@@ -32,10 +32,10 @@ export default function EmployeeDetailScreen() {
     query: { queryKey: getGetEmployeeQueryKey(id!), enabled: !!id }
   });
 
-  const { data: licenses } = useGetLicenses({
-    params: { employeeId: id! },
-    query: { queryKey: getGetLicensesQueryKey({ employeeId: id! }), enabled: !!id }
-  });
+  const { data: licenses } = useGetLicenses(
+    { employeeId: id! },
+    { query: { queryKey: getGetLicensesQueryKey({ employeeId: id! }), enabled: !!id } },
+  );
 
   const updateEmployee = useUpdateEmployee();
 

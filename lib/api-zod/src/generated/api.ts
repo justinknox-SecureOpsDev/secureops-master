@@ -8,6 +8,291 @@
 import * as zod from "zod";
 
 /**
+ * @summary List clients
+ */
+export const GetClientsResponseItem = zod.object({
+  id: zod.string(),
+  name: zod.string(),
+  contactName: zod.string().optional(),
+  contactEmail: zod.string().optional(),
+  contactPhone: zod.string().optional(),
+  billingAddress: zod.string().optional(),
+  paymentTermsDays: zod.number().describe("Net X days for invoices"),
+  notes: zod.string().optional(),
+  sites: zod
+    .array(
+      zod.object({
+        id: zod.string(),
+        clientId: zod.string(),
+        clientName: zod.string().optional(),
+        name: zod.string(),
+        address: zod.string().optional(),
+        locationLat: zod.number().optional(),
+        locationLng: zod.number().optional(),
+        notes: zod.string().optional(),
+        createdAt: zod.coerce.date(),
+      }),
+    )
+    .optional(),
+  createdAt: zod.coerce.date(),
+});
+export const GetClientsResponse = zod.array(GetClientsResponseItem);
+
+/**
+ * @summary Create client
+ */
+export const createClientBodyPaymentTermsDaysMin = 0;
+
+export const CreateClientBody = zod.object({
+  name: zod.string(),
+  contactName: zod.string().optional(),
+  contactEmail: zod.string().optional(),
+  contactPhone: zod.string().optional(),
+  billingAddress: zod.string().optional(),
+  paymentTermsDays: zod.number().min(createClientBodyPaymentTermsDaysMin),
+  notes: zod.string().optional(),
+});
+
+/**
+ * @summary Get client (with sites)
+ */
+export const GetClientParams = zod.object({
+  id: zod.coerce.string(),
+});
+
+export const GetClientResponse = zod.object({
+  id: zod.string(),
+  name: zod.string(),
+  contactName: zod.string().optional(),
+  contactEmail: zod.string().optional(),
+  contactPhone: zod.string().optional(),
+  billingAddress: zod.string().optional(),
+  paymentTermsDays: zod.number().describe("Net X days for invoices"),
+  notes: zod.string().optional(),
+  sites: zod
+    .array(
+      zod.object({
+        id: zod.string(),
+        clientId: zod.string(),
+        clientName: zod.string().optional(),
+        name: zod.string(),
+        address: zod.string().optional(),
+        locationLat: zod.number().optional(),
+        locationLng: zod.number().optional(),
+        notes: zod.string().optional(),
+        createdAt: zod.coerce.date(),
+      }),
+    )
+    .optional(),
+  createdAt: zod.coerce.date(),
+});
+
+/**
+ * @summary Update client
+ */
+export const UpdateClientParams = zod.object({
+  id: zod.coerce.string(),
+});
+
+export const updateClientBodyPaymentTermsDaysMin = 0;
+
+export const UpdateClientBody = zod.object({
+  name: zod.string().optional(),
+  contactName: zod.string().optional(),
+  contactEmail: zod.string().optional(),
+  contactPhone: zod.string().optional(),
+  billingAddress: zod.string().optional(),
+  paymentTermsDays: zod
+    .number()
+    .min(updateClientBodyPaymentTermsDaysMin)
+    .optional(),
+  notes: zod.string().optional(),
+});
+
+export const UpdateClientResponse = zod.object({
+  id: zod.string(),
+  name: zod.string(),
+  contactName: zod.string().optional(),
+  contactEmail: zod.string().optional(),
+  contactPhone: zod.string().optional(),
+  billingAddress: zod.string().optional(),
+  paymentTermsDays: zod.number().describe("Net X days for invoices"),
+  notes: zod.string().optional(),
+  sites: zod
+    .array(
+      zod.object({
+        id: zod.string(),
+        clientId: zod.string(),
+        clientName: zod.string().optional(),
+        name: zod.string(),
+        address: zod.string().optional(),
+        locationLat: zod.number().optional(),
+        locationLng: zod.number().optional(),
+        notes: zod.string().optional(),
+        createdAt: zod.coerce.date(),
+      }),
+    )
+    .optional(),
+  createdAt: zod.coerce.date(),
+});
+
+/**
+ * @summary Delete client
+ */
+export const DeleteClientParams = zod.object({
+  id: zod.coerce.string(),
+});
+
+/**
+ * @summary Create a site under a client
+ */
+export const CreateClientSiteParams = zod.object({
+  id: zod.coerce.string(),
+});
+
+export const CreateClientSiteBody = zod.object({
+  clientId: zod
+    .string()
+    .optional()
+    .describe("Optional when posting to \/clients\/{id}\/sites"),
+  name: zod.string(),
+  address: zod.string().optional(),
+  locationLat: zod.number().optional(),
+  locationLng: zod.number().optional(),
+  notes: zod.string().optional(),
+});
+
+/**
+ * @summary List sites (optionally filter by clientId)
+ */
+export const GetSitesQueryParams = zod.object({
+  clientId: zod.coerce.string().optional(),
+});
+
+export const GetSitesResponseItem = zod.object({
+  id: zod.string(),
+  clientId: zod.string(),
+  clientName: zod.string().optional(),
+  name: zod.string(),
+  address: zod.string().optional(),
+  locationLat: zod.number().optional(),
+  locationLng: zod.number().optional(),
+  notes: zod.string().optional(),
+  createdAt: zod.coerce.date(),
+});
+export const GetSitesResponse = zod.array(GetSitesResponseItem);
+
+/**
+ * @summary Get site
+ */
+export const GetSiteParams = zod.object({
+  id: zod.coerce.string(),
+});
+
+export const GetSiteResponse = zod.object({
+  id: zod.string(),
+  clientId: zod.string(),
+  clientName: zod.string().optional(),
+  name: zod.string(),
+  address: zod.string().optional(),
+  locationLat: zod.number().optional(),
+  locationLng: zod.number().optional(),
+  notes: zod.string().optional(),
+  createdAt: zod.coerce.date(),
+});
+
+/**
+ * @summary Update site
+ */
+export const UpdateSiteParams = zod.object({
+  id: zod.coerce.string(),
+});
+
+export const UpdateSiteBody = zod.object({
+  name: zod.string().optional(),
+  address: zod.string().optional(),
+  locationLat: zod.number().optional(),
+  locationLng: zod.number().optional(),
+  notes: zod.string().optional(),
+});
+
+export const UpdateSiteResponse = zod.object({
+  id: zod.string(),
+  clientId: zod.string(),
+  clientName: zod.string().optional(),
+  name: zod.string(),
+  address: zod.string().optional(),
+  locationLat: zod.number().optional(),
+  locationLng: zod.number().optional(),
+  notes: zod.string().optional(),
+  createdAt: zod.coerce.date(),
+});
+
+/**
+ * @summary Delete site
+ */
+export const DeleteSiteParams = zod.object({
+  id: zod.coerce.string(),
+});
+
+/**
+ * @summary Approve or reject a time entry (admin)
+ */
+export const ApproveTimeEntryParams = zod.object({
+  id: zod.coerce.string(),
+});
+
+export const ApproveTimeEntryBody = zod.object({
+  decision: zod.enum(["approved", "rejected"]),
+  hoursWorked: zod
+    .number()
+    .optional()
+    .describe("Optional override (e.g. correct logged hours)"),
+  notes: zod.string().optional(),
+});
+
+export const ApproveTimeEntryResponse = zod.object({
+  id: zod.string(),
+  shiftId: zod.string(),
+  shiftTitle: zod.string().optional(),
+  employeeId: zod.string(),
+  employeeName: zod.string().optional(),
+  clockInTime: zod.coerce.date(),
+  clockInLat: zod.number().optional(),
+  clockInLng: zod.number().optional(),
+  clockOutTime: zod.coerce.date().optional(),
+  clockOutLat: zod.number().optional(),
+  clockOutLng: zod.number().optional(),
+  hoursWorked: zod.number().optional(),
+  isVerified: zod.boolean(),
+  approvalStatus: zod.enum(["pending", "approved", "rejected"]),
+  approvedAt: zod.coerce.date().optional(),
+  approvedBy: zod.string().optional(),
+  siteId: zod.string().optional(),
+  siteName: zod.string().optional(),
+  payRate: zod.number().optional(),
+  billRate: zod.number().optional(),
+  notes: zod.string().optional(),
+  createdAt: zod.coerce.date(),
+});
+
+/**
+ * @summary Generate weekly payroll for a site from approved time entries
+ */
+export const GeneratePayrollBody = zod.object({
+  siteId: zod.string(),
+  weekStart: zod.coerce.date().describe("Monday of the week (YYYY-MM-DD)"),
+});
+
+/**
+ * @summary Generate weekly invoice for a site from approved time entries
+ */
+export const GenerateInvoiceBody = zod.object({
+  siteId: zod.string(),
+  weekStart: zod.coerce.date(),
+});
+
+/**
  * @summary Health check
  */
 export const HealthCheckResponse = zod.object({
@@ -210,14 +495,22 @@ export const GetShiftsQueryParams = zod.object({
 export const GetShiftsResponseItem = zod.object({
   id: zod.string(),
   title: zod.string(),
-  clientName: zod.string(),
-  location: zod.string(),
+  siteId: zod.string().optional(),
+  siteName: zod.string().optional(),
+  clientName: zod.string().optional(),
+  clientId: zod.string().optional(),
+  location: zod.string().optional(),
   locationLat: zod.number().optional(),
   locationLng: zod.number().optional(),
   startTime: zod.coerce.date(),
   endTime: zod.coerce.date(),
-  hourlyRate: zod.number(),
-  billableRate: zod.number().optional(),
+  payRate: zod.number().optional().describe("What the officer earns per hour"),
+  billRate: zod
+    .number()
+    .optional()
+    .describe("What the client is billed per hour"),
+  hourlyRate: zod.number().optional().describe("Legacy alias for payRate"),
+  billableRate: zod.number().optional().describe("Legacy alias for billRate"),
   status: zod.enum(["upcoming", "active", "completed", "cancelled"]),
   requiredLicenseLevel: zod
     .union([zod.literal(2), zod.literal(3), zod.literal(4)])
@@ -252,14 +545,13 @@ export const GetShiftsResponse = zod.array(GetShiftsResponseItem);
 
 export const CreateShiftBody = zod.object({
   title: zod.string(),
-  clientName: zod.string(),
-  location: zod.string(),
-  locationLat: zod.number().optional(),
-  locationLng: zod.number().optional(),
+  siteId: zod
+    .string()
+    .describe("Required — links shift to a site (and its client)"),
   startTime: zod.coerce.date(),
   endTime: zod.coerce.date(),
-  hourlyRate: zod.number(),
-  billableRate: zod.number().optional(),
+  payRate: zod.number().describe("Officer pay per hour"),
+  billRate: zod.number().describe("Client bill per hour"),
   requiredLicenseLevel: zod.union([
     zod.literal(2),
     zod.literal(3),
@@ -271,7 +563,6 @@ export const CreateShiftBody = zod.object({
     .enum(["daily", "weekly", "fortnightly", "monthly"])
     .optional(),
   notes: zod.string().optional(),
-  employeeIds: zod.array(zod.string()).optional(),
 });
 
 /**
@@ -284,14 +575,22 @@ export const GetShiftParams = zod.object({
 export const GetShiftResponse = zod.object({
   id: zod.string(),
   title: zod.string(),
-  clientName: zod.string(),
-  location: zod.string(),
+  siteId: zod.string().optional(),
+  siteName: zod.string().optional(),
+  clientName: zod.string().optional(),
+  clientId: zod.string().optional(),
+  location: zod.string().optional(),
   locationLat: zod.number().optional(),
   locationLng: zod.number().optional(),
   startTime: zod.coerce.date(),
   endTime: zod.coerce.date(),
-  hourlyRate: zod.number(),
-  billableRate: zod.number().optional(),
+  payRate: zod.number().optional().describe("What the officer earns per hour"),
+  billRate: zod
+    .number()
+    .optional()
+    .describe("What the client is billed per hour"),
+  hourlyRate: zod.number().optional().describe("Legacy alias for payRate"),
+  billableRate: zod.number().optional().describe("Legacy alias for billRate"),
   status: zod.enum(["upcoming", "active", "completed", "cancelled"]),
   requiredLicenseLevel: zod
     .union([zod.literal(2), zod.literal(3), zod.literal(4)])
@@ -328,14 +627,11 @@ export const UpdateShiftParams = zod.object({
 
 export const UpdateShiftBody = zod.object({
   title: zod.string().optional(),
-  clientName: zod.string().optional(),
-  location: zod.string().optional(),
-  locationLat: zod.number().optional(),
-  locationLng: zod.number().optional(),
+  siteId: zod.string().optional(),
   startTime: zod.coerce.date().optional(),
   endTime: zod.coerce.date().optional(),
-  hourlyRate: zod.number().optional(),
-  billableRate: zod.number().optional(),
+  payRate: zod.number().optional(),
+  billRate: zod.number().optional(),
   status: zod.enum(["upcoming", "active", "completed", "cancelled"]).optional(),
   requiredLicenseLevel: zod
     .union([zod.literal(2), zod.literal(3), zod.literal(4)])
@@ -347,14 +643,22 @@ export const UpdateShiftBody = zod.object({
 export const UpdateShiftResponse = zod.object({
   id: zod.string(),
   title: zod.string(),
-  clientName: zod.string(),
-  location: zod.string(),
+  siteId: zod.string().optional(),
+  siteName: zod.string().optional(),
+  clientName: zod.string().optional(),
+  clientId: zod.string().optional(),
+  location: zod.string().optional(),
   locationLat: zod.number().optional(),
   locationLng: zod.number().optional(),
   startTime: zod.coerce.date(),
   endTime: zod.coerce.date(),
-  hourlyRate: zod.number(),
-  billableRate: zod.number().optional(),
+  payRate: zod.number().optional().describe("What the officer earns per hour"),
+  billRate: zod
+    .number()
+    .optional()
+    .describe("What the client is billed per hour"),
+  hourlyRate: zod.number().optional().describe("Legacy alias for payRate"),
+  billableRate: zod.number().optional().describe("Legacy alias for billRate"),
   status: zod.enum(["upcoming", "active", "completed", "cancelled"]),
   requiredLicenseLevel: zod
     .union([zod.literal(2), zod.literal(3), zod.literal(4)])
@@ -452,6 +756,13 @@ export const GetTimeEntriesResponseItem = zod.object({
   clockOutLng: zod.number().optional(),
   hoursWorked: zod.number().optional(),
   isVerified: zod.boolean(),
+  approvalStatus: zod.enum(["pending", "approved", "rejected"]),
+  approvedAt: zod.coerce.date().optional(),
+  approvedBy: zod.string().optional(),
+  siteId: zod.string().optional(),
+  siteName: zod.string().optional(),
+  payRate: zod.number().optional(),
+  billRate: zod.number().optional(),
   notes: zod.string().optional(),
   createdAt: zod.coerce.date(),
 });
@@ -491,6 +802,13 @@ export const ClockOutResponse = zod.object({
   clockOutLng: zod.number().optional(),
   hoursWorked: zod.number().optional(),
   isVerified: zod.boolean(),
+  approvalStatus: zod.enum(["pending", "approved", "rejected"]),
+  approvedAt: zod.coerce.date().optional(),
+  approvedBy: zod.string().optional(),
+  siteId: zod.string().optional(),
+  siteName: zod.string().optional(),
+  payRate: zod.number().optional(),
+  billRate: zod.number().optional(),
   notes: zod.string().optional(),
   createdAt: zod.coerce.date(),
 });
@@ -512,6 +830,13 @@ export const GetActiveTimeEntryResponse = zod.object({
   clockOutLng: zod.number().optional(),
   hoursWorked: zod.number().optional(),
   isVerified: zod.boolean(),
+  approvalStatus: zod.enum(["pending", "approved", "rejected"]),
+  approvedAt: zod.coerce.date().optional(),
+  approvedBy: zod.string().optional(),
+  siteId: zod.string().optional(),
+  siteName: zod.string().optional(),
+  payRate: zod.number().optional(),
+  billRate: zod.number().optional(),
   notes: zod.string().optional(),
   createdAt: zod.coerce.date(),
 });
@@ -530,6 +855,8 @@ export const GetPayrollEntriesResponseItem = zod.object({
   id: zod.string(),
   employeeId: zod.string(),
   employeeName: zod.string().optional(),
+  siteId: zod.string().optional(),
+  siteName: zod.string().optional(),
   periodStart: zod.coerce.date(),
   periodEnd: zod.coerce.date(),
   totalHours: zod.number(),
@@ -572,6 +899,8 @@ export const UpdatePayrollEntryResponse = zod.object({
   id: zod.string(),
   employeeId: zod.string(),
   employeeName: zod.string().optional(),
+  siteId: zod.string().optional(),
+  siteName: zod.string().optional(),
   periodStart: zod.coerce.date(),
   periodEnd: zod.coerce.date(),
   totalHours: zod.number(),
@@ -596,6 +925,11 @@ export const GetInvoicesQueryParams = zod.object({
 export const GetInvoicesResponseItem = zod.object({
   id: zod.string(),
   invoiceNumber: zod.string(),
+  clientId: zod.string().optional(),
+  siteId: zod.string().optional(),
+  siteName: zod.string().optional(),
+  periodStart: zod.coerce.date().optional(),
+  periodEnd: zod.coerce.date().optional(),
   clientName: zod.string(),
   clientEmail: zod.string().optional(),
   clientAddress: zod.string().optional(),
@@ -622,6 +956,8 @@ export const GetInvoicesResponse = zod.array(GetInvoicesResponseItem);
  * @summary Create invoice
  */
 export const CreateInvoiceBody = zod.object({
+  clientId: zod.string().optional(),
+  siteId: zod.string().optional(),
   clientName: zod.string(),
   clientEmail: zod.string().optional(),
   clientAddress: zod.string().optional(),
@@ -667,6 +1003,11 @@ export const UpdateInvoiceBody = zod.object({
 export const UpdateInvoiceResponse = zod.object({
   id: zod.string(),
   invoiceNumber: zod.string(),
+  clientId: zod.string().optional(),
+  siteId: zod.string().optional(),
+  siteName: zod.string().optional(),
+  periodStart: zod.coerce.date().optional(),
+  periodEnd: zod.coerce.date().optional(),
   clientName: zod.string(),
   clientEmail: zod.string().optional(),
   clientAddress: zod.string().optional(),
@@ -904,14 +1245,28 @@ export const GetAdminDashboardSummaryResponse = zod.object({
     zod.object({
       id: zod.string(),
       title: zod.string(),
-      clientName: zod.string(),
-      location: zod.string(),
+      siteId: zod.string().optional(),
+      siteName: zod.string().optional(),
+      clientName: zod.string().optional(),
+      clientId: zod.string().optional(),
+      location: zod.string().optional(),
       locationLat: zod.number().optional(),
       locationLng: zod.number().optional(),
       startTime: zod.coerce.date(),
       endTime: zod.coerce.date(),
-      hourlyRate: zod.number(),
-      billableRate: zod.number().optional(),
+      payRate: zod
+        .number()
+        .optional()
+        .describe("What the officer earns per hour"),
+      billRate: zod
+        .number()
+        .optional()
+        .describe("What the client is billed per hour"),
+      hourlyRate: zod.number().optional().describe("Legacy alias for payRate"),
+      billableRate: zod
+        .number()
+        .optional()
+        .describe("Legacy alias for billRate"),
       status: zod.enum(["upcoming", "active", "completed", "cancelled"]),
       requiredLicenseLevel: zod
         .union([zod.literal(2), zod.literal(3), zod.literal(4)])
@@ -949,14 +1304,28 @@ export const GetEmployeeDashboardSummaryResponse = zod.object({
     .object({
       id: zod.string(),
       title: zod.string(),
-      clientName: zod.string(),
-      location: zod.string(),
+      siteId: zod.string().optional(),
+      siteName: zod.string().optional(),
+      clientName: zod.string().optional(),
+      clientId: zod.string().optional(),
+      location: zod.string().optional(),
       locationLat: zod.number().optional(),
       locationLng: zod.number().optional(),
       startTime: zod.coerce.date(),
       endTime: zod.coerce.date(),
-      hourlyRate: zod.number(),
-      billableRate: zod.number().optional(),
+      payRate: zod
+        .number()
+        .optional()
+        .describe("What the officer earns per hour"),
+      billRate: zod
+        .number()
+        .optional()
+        .describe("What the client is billed per hour"),
+      hourlyRate: zod.number().optional().describe("Legacy alias for payRate"),
+      billableRate: zod
+        .number()
+        .optional()
+        .describe("Legacy alias for billRate"),
       status: zod.enum(["upcoming", "active", "completed", "cancelled"]),
       requiredLicenseLevel: zod
         .union([zod.literal(2), zod.literal(3), zod.literal(4)])
@@ -999,6 +1368,13 @@ export const GetEmployeeDashboardSummaryResponse = zod.object({
       clockOutLng: zod.number().optional(),
       hoursWorked: zod.number().optional(),
       isVerified: zod.boolean(),
+      approvalStatus: zod.enum(["pending", "approved", "rejected"]),
+      approvedAt: zod.coerce.date().optional(),
+      approvedBy: zod.string().optional(),
+      siteId: zod.string().optional(),
+      siteName: zod.string().optional(),
+      payRate: zod.number().optional(),
+      billRate: zod.number().optional(),
       notes: zod.string().optional(),
       createdAt: zod.coerce.date(),
     })
@@ -1009,14 +1385,28 @@ export const GetEmployeeDashboardSummaryResponse = zod.object({
     zod.object({
       id: zod.string(),
       title: zod.string(),
-      clientName: zod.string(),
-      location: zod.string(),
+      siteId: zod.string().optional(),
+      siteName: zod.string().optional(),
+      clientName: zod.string().optional(),
+      clientId: zod.string().optional(),
+      location: zod.string().optional(),
       locationLat: zod.number().optional(),
       locationLng: zod.number().optional(),
       startTime: zod.coerce.date(),
       endTime: zod.coerce.date(),
-      hourlyRate: zod.number(),
-      billableRate: zod.number().optional(),
+      payRate: zod
+        .number()
+        .optional()
+        .describe("What the officer earns per hour"),
+      billRate: zod
+        .number()
+        .optional()
+        .describe("What the client is billed per hour"),
+      hourlyRate: zod.number().optional().describe("Legacy alias for payRate"),
+      billableRate: zod
+        .number()
+        .optional()
+        .describe("Legacy alias for billRate"),
       status: zod.enum(["upcoming", "active", "completed", "cancelled"]),
       requiredLicenseLevel: zod
         .union([zod.literal(2), zod.literal(3), zod.literal(4)])

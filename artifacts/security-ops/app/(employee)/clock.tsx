@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from "react";
 import { View, Text, StyleSheet, TouchableOpacity, ActivityIndicator, Alert, Platform, ScrollView } from "react-native";
 import { useColors } from "@/hooks/useColors";
-import { useClockIn, useClockOut, useGetCurrentTimeEntry, getGetCurrentTimeEntryQueryKey, useGetTimeEntries, getGetTimeEntriesQueryKey } from "@workspace/api-client-react";
+import { useClockIn, useClockOut, useGetActiveTimeEntry, getGetActiveTimeEntryQueryKey, useGetTimeEntries, getGetTimeEntriesQueryKey } from "@workspace/api-client-react";
 import { Feather } from "@expo/vector-icons";
 import { useQueryClient } from "@tanstack/react-query";
 import * as Location from "expo-location";
@@ -21,14 +21,14 @@ export default function EmployeeClockScreen() {
   const [location, setLocation] = useState<{ lat: number; lon: number } | null>(null);
   const [locationLoading, setLocationLoading] = useState(false);
 
-  const { data: currentEntry, isLoading: entryLoading } = useGetCurrentTimeEntry({
-    query: { queryKey: getGetCurrentTimeEntryQueryKey() }
+  const { data: currentEntry, isLoading: entryLoading } = useGetActiveTimeEntry({
+    query: { queryKey: getGetActiveTimeEntryQueryKey() }
   });
 
-  const { data: recentEntries } = useGetTimeEntries({
-    params: { limit: 5 },
-    query: { queryKey: getGetTimeEntriesQueryKey({ limit: 5 }) }
-  });
+  const { data: recentEntries } = useGetTimeEntries(
+    {},
+    { query: { queryKey: getGetTimeEntriesQueryKey({}) } },
+  );
 
   const clockInMutation = useClockIn();
   const clockOutMutation = useClockOut();
@@ -36,13 +36,13 @@ export default function EmployeeClockScreen() {
   const isClockedIn = !!currentEntry?.id;
 
   useEffect(() => {
-    if (!isClockedIn || !currentEntry?.startTime) { setElapsed(0); return; }
-    const startMs = new Date(currentEntry.startTime).getTime();
+    if (!isClockedIn || !currentEntry?.clockInTime) { setElapsed(0); return; }
+    const startMs = new Date(currentEntry.clockInTime).getTime();
     const update = () => setElapsed(Math.floor((Date.now() - startMs) / 1000));
     update();
     const timer = setInterval(update, 1000);
     return () => clearInterval(timer);
-  }, [isClockedIn, currentEntry?.startTime]);
+  }, [isClockedIn, currentEntry?.clockInTime]);
 
   const getLocation = async () => {
     setLocationLoading(true);
@@ -63,9 +63,9 @@ export default function EmployeeClockScreen() {
       {
         text: "Clock In", onPress: async () => {
           await clockInMutation.mutateAsync({
-            data: { startLatitude: location?.lat, startLongitude: location?.lon }
+            data: { lat: location?.lat ?? 0, lng: location?.lon ?? 0 } as any,
           });
-          queryClient.invalidateQueries({ queryKey: getGetCurrentTimeEntryQueryKey() });
+          queryClient.invalidateQueries({ queryKey: getGetActiveTimeEntryQueryKey() });
           queryClient.invalidateQueries({ queryKey: getGetTimeEntriesQueryKey() });
         }
       }
@@ -79,10 +79,9 @@ export default function EmployeeClockScreen() {
       {
         text: "Clock Out", style: "destructive", onPress: async () => {
           await clockOutMutation.mutateAsync({
-            id: currentEntry.id,
-            data: { endLatitude: location?.lat, endLongitude: location?.lon }
+            data: { timeEntryId: currentEntry.id, lat: location?.lat ?? 0, lng: location?.lon ?? 0 } as any,
           });
-          queryClient.invalidateQueries({ queryKey: getGetCurrentTimeEntryQueryKey() });
+          queryClient.invalidateQueries({ queryKey: getGetActiveTimeEntryQueryKey() });
           queryClient.invalidateQueries({ queryKey: getGetTimeEntriesQueryKey() });
         }
       }
@@ -111,9 +110,9 @@ export default function EmployeeClockScreen() {
           </Text>
         </View>
 
-        {isClockedIn && currentEntry?.startTime && (
+        {isClockedIn && currentEntry?.clockInTime && (
           <Text style={[styles.clockInTime, { color: colors.mutedForeground }]}>
-            Clocked in at {new Date(currentEntry.startTime).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
+            Clocked in at {new Date(currentEntry.clockInTime).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
           </Text>
         )}
 
@@ -147,13 +146,13 @@ export default function EmployeeClockScreen() {
       {(recentEntries?.length ?? 0) > 0 && (
         <View style={styles.section}>
           <Text style={[styles.sectionTitle, { color: colors.accent }]}>RECENT TIME ENTRIES</Text>
-          {recentEntries!.map((entry) => {
+          {recentEntries!.slice(0, 5).map((entry: any) => {
             const hrs = entry.hoursWorked ? parseFloat(entry.hoursWorked as any).toFixed(2) : null;
             return (
               <View key={entry.id} style={[styles.entryCard, { backgroundColor: colors.card, borderColor: colors.border }]}>
                 <View style={styles.entryHeader}>
                   <Text style={[styles.entryDate, { color: colors.foreground }]}>
-                    {new Date(entry.startTime).toLocaleDateString([], { weekday: "short", month: "short", day: "numeric" })}
+                    {new Date(entry.clockInTime).toLocaleDateString([], { weekday: "short", month: "short", day: "numeric" })}
                   </Text>
                   {hrs && (
                     <View style={[styles.hrsBadge, { backgroundColor: colors.primary + "20", borderColor: colors.primary }]}>
@@ -164,16 +163,16 @@ export default function EmployeeClockScreen() {
                 <View style={styles.entryRow}>
                   <Feather name="play" size={13} color={colors.mutedForeground} />
                   <Text style={[styles.entryTime, { color: colors.mutedForeground }]}>
-                    {new Date(entry.startTime).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
+                    {new Date(entry.clockInTime).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
                   </Text>
-                  {entry.endTime && <>
+                  {entry.clockOutTime && <>
                     <Feather name="arrow-right" size={13} color={colors.mutedForeground} />
                     <Feather name="square" size={13} color={colors.mutedForeground} />
                     <Text style={[styles.entryTime, { color: colors.mutedForeground }]}>
-                      {new Date(entry.endTime).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
+                      {new Date(entry.clockOutTime).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
                     </Text>
                   </>}
-                  {entry.startLatitude && (
+                  {entry.clockInLat && (
                     <View style={styles.gpsTag}>
                       <Feather name="map-pin" size={11} color="#22c55e" />
                       <Text style={{ color: "#22c55e", fontSize: 11 }}>GPS</Text>

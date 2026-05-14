@@ -190,13 +190,22 @@ export interface ShiftAssignment {
 export interface Shift {
   id: string;
   title: string;
-  clientName: string;
-  location: string;
+  siteId?: string;
+  siteName?: string;
+  clientName?: string;
+  clientId?: string;
+  location?: string;
   locationLat?: number;
   locationLng?: number;
   startTime: string;
   endTime: string;
-  hourlyRate: number;
+  /** What the officer earns per hour */
+  payRate?: number;
+  /** What the client is billed per hour */
+  billRate?: number;
+  /** Legacy alias for payRate */
+  hourlyRate?: number;
+  /** Legacy alias for billRate */
   billableRate?: number;
   status: ShiftStatus;
   /** Minimum license level required (2=unarmed, 3=armed, 4=PPO) */
@@ -231,21 +240,20 @@ export const CreateShiftRequestRepeatPattern = {
 
 export interface CreateShiftRequest {
   title: string;
-  clientName: string;
-  location: string;
-  locationLat?: number;
-  locationLng?: number;
+  /** Required — links shift to a site (and its client) */
+  siteId: string;
   startTime: string;
   endTime: string;
-  hourlyRate: number;
-  billableRate?: number;
+  /** Officer pay per hour */
+  payRate: number;
+  /** Client bill per hour */
+  billRate: number;
   requiredLicenseLevel: CreateShiftRequestRequiredLicenseLevel;
   /** @minimum 1 */
   headcount?: number;
   isRepeat: boolean;
   repeatPattern?: CreateShiftRequestRepeatPattern;
   notes?: string;
-  employeeIds?: string[];
 }
 
 export type UpdateShiftRequestStatus =
@@ -269,14 +277,11 @@ export const UpdateShiftRequestRequiredLicenseLevel = {
 
 export interface UpdateShiftRequest {
   title?: string;
-  clientName?: string;
-  location?: string;
-  locationLat?: number;
-  locationLng?: number;
+  siteId?: string;
   startTime?: string;
   endTime?: string;
-  hourlyRate?: number;
-  billableRate?: number;
+  payRate?: number;
+  billRate?: number;
   status?: UpdateShiftRequestStatus;
   requiredLicenseLevel?: UpdateShiftRequestRequiredLicenseLevel;
   /** @minimum 1 */
@@ -300,6 +305,15 @@ export interface UpdateAssignmentRequest {
   status: UpdateAssignmentRequestStatus;
 }
 
+export type TimeEntryApprovalStatus =
+  (typeof TimeEntryApprovalStatus)[keyof typeof TimeEntryApprovalStatus];
+
+export const TimeEntryApprovalStatus = {
+  pending: "pending",
+  approved: "approved",
+  rejected: "rejected",
+} as const;
+
 export interface TimeEntry {
   id: string;
   shiftId: string;
@@ -314,6 +328,13 @@ export interface TimeEntry {
   clockOutLng?: number;
   hoursWorked?: number;
   isVerified: boolean;
+  approvalStatus: TimeEntryApprovalStatus;
+  approvedAt?: string;
+  approvedBy?: string;
+  siteId?: string;
+  siteName?: string;
+  payRate?: number;
+  billRate?: number;
   notes?: string;
   createdAt: string;
 }
@@ -345,6 +366,8 @@ export interface PayrollEntry {
   id: string;
   employeeId: string;
   employeeName?: string;
+  siteId?: string;
+  siteName?: string;
   periodStart: string;
   periodEnd: string;
   totalHours: number;
@@ -397,6 +420,11 @@ export interface InvoiceLineItem {
 export interface Invoice {
   id: string;
   invoiceNumber: string;
+  clientId?: string;
+  siteId?: string;
+  siteName?: string;
+  periodStart?: string;
+  periodEnd?: string;
   clientName: string;
   clientEmail?: string;
   clientAddress?: string;
@@ -412,6 +440,8 @@ export interface Invoice {
 }
 
 export interface CreateInvoiceRequest {
+  clientId?: string;
+  siteId?: string;
   clientName: string;
   clientEmail?: string;
   clientAddress?: string;
@@ -419,6 +449,98 @@ export interface CreateInvoiceRequest {
   taxAmount?: number;
   dueDate: string;
   notes?: string;
+}
+
+export interface Site {
+  id: string;
+  clientId: string;
+  clientName?: string;
+  name: string;
+  address?: string;
+  locationLat?: number;
+  locationLng?: number;
+  notes?: string;
+  createdAt: string;
+}
+
+export interface Client {
+  id: string;
+  name: string;
+  contactName?: string;
+  contactEmail?: string;
+  contactPhone?: string;
+  billingAddress?: string;
+  /** Net X days for invoices */
+  paymentTermsDays: number;
+  notes?: string;
+  sites?: Site[];
+  createdAt: string;
+}
+
+export interface CreateClientRequest {
+  name: string;
+  contactName?: string;
+  contactEmail?: string;
+  contactPhone?: string;
+  billingAddress?: string;
+  /** @minimum 0 */
+  paymentTermsDays: number;
+  notes?: string;
+}
+
+export interface UpdateClientRequest {
+  name?: string;
+  contactName?: string;
+  contactEmail?: string;
+  contactPhone?: string;
+  billingAddress?: string;
+  /** @minimum 0 */
+  paymentTermsDays?: number;
+  notes?: string;
+}
+
+export interface CreateSiteRequest {
+  /** Optional when posting to /clients/{id}/sites */
+  clientId?: string;
+  name: string;
+  address?: string;
+  locationLat?: number;
+  locationLng?: number;
+  notes?: string;
+}
+
+export interface UpdateSiteRequest {
+  name?: string;
+  address?: string;
+  locationLat?: number;
+  locationLng?: number;
+  notes?: string;
+}
+
+export type ApproveTimeEntryRequestDecision =
+  (typeof ApproveTimeEntryRequestDecision)[keyof typeof ApproveTimeEntryRequestDecision];
+
+export const ApproveTimeEntryRequestDecision = {
+  approved: "approved",
+  rejected: "rejected",
+} as const;
+
+export interface ApproveTimeEntryRequest {
+  decision: ApproveTimeEntryRequestDecision;
+  /** Optional override (e.g. correct logged hours) */
+  hoursWorked?: number;
+  notes?: string;
+}
+
+export interface GeneratePayrollRequest {
+  siteId: string;
+  /** Monday of the week (YYYY-MM-DD) */
+  weekStart: string;
+}
+
+export interface GenerateInvoiceRequest {
+  siteId: string;
+  weekStart: string;
 }
 
 export type UpdateInvoiceRequestStatus =
@@ -644,6 +766,10 @@ export interface EmployeeDashboardSummary {
   myOpenIncidents: number;
   expiringLicenses: number;
 }
+
+export type GetSitesParams = {
+  clientId?: string;
+};
 
 export type RegisterPushTokenBody = {
   token: string;

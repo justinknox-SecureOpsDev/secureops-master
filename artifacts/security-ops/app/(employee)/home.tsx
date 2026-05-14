@@ -44,13 +44,13 @@ export default function EmployeeHomeScreen() {
         </TouchableOpacity>
       </View>
 
-      {summary?.clockedIn && (
+      {summary?.activeTimeEntry && (
         <View style={[styles.clockedInBanner, { backgroundColor: "#22c55e20", borderColor: "#22c55e" }]}>
           <Feather name="clock" size={18} color="#22c55e" />
           <View style={{ flex: 1 }}>
             <Text style={[styles.clockedInTitle, { color: "#22c55e" }]}>ON DUTY</Text>
             <Text style={[styles.clockedInTime, { color: colors.foreground }]}>
-              Clocked in {summary.clockInTime ? new Date(summary.clockInTime).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }) : ""}
+              Clocked in {summary.activeTimeEntry.clockInTime ? new Date(summary.activeTimeEntry.clockInTime).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }) : ""}
             </Text>
           </View>
           <TouchableOpacity style={[styles.clockBtn, { backgroundColor: "#22c55e" }]} onPress={() => router.push("/(employee)/clock")}>
@@ -64,9 +64,9 @@ export default function EmployeeHomeScreen() {
         <View style={styles.statsGrid}>
           {[
             { label: "Hours Worked", value: `${parseFloat(summary?.hoursThisWeek as any ?? "0").toFixed(1)}h`, icon: "clock", color: colors.primary },
-            { label: "Shifts Done", value: summary?.shiftsThisWeek ?? 0, icon: "calendar", color: colors.foreground },
-            { label: "Upcoming", value: summary?.upcomingShifts ?? 0, icon: "arrow-right-circle", color: colors.accent },
-            { label: "My Pay Est.", value: `$${parseFloat(summary?.estimatedPay as any ?? "0").toFixed(0)}`, icon: "dollar-sign", color: "#22c55e" },
+            { label: "Hours This Month", value: `${parseFloat(summary?.hoursThisMonth as any ?? "0").toFixed(1)}h`, icon: "calendar", color: colors.foreground },
+            { label: "Upcoming Shifts", value: summary?.upcomingShifts?.length ?? 0, icon: "arrow-right-circle", color: colors.accent },
+            { label: "Pending Accept", value: summary?.pendingAssignments?.length ?? 0, icon: "alert-circle", color: "#22c55e" },
           ].map(({ label, value, icon, color }) => (
             <View key={label} style={[styles.statCard, { backgroundColor: colors.card, borderColor: colors.border }]}>
               <Feather name={icon as any} size={18} color={color} />
@@ -77,7 +77,7 @@ export default function EmployeeHomeScreen() {
         </View>
       </View>
 
-      {!summary?.clockedIn && (
+      {!summary?.activeTimeEntry && (
         <View style={styles.section}>
           <TouchableOpacity
             style={[styles.bigClockBtn, { backgroundColor: colors.primary }]}
@@ -116,20 +116,15 @@ export default function EmployeeHomeScreen() {
         </View>
       )}
 
-      {(summary?.recentIncidents?.length ?? 0) > 0 && (
+      {(summary?.myOpenIncidents ?? 0) > 0 && (
         <View style={styles.section}>
-          <Text style={[styles.sectionTitle, { color: colors.accent }]}>MY RECENT INCIDENTS</Text>
-          {summary!.recentIncidents.map((inc) => (
-            <View key={inc.id} style={[styles.incCard, { backgroundColor: colors.card, borderColor: colors.border }]}>
-              <View style={styles.incRow}>
-                <SeverityBadge severity={inc.severity} />
-                <Text style={[styles.incTitle, { color: colors.foreground }]} numberOfLines={1}>{inc.title}</Text>
-              </View>
-              <Text style={[styles.incDate, { color: colors.mutedForeground }]}>{new Date(inc.occurredAt).toLocaleDateString()}</Text>
-            </View>
-          ))}
+          <View style={[styles.incCard, { backgroundColor: colors.card, borderColor: colors.destructive + "60" }]}>
+            <Feather name="alert-triangle" size={18} color={colors.destructive} />
+            <Text style={[styles.incTitle, { color: colors.foreground }]}>{summary?.myOpenIncidents} open incident(s)</Text>
+          </View>
         </View>
       )}
+      {void SeverityBadge}
 
       <View style={styles.section}>
         <Text style={[styles.sectionTitle, { color: colors.accent }]}>QUICK ACTIONS</Text>

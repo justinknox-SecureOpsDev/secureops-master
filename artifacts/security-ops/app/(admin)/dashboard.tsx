@@ -95,6 +95,8 @@ export default function AdminDashboardScreen() {
         <Text style={[styles.sectionTitle, { color: colors.accent }]}>ADMIN ACTIONS</Text>
         <View style={styles.actionRow}>
           {[
+            { label: "Clients", icon: "briefcase", route: "/(admin)/clients" },
+            { label: "Time Approval", icon: "check-square", route: "/(admin)/time-approval" },
             { label: "Payroll", icon: "dollar-sign", route: "/(admin)/payroll" },
             { label: "Invoices", icon: "file-text", route: "/(admin)/invoices" },
             { label: "Licences", icon: "award", route: "/(admin)/licenses" },

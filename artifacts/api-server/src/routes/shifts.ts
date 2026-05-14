@@ -1,6 +1,6 @@
 import { Router, type IRouter } from "express";
 import { eq, and, gte, lte, sql, or, isNull } from "drizzle-orm";
-import { db, shiftsTable, shiftAssignmentsTable, usersTable, licensesTable } from "@workspace/db";
+import { db, shiftsTable, shiftAssignmentsTable, usersTable, licensesTable, sitesTable, clientsTable } from "@workspace/db";
 import { requireAuth, requireAdmin } from "../middlewares/auth";
 
 const router: IRouter = Router();
@@ -99,24 +99,51 @@ router.get("/shifts", requireAuth, async (req, res): Promise<void> => {
 });
 
 router.post("/shifts", requireAdmin, async (req, res): Promise<void> => {
-  const { title, clientName, location, locationLat, locationLng, startTime, endTime, hourlyRate, billableRate, isRepeat, repeatPattern, notes, employeeIds, requiredLicenseLevel, headcount } = req.body;
-  if (!title || !clientName || !location || !startTime || !endTime || hourlyRate == null) {
-    res.status(400).json({ error: "Bad Request", message: "Missing required fields" });
+  const {
+    title, siteId, clientName: bodyClientName, location: bodyLocation, locationLat, locationLng,
+    startTime, endTime,
+    payRate, billRate, hourlyRate, billableRate,
+    isRepeat, repeatPattern, notes, employeeIds, requiredLicenseLevel, headcount,
+  } = req.body;
+
+  // Resolve site to populate clientName/location automatically.
+  let resolvedClientName = bodyClientName ?? null;
+  let resolvedLocation = bodyLocation ?? null;
+  if (siteId) {
+    const [site] = await db
+      .select({ id: sitesTable.id, name: sitesTable.name, address: sitesTable.address, lat: sitesTable.locationLat, lng: sitesTable.locationLng, clientName: clientsTable.name })
+      .from(sitesTable)
+      .leftJoin(clientsTable, eq(sitesTable.clientId, clientsTable.id))
+      .where(eq(sitesTable.id, siteId));
+    if (!site) { res.status(400).json({ error: "Bad Request", message: "Site not found" }); return; }
+    resolvedClientName = site.clientName ?? resolvedClientName ?? null;
+    resolvedLocation = site.address ?? resolvedLocation ?? site.name;
+  }
+
+  if (!title || !startTime || !endTime) {
+    res.status(400).json({ error: "Bad Request", message: "title, startTime, endTime required" });
     return;
   }
+
   const lvl = [2, 3, 4].includes(Number(requiredLicenseLevel)) ? Number(requiredLicenseLevel) : 2;
   const hc = Math.max(1, Number(headcount) || 1);
+  // payRate/billRate are the canonical fields; legacy hourlyRate/billableRate fall back when not set.
+  const finalPay = payRate != null ? Number(payRate) : (hourlyRate != null ? Number(hourlyRate) : 0);
+  const finalBill = billRate != null ? Number(billRate) : (billableRate != null ? Number(billableRate) : 0);
 
   const [shift] = await db.insert(shiftsTable).values({
     title,
-    clientName,
-    location,
+    siteId: siteId || null,
+    clientName: resolvedClientName,
+    location: resolvedLocation,
     locationLat: locationLat ? String(locationLat) : null,
     locationLng: locationLng ? String(locationLng) : null,
     startTime: new Date(startTime),
     endTime: new Date(endTime),
-    hourlyRate: String(hourlyRate),
-    billableRate: billableRate ? String(billableRate) : null,
+    payRate: String(finalPay),
+    billRate: String(finalBill),
+    hourlyRate: String(finalPay),
+    billableRate: String(finalBill),
     isRepeat: isRepeat || false,
     repeatPattern: repeatPattern || null,
     notes: notes || null,
@@ -187,17 +214,27 @@ router.get("/shifts/:id", requireAuth, async (req, res): Promise<void> => {
 
 router.put("/shifts/:id", requireAdmin, async (req, res): Promise<void> => {
   const id = Array.isArray(req.params.id) ? req.params.id[0] : req.params.id;
-  const { title, clientName, location, locationLat, locationLng, startTime, endTime, hourlyRate, billableRate, status, notes, requiredLicenseLevel, headcount } = req.body;
+  const { title, siteId, startTime, endTime, payRate, billRate, hourlyRate, billableRate, status, notes, requiredLicenseLevel, headcount } = req.body;
   const updates: Record<string, unknown> = {};
   if (title) updates.title = title;
-  if (clientName) updates.clientName = clientName;
-  if (location) updates.location = location;
-  if (locationLat !== undefined) updates.locationLat = String(locationLat);
-  if (locationLng !== undefined) updates.locationLng = String(locationLng);
+  if (siteId) {
+    const [site] = await db
+      .select({ name: sitesTable.name, address: sitesTable.address, clientName: clientsTable.name })
+      .from(sitesTable)
+      .leftJoin(clientsTable, eq(sitesTable.clientId, clientsTable.id))
+      .where(eq(sitesTable.id, siteId));
+    if (site) {
+      updates.siteId = siteId;
+      updates.clientName = site.clientName;
+      updates.location = site.address ?? site.name;
+    }
+  }
   if (startTime) updates.startTime = new Date(startTime);
   if (endTime) updates.endTime = new Date(endTime);
-  if (hourlyRate !== undefined) updates.hourlyRate = String(hourlyRate);
-  if (billableRate !== undefined) updates.billableRate = String(billableRate);
+  if (payRate !== undefined) { updates.payRate = String(payRate); updates.hourlyRate = String(payRate); }
+  if (billRate !== undefined) { updates.billRate = String(billRate); updates.billableRate = String(billRate); }
+  if (hourlyRate !== undefined && payRate === undefined) { updates.payRate = String(hourlyRate); updates.hourlyRate = String(hourlyRate); }
+  if (billableRate !== undefined && billRate === undefined) { updates.billRate = String(billableRate); updates.billableRate = String(billableRate); }
   if (status) updates.status = status;
   if (notes !== undefined) updates.notes = notes;
   if (requiredLicenseLevel !== undefined && [2, 3, 4].includes(Number(requiredLicenseLevel))) {
@@ -260,7 +297,7 @@ router.post("/shifts/:id/claim", requireAuth, async (req, res): Promise<void> =>
       try {
         const inserted = await tx.execute(sql`
           INSERT INTO shift_assignments (shift_id, employee_id, status)
-          VALUES (${shiftId}::uuid, ${userId}::uuid, 'accepted')
+          VALUES (${shiftId}::uuid, ${userId}::uuid, 'pending')
           RETURNING id, shift_id, employee_id, status, created_at, updated_at
         `);
         const row = (inserted as any).rows?.[0];
@@ -297,6 +334,20 @@ router.post("/shifts/:id/claim", requireAuth, async (req, res): Promise<void> =>
   }
 
   const [user] = await db.select().from(usersTable).where(eq(usersTable.id, userId));
+
+  // Reminder push so the officer confirms the shift on-device (accountability trail).
+  try {
+    const { sendPushToUsers } = await import("../lib/push");
+    const start = new Date(shift.startTime).toLocaleString("en-GB", { weekday: "short", month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" });
+    await sendPushToUsers([userId], {
+      title: "🕒 Confirm Your Shift",
+      body: `${shift.title} on ${start} — open to accept or decline.`,
+      data: { type: "shift_pending_confirmation", shiftId },
+    });
+  } catch (err) {
+    req.log.warn({ err }, "Failed to send claim confirmation push");
+  }
+
   res.status(201).json({ ...assignment, employeeName: user ? `${user.firstName} ${user.lastName}` : null });
 });
 
@@ -347,6 +398,13 @@ router.put("/shifts/:id/assignments/:assignmentId", requireAuth, async (req, res
   // Non-admins can only modify their own assignments.
   if (req.user!.role !== "admin" && existing.employeeId !== req.user!.userId) {
     res.status(403).json({ error: "Forbidden", message: "You can only update your own assignments" });
+    return;
+  }
+
+  // Declining frees the slot — delete the assignment row so headcount opens back up.
+  if (status === "declined") {
+    await db.delete(shiftAssignmentsTable).where(eq(shiftAssignmentsTable.id, assignmentId));
+    res.json({ id: assignmentId, status: "declined", removed: true });
     return;
   }
 

@@ -59,7 +59,7 @@ router.post("/chat/rooms", requireAuth, async (req, res): Promise<void> => {
 
 // GET /chat/rooms/:id/messages — get messages for a room
 router.get("/chat/rooms/:id/messages", requireAuth, async (req, res): Promise<void> => {
-  const { id } = req.params;
+  const id = req.params.id as string;
   const limit = parseInt(req.query["limit"] as string || "50", 10);
   const before = req.query["before"] as string | undefined;
 
@@ -87,7 +87,7 @@ router.get("/chat/rooms/:id/messages", requireAuth, async (req, res): Promise<vo
 
 // POST /chat/rooms/:id/messages — send a message
 router.post("/chat/rooms/:id/messages", requireAuth, async (req, res): Promise<void> => {
-  const { id } = req.params;
+  const id = req.params.id as string;
   const { content } = req.body as { content: string };
   if (!content?.trim()) { res.status(400).json({ error: "Bad Request", message: "content required" }); return; }
 

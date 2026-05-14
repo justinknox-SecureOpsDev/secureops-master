@@ -38,15 +38,16 @@ export default function AdminIncidentsScreen() {
   const [resolution, setResolution] = useState("");
   const topPad = Platform.OS === "web" ? 67 : 0;
 
-  const { data: incidents, isLoading, error, refetch } = useGetIncidents({
-    params: { status: filter },
-    query: { queryKey: getGetIncidentsQueryKey({ status: filter }) }
-  });
+  const incParams: any = { status: filter };
+  const { data: incidents, isLoading, error, refetch } = useGetIncidents(
+    incParams,
+    { query: { queryKey: getGetIncidentsQueryKey(incParams) } },
+  );
 
   const updateMutation = useUpdateIncident();
 
   const handleUpdateStatus = async (id: string, status: string) => {
-    await updateMutation.mutateAsync({ id, data: { status: status as any, resolution: resolution || undefined } });
+    await updateMutation.mutateAsync({ id, data: { status: status as any, adminNotes: resolution || undefined, resolvedAt: status === "resolved" ? new Date().toISOString() : undefined } });
     queryClient.invalidateQueries({ queryKey: getGetIncidentsQueryKey() });
     setSelectedIncident(null);
     setResolution("");
@@ -102,7 +103,7 @@ export default function AdminIncidentsScreen() {
           renderItem={({ item }) => (
             <TouchableOpacity
               style={[styles.card, { backgroundColor: colors.card, borderColor: item.severity === "critical" ? colors.destructive + "60" : colors.border }]}
-              onPress={() => { setSelectedIncident(item); setResolution(item.resolution || ""); }}
+              onPress={() => { setSelectedIncident(item); setResolution((item as any).adminNotes || ""); }}
             >
               <View style={styles.cardHeader}>
                 <SeverityBadge severity={item.severity} />
@@ -116,10 +117,10 @@ export default function AdminIncidentsScreen() {
                 <Feather name="calendar" size={13} color={colors.mutedForeground} style={{ marginLeft: 8 }} />
                 <Text style={[styles.metaText, { color: colors.mutedForeground }]}>{new Date(item.occurredAt).toLocaleDateString()}</Text>
               </View>
-              {item.location && (
+              {(item as any).locationDescription && (
                 <View style={styles.metaRow}>
                   <Feather name="map-pin" size={13} color={colors.mutedForeground} />
-                  <Text style={[styles.metaText, { color: colors.mutedForeground }]}>{item.location}</Text>
+                  <Text style={[styles.metaText, { color: colors.mutedForeground }]}>{(item as any).locationDescription}</Text>
                 </View>
               )}
             </TouchableOpacity>

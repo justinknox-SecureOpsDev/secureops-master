@@ -16,6 +16,10 @@ export const timeEntriesTable = pgTable("time_entries", {
   clockOutLng: numeric("clock_out_lng", { precision: 10, scale: 6 }),
   hoursWorked: numeric("hours_worked", { precision: 6, scale: 2 }),
   isVerified: boolean("is_verified").notNull().default(false),
+  // Approval workflow: admin must approve before payroll/invoicing picks up the entry.
+  approvalStatus: text("approval_status").notNull().default("pending"), // pending | approved | rejected
+  approvedAt: timestamp("approved_at", { withTimezone: true }),
+  approvedBy: uuid("approved_by").references(() => usersTable.id, { onDelete: "set null" }),
   notes: text("notes"),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow().$onUpdate(() => new Date()),

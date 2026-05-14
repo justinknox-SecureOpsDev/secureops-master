@@ -24,10 +24,10 @@ export default function AdminShiftsScreen() {
   const [filter, setFilter] = useState<string>("upcoming");
   const topPad = Platform.OS === "web" ? 67 : 0;
 
-  const { data: shifts, isLoading, error, refetch } = useGetShifts({
-    params: { status: filter },
-    query: { queryKey: getGetShiftsQueryKey({ status: filter }) }
-  });
+  const { data: shifts, isLoading, error, refetch } = useGetShifts(
+    { status: filter as any },
+    { query: { queryKey: getGetShiftsQueryKey({ status: filter as any }) } },
+  );
 
   return (
     <View style={[styles.container, { backgroundColor: colors.background }]}>

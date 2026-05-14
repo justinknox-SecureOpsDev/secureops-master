@@ -1,7 +1,12 @@
 import React, { useState } from "react";
 import { View, Text, StyleSheet, FlatList, TouchableOpacity, ActivityIndicator, Platform, Alert } from "react-native";
 import { useColors } from "@/hooks/useColors";
-import { useGetShifts, getGetShiftsQueryKey, useGetMe, getGetMeQueryKey, useGetEmployee, getGetEmployeeQueryKey, claimShift } from "@workspace/api-client-react";
+import {
+  useGetShifts, getGetShiftsQueryKey,
+  useGetMe, getGetMeQueryKey,
+  useGetEmployee, getGetEmployeeQueryKey,
+  claimShift, useUpdateShiftAssignment,
+} from "@workspace/api-client-react";
 import { useQueryClient } from "@tanstack/react-query";
 import { Feather } from "@expo/vector-icons";
 import { LicenseLevelBadge, levelLabel } from "@/components/LicenseLevelBadge";
@@ -12,7 +17,7 @@ export default function EmployeeShiftsScreen() {
   const colors = useColors();
   const queryClient = useQueryClient();
   const [filter, setFilter] = useState<typeof FILTERS[number]>("available");
-  const [claiming, setClaiming] = useState<string | null>(null);
+  const [busyId, setBusyId] = useState<string | null>(null);
   const topPad = Platform.OS === "web" ? 67 : 0;
 
   const { data: me } = useGetMe({ query: { queryKey: getGetMeQueryKey() } });
@@ -22,12 +27,13 @@ export default function EmployeeShiftsScreen() {
   });
   const myMaxLevel = (myEmployee as any)?.maxLicenseLevel as number | null | undefined;
 
-  // Server filters automatically: returns assigned + open shifts the employee qualifies for.
   const statusParam = filter === "available" ? "upcoming" : filter;
-  const { data: allShifts, isLoading, error, refetch } = useGetShifts({
-    params: { status: statusParam },
-    query: { queryKey: getGetShiftsQueryKey({ status: statusParam }) },
-  });
+  const { data: allShifts, isLoading, error, refetch } = useGetShifts(
+    { status: statusParam as any },
+    { query: { queryKey: getGetShiftsQueryKey({ status: statusParam as any }) } },
+  );
+
+  const updateAssignment = useUpdateShiftAssignment();
 
   const shifts = (allShifts ?? []).filter((s: any) => {
     const isAssigned = (s.assignments ?? []).some((a: any) => a.employeeId === myUserId);
@@ -35,27 +41,68 @@ export default function EmployeeShiftsScreen() {
     return isAssigned;
   });
 
+  const myAssignmentFor = (shift: any) =>
+    (shift.assignments ?? []).find((a: any) => a.employeeId === myUserId);
+
   const statusColor: Record<string, string> = { upcoming: colors.primary, active: "#22c55e", completed: colors.mutedForeground };
 
   const handleClaim = (shift: any) => {
     Alert.alert(
-      "Sign Up For Shift",
-      `${shift.title} @ ${shift.clientName}\n\nConfirm sign-up?`,
+      "Reserve This Shift",
+      `${shift.title} @ ${shift.clientName}\n\nYou'll need to confirm acceptance after reserving.`,
       [
         { text: "Cancel", style: "cancel" },
         {
-          text: "Sign Up",
+          text: "Reserve",
           onPress: async () => {
-            setClaiming(shift.id);
+            setBusyId(shift.id);
             try {
               await claimShift(shift.id);
               await queryClient.invalidateQueries({ queryKey: getGetShiftsQueryKey() });
-              Alert.alert("You're Signed Up", "This shift is now in your roster.");
+              setFilter("upcoming");
+              Alert.alert("Slot Held", "Open the shift in 'Upcoming' to confirm acceptance.");
             } catch (e: any) {
-              const msg = e?.response?.data?.message || e?.message || "Could not sign up for this shift.";
-              Alert.alert("Sign-Up Failed", msg);
+              const msg = e?.response?.data?.message || e?.message || "Could not reserve this shift.";
+              Alert.alert("Reservation Failed", msg);
             } finally {
-              setClaiming(null);
+              setBusyId(null);
+            }
+          },
+        },
+      ]
+    );
+  };
+
+  const handleAccept = async (shift: any, assignmentId: string) => {
+    setBusyId(shift.id);
+    try {
+      await updateAssignment.mutateAsync({ id: shift.id, assignmentId, data: { status: "accepted" } });
+      await queryClient.invalidateQueries({ queryKey: getGetShiftsQueryKey() });
+    } catch (e: any) {
+      Alert.alert("Failed", e?.response?.data?.message || e?.message || "Could not accept shift.");
+    } finally {
+      setBusyId(null);
+    }
+  };
+
+  const handleDecline = (shift: any, assignmentId: string) => {
+    Alert.alert(
+      "Decline Shift?",
+      `Releasing ${shift.title} will free the slot for another officer. This will be visible to admin.`,
+      [
+        { text: "Keep", style: "cancel" },
+        {
+          text: "Decline",
+          style: "destructive",
+          onPress: async () => {
+            setBusyId(shift.id);
+            try {
+              await updateAssignment.mutateAsync({ id: shift.id, assignmentId, data: { status: "declined" } });
+              await queryClient.invalidateQueries({ queryKey: getGetShiftsQueryKey() });
+            } catch (e: any) {
+              Alert.alert("Failed", e?.response?.data?.message || e?.message || "Could not decline shift.");
+            } finally {
+              setBusyId(null);
             }
           },
         },
@@ -117,8 +164,17 @@ export default function EmployeeShiftsScreen() {
             const start = new Date(item.startTime);
             const filled = (item.assignments ?? []).length;
             const isAvailable = filter === "available";
+            const myAssign = myAssignmentFor(item);
+            const isPending = myAssign?.status === "pending";
+            const isAccepted = myAssign?.status === "accepted";
+            const busy = busyId === item.id;
             return (
-              <View style={[styles.card, { backgroundColor: colors.card, borderColor: colors.border, borderLeftColor: sc, borderLeftWidth: 3 }]}>
+              <View style={[styles.card, {
+                backgroundColor: colors.card,
+                borderColor: isPending ? colors.accent : colors.border,
+                borderLeftColor: sc,
+                borderLeftWidth: 3,
+              }]}>
                 <View style={styles.cardHeader}>
                   <View style={{ flex: 1 }}>
                     <Text style={[styles.shiftTitle, { color: colors.foreground }]}>{item.title}</Text>
@@ -128,6 +184,19 @@ export default function EmployeeShiftsScreen() {
                     <Text style={[styles.durationText, { color: sc }]}>{duration}h</Text>
                   </View>
                 </View>
+
+                {isPending && (
+                  <View style={[styles.statusBanner, { backgroundColor: colors.accent + "20", borderColor: colors.accent }]}>
+                    <Feather name="alert-circle" size={14} color={colors.accent} />
+                    <Text style={[styles.statusBannerText, { color: colors.accent }]}>Awaiting your acceptance</Text>
+                  </View>
+                )}
+                {isAccepted && (
+                  <View style={[styles.statusBanner, { backgroundColor: "#22c55e20", borderColor: "#22c55e" }]}>
+                    <Feather name="check-circle" size={14} color="#22c55e" />
+                    <Text style={[styles.statusBannerText, { color: "#22c55e" }]}>Confirmed — you're committed to this shift</Text>
+                  </View>
+                )}
 
                 <View style={{ flexDirection: "row", gap: 6, alignItems: "center", flexWrap: "wrap" }}>
                   <LicenseLevelBadge level={item.requiredLicenseLevel} size="sm" />
@@ -165,10 +234,9 @@ export default function EmployeeShiftsScreen() {
                 </View>
 
                 <View style={styles.rateRow}>
-                  <Feather name="dollar-sign" size={13} color={colors.primary} />
-                  <Text style={[styles.rateText, { color: colors.primary }]}>${parseFloat(item.hourlyRate).toFixed(2)}/hr</Text>
+                  <Text style={[styles.rateText, { color: colors.primary }]}>£{parseFloat(item.payRate ?? item.hourlyRate ?? "0").toFixed(2)}/hr</Text>
                   <Text style={[styles.earnText, { color: colors.mutedForeground }]}>
-                    ≈ ${(parseFloat(item.hourlyRate) * parseFloat(duration)).toFixed(2)} total
+                    ≈ £{(parseFloat(item.payRate ?? item.hourlyRate ?? "0") * parseFloat(duration)).toFixed(2)} total
                   </Text>
                 </View>
 
@@ -181,19 +249,42 @@ export default function EmployeeShiftsScreen() {
 
                 {isAvailable && (
                   <TouchableOpacity
-                    style={[styles.claimBtn, { backgroundColor: colors.primary, opacity: claiming === item.id ? 0.6 : 1 }]}
+                    style={[styles.claimBtn, { backgroundColor: colors.primary, opacity: busy ? 0.6 : 1 }]}
                     onPress={() => handleClaim(item)}
-                    disabled={claiming === item.id}
+                    disabled={busy}
                   >
-                    {claiming === item.id ? (
-                      <ActivityIndicator color={colors.primaryForeground} />
-                    ) : (
+                    {busy ? <ActivityIndicator color={colors.primaryForeground} /> : (
                       <>
-                        <Feather name="check-circle" size={16} color={colors.primaryForeground} />
-                        <Text style={[styles.claimText, { color: colors.primaryForeground }]}>Sign Up For This Shift</Text>
+                        <Feather name="bookmark" size={16} color={colors.primaryForeground} />
+                        <Text style={[styles.claimText, { color: colors.primaryForeground }]}>Reserve Slot</Text>
                       </>
                     )}
                   </TouchableOpacity>
+                )}
+
+                {isPending && (
+                  <View style={{ flexDirection: "row", gap: 8 }}>
+                    <TouchableOpacity
+                      style={[styles.acceptBtn, { backgroundColor: "#22c55e", opacity: busy ? 0.6 : 1 }]}
+                      onPress={() => handleAccept(item, myAssign!.id)}
+                      disabled={busy}
+                    >
+                      {busy ? <ActivityIndicator color="#fff" /> : (
+                        <>
+                          <Feather name="check" size={16} color="#fff" />
+                          <Text style={[styles.acceptText, { color: "#fff" }]}>Accept</Text>
+                        </>
+                      )}
+                    </TouchableOpacity>
+                    <TouchableOpacity
+                      style={[styles.declineBtn, { borderColor: colors.destructive, opacity: busy ? 0.6 : 1 }]}
+                      onPress={() => handleDecline(item, myAssign!.id)}
+                      disabled={busy}
+                    >
+                      <Feather name="x" size={16} color={colors.destructive} />
+                      <Text style={[styles.declineText, { color: colors.destructive }]}>Decline</Text>
+                    </TouchableOpacity>
+                  </View>
                 )}
               </View>
             );
@@ -218,6 +309,8 @@ const styles = StyleSheet.create({
   clientName: { fontSize: 13, fontWeight: "600", marginTop: 2 },
   durationBadge: { paddingHorizontal: 8, paddingVertical: 4, borderRadius: 6, borderWidth: 1 },
   durationText: { fontSize: 13, fontWeight: "700" },
+  statusBanner: { flexDirection: "row", alignItems: "center", gap: 6, padding: 8, borderRadius: 6, borderWidth: 1 },
+  statusBannerText: { fontSize: 12, fontWeight: "700", flex: 1 },
   detailRow: { flexDirection: "row", alignItems: "center", gap: 6 },
   detailText: { fontSize: 12, flex: 1 },
   timeBlock: { flexDirection: "row", borderRadius: 8, borderWidth: 1, overflow: "hidden" },
@@ -225,7 +318,7 @@ const styles = StyleSheet.create({
   timeLabel: { fontSize: 9, fontWeight: "700", letterSpacing: 1, marginBottom: 3 },
   timeValue: { fontSize: 14, fontWeight: "600" },
   timeDivider: { width: 1 },
-  rateRow: { flexDirection: "row", alignItems: "center", gap: 5 },
+  rateRow: { flexDirection: "row", alignItems: "center", gap: 8 },
   rateText: { fontSize: 13, fontWeight: "700" },
   earnText: { fontSize: 12, flex: 1 },
   notesBox: { flexDirection: "row", alignItems: "flex-start", gap: 8, padding: 10, borderRadius: 6, borderWidth: 1 },
@@ -234,4 +327,8 @@ const styles = StyleSheet.create({
   retryBtn: { paddingHorizontal: 20, paddingVertical: 8, borderRadius: 8, borderWidth: 1 },
   claimBtn: { flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 8, paddingVertical: 12, borderRadius: 8, marginTop: 4 },
   claimText: { fontSize: 14, fontWeight: "700" },
+  acceptBtn: { flex: 1, flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 6, paddingVertical: 12, borderRadius: 8 },
+  acceptText: { fontSize: 14, fontWeight: "700" },
+  declineBtn: { flex: 1, flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 6, paddingVertical: 12, borderRadius: 8, borderWidth: 1.5 },
+  declineText: { fontSize: 14, fontWeight: "700" },
 });

@@ -1,7 +1,11 @@
-import React, { useState } from "react";
-import { View, Text, StyleSheet, TouchableOpacity, TextInput, ActivityIndicator, Alert, Platform, Switch } from "react-native";
+import React, { useState, useMemo } from "react";
+import { View, Text, StyleSheet, TouchableOpacity, TextInput, ActivityIndicator, Alert, Platform, Switch, ScrollView } from "react-native";
 import { useColors } from "@/hooks/useColors";
-import { useCreateShift, getGetShiftsQueryKey } from "@workspace/api-client-react";
+import {
+  useCreateShift, getGetShiftsQueryKey,
+  useGetClients, getGetClientsQueryKey,
+  useGetSites, getGetSitesQueryKey,
+} from "@workspace/api-client-react";
 import { Feather } from "@expo/vector-icons";
 import { useRouter } from "expo-router";
 import { useQueryClient } from "@tanstack/react-query";
@@ -38,38 +42,52 @@ export default function CreateShiftScreen() {
   const createShift = useCreateShift();
   const topPad = Platform.OS === "web" ? 67 : 0;
 
+  const { data: clients } = useGetClients({ query: { queryKey: getGetClientsQueryKey() } });
+
   const now = new Date();
   const nextHour = new Date(now);
   nextHour.setHours(now.getHours() + 1, 0, 0, 0);
   const endTime = new Date(nextHour);
   endTime.setHours(endTime.getHours() + 8);
-
   const fmt = (d: Date) => d.toISOString().slice(0, 16);
 
   const [form, setForm] = useState({
-    title: "", clientName: "", location: "", notes: "",
-    startTime: fmt(nextHour), endTime: fmt(endTime),
-    hourlyRate: "", billableRate: "",
-    isRepeat: false, repeatPattern: "",
+    title: "",
+    clientId: "",
+    siteId: "",
+    notes: "",
+    startTime: fmt(nextHour),
+    endTime: fmt(endTime),
+    payRate: "",
+    billRate: "",
+    isRepeat: false,
+    repeatPattern: "",
     requiredLicenseLevel: 2 as 2 | 3 | 4,
     headcount: "1",
   });
   const set = (key: string) => (val: any) => setForm((f) => ({ ...f, [key]: val }));
 
+  const { data: sites } = useGetSites({ clientId: form.clientId || undefined } as any, {
+    query: { queryKey: getGetSitesQueryKey({ clientId: form.clientId || undefined } as any), enabled: !!form.clientId },
+  });
+
+  const selectedSite = useMemo(() => (sites ?? []).find((s: any) => s.id === form.siteId), [sites, form.siteId]);
+
   const handleCreate = async () => {
-    if (!form.title || !form.clientName || !form.location || !form.startTime || !form.endTime || !form.hourlyRate) {
-      Alert.alert("Missing Fields", "Title, client, location, times and hourly rate are required.");
+    if (!form.title || !form.siteId || !form.startTime || !form.endTime || !form.payRate || !form.billRate) {
+      Alert.alert("Missing Fields", "Title, site, times, pay rate and bill rate are required.");
       return;
     }
     try {
       await createShift.mutateAsync({
         data: {
-          title: form.title, clientName: form.clientName,
-          location: form.location, notes: form.notes || undefined,
+          title: form.title,
+          siteId: form.siteId,
+          notes: form.notes || undefined,
           startTime: new Date(form.startTime).toISOString(),
           endTime: new Date(form.endTime).toISOString(),
-          hourlyRate: parseFloat(form.hourlyRate),
-          billableRate: form.billableRate ? parseFloat(form.billableRate) : undefined,
+          payRate: parseFloat(form.payRate),
+          billRate: parseFloat(form.billRate),
           isRepeat: form.isRepeat,
           repeatPattern: form.isRepeat ? (form.repeatPattern as any) || undefined : undefined,
           requiredLicenseLevel: form.requiredLicenseLevel,
@@ -80,7 +98,7 @@ export default function CreateShiftScreen() {
       Alert.alert("Shift Posted", "All qualified officers have been notified.");
       router.back();
     } catch (e: any) {
-      Alert.alert("Error", e?.message || "Failed to create shift");
+      Alert.alert("Error", e?.response?.data?.message || e?.message || "Failed to create shift");
     }
   };
 
@@ -95,9 +113,64 @@ export default function CreateShiftScreen() {
 
       <KeyboardAwareScrollViewCompat contentContainerStyle={{ padding: 16, paddingBottom: 120 }}>
         <Text style={[styles.sectionLabel, { color: colors.accent }]}>SHIFT DETAILS</Text>
-        <Field label="Shift Title" value={form.title} onChangeText={set("title")} placeholder="Night Security — CBD" required />
-        <Field label="Client / Site Name" value={form.clientName} onChangeText={set("clientName")} placeholder="Crown Casino" required />
-        <Field label="Location" value={form.location} onChangeText={set("location")} placeholder="8 Whiteman St, Southbank" required />
+        <Field label="Shift Title (assignment name)" value={form.title} onChangeText={set("title")} placeholder="Kanvas L3" required />
+
+        <Text style={[styles.fieldLabel, { color: colors.mutedForeground, marginTop: 4 }]}>Client *</Text>
+        <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginBottom: 14 }}>
+          <View style={{ flexDirection: "row", gap: 8 }}>
+            {(clients ?? []).length === 0 && (
+              <TouchableOpacity onPress={() => router.push("/(admin)/clients" as any)}
+                style={[styles.pickChip, { borderColor: colors.accent, borderStyle: "dashed" }]}>
+                <Feather name="plus" size={14} color={colors.accent} />
+                <Text style={{ color: colors.accent, fontWeight: "600" }}>Add a client</Text>
+              </TouchableOpacity>
+            )}
+            {((clients as any[]) ?? []).map((c) => {
+              const sel = c.id === form.clientId;
+              return (
+                <TouchableOpacity key={c.id} onPress={() => { setForm((f) => ({ ...f, clientId: c.id, siteId: "" })); }}
+                  style={[styles.pickChip, { borderColor: sel ? colors.primary : colors.border, backgroundColor: sel ? colors.primary + "20" : colors.card }]}>
+                  <Text style={{ color: sel ? colors.primary : colors.foreground, fontWeight: "600" }}>{c.name}</Text>
+                </TouchableOpacity>
+              );
+            })}
+          </View>
+        </ScrollView>
+
+        {form.clientId !== "" && (
+          <>
+            <Text style={[styles.fieldLabel, { color: colors.mutedForeground }]}>Site *</Text>
+            <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginBottom: 14 }}>
+              <View style={{ flexDirection: "row", gap: 8 }}>
+                {((sites as any[]) ?? []).length === 0 && (
+                  <TouchableOpacity onPress={() => router.push(`/(admin)/clients/${form.clientId}` as any)}
+                    style={[styles.pickChip, { borderColor: colors.accent, borderStyle: "dashed" }]}>
+                    <Feather name="plus" size={14} color={colors.accent} />
+                    <Text style={{ color: colors.accent, fontWeight: "600" }}>Add a site</Text>
+                  </TouchableOpacity>
+                )}
+                {((sites as any[]) ?? []).map((s) => {
+                  const sel = s.id === form.siteId;
+                  return (
+                    <TouchableOpacity key={s.id} onPress={() => set("siteId")(s.id)}
+                      style={[styles.pickChip, { borderColor: sel ? colors.primary : colors.border, backgroundColor: sel ? colors.primary + "20" : colors.card }]}>
+                      <Feather name="map-pin" size={12} color={sel ? colors.primary : colors.mutedForeground} />
+                      <Text style={{ color: sel ? colors.primary : colors.foreground, fontWeight: "600" }}>{s.name}</Text>
+                    </TouchableOpacity>
+                  );
+                })}
+              </View>
+            </ScrollView>
+          </>
+        )}
+
+        {selectedSite && (selectedSite as any).address && (
+          <View style={[styles.helper, { backgroundColor: colors.secondary, borderColor: colors.border }]}>
+            <Feather name="map-pin" size={12} color={colors.mutedForeground} />
+            <Text style={{ color: colors.mutedForeground, fontSize: 12, flex: 1 }}>{(selectedSite as any).address}</Text>
+          </View>
+        )}
+
         <Field label="Notes" value={form.notes} onChangeText={set("notes")} placeholder="Bring high-vis vest" />
 
         <Text style={[styles.sectionLabel, { color: colors.accent, marginTop: 20 }]}>LICENCE REQUIREMENT *</Text>
@@ -105,14 +178,11 @@ export default function CreateShiftScreen() {
           {LEVELS.map((opt) => {
             const selected = form.requiredLicenseLevel === opt.value;
             return (
-              <TouchableOpacity
-                key={opt.value}
-                onPress={() => set("requiredLicenseLevel")(opt.value)}
+              <TouchableOpacity key={opt.value} onPress={() => set("requiredLicenseLevel")(opt.value)}
                 style={[styles.levelOpt, {
                   backgroundColor: selected ? colors.primary + "20" : colors.card,
                   borderColor: selected ? colors.primary : colors.border,
-                }]}
-              >
+                }]}>
                 <View style={[styles.levelDot, { borderColor: selected ? colors.primary : colors.border, backgroundColor: selected ? colors.primary : "transparent" }]}>
                   {selected && <Feather name="check" size={12} color={colors.primaryForeground} />}
                 </View>
@@ -134,33 +204,27 @@ export default function CreateShiftScreen() {
         <View style={[styles.switchRow, { backgroundColor: colors.card, borderColor: colors.border }]}>
           <Feather name="repeat" size={16} color={colors.mutedForeground} />
           <Text style={[styles.switchLabel, { color: colors.foreground }]}>Repeating Shift</Text>
-          <Switch
-            value={form.isRepeat}
-            onValueChange={set("isRepeat")}
+          <Switch value={form.isRepeat} onValueChange={set("isRepeat")}
             trackColor={{ false: colors.border, true: colors.primary + "80" }}
-            thumbColor={form.isRepeat ? colors.primary : colors.mutedForeground}
-          />
+            thumbColor={form.isRepeat ? colors.primary : colors.mutedForeground} />
         </View>
         {form.isRepeat && (
           <Field label="Repeat Pattern" value={form.repeatPattern} onChangeText={set("repeatPattern")} placeholder="weekly" autoCapitalize="none" />
         )}
 
-        <Text style={[styles.sectionLabel, { color: colors.accent, marginTop: 20 }]}>RATES</Text>
-        <Field label="Employee Pay Rate ($/hr)" value={form.hourlyRate} onChangeText={set("hourlyRate")} placeholder="38.50" keyboardType="decimal-pad" autoCapitalize="none" required />
-        <Field label="Client Billable Rate ($/hr)" value={form.billableRate} onChangeText={set("billableRate")} placeholder="75.00" keyboardType="decimal-pad" autoCapitalize="none" />
+        <Text style={[styles.sectionLabel, { color: colors.accent, marginTop: 20 }]}>RATES (this site / assignment)</Text>
+        <Field label="Officer Pay Rate (£/hr)" value={form.payRate} onChangeText={set("payRate")} placeholder="18.00" keyboardType="decimal-pad" autoCapitalize="none" required />
+        <Field label="Client Bill Rate (£/hr)" value={form.billRate} onChangeText={set("billRate")} placeholder="30.00" keyboardType="decimal-pad" autoCapitalize="none" required />
 
         <View style={[styles.broadcastNote, { backgroundColor: colors.accent + "15", borderColor: colors.accent + "50" }]}>
           <Feather name="bell" size={14} color={colors.accent} />
           <Text style={[styles.broadcastText, { color: colors.accent }]}>
-            All qualifying officers (Level {form.requiredLicenseLevel}{form.requiredLicenseLevel < 4 ? "+" : ""}) will be notified and can sign up.
+            All qualifying officers (Level {form.requiredLicenseLevel}{form.requiredLicenseLevel < 4 ? "+" : ""}) will be notified. They reserve a slot, then must explicitly accept.
           </Text>
         </View>
 
-        <TouchableOpacity
-          style={[styles.submitBtn, { backgroundColor: colors.primary, opacity: createShift.isPending ? 0.7 : 1 }]}
-          onPress={handleCreate}
-          disabled={createShift.isPending}
-        >
+        <TouchableOpacity style={[styles.submitBtn, { backgroundColor: colors.primary, opacity: createShift.isPending ? 0.7 : 1 }]}
+          onPress={handleCreate} disabled={createShift.isPending}>
           {createShift.isPending ? <ActivityIndicator color={colors.primaryForeground} /> : (
             <>
               <Feather name="send" size={18} color={colors.primaryForeground} />
@@ -182,6 +246,8 @@ const styles = StyleSheet.create({
   fieldWrap: { marginBottom: 14 },
   fieldLabel: { fontSize: 12, marginBottom: 6, fontWeight: "500" },
   fieldInput: { height: 46, borderWidth: 1, borderRadius: 8, paddingHorizontal: 14, fontSize: 15 },
+  pickChip: { flexDirection: "row", alignItems: "center", gap: 6, paddingHorizontal: 14, paddingVertical: 10, borderRadius: 20, borderWidth: 1 },
+  helper: { flexDirection: "row", alignItems: "center", gap: 6, padding: 8, borderRadius: 6, borderWidth: 1, marginBottom: 14 },
   switchRow: { flexDirection: "row", alignItems: "center", gap: 10, padding: 14, borderRadius: 8, borderWidth: 1, marginBottom: 14 },
   switchLabel: { flex: 1, fontSize: 14 },
   submitBtn: { flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 10, padding: 16, borderRadius: 12, marginTop: 12 },

@@ -1,11 +1,11 @@
 {
   "expo": {
-    "name": "WCSG",
-    "slug": "security-ops",
+    "name": "WCSGI",
+    "slug": "wcsgi",
     "version": "1.0.0",
     "orientation": "portrait",
     "icon": "./assets/images/icon.png",
-    "scheme": "security-ops",
+    "scheme": "wcsgi",
     "userInterfaceStyle": "dark",
     "newArchEnabled": true,
     "splash": {
@@ -15,10 +15,10 @@
     },
     "ios": {
       "supportsTablet": false,
-      "bundleIdentifier": "com.wcsg.secureops"
+      "bundleIdentifier": "com.wcsgi.app"
     },
     "android": {
-      "package": "com.wcsg.secureops"
+      "package": "com.wcsgi.app"
     },
     "web": {
       "favicon": "./assets/images/icon.png"

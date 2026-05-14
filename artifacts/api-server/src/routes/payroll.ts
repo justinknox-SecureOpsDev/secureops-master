@@ -1,15 +1,26 @@
 import { Router, type IRouter } from "express";
-import { eq, and, gte, lte, sql } from "drizzle-orm";
-import { db, payrollEntriesTable, usersTable, timeEntriesTable, employeesTable } from "@workspace/db";
-import { requireAuth, requireAdmin } from "../middlewares/auth";
+import { eq, and, gte, lte, lt, sql } from "drizzle-orm";
+import { db, payrollEntriesTable, usersTable, timeEntriesTable, shiftsTable, sitesTable } from "@workspace/db";
+import { requireAdmin } from "../middlewares/auth";
 
 const router: IRouter = Router();
 
+function addDays(d: Date, n: number): Date {
+  const x = new Date(d);
+  x.setUTCDate(x.getUTCDate() + n);
+  return x;
+}
+
+function isoDate(d: Date): string {
+  return d.toISOString().slice(0, 10);
+}
+
 router.get("/payroll", requireAdmin, async (req, res): Promise<void> => {
-  const { employeeId, status, periodStart, periodEnd } = req.query as Record<string, string | undefined>;
+  const { employeeId, siteId, status, periodStart, periodEnd } = req.query as Record<string, string | undefined>;
 
   const conditions = [];
   if (employeeId) conditions.push(eq(payrollEntriesTable.employeeId, employeeId));
+  if (siteId) conditions.push(eq(payrollEntriesTable.siteId, siteId));
   if (status) conditions.push(eq(payrollEntriesTable.status, status));
   if (periodStart) conditions.push(gte(payrollEntriesTable.periodStart, periodStart));
   if (periodEnd) conditions.push(lte(payrollEntriesTable.periodEnd, periodEnd));
@@ -18,6 +29,8 @@ router.get("/payroll", requireAdmin, async (req, res): Promise<void> => {
     .select({
       id: payrollEntriesTable.id,
       employeeId: payrollEntriesTable.employeeId,
+      siteId: payrollEntriesTable.siteId,
+      siteName: sitesTable.name,
       periodStart: payrollEntriesTable.periodStart,
       periodEnd: payrollEntriesTable.periodEnd,
       totalHours: payrollEntriesTable.totalHours,
@@ -33,56 +46,101 @@ router.get("/payroll", requireAdmin, async (req, res): Promise<void> => {
     })
     .from(payrollEntriesTable)
     .leftJoin(usersTable, eq(payrollEntriesTable.employeeId, usersTable.id))
+    .leftJoin(sitesTable, eq(payrollEntriesTable.siteId, sitesTable.id))
     .where(conditions.length > 0 ? and(...conditions) : undefined);
 
   res.json(rows);
 });
 
-router.post("/payroll", requireAdmin, async (req, res): Promise<void> => {
-  const { employeeId, periodStart, periodEnd, notes } = req.body;
-  if (!employeeId || !periodStart || !periodEnd) {
-    res.status(400).json({ error: "Bad Request", message: "employeeId, periodStart, periodEnd required" });
+// Generate weekly payroll for a site from APPROVED time entries.
+// Aggregates per (employee × shift payRate) and produces one payroll entry per employee for that week.
+router.post("/payroll/generate", requireAdmin, async (req, res): Promise<void> => {
+  const { siteId, weekStart } = req.body;
+  if (!siteId || !weekStart) {
+    res.status(400).json({ error: "Bad Request", message: "siteId and weekStart required" });
+    return;
+  }
+  const start = new Date(`${weekStart}T00:00:00.000Z`);
+  if (Number.isNaN(start.getTime())) { res.status(400).json({ error: "Bad Request", message: "weekStart must be YYYY-MM-DD" }); return; }
+  const end = addDays(start, 7);
+
+  // Pull approved time entries at this site for the week.
+  const entries = await db
+    .select({
+      employeeId: timeEntriesTable.employeeId,
+      hoursWorked: timeEntriesTable.hoursWorked,
+      payRate: shiftsTable.payRate,
+    })
+    .from(timeEntriesTable)
+    .innerJoin(shiftsTable, eq(timeEntriesTable.shiftId, shiftsTable.id))
+    .where(and(
+      eq(shiftsTable.siteId, siteId),
+      eq(timeEntriesTable.approvalStatus, "approved"),
+      gte(timeEntriesTable.clockInTime, start),
+      lt(timeEntriesTable.clockInTime, end),
+    ));
+
+  // Aggregate per employee: total hours and pay (sum of hours × shift payRate per entry).
+  type Agg = { totalHours: number; gross: number };
+  const perEmployee = new Map<string, Agg>();
+  for (const e of entries) {
+    const hours = parseFloat(String(e.hoursWorked || "0"));
+    const rate = parseFloat(String(e.payRate || "0"));
+    const cur = perEmployee.get(e.employeeId) ?? { totalHours: 0, gross: 0 };
+    cur.totalHours += hours;
+    cur.gross += hours * rate;
+    perEmployee.set(e.employeeId, cur);
+  }
+
+  if (perEmployee.size === 0) {
+    res.status(200).json([]);
     return;
   }
 
-  const timeEntries = await db
-    .select()
-    .from(timeEntriesTable)
-    .where(
-      and(
-        eq(timeEntriesTable.employeeId, employeeId),
-        gte(timeEntriesTable.clockInTime, new Date(periodStart)),
-        lte(timeEntriesTable.clockInTime, new Date(periodEnd))
-      )
-    );
+  const periodStart = isoDate(start);
+  const periodEnd = isoDate(addDays(start, 6));
+  const created: any[] = [];
 
-  const totalHours = timeEntries.reduce((sum, e) => sum + parseFloat(String(e.hoursWorked || 0)), 0);
+  for (const [employeeId, agg] of perEmployee) {
+    const totalHours = Math.round(agg.totalHours * 100) / 100;
+    const gross = Math.round(agg.gross * 100) / 100;
+    const tax = Math.round(gross * 0.2 * 100) / 100;
+    const net = Math.round((gross - tax) * 100) / 100;
+    const avgRate = totalHours > 0 ? Math.round((gross / totalHours) * 100) / 100 : 0;
 
-  const [empRow] = await db
-    .select({ hourlyRate: employeesTable.hourlyRate })
-    .from(employeesTable)
-    .where(eq(employeesTable.userId, employeeId));
+    // Upsert by (employee, site, periodStart) — a re-generate replaces the totals.
+    const [row] = await db.insert(payrollEntriesTable).values({
+      employeeId,
+      siteId,
+      periodStart,
+      periodEnd,
+      totalHours: String(totalHours),
+      hourlyRate: String(avgRate),
+      grossPay: String(gross),
+      tax: String(tax),
+      netPay: String(net),
+      status: "pending",
+    }).onConflictDoUpdate({
+      target: [payrollEntriesTable.employeeId, payrollEntriesTable.siteId, payrollEntriesTable.periodStart],
+      set: {
+        totalHours: String(totalHours),
+        hourlyRate: String(avgRate),
+        grossPay: String(gross),
+        tax: String(tax),
+        netPay: String(net),
+        updatedAt: new Date(),
+      },
+    }).returning();
+    const [user] = await db.select().from(usersTable).where(eq(usersTable.id, employeeId));
+    const [site] = await db.select().from(sitesTable).where(eq(sitesTable.id, siteId));
+    created.push({
+      ...row,
+      employeeName: user ? `${user.firstName} ${user.lastName}` : null,
+      siteName: site?.name ?? null,
+    });
+  }
 
-  const hourlyRate = parseFloat(String(empRow?.hourlyRate || 0));
-  const grossPay = Math.round(totalHours * hourlyRate * 100) / 100;
-  const tax = Math.round(grossPay * 0.2 * 100) / 100;
-  const netPay = Math.round((grossPay - tax) * 100) / 100;
-
-  const [entry] = await db.insert(payrollEntriesTable).values({
-    employeeId,
-    periodStart,
-    periodEnd,
-    totalHours: String(Math.round(totalHours * 100) / 100),
-    hourlyRate: String(hourlyRate),
-    grossPay: String(grossPay),
-    tax: String(tax),
-    netPay: String(netPay),
-    status: "pending",
-    notes: notes || null,
-  }).returning();
-
-  const [user] = await db.select().from(usersTable).where(eq(usersTable.id, employeeId));
-  res.status(201).json({ ...entry, employeeName: user ? `${user.firstName} ${user.lastName}` : null });
+  res.status(201).json(created);
 });
 
 router.put("/payroll/:id", requireAdmin, async (req, res): Promise<void> => {

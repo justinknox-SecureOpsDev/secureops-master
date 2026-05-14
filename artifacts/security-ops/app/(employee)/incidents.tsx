@@ -1,7 +1,7 @@
 import React, { useState } from "react";
 import { View, Text, StyleSheet, FlatList, TouchableOpacity, ActivityIndicator, Alert, Platform, Modal, TextInput } from "react-native";
 import { useColors } from "@/hooks/useColors";
-import { useGetMyIncidents, getGetMyIncidentsQueryKey, useCreateIncident } from "@workspace/api-client-react";
+import { useGetIncidents, getGetIncidentsQueryKey, useCreateIncident } from "@workspace/api-client-react";
 import { Feather } from "@expo/vector-icons";
 import { useQueryClient } from "@tanstack/react-query";
 import { KeyboardAwareScrollViewCompat } from "@/components/KeyboardAwareScrollViewCompat";
@@ -18,9 +18,10 @@ export default function EmployeeIncidentsScreen() {
   const [form, setForm] = useState({ title: "", description: "", severity: "medium" as string, location: "", actionsTaken: "" });
   const set = (k: string) => (v: string) => setForm((f) => ({ ...f, [k]: v }));
 
-  const { data: incidents, isLoading, error, refetch } = useGetMyIncidents({
-    query: { queryKey: getGetMyIncidentsQueryKey() }
-  });
+  const { data: incidents, isLoading, error, refetch } = useGetIncidents(
+    {},
+    { query: { queryKey: getGetIncidentsQueryKey({}) } },
+  );
 
   const createMutation = useCreateIncident();
 
@@ -34,12 +35,12 @@ export default function EmployeeIncidentsScreen() {
         data: {
           title: form.title, description: form.description,
           severity: form.severity as any,
-          location: form.location || undefined,
+          locationDescription: form.location || undefined,
           actionsTaken: form.actionsTaken || undefined,
           occurredAt: new Date().toISOString(),
-        }
+        } as any
       });
-      queryClient.invalidateQueries({ queryKey: getGetMyIncidentsQueryKey() });
+      queryClient.invalidateQueries({ queryKey: getGetIncidentsQueryKey({}) });
       setShowReport(false);
       setForm({ title: "", description: "", severity: "medium", location: "", actionsTaken: "" });
       Alert.alert("Reported", "Your incident report has been submitted.");
@@ -100,20 +101,20 @@ export default function EmployeeIncidentsScreen() {
                 </View>
                 <Text style={[styles.incTitle, { color: colors.foreground }]}>{item.title}</Text>
                 <Text style={[styles.incDesc, { color: colors.mutedForeground }]} numberOfLines={2}>{item.description}</Text>
-                {item.location && (
+                {(item as any).locationDescription && (
                   <View style={styles.metaRow}>
                     <Feather name="map-pin" size={12} color={colors.mutedForeground} />
-                    <Text style={[styles.metaText, { color: colors.mutedForeground }]}>{item.location}</Text>
+                    <Text style={[styles.metaText, { color: colors.mutedForeground }]}>{(item as any).locationDescription}</Text>
                   </View>
                 )}
                 <View style={styles.metaRow}>
                   <Feather name="calendar" size={12} color={colors.mutedForeground} />
                   <Text style={[styles.metaText, { color: colors.mutedForeground }]}>{new Date(item.occurredAt).toLocaleString()}</Text>
                 </View>
-                {item.resolution && (
+                {(item as any).adminNotes && (
                   <View style={[styles.resolutionBox, { backgroundColor: colors.primary + "15", borderColor: colors.primary + "30" }]}>
                     <Text style={[styles.resLabel, { color: colors.primary }]}>RESOLUTION</Text>
-                    <Text style={[styles.resText, { color: colors.foreground }]}>{item.resolution}</Text>
+                    <Text style={[styles.resText, { color: colors.foreground }]}>{(item as any).adminNotes}</Text>
                   </View>
                 )}
               </View>

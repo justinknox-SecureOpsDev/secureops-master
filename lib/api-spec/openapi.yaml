@@ -30,8 +30,209 @@ tags:
     description: Dashboard summaries
   - name: chat
     description: Team chat messaging
+  - name: clients
+    description: Client management with payment terms
+  - name: sites
+    description: Sites under a client (each holds its own shifts)
 
 paths:
+  /clients:
+    get:
+      operationId: getClients
+      tags: [clients]
+      summary: List clients
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: "#/components/schemas/Client" }
+    post:
+      operationId: createClient
+      tags: [clients]
+      summary: Create client
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/CreateClientRequest" }
+      responses:
+        "201":
+          description: Created
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Client" }
+
+  /clients/{id}:
+    get:
+      operationId: getClient
+      tags: [clients]
+      summary: Get client (with sites)
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Client" }
+    put:
+      operationId: updateClient
+      tags: [clients]
+      summary: Update client
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/UpdateClientRequest" }
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Client" }
+    delete:
+      operationId: deleteClient
+      tags: [clients]
+      summary: Delete client
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+      responses:
+        "204": { description: Deleted }
+
+  /clients/{id}/sites:
+    post:
+      operationId: createClientSite
+      tags: [sites]
+      summary: Create a site under a client
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/CreateSiteRequest" }
+      responses:
+        "201":
+          description: Created
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Site" }
+
+  /sites:
+    get:
+      operationId: getSites
+      tags: [sites]
+      summary: List sites (optionally filter by clientId)
+      parameters:
+        - { name: clientId, in: query, schema: { type: string } }
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: "#/components/schemas/Site" }
+
+  /sites/{id}:
+    get:
+      operationId: getSite
+      tags: [sites]
+      summary: Get site
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Site" }
+    put:
+      operationId: updateSite
+      tags: [sites]
+      summary: Update site
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/UpdateSiteRequest" }
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Site" }
+    delete:
+      operationId: deleteSite
+      tags: [sites]
+      summary: Delete site
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+      responses:
+        "204": { description: Deleted }
+
+  /time-entries/{id}/approve:
+    post:
+      operationId: approveTimeEntry
+      tags: [timeEntries]
+      summary: Approve or reject a time entry (admin)
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/ApproveTimeEntryRequest" }
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/TimeEntry" }
+
+  /payroll/generate:
+    post:
+      operationId: generatePayroll
+      tags: [payroll]
+      summary: Generate weekly payroll for a site from approved time entries
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/GeneratePayrollRequest" }
+      responses:
+        "201":
+          description: Generated
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: "#/components/schemas/PayrollEntry" }
+
+  /invoices/generate:
+    post:
+      operationId: generateInvoice
+      tags: [invoices]
+      summary: Generate weekly invoice for a site from approved time entries
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/GenerateInvoiceRequest" }
+      responses:
+        "201":
+          description: Generated
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Invoice" }
+
   /healthz:
     get:
       operationId: healthCheck
@@ -1136,28 +1337,21 @@ components:
     Shift:
       type: object
       properties:
-        id:
-          type: string
-        title:
-          type: string
-        clientName:
-          type: string
-        location:
-          type: string
-        locationLat:
-          type: number
-        locationLng:
-          type: number
-        startTime:
-          type: string
-          format: date-time
-        endTime:
-          type: string
-          format: date-time
-        hourlyRate:
-          type: number
-        billableRate:
-          type: number
+        id: { type: string }
+        title: { type: string }
+        siteId: { type: string }
+        siteName: { type: string }
+        clientName: { type: string }
+        clientId: { type: string }
+        location: { type: string }
+        locationLat: { type: number }
+        locationLng: { type: number }
+        startTime: { type: string, format: date-time }
+        endTime: { type: string, format: date-time }
+        payRate: { type: number, description: "What the officer earns per hour" }
+        billRate: { type: number, description: "What the client is billed per hour" }
+        hourlyRate: { type: number, description: "Legacy alias for payRate" }
+        billableRate: { type: number, description: "Legacy alias for billRate" }
         status:
           type: string
           enum: [upcoming, active, completed, cancelled]
@@ -1168,28 +1362,20 @@ components:
         headcount:
           type: integer
           description: Total number of officers needed for this shift
-        isRepeat:
-          type: boolean
+        isRepeat: { type: boolean }
         repeatPattern:
           type: string
           enum: [daily, weekly, fortnightly, monthly]
-        notes:
-          type: string
+        notes: { type: string }
         assignments:
           type: array
-          items:
-            $ref: "#/components/schemas/ShiftAssignment"
-        createdAt:
-          type: string
-          format: date-time
+          items: { $ref: "#/components/schemas/ShiftAssignment" }
+        createdAt: { type: string, format: date-time }
       required:
         - id
         - title
-        - clientName
-        - location
         - startTime
         - endTime
-        - hourlyRate
         - status
         - requiredLicenseLevel
         - headcount
@@ -1199,76 +1385,42 @@ components:
     CreateShiftRequest:
       type: object
       properties:
-        title:
-          type: string
-        clientName:
-          type: string
-        location:
-          type: string
-        locationLat:
-          type: number
-        locationLng:
-          type: number
-        startTime:
-          type: string
-          format: date-time
-        endTime:
-          type: string
-          format: date-time
-        hourlyRate:
-          type: number
-        billableRate:
-          type: number
+        title: { type: string }
+        siteId: { type: string, description: "Required — links shift to a site (and its client)" }
+        startTime: { type: string, format: date-time }
+        endTime: { type: string, format: date-time }
+        payRate: { type: number, description: "Officer pay per hour" }
+        billRate: { type: number, description: "Client bill per hour" }
         requiredLicenseLevel:
           type: integer
           enum: [2, 3, 4]
         headcount:
           type: integer
           minimum: 1
-        isRepeat:
-          type: boolean
+        isRepeat: { type: boolean }
         repeatPattern:
           type: string
           enum: [daily, weekly, fortnightly, monthly]
-        notes:
-          type: string
-        employeeIds:
-          type: array
-          items:
-            type: string
+        notes: { type: string }
       required:
         - title
-        - clientName
-        - location
+        - siteId
         - startTime
         - endTime
-        - hourlyRate
+        - payRate
+        - billRate
         - requiredLicenseLevel
         - isRepeat
 
     UpdateShiftRequest:
       type: object
       properties:
-        title:
-          type: string
-        clientName:
-          type: string
-        location:
-          type: string
-        locationLat:
-          type: number
-        locationLng:
-          type: number
-        startTime:
-          type: string
-          format: date-time
-        endTime:
-          type: string
-          format: date-time
-        hourlyRate:
-          type: number
-        billableRate:
-          type: number
+        title: { type: string }
+        siteId: { type: string }
+        startTime: { type: string, format: date-time }
+        endTime: { type: string, format: date-time }
+        payRate: { type: number }
+        billRate: { type: number }
         status:
           type: string
           enum: [upcoming, active, completed, cancelled]
@@ -1278,8 +1430,7 @@ components:
         headcount:
           type: integer
           minimum: 1
-        notes:
-          type: string
+        notes: { type: string }
 
     ShiftAssignment:
       type: object
@@ -1353,6 +1504,22 @@ components:
           type: number
         isVerified:
           type: boolean
+        approvalStatus:
+          type: string
+          enum: [pending, approved, rejected]
+        approvedAt:
+          type: string
+          format: date-time
+        approvedBy:
+          type: string
+        siteId:
+          type: string
+        siteName:
+          type: string
+        payRate:
+          type: number
+        billRate:
+          type: number
         notes:
           type: string
         createdAt:
@@ -1364,6 +1531,7 @@ components:
         - employeeId
         - clockInTime
         - isVerified
+        - approvalStatus
         - createdAt
 
     ClockInRequest:
@@ -1401,39 +1569,24 @@ components:
     PayrollEntry:
       type: object
       properties:
-        id:
-          type: string
-        employeeId:
-          type: string
-        employeeName:
-          type: string
-        periodStart:
-          type: string
-          format: date
-        periodEnd:
-          type: string
-          format: date
-        totalHours:
-          type: number
-        hourlyRate:
-          type: number
-        grossPay:
-          type: number
-        tax:
-          type: number
-        netPay:
-          type: number
+        id: { type: string }
+        employeeId: { type: string }
+        employeeName: { type: string }
+        siteId: { type: string }
+        siteName: { type: string }
+        periodStart: { type: string, format: date }
+        periodEnd: { type: string, format: date }
+        totalHours: { type: number }
+        hourlyRate: { type: number }
+        grossPay: { type: number }
+        tax: { type: number }
+        netPay: { type: number }
         status:
           type: string
           enum: [pending, processing, paid]
-        paidAt:
-          type: string
-          format: date-time
-        notes:
-          type: string
-        createdAt:
-          type: string
-          format: date-time
+        paidAt: { type: string, format: date-time }
+        notes: { type: string }
+        createdAt: { type: string, format: date-time }
       required:
         - id
         - employeeId
@@ -1478,40 +1631,29 @@ components:
     Invoice:
       type: object
       properties:
-        id:
-          type: string
-        invoiceNumber:
-          type: string
-        clientName:
-          type: string
-        clientEmail:
-          type: string
-        clientAddress:
-          type: string
+        id: { type: string }
+        invoiceNumber: { type: string }
+        clientId: { type: string }
+        siteId: { type: string }
+        siteName: { type: string }
+        periodStart: { type: string, format: date }
+        periodEnd: { type: string, format: date }
+        clientName: { type: string }
+        clientEmail: { type: string }
+        clientAddress: { type: string }
         lineItems:
           type: array
-          items:
-            $ref: "#/components/schemas/InvoiceLineItem"
-        subtotal:
-          type: number
-        taxAmount:
-          type: number
-        totalAmount:
-          type: number
+          items: { $ref: "#/components/schemas/InvoiceLineItem" }
+        subtotal: { type: number }
+        taxAmount: { type: number }
+        totalAmount: { type: number }
         status:
           type: string
           enum: [draft, sent, paid, overdue]
-        dueDate:
-          type: string
-          format: date
-        paidAt:
-          type: string
-          format: date-time
-        notes:
-          type: string
-        createdAt:
-          type: string
-          format: date-time
+        dueDate: { type: string, format: date }
+        paidAt: { type: string, format: date-time }
+        notes: { type: string }
+        createdAt: { type: string, format: date-time }
       required:
         - id
         - invoiceNumber
@@ -1541,27 +1683,119 @@ components:
     CreateInvoiceRequest:
       type: object
       properties:
-        clientName:
-          type: string
-        clientEmail:
-          type: string
-        clientAddress:
-          type: string
+        clientId: { type: string }
+        siteId: { type: string }
+        clientName: { type: string }
+        clientEmail: { type: string }
+        clientAddress: { type: string }
         lineItems:
           type: array
-          items:
-            $ref: "#/components/schemas/InvoiceLineItem"
-        taxAmount:
-          type: number
-        dueDate:
-          type: string
-          format: date
-        notes:
-          type: string
+          items: { $ref: "#/components/schemas/InvoiceLineItem" }
+        taxAmount: { type: number }
+        dueDate: { type: string, format: date }
+        notes: { type: string }
       required:
         - clientName
         - lineItems
         - dueDate
+
+    Client:
+      type: object
+      properties:
+        id: { type: string }
+        name: { type: string }
+        contactName: { type: string }
+        contactEmail: { type: string }
+        contactPhone: { type: string }
+        billingAddress: { type: string }
+        paymentTermsDays: { type: integer, description: "Net X days for invoices" }
+        notes: { type: string }
+        sites:
+          type: array
+          items: { $ref: "#/components/schemas/Site" }
+        createdAt: { type: string, format: date-time }
+      required: [id, name, paymentTermsDays, createdAt]
+
+    CreateClientRequest:
+      type: object
+      properties:
+        name: { type: string }
+        contactName: { type: string }
+        contactEmail: { type: string }
+        contactPhone: { type: string }
+        billingAddress: { type: string }
+        paymentTermsDays: { type: integer, minimum: 0 }
+        notes: { type: string }
+      required: [name, paymentTermsDays]
+
+    UpdateClientRequest:
+      type: object
+      properties:
+        name: { type: string }
+        contactName: { type: string }
+        contactEmail: { type: string }
+        contactPhone: { type: string }
+        billingAddress: { type: string }
+        paymentTermsDays: { type: integer, minimum: 0 }
+        notes: { type: string }
+
+    Site:
+      type: object
+      properties:
+        id: { type: string }
+        clientId: { type: string }
+        clientName: { type: string }
+        name: { type: string }
+        address: { type: string }
+        locationLat: { type: number }
+        locationLng: { type: number }
+        notes: { type: string }
+        createdAt: { type: string, format: date-time }
+      required: [id, clientId, name, createdAt]
+
+    CreateSiteRequest:
+      type: object
+      properties:
+        clientId: { type: string, description: "Optional when posting to /clients/{id}/sites" }
+        name: { type: string }
+        address: { type: string }
+        locationLat: { type: number }
+        locationLng: { type: number }
+        notes: { type: string }
+      required: [name]
+
+    UpdateSiteRequest:
+      type: object
+      properties:
+        name: { type: string }
+        address: { type: string }
+        locationLat: { type: number }
+        locationLng: { type: number }
+        notes: { type: string }
+
+    ApproveTimeEntryRequest:
+      type: object
+      properties:
+        decision:
+          type: string
+          enum: [approved, rejected]
+        hoursWorked: { type: number, description: "Optional override (e.g. correct logged hours)" }
+        notes: { type: string }
+      required: [decision]
+
+    GeneratePayrollRequest:
+      type: object
+      properties:
+        siteId: { type: string }
+        weekStart: { type: string, format: date, description: "Monday of the week (YYYY-MM-DD)" }
+      required: [siteId, weekStart]
+
+    GenerateInvoiceRequest:
+      type: object
+      properties:
+        siteId: { type: string }
+        weekStart: { type: string, format: date }
+      required: [siteId, weekStart]
 
     UpdateInvoiceRequest:
       type: object

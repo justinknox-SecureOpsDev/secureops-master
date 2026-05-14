@@ -18,18 +18,19 @@ export default function AdminLicensesScreen() {
   const [showAdd, setShowAdd] = useState(false);
   const topPad = Platform.OS === "web" ? 67 : 0;
 
-  const [form, setForm] = useState<{ employeeId: string; type: string; level: 2 | 3 | 4 | null; licenseNumber: string; issuedDate: string; expiryDate: string; issuingAuthority: string }>({ employeeId: "", type: "", level: 2, licenseNumber: "", issuedDate: "", expiryDate: "", issuingAuthority: "" });
+  const [form, setForm] = useState<{ employeeId: string; type: string; level: 2 | 3 | 4 | null; licenseNumber: string; issueDate: string; expiryDate: string; issuingAuthority: string }>({ employeeId: "", type: "", level: 2, licenseNumber: "", issueDate: "", expiryDate: "", issuingAuthority: "" });
   const set = (k: string) => (v: any) => setForm((f) => ({ ...f, [k]: v }));
 
-  const { data: licenses, isLoading, error, refetch } = useGetLicenses({
-    params: { expiringSoon: filter === "expiring" ? true : undefined, expired: filter === "expired" ? true : undefined },
-    query: { queryKey: getGetLicensesQueryKey({ expiringSoon: filter === "expiring" ? true : undefined, expired: filter === "expired" ? true : undefined }) }
-  });
+  const lParams: any = { expiringSoon: filter === "expiring" ? true : undefined, expired: filter === "expired" ? true : undefined };
+  const { data: licenses, isLoading, error, refetch } = useGetLicenses(
+    lParams,
+    { query: { queryKey: getGetLicensesQueryKey(lParams) } },
+  );
 
-  const { data: employees } = useGetEmployees({
-    params: { status: "active" },
-    query: { queryKey: getGetEmployeesQueryKey({ status: "active" }) }
-  });
+  const { data: employees } = useGetEmployees(
+    { status: "active" as any },
+    { query: { queryKey: getGetEmployeesQueryKey({ status: "active" as any }) } },
+  );
 
   const createLicense = useCreateLicense();
 
@@ -47,10 +48,10 @@ export default function AdminLicensesScreen() {
       return;
     }
     try {
-      await createLicense.mutateAsync({ data: { ...form, level: form.level ?? undefined, issuedDate: form.issuedDate || undefined, issuingAuthority: form.issuingAuthority || undefined } as any });
+      await createLicense.mutateAsync({ data: { ...form, level: form.level ?? undefined, issueDate: form.issueDate || undefined, issuingAuthority: form.issuingAuthority || undefined } as any });
       queryClient.invalidateQueries({ queryKey: getGetLicensesQueryKey() });
       setShowAdd(false);
-      setForm({ employeeId: "", type: "", level: 2, licenseNumber: "", issuedDate: "", expiryDate: "", issuingAuthority: "" });
+      setForm({ employeeId: "", type: "", level: 2, licenseNumber: "", issueDate: "", expiryDate: "", issuingAuthority: "" });
     } catch (e: any) {
       Alert.alert("Error", e?.message || "Failed to create licence");
     }
@@ -123,10 +124,10 @@ export default function AdminLicensesScreen() {
                   </View>
                 )}
                 <View style={styles.dateRow}>
-                  {item.issuedDate && (
+                  {item.issueDate && (
                     <View style={styles.detailRow}>
                       <Feather name="calendar" size={13} color={colors.mutedForeground} />
-                      <Text style={[styles.detailText, { color: colors.mutedForeground }]}>Issued: {item.issuedDate}</Text>
+                      <Text style={[styles.detailText, { color: colors.mutedForeground }]}>Issued: {item.issueDate}</Text>
                     </View>
                   )}
                   <View style={[styles.detailRow, { marginLeft: 12 }]}>
@@ -177,7 +178,7 @@ export default function AdminLicensesScreen() {
                 {[
                   { label: "Licence Type *", key: "type", placeholder: "Security Licence (SIA)" },
                   { label: "Licence Number *", key: "licenseNumber", placeholder: "SIA-123456789" },
-                  { label: "Issued Date (YYYY-MM-DD)", key: "issuedDate", placeholder: "2023-01-15" },
+                  { label: "Issued Date (YYYY-MM-DD)", key: "issueDate", placeholder: "2023-01-15" },
                   { label: "Expiry Date *  (YYYY-MM-DD)", key: "expiryDate", placeholder: "2026-01-14" },
                   { label: "Issuing Authority", key: "issuingAuthority", placeholder: "Security Industry Authority" },
                 ].map(({ label, key, placeholder }) => (

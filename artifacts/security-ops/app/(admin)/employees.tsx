@@ -14,13 +14,11 @@ export default function AdminEmployeesScreen() {
   const [statusFilter, setStatusFilter] = useState<string>("all");
   const topPad = Platform.OS === "web" ? 67 : 0;
 
-  const { data: employees, isLoading, error, refetch } = useGetEmployees({
-    params: {
-      status: statusFilter === "all" ? undefined : statusFilter,
-      search: search || undefined,
-    },
-    query: { queryKey: getGetEmployeesQueryKey({ status: statusFilter === "all" ? undefined : statusFilter, search: search || undefined }) }
-  });
+  const empParams: any = { status: statusFilter === "all" ? undefined : statusFilter, search: search || undefined };
+  const { data: employees, isLoading, error, refetch } = useGetEmployees(
+    empParams,
+    { query: { queryKey: getGetEmployeesQueryKey(empParams) } },
+  );
 
   const getStatusColor = (status: string) => {
     if (status === "active") return "#22c55e";

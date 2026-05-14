@@ -1,7 +1,7 @@
 import React from "react";
 import { View, Text, StyleSheet, ScrollView, TouchableOpacity, ActivityIndicator, Alert, Platform } from "react-native";
 import { useColors } from "@/hooks/useColors";
-import { useGetShift, getGetShiftQueryKey, useGetEmployees, getGetEmployeesQueryKey, useAssignEmployeeToShift, useRemoveEmployeeFromShift, getGetShiftsQueryKey } from "@workspace/api-client-react";
+import { useGetShift, getGetShiftQueryKey, useGetEmployees, getGetEmployeesQueryKey, useAssignEmployeeToShift, useUpdateShiftAssignment, getGetShiftsQueryKey } from "@workspace/api-client-react";
 import { LicenseLevelBadge, levelLabel } from "@/components/LicenseLevelBadge";
 import { Feather } from "@expo/vector-icons";
 import { useLocalSearchParams, useRouter } from "expo-router";
@@ -31,13 +31,13 @@ export default function ShiftDetailScreen() {
   const { data: shift, isLoading } = useGetShift(id!, {
     query: { queryKey: getGetShiftQueryKey(id!), enabled: !!id }
   });
-  const { data: allEmployees } = useGetEmployees({
-    params: { status: "active" },
-    query: { queryKey: getGetEmployeesQueryKey({ status: "active" }) }
-  });
+  const { data: allEmployees } = useGetEmployees(
+    { status: "active" as any },
+    { query: { queryKey: getGetEmployeesQueryKey({ status: "active" as any }) } },
+  );
 
   const assignMutation = useAssignEmployeeToShift();
-  const removeMutation = useRemoveEmployeeFromShift();
+  const removeMutation = useUpdateShiftAssignment();
 
   const assignedIds = new Set((shift?.assignments ?? []).map((a) => a.employeeId));
 
@@ -63,7 +63,7 @@ export default function ShiftDetailScreen() {
       { text: "Cancel", style: "cancel" },
       {
         text: "Remove", style: "destructive", onPress: async () => {
-          await removeMutation.mutateAsync({ id: id!, assignmentId });
+          await removeMutation.mutateAsync({ id: id!, assignmentId, data: { status: "declined" } as any });
           queryClient.invalidateQueries({ queryKey: getGetShiftQueryKey(id!) });
         }
       }
@@ -124,13 +124,13 @@ export default function ShiftDetailScreen() {
           </View>
           <View style={[styles.statDivider, { backgroundColor: colors.border }]} />
           <View style={styles.statItem}>
-            <Text style={[styles.statVal, { color: colors.primary }]}>${parseFloat(shift.hourlyRate as any).toFixed(2)}</Text>
+            <Text style={[styles.statVal, { color: colors.primary }]}>£{parseFloat(((shift as any).payRate ?? (shift as any).hourlyRate ?? "0") as any).toFixed(2)}</Text>
             <Text style={[styles.statLbl, { color: colors.mutedForeground }]}>Pay Rate</Text>
           </View>
-          {shift.billableRate && <>
+          {(shift as any).billRate && <>
             <View style={[styles.statDivider, { backgroundColor: colors.border }]} />
             <View style={styles.statItem}>
-              <Text style={[styles.statVal, { color: colors.accent }]}>${parseFloat(shift.billableRate as any).toFixed(2)}</Text>
+              <Text style={[styles.statVal, { color: colors.accent }]}>£{parseFloat((shift as any).billRate as any).toFixed(2)}</Text>
               <Text style={[styles.statLbl, { color: colors.mutedForeground }]}>Bill Rate</Text>
             </View>
           </>}
@@ -141,7 +141,6 @@ export default function ShiftDetailScreen() {
         <Text style={[styles.sectionTitle, { color: colors.accent }]}>SCHEDULE</Text>
         <InfoRow label="Start Time" value={new Date(shift.startTime).toLocaleString()} icon="play-circle" />
         <InfoRow label="End Time" value={new Date(shift.endTime).toLocaleString()} icon="stop-circle" />
-        <InfoRow label="Break Duration" value={shift.breakMinutes ? `${shift.breakMinutes} minutes` : null} icon="coffee" />
         {shift.isRepeat && <InfoRow label="Repeat Pattern" value={shift.repeatPattern} icon="repeat" />}
         <InfoRow label="Notes" value={shift.notes} icon="file-text" />
       </View>
