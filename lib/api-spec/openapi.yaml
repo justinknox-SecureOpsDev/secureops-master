@@ -3,20 +3,38 @@ info:
   # Do not change the title, if the title changes, the import paths will be broken
   title: Api
   version: 0.1.0
-  description: API specification
+  description: SecureOps - Private Security Operations Platform API
 servers:
   - url: /api
     description: Base API path
 tags:
   - name: health
     description: Health operations
+  - name: auth
+    description: Authentication operations
+  - name: employees
+    description: Employee management
+  - name: shifts
+    description: Shift scheduling and management
+  - name: timeEntries
+    description: Clock in/out and time tracking
+  - name: payroll
+    description: Payroll processing
+  - name: invoices
+    description: Client invoice management
+  - name: incidents
+    description: Incident reporting
+  - name: licenses
+    description: License compliance management
+  - name: dashboard
+    description: Dashboard summaries
+
 paths:
   /healthz:
     get:
       operationId: healthCheck
       tags: [health]
       summary: Health check
-      description: Returns server health status
       responses:
         "200":
           description: Healthy
@@ -24,6 +42,733 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/HealthStatus"
+
+  /auth/login:
+    post:
+      operationId: login
+      tags: [auth]
+      summary: Login with email and password
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/LoginRequest"
+      responses:
+        "200":
+          description: Login successful
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AuthResponse"
+        "401":
+          description: Invalid credentials
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /auth/logout:
+    post:
+      operationId: logout
+      tags: [auth]
+      summary: Logout
+      responses:
+        "200":
+          description: Logged out
+
+  /auth/me:
+    get:
+      operationId: getMe
+      tags: [auth]
+      summary: Get current user
+      responses:
+        "200":
+          description: Current user
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/User"
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /employees:
+    get:
+      operationId: getEmployees
+      tags: [employees]
+      summary: List all employees
+      parameters:
+        - name: status
+          in: query
+          schema:
+            type: string
+            enum: [active, inactive, pending]
+        - name: search
+          in: query
+          schema:
+            type: string
+      responses:
+        "200":
+          description: List of employees
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Employee"
+    post:
+      operationId: createEmployee
+      tags: [employees]
+      summary: Create a new employee
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateEmployeeRequest"
+      responses:
+        "201":
+          description: Created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Employee"
+
+  /employees/{id}:
+    get:
+      operationId: getEmployee
+      tags: [employees]
+      summary: Get employee by ID
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Employee
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Employee"
+        "404":
+          description: Not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+    put:
+      operationId: updateEmployee
+      tags: [employees]
+      summary: Update employee
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpdateEmployeeRequest"
+      responses:
+        "200":
+          description: Updated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Employee"
+
+  /shifts:
+    get:
+      operationId: getShifts
+      tags: [shifts]
+      summary: List shifts
+      parameters:
+        - name: status
+          in: query
+          schema:
+            type: string
+            enum: [upcoming, active, completed, cancelled]
+        - name: employeeId
+          in: query
+          schema:
+            type: string
+        - name: from
+          in: query
+          schema:
+            type: string
+            format: date
+        - name: to
+          in: query
+          schema:
+            type: string
+            format: date
+      responses:
+        "200":
+          description: List of shifts
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Shift"
+    post:
+      operationId: createShift
+      tags: [shifts]
+      summary: Create a new shift
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateShiftRequest"
+      responses:
+        "201":
+          description: Created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Shift"
+
+  /shifts/{id}:
+    get:
+      operationId: getShift
+      tags: [shifts]
+      summary: Get shift by ID
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Shift
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Shift"
+    put:
+      operationId: updateShift
+      tags: [shifts]
+      summary: Update shift
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpdateShiftRequest"
+      responses:
+        "200":
+          description: Updated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Shift"
+    delete:
+      operationId: deleteShift
+      tags: [shifts]
+      summary: Delete shift
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "204":
+          description: Deleted
+
+  /shifts/{id}/assignments:
+    post:
+      operationId: assignEmployeeToShift
+      tags: [shifts]
+      summary: Assign employee to a shift
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AssignShiftRequest"
+      responses:
+        "201":
+          description: Assigned
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ShiftAssignment"
+
+  /shifts/{id}/assignments/{assignmentId}:
+    put:
+      operationId: updateShiftAssignment
+      tags: [shifts]
+      summary: Update assignment status (accept/decline)
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: assignmentId
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpdateAssignmentRequest"
+      responses:
+        "200":
+          description: Updated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ShiftAssignment"
+
+  /time-entries:
+    get:
+      operationId: getTimeEntries
+      tags: [timeEntries]
+      summary: Get time entries
+      parameters:
+        - name: employeeId
+          in: query
+          schema:
+            type: string
+        - name: shiftId
+          in: query
+          schema:
+            type: string
+        - name: from
+          in: query
+          schema:
+            type: string
+            format: date
+        - name: to
+          in: query
+          schema:
+            type: string
+            format: date
+      responses:
+        "200":
+          description: List of time entries
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/TimeEntry"
+
+  /time-entries/clock-in:
+    post:
+      operationId: clockIn
+      tags: [timeEntries]
+      summary: Clock in to a shift
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ClockInRequest"
+      responses:
+        "201":
+          description: Clocked in
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TimeEntry"
+
+  /time-entries/clock-out:
+    post:
+      operationId: clockOut
+      tags: [timeEntries]
+      summary: Clock out from current shift
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ClockOutRequest"
+      responses:
+        "200":
+          description: Clocked out
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TimeEntry"
+
+  /time-entries/active:
+    get:
+      operationId: getActiveTimeEntry
+      tags: [timeEntries]
+      summary: Get current active time entry for logged in employee
+      responses:
+        "200":
+          description: Active time entry or null
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TimeEntry"
+        "404":
+          description: No active entry
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /payroll:
+    get:
+      operationId: getPayrollEntries
+      tags: [payroll]
+      summary: Get payroll entries
+      parameters:
+        - name: employeeId
+          in: query
+          schema:
+            type: string
+        - name: status
+          in: query
+          schema:
+            type: string
+            enum: [pending, processing, paid]
+        - name: periodStart
+          in: query
+          schema:
+            type: string
+            format: date
+        - name: periodEnd
+          in: query
+          schema:
+            type: string
+            format: date
+      responses:
+        "200":
+          description: List of payroll entries
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/PayrollEntry"
+    post:
+      operationId: createPayrollEntry
+      tags: [payroll]
+      summary: Create payroll entry
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreatePayrollRequest"
+      responses:
+        "201":
+          description: Created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PayrollEntry"
+
+  /payroll/{id}:
+    put:
+      operationId: updatePayrollEntry
+      tags: [payroll]
+      summary: Update payroll entry status
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpdatePayrollRequest"
+      responses:
+        "200":
+          description: Updated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PayrollEntry"
+
+  /invoices:
+    get:
+      operationId: getInvoices
+      tags: [invoices]
+      summary: List invoices
+      parameters:
+        - name: status
+          in: query
+          schema:
+            type: string
+            enum: [draft, sent, paid, overdue]
+        - name: clientName
+          in: query
+          schema:
+            type: string
+      responses:
+        "200":
+          description: List of invoices
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Invoice"
+    post:
+      operationId: createInvoice
+      tags: [invoices]
+      summary: Create invoice
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateInvoiceRequest"
+      responses:
+        "201":
+          description: Created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Invoice"
+
+  /invoices/{id}:
+    put:
+      operationId: updateInvoice
+      tags: [invoices]
+      summary: Update invoice
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpdateInvoiceRequest"
+      responses:
+        "200":
+          description: Updated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Invoice"
+
+  /incidents:
+    get:
+      operationId: getIncidents
+      tags: [incidents]
+      summary: List incidents
+      parameters:
+        - name: employeeId
+          in: query
+          schema:
+            type: string
+        - name: shiftId
+          in: query
+          schema:
+            type: string
+        - name: severity
+          in: query
+          schema:
+            type: string
+            enum: [low, medium, high, critical]
+        - name: status
+          in: query
+          schema:
+            type: string
+            enum: [open, under_review, resolved, closed]
+      responses:
+        "200":
+          description: List of incidents
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Incident"
+    post:
+      operationId: createIncident
+      tags: [incidents]
+      summary: Report an incident
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateIncidentRequest"
+      responses:
+        "201":
+          description: Created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Incident"
+
+  /incidents/{id}:
+    get:
+      operationId: getIncident
+      tags: [incidents]
+      summary: Get incident by ID
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Incident
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Incident"
+    put:
+      operationId: updateIncident
+      tags: [incidents]
+      summary: Update incident
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpdateIncidentRequest"
+      responses:
+        "200":
+          description: Updated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Incident"
+
+  /licenses:
+    get:
+      operationId: getLicenses
+      tags: [licenses]
+      summary: List licenses
+      parameters:
+        - name: employeeId
+          in: query
+          schema:
+            type: string
+        - name: status
+          in: query
+          schema:
+            type: string
+            enum: [valid, expiring_soon, expired]
+      responses:
+        "200":
+          description: List of licenses
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/License"
+    post:
+      operationId: createLicense
+      tags: [licenses]
+      summary: Add a license
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateLicenseRequest"
+      responses:
+        "201":
+          description: Created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/License"
+
+  /licenses/{id}:
+    put:
+      operationId: updateLicense
+      tags: [licenses]
+      summary: Update license
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpdateLicenseRequest"
+      responses:
+        "200":
+          description: Updated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/License"
+
+  /dashboard/admin-summary:
+    get:
+      operationId: getAdminDashboardSummary
+      tags: [dashboard]
+      summary: Admin dashboard summary stats
+      responses:
+        "200":
+          description: Admin summary
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AdminDashboardSummary"
+
+  /dashboard/employee-summary:
+    get:
+      operationId: getEmployeeDashboardSummary
+      tags: [dashboard]
+      summary: Employee dashboard summary
+      responses:
+        "200":
+          description: Employee summary
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/EmployeeDashboardSummary"
+
 components:
   schemas:
     HealthStatus:
@@ -34,3 +779,867 @@ components:
       required:
         - status
 
+    ErrorResponse:
+      type: object
+      properties:
+        error:
+          type: string
+        message:
+          type: string
+      required:
+        - error
+
+    LoginRequest:
+      type: object
+      properties:
+        email:
+          type: string
+        password:
+          type: string
+      required:
+        - email
+        - password
+
+    AuthResponse:
+      type: object
+      properties:
+        token:
+          type: string
+        user:
+          $ref: "#/components/schemas/User"
+      required:
+        - token
+        - user
+
+    User:
+      type: object
+      properties:
+        id:
+          type: string
+        email:
+          type: string
+        firstName:
+          type: string
+        lastName:
+          type: string
+        role:
+          type: string
+          enum: [admin, employee]
+        status:
+          type: string
+          enum: [active, inactive, pending]
+        createdAt:
+          type: string
+          format: date-time
+      required:
+        - id
+        - email
+        - firstName
+        - lastName
+        - role
+        - status
+        - createdAt
+
+    Employee:
+      type: object
+      properties:
+        id:
+          type: string
+        userId:
+          type: string
+        email:
+          type: string
+        firstName:
+          type: string
+        lastName:
+          type: string
+        phone:
+          type: string
+        role:
+          type: string
+          enum: [admin, employee]
+        status:
+          type: string
+          enum: [active, inactive, pending]
+        address:
+          type: string
+        emergencyContactName:
+          type: string
+        emergencyContactPhone:
+          type: string
+        hourlyRate:
+          type: number
+        bankAccountName:
+          type: string
+        bankAccountNumber:
+          type: string
+        bankBsb:
+          type: string
+        skills:
+          type: array
+          items:
+            type: string
+        licenseCount:
+          type: integer
+        expiringLicenseCount:
+          type: integer
+        createdAt:
+          type: string
+          format: date-time
+      required:
+        - id
+        - userId
+        - email
+        - firstName
+        - lastName
+        - role
+        - status
+        - createdAt
+
+    CreateEmployeeRequest:
+      type: object
+      properties:
+        email:
+          type: string
+        password:
+          type: string
+        firstName:
+          type: string
+        lastName:
+          type: string
+        phone:
+          type: string
+        role:
+          type: string
+          enum: [admin, employee]
+        address:
+          type: string
+        emergencyContactName:
+          type: string
+        emergencyContactPhone:
+          type: string
+        hourlyRate:
+          type: number
+        bankAccountName:
+          type: string
+        bankAccountNumber:
+          type: string
+        bankBsb:
+          type: string
+        skills:
+          type: array
+          items:
+            type: string
+      required:
+        - email
+        - password
+        - firstName
+        - lastName
+        - role
+
+    UpdateEmployeeRequest:
+      type: object
+      properties:
+        firstName:
+          type: string
+        lastName:
+          type: string
+        phone:
+          type: string
+        status:
+          type: string
+          enum: [active, inactive, pending]
+        address:
+          type: string
+        emergencyContactName:
+          type: string
+        emergencyContactPhone:
+          type: string
+        hourlyRate:
+          type: number
+        bankAccountName:
+          type: string
+        bankAccountNumber:
+          type: string
+        bankBsb:
+          type: string
+        skills:
+          type: array
+          items:
+            type: string
+
+    Shift:
+      type: object
+      properties:
+        id:
+          type: string
+        title:
+          type: string
+        clientName:
+          type: string
+        location:
+          type: string
+        locationLat:
+          type: number
+        locationLng:
+          type: number
+        startTime:
+          type: string
+          format: date-time
+        endTime:
+          type: string
+          format: date-time
+        hourlyRate:
+          type: number
+        billableRate:
+          type: number
+        status:
+          type: string
+          enum: [upcoming, active, completed, cancelled]
+        isRepeat:
+          type: boolean
+        repeatPattern:
+          type: string
+          enum: [daily, weekly, fortnightly, monthly]
+        notes:
+          type: string
+        assignments:
+          type: array
+          items:
+            $ref: "#/components/schemas/ShiftAssignment"
+        createdAt:
+          type: string
+          format: date-time
+      required:
+        - id
+        - title
+        - clientName
+        - location
+        - startTime
+        - endTime
+        - hourlyRate
+        - status
+        - isRepeat
+        - createdAt
+
+    CreateShiftRequest:
+      type: object
+      properties:
+        title:
+          type: string
+        clientName:
+          type: string
+        location:
+          type: string
+        locationLat:
+          type: number
+        locationLng:
+          type: number
+        startTime:
+          type: string
+          format: date-time
+        endTime:
+          type: string
+          format: date-time
+        hourlyRate:
+          type: number
+        billableRate:
+          type: number
+        isRepeat:
+          type: boolean
+        repeatPattern:
+          type: string
+          enum: [daily, weekly, fortnightly, monthly]
+        notes:
+          type: string
+        employeeIds:
+          type: array
+          items:
+            type: string
+      required:
+        - title
+        - clientName
+        - location
+        - startTime
+        - endTime
+        - hourlyRate
+        - isRepeat
+
+    UpdateShiftRequest:
+      type: object
+      properties:
+        title:
+          type: string
+        clientName:
+          type: string
+        location:
+          type: string
+        locationLat:
+          type: number
+        locationLng:
+          type: number
+        startTime:
+          type: string
+          format: date-time
+        endTime:
+          type: string
+          format: date-time
+        hourlyRate:
+          type: number
+        billableRate:
+          type: number
+        status:
+          type: string
+          enum: [upcoming, active, completed, cancelled]
+        notes:
+          type: string
+
+    ShiftAssignment:
+      type: object
+      properties:
+        id:
+          type: string
+        shiftId:
+          type: string
+        employeeId:
+          type: string
+        employeeName:
+          type: string
+        status:
+          type: string
+          enum: [pending, accepted, declined]
+        createdAt:
+          type: string
+          format: date-time
+      required:
+        - id
+        - shiftId
+        - employeeId
+        - status
+        - createdAt
+
+    AssignShiftRequest:
+      type: object
+      properties:
+        employeeId:
+          type: string
+      required:
+        - employeeId
+
+    UpdateAssignmentRequest:
+      type: object
+      properties:
+        status:
+          type: string
+          enum: [accepted, declined]
+      required:
+        - status
+
+    TimeEntry:
+      type: object
+      properties:
+        id:
+          type: string
+        shiftId:
+          type: string
+        shiftTitle:
+          type: string
+        employeeId:
+          type: string
+        employeeName:
+          type: string
+        clockInTime:
+          type: string
+          format: date-time
+        clockInLat:
+          type: number
+        clockInLng:
+          type: number
+        clockOutTime:
+          type: string
+          format: date-time
+        clockOutLat:
+          type: number
+        clockOutLng:
+          type: number
+        hoursWorked:
+          type: number
+        isVerified:
+          type: boolean
+        notes:
+          type: string
+        createdAt:
+          type: string
+          format: date-time
+      required:
+        - id
+        - shiftId
+        - employeeId
+        - clockInTime
+        - isVerified
+        - createdAt
+
+    ClockInRequest:
+      type: object
+      properties:
+        shiftId:
+          type: string
+        lat:
+          type: number
+        lng:
+          type: number
+        notes:
+          type: string
+      required:
+        - shiftId
+        - lat
+        - lng
+
+    ClockOutRequest:
+      type: object
+      properties:
+        timeEntryId:
+          type: string
+        lat:
+          type: number
+        lng:
+          type: number
+        notes:
+          type: string
+      required:
+        - timeEntryId
+        - lat
+        - lng
+
+    PayrollEntry:
+      type: object
+      properties:
+        id:
+          type: string
+        employeeId:
+          type: string
+        employeeName:
+          type: string
+        periodStart:
+          type: string
+          format: date
+        periodEnd:
+          type: string
+          format: date
+        totalHours:
+          type: number
+        hourlyRate:
+          type: number
+        grossPay:
+          type: number
+        tax:
+          type: number
+        netPay:
+          type: number
+        status:
+          type: string
+          enum: [pending, processing, paid]
+        paidAt:
+          type: string
+          format: date-time
+        notes:
+          type: string
+        createdAt:
+          type: string
+          format: date-time
+      required:
+        - id
+        - employeeId
+        - periodStart
+        - periodEnd
+        - totalHours
+        - hourlyRate
+        - grossPay
+        - netPay
+        - status
+        - createdAt
+
+    CreatePayrollRequest:
+      type: object
+      properties:
+        employeeId:
+          type: string
+        periodStart:
+          type: string
+          format: date
+        periodEnd:
+          type: string
+          format: date
+        notes:
+          type: string
+      required:
+        - employeeId
+        - periodStart
+        - periodEnd
+
+    UpdatePayrollRequest:
+      type: object
+      properties:
+        status:
+          type: string
+          enum: [processing, paid]
+        notes:
+          type: string
+      required:
+        - status
+
+    Invoice:
+      type: object
+      properties:
+        id:
+          type: string
+        invoiceNumber:
+          type: string
+        clientName:
+          type: string
+        clientEmail:
+          type: string
+        clientAddress:
+          type: string
+        lineItems:
+          type: array
+          items:
+            $ref: "#/components/schemas/InvoiceLineItem"
+        subtotal:
+          type: number
+        taxAmount:
+          type: number
+        totalAmount:
+          type: number
+        status:
+          type: string
+          enum: [draft, sent, paid, overdue]
+        dueDate:
+          type: string
+          format: date
+        paidAt:
+          type: string
+          format: date-time
+        notes:
+          type: string
+        createdAt:
+          type: string
+          format: date-time
+      required:
+        - id
+        - invoiceNumber
+        - clientName
+        - lineItems
+        - subtotal
+        - totalAmount
+        - status
+        - dueDate
+        - createdAt
+
+    InvoiceLineItem:
+      type: object
+      properties:
+        description:
+          type: string
+        hours:
+          type: number
+        rate:
+          type: number
+        amount:
+          type: number
+      required:
+        - description
+        - amount
+
+    CreateInvoiceRequest:
+      type: object
+      properties:
+        clientName:
+          type: string
+        clientEmail:
+          type: string
+        clientAddress:
+          type: string
+        lineItems:
+          type: array
+          items:
+            $ref: "#/components/schemas/InvoiceLineItem"
+        taxAmount:
+          type: number
+        dueDate:
+          type: string
+          format: date
+        notes:
+          type: string
+      required:
+        - clientName
+        - lineItems
+        - dueDate
+
+    UpdateInvoiceRequest:
+      type: object
+      properties:
+        clientEmail:
+          type: string
+        clientAddress:
+          type: string
+        lineItems:
+          type: array
+          items:
+            $ref: "#/components/schemas/InvoiceLineItem"
+        taxAmount:
+          type: number
+        status:
+          type: string
+          enum: [draft, sent, paid, overdue]
+        dueDate:
+          type: string
+          format: date
+        notes:
+          type: string
+
+    Incident:
+      type: object
+      properties:
+        id:
+          type: string
+        shiftId:
+          type: string
+        shiftTitle:
+          type: string
+        employeeId:
+          type: string
+        employeeName:
+          type: string
+        title:
+          type: string
+        description:
+          type: string
+        severity:
+          type: string
+          enum: [low, medium, high, critical]
+        status:
+          type: string
+          enum: [open, under_review, resolved, closed]
+        locationDescription:
+          type: string
+        lat:
+          type: number
+        lng:
+          type: number
+        occurredAt:
+          type: string
+          format: date-time
+        resolvedAt:
+          type: string
+          format: date-time
+        adminNotes:
+          type: string
+        createdAt:
+          type: string
+          format: date-time
+      required:
+        - id
+        - employeeId
+        - title
+        - description
+        - severity
+        - status
+        - occurredAt
+        - createdAt
+
+    CreateIncidentRequest:
+      type: object
+      properties:
+        shiftId:
+          type: string
+        title:
+          type: string
+        description:
+          type: string
+        severity:
+          type: string
+          enum: [low, medium, high, critical]
+        locationDescription:
+          type: string
+        lat:
+          type: number
+        lng:
+          type: number
+        occurredAt:
+          type: string
+          format: date-time
+      required:
+        - title
+        - description
+        - severity
+        - occurredAt
+
+    UpdateIncidentRequest:
+      type: object
+      properties:
+        status:
+          type: string
+          enum: [open, under_review, resolved, closed]
+        adminNotes:
+          type: string
+        resolvedAt:
+          type: string
+          format: date-time
+
+    License:
+      type: object
+      properties:
+        id:
+          type: string
+        employeeId:
+          type: string
+        employeeName:
+          type: string
+        type:
+          type: string
+        licenseNumber:
+          type: string
+        issuingAuthority:
+          type: string
+        issueDate:
+          type: string
+          format: date
+        expiryDate:
+          type: string
+          format: date
+        status:
+          type: string
+          enum: [valid, expiring_soon, expired]
+        notes:
+          type: string
+        createdAt:
+          type: string
+          format: date-time
+      required:
+        - id
+        - employeeId
+        - type
+        - licenseNumber
+        - expiryDate
+        - status
+        - createdAt
+
+    CreateLicenseRequest:
+      type: object
+      properties:
+        employeeId:
+          type: string
+        type:
+          type: string
+        licenseNumber:
+          type: string
+        issuingAuthority:
+          type: string
+        issueDate:
+          type: string
+          format: date
+        expiryDate:
+          type: string
+          format: date
+        notes:
+          type: string
+      required:
+        - employeeId
+        - type
+        - licenseNumber
+        - expiryDate
+
+    UpdateLicenseRequest:
+      type: object
+      properties:
+        type:
+          type: string
+        licenseNumber:
+          type: string
+        issuingAuthority:
+          type: string
+        issueDate:
+          type: string
+          format: date
+        expiryDate:
+          type: string
+          format: date
+        notes:
+          type: string
+
+    AdminDashboardSummary:
+      type: object
+      properties:
+        totalEmployees:
+          type: integer
+        activeEmployees:
+          type: integer
+        pendingEmployees:
+          type: integer
+        activeShifts:
+          type: integer
+        upcomingShifts:
+          type: integer
+        openIncidents:
+          type: integer
+        criticalIncidents:
+          type: integer
+        pendingPayroll:
+          type: integer
+        expiringLicenses:
+          type: integer
+        clockedInNow:
+          type: integer
+        recentIncidents:
+          type: array
+          items:
+            $ref: "#/components/schemas/Incident"
+        upcomingShiftsList:
+          type: array
+          items:
+            $ref: "#/components/schemas/Shift"
+      required:
+        - totalEmployees
+        - activeEmployees
+        - pendingEmployees
+        - activeShifts
+        - upcomingShifts
+        - openIncidents
+        - criticalIncidents
+        - pendingPayroll
+        - expiringLicenses
+        - clockedInNow
+        - recentIncidents
+        - upcomingShiftsList
+
+    EmployeeDashboardSummary:
+      type: object
+      properties:
+        nextShift:
+          $ref: "#/components/schemas/Shift"
+        activeTimeEntry:
+          $ref: "#/components/schemas/TimeEntry"
+        hoursThisWeek:
+          type: number
+        hoursThisMonth:
+          type: number
+        upcomingShifts:
+          type: array
+          items:
+            $ref: "#/components/schemas/Shift"
+        pendingAssignments:
+          type: array
+          items:
+            $ref: "#/components/schemas/ShiftAssignment"
+        myOpenIncidents:
+          type: integer
+        expiringLicenses:
+          type: integer
+      required:
+        - hoursThisWeek
+        - hoursThisMonth
+        - upcomingShifts
+        - pendingAssignments
+        - myOpenIncidents
+        - expiringLicenses

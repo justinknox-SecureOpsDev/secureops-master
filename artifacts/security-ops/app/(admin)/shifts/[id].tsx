@@ -1,0 +1,199 @@
+import React from "react";
+import { View, Text, StyleSheet, ScrollView, TouchableOpacity, ActivityIndicator, Alert, Platform } from "react-native";
+import { useColors } from "@/hooks/useColors";
+import { useGetShift, getGetShiftQueryKey, useGetEmployees, getGetEmployeesQueryKey, useAssignEmployeeToShift, useRemoveEmployeeFromShift, getGetShiftsQueryKey } from "@workspace/api-client-react";
+import { Feather } from "@expo/vector-icons";
+import { useLocalSearchParams, useRouter } from "expo-router";
+import { useQueryClient } from "@tanstack/react-query";
+
+function InfoRow({ label, value, icon }: { label: string; value?: string | null; icon: string }) {
+  const colors = useColors();
+  if (!value) return null;
+  return (
+    <View style={[styles.infoRow, { borderBottomColor: colors.border }]}>
+      <Feather name={icon as any} size={14} color={colors.mutedForeground} />
+      <View style={{ flex: 1 }}>
+        <Text style={[styles.infoLabel, { color: colors.mutedForeground }]}>{label}</Text>
+        <Text style={[styles.infoValue, { color: colors.foreground }]}>{value}</Text>
+      </View>
+    </View>
+  );
+}
+
+export default function ShiftDetailScreen() {
+  const colors = useColors();
+  const router = useRouter();
+  const queryClient = useQueryClient();
+  const { id } = useLocalSearchParams<{ id: string }>();
+  const topPad = Platform.OS === "web" ? 67 : 0;
+
+  const { data: shift, isLoading } = useGetShift(id!, {
+    query: { queryKey: getGetShiftQueryKey(id!), enabled: !!id }
+  });
+  const { data: allEmployees } = useGetEmployees({
+    params: { status: "active" },
+    query: { queryKey: getGetEmployeesQueryKey({ status: "active" }) }
+  });
+
+  const assignMutation = useAssignEmployeeToShift();
+  const removeMutation = useRemoveEmployeeFromShift();
+
+  const assignedIds = new Set((shift?.assignments ?? []).map((a) => a.employeeId));
+
+  const handleAssign = (employeeId: string, name: string) => {
+    Alert.alert("Assign Employee", `Assign ${name} to this shift?`, [
+      { text: "Cancel", style: "cancel" },
+      {
+        text: "Assign", onPress: async () => {
+          await assignMutation.mutateAsync({ id: id!, data: { employeeId } });
+          queryClient.invalidateQueries({ queryKey: getGetShiftQueryKey(id!) });
+        }
+      }
+    ]);
+  };
+
+  const handleRemove = (assignmentId: string, name: string) => {
+    Alert.alert("Remove Assignment", `Remove ${name} from this shift?`, [
+      { text: "Cancel", style: "cancel" },
+      {
+        text: "Remove", style: "destructive", onPress: async () => {
+          await removeMutation.mutateAsync({ id: id!, assignmentId });
+          queryClient.invalidateQueries({ queryKey: getGetShiftQueryKey(id!) });
+        }
+      }
+    ]);
+  };
+
+  const statusColor = (s: string) => {
+    const m: Record<string, string> = { upcoming: colors.primary, active: "#22c55e", completed: colors.mutedForeground, cancelled: colors.destructive };
+    return m[s] || colors.mutedForeground;
+  };
+
+  if (isLoading) return <View style={[styles.center, { backgroundColor: colors.background }]}><ActivityIndicator size="large" color={colors.primary} /></View>;
+  if (!shift) return <View style={[styles.center, { backgroundColor: colors.background }]}><Text style={{ color: colors.destructive }}>Shift not found</Text></View>;
+
+  const unassigned = (allEmployees ?? []).filter((e) => !assignedIds.has(e.id));
+  const duration = ((new Date(shift.endTime).getTime() - new Date(shift.startTime).getTime()) / 3600000).toFixed(1);
+
+  return (
+    <ScrollView style={[styles.container, { backgroundColor: colors.background }]} contentContainerStyle={{ paddingBottom: 100 }}>
+      <View style={[styles.topBar, { paddingTop: topPad + 12, borderBottomColor: colors.border }]}>
+        <TouchableOpacity onPress={() => router.back()} style={[styles.backBtn, { borderColor: colors.border }]}>
+          <Feather name="arrow-left" size={18} color={colors.foreground} />
+        </TouchableOpacity>
+        <Text style={[styles.pageTitle, { color: colors.foreground }]} numberOfLines={1}>{shift.title}</Text>
+        <View style={[styles.statusBadge, { backgroundColor: statusColor(shift.status) + "20", borderColor: statusColor(shift.status) }]}>
+          <Text style={[styles.statusText, { color: statusColor(shift.status) }]}>{shift.status.toUpperCase()}</Text>
+        </View>
+      </View>
+
+      <View style={[styles.heroCard, { backgroundColor: colors.card, borderColor: colors.border }]}>
+        <View style={styles.heroRow}>
+          <Feather name="briefcase" size={18} color={colors.primary} />
+          <Text style={[styles.clientName, { color: colors.primary }]}>{shift.clientName}</Text>
+          {shift.isRepeat && <View style={[styles.repeatBadge, { backgroundColor: colors.accent + "20" }]}><Text style={[styles.repeatText, { color: colors.accent }]}>REPEAT</Text></View>}
+        </View>
+        <View style={styles.heroRow}>
+          <Feather name="map-pin" size={16} color={colors.mutedForeground} />
+          <Text style={[styles.heroSub, { color: colors.mutedForeground }]}>{shift.location}</Text>
+        </View>
+        <View style={[styles.statsRow, { borderTopColor: colors.border }]}>
+          <View style={styles.statItem}>
+            <Text style={[styles.statVal, { color: colors.foreground }]}>{duration}h</Text>
+            <Text style={[styles.statLbl, { color: colors.mutedForeground }]}>Duration</Text>
+          </View>
+          <View style={[styles.statDivider, { backgroundColor: colors.border }]} />
+          <View style={styles.statItem}>
+            <Text style={[styles.statVal, { color: colors.primary }]}>${parseFloat(shift.hourlyRate as any).toFixed(2)}</Text>
+            <Text style={[styles.statLbl, { color: colors.mutedForeground }]}>Pay Rate</Text>
+          </View>
+          {shift.billableRate && <>
+            <View style={[styles.statDivider, { backgroundColor: colors.border }]} />
+            <View style={styles.statItem}>
+              <Text style={[styles.statVal, { color: colors.accent }]}>${parseFloat(shift.billableRate as any).toFixed(2)}</Text>
+              <Text style={[styles.statLbl, { color: colors.mutedForeground }]}>Bill Rate</Text>
+            </View>
+          </>}
+        </View>
+      </View>
+
+      <View style={[styles.section, { backgroundColor: colors.card, borderColor: colors.border }]}>
+        <Text style={[styles.sectionTitle, { color: colors.accent }]}>SCHEDULE</Text>
+        <InfoRow label="Start Time" value={new Date(shift.startTime).toLocaleString()} icon="play-circle" />
+        <InfoRow label="End Time" value={new Date(shift.endTime).toLocaleString()} icon="stop-circle" />
+        <InfoRow label="Break Duration" value={shift.breakMinutes ? `${shift.breakMinutes} minutes` : null} icon="coffee" />
+        {shift.isRepeat && <InfoRow label="Repeat Pattern" value={shift.repeatPattern} icon="repeat" />}
+        <InfoRow label="Notes" value={shift.notes} icon="file-text" />
+      </View>
+
+      <View style={[styles.section, { backgroundColor: colors.card, borderColor: colors.border }]}>
+        <Text style={[styles.sectionTitle, { color: colors.accent }]}>ASSIGNED PERSONNEL ({shift.assignments?.length ?? 0})</Text>
+        {(shift.assignments ?? []).length === 0 && (
+          <Text style={[styles.emptyText, { color: colors.mutedForeground }]}>No personnel assigned yet</Text>
+        )}
+        {(shift.assignments ?? []).map((a) => (
+          <View key={a.id} style={[styles.personRow, { borderBottomColor: colors.border }]}>
+            <View style={[styles.avatar, { backgroundColor: colors.primary + "20" }]}>
+              <Text style={[styles.avatarText, { color: colors.primary }]}>{(a.employeeName || "?")[0]}</Text>
+            </View>
+            <Text style={[styles.personName, { color: colors.foreground }]}>{a.employeeName}</Text>
+            <TouchableOpacity onPress={() => handleRemove(a.id, a.employeeName || "")} style={[styles.removeBtn, { borderColor: colors.destructive + "40" }]}>
+              <Feather name="x" size={16} color={colors.destructive} />
+            </TouchableOpacity>
+          </View>
+        ))}
+      </View>
+
+      {unassigned.length > 0 && (
+        <View style={[styles.section, { backgroundColor: colors.card, borderColor: colors.border }]}>
+          <Text style={[styles.sectionTitle, { color: colors.accent }]}>ADD PERSONNEL</Text>
+          {unassigned.slice(0, 10).map((emp) => (
+            <TouchableOpacity
+              key={emp.id}
+              style={[styles.personRow, { borderBottomColor: colors.border }]}
+              onPress={() => handleAssign(emp.id, `${emp.firstName} ${emp.lastName}`)}
+            >
+              <View style={[styles.avatar, { backgroundColor: colors.secondary }]}>
+                <Text style={[styles.avatarText, { color: colors.mutedForeground }]}>{emp.firstName[0]}{emp.lastName[0]}</Text>
+              </View>
+              <Text style={[styles.personName, { color: colors.foreground }]}>{emp.firstName} {emp.lastName}</Text>
+              <Feather name="plus-circle" size={20} color={colors.primary} />
+            </TouchableOpacity>
+          ))}
+        </View>
+      )}
+    </ScrollView>
+  );
+}
+
+const styles = StyleSheet.create({
+  container: { flex: 1 },
+  center: { flex: 1, justifyContent: "center", alignItems: "center" },
+  topBar: { flexDirection: "row", alignItems: "center", gap: 10, paddingHorizontal: 16, paddingBottom: 12, borderBottomWidth: 1 },
+  backBtn: { padding: 8, borderRadius: 8, borderWidth: 1 },
+  pageTitle: { flex: 1, fontSize: 16, fontWeight: "700" },
+  statusBadge: { paddingHorizontal: 8, paddingVertical: 3, borderRadius: 6, borderWidth: 1 },
+  statusText: { fontSize: 10, fontWeight: "700" },
+  heroCard: { margin: 16, padding: 18, borderRadius: 14, borderWidth: 1, gap: 10 },
+  heroRow: { flexDirection: "row", alignItems: "center", gap: 8 },
+  clientName: { fontSize: 17, fontWeight: "700", flex: 1 },
+  heroSub: { fontSize: 13, flex: 1 },
+  repeatBadge: { paddingHorizontal: 7, paddingVertical: 2, borderRadius: 4 },
+  repeatText: { fontSize: 10, fontWeight: "700" },
+  statsRow: { flexDirection: "row", paddingTop: 14, borderTopWidth: 1, marginTop: 4 },
+  statItem: { flex: 1, alignItems: "center" },
+  statVal: { fontSize: 20, fontWeight: "700" },
+  statLbl: { fontSize: 11, marginTop: 2 },
+  statDivider: { width: 1, marginVertical: 4 },
+  section: { marginHorizontal: 16, marginBottom: 12, borderRadius: 12, borderWidth: 1, padding: 16 },
+  sectionTitle: { fontSize: 11, fontWeight: "700", letterSpacing: 2, marginBottom: 12 },
+  infoRow: { flexDirection: "row", alignItems: "flex-start", gap: 10, paddingVertical: 10, borderBottomWidth: 1 },
+  infoLabel: { fontSize: 11, marginBottom: 2 },
+  infoValue: { fontSize: 14 },
+  personRow: { flexDirection: "row", alignItems: "center", gap: 12, paddingVertical: 10, borderBottomWidth: 1 },
+  avatar: { width: 36, height: 36, borderRadius: 18, justifyContent: "center", alignItems: "center" },
+  avatarText: { fontWeight: "700", fontSize: 14 },
+  personName: { flex: 1, fontSize: 14, fontWeight: "500" },
+  removeBtn: { padding: 6, borderRadius: 6, borderWidth: 1 },
+  emptyText: { fontSize: 13, fontStyle: "italic" },
+});

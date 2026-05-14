@@ -1,0 +1,27 @@
+kind = "mobile"
+previewPath = "/"
+title = "SecureOps"
+version = "1.0.0"
+id = "artifacts/security-ops"
+router = "expo-domain"
+
+[[integratedSkills]]
+name = "expo"
+version = "1.0.0"
+
+[[services]]
+ensurePreviewReachable = "/status"
+name = "expo"
+paths = [ "/" ]
+localPort = 22706
+
+[services.development]
+run = "pnpm --filter @workspace/security-ops run dev"
+
+[services.production]
+build = [ "pnpm", "--filter", "@workspace/security-ops", "run", "build" ]
+run = [ "pnpm", "--filter", "@workspace/security-ops", "run", "serve" ]
+
+[services.env]
+PORT = "22706"
+BASE_PATH = "/"
