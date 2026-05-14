@@ -14,6 +14,7 @@ import { SafeAreaProvider } from "react-native-safe-area-context";
 
 import { ErrorBoundary } from "@/components/ErrorBoundary";
 import { AuthProvider } from "@/contexts/AuthContext";
+import { ChatProvider } from "@/contexts/ChatContext";
 import RootLayoutNav from "./RootLayoutNav";
 import { setBaseUrl, setAuthTokenGetter } from "@workspace/api-client-react";
 import { storage } from "@/utils/storage";
@@ -53,7 +54,9 @@ export default function RootLayout() {
           <GestureHandlerRootView>
             <KeyboardProvider>
               <AuthProvider>
-                <RootLayoutNav />
+                <ChatProvider>
+                  <RootLayoutNav />
+                </ChatProvider>
               </AuthProvider>
             </KeyboardProvider>
           </GestureHandlerRootView>

@@ -7,3 +7,5 @@ export * from "./payrollEntries";
 export * from "./invoices";
 export * from "./incidents";
 export * from "./licenses";
+export * from "./chatRooms";
+export * from "./chatMessages";

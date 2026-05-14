@@ -138,6 +138,19 @@ router.post("/shifts/:id/assignments", requireAdmin, async (req, res): Promise<v
   if (!employeeId) { res.status(400).json({ error: "Bad Request", message: "employeeId required" }); return; }
   const [assignment] = await db.insert(shiftAssignmentsTable).values({ shiftId, employeeId, status: "pending" }).returning();
   const [user] = await db.select().from(usersTable).where(eq(usersTable.id, employeeId));
+  const [shift] = await db.select().from(shiftsTable).where(eq(shiftsTable.id, shiftId));
+
+  // Send push notification to the assigned employee
+  if (shift) {
+    const { sendPushToUsers } = await import("../lib/push");
+    const start = new Date(shift.startTime).toLocaleString("en-AU", { weekday: "short", month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" });
+    await sendPushToUsers([employeeId], {
+      title: "📋 New Shift Assigned",
+      body: `You've been assigned to ${shift.title} on ${start}`,
+      data: { type: "shift_assigned", shiftId },
+    });
+  }
+
   res.status(201).json({ ...assignment, employeeName: user ? `${user.firstName} ${user.lastName}` : null });
 });
 

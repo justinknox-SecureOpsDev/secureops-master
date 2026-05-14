@@ -9,6 +9,7 @@ import invoicesRouter from "./invoices";
 import incidentsRouter from "./incidents";
 import licensesRouter from "./licenses";
 import dashboardRouter from "./dashboard";
+import chatRouter from "./chat";
 
 const router: IRouter = Router();
 
@@ -22,5 +23,6 @@ router.use(invoicesRouter);
 router.use(incidentsRouter);
 router.use(licensesRouter);
 router.use(dashboardRouter);
+router.use(chatRouter);
 
 export default router;

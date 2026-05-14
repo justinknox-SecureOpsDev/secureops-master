@@ -28,6 +28,8 @@ tags:
     description: License compliance management
   - name: dashboard
     description: Dashboard summaries
+  - name: chat
+    description: Team chat messaging
 
 paths:
   /healthz:
@@ -76,6 +78,27 @@ paths:
       responses:
         "200":
           description: Logged out
+
+  /auth/push-token:
+    post:
+      operationId: registerPushToken
+      tags: [auth]
+      summary: Register Expo push token
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                token:
+                  type: string
+              required: [token]
+      responses:
+        "200":
+          description: Token registered
 
   /auth/me:
     get:
@@ -768,6 +791,111 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/EmployeeDashboardSummary"
+
+  /chat/rooms:
+    get:
+      operationId: getChatRooms
+      tags: [chat]
+      summary: List chat rooms
+      security:
+        - bearerAuth: []
+      responses:
+        "200":
+          description: List of rooms
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/ChatRoom"
+    post:
+      operationId: createChatRoom
+      tags: [chat]
+      summary: Create a chat room
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                name:
+                  type: string
+                type:
+                  type: string
+                shiftId:
+                  type: string
+              required: [name]
+      responses:
+        "201":
+          description: Created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ChatRoom"
+
+  /chat/rooms/{id}/messages:
+    get:
+      operationId: getChatMessages
+      tags: [chat]
+      summary: Get messages for a room
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            default: 50
+        - name: before
+          in: query
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Messages
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/ChatMessage"
+    post:
+      operationId: sendChatMessage
+      tags: [chat]
+      summary: Send a message
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                content:
+                  type: string
+              required: [content]
+      responses:
+        "201":
+          description: Message sent
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ChatMessage"
 
 components:
   schemas:
@@ -1612,6 +1740,53 @@ components:
         - clockedInNow
         - recentIncidents
         - upcomingShiftsList
+
+    ChatRoom:
+      type: object
+      properties:
+        id:
+          type: string
+        name:
+          type: string
+        type:
+          type: string
+        shiftId:
+          type: string
+          nullable: true
+        createdAt:
+          type: string
+        lastMessage:
+          type: object
+          nullable: true
+          properties:
+            content:
+              type: string
+            createdAt:
+              type: string
+            userName:
+              type: string
+        messageCount:
+          type: integer
+      required: [id, name, type, createdAt, messageCount]
+
+    ChatMessage:
+      type: object
+      properties:
+        id:
+          type: string
+        roomId:
+          type: string
+        userId:
+          type: string
+        content:
+          type: string
+        createdAt:
+          type: string
+        userName:
+          type: string
+        userRole:
+          type: string
+      required: [id, roomId, userId, content, createdAt, userName]
 
     EmployeeDashboardSummary:
       type: object

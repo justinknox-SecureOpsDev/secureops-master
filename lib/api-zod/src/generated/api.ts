@@ -36,6 +36,13 @@ export const LoginResponse = zod.object({
 });
 
 /**
+ * @summary Register Expo push token
+ */
+export const RegisterPushTokenBody = zod.object({
+  token: zod.string(),
+});
+
+/**
  * @summary Get current user
  */
 export const GetMeResponse = zod.object({
@@ -967,4 +974,69 @@ export const GetEmployeeDashboardSummaryResponse = zod.object({
   ),
   myOpenIncidents: zod.number(),
   expiringLicenses: zod.number(),
+});
+
+/**
+ * @summary List chat rooms
+ */
+export const GetChatRoomsResponseItem = zod.object({
+  id: zod.string(),
+  name: zod.string(),
+  type: zod.string(),
+  shiftId: zod.string().nullish(),
+  createdAt: zod.string(),
+  lastMessage: zod
+    .object({
+      content: zod.string().optional(),
+      createdAt: zod.string().optional(),
+      userName: zod.string().optional(),
+    })
+    .nullish(),
+  messageCount: zod.number(),
+});
+export const GetChatRoomsResponse = zod.array(GetChatRoomsResponseItem);
+
+/**
+ * @summary Create a chat room
+ */
+export const CreateChatRoomBody = zod.object({
+  name: zod.string(),
+  type: zod.string().optional(),
+  shiftId: zod.string().optional(),
+});
+
+/**
+ * @summary Get messages for a room
+ */
+export const GetChatMessagesParams = zod.object({
+  id: zod.coerce.string(),
+});
+
+export const getChatMessagesQueryLimitDefault = 50;
+
+export const GetChatMessagesQueryParams = zod.object({
+  limit: zod.coerce.number().default(getChatMessagesQueryLimitDefault),
+  before: zod.coerce.string().optional(),
+});
+
+export const GetChatMessagesResponseItem = zod.object({
+  id: zod.string(),
+  roomId: zod.string(),
+  userId: zod.string(),
+  content: zod.string(),
+  createdAt: zod.string(),
+  userName: zod.string(),
+  userRole: zod.string().optional(),
+});
+export const GetChatMessagesResponse = zod.array(GetChatMessagesResponseItem);
+
+/**
+ * @summary Send a message
+ */
+export const SendChatMessageParams = zod.object({
+  id: zod.coerce.string(),
+});
+
+export const SendChatMessageBody = zod.object({
+  content: zod.string(),
 });

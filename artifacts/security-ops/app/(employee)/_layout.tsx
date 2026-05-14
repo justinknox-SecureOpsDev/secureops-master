@@ -63,12 +63,20 @@ export default function EmployeeLayout() {
         }}
       />
       <Tabs.Screen
+        name="chat"
+        options={{
+          title: "Chat",
+          tabBarIcon: ({ color }) => <Feather name="message-circle" size={22} color={color} />,
+        }}
+      />
+      <Tabs.Screen
         name="profile"
         options={{
           title: "Profile",
           tabBarIcon: ({ color }) => <Feather name="user" size={22} color={color} />,
         }}
       />
+      <Tabs.Screen name="chat/[id]" options={{ href: null, headerShown: false }} />
     </Tabs>
   );
 }

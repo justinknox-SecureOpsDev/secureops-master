@@ -531,6 +531,32 @@ export interface AdminDashboardSummary {
   upcomingShiftsList: Shift[];
 }
 
+export type ChatRoomLastMessage = {
+  content?: string;
+  createdAt?: string;
+  userName?: string;
+} | null;
+
+export interface ChatRoom {
+  id: string;
+  name: string;
+  type: string;
+  shiftId?: string | null;
+  createdAt: string;
+  lastMessage?: ChatRoomLastMessage;
+  messageCount: number;
+}
+
+export interface ChatMessage {
+  id: string;
+  roomId: string;
+  userId: string;
+  content: string;
+  createdAt: string;
+  userName: string;
+  userRole?: string;
+}
+
 export interface EmployeeDashboardSummary {
   nextShift?: Shift;
   activeTimeEntry?: TimeEntry;
@@ -541,6 +567,10 @@ export interface EmployeeDashboardSummary {
   myOpenIncidents: number;
   expiringLicenses: number;
 }
+
+export type RegisterPushTokenBody = {
+  token: string;
+};
 
 export type GetEmployeesParams = {
   status?: GetEmployeesStatus;
@@ -651,3 +681,18 @@ export const GetLicensesStatus = {
   expiring_soon: "expiring_soon",
   expired: "expired",
 } as const;
+
+export type CreateChatRoomBody = {
+  name: string;
+  type?: string;
+  shiftId?: string;
+};
+
+export type GetChatMessagesParams = {
+  limit?: number;
+  before?: string;
+};
+
+export type SendChatMessageBody = {
+  content: string;
+};

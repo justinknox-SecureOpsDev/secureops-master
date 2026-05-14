@@ -1,22 +1,25 @@
 {
   "expo": {
-    "name": "SecureOps",
+    "name": "WCSG",
     "slug": "security-ops",
     "version": "1.0.0",
     "orientation": "portrait",
     "icon": "./assets/images/icon.png",
     "scheme": "security-ops",
-    "userInterfaceStyle": "automatic",
+    "userInterfaceStyle": "dark",
     "newArchEnabled": true,
     "splash": {
-      "image": "./assets/images/icon.png",
+      "image": "./assets/images/logo.jpeg",
       "resizeMode": "contain",
-      "backgroundColor": "#ffffff"
+      "backgroundColor": "#080c18"
     },
     "ios": {
-      "supportsTablet": false
+      "supportsTablet": false,
+      "bundleIdentifier": "com.wcsg.secureops"
     },
-    "android": {},
+    "android": {
+      "package": "com.wcsg.secureops"
+    },
     "web": {
       "favicon": "./assets/images/icon.png"
     },
@@ -28,7 +31,15 @@
         }
       ],
       "expo-font",
-      "expo-web-browser"
+      "expo-web-browser",
+      [
+        "expo-notifications",
+        {
+          "icon": "./assets/images/icon.png",
+          "color": "#c9a84c",
+          "sounds": []
+        }
+      ]
     ],
     "experiments": {
       "typedRoutes": true,

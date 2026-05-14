@@ -10,6 +10,7 @@ export const usersTable = pgTable("users", {
   lastName: text("last_name").notNull(),
   role: text("role").notNull().default("employee"),
   status: text("status").notNull().default("pending"),
+  expoPushToken: text("expo_push_token"),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow().$onUpdate(() => new Date()),
 });

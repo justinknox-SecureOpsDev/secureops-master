@@ -72,6 +72,14 @@ export default function AdminLayout() {
           tabBarIcon: ({ color }) => <Feather name="alert-triangle" size={22} color={color} />,
         }}
       />
+      <Tabs.Screen
+        name="chat"
+        options={{
+          title: "Chat",
+          headerTitle: "Team Chat",
+          tabBarIcon: ({ color }) => <Feather name="message-circle" size={22} color={color} />,
+        }}
+      />
 
       {/* Hidden screens — accessible via router.push but not shown in tab bar */}
       <Tabs.Screen name="payroll" options={{ href: null, headerTitle: "Payroll" }} />
@@ -81,6 +89,7 @@ export default function AdminLayout() {
       <Tabs.Screen name="employees/create" options={{ href: null, headerTitle: "Add Employee" }} />
       <Tabs.Screen name="shifts/[id]" options={{ href: null, headerTitle: "Shift Details" }} />
       <Tabs.Screen name="shifts/create" options={{ href: null, headerTitle: "Create Shift" }} />
+      <Tabs.Screen name="chat/[id]" options={{ href: null, headerShown: false }} />
     </Tabs>
   );
 }

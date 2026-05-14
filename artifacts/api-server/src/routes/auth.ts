@@ -41,6 +41,13 @@ router.post("/auth/logout", (_req, res): void => {
   res.json({ success: true });
 });
 
+router.post("/auth/push-token", requireAuth, async (req, res): Promise<void> => {
+  const { token } = req.body as { token: string };
+  if (!token) { res.status(400).json({ error: "Bad Request", message: "token required" }); return; }
+  await db.update(usersTable).set({ expoPushToken: token }).where(eq(usersTable.id, req.user!.userId));
+  res.json({ success: true });
+});
+
 router.get("/auth/me", requireAuth, async (req, res): Promise<void> => {
   const [user] = await db.select().from(usersTable).where(eq(usersTable.id, req.user!.userId));
   if (!user) {

@@ -20,8 +20,11 @@ import type {
   AdminDashboardSummary,
   AssignShiftRequest,
   AuthResponse,
+  ChatMessage,
+  ChatRoom,
   ClockInRequest,
   ClockOutRequest,
+  CreateChatRoomBody,
   CreateEmployeeRequest,
   CreateIncidentRequest,
   CreateInvoiceRequest,
@@ -31,6 +34,7 @@ import type {
   Employee,
   EmployeeDashboardSummary,
   ErrorResponse,
+  GetChatMessagesParams,
   GetEmployeesParams,
   GetIncidentsParams,
   GetInvoicesParams,
@@ -44,6 +48,8 @@ import type {
   License,
   LoginRequest,
   PayrollEntry,
+  RegisterPushTokenBody,
+  SendChatMessageBody,
   Shift,
   ShiftAssignment,
   TimeEntry,
@@ -304,6 +310,92 @@ export const useLogout = <
   TContext
 > => {
   return useMutation(getLogoutMutationOptions(options));
+};
+
+/**
+ * @summary Register Expo push token
+ */
+export const getRegisterPushTokenUrl = () => {
+  return `/api/auth/push-token`;
+};
+
+export const registerPushToken = async (
+  registerPushTokenBody: RegisterPushTokenBody,
+  options?: RequestInit,
+): Promise<void> => {
+  return customFetch<void>(getRegisterPushTokenUrl(), {
+    ...options,
+    method: "POST",
+    headers: { "Content-Type": "application/json", ...options?.headers },
+    body: JSON.stringify(registerPushTokenBody),
+  });
+};
+
+export const getRegisterPushTokenMutationOptions = <
+  TError = ErrorType<unknown>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof registerPushToken>>,
+    TError,
+    { data: BodyType<RegisterPushTokenBody> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof registerPushToken>>,
+  TError,
+  { data: BodyType<RegisterPushTokenBody> },
+  TContext
+> => {
+  const mutationKey = ["registerPushToken"];
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof registerPushToken>>,
+    { data: BodyType<RegisterPushTokenBody> }
+  > = (props) => {
+    const { data } = props ?? {};
+
+    return registerPushToken(data, requestOptions);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type RegisterPushTokenMutationResult = NonNullable<
+  Awaited<ReturnType<typeof registerPushToken>>
+>;
+export type RegisterPushTokenMutationBody = BodyType<RegisterPushTokenBody>;
+export type RegisterPushTokenMutationError = ErrorType<unknown>;
+
+/**
+ * @summary Register Expo push token
+ */
+export const useRegisterPushToken = <
+  TError = ErrorType<unknown>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof registerPushToken>>,
+    TError,
+    { data: BodyType<RegisterPushTokenBody> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationResult<
+  Awaited<ReturnType<typeof registerPushToken>>,
+  TError,
+  { data: BodyType<RegisterPushTokenBody> },
+  TContext
+> => {
+  return useMutation(getRegisterPushTokenMutationOptions(options));
 };
 
 /**
@@ -3007,3 +3099,363 @@ export function useGetEmployeeDashboardSummary<
 
   return { ...query, queryKey: queryOptions.queryKey };
 }
+
+/**
+ * @summary List chat rooms
+ */
+export const getGetChatRoomsUrl = () => {
+  return `/api/chat/rooms`;
+};
+
+export const getChatRooms = async (
+  options?: RequestInit,
+): Promise<ChatRoom[]> => {
+  return customFetch<ChatRoom[]>(getGetChatRoomsUrl(), {
+    ...options,
+    method: "GET",
+  });
+};
+
+export const getGetChatRoomsQueryKey = () => {
+  return [`/api/chat/rooms`] as const;
+};
+
+export const getGetChatRoomsQueryOptions = <
+  TData = Awaited<ReturnType<typeof getChatRooms>>,
+  TError = ErrorType<unknown>,
+>(options?: {
+  query?: UseQueryOptions<
+    Awaited<ReturnType<typeof getChatRooms>>,
+    TError,
+    TData
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}) => {
+  const { query: queryOptions, request: requestOptions } = options ?? {};
+
+  const queryKey = queryOptions?.queryKey ?? getGetChatRoomsQueryKey();
+
+  const queryFn: QueryFunction<Awaited<ReturnType<typeof getChatRooms>>> = ({
+    signal,
+  }) => getChatRooms({ signal, ...requestOptions });
+
+  return { queryKey, queryFn, ...queryOptions } as UseQueryOptions<
+    Awaited<ReturnType<typeof getChatRooms>>,
+    TError,
+    TData
+  > & { queryKey: QueryKey };
+};
+
+export type GetChatRoomsQueryResult = NonNullable<
+  Awaited<ReturnType<typeof getChatRooms>>
+>;
+export type GetChatRoomsQueryError = ErrorType<unknown>;
+
+/**
+ * @summary List chat rooms
+ */
+
+export function useGetChatRooms<
+  TData = Awaited<ReturnType<typeof getChatRooms>>,
+  TError = ErrorType<unknown>,
+>(options?: {
+  query?: UseQueryOptions<
+    Awaited<ReturnType<typeof getChatRooms>>,
+    TError,
+    TData
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+  const queryOptions = getGetChatRoomsQueryOptions(options);
+
+  const query = useQuery(queryOptions) as UseQueryResult<TData, TError> & {
+    queryKey: QueryKey;
+  };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
+
+/**
+ * @summary Create a chat room
+ */
+export const getCreateChatRoomUrl = () => {
+  return `/api/chat/rooms`;
+};
+
+export const createChatRoom = async (
+  createChatRoomBody: CreateChatRoomBody,
+  options?: RequestInit,
+): Promise<ChatRoom> => {
+  return customFetch<ChatRoom>(getCreateChatRoomUrl(), {
+    ...options,
+    method: "POST",
+    headers: { "Content-Type": "application/json", ...options?.headers },
+    body: JSON.stringify(createChatRoomBody),
+  });
+};
+
+export const getCreateChatRoomMutationOptions = <
+  TError = ErrorType<unknown>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof createChatRoom>>,
+    TError,
+    { data: BodyType<CreateChatRoomBody> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof createChatRoom>>,
+  TError,
+  { data: BodyType<CreateChatRoomBody> },
+  TContext
+> => {
+  const mutationKey = ["createChatRoom"];
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof createChatRoom>>,
+    { data: BodyType<CreateChatRoomBody> }
+  > = (props) => {
+    const { data } = props ?? {};
+
+    return createChatRoom(data, requestOptions);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type CreateChatRoomMutationResult = NonNullable<
+  Awaited<ReturnType<typeof createChatRoom>>
+>;
+export type CreateChatRoomMutationBody = BodyType<CreateChatRoomBody>;
+export type CreateChatRoomMutationError = ErrorType<unknown>;
+
+/**
+ * @summary Create a chat room
+ */
+export const useCreateChatRoom = <
+  TError = ErrorType<unknown>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof createChatRoom>>,
+    TError,
+    { data: BodyType<CreateChatRoomBody> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationResult<
+  Awaited<ReturnType<typeof createChatRoom>>,
+  TError,
+  { data: BodyType<CreateChatRoomBody> },
+  TContext
+> => {
+  return useMutation(getCreateChatRoomMutationOptions(options));
+};
+
+/**
+ * @summary Get messages for a room
+ */
+export const getGetChatMessagesUrl = (
+  id: string,
+  params?: GetChatMessagesParams,
+) => {
+  const normalizedParams = new URLSearchParams();
+
+  Object.entries(params || {}).forEach(([key, value]) => {
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? "null" : value.toString());
+    }
+  });
+
+  const stringifiedParams = normalizedParams.toString();
+
+  return stringifiedParams.length > 0
+    ? `/api/chat/rooms/${id}/messages?${stringifiedParams}`
+    : `/api/chat/rooms/${id}/messages`;
+};
+
+export const getChatMessages = async (
+  id: string,
+  params?: GetChatMessagesParams,
+  options?: RequestInit,
+): Promise<ChatMessage[]> => {
+  return customFetch<ChatMessage[]>(getGetChatMessagesUrl(id, params), {
+    ...options,
+    method: "GET",
+  });
+};
+
+export const getGetChatMessagesQueryKey = (
+  id: string,
+  params?: GetChatMessagesParams,
+) => {
+  return [
+    `/api/chat/rooms/${id}/messages`,
+    ...(params ? [params] : []),
+  ] as const;
+};
+
+export const getGetChatMessagesQueryOptions = <
+  TData = Awaited<ReturnType<typeof getChatMessages>>,
+  TError = ErrorType<unknown>,
+>(
+  id: string,
+  params?: GetChatMessagesParams,
+  options?: {
+    query?: UseQueryOptions<
+      Awaited<ReturnType<typeof getChatMessages>>,
+      TError,
+      TData
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+) => {
+  const { query: queryOptions, request: requestOptions } = options ?? {};
+
+  const queryKey =
+    queryOptions?.queryKey ?? getGetChatMessagesQueryKey(id, params);
+
+  const queryFn: QueryFunction<Awaited<ReturnType<typeof getChatMessages>>> = ({
+    signal,
+  }) => getChatMessages(id, params, { signal, ...requestOptions });
+
+  return {
+    queryKey,
+    queryFn,
+    enabled: !!id,
+    ...queryOptions,
+  } as UseQueryOptions<
+    Awaited<ReturnType<typeof getChatMessages>>,
+    TError,
+    TData
+  > & { queryKey: QueryKey };
+};
+
+export type GetChatMessagesQueryResult = NonNullable<
+  Awaited<ReturnType<typeof getChatMessages>>
+>;
+export type GetChatMessagesQueryError = ErrorType<unknown>;
+
+/**
+ * @summary Get messages for a room
+ */
+
+export function useGetChatMessages<
+  TData = Awaited<ReturnType<typeof getChatMessages>>,
+  TError = ErrorType<unknown>,
+>(
+  id: string,
+  params?: GetChatMessagesParams,
+  options?: {
+    query?: UseQueryOptions<
+      Awaited<ReturnType<typeof getChatMessages>>,
+      TError,
+      TData
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+): UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+  const queryOptions = getGetChatMessagesQueryOptions(id, params, options);
+
+  const query = useQuery(queryOptions) as UseQueryResult<TData, TError> & {
+    queryKey: QueryKey;
+  };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
+
+/**
+ * @summary Send a message
+ */
+export const getSendChatMessageUrl = (id: string) => {
+  return `/api/chat/rooms/${id}/messages`;
+};
+
+export const sendChatMessage = async (
+  id: string,
+  sendChatMessageBody: SendChatMessageBody,
+  options?: RequestInit,
+): Promise<ChatMessage> => {
+  return customFetch<ChatMessage>(getSendChatMessageUrl(id), {
+    ...options,
+    method: "POST",
+    headers: { "Content-Type": "application/json", ...options?.headers },
+    body: JSON.stringify(sendChatMessageBody),
+  });
+};
+
+export const getSendChatMessageMutationOptions = <
+  TError = ErrorType<unknown>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof sendChatMessage>>,
+    TError,
+    { id: string; data: BodyType<SendChatMessageBody> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof sendChatMessage>>,
+  TError,
+  { id: string; data: BodyType<SendChatMessageBody> },
+  TContext
+> => {
+  const mutationKey = ["sendChatMessage"];
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof sendChatMessage>>,
+    { id: string; data: BodyType<SendChatMessageBody> }
+  > = (props) => {
+    const { id, data } = props ?? {};
+
+    return sendChatMessage(id, data, requestOptions);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type SendChatMessageMutationResult = NonNullable<
+  Awaited<ReturnType<typeof sendChatMessage>>
+>;
+export type SendChatMessageMutationBody = BodyType<SendChatMessageBody>;
+export type SendChatMessageMutationError = ErrorType<unknown>;
+
+/**
+ * @summary Send a message
+ */
+export const useSendChatMessage = <
+  TError = ErrorType<unknown>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof sendChatMessage>>,
+    TError,
+    { id: string; data: BodyType<SendChatMessageBody> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationResult<
+  Awaited<ReturnType<typeof sendChatMessage>>,
+  TError,
+  { id: string; data: BodyType<SendChatMessageBody> },
+  TContext
+> => {
+  return useMutation(getSendChatMessageMutationOptions(options));
+};

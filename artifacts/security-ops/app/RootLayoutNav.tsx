@@ -3,12 +3,14 @@ import React, { useEffect } from "react";
 import { useAuth } from "@/contexts/AuthContext";
 import { View, ActivityIndicator } from "react-native";
 import { useColors } from "@/hooks/useColors";
+import { useNotifications } from "@/hooks/useNotifications";
 
 export default function RootLayoutNav() {
   const { user, isLoading } = useAuth();
   const segments = useSegments();
   const router = useRouter();
   const colors = useColors();
+  useNotifications();
 
   useEffect(() => {
     if (isLoading) return;
