@@ -316,6 +316,39 @@ paths:
         "204":
           description: Deleted
 
+  /shifts/{id}/claim:
+    post:
+      operationId: claimShift
+      tags: [shifts]
+      summary: Employee self-signs up for a shift (license-gated)
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "201":
+          description: Claimed
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ShiftAssignment"
+        "403":
+          description: License level too low
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "409":
+          description: Shift already filled or already claimed
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
   /shifts/{id}/assignments:
     post:
       operationId: assignEmployeeToShift
@@ -1011,6 +1044,10 @@ components:
           type: integer
         expiringLicenseCount:
           type: integer
+        maxLicenseLevel:
+          type: integer
+          nullable: true
+          description: "Highest valid (non-expired) license level: 2, 3, or 4. Null if no valid license."
         createdAt:
           type: string
           format: date-time
@@ -1124,6 +1161,13 @@ components:
         status:
           type: string
           enum: [upcoming, active, completed, cancelled]
+        requiredLicenseLevel:
+          type: integer
+          enum: [2, 3, 4]
+          description: "Minimum license level required (2=unarmed, 3=armed, 4=PPO)"
+        headcount:
+          type: integer
+          description: Total number of officers needed for this shift
         isRepeat:
           type: boolean
         repeatPattern:
@@ -1147,6 +1191,8 @@ components:
         - endTime
         - hourlyRate
         - status
+        - requiredLicenseLevel
+        - headcount
         - isRepeat
         - createdAt
 
@@ -1173,6 +1219,12 @@ components:
           type: number
         billableRate:
           type: number
+        requiredLicenseLevel:
+          type: integer
+          enum: [2, 3, 4]
+        headcount:
+          type: integer
+          minimum: 1
         isRepeat:
           type: boolean
         repeatPattern:
@@ -1191,6 +1243,7 @@ components:
         - startTime
         - endTime
         - hourlyRate
+        - requiredLicenseLevel
         - isRepeat
 
     UpdateShiftRequest:
@@ -1219,6 +1272,12 @@ components:
         status:
           type: string
           enum: [upcoming, active, completed, cancelled]
+        requiredLicenseLevel:
+          type: integer
+          enum: [2, 3, 4]
+        headcount:
+          type: integer
+          minimum: 1
         notes:
           type: string
 
@@ -1626,6 +1685,11 @@ components:
           type: string
         type:
           type: string
+        level:
+          type: integer
+          enum: [2, 3, 4]
+          nullable: true
+          description: "License level (2=unarmed, 3=armed, 4=PPO)"
         licenseNumber:
           type: string
         issuingAuthority:
@@ -1660,6 +1724,9 @@ components:
           type: string
         type:
           type: string
+        level:
+          type: integer
+          enum: [2, 3, 4]
         licenseNumber:
           type: string
         issuingAuthority:
@@ -1683,6 +1750,9 @@ components:
       properties:
         type:
           type: string
+        level:
+          type: integer
+          enum: [2, 3, 4]
         licenseNumber:
           type: string
         issuingAuthority:

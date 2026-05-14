@@ -1,4 +1,4 @@
-import { pgTable, text, uuid, timestamp, date } from "drizzle-orm/pg-core";
+import { pgTable, text, uuid, timestamp, date, integer } from "drizzle-orm/pg-core";
 import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod/v4";
 import { usersTable } from "./users";
@@ -7,6 +7,7 @@ export const licensesTable = pgTable("licenses", {
   id: uuid("id").primaryKey().defaultRandom(),
   employeeId: uuid("employee_id").notNull().references(() => usersTable.id, { onDelete: "cascade" }),
   type: text("type").notNull(),
+  level: integer("level"),
   licenseNumber: text("license_number").notNull(),
   issuingAuthority: text("issuing_authority"),
   issueDate: date("issue_date"),

@@ -1,4 +1,4 @@
-import { pgTable, text, uuid, timestamp, boolean, numeric } from "drizzle-orm/pg-core";
+import { pgTable, text, uuid, timestamp, boolean, numeric, integer } from "drizzle-orm/pg-core";
 import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod/v4";
 
@@ -14,6 +14,8 @@ export const shiftsTable = pgTable("shifts", {
   hourlyRate: numeric("hourly_rate", { precision: 10, scale: 2 }).notNull(),
   billableRate: numeric("billable_rate", { precision: 10, scale: 2 }),
   status: text("status").notNull().default("upcoming"),
+  requiredLicenseLevel: integer("required_license_level").notNull().default(2),
+  headcount: integer("headcount").notNull().default(1),
   isRepeat: boolean("is_repeat").notNull().default(false),
   repeatPattern: text("repeat_pattern"),
   notes: text("notes"),

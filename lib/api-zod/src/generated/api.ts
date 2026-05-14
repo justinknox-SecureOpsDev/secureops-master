@@ -82,6 +82,12 @@ export const GetEmployeesResponseItem = zod.object({
   skills: zod.array(zod.string()).optional(),
   licenseCount: zod.number().optional(),
   expiringLicenseCount: zod.number().optional(),
+  maxLicenseLevel: zod
+    .number()
+    .nullish()
+    .describe(
+      "Highest valid (non-expired) license level: 2, 3, or 4. Null if no valid license.",
+    ),
   createdAt: zod.coerce.date(),
 });
 export const GetEmployeesResponse = zod.array(GetEmployeesResponseItem);
@@ -132,6 +138,12 @@ export const GetEmployeeResponse = zod.object({
   skills: zod.array(zod.string()).optional(),
   licenseCount: zod.number().optional(),
   expiringLicenseCount: zod.number().optional(),
+  maxLicenseLevel: zod
+    .number()
+    .nullish()
+    .describe(
+      "Highest valid (non-expired) license level: 2, 3, or 4. Null if no valid license.",
+    ),
   createdAt: zod.coerce.date(),
 });
 
@@ -176,6 +188,12 @@ export const UpdateEmployeeResponse = zod.object({
   skills: zod.array(zod.string()).optional(),
   licenseCount: zod.number().optional(),
   expiringLicenseCount: zod.number().optional(),
+  maxLicenseLevel: zod
+    .number()
+    .nullish()
+    .describe(
+      "Highest valid (non-expired) license level: 2, 3, or 4. Null if no valid license.",
+    ),
   createdAt: zod.coerce.date(),
 });
 
@@ -201,6 +219,12 @@ export const GetShiftsResponseItem = zod.object({
   hourlyRate: zod.number(),
   billableRate: zod.number().optional(),
   status: zod.enum(["upcoming", "active", "completed", "cancelled"]),
+  requiredLicenseLevel: zod
+    .union([zod.literal(2), zod.literal(3), zod.literal(4)])
+    .describe("Minimum license level required (2=unarmed, 3=armed, 4=PPO)"),
+  headcount: zod
+    .number()
+    .describe("Total number of officers needed for this shift"),
   isRepeat: zod.boolean(),
   repeatPattern: zod
     .enum(["daily", "weekly", "fortnightly", "monthly"])
@@ -225,6 +249,7 @@ export const GetShiftsResponse = zod.array(GetShiftsResponseItem);
 /**
  * @summary Create a new shift
  */
+
 export const CreateShiftBody = zod.object({
   title: zod.string(),
   clientName: zod.string(),
@@ -235,6 +260,12 @@ export const CreateShiftBody = zod.object({
   endTime: zod.coerce.date(),
   hourlyRate: zod.number(),
   billableRate: zod.number().optional(),
+  requiredLicenseLevel: zod.union([
+    zod.literal(2),
+    zod.literal(3),
+    zod.literal(4),
+  ]),
+  headcount: zod.number().min(1).optional(),
   isRepeat: zod.boolean(),
   repeatPattern: zod
     .enum(["daily", "weekly", "fortnightly", "monthly"])
@@ -262,6 +293,12 @@ export const GetShiftResponse = zod.object({
   hourlyRate: zod.number(),
   billableRate: zod.number().optional(),
   status: zod.enum(["upcoming", "active", "completed", "cancelled"]),
+  requiredLicenseLevel: zod
+    .union([zod.literal(2), zod.literal(3), zod.literal(4)])
+    .describe("Minimum license level required (2=unarmed, 3=armed, 4=PPO)"),
+  headcount: zod
+    .number()
+    .describe("Total number of officers needed for this shift"),
   isRepeat: zod.boolean(),
   repeatPattern: zod
     .enum(["daily", "weekly", "fortnightly", "monthly"])
@@ -300,6 +337,10 @@ export const UpdateShiftBody = zod.object({
   hourlyRate: zod.number().optional(),
   billableRate: zod.number().optional(),
   status: zod.enum(["upcoming", "active", "completed", "cancelled"]).optional(),
+  requiredLicenseLevel: zod
+    .union([zod.literal(2), zod.literal(3), zod.literal(4)])
+    .optional(),
+  headcount: zod.number().min(1).optional(),
   notes: zod.string().optional(),
 });
 
@@ -315,6 +356,12 @@ export const UpdateShiftResponse = zod.object({
   hourlyRate: zod.number(),
   billableRate: zod.number().optional(),
   status: zod.enum(["upcoming", "active", "completed", "cancelled"]),
+  requiredLicenseLevel: zod
+    .union([zod.literal(2), zod.literal(3), zod.literal(4)])
+    .describe("Minimum license level required (2=unarmed, 3=armed, 4=PPO)"),
+  headcount: zod
+    .number()
+    .describe("Total number of officers needed for this shift"),
   isRepeat: zod.boolean(),
   repeatPattern: zod
     .enum(["daily", "weekly", "fortnightly", "monthly"])
@@ -339,6 +386,13 @@ export const UpdateShiftResponse = zod.object({
  * @summary Delete shift
  */
 export const DeleteShiftParams = zod.object({
+  id: zod.coerce.string(),
+});
+
+/**
+ * @summary Employee self-signs up for a shift (license-gated)
+ */
+export const ClaimShiftParams = zod.object({
   id: zod.coerce.string(),
 });
 
@@ -749,6 +803,10 @@ export const GetLicensesResponseItem = zod.object({
   employeeId: zod.string(),
   employeeName: zod.string().optional(),
   type: zod.string(),
+  level: zod
+    .union([zod.literal(2), zod.literal(3), zod.literal(4)])
+    .nullish()
+    .describe("License level (2=unarmed, 3=armed, 4=PPO)"),
   licenseNumber: zod.string(),
   issuingAuthority: zod.string().optional(),
   issueDate: zod.coerce.date().optional(),
@@ -765,6 +823,7 @@ export const GetLicensesResponse = zod.array(GetLicensesResponseItem);
 export const CreateLicenseBody = zod.object({
   employeeId: zod.string(),
   type: zod.string(),
+  level: zod.union([zod.literal(2), zod.literal(3), zod.literal(4)]).optional(),
   licenseNumber: zod.string(),
   issuingAuthority: zod.string().optional(),
   issueDate: zod.coerce.date().optional(),
@@ -781,6 +840,7 @@ export const UpdateLicenseParams = zod.object({
 
 export const UpdateLicenseBody = zod.object({
   type: zod.string().optional(),
+  level: zod.union([zod.literal(2), zod.literal(3), zod.literal(4)]).optional(),
   licenseNumber: zod.string().optional(),
   issuingAuthority: zod.string().optional(),
   issueDate: zod.coerce.date().optional(),
@@ -793,6 +853,10 @@ export const UpdateLicenseResponse = zod.object({
   employeeId: zod.string(),
   employeeName: zod.string().optional(),
   type: zod.string(),
+  level: zod
+    .union([zod.literal(2), zod.literal(3), zod.literal(4)])
+    .nullish()
+    .describe("License level (2=unarmed, 3=armed, 4=PPO)"),
   licenseNumber: zod.string(),
   issuingAuthority: zod.string().optional(),
   issueDate: zod.coerce.date().optional(),
@@ -849,6 +913,12 @@ export const GetAdminDashboardSummaryResponse = zod.object({
       hourlyRate: zod.number(),
       billableRate: zod.number().optional(),
       status: zod.enum(["upcoming", "active", "completed", "cancelled"]),
+      requiredLicenseLevel: zod
+        .union([zod.literal(2), zod.literal(3), zod.literal(4)])
+        .describe("Minimum license level required (2=unarmed, 3=armed, 4=PPO)"),
+      headcount: zod
+        .number()
+        .describe("Total number of officers needed for this shift"),
       isRepeat: zod.boolean(),
       repeatPattern: zod
         .enum(["daily", "weekly", "fortnightly", "monthly"])
@@ -888,6 +958,12 @@ export const GetEmployeeDashboardSummaryResponse = zod.object({
       hourlyRate: zod.number(),
       billableRate: zod.number().optional(),
       status: zod.enum(["upcoming", "active", "completed", "cancelled"]),
+      requiredLicenseLevel: zod
+        .union([zod.literal(2), zod.literal(3), zod.literal(4)])
+        .describe("Minimum license level required (2=unarmed, 3=armed, 4=PPO)"),
+      headcount: zod
+        .number()
+        .describe("Total number of officers needed for this shift"),
       isRepeat: zod.boolean(),
       repeatPattern: zod
         .enum(["daily", "weekly", "fortnightly", "monthly"])
@@ -942,6 +1018,12 @@ export const GetEmployeeDashboardSummaryResponse = zod.object({
       hourlyRate: zod.number(),
       billableRate: zod.number().optional(),
       status: zod.enum(["upcoming", "active", "completed", "cancelled"]),
+      requiredLicenseLevel: zod
+        .union([zod.literal(2), zod.literal(3), zod.literal(4)])
+        .describe("Minimum license level required (2=unarmed, 3=armed, 4=PPO)"),
+      headcount: zod
+        .number()
+        .describe("Total number of officers needed for this shift"),
       isRepeat: zod.boolean(),
       repeatPattern: zod
         .enum(["daily", "weekly", "fortnightly", "monthly"])

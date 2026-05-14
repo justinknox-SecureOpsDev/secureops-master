@@ -2,6 +2,7 @@ import React from "react";
 import { View, Text, StyleSheet, ScrollView, TouchableOpacity, ActivityIndicator, Alert, Platform } from "react-native";
 import { useColors } from "@/hooks/useColors";
 import { useGetShift, getGetShiftQueryKey, useGetEmployees, getGetEmployeesQueryKey, useAssignEmployeeToShift, useRemoveEmployeeFromShift, getGetShiftsQueryKey } from "@workspace/api-client-react";
+import { LicenseLevelBadge, levelLabel } from "@/components/LicenseLevelBadge";
 import { Feather } from "@expo/vector-icons";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import { useQueryClient } from "@tanstack/react-query";
@@ -41,12 +42,17 @@ export default function ShiftDetailScreen() {
   const assignedIds = new Set((shift?.assignments ?? []).map((a) => a.employeeId));
 
   const handleAssign = (employeeId: string, name: string) => {
-    Alert.alert("Assign Employee", `Assign ${name} to this shift?`, [
+    Alert.alert("Assign Officer", `Assign ${name} to this shift?`, [
       { text: "Cancel", style: "cancel" },
       {
         text: "Assign", onPress: async () => {
-          await assignMutation.mutateAsync({ id: id!, data: { employeeId } });
-          queryClient.invalidateQueries({ queryKey: getGetShiftQueryKey(id!) });
+          try {
+            await assignMutation.mutateAsync({ id: id!, data: { employeeId } });
+            queryClient.invalidateQueries({ queryKey: getGetShiftQueryKey(id!) });
+          } catch (e: any) {
+            const msg = e?.response?.data?.message || e?.message || "Failed to assign";
+            Alert.alert("Cannot Assign", msg);
+          }
         }
       }
     ]);
@@ -72,8 +78,13 @@ export default function ShiftDetailScreen() {
   if (isLoading) return <View style={[styles.center, { backgroundColor: colors.background }]}><ActivityIndicator size="large" color={colors.primary} /></View>;
   if (!shift) return <View style={[styles.center, { backgroundColor: colors.background }]}><Text style={{ color: colors.destructive }}>Shift not found</Text></View>;
 
-  const unassigned = (allEmployees ?? []).filter((e) => !assignedIds.has(e.id));
+  const reqLevel = (shift as any).requiredLicenseLevel ?? 2;
+  const headcount = (shift as any).headcount ?? 1;
+  const unassignedAll = (allEmployees ?? []).filter((e) => !assignedIds.has(e.id));
+  const eligible = unassignedAll.filter((e: any) => (e.maxLicenseLevel ?? 0) >= reqLevel);
+  const ineligible = unassignedAll.filter((e: any) => (e.maxLicenseLevel ?? 0) < reqLevel);
   const duration = ((new Date(shift.endTime).getTime() - new Date(shift.startTime).getTime()) / 3600000).toFixed(1);
+  const filled = (shift.assignments ?? []).length;
 
   return (
     <ScrollView style={[styles.container, { backgroundColor: colors.background }]} contentContainerStyle={{ paddingBottom: 100 }}>
@@ -92,6 +103,15 @@ export default function ShiftDetailScreen() {
           <Feather name="briefcase" size={18} color={colors.primary} />
           <Text style={[styles.clientName, { color: colors.primary }]}>{shift.clientName}</Text>
           {shift.isRepeat && <View style={[styles.repeatBadge, { backgroundColor: colors.accent + "20" }]}><Text style={[styles.repeatText, { color: colors.accent }]}>REPEAT</Text></View>}
+        </View>
+        <View style={{ flexDirection: "row", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+          <LicenseLevelBadge level={reqLevel} size="md" />
+          <View style={{ flexDirection: "row", alignItems: "center", gap: 5 }}>
+            <Feather name="users" size={13} color={colors.mutedForeground} />
+            <Text style={{ color: colors.mutedForeground, fontSize: 12 }}>
+              {filled}/{headcount} officers
+            </Text>
+          </View>
         </View>
         <View style={styles.heroRow}>
           <Feather name="map-pin" size={16} color={colors.mutedForeground} />
@@ -144,10 +164,13 @@ export default function ShiftDetailScreen() {
         ))}
       </View>
 
-      {unassigned.length > 0 && (
+      {eligible.length > 0 && (
         <View style={[styles.section, { backgroundColor: colors.card, borderColor: colors.border }]}>
-          <Text style={[styles.sectionTitle, { color: colors.accent }]}>ADD PERSONNEL</Text>
-          {unassigned.slice(0, 10).map((emp) => (
+          <Text style={[styles.sectionTitle, { color: colors.accent }]}>ADD QUALIFIED PERSONNEL ({eligible.length})</Text>
+          <Text style={{ color: colors.mutedForeground, fontSize: 11, marginBottom: 8 }}>
+            Showing officers with {levelLabel(reqLevel)} or higher.
+          </Text>
+          {eligible.slice(0, 15).map((emp: any) => (
             <TouchableOpacity
               key={emp.id}
               style={[styles.personRow, { borderBottomColor: colors.border }]}
@@ -156,9 +179,34 @@ export default function ShiftDetailScreen() {
               <View style={[styles.avatar, { backgroundColor: colors.secondary }]}>
                 <Text style={[styles.avatarText, { color: colors.mutedForeground }]}>{emp.firstName[0]}{emp.lastName[0]}</Text>
               </View>
-              <Text style={[styles.personName, { color: colors.foreground }]}>{emp.firstName} {emp.lastName}</Text>
+              <View style={{ flex: 1 }}>
+                <Text style={[styles.personName, { color: colors.foreground }]}>{emp.firstName} {emp.lastName}</Text>
+                <View style={{ marginTop: 3 }}>
+                  <LicenseLevelBadge level={emp.maxLicenseLevel} size="sm" />
+                </View>
+              </View>
               <Feather name="plus-circle" size={20} color={colors.primary} />
             </TouchableOpacity>
+          ))}
+        </View>
+      )}
+
+      {ineligible.length > 0 && (
+        <View style={[styles.section, { backgroundColor: colors.card, borderColor: colors.border, opacity: 0.7 }]}>
+          <Text style={[styles.sectionTitle, { color: colors.mutedForeground }]}>NOT QUALIFIED ({ineligible.length})</Text>
+          {ineligible.slice(0, 8).map((emp: any) => (
+            <View key={emp.id} style={[styles.personRow, { borderBottomColor: colors.border }]}>
+              <View style={[styles.avatar, { backgroundColor: colors.secondary }]}>
+                <Text style={[styles.avatarText, { color: colors.mutedForeground }]}>{emp.firstName[0]}{emp.lastName[0]}</Text>
+              </View>
+              <View style={{ flex: 1 }}>
+                <Text style={[styles.personName, { color: colors.mutedForeground }]}>{emp.firstName} {emp.lastName}</Text>
+                <View style={{ marginTop: 3 }}>
+                  <LicenseLevelBadge level={emp.maxLicenseLevel} size="sm" />
+                </View>
+              </View>
+              <Feather name="lock" size={16} color={colors.mutedForeground} />
+            </View>
           ))}
         </View>
       )}

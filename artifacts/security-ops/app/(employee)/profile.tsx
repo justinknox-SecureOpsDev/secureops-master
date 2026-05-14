@@ -1,7 +1,8 @@
 import React from "react";
 import { View, Text, StyleSheet, ScrollView, TouchableOpacity, ActivityIndicator, Platform, Image } from "react-native";
 import { useColors } from "@/hooks/useColors";
-import { useGetMyProfile, getGetMyProfileQueryKey, useGetLicenses, getGetLicensesQueryKey } from "@workspace/api-client-react";
+import { useGetMe, getGetMeQueryKey, useGetEmployee, getGetEmployeeQueryKey, useGetLicenses, getGetLicensesQueryKey } from "@workspace/api-client-react";
+import { LicenseLevelBadge, levelLabel, levelColor } from "@/components/LicenseLevelBadge";
 import { useAuth } from "@/contexts/AuthContext";
 import { Feather } from "@expo/vector-icons";
 
@@ -24,14 +25,17 @@ export default function EmployeeProfileScreen() {
   const { logout } = useAuth();
   const topPad = Platform.OS === "web" ? 67 : 0;
 
-  const { data: profile, isLoading } = useGetMyProfile({
-    query: { queryKey: getGetMyProfileQueryKey() }
+  const { data: me } = useGetMe({ query: { queryKey: getGetMeQueryKey() } });
+  const userId = (me as any)?.id as string | undefined;
+  const { data: profile, isLoading } = useGetEmployee(userId!, {
+    query: { queryKey: getGetEmployeeQueryKey(userId!), enabled: !!userId },
   });
+  const maxLevel = (profile as any)?.maxLicenseLevel as number | null | undefined;
 
   const { data: licenses } = useGetLicenses({
-    params: { employeeId: profile?.employeeId },
-    query: { queryKey: getGetLicensesQueryKey({ employeeId: profile?.employeeId }), enabled: !!profile?.employeeId }
-  });
+    params: { employeeId: userId },
+    query: { queryKey: getGetLicensesQueryKey({ employeeId: userId }), enabled: !!userId },
+  } as any);
 
   const getLicenseStatus = (expiryDate: string) => {
     const expiry = new Date(expiryDate);
@@ -69,6 +73,15 @@ export default function EmployeeProfileScreen() {
             <Text style={[styles.rateText, { color: colors.accent }]}>${parseFloat(profile.hourlyRate as any).toFixed(2)}/hr</Text>
           </View>
         )}
+        <View style={[styles.levelBar, { backgroundColor: levelColor(maxLevel, colors) + "15", borderColor: levelColor(maxLevel, colors) + "60" }]}>
+          <Feather name="award" size={16} color={levelColor(maxLevel, colors)} />
+          <View style={{ flex: 1 }}>
+            <Text style={{ color: colors.mutedForeground, fontSize: 10, fontWeight: "700", letterSpacing: 1 }}>HIGHEST CURRENT CLEARANCE</Text>
+            <Text style={{ color: levelColor(maxLevel, colors), fontSize: 16, fontWeight: "700", marginTop: 2 }}>
+              {levelLabel(maxLevel ?? null)}
+            </Text>
+          </View>
+        </View>
       </View>
 
       <View style={[styles.section, { backgroundColor: colors.card, borderColor: colors.border }]}>
@@ -104,14 +117,17 @@ export default function EmployeeProfileScreen() {
         <Text style={[styles.sectionTitle, { color: colors.accent }]}>MY LICENCES ({licenses?.length ?? 0})</Text>
         {(licenses?.length ?? 0) === 0 ? (
           <Text style={[styles.emptyText, { color: colors.mutedForeground }]}>No licences on record</Text>
-        ) : licenses!.map((lic) => {
+        ) : licenses!.map((lic: any) => {
           const ls = getLicenseStatus(lic.expiryDate);
           return (
             <View key={lic.id} style={[styles.licCard, { borderBottomColor: colors.border }]}>
               <View style={styles.licHeader}>
                 <Text style={[styles.licType, { color: colors.foreground }]}>{lic.type}</Text>
-                <View style={[styles.badge, { backgroundColor: ls.color + "20", borderColor: ls.color }]}>
-                  <Text style={[styles.badgeText, { color: ls.color }]}>{ls.label}</Text>
+                <View style={{ flexDirection: "row", gap: 6 }}>
+                  {lic.level != null && <LicenseLevelBadge level={lic.level} size="sm" />}
+                  <View style={[styles.badge, { backgroundColor: ls.color + "20", borderColor: ls.color }]}>
+                    <Text style={[styles.badgeText, { color: ls.color }]}>{ls.label}</Text>
+                  </View>
                 </View>
               </View>
               <Text style={[styles.licNum, { color: colors.mutedForeground }]}>{lic.licenseNumber}</Text>
@@ -146,6 +162,7 @@ const styles = StyleSheet.create({
   roleBadge: { paddingHorizontal: 10, paddingVertical: 3, borderRadius: 6, borderWidth: 1, alignSelf: "flex-start" },
   roleText: { fontSize: 11, fontWeight: "700", letterSpacing: 1.5 },
   rateBar: { flexDirection: "row", alignItems: "center", gap: 6, padding: 10, borderRadius: 8, borderWidth: 1 },
+  levelBar: { flexDirection: "row", alignItems: "center", gap: 10, padding: 12, borderRadius: 8, borderWidth: 1 },
   rateText: { fontSize: 15, fontWeight: "700" },
   section: { marginHorizontal: 16, marginBottom: 12, borderRadius: 12, borderWidth: 1, padding: 16 },
   sectionTitle: { fontSize: 11, fontWeight: "700", letterSpacing: 2, marginBottom: 12 },

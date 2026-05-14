@@ -49,6 +49,7 @@ router.get("/employees", requireAdmin, async (req, res): Promise<void> => {
       employeeId: licensesTable.employeeId,
       total: sql<number>`count(*)::int`,
       expiringSoon: sql<number>`count(*) filter (where ${licensesTable.expiryDate} <= current_date + interval '30 days' and ${licensesTable.expiryDate} >= current_date)::int`,
+      maxLevel: sql<number | null>`max(${licensesTable.level}) filter (where ${licensesTable.expiryDate} >= current_date)`,
     })
     .from(licensesTable)
     .groupBy(licensesTable.employeeId);
@@ -61,6 +62,7 @@ router.get("/employees", requireAdmin, async (req, res): Promise<void> => {
       ...r,
       licenseCount: lc?.total ?? 0,
       expiringLicenseCount: lc?.expiringSoon ?? 0,
+      maxLicenseLevel: lc?.maxLevel ?? null,
     };
   });
 
@@ -116,6 +118,7 @@ router.post("/employees", requireAdmin, async (req, res): Promise<void> => {
     skills: employee.skills,
     licenseCount: 0,
     expiringLicenseCount: 0,
+    maxLicenseLevel: null,
   });
 });
 
@@ -158,6 +161,7 @@ router.get("/employees/:id", requireAuth, async (req, res): Promise<void> => {
     .select({
       total: sql<number>`count(*)::int`,
       expiringSoon: sql<number>`count(*) filter (where ${licensesTable.expiryDate} <= current_date + interval '30 days' and ${licensesTable.expiryDate} >= current_date)::int`,
+      maxLevel: sql<number | null>`max(${licensesTable.level}) filter (where ${licensesTable.expiryDate} >= current_date)`,
     })
     .from(licensesTable)
     .where(eq(licensesTable.employeeId, id));
@@ -166,6 +170,7 @@ router.get("/employees/:id", requireAuth, async (req, res): Promise<void> => {
     ...row,
     licenseCount: licenseCountsRaw[0]?.total ?? 0,
     expiringLicenseCount: licenseCountsRaw[0]?.expiringSoon ?? 0,
+    maxLicenseLevel: licenseCountsRaw[0]?.maxLevel ?? null,
   });
 });
 
@@ -224,7 +229,21 @@ router.put("/employees/:id", requireAuth, async (req, res): Promise<void> => {
     .leftJoin(employeesTable, eq(usersTable.id, employeesTable.userId))
     .where(eq(usersTable.id, id));
 
-  res.json({ ...row, licenseCount: 0, expiringLicenseCount: 0 });
+  const lc = await db
+    .select({
+      total: sql<number>`count(*)::int`,
+      expiringSoon: sql<number>`count(*) filter (where ${licensesTable.expiryDate} <= current_date + interval '30 days' and ${licensesTable.expiryDate} >= current_date)::int`,
+      maxLevel: sql<number | null>`max(${licensesTable.level}) filter (where ${licensesTable.expiryDate} >= current_date)`,
+    })
+    .from(licensesTable)
+    .where(eq(licensesTable.employeeId, id));
+
+  res.json({
+    ...row,
+    licenseCount: lc[0]?.total ?? 0,
+    expiringLicenseCount: lc[0]?.expiringSoon ?? 0,
+    maxLicenseLevel: lc[0]?.maxLevel ?? null,
+  });
 });
 
 export default router;

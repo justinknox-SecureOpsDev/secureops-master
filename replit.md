@@ -15,7 +15,7 @@ A full-stack mobile operations platform for Williams Council Security Group (WCS
 
 - pnpm workspaces, Node.js 24, TypeScript 5.9
 - API: Express 5 + WebSocket (ws package) for real-time chat
-- DB: PostgreSQL + Drizzle ORM (11 tables)
+- DB: PostgreSQL + Drizzle ORM (11 tables; shifts have `requiredLicenseLevel` 2/3/4 + `headcount`, licenses have `level`)
 - Validation: Zod (`zod/v4`), `drizzle-zod`
 - Mobile: Expo Router v6, React Native, expo-notifications
 - API codegen: Orval (from OpenAPI spec)
@@ -46,8 +46,10 @@ A full-stack mobile operations platform for Williams Council Security Group (WCS
 
 ## Product
 
-- **Admin**: Manage employees, schedule shifts, process payroll, generate invoices, review incidents, track licenses, broadcast messages via team chat.
-- **Employee**: View assigned shifts, GPS clock in/out, report incidents, see profile, message team via chat.
+- **Admin**: Manage employees, post shifts (with required licence level + headcount — broadcasts to all qualified officers), process payroll, generate invoices, review incidents, track licences (with level), broadcast messages via team chat.
+- **Employee**: See their highest current clearance on profile, browse "Available" shifts they qualify for and self-sign-up, view assigned shifts, GPS clock in/out, report incidents, message team via chat.
+- **Licence hierarchy**: L2 unarmed (lowest) → L3 armed (covers L2+L3) → L4/PPO (covers all). `maxLicenseLevel` = MAX(level) of unexpired licences.
+- **Atomic shift claim**: `POST /shifts/{id}/claim` uses a single SQL `INSERT ... WHERE NOT EXISTS ... AND count < headcount` to prevent races overfilling shifts.
 - **Chat**: Replaces WhatsApp — real-time team messaging with named channels, persistent message history, WebSocket delivery.
 - **Notifications**: Push alerts on shift assignment (iOS/Android); web degrades gracefully.
 

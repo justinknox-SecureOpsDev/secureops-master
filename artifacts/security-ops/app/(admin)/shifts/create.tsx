@@ -25,6 +25,12 @@ function Field({ label, value, onChangeText, placeholder, keyboardType, autoCapi
   );
 }
 
+const LEVELS: Array<{ value: 2 | 3 | 4; label: string; sub: string }> = [
+  { value: 2, label: "Level 2", sub: "Unarmed — any qualified officer" },
+  { value: 3, label: "Level 3", sub: "Armed — L3 or L4 officers only" },
+  { value: 4, label: "L4 / PPO", sub: "Personal Protection — L4 only" },
+];
+
 export default function CreateShiftScreen() {
   const colors = useColors();
   const router = useRouter();
@@ -43,8 +49,10 @@ export default function CreateShiftScreen() {
   const [form, setForm] = useState({
     title: "", clientName: "", location: "", notes: "",
     startTime: fmt(nextHour), endTime: fmt(endTime),
-    hourlyRate: "", billableRate: "", breakMinutes: "30",
+    hourlyRate: "", billableRate: "",
     isRepeat: false, repeatPattern: "",
+    requiredLicenseLevel: 2 as 2 | 3 | 4,
+    headcount: "1",
   });
   const set = (key: string) => (val: any) => setForm((f) => ({ ...f, [key]: val }));
 
@@ -62,13 +70,14 @@ export default function CreateShiftScreen() {
           endTime: new Date(form.endTime).toISOString(),
           hourlyRate: parseFloat(form.hourlyRate),
           billableRate: form.billableRate ? parseFloat(form.billableRate) : undefined,
-          breakMinutes: form.breakMinutes ? parseInt(form.breakMinutes) : undefined,
           isRepeat: form.isRepeat,
-          repeatPattern: form.isRepeat ? form.repeatPattern || undefined : undefined,
-        }
+          repeatPattern: form.isRepeat ? (form.repeatPattern as any) || undefined : undefined,
+          requiredLicenseLevel: form.requiredLicenseLevel,
+          headcount: Math.max(1, parseInt(form.headcount) || 1),
+        } as any,
       });
       queryClient.invalidateQueries({ queryKey: getGetShiftsQueryKey() });
-      Alert.alert("Success", "Shift created.");
+      Alert.alert("Shift Posted", "All qualified officers have been notified.");
       router.back();
     } catch (e: any) {
       Alert.alert("Error", e?.message || "Failed to create shift");
@@ -81,7 +90,7 @@ export default function CreateShiftScreen() {
         <TouchableOpacity onPress={() => router.back()} style={[styles.backBtn, { borderColor: colors.border }]}>
           <Feather name="arrow-left" size={18} color={colors.foreground} />
         </TouchableOpacity>
-        <Text style={[styles.pageTitle, { color: colors.foreground }]}>Create Shift</Text>
+        <Text style={[styles.pageTitle, { color: colors.foreground }]}>Post New Shift</Text>
       </View>
 
       <KeyboardAwareScrollViewCompat contentContainerStyle={{ padding: 16, paddingBottom: 120 }}>
@@ -91,10 +100,36 @@ export default function CreateShiftScreen() {
         <Field label="Location" value={form.location} onChangeText={set("location")} placeholder="8 Whiteman St, Southbank" required />
         <Field label="Notes" value={form.notes} onChangeText={set("notes")} placeholder="Bring high-vis vest" />
 
+        <Text style={[styles.sectionLabel, { color: colors.accent, marginTop: 20 }]}>LICENCE REQUIREMENT *</Text>
+        <View style={{ gap: 8, marginBottom: 14 }}>
+          {LEVELS.map((opt) => {
+            const selected = form.requiredLicenseLevel === opt.value;
+            return (
+              <TouchableOpacity
+                key={opt.value}
+                onPress={() => set("requiredLicenseLevel")(opt.value)}
+                style={[styles.levelOpt, {
+                  backgroundColor: selected ? colors.primary + "20" : colors.card,
+                  borderColor: selected ? colors.primary : colors.border,
+                }]}
+              >
+                <View style={[styles.levelDot, { borderColor: selected ? colors.primary : colors.border, backgroundColor: selected ? colors.primary : "transparent" }]}>
+                  {selected && <Feather name="check" size={12} color={colors.primaryForeground} />}
+                </View>
+                <View style={{ flex: 1 }}>
+                  <Text style={[styles.levelLabel, { color: selected ? colors.primary : colors.foreground }]}>{opt.label}</Text>
+                  <Text style={[styles.levelSub, { color: colors.mutedForeground }]}>{opt.sub}</Text>
+                </View>
+              </TouchableOpacity>
+            );
+          })}
+        </View>
+
+        <Field label="Number of Officers Needed" value={form.headcount} onChangeText={set("headcount")} placeholder="1" keyboardType="numeric" autoCapitalize="none" required />
+
         <Text style={[styles.sectionLabel, { color: colors.accent, marginTop: 20 }]}>SCHEDULE</Text>
-        <Field label="Start Time (YYYY-MM-DDTHH:MM)" value={form.startTime} onChangeText={set("startTime")} placeholder="2025-06-01T20:00" autoCapitalize="none" required />
-        <Field label="End Time (YYYY-MM-DDTHH:MM)" value={form.endTime} onChangeText={set("endTime")} placeholder="2025-06-02T04:00" autoCapitalize="none" required />
-        <Field label="Break (minutes)" value={form.breakMinutes} onChangeText={set("breakMinutes")} placeholder="30" keyboardType="numeric" autoCapitalize="none" />
+        <Field label="Start Time (YYYY-MM-DDTHH:MM)" value={form.startTime} onChangeText={set("startTime")} placeholder="2026-06-01T20:00" autoCapitalize="none" required />
+        <Field label="End Time (YYYY-MM-DDTHH:MM)" value={form.endTime} onChangeText={set("endTime")} placeholder="2026-06-02T04:00" autoCapitalize="none" required />
 
         <View style={[styles.switchRow, { backgroundColor: colors.card, borderColor: colors.border }]}>
           <Feather name="repeat" size={16} color={colors.mutedForeground} />
@@ -107,12 +142,19 @@ export default function CreateShiftScreen() {
           />
         </View>
         {form.isRepeat && (
-          <Field label="Repeat Pattern" value={form.repeatPattern} onChangeText={set("repeatPattern")} placeholder="e.g. Every Friday" />
+          <Field label="Repeat Pattern" value={form.repeatPattern} onChangeText={set("repeatPattern")} placeholder="weekly" autoCapitalize="none" />
         )}
 
         <Text style={[styles.sectionLabel, { color: colors.accent, marginTop: 20 }]}>RATES</Text>
         <Field label="Employee Pay Rate ($/hr)" value={form.hourlyRate} onChangeText={set("hourlyRate")} placeholder="38.50" keyboardType="decimal-pad" autoCapitalize="none" required />
         <Field label="Client Billable Rate ($/hr)" value={form.billableRate} onChangeText={set("billableRate")} placeholder="75.00" keyboardType="decimal-pad" autoCapitalize="none" />
+
+        <View style={[styles.broadcastNote, { backgroundColor: colors.accent + "15", borderColor: colors.accent + "50" }]}>
+          <Feather name="bell" size={14} color={colors.accent} />
+          <Text style={[styles.broadcastText, { color: colors.accent }]}>
+            All qualifying officers (Level {form.requiredLicenseLevel}{form.requiredLicenseLevel < 4 ? "+" : ""}) will be notified and can sign up.
+          </Text>
+        </View>
 
         <TouchableOpacity
           style={[styles.submitBtn, { backgroundColor: colors.primary, opacity: createShift.isPending ? 0.7 : 1 }]}
@@ -121,8 +163,8 @@ export default function CreateShiftScreen() {
         >
           {createShift.isPending ? <ActivityIndicator color={colors.primaryForeground} /> : (
             <>
-              <Feather name="calendar" size={18} color={colors.primaryForeground} />
-              <Text style={[styles.submitText, { color: colors.primaryForeground }]}>Create Shift</Text>
+              <Feather name="send" size={18} color={colors.primaryForeground} />
+              <Text style={[styles.submitText, { color: colors.primaryForeground }]}>Post Shift</Text>
             </>
           )}
         </TouchableOpacity>
@@ -142,6 +184,12 @@ const styles = StyleSheet.create({
   fieldInput: { height: 46, borderWidth: 1, borderRadius: 8, paddingHorizontal: 14, fontSize: 15 },
   switchRow: { flexDirection: "row", alignItems: "center", gap: 10, padding: 14, borderRadius: 8, borderWidth: 1, marginBottom: 14 },
   switchLabel: { flex: 1, fontSize: 14 },
-  submitBtn: { flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 10, padding: 16, borderRadius: 12, marginTop: 24 },
+  submitBtn: { flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 10, padding: 16, borderRadius: 12, marginTop: 12 },
   submitText: { fontSize: 16, fontWeight: "700" },
+  levelOpt: { flexDirection: "row", alignItems: "center", gap: 12, padding: 14, borderRadius: 10, borderWidth: 1.5 },
+  levelDot: { width: 22, height: 22, borderRadius: 11, borderWidth: 2, alignItems: "center", justifyContent: "center" },
+  levelLabel: { fontSize: 15, fontWeight: "700" },
+  levelSub: { fontSize: 12, marginTop: 2 },
+  broadcastNote: { flexDirection: "row", gap: 8, padding: 12, borderRadius: 8, borderWidth: 1, marginTop: 12, alignItems: "flex-start" },
+  broadcastText: { flex: 1, fontSize: 12, lineHeight: 17 },
 });

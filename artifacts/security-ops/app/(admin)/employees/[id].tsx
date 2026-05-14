@@ -2,6 +2,7 @@ import React from "react";
 import { View, Text, StyleSheet, ScrollView, TouchableOpacity, ActivityIndicator, Platform, Alert } from "react-native";
 import { useColors } from "@/hooks/useColors";
 import { useGetEmployee, getGetEmployeeQueryKey, useGetLicenses, getGetLicensesQueryKey, useUpdateEmployee } from "@workspace/api-client-react";
+import { LicenseLevelBadge } from "@/components/LicenseLevelBadge";
 import { Feather } from "@expo/vector-icons";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import { useQueryClient } from "@tanstack/react-query";
@@ -93,6 +94,9 @@ export default function EmployeeDetailScreen() {
         {employee.hourlyRate && (
           <Text style={[styles.heroRate, { color: colors.mutedForeground }]}>${parseFloat(employee.hourlyRate as any).toFixed(2)}/hr</Text>
         )}
+        <View style={{ marginTop: 8 }}>
+          <LicenseLevelBadge level={(employee as any).maxLicenseLevel} size="lg" />
+        </View>
       </View>
 
       <View style={[styles.section, { backgroundColor: colors.card, borderColor: colors.border }]}>
@@ -135,14 +139,17 @@ export default function EmployeeDetailScreen() {
         {(licenses?.length ?? 0) === 0 ? (
           <Text style={[styles.emptyText, { color: colors.mutedForeground }]}>No licences on file</Text>
         ) : (
-          licenses!.map((lic) => {
+          licenses!.map((lic: any) => {
             const licStatus = getLicenseStatus(lic.expiryDate);
             return (
               <View key={lic.id} style={[styles.licCard, { borderColor: colors.border }]}>
                 <View style={styles.licRow}>
                   <Text style={[styles.licType, { color: colors.foreground }]}>{lic.type}</Text>
-                  <View style={[styles.licBadge, { backgroundColor: licStatus.color + "20" }]}>
-                    <Text style={[styles.licBadgeText, { color: licStatus.color }]}>{licStatus.label}</Text>
+                  <View style={{ flexDirection: "row", gap: 6 }}>
+                    {lic.level != null && <LicenseLevelBadge level={lic.level} size="sm" />}
+                    <View style={[styles.licBadge, { backgroundColor: licStatus.color + "20" }]}>
+                      <Text style={[styles.licBadgeText, { color: licStatus.color }]}>{licStatus.label}</Text>
+                    </View>
                   </View>
                 </View>
                 <Text style={[styles.licNum, { color: colors.mutedForeground }]}>{lic.licenseNumber}</Text>

@@ -37,6 +37,7 @@ router.get("/licenses", requireAuth, async (req, res): Promise<void> => {
       id: licensesTable.id,
       employeeId: licensesTable.employeeId,
       type: licensesTable.type,
+      level: licensesTable.level,
       licenseNumber: licensesTable.licenseNumber,
       issuingAuthority: licensesTable.issuingAuthority,
       issueDate: licensesTable.issueDate,
@@ -53,7 +54,7 @@ router.get("/licenses", requireAuth, async (req, res): Promise<void> => {
 });
 
 router.post("/licenses", requireAuth, async (req, res): Promise<void> => {
-  const { employeeId, type, licenseNumber, issuingAuthority, issueDate, expiryDate, notes } = req.body;
+  const { employeeId, type, level, licenseNumber, issuingAuthority, issueDate, expiryDate, notes } = req.body;
   if (!employeeId || !type || !licenseNumber || !expiryDate) {
     res.status(400).json({ error: "Bad Request", message: "employeeId, type, licenseNumber, expiryDate required" });
     return;
@@ -61,9 +62,11 @@ router.post("/licenses", requireAuth, async (req, res): Promise<void> => {
   if (req.user!.role !== "admin" && req.user!.userId !== employeeId) {
     res.status(403).json({ error: "Forbidden" }); return;
   }
+  const lvl = level != null && [2, 3, 4].includes(Number(level)) ? Number(level) : null;
   const [license] = await db.insert(licensesTable).values({
     employeeId,
     type,
+    level: lvl,
     licenseNumber,
     issuingAuthority: issuingAuthority || null,
     issueDate: issueDate || null,
@@ -81,9 +84,10 @@ router.post("/licenses", requireAuth, async (req, res): Promise<void> => {
 
 router.put("/licenses/:id", requireAuth, async (req, res): Promise<void> => {
   const id = Array.isArray(req.params.id) ? req.params.id[0] : req.params.id;
-  const { type, licenseNumber, issuingAuthority, issueDate, expiryDate, notes } = req.body;
+  const { type, level, licenseNumber, issuingAuthority, issueDate, expiryDate, notes } = req.body;
   const updates: Record<string, unknown> = {};
   if (type) updates.type = type;
+  if (level !== undefined) updates.level = level == null ? null : ([2, 3, 4].includes(Number(level)) ? Number(level) : null);
   if (licenseNumber) updates.licenseNumber = licenseNumber;
   if (issuingAuthority !== undefined) updates.issuingAuthority = issuingAuthority;
   if (issueDate !== undefined) updates.issueDate = issueDate;

@@ -84,6 +84,8 @@ export interface Employee {
   skills?: string[];
   licenseCount?: number;
   expiringLicenseCount?: number;
+  /** Highest valid (non-expired) license level: 2, 3, or 4. Null if no valid license. */
+  maxLicenseLevel?: number | null;
   createdAt: string;
 }
 
@@ -145,6 +147,18 @@ export const ShiftStatus = {
   cancelled: "cancelled",
 } as const;
 
+/**
+ * Minimum license level required (2=unarmed, 3=armed, 4=PPO)
+ */
+export type ShiftRequiredLicenseLevel =
+  (typeof ShiftRequiredLicenseLevel)[keyof typeof ShiftRequiredLicenseLevel];
+
+export const ShiftRequiredLicenseLevel = {
+  NUMBER_2: 2,
+  NUMBER_3: 3,
+  NUMBER_4: 4,
+} as const;
+
 export type ShiftRepeatPattern =
   (typeof ShiftRepeatPattern)[keyof typeof ShiftRepeatPattern];
 
@@ -185,12 +199,25 @@ export interface Shift {
   hourlyRate: number;
   billableRate?: number;
   status: ShiftStatus;
+  /** Minimum license level required (2=unarmed, 3=armed, 4=PPO) */
+  requiredLicenseLevel: ShiftRequiredLicenseLevel;
+  /** Total number of officers needed for this shift */
+  headcount: number;
   isRepeat: boolean;
   repeatPattern?: ShiftRepeatPattern;
   notes?: string;
   assignments?: ShiftAssignment[];
   createdAt: string;
 }
+
+export type CreateShiftRequestRequiredLicenseLevel =
+  (typeof CreateShiftRequestRequiredLicenseLevel)[keyof typeof CreateShiftRequestRequiredLicenseLevel];
+
+export const CreateShiftRequestRequiredLicenseLevel = {
+  NUMBER_2: 2,
+  NUMBER_3: 3,
+  NUMBER_4: 4,
+} as const;
 
 export type CreateShiftRequestRepeatPattern =
   (typeof CreateShiftRequestRepeatPattern)[keyof typeof CreateShiftRequestRepeatPattern];
@@ -212,6 +239,9 @@ export interface CreateShiftRequest {
   endTime: string;
   hourlyRate: number;
   billableRate?: number;
+  requiredLicenseLevel: CreateShiftRequestRequiredLicenseLevel;
+  /** @minimum 1 */
+  headcount?: number;
   isRepeat: boolean;
   repeatPattern?: CreateShiftRequestRepeatPattern;
   notes?: string;
@@ -228,6 +258,15 @@ export const UpdateShiftRequestStatus = {
   cancelled: "cancelled",
 } as const;
 
+export type UpdateShiftRequestRequiredLicenseLevel =
+  (typeof UpdateShiftRequestRequiredLicenseLevel)[keyof typeof UpdateShiftRequestRequiredLicenseLevel];
+
+export const UpdateShiftRequestRequiredLicenseLevel = {
+  NUMBER_2: 2,
+  NUMBER_3: 3,
+  NUMBER_4: 4,
+} as const;
+
 export interface UpdateShiftRequest {
   title?: string;
   clientName?: string;
@@ -239,6 +278,9 @@ export interface UpdateShiftRequest {
   hourlyRate?: number;
   billableRate?: number;
   status?: UpdateShiftRequestStatus;
+  requiredLicenseLevel?: UpdateShiftRequestRequiredLicenseLevel;
+  /** @minimum 1 */
+  headcount?: number;
   notes?: string;
 }
 
@@ -475,6 +517,19 @@ export interface UpdateIncidentRequest {
   resolvedAt?: string;
 }
 
+/**
+ * License level (2=unarmed, 3=armed, 4=PPO)
+ */
+export type LicenseLevel =
+  | (typeof LicenseLevel)[keyof typeof LicenseLevel]
+  | null;
+
+export const LicenseLevel = {
+  NUMBER_2: 2,
+  NUMBER_3: 3,
+  NUMBER_4: 4,
+} as const;
+
 export type LicenseStatus = (typeof LicenseStatus)[keyof typeof LicenseStatus];
 
 export const LicenseStatus = {
@@ -488,6 +543,8 @@ export interface License {
   employeeId: string;
   employeeName?: string;
   type: string;
+  /** License level (2=unarmed, 3=armed, 4=PPO) */
+  level?: LicenseLevel;
   licenseNumber: string;
   issuingAuthority?: string;
   issueDate?: string;
@@ -497,9 +554,19 @@ export interface License {
   createdAt: string;
 }
 
+export type CreateLicenseRequestLevel =
+  (typeof CreateLicenseRequestLevel)[keyof typeof CreateLicenseRequestLevel];
+
+export const CreateLicenseRequestLevel = {
+  NUMBER_2: 2,
+  NUMBER_3: 3,
+  NUMBER_4: 4,
+} as const;
+
 export interface CreateLicenseRequest {
   employeeId: string;
   type: string;
+  level?: CreateLicenseRequestLevel;
   licenseNumber: string;
   issuingAuthority?: string;
   issueDate?: string;
@@ -507,8 +574,18 @@ export interface CreateLicenseRequest {
   notes?: string;
 }
 
+export type UpdateLicenseRequestLevel =
+  (typeof UpdateLicenseRequestLevel)[keyof typeof UpdateLicenseRequestLevel];
+
+export const UpdateLicenseRequestLevel = {
+  NUMBER_2: 2,
+  NUMBER_3: 3,
+  NUMBER_4: 4,
+} as const;
+
 export interface UpdateLicenseRequest {
   type?: string;
+  level?: UpdateLicenseRequestLevel;
   licenseNumber?: string;
   issuingAuthority?: string;
   issueDate?: string;

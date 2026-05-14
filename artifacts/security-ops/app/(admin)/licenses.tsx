@@ -2,6 +2,7 @@ import React, { useState } from "react";
 import { View, Text, StyleSheet, FlatList, TouchableOpacity, ActivityIndicator, Alert, Platform, Modal, TextInput } from "react-native";
 import { useColors } from "@/hooks/useColors";
 import { useGetLicenses, getGetLicensesQueryKey, useCreateLicense, useGetEmployees, getGetEmployeesQueryKey } from "@workspace/api-client-react";
+import { LicenseLevelBadge } from "@/components/LicenseLevelBadge";
 import { Feather } from "@expo/vector-icons";
 import { useRouter } from "expo-router";
 import { useQueryClient } from "@tanstack/react-query";
@@ -17,8 +18,8 @@ export default function AdminLicensesScreen() {
   const [showAdd, setShowAdd] = useState(false);
   const topPad = Platform.OS === "web" ? 67 : 0;
 
-  const [form, setForm] = useState({ employeeId: "", type: "", licenseNumber: "", issuedDate: "", expiryDate: "", issuingAuthority: "" });
-  const set = (k: string) => (v: string) => setForm((f) => ({ ...f, [k]: v }));
+  const [form, setForm] = useState<{ employeeId: string; type: string; level: 2 | 3 | 4 | null; licenseNumber: string; issuedDate: string; expiryDate: string; issuingAuthority: string }>({ employeeId: "", type: "", level: 2, licenseNumber: "", issuedDate: "", expiryDate: "", issuingAuthority: "" });
+  const set = (k: string) => (v: any) => setForm((f) => ({ ...f, [k]: v }));
 
   const { data: licenses, isLoading, error, refetch } = useGetLicenses({
     params: { expiringSoon: filter === "expiring" ? true : undefined, expired: filter === "expired" ? true : undefined },
@@ -46,10 +47,10 @@ export default function AdminLicensesScreen() {
       return;
     }
     try {
-      await createLicense.mutateAsync({ data: { ...form, issuedDate: form.issuedDate || undefined, issuingAuthority: form.issuingAuthority || undefined } as any });
+      await createLicense.mutateAsync({ data: { ...form, level: form.level ?? undefined, issuedDate: form.issuedDate || undefined, issuingAuthority: form.issuingAuthority || undefined } as any });
       queryClient.invalidateQueries({ queryKey: getGetLicensesQueryKey() });
       setShowAdd(false);
-      setForm({ employeeId: "", type: "", licenseNumber: "", issuedDate: "", expiryDate: "", issuingAuthority: "" });
+      setForm({ employeeId: "", type: "", level: 2, licenseNumber: "", issuedDate: "", expiryDate: "", issuingAuthority: "" });
     } catch (e: any) {
       Alert.alert("Error", e?.message || "Failed to create licence");
     }
@@ -104,8 +105,11 @@ export default function AdminLicensesScreen() {
                     <Text style={[styles.licType, { color: colors.foreground }]}>{item.type}</Text>
                     <Text style={[styles.empName, { color: colors.primary }]}>{item.employeeName}</Text>
                   </View>
-                  <View style={[styles.badge, { backgroundColor: licStatus.color + "20", borderColor: licStatus.color }]}>
-                    <Text style={[styles.badgeText, { color: licStatus.color }]}>{licStatus.label}</Text>
+                  <View style={{ flexDirection: "row", gap: 6, alignItems: "flex-start" }}>
+                    {(item as any).level != null && <LicenseLevelBadge level={(item as any).level} size="sm" />}
+                    <View style={[styles.badge, { backgroundColor: licStatus.color + "20", borderColor: licStatus.color }]}>
+                      <Text style={[styles.badgeText, { color: licStatus.color }]}>{licStatus.label}</Text>
+                    </View>
                   </View>
                 </View>
                 <View style={styles.detailRow}>
@@ -150,6 +154,23 @@ export default function AdminLicensesScreen() {
                   {(employees ?? []).map((e) => (
                     <TouchableOpacity key={e.id} style={[styles.pickerItem, { backgroundColor: form.employeeId === e.id ? colors.primary + "20" : "transparent" }]} onPress={() => set("employeeId")(e.id)}>
                       <Text style={[styles.pickerText, { color: form.employeeId === e.id ? colors.primary : colors.foreground }]}>{e.firstName} {e.lastName}</Text>
+                    </TouchableOpacity>
+                  ))}
+                </View>
+                <Text style={[styles.fieldLabel, { color: colors.mutedForeground }]}>Licence Level *</Text>
+                <View style={{ flexDirection: "row", gap: 8, marginBottom: 14 }}>
+                  {([2, 3, 4] as const).map((lv) => (
+                    <TouchableOpacity
+                      key={lv}
+                      style={[styles.lvlChip, {
+                        borderColor: form.level === lv ? colors.primary : colors.border,
+                        backgroundColor: form.level === lv ? colors.primary + "20" : "transparent",
+                      }]}
+                      onPress={() => set("level")(lv)}
+                    >
+                      <Text style={{ color: form.level === lv ? colors.primary : colors.foreground, fontWeight: "700", fontSize: 13 }}>
+                        {lv === 4 ? "L4 / PPO" : `Level ${lv}`}
+                      </Text>
                     </TouchableOpacity>
                   ))}
                 </View>
@@ -214,6 +235,7 @@ const styles = StyleSheet.create({
   picker: { borderWidth: 1, borderRadius: 8, marginBottom: 12, maxHeight: 140, overflow: "hidden" },
   pickerItem: { paddingVertical: 10, paddingHorizontal: 12 },
   pickerText: { fontSize: 14 },
+  lvlChip: { flex: 1, paddingVertical: 10, borderRadius: 8, borderWidth: 1.5, alignItems: "center" },
   submitBtn: { paddingVertical: 14, borderRadius: 10, alignItems: "center" },
   submitText: { fontWeight: "700", fontSize: 15 },
 });

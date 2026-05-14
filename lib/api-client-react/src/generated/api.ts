@@ -1252,6 +1252,90 @@ export const useDeleteShift = <
 };
 
 /**
+ * @summary Employee self-signs up for a shift (license-gated)
+ */
+export const getClaimShiftUrl = (id: string) => {
+  return `/api/shifts/${id}/claim`;
+};
+
+export const claimShift = async (
+  id: string,
+  options?: RequestInit,
+): Promise<ShiftAssignment> => {
+  return customFetch<ShiftAssignment>(getClaimShiftUrl(id), {
+    ...options,
+    method: "POST",
+  });
+};
+
+export const getClaimShiftMutationOptions = <
+  TError = ErrorType<ErrorResponse>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof claimShift>>,
+    TError,
+    { id: string },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof claimShift>>,
+  TError,
+  { id: string },
+  TContext
+> => {
+  const mutationKey = ["claimShift"];
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof claimShift>>,
+    { id: string }
+  > = (props) => {
+    const { id } = props ?? {};
+
+    return claimShift(id, requestOptions);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type ClaimShiftMutationResult = NonNullable<
+  Awaited<ReturnType<typeof claimShift>>
+>;
+
+export type ClaimShiftMutationError = ErrorType<ErrorResponse>;
+
+/**
+ * @summary Employee self-signs up for a shift (license-gated)
+ */
+export const useClaimShift = <
+  TError = ErrorType<ErrorResponse>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof claimShift>>,
+    TError,
+    { id: string },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationResult<
+  Awaited<ReturnType<typeof claimShift>>,
+  TError,
+  { id: string },
+  TContext
+> => {
+  return useMutation(getClaimShiftMutationOptions(options));
+};
+
+/**
  * @summary Assign employee to a shift
  */
 export const getAssignEmployeeToShiftUrl = (id: string) => {
