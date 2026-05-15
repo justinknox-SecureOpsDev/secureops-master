@@ -65,6 +65,22 @@ export const EmployeeStatus = {
   pending: "pending",
 } as const;
 
+export type EmployeeSiaLicenseLevel =
+  | (typeof EmployeeSiaLicenseLevel)[keyof typeof EmployeeSiaLicenseLevel]
+  | null;
+
+export const EmployeeSiaLicenseLevel = {
+  NUMBER_2: 2,
+  NUMBER_3: 3,
+  NUMBER_4: 4,
+} as const;
+
+export type EmployeeReferencesItem = { [key: string]: unknown };
+
+export type EmployeeAvailability = { [key: string]: unknown } | null;
+
+export type EmployeeAcknowledgementsItem = { [key: string]: unknown };
+
 export interface Employee {
   id: string;
   userId: string;
@@ -75,12 +91,46 @@ export interface Employee {
   role: EmployeeRole;
   status: EmployeeStatus;
   address?: string;
+  dateOfBirth?: string | null;
+  cityOfBirth?: string | null;
+  stateOfBirth?: string | null;
+  /** SSN last-4 (column name retains UK origin) */
+  niNumber?: string | null;
+  rightToWorkStatus?: string | null;
+  /** Object-storage path for right-to-work doc */
+  rightToWorkDocKey?: string | null;
+  siaLicenseNumber?: string | null;
+  siaLicenseLevel?: EmployeeSiaLicenseLevel;
+  siaLicenseExpiry?: string | null;
+  licenseDocKey?: string | null;
+  passportDocKey?: string | null;
+  previousExperience?: string | null;
+  yearsExperience?: number | null;
+  references?: EmployeeReferencesItem[] | null;
+  photoKey?: string | null;
+  cvKey?: string | null;
+  trainingCertificateKeys?: string[] | null;
+  availability?: EmployeeAvailability;
   emergencyContactName?: string;
+  emergencyContactRelationship?: string | null;
   emergencyContactPhone?: string;
   hourlyRate?: number;
   bankAccountName?: string;
   bankAccountNumber?: string;
+  /** Routing / sort code */
   bankBsb?: string;
+  taxCode?: string | null;
+  /** W-2 / pay stub object-storage path */
+  payStubDocKey?: string | null;
+  uniformShirt?: string | null;
+  uniformTrousers?: string | null;
+  uniformJacket?: string | null;
+  uniformBoots?: string | null;
+  directDepositConsent?: boolean | null;
+  directDepositSignature?: string | null;
+  acknowledgements?: EmployeeAcknowledgementsItem[] | null;
+  applicationId?: string | null;
+  onboardingSubmissionId?: string | null;
   skills?: string[];
   licenseCount?: number;
   expiringLicenseCount?: number;
@@ -123,18 +173,58 @@ export const UpdateEmployeeRequestStatus = {
   pending: "pending",
 } as const;
 
+export type UpdateEmployeeRequestSiaLicenseLevel =
+  | (typeof UpdateEmployeeRequestSiaLicenseLevel)[keyof typeof UpdateEmployeeRequestSiaLicenseLevel]
+  | null;
+
+export const UpdateEmployeeRequestSiaLicenseLevel = {
+  NUMBER_2: 2,
+  NUMBER_3: 3,
+  NUMBER_4: 4,
+} as const;
+
+export type UpdateEmployeeRequestAvailability = {
+  [key: string]: unknown;
+} | null;
+
 export interface UpdateEmployeeRequest {
   firstName?: string;
   lastName?: string;
   phone?: string;
   status?: UpdateEmployeeRequestStatus;
   address?: string;
+  dateOfBirth?: string | null;
+  cityOfBirth?: string | null;
+  stateOfBirth?: string | null;
+  niNumber?: string | null;
+  rightToWorkStatus?: string | null;
+  rightToWorkDocKey?: string | null;
+  siaLicenseNumber?: string | null;
+  siaLicenseLevel?: UpdateEmployeeRequestSiaLicenseLevel;
+  siaLicenseExpiry?: string | null;
+  licenseDocKey?: string | null;
+  passportDocKey?: string | null;
+  previousExperience?: string | null;
+  yearsExperience?: number | null;
+  photoKey?: string | null;
+  cvKey?: string | null;
+  trainingCertificateKeys?: string[] | null;
+  availability?: UpdateEmployeeRequestAvailability;
   emergencyContactName?: string;
+  emergencyContactRelationship?: string | null;
   emergencyContactPhone?: string;
   hourlyRate?: number;
   bankAccountName?: string;
   bankAccountNumber?: string;
   bankBsb?: string;
+  taxCode?: string | null;
+  payStubDocKey?: string | null;
+  uniformShirt?: string | null;
+  uniformTrousers?: string | null;
+  uniformJacket?: string | null;
+  uniformBoots?: string | null;
+  directDepositConsent?: boolean | null;
+  directDepositSignature?: string | null;
   skills?: string[];
 }
 

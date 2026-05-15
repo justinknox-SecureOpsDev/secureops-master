@@ -274,14 +274,36 @@ export function RowFormDialog({
             {initial ? `Edit ${descriptor.label.replace(/s$/, "")}` : `Add ${descriptor.label.replace(/s$/, "")}`}
           </DialogTitle>
         </DialogHeader>
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4 py-2">
-          {editable.filter((f) => !lockedSet.has(f.key)).map((f) => (
-            <div key={f.key} className={f.type === "textarea" ? "md:col-span-2" : ""}>
-              <Label className="text-xs font-semibold uppercase tracking-wide brand-navy">
-                {f.label}{f.required && <span className="text-destructive ml-1">*</span>}
-              </Label>
-              <div className="mt-1">
-                <FieldInput
+        <div className="space-y-5 py-2">
+          {(() => {
+            // Group fields into sections in declared order. A field's `section`
+            // starts a new section that all subsequent unsectioned fields fall
+            // under, until the next field that declares a section.
+            const visible = editable.filter((f) => !lockedSet.has(f.key));
+            const groups: { section: string | null; fields: typeof visible }[] = [];
+            let current: { section: string | null; fields: typeof visible } | null = null;
+            for (const f of visible) {
+              if (f.section || !current) {
+                current = { section: f.section ?? null, fields: [] };
+                groups.push(current);
+              }
+              current.fields.push(f);
+            }
+            return groups.map((g, gi) => (
+              <div key={gi}>
+                {g.section && (
+                  <div className="mb-2 pb-1 border-b border-brand-gold/40">
+                    <h3 className="text-sm font-semibold tracking-wide brand-navy">{g.section}</h3>
+                  </div>
+                )}
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  {g.fields.map((f) => (
+                    <div key={f.key} className={(f.type === "textarea" || f.type === "json" || f.type === "fileKeyList") ? "md:col-span-2" : ""}>
+                      <Label className="text-xs font-semibold uppercase tracking-wide brand-navy">
+                        {f.label}{f.required && <span className="text-destructive ml-1">*</span>}
+                      </Label>
+                      <div className="mt-1">
+                        <FieldInput
                   field={f}
                   value={values[f.key] ?? ""}
                   filterValue={f.filterBy ? values[f.filterBy.formKey] ?? "" : undefined}
@@ -307,9 +329,13 @@ export function RowFormDialog({
                     });
                   } : undefined}
                 />
+                      </div>
+                    </div>
+                  ))}
+                </div>
               </div>
-            </div>
-          ))}
+            ));
+          })()}
         </div>
         {error && (
           <pre className="text-xs text-destructive whitespace-pre-wrap bg-destructive/5 p-2 rounded border border-destructive/20">

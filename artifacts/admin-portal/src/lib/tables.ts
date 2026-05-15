@@ -49,6 +49,9 @@ export type Field = {
   filterBy?: { fkRowKey: string; formKey: string };
   /** During Excel import, resolve a free-text value (e.g. site name) to an FK id by looking up the FK table's primaryLabelField. */
   importResolveByLabel?: boolean;
+  /** Optional section header label rendered above this field in the row dialog.
+   *  Lets long forms (e.g. employees) be visually grouped (Identity / Licence / Pay …). */
+  section?: string;
 };
 
 export type TableDescriptor = {
@@ -118,19 +121,19 @@ export const TABLES: TableDescriptor[] = [
     importSupported: true,
     primaryLabelField: "phone",
     fields: [
-      { key: "id", label: "ID", type: "text", readonly: true, hiddenInGrid: true },
-      { key: "userId", label: "User", type: "fk", fkTable: "users", fkLabel: "email", required: true },
+      { key: "id", label: "ID", type: "text", readonly: true, hiddenInGrid: true, section: "Identity" },
+      { key: "userId", label: "User", type: "fk", fkTable: "users", fkLabel: "email", required: true, section: "Identity" },
       // --- Contact ---
-      { key: "phone", label: "Phone", type: "text" },
+      { key: "phone", label: "Phone", type: "text", section: "Contact & Identity" },
       { key: "address", label: "Address", type: "textarea", hiddenInGrid: true },
       { key: "dateOfBirth", label: "Date of Birth", type: "date", hiddenInGrid: true },
       { key: "cityOfBirth", label: "City of Birth", type: "text", hiddenInGrid: true },
       { key: "stateOfBirth", label: "State of Birth", type: "text", hiddenInGrid: true },
       // --- Right to work ---
-      { key: "rightToWorkStatus", label: "Right to Work", type: "text", hiddenInGrid: true },
+      { key: "rightToWorkStatus", label: "Right to Work", type: "text", hiddenInGrid: true, section: "Right to Work" },
       { key: "rightToWorkDocKey", label: "Right-to-Work Doc", type: "fileKey", hiddenInGrid: true },
       // --- TX Security License (visible — admins must update this) ---
-      { key: "siaLicenseNumber", label: "Licence #", type: "text" },
+      { key: "siaLicenseNumber", label: "Licence #", type: "text", section: "TX Security Licence" },
       {
         key: "siaLicenseLevel", label: "Licence Level", type: "select",
         options: [
@@ -143,20 +146,20 @@ export const TABLES: TableDescriptor[] = [
       { key: "licenseDocKey", label: "Licence Doc", type: "fileKey" },
       { key: "passportDocKey", label: "Passport Doc", type: "fileKey", hiddenInGrid: true },
       // --- Experience ---
-      { key: "yearsExperience", label: "Years Exp.", type: "integer", hiddenInGrid: true },
+      { key: "yearsExperience", label: "Years Exp.", type: "integer", hiddenInGrid: true, section: "Experience & References" },
       { key: "previousExperience", label: "Previous Experience", type: "textarea", hiddenInGrid: true },
       { key: "references", label: "References", type: "json", hiddenInGrid: true },
       // --- Personal docs ---
-      { key: "photoKey", label: "Photo", type: "fileKey", hiddenInGrid: true },
+      { key: "photoKey", label: "Photo", type: "fileKey", hiddenInGrid: true, section: "Personal Documents" },
       { key: "cvKey", label: "Résumé / CV", type: "fileKey", hiddenInGrid: true },
       { key: "trainingCertificateKeys", label: "Training Certificates", type: "fileKeyList", hiddenInGrid: true },
       { key: "availability", label: "Weekly Availability", type: "json", hiddenInGrid: true },
       // --- Emergency contact ---
-      { key: "emergencyContactName", label: "Emergency Contact", type: "text", hiddenInGrid: true },
+      { key: "emergencyContactName", label: "Emergency Contact", type: "text", hiddenInGrid: true, section: "Emergency Contact" },
       { key: "emergencyContactRelationship", label: "Emergency Relationship", type: "text", hiddenInGrid: true },
       { key: "emergencyContactPhone", label: "Emergency Phone", type: "text", hiddenInGrid: true },
       // --- Pay & banking ---
-      { key: "hourlyRate", label: "Hourly Rate ($)", type: "number" },
+      { key: "hourlyRate", label: "Hourly Rate ($)", type: "number", section: "Pay & Banking" },
       { key: "bankAccountName", label: "Bank Acct Name", type: "text", hiddenInGrid: true },
       { key: "bankAccountNumber", label: "Bank Acct #", type: "text", hiddenInGrid: true },
       { key: "bankBsb", label: "Routing/Sort Code", type: "text", hiddenInGrid: true },
@@ -164,16 +167,16 @@ export const TABLES: TableDescriptor[] = [
       { key: "taxCode", label: "Tax Code", type: "text", hiddenInGrid: true },
       { key: "payStubDocKey", label: "W-2 / Pay Stub", type: "fileKey", hiddenInGrid: true },
       // --- Uniform sizes ---
-      { key: "uniformShirt", label: "Uniform Shirt", type: "text", hiddenInGrid: true },
+      { key: "uniformShirt", label: "Uniform Shirt", type: "text", hiddenInGrid: true, section: "Uniform Sizes" },
       { key: "uniformTrousers", label: "Uniform Trousers", type: "text", hiddenInGrid: true },
       { key: "uniformJacket", label: "Uniform Jacket", type: "text", hiddenInGrid: true },
       { key: "uniformBoots", label: "Uniform Boots", type: "text", hiddenInGrid: true },
       // --- Consents & acknowledgements ---
-      { key: "directDepositConsent", label: "Direct Deposit Consent", type: "boolean", hiddenInGrid: true },
+      { key: "directDepositConsent", label: "Direct Deposit Consent", type: "boolean", hiddenInGrid: true, section: "Consents & Policy Acknowledgements" },
       { key: "directDepositSignature", label: "Direct Deposit Signature", type: "text", hiddenInGrid: true },
       { key: "acknowledgements", label: "Policy Acknowledgements", type: "json", hiddenInGrid: true },
       // --- HR pipeline links (read-only) ---
-      { key: "applicationId", label: "Application", type: "text", readonly: true, hiddenInGrid: true },
+      { key: "applicationId", label: "Application", type: "text", readonly: true, hiddenInGrid: true, section: "HR Pipeline (read-only)" },
       { key: "onboardingSubmissionId", label: "Onboarding Submission", type: "text", readonly: true, hiddenInGrid: true },
       { key: "createdAt", label: "Created", type: "datetime", readonly: true, hiddenInGrid: true },
     ],
