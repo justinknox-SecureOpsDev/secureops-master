@@ -44,6 +44,60 @@ const fmtUsd = (n: number | string) =>
 
 const maskAccount = (s: string | null) => (s ? `••••${s.slice(-4)}` : "—");
 
+// Week label "Mon Jan 6 → Sun Jan 12, 2025" from a YYYY-MM-DD start date.
+const fmtWeekRange = (periodStart: string, periodEnd: string) => {
+  const opts: Intl.DateTimeFormatOptions = { weekday: "short", month: "short", day: "numeric" };
+  const s = new Date(`${periodStart}T00:00:00`);
+  const e = new Date(`${periodEnd}T00:00:00`);
+  const yr = e.getFullYear();
+  return `${s.toLocaleDateString("en-US", opts)} → ${e.toLocaleDateString("en-US", opts)}, ${yr}`;
+};
+
+type SiteGroup = {
+  siteId: string | null;
+  siteName: string;
+  weeks: Map<string, PayrollRow[]>; // key = periodStart
+  total: number;
+  count: number;
+};
+
+// Group rows by Site → Week (periodStart). Sites alphabetical, weeks newest first.
+const groupBySiteAndWeek = (rows: PayrollRow[]): SiteGroup[] => {
+  const sites = new Map<string, SiteGroup>();
+  for (const r of rows) {
+    const key = r.siteId ?? "__nosite__";
+    let g = sites.get(key);
+    if (!g) {
+      g = {
+        siteId: r.siteId,
+        siteName: r.siteName ?? "(No site)",
+        weeks: new Map(),
+        total: 0,
+        count: 0,
+      };
+      sites.set(key, g);
+    }
+    const wk = g.weeks.get(r.periodStart) ?? [];
+    wk.push(r);
+    g.weeks.set(r.periodStart, wk);
+    g.total += Number(r.netPay);
+    g.count += 1;
+  }
+  return Array.from(sites.values())
+    .sort((a, b) => {
+      // "(No site)" sinks to the bottom.
+      if (a.siteId === null && b.siteId !== null) return 1;
+      if (b.siteId === null && a.siteId !== null) return -1;
+      return a.siteName.localeCompare(b.siteName);
+    })
+    .map((g) => ({
+      ...g,
+      weeks: new Map(
+        Array.from(g.weeks.entries()).sort(([a], [b]) => b.localeCompare(a)),
+      ),
+    }));
+};
+
 export default function PayRunPage() {
   const [rows, setRows] = useState<PayrollRow[]>([]);
   const [loading, setLoading] = useState(true);
@@ -88,6 +142,14 @@ export default function PayRunPage() {
   const toggleAll = () => {
     if (selected.size === rows.length) setSelected(new Set());
     else setSelected(new Set(rows.map((r) => r.id)));
+  };
+  // Bulk-toggle a group of ids: if every id is selected, deselect all; otherwise select all.
+  const toggleMany = (ids: string[]) => {
+    const allSelected = ids.length > 0 && ids.every((id) => selected.has(id));
+    const next = new Set(selected);
+    if (allSelected) ids.forEach((id) => next.delete(id));
+    else ids.forEach((id) => next.add(id));
+    setSelected(next);
   };
 
   const showToast = (kind: "ok" | "err", msg: string) => {
@@ -309,75 +371,133 @@ export default function PayRunPage() {
         </div>
       )}
 
-      {/* Table */}
-      <div className="bg-white border rounded-lg overflow-x-auto">
-        <table className="w-full text-sm">
-          <thead className="bg-gray-50 text-left text-xs uppercase tracking-wider text-muted-foreground">
-            <tr>
-              <th className="px-3 py-2 w-8">
-                <input
-                  type="checkbox"
-                  checked={rows.length > 0 && selected.size === rows.length}
-                  onChange={toggleAll}
-                />
-              </th>
-              <th className="px-3 py-2">Employee</th>
-              <th className="px-3 py-2">Site</th>
-              <th className="px-3 py-2">Period</th>
-              <th className="px-3 py-2 text-right">Hours</th>
-              <th className="px-3 py-2 text-right">Rate</th>
-              <th className="px-3 py-2 text-right">Gross</th>
-              <th className="px-3 py-2 text-right">Tax</th>
-              <th className="px-3 py-2 text-right">Net</th>
-              <th className="px-3 py-2">Status</th>
-            </tr>
-          </thead>
-          <tbody>
-            {loading ? (
-              <tr><td colSpan={10} className="px-3 py-8 text-center text-muted-foreground"><Loader2 className="w-5 h-5 animate-spin inline" /></td></tr>
-            ) : rows.length === 0 ? (
-              <tr><td colSpan={10} className="px-3 py-8 text-center text-muted-foreground">No payroll entries match these filters.</td></tr>
-            ) : (
-              rows.map((r) => {
-                const pv = preview?.rows.find((p) => p.id === r.id);
-                const hasWarn = pv && pv.warnings.length > 0;
-                return (
-                  <tr key={r.id} className={`border-t hover:bg-gray-50 ${hasWarn ? "bg-amber-50/40" : ""}`}>
-                    <td className="px-3 py-2">
-                      <input type="checkbox" checked={selected.has(r.id)} onChange={() => toggle(r.id)} />
-                    </td>
-                    <td className="px-3 py-2">
-                      <div className="font-medium">{r.employeeName ?? r.employeeId.slice(0, 8)}</div>
-                      {pv && (
-                        <div className="text-xs text-muted-foreground">
-                          {pv.bankAccountName ?? "—"} · rt {pv.bankBsb ?? "—"} · acct {maskAccount(pv.bankAccountNumber)}
-                          {hasWarn && (
-                            <span className="ml-2 text-amber-700">⚠ {pv.warnings[0]}{pv.warnings.length > 1 ? ` (+${pv.warnings.length - 1})` : ""}</span>
-                          )}
+      {/* Grouped by Site → Week */}
+      {loading ? (
+        <div className="bg-white border rounded-lg p-12 text-center text-muted-foreground">
+          <Loader2 className="w-6 h-6 animate-spin inline" />
+        </div>
+      ) : rows.length === 0 ? (
+        <div className="bg-white border rounded-lg p-12 text-center text-muted-foreground">
+          No payroll entries match these filters.
+        </div>
+      ) : (
+        <div className="space-y-4">
+          {groupBySiteAndWeek(rows).map((site) => {
+            const siteIds = Array.from(site.weeks.values()).flat().map((r) => r.id);
+            const siteAllSelected = siteIds.every((id) => selected.has(id));
+            const siteSomeSelected = siteIds.some((id) => selected.has(id));
+            return (
+              <div key={site.siteId ?? "__nosite__"} className="bg-white border rounded-lg overflow-hidden">
+                {/* Site header */}
+                <div className="flex items-center gap-3 px-4 py-3 bg-brand-navy text-white">
+                  <input
+                    type="checkbox"
+                    checked={siteAllSelected}
+                    ref={(el) => { if (el) el.indeterminate = !siteAllSelected && siteSomeSelected; }}
+                    onChange={() => toggleMany(siteIds)}
+                    className="w-4 h-4"
+                  />
+                  <div className="flex-1">
+                    <div className="font-semibold text-base">{site.siteName}</div>
+                    <div className="text-xs opacity-70">
+                      {site.count} entr{site.count === 1 ? "y" : "ies"} · {site.weeks.size} week{site.weeks.size === 1 ? "" : "s"}
+                    </div>
+                  </div>
+                  <div className="text-right">
+                    <div className="text-xs uppercase tracking-wider opacity-70">Site total (net)</div>
+                    <div className="brand-gold text-lg font-semibold">{fmtUsd(site.total)}</div>
+                  </div>
+                </div>
+
+                {/* Weeks */}
+                {Array.from(site.weeks.entries()).map(([weekStart, weekRows]) => {
+                  const weekIds = weekRows.map((r) => r.id);
+                  const weekTotal = weekRows.reduce((a, r) => a + Number(r.netPay), 0);
+                  const weekAll = weekIds.every((id) => selected.has(id));
+                  const weekSome = weekIds.some((id) => selected.has(id));
+                  return (
+                    <div key={weekStart} className="border-t">
+                      <div className="flex items-center gap-3 px-4 py-2 bg-gray-50 border-b">
+                        <input
+                          type="checkbox"
+                          checked={weekAll}
+                          ref={(el) => { if (el) el.indeterminate = !weekAll && weekSome; }}
+                          onChange={() => toggleMany(weekIds)}
+                          className="w-3.5 h-3.5"
+                        />
+                        <div className="flex-1 text-sm">
+                          <span className="font-medium text-brand-navy">Week of {fmtWeekRange(weekRows[0].periodStart, weekRows[0].periodEnd)}</span>
+                          <span className="ml-2 text-xs text-muted-foreground">({weekRows.length} employee{weekRows.length === 1 ? "" : "s"})</span>
                         </div>
-                      )}
-                    </td>
-                    <td className="px-3 py-2">{r.siteName ?? "—"}</td>
-                    <td className="px-3 py-2 text-xs">{r.periodStart} → {r.periodEnd}</td>
-                    <td className="px-3 py-2 text-right">{Number(r.totalHours).toFixed(2)}</td>
-                    <td className="px-3 py-2 text-right">{fmtUsd(r.hourlyRate)}</td>
-                    <td className="px-3 py-2 text-right">{fmtUsd(r.grossPay)}</td>
-                    <td className="px-3 py-2 text-right text-muted-foreground">{fmtUsd(r.tax)}</td>
-                    <td className="px-3 py-2 text-right font-semibold">{fmtUsd(r.netPay)}</td>
-                    <td className="px-3 py-2">
-                      <span className={`text-xs px-2 py-0.5 rounded ${
-                        r.status === "paid" ? "bg-green-100 text-green-800" :
-                        r.status === "processed" ? "bg-blue-100 text-blue-800" :
-                        "bg-gray-100 text-gray-700"
-                      }`}>{r.status}</span>
-                    </td>
-                  </tr>
-                );
-              })
-            )}
-          </tbody>
-        </table>
-      </div>
+                        <div className="text-sm text-muted-foreground">
+                          Week net: <strong className="text-brand-navy">{fmtUsd(weekTotal)}</strong>
+                        </div>
+                      </div>
+                      <table className="w-full text-sm">
+                        <thead className="text-left text-[10px] uppercase tracking-wider text-muted-foreground">
+                          <tr>
+                            <th className="px-3 py-1.5 w-8"></th>
+                            <th className="px-3 py-1.5">Employee</th>
+                            <th className="px-3 py-1.5 text-right">Hours</th>
+                            <th className="px-3 py-1.5 text-right">Rate</th>
+                            <th className="px-3 py-1.5 text-right">Gross</th>
+                            <th className="px-3 py-1.5 text-right">Tax</th>
+                            <th className="px-3 py-1.5 text-right">Net</th>
+                            <th className="px-3 py-1.5">Status</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {weekRows.map((r) => {
+                            const pv = preview?.rows.find((p) => p.id === r.id);
+                            const hasWarn = pv && pv.warnings.length > 0;
+                            return (
+                              <tr key={r.id} className={`border-t hover:bg-gray-50 ${hasWarn ? "bg-amber-50/40" : ""}`}>
+                                <td className="px-3 py-2">
+                                  <input type="checkbox" checked={selected.has(r.id)} onChange={() => toggle(r.id)} />
+                                </td>
+                                <td className="px-3 py-2">
+                                  <div className="font-medium">{r.employeeName ?? r.employeeId.slice(0, 8)}</div>
+                                  {pv && (
+                                    <div className="text-xs text-muted-foreground">
+                                      {pv.bankAccountName ?? "—"} · rt {pv.bankBsb ?? "—"} · acct {maskAccount(pv.bankAccountNumber)}
+                                      {hasWarn && (
+                                        <span className="ml-2 text-amber-700">⚠ {pv.warnings[0]}{pv.warnings.length > 1 ? ` (+${pv.warnings.length - 1})` : ""}</span>
+                                      )}
+                                    </div>
+                                  )}
+                                </td>
+                                <td className="px-3 py-2 text-right">{Number(r.totalHours).toFixed(2)}</td>
+                                <td className="px-3 py-2 text-right">{fmtUsd(r.hourlyRate)}</td>
+                                <td className="px-3 py-2 text-right">{fmtUsd(r.grossPay)}</td>
+                                <td className="px-3 py-2 text-right text-muted-foreground">{fmtUsd(r.tax)}</td>
+                                <td className="px-3 py-2 text-right font-semibold">{fmtUsd(r.netPay)}</td>
+                                <td className="px-3 py-2">
+                                  <span className={`text-xs px-2 py-0.5 rounded ${
+                                    r.status === "paid" ? "bg-green-100 text-green-800" :
+                                    r.status === "processed" ? "bg-blue-100 text-blue-800" :
+                                    "bg-gray-100 text-gray-700"
+                                  }`}>{r.status}</span>
+                                </td>
+                              </tr>
+                            );
+                          })}
+                        </tbody>
+                      </table>
+                    </div>
+                  );
+                })}
+              </div>
+            );
+          })}
+
+          {/* Quick "select all" button below for the rare bulk case */}
+          <div className="flex items-center justify-end gap-2 text-xs text-muted-foreground pt-1">
+            <button onClick={toggleAll} className="underline hover:text-brand-navy">
+              {selected.size === rows.length ? "Deselect all" : `Select all (${rows.length})`}
+            </button>
+          </div>
+        </div>
+      )}
 
       <p className="text-xs text-muted-foreground mt-4">
         Workflow: <strong>pending</strong> → exporting the CSV marks rows <strong>processed</strong> (file batch ID stored as reference) → after your bank confirms settlement, click <strong>Mark Paid</strong> with the bank reference number.
