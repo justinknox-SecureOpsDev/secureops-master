@@ -4,7 +4,10 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { uploadFile } from "@/lib/upload";
-import { Loader2, Upload, FileText, Trash2, Plus, Pencil, Check, X, ExternalLink } from "lucide-react";
+import {
+  Loader2, Upload, FileText, Trash2, Plus, Pencil, Check, X, ExternalLink,
+  Power, History, ChevronDown, ChevronRight,
+} from "lucide-react";
 
 type PolicyDto = {
   id: string;
@@ -13,30 +16,40 @@ type PolicyDto = {
   version: number;
   fileKey: string | null;
   fileName: string | null;
+  isActive: boolean;
   uploadedAt: string | null;
   uploadedBy: string | null;
   hasDocument: boolean;
   viewUrl: string | null;
 };
 
+type PolicyGroup = {
+  slug: string;
+  label: string;
+  isActive: boolean;
+  current: PolicyDto | null;
+  history: PolicyDto[];
+};
+
 export function PoliciesPage() {
-  const [rows, setRows] = useState<PolicyDto[]>([]);
+  const [groups, setGroups] = useState<PolicyGroup[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [busyId, setBusyId] = useState<string | null>(null);
-  const [editingId, setEditingId] = useState<string | null>(null);
+  const [busySlug, setBusySlug] = useState<string | null>(null);
+  const [editingSlug, setEditingSlug] = useState<string | null>(null);
   const [editLabel, setEditLabel] = useState("");
   const [showCreate, setShowCreate] = useState(false);
   const [newSlug, setNewSlug] = useState("");
   const [newLabel, setNewLabel] = useState("");
   const [creating, setCreating] = useState(false);
+  const [openHistory, setOpenHistory] = useState<Record<string, boolean>>({});
 
   async function load() {
     setLoading(true);
     setError(null);
     try {
-      const data = await api<PolicyDto[]>("/admin/policies");
-      setRows(data);
+      const data = await api<PolicyGroup[]>("/admin/policies");
+      setGroups(data);
     } catch (e) {
       setError(e instanceof ApiError ? e.message : (e as Error).message);
     } finally {
@@ -46,12 +59,17 @@ export function PoliciesPage() {
 
   useEffect(() => { void load(); }, []);
 
-  async function uploadFor(p: PolicyDto, file: File) {
-    setBusyId(p.id);
+  /** Resolve which row id to act on for a group (active row, else newest). */
+  function targetId(g: PolicyGroup): string {
+    return g.current?.id ?? g.history[0]?.id ?? "";
+  }
+
+  async function uploadFor(g: PolicyGroup, file: File) {
+    setBusySlug(g.slug);
     setError(null);
     try {
       const uploaded = await uploadFile(file);
-      await api(`/admin/policies/${p.id}/replace`, {
+      await api(`/admin/policies/${targetId(g)}/replace`, {
         method: "POST",
         body: { fileKey: uploaded.objectPath, fileName: uploaded.name },
       });
@@ -59,34 +77,53 @@ export function PoliciesPage() {
     } catch (e) {
       setError((e as Error).message);
     } finally {
-      setBusyId(null);
+      setBusySlug(null);
     }
   }
 
-  async function saveLabel(p: PolicyDto) {
-    if (!editLabel.trim() || editLabel === p.label) { setEditingId(null); return; }
-    setBusyId(p.id);
+  async function saveLabel(g: PolicyGroup) {
+    if (!editLabel.trim() || editLabel === g.label) { setEditingSlug(null); return; }
+    setBusySlug(g.slug);
     try {
-      await api(`/admin/policies/${p.id}`, { method: "PATCH", body: { label: editLabel.trim() } });
-      setEditingId(null);
+      await api(`/admin/policies/${targetId(g)}`, { method: "PATCH", body: { label: editLabel.trim() } });
+      setEditingSlug(null);
       await load();
     } catch (e) {
       setError((e as Error).message);
     } finally {
-      setBusyId(null);
+      setBusySlug(null);
     }
   }
 
-  async function remove(p: PolicyDto) {
-    if (!window.confirm(`Remove the "${p.label}" policy? This cannot be undone.`)) return;
-    setBusyId(p.id);
+  async function toggleActive(g: PolicyGroup) {
+    setBusySlug(g.slug);
+    setError(null);
     try {
-      await api(`/admin/policies/${p.id}`, { method: "DELETE" });
+      await api(`/admin/policies/${targetId(g)}`, {
+        method: "PATCH",
+        body: { isActive: !g.isActive },
+      });
       await load();
     } catch (e) {
       setError((e as Error).message);
     } finally {
-      setBusyId(null);
+      setBusySlug(null);
+    }
+  }
+
+  async function remove(g: PolicyGroup) {
+    if (!window.confirm(
+      `Delete the "${g.label}" policy and all ${g.history.length} version(s)?\n\n` +
+      `If any employee has signed it, deletion is blocked — deactivate it instead.`
+    )) return;
+    setBusySlug(g.slug);
+    try {
+      await api(`/admin/policies/${targetId(g)}`, { method: "DELETE" });
+      await load();
+    } catch (e) {
+      setError((e as Error).message);
+    } finally {
+      setBusySlug(null);
     }
   }
 
@@ -115,7 +152,7 @@ export function PoliciesPage() {
           <div>
             <h1 className="brand-wordmark text-2xl">Policy Documents</h1>
             <p className="text-sm text-muted-foreground">
-              Upload the PDFs applicants must read and sign during onboarding. Each upload bumps the version.
+              Upload the PDFs applicants must read and sign during onboarding. Each upload creates a new immutable version.
             </p>
           </div>
           <Button onClick={() => setShowCreate((v) => !v)} className="bg-brand-navy hover:opacity-90 text-white">
@@ -155,78 +192,99 @@ export function PoliciesPage() {
         {loading ? (
           <div className="text-center py-12 text-muted-foreground"><Loader2 className="w-6 h-6 animate-spin mx-auto" /></div>
         ) : (
-          <div className="bg-card border rounded-lg overflow-hidden">
-            <table className="w-full text-sm">
-              <thead className="bg-muted/40 text-xs uppercase tracking-wide">
-                <tr>
-                  <th className="text-left p-3">Policy</th>
-                  <th className="text-left p-3">Slug</th>
-                  <th className="text-left p-3">Document</th>
-                  <th className="text-left p-3">Version</th>
-                  <th className="text-right p-3">Actions</th>
-                </tr>
-              </thead>
-              <tbody>
-                {rows.length === 0 && (
-                  <tr><td colSpan={5} className="text-center text-muted-foreground p-6">No policies defined yet.</td></tr>
-                )}
-                {rows.map((p) => (
-                  <tr key={p.id} className="border-t">
-                    <td className="p-3">
-                      {editingId === p.id ? (
+          <div className="space-y-3">
+            {groups.length === 0 && (
+              <div className="text-center text-muted-foreground p-6 bg-card border rounded-lg">No policies defined yet.</div>
+            )}
+            {groups.map((g) => {
+              const open = !!openHistory[g.slug];
+              const display = g.current ?? g.history[0];
+              return (
+                <div key={g.slug} className="bg-card border rounded-lg overflow-hidden">
+                  <div className="flex flex-wrap items-center gap-3 p-4">
+                    <div className="flex-1 min-w-[16rem]">
+                      {editingSlug === g.slug ? (
                         <div className="flex items-center gap-1">
                           <Input value={editLabel} onChange={(e) => setEditLabel(e.target.value)} className="h-8" autoFocus />
-                          <Button size="sm" variant="ghost" onClick={() => saveLabel(p)} disabled={busyId === p.id}><Check className="w-4 h-4" /></Button>
-                          <Button size="sm" variant="ghost" onClick={() => setEditingId(null)}><X className="w-4 h-4" /></Button>
+                          <Button size="sm" variant="ghost" onClick={() => saveLabel(g)} disabled={busySlug === g.slug}><Check className="w-4 h-4" /></Button>
+                          <Button size="sm" variant="ghost" onClick={() => setEditingSlug(null)}><X className="w-4 h-4" /></Button>
                         </div>
                       ) : (
                         <div className="flex items-center gap-2">
-                          <span className="font-medium">{p.label}</span>
-                          <button onClick={() => { setEditingId(p.id); setEditLabel(p.label); }} className="text-muted-foreground hover:text-foreground">
+                          <span className="font-medium">{g.label}</span>
+                          <button onClick={() => { setEditingSlug(g.slug); setEditLabel(g.label); }} className="text-muted-foreground hover:text-foreground">
                             <Pencil className="w-3.5 h-3.5" />
                           </button>
+                          <span className="text-xs font-mono text-muted-foreground">{g.slug}</span>
+                          {g.isActive ? (
+                            <span className="text-[10px] uppercase px-1.5 py-0.5 rounded bg-emerald-100 text-emerald-800 border border-emerald-200">Active</span>
+                          ) : (
+                            <span className="text-[10px] uppercase px-1.5 py-0.5 rounded bg-muted text-muted-foreground border">Inactive</span>
+                          )}
                         </div>
                       )}
-                    </td>
-                    <td className="p-3 text-xs font-mono text-muted-foreground">{p.slug}</td>
-                    <td className="p-3">
-                      {p.hasDocument ? (
-                        <a href={p.viewUrl ?? "#"} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 text-brand-navy hover:underline">
-                          <FileText className="w-4 h-4" />
-                          <span className="truncate max-w-[18ch]">{p.fileName}</span>
-                          <ExternalLink className="w-3 h-3" />
-                        </a>
-                      ) : (
-                        <span className="text-xs text-muted-foreground italic">No document yet</span>
-                      )}
-                    </td>
-                    <td className="p-3">
-                      {p.version > 0 ? <span className="px-2 py-0.5 rounded bg-accent/40 text-xs">v{p.version}</span> : <span className="text-xs text-muted-foreground">—</span>}
-                    </td>
-                    <td className="p-3 text-right">
-                      <div className="inline-flex gap-1 items-center">
-                        <UploadButton accept=".pdf" disabled={busyId === p.id} onPick={(f) => uploadFor(p, f)}>
-                          {busyId === p.id ? (
-                            <><Loader2 className="w-3.5 h-3.5 animate-spin mr-1" /> Uploading…</>
-                          ) : (
-                            <><Upload className="w-3.5 h-3.5 mr-1" /> {p.hasDocument ? "Replace PDF" : "Upload PDF"}</>
-                          )}
-                        </UploadButton>
-                        <Button size="sm" variant="ghost" disabled={busyId === p.id} onClick={() => remove(p)} className="text-destructive hover:text-destructive">
-                          <Trash2 className="w-3.5 h-3.5" />
-                        </Button>
+                      <div className="text-xs text-muted-foreground mt-1 flex items-center gap-2">
+                        {display?.hasDocument ? (
+                          <a href={display.viewUrl ?? "#"} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 text-brand-navy hover:underline">
+                            <FileText className="w-3.5 h-3.5" />
+                            <span className="truncate max-w-[24ch]">{display.fileName}</span>
+                            <ExternalLink className="w-3 h-3" />
+                          </a>
+                        ) : (
+                          <span className="italic">No document yet</span>
+                        )}
+                        {display && <span className="px-1.5 py-0.5 rounded bg-accent/40">v{display.version}</span>}
+                        {g.history.length > 1 && (
+                          <button
+                            onClick={() => setOpenHistory((p) => ({ ...p, [g.slug]: !open }))}
+                            className="inline-flex items-center gap-0.5 text-xs hover:text-foreground"
+                          >
+                            {open ? <ChevronDown className="w-3 h-3" /> : <ChevronRight className="w-3 h-3" />}
+                            <History className="w-3 h-3" /> {g.history.length} versions
+                          </button>
+                        )}
                       </div>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+                    </div>
+                    <div className="flex items-center gap-1">
+                      <UploadButton accept=".pdf" disabled={busySlug === g.slug} onPick={(f) => uploadFor(g, f)}>
+                        {busySlug === g.slug ? (
+                          <><Loader2 className="w-3.5 h-3.5 animate-spin mr-1" /> Working…</>
+                        ) : (
+                          <><Upload className="w-3.5 h-3.5 mr-1" /> {display?.hasDocument ? "Replace PDF" : "Upload PDF"}</>
+                        )}
+                      </UploadButton>
+                      <Button size="sm" variant="ghost" disabled={busySlug === g.slug} onClick={() => toggleActive(g)} title={g.isActive ? "Deactivate" : "Activate"}>
+                        <Power className={`w-3.5 h-3.5 ${g.isActive ? "text-emerald-700" : "text-muted-foreground"}`} />
+                      </Button>
+                      <Button size="sm" variant="ghost" disabled={busySlug === g.slug} onClick={() => remove(g)} className="text-destructive hover:text-destructive" title="Delete">
+                        <Trash2 className="w-3.5 h-3.5" />
+                      </Button>
+                    </div>
+                  </div>
+                  {open && g.history.length > 1 && (
+                    <div className="border-t bg-muted/20 p-3">
+                      <div className="text-xs uppercase tracking-wide text-muted-foreground mb-2">Version history</div>
+                      <ul className="space-y-1.5">
+                        {g.history.map((h) => (
+                          <li key={h.id} className="flex items-center gap-2 text-xs">
+                            <span className="font-mono px-1.5 py-0.5 rounded bg-accent/40">v{h.version}</span>
+                            {h.isActive && <span className="px-1.5 py-0.5 rounded bg-emerald-100 text-emerald-800 border border-emerald-200">Active</span>}
+                            {h.fileName && <span className="text-muted-foreground truncate">{h.fileName}</span>}
+                            {h.uploadedAt && <span className="text-muted-foreground">· {new Date(h.uploadedAt).toLocaleString()}</span>}
+                          </li>
+                        ))}
+                      </ul>
+                    </div>
+                  )}
+                </div>
+              );
+            })}
           </div>
         )}
 
         <p className="text-xs text-muted-foreground mt-4">
-          Applicants must open and read each policy before they can tick its acknowledgement checkbox during onboarding.
-          The version they signed is permanently recorded with their signature.
+          Applicants must open and confirm each active policy before they can tick its acknowledgement checkbox during onboarding.
+          The exact version they signed is permanently recorded with their signature; signed versions cannot be deleted (deactivate them instead).
         </p>
       </div>
     </div>

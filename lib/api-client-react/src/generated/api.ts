@@ -42,6 +42,7 @@ import type {
   CreateInvoiceRequest,
   CreateLicenseRequest,
   CreatePayrollRequest,
+  CreatePolicyRequest,
   CreateShiftRequest,
   CreateSiteRequest,
   Employee,
@@ -69,7 +70,11 @@ import type {
   OnboardingPrefill,
   OnboardingSubmission,
   PayrollEntry,
+  Policy,
+  PolicyGroup,
+  PolicyPublic,
   RegisterPushTokenBody,
+  ReplacePolicyDocumentRequest,
   ReviewApplicationRequest,
   SendChatMessageBody,
   Shift,
@@ -89,6 +94,7 @@ import type {
   UpdateMyLocation200,
   UpdateMyLocationBody,
   UpdatePayrollRequest,
+  UpdatePolicyRequest,
   UpdateShiftRequest,
   UpdateSiteRequest,
   UploadUrlRequest,
@@ -6216,3 +6222,484 @@ export const useAdminResendOnboardingLink = <
 > => {
   return useMutation(getAdminResendOnboardingLinkMutationOptions(options));
 };
+
+/**
+ * List all policy slugs grouped by slug, with the active version and full version history.
+ */
+export const getAdminListPoliciesUrl = () => {
+  return `/api/admin/policies`;
+};
+
+export const adminListPolicies = async (
+  options?: RequestInit,
+): Promise<PolicyGroup[]> => {
+  return customFetch<PolicyGroup[]>(getAdminListPoliciesUrl(), {
+    ...options,
+    method: "GET",
+  });
+};
+
+export const getAdminListPoliciesQueryKey = () => {
+  return [`/api/admin/policies`] as const;
+};
+
+export const getAdminListPoliciesQueryOptions = <
+  TData = Awaited<ReturnType<typeof adminListPolicies>>,
+  TError = ErrorType<unknown>,
+>(options?: {
+  query?: UseQueryOptions<
+    Awaited<ReturnType<typeof adminListPolicies>>,
+    TError,
+    TData
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}) => {
+  const { query: queryOptions, request: requestOptions } = options ?? {};
+
+  const queryKey = queryOptions?.queryKey ?? getAdminListPoliciesQueryKey();
+
+  const queryFn: QueryFunction<
+    Awaited<ReturnType<typeof adminListPolicies>>
+  > = ({ signal }) => adminListPolicies({ signal, ...requestOptions });
+
+  return { queryKey, queryFn, ...queryOptions } as UseQueryOptions<
+    Awaited<ReturnType<typeof adminListPolicies>>,
+    TError,
+    TData
+  > & { queryKey: QueryKey };
+};
+
+export type AdminListPoliciesQueryResult = NonNullable<
+  Awaited<ReturnType<typeof adminListPolicies>>
+>;
+export type AdminListPoliciesQueryError = ErrorType<unknown>;
+
+export function useAdminListPolicies<
+  TData = Awaited<ReturnType<typeof adminListPolicies>>,
+  TError = ErrorType<unknown>,
+>(options?: {
+  query?: UseQueryOptions<
+    Awaited<ReturnType<typeof adminListPolicies>>,
+    TError,
+    TData
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+  const queryOptions = getAdminListPoliciesQueryOptions(options);
+
+  const query = useQuery(queryOptions) as UseQueryResult<TData, TError> & {
+    queryKey: QueryKey;
+  };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
+
+/**
+ * Create a new policy slug at version 1 with no document attached.
+ */
+export const getAdminCreatePolicyUrl = () => {
+  return `/api/admin/policies`;
+};
+
+export const adminCreatePolicy = async (
+  createPolicyRequest: CreatePolicyRequest,
+  options?: RequestInit,
+): Promise<Policy> => {
+  return customFetch<Policy>(getAdminCreatePolicyUrl(), {
+    ...options,
+    method: "POST",
+    headers: { "Content-Type": "application/json", ...options?.headers },
+    body: JSON.stringify(createPolicyRequest),
+  });
+};
+
+export const getAdminCreatePolicyMutationOptions = <
+  TError = ErrorType<ErrorResponse>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof adminCreatePolicy>>,
+    TError,
+    { data: BodyType<CreatePolicyRequest> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof adminCreatePolicy>>,
+  TError,
+  { data: BodyType<CreatePolicyRequest> },
+  TContext
+> => {
+  const mutationKey = ["adminCreatePolicy"];
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof adminCreatePolicy>>,
+    { data: BodyType<CreatePolicyRequest> }
+  > = (props) => {
+    const { data } = props ?? {};
+
+    return adminCreatePolicy(data, requestOptions);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type AdminCreatePolicyMutationResult = NonNullable<
+  Awaited<ReturnType<typeof adminCreatePolicy>>
+>;
+export type AdminCreatePolicyMutationBody = BodyType<CreatePolicyRequest>;
+export type AdminCreatePolicyMutationError = ErrorType<ErrorResponse>;
+
+export const useAdminCreatePolicy = <
+  TError = ErrorType<ErrorResponse>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof adminCreatePolicy>>,
+    TError,
+    { data: BodyType<CreatePolicyRequest> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationResult<
+  Awaited<ReturnType<typeof adminCreatePolicy>>,
+  TError,
+  { data: BodyType<CreatePolicyRequest> },
+  TContext
+> => {
+  return useMutation(getAdminCreatePolicyMutationOptions(options));
+};
+
+/**
+ * Rename a policy (applies label to all versions of its slug) and/or activate/deactivate it.
+ */
+export const getAdminUpdatePolicyUrl = (id: string) => {
+  return `/api/admin/policies/${id}`;
+};
+
+export const adminUpdatePolicy = async (
+  id: string,
+  updatePolicyRequest: UpdatePolicyRequest,
+  options?: RequestInit,
+): Promise<Policy> => {
+  return customFetch<Policy>(getAdminUpdatePolicyUrl(id), {
+    ...options,
+    method: "PATCH",
+    headers: { "Content-Type": "application/json", ...options?.headers },
+    body: JSON.stringify(updatePolicyRequest),
+  });
+};
+
+export const getAdminUpdatePolicyMutationOptions = <
+  TError = ErrorType<ErrorResponse>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof adminUpdatePolicy>>,
+    TError,
+    { id: string; data: BodyType<UpdatePolicyRequest> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof adminUpdatePolicy>>,
+  TError,
+  { id: string; data: BodyType<UpdatePolicyRequest> },
+  TContext
+> => {
+  const mutationKey = ["adminUpdatePolicy"];
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof adminUpdatePolicy>>,
+    { id: string; data: BodyType<UpdatePolicyRequest> }
+  > = (props) => {
+    const { id, data } = props ?? {};
+
+    return adminUpdatePolicy(id, data, requestOptions);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type AdminUpdatePolicyMutationResult = NonNullable<
+  Awaited<ReturnType<typeof adminUpdatePolicy>>
+>;
+export type AdminUpdatePolicyMutationBody = BodyType<UpdatePolicyRequest>;
+export type AdminUpdatePolicyMutationError = ErrorType<ErrorResponse>;
+
+export const useAdminUpdatePolicy = <
+  TError = ErrorType<ErrorResponse>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof adminUpdatePolicy>>,
+    TError,
+    { id: string; data: BodyType<UpdatePolicyRequest> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationResult<
+  Awaited<ReturnType<typeof adminUpdatePolicy>>,
+  TError,
+  { id: string; data: BodyType<UpdatePolicyRequest> },
+  TContext
+> => {
+  return useMutation(getAdminUpdatePolicyMutationOptions(options));
+};
+
+/**
+ * Hard-delete a policy slug and all its version history. Refuses with 409
+if any version is referenced by an existing onboarding submission —
+admin should deactivate instead.
+
+ */
+export const getAdminDeletePolicyUrl = (id: string) => {
+  return `/api/admin/policies/${id}`;
+};
+
+export const adminDeletePolicy = async (
+  id: string,
+  options?: RequestInit,
+): Promise<void> => {
+  return customFetch<void>(getAdminDeletePolicyUrl(id), {
+    ...options,
+    method: "DELETE",
+  });
+};
+
+export const getAdminDeletePolicyMutationOptions = <
+  TError = ErrorType<ErrorResponse>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof adminDeletePolicy>>,
+    TError,
+    { id: string },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof adminDeletePolicy>>,
+  TError,
+  { id: string },
+  TContext
+> => {
+  const mutationKey = ["adminDeletePolicy"];
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof adminDeletePolicy>>,
+    { id: string }
+  > = (props) => {
+    const { id } = props ?? {};
+
+    return adminDeletePolicy(id, requestOptions);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type AdminDeletePolicyMutationResult = NonNullable<
+  Awaited<ReturnType<typeof adminDeletePolicy>>
+>;
+
+export type AdminDeletePolicyMutationError = ErrorType<ErrorResponse>;
+
+export const useAdminDeletePolicy = <
+  TError = ErrorType<ErrorResponse>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof adminDeletePolicy>>,
+    TError,
+    { id: string },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationResult<
+  Awaited<ReturnType<typeof adminDeletePolicy>>,
+  TError,
+  { id: string },
+  TContext
+> => {
+  return useMutation(getAdminDeletePolicyMutationOptions(options));
+};
+
+/**
+ * Replace the document for a policy slug. Inserts a new immutable
+version row at (max version + 1), demotes all prior versions of the
+slug to inactive, and marks the new row active.
+
+ */
+export const getAdminReplacePolicyDocumentUrl = (id: string) => {
+  return `/api/admin/policies/${id}/replace`;
+};
+
+export const adminReplacePolicyDocument = async (
+  id: string,
+  replacePolicyDocumentRequest: ReplacePolicyDocumentRequest,
+  options?: RequestInit,
+): Promise<Policy> => {
+  return customFetch<Policy>(getAdminReplacePolicyDocumentUrl(id), {
+    ...options,
+    method: "POST",
+    headers: { "Content-Type": "application/json", ...options?.headers },
+    body: JSON.stringify(replacePolicyDocumentRequest),
+  });
+};
+
+export const getAdminReplacePolicyDocumentMutationOptions = <
+  TError = ErrorType<ErrorResponse>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof adminReplacePolicyDocument>>,
+    TError,
+    { id: string; data: BodyType<ReplacePolicyDocumentRequest> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof adminReplacePolicyDocument>>,
+  TError,
+  { id: string; data: BodyType<ReplacePolicyDocumentRequest> },
+  TContext
+> => {
+  const mutationKey = ["adminReplacePolicyDocument"];
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof adminReplacePolicyDocument>>,
+    { id: string; data: BodyType<ReplacePolicyDocumentRequest> }
+  > = (props) => {
+    const { id, data } = props ?? {};
+
+    return adminReplacePolicyDocument(id, data, requestOptions);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type AdminReplacePolicyDocumentMutationResult = NonNullable<
+  Awaited<ReturnType<typeof adminReplacePolicyDocument>>
+>;
+export type AdminReplacePolicyDocumentMutationBody =
+  BodyType<ReplacePolicyDocumentRequest>;
+export type AdminReplacePolicyDocumentMutationError = ErrorType<ErrorResponse>;
+
+export const useAdminReplacePolicyDocument = <
+  TError = ErrorType<ErrorResponse>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof adminReplacePolicyDocument>>,
+    TError,
+    { id: string; data: BodyType<ReplacePolicyDocumentRequest> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationResult<
+  Awaited<ReturnType<typeof adminReplacePolicyDocument>>,
+  TError,
+  { id: string; data: BodyType<ReplacePolicyDocumentRequest> },
+  TContext
+> => {
+  return useMutation(getAdminReplacePolicyDocumentMutationOptions(options));
+};
+
+/**
+ * Public — active policies (with documents) shown to applicants on the onboarding form.
+ */
+export const getListActivePoliciesUrl = () => {
+  return `/api/policies/active`;
+};
+
+export const listActivePolicies = async (
+  options?: RequestInit,
+): Promise<PolicyPublic[]> => {
+  return customFetch<PolicyPublic[]>(getListActivePoliciesUrl(), {
+    ...options,
+    method: "GET",
+  });
+};
+
+export const getListActivePoliciesQueryKey = () => {
+  return [`/api/policies/active`] as const;
+};
+
+export const getListActivePoliciesQueryOptions = <
+  TData = Awaited<ReturnType<typeof listActivePolicies>>,
+  TError = ErrorType<unknown>,
+>(options?: {
+  query?: UseQueryOptions<
+    Awaited<ReturnType<typeof listActivePolicies>>,
+    TError,
+    TData
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}) => {
+  const { query: queryOptions, request: requestOptions } = options ?? {};
+
+  const queryKey = queryOptions?.queryKey ?? getListActivePoliciesQueryKey();
+
+  const queryFn: QueryFunction<
+    Awaited<ReturnType<typeof listActivePolicies>>
+  > = ({ signal }) => listActivePolicies({ signal, ...requestOptions });
+
+  return { queryKey, queryFn, ...queryOptions } as UseQueryOptions<
+    Awaited<ReturnType<typeof listActivePolicies>>,
+    TError,
+    TData
+  > & { queryKey: QueryKey };
+};
+
+export type ListActivePoliciesQueryResult = NonNullable<
+  Awaited<ReturnType<typeof listActivePolicies>>
+>;
+export type ListActivePoliciesQueryError = ErrorType<unknown>;
+
+export function useListActivePolicies<
+  TData = Awaited<ReturnType<typeof listActivePolicies>>,
+  TError = ErrorType<unknown>,
+>(options?: {
+  query?: UseQueryOptions<
+    Awaited<ReturnType<typeof listActivePolicies>>,
+    TError,
+    TData
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+  const queryOptions = getListActivePoliciesQueryOptions(options);
+
+  const query = useQuery(queryOptions) as UseQueryResult<TData, TError> & {
+    queryKey: QueryKey;
+  };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}

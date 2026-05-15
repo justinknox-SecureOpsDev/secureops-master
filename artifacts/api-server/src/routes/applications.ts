@@ -29,23 +29,12 @@ const policyStorage = new ObjectStorageService();
 
 const ONBOARDING_TOKEN_TTL_DAYS = 14;
 
-const DEFAULT_POLICIES: { slug: string; label: string }[] = [
-  { slug: "drug_free", label: "Drug-Free Workplace Policy" },
-  { slug: "uniform_sou", label: "Uniform Standard of Use" },
-  { slug: "non_disclosure", label: "Non-Disclosure Agreement" },
-  { slug: "contract", label: "Employment Contract" },
-];
-
-async function ensurePolicyDefaults(): Promise<void> {
-  const existing = await db.select({ id: policiesTable.id }).from(policiesTable).limit(1);
-  if (existing.length > 0) return;
-  await db.insert(policiesTable).values(DEFAULT_POLICIES).onConflictDoNothing();
-}
-
 async function loadActivePolicies() {
-  await ensurePolicyDefaults();
+  const { seedPolicies } = await import("@workspace/db");
+  await seedPolicies();
   const rows = await db.select().from(policiesTable);
-  const active = rows.filter((r) => !!r.fileKey);
+  // "Active for onboarding" = isActive AND has a document.
+  const active = rows.filter((r) => r.isActive && !!r.fileKey);
   const out: Array<{
     id: string; slug: string; label: string; version: number;
     fileKey: string; fileName: string | null; viewUrl: string;

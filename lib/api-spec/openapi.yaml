@@ -1468,6 +1468,128 @@ paths:
             application/json:
               schema: { $ref: "#/components/schemas/OnboardingLinkResponse" }
 
+  /admin/policies:
+    get:
+      tags: [policies]
+      operationId: adminListPolicies
+      description: List all policy slugs grouped by slug, with the active version and full version history.
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: "#/components/schemas/PolicyGroup" }
+    post:
+      tags: [policies]
+      operationId: adminCreatePolicy
+      description: Create a new policy slug at version 1 with no document attached.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/CreatePolicyRequest" }
+      responses:
+        "201":
+          description: Created
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Policy" }
+        "409":
+          description: Slug already exists
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ErrorResponse" }
+
+  /admin/policies/{id}:
+    patch:
+      tags: [policies]
+      operationId: adminUpdatePolicy
+      description: Rename a policy (applies label to all versions of its slug) and/or activate/deactivate it.
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/UpdatePolicyRequest" }
+      responses:
+        "200":
+          description: Updated
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Policy" }
+        "404":
+          description: Not Found
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ErrorResponse" }
+    delete:
+      tags: [policies]
+      operationId: adminDeletePolicy
+      description: |
+        Hard-delete a policy slug and all its version history. Refuses with 409
+        if any version is referenced by an existing onboarding submission —
+        admin should deactivate instead.
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+      responses:
+        "204":
+          description: Deleted
+        "404":
+          description: Not Found
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ErrorResponse" }
+        "409":
+          description: In use by submissions — deactivate instead
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ErrorResponse" }
+
+  /admin/policies/{id}/replace:
+    post:
+      tags: [policies]
+      operationId: adminReplacePolicyDocument
+      description: |
+        Replace the document for a policy slug. Inserts a new immutable
+        version row at (max version + 1), demotes all prior versions of the
+        slug to inactive, and marks the new row active.
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/ReplacePolicyDocumentRequest" }
+      responses:
+        "200":
+          description: Replaced
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Policy" }
+        "404":
+          description: Not Found
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ErrorResponse" }
+
+  /policies/active:
+    get:
+      tags: [policies]
+      operationId: listActivePolicies
+      description: Public — active policies (with documents) shown to applicants on the onboarding form.
+      security: []
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: "#/components/schemas/PolicyPublic" }
+
 components:
   schemas:
     HealthStatus:
@@ -2638,7 +2760,7 @@ components:
 
     OnboardingPrefill:
       type: object
-      required: [employeeId, firstName, lastName, email]
+      required: [employeeId, firstName, lastName, email, policies]
       properties:
         employeeId: { type: string }
         firstName: { type: string }
@@ -2650,6 +2772,75 @@ components:
         siaLicenseNumber: { type: string, nullable: true }
         siaLicenseLevel: { type: integer, nullable: true }
         existing: { type: boolean, description: "True if onboarding already submitted" }
+        policies:
+          type: array
+          description: "Active acknowledgement policies the applicant must view and sign."
+          items: { $ref: "#/components/schemas/PolicyPublic" }
+
+    PolicyPublic:
+      type: object
+      required: [id, slug, label, version, fileName, viewUrl]
+      properties:
+        id: { type: string }
+        slug: { type: string }
+        label: { type: string }
+        version: { type: integer }
+        fileKey: { type: string, nullable: true }
+        fileName: { type: string, nullable: true }
+        viewUrl: { type: string, nullable: true, description: "Signed download URL for the policy PDF" }
+
+    Policy:
+      type: object
+      required: [id, slug, label, version, isActive, hasDocument]
+      properties:
+        id: { type: string }
+        slug: { type: string }
+        label: { type: string }
+        version: { type: integer }
+        fileKey: { type: string, nullable: true }
+        fileName: { type: string, nullable: true }
+        isActive: { type: boolean }
+        uploadedAt: { type: string, format: date-time, nullable: true }
+        uploadedBy: { type: string, nullable: true }
+        hasDocument: { type: boolean }
+        viewUrl: { type: string, nullable: true }
+
+    PolicyGroup:
+      type: object
+      required: [slug, label, isActive, current, history]
+      properties:
+        slug: { type: string }
+        label: { type: string }
+        isActive: { type: boolean, description: "True if any version of this slug is currently active" }
+        current:
+          oneOf:
+            - { $ref: "#/components/schemas/Policy" }
+            - { type: "null" }
+          description: "The currently active version of this policy slug, or null if none active"
+        history:
+          type: array
+          items: { $ref: "#/components/schemas/Policy" }
+          description: "All versions of this slug, newest first"
+
+    CreatePolicyRequest:
+      type: object
+      required: [slug, label]
+      properties:
+        slug: { type: string, pattern: "^[a-z0-9_]+$" }
+        label: { type: string, minLength: 1 }
+
+    UpdatePolicyRequest:
+      type: object
+      properties:
+        label: { type: string, minLength: 1 }
+        isActive: { type: boolean }
+
+    ReplacePolicyDocumentRequest:
+      type: object
+      required: [fileKey, fileName]
+      properties:
+        fileKey: { type: string, minLength: 1 }
+        fileName: { type: string, minLength: 1 }
 
     Acknowledgement:
       type: object

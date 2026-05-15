@@ -938,6 +938,17 @@ export interface ApproveApplicationResponse {
   emailSent?: boolean;
 }
 
+export interface PolicyPublic {
+  id: string;
+  slug: string;
+  label: string;
+  version: number;
+  fileKey?: string | null;
+  fileName: string | null;
+  /** Signed download URL for the policy PDF */
+  viewUrl: string | null;
+}
+
 export interface OnboardingPrefill {
   employeeId: string;
   firstName: string;
@@ -950,6 +961,53 @@ export interface OnboardingPrefill {
   siaLicenseLevel?: number | null;
   /** True if onboarding already submitted */
   existing?: boolean;
+  /** Active acknowledgement policies the applicant must view and sign. */
+  policies: PolicyPublic[];
+}
+
+export interface Policy {
+  id: string;
+  slug: string;
+  label: string;
+  version: number;
+  fileKey?: string | null;
+  fileName?: string | null;
+  isActive: boolean;
+  uploadedAt?: string | null;
+  uploadedBy?: string | null;
+  hasDocument: boolean;
+  viewUrl?: string | null;
+}
+
+export interface PolicyGroup {
+  slug: string;
+  label: string;
+  /** True if any version of this slug is currently active */
+  isActive: boolean;
+  /** The currently active version of this policy slug, or null if none active */
+  current: Policy | null;
+  /** All versions of this slug, newest first */
+  history: Policy[];
+}
+
+export interface CreatePolicyRequest {
+  /** @pattern ^[a-z0-9_]+$ */
+  slug: string;
+  /** @minLength 1 */
+  label: string;
+}
+
+export interface UpdatePolicyRequest {
+  /** @minLength 1 */
+  label?: string;
+  isActive?: boolean;
+}
+
+export interface ReplacePolicyDocumentRequest {
+  /** @minLength 1 */
+  fileKey: string;
+  /** @minLength 1 */
+  fileName: string;
 }
 
 export interface Acknowledgement {

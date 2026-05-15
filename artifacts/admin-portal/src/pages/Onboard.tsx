@@ -281,7 +281,6 @@ export function OnboardPage() {
                           href={p.viewUrl}
                           target="_blank"
                           rel="noreferrer"
-                          onClick={() => setViewed((prev) => ({ ...prev, [p.slug]: true }))}
                           className="shrink-0 inline-flex items-center gap-1 text-xs px-2 py-1 rounded border hover:bg-accent/50"
                         >
                           <Eye className="w-3.5 h-3.5" /> Open in new tab
@@ -293,7 +292,6 @@ export function OnboardPage() {
                         src={p.viewUrl}
                         title={p.label}
                         className="w-full h-72 bg-white border-b"
-                        onLoad={() => setViewed((prev) => ({ ...prev, [p.slug]: true }))}
                       />
                     ) : (
                       <div className="p-4 text-sm text-muted-foreground italic border-b">
@@ -301,9 +299,25 @@ export function OnboardPage() {
                       </div>
                     )}
                     <div className="p-3 space-y-2">
+                      {p.viewUrl && !isViewed && (
+                        <Button
+                          type="button"
+                          variant="outline"
+                          size="sm"
+                          onClick={() => setViewed((prev) => ({ ...prev, [p.slug]: true }))}
+                          className="w-full border-brand-gold text-brand-navy hover:bg-accent/30"
+                        >
+                          <Eye className="w-3.5 h-3.5 mr-1.5" /> I have read this document
+                        </Button>
+                      )}
+                      {p.viewUrl && isViewed && (
+                        <div className="text-xs text-emerald-700 flex items-center gap-1">
+                          <CheckCircle2 className="w-3.5 h-3.5" /> Marked as read
+                        </div>
+                      )}
                       <label
                         className={`flex items-start gap-2 ${isViewed ? "cursor-pointer" : "opacity-60 cursor-not-allowed"}`}
-                        title={isViewed ? "" : "Please open the document above first"}
+                        title={isViewed ? "" : "Click 'I have read this document' first"}
                       >
                         <Checkbox
                           checked={ack.accepted}
@@ -315,7 +329,7 @@ export function OnboardPage() {
                         />
                         <span className="text-sm font-medium">
                           I have read and accept the {p.label}.
-                          {!isViewed && <span className="block text-xs text-muted-foreground font-normal mt-0.5">Open the document above to enable this checkbox.</span>}
+                          {!isViewed && <span className="block text-xs text-muted-foreground font-normal mt-0.5">Confirm you've read the document above to enable this checkbox.</span>}
                         </span>
                       </label>
                       <Input

@@ -2005,6 +2005,24 @@ export const GetOnboardingPrefillResponse = zod.object({
     .boolean()
     .optional()
     .describe("True if onboarding already submitted"),
+  policies: zod
+    .array(
+      zod.object({
+        id: zod.string(),
+        slug: zod.string(),
+        label: zod.string(),
+        version: zod.number(),
+        fileKey: zod.string().nullish(),
+        fileName: zod.string().nullable(),
+        viewUrl: zod
+          .string()
+          .nullable()
+          .describe("Signed download URL for the policy PDF"),
+      }),
+    )
+    .describe(
+      "Active acknowledgement policies the applicant must view and sign.",
+    ),
 });
 
 export const SubmitOnboardingParams = zod.object({
@@ -2180,3 +2198,148 @@ export const AdminResendOnboardingLinkResponse = zod.object({
   onboardingToken: zod.string(),
   emailSent: zod.boolean().optional(),
 });
+
+/**
+ * List all policy slugs grouped by slug, with the active version and full version history.
+ */
+export const AdminListPoliciesResponseItem = zod.object({
+  slug: zod.string(),
+  label: zod.string(),
+  isActive: zod
+    .boolean()
+    .describe("True if any version of this slug is currently active"),
+  current: zod
+    .union([
+      zod.object({
+        id: zod.string(),
+        slug: zod.string(),
+        label: zod.string(),
+        version: zod.number(),
+        fileKey: zod.string().nullish(),
+        fileName: zod.string().nullish(),
+        isActive: zod.boolean(),
+        uploadedAt: zod.coerce.date().nullish(),
+        uploadedBy: zod.string().nullish(),
+        hasDocument: zod.boolean(),
+        viewUrl: zod.string().nullish(),
+      }),
+      zod.null(),
+    ])
+    .describe(
+      "The currently active version of this policy slug, or null if none active",
+    ),
+  history: zod
+    .array(
+      zod.object({
+        id: zod.string(),
+        slug: zod.string(),
+        label: zod.string(),
+        version: zod.number(),
+        fileKey: zod.string().nullish(),
+        fileName: zod.string().nullish(),
+        isActive: zod.boolean(),
+        uploadedAt: zod.coerce.date().nullish(),
+        uploadedBy: zod.string().nullish(),
+        hasDocument: zod.boolean(),
+        viewUrl: zod.string().nullish(),
+      }),
+    )
+    .describe("All versions of this slug, newest first"),
+});
+export const AdminListPoliciesResponse = zod.array(
+  AdminListPoliciesResponseItem,
+);
+
+/**
+ * Create a new policy slug at version 1 with no document attached.
+ */
+export const adminCreatePolicyBodySlugRegExp = new RegExp("^[a-z0-9_]+$");
+
+export const AdminCreatePolicyBody = zod.object({
+  slug: zod.string().regex(adminCreatePolicyBodySlugRegExp),
+  label: zod.string().min(1),
+});
+
+/**
+ * Rename a policy (applies label to all versions of its slug) and/or activate/deactivate it.
+ */
+export const AdminUpdatePolicyParams = zod.object({
+  id: zod.coerce.string(),
+});
+
+export const AdminUpdatePolicyBody = zod.object({
+  label: zod.string().min(1).optional(),
+  isActive: zod.boolean().optional(),
+});
+
+export const AdminUpdatePolicyResponse = zod.object({
+  id: zod.string(),
+  slug: zod.string(),
+  label: zod.string(),
+  version: zod.number(),
+  fileKey: zod.string().nullish(),
+  fileName: zod.string().nullish(),
+  isActive: zod.boolean(),
+  uploadedAt: zod.coerce.date().nullish(),
+  uploadedBy: zod.string().nullish(),
+  hasDocument: zod.boolean(),
+  viewUrl: zod.string().nullish(),
+});
+
+/**
+ * Hard-delete a policy slug and all its version history. Refuses with 409
+if any version is referenced by an existing onboarding submission —
+admin should deactivate instead.
+
+ */
+export const AdminDeletePolicyParams = zod.object({
+  id: zod.coerce.string(),
+});
+
+/**
+ * Replace the document for a policy slug. Inserts a new immutable
+version row at (max version + 1), demotes all prior versions of the
+slug to inactive, and marks the new row active.
+
+ */
+export const AdminReplacePolicyDocumentParams = zod.object({
+  id: zod.coerce.string(),
+});
+
+export const AdminReplacePolicyDocumentBody = zod.object({
+  fileKey: zod.string().min(1),
+  fileName: zod.string().min(1),
+});
+
+export const AdminReplacePolicyDocumentResponse = zod.object({
+  id: zod.string(),
+  slug: zod.string(),
+  label: zod.string(),
+  version: zod.number(),
+  fileKey: zod.string().nullish(),
+  fileName: zod.string().nullish(),
+  isActive: zod.boolean(),
+  uploadedAt: zod.coerce.date().nullish(),
+  uploadedBy: zod.string().nullish(),
+  hasDocument: zod.boolean(),
+  viewUrl: zod.string().nullish(),
+});
+
+/**
+ * Public — active policies (with documents) shown to applicants on the onboarding form.
+ */
+export const ListActivePoliciesResponseItem = zod.object({
+  id: zod.string(),
+  slug: zod.string(),
+  label: zod.string(),
+  version: zod.number(),
+  fileKey: zod.string().nullish(),
+  fileName: zod.string().nullable(),
+  viewUrl: zod
+    .string()
+    .nullable()
+    .describe("Signed download URL for the policy PDF"),
+});
+export const ListActivePoliciesResponse = zod.array(
+  ListActivePoliciesResponseItem,
+);
