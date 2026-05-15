@@ -22,7 +22,7 @@ export async function readSpreadsheet(file: File): Promise<ParsedSheet> {
 }
 
 export function downloadTemplateXlsx(descriptor: TableDescriptor): void {
-  const fields = descriptor.fields.filter((f) => !f.readonly);
+  const fields = descriptor.fields.filter((f) => !f.readonly && !f.virtual);
   const headers = fields.map((f) => f.label);
   const sampleRow = fields.map((f) => sampleFor(f));
   const ws = XLSX.utils.aoa_to_sheet([headers, sampleRow]);

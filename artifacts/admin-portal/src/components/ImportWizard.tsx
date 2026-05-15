@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -9,7 +9,8 @@ import {
 import { CheckCircle2, AlertTriangle, FileSpreadsheet, ChevronRight } from "lucide-react";
 import { api } from "@/lib/api";
 import type { TableDescriptor, Field } from "@/lib/tables";
-import { useFkOptions, invalidateFk } from "@/lib/fk";
+import { useFkOptions, invalidateFk, loadFkRows } from "@/lib/fk";
+import { getTable } from "@/lib/tables";
 import { autoMap, buildErrorCsv, coerceCell, readSpreadsheet, type ParsedSheet } from "@/lib/import";
 
 type Step = "upload" | "map" | "preview" | "result";
@@ -67,7 +68,7 @@ export function ImportWizard({
   descriptor: TableDescriptor;
   onDone: () => void;
 }) {
-  const writableFields = descriptor.fields.filter((f) => !f.readonly);
+  const writableFields = descriptor.fields.filter((f) => !f.readonly && !f.virtual);
   const [step, setStep] = useState<Step>("upload");
   const [sheet, setSheet] = useState<ParsedSheet | null>(null);
   const [mapping, setMapping] = useState<Record<string, string>>({});
@@ -77,6 +78,32 @@ export function ImportWizard({
   const [result, setResult] = useState<ImportResult | null>(null);
   const [previewRows, setPreviewRows] = useState<Record<string, unknown>[]>([]);
   const [previewIssues, setPreviewIssues] = useState<{ index: number; message: string }[]>([]);
+  /** For each field with importResolveByLabel: map of normalized FK label -> id, used to translate "Kanvas" → site UUID. */
+  const [fkLabelMaps, setFkLabelMaps] = useState<Record<string, Map<string, string>>>({});
+
+  useEffect(() => {
+    let cancelled = false;
+    const resolvable = writableFields.filter((f) => f.type === "fk" && f.importResolveByLabel && f.fkTable);
+    Promise.all(
+      resolvable.map(async (f) => {
+        const rows = await loadFkRows(f.fkTable!);
+        const labelField = getTable(f.fkTable!)?.primaryLabelField ?? "id";
+        const m = new Map<string, string>();
+        for (const r of rows) {
+          const id = String((r as any).id ?? "");
+          const label = String((r as any)[labelField] ?? "").trim().toLowerCase();
+          if (id && label) m.set(label, id);
+        }
+        return [f.key, m] as const;
+      }),
+    ).then((entries) => {
+      if (cancelled) return;
+      setFkLabelMaps(Object.fromEntries(entries));
+    });
+    return () => { cancelled = true; };
+  }, [descriptor.name]);
+
+  const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
   function reset() {
     setStep("upload");
@@ -129,6 +156,17 @@ export function ImportWizard({
           if (v !== null && v !== undefined && v !== "") out[f.key] = v;
         }
       }
+      // Resolve FK label -> id for fields opted in via importResolveByLabel.
+      for (const f of writableFields) {
+        if (!f.importResolveByLabel || f.type !== "fk") continue;
+        const v = out[f.key];
+        if (v === undefined || v === null || v === "") continue;
+        const s = String(v);
+        if (UUID_RE.test(s)) continue;
+        const id = fkLabelMaps[f.key]?.get(s.trim().toLowerCase());
+        if (id) out[f.key] = id;
+        // If not resolved, leave the raw string — it'll fail validation and surface in the error CSV.
+      }
       return out;
     });
   }
@@ -140,6 +178,12 @@ export function ImportWizard({
       for (const f of writableFields) {
         if (f.required && (row[f.key] === undefined || row[f.key] === null || row[f.key] === "")) {
           issues.push({ index: idx, message: `Row ${idx + 1}: missing required "${f.label}"` });
+        }
+        if (f.type === "fk" && f.importResolveByLabel) {
+          const v = row[f.key];
+          if (v && !UUID_RE.test(String(v))) {
+            issues.push({ index: idx, message: `Row ${idx + 1}: "${f.label}" value "${v}" doesn't match any existing ${f.fkTable}` });
+          }
         }
       }
     });

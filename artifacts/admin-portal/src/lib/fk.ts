@@ -5,6 +5,15 @@ import { getTable } from "./tables";
 type Row = Record<string, unknown>;
 const cache = new Map<string, Promise<Row[]>>();
 
+export function loadFkRows(tableName: string): Promise<Row[]> {
+  let p = cache.get(tableName);
+  if (!p) {
+    p = fetchAll(tableName);
+    cache.set(tableName, p);
+  }
+  return p;
+}
+
 async function fetchAll(table: string): Promise<Row[]> {
   let offset = 0;
   const all: Row[] = [];
@@ -29,11 +38,7 @@ export function useFkOptions(tableName: string | undefined) {
     const t = getTable(tableName);
     const labelField = t?.primaryLabelField ?? "id";
     setLoading(true);
-    let p = cache.get(tableName);
-    if (!p) {
-      p = fetchAll(tableName);
-      cache.set(tableName, p);
-    }
+    const p = loadFkRows(tableName);
     p.then((rows) => {
       const mapped = rows.map((r) => ({
         id: String(r.id ?? ""),

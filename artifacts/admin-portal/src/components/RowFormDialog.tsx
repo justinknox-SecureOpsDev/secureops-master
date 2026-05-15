@@ -13,9 +13,19 @@ import type { Field, TableDescriptor } from "@/lib/tables";
 import { api, ApiError } from "@/lib/api";
 
 function FieldInput({
-  field, value, onChange,
-}: { field: Field; value: string; onChange: (v: string) => void }) {
+  field, value, onChange, onPickFkRow, filterValue,
+}: {
+  field: Field;
+  value: string;
+  onChange: (v: string) => void;
+  onPickFkRow?: (row: Record<string, unknown> | null) => void;
+  /** When field.filterBy is set, this is the value of the source form field used to filter FK options. */
+  filterValue?: string;
+}) {
   const fk = useFkOptions(field.type === "fk" ? field.fkTable : undefined);
+  const fkOptions = field.filterBy
+    ? fk.options.filter((o) => String(o.row[field.filterBy!.fkRowKey] ?? "") === (filterValue ?? ""))
+    : fk.options;
   if (field.type === "textarea") {
     return <Textarea rows={3} value={value} onChange={(e) => onChange(e.target.value)} />;
   }
@@ -44,10 +54,26 @@ function FieldInput({
   }
   if (field.type === "fk") {
     return (
-      <Select value={value} onValueChange={onChange}>
-        <SelectTrigger><SelectValue placeholder={fk.loading ? "Loading…" : "Search & select…"} /></SelectTrigger>
+      <Select
+        value={value}
+        onValueChange={(v) => {
+          onChange(v);
+          if (onPickFkRow) {
+            const picked = fkOptions.find((o) => o.id === v);
+            onPickFkRow(picked?.row ?? null);
+          }
+        }}
+      >
+        <SelectTrigger>
+          <SelectValue placeholder={
+            fk.loading ? "Loading…"
+            : field.filterBy && !filterValue ? `Pick ${field.filterBy.formKey} first…`
+            : fkOptions.length === 0 && field.filterBy ? "No matches for this site"
+            : "Search & select…"
+          } />
+        </SelectTrigger>
         <SelectContent className="max-h-72">
-          {fk.options.map((o) => (
+          {fkOptions.map((o) => (
             <SelectItem key={o.id} value={o.id}>{o.label}</SelectItem>
           ))}
         </SelectContent>
@@ -105,6 +131,7 @@ export function RowFormDialog({
     try {
       const payload: Record<string, unknown> = {};
       for (const f of editable) {
+        if (f.virtual) continue; // UI-only helper, never sent to API
         const raw = values[f.key] ?? "";
         if (f.type === "password" && raw === "") continue; // don't overwrite
         const v = fromFormValue(raw, f);
@@ -158,7 +185,28 @@ export function RowFormDialog({
                 <FieldInput
                   field={f}
                   value={values[f.key] ?? ""}
-                  onChange={(v) => setValues((prev) => ({ ...prev, [f.key]: v }))}
+                  filterValue={f.filterBy ? values[f.filterBy.formKey] ?? "" : undefined}
+                  onChange={(v) => setValues((prev) => {
+                    const next = { ...prev, [f.key]: v };
+                    // If a parent of a virtual filtered field changed, clear the dependent virtual field.
+                    for (const other of editable) {
+                      if (other.virtual && other.filterBy?.formKey === f.key && next[other.key]) {
+                        next[other.key] = "";
+                      }
+                    }
+                    return next;
+                  })}
+                  onPickFkRow={f.autofill ? (row) => {
+                    if (!row || !f.autofill) return;
+                    setValues((prev) => {
+                      const next = { ...prev };
+                      for (const [target, source] of Object.entries(f.autofill!)) {
+                        const v = row[source];
+                        if (v !== null && v !== undefined) next[target] = String(v);
+                      }
+                      return next;
+                    });
+                  } : undefined}
                 />
               </div>
             </div>

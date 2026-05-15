@@ -36,6 +36,14 @@ export type Field = {
   /** FK display field on the foreign row. */
   fkLabel?: string;
   placeholder?: string;
+  /** UI-only field: not sent to the API, used to drive auto-fill of other fields. */
+  virtual?: boolean;
+  /** When this (virtual fk) field changes, copy these props from the picked row into the form. Map: targetFormKey -> fkRowKey. */
+  autofill?: Record<string, string>;
+  /** Restrict FK options to rows where row[fkRowKey] === current form value at formKey. */
+  filterBy?: { fkRowKey: string; formKey: string };
+  /** During Excel import, resolve a free-text value (e.g. site name) to an FK id by looking up the FK table's primaryLabelField. */
+  importResolveByLabel?: boolean;
 };
 
 export type TableDescriptor = {
@@ -149,6 +157,21 @@ export const TABLES: TableDescriptor[] = [
       { key: "id", label: "ID", type: "text", readonly: true, hiddenInGrid: true },
       { key: "title", label: "Title", type: "text", required: true },
       { key: "siteId", label: "Site", type: "fk", fkTable: "sites", fkLabel: "name" },
+      {
+        key: "__siteRoleId",
+        label: "Use site rate card",
+        type: "fk",
+        fkTable: "site_roles",
+        fkLabel: "name",
+        virtual: true,
+        hiddenInGrid: true,
+        filterBy: { fkRowKey: "siteId", formKey: "siteId" },
+        autofill: {
+          payRate: "payRate",
+          billRate: "billRate",
+          requiredLicenseLevel: "requiredLicenseLevel",
+        },
+      },
       { key: "startTime", label: "Start", type: "datetime", required: true },
       { key: "endTime", label: "End", type: "datetime", required: true },
       { key: "payRate", label: "Pay Rate (£)", type: "number", required: true },
@@ -169,6 +192,37 @@ export const TABLES: TableDescriptor[] = [
           { label: "Active", value: "active" },
           { label: "Completed", value: "completed" },
           { label: "Cancelled", value: "cancelled" },
+        ],
+      },
+      { key: "notes", label: "Notes", type: "textarea", hiddenInGrid: true },
+      { key: "createdAt", label: "Created", type: "datetime", readonly: true },
+    ],
+  },
+  {
+    name: "site_roles",
+    label: "Site Roles",
+    plural: "site roles",
+    importSupported: true,
+    primaryLabelField: "name",
+    fields: [
+      { key: "id", label: "ID", type: "text", readonly: true, hiddenInGrid: true },
+      { key: "siteId", label: "Site", type: "fk", fkTable: "sites", fkLabel: "name", required: true, importResolveByLabel: true },
+      { key: "name", label: "Role", type: "text", required: true },
+      { key: "payRate", label: "Pay Rate (£)", type: "number", required: true },
+      { key: "billRate", label: "Bill Rate (£)", type: "number", required: true },
+      {
+        key: "requiredLicenseLevel", label: "Min Licence", type: "select", required: true,
+        options: [
+          { label: "Level 2 (unarmed)", value: "2" },
+          { label: "Level 3 (armed)", value: "3" },
+          { label: "Level 4 (PPO)", value: "4" },
+        ],
+      },
+      {
+        key: "status", label: "Status", type: "select", required: true,
+        options: [
+          { label: "Active", value: "active" },
+          { label: "Inactive", value: "inactive" },
         ],
       },
       { key: "notes", label: "Notes", type: "textarea", hiddenInGrid: true },

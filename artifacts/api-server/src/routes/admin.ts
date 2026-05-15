@@ -8,6 +8,7 @@ import {
   employeesTable,
   clientsTable,
   sitesTable,
+  siteRolesTable,
   shiftsTable,
   shiftAssignmentsTable,
   timeEntriesTable,
@@ -18,6 +19,7 @@ import {
   insertEmployeeSchema,
   insertClientSchema,
   insertSiteSchema,
+  insertSiteRoleSchema,
   insertShiftSchema,
   insertShiftAssignmentSchema,
   insertTimeEntrySchema,
@@ -197,6 +199,19 @@ const tables: Record<string, TableConfig> = {
     coerceWrite: (v) => applyNumericCoercion(v, ["locationLat", "locationLng"]),
     importSupported: true,
     label: "Site",
+  },
+  site_roles: {
+    table: siteRolesTable,
+    insertSchema: insertSiteRoleSchema as unknown as z.ZodSchema<any>,
+    searchColumns: [siteRolesTable.name, siteRolesTable.status, siteRolesTable.notes],
+    orderBy: siteRolesTable.createdAt,
+    coerceWrite: (v) => {
+      let out = applyNumericCoercion(v, ["payRate", "billRate"]);
+      out = applyIntCoercion(out, ["requiredLicenseLevel"]);
+      return out;
+    },
+    importSupported: true,
+    label: "Site role",
   },
   shifts: {
     table: shiftsTable,
