@@ -57,6 +57,14 @@ export type Field = {
   filterBy?: { fkRowKey: string; formKey: string };
   /** During Excel import, resolve a free-text value (e.g. site name) to an FK id by looking up the FK table's primaryLabelField. */
   importResolveByLabel?: boolean;
+  /** Override the "Match by …" label shown in the import wizard for THIS field
+   *  (defaults to the FK target's match-by-label fields). */
+  importMatchLabel?: string;
+  /** Override the client-side label key extractor for THIS field. When set,
+   *  the wizard skips composite-key UI and uses this single normalized key
+   *  for matching against the FK target rows. The server's altPrimaryKeys
+   *  must register the same normalized key for the resolution to align. */
+  importMatchKeyFn?: (row: any) => string;
   /** Optional section header label rendered above this field in the row dialog.
    *  Lets long forms (e.g. employees) be visually grouped (Identity / Licence / Pay …). */
   section?: string;
@@ -299,8 +307,14 @@ export const TABLES: TableDescriptor[] = [
       { key: "shiftId", label: "Shift", type: "fk", fkTable: "shifts", fkLabel: "title", importResolveByLabel: true, importExample: "Leave blank if importing ad-hoc hours" },
       // siteId — handy when the spreadsheet has a "Location"/"Site" column instead of a shift.
       { key: "siteId", label: "Site", type: "fk", fkTable: "sites", fkLabel: "name", importResolveByLabel: true, importExample: "Acme HQ" },
-      // Employee matches by full name (e.g. "John Smith") OR email (resolved server-side).
-      { key: "employeeId", label: "Employee", type: "fk", fkTable: "users", fkLabel: "email", required: true, importResolveByLabel: true, importExample: "John Smith  — or  jane@example.com" },
+      // Employee matches by full name (e.g. "John Smith"). Email also accepted as a fallback (resolved server-side).
+      {
+        key: "employeeId", label: "Employee", type: "fk", fkTable: "users", fkLabel: "email", required: true,
+        importResolveByLabel: true,
+        importMatchLabel: "name",
+        importMatchKeyFn: (u) => `${u?.firstName ?? ""} ${u?.lastName ?? ""}`.trim().replace(/\s+/g, " ").toLowerCase(),
+        importExample: "John Smith",
+      },
       { key: "clockInTime", label: "Clock In", type: "datetime", required: true, importExample: "2025-01-06 08:00" },
       { key: "clockOutTime", label: "Clock Out", type: "datetime", importExample: "2025-01-06 16:00" },
       { key: "hoursWorked", label: "Hours", type: "number", importExample: "8.00" },

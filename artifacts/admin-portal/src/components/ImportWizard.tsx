@@ -141,8 +141,16 @@ export function ImportWizard({
         const m = new Map<string, string>();
         for (const r of rows) {
           const id = String((r as any).id ?? "");
-          const key = matchFields.map((mf) => normalizeKey((r as any)[mf])).join("|");
-          if (id && key.replace(/\|/g, "") !== "") m.set(key, id);
+          if (!id) continue;
+          if (f.importMatchKeyFn) {
+            // Field-level override: use a single normalized key from the candidate row
+            // (e.g. users by full name). Skips composite-key matchFields entirely.
+            const key = normalizeKey(f.importMatchKeyFn(r));
+            if (key) m.set(key, id);
+          } else {
+            const key = matchFields.map((mf) => normalizeKey((r as any)[mf])).join("|");
+            if (key.replace(/\|/g, "") !== "") m.set(key, id);
+          }
         }
         return [f.key, m] as const;
       }),
@@ -213,20 +221,26 @@ export function ImportWizard({
         if (resolveBy[f.key] !== "label") continue;
         const target = f.fkTable ? getTable(f.fkTable) : undefined;
         if (!target) continue;
-        const matchFields = getImportMatchByLabelFields(target);
         // Primary value comes from the column mapped to this FK field (or its default).
         const primary = out[f.key];
         if (primary === undefined || primary === null || primary === "") continue;
         const primaryStr = String(primary);
         if (UUID_RE.test(primaryStr)) continue; // Already an ID, no lookup needed.
-        const parts: string[] = [normalizeKey(primaryStr)];
-        for (let i = 1; i < matchFields.length; i++) {
-          const extraKey = matchFields[i];
-          const header = extraMatch[f.key]?.[extraKey];
-          parts.push(header ? normalizeKey(r[header]) : "");
+        let lookupKey: string;
+        if (f.importMatchKeyFn) {
+          // Single-key override (e.g. employee by full name); ignore composite parts.
+          lookupKey = normalizeKey(primaryStr);
+        } else {
+          const matchFields = getImportMatchByLabelFields(target);
+          const parts: string[] = [normalizeKey(primaryStr)];
+          for (let i = 1; i < matchFields.length; i++) {
+            const extraKey = matchFields[i];
+            const header = extraMatch[f.key]?.[extraKey];
+            parts.push(header ? normalizeKey(r[header]) : "");
+          }
+          lookupKey = parts.join("|");
         }
-        const composite = parts.join("|");
-        const id = fkLabelMaps[f.key]?.get(composite);
+        const id = fkLabelMaps[f.key]?.get(lookupKey);
         if (id) out[f.key] = id;
         // If not resolved, leave the raw string — preview will flag it.
       }
@@ -289,6 +303,7 @@ export function ImportWizard({
       const out: Record<string, Record<string, unknown>> = {};
       for (const f of fkFields) {
         if (resolveBy[f.key] !== "label") continue;
+        if (f.importMatchKeyFn) continue; // Single-key override — no composite extras to send.
         const target = f.fkTable ? getTable(f.fkTable) : undefined;
         if (!target) continue;
         const matchFields = getImportMatchByLabelFields(target);
@@ -438,7 +453,9 @@ export function ImportWizard({
                   {fkFields.map((f) => {
                     const target = f.fkTable ? getTable(f.fkTable) : undefined;
                     const matchFields = target ? getImportMatchByLabelFields(target) : [];
-                    const labelLabel = target ? joinFieldLabels(target, matchFields) : "name";
+                    const labelLabel = f.importMatchLabel
+                      ?? (target ? joinFieldLabels(target, matchFields) : "name");
+                    const showCompositeUI = !f.importMatchKeyFn;
                     const mode = resolveBy[f.key] ?? "id";
                     const primaryHeader = Object.entries(mapping).find(([, k]) => k === f.key)?.[0];
                     return (
@@ -457,7 +474,7 @@ export function ImportWizard({
                               <SelectItem value="label">Match by {labelLabel}</SelectItem>
                             </SelectContent>
                           </Select>
-                          {mode === "label" && matchFields.length > 1 && (
+                          {mode === "label" && showCompositeUI && matchFields.length > 1 && (
                             <div className="pl-2 border-l-2 border-brand-gold/40 space-y-1.5">
                               <div className="text-[11px] text-muted-foreground">
                                 {matchFields.length} columns are needed to identify a {target ? singularize(target.label).toLowerCase() : ""}:

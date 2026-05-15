@@ -342,6 +342,17 @@ const userFullNameAlt = (u: any): string[] => {
   return full ? [full] : [];
 };
 
+/** Shifts in spreadsheets often append the required licence level to the title
+ *  (e.g. "Acme Patrol 3" where 3 = level 3). Register a "<title> <level>"
+ *  variant so those values resolve to the same shift row. */
+const shiftTitleWithLevelAlt = (s: any): string[] => {
+  const title = normText(s.title);
+  const lvl = s.requiredLicenseLevel;
+  return title && (lvl === 2 || lvl === 3 || lvl === 4)
+    ? [`${title} ${lvl}`]
+    : [];
+};
+
 const fkResolution: Record<string, Record<string, FkRef>> = {
   shift_assignments: {
     employeeId: { table: usersTable, matchColumns: [{ key: "email", col: usersTable.email, type: "text" }] },
@@ -358,10 +369,14 @@ const fkResolution: Record<string, Record<string, FkRef>> = {
       matchColumns: [{ key: "email", col: usersTable.email, type: "text" }],
       altPrimaryKeys: userFullNameAlt,
     },
-    shiftId: { table: shiftsTable, matchColumns: [
-      { key: "title", col: shiftsTable.title, type: "text" },
-      { key: "startTime", col: shiftsTable.startTime, type: "date" },
-    ] },
+    shiftId: {
+      table: shiftsTable,
+      matchColumns: [
+        { key: "title", col: shiftsTable.title, type: "text" },
+        { key: "startTime", col: shiftsTable.startTime, type: "date" },
+      ],
+      altPrimaryKeys: shiftTitleWithLevelAlt,
+    },
     siteId: { table: sitesTable, matchColumns: [{ key: "name", col: sitesTable.name, type: "text" }] },
   },
   licenses: {
