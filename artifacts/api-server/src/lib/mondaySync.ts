@@ -382,22 +382,15 @@ async function syncOnboarding(items: MondayItem[], result: SyncResult, dryRun: b
         result.decisions.push({ mondayId: item.id, mondayName: item.name, matchKey: null, action: "skip-no-key", reason: "No valid email on onboarding row" });
         continue;
       }
-      const [user] = await db.select().from(usersTable).where(eq(sql`lower(${usersTable.email})`, email)).limit(1);
-      if (!user) {
-        result.skippedUnmatched++;
-        result.decisions.push({ mondayId: item.id, mondayName: item.name, matchKey: email, action: "skip-unmatched", reason: "No matching employee in WCSG. Sync Employees first." });
-        continue;
-      }
-      if (user.role !== "employee") {
-        result.skippedConflict++;
-        result.decisions.push({ mondayId: item.id, mondayName: item.name, matchKey: email, action: "skip-conflict", reason: `existing role '${user.role}'` });
-        continue;
-      }
-
       const cityState = getCol(item, ONB_COL.cityState);
       const [city, state] = cityState ? cityState.split(",").map((s) => s.trim()) : [null, null];
 
       const onbStatusRaw = getCol(item, ONB_COL.status);
+      const { firstName, lastName } = splitName(item.name);
+      const licNumber = getCol(item, ONB_COL.licNumber);
+      const licExpiry = isoDate(getCol(item, ONB_COL.licExpiry));
+      const licLevel = mapLicLevel(getCol(item, ONB_COL.licLevel));
+
       const userIn: Record<string, unknown> = onbStatusRaw ? { status: mapStatusOrDefault(onbStatusRaw) } : {};
       const empIn: Record<string, unknown> = {
         phone: getCol(item, ONB_COL.phone),
@@ -411,11 +404,51 @@ async function syncOnboarding(items: MondayItem[], result: SyncResult, dryRun: b
         emergencyContactRelationship: getCol(item, ONB_COL.ecRel),
         bankBsb: getCol(item, ONB_COL.routing),
         bankAccountNumber: getCol(item, ONB_COL.acct),
-        siaLicenseNumber: getCol(item, ONB_COL.licNumber),
-        siaLicenseExpiry: isoDate(getCol(item, ONB_COL.licExpiry)),
-        siaLicenseLevel: mapLicLevel(getCol(item, ONB_COL.licLevel)),
+        siaLicenseNumber: licNumber,
+        siaLicenseExpiry: licExpiry,
+        siaLicenseLevel: licLevel,
         uniformShirt: getCol(item, ONB_COL.uniform),
       };
+
+      const [user] = await db.select().from(usersTable).where(eq(sql`lower(${usersTable.email})`, email)).limit(1);
+
+      if (!user) {
+        // No existing employee — onboarding-in-progress people from old process.
+        // Create the account so they show up; default status="pending" until onboarding finishes.
+        const newUserStatus = (userIn.status as string | undefined) ?? "pending";
+        const changes: Record<string, { from: unknown; to: unknown }> = {
+          email: { from: null, to: email },
+          firstName: { from: null, to: firstName },
+          lastName: { from: null, to: lastName || "—" },
+          status: { from: null, to: newUserStatus },
+        };
+        for (const [k, v] of Object.entries(empIn)) if (v !== null && v !== undefined && v !== "") changes[k] = { from: null, to: v };
+        result.willCreate++;
+        result.decisions.push({ mondayId: item.id, mondayName: item.name, matchKey: email, action: "create", changes });
+        if (!dryRun) {
+          const passwordHash = await bcrypt.hash(randomUUID(), 10);
+          await db.transaction(async (tx) => {
+            const [u] = await tx.insert(usersTable).values({
+              email, firstName, lastName: lastName || "—", role: "employee", status: newUserStatus,
+              passwordHash, mustChangePassword: true,
+            }).returning();
+            await tx.insert(employeesTable).values({ userId: u!.id, ...(empIn as object) });
+            if (licNumber && licExpiry && licLevel) {
+              await tx.insert(licensesTable).values({
+                employeeId: u!.id, type: "TX Guard", level: licLevel,
+                licenseNumber: licNumber, issuingAuthority: "TX DPS", expiryDate: licExpiry,
+              });
+            }
+          });
+        }
+        continue;
+      }
+
+      if (user.role !== "employee") {
+        result.skippedConflict++;
+        result.decisions.push({ mondayId: item.id, mondayName: item.name, matchKey: email, action: "skip-conflict", reason: `existing role '${user.role}'` });
+        continue;
+      }
 
       const userChanges = diff(user as unknown as Record<string, unknown>, userIn);
       const [emp] = await db.select().from(employeesTable).where(eq(employeesTable.userId, user.id)).limit(1);
