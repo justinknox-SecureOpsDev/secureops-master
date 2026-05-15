@@ -4,13 +4,17 @@ import * as schema from "./schema";
 
 const { Pool } = pg;
 
-if (!process.env.DATABASE_URL) {
+const overrideUrl = process.env.OVERRIDE_DATABASE_URL;
+const connectionString = overrideUrl ?? process.env.DATABASE_URL;
+if (!connectionString) {
   throw new Error(
     "DATABASE_URL must be set. Did you forget to provision a database?",
   );
 }
+const dbHostHint = connectionString.replace(/.*@/, "").split("/")[0]?.split(".")[0] ?? "unknown";
+console.log(`[db] using ${overrideUrl ? "OVERRIDE_DATABASE_URL" : "DATABASE_URL"} (host=${dbHostHint})`);
 
-export const pool = new Pool({ connectionString: process.env.DATABASE_URL });
+export const pool = new Pool({ connectionString });
 export const db = drizzle(pool, { schema });
 
 export * from "./schema";

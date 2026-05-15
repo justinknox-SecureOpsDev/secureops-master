@@ -45,3 +45,8 @@ externalPort = 3001
 
 [nix]
 channel = "stable-25_05"
+
+[userenv]
+
+[userenv.production]
+OVERRIDE_DATABASE_URL = "postgresql://postgres:password@helium/heliumdb?sslmode=disable"
