@@ -343,9 +343,25 @@ router.get("/admin/tables/:table", requireAdmin, async (req, res): Promise<void>
   const sortField = typeof req.query.sort === "string" ? req.query.sort : "";
   const sortDir = req.query.dir === "asc" ? "asc" : "desc";
 
-  const where = search && cfg.searchColumns.length > 0
+  // Equality filters via ?filter[col]=val. Whitelisted to actual table columns
+  // so callers can't inject arbitrary SQL identifiers.
+  const filterClauses = [] as any[];
+  const rawFilter = req.query.filter;
+  if (rawFilter && typeof rawFilter === "object" && !Array.isArray(rawFilter)) {
+    for (const [col, val] of Object.entries(rawFilter as Record<string, unknown>)) {
+      const column = (cfg.table as any)[col];
+      if (column && typeof val === "string" && val.length > 0) {
+        filterClauses.push(eq(column, val));
+      }
+    }
+  }
+
+  const searchClause = search && cfg.searchColumns.length > 0
     ? or(...cfg.searchColumns.map((c) => ilike(sql`${c}::text`, `%${search}%`)))
     : undefined;
+  const where = filterClauses.length > 0
+    ? (searchClause ? and(searchClause, ...filterClauses) : and(...filterClauses))
+    : searchClause;
 
   const sortColumn = sortField && (cfg.table as any)[sortField] ? (cfg.table as any)[sortField] : cfg.orderBy;
   const order = sortDir === "asc" ? asc(sortColumn) : desc(sortColumn);

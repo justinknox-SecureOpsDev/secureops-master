@@ -8,7 +8,8 @@ import {
   AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
   AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
-import { ArrowUpDown, ArrowDown, ArrowUp, Pencil, Trash2, Plus, Upload, Download, RefreshCw } from "lucide-react";
+import { ArrowUpDown, ArrowDown, ArrowUp, Pencil, Trash2, Plus, Upload, Download, RefreshCw, ExternalLink } from "lucide-react";
+import { Link } from "wouter";
 import type { TableDescriptor } from "@/lib/tables";
 import { api } from "@/lib/api";
 import { formatCell } from "@/lib/format";
@@ -26,7 +27,21 @@ function FkCell({ field, value }: { field: { fkTable?: string; fkLabel?: string 
   return <span title={String(value)}>{o?.label ?? String(value).slice(0, 8) + "…"}</span>;
 }
 
-export function DataGrid({ descriptor }: { descriptor: TableDescriptor }) {
+export function DataGrid({
+  descriptor, filter, presetValues, lockedFields, hideHeader, compact,
+}: {
+  descriptor: TableDescriptor;
+  /** Equality filters appended to the list query, e.g. { siteId: "abc" }. */
+  filter?: Record<string, string>;
+  /** Pre-fill these field values when adding a new row (e.g. siteId on the Site detail page). */
+  presetValues?: Record<string, string>;
+  /** Hide these fields from the add/edit form. */
+  lockedFields?: string[];
+  /** Hide the page-style header (used when embedded in another page). */
+  hideHeader?: boolean;
+  /** Tighter padding for embedded use. */
+  compact?: boolean;
+}) {
   const visibleFields = useMemo(
     () => descriptor.fields.filter((f) => !f.hiddenInGrid),
     [descriptor],
@@ -54,6 +69,11 @@ export function DataGrid({ descriptor }: { descriptor: TableDescriptor }) {
     return () => clearTimeout(id);
   }, [search]);
 
+  const filterKey = useMemo(
+    () => (filter ? Object.entries(filter).map(([k, v]) => `${k}=${v}`).sort().join("&") : ""),
+    [filter],
+  );
+
   async function load() {
     setLoading(true);
     try {
@@ -63,6 +83,11 @@ export function DataGrid({ descriptor }: { descriptor: TableDescriptor }) {
       if (debounced) params.set("search", debounced);
       params.set("sort", sort.field);
       params.set("dir", sort.dir);
+      if (filter) {
+        for (const [k, v] of Object.entries(filter)) {
+          if (v) params.set(`filter[${k}]`, v);
+        }
+      }
       const data = await api<{ rows: Row[]; total: number }>(
         `/admin/tables/${descriptor.name}?${params}`,
       );
@@ -77,7 +102,13 @@ export function DataGrid({ descriptor }: { descriptor: TableDescriptor }) {
   useEffect(() => {
     load();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [descriptor.name, debounced, page, sort]);
+  }, [descriptor.name, debounced, page, sort, filterKey]);
+
+  const lockedSet = useMemo(() => new Set(lockedFields ?? []), [lockedFields]);
+  const gridFields = useMemo(
+    () => visibleFields.filter((f) => !lockedSet.has(f.key)),
+    [visibleFields, lockedSet],
+  );
 
   function toggleSort(fieldKey: string) {
     setSort((s) => s.field === fieldKey
@@ -98,48 +129,75 @@ export function DataGrid({ descriptor }: { descriptor: TableDescriptor }) {
 
   const totalPages = Math.max(1, Math.ceil(total / pageSize));
 
+  const padX = compact ? "px-3" : "px-6";
+
   return (
     <div className="flex flex-col h-full">
-      <div className="flex items-center justify-between gap-3 px-6 py-4 border-b bg-card">
-        <div>
-          <h1 className="text-2xl brand-navy" style={{ fontFamily: "Georgia, serif", fontWeight: 700 }}>
-            {descriptor.label}
-          </h1>
-          <p className="text-xs text-muted-foreground">
-            {loading ? "Loading…" : `${total.toLocaleString()} ${descriptor.plural}`}
-          </p>
+      {!hideHeader && (
+        <div className={`flex items-center justify-between gap-3 ${padX} py-4 border-b bg-card`}>
+          <div>
+            <h1 className="text-2xl brand-navy" style={{ fontFamily: "Georgia, serif", fontWeight: 700 }}>
+              {descriptor.label}
+            </h1>
+            <p className="text-xs text-muted-foreground">
+              {loading ? "Loading…" : `${total.toLocaleString()} ${descriptor.plural}`}
+            </p>
+          </div>
+          <div className="flex items-center gap-2">
+            <Input
+              value={search}
+              onChange={(e) => { setSearch(e.target.value); setPage(0); }}
+              placeholder="Search…"
+              className="w-64"
+            />
+            <Button variant="outline" size="icon" onClick={load} title="Refresh">
+              <RefreshCw className="w-4 h-4" />
+            </Button>
+            {descriptor.importSupported && (
+              <>
+                <Button variant="outline" onClick={() => downloadTemplateXlsx(descriptor)}>
+                  <Download className="w-4 h-4 mr-2" />Template
+                </Button>
+                <Button variant="outline" onClick={() => setImportOpen(true)}>
+                  <Upload className="w-4 h-4 mr-2" />Import
+                </Button>
+              </>
+            )}
+            <Button onClick={() => setCreating(true)} className="bg-brand-navy text-white hover:opacity-90">
+              <Plus className="w-4 h-4 mr-2" />Add {descriptor.label.replace(/s$/, "")}
+            </Button>
+          </div>
         </div>
-        <div className="flex items-center gap-2">
-          <Input
-            value={search}
-            onChange={(e) => { setSearch(e.target.value); setPage(0); }}
-            placeholder="Search…"
-            className="w-64"
-          />
-          <Button variant="outline" size="icon" onClick={load} title="Refresh">
-            <RefreshCw className="w-4 h-4" />
-          </Button>
-          {descriptor.importSupported && (
-            <>
-              <Button variant="outline" onClick={() => downloadTemplateXlsx(descriptor)}>
-                <Download className="w-4 h-4 mr-2" />Template
-              </Button>
-              <Button variant="outline" onClick={() => setImportOpen(true)}>
-                <Upload className="w-4 h-4 mr-2" />Import
-              </Button>
-            </>
-          )}
-          <Button onClick={() => setCreating(true)} className="bg-brand-navy text-white hover:opacity-90">
-            <Plus className="w-4 h-4 mr-2" />Add {descriptor.label.replace(/s$/, "")}
-          </Button>
+      )}
+      {hideHeader && (
+        <div className={`flex items-center justify-between gap-2 ${padX} py-2 border-b bg-card`}>
+          <div className="flex items-center gap-2">
+            <Input
+              value={search}
+              onChange={(e) => { setSearch(e.target.value); setPage(0); }}
+              placeholder="Search…"
+              className="w-56 h-8"
+            />
+            <span className="text-xs text-muted-foreground">
+              {loading ? "Loading…" : `${total.toLocaleString()} ${descriptor.plural}`}
+            </span>
+          </div>
+          <div className="flex items-center gap-2">
+            <Button variant="outline" size="sm" onClick={load} title="Refresh">
+              <RefreshCw className="w-3.5 h-3.5" />
+            </Button>
+            <Button size="sm" onClick={() => setCreating(true)} className="bg-brand-navy text-white hover:opacity-90">
+              <Plus className="w-3.5 h-3.5 mr-1" />Add {descriptor.label.replace(/s$/, "")}
+            </Button>
+          </div>
         </div>
-      </div>
+      )}
 
       <div className="flex-1 overflow-auto bg-background">
         <Table>
           <TableHeader className="sticky top-0 bg-card z-10">
             <TableRow>
-              {visibleFields.map((f) => (
+              {gridFields.map((f) => (
                 <TableHead key={f.key}>
                   <button
                     onClick={() => toggleSort(f.key)}
@@ -158,7 +216,7 @@ export function DataGrid({ descriptor }: { descriptor: TableDescriptor }) {
           <TableBody>
             {rows.length === 0 && !loading && (
               <TableRow>
-                <TableCell colSpan={visibleFields.length + 1} className="text-center text-muted-foreground py-12">
+                <TableCell colSpan={gridFields.length + 1} className="text-center text-muted-foreground py-12">
                   No {descriptor.plural} yet. Click <b>Add {descriptor.label.replace(/s$/, "")}</b> to create one
                   {descriptor.importSupported ? " or use Import to bulk-load." : "."}
                 </TableCell>
@@ -166,7 +224,7 @@ export function DataGrid({ descriptor }: { descriptor: TableDescriptor }) {
             )}
             {rows.map((r) => (
               <TableRow key={String((r as any).id)} className="hover:bg-accent/40">
-                {visibleFields.map((f) => (
+                {gridFields.map((f) => (
                   <TableCell key={f.key} className="text-sm max-w-[260px] truncate">
                     {f.type === "fk"
                       ? <FkCell field={f} value={(r as any)[f.key]} />
@@ -174,6 +232,13 @@ export function DataGrid({ descriptor }: { descriptor: TableDescriptor }) {
                   </TableCell>
                 ))}
                 <TableCell className="text-right">
+                  {descriptor.name === "sites" && (
+                    <Link href={`/sites/${(r as any).id}`}>
+                      <Button variant="ghost" size="icon" title="Open site detail">
+                        <ExternalLink className="w-4 h-4" />
+                      </Button>
+                    </Link>
+                  )}
                   <Button variant="ghost" size="icon" onClick={() => setEditing(r)} title="Edit">
                     <Pencil className="w-4 h-4" />
                   </Button>
@@ -203,6 +268,8 @@ export function DataGrid({ descriptor }: { descriptor: TableDescriptor }) {
         descriptor={descriptor}
         initial={null}
         onSaved={load}
+        presetValues={presetValues}
+        lockedFields={lockedFields}
       />
       <RowFormDialog
         open={!!editing}
@@ -210,6 +277,7 @@ export function DataGrid({ descriptor }: { descriptor: TableDescriptor }) {
         descriptor={descriptor}
         initial={editing}
         onSaved={load}
+        lockedFields={lockedFields}
       />
       <ImportWizard
         open={importOpen}

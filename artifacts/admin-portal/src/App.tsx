@@ -6,6 +6,7 @@ import { AuthProvider, useAuth } from "@/lib/auth";
 import { LoginPage } from "@/pages/Login";
 import { AppShell } from "@/pages/AppShell";
 import { TablePage, HomeRedirect } from "@/pages/TablePage";
+import { SiteDetailPage } from "@/pages/SiteDetailPage";
 import NotFound from "@/pages/not-found";
 
 const queryClient = new QueryClient();
@@ -38,6 +39,7 @@ function Routed() {
     <AppShell>
       <Switch>
         <Route path="/" component={HomeRedirect} />
+        <Route path="/sites/:id" component={SiteDetailPage} />
         <Route path="/tables/:table" component={TablePage} />
         <Route component={NotFound} />
       </Switch>

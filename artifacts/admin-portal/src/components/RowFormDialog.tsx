@@ -99,14 +99,19 @@ function FieldInput({
 }
 
 export function RowFormDialog({
-  open, onOpenChange, descriptor, initial, onSaved,
+  open, onOpenChange, descriptor, initial, onSaved, presetValues, lockedFields,
 }: {
   open: boolean;
   onOpenChange: (b: boolean) => void;
   descriptor: TableDescriptor;
   initial: Record<string, unknown> | null;
   onSaved: () => void;
+  /** Pre-fill these field values when opening for create. Ignored on edit. */
+  presetValues?: Record<string, string>;
+  /** Hide these fields entirely (used for nested grids where the parent FK is implicit). */
+  lockedFields?: string[];
 }) {
+  const lockedSet = useMemo(() => new Set(lockedFields ?? []), [lockedFields]);
   const editable = useMemo(
     () => descriptor.fields.filter((f) => !f.readonly),
     [descriptor],
@@ -119,11 +124,17 @@ export function RowFormDialog({
     if (!open) return;
     const v: Record<string, string> = {};
     for (const f of editable) {
-      v[f.key] = initial ? toFormValue((initial as any)[f.key], f) : "";
+      if (initial) {
+        v[f.key] = toFormValue((initial as any)[f.key], f);
+      } else if (presetValues && presetValues[f.key] !== undefined) {
+        v[f.key] = presetValues[f.key];
+      } else {
+        v[f.key] = "";
+      }
     }
     setValues(v);
     setError(null);
-  }, [open, initial, editable]);
+  }, [open, initial, editable, presetValues]);
 
   async function submit() {
     setSaving(true);
@@ -176,7 +187,7 @@ export function RowFormDialog({
           </DialogTitle>
         </DialogHeader>
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4 py-2">
-          {editable.map((f) => (
+          {editable.filter((f) => !lockedSet.has(f.key)).map((f) => (
             <div key={f.key} className={f.type === "textarea" ? "md:col-span-2" : ""}>
               <Label className="text-xs font-semibold uppercase tracking-wide brand-navy">
                 {f.label}{f.required && <span className="text-destructive ml-1">*</span>}
