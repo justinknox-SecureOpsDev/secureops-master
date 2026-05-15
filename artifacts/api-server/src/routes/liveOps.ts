@@ -1,0 +1,125 @@
+import { Router, type IRouter } from "express";
+import { eq, isNull, and, sql, desc } from "drizzle-orm";
+import { db, usersTable, timeEntriesTable, shiftsTable, sitesTable, incidentsTable } from "@workspace/db";
+import { requireAuth, requireAdmin } from "../middlewares/auth";
+import { sendPushToUsers } from "../lib/push";
+
+const router: IRouter = Router();
+
+// POST /me/location — update authenticated user's last known location.
+// Called periodically by the mobile app while the officer is clocked in.
+function validCoord(lat: unknown, lng: unknown): { lat: number; lng: number } | null {
+  if (typeof lat !== "number" || typeof lng !== "number") return null;
+  if (!Number.isFinite(lat) || !Number.isFinite(lng)) return null;
+  if (lat < -90 || lat > 90 || lng < -180 || lng > 180) return null;
+  return { lat, lng };
+}
+
+router.post("/me/location", requireAuth, async (req, res): Promise<void> => {
+  const { lat, lng } = (req.body ?? {}) as { lat?: number; lng?: number };
+  const coord = validCoord(lat, lng);
+  if (!coord) {
+    res.status(400).json({ error: "Bad Request", message: "Valid lat (-90..90) and lng (-180..180) required" });
+    return;
+  }
+  await db.update(usersTable).set({
+    lastLat: String(coord.lat),
+    lastLng: String(coord.lng),
+    lastLocationAt: new Date(),
+  }).where(eq(usersTable.id, req.user!.userId));
+  res.json({ ok: true });
+});
+
+// GET /admin/active-officers — list currently clocked-in officers with last known location.
+router.get("/admin/active-officers", requireAdmin, async (req, res): Promise<void> => {
+  const rows = await db
+    .select({
+      userId: usersTable.id,
+      firstName: usersTable.firstName,
+      lastName: usersTable.lastName,
+      lastLat: usersTable.lastLat,
+      lastLng: usersTable.lastLng,
+      lastLocationAt: usersTable.lastLocationAt,
+      timeEntryId: timeEntriesTable.id,
+      clockInTime: timeEntriesTable.clockInTime,
+      clockInLat: timeEntriesTable.clockInLat,
+      clockInLng: timeEntriesTable.clockInLng,
+      shiftId: shiftsTable.id,
+      shiftTitle: shiftsTable.title,
+      siteName: sitesTable.name,
+      siteAddress: sitesTable.address,
+    })
+    .from(timeEntriesTable)
+    .innerJoin(usersTable, eq(timeEntriesTable.employeeId, usersTable.id))
+    .leftJoin(shiftsTable, eq(timeEntriesTable.shiftId, shiftsTable.id))
+    .leftJoin(sitesTable, eq(shiftsTable.siteId, sitesTable.id))
+    .where(isNull(timeEntriesTable.clockOutTime))
+    .orderBy(desc(timeEntriesTable.clockInTime));
+
+  res.json(rows);
+});
+
+// POST /emergency — officer triggers panic alert. Creates a critical incident
+// and pushes to every admin. Returns the incident + the recommended phone number.
+router.post("/emergency", requireAuth, async (req, res): Promise<void> => {
+  const me = req.user!.userId;
+  const { lat, lng, message } = (req.body ?? {}) as { lat?: number; lng?: number; message?: string };
+
+  const [user] = await db.select().from(usersTable).where(eq(usersTable.id, me)).limit(1);
+  if (!user) { res.status(404).json({ error: "Not Found", message: "User not found" }); return; }
+
+  // Find active time entry (if any) so we can attach the shift to the incident.
+  const [active] = await db
+    .select()
+    .from(timeEntriesTable)
+    .where(and(eq(timeEntriesTable.employeeId, me), isNull(timeEntriesTable.clockOutTime)))
+    .limit(1);
+
+  const fresh = validCoord(lat, lng);
+  const fallbackLat = active?.clockInLat ? parseFloat(active.clockInLat) : null;
+  const fallbackLng = active?.clockInLng ? parseFloat(active.clockInLng) : null;
+  const useLat = fresh ? fresh.lat : (Number.isFinite(fallbackLat as number) ? (fallbackLat as number) : null);
+  const useLng = fresh ? fresh.lng : (Number.isFinite(fallbackLng as number) ? (fallbackLng as number) : null);
+
+  if (fresh) {
+    await db.update(usersTable).set({
+      lastLat: String(fresh.lat),
+      lastLng: String(fresh.lng),
+      lastLocationAt: new Date(),
+    }).where(eq(usersTable.id, me));
+  }
+
+  const haveCoords = useLat !== null && useLng !== null;
+  const [incident] = await db.insert(incidentsTable).values({
+    shiftId: active?.shiftId ?? null,
+    employeeId: me,
+    title: `EMERGENCY — ${user.firstName} ${user.lastName}`,
+    description: message?.trim() || "Officer triggered the emergency panic button. Verify safety immediately.",
+    severity: "critical",
+    status: "open",
+    locationDescription: haveCoords ? `${useLat!.toFixed(6)}, ${useLng!.toFixed(6)}` : null,
+    lat: haveCoords ? String(useLat) : null,
+    lng: haveCoords ? String(useLng) : null,
+    occurredAt: new Date(),
+  }).returning();
+
+  const admins = await db.select({ id: usersTable.id }).from(usersTable).where(eq(usersTable.role, "admin"));
+  const adminIds = admins.map((a) => a.id);
+
+  // Fire-and-forget push to all admins.
+  sendPushToUsers(adminIds, {
+    title: "🚨 EMERGENCY ALERT",
+    body: `${user.firstName} ${user.lastName} triggered a panic alert. Tap to view location.`,
+    data: { type: "emergency", incidentId: incident.id, lat: useLat, lng: useLng },
+  }).catch(() => {});
+
+  // Notify any connected websocket clients in admin push channels via the chat broadcast pipe is overkill;
+  // keep it to the push notification + incident record. Map view + incidents list will refresh on next poll.
+
+  // WCSG operates in the UK — default to 999. Override via EMERGENCY_CALL_NUMBER (e.g. "911").
+  const phone = process.env["EMERGENCY_CALL_NUMBER"] || "999";
+
+  res.status(201).json({ incident, callNumber: phone, adminCount: adminIds.length });
+});
+
+export default router;

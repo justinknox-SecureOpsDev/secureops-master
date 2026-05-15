@@ -5,6 +5,7 @@ import { useGetEmployeeDashboardSummary, getGetEmployeeDashboardSummaryQueryKey 
 import { useAuth } from "@/contexts/AuthContext";
 import { Feather } from "@expo/vector-icons";
 import { useRouter } from "expo-router";
+import EmergencyButton from "@/components/EmergencyButton";
 
 function SeverityBadge({ severity }: { severity: string }) {
   const colors = useColors();
@@ -43,6 +44,8 @@ export default function EmployeeHomeScreen() {
           <Feather name="log-out" size={18} color={colors.mutedForeground} />
         </TouchableOpacity>
       </View>
+
+      <EmergencyButton />
 
       {summary?.activeTimeEntry && (
         <View style={[styles.clockedInBanner, { backgroundColor: "#22c55e20", borderColor: "#22c55e" }]}>

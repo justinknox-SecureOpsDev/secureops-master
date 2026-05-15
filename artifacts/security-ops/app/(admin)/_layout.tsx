@@ -66,6 +66,13 @@ export default function AdminLayout() {
         }}
       />
       <Tabs.Screen
+        name="live-map"
+        options={{
+          title: "Live Map",
+          tabBarIcon: ({ color }) => <Feather name="map" size={22} color={color} />,
+        }}
+      />
+      <Tabs.Screen
         name="incidents"
         options={{
           title: "Incidents",

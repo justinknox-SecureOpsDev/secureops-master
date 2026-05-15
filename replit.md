@@ -35,6 +35,10 @@ A full-stack mobile operations platform for Williams Council Security Group (WCS
 - `artifacts/security-ops/contexts/ChatContext.tsx` — WebSocket chat context
 - `artifacts/security-ops/components/chat/` — Chat UI components
 - `artifacts/security-ops/hooks/useNotifications.ts` — Push notification registration
+- `artifacts/api-server/src/routes/liveOps.ts` — Live location, active officers, emergency endpoints
+- `artifacts/security-ops/components/EmergencyButton.tsx` — Panic button on employee home
+- `artifacts/security-ops/components/LiveOfficerMap.tsx` — Leaflet map (web) / list (native)
+- `artifacts/security-ops/app/(admin)/live-map.tsx` — Admin Live Map tab
 
 ## Architecture decisions
 
@@ -54,6 +58,8 @@ A full-stack mobile operations platform for Williams Council Security Group (WCS
 - **Currency**: GBP (£) throughout admin payroll/invoice screens.
 - **Chat**: Replaces WhatsApp — real-time team messaging with named channels, persistent message history, WebSocket delivery.
 - **Notifications**: Push alerts on shift assignment (iOS/Android); web degrades gracefully.
+- **Live map**: Admin "Live Map" tab shows every clocked-in officer on a Leaflet/OpenStreetMap view (web) or list (native), refreshed every 30s. Mobile pings `POST /me/location` every 60s while clocked in; users table stores `last_lat/last_lng/last_location_at`. `GET /admin/active-officers` joins active time entries with users + shifts + sites.
+- **Emergency button**: Red EMERGENCY button on employee Home. `POST /emergency` creates a `severity=critical` incident, pushes "🚨 EMERGENCY ALERT" to all admins via Expo, and returns a `callNumber` (defaults to `999` (UK), override via `EMERGENCY_CALL_NUMBER` env var (e.g. `911`)). Mobile then offers `Linking.openURL("tel:<number>")` to dial. Web shows alert only (no auto-dial).
 
 ## Seeded Accounts
 

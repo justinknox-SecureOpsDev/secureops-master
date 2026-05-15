@@ -749,6 +749,23 @@ export interface ChatRoom {
   messageCount: number;
 }
 
+export interface ActiveOfficer {
+  userId: string;
+  firstName: string;
+  lastName: string;
+  lastLat?: string | null;
+  lastLng?: string | null;
+  lastLocationAt?: string | null;
+  timeEntryId: string;
+  clockInTime: string;
+  clockInLat?: string | null;
+  clockInLng?: string | null;
+  shiftId?: string | null;
+  shiftTitle?: string | null;
+  siteName?: string | null;
+  siteAddress?: string | null;
+}
+
 export interface ChatUser {
   id: string;
   firstName: string;
@@ -899,6 +916,27 @@ export type CreateChatRoomBody = {
   name: string;
   type?: string;
   shiftId?: string;
+};
+
+export type UpdateMyLocationBody = {
+  lat: number;
+  lng: number;
+};
+
+export type UpdateMyLocation200 = {
+  ok: boolean;
+};
+
+export type TriggerEmergencyBody = {
+  lat?: number;
+  lng?: number;
+  message?: string;
+};
+
+export type TriggerEmergency201 = {
+  incident: Incident;
+  callNumber: string;
+  adminCount: number;
 };
 
 export type CreateDirectChatBody = {

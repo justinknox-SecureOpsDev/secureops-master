@@ -17,6 +17,7 @@ import type {
 } from "@tanstack/react-query";
 
 import type {
+  ActiveOfficer,
   AdminDashboardSummary,
   ApproveTimeEntryRequest,
   AssignShiftRequest,
@@ -63,12 +64,16 @@ import type {
   ShiftAssignment,
   Site,
   TimeEntry,
+  TriggerEmergency201,
+  TriggerEmergencyBody,
   UpdateAssignmentRequest,
   UpdateClientRequest,
   UpdateEmployeeRequest,
   UpdateIncidentRequest,
   UpdateInvoiceRequest,
   UpdateLicenseRequest,
+  UpdateMyLocation200,
+  UpdateMyLocationBody,
   UpdatePayrollRequest,
   UpdateShiftRequest,
   UpdateSiteRequest,
@@ -4458,6 +4463,253 @@ export const useCreateChatRoom = <
   TContext
 > => {
   return useMutation(getCreateChatRoomMutationOptions(options));
+};
+
+/**
+ * @summary Update authenticated user's last known location
+ */
+export const getUpdateMyLocationUrl = () => {
+  return `/api/me/location`;
+};
+
+export const updateMyLocation = async (
+  updateMyLocationBody: UpdateMyLocationBody,
+  options?: RequestInit,
+): Promise<UpdateMyLocation200> => {
+  return customFetch<UpdateMyLocation200>(getUpdateMyLocationUrl(), {
+    ...options,
+    method: "POST",
+    headers: { "Content-Type": "application/json", ...options?.headers },
+    body: JSON.stringify(updateMyLocationBody),
+  });
+};
+
+export const getUpdateMyLocationMutationOptions = <
+  TError = ErrorType<unknown>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof updateMyLocation>>,
+    TError,
+    { data: BodyType<UpdateMyLocationBody> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof updateMyLocation>>,
+  TError,
+  { data: BodyType<UpdateMyLocationBody> },
+  TContext
+> => {
+  const mutationKey = ["updateMyLocation"];
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof updateMyLocation>>,
+    { data: BodyType<UpdateMyLocationBody> }
+  > = (props) => {
+    const { data } = props ?? {};
+
+    return updateMyLocation(data, requestOptions);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type UpdateMyLocationMutationResult = NonNullable<
+  Awaited<ReturnType<typeof updateMyLocation>>
+>;
+export type UpdateMyLocationMutationBody = BodyType<UpdateMyLocationBody>;
+export type UpdateMyLocationMutationError = ErrorType<unknown>;
+
+/**
+ * @summary Update authenticated user's last known location
+ */
+export const useUpdateMyLocation = <
+  TError = ErrorType<unknown>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof updateMyLocation>>,
+    TError,
+    { data: BodyType<UpdateMyLocationBody> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationResult<
+  Awaited<ReturnType<typeof updateMyLocation>>,
+  TError,
+  { data: BodyType<UpdateMyLocationBody> },
+  TContext
+> => {
+  return useMutation(getUpdateMyLocationMutationOptions(options));
+};
+
+/**
+ * @summary List currently clocked-in officers with last known location
+ */
+export const getGetActiveOfficersUrl = () => {
+  return `/api/admin/active-officers`;
+};
+
+export const getActiveOfficers = async (
+  options?: RequestInit,
+): Promise<ActiveOfficer[]> => {
+  return customFetch<ActiveOfficer[]>(getGetActiveOfficersUrl(), {
+    ...options,
+    method: "GET",
+  });
+};
+
+export const getGetActiveOfficersQueryKey = () => {
+  return [`/api/admin/active-officers`] as const;
+};
+
+export const getGetActiveOfficersQueryOptions = <
+  TData = Awaited<ReturnType<typeof getActiveOfficers>>,
+  TError = ErrorType<unknown>,
+>(options?: {
+  query?: UseQueryOptions<
+    Awaited<ReturnType<typeof getActiveOfficers>>,
+    TError,
+    TData
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}) => {
+  const { query: queryOptions, request: requestOptions } = options ?? {};
+
+  const queryKey = queryOptions?.queryKey ?? getGetActiveOfficersQueryKey();
+
+  const queryFn: QueryFunction<
+    Awaited<ReturnType<typeof getActiveOfficers>>
+  > = ({ signal }) => getActiveOfficers({ signal, ...requestOptions });
+
+  return { queryKey, queryFn, ...queryOptions } as UseQueryOptions<
+    Awaited<ReturnType<typeof getActiveOfficers>>,
+    TError,
+    TData
+  > & { queryKey: QueryKey };
+};
+
+export type GetActiveOfficersQueryResult = NonNullable<
+  Awaited<ReturnType<typeof getActiveOfficers>>
+>;
+export type GetActiveOfficersQueryError = ErrorType<unknown>;
+
+/**
+ * @summary List currently clocked-in officers with last known location
+ */
+
+export function useGetActiveOfficers<
+  TData = Awaited<ReturnType<typeof getActiveOfficers>>,
+  TError = ErrorType<unknown>,
+>(options?: {
+  query?: UseQueryOptions<
+    Awaited<ReturnType<typeof getActiveOfficers>>,
+    TError,
+    TData
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+  const queryOptions = getGetActiveOfficersQueryOptions(options);
+
+  const query = useQuery(queryOptions) as UseQueryResult<TData, TError> & {
+    queryKey: QueryKey;
+  };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
+
+/**
+ * @summary Officer triggers emergency panic alert
+ */
+export const getTriggerEmergencyUrl = () => {
+  return `/api/emergency`;
+};
+
+export const triggerEmergency = async (
+  triggerEmergencyBody: TriggerEmergencyBody,
+  options?: RequestInit,
+): Promise<TriggerEmergency201> => {
+  return customFetch<TriggerEmergency201>(getTriggerEmergencyUrl(), {
+    ...options,
+    method: "POST",
+    headers: { "Content-Type": "application/json", ...options?.headers },
+    body: JSON.stringify(triggerEmergencyBody),
+  });
+};
+
+export const getTriggerEmergencyMutationOptions = <
+  TError = ErrorType<unknown>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof triggerEmergency>>,
+    TError,
+    { data: BodyType<TriggerEmergencyBody> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof triggerEmergency>>,
+  TError,
+  { data: BodyType<TriggerEmergencyBody> },
+  TContext
+> => {
+  const mutationKey = ["triggerEmergency"];
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof triggerEmergency>>,
+    { data: BodyType<TriggerEmergencyBody> }
+  > = (props) => {
+    const { data } = props ?? {};
+
+    return triggerEmergency(data, requestOptions);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type TriggerEmergencyMutationResult = NonNullable<
+  Awaited<ReturnType<typeof triggerEmergency>>
+>;
+export type TriggerEmergencyMutationBody = BodyType<TriggerEmergencyBody>;
+export type TriggerEmergencyMutationError = ErrorType<unknown>;
+
+/**
+ * @summary Officer triggers emergency panic alert
+ */
+export const useTriggerEmergency = <
+  TError = ErrorType<unknown>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof triggerEmergency>>,
+    TError,
+    { data: BodyType<TriggerEmergencyBody> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationResult<
+  Awaited<ReturnType<typeof triggerEmergency>>,
+  TError,
+  { data: BodyType<TriggerEmergencyBody> },
+  TContext
+> => {
+  return useMutation(getTriggerEmergencyMutationOptions(options));
 };
 
 /**

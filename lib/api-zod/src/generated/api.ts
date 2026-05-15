@@ -1481,6 +1481,50 @@ export const CreateChatRoomBody = zod.object({
 });
 
 /**
+ * @summary Update authenticated user's last known location
+ */
+export const UpdateMyLocationBody = zod.object({
+  lat: zod.number(),
+  lng: zod.number(),
+});
+
+export const UpdateMyLocationResponse = zod.object({
+  ok: zod.boolean(),
+});
+
+/**
+ * @summary List currently clocked-in officers with last known location
+ */
+export const GetActiveOfficersResponseItem = zod.object({
+  userId: zod.string(),
+  firstName: zod.string(),
+  lastName: zod.string(),
+  lastLat: zod.string().nullish(),
+  lastLng: zod.string().nullish(),
+  lastLocationAt: zod.string().nullish(),
+  timeEntryId: zod.string(),
+  clockInTime: zod.string(),
+  clockInLat: zod.string().nullish(),
+  clockInLng: zod.string().nullish(),
+  shiftId: zod.string().nullish(),
+  shiftTitle: zod.string().nullish(),
+  siteName: zod.string().nullish(),
+  siteAddress: zod.string().nullish(),
+});
+export const GetActiveOfficersResponse = zod.array(
+  GetActiveOfficersResponseItem,
+);
+
+/**
+ * @summary Officer triggers emergency panic alert
+ */
+export const TriggerEmergencyBody = zod.object({
+  lat: zod.number().optional(),
+  lng: zod.number().optional(),
+  message: zod.string().optional(),
+});
+
+/**
  * @summary List users available for direct messaging
  */
 export const GetChatUsersResponseItem = zod.object({

@@ -12,6 +12,7 @@ import incidentsRouter from "./incidents";
 import licensesRouter from "./licenses";
 import dashboardRouter from "./dashboard";
 import chatRouter from "./chat";
+import liveOpsRouter from "./liveOps";
 
 const router: IRouter = Router();
 
@@ -28,5 +29,6 @@ router.use(incidentsRouter);
 router.use(licensesRouter);
 router.use(dashboardRouter);
 router.use(chatRouter);
+router.use(liveOpsRouter);
 
 export default router;

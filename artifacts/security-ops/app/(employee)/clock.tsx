@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from "react";
 import { View, Text, StyleSheet, TouchableOpacity, ActivityIndicator, Alert, Platform, ScrollView } from "react-native";
 import { useColors } from "@/hooks/useColors";
-import { useClockIn, useClockOut, useGetActiveTimeEntry, getGetActiveTimeEntryQueryKey, useGetTimeEntries, getGetTimeEntriesQueryKey } from "@workspace/api-client-react";
+import { useClockIn, useClockOut, useGetActiveTimeEntry, getGetActiveTimeEntryQueryKey, useGetTimeEntries, getGetTimeEntriesQueryKey, updateMyLocation } from "@workspace/api-client-react";
 import { Feather } from "@expo/vector-icons";
 import { useQueryClient } from "@tanstack/react-query";
 import * as Location from "expo-location";
@@ -56,6 +56,27 @@ export default function EmployeeClockScreen() {
   };
 
   useEffect(() => { getLocation(); }, []);
+
+  // While clocked in, push location to the server every 60s so admins see live map updates.
+  useEffect(() => {
+    if (!isClockedIn) return;
+    let cancelled = false;
+    const ping = async () => {
+      try {
+        const { status } = await Location.requestForegroundPermissionsAsync();
+        if (status !== "granted") return;
+        const loc = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced });
+        if (cancelled) return;
+        const lat = loc.coords.latitude;
+        const lng = loc.coords.longitude;
+        setLocation({ lat, lon: lng });
+        await updateMyLocation({ lat, lng });
+      } catch { /* ignore */ }
+    };
+    ping();
+    const t = setInterval(ping, 60_000);
+    return () => { cancelled = true; clearInterval(t); };
+  }, [isClockedIn]);
 
   const handleClockIn = async () => {
     Alert.alert("Clock In", "Start your shift now?", [

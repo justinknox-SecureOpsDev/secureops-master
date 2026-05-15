@@ -1,4 +1,4 @@
-import { pgTable, text, uuid, timestamp } from "drizzle-orm/pg-core";
+import { pgTable, text, uuid, timestamp, numeric } from "drizzle-orm/pg-core";
 import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod/v4";
 
@@ -11,6 +11,9 @@ export const usersTable = pgTable("users", {
   role: text("role").notNull().default("employee"),
   status: text("status").notNull().default("pending"),
   expoPushToken: text("expo_push_token"),
+  lastLat: numeric("last_lat", { precision: 10, scale: 6 }),
+  lastLng: numeric("last_lng", { precision: 10, scale: 6 }),
+  lastLocationAt: timestamp("last_location_at", { withTimezone: true }),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow().$onUpdate(() => new Date()),
 });
