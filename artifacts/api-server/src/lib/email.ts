@@ -128,6 +128,48 @@ export function renderResendOnboardingEmail(opts: {
   return { subject, text, html };
 }
 
+export function renderRejectionEmail(opts: {
+  firstName: string;
+  reviewerNotes?: string | null;
+}): { subject: string; text: string; html: string } {
+  const subject = "Update on your Williams Council Security Group application";
+  const notesBlock = opts.reviewerNotes && opts.reviewerNotes.trim().length > 0
+    ? `\n\nNotes from our recruitment team:\n${opts.reviewerNotes.trim()}\n`
+    : "";
+  const text = [
+    `Hi ${opts.firstName},`,
+    "",
+    "Thank you for taking the time to apply to Williams Council Security Group.",
+    "",
+    "After careful consideration, we won't be moving forward with your application at this time.",
+    "We genuinely appreciate your interest and the effort you put into applying, and we wish you the very best in your job search.",
+    notesBlock,
+    "You're welcome to apply again in the future as new positions open up.",
+    "",
+    "— Williams Council Security Group",
+  ].join("\n");
+  const notesHtml = opts.reviewerNotes && opts.reviewerNotes.trim().length > 0
+    ? `<div style="background:#f6f1e1;padding:12px;border-left:3px solid #c9a84c;margin:16px 0;border-radius:4px">
+         <div style="font-size:12px;text-transform:uppercase;letter-spacing:0.5px;color:#555;margin-bottom:6px">Notes from our team</div>
+         <div style="white-space:pre-wrap">${escapeHtml(opts.reviewerNotes.trim())}</div>
+       </div>`
+    : "";
+  const html = `
+    <div style="font-family:Georgia,serif;max-width:560px;margin:0 auto;color:#080c18">
+      <h2 style="color:#080c18">Williams Council Security Group</h2>
+      <p>Hi ${escapeHtml(opts.firstName)},</p>
+      <p>Thank you for taking the time to apply to Williams Council Security Group.</p>
+      <p>After careful consideration, we won't be moving forward with your application at this time.
+         We genuinely appreciate your interest and the effort you put into applying, and we wish you the very best in your job search.</p>
+      ${notesHtml}
+      <p style="color:#555">You're welcome to apply again in the future as new positions open up.</p>
+      <hr style="border:none;border-top:1px solid #ddd;margin:24px 0"/>
+      <p style="color:#555;font-size:12px">— Williams Council Security Group</p>
+    </div>
+  `;
+  return { subject, text, html };
+}
+
 function escapeHtml(s: string): string {
   return s.replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]!));
 }

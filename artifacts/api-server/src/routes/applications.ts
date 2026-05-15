@@ -20,7 +20,7 @@ import {
 } from "@workspace/api-zod";
 import { requireAdmin } from "../middlewares/auth";
 import { sendPushToUsers } from "../lib/push";
-import { sendEmail, renderOnboardingEmail, renderResendOnboardingEmail } from "../lib/email";
+import { sendEmail, renderOnboardingEmail, renderResendOnboardingEmail, renderRejectionEmail } from "../lib/email";
 
 const router: IRouter = Router();
 
@@ -167,7 +167,25 @@ router.post("/admin/applications/:id/reject", requireAdmin, async (req, res): Pr
     reviewedAt: new Date(),
   }).where(eq(applicationsTable.id, req.params.id as string)).returning();
   if (!row) { res.status(404).json({ error: "Not Found", message: "Application not found" }); return; }
-  res.json(rowToApplication(row));
+
+  const application = rowToApplication(row);
+  const emailMsg = renderRejectionEmail({
+    firstName: application.firstName,
+    reviewerNotes: application.reviewerNotes ?? null,
+  });
+  const emailSent = await sendEmail({
+    to: application.email,
+    subject: emailMsg.subject,
+    text: emailMsg.text,
+    html: emailMsg.html,
+  });
+  if (emailSent) {
+    req.log.info({ applicationId: application.id, to: application.email }, "Rejection email sent");
+  } else {
+    req.log.info({ applicationId: application.id }, "Rejection email not sent — SMTP not configured");
+  }
+
+  res.json({ ...application, emailSent });
 });
 
 router.post("/admin/applications/:id/approve", requireAdmin, async (req, res): Promise<void> => {

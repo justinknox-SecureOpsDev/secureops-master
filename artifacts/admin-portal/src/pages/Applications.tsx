@@ -37,6 +37,8 @@ type ApproveResp = {
   emailSent: boolean;
 };
 
+type RejectResp = Application & { emailSent: boolean };
+
 const STATUSES = [
   { value: "", label: "All" },
   { value: "submitted", label: "Submitted" },
@@ -60,6 +62,7 @@ export function ApplicationsPage() {
   const [search, setSearch] = useState("");
   const [openId, setOpenId] = useState<string | null>(null);
   const [approval, setApproval] = useState<ApproveResp | null>(null);
+  const [rejection, setRejection] = useState<RejectResp | null>(null);
 
   async function refresh() {
     setLoading(true); setError(null);
@@ -157,22 +160,31 @@ export function ApplicationsPage() {
             setItems((arr) => arr.map((x) => x.id === resp.application.id ? resp.application : x));
             setApproval(resp);
           }}
+          onRejected={(resp) => {
+            const { emailSent: _es, ...app } = resp;
+            setItems((arr) => arr.map((x) => x.id === app.id ? (app as Application) : x));
+            setRejection(resp);
+          }}
         />
       )}
       {approval && (
         <ApprovalSuccessDialog resp={approval} onClose={() => setApproval(null)} />
+      )}
+      {rejection && (
+        <RejectionResultDialog resp={rejection} onClose={() => setRejection(null)} />
       )}
     </div>
   );
 }
 
 function ApplicationDialog({
-  app, onClose, onUpdated, onApproved,
+  app, onClose, onUpdated, onApproved, onRejected,
 }: {
   app: Application;
   onClose: () => void;
   onUpdated: (a: Application) => void;
   onApproved: (resp: ApproveResp) => void;
+  onRejected: (resp: RejectResp) => void;
 }) {
   const [notes, setNotes] = useState(app.reviewerNotes ?? "");
   const [busy, setBusy] = useState<string | null>(null);
@@ -186,12 +198,16 @@ function ApplicationDialog({
           method: "POST", body: { notes: notes || undefined },
         });
         onApproved(resp); onClose();
+      } else if (kind === "reject") {
+        const resp = await api<RejectResp>(`/admin/applications/${app.id}/reject`, {
+          method: "POST", body: { notes: notes || undefined },
+        });
+        onRejected(resp); onClose();
       } else {
         const updated = await api<Application>(`/admin/applications/${app.id}/${kind}`, {
           method: "POST", body: { notes: notes || undefined },
         });
         onUpdated(updated);
-        if (kind === "reject") onClose();
       }
     } catch (e) { setError((e as Error).message); }
     finally { setBusy(null); }
@@ -395,5 +411,43 @@ function FileLink({ k, path }: { k: string; path: string | null }) {
       <span className="opacity-70">{k}:</span>{" "}
       <button type="button" className="underline brand-navy" onClick={() => openSignedObject(path)}>view</button>
     </li>
+  );
+}
+
+function RejectionResultDialog({ resp, onClose }: { resp: RejectResp; onClose: () => void }) {
+  const fullName = `${resp.firstName} ${resp.lastName}`;
+  return (
+    <Dialog open onOpenChange={(o) => { if (!o) onClose(); }}>
+      <DialogContent className="max-w-lg">
+        <DialogHeader>
+          <DialogTitle className="brand-wordmark text-xl">Application rejected</DialogTitle>
+        </DialogHeader>
+        <div className="space-y-3 text-sm">
+          {resp.emailSent ? (
+            <div className="flex items-start gap-2 bg-emerald-50 border border-emerald-200 text-emerald-900 p-3 rounded">
+              <MailCheck className="w-5 h-5 mt-0.5 shrink-0" />
+              <div>
+                <div className="font-medium">Rejection email sent to {resp.email}</div>
+                <div className="text-xs mt-0.5">
+                  {fullName} has been notified that their application won't be moving forward.
+                </div>
+              </div>
+            </div>
+          ) : (
+            <div className="bg-amber-50 border border-amber-200 text-amber-900 p-3 rounded">
+              <div className="font-medium">{fullName} marked as rejected</div>
+              <div className="text-xs mt-1">
+                No email was sent — SMTP isn't configured. Set <code>SMTP_HOST</code>, <code>SMTP_PORT</code>,
+                <code> SMTP_USER</code>, <code>SMTP_PASS</code> (and optionally <code>SMTP_FROM</code>) to send
+                rejection emails automatically. You may want to follow up with the applicant manually.
+              </div>
+            </div>
+          )}
+        </div>
+        <DialogFooter>
+          <Button onClick={onClose}>Close</Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
   );
 }
