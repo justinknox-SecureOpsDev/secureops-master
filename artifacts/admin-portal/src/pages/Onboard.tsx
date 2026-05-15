@@ -185,15 +185,15 @@ export function OnboardPage() {
             <>
               <h2 className="brand-wordmark text-xl">Bank & tax details</h2>
               <Two>
-                <Field label="Sort code *"><Input value={bankSortCode} onChange={(e) => setBankSortCode(e.target.value)} placeholder="00-00-00" /></Field>
+                <Field label="Bank routing number *"><Input value={bankSortCode} onChange={(e) => setBankSortCode(e.target.value)} placeholder="9 digits" /></Field>
                 <Field label="Account number *"><Input value={bankAccountNumber} onChange={(e) => setBankAccountNumber(e.target.value)} /></Field>
               </Two>
               <Field label="Account holder name *"><Input value={bankAccountName} onChange={(e) => setBankAccountName(e.target.value)} /></Field>
               <Two>
-                <Field label="National Insurance number"><Input value={niNumberConfirmed} onChange={(e) => setNiNumberConfirmed(e.target.value)} /></Field>
-                <Field label="Tax code"><Input value={taxCode} onChange={(e) => setTaxCode(e.target.value)} placeholder="e.g. 1257L" /></Field>
+                <Field label="SSN"><Input value={niNumberConfirmed} onChange={(e) => setNiNumberConfirmed(e.target.value)} placeholder="xxx-xx-xxxx" /></Field>
+                <Field label="W-4 filing status"><Input value={taxCode} onChange={(e) => setTaxCode(e.target.value)} placeholder="e.g. Single, Married" /></Field>
               </Two>
-              <FileUploadField label="P45 (if available)" accept=".pdf,image/*" value={p45Doc} onChange={setP45Doc} />
+              <FileUploadField label="Prior W-2 / final pay stub (if available)" accept=".pdf,image/*" value={p45Doc} onChange={setP45Doc} />
             </>
           )}
           {step === 1 && (
@@ -207,19 +207,19 @@ export function OnboardPage() {
               <h3 className="text-sm uppercase tracking-wide opacity-70 pt-3">Uniform sizes</h3>
               <Two>
                 <Field label="Shirt"><Input value={uShirt} onChange={(e) => setUShirt(e.target.value)} placeholder="S / M / L / XL" /></Field>
-                <Field label="Trousers"><Input value={uTrousers} onChange={(e) => setUTrousers(e.target.value)} placeholder="W32 L32" /></Field>
+                <Field label="Pants"><Input value={uTrousers} onChange={(e) => setUTrousers(e.target.value)} placeholder="W32 L32" /></Field>
               </Two>
               <Two>
                 <Field label="Jacket"><Input value={uJacket} onChange={(e) => setUJacket(e.target.value)} /></Field>
-                <Field label="Boots"><Input value={uBoots} onChange={(e) => setUBoots(e.target.value)} placeholder="UK size" /></Field>
+                <Field label="Boots"><Input value={uBoots} onChange={(e) => setUBoots(e.target.value)} placeholder="US size" /></Field>
               </Two>
             </>
           )}
           {step === 2 && (
             <>
               <h2 className="brand-wordmark text-xl">Documents</h2>
-              <FileUploadField label="SIA licence (photo of card)" accept="image/*,.pdf" value={siaLicenseDoc} onChange={setSiaDoc} />
-              <FileUploadField label="Passport / right-to-work document" accept="image/*,.pdf" value={passportDoc} onChange={setPassportDoc} />
+              <FileUploadField label="TX security license (photo of card)" accept="image/*,.pdf" value={siaLicenseDoc} onChange={setSiaDoc} />
+              <FileUploadField label="Passport / driver's license / right-to-work document" accept="image/*,.pdf" value={passportDoc} onChange={setPassportDoc} />
             </>
           )}
           {step === 3 && (

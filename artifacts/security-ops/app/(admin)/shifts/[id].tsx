@@ -124,13 +124,13 @@ export default function ShiftDetailScreen() {
           </View>
           <View style={[styles.statDivider, { backgroundColor: colors.border }]} />
           <View style={styles.statItem}>
-            <Text style={[styles.statVal, { color: colors.primary }]}>£{parseFloat(((shift as any).payRate ?? (shift as any).hourlyRate ?? "0") as any).toFixed(2)}</Text>
+            <Text style={[styles.statVal, { color: colors.primary }]}>${parseFloat(((shift as any).payRate ?? (shift as any).hourlyRate ?? "0") as any).toFixed(2)}</Text>
             <Text style={[styles.statLbl, { color: colors.mutedForeground }]}>Pay Rate</Text>
           </View>
           {(shift as any).billRate && <>
             <View style={[styles.statDivider, { backgroundColor: colors.border }]} />
             <View style={styles.statItem}>
-              <Text style={[styles.statVal, { color: colors.accent }]}>£{parseFloat((shift as any).billRate as any).toFixed(2)}</Text>
+              <Text style={[styles.statVal, { color: colors.accent }]}>${parseFloat((shift as any).billRate as any).toFixed(2)}</Text>
               <Text style={[styles.statLbl, { color: colors.mutedForeground }]}>Bill Rate</Text>
             </View>
           </>}

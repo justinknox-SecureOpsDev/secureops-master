@@ -118,7 +118,7 @@ export function ApplicationsPage() {
               <th className="text-left px-3 py-2">Applicant</th>
               <th className="text-left px-3 py-2">Email</th>
               <th className="text-left px-3 py-2">Phone</th>
-              <th className="text-left px-3 py-2">SIA</th>
+              <th className="text-left px-3 py-2">TX Lic</th>
               <th className="text-left px-3 py-2">Submitted</th>
               <th className="text-left px-3 py-2">Status</th>
               <th></th>
@@ -215,11 +215,11 @@ function ApplicationDialog({
           <Info k="Date of birth" v={app.dateOfBirth} />
           <Info k="City of birth" v={app.cityOfBirth} />
           <Info k="State of birth" v={app.stateOfBirth} />
-          <Info k="NI number" v={app.niNumber} />
+          <Info k="SSN (last 4)" v={app.niNumber} />
           <Info k="Right to work" v={app.rightToWorkStatus} />
-          <Info k="SIA licence #" v={app.siaLicenseNumber} />
-          <Info k="SIA level" v={app.siaLicenseLevel ? `L${app.siaLicenseLevel}` : null} />
-          <Info k="SIA expiry" v={app.siaLicenseExpiry} />
+          <Info k="TX license #" v={app.siaLicenseNumber} />
+          <Info k="License level" v={app.siaLicenseLevel ? `L${app.siaLicenseLevel}` : null} />
+          <Info k="License expiry" v={app.siaLicenseExpiry} />
           <Info k="Years experience" v={app.yearsExperience?.toString() ?? null} />
         </div>
         {app.previousExperience && (

@@ -20,10 +20,10 @@ export default function EmergencyButton() {
       }
     } catch { /* ignore */ }
 
-    let callNumber = "999";
+    let callNumber = "911";
     try {
       const result = await triggerEmergency({ lat: lat as any, lng: lng as any });
-      callNumber = (result as any).callNumber || "999";
+      callNumber = (result as any).callNumber || "911";
     } catch (e: any) {
       Alert.alert("Alert Failed", e?.message || "Could not send alert. Try calling directly.");
     }

@@ -53,7 +53,7 @@ export default function AdminInvoicesScreen() {
     if (!siteId) { Alert.alert("Pick Site", "Choose a site to invoice."); return; }
     generate.mutateAsync({ data: { siteId, weekStart } } as any).then((inv: any) => {
       queryClient.invalidateQueries({ queryKey: getGetInvoicesQueryKey({}) });
-      Alert.alert("Invoice Generated", `${inv?.invoiceNumber ?? "Invoice"} · £${parseFloat(inv?.totalAmount ?? "0").toFixed(2)}`);
+      Alert.alert("Invoice Generated", `${inv?.invoiceNumber ?? "Invoice"} · $${parseFloat(inv?.totalAmount ?? "0").toFixed(2)}`);
     }).catch((e: any) => Alert.alert("Failed", e?.response?.data?.message || e?.message || "Generation failed"));
   };
 
@@ -138,7 +138,7 @@ export default function AdminInvoicesScreen() {
           </TouchableOpacity>
         ))}
         <View style={{ flex: 1, alignItems: "flex-end" }}>
-          <Text style={{ color: colors.mutedForeground, fontSize: 11 }}>£{totalAmt.toFixed(2)}</Text>
+          <Text style={{ color: colors.mutedForeground, fontSize: 11 }}>${totalAmt.toFixed(2)}</Text>
         </View>
       </View>
 
@@ -175,11 +175,11 @@ export default function AdminInvoicesScreen() {
                 </View>
 
                 <View style={[styles.grid, { borderTopColor: colors.border, borderBottomColor: colors.border }]}>
-                  <View style={styles.gItem}><Text style={[styles.gv, { color: colors.foreground }]}>£{parseFloat(item.subtotal).toFixed(2)}</Text><Text style={[styles.gl, { color: colors.mutedForeground }]}>Subtotal</Text></View>
+                  <View style={styles.gItem}><Text style={[styles.gv, { color: colors.foreground }]}>${parseFloat(item.subtotal).toFixed(2)}</Text><Text style={[styles.gl, { color: colors.mutedForeground }]}>Subtotal</Text></View>
                   <View style={[styles.gDiv, { backgroundColor: colors.border }]} />
-                  <View style={styles.gItem}><Text style={[styles.gv, { color: colors.mutedForeground }]}>£{parseFloat(item.taxAmount ?? "0").toFixed(2)}</Text><Text style={[styles.gl, { color: colors.mutedForeground }]}>VAT</Text></View>
+                  <View style={styles.gItem}><Text style={[styles.gv, { color: colors.mutedForeground }]}>${parseFloat(item.taxAmount ?? "0").toFixed(2)}</Text><Text style={[styles.gl, { color: colors.mutedForeground }]}>Tax</Text></View>
                   <View style={[styles.gDiv, { backgroundColor: colors.border }]} />
-                  <View style={styles.gItem}><Text style={[styles.gv, { color: colors.accent }]}>£{parseFloat(item.totalAmount).toFixed(2)}</Text><Text style={[styles.gl, { color: colors.mutedForeground }]}>Total</Text></View>
+                  <View style={styles.gItem}><Text style={[styles.gv, { color: colors.accent }]}>${parseFloat(item.totalAmount).toFixed(2)}</Text><Text style={[styles.gl, { color: colors.mutedForeground }]}>Total</Text></View>
                 </View>
 
                 <View style={styles.dateRow}>

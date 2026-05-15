@@ -119,7 +119,7 @@ export const TABLES: TableDescriptor[] = [
       { key: "address", label: "Address", type: "textarea" },
       { key: "emergencyContactName", label: "Emergency Contact", type: "text" },
       { key: "emergencyContactPhone", label: "Emergency Phone", type: "text" },
-      { key: "hourlyRate", label: "Hourly Rate (£)", type: "number" },
+      { key: "hourlyRate", label: "Hourly Rate ($)", type: "number" },
       { key: "bankAccountName", label: "Bank Acct Name", type: "text", hiddenInGrid: true },
       { key: "bankAccountNumber", label: "Bank Acct #", type: "text", hiddenInGrid: true },
       { key: "bankBsb", label: "Sort Code/BSB", type: "text", hiddenInGrid: true },
@@ -189,8 +189,8 @@ export const TABLES: TableDescriptor[] = [
       },
       { key: "startTime", label: "Start", type: "datetime", required: true },
       { key: "endTime", label: "End", type: "datetime", required: true },
-      { key: "payRate", label: "Pay Rate (£)", type: "number", required: true },
-      { key: "billRate", label: "Bill Rate (£)", type: "number", required: true },
+      { key: "payRate", label: "Pay Rate ($)", type: "number", required: true },
+      { key: "billRate", label: "Bill Rate ($)", type: "number", required: true },
       {
         key: "requiredLicenseLevel", label: "Min Licence", type: "select", required: true,
         options: [
@@ -223,8 +223,8 @@ export const TABLES: TableDescriptor[] = [
       { key: "id", label: "ID", type: "text", readonly: true, hiddenInGrid: true },
       { key: "siteId", label: "Site", type: "fk", fkTable: "sites", fkLabel: "name", required: true, importResolveByLabel: true },
       { key: "name", label: "Role", type: "text", required: true },
-      { key: "payRate", label: "Pay Rate (£)", type: "number", required: true },
-      { key: "billRate", label: "Bill Rate (£)", type: "number", required: true },
+      { key: "payRate", label: "Pay Rate ($)", type: "number", required: true },
+      { key: "billRate", label: "Bill Rate ($)", type: "number", required: true },
       {
         key: "requiredLicenseLevel", label: "Min Licence", type: "select", required: true,
         options: [
@@ -302,10 +302,10 @@ export const TABLES: TableDescriptor[] = [
       { key: "periodStart", label: "Period Start", type: "date", required: true },
       { key: "periodEnd", label: "Period End", type: "date", required: true },
       { key: "totalHours", label: "Hours", type: "number" },
-      { key: "hourlyRate", label: "Rate (£)", type: "number" },
-      { key: "grossPay", label: "Gross (£)", type: "number" },
-      { key: "tax", label: "Tax (£)", type: "number" },
-      { key: "netPay", label: "Net (£)", type: "number" },
+      { key: "hourlyRate", label: "Rate ($)", type: "number" },
+      { key: "grossPay", label: "Gross ($)", type: "number" },
+      { key: "tax", label: "Tax ($)", type: "number" },
+      { key: "netPay", label: "Net ($)", type: "number" },
       {
         key: "status", label: "Status", type: "select",
         options: [
@@ -332,9 +332,9 @@ export const TABLES: TableDescriptor[] = [
       { key: "clientEmail", label: "Client Email", type: "email" },
       { key: "periodStart", label: "Period Start", type: "date" },
       { key: "periodEnd", label: "Period End", type: "date" },
-      { key: "subtotal", label: "Subtotal (£)", type: "number" },
-      { key: "taxAmount", label: "Tax (£)", type: "number" },
-      { key: "totalAmount", label: "Total (£)", type: "number" },
+      { key: "subtotal", label: "Subtotal ($)", type: "number" },
+      { key: "taxAmount", label: "Tax ($)", type: "number" },
+      { key: "totalAmount", label: "Total ($)", type: "number" },
       {
         key: "status", label: "Status", type: "select",
         options: [

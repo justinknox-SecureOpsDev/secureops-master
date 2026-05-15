@@ -61,7 +61,7 @@ export default function AdminPayrollScreen() {
 
   const togglePaid = (item: any) => {
     const next = item.status === "paid" ? "pending" : "paid";
-    Alert.alert("Confirm", `Mark £${parseFloat(item.netPay).toFixed(2)} for ${item.employeeName} as ${next}?`, [
+    Alert.alert("Confirm", `Mark $${parseFloat(item.netPay).toFixed(2)} for ${item.employeeName} as ${next}?`, [
       { text: "Cancel", style: "cancel" },
       {
         text: "Confirm", onPress: async () => {
@@ -138,7 +138,7 @@ export default function AdminPayrollScreen() {
           </TouchableOpacity>
         ))}
         <View style={{ flex: 1, alignItems: "flex-end" }}>
-          <Text style={{ color: colors.mutedForeground, fontSize: 11 }}>Gross £{totalGross.toFixed(2)} · Net £{totalNet.toFixed(2)}</Text>
+          <Text style={{ color: colors.mutedForeground, fontSize: 11 }}>Gross ${totalGross.toFixed(2)} · Net ${totalNet.toFixed(2)}</Text>
         </View>
       </View>
 
@@ -177,11 +177,11 @@ export default function AdminPayrollScreen() {
                 <View style={[styles.grid, { borderTopColor: colors.border }]}>
                   <View style={styles.gItem}><Text style={[styles.gv, { color: colors.foreground }]}>{parseFloat(item.totalHours).toFixed(2)}h</Text><Text style={[styles.gl, { color: colors.mutedForeground }]}>Hours</Text></View>
                   <View style={[styles.gDiv, { backgroundColor: colors.border }]} />
-                  <View style={styles.gItem}><Text style={[styles.gv, { color: colors.foreground }]}>£{parseFloat(item.hourlyRate).toFixed(2)}</Text><Text style={[styles.gl, { color: colors.mutedForeground }]}>Rate</Text></View>
+                  <View style={styles.gItem}><Text style={[styles.gv, { color: colors.foreground }]}>${parseFloat(item.hourlyRate).toFixed(2)}</Text><Text style={[styles.gl, { color: colors.mutedForeground }]}>Rate</Text></View>
                   <View style={[styles.gDiv, { backgroundColor: colors.border }]} />
-                  <View style={styles.gItem}><Text style={[styles.gv, { color: colors.primary }]}>£{parseFloat(item.grossPay).toFixed(2)}</Text><Text style={[styles.gl, { color: colors.mutedForeground }]}>Gross</Text></View>
+                  <View style={styles.gItem}><Text style={[styles.gv, { color: colors.primary }]}>${parseFloat(item.grossPay).toFixed(2)}</Text><Text style={[styles.gl, { color: colors.mutedForeground }]}>Gross</Text></View>
                   <View style={[styles.gDiv, { backgroundColor: colors.border }]} />
-                  <View style={styles.gItem}><Text style={[styles.gv, { color: "#22c55e" }]}>£{parseFloat(item.netPay).toFixed(2)}</Text><Text style={[styles.gl, { color: colors.mutedForeground }]}>Net</Text></View>
+                  <View style={styles.gItem}><Text style={[styles.gv, { color: "#22c55e" }]}>${parseFloat(item.netPay).toFixed(2)}</Text><Text style={[styles.gl, { color: colors.mutedForeground }]}>Net</Text></View>
                 </View>
                 <TouchableOpacity onPress={() => togglePaid(item)}
                   style={[styles.toggle, { borderColor: isPaid ? colors.mutedForeground : "#22c55e" }]}>

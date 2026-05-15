@@ -213,8 +213,8 @@ export default function CreateShiftScreen() {
         )}
 
         <Text style={[styles.sectionLabel, { color: colors.accent, marginTop: 20 }]}>RATES (this site / assignment)</Text>
-        <Field label="Officer Pay Rate (£/hr)" value={form.payRate} onChangeText={set("payRate")} placeholder="18.00" keyboardType="decimal-pad" autoCapitalize="none" required />
-        <Field label="Client Bill Rate (£/hr)" value={form.billRate} onChangeText={set("billRate")} placeholder="30.00" keyboardType="decimal-pad" autoCapitalize="none" required />
+        <Field label="Officer Pay Rate ($/hr)" value={form.payRate} onChangeText={set("payRate")} placeholder="18.00" keyboardType="decimal-pad" autoCapitalize="none" required />
+        <Field label="Client Bill Rate ($/hr)" value={form.billRate} onChangeText={set("billRate")} placeholder="30.00" keyboardType="decimal-pad" autoCapitalize="none" required />
 
         <View style={[styles.broadcastNote, { backgroundColor: colors.accent + "15", borderColor: colors.accent + "50" }]}>
           <Feather name="bell" size={14} color={colors.accent} />

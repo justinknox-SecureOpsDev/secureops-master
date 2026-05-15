@@ -89,7 +89,7 @@ export default function TimeApprovalScreen() {
                     <Text style={[styles.sub, { color: colors.mutedForeground }]}>{item.shiftTitle} · {item.siteName ?? "—"}</Text>
                   </View>
                   <View style={[styles.lvBadge, { backgroundColor: colors.primary + "20", borderColor: colors.primary }]}>
-                    <Text style={{ color: colors.primary, fontSize: 11, fontWeight: "700" }}>£{parseFloat(item.payRate ?? "0").toFixed(2)}/h</Text>
+                    <Text style={{ color: colors.primary, fontSize: 11, fontWeight: "700" }}>${parseFloat(item.payRate ?? "0").toFixed(2)}/h</Text>
                   </View>
                 </View>
 

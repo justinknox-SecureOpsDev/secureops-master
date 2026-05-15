@@ -116,8 +116,8 @@ router.post("/emergency", requireAuth, async (req, res): Promise<void> => {
   // Notify any connected websocket clients in admin push channels via the chat broadcast pipe is overkill;
   // keep it to the push notification + incident record. Map view + incidents list will refresh on next poll.
 
-  // WCSG operates in the UK — default to 999. Override via EMERGENCY_CALL_NUMBER (e.g. "911").
-  const phone = process.env["EMERGENCY_CALL_NUMBER"] || "999";
+  // WCSG operates in Texas (US) — default to 911. Override via EMERGENCY_CALL_NUMBER for other regions.
+  const phone = process.env["EMERGENCY_CALL_NUMBER"] || "911";
 
   res.status(201).json({ incident, callNumber: phone, adminCount: adminIds.length });
 });

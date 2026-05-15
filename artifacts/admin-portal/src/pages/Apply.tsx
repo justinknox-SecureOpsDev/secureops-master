@@ -38,7 +38,7 @@ type Form = {
   availability: { day: Day; period: Period }[];
 };
 
-const STEPS = ["Personal", "Right to work", "SIA & experience", "References & docs", "Availability", "Review"];
+const STEPS = ["Personal", "Right to work", "TX License & experience", "References & docs", "Availability", "Review"];
 
 export function ApplyPage() {
   const [step, setStep] = useState(0);
@@ -165,7 +165,7 @@ export function ApplyPage() {
               <Field label="Full address *"><Textarea rows={2} value={form.address} onChange={(e) => set("address", e.target.value)} /></Field>
               <Two>
                 <Field label="Date of birth"><Input type="date" value={form.dateOfBirth} onChange={(e) => set("dateOfBirth", e.target.value)} /></Field>
-                <Field label="National Insurance number"><Input value={form.niNumber} onChange={(e) => set("niNumber", e.target.value)} /></Field>
+                <Field label="SSN (last 4)"><Input value={form.niNumber} onChange={(e) => set("niNumber", e.target.value)} /></Field>
               </Two>
               <Two>
                 <Field label="City of birth"><Input value={form.cityOfBirth} onChange={(e) => set("cityOfBirth", e.target.value)} /></Field>
@@ -183,14 +183,14 @@ export function ApplyPage() {
                   onChange={(e) => set("rightToWorkStatus", e.target.value)}
                 >
                   <option value="">Select…</option>
-                  <option value="uk_citizen">UK Citizen</option>
-                  <option value="settled">Settled / Pre-settled status</option>
-                  <option value="visa">Work visa</option>
+                  <option value="us_citizen">US Citizen</option>
+                  <option value="permanent_resident">Permanent Resident / Green Card</option>
+                  <option value="work_visa">Employment Authorization (EAD/Visa)</option>
                   <option value="other">Other</option>
                 </select>
               </Field>
               <FileUploadField
-                label="Right-to-work document (passport, share code, BRP)"
+                label="Right-to-work document (passport, driver's license, EAD, I-9 docs)"
                 accept="image/*,.pdf"
                 value={form.rightToWorkDoc}
                 onChange={(v) => set("rightToWorkDoc", v)}
@@ -199,10 +199,10 @@ export function ApplyPage() {
           )}
           {step === 2 && (
             <>
-              <h2 className="brand-wordmark text-xl">SIA licence & experience</h2>
+              <h2 className="brand-wordmark text-xl">TX security license & experience</h2>
               <Two>
-                <Field label="SIA licence number"><Input value={form.siaLicenseNumber} onChange={(e) => set("siaLicenseNumber", e.target.value)} /></Field>
-                <Field label="Licence level">
+                <Field label="TX security license number"><Input value={form.siaLicenseNumber} onChange={(e) => set("siaLicenseNumber", e.target.value)} /></Field>
+                <Field label="License level">
                   <select className="w-full border rounded h-10 px-3 bg-background"
                     value={form.siaLicenseLevel} onChange={(e) => set("siaLicenseLevel", e.target.value)}>
                     <option value="">—</option>
@@ -213,7 +213,7 @@ export function ApplyPage() {
                 </Field>
               </Two>
               <Two>
-                <Field label="Licence expiry"><Input type="date" value={form.siaLicenseExpiry} onChange={(e) => set("siaLicenseExpiry", e.target.value)} /></Field>
+                <Field label="License expiry"><Input type="date" value={form.siaLicenseExpiry} onChange={(e) => set("siaLicenseExpiry", e.target.value)} /></Field>
                 <Field label="Years of experience"><Input type="number" min={0} value={form.yearsExperience} onChange={(e) => set("yearsExperience", e.target.value)} /></Field>
               </Two>
               <Field label="Describe your previous security experience">
@@ -284,9 +284,9 @@ export function ApplyPage() {
                 <Sum k="Email" v={form.email} />
                 <Sum k="Phone" v={form.phone} />
                 <Sum k="DOB" v={form.dateOfBirth || "—"} />
-                <Sum k="NI number" v={form.niNumber || "—"} />
+                <Sum k="SSN (last 4)" v={form.niNumber || "—"} />
                 <Sum k="Right-to-work" v={form.rightToWorkStatus || "—"} />
-                <Sum k="SIA licence" v={form.siaLicenseNumber ? `${form.siaLicenseNumber} (L${form.siaLicenseLevel || "?"})` : "—"} />
+                <Sum k="TX license" v={form.siaLicenseNumber ? `${form.siaLicenseNumber} (L${form.siaLicenseLevel || "?"})` : "—"} />
                 <Sum k="Experience" v={form.yearsExperience ? `${form.yearsExperience} yrs` : "—"} />
                 <Sum k="Photo" v={form.photo ? form.photo.name : "—"} />
                 <Sum k="CV" v={form.cv ? form.cv.name : "—"} />

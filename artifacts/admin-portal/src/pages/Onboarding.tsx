@@ -194,11 +194,11 @@ function DetailDialog({
               <>
                 <Section title="Bank & tax">
                   <div className="grid grid-cols-2 gap-4">
-                    <Info k="Sort code" v={d.submission.bankSortCode} />
+                    <Info k="Routing number" v={d.submission.bankSortCode} />
                     <Info k="Account number" v={d.submission.bankAccountNumber} />
                     <Info k="Account name" v={d.submission.bankAccountName} />
-                    <Info k="NI" v={d.submission.niNumberConfirmed} />
-                    <Info k="Tax code" v={d.submission.taxCode} />
+                    <Info k="SSN" v={d.submission.niNumberConfirmed} />
+                    <Info k="W-4 filing status" v={d.submission.taxCode} />
                   </div>
                 </Section>
                 <Section title="Emergency contact">
@@ -211,15 +211,15 @@ function DetailDialog({
                 <Section title="Uniform sizes">
                   <div className="grid grid-cols-4 gap-4">
                     <Info k="Shirt" v={d.submission.uniformShirt} />
-                    <Info k="Trousers" v={d.submission.uniformTrousers} />
+                    <Info k="Pants" v={d.submission.uniformTrousers} />
                     <Info k="Jacket" v={d.submission.uniformJacket} />
                     <Info k="Boots" v={d.submission.uniformBoots} />
                   </div>
                 </Section>
                 <Section title="Documents">
                   <ul className="space-y-1">
-                    <FileLink k="P45" path={d.submission.p45DocKey} />
-                    <FileLink k="SIA licence" path={d.submission.siaLicenseDocKey} />
+                    <FileLink k="W-2 / pay stub" path={d.submission.p45DocKey} />
+                    <FileLink k="TX security license" path={d.submission.siaLicenseDocKey} />
                     <FileLink k="Passport" path={d.submission.passportDocKey} />
                   </ul>
                 </Section>

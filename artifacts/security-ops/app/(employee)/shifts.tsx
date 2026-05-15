@@ -234,9 +234,9 @@ export default function EmployeeShiftsScreen() {
                 </View>
 
                 <View style={styles.rateRow}>
-                  <Text style={[styles.rateText, { color: colors.primary }]}>£{parseFloat(item.payRate ?? item.hourlyRate ?? "0").toFixed(2)}/hr</Text>
+                  <Text style={[styles.rateText, { color: colors.primary }]}>${parseFloat(item.payRate ?? item.hourlyRate ?? "0").toFixed(2)}/hr</Text>
                   <Text style={[styles.earnText, { color: colors.mutedForeground }]}>
-                    ≈ £{(parseFloat(item.payRate ?? item.hourlyRate ?? "0") * parseFloat(duration)).toFixed(2)} total
+                    ≈ ${(parseFloat(item.payRate ?? item.hourlyRate ?? "0") * parseFloat(duration)).toFixed(2)} total
                   </Text>
                 </View>
 
