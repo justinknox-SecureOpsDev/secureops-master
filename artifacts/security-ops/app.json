@@ -39,6 +39,13 @@
           "color": "#c9a84c",
           "sounds": []
         }
+      ],
+      [
+        "expo-image-picker",
+        {
+          "cameraPermission": "Allow WCSGI to use your camera so you can snap a fresh photo of your TX security license, passport, or training certificates from the field.",
+          "photosPermission": "Allow WCSGI to access your photo library so you can attach an existing image of your TX security license, passport, or training certificates."
+        }
       ]
     ],
     "experiments": {

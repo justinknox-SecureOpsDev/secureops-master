@@ -96,15 +96,31 @@ export default function EditProfileScreen() {
   }
 
   const [uploading, setUploading] = useState<string | null>(null);
-  async function handleUpload(field: "photoKey" | "licenseDocKey" | "passportDocKey" | "trainingCertificateKeys") {
+  async function handleUpload(
+    field: "photoKey" | "licenseDocKey" | "passportDocKey" | "trainingCertificateKeys",
+    source: "library" | "camera",
+  ) {
     try {
-      setUploading(field);
-      const res = await pickAndUploadImage({ source: "library", quality: 0.7 });
+      setUploading(`${field}:${source}`);
+      const res = await pickAndUploadImage({ source, quality: 0.7 });
       if (!res) return;
       if (field === "trainingCertificateKeys") appendCert(res.objectPath);
       else setDoc(field, res.objectPath);
     } catch (e) {
-      Alert.alert("Upload failed", (e as Error).message ?? "Could not upload file");
+      const msg = (e as Error).message ?? "Could not upload file";
+      if (source === "camera" && /camera permission/i.test(msg)) {
+        Alert.alert(
+          "Camera access needed",
+          "To snap a photo of your license or passport right from the field, allow camera access in your device Settings. You can still pick an existing image from your photo library.",
+        );
+      } else if (source === "library" && /photo library permission/i.test(msg)) {
+        Alert.alert(
+          "Photo library access needed",
+          "Allow photo library access in your device Settings to pick an existing image, or use 'Take photo' instead.",
+        );
+      } else {
+        Alert.alert("Upload failed", msg);
+      }
     } finally {
       setUploading(null);
     }
@@ -216,40 +232,54 @@ export default function EditProfileScreen() {
           <DocRow
             label="Profile photo"
             current={form.photoKey}
-            uploading={uploading === "photoKey"}
-            onUpload={() => handleUpload("photoKey")}
+            uploadingSource={uploading?.startsWith("photoKey:") ? (uploading.split(":")[1] as "library" | "camera") : null}
+            onUpload={(source) => handleUpload("photoKey", source)}
             onClear={() => setDoc("photoKey", null)}
           />
           <DocRow
             label="TX security license (photo of card)"
             current={form.licenseDocKey}
-            uploading={uploading === "licenseDocKey"}
-            onUpload={() => handleUpload("licenseDocKey")}
+            uploadingSource={uploading?.startsWith("licenseDocKey:") ? (uploading.split(":")[1] as "library" | "camera") : null}
+            onUpload={(source) => handleUpload("licenseDocKey", source)}
             onClear={() => setDoc("licenseDocKey", null)}
           />
           <DocRow
             label="Passport / driver's license"
             current={form.passportDocKey}
-            uploading={uploading === "passportDocKey"}
-            onUpload={() => handleUpload("passportDocKey")}
+            uploadingSource={uploading?.startsWith("passportDocKey:") ? (uploading.split(":")[1] as "library" | "camera") : null}
+            onUpload={(source) => handleUpload("passportDocKey", source)}
             onClear={() => setDoc("passportDocKey", null)}
           />
           <View style={{ gap: 4 }}>
             <Text style={[styles.label, { color: colors.mutedForeground }]}>
               Training certificates ({(form.trainingCertificateKeys ?? []).length} on file)
             </Text>
-            <TouchableOpacity
-              onPress={() => handleUpload("trainingCertificateKeys")}
-              disabled={uploading === "trainingCertificateKeys"}
-              style={[styles.docBtn, { borderColor: colors.primary, backgroundColor: colors.primary + "10" }]}
-            >
-              {uploading === "trainingCertificateKeys" ? <ActivityIndicator color={colors.primary} /> : (
-                <>
-                  <Feather name="plus" size={14} color={colors.primary} />
-                  <Text style={{ color: colors.primary, fontWeight: "600", fontSize: 13 }}>Add training certificate</Text>
-                </>
-              )}
-            </TouchableOpacity>
+            <View style={{ flexDirection: "row", gap: 8 }}>
+              <TouchableOpacity
+                onPress={() => handleUpload("trainingCertificateKeys", "camera")}
+                disabled={!!uploading}
+                style={[styles.docBtn, { borderColor: colors.primary, backgroundColor: colors.primary + "10", flex: 1 }]}
+              >
+                {uploading === "trainingCertificateKeys:camera" ? <ActivityIndicator color={colors.primary} /> : (
+                  <>
+                    <Feather name="camera" size={14} color={colors.primary} />
+                    <Text style={{ color: colors.primary, fontWeight: "600", fontSize: 13 }}>Take photo</Text>
+                  </>
+                )}
+              </TouchableOpacity>
+              <TouchableOpacity
+                onPress={() => handleUpload("trainingCertificateKeys", "library")}
+                disabled={!!uploading}
+                style={[styles.docBtn, { borderColor: colors.primary, backgroundColor: colors.primary + "10", flex: 1 }]}
+              >
+                {uploading === "trainingCertificateKeys:library" ? <ActivityIndicator color={colors.primary} /> : (
+                  <>
+                    <Feather name="image" size={14} color={colors.primary} />
+                    <Text style={{ color: colors.primary, fontWeight: "600", fontSize: 13 }}>Choose from library</Text>
+                  </>
+                )}
+              </TouchableOpacity>
+            </View>
             <Text style={[styles.note, { color: colors.mutedForeground }]}>
               Existing certificates remain on file. Contact admin to remove one.
             </Text>
@@ -312,36 +342,49 @@ function Input(props: React.ComponentProps<typeof TextInput>) {
   );
 }
 function DocRow({
-  label, current, uploading, onUpload, onClear,
+  label, current, uploadingSource, onUpload, onClear,
 }: {
   label: string;
   current: string | null;
-  uploading: boolean;
-  onUpload: () => void;
+  uploadingSource: "library" | "camera" | null;
+  onUpload: (source: "library" | "camera") => void;
   onClear: () => void;
 }) {
   const colors = useColors();
   const hasFile = !!current;
+  const busy = uploadingSource !== null;
   return (
     <View style={{ gap: 4 }}>
       <Text style={[styles.label, { color: colors.mutedForeground }]}>{label}</Text>
       <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
         <TouchableOpacity
-          onPress={onUpload}
-          disabled={uploading}
+          onPress={() => onUpload("camera")}
+          disabled={busy}
           style={[styles.docBtn, { borderColor: colors.primary, backgroundColor: colors.primary + "10", flex: 1 }]}
         >
-          {uploading ? <ActivityIndicator color={colors.primary} /> : (
+          {uploadingSource === "camera" ? <ActivityIndicator color={colors.primary} /> : (
             <>
-              <Feather name={hasFile ? "refresh-cw" : "upload"} size={14} color={colors.primary} />
+              <Feather name="camera" size={14} color={colors.primary} />
+              <Text style={{ color: colors.primary, fontWeight: "600", fontSize: 13 }}>Take photo</Text>
+            </>
+          )}
+        </TouchableOpacity>
+        <TouchableOpacity
+          onPress={() => onUpload("library")}
+          disabled={busy}
+          style={[styles.docBtn, { borderColor: colors.primary, backgroundColor: colors.primary + "10", flex: 1 }]}
+        >
+          {uploadingSource === "library" ? <ActivityIndicator color={colors.primary} /> : (
+            <>
+              <Feather name={hasFile ? "refresh-cw" : "image"} size={14} color={colors.primary} />
               <Text style={{ color: colors.primary, fontWeight: "600", fontSize: 13 }}>
-                {hasFile ? "Replace file" : "Upload file"}
+                {hasFile ? "Replace from library" : "Choose from library"}
               </Text>
             </>
           )}
         </TouchableOpacity>
         {hasFile && (
-          <TouchableOpacity onPress={onClear} style={[styles.docBtn, { borderColor: colors.border }]}>
+          <TouchableOpacity onPress={onClear} disabled={busy} style={[styles.docBtn, { borderColor: colors.border }]}>
             <Feather name="x" size={14} color={colors.foreground} />
           </TouchableOpacity>
         )}
