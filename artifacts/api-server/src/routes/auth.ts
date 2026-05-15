@@ -5,6 +5,13 @@ import { and, eq, sql } from "drizzle-orm";
 import { z } from "zod/v4";
 import { db, usersTable, employeesTable, passwordResetTokensTable } from "@workspace/db";
 import { requireAuth, signToken } from "../middlewares/auth";
+import {
+  forgotPasswordEmailLimiter,
+  forgotPasswordIpLimiter,
+  loginEmailLimiter,
+  loginIpLimiter,
+  resetPasswordLimiter,
+} from "../middlewares/rateLimit";
 import { sendEmail, renderPasswordResetEmail } from "../lib/email";
 
 const PASSWORD_RESET_TTL_MINUTES = 60;
@@ -67,7 +74,7 @@ function userPayload(user: typeof usersTable.$inferSelect) {
   };
 }
 
-router.post("/auth/login", async (req, res): Promise<void> => {
+router.post("/auth/login", loginIpLimiter, loginEmailLimiter, async (req, res): Promise<void> => {
   const { email, password } = req.body;
   if (!email || !password) {
     res.status(400).json({ error: "Bad Request", message: "Email and password required" });
@@ -152,7 +159,7 @@ const ForgotPasswordBody = z.object({ email: z.string().min(1) });
 // the live reset token leaking to an unauthenticated caller if email
 // delivery fails in production. Real result (sent, no-such-email, smtp
 // failure, dev-only reset URL) goes to server logs only.
-router.post("/auth/forgot-password", async (req, res): Promise<void> => {
+router.post("/auth/forgot-password", forgotPasswordIpLimiter, forgotPasswordEmailLimiter, async (req, res): Promise<void> => {
   const parsed = ForgotPasswordBody.safeParse(req.body);
   if (!parsed.success) {
     res.status(400).json({ error: "Bad Request", message: "Email required" });
@@ -236,7 +243,7 @@ const ResetPasswordBody = z.object({
   newPassword: z.string().min(8, "Password must be at least 8 characters"),
 });
 
-router.post("/auth/reset-password", async (req, res): Promise<void> => {
+router.post("/auth/reset-password", resetPasswordLimiter, async (req, res): Promise<void> => {
   const parsed = ResetPasswordBody.safeParse(req.body);
   if (!parsed.success) {
     res.status(400).json({ error: "Bad Request", message: parsed.error.message });
