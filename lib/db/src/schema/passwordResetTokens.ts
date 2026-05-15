@@ -8,6 +8,11 @@ export const passwordResetTokensTable = pgTable("password_reset_tokens", {
   expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
   consumedAt: timestamp("consumed_at", { withTimezone: true }),
   requestIp: text("request_ip"),
+  /**
+   * Admin user who issued this token via the admin portal force-reset action.
+   * Null for self-service /auth/forgot-password requests.
+   */
+  issuedBy: uuid("issued_by").references(() => usersTable.id, { onDelete: "set null" }),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
 });
 

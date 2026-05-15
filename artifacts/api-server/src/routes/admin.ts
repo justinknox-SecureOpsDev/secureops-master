@@ -16,6 +16,7 @@ import {
   invoicesTable,
   incidentsTable,
   licensesTable,
+  passwordResetTokensTable,
   insertEmployeeSchema,
   insertClientSchema,
   insertSiteSchema,
@@ -28,6 +29,7 @@ import {
   insertLicenseSchema,
 } from "@workspace/db";
 import { requireAdmin } from "../middlewares/auth";
+import { sendEmail, renderPasswordResetEmail } from "../lib/email";
 
 const router: IRouter = Router();
 
@@ -881,6 +883,87 @@ router.post("/admin/import/:table", requireAdmin, async (req, res): Promise<void
   const inserted = results.filter((r) => r.ok).length;
   const failed = results.length - inserted;
   res.status(201).json({ inserted, failed, total: rows.length, results, autoCreated });
+});
+
+// ---- Admin: force password reset for a user --------------------------------
+//
+// Lets an admin issue a single-use password reset link for an officer who
+// can't access their email or whose self-service flow is unavailable.
+// Mirrors the public /auth/forgot-password flow but:
+//   - is admin-gated (requireAdmin)
+//   - records the issuing admin's id on the token row (audit trail)
+//   - returns the resetUrl + emailSent flag in the response so the admin
+//     can copy/share the link if SMTP isn't configured.
+
+const ADMIN_PASSWORD_RESET_TTL_MINUTES = 60;
+
+function genAdminResetToken(): string {
+  return randomBytes(24).toString("base64url");
+}
+
+function getAdminResetBaseUrl(): string | null {
+  const explicit = process.env.APP_BASE_URL?.trim();
+  if (explicit) return explicit.replace(/\/+$/, "");
+  const replitDomain = process.env.REPLIT_DOMAINS?.split(",")[0]?.trim();
+  if (replitDomain) return `https://${replitDomain}`;
+  return null;
+}
+
+router.post("/admin/users/:userId/password-reset", requireAdmin, async (req, res): Promise<void> => {
+  const userId = req.params.userId as string;
+  const adminUserId = req.user!.userId;
+
+  const [user] = await db.select().from(usersTable).where(eq(usersTable.id, userId)).limit(1);
+  if (!user) {
+    res.status(404).json({ error: "Not Found", message: "User not found" });
+    return;
+  }
+
+  // Invalidate any prior unconsumed tokens for this user — only one live
+  // reset link at a time.
+  await db.update(passwordResetTokensTable)
+    .set({ consumedAt: new Date() })
+    .where(and(
+      eq(passwordResetTokensTable.userId, user.id),
+      sql`${passwordResetTokensTable.consumedAt} IS NULL`,
+    ));
+
+  const token = genAdminResetToken();
+  const expiresAt = new Date(Date.now() + ADMIN_PASSWORD_RESET_TTL_MINUTES * 60 * 1000);
+  await db.insert(passwordResetTokensTable).values({
+    token,
+    userId: user.id,
+    expiresAt,
+    requestIp: (req.headers["x-forwarded-for"] as string)?.split(",")[0]?.trim() || req.ip || null,
+    issuedBy: adminUserId,
+  });
+
+  const base = getAdminResetBaseUrl();
+  const resetUrl = base ? `${base}/admin-portal/reset-password/${token}` : null;
+
+  let emailSent = false;
+  if (resetUrl) {
+    const msg = renderPasswordResetEmail({
+      firstName: user.firstName,
+      resetUrl,
+      expiresInMinutes: ADMIN_PASSWORD_RESET_TTL_MINUTES,
+    });
+    emailSent = await sendEmail({ to: user.email, subject: msg.subject, text: msg.text, html: msg.html });
+    if (emailSent) {
+      req.log.info({ userId: user.id, adminUserId }, "Admin-issued password reset email sent");
+    } else {
+      req.log.info({ userId: user.id, adminUserId }, "Admin-issued password reset — email not sent (no SMTP); admin must share link manually");
+    }
+  } else {
+    req.log.warn({ userId: user.id, adminUserId }, "Admin-issued password reset — APP_BASE_URL/REPLIT_DOMAINS unset; cannot build link");
+  }
+
+  res.json({
+    resetUrl,
+    expiresAt: expiresAt.toISOString(),
+    expiresInMinutes: ADMIN_PASSWORD_RESET_TTL_MINUTES,
+    emailSent,
+  });
 });
 
 export default router;

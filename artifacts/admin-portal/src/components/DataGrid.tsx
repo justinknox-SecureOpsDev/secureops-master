@@ -8,7 +8,10 @@ import {
   AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
   AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
-import { ArrowUpDown, ArrowDown, ArrowUp, Pencil, Trash2, Plus, Upload, Download, RefreshCw, ExternalLink, Repeat } from "lucide-react";
+import { ArrowUpDown, ArrowDown, ArrowUp, Pencil, Trash2, Plus, Upload, Download, RefreshCw, ExternalLink, Repeat, KeyRound, Copy } from "lucide-react";
+import {
+  Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter,
+} from "@/components/ui/dialog";
 import { Link } from "wouter";
 import { type TableDescriptor, type Field, singularize } from "@/lib/tables";
 import { api } from "@/lib/api";
@@ -137,7 +140,44 @@ export function DataGrid({
   const [deleting, setDeleting] = useState<Row | null>(null);
   const [importOpen, setImportOpen] = useState(false);
   const [repeatOpen, setRepeatOpen] = useState(false);
+  type UserRow = { id: string; firstName?: unknown; lastName?: unknown; email?: unknown };
+  const toUserRow = (r: Row): UserRow => r as UserRow;
+  const [resetTarget, setResetTarget] = useState<UserRow | null>(null);
+  const [resetBusy, setResetBusy] = useState(false);
+  const [resetResult, setResetResult] = useState<{
+    user: { firstName: string; lastName: string; email: string };
+    resetUrl: string | null;
+    expiresInMinutes: number;
+    emailSent: boolean;
+  } | null>(null);
+  const [resetError, setResetError] = useState<string | null>(null);
   const isShifts = descriptor.name === "shifts";
+  const isUsers = descriptor.name === "users";
+
+  async function confirmPasswordReset() {
+    if (!resetTarget) return;
+    setResetBusy(true);
+    setResetError(null);
+    try {
+      const r = await api<{ resetUrl: string | null; expiresInMinutes: number; emailSent: boolean }>(
+        `/admin/users/${resetTarget.id}/password-reset`,
+        { method: "POST" },
+      );
+      setResetResult({
+        user: {
+          firstName: String(resetTarget.firstName ?? ""),
+          lastName: String(resetTarget.lastName ?? ""),
+          email: String(resetTarget.email ?? ""),
+        },
+        ...r,
+      });
+      setResetTarget(null);
+    } catch (e) {
+      setResetError((e as Error).message);
+    } finally {
+      setResetBusy(false);
+    }
+  }
 
   useEffect(() => { setPage(0); }, [descriptor.name]);
   useEffect(() => {
@@ -326,6 +366,16 @@ export function DataGrid({
                       </Button>
                     </Link>
                   )}
+                  {isUsers && (
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      onClick={() => { setResetError(null); setResetTarget(toUserRow(r)); }}
+                      title="Send password reset"
+                    >
+                      <KeyRound className="w-4 h-4" />
+                    </Button>
+                  )}
                   <Button variant="ghost" size="icon" onClick={() => setEditing(r)} title="Edit">
                     <Pencil className="w-4 h-4" />
                   </Button>
@@ -378,6 +428,86 @@ export function DataGrid({
           onOpenChange={setRepeatOpen}
           onCreated={load}
         />
+      )}
+
+      <AlertDialog open={!!resetTarget} onOpenChange={(b) => { if (!b && !resetBusy) setResetTarget(null); }}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Send password reset link?</AlertDialogTitle>
+            <AlertDialogDescription>
+              This will invalidate any existing reset link for{" "}
+              <b>{String(resetTarget?.firstName ?? "")} {String(resetTarget?.lastName ?? "")}</b>{" "}
+              ({String(resetTarget?.email ?? "")}) and issue a new single-use link valid for 60 minutes.
+              If email is configured the user will be emailed; otherwise you'll get a link to share manually.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          {resetError && (
+            <div className="text-sm text-destructive bg-destructive/5 p-2 rounded border border-destructive/20">
+              {resetError}
+            </div>
+          )}
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={resetBusy}>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={(e) => { e.preventDefault(); void confirmPasswordReset(); }}
+              disabled={resetBusy}
+              className="bg-brand-navy text-white"
+            >
+              {resetBusy ? "Sending…" : "Send reset link"}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      {resetResult && (
+        <Dialog open onOpenChange={(o) => { if (!o) setResetResult(null); }}>
+          <DialogContent className="max-w-xl">
+            <DialogHeader>
+              <DialogTitle className="brand-wordmark text-xl">Password reset link issued</DialogTitle>
+            </DialogHeader>
+            <div className="space-y-3 text-sm">
+              <div>
+                For <b>{resetResult.user.firstName} {resetResult.user.lastName}</b> ({resetResult.user.email}).
+                Link expires in {resetResult.expiresInMinutes} minutes and can be used once.
+              </div>
+              {resetResult.emailSent ? (
+                <div className="bg-emerald-50 border border-emerald-200 text-emerald-900 p-3 rounded">
+                  <div className="font-medium">Reset link emailed to the user.</div>
+                  <div className="text-xs mt-0.5">Any previous reset links have been invalidated.</div>
+                </div>
+              ) : (
+                <div className="text-xs text-amber-900 bg-amber-50 border border-amber-200 p-2 rounded">
+                  Email wasn't sent (SMTP not configured or delivery failed) — copy and share the link manually.
+                </div>
+              )}
+              {resetResult.resetUrl ? (
+                <details className="text-xs" open={!resetResult.emailSent}>
+                  <summary className="cursor-pointer text-muted-foreground hover:text-foreground">
+                    {resetResult.emailSent ? "Show link (for backup)" : "Reset link"}
+                  </summary>
+                  <div className="mt-2 flex gap-1">
+                    <Input readOnly value={resetResult.resetUrl} />
+                    <Button
+                      variant="outline"
+                      onClick={() => navigator.clipboard.writeText(resetResult.resetUrl!)}
+                      title="Copy link"
+                    >
+                      <Copy className="w-4 h-4" />
+                    </Button>
+                    <a href={resetResult.resetUrl} target="_blank" rel="noreferrer">
+                      <Button variant="outline" title="Open link"><ExternalLink className="w-4 h-4" /></Button>
+                    </a>
+                  </div>
+                </details>
+              ) : (
+                <div className="text-xs text-destructive bg-destructive/5 p-2 rounded border border-destructive/20">
+                  Server couldn't build a reset URL — set <code>APP_BASE_URL</code> (or <code>REPLIT_DOMAINS</code>) and try again.
+                </div>
+              )}
+            </div>
+            <DialogFooter><Button onClick={() => setResetResult(null)}>Done</Button></DialogFooter>
+          </DialogContent>
+        </Dialog>
       )}
 
       <AlertDialog open={!!deleting} onOpenChange={(b) => { if (!b) setDeleting(null); }}>
