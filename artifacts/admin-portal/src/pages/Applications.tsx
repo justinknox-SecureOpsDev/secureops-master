@@ -6,7 +6,7 @@ import { Textarea } from "@/components/ui/textarea";
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter,
 } from "@/components/ui/dialog";
-import { ClipboardList, Search, Loader2, Copy, ExternalLink } from "lucide-react";
+import { ClipboardList, Search, Loader2, Copy, ExternalLink, MailCheck } from "lucide-react";
 import { openSignedObject } from "@/lib/upload";
 
 type Application = {
@@ -283,6 +283,7 @@ function ApplicationDialog({
 
 function ApprovalSuccessDialog({ resp, onClose }: { resp: ApproveResp; onClose: () => void }) {
   function copy(text: string) { navigator.clipboard.writeText(text).catch(() => {}); }
+  const fullName = `${resp.application.firstName} ${resp.application.lastName}`;
   return (
     <Dialog open onOpenChange={(o) => { if (!o) onClose(); }}>
       <DialogContent className="max-w-xl">
@@ -290,32 +291,71 @@ function ApprovalSuccessDialog({ resp, onClose }: { resp: ApproveResp; onClose: 
           <DialogTitle className="brand-wordmark text-xl">Application approved</DialogTitle>
         </DialogHeader>
         <div className="space-y-3 text-sm">
-          <p>
-            Employee <strong>{resp.application.firstName} {resp.application.lastName}</strong> has been created.
-            Share the onboarding link below — it expires in 14 days and can be used once.
-          </p>
-          <Field label="Onboarding link">
-            <div className="flex gap-1">
-              <Input readOnly value={resp.onboardingUrl} />
-              <Button type="button" variant="outline" onClick={() => copy(resp.onboardingUrl)}><Copy className="w-4 h-4" /></Button>
-              <a className="inline-flex items-center" href={resp.onboardingUrl} target="_blank" rel="noreferrer">
-                <Button type="button" variant="outline"><ExternalLink className="w-4 h-4" /></Button>
-              </a>
-            </div>
-          </Field>
-          <Field label="Temporary password (for SecureOps mobile app)">
-            <div className="flex gap-1">
-              <Input readOnly value={resp.tempPassword} />
-              <Button type="button" variant="outline" onClick={() => copy(resp.tempPassword)}><Copy className="w-4 h-4" /></Button>
-            </div>
-            <p className="text-xs text-muted-foreground">
-              Email login: <strong>{resp.application.email}</strong>
-            </p>
-          </Field>
-          {!resp.emailSent && (
-            <div className="text-xs text-amber-900 bg-amber-50 border border-amber-200 p-2 rounded">
-              Email delivery isn't configured — copy and send the link manually.
-            </div>
+          {resp.emailSent ? (
+            <>
+              <div className="flex items-start gap-2 bg-emerald-50 border border-emerald-200 text-emerald-900 p-3 rounded">
+                <MailCheck className="w-5 h-5 mt-0.5 shrink-0" />
+                <div>
+                  <div className="font-medium">Onboarding email sent to {resp.application.email}</div>
+                  <div className="text-xs mt-0.5">
+                    Employee <strong>{fullName}</strong> has been created and emailed their onboarding link plus
+                    temporary login. The link expires in 14 days and can be used once.
+                  </div>
+                </div>
+              </div>
+              <details className="text-xs">
+                <summary className="cursor-pointer text-muted-foreground hover:text-foreground">
+                  Show link &amp; temporary password (for backup)
+                </summary>
+                <div className="mt-2 space-y-2">
+                  <Field label="Onboarding link">
+                    <div className="flex gap-1">
+                      <Input readOnly value={resp.onboardingUrl} />
+                      <Button type="button" variant="outline" onClick={() => copy(resp.onboardingUrl)}><Copy className="w-4 h-4" /></Button>
+                      <a className="inline-flex items-center" href={resp.onboardingUrl} target="_blank" rel="noreferrer">
+                        <Button type="button" variant="outline"><ExternalLink className="w-4 h-4" /></Button>
+                      </a>
+                    </div>
+                  </Field>
+                  <Field label="Temporary password">
+                    <div className="flex gap-1">
+                      <Input readOnly value={resp.tempPassword} />
+                      <Button type="button" variant="outline" onClick={() => copy(resp.tempPassword)}><Copy className="w-4 h-4" /></Button>
+                    </div>
+                  </Field>
+                </div>
+              </details>
+            </>
+          ) : (
+            <>
+              <p>
+                Employee <strong>{fullName}</strong> has been created.
+                Share the onboarding link below — it expires in 14 days and can be used once.
+              </p>
+              <Field label="Onboarding link">
+                <div className="flex gap-1">
+                  <Input readOnly value={resp.onboardingUrl} />
+                  <Button type="button" variant="outline" onClick={() => copy(resp.onboardingUrl)}><Copy className="w-4 h-4" /></Button>
+                  <a className="inline-flex items-center" href={resp.onboardingUrl} target="_blank" rel="noreferrer">
+                    <Button type="button" variant="outline"><ExternalLink className="w-4 h-4" /></Button>
+                  </a>
+                </div>
+              </Field>
+              <Field label="Temporary password (for SecureOps mobile app)">
+                <div className="flex gap-1">
+                  <Input readOnly value={resp.tempPassword} />
+                  <Button type="button" variant="outline" onClick={() => copy(resp.tempPassword)}><Copy className="w-4 h-4" /></Button>
+                </div>
+                <p className="text-xs text-muted-foreground">
+                  Email login: <strong>{resp.application.email}</strong>
+                </p>
+              </Field>
+              <div className="text-xs text-amber-900 bg-amber-50 border border-amber-200 p-2 rounded">
+                Email delivery isn't configured — copy and send the link manually.
+                Set <code>SMTP_HOST</code>, <code>SMTP_PORT</code>, <code>SMTP_USER</code>, <code>SMTP_PASS</code>
+                {" "}(and optionally <code>SMTP_FROM</code>) to enable automatic emails.
+              </div>
+            </>
           )}
         </div>
         <DialogFooter><Button onClick={onClose}>Done</Button></DialogFooter>

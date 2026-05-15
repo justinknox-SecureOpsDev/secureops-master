@@ -123,12 +123,24 @@ export function OnboardingPage() {
           <DialogContent className="max-w-xl">
             <DialogHeader><DialogTitle className="brand-wordmark text-xl">New onboarding link</DialogTitle></DialogHeader>
             <div className="space-y-2 text-sm">
-              <p>Share this link with the employee. Previous links are invalidated.</p>
-              <div className="flex gap-1">
-                <Input readOnly value={resend.onboardingUrl} />
-                <Button variant="outline" onClick={() => navigator.clipboard.writeText(resend.onboardingUrl)}><Copy className="w-4 h-4" /></Button>
-                <a href={resend.onboardingUrl} target="_blank" rel="noreferrer"><Button variant="outline"><ExternalLink className="w-4 h-4" /></Button></a>
-              </div>
+              {resend.emailSent ? (
+                <div className="bg-emerald-50 border border-emerald-200 text-emerald-900 p-3 rounded">
+                  <div className="font-medium">Fresh onboarding link emailed to the employee.</div>
+                  <div className="text-xs mt-0.5">Previous links have been invalidated.</div>
+                </div>
+              ) : (
+                <p>Share this link with the employee. Previous links are invalidated.</p>
+              )}
+              <details className="text-xs" open={!resend.emailSent}>
+                <summary className="cursor-pointer text-muted-foreground hover:text-foreground">
+                  {resend.emailSent ? "Show link (for backup)" : "Onboarding link"}
+                </summary>
+                <div className="mt-2 flex gap-1">
+                  <Input readOnly value={resend.onboardingUrl} />
+                  <Button variant="outline" onClick={() => navigator.clipboard.writeText(resend.onboardingUrl)}><Copy className="w-4 h-4" /></Button>
+                  <a href={resend.onboardingUrl} target="_blank" rel="noreferrer"><Button variant="outline"><ExternalLink className="w-4 h-4" /></Button></a>
+                </div>
+              </details>
               {!resend.emailSent && (
                 <div className="text-xs text-amber-900 bg-amber-50 border border-amber-200 p-2 rounded">
                   Email delivery isn't configured — copy and send the link manually.

@@ -20,7 +20,7 @@ import {
 } from "@workspace/api-zod";
 import { requireAdmin } from "../middlewares/auth";
 import { sendPushToUsers } from "../lib/push";
-import { sendEmail, renderOnboardingEmail } from "../lib/email";
+import { sendEmail, renderOnboardingEmail, renderResendOnboardingEmail } from "../lib/email";
 
 const router: IRouter = Router();
 
@@ -311,7 +311,9 @@ router.post("/admin/applications/:id/approve", requireAdmin, async (req, res): P
     text: emailMsg.text,
     html: emailMsg.html,
   });
-  if (!emailSent) {
+  if (emailSent) {
+    req.log.info({ employeeId: result.userId, to: app.email }, "Onboarding approval email sent");
+  } else {
     req.log.info({ employeeId: result.userId }, "Onboarding email not sent — admin must share link manually");
   }
 
@@ -562,10 +564,19 @@ router.post("/admin/onboarding/:employeeId/resend", requireAdmin, async (req, re
   const onboardingUrl = buildOnboardingUrl(req, token);
   // Resend doesn't reset password; we don't include credentials in the email
   // (we don't have the plaintext anymore). Just the link.
-  const subject = "Your Williams Council Security Group onboarding link";
-  const text = `Hi ${user.firstName},\n\nHere is a fresh link to complete your onboarding (single use, expires in 14 days):\n\n${onboardingUrl}\n\n— Williams Council Security Group`;
-  const emailSent = await sendEmail({ to: user.email, subject, text });
-  if (!emailSent) {
+  const emailMsg = renderResendOnboardingEmail({
+    firstName: user.firstName,
+    onboardingUrl,
+  });
+  const emailSent = await sendEmail({
+    to: user.email,
+    subject: emailMsg.subject,
+    text: emailMsg.text,
+    html: emailMsg.html,
+  });
+  if (emailSent) {
+    req.log.info({ employeeId, to: user.email }, "Resent onboarding email sent");
+  } else {
     req.log.info({ employeeId }, "Resent onboarding email not sent — admin must share link manually");
   }
 

@@ -97,6 +97,37 @@ Password: ${escapeHtml(opts.tempPassword)}</pre>
   return { subject, text, html };
 }
 
+export function renderResendOnboardingEmail(opts: {
+  firstName: string;
+  onboardingUrl: string;
+}): { subject: string; text: string; html: string } {
+  const subject = "Your Williams Council Security Group onboarding link";
+  const text = [
+    `Hi ${opts.firstName},`,
+    "",
+    "Here is a fresh link to complete your onboarding (single use, expires in 14 days):",
+    "",
+    opts.onboardingUrl,
+    "",
+    "— Williams Council Security Group",
+  ].join("\n");
+  const html = `
+    <div style="font-family:Georgia,serif;max-width:560px;margin:0 auto;color:#080c18">
+      <h2 style="color:#080c18">Williams Council Security Group</h2>
+      <p>Hi ${escapeHtml(opts.firstName)},</p>
+      <p>Here is a fresh link to complete your onboarding.</p>
+      <p style="margin:24px 0">
+        <a href="${escapeAttr(opts.onboardingUrl)}"
+           style="background:#c9a84c;color:#080c18;padding:12px 20px;text-decoration:none;font-weight:bold;border-radius:4px">
+          Complete onboarding
+        </a>
+      </p>
+      <p style="color:#555">This link is single use and expires in 14 days.</p>
+    </div>
+  `;
+  return { subject, text, html };
+}
+
 function escapeHtml(s: string): string {
   return s.replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]!));
 }
