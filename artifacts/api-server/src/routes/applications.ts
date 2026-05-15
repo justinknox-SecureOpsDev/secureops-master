@@ -20,7 +20,7 @@ import {
 } from "@workspace/api-zod";
 import { requireAdmin } from "../middlewares/auth";
 import { sendPushToUsers } from "../lib/push";
-import { sendEmail, renderOnboardingEmail, renderResendOnboardingEmail, renderRejectionEmail } from "../lib/email";
+import { sendEmail, renderOnboardingEmail, renderResendOnboardingEmail, renderRejectionEmail, renderApplicationReceivedEmail } from "../lib/email";
 
 const router: IRouter = Router();
 
@@ -98,6 +98,15 @@ router.post("/applications", async (req, res): Promise<void> => {
       trainingCertificateKeys: d.trainingCertificates?.map((f) => f.objectPath) ?? null,
       availability: d.availability ?? null,
     }).returning();
+    try {
+      const { subject, text, html } = renderApplicationReceivedEmail({ firstName: row.firstName });
+      const sent = await sendEmail({ to: row.email, subject, text, html });
+      if (!sent) {
+        req.log.info({ applicationId: row.id, to: row.email }, "Application confirmation email not sent (SMTP not configured or send failed)");
+      }
+    } catch (mailErr) {
+      req.log.error({ err: mailErr, applicationId: row.id }, "Failed to send application confirmation email");
+    }
     res.status(201).json(rowToApplication(row));
   } catch (err) {
     req.log.error({ err }, "Failed to submit application");

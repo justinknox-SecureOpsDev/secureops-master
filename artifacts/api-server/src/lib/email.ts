@@ -170,6 +170,37 @@ export function renderRejectionEmail(opts: {
   return { subject, text, html };
 }
 
+export function renderApplicationReceivedEmail(opts: {
+  firstName: string;
+  reviewWindowDays?: number;
+}): { subject: string; text: string; html: string } {
+  const days = opts.reviewWindowDays ?? 5;
+  const subject = "We've received your application — Williams Council Security Group";
+  const text = [
+    `Hi ${opts.firstName},`,
+    "",
+    "Thanks for applying to Williams Council Security Group. This is a quick note to confirm we've received your application.",
+    "",
+    `Our recruitment team will review your submission within ${days} business days and be in touch with next steps. If we need anything else from you in the meantime, we'll reach out by email or phone.`,
+    "",
+    "There's no need to reply to this message.",
+    "",
+    "— Williams Council Security Group",
+  ].join("\n");
+  const html = `
+    <div style="font-family:Georgia,serif;max-width:560px;margin:0 auto;color:#080c18;background:#f0e6c8;padding:24px;border-radius:6px">
+      <h2 style="color:#080c18;margin-top:0">Williams Council Security Group</h2>
+      <p>Hi ${escapeHtml(opts.firstName)},</p>
+      <p>Thanks for applying to Williams Council Security Group. This is a quick note to confirm we've received your application.</p>
+      <p>Our recruitment team will review your submission within <strong>${days} business days</strong> and be in touch with next steps. If we need anything else from you in the meantime, we'll reach out by email or phone.</p>
+      <p style="color:#555">There's no need to reply to this message.</p>
+      <hr style="border:none;border-top:2px solid #c9a84c;margin:24px 0"/>
+      <p style="color:#080c18;font-weight:bold;margin:0">Williams Council Security Group</p>
+    </div>
+  `;
+  return { subject, text, html };
+}
+
 function escapeHtml(s: string): string {
   return s.replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]!));
 }
