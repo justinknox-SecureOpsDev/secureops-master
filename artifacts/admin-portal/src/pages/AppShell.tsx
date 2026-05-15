@@ -43,7 +43,12 @@ export function AppShell({ children }: { children: React.ReactNode }) {
             )}
           </div>
           {!collapsed && (
-            <div className="text-[10px] uppercase tracking-widest opacity-60 mt-2">Admin Portal</div>
+            <div className="flex items-center gap-1.5 mt-2">
+              <div className="text-[10px] uppercase tracking-widest opacity-60">Admin Portal</div>
+              <span className="text-[9px] uppercase tracking-wider px-1.5 py-px rounded-sm bg-brand-gold/20 brand-gold border border-brand-gold/40">
+                Beta
+              </span>
+            </div>
           )}
         </div>
 
@@ -140,6 +145,11 @@ export function AppShell({ children }: { children: React.ReactNode }) {
               {collapsed ? <ChevronsRight className="w-4 h-4" /> : <ChevronsLeft className="w-4 h-4" />}
             </Button>
           </div>
+          {!collapsed && (
+            <div className="text-[10px] opacity-40 text-center pt-1 select-none">
+              v1.0 beta · © {new Date().getFullYear()} WCSG
+            </div>
+          )}
         </div>
       </aside>
       <main className="flex-1 overflow-hidden flex flex-col">
