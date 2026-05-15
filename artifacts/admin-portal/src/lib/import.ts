@@ -1,4 +1,4 @@
-import * as XLSX from "xlsx";
+import ExcelJS from "exceljs";
 import type { TableDescriptor, Field, FieldType } from "./tables";
 
 /** Field types that require uploads, not text — excluded from the Excel
@@ -30,32 +30,129 @@ export type ParsedSheet = {
  */
 export const TEMPLATE_HINT_MARKER = "EXAMPLE — delete this row before importing";
 
+/** Extract a plain scalar value from an ExcelJS cell value, which can be a
+ *  formula result, rich-text object, hyperlink, Date, etc. */
+function extractCellValue(val: ExcelJS.CellValue): unknown {
+  if (val === null || val === undefined) return "";
+  if (val instanceof Date) {
+    return val.toISOString();
+  }
+  if (typeof val === "object") {
+    if ("result" in val) {
+      const r = (val as ExcelJS.CellFormulaValue).result;
+      if (r instanceof Date) return r.toISOString();
+      if (r instanceof Error) return "";
+      return r ?? "";
+    }
+    if ("richText" in val) {
+      return (val as ExcelJS.CellRichTextValue).richText.map((rt) => rt.text).join("");
+    }
+    if ("text" in val) {
+      return (val as ExcelJS.CellHyperlinkValue).text;
+    }
+    if (val instanceof Error) return "";
+  }
+  return val;
+}
+
+async function readXlsx(buf: ArrayBuffer, descriptor?: TableDescriptor): Promise<ParsedSheet> {
+  const workbook = new ExcelJS.Workbook();
+  await workbook.xlsx.load(buf);
+  const worksheet = workbook.worksheets[0];
+  if (!worksheet || worksheet.rowCount === 0) return { headers: [], rows: [] };
+
+  const headerRow = worksheet.getRow(1);
+  const headers: string[] = [];
+  headerRow.eachCell({ includeEmpty: false }, (cell) => {
+    headers.push(String(extractCellValue(cell.value) ?? ""));
+  });
+
+  if (headers.length === 0) return { headers: [], rows: [] };
+
+  const rows: Record<string, unknown>[] = [];
+  for (let r = 2; r <= worksheet.rowCount; r++) {
+    const row = worksheet.getRow(r);
+    const obj: Record<string, unknown> = {};
+    let hasData = false;
+    headers.forEach((h, i) => {
+      const cell = row.getCell(i + 1);
+      const val = extractCellValue(cell.value);
+      obj[h] = val;
+      if (val !== null && val !== undefined && val !== "") hasData = true;
+    });
+    if (hasData) rows.push(obj);
+  }
+
+  let hintRowSkipped = false;
+  if (descriptor && rows.length > 0 && isTemplateHintRow(rows[0], headers, descriptor)) {
+    rows.shift();
+    hintRowSkipped = true;
+  }
+  return { headers, rows, hintRowSkipped };
+}
+
+function parseCsv(text: string, delimiter: string): ParsedSheet {
+  const lines = text.split(/\r?\n/);
+  if (lines.length === 0) return { headers: [], rows: [] };
+
+  function parseLine(line: string): string[] {
+    const cells: string[] = [];
+    let cur = "";
+    let inQuote = false;
+    for (let i = 0; i < line.length; i++) {
+      const ch = line[i];
+      if (inQuote) {
+        if (ch === '"' && line[i + 1] === '"') { cur += '"'; i++; }
+        else if (ch === '"') inQuote = false;
+        else cur += ch;
+      } else {
+        if (ch === '"') inQuote = true;
+        else if (ch === delimiter) { cells.push(cur); cur = ""; }
+        else cur += ch;
+      }
+    }
+    cells.push(cur);
+    return cells;
+  }
+
+  const headers = parseLine(lines[0]);
+  const rows: Record<string, unknown>[] = [];
+  for (let i = 1; i < lines.length; i++) {
+    const line = lines[i].trim();
+    if (!line) continue;
+    const cells = parseLine(line);
+    const obj: Record<string, unknown> = {};
+    headers.forEach((h, idx) => { obj[h] = cells[idx] ?? ""; });
+    rows.push(obj);
+  }
+  return { headers, rows };
+}
+
 export async function readSpreadsheet(
   file: File,
   descriptor?: TableDescriptor,
 ): Promise<ParsedSheet> {
-  const buf = await file.arrayBuffer();
-  // cellDates: true so cells styled as dates come back as JS Date objects.
-  // Cells that are formatted as plain Number but actually hold an Excel date
-  // serial (very common in old Glide/iOS exports) stay numeric — coerceCell
-  // converts those serials below. raw: false formats Date objects per dateNF.
-  const wb = XLSX.read(buf, { type: "array", cellDates: true });
-  const firstSheet = wb.Sheets[wb.SheetNames[0]];
-  const json = XLSX.utils.sheet_to_json<Record<string, unknown>>(firstSheet, {
-    defval: "",
-    raw: false,
-    dateNF: 'yyyy-mm-dd"T"hh:mm:ss',
-  });
-  const headers =
-    json.length > 0
-      ? Object.keys(json[0])
-      : (XLSX.utils.sheet_to_json<string[]>(firstSheet, { header: 1 })[0] ?? []) as string[];
-  let hintRowSkipped = false;
-  if (descriptor && json.length > 0 && isTemplateHintRow(json[0], headers, descriptor)) {
-    json.shift();
-    hintRowSkipped = true;
+  const name = file.name.toLowerCase();
+  if (name.endsWith(".csv")) {
+    const text = await file.text();
+    const result = parseCsv(text, ",");
+    if (descriptor && result.rows.length > 0 && isTemplateHintRow(result.rows[0], result.headers, descriptor)) {
+      result.rows.shift();
+      result.hintRowSkipped = true;
+    }
+    return result;
   }
-  return { headers, rows: json, hintRowSkipped };
+  if (name.endsWith(".tsv")) {
+    const text = await file.text();
+    const result = parseCsv(text, "\t");
+    if (descriptor && result.rows.length > 0 && isTemplateHintRow(result.rows[0], result.headers, descriptor)) {
+      result.rows.shift();
+      result.hintRowSkipped = true;
+    }
+    return result;
+  }
+  const buf = await file.arrayBuffer();
+  return readXlsx(buf, descriptor);
 }
 
 /**
@@ -92,26 +189,40 @@ function isTemplateHintRow(
   return nonEmpty > 0 && matched === nonEmpty;
 }
 
-export function downloadTemplateXlsx(descriptor: TableDescriptor): void {
+export async function downloadTemplateXlsx(descriptor: TableDescriptor): Promise<void> {
   const fields = getImportableFields(descriptor);
   const headers = fields.map((f) => f.label);
   const sampleRow = fields.map((f) => sampleFor(f));
-  const ws = XLSX.utils.aoa_to_sheet([headers, sampleRow]);
-  // Attach a comment to A1 so admins see why the second row exists.
-  const a1 = ws["A1"];
-  if (a1) {
-    (a1 as XLSX.CellObject).c = [{
-      a: "Template",
-      t: `Row 2 contains example values to show the expected format for each column. Delete row 2 before importing your real data — if you leave it in, ${TEMPLATE_HINT_MARKER.toLowerCase()} (we will skip it automatically).`,
-    }];
-  }
-  // Auto-fit-ish column widths based on the longer of header / sample.
-  ws["!cols"] = headers.map((h, i) => ({
-    wch: Math.max(12, h.length + 2, String(sampleRow[i] ?? "").length + 2),
+
+  const workbook = new ExcelJS.Workbook();
+  const worksheet = workbook.addWorksheet(descriptor.label.slice(0, 30));
+
+  worksheet.addRow(headers);
+  worksheet.addRow(sampleRow);
+
+  worksheet.columns = headers.map((h, i) => ({
+    width: Math.max(12, h.length + 2, String(sampleRow[i] ?? "").length + 2),
   }));
-  const wb = XLSX.utils.book_new();
-  XLSX.utils.book_append_sheet(wb, ws, descriptor.label.slice(0, 30));
-  XLSX.writeFile(wb, `${descriptor.name}-template.xlsx`);
+
+  const headerCell = worksheet.getCell("A1");
+  headerCell.note = {
+    texts: [{
+      text: `Row 2 contains example values to show the expected format for each column. Delete row 2 before importing your real data — if you leave it in, ${TEMPLATE_HINT_MARKER.toLowerCase()} (we will skip it automatically).`,
+    }],
+  };
+
+  const buffer = await workbook.xlsx.writeBuffer();
+  const blob = new Blob([buffer], {
+    type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+  });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = `${descriptor.name}-template.xlsx`;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
 }
 
 function sampleFor(f: Field): string {
@@ -159,7 +270,6 @@ const EXCEL_EPOCH_MS = Date.UTC(1899, 11, 30);
 function parseDateLike(v: unknown): Date | null {
   if (v instanceof Date) return Number.isNaN(v.getTime()) ? null : v;
   if (typeof v === "number" && Number.isFinite(v)) {
-    // Treat plausible Excel serials (> 1 day, < year 9999) as date serials.
     if (v >= 1 && v < 2958466) {
       return new Date(EXCEL_EPOCH_MS + Math.round(v * 86400 * 1000));
     }
@@ -167,8 +277,6 @@ function parseDateLike(v: unknown): Date | null {
   }
   const str = String(v ?? "").trim();
   if (!str) return null;
-  // Pure-number strings (xlsx with raw:false sometimes still hands these back)
-  // get the same Excel-serial treatment.
   if (/^-?\d+(\.\d+)?$/.test(str)) {
     const n = Number(str);
     if (n >= 1 && n < 2958466) {
@@ -192,12 +300,10 @@ export function coerceCell(raw: unknown, field: Field): unknown {
       return null;
     }
     case "integer": {
-      // Match digits inside messy strings like "Level 2" or "Lvl 3"
       const m = String(s).match(/-?\d+/);
       return m ? parseInt(m[0], 10) : null;
     }
     case "number": {
-      // Strip currency symbols, commas
       const m = String(s).replace(/[£$,]/g, "").match(/-?\d+(\.\d+)?/);
       return m ? m[0] : null;
     }
@@ -212,7 +318,6 @@ export function coerceCell(raw: unknown, field: Field): unknown {
       return d.toISOString();
     }
     case "json": {
-      // Accept JSON strings or pass through objects/arrays as-is.
       if (typeof s === "object") return s;
       const str = String(s).trim();
       try {
@@ -222,8 +327,6 @@ export function coerceCell(raw: unknown, field: Field): unknown {
       }
     }
     case "fileKeyList": {
-      // Accept JSON arrays, comma/newline/semicolon-separated strings, or a
-      // single key. Always returns string[] (or null).
       if (Array.isArray(s)) return s.map((x) => String(x).trim()).filter(Boolean);
       const str = String(s).trim();
       if (str.startsWith("[")) {
@@ -238,13 +341,11 @@ export function coerceCell(raw: unknown, field: Field): unknown {
       return parts.length > 0 ? parts : null;
     }
     case "select": {
-      // Try exact match against options' values or labels (case-insensitive).
       const v = String(s).toLowerCase();
       const opt = field.options?.find(
         (o) => o.value.toLowerCase() === v || o.label.toLowerCase() === v,
       );
       if (opt) return opt.value;
-      // Try numeric extraction (e.g., "Level 2" → "2")
       const m = String(s).match(/-?\d+/);
       const byDigit = m && field.options?.find((o) => o.value === m[0]);
       if (byDigit) return byDigit.value;

@@ -231,7 +231,7 @@ export function DataGrid({
             </Button>
             {descriptor.importSupported && (
               <>
-                <Button variant="outline" onClick={() => downloadTemplateXlsx(descriptor)}>
+                <Button variant="outline" onClick={() => { void downloadTemplateXlsx(descriptor); }}>
                   <Download className="w-4 h-4 mr-2" />Template
                 </Button>
                 <Button variant="outline" onClick={() => setImportOpen(true)}>
