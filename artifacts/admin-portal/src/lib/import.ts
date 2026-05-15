@@ -161,6 +161,32 @@ export function coerceCell(raw: unknown, field: Field): unknown {
       if (Number.isNaN(d.getTime())) return null;
       return d.toISOString();
     }
+    case "json": {
+      // Accept JSON strings or pass through objects/arrays as-is.
+      if (typeof s === "object") return s;
+      const str = String(s).trim();
+      try {
+        return JSON.parse(str);
+      } catch {
+        return null;
+      }
+    }
+    case "fileKeyList": {
+      // Accept JSON arrays, comma/newline/semicolon-separated strings, or a
+      // single key. Always returns string[] (or null).
+      if (Array.isArray(s)) return s.map((x) => String(x).trim()).filter(Boolean);
+      const str = String(s).trim();
+      if (str.startsWith("[")) {
+        try {
+          const arr = JSON.parse(str);
+          return Array.isArray(arr) ? arr.map((x) => String(x).trim()).filter(Boolean) : null;
+        } catch {
+          return null;
+        }
+      }
+      const parts = str.split(/[,;\n]+/).map((p) => p.trim()).filter(Boolean);
+      return parts.length > 0 ? parts : null;
+    }
     case "select": {
       // Try exact match against options' values or labels (case-insensitive).
       const v = String(s).toLowerCase();

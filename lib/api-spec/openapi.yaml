@@ -1801,6 +1801,8 @@ components:
         uniformBoots: { type: string, nullable: true }
         directDepositConsent: { type: boolean, nullable: true }
         directDepositSignature: { type: string, nullable: true }
+        references: { type: array, nullable: true, items: { type: object, additionalProperties: true } }
+        acknowledgements: { type: object, nullable: true, additionalProperties: true }
         skills:
           type: array
           items:
@@ -1854,6 +1856,8 @@ components:
         uniformBoots: { type: string, nullable: true }
         directDepositConsent: { type: boolean, nullable: true }
         directDepositSignature: { type: string, nullable: true }
+        references: { type: array, nullable: true, items: { type: object, additionalProperties: true } }
+        acknowledgements: { type: object, nullable: true, additionalProperties: true }
         skills:
           type: array
           items:

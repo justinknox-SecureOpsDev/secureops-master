@@ -463,6 +463,8 @@ export const CreateEmployeeBody = zod.object({
   uniformBoots: zod.string().nullish(),
   directDepositConsent: zod.boolean().nullish(),
   directDepositSignature: zod.string().nullish(),
+  references: zod.array(zod.record(zod.string(), zod.unknown())).nullish(),
+  acknowledgements: zod.record(zod.string(), zod.unknown()).nullish(),
   skills: zod.array(zod.string()).optional(),
 });
 
@@ -589,6 +591,8 @@ export const UpdateEmployeeBody = zod.object({
   uniformBoots: zod.string().nullish(),
   directDepositConsent: zod.boolean().nullish(),
   directDepositSignature: zod.string().nullish(),
+  references: zod.array(zod.record(zod.string(), zod.unknown())).nullish(),
+  acknowledgements: zod.record(zod.string(), zod.unknown()).nullish(),
   skills: zod.array(zod.string()).optional(),
 });
 

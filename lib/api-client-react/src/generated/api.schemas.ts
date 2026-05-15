@@ -161,6 +161,12 @@ export type CreateEmployeeRequestAvailability = {
   [key: string]: unknown;
 } | null;
 
+export type CreateEmployeeRequestReferencesItem = { [key: string]: unknown };
+
+export type CreateEmployeeRequestAcknowledgements = {
+  [key: string]: unknown;
+} | null;
+
 export interface CreateEmployeeRequest {
   email: string;
   password: string;
@@ -201,6 +207,8 @@ export interface CreateEmployeeRequest {
   uniformBoots?: string | null;
   directDepositConsent?: boolean | null;
   directDepositSignature?: string | null;
+  references?: CreateEmployeeRequestReferencesItem[] | null;
+  acknowledgements?: CreateEmployeeRequestAcknowledgements;
   skills?: string[];
 }
 
@@ -224,6 +232,12 @@ export const UpdateEmployeeRequestSiaLicenseLevel = {
 } as const;
 
 export type UpdateEmployeeRequestAvailability = {
+  [key: string]: unknown;
+} | null;
+
+export type UpdateEmployeeRequestReferencesItem = { [key: string]: unknown };
+
+export type UpdateEmployeeRequestAcknowledgements = {
   [key: string]: unknown;
 } | null;
 
@@ -265,6 +279,8 @@ export interface UpdateEmployeeRequest {
   uniformBoots?: string | null;
   directDepositConsent?: boolean | null;
   directDepositSignature?: string | null;
+  references?: UpdateEmployeeRequestReferencesItem[] | null;
+  acknowledgements?: UpdateEmployeeRequestAcknowledgements;
   skills?: string[];
 }
 
