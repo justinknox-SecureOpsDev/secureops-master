@@ -31,6 +31,10 @@ A full-stack mobile operations platform for Williams Council Security Group (WCS
 - `artifacts/api-server/src/lib/wsManager.ts` — WebSocket server manager
 - `artifacts/api-server/src/lib/push.ts` — Expo push notification sender
 - `artifacts/api-server/src/routes/chat.ts` — Chat REST endpoints
+- `artifacts/api-server/src/routes/admin.ts` — Generic admin CRUD (`/admin/tables`, `/admin/tables/:table[/:id]`, `/admin/import/:table`); admin-only via `requireAdmin`
+- `artifacts/admin-portal/` — React+Vite browser admin portal at `/admin-portal/` (sidebar of all 11 tables, generic grid, Excel/CSV import)
+- `artifacts/admin-portal/src/lib/tables.ts` — TABLE descriptors that drive the entire generic UI (fields, FKs, options, importable flag)
+- `artifacts/admin-portal/src/components/{DataGrid,RowFormDialog,ImportWizard}.tsx`
 - `artifacts/security-ops/` — Expo mobile app
 - `artifacts/security-ops/contexts/ChatContext.tsx` — WebSocket chat context
 - `artifacts/security-ops/components/chat/` — Chat UI components
@@ -70,6 +74,13 @@ A full-stack mobile operations platform for Williams Council Security Group (WCS
 
 - Brand: deep navy #080c18, rich gold #c9a84c, warm cream #f0e6c8
 - Company name: Williams Council Security Group (WCSG)
+
+## Admin Portal
+
+- Web app at `/admin-portal/` (Vite, port 25580). Sidebar lists all 11 DB tables; generic sortable/filterable/paginated grid with inline Add/Edit/Delete; FK columns render as searchable dropdowns. All writes hit `/api/admin/...` and are validated server-side via drizzle-zod insert schemas.
+- Excel/CSV bulk import for **users / employees / clients / sites** with column mapping + validation preview + error CSV download. The mapping step also lets you set a **default value** for any unmapped field — essential for Sites import (Glide CSV has no `clientId`, so pick one Client to attach all rows to).
+- Brand: navy sidebar `#080c18`, gold accents `#c9a84c`, cream background `#f0e6c8`, "Williams Council Security Group" wordmark in Georgia serif.
+- Auth: login via `/api/auth/login`; JWT stored in `localStorage` under `wcsg.adminToken`; non-admin users see an "Admin access required" screen.
 
 ## Gotchas
 

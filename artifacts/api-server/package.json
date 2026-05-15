@@ -21,7 +21,8 @@
     "jsonwebtoken": "^9.0.3",
     "pino": "^9",
     "pino-http": "^10",
-    "ws": "^8.20.1"
+    "ws": "^8.20.1",
+    "zod": "catalog:"
   },
   "devDependencies": {
     "@types/bcryptjs": "^3.0.0",

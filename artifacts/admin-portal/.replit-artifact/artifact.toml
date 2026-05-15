@@ -1,0 +1,31 @@
+kind = "web"
+previewPath = "/admin-portal/"
+title = "WCSG Admin Portal"
+version = "1.0.0"
+id = "artifacts/admin-portal"
+router = "path"
+
+[[integratedSkills]]
+name = "react-vite"
+version = "1.0.0"
+
+[[services]]
+name = "web"
+paths = [ "/admin-portal/" ]
+localPort = 25580
+
+[services.development]
+run = "pnpm --filter @workspace/admin-portal run dev"
+
+[services.production]
+build = [ "pnpm", "--filter", "@workspace/admin-portal", "run", "build" ]
+publicDir = "artifacts/admin-portal/dist/public"
+serve = "static"
+
+[[services.production.rewrites]]
+from = "/*"
+to = "/index.html"
+
+[services.env]
+PORT = "25580"
+BASE_PATH = "/admin-portal/"
