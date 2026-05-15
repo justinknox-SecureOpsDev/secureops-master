@@ -1,5 +1,5 @@
 import { Router, type IRouter } from "express";
-import { eq, and, gte, lte, sql, or, isNull } from "drizzle-orm";
+import { eq, and, gte, lte, sql, or, isNull, inArray } from "drizzle-orm";
 import { db, shiftsTable, shiftAssignmentsTable, usersTable, licensesTable, sitesTable, clientsTable } from "@workspace/db";
 import { requireAuth, requireAdmin } from "../middlewares/auth";
 
@@ -429,7 +429,7 @@ router.put("/shifts/bulk", requireAdmin, async (req, res): Promise<void> => {
     setCommon.status = changes.status;
   }
 
-  const rows = await db.select().from(shiftsTable).where(sql`${shiftsTable.id} = ANY(${ids as string[]})`);
+  const rows = await db.select().from(shiftsTable).where(inArray(shiftsTable.id, ids as string[]));
   if (rows.length === 0) { res.status(404).json({ error: "Not Found", message: "no matching shifts" }); return; }
 
   let updated = 0;
