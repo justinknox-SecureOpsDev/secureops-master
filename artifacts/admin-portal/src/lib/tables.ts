@@ -57,8 +57,22 @@ export type TableDescriptor = {
   importSupported: boolean;
   /** Field that best identifies a row (used for FK dropdown labels). */
   primaryLabelField: string;
+  /**
+   * When this table is referenced as a foreign key and the importer chooses
+   * "match by label" instead of "match by ID", these are the columns whose
+   * combined values uniquely identify a row. Defaults to [primaryLabelField].
+   * For shifts the title alone is rarely unique, so we use [title, startTime].
+   */
+  importMatchByLabelFields?: string[];
   fields: Field[];
 };
+
+/** Resolved list of label fields used for free-text FK matching during import. */
+export function getImportMatchByLabelFields(t: TableDescriptor): string[] {
+  return t.importMatchByLabelFields && t.importMatchByLabelFields.length > 0
+    ? t.importMatchByLabelFields
+    : [t.primaryLabelField];
+}
 
 export const TABLES: TableDescriptor[] = [
   {
@@ -153,6 +167,7 @@ export const TABLES: TableDescriptor[] = [
     plural: "shifts",
     importSupported: true,
     primaryLabelField: "title",
+    importMatchByLabelFields: ["title", "startTime"],
     fields: [
       { key: "id", label: "ID", type: "text", readonly: true, hiddenInGrid: true },
       { key: "title", label: "Title", type: "text", required: true },

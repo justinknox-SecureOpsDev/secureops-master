@@ -10,8 +10,22 @@ import { CheckCircle2, AlertTriangle, FileSpreadsheet, ChevronRight } from "luci
 import { api } from "@/lib/api";
 import type { TableDescriptor, Field } from "@/lib/tables";
 import { useFkOptions, invalidateFk, loadFkRows } from "@/lib/fk";
-import { getTable } from "@/lib/tables";
+import { getTable, getImportMatchByLabelFields } from "@/lib/tables";
 import { autoMap, buildErrorCsv, coerceCell, readSpreadsheet, type ParsedSheet } from "@/lib/import";
+
+/** Normalize a raw cell value to a comparable lookup key. */
+function normalizeKey(v: unknown): string {
+  if (v === null || v === undefined) return "";
+  if (v instanceof Date) return v.toISOString();
+  return String(v).trim().toLowerCase();
+}
+
+/** Friendly label for a list of match-field keys, e.g. ["title","startTime"] -> "title + startTime". */
+function joinFieldLabels(t: TableDescriptor, keys: string[]): string {
+  return keys
+    .map((k) => t.fields.find((f) => f.key === k)?.label ?? k)
+    .join(" + ");
+}
 
 type Step = "upload" | "map" | "preview" | "result";
 
@@ -69,6 +83,7 @@ export function ImportWizard({
   onDone: () => void;
 }) {
   const writableFields = descriptor.fields.filter((f) => !f.readonly && !f.virtual);
+  const fkFields = writableFields.filter((f) => f.type === "fk" && f.fkTable);
   const [step, setStep] = useState<Step>("upload");
   const [sheet, setSheet] = useState<ParsedSheet | null>(null);
   const [mapping, setMapping] = useState<Record<string, string>>({});
@@ -78,30 +93,63 @@ export function ImportWizard({
   const [result, setResult] = useState<ImportResult | null>(null);
   const [previewRows, setPreviewRows] = useState<Record<string, unknown>[]>([]);
   const [previewIssues, setPreviewIssues] = useState<{ index: number; message: string }[]>([]);
-  /** For each field with importResolveByLabel: map of normalized FK label -> id, used to translate "Kanvas" → site UUID. */
+  /**
+   * Per FK field: how the user wants to resolve values.
+   * "id" = the column already holds the UUID (default).
+   * "label" = look up by name/email/title against the FK target table.
+   */
+  const [resolveBy, setResolveBy] = useState<Record<string, "id" | "label">>({});
+  /**
+   * For composite lookups (e.g. shifts matched by title + startTime),
+   * `extraMatch[fkFieldKey][matchFieldKey] = spreadsheetHeader` tells us which
+   * column supplies each part of the lookup key. The first match field is
+   * supplied by the column already mapped to the FK field itself.
+   */
+  const [extraMatch, setExtraMatch] = useState<Record<string, Record<string, string>>>({});
+  /** For each FK field in label mode: map of composite normalized key -> id. */
   const [fkLabelMaps, setFkLabelMaps] = useState<Record<string, Map<string, string>>>({});
+  const [labelMapsLoading, setLabelMapsLoading] = useState(false);
 
+  /** Initialize per-FK resolve mode from the descriptor's importResolveByLabel hint. */
+  useEffect(() => {
+    const initial: Record<string, "id" | "label"> = {};
+    for (const f of fkFields) {
+      initial[f.key] = f.importResolveByLabel ? "label" : "id";
+    }
+    setResolveBy(initial);
+    setExtraMatch({});
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [descriptor.name]);
+
+  /** Load FK target rows for every FK field currently in label mode and build composite lookup maps. */
   useEffect(() => {
     let cancelled = false;
-    const resolvable = writableFields.filter((f) => f.type === "fk" && f.importResolveByLabel && f.fkTable);
+    const labelFks = fkFields.filter((f) => resolveBy[f.key] === "label" && f.fkTable);
+    if (labelFks.length === 0) {
+      setFkLabelMaps({});
+      return;
+    }
+    setLabelMapsLoading(true);
     Promise.all(
-      resolvable.map(async (f) => {
+      labelFks.map(async (f) => {
+        const target = getTable(f.fkTable!);
+        const matchFields = target ? getImportMatchByLabelFields(target) : ["id"];
         const rows = await loadFkRows(f.fkTable!);
-        const labelField = getTable(f.fkTable!)?.primaryLabelField ?? "id";
         const m = new Map<string, string>();
         for (const r of rows) {
           const id = String((r as any).id ?? "");
-          const label = String((r as any)[labelField] ?? "").trim().toLowerCase();
-          if (id && label) m.set(label, id);
+          const key = matchFields.map((mf) => normalizeKey((r as any)[mf])).join("|");
+          if (id && key.replace(/\|/g, "") !== "") m.set(key, id);
         }
         return [f.key, m] as const;
       }),
     ).then((entries) => {
       if (cancelled) return;
       setFkLabelMaps(Object.fromEntries(entries));
-    });
+    }).finally(() => { if (!cancelled) setLabelMapsLoading(false); });
     return () => { cancelled = true; };
-  }, [descriptor.name]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [descriptor.name, JSON.stringify(resolveBy)]);
 
   const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
@@ -115,6 +163,7 @@ export function ImportWizard({
     setResult(null);
     setPreviewRows([]);
     setPreviewIssues([]);
+    setExtraMatch({});
   }
 
   async function handleFile(file: File) {
@@ -156,16 +205,27 @@ export function ImportWizard({
           if (v !== null && v !== undefined && v !== "") out[f.key] = v;
         }
       }
-      // Resolve FK label -> id for fields opted in via importResolveByLabel.
-      for (const f of writableFields) {
-        if (!f.importResolveByLabel || f.type !== "fk") continue;
-        const v = out[f.key];
-        if (v === undefined || v === null || v === "") continue;
-        const s = String(v);
-        if (UUID_RE.test(s)) continue;
-        const id = fkLabelMaps[f.key]?.get(s.trim().toLowerCase());
+      // Resolve FK label -> id for fields the user set to "label" mode.
+      for (const f of fkFields) {
+        if (resolveBy[f.key] !== "label") continue;
+        const target = f.fkTable ? getTable(f.fkTable) : undefined;
+        if (!target) continue;
+        const matchFields = getImportMatchByLabelFields(target);
+        // Primary value comes from the column mapped to this FK field (or its default).
+        const primary = out[f.key];
+        if (primary === undefined || primary === null || primary === "") continue;
+        const primaryStr = String(primary);
+        if (UUID_RE.test(primaryStr)) continue; // Already an ID, no lookup needed.
+        const parts: string[] = [normalizeKey(primaryStr)];
+        for (let i = 1; i < matchFields.length; i++) {
+          const extraKey = matchFields[i];
+          const header = extraMatch[f.key]?.[extraKey];
+          parts.push(header ? normalizeKey(r[header]) : "");
+        }
+        const composite = parts.join("|");
+        const id = fkLabelMaps[f.key]?.get(composite);
         if (id) out[f.key] = id;
-        // If not resolved, leave the raw string — it'll fail validation and surface in the error CSV.
+        // If not resolved, leave the raw string — preview will flag it.
       }
       return out;
     });
@@ -179,7 +239,7 @@ export function ImportWizard({
         if (f.required && (row[f.key] === undefined || row[f.key] === null || row[f.key] === "")) {
           issues.push({ index: idx, message: `Row ${idx + 1}: missing required "${f.label}"` });
         }
-        if (f.type === "fk" && f.importResolveByLabel) {
+        if (f.type === "fk" && resolveBy[f.key] === "label") {
           const v = row[f.key];
           if (v && !UUID_RE.test(String(v))) {
             issues.push({ index: idx, message: `Row ${idx + 1}: "${f.label}" value "${v}" doesn't match any existing ${f.fkTable}` });
@@ -294,6 +354,92 @@ export function ImportWizard({
                 </div>
               ))}
             </div>
+
+            {fkFields.length > 0 && (
+              <div className="border-t pt-4">
+                <div className="text-xs uppercase font-semibold brand-navy mb-1">Foreign-key matching</div>
+                <p className="text-xs text-muted-foreground mb-3">
+                  By default each FK column expects the row's UUID. If your spreadsheet has names,
+                  emails or titles instead, switch the field to "Match by …" and we'll look up the
+                  matching record before importing.
+                </p>
+                <div className="space-y-3">
+                  {fkFields.map((f) => {
+                    const target = f.fkTable ? getTable(f.fkTable) : undefined;
+                    const matchFields = target ? getImportMatchByLabelFields(target) : [];
+                    const labelLabel = target ? joinFieldLabels(target, matchFields) : "name";
+                    const mode = resolveBy[f.key] ?? "id";
+                    const primaryHeader = Object.entries(mapping).find(([, k]) => k === f.key)?.[0];
+                    return (
+                      <div key={f.key} className="grid grid-cols-[160px_1fr] gap-2 items-start text-xs">
+                        <Label className="pt-2 brand-navy">{f.label}</Label>
+                        <div className="space-y-2">
+                          <Select
+                            value={mode}
+                            onValueChange={(v) => setResolveBy((prev) => ({ ...prev, [f.key]: v as "id" | "label" }))}
+                          >
+                            <SelectTrigger className="h-8 text-xs">
+                              <SelectValue />
+                            </SelectTrigger>
+                            <SelectContent>
+                              <SelectItem value="id">Match by ID (UUID)</SelectItem>
+                              <SelectItem value="label">Match by {labelLabel}</SelectItem>
+                            </SelectContent>
+                          </Select>
+                          {mode === "label" && matchFields.length > 1 && (
+                            <div className="pl-2 border-l-2 border-brand-gold/40 space-y-1.5">
+                              <div className="text-[11px] text-muted-foreground">
+                                {matchFields.length} columns are needed to identify a {target?.label.replace(/s$/i, "").toLowerCase()}:
+                              </div>
+                              <div className="grid grid-cols-[120px_1fr] gap-2 items-center">
+                                <span className="text-[11px] font-medium">
+                                  {target?.fields.find((x) => x.key === matchFields[0])?.label ?? matchFields[0]}
+                                </span>
+                                <span className="text-[11px] font-mono bg-accent/30 px-2 py-1 rounded">
+                                  {primaryHeader ?? <em className="text-amber-700 not-italic">map a column to {f.label} above</em>}
+                                </span>
+                                {matchFields.slice(1).map((mf) => (
+                                  <div key={mf} className="contents">
+                                    <span className="text-[11px] font-medium">
+                                      {target?.fields.find((x) => x.key === mf)?.label ?? mf}
+                                    </span>
+                                    <Select
+                                      value={extraMatch[f.key]?.[mf] ?? ""}
+                                      onValueChange={(v) => setExtraMatch((prev) => ({
+                                        ...prev,
+                                        [f.key]: { ...(prev[f.key] ?? {}), [mf]: v === "__none__" ? "" : v },
+                                      }))}
+                                    >
+                                      <SelectTrigger className="h-7 text-[11px]">
+                                        <SelectValue placeholder="Pick column…" />
+                                      </SelectTrigger>
+                                      <SelectContent>
+                                        <SelectItem value="__none__">— none —</SelectItem>
+                                        {sheet.headers.map((h) => (
+                                          <SelectItem key={h} value={h}>{h}</SelectItem>
+                                        ))}
+                                      </SelectContent>
+                                    </Select>
+                                  </div>
+                                ))}
+                              </div>
+                            </div>
+                          )}
+                          {mode === "label" && labelMapsLoading && (
+                            <div className="text-[11px] text-muted-foreground">Loading {f.fkTable}…</div>
+                          )}
+                          {mode === "label" && !labelMapsLoading && fkLabelMaps[f.key] && (
+                            <div className="text-[11px] text-muted-foreground">
+                              {fkLabelMaps[f.key].size.toLocaleString()} {f.fkTable} loaded for matching.
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
 
             <div className="border-t pt-4">
               <div className="text-xs uppercase font-semibold brand-navy mb-2">Default values (apply to all rows)</div>
