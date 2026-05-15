@@ -2655,10 +2655,14 @@ components:
       type: object
       required: [type, accepted, signature, timestamp]
       properties:
-        type: { type: string, enum: [drug_free, uniform_sou, non_disclosure, contract] }
+        type: { type: string }
         accepted: { type: boolean }
         signature: { type: string }
         timestamp: { type: string }
+        policyId: { type: string, nullable: true }
+        policyVersion: { type: integer, nullable: true }
+        policyFileKey: { type: string, nullable: true }
+        policyLabel: { type: string, nullable: true }
 
     SubmitOnboardingRequest:
       type: object

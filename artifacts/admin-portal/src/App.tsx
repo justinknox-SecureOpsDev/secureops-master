@@ -11,6 +11,7 @@ import { ApplyPage } from "@/pages/Apply";
 import { OnboardPage } from "@/pages/Onboard";
 import { ApplicationsPage } from "@/pages/Applications";
 import { OnboardingPage } from "@/pages/Onboarding";
+import { PoliciesPage } from "@/pages/Policies";
 import NotFound from "@/pages/not-found";
 
 const queryClient = new QueryClient();
@@ -50,6 +51,7 @@ function Routed() {
         <Route path="/" component={HomeRedirect} />
         <Route path="/hr/applications" component={ApplicationsPage} />
         <Route path="/hr/onboarding" component={OnboardingPage} />
+        <Route path="/hr/policies" component={PoliciesPage} />
         <Route path="/sites/:id" component={SiteDetailPage} />
         <Route path="/tables/:table" component={TablePage} />
         <Route component={NotFound} />

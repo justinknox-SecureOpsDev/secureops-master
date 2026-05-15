@@ -8,7 +8,17 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { BrandHeader } from "@/components/BrandHeader";
 import { FileUploadField } from "@/components/FileUploadField";
 import type { UploadedFile } from "@/lib/upload";
-import { CheckCircle2, AlertTriangle, Loader2, ChevronLeft, ChevronRight } from "lucide-react";
+import { CheckCircle2, AlertTriangle, Loader2, ChevronLeft, ChevronRight, FileText, Eye } from "lucide-react";
+
+type PolicyDto = {
+  id: string;
+  slug: string;
+  label: string;
+  version: number;
+  fileKey: string | null;
+  fileName: string | null;
+  viewUrl: string | null;
+};
 
 type Prefill = {
   employeeId: string;
@@ -16,14 +26,8 @@ type Prefill = {
   phone?: string | null; address?: string | null;
   niNumber?: string | null; siaLicenseNumber?: string | null; siaLicenseLevel?: number | null;
   existing: boolean;
+  policies: PolicyDto[];
 };
-
-const ACK_TYPES = [
-  { type: "drug_free", label: "Drug-Free Workplace Policy" },
-  { type: "uniform_sou", label: "Uniform Standard of Use" },
-  { type: "non_disclosure", label: "Non-Disclosure Agreement" },
-  { type: "contract", label: "Employment Contract" },
-] as const;
 
 const STEPS = ["Bank & tax", "Emergency & uniform", "Documents", "Consent & sign"];
 
@@ -56,9 +60,21 @@ export function OnboardPage() {
   const [passportDoc, setPassportDoc] = useState<UploadedFile | null>(null);
   const [directDepositConsent, setDdc] = useState(false);
   const [directDepositSignature, setDds] = useState("");
-  const [acks, setAcks] = useState<Record<string, { accepted: boolean; signature: string }>>(
-    () => Object.fromEntries(ACK_TYPES.map((a) => [a.type, { accepted: false, signature: "" }])),
-  );
+  const [acks, setAcks] = useState<Record<string, { accepted: boolean; signature: string }>>({});
+  const [viewed, setViewed] = useState<Record<string, boolean>>({});
+
+  const policies = prefill?.policies ?? [];
+
+  useEffect(() => {
+    if (!prefill) return;
+    setAcks((prev) => {
+      const next = { ...prev };
+      for (const p of prefill.policies) {
+        if (!next[p.slug]) next[p.slug] = { accepted: false, signature: "" };
+      }
+      return next;
+    });
+  }, [prefill]);
 
   useEffect(() => {
     if (!token) return;
@@ -123,10 +139,11 @@ export function OnboardPage() {
     if (step === 3) {
       if (!directDepositConsent) return "Please confirm direct deposit consent.";
       if (!directDepositSignature.trim()) return "Please type your name as signature.";
-      for (const a of ACK_TYPES) {
-        const v = acks[a.type];
-        if (!v.accepted) return `Please acknowledge: ${a.label}`;
-        if (!v.signature.trim()) return `Please sign: ${a.label}`;
+      for (const p of policies) {
+        if (!viewed[p.slug]) return `Please open and read: ${p.label}`;
+        const v = acks[p.slug];
+        if (!v?.accepted) return `Please acknowledge: ${p.label}`;
+        if (!v.signature.trim()) return `Please sign: ${p.label}`;
       }
     }
     return true;
@@ -149,9 +166,11 @@ export function OnboardPage() {
         uniformBoots: uBoots || null,
         siaLicenseDoc, passportDoc,
         directDepositConsent, directDepositSignature,
-        acknowledgements: ACK_TYPES.map((a) => ({
-          type: a.type, accepted: acks[a.type].accepted,
-          signature: acks[a.type].signature, timestamp: now,
+        acknowledgements: policies.map((p) => ({
+          type: p.slug,
+          accepted: acks[p.slug]?.accepted ?? false,
+          signature: acks[p.slug]?.signature ?? "",
+          timestamp: now,
         })),
       };
       await api(`/onboarding/${encodeURIComponent(token)}`, { method: "POST", body });
@@ -237,23 +256,80 @@ export function OnboardPage() {
                   <Input value={directDepositSignature} onChange={(e) => setDds(e.target.value)} placeholder="Your full name" />
                 </Field>
               </div>
-              {ACK_TYPES.map((a) => (
-                <div key={a.type} className="p-3 border rounded space-y-2 bg-muted/20">
-                  <label className="flex items-start gap-2 cursor-pointer">
-                    <Checkbox
-                      checked={acks[a.type].accepted}
-                      onCheckedChange={(v) => setAcks((prev) => ({ ...prev, [a.type]: { ...prev[a.type], accepted: !!v } }))}
-                      className="mt-0.5"
-                    />
-                    <span className="text-sm font-medium">I acknowledge & accept the {a.label}.</span>
-                  </label>
-                  <Input
-                    placeholder="Type full name to sign"
-                    value={acks[a.type].signature}
-                    onChange={(e) => setAcks((prev) => ({ ...prev, [a.type]: { ...prev[a.type], signature: e.target.value } }))}
-                  />
+              {policies.length === 0 && (
+                <div className="text-sm text-muted-foreground italic p-3 border rounded">
+                  No policies require acknowledgement at this time.
                 </div>
-              ))}
+              )}
+              {policies.map((p) => {
+                const isViewed = !!viewed[p.slug];
+                const ack = acks[p.slug] ?? { accepted: false, signature: "" };
+                return (
+                  <div key={p.slug} className="border rounded bg-muted/20 overflow-hidden">
+                    <div className="flex items-center justify-between gap-2 p-3 bg-background border-b">
+                      <div className="flex items-center gap-2 min-w-0">
+                        <FileText className="w-4 h-4 brand-gold shrink-0" />
+                        <div className="min-w-0">
+                          <div className="text-sm font-medium truncate">{p.label}</div>
+                          <div className="text-[10px] uppercase tracking-wider text-muted-foreground">
+                            {p.fileName ?? "Document"} · v{p.version}
+                          </div>
+                        </div>
+                      </div>
+                      {p.viewUrl && (
+                        <a
+                          href={p.viewUrl}
+                          target="_blank"
+                          rel="noreferrer"
+                          onClick={() => setViewed((prev) => ({ ...prev, [p.slug]: true }))}
+                          className="shrink-0 inline-flex items-center gap-1 text-xs px-2 py-1 rounded border hover:bg-accent/50"
+                        >
+                          <Eye className="w-3.5 h-3.5" /> Open in new tab
+                        </a>
+                      )}
+                    </div>
+                    {p.viewUrl ? (
+                      <iframe
+                        src={p.viewUrl}
+                        title={p.label}
+                        className="w-full h-72 bg-white border-b"
+                        onLoad={() => setViewed((prev) => ({ ...prev, [p.slug]: true }))}
+                      />
+                    ) : (
+                      <div className="p-4 text-sm text-muted-foreground italic border-b">
+                        Document is not currently available — please contact HR.
+                      </div>
+                    )}
+                    <div className="p-3 space-y-2">
+                      <label
+                        className={`flex items-start gap-2 ${isViewed ? "cursor-pointer" : "opacity-60 cursor-not-allowed"}`}
+                        title={isViewed ? "" : "Please open the document above first"}
+                      >
+                        <Checkbox
+                          checked={ack.accepted}
+                          disabled={!isViewed}
+                          onCheckedChange={(v) =>
+                            setAcks((prev) => ({ ...prev, [p.slug]: { ...(prev[p.slug] ?? { accepted: false, signature: "" }), accepted: !!v } }))
+                          }
+                          className="mt-0.5"
+                        />
+                        <span className="text-sm font-medium">
+                          I have read and accept the {p.label}.
+                          {!isViewed && <span className="block text-xs text-muted-foreground font-normal mt-0.5">Open the document above to enable this checkbox.</span>}
+                        </span>
+                      </label>
+                      <Input
+                        placeholder="Type full name to sign"
+                        value={ack.signature}
+                        disabled={!isViewed}
+                        onChange={(e) =>
+                          setAcks((prev) => ({ ...prev, [p.slug]: { ...(prev[p.slug] ?? { accepted: false, signature: "" }), signature: e.target.value } }))
+                        }
+                      />
+                    </div>
+                  </div>
+                );
+              })}
               {error && <div className="text-sm text-destructive bg-destructive/5 p-2 rounded border border-destructive/20">{error}</div>}
             </>
           )}

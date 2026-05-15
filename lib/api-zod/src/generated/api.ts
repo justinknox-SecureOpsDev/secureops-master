@@ -2052,15 +2052,14 @@ export const SubmitOnboardingBody = zod.object({
   directDepositSignature: zod.string(),
   acknowledgements: zod.array(
     zod.object({
-      type: zod.enum([
-        "drug_free",
-        "uniform_sou",
-        "non_disclosure",
-        "contract",
-      ]),
+      type: zod.string(),
       accepted: zod.boolean(),
       signature: zod.string(),
       timestamp: zod.string(),
+      policyId: zod.string().nullish(),
+      policyVersion: zod.number().nullish(),
+      policyFileKey: zod.string().nullish(),
+      policyLabel: zod.string().nullish(),
     }),
   ),
 });
@@ -2088,15 +2087,14 @@ export const SubmitOnboardingResponse = zod.object({
   acknowledgements: zod
     .array(
       zod.object({
-        type: zod.enum([
-          "drug_free",
-          "uniform_sou",
-          "non_disclosure",
-          "contract",
-        ]),
+        type: zod.string(),
         accepted: zod.boolean(),
         signature: zod.string(),
         timestamp: zod.string(),
+        policyId: zod.string().nullish(),
+        policyVersion: zod.number().nullish(),
+        policyFileKey: zod.string().nullish(),
+        policyLabel: zod.string().nullish(),
       }),
     )
     .nullish(),
@@ -2155,15 +2153,14 @@ export const AdminGetOnboardingResponse = zod.object({
       acknowledgements: zod
         .array(
           zod.object({
-            type: zod.enum([
-              "drug_free",
-              "uniform_sou",
-              "non_disclosure",
-              "contract",
-            ]),
+            type: zod.string(),
             accepted: zod.boolean(),
             signature: zod.string(),
             timestamp: zod.string(),
+            policyId: zod.string().nullish(),
+            policyVersion: zod.number().nullish(),
+            policyFileKey: zod.string().nullish(),
+            policyLabel: zod.string().nullish(),
           }),
         )
         .nullish(),

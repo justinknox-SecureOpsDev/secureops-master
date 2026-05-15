@@ -952,21 +952,15 @@ export interface OnboardingPrefill {
   existing?: boolean;
 }
 
-export type AcknowledgementType =
-  (typeof AcknowledgementType)[keyof typeof AcknowledgementType];
-
-export const AcknowledgementType = {
-  drug_free: "drug_free",
-  uniform_sou: "uniform_sou",
-  non_disclosure: "non_disclosure",
-  contract: "contract",
-} as const;
-
 export interface Acknowledgement {
-  type: AcknowledgementType;
+  type: string;
   accepted: boolean;
   signature: string;
   timestamp: string;
+  policyId?: string | null;
+  policyVersion?: number | null;
+  policyFileKey?: string | null;
+  policyLabel?: string | null;
 }
 
 export interface SubmitOnboardingRequest {

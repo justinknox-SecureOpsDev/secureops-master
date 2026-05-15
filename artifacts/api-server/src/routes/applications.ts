@@ -10,7 +10,9 @@ import {
   licensesTable,
   onboardingTokensTable,
   onboardingSubmissionsTable,
+  policiesTable,
 } from "@workspace/db";
+import { ObjectStorageService } from "../lib/objectStorage";
 import {
   SubmitApplicationBody,
   SubmitOnboardingBody,
@@ -23,8 +25,46 @@ import { sendPushToUsers } from "../lib/push";
 import { sendEmail, renderOnboardingEmail, renderResendOnboardingEmail, renderRejectionEmail, renderApplicationReceivedEmail } from "../lib/email";
 
 const router: IRouter = Router();
+const policyStorage = new ObjectStorageService();
 
 const ONBOARDING_TOKEN_TTL_DAYS = 14;
+
+const DEFAULT_POLICIES: { slug: string; label: string }[] = [
+  { slug: "drug_free", label: "Drug-Free Workplace Policy" },
+  { slug: "uniform_sou", label: "Uniform Standard of Use" },
+  { slug: "non_disclosure", label: "Non-Disclosure Agreement" },
+  { slug: "contract", label: "Employment Contract" },
+];
+
+async function ensurePolicyDefaults(): Promise<void> {
+  const existing = await db.select({ id: policiesTable.id }).from(policiesTable).limit(1);
+  if (existing.length > 0) return;
+  await db.insert(policiesTable).values(DEFAULT_POLICIES).onConflictDoNothing();
+}
+
+async function loadActivePolicies() {
+  await ensurePolicyDefaults();
+  const rows = await db.select().from(policiesTable);
+  const active = rows.filter((r) => !!r.fileKey);
+  const out: Array<{
+    id: string; slug: string; label: string; version: number;
+    fileKey: string; fileName: string | null; viewUrl: string;
+  }> = [];
+  for (const r of active) {
+    try {
+      const viewUrl = await policyStorage.getSignedDownloadURL(r.fileKey!);
+      out.push({
+        id: r.id, slug: r.slug, label: r.label, version: r.version,
+        fileKey: r.fileKey!, fileName: r.fileName, viewUrl,
+      });
+    } catch {
+      // Skip policies whose document can't be signed (stale/missing object).
+      // They won't be required for onboarding until admin re-uploads.
+    }
+  }
+  out.sort((a, b) => a.label.localeCompare(b.label));
+  return out;
+}
 
 function genToken(): string {
   return randomBytes(24).toString("base64url");
@@ -379,6 +419,7 @@ router.get("/onboarding/:token", async (req, res): Promise<void> => {
     app = a ?? null;
   }
   const [existing] = await db.select().from(onboardingSubmissionsTable).where(eq(onboardingSubmissionsTable.employeeId, user.id)).limit(1);
+  const policies = await loadActivePolicies();
 
   res.json({
     employeeId: user.id,
@@ -391,6 +432,7 @@ router.get("/onboarding/:token", async (req, res): Promise<void> => {
     siaLicenseNumber: app?.siaLicenseNumber ?? null,
     siaLicenseLevel: app?.siaLicenseLevel ?? null,
     existing: !!existing,
+    policies,
   });
 });
 
@@ -405,6 +447,35 @@ router.post("/onboarding/:token", async (req, res): Promise<void> => {
     return;
   }
   const d = parsed.data;
+
+  // Validate that every currently-active policy is acknowledged.
+  const activePolicies = await loadActivePolicies();
+  const ackBySlug = new Map(d.acknowledgements.map((a) => [a.type, a]));
+  for (const p of activePolicies) {
+    const ack = ackBySlug.get(p.slug);
+    if (!ack || !ack.accepted || !ack.signature?.trim()) {
+      res.status(400).json({
+        error: "Bad Request",
+        message: `Missing acknowledgement for policy: ${p.label}`,
+      });
+      return;
+    }
+  }
+  // Snapshot policy metadata into each ack entry so we can prove which
+  // version of which document the user signed.
+  const enrichedAcks = d.acknowledgements.map((a) => {
+    const p = activePolicies.find((pp) => pp.slug === a.type);
+    return {
+      type: a.type,
+      accepted: a.accepted,
+      signature: a.signature,
+      timestamp: a.timestamp,
+      policyId: p?.id ?? null,
+      policyVersion: p?.version ?? null,
+      policyFileKey: p?.fileKey ?? null,
+      policyLabel: p?.label ?? null,
+    };
+  });
 
   const values = {
     employeeId: t.employeeId,
@@ -425,7 +496,7 @@ router.post("/onboarding/:token", async (req, res): Promise<void> => {
     passportDocKey: d.passportDoc?.objectPath ?? null,
     directDepositConsent: d.directDepositConsent,
     directDepositSignature: d.directDepositSignature,
-    acknowledgements: d.acknowledgements,
+    acknowledgements: enrichedAcks,
   };
 
   // Upsert by employeeId

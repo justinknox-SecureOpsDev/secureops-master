@@ -16,6 +16,7 @@ import liveOpsRouter from "./liveOps";
 import adminRouter from "./admin";
 import storageRouter from "./storage";
 import applicationsRouter from "./applications";
+import policiesRouter from "./policies";
 
 const router: IRouter = Router();
 
@@ -36,5 +37,6 @@ router.use(liveOpsRouter);
 router.use(adminRouter);
 router.use(storageRouter);
 router.use(applicationsRouter);
+router.use(policiesRouter);
 
 export default router;

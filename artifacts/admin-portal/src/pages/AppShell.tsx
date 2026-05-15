@@ -1,5 +1,5 @@
 import { Link, useRoute, useLocation } from "wouter";
-import { ShieldCheck, LogOut, ClipboardList, UserPlus } from "lucide-react";
+import { ShieldCheck, LogOut, ClipboardList, UserPlus, FileText } from "lucide-react";
 import { TABLES } from "@/lib/tables";
 import { useAuth } from "@/lib/auth";
 import { Button } from "@/components/ui/button";
@@ -41,6 +41,14 @@ export function AppShell({ children }: { children: React.ReactNode }) {
                 : "border-transparent hover:bg-sidebar-accent/50"
             }`}
           ><UserPlus className="w-4 h-4" /> Onboarding</Link>
+          <Link
+            href="/hr/policies"
+            className={`flex items-center gap-2 px-4 py-2 text-sm border-l-2 transition-colors ${
+              location === "/hr/policies"
+                ? "bg-sidebar-accent text-sidebar-accent-foreground border-sidebar-primary"
+                : "border-transparent hover:bg-sidebar-accent/50"
+            }`}
+          ><FileText className="w-4 h-4" /> Policies</Link>
           <div className="px-3 text-[10px] uppercase tracking-widest opacity-50 mb-1 mt-3">Data Tables</div>
           {TABLES.map((t) => {
             const active = activeTable === t.name;
