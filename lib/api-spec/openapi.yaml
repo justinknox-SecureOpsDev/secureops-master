@@ -637,6 +637,43 @@ paths:
               schema:
                 $ref: "#/components/schemas/ShiftAssignment"
 
+  /shifts/{id}/notify-vacancy:
+    post:
+      operationId: notifyShiftVacancy
+      tags: [shifts]
+      summary: Push reminder to qualified, unassigned officers about an open vacancy
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Notification dispatched
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  notifiedCount: { type: integer }
+                  vacanciesRemaining: { type: integer }
+                required: [notifiedCount, vacanciesRemaining]
+        "404":
+          description: Shift not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "409":
+          description: Shift already fully staffed
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
   /shifts/{id}/assignments/{assignmentId}:
     put:
       operationId: updateShiftAssignment

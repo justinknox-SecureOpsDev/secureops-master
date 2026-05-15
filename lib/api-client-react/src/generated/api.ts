@@ -65,6 +65,7 @@ import type {
   Invoice,
   License,
   LoginRequest,
+  NotifyShiftVacancy200,
   OnboardingDetail,
   OnboardingLinkResponse,
   OnboardingListItem,
@@ -2739,6 +2740,90 @@ export const useAssignEmployeeToShift = <
   TContext
 > => {
   return useMutation(getAssignEmployeeToShiftMutationOptions(options));
+};
+
+/**
+ * @summary Push reminder to qualified, unassigned officers about an open vacancy
+ */
+export const getNotifyShiftVacancyUrl = (id: string) => {
+  return `/api/shifts/${id}/notify-vacancy`;
+};
+
+export const notifyShiftVacancy = async (
+  id: string,
+  options?: RequestInit,
+): Promise<NotifyShiftVacancy200> => {
+  return customFetch<NotifyShiftVacancy200>(getNotifyShiftVacancyUrl(id), {
+    ...options,
+    method: "POST",
+  });
+};
+
+export const getNotifyShiftVacancyMutationOptions = <
+  TError = ErrorType<ErrorResponse>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof notifyShiftVacancy>>,
+    TError,
+    { id: string },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof notifyShiftVacancy>>,
+  TError,
+  { id: string },
+  TContext
+> => {
+  const mutationKey = ["notifyShiftVacancy"];
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof notifyShiftVacancy>>,
+    { id: string }
+  > = (props) => {
+    const { id } = props ?? {};
+
+    return notifyShiftVacancy(id, requestOptions);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type NotifyShiftVacancyMutationResult = NonNullable<
+  Awaited<ReturnType<typeof notifyShiftVacancy>>
+>;
+
+export type NotifyShiftVacancyMutationError = ErrorType<ErrorResponse>;
+
+/**
+ * @summary Push reminder to qualified, unassigned officers about an open vacancy
+ */
+export const useNotifyShiftVacancy = <
+  TError = ErrorType<ErrorResponse>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof notifyShiftVacancy>>,
+    TError,
+    { id: string },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationResult<
+  Awaited<ReturnType<typeof notifyShiftVacancy>>,
+  TError,
+  { id: string },
+  TContext
+> => {
+  return useMutation(getNotifyShiftVacancyMutationOptions(options));
 };
 
 /**

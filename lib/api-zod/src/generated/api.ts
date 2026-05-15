@@ -1052,6 +1052,18 @@ export const AssignEmployeeToShiftBody = zod.object({
 });
 
 /**
+ * @summary Push reminder to qualified, unassigned officers about an open vacancy
+ */
+export const NotifyShiftVacancyParams = zod.object({
+  id: zod.coerce.string(),
+});
+
+export const NotifyShiftVacancyResponse = zod.object({
+  notifiedCount: zod.number(),
+  vacanciesRemaining: zod.number(),
+});
+
+/**
  * @summary Update assignment status (accept/decline)
  */
 export const UpdateShiftAssignmentParams = zod.object({

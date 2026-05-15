@@ -1322,6 +1322,11 @@ export const GetShiftsStatus = {
   cancelled: "cancelled",
 } as const;
 
+export type NotifyShiftVacancy200 = {
+  notifiedCount: number;
+  vacanciesRemaining: number;
+};
+
 export type GetTimeEntriesParams = {
   employeeId?: string;
   shiftId?: string;

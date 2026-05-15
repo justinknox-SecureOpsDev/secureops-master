@@ -1,11 +1,16 @@
 import React from "react";
 import { View, Text, StyleSheet, ScrollView, TouchableOpacity, ActivityIndicator, Platform } from "react-native";
 import { useColors } from "@/hooks/useColors";
-import { useGetAdminDashboardSummary, getGetAdminDashboardSummaryQueryKey } from "@workspace/api-client-react";
+import {
+  useGetAdminDashboardSummary, getGetAdminDashboardSummaryQueryKey,
+  useGetShifts, getGetShiftsQueryKey,
+  useNotifyShiftVacancy,
+} from "@workspace/api-client-react";
 import { useAuth } from "@/contexts/AuthContext";
 import { Feather } from "@expo/vector-icons";
 import { useRouter } from "expo-router";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
+import { confirmAction, notify } from "@/utils/confirm";
 
 function StatCard({ label, value, color, icon }: { label: string; value: number | string; color?: string; icon: string }) {
   const colors = useColors();
@@ -39,6 +44,40 @@ export default function AdminDashboardScreen() {
   const { data: summary, isLoading, error, refetch } = useGetAdminDashboardSummary({
     query: { queryKey: getGetAdminDashboardSummaryQueryKey() }
   });
+  const { data: upcomingShifts } = useGetShifts(
+    { status: "upcoming" as any },
+    { query: { queryKey: getGetShiftsQueryKey({ status: "upcoming" as any }) } },
+  );
+  const notifyMutation = useNotifyShiftVacancy();
+  const [notifyingId, setNotifyingId] = React.useState<string | null>(null);
+
+  const openVacancies = (upcomingShifts ?? [])
+    .map((s: any) => {
+      const filled = (s.assignments ?? []).length;
+      const headcount = s.headcount ?? 1;
+      return { ...s, filled, headcount, vacancies: Math.max(0, headcount - filled) };
+    })
+    .filter((s: any) => s.vacancies > 0)
+    .sort((a: any, b: any) => new Date(a.startTime).getTime() - new Date(b.startTime).getTime())
+    .slice(0, 6);
+
+  const handleNotify = async (shift: any) => {
+    const ok = await confirmAction({
+      title: "Notify Qualified Officers?",
+      message: `Send a push to all active officers with Level ${shift.requiredLicenseLevel}+ clearance who aren't already on "${shift.title}".`,
+      confirmText: "Send",
+    });
+    if (!ok) return;
+    setNotifyingId(shift.id);
+    try {
+      const result: any = await notifyMutation.mutateAsync({ id: shift.id });
+      notify("Reminder Sent", `Pushed to ${result?.notifiedCount ?? 0} qualified officer(s). ${result?.vacanciesRemaining ?? shift.vacancies} vacancy(ies) still open.`);
+    } catch (e: any) {
+      notify("Failed", e?.response?.data?.message || e?.message || "Could not send reminders");
+    } finally {
+      setNotifyingId(null);
+    }
+  };
 
   if (isLoading) {
     return (
@@ -90,6 +129,55 @@ export default function AdminDashboardScreen() {
           <StatCard label="Expiring Licences" value={summary?.expiringLicenses ?? 0} icon="file-text" color={summary?.expiringLicenses ? colors.destructive : colors.mutedForeground} />
         </View>
       </View>
+
+      {openVacancies.length > 0 && (
+        <View style={styles.section}>
+          <View style={{ flexDirection: "row", alignItems: "center", marginBottom: 12 }}>
+            <Text style={[styles.sectionTitle, { color: colors.accent, marginBottom: 0, flex: 1 }]}>
+              OPEN VACANCIES ({openVacancies.reduce((n: number, s: any) => n + s.vacancies, 0)})
+            </Text>
+            <Feather name="alert-circle" size={14} color={colors.accent} />
+          </View>
+          {openVacancies.map((shift: any) => {
+            const start = new Date(shift.startTime);
+            const isNotifying = notifyingId === shift.id;
+            return (
+              <View
+                key={shift.id}
+                style={[styles.vacancyCard, { backgroundColor: colors.card, borderColor: colors.border, borderLeftColor: colors.accent }]}
+              >
+                <TouchableOpacity onPress={() => router.push(`/(admin)/shifts/${shift.id}` as any)} style={{ flex: 1 }}>
+                  <View style={{ flexDirection: "row", alignItems: "center", gap: 8, marginBottom: 4 }}>
+                    <Text style={[styles.itemTitle, { color: colors.foreground }]} numberOfLines={1}>{shift.title}</Text>
+                    <View style={[styles.vacancyPill, { backgroundColor: colors.accent + "25", borderColor: colors.accent }]}>
+                      <Text style={{ color: colors.accent, fontSize: 11, fontWeight: "700" }}>
+                        {shift.vacancies}/{shift.headcount} open
+                      </Text>
+                    </View>
+                  </View>
+                  <Text style={[styles.itemSub, { color: colors.mutedForeground }]} numberOfLines={1}>
+                    {shift.clientName} · {start.toLocaleDateString([], { weekday: "short", day: "numeric", month: "short" })} {start.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })} · L{shift.requiredLicenseLevel}+
+                  </Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  onPress={() => handleNotify(shift)}
+                  disabled={isNotifying}
+                  style={[styles.notifyBtn, { backgroundColor: colors.primary, opacity: isNotifying ? 0.6 : 1 }]}
+                >
+                  {isNotifying ? (
+                    <ActivityIndicator color={colors.primaryForeground} size="small" />
+                  ) : (
+                    <>
+                      <Feather name="bell" size={14} color={colors.primaryForeground} />
+                      <Text style={[styles.notifyText, { color: colors.primaryForeground }]}>Notify</Text>
+                    </>
+                  )}
+                </TouchableOpacity>
+              </View>
+            );
+          })}
+        </View>
+      )}
 
       <View style={styles.section}>
         <Text style={[styles.sectionTitle, { color: colors.accent }]}>ADMIN ACTIONS</Text>
@@ -197,5 +285,15 @@ const styles = StyleSheet.create({
   itemSub: { fontSize: 12 },
   badge: { paddingHorizontal: 7, paddingVertical: 2, borderRadius: 4, borderWidth: 1 },
   badgeText: { fontSize: 10, fontWeight: "700" },
+  vacancyCard: {
+    flexDirection: "row", alignItems: "center", gap: 10,
+    padding: 12, borderRadius: 10, borderWidth: 1, borderLeftWidth: 3, marginBottom: 8,
+  },
+  vacancyPill: { paddingHorizontal: 7, paddingVertical: 2, borderRadius: 4, borderWidth: 1 },
+  notifyBtn: {
+    flexDirection: "row", alignItems: "center", gap: 5,
+    paddingHorizontal: 12, paddingVertical: 8, borderRadius: 8,
+  },
+  notifyText: { fontSize: 12, fontWeight: "700" },
   retryBtn: { paddingHorizontal: 20, paddingVertical: 8, borderRadius: 8, borderWidth: 1 },
 });

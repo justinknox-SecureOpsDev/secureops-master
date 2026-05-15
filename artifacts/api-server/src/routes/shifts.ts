@@ -354,6 +354,59 @@ router.post("/shifts/:id/claim", requireAuth, async (req, res): Promise<void> =>
   res.status(201).json({ ...assignment, employeeName: user ? `${user.firstName} ${user.lastName}` : null });
 });
 
+router.post("/shifts/:id/notify-vacancy", requireAdmin, async (req, res): Promise<void> => {
+  const shiftId = Array.isArray(req.params.id) ? req.params.id[0] : req.params.id;
+
+  const [shift] = await db.select().from(shiftsTable).where(eq(shiftsTable.id, shiftId));
+  if (!shift) { res.status(404).json({ error: "Not Found", message: "Shift not found" }); return; }
+
+  const filledRes = await db.execute(sql`
+    SELECT COUNT(*)::int AS c, ARRAY_AGG(employee_id) AS ids
+    FROM shift_assignments WHERE shift_id = ${shiftId}::uuid
+  `);
+  const filled: number = (filledRes as any).rows?.[0]?.c ?? 0;
+  const assignedIds: string[] = (filledRes as any).rows?.[0]?.ids ?? [];
+  const vacanciesRemaining = Math.max(0, shift.headcount - filled);
+  if (vacanciesRemaining === 0) {
+    res.status(409).json({ error: "Conflict", message: "This shift is already fully staffed" });
+    return;
+  }
+
+  // Find active employees whose highest unexpired licence covers the requirement
+  // and who aren't already assigned to this shift.
+  const candidates = await db
+    .select({
+      userId: usersTable.id,
+      maxLevel: sql<number | null>`max(${licensesTable.level}) filter (where ${licensesTable.expiryDate} >= current_date)`,
+    })
+    .from(usersTable)
+    .leftJoin(licensesTable, eq(licensesTable.employeeId, usersTable.id))
+    .where(and(eq(usersTable.role, "employee"), eq(usersTable.status, "active")))
+    .groupBy(usersTable.id);
+
+  const assignedSet = new Set(assignedIds.filter(Boolean));
+  const targetIds = candidates
+    .filter((c) => (c.maxLevel ?? 0) >= shift.requiredLicenseLevel && !assignedSet.has(c.userId))
+    .map((c) => c.userId);
+
+  if (targetIds.length > 0) {
+    try {
+      const { sendPushToUsers } = await import("../lib/push");
+      const start = new Date(shift.startTime).toLocaleString("en-US", { weekday: "short", month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" });
+      const levelLabel = shift.requiredLicenseLevel === 4 ? "L4/PPO" : `L${shift.requiredLicenseLevel}+`;
+      await sendPushToUsers(targetIds, {
+        title: `🛡️ Open ${levelLabel} Shift — ${vacanciesRemaining} vacancy${vacanciesRemaining === 1 ? "" : "s"}`,
+        body: `${shift.title} @ ${shift.clientName} — ${start}. Tap to reserve.`,
+        data: { type: "shift_vacancy_reminder", shiftId },
+      });
+    } catch (err) {
+      req.log.warn({ err }, "Failed to send vacancy reminder push");
+    }
+  }
+
+  res.json({ notifiedCount: targetIds.length, vacanciesRemaining });
+});
+
 router.post("/shifts/:id/assignments", requireAdmin, async (req, res): Promise<void> => {
   const shiftId = Array.isArray(req.params.id) ? req.params.id[0] : req.params.id;
   const { employeeId } = req.body;
