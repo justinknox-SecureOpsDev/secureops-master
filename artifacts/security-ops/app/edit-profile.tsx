@@ -211,7 +211,7 @@ export default function EditProfileScreen() {
 
         <Section title="Documents">
           <Text style={[styles.note, { color: colors.mutedForeground }]}>
-            Replace your photo or scan refreshed copies of your TX security license, passport / right-to-work doc, or training certificates. Files are private and only visible to admin.
+            Replace your photo or snap refreshed pictures of your TX security license, passport / right-to-work doc, or training certificates. Image uploads only — for PDF certificates, ask admin to upload from the office. Files are private and only visible to admin.
           </Text>
           <DocRow
             label="Profile photo"
