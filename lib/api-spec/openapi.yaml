@@ -1728,7 +1728,7 @@ components:
         # --- Consents (mirrored from onboarding) ---
         directDepositConsent: { type: boolean, nullable: true }
         directDepositSignature: { type: string, nullable: true }
-        acknowledgements: { type: array, nullable: true, items: { type: object } }
+        acknowledgements: { type: object, nullable: true, additionalProperties: true }
         # --- HR pipeline links ---
         applicationId: { type: string, nullable: true }
         onboardingSubmissionId: { type: string, nullable: true }

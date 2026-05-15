@@ -79,7 +79,7 @@ export type EmployeeReferencesItem = { [key: string]: unknown };
 
 export type EmployeeAvailability = { [key: string]: unknown } | null;
 
-export type EmployeeAcknowledgementsItem = { [key: string]: unknown };
+export type EmployeeAcknowledgements = { [key: string]: unknown } | null;
 
 export interface Employee {
   id: string;
@@ -128,7 +128,7 @@ export interface Employee {
   uniformBoots?: string | null;
   directDepositConsent?: boolean | null;
   directDepositSignature?: string | null;
-  acknowledgements?: EmployeeAcknowledgementsItem[] | null;
+  acknowledgements?: EmployeeAcknowledgements;
   applicationId?: string | null;
   onboardingSubmissionId?: string | null;
   skills?: string[];
