@@ -1,6 +1,6 @@
 import {
   db, usersTable, employeesTable, licensesTable,
-  clientsTable, sitesTable, applicationsTable,
+  clientsTable, sitesTable, applicationsTable, shiftsTable,
 } from "@workspace/db";
 import { eq, sql } from "drizzle-orm";
 import bcrypt from "bcryptjs";
@@ -9,7 +9,7 @@ import { logger } from "./logger";
 
 // ---------- shared types & helpers ----------
 
-export type SyncKind = "employees" | "clients" | "sites" | "onboarding" | "candidates";
+export type SyncKind = "employees" | "clients" | "sites" | "onboarding" | "candidates" | "shifts";
 
 export const DEFAULT_BOARD_IDS: Record<SyncKind, string> = {
   employees: "18408899656",
@@ -17,6 +17,7 @@ export const DEFAULT_BOARD_IDS: Record<SyncKind, string> = {
   sites: "18408899655",
   onboarding: "18399600913",
   candidates: "18399600911",
+  shifts: "18408889225",
 };
 
 export type SyncDecision = {
