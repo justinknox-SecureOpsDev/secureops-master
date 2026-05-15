@@ -8,7 +8,7 @@ import {
   type Policy,
 } from "@workspace/db";
 import { z } from "zod/v4";
-import { requireAdmin } from "../middlewares/auth";
+import { requireAdmin, requireAuth } from "../middlewares/auth";
 import { ObjectStorageService, ObjectNotFoundError } from "../lib/objectStorage";
 
 const router: IRouter = Router();
@@ -214,8 +214,24 @@ router.delete("/admin/policies/:id", requireAdmin, async (req, res): Promise<voi
   const versions = await db.select().from(policiesTable).where(eq(policiesTable.slug, target.slug));
   const ids = versions.map((v) => v.id);
 
-  // Scan all submissions for any ack entry whose policyId matches one of
-  // this slug's versions. Use jsonb containment with one literal per id.
+  // Scan all submissions for any ack entry referencing this slug. We
+  // check both the new policyId-stamped acknowledgements (one literal
+  // per version id) AND the legacy acknowledgements that only stored
+  // `type` (the slug) without a policyId — so historical signatures
+  // also block hard-delete.
+  const legacyLiteral = JSON.stringify([{ type: target.slug }]);
+  const legacyUsed = await db.execute(sql`
+    SELECT 1 FROM ${onboardingSubmissionsTable}
+    WHERE ${onboardingSubmissionsTable.acknowledgements} @> ${legacyLiteral}::jsonb
+    LIMIT 1
+  `);
+  if (legacyUsed.rows.length > 0) {
+    res.status(409).json({
+      error: "Conflict",
+      message: "This policy has been signed by one or more employees and cannot be deleted. Deactivate it instead.",
+    });
+    return;
+  }
   for (const id of ids) {
     const literal = JSON.stringify([{ policyId: id }]);
     const used = await db.execute(sql`
@@ -238,7 +254,11 @@ router.delete("/admin/policies/:id", requireAdmin, async (req, res): Promise<voi
 
 // ---- Public (used by onboarding page) --------------------------------------
 
-router.get("/policies/active", async (_req, res): Promise<void> => {
+// Authenticated-only — the onboarding form gets its policies via the
+// token-scoped /onboarding/:token prefill, so this endpoint exists only
+// for authenticated UI uses (e.g. an admin preview) and should not
+// expose signed PDF URLs to the public.
+router.get("/policies/active", requireAuth, async (_req, res): Promise<void> => {
   await seedPolicies();
   const rows = await db.select().from(policiesTable)
     .where(and(eq(policiesTable.isActive, true), sql`${policiesTable.fileKey} IS NOT NULL`));

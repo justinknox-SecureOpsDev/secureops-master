@@ -6634,7 +6634,11 @@ export const useAdminReplacePolicyDocument = <
 };
 
 /**
- * Public — active policies (with documents) shown to applicants on the onboarding form.
+ * Authenticated — list of active policies (with signed document URLs).
+The public onboarding form does NOT use this endpoint; it receives
+the same data inside the token-scoped /onboarding/{token} prefill
+so signed URLs are never exposed to unauthenticated callers.
+
  */
 export const getListActivePoliciesUrl = () => {
   return `/api/policies/active`;

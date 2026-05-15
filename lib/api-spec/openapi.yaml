@@ -1579,8 +1579,11 @@ paths:
     get:
       tags: [policies]
       operationId: listActivePolicies
-      description: Public — active policies (with documents) shown to applicants on the onboarding form.
-      security: []
+      description: |
+        Authenticated — list of active policies (with signed document URLs).
+        The public onboarding form does NOT use this endpoint; it receives
+        the same data inside the token-scoped /onboarding/{token} prefill
+        so signed URLs are never exposed to unauthenticated callers.
       responses:
         "200":
           description: OK
