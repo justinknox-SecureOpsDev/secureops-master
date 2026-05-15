@@ -6,12 +6,15 @@ import { Textarea } from "@/components/ui/textarea";
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter,
 } from "@/components/ui/dialog";
-import { ClipboardList, Search, Loader2, Copy, ExternalLink, MailCheck } from "lucide-react";
+import { ClipboardList, Search, Loader2, Copy, ExternalLink, MailCheck, MessageSquareWarning } from "lucide-react";
 import { openSignedObject } from "@/lib/upload";
+import { AMENDMENT_FIELDS } from "@/lib/amendmentFields";
+
+type ApplicationStatus = "submitted" | "under_review" | "info_requested" | "approved" | "rejected";
 
 type Application = {
   id: string;
-  status: "submitted" | "under_review" | "approved" | "rejected";
+  status: ApplicationStatus;
   firstName: string; lastName: string; email: string; phone: string; address: string;
   dateOfBirth: string | null; cityOfBirth: string | null; stateOfBirth: string | null;
   niNumber: string | null; rightToWorkStatus: string | null; rightToWorkDocKey: string | null;
@@ -43,6 +46,7 @@ const STATUSES = [
   { value: "", label: "All" },
   { value: "submitted", label: "Submitted" },
   { value: "under_review", label: "Under review" },
+  { value: "info_requested", label: "Info requested" },
   { value: "approved", label: "Approved" },
   { value: "rejected", label: "Rejected" },
 ];
@@ -50,8 +54,19 @@ const STATUSES = [
 const STATUS_STYLES: Record<string, string> = {
   submitted: "bg-blue-100 text-blue-900 border-blue-300",
   under_review: "bg-amber-100 text-amber-900 border-amber-300",
+  info_requested: "bg-orange-100 text-orange-900 border-orange-300",
   approved: "bg-emerald-100 text-emerald-900 border-emerald-300",
   rejected: "bg-rose-100 text-rose-900 border-rose-300",
+};
+
+type RequestInfoResp = {
+  application: Application;
+  amendUrl: string;
+  amendmentToken: string;
+  requestedFields: string[];
+  fieldLabels: string[];
+  expiresAt: string;
+  emailSent: boolean;
 };
 
 export function ApplicationsPage() {
@@ -63,6 +78,7 @@ export function ApplicationsPage() {
   const [openId, setOpenId] = useState<string | null>(null);
   const [approval, setApproval] = useState<ApproveResp | null>(null);
   const [rejection, setRejection] = useState<RejectResp | null>(null);
+  const [requestInfo, setRequestInfo] = useState<RequestInfoResp | null>(null);
 
   async function refresh() {
     setLoading(true); setError(null);
@@ -165,6 +181,10 @@ export function ApplicationsPage() {
             setItems((arr) => arr.map((x) => x.id === app.id ? (app as Application) : x));
             setRejection(resp);
           }}
+          onInfoRequested={(resp) => {
+            setItems((arr) => arr.map((x) => x.id === resp.application.id ? resp.application : x));
+            setRequestInfo(resp);
+          }}
         />
       )}
       {approval && (
@@ -173,22 +193,27 @@ export function ApplicationsPage() {
       {rejection && (
         <RejectionResultDialog resp={rejection} onClose={() => setRejection(null)} />
       )}
+      {requestInfo && (
+        <RequestInfoResultDialog resp={requestInfo} onClose={() => setRequestInfo(null)} />
+      )}
     </div>
   );
 }
 
 function ApplicationDialog({
-  app, onClose, onUpdated, onApproved, onRejected,
+  app, onClose, onUpdated, onApproved, onRejected, onInfoRequested,
 }: {
   app: Application;
   onClose: () => void;
   onUpdated: (a: Application) => void;
   onApproved: (resp: ApproveResp) => void;
   onRejected: (resp: RejectResp) => void;
+  onInfoRequested: (resp: RequestInfoResp) => void;
 }) {
   const [notes, setNotes] = useState(app.reviewerNotes ?? "");
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [showRequestInfo, setShowRequestInfo] = useState(false);
 
   async function action(kind: "review" | "reject" | "approve") {
     setBusy(kind); setError(null);
@@ -281,6 +306,11 @@ function ApplicationDialog({
               {busy === "review" ? "…" : "Mark under review"}
             </Button>
           )}
+          {app.status !== "approved" && app.status !== "rejected" && (
+            <Button variant="outline" disabled={!!busy} onClick={() => setShowRequestInfo(true)}>
+              <MessageSquareWarning className="w-4 h-4 mr-1" /> Request more info
+            </Button>
+          )}
           {app.status !== "approved" && (
             <Button variant="destructive" disabled={!!busy} onClick={() => action("reject")}>
               {busy === "reject" ? "…" : "Reject"}
@@ -292,6 +322,150 @@ function ApplicationDialog({
             </Button>
           )}
         </DialogFooter>
+      </DialogContent>
+      {showRequestInfo && (
+        <RequestInfoDialog
+          app={app}
+          onClose={() => setShowRequestInfo(false)}
+          onSent={(resp) => { setShowRequestInfo(false); onInfoRequested(resp); onClose(); }}
+        />
+      )}
+    </Dialog>
+  );
+}
+
+function RequestInfoDialog({
+  app, onClose, onSent,
+}: {
+  app: Application;
+  onClose: () => void;
+  onSent: (resp: RequestInfoResp) => void;
+}) {
+  const [selected, setSelected] = useState<Set<string>>(new Set());
+  const [note, setNote] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  function toggle(key: string) {
+    setSelected((prev) => {
+      const next = new Set(prev);
+      if (next.has(key)) next.delete(key); else next.add(key);
+      return next;
+    });
+  }
+
+  async function send() {
+    if (selected.size === 0) { setError("Select at least one field."); return; }
+    setBusy(true); setError(null);
+    try {
+      const resp = await api<RequestInfoResp>(`/admin/applications/${app.id}/request-info`, {
+        method: "POST",
+        body: { requestedFields: [...selected], note: note.trim() || undefined },
+      });
+      onSent(resp);
+    } catch (e) { setError((e as Error).message); }
+    finally { setBusy(false); }
+  }
+
+  // Show whether each field already has a value, so the admin can see what's missing.
+  function currentValueFor(key: string): string | null {
+    const dbKey = (AMENDMENT_FIELDS.find((f) => f.key === key)?.dbKey) ?? key;
+    const v = (app as unknown as Record<string, unknown>)[dbKey];
+    if (v == null || v === "") return null;
+    return String(v);
+  }
+
+  return (
+    <Dialog open onOpenChange={(o) => { if (!o && !busy) onClose(); }}>
+      <DialogContent className="max-w-2xl max-h-[85vh] overflow-y-auto">
+        <DialogHeader>
+          <DialogTitle className="brand-wordmark text-xl flex items-center gap-2">
+            <MessageSquareWarning className="w-5 h-5 brand-gold" />
+            Request more info from {app.firstName}
+          </DialogTitle>
+        </DialogHeader>
+        <div className="space-y-4 text-sm">
+          <p className="text-muted-foreground">
+            Tick each item you need the applicant to (re-)submit. They'll get an email
+            with a secure link to complete just those fields. The link expires in 14 days.
+          </p>
+          <div className="border rounded divide-y">
+            {AMENDMENT_FIELDS.map((f) => {
+              const current = currentValueFor(f.key);
+              const isOn = selected.has(f.key);
+              return (
+                <label key={f.key} className="flex items-start gap-3 px-3 py-2 hover:bg-accent/30 cursor-pointer">
+                  <input type="checkbox" className="mt-1" checked={isOn} onChange={() => toggle(f.key)} />
+                  <div className="flex-1 min-w-0">
+                    <div className="font-medium">{f.label}</div>
+                    <div className="text-xs text-muted-foreground truncate">
+                      {current ? <>Current: <span className="text-foreground/80">{f.type === "file" ? "uploaded" : current}</span></> : <em className="text-rose-700">Currently empty</em>}
+                    </div>
+                  </div>
+                </label>
+              );
+            })}
+          </div>
+          <div className="space-y-1">
+            <div className="text-xs uppercase tracking-wide opacity-70">Note to applicant (optional)</div>
+            <Textarea rows={3} value={note} onChange={(e) => setNote(e.target.value)}
+              placeholder="e.g. Your right-to-work document was unreadable — please upload a clearer copy." />
+          </div>
+          {error && <div className="text-sm text-destructive bg-destructive/5 p-2 rounded border border-destructive/20">{error}</div>}
+        </div>
+        <DialogFooter>
+          <Button variant="ghost" onClick={onClose} disabled={busy}>Cancel</Button>
+          <Button className="bg-brand-navy hover:opacity-90 text-white" onClick={send} disabled={busy || selected.size === 0}>
+            {busy ? "Sending…" : `Send request (${selected.size})`}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+function RequestInfoResultDialog({ resp, onClose }: { resp: RequestInfoResp; onClose: () => void }) {
+  function copy(text: string) { navigator.clipboard.writeText(text).catch(() => {}); }
+  const fullName = `${resp.application.firstName} ${resp.application.lastName}`;
+  return (
+    <Dialog open onOpenChange={(o) => { if (!o) onClose(); }}>
+      <DialogContent className="max-w-xl">
+        <DialogHeader>
+          <DialogTitle className="brand-wordmark text-xl">Info request sent</DialogTitle>
+        </DialogHeader>
+        <div className="space-y-3 text-sm">
+          {resp.emailSent ? (
+            <div className="flex items-start gap-2 bg-emerald-50 border border-emerald-200 text-emerald-900 p-3 rounded">
+              <MailCheck className="w-5 h-5 mt-0.5 shrink-0" />
+              <div>
+                <div className="font-medium">Email sent to {resp.application.email}</div>
+                <div className="text-xs mt-0.5">
+                  {fullName} has been asked to update {resp.fieldLabels.length} item{resp.fieldLabels.length === 1 ? "" : "s"}.
+                  The link expires {new Date(resp.expiresAt).toLocaleDateString()}.
+                </div>
+              </div>
+            </div>
+          ) : (
+            <div className="bg-amber-50 border border-amber-200 text-amber-900 p-3 rounded text-xs">
+              Email delivery isn't configured — copy the link below and send it to <strong>{resp.application.email}</strong> manually.
+            </div>
+          )}
+          <Field label="Requested items">
+            <ul className="text-xs list-disc pl-5 space-y-0.5">
+              {resp.fieldLabels.map((l) => <li key={l}>{l}</li>)}
+            </ul>
+          </Field>
+          <Field label="Secure link (single-use, expires 14 days)">
+            <div className="flex gap-1">
+              <Input readOnly value={resp.amendUrl} />
+              <Button type="button" variant="outline" onClick={() => copy(resp.amendUrl)}><Copy className="w-4 h-4" /></Button>
+              <a className="inline-flex items-center" href={resp.amendUrl} target="_blank" rel="noreferrer">
+                <Button type="button" variant="outline"><ExternalLink className="w-4 h-4" /></Button>
+              </a>
+            </div>
+          </Field>
+        </div>
+        <DialogFooter><Button onClick={onClose}>Done</Button></DialogFooter>
       </DialogContent>
     </Dialog>
   );

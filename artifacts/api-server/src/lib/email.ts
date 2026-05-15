@@ -200,6 +200,62 @@ export function renderApplicationReceivedEmail(opts: {
   return { subject, text, html };
 }
 
+export function renderRequestInfoEmail(opts: {
+  firstName: string;
+  amendUrl: string;
+  note?: string | null;
+  fieldLabels: string[];
+}): { subject: string; text: string; html: string } {
+  const subject = "We need a few more details on your application — Williams Council Security Group";
+  const fieldsList = opts.fieldLabels.map((l) => `  • ${l}`).join("\n");
+  const noteBlock = opts.note && opts.note.trim().length > 0
+    ? `\n\nNote from our team:\n${opts.note.trim()}\n`
+    : "";
+  const text = [
+    `Hi ${opts.firstName},`,
+    "",
+    "Thanks for applying to Williams Council Security Group. To finish reviewing your application, we need a few more details from you:",
+    "",
+    fieldsList,
+    noteBlock,
+    "Please complete the missing items using the secure link below. The link expires in 14 days.",
+    "",
+    opts.amendUrl,
+    "",
+    "— Williams Council Security Group",
+  ].join("\n");
+  const fieldsHtml = `<ul style="margin:8px 0 0 0;padding-left:20px">${
+    opts.fieldLabels.map((l) => `<li style="margin:4px 0">${escapeHtml(l)}</li>`).join("")
+  }</ul>`;
+  const noteHtml = opts.note && opts.note.trim().length > 0
+    ? `<div style="background:#f6f1e1;padding:12px;border-left:3px solid #c9a84c;margin:16px 0;border-radius:4px">
+         <div style="font-size:12px;text-transform:uppercase;letter-spacing:0.5px;color:#555;margin-bottom:6px">Note from our team</div>
+         <div style="white-space:pre-wrap">${escapeHtml(opts.note.trim())}</div>
+       </div>`
+    : "";
+  const html = `
+    <div style="font-family:Georgia,serif;max-width:560px;margin:0 auto;color:#080c18;background:#f0e6c8;padding:24px;border-radius:6px">
+      <h2 style="color:#080c18;margin-top:0">Williams Council Security Group</h2>
+      <p>Hi ${escapeHtml(opts.firstName)},</p>
+      <p>Thanks for applying. To finish reviewing your application, we need a few more details from you:</p>
+      ${fieldsHtml}
+      ${noteHtml}
+      <p style="text-align:center;margin:24px 0">
+        <a href="${escapeHtml(opts.amendUrl)}"
+           style="display:inline-block;background:#080c18;color:#c9a84c;padding:12px 24px;text-decoration:none;border-radius:4px;font-weight:bold">
+          Complete missing details
+        </a>
+      </p>
+      <p style="color:#555;font-size:12px">This secure link expires in 14 days. If the button doesn't work, paste this URL into your browser:<br/>
+        <span style="word-break:break-all">${escapeHtml(opts.amendUrl)}</span>
+      </p>
+      <hr style="border:none;border-top:2px solid #c9a84c;margin:24px 0"/>
+      <p style="color:#080c18;font-weight:bold;margin:0">Williams Council Security Group</p>
+    </div>
+  `;
+  return { subject, text, html };
+}
+
 export function renderPasswordResetEmail(opts: {
   firstName: string;
   resetUrl: string;

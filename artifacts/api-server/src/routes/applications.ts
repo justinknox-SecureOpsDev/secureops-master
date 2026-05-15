@@ -10,6 +10,7 @@ import {
   licensesTable,
   onboardingTokensTable,
   onboardingSubmissionsTable,
+  applicationAmendmentTokensTable,
   policiesTable,
 } from "@workspace/db";
 import { ObjectStorageService } from "../lib/objectStorage";
@@ -20,14 +21,52 @@ import {
   AdminMarkApplicationUnderReviewBody,
   AdminRejectApplicationBody,
 } from "@workspace/api-zod";
+import { z } from "zod/v4";
 import { requireAdmin } from "../middlewares/auth";
 import { sendPushToUsers } from "../lib/push";
-import { sendEmail, renderOnboardingEmail, renderResendOnboardingEmail, renderRejectionEmail, renderApplicationReceivedEmail } from "../lib/email";
+import { sendEmail, renderOnboardingEmail, renderResendOnboardingEmail, renderRejectionEmail, renderApplicationReceivedEmail, renderRequestInfoEmail } from "../lib/email";
 
 const router: IRouter = Router();
 const policyStorage = new ObjectStorageService();
 
 const ONBOARDING_TOKEN_TTL_DAYS = 14;
+const AMENDMENT_TOKEN_TTL_DAYS = 14;
+
+// Whitelist of fields admins can request the applicant to update, mapped
+// to (a) the application column the value lands on and (b) the type the
+// applicant submits. File fields receive {objectPath, name} from the
+// presigned-upload flow and we store objectPath on the *Key column.
+type AmendmentFieldType = "text" | "textarea" | "number" | "date" | "file";
+const AMENDABLE_FIELDS: Record<string, { column: string; type: AmendmentFieldType; label: string }> = {
+  phone:               { column: "phone",                type: "text",     label: "Phone number" },
+  address:             { column: "address",              type: "textarea", label: "Home address" },
+  dateOfBirth:         { column: "dateOfBirth",          type: "date",     label: "Date of birth" },
+  cityOfBirth:         { column: "cityOfBirth",          type: "text",     label: "City of birth" },
+  stateOfBirth:        { column: "stateOfBirth",         type: "text",     label: "State of birth" },
+  niNumber:            { column: "niNumber",             type: "text",     label: "SSN (last 4 digits)" },
+  rightToWorkStatus:   { column: "rightToWorkStatus",    type: "text",     label: "Right-to-work status" },
+  rightToWorkDoc:      { column: "rightToWorkDocKey",    type: "file",     label: "Right-to-work document" },
+  siaLicenseNumber:    { column: "siaLicenseNumber",     type: "text",     label: "TX security license number" },
+  siaLicenseLevel:     { column: "siaLicenseLevel",      type: "number",   label: "License level (2, 3, or 4)" },
+  siaLicenseExpiry:    { column: "siaLicenseExpiry",     type: "date",     label: "License expiry date" },
+  previousExperience:  { column: "previousExperience",   type: "textarea", label: "Previous security experience" },
+  yearsExperience:     { column: "yearsExperience",      type: "number",   label: "Years of experience" },
+  photo:               { column: "photoKey",             type: "file",     label: "Profile photo" },
+  cv:                  { column: "cvKey",                type: "file",     label: "CV / résumé" },
+};
+
+const RequestInfoBody = z.object({
+  requestedFields: z.array(z.string().refine((k) => k in AMENDABLE_FIELDS, "Unknown field")).min(1).max(20),
+  note: z.string().trim().max(2000).optional(),
+});
+
+const FileUploadInput = z.object({
+  objectPath: z.string().min(1),
+  name: z.string().optional(),
+});
+const SubmitAmendmentBody = z.object({
+  values: z.record(z.string(), z.union([z.string(), z.number(), FileUploadInput, z.null()])),
+});
 
 type ActivePolicyRow = {
   id: string; slug: string; label: string; version: number;
@@ -443,6 +482,216 @@ router.post("/admin/applications/:id/approve", requireAdmin, async (req, res): P
     tempPasswordHint: "Last 4 digits of the SSN provided on the application",
     emailSent,
   });
+});
+
+// ---- Admin: request more info from applicant -----------------------------
+
+function buildAmendUrl(req: Request, token: string): string {
+  const proto = (req.headers["x-forwarded-proto"] as string) || req.protocol || "https";
+  const host = (req.headers["x-forwarded-host"] as string) || req.headers.host || "";
+  const base = host ? `${proto}://${host}` : "";
+  return `${base}/admin-portal/amend/${token}`;
+}
+
+router.post("/admin/applications/:id/request-info", requireAdmin, async (req, res): Promise<void> => {
+  const parsed = RequestInfoBody.safeParse(req.body ?? {});
+  if (!parsed.success) {
+    res.status(400).json({ error: "Bad Request", message: parsed.error.message });
+    return;
+  }
+  const appId = req.params.id as string;
+  const [app] = await db.select().from(applicationsTable).where(eq(applicationsTable.id, appId)).limit(1);
+  if (!app) { res.status(404).json({ error: "Not Found", message: "Application not found" }); return; }
+  if (app.status === "approved" || app.status === "rejected") {
+    res.status(409).json({ error: "Conflict", message: `Cannot request info on an ${app.status} application.` });
+    return;
+  }
+
+  // Invalidate any prior unconsumed amendment tokens for this application
+  // so an old link can't be used after a fresh request goes out.
+  await db.update(applicationAmendmentTokensTable)
+    .set({ consumedAt: new Date() })
+    .where(and(
+      eq(applicationAmendmentTokensTable.applicationId, appId),
+      sql`${applicationAmendmentTokensTable.consumedAt} IS NULL`,
+    ));
+
+  const token = genToken();
+  const expiresAt = new Date(Date.now() + AMENDMENT_TOKEN_TTL_DAYS * 86400_000);
+  await db.insert(applicationAmendmentTokensTable).values({
+    token,
+    applicationId: appId,
+    requestedFields: parsed.data.requestedFields,
+    note: parsed.data.note ?? null,
+    requestedBy: req.user!.userId,
+    expiresAt,
+  });
+
+  const [updatedApp] = await db.update(applicationsTable).set({
+    status: "info_requested",
+    reviewedBy: req.user!.userId,
+    reviewedAt: new Date(),
+  }).where(eq(applicationsTable.id, appId)).returning();
+
+  const amendUrl = buildAmendUrl(req, token);
+  const fieldLabels = parsed.data.requestedFields.map((k) => AMENDABLE_FIELDS[k].label);
+  const emailMsg = renderRequestInfoEmail({
+    firstName: app.firstName,
+    amendUrl,
+    note: parsed.data.note ?? null,
+    fieldLabels,
+  });
+  const emailSent = await sendEmail({
+    to: app.email,
+    subject: emailMsg.subject,
+    text: emailMsg.text,
+    html: emailMsg.html,
+  });
+  if (emailSent) {
+    req.log.info({ applicationId: appId, to: app.email }, "Request-info email sent");
+  } else {
+    req.log.info({ applicationId: appId }, "Request-info email not sent — admin must share link manually");
+  }
+
+  res.json({
+    application: rowToApplication(updatedApp),
+    amendUrl,
+    amendmentToken: token,
+    requestedFields: parsed.data.requestedFields,
+    fieldLabels,
+    expiresAt: expiresAt.toISOString(),
+    emailSent,
+  });
+});
+
+// ---- Public: amendment token resolve / submit ----------------------------
+
+async function resolveValidAmendmentToken(token: string) {
+  const [t] = await db.select().from(applicationAmendmentTokensTable)
+    .where(eq(applicationAmendmentTokensTable.token, token)).limit(1);
+  if (!t) return { error: "Invalid link" } as const;
+  if (t.consumedAt) return { error: "This link has already been used" } as const;
+  if (t.expiresAt.getTime() < Date.now()) return { error: "This link has expired" } as const;
+  return { token: t } as const;
+}
+
+router.get("/applications/amend/:token", async (req, res): Promise<void> => {
+  const result = await resolveValidAmendmentToken(req.params.token as string);
+  if ("error" in result) { res.status(404).json({ error: "Not Found", message: result.error }); return; }
+  const t = result.token;
+  const [app] = await db.select().from(applicationsTable).where(eq(applicationsTable.id, t.applicationId)).limit(1);
+  if (!app) { res.status(404).json({ error: "Not Found", message: "Application not found" }); return; }
+
+  const requestedFields = (t.requestedFields as string[]).filter((k) => k in AMENDABLE_FIELDS);
+  const fields = requestedFields.map((k) => {
+    const def = AMENDABLE_FIELDS[k];
+    const current = (app as Record<string, unknown>)[def.column];
+    return {
+      key: k,
+      label: def.label,
+      type: def.type,
+      currentValue: current == null ? null : String(current),
+    };
+  });
+
+  res.json({
+    firstName: app.firstName,
+    lastName: app.lastName,
+    email: app.email,
+    note: t.note ?? null,
+    expiresAt: t.expiresAt.toISOString(),
+    fields,
+  });
+});
+
+router.post("/applications/amend/:token", async (req, res): Promise<void> => {
+  const result = await resolveValidAmendmentToken(req.params.token as string);
+  if ("error" in result) { res.status(404).json({ error: "Not Found", message: result.error }); return; }
+  const t = result.token;
+
+  const parsed = SubmitAmendmentBody.safeParse(req.body);
+  if (!parsed.success) {
+    res.status(400).json({ error: "Bad Request", message: parsed.error.message });
+    return;
+  }
+  const requestedFields = (t.requestedFields as string[]).filter((k) => k in AMENDABLE_FIELDS);
+  const requestedSet = new Set(requestedFields);
+
+  const updates: Record<string, string | number | null> = {};
+  const provided = new Set<string>();
+  for (const [k, raw] of Object.entries(parsed.data.values)) {
+    if (!requestedSet.has(k)) continue;
+    const def = AMENDABLE_FIELDS[k];
+    if (raw === null || raw === undefined || raw === "") {
+      // Treat empty as "not provided" — we require every requested field.
+      continue;
+    }
+    provided.add(k);
+    if (def.type === "file") {
+      if (typeof raw !== "object" || raw === null || !("objectPath" in raw)) {
+        res.status(400).json({ error: "Bad Request", message: `Field "${k}" must be an uploaded file.` });
+        return;
+      }
+      updates[def.column] = (raw as { objectPath: string }).objectPath;
+    } else if (def.type === "number") {
+      const n = typeof raw === "number" ? raw : Number(raw);
+      if (!Number.isFinite(n)) {
+        res.status(400).json({ error: "Bad Request", message: `Field "${k}" must be a number.` });
+        return;
+      }
+      updates[def.column] = n;
+    } else {
+      if (typeof raw !== "string") {
+        res.status(400).json({ error: "Bad Request", message: `Field "${k}" must be text.` });
+        return;
+      }
+      updates[def.column] = raw;
+    }
+  }
+
+  // Enforce: every requested field must be provided. The whole point of this
+  // flow is for the applicant to complete the missing details.
+  const missing = requestedFields.filter((k) => !provided.has(k));
+  if (missing.length > 0) {
+    res.status(400).json({
+      error: "Bad Request",
+      message: `Please complete every requested item: ${missing.map((k) => AMENDABLE_FIELDS[k].label).join(", ")}.`,
+      missingFields: missing,
+    });
+    return;
+  }
+
+  // Atomically consume token + apply updates so a re-submit can't double-apply.
+  const updated = await db.transaction(async (tx) => {
+    const [tokenRow] = await tx.select().from(applicationAmendmentTokensTable)
+      .where(eq(applicationAmendmentTokensTable.id, t.id)).for("update").limit(1);
+    if (!tokenRow || tokenRow.consumedAt) return null;
+    if (Object.keys(updates).length > 0) {
+      await tx.update(applicationsTable).set(updates).where(eq(applicationsTable.id, t.applicationId));
+    }
+    // Bump back to under_review so admin sees it ready to re-evaluate.
+    await tx.update(applicationsTable).set({ status: "under_review" })
+      .where(eq(applicationsTable.id, t.applicationId));
+    await tx.update(applicationAmendmentTokensTable).set({ consumedAt: new Date() })
+      .where(eq(applicationAmendmentTokensTable.id, t.id));
+    const [row] = await tx.select().from(applicationsTable).where(eq(applicationsTable.id, t.applicationId)).limit(1);
+    return row;
+  });
+  if (!updated) {
+    res.status(409).json({ error: "Conflict", message: "This link has already been used." });
+    return;
+  }
+
+  // Notify admins
+  const admins = await db.select({ id: usersTable.id }).from(usersTable).where(eq(usersTable.role, "admin"));
+  if (admins.length) {
+    sendPushToUsers(admins.map((a) => a.id), {
+      title: "📝 Application updated",
+      body: `${updated.firstName} ${updated.lastName} submitted the missing details.`,
+    }).catch(() => {});
+  }
+
+  res.json({ ok: true, applicationId: updated.id });
 });
 
 // ---- Public: onboarding token resolve / submit ----------------------------

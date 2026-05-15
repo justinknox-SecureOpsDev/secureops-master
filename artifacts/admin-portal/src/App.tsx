@@ -10,6 +10,7 @@ import { SiteDetailPage } from "@/pages/SiteDetailPage";
 import { ApplyPage } from "@/pages/Apply";
 import { OnboardPage } from "@/pages/Onboard";
 import { ResetPasswordPage } from "@/pages/ResetPassword";
+import { AmendApplication } from "@/pages/AmendApplication";
 import { ApplicationsPage } from "@/pages/Applications";
 import { OnboardingPage } from "@/pages/Onboarding";
 import { PoliciesPage } from "@/pages/Policies";
@@ -28,6 +29,7 @@ function Routed() {
   if (location === "/apply" || location.startsWith("/apply/")) return <ApplyPage />;
   if (location.startsWith("/onboard/")) return <OnboardPage />;
   if (location.startsWith("/reset-password/")) return <ResetPasswordPage />;
+  if (location.startsWith("/amend/")) return <AmendApplication />;
 
   if (loading) {
     return (
