@@ -6,29 +6,98 @@ import { requireAuth, requireAdmin } from "../middlewares/auth";
 
 const router: IRouter = Router();
 
+/**
+ * Shared `select` projection for the Employee API contract — must stay in
+ * sync with `Employee` in `lib/api-spec/openapi.yaml`. Includes every
+ * applicant + onboarding field that gets mirrored onto the employees row
+ * (right-to-work, TX licence, references, banking, uniform, consents,
+ * source-link IDs).
+ */
+const employeeSelect = {
+  id: usersTable.id,
+  userId: usersTable.id,
+  email: usersTable.email,
+  firstName: usersTable.firstName,
+  lastName: usersTable.lastName,
+  role: usersTable.role,
+  status: usersTable.status,
+  createdAt: usersTable.createdAt,
+  // Contact / identity
+  phone: employeesTable.phone,
+  address: employeesTable.address,
+  dateOfBirth: employeesTable.dateOfBirth,
+  cityOfBirth: employeesTable.cityOfBirth,
+  stateOfBirth: employeesTable.stateOfBirth,
+  niNumber: employeesTable.niNumber,
+  // Right to work
+  rightToWorkStatus: employeesTable.rightToWorkStatus,
+  rightToWorkDocKey: employeesTable.rightToWorkDocKey,
+  // TX security licence
+  siaLicenseNumber: employeesTable.siaLicenseNumber,
+  siaLicenseLevel: employeesTable.siaLicenseLevel,
+  siaLicenseExpiry: employeesTable.siaLicenseExpiry,
+  licenseDocKey: employeesTable.licenseDocKey,
+  passportDocKey: employeesTable.passportDocKey,
+  // Experience
+  previousExperience: employeesTable.previousExperience,
+  yearsExperience: employeesTable.yearsExperience,
+  references: employeesTable.references,
+  // Personal docs
+  photoKey: employeesTable.photoKey,
+  cvKey: employeesTable.cvKey,
+  trainingCertificateKeys: employeesTable.trainingCertificateKeys,
+  availability: employeesTable.availability,
+  // Emergency contact
+  emergencyContactName: employeesTable.emergencyContactName,
+  emergencyContactRelationship: employeesTable.emergencyContactRelationship,
+  emergencyContactPhone: employeesTable.emergencyContactPhone,
+  // Pay & banking
+  hourlyRate: employeesTable.hourlyRate,
+  bankAccountName: employeesTable.bankAccountName,
+  bankAccountNumber: employeesTable.bankAccountNumber,
+  bankBsb: employeesTable.bankBsb,
+  taxCode: employeesTable.taxCode,
+  payStubDocKey: employeesTable.payStubDocKey,
+  // Uniform
+  uniformShirt: employeesTable.uniformShirt,
+  uniformTrousers: employeesTable.uniformTrousers,
+  uniformJacket: employeesTable.uniformJacket,
+  uniformBoots: employeesTable.uniformBoots,
+  // Consents
+  directDepositConsent: employeesTable.directDepositConsent,
+  directDepositSignature: employeesTable.directDepositSignature,
+  acknowledgements: employeesTable.acknowledgements,
+  // HR pipeline links
+  applicationId: employeesTable.applicationId,
+  onboardingSubmissionId: employeesTable.onboardingSubmissionId,
+  skills: employeesTable.skills,
+};
+
+/**
+ * Whitelist of employee-row fields the PUT /employees/:id endpoint will
+ * forward straight to the employees table. Everything in `UpdateEmployeeRequest`
+ * (OpenAPI) that maps 1:1 onto an employees column belongs here.
+ *
+ * `hourlyRate` is special-cased (numeric → string) below.
+ */
+const EMP_PASSTHROUGH_KEYS = [
+  "phone", "address", "dateOfBirth", "cityOfBirth", "stateOfBirth", "niNumber",
+  "rightToWorkStatus", "rightToWorkDocKey",
+  "siaLicenseNumber", "siaLicenseLevel", "siaLicenseExpiry", "licenseDocKey", "passportDocKey",
+  "previousExperience", "yearsExperience",
+  "photoKey", "cvKey", "trainingCertificateKeys", "availability",
+  "emergencyContactName", "emergencyContactRelationship", "emergencyContactPhone",
+  "bankAccountName", "bankAccountNumber", "bankBsb", "taxCode", "payStubDocKey",
+  "uniformShirt", "uniformTrousers", "uniformJacket", "uniformBoots",
+  "directDepositConsent", "directDepositSignature",
+  "skills",
+] as const;
+
 router.get("/employees", requireAdmin, async (req, res): Promise<void> => {
   const { status, search } = req.query as { status?: string; search?: string };
 
   let query = db
-    .select({
-      id: usersTable.id,
-      userId: usersTable.id,
-      email: usersTable.email,
-      firstName: usersTable.firstName,
-      lastName: usersTable.lastName,
-      role: usersTable.role,
-      status: usersTable.status,
-      createdAt: usersTable.createdAt,
-      phone: employeesTable.phone,
-      address: employeesTable.address,
-      emergencyContactName: employeesTable.emergencyContactName,
-      emergencyContactPhone: employeesTable.emergencyContactPhone,
-      hourlyRate: employeesTable.hourlyRate,
-      bankAccountName: employeesTable.bankAccountName,
-      bankAccountNumber: employeesTable.bankAccountNumber,
-      bankBsb: employeesTable.bankBsb,
-      skills: employeesTable.skills,
-    })
+    .select(employeeSelect)
     .from(usersTable)
     .leftJoin(employeesTable, eq(usersTable.id, employeesTable.userId));
 
@@ -85,7 +154,7 @@ router.post("/employees", requireAdmin, async (req, res): Promise<void> => {
     status: "active",
   }).returning();
 
-  const [employee] = await db.insert(employeesTable).values({
+  await db.insert(employeesTable).values({
     userId: user.id,
     phone: phone || null,
     address: address || null,
@@ -96,26 +165,18 @@ router.post("/employees", requireAdmin, async (req, res): Promise<void> => {
     bankAccountNumber: bankAccountNumber || null,
     bankBsb: bankBsb || null,
     skills: skills || [],
-  }).returning();
+  });
+
+  // Re-read via the canonical projection so the response shape matches
+  // GET /employees/:id and the OpenAPI Employee schema exactly.
+  const [row] = await db
+    .select(employeeSelect)
+    .from(usersTable)
+    .leftJoin(employeesTable, eq(usersTable.id, employeesTable.userId))
+    .where(eq(usersTable.id, user.id));
 
   res.status(201).json({
-    id: user.id,
-    userId: user.id,
-    email: user.email,
-    firstName: user.firstName,
-    lastName: user.lastName,
-    role: user.role,
-    status: user.status,
-    createdAt: user.createdAt,
-    phone: employee.phone,
-    address: employee.address,
-    emergencyContactName: employee.emergencyContactName,
-    emergencyContactPhone: employee.emergencyContactPhone,
-    hourlyRate: employee.hourlyRate,
-    bankAccountName: employee.bankAccountName,
-    bankAccountNumber: employee.bankAccountNumber,
-    bankBsb: employee.bankBsb,
-    skills: employee.skills,
+    ...row,
     licenseCount: 0,
     expiringLicenseCount: 0,
     maxLicenseLevel: null,
@@ -129,25 +190,7 @@ router.get("/employees/:id", requireAuth, async (req, res): Promise<void> => {
     return;
   }
   const [row] = await db
-    .select({
-      id: usersTable.id,
-      userId: usersTable.id,
-      email: usersTable.email,
-      firstName: usersTable.firstName,
-      lastName: usersTable.lastName,
-      role: usersTable.role,
-      status: usersTable.status,
-      createdAt: usersTable.createdAt,
-      phone: employeesTable.phone,
-      address: employeesTable.address,
-      emergencyContactName: employeesTable.emergencyContactName,
-      emergencyContactPhone: employeesTable.emergencyContactPhone,
-      hourlyRate: employeesTable.hourlyRate,
-      bankAccountName: employeesTable.bankAccountName,
-      bankAccountNumber: employeesTable.bankAccountNumber,
-      bankBsb: employeesTable.bankBsb,
-      skills: employeesTable.skills,
-    })
+    .select(employeeSelect)
     .from(usersTable)
     .leftJoin(employeesTable, eq(usersTable.id, employeesTable.userId))
     .where(eq(usersTable.id, id));
@@ -180,23 +223,20 @@ router.put("/employees/:id", requireAuth, async (req, res): Promise<void> => {
     res.status(403).json({ error: "Forbidden" });
     return;
   }
-  const { firstName, lastName, phone, status, address, emergencyContactName, emergencyContactPhone, hourlyRate, bankAccountName, bankAccountNumber, bankBsb, skills } = req.body;
+  const body = req.body as Record<string, unknown>;
 
   const userUpdates: Record<string, unknown> = {};
-  if (firstName) userUpdates.firstName = firstName;
-  if (lastName) userUpdates.lastName = lastName;
-  if (status && req.user!.role === "admin") userUpdates.status = status;
+  if (typeof body.firstName === "string") userUpdates.firstName = body.firstName;
+  if (typeof body.lastName === "string") userUpdates.lastName = body.lastName;
+  if (typeof body.status === "string" && req.user!.role === "admin") userUpdates.status = body.status;
 
   const empUpdates: Record<string, unknown> = {};
-  if (phone !== undefined) empUpdates.phone = phone;
-  if (address !== undefined) empUpdates.address = address;
-  if (emergencyContactName !== undefined) empUpdates.emergencyContactName = emergencyContactName;
-  if (emergencyContactPhone !== undefined) empUpdates.emergencyContactPhone = emergencyContactPhone;
-  if (hourlyRate !== undefined) empUpdates.hourlyRate = String(hourlyRate);
-  if (bankAccountName !== undefined) empUpdates.bankAccountName = bankAccountName;
-  if (bankAccountNumber !== undefined) empUpdates.bankAccountNumber = bankAccountNumber;
-  if (bankBsb !== undefined) empUpdates.bankBsb = bankBsb;
-  if (skills !== undefined) empUpdates.skills = skills;
+  for (const k of EMP_PASSTHROUGH_KEYS) {
+    if (body[k] !== undefined) empUpdates[k] = body[k];
+  }
+  if (body.hourlyRate !== undefined) {
+    empUpdates.hourlyRate = body.hourlyRate === null ? null : String(body.hourlyRate);
+  }
 
   if (Object.keys(userUpdates).length > 0) {
     await db.update(usersTable).set(userUpdates).where(eq(usersTable.id, id));
@@ -206,25 +246,7 @@ router.put("/employees/:id", requireAuth, async (req, res): Promise<void> => {
   }
 
   const [row] = await db
-    .select({
-      id: usersTable.id,
-      userId: usersTable.id,
-      email: usersTable.email,
-      firstName: usersTable.firstName,
-      lastName: usersTable.lastName,
-      role: usersTable.role,
-      status: usersTable.status,
-      createdAt: usersTable.createdAt,
-      phone: employeesTable.phone,
-      address: employeesTable.address,
-      emergencyContactName: employeesTable.emergencyContactName,
-      emergencyContactPhone: employeesTable.emergencyContactPhone,
-      hourlyRate: employeesTable.hourlyRate,
-      bankAccountName: employeesTable.bankAccountName,
-      bankAccountNumber: employeesTable.bankAccountNumber,
-      bankBsb: employeesTable.bankBsb,
-      skills: employeesTable.skills,
-    })
+    .select(employeeSelect)
     .from(usersTable)
     .leftJoin(employeesTable, eq(usersTable.id, employeesTable.userId))
     .where(eq(usersTable.id, id));
