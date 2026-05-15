@@ -1,6 +1,6 @@
 import { useState, useEffect } from "react";
 import { Link, useRoute, useLocation } from "wouter";
-import { LogOut, ClipboardList, UserPlus, FileText, ChevronsLeft, ChevronsRight, Database } from "lucide-react";
+import { LogOut, ClipboardList, UserPlus, FileText, ChevronsLeft, ChevronsRight, Database, Banknote } from "lucide-react";
 import { TABLES } from "@/lib/tables";
 import { useAuth } from "@/lib/auth";
 import { Button } from "@/components/ui/button";
@@ -23,6 +23,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
     { href: "/hr/applications", label: "Applications", Icon: ClipboardList },
     { href: "/hr/onboarding", label: "Onboarding", Icon: UserPlus },
     { href: "/hr/policies", label: "Policies", Icon: FileText },
+    { href: "/payroll/pay-run", label: "Pay Run", Icon: Banknote },
     { href: "/integrations/monday", label: "Monday Sync", Icon: Database },
   ];
 

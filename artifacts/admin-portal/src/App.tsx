@@ -13,6 +13,7 @@ import { ApplicationsPage } from "@/pages/Applications";
 import { OnboardingPage } from "@/pages/Onboarding";
 import { PoliciesPage } from "@/pages/Policies";
 import { MondaySyncPage } from "@/pages/MondaySync";
+import PayRunPage from "@/pages/PayRun";
 import NotFound from "@/pages/not-found";
 
 const queryClient = new QueryClient();
@@ -54,6 +55,7 @@ function Routed() {
         <Route path="/hr/onboarding" component={OnboardingPage} />
         <Route path="/hr/policies" component={PoliciesPage} />
         <Route path="/integrations/monday" component={MondaySyncPage} />
+        <Route path="/payroll/pay-run" component={PayRunPage} />
         <Route path="/sites/:id" component={SiteDetailPage} />
         <Route path="/tables/:table" component={TablePage} />
         <Route component={NotFound} />

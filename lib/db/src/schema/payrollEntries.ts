@@ -16,8 +16,13 @@ export const payrollEntriesTable = pgTable("payroll_entries", {
   grossPay: numeric("gross_pay", { precision: 10, scale: 2 }).notNull().default("0"),
   tax: numeric("tax", { precision: 10, scale: 2 }).notNull().default("0"),
   netPay: numeric("net_pay", { precision: 10, scale: 2 }).notNull().default("0"),
-  status: text("status").notNull().default("pending"), // pending | processed | paid
+  status: text("status").notNull().default("pending"), // pending | processed | paid | failed
   paidAt: timestamp("paid_at", { withTimezone: true }),
+  // Audit trail for "executed" payments.
+  paidBy: uuid("paid_by").references(() => usersTable.id, { onDelete: "set null" }),
+  paidMethod: text("paid_method"), // manual | ach_csv | stripe
+  paymentReference: text("payment_reference"), // bank confirmation # / file batch id / stripe transfer id
+  stripeTransferId: text("stripe_transfer_id"),
   notes: text("notes"),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow().$onUpdate(() => new Date()),
