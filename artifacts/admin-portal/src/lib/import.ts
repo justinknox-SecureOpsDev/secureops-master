@@ -23,9 +23,23 @@ export async function readSpreadsheet(file: File): Promise<ParsedSheet> {
 
 export function downloadTemplateXlsx(descriptor: TableDescriptor): void {
   const fields = descriptor.fields.filter((f) => !f.readonly && !f.virtual);
-  const headers = fields.map((f) => f.label);
+  // Header row: required fields get a "*" suffix
+  const headers = fields.map((f) => `${f.label}${f.required ? " *" : ""}`);
   const sampleRow = fields.map((f) => sampleFor(f));
-  const ws = XLSX.utils.aoa_to_sheet([headers, sampleRow]);
+  const hintRow = fields.map((f) => hintFor(f));
+  const ws = XLSX.utils.aoa_to_sheet([headers, sampleRow, hintRow]);
+  // Set sensible column widths so the hint row is readable when opened.
+  ws["!cols"] = headers.map((h, i) => ({
+    wch: Math.min(
+      60,
+      Math.max(
+        h.length + 2,
+        String(sampleRow[i] ?? "").length + 2,
+        String(hintRow[i] ?? "").length + 2,
+        14,
+      ),
+    ),
+  }));
   const wb = XLSX.utils.book_new();
   XLSX.utils.book_append_sheet(wb, ws, descriptor.label.slice(0, 30));
   XLSX.writeFile(wb, `${descriptor.name}-template.xlsx`);
@@ -40,8 +54,34 @@ function sampleFor(f: Field): string {
     case "datetime": return "2025-01-31T09:00";
     case "boolean": return "false";
     case "select": return f.options?.[0]?.value ?? "";
-    case "fk": return `<${f.fkTable} id>`;
+    case "fk":
+      return f.importResolveByLabel
+        ? `<${f.fkTable} ${f.fkLabel ?? "name"}>`
+        : `<${f.fkTable} id (uuid)>`;
+    case "password": return "min 6 chars";
     default: return "";
+  }
+}
+
+/** A short human hint describing the accepted format / allowed values. */
+function hintFor(f: Field): string {
+  const req = f.required ? "required. " : "optional. ";
+  switch (f.type) {
+    case "email": return req + "Valid email address";
+    case "number": return req + "Decimal number, e.g. 12.50";
+    case "integer": return req + "Whole number";
+    case "date": return req + "YYYY-MM-DD";
+    case "datetime": return req + "YYYY-MM-DDTHH:mm (ISO 8601)";
+    case "boolean": return req + "true or false";
+    case "select":
+      return req + "One of: " + (f.options ?? []).map((o) => o.value).join(" | ");
+    case "fk":
+      return req + (f.importResolveByLabel
+        ? `Existing ${f.fkTable} ${f.fkLabel ?? "name"} (matched case-insensitively)`
+        : `UUID of an existing ${f.fkTable} row`);
+    case "password": return req + "Min 6 characters (omit column to keep existing)";
+    case "textarea": return req + "Free text";
+    default: return req + "Free text";
   }
 }
 

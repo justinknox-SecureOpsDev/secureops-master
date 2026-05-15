@@ -6,12 +6,12 @@ import { Label } from "@/components/ui/label";
 import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from "@/components/ui/select";
-import { CheckCircle2, AlertTriangle, FileSpreadsheet, ChevronRight } from "lucide-react";
+import { CheckCircle2, AlertTriangle, FileSpreadsheet, ChevronRight, Download } from "lucide-react";
 import { api } from "@/lib/api";
 import type { TableDescriptor, Field } from "@/lib/tables";
 import { useFkOptions, invalidateFk, loadFkRows } from "@/lib/fk";
 import { getTable } from "@/lib/tables";
-import { autoMap, buildErrorCsv, coerceCell, readSpreadsheet, type ParsedSheet } from "@/lib/import";
+import { autoMap, buildErrorCsv, coerceCell, downloadTemplateXlsx, readSpreadsheet, type ParsedSheet } from "@/lib/import";
 
 type Step = "upload" | "map" | "preview" | "result";
 
@@ -248,18 +248,37 @@ export function ImportWizard({
         )}
 
         {step === "upload" && (
-          <div className="py-8 text-center border-2 border-dashed rounded-lg">
-            <FileSpreadsheet className="w-10 h-10 mx-auto brand-gold mb-3" />
-            <p className="text-sm text-muted-foreground mb-3">
-              Drop or pick an Excel (.xlsx) or CSV file. The first sheet is used.
-            </p>
-            <input
-              type="file"
-              accept=".xlsx,.xls,.csv,.tsv"
-              disabled={busy}
-              onChange={(e) => { const f = e.target.files?.[0]; if (f) handleFile(f); }}
-              className="block mx-auto text-sm"
-            />
+          <div className="space-y-3">
+            <div className="flex items-center justify-between gap-3 bg-accent/30 border rounded-lg p-3">
+              <div className="text-xs text-muted-foreground">
+                <div className="font-semibold brand-navy mb-0.5">Need a starting point?</div>
+                Download a ready-to-fill Excel template with all expected columns,
+                an example row, and a hint row describing the format. Required
+                columns are marked with <span className="font-mono">*</span>.
+              </div>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => downloadTemplateXlsx(descriptor)}
+                className="shrink-0"
+              >
+                <Download className="w-4 h-4 mr-1.5" />
+                Download .xlsx template
+              </Button>
+            </div>
+            <div className="py-8 text-center border-2 border-dashed rounded-lg">
+              <FileSpreadsheet className="w-10 h-10 mx-auto brand-gold mb-3" />
+              <p className="text-sm text-muted-foreground mb-3">
+                Drop or pick an Excel (.xlsx) or CSV file. The first sheet is used.
+              </p>
+              <input
+                type="file"
+                accept=".xlsx,.xls,.csv,.tsv"
+                disabled={busy}
+                onChange={(e) => { const f = e.target.files?.[0]; if (f) handleFile(f); }}
+                className="block mx-auto text-sm"
+              />
+            </div>
           </div>
         )}
 
