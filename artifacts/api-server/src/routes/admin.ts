@@ -374,27 +374,6 @@ router.get("/admin/tables/:table", requireAdmin, async (req, res): Promise<void>
   res.json({ rows, total: totalRows[0]?.count ?? 0, limit, offset });
 });
 
-router.get("/admin/tables/:table/:id", requireAdmin, async (req, res): Promise<void> => {
-  const tableName = String(req.params.table);
-  const id = String(req.params.id);
-  const cfg = getConfig(tableName);
-  if (!cfg) {
-    res.status(404).json({ error: "Not Found", message: `Unknown table '${tableName}'` });
-    return;
-  }
-  const idColumn = (cfg.table as any).id;
-  if (!idColumn) {
-    res.status(400).json({ error: "Bad Request", message: `Table '${tableName}' has no id column` });
-    return;
-  }
-  const rows = (await db.select().from(cfg.table).where(eq(idColumn, id)).limit(1)) as unknown[];
-  if (rows.length === 0) {
-    res.status(404).json({ error: "Not Found", message: `${cfg.label} ${id} not found` });
-    return;
-  }
-  res.json(rows[0]);
-});
-
 router.post("/admin/tables/:table", requireAdmin, async (req, res): Promise<void> => {
   const tableName = String(req.params.table);
   const cfg = getConfig(tableName);
