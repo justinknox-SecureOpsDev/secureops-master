@@ -35,7 +35,7 @@ export default function EmployeeHomeScreen() {
   return (
     <ScrollView style={[styles.container, { backgroundColor: colors.background }]} contentContainerStyle={{ paddingBottom: 100 }}>
       <View style={[styles.header, { paddingTop: topPad + 16, borderBottomColor: colors.border }]}>
-        <Image source={require("@/assets/images/logo.jpeg")} style={styles.logoSmall} resizeMode="contain" />
+        <Image source={require("@/assets/images/logo.png")} style={styles.logoSmall} resizeMode="contain" />
         <View style={{ flex: 1 }}>
           <Text style={[styles.greeting, { color: colors.mutedForeground }]}>Good day,</Text>
           <Text style={[styles.name, { color: colors.foreground }]}>{user?.firstName} {user?.lastName}</Text>

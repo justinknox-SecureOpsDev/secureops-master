@@ -157,7 +157,7 @@ export default function EmployeeProfileScreen() {
 
       <View style={[styles.heroCard, { backgroundColor: colors.card, borderColor: colors.border }]}>
         <View style={styles.heroRow}>
-          <Image source={require("@/assets/images/logo.jpeg")} style={styles.brandLogo} resizeMode="contain" />
+          <Image source={require("@/assets/images/logo.png")} style={styles.brandLogo} resizeMode="contain" />
           <View style={{ flex: 1, gap: 2 }}>
             <Text style={[styles.heroName, { color: colors.foreground }]}>{p?.firstName} {p?.lastName}</Text>
             <View style={[styles.roleBadge, { backgroundColor: colors.primary + "20", borderColor: colors.primary + "50" }]}>

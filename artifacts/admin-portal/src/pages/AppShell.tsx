@@ -1,6 +1,6 @@
 import { useState, useEffect } from "react";
 import { Link, useRoute, useLocation } from "wouter";
-import { ShieldCheck, LogOut, ClipboardList, UserPlus, FileText, ChevronsLeft, ChevronsRight } from "lucide-react";
+import { LogOut, ClipboardList, UserPlus, FileText, ChevronsLeft, ChevronsRight } from "lucide-react";
 import { TABLES } from "@/lib/tables";
 import { useAuth } from "@/lib/auth";
 import { Button } from "@/components/ui/button";
@@ -34,7 +34,11 @@ export function AppShell({ children }: { children: React.ReactNode }) {
       >
         <div className={`border-b border-sidebar-border ${collapsed ? "p-3" : "p-5"}`}>
           <div className={`flex items-center ${collapsed ? "justify-center" : "gap-2"}`}>
-            <ShieldCheck className="w-7 h-7 brand-gold shrink-0" />
+            <img
+              src={`${import.meta.env.BASE_URL}logo-256.png`}
+              alt="WCSG"
+              className="w-9 h-9 shrink-0 rounded-md object-contain"
+            />
             {!collapsed && (
               <div>
                 <div className="brand-wordmark text-sm leading-tight">Williams Council</div>

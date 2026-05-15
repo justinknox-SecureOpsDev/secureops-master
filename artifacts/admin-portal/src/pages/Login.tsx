@@ -3,7 +3,7 @@ import { useAuth } from "@/lib/auth";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { ShieldCheck, Loader2, AlertCircle } from "lucide-react";
+import { Loader2, AlertCircle } from "lucide-react";
 
 export function LoginPage() {
   const { login } = useAuth();
@@ -40,7 +40,11 @@ export function LoginPage() {
           <span className="absolute top-3 right-3 text-[9px] uppercase tracking-wider px-1.5 py-px rounded-sm bg-brand-gold/20 brand-gold border border-brand-gold/40">
             Beta
           </span>
-          <ShieldCheck className="w-12 h-12 mx-auto mb-2 brand-gold" />
+          <img
+            src={`${import.meta.env.BASE_URL}logo-256.png`}
+            alt="Williams Council Security Group"
+            className="w-24 h-24 mx-auto mb-3 object-contain drop-shadow-[0_4px_12px_rgba(201,168,76,0.35)]"
+          />
           <div className="brand-wordmark text-xl">Williams Council</div>
           <div className="brand-wordmark text-xl brand-gold">Security Group</div>
           <div className="text-xs uppercase tracking-widest opacity-70 mt-1">Admin Portal</div>
