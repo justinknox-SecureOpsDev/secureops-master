@@ -10,7 +10,11 @@ router.get("/dashboard/admin-summary", requireAdmin, async (req, res): Promise<v
   const [activeEmp] = await db.select({ count: sql<number>`count(*)::int` }).from(usersTable).where(eq(usersTable.status, "active"));
   const [pendingEmp] = await db.select({ count: sql<number>`count(*)::int` }).from(usersTable).where(eq(usersTable.status, "pending"));
   const [activeShifts] = await db.select({ count: sql<number>`count(*)::int` }).from(shiftsTable).where(eq(shiftsTable.status, "active"));
-  const [upcomingShifts] = await db.select({ count: sql<number>`count(*)::int` }).from(shiftsTable).where(eq(shiftsTable.status, "upcoming"));
+  const sevenDays = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000);
+  const [upcomingShifts] = await db.select({ count: sql<number>`count(*)::int` }).from(shiftsTable).where(and(
+    eq(shiftsTable.status, "upcoming"),
+    lte(shiftsTable.startTime, sevenDays),
+  ));
   const [openIncidents] = await db.select({ count: sql<number>`count(*)::int` }).from(incidentsTable).where(ne(incidentsTable.status, "closed"));
   const [criticalIncidents] = await db.select({ count: sql<number>`count(*)::int` }).from(incidentsTable).where(and(eq(incidentsTable.severity, "critical"), ne(incidentsTable.status, "closed")));
   const [pendingPayroll] = await db.select({ count: sql<number>`count(*)::int` }).from(payrollEntriesTable).where(eq(payrollEntriesTable.status, "pending"));
@@ -99,7 +103,11 @@ router.get("/dashboard/employee-summary", requireAuth, async (req, res): Promise
     upcomingShifts = await db
       .select()
       .from(shiftsTable)
-      .where(and(eq(shiftsTable.status, "upcoming"), gte(shiftsTable.startTime, now)))
+      .where(and(
+        eq(shiftsTable.status, "upcoming"),
+        gte(shiftsTable.startTime, now),
+        lte(shiftsTable.startTime, new Date(now.getTime() + 7 * 24 * 60 * 60 * 1000)),
+      ))
       .orderBy(shiftsTable.startTime)
       .limit(5);
   }
