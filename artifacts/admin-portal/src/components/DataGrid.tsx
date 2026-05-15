@@ -76,7 +76,22 @@ function DerivedCell({
   if (!fkValue) return <>—</>;
   const match = options.find((o) => o.id === String(fkValue));
   const label = field.derived.render(match?.row ?? null);
-  return <>{label.trim() || "—"}</>;
+  const text = label.trim() || "—";
+  const linkTo = field.derived.linkTo;
+  if (linkTo && text !== "—") {
+    const href = `/tables/${linkTo.table}?filter[${linkTo.filterField}]=${encodeURIComponent(String(fkValue))}`;
+    return (
+      <Link
+        href={href}
+        onClick={(e) => e.stopPropagation()}
+        className="text-blue-700 hover:underline"
+        title={`Open ${linkTo.table} record`}
+      >
+        {text}
+      </Link>
+    );
+  }
+  return <>{text}</>;
 }
 
 function renderCell(f: Field, value: unknown) {

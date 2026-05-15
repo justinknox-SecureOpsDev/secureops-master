@@ -83,6 +83,12 @@ export type Field = {
     fromField: string;
     /** Build the cell label from the resolved FK row (null when unmatched). */
     render: (fkRow: Record<string, unknown> | null) => string;
+    /**
+     * Optional click target. When set, the derived cell renders as a link to
+     * `/tables/{table}?filter[{filterField}]={fkValue}` so admins can drill
+     * into the related record from any grid that resolves to it.
+     */
+    linkTo?: { table: string; filterField: string };
   };
 };
 
@@ -165,6 +171,7 @@ export const TABLES: TableDescriptor[] = [
             const full = [first, last].filter(Boolean).join(" ");
             return full || String(u.email ?? "").trim();
           },
+          linkTo: { table: "employees", filterField: "userId" },
         },
       },
       { key: "userId", label: "User", type: "fk", fkTable: "users", fkLabel: "email", required: true, section: "Identity", importResolveByLabel: true, importExample: "name@example.com" },
@@ -317,6 +324,7 @@ export const TABLES: TableDescriptor[] = [
             const full = [first, last].filter(Boolean).join(" ");
             return full || String(u.email ?? "").trim();
           },
+          linkTo: { table: "employees", filterField: "userId" },
         },
       },
       { key: "shiftId", label: "Shift", type: "fk", fkTable: "shifts", fkLabel: "title", required: true },
@@ -351,6 +359,7 @@ export const TABLES: TableDescriptor[] = [
             const full = [first, last].filter(Boolean).join(" ");
             return full || String(u.email ?? "").trim();
           },
+          linkTo: { table: "employees", filterField: "userId" },
         },
       },
       // shiftId is nullable in the DB (geo clock-in entries have no scheduled shift). Optional on import.
