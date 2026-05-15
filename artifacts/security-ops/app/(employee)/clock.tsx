@@ -79,15 +79,27 @@ export default function EmployeeClockScreen() {
   }, [isClockedIn]);
 
   const handleClockIn = async () => {
-    Alert.alert("Clock In", "Start your shift now?", [
+    if (!location) {
+      Alert.alert("Location Required", "We need your GPS to identify which site you're at. Please enable location and try again.");
+      return;
+    }
+    Alert.alert("Clock In", "Start your shift now? Your location will be used to identify the site.", [
       { text: "Cancel", style: "cancel" },
       {
         text: "Clock In", onPress: async () => {
-          await clockInMutation.mutateAsync({
-            data: { lat: location?.lat ?? 0, lng: location?.lon ?? 0 } as any,
-          });
-          queryClient.invalidateQueries({ queryKey: getGetActiveTimeEntryQueryKey() });
-          queryClient.invalidateQueries({ queryKey: getGetTimeEntriesQueryKey() });
+          try {
+            const result: any = await clockInMutation.mutateAsync({
+              data: { lat: location.lat, lng: location.lon } as any,
+            });
+            queryClient.invalidateQueries({ queryKey: getGetActiveTimeEntryQueryKey() });
+            queryClient.invalidateQueries({ queryKey: getGetTimeEntriesQueryKey() });
+            if (result?.geoResolved?.siteName) {
+              Alert.alert("Clocked In", `Site auto-detected: ${result.geoResolved.siteName} (${result.geoResolved.distanceMiles} mi away).`);
+            }
+          } catch (e: any) {
+            const msg = e?.response?.data?.message || e?.message || "Clock-in failed";
+            Alert.alert("Cannot Clock In", msg);
+          }
         }
       }
     ]);

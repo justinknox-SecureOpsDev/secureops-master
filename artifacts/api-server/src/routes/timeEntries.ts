@@ -9,6 +9,8 @@ function calcHours(clockIn: Date, clockOut: Date): number {
   return Math.round(((clockOut.getTime() - clockIn.getTime()) / 3600000) * 100) / 100;
 }
 
+// Coalesce: prefer the time entry's direct siteId (set by geo-resolution when no shift),
+// otherwise fall back to the linked shift's siteId.
 const baseSelect = {
   id: timeEntriesTable.id,
   shiftId: timeEntriesTable.shiftId,
@@ -27,12 +29,44 @@ const baseSelect = {
   notes: timeEntriesTable.notes,
   createdAt: timeEntriesTable.createdAt,
   shiftTitle: shiftsTable.title,
-  siteId: shiftsTable.siteId,
+  siteId: sql<string | null>`coalesce(${timeEntriesTable.siteId}, ${shiftsTable.siteId})`,
   siteName: sitesTable.name,
   payRate: shiftsTable.payRate,
   billRate: shiftsTable.billRate,
   employeeName: sql<string>`${usersTable.firstName} || ' ' || ${usersTable.lastName}`,
 };
+
+// Haversine distance in miles between two lat/lng points.
+function haversineMiles(lat1: number, lng1: number, lat2: number, lng2: number): number {
+  const R = 3958.7613;
+  const toRad = (d: number) => (d * Math.PI) / 180;
+  const dLat = toRad(lat2 - lat1);
+  const dLng = toRad(lng2 - lng1);
+  const a = Math.sin(dLat / 2) ** 2 + Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.sin(dLng / 2) ** 2;
+  return 2 * R * Math.asin(Math.sqrt(a));
+}
+
+const GEO_RESOLVE_RADIUS_MILES = 1;
+
+// Find the closest Site within GEO_RESOLVE_RADIUS_MILES of (lat, lng), or null.
+async function resolveNearestSite(lat: number, lng: number): Promise<{ id: string; name: string; distanceMiles: number } | null> {
+  const sites = await db
+    .select({ id: sitesTable.id, name: sitesTable.name, lat: sitesTable.locationLat, lng: sitesTable.locationLng })
+    .from(sitesTable)
+    .where(and(
+      sql`${sitesTable.locationLat} IS NOT NULL`,
+      sql`${sitesTable.locationLng} IS NOT NULL`,
+    ));
+  let best: { id: string; name: string; distanceMiles: number } | null = null;
+  for (const s of sites) {
+    if (s.lat == null || s.lng == null) continue;
+    const d = haversineMiles(lat, lng, Number(s.lat), Number(s.lng));
+    if (d <= GEO_RESOLVE_RADIUS_MILES && (!best || d < best.distanceMiles)) {
+      best = { id: s.id, name: s.name, distanceMiles: d };
+    }
+  }
+  return best;
+}
 
 router.get("/time-entries", requireAuth, async (req, res): Promise<void> => {
   const { employeeId, shiftId, siteId, approvalStatus, from, to } = req.query as Record<string, string | undefined>;
@@ -44,7 +78,7 @@ router.get("/time-entries", requireAuth, async (req, res): Promise<void> => {
     conditions.push(eq(timeEntriesTable.employeeId, employeeId));
   }
   if (shiftId) conditions.push(eq(timeEntriesTable.shiftId, shiftId));
-  if (siteId) conditions.push(eq(shiftsTable.siteId, siteId));
+  if (siteId) conditions.push(sql`coalesce(${timeEntriesTable.siteId}, ${shiftsTable.siteId}) = ${siteId}`);
   if (approvalStatus) conditions.push(eq(timeEntriesTable.approvalStatus, approvalStatus));
   if (from) conditions.push(gte(timeEntriesTable.clockInTime, new Date(from)));
   if (to) conditions.push(lte(timeEntriesTable.clockInTime, new Date(to)));
@@ -62,8 +96,8 @@ router.get("/time-entries", requireAuth, async (req, res): Promise<void> => {
 
 router.post("/time-entries/clock-in", requireAuth, async (req, res): Promise<void> => {
   const { shiftId, lat, lng, notes } = req.body;
-  if (!shiftId || lat == null || lng == null) {
-    res.status(400).json({ error: "Bad Request", message: "shiftId, lat, lng required" });
+  if (lat == null || lng == null) {
+    res.status(400).json({ error: "Bad Request", message: "lat, lng required" });
     return;
   }
   const existing = await db
@@ -76,8 +110,22 @@ router.post("/time-entries/clock-in", requireAuth, async (req, res): Promise<voi
     return;
   }
 
+  // Geo-resolve site if no shiftId provided.
+  let resolvedSite: { id: string; name: string; distanceMiles: number } | null = null;
+  if (!shiftId) {
+    resolvedSite = await resolveNearestSite(Number(lat), Number(lng));
+    if (!resolvedSite) {
+      res.status(422).json({
+        error: "No Site Nearby",
+        message: `You are not within ${GEO_RESOLVE_RADIUS_MILES} mile of any known site. Move closer to a site or have an admin assign you to a shift first.`,
+      });
+      return;
+    }
+  }
+
   const [entry] = await db.insert(timeEntriesTable).values({
-    shiftId,
+    shiftId: shiftId || null,
+    siteId: resolvedSite ? resolvedSite.id : null,
     employeeId: req.user!.userId,
     clockInTime: new Date(),
     clockInLat: String(lat),
@@ -87,12 +135,17 @@ router.post("/time-entries/clock-in", requireAuth, async (req, res): Promise<voi
     approvalStatus: "pending",
   }).returning();
 
-  const [shift] = await db.select().from(shiftsTable).where(eq(shiftsTable.id, shiftId));
+  const [shift] = shiftId
+    ? await db.select().from(shiftsTable).where(eq(shiftsTable.id, shiftId))
+    : [undefined];
   const [user] = await db.select().from(usersTable).where(eq(usersTable.id, req.user!.userId));
 
   res.status(201).json({
     ...entry,
-    shiftTitle: shift?.title,
+    shiftTitle: shift?.title ?? null,
+    siteId: entry.siteId ?? shift?.siteId ?? null,
+    siteName: resolvedSite?.name ?? null,
+    geoResolved: resolvedSite ? { siteName: resolvedSite.name, distanceMiles: Math.round(resolvedSite.distanceMiles * 100) / 100 } : null,
     employeeName: user ? `${user.firstName} ${user.lastName}` : null,
   });
 });
@@ -121,7 +174,9 @@ router.post("/time-entries/clock-out", requireAuth, async (req, res): Promise<vo
     notes: notes || entry.notes,
   }).where(eq(timeEntriesTable.id, timeEntryId)).returning();
 
-  const [shift] = await db.select().from(shiftsTable).where(eq(shiftsTable.id, updated.shiftId));
+  const [shift] = updated.shiftId
+    ? await db.select().from(shiftsTable).where(eq(shiftsTable.id, updated.shiftId))
+    : [undefined];
   const [user] = await db.select().from(usersTable).where(eq(usersTable.id, updated.employeeId));
 
   res.json({
@@ -169,7 +224,9 @@ router.post("/time-entries/:id/approve", requireAdmin, async (req, res): Promise
   if (notes !== undefined) updates.notes = notes;
 
   const [updated] = await db.update(timeEntriesTable).set(updates).where(eq(timeEntriesTable.id, id)).returning();
-  const [shift] = await db.select().from(shiftsTable).where(eq(shiftsTable.id, updated.shiftId));
+  const [shift] = updated.shiftId
+    ? await db.select().from(shiftsTable).where(eq(shiftsTable.id, updated.shiftId))
+    : [undefined];
   const [user] = await db.select().from(usersTable).where(eq(usersTable.id, updated.employeeId));
   res.json({
     ...updated,

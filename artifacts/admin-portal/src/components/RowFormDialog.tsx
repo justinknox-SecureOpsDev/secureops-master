@@ -9,7 +9,7 @@ import {
 } from "@/components/ui/select";
 import { useFkOptions, invalidateFk } from "@/lib/fk";
 import { toFormValue, fromFormValue } from "@/lib/format";
-import type { Field, TableDescriptor } from "@/lib/tables";
+import { type Field, type TableDescriptor, singularize } from "@/lib/tables";
 import { api, ApiError } from "@/lib/api";
 import { FileUploadField, MultiFileUploadField } from "./FileUploadField";
 import { openSignedObject, type UploadedFile } from "@/lib/upload";
@@ -271,7 +271,7 @@ export function RowFormDialog({
       <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
         <DialogHeader>
           <DialogTitle>
-            {initial ? `Edit ${descriptor.label.replace(/s$/, "")}` : `Add ${descriptor.label.replace(/s$/, "")}`}
+            {initial ? `Edit ${singularize(descriptor.label)}` : `Add ${singularize(descriptor.label)}`}
           </DialogTitle>
         </DialogHeader>
         <div className="space-y-5 py-2">

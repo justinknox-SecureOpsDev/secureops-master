@@ -570,6 +570,124 @@ async function syncCandidates(items: MondayItem[], result: SyncResult, dryRun: b
   }
 }
 
+// ---------- SHIFTS / ASSIGNMENTS (Site rate update + draft standing-shift template) ----------
+
+const SHIFT_COL = {
+  status: "color_mm0gd9sy",
+  payRate: "numeric_mm0gcxsk",
+  billRate: "numeric_mm0gzzat",
+};
+
+// Placeholder window for draft shifts so they sort to a clearly-fake far-future date.
+const DRAFT_PLACEHOLDER_START = new Date("2099-01-01T09:00:00Z");
+const DRAFT_PLACEHOLDER_END   = new Date("2099-01-01T17:00:00Z");
+const DRAFT_NOTES_PREFIX = "[monday-assignment:";
+
+function buildDraftNotes(itemId: string): string {
+  return `${DRAFT_NOTES_PREFIX}${itemId}]\nDraft template imported from Monday Assignments board. Variable headcount/times. Replace placeholder start/end before publishing as a real shift.`;
+}
+
+async function syncShifts(items: MondayItem[], result: SyncResult, dryRun: boolean): Promise<void> {
+  for (const item of items) {
+    try {
+      const name = item.name.trim();
+      if (!name) {
+        result.skippedNoKey++;
+        result.decisions.push({ mondayId: item.id, mondayName: item.name, matchKey: null, action: "skip-no-key", reason: "Empty site name on row" });
+        continue;
+      }
+      const [site] = await db.select().from(sitesTable).where(eq(sql`lower(${sitesTable.name})`, name.toLowerCase())).limit(1);
+      if (!site) {
+        result.skippedUnmatched++;
+        result.decisions.push({ mondayId: item.id, mondayName: item.name, matchKey: name, action: "skip-unmatched", reason: `No Site named "${name}" in DB. Run the Sites sync first.` });
+        continue;
+      }
+
+      const payRateRaw = getCol(item, SHIFT_COL.payRate);
+      const billRateRaw = getCol(item, SHIFT_COL.billRate);
+      const payRate = payRateRaw && !isNaN(Number(payRateRaw)) ? Number(payRateRaw).toFixed(2) : null;
+      const billRate = billRateRaw && !isNaN(Number(billRateRaw)) ? Number(billRateRaw).toFixed(2) : null;
+      const statusText = (getCol(item, SHIFT_COL.status) || "").toLowerCase();
+      const isActive = statusText.includes("active");
+
+      const changes: Record<string, { from: unknown; to: unknown }> = {};
+
+      // 1) Site rate update — only if Monday has a non-empty value AND it differs.
+      const siteIncoming: Record<string, unknown> = {};
+      if (payRate != null) siteIncoming.defaultPayRate = payRate;
+      if (billRate != null) siteIncoming.defaultBillRate = billRate;
+      const siteChanges = diff(site as unknown as Record<string, unknown>, siteIncoming);
+      for (const [k, v] of Object.entries(siteChanges)) changes[`site.${k}`] = v;
+
+      // 2) Draft shift upsert — dedupe by notes tag.
+      const tag = `${DRAFT_NOTES_PREFIX}${item.id}]`;
+      const [existingShift] = await db.select().from(shiftsTable).where(
+        sql`${shiftsTable.notes} ILIKE ${"%" + tag + "%"}`,
+      ).limit(1);
+
+      const draftIncoming: Record<string, unknown> = {
+        title: name,
+        siteId: site.id,
+        status: isActive ? "draft" : "draft-inactive",
+        payRate: payRate ?? "0.00",
+        billRate: billRate ?? "0.00",
+        requiredLicenseLevel: 2,
+        headcount: 1,
+        startTime: DRAFT_PLACEHOLDER_START,
+        endTime: DRAFT_PLACEHOLDER_END,
+        notes: buildDraftNotes(item.id),
+      };
+
+      if (!existingShift) {
+        for (const [k, v] of Object.entries(draftIncoming)) {
+          if (k === "startTime" || k === "endTime") changes[`shift.${k}`] = { from: null, to: (v as Date).toISOString() };
+          else if (v !== null && v !== undefined && v !== "") changes[`shift.${k}`] = { from: null, to: v };
+        }
+      } else {
+        // For existing draft, only update mutable rate/status/title — preserve any admin edits to start/end/headcount/level.
+        const mutable: Record<string, unknown> = {
+          title: draftIncoming.title,
+          siteId: draftIncoming.siteId,
+          status: draftIncoming.status,
+          payRate: draftIncoming.payRate,
+          billRate: draftIncoming.billRate,
+        };
+        const shiftChanges = diff(existingShift as unknown as Record<string, unknown>, mutable);
+        for (const [k, v] of Object.entries(shiftChanges)) changes[`shift.${k}`] = v;
+      }
+
+      if (Object.keys(changes).length === 0) continue;
+
+      const action = existingShift ? "update" : "create";
+      if (action === "create") result.willCreate++; else result.willUpdate++;
+      result.decisions.push({ mondayId: item.id, mondayName: item.name, matchKey: name, action, changes });
+
+      if (!dryRun) {
+        await db.transaction(async (tx) => {
+          if (Object.keys(siteChanges).length > 0) {
+            await tx.update(sitesTable)
+              .set(Object.fromEntries(Object.entries(siteChanges).map(([k, v]) => [k, v.to])))
+              .where(eq(sitesTable.id, site.id));
+          }
+          if (!existingShift) {
+            await tx.insert(shiftsTable).values(draftIncoming as any);
+          } else {
+            await tx.update(shiftsTable).set({
+              title: draftIncoming.title as string,
+              siteId: draftIncoming.siteId as string,
+              status: draftIncoming.status as string,
+              payRate: draftIncoming.payRate as string,
+              billRate: draftIncoming.billRate as string,
+            }).where(eq(shiftsTable.id, existingShift.id));
+          }
+        });
+      }
+    } catch (e) {
+      result.errors.push({ mondayId: item.id, mondayName: item.name, error: e instanceof Error ? e.message : String(e) });
+    }
+  }
+}
+
 // ---------- main entry ----------
 
 export async function syncFromMonday(opts: { kind: SyncKind; boardId?: string; dryRun: boolean }): Promise<SyncResult> {
@@ -589,6 +707,7 @@ export async function syncFromMonday(opts: { kind: SyncKind; boardId?: string; d
     case "sites":      await syncSites(items, result, opts.dryRun); break;
     case "onboarding": await syncOnboarding(items, result, opts.dryRun); break;
     case "candidates": await syncCandidates(items, result, opts.dryRun); break;
+    case "shifts":     await syncShifts(items, result, opts.dryRun); break;
   }
 
   const { decisions: _d, ...summary } = result;

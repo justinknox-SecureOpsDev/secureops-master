@@ -10,7 +10,7 @@ import { CheckCircle2, AlertTriangle, FileSpreadsheet, ChevronRight } from "luci
 import { api } from "@/lib/api";
 import type { TableDescriptor, Field } from "@/lib/tables";
 import { useFkOptions, invalidateFk, loadFkRows } from "@/lib/fk";
-import { getTable, getImportMatchByLabelFields } from "@/lib/tables";
+import { getTable, getImportMatchByLabelFields, singularize } from "@/lib/tables";
 import { autoMap, buildErrorCsv, coerceCell, getImportableFields, readSpreadsheet, type ParsedSheet } from "@/lib/import";
 
 /** Normalize a raw cell value to a comparable lookup key. */
@@ -460,7 +460,7 @@ export function ImportWizard({
                           {mode === "label" && matchFields.length > 1 && (
                             <div className="pl-2 border-l-2 border-brand-gold/40 space-y-1.5">
                               <div className="text-[11px] text-muted-foreground">
-                                {matchFields.length} columns are needed to identify a {target?.label.replace(/s$/i, "").toLowerCase()}:
+                                {matchFields.length} columns are needed to identify a {target ? singularize(target.label).toLowerCase() : ""}:
                               </div>
                               <div className="grid grid-cols-[120px_1fr] gap-2 items-center">
                                 <span className="text-[11px] font-medium">

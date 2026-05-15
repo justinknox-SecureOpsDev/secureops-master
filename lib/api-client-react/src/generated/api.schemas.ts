@@ -520,8 +520,13 @@ export interface TimeEntry {
   createdAt: string;
 }
 
+/**
+ * Clock in. If shiftId is provided, the entry is linked to that shift. Otherwise the
+server geo-resolves the nearest Site within 1 mile of (lat, lng) and links that.
+
+ */
 export interface ClockInRequest {
-  shiftId: string;
+  shiftId?: string | null;
   lat: number;
   lng: number;
   notes?: string;

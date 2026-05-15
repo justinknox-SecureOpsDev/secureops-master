@@ -5,7 +5,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { AlertCircle, CheckCircle2, Loader2, Database, Plus, Pencil, SkipForward } from "lucide-react";
 
-type Kind = "employees" | "clients" | "sites" | "onboarding" | "candidates";
+type Kind = "employees" | "clients" | "sites" | "onboarding" | "candidates" | "shifts";
 
 const KINDS: { value: Kind; label: string; defaultBoard: string; target: string; matchKey: string; help: string }[] = [
   { value: "employees", label: "Employees", defaultBoard: "18408899656", target: "users + employees + licenses",
@@ -18,6 +18,8 @@ const KINDS: { value: Kind; label: string; defaultBoard: string; target: string;
     matchKey: "email", help: "Updates existing employees with bank/SSN/license/EC/uniform from the Onboarding board." },
   { value: "candidates", label: "Candidates → Applications", defaultBoard: "18399600911", target: "applications",
     matchKey: "email", help: "Brings recruiting candidates into the HR Applications inbox." },
+  { value: "shifts", label: "Assignments → Sites + Drafts", defaultBoard: "18408889225", target: "sites (default rates) + shifts (drafts)",
+    matchKey: "site name", help: "For each Assignments row: updates the matching Site's default pay/bill rates AND creates a draft shift template (status=draft, placeholder times 2099-01-01) hidden from officers. Run Sites first." },
 ];
 
 type Decision = {

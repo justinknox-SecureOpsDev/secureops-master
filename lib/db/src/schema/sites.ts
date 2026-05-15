@@ -11,6 +11,8 @@ export const sitesTable = pgTable("sites", {
   locationLat: numeric("location_lat", { precision: 10, scale: 6 }),
   locationLng: numeric("location_lng", { precision: 10, scale: 6 }),
   notes: text("notes"),
+  defaultPayRate: numeric("default_pay_rate", { precision: 10, scale: 2 }),
+  defaultBillRate: numeric("default_bill_rate", { precision: 10, scale: 2 }),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow().$onUpdate(() => new Date()),
 });

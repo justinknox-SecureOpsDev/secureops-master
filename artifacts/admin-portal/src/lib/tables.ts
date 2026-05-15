@@ -5,6 +5,14 @@
  * `/admin/tables/:table` endpoint registry in `artifacts/api-server/src/routes/admin.ts`.
  */
 
+/** Singularize a plural label for "Add {X}" / "Edit {X}" buttons. */
+export function singularize(label: string): string {
+  if (/ies$/i.test(label)) return label.replace(/ies$/i, "y");
+  if (/sses$/i.test(label)) return label.replace(/es$/i, "");
+  if (/s$/i.test(label) && !/ss$/i.test(label)) return label.replace(/s$/i, "");
+  return label;
+}
+
 export type FieldType =
   | "text"
   | "textarea"

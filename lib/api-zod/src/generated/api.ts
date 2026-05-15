@@ -1123,12 +1123,16 @@ export const GetTimeEntriesResponse = zod.array(GetTimeEntriesResponseItem);
 /**
  * @summary Clock in to a shift
  */
-export const ClockInBody = zod.object({
-  shiftId: zod.string(),
-  lat: zod.number(),
-  lng: zod.number(),
-  notes: zod.string().optional(),
-});
+export const ClockInBody = zod
+  .object({
+    shiftId: zod.string().nullish(),
+    lat: zod.number(),
+    lng: zod.number(),
+    notes: zod.string().optional(),
+  })
+  .describe(
+    "Clock in. If shiftId is provided, the entry is linked to that shift. Otherwise the\nserver geo-resolves the nearest Site within 1 mile of (lat, lng) and links that.\n",
+  );
 
 /**
  * @summary Clock out from current shift

@@ -10,7 +10,7 @@ import {
 } from "@/components/ui/alert-dialog";
 import { ArrowUpDown, ArrowDown, ArrowUp, Pencil, Trash2, Plus, Upload, Download, RefreshCw, ExternalLink } from "lucide-react";
 import { Link } from "wouter";
-import type { TableDescriptor, Field } from "@/lib/tables";
+import { type TableDescriptor, type Field, singularize } from "@/lib/tables";
 import { api } from "@/lib/api";
 import { formatCell } from "@/lib/format";
 import { useFkOptions } from "@/lib/fk";
@@ -210,7 +210,7 @@ export function DataGrid({
               </>
             )}
             <Button onClick={() => setCreating(true)} className="bg-brand-navy text-white hover:opacity-90">
-              <Plus className="w-4 h-4 mr-2" />Add {descriptor.label.replace(/s$/, "")}
+              <Plus className="w-4 h-4 mr-2" />Add {singularize(descriptor.label)}
             </Button>
           </div>
         </div>
@@ -233,7 +233,7 @@ export function DataGrid({
               <RefreshCw className="w-3.5 h-3.5" />
             </Button>
             <Button size="sm" onClick={() => setCreating(true)} className="bg-brand-navy text-white hover:opacity-90">
-              <Plus className="w-3.5 h-3.5 mr-1" />Add {descriptor.label.replace(/s$/, "")}
+              <Plus className="w-3.5 h-3.5 mr-1" />Add {singularize(descriptor.label)}
             </Button>
           </div>
         </div>
@@ -263,7 +263,7 @@ export function DataGrid({
             {rows.length === 0 && !loading && (
               <TableRow>
                 <TableCell colSpan={gridFields.length + 1} className="text-center text-muted-foreground py-12">
-                  No {descriptor.plural} yet. Click <b>Add {descriptor.label.replace(/s$/, "")}</b> to create one
+                  No {descriptor.plural} yet. Click <b>Add {singularize(descriptor.label)}</b> to create one
                   {descriptor.importSupported ? " or use Import to bulk-load." : "."}
                 </TableCell>
               </TableRow>
@@ -333,7 +333,7 @@ export function DataGrid({
       <AlertDialog open={!!deleting} onOpenChange={(b) => { if (!b) setDeleting(null); }}>
         <AlertDialogContent>
           <AlertDialogHeader>
-            <AlertDialogTitle>Delete this {descriptor.label.replace(/s$/, "").toLowerCase()}?</AlertDialogTitle>
+            <AlertDialogTitle>Delete this {singularize(descriptor.label).toLowerCase()}?</AlertDialogTitle>
             <AlertDialogDescription>
               This cannot be undone. Related records that depend on this row may be affected.
             </AlertDialogDescription>

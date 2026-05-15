@@ -2,11 +2,15 @@ import { pgTable, text, uuid, timestamp, boolean, numeric } from "drizzle-orm/pg
 import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod/v4";
 import { shiftsTable } from "./shifts";
+import { sitesTable } from "./sites";
 import { usersTable } from "./users";
 
 export const timeEntriesTable = pgTable("time_entries", {
   id: uuid("id").primaryKey().defaultRandom(),
-  shiftId: uuid("shift_id").notNull().references(() => shiftsTable.id, { onDelete: "cascade" }),
+  // shiftId is now optional — officers can clock in without an assigned shift if they're
+  // within range of a known site (siteId is then resolved by GPS).
+  shiftId: uuid("shift_id").references(() => shiftsTable.id, { onDelete: "set null" }),
+  siteId: uuid("site_id").references(() => sitesTable.id, { onDelete: "set null" }),
   employeeId: uuid("employee_id").notNull().references(() => usersTable.id, { onDelete: "cascade" }),
   clockInTime: timestamp("clock_in_time", { withTimezone: true }).notNull(),
   clockInLat: numeric("clock_in_lat", { precision: 10, scale: 6 }),

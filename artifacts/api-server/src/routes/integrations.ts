@@ -6,7 +6,7 @@ import { syncFromMonday, DEFAULT_BOARD_IDS, type SyncKind } from "../lib/mondayS
 const router: IRouter = Router();
 
 const syncBody = z.object({
-  kind: z.enum(["employees", "clients", "sites", "onboarding", "candidates"]),
+  kind: z.enum(["employees", "clients", "sites", "onboarding", "candidates", "shifts"]),
   boardId: z.string().regex(/^\d+$/, "boardId must be numeric").optional(),
   dryRun: z.boolean().default(true),
 });
