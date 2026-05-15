@@ -75,6 +75,7 @@ function statusBadge(status: string): string {
 export default function ShiftsPage() {
   const descriptor = getTable("shifts")!;
   const [shifts, setShifts] = useState<Shift[]>([]);
+  const [sites, setSites] = useState<{ id: string; name: string; address: string | null; clientName: string | null }[]>([]);
   const [loading, setLoading] = useState(true);
   const [statusFilter, setStatusFilter] = useState<StatusFilter>("upcoming");
   const [search, setSearch] = useState("");
@@ -91,12 +92,25 @@ export default function ShiftsPage() {
     setLoading(true);
     const params = new URLSearchParams();
     if (statusFilter !== "all") params.set("status", statusFilter);
-    api<Shift[]>(`/shifts${params.toString() ? `?${params}` : ""}`)
-      .then((rows) => { if (!cancelled) setShifts(rows ?? []); })
-      .catch((e) => { console.error(e); if (!cancelled) setShifts([]); })
+    Promise.all([
+      api<Shift[]>(`/shifts${params.toString() ? `?${params}` : ""}`),
+      api<{ id: string; name: string; address: string | null; clientName: string | null }[]>(`/sites`),
+    ])
+      .then(([shiftRows, siteRows]) => {
+        if (cancelled) return;
+        setShifts(shiftRows ?? []);
+        setSites(siteRows ?? []);
+      })
+      .catch((e) => { console.error(e); if (!cancelled) { setShifts([]); setSites([]); } })
       .finally(() => { if (!cancelled) setLoading(false); });
     return () => { cancelled = true; };
   }, [statusFilter, version]);
+
+  const siteIndex = useMemo(() => {
+    const m = new Map<string, { name: string; clientName: string | null }>();
+    for (const s of sites) m.set(s.id, { name: s.name, clientName: s.clientName });
+    return m;
+  }, [sites]);
 
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase();
@@ -126,21 +140,21 @@ export default function ShiftsPage() {
     const map = new Map<string, Group>();
     for (const s of filtered) {
       const key = s.siteId ?? NO_SITE_KEY;
+      const liveSite = s.siteId ? siteIndex.get(s.siteId) : undefined;
+      // Prefer the live site/client names (sites & clients tables) over the
+      // denormalized snapshot stored on the shift row, so renames flow through.
+      const siteLabel = liveSite?.name ?? s.location ?? (s.siteId ? "Unnamed site" : "No site");
+      const clientLabel = liveSite?.clientName ?? s.clientName ?? null;
+
       let g = map.get(key);
       if (!g) {
-        g = {
-          key,
-          siteId: s.siteId,
-          siteLabel: s.location ?? (s.siteId ? "Unnamed site" : "No site"),
-          clientLabel: s.clientName,
-          singles: [],
-          series: [],
-        };
+        g = { key, siteId: s.siteId, siteLabel, clientLabel, singles: [], series: [] };
         map.set(key, g);
+      } else {
+        // Upgrade labels if a later shift gave us better info.
+        if (liveSite?.name) g.siteLabel = liveSite.name;
+        if (liveSite?.clientName && !g.clientLabel) g.clientLabel = liveSite.clientName;
       }
-      // Prefer the most informative location/client labels we encounter
-      if (!g.siteLabel && s.location) g.siteLabel = s.location;
-      if (!g.clientLabel && s.clientName) g.clientLabel = s.clientName;
 
       if (s.isRepeat) {
         const seriesKey = `${key}::${s.title}`;
