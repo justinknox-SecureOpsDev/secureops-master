@@ -90,6 +90,13 @@ export default function ShiftDetailScreen() {
           <Feather name="arrow-left" size={18} color={colors.foreground} />
         </TouchableOpacity>
         <Text style={[styles.pageTitle, { color: colors.foreground }]} numberOfLines={1}>{shift.title}</Text>
+        <TouchableOpacity
+          onPress={() => router.push(`/(admin)/shifts/edit/${id}` as any)}
+          style={[styles.backBtn, { borderColor: colors.primary }]}
+          accessibilityLabel="Edit shift"
+        >
+          <Feather name="edit-2" size={16} color={colors.primary} />
+        </TouchableOpacity>
         <View style={[styles.statusBadge, { backgroundColor: statusColor(shift.status) + "20", borderColor: statusColor(shift.status) }]}>
           <Text style={[styles.statusText, { color: statusColor(shift.status) }]}>{shift.status.toUpperCase()}</Text>
         </View>
