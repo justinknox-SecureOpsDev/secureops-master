@@ -1,5 +1,5 @@
 import { Router, type IRouter, type Request, type Response } from "express";
-import { eq, sql, desc, asc, ilike, or, and, type AnyColumn } from "drizzle-orm";
+import { eq, sql, desc, asc, ilike, or, and, inArray, type AnyColumn } from "drizzle-orm";
 import bcrypt from "bcryptjs";
 import { z } from "zod/v4";
 import {
@@ -316,6 +316,169 @@ function getConfig(name: string): TableConfig | null {
   return tables[name] ?? null;
 }
 
+// ---- FK resolution metadata for import-by-label ----------------------------
+//
+// When the importer chooses "match by name/email/title" instead of UUID, we
+// resolve each row's FK column against the target table here on the server.
+// `matchColumns` lists the columns that together uniquely identify a row in
+// the target table — for shifts that's title + startTime because two shifts
+// often share a title across different days.
+//
+// Adding a new resolvable FK = add an entry. Lookup is whitelisted to these
+// entries so callers can't ask the server to query arbitrary tables.
+
+type FkMatchType = "text" | "date";
+type FkMatchColumn = { key: string; col: AnyColumn; type: FkMatchType };
+type FkRef = { table: any; matchColumns: FkMatchColumn[] };
+
+const fkResolution: Record<string, Record<string, FkRef>> = {
+  shift_assignments: {
+    employeeId: { table: usersTable, matchColumns: [{ key: "email", col: usersTable.email, type: "text" }] },
+    shiftId: { table: shiftsTable, matchColumns: [
+      { key: "title", col: shiftsTable.title, type: "text" },
+      { key: "startTime", col: shiftsTable.startTime, type: "date" },
+    ] },
+  },
+  time_entries: {
+    employeeId: { table: usersTable, matchColumns: [{ key: "email", col: usersTable.email, type: "text" }] },
+    shiftId: { table: shiftsTable, matchColumns: [
+      { key: "title", col: shiftsTable.title, type: "text" },
+      { key: "startTime", col: shiftsTable.startTime, type: "date" },
+    ] },
+  },
+  licenses: {
+    employeeId: { table: usersTable, matchColumns: [{ key: "email", col: usersTable.email, type: "text" }] },
+  },
+  incidents: {
+    employeeId: { table: usersTable, matchColumns: [{ key: "email", col: usersTable.email, type: "text" }] },
+    shiftId: { table: shiftsTable, matchColumns: [
+      { key: "title", col: shiftsTable.title, type: "text" },
+      { key: "startTime", col: shiftsTable.startTime, type: "date" },
+    ] },
+  },
+  shifts: {
+    siteId: { table: sitesTable, matchColumns: [{ key: "name", col: sitesTable.name, type: "text" }] },
+  },
+  sites: {
+    clientId: { table: clientsTable, matchColumns: [{ key: "name", col: clientsTable.name, type: "text" }] },
+  },
+  site_roles: {
+    siteId: { table: sitesTable, matchColumns: [{ key: "name", col: sitesTable.name, type: "text" }] },
+  },
+  employees: {
+    userId: { table: usersTable, matchColumns: [{ key: "email", col: usersTable.email, type: "text" }] },
+  },
+  payroll_entries: {
+    employeeId: { table: usersTable, matchColumns: [{ key: "email", col: usersTable.email, type: "text" }] },
+    siteId: { table: sitesTable, matchColumns: [{ key: "name", col: sitesTable.name, type: "text" }] },
+  },
+  invoices: {
+    clientId: { table: clientsTable, matchColumns: [{ key: "name", col: clientsTable.name, type: "text" }] },
+    siteId: { table: sitesTable, matchColumns: [{ key: "name", col: sitesTable.name, type: "text" }] },
+  },
+};
+
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+/** Normalize a value to a stable lookup key. Dates are coerced to ISO so
+ *  Excel-numbers, "2024-01-15", "1/15/2024 8:00", and JS Date all collapse to
+ *  the same key. */
+function normalizeMatchValue(v: unknown, type: FkMatchType): string {
+  if (v === undefined || v === null || v === "") return "";
+  if (type === "date") {
+    const d = toDateOrNull(v);
+    return d ? d.toISOString() : "";
+  }
+  return String(v).trim().toLowerCase();
+}
+
+/**
+ * Resolve label values to UUIDs in-place on `rows` for any FK columns the
+ * caller marked as `{ by: "label" }`. Returns a map of rowIndex -> error
+ * message for unresolved rows so the import handler can short-circuit them.
+ */
+async function resolveImportFks(
+  tableName: string,
+  rows: any[],
+  resolveHints: Record<string, { by?: "id" | "label" }>,
+  matchExtras: Array<Record<string, Record<string, unknown>> | undefined>,
+): Promise<Map<number, string>> {
+  const errors = new Map<number, string>();
+  const refs = fkResolution[tableName];
+  if (!refs) return errors;
+
+  for (const [fkKey, hint] of Object.entries(resolveHints)) {
+    if (hint?.by !== "label") continue;
+    const ref = refs[fkKey];
+    if (!ref) continue;
+    const primary = ref.matchColumns[0];
+
+    // Collect distinct primary lookup values across all rows so we can fetch
+    // candidates in one query rather than N.
+    const primaries = new Set<string>();
+    rows.forEach((r) => {
+      if (!r || typeof r !== "object") return;
+      const v = r[fkKey];
+      if (v === undefined || v === null || v === "") return;
+      const s = String(v);
+      if (UUID_RE.test(s)) return;
+      const norm = normalizeMatchValue(s, primary.type);
+      if (norm) primaries.add(norm);
+    });
+    if (primaries.size === 0) continue;
+
+    let candidates: any[] = [];
+    if (primary.type === "text") {
+      candidates = await db
+        .select()
+        .from(ref.table)
+        .where(inArray(sql`lower(${primary.col}::text)`, [...primaries]));
+    } else {
+      // Date primaries are uncommon but supported — fall back to range fetch.
+      candidates = await db.select().from(ref.table);
+    }
+
+    const map = new Map<string, string>();
+    for (const c of candidates) {
+      const key = ref.matchColumns
+        .map((mc) => normalizeMatchValue(c[mc.key], mc.type))
+        .join("|");
+      const id = String(c.id ?? "");
+      if (id && key.replace(/\|/g, "") !== "") {
+        // Last-write-wins is fine; duplicate-label warnings are surfaced in
+        // the wizard UI, and an unresolved row will still error cleanly.
+        map.set(key, id);
+      }
+    }
+
+    rows.forEach((r, i) => {
+      if (!r || typeof r !== "object") return;
+      const v = r[fkKey];
+      if (v === undefined || v === null || v === "") return;
+      const s = String(v);
+      if (UUID_RE.test(s)) return; // Already an ID, leave alone.
+      const parts: string[] = [normalizeMatchValue(s, primary.type)];
+      for (let m = 1; m < ref.matchColumns.length; m++) {
+        const mc = ref.matchColumns[m];
+        const extra = matchExtras[i]?.[fkKey]?.[mc.key];
+        parts.push(normalizeMatchValue(extra, mc.type));
+      }
+      const key = parts.join("|");
+      const resolved = map.get(key);
+      if (resolved) {
+        r[fkKey] = resolved;
+      } else {
+        const labelParts = ref.matchColumns.map((mc, idx) => {
+          const raw = idx === 0 ? s : matchExtras[i]?.[fkKey]?.[mc.key];
+          return raw === undefined || raw === null || raw === "" ? "(blank)" : String(raw);
+        });
+        errors.set(i, `${fkKey}: no ${ref.matchColumns.map((mc) => mc.key).join("+")} match for "${labelParts.join(" / ")}"`);
+      }
+    });
+  }
+  return errors;
+}
+
 // ---- Routes ----------------------------------------------------------------
 
 router.get("/admin/tables", requireAdmin, (_req, res): void => {
@@ -495,13 +658,34 @@ router.post("/admin/import/:table", requireAdmin, async (req, res): Promise<void
     res.status(400).json({ error: "Bad Request", message: "Body must include 'rows' array" });
     return;
   }
+  const resolveHints = (req.body?.resolve && typeof req.body.resolve === "object"
+    ? req.body.resolve
+    : {}) as Record<string, { by?: "id" | "label" }>;
+  const matchExtras = Array.isArray(req.body?.matchExtras) ? req.body.matchExtras : [];
+  const dryRun = req.body?.dryRun === true;
 
   type RowResult = { index: number; ok: boolean; id?: string; error?: string };
   const results: RowResult[] = [];
 
+  // Authoritative server-side FK resolution. The browser may have pre-resolved
+  // some values to UUIDs; we only re-resolve rows that still hold raw labels,
+  // which makes this idempotent with the wizard's preview behavior.
+  let fkErrors = new Map<number, string>();
+  try {
+    fkErrors = await resolveImportFks(tableName, rows, resolveHints, matchExtras);
+  } catch (err: any) {
+    req.log.warn({ err }, "FK resolution failed");
+    res.status(400).json({ error: "FK resolution failed", message: err?.message ?? "FK resolution failed" });
+    return;
+  }
+
   // Validate everything first so we don't insert partial data
   const validated: { index: number; values: Record<string, unknown> }[] = [];
   for (let i = 0; i < rows.length; i++) {
+    if (fkErrors.has(i)) {
+      results.push({ index: i, ok: false, error: fkErrors.get(i)! });
+      continue;
+    }
     const r = rows[i];
     const parsed = cfg.insertSchema.safeParse(r);
     if (!parsed.success) {
@@ -515,6 +699,23 @@ router.post("/admin/import/:table", requireAdmin, async (req, res): Promise<void
     let values = cfg.coerceWrite(parsed.data as Record<string, unknown>);
     if (cfg.beforeInsert) values = await cfg.beforeInsert(values);
     validated.push({ index: i, values });
+  }
+
+  if (dryRun) {
+    // Surface what WOULD be inserted without touching the DB. Used by the
+    // wizard's preview step so admins see authoritative resolution failures.
+    for (const v of validated) {
+      results.push({ index: v.index, ok: true });
+    }
+    results.sort((a, b) => a.index - b.index);
+    res.json({
+      inserted: 0,
+      failed: results.filter((r) => !r.ok).length,
+      total: rows.length,
+      results,
+      dryRun: true,
+    });
+    return;
   }
 
   // Insert valid rows in a transaction; on per-row failure record the error and continue.

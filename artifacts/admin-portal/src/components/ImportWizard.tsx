@@ -231,7 +231,7 @@ export function ImportWizard({
     });
   }
 
-  function goPreview() {
+  async function goPreview() {
     const built = buildPayloadRows();
     const issues: { index: number; message: string }[] = [];
     built.forEach((row, idx) => {
@@ -239,17 +239,71 @@ export function ImportWizard({
         if (f.required && (row[f.key] === undefined || row[f.key] === null || row[f.key] === "")) {
           issues.push({ index: idx, message: `Row ${idx + 1}: missing required "${f.label}"` });
         }
-        if (f.type === "fk" && resolveBy[f.key] === "label") {
-          const v = row[f.key];
-          if (v && !UUID_RE.test(String(v))) {
-            issues.push({ index: idx, message: `Row ${idx + 1}: "${f.label}" value "${v}" doesn't match any existing ${f.fkTable}` });
-          }
-        }
       }
     });
     setPreviewRows(built);
-    setPreviewIssues(issues);
-    setStep("preview");
+    setBusy(true);
+    setError(null);
+    try {
+      // Authoritative dry-run: ask the server to resolve FKs against the live
+      // DB and validate every row, without actually inserting. This catches
+      // unresolved label lookups even when the browser's cached FK rows are
+      // stale or the user toggled label mode on a field we don't pre-resolve
+      // client-side for.
+      const dry = await api<ImportResult & { dryRun?: boolean }>(
+        `/admin/import/${descriptor.name}`,
+        { method: "POST", body: { ...buildImportBody(built), dryRun: true } },
+      );
+      const serverIssues = dry.results
+        .filter((r) => !r.ok)
+        .map((r) => ({ index: r.index, message: `Row ${r.index + 1}: ${r.error ?? "validation failed"}` }));
+      setPreviewIssues([...issues, ...serverIssues]);
+      setStep("preview");
+    } catch (e) {
+      // If the dry-run call itself fails, fall back to local issues only and
+      // let the user see the preview anyway.
+      setPreviewIssues(issues);
+      setError((e as Error).message);
+      setStep("preview");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  /** Build the per-row matchExtras payload for any FK in label mode with composite keys. */
+  function buildMatchExtras(): Array<Record<string, Record<string, unknown>>> {
+    if (!sheet) return [];
+    return sheet.rows.map((r) => {
+      const out: Record<string, Record<string, unknown>> = {};
+      for (const f of fkFields) {
+        if (resolveBy[f.key] !== "label") continue;
+        const target = f.fkTable ? getTable(f.fkTable) : undefined;
+        if (!target) continue;
+        const matchFields = getImportMatchByLabelFields(target);
+        if (matchFields.length <= 1) continue;
+        const extras: Record<string, unknown> = {};
+        for (let i = 1; i < matchFields.length; i++) {
+          const mf = matchFields[i];
+          const header = extraMatch[f.key]?.[mf];
+          if (header) extras[mf] = r[header];
+        }
+        if (Object.keys(extras).length > 0) out[f.key] = extras;
+      }
+      return out;
+    });
+  }
+
+  /** The body sent to /admin/import — same shape for dry-run preview and real import. */
+  function buildImportBody(rowsToSend: Record<string, unknown>[]) {
+    const resolve: Record<string, { by: "id" | "label" }> = {};
+    for (const f of fkFields) {
+      resolve[f.key] = { by: resolveBy[f.key] ?? "id" };
+    }
+    return {
+      rows: rowsToSend,
+      resolve,
+      matchExtras: buildMatchExtras(),
+    };
   }
 
   async function runImport() {
@@ -259,7 +313,7 @@ export function ImportWizard({
     try {
       const res = await api<ImportResult>(`/admin/import/${descriptor.name}`, {
         method: "POST",
-        body: { rows: previewRows },
+        body: buildImportBody(previewRows),
       });
       setResult(res);
       invalidateFk(descriptor.name);
