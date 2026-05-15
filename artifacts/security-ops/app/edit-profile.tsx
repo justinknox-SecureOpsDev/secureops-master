@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from "react";
 import {
   View, Text, TextInput, TouchableOpacity, StyleSheet,
-  ActivityIndicator, ScrollView, Platform, Alert,
+  ActivityIndicator, ScrollView, Platform, Alert, Linking,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { Feather } from "@expo/vector-icons";
@@ -14,6 +14,18 @@ import {
   useUpdateMyEmployeeProfile,
 } from "@workspace/api-client-react";
 import { pickAndUploadImage } from "@/utils/upload";
+import { apiRequest } from "@/utils/api";
+
+async function openOwnedDoc(path: string) {
+  try {
+    const { url } = await apiRequest(`/me/storage/sign?path=${encodeURIComponent(path)}`);
+    const can = await Linking.canOpenURL(url);
+    if (can) await Linking.openURL(url);
+    else Alert.alert("Cannot open file", "No app on this device can open the file.");
+  } catch (e) {
+    Alert.alert("Could not open file", (e as Error).message ?? "Unknown error");
+  }
+}
 
 type Form = {
   phone: string;
@@ -34,7 +46,7 @@ type Form = {
   photoKey: string | null;
   licenseDocKey: string | null;
   passportDocKey: string | null;
-  /** Append-only list. We never remove existing certs from this screen. */
+  /** Officers can append new certs and remove existing ones; staged locally until Save. */
   trainingCertificateKeys: string[] | null;
 };
 
@@ -93,6 +105,31 @@ export default function EditProfileScreen() {
   }
   function appendCert(v: string) {
     setForm((f) => ({ ...f, trainingCertificateKeys: [...(f.trainingCertificateKeys ?? []), v] }));
+  }
+  function removeCert(idx: number) {
+    setForm((f) => {
+      const next = [...(f.trainingCertificateKeys ?? [])];
+      next.splice(idx, 1);
+      return { ...f, trainingCertificateKeys: next };
+    });
+  }
+  function confirmRemoveCert(idx: number) {
+    const doRemove = () => removeCert(idx);
+    if (Platform.OS === "web") {
+      // eslint-disable-next-line no-alert
+      if (typeof window !== "undefined" && window.confirm("Remove this training certificate? You can re-upload it any time.")) {
+        doRemove();
+      }
+      return;
+    }
+    Alert.alert(
+      "Remove certificate?",
+      "This will remove the certificate from your profile when you save. You can upload a fresh copy any time.",
+      [
+        { text: "Cancel", style: "cancel" },
+        { text: "Remove", style: "destructive", onPress: doRemove },
+      ],
+    );
   }
 
   const [uploading, setUploading] = useState<string | null>(null);
@@ -232,6 +269,7 @@ export default function EditProfileScreen() {
           <DocRow
             label="Profile photo"
             current={form.photoKey}
+            originalKey={profile?.photoKey ?? null}
             uploadingSource={uploading?.startsWith("photoKey:") ? (uploading.split(":")[1] as "library" | "camera") : null}
             onUpload={(source) => handleUpload("photoKey", source)}
             onClear={() => setDoc("photoKey", null)}
@@ -239,6 +277,7 @@ export default function EditProfileScreen() {
           <DocRow
             label="TX security license (photo of card)"
             current={form.licenseDocKey}
+            originalKey={profile?.licenseDocKey ?? null}
             uploadingSource={uploading?.startsWith("licenseDocKey:") ? (uploading.split(":")[1] as "library" | "camera") : null}
             onUpload={(source) => handleUpload("licenseDocKey", source)}
             onClear={() => setDoc("licenseDocKey", null)}
@@ -246,14 +285,44 @@ export default function EditProfileScreen() {
           <DocRow
             label="Passport / driver's license"
             current={form.passportDocKey}
+            originalKey={profile?.passportDocKey ?? null}
             uploadingSource={uploading?.startsWith("passportDocKey:") ? (uploading.split(":")[1] as "library" | "camera") : null}
             onUpload={(source) => handleUpload("passportDocKey", source)}
             onClear={() => setDoc("passportDocKey", null)}
           />
-          <View style={{ gap: 4 }}>
+          <View style={{ gap: 6 }}>
             <Text style={[styles.label, { color: colors.mutedForeground }]}>
               Training certificates ({(form.trainingCertificateKeys ?? []).length} on file)
             </Text>
+            {(form.trainingCertificateKeys ?? []).length > 0 && (
+              <View style={{ gap: 6 }}>
+                {(form.trainingCertificateKeys ?? []).map((key, i) => {
+                  const origCerts = (profile?.trainingCertificateKeys ?? []) as string[];
+                  const isExisting = origCerts.includes(key);
+                  return (
+                    <View
+                      key={key + i}
+                      style={[styles.certRow, { borderColor: colors.border, backgroundColor: colors.secondary }]}
+                    >
+                      <Feather name="award" size={14} color={colors.accent} />
+                      <Text style={{ flex: 1, color: colors.foreground, fontSize: 13 }} numberOfLines={1}>
+                        Certificate {i + 1}{isExisting ? "" : " · just added"}
+                      </Text>
+                      {isExisting && (
+                        <TouchableOpacity onPress={() => openOwnedDoc(key)} style={styles.certAction}>
+                          <Feather name="eye" size={13} color={colors.primary} />
+                          <Text style={{ color: colors.primary, fontSize: 12, fontWeight: "600" }}>View</Text>
+                        </TouchableOpacity>
+                      )}
+                      <TouchableOpacity onPress={() => confirmRemoveCert(i)} style={styles.certAction}>
+                        <Feather name="trash-2" size={13} color={colors.destructive} />
+                        <Text style={{ color: colors.destructive, fontSize: 12, fontWeight: "600" }}>Remove</Text>
+                      </TouchableOpacity>
+                    </View>
+                  );
+                })}
+              </View>
+            )}
             <View style={{ flexDirection: "row", gap: 8 }}>
               <TouchableOpacity
                 onPress={() => handleUpload("trainingCertificateKeys", "camera")}
@@ -281,7 +350,7 @@ export default function EditProfileScreen() {
               </TouchableOpacity>
             </View>
             <Text style={[styles.note, { color: colors.mutedForeground }]}>
-              Existing certificates remain on file. Contact admin to remove one.
+              Removed certificates are deleted from your profile when you save.
             </Text>
           </View>
         </Section>
@@ -342,10 +411,11 @@ function Input(props: React.ComponentProps<typeof TextInput>) {
   );
 }
 function DocRow({
-  label, current, uploadingSource, onUpload, onClear,
+  label, current, originalKey, uploadingSource, onUpload, onClear,
 }: {
   label: string;
   current: string | null;
+  originalKey: string | null;
   uploadingSource: "library" | "camera" | null;
   onUpload: (source: "library" | "camera") => void;
   onClear: () => void;
@@ -353,6 +423,7 @@ function DocRow({
   const colors = useColors();
   const hasFile = !!current;
   const busy = uploadingSource !== null;
+  const viewableKey = current && current === originalKey ? current : null;
   return (
     <View style={{ gap: 4 }}>
       <Text style={[styles.label, { color: colors.mutedForeground }]}>{label}</Text>
@@ -390,9 +461,17 @@ function DocRow({
         )}
       </View>
       {hasFile && (
-        <Text style={[styles.note, { color: colors.mutedForeground }]}>
-          <Feather name="check" size={11} color={colors.accent} /> File on record
-        </Text>
+        <View style={{ flexDirection: "row", alignItems: "center", gap: 12, marginTop: 2 }}>
+          <Text style={[styles.note, { color: colors.mutedForeground }]}>
+            <Feather name="check" size={11} color={colors.accent} /> {viewableKey ? "File on record" : "New file selected (save to upload)"}
+          </Text>
+          {viewableKey && (
+            <TouchableOpacity onPress={() => openOwnedDoc(viewableKey)} style={{ flexDirection: "row", alignItems: "center", gap: 4 }}>
+              <Feather name="eye" size={12} color={colors.primary} />
+              <Text style={{ color: colors.primary, fontSize: 12, fontWeight: "600" }}>View current file</Text>
+            </TouchableOpacity>
+          )}
+        </View>
       )}
     </View>
   );
@@ -419,6 +498,8 @@ const styles = StyleSheet.create({
   label: { fontSize: 11, letterSpacing: 1, fontWeight: "700", textTransform: "uppercase" },
   note: { fontSize: 11, fontStyle: "italic" },
   docBtn: { flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 6, paddingHorizontal: 12, paddingVertical: 10, borderRadius: 8, borderWidth: 1 },
+  certRow: { flexDirection: "row", alignItems: "center", gap: 8, paddingHorizontal: 10, paddingVertical: 8, borderRadius: 8, borderWidth: 1 },
+  certAction: { flexDirection: "row", alignItems: "center", gap: 4, paddingHorizontal: 6, paddingVertical: 4 },
   errorBox: { flexDirection: "row", alignItems: "center", gap: 8, padding: 12, borderRadius: 8, borderWidth: 1 },
   button: { height: 50, borderRadius: 8, alignItems: "center", justifyContent: "center" },
   buttonText: { fontSize: 15, fontWeight: "700", letterSpacing: 1 },
