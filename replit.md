@@ -9,7 +9,7 @@ A full-stack mobile operations platform for Williams Council Security Group (WCS
 - `pnpm run build` — typecheck + build all packages
 - `pnpm --filter @workspace/api-spec run codegen` — regenerate API hooks and Zod schemas from the OpenAPI spec
 - `pnpm --filter @workspace/db run push` — push DB schema changes (dev only)
-- Required env: `DATABASE_URL` — Postgres connection string, `SESSION_SECRET` — JWT signing key
+- Required env: `DATABASE_URL` — Postgres connection string, `SESSION_SECRET` — JWT signing key (≥16 chars; production hard-fails at boot if missing/short)
 
 ## Stack
 

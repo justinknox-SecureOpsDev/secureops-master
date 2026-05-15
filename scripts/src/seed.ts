@@ -2,6 +2,15 @@ import bcrypt from "bcryptjs";
 import { db, usersTable, employeesTable, shiftsTable, shiftAssignmentsTable, licensesTable, incidentsTable } from "@workspace/db";
 
 async function seed() {
+  // Safety guard: this script seeds well-known credentials (admin@secureops.com /
+  // Admin123!, etc) and is only intended for local development. Refuse to run
+  // against a production deployment unless the operator explicitly opts in.
+  if (process.env.NODE_ENV === "production" && process.env.ALLOW_PROD_SEED !== "true") {
+    throw new Error(
+      "Refusing to seed in production: would create well-known credentials. " +
+        "Set ALLOW_PROD_SEED=true only if you really mean it.",
+    );
+  }
   const passwordHash = await bcrypt.hash("Admin123!", 10);
   const empHash = await bcrypt.hash("Employee123!", 10);
 

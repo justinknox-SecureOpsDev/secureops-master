@@ -40,7 +40,7 @@ export function LoginPage() {
             <Input
               id="email" type="email" autoComplete="email" required
               value={email} onChange={(e) => setEmail(e.target.value)}
-              placeholder="admin@secureops.com"
+              placeholder="you@example.com"
             />
           </div>
           <div>

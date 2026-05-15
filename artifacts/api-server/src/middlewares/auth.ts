@@ -1,7 +1,27 @@
 import { Request, Response, NextFunction } from "express";
 import jwt from "jsonwebtoken";
 
-const JWT_SECRET = process.env.SESSION_SECRET || "fallback-secret-change-me";
+// SESSION_SECRET is required to sign JWTs. In production we hard-fail at
+// import time so a misconfigured deploy never silently issues tokens with a
+// well-known secret. In dev we fall back so local boot stays painless, but
+// log a loud warning.
+function resolveJwtSecret(): string {
+  const secret = process.env.SESSION_SECRET;
+  if (secret && secret.length >= 16) return secret;
+  if (process.env.NODE_ENV === "production") {
+    throw new Error(
+      "SESSION_SECRET environment variable is required in production " +
+        "(must be at least 16 characters). Refusing to start with a fallback secret.",
+    );
+  }
+  // eslint-disable-next-line no-console
+  console.warn(
+    "[auth] SESSION_SECRET not set — using insecure dev fallback. Set SESSION_SECRET before deploying.",
+  );
+  return "fallback-secret-change-me";
+}
+
+const JWT_SECRET = resolveJwtSecret();
 
 export interface JwtPayload {
   userId: string;
