@@ -305,6 +305,18 @@ const SITE_COL = {
 };
 
 async function syncSites(items: MondayItem[], result: SyncResult, dryRun: boolean): Promise<void> {
+  // Lazy-create an "Unassigned" client for sites whose Monday row has no Client linked.
+  let unassignedId: string | null = null;
+  const ensureUnassigned = async (): Promise<string> => {
+    if (unassignedId) return unassignedId;
+    const [existing] = await db.select().from(clientsTable).where(eq(sql`lower(${clientsTable.name})`, "unassigned")).limit(1);
+    if (existing) { unassignedId = existing.id; return unassignedId; }
+    if (dryRun) { unassignedId = "00000000-0000-0000-0000-000000000000"; return unassignedId; }
+    const [created] = await db.insert(clientsTable).values({ name: "Unassigned", paymentTermsDays: 30, notes: "Auto-created by Monday Sites sync for sites with no client link. Reassign manually." }).returning();
+    unassignedId = created!.id;
+    return unassignedId;
+  };
+
   for (const item of items) {
     try {
       const name = item.name.trim();
@@ -314,16 +326,15 @@ async function syncSites(items: MondayItem[], result: SyncResult, dryRun: boolea
         continue;
       }
       const clientName = getCol(item, SITE_COL.client)?.split(",")[0]?.trim() || null;
-      if (!clientName) {
-        result.skippedUnmatched++;
-        result.decisions.push({ mondayId: item.id, mondayName: item.name, matchKey: name, action: "skip-unmatched", reason: "No Client linked on Monday row" });
-        continue;
+      let client: { id: string } | undefined;
+      let clientLabel = clientName;
+      if (clientName) {
+        [client] = await db.select().from(clientsTable).where(eq(sql`lower(${clientsTable.name})`, clientName.toLowerCase())).limit(1);
       }
-      const [client] = await db.select().from(clientsTable).where(eq(sql`lower(${clientsTable.name})`, clientName.toLowerCase())).limit(1);
       if (!client) {
-        result.skippedUnmatched++;
-        result.decisions.push({ mondayId: item.id, mondayName: item.name, matchKey: name, action: "skip-unmatched", reason: `Client "${clientName}" not in WCSG. Sync Clients first.` });
-        continue;
+        const id = await ensureUnassigned();
+        client = { id };
+        clientLabel = clientName ? `Unassigned (Monday client "${clientName}" not found)` : "Unassigned (no Monday client linked)";
       }
       const incoming: Record<string, unknown> = {
         name,
@@ -338,7 +349,7 @@ async function syncSites(items: MondayItem[], result: SyncResult, dryRun: boolea
         const changes: Record<string, { from: unknown; to: unknown }> = {};
         for (const [k, v] of Object.entries(incoming)) if (v !== null && v !== undefined && v !== "") changes[k] = { from: null, to: v };
         result.willCreate++;
-        result.decisions.push({ mondayId: item.id, mondayName: item.name, matchKey: `${clientName} / ${name}`, action: "create", changes });
+        result.decisions.push({ mondayId: item.id, mondayName: item.name, matchKey: `${clientLabel} / ${name}`, action: "create", changes });
         if (!dryRun) {
           await db.insert(sitesTable).values({
             name, clientId: client.id,
@@ -351,7 +362,7 @@ async function syncSites(items: MondayItem[], result: SyncResult, dryRun: boolea
         delete changes.clientId;
         if (!Object.keys(changes).length) continue;
         result.willUpdate++;
-        result.decisions.push({ mondayId: item.id, mondayName: item.name, matchKey: `${clientName} / ${name}`, action: "update", changes });
+        result.decisions.push({ mondayId: item.id, mondayName: item.name, matchKey: `${clientLabel} / ${name}`, action: "update", changes });
         if (!dryRun) {
           await db.update(sitesTable).set(Object.fromEntries(Object.entries(changes).map(([k, v]) => [k, v.to]))).where(eq(sitesTable.id, existing.id));
         }
