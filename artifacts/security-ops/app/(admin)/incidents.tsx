@@ -1,9 +1,10 @@
 import React, { useState } from "react";
-import { View, Text, StyleSheet, FlatList, TouchableOpacity, ActivityIndicator, Alert, Platform, TextInput, Modal, ScrollView } from "react-native";
+import { View, Text, StyleSheet, FlatList, TouchableOpacity, ActivityIndicator, Platform, TextInput, Modal, ScrollView, Image } from "react-native";
 import { useColors } from "@/hooks/useColors";
 import { useGetIncidents, getGetIncidentsQueryKey, useUpdateIncident } from "@workspace/api-client-react";
 import { Feather } from "@expo/vector-icons";
 import { useQueryClient } from "@tanstack/react-query";
+import { AttachmentImage } from "@/components/AttachmentImage";
 
 const STATUS_FILTERS = ["open", "under_review", "resolved", "closed"] as const;
 const SEVERITIES = ["low", "medium", "high", "critical"] as const;
@@ -36,6 +37,7 @@ export default function AdminIncidentsScreen() {
   const [filter, setFilter] = useState<string>("open");
   const [selectedIncident, setSelectedIncident] = useState<any>(null);
   const [resolution, setResolution] = useState("");
+  const [previewUri, setPreviewUri] = useState<string | null>(null);
   const topPad = Platform.OS === "web" ? 67 : 0;
 
   const incParams: any = { status: filter };
@@ -123,6 +125,14 @@ export default function AdminIncidentsScreen() {
                   <Text style={[styles.metaText, { color: colors.mutedForeground }]}>{(item as any).locationDescription}</Text>
                 </View>
               )}
+              {Array.isArray((item as any).attachments) && (item as any).attachments.length > 0 && (
+                <View style={styles.attachmentTag}>
+                  <Feather name="paperclip" size={12} color={colors.mutedForeground} />
+                  <Text style={[styles.metaText, { color: colors.mutedForeground }]}>
+                    {(item as any).attachments.length} photo{(item as any).attachments.length === 1 ? "" : "s"}
+                  </Text>
+                </View>
+              )}
             </TouchableOpacity>
           )}
         />
@@ -139,8 +149,18 @@ export default function AdminIncidentsScreen() {
                 </TouchableOpacity>
               </View>
 
-              <ScrollView style={{ maxHeight: 300 }}>
+              <ScrollView style={{ maxHeight: 340 }}>
                 <Text style={[styles.descFull, { color: colors.foreground }]}>{selectedIncident.description}</Text>
+                {Array.isArray(selectedIncident.attachments) && selectedIncident.attachments.length > 0 && (
+                  <View style={[styles.sectionBox, { borderColor: colors.border }]}>
+                    <Text style={[styles.boxLabel, { color: colors.primary }]}>PHOTOS ({selectedIncident.attachments.length})</Text>
+                    <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.thumbRow}>
+                      {(selectedIncident.attachments as string[]).map((p) => (
+                        <AttachmentImage key={p} path={p} size={84} scope="admin" onPress={(u) => setPreviewUri(u)} />
+                      ))}
+                    </ScrollView>
+                  </View>
+                )}
                 {selectedIncident.actionsTaken && (
                   <View style={[styles.sectionBox, { borderColor: colors.border }]}>
                     <Text style={[styles.boxLabel, { color: colors.accent }]}>ACTIONS TAKEN</Text>
@@ -186,6 +206,15 @@ export default function AdminIncidentsScreen() {
           </View>
         </Modal>
       )}
+
+      {previewUri && (
+        <Modal transparent animationType="fade" onRequestClose={() => setPreviewUri(null)}>
+          <TouchableOpacity style={styles.previewOverlay} activeOpacity={1} onPress={() => setPreviewUri(null)}>
+            <Image source={{ uri: previewUri }} style={styles.previewImg} resizeMode="contain" />
+            <View style={styles.previewClose}><Feather name="x" size={28} color="#fff" /></View>
+          </TouchableOpacity>
+        </Modal>
+      )}
     </View>
   );
 }
@@ -222,4 +251,9 @@ const styles = StyleSheet.create({
   modalActions: { flexDirection: "row", gap: 10 },
   modalBtn: { flex: 1, paddingVertical: 12, borderRadius: 8, borderWidth: 1, alignItems: "center" },
   modalBtnText: { fontWeight: "700", fontSize: 14 },
+  attachmentTag: { flexDirection: "row", alignItems: "center", gap: 5, marginTop: 2 },
+  thumbRow: { gap: 8, paddingVertical: 4 },
+  previewOverlay: { flex: 1, backgroundColor: "#000000ee", alignItems: "center", justifyContent: "center" },
+  previewImg: { width: "100%", height: "85%" },
+  previewClose: { position: "absolute", top: 40, right: 20, padding: 8 },
 });

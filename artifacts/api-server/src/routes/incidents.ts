@@ -32,6 +32,7 @@ router.get("/incidents", requireAuth, async (req, res): Promise<void> => {
       occurredAt: incidentsTable.occurredAt,
       resolvedAt: incidentsTable.resolvedAt,
       adminNotes: incidentsTable.adminNotes,
+      attachments: incidentsTable.attachments,
       createdAt: incidentsTable.createdAt,
       employeeName: sql<string>`${usersTable.firstName} || ' ' || ${usersTable.lastName}`,
       shiftTitle: shiftsTable.title,
@@ -45,11 +46,19 @@ router.get("/incidents", requireAuth, async (req, res): Promise<void> => {
 });
 
 router.post("/incidents", requireAuth, async (req, res): Promise<void> => {
-  const { shiftId, title, description, severity, locationDescription, lat, lng, occurredAt } = req.body;
+  const { shiftId, title, description, severity, locationDescription, lat, lng, occurredAt, attachments } = req.body;
   if (!title || !description || !severity || !occurredAt) {
     res.status(400).json({ error: "Bad Request", message: "title, description, severity, occurredAt required" });
     return;
   }
+  // Only accept attachment paths that were uploaded via this user's bound
+  // upload prefix (`/objects/uploads/u/<userId>/...`). The presigned-URL
+  // endpoint stamps the authenticated user's id into the path, so this
+  // prevents an officer from referencing object paths they don't own.
+  const ownedPrefix = `/objects/uploads/u/${req.user!.userId}/`;
+  const cleanAttachments: string[] = Array.isArray(attachments)
+    ? attachments.filter((p): p is string => typeof p === "string" && p.startsWith(ownedPrefix))
+    : [];
   const [incident] = await db.insert(incidentsTable).values({
     shiftId: shiftId || null,
     employeeId: req.user!.userId,
@@ -61,6 +70,7 @@ router.post("/incidents", requireAuth, async (req, res): Promise<void> => {
     lat: lat ? String(lat) : null,
     lng: lng ? String(lng) : null,
     occurredAt: new Date(occurredAt),
+    attachments: cleanAttachments,
   }).returning();
 
   const [user] = await db.select().from(usersTable).where(eq(usersTable.id, req.user!.userId));
@@ -88,6 +98,7 @@ router.get("/incidents/:id", requireAuth, async (req, res): Promise<void> => {
       occurredAt: incidentsTable.occurredAt,
       resolvedAt: incidentsTable.resolvedAt,
       adminNotes: incidentsTable.adminNotes,
+      attachments: incidentsTable.attachments,
       createdAt: incidentsTable.createdAt,
       employeeName: sql<string>`${usersTable.firstName} || ' ' || ${usersTable.lastName}`,
       shiftTitle: shiftsTable.title,

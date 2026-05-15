@@ -1407,6 +1407,12 @@ export const GetIncidentsResponseItem = zod.object({
   occurredAt: zod.coerce.date(),
   resolvedAt: zod.coerce.date().optional(),
   adminNotes: zod.string().optional(),
+  attachments: zod
+    .array(zod.string())
+    .optional()
+    .describe(
+      "Object storage paths (e.g. `\/objects\/<uuid>`) for photos attached to this incident.",
+    ),
   createdAt: zod.coerce.date(),
 });
 export const GetIncidentsResponse = zod.array(GetIncidentsResponseItem);
@@ -1423,6 +1429,12 @@ export const CreateIncidentBody = zod.object({
   lat: zod.number().optional(),
   lng: zod.number().optional(),
   occurredAt: zod.coerce.date(),
+  attachments: zod
+    .array(zod.string())
+    .optional()
+    .describe(
+      "Object storage paths (e.g. `\/objects\/<uuid>`) for photos uploaded ahead of submission.",
+    ),
 });
 
 /**
@@ -1448,6 +1460,12 @@ export const GetIncidentResponse = zod.object({
   occurredAt: zod.coerce.date(),
   resolvedAt: zod.coerce.date().optional(),
   adminNotes: zod.string().optional(),
+  attachments: zod
+    .array(zod.string())
+    .optional()
+    .describe(
+      "Object storage paths (e.g. `\/objects\/<uuid>`) for photos attached to this incident.",
+    ),
   createdAt: zod.coerce.date(),
 });
 
@@ -1480,6 +1498,12 @@ export const UpdateIncidentResponse = zod.object({
   occurredAt: zod.coerce.date(),
   resolvedAt: zod.coerce.date().optional(),
   adminNotes: zod.string().optional(),
+  attachments: zod
+    .array(zod.string())
+    .optional()
+    .describe(
+      "Object storage paths (e.g. `\/objects\/<uuid>`) for photos attached to this incident.",
+    ),
   createdAt: zod.coerce.date(),
 });
 
@@ -1590,6 +1614,12 @@ export const GetAdminDashboardSummaryResponse = zod.object({
       occurredAt: zod.coerce.date(),
       resolvedAt: zod.coerce.date().optional(),
       adminNotes: zod.string().optional(),
+      attachments: zod
+        .array(zod.string())
+        .optional()
+        .describe(
+          "Object storage paths (e.g. `\/objects\/<uuid>`) for photos attached to this incident.",
+        ),
       createdAt: zod.coerce.date(),
     }),
   ),

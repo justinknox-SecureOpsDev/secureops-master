@@ -38,7 +38,7 @@ A full-stack mobile operations platform for Williams Council Security Group (WCS
 - `artifacts/admin-portal/src/pages/{Apply,Onboard,Applications,Onboarding}.tsx` — HR public + admin pages
 - `artifacts/admin-portal/src/lib/upload.ts` — client helper: presigned-URL upload via `/storage/uploads/request-url`
 - `artifacts/api-server/src/routes/applications.ts` — public application submit, admin review/approve, public onboarding GET/POST, admin onboarding list/detail/resend
-- `artifacts/api-server/src/routes/storage.ts` + `src/lib/{objectStorage,objectAcl}.ts` — App Storage upload URL + file serving
+- `artifacts/api-server/src/routes/storage.ts` + `src/lib/{objectStorage,objectAcl}.ts` — App Storage upload URL + file serving (uploads bind path to caller's userId via `/objects/uploads/u/<userId>/<uuid>` when authenticated; incident attachments + `/me/storage/sign` enforce that prefix so officers can only sign their own files)
 - `lib/db/src/schema/{applications,onboardingTokens,onboardingSubmissions}.ts` — HR pipeline tables
 - `artifacts/security-ops/` — Expo mobile app
 - `artifacts/security-ops/contexts/ChatContext.tsx` — WebSocket chat context
@@ -61,7 +61,7 @@ A full-stack mobile operations platform for Williams Council Security Group (WCS
 
 - **Client → Site hierarchy**: Clients have payment terms (Net X days). Each client has Sites (physical locations). Shifts are posted against a Site with per-shift `payRate` (officer) and `billRate` (client). Site replaces the old free-text `clientName`/`location`.
 - **Admin**: Manage clients (with payment terms) + sites; post shifts on sites with bill/pay rates + required licence level + headcount; approve time entries; generate weekly payroll per (employee × site × week) from approved hours; generate weekly invoices per (client × site × week) at billRate × approved hours, due date = invoice date + client.paymentTermsDays; mark payroll/invoices paid manually; review incidents; track licences; broadcast via team chat.
-- **Employee**: See highest current clearance on profile; browse "Available" shifts they qualify for; **one-tap Reserve** books the shift immediately (`POST /shifts/:id/claim` inserts an `accepted` assignment); officer can later Decline to release the slot; GPS clock in/out (entries start `pending` admin approval); report incidents; team chat.
+- **Employee**: See highest current clearance on profile; browse "Available" shifts they qualify for; **one-tap Reserve** books the shift immediately (`POST /shifts/:id/claim` inserts an `accepted` assignment); officer can later Decline to release the slot; GPS clock in/out (entries start `pending` admin approval); report incidents (with optional camera/library photo attachments uploaded to App Storage); team chat.
 - **Licence hierarchy**: L2 unarmed (lowest) → L3 armed (covers L2+L3) → L4/PPO (covers all). `maxLicenseLevel` = MAX(level) of unexpired licences.
 - **Atomic shift claim**: `POST /shifts/{id}/claim` runs inside a transaction that locks the shift row (`SELECT … FOR UPDATE`) and re-counts assignments before inserting, preventing races from overfilling. Creates an `accepted` assignment (one-tap Reserve = booked) and sends "✅ Shift Reserved" Expo push. Admin "+" (`POST /shifts/{id}/assignments`) likewise creates `accepted` directly.
 - **Currency**: USD ($) throughout admin payroll/invoice screens.

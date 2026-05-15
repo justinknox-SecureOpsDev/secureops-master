@@ -1,10 +1,13 @@
 import React, { useState } from "react";
-import { View, Text, StyleSheet, FlatList, TouchableOpacity, ActivityIndicator, Alert, Platform, Modal, TextInput } from "react-native";
+import { View, Text, StyleSheet, FlatList, TouchableOpacity, ActivityIndicator, Platform, Modal, TextInput, ScrollView, Image } from "react-native";
 import { useColors } from "@/hooks/useColors";
 import { useGetIncidents, getGetIncidentsQueryKey, useCreateIncident } from "@workspace/api-client-react";
 import { Feather } from "@expo/vector-icons";
 import { useQueryClient } from "@tanstack/react-query";
 import { KeyboardAwareScrollViewCompat } from "@/components/KeyboardAwareScrollViewCompat";
+import { pickAndUploadImage, type UploadedFile } from "@/utils/upload";
+import { confirmAction, notify } from "@/utils/confirm";
+import { AttachmentImage } from "@/components/AttachmentImage";
 
 const SEVERITY_LEVELS = ["low", "medium", "high", "critical"] as const;
 const SEVERITY_COLORS: Record<string, string> = { low: "#22c55e", medium: "#f59e0b", high: "#f97316", critical: "#ef4444" };
@@ -17,6 +20,24 @@ export default function EmployeeIncidentsScreen() {
 
   const [form, setForm] = useState({ title: "", description: "", severity: "medium" as string, location: "", actionsTaken: "" });
   const set = (k: string) => (v: string) => setForm((f) => ({ ...f, [k]: v }));
+  const [photos, setPhotos] = useState<UploadedFile[]>([]);
+  const [pickingSource, setPickingSource] = useState<"camera" | "library" | null>(null);
+  const [previewUri, setPreviewUri] = useState<string | null>(null);
+
+  const addPhoto = async (source: "camera" | "library") => {
+    if (pickingSource) return;
+    setPickingSource(source);
+    try {
+      const file = await pickAndUploadImage({ source });
+      if (file) setPhotos((p) => [...p, file]);
+    } catch (e: any) {
+      notify("Photo upload failed", e?.message || "Please try again.");
+    } finally {
+      setPickingSource(null);
+    }
+  };
+
+  const removePhoto = (idx: number) => setPhotos((p) => p.filter((_, i) => i !== idx));
 
   const { data: incidents, isLoading, error, refetch } = useGetIncidents(
     {},
@@ -25,9 +46,15 @@ export default function EmployeeIncidentsScreen() {
 
   const createMutation = useCreateIncident();
 
+  const closeReport = () => {
+    setShowReport(false);
+    setForm({ title: "", description: "", severity: "medium", location: "", actionsTaken: "" });
+    setPhotos([]);
+  };
+
   const handleReport = async () => {
     if (!form.title || !form.description) {
-      Alert.alert("Missing Fields", "Title and description are required.");
+      notify("Missing Fields", "Title and description are required.");
       return;
     }
     try {
@@ -38,14 +65,14 @@ export default function EmployeeIncidentsScreen() {
           locationDescription: form.location || undefined,
           actionsTaken: form.actionsTaken || undefined,
           occurredAt: new Date().toISOString(),
+          attachments: photos.map((p) => p.objectPath),
         } as any
       });
       queryClient.invalidateQueries({ queryKey: getGetIncidentsQueryKey({}) });
-      setShowReport(false);
-      setForm({ title: "", description: "", severity: "medium", location: "", actionsTaken: "" });
-      Alert.alert("Reported", "Your incident report has been submitted.");
+      closeReport();
+      notify("Reported", "Your incident report has been submitted.");
     } catch (e: any) {
-      Alert.alert("Error", e?.message || "Failed to submit report");
+      notify("Error", e?.message || "Failed to submit report");
     }
   };
 
@@ -111,6 +138,13 @@ export default function EmployeeIncidentsScreen() {
                   <Feather name="calendar" size={12} color={colors.mutedForeground} />
                   <Text style={[styles.metaText, { color: colors.mutedForeground }]}>{new Date(item.occurredAt).toLocaleString()}</Text>
                 </View>
+                {Array.isArray((item as any).attachments) && (item as any).attachments.length > 0 && (
+                  <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.thumbRow}>
+                    {((item as any).attachments as string[]).map((p) => (
+                      <AttachmentImage key={p} path={p} size={64} scope="me" onPress={(u) => setPreviewUri(u)} />
+                    ))}
+                  </ScrollView>
+                )}
                 {(item as any).adminNotes && (
                   <View style={[styles.resolutionBox, { backgroundColor: colors.primary + "15", borderColor: colors.primary + "30" }]}>
                     <Text style={[styles.resLabel, { color: colors.primary }]}>RESOLUTION</Text>
@@ -124,12 +158,12 @@ export default function EmployeeIncidentsScreen() {
       )}
 
       {showReport && (
-        <Modal transparent animationType="slide" onRequestClose={() => setShowReport(false)}>
+        <Modal transparent animationType="slide" onRequestClose={closeReport}>
           <View style={styles.modalOverlay}>
             <View style={[styles.modalCard, { backgroundColor: colors.card, borderColor: colors.border }]}>
               <View style={styles.modalHeader}>
                 <Text style={[styles.modalTitle, { color: colors.foreground }]}>Report Incident</Text>
-                <TouchableOpacity onPress={() => setShowReport(false)}><Feather name="x" size={20} color={colors.mutedForeground} /></TouchableOpacity>
+                <TouchableOpacity onPress={closeReport}><Feather name="x" size={20} color={colors.mutedForeground} /></TouchableOpacity>
               </View>
               <KeyboardAwareScrollViewCompat style={{ maxHeight: 460 }}>
                 {[
@@ -184,6 +218,50 @@ export default function EmployeeIncidentsScreen() {
                   numberOfLines={3}
                   textAlignVertical="top"
                 />
+
+                <Text style={[styles.fieldLabel, { color: colors.mutedForeground, marginTop: 14 }]}>
+                  Photos {photos.length > 0 ? `(${photos.length})` : ""}
+                </Text>
+                <View style={styles.photoBtnRow}>
+                  <TouchableOpacity
+                    style={[styles.photoBtn, { borderColor: colors.primary, backgroundColor: colors.primary + "15", opacity: pickingSource ? 0.6 : 1 }]}
+                    onPress={() => addPhoto("camera")}
+                    disabled={!!pickingSource}
+                  >
+                    {pickingSource === "camera"
+                      ? <ActivityIndicator size="small" color={colors.primary} />
+                      : <Feather name="camera" size={16} color={colors.primary} />}
+                    <Text style={[styles.photoBtnText, { color: colors.primary }]}>Take Photo</Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity
+                    style={[styles.photoBtn, { borderColor: colors.primary, backgroundColor: colors.primary + "15", opacity: pickingSource ? 0.6 : 1 }]}
+                    onPress={() => addPhoto("library")}
+                    disabled={!!pickingSource}
+                  >
+                    {pickingSource === "library"
+                      ? <ActivityIndicator size="small" color={colors.primary} />
+                      : <Feather name="image" size={16} color={colors.primary} />}
+                    <Text style={[styles.photoBtnText, { color: colors.primary }]}>From Library</Text>
+                  </TouchableOpacity>
+                </View>
+                {photos.length > 0 && (
+                  <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.thumbRow}>
+                    {photos.map((p, idx) => (
+                      <View key={p.objectPath} style={styles.thumbWrap}>
+                        <Image source={{ uri: p.localUri }} style={styles.thumbImg} resizeMode="cover" />
+                        <TouchableOpacity
+                          style={[styles.removeBtn, { backgroundColor: colors.destructive }]}
+                          onPress={async () => {
+                            const ok = await confirmAction({ title: "Remove photo?", confirmText: "Remove", destructive: true });
+                            if (ok) removePhoto(idx);
+                          }}
+                        >
+                          <Feather name="x" size={12} color="#fff" />
+                        </TouchableOpacity>
+                      </View>
+                    ))}
+                  </ScrollView>
+                )}
               </KeyboardAwareScrollViewCompat>
               <TouchableOpacity
                 style={[styles.submitBtn, { backgroundColor: colors.destructive, opacity: createMutation.isPending ? 0.7 : 1 }]}
@@ -199,6 +277,17 @@ export default function EmployeeIncidentsScreen() {
               </TouchableOpacity>
             </View>
           </View>
+        </Modal>
+      )}
+
+      {previewUri && (
+        <Modal transparent animationType="fade" onRequestClose={() => setPreviewUri(null)}>
+          <TouchableOpacity style={styles.previewOverlay} activeOpacity={1} onPress={() => setPreviewUri(null)}>
+            <Image source={{ uri: previewUri }} style={styles.previewImg} resizeMode="contain" />
+            <View style={styles.previewClose}>
+              <Feather name="x" size={28} color="#fff" />
+            </View>
+          </TouchableOpacity>
         </Modal>
       )}
     </View>
@@ -241,4 +330,14 @@ const styles = StyleSheet.create({
   sevText: { fontSize: 11, fontWeight: "700" },
   submitBtn: { flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 8, paddingVertical: 14, borderRadius: 10 },
   submitText: { color: "#fff", fontWeight: "700", fontSize: 15 },
+  photoBtnRow: { flexDirection: "row", gap: 8, marginTop: 4 },
+  photoBtn: { flex: 1, flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 6, paddingVertical: 10, borderRadius: 8, borderWidth: 1 },
+  photoBtnText: { fontSize: 13, fontWeight: "600" },
+  thumbRow: { gap: 8, paddingTop: 10, paddingRight: 4 },
+  thumbWrap: { position: "relative" },
+  thumbImg: { width: 64, height: 64, borderRadius: 6 },
+  removeBtn: { position: "absolute", top: -6, right: -6, width: 20, height: 20, borderRadius: 10, alignItems: "center", justifyContent: "center" },
+  previewOverlay: { flex: 1, backgroundColor: "#000000ee", alignItems: "center", justifyContent: "center" },
+  previewImg: { width: "100%", height: "85%" },
+  previewClose: { position: "absolute", top: 40, right: 20, padding: 8 },
 });

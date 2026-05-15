@@ -104,7 +104,7 @@ export class ObjectStorageService {
     return new Response(webStream, { headers });
   }
 
-  async getObjectEntityUploadURL(): Promise<string> {
+  async getObjectEntityUploadURL(ownerKey?: string): Promise<string> {
     const privateObjectDir = this.getPrivateObjectDir();
     if (!privateObjectDir) {
       throw new Error(
@@ -114,7 +114,12 @@ export class ObjectStorageService {
     }
 
     const objectId = randomUUID();
-    const fullPath = `${privateObjectDir}/uploads/${objectId}`;
+    // Bind path to owner when known so server can verify ownership later
+    // without trusting client-supplied object paths (see incident attachments).
+    const safeOwner = ownerKey?.replace(/[^a-zA-Z0-9_-]/g, "");
+    const fullPath = safeOwner
+      ? `${privateObjectDir}/uploads/u/${safeOwner}/${objectId}`
+      : `${privateObjectDir}/uploads/${objectId}`;
 
     const { bucketName, objectName } = parseObjectPath(fullPath);
 

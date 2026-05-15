@@ -2560,6 +2560,11 @@ components:
           format: date-time
         adminNotes:
           type: string
+        attachments:
+          type: array
+          items:
+            type: string
+          description: Object storage paths (e.g. `/objects/<uuid>`) for photos attached to this incident.
         createdAt:
           type: string
           format: date-time
@@ -2594,6 +2599,11 @@ components:
         occurredAt:
           type: string
           format: date-time
+        attachments:
+          type: array
+          items:
+            type: string
+          description: Object storage paths (e.g. `/objects/<uuid>`) for photos uploaded ahead of submission.
       required:
         - title
         - description

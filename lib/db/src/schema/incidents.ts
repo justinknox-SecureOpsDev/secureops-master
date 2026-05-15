@@ -1,4 +1,4 @@
-import { pgTable, text, uuid, timestamp, numeric } from "drizzle-orm/pg-core";
+import { pgTable, text, uuid, timestamp, numeric, jsonb } from "drizzle-orm/pg-core";
 import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod/v4";
 import { usersTable } from "./users";
@@ -17,6 +17,7 @@ export const incidentsTable = pgTable("incidents", {
   occurredAt: timestamp("occurred_at", { withTimezone: true }).notNull(),
   resolvedAt: timestamp("resolved_at", { withTimezone: true }),
   adminNotes: text("admin_notes"),
+  attachments: jsonb("attachments").$type<string[]>().notNull().default([]),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow().$onUpdate(() => new Date()),
 });

@@ -5,8 +5,8 @@ import {
   RequestUploadUrlResponse,
 } from "@workspace/api-zod";
 import { ObjectStorageService, ObjectNotFoundError } from "../lib/objectStorage";
-import { requireAdmin, requireAuth } from "../middlewares/auth";
-import { db, employeesTable } from "@workspace/db";
+import { requireAdmin, requireAuth, optionalAuth } from "../middlewares/auth";
+import { db, employeesTable, incidentsTable } from "@workspace/db";
 import { eq } from "drizzle-orm";
 
 const router: IRouter = Router();
@@ -19,7 +19,7 @@ const objectStorageService = new ObjectStorageService();
  * The client sends JSON metadata (name, size, contentType) — NOT the file.
  * Then uploads the file directly to the returned presigned URL.
  */
-router.post("/storage/uploads/request-url", async (req: Request, res: Response) => {
+router.post("/storage/uploads/request-url", optionalAuth, async (req: Request, res: Response) => {
   const parsed = RequestUploadUrlBody.safeParse(req.body);
   if (!parsed.success) {
     res.status(400).json({ error: "Missing or invalid required fields" });
@@ -29,7 +29,10 @@ router.post("/storage/uploads/request-url", async (req: Request, res: Response) 
   try {
     const { name, size, contentType } = parsed.data;
 
-    const uploadURL = await objectStorageService.getObjectEntityUploadURL();
+    // When the caller is authenticated, bind the upload path to their user id
+    // so server-side ownership checks (e.g. incident attachments) are
+    // path-deterministic and don't depend on trusting client-supplied paths.
+    const uploadURL = await objectStorageService.getObjectEntityUploadURL(req.user?.userId);
     const objectPath = objectStorageService.normalizeObjectEntityPath(uploadURL);
 
     res.json(
@@ -85,6 +88,24 @@ router.get("/me/storage/sign", requireAuth, async (req: Request, res: Response) 
         if (typeof k === "string") owned.add(k);
       }
     }
+
+    // Defense in depth: also allow signing attachments on incidents the user
+    // owns, but only when the path is under their bound upload prefix. The
+    // create endpoint already enforces this prefix, so DB-stored values are
+    // trustworthy; this guard prevents regressions if that ever changes.
+    const ownedPrefix = `/objects/uploads/u/${req.user!.userId}/`;
+    const myIncidents = await db
+      .select({ attachments: incidentsTable.attachments })
+      .from(incidentsTable)
+      .where(eq(incidentsTable.employeeId, req.user!.userId));
+    for (const inc of myIncidents) {
+      if (Array.isArray(inc.attachments)) {
+        for (const k of inc.attachments) {
+          if (typeof k === "string" && k.startsWith(ownedPrefix)) owned.add(k);
+        }
+      }
+    }
+
     if (!owned.has(path)) {
       res.status(403).json({ error: "Forbidden", message: "You do not own this object" });
       return;

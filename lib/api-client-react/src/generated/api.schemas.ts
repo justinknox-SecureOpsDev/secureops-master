@@ -780,6 +780,8 @@ export interface Incident {
   occurredAt: string;
   resolvedAt?: string;
   adminNotes?: string;
+  /** Object storage paths (e.g. `/objects/<uuid>`) for photos attached to this incident. */
+  attachments?: string[];
   createdAt: string;
 }
 
@@ -802,6 +804,8 @@ export interface CreateIncidentRequest {
   lat?: number;
   lng?: number;
   occurredAt: string;
+  /** Object storage paths (e.g. `/objects/<uuid>`) for photos uploaded ahead of submission. */
+  attachments?: string[];
 }
 
 export type UpdateIncidentRequestStatus =
