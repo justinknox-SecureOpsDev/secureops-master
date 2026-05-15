@@ -1,13 +1,27 @@
-import React, { createContext, useContext, useState, useEffect, ReactNode } from "react";
+import React, { createContext, useContext, useState, useEffect, useCallback, ReactNode } from "react";
 import { User } from "@workspace/api-client-react";
 import { storage } from "@/utils/storage";
+import {
+  isBiometricEnabled,
+  promptBiometric,
+} from "@/utils/biometric";
 
 interface AuthContextType {
   user: User | null;
   token: string | null;
   isLoading: boolean;
+  /** True while we're waiting for the user to pass the biometric prompt. */
+  awaitingBiometric: boolean;
   login: (user: User, token: string) => Promise<void>;
   logout: () => Promise<void>;
+  /** Updates the cached user (e.g. after change-password / patch profile). */
+  updateUser: (patch: Partial<User>) => Promise<void>;
+  /** Replaces the JWT (e.g. rotated after change-password). */
+  setToken: (token: string) => Promise<void>;
+  /** Re-attempts the biometric unlock when the user picks "Try again". */
+  retryBiometric: () => Promise<void>;
+  /** Discards the cached session and routes back to login. */
+  cancelBiometric: () => Promise<void>;
 }
 
 const AuthContext = createContext<AuthContextType | null>(null);
@@ -17,43 +31,97 @@ export const AUTH_USER_KEY = "auth_user";
 
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<User | null>(null);
-  const [token, setToken] = useState<string | null>(null);
+  const [token, setTokenState] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(true);
+  const [awaitingBiometric, setAwaitingBiometric] = useState(false);
+
+  const tryRestoreCachedSession = useCallback(async () => {
+    const storedToken = await storage.get(AUTH_TOKEN_KEY);
+    const storedUser = await storage.get(AUTH_USER_KEY);
+    if (!storedToken || !storedUser) {
+      setIsLoading(false);
+      return;
+    }
+    const parsedUser: User = JSON.parse(storedUser);
+    const bioEnabled = await isBiometricEnabled();
+    if (!bioEnabled) {
+      setTokenState(storedToken);
+      setUser(parsedUser);
+      setIsLoading(false);
+      return;
+    }
+    setAwaitingBiometric(true);
+    setIsLoading(false);
+    const ok = await promptBiometric("Unlock SecureOps");
+    if (ok) {
+      setTokenState(storedToken);
+      setUser(parsedUser);
+      setAwaitingBiometric(false);
+    }
+    // Otherwise stay locked — user picks Try again or Sign in with password.
+  }, []);
 
   useEffect(() => {
-    async function loadAuth() {
-      try {
-        const storedToken = await storage.get(AUTH_TOKEN_KEY);
-        const storedUser = await storage.get(AUTH_USER_KEY);
-        if (storedToken && storedUser) {
-          setToken(storedToken);
-          setUser(JSON.parse(storedUser));
-        }
-      } catch (e) {
-        console.error("Failed to load auth", e);
-      } finally {
-        setIsLoading(false);
-      }
-    }
-    loadAuth();
-  }, []);
+    tryRestoreCachedSession().catch((e) => {
+      console.error("Failed to restore session", e);
+      setIsLoading(false);
+    });
+  }, [tryRestoreCachedSession]);
 
   const login = async (newUser: User, newToken: string) => {
     setUser(newUser);
-    setToken(newToken);
+    setTokenState(newToken);
+    setAwaitingBiometric(false);
     await storage.set(AUTH_TOKEN_KEY, newToken);
     await storage.set(AUTH_USER_KEY, JSON.stringify(newUser));
   };
 
   const logout = async () => {
     setUser(null);
-    setToken(null);
+    setTokenState(null);
+    setAwaitingBiometric(false);
     await storage.remove(AUTH_TOKEN_KEY);
     await storage.remove(AUTH_USER_KEY);
   };
 
+  const updateUser = async (patch: Partial<User>) => {
+    setUser((prev) => {
+      if (!prev) return prev;
+      const next = { ...prev, ...patch };
+      storage.set(AUTH_USER_KEY, JSON.stringify(next)).catch(() => {});
+      return next;
+    });
+  };
+
+  const setToken = async (newToken: string) => {
+    setTokenState(newToken);
+    await storage.set(AUTH_TOKEN_KEY, newToken);
+  };
+
+  const retryBiometric = async () => {
+    const ok = await promptBiometric("Unlock SecureOps");
+    if (ok) {
+      const storedToken = await storage.get(AUTH_TOKEN_KEY);
+      const storedUser = await storage.get(AUTH_USER_KEY);
+      if (storedToken && storedUser) {
+        setTokenState(storedToken);
+        setUser(JSON.parse(storedUser));
+        setAwaitingBiometric(false);
+      }
+    }
+  };
+
+  const cancelBiometric = async () => {
+    setAwaitingBiometric(false);
+    await logout();
+  };
+
   return (
-    <AuthContext.Provider value={{ user, token, isLoading, login, logout }}>
+    <AuthContext.Provider value={{
+      user, token, isLoading, awaitingBiometric,
+      login, logout, updateUser, setToken,
+      retryBiometric, cancelBiometric,
+    }}>
       {children}
     </AuthContext.Provider>
   );

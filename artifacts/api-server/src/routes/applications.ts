@@ -72,10 +72,7 @@ async function getActivePoliciesForPrefill() {
 function genToken(): string {
   return randomBytes(24).toString("base64url");
 }
-function genTempPassword(): string {
-  // Friendly: 8 chars from base64url, all alphanumeric.
-  return randomBytes(9).toString("base64url").replace(/[^A-Za-z0-9]/g, "x").slice(0, 10);
-}
+const SSN_LAST4_RE = /^\d{4}$/;
 
 function buildOnboardingUrl(req: Request, token: string): string {
   const proto = (req.headers["x-forwarded-proto"] as string) || req.protocol || "https";
@@ -250,8 +247,6 @@ router.post("/admin/applications/:id/approve", requireAdmin, async (req, res): P
   const appId = req.params.id as string;
   const reviewerId = req.user!.userId;
 
-  const tempPassword = genTempPassword();
-  const passwordHash = await bcrypt.hash(tempPassword, 10);
   const token = genToken();
   const expiresAt = new Date(Date.now() + ONBOARDING_TOKEN_TTL_DAYS * 86400_000);
 
@@ -277,6 +272,23 @@ router.post("/admin/applications/:id/approve", requireAdmin, async (req, res): P
       if (app.status === "approved" && app.createdEmployeeId) {
         return { error: { status: 409, body: { error: "Conflict", message: "Application already approved" } } };
       }
+
+      // Temp password = last-4 SSN captured on the application. We refuse to
+      // approve without it so the employee always has a known starting password
+      // to type into the mobile app's mandatory first-login change-password.
+      const ssnLast4 = (app.niNumber ?? "").trim();
+      if (!SSN_LAST4_RE.test(ssnLast4)) {
+        return {
+          error: {
+            status: 400,
+            body: {
+              error: "Bad Request",
+              message: "Application is missing a valid 4-digit SSN (last 4) — required to set the temporary password.",
+            },
+          },
+        };
+      }
+      const passwordHash = await bcrypt.hash(ssnLast4, 10);
 
       const email = app.email.toLowerCase();
 
@@ -308,6 +320,8 @@ router.post("/admin/applications/:id/approve", requireAdmin, async (req, res): P
           firstName: app.firstName,
           lastName: app.lastName,
           status: "pending",
+          mustChangePassword: true,
+          mustCompleteProfile: true,
         }).where(eq(usersTable.id, userId));
       } else {
         const [u] = await tx.insert(usersTable).values({
@@ -317,6 +331,8 @@ router.post("/admin/applications/:id/approve", requireAdmin, async (req, res): P
           lastName: app.lastName,
           role: "employee",
           status: "pending",
+          mustChangePassword: true,
+          mustCompleteProfile: true,
         }).returning();
         userId = u.id;
       }
@@ -395,7 +411,6 @@ router.post("/admin/applications/:id/approve", requireAdmin, async (req, res): P
     firstName: app.firstName,
     onboardingUrl,
     email: app.email,
-    tempPassword,
   });
   const emailSent = await sendEmail({
     to: app.email,
@@ -414,7 +429,7 @@ router.post("/admin/applications/:id/approve", requireAdmin, async (req, res): P
     onboardingUrl,
     onboardingToken: token,
     employeeId: result.userId,
-    tempPassword,
+    tempPasswordHint: "Last 4 digits of the SSN provided on the application",
     emailSent,
   });
 });

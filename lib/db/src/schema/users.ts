@@ -1,4 +1,4 @@
-import { pgTable, text, uuid, timestamp, numeric } from "drizzle-orm/pg-core";
+import { pgTable, text, uuid, timestamp, numeric, boolean } from "drizzle-orm/pg-core";
 import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod/v4";
 
@@ -10,6 +10,8 @@ export const usersTable = pgTable("users", {
   lastName: text("last_name").notNull(),
   role: text("role").notNull().default("employee"),
   status: text("status").notNull().default("pending"),
+  mustChangePassword: boolean("must_change_password").notNull().default(false),
+  mustCompleteProfile: boolean("must_complete_profile").notNull().default(false),
   expoPushToken: text("expo_push_token"),
   lastLat: numeric("last_lat", { precision: 10, scale: 6 }),
   lastLng: numeric("last_lng", { precision: 10, scale: 6 }),

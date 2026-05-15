@@ -41,6 +41,10 @@ export interface User {
   lastName: string;
   role: UserRole;
   status: UserStatus;
+  /** True when the user must change their password before accessing the app. */
+  mustChangePassword?: boolean;
+  /** True after first password change until the user has reviewed/saved their profile. */
+  mustCompleteProfile?: boolean;
   createdAt: string;
 }
 
@@ -209,6 +213,31 @@ export interface CreateEmployeeRequest {
   directDepositSignature?: string | null;
   references?: CreateEmployeeRequestReferencesItem[] | null;
   acknowledgements?: CreateEmployeeRequestAcknowledgements;
+  skills?: string[];
+}
+
+export interface ChangePasswordRequest {
+  currentPassword: string;
+  /** @minLength 8 */
+  newPassword: string;
+}
+
+/**
+ * Strict allow-list of fields the employee may edit on their own profile.
+ */
+export interface UpdateMyEmployeeRequest {
+  phone?: string;
+  address?: string;
+  emergencyContactName?: string;
+  emergencyContactRelationship?: string | null;
+  emergencyContactPhone?: string;
+  uniformShirt?: string | null;
+  uniformTrousers?: string | null;
+  uniformJacket?: string | null;
+  uniformBoots?: string | null;
+  bankAccountName?: string | null;
+  bankAccountNumber?: string | null;
+  bankBsb?: string | null;
   skills?: string[];
 }
 

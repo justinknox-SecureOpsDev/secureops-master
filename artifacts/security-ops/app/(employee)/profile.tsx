@@ -1,10 +1,12 @@
-import React from "react";
-import { View, Text, StyleSheet, ScrollView, TouchableOpacity, ActivityIndicator, Platform, Image } from "react-native";
+import React, { useEffect, useState } from "react";
+import { View, Text, StyleSheet, ScrollView, TouchableOpacity, ActivityIndicator, Platform, Image, Switch } from "react-native";
+import { useRouter } from "expo-router";
 import { useColors } from "@/hooks/useColors";
 import { useGetMe, getGetMeQueryKey, useGetEmployee, getGetEmployeeQueryKey, useGetLicenses, getGetLicensesQueryKey } from "@workspace/api-client-react";
 import { LicenseLevelBadge, levelLabel, levelColor } from "@/components/LicenseLevelBadge";
 import { useAuth } from "@/contexts/AuthContext";
 import { Feather } from "@expo/vector-icons";
+import { isBiometricAvailable, isBiometricEnabled, setBiometricEnabled, promptBiometric } from "@/utils/biometric";
 
 function InfoRow({ label, value, icon }: { label: string; value?: string | null; icon: string }) {
   const colors = useColors();
@@ -22,8 +24,36 @@ function InfoRow({ label, value, icon }: { label: string; value?: string | null;
 
 export default function EmployeeProfileScreen() {
   const colors = useColors();
+  const router = useRouter();
   const { logout } = useAuth();
   const topPad = Platform.OS === "web" ? 67 : 0;
+  const [bioAvailable, setBioAvailable] = useState(false);
+  const [bioOn, setBioOn] = useState(false);
+  const [bioBusy, setBioBusy] = useState(false);
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      const a = await isBiometricAvailable();
+      const e = await isBiometricEnabled();
+      if (!cancelled) { setBioAvailable(a); setBioOn(e); }
+    })();
+    return () => { cancelled = true; };
+  }, []);
+
+  async function toggleBio(next: boolean) {
+    setBioBusy(true);
+    try {
+      if (next) {
+        const ok = await promptBiometric("Confirm biometric to enable faster sign-in");
+        if (!ok) { setBioBusy(false); return; }
+      }
+      await setBiometricEnabled(next);
+      setBioOn(next);
+    } finally {
+      setBioBusy(false);
+    }
+  }
 
   const { data: me } = useGetMe({ query: { queryKey: getGetMeQueryKey() } });
   const userId = (me as any)?.id as string | undefined;
@@ -138,6 +168,40 @@ export default function EmployeeProfileScreen() {
       </View>
 
       <View style={[styles.section, { backgroundColor: colors.card, borderColor: colors.border }]}>
+        <Text style={[styles.sectionTitle, { color: colors.accent }]}>ACCOUNT</Text>
+        <TouchableOpacity
+          onPress={() => router.push("/edit-profile" as any)}
+          style={[styles.actionRow, { borderBottomColor: colors.border }]}
+        >
+          <Feather name="edit-3" size={16} color={colors.primary} />
+          <Text style={{ color: colors.foreground, flex: 1, fontSize: 14, fontWeight: "600" }}>Edit profile</Text>
+          <Feather name="chevron-right" size={16} color={colors.mutedForeground} />
+        </TouchableOpacity>
+        <TouchableOpacity
+          onPress={() => router.push({ pathname: "/change-password" as any, params: { mode: "self" } })}
+          style={[styles.actionRow, { borderBottomColor: colors.border }]}
+        >
+          <Feather name="lock" size={16} color={colors.primary} />
+          <Text style={{ color: colors.foreground, flex: 1, fontSize: 14, fontWeight: "600" }}>Change password</Text>
+          <Feather name="chevron-right" size={16} color={colors.mutedForeground} />
+        </TouchableOpacity>
+        {bioAvailable && (
+          <View style={[styles.actionRow, { borderBottomColor: "transparent" }]}>
+            <Feather name="smile" size={16} color={colors.primary} />
+            <View style={{ flex: 1 }}>
+              <Text style={{ color: colors.foreground, fontSize: 14, fontWeight: "600" }}>
+                {Platform.OS === "ios" ? "Face ID / Touch ID unlock" : "Fingerprint unlock"}
+              </Text>
+              <Text style={{ color: colors.mutedForeground, fontSize: 12, marginTop: 2 }}>
+                {bioOn ? "Enabled" : "Disabled"}
+              </Text>
+            </View>
+            <Switch value={bioOn} onValueChange={toggleBio} disabled={bioBusy} />
+          </View>
+        )}
+      </View>
+
+      <View style={[styles.section, { backgroundColor: colors.card, borderColor: colors.border }]}>
         <Text style={[styles.sectionTitle, { color: colors.accent }]}>WILLIAMS COUNCIL SECURITY GROUP</Text>
         <View style={styles.companyRow}>
           <Feather name="shield" size={14} color={colors.mutedForeground} />
@@ -182,4 +246,5 @@ const styles = StyleSheet.create({
   emptyText: { fontSize: 13, fontStyle: "italic" },
   companyRow: { flexDirection: "row", alignItems: "center", gap: 8 },
   companyText: { fontSize: 13 },
+  actionRow: { flexDirection: "row", alignItems: "center", gap: 12, paddingVertical: 14, borderBottomWidth: 1 },
 });

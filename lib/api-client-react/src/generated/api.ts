@@ -28,6 +28,7 @@ import type {
   ApproveTimeEntryRequest,
   AssignShiftRequest,
   AuthResponse,
+  ChangePasswordRequest,
   ChatMessage,
   ChatRoom,
   ChatUser,
@@ -91,6 +92,7 @@ import type {
   UpdateIncidentRequest,
   UpdateInvoiceRequest,
   UpdateLicenseRequest,
+  UpdateMyEmployeeRequest,
   UpdateMyLocation200,
   UpdateMyLocationBody,
   UpdatePayrollRequest,
@@ -1538,6 +1540,179 @@ export const useRegisterPushToken = <
   TContext
 > => {
   return useMutation(getRegisterPushTokenMutationOptions(options));
+};
+
+/**
+ * @summary Change the current user's password (clears mustChangePassword and rotates the JWT)
+ */
+export const getChangePasswordUrl = () => {
+  return `/api/auth/change-password`;
+};
+
+export const changePassword = async (
+  changePasswordRequest: ChangePasswordRequest,
+  options?: RequestInit,
+): Promise<AuthResponse> => {
+  return customFetch<AuthResponse>(getChangePasswordUrl(), {
+    ...options,
+    method: "POST",
+    headers: { "Content-Type": "application/json", ...options?.headers },
+    body: JSON.stringify(changePasswordRequest),
+  });
+};
+
+export const getChangePasswordMutationOptions = <
+  TError = ErrorType<ErrorResponse>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof changePassword>>,
+    TError,
+    { data: BodyType<ChangePasswordRequest> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof changePassword>>,
+  TError,
+  { data: BodyType<ChangePasswordRequest> },
+  TContext
+> => {
+  const mutationKey = ["changePassword"];
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof changePassword>>,
+    { data: BodyType<ChangePasswordRequest> }
+  > = (props) => {
+    const { data } = props ?? {};
+
+    return changePassword(data, requestOptions);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type ChangePasswordMutationResult = NonNullable<
+  Awaited<ReturnType<typeof changePassword>>
+>;
+export type ChangePasswordMutationBody = BodyType<ChangePasswordRequest>;
+export type ChangePasswordMutationError = ErrorType<ErrorResponse>;
+
+/**
+ * @summary Change the current user's password (clears mustChangePassword and rotates the JWT)
+ */
+export const useChangePassword = <
+  TError = ErrorType<ErrorResponse>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof changePassword>>,
+    TError,
+    { data: BodyType<ChangePasswordRequest> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationResult<
+  Awaited<ReturnType<typeof changePassword>>,
+  TError,
+  { data: BodyType<ChangePasswordRequest> },
+  TContext
+> => {
+  return useMutation(getChangePasswordMutationOptions(options));
+};
+
+/**
+ * @summary Self-service edit of allow-listed employee profile fields
+ */
+export const getUpdateMyEmployeeProfileUrl = () => {
+  return `/api/me/employee`;
+};
+
+export const updateMyEmployeeProfile = async (
+  updateMyEmployeeRequest: UpdateMyEmployeeRequest,
+  options?: RequestInit,
+): Promise<Employee> => {
+  return customFetch<Employee>(getUpdateMyEmployeeProfileUrl(), {
+    ...options,
+    method: "PATCH",
+    headers: { "Content-Type": "application/json", ...options?.headers },
+    body: JSON.stringify(updateMyEmployeeRequest),
+  });
+};
+
+export const getUpdateMyEmployeeProfileMutationOptions = <
+  TError = ErrorType<ErrorResponse>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof updateMyEmployeeProfile>>,
+    TError,
+    { data: BodyType<UpdateMyEmployeeRequest> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof updateMyEmployeeProfile>>,
+  TError,
+  { data: BodyType<UpdateMyEmployeeRequest> },
+  TContext
+> => {
+  const mutationKey = ["updateMyEmployeeProfile"];
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof updateMyEmployeeProfile>>,
+    { data: BodyType<UpdateMyEmployeeRequest> }
+  > = (props) => {
+    const { data } = props ?? {};
+
+    return updateMyEmployeeProfile(data, requestOptions);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type UpdateMyEmployeeProfileMutationResult = NonNullable<
+  Awaited<ReturnType<typeof updateMyEmployeeProfile>>
+>;
+export type UpdateMyEmployeeProfileMutationBody =
+  BodyType<UpdateMyEmployeeRequest>;
+export type UpdateMyEmployeeProfileMutationError = ErrorType<ErrorResponse>;
+
+/**
+ * @summary Self-service edit of allow-listed employee profile fields
+ */
+export const useUpdateMyEmployeeProfile = <
+  TError = ErrorType<ErrorResponse>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof updateMyEmployeeProfile>>,
+    TError,
+    { data: BodyType<UpdateMyEmployeeRequest> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationResult<
+  Awaited<ReturnType<typeof updateMyEmployeeProfile>>,
+  TError,
+  { data: BodyType<UpdateMyEmployeeRequest> },
+  TContext
+> => {
+  return useMutation(getUpdateMyEmployeeProfileMutationOptions(options));
 };
 
 /**

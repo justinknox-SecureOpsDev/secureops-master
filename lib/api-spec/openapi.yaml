@@ -301,6 +301,68 @@ paths:
         "200":
           description: Token registered
 
+  /auth/change-password:
+    post:
+      operationId: changePassword
+      tags: [auth]
+      summary: Change the current user's password (clears mustChangePassword and rotates the JWT)
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ChangePasswordRequest"
+      responses:
+        "200":
+          description: Password changed; new JWT returned
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AuthResponse"
+        "400":
+          description: Validation failed
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ErrorResponse" }
+        "401":
+          description: Current password incorrect
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ErrorResponse" }
+
+  /me/employee:
+    patch:
+      operationId: updateMyEmployeeProfile
+      tags: [employees]
+      summary: Self-service edit of allow-listed employee profile fields
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpdateMyEmployeeRequest"
+      responses:
+        "200":
+          description: Updated employee row
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Employee"
+        "400":
+          description: Validation failed or non-allow-listed field provided
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ErrorResponse" }
+        "404":
+          description: Employee row not found
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ErrorResponse" }
+
   /auth/me:
     get:
       operationId: getMe
@@ -1652,6 +1714,12 @@ components:
         status:
           type: string
           enum: [active, inactive, pending]
+        mustChangePassword:
+          type: boolean
+          description: "True when the user must change their password before accessing the app."
+        mustCompleteProfile:
+          type: boolean
+          description: "True after first password change until the user has reviewed/saved their profile."
         createdAt:
           type: string
           format: date-time
@@ -1813,6 +1881,34 @@ components:
         - firstName
         - lastName
         - role
+
+    ChangePasswordRequest:
+      type: object
+      properties:
+        currentPassword: { type: string }
+        newPassword: { type: string, minLength: 8 }
+      required: [currentPassword, newPassword]
+
+    UpdateMyEmployeeRequest:
+      type: object
+      additionalProperties: false
+      description: "Strict allow-list of fields the employee may edit on their own profile."
+      properties:
+        phone: { type: string }
+        address: { type: string }
+        emergencyContactName: { type: string }
+        emergencyContactRelationship: { type: string, nullable: true }
+        emergencyContactPhone: { type: string }
+        uniformShirt: { type: string, nullable: true }
+        uniformTrousers: { type: string, nullable: true }
+        uniformJacket: { type: string, nullable: true }
+        uniformBoots: { type: string, nullable: true }
+        bankAccountName: { type: string, nullable: true }
+        bankAccountNumber: { type: string, nullable: true }
+        bankBsb: { type: string, nullable: true }
+        skills:
+          type: array
+          items: { type: string }
 
     UpdateEmployeeRequest:
       type: object

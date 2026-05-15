@@ -1,41 +1,80 @@
 import { Stack, useRouter, useSegments } from "expo-router";
 import React, { useEffect } from "react";
 import { useAuth } from "@/contexts/AuthContext";
-import { View, ActivityIndicator } from "react-native";
+import { View, Text, ActivityIndicator, TouchableOpacity, StyleSheet } from "react-native";
 import { useColors } from "@/hooks/useColors";
 import { useNotifications } from "@/hooks/useNotifications";
+import { Feather } from "@expo/vector-icons";
+
+const PUBLIC_TOP_SCREENS = new Set([
+  "login",
+  "change-password",
+  "enable-biometric",
+  "edit-profile",
+]);
 
 export default function RootLayoutNav() {
-  const { user, isLoading } = useAuth();
+  const { user, isLoading, awaitingBiometric, retryBiometric, cancelBiometric } = useAuth();
   const segments = useSegments();
   const router = useRouter();
   const colors = useColors();
   useNotifications();
 
   useEffect(() => {
-    if (isLoading) return;
+    if (isLoading || awaitingBiometric) return;
 
-    const inAuthGroup = segments[0] === "(admin)" || segments[0] === "(employee)";
-    
+    const top = segments[0] as string | undefined;
+    const inAuthGroup = top === "(admin)" || top === "(employee)";
+
     if (!user) {
-      if (inAuthGroup || segments[0] !== "login") {
-        router.replace("/login");
-      }
-    } else {
-      if (!inAuthGroup) {
-        if (user.role === "admin") {
-          router.replace("/(admin)/dashboard");
-        } else {
-          router.replace("/(employee)/home");
-        }
-      }
+      if (top !== "login") router.replace("/login");
+      return;
     }
-  }, [user, isLoading, segments]);
+
+    // Force flows for first-login users.
+    if (user.mustChangePassword && top !== "change-password") {
+      router.replace("/change-password" as any);
+      return;
+    }
+    if (!user.mustChangePassword && user.mustCompleteProfile && top !== "edit-profile" && top !== "enable-biometric") {
+      router.replace("/edit-profile" as any);
+      return;
+    }
+
+    // Default landing.
+    if (!inAuthGroup && !PUBLIC_TOP_SCREENS.has(top ?? "")) {
+      if (user.role === "admin") router.replace("/(admin)/dashboard");
+      else router.replace("/(employee)/home");
+    } else if (top === "login") {
+      if (user.role === "admin") router.replace("/(admin)/dashboard");
+      else router.replace("/(employee)/home");
+    }
+  }, [user, isLoading, awaitingBiometric, segments]);
 
   if (isLoading) {
     return (
-      <View style={{ flex: 1, justifyContent: "center", alignItems: "center", backgroundColor: colors.background }}>
+      <View style={[styles.center, { backgroundColor: colors.background }]}>
         <ActivityIndicator size="large" color={colors.primary} />
+      </View>
+    );
+  }
+
+  if (awaitingBiometric) {
+    return (
+      <View style={[styles.center, { backgroundColor: colors.background, padding: 24, gap: 16 }]}>
+        <View style={[styles.iconCircle, { borderColor: colors.primary, backgroundColor: colors.primary + "15" }]}>
+          <Feather name="lock" size={32} color={colors.primary} />
+        </View>
+        <Text style={{ color: colors.foreground, fontSize: 20, fontWeight: "700" }}>SecureOps locked</Text>
+        <Text style={{ color: colors.mutedForeground, textAlign: "center", maxWidth: 280 }}>
+          Use biometric to unlock, or sign in again with your password.
+        </Text>
+        <TouchableOpacity onPress={retryBiometric} style={[styles.btn, { backgroundColor: colors.primary }]}>
+          <Text style={{ color: colors.primaryForeground, fontWeight: "700", letterSpacing: 1 }}>UNLOCK</Text>
+        </TouchableOpacity>
+        <TouchableOpacity onPress={cancelBiometric} style={{ padding: 10 }}>
+          <Text style={{ color: colors.mutedForeground }}>Sign in with password</Text>
+        </TouchableOpacity>
       </View>
     );
   }
@@ -45,6 +84,15 @@ export default function RootLayoutNav() {
       <Stack.Screen name="login" />
       <Stack.Screen name="(admin)" />
       <Stack.Screen name="(employee)" />
+      <Stack.Screen name="change-password" />
+      <Stack.Screen name="enable-biometric" />
+      <Stack.Screen name="edit-profile" />
     </Stack>
   );
 }
+
+const styles = StyleSheet.create({
+  center: { flex: 1, justifyContent: "center", alignItems: "center" },
+  iconCircle: { width: 80, height: 80, borderRadius: 40, alignItems: "center", justifyContent: "center", borderWidth: 2 },
+  btn: { paddingHorizontal: 28, height: 48, borderRadius: 8, alignItems: "center", justifyContent: "center" },
+});

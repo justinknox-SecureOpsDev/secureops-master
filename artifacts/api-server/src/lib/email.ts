@@ -58,7 +58,6 @@ export function renderOnboardingEmail(opts: {
   firstName: string;
   onboardingUrl: string;
   email: string;
-  tempPassword: string;
 }): { subject: string; text: string; html: string } {
   const subject = "Welcome to Williams Council Security Group — complete your onboarding";
   const text = [
@@ -70,8 +69,8 @@ export function renderOnboardingEmail(opts: {
     "",
     "After onboarding you can sign in to the SecureOps app with:",
     `  Email:    ${opts.email}`,
-    `  Password: ${opts.tempPassword}`,
-    "(You will be asked to change this password on first login.)",
+    `  Password: the last 4 digits of your SSN`,
+    "(You will be asked to set a new password on first login.)",
     "",
     "— Williams Council Security Group",
   ].join("\n");
@@ -90,8 +89,8 @@ export function renderOnboardingEmail(opts: {
       <hr style="border:none;border-top:1px solid #ddd;margin:24px 0"/>
       <p>After onboarding, sign in to the SecureOps app with:</p>
       <pre style="background:#f6f1e1;padding:12px;border-radius:4px">Email:    ${escapeHtml(opts.email)}
-Password: ${escapeHtml(opts.tempPassword)}</pre>
-      <p style="color:#555;font-size:12px">You will be asked to change this password on first login.</p>
+Password: the last 4 digits of your SSN</pre>
+      <p style="color:#555;font-size:12px">You will be asked to set a new password on first login.</p>
     </div>
   `;
   return { subject, text, html };
