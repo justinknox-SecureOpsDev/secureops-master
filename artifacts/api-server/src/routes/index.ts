@@ -17,6 +17,7 @@ import adminRouter from "./admin";
 import storageRouter from "./storage";
 import applicationsRouter from "./applications";
 import policiesRouter from "./policies";
+import integrationsRouter from "./integrations";
 
 const router: IRouter = Router();
 
@@ -38,5 +39,6 @@ router.use(adminRouter);
 router.use(storageRouter);
 router.use(applicationsRouter);
 router.use(policiesRouter);
+router.use(integrationsRouter);
 
 export default router;
