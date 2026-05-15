@@ -8,7 +8,7 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { BrandHeader } from "@/components/BrandHeader";
 import { FileUploadField } from "@/components/FileUploadField";
 import type { UploadedFile } from "@/lib/upload";
-import { CheckCircle2, AlertTriangle, Loader2, ChevronLeft, ChevronRight, FileText, Eye } from "lucide-react";
+import { CheckCircle2, AlertTriangle, Loader2, ChevronLeft, ChevronRight, FileText, ExternalLink } from "lucide-react";
 
 type PolicyDto = {
   id: string;
@@ -140,7 +140,7 @@ export function OnboardPage() {
       if (!directDepositConsent) return "Please confirm direct deposit consent.";
       if (!directDepositSignature.trim()) return "Please type your name as signature.";
       for (const p of policies) {
-        if (!viewed[p.slug]) return `Please open and read: ${p.label}`;
+        if (!viewed[p.slug]) return `Please click "Open document to read" for: ${p.label}`;
         const v = acks[p.slug];
         if (!v?.accepted) return `Please acknowledge: ${p.label}`;
         if (!v.signature.trim()) return `Please sign: ${p.label}`;
@@ -171,6 +171,11 @@ export function OnboardPage() {
           accepted: acks[p.slug]?.accepted ?? false,
           signature: acks[p.slug]?.signature ?? "",
           timestamp: now,
+          // Bind the signature to the EXACT policy version the applicant
+          // viewed at prefill time. Server rejects the submission if this
+          // does not match a currently-active version of the same slug.
+          policyId: p.id,
+          policyVersion: p.version,
         })),
       };
       await api(`/onboarding/${encodeURIComponent(token)}`, { method: "POST", body });
@@ -281,9 +286,14 @@ export function OnboardPage() {
                           href={p.viewUrl}
                           target="_blank"
                           rel="noreferrer"
-                          className="shrink-0 inline-flex items-center gap-1 text-xs px-2 py-1 rounded border hover:bg-accent/50"
+                          onClick={() => setViewed((prev) => ({ ...prev, [p.slug]: true }))}
+                          className={`shrink-0 inline-flex items-center gap-1 text-xs px-2 py-1 rounded border hover:bg-accent/50 ${
+                            isViewed ? "border-emerald-300 bg-emerald-50 text-emerald-800" : "border-brand-gold text-brand-navy"
+                          }`}
                         >
-                          <Eye className="w-3.5 h-3.5" /> Open in new tab
+                          {isViewed
+                            ? <><CheckCircle2 className="w-3.5 h-3.5" /> Opened</>
+                            : <><ExternalLink className="w-3.5 h-3.5" /> Open document to read</>}
                         </a>
                       )}
                     </div>
@@ -299,25 +309,9 @@ export function OnboardPage() {
                       </div>
                     )}
                     <div className="p-3 space-y-2">
-                      {p.viewUrl && !isViewed && (
-                        <Button
-                          type="button"
-                          variant="outline"
-                          size="sm"
-                          onClick={() => setViewed((prev) => ({ ...prev, [p.slug]: true }))}
-                          className="w-full border-brand-gold text-brand-navy hover:bg-accent/30"
-                        >
-                          <Eye className="w-3.5 h-3.5 mr-1.5" /> I have read this document
-                        </Button>
-                      )}
-                      {p.viewUrl && isViewed && (
-                        <div className="text-xs text-emerald-700 flex items-center gap-1">
-                          <CheckCircle2 className="w-3.5 h-3.5" /> Marked as read
-                        </div>
-                      )}
                       <label
                         className={`flex items-start gap-2 ${isViewed ? "cursor-pointer" : "opacity-60 cursor-not-allowed"}`}
-                        title={isViewed ? "" : "Click 'I have read this document' first"}
+                        title={isViewed ? "" : "Click 'Open document to read' first"}
                       >
                         <Checkbox
                           checked={ack.accepted}
@@ -329,7 +323,7 @@ export function OnboardPage() {
                         />
                         <span className="text-sm font-medium">
                           I have read and accept the {p.label}.
-                          {!isViewed && <span className="block text-xs text-muted-foreground font-normal mt-0.5">Confirm you've read the document above to enable this checkbox.</span>}
+                          {!isViewed && <span className="block text-xs text-muted-foreground font-normal mt-0.5">Open the document via the "Open document to read" link above to enable this checkbox.</span>}
                         </span>
                       </label>
                       <Input

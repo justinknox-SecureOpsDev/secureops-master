@@ -29,29 +29,43 @@ const policyStorage = new ObjectStorageService();
 
 const ONBOARDING_TOKEN_TTL_DAYS = 14;
 
-async function loadActivePolicies() {
+type ActivePolicyRow = {
+  id: string; slug: string; label: string; version: number;
+  fileKey: string; fileName: string | null;
+};
+
+/**
+ * Returns every currently-active policy that has a document attached.
+ * No signing — safe to use during validation (won't silently drop
+ * policies if the storage backend hiccups).
+ */
+async function getActivePoliciesForValidation(): Promise<ActivePolicyRow[]> {
   const { seedPolicies } = await import("@workspace/db");
   await seedPolicies();
   const rows = await db.select().from(policiesTable);
-  // "Active for onboarding" = isActive AND has a document.
-  const active = rows.filter((r) => r.isActive && !!r.fileKey);
-  const out: Array<{
-    id: string; slug: string; label: string; version: number;
-    fileKey: string; fileName: string | null; viewUrl: string;
-  }> = [];
+  const active = rows
+    .filter((r) => r.isActive && !!r.fileKey)
+    .map((r) => ({
+      id: r.id, slug: r.slug, label: r.label, version: r.version,
+      fileKey: r.fileKey!, fileName: r.fileName,
+    }));
+  active.sort((a, b) => a.label.localeCompare(b.label));
+  return active;
+}
+
+/**
+ * For the public onboarding prefill — also signs each policy URL.
+ * FAILS CLOSED: if any active policy can't be signed, throws so the
+ * caller can surface a clear error instead of silently dropping it
+ * (which would let the applicant skip the acknowledgement).
+ */
+async function getActivePoliciesForPrefill() {
+  const active = await getActivePoliciesForValidation();
+  const out: Array<ActivePolicyRow & { viewUrl: string }> = [];
   for (const r of active) {
-    try {
-      const viewUrl = await policyStorage.getSignedDownloadURL(r.fileKey!);
-      out.push({
-        id: r.id, slug: r.slug, label: r.label, version: r.version,
-        fileKey: r.fileKey!, fileName: r.fileName, viewUrl,
-      });
-    } catch {
-      // Skip policies whose document can't be signed (stale/missing object).
-      // They won't be required for onboarding until admin re-uploads.
-    }
+    const viewUrl = await policyStorage.getSignedDownloadURL(r.fileKey);
+    out.push({ ...r, viewUrl });
   }
-  out.sort((a, b) => a.label.localeCompare(b.label));
   return out;
 }
 
@@ -408,7 +422,17 @@ router.get("/onboarding/:token", async (req, res): Promise<void> => {
     app = a ?? null;
   }
   const [existing] = await db.select().from(onboardingSubmissionsTable).where(eq(onboardingSubmissionsTable.employeeId, user.id)).limit(1);
-  const policies = await loadActivePolicies();
+  let policies;
+  try {
+    policies = await getActivePoliciesForPrefill();
+  } catch (err) {
+    req.log.error({ err }, "Failed to sign policy URLs for onboarding prefill");
+    res.status(503).json({
+      error: "Service Unavailable",
+      message: "Policy documents are temporarily unavailable. Please try again in a moment or contact HR.",
+    });
+    return;
+  }
 
   res.json({
     employeeId: user.id,
@@ -437,9 +461,16 @@ router.post("/onboarding/:token", async (req, res): Promise<void> => {
   }
   const d = parsed.data;
 
-  // Validate that every currently-active policy is acknowledged.
-  const activePolicies = await loadActivePolicies();
+  // Fail-closed validation: every currently-active policy MUST appear
+  // in the submission, AND each ack must reference (by policyId) a row
+  // that is still currently active for that slug. This prevents two
+  // bypasses: (a) a transient storage error silently dropping a
+  // required acknowledgement, and (b) the applicant signing version N
+  // while admin replaces it with version N+1 between view and submit.
+  const activePolicies = await getActivePoliciesForValidation();
+  const activeById = new Map(activePolicies.map((p) => [p.id, p]));
   const ackBySlug = new Map(d.acknowledgements.map((a) => [a.type, a]));
+
   for (const p of activePolicies) {
     const ack = ackBySlug.get(p.slug);
     if (!ack || !ack.accepted || !ack.signature?.trim()) {
@@ -449,18 +480,26 @@ router.post("/onboarding/:token", async (req, res): Promise<void> => {
       });
       return;
     }
+    if (!ack.policyId || ack.policyId !== p.id) {
+      res.status(409).json({
+        error: "Conflict",
+        message: `The "${p.label}" policy was updated while you were filling out the form. Please refresh the page and review the new version.`,
+      });
+      return;
+    }
   }
-  // Snapshot policy metadata into each ack entry so we can prove which
-  // version of which document the user signed.
+
+  // Snapshot from the EXACT row the applicant signed (looked up by the
+  // submitted policyId), not by re-resolving the slug at submit time.
   const enrichedAcks = d.acknowledgements.map((a) => {
-    const p = activePolicies.find((pp) => pp.slug === a.type);
+    const p = a.policyId ? activeById.get(a.policyId) ?? null : null;
     return {
       type: a.type,
       accepted: a.accepted,
       signature: a.signature,
       timestamp: a.timestamp,
-      policyId: p?.id ?? null,
-      policyVersion: p?.version ?? null,
+      policyId: p?.id ?? a.policyId ?? null,
+      policyVersion: p?.version ?? a.policyVersion ?? null,
       policyFileKey: p?.fileKey ?? null,
       policyLabel: p?.label ?? null,
     };
