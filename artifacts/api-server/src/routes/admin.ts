@@ -531,7 +531,8 @@ router.post("/admin/tables/:table", requireAdmin, async (req, res): Promise<void
     res.status(404).json({ error: "Not Found", message: `Unknown table '${tableName}'` });
     return;
   }
-  const parsed = cfg.insertSchema.safeParse(req.body);
+  const coerced = cfg.coerceWrite((req.body ?? {}) as Record<string, unknown>);
+  const parsed = cfg.insertSchema.safeParse(coerced);
   if (!parsed.success) {
     res.status(400).json({
       error: "Validation",
@@ -540,7 +541,7 @@ router.post("/admin/tables/:table", requireAdmin, async (req, res): Promise<void
     });
     return;
   }
-  let values = cfg.coerceWrite(parsed.data as Record<string, unknown>);
+  let values = parsed.data as Record<string, unknown>;
   if (cfg.beforeInsert) values = await cfg.beforeInsert(values);
   try {
     const inserted = (await db.insert(cfg.table).values(values).returning()) as unknown[];
