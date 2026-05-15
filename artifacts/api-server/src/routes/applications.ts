@@ -138,7 +138,11 @@ router.get("/admin/applications/:id", requireAdmin, async (req, res): Promise<vo
 
 router.post("/admin/applications/:id/review", requireAdmin, async (req, res): Promise<void> => {
   const parsed = AdminMarkApplicationUnderReviewBody.safeParse(req.body ?? {});
-  const notes = parsed.success ? parsed.data.notes : undefined;
+  if (!parsed.success) {
+    res.status(400).json({ error: "Bad Request", message: parsed.error.message });
+    return;
+  }
+  const notes = parsed.data.notes;
   const [row] = await db.update(applicationsTable).set({
     status: "under_review",
     reviewerNotes: notes ?? null,
@@ -151,7 +155,11 @@ router.post("/admin/applications/:id/review", requireAdmin, async (req, res): Pr
 
 router.post("/admin/applications/:id/reject", requireAdmin, async (req, res): Promise<void> => {
   const parsed = AdminRejectApplicationBody.safeParse(req.body ?? {});
-  const notes = parsed.success ? parsed.data.notes : undefined;
+  if (!parsed.success) {
+    res.status(400).json({ error: "Bad Request", message: parsed.error.message });
+    return;
+  }
+  const notes = parsed.data.notes;
   const [row] = await db.update(applicationsTable).set({
     status: "rejected",
     reviewerNotes: notes ?? null,
@@ -164,7 +172,11 @@ router.post("/admin/applications/:id/reject", requireAdmin, async (req, res): Pr
 
 router.post("/admin/applications/:id/approve", requireAdmin, async (req, res): Promise<void> => {
   const parsed = AdminApproveApplicationBody.safeParse(req.body ?? {});
-  const notes = parsed.success ? parsed.data.notes : undefined;
+  if (!parsed.success) {
+    res.status(400).json({ error: "Bad Request", message: parsed.error.message });
+    return;
+  }
+  const notes = parsed.data.notes;
   const appId = req.params.id as string;
   const reviewerId = req.user!.userId;
 
@@ -332,7 +344,7 @@ router.get("/onboarding/:token", async (req, res): Promise<void> => {
   if (!user) { res.status(404).json({ error: "Not Found", message: "Employee not found" }); return; }
   const [employee] = await db.select().from(employeesTable).where(eq(employeesTable.userId, user.id)).limit(1);
 
-  let app: any = null;
+  let app: ApplicationRow | null = null;
   if (t.applicationId) {
     const [a] = await db.select().from(applicationsTable).where(eq(applicationsTable.id, t.applicationId)).limit(1);
     app = a ?? null;
