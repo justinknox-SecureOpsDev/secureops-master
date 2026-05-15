@@ -170,7 +170,7 @@ export function ImportWizard({
     setError(null);
     setBusy(true);
     try {
-      const parsed = await readSpreadsheet(file);
+      const parsed = await readSpreadsheet(file, descriptor);
       setSheet(parsed);
       setMapping(autoMap(parsed.headers, writableFields));
       setDefaults({});
@@ -392,6 +392,11 @@ export function ImportWizard({
               Detected <b>{sheet.headers.length}</b> columns and <b>{sheet.rows.length}</b> rows.
               Match each spreadsheet column to a field, or set a default value for any missing required fields.
             </p>
+            {sheet.hintRowSkipped && (
+              <div className="text-xs bg-amber-50 border border-amber-200 rounded p-2">
+                Skipped the template's example row (it only shows the expected format). Delete row 2 from the file to remove this notice.
+              </div>
+            )}
             <div className="grid grid-cols-[1fr_auto_1fr] gap-2 items-center text-sm">
               <div className="font-semibold uppercase text-xs brand-navy">Spreadsheet column</div>
               <div></div>

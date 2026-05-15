@@ -4,9 +4,23 @@ import type { TableDescriptor, Field } from "./tables";
 export type ParsedSheet = {
   headers: string[];
   rows: Record<string, unknown>[];
+  /** True if a template hint row was detected and removed from `rows`. */
+  hintRowSkipped?: boolean;
 };
 
-export async function readSpreadsheet(file: File): Promise<ParsedSheet> {
+/**
+ * Sentinel string future templates can prepend to a hint row's first cell to
+ * mark it for skipping. The current `downloadTemplateXlsx` does not inject
+ * this string into the sheet (it labels row 2 via an A1 cell comment plus
+ * deterministic sample values), but `isTemplateHintRow` still honours it so
+ * older or hand-edited templates carrying the marker continue to be skipped.
+ */
+export const TEMPLATE_HINT_MARKER = "EXAMPLE — delete this row before importing";
+
+export async function readSpreadsheet(
+  file: File,
+  descriptor?: TableDescriptor,
+): Promise<ParsedSheet> {
   const buf = await file.arrayBuffer();
   const wb = XLSX.read(buf, { type: "array" });
   const firstSheet = wb.Sheets[wb.SheetNames[0]];
@@ -18,7 +32,46 @@ export async function readSpreadsheet(file: File): Promise<ParsedSheet> {
     json.length > 0
       ? Object.keys(json[0])
       : (XLSX.utils.sheet_to_json<string[]>(firstSheet, { header: 1 })[0] ?? []) as string[];
-  return { headers, rows: json };
+  let hintRowSkipped = false;
+  if (descriptor && json.length > 0 && isTemplateHintRow(json[0], headers, descriptor)) {
+    json.shift();
+    hintRowSkipped = true;
+  }
+  return { headers, rows: json, hintRowSkipped };
+}
+
+/**
+ * Detect the auto-generated template hint row so it isn't treated as data.
+ * A row qualifies if either:
+ *  - any cell starts with the visible TEMPLATE_HINT_MARKER, or
+ *  - every non-empty cell exactly matches the deterministic sample value
+ *    that `downloadTemplateXlsx` would have written for that column.
+ */
+function isTemplateHintRow(
+  row: Record<string, unknown>,
+  headers: string[],
+  descriptor: TableDescriptor,
+): boolean {
+  for (const v of Object.values(row)) {
+    if (typeof v === "string" && v.startsWith(TEMPLATE_HINT_MARKER)) return true;
+  }
+  const fields = descriptor.fields.filter((f) => !f.readonly && !f.virtual);
+  const byLabel = new Map(fields.map((f) => [f.label, f]));
+  let matched = 0;
+  let nonEmpty = 0;
+  for (const h of headers) {
+    const cell = row[h];
+    const s = cell === null || cell === undefined ? "" : String(cell).trim();
+    if (s === "") continue;
+    nonEmpty++;
+    const f = byLabel.get(h);
+    if (!f) return false;
+    const expected = sampleFor(f).trim();
+    if (expected === "") return false;
+    if (s === expected) matched++;
+    else return false;
+  }
+  return nonEmpty > 0 && matched === nonEmpty;
 }
 
 export function downloadTemplateXlsx(descriptor: TableDescriptor): void {
@@ -26,6 +79,18 @@ export function downloadTemplateXlsx(descriptor: TableDescriptor): void {
   const headers = fields.map((f) => f.label);
   const sampleRow = fields.map((f) => sampleFor(f));
   const ws = XLSX.utils.aoa_to_sheet([headers, sampleRow]);
+  // Attach a comment to A1 so admins see why the second row exists.
+  const a1 = ws["A1"];
+  if (a1) {
+    (a1 as XLSX.CellObject).c = [{
+      a: "Template",
+      t: `Row 2 contains example values to show the expected format for each column. Delete row 2 before importing your real data — if you leave it in, ${TEMPLATE_HINT_MARKER.toLowerCase()} (we will skip it automatically).`,
+    }];
+  }
+  // Auto-fit-ish column widths based on the longer of header / sample.
+  ws["!cols"] = headers.map((h, i) => ({
+    wch: Math.max(12, h.length + 2, String(sampleRow[i] ?? "").length + 2),
+  }));
   const wb = XLSX.utils.book_new();
   XLSX.utils.book_append_sheet(wb, ws, descriptor.label.slice(0, 30));
   XLSX.writeFile(wb, `${descriptor.name}-template.xlsx`);
