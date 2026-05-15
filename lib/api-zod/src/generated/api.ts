@@ -1960,6 +1960,23 @@ export const RequestUploadUrlResponse = zod.object({
 });
 
 /**
+ * Authenticated employees can sign a download URL only for object paths
+that are referenced by their own employee record (photo, CV, license,
+passport, right-to-work, pay stub, training certificates).
+
+ * @summary Mint a short-lived presigned GET URL for one of the caller's own documents
+ */
+export const SignMyObjectDownloadQueryParams = zod.object({
+  path: zod.coerce
+    .string()
+    .describe("Object path beginning with `\/objects\/`."),
+});
+
+export const SignMyObjectDownloadResponse = zod.object({
+  url: zod.string().url(),
+});
+
+/**
  * Admin-only. Returns a presigned download URL (TTL ~5 min) for an object
 path beginning with `/objects/`. Used by the admin UI to view applicant
 documents without proxying bytes through the API server.

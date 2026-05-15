@@ -1441,6 +1441,17 @@ export type SendChatMessageBody = {
   content: string;
 };
 
+export type SignMyObjectDownloadParams = {
+  /**
+   * Object path beginning with `/objects/`.
+   */
+  path: string;
+};
+
+export type SignMyObjectDownload200 = {
+  url: string;
+};
+
 export type AdminSignObjectDownloadParams = {
   /**
    * Object path beginning with `/objects/`.

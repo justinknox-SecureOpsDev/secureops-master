@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from "react";
-import { View, Text, StyleSheet, ScrollView, TouchableOpacity, ActivityIndicator, Platform, Image, Switch } from "react-native";
+import { View, Text, StyleSheet, ScrollView, TouchableOpacity, ActivityIndicator, Platform, Image, Switch, Linking, Alert } from "react-native";
 import { useRouter } from "expo-router";
 import { useColors } from "@/hooks/useColors";
 import { useGetMe, getGetMeQueryKey, useGetEmployee, getGetEmployeeQueryKey, useGetLicenses, getGetLicensesQueryKey } from "@workspace/api-client-react";
@@ -7,17 +7,74 @@ import { LicenseLevelBadge, levelLabel, levelColor } from "@/components/LicenseL
 import { useAuth } from "@/contexts/AuthContext";
 import { Feather } from "@expo/vector-icons";
 import { isBiometricAvailable, isBiometricEnabled, setBiometricEnabled, promptBiometric } from "@/utils/biometric";
+import { apiRequest } from "@/utils/api";
 
-function InfoRow({ label, value, icon }: { label: string; value?: string | null; icon: string }) {
+function InfoRow({ label, value, icon }: { label: string; value?: string | number | null; icon: string }) {
   const colors = useColors();
-  if (!value) return null;
+  if (value === null || value === undefined || value === "") return null;
   return (
     <View style={[styles.infoRow, { borderBottomColor: colors.border }]}>
       <Feather name={icon as any} size={14} color={colors.mutedForeground} />
       <View style={{ flex: 1 }}>
         <Text style={[styles.infoLabel, { color: colors.mutedForeground }]}>{label}</Text>
-        <Text style={[styles.infoValue, { color: colors.foreground }]}>{value}</Text>
+        <Text style={[styles.infoValue, { color: colors.foreground }]}>{String(value)}</Text>
       </View>
+    </View>
+  );
+}
+
+async function openOwnedDoc(path: string) {
+  try {
+    const { url } = await apiRequest(`/me/storage/sign?path=${encodeURIComponent(path)}`);
+    const can = await Linking.canOpenURL(url);
+    if (can) {
+      await Linking.openURL(url);
+    } else {
+      Alert.alert("Cannot open file", "No app on this device can open the file.");
+    }
+  } catch (e) {
+    Alert.alert("Could not open file", (e as Error).message ?? "Unknown error");
+  }
+}
+
+function DocRow({ label, path, icon = "file-text" }: { label: string; path?: string | null; icon?: string }) {
+  const colors = useColors();
+  if (!path) return null;
+  return (
+    <TouchableOpacity onPress={() => openOwnedDoc(path)} style={[styles.docRow, { borderBottomColor: colors.border }]}>
+      <Feather name={icon as any} size={16} color={colors.primary} />
+      <Text style={{ flex: 1, color: colors.foreground, fontSize: 14, fontWeight: "600" }}>{label}</Text>
+      <Feather name="external-link" size={14} color={colors.mutedForeground} />
+    </TouchableOpacity>
+  );
+}
+
+function PhotoPreview({ path }: { path?: string | null }) {
+  const colors = useColors();
+  const [url, setUrl] = useState<string | null>(null);
+  useEffect(() => {
+    let cancelled = false;
+    if (!path) return;
+    (async () => {
+      try {
+        const { url } = await apiRequest(`/me/storage/sign?path=${encodeURIComponent(path)}`);
+        if (!cancelled) setUrl(url);
+      } catch {
+        // ignore — user can still see the doc link below
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [path]);
+  if (!path) return null;
+  return (
+    <View style={[styles.photoCard, { borderColor: colors.border, backgroundColor: colors.secondary }]}>
+      {url ? (
+        <Image source={{ uri: url }} style={styles.photoImg} resizeMode="cover" />
+      ) : (
+        <View style={[styles.photoImg, { alignItems: "center", justifyContent: "center" }]}>
+          <ActivityIndicator color={colors.primary} />
+        </View>
+      )}
     </View>
   );
 }
@@ -60,7 +117,8 @@ export default function EmployeeProfileScreen() {
   const { data: profile, isLoading } = useGetEmployee(userId!, {
     query: { queryKey: getGetEmployeeQueryKey(userId!), enabled: !!userId },
   });
-  const maxLevel = (profile as any)?.maxLicenseLevel as number | null | undefined;
+  const p = profile as any;
+  const maxLevel = p?.maxLicenseLevel as number | null | undefined;
 
   const { data: licenses } = useGetLicenses({
     params: { employeeId: userId },
@@ -77,6 +135,16 @@ export default function EmployeeProfileScreen() {
 
   if (isLoading) return <View style={[styles.center, { backgroundColor: colors.background }]}><ActivityIndicator size="large" color={colors.primary} /></View>;
 
+  const refs = Array.isArray(p?.references) ? (p.references as any[]) : [];
+  const certs = Array.isArray(p?.trainingCertificateKeys) ? (p.trainingCertificateKeys as string[]) : [];
+  const acks = p?.acknowledgements && typeof p.acknowledgements === "object"
+    ? (Array.isArray(p.acknowledgements) ? p.acknowledgements : Object.values(p.acknowledgements))
+    : [];
+  const availabilitySlots = Array.isArray(p?.availability)
+    ? (p.availability as any[])
+    : (p?.availability && typeof p.availability === "object" ? Object.entries(p.availability).map(([day, period]) => ({ day, period })) : []);
+  const mailtoCorrection = `mailto:hr@williamscouncilsecurity.com?subject=${encodeURIComponent("Profile correction request")}&body=${encodeURIComponent(`Hi HR,\n\nPlease update the following on my profile:\n\n[describe what needs to change]\n\nThanks,\n${p?.firstName ?? ""} ${p?.lastName ?? ""}`)}`;
+
   return (
     <ScrollView style={[styles.container, { backgroundColor: colors.background }]} contentContainerStyle={{ paddingBottom: 100 }}>
       <View style={[styles.topBar, { paddingTop: topPad + 12, borderBottomColor: colors.border }]}>
@@ -91,16 +159,16 @@ export default function EmployeeProfileScreen() {
         <View style={styles.heroRow}>
           <Image source={require("@/assets/images/logo.jpeg")} style={styles.brandLogo} resizeMode="contain" />
           <View style={{ flex: 1, gap: 2 }}>
-            <Text style={[styles.heroName, { color: colors.foreground }]}>{profile?.firstName} {profile?.lastName}</Text>
+            <Text style={[styles.heroName, { color: colors.foreground }]}>{p?.firstName} {p?.lastName}</Text>
             <View style={[styles.roleBadge, { backgroundColor: colors.primary + "20", borderColor: colors.primary + "50" }]}>
               <Text style={[styles.roleText, { color: colors.primary }]}>SECURITY OFFICER</Text>
             </View>
           </View>
         </View>
-        {profile?.hourlyRate && (
+        {p?.hourlyRate && (
           <View style={[styles.rateBar, { backgroundColor: colors.secondary, borderColor: colors.border }]}>
             <Feather name="dollar-sign" size={14} color={colors.accent} />
-            <Text style={[styles.rateText, { color: colors.accent }]}>${parseFloat(profile.hourlyRate as any).toFixed(2)}/hr</Text>
+            <Text style={[styles.rateText, { color: colors.accent }]}>${parseFloat(p.hourlyRate as any).toFixed(2)}/hr</Text>
           </View>
         )}
         <View style={[styles.levelBar, { backgroundColor: levelColor(maxLevel, colors) + "15", borderColor: levelColor(maxLevel, colors) + "60" }]}>
@@ -114,32 +182,170 @@ export default function EmployeeProfileScreen() {
         </View>
       </View>
 
+      {p?.photoKey && (
+        <View style={[styles.section, { backgroundColor: colors.card, borderColor: colors.border }]}>
+          <Text style={[styles.sectionTitle, { color: colors.accent }]}>PHOTO ON FILE</Text>
+          <PhotoPreview path={p.photoKey} />
+        </View>
+      )}
+
       <View style={[styles.section, { backgroundColor: colors.card, borderColor: colors.border }]}>
         <Text style={[styles.sectionTitle, { color: colors.accent }]}>CONTACT</Text>
-        <InfoRow label="Email" value={profile?.email} icon="mail" />
-        <InfoRow label="Phone" value={profile?.phone} icon="phone" />
-        <InfoRow label="Address" value={profile?.address} icon="map-pin" />
+        <InfoRow label="Email" value={p?.email} icon="mail" />
+        <InfoRow label="Phone" value={p?.phone} icon="phone" />
+        <InfoRow label="Address" value={p?.address} icon="map-pin" />
+      </View>
+
+      <View style={[styles.section, { backgroundColor: colors.card, borderColor: colors.border }]}>
+        <Text style={[styles.sectionTitle, { color: colors.accent }]}>PERSONAL DETAILS</Text>
+        <InfoRow label="Date of birth" value={p?.dateOfBirth} icon="calendar" />
+        <InfoRow label="City of birth" value={p?.cityOfBirth} icon="map" />
+        <InfoRow label="State of birth" value={p?.stateOfBirth} icon="map" />
+        <InfoRow label="SSN (last 4)" value={p?.niNumber ? `••• •• ${String(p.niNumber).slice(-4)}` : null} icon="hash" />
+        <InfoRow label="Right to work" value={p?.rightToWorkStatus} icon="check-circle" />
+        {!p?.dateOfBirth && !p?.niNumber && !p?.rightToWorkStatus && (
+          <Text style={[styles.emptyText, { color: colors.mutedForeground }]}>No personal details on file.</Text>
+        )}
       </View>
 
       <View style={[styles.section, { backgroundColor: colors.card, borderColor: colors.border }]}>
         <Text style={[styles.sectionTitle, { color: colors.accent }]}>EMERGENCY CONTACT</Text>
-        <InfoRow label="Name" value={profile?.emergencyContactName} icon="user" />
-        <InfoRow label="Phone" value={profile?.emergencyContactPhone} icon="phone" />
-        {!profile?.emergencyContactName && (
-          <Text style={[styles.emptyText, { color: colors.mutedForeground }]}>No emergency contact on file. Please contact admin.</Text>
+        <InfoRow label="Name" value={p?.emergencyContactName} icon="user" />
+        <InfoRow label="Relationship" value={p?.emergencyContactRelationship} icon="users" />
+        <InfoRow label="Phone" value={p?.emergencyContactPhone} icon="phone" />
+        {!p?.emergencyContactName && (
+          <Text style={[styles.emptyText, { color: colors.mutedForeground }]}>No emergency contact on file. Please update below.</Text>
         )}
       </View>
 
-      {(profile?.skills?.length ?? 0) > 0 && (
+      <View style={[styles.section, { backgroundColor: colors.card, borderColor: colors.border }]}>
+        <Text style={[styles.sectionTitle, { color: colors.accent }]}>TX SECURITY LICENSE</Text>
+        <InfoRow label="License number" value={p?.siaLicenseNumber} icon="credit-card" />
+        <InfoRow label="Level" value={p?.siaLicenseLevel ? `L${p.siaLicenseLevel}` : null} icon="shield" />
+        <InfoRow label="Expires" value={p?.siaLicenseExpiry} icon="calendar" />
+        {!p?.siaLicenseNumber && (
+          <Text style={[styles.emptyText, { color: colors.mutedForeground }]}>No TX license on file.</Text>
+        )}
+      </View>
+
+      <View style={[styles.section, { backgroundColor: colors.card, borderColor: colors.border }]}>
+        <Text style={[styles.sectionTitle, { color: colors.accent }]}>UNIFORM SIZES</Text>
+        <InfoRow label="Shirt" value={p?.uniformShirt} icon="user" />
+        <InfoRow label="Trousers" value={p?.uniformTrousers} icon="user" />
+        <InfoRow label="Jacket" value={p?.uniformJacket} icon="user" />
+        <InfoRow label="Boots" value={p?.uniformBoots} icon="user" />
+        {!p?.uniformShirt && !p?.uniformTrousers && !p?.uniformJacket && !p?.uniformBoots && (
+          <Text style={[styles.emptyText, { color: colors.mutedForeground }]}>No uniform sizes on file.</Text>
+        )}
+      </View>
+
+      <View style={[styles.section, { backgroundColor: colors.card, borderColor: colors.border }]}>
+        <Text style={[styles.sectionTitle, { color: colors.accent }]}>BANKING & TAX</Text>
+        <InfoRow label="Account name" value={p?.bankAccountName} icon="user" />
+        <InfoRow label="Account number" value={p?.bankAccountNumber ? `••••${String(p.bankAccountNumber).slice(-4)}` : null} icon="credit-card" />
+        <InfoRow label="Routing / sort code" value={p?.bankBsb} icon="hash" />
+        <InfoRow label="Tax code" value={p?.taxCode} icon="file-text" />
+        <InfoRow label="Direct deposit consent" value={p?.directDepositConsent ? "Yes" : (p?.directDepositConsent === false ? "No" : null)} icon="check" />
+        {!p?.bankAccountNumber && (
+          <Text style={[styles.emptyText, { color: colors.mutedForeground }]}>No banking details on file.</Text>
+        )}
+      </View>
+
+      <View style={[styles.section, { backgroundColor: colors.card, borderColor: colors.border }]}>
+        <Text style={[styles.sectionTitle, { color: colors.accent }]}>EXPERIENCE</Text>
+        <InfoRow label="Years" value={p?.yearsExperience} icon="briefcase" />
+        {p?.previousExperience ? (
+          <View style={[styles.infoRow, { borderBottomColor: colors.border, alignItems: "flex-start" }]}>
+            <Feather name="file-text" size={14} color={colors.mutedForeground} />
+            <View style={{ flex: 1 }}>
+              <Text style={[styles.infoLabel, { color: colors.mutedForeground }]}>Previous experience</Text>
+              <Text style={[styles.infoValue, { color: colors.foreground }]}>{p.previousExperience}</Text>
+            </View>
+          </View>
+        ) : null}
+        {!p?.yearsExperience && !p?.previousExperience && (
+          <Text style={[styles.emptyText, { color: colors.mutedForeground }]}>No experience on file.</Text>
+        )}
+      </View>
+
+      {refs.length > 0 && (
+        <View style={[styles.section, { backgroundColor: colors.card, borderColor: colors.border }]}>
+          <Text style={[styles.sectionTitle, { color: colors.accent }]}>REFERENCES</Text>
+          {refs.map((r, i) => (
+            <View key={i} style={[styles.refRow, { borderBottomColor: colors.border }]}>
+              <Text style={{ color: colors.foreground, fontWeight: "600", fontSize: 14 }}>{r?.name ?? "—"}</Text>
+              {r?.relationship ? <Text style={{ color: colors.mutedForeground, fontSize: 12 }}>{r.relationship}</Text> : null}
+              {r?.phone ? <Text style={{ color: colors.mutedForeground, fontSize: 12 }}>{r.phone}</Text> : null}
+              {r?.email ? <Text style={{ color: colors.mutedForeground, fontSize: 12 }}>{r.email}</Text> : null}
+            </View>
+          ))}
+        </View>
+      )}
+
+      {availabilitySlots.length > 0 && (
+        <View style={[styles.section, { backgroundColor: colors.card, borderColor: colors.border }]}>
+          <Text style={[styles.sectionTitle, { color: colors.accent }]}>AVAILABILITY</Text>
+          <Text style={[styles.emptyText, { color: colors.mutedForeground, fontStyle: "normal" }]}>
+            {availabilitySlots.length} slot{availabilitySlots.length === 1 ? "" : "s"} on file.
+          </Text>
+          <View style={styles.skillsWrap}>
+            {availabilitySlots.slice(0, 14).map((s, i) => (
+              <View key={i} style={[styles.skillChip, { backgroundColor: colors.secondary, borderColor: colors.border }]}>
+                <Text style={[styles.skillText, { color: colors.foreground }]}>{(s?.day ?? "")} {(s?.period ?? "")}</Text>
+              </View>
+            ))}
+            {availabilitySlots.length > 14 && (
+              <Text style={[styles.skillText, { color: colors.mutedForeground }]}>+{availabilitySlots.length - 14} more</Text>
+            )}
+          </View>
+        </View>
+      )}
+
+      {(p?.skills?.length ?? 0) > 0 && (
         <View style={[styles.section, { backgroundColor: colors.card, borderColor: colors.border }]}>
           <Text style={[styles.sectionTitle, { color: colors.accent }]}>SKILLS & QUALIFICATIONS</Text>
           <View style={styles.skillsWrap}>
-            {profile!.skills!.map((s) => (
+            {p.skills!.map((s: string) => (
               <View key={s} style={[styles.skillChip, { backgroundColor: colors.primary + "20", borderColor: colors.primary + "40" }]}>
                 <Text style={[styles.skillText, { color: colors.primary }]}>{s}</Text>
               </View>
             ))}
           </View>
+        </View>
+      )}
+
+      <View style={[styles.section, { backgroundColor: colors.card, borderColor: colors.border }]}>
+        <Text style={[styles.sectionTitle, { color: colors.accent }]}>DOCUMENTS</Text>
+        <DocRow label="Photo" path={p?.photoKey} icon="image" />
+        <DocRow label="CV / résumé" path={p?.cvKey} icon="file-text" />
+        <DocRow label="TX security license" path={p?.licenseDocKey} icon="credit-card" />
+        <DocRow label="Passport / photo ID" path={p?.passportDocKey} icon="book" />
+        <DocRow label="Right-to-work doc" path={p?.rightToWorkDocKey} icon="check-circle" />
+        <DocRow label="W-2 / pay stub" path={p?.payStubDocKey} icon="dollar-sign" />
+        {certs.map((k, i) => (
+          <DocRow key={k + i} label={`Training certificate ${i + 1}`} path={k} icon="award" />
+        ))}
+        {!p?.photoKey && !p?.cvKey && !p?.licenseDocKey && !p?.passportDocKey && !p?.rightToWorkDocKey && !p?.payStubDocKey && certs.length === 0 && (
+          <Text style={[styles.emptyText, { color: colors.mutedForeground }]}>No documents on file.</Text>
+        )}
+      </View>
+
+      {acks.length > 0 && (
+        <View style={[styles.section, { backgroundColor: colors.card, borderColor: colors.border }]}>
+          <Text style={[styles.sectionTitle, { color: colors.accent }]}>ACKNOWLEDGEMENTS</Text>
+          {acks.map((a: any, i: number) => (
+            <View key={i} style={[styles.infoRow, { borderBottomColor: colors.border }]}>
+              <Feather name={a?.accepted ? "check-circle" : "x-circle"} size={14} color={a?.accepted ? "#22c55e" : colors.destructive} />
+              <View style={{ flex: 1 }}>
+                <Text style={[styles.infoValue, { color: colors.foreground }]}>{a?.type ?? "Acknowledgement"}</Text>
+                {a?.signature ? (
+                  <Text style={[styles.infoLabel, { color: colors.mutedForeground }]}>
+                    Signed “{a.signature}”{a?.timestamp ? ` · ${new Date(a.timestamp).toLocaleDateString()}` : ""}
+                  </Text>
+                ) : null}
+              </View>
+            </View>
+          ))}
         </View>
       )}
 
@@ -175,6 +381,19 @@ export default function EmployeeProfileScreen() {
         >
           <Feather name="edit-3" size={16} color={colors.primary} />
           <Text style={{ color: colors.foreground, flex: 1, fontSize: 14, fontWeight: "600" }}>Edit profile</Text>
+          <Feather name="chevron-right" size={16} color={colors.mutedForeground} />
+        </TouchableOpacity>
+        <TouchableOpacity
+          onPress={() => Linking.openURL(mailtoCorrection).catch(() => Alert.alert("Email unavailable", "Could not open your email app. Please contact HR directly."))}
+          style={[styles.actionRow, { borderBottomColor: colors.border }]}
+        >
+          <Feather name="alert-circle" size={16} color={colors.accent} />
+          <View style={{ flex: 1 }}>
+            <Text style={{ color: colors.foreground, fontSize: 14, fontWeight: "600" }}>Request a correction</Text>
+            <Text style={{ color: colors.mutedForeground, fontSize: 12, marginTop: 2 }}>
+              Email HR to fix anything you can't edit yourself
+            </Text>
+          </View>
           <Feather name="chevron-right" size={16} color={colors.mutedForeground} />
         </TouchableOpacity>
         <TouchableOpacity
@@ -233,7 +452,7 @@ const styles = StyleSheet.create({
   infoRow: { flexDirection: "row", alignItems: "flex-start", gap: 10, paddingVertical: 10, borderBottomWidth: 1 },
   infoLabel: { fontSize: 11, marginBottom: 2 },
   infoValue: { fontSize: 14 },
-  skillsWrap: { flexDirection: "row", flexWrap: "wrap", gap: 8 },
+  skillsWrap: { flexDirection: "row", flexWrap: "wrap", gap: 8, marginTop: 6 },
   skillChip: { paddingHorizontal: 10, paddingVertical: 5, borderRadius: 6, borderWidth: 1 },
   skillText: { fontSize: 13 },
   licCard: { paddingVertical: 12, borderBottomWidth: 1, gap: 3 },
@@ -247,4 +466,8 @@ const styles = StyleSheet.create({
   companyRow: { flexDirection: "row", alignItems: "center", gap: 8 },
   companyText: { fontSize: 13 },
   actionRow: { flexDirection: "row", alignItems: "center", gap: 12, paddingVertical: 14, borderBottomWidth: 1 },
+  docRow: { flexDirection: "row", alignItems: "center", gap: 12, paddingVertical: 12, borderBottomWidth: 1 },
+  refRow: { paddingVertical: 10, borderBottomWidth: 1, gap: 2 },
+  photoCard: { borderWidth: 1, borderRadius: 10, overflow: "hidden", alignItems: "center", justifyContent: "center" },
+  photoImg: { width: "100%", height: 220 },
 });

@@ -5,7 +5,9 @@ import {
   RequestUploadUrlResponse,
 } from "@workspace/api-zod";
 import { ObjectStorageService, ObjectNotFoundError } from "../lib/objectStorage";
-import { requireAdmin } from "../middlewares/auth";
+import { requireAdmin, requireAuth } from "../middlewares/auth";
+import { db, employeesTable } from "@workspace/db";
+import { eq } from "drizzle-orm";
 
 const router: IRouter = Router();
 const objectStorageService = new ObjectStorageService();
@@ -40,6 +42,63 @@ router.post("/storage/uploads/request-url", async (req: Request, res: Response) 
   } catch (error) {
     req.log.error({ err: error }, "Error generating upload URL");
     res.status(500).json({ error: "Failed to generate upload URL" });
+  }
+});
+
+/**
+ * GET /me/storage/sign?path=/objects/...
+ *
+ * Self-serve signed download URL for the authenticated employee. Only signs
+ * paths that match one of the caller's own employee document keys.
+ */
+router.get("/me/storage/sign", requireAuth, async (req: Request, res: Response) => {
+  const path = (req.query.path as string | undefined)?.trim();
+  if (!path || !path.startsWith("/objects/")) {
+    res.status(400).json({ error: "Bad Request", message: "path query param required" });
+    return;
+  }
+  try {
+    const [emp] = await db
+      .select({
+        photoKey: employeesTable.photoKey,
+        cvKey: employeesTable.cvKey,
+        licenseDocKey: employeesTable.licenseDocKey,
+        passportDocKey: employeesTable.passportDocKey,
+        rightToWorkDocKey: employeesTable.rightToWorkDocKey,
+        payStubDocKey: employeesTable.payStubDocKey,
+        trainingCertificateKeys: employeesTable.trainingCertificateKeys,
+      })
+      .from(employeesTable)
+      .where(eq(employeesTable.userId, req.user!.userId));
+
+    if (!emp) {
+      res.status(403).json({ error: "Forbidden", message: "No employee record" });
+      return;
+    }
+
+    const owned = new Set<string>();
+    for (const k of [emp.photoKey, emp.cvKey, emp.licenseDocKey, emp.passportDocKey, emp.rightToWorkDocKey, emp.payStubDocKey]) {
+      if (k) owned.add(k);
+    }
+    if (Array.isArray(emp.trainingCertificateKeys)) {
+      for (const k of emp.trainingCertificateKeys as unknown[]) {
+        if (typeof k === "string") owned.add(k);
+      }
+    }
+    if (!owned.has(path)) {
+      res.status(403).json({ error: "Forbidden", message: "You do not own this object" });
+      return;
+    }
+
+    const url = await objectStorageService.getSignedDownloadURL(path);
+    res.json({ url });
+  } catch (err) {
+    if (err instanceof ObjectNotFoundError) {
+      res.status(404).json({ error: "Not Found", message: "Object not found" });
+      return;
+    }
+    req.log.error({ err }, "Error signing self-serve download URL");
+    res.status(500).json({ error: "Internal Server Error", message: "Failed to sign URL" });
   }
 });
 

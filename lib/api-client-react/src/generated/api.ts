@@ -80,6 +80,8 @@ import type {
   SendChatMessageBody,
   Shift,
   ShiftAssignment,
+  SignMyObjectDownload200,
+  SignMyObjectDownloadParams,
   Site,
   SubmitApplicationRequest,
   SubmitOnboardingRequest,
@@ -5354,6 +5356,113 @@ export const useRequestUploadUrl = <
 > => {
   return useMutation(getRequestUploadUrlMutationOptions(options));
 };
+
+/**
+ * Authenticated employees can sign a download URL only for object paths
+that are referenced by their own employee record (photo, CV, license,
+passport, right-to-work, pay stub, training certificates).
+
+ * @summary Mint a short-lived presigned GET URL for one of the caller's own documents
+ */
+export const getSignMyObjectDownloadUrl = (
+  params: SignMyObjectDownloadParams,
+) => {
+  const normalizedParams = new URLSearchParams();
+
+  Object.entries(params || {}).forEach(([key, value]) => {
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? "null" : value.toString());
+    }
+  });
+
+  const stringifiedParams = normalizedParams.toString();
+
+  return stringifiedParams.length > 0
+    ? `/api/me/storage/sign?${stringifiedParams}`
+    : `/api/me/storage/sign`;
+};
+
+export const signMyObjectDownload = async (
+  params: SignMyObjectDownloadParams,
+  options?: RequestInit,
+): Promise<SignMyObjectDownload200> => {
+  return customFetch<SignMyObjectDownload200>(
+    getSignMyObjectDownloadUrl(params),
+    {
+      ...options,
+      method: "GET",
+    },
+  );
+};
+
+export const getSignMyObjectDownloadQueryKey = (
+  params?: SignMyObjectDownloadParams,
+) => {
+  return [`/api/me/storage/sign`, ...(params ? [params] : [])] as const;
+};
+
+export const getSignMyObjectDownloadQueryOptions = <
+  TData = Awaited<ReturnType<typeof signMyObjectDownload>>,
+  TError = ErrorType<void>,
+>(
+  params: SignMyObjectDownloadParams,
+  options?: {
+    query?: UseQueryOptions<
+      Awaited<ReturnType<typeof signMyObjectDownload>>,
+      TError,
+      TData
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+) => {
+  const { query: queryOptions, request: requestOptions } = options ?? {};
+
+  const queryKey =
+    queryOptions?.queryKey ?? getSignMyObjectDownloadQueryKey(params);
+
+  const queryFn: QueryFunction<
+    Awaited<ReturnType<typeof signMyObjectDownload>>
+  > = ({ signal }) =>
+    signMyObjectDownload(params, { signal, ...requestOptions });
+
+  return { queryKey, queryFn, ...queryOptions } as UseQueryOptions<
+    Awaited<ReturnType<typeof signMyObjectDownload>>,
+    TError,
+    TData
+  > & { queryKey: QueryKey };
+};
+
+export type SignMyObjectDownloadQueryResult = NonNullable<
+  Awaited<ReturnType<typeof signMyObjectDownload>>
+>;
+export type SignMyObjectDownloadQueryError = ErrorType<void>;
+
+/**
+ * @summary Mint a short-lived presigned GET URL for one of the caller's own documents
+ */
+
+export function useSignMyObjectDownload<
+  TData = Awaited<ReturnType<typeof signMyObjectDownload>>,
+  TError = ErrorType<void>,
+>(
+  params: SignMyObjectDownloadParams,
+  options?: {
+    query?: UseQueryOptions<
+      Awaited<ReturnType<typeof signMyObjectDownload>>,
+      TError,
+      TData
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+): UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+  const queryOptions = getSignMyObjectDownloadQueryOptions(params, options);
+
+  const query = useQuery(queryOptions) as UseQueryResult<TData, TError> & {
+    queryKey: QueryKey;
+  };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
 
 /**
  * Admin-only. Returns a presigned download URL (TTL ~5 min) for an object
