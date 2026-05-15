@@ -73,6 +73,17 @@ export type Field = {
    *  generic per-type sample when omitted. Ignored entirely for field
    *  types that aren't supported by Excel import (e.g. file uploads). */
   importExample?: string;
+  /** Grid-only computed column. The field is automatically skipped by the
+   *  row edit dialog, the import wizard (template + mapping + write paths)
+   *  and never sent to the API. The grid renders it by resolving `fromField`
+   *  (an FK key on the same row) against its target table and passing the
+   *  matched row to `render`. Returning an empty string falls back to "—". */
+  derived?: {
+    /** Key of an FK field on the same descriptor whose row supplies the data. */
+    fromField: string;
+    /** Build the cell label from the resolved FK row (null when unmatched). */
+    render: (fkRow: Record<string, unknown> | null) => string;
+  };
 };
 
 export type TableDescriptor = {
@@ -143,6 +154,19 @@ export const TABLES: TableDescriptor[] = [
     primaryLabelField: "phone",
     fields: [
       { key: "id", label: "ID", type: "text", readonly: true, hiddenInGrid: true, section: "Identity" },
+      {
+        key: "__name", label: "Name", type: "text", readonly: true,
+        derived: {
+          fromField: "userId",
+          render: (u) => {
+            if (!u) return "";
+            const first = String(u.firstName ?? "").trim();
+            const last = String(u.lastName ?? "").trim();
+            const full = [first, last].filter(Boolean).join(" ");
+            return full || String(u.email ?? "").trim();
+          },
+        },
+      },
       { key: "userId", label: "User", type: "fk", fkTable: "users", fkLabel: "email", required: true, section: "Identity", importResolveByLabel: true, importExample: "name@example.com" },
       // --- Contact ---
       { key: "phone", label: "Phone", type: "text", section: "Contact & Identity", importExample: "+1 512 555 0142" },

@@ -10,7 +10,7 @@ const NON_IMPORTABLE_TYPES: ReadonlySet<FieldType> = new Set(["fileKey", "fileKe
  *  virtual) and not a file-upload type. */
 export function getImportableFields(descriptor: TableDescriptor): Field[] {
   return descriptor.fields.filter(
-    (f) => !f.readonly && !f.virtual && !NON_IMPORTABLE_TYPES.has(f.type),
+    (f) => !f.readonly && !f.virtual && !f.derived && !NON_IMPORTABLE_TYPES.has(f.type),
   );
 }
 

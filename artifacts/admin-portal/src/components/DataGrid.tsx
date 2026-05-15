@@ -67,6 +67,18 @@ function FileKeyListCell({ value }: { value: unknown }) {
   );
 }
 
+function DerivedCell({
+  field, sourceField, row,
+}: { field: Field; sourceField: Field | undefined; row: Row }) {
+  const { options } = useFkOptions(sourceField?.fkTable);
+  if (!field.derived || !sourceField) return <>—</>;
+  const fkValue = (row as any)[field.derived.fromField];
+  if (!fkValue) return <>—</>;
+  const match = options.find((o) => o.id === String(fkValue));
+  const label = field.derived.render(match?.row ?? null);
+  return <>{label.trim() || "—"}</>;
+}
+
 function renderCell(f: Field, value: unknown) {
   if (f.type === "fk") return <FkCell field={f} value={value} />;
   if (f.type === "fileKey") return <FileKeyCell value={value} />;
@@ -253,15 +265,21 @@ export function DataGrid({
             <TableRow>
               {gridFields.map((f) => (
                 <TableHead key={f.key}>
-                  <button
-                    onClick={() => toggleSort(f.key)}
-                    className="inline-flex items-center gap-1 font-semibold uppercase tracking-wide text-xs brand-navy"
-                  >
-                    {f.label}
-                    {sort.field === f.key
-                      ? (sort.dir === "asc" ? <ArrowUp className="w-3 h-3" /> : <ArrowDown className="w-3 h-3" />)
-                      : <ArrowUpDown className="w-3 h-3 opacity-30" />}
-                  </button>
+                  {f.derived ? (
+                    <span className="inline-flex items-center gap-1 font-semibold uppercase tracking-wide text-xs brand-navy">
+                      {f.label}
+                    </span>
+                  ) : (
+                    <button
+                      onClick={() => toggleSort(f.key)}
+                      className="inline-flex items-center gap-1 font-semibold uppercase tracking-wide text-xs brand-navy"
+                    >
+                      {f.label}
+                      {sort.field === f.key
+                        ? (sort.dir === "asc" ? <ArrowUp className="w-3 h-3" /> : <ArrowDown className="w-3 h-3" />)
+                        : <ArrowUpDown className="w-3 h-3 opacity-30" />}
+                    </button>
+                  )}
                 </TableHead>
               ))}
               <TableHead className="w-24 text-right">Actions</TableHead>
@@ -280,7 +298,9 @@ export function DataGrid({
               <TableRow key={String((r as any).id)} className="hover:bg-accent/40">
                 {gridFields.map((f) => (
                   <TableCell key={f.key} className="text-sm max-w-[260px] truncate">
-                    {renderCell(f, (r as any)[f.key])}
+                    {f.derived
+                      ? <DerivedCell field={f} sourceField={descriptor.fields.find((x) => x.key === f.derived!.fromField)} row={r} />
+                      : renderCell(f, (r as any)[f.key])}
                   </TableCell>
                 ))}
                 <TableCell className="text-right">

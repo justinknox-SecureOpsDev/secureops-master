@@ -201,7 +201,7 @@ export function RowFormDialog({
 }) {
   const lockedSet = useMemo(() => new Set(lockedFields ?? []), [lockedFields]);
   const editable = useMemo(
-    () => descriptor.fields.filter((f) => !f.readonly),
+    () => descriptor.fields.filter((f) => !f.readonly && !f.derived),
     [descriptor],
   );
   const [values, setValues] = useState<Record<string, string>>({});
