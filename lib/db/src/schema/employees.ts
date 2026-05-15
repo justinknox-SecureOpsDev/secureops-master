@@ -2,6 +2,8 @@ import { pgTable, text, uuid, timestamp, numeric, date, integer, jsonb, boolean 
 import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod/v4";
 import { usersTable } from "./users";
+import { applicationsTable } from "./applications";
+import { onboardingSubmissionsTable } from "./onboardingSubmissions";
 
 export const employeesTable = pgTable("employees", {
   id: uuid("id").primaryKey().defaultRandom(),
@@ -42,8 +44,8 @@ export const employeesTable = pgTable("employees", {
   directDepositConsent: boolean("direct_deposit_consent"),
   directDepositSignature: text("direct_deposit_signature"),
   acknowledgements: jsonb("acknowledgements"),
-  applicationId: uuid("application_id"),
-  onboardingSubmissionId: uuid("onboarding_submission_id"),
+  applicationId: uuid("application_id").references(() => applicationsTable.id, { onDelete: "set null" }),
+  onboardingSubmissionId: uuid("onboarding_submission_id").references(() => onboardingSubmissionsTable.id, { onDelete: "set null" }),
   skills: text("skills").array(),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow().$onUpdate(() => new Date()),

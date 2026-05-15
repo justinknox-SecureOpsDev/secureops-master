@@ -1760,33 +1760,47 @@ components:
     CreateEmployeeRequest:
       type: object
       properties:
-        email:
-          type: string
-        password:
-          type: string
-        firstName:
-          type: string
-        lastName:
-          type: string
-        phone:
-          type: string
+        email: { type: string }
+        password: { type: string }
+        firstName: { type: string }
+        lastName: { type: string }
         role:
           type: string
           enum: [admin, employee]
-        address:
-          type: string
-        emergencyContactName:
-          type: string
-        emergencyContactPhone:
-          type: string
-        hourlyRate:
-          type: number
-        bankAccountName:
-          type: string
-        bankAccountNumber:
-          type: string
-        bankBsb:
-          type: string
+        phone: { type: string }
+        address: { type: string }
+        dateOfBirth: { type: string, format: date, nullable: true }
+        cityOfBirth: { type: string, nullable: true }
+        stateOfBirth: { type: string, nullable: true }
+        niNumber: { type: string, nullable: true }
+        rightToWorkStatus: { type: string, nullable: true }
+        rightToWorkDocKey: { type: string, nullable: true }
+        siaLicenseNumber: { type: string, nullable: true }
+        siaLicenseLevel: { type: integer, nullable: true, enum: [2, 3, 4] }
+        siaLicenseExpiry: { type: string, format: date, nullable: true }
+        licenseDocKey: { type: string, nullable: true }
+        passportDocKey: { type: string, nullable: true }
+        previousExperience: { type: string, nullable: true }
+        yearsExperience: { type: integer, nullable: true }
+        photoKey: { type: string, nullable: true }
+        cvKey: { type: string, nullable: true }
+        trainingCertificateKeys: { type: array, nullable: true, items: { type: string } }
+        availability: { type: object, nullable: true, additionalProperties: true }
+        emergencyContactName: { type: string }
+        emergencyContactRelationship: { type: string, nullable: true }
+        emergencyContactPhone: { type: string }
+        hourlyRate: { type: number }
+        bankAccountName: { type: string }
+        bankAccountNumber: { type: string }
+        bankBsb: { type: string }
+        taxCode: { type: string, nullable: true }
+        payStubDocKey: { type: string, nullable: true }
+        uniformShirt: { type: string, nullable: true }
+        uniformTrousers: { type: string, nullable: true }
+        uniformJacket: { type: string, nullable: true }
+        uniformBoots: { type: string, nullable: true }
+        directDepositConsent: { type: boolean, nullable: true }
+        directDepositSignature: { type: string, nullable: true }
         skills:
           type: array
           items:

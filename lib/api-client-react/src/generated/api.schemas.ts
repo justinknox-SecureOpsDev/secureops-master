@@ -147,20 +147,60 @@ export const CreateEmployeeRequestRole = {
   employee: "employee",
 } as const;
 
+export type CreateEmployeeRequestSiaLicenseLevel =
+  | (typeof CreateEmployeeRequestSiaLicenseLevel)[keyof typeof CreateEmployeeRequestSiaLicenseLevel]
+  | null;
+
+export const CreateEmployeeRequestSiaLicenseLevel = {
+  NUMBER_2: 2,
+  NUMBER_3: 3,
+  NUMBER_4: 4,
+} as const;
+
+export type CreateEmployeeRequestAvailability = {
+  [key: string]: unknown;
+} | null;
+
 export interface CreateEmployeeRequest {
   email: string;
   password: string;
   firstName: string;
   lastName: string;
-  phone?: string;
   role: CreateEmployeeRequestRole;
+  phone?: string;
   address?: string;
+  dateOfBirth?: string | null;
+  cityOfBirth?: string | null;
+  stateOfBirth?: string | null;
+  niNumber?: string | null;
+  rightToWorkStatus?: string | null;
+  rightToWorkDocKey?: string | null;
+  siaLicenseNumber?: string | null;
+  siaLicenseLevel?: CreateEmployeeRequestSiaLicenseLevel;
+  siaLicenseExpiry?: string | null;
+  licenseDocKey?: string | null;
+  passportDocKey?: string | null;
+  previousExperience?: string | null;
+  yearsExperience?: number | null;
+  photoKey?: string | null;
+  cvKey?: string | null;
+  trainingCertificateKeys?: string[] | null;
+  availability?: CreateEmployeeRequestAvailability;
   emergencyContactName?: string;
+  emergencyContactRelationship?: string | null;
   emergencyContactPhone?: string;
   hourlyRate?: number;
   bankAccountName?: string;
   bankAccountNumber?: string;
   bankBsb?: string;
+  taxCode?: string | null;
+  payStubDocKey?: string | null;
+  uniformShirt?: string | null;
+  uniformTrousers?: string | null;
+  uniformJacket?: string | null;
+  uniformBoots?: string | null;
+  directDepositConsent?: boolean | null;
+  directDepositSignature?: string | null;
   skills?: string[];
 }
 

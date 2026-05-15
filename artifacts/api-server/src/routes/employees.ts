@@ -139,7 +139,10 @@ router.get("/employees", requireAdmin, async (req, res): Promise<void> => {
 });
 
 router.post("/employees", requireAdmin, async (req, res): Promise<void> => {
-  const { email, password, firstName, lastName, role, phone, address, emergencyContactName, emergencyContactPhone, hourlyRate, bankAccountName, bankAccountNumber, bankBsb, skills } = req.body;
+  const body = req.body as Record<string, unknown>;
+  const { email, password, firstName, lastName, role } = body as {
+    email?: string; password?: string; firstName?: string; lastName?: string; role?: string;
+  };
   if (!email || !password || !firstName || !lastName) {
     res.status(400).json({ error: "Bad Request", message: "email, password, firstName, lastName required" });
     return;
@@ -154,18 +157,17 @@ router.post("/employees", requireAdmin, async (req, res): Promise<void> => {
     status: "active",
   }).returning();
 
-  await db.insert(employeesTable).values({
-    userId: user.id,
-    phone: phone || null,
-    address: address || null,
-    emergencyContactName: emergencyContactName || null,
-    emergencyContactPhone: emergencyContactPhone || null,
-    hourlyRate: hourlyRate ? String(hourlyRate) : null,
-    bankAccountName: bankAccountName || null,
-    bankAccountNumber: bankAccountNumber || null,
-    bankBsb: bankBsb || null,
-    skills: skills || [],
-  });
+  // Build employee insert payload from the same allow-list used by PUT, so
+  // POST /employees accepts the full expanded CreateEmployeeRequest contract.
+  const empValues: Record<string, unknown> = { userId: user.id };
+  for (const k of EMP_PASSTHROUGH_KEYS) {
+    if (body[k] !== undefined) empValues[k] = body[k];
+  }
+  if (body.hourlyRate !== undefined) {
+    empValues.hourlyRate = body.hourlyRate === null ? null : String(body.hourlyRate);
+  }
+  if (empValues.skills === undefined) empValues.skills = [];
+  await db.insert(employeesTable).values(empValues as typeof employeesTable.$inferInsert);
 
   // Re-read via the canonical projection so the response shape matches
   // GET /employees/:id and the OpenAPI Employee schema exactly.
