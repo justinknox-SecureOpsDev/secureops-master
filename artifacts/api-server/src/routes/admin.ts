@@ -216,7 +216,7 @@ const tables: Record<string, TableConfig> = {
       out = applyIntCoercion(out, ["requiredLicenseLevel", "headcount"]);
       return out;
     },
-    importSupported: false,
+    importSupported: true,
     label: "Shift",
   },
   shift_assignments: {
@@ -225,7 +225,7 @@ const tables: Record<string, TableConfig> = {
     searchColumns: [shiftAssignmentsTable.status],
     orderBy: shiftAssignmentsTable.createdAt,
     coerceWrite: (v) => v,
-    importSupported: false,
+    importSupported: true,
     label: "Shift assignment",
   },
   time_entries: {
@@ -244,7 +244,7 @@ const tables: Record<string, TableConfig> = {
       ]);
       return out;
     },
-    importSupported: false,
+    importSupported: true,
     label: "Time entry",
   },
   payroll_entries: {
@@ -257,7 +257,7 @@ const tables: Record<string, TableConfig> = {
       out = applyNumericCoercion(out, ["totalHours", "hourlyRate", "grossPay", "tax", "netPay"]);
       return out;
     },
-    importSupported: false,
+    importSupported: true,
     label: "Payroll entry",
   },
   invoices: {
@@ -270,7 +270,7 @@ const tables: Record<string, TableConfig> = {
       out = applyNumericCoercion(out, ["subtotal", "taxAmount", "totalAmount"]);
       return out;
     },
-    importSupported: false,
+    importSupported: true,
     label: "Invoice",
   },
   incidents: {
@@ -283,7 +283,7 @@ const tables: Record<string, TableConfig> = {
       out = applyNumericCoercion(out, ["lat", "lng"]);
       return out;
     },
-    importSupported: false,
+    importSupported: true,
     label: "Incident",
   },
   licenses: {
@@ -292,7 +292,7 @@ const tables: Record<string, TableConfig> = {
     searchColumns: [licensesTable.type, licensesTable.licenseNumber, licensesTable.issuingAuthority],
     orderBy: licensesTable.expiryDate,
     coerceWrite: (v) => applyIntCoercion(v, ["level"]),
-    importSupported: false,
+    importSupported: true,
     label: "License",
   },
 };

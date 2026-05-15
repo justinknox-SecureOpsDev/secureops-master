@@ -143,7 +143,7 @@ export const TABLES: TableDescriptor[] = [
     name: "shifts",
     label: "Shifts",
     plural: "shifts",
-    importSupported: false,
+    importSupported: true,
     primaryLabelField: "title",
     fields: [
       { key: "id", label: "ID", type: "text", readonly: true, hiddenInGrid: true },
@@ -179,7 +179,7 @@ export const TABLES: TableDescriptor[] = [
     name: "shift_assignments",
     label: "Shift Assignments",
     plural: "shift assignments",
-    importSupported: false,
+    importSupported: true,
     primaryLabelField: "id",
     fields: [
       { key: "id", label: "ID", type: "text", readonly: true, hiddenInGrid: true },
@@ -200,7 +200,7 @@ export const TABLES: TableDescriptor[] = [
     name: "time_entries",
     label: "Time Entries",
     plural: "time entries",
-    importSupported: false,
+    importSupported: true,
     primaryLabelField: "id",
     fields: [
       { key: "id", label: "ID", type: "text", readonly: true, hiddenInGrid: true },
@@ -224,7 +224,7 @@ export const TABLES: TableDescriptor[] = [
     name: "payroll_entries",
     label: "Payroll",
     plural: "payroll entries",
-    importSupported: false,
+    importSupported: true,
     primaryLabelField: "id",
     fields: [
       { key: "id", label: "ID", type: "text", readonly: true, hiddenInGrid: true },
@@ -252,7 +252,7 @@ export const TABLES: TableDescriptor[] = [
     name: "invoices",
     label: "Invoices",
     plural: "invoices",
-    importSupported: false,
+    importSupported: true,
     primaryLabelField: "invoiceNumber",
     fields: [
       { key: "id", label: "ID", type: "text", readonly: true, hiddenInGrid: true },
@@ -283,7 +283,7 @@ export const TABLES: TableDescriptor[] = [
     name: "incidents",
     label: "Incidents",
     plural: "incidents",
-    importSupported: false,
+    importSupported: true,
     primaryLabelField: "title",
     fields: [
       { key: "id", label: "ID", type: "text", readonly: true, hiddenInGrid: true },
@@ -319,7 +319,7 @@ export const TABLES: TableDescriptor[] = [
     name: "licenses",
     label: "Licences",
     plural: "licences",
-    importSupported: false,
+    importSupported: true,
     primaryLabelField: "licenseNumber",
     fields: [
       { key: "id", label: "ID", type: "text", readonly: true, hiddenInGrid: true },
