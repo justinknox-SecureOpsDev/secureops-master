@@ -1,6 +1,7 @@
 import { Router, type IRouter, type Request, type Response } from "express";
 import { eq, sql, desc, asc, ilike, or, and, inArray, type AnyColumn } from "drizzle-orm";
 import bcrypt from "bcryptjs";
+import { randomBytes } from "node:crypto";
 import { z } from "zod/v4";
 import {
   db,
@@ -330,6 +331,14 @@ type FkRef = {
    * (no pre-filter) so alt-key matches aren't excluded by the email IN clause.
    */
   altPrimaryKeys?: (row: any) => string[];
+  /**
+   * If provided, unresolved labels trigger this factory which creates a
+   * placeholder record and returns its id, so an import can populate now and
+   * the admin can flesh out the row later. Time-entries use this for employee
+   * names that don't match an existing user (creates a `pending` user +
+   * employee with `mustCompleteProfile=true`). Skipped on dry-run preview.
+   */
+  autoCreate?: (rawLabel: string) => Promise<string>;
 };
 
 /** Lower-trim-collapse-whitespace for free-text comparisons. */
@@ -341,6 +350,39 @@ const userFullNameAlt = (u: any): string[] => {
   const full = normText(`${u.firstName ?? ""} ${u.lastName ?? ""}`);
   return full ? [full] : [];
 };
+
+/** Splits "Nabian ramirez" or "Victor Jamal wheeler" into first / last with
+ *  reasonable defaults. Single-word names go into firstName with a placeholder
+ *  lastName so the not-null constraint is satisfied. */
+function splitFullName(label: string): { firstName: string; lastName: string } {
+  const parts = label.trim().replace(/\s+/g, " ").split(" ");
+  if (parts.length === 0 || !parts[0]) return { firstName: "Imported", lastName: "Employee" };
+  if (parts.length === 1) return { firstName: parts[0], lastName: "(unknown)" };
+  return { firstName: parts[0], lastName: parts.slice(1).join(" ") };
+}
+
+/** Auto-creates a `pending` user + employee from a free-text full name found
+ *  in a time-entries import. The placeholder email is unique-by-construction
+ *  so the row inserts cleanly; `mustCompleteProfile=true` flags the row for
+ *  the admin to finish later. Runs as its own transaction so the new user
+ *  exists even if the surrounding import partially fails. */
+async function autoCreateEmployeeFromName(label: string): Promise<string> {
+  const { firstName, lastName } = splitFullName(label);
+  const slug = `${firstName}.${lastName}`.toLowerCase().replace(/[^a-z0-9.]+/g, "-").replace(/^[-.]+|[-.]+$/g, "") || "imported";
+  const short = randomBytes(3).toString("hex");
+  const email = `${slug}+import-${short}@imported.local`;
+  const passwordHash = await bcrypt.hash(randomBytes(16).toString("hex"), 10);
+  return await db.transaction(async (tx) => {
+    const [u] = (await tx.insert(usersTable).values({
+      email, passwordHash, firstName, lastName,
+      role: "employee",
+      status: "pending",
+      mustCompleteProfile: true,
+    }).returning()) as Array<{ id: string }>;
+    await tx.insert(employeesTable).values({ userId: u.id });
+    return u.id;
+  });
+}
 
 /** Shifts in spreadsheets often append the required licence level to the title
  *  (e.g. "Acme Patrol 3" where 3 = level 3). Register a "<title> <level>"
@@ -368,6 +410,7 @@ const fkResolution: Record<string, Record<string, FkRef>> = {
       table: usersTable,
       matchColumns: [{ key: "email", col: usersTable.email, type: "text" }],
       altPrimaryKeys: userFullNameAlt,
+      autoCreate: autoCreateEmployeeFromName,
     },
     shiftId: {
       table: shiftsTable,
@@ -432,10 +475,12 @@ async function resolveImportFks(
   rows: any[],
   resolveHints: Record<string, { by?: "id" | "label" }>,
   matchExtras: Array<Record<string, Record<string, unknown>> | undefined>,
-): Promise<Map<number, string>> {
+  opts: { dryRun: boolean } = { dryRun: false },
+): Promise<{ errors: Map<number, string>; autoCreated: Record<string, string[]> }> {
   const errors = new Map<number, string>();
+  const autoCreated: Record<string, string[]> = {};
   const refs = fkResolution[tableName];
-  if (!refs) return errors;
+  if (!refs) return { errors, autoCreated };
 
   for (const [fkKey, hint] of Object.entries(resolveHints)) {
     if (hint?.by !== "label") continue;
@@ -505,6 +550,11 @@ async function resolveImportFks(
       }
     }
 
+    // Cache auto-created ids per normalized primary value so multiple rows for
+    // the same new employee dedupe to a single insert.
+    const autoCreatedThisField = new Map<string, string>();
+    const tasks: Array<{ index: number; rawLabel: string; key: string; lookupKey: string }> = [];
+
     rows.forEach((r, i) => {
       if (!r || typeof r !== "object") return;
       const v = r[fkKey];
@@ -528,16 +578,45 @@ async function resolveImportFks(
       const resolved = map.get(key);
       if (resolved) {
         r[fkKey] = resolved;
-      } else {
-        const labelParts = ref.matchColumns.map((mc, idx) => {
-          const raw = idx === 0 ? s : matchExtras[i]?.[fkKey]?.[mc.key];
-          return raw === undefined || raw === null || raw === "" ? "(blank)" : String(raw);
-        });
-        errors.set(i, `${fkKey}: no ${ref.matchColumns.map((mc) => mc.key).join("+")} match for "${labelParts.join(" / ")}"`);
+        return;
       }
+      if (ref.autoCreate) {
+        // Defer creation so we can dedupe + create sequentially below.
+        tasks.push({ index: i, rawLabel: s, key: parts[0], lookupKey: key });
+        return;
+      }
+      const labelParts = ref.matchColumns.map((mc, idx) => {
+        const raw = idx === 0 ? s : matchExtras[i]?.[fkKey]?.[mc.key];
+        return raw === undefined || raw === null || raw === "" ? "(blank)" : String(raw);
+      });
+      errors.set(i, `${fkKey}: no ${ref.matchColumns.map((mc) => mc.key).join("+")} match for "${labelParts.join(" / ")}"`);
     });
+
+    if (tasks.length > 0 && ref.autoCreate) {
+      const created: string[] = [];
+      for (const t of tasks) {
+        try {
+          let id = autoCreatedThisField.get(t.key);
+          if (!id) {
+            if (opts.dryRun) {
+              // Sentinel so insert-schema UUID validation passes during preview;
+              // no row is actually written because the handler short-circuits.
+              id = "00000000-0000-0000-0000-000000000000";
+            } else {
+              id = await ref.autoCreate(t.rawLabel);
+            }
+            autoCreatedThisField.set(t.key, id);
+            created.push(t.rawLabel);
+          }
+          rows[t.index][fkKey] = id;
+        } catch (err: any) {
+          errors.set(t.index, `${fkKey}: auto-create failed for "${t.rawLabel}" — ${err?.message ?? "unknown error"}`);
+        }
+      }
+      if (created.length > 0) autoCreated[fkKey] = created;
+    }
   }
-  return errors;
+  return { errors, autoCreated };
 }
 
 // ---- Routes ----------------------------------------------------------------
@@ -733,8 +812,11 @@ router.post("/admin/import/:table", requireAdmin, async (req, res): Promise<void
   // some values to UUIDs; we only re-resolve rows that still hold raw labels,
   // which makes this idempotent with the wizard's preview behavior.
   let fkErrors = new Map<number, string>();
+  let autoCreated: Record<string, string[]> = {};
   try {
-    fkErrors = await resolveImportFks(tableName, rows, resolveHints, matchExtras);
+    const out = await resolveImportFks(tableName, rows, resolveHints, matchExtras, { dryRun });
+    fkErrors = out.errors;
+    autoCreated = out.autoCreated;
   } catch (err: any) {
     req.log.warn({ err }, "FK resolution failed");
     res.status(400).json({ error: "FK resolution failed", message: err?.message ?? "FK resolution failed" });
@@ -775,6 +857,7 @@ router.post("/admin/import/:table", requireAdmin, async (req, res): Promise<void
       failed: results.filter((r) => !r.ok).length,
       total: rows.length,
       results,
+      autoCreated,
       dryRun: true,
     });
     return;
@@ -797,7 +880,7 @@ router.post("/admin/import/:table", requireAdmin, async (req, res): Promise<void
   results.sort((a, b) => a.index - b.index);
   const inserted = results.filter((r) => r.ok).length;
   const failed = results.length - inserted;
-  res.status(201).json({ inserted, failed, total: rows.length, results });
+  res.status(201).json({ inserted, failed, total: rows.length, results, autoCreated });
 });
 
 export default router;

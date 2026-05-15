@@ -34,6 +34,9 @@ type ImportResult = {
   failed: number;
   total: number;
   results: { index: number; ok: boolean; id?: string; error?: string }[];
+  /** Map of fkField -> list of distinct labels the server auto-provisioned
+   *  (e.g. employee names that didn't already exist in the system). */
+  autoCreated?: Record<string, string[]>;
 };
 
 function DefaultValueInput({
@@ -634,6 +637,18 @@ export function ImportWizard({
                 <div className="text-2xl text-destructive" style={{ fontFamily: "Georgia, serif" }}>{result.failed}</div>
               </div>
             </div>
+            {result.autoCreated && Object.keys(result.autoCreated).length > 0 && (
+              <div className="text-xs bg-amber-50 border border-amber-300 rounded p-3 space-y-1">
+                <div className="font-semibold text-amber-900">
+                  Auto-created placeholder records — please complete their profiles later
+                </div>
+                {Object.entries(result.autoCreated).map(([field, labels]) => (
+                  <div key={field}>
+                    <span className="font-medium">{field}:</span> {labels.length} new ({labels.slice(0, 12).join(", ")}{labels.length > 12 ? `, +${labels.length - 12} more` : ""})
+                  </div>
+                ))}
+              </div>
+            )}
             {result.failed > 0 && (
               <>
                 <div className="text-xs bg-destructive/5 border border-destructive/20 rounded p-2 max-h-48 overflow-auto">

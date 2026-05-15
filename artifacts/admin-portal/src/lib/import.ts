@@ -35,11 +35,16 @@ export async function readSpreadsheet(
   descriptor?: TableDescriptor,
 ): Promise<ParsedSheet> {
   const buf = await file.arrayBuffer();
-  const wb = XLSX.read(buf, { type: "array" });
+  // cellDates: true so cells styled as dates come back as JS Date objects.
+  // Cells that are formatted as plain Number but actually hold an Excel date
+  // serial (very common in old Glide/iOS exports) stay numeric — coerceCell
+  // converts those serials below. raw: false formats Date objects per dateNF.
+  const wb = XLSX.read(buf, { type: "array", cellDates: true });
   const firstSheet = wb.Sheets[wb.SheetNames[0]];
   const json = XLSX.utils.sheet_to_json<Record<string, unknown>>(firstSheet, {
     defval: "",
     raw: false,
+    dateNF: 'yyyy-mm-dd"T"hh:mm:ss',
   });
   const headers =
     json.length > 0
@@ -143,6 +148,37 @@ export function autoMap(
   return map;
 }
 
+/** Excel/Lotus date serial epoch is 1899-12-30 (accounts for the 1900 leap-year bug). */
+const EXCEL_EPOCH_MS = Date.UTC(1899, 11, 30);
+
+/** Parse a cell that might be a JS Date, an Excel serial number, or any
+ *  string Date can handle. Excel exports from Glide / iOS Numbers commonly
+ *  store timestamps as plain numbers (e.g. 46129.95347) rather than styled
+ *  date cells, which would otherwise pass straight through as the literal
+ *  number string. */
+function parseDateLike(v: unknown): Date | null {
+  if (v instanceof Date) return Number.isNaN(v.getTime()) ? null : v;
+  if (typeof v === "number" && Number.isFinite(v)) {
+    // Treat plausible Excel serials (> 1 day, < year 9999) as date serials.
+    if (v >= 1 && v < 2958466) {
+      return new Date(EXCEL_EPOCH_MS + Math.round(v * 86400 * 1000));
+    }
+    return null;
+  }
+  const str = String(v ?? "").trim();
+  if (!str) return null;
+  // Pure-number strings (xlsx with raw:false sometimes still hands these back)
+  // get the same Excel-serial treatment.
+  if (/^-?\d+(\.\d+)?$/.test(str)) {
+    const n = Number(str);
+    if (n >= 1 && n < 2958466) {
+      return new Date(EXCEL_EPOCH_MS + Math.round(n * 86400 * 1000));
+    }
+  }
+  const d = new Date(str);
+  return Number.isNaN(d.getTime()) ? null : d;
+}
+
 /** Coerce a raw cell into the form expected by the API for that field. */
 export function coerceCell(raw: unknown, field: Field): unknown {
   if (raw === undefined || raw === null) return null;
@@ -166,13 +202,13 @@ export function coerceCell(raw: unknown, field: Field): unknown {
       return m ? m[0] : null;
     }
     case "date": {
-      const d = new Date(String(s));
-      if (Number.isNaN(d.getTime())) return null;
+      const d = parseDateLike(s);
+      if (!d) return null;
       return d.toISOString().slice(0, 10);
     }
     case "datetime": {
-      const d = new Date(String(s));
-      if (Number.isNaN(d.getTime())) return null;
+      const d = parseDateLike(s);
+      if (!d) return null;
       return d.toISOString();
     }
     case "json": {
