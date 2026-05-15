@@ -80,6 +80,14 @@ export default function AdminShiftsScreen() {
               <View style={styles.cardHeader}>
                 <Text style={[styles.shiftTitle, { color: colors.foreground }]}>{item.title}</Text>
                 <StatusBadge status={item.status} />
+                <TouchableOpacity
+                  onPress={(e) => { e.stopPropagation?.(); router.push(`/(admin)/shifts/edit/${item.id}` as any); }}
+                  style={[styles.editBtn, { borderColor: colors.primary }]}
+                  accessibilityLabel={`Edit ${item.title}`}
+                  hitSlop={8}
+                >
+                  <Feather name="edit-2" size={14} color={colors.primary} />
+                </TouchableOpacity>
               </View>
               <View style={styles.clientRow}>
                 <Feather name="briefcase" size={13} color={colors.accent} />
@@ -127,6 +135,7 @@ const styles = StyleSheet.create({
   cardHeader: { flexDirection: "row", justifyContent: "space-between", alignItems: "center" },
   shiftTitle: { fontSize: 15, fontWeight: "700", flex: 1, marginRight: 8 },
   badge: { paddingHorizontal: 7, paddingVertical: 2, borderRadius: 4, borderWidth: 1 },
+  editBtn: { padding: 6, borderRadius: 6, borderWidth: 1, marginLeft: 6 },
   badgeText: { fontSize: 10, fontWeight: "700" },
   clientRow: { flexDirection: "row", alignItems: "center", gap: 6 },
   clientText: { fontSize: 13, fontWeight: "600" },

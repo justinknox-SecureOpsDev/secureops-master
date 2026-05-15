@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from "react";
 import { View, Text, StyleSheet, TouchableOpacity, ActivityIndicator, Alert, Platform, ScrollView } from "react-native";
 import { useColors } from "@/hooks/useColors";
-import { useClockIn, useClockOut, useGetActiveTimeEntry, getGetActiveTimeEntryQueryKey, useGetTimeEntries, getGetTimeEntriesQueryKey, updateMyLocation } from "@workspace/api-client-react";
+import { useClockIn, useClockOut, useGetActiveTimeEntry, getGetActiveTimeEntryQueryKey, useGetTimeEntries, getGetTimeEntriesQueryKey, updateMyLocation, useGetSites, getGetSitesQueryKey } from "@workspace/api-client-react";
 import { Feather } from "@expo/vector-icons";
 import { useQueryClient } from "@tanstack/react-query";
 import * as Location from "expo-location";
@@ -32,6 +32,14 @@ export default function EmployeeClockScreen() {
 
   const clockInMutation = useClockIn();
   const clockOutMutation = useClockOut();
+
+  // Web preview (canvas iframe) often blocks geolocation. Let the user pick a
+  // site manually as a fallback so the clock function is testable on web.
+  const isWeb = Platform.OS === "web";
+  const [showSitePicker, setShowSitePicker] = useState(false);
+  const { data: sitesList } = useGetSites({} as any, {
+    query: { queryKey: getGetSitesQueryKey({} as any), enabled: isWeb },
+  });
 
   const isClockedIn = !!currentEntry?.id;
 
@@ -78,31 +86,50 @@ export default function EmployeeClockScreen() {
     return () => { cancelled = true; clearInterval(t); };
   }, [isClockedIn]);
 
+  const performClockIn = async (lat: number, lng: number, siteLabel?: string) => {
+    try {
+      const result: any = await clockInMutation.mutateAsync({
+        data: { lat, lng } as any,
+      });
+      queryClient.invalidateQueries({ queryKey: getGetActiveTimeEntryQueryKey() });
+      queryClient.invalidateQueries({ queryKey: getGetTimeEntriesQueryKey() });
+      const name = result?.geoResolved?.siteName ?? siteLabel;
+      if (name) {
+        Alert.alert("Clocked In", `Site: ${name}${result?.geoResolved?.distanceMiles != null ? ` (${result.geoResolved.distanceMiles} mi away)` : ""}.`);
+      }
+    } catch (e: any) {
+      const msg = e?.response?.data?.message || e?.message || "Clock-in failed";
+      Alert.alert("Cannot Clock In", msg);
+    }
+  };
+
   const handleClockIn = async () => {
     if (!location) {
+      if (isWeb) {
+        // Web preview can't use browser GPS inside the workspace iframe — let
+        // the user manually pick a site whose coordinates we'll use instead.
+        setShowSitePicker(true);
+        return;
+      }
       Alert.alert("Location Required", "We need your GPS to identify which site you're at. Please enable location and try again.");
       return;
     }
     Alert.alert("Clock In", "Start your shift now? Your location will be used to identify the site.", [
       { text: "Cancel", style: "cancel" },
-      {
-        text: "Clock In", onPress: async () => {
-          try {
-            const result: any = await clockInMutation.mutateAsync({
-              data: { lat: location.lat, lng: location.lon } as any,
-            });
-            queryClient.invalidateQueries({ queryKey: getGetActiveTimeEntryQueryKey() });
-            queryClient.invalidateQueries({ queryKey: getGetTimeEntriesQueryKey() });
-            if (result?.geoResolved?.siteName) {
-              Alert.alert("Clocked In", `Site auto-detected: ${result.geoResolved.siteName} (${result.geoResolved.distanceMiles} mi away).`);
-            }
-          } catch (e: any) {
-            const msg = e?.response?.data?.message || e?.message || "Clock-in failed";
-            Alert.alert("Cannot Clock In", msg);
-          }
-        }
-      }
+      { text: "Clock In", onPress: () => performClockIn(location.lat, location.lon) },
     ]);
+  };
+
+  const handlePickSite = (site: any) => {
+    setShowSitePicker(false);
+    const lat = site?.locationLat != null ? Number(site.locationLat) : null;
+    const lng = site?.locationLng != null ? Number(site.locationLng) : null;
+    if (lat == null || lng == null || Number.isNaN(lat) || Number.isNaN(lng)) {
+      Alert.alert("Site Has No Coordinates", `${site?.name ?? "This site"} doesn't have a saved location yet. Add lat/lng to the site in the admin portal first.`);
+      return;
+    }
+    setLocation({ lat, lon: lng });
+    performClockIn(lat, lng, site.name);
   };
 
   const handleClockOut = async () => {
@@ -175,6 +202,37 @@ export default function EmployeeClockScreen() {
           </TouchableOpacity>
         )}
       </View>
+
+      {isWeb && showSitePicker && (
+        <View style={[styles.section, { backgroundColor: colors.card, borderColor: colors.border, marginHorizontal: 16, borderRadius: 12, borderWidth: 1, padding: 16 }]}>
+          <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
+            <Text style={[styles.sectionTitle, { color: colors.accent }]}>PICK A SITE</Text>
+            <TouchableOpacity onPress={() => setShowSitePicker(false)}>
+              <Feather name="x" size={18} color={colors.mutedForeground} />
+            </TouchableOpacity>
+          </View>
+          <Text style={{ color: colors.mutedForeground, fontSize: 12, marginBottom: 10 }}>
+            Browser GPS isn't available in this preview. Pick the site you're clocking in at:
+          </Text>
+          {((sitesList as any[]) ?? []).map((s: any) => (
+            <TouchableOpacity
+              key={s.id}
+              onPress={() => handlePickSite(s)}
+              style={[styles.entryCard, { backgroundColor: colors.background, borderColor: colors.border, padding: 12 }]}
+            >
+              <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
+                <Feather name="map-pin" size={14} color={colors.primary} />
+                <Text style={[{ color: colors.foreground, fontWeight: "600", flex: 1 }]}>{s.name}</Text>
+                <Feather name="chevron-right" size={16} color={colors.mutedForeground} />
+              </View>
+              {s.address && <Text style={{ color: colors.mutedForeground, fontSize: 12, marginTop: 4, marginLeft: 22 }}>{s.address}</Text>}
+            </TouchableOpacity>
+          ))}
+          {((sitesList as any[]) ?? []).length === 0 && (
+            <Text style={{ color: colors.mutedForeground, fontSize: 12, textAlign: "center", padding: 20 }}>No sites configured.</Text>
+          )}
+        </View>
+      )}
 
       {(recentEntries?.length ?? 0) > 0 && (
         <View style={styles.section}>
