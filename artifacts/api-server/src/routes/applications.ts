@@ -1,5 +1,5 @@
 import { Router, type IRouter, type Request, type Response } from "express";
-import { eq, desc, ilike, or, sql, and } from "drizzle-orm";
+import { eq, desc, ilike, or, sql, and, type SQL } from "drizzle-orm";
 import bcrypt from "bcryptjs";
 import { randomBytes } from "crypto";
 import {
@@ -43,7 +43,16 @@ function buildOnboardingUrl(req: Request, token: string): string {
 
 // ---- helpers ---------------------------------------------------------------
 
-function rowToApplication(r: any) {
+type ApplicationRow = typeof applicationsTable.$inferSelect;
+
+interface AcknowledgementEntry {
+  type: string;
+  accepted: boolean;
+  signature?: string | null;
+  timestamp?: string | null;
+}
+
+function rowToApplication(r: ApplicationRow) {
   return {
     ...r,
     dateOfBirth: r.dateOfBirth ?? null,
@@ -101,16 +110,17 @@ router.post("/applications", async (req, res): Promise<void> => {
 router.get("/admin/applications", requireAdmin, async (req, res): Promise<void> => {
   const status = (req.query.status as string | undefined)?.trim();
   const search = (req.query.search as string | undefined)?.trim();
-  const conds: any[] = [];
+  const conds: SQL[] = [];
   if (status) conds.push(eq(applicationsTable.status, status));
   if (search) {
     const like = `%${search}%`;
-    conds.push(or(
+    const searchOr = or(
       ilike(applicationsTable.firstName, like),
       ilike(applicationsTable.lastName, like),
       ilike(applicationsTable.email, like),
       ilike(applicationsTable.phone, like),
-    ));
+    );
+    if (searchOr) conds.push(searchOr);
   }
   const rows = await db
     .select()
@@ -163,21 +173,30 @@ router.post("/admin/applications/:id/approve", requireAdmin, async (req, res): P
   const token = genToken();
   const expiresAt = new Date(Date.now() + ONBOARDING_TOKEN_TTL_DAYS * 86400_000);
 
-  let result: { updated: any; userId: string } | { error: { status: number; body: any } };
+  type ErrorBody = { error: string; message: string };
+  type ApproveResult =
+    | { updated: ApplicationRow; userId: string }
+    | { error: { status: number; body: ErrorBody } };
+
+  let result: ApproveResult;
   try {
-    result = await db.transaction(async (tx) => {
-      // Lock the application row to prevent concurrent approves.
-      const [app] = await tx.execute(
-        sql`SELECT * FROM ${applicationsTable} WHERE id = ${appId} FOR UPDATE`,
-      ).then((r: any) => r.rows ?? r);
+    result = await db.transaction(async (tx): Promise<ApproveResult> => {
+      // Typed SELECT … FOR UPDATE prevents concurrent approves and gives us
+      // a properly typed Application row (camelCase, correct nullability).
+      const [app] = await tx
+        .select()
+        .from(applicationsTable)
+        .where(eq(applicationsTable.id, appId))
+        .for("update")
+        .limit(1);
       if (!app) {
         return { error: { status: 404, body: { error: "Not Found", message: "Application not found" } } };
       }
-      if (app.status === "approved" && app.created_employee_id) {
+      if (app.status === "approved" && app.createdEmployeeId) {
         return { error: { status: 409, body: { error: "Conflict", message: "Application already approved" } } };
       }
 
-      const email = (app.email as string).toLowerCase();
+      const email = app.email.toLowerCase();
 
       // Reuse user if email exists — but ONLY if the existing account is an
       // employee in pending/inactive state. We refuse to mutate any other
@@ -204,16 +223,16 @@ router.post("/admin/applications/:id/approve", requireAdmin, async (req, res): P
         userId = existingUser.id;
         await tx.update(usersTable).set({
           passwordHash,
-          firstName: app.first_name as string,
-          lastName: app.last_name as string,
+          firstName: app.firstName,
+          lastName: app.lastName,
           status: "pending",
         }).where(eq(usersTable.id, userId));
       } else {
         const [u] = await tx.insert(usersTable).values({
           email,
           passwordHash,
-          firstName: app.first_name as string,
-          lastName: app.last_name as string,
+          firstName: app.firstName,
+          lastName: app.lastName,
           role: "employee",
           status: "pending",
         }).returning();
@@ -224,19 +243,19 @@ router.post("/admin/applications/:id/approve", requireAdmin, async (req, res): P
       if (!existingEmployee) {
         await tx.insert(employeesTable).values({
           userId,
-          phone: app.phone as string,
-          address: app.address as string,
+          phone: app.phone,
+          address: app.address,
         });
       }
 
-      if (app.sia_license_number && app.sia_license_expiry) {
+      if (app.siaLicenseNumber && app.siaLicenseExpiry) {
         await tx.insert(licensesTable).values({
           employeeId: userId,
           type: "SIA",
-          level: (app.sia_license_level as number) ?? null,
-          licenseNumber: app.sia_license_number as string,
+          level: app.siaLicenseLevel ?? null,
+          licenseNumber: app.siaLicenseNumber,
           issuingAuthority: "SIA",
-          expiryDate: app.sia_license_expiry as string,
+          expiryDate: app.siaLicenseExpiry,
         });
       }
 
@@ -250,7 +269,7 @@ router.post("/admin/applications/:id/approve", requireAdmin, async (req, res): P
 
       const [updated] = await tx.update(applicationsTable).set({
         status: "approved",
-        reviewerNotes: notes ?? (app.reviewer_notes as string | null) ?? null,
+        reviewerNotes: notes ?? app.reviewerNotes ?? null,
         reviewedBy: reviewerId,
         reviewedAt: new Date(),
         createdEmployeeId: userId,
@@ -269,13 +288,13 @@ router.post("/admin/applications/:id/approve", requireAdmin, async (req, res): P
   const onboardingUrl = buildOnboardingUrl(req, token);
   const app = result.updated;
   const emailMsg = renderOnboardingEmail({
-    firstName: app.firstName as string,
+    firstName: app.firstName,
     onboardingUrl,
-    email: app.email as string,
+    email: app.email,
     tempPassword,
   });
   const emailSent = await sendEmail({
-    to: app.email as string,
+    to: app.email,
     subject: emailMsg.subject,
     text: emailMsg.text,
     html: emailMsg.html,
@@ -419,7 +438,7 @@ router.post("/onboarding/:token", async (req, res): Promise<void> => {
     passportDocKey: row.passportDocKey,
     directDepositConsent: row.directDepositConsent,
     directDepositSignature: row.directDepositSignature,
-    acknowledgements: row.acknowledgements,
+    acknowledgements: (row.acknowledgements as AcknowledgementEntry[] | null) ?? null,
     submittedAt: row.submittedAt.toISOString(),
   });
 });
@@ -503,7 +522,7 @@ router.get("/admin/onboarding/:employeeId", requireAdmin, async (req, res): Prom
       passportDocKey: sub.passportDocKey,
       directDepositConsent: sub.directDepositConsent,
       directDepositSignature: sub.directDepositSignature,
-      acknowledgements: sub.acknowledgements as any,
+      acknowledgements: (sub.acknowledgements as AcknowledgementEntry[] | null) ?? null,
       submittedAt: sub.submittedAt.toISOString(),
     } : null,
     tokenExpiresAt: latestToken ? latestToken.expiresAt.toISOString() : null,
