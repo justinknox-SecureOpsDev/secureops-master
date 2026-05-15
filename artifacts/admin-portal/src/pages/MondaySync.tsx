@@ -5,34 +5,51 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { AlertCircle, CheckCircle2, Loader2, Database, Plus, Pencil, SkipForward } from "lucide-react";
 
+type Kind = "employees" | "clients" | "sites" | "onboarding" | "candidates";
+
+const KINDS: { value: Kind; label: string; defaultBoard: string; target: string; matchKey: string; help: string }[] = [
+  { value: "employees", label: "Employees", defaultBoard: "18408899656", target: "users + employees + licenses",
+    matchKey: "email", help: "Master Employee Database. Creates user accounts (no invites)." },
+  { value: "clients", label: "Clients", defaultBoard: "18408899653", target: "clients",
+    matchKey: "name", help: "Run before Sites. Matches by client name." },
+  { value: "sites", label: "Sites", defaultBoard: "18408899655", target: "sites",
+    matchKey: "name + linked client", help: "Requires Clients to be synced first; resolves client by linked Monday board relation." },
+  { value: "onboarding", label: "Onboarding", defaultBoard: "18399600913", target: "users + employees (update only)",
+    matchKey: "email", help: "Updates existing employees with bank/SSN/license/EC/uniform from the Onboarding board." },
+  { value: "candidates", label: "Candidates → Applications", defaultBoard: "18399600911", target: "applications",
+    matchKey: "email", help: "Brings recruiting candidates into the HR Applications inbox." },
+];
+
 type Decision = {
   mondayId: string;
   mondayName: string;
-  email: string | null;
-  action: "create" | "update" | "skip-no-email" | "skip-conflict";
+  matchKey: string | null;
+  action: "create" | "update" | "skip-no-key" | "skip-conflict" | "skip-unmatched";
   reason?: string;
   changes?: Record<string, { from: unknown; to: unknown }>;
 };
 type SyncResult = {
-  boardId: string;
-  totalFromMonday: number;
-  willCreate: number;
-  willUpdate: number;
-  skippedNoEmail: number;
-  skippedConflict: number;
-  decisions: Decision[];
-  applied: boolean;
+  kind: Kind; boardId: string;
+  totalFromMonday: number; willCreate: number; willUpdate: number;
+  skippedNoKey: number; skippedConflict: number; skippedUnmatched: number;
+  decisions: Decision[]; applied: boolean;
   errors: { mondayId: string; mondayName: string; error: string }[];
 };
 
-const DEFAULT_BOARD = "18408899656";
-
 export function MondaySyncPage() {
-  const [boardId, setBoardId] = useState(DEFAULT_BOARD);
+  const [kind, setKind] = useState<Kind>("employees");
+  const cfg = KINDS.find((k) => k.value === kind)!;
+  const [boardId, setBoardId] = useState(cfg.defaultBoard);
   const [busy, setBusy] = useState<"dry" | "apply" | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [result, setResult] = useState<SyncResult | null>(null);
   const [filter, setFilter] = useState<"all" | "create" | "update" | "skip">("all");
+
+  function selectKind(k: Kind) {
+    setKind(k);
+    setBoardId(KINDS.find((x) => x.value === k)!.defaultBoard);
+    setResult(null); setError(null);
+  }
 
   async function run(dryRun: boolean) {
     setBusy(dryRun ? "dry" : "apply");
@@ -41,7 +58,7 @@ export function MondaySyncPage() {
     try {
       const res = await api<SyncResult>("/admin/integrations/monday/sync", {
         method: "POST",
-        body: { boardId, dryRun },
+        body: { kind, boardId, dryRun },
       });
       setResult(res);
     } catch (e) {
@@ -62,20 +79,44 @@ export function MondaySyncPage() {
       <div className="flex items-center gap-3">
         <Database className="w-7 h-7 brand-gold" />
         <div>
-          <h1 className="text-xl font-bold brand-navy">Sync from Monday.com</h1>
-          <p className="text-sm text-muted-foreground">
-            One-way pull from your Employee Database Master board into our users + employees tables.
-          </p>
+          <h1 className="text-xl font-bold brand-navy">Monday.com Sync</h1>
+          <p className="text-sm text-muted-foreground">One-way pull from Monday boards into our database.</p>
         </div>
       </div>
 
-      <div className="bg-card border rounded-lg p-4 space-y-3">
+      <div className="bg-card border rounded-lg p-4 space-y-4">
+        <div>
+          <Label className="text-xs uppercase font-semibold brand-navy mb-2 block">Board to sync</Label>
+          <div className="grid grid-cols-2 md:grid-cols-5 gap-2">
+            {KINDS.map((k) => (
+              <button
+                key={k.value}
+                onClick={() => selectKind(k.value)}
+                disabled={Boolean(busy)}
+                className={`text-left px-3 py-2 rounded border text-sm transition ${
+                  kind === k.value
+                    ? "bg-brand-navy text-white border-brand-navy"
+                    : "bg-white text-brand-navy border-gray-300 hover:border-brand-gold"
+                }`}
+              >
+                <div className="font-semibold">{k.label}</div>
+                <div className={`text-[10px] mt-0.5 ${kind === k.value ? "opacity-70" : "text-muted-foreground"}`}>
+                  → {k.target}
+                </div>
+              </button>
+            ))}
+          </div>
+          <p className="text-xs text-muted-foreground mt-2">
+            <strong>{cfg.label}:</strong> {cfg.help} <em>Match key: {cfg.matchKey}.</em>
+          </p>
+        </div>
+
         <div className="grid grid-cols-1 md:grid-cols-[1fr_auto_auto] gap-3 items-end">
           <div>
             <Label htmlFor="boardId" className="text-xs uppercase font-semibold brand-navy">Monday Board ID</Label>
             <Input
               id="boardId" value={boardId} onChange={(e) => setBoardId(e.target.value)}
-              placeholder="18408899656" disabled={Boolean(busy)}
+              placeholder={cfg.defaultBoard} disabled={Boolean(busy)}
             />
           </div>
           <Button onClick={() => run(true)} disabled={Boolean(busy) || !boardId} variant="outline">
@@ -84,7 +125,8 @@ export function MondaySyncPage() {
           <Button
             onClick={() => {
               if (!result) return;
-              if (!confirm(`Apply ${result.willCreate} new + ${result.willUpdate} updates to the database? This cannot be undone automatically.`)) return;
+              const total = result.willCreate + result.willUpdate;
+              if (!confirm(`Apply ${result.willCreate} new + ${result.willUpdate} updates to ${cfg.target}? (${total} writes total)`)) return;
               run(false);
             }}
             disabled={Boolean(busy) || !result || (result.willCreate + result.willUpdate === 0)}
@@ -93,11 +135,6 @@ export function MondaySyncPage() {
             {busy === "apply" ? <><Loader2 className="w-4 h-4 mr-2 animate-spin" />Applying…</> : "Apply Changes"}
           </Button>
         </div>
-        <p className="text-xs text-muted-foreground">
-          New users are created with role <strong>employee</strong>, status mirrored from Monday's Employment Status, and a random
-          password (set <em>must change password</em>). Login invites are <strong>not</strong> emailed — you'll share credentials manually.
-          Existing rows are matched by email; only employee-role users are touched.
-        </p>
       </div>
 
       {error && (
@@ -115,21 +152,20 @@ export function MondaySyncPage() {
             </div>
           )}
 
-          <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
-            <Stat label="Total on Monday" value={result.totalFromMonday} />
+          <div className="grid grid-cols-2 md:grid-cols-6 gap-3">
+            <Stat label="From Monday" value={result.totalFromMonday} />
             <Stat label="To Create" value={result.willCreate} accent="emerald" />
             <Stat label="To Update" value={result.willUpdate} accent="blue" />
-            <Stat label="Skipped (no email)" value={result.skippedNoEmail} accent="amber" />
-            <Stat label="Skipped (conflict)" value={result.skippedConflict} accent="amber" />
+            <Stat label="Skip (no key)" value={result.skippedNoKey} accent="amber" />
+            <Stat label="Skip (unmatched)" value={result.skippedUnmatched} accent="amber" />
+            <Stat label="Skip (conflict)" value={result.skippedConflict} accent="amber" />
           </div>
 
           {result.errors.length > 0 && (
             <div className="bg-destructive/5 border border-destructive/20 rounded p-3 text-sm">
               <div className="font-semibold text-destructive mb-1">{result.errors.length} row error(s):</div>
               <ul className="list-disc pl-5 text-xs">
-                {result.errors.map((e) => (
-                  <li key={e.mondayId}>{e.mondayName}: {e.error}</li>
-                ))}
+                {result.errors.map((e) => <li key={e.mondayId}>{e.mondayName}: {e.error}</li>)}
               </ul>
             </div>
           )}
@@ -150,18 +186,18 @@ export function MondaySyncPage() {
             <table className="w-full text-sm">
               <thead className="bg-gray-50 text-xs uppercase text-gray-600">
                 <tr>
-                  <th className="text-left p-2 w-12">Action</th>
-                  <th className="text-left p-2">Name</th>
-                  <th className="text-left p-2">Email</th>
+                  <th className="text-left p-2 w-20">Action</th>
+                  <th className="text-left p-2">Row</th>
+                  <th className="text-left p-2">Match Key</th>
                   <th className="text-left p-2">Details</th>
                 </tr>
               </thead>
               <tbody>
-                {filtered.slice(0, 200).map((d) => (
+                {filtered.slice(0, 250).map((d) => (
                   <tr key={d.mondayId} className="border-t align-top">
                     <td className="p-2"><ActionBadge action={d.action} /></td>
                     <td className="p-2 font-medium">{d.mondayName}</td>
-                    <td className="p-2 text-muted-foreground">{d.email ?? "—"}</td>
+                    <td className="p-2 text-muted-foreground text-xs">{d.matchKey ?? "—"}</td>
                     <td className="p-2 text-xs">
                       {d.reason && <div className="text-amber-700">{d.reason}</div>}
                       {d.changes && Object.keys(d.changes).length > 0 && (
@@ -170,11 +206,11 @@ export function MondaySyncPage() {
                             <li key={k}>
                               <span className="font-mono text-[10px] bg-gray-100 px-1 rounded">{k}</span>{" "}
                               {d.action === "create" ? (
-                                <span className="text-emerald-700">{String(v.to).slice(0, 60)}</span>
+                                <span className="text-emerald-700">{String(v.to).slice(0, 70)}</span>
                               ) : (
                                 <>
                                   <span className="line-through text-gray-400">{String(v.from ?? "∅").slice(0, 30)}</span>{" "}
-                                  → <span className="text-blue-700">{String(v.to).slice(0, 30)}</span>
+                                  → <span className="text-blue-700">{String(v.to).slice(0, 35)}</span>
                                 </>
                               )}
                             </li>
@@ -189,9 +225,9 @@ export function MondaySyncPage() {
                 ))}
               </tbody>
             </table>
-            {filtered.length > 200 && (
+            {filtered.length > 250 && (
               <div className="p-2 text-xs text-center text-muted-foreground bg-gray-50">
-                Showing first 200 of {filtered.length} rows.
+                Showing first 250 of {filtered.length} rows.
               </div>
             )}
           </div>

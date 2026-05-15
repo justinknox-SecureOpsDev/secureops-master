@@ -86,6 +86,16 @@ A full-stack mobile operations platform for Williams Council Security Group (WCS
 - Admin: `admin@secureops.com` / `Admin123!`
 - Employee: `john.smith@secureops.com` / `Employee123!`
 
+## Monday.com Sync (one-way, Monday → SecureOps)
+
+- Admin page at `/admin-portal/integrations/monday` with tabs for 5 boards. Preview (dry-run) → Apply, with per-row diff table.
+- API: `POST /api/admin/integrations/monday/sync` body `{ kind, boardId?, dryRun }`. `kind` ∈ `employees | clients | sites | onboarding | candidates`. `boardId` defaults to per-kind constants in `mondaySync.ts`.
+- Rules: only non-empty Monday values overwrite existing DB values; status defaults are NOT applied during updates (status is sent only when source row has it set). Multi-table writes (users+employees+licenses; users+employees) run inside `db.transaction` for atomic per-row commits.
+- Match keys: employees/onboarding/candidates by **email**, clients by **name** (case-insensitive), sites by **name + linked client** (resolved from board_relation display text).
+- Boards: Employees `18408899656` → users+employees+licenses; Clients `18408899653` → clients; Sites `18408899655` → sites (run Clients first); Onboarding `18399600913` → updates existing employees with bank/SSN/EC/license/uniform; Candidates `18399600911` → applications.
+- Skip semantics in result: `skippedNoKey` (missing email/required field), `skippedConflict` (existing user has non-employee role), `skippedUnmatched` (no matching FK or no existing employee for onboarding).
+- Requires `MONDAY_API_TOKEN` secret.
+
 ## User preferences
 
 - Brand: deep navy #080c18, rich gold #c9a84c, warm cream #f0e6c8

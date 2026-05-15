@@ -1,12 +1,13 @@
 import { Router, type IRouter } from "express";
 import { z } from "zod/v4";
 import { requireAdmin } from "../middlewares/auth";
-import { syncFromMonday } from "../lib/mondaySync";
+import { syncFromMonday, DEFAULT_BOARD_IDS, type SyncKind } from "../lib/mondaySync";
 
 const router: IRouter = Router();
 
 const syncBody = z.object({
-  boardId: z.string().regex(/^\d+$/, "boardId must be numeric"),
+  kind: z.enum(["employees", "clients", "sites", "onboarding", "candidates"]),
+  boardId: z.string().regex(/^\d+$/, "boardId must be numeric").optional(),
   dryRun: z.boolean().default(true),
 });
 
@@ -21,7 +22,7 @@ router.post("/admin/integrations/monday/sync", requireAdmin, async (req, res): P
     return;
   }
   try {
-    const result = await syncFromMonday(parsed.data);
+    const result = await syncFromMonday(parsed.data as { kind: SyncKind; boardId?: string; dryRun: boolean });
     res.json(result);
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e);
@@ -31,7 +32,7 @@ router.post("/admin/integrations/monday/sync", requireAdmin, async (req, res): P
 });
 
 router.get("/admin/integrations/monday/status", requireAdmin, (_req, res): void => {
-  res.json({ configured: Boolean(process.env.MONDAY_API_TOKEN) });
+  res.json({ configured: Boolean(process.env.MONDAY_API_TOKEN), defaults: DEFAULT_BOARD_IDS });
 });
 
 export default router;
