@@ -77,7 +77,8 @@ A full-stack mobile operations platform for Williams Council Security Group (WCS
 - **Approve** creates `User` (role=`employee`, status=`pending`, random temp password) + `Employee` row + `License` row (if SIA info provided), invalidates prior unconsumed tokens, issues a 14-day single-use `OnboardingToken`, links the application via `createdEmployeeId`. Response includes `onboardingUrl`, `tempPassword`, and `emailSent:false` so the admin can copy/share.
 - **Public onboarding** at `/admin-portal/onboard/:token` — GET `/api/onboarding/:token` returns prefill (name/email/phone/NI/SIA from application). POST submits bank/tax/P45, emergency contact, uniform sizes, SIA+passport docs, direct-deposit consent + signature, and 4 acknowledgements (Drug-Free, Uniform, NDA, Contract). On submit: upserts `OnboardingSubmission`, copies bank+emergency to `employees`, sets user status=`active`, consumes token, pushes admins.
 - **Admin Onboarding** at `/admin-portal/hr/onboarding` — list pending vs completed, detail dialog shows full submission, **Resend onboarding link** invalidates old tokens and returns a fresh link.
-- Email is not configured: approve/resend always return `emailSent:false` and the link in the response so the admin can share manually.
+- Email: approve/resend send via SMTP if `SMTP_HOST`, `SMTP_PORT`, `SMTP_USER`, `SMTP_PASS` (and optionally `SMTP_FROM`) env vars are set; otherwise `emailSent:false` is returned alongside `onboardingUrl` (+ `tempPassword` for approve) so the admin can share manually. Sender lives in `artifacts/api-server/src/lib/email.ts`.
+- **Approve email-conflict guard**: `POST /admin/applications/:id/approve` only re-provisions an existing user when their `role==='employee'` AND `status` is `pending`/`inactive`. Any other match (admin, active employee, etc.) returns 409 — the HR flow will never overwrite an unrelated account.
 
 ## Seeded Accounts
 

@@ -1208,6 +1208,17 @@ export type SendChatMessageBody = {
   content: string;
 };
 
+export type AdminSignObjectDownloadParams = {
+  /**
+   * Object path beginning with `/objects/`.
+   */
+  path: string;
+};
+
+export type AdminSignObjectDownload200 = {
+  url: string;
+};
+
 export type AdminListApplicationsParams = {
   status?: string;
   search?: string;

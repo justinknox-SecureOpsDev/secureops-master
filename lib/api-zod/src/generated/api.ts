@@ -1620,6 +1620,23 @@ export const RequestUploadUrlResponse = zod.object({
 });
 
 /**
+ * Admin-only. Returns a presigned download URL (TTL ~5 min) for an object
+path beginning with `/objects/`. Used by the admin UI to view applicant
+documents without proxying bytes through the API server.
+
+ * @summary Mint a short-lived presigned GET URL for a private object
+ */
+export const AdminSignObjectDownloadQueryParams = zod.object({
+  path: zod.coerce
+    .string()
+    .describe("Object path beginning with `\/objects\/`."),
+});
+
+export const AdminSignObjectDownloadResponse = zod.object({
+  url: zod.string().url(),
+});
+
+/**
  * @summary Submit a public job application
  */
 export const SubmitApplicationBody = zod.object({

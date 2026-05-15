@@ -20,6 +20,7 @@ import {
 } from "@workspace/api-zod";
 import { requireAdmin } from "../middlewares/auth";
 import { sendPushToUsers } from "../lib/push";
+import { sendEmail, renderOnboardingEmail } from "../lib/email";
 
 const router: IRouter = Router();
 
@@ -178,11 +179,28 @@ router.post("/admin/applications/:id/approve", requireAdmin, async (req, res): P
 
       const email = (app.email as string).toLowerCase();
 
-      // Reuse user if email exists; reset their password to the new temp one
-      // so the credentials we return are guaranteed valid.
+      // Reuse user if email exists — but ONLY if the existing account is an
+      // employee in pending/inactive state. We refuse to mutate any other
+      // account (admins, active employees) to prevent the HR pipeline from
+      // overwriting credentials of unrelated users with the same email.
       let userId: string;
       const [existingUser] = await tx.select().from(usersTable).where(eq(usersTable.email, email)).limit(1);
       if (existingUser) {
+        const reusable =
+          existingUser.role === "employee" &&
+          (existingUser.status === "pending" || existingUser.status === "inactive");
+        if (!reusable) {
+          return {
+            error: {
+              status: 409,
+              body: {
+                error: "Conflict",
+                message:
+                  "An account with this email already exists and cannot be re-provisioned via the HR flow. Resolve the existing account first.",
+              },
+            },
+          };
+        }
         userId = existingUser.id;
         await tx.update(usersTable).set({
           passwordHash,
@@ -248,13 +266,31 @@ router.post("/admin/applications/:id/approve", requireAdmin, async (req, res): P
 
   if ("error" in result) { res.status(result.error.status).json(result.error.body); return; }
 
+  const onboardingUrl = buildOnboardingUrl(req, token);
+  const app = result.updated;
+  const emailMsg = renderOnboardingEmail({
+    firstName: app.firstName as string,
+    onboardingUrl,
+    email: app.email as string,
+    tempPassword,
+  });
+  const emailSent = await sendEmail({
+    to: app.email as string,
+    subject: emailMsg.subject,
+    text: emailMsg.text,
+    html: emailMsg.html,
+  });
+  if (!emailSent) {
+    req.log.info({ employeeId: result.userId }, "Onboarding email not sent — admin must share link manually");
+  }
+
   res.json({
     application: rowToApplication(result.updated),
-    onboardingUrl: buildOnboardingUrl(req, token),
+    onboardingUrl,
     onboardingToken: token,
     employeeId: result.userId,
     tempPassword,
-    emailSent: false,
+    emailSent,
   });
 });
 
@@ -492,10 +528,20 @@ router.post("/admin/onboarding/:employeeId/resend", requireAdmin, async (req, re
     token, employeeId, applicationId: prev?.applicationId ?? null, expiresAt,
   });
 
+  const onboardingUrl = buildOnboardingUrl(req, token);
+  // Resend doesn't reset password; we don't include credentials in the email
+  // (we don't have the plaintext anymore). Just the link.
+  const subject = "Your Williams Council Security Group onboarding link";
+  const text = `Hi ${user.firstName},\n\nHere is a fresh link to complete your onboarding (single use, expires in 14 days):\n\n${onboardingUrl}\n\n— Williams Council Security Group`;
+  const emailSent = await sendEmail({ to: user.email, subject, text });
+  if (!emailSent) {
+    req.log.info({ employeeId }, "Resent onboarding email not sent — admin must share link manually");
+  }
+
   res.json({
-    onboardingUrl: buildOnboardingUrl(req, token),
+    onboardingUrl,
     onboardingToken: token,
-    emailSent: false,
+    emailSent,
   });
 });
 

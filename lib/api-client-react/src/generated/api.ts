@@ -21,6 +21,8 @@ import type {
   AdminDashboardSummary,
   AdminListApplicationsParams,
   AdminListOnboardingParams,
+  AdminSignObjectDownload200,
+  AdminSignObjectDownloadParams,
   Application,
   ApproveApplicationResponse,
   ApproveTimeEntryRequest,
@@ -5171,6 +5173,113 @@ export const useRequestUploadUrl = <
 > => {
   return useMutation(getRequestUploadUrlMutationOptions(options));
 };
+
+/**
+ * Admin-only. Returns a presigned download URL (TTL ~5 min) for an object
+path beginning with `/objects/`. Used by the admin UI to view applicant
+documents without proxying bytes through the API server.
+
+ * @summary Mint a short-lived presigned GET URL for a private object
+ */
+export const getAdminSignObjectDownloadUrl = (
+  params: AdminSignObjectDownloadParams,
+) => {
+  const normalizedParams = new URLSearchParams();
+
+  Object.entries(params || {}).forEach(([key, value]) => {
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? "null" : value.toString());
+    }
+  });
+
+  const stringifiedParams = normalizedParams.toString();
+
+  return stringifiedParams.length > 0
+    ? `/api/admin/storage/sign?${stringifiedParams}`
+    : `/api/admin/storage/sign`;
+};
+
+export const adminSignObjectDownload = async (
+  params: AdminSignObjectDownloadParams,
+  options?: RequestInit,
+): Promise<AdminSignObjectDownload200> => {
+  return customFetch<AdminSignObjectDownload200>(
+    getAdminSignObjectDownloadUrl(params),
+    {
+      ...options,
+      method: "GET",
+    },
+  );
+};
+
+export const getAdminSignObjectDownloadQueryKey = (
+  params?: AdminSignObjectDownloadParams,
+) => {
+  return [`/api/admin/storage/sign`, ...(params ? [params] : [])] as const;
+};
+
+export const getAdminSignObjectDownloadQueryOptions = <
+  TData = Awaited<ReturnType<typeof adminSignObjectDownload>>,
+  TError = ErrorType<void>,
+>(
+  params: AdminSignObjectDownloadParams,
+  options?: {
+    query?: UseQueryOptions<
+      Awaited<ReturnType<typeof adminSignObjectDownload>>,
+      TError,
+      TData
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+) => {
+  const { query: queryOptions, request: requestOptions } = options ?? {};
+
+  const queryKey =
+    queryOptions?.queryKey ?? getAdminSignObjectDownloadQueryKey(params);
+
+  const queryFn: QueryFunction<
+    Awaited<ReturnType<typeof adminSignObjectDownload>>
+  > = ({ signal }) =>
+    adminSignObjectDownload(params, { signal, ...requestOptions });
+
+  return { queryKey, queryFn, ...queryOptions } as UseQueryOptions<
+    Awaited<ReturnType<typeof adminSignObjectDownload>>,
+    TError,
+    TData
+  > & { queryKey: QueryKey };
+};
+
+export type AdminSignObjectDownloadQueryResult = NonNullable<
+  Awaited<ReturnType<typeof adminSignObjectDownload>>
+>;
+export type AdminSignObjectDownloadQueryError = ErrorType<void>;
+
+/**
+ * @summary Mint a short-lived presigned GET URL for a private object
+ */
+
+export function useAdminSignObjectDownload<
+  TData = Awaited<ReturnType<typeof adminSignObjectDownload>>,
+  TError = ErrorType<void>,
+>(
+  params: AdminSignObjectDownloadParams,
+  options?: {
+    query?: UseQueryOptions<
+      Awaited<ReturnType<typeof adminSignObjectDownload>>,
+      TError,
+      TData
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+): UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+  const queryOptions = getAdminSignObjectDownloadQueryOptions(params, options);
+
+  const query = useQuery(queryOptions) as UseQueryResult<TData, TError> & {
+    queryKey: QueryKey;
+  };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
 
 /**
  * @summary Submit a public job application
