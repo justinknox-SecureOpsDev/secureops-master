@@ -368,14 +368,25 @@ router.post("/admin/applications/:id/approve", requireAdmin, async (req, res): P
         await tx.update(employeesTable).set(employeeFromApp).where(eq(employeesTable.userId, userId));
       }
 
-      if (app.siaLicenseNumber && app.siaLicenseExpiry) {
+      // Create a licence row whenever the applicant declared *any* TX
+      // licence info (number, level, or expiry). Previously we required
+      // BOTH number and expiry, which silently dropped applications that
+      // only filled in the level — leaving the officer with
+      // maxLicenseLevel=null on mobile and unable to claim shifts.
+      // Missing fields are stored as a 30-day placeholder so admin sees
+      // an "expiring soon" row to verify and complete.
+      const hasAnyLicenceInfo =
+        !!app.siaLicenseNumber || app.siaLicenseLevel != null || !!app.siaLicenseExpiry;
+      if (hasAnyLicenceInfo) {
+        const placeholderExpiry = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000)
+          .toISOString().slice(0, 10);
         await tx.insert(licensesTable).values({
           employeeId: userId,
           type: "SIA",
           level: app.siaLicenseLevel ?? null,
-          licenseNumber: app.siaLicenseNumber,
+          licenseNumber: app.siaLicenseNumber || "PENDING-VERIFICATION",
           issuingAuthority: "SIA",
-          expiryDate: app.siaLicenseExpiry,
+          expiryDate: app.siaLicenseExpiry || placeholderExpiry,
         });
       }
 

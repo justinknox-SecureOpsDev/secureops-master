@@ -10,11 +10,13 @@ import {
 import { useQueryClient } from "@tanstack/react-query";
 import { Feather } from "@expo/vector-icons";
 import { LicenseLevelBadge, levelLabel } from "@/components/LicenseLevelBadge";
+import { useRouter } from "expo-router";
 
 const FILTERS = ["available", "upcoming", "active", "completed"] as const;
 
 export default function EmployeeShiftsScreen() {
   const colors = useColors();
+  const router = useRouter();
   const queryClient = useQueryClient();
   const [filter, setFilter] = useState<typeof FILTERS[number]>("available");
   const [busyId, setBusyId] = useState<string | null>(null);
@@ -123,6 +125,28 @@ export default function EmployeeShiftsScreen() {
           </View>
         </View>
       </View>
+
+      {!myMaxLevel && myEmployee && (
+        <TouchableOpacity
+          onPress={() => router.push("/edit-profile")}
+          style={{
+            margin: 12, padding: 12, borderRadius: 10, borderWidth: 1,
+            borderColor: colors.accent, backgroundColor: colors.accent + "15",
+            flexDirection: "row", alignItems: "center", gap: 10,
+          }}
+        >
+          <Feather name="alert-triangle" size={18} color={colors.accent} />
+          <View style={{ flex: 1 }}>
+            <Text style={{ color: colors.accent, fontWeight: "700", fontSize: 13 }}>
+              No active TX security licence on file
+            </Text>
+            <Text style={{ color: colors.mutedForeground, fontSize: 11, marginTop: 2 }}>
+              You can't claim shifts until admin verifies your licence. Tap to upload a photo of your card or contact admin.
+            </Text>
+          </View>
+          <Feather name="chevron-right" size={18} color={colors.mutedForeground} />
+        </TouchableOpacity>
+      )}
 
       <View style={styles.filterRow}>
         {FILTERS.map((f) => (
