@@ -5,10 +5,13 @@ import { useGetActiveOfficers, getGetActiveOfficersQueryKey } from "@workspace/a
 import { Feather } from "@expo/vector-icons";
 import LiveOfficerMap from "@/components/LiveOfficerMap";
 import { formatDistanceToNow } from "date-fns";
+import { useRouter } from "expo-router";
 
 export default function AdminLiveMapScreen() {
   const colors = useColors();
+  const router = useRouter();
   const topPad = Platform.OS === "web" ? 12 : 0;
+  const openOfficer = (userId: string) => router.push(`/(admin)/employees/${userId}` as any);
 
   const { data, isLoading, refetch, isFetching } = useGetActiveOfficers({
     query: {
@@ -37,7 +40,7 @@ export default function AdminLiveMapScreen() {
         <View style={styles.center}><ActivityIndicator color={colors.primary} /></View>
       ) : (
         <>
-          <LiveOfficerMap officers={officers} height={380} />
+          <LiveOfficerMap officers={officers} height={380} onSelectOfficer={openOfficer} />
 
           <View style={styles.list}>
             {officers.length === 0 ? (
@@ -55,7 +58,13 @@ export default function AdminLiveMapScreen() {
                   ? formatDistanceToNow(new Date(o.lastLocationAt), { addSuffix: true })
                   : "since clock-in";
                 return (
-                  <View key={o.timeEntryId} style={[styles.card, { backgroundColor: colors.card, borderColor: colors.border }]}>
+                  <TouchableOpacity
+                    key={o.timeEntryId}
+                    onPress={() => openOfficer(o.userId)}
+                    accessibilityRole="button"
+                    accessibilityLabel={`View profile for ${o.firstName} ${o.lastName}`}
+                    style={[styles.card, { backgroundColor: colors.card, borderColor: colors.border }]}
+                  >
                     <View style={[styles.dot, { backgroundColor: "#22c55e" }]} />
                     <View style={{ flex: 1 }}>
                       <Text style={[styles.name, { color: colors.foreground }]}>
@@ -77,7 +86,8 @@ export default function AdminLiveMapScreen() {
                         <Text style={{ color: colors.primary, fontSize: 12, fontWeight: "600" }}>Maps</Text>
                       </TouchableOpacity>
                     )}
-                  </View>
+                    <Feather name="chevron-right" size={18} color={colors.mutedForeground} />
+                  </TouchableOpacity>
                 );
               })
             )}

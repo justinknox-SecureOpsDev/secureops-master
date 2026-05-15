@@ -159,7 +159,14 @@ export default function ShiftDetailScreen() {
             <View style={[styles.avatar, { backgroundColor: colors.primary + "20" }]}>
               <Text style={[styles.avatarText, { color: colors.primary }]}>{(a.employeeName || "?")[0]}</Text>
             </View>
-            <Text style={[styles.personName, { color: colors.foreground }]}>{a.employeeName}</Text>
+            <TouchableOpacity
+              style={{ flex: 1 }}
+              onPress={() => router.push(`/(admin)/employees/${a.employeeId}` as any)}
+              accessibilityRole="button"
+              accessibilityLabel={`View profile for ${a.employeeName}`}
+            >
+              <Text style={[styles.personName, { color: colors.foreground }]}>{a.employeeName}</Text>
+            </TouchableOpacity>
             <TouchableOpacity onPress={() => handleRemove(a.id, a.employeeName || "")} style={[styles.removeBtn, { borderColor: colors.destructive + "40" }]}>
               <Feather name="x" size={16} color={colors.destructive} />
             </TouchableOpacity>

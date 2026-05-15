@@ -5,6 +5,7 @@ import { useGetIncidents, getGetIncidentsQueryKey, useUpdateIncident } from "@wo
 import { Feather } from "@expo/vector-icons";
 import { useQueryClient } from "@tanstack/react-query";
 import { AttachmentImage } from "@/components/AttachmentImage";
+import { useRouter } from "expo-router";
 
 const STATUS_FILTERS = ["open", "under_review", "resolved", "closed"] as const;
 const SEVERITIES = ["low", "medium", "high", "critical"] as const;
@@ -34,6 +35,7 @@ function StatusBadge({ status }: { status: string }) {
 export default function AdminIncidentsScreen() {
   const colors = useColors();
   const queryClient = useQueryClient();
+  const router = useRouter();
   const [filter, setFilter] = useState<string>("open");
   const [selectedIncident, setSelectedIncident] = useState<any>(null);
   const [resolution, setResolution] = useState("");
@@ -149,6 +151,25 @@ export default function AdminIncidentsScreen() {
                 </TouchableOpacity>
               </View>
 
+              {selectedIncident.employeeId && (
+                <TouchableOpacity
+                  style={[styles.officerLink, { borderColor: colors.primary }]}
+                  onPress={() => {
+                    const eid = selectedIncident.employeeId;
+                    setSelectedIncident(null);
+                    router.push(`/(admin)/employees/${eid}` as any);
+                  }}
+                  accessibilityRole="button"
+                  accessibilityLabel={`View profile for ${selectedIncident.employeeName}`}
+                >
+                  <Feather name="user" size={14} color={colors.primary} />
+                  <Text style={[styles.officerLinkText, { color: colors.primary }]} numberOfLines={1}>
+                    {selectedIncident.employeeName || "View officer profile"}
+                  </Text>
+                  <Feather name="chevron-right" size={16} color={colors.primary} />
+                </TouchableOpacity>
+              )}
+
               <ScrollView style={{ maxHeight: 340 }}>
                 <Text style={[styles.descFull, { color: colors.foreground }]}>{selectedIncident.description}</Text>
                 {Array.isArray(selectedIncident.attachments) && selectedIncident.attachments.length > 0 && (
@@ -252,6 +273,8 @@ const styles = StyleSheet.create({
   modalBtn: { flex: 1, paddingVertical: 12, borderRadius: 8, borderWidth: 1, alignItems: "center" },
   modalBtnText: { fontWeight: "700", fontSize: 14 },
   attachmentTag: { flexDirection: "row", alignItems: "center", gap: 5, marginTop: 2 },
+  officerLink: { flexDirection: "row", alignItems: "center", gap: 6, paddingHorizontal: 10, paddingVertical: 8, borderRadius: 8, borderWidth: 1 },
+  officerLinkText: { flex: 1, fontSize: 13, fontWeight: "600" },
   thumbRow: { gap: 8, paddingVertical: 4 },
   previewOverlay: { flex: 1, backgroundColor: "#000000ee", alignItems: "center", justifyContent: "center" },
   previewImg: { width: "100%", height: "85%" },
