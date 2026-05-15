@@ -257,7 +257,16 @@ export function ImportWizard({
       const serverIssues = dry.results
         .filter((r) => !r.ok)
         .map((r) => ({ index: r.index, message: `Row ${r.index + 1}: ${r.error ?? "validation failed"}` }));
-      setPreviewIssues([...issues, ...serverIssues]);
+      // Dedupe by index+message so client and server flagging the same row
+      // for the same reason doesn't double-count.
+      const seen = new Set<string>();
+      const merged = [...issues, ...serverIssues].filter((i) => {
+        const k = `${i.index}::${i.message}`;
+        if (seen.has(k)) return false;
+        seen.add(k);
+        return true;
+      });
+      setPreviewIssues(merged);
       setStep("preview");
     } catch (e) {
       // If the dry-run call itself fails, fall back to local issues only and
@@ -526,14 +535,22 @@ export function ImportWizard({
 
         {step === "preview" && (
           <div className="space-y-3">
-            <div className="flex items-center gap-4 text-sm">
-              <span className="inline-flex items-center gap-1 text-emerald-700">
-                <CheckCircle2 className="w-4 h-4" /> {previewRows.length - previewIssues.length} ready
-              </span>
-              <span className="inline-flex items-center gap-1 text-amber-700">
-                <AlertTriangle className="w-4 h-4" /> {previewIssues.length} flagged
-              </span>
-            </div>
+            {(() => {
+              // Count unique failing rows, not issues — a single row may
+              // collect several issues (missing required + unresolved FK).
+              const flaggedRows = new Set(previewIssues.map((i) => i.index)).size;
+              const readyRows = Math.max(0, previewRows.length - flaggedRows);
+              return (
+                <div className="flex items-center gap-4 text-sm">
+                  <span className="inline-flex items-center gap-1 text-emerald-700">
+                    <CheckCircle2 className="w-4 h-4" /> {readyRows} ready
+                  </span>
+                  <span className="inline-flex items-center gap-1 text-amber-700">
+                    <AlertTriangle className="w-4 h-4" /> {flaggedRows} flagged
+                  </span>
+                </div>
+              );
+            })()}
             {previewIssues.length > 0 && (
               <div className="text-xs bg-amber-50 border border-amber-200 rounded p-2 max-h-32 overflow-auto">
                 {previewIssues.slice(0, 30).map((i, n) => <div key={n}>{i.message}</div>)}
