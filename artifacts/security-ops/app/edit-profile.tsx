@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from "react";
 import {
   View, Text, TextInput, TouchableOpacity, StyleSheet,
-  ActivityIndicator, ScrollView, Platform,
+  ActivityIndicator, ScrollView, Platform, Alert,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { Feather } from "@expo/vector-icons";
@@ -13,6 +13,7 @@ import {
   useGetEmployee, getGetEmployeeQueryKey,
   useUpdateMyEmployeeProfile,
 } from "@workspace/api-client-react";
+import { pickAndUploadImage } from "@/utils/upload";
 
 type Form = {
   phone: string;
@@ -28,6 +29,13 @@ type Form = {
   bankAccountNumber: string;
   bankBsb: string;
   skills: string;
+  // Document keys (object paths) the officer may swap. null = no change
+  // pending; new "/objects/<uuid>" string = file uploaded this session.
+  photoKey: string | null;
+  licenseDocKey: string | null;
+  passportDocKey: string | null;
+  /** Append-only list. We never remove existing certs from this screen. */
+  trainingCertificateKeys: string[] | null;
 };
 
 const empty: Form = {
@@ -36,6 +44,8 @@ const empty: Form = {
   uniformShirt: "", uniformTrousers: "", uniformJacket: "", uniformBoots: "",
   bankAccountName: "", bankAccountNumber: "", bankBsb: "",
   skills: "",
+  photoKey: null, licenseDocKey: null, passportDocKey: null,
+  trainingCertificateKeys: null,
 };
 
 export default function EditProfileScreen() {
@@ -70,10 +80,35 @@ export default function EditProfileScreen() {
       bankAccountNumber: profile.bankAccountNumber ?? "",
       bankBsb: profile.bankBsb ?? "",
       skills: (profile.skills ?? []).join(", "),
+      photoKey: profile.photoKey ?? null,
+      licenseDocKey: profile.licenseDocKey ?? null,
+      passportDocKey: profile.passportDocKey ?? null,
+      trainingCertificateKeys: profile.trainingCertificateKeys ?? null,
     });
   }, [profile]);
 
   function set<K extends keyof Form>(k: K, v: string) { setForm((f) => ({ ...f, [k]: v })); }
+  function setDoc<K extends "photoKey" | "licenseDocKey" | "passportDocKey">(k: K, v: string | null) {
+    setForm((f) => ({ ...f, [k]: v }));
+  }
+  function appendCert(v: string) {
+    setForm((f) => ({ ...f, trainingCertificateKeys: [...(f.trainingCertificateKeys ?? []), v] }));
+  }
+
+  const [uploading, setUploading] = useState<string | null>(null);
+  async function handleUpload(field: "photoKey" | "licenseDocKey" | "passportDocKey" | "trainingCertificateKeys") {
+    try {
+      setUploading(field);
+      const res = await pickAndUploadImage({ source: "library", quality: 0.7 });
+      if (!res) return;
+      if (field === "trainingCertificateKeys") appendCert(res.objectPath);
+      else setDoc(field, res.objectPath);
+    } catch (e) {
+      Alert.alert("Upload failed", (e as Error).message ?? "Could not upload file");
+    } finally {
+      setUploading(null);
+    }
+  }
 
   async function save() {
     setError(null);
@@ -93,6 +128,15 @@ export default function EditProfileScreen() {
     payload.bankBsb = trim(form.bankBsb) || null;
     const skills = form.skills.split(",").map((s) => s.trim()).filter(Boolean);
     payload.skills = skills;
+    // Only send doc keys that actually changed from what's on the profile.
+    if (form.photoKey !== (profile?.photoKey ?? null)) payload.photoKey = form.photoKey;
+    if (form.licenseDocKey !== (profile?.licenseDocKey ?? null)) payload.licenseDocKey = form.licenseDocKey;
+    if (form.passportDocKey !== (profile?.passportDocKey ?? null)) payload.passportDocKey = form.passportDocKey;
+    const origCerts = profile?.trainingCertificateKeys ?? null;
+    const newCerts = form.trainingCertificateKeys ?? null;
+    if (JSON.stringify(origCerts) !== JSON.stringify(newCerts)) {
+      payload.trainingCertificateKeys = newCerts;
+    }
     try {
       await mut.mutateAsync({ data: payload as any });
       await updateUser({ mustCompleteProfile: false });
@@ -165,6 +209,53 @@ export default function EditProfileScreen() {
           <Field label="Routing / sort code"><Input value={form.bankBsb} onChangeText={(v) => set("bankBsb", v)} /></Field>
         </Section>
 
+        <Section title="Documents">
+          <Text style={[styles.note, { color: colors.mutedForeground }]}>
+            Replace your photo or scan refreshed copies of your TX security license, passport / right-to-work doc, or training certificates. Files are private and only visible to admin.
+          </Text>
+          <DocRow
+            label="Profile photo"
+            current={form.photoKey}
+            uploading={uploading === "photoKey"}
+            onUpload={() => handleUpload("photoKey")}
+            onClear={() => setDoc("photoKey", null)}
+          />
+          <DocRow
+            label="TX security license (photo of card)"
+            current={form.licenseDocKey}
+            uploading={uploading === "licenseDocKey"}
+            onUpload={() => handleUpload("licenseDocKey")}
+            onClear={() => setDoc("licenseDocKey", null)}
+          />
+          <DocRow
+            label="Passport / driver's license"
+            current={form.passportDocKey}
+            uploading={uploading === "passportDocKey"}
+            onUpload={() => handleUpload("passportDocKey")}
+            onClear={() => setDoc("passportDocKey", null)}
+          />
+          <View style={{ gap: 4 }}>
+            <Text style={[styles.label, { color: colors.mutedForeground }]}>
+              Training certificates ({(form.trainingCertificateKeys ?? []).length} on file)
+            </Text>
+            <TouchableOpacity
+              onPress={() => handleUpload("trainingCertificateKeys")}
+              disabled={uploading === "trainingCertificateKeys"}
+              style={[styles.docBtn, { borderColor: colors.primary, backgroundColor: colors.primary + "10" }]}
+            >
+              {uploading === "trainingCertificateKeys" ? <ActivityIndicator color={colors.primary} /> : (
+                <>
+                  <Feather name="plus" size={14} color={colors.primary} />
+                  <Text style={{ color: colors.primary, fontWeight: "600", fontSize: 13 }}>Add training certificate</Text>
+                </>
+              )}
+            </TouchableOpacity>
+            <Text style={[styles.note, { color: colors.mutedForeground }]}>
+              Existing certificates remain on file. Contact admin to remove one.
+            </Text>
+          </View>
+        </Section>
+
         <Section title="Skills">
           <Field label="Comma-separated">
             <Input value={form.skills} onChangeText={(v) => set("skills", v)} placeholder="e.g. CPR, Crowd control, First aid" />
@@ -220,6 +311,49 @@ function Input(props: React.ComponentProps<typeof TextInput>) {
     />
   );
 }
+function DocRow({
+  label, current, uploading, onUpload, onClear,
+}: {
+  label: string;
+  current: string | null;
+  uploading: boolean;
+  onUpload: () => void;
+  onClear: () => void;
+}) {
+  const colors = useColors();
+  const hasFile = !!current;
+  return (
+    <View style={{ gap: 4 }}>
+      <Text style={[styles.label, { color: colors.mutedForeground }]}>{label}</Text>
+      <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
+        <TouchableOpacity
+          onPress={onUpload}
+          disabled={uploading}
+          style={[styles.docBtn, { borderColor: colors.primary, backgroundColor: colors.primary + "10", flex: 1 }]}
+        >
+          {uploading ? <ActivityIndicator color={colors.primary} /> : (
+            <>
+              <Feather name={hasFile ? "refresh-cw" : "upload"} size={14} color={colors.primary} />
+              <Text style={{ color: colors.primary, fontWeight: "600", fontSize: 13 }}>
+                {hasFile ? "Replace file" : "Upload file"}
+              </Text>
+            </>
+          )}
+        </TouchableOpacity>
+        {hasFile && (
+          <TouchableOpacity onPress={onClear} style={[styles.docBtn, { borderColor: colors.border }]}>
+            <Feather name="x" size={14} color={colors.foreground} />
+          </TouchableOpacity>
+        )}
+      </View>
+      {hasFile && (
+        <Text style={[styles.note, { color: colors.mutedForeground }]}>
+          <Feather name="check" size={11} color={colors.accent} /> File on record
+        </Text>
+      )}
+    </View>
+  );
+}
 function ReadOnly({ label, value }: { label: string; value: string }) {
   const colors = useColors();
   return (
@@ -241,6 +375,7 @@ const styles = StyleSheet.create({
   sectionTitle: { fontSize: 11, letterSpacing: 2, fontWeight: "700" },
   label: { fontSize: 11, letterSpacing: 1, fontWeight: "700", textTransform: "uppercase" },
   note: { fontSize: 11, fontStyle: "italic" },
+  docBtn: { flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 6, paddingHorizontal: 12, paddingVertical: 10, borderRadius: 8, borderWidth: 1 },
   errorBox: { flexDirection: "row", alignItems: "center", gap: 8, padding: 12, borderRadius: 8, borderWidth: 1 },
   button: { height: 50, borderRadius: 8, alignItems: "center", justifyContent: "center" },
   buttonText: { fontSize: 15, fontWeight: "700", letterSpacing: 1 },

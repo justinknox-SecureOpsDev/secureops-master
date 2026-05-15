@@ -101,6 +101,7 @@ router.post("/auth/change-password", requireAuth, async (req, res): Promise<void
 // fields. Email, name, role, status, hourlyRate, license info, and any
 // user-account field are intentionally NOT editable here — those must go
 // through admin / HR.
+const ObjectKey = z.string().min(1).max(512).startsWith("/objects/");
 const PatchMeEmployeeBody = z.object({
   phone: z.string().optional(),
   address: z.string().optional(),
@@ -115,6 +116,18 @@ const PatchMeEmployeeBody = z.object({
   bankAccountNumber: z.string().nullable().optional(),
   bankBsb: z.string().nullable().optional(),
   skills: z.array(z.string()).optional(),
+  // Self-service document refresh (Task #31). Object paths look like
+  // "/objects/<uuid>" — the value the presigned-upload flow returns.
+  // We enforce that prefix so officers cannot persist arbitrary strings
+  // as document references. The license number / expiry / right-to-work
+  // *status* still require admin (those are compliance fields). Officers
+  // can only swap the *file* they previously uploaded.
+  photoKey: ObjectKey.nullable().optional(),
+  cvKey: ObjectKey.nullable().optional(),
+  licenseDocKey: ObjectKey.nullable().optional(),
+  passportDocKey: ObjectKey.nullable().optional(),
+  rightToWorkDocKey: ObjectKey.nullable().optional(),
+  trainingCertificateKeys: z.array(ObjectKey).max(50).nullable().optional(),
 }).strict();
 
 router.patch("/me/employee", requireAuth, async (req, res): Promise<void> => {

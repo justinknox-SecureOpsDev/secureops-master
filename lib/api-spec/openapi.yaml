@@ -1909,6 +1909,18 @@ components:
         skills:
           type: array
           items: { type: string }
+        # Self-service document refresh (Task #31). Object paths returned
+        # by POST /storage/uploads/request-url. Officers can replace their
+        # own files but cannot edit license number / expiry / status.
+        photoKey: { type: string, nullable: true }
+        cvKey: { type: string, nullable: true }
+        licenseDocKey: { type: string, nullable: true }
+        passportDocKey: { type: string, nullable: true }
+        rightToWorkDocKey: { type: string, nullable: true }
+        trainingCertificateKeys:
+          type: array
+          nullable: true
+          items: { type: string }
 
     UpdateEmployeeRequest:
       type: object

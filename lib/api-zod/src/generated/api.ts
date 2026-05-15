@@ -392,6 +392,12 @@ export const UpdateMyEmployeeProfileBody = zod
     bankAccountNumber: zod.string().nullish(),
     bankBsb: zod.string().nullish(),
     skills: zod.array(zod.string()).optional(),
+    photoKey: zod.string().nullish(),
+    cvKey: zod.string().nullish(),
+    licenseDocKey: zod.string().nullish(),
+    passportDocKey: zod.string().nullish(),
+    rightToWorkDocKey: zod.string().nullish(),
+    trainingCertificateKeys: zod.array(zod.string()).nullish(),
   })
   .describe(
     "Strict allow-list of fields the employee may edit on their own profile.",

@@ -239,6 +239,12 @@ export interface UpdateMyEmployeeRequest {
   bankAccountNumber?: string | null;
   bankBsb?: string | null;
   skills?: string[];
+  photoKey?: string | null;
+  cvKey?: string | null;
+  licenseDocKey?: string | null;
+  passportDocKey?: string | null;
+  rightToWorkDocKey?: string | null;
+  trainingCertificateKeys?: string[] | null;
 }
 
 export type UpdateEmployeeRequestStatus =
