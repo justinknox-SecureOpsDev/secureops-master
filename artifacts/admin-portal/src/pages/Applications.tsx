@@ -79,6 +79,9 @@ export function ApplicationsPage() {
   const [approval, setApproval] = useState<ApproveResp | null>(null);
   const [rejection, setRejection] = useState<RejectResp | null>(null);
   const [requestInfo, setRequestInfo] = useState<RequestInfoResp | null>(null);
+  const [selected, setSelected] = useState<Set<string>>(new Set());
+  const [showBatch, setShowBatch] = useState(false);
+  const [batchResult, setBatchResult] = useState<BatchResult | null>(null);
 
   async function refresh() {
     setLoading(true); setError(null);
@@ -94,6 +97,39 @@ export function ApplicationsPage() {
   useEffect(() => { refresh(); /* eslint-disable-next-line */ }, [status]);
 
   const opened = useMemo(() => items.find((i) => i.id === openId) ?? null, [items, openId]);
+
+  const eligible = useMemo(
+    () => items.filter((a) => a.status !== "approved" && a.status !== "rejected"),
+    [items],
+  );
+  const selectedItems = useMemo(
+    () => eligible.filter((a) => selected.has(a.id)),
+    [eligible, selected],
+  );
+  // Drop selections that are no longer eligible (e.g. after approve/reject in dialog).
+  useEffect(() => {
+    setSelected((prev) => {
+      const eligibleIds = new Set(eligible.map((a) => a.id));
+      const next = new Set<string>();
+      prev.forEach((id) => { if (eligibleIds.has(id)) next.add(id); });
+      return next.size === prev.size ? prev : next;
+    });
+  }, [eligible]);
+
+  function toggleRow(id: string) {
+    setSelected((prev) => {
+      const n = new Set(prev);
+      if (n.has(id)) n.delete(id); else n.add(id);
+      return n;
+    });
+  }
+  function toggleAll() {
+    setSelected((prev) => {
+      if (prev.size === eligible.length && eligible.length > 0) return new Set();
+      return new Set(eligible.map((a) => a.id));
+    });
+  }
+  const allSelected = eligible.length > 0 && selected.size === eligible.length;
 
   return (
     <div className="flex-1 overflow-auto p-6 space-y-4">
@@ -130,10 +166,36 @@ export function ApplicationsPage() {
 
       {error && <div className="text-sm text-destructive bg-destructive/5 p-2 rounded border border-destructive/20">{error}</div>}
 
+      {selected.size > 0 && (
+        <div className="sticky top-0 z-10 flex items-center gap-3 bg-brand-navy text-white px-4 py-2 rounded shadow">
+          <span className="text-sm">
+            <strong>{selected.size}</strong> selected
+          </span>
+          <Button size="sm" variant="secondary" className="ml-auto"
+            onClick={() => setShowBatch(true)}>
+            <MessageSquareWarning className="w-4 h-4 mr-1" /> Request more info from {selected.size}
+          </Button>
+          <Button size="sm" variant="ghost" className="text-white hover:bg-white/10"
+            onClick={() => setSelected(new Set())}>
+            Clear
+          </Button>
+        </div>
+      )}
+
       <div className="bg-card rounded-lg border overflow-hidden">
         <table className="w-full text-sm">
           <thead className="bg-muted/50 text-xs uppercase tracking-wide">
             <tr>
+              <th className="px-3 py-2 w-8">
+                <input
+                  type="checkbox"
+                  aria-label="Select all"
+                  checked={allSelected}
+                  ref={(el) => { if (el) el.indeterminate = selected.size > 0 && !allSelected; }}
+                  onChange={toggleAll}
+                  disabled={eligible.length === 0}
+                />
+              </th>
               <th className="text-left px-3 py-2">Applicant</th>
               <th className="text-left px-3 py-2">Email</th>
               <th className="text-left px-3 py-2">Phone</th>
@@ -144,25 +206,38 @@ export function ApplicationsPage() {
             </tr>
           </thead>
           <tbody>
-            {loading && (<tr><td colSpan={7} className="px-3 py-10 text-center text-muted-foreground"><Loader2 className="w-5 h-5 inline-block animate-spin" /></td></tr>)}
-            {!loading && items.length === 0 && (<tr><td colSpan={7} className="px-3 py-10 text-center text-muted-foreground">No applications.</td></tr>)}
-            {items.map((a) => (
-              <tr key={a.id} className="border-t hover:bg-accent/30">
-                <td className="px-3 py-2 font-medium">{a.firstName} {a.lastName}</td>
-                <td className="px-3 py-2">{a.email}</td>
-                <td className="px-3 py-2">{a.phone}</td>
-                <td className="px-3 py-2">{a.siaLicenseLevel ? `L${a.siaLicenseLevel}` : "—"}</td>
-                <td className="px-3 py-2 text-muted-foreground">{new Date(a.createdAt).toLocaleString()}</td>
-                <td className="px-3 py-2">
-                  <span className={`inline-block px-2 py-0.5 text-[11px] uppercase rounded border ${STATUS_STYLES[a.status]}`}>
-                    {a.status.replace("_", " ")}
-                  </span>
-                </td>
-                <td className="px-3 py-2 text-right">
-                  <Button size="sm" variant="outline" onClick={() => setOpenId(a.id)}>Review</Button>
-                </td>
-              </tr>
-            ))}
+            {loading && (<tr><td colSpan={8} className="px-3 py-10 text-center text-muted-foreground"><Loader2 className="w-5 h-5 inline-block animate-spin" /></td></tr>)}
+            {!loading && items.length === 0 && (<tr><td colSpan={8} className="px-3 py-10 text-center text-muted-foreground">No applications.</td></tr>)}
+            {items.map((a) => {
+              const isEligible = a.status !== "approved" && a.status !== "rejected";
+              return (
+                <tr key={a.id} className="border-t hover:bg-accent/30">
+                  <td className="px-3 py-2">
+                    <input
+                      type="checkbox"
+                      aria-label={`Select ${a.firstName} ${a.lastName}`}
+                      checked={selected.has(a.id)}
+                      onChange={() => toggleRow(a.id)}
+                      disabled={!isEligible}
+                      title={isEligible ? undefined : `Cannot request info on ${a.status} applications`}
+                    />
+                  </td>
+                  <td className="px-3 py-2 font-medium">{a.firstName} {a.lastName}</td>
+                  <td className="px-3 py-2">{a.email}</td>
+                  <td className="px-3 py-2">{a.phone}</td>
+                  <td className="px-3 py-2">{a.siaLicenseLevel ? `L${a.siaLicenseLevel}` : "—"}</td>
+                  <td className="px-3 py-2 text-muted-foreground">{new Date(a.createdAt).toLocaleString()}</td>
+                  <td className="px-3 py-2">
+                    <span className={`inline-block px-2 py-0.5 text-[11px] uppercase rounded border ${STATUS_STYLES[a.status]}`}>
+                      {a.status.replace("_", " ")}
+                    </span>
+                  </td>
+                  <td className="px-3 py-2 text-right">
+                    <Button size="sm" variant="outline" onClick={() => setOpenId(a.id)}>Review</Button>
+                  </td>
+                </tr>
+              );
+            })}
           </tbody>
         </table>
       </div>
@@ -196,9 +271,33 @@ export function ApplicationsPage() {
       {requestInfo && (
         <RequestInfoResultDialog resp={requestInfo} onClose={() => setRequestInfo(null)} />
       )}
+      {showBatch && selectedItems.length > 0 && (
+        <BatchRequestInfoDialog
+          apps={selectedItems}
+          onClose={() => setShowBatch(false)}
+          onDone={(result) => {
+            setShowBatch(false);
+            // Apply per-row updates from any successful sends.
+            setItems((arr) => arr.map((x) => {
+              const updated = result.successes.find((s) => s.application.id === x.id);
+              return updated ? updated.application : x;
+            }));
+            setSelected(new Set());
+            setBatchResult(result);
+          }}
+        />
+      )}
+      {batchResult && (
+        <BatchResultDialog result={batchResult} onClose={() => setBatchResult(null)} />
+      )}
     </div>
   );
 }
+
+type BatchResult = {
+  successes: RequestInfoResp[];
+  failures: { app: Application; error: string }[];
+};
 
 function ApplicationDialog({
   app, onClose, onUpdated, onApproved, onRejected, onInfoRequested,
@@ -620,5 +719,210 @@ function RejectionResultDialog({ resp, onClose }: { resp: RejectResp; onClose: (
         </DialogFooter>
       </DialogContent>
     </Dialog>
+  );
+}
+
+function BatchRequestInfoDialog({
+  apps, onClose, onDone,
+}: {
+  apps: Application[];
+  onClose: () => void;
+  onDone: (result: BatchResult) => void;
+}) {
+  const [selectedFields, setSelectedFields] = useState<Set<string>>(new Set());
+  const [note, setNote] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [progress, setProgress] = useState<{ done: number; total: number } | null>(null);
+
+  function toggle(key: string) {
+    setSelectedFields((prev) => {
+      const n = new Set(prev);
+      if (n.has(key)) n.delete(key); else n.add(key);
+      return n;
+    });
+  }
+
+  // Per-field count of how many selected applicants are missing it — so the
+  // admin can see "8 of 10 selected applicants are missing photo".
+  function missingCount(fieldKey: string): number {
+    const dbKey = AMENDMENT_FIELDS.find((f) => f.key === fieldKey)?.dbKey ?? fieldKey;
+    return apps.filter((a) => {
+      const v = (a as unknown as Record<string, unknown>)[dbKey];
+      return v == null || v === "";
+    }).length;
+  }
+
+  async function send() {
+    if (selectedFields.size === 0) { setError("Select at least one field."); return; }
+    setBusy(true); setError(null);
+    setProgress({ done: 0, total: apps.length });
+    const fields = [...selectedFields];
+    const trimmedNote = note.trim() || undefined;
+    const successes: RequestInfoResp[] = [];
+    const failures: { app: Application; error: string }[] = [];
+
+    // Limit concurrency so we don't hammer SMTP. 4 at a time.
+    const queue = [...apps];
+    async function worker() {
+      while (queue.length) {
+        const app = queue.shift();
+        if (!app) return;
+        try {
+          const resp = await api<RequestInfoResp>(`/admin/applications/${app.id}/request-info`, {
+            method: "POST",
+            body: { requestedFields: fields, note: trimmedNote },
+          });
+          successes.push(resp);
+        } catch (e) {
+          failures.push({ app, error: (e as Error).message });
+        } finally {
+          setProgress((p) => p ? { done: p.done + 1, total: p.total } : p);
+        }
+      }
+    }
+    await Promise.all(Array.from({ length: Math.min(4, apps.length) }, worker));
+    setBusy(false);
+    setProgress(null);
+    onDone({ successes, failures });
+  }
+
+  return (
+    <Dialog open onOpenChange={(o) => { if (!o && !busy) onClose(); }}>
+      <DialogContent className="max-w-2xl max-h-[85vh] overflow-y-auto">
+        <DialogHeader>
+          <DialogTitle className="brand-wordmark text-xl flex items-center gap-2">
+            <MessageSquareWarning className="w-5 h-5 brand-gold" />
+            Request more info — {apps.length} applicant{apps.length === 1 ? "" : "s"}
+          </DialogTitle>
+        </DialogHeader>
+        <div className="space-y-4 text-sm">
+          <div className="bg-muted/40 border rounded p-3 max-h-32 overflow-y-auto">
+            <div className="text-xs uppercase tracking-wide opacity-70 mb-1">Recipients</div>
+            <div className="text-xs space-y-0.5">
+              {apps.map((a) => (
+                <div key={a.id}>
+                  <strong>{a.firstName} {a.lastName}</strong>
+                  <span className="text-muted-foreground"> · {a.email}</span>
+                </div>
+              ))}
+            </div>
+          </div>
+          <p className="text-muted-foreground">
+            Each applicant gets their own secure link to the items you tick below. The same note (if any)
+            goes to everyone. Links expire in 14 days. Any prior unconsumed link for an applicant is invalidated.
+          </p>
+          <div className="border rounded divide-y">
+            {AMENDMENT_FIELDS.map((f) => {
+              const isOn = selectedFields.has(f.key);
+              const missing = missingCount(f.key);
+              return (
+                <label key={f.key} className="flex items-start gap-3 px-3 py-2 hover:bg-accent/30 cursor-pointer">
+                  <input type="checkbox" className="mt-1" checked={isOn} onChange={() => toggle(f.key)} />
+                  <div className="flex-1 min-w-0">
+                    <div className="font-medium">{f.label}</div>
+                    <div className="text-xs text-muted-foreground">
+                      {missing === 0
+                        ? <span className="text-emerald-700">All selected applicants already have this</span>
+                        : <span>{missing} of {apps.length} missing this</span>}
+                    </div>
+                  </div>
+                </label>
+              );
+            })}
+          </div>
+          <div className="space-y-1">
+            <div className="text-xs uppercase tracking-wide opacity-70">Note to applicants (optional)</div>
+            <Textarea rows={3} value={note} onChange={(e) => setNote(e.target.value)}
+              placeholder="e.g. We need clearer copies of your right-to-work and license documents." />
+          </div>
+          {progress && (
+            <div className="text-xs text-muted-foreground">
+              Sending… {progress.done} / {progress.total}
+            </div>
+          )}
+          {error && <div className="text-sm text-destructive bg-destructive/5 p-2 rounded border border-destructive/20">{error}</div>}
+        </div>
+        <DialogFooter>
+          <Button variant="ghost" onClick={onClose} disabled={busy}>Cancel</Button>
+          <Button className="bg-brand-navy hover:opacity-90 text-white"
+            onClick={send} disabled={busy || selectedFields.size === 0}>
+            {busy ? "Sending…" : `Send to ${apps.length} applicant${apps.length === 1 ? "" : "s"}`}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+function BatchResultDialog({ result, onClose }: { result: BatchResult; onClose: () => void }) {
+  function copy(text: string) { navigator.clipboard.writeText(text).catch(() => {}); }
+  const emailedCount = result.successes.filter((s) => s.emailSent).length;
+  const linkOnlyCount = result.successes.length - emailedCount;
+  return (
+    <Dialog open onOpenChange={(o) => { if (!o) onClose(); }}>
+      <DialogContent className="max-w-2xl max-h-[85vh] overflow-y-auto">
+        <DialogHeader>
+          <DialogTitle className="brand-wordmark text-xl">Batch info request — results</DialogTitle>
+        </DialogHeader>
+        <div className="space-y-3 text-sm">
+          <div className="grid grid-cols-3 gap-2">
+            <Stat label="Emailed" value={emailedCount} tone="emerald" />
+            <Stat label="Link only" value={linkOnlyCount} tone="amber" />
+            <Stat label="Failed" value={result.failures.length} tone="rose" />
+          </div>
+          {result.failures.length > 0 && (
+            <div>
+              <div className="text-xs uppercase tracking-wide opacity-70 mb-1">Failures</div>
+              <ul className="text-xs bg-rose-50 border border-rose-200 rounded p-2 space-y-1">
+                {result.failures.map((f) => (
+                  <li key={f.app.id}>
+                    <strong>{f.app.firstName} {f.app.lastName}</strong> — {f.error}
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
+          {linkOnlyCount > 0 && (
+            <div>
+              <div className="text-xs uppercase tracking-wide opacity-70 mb-1">
+                Share these links manually (SMTP didn't send)
+              </div>
+              <ul className="text-xs space-y-1">
+                {result.successes.filter((s) => !s.emailSent).map((s) => (
+                  <li key={s.application.id} className="flex items-center gap-1">
+                    <span className="shrink-0">{s.application.firstName} {s.application.lastName} ({s.application.email}):</span>
+                    <Input readOnly value={s.amendUrl} className="text-xs h-7 flex-1" />
+                    <Button type="button" size="sm" variant="outline" onClick={() => copy(s.amendUrl)}>
+                      <Copy className="w-3 h-3" />
+                    </Button>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
+          {emailedCount > 0 && result.failures.length === 0 && linkOnlyCount === 0 && (
+            <div className="bg-emerald-50 border border-emerald-200 text-emerald-900 p-3 rounded">
+              All {emailedCount} applicant{emailedCount === 1 ? "" : "s"} have been emailed.
+            </div>
+          )}
+        </div>
+        <DialogFooter><Button onClick={onClose}>Done</Button></DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+function Stat({ label, value, tone }: { label: string; value: number; tone: "emerald" | "amber" | "rose" }) {
+  const cls = tone === "emerald"
+    ? "bg-emerald-50 border-emerald-200 text-emerald-900"
+    : tone === "amber"
+      ? "bg-amber-50 border-amber-200 text-amber-900"
+      : "bg-rose-50 border-rose-200 text-rose-900";
+  return (
+    <div className={`border rounded p-2 text-center ${cls}`}>
+      <div className="text-2xl font-semibold">{value}</div>
+      <div className="text-[11px] uppercase tracking-wide opacity-80">{label}</div>
+    </div>
   );
 }
