@@ -154,7 +154,7 @@ router.post("/shifts", requireAdmin, async (req, res): Promise<void> => {
 
   if (employeeIds && Array.isArray(employeeIds) && employeeIds.length > 0) {
     await db.insert(shiftAssignmentsTable).values(
-      employeeIds.map((eid: string) => ({ shiftId: shift.id, employeeId: eid, status: "pending" }))
+      employeeIds.map((eid: string) => ({ shiftId: shift.id, employeeId: eid, status: "accepted" }))
     );
   }
 
@@ -295,9 +295,12 @@ router.post("/shifts/:id/claim", requireAuth, async (req, res): Promise<void> =>
       if (filled >= headcount) return undefined;
 
       try {
+        // One-tap reserve: officer is committed immediately. No separate
+        // pending→accepted confirmation step (admins were getting confused
+        // about whether the slot was actually filled).
         const inserted = await tx.execute(sql`
           INSERT INTO shift_assignments (shift_id, employee_id, status)
-          VALUES (${shiftId}::uuid, ${userId}::uuid, 'pending')
+          VALUES (${shiftId}::uuid, ${userId}::uuid, 'accepted')
           RETURNING id, shift_id, employee_id, status, created_at, updated_at
         `);
         const row = (inserted as any).rows?.[0];
@@ -340,9 +343,9 @@ router.post("/shifts/:id/claim", requireAuth, async (req, res): Promise<void> =>
     const { sendPushToUsers } = await import("../lib/push");
     const start = new Date(shift.startTime).toLocaleString("en-GB", { weekday: "short", month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" });
     await sendPushToUsers([userId], {
-      title: "🕒 Confirm Your Shift",
-      body: `${shift.title} on ${start} — open to accept or decline.`,
-      data: { type: "shift_pending_confirmation", shiftId },
+      title: "✅ Shift Reserved",
+      body: `You're booked for ${shift.title} on ${start}.`,
+      data: { type: "shift_reserved", shiftId },
     });
   } catch (err) {
     req.log.warn({ err }, "Failed to send claim confirmation push");
@@ -368,7 +371,9 @@ router.post("/shifts/:id/assignments", requireAdmin, async (req, res): Promise<v
     return;
   }
 
-  const [assignment] = await db.insert(shiftAssignmentsTable).values({ shiftId, employeeId, status: "pending" }).returning();
+  // Admin assignment is final — the officer is on the schedule immediately.
+  // No pending/accept dance: when admin taps "+", the slot is filled.
+  const [assignment] = await db.insert(shiftAssignmentsTable).values({ shiftId, employeeId, status: "accepted" }).returning();
   const [user] = await db.select().from(usersTable).where(eq(usersTable.id, employeeId));
 
   // Send push notification to the assigned employee

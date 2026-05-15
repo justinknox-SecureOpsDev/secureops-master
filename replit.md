@@ -61,9 +61,9 @@ A full-stack mobile operations platform for Williams Council Security Group (WCS
 
 - **Client → Site hierarchy**: Clients have payment terms (Net X days). Each client has Sites (physical locations). Shifts are posted against a Site with per-shift `payRate` (officer) and `billRate` (client). Site replaces the old free-text `clientName`/`location`.
 - **Admin**: Manage clients (with payment terms) + sites; post shifts on sites with bill/pay rates + required licence level + headcount; approve time entries; generate weekly payroll per (employee × site × week) from approved hours; generate weekly invoices per (client × site × week) at billRate × approved hours, due date = invoice date + client.paymentTermsDays; mark payroll/invoices paid manually; review incidents; track licences; broadcast via team chat.
-- **Employee**: See highest current clearance on profile; browse "Available" shifts they qualify for; **explicitly Accept or Decline** each assignment (claim creates `pending`, accept → `accepted`, decline → row deleted, slot freed); GPS clock in/out (entries start `pending` admin approval); report incidents; team chat.
+- **Employee**: See highest current clearance on profile; browse "Available" shifts they qualify for; **one-tap Reserve** books the shift immediately (`POST /shifts/:id/claim` inserts an `accepted` assignment); officer can later Decline to release the slot; GPS clock in/out (entries start `pending` admin approval); report incidents; team chat.
 - **Licence hierarchy**: L2 unarmed (lowest) → L3 armed (covers L2+L3) → L4/PPO (covers all). `maxLicenseLevel` = MAX(level) of unexpired licences.
-- **Atomic shift claim**: `POST /shifts/{id}/claim` uses a single SQL `INSERT ... WHERE NOT EXISTS ... AND count < headcount` to prevent races overfilling shifts; creates `pending` assignment + sends "🕒 Confirm Your Shift" Expo push.
+- **Atomic shift claim**: `POST /shifts/{id}/claim` runs inside a transaction that locks the shift row (`SELECT … FOR UPDATE`) and re-counts assignments before inserting, preventing races from overfilling. Creates an `accepted` assignment (one-tap Reserve = booked) and sends "✅ Shift Reserved" Expo push. Admin "+" (`POST /shifts/{id}/assignments`) likewise creates `accepted` directly.
 - **Currency**: USD ($) throughout admin payroll/invoice screens.
 - **Chat**: Replaces WhatsApp — real-time team messaging with named channels, persistent message history, WebSocket delivery.
 - **Notifications**: Push alerts on shift assignment (iOS/Android); web degrades gracefully.
@@ -99,7 +99,7 @@ A full-stack mobile operations platform for Williams Council Security Group (WCS
 
 ## Gotchas
 
-- **Explicit-acceptance flow**: `PUT /shifts/{id}/assignments/{assignmentId}` with `{status:"declined"}` DELETES the row and returns `{removed:true}` so the slot is freed for re-claim. Accepted/pending are separate states — only `accepted` rows count toward filled headcount once flow is fully gated.
+- **Decline frees the slot**: `PUT /shifts/{id}/assignments/{assignmentId}` with `{status:"declined"}` DELETES the row and returns `{removed:true}` so the slot is freed for re-claim. (Reserve / admin "+" both create `accepted` directly — there is no longer a `pending` confirmation step.)
 - **Orval signature**: list hooks now take `(params, { query: { queryKey } })` — NOT `{ params, query }` wrapped. Mutation hooks take `{id, data}` (or `{id, assignmentId, data}` for nested), not `{id, ...body}`.
 - Orval codegen regenerates `lib/api-zod/src/index.ts` — the codegen script has a post-step to rewrite it to only export from `./generated/api` (avoids TS2308 duplicate export error from types conflict).
 - WebSocket clients connect via `wss://<domain>/api/ws?token=<jwt>` — the proxy routes this correctly.

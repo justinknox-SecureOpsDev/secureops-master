@@ -51,7 +51,7 @@ export default function EmployeeShiftsScreen() {
   const handleClaim = (shift: any) => {
     Alert.alert(
       "Reserve This Shift",
-      `${shift.title} @ ${shift.clientName}\n\nYou'll need to confirm acceptance after reserving.`,
+      `${shift.title} @ ${shift.clientName}\n\nReserving books you onto this shift. You can release it later if you can't make it.`,
       [
         { text: "Cancel", style: "cancel" },
         {
@@ -62,7 +62,7 @@ export default function EmployeeShiftsScreen() {
               await claimShift(shift.id);
               await queryClient.invalidateQueries({ queryKey: getGetShiftsQueryKey() });
               setFilter("upcoming");
-              Alert.alert("Slot Held", "Open the shift in 'Upcoming' to confirm acceptance.");
+              Alert.alert("Shift Reserved", "You're booked. See it under 'Upcoming'.");
             } catch (e: any) {
               const msg = e?.response?.data?.message || e?.message || "Could not reserve this shift.";
               Alert.alert("Reservation Failed", msg);
@@ -309,6 +309,21 @@ export default function EmployeeShiftsScreen() {
                       <Text style={[styles.declineText, { color: colors.destructive }]}>Decline</Text>
                     </TouchableOpacity>
                   </View>
+                )}
+
+                {isAccepted && myAssign && (
+                  <TouchableOpacity
+                    style={[styles.declineBtn, { borderColor: colors.destructive, opacity: busy ? 0.6 : 1, alignSelf: "flex-start" }]}
+                    onPress={() => handleDecline(item, myAssign.id)}
+                    disabled={busy}
+                  >
+                    {busy ? <ActivityIndicator color={colors.destructive} /> : (
+                      <>
+                        <Feather name="x" size={14} color={colors.destructive} />
+                        <Text style={[styles.declineText, { color: colors.destructive }]}>Release Shift</Text>
+                      </>
+                    )}
+                  </TouchableOpacity>
                 )}
               </View>
             );
