@@ -2,7 +2,6 @@ export * from "./users";
 export * from "./employees";
 export * from "./clients";
 export * from "./sites";
-export * from "./siteRoles";
 export * from "./shifts";
 export * from "./shiftAssignments";
 export * from "./timeEntries";

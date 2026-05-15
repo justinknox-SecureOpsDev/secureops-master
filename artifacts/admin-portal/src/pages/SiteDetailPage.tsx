@@ -5,7 +5,6 @@ import { Button } from "@/components/ui/button";
 import { api } from "@/lib/api";
 import { useFkOptions } from "@/lib/fk";
 import { getTable } from "@/lib/tables";
-import { DataGrid } from "@/components/DataGrid";
 import { RowFormDialog } from "@/components/RowFormDialog";
 
 type Site = {
@@ -23,7 +22,6 @@ export function SiteDetailPage() {
   const [, navigate] = useLocation();
   const siteId = params?.id ?? "";
   const sitesDescriptor = getTable("sites");
-  const siteRolesDescriptor = getTable("site_roles");
 
   const [site, setSite] = useState<Site | null>(null);
   const [loading, setLoading] = useState(true);
@@ -46,7 +44,7 @@ export function SiteDetailPage() {
   }
   useEffect(() => { load(); }, [siteId]);
 
-  if (!sitesDescriptor || !siteRolesDescriptor) return null;
+  if (!sitesDescriptor) return null;
 
   const clientName = site ? clientOptions.find((o) => o.id === site.clientId)?.label ?? "—" : "";
 
@@ -92,30 +90,6 @@ export function SiteDetailPage() {
               </Button>
             </div>
           </div>
-        )}
-      </div>
-
-      <div className="px-6 pt-5 pb-2 bg-background">
-        <h2 className="text-sm font-semibold uppercase tracking-wider brand-navy">
-          Rate card
-        </h2>
-        <p className="text-xs text-muted-foreground mt-0.5">
-          Roles you book at this site, with the pay rate paid to the officer and the bill rate charged to the client.
-          Add a role here, then on a Shift you can pick "Use site rate card" and it will auto-fill the rates.
-        </p>
-      </div>
-
-      <div className="flex-1 overflow-hidden border-t">
-        {site && (
-          <DataGrid
-            key={site.id}
-            descriptor={siteRolesDescriptor}
-            filter={{ siteId: site.id }}
-            presetValues={{ siteId: site.id, status: "active" }}
-            lockedFields={["siteId"]}
-            hideHeader
-            compact
-          />
         )}
       </div>
 

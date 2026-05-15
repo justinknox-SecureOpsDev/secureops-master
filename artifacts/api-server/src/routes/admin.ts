@@ -8,7 +8,6 @@ import {
   employeesTable,
   clientsTable,
   sitesTable,
-  siteRolesTable,
   shiftsTable,
   shiftAssignmentsTable,
   timeEntriesTable,
@@ -19,7 +18,6 @@ import {
   insertEmployeeSchema,
   insertClientSchema,
   insertSiteSchema,
-  insertSiteRoleSchema,
   insertShiftSchema,
   insertShiftAssignmentSchema,
   insertTimeEntrySchema,
@@ -200,19 +198,6 @@ const tables: Record<string, TableConfig> = {
     importSupported: true,
     label: "Site",
   },
-  site_roles: {
-    table: siteRolesTable,
-    insertSchema: insertSiteRoleSchema as unknown as z.ZodSchema<any>,
-    searchColumns: [siteRolesTable.name, siteRolesTable.status, siteRolesTable.notes],
-    orderBy: siteRolesTable.createdAt,
-    coerceWrite: (v) => {
-      let out = applyNumericCoercion(v, ["payRate", "billRate"]);
-      out = applyIntCoercion(out, ["requiredLicenseLevel"]);
-      return out;
-    },
-    importSupported: true,
-    label: "Site role",
-  },
   shifts: {
     table: shiftsTable,
     insertSchema: insertShiftSchema as unknown as z.ZodSchema<any>,
@@ -361,9 +346,6 @@ const fkResolution: Record<string, Record<string, FkRef>> = {
   },
   sites: {
     clientId: { table: clientsTable, matchColumns: [{ key: "name", col: clientsTable.name, type: "text" }] },
-  },
-  site_roles: {
-    siteId: { table: sitesTable, matchColumns: [{ key: "name", col: sitesTable.name, type: "text" }] },
   },
   employees: {
     userId: { table: usersTable, matchColumns: [{ key: "email", col: usersTable.email, type: "text" }] },
