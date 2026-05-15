@@ -306,6 +306,19 @@ export const TABLES: TableDescriptor[] = [
     primaryLabelField: "id",
     fields: [
       { key: "id", label: "ID", type: "text", readonly: true, hiddenInGrid: true },
+      {
+        key: "__name", label: "Name", type: "text", readonly: true,
+        derived: {
+          fromField: "employeeId",
+          render: (u) => {
+            if (!u) return "";
+            const first = String(u.firstName ?? "").trim();
+            const last = String(u.lastName ?? "").trim();
+            const full = [first, last].filter(Boolean).join(" ");
+            return full || String(u.email ?? "").trim();
+          },
+        },
+      },
       { key: "shiftId", label: "Shift", type: "fk", fkTable: "shifts", fkLabel: "title", required: true },
       { key: "employeeId", label: "Employee", type: "fk", fkTable: "users", fkLabel: "email", required: true },
       {
@@ -327,6 +340,19 @@ export const TABLES: TableDescriptor[] = [
     primaryLabelField: "id",
     fields: [
       { key: "id", label: "ID", type: "text", readonly: true, hiddenInGrid: true },
+      {
+        key: "__name", label: "Name", type: "text", readonly: true,
+        derived: {
+          fromField: "employeeId",
+          render: (u) => {
+            if (!u) return "";
+            const first = String(u.firstName ?? "").trim();
+            const last = String(u.lastName ?? "").trim();
+            const full = [first, last].filter(Boolean).join(" ");
+            return full || String(u.email ?? "").trim();
+          },
+        },
+      },
       // shiftId is nullable in the DB (geo clock-in entries have no scheduled shift). Optional on import.
       { key: "shiftId", label: "Shift", type: "fk", fkTable: "shifts", fkLabel: "title", importResolveByLabel: true, importExample: "Leave blank if importing ad-hoc hours" },
       // siteId — handy when the spreadsheet has a "Location"/"Site" column instead of a shift.
