@@ -222,6 +222,30 @@ export interface ChangePasswordRequest {
   newPassword: string;
 }
 
+export interface ForgotPasswordRequest {
+  email: string;
+}
+
+/**
+ * Always returns ok=true regardless of whether the email matches an account, to avoid account enumeration. The actual delivery result is recorded in server logs only and is never exposed in the response.
+ */
+export interface ForgotPasswordResponse {
+  ok: boolean;
+}
+
+export interface PasswordResetTokenInfo {
+  /** Masked email address (e.g. j***@example.com) */
+  email: string;
+  firstName: string;
+  expiresAt: string;
+}
+
+export interface ResetPasswordRequest {
+  token: string;
+  /** @minLength 8 */
+  newPassword: string;
+}
+
 /**
  * Strict allow-list of fields the employee may edit on their own profile.
  */

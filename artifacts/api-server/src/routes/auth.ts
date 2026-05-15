@@ -1,9 +1,55 @@
 import { Router, type IRouter } from "express";
 import bcrypt from "bcryptjs";
-import { eq } from "drizzle-orm";
+import { randomBytes } from "crypto";
+import { and, eq, sql } from "drizzle-orm";
 import { z } from "zod/v4";
-import { db, usersTable, employeesTable } from "@workspace/db";
+import { db, usersTable, employeesTable, passwordResetTokensTable } from "@workspace/db";
 import { requireAuth, signToken } from "../middlewares/auth";
+import { sendEmail, renderPasswordResetEmail } from "../lib/email";
+
+const PASSWORD_RESET_TTL_MINUTES = 60;
+
+function genResetToken(): string {
+  return randomBytes(24).toString("base64url");
+}
+
+function maskEmail(email: string): string {
+  const [local, domain] = email.split("@");
+  if (!local || !domain) return email;
+  const visible = local.slice(0, Math.min(2, local.length));
+  return `${visible}${"*".repeat(Math.max(1, local.length - visible.length))}@${domain}`;
+}
+
+/**
+ * Build a password reset URL from a TRUSTED, server-configured origin only.
+ *
+ * Security: never derive the host/proto for security-sensitive links from
+ * request headers (Host, X-Forwarded-Host, X-Forwarded-Proto). Those are
+ * attacker-influenced and would let a hostile caller send a victim a
+ * reset email pointing to an attacker-controlled domain that captures
+ * the live token.
+ *
+ * Resolution order:
+ *   1. APP_BASE_URL — explicit operator-configured origin (preferred).
+ *   2. REPLIT_DOMAINS — first comma-separated value, used over HTTPS
+ *      (Replit-managed development & deploy domain — trusted infra).
+ *
+ * Returns null if neither is set. In that case, callers MUST treat email
+ * as having failed and MUST NOT fall back to request headers.
+ */
+function getTrustedBaseUrl(): string | null {
+  const explicit = process.env.APP_BASE_URL?.trim();
+  if (explicit) return explicit.replace(/\/+$/, "");
+  const replitDomain = process.env.REPLIT_DOMAINS?.split(",")[0]?.trim();
+  if (replitDomain) return `https://${replitDomain}`;
+  return null;
+}
+
+function buildResetUrl(token: string): string | null {
+  const base = getTrustedBaseUrl();
+  if (!base) return null;
+  return `${base}/admin-portal/reset-password/${token}`;
+}
 
 const router: IRouter = Router();
 
@@ -95,6 +141,145 @@ router.post("/auth/change-password", requireAuth, async (req, res): Promise<void
   // Rotate session.
   const token = signToken({ userId: updated.id, email: updated.email, role: updated.role });
   res.json({ token, user: userPayload(updated) });
+});
+
+// ---- Password reset (forgot password) -----------------------------------
+
+const ForgotPasswordBody = z.object({ email: z.string().min(1) });
+
+// Public endpoint — returns a CONSTANT response for every input/outcome to
+// prevent (a) account enumeration via response shape and (b) any chance of
+// the live reset token leaking to an unauthenticated caller if email
+// delivery fails in production. Real result (sent, no-such-email, smtp
+// failure, dev-only reset URL) goes to server logs only.
+router.post("/auth/forgot-password", async (req, res): Promise<void> => {
+  const parsed = ForgotPasswordBody.safeParse(req.body);
+  if (!parsed.success) {
+    res.status(400).json({ error: "Bad Request", message: "Email required" });
+    return;
+  }
+  const email = parsed.data.email.trim().toLowerCase();
+  // Send the constant response immediately so timing differences between
+  // "user found" and "user not found" can't be used to enumerate accounts.
+  res.json({ ok: true });
+
+  try {
+    const [user] = await db.select().from(usersTable).where(eq(usersTable.email, email)).limit(1);
+    if (!user) {
+      req.log.info({ email }, "Password reset requested for unknown email — silently ignored");
+      return;
+    }
+
+    // Invalidate any prior unconsumed tokens for this user.
+    await db.update(passwordResetTokensTable)
+      .set({ consumedAt: new Date() })
+      .where(and(
+        eq(passwordResetTokensTable.userId, user.id),
+        sql`${passwordResetTokensTable.consumedAt} IS NULL`,
+      ));
+
+    const token = genResetToken();
+    const expiresAt = new Date(Date.now() + PASSWORD_RESET_TTL_MINUTES * 60 * 1000);
+    await db.insert(passwordResetTokensTable).values({
+      token,
+      userId: user.id,
+      expiresAt,
+      requestIp: (req.headers["x-forwarded-for"] as string)?.split(",")[0]?.trim() || req.ip || null,
+    });
+
+    const resetUrl = buildResetUrl(token);
+    if (!resetUrl) {
+      // Fail closed: without a trusted configured origin we refuse to send
+      // a reset email at all. (Never fall back to request headers — that
+      // would re-introduce the host-injection vector.)
+      req.log.error({ userId: user.id }, "Password reset link could NOT be built — set APP_BASE_URL (or REPLIT_DOMAINS) so reset emails point to a trusted origin");
+      return;
+    }
+    const msg = renderPasswordResetEmail({
+      firstName: user.firstName,
+      resetUrl,
+      expiresInMinutes: PASSWORD_RESET_TTL_MINUTES,
+    });
+    const emailSent = await sendEmail({ to: user.email, subject: msg.subject, text: msg.text, html: msg.html });
+    if (emailSent) {
+      req.log.info({ userId: user.id }, "Password reset email sent");
+    } else if (process.env.NODE_ENV !== "production") {
+      // Dev-only convenience: print the link to the server log when SMTP
+      // isn't configured. NEVER returned in the HTTP response, and never
+      // logged in production where SMTP is required.
+      req.log.warn({ userId: user.id, resetUrl }, "Password reset email NOT sent (no SMTP) — link logged for local dev only");
+    } else {
+      req.log.error({ userId: user.id }, "Password reset email failed to send (SMTP error or unconfigured in production)");
+    }
+  } catch (err) {
+    req.log.error({ err, email }, "Password reset background work failed");
+  }
+});
+
+router.get("/auth/reset-password/:token", async (req, res): Promise<void> => {
+  const token = req.params.token;
+  const [t] = await db.select().from(passwordResetTokensTable).where(eq(passwordResetTokensTable.token, token)).limit(1);
+  if (!t) { res.status(404).json({ error: "Not Found", message: "Invalid reset link" }); return; }
+  if (t.consumedAt) { res.status(404).json({ error: "Not Found", message: "This reset link has already been used" }); return; }
+  if (t.expiresAt.getTime() < Date.now()) { res.status(404).json({ error: "Not Found", message: "This reset link has expired" }); return; }
+  const [user] = await db.select().from(usersTable).where(eq(usersTable.id, t.userId)).limit(1);
+  if (!user) { res.status(404).json({ error: "Not Found", message: "Account not found" }); return; }
+  res.json({
+    email: maskEmail(user.email),
+    firstName: user.firstName,
+    expiresAt: t.expiresAt.toISOString(),
+  });
+});
+
+const ResetPasswordBody = z.object({
+  token: z.string().min(1),
+  newPassword: z.string().min(8, "Password must be at least 8 characters"),
+});
+
+router.post("/auth/reset-password", async (req, res): Promise<void> => {
+  const parsed = ResetPasswordBody.safeParse(req.body);
+  if (!parsed.success) {
+    res.status(400).json({ error: "Bad Request", message: parsed.error.message });
+    return;
+  }
+  const { token, newPassword } = parsed.data;
+
+  const [t] = await db.select().from(passwordResetTokensTable).where(eq(passwordResetTokensTable.token, token)).limit(1);
+  if (!t) { res.status(404).json({ error: "Not Found", message: "Invalid reset link" }); return; }
+  if (t.consumedAt) { res.status(404).json({ error: "Not Found", message: "This reset link has already been used" }); return; }
+  if (t.expiresAt.getTime() < Date.now()) { res.status(404).json({ error: "Not Found", message: "This reset link has expired" }); return; }
+
+  const [user] = await db.select().from(usersTable).where(eq(usersTable.id, t.userId)).limit(1);
+  if (!user) { res.status(404).json({ error: "Not Found", message: "Account not found" }); return; }
+
+  const passwordHash = await bcrypt.hash(newPassword, 10);
+  const result = await db.transaction(async (tx) => {
+    // Atomically consume the token. If another request beat us to it, abort.
+    const consumed = await tx.update(passwordResetTokensTable)
+      .set({ consumedAt: new Date() })
+      .where(and(
+        eq(passwordResetTokensTable.id, t.id),
+        sql`${passwordResetTokensTable.consumedAt} IS NULL`,
+      ))
+      .returning();
+    if (consumed.length === 0) return { conflict: true } as const;
+
+    const [updated] = await tx.update(usersTable)
+      .set({ passwordHash, mustChangePassword: false })
+      .where(eq(usersTable.id, user.id))
+      .returning();
+    return { updated } as const;
+  });
+
+  if ("conflict" in result) {
+    res.status(404).json({ error: "Not Found", message: "This reset link has already been used" });
+    return;
+  }
+
+  const updated = result.updated;
+  const newToken = signToken({ userId: updated.id, email: updated.email, role: updated.role });
+  req.log.info({ userId: updated.id }, "Password reset completed");
+  res.json({ token: newToken, user: userPayload(updated) });
 });
 
 // Self-service profile edit. Strict allow-list of editable employee-row

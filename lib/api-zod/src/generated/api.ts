@@ -473,6 +473,71 @@ export const UpdateMyEmployeeProfileResponse = zod.object({
 });
 
 /**
+ * @summary Request a password reset link (always returns 200, even if no account matches, to avoid email enumeration)
+ */
+export const ForgotPasswordBody = zod.object({
+  email: zod.string(),
+});
+
+export const ForgotPasswordResponse = zod
+  .object({
+    ok: zod.boolean(),
+  })
+  .describe(
+    "Always returns ok=true regardless of whether the email matches an account, to avoid account enumeration. The actual delivery result is recorded in server logs only and is never exposed in the response.",
+  );
+
+/**
+ * @summary Validate a password reset token and return the masked email it belongs to
+ */
+export const GetPasswordResetTokenParams = zod.object({
+  token: zod.coerce.string(),
+});
+
+export const GetPasswordResetTokenResponse = zod.object({
+  email: zod
+    .string()
+    .describe("Masked email address (e.g. j\*\*\*@example.com)"),
+  firstName: zod.string(),
+  expiresAt: zod.coerce.date(),
+});
+
+/**
+ * @summary Consume a password reset token and set a new password (clears mustChangePassword and rotates the JWT)
+ */
+export const resetPasswordBodyNewPasswordMin = 8;
+
+export const ResetPasswordBody = zod.object({
+  token: zod.string(),
+  newPassword: zod.string().min(resetPasswordBodyNewPasswordMin),
+});
+
+export const ResetPasswordResponse = zod.object({
+  token: zod.string(),
+  user: zod.object({
+    id: zod.string(),
+    email: zod.string(),
+    firstName: zod.string(),
+    lastName: zod.string(),
+    role: zod.enum(["admin", "employee"]),
+    status: zod.enum(["active", "inactive", "pending"]),
+    mustChangePassword: zod
+      .boolean()
+      .optional()
+      .describe(
+        "True when the user must change their password before accessing the app.",
+      ),
+    mustCompleteProfile: zod
+      .boolean()
+      .optional()
+      .describe(
+        "True after first password change until the user has reviewed\/saved their profile.",
+      ),
+    createdAt: zod.coerce.date(),
+  }),
+});
+
+/**
  * @summary Get current user
  */
 export const GetMeResponse = zod.object({

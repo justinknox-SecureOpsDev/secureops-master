@@ -363,6 +363,79 @@ paths:
             application/json:
               schema: { $ref: "#/components/schemas/ErrorResponse" }
 
+  /auth/forgot-password:
+    post:
+      operationId: forgotPassword
+      tags: [auth]
+      summary: Request a password reset link (always returns 200, even if no account matches, to avoid email enumeration)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ForgotPasswordRequest"
+      responses:
+        "200":
+          description: Reset request accepted
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ForgotPasswordResponse"
+        "400":
+          description: Validation failed
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ErrorResponse" }
+
+  /auth/reset-password/{token}:
+    get:
+      operationId: getPasswordResetToken
+      tags: [auth]
+      summary: Validate a password reset token and return the masked email it belongs to
+      parameters:
+        - { name: token, in: path, required: true, schema: { type: string } }
+      responses:
+        "200":
+          description: Token is valid
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PasswordResetTokenInfo"
+        "404":
+          description: Invalid, expired or already-used token
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ErrorResponse" }
+
+  /auth/reset-password:
+    post:
+      operationId: resetPassword
+      tags: [auth]
+      summary: Consume a password reset token and set a new password (clears mustChangePassword and rotates the JWT)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ResetPasswordRequest"
+      responses:
+        "200":
+          description: Password reset; new JWT returned
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AuthResponse"
+        "400":
+          description: Validation failed
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ErrorResponse" }
+        "404":
+          description: Invalid, expired or already-used token
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ErrorResponse" }
+
   /auth/me:
     get:
       operationId: getMe
@@ -1955,6 +2028,34 @@ components:
         currentPassword: { type: string }
         newPassword: { type: string, minLength: 8 }
       required: [currentPassword, newPassword]
+
+    ForgotPasswordRequest:
+      type: object
+      properties:
+        email: { type: string }
+      required: [email]
+
+    ForgotPasswordResponse:
+      type: object
+      description: Always returns ok=true regardless of whether the email matches an account, to avoid account enumeration. The actual delivery result is recorded in server logs only and is never exposed in the response.
+      properties:
+        ok: { type: boolean }
+      required: [ok]
+
+    PasswordResetTokenInfo:
+      type: object
+      properties:
+        email: { type: string, description: "Masked email address (e.g. j***@example.com)" }
+        firstName: { type: string }
+        expiresAt: { type: string, format: date-time }
+      required: [email, firstName, expiresAt]
+
+    ResetPasswordRequest:
+      type: object
+      properties:
+        token: { type: string }
+        newPassword: { type: string, minLength: 8 }
+      required: [token, newPassword]
 
     UpdateMyEmployeeRequest:
       type: object

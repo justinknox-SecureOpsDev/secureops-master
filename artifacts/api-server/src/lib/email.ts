@@ -200,6 +200,42 @@ export function renderApplicationReceivedEmail(opts: {
   return { subject, text, html };
 }
 
+export function renderPasswordResetEmail(opts: {
+  firstName: string;
+  resetUrl: string;
+  expiresInMinutes: number;
+}): { subject: string; text: string; html: string } {
+  const subject = "Reset your Williams Council Security Group password";
+  const text = [
+    `Hi ${opts.firstName},`,
+    "",
+    "We received a request to reset the password on your Williams Council Security Group account.",
+    "",
+    `Reset link (single use, expires in ${opts.expiresInMinutes} minutes):`,
+    opts.resetUrl,
+    "",
+    "If you didn't request this, you can ignore this email — your password will stay the same.",
+    "",
+    "— Williams Council Security Group",
+  ].join("\n");
+  const html = `
+    <div style="font-family:Georgia,serif;max-width:560px;margin:0 auto;color:#080c18">
+      <h2 style="color:#080c18">Reset your password</h2>
+      <p>Hi ${escapeHtml(opts.firstName)},</p>
+      <p>We received a request to reset the password on your Williams Council Security Group account.</p>
+      <p style="margin:24px 0">
+        <a href="${escapeAttr(opts.resetUrl)}"
+           style="background:#c9a84c;color:#080c18;padding:12px 20px;text-decoration:none;font-weight:bold;border-radius:4px">
+          Choose a new password
+        </a>
+      </p>
+      <p style="color:#555">This link is single use and expires in ${opts.expiresInMinutes} minutes.</p>
+      <p style="color:#555;font-size:12px">If you didn't request this, you can ignore this email — your password will stay the same.</p>
+    </div>
+  `;
+  return { subject, text, html };
+}
+
 function escapeHtml(s: string): string {
   return s.replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]!));
 }

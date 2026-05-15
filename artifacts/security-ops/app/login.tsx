@@ -3,6 +3,7 @@ import {
   View, Text, TextInput, TouchableOpacity,
   StyleSheet, ActivityIndicator, Image,
 } from "react-native";
+import { useRouter } from "expo-router";
 import { useAuth } from "@/contexts/AuthContext";
 import { useLogin } from "@workspace/api-client-react";
 import { useColors } from "@/hooks/useColors";
@@ -15,6 +16,7 @@ export default function LoginScreen() {
   const [showPassword, setShowPassword] = useState(false);
   const { login: setAuthContext } = useAuth();
   const colors = useColors();
+  const router = useRouter();
   const loginMutation = useLogin();
 
   const handleLogin = async () => {
@@ -107,6 +109,15 @@ export default function LoginScreen() {
                 <Text style={[styles.buttonText, { color: colors.primaryForeground }]}>ACCESS SYSTEM</Text>
               </>
             )}
+          </TouchableOpacity>
+
+          <TouchableOpacity
+            onPress={() => router.push("/forgot-password")}
+            style={styles.forgotRow}
+          >
+            <Text style={[styles.forgotText, { color: colors.mutedForeground }]}>
+              Forgot password?
+            </Text>
           </TouchableOpacity>
         </View>
 
@@ -222,6 +233,16 @@ const styles = StyleSheet.create({
     fontWeight: "800",
     fontSize: 14,
     letterSpacing: 2,
+  },
+  forgotRow: {
+    alignItems: "center",
+    paddingVertical: 6,
+    marginTop: 2,
+  },
+  forgotText: {
+    fontSize: 12,
+    letterSpacing: 1,
+    textDecorationLine: "underline",
   },
   footer: {
     textAlign: "center",

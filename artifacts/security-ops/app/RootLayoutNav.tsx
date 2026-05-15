@@ -8,6 +8,7 @@ import { Feather } from "@expo/vector-icons";
 
 const PUBLIC_TOP_SCREENS = new Set([
   "login",
+  "forgot-password",
   "change-password",
   "enable-biometric",
   "edit-profile",
@@ -27,7 +28,7 @@ export default function RootLayoutNav() {
     const inAuthGroup = top === "(admin)" || top === "(employee)";
 
     if (!user) {
-      if (top !== "login") router.replace("/login");
+      if (top !== "login" && top !== "forgot-password") router.replace("/login");
       return;
     }
 
@@ -82,6 +83,7 @@ export default function RootLayoutNav() {
   return (
     <Stack screenOptions={{ headerShown: false }}>
       <Stack.Screen name="login" />
+      <Stack.Screen name="forgot-password" />
       <Stack.Screen name="(admin)" />
       <Stack.Screen name="(employee)" />
       <Stack.Screen name="change-password" />

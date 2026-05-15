@@ -9,6 +9,7 @@ import { TablePage, HomeRedirect } from "@/pages/TablePage";
 import { SiteDetailPage } from "@/pages/SiteDetailPage";
 import { ApplyPage } from "@/pages/Apply";
 import { OnboardPage } from "@/pages/Onboard";
+import { ResetPasswordPage } from "@/pages/ResetPassword";
 import { ApplicationsPage } from "@/pages/Applications";
 import { OnboardingPage } from "@/pages/Onboarding";
 import { PoliciesPage } from "@/pages/Policies";
@@ -26,6 +27,7 @@ function Routed() {
   // Public routes — no admin auth required
   if (location === "/apply" || location.startsWith("/apply/")) return <ApplyPage />;
   if (location.startsWith("/onboard/")) return <OnboardPage />;
+  if (location.startsWith("/reset-password/")) return <ResetPasswordPage />;
 
   if (loading) {
     return (
