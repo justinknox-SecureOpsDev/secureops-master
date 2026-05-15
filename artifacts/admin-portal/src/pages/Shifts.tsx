@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { api } from "@/lib/api";
 import { getTable } from "@/lib/tables";
 import { RowFormDialog } from "@/components/RowFormDialog";
+import { RepeatingShiftDialog } from "@/components/RepeatingShiftDialog";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import {
@@ -13,7 +14,7 @@ import {
 } from "@/components/ui/alert-dialog";
 import {
   ChevronDown, ChevronRight, MapPin, Repeat, Pencil, Trash2,
-  Users, Plus, RefreshCw,
+  Users, Plus, RefreshCw, CalendarRange,
 } from "lucide-react";
 
 type Shift = {
@@ -81,6 +82,7 @@ export default function ShiftsPage() {
   const [openSeries, setOpenSeries] = useState<Record<string, boolean>>({});
   const [editing, setEditing] = useState<Shift | null>(null);
   const [creating, setCreating] = useState(false);
+  const [repeatOpen, setRepeatOpen] = useState(false);
   const [deleting, setDeleting] = useState<Shift | null>(null);
   const [version, setVersion] = useState(0);
 
@@ -219,6 +221,9 @@ export default function ShiftsPage() {
           <Button variant="outline" size="icon" title="Refresh" onClick={() => setVersion((v) => v + 1)}>
             <RefreshCw className="w-4 h-4" />
           </Button>
+          <Button variant="outline" onClick={() => setRepeatOpen(true)}>
+            <CalendarRange className="w-4 h-4 mr-1" /> Repeating Shift
+          </Button>
           <Button onClick={() => setCreating(true)}>
             <Plus className="w-4 h-4 mr-1" /> New Shift
           </Button>
@@ -325,6 +330,12 @@ export default function ShiftsPage() {
           );
         })}
       </div>
+
+      <RepeatingShiftDialog
+        open={repeatOpen}
+        onOpenChange={setRepeatOpen}
+        onCreated={() => { setRepeatOpen(false); setVersion((v) => v + 1); }}
+      />
 
       <RowFormDialog
         open={!!editing || creating}
