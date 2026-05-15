@@ -292,6 +292,53 @@ export function renderPasswordResetEmail(opts: {
   return { subject, text, html };
 }
 
+export function renderPasswordChangedEmail(opts: {
+  firstName: string;
+  changeType: "reset" | "change";
+  whenIso: string;
+  ip?: string | null;
+  userAgent?: string | null;
+  hrContact?: string;
+}): { subject: string; text: string; html: string } {
+  const action = opts.changeType === "reset" ? "reset" : "changed";
+  const subject = `Your Williams Council Security Group password was just ${action}`;
+  const hrContact = opts.hrContact ?? "hr@williamscouncilsecurity.com";
+  const ipLine = opts.ip ? `Approximate location / IP: ${opts.ip}` : "Approximate location / IP: unknown";
+  const uaLine = opts.userAgent ? `Device: ${opts.userAgent}` : "";
+  const text = [
+    `Hi ${opts.firstName},`,
+    "",
+    `Your Williams Council Security Group password was just ${action}.`,
+    "",
+    `Time: ${opts.whenIso}`,
+    ipLine,
+    uaLine,
+    "",
+    `If this WAS you, no action is needed.`,
+    `If this WASN'T you, contact HR immediately at ${hrContact} — your account may be compromised.`,
+    "",
+    "— Williams Council Security Group",
+  ].filter((l) => l !== "").join("\n");
+  const html = `
+    <div style="font-family:Georgia,serif;max-width:560px;margin:0 auto;color:#080c18">
+      <h2 style="color:#080c18">Your password was just ${action}</h2>
+      <p>Hi ${escapeHtml(opts.firstName)},</p>
+      <p>Your Williams Council Security Group password was just <strong>${action}</strong>.</p>
+      <div style="background:#f6f1e1;padding:12px;border-left:3px solid #c9a84c;margin:16px 0;border-radius:4px;font-size:14px">
+        <div><strong>Time:</strong> ${escapeHtml(opts.whenIso)}</div>
+        <div><strong>Approximate location / IP:</strong> ${escapeHtml(opts.ip || "unknown")}</div>
+        ${opts.userAgent ? `<div><strong>Device:</strong> ${escapeHtml(opts.userAgent)}</div>` : ""}
+      </div>
+      <p>If this <strong>was</strong> you, no action is needed.</p>
+      <p style="color:#a33">If this <strong>wasn't</strong> you, contact HR immediately at
+        <a href="mailto:${escapeAttr(hrContact)}">${escapeHtml(hrContact)}</a> — your account may be compromised.</p>
+      <hr style="border:none;border-top:1px solid #ddd;margin:24px 0"/>
+      <p style="color:#555;font-size:12px">— Williams Council Security Group</p>
+    </div>
+  `;
+  return { subject, text, html };
+}
+
 function escapeHtml(s: string): string {
   return s.replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]!));
 }

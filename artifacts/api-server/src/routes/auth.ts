@@ -12,7 +12,43 @@ import {
   loginIpLimiter,
   resetPasswordLimiter,
 } from "../middlewares/rateLimit";
-import { sendEmail, renderPasswordResetEmail } from "../lib/email";
+import { sendEmail, renderPasswordResetEmail, renderPasswordChangedEmail } from "../lib/email";
+
+function getRequestIp(req: import("express").Request): string | null {
+  const fwd = req.headers["x-forwarded-for"];
+  const first = (Array.isArray(fwd) ? fwd[0] : fwd)?.split(",")[0]?.trim();
+  return first || req.ip || null;
+}
+
+function sendPasswordChangedNotice(
+  req: import("express").Request,
+  user: { id: string; email: string; firstName: string },
+  changeType: "reset" | "change",
+): void {
+  const ip = getRequestIp(req);
+  const ua = (req.headers["user-agent"] as string | undefined) || null;
+  const msg = renderPasswordChangedEmail({
+    firstName: user.firstName,
+    changeType,
+    whenIso: new Date().toISOString(),
+    ip,
+    userAgent: ua,
+  });
+  // Fire-and-forget: don't block the response on SMTP. Failures are
+  // logged so admins can investigate, but the password change itself
+  // has already succeeded.
+  void sendEmail({ to: user.email, subject: msg.subject, text: msg.text, html: msg.html })
+    .then((sent) => {
+      if (sent) {
+        req.log.info({ userId: user.id, changeType }, "Password change notification email sent");
+      } else {
+        req.log.warn({ userId: user.id, changeType }, "Password change notification email NOT sent (SMTP unconfigured or failed)");
+      }
+    })
+    .catch((err) => {
+      req.log.error({ err, userId: user.id, changeType }, "Password change notification email threw");
+    });
+}
 
 const PASSWORD_RESET_TTL_MINUTES = 60;
 
@@ -147,6 +183,7 @@ router.post("/auth/change-password", requireAuth, async (req, res): Promise<void
     .returning();
   // Rotate session.
   const token = signToken({ userId: updated.id, email: updated.email, role: updated.role });
+  sendPasswordChangedNotice(req, updated, "change");
   res.json({ token, user: userPayload(updated) });
 });
 
@@ -286,6 +323,7 @@ router.post("/auth/reset-password", resetPasswordLimiter, async (req, res): Prom
   const updated = result.updated;
   const newToken = signToken({ userId: updated.id, email: updated.email, role: updated.role });
   req.log.info({ userId: updated.id }, "Password reset completed");
+  sendPasswordChangedNotice(req, updated, "reset");
   res.json({ token: newToken, user: userPayload(updated) });
 });
 
