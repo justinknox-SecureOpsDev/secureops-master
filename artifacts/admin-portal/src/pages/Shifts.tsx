@@ -3,6 +3,7 @@ import { api } from "@/lib/api";
 import { getTable } from "@/lib/tables";
 import { RowFormDialog } from "@/components/RowFormDialog";
 import { RepeatingShiftDialog } from "@/components/RepeatingShiftDialog";
+import { BulkEditSeriesDialog, type BulkSeriesTarget } from "@/components/BulkEditSeriesDialog";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import {
@@ -84,6 +85,7 @@ export default function ShiftsPage() {
   const [editing, setEditing] = useState<Shift | null>(null);
   const [creating, setCreating] = useState(false);
   const [repeatOpen, setRepeatOpen] = useState(false);
+  const [editSeries, setEditSeries] = useState<BulkSeriesTarget | null>(null);
   const [deleting, setDeleting] = useState<Shift | null>(null);
   const [version, setVersion] = useState(0);
 
@@ -134,7 +136,7 @@ export default function ShiftsPage() {
       siteLabel: string;
       clientLabel: string | null;
       singles: Shift[];
-      series: { key: string; title: string; total: number; occurrences: Shift[]; hidden: number }[];
+      series: { key: string; title: string; total: number; occurrences: Shift[]; hidden: number; allIds: string[]; siteLabel: string }[];
     };
 
     const map = new Map<string, Group>();
@@ -157,13 +159,18 @@ export default function ShiftsPage() {
       }
 
       if (s.isRepeat) {
-        const seriesKey = `${key}::${s.title}`;
+        // Include repeatPattern in the key so two series at the same site
+        // with the same title but different patterns (e.g. different times
+        // or days of week) are NOT merged — bulk edit must only target
+        // shifts that truly belong to the same series.
+        const seriesKey = `${key}::${s.title}::${s.repeatPattern ?? ""}`;
         let series = g.series.find((x) => x.key === seriesKey);
         if (!series) {
-          series = { key: seriesKey, title: s.title, total: 0, occurrences: [], hidden: 0 };
+          series = { key: seriesKey, title: s.title, total: 0, occurrences: [], hidden: 0, allIds: [], siteLabel: g.siteLabel };
           g.series.push(series);
         }
         series.total++;
+        series.allIds.push(s.id);
         if (new Date(s.startTime).getTime() <= cutoff) {
           series.occurrences.push(s);
         } else {
@@ -209,7 +216,7 @@ export default function ShiftsPage() {
   const repeatCount = filtered.filter((s) => s.isRepeat).length;
 
   return (
-    <div className="p-6 space-y-4">
+    <div className="flex-1 overflow-auto p-6 space-y-4">
       <div className="flex flex-wrap items-center gap-3">
         <div>
           <h1 className="text-2xl font-bold">Shifts</h1>
@@ -288,23 +295,37 @@ export default function ShiftsPage() {
                     const next = series.occurrences[0];
                     return (
                       <div key={series.key} className="bg-amber-50/30">
-                        <button
-                          type="button"
-                          onClick={() => toggleSeries(series.key)}
-                          className="w-full flex items-center gap-3 px-4 py-2.5 hover:bg-amber-50 text-left"
-                        >
-                          {sopen ? <ChevronDown className="w-4 h-4 shrink-0" /> : <ChevronRight className="w-4 h-4 shrink-0" />}
-                          <Repeat className="w-4 h-4 text-amber-700 shrink-0" />
-                          <div className="flex-1 min-w-0">
-                            <div className="font-medium truncate">{series.title}</div>
-                            <div className="text-xs text-muted-foreground">
-                              {series.occurrences.length} this week
-                              {series.hidden > 0 && <> · {series.hidden} more after this week (hidden)</>}
-                              {next && <> · next: {fmtDateTime(next.startTime)}</>}
-                              {!next && series.hidden > 0 && <> · all upcoming occurrences are beyond 7 days</>}
+                        <div className="w-full flex items-center gap-3 px-4 py-2.5 hover:bg-amber-50">
+                          <button
+                            type="button"
+                            onClick={() => toggleSeries(series.key)}
+                            className="flex items-center gap-3 flex-1 min-w-0 text-left"
+                          >
+                            {sopen ? <ChevronDown className="w-4 h-4 shrink-0" /> : <ChevronRight className="w-4 h-4 shrink-0" />}
+                            <Repeat className="w-4 h-4 text-amber-700 shrink-0" />
+                            <div className="flex-1 min-w-0">
+                              <div className="font-medium truncate">{series.title}</div>
+                              <div className="text-xs text-muted-foreground">
+                                {series.total} total · {series.occurrences.length} this week
+                                {series.hidden > 0 && <> · {series.hidden} after this week (hidden)</>}
+                                {next && <> · next: {fmtDateTime(next.startTime)}</>}
+                                {!next && series.hidden > 0 && <> · all upcoming occurrences are beyond 7 days</>}
+                              </div>
                             </div>
-                          </div>
-                        </button>
+                          </button>
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            className="shrink-0"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setEditSeries({ ids: series.allIds, title: series.title, siteLabel: series.siteLabel });
+                            }}
+                            title={`Edit all ${series.total} shifts in this series`}
+                          >
+                            <Pencil className="w-3.5 h-3.5 mr-1" /> Edit all {series.total}
+                          </Button>
+                        </div>
                         {sopen && (
                           <div className="px-4 pb-3">
                             {series.occurrences.length === 0 ? (
@@ -349,6 +370,13 @@ export default function ShiftsPage() {
         open={repeatOpen}
         onOpenChange={setRepeatOpen}
         onCreated={() => { setRepeatOpen(false); setVersion((v) => v + 1); }}
+      />
+
+      <BulkEditSeriesDialog
+        open={!!editSeries}
+        onOpenChange={(b) => { if (!b) setEditSeries(null); }}
+        target={editSeries}
+        onSaved={() => { setEditSeries(null); setVersion((v) => v + 1); }}
       />
 
       <RowFormDialog

@@ -249,7 +249,7 @@ export default function PayRunPage() {
   const selTotal = selectedRows.reduce((a, r) => a + Number(r.netPay), 0);
 
   return (
-    <div className="p-6 max-w-[1400px] mx-auto">
+    <div className="flex-1 overflow-auto p-6 max-w-[1400px] mx-auto w-full">
       <div className="flex items-center gap-3 mb-1">
         <Banknote className="w-7 h-7 brand-gold" />
         <h1 className="text-2xl font-semibold text-brand-navy">Pay Run</h1>

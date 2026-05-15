@@ -86,7 +86,10 @@ export function RepeatingShiftDialog({
             headcount: Number(headcount) || 1,
             notes: notes.trim() || null,
           },
-          recurrence: { startDate, untilDate, daysOfWeek: days, startTime, endTime },
+          recurrence: {
+            startDate, untilDate, daysOfWeek: days, startTime, endTime,
+            tz: Intl.DateTimeFormat().resolvedOptions().timeZone || "America/Chicago",
+          },
         },
       });
       const msg = result.skippedExisting > 0

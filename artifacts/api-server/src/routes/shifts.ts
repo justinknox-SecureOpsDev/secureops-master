@@ -5,6 +5,50 @@ import { requireAuth, requireAdmin } from "../middlewares/auth";
 
 const router: IRouter = Router();
 
+// Returns the offset (ms ahead of UTC) that `tz` was actually using at the
+// given UTC instant. e.g. America/Chicago in winter → -6h, in summer → -5h.
+function tzOffsetAt(utcMs: number, tz: string): number {
+  const dtf = new Intl.DateTimeFormat("en-US", {
+    timeZone: tz, year: "numeric", month: "2-digit", day: "2-digit",
+    hour: "2-digit", minute: "2-digit", second: "2-digit", hour12: false,
+  });
+  const parts: Record<string, string> = {};
+  for (const p of dtf.formatToParts(new Date(utcMs))) parts[p.type] = p.value;
+  const localAsUtc = Date.UTC(
+    Number(parts.year), Number(parts.month) - 1, Number(parts.day),
+    Number(parts.hour) % 24, Number(parts.minute), Number(parts.second),
+  );
+  return localAsUtc - utcMs;
+}
+
+// Convert a wall-clock time (Y/M/D h:m) in `tz` (IANA, e.g. "America/Chicago")
+// into the correct UTC instant. DST-safe: iterates once so the offset is read
+// at the resolved instant, not the naive guess. For nonexistent/ambiguous wall
+// times during DST transitions this resolves consistently (no throw).
+function wallTimeToUtc(year: number, month1to12: number, day: number, hour: number, minute: number, tz: string): Date {
+  const naiveUtc = Date.UTC(year, month1to12 - 1, day, hour, minute, 0);
+  try {
+    let offset = tzOffsetAt(naiveUtc, tz);
+    // Re-evaluate offset at the *target* instant (handles DST boundary crossing).
+    offset = tzOffsetAt(naiveUtc - offset, tz);
+    return new Date(naiveUtc - offset);
+  } catch {
+    return new Date(naiveUtc);
+  }
+}
+
+// Returns YYYY-MM-DD as observed in `tz` for a given UTC instant.
+function localDateInTz(utcMs: number, tz: string): string {
+  try {
+    const dtf = new Intl.DateTimeFormat("en-CA", {
+      timeZone: tz, year: "numeric", month: "2-digit", day: "2-digit",
+    });
+    return dtf.format(new Date(utcMs)); // en-CA → "YYYY-MM-DD"
+  } catch {
+    return new Date(utcMs).toISOString().slice(0, 10);
+  }
+}
+
 async function getEmployeeMaxLevel(employeeId: string): Promise<number | null> {
   const rows = await db
     .select({ level: licensesTable.level })
@@ -223,6 +267,7 @@ router.post("/shifts/repeat", requireAdmin, async (req, res): Promise<void> => {
     title, siteId, payRate, billRate, requiredLicenseLevel, headcount, notes,
   } = base;
   const { startDate, untilDate, daysOfWeek, startTime, endTime } = recurrence;
+  const tz: string = typeof recurrence.tz === "string" && recurrence.tz ? recurrence.tz : "America/Chicago";
 
   if (!title || !siteId) {
     res.status(400).json({ error: "Bad Request", message: "base.title and base.siteId required" });
@@ -283,9 +328,11 @@ router.post("/shifts/repeat", requireAdmin, async (req, res): Promise<void> => {
   const occurrences: { startTime: Date; endTime: Date }[] = [];
   for (let d = new Date(start); d <= until && occurrences.length < MAX_OCCURRENCES; d = new Date(d.getTime() + 86400000)) {
     if (!validDays.includes(d.getUTCDay())) continue;
-    const startInst = new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate(), sh, sm, 0));
+    const y = d.getUTCFullYear(), mo = d.getUTCMonth() + 1, da = d.getUTCDate();
+    const startInst = wallTimeToUtc(y, mo, da, sh, sm, tz);
     const endBase = wrapsOvernight ? new Date(d.getTime() + 86400000) : d;
-    const endInst = new Date(Date.UTC(endBase.getUTCFullYear(), endBase.getUTCMonth(), endBase.getUTCDate(), eh, em, 0));
+    const ey = endBase.getUTCFullYear(), em2 = endBase.getUTCMonth() + 1, ed = endBase.getUTCDate();
+    const endInst = wallTimeToUtc(ey, em2, ed, eh, em, tz);
     occurrences.push({ startTime: startInst, endTime: endInst });
   }
 
@@ -338,6 +385,97 @@ router.post("/shifts/repeat", requireAdmin, async (req, res): Promise<void> => {
     totalOccurrences: occurrences.length,
     shifts: inserted,
   });
+});
+
+// Bulk update a set of shifts (typically every occurrence in a recurring
+// series). Times are HH:MM in `tz` and applied to each row's existing date.
+router.put("/shifts/bulk", requireAdmin, async (req, res): Promise<void> => {
+  const { ids, changes } = req.body ?? {};
+  if (!Array.isArray(ids) || ids.length === 0) {
+    res.status(400).json({ error: "Bad Request", message: "ids[] required" }); return;
+  }
+  if (!changes || typeof changes !== "object") {
+    res.status(400).json({ error: "Bad Request", message: "changes object required" }); return;
+  }
+  const tz: string = typeof changes.tz === "string" && changes.tz ? changes.tz : "America/Chicago";
+  const timeRe = /^\d{2}:\d{2}$/;
+  const newStart = typeof changes.startTime === "string" && timeRe.test(changes.startTime) ? changes.startTime : null;
+  const newEnd = typeof changes.endTime === "string" && timeRe.test(changes.endTime) ? changes.endTime : null;
+
+  const setCommon: Record<string, unknown> = {};
+  if (changes.payRate != null && changes.payRate !== "") {
+    const n = Number(changes.payRate);
+    if (!Number.isFinite(n)) { res.status(400).json({ error: "Bad Request", message: "payRate must be a number" }); return; }
+    setCommon.payRate = String(n); setCommon.hourlyRate = String(n);
+  }
+  if (changes.billRate != null && changes.billRate !== "") {
+    const n = Number(changes.billRate);
+    if (!Number.isFinite(n)) { res.status(400).json({ error: "Bad Request", message: "billRate must be a number" }); return; }
+    setCommon.billRate = String(n); setCommon.billableRate = String(n);
+  }
+  if (changes.requiredLicenseLevel != null && changes.requiredLicenseLevel !== "") {
+    const n = Number(changes.requiredLicenseLevel);
+    if (![2, 3, 4].includes(n)) { res.status(400).json({ error: "Bad Request", message: "requiredLicenseLevel must be 2|3|4" }); return; }
+    setCommon.requiredLicenseLevel = n;
+  }
+  if (changes.headcount != null && changes.headcount !== "") {
+    const n = Math.max(1, Math.floor(Number(changes.headcount)));
+    if (!Number.isFinite(n)) { res.status(400).json({ error: "Bad Request", message: "headcount must be a number" }); return; }
+    setCommon.headcount = n;
+  }
+  if (typeof changes.notes === "string") setCommon.notes = changes.notes || null;
+  if (typeof changes.title === "string" && changes.title.trim()) setCommon.title = changes.title.trim();
+  if (typeof changes.status === "string" && ["upcoming", "active", "completed", "cancelled"].includes(changes.status)) {
+    setCommon.status = changes.status;
+  }
+
+  const rows = await db.select().from(shiftsTable).where(sql`${shiftsTable.id} = ANY(${ids as string[]})`);
+  if (rows.length === 0) { res.status(404).json({ error: "Not Found", message: "no matching shifts" }); return; }
+
+  let updated = 0;
+  await db.transaction(async (tx) => {
+    for (const r of rows) {
+      const patch: Record<string, unknown> = { ...setCommon };
+      if (newStart || newEnd) {
+        // Anchor on the existing start day as observed in `tz`.
+        const startDateLocal = localDateInTz(new Date(r.startTime).getTime(), tz);
+        const [y, mo, da] = startDateLocal.split("-").map(Number);
+        if (newStart) {
+          const [sh, sm] = newStart.split(":").map(Number);
+          patch.startTime = wallTimeToUtc(y, mo, da, sh, sm, tz);
+        }
+        if (newEnd) {
+          const [eh, eM] = newEnd.split(":").map(Number);
+          // Decide overnight: if the user supplied newStart, compare HH:MM
+          // pairs directly. Otherwise preserve the existing shift's
+          // overnight-ness by comparing the local dates of the existing
+          // start vs. end in `tz` (NOT raw UTC proximity, which breaks
+          // for normal multi-hour overnight shifts).
+          let wraps: boolean;
+          if (newStart) {
+            const [sh2, sm2] = newStart.split(":").map(Number);
+            wraps = (eh * 60 + eM) <= (sh2 * 60 + sm2);
+          } else {
+            const endDateLocal = localDateInTz(new Date(r.endTime).getTime(), tz);
+            wraps = endDateLocal !== startDateLocal;
+          }
+          let ey = y, em3 = mo, ed = da;
+          if (wraps) {
+            const next = new Date(Date.UTC(y, mo - 1, da) + 86400000);
+            ey = next.getUTCFullYear();
+            em3 = next.getUTCMonth() + 1;
+            ed = next.getUTCDate();
+          }
+          patch.endTime = wallTimeToUtc(ey, em3, ed, eh, eM, tz);
+        }
+      }
+      if (Object.keys(patch).length === 0) continue;
+      await tx.update(shiftsTable).set(patch).where(eq(shiftsTable.id, r.id));
+      updated++;
+    }
+  });
+
+  res.json({ updated, total: rows.length });
 });
 
 router.get("/shifts/:id", requireAuth, async (req, res): Promise<void> => {
