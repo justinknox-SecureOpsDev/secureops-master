@@ -74,23 +74,38 @@ const employeeSelect = {
 };
 
 /**
- * Whitelist of employee-row fields the PUT /employees/:id endpoint will
- * forward straight to the employees table. Everything in `UpdateEmployeeRequest`
- * (OpenAPI) that maps 1:1 onto an employees column belongs here.
+ * Fields an employee may update on their *own* row. Deliberately narrow:
+ * basic contact info + emergency contact + uniform sizes. Everything HR/
+ * payroll/compliance/document-related stays admin-only (see
+ * `ADMIN_ONLY_EMP_KEYS` below).
+ */
+const SELF_UPDATABLE_EMP_KEYS = [
+  "phone", "address",
+  "emergencyContactName", "emergencyContactRelationship", "emergencyContactPhone",
+  "uniformShirt", "uniformTrousers", "uniformJacket", "uniformBoots",
+] as const;
+
+/**
+ * Admin-only employee fields: identity, right-to-work, TX licence,
+ * experience, references, personal documents, banking, tax, consents,
+ * skills, plus the freeform `availability` / `acknowledgements` JSON blobs.
  *
  * `hourlyRate` is special-cased (numeric → string) below.
  */
-const EMP_PASSTHROUGH_KEYS = [
-  "phone", "address", "dateOfBirth", "cityOfBirth", "stateOfBirth", "niNumber",
+const ADMIN_ONLY_EMP_KEYS = [
+  "dateOfBirth", "cityOfBirth", "stateOfBirth", "niNumber",
   "rightToWorkStatus", "rightToWorkDocKey",
   "siaLicenseNumber", "siaLicenseLevel", "siaLicenseExpiry", "licenseDocKey", "passportDocKey",
-  "previousExperience", "yearsExperience",
+  "previousExperience", "yearsExperience", "references",
   "photoKey", "cvKey", "trainingCertificateKeys", "availability",
-  "emergencyContactName", "emergencyContactRelationship", "emergencyContactPhone",
   "bankAccountName", "bankAccountNumber", "bankBsb", "taxCode", "payStubDocKey",
-  "uniformShirt", "uniformTrousers", "uniformJacket", "uniformBoots",
-  "directDepositConsent", "directDepositSignature",
+  "directDepositConsent", "directDepositSignature", "acknowledgements",
   "skills",
+] as const;
+
+const ALL_EMP_PASSTHROUGH_KEYS = [
+  ...SELF_UPDATABLE_EMP_KEYS,
+  ...ADMIN_ONLY_EMP_KEYS,
 ] as const;
 
 router.get("/employees", requireAdmin, async (req, res): Promise<void> => {
@@ -160,7 +175,7 @@ router.post("/employees", requireAdmin, async (req, res): Promise<void> => {
   // Build employee insert payload from the same allow-list used by PUT, so
   // POST /employees accepts the full expanded CreateEmployeeRequest contract.
   const empValues: Record<string, unknown> = { userId: user.id };
-  for (const k of EMP_PASSTHROUGH_KEYS) {
+  for (const k of ALL_EMP_PASSTHROUGH_KEYS) {
     if (body[k] !== undefined) empValues[k] = body[k];
   }
   if (body.hourlyRate !== undefined) {
@@ -227,16 +242,22 @@ router.put("/employees/:id", requireAuth, async (req, res): Promise<void> => {
   }
   const body = req.body as Record<string, unknown>;
 
+  const isAdmin = req.user!.role === "admin";
+
   const userUpdates: Record<string, unknown> = {};
   if (typeof body.firstName === "string") userUpdates.firstName = body.firstName;
   if (typeof body.lastName === "string") userUpdates.lastName = body.lastName;
-  if (typeof body.status === "string" && req.user!.role === "admin") userUpdates.status = body.status;
+  if (typeof body.status === "string" && isAdmin) userUpdates.status = body.status;
 
+  // Non-admin self-edits are restricted to a narrow allow-list. HR / payroll
+  // / compliance / document fields require admin role, even when the actor
+  // is editing their own row.
+  const allowedKeys = isAdmin ? ALL_EMP_PASSTHROUGH_KEYS : SELF_UPDATABLE_EMP_KEYS;
   const empUpdates: Record<string, unknown> = {};
-  for (const k of EMP_PASSTHROUGH_KEYS) {
+  for (const k of allowedKeys) {
     if (body[k] !== undefined) empUpdates[k] = body[k];
   }
-  if (body.hourlyRate !== undefined) {
+  if (isAdmin && body.hourlyRate !== undefined) {
     empUpdates.hourlyRate = body.hourlyRate === null ? null : String(body.hourlyRate);
   }
 
