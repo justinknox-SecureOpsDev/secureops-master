@@ -1,4 +1,4 @@
-import { Switch, Route, Router as WouterRouter } from "wouter";
+import { Switch, Route, Router as WouterRouter, useLocation } from "wouter";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { Toaster } from "@/components/ui/toaster";
 import { TooltipProvider } from "@/components/ui/tooltip";
@@ -7,12 +7,21 @@ import { LoginPage } from "@/pages/Login";
 import { AppShell } from "@/pages/AppShell";
 import { TablePage, HomeRedirect } from "@/pages/TablePage";
 import { SiteDetailPage } from "@/pages/SiteDetailPage";
+import { ApplyPage } from "@/pages/Apply";
+import { OnboardPage } from "@/pages/Onboard";
+import { ApplicationsPage } from "@/pages/Applications";
+import { OnboardingPage } from "@/pages/Onboarding";
 import NotFound from "@/pages/not-found";
 
 const queryClient = new QueryClient();
 
 function Routed() {
   const { user, loading } = useAuth();
+  const [location] = useLocation();
+
+  // Public routes — no admin auth required
+  if (location === "/apply" || location.startsWith("/apply/")) return <ApplyPage />;
+  if (location.startsWith("/onboard/")) return <OnboardPage />;
 
   if (loading) {
     return (
@@ -39,6 +48,8 @@ function Routed() {
     <AppShell>
       <Switch>
         <Route path="/" component={HomeRedirect} />
+        <Route path="/hr/applications" component={ApplicationsPage} />
+        <Route path="/hr/onboarding" component={OnboardingPage} />
         <Route path="/sites/:id" component={SiteDetailPage} />
         <Route path="/tables/:table" component={TablePage} />
         <Route component={NotFound} />

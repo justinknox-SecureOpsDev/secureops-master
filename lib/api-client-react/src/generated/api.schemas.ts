@@ -794,6 +794,262 @@ export interface EmployeeDashboardSummary {
   expiringLicenses: number;
 }
 
+export interface UploadUrlRequest {
+  /** @minLength 1 */
+  name: string;
+  /** @minimum 1 */
+  size: number;
+  /** @minLength 1 */
+  contentType: string;
+}
+
+export interface UploadUrlResponse {
+  uploadURL: string;
+  objectPath: string;
+  metadata?: UploadUrlRequest;
+}
+
+export interface UploadedFile {
+  name: string;
+  objectPath: string;
+  contentType?: string;
+  size?: number;
+}
+
+export interface ApplicationReference {
+  name: string;
+  relationship: string;
+  phone: string;
+  email?: string;
+}
+
+export type AvailabilityCellDay =
+  (typeof AvailabilityCellDay)[keyof typeof AvailabilityCellDay];
+
+export const AvailabilityCellDay = {
+  mon: "mon",
+  tue: "tue",
+  wed: "wed",
+  thu: "thu",
+  fri: "fri",
+  sat: "sat",
+  sun: "sun",
+} as const;
+
+export type AvailabilityCellPeriod =
+  (typeof AvailabilityCellPeriod)[keyof typeof AvailabilityCellPeriod];
+
+export const AvailabilityCellPeriod = {
+  morning: "morning",
+  afternoon: "afternoon",
+  evening: "evening",
+  overnight: "overnight",
+} as const;
+
+export interface AvailabilityCell {
+  day: AvailabilityCellDay;
+  period: AvailabilityCellPeriod;
+}
+
+export type SubmitApplicationRequestSiaLicenseLevel =
+  | (typeof SubmitApplicationRequestSiaLicenseLevel)[keyof typeof SubmitApplicationRequestSiaLicenseLevel]
+  | null;
+
+export const SubmitApplicationRequestSiaLicenseLevel = {
+  NUMBER_2: 2,
+  NUMBER_3: 3,
+  NUMBER_4: 4,
+} as const;
+
+export interface SubmitApplicationRequest {
+  firstName: string;
+  lastName: string;
+  email: string;
+  phone: string;
+  address: string;
+  dateOfBirth?: string | null;
+  cityOfBirth?: string | null;
+  stateOfBirth?: string | null;
+  niNumber?: string | null;
+  rightToWorkStatus?: string | null;
+  rightToWorkDoc?: UploadedFile | null;
+  siaLicenseNumber?: string | null;
+  siaLicenseLevel?: SubmitApplicationRequestSiaLicenseLevel;
+  siaLicenseExpiry?: string | null;
+  previousExperience?: string | null;
+  yearsExperience?: number | null;
+  references?: ApplicationReference[];
+  photo?: UploadedFile | null;
+  cv?: UploadedFile | null;
+  trainingCertificates?: UploadedFile[];
+  availability?: AvailabilityCell[];
+}
+
+export type ApplicationStatus =
+  (typeof ApplicationStatus)[keyof typeof ApplicationStatus];
+
+export const ApplicationStatus = {
+  submitted: "submitted",
+  under_review: "under_review",
+  approved: "approved",
+  rejected: "rejected",
+} as const;
+
+export interface Application {
+  id: string;
+  status: ApplicationStatus;
+  firstName: string;
+  lastName: string;
+  email: string;
+  phone: string;
+  address: string;
+  dateOfBirth?: string | null;
+  cityOfBirth?: string | null;
+  stateOfBirth?: string | null;
+  niNumber?: string | null;
+  rightToWorkStatus?: string | null;
+  rightToWorkDocKey?: string | null;
+  siaLicenseNumber?: string | null;
+  siaLicenseLevel?: number | null;
+  siaLicenseExpiry?: string | null;
+  previousExperience?: string | null;
+  yearsExperience?: number | null;
+  references?: ApplicationReference[] | null;
+  photoKey?: string | null;
+  cvKey?: string | null;
+  trainingCertificateKeys?: string[] | null;
+  availability?: AvailabilityCell[] | null;
+  reviewerNotes?: string | null;
+  reviewedAt?: string | null;
+  createdEmployeeId?: string | null;
+  createdAt: string;
+}
+
+export interface ReviewApplicationRequest {
+  notes?: string;
+}
+
+export interface ApproveApplicationResponse {
+  application: Application;
+  onboardingUrl: string;
+  onboardingToken: string;
+  employeeId: string;
+  tempPassword: string;
+  emailSent?: boolean;
+}
+
+export interface OnboardingPrefill {
+  employeeId: string;
+  firstName: string;
+  lastName: string;
+  email: string;
+  phone?: string | null;
+  address?: string | null;
+  niNumber?: string | null;
+  siaLicenseNumber?: string | null;
+  siaLicenseLevel?: number | null;
+  /** True if onboarding already submitted */
+  existing?: boolean;
+}
+
+export type AcknowledgementType =
+  (typeof AcknowledgementType)[keyof typeof AcknowledgementType];
+
+export const AcknowledgementType = {
+  drug_free: "drug_free",
+  uniform_sou: "uniform_sou",
+  non_disclosure: "non_disclosure",
+  contract: "contract",
+} as const;
+
+export interface Acknowledgement {
+  type: AcknowledgementType;
+  accepted: boolean;
+  signature: string;
+  timestamp: string;
+}
+
+export interface SubmitOnboardingRequest {
+  bankSortCode: string;
+  bankAccountNumber: string;
+  bankAccountName: string;
+  niNumberConfirmed?: string | null;
+  taxCode?: string | null;
+  p45Doc?: UploadedFile | null;
+  emergencyContactName: string;
+  emergencyContactRelationship?: string | null;
+  emergencyContactPhone: string;
+  uniformShirt?: string | null;
+  uniformTrousers?: string | null;
+  uniformJacket?: string | null;
+  uniformBoots?: string | null;
+  siaLicenseDoc?: UploadedFile | null;
+  passportDoc?: UploadedFile | null;
+  directDepositConsent: boolean;
+  directDepositSignature: string;
+  acknowledgements: Acknowledgement[];
+}
+
+export interface OnboardingSubmission {
+  id: string;
+  employeeId: string;
+  bankSortCode?: string | null;
+  bankAccountNumber?: string | null;
+  bankAccountName?: string | null;
+  niNumberConfirmed?: string | null;
+  taxCode?: string | null;
+  p45DocKey?: string | null;
+  emergencyContactName?: string | null;
+  emergencyContactRelationship?: string | null;
+  emergencyContactPhone?: string | null;
+  uniformShirt?: string | null;
+  uniformTrousers?: string | null;
+  uniformJacket?: string | null;
+  uniformBoots?: string | null;
+  siaLicenseDocKey?: string | null;
+  passportDocKey?: string | null;
+  directDepositConsent?: boolean;
+  directDepositSignature?: string | null;
+  acknowledgements?: Acknowledgement[] | null;
+  submittedAt: string;
+}
+
+export type OnboardingListItemStatus =
+  (typeof OnboardingListItemStatus)[keyof typeof OnboardingListItemStatus];
+
+export const OnboardingListItemStatus = {
+  pending: "pending",
+  completed: "completed",
+} as const;
+
+export interface OnboardingListItem {
+  employeeId: string;
+  firstName: string;
+  lastName: string;
+  email: string;
+  status: OnboardingListItemStatus;
+  tokenExpiresAt?: string | null;
+  submittedAt?: string | null;
+  applicationId?: string | null;
+}
+
+export interface OnboardingDetail {
+  employeeId: string;
+  firstName: string;
+  lastName: string;
+  email: string;
+  status: string;
+  submission?: OnboardingSubmission | null;
+  tokenExpiresAt?: string | null;
+  applicationId?: string | null;
+}
+
+export interface OnboardingLinkResponse {
+  onboardingUrl: string;
+  onboardingToken: string;
+  emailSent?: boolean;
+}
+
 export type GetSitesParams = {
   clientId?: string;
 };
@@ -951,3 +1207,20 @@ export type GetChatMessagesParams = {
 export type SendChatMessageBody = {
   content: string;
 };
+
+export type AdminListApplicationsParams = {
+  status?: string;
+  search?: string;
+};
+
+export type AdminListOnboardingParams = {
+  status?: AdminListOnboardingStatus;
+};
+
+export type AdminListOnboardingStatus =
+  (typeof AdminListOnboardingStatus)[keyof typeof AdminListOnboardingStatus];
+
+export const AdminListOnboardingStatus = {
+  pending: "pending",
+  completed: "completed",
+} as const;

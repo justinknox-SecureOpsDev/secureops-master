@@ -34,7 +34,12 @@ A full-stack mobile operations platform for Williams Council Security Group (WCS
 - `artifacts/api-server/src/routes/admin.ts` — Generic admin CRUD (`/admin/tables`, `/admin/tables/:table[/:id]`, `/admin/import/:table`); admin-only via `requireAdmin`
 - `artifacts/admin-portal/` — React+Vite browser admin portal at `/admin-portal/` (sidebar of all 11 tables, generic grid, Excel/CSV import)
 - `artifacts/admin-portal/src/lib/tables.ts` — TABLE descriptors that drive the entire generic UI (fields, FKs, options, importable flag)
-- `artifacts/admin-portal/src/components/{DataGrid,RowFormDialog,ImportWizard}.tsx`
+- `artifacts/admin-portal/src/components/{DataGrid,RowFormDialog,ImportWizard,FileUploadField,BrandHeader}.tsx`
+- `artifacts/admin-portal/src/pages/{Apply,Onboard,Applications,Onboarding}.tsx` — HR public + admin pages
+- `artifacts/admin-portal/src/lib/upload.ts` — client helper: presigned-URL upload via `/storage/uploads/request-url`
+- `artifacts/api-server/src/routes/applications.ts` — public application submit, admin review/approve, public onboarding GET/POST, admin onboarding list/detail/resend
+- `artifacts/api-server/src/routes/storage.ts` + `src/lib/{objectStorage,objectAcl}.ts` — App Storage upload URL + file serving
+- `lib/db/src/schema/{applications,onboardingTokens,onboardingSubmissions}.ts` — HR pipeline tables
 - `artifacts/security-ops/` — Expo mobile app
 - `artifacts/security-ops/contexts/ChatContext.tsx` — WebSocket chat context
 - `artifacts/security-ops/components/chat/` — Chat UI components
@@ -64,6 +69,15 @@ A full-stack mobile operations platform for Williams Council Security Group (WCS
 - **Notifications**: Push alerts on shift assignment (iOS/Android); web degrades gracefully.
 - **Live map**: Admin "Live Map" tab shows every clocked-in officer on a Leaflet/OpenStreetMap view (web) or list (native), refreshed every 30s. Mobile pings `POST /me/location` every 60s while clocked in; users table stores `last_lat/last_lng/last_location_at`. `GET /admin/active-officers` joins active time entries with users + shifts + sites.
 - **Emergency button**: Red EMERGENCY button on employee Home. `POST /emergency` creates a `severity=critical` incident, pushes "🚨 EMERGENCY ALERT" to all admins via Expo, and returns a `callNumber` (defaults to `999` (UK), override via `EMERGENCY_CALL_NUMBER` env var (e.g. `911`)). Mobile then offers `Linking.openURL("tel:<number>")` to dial. Web shows alert only (no auto-dial).
+
+## HR pipeline (recruitment → onboarding)
+
+- **Public application** at `/admin-portal/apply` — multi-step form (personal, right-to-work, SIA + experience, references + photo/CV/training certs, weekly availability grid, review). Files uploaded to App Storage via presigned URLs (`POST /api/storage/uploads/request-url` → PUT to GCS). Submits to `POST /api/applications` (no auth).
+- **Admin Applications** at `/admin-portal/hr/applications` — filter by status (`submitted`/`under_review`/`approved`/`rejected`), search by name/email/phone, review dialog with all uploads, mark under review / reject / **approve**.
+- **Approve** creates `User` (role=`employee`, status=`pending`, random temp password) + `Employee` row + `License` row (if SIA info provided), invalidates prior unconsumed tokens, issues a 14-day single-use `OnboardingToken`, links the application via `createdEmployeeId`. Response includes `onboardingUrl`, `tempPassword`, and `emailSent:false` so the admin can copy/share.
+- **Public onboarding** at `/admin-portal/onboard/:token` — GET `/api/onboarding/:token` returns prefill (name/email/phone/NI/SIA from application). POST submits bank/tax/P45, emergency contact, uniform sizes, SIA+passport docs, direct-deposit consent + signature, and 4 acknowledgements (Drug-Free, Uniform, NDA, Contract). On submit: upserts `OnboardingSubmission`, copies bank+emergency to `employees`, sets user status=`active`, consumes token, pushes admins.
+- **Admin Onboarding** at `/admin-portal/hr/onboarding` — list pending vs completed, detail dialog shows full submission, **Resend onboarding link** invalidates old tokens and returns a fresh link.
+- Email is not configured: approve/resend always return `emailSent:false` and the link in the response so the admin can share manually.
 
 ## Seeded Accounts
 

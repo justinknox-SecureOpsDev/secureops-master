@@ -19,6 +19,10 @@ import type {
 import type {
   ActiveOfficer,
   AdminDashboardSummary,
+  AdminListApplicationsParams,
+  AdminListOnboardingParams,
+  Application,
+  ApproveApplicationResponse,
   ApproveTimeEntryRequest,
   AssignShiftRequest,
   AuthResponse,
@@ -57,12 +61,20 @@ import type {
   Invoice,
   License,
   LoginRequest,
+  OnboardingDetail,
+  OnboardingLinkResponse,
+  OnboardingListItem,
+  OnboardingPrefill,
+  OnboardingSubmission,
   PayrollEntry,
   RegisterPushTokenBody,
+  ReviewApplicationRequest,
   SendChatMessageBody,
   Shift,
   ShiftAssignment,
   Site,
+  SubmitApplicationRequest,
+  SubmitOnboardingRequest,
   TimeEntry,
   TriggerEmergency201,
   TriggerEmergencyBody,
@@ -77,6 +89,8 @@ import type {
   UpdatePayrollRequest,
   UpdateShiftRequest,
   UpdateSiteRequest,
+  UploadUrlRequest,
+  UploadUrlResponse,
   User,
 } from "./api.schemas";
 
@@ -5070,4 +5084,1026 @@ export const useSendChatMessage = <
   TContext
 > => {
   return useMutation(getSendChatMessageMutationOptions(options));
+};
+
+/**
+ * @summary Request a presigned URL for file upload
+ */
+export const getRequestUploadUrlUrl = () => {
+  return `/api/storage/uploads/request-url`;
+};
+
+export const requestUploadUrl = async (
+  uploadUrlRequest: UploadUrlRequest,
+  options?: RequestInit,
+): Promise<UploadUrlResponse> => {
+  return customFetch<UploadUrlResponse>(getRequestUploadUrlUrl(), {
+    ...options,
+    method: "POST",
+    headers: { "Content-Type": "application/json", ...options?.headers },
+    body: JSON.stringify(uploadUrlRequest),
+  });
+};
+
+export const getRequestUploadUrlMutationOptions = <
+  TError = ErrorType<unknown>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof requestUploadUrl>>,
+    TError,
+    { data: BodyType<UploadUrlRequest> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof requestUploadUrl>>,
+  TError,
+  { data: BodyType<UploadUrlRequest> },
+  TContext
+> => {
+  const mutationKey = ["requestUploadUrl"];
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof requestUploadUrl>>,
+    { data: BodyType<UploadUrlRequest> }
+  > = (props) => {
+    const { data } = props ?? {};
+
+    return requestUploadUrl(data, requestOptions);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type RequestUploadUrlMutationResult = NonNullable<
+  Awaited<ReturnType<typeof requestUploadUrl>>
+>;
+export type RequestUploadUrlMutationBody = BodyType<UploadUrlRequest>;
+export type RequestUploadUrlMutationError = ErrorType<unknown>;
+
+/**
+ * @summary Request a presigned URL for file upload
+ */
+export const useRequestUploadUrl = <
+  TError = ErrorType<unknown>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof requestUploadUrl>>,
+    TError,
+    { data: BodyType<UploadUrlRequest> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationResult<
+  Awaited<ReturnType<typeof requestUploadUrl>>,
+  TError,
+  { data: BodyType<UploadUrlRequest> },
+  TContext
+> => {
+  return useMutation(getRequestUploadUrlMutationOptions(options));
+};
+
+/**
+ * @summary Submit a public job application
+ */
+export const getSubmitApplicationUrl = () => {
+  return `/api/applications`;
+};
+
+export const submitApplication = async (
+  submitApplicationRequest: SubmitApplicationRequest,
+  options?: RequestInit,
+): Promise<Application> => {
+  return customFetch<Application>(getSubmitApplicationUrl(), {
+    ...options,
+    method: "POST",
+    headers: { "Content-Type": "application/json", ...options?.headers },
+    body: JSON.stringify(submitApplicationRequest),
+  });
+};
+
+export const getSubmitApplicationMutationOptions = <
+  TError = ErrorType<unknown>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof submitApplication>>,
+    TError,
+    { data: BodyType<SubmitApplicationRequest> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof submitApplication>>,
+  TError,
+  { data: BodyType<SubmitApplicationRequest> },
+  TContext
+> => {
+  const mutationKey = ["submitApplication"];
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof submitApplication>>,
+    { data: BodyType<SubmitApplicationRequest> }
+  > = (props) => {
+    const { data } = props ?? {};
+
+    return submitApplication(data, requestOptions);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type SubmitApplicationMutationResult = NonNullable<
+  Awaited<ReturnType<typeof submitApplication>>
+>;
+export type SubmitApplicationMutationBody = BodyType<SubmitApplicationRequest>;
+export type SubmitApplicationMutationError = ErrorType<unknown>;
+
+/**
+ * @summary Submit a public job application
+ */
+export const useSubmitApplication = <
+  TError = ErrorType<unknown>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof submitApplication>>,
+    TError,
+    { data: BodyType<SubmitApplicationRequest> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationResult<
+  Awaited<ReturnType<typeof submitApplication>>,
+  TError,
+  { data: BodyType<SubmitApplicationRequest> },
+  TContext
+> => {
+  return useMutation(getSubmitApplicationMutationOptions(options));
+};
+
+/**
+ * @summary List all job applications
+ */
+export const getAdminListApplicationsUrl = (
+  params?: AdminListApplicationsParams,
+) => {
+  const normalizedParams = new URLSearchParams();
+
+  Object.entries(params || {}).forEach(([key, value]) => {
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? "null" : value.toString());
+    }
+  });
+
+  const stringifiedParams = normalizedParams.toString();
+
+  return stringifiedParams.length > 0
+    ? `/api/admin/applications?${stringifiedParams}`
+    : `/api/admin/applications`;
+};
+
+export const adminListApplications = async (
+  params?: AdminListApplicationsParams,
+  options?: RequestInit,
+): Promise<Application[]> => {
+  return customFetch<Application[]>(getAdminListApplicationsUrl(params), {
+    ...options,
+    method: "GET",
+  });
+};
+
+export const getAdminListApplicationsQueryKey = (
+  params?: AdminListApplicationsParams,
+) => {
+  return [`/api/admin/applications`, ...(params ? [params] : [])] as const;
+};
+
+export const getAdminListApplicationsQueryOptions = <
+  TData = Awaited<ReturnType<typeof adminListApplications>>,
+  TError = ErrorType<unknown>,
+>(
+  params?: AdminListApplicationsParams,
+  options?: {
+    query?: UseQueryOptions<
+      Awaited<ReturnType<typeof adminListApplications>>,
+      TError,
+      TData
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+) => {
+  const { query: queryOptions, request: requestOptions } = options ?? {};
+
+  const queryKey =
+    queryOptions?.queryKey ?? getAdminListApplicationsQueryKey(params);
+
+  const queryFn: QueryFunction<
+    Awaited<ReturnType<typeof adminListApplications>>
+  > = ({ signal }) =>
+    adminListApplications(params, { signal, ...requestOptions });
+
+  return { queryKey, queryFn, ...queryOptions } as UseQueryOptions<
+    Awaited<ReturnType<typeof adminListApplications>>,
+    TError,
+    TData
+  > & { queryKey: QueryKey };
+};
+
+export type AdminListApplicationsQueryResult = NonNullable<
+  Awaited<ReturnType<typeof adminListApplications>>
+>;
+export type AdminListApplicationsQueryError = ErrorType<unknown>;
+
+/**
+ * @summary List all job applications
+ */
+
+export function useAdminListApplications<
+  TData = Awaited<ReturnType<typeof adminListApplications>>,
+  TError = ErrorType<unknown>,
+>(
+  params?: AdminListApplicationsParams,
+  options?: {
+    query?: UseQueryOptions<
+      Awaited<ReturnType<typeof adminListApplications>>,
+      TError,
+      TData
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+): UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+  const queryOptions = getAdminListApplicationsQueryOptions(params, options);
+
+  const query = useQuery(queryOptions) as UseQueryResult<TData, TError> & {
+    queryKey: QueryKey;
+  };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
+
+export const getAdminGetApplicationUrl = (id: string) => {
+  return `/api/admin/applications/${id}`;
+};
+
+export const adminGetApplication = async (
+  id: string,
+  options?: RequestInit,
+): Promise<Application> => {
+  return customFetch<Application>(getAdminGetApplicationUrl(id), {
+    ...options,
+    method: "GET",
+  });
+};
+
+export const getAdminGetApplicationQueryKey = (id: string) => {
+  return [`/api/admin/applications/${id}`] as const;
+};
+
+export const getAdminGetApplicationQueryOptions = <
+  TData = Awaited<ReturnType<typeof adminGetApplication>>,
+  TError = ErrorType<unknown>,
+>(
+  id: string,
+  options?: {
+    query?: UseQueryOptions<
+      Awaited<ReturnType<typeof adminGetApplication>>,
+      TError,
+      TData
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+) => {
+  const { query: queryOptions, request: requestOptions } = options ?? {};
+
+  const queryKey = queryOptions?.queryKey ?? getAdminGetApplicationQueryKey(id);
+
+  const queryFn: QueryFunction<
+    Awaited<ReturnType<typeof adminGetApplication>>
+  > = ({ signal }) => adminGetApplication(id, { signal, ...requestOptions });
+
+  return {
+    queryKey,
+    queryFn,
+    enabled: !!id,
+    ...queryOptions,
+  } as UseQueryOptions<
+    Awaited<ReturnType<typeof adminGetApplication>>,
+    TError,
+    TData
+  > & { queryKey: QueryKey };
+};
+
+export type AdminGetApplicationQueryResult = NonNullable<
+  Awaited<ReturnType<typeof adminGetApplication>>
+>;
+export type AdminGetApplicationQueryError = ErrorType<unknown>;
+
+export function useAdminGetApplication<
+  TData = Awaited<ReturnType<typeof adminGetApplication>>,
+  TError = ErrorType<unknown>,
+>(
+  id: string,
+  options?: {
+    query?: UseQueryOptions<
+      Awaited<ReturnType<typeof adminGetApplication>>,
+      TError,
+      TData
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+): UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+  const queryOptions = getAdminGetApplicationQueryOptions(id, options);
+
+  const query = useQuery(queryOptions) as UseQueryResult<TData, TError> & {
+    queryKey: QueryKey;
+  };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
+
+export const getAdminMarkApplicationUnderReviewUrl = (id: string) => {
+  return `/api/admin/applications/${id}/review`;
+};
+
+export const adminMarkApplicationUnderReview = async (
+  id: string,
+  reviewApplicationRequest: ReviewApplicationRequest,
+  options?: RequestInit,
+): Promise<Application> => {
+  return customFetch<Application>(getAdminMarkApplicationUnderReviewUrl(id), {
+    ...options,
+    method: "POST",
+    headers: { "Content-Type": "application/json", ...options?.headers },
+    body: JSON.stringify(reviewApplicationRequest),
+  });
+};
+
+export const getAdminMarkApplicationUnderReviewMutationOptions = <
+  TError = ErrorType<unknown>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof adminMarkApplicationUnderReview>>,
+    TError,
+    { id: string; data: BodyType<ReviewApplicationRequest> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof adminMarkApplicationUnderReview>>,
+  TError,
+  { id: string; data: BodyType<ReviewApplicationRequest> },
+  TContext
+> => {
+  const mutationKey = ["adminMarkApplicationUnderReview"];
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof adminMarkApplicationUnderReview>>,
+    { id: string; data: BodyType<ReviewApplicationRequest> }
+  > = (props) => {
+    const { id, data } = props ?? {};
+
+    return adminMarkApplicationUnderReview(id, data, requestOptions);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type AdminMarkApplicationUnderReviewMutationResult = NonNullable<
+  Awaited<ReturnType<typeof adminMarkApplicationUnderReview>>
+>;
+export type AdminMarkApplicationUnderReviewMutationBody =
+  BodyType<ReviewApplicationRequest>;
+export type AdminMarkApplicationUnderReviewMutationError = ErrorType<unknown>;
+
+export const useAdminMarkApplicationUnderReview = <
+  TError = ErrorType<unknown>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof adminMarkApplicationUnderReview>>,
+    TError,
+    { id: string; data: BodyType<ReviewApplicationRequest> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationResult<
+  Awaited<ReturnType<typeof adminMarkApplicationUnderReview>>,
+  TError,
+  { id: string; data: BodyType<ReviewApplicationRequest> },
+  TContext
+> => {
+  return useMutation(
+    getAdminMarkApplicationUnderReviewMutationOptions(options),
+  );
+};
+
+export const getAdminRejectApplicationUrl = (id: string) => {
+  return `/api/admin/applications/${id}/reject`;
+};
+
+export const adminRejectApplication = async (
+  id: string,
+  reviewApplicationRequest: ReviewApplicationRequest,
+  options?: RequestInit,
+): Promise<Application> => {
+  return customFetch<Application>(getAdminRejectApplicationUrl(id), {
+    ...options,
+    method: "POST",
+    headers: { "Content-Type": "application/json", ...options?.headers },
+    body: JSON.stringify(reviewApplicationRequest),
+  });
+};
+
+export const getAdminRejectApplicationMutationOptions = <
+  TError = ErrorType<unknown>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof adminRejectApplication>>,
+    TError,
+    { id: string; data: BodyType<ReviewApplicationRequest> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof adminRejectApplication>>,
+  TError,
+  { id: string; data: BodyType<ReviewApplicationRequest> },
+  TContext
+> => {
+  const mutationKey = ["adminRejectApplication"];
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof adminRejectApplication>>,
+    { id: string; data: BodyType<ReviewApplicationRequest> }
+  > = (props) => {
+    const { id, data } = props ?? {};
+
+    return adminRejectApplication(id, data, requestOptions);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type AdminRejectApplicationMutationResult = NonNullable<
+  Awaited<ReturnType<typeof adminRejectApplication>>
+>;
+export type AdminRejectApplicationMutationBody =
+  BodyType<ReviewApplicationRequest>;
+export type AdminRejectApplicationMutationError = ErrorType<unknown>;
+
+export const useAdminRejectApplication = <
+  TError = ErrorType<unknown>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof adminRejectApplication>>,
+    TError,
+    { id: string; data: BodyType<ReviewApplicationRequest> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationResult<
+  Awaited<ReturnType<typeof adminRejectApplication>>,
+  TError,
+  { id: string; data: BodyType<ReviewApplicationRequest> },
+  TContext
+> => {
+  return useMutation(getAdminRejectApplicationMutationOptions(options));
+};
+
+export const getAdminApproveApplicationUrl = (id: string) => {
+  return `/api/admin/applications/${id}/approve`;
+};
+
+export const adminApproveApplication = async (
+  id: string,
+  reviewApplicationRequest: ReviewApplicationRequest,
+  options?: RequestInit,
+): Promise<ApproveApplicationResponse> => {
+  return customFetch<ApproveApplicationResponse>(
+    getAdminApproveApplicationUrl(id),
+    {
+      ...options,
+      method: "POST",
+      headers: { "Content-Type": "application/json", ...options?.headers },
+      body: JSON.stringify(reviewApplicationRequest),
+    },
+  );
+};
+
+export const getAdminApproveApplicationMutationOptions = <
+  TError = ErrorType<unknown>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof adminApproveApplication>>,
+    TError,
+    { id: string; data: BodyType<ReviewApplicationRequest> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof adminApproveApplication>>,
+  TError,
+  { id: string; data: BodyType<ReviewApplicationRequest> },
+  TContext
+> => {
+  const mutationKey = ["adminApproveApplication"];
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof adminApproveApplication>>,
+    { id: string; data: BodyType<ReviewApplicationRequest> }
+  > = (props) => {
+    const { id, data } = props ?? {};
+
+    return adminApproveApplication(id, data, requestOptions);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type AdminApproveApplicationMutationResult = NonNullable<
+  Awaited<ReturnType<typeof adminApproveApplication>>
+>;
+export type AdminApproveApplicationMutationBody =
+  BodyType<ReviewApplicationRequest>;
+export type AdminApproveApplicationMutationError = ErrorType<unknown>;
+
+export const useAdminApproveApplication = <
+  TError = ErrorType<unknown>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof adminApproveApplication>>,
+    TError,
+    { id: string; data: BodyType<ReviewApplicationRequest> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationResult<
+  Awaited<ReturnType<typeof adminApproveApplication>>,
+  TError,
+  { id: string; data: BodyType<ReviewApplicationRequest> },
+  TContext
+> => {
+  return useMutation(getAdminApproveApplicationMutationOptions(options));
+};
+
+export const getGetOnboardingPrefillUrl = (token: string) => {
+  return `/api/onboarding/${token}`;
+};
+
+export const getOnboardingPrefill = async (
+  token: string,
+  options?: RequestInit,
+): Promise<OnboardingPrefill> => {
+  return customFetch<OnboardingPrefill>(getGetOnboardingPrefillUrl(token), {
+    ...options,
+    method: "GET",
+  });
+};
+
+export const getGetOnboardingPrefillQueryKey = (token: string) => {
+  return [`/api/onboarding/${token}`] as const;
+};
+
+export const getGetOnboardingPrefillQueryOptions = <
+  TData = Awaited<ReturnType<typeof getOnboardingPrefill>>,
+  TError = ErrorType<ErrorResponse>,
+>(
+  token: string,
+  options?: {
+    query?: UseQueryOptions<
+      Awaited<ReturnType<typeof getOnboardingPrefill>>,
+      TError,
+      TData
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+) => {
+  const { query: queryOptions, request: requestOptions } = options ?? {};
+
+  const queryKey =
+    queryOptions?.queryKey ?? getGetOnboardingPrefillQueryKey(token);
+
+  const queryFn: QueryFunction<
+    Awaited<ReturnType<typeof getOnboardingPrefill>>
+  > = ({ signal }) =>
+    getOnboardingPrefill(token, { signal, ...requestOptions });
+
+  return {
+    queryKey,
+    queryFn,
+    enabled: !!token,
+    ...queryOptions,
+  } as UseQueryOptions<
+    Awaited<ReturnType<typeof getOnboardingPrefill>>,
+    TError,
+    TData
+  > & { queryKey: QueryKey };
+};
+
+export type GetOnboardingPrefillQueryResult = NonNullable<
+  Awaited<ReturnType<typeof getOnboardingPrefill>>
+>;
+export type GetOnboardingPrefillQueryError = ErrorType<ErrorResponse>;
+
+export function useGetOnboardingPrefill<
+  TData = Awaited<ReturnType<typeof getOnboardingPrefill>>,
+  TError = ErrorType<ErrorResponse>,
+>(
+  token: string,
+  options?: {
+    query?: UseQueryOptions<
+      Awaited<ReturnType<typeof getOnboardingPrefill>>,
+      TError,
+      TData
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+): UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+  const queryOptions = getGetOnboardingPrefillQueryOptions(token, options);
+
+  const query = useQuery(queryOptions) as UseQueryResult<TData, TError> & {
+    queryKey: QueryKey;
+  };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
+
+export const getSubmitOnboardingUrl = (token: string) => {
+  return `/api/onboarding/${token}`;
+};
+
+export const submitOnboarding = async (
+  token: string,
+  submitOnboardingRequest: SubmitOnboardingRequest,
+  options?: RequestInit,
+): Promise<OnboardingSubmission> => {
+  return customFetch<OnboardingSubmission>(getSubmitOnboardingUrl(token), {
+    ...options,
+    method: "POST",
+    headers: { "Content-Type": "application/json", ...options?.headers },
+    body: JSON.stringify(submitOnboardingRequest),
+  });
+};
+
+export const getSubmitOnboardingMutationOptions = <
+  TError = ErrorType<unknown>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof submitOnboarding>>,
+    TError,
+    { token: string; data: BodyType<SubmitOnboardingRequest> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof submitOnboarding>>,
+  TError,
+  { token: string; data: BodyType<SubmitOnboardingRequest> },
+  TContext
+> => {
+  const mutationKey = ["submitOnboarding"];
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof submitOnboarding>>,
+    { token: string; data: BodyType<SubmitOnboardingRequest> }
+  > = (props) => {
+    const { token, data } = props ?? {};
+
+    return submitOnboarding(token, data, requestOptions);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type SubmitOnboardingMutationResult = NonNullable<
+  Awaited<ReturnType<typeof submitOnboarding>>
+>;
+export type SubmitOnboardingMutationBody = BodyType<SubmitOnboardingRequest>;
+export type SubmitOnboardingMutationError = ErrorType<unknown>;
+
+export const useSubmitOnboarding = <
+  TError = ErrorType<unknown>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof submitOnboarding>>,
+    TError,
+    { token: string; data: BodyType<SubmitOnboardingRequest> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationResult<
+  Awaited<ReturnType<typeof submitOnboarding>>,
+  TError,
+  { token: string; data: BodyType<SubmitOnboardingRequest> },
+  TContext
+> => {
+  return useMutation(getSubmitOnboardingMutationOptions(options));
+};
+
+export const getAdminListOnboardingUrl = (
+  params?: AdminListOnboardingParams,
+) => {
+  const normalizedParams = new URLSearchParams();
+
+  Object.entries(params || {}).forEach(([key, value]) => {
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? "null" : value.toString());
+    }
+  });
+
+  const stringifiedParams = normalizedParams.toString();
+
+  return stringifiedParams.length > 0
+    ? `/api/admin/onboarding?${stringifiedParams}`
+    : `/api/admin/onboarding`;
+};
+
+export const adminListOnboarding = async (
+  params?: AdminListOnboardingParams,
+  options?: RequestInit,
+): Promise<OnboardingListItem[]> => {
+  return customFetch<OnboardingListItem[]>(getAdminListOnboardingUrl(params), {
+    ...options,
+    method: "GET",
+  });
+};
+
+export const getAdminListOnboardingQueryKey = (
+  params?: AdminListOnboardingParams,
+) => {
+  return [`/api/admin/onboarding`, ...(params ? [params] : [])] as const;
+};
+
+export const getAdminListOnboardingQueryOptions = <
+  TData = Awaited<ReturnType<typeof adminListOnboarding>>,
+  TError = ErrorType<unknown>,
+>(
+  params?: AdminListOnboardingParams,
+  options?: {
+    query?: UseQueryOptions<
+      Awaited<ReturnType<typeof adminListOnboarding>>,
+      TError,
+      TData
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+) => {
+  const { query: queryOptions, request: requestOptions } = options ?? {};
+
+  const queryKey =
+    queryOptions?.queryKey ?? getAdminListOnboardingQueryKey(params);
+
+  const queryFn: QueryFunction<
+    Awaited<ReturnType<typeof adminListOnboarding>>
+  > = ({ signal }) =>
+    adminListOnboarding(params, { signal, ...requestOptions });
+
+  return { queryKey, queryFn, ...queryOptions } as UseQueryOptions<
+    Awaited<ReturnType<typeof adminListOnboarding>>,
+    TError,
+    TData
+  > & { queryKey: QueryKey };
+};
+
+export type AdminListOnboardingQueryResult = NonNullable<
+  Awaited<ReturnType<typeof adminListOnboarding>>
+>;
+export type AdminListOnboardingQueryError = ErrorType<unknown>;
+
+export function useAdminListOnboarding<
+  TData = Awaited<ReturnType<typeof adminListOnboarding>>,
+  TError = ErrorType<unknown>,
+>(
+  params?: AdminListOnboardingParams,
+  options?: {
+    query?: UseQueryOptions<
+      Awaited<ReturnType<typeof adminListOnboarding>>,
+      TError,
+      TData
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+): UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+  const queryOptions = getAdminListOnboardingQueryOptions(params, options);
+
+  const query = useQuery(queryOptions) as UseQueryResult<TData, TError> & {
+    queryKey: QueryKey;
+  };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
+
+export const getAdminGetOnboardingUrl = (employeeId: string) => {
+  return `/api/admin/onboarding/${employeeId}`;
+};
+
+export const adminGetOnboarding = async (
+  employeeId: string,
+  options?: RequestInit,
+): Promise<OnboardingDetail> => {
+  return customFetch<OnboardingDetail>(getAdminGetOnboardingUrl(employeeId), {
+    ...options,
+    method: "GET",
+  });
+};
+
+export const getAdminGetOnboardingQueryKey = (employeeId: string) => {
+  return [`/api/admin/onboarding/${employeeId}`] as const;
+};
+
+export const getAdminGetOnboardingQueryOptions = <
+  TData = Awaited<ReturnType<typeof adminGetOnboarding>>,
+  TError = ErrorType<unknown>,
+>(
+  employeeId: string,
+  options?: {
+    query?: UseQueryOptions<
+      Awaited<ReturnType<typeof adminGetOnboarding>>,
+      TError,
+      TData
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+) => {
+  const { query: queryOptions, request: requestOptions } = options ?? {};
+
+  const queryKey =
+    queryOptions?.queryKey ?? getAdminGetOnboardingQueryKey(employeeId);
+
+  const queryFn: QueryFunction<
+    Awaited<ReturnType<typeof adminGetOnboarding>>
+  > = ({ signal }) =>
+    adminGetOnboarding(employeeId, { signal, ...requestOptions });
+
+  return {
+    queryKey,
+    queryFn,
+    enabled: !!employeeId,
+    ...queryOptions,
+  } as UseQueryOptions<
+    Awaited<ReturnType<typeof adminGetOnboarding>>,
+    TError,
+    TData
+  > & { queryKey: QueryKey };
+};
+
+export type AdminGetOnboardingQueryResult = NonNullable<
+  Awaited<ReturnType<typeof adminGetOnboarding>>
+>;
+export type AdminGetOnboardingQueryError = ErrorType<unknown>;
+
+export function useAdminGetOnboarding<
+  TData = Awaited<ReturnType<typeof adminGetOnboarding>>,
+  TError = ErrorType<unknown>,
+>(
+  employeeId: string,
+  options?: {
+    query?: UseQueryOptions<
+      Awaited<ReturnType<typeof adminGetOnboarding>>,
+      TError,
+      TData
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+): UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+  const queryOptions = getAdminGetOnboardingQueryOptions(employeeId, options);
+
+  const query = useQuery(queryOptions) as UseQueryResult<TData, TError> & {
+    queryKey: QueryKey;
+  };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
+
+export const getAdminResendOnboardingLinkUrl = (employeeId: string) => {
+  return `/api/admin/onboarding/${employeeId}/resend`;
+};
+
+export const adminResendOnboardingLink = async (
+  employeeId: string,
+  options?: RequestInit,
+): Promise<OnboardingLinkResponse> => {
+  return customFetch<OnboardingLinkResponse>(
+    getAdminResendOnboardingLinkUrl(employeeId),
+    {
+      ...options,
+      method: "POST",
+    },
+  );
+};
+
+export const getAdminResendOnboardingLinkMutationOptions = <
+  TError = ErrorType<unknown>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof adminResendOnboardingLink>>,
+    TError,
+    { employeeId: string },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof adminResendOnboardingLink>>,
+  TError,
+  { employeeId: string },
+  TContext
+> => {
+  const mutationKey = ["adminResendOnboardingLink"];
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof adminResendOnboardingLink>>,
+    { employeeId: string }
+  > = (props) => {
+    const { employeeId } = props ?? {};
+
+    return adminResendOnboardingLink(employeeId, requestOptions);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type AdminResendOnboardingLinkMutationResult = NonNullable<
+  Awaited<ReturnType<typeof adminResendOnboardingLink>>
+>;
+
+export type AdminResendOnboardingLinkMutationError = ErrorType<unknown>;
+
+export const useAdminResendOnboardingLink = <
+  TError = ErrorType<unknown>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof adminResendOnboardingLink>>,
+    TError,
+    { employeeId: string },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationResult<
+  Awaited<ReturnType<typeof adminResendOnboardingLink>>,
+  TError,
+  { employeeId: string },
+  TContext
+> => {
+  return useMutation(getAdminResendOnboardingLinkMutationOptions(options));
 };

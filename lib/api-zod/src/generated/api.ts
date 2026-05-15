@@ -1596,3 +1596,573 @@ export const SendChatMessageParams = zod.object({
 export const SendChatMessageBody = zod.object({
   content: zod.string(),
 });
+
+/**
+ * @summary Request a presigned URL for file upload
+ */
+
+export const RequestUploadUrlBody = zod.object({
+  name: zod.string().min(1),
+  size: zod.number().min(1),
+  contentType: zod.string().min(1),
+});
+
+export const RequestUploadUrlResponse = zod.object({
+  uploadURL: zod.string(),
+  objectPath: zod.string(),
+  metadata: zod
+    .object({
+      name: zod.string().min(1),
+      size: zod.number().min(1),
+      contentType: zod.string().min(1),
+    })
+    .optional(),
+});
+
+/**
+ * @summary Submit a public job application
+ */
+export const SubmitApplicationBody = zod.object({
+  firstName: zod.string(),
+  lastName: zod.string(),
+  email: zod.string(),
+  phone: zod.string(),
+  address: zod.string(),
+  dateOfBirth: zod.string().nullish(),
+  cityOfBirth: zod.string().nullish(),
+  stateOfBirth: zod.string().nullish(),
+  niNumber: zod.string().nullish(),
+  rightToWorkStatus: zod.string().nullish(),
+  rightToWorkDoc: zod
+    .object({
+      name: zod.string(),
+      objectPath: zod.string(),
+      contentType: zod.string().optional(),
+      size: zod.number().optional(),
+    })
+    .nullish(),
+  siaLicenseNumber: zod.string().nullish(),
+  siaLicenseLevel: zod
+    .union([zod.literal(2), zod.literal(3), zod.literal(4)])
+    .nullish(),
+  siaLicenseExpiry: zod.string().nullish(),
+  previousExperience: zod.string().nullish(),
+  yearsExperience: zod.number().nullish(),
+  references: zod
+    .array(
+      zod.object({
+        name: zod.string(),
+        relationship: zod.string(),
+        phone: zod.string(),
+        email: zod.string().optional(),
+      }),
+    )
+    .optional(),
+  photo: zod
+    .object({
+      name: zod.string(),
+      objectPath: zod.string(),
+      contentType: zod.string().optional(),
+      size: zod.number().optional(),
+    })
+    .nullish(),
+  cv: zod
+    .object({
+      name: zod.string(),
+      objectPath: zod.string(),
+      contentType: zod.string().optional(),
+      size: zod.number().optional(),
+    })
+    .nullish(),
+  trainingCertificates: zod
+    .array(
+      zod.object({
+        name: zod.string(),
+        objectPath: zod.string(),
+        contentType: zod.string().optional(),
+        size: zod.number().optional(),
+      }),
+    )
+    .optional(),
+  availability: zod
+    .array(
+      zod.object({
+        day: zod.enum(["mon", "tue", "wed", "thu", "fri", "sat", "sun"]),
+        period: zod.enum(["morning", "afternoon", "evening", "overnight"]),
+      }),
+    )
+    .optional(),
+});
+
+/**
+ * @summary List all job applications
+ */
+export const AdminListApplicationsQueryParams = zod.object({
+  status: zod.coerce.string().optional(),
+  search: zod.coerce.string().optional(),
+});
+
+export const AdminListApplicationsResponseItem = zod.object({
+  id: zod.string(),
+  status: zod.enum(["submitted", "under_review", "approved", "rejected"]),
+  firstName: zod.string(),
+  lastName: zod.string(),
+  email: zod.string(),
+  phone: zod.string(),
+  address: zod.string(),
+  dateOfBirth: zod.string().nullish(),
+  cityOfBirth: zod.string().nullish(),
+  stateOfBirth: zod.string().nullish(),
+  niNumber: zod.string().nullish(),
+  rightToWorkStatus: zod.string().nullish(),
+  rightToWorkDocKey: zod.string().nullish(),
+  siaLicenseNumber: zod.string().nullish(),
+  siaLicenseLevel: zod.number().nullish(),
+  siaLicenseExpiry: zod.string().nullish(),
+  previousExperience: zod.string().nullish(),
+  yearsExperience: zod.number().nullish(),
+  references: zod
+    .array(
+      zod.object({
+        name: zod.string(),
+        relationship: zod.string(),
+        phone: zod.string(),
+        email: zod.string().optional(),
+      }),
+    )
+    .nullish(),
+  photoKey: zod.string().nullish(),
+  cvKey: zod.string().nullish(),
+  trainingCertificateKeys: zod.array(zod.string()).nullish(),
+  availability: zod
+    .array(
+      zod.object({
+        day: zod.enum(["mon", "tue", "wed", "thu", "fri", "sat", "sun"]),
+        period: zod.enum(["morning", "afternoon", "evening", "overnight"]),
+      }),
+    )
+    .nullish(),
+  reviewerNotes: zod.string().nullish(),
+  reviewedAt: zod.string().nullish(),
+  createdEmployeeId: zod.string().nullish(),
+  createdAt: zod.string(),
+});
+export const AdminListApplicationsResponse = zod.array(
+  AdminListApplicationsResponseItem,
+);
+
+export const AdminGetApplicationParams = zod.object({
+  id: zod.coerce.string(),
+});
+
+export const AdminGetApplicationResponse = zod.object({
+  id: zod.string(),
+  status: zod.enum(["submitted", "under_review", "approved", "rejected"]),
+  firstName: zod.string(),
+  lastName: zod.string(),
+  email: zod.string(),
+  phone: zod.string(),
+  address: zod.string(),
+  dateOfBirth: zod.string().nullish(),
+  cityOfBirth: zod.string().nullish(),
+  stateOfBirth: zod.string().nullish(),
+  niNumber: zod.string().nullish(),
+  rightToWorkStatus: zod.string().nullish(),
+  rightToWorkDocKey: zod.string().nullish(),
+  siaLicenseNumber: zod.string().nullish(),
+  siaLicenseLevel: zod.number().nullish(),
+  siaLicenseExpiry: zod.string().nullish(),
+  previousExperience: zod.string().nullish(),
+  yearsExperience: zod.number().nullish(),
+  references: zod
+    .array(
+      zod.object({
+        name: zod.string(),
+        relationship: zod.string(),
+        phone: zod.string(),
+        email: zod.string().optional(),
+      }),
+    )
+    .nullish(),
+  photoKey: zod.string().nullish(),
+  cvKey: zod.string().nullish(),
+  trainingCertificateKeys: zod.array(zod.string()).nullish(),
+  availability: zod
+    .array(
+      zod.object({
+        day: zod.enum(["mon", "tue", "wed", "thu", "fri", "sat", "sun"]),
+        period: zod.enum(["morning", "afternoon", "evening", "overnight"]),
+      }),
+    )
+    .nullish(),
+  reviewerNotes: zod.string().nullish(),
+  reviewedAt: zod.string().nullish(),
+  createdEmployeeId: zod.string().nullish(),
+  createdAt: zod.string(),
+});
+
+export const AdminMarkApplicationUnderReviewParams = zod.object({
+  id: zod.coerce.string(),
+});
+
+export const AdminMarkApplicationUnderReviewBody = zod.object({
+  notes: zod.string().optional(),
+});
+
+export const AdminMarkApplicationUnderReviewResponse = zod.object({
+  id: zod.string(),
+  status: zod.enum(["submitted", "under_review", "approved", "rejected"]),
+  firstName: zod.string(),
+  lastName: zod.string(),
+  email: zod.string(),
+  phone: zod.string(),
+  address: zod.string(),
+  dateOfBirth: zod.string().nullish(),
+  cityOfBirth: zod.string().nullish(),
+  stateOfBirth: zod.string().nullish(),
+  niNumber: zod.string().nullish(),
+  rightToWorkStatus: zod.string().nullish(),
+  rightToWorkDocKey: zod.string().nullish(),
+  siaLicenseNumber: zod.string().nullish(),
+  siaLicenseLevel: zod.number().nullish(),
+  siaLicenseExpiry: zod.string().nullish(),
+  previousExperience: zod.string().nullish(),
+  yearsExperience: zod.number().nullish(),
+  references: zod
+    .array(
+      zod.object({
+        name: zod.string(),
+        relationship: zod.string(),
+        phone: zod.string(),
+        email: zod.string().optional(),
+      }),
+    )
+    .nullish(),
+  photoKey: zod.string().nullish(),
+  cvKey: zod.string().nullish(),
+  trainingCertificateKeys: zod.array(zod.string()).nullish(),
+  availability: zod
+    .array(
+      zod.object({
+        day: zod.enum(["mon", "tue", "wed", "thu", "fri", "sat", "sun"]),
+        period: zod.enum(["morning", "afternoon", "evening", "overnight"]),
+      }),
+    )
+    .nullish(),
+  reviewerNotes: zod.string().nullish(),
+  reviewedAt: zod.string().nullish(),
+  createdEmployeeId: zod.string().nullish(),
+  createdAt: zod.string(),
+});
+
+export const AdminRejectApplicationParams = zod.object({
+  id: zod.coerce.string(),
+});
+
+export const AdminRejectApplicationBody = zod.object({
+  notes: zod.string().optional(),
+});
+
+export const AdminRejectApplicationResponse = zod.object({
+  id: zod.string(),
+  status: zod.enum(["submitted", "under_review", "approved", "rejected"]),
+  firstName: zod.string(),
+  lastName: zod.string(),
+  email: zod.string(),
+  phone: zod.string(),
+  address: zod.string(),
+  dateOfBirth: zod.string().nullish(),
+  cityOfBirth: zod.string().nullish(),
+  stateOfBirth: zod.string().nullish(),
+  niNumber: zod.string().nullish(),
+  rightToWorkStatus: zod.string().nullish(),
+  rightToWorkDocKey: zod.string().nullish(),
+  siaLicenseNumber: zod.string().nullish(),
+  siaLicenseLevel: zod.number().nullish(),
+  siaLicenseExpiry: zod.string().nullish(),
+  previousExperience: zod.string().nullish(),
+  yearsExperience: zod.number().nullish(),
+  references: zod
+    .array(
+      zod.object({
+        name: zod.string(),
+        relationship: zod.string(),
+        phone: zod.string(),
+        email: zod.string().optional(),
+      }),
+    )
+    .nullish(),
+  photoKey: zod.string().nullish(),
+  cvKey: zod.string().nullish(),
+  trainingCertificateKeys: zod.array(zod.string()).nullish(),
+  availability: zod
+    .array(
+      zod.object({
+        day: zod.enum(["mon", "tue", "wed", "thu", "fri", "sat", "sun"]),
+        period: zod.enum(["morning", "afternoon", "evening", "overnight"]),
+      }),
+    )
+    .nullish(),
+  reviewerNotes: zod.string().nullish(),
+  reviewedAt: zod.string().nullish(),
+  createdEmployeeId: zod.string().nullish(),
+  createdAt: zod.string(),
+});
+
+export const AdminApproveApplicationParams = zod.object({
+  id: zod.coerce.string(),
+});
+
+export const AdminApproveApplicationBody = zod.object({
+  notes: zod.string().optional(),
+});
+
+export const AdminApproveApplicationResponse = zod.object({
+  application: zod.object({
+    id: zod.string(),
+    status: zod.enum(["submitted", "under_review", "approved", "rejected"]),
+    firstName: zod.string(),
+    lastName: zod.string(),
+    email: zod.string(),
+    phone: zod.string(),
+    address: zod.string(),
+    dateOfBirth: zod.string().nullish(),
+    cityOfBirth: zod.string().nullish(),
+    stateOfBirth: zod.string().nullish(),
+    niNumber: zod.string().nullish(),
+    rightToWorkStatus: zod.string().nullish(),
+    rightToWorkDocKey: zod.string().nullish(),
+    siaLicenseNumber: zod.string().nullish(),
+    siaLicenseLevel: zod.number().nullish(),
+    siaLicenseExpiry: zod.string().nullish(),
+    previousExperience: zod.string().nullish(),
+    yearsExperience: zod.number().nullish(),
+    references: zod
+      .array(
+        zod.object({
+          name: zod.string(),
+          relationship: zod.string(),
+          phone: zod.string(),
+          email: zod.string().optional(),
+        }),
+      )
+      .nullish(),
+    photoKey: zod.string().nullish(),
+    cvKey: zod.string().nullish(),
+    trainingCertificateKeys: zod.array(zod.string()).nullish(),
+    availability: zod
+      .array(
+        zod.object({
+          day: zod.enum(["mon", "tue", "wed", "thu", "fri", "sat", "sun"]),
+          period: zod.enum(["morning", "afternoon", "evening", "overnight"]),
+        }),
+      )
+      .nullish(),
+    reviewerNotes: zod.string().nullish(),
+    reviewedAt: zod.string().nullish(),
+    createdEmployeeId: zod.string().nullish(),
+    createdAt: zod.string(),
+  }),
+  onboardingUrl: zod.string(),
+  onboardingToken: zod.string(),
+  employeeId: zod.string(),
+  tempPassword: zod.string(),
+  emailSent: zod.boolean().optional(),
+});
+
+export const GetOnboardingPrefillParams = zod.object({
+  token: zod.coerce.string(),
+});
+
+export const GetOnboardingPrefillResponse = zod.object({
+  employeeId: zod.string(),
+  firstName: zod.string(),
+  lastName: zod.string(),
+  email: zod.string(),
+  phone: zod.string().nullish(),
+  address: zod.string().nullish(),
+  niNumber: zod.string().nullish(),
+  siaLicenseNumber: zod.string().nullish(),
+  siaLicenseLevel: zod.number().nullish(),
+  existing: zod
+    .boolean()
+    .optional()
+    .describe("True if onboarding already submitted"),
+});
+
+export const SubmitOnboardingParams = zod.object({
+  token: zod.coerce.string(),
+});
+
+export const SubmitOnboardingBody = zod.object({
+  bankSortCode: zod.string(),
+  bankAccountNumber: zod.string(),
+  bankAccountName: zod.string(),
+  niNumberConfirmed: zod.string().nullish(),
+  taxCode: zod.string().nullish(),
+  p45Doc: zod
+    .object({
+      name: zod.string(),
+      objectPath: zod.string(),
+      contentType: zod.string().optional(),
+      size: zod.number().optional(),
+    })
+    .nullish(),
+  emergencyContactName: zod.string(),
+  emergencyContactRelationship: zod.string().nullish(),
+  emergencyContactPhone: zod.string(),
+  uniformShirt: zod.string().nullish(),
+  uniformTrousers: zod.string().nullish(),
+  uniformJacket: zod.string().nullish(),
+  uniformBoots: zod.string().nullish(),
+  siaLicenseDoc: zod
+    .object({
+      name: zod.string(),
+      objectPath: zod.string(),
+      contentType: zod.string().optional(),
+      size: zod.number().optional(),
+    })
+    .nullish(),
+  passportDoc: zod
+    .object({
+      name: zod.string(),
+      objectPath: zod.string(),
+      contentType: zod.string().optional(),
+      size: zod.number().optional(),
+    })
+    .nullish(),
+  directDepositConsent: zod.boolean(),
+  directDepositSignature: zod.string(),
+  acknowledgements: zod.array(
+    zod.object({
+      type: zod.enum([
+        "drug_free",
+        "uniform_sou",
+        "non_disclosure",
+        "contract",
+      ]),
+      accepted: zod.boolean(),
+      signature: zod.string(),
+      timestamp: zod.string(),
+    }),
+  ),
+});
+
+export const SubmitOnboardingResponse = zod.object({
+  id: zod.string(),
+  employeeId: zod.string(),
+  bankSortCode: zod.string().nullish(),
+  bankAccountNumber: zod.string().nullish(),
+  bankAccountName: zod.string().nullish(),
+  niNumberConfirmed: zod.string().nullish(),
+  taxCode: zod.string().nullish(),
+  p45DocKey: zod.string().nullish(),
+  emergencyContactName: zod.string().nullish(),
+  emergencyContactRelationship: zod.string().nullish(),
+  emergencyContactPhone: zod.string().nullish(),
+  uniformShirt: zod.string().nullish(),
+  uniformTrousers: zod.string().nullish(),
+  uniformJacket: zod.string().nullish(),
+  uniformBoots: zod.string().nullish(),
+  siaLicenseDocKey: zod.string().nullish(),
+  passportDocKey: zod.string().nullish(),
+  directDepositConsent: zod.boolean().optional(),
+  directDepositSignature: zod.string().nullish(),
+  acknowledgements: zod
+    .array(
+      zod.object({
+        type: zod.enum([
+          "drug_free",
+          "uniform_sou",
+          "non_disclosure",
+          "contract",
+        ]),
+        accepted: zod.boolean(),
+        signature: zod.string(),
+        timestamp: zod.string(),
+      }),
+    )
+    .nullish(),
+  submittedAt: zod.string(),
+});
+
+export const AdminListOnboardingQueryParams = zod.object({
+  status: zod.enum(["pending", "completed"]).optional(),
+});
+
+export const AdminListOnboardingResponseItem = zod.object({
+  employeeId: zod.string(),
+  firstName: zod.string(),
+  lastName: zod.string(),
+  email: zod.string(),
+  status: zod.enum(["pending", "completed"]),
+  tokenExpiresAt: zod.string().nullish(),
+  submittedAt: zod.string().nullish(),
+  applicationId: zod.string().nullish(),
+});
+export const AdminListOnboardingResponse = zod.array(
+  AdminListOnboardingResponseItem,
+);
+
+export const AdminGetOnboardingParams = zod.object({
+  employeeId: zod.coerce.string(),
+});
+
+export const AdminGetOnboardingResponse = zod.object({
+  employeeId: zod.string(),
+  firstName: zod.string(),
+  lastName: zod.string(),
+  email: zod.string(),
+  status: zod.string(),
+  submission: zod
+    .object({
+      id: zod.string(),
+      employeeId: zod.string(),
+      bankSortCode: zod.string().nullish(),
+      bankAccountNumber: zod.string().nullish(),
+      bankAccountName: zod.string().nullish(),
+      niNumberConfirmed: zod.string().nullish(),
+      taxCode: zod.string().nullish(),
+      p45DocKey: zod.string().nullish(),
+      emergencyContactName: zod.string().nullish(),
+      emergencyContactRelationship: zod.string().nullish(),
+      emergencyContactPhone: zod.string().nullish(),
+      uniformShirt: zod.string().nullish(),
+      uniformTrousers: zod.string().nullish(),
+      uniformJacket: zod.string().nullish(),
+      uniformBoots: zod.string().nullish(),
+      siaLicenseDocKey: zod.string().nullish(),
+      passportDocKey: zod.string().nullish(),
+      directDepositConsent: zod.boolean().optional(),
+      directDepositSignature: zod.string().nullish(),
+      acknowledgements: zod
+        .array(
+          zod.object({
+            type: zod.enum([
+              "drug_free",
+              "uniform_sou",
+              "non_disclosure",
+              "contract",
+            ]),
+            accepted: zod.boolean(),
+            signature: zod.string(),
+            timestamp: zod.string(),
+          }),
+        )
+        .nullish(),
+      submittedAt: zod.string(),
+    })
+    .nullish(),
+  tokenExpiresAt: zod.string().nullish(),
+  applicationId: zod.string().nullish(),
+});
+
+export const AdminResendOnboardingLinkParams = zod.object({
+  employeeId: zod.coerce.string(),
+});
+
+export const AdminResendOnboardingLinkResponse = zod.object({
+  onboardingUrl: zod.string(),
+  onboardingToken: zod.string(),
+  emailSent: zod.boolean().optional(),
+});

@@ -14,6 +14,8 @@ import dashboardRouter from "./dashboard";
 import chatRouter from "./chat";
 import liveOpsRouter from "./liveOps";
 import adminRouter from "./admin";
+import storageRouter from "./storage";
+import applicationsRouter from "./applications";
 
 const router: IRouter = Router();
 
@@ -32,5 +34,7 @@ router.use(dashboardRouter);
 router.use(chatRouter);
 router.use(liveOpsRouter);
 router.use(adminRouter);
+router.use(storageRouter);
+router.use(applicationsRouter);
 
 export default router;

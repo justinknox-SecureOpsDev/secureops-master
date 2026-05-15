@@ -1248,6 +1248,196 @@ paths:
               schema:
                 $ref: "#/components/schemas/ChatMessage"
 
+  /storage/uploads/request-url:
+    post:
+      tags: [storage]
+      operationId: requestUploadUrl
+      summary: Request a presigned URL for file upload
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/UploadUrlRequest" }
+      responses:
+        "200":
+          description: Presigned upload URL generated.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/UploadUrlResponse" }
+
+  /applications:
+    post:
+      tags: [applications]
+      operationId: submitApplication
+      summary: Submit a public job application
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/SubmitApplicationRequest" }
+      responses:
+        "201":
+          description: Created
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Application" }
+
+  /admin/applications:
+    get:
+      tags: [applications]
+      operationId: adminListApplications
+      summary: List all job applications
+      parameters:
+        - { name: status, in: query, schema: { type: string } }
+        - { name: search, in: query, schema: { type: string } }
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: "#/components/schemas/Application" }
+
+  /admin/applications/{id}:
+    get:
+      tags: [applications]
+      operationId: adminGetApplication
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Application" }
+
+  /admin/applications/{id}/review:
+    post:
+      tags: [applications]
+      operationId: adminMarkApplicationUnderReview
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+      requestBody:
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/ReviewApplicationRequest" }
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Application" }
+
+  /admin/applications/{id}/reject:
+    post:
+      tags: [applications]
+      operationId: adminRejectApplication
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+      requestBody:
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/ReviewApplicationRequest" }
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Application" }
+
+  /admin/applications/{id}/approve:
+    post:
+      tags: [applications]
+      operationId: adminApproveApplication
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+      requestBody:
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/ReviewApplicationRequest" }
+      responses:
+        "200":
+          description: Approved with onboarding link
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ApproveApplicationResponse" }
+
+  /onboarding/{token}:
+    get:
+      tags: [onboarding]
+      operationId: getOnboardingPrefill
+      parameters:
+        - { name: token, in: path, required: true, schema: { type: string } }
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/OnboardingPrefill" }
+        "404":
+          description: Invalid/expired/consumed token
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ErrorResponse" }
+    post:
+      tags: [onboarding]
+      operationId: submitOnboarding
+      parameters:
+        - { name: token, in: path, required: true, schema: { type: string } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/SubmitOnboardingRequest" }
+      responses:
+        "200":
+          description: Submitted
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/OnboardingSubmission" }
+
+  /admin/onboarding:
+    get:
+      tags: [onboarding]
+      operationId: adminListOnboarding
+      parameters:
+        - { name: status, in: query, schema: { type: string, enum: [pending, completed] } }
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: "#/components/schemas/OnboardingListItem" }
+
+  /admin/onboarding/{employeeId}:
+    get:
+      tags: [onboarding]
+      operationId: adminGetOnboarding
+      parameters:
+        - { name: employeeId, in: path, required: true, schema: { type: string } }
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/OnboardingDetail" }
+
+  /admin/onboarding/{employeeId}/resend:
+    post:
+      tags: [onboarding]
+      operationId: adminResendOnboardingLink
+      parameters:
+        - { name: employeeId, in: path, required: true, schema: { type: string } }
+      responses:
+        "200":
+          description: Link reissued
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/OnboardingLinkResponse" }
+
 components:
   schemas:
     HealthStatus:
@@ -2280,3 +2470,250 @@ components:
         - pendingAssignments
         - myOpenIncidents
         - expiringLicenses
+
+    UploadUrlRequest:
+      type: object
+      required: [name, size, contentType]
+      properties:
+        name: { type: string, minLength: 1 }
+        size: { type: integer, minimum: 1 }
+        contentType: { type: string, minLength: 1 }
+
+    UploadUrlResponse:
+      type: object
+      required: [uploadURL, objectPath]
+      properties:
+        uploadURL: { type: string }
+        objectPath: { type: string }
+        metadata: { $ref: "#/components/schemas/UploadUrlRequest" }
+
+    UploadedFile:
+      type: object
+      required: [name, objectPath]
+      properties:
+        name: { type: string }
+        objectPath: { type: string }
+        contentType: { type: string }
+        size: { type: integer }
+
+    ApplicationReference:
+      type: object
+      required: [name, relationship, phone]
+      properties:
+        name: { type: string }
+        relationship: { type: string }
+        phone: { type: string }
+        email: { type: string }
+
+    AvailabilityCell:
+      type: object
+      required: [day, period]
+      properties:
+        day: { type: string, enum: [mon, tue, wed, thu, fri, sat, sun] }
+        period: { type: string, enum: [morning, afternoon, evening, overnight] }
+
+    SubmitApplicationRequest:
+      type: object
+      required:
+        - firstName
+        - lastName
+        - email
+        - phone
+        - address
+      properties:
+        firstName: { type: string }
+        lastName: { type: string }
+        email: { type: string }
+        phone: { type: string }
+        address: { type: string }
+        dateOfBirth: { type: string, nullable: true }
+        cityOfBirth: { type: string, nullable: true }
+        stateOfBirth: { type: string, nullable: true }
+        niNumber: { type: string, nullable: true }
+        rightToWorkStatus: { type: string, nullable: true }
+        rightToWorkDoc: { $ref: "#/components/schemas/UploadedFile", nullable: true }
+        siaLicenseNumber: { type: string, nullable: true }
+        siaLicenseLevel: { type: integer, nullable: true, enum: [2, 3, 4] }
+        siaLicenseExpiry: { type: string, nullable: true }
+        previousExperience: { type: string, nullable: true }
+        yearsExperience: { type: integer, nullable: true }
+        references:
+          type: array
+          items: { $ref: "#/components/schemas/ApplicationReference" }
+        photo: { $ref: "#/components/schemas/UploadedFile", nullable: true }
+        cv: { $ref: "#/components/schemas/UploadedFile", nullable: true }
+        trainingCertificates:
+          type: array
+          items: { $ref: "#/components/schemas/UploadedFile" }
+        availability:
+          type: array
+          items: { $ref: "#/components/schemas/AvailabilityCell" }
+
+    Application:
+      type: object
+      required: [id, status, firstName, lastName, email, phone, address, createdAt]
+      properties:
+        id: { type: string }
+        status: { type: string, enum: [submitted, under_review, approved, rejected] }
+        firstName: { type: string }
+        lastName: { type: string }
+        email: { type: string }
+        phone: { type: string }
+        address: { type: string }
+        dateOfBirth: { type: string, nullable: true }
+        cityOfBirth: { type: string, nullable: true }
+        stateOfBirth: { type: string, nullable: true }
+        niNumber: { type: string, nullable: true }
+        rightToWorkStatus: { type: string, nullable: true }
+        rightToWorkDocKey: { type: string, nullable: true }
+        siaLicenseNumber: { type: string, nullable: true }
+        siaLicenseLevel: { type: integer, nullable: true }
+        siaLicenseExpiry: { type: string, nullable: true }
+        previousExperience: { type: string, nullable: true }
+        yearsExperience: { type: integer, nullable: true }
+        references:
+          type: array
+          nullable: true
+          items: { $ref: "#/components/schemas/ApplicationReference" }
+        photoKey: { type: string, nullable: true }
+        cvKey: { type: string, nullable: true }
+        trainingCertificateKeys:
+          type: array
+          nullable: true
+          items: { type: string }
+        availability:
+          type: array
+          nullable: true
+          items: { $ref: "#/components/schemas/AvailabilityCell" }
+        reviewerNotes: { type: string, nullable: true }
+        reviewedAt: { type: string, nullable: true }
+        createdEmployeeId: { type: string, nullable: true }
+        createdAt: { type: string }
+
+    ReviewApplicationRequest:
+      type: object
+      properties:
+        notes: { type: string }
+
+    ApproveApplicationResponse:
+      type: object
+      required: [application, onboardingUrl, onboardingToken, employeeId, tempPassword]
+      properties:
+        application: { $ref: "#/components/schemas/Application" }
+        onboardingUrl: { type: string }
+        onboardingToken: { type: string }
+        employeeId: { type: string }
+        tempPassword: { type: string }
+        emailSent: { type: boolean }
+
+    OnboardingPrefill:
+      type: object
+      required: [employeeId, firstName, lastName, email]
+      properties:
+        employeeId: { type: string }
+        firstName: { type: string }
+        lastName: { type: string }
+        email: { type: string }
+        phone: { type: string, nullable: true }
+        address: { type: string, nullable: true }
+        niNumber: { type: string, nullable: true }
+        siaLicenseNumber: { type: string, nullable: true }
+        siaLicenseLevel: { type: integer, nullable: true }
+        existing: { type: boolean, description: "True if onboarding already submitted" }
+
+    Acknowledgement:
+      type: object
+      required: [type, accepted, signature, timestamp]
+      properties:
+        type: { type: string, enum: [drug_free, uniform_sou, non_disclosure, contract] }
+        accepted: { type: boolean }
+        signature: { type: string }
+        timestamp: { type: string }
+
+    SubmitOnboardingRequest:
+      type: object
+      required: [bankSortCode, bankAccountNumber, bankAccountName, emergencyContactName, emergencyContactPhone, directDepositConsent, directDepositSignature, acknowledgements]
+      properties:
+        bankSortCode: { type: string }
+        bankAccountNumber: { type: string }
+        bankAccountName: { type: string }
+        niNumberConfirmed: { type: string, nullable: true }
+        taxCode: { type: string, nullable: true }
+        p45Doc: { $ref: "#/components/schemas/UploadedFile", nullable: true }
+        emergencyContactName: { type: string }
+        emergencyContactRelationship: { type: string, nullable: true }
+        emergencyContactPhone: { type: string }
+        uniformShirt: { type: string, nullable: true }
+        uniformTrousers: { type: string, nullable: true }
+        uniformJacket: { type: string, nullable: true }
+        uniformBoots: { type: string, nullable: true }
+        siaLicenseDoc: { $ref: "#/components/schemas/UploadedFile", nullable: true }
+        passportDoc: { $ref: "#/components/schemas/UploadedFile", nullable: true }
+        directDepositConsent: { type: boolean }
+        directDepositSignature: { type: string }
+        acknowledgements:
+          type: array
+          items: { $ref: "#/components/schemas/Acknowledgement" }
+
+    OnboardingSubmission:
+      type: object
+      required: [id, employeeId, submittedAt]
+      properties:
+        id: { type: string }
+        employeeId: { type: string }
+        bankSortCode: { type: string, nullable: true }
+        bankAccountNumber: { type: string, nullable: true }
+        bankAccountName: { type: string, nullable: true }
+        niNumberConfirmed: { type: string, nullable: true }
+        taxCode: { type: string, nullable: true }
+        p45DocKey: { type: string, nullable: true }
+        emergencyContactName: { type: string, nullable: true }
+        emergencyContactRelationship: { type: string, nullable: true }
+        emergencyContactPhone: { type: string, nullable: true }
+        uniformShirt: { type: string, nullable: true }
+        uniformTrousers: { type: string, nullable: true }
+        uniformJacket: { type: string, nullable: true }
+        uniformBoots: { type: string, nullable: true }
+        siaLicenseDocKey: { type: string, nullable: true }
+        passportDocKey: { type: string, nullable: true }
+        directDepositConsent: { type: boolean }
+        directDepositSignature: { type: string, nullable: true }
+        acknowledgements:
+          type: array
+          nullable: true
+          items: { $ref: "#/components/schemas/Acknowledgement" }
+        submittedAt: { type: string }
+
+    OnboardingListItem:
+      type: object
+      required: [employeeId, firstName, lastName, email, status]
+      properties:
+        employeeId: { type: string }
+        firstName: { type: string }
+        lastName: { type: string }
+        email: { type: string }
+        status: { type: string, enum: [pending, completed] }
+        tokenExpiresAt: { type: string, nullable: true }
+        submittedAt: { type: string, nullable: true }
+        applicationId: { type: string, nullable: true }
+
+    OnboardingDetail:
+      type: object
+      required: [employeeId, firstName, lastName, email, status]
+      properties:
+        employeeId: { type: string }
+        firstName: { type: string }
+        lastName: { type: string }
+        email: { type: string }
+        status: { type: string }
+        submission: { $ref: "#/components/schemas/OnboardingSubmission", nullable: true }
+        tokenExpiresAt: { type: string, nullable: true }
+        applicationId: { type: string, nullable: true }
+
+    OnboardingLinkResponse:
+      type: object
+      required: [onboardingUrl, onboardingToken]
+      properties:
+        onboardingUrl: { type: string }
+        onboardingToken: { type: string }
+        emailSent: { type: boolean }
