@@ -174,9 +174,14 @@ const tables: Record<string, TableConfig> = {
   employees: {
     table: employeesTable,
     insertSchema: insertEmployeeSchema as unknown as z.ZodSchema<any>,
-    searchColumns: [employeesTable.phone, employeesTable.address],
+    searchColumns: [employeesTable.phone, employeesTable.address, employeesTable.siaLicenseNumber],
     orderBy: employeesTable.createdAt,
-    coerceWrite: (v) => applyNumericCoercion(v, ["hourlyRate"]),
+    coerceWrite: (v) => {
+      let out = applyNumericCoercion(v, ["hourlyRate"]);
+      out = applyIntCoercion(out, ["siaLicenseLevel", "yearsExperience"]);
+      out = applyDateCoercion(out, ["dateOfBirth", "siaLicenseExpiry"]);
+      return out;
+    },
     importSupported: true,
     label: "Employee",
   },

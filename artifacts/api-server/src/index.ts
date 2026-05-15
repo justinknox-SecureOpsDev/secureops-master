@@ -2,7 +2,7 @@ import http from "http";
 import app from "./app";
 import { logger } from "./lib/logger";
 import { attachWebSocketServer } from "./lib/wsManager";
-import { seedPolicies } from "@workspace/db";
+import { seedPolicies, backfillEmployeeProfileFields } from "@workspace/db";
 
 const rawPort = process.env["PORT"];
 
@@ -26,6 +26,12 @@ server.listen(port, () => {
 seedPolicies()
   .then(() => logger.info("Default policies ensured"))
   .catch((err) => logger.error({ err }, "Failed to seed default policies"));
+
+// One-time backfill of applicant + onboarding fields onto employees rows.
+// Idempotent (COALESCE-only): safe to run on every boot.
+backfillEmployeeProfileFields()
+  .then(() => logger.info("Employee profile backfill complete"))
+  .catch((err) => logger.error({ err }, "Failed to backfill employee profile fields"));
 
 server.on("error", (err) => {
   logger.error({ err }, "Server error");

@@ -11,6 +11,9 @@ import { useFkOptions, invalidateFk } from "@/lib/fk";
 import { toFormValue, fromFormValue } from "@/lib/format";
 import type { Field, TableDescriptor } from "@/lib/tables";
 import { api, ApiError } from "@/lib/api";
+import { FileUploadField, MultiFileUploadField } from "./FileUploadField";
+import { openSignedObject, type UploadedFile } from "@/lib/upload";
+import { ExternalLink } from "lucide-react";
 
 function FieldInput({
   field, value, onChange, onPickFkRow, filterValue,
@@ -28,6 +31,91 @@ function FieldInput({
     : fk.options;
   if (field.type === "textarea") {
     return <Textarea rows={3} value={value} onChange={(e) => onChange(e.target.value)} />;
+  }
+  if (field.type === "json") {
+    return (
+      <Textarea
+        rows={6}
+        value={value}
+        placeholder='{ }'
+        className="font-mono text-xs"
+        onChange={(e) => onChange(e.target.value)}
+      />
+    );
+  }
+  if (field.type === "fileKey") {
+    const current = value?.trim();
+    return (
+      <div className="space-y-2">
+        {current && (
+          <div className="flex items-center gap-2 p-2 bg-accent/40 border border-accent rounded text-xs">
+            <button
+              type="button"
+              onClick={() => openSignedObject(current)}
+              className="inline-flex items-center gap-1 text-blue-700 hover:underline truncate flex-1 text-left"
+            >
+              <ExternalLink className="w-3 h-3 shrink-0" />
+              <span className="truncate">{current.split("/").pop()}</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => onChange("")}
+              className="text-muted-foreground hover:text-destructive"
+              aria-label="Remove"
+            >
+              ×
+            </button>
+          </div>
+        )}
+        <FileUploadField
+          label={current ? "Replace file" : "Upload file"}
+          value={null}
+          onChange={(f: UploadedFile | null) => { if (f) onChange(f.objectPath); }}
+        />
+      </div>
+    );
+  }
+  if (field.type === "fileKeyList") {
+    let arr: string[] = [];
+    try {
+      const parsed = value ? JSON.parse(value) : [];
+      if (Array.isArray(parsed)) arr = parsed.filter((x) => typeof x === "string");
+    } catch {
+      // fall through with empty list
+    }
+    const setArr = (next: string[]) => onChange(JSON.stringify(next));
+    return (
+      <div className="space-y-2">
+        {arr.length > 0 && (
+          <div className="space-y-1">
+            {arr.map((p, i) => (
+              <div key={i} className="flex items-center gap-2 p-2 bg-accent/40 border border-accent rounded text-xs">
+                <button
+                  type="button"
+                  onClick={() => openSignedObject(p)}
+                  className="inline-flex items-center gap-1 text-blue-700 hover:underline truncate flex-1 text-left"
+                >
+                  <ExternalLink className="w-3 h-3 shrink-0" />
+                  <span className="truncate">{p.split("/").pop()}</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setArr(arr.filter((_, j) => j !== i))}
+                  className="text-muted-foreground hover:text-destructive"
+                >
+                  ×
+                </button>
+              </div>
+            ))}
+          </div>
+        )}
+        <MultiFileUploadField
+          label="Add files"
+          value={[]}
+          onChange={(files: UploadedFile[]) => setArr([...arr, ...files.map((f) => f.objectPath)])}
+        />
+      </div>
+    );
   }
   if (field.type === "boolean") {
     return (

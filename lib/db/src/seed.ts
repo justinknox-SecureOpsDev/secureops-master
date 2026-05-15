@@ -1,3 +1,4 @@
+import { sql } from "drizzle-orm";
 import { db } from "./index";
 import { policiesTable } from "./schema/policies";
 
@@ -29,4 +30,65 @@ export async function seedPolicies(): Promise<void> {
       isActive: true,
     })),
   );
+}
+
+/**
+ * One-time backfill: copy applicant + onboarding-submission fields onto the
+ * employees row that was created when the application was approved.
+ *
+ * Idempotent — uses COALESCE so existing employee values are never overwritten;
+ * we only fill columns that are NULL today. Safe to run on every boot.
+ */
+export async function backfillEmployeeProfileFields(): Promise<void> {
+  // Applications -> employees (matched via applications.created_employee_id = employees.user_id)
+  await db.execute(sql`
+    UPDATE employees e SET
+      phone                       = COALESCE(e.phone, a.phone),
+      address                     = COALESCE(e.address, a.address),
+      date_of_birth               = COALESCE(e.date_of_birth, a.date_of_birth),
+      city_of_birth               = COALESCE(e.city_of_birth, a.city_of_birth),
+      state_of_birth              = COALESCE(e.state_of_birth, a.state_of_birth),
+      ni_number                   = COALESCE(e.ni_number, a.ni_number),
+      right_to_work_status        = COALESCE(e.right_to_work_status, a.right_to_work_status),
+      right_to_work_doc_key       = COALESCE(e.right_to_work_doc_key, a.right_to_work_doc_key),
+      sia_license_number          = COALESCE(e.sia_license_number, a.sia_license_number),
+      sia_license_level           = COALESCE(e.sia_license_level, a.sia_license_level),
+      sia_license_expiry          = COALESCE(e.sia_license_expiry, a.sia_license_expiry),
+      previous_experience         = COALESCE(e.previous_experience, a.previous_experience),
+      years_experience            = COALESCE(e.years_experience, a.years_experience),
+      "references"                = COALESCE(e."references", a."references"),
+      photo_key                   = COALESCE(e.photo_key, a.photo_key),
+      cv_key                      = COALESCE(e.cv_key, a.cv_key),
+      training_certificate_keys   = COALESCE(e.training_certificate_keys, a.training_certificate_keys),
+      availability                = COALESCE(e.availability, a.availability),
+      application_id              = COALESCE(e.application_id, a.id)
+    FROM applications a
+    WHERE a.created_employee_id = e.user_id;
+  `);
+
+  // Onboarding submissions -> employees (matched via onboarding_submissions.employee_id = employees.user_id)
+  await db.execute(sql`
+    UPDATE employees e SET
+      bank_account_name              = COALESCE(e.bank_account_name, o.bank_account_name),
+      bank_account_number            = COALESCE(e.bank_account_number, o.bank_account_number),
+      bank_bsb                       = COALESCE(e.bank_bsb, o.bank_sort_code),
+      ni_number                      = COALESCE(e.ni_number, o.ni_number_confirmed),
+      tax_code                       = COALESCE(e.tax_code, o.tax_code),
+      pay_stub_doc_key               = COALESCE(e.pay_stub_doc_key, o.p45_doc_key),
+      emergency_contact_name         = COALESCE(e.emergency_contact_name, o.emergency_contact_name),
+      emergency_contact_relationship = COALESCE(e.emergency_contact_relationship, o.emergency_contact_relationship),
+      emergency_contact_phone        = COALESCE(e.emergency_contact_phone, o.emergency_contact_phone),
+      uniform_shirt                  = COALESCE(e.uniform_shirt, o.uniform_shirt),
+      uniform_trousers               = COALESCE(e.uniform_trousers, o.uniform_trousers),
+      uniform_jacket                 = COALESCE(e.uniform_jacket, o.uniform_jacket),
+      uniform_boots                  = COALESCE(e.uniform_boots, o.uniform_boots),
+      license_doc_key                = COALESCE(e.license_doc_key, o.sia_license_doc_key),
+      passport_doc_key               = COALESCE(e.passport_doc_key, o.passport_doc_key),
+      direct_deposit_consent         = COALESCE(e.direct_deposit_consent, o.direct_deposit_consent),
+      direct_deposit_signature       = COALESCE(e.direct_deposit_signature, o.direct_deposit_signature),
+      acknowledgements               = COALESCE(e.acknowledgements, o.acknowledgements),
+      onboarding_submission_id       = COALESCE(e.onboarding_submission_id, o.id)
+    FROM onboarding_submissions o
+    WHERE o.employee_id = e.user_id;
+  `);
 }

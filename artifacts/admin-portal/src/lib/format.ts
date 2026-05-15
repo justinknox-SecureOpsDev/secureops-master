@@ -17,6 +17,12 @@ export function formatCell(value: unknown, field: Field): string {
       return value ? "Yes" : "No";
     case "json":
       try { return JSON.stringify(value); } catch { return String(value); }
+    case "fileKey":
+      return String(value);
+    case "fileKeyList": {
+      if (!Array.isArray(value)) return String(value);
+      return `${value.length} file${value.length === 1 ? "" : "s"}`;
+    }
     case "select": {
       const opt = field.options?.find((o) => o.value === String(value));
       return opt?.label ?? String(value);
@@ -47,6 +53,10 @@ export function toFormValue(value: unknown, field: Field): string {
       return value ? "true" : "false";
     case "json":
       try { return JSON.stringify(value, null, 2); } catch { return String(value); }
+    case "fileKey":
+      return String(value);
+    case "fileKeyList":
+      try { return JSON.stringify(value, null, 2); } catch { return String(value); }
     default:
       return String(value);
   }
@@ -69,7 +79,10 @@ export function fromFormValue(raw: string, field: Field): unknown {
     case "date":
       return raw;
     case "json":
+    case "fileKeyList":
       try { return JSON.parse(raw); } catch { return raw; }
+    case "fileKey":
+      return raw;
     default:
       return raw;
   }

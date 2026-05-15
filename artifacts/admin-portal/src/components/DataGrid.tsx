@@ -10,10 +10,11 @@ import {
 } from "@/components/ui/alert-dialog";
 import { ArrowUpDown, ArrowDown, ArrowUp, Pencil, Trash2, Plus, Upload, Download, RefreshCw, ExternalLink } from "lucide-react";
 import { Link } from "wouter";
-import type { TableDescriptor } from "@/lib/tables";
+import type { TableDescriptor, Field } from "@/lib/tables";
 import { api } from "@/lib/api";
 import { formatCell } from "@/lib/format";
 import { useFkOptions } from "@/lib/fk";
+import { openSignedObject } from "@/lib/upload";
 import { RowFormDialog } from "./RowFormDialog";
 import { ImportWizard } from "./ImportWizard";
 import { downloadTemplateXlsx } from "@/lib/import";
@@ -25,6 +26,51 @@ function FkCell({ field, value }: { field: { fkTable?: string; fkLabel?: string 
   if (!value) return <>—</>;
   const o = options.find((x) => x.id === String(value));
   return <span title={String(value)}>{o?.label ?? String(value).slice(0, 8) + "…"}</span>;
+}
+
+function FileKeyCell({ value }: { value: unknown }) {
+  if (!value || typeof value !== "string") return <>—</>;
+  const name = value.split("/").pop() ?? value;
+  return (
+    <button
+      type="button"
+      onClick={(e) => { e.stopPropagation(); openSignedObject(value); }}
+      className="inline-flex items-center gap-1 text-blue-700 hover:underline"
+      title={value}
+    >
+      <ExternalLink className="w-3 h-3" />
+      <span className="truncate">{name}</span>
+    </button>
+  );
+}
+
+function FileKeyListCell({ value }: { value: unknown }) {
+  const arr = Array.isArray(value) ? value.filter((x): x is string => typeof x === "string") : [];
+  if (arr.length === 0) return <>—</>;
+  return (
+    <div className="flex flex-col gap-0.5">
+      {arr.slice(0, 3).map((p, i) => (
+        <button
+          key={i}
+          type="button"
+          onClick={(e) => { e.stopPropagation(); openSignedObject(p); }}
+          className="inline-flex items-center gap-1 text-blue-700 hover:underline text-left"
+          title={p}
+        >
+          <ExternalLink className="w-3 h-3 shrink-0" />
+          <span className="truncate">{p.split("/").pop()}</span>
+        </button>
+      ))}
+      {arr.length > 3 && <span className="text-xs text-muted-foreground">+{arr.length - 3} more</span>}
+    </div>
+  );
+}
+
+function renderCell(f: Field, value: unknown) {
+  if (f.type === "fk") return <FkCell field={f} value={value} />;
+  if (f.type === "fileKey") return <FileKeyCell value={value} />;
+  if (f.type === "fileKeyList") return <FileKeyListCell value={value} />;
+  return formatCell(value, f);
 }
 
 export function DataGrid({
@@ -226,9 +272,7 @@ export function DataGrid({
               <TableRow key={String((r as any).id)} className="hover:bg-accent/40">
                 {gridFields.map((f) => (
                   <TableCell key={f.key} className="text-sm max-w-[260px] truncate">
-                    {f.type === "fk"
-                      ? <FkCell field={f} value={(r as any)[f.key]} />
-                      : formatCell((r as any)[f.key], f)}
+                    {renderCell(f, (r as any)[f.key])}
                   </TableCell>
                 ))}
                 <TableCell className="text-right">

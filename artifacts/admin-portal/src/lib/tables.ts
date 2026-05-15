@@ -17,7 +17,12 @@ export type FieldType =
   | "select"
   | "fk"
   | "password"
-  | "json";
+  | "json"
+  /** Object-storage path (e.g. "/objects/uploads/abc"). Renders as an "Open" link
+   *  in the grid + dialog using a short-lived signed URL. */
+  | "fileKey"
+  /** Multi-file: array of object-storage paths stored as JSONB. */
+  | "fileKeyList";
 
 export type Field = {
   key: string;
@@ -115,15 +120,62 @@ export const TABLES: TableDescriptor[] = [
     fields: [
       { key: "id", label: "ID", type: "text", readonly: true, hiddenInGrid: true },
       { key: "userId", label: "User", type: "fk", fkTable: "users", fkLabel: "email", required: true },
+      // --- Contact ---
       { key: "phone", label: "Phone", type: "text" },
-      { key: "address", label: "Address", type: "textarea" },
-      { key: "emergencyContactName", label: "Emergency Contact", type: "text" },
-      { key: "emergencyContactPhone", label: "Emergency Phone", type: "text" },
+      { key: "address", label: "Address", type: "textarea", hiddenInGrid: true },
+      { key: "dateOfBirth", label: "Date of Birth", type: "date", hiddenInGrid: true },
+      { key: "cityOfBirth", label: "City of Birth", type: "text", hiddenInGrid: true },
+      { key: "stateOfBirth", label: "State of Birth", type: "text", hiddenInGrid: true },
+      // --- Right to work ---
+      { key: "rightToWorkStatus", label: "Right to Work", type: "text", hiddenInGrid: true },
+      { key: "rightToWorkDocKey", label: "Right-to-Work Doc", type: "fileKey", hiddenInGrid: true },
+      // --- TX Security License (visible — admins must update this) ---
+      { key: "siaLicenseNumber", label: "Licence #", type: "text" },
+      {
+        key: "siaLicenseLevel", label: "Licence Level", type: "select",
+        options: [
+          { label: "Level 2 (unarmed)", value: "2" },
+          { label: "Level 3 (armed)", value: "3" },
+          { label: "Level 4 (PPO)", value: "4" },
+        ],
+      },
+      { key: "siaLicenseExpiry", label: "Licence Expiry", type: "date" },
+      { key: "licenseDocKey", label: "Licence Doc", type: "fileKey" },
+      { key: "passportDocKey", label: "Passport Doc", type: "fileKey", hiddenInGrid: true },
+      // --- Experience ---
+      { key: "yearsExperience", label: "Years Exp.", type: "integer", hiddenInGrid: true },
+      { key: "previousExperience", label: "Previous Experience", type: "textarea", hiddenInGrid: true },
+      { key: "references", label: "References", type: "json", hiddenInGrid: true },
+      // --- Personal docs ---
+      { key: "photoKey", label: "Photo", type: "fileKey", hiddenInGrid: true },
+      { key: "cvKey", label: "Résumé / CV", type: "fileKey", hiddenInGrid: true },
+      { key: "trainingCertificateKeys", label: "Training Certificates", type: "fileKeyList", hiddenInGrid: true },
+      { key: "availability", label: "Weekly Availability", type: "json", hiddenInGrid: true },
+      // --- Emergency contact ---
+      { key: "emergencyContactName", label: "Emergency Contact", type: "text", hiddenInGrid: true },
+      { key: "emergencyContactRelationship", label: "Emergency Relationship", type: "text", hiddenInGrid: true },
+      { key: "emergencyContactPhone", label: "Emergency Phone", type: "text", hiddenInGrid: true },
+      // --- Pay & banking ---
       { key: "hourlyRate", label: "Hourly Rate ($)", type: "number" },
       { key: "bankAccountName", label: "Bank Acct Name", type: "text", hiddenInGrid: true },
       { key: "bankAccountNumber", label: "Bank Acct #", type: "text", hiddenInGrid: true },
-      { key: "bankBsb", label: "Sort Code/BSB", type: "text", hiddenInGrid: true },
-      { key: "createdAt", label: "Created", type: "datetime", readonly: true },
+      { key: "bankBsb", label: "Routing/Sort Code", type: "text", hiddenInGrid: true },
+      { key: "niNumber", label: "SSN (last 4)", type: "text", hiddenInGrid: true },
+      { key: "taxCode", label: "Tax Code", type: "text", hiddenInGrid: true },
+      { key: "payStubDocKey", label: "W-2 / Pay Stub", type: "fileKey", hiddenInGrid: true },
+      // --- Uniform sizes ---
+      { key: "uniformShirt", label: "Uniform Shirt", type: "text", hiddenInGrid: true },
+      { key: "uniformTrousers", label: "Uniform Trousers", type: "text", hiddenInGrid: true },
+      { key: "uniformJacket", label: "Uniform Jacket", type: "text", hiddenInGrid: true },
+      { key: "uniformBoots", label: "Uniform Boots", type: "text", hiddenInGrid: true },
+      // --- Consents & acknowledgements ---
+      { key: "directDepositConsent", label: "Direct Deposit Consent", type: "boolean", hiddenInGrid: true },
+      { key: "directDepositSignature", label: "Direct Deposit Signature", type: "text", hiddenInGrid: true },
+      { key: "acknowledgements", label: "Policy Acknowledgements", type: "json", hiddenInGrid: true },
+      // --- HR pipeline links (read-only) ---
+      { key: "applicationId", label: "Application", type: "text", readonly: true, hiddenInGrid: true },
+      { key: "onboardingSubmissionId", label: "Onboarding Submission", type: "text", readonly: true, hiddenInGrid: true },
+      { key: "createdAt", label: "Created", type: "datetime", readonly: true, hiddenInGrid: true },
     ],
   },
   {

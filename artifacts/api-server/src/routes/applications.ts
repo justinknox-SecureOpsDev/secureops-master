@@ -321,13 +321,35 @@ router.post("/admin/applications/:id/approve", requireAdmin, async (req, res): P
         userId = u.id;
       }
 
+      // Mirror every applicant field onto the employee row so admins see the
+      // full applicant profile in the Employees grid (no need to dig back into
+      // the application record). On re-approve we update the existing row.
+      const employeeFromApp = {
+        phone: app.phone,
+        address: app.address,
+        dateOfBirth: app.dateOfBirth ?? null,
+        cityOfBirth: app.cityOfBirth ?? null,
+        stateOfBirth: app.stateOfBirth ?? null,
+        niNumber: app.niNumber ?? null,
+        rightToWorkStatus: app.rightToWorkStatus ?? null,
+        rightToWorkDocKey: app.rightToWorkDocKey ?? null,
+        siaLicenseNumber: app.siaLicenseNumber ?? null,
+        siaLicenseLevel: app.siaLicenseLevel ?? null,
+        siaLicenseExpiry: app.siaLicenseExpiry ?? null,
+        previousExperience: app.previousExperience ?? null,
+        yearsExperience: app.yearsExperience ?? null,
+        references: app.references ?? null,
+        photoKey: app.photoKey ?? null,
+        cvKey: app.cvKey ?? null,
+        trainingCertificateKeys: app.trainingCertificateKeys ?? null,
+        availability: app.availability ?? null,
+        applicationId: app.id,
+      };
       const [existingEmployee] = await tx.select().from(employeesTable).where(eq(employeesTable.userId, userId)).limit(1);
       if (!existingEmployee) {
-        await tx.insert(employeesTable).values({
-          userId,
-          phone: app.phone,
-          address: app.address,
-        });
+        await tx.insert(employeesTable).values({ userId, ...employeeFromApp });
+      } else {
+        await tx.update(employeesTable).set(employeeFromApp).where(eq(employeesTable.userId, userId));
       }
 
       if (app.siaLicenseNumber && app.siaLicenseExpiry) {
@@ -536,13 +558,29 @@ router.post("/onboarding/:token", async (req, res): Promise<void> => {
     [row] = await db.insert(onboardingSubmissionsTable).values(values).returning();
   }
 
-  // Persist bank info onto employee for payroll convenience.
+  // Mirror every onboarding-submission field onto the employee row so admins
+  // see the full profile in the Employees grid without opening the onboarding
+  // detail dialog.
   await db.update(employeesTable).set({
     bankAccountName: d.bankAccountName,
     bankAccountNumber: d.bankAccountNumber,
     bankBsb: d.bankSortCode,
+    niNumber: d.niNumberConfirmed ?? null,
+    taxCode: d.taxCode ?? null,
+    payStubDocKey: d.p45Doc?.objectPath ?? null,
     emergencyContactName: d.emergencyContactName,
+    emergencyContactRelationship: d.emergencyContactRelationship ?? null,
     emergencyContactPhone: d.emergencyContactPhone,
+    uniformShirt: d.uniformShirt ?? null,
+    uniformTrousers: d.uniformTrousers ?? null,
+    uniformJacket: d.uniformJacket ?? null,
+    uniformBoots: d.uniformBoots ?? null,
+    licenseDocKey: d.siaLicenseDoc?.objectPath ?? null,
+    passportDocKey: d.passportDoc?.objectPath ?? null,
+    directDepositConsent: d.directDepositConsent ?? null,
+    directDepositSignature: d.directDepositSignature ?? null,
+    acknowledgements: enrichedAcks,
+    onboardingSubmissionId: row.id,
   }).where(eq(employeesTable.userId, t.employeeId));
 
   // Activate user, mark token consumed
