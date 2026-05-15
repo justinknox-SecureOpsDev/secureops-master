@@ -21,6 +21,7 @@ export default function ChatRoomScreen({ roomId, roomName }: Props) {
   const colors = useColors();
   const { user } = useAuth();
   const { subscribeToRoom, sendMessage } = useChat();
+  const tabBarHeight = Platform.OS === "ios" ? 84 : 60;
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [loading, setLoading] = useState(true);
   const [text, setText] = useState("");
@@ -102,7 +103,7 @@ export default function ChatRoomScreen({ roomId, roomName }: Props) {
   };
 
   return (
-    <SafeAreaView style={[s.container, { backgroundColor: colors.background }]} edges={["bottom"]}>
+    <SafeAreaView style={[s.container, { backgroundColor: colors.background, paddingBottom: tabBarHeight }]} edges={["bottom"]}>
       <View style={[s.topBar, { backgroundColor: colors.card, borderBottomColor: colors.border }]}>
         <Feather name="hash" size={18} color={colors.primary} />
         <Text style={[s.roomTitle, { color: colors.foreground }]}>{roomName}</Text>
