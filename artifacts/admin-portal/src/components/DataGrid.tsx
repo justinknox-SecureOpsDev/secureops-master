@@ -8,7 +8,7 @@ import {
   AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
   AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
-import { ArrowUpDown, ArrowDown, ArrowUp, Pencil, Trash2, Plus, Upload, Download, RefreshCw, ExternalLink } from "lucide-react";
+import { ArrowUpDown, ArrowDown, ArrowUp, Pencil, Trash2, Plus, Upload, Download, RefreshCw, ExternalLink, Repeat } from "lucide-react";
 import { Link } from "wouter";
 import { type TableDescriptor, type Field, singularize } from "@/lib/tables";
 import { api } from "@/lib/api";
@@ -17,6 +17,7 @@ import { useFkOptions } from "@/lib/fk";
 import { openSignedObject } from "@/lib/upload";
 import { RowFormDialog } from "./RowFormDialog";
 import { ImportWizard } from "./ImportWizard";
+import { RepeatingShiftDialog } from "./RepeatingShiftDialog";
 import { downloadTemplateXlsx } from "@/lib/import";
 
 type Row = Record<string, unknown>;
@@ -108,6 +109,8 @@ export function DataGrid({
   const [creating, setCreating] = useState(false);
   const [deleting, setDeleting] = useState<Row | null>(null);
   const [importOpen, setImportOpen] = useState(false);
+  const [repeatOpen, setRepeatOpen] = useState(false);
+  const isShifts = descriptor.name === "shifts";
 
   useEffect(() => { setPage(0); }, [descriptor.name]);
   useEffect(() => {
@@ -208,6 +211,11 @@ export function DataGrid({
                   <Upload className="w-4 h-4 mr-2" />Import
                 </Button>
               </>
+            )}
+            {isShifts && (
+              <Button variant="outline" onClick={() => setRepeatOpen(true)} title="Create a series of shifts on selected days">
+                <Repeat className="w-4 h-4 mr-2" />Repeating Shift
+              </Button>
             )}
             <Button onClick={() => setCreating(true)} className="bg-brand-navy text-white hover:opacity-90">
               <Plus className="w-4 h-4 mr-2" />Add {singularize(descriptor.label)}
@@ -329,6 +337,13 @@ export function DataGrid({
         descriptor={descriptor}
         onDone={load}
       />
+      {isShifts && (
+        <RepeatingShiftDialog
+          open={repeatOpen}
+          onOpenChange={setRepeatOpen}
+          onCreated={load}
+        />
+      )}
 
       <AlertDialog open={!!deleting} onOpenChange={(b) => { if (!b) setDeleting(null); }}>
         <AlertDialogContent>

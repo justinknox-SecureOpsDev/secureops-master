@@ -191,6 +191,155 @@ router.post("/shifts", requireAdmin, async (req, res): Promise<void> => {
   res.status(201).json({ ...shift, assignments: [] });
 });
 
+/**
+ * Bulk-create a series of shifts from a recurrence pattern.
+ *
+ * Body shape:
+ *   {
+ *     base: { title, siteId, payRate, billRate, requiredLicenseLevel, headcount, notes? },
+ *     recurrence: {
+ *       startDate: "YYYY-MM-DD",      // first eligible day (inclusive)
+ *       untilDate: "YYYY-MM-DD",      // last eligible day (inclusive)
+ *       daysOfWeek: number[],         // 0=Sun ... 6=Sat
+ *       startTime: "HH:MM",           // local 24h, applied each occurrence
+ *       endTime:   "HH:MM",           // wraps to next day if <= startTime
+ *     }
+ *   }
+ *
+ * Returns: { created, skippedExisting, shifts[] }.
+ *
+ * Times are stored UTC; we apply the HH:MM directly to the calendar date as
+ * UTC instants so the admin sees what they typed. (Multi-timezone scheduling
+ * is out of scope for this feature.) Existing shifts at the same site +
+ * startTime are skipped to make re-runs idempotent.
+ */
+router.post("/shifts/repeat", requireAdmin, async (req, res): Promise<void> => {
+  const { base, recurrence } = req.body ?? {};
+  if (!base || !recurrence) {
+    res.status(400).json({ error: "Bad Request", message: "base and recurrence required" });
+    return;
+  }
+  const {
+    title, siteId, payRate, billRate, requiredLicenseLevel, headcount, notes,
+  } = base;
+  const { startDate, untilDate, daysOfWeek, startTime, endTime } = recurrence;
+
+  if (!title || !siteId) {
+    res.status(400).json({ error: "Bad Request", message: "base.title and base.siteId required" });
+    return;
+  }
+  if (!startDate || !untilDate || !startTime || !endTime || !Array.isArray(daysOfWeek) || daysOfWeek.length === 0) {
+    res.status(400).json({ error: "Bad Request", message: "recurrence.startDate, untilDate, daysOfWeek, startTime, endTime required" });
+    return;
+  }
+
+  const dateRe = /^\d{4}-\d{2}-\d{2}$/;
+  const timeRe = /^\d{2}:\d{2}$/;
+  if (!dateRe.test(startDate) || !dateRe.test(untilDate)) {
+    res.status(400).json({ error: "Bad Request", message: "dates must be YYYY-MM-DD" });
+    return;
+  }
+  if (!timeRe.test(startTime) || !timeRe.test(endTime)) {
+    res.status(400).json({ error: "Bad Request", message: "times must be HH:MM" });
+    return;
+  }
+
+  const validDays = (daysOfWeek as unknown[])
+    .map((d) => Number(d))
+    .filter((d) => Number.isInteger(d) && d >= 0 && d <= 6);
+  if (validDays.length === 0) {
+    res.status(400).json({ error: "Bad Request", message: "daysOfWeek must contain integers 0..6" });
+    return;
+  }
+
+  // Resolve site → clientName/location for back-compat columns.
+  const [site] = await db
+    .select({ id: sitesTable.id, name: sitesTable.name, address: sitesTable.address, lat: sitesTable.locationLat, lng: sitesTable.locationLng, clientName: clientsTable.name })
+    .from(sitesTable)
+    .leftJoin(clientsTable, eq(sitesTable.clientId, clientsTable.id))
+    .where(eq(sitesTable.id, siteId));
+  if (!site) { res.status(400).json({ error: "Bad Request", message: "Site not found" }); return; }
+
+  const lvl = [2, 3, 4].includes(Number(requiredLicenseLevel)) ? Number(requiredLicenseLevel) : 2;
+  const hc = Math.max(1, Number(headcount) || 1);
+  const pay = Number(payRate) || 0;
+  const bill = Number(billRate) || 0;
+
+  // Cap series length to prevent runaway expansion (~1 year of daily shifts).
+  const MAX_OCCURRENCES = 366;
+  const start = new Date(`${startDate}T00:00:00Z`);
+  const until = new Date(`${untilDate}T00:00:00Z`);
+  if (Number.isNaN(start.getTime()) || Number.isNaN(until.getTime()) || until < start) {
+    res.status(400).json({ error: "Bad Request", message: "untilDate must be on/after startDate" });
+    return;
+  }
+
+  const [sh, sm] = startTime.split(":").map(Number);
+  const [eh, em] = endTime.split(":").map(Number);
+  const wrapsOvernight = (eh * 60 + em) <= (sh * 60 + sm);
+
+  const repeatPattern = JSON.stringify({ daysOfWeek: validDays.sort(), startTime, endTime, startDate, untilDate });
+
+  const occurrences: { startTime: Date; endTime: Date }[] = [];
+  for (let d = new Date(start); d <= until && occurrences.length < MAX_OCCURRENCES; d = new Date(d.getTime() + 86400000)) {
+    if (!validDays.includes(d.getUTCDay())) continue;
+    const startInst = new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate(), sh, sm, 0));
+    const endBase = wrapsOvernight ? new Date(d.getTime() + 86400000) : d;
+    const endInst = new Date(Date.UTC(endBase.getUTCFullYear(), endBase.getUTCMonth(), endBase.getUTCDate(), eh, em, 0));
+    occurrences.push({ startTime: startInst, endTime: endInst });
+  }
+
+  if (occurrences.length === 0) {
+    res.status(400).json({ error: "Bad Request", message: "No matching dates in range" });
+    return;
+  }
+
+  // Idempotency: skip occurrences that already exist (same site + exact startTime).
+  const existing = await db
+    .select({ startTime: shiftsTable.startTime })
+    .from(shiftsTable)
+    .where(and(
+      eq(shiftsTable.siteId, siteId),
+      gte(shiftsTable.startTime, occurrences[0].startTime),
+      lte(shiftsTable.startTime, occurrences[occurrences.length - 1].startTime),
+    ));
+  const existingMs = new Set(existing.map((r) => new Date(r.startTime).getTime()));
+
+  const toInsert = occurrences
+    .filter((o) => !existingMs.has(o.startTime.getTime()))
+    .map((o) => ({
+      title,
+      siteId,
+      clientName: site.clientName ?? null,
+      location: site.address ?? site.name,
+      locationLat: site.lat ? String(site.lat) : null,
+      locationLng: site.lng ? String(site.lng) : null,
+      startTime: o.startTime,
+      endTime: o.endTime,
+      payRate: String(pay),
+      billRate: String(bill),
+      hourlyRate: String(pay),
+      billableRate: String(bill),
+      isRepeat: true,
+      repeatPattern,
+      notes: notes || null,
+      status: "upcoming" as const,
+      requiredLicenseLevel: lvl,
+      headcount: hc,
+    }));
+
+  const inserted = toInsert.length > 0
+    ? await db.insert(shiftsTable).values(toInsert).returning()
+    : [];
+
+  res.status(201).json({
+    created: inserted.length,
+    skippedExisting: occurrences.length - inserted.length,
+    totalOccurrences: occurrences.length,
+    shifts: inserted,
+  });
+});
+
 router.get("/shifts/:id", requireAuth, async (req, res): Promise<void> => {
   const id = Array.isArray(req.params.id) ? req.params.id[0] : req.params.id;
   const [shift] = await db.select().from(shiftsTable).where(eq(shiftsTable.id, id));
