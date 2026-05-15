@@ -319,7 +319,28 @@ function getConfig(name: string): TableConfig | null {
 
 type FkMatchType = "text" | "date";
 type FkMatchColumn = { key: string; col: AnyColumn; type: FkMatchType };
-type FkRef = { table: any; matchColumns: FkMatchColumn[] };
+type FkRef = {
+  table: any;
+  matchColumns: FkMatchColumn[];
+  /**
+   * Optional alternate primary-key extractors. For each candidate row, returns
+   * additional normalized strings to register in the lookup map alongside the
+   * primary key. Used so users can be matched by full name ("John Smith") in
+   * addition to email. When set, the resolver fetches the entire target table
+   * (no pre-filter) so alt-key matches aren't excluded by the email IN clause.
+   */
+  altPrimaryKeys?: (row: any) => string[];
+};
+
+/** Lower-trim-collapse-whitespace for free-text comparisons. */
+function normText(s: unknown): string {
+  return String(s ?? "").trim().replace(/\s+/g, " ").toLowerCase();
+}
+
+const userFullNameAlt = (u: any): string[] => {
+  const full = normText(`${u.firstName ?? ""} ${u.lastName ?? ""}`);
+  return full ? [full] : [];
+};
 
 const fkResolution: Record<string, Record<string, FkRef>> = {
   shift_assignments: {
@@ -330,11 +351,18 @@ const fkResolution: Record<string, Record<string, FkRef>> = {
     ] },
   },
   time_entries: {
-    employeeId: { table: usersTable, matchColumns: [{ key: "email", col: usersTable.email, type: "text" }] },
+    // Employee can be matched by email OR full name ("John Smith"), since spreadsheets
+    // commonly carry names rather than emails for hours imports.
+    employeeId: {
+      table: usersTable,
+      matchColumns: [{ key: "email", col: usersTable.email, type: "text" }],
+      altPrimaryKeys: userFullNameAlt,
+    },
     shiftId: { table: shiftsTable, matchColumns: [
       { key: "title", col: shiftsTable.title, type: "text" },
       { key: "startTime", col: shiftsTable.startTime, type: "date" },
     ] },
+    siteId: { table: sitesTable, matchColumns: [{ key: "name", col: sitesTable.name, type: "text" }] },
   },
   licenses: {
     employeeId: { table: usersTable, matchColumns: [{ key: "email", col: usersTable.email, type: "text" }] },
@@ -376,7 +404,7 @@ function normalizeMatchValue(v: unknown, type: FkMatchType): string {
     const d = toDateOrNull(v);
     return d ? d.toISOString() : "";
   }
-  return String(v).trim().toLowerCase();
+  return String(v).trim().replace(/\s+/g, " ").toLowerCase();
 }
 
 /**
@@ -415,7 +443,12 @@ async function resolveImportFks(
     if (primaries.size === 0) continue;
 
     let candidates: any[] = [];
-    if (primary.type === "text") {
+    if (ref.altPrimaryKeys) {
+      // Alt-key support means a row may match by something other than the
+      // primary column (e.g. users by full name instead of email), so we can't
+      // pre-filter — fetch the whole table and let the in-memory map sort it out.
+      candidates = await db.select().from(ref.table);
+    } else if (primary.type === "text") {
       candidates = await db
         .select()
         .from(ref.table)
@@ -425,16 +458,35 @@ async function resolveImportFks(
       candidates = await db.select().from(ref.table);
     }
 
+    // Track ids per key so we can flag ambiguity (e.g. two users named "John Smith")
+    // instead of silently last-write-wins. Primary-column duplicates aren't surfaced
+    // because they imply real DB-level duplication that's not specific to this row.
     const map = new Map<string, string>();
+    const altCollisions = new Map<string, Set<string>>();
     for (const c of candidates) {
-      const key = ref.matchColumns
+      const id = String(c.id ?? "");
+      if (!id) continue;
+      const tail = ref.matchColumns
+        .slice(1)
         .map((mc) => normalizeMatchValue(c[mc.key], mc.type))
         .join("|");
-      const id = String(c.id ?? "");
-      if (id && key.replace(/\|/g, "") !== "") {
-        // Last-write-wins is fine; duplicate-label warnings are surfaced in
-        // the wizard UI, and an unresolved row will still error cleanly.
-        map.set(key, id);
+      const tailSuffix = ref.matchColumns.length > 1 ? `|${tail}` : "";
+
+      // Register the primary-column key.
+      const primaryKey = normalizeMatchValue(c[primary.key], primary.type);
+      if (primaryKey) map.set(primaryKey + tailSuffix, id);
+
+      // Register alt-keys, recording collisions for ambiguity detection.
+      if (ref.altPrimaryKeys) {
+        for (const alt of ref.altPrimaryKeys(c)) {
+          if (!alt) continue;
+          const k = alt + tailSuffix;
+          // Don't fight a real primary match — alt only fills in when primary is absent.
+          if (!map.has(k)) map.set(k, id);
+          const set = altCollisions.get(k) ?? new Set<string>();
+          set.add(id);
+          altCollisions.set(k, set);
+        }
       }
     }
 
@@ -451,6 +503,13 @@ async function resolveImportFks(
         parts.push(normalizeMatchValue(extra, mc.type));
       }
       const key = parts.join("|");
+      const collisions = altCollisions.get(key);
+      if (collisions && collisions.size > 1) {
+        // Ambiguous alt-key match (e.g. two users named "John Smith"). Better
+        // to fail loudly than silently pick the wrong record.
+        errors.set(i, `${fkKey}: "${s}" matches ${collisions.size} records — please use email or a unique value to disambiguate`);
+        return;
+      }
       const resolved = map.get(key);
       if (resolved) {
         r[fkKey] = resolved;

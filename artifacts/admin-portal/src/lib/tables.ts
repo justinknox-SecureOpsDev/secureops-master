@@ -295,11 +295,15 @@ export const TABLES: TableDescriptor[] = [
     primaryLabelField: "id",
     fields: [
       { key: "id", label: "ID", type: "text", readonly: true, hiddenInGrid: true },
-      { key: "shiftId", label: "Shift", type: "fk", fkTable: "shifts", fkLabel: "title", required: true },
-      { key: "employeeId", label: "Employee", type: "fk", fkTable: "users", fkLabel: "email", required: true },
-      { key: "clockInTime", label: "Clock In", type: "datetime", required: true },
-      { key: "clockOutTime", label: "Clock Out", type: "datetime" },
-      { key: "hoursWorked", label: "Hours", type: "number" },
+      // shiftId is nullable in the DB (geo clock-in entries have no scheduled shift). Optional on import.
+      { key: "shiftId", label: "Shift", type: "fk", fkTable: "shifts", fkLabel: "title", importResolveByLabel: true, importExample: "Leave blank if importing ad-hoc hours" },
+      // siteId — handy when the spreadsheet has a "Location"/"Site" column instead of a shift.
+      { key: "siteId", label: "Site", type: "fk", fkTable: "sites", fkLabel: "name", importResolveByLabel: true, importExample: "Acme HQ" },
+      // Employee matches by full name (e.g. "John Smith") OR email (resolved server-side).
+      { key: "employeeId", label: "Employee", type: "fk", fkTable: "users", fkLabel: "email", required: true, importResolveByLabel: true, importExample: "John Smith  — or  jane@example.com" },
+      { key: "clockInTime", label: "Clock In", type: "datetime", required: true, importExample: "2025-01-06 08:00" },
+      { key: "clockOutTime", label: "Clock Out", type: "datetime", importExample: "2025-01-06 16:00" },
+      { key: "hoursWorked", label: "Hours", type: "number", importExample: "8.00" },
       {
         key: "approvalStatus", label: "Approval", type: "select",
         options: [
