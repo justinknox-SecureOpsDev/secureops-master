@@ -1,17 +1,28 @@
 import { useState, useEffect } from "react";
 import { Link, useRoute, useLocation } from "wouter";
-import { LogOut, ClipboardList, UserPlus, FileText, ChevronsLeft, ChevronsRight, Database, Banknote } from "lucide-react";
+import {
+  LogOut, ClipboardList, UserPlus, FileText, ChevronsLeft, ChevronsRight,
+  Database, Banknote, ChevronDown, ChevronRight, Receipt, Wallet,
+  type LucideIcon,
+} from "lucide-react";
 import { TABLES } from "@/lib/tables";
 import { useAuth } from "@/lib/auth";
 import { Button } from "@/components/ui/button";
 
 const COLLAPSE_KEY = "wcsg.sidebarCollapsed";
+const SECTIONS_KEY = "wcsg.sidebarSections";
+
+type LinkItem = { href: string; label: string; Icon: LucideIcon; badge?: string };
+
+// Tables surfaced under "Accounting" — kept out of the generic Operations list.
+const ACCOUNTING_TABLE_NAMES = new Set(["payroll_entries", "invoices"]);
 
 export function AppShell({ children }: { children: React.ReactNode }) {
   const { user, logout } = useAuth();
   const [match, params] = useRoute("/tables/:table");
   const [location] = useLocation();
   const activeTable = match ? params?.table : null;
+
   const [collapsed, setCollapsed] = useState<boolean>(() => {
     try { return localStorage.getItem(COLLAPSE_KEY) === "1"; } catch { return false; }
   });
@@ -19,13 +30,76 @@ export function AppShell({ children }: { children: React.ReactNode }) {
     try { localStorage.setItem(COLLAPSE_KEY, collapsed ? "1" : "0"); } catch {}
   }, [collapsed]);
 
-  const hrLinks = [
+  // Per-section open/closed state (persisted). Defaults: all open.
+  const [openSections, setOpenSections] = useState<Record<string, boolean>>(() => {
+    try {
+      const raw = localStorage.getItem(SECTIONS_KEY);
+      if (raw) return JSON.parse(raw);
+    } catch {}
+    return { hr: true, accounting: true, operations: true };
+  });
+  useEffect(() => {
+    try { localStorage.setItem(SECTIONS_KEY, JSON.stringify(openSections)); } catch {}
+  }, [openSections]);
+  const toggleSection = (key: string) =>
+    setOpenSections((s) => ({ ...s, [key]: !s[key] }));
+
+  const hrLinks: LinkItem[] = [
     { href: "/hr/applications", label: "Applications", Icon: ClipboardList },
     { href: "/hr/onboarding", label: "Onboarding", Icon: UserPlus },
     { href: "/hr/policies", label: "Policies", Icon: FileText },
-    { href: "/payroll/pay-run", label: "Pay Run", Icon: Banknote },
     { href: "/integrations/monday", label: "Monday Sync", Icon: Database },
   ];
+
+  const accountingLinks: LinkItem[] = [
+    { href: "/payroll/pay-run", label: "Pay Run", Icon: Banknote },
+    { href: "/tables/invoices", label: "Invoices", Icon: Receipt },
+    { href: "/tables/payroll_entries", label: "Payroll", Icon: Wallet },
+  ];
+
+  const operationsTables = TABLES.filter((t) => !ACCOUNTING_TABLE_NAMES.has(t.name));
+
+  const renderLink = ({ href, label, Icon, badge }: LinkItem) => {
+    const active = location === href;
+    return (
+      <Link
+        key={href}
+        href={href}
+        title={collapsed ? label : undefined}
+        className={`flex items-center text-sm border-l-2 transition-colors ${
+          collapsed ? "justify-center px-0 py-2.5" : "gap-2 px-4 py-2"
+        } ${
+          active
+            ? "bg-sidebar-accent text-sidebar-accent-foreground border-sidebar-primary"
+            : "border-transparent hover:bg-sidebar-accent/50"
+        }`}
+      >
+        <Icon className="w-4 h-4 shrink-0" />
+        {!collapsed && (
+          <span className="flex-1 flex items-center justify-between">
+            <span>{label}</span>
+            {badge && <span className="text-[9px] brand-gold opacity-80">{badge}</span>}
+          </span>
+        )}
+      </Link>
+    );
+  };
+
+  const SectionHeader = ({ id, label }: { id: string; label: string }) => {
+    const open = openSections[id] !== false;
+    return (
+      <button
+        type="button"
+        onClick={() => toggleSection(id)}
+        className="w-full flex items-center justify-between px-3 py-1.5 text-[10px] uppercase tracking-widest opacity-60 hover:opacity-100 hover:bg-sidebar-accent/30 transition-colors"
+      >
+        <span>{label}</span>
+        {open
+          ? <ChevronDown className="w-3 h-3" />
+          : <ChevronRight className="w-3 h-3" />}
+      </button>
+    );
+  };
 
   return (
     <div className="flex h-screen w-full overflow-hidden bg-background">
@@ -59,35 +133,21 @@ export function AppShell({ children }: { children: React.ReactNode }) {
         </div>
 
         <nav className="flex-1 overflow-y-auto py-3">
-          {!collapsed && (
-            <div className="px-3 text-[10px] uppercase tracking-widest opacity-50 mb-1">Human Resources</div>
-          )}
-          {hrLinks.map(({ href, label, Icon }) => {
-            const active = location === href;
-            return (
-              <Link
-                key={href}
-                href={href}
-                title={collapsed ? label : undefined}
-                className={`flex items-center text-sm border-l-2 transition-colors ${
-                  collapsed ? "justify-center px-0 py-2.5" : "gap-2 px-4 py-2"
-                } ${
-                  active
-                    ? "bg-sidebar-accent text-sidebar-accent-foreground border-sidebar-primary"
-                    : "border-transparent hover:bg-sidebar-accent/50"
-                }`}
-              >
-                <Icon className="w-4 h-4 shrink-0" />
-                {!collapsed && <span>{label}</span>}
-              </Link>
-            );
-          })}
+          {/* Human Resources */}
+          {!collapsed && <SectionHeader id="hr" label="Human Resources" />}
+          {(collapsed || openSections.hr !== false) && hrLinks.map(renderLink)}
 
-          {!collapsed && (
-            <div className="px-3 text-[10px] uppercase tracking-widest opacity-50 mb-1 mt-3">Data Tables</div>
-          )}
-          {collapsed && <div className="my-2 mx-3 border-t border-sidebar-border/40" />}
-          {TABLES.map((t) => {
+          {/* Accounting */}
+          {!collapsed
+            ? <div className="mt-2"><SectionHeader id="accounting" label="Accounting" /></div>
+            : <div className="my-2 mx-3 border-t border-sidebar-border/40" />}
+          {(collapsed || openSections.accounting !== false) && accountingLinks.map(renderLink)}
+
+          {/* Operations (data tables) */}
+          {!collapsed
+            ? <div className="mt-2"><SectionHeader id="operations" label="Operations" /></div>
+            : <div className="my-2 mx-3 border-t border-sidebar-border/40" />}
+          {(collapsed || openSections.operations !== false) && operationsTables.map((t) => {
             const active = activeTable === t.name;
             const initials = t.label.slice(0, 2).toUpperCase();
             return (
