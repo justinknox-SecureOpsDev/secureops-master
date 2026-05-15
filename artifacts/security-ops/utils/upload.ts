@@ -6,6 +6,9 @@ export type UploadedFile = {
   objectPath: string;
   contentType: string;
   size: number;
+  /** Local URI of the source asset; useful for instant preview before the
+   * server round-trip. Same `uri` returned by expo-image-picker. */
+  localUri: string;
 };
 
 /**
@@ -77,7 +80,7 @@ export async function uploadAssetUri(asset: {
     body: blob,
   });
   if (!put.ok) throw new Error(`Upload failed (${put.status})`);
-  return { name: asset.name, objectPath, contentType: finalType, size: finalSize };
+  return { name: asset.name, objectPath, contentType: finalType, size: finalSize, localUri: asset.uri };
 }
 
 /**

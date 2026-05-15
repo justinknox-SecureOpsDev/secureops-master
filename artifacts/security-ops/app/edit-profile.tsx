@@ -2,6 +2,7 @@ import React, { useEffect, useState } from "react";
 import {
   View, Text, TextInput, TouchableOpacity, StyleSheet,
   ActivityIndicator, ScrollView, Platform, Alert, Linking,
+  Image, Modal, Pressable,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { Feather } from "@expo/vector-icons";
@@ -16,15 +17,39 @@ import {
 import { pickAndUploadImage } from "@/utils/upload";
 import { apiRequest } from "@/utils/api";
 
+async function signOwnedDoc(path: string): Promise<string> {
+  const { url } = await apiRequest(`/me/storage/sign?path=${encodeURIComponent(path)}`);
+  return url as string;
+}
+
 async function openOwnedDoc(path: string) {
   try {
-    const { url } = await apiRequest(`/me/storage/sign?path=${encodeURIComponent(path)}`);
+    const url = await signOwnedDoc(path);
     const can = await Linking.canOpenURL(url);
     if (can) await Linking.openURL(url);
     else Alert.alert("Cannot open file", "No app on this device can open the file.");
   } catch (e) {
     Alert.alert("Could not open file", (e as Error).message ?? "Unknown error");
   }
+}
+
+/** Resolves an inline thumbnail URL for a doc key the caller owns. Local
+ * URIs (newly captured this session) win — no round-trip needed. Otherwise
+ * we ask the server for a short-lived signed GET URL. Returns null while
+ * loading / on error so the caller can render a graceful fallback. */
+function useDocPreview(objectKey: string | null, localUri: string | null): string | null {
+  const [signedUrl, setSignedUrl] = useState<string | null>(null);
+  useEffect(() => {
+    if (localUri) { setSignedUrl(null); return; }
+    if (!objectKey) { setSignedUrl(null); return; }
+    let cancelled = false;
+    setSignedUrl(null);
+    signOwnedDoc(objectKey)
+      .then((url) => { if (!cancelled) setSignedUrl(url); })
+      .catch(() => { if (!cancelled) setSignedUrl(null); });
+    return () => { cancelled = true; };
+  }, [objectKey, localUri]);
+  return localUri ?? signedUrl;
 }
 
 type Form = {
@@ -133,6 +158,11 @@ export default function EditProfileScreen() {
   }
 
   const [uploading, setUploading] = useState<string | null>(null);
+  /** Local URIs for images uploaded *this session* — keyed by objectPath so
+   * we can render an instant thumbnail without re-fetching from the server. */
+  const [localPreviews, setLocalPreviews] = useState<Record<string, string>>({});
+  /** Currently-open full-size preview (modal). */
+  const [preview, setPreview] = useState<{ uri: string; label: string } | null>(null);
   async function handleUpload(
     field: "photoKey" | "licenseDocKey" | "passportDocKey" | "trainingCertificateKeys",
     source: "library" | "camera",
@@ -141,6 +171,7 @@ export default function EditProfileScreen() {
       setUploading(`${field}:${source}`);
       const res = await pickAndUploadImage({ source, quality: 0.7 });
       if (!res) return;
+      setLocalPreviews((m) => ({ ...m, [res.objectPath]: res.localUri }));
       if (field === "trainingCertificateKeys") appendCert(res.objectPath);
       else setDoc(field, res.objectPath);
     } catch (e) {
@@ -270,25 +301,31 @@ export default function EditProfileScreen() {
             label="Profile photo"
             current={form.photoKey}
             originalKey={profile?.photoKey ?? null}
+            localUri={form.photoKey ? localPreviews[form.photoKey] ?? null : null}
             uploadingSource={uploading?.startsWith("photoKey:") ? (uploading.split(":")[1] as "library" | "camera") : null}
             onUpload={(source) => handleUpload("photoKey", source)}
             onClear={() => setDoc("photoKey", null)}
+            onPreview={(uri) => setPreview({ uri, label: "Profile photo" })}
           />
           <DocRow
             label="TX security license (photo of card)"
             current={form.licenseDocKey}
             originalKey={profile?.licenseDocKey ?? null}
+            localUri={form.licenseDocKey ? localPreviews[form.licenseDocKey] ?? null : null}
             uploadingSource={uploading?.startsWith("licenseDocKey:") ? (uploading.split(":")[1] as "library" | "camera") : null}
             onUpload={(source) => handleUpload("licenseDocKey", source)}
             onClear={() => setDoc("licenseDocKey", null)}
+            onPreview={(uri) => setPreview({ uri, label: "TX security license" })}
           />
           <DocRow
             label="Passport / driver's license"
             current={form.passportDocKey}
             originalKey={profile?.passportDocKey ?? null}
+            localUri={form.passportDocKey ? localPreviews[form.passportDocKey] ?? null : null}
             uploadingSource={uploading?.startsWith("passportDocKey:") ? (uploading.split(":")[1] as "library" | "camera") : null}
             onUpload={(source) => handleUpload("passportDocKey", source)}
             onClear={() => setDoc("passportDocKey", null)}
+            onPreview={(uri) => setPreview({ uri, label: "Passport / driver's license" })}
           />
           <View style={{ gap: 6 }}>
             <Text style={[styles.label, { color: colors.mutedForeground }]}>
@@ -300,25 +337,14 @@ export default function EditProfileScreen() {
                   const origCerts = (profile?.trainingCertificateKeys ?? []) as string[];
                   const isExisting = origCerts.includes(key);
                   return (
-                    <View
+                    <CertRow
                       key={key + i}
-                      style={[styles.certRow, { borderColor: colors.border, backgroundColor: colors.secondary }]}
-                    >
-                      <Feather name="award" size={14} color={colors.accent} />
-                      <Text style={{ flex: 1, color: colors.foreground, fontSize: 13 }} numberOfLines={1}>
-                        Certificate {i + 1}{isExisting ? "" : " · just added"}
-                      </Text>
-                      {isExisting && (
-                        <TouchableOpacity onPress={() => openOwnedDoc(key)} style={styles.certAction}>
-                          <Feather name="eye" size={13} color={colors.primary} />
-                          <Text style={{ color: colors.primary, fontSize: 12, fontWeight: "600" }}>View</Text>
-                        </TouchableOpacity>
-                      )}
-                      <TouchableOpacity onPress={() => confirmRemoveCert(i)} style={styles.certAction}>
-                        <Feather name="trash-2" size={13} color={colors.destructive} />
-                        <Text style={{ color: colors.destructive, fontSize: 12, fontWeight: "600" }}>Remove</Text>
-                      </TouchableOpacity>
-                    </View>
+                      objectKey={key}
+                      localUri={localPreviews[key] ?? null}
+                      label={`Certificate ${i + 1}${isExisting ? "" : " · just added"}`}
+                      onPreview={(uri) => setPreview({ uri, label: `Certificate ${i + 1}` })}
+                      onRemove={() => confirmRemoveCert(i)}
+                    />
                   );
                 })}
               </View>
@@ -368,6 +394,8 @@ export default function EditProfileScreen() {
           </View>
         )}
 
+        <PreviewModal preview={preview} onClose={() => setPreview(null)} />
+
         <TouchableOpacity onPress={save} disabled={mut.isPending} style={[styles.button, { backgroundColor: colors.primary, opacity: mut.isPending ? 0.7 : 1 }]}>
           {mut.isPending ? <ActivityIndicator color={colors.primaryForeground} /> : (
             <Text style={[styles.buttonText, { color: colors.primaryForeground }]}>{isFirstRun ? "Save and continue" : "Save changes"}</Text>
@@ -411,69 +439,145 @@ function Input(props: React.ComponentProps<typeof TextInput>) {
   );
 }
 function DocRow({
-  label, current, originalKey, uploadingSource, onUpload, onClear,
+  label, current, originalKey, localUri, uploadingSource, onUpload, onClear, onPreview,
 }: {
   label: string;
   current: string | null;
   originalKey: string | null;
+  localUri: string | null;
   uploadingSource: "library" | "camera" | null;
   onUpload: (source: "library" | "camera") => void;
   onClear: () => void;
+  onPreview: (uri: string) => void;
 }) {
   const colors = useColors();
   const hasFile = !!current;
   const busy = uploadingSource !== null;
-  const viewableKey = current && current === originalKey ? current : null;
+  const isExisting = !!current && current === originalKey;
+  // Only sign existing-on-record keys; new-this-session uploads use localUri.
+  const previewUri = useDocPreview(isExisting ? current : null, localUri);
   return (
-    <View style={{ gap: 4 }}>
+    <View style={{ gap: 6 }}>
       <Text style={[styles.label, { color: colors.mutedForeground }]}>{label}</Text>
       <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
-        <TouchableOpacity
-          onPress={() => onUpload("camera")}
-          disabled={busy}
-          style={[styles.docBtn, { borderColor: colors.primary, backgroundColor: colors.primary + "10", flex: 1 }]}
-        >
-          {uploadingSource === "camera" ? <ActivityIndicator color={colors.primary} /> : (
-            <>
-              <Feather name="camera" size={14} color={colors.primary} />
-              <Text style={{ color: colors.primary, fontWeight: "600", fontSize: 13 }}>Take photo</Text>
-            </>
-          )}
-        </TouchableOpacity>
-        <TouchableOpacity
-          onPress={() => onUpload("library")}
-          disabled={busy}
-          style={[styles.docBtn, { borderColor: colors.primary, backgroundColor: colors.primary + "10", flex: 1 }]}
-        >
-          {uploadingSource === "library" ? <ActivityIndicator color={colors.primary} /> : (
-            <>
-              <Feather name={hasFile ? "refresh-cw" : "image"} size={14} color={colors.primary} />
-              <Text style={{ color: colors.primary, fontWeight: "600", fontSize: 13 }}>
-                {hasFile ? "Replace from library" : "Choose from library"}
-              </Text>
-            </>
-          )}
-        </TouchableOpacity>
         {hasFile && (
-          <TouchableOpacity onPress={onClear} disabled={busy} style={[styles.docBtn, { borderColor: colors.border }]}>
-            <Feather name="x" size={14} color={colors.foreground} />
-          </TouchableOpacity>
+          <Pressable
+            onPress={() => previewUri && onPreview(previewUri)}
+            disabled={!previewUri}
+            style={[styles.thumb, { borderColor: colors.border, backgroundColor: colors.secondary }]}
+            accessibilityRole="imagebutton"
+            accessibilityLabel={`Preview ${label}`}
+          >
+            {previewUri ? (
+              <Image source={{ uri: previewUri }} style={styles.thumbImg} resizeMode="cover" />
+            ) : (
+              <ActivityIndicator color={colors.mutedForeground} />
+            )}
+          </Pressable>
         )}
-      </View>
-      {hasFile && (
-        <View style={{ flexDirection: "row", alignItems: "center", gap: 12, marginTop: 2 }}>
-          <Text style={[styles.note, { color: colors.mutedForeground }]}>
-            <Feather name="check" size={11} color={colors.accent} /> {viewableKey ? "File on record" : "New file selected (save to upload)"}
-          </Text>
-          {viewableKey && (
-            <TouchableOpacity onPress={() => openOwnedDoc(viewableKey)} style={{ flexDirection: "row", alignItems: "center", gap: 4 }}>
-              <Feather name="eye" size={12} color={colors.primary} />
-              <Text style={{ color: colors.primary, fontSize: 12, fontWeight: "600" }}>View current file</Text>
+        <View style={{ flex: 1, flexDirection: "row", alignItems: "center", gap: 8 }}>
+          <TouchableOpacity
+            onPress={() => onUpload("camera")}
+            disabled={busy}
+            style={[styles.docBtn, { borderColor: colors.primary, backgroundColor: colors.primary + "10", flex: 1 }]}
+          >
+            {uploadingSource === "camera" ? <ActivityIndicator color={colors.primary} /> : (
+              <>
+                <Feather name="camera" size={14} color={colors.primary} />
+                <Text style={{ color: colors.primary, fontWeight: "600", fontSize: 13 }}>Take photo</Text>
+              </>
+            )}
+          </TouchableOpacity>
+          <TouchableOpacity
+            onPress={() => onUpload("library")}
+            disabled={busy}
+            style={[styles.docBtn, { borderColor: colors.primary, backgroundColor: colors.primary + "10", flex: 1 }]}
+          >
+            {uploadingSource === "library" ? <ActivityIndicator color={colors.primary} /> : (
+              <>
+                <Feather name={hasFile ? "refresh-cw" : "image"} size={14} color={colors.primary} />
+                <Text style={{ color: colors.primary, fontWeight: "600", fontSize: 13 }}>
+                  {hasFile ? "Replace" : "Library"}
+                </Text>
+              </>
+            )}
+          </TouchableOpacity>
+          {hasFile && (
+            <TouchableOpacity onPress={onClear} disabled={busy} style={[styles.docBtn, { borderColor: colors.border }]}>
+              <Feather name="x" size={14} color={colors.foreground} />
             </TouchableOpacity>
           )}
         </View>
+      </View>
+      {hasFile && (
+        <Text style={[styles.note, { color: colors.mutedForeground }]}>
+          <Feather name="check" size={11} color={colors.accent} /> {isExisting ? "File on record · tap thumbnail to preview" : "New file selected (save to upload) · tap thumbnail to preview"}
+        </Text>
       )}
     </View>
+  );
+}
+
+function CertRow({
+  objectKey, localUri, label, onPreview, onRemove,
+}: {
+  objectKey: string;
+  localUri: string | null;
+  label: string;
+  onPreview: (uri: string) => void;
+  onRemove: () => void;
+}) {
+  const colors = useColors();
+  const previewUri = useDocPreview(objectKey, localUri);
+  return (
+    <View style={[styles.certRow, { borderColor: colors.border, backgroundColor: colors.secondary }]}>
+      <Pressable
+        onPress={() => previewUri && onPreview(previewUri)}
+        disabled={!previewUri}
+        style={[styles.certThumb, { borderColor: colors.border, backgroundColor: colors.background }]}
+        accessibilityRole="imagebutton"
+        accessibilityLabel={`Preview ${label}`}
+      >
+        {previewUri ? (
+          <Image source={{ uri: previewUri }} style={styles.thumbImg} resizeMode="cover" />
+        ) : (
+          <Feather name="award" size={16} color={colors.accent} />
+        )}
+      </Pressable>
+      <Text style={{ flex: 1, color: colors.foreground, fontSize: 13 }} numberOfLines={1}>{label}</Text>
+      <TouchableOpacity onPress={onRemove} style={styles.certAction}>
+        <Feather name="trash-2" size={13} color={colors.destructive} />
+        <Text style={{ color: colors.destructive, fontSize: 12, fontWeight: "600" }}>Remove</Text>
+      </TouchableOpacity>
+    </View>
+  );
+}
+
+function PreviewModal({
+  preview, onClose,
+}: {
+  preview: { uri: string; label: string } | null;
+  onClose: () => void;
+}) {
+  const colors = useColors();
+  return (
+    <Modal visible={!!preview} transparent animationType="fade" onRequestClose={onClose}>
+      <Pressable onPress={onClose} style={styles.modalBackdrop}>
+        <View style={styles.modalCard} pointerEvents="box-none">
+          <View style={[styles.modalHeader, { backgroundColor: colors.card, borderColor: colors.border }]}>
+            <Text style={{ color: colors.foreground, fontWeight: "700", flex: 1 }} numberOfLines={1}>
+              {preview?.label ?? "Preview"}
+            </Text>
+            <TouchableOpacity onPress={onClose} hitSlop={10}>
+              <Feather name="x" size={20} color={colors.foreground} />
+            </TouchableOpacity>
+          </View>
+          {preview && (
+            <Image source={{ uri: preview.uri }} style={styles.modalImg} resizeMode="contain" />
+          )}
+        </View>
+      </Pressable>
+    </Modal>
   );
 }
 function ReadOnly({ label, value }: { label: string; value: string }) {
@@ -500,6 +604,13 @@ const styles = StyleSheet.create({
   docBtn: { flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 6, paddingHorizontal: 12, paddingVertical: 10, borderRadius: 8, borderWidth: 1 },
   certRow: { flexDirection: "row", alignItems: "center", gap: 8, paddingHorizontal: 10, paddingVertical: 8, borderRadius: 8, borderWidth: 1 },
   certAction: { flexDirection: "row", alignItems: "center", gap: 4, paddingHorizontal: 6, paddingVertical: 4 },
+  thumb: { width: 56, height: 56, borderRadius: 8, borderWidth: 1, alignItems: "center", justifyContent: "center", overflow: "hidden" },
+  certThumb: { width: 36, height: 36, borderRadius: 6, borderWidth: 1, alignItems: "center", justifyContent: "center", overflow: "hidden" },
+  thumbImg: { width: "100%", height: "100%" },
+  modalBackdrop: { flex: 1, backgroundColor: "rgba(0,0,0,0.85)", alignItems: "center", justifyContent: "center", padding: 16 },
+  modalCard: { width: "100%", maxWidth: 720, flex: 1, maxHeight: "100%", gap: 8 },
+  modalHeader: { flexDirection: "row", alignItems: "center", gap: 8, paddingHorizontal: 12, paddingVertical: 10, borderRadius: 8, borderWidth: 1 },
+  modalImg: { flex: 1, width: "100%", height: undefined },
   errorBox: { flexDirection: "row", alignItems: "center", gap: 8, padding: 12, borderRadius: 8, borderWidth: 1 },
   button: { height: 50, borderRadius: 8, alignItems: "center", justifyContent: "center" },
   buttonText: { fontSize: 15, fontWeight: "700", letterSpacing: 1 },
