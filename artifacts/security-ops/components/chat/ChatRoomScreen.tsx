@@ -103,7 +103,7 @@ export default function ChatRoomScreen({ roomId, roomName }: Props) {
   };
 
   return (
-    <SafeAreaView style={[s.container, { backgroundColor: colors.background, paddingBottom: tabBarHeight }]} edges={["bottom"]}>
+    <SafeAreaView style={[s.container, { backgroundColor: colors.background, paddingBottom: tabBarHeight }]} edges={["top", "bottom"]}>
       <View style={[s.topBar, { backgroundColor: colors.card, borderBottomColor: colors.border }]}>
         <Feather name="hash" size={18} color={colors.primary} />
         <Text style={[s.roomTitle, { color: colors.foreground }]}>{roomName}</Text>

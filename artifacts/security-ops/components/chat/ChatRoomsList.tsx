@@ -1,7 +1,7 @@
 import React, { useEffect, useState, useCallback } from "react";
 import {
   View, Text, FlatList, TouchableOpacity, StyleSheet,
-  ActivityIndicator, RefreshControl, TextInput, Platform,
+  ActivityIndicator, RefreshControl, TextInput, Modal, Platform,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { Feather } from "@expo/vector-icons";
@@ -15,7 +15,16 @@ interface ChatRoom {
   name: string;
   type: string;
   messageCount: number;
+  otherUserId?: string | null;
+  otherUserName?: string | null;
   lastMessage?: { content: string; createdAt: string; userName: string } | null;
+}
+
+interface ChatUser {
+  id: string;
+  firstName: string;
+  lastName: string;
+  role: string;
 }
 
 interface Props {
@@ -30,6 +39,11 @@ export default function ChatRoomsList({ onSelectRoom }: Props) {
   const [refreshing, setRefreshing] = useState(false);
   const [newRoom, setNewRoom] = useState("");
   const [creating, setCreating] = useState(false);
+  const [tab, setTab] = useState<"channels" | "direct">("channels");
+  const [pickerOpen, setPickerOpen] = useState(false);
+  const [users, setUsers] = useState<ChatUser[]>([]);
+  const [usersLoading, setUsersLoading] = useState(false);
+  const [userSearch, setUserSearch] = useState("");
   const isAdmin = user?.role === "admin";
 
   const fetchRooms = useCallback(async () => {
@@ -58,24 +72,55 @@ export default function ChatRoomsList({ onSelectRoom }: Props) {
     }
   };
 
-  const s = styles(colors);
-
-  const roomIcon = (type: string) => {
-    if (type === "shift") return "briefcase";
-    if (type === "direct") return "user";
-    return "hash";
+  const openPicker = async () => {
+    setPickerOpen(true);
+    setUsersLoading(true);
+    try {
+      const data = await apiRequest("/chat/users");
+      setUsers(data);
+    } finally {
+      setUsersLoading(false);
+    }
   };
+
+  const startDirect = async (otherUserId: string, otherName: string) => {
+    setPickerOpen(false);
+    try {
+      const room = await apiRequest("/chat/direct", {
+        method: "POST",
+        body: JSON.stringify({ otherUserId }),
+      });
+      await fetchRooms();
+      onSelectRoom(room.id, otherName);
+    } catch (e) {
+      console.error("Failed to start DM", e);
+    }
+  };
+
+  const channels = rooms.filter((r) => r.type !== "direct");
+  const directs = rooms.filter((r) => r.type === "direct");
+  const visibleRooms = tab === "channels" ? channels : directs;
+
+  const filteredUsers = users.filter((u) => {
+    const q = userSearch.trim().toLowerCase();
+    if (!q) return true;
+    return `${u.firstName} ${u.lastName}`.toLowerCase().includes(q);
+  });
+
+  const s = styles(colors);
 
   if (loading) {
     return (
-      <View style={[s.center, { backgroundColor: colors.background }]}>
-        <ActivityIndicator color={colors.primary} />
-      </View>
+      <SafeAreaView style={[s.container, { backgroundColor: colors.background }]} edges={["top", "bottom"]}>
+        <View style={s.center}>
+          <ActivityIndicator color={colors.primary} />
+        </View>
+      </SafeAreaView>
     );
   }
 
   return (
-    <SafeAreaView style={[s.container, { backgroundColor: colors.background }]} edges={["bottom"]}>
+    <SafeAreaView style={[s.container, { backgroundColor: colors.background }]} edges={["top", "bottom"]}>
       <View style={s.header}>
         <Text style={[s.title, { color: colors.foreground }]}>Team Chat</Text>
         <Text style={[s.subtitle, { color: colors.mutedForeground }]}>
@@ -83,7 +128,21 @@ export default function ChatRoomsList({ onSelectRoom }: Props) {
         </Text>
       </View>
 
-      {isAdmin && (
+      <View style={[s.tabs, { borderBottomColor: colors.border }]}>
+        {(["channels", "direct"] as const).map((k) => (
+          <TouchableOpacity
+            key={k}
+            onPress={() => setTab(k)}
+            style={[s.tab, tab === k && { borderBottomColor: colors.primary }]}
+          >
+            <Text style={[s.tabText, { color: tab === k ? colors.primary : colors.mutedForeground }]}>
+              {k === "channels" ? "Channels" : "Direct"}
+            </Text>
+          </TouchableOpacity>
+        ))}
+      </View>
+
+      {tab === "channels" && isAdmin && (
         <View style={[s.newRoomRow, { borderColor: colors.border, backgroundColor: colors.card }]}>
           <TextInput
             style={[s.input, { color: colors.foreground }]}
@@ -99,48 +158,135 @@ export default function ChatRoomsList({ onSelectRoom }: Props) {
         </View>
       )}
 
+      {tab === "direct" && (
+        <TouchableOpacity
+          onPress={openPicker}
+          style={[s.newDmBtn, { backgroundColor: colors.primary }]}
+          activeOpacity={0.85}
+        >
+          <Feather name="edit" size={16} color="#080c18" />
+          <Text style={s.newDmText}>New Direct Message</Text>
+        </TouchableOpacity>
+      )}
+
       <FlatList
-        data={rooms}
+        data={visibleRooms}
         keyExtractor={(r) => r.id}
         contentContainerStyle={s.list}
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => { setRefreshing(true); fetchRooms(); }} tintColor={colors.primary} />}
-        renderItem={({ item }) => (
-          <TouchableOpacity
-            style={[s.roomCard, { backgroundColor: colors.card, borderColor: colors.border }]}
-            onPress={() => onSelectRoom(item.id, item.name)}
-            activeOpacity={0.75}
-          >
-            <View style={[s.roomIcon, { backgroundColor: colors.primary + "22" }]}>
-              <Feather name={roomIcon(item.type) as any} size={18} color={colors.primary} />
-            </View>
-            <View style={s.roomInfo}>
-              <View style={s.roomTopRow}>
-                <Text style={[s.roomName, { color: colors.foreground }]}>#{item.name}</Text>
-                {item.lastMessage && (
-                  <Text style={[s.time, { color: colors.mutedForeground }]}>
-                    {formatDistanceToNow(new Date(item.lastMessage.createdAt), { addSuffix: true })}
-                  </Text>
+        renderItem={({ item }) => {
+          const isDirect = item.type === "direct";
+          const displayName = isDirect ? (item.otherUserName || "Direct") : `#${item.name}`;
+          const initials = isDirect && item.otherUserName
+            ? item.otherUserName.split(" ").map((n) => n[0]).join("").slice(0, 2).toUpperCase()
+            : null;
+          return (
+            <TouchableOpacity
+              style={[s.roomCard, { backgroundColor: colors.card, borderColor: colors.border }]}
+              onPress={() => onSelectRoom(item.id, displayName)}
+              activeOpacity={0.75}
+            >
+              <View style={[s.roomIcon, { backgroundColor: colors.primary + "22" }]}>
+                {isDirect && initials ? (
+                  <Text style={{ color: colors.primary, fontWeight: "700", fontSize: 13 }}>{initials}</Text>
+                ) : (
+                  <Feather name={item.type === "shift" ? "briefcase" : "hash"} size={18} color={colors.primary} />
                 )}
               </View>
-              {item.lastMessage ? (
-                <Text style={[s.lastMsg, { color: colors.mutedForeground }]} numberOfLines={1}>
-                  <Text style={{ fontWeight: "600" }}>{item.lastMessage.userName}: </Text>
-                  {item.lastMessage.content}
-                </Text>
-              ) : (
-                <Text style={[s.lastMsg, { color: colors.mutedForeground }]}>No messages yet</Text>
-              )}
-            </View>
-            <Feather name="chevron-right" size={16} color={colors.mutedForeground} />
-          </TouchableOpacity>
-        )}
+              <View style={s.roomInfo}>
+                <View style={s.roomTopRow}>
+                  <Text style={[s.roomName, { color: colors.foreground }]} numberOfLines={1}>
+                    {displayName}
+                  </Text>
+                  {item.lastMessage && (
+                    <Text style={[s.time, { color: colors.mutedForeground }]}>
+                      {formatDistanceToNow(new Date(item.lastMessage.createdAt), { addSuffix: true })}
+                    </Text>
+                  )}
+                </View>
+                {item.lastMessage ? (
+                  <Text style={[s.lastMsg, { color: colors.mutedForeground }]} numberOfLines={1}>
+                    {!isDirect && <Text style={{ fontWeight: "600" }}>{item.lastMessage.userName}: </Text>}
+                    {item.lastMessage.content}
+                  </Text>
+                ) : (
+                  <Text style={[s.lastMsg, { color: colors.mutedForeground }]}>No messages yet</Text>
+                )}
+              </View>
+              <Feather name="chevron-right" size={16} color={colors.mutedForeground} />
+            </TouchableOpacity>
+          );
+        }}
         ListEmptyComponent={() => (
           <View style={s.center}>
-            <Feather name="message-circle" size={48} color={colors.mutedForeground} />
-            <Text style={[s.emptyText, { color: colors.mutedForeground }]}>No channels yet</Text>
+            <Feather name={tab === "direct" ? "user" : "message-circle"} size={48} color={colors.mutedForeground} />
+            <Text style={[s.emptyText, { color: colors.mutedForeground }]}>
+              {tab === "direct" ? "No direct messages yet" : "No channels yet"}
+            </Text>
           </View>
         )}
       />
+
+      <Modal visible={pickerOpen} animationType="slide" transparent onRequestClose={() => setPickerOpen(false)}>
+        <View style={s.modalBackdrop}>
+          <SafeAreaView style={[s.modalSheet, { backgroundColor: colors.background }]} edges={["bottom"]}>
+            <View style={[s.modalHeader, { borderBottomColor: colors.border }]}>
+              <Text style={[s.modalTitle, { color: colors.foreground }]}>Start a Direct Message</Text>
+              <TouchableOpacity onPress={() => setPickerOpen(false)}>
+                <Feather name="x" size={22} color={colors.mutedForeground} />
+              </TouchableOpacity>
+            </View>
+            <View style={[s.searchRow, { borderColor: colors.border, backgroundColor: colors.card }]}>
+              <Feather name="search" size={16} color={colors.mutedForeground} />
+              <TextInput
+                style={[s.searchInput, { color: colors.foreground }]}
+                placeholder="Search people..."
+                placeholderTextColor={colors.mutedForeground}
+                value={userSearch}
+                onChangeText={setUserSearch}
+                autoFocus={Platform.OS === "web"}
+              />
+            </View>
+            {usersLoading ? (
+              <View style={s.center}><ActivityIndicator color={colors.primary} /></View>
+            ) : (
+              <FlatList
+                data={filteredUsers}
+                keyExtractor={(u) => u.id}
+                contentContainerStyle={{ padding: 16, gap: 6 }}
+                renderItem={({ item }) => {
+                  const name = `${item.firstName} ${item.lastName}`;
+                  return (
+                    <TouchableOpacity
+                      style={[s.userRow, { backgroundColor: colors.card, borderColor: colors.border }]}
+                      onPress={() => startDirect(item.id, name)}
+                      activeOpacity={0.75}
+                    >
+                      <View style={[s.roomIcon, { backgroundColor: colors.primary + "22" }]}>
+                        <Text style={{ color: colors.primary, fontWeight: "700", fontSize: 13 }}>
+                          {`${item.firstName[0]}${item.lastName[0]}`.toUpperCase()}
+                        </Text>
+                      </View>
+                      <View style={{ flex: 1 }}>
+                        <Text style={[s.userName, { color: colors.foreground }]}>{name}</Text>
+                        <Text style={[s.userRole, { color: colors.mutedForeground }]}>
+                          {item.role === "admin" ? "Admin" : "Officer"}
+                        </Text>
+                      </View>
+                      <Feather name="message-square" size={18} color={colors.primary} />
+                    </TouchableOpacity>
+                  );
+                }}
+                ListEmptyComponent={() => (
+                  <Text style={[s.lastMsg, { color: colors.mutedForeground, textAlign: "center", marginTop: 32 }]}>
+                    No people found
+                  </Text>
+                )}
+              />
+            )}
+          </SafeAreaView>
+        </View>
+      </Modal>
     </SafeAreaView>
   );
 }
@@ -151,22 +297,48 @@ const styles = (colors: ReturnType<typeof useColors>) => StyleSheet.create({
   header: { paddingHorizontal: 16, paddingTop: 16, paddingBottom: 8 },
   title: { fontSize: 24, fontWeight: "700" },
   subtitle: { fontSize: 13, marginTop: 2 },
+  tabs: { flexDirection: "row", borderBottomWidth: 1, marginBottom: 8 },
+  tab: { flex: 1, paddingVertical: 12, alignItems: "center", borderBottomWidth: 2, borderBottomColor: "transparent" },
+  tabText: { fontSize: 14, fontWeight: "600" },
   newRoomRow: {
     flexDirection: "row", alignItems: "center", marginHorizontal: 16, marginBottom: 12,
     borderRadius: 10, borderWidth: 1, paddingHorizontal: 12,
   },
   input: { flex: 1, height: 44, fontSize: 15 },
   addBtn: { paddingLeft: 8 },
-  list: { paddingHorizontal: 16, gap: 8, paddingBottom: 100 },
+  newDmBtn: {
+    flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 8,
+    marginHorizontal: 16, marginBottom: 12, paddingVertical: 12, borderRadius: 10,
+  },
+  newDmText: { color: "#080c18", fontSize: 15, fontWeight: "700" },
+  list: { paddingHorizontal: 16, gap: 8, paddingBottom: 100, flexGrow: 1 },
   roomCard: {
     flexDirection: "row", alignItems: "center", padding: 14,
     borderRadius: 12, borderWidth: 1, gap: 12,
   },
   roomIcon: { width: 40, height: 40, borderRadius: 20, alignItems: "center", justifyContent: "center" },
   roomInfo: { flex: 1 },
-  roomTopRow: { flexDirection: "row", justifyContent: "space-between", alignItems: "center" },
-  roomName: { fontSize: 15, fontWeight: "600" },
+  roomTopRow: { flexDirection: "row", justifyContent: "space-between", alignItems: "center", gap: 8 },
+  roomName: { fontSize: 15, fontWeight: "600", flex: 1 },
   time: { fontSize: 12 },
   lastMsg: { fontSize: 13, marginTop: 2 },
   emptyText: { marginTop: 12, fontSize: 16 },
+  modalBackdrop: { flex: 1, backgroundColor: "#00000088", justifyContent: "flex-end" },
+  modalSheet: { maxHeight: "85%", minHeight: "60%", borderTopLeftRadius: 20, borderTopRightRadius: 20, overflow: "hidden" },
+  modalHeader: {
+    flexDirection: "row", alignItems: "center", justifyContent: "space-between",
+    paddingHorizontal: 16, paddingVertical: 14, borderBottomWidth: 1,
+  },
+  modalTitle: { fontSize: 17, fontWeight: "700" },
+  searchRow: {
+    flexDirection: "row", alignItems: "center", gap: 8,
+    marginHorizontal: 16, marginTop: 12, borderRadius: 10, borderWidth: 1, paddingHorizontal: 12,
+  },
+  searchInput: { flex: 1, height: 42, fontSize: 15 },
+  userRow: {
+    flexDirection: "row", alignItems: "center", padding: 12,
+    borderRadius: 12, borderWidth: 1, gap: 12,
+  },
+  userName: { fontSize: 15, fontWeight: "600" },
+  userRole: { fontSize: 12, marginTop: 2 },
 });

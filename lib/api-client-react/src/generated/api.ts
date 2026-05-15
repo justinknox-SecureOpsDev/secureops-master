@@ -23,11 +23,13 @@ import type {
   AuthResponse,
   ChatMessage,
   ChatRoom,
+  ChatUser,
   Client,
   ClockInRequest,
   ClockOutRequest,
   CreateChatRoomBody,
   CreateClientRequest,
+  CreateDirectChatBody,
   CreateEmployeeRequest,
   CreateIncidentRequest,
   CreateInvoiceRequest,
@@ -4456,6 +4458,167 @@ export const useCreateChatRoom = <
   TContext
 > => {
   return useMutation(getCreateChatRoomMutationOptions(options));
+};
+
+/**
+ * @summary List users available for direct messaging
+ */
+export const getGetChatUsersUrl = () => {
+  return `/api/chat/users`;
+};
+
+export const getChatUsers = async (
+  options?: RequestInit,
+): Promise<ChatUser[]> => {
+  return customFetch<ChatUser[]>(getGetChatUsersUrl(), {
+    ...options,
+    method: "GET",
+  });
+};
+
+export const getGetChatUsersQueryKey = () => {
+  return [`/api/chat/users`] as const;
+};
+
+export const getGetChatUsersQueryOptions = <
+  TData = Awaited<ReturnType<typeof getChatUsers>>,
+  TError = ErrorType<unknown>,
+>(options?: {
+  query?: UseQueryOptions<
+    Awaited<ReturnType<typeof getChatUsers>>,
+    TError,
+    TData
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}) => {
+  const { query: queryOptions, request: requestOptions } = options ?? {};
+
+  const queryKey = queryOptions?.queryKey ?? getGetChatUsersQueryKey();
+
+  const queryFn: QueryFunction<Awaited<ReturnType<typeof getChatUsers>>> = ({
+    signal,
+  }) => getChatUsers({ signal, ...requestOptions });
+
+  return { queryKey, queryFn, ...queryOptions } as UseQueryOptions<
+    Awaited<ReturnType<typeof getChatUsers>>,
+    TError,
+    TData
+  > & { queryKey: QueryKey };
+};
+
+export type GetChatUsersQueryResult = NonNullable<
+  Awaited<ReturnType<typeof getChatUsers>>
+>;
+export type GetChatUsersQueryError = ErrorType<unknown>;
+
+/**
+ * @summary List users available for direct messaging
+ */
+
+export function useGetChatUsers<
+  TData = Awaited<ReturnType<typeof getChatUsers>>,
+  TError = ErrorType<unknown>,
+>(options?: {
+  query?: UseQueryOptions<
+    Awaited<ReturnType<typeof getChatUsers>>,
+    TError,
+    TData
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+  const queryOptions = getGetChatUsersQueryOptions(options);
+
+  const query = useQuery(queryOptions) as UseQueryResult<TData, TError> & {
+    queryKey: QueryKey;
+  };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
+
+/**
+ * @summary Get or create a direct message room with another user
+ */
+export const getCreateDirectChatUrl = () => {
+  return `/api/chat/direct`;
+};
+
+export const createDirectChat = async (
+  createDirectChatBody: CreateDirectChatBody,
+  options?: RequestInit,
+): Promise<ChatRoom> => {
+  return customFetch<ChatRoom>(getCreateDirectChatUrl(), {
+    ...options,
+    method: "POST",
+    headers: { "Content-Type": "application/json", ...options?.headers },
+    body: JSON.stringify(createDirectChatBody),
+  });
+};
+
+export const getCreateDirectChatMutationOptions = <
+  TError = ErrorType<unknown>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof createDirectChat>>,
+    TError,
+    { data: BodyType<CreateDirectChatBody> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof createDirectChat>>,
+  TError,
+  { data: BodyType<CreateDirectChatBody> },
+  TContext
+> => {
+  const mutationKey = ["createDirectChat"];
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof createDirectChat>>,
+    { data: BodyType<CreateDirectChatBody> }
+  > = (props) => {
+    const { data } = props ?? {};
+
+    return createDirectChat(data, requestOptions);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type CreateDirectChatMutationResult = NonNullable<
+  Awaited<ReturnType<typeof createDirectChat>>
+>;
+export type CreateDirectChatMutationBody = BodyType<CreateDirectChatBody>;
+export type CreateDirectChatMutationError = ErrorType<unknown>;
+
+/**
+ * @summary Get or create a direct message room with another user
+ */
+export const useCreateDirectChat = <
+  TError = ErrorType<unknown>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof createDirectChat>>,
+    TError,
+    { data: BodyType<CreateDirectChatBody> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationResult<
+  Awaited<ReturnType<typeof createDirectChat>>,
+  TError,
+  { data: BodyType<CreateDirectChatBody> },
+  TContext
+> => {
+  return useMutation(getCreateDirectChatMutationOptions(options));
 };
 
 /**

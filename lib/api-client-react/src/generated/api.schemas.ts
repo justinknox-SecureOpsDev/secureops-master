@@ -741,9 +741,19 @@ export interface ChatRoom {
   name: string;
   type: string;
   shiftId?: string | null;
+  directKey?: string | null;
+  otherUserId?: string | null;
+  otherUserName?: string | null;
   createdAt: string;
   lastMessage?: ChatRoomLastMessage;
   messageCount: number;
+}
+
+export interface ChatUser {
+  id: string;
+  firstName: string;
+  lastName: string;
+  role: string;
 }
 
 export interface ChatMessage {
@@ -889,6 +899,10 @@ export type CreateChatRoomBody = {
   name: string;
   type?: string;
   shiftId?: string;
+};
+
+export type CreateDirectChatBody = {
+  otherUserId: string;
 };
 
 export type GetChatMessagesParams = {

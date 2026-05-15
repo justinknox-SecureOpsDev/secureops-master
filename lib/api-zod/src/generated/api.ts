@@ -1456,6 +1456,9 @@ export const GetChatRoomsResponseItem = zod.object({
   name: zod.string(),
   type: zod.string(),
   shiftId: zod.string().nullish(),
+  directKey: zod.string().nullish(),
+  otherUserId: zod.string().nullish(),
+  otherUserName: zod.string().nullish(),
   createdAt: zod.string(),
   lastMessage: zod
     .object({
@@ -1475,6 +1478,43 @@ export const CreateChatRoomBody = zod.object({
   name: zod.string(),
   type: zod.string().optional(),
   shiftId: zod.string().optional(),
+});
+
+/**
+ * @summary List users available for direct messaging
+ */
+export const GetChatUsersResponseItem = zod.object({
+  id: zod.string(),
+  firstName: zod.string(),
+  lastName: zod.string(),
+  role: zod.string(),
+});
+export const GetChatUsersResponse = zod.array(GetChatUsersResponseItem);
+
+/**
+ * @summary Get or create a direct message room with another user
+ */
+export const CreateDirectChatBody = zod.object({
+  otherUserId: zod.string(),
+});
+
+export const CreateDirectChatResponse = zod.object({
+  id: zod.string(),
+  name: zod.string(),
+  type: zod.string(),
+  shiftId: zod.string().nullish(),
+  directKey: zod.string().nullish(),
+  otherUserId: zod.string().nullish(),
+  otherUserName: zod.string().nullish(),
+  createdAt: zod.string(),
+  lastMessage: zod
+    .object({
+      content: zod.string().optional(),
+      createdAt: zod.string().optional(),
+      userName: zod.string().optional(),
+    })
+    .nullish(),
+  messageCount: zod.number(),
 });
 
 /**
