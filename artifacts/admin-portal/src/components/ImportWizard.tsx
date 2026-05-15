@@ -11,7 +11,7 @@ import { api } from "@/lib/api";
 import type { TableDescriptor, Field } from "@/lib/tables";
 import { useFkOptions, invalidateFk, loadFkRows } from "@/lib/fk";
 import { getTable, getImportMatchByLabelFields } from "@/lib/tables";
-import { autoMap, buildErrorCsv, coerceCell, readSpreadsheet, type ParsedSheet } from "@/lib/import";
+import { autoMap, buildErrorCsv, coerceCell, getImportableFields, readSpreadsheet, type ParsedSheet } from "@/lib/import";
 
 /** Normalize a raw cell value to a comparable lookup key. */
 function normalizeKey(v: unknown): string {
@@ -82,7 +82,10 @@ export function ImportWizard({
   descriptor: TableDescriptor;
   onDone: () => void;
 }) {
-  const writableFields = descriptor.fields.filter((f) => !f.readonly && !f.virtual);
+  // Importable fields exclude file-upload columns (fileKey / fileKeyList) —
+  // those require object-storage uploads, not spreadsheet text, so they're
+  // hidden from the template, mapping UI, defaults, and preview.
+  const writableFields = getImportableFields(descriptor);
   const fkFields = writableFields.filter((f) => f.type === "fk" && f.fkTable);
   const [step, setStep] = useState<Step>("upload");
   const [sheet, setSheet] = useState<ParsedSheet | null>(null);

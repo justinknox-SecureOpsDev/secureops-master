@@ -52,6 +52,11 @@ export type Field = {
   /** Optional section header label rendered above this field in the row dialog.
    *  Lets long forms (e.g. employees) be visually grouped (Identity / Licence / Pay …). */
   section?: string;
+  /** Sample value written into the second row of the downloadable XLSX
+   *  template so admins can see the expected format. Falls back to a
+   *  generic per-type sample when omitted. Ignored entirely for field
+   *  types that aren't supported by Excel import (e.g. file uploads). */
+  importExample?: string;
 };
 
 export type TableDescriptor = {
@@ -122,18 +127,18 @@ export const TABLES: TableDescriptor[] = [
     primaryLabelField: "phone",
     fields: [
       { key: "id", label: "ID", type: "text", readonly: true, hiddenInGrid: true, section: "Identity" },
-      { key: "userId", label: "User", type: "fk", fkTable: "users", fkLabel: "email", required: true, section: "Identity" },
+      { key: "userId", label: "User", type: "fk", fkTable: "users", fkLabel: "email", required: true, section: "Identity", importResolveByLabel: true, importExample: "name@example.com" },
       // --- Contact ---
-      { key: "phone", label: "Phone", type: "text", section: "Contact & Identity" },
-      { key: "address", label: "Address", type: "textarea", hiddenInGrid: true },
-      { key: "dateOfBirth", label: "Date of Birth", type: "date", hiddenInGrid: true },
-      { key: "cityOfBirth", label: "City of Birth", type: "text", hiddenInGrid: true },
-      { key: "stateOfBirth", label: "State of Birth", type: "text", hiddenInGrid: true },
+      { key: "phone", label: "Phone", type: "text", section: "Contact & Identity", importExample: "+1 512 555 0142" },
+      { key: "address", label: "Address", type: "textarea", hiddenInGrid: true, importExample: "123 Main St, Austin, TX 78701" },
+      { key: "dateOfBirth", label: "Date of Birth", type: "date", hiddenInGrid: true, importExample: "1990-04-12" },
+      { key: "cityOfBirth", label: "City of Birth", type: "text", hiddenInGrid: true, importExample: "Houston" },
+      { key: "stateOfBirth", label: "State of Birth", type: "text", hiddenInGrid: true, importExample: "TX" },
       // --- Right to work ---
-      { key: "rightToWorkStatus", label: "Right to Work", type: "text", hiddenInGrid: true, section: "Right to Work" },
+      { key: "rightToWorkStatus", label: "Right to Work", type: "text", hiddenInGrid: true, section: "Right to Work", importExample: "US Citizen" },
       { key: "rightToWorkDocKey", label: "Right-to-Work Doc", type: "fileKey", hiddenInGrid: true },
       // --- TX Security License (visible — admins must update this) ---
-      { key: "siaLicenseNumber", label: "Licence #", type: "text", section: "TX Security Licence" },
+      { key: "siaLicenseNumber", label: "Licence #", type: "text", section: "TX Security Licence", importExample: "TX-SEC-123456" },
       {
         key: "siaLicenseLevel", label: "Licence Level", type: "select",
         options: [
@@ -142,39 +147,39 @@ export const TABLES: TableDescriptor[] = [
           { label: "Level 4 (PPO)", value: "4" },
         ],
       },
-      { key: "siaLicenseExpiry", label: "Licence Expiry", type: "date" },
+      { key: "siaLicenseExpiry", label: "Licence Expiry", type: "date", importExample: "2027-06-30" },
       { key: "licenseDocKey", label: "Licence Doc", type: "fileKey" },
       { key: "passportDocKey", label: "Passport Doc", type: "fileKey", hiddenInGrid: true },
       // --- Experience ---
-      { key: "yearsExperience", label: "Years Exp.", type: "integer", hiddenInGrid: true, section: "Experience & References" },
-      { key: "previousExperience", label: "Previous Experience", type: "textarea", hiddenInGrid: true },
-      { key: "references", label: "References", type: "json", hiddenInGrid: true },
+      { key: "yearsExperience", label: "Years Exp.", type: "integer", hiddenInGrid: true, section: "Experience & References", importExample: "5" },
+      { key: "previousExperience", label: "Previous Experience", type: "textarea", hiddenInGrid: true, importExample: "3 years event security at Acme Stadium" },
+      { key: "references", label: "References", type: "json", hiddenInGrid: true, importExample: '[{"name":"Jane Doe","phone":"+1 512 555 0199","relationship":"Former supervisor"}]' },
       // --- Personal docs ---
       { key: "photoKey", label: "Photo", type: "fileKey", hiddenInGrid: true, section: "Personal Documents" },
       { key: "cvKey", label: "Résumé / CV", type: "fileKey", hiddenInGrid: true },
       { key: "trainingCertificateKeys", label: "Training Certificates", type: "fileKeyList", hiddenInGrid: true },
-      { key: "availability", label: "Weekly Availability", type: "json", hiddenInGrid: true },
+      { key: "availability", label: "Weekly Availability", type: "json", hiddenInGrid: true, importExample: '{"mon":["am","pm"],"tue":["pm"],"wed":[],"thu":["am","pm","night"],"fri":["night"],"sat":["pm","night"],"sun":[]}' },
       // --- Emergency contact ---
-      { key: "emergencyContactName", label: "Emergency Contact", type: "text", hiddenInGrid: true, section: "Emergency Contact" },
-      { key: "emergencyContactRelationship", label: "Emergency Relationship", type: "text", hiddenInGrid: true },
-      { key: "emergencyContactPhone", label: "Emergency Phone", type: "text", hiddenInGrid: true },
+      { key: "emergencyContactName", label: "Emergency Contact", type: "text", hiddenInGrid: true, section: "Emergency Contact", importExample: "John Doe" },
+      { key: "emergencyContactRelationship", label: "Emergency Relationship", type: "text", hiddenInGrid: true, importExample: "Spouse" },
+      { key: "emergencyContactPhone", label: "Emergency Phone", type: "text", hiddenInGrid: true, importExample: "+1 512 555 0177" },
       // --- Pay & banking ---
-      { key: "hourlyRate", label: "Hourly Rate ($)", type: "number", section: "Pay & Banking" },
-      { key: "bankAccountName", label: "Bank Acct Name", type: "text", hiddenInGrid: true },
-      { key: "bankAccountNumber", label: "Bank Acct #", type: "text", hiddenInGrid: true },
-      { key: "bankBsb", label: "Routing/Sort Code", type: "text", hiddenInGrid: true },
-      { key: "niNumber", label: "SSN (last 4)", type: "text", hiddenInGrid: true },
-      { key: "taxCode", label: "Tax Code", type: "text", hiddenInGrid: true },
+      { key: "hourlyRate", label: "Hourly Rate ($)", type: "number", section: "Pay & Banking", importExample: "22.50" },
+      { key: "bankAccountName", label: "Bank Acct Name", type: "text", hiddenInGrid: true, importExample: "Jane M Smith" },
+      { key: "bankAccountNumber", label: "Bank Acct #", type: "text", hiddenInGrid: true, importExample: "000123456789" },
+      { key: "bankBsb", label: "Routing/Sort Code", type: "text", hiddenInGrid: true, importExample: "111000025" },
+      { key: "niNumber", label: "SSN (last 4)", type: "text", hiddenInGrid: true, importExample: "1234" },
+      { key: "taxCode", label: "Tax Code", type: "text", hiddenInGrid: true, importExample: "S-0" },
       { key: "payStubDocKey", label: "W-2 / Pay Stub", type: "fileKey", hiddenInGrid: true },
       // --- Uniform sizes ---
-      { key: "uniformShirt", label: "Uniform Shirt", type: "text", hiddenInGrid: true, section: "Uniform Sizes" },
-      { key: "uniformTrousers", label: "Uniform Trousers", type: "text", hiddenInGrid: true },
-      { key: "uniformJacket", label: "Uniform Jacket", type: "text", hiddenInGrid: true },
-      { key: "uniformBoots", label: "Uniform Boots", type: "text", hiddenInGrid: true },
+      { key: "uniformShirt", label: "Uniform Shirt", type: "text", hiddenInGrid: true, section: "Uniform Sizes", importExample: "L" },
+      { key: "uniformTrousers", label: "Uniform Trousers", type: "text", hiddenInGrid: true, importExample: "34x32" },
+      { key: "uniformJacket", label: "Uniform Jacket", type: "text", hiddenInGrid: true, importExample: "L" },
+      { key: "uniformBoots", label: "Uniform Boots", type: "text", hiddenInGrid: true, importExample: "10" },
       // --- Consents & acknowledgements ---
-      { key: "directDepositConsent", label: "Direct Deposit Consent", type: "boolean", hiddenInGrid: true, section: "Consents & Policy Acknowledgements" },
-      { key: "directDepositSignature", label: "Direct Deposit Signature", type: "text", hiddenInGrid: true },
-      { key: "acknowledgements", label: "Policy Acknowledgements", type: "json", hiddenInGrid: true },
+      { key: "directDepositConsent", label: "Direct Deposit Consent", type: "boolean", hiddenInGrid: true, section: "Consents & Policy Acknowledgements", importExample: "true" },
+      { key: "directDepositSignature", label: "Direct Deposit Signature", type: "text", hiddenInGrid: true, importExample: "Jane M Smith" },
+      { key: "acknowledgements", label: "Policy Acknowledgements", type: "json", hiddenInGrid: true, importExample: '{"drugFree":true,"uniform":true,"nda":true,"contract":true}' },
       // --- HR pipeline links (read-only) ---
       { key: "applicationId", label: "Application", type: "text", readonly: true, hiddenInGrid: true, section: "HR Pipeline (read-only)" },
       { key: "onboardingSubmissionId", label: "Onboarding Submission", type: "text", readonly: true, hiddenInGrid: true },

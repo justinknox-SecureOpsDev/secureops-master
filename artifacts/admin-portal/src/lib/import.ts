@@ -1,5 +1,18 @@
 import * as XLSX from "xlsx";
-import type { TableDescriptor, Field } from "./tables";
+import type { TableDescriptor, Field, FieldType } from "./tables";
+
+/** Field types that require uploads, not text — excluded from the Excel
+ *  import flow (template, mapping, validation). Admins still edit these
+ *  per-row from the row dialog after the bulk-imported records exist. */
+const NON_IMPORTABLE_TYPES: ReadonlySet<FieldType> = new Set(["fileKey", "fileKeyList"]);
+
+/** Fields that participate in the Excel import: writable (not readonly /
+ *  virtual) and not a file-upload type. */
+export function getImportableFields(descriptor: TableDescriptor): Field[] {
+  return descriptor.fields.filter(
+    (f) => !f.readonly && !f.virtual && !NON_IMPORTABLE_TYPES.has(f.type),
+  );
+}
 
 export type ParsedSheet = {
   headers: string[];
@@ -55,7 +68,7 @@ function isTemplateHintRow(
   for (const v of Object.values(row)) {
     if (typeof v === "string" && v.startsWith(TEMPLATE_HINT_MARKER)) return true;
   }
-  const fields = descriptor.fields.filter((f) => !f.readonly && !f.virtual);
+  const fields = getImportableFields(descriptor);
   const byLabel = new Map(fields.map((f) => [f.label, f]));
   let matched = 0;
   let nonEmpty = 0;
@@ -75,7 +88,7 @@ function isTemplateHintRow(
 }
 
 export function downloadTemplateXlsx(descriptor: TableDescriptor): void {
-  const fields = descriptor.fields.filter((f) => !f.readonly && !f.virtual);
+  const fields = getImportableFields(descriptor);
   const headers = fields.map((f) => f.label);
   const sampleRow = fields.map((f) => sampleFor(f));
   const ws = XLSX.utils.aoa_to_sheet([headers, sampleRow]);
@@ -97,6 +110,7 @@ export function downloadTemplateXlsx(descriptor: TableDescriptor): void {
 }
 
 function sampleFor(f: Field): string {
+  if (f.importExample !== undefined) return f.importExample;
   switch (f.type) {
     case "email": return "name@example.com";
     case "number": return "0.00";
