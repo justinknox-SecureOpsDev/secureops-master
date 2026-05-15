@@ -1,6 +1,7 @@
 import React, { useState } from "react";
-import { View, Text, StyleSheet, FlatList, TouchableOpacity, ActivityIndicator, Platform, Alert } from "react-native";
+import { View, Text, StyleSheet, FlatList, TouchableOpacity, ActivityIndicator, Platform } from "react-native";
 import { useColors } from "@/hooks/useColors";
+import { confirmAction, notify } from "@/utils/confirm";
 import {
   useGetShifts, getGetShiftsQueryKey,
   useGetMe, getGetMeQueryKey,
@@ -48,31 +49,25 @@ export default function EmployeeShiftsScreen() {
 
   const statusColor: Record<string, string> = { upcoming: colors.primary, active: "#22c55e", completed: colors.mutedForeground };
 
-  const handleClaim = (shift: any) => {
-    Alert.alert(
-      "Reserve This Shift",
-      `${shift.title} @ ${shift.clientName}\n\nReserving books you onto this shift. You can release it later if you can't make it.`,
-      [
-        { text: "Cancel", style: "cancel" },
-        {
-          text: "Reserve",
-          onPress: async () => {
-            setBusyId(shift.id);
-            try {
-              await claimShift(shift.id);
-              await queryClient.invalidateQueries({ queryKey: getGetShiftsQueryKey() });
-              setFilter("upcoming");
-              Alert.alert("Shift Reserved", "You're booked. See it under 'Upcoming'.");
-            } catch (e: any) {
-              const msg = e?.response?.data?.message || e?.message || "Could not reserve this shift.";
-              Alert.alert("Reservation Failed", msg);
-            } finally {
-              setBusyId(null);
-            }
-          },
-        },
-      ]
-    );
+  const handleClaim = async (shift: any) => {
+    const ok = await confirmAction({
+      title: "Reserve This Shift",
+      message: `${shift.title} @ ${shift.clientName}\n\nReserving books you onto this shift. You can release it later if you can't make it.`,
+      confirmText: "Reserve",
+    });
+    if (!ok) return;
+    setBusyId(shift.id);
+    try {
+      await claimShift(shift.id);
+      await queryClient.invalidateQueries({ queryKey: getGetShiftsQueryKey() });
+      setFilter("upcoming");
+      notify("Shift Reserved", "You're booked. See it under 'Upcoming'.");
+    } catch (e: any) {
+      const msg = e?.response?.data?.message || e?.message || "Could not reserve this shift.";
+      notify("Reservation Failed", msg);
+    } finally {
+      setBusyId(null);
+    }
   };
 
   const handleAccept = async (shift: any, assignmentId: string) => {
@@ -81,35 +76,29 @@ export default function EmployeeShiftsScreen() {
       await updateAssignment.mutateAsync({ id: shift.id, assignmentId, data: { status: "accepted" } });
       await queryClient.invalidateQueries({ queryKey: getGetShiftsQueryKey() });
     } catch (e: any) {
-      Alert.alert("Failed", e?.response?.data?.message || e?.message || "Could not accept shift.");
+      notify("Failed", e?.response?.data?.message || e?.message || "Could not accept shift.");
     } finally {
       setBusyId(null);
     }
   };
 
-  const handleDecline = (shift: any, assignmentId: string) => {
-    Alert.alert(
-      "Decline Shift?",
-      `Releasing ${shift.title} will free the slot for another officer. This will be visible to admin.`,
-      [
-        { text: "Keep", style: "cancel" },
-        {
-          text: "Decline",
-          style: "destructive",
-          onPress: async () => {
-            setBusyId(shift.id);
-            try {
-              await updateAssignment.mutateAsync({ id: shift.id, assignmentId, data: { status: "declined" } });
-              await queryClient.invalidateQueries({ queryKey: getGetShiftsQueryKey() });
-            } catch (e: any) {
-              Alert.alert("Failed", e?.response?.data?.message || e?.message || "Could not decline shift.");
-            } finally {
-              setBusyId(null);
-            }
-          },
-        },
-      ]
-    );
+  const handleDecline = async (shift: any, assignmentId: string) => {
+    const ok = await confirmAction({
+      title: "Release This Shift?",
+      message: `Releasing ${shift.title} will free the slot for another officer. This will be visible to admin.`,
+      confirmText: "Release",
+      destructive: true,
+    });
+    if (!ok) return;
+    setBusyId(shift.id);
+    try {
+      await updateAssignment.mutateAsync({ id: shift.id, assignmentId, data: { status: "declined" } });
+      await queryClient.invalidateQueries({ queryKey: getGetShiftsQueryKey() });
+    } catch (e: any) {
+      notify("Failed", e?.response?.data?.message || e?.message || "Could not release shift.");
+    } finally {
+      setBusyId(null);
+    }
   };
 
   return (

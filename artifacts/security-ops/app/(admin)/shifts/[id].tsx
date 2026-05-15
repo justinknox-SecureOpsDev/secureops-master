@@ -1,6 +1,7 @@
 import React from "react";
-import { View, Text, StyleSheet, ScrollView, TouchableOpacity, ActivityIndicator, Alert, Platform } from "react-native";
+import { View, Text, StyleSheet, ScrollView, TouchableOpacity, ActivityIndicator, Platform } from "react-native";
 import { useColors } from "@/hooks/useColors";
+import { confirmAction, notify } from "@/utils/confirm";
 import { useGetShift, getGetShiftQueryKey, useGetEmployees, getGetEmployeesQueryKey, useAssignEmployeeToShift, useUpdateShiftAssignment, getGetShiftsQueryKey } from "@workspace/api-client-react";
 import { LicenseLevelBadge, levelLabel } from "@/components/LicenseLevelBadge";
 import { Feather } from "@expo/vector-icons";
@@ -41,33 +42,29 @@ export default function ShiftDetailScreen() {
 
   const assignedIds = new Set((shift?.assignments ?? []).map((a) => a.employeeId));
 
-  const handleAssign = (employeeId: string, name: string) => {
-    Alert.alert("Assign Officer", `Assign ${name} to this shift?`, [
-      { text: "Cancel", style: "cancel" },
-      {
-        text: "Assign", onPress: async () => {
-          try {
-            await assignMutation.mutateAsync({ id: id!, data: { employeeId } });
-            queryClient.invalidateQueries({ queryKey: getGetShiftQueryKey(id!) });
-          } catch (e: any) {
-            const msg = e?.response?.data?.message || e?.message || "Failed to assign";
-            Alert.alert("Cannot Assign", msg);
-          }
-        }
-      }
-    ]);
+  const handleAssign = async (employeeId: string, name: string) => {
+    const ok = await confirmAction({ title: "Assign Officer", message: `Assign ${name} to this shift?`, confirmText: "Assign" });
+    if (!ok) return;
+    try {
+      await assignMutation.mutateAsync({ id: id!, data: { employeeId } });
+      queryClient.invalidateQueries({ queryKey: getGetShiftQueryKey(id!) });
+      queryClient.invalidateQueries({ queryKey: getGetShiftsQueryKey() });
+    } catch (e: any) {
+      const msg = e?.response?.data?.message || e?.message || "Failed to assign";
+      notify("Cannot Assign", msg);
+    }
   };
 
-  const handleRemove = (assignmentId: string, name: string) => {
-    Alert.alert("Remove Assignment", `Remove ${name} from this shift?`, [
-      { text: "Cancel", style: "cancel" },
-      {
-        text: "Remove", style: "destructive", onPress: async () => {
-          await removeMutation.mutateAsync({ id: id!, assignmentId, data: { status: "declined" } as any });
-          queryClient.invalidateQueries({ queryKey: getGetShiftQueryKey(id!) });
-        }
-      }
-    ]);
+  const handleRemove = async (assignmentId: string, name: string) => {
+    const ok = await confirmAction({ title: "Remove Assignment", message: `Remove ${name} from this shift?`, confirmText: "Remove", destructive: true });
+    if (!ok) return;
+    try {
+      await removeMutation.mutateAsync({ id: id!, assignmentId, data: { status: "declined" } as any });
+      queryClient.invalidateQueries({ queryKey: getGetShiftQueryKey(id!) });
+      queryClient.invalidateQueries({ queryKey: getGetShiftsQueryKey() });
+    } catch (e: any) {
+      notify("Failed", e?.response?.data?.message || e?.message || "Could not remove");
+    }
   };
 
   const statusColor = (s: string) => {
