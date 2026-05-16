@@ -1,10 +1,66 @@
 import { Router, type IRouter } from "express";
 import { eq, desc, asc, sql, and, or, ne } from "drizzle-orm";
-import { db, chatRoomsTable, chatMessagesTable, usersTable } from "@workspace/db";
+import { db, chatRoomsTable, chatMessagesTable, usersTable, type ChatRoom } from "@workspace/db";
 import { requireAuth } from "../middlewares/auth";
 import { broadcastToRoom } from "../lib/wsManager";
 
 const router: IRouter = Router();
+
+/**
+ * Public chat room types — every authenticated user can read and post.
+ * Anything not in this set is treated as private and requires explicit
+ * authorization (fail-closed). Direct messages have their own dedicated
+ * branch via `directKey`.
+ */
+const PUBLIC_ROOM_TYPES = new Set(["general", "shift"]);
+
+/**
+ * Strictly parse a sorted "userIdA:userIdB" directKey. Returns the two
+ * participant IDs only when the key contains exactly two non-empty
+ * segments; otherwise returns null so callers fail closed on malformed
+ * data (e.g. legacy rows or manual DB edits).
+ */
+function parseDirectKey(directKey: string | null | undefined): readonly [string, string] | null {
+  if (!directKey) return null;
+  const parts = directKey.split(":");
+  if (parts.length !== 2) return null;
+  const [a, b] = parts;
+  if (!a || !b) return null;
+  return [a, b] as const;
+}
+
+/**
+ * Authorization model for chat rooms — mirrors the visibility filter used
+ * by `GET /chat/rooms` so the read/write surface matches what the caller
+ * can already list:
+ *
+ *   - `direct`: only the two participants encoded in `directKey`.
+ *   - `general` / `shift`: any authenticated user.
+ *   - any other / unknown type: denied (fail-closed).
+ */
+function isAuthorizedForRoom(userId: string, room: ChatRoom): boolean {
+  if (room.type === "direct") {
+    const participants = parseDirectKey(room.directKey);
+    if (!participants) return false;
+    return userId === participants[0] || userId === participants[1];
+  }
+  return PUBLIC_ROOM_TYPES.has(room.type);
+}
+
+/**
+ * Recipient allow-list for a WebSocket broadcast. Returns `undefined`
+ * (= "every authenticated socket") only for known public rooms. Direct
+ * rooms are restricted to the two participants. Unknown / unrecognised
+ * types fail closed: an empty Set so no socket receives the payload.
+ */
+function recipientsForRoom(room: ChatRoom): Set<string> | undefined {
+  if (room.type === "direct") {
+    const participants = parseDirectKey(room.directKey);
+    return new Set(participants ?? []);
+  }
+  if (PUBLIC_ROOM_TYPES.has(room.type)) return undefined;
+  return new Set<string>();
+}
 
 let generalRoomEnsured = false;
 async function ensureGeneralRoom() {
@@ -120,6 +176,15 @@ router.get("/chat/rooms/:id/messages", requireAuth, async (req, res): Promise<vo
   const limit = parseInt(req.query["limit"] as string || "50", 10);
   const before = req.query["before"] as string | undefined;
 
+  // Membership check — load the room first so we can enforce authorization
+  // before returning any history. Avoids leaking DM contents to non-members.
+  const [room] = await db.select().from(chatRoomsTable).where(eq(chatRoomsTable.id, id)).limit(1);
+  if (!room) { res.status(404).json({ error: "Not Found", message: "Room not found" }); return; }
+  if (!isAuthorizedForRoom(req.user!.userId, room)) {
+    res.status(403).json({ error: "Forbidden", message: "You are not a member of this room" });
+    return;
+  }
+
   const conditions = [eq(chatMessagesTable.roomId, id)];
   if (before) conditions.push(sql`${chatMessagesTable.createdAt} < ${new Date(before)}`);
 
@@ -150,6 +215,10 @@ router.post("/chat/rooms/:id/messages", requireAuth, async (req, res): Promise<v
 
   const [room] = await db.select().from(chatRoomsTable).where(eq(chatRoomsTable.id, id)).limit(1);
   if (!room) { res.status(404).json({ error: "Not Found", message: "Room not found" }); return; }
+  if (!isAuthorizedForRoom(req.user!.userId, room)) {
+    res.status(403).json({ error: "Forbidden", message: "You are not a member of this room" });
+    return;
+  }
 
   const [message] = await db.insert(chatMessagesTable).values({
     roomId: id,
@@ -168,7 +237,10 @@ router.post("/chat/rooms/:id/messages", requireAuth, async (req, res): Promise<v
     },
   };
 
-  broadcastToRoom(id, broadcastPayload);
+  // Restrict the live broadcast to the room's authorized recipients (DMs
+  // only fan out to the two participants). Public rooms remain broadcast
+  // to every authenticated connection.
+  broadcastToRoom(id, broadcastPayload, { allowedUserIds: recipientsForRoom(room) });
   res.status(201).json(broadcastPayload.message);
 });
 

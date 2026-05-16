@@ -18,10 +18,30 @@ let wss: WebSocketServer | null = null;
 
 export function getWss() { return wss; }
 
-export function broadcastToRoom(roomId: string, payload: object, excludeUserId?: string) {
+/**
+ * Send a payload to every socket of every authorized recipient.
+ *
+ * - `allowedUserIds`: required allow-list of user IDs that may receive the
+ *   message. If omitted (legacy callers), the message is treated as
+ *   public-room traffic and broadcast to every authenticated connection.
+ *   Pass an explicit Set for any private-room broadcast (direct messages,
+ *   shift channels, etc.) so non-members never see the payload.
+ * - `excludeUserId`: optional sender ID to skip (typically the message author
+ *   already has the message in their REST response).
+ *
+ * The `roomId` parameter is retained for logging/observability but is NOT
+ * used to look up membership — callers must compute the recipient set.
+ */
+export function broadcastToRoom(
+  _roomId: string,
+  payload: object,
+  opts: { excludeUserId?: string; allowedUserIds?: ReadonlySet<string> } = {},
+) {
   const msg = JSON.stringify(payload);
+  const { excludeUserId, allowedUserIds } = opts;
   for (const [userId, sockets] of connections.entries()) {
     if (excludeUserId && userId === excludeUserId) continue;
+    if (allowedUserIds && !allowedUserIds.has(userId)) continue;
     for (const ws of sockets) {
       if (ws.readyState === WebSocket.OPEN) {
         ws.send(msg);
