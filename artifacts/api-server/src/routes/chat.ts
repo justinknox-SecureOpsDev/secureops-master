@@ -1,18 +1,10 @@
 import { Router, type IRouter } from "express";
 import { eq, desc, asc, sql, and, or, ne } from "drizzle-orm";
-import { db, chatRoomsTable, chatMessagesTable, usersTable, type ChatRoom } from "@workspace/db";
+import { db, chatRoomsTable, chatMessagesTable, usersTable, shiftAssignmentsTable, type ChatRoom } from "@workspace/db";
 import { requireAuth } from "../middlewares/auth";
 import { broadcastToRoom } from "../lib/wsManager";
 
 const router: IRouter = Router();
-
-/**
- * Public chat room types — every authenticated user can read and post.
- * Anything not in this set is treated as private and requires explicit
- * authorization (fail-closed). Direct messages have their own dedicated
- * branch via `directKey`.
- */
-const PUBLIC_ROOM_TYPES = new Set(["general", "shift"]);
 
 /**
  * Strictly parse a sorted "userIdA:userIdB" directKey. Returns the two
@@ -30,36 +22,65 @@ function parseDirectKey(directKey: string | null | undefined): readonly [string,
 }
 
 /**
- * Authorization model for chat rooms — mirrors the visibility filter used
- * by `GET /chat/rooms` so the read/write surface matches what the caller
- * can already list:
+ * Resolve the set of user IDs allowed to read/post in a room. Used as the
+ * single source of truth for both REST authorization and WebSocket
+ * broadcast fan-out so the two paths can never drift.
  *
  *   - `direct`: only the two participants encoded in `directKey`.
- *   - `general` / `shift`: any authenticated user.
- *   - any other / unknown type: denied (fail-closed).
+ *   - `shift`: every admin + every officer with a `shift_assignments` row
+ *              for that shift (regardless of assignment status).
+ *   - `general`: every authenticated user (returns `null` to signal
+ *                "no allow-list, broadcast to all sockets").
+ *   - any other / unknown type: empty Set (fail-closed).
+ *
+ * Returning `null` means "public — every authenticated user". Returning
+ * a Set means "restricted — only these user IDs".
  */
-function isAuthorizedForRoom(userId: string, room: ChatRoom): boolean {
+async function resolveRoomMembers(room: ChatRoom): Promise<Set<string> | null> {
+  if (room.type === "direct") {
+    const participants = parseDirectKey(room.directKey);
+    return new Set(participants ?? []);
+  }
+  if (room.type === "general") {
+    return null;
+  }
+  if (room.type === "shift") {
+    if (!room.shiftId) return new Set<string>();
+    const [admins, assignees] = await Promise.all([
+      db.select({ id: usersTable.id }).from(usersTable).where(eq(usersTable.role, "admin")),
+      db
+        .select({ id: shiftAssignmentsTable.employeeId })
+        .from(shiftAssignmentsTable)
+        .where(eq(shiftAssignmentsTable.shiftId, room.shiftId)),
+    ]);
+    const ids = new Set<string>();
+    for (const a of admins) ids.add(a.id);
+    for (const a of assignees) ids.add(a.id);
+    return ids;
+  }
+  return new Set<string>();
+}
+
+/**
+ * REST authorization check. Admins are always allowed in non-direct rooms
+ * (operational override — admins manage every room and need read access
+ * to investigate incidents). Direct rooms still strictly require
+ * participant identity, even for admins, since DMs are private.
+ */
+async function isAuthorizedForRoom(
+  userId: string,
+  userRole: string | undefined,
+  room: ChatRoom,
+): Promise<boolean> {
   if (room.type === "direct") {
     const participants = parseDirectKey(room.directKey);
     if (!participants) return false;
     return userId === participants[0] || userId === participants[1];
   }
-  return PUBLIC_ROOM_TYPES.has(room.type);
-}
-
-/**
- * Recipient allow-list for a WebSocket broadcast. Returns `undefined`
- * (= "every authenticated socket") only for known public rooms. Direct
- * rooms are restricted to the two participants. Unknown / unrecognised
- * types fail closed: an empty Set so no socket receives the payload.
- */
-function recipientsForRoom(room: ChatRoom): Set<string> | undefined {
-  if (room.type === "direct") {
-    const participants = parseDirectKey(room.directKey);
-    return new Set(participants ?? []);
-  }
-  if (PUBLIC_ROOM_TYPES.has(room.type)) return undefined;
-  return new Set<string>();
+  if (userRole === "admin") return true;
+  const members = await resolveRoomMembers(room);
+  if (members === null) return true;
+  return members.has(userId);
 }
 
 let generalRoomEnsured = false;
@@ -180,7 +201,7 @@ router.get("/chat/rooms/:id/messages", requireAuth, async (req, res): Promise<vo
   // before returning any history. Avoids leaking DM contents to non-members.
   const [room] = await db.select().from(chatRoomsTable).where(eq(chatRoomsTable.id, id)).limit(1);
   if (!room) { res.status(404).json({ error: "Not Found", message: "Room not found" }); return; }
-  if (!isAuthorizedForRoom(req.user!.userId, room)) {
+  if (!(await isAuthorizedForRoom(req.user!.userId, req.user!.role, room))) {
     res.status(403).json({ error: "Forbidden", message: "You are not a member of this room" });
     return;
   }
@@ -215,7 +236,7 @@ router.post("/chat/rooms/:id/messages", requireAuth, async (req, res): Promise<v
 
   const [room] = await db.select().from(chatRoomsTable).where(eq(chatRoomsTable.id, id)).limit(1);
   if (!room) { res.status(404).json({ error: "Not Found", message: "Room not found" }); return; }
-  if (!isAuthorizedForRoom(req.user!.userId, room)) {
+  if (!(await isAuthorizedForRoom(req.user!.userId, req.user!.role, room))) {
     res.status(403).json({ error: "Forbidden", message: "You are not a member of this room" });
     return;
   }
@@ -237,10 +258,12 @@ router.post("/chat/rooms/:id/messages", requireAuth, async (req, res): Promise<v
     },
   };
 
-  // Restrict the live broadcast to the room's authorized recipients (DMs
-  // only fan out to the two participants). Public rooms remain broadcast
-  // to every authenticated connection.
-  broadcastToRoom(id, broadcastPayload, { allowedUserIds: recipientsForRoom(room) });
+  // Restrict the live broadcast to the room's authorized recipients
+  // (DMs → the two participants, shift rooms → admins + assigned officers,
+  // general → all authenticated sockets). Same resolver as the REST
+  // membership check, so the two paths can never drift.
+  const members = await resolveRoomMembers(room);
+  broadcastToRoom(id, broadcastPayload, members === null ? {} : { allowedUserIds: members });
   res.status(201).json(broadcastPayload.message);
 });
 
