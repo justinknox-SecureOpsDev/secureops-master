@@ -24,6 +24,7 @@ import LicenseRenewalsPage from "@/pages/LicenseRenewals";
 import IncidentShareLinksPage from "@/pages/IncidentShareLinks";
 import PublicIncidentPage from "@/pages/PublicIncident";
 import SecurityPage from "@/pages/Security";
+import { DailyReportsPage } from "@/pages/DailyReports";
 import NotFound from "@/pages/not-found";
 
 const queryClient = new QueryClient();
@@ -77,6 +78,7 @@ function Routed() {
         <Route path="/hr/license-renewals" component={LicenseRenewalsPage} />
         <Route path="/incidents/share-links" component={IncidentShareLinksPage} />
         <Route path="/account/security" component={SecurityPage} />
+        <Route path="/dar" component={DailyReportsPage} />
         <Route path="/sites/:id" component={SiteDetailPage} />
         <Route path="/tables/shifts" component={ShiftsPage} />
         <Route path="/tables/:table" component={TablePage} />

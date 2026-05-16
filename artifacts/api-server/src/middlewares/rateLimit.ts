@@ -189,6 +189,25 @@ export const emergencyLimiter: RateLimitRequestHandler = rateLimit({
   },
 });
 
+// POST /me/dar — end-of-shift Daily Activity Report. Officers normally
+// file one per shift; a generous 10/hr/user cap absorbs retries and
+// multi-site split shifts while preventing a compromised account from
+// flooding the admin feed.
+const DAR_PER_USER_MAX = envInt("DAR_RATE_LIMIT_MAX", 10);
+
+export const darWriteLimiter: RateLimitRequestHandler = rateLimit({
+  windowMs: 60 * 60 * 1000,
+  limit: DAR_PER_USER_MAX,
+  standardHeaders: true,
+  legacyHeaders: false,
+  handler: tooMany,
+  keyGenerator: (req) => {
+    const uid = req.user?.userId;
+    if (uid) return `dar:u:${uid}`;
+    return `dar:ip:${ipKeyGenerator(req.ip ?? "")}`;
+  },
+});
+
 // POST /me/location — authenticated location pings from the mobile app.
 // The app pings every ~60s while clocked in, so a generous per-user cap
 // of 30/min still leaves 2x headroom for legitimate retries while

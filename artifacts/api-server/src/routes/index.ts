@@ -26,6 +26,7 @@ import licenseRenewalsRouter from "./licenseRenewals";
 import incidentSharesRouter from "./incidentShares";
 import availabilityRouter from "./availability";
 import patrolRouter from "./patrol";
+import darRouter from "./dar";
 import { auditLogMiddleware } from "../lib/auditLog";
 
 const router: IRouter = Router();
@@ -62,5 +63,6 @@ router.use(licenseRenewalsRouter);
 router.use(incidentSharesRouter);
 router.use(availabilityRouter);
 router.use(patrolRouter);
+router.use(darRouter);
 
 export default router;

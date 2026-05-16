@@ -423,6 +423,19 @@ export default function EmployeeProfileScreen() {
           <Feather name="chevron-right" size={16} color={colors.mutedForeground} />
         </TouchableOpacity>
         <TouchableOpacity
+          onPress={() => router.push("/dar" as any)}
+          style={[styles.actionRow, { borderBottomColor: colors.border }]}
+        >
+          <Feather name="clipboard" size={16} color={colors.accent} />
+          <View style={{ flex: 1 }}>
+            <Text style={{ color: colors.foreground, fontSize: 14, fontWeight: "600" }}>Daily activity report</Text>
+            <Text style={{ color: colors.mutedForeground, fontSize: 12, marginTop: 2 }}>
+              File or review your end-of-shift summaries
+            </Text>
+          </View>
+          <Feather name="chevron-right" size={16} color={colors.mutedForeground} />
+        </TouchableOpacity>
+        <TouchableOpacity
           onPress={() => router.push("/patrol" as any)}
           style={[styles.actionRow, { borderBottomColor: colors.border }]}
         >

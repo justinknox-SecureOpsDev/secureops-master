@@ -105,6 +105,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   ];
 
   const securityLinks: LinkItem[] = [
+    { href: "/dar", label: "Daily Reports", Icon: ClipboardList },
     { href: "/audit-log", label: "Audit Log", Icon: ShieldCheck },
     { href: "/swap-requests", label: "Swap Requests", Icon: Repeat },
     { href: "/incidents/share-links", label: "Incident shares", Icon: Link2 },
