@@ -4,6 +4,7 @@ import { logger } from "./lib/logger";
 import { attachWebSocketServer } from "./lib/wsManager";
 import { seedPolicies, backfillEmployeeProfileFields } from "@workspace/db";
 import { seedDemoUsers } from "./lib/seedDemoUsers";
+import { seedChatRooms } from "./lib/seedChatRooms";
 import { startScheduledJobs } from "./lib/scheduledJobs";
 
 const rawPort = process.env["PORT"];
@@ -66,6 +67,12 @@ backfillEmployeeProfileFields()
 seedDemoUsers()
   .then(() => logger.info("Demo users ensured"))
   .catch((err) => logger.error({ err }, "Failed to seed demo users"));
+
+// Idempotently seed the canonical chat channel set (announcements,
+// per-license-level rooms, OPS, city rooms, elite, one-per-site).
+seedChatRooms()
+  .then(() => logger.info("Canonical chat rooms ensured"))
+  .catch((err) => logger.error({ err }, "Failed to seed canonical chat rooms"));
 
 server.on("error", (err) => {
   logger.error({ err }, "Server error");

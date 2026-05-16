@@ -1,16 +1,22 @@
 import { Router, type IRouter } from "express";
-import { eq, desc, asc, sql, and, or, ne } from "drizzle-orm";
-import { db, chatRoomsTable, chatMessagesTable, usersTable, shiftAssignmentsTable, type ChatRoom } from "@workspace/db";
-import { requireAuth } from "../middlewares/auth";
+import { eq, desc, asc, sql, and, or, ne, inArray } from "drizzle-orm";
+import {
+  db,
+  chatRoomsTable,
+  chatMessagesTable,
+  chatRoomMembershipsTable,
+  usersTable,
+  licensesTable,
+  sitesTable,
+  type ChatRoom,
+} from "@workspace/db";
+import { requireAuth, requireAdmin } from "../middlewares/auth";
 import { broadcastToRoom } from "../lib/wsManager";
 
 const router: IRouter = Router();
 
 /**
- * Strictly parse a sorted "userIdA:userIdB" directKey. Returns the two
- * participant IDs only when the key contains exactly two non-empty
- * segments; otherwise returns null so callers fail closed on malformed
- * data (e.g. legacy rows or manual DB edits).
+ * Strictly parse a sorted "userIdA:userIdB" directKey.
  */
 function parseDirectKey(directKey: string | null | undefined): readonly [string, string] | null {
   if (!directKey) return null;
@@ -21,51 +27,100 @@ function parseDirectKey(directKey: string | null | undefined): readonly [string,
   return [a, b] as const;
 }
 
-/**
- * Resolve the set of user IDs allowed to read/post in a room. Used as the
- * single source of truth for both REST authorization and WebSocket
- * broadcast fan-out so the two paths can never drift.
- *
- *   - `direct`: only the two participants encoded in `directKey`.
- *   - `shift`: every admin + every officer with a `shift_assignments` row
- *              for that shift (regardless of assignment status).
- *   - `general`: every authenticated user (returns `null` to signal
- *                "no allow-list, broadcast to all sockets").
- *   - any other / unknown type: empty Set (fail-closed).
- *
- * Returning `null` means "public — every authenticated user". Returning
- * a Set means "restricted — only these user IDs".
- */
-async function resolveRoomMembers(room: ChatRoom): Promise<Set<string> | null> {
-  if (room.type === "direct") {
-    const participants = parseDirectKey(room.directKey);
-    return new Set(participants ?? []);
-  }
-  if (room.type === "general") {
-    return null;
-  }
-  if (room.type === "shift") {
-    if (!room.shiftId) return new Set<string>();
-    const [admins, assignees] = await Promise.all([
-      db.select({ id: usersTable.id }).from(usersTable).where(eq(usersTable.role, "admin")),
-      db
-        .select({ id: shiftAssignmentsTable.employeeId })
-        .from(shiftAssignmentsTable)
-        .where(eq(shiftAssignmentsTable.shiftId, room.shiftId)),
-    ]);
-    const ids = new Set<string>();
-    for (const a of admins) ids.add(a.id);
-    for (const a of assignees) ids.add(a.id);
-    return ids;
-  }
-  return new Set<string>();
+function directKeyFor(a: string, b: string): string {
+  return [a, b].sort().join(":");
 }
 
 /**
- * REST authorization check. Admins are always allowed in non-direct rooms
- * (operational override — admins manage every room and need read access
- * to investigate incidents). Direct rooms still strictly require
- * participant identity, even for admins, since DMs are private.
+ * Resolve the set of user IDs allowed to read/post in a room. Single
+ * source of truth for REST auth + WebSocket broadcast fan-out.
+ *
+ * Returns `null` to mean "every authenticated user" (announcements only).
+ * Returns a Set otherwise. Admins are added to every non-direct set so
+ * admin oversight is consistent (DMs stay strictly between participants).
+ */
+async function resolveRoomMembers(room: ChatRoom): Promise<Set<string> | null> {
+  if (room.type === "direct") {
+    const parts = parseDirectKey(room.directKey);
+    return new Set(parts ?? []);
+  }
+  if (room.type === "announcements" || room.type === "general") {
+    return null;
+  }
+
+  const admins = await db
+    .select({ id: usersTable.id })
+    .from(usersTable)
+    .where(eq(usersTable.role, "admin"));
+  const ids = new Set<string>(admins.map((a) => a.id));
+
+  if (room.type === "ops") {
+    return ids; // admins only
+  }
+
+  if (room.type === "license_level" && room.licenseLevel != null) {
+    // Officers whose max unexpired license level meets the threshold.
+    const today = new Date();
+    const rows = await db
+      .select({
+        userId: licensesTable.employeeId,
+        maxLevel: sql<number>`MAX(${licensesTable.level})::int`,
+      })
+      .from(licensesTable)
+      .where(sql`${licensesTable.expiryDate} >= ${today}`)
+      .groupBy(licensesTable.employeeId);
+    for (const r of rows) {
+      if ((r.maxLevel ?? 0) >= room.licenseLevel) ids.add(r.userId);
+    }
+    return ids;
+  }
+
+  if (room.type === "site" && room.siteId) {
+    const [site] = await db.select().from(sitesTable).where(eq(sitesTable.id, room.siteId)).limit(1);
+    if (!site) return ids;
+    // Each shift has its own requiredLicenseLevel; for a site channel we
+    // gate on the lowest shift level posted at that site (any officer who
+    // could work any shift here should be in the channel). Fall back to 2
+    // if the site has no shifts yet.
+    const [{ minLevel }] = (await db.execute(sql`
+      SELECT COALESCE(MIN(required_license_level), 2)::int AS "minLevel"
+      FROM shifts WHERE site_id = ${room.siteId}
+    `)).rows as { minLevel: number }[];
+    const today = new Date();
+    const rows = await db
+      .select({
+        userId: licensesTable.employeeId,
+        maxLevel: sql<number>`MAX(${licensesTable.level})::int`,
+      })
+      .from(licensesTable)
+      .where(sql`${licensesTable.expiryDate} >= ${today}`)
+      .groupBy(licensesTable.employeeId);
+    for (const r of rows) {
+      if ((r.maxLevel ?? 0) >= (minLevel ?? 2)) ids.add(r.userId);
+    }
+    return ids;
+  }
+
+  if (room.type === "city" || room.type === "elite") {
+    const explicit = await db
+      .select({ userId: chatRoomMembershipsTable.userId })
+      .from(chatRoomMembershipsTable)
+      .where(and(
+        eq(chatRoomMembershipsTable.roomId, room.id),
+        inArray(chatRoomMembershipsTable.status, ["active", "invited"]),
+      ));
+    for (const r of explicit) ids.add(r.userId);
+    return ids;
+  }
+
+  // Unknown / legacy types (e.g. old `shift` rooms) → admins only,
+  // fail-closed so leftover data never leaks.
+  return ids;
+}
+
+/**
+ * Per-user "can this user read/post" view of resolveRoomMembers.
+ * Admins always pass (except DMs).
  */
 async function isAuthorizedForRoom(
   userId: string,
@@ -73,9 +128,9 @@ async function isAuthorizedForRoom(
   room: ChatRoom,
 ): Promise<boolean> {
   if (room.type === "direct") {
-    const participants = parseDirectKey(room.directKey);
-    if (!participants) return false;
-    return userId === participants[0] || userId === participants[1];
+    const parts = parseDirectKey(room.directKey);
+    if (!parts) return false;
+    return userId === parts[0] || userId === parts[1];
   }
   if (userRole === "admin") return true;
   const members = await resolveRoomMembers(room);
@@ -83,23 +138,10 @@ async function isAuthorizedForRoom(
   return members.has(userId);
 }
 
-let generalRoomEnsured = false;
-async function ensureGeneralRoom() {
-  if (generalRoomEnsured) return;
-  const [existing] = await db.select().from(chatRoomsTable).where(eq(chatRoomsTable.type, "general")).limit(1);
-  if (!existing) {
-    await db.insert(chatRoomsTable).values({ name: "General", type: "general" }).onConflictDoNothing();
-  }
-  generalRoomEnsured = true;
-}
+// ============================================================ ROOM LISTING
 
-function directKeyFor(a: string, b: string): string {
-  return [a, b].sort().join(":");
-}
-
-// GET /chat/rooms — channels + DMs the current user participates in
+// GET /chat/rooms — rooms the current user is in (or DMs they're part of)
 router.get("/chat/rooms", requireAuth, async (req, res): Promise<void> => {
-  await ensureGeneralRoom();
   const me = req.user!.userId;
   const myRole = req.user!.role;
 
@@ -112,15 +154,12 @@ router.get("/chat/rooms", requireAuth, async (req, res): Promise<void> => {
     ))
     .orderBy(asc(chatRoomsTable.createdAt));
 
-  // Filter to rooms the user is actually authorized to enter. Without this,
-  // employees see shift rooms they aren't assigned to in their chat list,
-  // tap one, and get a 403 "not a member" from the messages endpoint. Uses
-  // the same isAuthorizedForRoom check as GET /chat/rooms/:id/messages so
-  // the list can never drift from the membership rule.
   const authChecks = await Promise.all(
     candidates.map((room) => isAuthorizedForRoom(me, myRole, room)),
   );
-  const rooms = candidates.filter((_, i) => authChecks[i]);
+  // Hide elite rooms entirely from non-members (invite-only ⇒ not even
+  // visible). City rooms stay visible via the "discoverable" endpoint.
+  const rooms = candidates.filter((room, i) => authChecks[i] && (room.type !== "elite" || authChecks[i]));
 
   const enriched = await Promise.all(
     rooms.map(async (room) => {
@@ -160,15 +199,164 @@ router.get("/chat/rooms", requireAuth, async (req, res): Promise<void> => {
   res.json(enriched);
 });
 
-// POST /chat/rooms — create a channel
-router.post("/chat/rooms", requireAuth, async (req, res): Promise<void> => {
-  const { name, type, shiftId } = req.body as { name: string; type?: string; shiftId?: string };
+// GET /chat/rooms/discoverable — city/elite rooms the user can request to
+// join (or has a pending request to). Returned alongside membership status
+// so the mobile UI can render "Request to join" / "Request pending" badges.
+router.get("/chat/rooms/discoverable", requireAuth, async (req, res): Promise<void> => {
+  const me = req.user!.userId;
+
+  // Only city rooms are discoverable to non-members. Elite is invite-only
+  // and stays hidden until an admin issues an invite (which surfaces it
+  // in GET /chat/rooms automatically).
+  const cityRooms = await db
+    .select()
+    .from(chatRoomsTable)
+    .where(eq(chatRoomsTable.type, "city"))
+    .orderBy(asc(chatRoomsTable.name));
+
+  if (cityRooms.length === 0) { res.json([]); return; }
+
+  const memberships = await db
+    .select()
+    .from(chatRoomMembershipsTable)
+    .where(and(
+      eq(chatRoomMembershipsTable.userId, me),
+      inArray(chatRoomMembershipsTable.roomId, cityRooms.map((r) => r.id)),
+    ));
+  const statusByRoom = new Map(memberships.map((m) => [m.roomId, m.status]));
+
+  res.json(cityRooms.map((r) => ({
+    ...r,
+    membershipStatus: statusByRoom.get(r.id) ?? null, // null = not requested
+  })));
+});
+
+// POST /chat/rooms/:id/join-request — request to join a city room
+router.post("/chat/rooms/:id/join-request", requireAuth, async (req, res): Promise<void> => {
+  const me = req.user!.userId;
+  const id = req.params.id as string;
+  const [room] = await db.select().from(chatRoomsTable).where(eq(chatRoomsTable.id, id)).limit(1);
+  if (!room) { res.status(404).json({ error: "Not Found", message: "Room not found" }); return; }
+  if (room.type !== "city") {
+    res.status(400).json({ error: "Bad Request", message: "Only city rooms accept join requests" });
+    return;
+  }
+  const [existing] = await db
+    .select()
+    .from(chatRoomMembershipsTable)
+    .where(and(eq(chatRoomMembershipsTable.roomId, id), eq(chatRoomMembershipsTable.userId, me)))
+    .limit(1);
+  if (existing) {
+    res.status(200).json(existing);
+    return;
+  }
+  const [created] = await db
+    .insert(chatRoomMembershipsTable)
+    .values({ roomId: id, userId: me, status: "pending" })
+    .returning();
+  res.status(201).json(created);
+});
+
+// ============================================================ ADMIN: REQUESTS
+
+// GET /admin/chat/membership-requests — pending join requests across all rooms
+router.get("/admin/chat/membership-requests", requireAuth, requireAdmin, async (_req, res): Promise<void> => {
+  const rows = await db
+    .select({
+      id: chatRoomMembershipsTable.id,
+      roomId: chatRoomMembershipsTable.roomId,
+      roomName: chatRoomsTable.name,
+      roomType: chatRoomsTable.type,
+      userId: chatRoomMembershipsTable.userId,
+      userName: sql<string>`${usersTable.firstName} || ' ' || ${usersTable.lastName}`,
+      userEmail: usersTable.email,
+      status: chatRoomMembershipsTable.status,
+      requestedAt: chatRoomMembershipsTable.requestedAt,
+    })
+    .from(chatRoomMembershipsTable)
+    .innerJoin(chatRoomsTable, eq(chatRoomsTable.id, chatRoomMembershipsTable.roomId))
+    .innerJoin(usersTable, eq(usersTable.id, chatRoomMembershipsTable.userId))
+    .where(eq(chatRoomMembershipsTable.status, "pending"))
+    .orderBy(desc(chatRoomMembershipsTable.requestedAt));
+  res.json(rows);
+});
+
+// POST /admin/chat/membership-requests/:id/approve
+router.post("/admin/chat/membership-requests/:id/approve", requireAuth, requireAdmin, async (req, res): Promise<void> => {
+  const id = req.params.id as string;
+  const [updated] = await db
+    .update(chatRoomMembershipsTable)
+    .set({ status: "active", decidedAt: new Date(), decidedBy: req.user!.userId })
+    .where(eq(chatRoomMembershipsTable.id, id))
+    .returning();
+  if (!updated) { res.status(404).json({ error: "Not Found", message: "Request not found" }); return; }
+  res.json(updated);
+});
+
+// POST /admin/chat/membership-requests/:id/deny
+router.post("/admin/chat/membership-requests/:id/deny", requireAuth, requireAdmin, async (req, res): Promise<void> => {
+  const id = req.params.id as string;
+  const deleted = await db
+    .delete(chatRoomMembershipsTable)
+    .where(eq(chatRoomMembershipsTable.id, id))
+    .returning();
+  if (deleted.length === 0) { res.status(404).json({ error: "Not Found", message: "Request not found" }); return; }
+  res.json({ ok: true });
+});
+
+// POST /admin/chat/rooms/:id/invite { userIds: [...] } — invite users to elite
+router.post("/admin/chat/rooms/:id/invite", requireAuth, requireAdmin, async (req, res): Promise<void> => {
+  const id = req.params.id as string;
+  const { userIds } = req.body as { userIds: string[] };
+  if (!Array.isArray(userIds) || userIds.length === 0) {
+    res.status(400).json({ error: "Bad Request", message: "userIds[] required" });
+    return;
+  }
+  const [room] = await db.select().from(chatRoomsTable).where(eq(chatRoomsTable.id, id)).limit(1);
+  if (!room) { res.status(404).json({ error: "Not Found", message: "Room not found" }); return; }
+  if (room.type !== "elite" && room.type !== "city") {
+    res.status(400).json({ error: "Bad Request", message: "This room does not accept invites" });
+    return;
+  }
+  const inserted: { id: string }[] = [];
+  for (const userId of userIds) {
+    const [row] = await db
+      .insert(chatRoomMembershipsTable)
+      .values({ roomId: id, userId, status: "active", decidedAt: new Date(), decidedBy: req.user!.userId })
+      .onConflictDoUpdate({
+        target: [chatRoomMembershipsTable.roomId, chatRoomMembershipsTable.userId],
+        set: { status: "active", decidedAt: new Date(), decidedBy: req.user!.userId },
+      })
+      .returning({ id: chatRoomMembershipsTable.id });
+    if (row) inserted.push(row);
+  }
+  res.json({ added: inserted.length });
+});
+
+// DELETE /admin/chat/rooms/:id/members/:userId — kick a user
+router.delete("/admin/chat/rooms/:id/members/:userId", requireAuth, requireAdmin, async (req, res): Promise<void> => {
+  const { id, userId } = req.params as { id: string; userId: string };
+  await db
+    .delete(chatRoomMembershipsTable)
+    .where(and(eq(chatRoomMembershipsTable.roomId, id), eq(chatRoomMembershipsTable.userId, userId)));
+  res.json({ ok: true });
+});
+
+// ============================================================ CHANNELS / DMs
+
+// POST /chat/rooms — admin-created custom channel
+router.post("/chat/rooms", requireAuth, requireAdmin, async (req, res): Promise<void> => {
+  const { name, type } = req.body as { name: string; type?: string };
   if (!name) { res.status(400).json({ error: "Bad Request", message: "name required" }); return; }
-  const [room] = await db.insert(chatRoomsTable).values({ name, type: type || "general", shiftId }).returning();
+  const [room] = await db.insert(chatRoomsTable).values({
+    name,
+    type: type || "announcements",
+    joinPolicy: "auto",
+  }).returning();
   res.status(201).json(room);
 });
 
-// GET /chat/users — list other users for DM picker
+// GET /chat/users — DM picker
 router.get("/chat/users", requireAuth, async (req, res): Promise<void> => {
   const me = req.user!.userId;
   const rows = await db
@@ -179,7 +367,7 @@ router.get("/chat/users", requireAuth, async (req, res): Promise<void> => {
   res.json(rows);
 });
 
-// POST /chat/direct — get or create a 1:1 DM room
+// POST /chat/direct — get or create a 1:1 DM
 router.post("/chat/direct", requireAuth, async (req, res): Promise<void> => {
   const me = req.user!.userId;
   const { otherUserId } = req.body as { otherUserId: string };
@@ -202,14 +390,14 @@ router.post("/chat/direct", requireAuth, async (req, res): Promise<void> => {
   res.status(201).json(room);
 });
 
+// ============================================================ MESSAGES
+
 // GET /chat/rooms/:id/messages
 router.get("/chat/rooms/:id/messages", requireAuth, async (req, res): Promise<void> => {
   const id = req.params.id as string;
   const limit = parseInt(req.query["limit"] as string || "50", 10);
   const before = req.query["before"] as string | undefined;
 
-  // Membership check — load the room first so we can enforce authorization
-  // before returning any history. Avoids leaking DM contents to non-members.
   const [room] = await db.select().from(chatRoomsTable).where(eq(chatRoomsTable.id, id)).limit(1);
   if (!room) { res.status(404).json({ error: "Not Found", message: "Room not found" }); return; }
   if (!(await isAuthorizedForRoom(req.user!.userId, req.user!.role, room))) {
@@ -252,6 +440,12 @@ router.post("/chat/rooms/:id/messages", requireAuth, async (req, res): Promise<v
     return;
   }
 
+  // Announcements channel: only admins post; everyone reads.
+  if (room.type === "announcements" && req.user!.role !== "admin") {
+    res.status(403).json({ error: "Forbidden", message: "Only admins can post in announcements" });
+    return;
+  }
+
   const [message] = await db.insert(chatMessagesTable).values({
     roomId: id,
     userId: req.user!.userId,
@@ -269,10 +463,6 @@ router.post("/chat/rooms/:id/messages", requireAuth, async (req, res): Promise<v
     },
   };
 
-  // Restrict the live broadcast to the room's authorized recipients
-  // (DMs → the two participants, shift rooms → admins + assigned officers,
-  // general → all authenticated sockets). Same resolver as the REST
-  // membership check, so the two paths can never drift.
   const members = await resolveRoomMembers(room);
   broadcastToRoom(id, broadcastPayload, members === null ? {} : { allowedUserIds: members });
   res.status(201).json(broadcastPayload.message);

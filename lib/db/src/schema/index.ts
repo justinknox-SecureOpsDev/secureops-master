@@ -10,6 +10,7 @@ export * from "./invoices";
 export * from "./incidents";
 export * from "./licenses";
 export * from "./chatRooms";
+export * from "./chatRoomMemberships";
 export * from "./chatMessages";
 export * from "./applications";
 export * from "./onboardingTokens";
