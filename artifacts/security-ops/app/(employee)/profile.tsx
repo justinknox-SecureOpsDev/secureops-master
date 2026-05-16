@@ -79,6 +79,80 @@ function PhotoPreview({ path }: { path?: string | null }) {
   );
 }
 
+type TrainingCert = {
+  id: string;
+  type: string;
+  title: string;
+  issuingAuthority?: string | null;
+  certificateNumber?: string | null;
+  issueDate?: string | null;
+  expiryDate?: string | null;
+  docKey?: string | null;
+  status: "valid" | "expiring_soon" | "expired" | "no_expiry";
+};
+
+function MyTrainingSection() {
+  const colors = useColors();
+  const router = useRouter();
+  const [items, setItems] = useState<TrainingCert[] | null>(null);
+  const [err, setErr] = useState<string | null>(null);
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const data = await apiRequest("/me/trainings");
+        if (!cancelled) setItems(data);
+      } catch (e) {
+        if (!cancelled) setErr((e as Error).message);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, []);
+  const statusColor = (s: TrainingCert["status"]) => {
+    if (s === "expired") return "#a33";
+    if (s === "expiring_soon") return "#c9a84c";
+    if (s === "no_expiry") return colors.mutedForeground;
+    return "#3a8a3a";
+  };
+  const statusLabel = (s: TrainingCert["status"], d?: string | null) => {
+    if (s === "expired") return `Expired ${d ?? ""}`.trim();
+    if (s === "expiring_soon") return `Expires ${d}`;
+    if (s === "no_expiry") return "No expiry";
+    return `Valid · ${d}`;
+  };
+  return (
+    <View style={[styles.section, { backgroundColor: colors.card, borderColor: colors.border }]}>
+      <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between" }}>
+        <Text style={[styles.sectionTitle, { color: colors.accent }]}>MY TRAINING ({items?.length ?? 0})</Text>
+        <TouchableOpacity onPress={() => router.push("/training-add" as any)} style={{ flexDirection: "row", alignItems: "center", gap: 4 }}>
+          <Feather name="plus" size={14} color={colors.primary} />
+          <Text style={{ color: colors.primary, fontSize: 12, fontWeight: "600" }}>Add</Text>
+        </TouchableOpacity>
+      </View>
+      {err && <Text style={[styles.emptyText, { color: "#a33" }]}>{err}</Text>}
+      {!err && items === null ? (
+        <ActivityIndicator color={colors.primary} style={{ marginTop: 8 }} />
+      ) : items && items.length === 0 ? (
+        <Text style={[styles.emptyText, { color: colors.mutedForeground }]}>No training certificates on record. Tap “Add” to upload one.</Text>
+      ) : (
+        items?.map((c) => (
+          <View key={c.id} style={[styles.licCard, { borderBottomColor: colors.border }]}>
+            <View style={styles.licHeader}>
+              <Text style={[styles.licType, { color: colors.foreground }]}>{c.title}</Text>
+              <View style={[styles.badge, { backgroundColor: statusColor(c.status) + "20", borderColor: statusColor(c.status) }]}>
+                <Text style={[styles.badgeText, { color: statusColor(c.status) }]}>{statusLabel(c.status, c.expiryDate)}</Text>
+              </View>
+            </View>
+            <Text style={[styles.licNum, { color: colors.mutedForeground }]}>
+              {c.type}{c.certificateNumber ? ` · #${c.certificateNumber}` : ""}{c.issuingAuthority ? ` · ${c.issuingAuthority}` : ""}
+            </Text>
+          </View>
+        ))
+      )}
+    </View>
+  );
+}
+
 export default function EmployeeProfileScreen() {
   const colors = useColors();
   const router = useRouter();
@@ -348,6 +422,8 @@ export default function EmployeeProfileScreen() {
           ))}
         </View>
       )}
+
+      <MyTrainingSection />
 
       <View style={[styles.section, { backgroundColor: colors.card, borderColor: colors.border }]}>
         <Text style={[styles.sectionTitle, { color: colors.accent }]}>MY LICENCES ({licenses?.length ?? 0})</Text>

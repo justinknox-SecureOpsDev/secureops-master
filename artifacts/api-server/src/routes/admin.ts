@@ -16,6 +16,7 @@ import {
   invoicesTable,
   incidentsTable,
   licensesTable,
+  trainingCertificationsTable,
   passwordResetTokensTable,
   insertEmployeeSchema,
   insertClientSchema,
@@ -303,6 +304,19 @@ const tables: Record<string, TableConfig> = {
     importSupported: true,
     label: "License",
   },
+  "training-certifications": {
+    table: trainingCertificationsTable,
+    // No drizzle-zod insert schema — we keep validation in routes/trainings.ts
+    // (the dedicated officer + admin endpoints). z.any() lets the generic
+    // admin grid pass through; the table's NOT NULL columns still enforce
+    // shape at the DB layer.
+    insertSchema: z.any() as z.ZodSchema<any>,
+    searchColumns: [trainingCertificationsTable.title, trainingCertificationsTable.type, trainingCertificationsTable.certificateNumber],
+    orderBy: trainingCertificationsTable.expiryDate,
+    coerceWrite: (v) => v,
+    importSupported: false,
+    label: "Training certification",
+  },
 };
 
 function getConfig(name: string): TableConfig | null {
@@ -425,6 +439,9 @@ const fkResolution: Record<string, Record<string, FkRef>> = {
     siteId: { table: sitesTable, matchColumns: [{ key: "name", col: sitesTable.name, type: "text" }] },
   },
   licenses: {
+    employeeId: { table: usersTable, matchColumns: [{ key: "email", col: usersTable.email, type: "text" }] },
+  },
+  "training-certifications": {
     employeeId: { table: usersTable, matchColumns: [{ key: "email", col: usersTable.email, type: "text" }] },
   },
   incidents: {

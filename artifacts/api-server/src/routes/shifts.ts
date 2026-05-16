@@ -1,6 +1,6 @@
 import { Router, type IRouter } from "express";
 import { eq, and, gte, lte, sql, or, isNull, inArray } from "drizzle-orm";
-import { db, shiftsTable, shiftAssignmentsTable, usersTable, licensesTable, sitesTable, clientsTable } from "@workspace/db";
+import { db, shiftsTable, shiftAssignmentsTable, usersTable, licensesTable, sitesTable, clientsTable, trainingCertificationsTable } from "@workspace/db";
 import { requireAuth, requireAdmin } from "../middlewares/auth";
 
 const router: IRouter = Router();
@@ -64,6 +64,25 @@ async function getEmployeeMaxLevel(employeeId: string): Promise<number | null> {
   return max;
 }
 
+/**
+ * Slugs of training-certification types the officer currently holds with
+ * either no expiry (perpetual) or an unexpired expiry. Used to enforce
+ * site.requiredTrainings on shift visibility/claim.
+ */
+async function getEmployeeHeldTrainings(employeeId: string): Promise<Set<string>> {
+  const rows = await db
+    .select({ type: trainingCertificationsTable.type })
+    .from(trainingCertificationsTable)
+    .where(and(
+      eq(trainingCertificationsTable.employeeId, employeeId),
+      or(
+        sql`${trainingCertificationsTable.expiryDate} IS NULL`,
+        gte(trainingCertificationsTable.expiryDate, sql`current_date`),
+      ),
+    ));
+  return new Set(rows.map((r) => r.type));
+}
+
 router.get("/shifts", requireAuth, async (req, res): Promise<void> => {
   const { status, employeeId, from, to } = req.query as { status?: string; employeeId?: string; from?: string; to?: string };
   const isAdmin = req.user!.role === "admin";
@@ -85,6 +104,7 @@ router.get("/shifts", requireAuth, async (req, res): Promise<void> => {
   let shifts;
   if (restrictToEmployee) {
     const myMaxLevel = !isAdmin ? (await getEmployeeMaxLevel(userId)) ?? 0 : 4;
+    const myHeldTrainings = !isAdmin ? await getEmployeeHeldTrainings(userId) : new Set<string>();
     const assignedRows = await db
       .select({ shiftId: shiftAssignmentsTable.shiftId })
       .from(shiftAssignmentsTable)
@@ -98,17 +118,32 @@ router.get("/shifts", requireAuth, async (req, res): Promise<void> => {
     if (isAdmin) {
       shifts = all.filter((s) => assignedIds.includes(s.id));
     } else {
-      // Employee sees: assigned shifts + open shifts they qualify for (upcoming, not full)
+      // Employee sees: assigned shifts + open shifts they qualify for (upcoming, not full).
+      // Training-compliance check: any site-required training the officer
+      // doesn't currently hold (unexpired) hides the shift from feeds.
+      // Assigned shifts are always visible so an officer keeps seeing
+      // shifts they've already committed to even if a cert lapsed.
       const counts = await db
         .select({ shiftId: shiftAssignmentsTable.shiftId, n: sql<number>`count(*)::int` })
         .from(shiftAssignmentsTable)
         .groupBy(shiftAssignmentsTable.shiftId);
       const countMap = new Map(counts.map((c) => [c.shiftId, c.n]));
+      const siteIds = Array.from(new Set(all.map((s) => s.siteId).filter((id): id is string => !!id)));
+      const siteReqMap = new Map<string, string[]>();
+      if (siteIds.length > 0) {
+        const siteRows = await db
+          .select({ id: sitesTable.id, req: sitesTable.requiredTrainings })
+          .from(sitesTable)
+          .where(inArray(sitesTable.id, siteIds));
+        for (const s of siteRows) siteReqMap.set(s.id, Array.isArray(s.req) ? s.req : []);
+      }
       shifts = all.filter((s) => {
         if (assignedIds.includes(s.id)) return true;
         if (s.status !== "upcoming") return false;
         if (myMaxLevel < s.requiredLicenseLevel) return false;
         if ((countMap.get(s.id) ?? 0) >= s.headcount) return false;
+        const req = s.siteId ? (siteReqMap.get(s.siteId) ?? []) : [];
+        for (const t of req) if (!myHeldTrainings.has(t)) return false;
         return true;
       });
     }
@@ -558,6 +593,31 @@ router.post("/shifts/:id/claim", requireAuth, async (req, res): Promise<void> =>
       message: `This shift requires Level ${shift.requiredLicenseLevel}${shift.requiredLicenseLevel === 4 ? "/PPO" : ""}. Your highest valid licence is ${myLevel === 0 ? "none" : `Level ${myLevel}`}.`,
     });
     return;
+  }
+  // Training compliance: if the site declares required training slugs,
+  // the officer must hold each one (unexpired). 403 with a precise
+  // "you're missing X, Y" so the officer can self-serve the fix from
+  // the mobile profile page.
+  if (shift.siteId) {
+    const [site] = await db
+      .select({ req: sitesTable.requiredTrainings })
+      .from(sitesTable)
+      .where(eq(sitesTable.id, shift.siteId))
+      .limit(1);
+    const required = Array.isArray(site?.req) ? site!.req : [];
+    if (required.length > 0) {
+      const held = await getEmployeeHeldTrainings(userId);
+      const missing = required.filter((t) => !held.has(t));
+      if (missing.length > 0) {
+        res.status(403).json({
+          error: "Forbidden",
+          code: "missing_training",
+          message: `This site requires training you don't currently hold: ${missing.join(", ")}. Upload the certificate from Profile → My training.`,
+          missingTrainings: missing,
+        });
+        return;
+      }
+    }
   }
 
   // Race-safe atomic claim: lock the parent shift row inside a transaction so

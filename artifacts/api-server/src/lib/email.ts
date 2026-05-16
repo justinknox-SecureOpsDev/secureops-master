@@ -384,6 +384,50 @@ export function renderInviteEmail(opts: {
   return { subject, text, html };
 }
 
+export function renderTrainingExpiryEmail(opts: {
+  firstName: string;
+  trainingTitle: string;
+  trainingType: string;
+  expiryDate: string;
+  daysRemaining: number;
+}): { subject: string; text: string; html: string } {
+  const urgency = opts.daysRemaining <= 7 ? "URGENT" : opts.daysRemaining <= 14 ? "Action needed" : "Reminder";
+  const subject = `${urgency}: your ${opts.trainingTitle} certificate expires in ${opts.daysRemaining} days`;
+  const text = [
+    `Hi ${opts.firstName},`,
+    "",
+    `This is a friendly reminder that your ${opts.trainingTitle} (${opts.trainingType}) training certificate is due to expire soon.`,
+    "",
+    `  Certificate: ${opts.trainingTitle}`,
+    `  Expires:     ${opts.expiryDate}`,
+    `  Days left:   ${opts.daysRemaining}`,
+    "",
+    "Please refresh before the expiry date. An expired certificate may make you ineligible for sites that require this training.",
+    "Once renewed, please upload the new certificate from the mobile app (Profile → My training).",
+    "",
+    "— Williams Council Security Group",
+  ].join("\n");
+  const accent = opts.daysRemaining <= 7 ? "#a33" : "#c9a84c";
+  const html = `
+    <div style="font-family:Georgia,serif;max-width:560px;margin:0 auto;color:#080c18">
+      <h2 style="color:#080c18">${escapeHtml(urgency)}: training renewal needed</h2>
+      <p>Hi ${escapeHtml(opts.firstName)},</p>
+      <p>This is a friendly reminder that your <strong>${escapeHtml(opts.trainingTitle)}</strong> certificate is due to expire soon.</p>
+      <div style="background:#f6f1e1;padding:14px 16px;border-left:3px solid ${accent};margin:18px 0;border-radius:4px">
+        <div><strong>Certificate:</strong> ${escapeHtml(opts.trainingTitle)}</div>
+        <div><strong>Type:</strong> ${escapeHtml(opts.trainingType)}</div>
+        <div><strong>Expires:</strong> ${escapeHtml(opts.expiryDate)}</div>
+        <div><strong>Days remaining:</strong> ${opts.daysRemaining}</div>
+      </div>
+      <p>Please refresh before the expiry date. An expired certificate may make you ineligible for sites that require this training.</p>
+      <p>Once renewed, please upload the new certificate from the mobile app (Profile → My training).</p>
+      <hr style="border:none;border-top:2px solid #c9a84c;margin:24px 0"/>
+      <p style="color:#080c18;font-weight:bold;margin:0">Williams Council Security Group</p>
+    </div>
+  `;
+  return { subject, text, html };
+}
+
 export function renderLicenseExpiryEmail(opts: {
   firstName: string;
   licenseType: string;

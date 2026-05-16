@@ -25,6 +25,7 @@ import IncidentShareLinksPage from "@/pages/IncidentShareLinks";
 import PublicIncidentPage from "@/pages/PublicIncident";
 import SecurityPage from "@/pages/Security";
 import { DailyReportsPage } from "@/pages/DailyReports";
+import CompliancePage from "@/pages/Compliance";
 import NotFound from "@/pages/not-found";
 
 const queryClient = new QueryClient();
@@ -79,6 +80,7 @@ function Routed() {
         <Route path="/incidents/share-links" component={IncidentShareLinksPage} />
         <Route path="/account/security" component={SecurityPage} />
         <Route path="/dar" component={DailyReportsPage} />
+        <Route path="/compliance" component={CompliancePage} />
         <Route path="/sites/:id" component={SiteDetailPage} />
         <Route path="/tables/shifts" component={ShiftsPage} />
         <Route path="/tables/:table" component={TablePage} />

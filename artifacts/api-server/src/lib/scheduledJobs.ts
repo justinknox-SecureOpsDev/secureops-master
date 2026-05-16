@@ -3,6 +3,7 @@ import {
   db,
   revokedTokensTable,
   licensesTable,
+  trainingCertificationsTable,
   usersTable,
   shiftsTable,
   shiftAssignmentsTable,
@@ -11,7 +12,7 @@ import {
   patrolScansTable,
 } from "@workspace/db";
 import { logger } from "./logger";
-import { sendEmail, renderLicenseExpiryEmail } from "./email";
+import { sendEmail, renderLicenseExpiryEmail, renderTrainingExpiryEmail } from "./email";
 import { sendPushToUsers } from "./push";
 
 const HOUR_MS = 60 * 60 * 1000;
@@ -192,6 +193,126 @@ export function startScheduledJobs(intervalMs: number = HOUR_MS): NodeJS.Timeout
       }
     } catch (err) {
       logger.error({ err }, "[license-expiry] reminder job failed");
+    }
+  }
+
+  /**
+   * Training-certification expiry reminders. Same 30/14/7-day tiered
+   * pattern as license reminders (idempotent via lastReminderTier +
+   * lastReminderForExpiry, atomic UPDATE...RETURNING claim, rollback on
+   * total delivery failure). Skips rows with no expiryDate (perpetual
+   * certs like site-induction with no formal renewal).
+   */
+  async function sendTrainingExpiryReminders(): Promise<void> {
+    try {
+      const tiers = [30, 14, 7];
+      const today = new Date();
+      const todayDateOnly = today.toISOString().slice(0, 10);
+
+      let totalSent = 0;
+      for (const tier of tiers) {
+        const cutoff = new Date(today.getTime() + tier * 24 * 60 * 60 * 1000)
+          .toISOString()
+          .slice(0, 10);
+
+        const candidates = await db
+          .select({
+            id: trainingCertificationsTable.id,
+            employeeId: trainingCertificationsTable.employeeId,
+            type: trainingCertificationsTable.type,
+            title: trainingCertificationsTable.title,
+            expiryDate: trainingCertificationsTable.expiryDate,
+            firstName: usersTable.firstName,
+            email: usersTable.email,
+          })
+          .from(trainingCertificationsTable)
+          .innerJoin(usersTable, eq(usersTable.id, trainingCertificationsTable.employeeId))
+          .where(
+            and(
+              // Skip perpetual certs (no expiry on file).
+              sql`${trainingCertificationsTable.expiryDate} IS NOT NULL`,
+              gte(trainingCertificationsTable.expiryDate, todayDateOnly),
+              lte(trainingCertificationsTable.expiryDate, cutoff),
+              eq(usersTable.status, "active"),
+              or(
+                isNull(trainingCertificationsTable.lastReminderForExpiry),
+                ne(trainingCertificationsTable.lastReminderForExpiry, trainingCertificationsTable.expiryDate),
+                isNull(trainingCertificationsTable.lastReminderTier),
+                gt(trainingCertificationsTable.lastReminderTier, tier),
+              ),
+            ),
+          );
+
+        for (const cert of candidates) {
+          if (!cert.expiryDate) continue;
+          const claimed = await db
+            .update(trainingCertificationsTable)
+            .set({
+              lastReminderTier: tier,
+              lastReminderSentAt: new Date(),
+              lastReminderForExpiry: cert.expiryDate,
+            })
+            .where(
+              and(
+                eq(trainingCertificationsTable.id, cert.id),
+                or(
+                  isNull(trainingCertificationsTable.lastReminderForExpiry),
+                  ne(trainingCertificationsTable.lastReminderForExpiry, cert.expiryDate),
+                  isNull(trainingCertificationsTable.lastReminderTier),
+                  gt(trainingCertificationsTable.lastReminderTier, tier),
+                ),
+              ),
+            )
+            .returning({ id: trainingCertificationsTable.id });
+          if (claimed.length === 0) continue;
+
+          const expiry = new Date(cert.expiryDate);
+          const daysRemaining = Math.max(
+            0,
+            Math.ceil((expiry.getTime() - today.getTime()) / (24 * 60 * 60 * 1000)),
+          );
+          const tpl = renderTrainingExpiryEmail({
+            firstName: cert.firstName ?? "there",
+            trainingTitle: cert.title,
+            trainingType: cert.type,
+            expiryDate: cert.expiryDate,
+            daysRemaining,
+          });
+
+          let emailOk = false;
+          let pushOk = false;
+          try {
+            emailOk = await sendEmail({ to: cert.email, subject: tpl.subject, text: tpl.text, html: tpl.html });
+          } catch (err) {
+            logger.warn({ err, trainingId: cert.id }, "[training-expiry] email send failed");
+          }
+          try {
+            await sendPushToUsers([cert.employeeId], {
+              title: `Training expires in ${daysRemaining} days`,
+              body: `${cert.title} expires on ${cert.expiryDate}. Please renew.`,
+              data: { type: "training_expiry_reminder", trainingId: cert.id, tier },
+            });
+            pushOk = true;
+          } catch (err) {
+            logger.warn({ err, trainingId: cert.id }, "[training-expiry] push send failed");
+          }
+
+          if (!emailOk && !pushOk) {
+            await db
+              .update(trainingCertificationsTable)
+              .set({ lastReminderTier: null, lastReminderSentAt: null, lastReminderForExpiry: null })
+              .where(eq(trainingCertificationsTable.id, cert.id))
+              .catch((err) => logger.warn({ err, trainingId: cert.id }, "[training-expiry] failed to rollback bookkeeping"));
+            continue;
+          }
+          totalSent += 1;
+        }
+      }
+      if (totalSent > 0) {
+        logger.info({ totalSent }, "Sent training expiry reminders");
+      }
+    } catch (err) {
+      logger.error({ err }, "[training-expiry] reminder job failed");
     }
   }
 
@@ -460,6 +581,8 @@ export function startScheduledJobs(intervalMs: number = HOUR_MS): NodeJS.Timeout
   // License expiry — hourly is plenty (and idempotent), avoids a
   // mid-day spike if many licenses cluster on one expiry date.
   schedule("license-expiry", sendLicenseExpiryReminders, intervalMs);
+  // Training-cert expiry — same hourly cadence as license expiry.
+  schedule("training-expiry", sendTrainingExpiryReminders, intervalMs);
   // Pre-shift reminders — every 5 minutes is the right cadence for the
   // 30-minute window without being too chatty.
   schedule("shift-reminders", sendPreShiftReminders, 5 * MIN_MS);

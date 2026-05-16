@@ -25,3 +25,4 @@ export * from "./incidentShareLinks";
 export * from "./officerAvailability";
 export * from "./patrolCheckpoints";
 export * from "./dailyActivityReports";
+export * from "./trainingCertifications";

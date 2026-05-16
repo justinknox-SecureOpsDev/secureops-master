@@ -511,6 +511,24 @@ export const TABLES: TableDescriptor[] = [
       { key: "notes", label: "Notes", type: "textarea", hiddenInGrid: true },
     ],
   },
+  {
+    name: "training-certifications",
+    label: "Training",
+    plural: "training certificates",
+    importSupported: false,
+    primaryLabelField: "title",
+    fields: [
+      { key: "id", label: "ID", type: "text", readonly: true, hiddenInGrid: true },
+      { key: "employeeId", label: "Employee", type: "fk", fkTable: "users", fkLabel: "email", required: true },
+      { key: "type", label: "Type (slug)", type: "text", required: true },
+      { key: "title", label: "Title", type: "text", required: true },
+      { key: "issuingAuthority", label: "Authority", type: "text" },
+      { key: "certificateNumber", label: "Cert #", type: "text" },
+      { key: "issueDate", label: "Issued", type: "date" },
+      { key: "expiryDate", label: "Expires", type: "date" },
+      { key: "notes", label: "Notes", type: "textarea", hiddenInGrid: true },
+    ],
+  },
 ];
 
 export function getTable(name: string): TableDescriptor | undefined {
