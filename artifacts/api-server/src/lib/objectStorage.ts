@@ -243,6 +243,10 @@ async function signObjectURL({
     method,
     expires_at: new Date(Date.now() + ttlSec * 1000).toISOString(),
   };
+  // REPLIT_SIDECAR_ENDPOINT is the Replit-managed sidecar reachable only on
+  // the local container network (http://127.0.0.1:1106 by default). HTTP is
+  // intentional and required — TLS is not exposed by the sidecar.
+  // nosemgrep: typescript.react.security.react-insecure-request
   const response = await fetch(
     `${REPLIT_SIDECAR_ENDPOINT}/object-storage/signed-object-url`,
     {

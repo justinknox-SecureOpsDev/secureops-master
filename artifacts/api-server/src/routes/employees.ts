@@ -174,9 +174,15 @@ router.post("/employees", requireAdmin, async (req, res): Promise<void> => {
 
   // Build employee insert payload from the same allow-list used by PUT, so
   // POST /employees accepts the full expanded CreateEmployeeRequest contract.
+  // Allow-list iteration: `k` only ranges over the hardcoded
+  // ALL_EMP_PASSTHROUGH_KEYS constant, never user input. Object.hasOwn
+  // additionally guards against prototype-chain reads from `body`.
   const empValues: Record<string, unknown> = { userId: user.id };
   for (const k of ALL_EMP_PASSTHROUGH_KEYS) {
-    if (body[k] !== undefined) empValues[k] = body[k];
+    if (Object.hasOwn(body, k) && body[k] !== undefined) {
+      // nosemgrep: javascript.express.security.audit.remote-property-injection
+      empValues[k] = body[k];
+    }
   }
   if (body.hourlyRate !== undefined) {
     empValues.hourlyRate = body.hourlyRate === null ? null : String(body.hourlyRate);
@@ -252,10 +258,16 @@ router.put("/employees/:id", requireAuth, async (req, res): Promise<void> => {
   // Non-admin self-edits are restricted to a narrow allow-list. HR / payroll
   // / compliance / document fields require admin role, even when the actor
   // is editing their own row.
+  // Allow-list iteration: `k` only ranges over hardcoded constants
+  // (ALL_EMP_PASSTHROUGH_KEYS / SELF_UPDATABLE_EMP_KEYS), never user input.
+  // Object.hasOwn additionally guards against prototype-chain reads.
   const allowedKeys = isAdmin ? ALL_EMP_PASSTHROUGH_KEYS : SELF_UPDATABLE_EMP_KEYS;
   const empUpdates: Record<string, unknown> = {};
   for (const k of allowedKeys) {
-    if (body[k] !== undefined) empUpdates[k] = body[k];
+    if (Object.hasOwn(body, k) && body[k] !== undefined) {
+      // nosemgrep: javascript.express.security.audit.remote-property-injection
+      empUpdates[k] = body[k];
+    }
   }
   if (isAdmin && body.hourlyRate !== undefined) {
     empUpdates.hourlyRate = body.hourlyRate === null ? null : String(body.hourlyRate);

@@ -33,10 +33,11 @@ export function ChatProvider({ children }: { children: React.ReactNode }) {
 
   const connect = useCallback(() => {
     if (!token) return;
-    const wsUrl = API_BASE_URL
-      .replace(/^https?:\/\//, (m) => (m.startsWith("https") ? "wss://" : "ws://"))
-      .replace(/\/api$/, "/api/ws");
-    const ws = new WebSocket(`${wsUrl}?token=${token}`);
+    // API_BASE_URL is always https://… (set in utils/api.ts). Strip the
+    // scheme and re-prepend the secure wss:// scheme literally so the
+    // resulting URL is always TLS-encrypted.
+    const host = API_BASE_URL.replace(/^https?:\/\//, "").replace(/\/api$/, "");
+    const ws = new WebSocket(`wss://${host}/api/ws?token=${token}`);
     wsRef.current = ws;
 
     ws.onopen = () => setConnected(true);
