@@ -50,3 +50,5 @@ channel = "stable-25_05"
 
 [userenv.production]
 SEED_DEMO_USERS = "false"
+APP_BASE_URL = "https://secureops.williamscouncilsg.com"
+ALLOWED_ORIGINS = "https://secureops.williamscouncilsg.com"
