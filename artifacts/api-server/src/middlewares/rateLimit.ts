@@ -173,3 +173,23 @@ export const emergencyLimiter: RateLimitRequestHandler = rateLimit({
     return `em:ip:${ipKeyGenerator(req.ip ?? "")}`;
   },
 });
+
+// POST /me/location — authenticated location pings from the mobile app.
+// The app pings every ~60s while clocked in, so a generous per-user cap
+// of 30/min still leaves 2x headroom for legitimate retries while
+// preventing a malicious or buggy client from rapidly flipping
+// inside/outside coords to spam the geofence alert channel.
+const LOCATION_PER_USER_MAX = envInt("LOCATION_RATE_LIMIT_MAX", 30);
+
+export const locationLimiter: RateLimitRequestHandler = rateLimit({
+  windowMs: ONE_MIN_MS,
+  limit: LOCATION_PER_USER_MAX,
+  standardHeaders: true,
+  legacyHeaders: false,
+  handler: tooMany,
+  keyGenerator: (req) => {
+    const uid = req.user?.userId;
+    if (uid) return `loc:u:${uid}`;
+    return `loc:ip:${ipKeyGenerator(req.ip ?? "")}`;
+  },
+});

@@ -149,6 +149,8 @@ export const TABLES: TableDescriptor[] = [
         ],
       },
       { key: "expoPushToken", label: "Push Token", type: "text", hiddenInGrid: true },
+      { key: "phoneNumber", label: "SMS Phone (E.164)", type: "text", importExample: "+15125550142" },
+      { key: "smsOptIn", label: "SMS Notifications", type: "boolean" },
       { key: "lastActiveAt", label: "Last Active", type: "datetime", readonly: true },
       { key: "createdAt", label: "Created", type: "datetime", readonly: true },
     ],

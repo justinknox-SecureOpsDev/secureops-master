@@ -88,4 +88,6 @@ These environment variables must be set on the deployed environment for the hard
 - `APP_BASE_URL` — public origin used to build links inside outbound emails (password reset, onboarding, amendment, invites). Falls back to `REPLIT_DOMAINS` if unset.
 - `SMTP_HOST`, `SMTP_PORT`, `SMTP_USER`, `SMTP_PASS`, optional `SMTP_FROM` — required for invitation, password-reset, onboarding, and amendment emails to actually leave the building.
 - `EMERGENCY_CALL_NUMBER` — dial-out number for the panic button (defaults to `911`).
+- Twilio integration (Replit connector) — enables SMS notifications for emergency / shift-assignment / vacancy alerts. Without it, SMS is a no-op and push remains the sole channel. The SMS path enforces opt-in (`users.sms_opt_in`) and an E.164 phone format check before dispatch.
+- `GEOFENCE_RADIUS_MILES` — site-perimeter radius for the live geofence (defaults to `0.25` mi). Officers drifting outside trigger one push + one SMS to admins per breach (debounced by `time_entries.geofence_state`).
 - `SEED_DEMO_USERS=false` — set in production to prevent the demo `admin@secureops.com` / `john.smith@secureops.com` accounts from being re-provisioned.

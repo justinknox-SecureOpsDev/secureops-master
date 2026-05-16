@@ -22,6 +22,10 @@ export const usersTable = pgTable("users", {
   // self-logout-all-devices and admin "revoke all sessions" actions.
   tokensValidAfter: timestamp("tokens_valid_after", { withTimezone: true }).notNull().defaultNow(),
   expoPushToken: text("expo_push_token"),
+  // E.164 phone number for SMS notifications (e.g. "+15125550142"). Optional —
+  // SMS only fires when this is set AND smsOptIn is true AND Twilio is connected.
+  phoneNumber: text("phone_number"),
+  smsOptIn: boolean("sms_opt_in").notNull().default(true),
   lastLat: numeric("last_lat", { precision: 10, scale: 6 }),
   lastLng: numeric("last_lng", { precision: 10, scale: 6 }),
   lastLocationAt: timestamp("last_location_at", { withTimezone: true }),

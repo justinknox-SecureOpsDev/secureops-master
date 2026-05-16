@@ -25,6 +25,13 @@ export const timeEntriesTable = pgTable("time_entries", {
   approvedAt: timestamp("approved_at", { withTimezone: true }),
   approvedBy: uuid("approved_by").references(() => usersTable.id, { onDelete: "set null" }),
   notes: text("notes"),
+  // Live geofence state for THIS active shift. `inside` while the officer's
+  // last location ping is within GEOFENCE_RADIUS_MILES of the shift's site,
+  // `outside` if they've drifted out (admins are pushed once on the
+  // transition), `null` if we've never had a usable ping yet. Reset on
+  // clock-out — geofence is only meaningful while clocked in.
+  geofenceState: text("geofence_state"),
+  geofenceLastBreachAt: timestamp("geofence_last_breach_at", { withTimezone: true }),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow().$onUpdate(() => new Date()),
 }, (t) => ({

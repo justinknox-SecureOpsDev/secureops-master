@@ -686,6 +686,11 @@ router.post("/shifts/:id/notify-vacancy", requireAdmin, async (req, res): Promis
         body: `${shift.title} @ ${shift.clientName} — ${start}. Tap to reserve.`,
         data: { type: "shift_vacancy_reminder", shiftId },
       });
+      const { sendSmsToUsers } = await import("../lib/sms");
+      sendSmsToUsers(
+        targetIds,
+        `[WCSG] Open ${levelLabel} shift @ ${shift.clientName} — ${start}. Reserve in the app.`,
+      ).catch((err: unknown) => req.log.warn({ err, shiftId }, "vacancy SMS dispatch failed"));
     } catch (err) {
       req.log.warn({ err }, "Failed to send vacancy reminder push");
     }
@@ -725,6 +730,11 @@ router.post("/shifts/:id/assignments", requireAdmin, async (req, res): Promise<v
       body: `You've been assigned to ${shift.title} on ${start}`,
       data: { type: "shift_assigned", shiftId },
     });
+    const { sendSmsToUsers } = await import("../lib/sms");
+    sendSmsToUsers(
+      [employeeId],
+      `[WCSG] You've been assigned to ${shift.title} on ${start}. Open the app for details.`,
+    ).catch((err: unknown) => req.log.warn({ err, shiftId, employeeId }, "shift-assign SMS dispatch failed"));
   } catch (err) {
     req.log.warn({ err }, "Failed to send assignment push");
   }

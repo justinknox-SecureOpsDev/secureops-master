@@ -2,8 +2,10 @@ import { Router, type IRouter } from "express";
 import { eq, isNull, and, sql, desc } from "drizzle-orm";
 import { db, usersTable, timeEntriesTable, shiftsTable, sitesTable, incidentsTable } from "@workspace/db";
 import { requireAuth, requireAdmin } from "../middlewares/auth";
-import { emergencyLimiter } from "../middlewares/rateLimit";
+import { emergencyLimiter, locationLimiter } from "../middlewares/rateLimit";
 import { sendPushToUsers } from "../lib/push";
+import { sendSmsToUsers } from "../lib/sms";
+import { evaluateGeofence } from "../lib/geofence";
 
 const router: IRouter = Router();
 
@@ -16,7 +18,7 @@ function validCoord(lat: unknown, lng: unknown): { lat: number; lng: number } | 
   return { lat, lng };
 }
 
-router.post("/me/location", requireAuth, async (req, res): Promise<void> => {
+router.post("/me/location", requireAuth, locationLimiter, async (req, res): Promise<void> => {
   const { lat, lng } = (req.body ?? {}) as { lat?: number; lng?: number };
   const coord = validCoord(lat, lng);
   if (!coord) {
@@ -28,6 +30,12 @@ router.post("/me/location", requireAuth, async (req, res): Promise<void> => {
     lastLng: String(coord.lng),
     lastLocationAt: new Date(),
   }).where(eq(usersTable.id, req.user!.userId));
+  // Fire-and-forget geofence evaluation. We do not block the location
+  // response on push/SMS dispatch — the mobile app pings every minute and
+  // shouldn't pay the latency tax for a downstream alert pipeline.
+  evaluateGeofence(req.user!.userId, coord.lat, coord.lng).catch((err: unknown) => {
+    req.log.warn({ err }, "geofence evaluation failed");
+  });
   res.json({ ok: true });
 });
 
@@ -107,12 +115,23 @@ router.post("/emergency", requireAuth, emergencyLimiter, async (req, res): Promi
   const admins = await db.select({ id: usersTable.id }).from(usersTable).where(eq(usersTable.role, "admin"));
   const adminIds = admins.map((a) => a.id);
 
-  // Fire-and-forget push to all admins.
+  // Fire-and-forget push to all admins. We log dispatch failures so
+  // systemic regressions (e.g. Expo creds rotated) are visible without
+  // crashing the request path.
   sendPushToUsers(adminIds, {
     title: "🚨 EMERGENCY ALERT",
     body: `${user.firstName} ${user.lastName} triggered a panic alert. Tap to view location.`,
     data: { type: "emergency", incidentId: incident.id, lat: useLat, lng: useLng },
-  }).catch(() => {});
+  }).catch((err: unknown) => req.log.warn({ err, incidentId: incident.id }, "emergency push dispatch failed"));
+
+  // Belt-and-braces SMS to admins for emergencies — push can be silenced
+  // or delayed by the OS; SMS bypasses Do Not Disturb on most devices.
+  // No-ops when Twilio isn't connected.
+  const locTxt = haveCoords ? ` (loc ${useLat!.toFixed(5)},${useLng!.toFixed(5)})` : "";
+  sendSmsToUsers(
+    adminIds,
+    `[WCSG EMERGENCY] ${user.firstName} ${user.lastName} pressed the panic button${locTxt}. Open the app immediately.`,
+  ).catch((err: unknown) => req.log.warn({ err, incidentId: incident.id }, "emergency SMS dispatch failed"));
 
   // Notify any connected websocket clients in admin push channels via the chat broadcast pipe is overkill;
   // keep it to the push notification + incident record. Map view + incidents list will refresh on next poll.
