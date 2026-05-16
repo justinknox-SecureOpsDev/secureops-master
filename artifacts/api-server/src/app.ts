@@ -101,6 +101,16 @@ function buildAllowedOrigins(): Set<string> {
     set.add("http://localhost:5000");
     set.add("http://localhost:25580");
   }
+  // Expo's web preview is served from a separate subdomain
+  // (<id>.expo.janeway.replit.dev) while the API and admin portal live on
+  // <id>.janeway.replit.dev. The mobile web build hits the regular dev
+  // domain for /api, which is cross-origin — so the Expo subdomain must be
+  // in the allow-list or login preflights fail with "failed to fetch".
+  const expoDomain = (process.env.REPLIT_EXPO_DEV_DOMAIN || "").trim();
+  if (expoDomain) {
+    set.add(`https://${expoDomain}`);
+    set.add(`http://${expoDomain}`);
+  }
   return set;
 }
 
