@@ -39,3 +39,4 @@ yarn-error.*
 .vercel
 
 .env
+google-play-service-account.json

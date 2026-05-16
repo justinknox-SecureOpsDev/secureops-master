@@ -1,11 +1,12 @@
 {
   "expo": {
-    "name": "WCSGI",
-    "slug": "wcsgi",
+    "name": "SecureOps",
+    "slug": "secureops",
+    "owner": "williamscouncilsg",
     "version": "1.0.0",
     "orientation": "portrait",
     "icon": "./assets/images/icon.png",
-    "scheme": "wcsgi",
+    "scheme": "secureops",
     "userInterfaceStyle": "dark",
     "newArchEnabled": true,
     "splash": {
@@ -15,10 +16,29 @@
     },
     "ios": {
       "supportsTablet": false,
-      "bundleIdentifier": "com.wcsgi.app"
+      "bundleIdentifier": "com.williamscouncilsg.secureops",
+      "buildNumber": "1",
+      "infoPlist": {
+        "NSLocationWhenInUseUsageDescription": "SecureOps uses your location to verify you are on-site when you clock in and to share your live position with dispatch while you are on shift.",
+        "NSLocationAlwaysAndWhenInUseUsageDescription": "SecureOps uses your location in the background while you are clocked in so dispatch can be alerted if you leave your assigned site or trigger an emergency."
+      }
     },
     "android": {
-      "package": "com.wcsgi.app"
+      "package": "com.williamscouncilsg.secureops",
+      "versionCode": 1,
+      "adaptiveIcon": {
+        "foregroundImage": "./assets/images/icon.png",
+        "backgroundColor": "#080c18"
+      },
+      "permissions": [
+        "ACCESS_COARSE_LOCATION",
+        "ACCESS_FINE_LOCATION",
+        "ACCESS_BACKGROUND_LOCATION",
+        "CAMERA",
+        "READ_MEDIA_IMAGES",
+        "VIBRATE",
+        "POST_NOTIFICATIONS"
+      ]
     },
     "web": {
       "favicon": "./assets/images/icon.png"
@@ -27,7 +47,7 @@
       [
         "expo-router",
         {
-          "origin": "https://replit.com/"
+          "origin": "https://secureops.williamscouncilsg.com/"
         }
       ],
       "expo-font",
@@ -43,8 +63,15 @@
       [
         "expo-image-picker",
         {
-          "cameraPermission": "Allow WCSGI to use your camera so you can snap a fresh photo of your TX security license, passport, or training certificates from the field.",
-          "photosPermission": "Allow WCSGI to access your photo library so you can attach an existing image of your TX security license, passport, or training certificates."
+          "cameraPermission": "Allow SecureOps to use your camera so you can snap a fresh photo of your TX security license, passport, or training certificates from the field.",
+          "photosPermission": "Allow SecureOps to access your photo library so you can attach an existing image of your TX security license, passport, or training certificates."
+        }
+      ],
+      [
+        "expo-location",
+        {
+          "locationAlwaysAndWhenInUsePermission": "SecureOps uses your location in the background while you are clocked in so dispatch can be alerted if you leave your assigned site or trigger an emergency.",
+          "isAndroidBackgroundLocationEnabled": true
         }
       ]
     ],
