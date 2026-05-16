@@ -18,8 +18,16 @@ import storageRouter from "./storage";
 import applicationsRouter from "./applications";
 import policiesRouter from "./policies";
 import systemRouter from "./system";
+import auditRouter from "./audit";
+import myPayrollRouter from "./myPayroll";
+import { auditLogMiddleware } from "../lib/auditLog";
 
 const router: IRouter = Router();
+
+// Audit log first so every downstream write is recorded. The middleware
+// only persists 2xx writes and runs after the response is sent — so it
+// adds no latency to the request path.
+router.use(auditLogMiddleware);
 
 router.use(healthRouter);
 router.use(authRouter);
@@ -40,5 +48,7 @@ router.use(storageRouter);
 router.use(applicationsRouter);
 router.use(policiesRouter);
 router.use(systemRouter);
+router.use(auditRouter);
+router.use(myPayrollRouter);
 
 export default router;

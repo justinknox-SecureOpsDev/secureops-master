@@ -384,6 +384,49 @@ export function renderInviteEmail(opts: {
   return { subject, text, html };
 }
 
+export function renderLicenseExpiryEmail(opts: {
+  firstName: string;
+  licenseType: string;
+  licenseNumber: string;
+  expiryDate: string;
+  daysRemaining: number;
+}): { subject: string; text: string; html: string } {
+  const urgency = opts.daysRemaining <= 7 ? "URGENT" : opts.daysRemaining <= 14 ? "Action needed" : "Reminder";
+  const subject = `${urgency}: your ${opts.licenseType} license expires in ${opts.daysRemaining} days`;
+  const text = [
+    `Hi ${opts.firstName},`,
+    "",
+    `This is a friendly reminder that your ${opts.licenseType} license is due to expire soon.`,
+    "",
+    `  License:    ${opts.licenseType} (${opts.licenseNumber})`,
+    `  Expires:    ${opts.expiryDate}`,
+    `  Days left:  ${opts.daysRemaining}`,
+    "",
+    "Please renew before the expiry date. An expired license means you cannot be assigned to qualifying shifts.",
+    "If you have already renewed, please send a copy of the new license to HR so we can update your record.",
+    "",
+    "— Williams Council Security Group",
+  ].join("\n");
+  const accent = opts.daysRemaining <= 7 ? "#a33" : "#c9a84c";
+  const html = `
+    <div style="font-family:Georgia,serif;max-width:560px;margin:0 auto;color:#080c18">
+      <h2 style="color:#080c18">${escapeHtml(urgency)}: license renewal needed</h2>
+      <p>Hi ${escapeHtml(opts.firstName)},</p>
+      <p>This is a friendly reminder that your <strong>${escapeHtml(opts.licenseType)}</strong> license is due to expire soon.</p>
+      <div style="background:#f6f1e1;padding:14px 16px;border-left:3px solid ${accent};margin:18px 0;border-radius:4px">
+        <div><strong>License:</strong> ${escapeHtml(opts.licenseType)} (${escapeHtml(opts.licenseNumber)})</div>
+        <div><strong>Expires:</strong> ${escapeHtml(opts.expiryDate)}</div>
+        <div><strong>Days remaining:</strong> ${opts.daysRemaining}</div>
+      </div>
+      <p>Please renew before the expiry date. An expired license means you cannot be assigned to qualifying shifts.</p>
+      <p style="color:#555;font-size:13px">If you have already renewed, please send a copy of the new license to HR so we can update your record.</p>
+      <hr style="border:none;border-top:2px solid #c9a84c;margin:24px 0"/>
+      <p style="color:#080c18;font-weight:bold;margin:0">Williams Council Security Group</p>
+    </div>
+  `;
+  return { subject, text, html };
+}
+
 function escapeHtml(s: string): string {
   return s.replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]!));
 }

@@ -397,6 +397,19 @@ export default function EmployeeProfileScreen() {
           <Feather name="chevron-right" size={16} color={colors.mutedForeground} />
         </TouchableOpacity>
         <TouchableOpacity
+          onPress={() => router.push("/paystubs" as any)}
+          style={[styles.actionRow, { borderBottomColor: colors.border }]}
+        >
+          <Feather name="dollar-sign" size={16} color={colors.accent} />
+          <View style={{ flex: 1 }}>
+            <Text style={{ color: colors.foreground, fontSize: 14, fontWeight: "600" }}>My paystubs</Text>
+            <Text style={{ color: colors.mutedForeground, fontSize: 12, marginTop: 2 }}>
+              View pay history and year-to-date totals
+            </Text>
+          </View>
+          <Feather name="chevron-right" size={16} color={colors.mutedForeground} />
+        </TouchableOpacity>
+        <TouchableOpacity
           onPress={() => router.push({ pathname: "/change-password" as any, params: { mode: "self" } })}
           style={[styles.actionRow, { borderBottomColor: colors.border }]}
         >

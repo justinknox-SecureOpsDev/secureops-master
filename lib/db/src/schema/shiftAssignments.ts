@@ -9,6 +9,11 @@ export const shiftAssignmentsTable = pgTable("shift_assignments", {
   shiftId: uuid("shift_id").notNull().references(() => shiftsTable.id, { onDelete: "cascade" }),
   employeeId: uuid("employee_id").notNull().references(() => usersTable.id, { onDelete: "cascade" }),
   status: text("status").notNull().default("pending"),
+  // Pre-shift reminder bookkeeping. The scheduled reminder job sets these
+  // when it sends "starts in 2 hours" / "starts in 30 minutes" pushes so
+  // the same officer is never reminded twice for the same shift.
+  reminder2hSentAt: timestamp("reminder_2h_sent_at", { withTimezone: true }),
+  reminder30mSentAt: timestamp("reminder_30m_sent_at", { withTimezone: true }),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow().$onUpdate(() => new Date()),
 }, (t) => ({

@@ -3,7 +3,7 @@ import { Link, useRoute, useLocation } from "wouter";
 import {
   LogOut, ClipboardList, UserPlus, FileText, ChevronsLeft, ChevronsRight,
   Database, Banknote, ChevronDown, ChevronRight, Receipt, Wallet, MailPlus,
-  AlertTriangle,
+  AlertTriangle, ShieldCheck,
   type LucideIcon,
 } from "lucide-react";
 import { TABLES } from "@/lib/tables";
@@ -103,6 +103,10 @@ export function AppShell({ children }: { children: React.ReactNode }) {
     { href: "/tables/payroll_entries", label: "Payroll", Icon: Wallet },
   ];
 
+  const securityLinks: LinkItem[] = [
+    { href: "/audit-log", label: "Audit Log", Icon: ShieldCheck },
+  ];
+
   const operationsTables = TABLES.filter((t) => !ACCOUNTING_TABLE_NAMES.has(t.name));
 
   const renderLink = ({ href, label, Icon, badge }: LinkItem) => {
@@ -188,6 +192,12 @@ export function AppShell({ children }: { children: React.ReactNode }) {
             ? <div className="mt-2"><SectionHeader id="accounting" label="Accounting" /></div>
             : <div className="my-2 mx-3 border-t border-sidebar-border/40" />}
           {(collapsed || openSections.accounting !== false) && accountingLinks.map(renderLink)}
+
+          {/* Security */}
+          {!collapsed
+            ? <div className="mt-2"><SectionHeader id="security" label="Security" /></div>
+            : <div className="my-2 mx-3 border-t border-sidebar-border/40" />}
+          {(collapsed || openSections.security !== false) && securityLinks.map(renderLink)}
 
           {/* Operations (data tables) */}
           {!collapsed
