@@ -1,9 +1,9 @@
 import { Link } from "wouter";
 
-const COMPANY = "Williams Council Security Group";
+const COMPANY = "Williams Council Security Group Inc.";
 const SHORT = "WCSG";
 const CONTACT_EMAIL = "privacy@williamscouncilsecurity.com";
-const POSTAL = "Williams Council Security Group, Texas, USA";
+const POSTAL = "Williams Council Security Group Inc., Texas, USA";
 
 function Page({
   title,
