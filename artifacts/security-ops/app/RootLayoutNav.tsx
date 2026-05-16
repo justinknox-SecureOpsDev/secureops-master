@@ -6,12 +6,26 @@ import { useColors } from "@/hooks/useColors";
 import { useNotifications } from "@/hooks/useNotifications";
 import { Feather } from "@expo/vector-icons";
 
-const PUBLIC_TOP_SCREENS = new Set([
+// Top-level routes the redirect guard must leave alone. Anything not in this
+// set (and not inside (admin)/(employee)) gets bounced to the role landing
+// page — that's how we keep deep links from leaking into the wrong shell.
+// When you add a new top-level screen under `app/*.tsx`, add it here too,
+// otherwise the button that opens it will just punt the user back to Home.
+const ALLOWED_TOP_SCREENS = new Set([
+  // Auth / first-login flows
   "login",
   "forgot-password",
   "change-password",
   "enable-biometric",
   "edit-profile",
+  // Authenticated standalone screens reachable from profile / quick actions
+  "availability",
+  "license-renewal",
+  "paystubs",
+  "swap-requests",
+  "training-add",
+  "dar",
+  "patrol",
 ]);
 
 export default function RootLayoutNav() {
@@ -43,7 +57,7 @@ export default function RootLayoutNav() {
     }
 
     // Default landing.
-    if (!inAuthGroup && !PUBLIC_TOP_SCREENS.has(top ?? "")) {
+    if (!inAuthGroup && !ALLOWED_TOP_SCREENS.has(top ?? "")) {
       if (user.role === "admin") router.replace("/(admin)/dashboard");
       else router.replace("/(employee)/home");
     } else if (top === "login") {
@@ -89,6 +103,13 @@ export default function RootLayoutNav() {
       <Stack.Screen name="change-password" />
       <Stack.Screen name="enable-biometric" />
       <Stack.Screen name="edit-profile" />
+      <Stack.Screen name="availability" />
+      <Stack.Screen name="license-renewal" />
+      <Stack.Screen name="paystubs" />
+      <Stack.Screen name="swap-requests" />
+      <Stack.Screen name="training-add" />
+      <Stack.Screen name="dar" />
+      <Stack.Screen name="patrol" />
     </Stack>
   );
 }
