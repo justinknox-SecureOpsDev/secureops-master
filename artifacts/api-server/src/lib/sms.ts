@@ -38,6 +38,17 @@ async function getTwilioCreds(): Promise<TwilioCreds | null> {
   const now = Date.now();
   if (cachedCreds && now - lastFetchAt < CRED_TTL_MS) return cachedCreds;
 
+  // Env-var fallback (preferred when explicitly set): allows operators to
+  // configure Twilio without going through the Replit connector popup.
+  const envSid = process.env["TWILIO_ACCOUNT_SID"]?.trim();
+  const envToken = process.env["TWILIO_AUTH_TOKEN"]?.trim();
+  const envFrom = process.env["TWILIO_PHONE_NUMBER"]?.trim();
+  if (envSid && envToken && envFrom) {
+    cachedCreds = { accountSid: envSid, authToken: envToken, fromNumber: envFrom };
+    lastFetchAt = now;
+    return cachedCreds;
+  }
+
   const hostname = process.env["REPLIT_CONNECTORS_HOSTNAME"];
   const xReplitToken = process.env["REPL_IDENTITY"]
     ? `repl ${process.env["REPL_IDENTITY"]}`
