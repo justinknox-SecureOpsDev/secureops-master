@@ -380,12 +380,24 @@ router.patch("/me/employee", requireAuth, async (req, res): Promise<void> => {
     return;
   }
   const userId = req.user!.userId;
-  const [existing] = await db.select().from(employeesTable).where(eq(employeesTable.userId, userId)).limit(1);
-  if (!existing) {
-    res.status(404).json({ error: "Not Found", message: "Employee profile not found" });
+  // Make sure the user behind the JWT still exists. If not, surface a clear
+  // 401 so the mobile app can prompt re-login instead of looping on the form.
+  const [user] = await db.select().from(usersTable).where(eq(usersTable.id, userId)).limit(1);
+  if (!user) {
+    res.status(401).json({ error: "Unauthorized", message: "Your session is no longer valid. Please sign in again." });
     return;
   }
-  await db.update(employeesTable).set(updates).where(eq(employeesTable.userId, userId));
+  // Auto-create the employee profile row on first save. Admin users (and any
+  // legacy users that pre-date the employees-row backfill) don't necessarily
+  // have a row yet; the user is authenticated and the row is keyed by userId,
+  // so an upsert is always safe and avoids confusing "profile not found"
+  // errors when the user is clearly logged in.
+  const [existing] = await db.select().from(employeesTable).where(eq(employeesTable.userId, userId)).limit(1);
+  if (!existing) {
+    await db.insert(employeesTable).values({ userId, ...updates });
+  } else {
+    await db.update(employeesTable).set(updates).where(eq(employeesTable.userId, userId));
+  }
   // Clear must-complete-profile once they've saved their profile.
   await db.update(usersTable).set({ mustCompleteProfile: false }).where(eq(usersTable.id, userId));
   const [employee] = await db.select().from(employeesTable).where(eq(employeesTable.userId, userId)).limit(1);
