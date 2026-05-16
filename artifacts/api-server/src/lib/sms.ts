@@ -42,8 +42,13 @@ async function getTwilioCreds(): Promise<TwilioCreds | null> {
   // configure Twilio without going through the Replit connector popup.
   const envSid = process.env["TWILIO_ACCOUNT_SID"]?.trim();
   const envToken = process.env["TWILIO_AUTH_TOKEN"]?.trim();
-  const envFrom = process.env["TWILIO_PHONE_NUMBER"]?.trim();
-  if (envSid && envToken && envFrom) {
+  const envFromRaw = process.env["TWILIO_PHONE_NUMBER"]?.trim();
+  // Defensively normalize to E.164: strip non-digits, ensure leading "+".
+  // Twilio rejects from-numbers without the "+" prefix.
+  const envFrom = envFromRaw
+    ? (envFromRaw.startsWith("+") ? "+" + envFromRaw.slice(1).replace(/\D/g, "") : "+" + envFromRaw.replace(/\D/g, ""))
+    : undefined;
+  if (envSid && envToken && envFrom && /^\+\d{8,15}$/.test(envFrom)) {
     cachedCreds = { accountSid: envSid, authToken: envToken, fromNumber: envFrom };
     lastFetchAt = now;
     return cachedCreds;
