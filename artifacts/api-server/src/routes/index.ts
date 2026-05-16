@@ -24,6 +24,7 @@ import shiftSwapsRouter from "./shiftSwaps";
 import totpRouter from "./totp";
 import licenseRenewalsRouter from "./licenseRenewals";
 import incidentSharesRouter from "./incidentShares";
+import availabilityRouter from "./availability";
 import { auditLogMiddleware } from "../lib/auditLog";
 
 const router: IRouter = Router();
@@ -58,5 +59,6 @@ router.use(shiftSwapsRouter);
 router.use(totpRouter);
 router.use(licenseRenewalsRouter);
 router.use(incidentSharesRouter);
+router.use(availabilityRouter);
 
 export default router;

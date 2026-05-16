@@ -7,7 +7,7 @@ import { onboardingSubmissionsTable } from "./onboardingSubmissions";
 
 export const employeesTable = pgTable("employees", {
   id: uuid("id").primaryKey().defaultRandom(),
-  userId: uuid("user_id").notNull().references(() => usersTable.id, { onDelete: "cascade" }),
+  userId: uuid("user_id").notNull().unique().references(() => usersTable.id, { onDelete: "cascade" }),
   phone: text("phone"),
   address: text("address"),
   dateOfBirth: date("date_of_birth"),
@@ -38,6 +38,10 @@ export const employeesTable = pgTable("employees", {
   siaLicenseExpiry: date("sia_license_expiry"),
   previousExperience: text("previous_experience"),
   yearsExperience: integer("years_experience"),
+  // Officer-declared cap on hours they want to be scheduled per ISO week.
+  // null = no cap. Used by /me/suggested-shifts to filter out shifts that
+  // would push the officer over their preferred maximum.
+  maxWeeklyHours: integer("max_weekly_hours"),
   references: jsonb("references"),
   trainingCertificateKeys: jsonb("training_certificate_keys"),
   availability: jsonb("availability"),
