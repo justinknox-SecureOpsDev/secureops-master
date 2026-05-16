@@ -8,7 +8,7 @@ import {
   AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
   AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
-import { ArrowUpDown, ArrowDown, ArrowUp, Pencil, Trash2, Plus, Upload, Download, RefreshCw, ExternalLink, Repeat, KeyRound, Copy } from "lucide-react";
+import { ArrowUpDown, ArrowDown, ArrowUp, Pencil, Trash2, Plus, Upload, Download, RefreshCw, ExternalLink, Repeat, KeyRound, Copy, ShieldOff } from "lucide-react";
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter,
 } from "@/components/ui/dialog";
@@ -144,6 +144,10 @@ export function DataGrid({
   const toUserRow = (r: Row): UserRow => r as UserRow;
   const [resetTarget, setResetTarget] = useState<UserRow | null>(null);
   const [resetBusy, setResetBusy] = useState(false);
+  const [revokeTarget, setRevokeTarget] = useState<UserRow | null>(null);
+  const [revokeBusy, setRevokeBusy] = useState(false);
+  const [revokeError, setRevokeError] = useState<string | null>(null);
+  const [revokeDone, setRevokeDone] = useState<{ email: string; revokedAt: string } | null>(null);
   const [resetResult, setResetResult] = useState<{
     user: { firstName: string; lastName: string; email: string };
     resetUrl: string | null;
@@ -153,6 +157,24 @@ export function DataGrid({
   const [resetError, setResetError] = useState<string | null>(null);
   const isShifts = descriptor.name === "shifts";
   const isUsers = descriptor.name === "users";
+
+  async function confirmRevokeSessions() {
+    if (!revokeTarget) return;
+    setRevokeBusy(true);
+    setRevokeError(null);
+    try {
+      const r = await api<{ email: string; revokedAt: string }>(
+        `/admin/users/${revokeTarget.id}/revoke-sessions`,
+        { method: "POST" },
+      );
+      setRevokeDone(r);
+      setRevokeTarget(null);
+    } catch (e) {
+      setRevokeError((e as Error).message);
+    } finally {
+      setRevokeBusy(false);
+    }
+  }
 
   async function confirmPasswordReset() {
     if (!resetTarget) return;
@@ -376,6 +398,16 @@ export function DataGrid({
                       <KeyRound className="w-4 h-4" />
                     </Button>
                   )}
+                  {isUsers && (
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      onClick={() => { setRevokeError(null); setRevokeTarget(toUserRow(r)); }}
+                      title="Revoke all active sessions for this user"
+                    >
+                      <ShieldOff className="w-4 h-4 text-destructive" />
+                    </Button>
+                  )}
                   <Button variant="ghost" size="icon" onClick={() => setEditing(r)} title="Edit">
                     <Pencil className="w-4 h-4" />
                   </Button>
@@ -428,6 +460,59 @@ export function DataGrid({
           onOpenChange={setRepeatOpen}
           onCreated={load}
         />
+      )}
+
+      <AlertDialog open={!!revokeTarget} onOpenChange={(b) => { if (!b && !revokeBusy) setRevokeTarget(null); }}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Sign this user out everywhere?</AlertDialogTitle>
+            <AlertDialogDescription>
+              All active sessions for{" "}
+              <b>{String(revokeTarget?.firstName ?? "")} {String(revokeTarget?.lastName ?? "")}</b>{" "}
+              ({String(revokeTarget?.email ?? "")}) — admin portal, mobile app, and any
+              live chat connections — will be invalidated immediately. They'll need to
+              sign in again with their existing password. Use this if their phone is
+              lost or you suspect their account is compromised.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          {revokeError && (
+            <div className="text-sm text-destructive bg-destructive/5 p-2 rounded border border-destructive/20">
+              {revokeError}
+            </div>
+          )}
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={revokeBusy}>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={(e) => { e.preventDefault(); void confirmRevokeSessions(); }}
+              disabled={revokeBusy}
+              className="bg-destructive text-destructive-foreground"
+            >
+              {revokeBusy ? "Revoking…" : "Revoke all sessions"}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      {revokeDone && (
+        <Dialog open onOpenChange={(o) => { if (!o) setRevokeDone(null); }}>
+          <DialogContent className="max-w-md">
+            <DialogHeader>
+              <DialogTitle className="brand-wordmark text-xl">Sessions revoked</DialogTitle>
+            </DialogHeader>
+            <div className="text-sm space-y-2">
+              <p>
+                All active sessions for <b>{revokeDone.email}</b> were invalidated at{" "}
+                {new Date(revokeDone.revokedAt).toLocaleString()}.
+              </p>
+              <p className="text-muted-foreground">
+                Their next request from any device will return 401 and force a fresh sign-in.
+              </p>
+            </div>
+            <DialogFooter>
+              <Button onClick={() => setRevokeDone(null)}>Close</Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
       )}
 
       <AlertDialog open={!!resetTarget} onOpenChange={(b) => { if (!b && !resetBusy) setResetTarget(null); }}>

@@ -55,3 +55,37 @@ Public application and upload flows can be triggered without authentication, and
 ### Elevation of Privilege
 
 Role separation between admin and employee is central to the product. Missing membership checks on chat/direct-message routes, broken ownership checks on documents, or allowing pending/untrusted accounts to act like active employees would let attackers reach data and operations beyond their intended role. Generic admin CRUD and token-scoped onboarding flows are especially sensitive and must enforce server-side authorization on every request.
+
+## Recent Hardening (May 2026 launch pack)
+
+The P0 launch security pack tightened the controls described above. When re-scanning, treat the following as the current baseline:
+
+- **CORS** is locked to `ALLOWED_ORIGINS ∪ REPLIT_DOMAINS` in `artifacts/api-server/src/app.ts`. Requests with no `Origin` header (native app / curl) are allowed; unknown browser origins are rejected.
+- **Helmet** is enabled with `crossOriginResourcePolicy: cross-origin` (so signed object-storage downloads can be embedded by the portal and mobile app). Content-Security-Policy is enabled in production with a tuned directive set; disabled in dev to keep Vite HMR working.
+- **Rate limiters** (`middlewares/rateLimit.ts`):
+  - login (existing): 10 / 15 min / IP and per-email
+  - forgot-password (existing): 5 / hour / IP and per-email
+  - `publicApplicationLimiter`: 5 / hour / IP on `POST /applications`
+  - `tokenLookupLimiter`: 60 / 5 min / IP on GET+POST `/applications/amend/:token` and `/onboarding/:token`
+  - `emergencyLimiter`: 5 / min / user on `POST /emergency`
+  - existing per-IP cap on `/storage/uploads/request-url` and `/storage/uploads/application-url`
+- **JWT revocation** uses two complementary mechanisms, both checked in `requireAuth` AND in the `/api/ws` upgrade in `lib/wsManager.ts`:
+  - `users.tokens_valid_after` watermark — bumped by `POST /auth/logout-all` (self) or `POST /admin/users/:id/revoke-sessions` (admin). Tokens with `iat < tokensValidAfter` are rejected.
+  - `revoked_tokens` table keyed by `jti` — written by `POST /auth/logout`. Looked up per request.
+  - Expired `revoked_tokens` rows are cleaned up hourly by `lib/scheduledJobs.ts`.
+- **Sensitive-data redaction** on `/admin/tables/users` strips `passwordHash` and `tempPasswordPlain` from list/get responses; only the dedicated `/admin/users/invitations` endpoint returns temp passwords.
+- **System status surface**: `GET /admin/system/status` (admin-only) returns booleans for SMTP / SESSION_SECRET / base-URL / CORS configuration. Used by the admin shell to render an amber "degraded configuration" banner. The server also logs error-level messages at boot if any of these are missing in production.
+- **Public legal surface**: `/admin-portal/{privacy,terms,data-rights}` are publicly accessible and linked from the admin Apply page, admin Login, and the mobile login screen.
+- **DB indexes** on hot lookup paths: `shifts(siteId,startTime)`, `shiftAssignments(shiftId,status)`, `timeEntries(employeeId,clockInTime)`, `chatMessages(roomId,createdAt)`, `incidents(employeeId,occurredAt)`, plus `revoked_tokens(userId)` and `revoked_tokens(expiresAt)`.
+
+## Production deployment checklist
+
+These environment variables must be set on the deployed environment for the hardening above to be fully effective. Missing values are surfaced via boot-time `logger.error` and the admin shell banner.
+
+- `SESSION_SECRET` — ≥16 chars, high-entropy. Production hard-fails at boot if missing/short.
+- `DATABASE_URL` — Postgres connection string (already required).
+- `ALLOWED_ORIGINS` — comma-separated list of browser origins that may call the API. `REPLIT_DOMAINS` is automatically added on top.
+- `APP_BASE_URL` — public origin used to build links inside outbound emails (password reset, onboarding, amendment, invites). Falls back to `REPLIT_DOMAINS` if unset.
+- `SMTP_HOST`, `SMTP_PORT`, `SMTP_USER`, `SMTP_PASS`, optional `SMTP_FROM` — required for invitation, password-reset, onboarding, and amendment emails to actually leave the building.
+- `EMERGENCY_CALL_NUMBER` — dial-out number for the panic button (defaults to `911`).
+- `SEED_DEMO_USERS=false` — set in production to prevent the demo `admin@secureops.com` / `john.smith@secureops.com` accounts from being re-provisioned.

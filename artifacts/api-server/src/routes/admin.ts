@@ -915,6 +915,27 @@ function getAdminResetBaseUrl(): string | null {
   return null;
 }
 
+// POST /admin/users/:userId/revoke-sessions — admin "kick this user out" action.
+// Bumps the user's tokens_valid_after watermark so every existing JWT
+// (REST and WebSocket) is rejected on the very next request. Use after a
+// suspected compromise, lost device, or role change.
+router.post("/admin/users/:userId/revoke-sessions", requireAdmin, async (req, res): Promise<void> => {
+  const { userId } = req.params as { userId: string };
+  const [user] = await db
+    .select({ id: usersTable.id, email: usersTable.email })
+    .from(usersTable)
+    .where(eq(usersTable.id, userId))
+    .limit(1);
+  if (!user) {
+    res.status(404).json({ error: "Not Found", message: "User not found" });
+    return;
+  }
+  const now = new Date();
+  await db.update(usersTable).set({ tokensValidAfter: now }).where(eq(usersTable.id, userId));
+  req.log.info({ targetUserId: userId, byAdmin: req.user!.userId }, "Admin revoked all sessions for user");
+  res.json({ success: true, revokedAt: now.toISOString(), email: user.email });
+});
+
 router.post("/admin/users/:userId/password-reset", requireAdmin, async (req, res): Promise<void> => {
   const userId = req.params.userId as string;
   const adminUserId = req.user!.userId;

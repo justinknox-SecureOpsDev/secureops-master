@@ -4,6 +4,7 @@ import { logger } from "./lib/logger";
 import { attachWebSocketServer } from "./lib/wsManager";
 import { seedPolicies, backfillEmployeeProfileFields } from "@workspace/db";
 import { seedDemoUsers } from "./lib/seedDemoUsers";
+import { startScheduledJobs } from "./lib/scheduledJobs";
 
 const rawPort = process.env["PORT"];
 
@@ -22,6 +23,9 @@ attachWebSocketServer(server);
 
 server.listen(port, () => {
   logger.info({ port }, "Server listening");
+  // Background maintenance — currently just expired-revoked-token cleanup.
+  // Kept inside listen() so it only starts once the server is actually up.
+  startScheduledJobs();
   // Production startup checks — surface degraded-mode configuration loudly
   // so operators notice on the very first deploy log instead of after a
   // user-facing failure (e.g. invite emails silently not being sent).

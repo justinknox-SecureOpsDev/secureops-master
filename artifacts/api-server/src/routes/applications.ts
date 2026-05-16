@@ -125,11 +125,33 @@ function genTempPassword(): string {
   return out;
 }
 
-function buildOnboardingUrl(req: Request, token: string): string {
-  const proto = (req.headers["x-forwarded-proto"] as string) || req.protocol || "https";
-  const host = (req.headers["x-forwarded-host"] as string) || req.headers.host || "";
-  const base = host ? `${proto}://${host}` : "";
-  return `${base}/admin-portal/onboard/${token}`;
+/**
+ * Resolve a trusted base URL for outbound onboarding/amendment links.
+ *
+ * Mirrors the policy in `routes/auth.ts` (password reset) and
+ * `routes/admin.ts` (admin-issued resets). We deliberately do NOT use
+ * request headers (Host / X-Forwarded-*) — those are attacker-influenced
+ * and would let a hostile caller send a victim a link pointing to an
+ * attacker-controlled domain that captures the live single-use token.
+ *
+ * Resolution order:
+ *   1. APP_BASE_URL — explicit operator-configured origin (preferred).
+ *   2. REPLIT_DOMAINS — first comma-separated value, used over HTTPS.
+ *
+ * Returns null if neither is set; callers must then skip the email and
+ * return `onboardingUrl: null` so the admin shares the link some other way.
+ */
+function getTrustedBaseUrl(): string | null {
+  const explicit = process.env.APP_BASE_URL?.trim();
+  if (explicit) return explicit.replace(/\/+$/, "");
+  const replitDomain = process.env.REPLIT_DOMAINS?.split(",")[0]?.trim();
+  if (replitDomain) return `https://${replitDomain}`;
+  return null;
+}
+
+function buildOnboardingUrl(token: string): string | null {
+  const base = getTrustedBaseUrl();
+  return base ? `${base}/admin-portal/onboard/${token}` : null;
 }
 
 // ---- helpers ---------------------------------------------------------------
@@ -457,23 +479,28 @@ router.post("/admin/applications/:id/approve", requireAdmin, async (req, res): P
 
   if ("error" in result) { res.status(result.error.status).json(result.error.body); return; }
 
-  const onboardingUrl = buildOnboardingUrl(req, token);
+  const onboardingUrl = buildOnboardingUrl(token);
   const app = result.updated;
-  const emailMsg = renderOnboardingEmail({
-    firstName: app.firstName,
-    onboardingUrl,
-    email: app.email,
-  });
-  const emailSent = await sendEmail({
-    to: app.email,
-    subject: emailMsg.subject,
-    text: emailMsg.text,
-    html: emailMsg.html,
-  });
-  if (emailSent) {
-    req.log.info({ employeeId: result.userId, to: app.email }, "Onboarding approval email sent");
+  let emailSent = false;
+  if (onboardingUrl) {
+    const emailMsg = renderOnboardingEmail({
+      firstName: app.firstName,
+      onboardingUrl,
+      email: app.email,
+    });
+    emailSent = await sendEmail({
+      to: app.email,
+      subject: emailMsg.subject,
+      text: emailMsg.text,
+      html: emailMsg.html,
+    });
+    if (emailSent) {
+      req.log.info({ employeeId: result.userId, to: app.email }, "Onboarding approval email sent");
+    } else {
+      req.log.info({ employeeId: result.userId }, "Onboarding email not sent — admin must share link manually");
+    }
   } else {
-    req.log.info({ employeeId: result.userId }, "Onboarding email not sent — admin must share link manually");
+    req.log.error({ employeeId: result.userId }, "Approve: APP_BASE_URL/REPLIT_DOMAINS unset; cannot build onboarding link");
   }
 
   res.json({
@@ -488,11 +515,9 @@ router.post("/admin/applications/:id/approve", requireAdmin, async (req, res): P
 
 // ---- Admin: request more info from applicant -----------------------------
 
-function buildAmendUrl(req: Request, token: string): string {
-  const proto = (req.headers["x-forwarded-proto"] as string) || req.protocol || "https";
-  const host = (req.headers["x-forwarded-host"] as string) || req.headers.host || "";
-  const base = host ? `${proto}://${host}` : "";
-  return `${base}/admin-portal/amend/${token}`;
+function buildAmendUrl(token: string): string | null {
+  const base = getTrustedBaseUrl();
+  return base ? `${base}/admin-portal/amend/${token}` : null;
 }
 
 router.post("/admin/applications/:id/request-info", requireAdmin, async (req, res): Promise<void> => {
@@ -535,20 +560,25 @@ router.post("/admin/applications/:id/request-info", requireAdmin, async (req, re
     reviewedAt: new Date(),
   }).where(eq(applicationsTable.id, appId)).returning();
 
-  const amendUrl = buildAmendUrl(req, token);
+  const amendUrl = buildAmendUrl(token);
   const fieldLabels = parsed.data.requestedFields.map((k) => AMENDABLE_FIELDS[k].label);
-  const emailMsg = renderRequestInfoEmail({
-    firstName: app.firstName,
-    amendUrl,
-    note: parsed.data.note ?? null,
-    fieldLabels,
-  });
-  const emailSent = await sendEmail({
-    to: app.email,
-    subject: emailMsg.subject,
-    text: emailMsg.text,
-    html: emailMsg.html,
-  });
+  let emailSent = false;
+  if (amendUrl) {
+    const emailMsg = renderRequestInfoEmail({
+      firstName: app.firstName,
+      amendUrl,
+      note: parsed.data.note ?? null,
+      fieldLabels,
+    });
+    emailSent = await sendEmail({
+      to: app.email,
+      subject: emailMsg.subject,
+      text: emailMsg.text,
+      html: emailMsg.html,
+    });
+  } else {
+    req.log.error({ applicationId: appId }, "request-info: APP_BASE_URL/REPLIT_DOMAINS unset; cannot build amend link");
+  }
   if (emailSent) {
     req.log.info({ applicationId: appId, to: app.email }, "Request-info email sent");
   } else {
@@ -1002,23 +1032,28 @@ router.post("/admin/onboarding/:employeeId/resend", requireAdmin, async (req, re
     token, employeeId, applicationId: prev?.applicationId ?? null, expiresAt,
   });
 
-  const onboardingUrl = buildOnboardingUrl(req, token);
+  const onboardingUrl = buildOnboardingUrl(token);
   // Resend doesn't reset password; we don't include credentials in the email
   // (we don't have the plaintext anymore). Just the link.
-  const emailMsg = renderResendOnboardingEmail({
-    firstName: user.firstName,
-    onboardingUrl,
-  });
-  const emailSent = await sendEmail({
-    to: user.email,
-    subject: emailMsg.subject,
-    text: emailMsg.text,
-    html: emailMsg.html,
-  });
-  if (emailSent) {
-    req.log.info({ employeeId, to: user.email }, "Resent onboarding email sent");
+  let emailSent = false;
+  if (onboardingUrl) {
+    const emailMsg = renderResendOnboardingEmail({
+      firstName: user.firstName,
+      onboardingUrl,
+    });
+    emailSent = await sendEmail({
+      to: user.email,
+      subject: emailMsg.subject,
+      text: emailMsg.text,
+      html: emailMsg.html,
+    });
+    if (emailSent) {
+      req.log.info({ employeeId, to: user.email }, "Resent onboarding email sent");
+    } else {
+      req.log.info({ employeeId }, "Resent onboarding email not sent — admin must share link manually");
+    }
   } else {
-    req.log.info({ employeeId }, "Resent onboarding email not sent — admin must share link manually");
+    req.log.error({ employeeId }, "Resend onboarding: APP_BASE_URL/REPLIT_DOMAINS unset; cannot build link");
   }
 
   res.json({

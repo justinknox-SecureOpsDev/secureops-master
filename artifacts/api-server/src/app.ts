@@ -32,16 +32,44 @@ app.use(
 );
 
 // --- Security headers (helmet) -------------------------------------------
-// CSP is intentionally disabled here: the admin portal is served from the
-// same origin via the shared proxy and would need a non-trivial allow-list
-// for Vite/inline styles. Crawlers and clickjacking are still blocked via
-// the other helmet defaults (X-Frame-Options=DENY, X-Content-Type-Options,
-// etc.). crossOriginResourcePolicy is set to "cross-origin" so signed
-// uploads/downloads served from this API can still be embedded by the
-// admin portal and mobile app.
+// crossOriginResourcePolicy is set to "cross-origin" so signed uploads /
+// downloads served from this API can still be embedded by the admin portal
+// and mobile app. Other helmet defaults (HSTS, X-Frame-Options=DENY,
+// X-Content-Type-Options) stay on.
+//
+// Content-Security-Policy is enabled in production only. Vite's dev server
+// uses inline scripts and HMR over a websocket that a strict CSP would
+// break, so we leave it off in development. The production policy is tuned
+// for the admin portal's actual needs:
+//   - script-src: self only (Vite emits hashed JS bundles)
+//   - style-src: self + Google Fonts CSS + 'unsafe-inline' for runtime
+//     style injection by Radix/Tailwind utilities
+//   - font-src:  self + Google Fonts woff2 hosts
+//   - img-src:   self + data: (icons) + blob: (file previews) + https:
+//                (signed object-storage downloads)
+//   - connect-src: self + wss://<self> for the chat WebSocket. Tile servers
+//                for the live map are explicitly allow-listed.
+//   - frame-ancestors: 'none' (no embedding the portal anywhere)
+const CSP_DIRECTIVES = {
+  defaultSrc: ["'self'"],
+  scriptSrc: ["'self'"],
+  styleSrc: ["'self'", "'unsafe-inline'", "https://fonts.googleapis.com"],
+  fontSrc: ["'self'", "https://fonts.gstatic.com", "data:"],
+  imgSrc: ["'self'", "data:", "blob:", "https:"],
+  connectSrc: ["'self'", "ws:", "wss:", "https://*.tile.openstreetmap.org"],
+  frameAncestors: ["'none'"],
+  baseUri: ["'self'"],
+  formAction: ["'self'"],
+  objectSrc: ["'none'"],
+  upgradeInsecureRequests: [],
+};
+
 app.use(
   helmet({
-    contentSecurityPolicy: false,
+    contentSecurityPolicy:
+      process.env.NODE_ENV === "production"
+        ? { useDefaults: true, directives: CSP_DIRECTIVES }
+        : false,
     crossOriginResourcePolicy: { policy: "cross-origin" },
   }),
 );
