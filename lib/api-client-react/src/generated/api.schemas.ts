@@ -1080,7 +1080,12 @@ export interface SubmitApplicationRequest {
   lastName: string;
   email: string;
   phone: string;
+  /** Street address (line 1, optionally line 2) */
   address: string;
+  city?: string | null;
+  /** US state code, e.g. TX */
+  state?: string | null;
+  zip?: string | null;
   dateOfBirth?: string | null;
   cityOfBirth?: string | null;
   stateOfBirth?: string | null;
@@ -1117,6 +1122,15 @@ export interface Application {
   email: string;
   phone: string;
   address: string;
+  city?: string | null;
+  state?: string | null;
+  zip?: string | null;
+  /** Geocoded latitude (best-effort, may be null). */
+  locationLat?: number | null;
+  /** Geocoded longitude (best-effort, may be null). */
+  locationLng?: number | null;
+  /** Distance in miles from the queried site. Only populated when nearSiteId+maxMiles filter is active. */
+  distanceMiles?: number | null;
   dateOfBirth?: string | null;
   cityOfBirth?: string | null;
   stateOfBirth?: string | null;
@@ -1504,6 +1518,18 @@ export type AdminSignObjectDownload200 = {
 export type AdminListApplicationsParams = {
   status?: string;
   search?: string;
+  /**
+   * Case-insensitive partial match on applicant city.
+   */
+  city?: string;
+  /**
+   * When set together with maxMiles, only returns applicants whose geocoded address is within maxMiles of this site's coordinates.
+   */
+  nearSiteId?: string;
+  /**
+   * Distance radius in miles for nearSiteId filter. Required when nearSiteId is set.
+   */
+  maxMiles?: number;
 };
 
 export type AdminListOnboardingParams = {

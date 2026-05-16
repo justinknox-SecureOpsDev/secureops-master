@@ -2112,7 +2112,10 @@ export const SubmitApplicationBody = zod.object({
   lastName: zod.string(),
   email: zod.string(),
   phone: zod.string(),
-  address: zod.string(),
+  address: zod.string().describe("Street address (line 1, optionally line 2)"),
+  city: zod.string().nullish(),
+  state: zod.string().nullish().describe("US state code, e.g. TX"),
+  zip: zod.string().nullish(),
   dateOfBirth: zod.string().nullish(),
   cityOfBirth: zod.string().nullish(),
   stateOfBirth: zod.string().nullish(),
@@ -2185,6 +2188,22 @@ export const SubmitApplicationBody = zod.object({
 export const AdminListApplicationsQueryParams = zod.object({
   status: zod.coerce.string().optional(),
   search: zod.coerce.string().optional(),
+  city: zod.coerce
+    .string()
+    .optional()
+    .describe("Case-insensitive partial match on applicant city."),
+  nearSiteId: zod.coerce
+    .string()
+    .optional()
+    .describe(
+      "When set together with maxMiles, only returns applicants whose geocoded address is within maxMiles of this site's coordinates.",
+    ),
+  maxMiles: zod.coerce
+    .number()
+    .optional()
+    .describe(
+      "Distance radius in miles for nearSiteId filter. Required when nearSiteId is set.",
+    ),
 });
 
 export const AdminListApplicationsResponseItem = zod.object({
@@ -2195,6 +2214,23 @@ export const AdminListApplicationsResponseItem = zod.object({
   email: zod.string(),
   phone: zod.string(),
   address: zod.string(),
+  city: zod.string().nullish(),
+  state: zod.string().nullish(),
+  zip: zod.string().nullish(),
+  locationLat: zod
+    .number()
+    .nullish()
+    .describe("Geocoded latitude (best-effort, may be null)."),
+  locationLng: zod
+    .number()
+    .nullish()
+    .describe("Geocoded longitude (best-effort, may be null)."),
+  distanceMiles: zod
+    .number()
+    .nullish()
+    .describe(
+      "Distance in miles from the queried site. Only populated when nearSiteId+maxMiles filter is active.",
+    ),
   dateOfBirth: zod.string().nullish(),
   cityOfBirth: zod.string().nullish(),
   stateOfBirth: zod.string().nullish(),
@@ -2248,6 +2284,23 @@ export const AdminGetApplicationResponse = zod.object({
   email: zod.string(),
   phone: zod.string(),
   address: zod.string(),
+  city: zod.string().nullish(),
+  state: zod.string().nullish(),
+  zip: zod.string().nullish(),
+  locationLat: zod
+    .number()
+    .nullish()
+    .describe("Geocoded latitude (best-effort, may be null)."),
+  locationLng: zod
+    .number()
+    .nullish()
+    .describe("Geocoded longitude (best-effort, may be null)."),
+  distanceMiles: zod
+    .number()
+    .nullish()
+    .describe(
+      "Distance in miles from the queried site. Only populated when nearSiteId+maxMiles filter is active.",
+    ),
   dateOfBirth: zod.string().nullish(),
   cityOfBirth: zod.string().nullish(),
   stateOfBirth: zod.string().nullish(),
@@ -2302,6 +2355,23 @@ export const AdminMarkApplicationUnderReviewResponse = zod.object({
   email: zod.string(),
   phone: zod.string(),
   address: zod.string(),
+  city: zod.string().nullish(),
+  state: zod.string().nullish(),
+  zip: zod.string().nullish(),
+  locationLat: zod
+    .number()
+    .nullish()
+    .describe("Geocoded latitude (best-effort, may be null)."),
+  locationLng: zod
+    .number()
+    .nullish()
+    .describe("Geocoded longitude (best-effort, may be null)."),
+  distanceMiles: zod
+    .number()
+    .nullish()
+    .describe(
+      "Distance in miles from the queried site. Only populated when nearSiteId+maxMiles filter is active.",
+    ),
   dateOfBirth: zod.string().nullish(),
   cityOfBirth: zod.string().nullish(),
   stateOfBirth: zod.string().nullish(),
@@ -2356,6 +2426,23 @@ export const AdminRejectApplicationResponse = zod.object({
   email: zod.string(),
   phone: zod.string(),
   address: zod.string(),
+  city: zod.string().nullish(),
+  state: zod.string().nullish(),
+  zip: zod.string().nullish(),
+  locationLat: zod
+    .number()
+    .nullish()
+    .describe("Geocoded latitude (best-effort, may be null)."),
+  locationLng: zod
+    .number()
+    .nullish()
+    .describe("Geocoded longitude (best-effort, may be null)."),
+  distanceMiles: zod
+    .number()
+    .nullish()
+    .describe(
+      "Distance in miles from the queried site. Only populated when nearSiteId+maxMiles filter is active.",
+    ),
   dateOfBirth: zod.string().nullish(),
   cityOfBirth: zod.string().nullish(),
   stateOfBirth: zod.string().nullish(),
@@ -2411,6 +2498,23 @@ export const AdminApproveApplicationResponse = zod.object({
     email: zod.string(),
     phone: zod.string(),
     address: zod.string(),
+    city: zod.string().nullish(),
+    state: zod.string().nullish(),
+    zip: zod.string().nullish(),
+    locationLat: zod
+      .number()
+      .nullish()
+      .describe("Geocoded latitude (best-effort, may be null)."),
+    locationLng: zod
+      .number()
+      .nullish()
+      .describe("Geocoded longitude (best-effort, may be null)."),
+    distanceMiles: zod
+      .number()
+      .nullish()
+      .describe(
+        "Distance in miles from the queried site. Only populated when nearSiteId+maxMiles filter is active.",
+      ),
     dateOfBirth: zod.string().nullish(),
     cityOfBirth: zod.string().nullish(),
     stateOfBirth: zod.string().nullish(),

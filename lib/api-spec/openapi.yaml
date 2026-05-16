@@ -1522,6 +1522,9 @@ paths:
       parameters:
         - { name: status, in: query, schema: { type: string } }
         - { name: search, in: query, schema: { type: string } }
+        - { name: city, in: query, schema: { type: string }, description: "Case-insensitive partial match on applicant city." }
+        - { name: nearSiteId, in: query, schema: { type: string }, description: "When set together with maxMiles, only returns applicants whose geocoded address is within maxMiles of this site's coordinates." }
+        - { name: maxMiles, in: query, schema: { type: number }, description: "Distance radius in miles for nearSiteId filter. Required when nearSiteId is set." }
       responses:
         "200":
           description: OK
@@ -3036,7 +3039,10 @@ components:
         lastName: { type: string }
         email: { type: string }
         phone: { type: string }
-        address: { type: string }
+        address: { type: string, description: "Street address (line 1, optionally line 2)" }
+        city: { type: string, nullable: true }
+        state: { type: string, nullable: true, description: "US state code, e.g. TX" }
+        zip: { type: string, nullable: true }
         dateOfBirth: { type: string, nullable: true }
         cityOfBirth: { type: string, nullable: true }
         stateOfBirth: { type: string, nullable: true }
@@ -3071,6 +3077,12 @@ components:
         email: { type: string }
         phone: { type: string }
         address: { type: string }
+        city: { type: string, nullable: true }
+        state: { type: string, nullable: true }
+        zip: { type: string, nullable: true }
+        locationLat: { type: number, nullable: true, description: "Geocoded latitude (best-effort, may be null)." }
+        locationLng: { type: number, nullable: true, description: "Geocoded longitude (best-effort, may be null)." }
+        distanceMiles: { type: number, nullable: true, description: "Distance in miles from the queried site. Only populated when nearSiteId+maxMiles filter is active." }
         dateOfBirth: { type: string, nullable: true }
         cityOfBirth: { type: string, nullable: true }
         stateOfBirth: { type: string, nullable: true }

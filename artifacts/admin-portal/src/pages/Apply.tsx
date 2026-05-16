@@ -17,7 +17,8 @@ type Period = (typeof PERIODS)[number];
 type Reference = { name: string; relationship: string; phone: string; email: string };
 type Form = {
   // Personal
-  firstName: string; lastName: string; email: string; phone: string; address: string;
+  firstName: string; lastName: string; email: string; phone: string;
+  address: string; city: string; state: string; zip: string;
   dateOfBirth: string; cityOfBirth: string; stateOfBirth: string; niNumber: string;
   // Right to work
   rightToWorkStatus: string;
@@ -46,7 +47,8 @@ export function ApplyPage() {
   const [submitted, setSubmitted] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [form, setForm] = useState<Form>({
-    firstName: "", lastName: "", email: "", phone: "", address: "",
+    firstName: "", lastName: "", email: "", phone: "",
+    address: "", city: "", state: "", zip: "",
     dateOfBirth: "", cityOfBirth: "", stateOfBirth: "", niNumber: "",
     rightToWorkStatus: "", rightToWorkDoc: null,
     siaLicenseNumber: "", siaLicenseLevel: "", siaLicenseExpiry: "",
@@ -86,7 +88,10 @@ export function ApplyPage() {
       if (!form.firstName || !form.lastName) return "First and last name are required.";
       if (!form.email) return "Email is required.";
       if (!form.phone) return "Phone is required.";
-      if (!form.address) return "Address is required.";
+      if (!form.address) return "Street address is required.";
+      if (!form.city) return "City is required.";
+      if (!form.state) return "State is required.";
+      if (!form.zip) return "ZIP code is required.";
     }
     return true;
   }
@@ -101,6 +106,9 @@ export function ApplyPage() {
         email: form.email,
         phone: form.phone,
         address: form.address,
+        city: form.city || null,
+        state: form.state || null,
+        zip: form.zip || null,
         dateOfBirth: form.dateOfBirth || null,
         cityOfBirth: form.cityOfBirth || null,
         stateOfBirth: form.stateOfBirth || null,
@@ -162,7 +170,15 @@ export function ApplyPage() {
                 <Field label="Email *"><Input type="email" value={form.email} onChange={(e) => set("email", e.target.value)} /></Field>
                 <Field label="Phone *"><Input value={form.phone} onChange={(e) => set("phone", e.target.value)} /></Field>
               </Two>
-              <Field label="Full address *"><Textarea rows={2} value={form.address} onChange={(e) => set("address", e.target.value)} /></Field>
+              <Field label="Street address *"><Textarea rows={2} value={form.address} onChange={(e) => set("address", e.target.value)} placeholder="Street, apt/unit" /></Field>
+              <Two>
+                <Field label="City *"><Input value={form.city} onChange={(e) => set("city", e.target.value)} /></Field>
+                <Field label="State *"><Input value={form.state} onChange={(e) => set("state", e.target.value.toUpperCase().slice(0, 2))} placeholder="TX" maxLength={2} /></Field>
+              </Two>
+              <Two>
+                <Field label="ZIP code *"><Input value={form.zip} onChange={(e) => set("zip", e.target.value)} placeholder="75001" /></Field>
+                <div />
+              </Two>
               <Two>
                 <Field label="Date of birth"><Input type="date" value={form.dateOfBirth} onChange={(e) => set("dateOfBirth", e.target.value)} /></Field>
                 <Field label="SSN (last 4)"><Input value={form.niNumber} onChange={(e) => set("niNumber", e.target.value)} /></Field>

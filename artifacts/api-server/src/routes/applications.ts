@@ -1,5 +1,8 @@
 import { Router, type IRouter, type Request, type Response } from "express";
 import { eq, desc, ilike, or, sql, and, type SQL } from "drizzle-orm";
+import { sitesTable } from "@workspace/db";
+import { haversineMiles } from "../lib/geofence";
+import { geocodeUsAddress } from "../lib/geocode";
 import bcrypt from "bcryptjs";
 import { randomBytes } from "crypto";
 import {
@@ -40,7 +43,10 @@ const AMENDMENT_TOKEN_TTL_DAYS = 14;
 type AmendmentFieldType = "text" | "textarea" | "number" | "date" | "file";
 const AMENDABLE_FIELDS: Record<string, { column: string; type: AmendmentFieldType; label: string }> = {
   phone:               { column: "phone",                type: "text",     label: "Phone number" },
-  address:             { column: "address",              type: "textarea", label: "Home address" },
+  address:             { column: "address",              type: "textarea", label: "Street address" },
+  city:                { column: "city",                 type: "text",     label: "City" },
+  state:               { column: "state",                type: "text",     label: "State" },
+  zip:                 { column: "zip",                  type: "text",     label: "ZIP code" },
   dateOfBirth:         { column: "dateOfBirth",          type: "date",     label: "Date of birth" },
   cityOfBirth:         { column: "cityOfBirth",          type: "text",     label: "City of birth" },
   stateOfBirth:        { column: "stateOfBirth",         type: "text",     label: "State of birth" },
@@ -165,9 +171,16 @@ interface AcknowledgementEntry {
   timestamp?: string | null;
 }
 
-function rowToApplication(r: ApplicationRow) {
+function rowToApplication(r: ApplicationRow, distanceMiles: number | null = null) {
   return {
     ...r,
+    city: r.city ?? null,
+    state: r.state ?? null,
+    zip: r.zip ?? null,
+    // numeric() columns come back as strings; expose them as numbers (or null) to the API
+    locationLat: r.locationLat != null ? Number(r.locationLat) : null,
+    locationLng: r.locationLng != null ? Number(r.locationLng) : null,
+    distanceMiles,
     dateOfBirth: r.dateOfBirth ?? null,
     siaLicenseExpiry: r.siaLicenseExpiry ?? null,
     references: r.references ?? null,
@@ -176,6 +189,43 @@ function rowToApplication(r: ApplicationRow) {
     reviewedAt: r.reviewedAt ? r.reviewedAt.toISOString() : null,
     createdAt: r.createdAt.toISOString(),
   };
+}
+
+/**
+ * Fire-and-forget background geocode. Writes location_lat/lng to the row
+ * if Census returns a match. Errors are logged but never propagated —
+ * geocoding is best-effort, applicants never wait on it.
+ */
+function geocodeApplicationInBackground(
+  appId: string,
+  parts: { street: string; city: string | null; state: string | null; zip: string | null },
+  log: { error: (o: object, m?: string) => void; info: (o: object, m?: string) => void },
+): void {
+  // Kill switch — applicant home address is PII. Geocoding sends street/city/
+  // state/zip to the US Census Bureau geocoder. Operator must explicitly opt
+  // in via env so the data flow is documented and auditable. When disabled,
+  // city filter still works (text-only); only the distance filter is unfed.
+  if (process.env.GEOCODING_ENABLED !== "true") return;
+  void (async () => {
+    try {
+      const result = await geocodeUsAddress({
+        street: parts.street,
+        city: parts.city,
+        state: parts.state,
+        zip: parts.zip,
+      });
+      if (!result) {
+        log.info({ applicationId: appId }, "Geocode: no match for application address");
+        return;
+      }
+      await db.update(applicationsTable).set({
+        locationLat: String(result.lat),
+        locationLng: String(result.lng),
+      }).where(eq(applicationsTable.id, appId));
+    } catch (err) {
+      log.error({ err, applicationId: appId }, "Background geocode failed");
+    }
+  })();
 }
 
 // ---- Public: submit application -------------------------------------------
@@ -194,6 +244,9 @@ router.post("/applications", publicApplicationLimiter, async (req, res): Promise
       email: d.email.toLowerCase(),
       phone: d.phone,
       address: d.address,
+      city: d.city ?? null,
+      state: d.state ?? null,
+      zip: d.zip ?? null,
       dateOfBirth: d.dateOfBirth ?? null,
       cityOfBirth: d.cityOfBirth ?? null,
       stateOfBirth: d.stateOfBirth ?? null,
@@ -211,6 +264,13 @@ router.post("/applications", publicApplicationLimiter, async (req, res): Promise
       trainingCertificateKeys: d.trainingCertificates?.map((f) => f.objectPath) ?? null,
       availability: d.availability ?? null,
     }).returning();
+    // Best-effort background geocode so admins can filter by distance later.
+    // Never blocks the applicant response.
+    geocodeApplicationInBackground(
+      row.id,
+      { street: row.address, city: row.city, state: row.state, zip: row.zip },
+      req.log,
+    );
     try {
       const { subject, text, html } = renderApplicationReceivedEmail({ firstName: row.firstName });
       const sent = await sendEmail({ to: row.email, subject, text, html });
@@ -232,8 +292,14 @@ router.post("/applications", publicApplicationLimiter, async (req, res): Promise
 router.get("/admin/applications", requireAdmin, async (req, res): Promise<void> => {
   const status = (req.query.status as string | undefined)?.trim();
   const search = (req.query.search as string | undefined)?.trim();
+  const city = (req.query.city as string | undefined)?.trim();
+  const nearSiteId = (req.query.nearSiteId as string | undefined)?.trim();
+  const maxMilesRaw = (req.query.maxMiles as string | undefined)?.trim();
+  const maxMiles = maxMilesRaw ? parseFloat(maxMilesRaw) : NaN;
+
   const conds: SQL[] = [];
   if (status) conds.push(eq(applicationsTable.status, status));
+  if (city) conds.push(ilike(applicationsTable.city, `%${city}%`));
   if (search) {
     const like = `%${search}%`;
     const searchOr = or(
@@ -241,6 +307,7 @@ router.get("/admin/applications", requireAdmin, async (req, res): Promise<void> 
       ilike(applicationsTable.lastName, like),
       ilike(applicationsTable.email, like),
       ilike(applicationsTable.phone, like),
+      ilike(applicationsTable.city, like),
     );
     if (searchOr) conds.push(searchOr);
   }
@@ -249,7 +316,36 @@ router.get("/admin/applications", requireAdmin, async (req, res): Promise<void> 
     .from(applicationsTable)
     .where(conds.length ? and(...conds) : undefined)
     .orderBy(desc(applicationsTable.createdAt));
-  res.json(rows.map(rowToApplication));
+
+  // Distance filter (post-query). Only applied when both nearSiteId and a
+  // positive maxMiles are provided AND the site itself has coordinates.
+  // Applicants without a geocoded address are dropped from the result set
+  // when the filter is active — they have no way to satisfy the predicate.
+  if (nearSiteId && Number.isFinite(maxMiles) && maxMiles > 0) {
+    const [site] = await db.select().from(sitesTable).where(eq(sitesTable.id, nearSiteId)).limit(1);
+    if (!site || site.locationLat == null || site.locationLng == null) {
+      res.status(400).json({
+        error: "Bad Request",
+        message: "Selected site has no coordinates on file; cannot filter by distance.",
+      });
+      return;
+    }
+    const siteLat = Number(site.locationLat);
+    const siteLng = Number(site.locationLng);
+    const enriched = rows
+      .map((r) => {
+        if (r.locationLat == null || r.locationLng == null) return null;
+        const d = haversineMiles(siteLat, siteLng, Number(r.locationLat), Number(r.locationLng));
+        if (d > maxMiles) return null;
+        return rowToApplication(r, Math.round(d * 10) / 10);
+      })
+      .filter((x): x is NonNullable<typeof x> => x !== null)
+      .sort((a, b) => (a.distanceMiles ?? 0) - (b.distanceMiles ?? 0));
+    res.json(enriched);
+    return;
+  }
+
+  res.json(rows.map((r) => rowToApplication(r)));
 });
 
 router.get("/admin/applications/:id", requireAdmin, async (req, res): Promise<void> => {

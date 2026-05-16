@@ -1,4 +1,4 @@
-import { pgTable, text, uuid, timestamp, integer, date, jsonb } from "drizzle-orm/pg-core";
+import { pgTable, text, uuid, timestamp, integer, date, jsonb, numeric } from "drizzle-orm/pg-core";
 import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod/v4";
 
@@ -10,6 +10,11 @@ export const applicationsTable = pgTable("applications", {
   email: text("email").notNull(),
   phone: text("phone").notNull(),
   address: text("address").notNull(),
+  city: text("city"),
+  state: text("state"),
+  zip: text("zip"),
+  locationLat: numeric("location_lat", { precision: 10, scale: 6 }),
+  locationLng: numeric("location_lng", { precision: 10, scale: 6 }),
   dateOfBirth: date("date_of_birth"),
   cityOfBirth: text("city_of_birth"),
   stateOfBirth: text("state_of_birth"),

@@ -16,6 +16,9 @@ type Application = {
   id: string;
   status: ApplicationStatus;
   firstName: string; lastName: string; email: string; phone: string; address: string;
+  city: string | null; state: string | null; zip: string | null;
+  locationLat: number | null; locationLng: number | null;
+  distanceMiles: number | null;
   dateOfBirth: string | null; cityOfBirth: string | null; stateOfBirth: string | null;
   niNumber: string | null; rightToWorkStatus: string | null; rightToWorkDocKey: string | null;
   siaLicenseNumber: string | null; siaLicenseLevel: number | null; siaLicenseExpiry: string | null;
@@ -75,6 +78,10 @@ export function ApplicationsPage() {
   const [error, setError] = useState<string | null>(null);
   const [status, setStatus] = useState("");
   const [search, setSearch] = useState("");
+  const [cityFilter, setCityFilter] = useState("");
+  const [nearSiteId, setNearSiteId] = useState("");
+  const [maxMiles, setMaxMiles] = useState("25");
+  const [sites, setSites] = useState<{ id: string; name: string; locationLat: string | null; locationLng: string | null }[]>([]);
   const [openId, setOpenId] = useState<string | null>(null);
   const [approval, setApproval] = useState<ApproveResp | null>(null);
   const [rejection, setRejection] = useState<RejectResp | null>(null);
@@ -89,12 +96,28 @@ export function ApplicationsPage() {
       const qs = new URLSearchParams();
       if (status) qs.set("status", status);
       if (search) qs.set("search", search);
+      if (cityFilter.trim()) qs.set("city", cityFilter.trim());
+      if (nearSiteId && maxMiles) {
+        qs.set("nearSiteId", nearSiteId);
+        qs.set("maxMiles", maxMiles);
+      }
       const data = await api<Application[]>(`/admin/applications${qs.toString() ? `?${qs}` : ""}`);
       setItems(data);
     } catch (e) { setError((e as Error).message); }
     finally { setLoading(false); }
   }
-  useEffect(() => { refresh(); /* eslint-disable-next-line */ }, [status]);
+  useEffect(() => { refresh(); /* eslint-disable-next-line */ }, [status, nearSiteId, maxMiles]);
+  useEffect(() => {
+    // /admin/tables/:table returns { rows, total, limit, offset }, not a bare array.
+    api<{ rows: { id: string; name: string; locationLat: string | null; locationLng: string | null }[] }>(
+      "/admin/tables/sites?limit=500"
+    )
+      .then((resp) => setSites((resp.rows ?? []).map((r) => ({
+        id: r.id, name: r.name, locationLat: r.locationLat, locationLng: r.locationLng,
+      }))))
+      .catch(() => { /* sites list is optional; distance filter just won't appear */ });
+  }, []);
+  const distanceActive = !!nearSiteId && !!maxMiles;
 
   const opened = useMemo(() => items.find((i) => i.id === openId) ?? null, [items, openId]);
 
@@ -159,9 +182,65 @@ export function ApplicationsPage() {
           ))}
         </div>
         <form className="flex gap-2 ml-auto" onSubmit={(e) => { e.preventDefault(); refresh(); }}>
-          <Input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search name / email / phone" className="w-64" />
+          <Input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search name / email / phone / city" className="w-64" />
           <Button type="submit" variant="outline"><Search className="w-4 h-4" /></Button>
         </form>
+      </div>
+
+      <div className="flex flex-wrap items-end gap-3 bg-muted/40 border rounded-md p-3">
+        <div className="flex flex-col">
+          <label className="text-[11px] uppercase tracking-wide text-muted-foreground mb-1">City contains</label>
+          <form onSubmit={(e) => { e.preventDefault(); refresh(); }}>
+            <Input
+              value={cityFilter}
+              onChange={(e) => setCityFilter(e.target.value)}
+              placeholder="e.g. Dallas"
+              className="w-48"
+            />
+          </form>
+        </div>
+        <div className="flex flex-col">
+          <label className="text-[11px] uppercase tracking-wide text-muted-foreground mb-1">Within distance of site</label>
+          <select
+            value={nearSiteId}
+            onChange={(e) => setNearSiteId(e.target.value)}
+            className="h-9 px-2 rounded border bg-background text-sm w-64"
+          >
+            <option value="">— Any location —</option>
+            {sites
+              .filter((s) => s.locationLat != null && s.locationLng != null)
+              .map((s) => (
+                <option key={s.id} value={s.id}>{s.name}</option>
+              ))}
+          </select>
+        </div>
+        <div className="flex flex-col">
+          <label className="text-[11px] uppercase tracking-wide text-muted-foreground mb-1">Max miles</label>
+          <select
+            value={maxMiles}
+            onChange={(e) => setMaxMiles(e.target.value)}
+            disabled={!nearSiteId}
+            className="h-9 px-2 rounded border bg-background text-sm w-28 disabled:opacity-50"
+          >
+            {[5, 10, 15, 25, 50, 100, 200].map((n) => (
+              <option key={n} value={String(n)}>{n} mi</option>
+            ))}
+          </select>
+        </div>
+        <Button
+          variant="outline"
+          size="sm"
+          onClick={() => { setCityFilter(""); setNearSiteId(""); setMaxMiles("25"); refresh(); }}
+          disabled={!cityFilter && !nearSiteId}
+        >
+          Clear
+        </Button>
+        <Button variant="default" size="sm" onClick={() => refresh()}>Apply</Button>
+        {distanceActive && (
+          <div className="text-xs text-muted-foreground ml-auto">
+            Showing applicants within {maxMiles} mi of the selected site. Applicants without a geocoded address are hidden.
+          </div>
+        )}
       </div>
 
       {error && <div className="text-sm text-destructive bg-destructive/5 p-2 rounded border border-destructive/20">{error}</div>}
@@ -199,6 +278,8 @@ export function ApplicationsPage() {
               <th className="text-left px-3 py-2">Applicant</th>
               <th className="text-left px-3 py-2">Email</th>
               <th className="text-left px-3 py-2">Phone</th>
+              <th className="text-left px-3 py-2">City</th>
+              {distanceActive && <th className="text-left px-3 py-2">Distance</th>}
               <th className="text-left px-3 py-2">TX Lic</th>
               <th className="text-left px-3 py-2">Submitted</th>
               <th className="text-left px-3 py-2">Status</th>
@@ -206,8 +287,8 @@ export function ApplicationsPage() {
             </tr>
           </thead>
           <tbody>
-            {loading && (<tr><td colSpan={8} className="px-3 py-10 text-center text-muted-foreground"><Loader2 className="w-5 h-5 inline-block animate-spin" /></td></tr>)}
-            {!loading && items.length === 0 && (<tr><td colSpan={8} className="px-3 py-10 text-center text-muted-foreground">No applications.</td></tr>)}
+            {loading && (<tr><td colSpan={distanceActive ? 10 : 9} className="px-3 py-10 text-center text-muted-foreground"><Loader2 className="w-5 h-5 inline-block animate-spin" /></td></tr>)}
+            {!loading && items.length === 0 && (<tr><td colSpan={distanceActive ? 10 : 9} className="px-3 py-10 text-center text-muted-foreground">No applications.</td></tr>)}
             {items.map((a) => {
               const isEligible = a.status !== "approved" && a.status !== "rejected";
               return (
@@ -225,6 +306,12 @@ export function ApplicationsPage() {
                   <td className="px-3 py-2 font-medium">{a.firstName} {a.lastName}</td>
                   <td className="px-3 py-2">{a.email}</td>
                   <td className="px-3 py-2">{a.phone}</td>
+                  <td className="px-3 py-2">{[a.city, a.state].filter(Boolean).join(", ") || "—"}</td>
+                  {distanceActive && (
+                    <td className="px-3 py-2 font-mono text-xs">
+                      {a.distanceMiles != null ? `${a.distanceMiles.toFixed(1)} mi` : "—"}
+                    </td>
+                  )}
                   <td className="px-3 py-2">{a.siaLicenseLevel ? `L${a.siaLicenseLevel}` : "—"}</td>
                   <td className="px-3 py-2 text-muted-foreground">{new Date(a.createdAt).toLocaleString()}</td>
                   <td className="px-3 py-2">

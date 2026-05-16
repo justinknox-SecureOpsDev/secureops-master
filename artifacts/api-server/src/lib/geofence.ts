@@ -49,7 +49,7 @@ function radiusMiles(): number {
   return Number.isFinite(n) && n > 0 ? n : DEFAULT_RADIUS_MILES;
 }
 
-function haversineMiles(lat1: number, lng1: number, lat2: number, lng2: number): number {
+export function haversineMiles(lat1: number, lng1: number, lat2: number, lng2: number): number {
   const toRad = (x: number) => (x * Math.PI) / 180;
   const R = 3958.7613; // mean Earth radius in miles
   const dLat = toRad(lat2 - lat1);
