@@ -137,6 +137,8 @@ const insertUserAdminSchema = z.object({
   role: z.enum(["admin", "employee"]).default("employee"),
   status: z.enum(["active", "inactive", "pending"]).default("active"),
   expoPushToken: z.string().nullable().optional(),
+  phoneNumber: z.string().nullable().optional(),
+  smsOptIn: z.boolean().optional(),
 });
 
 const updateUserAdminSchema = z.object({
@@ -147,6 +149,11 @@ const updateUserAdminSchema = z.object({
   role: z.enum(["admin", "employee"]).optional(),
   status: z.enum(["active", "inactive", "pending"]).optional(),
   expoPushToken: z.string().nullable().optional(),
+  // Editable contact + SMS opt-in. Without these in the allow-list the
+  // strict zod parser silently strips them, so admin edits "disappear"
+  // (the request succeeds but the field is never written).
+  phoneNumber: z.string().nullable().optional(),
+  smsOptIn: z.boolean().optional(),
 });
 
 // ---- Table registry ---------------------------------------------------------
@@ -678,8 +685,28 @@ router.get("/admin/tables/:table", requireAdmin, async (req, res): Promise<void>
     }
   }
 
-  const searchClause = search && cfg.searchColumns.length > 0
-    ? or(...cfg.searchColumns.map((c) => ilike(sql`${c}::text`, `%${search}%`)))
+  const ownColumnClauses = search && cfg.searchColumns.length > 0
+    ? cfg.searchColumns.map((c) => ilike(sql`${c}::text`, `%${search}%`))
+    : [];
+  // For the employees table, names + email live on the joined users row,
+  // so a plain column-match against employees returns nothing for the
+  // most common admin search ("type the officer's name"). Extend the
+  // search to include the linked user via a correlated EXISTS.
+  if (search && tableName === "employees") {
+    const like = `%${search}%`;
+    ownColumnClauses.push(sql`EXISTS (
+      SELECT 1 FROM users u
+      WHERE u.id = ${employeesTable.userId}
+        AND (
+          u.first_name ILIKE ${like}
+          OR u.last_name ILIKE ${like}
+          OR (u.first_name || ' ' || u.last_name) ILIKE ${like}
+          OR u.email ILIKE ${like}
+        )
+    )` as any);
+  }
+  const searchClause = ownColumnClauses.length > 0
+    ? or(...ownColumnClauses)
     : undefined;
   const where = filterClauses.length > 0
     ? (searchClause ? and(searchClause, ...filterClauses) : and(...filterClauses))
