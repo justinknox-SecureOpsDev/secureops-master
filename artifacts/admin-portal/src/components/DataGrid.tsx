@@ -8,13 +8,13 @@ import {
   AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
   AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
-import { ArrowUpDown, ArrowDown, ArrowUp, Pencil, Trash2, Plus, Upload, Download, RefreshCw, ExternalLink, Repeat, KeyRound, Copy, ShieldOff } from "lucide-react";
+import { ArrowUpDown, ArrowDown, ArrowUp, Pencil, Trash2, Plus, Upload, Download, RefreshCw, ExternalLink, Repeat, KeyRound, Copy, ShieldOff, FileText } from "lucide-react";
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter,
 } from "@/components/ui/dialog";
 import { Link } from "wouter";
 import { type TableDescriptor, type Field, singularize } from "@/lib/tables";
-import { api } from "@/lib/api";
+import { api, getToken } from "@/lib/api";
 import { formatCell } from "@/lib/format";
 import { useFkOptions } from "@/lib/fk";
 import { openSignedObject } from "@/lib/upload";
@@ -157,6 +157,35 @@ export function DataGrid({
   const [resetError, setResetError] = useState<string | null>(null);
   const isShifts = descriptor.name === "shifts";
   const isUsers = descriptor.name === "users";
+  const isIncidents = descriptor.name === "incidents";
+
+  async function downloadIncidentPdf(row: Row) {
+    const id = String((row as { id?: unknown }).id ?? "");
+    if (!id) return;
+    try {
+      // Direct fetch (the shared `api` helper is JSON-only) so we can read
+      // the bytes as a Blob and honor the server's Content-Disposition.
+      const token = getToken();
+      const res = await fetch(`/api/incidents/${id}/pdf`, {
+        headers: token ? { Authorization: `Bearer ${token}` } : {},
+      });
+      if (!res.ok) throw new Error(`Request failed (${res.status})`);
+      const blob = await res.blob();
+      const cd = res.headers.get("Content-Disposition") ?? "";
+      const m = /filename="?([^";]+)"?/i.exec(cd);
+      const filename = m?.[1] ?? `wcsg-incident-${id.slice(0, 8)}.pdf`;
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = filename;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      setTimeout(() => URL.revokeObjectURL(url), 1000);
+    } catch (e) {
+      alert(`Could not download PDF: ${(e as Error).message}`);
+    }
+  }
 
   async function confirmRevokeSessions() {
     if (!revokeTarget) return;
@@ -406,6 +435,16 @@ export function DataGrid({
                       title="Revoke all active sessions for this user"
                     >
                       <ShieldOff className="w-4 h-4 text-destructive" />
+                    </Button>
+                  )}
+                  {isIncidents && (
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      onClick={() => downloadIncidentPdf(r)}
+                      title="Download incident report (PDF)"
+                    >
+                      <FileText className="w-4 h-4" />
                     </Button>
                   )}
                   <Button variant="ghost" size="icon" onClick={() => setEditing(r)} title="Edit">

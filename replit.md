@@ -1,143 +1,120 @@
 # Williams Council Security Group — SecureOps Platform
 
-A full-stack mobile operations platform for Williams Council Security Group (WCSG), covering recruitment through operational control for private security officers.
+Mobile + web operations platform for Williams Council Security Group (WCSG): recruitment → onboarding → scheduling → live ops → payroll/invoicing → audit.
 
 ## Run & Operate
 
-- `pnpm --filter @workspace/api-server run dev` — run the API server (port 8080)
-- `pnpm run typecheck` — full typecheck across all packages
-- `pnpm run build` — typecheck + build all packages
-- `pnpm --filter @workspace/api-spec run codegen` — regenerate API hooks and Zod schemas from the OpenAPI spec
-- `pnpm --filter @workspace/db run push` — push DB schema changes (dev only)
-- `pnpm --filter @workspace/api-server run build && pnpm --filter @workspace/scripts run check-security-headers` — boot the built server in production mode and assert helmet CSP / CORS / HSTS / COR-P stay correct (run before each deploy)
-- Required env: `DATABASE_URL` — Postgres connection string, `SESSION_SECRET` — JWT signing key (≥16 chars; production hard-fails at boot if missing/short)
+- `pnpm --filter @workspace/api-server run dev` — API server (port 8080)
+- `pnpm run typecheck` / `pnpm run build` — workspace-wide TS check / build
+- `pnpm --filter @workspace/api-spec run codegen` — regen API hooks + Zod from OpenAPI
+- `pnpm --filter @workspace/db run push` — push DB schema (re-run after every schema change)
+- `pnpm --filter @workspace/api-server run build && pnpm --filter @workspace/scripts run check-security-headers` — pre-deploy: assert helmet CSP / CORS / HSTS / COR-P
+- Required env: `DATABASE_URL`, `SESSION_SECRET` (≥16 chars; production hard-fails if missing/short)
+- Optional env: `ALLOWED_ORIGINS`, `APP_BASE_URL`, `SMTP_*`, `EMERGENCY_CALL_NUMBER`, `GEOFENCE_RADIUS_MILES`, `SEED_DEMO_USERS=false`, `STRIPE_CONNECT_ENABLED`
 
 ## Stack
 
-- pnpm workspaces, Node.js 24, TypeScript 5.9
-- API: Express 5 + WebSocket (ws package) for real-time chat
-- DB: PostgreSQL + Drizzle ORM (11 tables; shifts have `requiredLicenseLevel` 2/3/4 + `headcount`, licenses have `level`)
-- Validation: Zod (`zod/v4`), `drizzle-zod`
-- Mobile: Expo Router v6, React Native, expo-notifications
-- API codegen: Orval (from OpenAPI spec)
-- Build: esbuild (CJS bundle)
+- pnpm workspaces · Node 24 · TypeScript 5.9 · Express 5 · ws · PostgreSQL + Drizzle · Zod v4 + drizzle-zod · Expo Router v6 · expo-notifications · Orval (OpenAPI codegen) · esbuild
 
 ## Where things live
 
-- `lib/db/src/schema/` — DB schema (users, employees, shifts, shiftAssignments, timeEntries, payrollEntries, invoices, incidents, licenses, chatRooms, chatMessages)
-- `lib/api-spec/openapi.yaml` — API contract (source of truth)
-- `lib/api-client-react/src/generated/` — generated React Query hooks
-- `lib/api-zod/src/generated/api.ts` — generated Zod validation schemas
-- `artifacts/api-server/src/` — Express 5 API server
-- `artifacts/api-server/src/lib/wsManager.ts` — WebSocket server manager
-- `artifacts/api-server/src/lib/push.ts` — Expo push notification sender
-- `artifacts/api-server/src/lib/sms.ts` — Twilio SMS sender (no-ops until Twilio integration is connected)
-- `artifacts/api-server/src/lib/geofence.ts` — Real-time geofence evaluator (called from `/me/location`)
-- `artifacts/api-server/src/routes/chat.ts` — Chat REST endpoints
-- `artifacts/api-server/src/routes/admin.ts` — Generic admin CRUD (`/admin/tables`, `/admin/tables/:table[/:id]`, `/admin/import/:table`); admin-only via `requireAdmin`
-- `artifacts/admin-portal/` — React+Vite browser admin portal at `/admin-portal/` (sidebar of all 11 tables, generic grid, Excel/CSV import)
-- `artifacts/admin-portal/src/lib/tables.ts` — TABLE descriptors that drive the entire generic UI (fields, FKs, options, importable flag)
-- `artifacts/admin-portal/src/components/{DataGrid,RowFormDialog,ImportWizard,FileUploadField,BrandHeader}.tsx`
-- `artifacts/admin-portal/src/pages/{Apply,Onboard,Applications,Onboarding}.tsx` — HR public + admin pages
-- `artifacts/admin-portal/src/lib/upload.ts` — client helper: presigned-URL upload via `/storage/uploads/request-url`
-- `artifacts/api-server/src/routes/applications.ts` — public application submit, admin review/approve, public onboarding GET/POST, admin onboarding list/detail/resend
-- `artifacts/api-server/src/routes/storage.ts` + `src/lib/{objectStorage,objectAcl}.ts` — App Storage upload URL + file serving (uploads bind path to caller's userId via `/objects/uploads/u/<userId>/<uuid>` when authenticated; incident attachments + `/me/storage/sign` enforce that prefix so officers can only sign their own files)
-- `lib/db/src/schema/{applications,onboardingTokens,onboardingSubmissions}.ts` — HR pipeline tables
-- `artifacts/security-ops/` — Expo mobile app
-- `artifacts/security-ops/contexts/ChatContext.tsx` — WebSocket chat context
-- `artifacts/security-ops/components/chat/` — Chat UI components
-- `artifacts/security-ops/hooks/useNotifications.ts` — Push notification registration
-- `artifacts/api-server/src/routes/liveOps.ts` — Live location, active officers, emergency endpoints
-- `artifacts/security-ops/components/EmergencyButton.tsx` — Panic button on employee home
-- `artifacts/security-ops/components/LiveOfficerMap.tsx` — Leaflet map (web) / list (native)
-- `artifacts/security-ops/app/(admin)/live-map.tsx` — Admin Live Map tab
+- **DB schema** — `lib/db/src/schema/` (users, employees, clients, sites, shifts, shiftAssignments, timeEntries, payrollEntries, invoices, incidents, licenses, chatRooms, chatMessages, applications, onboardingTokens, onboardingSubmissions, applicationAmendmentTokens, revokedTokens, auditLogs)
+- **API contract** — `lib/api-spec/openapi.yaml` (source of truth) → `lib/api-client-react/src/generated/` (React Query hooks) + `lib/api-zod/src/generated/api.ts` (Zod)
+- **API server** — `artifacts/api-server/src/`
+  - `routes/` — `auth, applications, chat, admin, storage, liveOps, payroll, shifts, incidents, audit, myPayroll, ...`
+  - `lib/` — `wsManager` (WS at `/api/ws`), `push` (Expo), `sms` (Twilio no-op), `geofence`, `objectStorage` + `objectAcl`, `email`, `auditLog`, `scheduledJobs`, `seedDemoUsers`, `incidentPdf`
+- **Admin portal** — `artifacts/admin-portal/` (React+Vite, mounted at `/admin-portal/`)
+  - `lib/tables.ts` drives the generic CRUD UI
+  - `components/{DataGrid,RowFormDialog,ImportWizard,FileUploadField,BrandHeader,RepeatingShiftDialog}.tsx`
+  - `pages/` — `Apply, Onboard, AmendApplication, Applications, Onboarding, Policies, PayRun, Invitations, Shifts, AuditLog, SiteDetailPage, ResetPassword, Legal (Privacy/Terms/DataRights)`
+- **Mobile (Expo)** — `artifacts/security-ops/`
+  - `contexts/ChatContext.tsx`, `hooks/useNotifications.ts`
+  - `app/(employee)/` (5 tabs) and `app/(admin)/` (5 tabs)
+  - `app/paystubs.tsx` — officer paystubs (linked from profile)
+  - `components/{EmergencyButton,LiveOfficerMap,chat/}`
 
-## Architecture decisions
+## Architecture
 
-- **Contract-first API**: OpenAPI YAML is the source of truth; hooks and Zod schemas are generated from it.
-- **WebSocket at `/api/ws`**: Same port as HTTP server; JWT token passed as query param for auth; broadcasts chat messages to all connected clients.
-- **Expo Push API**: Uses `expo-server-sdk` on the server to send notifications; tokens stored in users table; degrades gracefully on web/simulator.
-- **Chat General room**: Auto-created on first `/chat/rooms` GET; admins can create additional channels.
-- **Role-based nav**: Admin gets 5 tabs (Dashboard, Personnel, Shifts, Incidents, Chat); Employee gets 5 tabs (Home, My Shifts, Clock, Incidents, Chat).
+- **Contract-first**: edit OpenAPI yaml, regen hooks + zod, server uses zod for validation.
+- **WebSocket** at `/api/ws?token=<jwt>` — chat broadcast, JWT also revocation-checked on upgrade.
+- **Push**: `expo-server-sdk`; tokens in `users.expoPushToken`; web/sim degrade gracefully.
+- **SMS**: additive to push; only fires when Twilio integration connected AND `users.phoneNumber` (E.164) AND `users.smsOptIn=true`.
+- **Roles**: admin = 5 tabs (Dashboard, Personnel, Shifts, Incidents, Chat); employee = 5 tabs (Home, My Shifts, Clock, Incidents, Chat).
+- **Audit log**: `lib/auditLog.ts` records every 2xx write on privileged paths (admin/payroll/clients/sites/shifts/invoices/incidents). Sensitive keys redacted, body capped 8 KB. Read via `/admin/audit-logs`.
+- **Scheduled jobs** (`lib/scheduledJobs.ts`): hourly cleanup of revoked tokens; hourly license-expiry reminders (30/14/7 days, idempotent via `licenses.last_reminder_for_expiry` + `last_reminder_tier`); 5-min pre-shift reminders (~2h, ~30m). Each job uses an in-process mutex + atomic UPDATE-RETURNING claim; failed deliveries roll back bookkeeping for retry.
 
 ## Product
 
-- **Client → Site hierarchy**: Clients have payment terms (Net X days). Each client has Sites (physical locations). Shifts are posted against a Site with per-shift `payRate` (officer) and `billRate` (client). Site replaces the old free-text `clientName`/`location`.
-- **Admin**: Manage clients (with payment terms) + sites; post shifts on sites with bill/pay rates + required licence level + headcount; approve time entries; generate weekly payroll per (employee × site × week) from approved hours; generate weekly invoices per (client × site × week) at billRate × approved hours, **execute payroll via Pay Run** (bulk select → ACH CSV export or mark-paid; Stripe Connect scaffolded behind flag); mark payroll/invoices paid manually; review incidents; track licences; broadcast via team chat.
-- **Employee**: See highest current clearance on profile; browse "Available" shifts they qualify for; **one-tap Reserve** books the shift immediately (`POST /shifts/:id/claim` inserts an `accepted` assignment); officer can later Decline to release the slot; GPS clock in/out (entries start `pending` admin approval); report incidents (with optional camera/library photo attachments uploaded to App Storage); team chat.
-- **Geo clock-in (no shift required)**: `POST /time-entries/clock-in` accepts `{lat,lng}` with optional `shiftId`. When `shiftId` is omitted, the server resolves the nearest Site within **1 mile** (haversine over `sites.locationLat/Lng`) and stores `time_entries.siteId` (column added; `shiftId` is now nullable). Returns `{geoResolved:{siteName,distanceMiles}}` on success or `422 No Site Nearby` if outside radius. Mobile clock screen surfaces both. Time-entry list filtering by `siteId` uses `coalesce(timeEntries.siteId, shifts.siteId)`.
-- **Licence hierarchy**: L2 unarmed (lowest) → L3 armed (covers L2+L3) → L4/PPO (covers all). `maxLicenseLevel` = MAX(level) of unexpired licences.
-- **Atomic shift claim**: `POST /shifts/{id}/claim` runs inside a transaction that locks the shift row (`SELECT … FOR UPDATE`) and re-counts assignments before inserting, preventing races from overfilling. Creates an `accepted` assignment (one-tap Reserve = booked) and sends "✅ Shift Reserved" Expo push. Admin "+" (`POST /shifts/{id}/assignments`) likewise creates `accepted` directly.
-- **Currency**: USD ($) throughout admin payroll/invoice screens.
-- **Chat**: Replaces WhatsApp — real-time team messaging with named channels, persistent message history, WebSocket delivery.
-- **Notifications**: Push alerts on shift assignment (iOS/Android); web degrades gracefully. SMS notifications run alongside push (additive, never a replacement) for emergency alerts (to admins), shift assignment (to officer), and vacancy reminders (to qualified officers) — sent via Twilio when the Replit Twilio integration is connected and the recipient has `users.phone_number` (E.164) set with `users.sms_opt_in=true`. No-op if any of those is missing.
-- **Live geofence**: Every `POST /me/location` ping (mobile, ~1/min while clocked in) evaluates the officer against their active shift's site. Tracks `time_entries.geofence_state` (`inside`/`outside`/null) and pushes + SMSs admins on the first inside→outside or null→outside transition. Resets quietly when the officer returns. Radius defaults to **0.25 mi** (≈400m); override with `GEOFENCE_RADIUS_MILES`. No alert fires when the site has no `locationLat/Lng` (can't evaluate) or the officer is clocked in without a resolved site.
-- **Repeating shifts**: Admin Shifts page has a "Repeating Shift" button next to "Add Shift" — opens a dialog to pick site, days-of-week (Mon–Sun chips), date range (from/until), start/end times, pay/bill rates, min licence, headcount, notes. `POST /shifts/repeat` (admin) takes `{base, recurrence:{startDate,untilDate,daysOfWeek[0..6],startTime "HH:MM",endTime "HH:MM"}}`, expands occurrences (capped at 366), wraps overnight when `endTime <= startTime`, sets `isRepeat=true` and stores the pattern as JSON in `repeatPattern`. Idempotent: existing shifts at the same site + exact `startTime` are skipped, so re-running the same series is safe. Returns `{created, skippedExisting, totalOccurrences, shifts[]}`.
-- **Open vacancies**: Admin dashboard surfaces an "OPEN VACANCIES" block listing the next upcoming shifts where `filled < headcount`, with per-shift `Notify` button. `POST /shifts/{id}/notify-vacancy` (admin) finds active employees with `maxLicenseLevel >= requiredLicenseLevel` who aren't already assigned, sends Expo push "🛡️ Open L{n}+ Shift — {N} vacancy/s", returns `{notifiedCount, vacanciesRemaining}`.
-- **Live map**: Admin "Live Map" tab shows every clocked-in officer on a Leaflet/OpenStreetMap view (web) or list (native), refreshed every 30s. Mobile pings `POST /me/location` every 60s while clocked in; users table stores `last_lat/last_lng/last_location_at`. `GET /admin/active-officers` joins active time entries with users + shifts + sites.
-- **Emergency button**: Red **press-and-hold for 3 seconds** EMERGENCY button on employee Home (prevents accidental activation). Visual fill bar + countdown ("HOLD… 3"); releasing early cancels. After the 3-second hold, `POST /emergency` creates a `severity=critical` incident, pushes "🚨 EMERGENCY ALERT" to all admins via Expo, and returns a `callNumber` (defaults to `911` (US), override via `EMERGENCY_CALL_NUMBER` env var for other regions). Mobile then offers `Linking.openURL("tel:<number>")` to dial. Web shows alert only (no auto-dial).
+- **Client → Site hierarchy**: clients have payment terms (Net X days), sites are physical locations, shifts are posted against a site with `payRate` (officer) + `billRate` (client) + `requiredLicenseLevel` (2/3/4) + `headcount`.
+- **License hierarchy**: L2 unarmed → L3 armed (covers L2+L3) → L4/PPO (covers all). `maxLicenseLevel` = MAX(level) of unexpired licenses.
+- **Atomic shift claim** (`POST /shifts/:id/claim`): tx + `SELECT … FOR UPDATE` + headcount re-check before insert. Officer one-tap Reserve creates `accepted` directly. Decline (`PUT …/assignments/:aid {status:"declined"}`) DELETES the assignment so the slot is freed.
+- **Repeating shifts** (`POST /shifts/repeat`): expand `{startDate, untilDate, daysOfWeek[0..6], startTime/endTime "HH:MM"}` (cap 366; overnight wrap when end ≤ start), `isRepeat=true`, pattern in `repeatPattern`. Idempotent: skips existing shifts at same site + exact `startTime`.
+- **Geo clock-in** (`POST /time-entries/clock-in {lat,lng,shiftId?}`): when `shiftId` omitted, resolves nearest site within 1 mile (haversine over `sites.locationLat/Lng`), stores `time_entries.siteId`. Returns `422 No Site Nearby` if outside radius.
+- **Live geofence**: every `/me/location` ping (≈1/min while clocked in) evaluates officer vs active shift's site (radius `GEOFENCE_RADIUS_MILES`, default 0.25 mi). On first inside→outside transition, push + SMS to admins. Resets on return. Skips silently when site has no coords or no active shift.
+- **Open vacancies**: admin dashboard lists upcoming shifts where `filled<headcount`. `POST /shifts/:id/notify-vacancy` (admin) pushes qualifying officers (`maxLicenseLevel ≥ requiredLicenseLevel`).
+- **Live map**: admin Live Map tab, Leaflet/OSM (web) or list (native), refresh 30s. Mobile pings `/me/location` every 60s while clocked in. `GET /admin/active-officers`.
+- **Emergency button**: red 3-second hold on employee Home (visual fill bar). `POST /emergency` creates `severity=critical` incident, push "🚨 EMERGENCY ALERT" + SMS to admins, returns `callNumber` (`EMERGENCY_CALL_NUMBER` or `911`). Mobile dials via `Linking.openURL("tel:…")`.
+- **Chat**: real-time named channels, persistent history, WS delivery, replaces WhatsApp.
+- **Notifications recap**: shift assignment, vacancy, geofence breach, emergency, license expiry (30/14/7), pre-shift (2h, 30m).
+- **Audit + Officer paystubs** (May 2026 wave 1): admins see every privileged write at `/admin-portal/audit-log`; officers see their pay history + YTD/lifetime totals at mobile Profile → My paystubs (`GET /me/payroll`).
 
 ## Pay Run (payroll execution)
 
-- **Page**: `/admin-portal/payroll/pay-run` (HR sidebar). Lists payroll entries (filter pending / processed / all + period range), bulk-select with checkboxes, totals bar shows count + selected net.
-- **Three-step flow**: pending → **processed** (after CSV export) → **paid** (after bank confirms settlement).
-- **Preview** (`POST /payroll/pay-run/preview` body `{ids[]}`) returns rows + per-row warnings (missing bank acct/routing/name, no direct-deposit consent, zero/negative net) + totals + counts (total / payable / withWarnings / alreadyPaid). Rows with warnings or already-paid are excluded from the CSV.
-- **Export ACH CSV** (`POST /payroll/pay-run/export-csv` body `{ids[], batchReference?}`) downloads `wcsg-payroll-<batchId>.csv` with columns: Employee Name, Account Name, Routing Number, Account Number, Amount (USD), Pay Period Start/End, Site, Reference, Memo. Atomically marks every payable row `status='processed'`, `paidMethod='ach_csv'`, `paymentReference=<batchId>`, `paidBy=<adminUserId>`. Idempotent — re-export only flips rows that are still `pending`.
-- **Mark Paid** (`POST /payroll/pay-run/mark-paid` body `{ids[], paymentReference?, method?}`) sets `status='paid'`, `paidAt=now`, `paidMethod` (`manual` default), `paymentReference`, `paidBy`. Use after the bank confirms settlement.
-- **Stripe Connect (scaffolded)**: `POST /payroll/pay-run/stripe` returns **501** unless `STRIPE_CONNECT_ENABLED=true`. To activate: set the flag, add `STRIPE_SECRET_KEY`, populate each employee's connected `stripeAccountId`, and implement `stripe.transfers.create()` in the route — `stripeTransferId` column already on `payroll_entries` for the receipt.
-- **Schema additions to `payroll_entries`**: `paidBy uuid → users`, `paidMethod text` (`manual|ach_csv|stripe`), `paymentReference text`, `stripeTransferId text`. Status enum extended with `failed`.
-- Bank info source: `employees.bankAccountName / bankAccountNumber / bankBsb` (column names retain UK origins; UI labels are US: routing/account). `directDepositConsent` must be true for a row to be payable.
+- Page: `/admin-portal/payroll/pay-run`. Three states: pending → processed (after CSV export) → paid.
+- `POST /payroll/pay-run/preview {ids[]}` → rows + per-row warnings (missing bank acct/routing/name, no direct-deposit consent, zero/negative net) + counts. Warnings + already-paid excluded from CSV.
+- `POST /payroll/pay-run/export-csv {ids[], batchReference?}` → downloads `wcsg-payroll-<batch>.csv` (Employee Name, Account Name, Routing Number, Account Number, Amount USD, Pay Period Start/End, Site, Reference, Memo). Atomically marks payable rows `processed`, `paidMethod='ach_csv'`, `paymentReference=<batch>`, `paidBy=admin`. Idempotent.
+- `POST /payroll/pay-run/mark-paid {ids[], paymentReference?, method?}` → `paid` after bank confirms. Default method `manual`.
+- `POST /payroll/pay-run/stripe` → 501 unless `STRIPE_CONNECT_ENABLED=true`. Schema has `stripeTransferId` ready; flip flag + add `STRIPE_SECRET_KEY` + populate employee `stripeAccountId` + implement `stripe.transfers.create()`.
+- Bank source: `employees.bankAccountName / bankAccountNumber / bankBsb` (UK column names, US labels). `directDepositConsent` must be true.
+- `payroll_entries` extra cols: `paidBy`, `paidMethod` (`manual|ach_csv|stripe`), `paymentReference`, `stripeTransferId`. Status enum includes `failed`.
 
 ## HR pipeline (recruitment → onboarding)
 
-- **Public application** at `/admin-portal/apply` — multi-step form (personal, right-to-work, TX security license + experience, references + photo/CV/training certs, weekly availability grid, review). Files uploaded to App Storage via presigned URLs (`POST /api/storage/uploads/request-url` → PUT to GCS). Submits to `POST /api/applications` (no auth).
-- **Admin Applications** at `/admin-portal/hr/applications` — filter by status (`submitted`/`under_review`/`approved`/`rejected`), search by name/email/phone, review dialog with all uploads, mark under review / reject / **approve**.
-- **Approve** creates `User` (role=`employee`, status=`pending`, random temp password) + `Employee` row + `License` row (if TX license info provided), invalidates prior unconsumed tokens, issues a 14-day single-use `OnboardingToken`, links the application via `createdEmployeeId`. Response includes `onboardingUrl`, `tempPassword`, and `emailSent:false` so the admin can copy/share.
-- **Public onboarding** at `/admin-portal/onboard/:token` — GET `/api/onboarding/:token` returns prefill (name/email/phone/SSN/TX-license from application). POST submits bank/tax/W-2-or-pay-stub, emergency contact, uniform sizes, TX-license+passport docs, direct-deposit consent + signature, and 4 acknowledgements (Drug-Free, Uniform, NDA, Contract). On submit: upserts `OnboardingSubmission`, copies bank+emergency to `employees`, sets user status=`active`, consumes token, pushes admins. (DB column names retain UK origins — `sia_license_*`, `ni_number*`, `p45_doc_key` — but UI labels are TX/US.)
-- **Admin Onboarding** at `/admin-portal/hr/onboarding` — list pending vs completed, detail dialog shows full submission, **Resend onboarding link** invalidates old tokens and returns a fresh link.
-- Email: approve/resend send via SMTP if `SMTP_HOST`, `SMTP_PORT`, `SMTP_USER`, `SMTP_PASS` (and optionally `SMTP_FROM`) env vars are set; otherwise `emailSent:false` is returned alongside `onboardingUrl` (+ `tempPassword` for approve) so the admin can share manually. Sender lives in `artifacts/api-server/src/lib/email.ts`.
-- **Approve email-conflict guard**: `POST /admin/applications/:id/approve` only re-provisions an existing user when their `role==='employee'` AND `status` is `pending`/`inactive`. Any other match (admin, active employee, etc.) returns 409 — the HR flow will never overwrite an unrelated account.
-- **Request more info from applicant**: In the application review dialog, "Request more info" lets the admin tick missing fields (phone, address, DOB, SSN last 4, right-to-work doc, TX license details, photo, CV, experience, etc.) + add an optional note. `POST /admin/applications/:id/request-info` mints a 14-day single-use `application_amendment_tokens` row, invalidates prior unconsumed tokens, sets app status to `info_requested`, and emails the applicant a link to `/admin-portal/amend/:token`. The public form (`GET /applications/amend/:token`) shows only the requested fields with current values, and `POST /applications/amend/:token` enforces that **every** requested field is filled before applying updates atomically (transaction with `SELECT … FOR UPDATE` on the token), bumping status back to `under_review` and pushing admins.
-- **Batch request more info**: Applications page has row checkboxes (disabled for `approved`/`rejected`) + a sticky navy toolbar that appears when ≥1 row is selected. "Request more info from N" opens `BatchRequestInfoDialog` listing recipients + the same 15 amendable fields with per-field "X of N missing this" hints + shared note. Sends in parallel via the existing per-app `/admin/applications/:id/request-info` endpoint (concurrency capped at 4 workers, each request independently try/catch'd) — no new server endpoint. `BatchResultDialog` shows emailed/link-only/failed counts, lists failures by name, and provides copy buttons for any link-only successes (when SMTP isn't configured).
+- **Public application** at `/admin-portal/apply` — multi-step (personal, right-to-work, TX security license + experience, references + photo/CV/training certs, weekly availability, review). Files via presigned URL → `POST /api/storage/uploads/request-url` → PUT to GCS. Submits to `POST /api/applications` (no auth, rate-limited).
+- **Admin Applications** at `/admin-portal/hr/applications` — filter/search, review dialog, mark under review / reject / approve. Row checkboxes + sticky toolbar drive batch "Request more info from N".
+- **Approve** creates `User` (role=`employee`, status=`pending`, random temp pw) + `Employee` + `License` (if TX info), invalidates prior tokens, mints 14-day single-use `OnboardingToken`, links via `createdEmployeeId`. Returns `onboardingUrl`, `tempPassword`, `emailSent`. Email-conflict guard: only re-provisions existing user if `role==='employee'` AND status `pending`/`inactive`; else 409.
+- **Public onboarding** at `/admin-portal/onboard/:token` — prefilled (name/email/phone/SSN/TX-license), submits bank/tax/W-2-or-pay-stub/emergency contact/uniform sizes/TX-license+passport docs/direct-deposit consent + signature/4 acknowledgements (Drug-Free, Uniform, NDA, Contract). Upserts submission, copies bank+emergency to `employees`, sets user `active`, consumes token, pushes admins. (DB cols keep UK names — `sia_license_*`, `ni_number*`, `p45_doc_key` — UI labels are TX/US.)
+- **Admin Onboarding** at `/admin-portal/hr/onboarding` — pending vs completed, detail dialog, "Resend onboarding link" mints fresh token.
+- **Request more info** (per-app or batch): `POST /admin/applications/:id/request-info {fields[], note?}` mints 14-day single-use `application_amendment_tokens`, sets app status `info_requested`, emails link to `/admin-portal/amend/:token`. `POST /applications/amend/:token` enforces every requested field is filled, applies updates atomically (`SELECT … FOR UPDATE` on token), bumps status to `under_review`. Batch UI sends in parallel (cap 4 concurrent), per-row try/catch.
+- Email: SMTP (`SMTP_HOST/PORT/USER/PASS`, optional `SMTP_FROM`); otherwise endpoints return `emailSent:false` + the URL so admin can share manually.
 
 ## Invitations (bulk temp passwords + invite emails)
 
-- **Page**: `/admin-portal/hr/invitations` (HR sidebar). Two-phase admin workflow.
-- **Phase 1 — Generate temp passwords**: `POST /admin/users/bulk-temp-passwords` body `{ scope: "all_non_admin"|"by_ids", userIds?, force? }`. For each non-admin user it generates a 10-char password (avoids ambiguous 0/O/1/I/l), bcrypts it into `users.password_hash`, stores plaintext in `users.temp_password_plain`, sets `temp_password_set_at`, sets `must_change_password=true`, and clears `invited_at` (rotating re-arms the invite). Default `force=false` skips users that already have an unsent temp password (so re-running is idempotent). Admins (role='admin') are NEVER targeted.
-- **Phase 2 — Send invites**: `POST /admin/users/bulk-invite` body `{ userIds[] }`. For each selected user with a stored temp password, sends `renderInviteEmail` (sign-in URL + email + temp password) via SMTP. On successful send, **clears `temp_password_plain` and stamps `invited_at`** so the password no longer sits in the DB. Failures (no temp pw, no SMTP, no base URL) are returned per row.
-- **List**: `GET /admin/users/invitations` returns non-admin users with `tempPasswordPlain` (admin-only) for the page table.
-- **Page UX**: 4 stat tiles (Total / No password / Ready to invite / Invited), filter chips, search, row checkboxes, sticky toolbar when ≥1 selected with **Send invite to N** + **Regenerate password**, per-row hide/show + copy temp password, **Download credentials CSV** for all "ready to invite" rows, regenerate-with-force confirm dialog, results dialog with sent/failed breakdown.
-- **Schema additions to `users`**: `temp_password_plain text` (nullable, cleared on invite), `temp_password_set_at timestamptz`, `invited_at timestamptz`.
-- **Sensitive-data redaction**: generic `/admin/tables/users` GET now strips `passwordHash` and `tempPasswordPlain` from rows. Use the dedicated `/admin/users/invitations` endpoint to read temp passwords.
-- **Sign-in URL** is built from `APP_BASE_URL` (preferred) or `REPLIT_DOMAINS`, same as the password-reset flow.
+- Page: `/admin-portal/hr/invitations`. Two-phase.
+- **Generate**: `POST /admin/users/bulk-temp-passwords {scope:"all_non_admin"|"by_ids", userIds?, force?}` — 10-char password (avoids 0/O/1/I/l), bcrypt → `users.password_hash`, plaintext → `users.temp_password_plain`, sets `temp_password_set_at`, `must_change_password=true`, clears `invited_at`. `force=false` skips users with unsent temp pw. Admins NEVER targeted.
+- **Send**: `POST /admin/users/bulk-invite {userIds[]}` — emails sign-in URL + email + temp pw, then clears `temp_password_plain` + stamps `invited_at`.
+- `GET /admin/users/invitations` returns rows incl. `tempPasswordPlain` (admin-only). Generic `/admin/tables/users` strips `passwordHash` + `tempPasswordPlain`.
+- Sign-in URL built from `APP_BASE_URL` (preferred) or `REPLIT_DOMAINS`.
 
-## Seeded Accounts
+## Security baseline (May 2026 launch pack)
+
+- **CORS** locked to `ALLOWED_ORIGINS ∪ REPLIT_DOMAINS`; no-Origin (native/curl) allowed.
+- **Helmet** with `crossOriginResourcePolicy: cross-origin` (so signed object downloads embed). CSP enabled in production only.
+- **Rate limiters** (`middlewares/rateLimit.ts`): login (10/15min/IP+email), forgot-password (5/hr/IP+email), public-application (5/hr/IP), token-lookup (60/5min/IP), emergency (5/min/user), upload-URL endpoints (per-IP cap).
+- **JWT revocation**: two layers, both checked in `requireAuth` AND on `/api/ws` upgrade. (1) `users.tokens_valid_after` watermark — bumped by `POST /auth/logout-all` (self) or `POST /admin/users/:id/revoke-sessions`; tokens with `iat<watermark` rejected. (2) `revoked_tokens(jti)` — written by `POST /auth/logout`. Hourly cleanup of expired rows.
+- **System status**: `GET /admin/system/status` (admin) returns booleans for SMTP / SESSION_SECRET / base-URL / CORS. Admin shell renders amber banner on degraded config. Boot logs `error` for each missing prod requirement.
+- **Public legal pages**: `/admin-portal/{privacy,terms,data-rights}` linked from Apply, admin Login, mobile login.
+- **DB indexes** on hot paths: `shifts(siteId,startTime)`, `shiftAssignments(shiftId,status)`, `timeEntries(employeeId,clockInTime)`, `chatMessages(roomId,createdAt)`, `incidents(employeeId,occurredAt)`, `revokedTokens(userId)`, `revokedTokens(expiresAt)`.
+
+## Seeded accounts
 
 - Admin: `admin@secureops.com` / `Admin123!`
 - Employee: `john.smith@secureops.com` / `Employee123!`
-- Both are provisioned idempotently on every API server boot by `seedDemoUsers()` in `artifacts/api-server/src/lib/seedDemoUsers.ts`. If the user already exists with the documented password, nothing changes; otherwise the password is reset to the documented value and a missing employees row is created. Disable with `SEED_DEMO_USERS=false` (e.g. in production).
+- Provisioned idempotently each boot by `seedDemoUsers()`. Disable with `SEED_DEMO_USERS=false`.
 
 ## User preferences
 
-- Brand: deep navy #080c18, rich gold #c9a84c, warm cream #f0e6c8
-- Company name: Williams Council Security Group (WCSG)
-
-## Admin Portal
-
-- Web app at `/admin-portal/` (Vite, port 25580). Sidebar lists all 11 DB tables; generic sortable/filterable/paginated grid with inline Add/Edit/Delete; FK columns render as searchable dropdowns. All writes hit `/api/admin/...` and are validated server-side via drizzle-zod insert schemas.
-- Excel/CSV bulk import for **users / employees / clients / sites** with column mapping + validation preview + error CSV download. The mapping step also lets you set a **default value** for any unmapped field — essential for Sites import (Glide CSV has no `clientId`, so pick one Client to attach all rows to).
-- Brand: navy sidebar `#080c18`, gold accents `#c9a84c`, cream background `#f0e6c8`, "Williams Council Security Group" wordmark in Georgia serif.
-- Auth: login via `/api/auth/login`; JWT stored in `localStorage` under `wcsg.adminToken`; non-admin users see an "Admin access required" screen.
+- Brand: deep navy `#080c18`, rich gold `#c9a84c`, warm cream `#f0e6c8`
+- Company: Williams Council Security Group (WCSG)
+- Currency: USD ($)
 
 ## Gotchas
 
-- **Decline frees the slot**: `PUT /shifts/{id}/assignments/{assignmentId}` with `{status:"declined"}` DELETES the row and returns `{removed:true}` so the slot is freed for re-claim. (Reserve / admin "+" both create `accepted` directly — there is no longer a `pending` confirmation step.)
-- **Orval signature**: list hooks now take `(params, { query: { queryKey } })` — NOT `{ params, query }` wrapped. Mutation hooks take `{id, data}` (or `{id, assignmentId, data}` for nested), not `{id, ...body}`.
-- Orval codegen regenerates `lib/api-zod/src/index.ts` — the codegen script has a post-step to rewrite it to only export from `./generated/api` (avoids TS2308 duplicate export error from types conflict).
-- WebSocket clients connect via `wss://<domain>/api/ws?token=<jwt>` — the proxy routes this correctly.
-- expo-notifications on web shows a warning but does not crash — push token registration is skipped on web.
-- `pnpm --filter @workspace/db run push` must be re-run whenever DB schema changes.
+- `pnpm --filter @workspace/db run push` after every schema change.
+- WS clients: `wss://<domain>/api/ws?token=<jwt>` — proxy routes correctly.
+- Orval: list hooks take `(params, { query: { queryKey } })`; mutation hooks take `{id, data}` (or `{id, assignmentId, data}` nested). Codegen post-step rewrites `lib/api-zod/src/index.ts` to only re-export from `./generated/api` (avoids TS2308 duplicate export).
+- expo-notifications on web warns but doesn't crash — push registration is skipped on web.
 
 ## Pointers
 
-- See the `pnpm-workspace` skill for workspace structure, TypeScript setup, and package details
+- See the `pnpm-workspace` skill for monorepo structure, TS project refs, dependency conventions.

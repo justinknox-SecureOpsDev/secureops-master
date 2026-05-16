@@ -2,6 +2,7 @@ import { Router, type IRouter } from "express";
 import { eq, and, sql } from "drizzle-orm";
 import { db, incidentsTable, usersTable, shiftsTable } from "@workspace/db";
 import { requireAuth, requireAdmin } from "../middlewares/auth";
+import { buildIncidentReportPdf } from "../lib/incidentPdf";
 
 const router: IRouter = Router();
 
@@ -113,6 +114,24 @@ router.get("/incidents/:id", requireAuth, async (req, res): Promise<void> => {
     res.status(403).json({ error: "Forbidden" }); return;
   }
   res.json(row);
+});
+
+router.get("/incidents/:id/pdf", requireAuth, async (req, res): Promise<void> => {
+  const id = Array.isArray(req.params.id) ? req.params.id[0] : req.params.id;
+  // Same authorization model as GET /incidents/:id: admin reads anything,
+  // employees only their own.
+  const [own] = await db.select({ employeeId: incidentsTable.employeeId })
+    .from(incidentsTable).where(eq(incidentsTable.id, id));
+  if (!own) { res.status(404).json({ error: "Not Found" }); return; }
+  if (req.user!.role !== "admin" && own.employeeId !== req.user!.userId) {
+    res.status(403).json({ error: "Forbidden" }); return;
+  }
+  const payload = await buildIncidentReportPdf(id);
+  if (!payload) { res.status(404).json({ error: "Not Found" }); return; }
+  res.setHeader("Content-Type", "application/pdf");
+  res.setHeader("Content-Disposition", `attachment; filename="${payload.filename}"`);
+  res.setHeader("Cache-Control", "private, no-store");
+  payload.stream.pipe(res);
 });
 
 router.put("/incidents/:id", requireAdmin, async (req, res): Promise<void> => {
