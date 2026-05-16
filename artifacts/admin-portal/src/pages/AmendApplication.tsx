@@ -4,7 +4,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { FileUploadField } from "@/components/FileUploadField";
-import { type UploadedFile } from "@/lib/upload";
+import { uploadFileAnon, type UploadedFile } from "@/lib/upload";
 import { api } from "@/lib/api";
 import { CheckCircle2, Loader2, ShieldAlert } from "lucide-react";
 
@@ -176,6 +176,7 @@ function FieldEditor({
           accept={field.key === "photo" ? "image/*" : field.key === "cv" ? ".pdf,.doc,.docx" : "image/*,.pdf"}
           value={(value as UploadedFile | null) ?? null}
           onChange={(v) => onChange(v)}
+          uploadFn={uploadFileAnon}
         />
         {field.currentValue && !value && (
           <p className="text-xs text-muted-foreground mt-1">A file is already on file — uploading a new one will replace it.</p>

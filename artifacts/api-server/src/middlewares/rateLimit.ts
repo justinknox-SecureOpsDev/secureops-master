@@ -102,3 +102,26 @@ export const resetPasswordLimiter: RateLimitRequestHandler = makeLimiter({
   keyBy: "ip",
   tag: "rp",
 });
+
+// /storage/uploads/request-url — authenticated endpoint that mints GCS signed
+// PUT URLs. Rate-limited per IP as defense-in-depth even though auth is required.
+const UPLOAD_URL_PER_IP_MAX = envInt("UPLOAD_URL_RATE_LIMIT_MAX", 60);
+
+export const uploadUrlLimiter: RateLimitRequestHandler = makeLimiter({
+  max: UPLOAD_URL_PER_IP_MAX,
+  keyBy: "ip",
+  tag: "uu",
+});
+
+// /storage/uploads/application-url — unauthenticated endpoint for the HR
+// application pipeline (Apply / Onboard / Amend). Strict per-IP cap because
+// the route is fully public; 10 URL grants per window is enough for a
+// complete multi-file application submission while making automated flooding
+// impractical.
+const APPLICATION_UPLOAD_PER_IP_MAX = envInt("APPLICATION_UPLOAD_RATE_LIMIT_MAX", 10);
+
+export const applicationUploadLimiter: RateLimitRequestHandler = makeLimiter({
+  max: APPLICATION_UPLOAD_PER_IP_MAX,
+  keyBy: "ip",
+  tag: "au",
+});

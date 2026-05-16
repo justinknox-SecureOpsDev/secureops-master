@@ -6,7 +6,7 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { BrandHeader } from "@/components/BrandHeader";
 import { FileUploadField, MultiFileUploadField } from "@/components/FileUploadField";
-import type { UploadedFile } from "@/lib/upload";
+import { uploadFileAnon, type UploadedFile } from "@/lib/upload";
 import { CheckCircle2, ChevronLeft, ChevronRight } from "lucide-react";
 
 const DAYS = ["mon", "tue", "wed", "thu", "fri", "sat", "sun"] as const;
@@ -194,6 +194,7 @@ export function ApplyPage() {
                 accept="image/*,.pdf"
                 value={form.rightToWorkDoc}
                 onChange={(v) => set("rightToWorkDoc", v)}
+                uploadFn={uploadFileAnon}
               />
             </>
           )}
@@ -238,10 +239,10 @@ export function ApplyPage() {
                 </div>
               ))}
               <Two>
-                <FileUploadField label="Head & shoulders photo" accept="image/*" value={form.photo} onChange={(v) => set("photo", v)} />
-                <FileUploadField label="CV (PDF / DOC)" accept=".pdf,.doc,.docx" value={form.cv} onChange={(v) => set("cv", v)} />
+                <FileUploadField label="Head & shoulders photo" accept="image/*" value={form.photo} onChange={(v) => set("photo", v)} uploadFn={uploadFileAnon} />
+                <FileUploadField label="CV (PDF / DOC)" accept=".pdf,.doc,.docx" value={form.cv} onChange={(v) => set("cv", v)} uploadFn={uploadFileAnon} />
               </Two>
-              <MultiFileUploadField label="Training certificates" accept="image/*,.pdf" value={form.trainingCertificates} onChange={(v) => set("trainingCertificates", v)} />
+              <MultiFileUploadField label="Training certificates" accept="image/*,.pdf" value={form.trainingCertificates} onChange={(v) => set("trainingCertificates", v)} uploadFn={uploadFileAnon} />
             </>
           )}
           {step === 4 && (

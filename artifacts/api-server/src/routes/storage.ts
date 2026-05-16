@@ -1,38 +1,101 @@
-import { Router, type IRouter, type Request, type Response } from "express";
+import express, { Router, type IRouter, type Request, type Response } from "express";
 import { Readable } from "stream";
 import {
   RequestUploadUrlBody,
   RequestUploadUrlResponse,
 } from "@workspace/api-zod";
 import { ObjectStorageService, ObjectNotFoundError } from "../lib/objectStorage";
-import { requireAdmin, requireAuth, optionalAuth } from "../middlewares/auth";
+import { requireAdmin, requireAuth } from "../middlewares/auth";
+import { uploadUrlLimiter, applicationUploadLimiter } from "../middlewares/rateLimit";
 import { db, employeesTable, incidentsTable } from "@workspace/db";
 import { eq } from "drizzle-orm";
+
+/**
+ * Maximum declared file size accepted for presigned upload URL requests.
+ * The actual bytes flow directly to GCS, so this caps what callers can
+ * *claim* to upload and also serves as a signal to reject obviously
+ * abusive requests early (25 MB).
+ */
+const MAX_UPLOAD_BYTES = 25 * 1024 * 1024;
+
+/**
+ * Lower cap for anonymous HR application uploads (Apply / Onboard / Amend).
+ * 10 MB is enough for scanned documents, license photos, and passports.
+ */
+const APPLICATION_MAX_UPLOAD_BYTES = 10 * 1024 * 1024;
+
+/**
+ * MIME types the application legitimately handles: identity/work documents,
+ * photos, certificates, and incident attachments. Reject everything else to
+ * prevent the bucket from being used as generic file storage.
+ */
+const ALLOWED_CONTENT_TYPES = new Set([
+  "image/jpeg",
+  "image/jpg",
+  "image/png",
+  "image/gif",
+  "image/webp",
+  "application/pdf",
+  "application/msword",
+  "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+  "text/plain",
+]);
 
 const router: IRouter = Router();
 const objectStorageService = new ObjectStorageService();
 
 /**
- * POST /storage/uploads/request-url
- *
- * Request a presigned URL for file upload.
- * The client sends JSON metadata (name, size, contentType) — NOT the file.
- * Then uploads the file directly to the returned presigned URL.
+ * Per-route raw-body parser for the anonymous application upload endpoint.
+ * Enforces the 10 MB limit at the HTTP layer before any handler logic runs.
+ * `express.json()` in app.ts only fires on application/json, so it does not
+ * consume the body for image/* / application/pdf uploads first.
  */
-router.post("/storage/uploads/request-url", optionalAuth, async (req: Request, res: Response) => {
+const applicationRawParser = express.raw({
+  limit: `${APPLICATION_MAX_UPLOAD_BYTES}b`,
+  type: "*/*",
+});
+
+/**
+ * Shared handler logic: validate size + content-type then mint a signed URL.
+ * `ownerKey` is the authenticated user's ID (undefined for anonymous flows).
+ */
+async function handleUploadUrlRequest(
+  req: Request,
+  res: Response,
+  opts: { maxBytes: number; ownerKey?: string },
+): Promise<void> {
   const parsed = RequestUploadUrlBody.safeParse(req.body);
   if (!parsed.success) {
     res.status(400).json({ error: "Missing or invalid required fields" });
     return;
   }
 
-  try {
-    const { name, size, contentType } = parsed.data;
+  const { name, size, contentType } = parsed.data;
 
-    // When the caller is authenticated, bind the upload path to their user id
-    // so server-side ownership checks (e.g. incident attachments) are
-    // path-deterministic and don't depend on trusting client-supplied paths.
-    const uploadURL = await objectStorageService.getObjectEntityUploadURL(req.user?.userId);
+  // Reject oversized declarations up-front. The actual bytes go straight to
+  // GCS, so Express body limits don't apply — this is the only server-side
+  // gate on declared upload size.
+  if (size > opts.maxBytes) {
+    res.status(413).json({
+      error: "Payload Too Large",
+      message: `File size must not exceed ${opts.maxBytes / (1024 * 1024)} MB`,
+    });
+    return;
+  }
+
+  // Restrict to MIME types the application legitimately handles. This prevents
+  // the private bucket from being used as generic arbitrary-file storage.
+  const normalizedType = contentType.split(";")[0].trim().toLowerCase();
+  if (!ALLOWED_CONTENT_TYPES.has(normalizedType)) {
+    res.status(415).json({
+      error: "Unsupported Media Type",
+      message: "File type not permitted",
+    });
+    return;
+  }
+
+  try {
+    const uploadURL = await objectStorageService.getObjectEntityUploadURL(opts.ownerKey);
     const objectPath = objectStorageService.normalizeObjectEntityPath(uploadURL);
 
     res.json(
@@ -46,7 +109,84 @@ router.post("/storage/uploads/request-url", optionalAuth, async (req: Request, r
     req.log.error({ err: error }, "Error generating upload URL");
     res.status(500).json({ error: "Failed to generate upload URL" });
   }
-});
+}
+
+/**
+ * POST /storage/uploads/request-url
+ *
+ * Authenticated endpoint: mint a presigned GCS PUT URL.
+ * The upload path is bound to the caller's user ID so server-side
+ * ownership checks (incident attachments, employee doc keys) remain
+ * path-deterministic without trusting client-supplied paths.
+ */
+router.post(
+  "/storage/uploads/request-url",
+  uploadUrlLimiter,
+  requireAuth,
+  (req: Request, res: Response) =>
+    handleUploadUrlRequest(req, res, {
+      maxBytes: MAX_UPLOAD_BYTES,
+      ownerKey: req.user!.userId,
+    }),
+);
+
+/**
+ * POST /storage/uploads/application-file
+ *
+ * Public (unauthenticated) direct-upload endpoint for the HR pipeline
+ * (Apply / Onboard / Amend). File bytes travel through Express before
+ * reaching GCS, so size and content-type are genuinely enforced by the
+ * server — not by client-declared metadata or an unsigned GCS PUT policy.
+ *
+ * Controls:
+ *   - express.raw() body limit: 10 MB hard stop at the HTTP layer
+ *   - Content-Type header: must match the allow-list before touching GCS
+ *   - X-File-Name header: advisory display name, sanitised, never used in paths
+ *   - Per-IP rate limiter: 10 requests / 15-minute window
+ *
+ * Response: { objectPath, name, size, contentType }
+ */
+router.post(
+  "/storage/uploads/application-file",
+  applicationUploadLimiter,
+  applicationRawParser,
+  async (req: Request, res: Response) => {
+    const rawType = req.headers["content-type"] ?? "";
+    const normalizedType = rawType.split(";")[0].trim().toLowerCase();
+
+    if (!ALLOWED_CONTENT_TYPES.has(normalizedType)) {
+      res.status(415).json({
+        error: "Unsupported Media Type",
+        message: "File type not permitted",
+      });
+      return;
+    }
+
+    const body = req.body as Buffer;
+    if (!Buffer.isBuffer(body) || body.length === 0) {
+      res.status(400).json({ error: "Bad Request", message: "Empty or missing file body" });
+      return;
+    }
+
+    // X-File-Name is advisory only (display on client). Sanitised, never used
+    // in storage paths.
+    const rawName = String(req.headers["x-file-name"] ?? "upload");
+    const safeName = rawName.replace(/[^\w\s.\-()]/g, "").slice(0, 255) || "upload";
+
+    try {
+      const objectPath = await objectStorageService.saveObjectBuffer(body, normalizedType);
+      res.json({
+        objectPath,
+        name: safeName,
+        size: body.length,
+        contentType: normalizedType,
+      });
+    } catch (error) {
+      req.log.error({ err: error }, "Error saving application upload");
+      res.status(500).json({ error: "Failed to save file" });
+    }
+  },
+);
 
 /**
  * GET /me/storage/sign?path=/objects/...

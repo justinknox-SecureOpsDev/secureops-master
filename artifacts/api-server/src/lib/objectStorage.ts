@@ -131,6 +131,40 @@ export class ObjectStorageService {
     });
   }
 
+  /**
+   * Write a Buffer directly to the private object store without a presigned
+   * URL. This is the correct approach for server-proxied uploads where the
+   * API server must enforce size and content-type server-side rather than
+   * relying on client-declared metadata.
+   *
+   * Returns the canonical `/objects/...` path for the stored object.
+   */
+  async saveObjectBuffer(
+    buffer: Buffer,
+    contentType: string,
+    ownerKey?: string,
+  ): Promise<string> {
+    const privateObjectDir = this.getPrivateObjectDir();
+    const objectId = randomUUID();
+    const safeOwner = ownerKey?.replace(/[^a-zA-Z0-9_-]/g, "");
+    const fullPath = safeOwner
+      ? `${privateObjectDir}/uploads/u/${safeOwner}/${objectId}`
+      : `${privateObjectDir}/uploads/${objectId}`;
+
+    const { bucketName, objectName } = parseObjectPath(fullPath);
+    const bucket = objectStorageClient.bucket(bucketName);
+    const file = bucket.file(objectName);
+
+    await file.save(buffer, {
+      contentType,
+      resumable: false,
+    });
+
+    return this.normalizeObjectEntityPath(
+      `https://storage.googleapis.com/${bucketName}/${objectName}`,
+    );
+  }
+
   async getSignedDownloadURL(objectPath: string, ttlSec = 300): Promise<string> {
     // Verifies existence, then mints a presigned GET URL.
     const file = await this.getObjectEntityFile(objectPath);

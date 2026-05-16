@@ -7,7 +7,7 @@ import { Label } from "@/components/ui/label";
 import { Checkbox } from "@/components/ui/checkbox";
 import { BrandHeader } from "@/components/BrandHeader";
 import { FileUploadField } from "@/components/FileUploadField";
-import type { UploadedFile } from "@/lib/upload";
+import { uploadFileAnon, type UploadedFile } from "@/lib/upload";
 import { CheckCircle2, AlertTriangle, Loader2, ChevronLeft, ChevronRight, FileText, ExternalLink } from "lucide-react";
 
 type PolicyDto = {
@@ -217,7 +217,7 @@ export function OnboardPage() {
                 <Field label="SSN"><Input value={niNumberConfirmed} onChange={(e) => setNiNumberConfirmed(e.target.value)} placeholder="xxx-xx-xxxx" /></Field>
                 <Field label="W-4 filing status"><Input value={taxCode} onChange={(e) => setTaxCode(e.target.value)} placeholder="e.g. Single, Married" /></Field>
               </Two>
-              <FileUploadField label="Prior W-2 / final pay stub (if available)" accept=".pdf,image/*" value={p45Doc} onChange={setP45Doc} />
+              <FileUploadField label="Prior W-2 / final pay stub (if available)" accept=".pdf,image/*" value={p45Doc} onChange={setP45Doc} uploadFn={uploadFileAnon} />
             </>
           )}
           {step === 1 && (
@@ -242,8 +242,8 @@ export function OnboardPage() {
           {step === 2 && (
             <>
               <h2 className="brand-wordmark text-xl">Documents</h2>
-              <FileUploadField label="TX security license (photo of card)" accept="image/*,.pdf" value={siaLicenseDoc} onChange={setSiaDoc} />
-              <FileUploadField label="Passport / driver's license / right-to-work document" accept="image/*,.pdf" value={passportDoc} onChange={setPassportDoc} />
+              <FileUploadField label="TX security license (photo of card)" accept="image/*,.pdf" value={siaLicenseDoc} onChange={setSiaDoc} uploadFn={uploadFileAnon} />
+              <FileUploadField label="Passport / driver's license / right-to-work document" accept="image/*,.pdf" value={passportDoc} onChange={setPassportDoc} uploadFn={uploadFileAnon} />
             </>
           )}
           {step === 3 && (

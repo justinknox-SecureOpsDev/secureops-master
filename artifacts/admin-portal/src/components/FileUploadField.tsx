@@ -9,18 +9,22 @@ type Props = {
   value: UploadedFile | null;
   onChange: (f: UploadedFile | null) => void;
   required?: boolean;
+  /** Override the default (authenticated) upload function. Pass `uploadFileAnon`
+   *  on public pages (Apply / Onboard / Amend) that have no auth token. */
+  uploadFn?: (file: File) => Promise<UploadedFile>;
 };
 
-export function FileUploadField({ label, accept, value, onChange, required }: Props) {
+export function FileUploadField({ label, accept, value, onChange, required, uploadFn }: Props) {
   const inputRef = useRef<HTMLInputElement | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const doUpload = uploadFn ?? uploadFile;
 
   async function pick(file: File) {
     setBusy(true);
     setError(null);
     try {
-      const result = await uploadFile(file);
+      const result = await doUpload(file);
       onChange(result);
     } catch (e) {
       setError((e as Error).message);
@@ -77,17 +81,19 @@ export function FileUploadField({ label, accept, value, onChange, required }: Pr
 }
 
 export function MultiFileUploadField({
-  label, accept, value, onChange, required,
+  label, accept, value, onChange, required, uploadFn,
 }: {
   label: string;
   accept?: string;
   value: UploadedFile[];
   onChange: (v: UploadedFile[]) => void;
   required?: boolean;
+  uploadFn?: (file: File) => Promise<UploadedFile>;
 }) {
   const inputRef = useRef<HTMLInputElement | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const doUpload = uploadFn ?? uploadFile;
 
   async function pickMany(files: FileList) {
     setBusy(true);
@@ -95,7 +101,7 @@ export function MultiFileUploadField({
     try {
       const arr: UploadedFile[] = [];
       for (const f of Array.from(files)) {
-        arr.push(await uploadFile(f));
+        arr.push(await doUpload(f));
       }
       onChange([...value, ...arr]);
     } catch (e) {
