@@ -7,6 +7,8 @@ import {
   shiftsTable,
   shiftAssignmentsTable,
   sitesTable,
+  timeEntriesTable,
+  patrolScansTable,
 } from "@workspace/db";
 import { logger } from "./logger";
 import { sendEmail, renderLicenseExpiryEmail } from "./email";
@@ -293,6 +295,143 @@ export function startScheduledJobs(intervalMs: number = HOUR_MS): NodeJS.Timeout
     }
   }
 
+  /**
+   * Missed-checkpoint pager. For each currently-clocked-in officer at a
+   * site that has `patrol_interval_minutes` configured, page admins if
+   * the officer has been silent for longer than that interval. Reference
+   * point per shift = MAX(clock-in, most-recent-scan-at-this-site).
+   * Debounced via `time_entries.patrol_last_notified_at` so admins get
+   * at most one page per missed window per active shift.
+   */
+  async function checkMissedPatrolCheckpoints(): Promise<void> {
+    try {
+      // Pull every open time_entry whose site has an interval set.
+      const actives = await db
+        .select({
+          id: timeEntriesTable.id,
+          employeeId: timeEntriesTable.employeeId,
+          siteId: timeEntriesTable.siteId,
+          clockInTime: timeEntriesTable.clockInTime,
+          patrolLastNotifiedAt: timeEntriesTable.patrolLastNotifiedAt,
+          intervalMin: sitesTable.patrolIntervalMinutes,
+          siteName: sitesTable.name,
+        })
+        .from(timeEntriesTable)
+        .innerJoin(sitesTable, eq(timeEntriesTable.siteId, sitesTable.id))
+        .where(and(
+          isNull(timeEntriesTable.clockOutTime),
+          // intervalMin IS NOT NULL
+          sql`${sitesTable.patrolIntervalMinutes} IS NOT NULL`,
+        ));
+
+      if (actives.length === 0) return;
+
+      const admins = await db
+        .select({ id: usersTable.id })
+        .from(usersTable)
+        .where(eq(usersTable.role, "admin"));
+      const adminIds = admins.map((a) => a.id);
+      if (adminIds.length === 0) return;
+
+      const now = Date.now();
+      let pagedCount = 0;
+
+      for (const a of actives) {
+        const intervalMin = a.intervalMin!;
+        // Safety: misconfigured (zero/negative) intervals would loop the pager
+        // every tick. Skip silently.
+        if (!Number.isFinite(intervalMin) || intervalMin < 1) continue;
+        const intervalMs = intervalMin * 60 * 1000;
+        // Most recent scan at this site by this officer.
+        const [latest] = await db
+          .select({ scannedAt: patrolScansTable.scannedAt })
+          .from(patrolScansTable)
+          .where(and(
+            eq(patrolScansTable.userId, a.employeeId),
+            eq(patrolScansTable.siteId, a.siteId!),
+          ))
+          .orderBy(sql`${patrolScansTable.scannedAt} DESC`)
+          .limit(1);
+
+        const reference = latest?.scannedAt && latest.scannedAt > a.clockInTime
+          ? latest.scannedAt
+          : a.clockInTime;
+        if (now - reference.getTime() <= intervalMs) continue;
+
+        // Debounce: don't re-page within the same interval window.
+        if (a.patrolLastNotifiedAt && now - a.patrolLastNotifiedAt.getTime() < intervalMs) continue;
+
+        // Claim the page atomically — UPDATE … RETURNING so two ticks can't double-page.
+        const claim = await db.update(timeEntriesTable)
+          .set({ patrolLastNotifiedAt: new Date() })
+          .where(and(
+            eq(timeEntriesTable.id, a.id),
+            // Guard: only claim if the timestamp we read is still the current one.
+            a.patrolLastNotifiedAt == null
+              ? isNull(timeEntriesTable.patrolLastNotifiedAt)
+              : eq(timeEntriesTable.patrolLastNotifiedAt, a.patrolLastNotifiedAt),
+          ))
+          .returning({ id: timeEntriesTable.id });
+        if (claim.length === 0) continue;
+
+        // Re-check freshness AFTER the claim — if the officer scanned between
+        // our read and the claim, roll back the debounce stamp and skip the
+        // page (the next tick will be a clean reference).
+        const [postCheck] = await db
+          .select({ scannedAt: patrolScansTable.scannedAt })
+          .from(patrolScansTable)
+          .where(and(
+            eq(patrolScansTable.userId, a.employeeId),
+            eq(patrolScansTable.siteId, a.siteId!),
+          ))
+          .orderBy(sql`${patrolScansTable.scannedAt} DESC`)
+          .limit(1);
+        const postRef = postCheck?.scannedAt && postCheck.scannedAt > a.clockInTime
+          ? postCheck.scannedAt
+          : a.clockInTime;
+        if (now - postRef.getTime() <= intervalMs) {
+          await db.update(timeEntriesTable)
+            .set({ patrolLastNotifiedAt: a.patrolLastNotifiedAt })
+            .where(eq(timeEntriesTable.id, a.id))
+            .catch(() => {/* swallow */});
+          continue;
+        }
+
+        // Look up the officer's name for the page body.
+        const [officer] = await db
+          .select({ firstName: usersTable.firstName, lastName: usersTable.lastName })
+          .from(usersTable)
+          .where(eq(usersTable.id, a.employeeId))
+          .limit(1);
+        const officerName = officer
+          ? `${officer.firstName ?? ""} ${officer.lastName ?? ""}`.trim() || "Officer"
+          : "Officer";
+
+        try {
+          await sendPushToUsers(adminIds, {
+            title: "⚠ Missed patrol checkpoint",
+            body: `${officerName} hasn't scanned at ${a.siteName} for over ${intervalMin}m.`,
+            data: { kind: "missed_checkpoint", siteId: a.siteId!, timeEntryId: a.id },
+          });
+          pagedCount += 1;
+        } catch (err) {
+          // Roll back the debounce stamp so the next tick retries this officer.
+          await db.update(timeEntriesTable)
+            .set({ patrolLastNotifiedAt: a.patrolLastNotifiedAt })
+            .where(eq(timeEntriesTable.id, a.id))
+            .catch(() => {/* swallow */});
+          logger.error({ err, timeEntryId: a.id }, "[missed-checkpoint] push failed");
+        }
+      }
+
+      if (pagedCount > 0) {
+        logger.info({ pagedCount }, "Paged admins for missed patrol checkpoints");
+      }
+    } catch (err) {
+      logger.error({ err }, "[missed-checkpoint] job failed");
+    }
+  }
+
   // Wrap a job with an in-process mutex so a slow tick never overlaps
   // its own next tick. Cross-instance protection comes from the atomic
   // UPDATE-RETURNING claims inside each job.
@@ -324,6 +463,8 @@ export function startScheduledJobs(intervalMs: number = HOUR_MS): NodeJS.Timeout
   // Pre-shift reminders — every 5 minutes is the right cadence for the
   // 30-minute window without being too chatty.
   schedule("shift-reminders", sendPreShiftReminders, 5 * MIN_MS);
+  // Missed-checkpoint pages — every 5 minutes; debounced per active shift.
+  schedule("missed-checkpoints", checkMissedPatrolCheckpoints, 5 * MIN_MS);
   // Suppress lint about unused sql import.
   void sql;
 

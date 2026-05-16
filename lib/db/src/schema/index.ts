@@ -23,3 +23,4 @@ export * from "./shiftSwapRequests";
 export * from "./licenseRenewalRequests";
 export * from "./incidentShareLinks";
 export * from "./officerAvailability";
+export * from "./patrolCheckpoints";

@@ -423,6 +423,19 @@ export default function EmployeeProfileScreen() {
           <Feather name="chevron-right" size={16} color={colors.mutedForeground} />
         </TouchableOpacity>
         <TouchableOpacity
+          onPress={() => router.push("/patrol" as any)}
+          style={[styles.actionRow, { borderBottomColor: colors.border }]}
+        >
+          <Feather name="map-pin" size={16} color={colors.accent} />
+          <View style={{ flex: 1 }}>
+            <Text style={{ color: colors.foreground, fontSize: 14, fontWeight: "600" }}>Patrol scan</Text>
+            <Text style={{ color: colors.mutedForeground, fontSize: 12, marginTop: 2 }}>
+              Scan checkpoint codes during rounds
+            </Text>
+          </View>
+          <Feather name="chevron-right" size={16} color={colors.mutedForeground} />
+        </TouchableOpacity>
+        <TouchableOpacity
           onPress={() => router.push("/availability" as any)}
           style={[styles.actionRow, { borderBottomColor: colors.border }]}
         >

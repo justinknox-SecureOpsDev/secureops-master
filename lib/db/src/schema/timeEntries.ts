@@ -32,6 +32,9 @@ export const timeEntriesTable = pgTable("time_entries", {
   // clock-out — geofence is only meaningful while clocked in.
   geofenceState: text("geofence_state"),
   geofenceLastBreachAt: timestamp("geofence_last_breach_at", { withTimezone: true }),
+  // Debounce timestamp for missed-checkpoint pages — we only notify admins
+  // once per `sites.patrolIntervalMinutes` window per active shift.
+  patrolLastNotifiedAt: timestamp("patrol_last_notified_at", { withTimezone: true }),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow().$onUpdate(() => new Date()),
 }, (t) => ({
