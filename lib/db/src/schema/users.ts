@@ -1,4 +1,4 @@
-import { pgTable, text, uuid, timestamp, numeric, boolean } from "drizzle-orm/pg-core";
+import { pgTable, text, uuid, timestamp, numeric, boolean, jsonb } from "drizzle-orm/pg-core";
 import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod/v4";
 
@@ -26,6 +26,15 @@ export const usersTable = pgTable("users", {
   // SMS only fires when this is set AND smsOptIn is true AND Twilio is connected.
   phoneNumber: text("phone_number"),
   smsOptIn: boolean("sms_opt_in").notNull().default(true),
+  // TOTP (RFC 6238) two-factor secret. Currently stored unencrypted so
+  // the design stays simple; rotating SESSION_SECRET-derived AES is a
+  // future hardening step. Only present once the user has enrolled.
+  totpSecret: text("totp_secret"),
+  totpEnrolledAt: timestamp("totp_enrolled_at", { withTimezone: true }),
+  // Bcrypt-hashed recovery codes (10 single-use codes generated on
+  // enrollment). Stored as a JSON array of strings; consumed entries are
+  // removed on use.
+  totpRecoveryCodes: jsonb("totp_recovery_codes").$type<string[]>(),
   lastLat: numeric("last_lat", { precision: 10, scale: 6 }),
   lastLng: numeric("last_lng", { precision: 10, scale: 6 }),
   lastLocationAt: timestamp("last_location_at", { withTimezone: true }),

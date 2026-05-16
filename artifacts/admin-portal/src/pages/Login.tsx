@@ -6,11 +6,13 @@ import { Label } from "@/components/ui/label";
 import { Loader2, AlertCircle } from "lucide-react";
 
 export function LoginPage() {
-  const { login } = useAuth();
+  const { login, loginTotp } = useAuth();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [challengeToken, setChallengeToken] = useState<string | null>(null);
+  const [code, setCode] = useState("");
 
   async function submit(e: React.FormEvent) {
     e.preventDefault();
@@ -19,7 +21,26 @@ export function LoginPage() {
     try {
       await login(email, password);
     } catch (err) {
-      setError((err as Error).message || "Login failed");
+      const e2 = err as Error & { challengeToken?: string };
+      if (e2.message === "TOTP_REQUIRED" && e2.challengeToken) {
+        setChallengeToken(e2.challengeToken);
+      } else {
+        setError(e2.message || "Login failed");
+      }
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function submitTotp(e: React.FormEvent) {
+    e.preventDefault();
+    if (!challengeToken) return;
+    setBusy(true);
+    setError(null);
+    try {
+      await loginTotp(challengeToken, code);
+    } catch (err) {
+      setError((err as Error).message || "Invalid code");
     } finally {
       setBusy(false);
     }
@@ -49,6 +70,33 @@ export function LoginPage() {
           <div className="brand-wordmark text-xl brand-gold">Security Group</div>
           <div className="text-xs uppercase tracking-widest opacity-70 mt-1">Admin Portal</div>
         </div>
+        {challengeToken ? (
+          <form onSubmit={submitTotp} className="p-6 space-y-4">
+            <div>
+              <Label htmlFor="totp" className="text-xs uppercase font-semibold brand-navy">Two-factor code</Label>
+              <Input id="totp" inputMode="numeric" autoComplete="one-time-code" required autoFocus
+                value={code} onChange={(e) => setCode(e.target.value)}
+                placeholder="000000 or recovery code" disabled={busy} />
+              <p className="text-xs text-muted-foreground mt-1">
+                Enter the 6-digit code from your authenticator app, or one of your recovery codes.
+              </p>
+            </div>
+            {error && (
+              <div className="flex items-start gap-2 text-sm text-destructive bg-destructive/5 p-2.5 rounded border border-destructive/20">
+                <AlertCircle className="w-4 h-4 mt-0.5 shrink-0" />
+                <span>{error}</span>
+              </div>
+            )}
+            <Button type="submit" disabled={busy || !code}
+              className="w-full bg-brand-navy hover:opacity-90 text-white">
+              {busy ? <><Loader2 className="w-4 h-4 mr-2 animate-spin" />Verifying…</> : "Verify & sign in"}
+            </Button>
+            <button type="button" onClick={() => { setChallengeToken(null); setCode(""); setError(null); }}
+              className="text-xs text-muted-foreground hover:underline w-full text-center">
+              ← Use a different account
+            </button>
+          </form>
+        ) : (
         <form onSubmit={submit} className="p-6 space-y-4">
           <div>
             <Label htmlFor="email" className="text-xs uppercase font-semibold brand-navy">Email</Label>
@@ -87,6 +135,7 @@ export function LoginPage() {
             Admin access only. Employees use the SecureOps mobile app.
           </p>
         </form>
+        )}
         <div className="text-center text-[11px] text-white/50 mt-4 space-x-3">
           <a href={`${import.meta.env.BASE_URL}privacy`} className="hover:text-white/80 underline">Privacy</a>
           <a href={`${import.meta.env.BASE_URL}terms`} className="hover:text-white/80 underline">Terms</a>

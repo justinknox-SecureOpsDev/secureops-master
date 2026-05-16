@@ -19,3 +19,4 @@ export * from "./onboardingSubmissions";
 export * from "./policies";
 export * from "./revokedTokens";
 export * from "./auditLogs";
+export * from "./shiftSwapRequests";

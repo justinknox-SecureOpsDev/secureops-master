@@ -5,28 +5,74 @@ import {
 } from "react-native";
 import { useRouter } from "expo-router";
 import { useAuth } from "@/contexts/AuthContext";
-import { useLogin } from "@workspace/api-client-react";
 import { useColors } from "@/hooks/useColors";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { Feather } from "@expo/vector-icons";
+import { API_BASE_URL } from "@/utils/api";
+
+async function postJson<T>(path: string, body: unknown): Promise<T> {
+  const res = await fetch(`${API_BASE_URL}${path}`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error((data as any)?.message || `HTTP ${res.status}`);
+  return data as T;
+}
 
 export default function LoginScreen() {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [showPassword, setShowPassword] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [challengeToken, setChallengeToken] = useState<string | null>(null);
+  const [code, setCode] = useState("");
   const { login: setAuthContext } = useAuth();
   const colors = useColors();
   const router = useRouter();
-  const loginMutation = useLogin();
 
   const handleLogin = async () => {
     if (!email || !password) return;
+    setBusy(true); setError(null);
     try {
-      const response = await loginMutation.mutateAsync({ data: { email, password } });
-      await setAuthContext(response.user, response.token);
-    } catch (error) {
-      // error displayed via loginMutation.error
+      const res = await postJson<{ token?: string; user?: any; needsTotp?: boolean; challengeToken?: string }>(
+        "/auth/login",
+        { email, password },
+      );
+      if (res.needsTotp && res.challengeToken) {
+        setChallengeToken(res.challengeToken);
+      } else if (res.token && res.user) {
+        await setAuthContext(res.user, res.token);
+      } else {
+        setError("Unexpected response from server.");
+      }
+    } catch (e: any) {
+      setError(e?.message || "Invalid credentials. Please try again.");
+    } finally {
+      setBusy(false);
     }
+  };
+
+  const handleVerifyTotp = async () => {
+    if (!challengeToken || !code) return;
+    setBusy(true); setError(null);
+    try {
+      const res = await postJson<{ token: string; user: any }>(
+        "/auth/login-totp",
+        { challengeToken, code },
+      );
+      await setAuthContext(res.user, res.token);
+    } catch (e: any) {
+      setError(e?.message || "Invalid code. Try again.");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const cancelTotp = () => {
+    setChallengeToken(null); setCode(""); setError(null);
   };
 
   return (
@@ -59,66 +105,104 @@ export default function LoginScreen() {
         <View style={[styles.card, { backgroundColor: colors.card, borderColor: colors.border }]}>
           <Text style={[styles.cardTitle, { color: colors.foreground }]}>COMMAND ACCESS</Text>
 
-          {loginMutation.error && (
+          {error && (
             <View style={[styles.errorBox, { backgroundColor: colors.destructive + "25", borderColor: colors.destructive }]}>
               <Feather name="alert-circle" size={14} color={colors.destructive} />
-              <Text style={{ color: colors.destructive, fontSize: 13, flex: 1 }}>
-                {(loginMutation.error as any)?.message || "Invalid credentials. Please try again."}
-              </Text>
+              <Text style={{ color: colors.destructive, fontSize: 13, flex: 1 }}>{error}</Text>
             </View>
           )}
 
-          <View style={[styles.inputWrap, { borderColor: colors.border, backgroundColor: colors.secondary }]}>
-            <Feather name="mail" size={16} color={colors.mutedForeground} />
-            <TextInput
-              style={[styles.input, { color: colors.foreground }]}
-              placeholder="Email address"
-              placeholderTextColor={colors.mutedForeground}
-              value={email}
-              onChangeText={setEmail}
-              autoCapitalize="none"
-              keyboardType="email-address"
-            />
-          </View>
+          {!challengeToken ? (
+            <>
+              <View style={[styles.inputWrap, { borderColor: colors.border, backgroundColor: colors.secondary }]}>
+                <Feather name="mail" size={16} color={colors.mutedForeground} />
+                <TextInput
+                  style={[styles.input, { color: colors.foreground }]}
+                  placeholder="Email address"
+                  placeholderTextColor={colors.mutedForeground}
+                  value={email}
+                  onChangeText={setEmail}
+                  autoCapitalize="none"
+                  keyboardType="email-address"
+                />
+              </View>
 
-          <View style={[styles.inputWrap, { borderColor: colors.border, backgroundColor: colors.secondary }]}>
-            <Feather name="lock" size={16} color={colors.mutedForeground} />
-            <TextInput
-              style={[styles.input, { color: colors.foreground }]}
-              placeholder="Password"
-              placeholderTextColor={colors.mutedForeground}
-              value={password}
-              onChangeText={setPassword}
-              secureTextEntry={!showPassword}
-            />
-            <TouchableOpacity onPress={() => setShowPassword(!showPassword)}>
-              <Feather name={showPassword ? "eye-off" : "eye"} size={16} color={colors.mutedForeground} />
-            </TouchableOpacity>
-          </View>
+              <View style={[styles.inputWrap, { borderColor: colors.border, backgroundColor: colors.secondary }]}>
+                <Feather name="lock" size={16} color={colors.mutedForeground} />
+                <TextInput
+                  style={[styles.input, { color: colors.foreground }]}
+                  placeholder="Password"
+                  placeholderTextColor={colors.mutedForeground}
+                  value={password}
+                  onChangeText={setPassword}
+                  secureTextEntry={!showPassword}
+                />
+                <TouchableOpacity onPress={() => setShowPassword(!showPassword)}>
+                  <Feather name={showPassword ? "eye-off" : "eye"} size={16} color={colors.mutedForeground} />
+                </TouchableOpacity>
+              </View>
 
-          <TouchableOpacity
-            style={[styles.button, { backgroundColor: colors.primary, opacity: loginMutation.isPending ? 0.8 : 1 }]}
-            onPress={handleLogin}
-            disabled={loginMutation.isPending}
-          >
-            {loginMutation.isPending ? (
-              <ActivityIndicator color={colors.primaryForeground} />
-            ) : (
-              <>
-                <Feather name="shield" size={16} color={colors.primaryForeground} />
-                <Text style={[styles.buttonText, { color: colors.primaryForeground }]}>ACCESS SYSTEM</Text>
-              </>
-            )}
-          </TouchableOpacity>
+              <TouchableOpacity
+                style={[styles.button, { backgroundColor: colors.primary, opacity: busy ? 0.8 : 1 }]}
+                onPress={handleLogin}
+                disabled={busy}
+              >
+                {busy ? (
+                  <ActivityIndicator color={colors.primaryForeground} />
+                ) : (
+                  <>
+                    <Feather name="shield" size={16} color={colors.primaryForeground} />
+                    <Text style={[styles.buttonText, { color: colors.primaryForeground }]}>ACCESS SYSTEM</Text>
+                  </>
+                )}
+              </TouchableOpacity>
 
-          <TouchableOpacity
-            onPress={() => router.push("/forgot-password")}
-            style={styles.forgotRow}
-          >
-            <Text style={[styles.forgotText, { color: colors.mutedForeground }]}>
-              Forgot password?
-            </Text>
-          </TouchableOpacity>
+              <TouchableOpacity
+                onPress={() => router.push("/forgot-password")}
+                style={styles.forgotRow}
+              >
+                <Text style={[styles.forgotText, { color: colors.mutedForeground }]}>
+                  Forgot password?
+                </Text>
+              </TouchableOpacity>
+            </>
+          ) : (
+            <>
+              <Text style={{ color: colors.mutedForeground, fontSize: 13, textAlign: "center" }}>
+                Enter the 6-digit code from your authenticator app, or a recovery code.
+              </Text>
+              <View style={[styles.inputWrap, { borderColor: colors.border, backgroundColor: colors.secondary }]}>
+                <Feather name="key" size={16} color={colors.mutedForeground} />
+                <TextInput
+                  style={[styles.input, { color: colors.foreground, letterSpacing: 4, textAlign: "center", fontSize: 18 }]}
+                  placeholder="000000"
+                  placeholderTextColor={colors.mutedForeground}
+                  value={code}
+                  onChangeText={setCode}
+                  autoCapitalize="characters"
+                  autoFocus
+                  keyboardType="default"
+                />
+              </View>
+              <TouchableOpacity
+                style={[styles.button, { backgroundColor: colors.primary, opacity: busy || !code ? 0.7 : 1 }]}
+                onPress={handleVerifyTotp}
+                disabled={busy || !code}
+              >
+                {busy ? (
+                  <ActivityIndicator color={colors.primaryForeground} />
+                ) : (
+                  <>
+                    <Feather name="shield" size={16} color={colors.primaryForeground} />
+                    <Text style={[styles.buttonText, { color: colors.primaryForeground }]}>VERIFY</Text>
+                  </>
+                )}
+              </TouchableOpacity>
+              <TouchableOpacity onPress={cancelTotp} style={styles.forgotRow}>
+                <Text style={[styles.forgotText, { color: colors.mutedForeground }]}>Use a different account</Text>
+              </TouchableOpacity>
+            </>
+          )}
         </View>
 
         <View style={styles.legalRow}>

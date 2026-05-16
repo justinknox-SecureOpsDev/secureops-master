@@ -6,6 +6,7 @@ type AuthCtx = {
   user: User | null;
   loading: boolean;
   login: (email: string, password: string) => Promise<void>;
+  loginTotp: (challengeToken: string, code: string) => Promise<void>;
   logout: () => void;
 };
 
@@ -25,9 +26,26 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, []);
 
   async function login(email: string, password: string) {
-    const res = await api<{ token: string; user: User }>("/auth/login", {
+    const res = await api<{ token?: string; user?: User; needsTotp?: boolean; challengeToken?: string }>(
+      "/auth/login",
+      { method: "POST", body: { email, password } },
+    );
+    if (res.needsTotp && res.challengeToken) {
+      // Caller (LoginPage) inspects the thrown sentinel and switches to
+      // the 2FA challenge form. We stash the challenge token on the error
+      // so it never touches React state until the second factor succeeds.
+      const e = new Error("TOTP_REQUIRED") as Error & { challengeToken?: string };
+      e.challengeToken = res.challengeToken;
+      throw e;
+    }
+    if (!res.token || !res.user) throw new Error("Login failed");
+    setToken(res.token);
+    setUser(res.user);
+  }
+  async function loginTotp(challengeToken: string, code: string) {
+    const res = await api<{ token: string; user: User }>("/auth/login-totp", {
       method: "POST",
-      body: { email, password },
+      body: { challengeToken, code },
     });
     setToken(res.token);
     setUser(res.user);
@@ -36,7 +54,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setToken(null);
     setUser(null);
   }
-  return <Ctx.Provider value={{ user, loading, login, logout }}>{children}</Ctx.Provider>;
+  return <Ctx.Provider value={{ user, loading, login, loginTotp, logout }}>{children}</Ctx.Provider>;
 }
 
 export function useAuth(): AuthCtx {

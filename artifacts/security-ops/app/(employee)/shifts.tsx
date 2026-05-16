@@ -13,6 +13,7 @@ import * as Location from "expo-location";
 import { useQueryClient } from "@tanstack/react-query";
 import { Feather } from "@expo/vector-icons";
 import { LicenseLevelBadge, levelLabel } from "@/components/LicenseLevelBadge";
+import { SwapRequestModal } from "@/components/SwapRequestModal";
 import { useRouter } from "expo-router";
 
 const FILTERS = ["available", "upcoming", "active", "completed"] as const;
@@ -23,6 +24,7 @@ export default function EmployeeShiftsScreen() {
   const queryClient = useQueryClient();
   const [filter, setFilter] = useState<typeof FILTERS[number]>("available");
   const [busyId, setBusyId] = useState<string | null>(null);
+  const [swapTarget, setSwapTarget] = useState<{ assignmentId: string; title: string } | null>(null);
   const topPad = Platform.OS === "web" ? 67 : 0;
 
   const { data: me } = useGetMe({ query: { queryKey: getGetMeQueryKey() } });
@@ -385,12 +387,32 @@ export default function EmployeeShiftsScreen() {
                           </>
                         )}
                       </TouchableOpacity>
+                      {now < startMs && (
+                        <TouchableOpacity
+                          style={[styles.declineBtn, { borderColor: colors.primary, opacity: busy ? 0.6 : 1 }]}
+                          onPress={() => setSwapTarget({ assignmentId: myAssign.id, title: `${item.title} @ ${item.clientName}` })}
+                          disabled={busy}
+                        >
+                          <Feather name="repeat" size={14} color={colors.primary} />
+                          <Text style={[styles.declineText, { color: colors.primary }]}>Request Swap</Text>
+                        </TouchableOpacity>
+                      )}
                     </View>
                   );
                 })()}
               </View>
             );
           }}
+        />
+      )}
+      {swapTarget && myUserId && (
+        <SwapRequestModal
+          visible={!!swapTarget}
+          onClose={() => setSwapTarget(null)}
+          onSubmitted={() => router.push("/swap-requests" as any)}
+          assignmentId={swapTarget.assignmentId}
+          shiftTitle={swapTarget.title}
+          myUserId={myUserId}
         />
       )}
     </View>

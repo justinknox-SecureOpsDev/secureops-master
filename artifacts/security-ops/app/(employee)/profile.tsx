@@ -410,6 +410,19 @@ export default function EmployeeProfileScreen() {
           <Feather name="chevron-right" size={16} color={colors.mutedForeground} />
         </TouchableOpacity>
         <TouchableOpacity
+          onPress={() => router.push("/swap-requests" as any)}
+          style={[styles.actionRow, { borderBottomColor: colors.border }]}
+        >
+          <Feather name="repeat" size={16} color={colors.accent} />
+          <View style={{ flex: 1 }}>
+            <Text style={{ color: colors.foreground, fontSize: 14, fontWeight: "600" }}>Shift swaps</Text>
+            <Text style={{ color: colors.mutedForeground, fontSize: 12, marginTop: 2 }}>
+              See and respond to swap requests
+            </Text>
+          </View>
+          <Feather name="chevron-right" size={16} color={colors.mutedForeground} />
+        </TouchableOpacity>
+        <TouchableOpacity
           onPress={() => router.push({ pathname: "/change-password" as any, params: { mode: "self" } })}
           style={[styles.actionRow, { borderBottomColor: colors.border }]}
         >

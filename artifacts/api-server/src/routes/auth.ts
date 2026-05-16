@@ -13,6 +13,28 @@ import {
   resetPasswordLimiter,
 } from "../middlewares/rateLimit";
 import { sendEmail, renderPasswordResetEmail, renderPasswordChangedEmail } from "../lib/email";
+import jwt from "jsonwebtoken";
+import { verifyTotpOrRecovery } from "./totp";
+
+// Short-lived bearer used between /auth/login (1st factor) and
+// /auth/login-totp (2nd factor). Signed with the same SESSION_SECRET as
+// the main auth tokens but scoped via `purpose:"totp-challenge"` and a
+// 5 minute TTL so it cannot be used as a real session token.
+const TOTP_CHALLENGE_TTL_SECONDS = 5 * 60;
+function signTotpChallenge(userId: string): string {
+  const secret = process.env.SESSION_SECRET || "fallback-secret-change-me";
+  return jwt.sign({ userId, purpose: "totp-challenge" }, secret, { expiresIn: TOTP_CHALLENGE_TTL_SECONDS });
+}
+function verifyTotpChallenge(token: string): { userId: string } | null {
+  try {
+    const secret = process.env.SESSION_SECRET || "fallback-secret-change-me";
+    const decoded = jwt.verify(token, secret) as { userId?: string; purpose?: string };
+    if (decoded.purpose !== "totp-challenge" || !decoded.userId) return null;
+    return { userId: decoded.userId };
+  } catch {
+    return null;
+  }
+}
 
 function getRequestIp(req: import("express").Request): string | null {
   const fwd = req.headers["x-forwarded-for"];
@@ -134,8 +156,44 @@ router.post("/auth/login", loginIpLimiter, loginEmailLimiter, async (req, res): 
     res.status(401).json({ error: "Unauthorized", message: "Invalid credentials" });
     return;
   }
+  // Two-factor gate: if the account has TOTP enrolled, do NOT issue a
+  // session token. Return a short-lived challenge token instead; the
+  // client must complete /auth/login-totp before getting a real session.
+  if (user.totpEnrolledAt) {
+    const challengeToken = signTotpChallenge(user.id);
+    res.json({ needsTotp: true, challengeToken });
+    return;
+  }
   const token = signToken({ userId: user.id, email: user.email, role: user.role });
   res.json({ token, user: userPayload(user) });
+});
+
+// Second factor: exchange a valid challenge token + TOTP/recovery code for
+// a real session. Rate-limited identically to /auth/login by IP to slow
+// brute-force of the 6-digit window.
+router.post("/auth/login-totp", loginIpLimiter, async (req, res): Promise<void> => {
+  const { challengeToken, code } = req.body ?? {};
+  if (typeof challengeToken !== "string" || typeof code !== "string") {
+    res.status(400).json({ error: "Bad Request", message: "challengeToken and code required" });
+    return;
+  }
+  const challenge = verifyTotpChallenge(challengeToken);
+  if (!challenge) {
+    res.status(401).json({ error: "Unauthorized", message: "Challenge expired. Sign in again." });
+    return;
+  }
+  const [user] = await db.select().from(usersTable).where(eq(usersTable.id, challenge.userId));
+  if (!user || user.status !== "active" || !user.totpEnrolledAt) {
+    res.status(401).json({ error: "Unauthorized", message: "Invalid credentials" });
+    return;
+  }
+  const ok = await verifyTotpOrRecovery(user.id, code);
+  if (!ok) {
+    res.status(401).json({ error: "Unauthorized", message: "Invalid code" });
+    return;
+  }
+  const token = signToken({ userId: user.id, email: user.email, role: user.role });
+  res.json({ token, user: userPayload(user), via: ok });
 });
 
 // Best-effort revoke the bearer's jti so the token cannot be reused even if it

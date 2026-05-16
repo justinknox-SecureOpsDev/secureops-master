@@ -3,7 +3,7 @@ import { Link, useRoute, useLocation } from "wouter";
 import {
   LogOut, ClipboardList, UserPlus, FileText, ChevronsLeft, ChevronsRight,
   Database, Banknote, ChevronDown, ChevronRight, Receipt, Wallet, MailPlus,
-  AlertTriangle, ShieldCheck,
+  AlertTriangle, ShieldCheck, Repeat, KeyRound,
   type LucideIcon,
 } from "lucide-react";
 import { TABLES } from "@/lib/tables";
@@ -105,6 +105,8 @@ export function AppShell({ children }: { children: React.ReactNode }) {
 
   const securityLinks: LinkItem[] = [
     { href: "/audit-log", label: "Audit Log", Icon: ShieldCheck },
+    { href: "/swap-requests", label: "Swap Requests", Icon: Repeat },
+    { href: "/account/security", label: "My 2FA", Icon: KeyRound },
   ];
 
   const operationsTables = TABLES.filter((t) => !ACCOUNTING_TABLE_NAMES.has(t.name));
