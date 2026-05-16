@@ -208,6 +208,24 @@ export const darWriteLimiter: RateLimitRequestHandler = rateLimit({
   },
 });
 
+// GET /dar/:id/pdf — PDFKit render is CPU/memory-heavier than JSON
+// routes. Per-user cap absorbs legitimate "view, then download" workflows
+// while preventing a logged-in account from looping the renderer.
+const DAR_PDF_PER_USER_MAX = envInt("DAR_PDF_RATE_LIMIT_MAX", 30);
+
+export const darPdfLimiter: RateLimitRequestHandler = rateLimit({
+  windowMs: 5 * 60 * 1000,
+  limit: DAR_PDF_PER_USER_MAX,
+  standardHeaders: true,
+  legacyHeaders: false,
+  handler: tooMany,
+  keyGenerator: (req) => {
+    const uid = req.user?.userId;
+    if (uid) return `darpdf:u:${uid}`;
+    return `darpdf:ip:${ipKeyGenerator(req.ip ?? "")}`;
+  },
+});
+
 // POST /me/location — authenticated location pings from the mobile app.
 // The app pings every ~60s while clocked in, so a generous per-user cap
 // of 30/min still leaves 2x headroom for legitimate retries while

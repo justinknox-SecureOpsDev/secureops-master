@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { ClipboardList, RefreshCw, X } from "lucide-react";
+import { ClipboardList, RefreshCw, X, Download } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { api } from "@/lib/api";
+import { api, getToken } from "@/lib/api";
 
 type Row = {
   id: string;
@@ -159,7 +159,12 @@ export function DailyReportsPage() {
                   </div>
                 )}
               </div>
-              <button onClick={() => setOpenId(null)} className="text-muted-foreground hover:text-foreground"><X className="w-4 h-4" /></button>
+              <div className="flex items-center gap-2">
+                <Button variant="outline" size="sm" onClick={() => openId && downloadDarPdf(openId)}>
+                  <Download className="w-3.5 h-3.5 mr-1" /> PDF
+                </Button>
+                <button onClick={() => setOpenId(null)} className="text-muted-foreground hover:text-foreground"><X className="w-4 h-4" /></button>
+              </div>
             </div>
             <div className="p-5 space-y-4 text-sm">
               {!detail ? (
@@ -192,6 +197,27 @@ export function DailyReportsPage() {
       )}
     </div>
   );
+}
+
+async function downloadDarPdf(id: string) {
+  try {
+    const token = getToken();
+    const res = await fetch(`/api/dar/${id}/pdf`, {
+      headers: token ? { Authorization: `Bearer ${token}` } : {},
+    });
+    if (!res.ok) throw new Error(`Request failed (${res.status})`);
+    const blob = await res.blob();
+    const cd = res.headers.get("Content-Disposition") ?? "";
+    const m = /filename="?([^";]+)"?/i.exec(cd);
+    const filename = m?.[1] ?? `wcsg-dar-${id.slice(0, 8)}.pdf`;
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url; a.download = filename;
+    document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+  } catch (e) {
+    alert(`Could not download PDF: ${(e as Error).message}`);
+  }
 }
 
 function Section({ title, children }: { title: string; children: React.ReactNode }) {

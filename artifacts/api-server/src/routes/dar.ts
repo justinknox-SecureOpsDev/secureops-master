@@ -10,7 +10,9 @@ import {
   usersTable,
 } from "@workspace/db";
 import { requireAuth, requireAdmin } from "../middlewares/auth";
-import { darWriteLimiter } from "../middlewares/rateLimit";
+import { darWriteLimiter, darPdfLimiter } from "../middlewares/rateLimit";
+import { buildDarPdf } from "../lib/darPdf";
+import { logger } from "../lib/logger";
 
 const router: IRouter = Router();
 
@@ -145,6 +147,46 @@ router.get("/me/dar/:id", requireAuth, async (req, res): Promise<void> => {
     .limit(1);
   if (!row) { res.status(404).json({ error: "Not Found" }); return; }
   res.json(row);
+});
+
+// ---------- PDF (officer own, admin any) ----------
+
+router.get("/dar/:id/pdf", requireAuth, darPdfLimiter, async (req, res): Promise<void> => {
+  const idParse = z.string().uuid().safeParse(req.params.id);
+  if (!idParse.success) { res.status(400).json({ error: "Bad Request", message: "Invalid id" }); return; }
+  const [owner] = await db
+    .select({ employeeId: dailyActivityReportsTable.employeeId })
+    .from(dailyActivityReportsTable)
+    .where(eq(dailyActivityReportsTable.id, idParse.data))
+    .limit(1);
+  if (!owner) { res.status(404).json({ error: "Not Found" }); return; }
+  if (req.user!.role !== "admin" && owner.employeeId !== req.user!.userId) {
+    res.status(403).json({ error: "Forbidden" }); return;
+  }
+  try {
+    const payload = await buildDarPdf(idParse.data);
+    if (!payload) { res.status(404).json({ error: "Not Found" }); return; }
+    res.setHeader("Content-Type", "application/pdf");
+    res.setHeader("Content-Disposition", `attachment; filename="${payload.filename}"`);
+    res.setHeader("Cache-Control", "private, no-store");
+    // Stream error handling: PDFKit can throw mid-render after headers
+    // are already flushed. Once that happens we can't send a JSON error,
+    // so destroy the socket to signal failure instead of leaving the
+    // client hanging on a truncated/corrupt PDF.
+    payload.stream.on("error", (err) => {
+      logger.warn({ err, darId: idParse.data }, "[dar/pdf] stream error");
+      if (!res.headersSent) {
+        res.status(500).json({ error: "PDF render failed" });
+      } else {
+        res.destroy(err);
+      }
+    });
+    payload.stream.pipe(res);
+  } catch (err) {
+    logger.warn({ err, darId: idParse.data }, "[dar/pdf] build error");
+    if (!res.headersSent) res.status(500).json({ error: "PDF render failed" });
+    else res.destroy(err as Error);
+  }
 });
 
 // ---------- Admin: feed / detail ----------
