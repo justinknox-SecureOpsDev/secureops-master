@@ -21,3 +21,4 @@ export * from "./revokedTokens";
 export * from "./auditLogs";
 export * from "./shiftSwapRequests";
 export * from "./licenseRenewalRequests";
+export * from "./incidentShareLinks";

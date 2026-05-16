@@ -50,7 +50,15 @@ export type IncidentPdfPayload = {
  *  - Layout is intentionally single-column and spacious so the PDF reads
  *    well when printed for a client / insurance handover.
  */
-export async function buildIncidentReportPdf(incidentId: string): Promise<IncidentPdfPayload | null> {
+export async function buildIncidentReportPdf(
+  incidentId: string,
+  opts: { redactForPublicShare?: boolean } = {},
+): Promise<IncidentPdfPayload | null> {
+  // When `redactForPublicShare` is true we strip every field that would
+  // leak internal context or employee PII over the unauthenticated share
+  // link surface: admin notes, officer email/phone, and full officer
+  // name (replaced with initial + last name).
+  const redact = opts.redactForPublicShare === true;
   const [row] = await db
     .select({
       id: incidentsTable.id,
@@ -148,13 +156,18 @@ export async function buildIncidentReportPdf(incidentId: string): Promise<Incide
     year: "numeric", month: "short", day: "numeric", hour: "numeric", minute: "2-digit",
   }) : "—");
   const employeeFull = [row.employeeFirst, row.employeeLast].filter(Boolean).join(" ") || "—";
+  const employeeShort = row.employeeFirst && row.employeeLast
+    ? `${row.employeeFirst[0]}. ${row.employeeLast}`
+    : (row.employeeLast || row.employeeFirst || "—");
   const meta: Array<[string, string]> = [
     ["Report ID", row.id],
     ["Occurred", fmtDate(row.occurredAt)],
     ["Reported", fmtDate(row.createdAt)],
     ["Resolved", fmtDate(row.resolvedAt)],
-    ["Officer", employeeFull],
-    ["Officer Contact", [row.employeeEmail, row.employeePhone].filter(Boolean).join(" · ") || "—"],
+    ["Officer", redact ? employeeShort : employeeFull],
+    ...(redact
+      ? []
+      : [["Officer Contact", [row.employeeEmail, row.employeePhone].filter(Boolean).join(" · ") || "—"] as [string, string]]),
     ["Site", row.siteName ?? "—"],
     ["Site Address", row.siteAddress ?? "—"],
     ["Shift", row.shiftTitle ? `${row.shiftTitle} (${fmtDate(row.shiftStart)} → ${fmtDate(row.shiftEnd)})` : "—"],
@@ -177,8 +190,9 @@ export async function buildIncidentReportPdf(incidentId: string): Promise<Incide
   doc.fillColor(TEXT).font("Helvetica").fontSize(11)
     .text(row.description, 56, doc.y, { width: doc.page.width - 112, align: "left", lineGap: 2 });
 
-  // Admin notes (if any).
-  if (row.adminNotes) {
+  // Admin notes (if any). NEVER include in the redacted/public copy —
+  // these are internal-only.
+  if (!redact && row.adminNotes) {
     doc.moveDown(1);
     sectionHeader(doc, "Admin Notes");
     doc.fillColor(TEXT).font("Helvetica-Oblique").fontSize(11)

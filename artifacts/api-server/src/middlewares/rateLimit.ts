@@ -155,6 +155,21 @@ export const tokenLookupLimiter: RateLimitRequestHandler = rateLimit({
   keyGenerator: (req) => `tk:ip:${ipKeyGenerator(req.ip ?? "")}`,
 });
 
+// Stricter limiter for unauthenticated endpoints that do real work
+// (PDF render, attachment signing). Keeps a single recipient from
+// hammering the share PDF endpoint into a DoS.
+const PUBLIC_SHARE_EXPENSIVE_PER_IP_MAX = envInt("PUBLIC_SHARE_EXPENSIVE_RATE_LIMIT_MAX", 15);
+const FIFTEEN_MIN_MS = 15 * 60 * 1000;
+
+export const publicShareExpensiveLimiter: RateLimitRequestHandler = rateLimit({
+  windowMs: FIFTEEN_MIN_MS,
+  limit: PUBLIC_SHARE_EXPENSIVE_PER_IP_MAX,
+  standardHeaders: true,
+  legacyHeaders: false,
+  handler: tooMany,
+  keyGenerator: (req) => `pse:ip:${ipKeyGenerator(req.ip ?? "")}`,
+});
+
 // POST /emergency — authenticated, but rate-limited per user to prevent
 // runaway loops or malicious flooding from spamming admin push channels.
 // Keyed by userId; falls back to IP if somehow unauthenticated.

@@ -21,6 +21,8 @@ import ShiftsPage from "@/pages/Shifts";
 import AuditLogPage from "@/pages/AuditLog";
 import SwapRequestsPage from "@/pages/SwapRequests";
 import LicenseRenewalsPage from "@/pages/LicenseRenewals";
+import IncidentShareLinksPage from "@/pages/IncidentShareLinks";
+import PublicIncidentPage from "@/pages/PublicIncident";
 import SecurityPage from "@/pages/Security";
 import NotFound from "@/pages/not-found";
 
@@ -38,6 +40,7 @@ function Routed() {
   if (location === "/privacy") return <PrivacyPage />;
   if (location === "/terms") return <TermsPage />;
   if (location === "/data-rights") return <DataRightsPage />;
+  if (location.startsWith("/share/incident/")) return <PublicIncidentPage />;
 
   if (loading) {
     return (
@@ -72,6 +75,7 @@ function Routed() {
         <Route path="/audit-log" component={AuditLogPage} />
         <Route path="/swap-requests" component={SwapRequestsPage} />
         <Route path="/hr/license-renewals" component={LicenseRenewalsPage} />
+        <Route path="/incidents/share-links" component={IncidentShareLinksPage} />
         <Route path="/account/security" component={SecurityPage} />
         <Route path="/sites/:id" component={SiteDetailPage} />
         <Route path="/tables/shifts" component={ShiftsPage} />
