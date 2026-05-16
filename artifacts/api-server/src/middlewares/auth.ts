@@ -57,6 +57,57 @@ export function tokenTtlSeconds(): number {
   return TOKEN_TTL_DAYS * 24 * 60 * 60;
 }
 
+// Throttle map: userId → last DB-write timestamp (ms). We only update the
+// `users.last_active_at` column at most once per LAST_ACTIVE_THROTTLE_MS
+// per user, because clients (mobile location pings, websocket polling)
+// can issue dozens of authed requests per minute and we don't want to
+// turn a hot read path into a hot write path.
+//
+// Bounded growth: in a long-lived multi-tenant deployment the map could
+// otherwise accumulate one entry per distinct user ever seen since boot.
+// We cap it at LAST_ACTIVE_MAX_ENTRIES; before each insert that would
+// exceed the cap we prune any entries older than the throttle window
+// (those entries serve no purpose — the next request from that user
+// would write to the DB regardless of whether the entry exists). If the
+// map is still at capacity after pruning we drop the single oldest
+// entry. This is bounded work — at most one full scan and one min
+// search — and only runs when growth would otherwise be unbounded.
+const LAST_ACTIVE_THROTTLE_MS = 60_000;
+const LAST_ACTIVE_MAX_ENTRIES = 10_000;
+const lastActiveStamps = new Map<string, number>();
+
+function pruneLastActive(now: number): void {
+  const cutoff = now - LAST_ACTIVE_THROTTLE_MS;
+  for (const [id, ts] of lastActiveStamps) {
+    if (ts < cutoff) lastActiveStamps.delete(id);
+  }
+  if (lastActiveStamps.size >= LAST_ACTIVE_MAX_ENTRIES) {
+    let oldestId: string | null = null;
+    let oldestTs = Infinity;
+    for (const [id, ts] of lastActiveStamps) {
+      if (ts < oldestTs) { oldestTs = ts; oldestId = id; }
+    }
+    if (oldestId) lastActiveStamps.delete(oldestId);
+  }
+}
+
+async function stampLastActive(userId: string): Promise<void> {
+  const now = Date.now();
+  const prev = lastActiveStamps.get(userId) ?? 0;
+  if (now - prev < LAST_ACTIVE_THROTTLE_MS) return;
+  if (!lastActiveStamps.has(userId) && lastActiveStamps.size >= LAST_ACTIVE_MAX_ENTRIES) {
+    pruneLastActive(now);
+  }
+  lastActiveStamps.set(userId, now);
+  try {
+    await db.update(usersTable).set({ lastActiveAt: new Date(now) }).where(eq(usersTable.id, userId));
+  } catch {
+    // If the write fails (e.g. transient DB blip), drop the throttle
+    // entry so the next request retries instead of waiting a full minute.
+    lastActiveStamps.delete(userId);
+  }
+}
+
 export async function requireAuth(req: Request, res: Response, next: NextFunction): Promise<void> {
   const authHeader = req.headers.authorization;
   if (!authHeader || !authHeader.startsWith("Bearer ")) {
@@ -128,6 +179,12 @@ export async function requireAuth(req: Request, res: Response, next: NextFunctio
       iat: payload.iat,
       exp: payload.exp,
     };
+
+    // Throttled "last active" stamp — fire-and-forget so the request path
+    // is never blocked on an extra DB write. The in-memory map keeps us
+    // from doing a write on every single authenticated request from a
+    // chatty client (mobile pings location every 60s, etc.).
+    void stampLastActive(user.id);
 
     // Enforce server-side: accounts with mustChangePassword=true are locked to
     // password-management and identity routes only. All other API access is

@@ -25,6 +25,11 @@ export const usersTable = pgTable("users", {
   lastLat: numeric("last_lat", { precision: 10, scale: 6 }),
   lastLng: numeric("last_lng", { precision: 10, scale: 6 }),
   lastLocationAt: timestamp("last_location_at", { withTimezone: true }),
+  // Wall-clock of the most recent authenticated REST/WS request from this
+  // user. Updated by `requireAuth` at most once per ~60s/user (in-memory
+  // throttle) so it never becomes a per-request hot write. Used by admins
+  // to decide whether revoking sessions is meaningful right now.
+  lastActiveAt: timestamp("last_active_at", { withTimezone: true }),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow().$onUpdate(() => new Date()),
 });

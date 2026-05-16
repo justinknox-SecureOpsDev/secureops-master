@@ -149,6 +149,7 @@ export const TABLES: TableDescriptor[] = [
         ],
       },
       { key: "expoPushToken", label: "Push Token", type: "text", hiddenInGrid: true },
+      { key: "lastActiveAt", label: "Last Active", type: "datetime", readonly: true },
       { key: "createdAt", label: "Created", type: "datetime", readonly: true },
     ],
   },

@@ -140,7 +140,7 @@ export function DataGrid({
   const [deleting, setDeleting] = useState<Row | null>(null);
   const [importOpen, setImportOpen] = useState(false);
   const [repeatOpen, setRepeatOpen] = useState(false);
-  type UserRow = { id: string; firstName?: unknown; lastName?: unknown; email?: unknown };
+  type UserRow = { id: string; firstName?: unknown; lastName?: unknown; email?: unknown; lastActiveAt?: unknown };
   const toUserRow = (r: Row): UserRow => r as UserRow;
   const [resetTarget, setResetTarget] = useState<UserRow | null>(null);
   const [resetBusy, setResetBusy] = useState(false);
@@ -475,6 +475,11 @@ export function DataGrid({
               lost or you suspect their account is compromised.
             </AlertDialogDescription>
           </AlertDialogHeader>
+          <div className="text-xs text-muted-foreground bg-muted/40 rounded p-2 border">
+            {revokeTarget?.lastActiveAt
+              ? <>Last active: <b>{new Date(String(revokeTarget.lastActiveAt)).toLocaleString()}</b> — this account is currently signed in somewhere.</>
+              : <>This account has no recorded activity yet — they may not be signed in anywhere right now.</>}
+          </div>
           {revokeError && (
             <div className="text-sm text-destructive bg-destructive/5 p-2 rounded border border-destructive/20">
               {revokeError}
