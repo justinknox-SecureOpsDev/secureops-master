@@ -49,7 +49,6 @@ export function AppShell({ children }: { children: React.ReactNode }) {
     { href: "/hr/onboarding", label: "Onboarding", Icon: UserPlus },
     { href: "/hr/invitations", label: "Invitations", Icon: MailPlus },
     { href: "/hr/policies", label: "Policies", Icon: FileText },
-    { href: "/integrations/monday", label: "Monday Sync", Icon: Database },
   ];
 
   const accountingLinks: LinkItem[] = [

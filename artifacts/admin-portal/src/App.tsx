@@ -14,7 +14,6 @@ import { AmendApplication } from "@/pages/AmendApplication";
 import { ApplicationsPage } from "@/pages/Applications";
 import { OnboardingPage } from "@/pages/Onboarding";
 import { PoliciesPage } from "@/pages/Policies";
-import { MondaySyncPage } from "@/pages/MondaySync";
 import PayRunPage from "@/pages/PayRun";
 import { InvitationsPage } from "@/pages/Invitations";
 import ShiftsPage from "@/pages/Shifts";
@@ -61,7 +60,6 @@ function Routed() {
         <Route path="/hr/onboarding" component={OnboardingPage} />
         <Route path="/hr/policies" component={PoliciesPage} />
         <Route path="/hr/invitations" component={InvitationsPage} />
-        <Route path="/integrations/monday" component={MondaySyncPage} />
         <Route path="/payroll/pay-run" component={PayRunPage} />
         <Route path="/sites/:id" component={SiteDetailPage} />
         <Route path="/tables/shifts" component={ShiftsPage} />
