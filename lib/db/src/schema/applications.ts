@@ -21,6 +21,15 @@ export const applicationsTable = pgTable("applications", {
   niNumber: text("ni_number"),
   rightToWorkStatus: text("right_to_work_status"),
   rightToWorkDocKey: text("right_to_work_doc_key"),
+  // I-9 employment eligibility (replaces the old generic right-to-work doc).
+  // i9DocKey   = applicant-completed Form I-9 (PDF / scan)
+  // ssnCardDocKey = photo / scan of Social Security card
+  // idDocType  = "drivers_license" | "passport"
+  // idDocKey   = photo / scan of the chosen ID
+  i9DocKey: text("i9_doc_key"),
+  ssnCardDocKey: text("ssn_card_doc_key"),
+  idDocType: text("id_doc_type"),
+  idDocKey: text("id_doc_key"),
   siaLicenseNumber: text("sia_license_number"),
   siaLicenseLevel: integer("sia_license_level"),
   siaLicenseExpiry: date("sia_license_expiry"),

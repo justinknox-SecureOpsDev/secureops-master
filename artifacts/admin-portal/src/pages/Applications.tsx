@@ -21,6 +21,8 @@ type Application = {
   distanceMiles: number | null;
   dateOfBirth: string | null; cityOfBirth: string | null; stateOfBirth: string | null;
   niNumber: string | null; rightToWorkStatus: string | null; rightToWorkDocKey: string | null;
+  i9DocKey: string | null; ssnCardDocKey: string | null;
+  idDocType: "drivers_license" | "passport" | null; idDocKey: string | null;
   siaLicenseNumber: string | null; siaLicenseLevel: number | null; siaLicenseExpiry: string | null;
   previousExperience: string | null; yearsExperience: number | null;
   references: { name: string; relationship: string; phone: string; email?: string }[] | null;
@@ -443,7 +445,7 @@ function ApplicationDialog({
           <Info k="City of birth" v={app.cityOfBirth} />
           <Info k="State of birth" v={app.stateOfBirth} />
           <Info k="SSN (last 4)" v={app.niNumber} />
-          <Info k="Right to work" v={app.rightToWorkStatus} />
+          <Info k="Photo ID type" v={app.idDocType === "passport" ? "Passport" : app.idDocType === "drivers_license" ? "Driver's License" : null} />
           <Info k="TX license #" v={app.siaLicenseNumber} />
           <Info k="License level" v={app.siaLicenseLevel ? `L${app.siaLicenseLevel}` : null} />
           <Info k="License expiry" v={app.siaLicenseExpiry} />
@@ -463,7 +465,13 @@ function ApplicationDialog({
         )}
         <Section title="Documents">
           <ul className="text-sm space-y-1">
-            <FileLink k="Right-to-work" path={app.rightToWorkDocKey} />
+            <FileLink k="Form I-9" path={app.i9DocKey} />
+            <FileLink k="SSN card" path={app.ssnCardDocKey} />
+            <FileLink
+              k={app.idDocType === "passport" ? "Passport" : app.idDocType === "drivers_license" ? "Driver's License" : "Photo ID"}
+              path={app.idDocKey}
+            />
+            {app.rightToWorkDocKey && <FileLink k="Right-to-work (legacy)" path={app.rightToWorkDocKey} />}
             <FileLink k="Photo" path={app.photoKey} />
             <FileLink k="CV" path={app.cvKey} />
             {(app.trainingCertificateKeys ?? []).map((k, i) => (

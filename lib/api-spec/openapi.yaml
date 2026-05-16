@@ -3048,7 +3048,11 @@ components:
         stateOfBirth: { type: string, nullable: true }
         niNumber: { type: string, nullable: true }
         rightToWorkStatus: { type: string, nullable: true }
-        rightToWorkDoc: { $ref: "#/components/schemas/UploadedFile", nullable: true }
+        rightToWorkDoc: { $ref: "#/components/schemas/UploadedFile", nullable: true, description: "Deprecated. Use i9Doc + ssnCardDoc + idDoc." }
+        i9Doc: { $ref: "#/components/schemas/UploadedFile", nullable: true, description: "Completed Form I-9." }
+        ssnCardDoc: { $ref: "#/components/schemas/UploadedFile", nullable: true, description: "Photo/scan of Social Security card." }
+        idDocType: { type: string, nullable: true, enum: [drivers_license, passport], description: "Which ID accompanies the SSN card." }
+        idDoc: { $ref: "#/components/schemas/UploadedFile", nullable: true, description: "Photo/scan of driver's license OR passport." }
         siaLicenseNumber: { type: string, nullable: true }
         siaLicenseLevel: { type: integer, nullable: true, enum: [2, 3, 4] }
         siaLicenseExpiry: { type: string, nullable: true }
@@ -3089,6 +3093,10 @@ components:
         niNumber: { type: string, nullable: true }
         rightToWorkStatus: { type: string, nullable: true }
         rightToWorkDocKey: { type: string, nullable: true }
+        i9DocKey: { type: string, nullable: true }
+        ssnCardDocKey: { type: string, nullable: true }
+        idDocType: { type: string, nullable: true, enum: [drivers_license, passport] }
+        idDocKey: { type: string, nullable: true }
         siaLicenseNumber: { type: string, nullable: true }
         siaLicenseLevel: { type: integer, nullable: true }
         siaLicenseExpiry: { type: string, nullable: true }

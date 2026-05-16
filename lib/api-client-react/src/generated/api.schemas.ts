@@ -1065,6 +1065,18 @@ export interface AvailabilityCell {
   period: AvailabilityCellPeriod;
 }
 
+/**
+ * Which ID accompanies the SSN card.
+ */
+export type SubmitApplicationRequestIdDocType =
+  | (typeof SubmitApplicationRequestIdDocType)[keyof typeof SubmitApplicationRequestIdDocType]
+  | null;
+
+export const SubmitApplicationRequestIdDocType = {
+  drivers_license: "drivers_license",
+  passport: "passport",
+} as const;
+
 export type SubmitApplicationRequestSiaLicenseLevel =
   | (typeof SubmitApplicationRequestSiaLicenseLevel)[keyof typeof SubmitApplicationRequestSiaLicenseLevel]
   | null;
@@ -1091,7 +1103,16 @@ export interface SubmitApplicationRequest {
   stateOfBirth?: string | null;
   niNumber?: string | null;
   rightToWorkStatus?: string | null;
+  /** Deprecated. Use i9Doc + ssnCardDoc + idDoc. */
   rightToWorkDoc?: UploadedFile | null;
+  /** Completed Form I-9. */
+  i9Doc?: UploadedFile | null;
+  /** Photo/scan of Social Security card. */
+  ssnCardDoc?: UploadedFile | null;
+  /** Which ID accompanies the SSN card. */
+  idDocType?: SubmitApplicationRequestIdDocType;
+  /** Photo/scan of driver's license OR passport. */
+  idDoc?: UploadedFile | null;
   siaLicenseNumber?: string | null;
   siaLicenseLevel?: SubmitApplicationRequestSiaLicenseLevel;
   siaLicenseExpiry?: string | null;
@@ -1112,6 +1133,15 @@ export const ApplicationStatus = {
   under_review: "under_review",
   approved: "approved",
   rejected: "rejected",
+} as const;
+
+export type ApplicationIdDocType =
+  | (typeof ApplicationIdDocType)[keyof typeof ApplicationIdDocType]
+  | null;
+
+export const ApplicationIdDocType = {
+  drivers_license: "drivers_license",
+  passport: "passport",
 } as const;
 
 export interface Application {
@@ -1137,6 +1167,10 @@ export interface Application {
   niNumber?: string | null;
   rightToWorkStatus?: string | null;
   rightToWorkDocKey?: string | null;
+  i9DocKey?: string | null;
+  ssnCardDocKey?: string | null;
+  idDocType?: ApplicationIdDocType;
+  idDocKey?: string | null;
   siaLicenseNumber?: string | null;
   siaLicenseLevel?: number | null;
   siaLicenseExpiry?: string | null;

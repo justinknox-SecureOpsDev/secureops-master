@@ -20,9 +20,11 @@ type Form = {
   firstName: string; lastName: string; email: string; phone: string;
   address: string; city: string; state: string; zip: string;
   dateOfBirth: string; cityOfBirth: string; stateOfBirth: string; niNumber: string;
-  // Right to work
-  rightToWorkStatus: string;
-  rightToWorkDoc: UploadedFile | null;
+  // I-9 Employment Eligibility (replaces generic "right to work")
+  i9Doc: UploadedFile | null;
+  ssnCardDoc: UploadedFile | null;
+  idDocType: "" | "drivers_license" | "passport";
+  idDoc: UploadedFile | null;
   // SIA
   siaLicenseNumber: string;
   siaLicenseLevel: string; // "" | "2" | "3" | "4"
@@ -39,7 +41,9 @@ type Form = {
   availability: { day: Day; period: Period }[];
 };
 
-const STEPS = ["Personal", "Right to work", "TX License & experience", "References & docs", "Availability", "Review"];
+const STEPS = ["Personal", "I-9 & Identity", "TX License & experience", "References & docs", "Availability", "Review"];
+
+const I9_FORM_URL = "https://www.uscis.gov/sites/default/files/document/forms/i-9.pdf";
 
 export function ApplyPage() {
   const [step, setStep] = useState(0);
@@ -50,7 +54,7 @@ export function ApplyPage() {
     firstName: "", lastName: "", email: "", phone: "",
     address: "", city: "", state: "", zip: "",
     dateOfBirth: "", cityOfBirth: "", stateOfBirth: "", niNumber: "",
-    rightToWorkStatus: "", rightToWorkDoc: null,
+    i9Doc: null, ssnCardDoc: null, idDocType: "", idDoc: null,
     siaLicenseNumber: "", siaLicenseLevel: "", siaLicenseExpiry: "",
     previousExperience: "", yearsExperience: "",
     references: [
@@ -93,6 +97,12 @@ export function ApplyPage() {
       if (!form.state) return "State is required.";
       if (!form.zip) return "ZIP code is required.";
     }
+    if (step === 1) {
+      if (!form.i9Doc) return "Please upload your completed Form I-9.";
+      if (!form.ssnCardDoc) return "Please upload a photo of your Social Security card.";
+      if (!form.idDocType) return "Please select your photo ID type (driver's license or passport).";
+      if (!form.idDoc) return "Please upload a photo of your driver's license or passport.";
+    }
     return true;
   }
 
@@ -113,8 +123,10 @@ export function ApplyPage() {
         cityOfBirth: form.cityOfBirth || null,
         stateOfBirth: form.stateOfBirth || null,
         niNumber: form.niNumber || null,
-        rightToWorkStatus: form.rightToWorkStatus || null,
-        rightToWorkDoc: form.rightToWorkDoc,
+        i9Doc: form.i9Doc,
+        ssnCardDoc: form.ssnCardDoc,
+        idDocType: form.idDocType || null,
+        idDoc: form.idDoc,
         siaLicenseNumber: form.siaLicenseNumber || null,
         siaLicenseLevel: form.siaLicenseLevel ? Number(form.siaLicenseLevel) : null,
         siaLicenseExpiry: form.siaLicenseExpiry || null,
@@ -191,25 +203,62 @@ export function ApplyPage() {
           )}
           {step === 1 && (
             <>
-              <h2 className="brand-wordmark text-xl">Right to work</h2>
-              <Field label="Status">
+              <h2 className="brand-wordmark text-xl">I-9 Employment Eligibility</h2>
+              <p className="text-sm text-muted-foreground">
+                Federal law requires every new hire to complete a Form I-9 and present
+                identity + work-authorization documents. Download the blank form, fill in
+                Section 1, sign it, and upload it below — plus a photo of your Social
+                Security card and either your driver's license or passport.
+              </p>
+              <div className="p-3 border rounded bg-amber-50 text-sm">
+                <a
+                  href={I9_FORM_URL}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="font-semibold underline text-amber-900"
+                >
+                  ↓ Download blank Form I-9 (USCIS)
+                </a>
+                <div className="text-xs text-amber-900/80 mt-1">
+                  Print, complete Section 1, sign and date, then scan or photograph all pages.
+                </div>
+              </div>
+              <FileUploadField
+                label="Completed Form I-9 (PDF or photos of all pages) *"
+                accept="image/*,.pdf"
+                value={form.i9Doc}
+                onChange={(v) => set("i9Doc", v)}
+                uploadFn={uploadFileAnon}
+              />
+              <FileUploadField
+                label="Social Security card (photo of front) *"
+                accept="image/*,.pdf"
+                value={form.ssnCardDoc}
+                onChange={(v) => set("ssnCardDoc", v)}
+                uploadFn={uploadFileAnon}
+              />
+              <Field label="Photo ID type *">
                 <select
                   className="w-full border rounded h-10 px-3 bg-background"
-                  value={form.rightToWorkStatus}
-                  onChange={(e) => set("rightToWorkStatus", e.target.value)}
+                  value={form.idDocType}
+                  onChange={(e) => set("idDocType", e.target.value as Form["idDocType"])}
                 >
                   <option value="">Select…</option>
-                  <option value="us_citizen">US Citizen</option>
-                  <option value="permanent_resident">Permanent Resident / Green Card</option>
-                  <option value="work_visa">Employment Authorization (EAD/Visa)</option>
-                  <option value="other">Other</option>
+                  <option value="drivers_license">Driver's License</option>
+                  <option value="passport">Passport</option>
                 </select>
               </Field>
               <FileUploadField
-                label="Right-to-work document (passport, driver's license, EAD, I-9 docs)"
+                label={
+                  form.idDocType === "passport"
+                    ? "Passport (photo of ID page) *"
+                    : form.idDocType === "drivers_license"
+                    ? "Driver's License (photo of front) *"
+                    : "Photo ID (select type above first) *"
+                }
                 accept="image/*,.pdf"
-                value={form.rightToWorkDoc}
-                onChange={(v) => set("rightToWorkDoc", v)}
+                value={form.idDoc}
+                onChange={(v) => set("idDoc", v)}
                 uploadFn={uploadFileAnon}
               />
             </>
@@ -302,7 +351,9 @@ export function ApplyPage() {
                 <Sum k="Phone" v={form.phone} />
                 <Sum k="DOB" v={form.dateOfBirth || "—"} />
                 <Sum k="SSN (last 4)" v={form.niNumber || "—"} />
-                <Sum k="Right-to-work" v={form.rightToWorkStatus || "—"} />
+                <Sum k="I-9 form" v={form.i9Doc ? form.i9Doc.name : "—"} />
+                <Sum k="SSN card" v={form.ssnCardDoc ? form.ssnCardDoc.name : "—"} />
+                <Sum k="Photo ID" v={form.idDoc ? `${form.idDocType === "passport" ? "Passport" : "DL"}: ${form.idDoc.name}` : "—"} />
                 <Sum k="TX license" v={form.siaLicenseNumber ? `${form.siaLicenseNumber} (L${form.siaLicenseLevel || "?"})` : "—"} />
                 <Sum k="Experience" v={form.yearsExperience ? `${form.yearsExperience} yrs` : "—"} />
                 <Sum k="Photo" v={form.photo ? form.photo.name : "—"} />

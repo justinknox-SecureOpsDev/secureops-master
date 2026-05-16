@@ -2128,7 +2128,39 @@ export const SubmitApplicationBody = zod.object({
       contentType: zod.string().optional(),
       size: zod.number().optional(),
     })
-    .nullish(),
+    .nullish()
+    .describe("Deprecated. Use i9Doc + ssnCardDoc + idDoc."),
+  i9Doc: zod
+    .object({
+      name: zod.string(),
+      objectPath: zod.string(),
+      contentType: zod.string().optional(),
+      size: zod.number().optional(),
+    })
+    .nullish()
+    .describe("Completed Form I-9."),
+  ssnCardDoc: zod
+    .object({
+      name: zod.string(),
+      objectPath: zod.string(),
+      contentType: zod.string().optional(),
+      size: zod.number().optional(),
+    })
+    .nullish()
+    .describe("Photo\/scan of Social Security card."),
+  idDocType: zod
+    .enum(["drivers_license", "passport"])
+    .nullish()
+    .describe("Which ID accompanies the SSN card."),
+  idDoc: zod
+    .object({
+      name: zod.string(),
+      objectPath: zod.string(),
+      contentType: zod.string().optional(),
+      size: zod.number().optional(),
+    })
+    .nullish()
+    .describe("Photo\/scan of driver's license OR passport."),
   siaLicenseNumber: zod.string().nullish(),
   siaLicenseLevel: zod
     .union([zod.literal(2), zod.literal(3), zod.literal(4)])
@@ -2237,6 +2269,10 @@ export const AdminListApplicationsResponseItem = zod.object({
   niNumber: zod.string().nullish(),
   rightToWorkStatus: zod.string().nullish(),
   rightToWorkDocKey: zod.string().nullish(),
+  i9DocKey: zod.string().nullish(),
+  ssnCardDocKey: zod.string().nullish(),
+  idDocType: zod.enum(["drivers_license", "passport"]).nullish(),
+  idDocKey: zod.string().nullish(),
   siaLicenseNumber: zod.string().nullish(),
   siaLicenseLevel: zod.number().nullish(),
   siaLicenseExpiry: zod.string().nullish(),
@@ -2307,6 +2343,10 @@ export const AdminGetApplicationResponse = zod.object({
   niNumber: zod.string().nullish(),
   rightToWorkStatus: zod.string().nullish(),
   rightToWorkDocKey: zod.string().nullish(),
+  i9DocKey: zod.string().nullish(),
+  ssnCardDocKey: zod.string().nullish(),
+  idDocType: zod.enum(["drivers_license", "passport"]).nullish(),
+  idDocKey: zod.string().nullish(),
   siaLicenseNumber: zod.string().nullish(),
   siaLicenseLevel: zod.number().nullish(),
   siaLicenseExpiry: zod.string().nullish(),
@@ -2378,6 +2418,10 @@ export const AdminMarkApplicationUnderReviewResponse = zod.object({
   niNumber: zod.string().nullish(),
   rightToWorkStatus: zod.string().nullish(),
   rightToWorkDocKey: zod.string().nullish(),
+  i9DocKey: zod.string().nullish(),
+  ssnCardDocKey: zod.string().nullish(),
+  idDocType: zod.enum(["drivers_license", "passport"]).nullish(),
+  idDocKey: zod.string().nullish(),
   siaLicenseNumber: zod.string().nullish(),
   siaLicenseLevel: zod.number().nullish(),
   siaLicenseExpiry: zod.string().nullish(),
@@ -2449,6 +2493,10 @@ export const AdminRejectApplicationResponse = zod.object({
   niNumber: zod.string().nullish(),
   rightToWorkStatus: zod.string().nullish(),
   rightToWorkDocKey: zod.string().nullish(),
+  i9DocKey: zod.string().nullish(),
+  ssnCardDocKey: zod.string().nullish(),
+  idDocType: zod.enum(["drivers_license", "passport"]).nullish(),
+  idDocKey: zod.string().nullish(),
   siaLicenseNumber: zod.string().nullish(),
   siaLicenseLevel: zod.number().nullish(),
   siaLicenseExpiry: zod.string().nullish(),
@@ -2521,6 +2569,10 @@ export const AdminApproveApplicationResponse = zod.object({
     niNumber: zod.string().nullish(),
     rightToWorkStatus: zod.string().nullish(),
     rightToWorkDocKey: zod.string().nullish(),
+    i9DocKey: zod.string().nullish(),
+    ssnCardDocKey: zod.string().nullish(),
+    idDocType: zod.enum(["drivers_license", "passport"]).nullish(),
+    idDocKey: zod.string().nullish(),
     siaLicenseNumber: zod.string().nullish(),
     siaLicenseLevel: zod.number().nullish(),
     siaLicenseExpiry: zod.string().nullish(),
