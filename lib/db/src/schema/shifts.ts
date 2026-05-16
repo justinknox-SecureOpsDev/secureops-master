@@ -1,4 +1,4 @@
-import { pgTable, text, uuid, timestamp, boolean, numeric, integer } from "drizzle-orm/pg-core";
+import { pgTable, text, uuid, timestamp, boolean, numeric, integer, index } from "drizzle-orm/pg-core";
 import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod/v4";
 import { sitesTable } from "./sites";
@@ -28,7 +28,10 @@ export const shiftsTable = pgTable("shifts", {
   notes: text("notes"),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow().$onUpdate(() => new Date()),
-});
+}, (t) => ({
+  siteStartIdx: index("shifts_site_start_idx").on(t.siteId, t.startTime),
+  startIdx: index("shifts_start_idx").on(t.startTime),
+}));
 
 export const insertShiftSchema = createInsertSchema(shiftsTable).omit({ id: true, createdAt: true, updatedAt: true });
 export type InsertShift = z.infer<typeof insertShiftSchema>;

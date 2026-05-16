@@ -11,6 +11,7 @@ import { ApplyPage } from "@/pages/Apply";
 import { OnboardPage } from "@/pages/Onboard";
 import { ResetPasswordPage } from "@/pages/ResetPassword";
 import { AmendApplication } from "@/pages/AmendApplication";
+import { PrivacyPage, TermsPage, DataRightsPage } from "@/pages/Legal";
 import { ApplicationsPage } from "@/pages/Applications";
 import { OnboardingPage } from "@/pages/Onboarding";
 import { PoliciesPage } from "@/pages/Policies";
@@ -30,6 +31,9 @@ function Routed() {
   if (location.startsWith("/onboard/")) return <OnboardPage />;
   if (location.startsWith("/reset-password/")) return <ResetPasswordPage />;
   if (location.startsWith("/amend/")) return <AmendApplication />;
+  if (location === "/privacy") return <PrivacyPage />;
+  if (location === "/terms") return <TermsPage />;
+  if (location === "/data-rights") return <DataRightsPage />;
 
   if (loading) {
     return (

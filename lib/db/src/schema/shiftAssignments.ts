@@ -1,4 +1,4 @@
-import { pgTable, text, uuid, timestamp, uniqueIndex } from "drizzle-orm/pg-core";
+import { pgTable, text, uuid, timestamp, uniqueIndex, index } from "drizzle-orm/pg-core";
 import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod/v4";
 import { shiftsTable } from "./shifts";
@@ -13,6 +13,8 @@ export const shiftAssignmentsTable = pgTable("shift_assignments", {
   updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow().$onUpdate(() => new Date()),
 }, (t) => ({
   shiftEmployeeUnique: uniqueIndex("shift_assignments_shift_employee_unique").on(t.shiftId, t.employeeId),
+  shiftStatusIdx: index("shift_assignments_shift_status_idx").on(t.shiftId, t.status),
+  employeeIdx: index("shift_assignments_employee_idx").on(t.employeeId),
 }));
 
 export const insertShiftAssignmentSchema = createInsertSchema(shiftAssignmentsTable).omit({ id: true, createdAt: true, updatedAt: true });

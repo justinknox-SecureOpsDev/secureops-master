@@ -3,11 +3,56 @@ import { Link, useRoute, useLocation } from "wouter";
 import {
   LogOut, ClipboardList, UserPlus, FileText, ChevronsLeft, ChevronsRight,
   Database, Banknote, ChevronDown, ChevronRight, Receipt, Wallet, MailPlus,
+  AlertTriangle,
   type LucideIcon,
 } from "lucide-react";
 import { TABLES } from "@/lib/tables";
 import { useAuth } from "@/lib/auth";
 import { Button } from "@/components/ui/button";
+
+type SystemStatus = {
+  env: string;
+  smtpConfigured: boolean;
+  sessionSecretOk: boolean;
+  baseUrlConfigured: boolean;
+  corsOriginsConfigured: boolean;
+};
+
+function useSystemStatus() {
+  const [status, setStatus] = useState<SystemStatus | null>(null);
+  useEffect(() => {
+    let cancelled = false;
+    const token = (() => { try { return localStorage.getItem("wcsg.adminToken") || ""; } catch { return ""; } })();
+    if (!token) return;
+    fetch("/api/admin/system/status", { headers: { Authorization: `Bearer ${token}` } })
+      .then((r) => (r.ok ? r.json() : null))
+      .then((data) => { if (!cancelled && data) setStatus(data); })
+      .catch(() => { /* ignore */ });
+    return () => { cancelled = true; };
+  }, []);
+  return status;
+}
+
+function SystemBanner({ status }: { status: SystemStatus | null }) {
+  if (!status) return null;
+  const issues: string[] = [];
+  if (!status.smtpConfigured) issues.push("Email is not configured — invite, onboarding, password-reset and amendment links will NOT be sent automatically.");
+  if (!status.baseUrlConfigured) issues.push("APP_BASE_URL / REPLIT_DOMAINS is not set — outgoing email links cannot be built.");
+  if (!status.corsOriginsConfigured) issues.push("CORS origins are not configured — browser clients will be blocked in production.");
+  if (!status.sessionSecretOk) issues.push("SESSION_SECRET is missing or too short — sessions are insecure.");
+  if (issues.length === 0) return null;
+  return (
+    <div className="bg-amber-100 border-b border-amber-300 text-amber-900 text-xs px-4 py-2 flex items-start gap-2">
+      <AlertTriangle className="w-4 h-4 mt-0.5 shrink-0" />
+      <div>
+        <div className="font-semibold">Action required — degraded configuration ({status.env}).</div>
+        <ul className="list-disc pl-5 mt-1 space-y-0.5">
+          {issues.map((i) => <li key={i}>{i}</li>)}
+        </ul>
+      </div>
+    </div>
+  );
+}
 
 const COLLAPSE_KEY = "wcsg.sidebarCollapsed";
 const SECTIONS_KEY = "wcsg.sidebarSections";
@@ -22,6 +67,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   const [match, params] = useRoute("/tables/:table");
   const [location] = useLocation();
   const activeTable = match ? params?.table : null;
+  const systemStatus = useSystemStatus();
 
   const [collapsed, setCollapsed] = useState<boolean>(() => {
     try { return localStorage.getItem(COLLAPSE_KEY) === "1"; } catch { return false; }
@@ -219,6 +265,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
         </div>
       </aside>
       <main className="flex-1 overflow-hidden flex flex-col">
+        <SystemBanner status={systemStatus} />
         {children}
       </main>
     </div>

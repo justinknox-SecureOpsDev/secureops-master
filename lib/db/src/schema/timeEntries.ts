@@ -1,4 +1,4 @@
-import { pgTable, text, uuid, timestamp, boolean, numeric } from "drizzle-orm/pg-core";
+import { pgTable, text, uuid, timestamp, boolean, numeric, index } from "drizzle-orm/pg-core";
 import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod/v4";
 import { shiftsTable } from "./shifts";
@@ -27,7 +27,11 @@ export const timeEntriesTable = pgTable("time_entries", {
   notes: text("notes"),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow().$onUpdate(() => new Date()),
-});
+}, (t) => ({
+  employeeClockInIdx: index("time_entries_employee_clockin_idx").on(t.employeeId, t.clockInTime),
+  approvalIdx: index("time_entries_approval_idx").on(t.approvalStatus),
+  siteIdx: index("time_entries_site_idx").on(t.siteId),
+}));
 
 export const insertTimeEntrySchema = createInsertSchema(timeEntriesTable).omit({ id: true, createdAt: true, updatedAt: true });
 export type InsertTimeEntry = z.infer<typeof insertTimeEntrySchema>;

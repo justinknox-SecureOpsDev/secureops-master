@@ -1,7 +1,7 @@
 import React, { useState } from "react";
 import {
   View, Text, TextInput, TouchableOpacity,
-  StyleSheet, ActivityIndicator, Image,
+  StyleSheet, ActivityIndicator, Image, Linking,
 } from "react-native";
 import { useRouter } from "expo-router";
 import { useAuth } from "@/contexts/AuthContext";
@@ -121,12 +121,38 @@ export default function LoginScreen() {
           </TouchableOpacity>
         </View>
 
+        <View style={styles.legalRow}>
+          <TouchableOpacity onPress={() => Linking.openURL(legalUrl("privacy"))}>
+            <Text style={[styles.legalLink, { color: colors.mutedForeground }]}>Privacy</Text>
+          </TouchableOpacity>
+          <Text style={[styles.legalDot, { color: colors.mutedForeground }]}>·</Text>
+          <TouchableOpacity onPress={() => Linking.openURL(legalUrl("terms"))}>
+            <Text style={[styles.legalLink, { color: colors.mutedForeground }]}>Terms</Text>
+          </TouchableOpacity>
+          <Text style={[styles.legalDot, { color: colors.mutedForeground }]}>·</Text>
+          <TouchableOpacity onPress={() => Linking.openURL(legalUrl("data-rights"))}>
+            <Text style={[styles.legalLink, { color: colors.mutedForeground }]}>Your data rights</Text>
+          </TouchableOpacity>
+        </View>
+
         <Text style={[styles.footer, { color: colors.mutedForeground }]}>
           © Williams Council Security Group
         </Text>
       </View>
     </SafeAreaView>
   );
+}
+
+function legalUrl(slug: "privacy" | "terms" | "data-rights"): string {
+  // Hosted on the admin-portal artifact under /admin-portal/<slug>.
+  // Resolve from EXPO_PUBLIC_API_BASE_URL when available; fall back to the
+  // production wcsg domain so the links work in built clients too.
+  const base =
+    process.env.EXPO_PUBLIC_API_BASE_URL?.replace(/\/+$/, "") ||
+    "https://secureops.williamscouncilsecurity.com";
+  // Strip trailing /api if the env var pointed at the API root.
+  const root = base.replace(/\/api$/, "");
+  return `${root}/admin-portal/${slug}`;
 }
 
 const styles = StyleSheet.create({
@@ -248,5 +274,21 @@ const styles = StyleSheet.create({
     textAlign: "center",
     fontSize: 11,
     letterSpacing: 1,
+  },
+  legalRow: {
+    flexDirection: "row",
+    justifyContent: "center",
+    alignItems: "center",
+    gap: 8,
+    marginTop: 4,
+  },
+  legalLink: {
+    fontSize: 11,
+    letterSpacing: 0.5,
+    textDecorationLine: "underline",
+  },
+  legalDot: {
+    fontSize: 11,
+    opacity: 0.5,
   },
 });

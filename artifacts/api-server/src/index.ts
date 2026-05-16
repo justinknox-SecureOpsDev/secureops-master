@@ -22,6 +22,29 @@ attachWebSocketServer(server);
 
 server.listen(port, () => {
   logger.info({ port }, "Server listening");
+  // Production startup checks — surface degraded-mode configuration loudly
+  // so operators notice on the very first deploy log instead of after a
+  // user-facing failure (e.g. invite emails silently not being sent).
+  if (process.env.NODE_ENV === "production") {
+    const smtpOk = Boolean(
+      process.env.SMTP_HOST && process.env.SMTP_PORT && process.env.SMTP_USER && process.env.SMTP_PASS,
+    );
+    if (!smtpOk) {
+      logger.error(
+        "SMTP is not configured in production. Invite, onboarding, password-reset and amendment emails will NOT be sent. Set SMTP_HOST, SMTP_PORT, SMTP_USER, SMTP_PASS (and optionally SMTP_FROM) to enable email delivery.",
+      );
+    }
+    if (!process.env.APP_BASE_URL && !process.env.REPLIT_DOMAINS) {
+      logger.error(
+        "Neither APP_BASE_URL nor REPLIT_DOMAINS is set. Password-reset, onboarding and amendment links cannot be built — emails relying on those URLs will be skipped.",
+      );
+    }
+    if (!process.env.ALLOWED_ORIGINS && !process.env.REPLIT_DOMAINS) {
+      logger.error(
+        "No CORS origins configured (ALLOWED_ORIGINS / REPLIT_DOMAINS). Browser clients will be blocked.",
+      );
+    }
+  }
 });
 
 seedPolicies()

@@ -2,6 +2,7 @@ import { Router, type IRouter } from "express";
 import { eq, isNull, and, sql, desc } from "drizzle-orm";
 import { db, usersTable, timeEntriesTable, shiftsTable, sitesTable, incidentsTable } from "@workspace/db";
 import { requireAuth, requireAdmin } from "../middlewares/auth";
+import { emergencyLimiter } from "../middlewares/rateLimit";
 import { sendPushToUsers } from "../lib/push";
 
 const router: IRouter = Router();
@@ -61,7 +62,7 @@ router.get("/admin/active-officers", requireAdmin, async (req, res): Promise<voi
 
 // POST /emergency — officer triggers panic alert. Creates a critical incident
 // and pushes to every admin. Returns the incident + the recommended phone number.
-router.post("/emergency", requireAuth, async (req, res): Promise<void> => {
+router.post("/emergency", requireAuth, emergencyLimiter, async (req, res): Promise<void> => {
   const me = req.user!.userId;
   const { lat, lng, message } = (req.body ?? {}) as { lat?: number; lng?: number; message?: string };
 

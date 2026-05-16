@@ -87,6 +87,11 @@ export function LoginPage() {
             Admin access only. Employees use the SecureOps mobile app.
           </p>
         </form>
+        <div className="text-center text-[11px] text-white/50 mt-4 space-x-3">
+          <a href={`${import.meta.env.BASE_URL}privacy`} className="hover:text-white/80 underline">Privacy</a>
+          <a href={`${import.meta.env.BASE_URL}terms`} className="hover:text-white/80 underline">Terms</a>
+          <a href={`${import.meta.env.BASE_URL}data-rights`} className="hover:text-white/80 underline">Your data rights</a>
+        </div>
       </div>
       <div className="absolute bottom-3 left-0 right-0 text-center text-[10px] text-white/40 select-none">
         v1.0 beta · © {new Date().getFullYear()} Williams Council Security Group

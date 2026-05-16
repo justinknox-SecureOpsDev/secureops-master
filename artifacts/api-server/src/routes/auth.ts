@@ -3,8 +3,8 @@ import bcrypt from "bcryptjs";
 import { randomBytes } from "crypto";
 import { and, eq, sql } from "drizzle-orm";
 import { z } from "zod/v4";
-import { db, usersTable, employeesTable, passwordResetTokensTable } from "@workspace/db";
-import { requireAuth, signToken } from "../middlewares/auth";
+import { db, usersTable, employeesTable, passwordResetTokensTable, revokedTokensTable } from "@workspace/db";
+import { requireAuth, signToken, tokenTtlSeconds } from "../middlewares/auth";
 import {
   forgotPasswordEmailLimiter,
   forgotPasswordIpLimiter,
@@ -138,7 +138,35 @@ router.post("/auth/login", loginIpLimiter, loginEmailLimiter, async (req, res): 
   res.json({ token, user: userPayload(user) });
 });
 
-router.post("/auth/logout", (_req, res): void => {
+// Best-effort revoke the bearer's jti so the token cannot be reused even if it
+// remains in client storage / a stolen device. Always responds 200 to avoid
+// leaking auth state to unauthenticated callers.
+router.post("/auth/logout", async (req, res): Promise<void> => {
+  const authHeader = req.headers.authorization;
+  if (authHeader?.startsWith("Bearer ")) {
+    try {
+      const jwtMod = await import("jsonwebtoken");
+      const decoded = jwtMod.default.decode(authHeader.slice(7)) as
+        | { jti?: string; userId?: string; exp?: number }
+        | null;
+      if (decoded?.jti && decoded.userId) {
+        const expiresAt = new Date((decoded.exp ?? Math.floor(Date.now() / 1000) + tokenTtlSeconds()) * 1000);
+        await db
+          .insert(revokedTokensTable)
+          .values({ jti: decoded.jti, userId: decoded.userId, reason: "logout", expiresAt })
+          .onConflictDoNothing();
+      }
+    } catch (err) {
+      req.log.warn({ err }, "Logout revoke failed (token unparseable)");
+    }
+  }
+  res.json({ success: true });
+});
+
+// Authenticated "log out from all devices" — bumps the user's
+// tokens_valid_after watermark so every existing JWT is rejected.
+router.post("/auth/logout-all", requireAuth, async (req, res): Promise<void> => {
+  await db.update(usersTable).set({ tokensValidAfter: new Date() }).where(eq(usersTable.id, req.user!.userId));
   res.json({ success: true });
 });
 

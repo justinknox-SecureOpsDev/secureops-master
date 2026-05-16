@@ -18,6 +18,9 @@ export const usersTable = pgTable("users", {
   tempPasswordPlain: text("temp_password_plain"),
   tempPasswordSetAt: timestamp("temp_password_set_at", { withTimezone: true }),
   invitedAt: timestamp("invited_at", { withTimezone: true }),
+  // Sessions issued before this timestamp are rejected. Bumped on
+  // self-logout-all-devices and admin "revoke all sessions" actions.
+  tokensValidAfter: timestamp("tokens_valid_after", { withTimezone: true }).notNull().defaultNow(),
   expoPushToken: text("expo_push_token"),
   lastLat: numeric("last_lat", { precision: 10, scale: 6 }),
   lastLng: numeric("last_lng", { precision: 10, scale: 6 }),

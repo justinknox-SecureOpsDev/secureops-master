@@ -2,7 +2,7 @@ import { WebSocket, WebSocketServer } from "ws";
 import type { IncomingMessage } from "http";
 import type { Server } from "http";
 import { eq } from "drizzle-orm";
-import { db, usersTable } from "@workspace/db";
+import { db, usersTable, revokedTokensTable } from "@workspace/db";
 import { verifyToken } from "../middlewares/auth";
 import { logger } from "./logger";
 
@@ -82,7 +82,7 @@ export function attachWebSocketServer(server: Server) {
 
     if (!token) { ws.close(1008, "Token required"); return; }
 
-    let payload: { userId: string; role: string; email: string } | null = null;
+    let payload: { userId: string; role: string; email: string; jti?: string; iat?: number } | null = null;
     try {
       payload = verifyToken(token);
     } catch {
@@ -93,16 +93,41 @@ export function attachWebSocketServer(server: Server) {
     const tokenPayload = payload;
 
     // Re-validate against current DB state so stale tokens from deactivated or
-    // demoted accounts cannot open a WebSocket session. All event handlers are
-    // registered inside the .then() callback so the socket is never added to
-    // `connections` if it closed before the query returned.
-    db.select({ id: usersTable.id, role: usersTable.role, status: usersTable.status })
-      .from(usersTable)
-      .where(eq(usersTable.id, tokenPayload.userId))
-      .limit(1)
-      .then(([user]) => {
+    // demoted accounts cannot open a WebSocket session. We also enforce the
+    // same revocation semantics as the HTTP requireAuth middleware:
+    //   - tokens_valid_after watermark (logout-all / admin revoke-sessions)
+    //   - revoked_tokens jti lookup (single-session logout)
+    // Without these, a revoked JWT would still establish a long-lived WS
+    // and continue receiving chat / live-ops broadcasts until token expiry.
+    Promise.all([
+      db.select({
+        id: usersTable.id,
+        role: usersTable.role,
+        status: usersTable.status,
+        tokensValidAfter: usersTable.tokensValidAfter,
+      })
+        .from(usersTable)
+        .where(eq(usersTable.id, tokenPayload.userId))
+        .limit(1),
+      tokenPayload.jti
+        ? db.select({ jti: revokedTokensTable.jti })
+            .from(revokedTokensTable)
+            .where(eq(revokedTokensTable.jti, tokenPayload.jti))
+            .limit(1)
+        : Promise.resolve([] as { jti: string }[]),
+    ])
+      .then(([[user], revokedRows]) => {
         if (!user || user.status !== "active") {
           ws.close(1008, "Account is not active");
+          return;
+        }
+        const iatMs = (tokenPayload.iat ?? 0) * 1000;
+        if (iatMs < user.tokensValidAfter.getTime()) {
+          ws.close(1008, "Session was revoked");
+          return;
+        }
+        if (revokedRows.length > 0) {
+          ws.close(1008, "Session was revoked");
           return;
         }
 

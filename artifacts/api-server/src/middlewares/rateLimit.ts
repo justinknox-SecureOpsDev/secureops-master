@@ -125,3 +125,51 @@ export const applicationUploadLimiter: RateLimitRequestHandler = makeLimiter({
   keyBy: "ip",
   tag: "au",
 });
+
+// POST /applications — fully public application submit. 5 per IP per hour
+// is generous for legitimate applicants but stops bot-driven spam.
+const APPLICATION_SUBMIT_PER_IP_MAX = envInt("APPLICATION_SUBMIT_RATE_LIMIT_MAX", 5);
+const HOUR_MS = 60 * 60 * 1000;
+
+export const publicApplicationLimiter: RateLimitRequestHandler = rateLimit({
+  windowMs: HOUR_MS,
+  limit: APPLICATION_SUBMIT_PER_IP_MAX,
+  standardHeaders: true,
+  legacyHeaders: false,
+  handler: tooMany,
+  keyGenerator: (req) => `pa:ip:${ipKeyGenerator(req.ip ?? "")}`,
+});
+
+// GET / POST /onboarding/:token, GET / POST /applications/amend/:token —
+// public token-based endpoints. Cap per-IP to slow brute-force token
+// guessing while leaving plenty of headroom for legitimate retries.
+const TOKEN_LOOKUP_PER_IP_MAX = envInt("TOKEN_LOOKUP_RATE_LIMIT_MAX", 60);
+const FIVE_MIN_MS = 5 * 60 * 1000;
+
+export const tokenLookupLimiter: RateLimitRequestHandler = rateLimit({
+  windowMs: FIVE_MIN_MS,
+  limit: TOKEN_LOOKUP_PER_IP_MAX,
+  standardHeaders: true,
+  legacyHeaders: false,
+  handler: tooMany,
+  keyGenerator: (req) => `tk:ip:${ipKeyGenerator(req.ip ?? "")}`,
+});
+
+// POST /emergency — authenticated, but rate-limited per user to prevent
+// runaway loops or malicious flooding from spamming admin push channels.
+// Keyed by userId; falls back to IP if somehow unauthenticated.
+const EMERGENCY_PER_USER_MAX = envInt("EMERGENCY_RATE_LIMIT_MAX", 5);
+const ONE_MIN_MS = 60 * 1000;
+
+export const emergencyLimiter: RateLimitRequestHandler = rateLimit({
+  windowMs: ONE_MIN_MS,
+  limit: EMERGENCY_PER_USER_MAX,
+  standardHeaders: true,
+  legacyHeaders: false,
+  handler: tooMany,
+  keyGenerator: (req) => {
+    const uid = req.user?.userId;
+    if (uid) return `em:u:${uid}`;
+    return `em:ip:${ipKeyGenerator(req.ip ?? "")}`;
+  },
+});

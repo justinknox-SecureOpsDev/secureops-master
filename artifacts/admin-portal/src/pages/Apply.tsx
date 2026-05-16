@@ -323,6 +323,14 @@ export function ApplyPage() {
             )}
           </div>
         </div>
+        <p className="text-[11px] text-muted-foreground text-center pt-6">
+          By submitting you agree to our{" "}
+          <a href={`${import.meta.env.BASE_URL}terms`} className="underline hover:text-foreground">Terms</a>{" "}
+          and acknowledge our{" "}
+          <a href={`${import.meta.env.BASE_URL}privacy`} className="underline hover:text-foreground">Privacy Policy</a>.{" "}
+          See your{" "}
+          <a href={`${import.meta.env.BASE_URL}data-rights`} className="underline hover:text-foreground">data rights</a>.
+        </p>
       </main>
     </div>
   );

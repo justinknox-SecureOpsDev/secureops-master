@@ -17,3 +17,4 @@ export * from "./applicationAmendmentTokens";
 export * from "./passwordResetTokens";
 export * from "./onboardingSubmissions";
 export * from "./policies";
+export * from "./revokedTokens";

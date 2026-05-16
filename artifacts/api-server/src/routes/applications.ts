@@ -13,6 +13,7 @@ import {
   applicationAmendmentTokensTable,
   policiesTable,
 } from "@workspace/db";
+import { publicApplicationLimiter, tokenLookupLimiter } from "../middlewares/rateLimit";
 import { ObjectStorageService } from "../lib/objectStorage";
 import {
   SubmitApplicationBody,
@@ -157,7 +158,7 @@ function rowToApplication(r: ApplicationRow) {
 
 // ---- Public: submit application -------------------------------------------
 
-router.post("/applications", async (req, res): Promise<void> => {
+router.post("/applications", publicApplicationLimiter, async (req, res): Promise<void> => {
   const parsed = SubmitApplicationBody.safeParse(req.body);
   if (!parsed.success) {
     res.status(400).json({ error: "Bad Request", message: parsed.error.message });
@@ -576,7 +577,7 @@ async function resolveValidAmendmentToken(token: string) {
   return { token: t } as const;
 }
 
-router.get("/applications/amend/:token", async (req, res): Promise<void> => {
+router.get("/applications/amend/:token", tokenLookupLimiter, async (req, res): Promise<void> => {
   const result = await resolveValidAmendmentToken(req.params.token as string);
   if ("error" in result) { res.status(404).json({ error: "Not Found", message: result.error }); return; }
   const t = result.token;
@@ -605,7 +606,7 @@ router.get("/applications/amend/:token", async (req, res): Promise<void> => {
   });
 });
 
-router.post("/applications/amend/:token", async (req, res): Promise<void> => {
+router.post("/applications/amend/:token", tokenLookupLimiter, async (req, res): Promise<void> => {
   const result = await resolveValidAmendmentToken(req.params.token as string);
   if ("error" in result) { res.status(404).json({ error: "Not Found", message: result.error }); return; }
   const t = result.token;
@@ -705,7 +706,7 @@ async function resolveValidToken(token: string) {
   return { token: t } as const;
 }
 
-router.get("/onboarding/:token", async (req, res): Promise<void> => {
+router.get("/onboarding/:token", tokenLookupLimiter, async (req, res): Promise<void> => {
   const result = await resolveValidToken(req.params.token as string);
   if ("error" in result) { res.status(404).json({ error: "Not Found", message: result.error }); return; }
   const t = result.token;
@@ -747,7 +748,7 @@ router.get("/onboarding/:token", async (req, res): Promise<void> => {
   });
 });
 
-router.post("/onboarding/:token", async (req, res): Promise<void> => {
+router.post("/onboarding/:token", tokenLookupLimiter, async (req, res): Promise<void> => {
   const result = await resolveValidToken(req.params.token as string);
   if ("error" in result) { res.status(404).json({ error: "Not Found", message: result.error }); return; }
   const t = result.token;
