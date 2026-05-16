@@ -359,15 +359,19 @@ router.get("/admin/compliance", requireAdmin, async (req, res): Promise<void> =>
     const expiringSoon = certs
       .filter((c) => c.expiryDate && c.expiryDate <= horizon)
       .map((c) => ({ id: c.id, type: c.type, title: c.title, expiryDate: c.expiryDate }));
+    const maxLicenseLevel = maxLevelByOfficer.get(o.id) ?? null;
+    // An officer can't be "compliant" without a valid (unexpired) license
+    // on file — otherwise officers with no license info at all were showing
+    // green when no site (or a no-training-requirement site) was selected.
     return {
       employeeId: o.id,
       employeeName: [o.firstName, o.lastName].filter(Boolean).join(" ") || o.email,
       employeeEmail: o.email,
-      maxLicenseLevel: maxLevelByOfficer.get(o.id) ?? null,
+      maxLicenseLevel,
       heldTrainings: [...held],
       missingTrainings: missing,
       expiringSoon,
-      compliant: missing.length === 0,
+      compliant: maxLicenseLevel != null && missing.length === 0,
     };
   });
 
