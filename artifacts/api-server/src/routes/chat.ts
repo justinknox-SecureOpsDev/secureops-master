@@ -101,8 +101,9 @@ function directKeyFor(a: string, b: string): string {
 router.get("/chat/rooms", requireAuth, async (req, res): Promise<void> => {
   await ensureGeneralRoom();
   const me = req.user!.userId;
+  const myRole = req.user!.role;
 
-  const rooms = await db
+  const candidates = await db
     .select()
     .from(chatRoomsTable)
     .where(or(
@@ -110,6 +111,16 @@ router.get("/chat/rooms", requireAuth, async (req, res): Promise<void> => {
       sql`${chatRoomsTable.directKey} LIKE ${"%" + me + "%"}`,
     ))
     .orderBy(asc(chatRoomsTable.createdAt));
+
+  // Filter to rooms the user is actually authorized to enter. Without this,
+  // employees see shift rooms they aren't assigned to in their chat list,
+  // tap one, and get a 403 "not a member" from the messages endpoint. Uses
+  // the same isAuthorizedForRoom check as GET /chat/rooms/:id/messages so
+  // the list can never drift from the membership rule.
+  const authChecks = await Promise.all(
+    candidates.map((room) => isAuthorizedForRoom(me, myRole, room)),
+  );
+  const rooms = candidates.filter((_, i) => authChecks[i]);
 
   const enriched = await Promise.all(
     rooms.map(async (room) => {
