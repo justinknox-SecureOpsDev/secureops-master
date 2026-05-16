@@ -51,5 +51,5 @@ packages = ["yakut"]
 
 [userenv.production]
 SEED_DEMO_USERS = "false"
-APP_BASE_URL = "https://secureops.williamscouncilsg.com"
-ALLOWED_ORIGINS = "https://secureops.williamscouncilsg.com"
+APP_BASE_URL = "https://security-operations-suite.replit.app"
+ALLOWED_ORIGINS = "https://security-operations-suite.replit.app,https://secureops.williamscouncilsg.com"
