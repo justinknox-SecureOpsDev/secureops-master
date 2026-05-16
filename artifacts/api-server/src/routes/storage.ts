@@ -7,7 +7,7 @@ import {
 import { ObjectStorageService, ObjectNotFoundError } from "../lib/objectStorage";
 import { requireAdmin, requireAuth } from "../middlewares/auth";
 import { uploadUrlLimiter, applicationUploadLimiter } from "../middlewares/rateLimit";
-import { db, employeesTable, incidentsTable } from "@workspace/db";
+import { db, employeesTable, incidentsTable, licenseRenewalRequestsTable } from "@workspace/db";
 import { eq } from "drizzle-orm";
 
 /**
@@ -244,6 +244,17 @@ router.get("/me/storage/sign", requireAuth, async (req: Request, res: Response) 
           if (typeof k === "string" && k.startsWith(ownedPrefix)) owned.add(k);
         }
       }
+    }
+
+    // Also allow signing the doc attached to the caller's own license-renewal
+    // submissions, again only when the path is under their bound upload
+    // prefix (the create endpoint enforces this).
+    const myRenewals = await db
+      .select({ docKey: licenseRenewalRequestsTable.docKey })
+      .from(licenseRenewalRequestsTable)
+      .where(eq(licenseRenewalRequestsTable.employeeId, req.user!.userId));
+    for (const r of myRenewals) {
+      if (typeof r.docKey === "string" && r.docKey.startsWith(ownedPrefix)) owned.add(r.docKey);
     }
 
     if (!owned.has(path)) {

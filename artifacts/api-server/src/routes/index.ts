@@ -22,6 +22,7 @@ import auditRouter from "./audit";
 import myPayrollRouter from "./myPayroll";
 import shiftSwapsRouter from "./shiftSwaps";
 import totpRouter from "./totp";
+import licenseRenewalsRouter from "./licenseRenewals";
 import { auditLogMiddleware } from "../lib/auditLog";
 
 const router: IRouter = Router();
@@ -54,5 +55,6 @@ router.use(auditRouter);
 router.use(myPayrollRouter);
 router.use(shiftSwapsRouter);
 router.use(totpRouter);
+router.use(licenseRenewalsRouter);
 
 export default router;

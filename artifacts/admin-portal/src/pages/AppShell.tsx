@@ -3,7 +3,7 @@ import { Link, useRoute, useLocation } from "wouter";
 import {
   LogOut, ClipboardList, UserPlus, FileText, ChevronsLeft, ChevronsRight,
   Database, Banknote, ChevronDown, ChevronRight, Receipt, Wallet, MailPlus,
-  AlertTriangle, ShieldCheck, Repeat, KeyRound,
+  AlertTriangle, ShieldCheck, Repeat, KeyRound, IdCard,
   type LucideIcon,
 } from "lucide-react";
 import { TABLES } from "@/lib/tables";
@@ -94,6 +94,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
     { href: "/hr/applications", label: "Applications", Icon: ClipboardList },
     { href: "/hr/onboarding", label: "Onboarding", Icon: UserPlus },
     { href: "/hr/invitations", label: "Invitations", Icon: MailPlus },
+    { href: "/hr/license-renewals", label: "License renewals", Icon: IdCard },
     { href: "/hr/policies", label: "Policies", Icon: FileText },
   ];
 
