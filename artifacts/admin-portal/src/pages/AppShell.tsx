@@ -2,7 +2,7 @@ import { useState, useEffect } from "react";
 import { Link, useRoute, useLocation } from "wouter";
 import {
   LogOut, ClipboardList, UserPlus, FileText, ChevronsLeft, ChevronsRight,
-  Database, Banknote, ChevronDown, ChevronRight, Receipt, Wallet,
+  Database, Banknote, ChevronDown, ChevronRight, Receipt, Wallet, MailPlus,
   type LucideIcon,
 } from "lucide-react";
 import { TABLES } from "@/lib/tables";
@@ -47,6 +47,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   const hrLinks: LinkItem[] = [
     { href: "/hr/applications", label: "Applications", Icon: ClipboardList },
     { href: "/hr/onboarding", label: "Onboarding", Icon: UserPlus },
+    { href: "/hr/invitations", label: "Invitations", Icon: MailPlus },
     { href: "/hr/policies", label: "Policies", Icon: FileText },
     { href: "/integrations/monday", label: "Monday Sync", Icon: Database },
   ];

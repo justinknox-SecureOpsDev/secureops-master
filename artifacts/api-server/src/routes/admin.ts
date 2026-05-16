@@ -29,7 +29,7 @@ import {
   insertLicenseSchema,
 } from "@workspace/db";
 import { requireAdmin } from "../middlewares/auth";
-import { sendEmail, renderPasswordResetEmail } from "../lib/email";
+import { sendEmail, renderPasswordResetEmail, renderInviteEmail } from "../lib/email";
 
 const router: IRouter = Router();
 
@@ -676,7 +676,13 @@ router.get("/admin/tables/:table", requireAdmin, async (req, res): Promise<void>
     db.select({ count: sql<number>`count(*)::int` }).from(cfg.table).where(where),
   ]);
 
-  res.json({ rows, total: totalRows[0]?.count ?? 0, limit, offset });
+  // Redact sensitive columns for the users table — the dedicated invitation
+  // endpoints expose temp passwords intentionally; the generic list shouldn't.
+  const safeRows = tableName === "users"
+    ? (rows as Record<string, unknown>[]).map(({ passwordHash: _ph, tempPasswordPlain: _tp, ...rest }) => rest)
+    : rows;
+
+  res.json({ rows: safeRows, total: totalRows[0]?.count ?? 0, limit, offset });
 });
 
 router.post("/admin/tables/:table", requireAdmin, async (req, res): Promise<void> => {
@@ -964,6 +970,219 @@ router.post("/admin/users/:userId/password-reset", requireAdmin, async (req, res
     expiresInMinutes: ADMIN_PASSWORD_RESET_TTL_MINUTES,
     emailSent,
   });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Bulk invitations: temp passwords + invite emails
+// ─────────────────────────────────────────────────────────────────────────────
+//
+// Two-phase admin workflow:
+//   1. POST /admin/users/bulk-temp-passwords  → assign random temp passwords
+//      to non-admin users (stored in users.temp_password_plain alongside the
+//      hashed users.password_hash so the admin can review/copy them later).
+//   2. POST /admin/users/bulk-invite          → email selected users their
+//      sign-in URL + temp password, then clear temp_password_plain and set
+//      invited_at.
+//
+// Admins (role='admin') are NEVER targeted by either endpoint.
+
+// Avoid ambiguous chars (0/O, 1/I/l) so admins reading temp passwords aloud
+// don't fumble.
+const TEMP_PW_ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnpqrstuvwxyz23456789";
+const TEMP_PW_LENGTH = 10;
+function genTempPassword(): string {
+  const buf = randomBytes(TEMP_PW_LENGTH);
+  let out = "";
+  for (let i = 0; i < TEMP_PW_LENGTH; i++) {
+    out += TEMP_PW_ALPHABET[buf[i]! % TEMP_PW_ALPHABET.length];
+  }
+  return out;
+}
+
+const bulkTempPasswordsBody = z.object({
+  scope: z.enum(["all_non_admin", "by_ids"]).default("by_ids"),
+  userIds: z.array(z.string().uuid()).optional(),
+  // When false (default): only generate for users that don't already have a
+  // pending temp password (i.e. tempPasswordPlain IS NULL OR invitedAt IS NOT NULL).
+  // When true: rotate even if a usable temp password already exists.
+  force: z.boolean().default(false),
+});
+
+router.post("/admin/users/bulk-temp-passwords", requireAdmin, async (req, res): Promise<void> => {
+  const parsed = bulkTempPasswordsBody.safeParse(req.body ?? {});
+  if (!parsed.success) {
+    res.status(400).json({ error: "Bad Request", message: parsed.error.message });
+    return;
+  }
+  const { scope, userIds, force } = parsed.data;
+
+  // Resolve target user set.
+  let targets: { id: string; email: string; firstName: string; lastName: string; role: string; status: string; tempPasswordPlain: string | null; invitedAt: Date | null }[];
+  if (scope === "all_non_admin") {
+    targets = await db
+      .select({
+        id: usersTable.id,
+        email: usersTable.email,
+        firstName: usersTable.firstName,
+        lastName: usersTable.lastName,
+        role: usersTable.role,
+        status: usersTable.status,
+        tempPasswordPlain: usersTable.tempPasswordPlain,
+        invitedAt: usersTable.invitedAt,
+      })
+      .from(usersTable)
+      .where(sql`${usersTable.role} <> 'admin'`);
+  } else {
+    if (!userIds || userIds.length === 0) {
+      res.status(400).json({ error: "Bad Request", message: "userIds required for scope=by_ids" });
+      return;
+    }
+    targets = await db
+      .select({
+        id: usersTable.id,
+        email: usersTable.email,
+        firstName: usersTable.firstName,
+        lastName: usersTable.lastName,
+        role: usersTable.role,
+        status: usersTable.status,
+        tempPasswordPlain: usersTable.tempPasswordPlain,
+        invitedAt: usersTable.invitedAt,
+      })
+      .from(usersTable)
+      .where(and(inArray(usersTable.id, userIds), sql`${usersTable.role} <> 'admin'`));
+  }
+
+  const now = new Date();
+  const generated: { userId: string; email: string; firstName: string; lastName: string; tempPassword: string }[] = [];
+  const skipped: { userId: string; email: string; reason: string }[] = [];
+
+  for (const t of targets) {
+    // Skip if a temp password already exists and the user hasn't been invited
+    // yet (still usable) — unless caller forced regeneration.
+    const hasUsableTemp = t.tempPasswordPlain && !t.invitedAt;
+    if (hasUsableTemp && !force) {
+      skipped.push({ userId: t.id, email: t.email, reason: "already_has_temp_password" });
+      continue;
+    }
+    const plain = genTempPassword();
+    const hash = await bcrypt.hash(plain, 10);
+    await db.update(usersTable)
+      .set({
+        passwordHash: hash,
+        tempPasswordPlain: plain,
+        tempPasswordSetAt: now,
+        invitedAt: null, // rotating a password effectively re-arms the invite
+        mustChangePassword: true,
+      })
+      .where(eq(usersTable.id, t.id));
+    generated.push({ userId: t.id, email: t.email, firstName: t.firstName, lastName: t.lastName, tempPassword: plain });
+  }
+
+  req.log.info(
+    { adminUserId: req.user!.userId, generated: generated.length, skipped: skipped.length, scope, force },
+    "Bulk temp passwords generated",
+  );
+
+  res.json({
+    generated,
+    skipped,
+    counts: {
+      total: targets.length,
+      generated: generated.length,
+      skipped: skipped.length,
+    },
+  });
+});
+
+const bulkInviteBody = z.object({
+  userIds: z.array(z.string().uuid()).min(1, "Pick at least one user"),
+});
+
+router.post("/admin/users/bulk-invite", requireAdmin, async (req, res): Promise<void> => {
+  const parsed = bulkInviteBody.safeParse(req.body ?? {});
+  if (!parsed.success) {
+    res.status(400).json({ error: "Bad Request", message: parsed.error.message });
+    return;
+  }
+  const { userIds } = parsed.data;
+
+  const targets = await db.select().from(usersTable)
+    .where(and(inArray(usersTable.id, userIds), sql`${usersTable.role} <> 'admin'`));
+
+  const base = getAdminResetBaseUrl();
+  const loginUrl = base ? `${base}/admin-portal/` : null;
+
+  const sent: { userId: string; email: string; emailSent: boolean }[] = [];
+  const failed: { userId: string; email: string; reason: string }[] = [];
+
+  for (const u of targets) {
+    if (!u.tempPasswordPlain) {
+      failed.push({ userId: u.id, email: u.email, reason: "no_temp_password — generate one first" });
+      continue;
+    }
+    if (!loginUrl) {
+      failed.push({ userId: u.id, email: u.email, reason: "no_base_url — set APP_BASE_URL or REPLIT_DOMAINS" });
+      continue;
+    }
+    const msg = renderInviteEmail({
+      firstName: u.firstName,
+      email: u.email,
+      tempPassword: u.tempPasswordPlain,
+      loginUrl,
+    });
+    let ok = false;
+    try {
+      ok = await sendEmail({ to: u.email, subject: msg.subject, text: msg.text, html: msg.html });
+    } catch (e) {
+      req.log.error({ err: e, userId: u.id }, "Invite email threw");
+      failed.push({ userId: u.id, email: u.email, reason: (e as Error).message });
+      continue;
+    }
+    if (!ok) {
+      failed.push({ userId: u.id, email: u.email, reason: "smtp_not_configured — share the credentials manually" });
+      continue;
+    }
+    // Email left the building. Clear the plaintext temp password — the user
+    // now has it and we don't want it sitting in the DB indefinitely. Stamp
+    // invited_at so the page can show the user is invited.
+    await db.update(usersTable)
+      .set({ tempPasswordPlain: null, invitedAt: new Date() })
+      .where(eq(usersTable.id, u.id));
+    sent.push({ userId: u.id, email: u.email, emailSent: true });
+  }
+
+  req.log.info(
+    { adminUserId: req.user!.userId, sent: sent.length, failed: failed.length },
+    "Bulk invites sent",
+  );
+
+  res.json({
+    sent,
+    failed,
+    counts: { total: targets.length, sent: sent.length, failed: failed.length },
+  });
+});
+
+// Read-only list for the Invitations page. Returns non-admin users with
+// invite-related fields (including temp_password_plain — admin-only).
+router.get("/admin/users/invitations", requireAdmin, async (_req, res): Promise<void> => {
+  const rows = await db
+    .select({
+      id: usersTable.id,
+      email: usersTable.email,
+      firstName: usersTable.firstName,
+      lastName: usersTable.lastName,
+      role: usersTable.role,
+      status: usersTable.status,
+      tempPasswordPlain: usersTable.tempPasswordPlain,
+      tempPasswordSetAt: usersTable.tempPasswordSetAt,
+      invitedAt: usersTable.invitedAt,
+      createdAt: usersTable.createdAt,
+    })
+    .from(usersTable)
+    .where(sql`${usersTable.role} <> 'admin'`)
+    .orderBy(asc(usersTable.lastName), asc(usersTable.firstName));
+  res.json(rows);
 });
 
 export default router;

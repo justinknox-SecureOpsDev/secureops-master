@@ -339,6 +339,51 @@ export function renderPasswordChangedEmail(opts: {
   return { subject, text, html };
 }
 
+export function renderInviteEmail(opts: {
+  firstName: string;
+  email: string;
+  tempPassword: string;
+  loginUrl: string;
+}): { subject: string; text: string; html: string } {
+  const subject = "Welcome to Williams Council Security Group — your login";
+  const text = [
+    `Hi ${opts.firstName},`,
+    "",
+    "Your Williams Council Security Group account is ready.",
+    "",
+    `Sign in at: ${opts.loginUrl}`,
+    `Email:      ${opts.email}`,
+    `Temporary password: ${opts.tempPassword}`,
+    "",
+    "Please sign in and change your password as soon as possible.",
+    "",
+    "— Williams Council Security Group",
+  ].join("\n");
+  const html = `
+    <div style="font-family:Georgia,serif;max-width:560px;margin:0 auto;color:#080c18">
+      <h2 style="color:#080c18">Welcome to Williams Council Security Group</h2>
+      <p>Hi ${escapeHtml(opts.firstName)},</p>
+      <p>Your account is ready. Use the credentials below to sign in for the first time, then change your password.</p>
+      <div style="background:#f6f1e1;padding:14px 16px;border-left:3px solid #c9a84c;margin:18px 0;border-radius:4px;font-family:ui-monospace,Menlo,Consolas,monospace;font-size:14px">
+        <div><strong>Email:</strong> ${escapeHtml(opts.email)}</div>
+        <div><strong>Temporary password:</strong> ${escapeHtml(opts.tempPassword)}</div>
+      </div>
+      <p style="text-align:center;margin:24px 0">
+        <a href="${escapeAttr(opts.loginUrl)}"
+           style="display:inline-block;background:#080c18;color:#c9a84c;padding:12px 24px;text-decoration:none;border-radius:4px;font-weight:bold">
+          Sign in
+        </a>
+      </p>
+      <p style="color:#555;font-size:12px">If the button doesn't work, paste this URL into your browser:<br/>
+        <span style="word-break:break-all">${escapeHtml(opts.loginUrl)}</span>
+      </p>
+      <hr style="border:none;border-top:2px solid #c9a84c;margin:24px 0"/>
+      <p style="color:#080c18;font-weight:bold;margin:0">Williams Council Security Group</p>
+    </div>
+  `;
+  return { subject, text, html };
+}
+
 function escapeHtml(s: string): string {
   return s.replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]!));
 }
