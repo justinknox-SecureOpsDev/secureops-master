@@ -3,6 +3,7 @@ import app from "./app";
 import { logger } from "./lib/logger";
 import { attachWebSocketServer } from "./lib/wsManager";
 import { seedPolicies, backfillEmployeeProfileFields } from "@workspace/db";
+import { seedDemoUsers } from "./lib/seedDemoUsers";
 
 const rawPort = process.env["PORT"];
 
@@ -32,6 +33,12 @@ seedPolicies()
 backfillEmployeeProfileFields()
   .then(() => logger.info("Employee profile backfill complete"))
   .catch((err) => logger.error({ err }, "Failed to backfill employee profile fields"));
+
+// Idempotently provision the documented demo accounts so `replit.md`
+// credentials always work. Disable with SEED_DEMO_USERS=false.
+seedDemoUsers()
+  .then(() => logger.info("Demo users ensured"))
+  .catch((err) => logger.error({ err }, "Failed to seed demo users"));
 
 server.on("error", (err) => {
   logger.error({ err }, "Server error");

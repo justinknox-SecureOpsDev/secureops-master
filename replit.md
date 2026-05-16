@@ -111,6 +111,7 @@ A full-stack mobile operations platform for Williams Council Security Group (WCS
 
 - Admin: `admin@secureops.com` / `Admin123!`
 - Employee: `john.smith@secureops.com` / `Employee123!`
+- Both are provisioned idempotently on every API server boot by `seedDemoUsers()` in `artifacts/api-server/src/lib/seedDemoUsers.ts`. If the user already exists with the documented password, nothing changes; otherwise the password is reset to the documented value and a missing employees row is created. Disable with `SEED_DEMO_USERS=false` (e.g. in production).
 
 ## User preferences
 
