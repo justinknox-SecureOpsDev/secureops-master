@@ -49,3 +49,4 @@ channel = "stable-25_05"
 [userenv]
 
 [userenv.production]
+SEED_DEMO_USERS = "false"
