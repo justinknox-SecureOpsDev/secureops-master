@@ -1,6 +1,6 @@
 import { Router, type IRouter } from "express";
 import { eq, and, gte, lte, isNull, sql } from "drizzle-orm";
-import { db, timeEntriesTable, shiftsTable, usersTable, sitesTable } from "@workspace/db";
+import { db, timeEntriesTable, shiftsTable, usersTable, sitesTable, shiftAssignmentsTable } from "@workspace/db";
 import { requireAuth, requireAdmin } from "../middlewares/auth";
 
 const router: IRouter = Router();
@@ -112,12 +112,42 @@ router.post("/time-entries/clock-in", requireAuth, async (req, res): Promise<voi
 
   // Geo-resolve site if no shiftId provided.
   let resolvedSite: { id: string; name: string; distanceMiles: number } | null = null;
-  if (!shiftId) {
+  let assignedShiftSiteId: string | null = null;
+  if (shiftId) {
+    // Validate the shift exists and the user is assigned to it (admins may
+    // clock in on behalf of any user, but normal employees can only clock in
+    // to shifts they have an accepted assignment for). When shiftId is
+    // provided we skip the geo-radius check entirely and just trust the
+    // assignment — this is the "click on my shift to clock in" flow.
+    const [shift] = await db.select().from(shiftsTable).where(eq(shiftsTable.id, shiftId));
+    if (!shift) {
+      res.status(404).json({ error: "Not Found", message: "Shift not found" });
+      return;
+    }
+    if (req.user!.role !== "admin") {
+      const assignment = await db
+        .select()
+        .from(shiftAssignmentsTable)
+        .where(and(
+          eq(shiftAssignmentsTable.shiftId, shiftId),
+          eq(shiftAssignmentsTable.employeeId, req.user!.userId),
+          eq(shiftAssignmentsTable.status, "accepted"),
+        ));
+      if (assignment.length === 0) {
+        res.status(403).json({
+          error: "Forbidden",
+          message: "You are not assigned to this shift. Reserve it first from the Shifts tab.",
+        });
+        return;
+      }
+    }
+    assignedShiftSiteId = shift.siteId ?? null;
+  } else {
     resolvedSite = await resolveNearestSite(Number(lat), Number(lng));
     if (!resolvedSite) {
       res.status(422).json({
         error: "No Site Nearby",
-        message: `You are not within ${GEO_RESOLVE_RADIUS_MILES} mile of any known site. Move closer to a site or have an admin assign you to a shift first.`,
+        message: `You are not within ${GEO_RESOLVE_RADIUS_MILES} mile of any known site. Move closer to a site or tap a reserved shift in the Shifts tab to clock in to it directly.`,
       });
       return;
     }
@@ -125,7 +155,7 @@ router.post("/time-entries/clock-in", requireAuth, async (req, res): Promise<voi
 
   const [entry] = await db.insert(timeEntriesTable).values({
     shiftId: shiftId || null,
-    siteId: resolvedSite ? resolvedSite.id : null,
+    siteId: resolvedSite ? resolvedSite.id : assignedShiftSiteId,
     employeeId: req.user!.userId,
     clockInTime: new Date(),
     clockInLat: String(lat),

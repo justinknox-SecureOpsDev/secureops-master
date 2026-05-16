@@ -7,7 +7,9 @@ import {
   useGetMe, getGetMeQueryKey,
   useGetEmployee, getGetEmployeeQueryKey,
   claimShift, useUpdateShiftAssignment,
+  useClockIn, useGetActiveTimeEntry, getGetActiveTimeEntryQueryKey, getGetTimeEntriesQueryKey,
 } from "@workspace/api-client-react";
+import * as Location from "expo-location";
 import { useQueryClient } from "@tanstack/react-query";
 import { Feather } from "@expo/vector-icons";
 import { LicenseLevelBadge, levelLabel } from "@/components/LicenseLevelBadge";
@@ -37,6 +39,11 @@ export default function EmployeeShiftsScreen() {
   );
 
   const updateAssignment = useUpdateShiftAssignment();
+  const clockInMutation = useClockIn();
+  const { data: activeEntry } = useGetActiveTimeEntry({
+    query: { queryKey: getGetActiveTimeEntryQueryKey() },
+  });
+  const isClockedInElsewhere = !!(activeEntry as any)?.id;
 
   const shifts = (allShifts ?? []).filter((s: any) => {
     const isAssigned = (s.assignments ?? []).some((a: any) => a.employeeId === myUserId);
@@ -77,6 +84,44 @@ export default function EmployeeShiftsScreen() {
       await queryClient.invalidateQueries({ queryKey: getGetShiftsQueryKey() });
     } catch (e: any) {
       notify("Failed", e?.response?.data?.message || e?.message || "Could not accept shift.");
+    } finally {
+      setBusyId(null);
+    }
+  };
+
+  const handleClockInToShift = async (shift: any) => {
+    if (isClockedInElsewhere) {
+      notify("Already Clocked In", "You're already clocked in. Clock out first from the Clock tab.");
+      return;
+    }
+    const ok = await confirmAction({
+      title: "Clock In Now?",
+      message: `Start your shift "${shift.title}"?\n\nYour time will be tracked against this specific shift for payroll and invoicing.`,
+      confirmText: "Clock In",
+    });
+    if (!ok) return;
+    setBusyId(shift.id);
+    let lat = 0;
+    let lng = 0;
+    try {
+      const { status } = await Location.requestForegroundPermissionsAsync();
+      if (status === "granted") {
+        const loc = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced });
+        lat = loc.coords.latitude;
+        lng = loc.coords.longitude;
+      }
+    } catch { /* GPS optional when shiftId is provided */ }
+    try {
+      await clockInMutation.mutateAsync({ data: { shiftId: shift.id, lat, lng } as any });
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: getGetActiveTimeEntryQueryKey() }),
+        queryClient.invalidateQueries({ queryKey: getGetTimeEntriesQueryKey() }),
+        queryClient.invalidateQueries({ queryKey: getGetShiftsQueryKey() }),
+      ]);
+      notify("Clocked In", `You're on duty for ${shift.title}. Open the Clock tab to clock out when finished.`);
+    } catch (e: any) {
+      const msg = e?.response?.data?.message || e?.message || "Could not clock in.";
+      notify("Clock-In Failed", msg);
     } finally {
       setBusyId(null);
     }
@@ -300,20 +345,49 @@ export default function EmployeeShiftsScreen() {
                   </View>
                 )}
 
-                {isAccepted && myAssign && (
-                  <TouchableOpacity
-                    style={[styles.declineBtn, { borderColor: colors.destructive, opacity: busy ? 0.6 : 1, alignSelf: "flex-start" }]}
-                    onPress={() => handleDecline(item, myAssign.id)}
-                    disabled={busy}
-                  >
-                    {busy ? <ActivityIndicator color={colors.destructive} /> : (
-                      <>
-                        <Feather name="x" size={14} color={colors.destructive} />
-                        <Text style={[styles.declineText, { color: colors.destructive }]}>Release Shift</Text>
-                      </>
-                    )}
-                  </TouchableOpacity>
-                )}
+                {isAccepted && myAssign && (() => {
+                  // Show "Clock In Now" from 1 hour before start through end of
+                  // shift; outside that window only the Release button shows.
+                  const now = Date.now();
+                  const startMs = new Date(item.startTime).getTime();
+                  const endMs = new Date(item.endTime).getTime();
+                  const canClockIn =
+                    now >= startMs - 60 * 60 * 1000 &&
+                    now <= endMs &&
+                    item.status !== "completed" &&
+                    item.status !== "cancelled" &&
+                    !isClockedInElsewhere;
+                  return (
+                    <View style={{ flexDirection: "row", gap: 8, flexWrap: "wrap" }}>
+                      {canClockIn && (
+                        <TouchableOpacity
+                          style={[styles.acceptBtn, { backgroundColor: "#22c55e", opacity: busy ? 0.6 : 1 }]}
+                          onPress={() => handleClockInToShift(item)}
+                          disabled={busy}
+                        >
+                          {busy ? <ActivityIndicator color="#fff" /> : (
+                            <>
+                              <Feather name="play" size={16} color="#fff" />
+                              <Text style={[styles.acceptText, { color: "#fff" }]}>Clock In Now</Text>
+                            </>
+                          )}
+                        </TouchableOpacity>
+                      )}
+                      <TouchableOpacity
+                        style={[styles.declineBtn, { borderColor: colors.destructive, opacity: busy ? 0.6 : 1 }]}
+                        onPress={() => handleDecline(item, myAssign.id)}
+                        disabled={busy}
+                      >
+                        {busy && !canClockIn ? <ActivityIndicator color={colors.destructive} /> : (
+                          <>
+                            <Feather name="x" size={14} color={colors.destructive} />
+                            <Text style={[styles.declineText, { color: colors.destructive }]}>Release Shift</Text>
+                          </>
+                        )}
+                      </TouchableOpacity>
+                    </View>
+                  );
+                })()}
               </View>
             );
           }}

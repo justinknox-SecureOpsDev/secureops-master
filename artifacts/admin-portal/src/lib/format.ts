@@ -75,7 +75,14 @@ export function fromFormValue(raw: string, field: Field): unknown {
     }
     case "boolean":
       return raw === "true";
-    case "datetime":
+    case "datetime": {
+      // <input type="datetime-local"> emits a wall-clock string like
+      // "2026-05-16T10:00" with no timezone. Parse it as the user's local
+      // time and convert to a UTC ISO string so the server stores the
+      // correct instant regardless of where it's running.
+      const d = new Date(raw);
+      return Number.isNaN(d.getTime()) ? raw : d.toISOString();
+    }
     case "date":
       return raw;
     case "json":
