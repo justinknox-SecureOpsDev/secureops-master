@@ -111,7 +111,18 @@ async function getActivePoliciesForPrefill() {
 function genToken(): string {
   return randomBytes(24).toString("base64url");
 }
-const SSN_LAST4_RE = /^\d{4}$/;
+
+// Random 12-char temp password — avoids visually ambiguous characters so it
+// can be read back from a screen/email without confusion.
+const TEMP_PW_ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnpqrstuvwxyz23456789";
+function genTempPassword(): string {
+  const buf = randomBytes(12);
+  let out = "";
+  for (let i = 0; i < 12; i++) {
+    out += TEMP_PW_ALPHABET[buf[i]! % TEMP_PW_ALPHABET.length];
+  }
+  return out;
+}
 
 function buildOnboardingUrl(req: Request, token: string): string {
   const proto = (req.headers["x-forwarded-proto"] as string) || req.protocol || "https";
@@ -291,7 +302,7 @@ router.post("/admin/applications/:id/approve", requireAdmin, async (req, res): P
 
   type ErrorBody = { error: string; message: string };
   type ApproveResult =
-    | { updated: ApplicationRow; userId: string }
+    | { updated: ApplicationRow; userId: string; tempPasswordPlain: string }
     | { error: { status: number; body: ErrorBody } };
 
   let result: ApproveResult;
@@ -312,22 +323,12 @@ router.post("/admin/applications/:id/approve", requireAdmin, async (req, res): P
         return { error: { status: 409, body: { error: "Conflict", message: "Application already approved" } } };
       }
 
-      // Temp password = last-4 SSN captured on the application. We refuse to
-      // approve without it so the employee always has a known starting password
-      // to type into the mobile app's mandatory first-login change-password.
-      const ssnLast4 = (app.niNumber ?? "").trim();
-      if (!SSN_LAST4_RE.test(ssnLast4)) {
-        return {
-          error: {
-            status: 400,
-            body: {
-              error: "Bad Request",
-              message: "Application is missing a valid 4-digit SSN (last 4) — required to set the temporary password.",
-            },
-          },
-        };
-      }
-      const passwordHash = await bcrypt.hash(ssnLast4, 10);
+      // Generate a cryptographically random temp password — never derive it
+      // from applicant data (e.g. SSN last-4) which may be known to others.
+      // The plaintext is returned to the admin once and never stored; the
+      // employee must change it on first login (mustChangePassword=true).
+      const tempPasswordPlain = genTempPassword();
+      const passwordHash = await bcrypt.hash(tempPasswordPlain, 10);
 
       const email = app.email.toLowerCase();
 
@@ -445,7 +446,7 @@ router.post("/admin/applications/:id/approve", requireAdmin, async (req, res): P
         createdEmployeeId: userId,
       }).where(eq(applicationsTable.id, appId)).returning();
 
-      return { updated, userId };
+      return { updated, userId, tempPasswordPlain };
     });
   } catch (err) {
     req.log.error({ err }, "Approve transaction failed");
@@ -479,7 +480,7 @@ router.post("/admin/applications/:id/approve", requireAdmin, async (req, res): P
     onboardingUrl,
     onboardingToken: token,
     employeeId: result.userId,
-    tempPasswordHint: "Last 4 digits of the SSN provided on the application",
+    tempPassword: result.tempPasswordPlain,
     emailSent,
   });
 });

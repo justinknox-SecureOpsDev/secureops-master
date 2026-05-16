@@ -1,6 +1,8 @@
 import { WebSocket, WebSocketServer } from "ws";
 import type { IncomingMessage } from "http";
 import type { Server } from "http";
+import { eq } from "drizzle-orm";
+import { db, usersTable } from "@workspace/db";
 import { verifyToken } from "../middlewares/auth";
 import { logger } from "./logger";
 
@@ -88,40 +90,62 @@ export function attachWebSocketServer(server: Server) {
       return;
     }
 
-    ws.userId = payload.userId;
-    ws.role = payload.role;
-    ws.isAlive = true;
+    const tokenPayload = payload;
 
-    if (!connections.has(payload.userId)) {
-      connections.set(payload.userId, new Set());
-    }
-    connections.get(payload.userId)!.add(ws);
-
-    logger.info({ userId: payload.userId }, "WS client connected");
-
-    ws.on("pong", () => { ws.isAlive = true; });
-
-    ws.on("message", (data) => {
-      // Clients can send {type: "ping"} keepalives — nothing else needed, server handles broadcasts
-      try {
-        const msg = JSON.parse(data.toString());
-        if (msg.type === "ping") ws.send(JSON.stringify({ type: "pong" }));
-      } catch { /* ignore */ }
-    });
-
-    ws.on("close", () => {
-      if (ws.userId) {
-        connections.get(ws.userId)?.delete(ws);
-        if (connections.get(ws.userId)?.size === 0) {
-          connections.delete(ws.userId);
+    // Re-validate against current DB state so stale tokens from deactivated or
+    // demoted accounts cannot open a WebSocket session. All event handlers are
+    // registered inside the .then() callback so the socket is never added to
+    // `connections` if it closed before the query returned.
+    db.select({ id: usersTable.id, role: usersTable.role, status: usersTable.status })
+      .from(usersTable)
+      .where(eq(usersTable.id, tokenPayload.userId))
+      .limit(1)
+      .then(([user]) => {
+        if (!user || user.status !== "active") {
+          ws.close(1008, "Account is not active");
+          return;
         }
-      }
-    });
 
-    ws.on("error", (err) => logger.error({ err, userId: ws.userId }, "WS error"));
+        // Guard against the race where the client disconnected before the DB
+        // query resolved; don't insert a dead socket into the registry.
+        if (ws.readyState !== WebSocket.OPEN) return;
 
-    // Welcome
-    ws.send(JSON.stringify({ type: "connected", userId: payload.userId }));
+        ws.userId = user.id;
+        ws.role = user.role; // live role, not stale token role
+        ws.isAlive = true;
+
+        if (!connections.has(user.id)) {
+          connections.set(user.id, new Set());
+        }
+        connections.get(user.id)!.add(ws);
+
+        logger.info({ userId: user.id }, "WS client connected");
+
+        ws.on("pong", () => { ws.isAlive = true; });
+
+        ws.on("message", (data) => {
+          // Clients can send {type: "ping"} keepalives — nothing else needed, server handles broadcasts
+          try {
+            const msg = JSON.parse(data.toString());
+            if (msg.type === "ping") ws.send(JSON.stringify({ type: "pong" }));
+          } catch { /* ignore */ }
+        });
+
+        ws.on("close", () => {
+          connections.get(user.id)?.delete(ws);
+          if (connections.get(user.id)?.size === 0) {
+            connections.delete(user.id);
+          }
+        });
+
+        ws.on("error", (err) => logger.error({ err, userId: user.id }, "WS error"));
+
+        ws.send(JSON.stringify({ type: "connected", userId: user.id }));
+      })
+      .catch((err) => {
+        logger.error({ err, userId: tokenPayload.userId }, "WS auth DB check failed");
+        ws.close(1011, "Authentication error");
+      });
   });
 
   logger.info("WebSocket server attached at /api/ws");

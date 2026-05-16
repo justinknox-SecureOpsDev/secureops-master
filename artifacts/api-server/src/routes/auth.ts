@@ -126,6 +126,14 @@ router.post("/auth/login", loginIpLimiter, loginEmailLimiter, async (req, res): 
     res.status(401).json({ error: "Unauthorized", message: "Invalid credentials" });
     return;
   }
+  // Only active accounts may receive a session token. Pending accounts have
+  // not yet completed onboarding (done via a separate token-based flow), and
+  // inactive accounts have been intentionally deactivated. Returning a generic
+  // 401 avoids leaking the specific account state to the caller.
+  if (user.status !== "active") {
+    res.status(401).json({ error: "Unauthorized", message: "Invalid credentials" });
+    return;
+  }
   const token = signToken({ userId: user.id, email: user.email, role: user.role });
   res.json({ token, user: userPayload(user) });
 });
