@@ -5,6 +5,7 @@ import { and, eq, sql } from "drizzle-orm";
 import { z } from "zod/v4";
 import { db, usersTable, employeesTable, passwordResetTokensTable, revokedTokensTable } from "@workspace/db";
 import { requireAuth, signToken, tokenTtlSeconds } from "../middlewares/auth";
+import { disconnectUser } from "../lib/wsManager";
 import {
   forgotPasswordEmailLimiter,
   forgotPasswordIpLimiter,
@@ -224,7 +225,13 @@ router.post("/auth/logout", async (req, res): Promise<void> => {
 // Authenticated "log out from all devices" — bumps the user's
 // tokens_valid_after watermark so every existing JWT is rejected.
 router.post("/auth/logout-all", requireAuth, async (req, res): Promise<void> => {
-  await db.update(usersTable).set({ tokensValidAfter: new Date() }).where(eq(usersTable.id, req.user!.userId));
+  const userId = req.user!.userId;
+  // Floor to second precision for consistency with JWT iat granularity.
+  const logoutAll = new Date(Math.floor(Date.now() / 1000) * 1000);
+  await db.update(usersTable).set({ tokensValidAfter: logoutAll }).where(eq(usersTable.id, userId));
+  // Force-close open WebSocket sessions so the user is cut off in real time
+  // rather than continuing to receive broadcasts until token expiry.
+  disconnectUser(userId);
   res.json({ success: true });
 });
 
@@ -271,12 +278,19 @@ router.post("/auth/change-password", requireAuth, async (req, res): Promise<void
     return;
   }
   const passwordHash = await bcrypt.hash(newPassword, 10);
+  // Floor to second precision: JWT `iat` is second-granular, so using a
+  // millisecond-precise timestamp would cause the brand-new token (whose
+  // iat*1000 == the floor) to fail the iatMs < tokensValidAfter check.
+  const now = new Date(Math.floor(Date.now() / 1000) * 1000);
   const [updated] = await db.update(usersTable)
-    .set({ passwordHash, mustChangePassword: false })
+    .set({ passwordHash, mustChangePassword: false, tokensValidAfter: now })
     .where(eq(usersTable.id, user.id))
     .returning();
-  // Rotate session.
+  // Rotate session: issue a fresh token (iat >= tokensValidAfter so it is
+  // accepted), then disconnect any existing WebSocket sessions so they cannot
+  // continue receiving broadcasts with a credential that is now invalidated.
   const token = signToken({ userId: updated.id, email: updated.email, role: updated.role });
+  disconnectUser(updated.id);
   sendPasswordChangedNotice(req, updated, "change");
   res.json({ token, user: userPayload(updated) });
 });
@@ -391,10 +405,15 @@ router.post("/auth/reset-password", resetPasswordLimiter, async (req, res): Prom
   if (!user) { res.status(404).json({ error: "Not Found", message: "Account not found" }); return; }
 
   const passwordHash = await bcrypt.hash(newPassword, 10);
+  const consumedAt = new Date();
+  // Floor to second precision so the watermark does not exceed the new token's
+  // iat*1000 (JWT iat is second-granular; a sub-second tokensValidAfter would
+  // cause the brand-new token to be immediately rejected by requireAuth).
+  const tokensValidAfterReset = new Date(Math.floor(consumedAt.getTime() / 1000) * 1000);
   const result = await db.transaction(async (tx) => {
     // Atomically consume the token. If another request beat us to it, abort.
     const consumed = await tx.update(passwordResetTokensTable)
-      .set({ consumedAt: new Date() })
+      .set({ consumedAt })
       .where(and(
         eq(passwordResetTokensTable.id, t.id),
         sql`${passwordResetTokensTable.consumedAt} IS NULL`,
@@ -402,8 +421,10 @@ router.post("/auth/reset-password", resetPasswordLimiter, async (req, res): Prom
       .returning();
     if (consumed.length === 0) return { conflict: true } as const;
 
+    // Bump tokensValidAfter so every pre-reset JWT is instantly rejected on
+    // the next HTTP request or WS upgrade attempt.
     const [updated] = await tx.update(usersTable)
-      .set({ passwordHash, mustChangePassword: false })
+      .set({ passwordHash, mustChangePassword: false, tokensValidAfter: tokensValidAfterReset })
       .where(eq(usersTable.id, user.id))
       .returning();
     return { updated } as const;
@@ -415,7 +436,10 @@ router.post("/auth/reset-password", resetPasswordLimiter, async (req, res): Prom
   }
 
   const updated = result.updated;
+  // Issue fresh token (iat >= tokensValidAfter), then force-close any open
+  // WebSocket sessions that are still holding the now-invalidated credentials.
   const newToken = signToken({ userId: updated.id, email: updated.email, role: updated.role });
+  disconnectUser(updated.id);
   req.log.info({ userId: updated.id }, "Password reset completed");
   sendPasswordChangedNotice(req, updated, "reset");
   res.json({ token: newToken, user: userPayload(updated) });

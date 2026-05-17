@@ -21,6 +21,26 @@ let wss: WebSocketServer | null = null;
 export function getWss() { return wss; }
 
 /**
+ * Forcibly close every open WebSocket for a given user.
+ *
+ * Call this immediately after bumping tokensValidAfter or revoking individual
+ * tokens so that already-connected sockets are cut off in real time rather
+ * than left open until natural expiry. The client will reconnect with its
+ * stored token, which will then fail the revocation check and be closed again.
+ */
+export function disconnectUser(userId: string): void {
+  const sockets = connections.get(userId);
+  if (!sockets) return;
+  for (const ws of sockets) {
+    try {
+      ws.close(1008, "Session was revoked");
+    } catch {
+      // ignore — socket may already be closing
+    }
+  }
+}
+
+/**
  * Send a payload to every socket of every authorized recipient.
  *
  * - `allowedUserIds`: required allow-list of user IDs that may receive the
@@ -97,6 +117,7 @@ export function attachWebSocketServer(server: Server) {
     // same revocation semantics as the HTTP requireAuth middleware:
     //   - tokens_valid_after watermark (logout-all / admin revoke-sessions)
     //   - revoked_tokens jti lookup (single-session logout)
+    //   - mustChangePassword lockout (mirrors the HTTP layer's gate)
     // Without these, a revoked JWT would still establish a long-lived WS
     // and continue receiving chat / live-ops broadcasts until token expiry.
     Promise.all([
@@ -105,6 +126,7 @@ export function attachWebSocketServer(server: Server) {
         role: usersTable.role,
         status: usersTable.status,
         tokensValidAfter: usersTable.tokensValidAfter,
+        mustChangePassword: usersTable.mustChangePassword,
       })
         .from(usersTable)
         .where(eq(usersTable.id, tokenPayload.userId))
@@ -128,6 +150,13 @@ export function attachWebSocketServer(server: Server) {
         }
         if (revokedRows.length > 0) {
           ws.close(1008, "Session was revoked");
+          return;
+        }
+        // Mirror the HTTP mustChangePassword lockout: users with a forced
+        // password rotation pending must not receive chat / live-ops traffic
+        // until they complete credential rotation.
+        if (user.mustChangePassword) {
+          ws.close(1008, "Password change required");
           return;
         }
 

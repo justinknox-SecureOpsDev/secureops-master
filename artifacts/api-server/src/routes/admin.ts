@@ -31,6 +31,7 @@ import {
 } from "@workspace/db";
 import { requireAdmin } from "../middlewares/auth";
 import { sendEmail, renderPasswordResetEmail, renderInviteEmail } from "../lib/email";
+import { disconnectUser } from "../lib/wsManager";
 
 const router: IRouter = Router();
 
@@ -974,8 +975,12 @@ router.post("/admin/users/:userId/revoke-sessions", requireAdmin, async (req, re
     res.status(404).json({ error: "Not Found", message: "User not found" });
     return;
   }
-  const now = new Date();
+  // Floor to second precision for consistency with JWT iat granularity.
+  const now = new Date(Math.floor(Date.now() / 1000) * 1000);
   await db.update(usersTable).set({ tokensValidAfter: now }).where(eq(usersTable.id, userId));
+  // Force-close any open WebSocket connections for this user immediately so
+  // they cannot continue receiving chat / live-ops broadcasts after revocation.
+  disconnectUser(userId);
   req.log.info({ targetUserId: userId, byAdmin: req.user!.userId }, "Admin revoked all sessions for user");
   res.json({ success: true, revokedAt: now.toISOString(), email: user.email });
 });
@@ -1117,7 +1122,8 @@ router.post("/admin/users/bulk-temp-passwords", requireAdmin, async (req, res): 
       .where(and(inArray(usersTable.id, userIds), sql`${usersTable.role} <> 'admin'`));
   }
 
-  const now = new Date();
+  // Floor to second precision for consistency with JWT iat granularity.
+  const now = new Date(Math.floor(Date.now() / 1000) * 1000);
   const generated: { userId: string; email: string; firstName: string; lastName: string; tempPassword: string }[] = [];
   const skipped: { userId: string; email: string; reason: string }[] = [];
 
@@ -1138,8 +1144,14 @@ router.post("/admin/users/bulk-temp-passwords", requireAdmin, async (req, res): 
         tempPasswordSetAt: now,
         invitedAt: null, // rotating a password effectively re-arms the invite
         mustChangePassword: true,
+        // Bump the session watermark so any pre-rotation JWT is immediately
+        // rejected on the next HTTP request or WS upgrade.
+        tokensValidAfter: now,
       })
       .where(eq(usersTable.id, t.id));
+    // Force-close any open WebSocket connections so the user cannot continue
+    // receiving chat / live-ops broadcasts with now-invalidated credentials.
+    disconnectUser(t.id);
     generated.push({ userId: t.id, email: t.email, firstName: t.firstName, lastName: t.lastName, tempPassword: plain });
   }
 
