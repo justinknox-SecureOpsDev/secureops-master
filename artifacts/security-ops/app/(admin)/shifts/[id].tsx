@@ -1,4 +1,5 @@
-import React from "react";
+import React, { useLayoutEffect } from "react";
+import { useNavigation } from "expo-router";
 import { useTopPad } from "@/hooks/useTopPad";
 import { View, Text, StyleSheet, ScrollView, TouchableOpacity, ActivityIndicator, Platform } from "react-native";
 import { useColors } from "@/hooks/useColors";
@@ -29,6 +30,8 @@ export default function ShiftDetailScreen() {
   const queryClient = useQueryClient();
   const { id } = useLocalSearchParams<{ id: string }>();
   const topPad = useTopPad();
+  const navigation = useNavigation();
+  useLayoutEffect(() => { (navigation as any).setOptions?.({ headerShown: false }); }, [navigation]);
 
   const { data: shift, isLoading } = useGetShift(id!, {
     query: { queryKey: getGetShiftQueryKey(id!), enabled: !!id }

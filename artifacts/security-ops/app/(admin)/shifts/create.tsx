@@ -1,4 +1,5 @@
-import React, { useState, useMemo } from "react";
+import React, { useState, useMemo, useLayoutEffect } from "react";
+import { useNavigation } from "expo-router";
 import { useTopPad } from "@/hooks/useTopPad";
 import { View, Text, StyleSheet, TouchableOpacity, TextInput, ActivityIndicator, Alert, Platform, Switch, ScrollView } from "react-native";
 import { useColors } from "@/hooks/useColors";
@@ -42,6 +43,8 @@ export default function CreateShiftScreen() {
   const queryClient = useQueryClient();
   const createShift = useCreateShift();
   const topPad = useTopPad();
+  const navigation = useNavigation();
+  useLayoutEffect(() => { (navigation as any).setOptions?.({ headerShown: false }); }, [navigation]);
 
   const { data: clients } = useGetClients({ query: { queryKey: getGetClientsQueryKey() } });
 

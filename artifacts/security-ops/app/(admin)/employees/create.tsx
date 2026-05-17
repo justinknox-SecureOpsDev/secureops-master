@@ -1,4 +1,5 @@
-import React, { useState } from "react";
+import React, { useState, useLayoutEffect } from "react";
+import { useNavigation } from "expo-router";
 import { useTopPad } from "@/hooks/useTopPad";
 import { View, Text, StyleSheet, ScrollView, TouchableOpacity, TextInput, ActivityIndicator, Alert, Platform } from "react-native";
 import { useColors } from "@/hooks/useColors";
@@ -33,6 +34,8 @@ export default function CreateEmployeeScreen() {
   const queryClient = useQueryClient();
   const createEmployee = useCreateEmployee();
   const topPad = useTopPad();
+  const navigation = useNavigation();
+  useLayoutEffect(() => { (navigation as any).setOptions?.({ headerShown: false }); }, [navigation]);
 
   const [form, setForm] = useState({
     firstName: "", lastName: "", email: "", password: "", phone: "",

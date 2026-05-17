@@ -1,4 +1,5 @@
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useLayoutEffect } from "react";
+import { useNavigation } from "expo-router";
 import { useTopPad } from "@/hooks/useTopPad";
 import { View, Text, StyleSheet, ScrollView, TouchableOpacity, ActivityIndicator, Platform, Alert, Modal, TextInput, KeyboardAvoidingView } from "react-native";
 import { useColors } from "@/hooks/useColors";
@@ -28,6 +29,8 @@ export default function EmployeeDetailScreen() {
   const queryClient = useQueryClient();
   const { id } = useLocalSearchParams<{ id: string }>();
   const topPad = useTopPad();
+  const navigation = useNavigation();
+  useLayoutEffect(() => { (navigation as any).setOptions?.({ headerShown: false }); }, [navigation]);
 
   const { data: employee, isLoading } = useGetEmployee(id!, {
     query: { queryKey: getGetEmployeeQueryKey(id!), enabled: !!id }

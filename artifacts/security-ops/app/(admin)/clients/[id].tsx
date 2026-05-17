@@ -1,4 +1,5 @@
-import React, { useState } from "react";
+import React, { useState, useLayoutEffect } from "react";
+import { useNavigation } from "expo-router";
 import { useTopPad } from "@/hooks/useTopPad";
 import { View, Text, StyleSheet, FlatList, TouchableOpacity, ActivityIndicator, TextInput, Alert, Platform, Modal } from "react-native";
 import { useColors } from "@/hooks/useColors";
@@ -18,6 +19,8 @@ export default function ClientSitesScreen() {
   const clientId = String(params.id);
   const queryClient = useQueryClient();
   const topPad = useTopPad();
+  const navigation = useNavigation();
+  useLayoutEffect(() => { (navigation as any).setOptions?.({ headerShown: false }); }, [navigation]);
 
   const { data: client } = useGetClient(clientId, { query: { queryKey: getGetClientQueryKey(clientId) } });
   const { data: sites, isLoading } = useGetSites({ clientId }, { query: { queryKey: getGetSitesQueryKey({ clientId }) } });

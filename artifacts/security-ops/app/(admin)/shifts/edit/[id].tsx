@@ -1,4 +1,5 @@
-import React, { useState, useMemo, useEffect } from "react";
+import React, { useState, useMemo, useEffect, useLayoutEffect } from "react";
+import { useNavigation } from "expo-router";
 import { useTopPad } from "@/hooks/useTopPad";
 import { View, Text, StyleSheet, TouchableOpacity, TextInput, ActivityIndicator, Alert, Platform, Switch, ScrollView } from "react-native";
 import { useColors } from "@/hooks/useColors";
@@ -57,6 +58,8 @@ export default function EditShiftScreen() {
   const queryClient = useQueryClient();
   const { id } = useLocalSearchParams<{ id: string }>();
   const topPad = useTopPad();
+  const navigation = useNavigation();
+  useLayoutEffect(() => { (navigation as any).setOptions?.({ headerShown: false }); }, [navigation]);
 
   const { data: shift, isLoading, error, refetch } = useGetShift(id!, {
     query: { queryKey: getGetShiftQueryKey(id!), enabled: !!id, retry: 1 },
