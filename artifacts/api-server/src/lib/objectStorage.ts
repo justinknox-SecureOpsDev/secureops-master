@@ -165,6 +165,27 @@ export class ObjectStorageService {
     );
   }
 
+  /**
+   * Download an object's full body into memory. Used by the share
+   * watermark proxy — the API needs the raw bytes so it can overlay
+   * a recipient/timestamp footer before forwarding to the recipient.
+   * Caller decides whether to apply the watermark based on
+   * `contentType`. The original object in storage is not touched.
+   */
+  async downloadObjectBuffer(
+    objectPath: string,
+  ): Promise<{ buffer: Buffer; contentType: string; filename: string; size: number }> {
+    const file = await this.getObjectEntityFile(objectPath);
+    const [metadata] = await file.getMetadata();
+    const [body] = await file.download();
+    return {
+      buffer: body,
+      contentType: (metadata.contentType as string) || "application/octet-stream",
+      filename: file.name.split("/").pop() || "document",
+      size: body.length,
+    };
+  }
+
   async getSignedDownloadURL(objectPath: string, ttlSec = 300): Promise<string> {
     // Verifies existence, then mints a presigned GET URL.
     const file = await this.getObjectEntityFile(objectPath);

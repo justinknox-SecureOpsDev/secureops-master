@@ -9,8 +9,15 @@ import {
 } from "@workspace/db";
 import { requireAdmin } from "../middlewares/auth";
 import { tokenLookupLimiter, publicShareExpensiveLimiter } from "../middlewares/rateLimit";
-import { ObjectStorageService } from "../lib/objectStorage";
+import { ObjectStorageService, ObjectNotFoundError } from "../lib/objectStorage";
 import { buildEmployeeProfilePdf } from "../lib/profilePdf";
+import {
+  watermarkPdfBuffer,
+  watermarkImageBuffer,
+  isPdfContentType,
+  isWatermarkableImageContentType,
+  type WatermarkInfo,
+} from "../lib/watermark";
 
 const router: IRouter = Router();
 const storage = new ObjectStorageService();
@@ -34,6 +41,25 @@ function trustedPublicOrigin(): string | null {
 function buildShareUrl(token: string): string | null {
   const origin = trustedPublicOrigin();
   return origin ? `${origin}/admin-portal/share/employee/${token}` : null;
+}
+
+/**
+ * Build an absolute URL pointing at the watermark-proxy download
+ * endpoint for one document on this share. Returns null when no
+ * trusted origin is configured — callers should fall back to omitting
+ * the link (we do NOT leak a raw signed object-storage URL here,
+ * because that would bypass the watermark).
+ */
+function buildWatermarkUrl(token: string, slot: string): string | null {
+  const origin = trustedPublicOrigin();
+  return origin
+    ? `${origin}/api/public/employee-shares/${encodeURIComponent(token)}/document/${encodeURIComponent(slot)}`
+    : null;
+}
+
+/** First 8 chars of the share token — short enough to skim, long enough to disambiguate in audits. */
+function shortIdOf(token: string): string {
+  return token.slice(0, 8);
 }
 
 const SECTION_KEYS: ReadonlyArray<keyof EmployeeShareVisibleSections> = [
@@ -312,37 +338,30 @@ router.get("/public/employee-shares/:token", tokenLookupLimiter, async (req, res
   const filenameOf = (key: string | null | undefined): string | null =>
     key ? (key.split("/").pop() ?? null) : null;
 
-  // Short-lived signed URLs (5 min) re-issued every time the recipient
-  // reloads the page. Section toggles already gate which entries are
-  // even constructed below, so a failure to sign one doc never leaks
-  // anything — we just emit `url: null` and the UI falls back to
-  // showing the filename without a download button.
-  const SIGN_TTL_SEC = 300;
-  const signKey = async (key: string | null | undefined): Promise<string | null> => {
-    if (!key) return null;
-    try { return await storage.getSignedDownloadURL(key, SIGN_TTL_SEC); }
-    catch (err) { req.log.warn({ err, key }, "Could not sign share document"); return null; }
-  };
-  const buildDoc = async (label: string, key: string | null | undefined) => ({
+  // Document download URLs route through the watermark proxy below so
+  // every byte the recipient receives carries a recipient-label +
+  // short-token-id + access-timestamp footer. We never hand out the
+  // raw signed object-storage URL on the public surface — that would
+  // bypass the watermark and defeat the point of this feature.
+  const buildDoc = (label: string, key: string | null | undefined, slot: string) => ({
     label,
     filename: filenameOf(key),
-    url: await signKey(key),
+    url: key ? buildWatermarkUrl(token, slot) : null,
   });
 
   const docs = sections.documents
-    ? (await Promise.all([
-        buildDoc("CV / résumé", row.cvKey),
-        buildDoc("TX security license", row.licenseDocKey),
-        buildDoc("Passport / photo ID", row.passportDocKey),
-        buildDoc("Right-to-work doc", row.rightToWorkDocKey),
-        buildDoc("W-2 / pay stub", row.payStubDocKey),
-      ])).filter((d) => !!d.filename)
+    ? [
+        buildDoc("CV / résumé", row.cvKey, "cv"),
+        buildDoc("TX security license", row.licenseDocKey, "license"),
+        buildDoc("Passport / photo ID", row.passportDocKey, "passport"),
+        buildDoc("Right-to-work doc", row.rightToWorkDocKey, "right-to-work"),
+        buildDoc("W-2 / pay stub", row.payStubDocKey, "pay-stub"),
+      ].filter((d) => !!d.filename)
     : [];
   const certs = sections.trainingCerts
-    ? await Promise.all(
-        (Array.isArray(row.trainingCertificateKeys) ? row.trainingCertificateKeys as string[] : [])
-          .map((k, i) => buildDoc(`Training certificate ${i + 1}`, k))
-      ).then((arr) => arr.filter((d) => !!d.filename))
+    ? (Array.isArray(row.trainingCertificateKeys) ? row.trainingCertificateKeys as string[] : [])
+        .map((k, i) => buildDoc(`Training certificate ${i + 1}`, k, `training-${i}`))
+        .filter((d) => !!d.filename)
     : [];
 
   res.json({
@@ -395,15 +414,47 @@ router.get(
     // SSN, contact, DOB, emergency contact, hourly rate, references,
     // and acknowledgements. The per-link `visibleSections` map further
     // pares back which optional sections render.
+    // Resolve the employee row so we can map document keys to share
+    // slot ids — the embedded links inside the PDF must route through
+    // the watermark proxy, not raw signed URLs.
+    const [empRow] = await db
+      .select({
+        cvKey: employeesTable.cvKey,
+        licenseDocKey: employeesTable.licenseDocKey,
+        passportDocKey: employeesTable.passportDocKey,
+        rightToWorkDocKey: employeesTable.rightToWorkDocKey,
+        payStubDocKey: employeesTable.payStubDocKey,
+        trainingCertificateKeys: employeesTable.trainingCertificateKeys,
+      })
+      .from(employeesTable)
+      .where(eq(employeesTable.userId, r.share.employeeUserId));
+    const keyToSlot = new Map<string, string>();
+    if (empRow) {
+      if (empRow.cvKey) keyToSlot.set(empRow.cvKey, "cv");
+      if (empRow.licenseDocKey) keyToSlot.set(empRow.licenseDocKey, "license");
+      if (empRow.passportDocKey) keyToSlot.set(empRow.passportDocKey, "passport");
+      if (empRow.rightToWorkDocKey) keyToSlot.set(empRow.rightToWorkDocKey, "right-to-work");
+      if (empRow.payStubDocKey) keyToSlot.set(empRow.payStubDocKey, "pay-stub");
+      const certs = Array.isArray(empRow.trainingCertificateKeys)
+        ? empRow.trainingCertificateKeys as string[]
+        : [];
+      certs.forEach((k, i) => { if (k) keyToSlot.set(k, `training-${i}`); });
+    }
+
     const payload = await buildEmployeeProfilePdf(r.share.employeeUserId, {
       redactForPublicShare: true,
       publicSections: resolveSections(r.share.visibleSections),
-      // Embed short-lived signed download URLs so the recipient can
-      // open the underlying documents straight from the PDF without
-      // needing to re-load the share page. TTL matches the JSON
-      // surface — recipients reload for fresh links.
+      // Embed download links that route through the watermark proxy
+      // (NOT raw signed object-storage URLs) so any file the recipient
+      // pulls from the embedded link still gets watermarked. Returning
+      // null from the builder drops that link silently — keeps the PDF
+      // valid even if a key fell out of the keyToSlot map.
       includeDocumentLinks: true,
-      documentLinkTtlSec: 300,
+      documentUrlBuilder: (key: string) => {
+        const slot = keyToSlot.get(key);
+        if (!slot) return null;
+        return buildWatermarkUrl(token, slot);
+      },
     });
     if (!payload) { res.status(404).json({ error: "Officer not found" }); return; }
 
@@ -412,6 +463,131 @@ router.get(
     res.setHeader("Cache-Control", "private, no-store");
     payload.stream.pipe(res);
     void Readable;
+  },
+);
+
+// ---------- Public: watermarked download proxy ----------
+// Resolves a share + slot id to one of the employee's stored object
+// keys, fetches the file from object storage, overlays a footer /
+// banner watermark with the share recipient label + short token id +
+// access timestamp, and streams the watermarked copy. The source
+// object in storage is never modified.
+//
+// Only the public-share path uses this — admin/self downloads still
+// hit the un-watermarked signed-URL endpoints in routes/storage.ts so
+// internal consumers see the original file.
+router.get(
+  "/public/employee-shares/:token/document/:slot",
+  publicShareExpensiveLimiter,
+  tokenLookupLimiter,
+  async (req: Request, res: Response): Promise<void> => {
+    const token = String(req.params.token);
+    const slot = String(req.params.slot);
+    const r = await loadActiveShare(token);
+    if (r.status !== 200) { res.status(r.status).json({ error: r.error }); return; }
+
+    const sections = resolveSections(r.share.visibleSections);
+
+    // Resolve slot → object key against the employee's row, enforcing
+    // the same per-section visibility toggles the JSON surface honours.
+    // Without this check, a recipient could request `pay-stub` against
+    // a link whose admin had toggled the "documents" section off.
+    const [empRow] = await db
+      .select({
+        cvKey: employeesTable.cvKey,
+        licenseDocKey: employeesTable.licenseDocKey,
+        passportDocKey: employeesTable.passportDocKey,
+        rightToWorkDocKey: employeesTable.rightToWorkDocKey,
+        payStubDocKey: employeesTable.payStubDocKey,
+        trainingCertificateKeys: employeesTable.trainingCertificateKeys,
+      })
+      .from(employeesTable)
+      .where(eq(employeesTable.userId, r.share.employeeUserId));
+    if (!empRow) { res.status(404).json({ error: "Document not found" }); return; }
+
+    let objectKey: string | null = null;
+    if (sections.documents) {
+      if (slot === "cv") objectKey = empRow.cvKey;
+      else if (slot === "license") objectKey = empRow.licenseDocKey;
+      else if (slot === "passport") objectKey = empRow.passportDocKey;
+      else if (slot === "right-to-work") objectKey = empRow.rightToWorkDocKey;
+      else if (slot === "pay-stub") objectKey = empRow.payStubDocKey;
+    }
+    if (!objectKey && sections.trainingCerts) {
+      const m = /^training-(\d+)$/.exec(slot);
+      if (m) {
+        const idx = Number(m[1]);
+        const certs = Array.isArray(empRow.trainingCertificateKeys)
+          ? empRow.trainingCertificateKeys as string[]
+          : [];
+        if (Number.isInteger(idx) && idx >= 0 && idx < certs.length) {
+          objectKey = certs[idx] ?? null;
+        }
+      }
+    }
+    if (!objectKey) { res.status(404).json({ error: "Document not found" }); return; }
+
+    // Atomic re-check + bookkeeping BEFORE we fetch / emit bytes. A
+    // simultaneous revoke must abort the download.
+    const stillActive = await reverifyAndBumpView(r.share.id);
+    if (!stillActive) {
+      res.status(410).json({ error: "This share link is no longer active" });
+      return;
+    }
+
+    let source: { buffer: Buffer; contentType: string; filename: string };
+    try {
+      source = await storage.downloadObjectBuffer(objectKey);
+    } catch (err) {
+      if (err instanceof ObjectNotFoundError) {
+        res.status(404).json({ error: "Document not found" });
+        return;
+      }
+      req.log.error({ err, key: objectKey }, "Could not fetch share document");
+      res.status(502).json({ error: "Document unavailable" });
+      return;
+    }
+
+    const info: WatermarkInfo = {
+      recipientLabel: r.share.recipientLabel?.trim() || "external recipient",
+      tokenShortId: shortIdOf(token),
+      accessedAt: new Date(),
+    };
+
+    let outBuf = source.buffer;
+    let outType = source.contentType;
+    try {
+      if (isPdfContentType(source.contentType)) {
+        outBuf = await watermarkPdfBuffer(source.buffer, info);
+        outType = "application/pdf";
+      } else if (isWatermarkableImageContentType(source.contentType)) {
+        const wm = await watermarkImageBuffer(source.buffer, info);
+        outBuf = wm.buffer;
+        outType = wm.contentType;
+      }
+      // Otherwise: pass through untouched. We deliberately do NOT block
+      // unknown content types — recipients still need the file.
+    } catch (err) {
+      req.log.warn(
+        { err, key: objectKey, contentType: source.contentType },
+        "Watermark overlay failed — streaming raw bytes",
+      );
+      // Fall through with the original buffer so the recipient still
+      // gets the file even if watermarking blew up on a malformed
+      // PDF / image.
+    }
+
+    res.setHeader("Content-Type", outType);
+    res.setHeader("Content-Length", String(outBuf.length));
+    // Cache-Control: 'private, no-store' — these URLs are tied to a
+    // single access event and the watermark is timestamped, so a
+    // shared cache holding the response would defeat the audit trail.
+    res.setHeader("Cache-Control", "private, no-store");
+    res.setHeader(
+      "Content-Disposition",
+      `attachment; filename="${source.filename.replace(/[\r\n"\\]/g, "_")}"`,
+    );
+    res.status(200).end(outBuf);
   },
 );
 

@@ -89,6 +89,15 @@ export async function buildEmployeeProfilePdf(
     includeDocumentLinks?: boolean;
     /** TTL (seconds) for embedded document links. Clamped to 60–900. */
     documentLinkTtlSec?: number;
+    /**
+     * Override how a document link is built. When provided, this is
+     * called instead of minting a raw signed object-storage URL —
+     * letting the public share path route links through the watermark
+     * proxy so the recipient never gets an un-watermarked copy.
+     * Return null to fall through to the default (signed URL) behaviour
+     * for that key; throw / return null+log on failure to drop the link.
+     */
+    documentUrlBuilder?: (key: string) => string | null;
   } = {},
 ): Promise<ProfilePdfPayload | null> {
   // When `redactForPublicShare` is true we strip every field that would
@@ -401,9 +410,16 @@ export async function buildEmployeeProfilePdf(
     const signed = new Map<string, string>();
     if (wantLinks) {
       const ttl = Math.max(60, Math.min(opts.documentLinkTtlSec ?? 300, 900));
+      const builder = opts.documentUrlBuilder;
       await Promise.all(presentDocs.map(async ([, key]) => {
-        try { signed.set(key, await objectStorage.getSignedDownloadURL(key, ttl)); }
-        catch (err) { logger.warn({ err, key }, "[profilePdf] could not sign doc link"); }
+        try {
+          if (builder) {
+            const url = builder(key);
+            if (url) signed.set(key, url);
+            return;
+          }
+          signed.set(key, await objectStorage.getSignedDownloadURL(key, ttl));
+        } catch (err) { logger.warn({ err, key }, "[profilePdf] could not sign doc link"); }
       }));
     }
 
