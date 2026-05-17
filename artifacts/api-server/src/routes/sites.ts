@@ -2,8 +2,29 @@ import { Router, type IRouter } from "express";
 import { eq, sql } from "drizzle-orm";
 import { db, sitesTable, clientsTable } from "@workspace/db";
 import { requireAdmin } from "../middlewares/auth";
+import { geocodeOnelineAddress } from "../lib/geocode";
 
 const router: IRouter = Router();
+
+// Admin-only address-to-coords helper used by the Site form's "Geocode" button
+// and any other admin UI that needs to fill lat/lng from a typed address.
+// Routed BEFORE /sites/:id but on a distinct verb so there's no collision.
+router.post("/sites/geocode", requireAdmin, async (req, res): Promise<void> => {
+  const address = typeof req.body?.address === "string" ? req.body.address : "";
+  if (!address.trim()) {
+    res.status(400).json({ error: "Bad Request", message: "address is required" });
+    return;
+  }
+  const result = await geocodeOnelineAddress(address);
+  if (!result) {
+    res.status(422).json({
+      error: "No Match",
+      message: "Couldn't find that address. Check spelling, or add city/state/ZIP and try again.",
+    });
+    return;
+  }
+  res.json({ lat: result.lat, lng: result.lng });
+});
 
 router.get("/sites", requireAdmin, async (req, res): Promise<void> => {
   const { clientId } = req.query as { clientId?: string };

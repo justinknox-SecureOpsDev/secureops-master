@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import { Link, useRoute, useLocation } from "wouter";
-import { ArrowLeft, MapPin, Pencil, Plus, Trash2, QrCode } from "lucide-react";
+import { ArrowLeft, MapPin, Pencil, Plus, Trash2, QrCode, AlertTriangle } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { api } from "@/lib/api";
 import { useFkOptions } from "@/lib/fk";
@@ -153,6 +153,16 @@ export function SiteDetailPage() {
               {site.address && (
                 <div className="mt-1 text-sm text-muted-foreground inline-flex items-center gap-1">
                   <MapPin className="w-3.5 h-3.5" />{site.address}
+                </div>
+              )}
+              {site.locationLat != null && site.locationLng != null ? (
+                <div className="mt-1 text-xs text-muted-foreground">
+                  Coordinates: <span className="text-foreground font-medium">{site.locationLat}, {site.locationLng}</span>
+                </div>
+              ) : (
+                <div className="mt-2 inline-flex items-center gap-1.5 text-xs font-semibold text-amber-800 bg-amber-100 border border-amber-300 rounded px-2 py-1">
+                  <AlertTriangle className="w-3.5 h-3.5" />
+                  Needs coordinates — click <span className="underline">Edit site</span> and Geocode the address so this site is usable by the live map and the clock-in picker.
                 </div>
               )}
               {site.patrolIntervalMinutes != null && (

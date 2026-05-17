@@ -13,7 +13,7 @@ import { type Field, type TableDescriptor, singularize } from "@/lib/tables";
 import { api, ApiError } from "@/lib/api";
 import { FileUploadField, MultiFileUploadField } from "./FileUploadField";
 import { openSignedObject, type UploadedFile } from "@/lib/upload";
-import { ExternalLink } from "lucide-react";
+import { ExternalLink, MapPin, AlertTriangle } from "lucide-react";
 
 function FieldInput({
   field, value, onChange, onPickFkRow, filterValue,
@@ -207,6 +207,44 @@ export function RowFormDialog({
   const [values, setValues] = useState<Record<string, string>>({});
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [geocoding, setGeocoding] = useState(false);
+  const [geocodeMsg, setGeocodeMsg] = useState<string | null>(null);
+
+  const isSites = descriptor.name === "sites";
+  const sitesAddress = (values["address"] ?? "").trim();
+  const sitesHasCoords =
+    (values["locationLat"] ?? "").trim() !== "" &&
+    (values["locationLng"] ?? "").trim() !== "";
+
+  async function geocodeSiteAddress() {
+    if (!sitesAddress) {
+      setGeocodeMsg("Enter the site's street address first.");
+      return;
+    }
+    setGeocoding(true);
+    setGeocodeMsg(null);
+    try {
+      const r = await api<{ lat: number; lng: number }>(`/sites/geocode`, {
+        method: "POST",
+        body: { address: sitesAddress },
+      });
+      setValues((prev) => ({
+        ...prev,
+        locationLat: String(r.lat),
+        locationLng: String(r.lng),
+      }));
+      setGeocodeMsg(`Filled in coordinates (${r.lat.toFixed(5)}, ${r.lng.toFixed(5)}).`);
+    } catch (e) {
+      const err = e as ApiError | Error;
+      const msg =
+        (err as ApiError).data && typeof (err as ApiError).data === "object"
+          ? ((err as ApiError).data as { message?: string }).message ?? err.message
+          : err.message;
+      setGeocodeMsg(msg || "Couldn't geocode that address.");
+    } finally {
+      setGeocoding(false);
+    }
+  }
 
   useEffect(() => {
     if (!open) return;
@@ -222,6 +260,7 @@ export function RowFormDialog({
     }
     setValues(v);
     setError(null);
+    setGeocodeMsg(null);
   }, [open, initial, editable, presetValues]);
 
   async function submit() {
@@ -337,6 +376,40 @@ export function RowFormDialog({
             ));
           })()}
         </div>
+        {isSites && (
+          <div className="rounded border border-brand-gold/40 bg-brand-gold/5 p-3 space-y-2">
+            <div className="flex items-center justify-between gap-3">
+              <div className="text-xs">
+                <div className="font-semibold brand-navy uppercase tracking-wide flex items-center gap-1">
+                  <MapPin className="w-3.5 h-3.5" /> Site coordinates
+                </div>
+                {sitesHasCoords ? (
+                  <div className="text-muted-foreground mt-0.5">
+                    Saved: {values["locationLat"]}, {values["locationLng"]}
+                  </div>
+                ) : (
+                  <div className="text-amber-700 mt-0.5 inline-flex items-center gap-1">
+                    <AlertTriangle className="w-3 h-3" />
+                    Needs coordinates — the live map and clock-in picker can't use this site until lat/lng are set.
+                  </div>
+                )}
+              </div>
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                onClick={geocodeSiteAddress}
+                disabled={geocoding || !sitesAddress}
+                title={sitesAddress ? "Look up lat/lng from the address above" : "Enter an address first"}
+              >
+                {geocoding ? "Geocoding…" : sitesHasCoords ? "Re-geocode" : "Geocode address"}
+              </Button>
+            </div>
+            {geocodeMsg && (
+              <div className="text-xs text-muted-foreground">{geocodeMsg}</div>
+            )}
+          </div>
+        )}
         {error && (
           <pre className="text-xs text-destructive whitespace-pre-wrap bg-destructive/5 p-2 rounded border border-destructive/20">
             {error}

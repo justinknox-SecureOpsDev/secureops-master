@@ -55,3 +55,39 @@ export async function geocodeUsAddress(parts: {
     return null;
   }
 }
+
+/**
+ * Same Census Bureau service but using the "onelineaddress" endpoint, which
+ * accepts a single free-text address ("123 Main St, Austin, TX 78701") and
+ * does its own parsing. Used by the admin "Geocode address" button on the
+ * Site form, where addresses are stored as a single textarea field.
+ */
+export async function geocodeOnelineAddress(address: string): Promise<GeocodeResult | null> {
+  const trimmed = address.trim();
+  if (!trimmed) return null;
+
+  const url = new URL("https://geocoding.geo.census.gov/geocoder/locations/onelineaddress");
+  url.searchParams.set("address", trimmed);
+  url.searchParams.set("benchmark", "Public_AR_Current");
+  url.searchParams.set("format", "json");
+
+  try {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 5000);
+    const res = await fetch(url.toString(), { signal: controller.signal });
+    clearTimeout(timeout);
+    if (!res.ok) {
+      logger.info({ status: res.status }, "Geocode (oneline) HTTP non-2xx");
+      return null;
+    }
+    const data = (await res.json()) as {
+      result?: { addressMatches?: Array<{ coordinates?: { x?: number; y?: number } }> };
+    };
+    const match = data.result?.addressMatches?.[0]?.coordinates;
+    if (typeof match?.x !== "number" || typeof match?.y !== "number") return null;
+    return { lat: match.y, lng: match.x };
+  } catch (err) {
+    logger.info({ err: (err as Error).message }, "Geocode (oneline) failed");
+    return null;
+  }
+}

@@ -227,20 +227,39 @@ export default function EmployeeClockScreen() {
           <Text style={{ color: colors.mutedForeground, fontSize: 12, marginBottom: 10 }}>
             Browser GPS isn't available in this preview. Pick the site you're clocking in at:
           </Text>
-          {((sitesList as any[]) ?? []).map((s: any) => (
-            <TouchableOpacity
-              key={s.id}
-              onPress={() => handlePickSite(s)}
-              style={[styles.entryCard, { backgroundColor: colors.background, borderColor: colors.border, padding: 12 }]}
-            >
-              <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
-                <Feather name="map-pin" size={14} color={colors.primary} />
-                <Text style={[{ color: colors.foreground, fontWeight: "600", flex: 1 }]}>{s.name}</Text>
-                <Feather name="chevron-right" size={16} color={colors.mutedForeground} />
-              </View>
-              {s.address && <Text style={{ color: colors.mutedForeground, fontSize: 12, marginTop: 4, marginLeft: 22 }}>{s.address}</Text>}
-            </TouchableOpacity>
-          ))}
+          {((sitesList as any[]) ?? []).map((s: any) => {
+            const hasCoords = s?.locationLat != null && s?.locationLng != null;
+            return (
+              <TouchableOpacity
+                key={s.id}
+                onPress={() => handlePickSite(s)}
+                disabled={!hasCoords}
+                style={[
+                  styles.entryCard,
+                  { backgroundColor: colors.background, borderColor: colors.border, padding: 12, opacity: hasCoords ? 1 : 0.55 },
+                ]}
+              >
+                <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
+                  <Feather name="map-pin" size={14} color={hasCoords ? colors.primary : colors.mutedForeground} />
+                  <Text style={[{ color: colors.foreground, fontWeight: "600", flex: 1 }]}>{s.name}</Text>
+                  {hasCoords ? (
+                    <Feather name="chevron-right" size={16} color={colors.mutedForeground} />
+                  ) : (
+                    <View style={{ flexDirection: "row", alignItems: "center", gap: 4, backgroundColor: "#fef3c7", borderColor: "#fcd34d", borderWidth: 1, paddingHorizontal: 6, paddingVertical: 2, borderRadius: 4 }}>
+                      <Feather name="alert-triangle" size={10} color="#92400e" />
+                      <Text style={{ color: "#92400e", fontSize: 10, fontWeight: "700" }}>NEEDS SETUP</Text>
+                    </View>
+                  )}
+                </View>
+                {s.address && <Text style={{ color: colors.mutedForeground, fontSize: 12, marginTop: 4, marginLeft: 22 }}>{s.address}</Text>}
+                {!hasCoords && (
+                  <Text style={{ color: "#92400e", fontSize: 11, marginTop: 4, marginLeft: 22 }}>
+                    Ask an admin to geocode this site's address.
+                  </Text>
+                )}
+              </TouchableOpacity>
+            );
+          })}
           {((sitesList as any[]) ?? []).length === 0 && (
             <Text style={{ color: colors.mutedForeground, fontSize: 12, textAlign: "center", padding: 20 }}>No sites configured.</Text>
           )}
