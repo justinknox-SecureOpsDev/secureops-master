@@ -2,7 +2,14 @@ import { useEffect, useState, useCallback } from "react";
 import { api } from "@/lib/api";
 import { Button } from "@/components/ui/button";
 import { useToast } from "@/hooks/use-toast";
-import { Link2, Loader2, Copy, Ban, ExternalLink } from "lucide-react";
+import { Link2, Loader2, Copy, Ban, ExternalLink, Pencil } from "lucide-react";
+import {
+  Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription,
+} from "@/components/ui/dialog";
+import {
+  EmployeeShareSectionsField, DEFAULT_SECTIONS,
+  type VisibleSections,
+} from "@/components/EmployeeShareSectionsField";
 
 type ShareLink = {
   id: string;
@@ -13,6 +20,7 @@ type ShareLink = {
   revokedAt: string | null;
   viewCount: number;
   lastViewedAt: string | null;
+  visibleSections: VisibleSections | null;
   createdAt: string;
   officerFirstName: string | null;
   officerLastName: string | null;
@@ -42,6 +50,9 @@ export default function EmployeeShareLinksPage() {
   const [rows, setRows] = useState<ShareLink[]>([]);
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState<string | null>(null);
+  const [editing, setEditing] = useState<ShareLink | null>(null);
+  const [editSections, setEditSections] = useState<VisibleSections>({ ...DEFAULT_SECTIONS });
+  const [savingEdit, setSavingEdit] = useState(false);
 
   const refresh = useCallback(async () => {
     setLoading(true);
@@ -64,6 +75,29 @@ export default function EmployeeShareLinksPage() {
       toast({ title: "Copied", description: "Share URL copied to clipboard." });
     } catch {
       toast({ title: "Copy failed", description: "Select the URL and copy manually.", variant: "destructive" });
+    }
+  }
+
+  function openEdit(r: ShareLink) {
+    setEditing(r);
+    setEditSections({ ...DEFAULT_SECTIONS, ...(r.visibleSections ?? {}) });
+  }
+
+  async function saveEdit() {
+    if (!editing) return;
+    setSavingEdit(true);
+    try {
+      await api(`/admin/employee-shares/${editing.id}`, {
+        method: "PATCH",
+        body: JSON.stringify({ visibleSections: editSections }),
+      });
+      toast({ title: "Sections updated", description: "The next view will reflect the new visibility." });
+      setEditing(null);
+      await refresh();
+    } catch (e) {
+      toast({ title: "Update failed", description: (e as Error).message, variant: "destructive" });
+    } finally {
+      setSavingEdit(false);
     }
   }
 
@@ -148,6 +182,11 @@ export default function EmployeeShareLinksPage() {
                           <ExternalLink className="w-3 h-3 mr-1" />Open
                         </Button>
                         {isActive && (
+                          <Button size="sm" variant="outline" onClick={() => openEdit(r)}>
+                            <Pencil className="w-3 h-3 mr-1" />Edit sections
+                          </Button>
+                        )}
+                        {isActive && (
                           <Button size="sm" variant="outline" disabled={busy === r.id} onClick={() => revoke(r)}>
                             {busy === r.id ? <Loader2 className="w-3 h-3 animate-spin" /> : <Ban className="w-3 h-3 mr-1" />}
                             Revoke
@@ -162,6 +201,33 @@ export default function EmployeeShareLinksPage() {
           </table>
         </div>
       )}
+
+      <Dialog open={!!editing} onOpenChange={(v) => { if (!savingEdit && !v) setEditing(null); }}>
+        <DialogContent className="max-w-lg">
+          <DialogHeader>
+            <DialogTitle className="brand-navy">Edit visible sections</DialogTitle>
+            <DialogDescription>
+              {editing?.recipientLabel
+                ? `Update what ${editing.recipientLabel} can see.`
+                : "Update what this recipient can see."}
+              {" "}Changes take effect the next time the link is opened — the URL stays the same.
+            </DialogDescription>
+          </DialogHeader>
+
+          <EmployeeShareSectionsField
+            value={editSections}
+            onChange={setEditSections}
+            disabled={savingEdit}
+          />
+
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setEditing(null)} disabled={savingEdit}>Cancel</Button>
+            <Button onClick={saveEdit} disabled={savingEdit} className="bg-brand-navy text-white hover:opacity-90">
+              {savingEdit ? <><Loader2 className="w-4 h-4 mr-1.5 animate-spin" />Saving…</> : "Save changes"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

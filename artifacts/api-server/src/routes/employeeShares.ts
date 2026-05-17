@@ -158,6 +158,44 @@ router.get("/admin/employee-shares", requireAdmin, async (req, res): Promise<voi
   })));
 });
 
+// ---------- Admin: edit visible sections on an existing share ----------
+router.patch("/admin/employee-shares/:id", requireAdmin, async (req, res): Promise<void> => {
+  const id = String(req.params.id);
+  const { visibleSections } = (req.body ?? {}) as { visibleSections?: unknown };
+  const sections = coerceSections(visibleSections);
+  if (!sections) {
+    res.status(400).json({ error: "Bad Request", message: "visibleSections is required" });
+    return;
+  }
+
+  // Only update rows that are still active (not revoked, not expired).
+  // Editing a dead link is a no-op from the recipient's perspective and
+  // would be confusing in the UI.
+  const now = new Date();
+  const updated = await db
+    .update(employeeShareLinksTable)
+    .set({ visibleSections: sections })
+    .where(and(
+      eq(employeeShareLinksTable.id, id),
+      isNull(employeeShareLinksTable.revokedAt),
+      sql`${employeeShareLinksTable.expiresAt} > ${now}`,
+    ))
+    .returning();
+  if (updated.length === 0) {
+    const [existing] = await db
+      .select({ id: employeeShareLinksTable.id })
+      .from(employeeShareLinksTable)
+      .where(eq(employeeShareLinksTable.id, id));
+    if (!existing) { res.status(404).json({ error: "Not Found" }); return; }
+    res.status(409).json({ error: "Conflict", message: "Link is revoked or expired" });
+    return;
+  }
+  res.json({
+    ...updated[0],
+    visibleSections: resolveSections(updated[0].visibleSections),
+  });
+});
+
 // ---------- Admin: revoke ----------
 router.post("/admin/employee-shares/:id/revoke", requireAdmin, async (req, res): Promise<void> => {
   const id = String(req.params.id);
