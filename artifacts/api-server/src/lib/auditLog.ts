@@ -98,6 +98,7 @@ const ACTION_RULES: Array<{ prefix: string; action: string }> = [
   { prefix: "/sites", action: "sites.write" },
   { prefix: "/invoices", action: "invoices.write" },
   { prefix: "/incidents", action: "incidents.write" },
+  { prefix: "/time-entries", action: "time_entries.write" },
 ];
 
 function classifyAction(path: string): string | null {

@@ -295,6 +295,101 @@ router.get("/time-entries/active", requireAuth, async (req, res): Promise<void> 
   res.json(entry);
 });
 
+// Admin patches a missing clock-out on an existing time entry.
+//
+// Used from the Payroll Board "Missing clock-out" warning so admins can
+// fix a stuck entry in one click instead of editing the raw DB row.
+// Accepts either an explicit ISO clockOutTime, or `useShiftEnd:true` to
+// snap to the linked shift's scheduled end. Recomputes hoursWorked from
+// the new clock-out and clockIn (rounded to 0.01h, matching clock-out).
+// Rejects entries that already have a clockOutTime to avoid silently
+// overwriting verified payroll data.
+router.patch("/time-entries/:id/clock-out", requireAdmin, async (req, res): Promise<void> => {
+  const id = Array.isArray(req.params.id) ? req.params.id[0] : req.params.id;
+  const { clockOutTime, useShiftEnd, notes } = req.body ?? {};
+
+  const [existing] = await db.select().from(timeEntriesTable).where(eq(timeEntriesTable.id, id));
+  if (!existing) { res.status(404).json({ error: "Not Found" }); return; }
+  if (existing.clockOutTime) {
+    res.status(409).json({
+      error: "Conflict",
+      message: "This time entry already has a clock-out time. Edit it from the time entries grid instead.",
+    });
+    return;
+  }
+
+  let targetClockOut: Date | null = null;
+  if (useShiftEnd) {
+    if (!existing.shiftId) {
+      res.status(400).json({
+        error: "Bad Request",
+        message: "This entry isn't linked to a shift, so there is no scheduled end. Provide an explicit clockOutTime instead.",
+      });
+      return;
+    }
+    const [shift] = await db.select().from(shiftsTable).where(eq(shiftsTable.id, existing.shiftId));
+    if (!shift) {
+      res.status(400).json({ error: "Bad Request", message: "Linked shift no longer exists." });
+      return;
+    }
+    targetClockOut = shift.endTime;
+  } else if (clockOutTime) {
+    const parsed = new Date(clockOutTime);
+    if (isNaN(parsed.getTime())) {
+      res.status(400).json({ error: "Bad Request", message: "clockOutTime must be a valid ISO timestamp." });
+      return;
+    }
+    targetClockOut = parsed;
+  } else {
+    res.status(400).json({ error: "Bad Request", message: "Provide clockOutTime or useShiftEnd:true." });
+    return;
+  }
+
+  if (targetClockOut.getTime() <= existing.clockInTime.getTime()) {
+    res.status(400).json({
+      error: "Bad Request",
+      message: "Clock-out must be after clock-in.",
+    });
+    return;
+  }
+
+  const hours = calcHours(existing.clockInTime, targetClockOut);
+
+  const [updated] = await db.update(timeEntriesTable).set({
+    clockOutTime: targetClockOut,
+    hoursWorked: String(hours),
+    notes: notes ?? existing.notes,
+  }).where(eq(timeEntriesTable.id, id)).returning();
+
+  // Mirror the clock-out endpoint's shift-completion flip so an open shift
+  // doesn't stay "active" after the admin patches the only outstanding entry.
+  if (updated.shiftId) {
+    await db
+      .update(shiftsTable)
+      .set({ status: "completed" })
+      .where(and(
+        eq(shiftsTable.id, updated.shiftId),
+        eq(shiftsTable.status, "active"),
+        sql`NOT EXISTS (
+          SELECT 1 FROM ${timeEntriesTable}
+          WHERE ${timeEntriesTable.shiftId} = ${updated.shiftId}
+            AND ${timeEntriesTable.clockOutTime} IS NULL
+        )`,
+      ));
+  }
+
+  const [shift] = updated.shiftId
+    ? await db.select().from(shiftsTable).where(eq(shiftsTable.id, updated.shiftId))
+    : [undefined];
+  const [user] = await db.select().from(usersTable).where(eq(usersTable.id, updated.employeeId));
+
+  res.json({
+    ...updated,
+    shiftTitle: shift?.title,
+    employeeName: user ? `${user.firstName} ${user.lastName}` : null,
+  });
+});
+
 // Admin approves/rejects a time entry. Approval is required before payroll/invoice picks it up.
 router.post("/time-entries/:id/approve", requireAdmin, async (req, res): Promise<void> => {
   const id = Array.isArray(req.params.id) ? req.params.id[0] : req.params.id;

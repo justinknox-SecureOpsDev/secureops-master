@@ -403,7 +403,7 @@ type BoardBucket = {
   timeEntryIds: string[];
   // Lightweight per-entry detail so the admin UI can expand a bucket row and
   // verify the underlying approved shifts without a second round-trip.
-  entries: Array<{ id: string; clockInTime: string; hoursWorked: number; rate: number }>;
+  entries: Array<{ id: string; clockInTime: string; hoursWorked: number; rate: number; hasClockOut: boolean; scheduledEnd: string | null }>;
   existingPayrollEntryId: string | null;
   existingStatus: string | null; // pending | processed | paid | null (none)
   // Per-bucket warnings surfaced on the Payroll Board so admins notice
@@ -453,6 +453,9 @@ async function computeBoardBuckets(filters: {
       // clock-out). Track it explicitly so the warning is "missing clock-out"
       // rather than the more confusing "zero hours" when summed.
       hasClockOut: sql<boolean>`${timeEntriesTable.clockOutTime} IS NOT NULL`,
+      // Scheduled shift end is surfaced so the Payroll Board can offer a
+      // one-click "Set clock-out to scheduled end" fix on stuck entries.
+      shiftEndTime: shiftsTable.endTime,
     })
     .from(timeEntriesTable)
     .leftJoin(shiftsTable, eq(timeEntriesTable.shiftId, shiftsTable.id))
@@ -472,7 +475,7 @@ async function computeBoardBuckets(filters: {
     hours: number;
     gross: number;
     timeEntryIds: string[];
-    entries: Array<{ id: string; clockInTime: string; hoursWorked: number; rate: number }>;
+    entries: Array<{ id: string; clockInTime: string; hoursWorked: number; rate: number; hasClockOut: boolean; scheduledEnd: string | null }>;
     zeroRateEntries: number;
     missingClockOutEntries: number;
     zeroHoursEntries: number;
@@ -531,6 +534,8 @@ async function computeBoardBuckets(filters: {
       clockInTime: r.clockInTime.toISOString(),
       hoursWorked: Math.round(hours * 100) / 100,
       rate: Math.round(rate * 100) / 100,
+      hasClockOut: !!r.hasClockOut,
+      scheduledEnd: r.shiftEndTime ? r.shiftEndTime.toISOString() : null,
     });
   }
 
@@ -570,8 +575,8 @@ async function computeBoardBuckets(filters: {
     if (b.missingClockOutEntries > 0) {
       warnings.push(
         b.missingClockOutEntries === 1
-          ? "Missing clock-out on 1 time entry (hours counted as 0)"
-          : `Missing clock-out on ${b.missingClockOutEntries} time entries (hours counted as 0)`,
+          ? "Missing clock-out on 1 time entry — expand the row and click Set clock-out to fix it"
+          : `Missing clock-out on ${b.missingClockOutEntries} time entries — expand the row and click Set clock-out on each to fix them`,
       );
     }
     if (b.zeroHoursEntries > 0) {

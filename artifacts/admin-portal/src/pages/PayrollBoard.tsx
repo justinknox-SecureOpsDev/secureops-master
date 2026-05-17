@@ -1,6 +1,6 @@
 import { Fragment, useEffect, useMemo, useState } from "react";
 import { useLocation } from "wouter";
-import { Banknote, Loader2, ChevronRight, ChevronDown, ArrowRight, AlertTriangle } from "lucide-react";
+import { Banknote, Loader2, ChevronRight, ChevronDown, ArrowRight, AlertTriangle, Clock } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -20,7 +20,7 @@ type BoardBucket = {
   hourlyRate: number;
   grossPay: number;
   timeEntryIds: string[];
-  entries: Array<{ id: string; clockInTime: string; hoursWorked: number; rate: number }>;
+  entries: Array<{ id: string; clockInTime: string; hoursWorked: number; rate: number; hasClockOut: boolean; scheduledEnd: string | null }>;
   existingPayrollEntryId: string | null;
   existingStatus: string | null;
   warnings: string[];
@@ -78,6 +78,16 @@ export default function PayrollBoardPage() {
   const [busy, setBusy] = useState(false);
   const [dialogOpen, setDialogOpen] = useState(false);
   const [mode, setMode] = useState<"ach_csv" | "manual">("ach_csv");
+  // Fix-clock-out dialog state. Opened from a "Set clock-out" button on
+  // entries that are missing a clockOut. Snaps to scheduled shift end or
+  // accepts a custom datetime.
+  const [fixEntry, setFixEntry] = useState<
+    | { id: string; clockInTime: string; scheduledEnd: string | null; employeeName: string | null }
+    | null
+  >(null);
+  const [fixMode, setFixMode] = useState<"scheduled" | "custom">("scheduled");
+  const [fixCustom, setFixCustom] = useState("");
+  const [fixBusy, setFixBusy] = useState(false);
   const [toast, setToast] = useState<{ kind: "ok" | "err"; msg: string } | null>(null);
   const [sites, setSites] = useState<Array<{ id: string; name: string }>>([]);
 
@@ -166,6 +176,43 @@ export default function PayrollBoardPage() {
     [allBuckets, selected],
   );
   const selGross = selectedBuckets.reduce((a, b) => a + b.grossPay, 0);
+
+  // Patch a missing clock-out so the entry becomes payable. Server
+  // recomputes hoursWorked from clockIn → chosen clockOut and audit-logs
+  // the change (admin actor recorded via the auditLog middleware).
+  const submitFix = async () => {
+    if (!fixEntry) return;
+    setFixBusy(true);
+    try {
+      const body: { useShiftEnd?: boolean; clockOutTime?: string } = {};
+      if (fixMode === "scheduled") {
+        body.useShiftEnd = true;
+      } else {
+        if (!fixCustom) {
+          showToast("err", "Pick a clock-out date and time.");
+          setFixBusy(false);
+          return;
+        }
+        // The datetime-local input is naive — assume the admin entered
+        // a local timestamp and let JS apply the browser timezone.
+        const parsed = new Date(fixCustom);
+        if (isNaN(parsed.getTime())) {
+          showToast("err", "That clock-out time isn't valid.");
+          setFixBusy(false);
+          return;
+        }
+        body.clockOutTime = parsed.toISOString();
+      }
+      await api(`/time-entries/${fixEntry.id}/clock-out`, { method: "PATCH", body });
+      setFixEntry(null);
+      showToast("ok", "Clock-out saved. Hours have been recomputed.");
+      await reload();
+    } catch (e) {
+      showToast("err", `Couldn't save clock-out: ${(e as Error).message}`);
+    } finally {
+      setFixBusy(false);
+    }
+  };
 
   const submitProcess = async () => {
     if (selectedBuckets.length === 0) return;
@@ -443,12 +490,39 @@ export default function PayrollBoardPage() {
                                     </thead>
                                     <tbody>
                                       {b.entries.map((e) => (
-                                        <tr key={e.id} className="border-t border-gray-200">
+                                        <tr key={e.id} className={`border-t border-gray-200 ${!e.hasClockOut ? "bg-amber-50/60" : ""}`}>
                                           <td className="px-2 py-1">{new Date(e.clockInTime).toLocaleString()}</td>
-                                          <td className="px-2 py-1 text-right">{e.hoursWorked.toFixed(2)}</td>
+                                          <td className="px-2 py-1 text-right">
+                                            {e.hasClockOut ? e.hoursWorked.toFixed(2) : <span className="text-amber-800">— no clock-out</span>}
+                                          </td>
                                           <td className="px-2 py-1 text-right">{fmtUsd(e.rate)}</td>
                                           <td className="px-2 py-1 text-right">{fmtUsd(e.hoursWorked * e.rate)}</td>
-                                          <td className="px-2 py-1 font-mono text-[10px] text-muted-foreground">{e.id}</td>
+                                          <td className="px-2 py-1 font-mono text-[10px] text-muted-foreground">
+                                            <div className="flex items-center gap-2">
+                                              <span>{e.id}</span>
+                                              {!e.hasClockOut && (
+                                                <Button
+                                                  size="sm"
+                                                  variant="outline"
+                                                  className="h-6 px-2 text-[10px] gap-1"
+                                                  onClick={() => {
+                                                    setFixEntry({
+                                                      id: e.id,
+                                                      clockInTime: e.clockInTime,
+                                                      scheduledEnd: e.scheduledEnd,
+                                                      employeeName: b.employeeName,
+                                                    });
+                                                    setFixMode(e.scheduledEnd ? "scheduled" : "custom");
+                                                    setFixCustom("");
+                                                  }}
+                                                  title="Patch the missing clock-out so this entry becomes payable"
+                                                >
+                                                  <Clock className="w-3 h-3" />
+                                                  Set clock-out
+                                                </Button>
+                                              )}
+                                            </div>
+                                          </td>
                                         </tr>
                                       ))}
                                     </tbody>
@@ -467,6 +541,66 @@ export default function PayrollBoardPage() {
           })}
         </div>
       )}
+
+      <Dialog open={!!fixEntry} onOpenChange={(o) => { if (!o) setFixEntry(null); }}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Set missing clock-out</DialogTitle>
+            <DialogDescription>
+              {fixEntry?.employeeName ?? "This officer"} clocked in at{" "}
+              {fixEntry && new Date(fixEntry.clockInTime).toLocaleString()} but never clocked out.
+              Pick a clock-out time and we'll recompute their hours. This is recorded in the audit log.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-3 py-2">
+            <label className={`flex items-start gap-3 p-3 border rounded ${fixEntry?.scheduledEnd ? "cursor-pointer hover:bg-gray-50" : "opacity-60 cursor-not-allowed"}`}>
+              <input
+                type="radio"
+                name="fixMode"
+                value="scheduled"
+                checked={fixMode === "scheduled"}
+                onChange={() => setFixMode("scheduled")}
+                disabled={!fixEntry?.scheduledEnd}
+                className="mt-1"
+              />
+              <div>
+                <div className="font-medium">Use scheduled shift end</div>
+                <div className="text-xs text-muted-foreground">
+                  {fixEntry?.scheduledEnd
+                    ? new Date(fixEntry.scheduledEnd).toLocaleString()
+                    : "No linked shift — pick a custom time instead."}
+                </div>
+              </div>
+            </label>
+            <label className="flex items-start gap-3 p-3 border rounded cursor-pointer hover:bg-gray-50">
+              <input
+                type="radio"
+                name="fixMode"
+                value="custom"
+                checked={fixMode === "custom"}
+                onChange={() => setFixMode("custom")}
+                className="mt-1"
+              />
+              <div className="flex-1">
+                <div className="font-medium">Enter a clock-out time</div>
+                <Input
+                  type="datetime-local"
+                  className="h-9 mt-2"
+                  value={fixCustom}
+                  onChange={(e) => { setFixCustom(e.target.value); setFixMode("custom"); }}
+                />
+              </div>
+            </label>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setFixEntry(null)} disabled={fixBusy}>Cancel</Button>
+            <Button onClick={submitFix} disabled={fixBusy} className="bg-brand-navy text-white hover:opacity-90">
+              {fixBusy ? <Loader2 className="w-4 h-4 animate-spin mr-2" /> : null}
+              Save clock-out
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
         <DialogContent>
