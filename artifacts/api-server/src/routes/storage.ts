@@ -219,13 +219,24 @@ router.get("/me/storage/sign", requireAuth, async (req: Request, res: Response) 
       return;
     }
 
+    // Only honour employee document keys that live under the caller's own
+    // upload prefix. The authenticated upload endpoint mints paths at
+    // /objects/uploads/u/<userId>/<uuid> so any legitimately self-uploaded
+    // file satisfies this check. This prevents an attacker who managed to
+    // write a foreign path into one of these columns (e.g. via the application
+    // or onboarding flows, or a prior write before the PATCH /me/employee
+    // ownership check was added) from obtaining a signed URL for another
+    // user's private document. Documents from anonymous application/onboarding
+    // uploads (path /objects/uploads/<uuid>, no user prefix) are intentionally
+    // excluded here and remain accessible only to admins via /admin/storage/sign.
+    const ownedPrefix = `/objects/uploads/u/${req.user!.userId}/`;
     const owned = new Set<string>();
     for (const k of [emp.photoKey, emp.cvKey, emp.licenseDocKey, emp.passportDocKey, emp.rightToWorkDocKey, emp.payStubDocKey]) {
-      if (k) owned.add(k);
+      if (k && k.startsWith(ownedPrefix)) owned.add(k);
     }
     if (Array.isArray(emp.trainingCertificateKeys)) {
       for (const k of emp.trainingCertificateKeys as unknown[]) {
-        if (typeof k === "string") owned.add(k);
+        if (typeof k === "string" && k.startsWith(ownedPrefix)) owned.add(k);
       }
     }
 
@@ -233,7 +244,6 @@ router.get("/me/storage/sign", requireAuth, async (req: Request, res: Response) 
     // owns, but only when the path is under their bound upload prefix. The
     // create endpoint already enforces this prefix, so DB-stored values are
     // trustworthy; this guard prevents regressions if that ever changes.
-    const ownedPrefix = `/objects/uploads/u/${req.user!.userId}/`;
     const myIncidents = await db
       .select({ attachments: incidentsTable.attachments })
       .from(incidentsTable)

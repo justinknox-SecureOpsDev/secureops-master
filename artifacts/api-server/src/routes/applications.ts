@@ -123,6 +123,32 @@ function genToken(): string {
   return randomBytes(24).toString("base64url");
 }
 
+/**
+ * Validate that an object path submitted by an applicant/onboarding user was
+ * minted by the anonymous application-upload endpoint rather than by an
+ * authenticated user's upload session.
+ *
+ * Authenticated uploads land at /objects/uploads/u/<userId>/... — a
+ * user-scoped prefix that encodes the uploader's identity. Anonymous
+ * application uploads land at /objects/uploads/<uuid> — no /u/ segment.
+ *
+ * Accepting a user-scoped path in an anonymous flow would allow an attacker
+ * to plant another user's private document key into an application record,
+ * where it could later be copied to an employee row and redeemed for a
+ * signed download URL.
+ */
+function isApplicationObjectPath(path: string): boolean {
+  // Require the path to be under the anonymous-upload namespace only.
+  // The application-upload endpoint mints paths at /objects/uploads/<uuid>.
+  // User-scoped authenticated uploads land at /objects/uploads/u/<userId>/...
+  // and must never be accepted from anonymous/token-based flows.
+  // Any other /objects/... namespace is also rejected to prevent out-of-band
+  // object references from being planted into application records.
+  if (!path.startsWith("/objects/uploads/")) return false;
+  if (path.startsWith("/objects/uploads/u/")) return false;
+  return true;
+}
+
 // Random 12-char temp password — avoids visually ambiguous characters so it
 // can be read back from a screen/email without confusion.
 const TEMP_PW_ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnpqrstuvwxyz23456789";
@@ -241,6 +267,24 @@ router.post("/applications", publicApplicationLimiter, async (req, res): Promise
     return;
   }
   const d = parsed.data;
+  // Reject any submitted document path that was minted by an authenticated
+  // upload session (i.e. starts with /objects/uploads/u/). Only anonymous
+  // application-upload paths are accepted in this unauthenticated flow.
+  const applicationFilePaths: (string | undefined)[] = [
+    d.rightToWorkDoc?.objectPath,
+    d.i9Doc?.objectPath,
+    d.ssnCardDoc?.objectPath,
+    d.idDoc?.objectPath,
+    d.photo?.objectPath,
+    d.cv?.objectPath,
+    ...(d.trainingCertificates?.map((f) => f.objectPath) ?? []),
+  ];
+  for (const p of applicationFilePaths) {
+    if (p !== undefined && !isApplicationObjectPath(p)) {
+      res.status(400).json({ error: "Bad Request", message: "Invalid document path." });
+      return;
+    }
+  }
   try {
     const [row] = await db.insert(applicationsTable).values({
       firstName: d.firstName,
@@ -789,7 +833,12 @@ router.post("/applications/amend/:token", tokenLookupLimiter, async (req, res): 
         res.status(400).json({ error: "Bad Request", message: `Field "${k}" must be an uploaded file.` });
         return;
       }
-      updates[def.column] = (raw as { objectPath: string }).objectPath;
+      const objectPath = (raw as { objectPath: string }).objectPath;
+      if (!isApplicationObjectPath(objectPath)) {
+        res.status(400).json({ error: "Bad Request", message: `Invalid document path for field "${k}".` });
+        return;
+      }
+      updates[def.column] = objectPath;
     } else if (def.type === "number") {
       const n = typeof raw === "number" ? raw : Number(raw);
       if (!Number.isFinite(n)) {
@@ -932,6 +981,21 @@ router.post("/onboarding/:token", tokenLookupLimiter, async (req, res): Promise<
     return;
   }
   const d = parsed.data;
+
+  // Reject any submitted document path that was minted by an authenticated
+  // upload session (i.e. starts with /objects/uploads/u/). Only anonymous
+  // application-upload paths are valid in this token-based flow.
+  const onboardingFilePaths: (string | undefined)[] = [
+    d.p45Doc?.objectPath,
+    d.siaLicenseDoc?.objectPath,
+    d.passportDoc?.objectPath,
+  ];
+  for (const p of onboardingFilePaths) {
+    if (p !== undefined && !isApplicationObjectPath(p)) {
+      res.status(400).json({ error: "Bad Request", message: "Invalid document path." });
+      return;
+    }
+  }
 
   // Fail-closed validation: every currently-active policy MUST appear
   // in the submission, AND each ack must reference (by policyId) a row

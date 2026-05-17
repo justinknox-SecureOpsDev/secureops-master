@@ -473,6 +473,30 @@ router.patch("/me/employee", requireAuth, async (req, res): Promise<void> => {
     res.status(401).json({ error: "Unauthorized", message: "Your session is no longer valid. Please sign in again." });
     return;
   }
+  // Ownership check: document keys must be under the caller's own upload
+  // prefix. The authenticated upload endpoint (/storage/uploads/request-url)
+  // mints paths at /objects/uploads/u/<userId>/<uuid>, so a legitimately
+  // self-uploaded file always satisfies this prefix. Rejecting any other
+  // prefix prevents an attacker from planting a foreign object path (e.g.
+  // another user's private document) into their own employee record and then
+  // redeeming a signed download URL for it via /me/storage/sign.
+  const ownedUploadPrefix = `/objects/uploads/u/${userId}/`;
+  const scalarDocFields = ["photoKey", "cvKey", "licenseDocKey", "passportDocKey", "rightToWorkDocKey"] as const;
+  for (const field of scalarDocFields) {
+    const val = updates[field];
+    if (val != null && !val.startsWith(ownedUploadPrefix)) {
+      res.status(403).json({ error: "Forbidden", message: "Document key does not belong to your upload space." });
+      return;
+    }
+  }
+  if (updates.trainingCertificateKeys != null) {
+    for (const k of updates.trainingCertificateKeys) {
+      if (!k.startsWith(ownedUploadPrefix)) {
+        res.status(403).json({ error: "Forbidden", message: "Document key does not belong to your upload space." });
+        return;
+      }
+    }
+  }
   // Auto-create the employee profile row on first save. Admin users (and any
   // legacy users that pre-date the employees-row backfill) don't necessarily
   // have a row yet; the user is authenticated and the row is keyed by userId,
