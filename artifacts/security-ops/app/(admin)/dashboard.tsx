@@ -236,7 +236,7 @@ export default function AdminDashboardScreen() {
             <TouchableOpacity
               key={shift.id}
               style={[styles.listItem, { backgroundColor: colors.card, borderColor: colors.border }]}
-              onPress={() => router.push("/(admin)/shifts")}
+              onPress={() => router.push(`/(admin)/shifts/${shift.id}` as any)}
             >
               <Text style={[styles.itemTitle, { color: colors.foreground }]}>{shift.title}</Text>
               <Text style={[styles.itemSub, { color: colors.mutedForeground }]}>
