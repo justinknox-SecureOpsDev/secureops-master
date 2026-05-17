@@ -5,6 +5,7 @@ import {
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { Feather } from "@expo/vector-icons";
+import { useRouter } from "expo-router";
 import { useColors } from "@/hooks/useColors";
 import { useAuth } from "@/contexts/AuthContext";
 import { useChat } from "@/contexts/ChatContext";
@@ -19,6 +20,7 @@ interface Props {
 
 export default function ChatRoomScreen({ roomId, roomName }: Props) {
   const colors = useColors();
+  const router = useRouter();
   const { user } = useAuth();
   const { subscribeToRoom, sendMessage } = useChat();
   const tabBarHeight = Platform.OS === "ios" ? 84 : 60;
@@ -105,8 +107,18 @@ export default function ChatRoomScreen({ roomId, roomName }: Props) {
   return (
     <SafeAreaView style={[s.container, { backgroundColor: colors.background, paddingBottom: tabBarHeight }]} edges={["top", "bottom"]}>
       <View style={[s.topBar, { backgroundColor: colors.card, borderBottomColor: colors.border }]}>
+        <TouchableOpacity
+          onPress={() => (router.canGoBack() ? router.back() : router.replace("/(employee)/chat"))}
+          style={s.backBtn}
+          hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
+          accessibilityLabel="Back to chats"
+        >
+          <Feather name="chevron-left" size={26} color={colors.foreground} />
+        </TouchableOpacity>
         <Feather name="hash" size={18} color={colors.primary} />
-        <Text style={[s.roomTitle, { color: colors.foreground }]}>{roomName}</Text>
+        <Text style={[s.roomTitle, { color: colors.foreground }]} numberOfLines={1}>
+          {roomName}
+        </Text>
       </View>
 
       {loading ? (
@@ -156,10 +168,11 @@ const styles = (colors: ReturnType<typeof useColors>) => StyleSheet.create({
   container: { flex: 1 },
   center: { flex: 1, alignItems: "center", justifyContent: "center", padding: 32 },
   topBar: {
-    flexDirection: "row", alignItems: "center", gap: 8, paddingHorizontal: 16,
-    paddingVertical: 12, borderBottomWidth: 1,
+    flexDirection: "row", alignItems: "center", gap: 8, paddingHorizontal: 8,
+    paddingVertical: 10, borderBottomWidth: 1,
   },
-  roomTitle: { fontSize: 16, fontWeight: "700" },
+  backBtn: { padding: 6, marginRight: 2 },
+  roomTitle: { fontSize: 16, fontWeight: "700", flex: 1 },
   list: { paddingHorizontal: 12, paddingVertical: 12, gap: 10, flexGrow: 1, justifyContent: "flex-end" },
   msgRow: { flexDirection: "row", alignItems: "flex-end", gap: 8 },
   msgRowMine: { flexDirection: "row-reverse" },

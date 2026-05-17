@@ -28,7 +28,20 @@ import { DailyReportsPage } from "@/pages/DailyReports";
 import CompliancePage from "@/pages/Compliance";
 import NotFound from "@/pages/not-found";
 
-const queryClient = new QueryClient();
+const queryClient = new QueryClient({
+  defaultOptions: {
+    queries: {
+      // 10s stale window + refetch on focus/reconnect keeps the admin grids
+      // in sync with mobile officer actions (clock in/out, claim, decline,
+      // incidents) without forcing a manual refresh.
+      staleTime: 10_000,
+      refetchOnWindowFocus: true,
+      refetchOnReconnect: true,
+      refetchOnMount: true,
+      retry: 1,
+    },
+  },
+});
 
 function Routed() {
   const { user, loading } = useAuth();
