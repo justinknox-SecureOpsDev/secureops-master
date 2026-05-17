@@ -3237,6 +3237,27 @@ components:
         - email
         - phone
         - address
+        - city
+        - state
+        - zip
+        - dateOfBirth
+        - cityOfBirth
+        - stateOfBirth
+        - niNumber
+        - i9Doc
+        - ssnCardDoc
+        - idDocType
+        - idDoc
+        - siaLicenseNumber
+        - siaLicenseLevel
+        - siaLicenseExpiry
+        - previousExperience
+        - yearsExperience
+        - references
+        - photo
+        - cv
+        - trainingCertificates
+        - availability
       properties:
         firstName: { type: string }
         lastName: { type: string }
@@ -3249,34 +3270,45 @@ components:
             Invalid numbers (not 10 US digits, not 11 US digits starting with 1, or not "+" followed by 8–15 digits)
             return 400.
         address: { type: string, description: "Street address (line 1, optionally line 2)" }
-        city: { type: string, nullable: true }
-        state: { type: string, nullable: true, description: "US state code, e.g. TX" }
-        zip: { type: string, nullable: true }
-        dateOfBirth: { type: string, nullable: true }
-        cityOfBirth: { type: string, nullable: true }
-        stateOfBirth: { type: string, nullable: true }
-        niNumber: { type: string, nullable: true }
-        rightToWorkStatus: { type: string, nullable: true }
-        rightToWorkDoc: { $ref: "#/components/schemas/UploadedFile", nullable: true, description: "Deprecated. Use i9Doc + ssnCardDoc + idDoc." }
-        i9Doc: { $ref: "#/components/schemas/UploadedFile", nullable: true, description: "Completed Form I-9." }
-        ssnCardDoc: { $ref: "#/components/schemas/UploadedFile", nullable: true, description: "Photo/scan of Social Security card." }
-        idDocType: { type: string, nullable: true, enum: [drivers_license, passport], description: "Which ID accompanies the SSN card." }
-        idDoc: { $ref: "#/components/schemas/UploadedFile", nullable: true, description: "Photo/scan of driver's license OR passport." }
-        siaLicenseNumber: { type: string, nullable: true }
-        siaLicenseLevel: { type: integer, nullable: true, enum: [2, 3, 4] }
-        siaLicenseExpiry: { type: string, nullable: true }
-        previousExperience: { type: string, nullable: true }
-        yearsExperience: { type: integer, nullable: true }
+        city: { type: string }
+        state: { type: string, description: "US state code, e.g. TX" }
+        zip: { type: string }
+        dateOfBirth: { type: string }
+        cityOfBirth: { type: string }
+        stateOfBirth: { type: string }
+        niNumber: { type: string }
+        rightToWorkStatus:
+          type: string
+          nullable: true
+          deprecated: true
+          description: "Deprecated US right-to-work status string (kept for back-compat; I-9 + SSN + photo ID are the authoritative US set)."
+        rightToWorkDoc:
+          allOf: [{ $ref: "#/components/schemas/UploadedFile" }]
+          nullable: true
+          deprecated: true
+          description: "Deprecated right-to-work document (kept for back-compat; I-9 + SSN + photo ID are the authoritative US set)."
+        i9Doc: { $ref: "#/components/schemas/UploadedFile", description: "Completed Form I-9." }
+        ssnCardDoc: { $ref: "#/components/schemas/UploadedFile", description: "Photo/scan of Social Security card." }
+        idDocType: { type: string, enum: [drivers_license, passport], description: "Which ID accompanies the SSN card." }
+        idDoc: { $ref: "#/components/schemas/UploadedFile", description: "Photo/scan of driver's license OR passport." }
+        siaLicenseNumber: { type: string }
+        siaLicenseLevel: { type: integer, enum: [2, 3, 4] }
+        siaLicenseExpiry: { type: string }
+        previousExperience: { type: string }
+        yearsExperience: { type: integer }
         references:
           type: array
+          minItems: 1
           items: { $ref: "#/components/schemas/ApplicationReference" }
-        photo: { $ref: "#/components/schemas/UploadedFile", nullable: true }
-        cv: { $ref: "#/components/schemas/UploadedFile", nullable: true }
+        photo: { $ref: "#/components/schemas/UploadedFile" }
+        cv: { $ref: "#/components/schemas/UploadedFile" }
         trainingCertificates:
           type: array
+          minItems: 1
           items: { $ref: "#/components/schemas/UploadedFile" }
         availability:
           type: array
+          minItems: 1
           items: { $ref: "#/components/schemas/AvailabilityCell" }
 
     Application:

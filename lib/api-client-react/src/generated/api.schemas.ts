@@ -1162,8 +1162,7 @@ export interface AvailabilityCell {
  * Which ID accompanies the SSN card.
  */
 export type SubmitApplicationRequestIdDocType =
-  | (typeof SubmitApplicationRequestIdDocType)[keyof typeof SubmitApplicationRequestIdDocType]
-  | null;
+  (typeof SubmitApplicationRequestIdDocType)[keyof typeof SubmitApplicationRequestIdDocType];
 
 export const SubmitApplicationRequestIdDocType = {
   drivers_license: "drivers_license",
@@ -1171,8 +1170,7 @@ export const SubmitApplicationRequestIdDocType = {
 } as const;
 
 export type SubmitApplicationRequestSiaLicenseLevel =
-  | (typeof SubmitApplicationRequestSiaLicenseLevel)[keyof typeof SubmitApplicationRequestSiaLicenseLevel]
-  | null;
+  (typeof SubmitApplicationRequestSiaLicenseLevel)[keyof typeof SubmitApplicationRequestSiaLicenseLevel];
 
 export const SubmitApplicationRequestSiaLicenseLevel = {
   NUMBER_2: 2,
@@ -1192,35 +1190,45 @@ return 400.
   phone: string;
   /** Street address (line 1, optionally line 2) */
   address: string;
-  city?: string | null;
+  city: string;
   /** US state code, e.g. TX */
-  state?: string | null;
-  zip?: string | null;
-  dateOfBirth?: string | null;
-  cityOfBirth?: string | null;
-  stateOfBirth?: string | null;
-  niNumber?: string | null;
+  state: string;
+  zip: string;
+  dateOfBirth: string;
+  cityOfBirth: string;
+  stateOfBirth: string;
+  niNumber: string;
+  /**
+   * Deprecated US right-to-work status string (kept for back-compat; I-9 + SSN + photo ID are the authoritative US set).
+   * @deprecated
+   */
   rightToWorkStatus?: string | null;
-  /** Deprecated. Use i9Doc + ssnCardDoc + idDoc. */
+  /**
+   * Deprecated right-to-work document (kept for back-compat; I-9 + SSN + photo ID are the authoritative US set).
+   * @deprecated
+   */
   rightToWorkDoc?: UploadedFile | null;
   /** Completed Form I-9. */
-  i9Doc?: UploadedFile | null;
+  i9Doc: UploadedFile;
   /** Photo/scan of Social Security card. */
-  ssnCardDoc?: UploadedFile | null;
+  ssnCardDoc: UploadedFile;
   /** Which ID accompanies the SSN card. */
-  idDocType?: SubmitApplicationRequestIdDocType;
+  idDocType: SubmitApplicationRequestIdDocType;
   /** Photo/scan of driver's license OR passport. */
-  idDoc?: UploadedFile | null;
-  siaLicenseNumber?: string | null;
-  siaLicenseLevel?: SubmitApplicationRequestSiaLicenseLevel;
-  siaLicenseExpiry?: string | null;
-  previousExperience?: string | null;
-  yearsExperience?: number | null;
-  references?: ApplicationReference[];
-  photo?: UploadedFile | null;
-  cv?: UploadedFile | null;
-  trainingCertificates?: UploadedFile[];
-  availability?: AvailabilityCell[];
+  idDoc: UploadedFile;
+  siaLicenseNumber: string;
+  siaLicenseLevel: SubmitApplicationRequestSiaLicenseLevel;
+  siaLicenseExpiry: string;
+  previousExperience: string;
+  yearsExperience: number;
+  /** @minItems 1 */
+  references: ApplicationReference[];
+  photo: UploadedFile;
+  cv: UploadedFile;
+  /** @minItems 1 */
+  trainingCertificates: UploadedFile[];
+  /** @minItems 1 */
+  availability: AvailabilityCell[];
 }
 
 export type ApplicationStatus =

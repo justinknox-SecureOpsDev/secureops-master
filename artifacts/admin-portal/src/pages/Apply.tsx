@@ -67,7 +67,7 @@ export function ApplyPage() {
   const [step, setStep] = useState(0);
   const [submitting, setSubmitting] = useState(false);
   const [submitted, setSubmitted] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const [error, setError] = useState<{ field?: string; message: string } | null>(null);
   const [form, setForm] = useState<Form>({
     firstName: "", lastName: "", email: "", phone: "",
     address: "", city: "", state: "", zip: "",
@@ -105,37 +105,69 @@ export function ApplyPage() {
     });
   }
 
-  function canAdvance(): true | string {
+  type FieldError = { field?: string; message: string };
+  function validateStep(): FieldError | null {
     if (step === 0) {
-      if (!form.firstName || !form.lastName) return "First and last name are required.";
-      if (!form.email) return "Email is required.";
-      if (!form.phone) return "Phone is required.";
+      if (!form.firstName) return { field: "firstName", message: "First name is required." };
+      if (!form.lastName) return { field: "lastName", message: "Last name is required." };
+      if (!form.email) return { field: "email", message: "Email is required." };
+      if (!form.phone) return { field: "phone", message: "Phone is required." };
       if (!normalizePhoneToE164(form.phone)) {
-        return "Phone number is invalid. Please enter a valid US phone number (e.g. (214) 555-1234) or include the country code (e.g. +44 20 1234 5678).";
+        return { field: "phone", message: "Phone number is invalid. Please enter a valid US phone number (e.g. (214) 555-1234) or include the country code (e.g. +44 20 1234 5678)." };
       }
-      if (!form.address) return "Street address is required.";
-      if (!form.city) return "City is required.";
-      if (!form.state) return "State is required.";
-      if (!form.zip) return "ZIP code is required.";
+      if (!form.address) return { field: "address", message: "Street address is required." };
+      if (!form.city) return { field: "city", message: "City is required." };
+      if (!form.state) return { field: "state", message: "State is required." };
+      if (!form.zip) return { field: "zip", message: "ZIP code is required." };
+      if (!form.dateOfBirth) return { field: "dateOfBirth", message: "Date of birth is required." };
+      if (!form.niNumber.trim()) return { field: "niNumber", message: "SSN (last 4) is required." };
+      if (!form.cityOfBirth.trim()) return { field: "cityOfBirth", message: "City of birth is required." };
+      if (!form.stateOfBirth.trim()) return { field: "stateOfBirth", message: "State of birth is required." };
     }
     if (step === 1) {
-      if (!form.i9Doc) return "Please upload your completed Form I-9.";
-      if (!form.ssnCardDoc) return "Please upload a photo of your Social Security card.";
-      if (!form.idDocType) return "Please select your photo ID type (driver's license or passport).";
-      if (!form.idDoc) return "Please upload a photo of your driver's license or passport.";
+      if (!form.i9Doc) return { field: "i9Doc", message: "Please upload your completed Form I-9." };
+      if (!form.ssnCardDoc) return { field: "ssnCardDoc", message: "Please upload a photo of your Social Security card." };
+      if (!form.idDocType) return { field: "idDocType", message: "Please select your photo ID type (driver's license or passport)." };
+      if (!form.idDoc) return { field: "idDoc", message: "Please upload a photo of your driver's license or passport." };
+    }
+    if (step === 2) {
+      if (!form.siaLicenseNumber.trim()) return { field: "siaLicenseNumber", message: "TX security license number is required." };
+      if (!form.siaLicenseLevel) return { field: "siaLicenseLevel", message: "License level is required." };
+      if (!form.siaLicenseExpiry) return { field: "siaLicenseExpiry", message: "License expiry date is required." };
+      if (!form.yearsExperience.trim()) return { field: "yearsExperience", message: "Years of experience is required." };
+      if (!form.previousExperience.trim()) return { field: "previousExperience", message: "Please describe your previous security experience." };
     }
     if (step === 3) {
-      // References step — phone is optional per reference, but if the
-      // applicant typed something we want it to parse as a real number so
-      // future reference-check SMS/voice flows don't silently skip it.
+      const filled = form.references.filter(
+        (r) => r.name.trim() && r.relationship.trim() && r.phone.trim(),
+      );
+      if (filled.length === 0) {
+        return { field: "ref:0:name", message: "Please provide at least one reference with name, relationship, and phone." };
+      }
       for (let i = 0; i < form.references.length; i++) {
         const r = form.references[i];
+        const anyTouched = r.name.trim() || r.relationship.trim() || r.phone.trim() || r.email.trim();
+        if (anyTouched) {
+          if (!r.name.trim()) return { field: `ref:${i}:name`, message: `Reference #${i + 1} name is required.` };
+          if (!r.relationship.trim()) return { field: `ref:${i}:relationship`, message: `Reference #${i + 1} relationship is required.` };
+          if (!r.phone.trim()) return { field: `ref:${i}:phone`, message: `Reference #${i + 1} phone is required.` };
+        }
         if (r.phone.trim() && !normalizePhoneToE164(r.phone)) {
-          return `Reference #${i + 1} phone is invalid. Please enter a valid US phone number (e.g. (214) 555-1234) or include the country code (e.g. +44 20 1234 5678), or leave it blank.`;
+          return { field: `ref:${i}:phone`, message: `Reference #${i + 1} phone is invalid. Please enter a valid US phone number (e.g. (214) 555-1234) or include the country code (e.g. +44 20 1234 5678).` };
         }
       }
+      if (!form.photo) return { field: "photo", message: "Please upload a head & shoulders photo." };
+      if (!form.cv) return { field: "cv", message: "Please upload your CV." };
+      if (form.trainingCertificates.length === 0) {
+        return { field: "trainingCertificates", message: "Please upload at least one training certificate." };
+      }
     }
-    return true;
+    if (step === 4) {
+      if (form.availability.length === 0) {
+        return { field: "availability", message: "Please tap at least one availability slot." };
+      }
+    }
+    return null;
   }
 
   async function submit() {
@@ -148,25 +180,30 @@ export function ApplyPage() {
         email: form.email,
         phone: form.phone,
         address: form.address,
-        city: form.city || null,
-        state: form.state || null,
-        zip: form.zip || null,
-        dateOfBirth: form.dateOfBirth || null,
-        cityOfBirth: form.cityOfBirth || null,
-        stateOfBirth: form.stateOfBirth || null,
-        niNumber: form.niNumber || null,
+        city: form.city,
+        state: form.state,
+        zip: form.zip,
+        dateOfBirth: form.dateOfBirth,
+        cityOfBirth: form.cityOfBirth,
+        stateOfBirth: form.stateOfBirth,
+        niNumber: form.niNumber,
         i9Doc: form.i9Doc,
         ssnCardDoc: form.ssnCardDoc,
-        idDocType: form.idDocType || null,
+        idDocType: form.idDocType,
         idDoc: form.idDoc,
-        siaLicenseNumber: form.siaLicenseNumber || null,
-        siaLicenseLevel: form.siaLicenseLevel ? Number(form.siaLicenseLevel) : null,
-        siaLicenseExpiry: form.siaLicenseExpiry || null,
-        previousExperience: form.previousExperience || null,
-        yearsExperience: form.yearsExperience ? Number(form.yearsExperience) : null,
-        references: form.references.filter((r) => r.name.trim()).map((r) => ({
-          name: r.name, relationship: r.relationship, phone: r.phone, email: r.email || undefined,
-        })),
+        siaLicenseNumber: form.siaLicenseNumber,
+        siaLicenseLevel: Number(form.siaLicenseLevel),
+        siaLicenseExpiry: form.siaLicenseExpiry,
+        previousExperience: form.previousExperience,
+        yearsExperience: Number(form.yearsExperience),
+        references: form.references
+          .filter((r) => r.name.trim() && r.relationship.trim() && r.phone.trim())
+          .map((r) => ({
+            name: r.name,
+            relationship: r.relationship,
+            phone: r.phone,
+            email: r.email || undefined,
+          })),
         photo: form.photo,
         cv: form.cv,
         trainingCertificates: form.trainingCertificates,
@@ -175,7 +212,7 @@ export function ApplyPage() {
       await api("/applications", { method: "POST", body });
       setSubmitted(true);
     } catch (e) {
-      setError((e as Error).message);
+      setError({ message: (e as Error).message });
     } finally {
       setSubmitting(false);
     }
@@ -207,29 +244,29 @@ export function ApplyPage() {
             <>
               <h2 className="brand-wordmark text-xl">Personal details</h2>
               <Two>
-                <Field label="First name *"><Input value={form.firstName} onChange={(e) => set("firstName", e.target.value)} /></Field>
-                <Field label="Last name *"><Input value={form.lastName} onChange={(e) => set("lastName", e.target.value)} /></Field>
+                <Field label="First name *" name="firstName" error={error}><Input value={form.firstName} onChange={(e) => set("firstName", e.target.value)} /></Field>
+                <Field label="Last name *" name="lastName" error={error}><Input value={form.lastName} onChange={(e) => set("lastName", e.target.value)} /></Field>
               </Two>
               <Two>
-                <Field label="Email *"><Input type="email" value={form.email} onChange={(e) => set("email", e.target.value)} /></Field>
-                <Field label="Phone *"><Input value={form.phone} onChange={(e) => set("phone", e.target.value)} /></Field>
+                <Field label="Email *" name="email" error={error}><Input type="email" value={form.email} onChange={(e) => set("email", e.target.value)} /></Field>
+                <Field label="Phone *" name="phone" error={error}><Input value={form.phone} onChange={(e) => set("phone", e.target.value)} /></Field>
               </Two>
-              <Field label="Street address *"><Textarea rows={2} value={form.address} onChange={(e) => set("address", e.target.value)} placeholder="Street, apt/unit" /></Field>
+              <Field label="Street address *" name="address" error={error}><Textarea rows={2} value={form.address} onChange={(e) => set("address", e.target.value)} placeholder="Street, apt/unit" /></Field>
               <Two>
-                <Field label="City *"><Input value={form.city} onChange={(e) => set("city", e.target.value)} /></Field>
-                <Field label="State *"><Input value={form.state} onChange={(e) => set("state", e.target.value.toUpperCase().slice(0, 2))} placeholder="TX" maxLength={2} /></Field>
+                <Field label="City *" name="city" error={error}><Input value={form.city} onChange={(e) => set("city", e.target.value)} /></Field>
+                <Field label="State *" name="state" error={error}><Input value={form.state} onChange={(e) => set("state", e.target.value.toUpperCase().slice(0, 2))} placeholder="TX" maxLength={2} /></Field>
               </Two>
               <Two>
-                <Field label="ZIP code *"><Input value={form.zip} onChange={(e) => set("zip", e.target.value)} placeholder="75001" /></Field>
+                <Field label="ZIP code *" name="zip" error={error}><Input value={form.zip} onChange={(e) => set("zip", e.target.value)} placeholder="75001" /></Field>
                 <div />
               </Two>
               <Two>
-                <Field label="Date of birth"><Input type="date" value={form.dateOfBirth} onChange={(e) => set("dateOfBirth", e.target.value)} /></Field>
-                <Field label="SSN (last 4)"><Input value={form.niNumber} onChange={(e) => set("niNumber", e.target.value)} /></Field>
+                <Field label="Date of birth *" name="dateOfBirth" error={error}><Input type="date" value={form.dateOfBirth} onChange={(e) => set("dateOfBirth", e.target.value)} /></Field>
+                <Field label="SSN (last 4) *" name="niNumber" error={error}><Input value={form.niNumber} onChange={(e) => set("niNumber", e.target.value)} /></Field>
               </Two>
               <Two>
-                <Field label="City of birth"><Input value={form.cityOfBirth} onChange={(e) => set("cityOfBirth", e.target.value)} /></Field>
-                <Field label="State / county of birth"><Input value={form.stateOfBirth} onChange={(e) => set("stateOfBirth", e.target.value)} /></Field>
+                <Field label="City of birth *" name="cityOfBirth" error={error}><Input value={form.cityOfBirth} onChange={(e) => set("cityOfBirth", e.target.value)} /></Field>
+                <Field label="State / county of birth *" name="stateOfBirth" error={error}><Input value={form.stateOfBirth} onChange={(e) => set("stateOfBirth", e.target.value)} /></Field>
               </Two>
             </>
           )}
@@ -255,21 +292,27 @@ export function ApplyPage() {
                   Print, complete Section 1, sign and date, then scan or photograph all pages.
                 </div>
               </div>
-              <FileUploadField
-                label="Completed Form I-9 (PDF or photos of all pages) *"
-                accept="image/*,.pdf"
-                value={form.i9Doc}
-                onChange={(v) => set("i9Doc", v)}
-                uploadFn={uploadFileAnon}
-              />
-              <FileUploadField
-                label="Social Security card (photo of front) *"
-                accept="image/*,.pdf"
-                value={form.ssnCardDoc}
-                onChange={(v) => set("ssnCardDoc", v)}
-                uploadFn={uploadFileAnon}
-              />
-              <Field label="Photo ID type *">
+              <div>
+                <FileUploadField
+                  label="Completed Form I-9 (PDF or photos of all pages) *"
+                  accept="image/*,.pdf"
+                  value={form.i9Doc}
+                  onChange={(v) => set("i9Doc", v)}
+                  uploadFn={uploadFileAnon}
+                />
+                <InlineError name="i9Doc" error={error} />
+              </div>
+              <div>
+                <FileUploadField
+                  label="Social Security card (photo of front) *"
+                  accept="image/*,.pdf"
+                  value={form.ssnCardDoc}
+                  onChange={(v) => set("ssnCardDoc", v)}
+                  uploadFn={uploadFileAnon}
+                />
+                <InlineError name="ssnCardDoc" error={error} />
+              </div>
+              <Field label="Photo ID type *" name="idDocType" error={error}>
                 <select
                   className="w-full border rounded h-10 px-3 bg-background"
                   value={form.idDocType}
@@ -280,30 +323,33 @@ export function ApplyPage() {
                   <option value="passport">Passport</option>
                 </select>
               </Field>
-              <FileUploadField
-                label={
-                  form.idDocType === "passport"
-                    ? "Passport (photo of ID page) *"
-                    : form.idDocType === "drivers_license"
-                    ? "Driver's License (photo of front) *"
-                    : "Photo ID (select type above first) *"
-                }
-                accept="image/*,.pdf"
-                value={form.idDoc}
-                onChange={(v) => set("idDoc", v)}
-                uploadFn={uploadFileAnon}
-              />
+              <div>
+                <FileUploadField
+                  label={
+                    form.idDocType === "passport"
+                      ? "Passport (photo of ID page) *"
+                      : form.idDocType === "drivers_license"
+                      ? "Driver's License (photo of front) *"
+                      : "Photo ID (select type above first) *"
+                  }
+                  accept="image/*,.pdf"
+                  value={form.idDoc}
+                  onChange={(v) => set("idDoc", v)}
+                  uploadFn={uploadFileAnon}
+                />
+                <InlineError name="idDoc" error={error} />
+              </div>
             </>
           )}
           {step === 2 && (
             <>
               <h2 className="brand-wordmark text-xl">TX security license & experience</h2>
               <Two>
-                <Field label="TX security license number"><Input value={form.siaLicenseNumber} onChange={(e) => set("siaLicenseNumber", e.target.value)} /></Field>
-                <Field label="License level">
+                <Field label="TX security license number *" name="siaLicenseNumber" error={error}><Input value={form.siaLicenseNumber} onChange={(e) => set("siaLicenseNumber", e.target.value)} /></Field>
+                <Field label="License level *" name="siaLicenseLevel" error={error}>
                   <select className="w-full border rounded h-10 px-3 bg-background"
                     value={form.siaLicenseLevel} onChange={(e) => set("siaLicenseLevel", e.target.value)}>
-                    <option value="">—</option>
+                    <option value="">Select…</option>
                     <option value="2">L2 — Unarmed</option>
                     <option value="3">L3 — Armed</option>
                     <option value="4">L4 — PPO</option>
@@ -311,10 +357,10 @@ export function ApplyPage() {
                 </Field>
               </Two>
               <Two>
-                <Field label="License expiry"><Input type="date" value={form.siaLicenseExpiry} onChange={(e) => set("siaLicenseExpiry", e.target.value)} /></Field>
-                <Field label="Years of experience"><Input type="number" min={0} value={form.yearsExperience} onChange={(e) => set("yearsExperience", e.target.value)} /></Field>
+                <Field label="License expiry *" name="siaLicenseExpiry" error={error}><Input type="date" value={form.siaLicenseExpiry} onChange={(e) => set("siaLicenseExpiry", e.target.value)} /></Field>
+                <Field label="Years of experience *" name="yearsExperience" error={error}><Input type="number" min={0} value={form.yearsExperience} onChange={(e) => set("yearsExperience", e.target.value)} /></Field>
               </Two>
-              <Field label="Describe your previous security experience">
+              <Field label="Describe your previous security experience *" name="previousExperience" error={error}>
                 <Textarea rows={5} value={form.previousExperience} onChange={(e) => set("previousExperience", e.target.value)} />
               </Field>
             </>
@@ -322,30 +368,45 @@ export function ApplyPage() {
           {step === 3 && (
             <>
               <h2 className="brand-wordmark text-xl">References & documents</h2>
+              <p className="text-sm text-muted-foreground">
+                At least one complete reference is required (name, relationship, and phone).
+              </p>
               {form.references.map((r, i) => (
                 <div key={i} className="p-3 border rounded space-y-2 bg-muted/30">
-                  <div className="text-xs uppercase tracking-wide opacity-70">Reference {i + 1}</div>
+                  <div className="text-xs uppercase tracking-wide opacity-70">
+                    Reference {i + 1}{i === 0 ? " *" : ""}
+                  </div>
                   <Two>
-                    <Field label="Name"><Input value={r.name} onChange={(e) => setRef(i, "name", e.target.value)} /></Field>
-                    <Field label="Relationship"><Input value={r.relationship} onChange={(e) => setRef(i, "relationship", e.target.value)} /></Field>
+                    <Field label={i === 0 ? "Name *" : "Name"} name={`ref:${i}:name`} error={error}><Input value={r.name} onChange={(e) => setRef(i, "name", e.target.value)} /></Field>
+                    <Field label={i === 0 ? "Relationship *" : "Relationship"} name={`ref:${i}:relationship`} error={error}><Input value={r.relationship} onChange={(e) => setRef(i, "relationship", e.target.value)} /></Field>
                   </Two>
                   <Two>
-                    <Field label="Phone"><Input value={r.phone} onChange={(e) => setRef(i, "phone", e.target.value)} /></Field>
+                    <Field label={i === 0 ? "Phone *" : "Phone"} name={`ref:${i}:phone`} error={error}><Input value={r.phone} onChange={(e) => setRef(i, "phone", e.target.value)} /></Field>
                     <Field label="Email"><Input type="email" value={r.email} onChange={(e) => setRef(i, "email", e.target.value)} /></Field>
                   </Two>
                 </div>
               ))}
               <Two>
-                <FileUploadField label="Head & shoulders photo" accept="image/*" value={form.photo} onChange={(v) => set("photo", v)} uploadFn={uploadFileAnon} />
-                <FileUploadField label="CV (PDF / DOC)" accept=".pdf,.doc,.docx" value={form.cv} onChange={(v) => set("cv", v)} uploadFn={uploadFileAnon} />
+                <div>
+                  <FileUploadField label="Head & shoulders photo *" accept="image/*" value={form.photo} onChange={(v) => set("photo", v)} uploadFn={uploadFileAnon} />
+                  <InlineError name="photo" error={error} />
+                </div>
+                <div>
+                  <FileUploadField label="CV (PDF / DOC) *" accept=".pdf,.doc,.docx" value={form.cv} onChange={(v) => set("cv", v)} uploadFn={uploadFileAnon} />
+                  <InlineError name="cv" error={error} />
+                </div>
               </Two>
-              <MultiFileUploadField label="Training certificates" accept="image/*,.pdf" value={form.trainingCertificates} onChange={(v) => set("trainingCertificates", v)} uploadFn={uploadFileAnon} />
+              <div>
+                <MultiFileUploadField label="Training certificates * (upload at least one)" accept="image/*,.pdf" value={form.trainingCertificates} onChange={(v) => set("trainingCertificates", v)} uploadFn={uploadFileAnon} />
+                <InlineError name="trainingCertificates" error={error} />
+              </div>
             </>
           )}
           {step === 4 && (
             <>
-              <h2 className="brand-wordmark text-xl">Availability</h2>
-              <p className="text-sm text-muted-foreground">Tap each shift period you can usually work.</p>
+              <h2 className="brand-wordmark text-xl">Availability *</h2>
+              <p className="text-sm text-muted-foreground">Tap each shift period you can usually work. At least one slot is required.</p>
+              <InlineError name="availability" error={error} />
               <div className="overflow-x-auto">
                 <table className="w-full text-sm">
                   <thead>
@@ -393,7 +454,7 @@ export function ApplyPage() {
                 <Sum k="Certificates" v={String(form.trainingCertificates.length)} />
                 <Sum k="Availability slots" v={String(form.availability.length)} />
               </dl>
-              {error && <div className="text-sm text-destructive bg-destructive/5 p-2 rounded border border-destructive/20">{error}</div>}
+              {error && <div className="text-sm text-destructive bg-destructive/5 p-2 rounded border border-destructive/20">{error.message}</div>}
             </>
           )}
 
@@ -407,8 +468,8 @@ export function ApplyPage() {
                 type="button"
                 className="bg-brand-navy hover:opacity-90 text-white"
                 onClick={() => {
-                  const ok = canAdvance();
-                  if (ok !== true) { setError(ok); return; }
+                  const err = validateStep();
+                  if (err) { setError(err); return; }
                   setError(null);
                   setStep((s) => Math.min(STEPS.length - 1, s + 1));
                 }}
@@ -450,13 +511,22 @@ function Stepper({ step, steps }: { step: number; steps: string[] }) {
   );
 }
 
-function Field({ label, children }: { label: string; children: React.ReactNode }) {
+function Field({ label, name, error, children }: { label: string; name?: string; error?: { field?: string; message: string } | null; children: React.ReactNode }) {
+  const showError = !!name && !!error && error.field === name;
   return (
     <div className="space-y-1">
       <Label className="text-xs uppercase font-semibold text-foreground/80">{label}</Label>
       {children}
+      {showError && (
+        <div className="text-xs text-destructive">{error!.message}</div>
+      )}
     </div>
   );
+}
+
+function InlineError({ name, error }: { name: string; error: { field?: string; message: string } | null }) {
+  if (!error || error.field !== name) return null;
+  return <div className="text-xs text-destructive mt-1">{error.message}</div>;
 }
 function Two({ children }: { children: React.ReactNode }) {
   return <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">{children}</div>;

@@ -2273,6 +2273,7 @@ export const AdminSignObjectDownloadResponse = zod.object({
 /**
  * @summary Submit a public job application
  */
+
 export const SubmitApplicationBody = zod.object({
   firstName: zod.string(),
   lastName: zod.string(),
@@ -2283,14 +2284,19 @@ export const SubmitApplicationBody = zod.object({
       'Phone number. Free-text accepted (e.g. \"(214) 555-1234\", \"214-555-1234\", \"+44 20 1234 5678\");\nserver normalizes to E.164 on submit, defaulting to US\/+1 when no country code is present.\nInvalid numbers (not 10 US digits, not 11 US digits starting with 1, or not \"+\" followed by 8–15 digits)\nreturn 400.\n',
     ),
   address: zod.string().describe("Street address (line 1, optionally line 2)"),
-  city: zod.string().nullish(),
-  state: zod.string().nullish().describe("US state code, e.g. TX"),
-  zip: zod.string().nullish(),
-  dateOfBirth: zod.string().nullish(),
-  cityOfBirth: zod.string().nullish(),
-  stateOfBirth: zod.string().nullish(),
-  niNumber: zod.string().nullish(),
-  rightToWorkStatus: zod.string().nullish(),
+  city: zod.string(),
+  state: zod.string().describe("US state code, e.g. TX"),
+  zip: zod.string(),
+  dateOfBirth: zod.string(),
+  cityOfBirth: zod.string(),
+  stateOfBirth: zod.string(),
+  niNumber: zod.string(),
+  rightToWorkStatus: zod
+    .string()
+    .nullish()
+    .describe(
+      "Deprecated US right-to-work status string (kept for back-compat; I-9 + SSN + photo ID are the authoritative US set).",
+    ),
   rightToWorkDoc: zod
     .object({
       name: zod.string(),
@@ -2299,7 +2305,9 @@ export const SubmitApplicationBody = zod.object({
       size: zod.number().optional(),
     })
     .nullish()
-    .describe("Deprecated. Use i9Doc + ssnCardDoc + idDoc."),
+    .describe(
+      "Deprecated right-to-work document (kept for back-compat; I-9 + SSN + photo ID are the authoritative US set).",
+    ),
   i9Doc: zod
     .object({
       name: zod.string(),
@@ -2307,7 +2315,6 @@ export const SubmitApplicationBody = zod.object({
       contentType: zod.string().optional(),
       size: zod.number().optional(),
     })
-    .nullish()
     .describe("Completed Form I-9."),
   ssnCardDoc: zod
     .object({
@@ -2316,11 +2323,9 @@ export const SubmitApplicationBody = zod.object({
       contentType: zod.string().optional(),
       size: zod.number().optional(),
     })
-    .nullish()
     .describe("Photo\/scan of Social Security card."),
   idDocType: zod
     .enum(["drivers_license", "passport"])
-    .nullish()
     .describe("Which ID accompanies the SSN card."),
   idDoc: zod
     .object({
@@ -2329,15 +2334,12 @@ export const SubmitApplicationBody = zod.object({
       contentType: zod.string().optional(),
       size: zod.number().optional(),
     })
-    .nullish()
     .describe("Photo\/scan of driver's license OR passport."),
-  siaLicenseNumber: zod.string().nullish(),
-  siaLicenseLevel: zod
-    .union([zod.literal(2), zod.literal(3), zod.literal(4)])
-    .nullish(),
-  siaLicenseExpiry: zod.string().nullish(),
-  previousExperience: zod.string().nullish(),
-  yearsExperience: zod.number().nullish(),
+  siaLicenseNumber: zod.string(),
+  siaLicenseLevel: zod.union([zod.literal(2), zod.literal(3), zod.literal(4)]),
+  siaLicenseExpiry: zod.string(),
+  previousExperience: zod.string(),
+  yearsExperience: zod.number(),
   references: zod
     .array(
       zod.object({
@@ -2347,23 +2349,19 @@ export const SubmitApplicationBody = zod.object({
         email: zod.string().optional(),
       }),
     )
-    .optional(),
-  photo: zod
-    .object({
-      name: zod.string(),
-      objectPath: zod.string(),
-      contentType: zod.string().optional(),
-      size: zod.number().optional(),
-    })
-    .nullish(),
-  cv: zod
-    .object({
-      name: zod.string(),
-      objectPath: zod.string(),
-      contentType: zod.string().optional(),
-      size: zod.number().optional(),
-    })
-    .nullish(),
+    .min(1),
+  photo: zod.object({
+    name: zod.string(),
+    objectPath: zod.string(),
+    contentType: zod.string().optional(),
+    size: zod.number().optional(),
+  }),
+  cv: zod.object({
+    name: zod.string(),
+    objectPath: zod.string(),
+    contentType: zod.string().optional(),
+    size: zod.number().optional(),
+  }),
   trainingCertificates: zod
     .array(
       zod.object({
@@ -2373,7 +2371,7 @@ export const SubmitApplicationBody = zod.object({
         size: zod.number().optional(),
       }),
     )
-    .optional(),
+    .min(1),
   availability: zod
     .array(
       zod.object({
@@ -2381,7 +2379,7 @@ export const SubmitApplicationBody = zod.object({
         period: zod.enum(["morning", "afternoon", "evening", "overnight"]),
       }),
     )
-    .optional(),
+    .min(1),
 });
 
 /**
