@@ -67,15 +67,23 @@ export default function RootLayout() {
     Inter_500Medium,
     Inter_600SemiBold,
     Inter_700Bold,
-    // Preload vector-icon fonts. Without this, Android (especially with the
-    // new architecture / preview builds) renders Feather / Material glyphs as
-    // empty boxes until something else triggers a font load.
-    ...Feather.font,
-    ...MaterialIcons.font,
-    ...MaterialCommunityIcons.font,
-    ...Ionicons.font,
-    ...FontAwesome.font,
   });
+
+  // Eagerly load vector-icon fonts. On Android (especially in Expo Go with the
+  // new architecture) the per-component lazy load from @expo/vector-icons
+  // races first paint and tab bar icons render as empty boxes. Calling
+  // loadFont() on mount registers the TTFs before any <Feather /> mounts.
+  useEffect(() => {
+    Promise.all([
+      Feather.loadFont(),
+      MaterialIcons.loadFont(),
+      MaterialCommunityIcons.loadFont(),
+      Ionicons.loadFont(),
+      FontAwesome.loadFont(),
+    ]).catch(() => {
+      // Best effort — components will retry their own load.
+    });
+  }, []);
 
   useEffect(() => {
     if (fontsLoaded || fontError) {
