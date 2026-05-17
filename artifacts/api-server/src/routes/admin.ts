@@ -33,6 +33,7 @@ import { requireAdmin } from "../middlewares/auth";
 import { sendEmail, renderPasswordResetEmail, renderInviteEmail } from "../lib/email";
 import { disconnectUser } from "../lib/wsManager";
 import { writeEmployeeFieldChanges } from "../lib/employeeChangeLog";
+import { preparePreUpdateBody as prepareSitePreUpdate, maybeAutoGeocode as maybeAutoGeocodeSite } from "../lib/siteGeocode";
 
 const router: IRouter = Router();
 
@@ -802,8 +803,11 @@ router.put("/admin/tables/:table/:id", requireAdmin, async (req, res): Promise<v
     // employee_changes. The generic spreadsheet update bypasses the
     // dedicated /employees/:id handler, so we have to replicate the log
     // write here too — otherwise admin grid edits go untracked.
+    // For the sites table, we also snapshot first so an address change can
+    // invalidate stale lat/lng (so the post-update auto-geocode picks up
+    // fresh coords for the new address).
     let beforeRow: Record<string, unknown> | null = null;
-    if (tableName === "employees") {
+    if (tableName === "employees" || tableName === "sites") {
       const rows = (await db
         .select()
         .from(cfg.table)
@@ -811,11 +815,19 @@ router.put("/admin/tables/:table/:id", requireAdmin, async (req, res): Promise<v
       beforeRow = rows[0] ?? null;
     }
 
+    if (tableName === "sites" && beforeRow) {
+      body = prepareSitePreUpdate(beforeRow as any, body);
+    }
+
     const updated = (await db.update(cfg.table).set(body).where(eq((cfg.table as any).id, id)).returning()) as unknown[];
-    const row = updated[0];
+    let row = updated[0];
     if (!row) {
       res.status(404).json({ error: "Not Found", message: `${cfg.label} not found` });
       return;
+    }
+
+    if (tableName === "sites") {
+      row = await maybeAutoGeocodeSite(row as Record<string, unknown>, req.log);
     }
 
     if (tableName === "employees" && beforeRow) {

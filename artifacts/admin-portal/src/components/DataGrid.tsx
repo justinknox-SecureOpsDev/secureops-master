@@ -163,10 +163,15 @@ export function DataGrid({
   const [geocodeBackfillResult, setGeocodeBackfillResult] = useState<{
     candidates: number;
     resolved: number;
+    refreshed?: number;
     unresolved: number;
     unresolvedSites: Array<{ id: string; name: string }>;
+    mode?: string;
   } | null>(null);
   const [geocodeBackfillError, setGeocodeBackfillError] = useState<string | null>(null);
+  // Opt-in: when true, the bulk backfill also re-resolves sites whose
+  // address text has drifted since the last successful geocode.
+  const [geocodeRefreshChanged, setGeocodeRefreshChanged] = useState(false);
 
   async function runGeocodeBackfill() {
     setGeocodeBackfillBusy(true);
@@ -176,9 +181,15 @@ export function DataGrid({
       const r = await api<{
         candidates: number;
         resolved: number;
+        refreshed?: number;
         unresolved: number;
         unresolvedSites: Array<{ id: string; name: string }>;
-      }>(`/sites/geocode-missing`, { method: "POST" });
+        mode?: string;
+      }>(`/sites/geocode-missing`, {
+        method: "POST",
+        body: JSON.stringify({ refreshChanged: geocodeRefreshChanged }),
+        headers: { "Content-Type": "application/json" },
+      });
       setGeocodeBackfillResult(r);
       load();
     } catch (e) {
@@ -365,15 +376,38 @@ export function DataGrid({
               </Button>
             )}
             {isSites && (
-              <Button
-                variant="outline"
-                onClick={runGeocodeBackfill}
-                disabled={geocodeBackfillBusy}
-                title="Look up lat/lng for every site that's still missing coordinates"
-              >
-                <MapPin className="w-4 h-4 mr-2" />
-                {geocodeBackfillBusy ? "Geocoding…" : "Geocode all missing"}
-              </Button>
+              <div className="flex items-center gap-2">
+                <label
+                  className="flex items-center gap-1.5 text-xs text-muted-foreground cursor-pointer select-none"
+                  title="Also re-geocode sites whose address text has changed since the last successful lookup"
+                >
+                  <input
+                    type="checkbox"
+                    checked={geocodeRefreshChanged}
+                    onChange={(e) => setGeocodeRefreshChanged(e.target.checked)}
+                    disabled={geocodeBackfillBusy}
+                    className="h-3.5 w-3.5"
+                  />
+                  Also refresh changed addresses
+                </label>
+                <Button
+                  variant="outline"
+                  onClick={runGeocodeBackfill}
+                  disabled={geocodeBackfillBusy}
+                  title={
+                    geocodeRefreshChanged
+                      ? "Look up lat/lng for sites missing coords AND re-resolve sites whose address has changed"
+                      : "Look up lat/lng for every site that's still missing coordinates"
+                  }
+                >
+                  <MapPin className="w-4 h-4 mr-2" />
+                  {geocodeBackfillBusy
+                    ? "Geocoding…"
+                    : geocodeRefreshChanged
+                      ? "Geocode missing + changed"
+                      : "Geocode all missing"}
+                </Button>
+              </div>
             )}
             <Button onClick={() => setCreating(true)} className="bg-brand-navy text-white hover:opacity-90">
               <Plus className="w-4 h-4 mr-2" />Add {singularize(descriptor.label)}
@@ -694,13 +728,20 @@ export function DataGrid({
                 <>
                   <div>
                     Checked <b>{geocodeBackfillResult.candidates}</b>{" "}
-                    {geocodeBackfillResult.candidates === 1 ? "site" : "sites"} missing
-                    coordinates.
+                    {geocodeBackfillResult.candidates === 1 ? "site" : "sites"}{" "}
+                    {geocodeBackfillResult.mode === "refresh_changed"
+                      ? "missing or with a changed address."
+                      : "missing coordinates."}
                   </div>
                   <div className="flex gap-4">
                     <div className="bg-emerald-50 border border-emerald-200 text-emerald-900 px-3 py-2 rounded flex-1">
                       <div className="text-xs uppercase tracking-wide">Resolved</div>
                       <div className="text-2xl font-semibold">{geocodeBackfillResult.resolved}</div>
+                      {(geocodeBackfillResult.refreshed ?? 0) > 0 && (
+                        <div className="text-[11px] text-emerald-800/80 mt-0.5">
+                          incl. {geocodeBackfillResult.refreshed} refreshed
+                        </div>
+                      )}
                     </div>
                     <div className="bg-amber-50 border border-amber-200 text-amber-900 px-3 py-2 rounded flex-1">
                       <div className="text-xs uppercase tracking-wide">Still unresolved</div>

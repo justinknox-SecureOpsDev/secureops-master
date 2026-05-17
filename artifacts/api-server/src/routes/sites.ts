@@ -1,8 +1,9 @@
 import { Router, type IRouter } from "express";
-import { and, eq, isNull, sql } from "drizzle-orm";
+import { and, eq, isNull, or, sql } from "drizzle-orm";
 import { db, sitesTable, clientsTable } from "@workspace/db";
 import { requireAdmin } from "../middlewares/auth";
 import { geocodeOnelineAddress } from "../lib/geocode";
+import { preparePreUpdateBody, maybeAutoGeocode } from "../lib/siteGeocode";
 
 const router: IRouter = Router();
 
@@ -31,16 +32,30 @@ router.post("/sites/geocode", requireAdmin, async (req, res): Promise<void> => {
 // touches rows that are still missing coords — and paced with a small delay
 // between calls so we don't hammer the public Census endpoint.
 router.post("/sites/geocode-missing", requireAdmin, async (req, res): Promise<void> => {
+  // Opt-in: when `refreshChanged` is true, also re-resolve sites whose
+  // current address text differs from the snapshot saved alongside the
+  // last successful geocode (so coordinates are likely stale after an
+  // admin edited the address).
+  const refreshChanged = req.body?.refreshChanged === true;
+
+  const hasAddress = sql`length(trim(coalesce(${sitesTable.address}, ''))) > 0`;
+  const addressDrifted = sql`coalesce(${sitesTable.lastGeocodedAddress}, '') <> coalesce(${sitesTable.address}, '')`;
+  const where = refreshChanged
+    ? and(hasAddress, or(isNull(sitesTable.locationLat), addressDrifted))
+    : and(isNull(sitesTable.locationLat), hasAddress);
+
   const rows = await db
     .select({
       id: sitesTable.id,
       name: sitesTable.name,
       address: sitesTable.address,
+      locationLat: sitesTable.locationLat,
     })
     .from(sitesTable)
-    .where(and(isNull(sitesTable.locationLat), sql`length(trim(coalesce(${sitesTable.address}, ''))) > 0`));
+    .where(where);
 
   let resolved = 0;
+  let refreshed = 0;
   const unresolved: Array<{ id: string; name: string }> = [];
 
   for (let i = 0; i < rows.length; i++) {
@@ -50,13 +65,26 @@ router.post("/sites/geocode-missing", requireAdmin, async (req, res): Promise<vo
       unresolved.push({ id: row.id, name: row.name });
       continue;
     }
+    const wasMissing = row.locationLat == null;
     const match = await geocodeOnelineAddress(address);
     if (match) {
+      // In missing-only mode we keep the original race-safe guard
+      // (skip the row if someone else filled coords in the meantime).
+      // In refresh-changed mode we want to overwrite stale coords, so
+      // the guard would defeat the whole point — drop it and key on id.
+      const guard = refreshChanged
+        ? eq(sitesTable.id, row.id)
+        : and(eq(sitesTable.id, row.id), isNull(sitesTable.locationLat));
       await db
         .update(sitesTable)
-        .set({ locationLat: String(match.lat), locationLng: String(match.lng) })
-        .where(and(eq(sitesTable.id, row.id), isNull(sitesTable.locationLat)));
+        .set({
+          locationLat: String(match.lat),
+          locationLng: String(match.lng),
+          lastGeocodedAddress: address,
+        })
+        .where(guard);
       resolved++;
+      if (!wasMissing) refreshed++;
     } else {
       unresolved.push({ id: row.id, name: row.name });
     }
@@ -67,8 +95,10 @@ router.post("/sites/geocode-missing", requireAdmin, async (req, res): Promise<vo
   res.json({
     candidates: rows.length,
     resolved,
+    refreshed,
     unresolved: unresolved.length,
     unresolvedSites: unresolved.slice(0, 25),
+    mode: refreshChanged ? "refresh_changed" : "missing_only",
   });
 });
 
@@ -116,36 +146,26 @@ router.get("/sites/:id", requireAdmin, async (req, res): Promise<void> => {
 router.put("/sites/:id", requireAdmin, async (req, res): Promise<void> => {
   const id = Array.isArray(req.params.id) ? req.params.id[0] : req.params.id;
   const { name, address, locationLat, locationLng, notes } = req.body;
-  const updates: Record<string, unknown> = {};
+  let updates: Record<string, unknown> = {};
   if (name !== undefined) updates.name = name;
   if (address !== undefined) updates.address = address;
   if (locationLat !== undefined) updates.locationLat = locationLat != null ? String(locationLat) : null;
   if (locationLng !== undefined) updates.locationLng = locationLng != null ? String(locationLng) : null;
   if (notes !== undefined) updates.notes = notes;
+
+  // Snapshot current row so we can detect an address change and invalidate
+  // stale coords if the admin didn't also supply fresh lat/lng.
+  const [before] = await db.select().from(sitesTable).where(eq(sitesTable.id, id));
+  if (!before) { res.status(404).json({ error: "Not Found" }); return; }
+  updates = preparePreUpdateBody(before as any, updates);
+
   const [site] = await db.update(sitesTable).set(updates).where(eq(sitesTable.id, id)).returning();
   if (!site) { res.status(404).json({ error: "Not Found" }); return; }
   // Best-effort auto-geocode: if the row ends up with an address but no
   // coordinates, look them up and write back. Never blocks the response
   // on failure — same pattern as the applicant home-address geocoder.
-  if (site.address && site.locationLat == null && site.locationLng == null) {
-    try {
-      const result = await geocodeOnelineAddress(site.address);
-      if (result) {
-        const [updated] = await db
-          .update(sitesTable)
-          .set({ locationLat: String(result.lat), locationLng: String(result.lng) })
-          .where(eq(sitesTable.id, id))
-          .returning();
-        if (updated) {
-          res.json(updated);
-          return;
-        }
-      }
-    } catch (err) {
-      req.log.info({ err: (err as Error).message }, "Auto-geocode on site update failed");
-    }
-  }
-  res.json(site);
+  const final = await maybeAutoGeocode(site as Record<string, unknown>, req.log);
+  res.json(final);
 });
 
 router.delete("/sites/:id", requireAdmin, async (req, res): Promise<void> => {
