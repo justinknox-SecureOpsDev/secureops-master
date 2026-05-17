@@ -44,7 +44,7 @@ async function resolveRoomMembers(room: ChatRoom): Promise<Set<string> | null> {
     const parts = parseDirectKey(room.directKey);
     return new Set(parts ?? []);
   }
-  if (room.type === "announcements" || room.type === "general") {
+  if (room.type === "announcements") {
     return null;
   }
 
