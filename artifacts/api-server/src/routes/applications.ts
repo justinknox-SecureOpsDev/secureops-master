@@ -386,12 +386,23 @@ router.post("/admin/applications/:id/reject", requireAdmin, async (req, res): Pr
     return;
   }
   const notes = parsed.data.notes;
+  const appId = req.params.id as string;
+
+  // Invalidate any outstanding amendment tokens so that an old amendment link
+  // cannot reopen a rejected application.
+  await db.update(applicationAmendmentTokensTable)
+    .set({ consumedAt: new Date() })
+    .where(and(
+      eq(applicationAmendmentTokensTable.applicationId, appId),
+      sql`${applicationAmendmentTokensTable.consumedAt} IS NULL`,
+    ));
+
   const [row] = await db.update(applicationsTable).set({
     status: "rejected",
     reviewerNotes: notes ?? null,
     reviewedBy: req.user!.userId,
     reviewedAt: new Date(),
-  }).where(eq(applicationsTable.id, req.params.id as string)).returning();
+  }).where(eq(applicationsTable.id, appId)).returning();
   if (!row) { res.status(404).json({ error: "Not Found", message: "Application not found" }); return; }
 
   const application = rowToApplication(row);
@@ -564,6 +575,16 @@ router.post("/admin/applications/:id/approve", requireAdmin, async (req, res): P
       await tx.insert(onboardingTokensTable).values({
         token, employeeId: userId, applicationId: appId, expiresAt,
       });
+
+      // Invalidate any outstanding amendment tokens so that an old amendment
+      // link cannot reopen an already-approved application and create
+      // divergence between the employee record and the application record.
+      await tx.update(applicationAmendmentTokensTable)
+        .set({ consumedAt: new Date() })
+        .where(and(
+          eq(applicationAmendmentTokensTable.applicationId, appId),
+          sql`${applicationAmendmentTokensTable.consumedAt} IS NULL`,
+        ));
 
       const [updated] = await tx.update(applicationsTable).set({
         status: "approved",
@@ -798,10 +819,23 @@ router.post("/applications/amend/:token", tokenLookupLimiter, async (req, res): 
   }
 
   // Atomically consume token + apply updates so a re-submit can't double-apply.
-  const updated = await db.transaction(async (tx) => {
+  const txResult = await db.transaction(async (tx) => {
     const [tokenRow] = await tx.select().from(applicationAmendmentTokensTable)
       .where(eq(applicationAmendmentTokensTable.id, t.id)).for("update").limit(1);
-    if (!tokenRow || tokenRow.consumedAt) return null;
+    if (!tokenRow || tokenRow.consumedAt) return { conflict: "already_used" } as const;
+
+    // Defense-in-depth: re-check the application status inside the transaction.
+    // Approve/reject invalidate tokens proactively, but this guard ensures
+    // correctness even under races or future code paths that skip invalidation.
+    const [appRow] = await tx.select({ status: applicationsTable.status })
+      .from(applicationsTable)
+      .where(eq(applicationsTable.id, t.applicationId))
+      .for("update")
+      .limit(1);
+    if (!appRow || appRow.status !== "info_requested") {
+      return { conflict: "not_editable" } as const;
+    }
+
     if (Object.keys(updates).length > 0) {
       await tx.update(applicationsTable).set(updates).where(eq(applicationsTable.id, t.applicationId));
     }
@@ -811,12 +845,17 @@ router.post("/applications/amend/:token", tokenLookupLimiter, async (req, res): 
     await tx.update(applicationAmendmentTokensTable).set({ consumedAt: new Date() })
       .where(eq(applicationAmendmentTokensTable.id, t.id));
     const [row] = await tx.select().from(applicationsTable).where(eq(applicationsTable.id, t.applicationId)).limit(1);
-    return row;
+    return { row } as const;
   });
-  if (!updated) {
-    res.status(409).json({ error: "Conflict", message: "This link has already been used." });
+  if ("conflict" in txResult) {
+    if (txResult.conflict === "already_used") {
+      res.status(409).json({ error: "Conflict", message: "This link has already been used." });
+    } else {
+      res.status(409).json({ error: "Conflict", message: "This application has already been reviewed and is no longer accepting amendments." });
+    }
     return;
   }
+  const updated = txResult.row;
 
   // Notify admins
   const admins = await db.select({ id: usersTable.id }).from(usersTable).where(eq(usersTable.role, "admin"));
