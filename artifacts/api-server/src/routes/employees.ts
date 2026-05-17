@@ -7,6 +7,40 @@ import type { Request, Response, NextFunction } from "express";
 import { buildEmployeeProfilePdf } from "../lib/profilePdf";
 import { writeEmployeeFieldChanges, CHANGE_FIELD_LABELS } from "../lib/employeeChangeLog";
 import { diffHighRiskChanges, enqueueHighRiskSelfEdit } from "../lib/highRiskSelfEditAlert";
+import { normalizePhoneToE164 } from "../lib/phone";
+
+/**
+ * Phone fields on the employees row that should always be stored in E.164.
+ * Both the dedicated /employees endpoints and the generic /admin/tables/employees
+ * grid run their inputs through `normalizePhoneToE164` so downstream SMS
+ * (emergency alerts, shift assignment, future direct-message-officer) actually
+ * dispatches instead of silently dropping unparseable text.
+ */
+const EMPLOYEE_PHONE_FIELDS: Array<[string, string]> = [
+  ["phone", "Phone"],
+  ["emergencyContactPhone", "Emergency contact phone"],
+];
+
+function normalizeEmployeePhoneFields(
+  values: Record<string, unknown>,
+): { ok: true } | { ok: false; message: string } {
+  for (const [key, label] of EMPLOYEE_PHONE_FIELDS) {
+    if (!(key in values)) continue;
+    const raw = values[key];
+    if (raw === undefined) continue;
+    if (raw === null || raw === "") { values[key] = null; continue; }
+    if (typeof raw !== "string") return { ok: false, message: `${label} must be text.` };
+    const norm = normalizePhoneToE164(raw);
+    if (!norm) {
+      return {
+        ok: false,
+        message: `${label} is invalid. Please enter a valid US phone number (e.g. (214) 555-1234) or include the country code (e.g. +44 20 1234 5678).`,
+      };
+    }
+    values[key] = norm;
+  }
+  return { ok: true };
+}
 
 const router: IRouter = Router();
 
@@ -241,6 +275,11 @@ router.post("/employees", requireAdmin, async (req, res): Promise<void> => {
     empValues.hourlyRate = body.hourlyRate === null ? null : String(body.hourlyRate);
   }
   if (empValues.skills === undefined) empValues.skills = [];
+  const phoneCheck = normalizeEmployeePhoneFields(empValues);
+  if (!phoneCheck.ok) {
+    res.status(400).json({ error: "Bad Request", message: phoneCheck.message });
+    return;
+  }
   await db.insert(employeesTable).values(empValues as typeof employeesTable.$inferInsert);
 
   // Re-read via the canonical projection so the response shape matches
@@ -364,6 +403,11 @@ router.put("/employees/:id", requireAuth, async (req, res): Promise<void> => {
   }
   if (isAdmin && body.hourlyRate !== undefined) {
     empUpdates.hourlyRate = body.hourlyRate === null ? null : String(body.hourlyRate);
+  }
+  const phoneCheck = normalizeEmployeePhoneFields(empUpdates);
+  if (!phoneCheck.ok) {
+    res.status(400).json({ error: "Bad Request", message: phoneCheck.message });
+    return;
   }
 
   if (Object.keys(userUpdates).length > 0) {

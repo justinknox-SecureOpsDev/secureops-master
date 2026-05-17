@@ -124,6 +124,17 @@ export function ApplyPage() {
       if (!form.idDocType) return "Please select your photo ID type (driver's license or passport).";
       if (!form.idDoc) return "Please upload a photo of your driver's license or passport.";
     }
+    if (step === 3) {
+      // References step — phone is optional per reference, but if the
+      // applicant typed something we want it to parse as a real number so
+      // future reference-check SMS/voice flows don't silently skip it.
+      for (let i = 0; i < form.references.length; i++) {
+        const r = form.references[i];
+        if (r.phone.trim() && !normalizePhoneToE164(r.phone)) {
+          return `Reference #${i + 1} phone is invalid. Please enter a valid US phone number (e.g. (214) 555-1234) or include the country code (e.g. +44 20 1234 5678), or leave it blank.`;
+        }
+      }
+    }
     return true;
   }
 

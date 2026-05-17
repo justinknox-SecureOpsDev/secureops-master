@@ -10,6 +10,24 @@ import { FileUploadField } from "@/components/FileUploadField";
 import { uploadFileAnon, type UploadedFile } from "@/lib/upload";
 import { CheckCircle2, AlertTriangle, Loader2, ChevronLeft, ChevronRight, FileText, ExternalLink } from "lucide-react";
 
+// Match the server-side normalizer in artifacts/api-server/src/lib/phone.ts.
+// Strips non-digits, then: keeps a leading "+", defaults to US/+1 for 10
+// digits, treats 11 digits starting with "1" as US/+1. Returns null otherwise.
+function normalizePhoneToE164(input: string): string | null {
+  if (typeof input !== "string") return null;
+  const trimmed = input.trim();
+  if (!trimmed) return null;
+  const hadPlus = trimmed.startsWith("+");
+  const digits = trimmed.replace(/\D/g, "");
+  if (!digits) return null;
+  let candidate: string;
+  if (hadPlus) candidate = `+${digits}`;
+  else if (digits.length === 10) candidate = `+1${digits}`;
+  else if (digits.length === 11 && digits.startsWith("1")) candidate = `+${digits}`;
+  else return null;
+  return /^\+\d{8,15}$/.test(candidate) ? candidate : null;
+}
+
 type PolicyDto = {
   id: string;
   slug: string;
@@ -135,6 +153,9 @@ export function OnboardPage() {
     }
     if (step === 1) {
       if (!emergencyContactName || !emergencyContactPhone) return "Emergency contact name and phone required.";
+      if (!normalizePhoneToE164(emergencyContactPhone)) {
+        return "Emergency contact phone is invalid. Please enter a valid US phone number (e.g. (214) 555-1234) or include the country code (e.g. +44 20 1234 5678).";
+      }
     }
     if (step === 3) {
       if (!directDepositConsent) return "Please confirm direct deposit consent.";

@@ -34,6 +34,42 @@ import { sendEmail, renderPasswordResetEmail, renderInviteEmail } from "../lib/e
 import { disconnectUser } from "../lib/wsManager";
 import { writeEmployeeFieldChanges } from "../lib/employeeChangeLog";
 import { preparePreUpdateBody as prepareSitePreUpdate, maybeAutoGeocode as maybeAutoGeocodeSite } from "../lib/siteGeocode";
+import { normalizePhoneToE164 } from "../lib/phone";
+
+/**
+ * Coerce a free-text phone field on an admin CRUD payload into E.164 in place.
+ *
+ * Mirrors the public application/onboarding normalizers so SMS-style flows
+ * (emergency alerts, shift assignment, direct-message-officer, etc.) actually
+ * dispatch. Admins routinely paste numbers in mixed formats — without this,
+ * the SMS pipeline (which requires `+<8..15 digits>`) silently skips them.
+ *
+ * - `undefined` → left untouched (partial-update friendly).
+ * - `null` / `""` → coerced to `null` so the column is cleared.
+ * - Non-parseable text → returns an error string the caller surfaces as 400.
+ */
+function normalizePhoneFieldInPlace(
+  body: Record<string, unknown>,
+  key: string,
+  label: string,
+): string | null {
+  if (!(key in body)) return null;
+  const raw = body[key];
+  if (raw === undefined) return null;
+  if (raw === null || raw === "") {
+    body[key] = null;
+    return null;
+  }
+  if (typeof raw !== "string") {
+    return `${label} must be text.`;
+  }
+  const norm = normalizePhoneToE164(raw);
+  if (!norm) {
+    return `${label} is invalid. Please enter a valid US phone number (e.g. (214) 555-1234) or include the country code (e.g. +44 20 1234 5678).`;
+  }
+  body[key] = norm;
+  return null;
+}
 
 const router: IRouter = Router();
 
@@ -167,7 +203,12 @@ const tables: Record<string, TableConfig> = {
     insertSchema: insertUserAdminSchema as unknown as z.ZodSchema<any>,
     searchColumns: [usersTable.email, usersTable.firstName, usersTable.lastName, usersTable.role],
     orderBy: usersTable.createdAt,
-    coerceWrite: (v) => v,
+    coerceWrite: (v) => {
+      const out = { ...v };
+      const err = normalizePhoneFieldInPlace(out, "phoneNumber", "Phone number");
+      if (err) throw Object.assign(new Error(err), { __badRequest: true });
+      return out;
+    },
     beforeInsert: async (v) => {
       const out: Record<string, unknown> = { ...v };
       if (out.password) {
@@ -194,6 +235,16 @@ const tables: Record<string, TableConfig> = {
       let out = applyNumericCoercion(v, ["hourlyRate"]);
       out = applyIntCoercion(out, ["siaLicenseLevel", "yearsExperience"]);
       out = applyDateCoercion(out, ["dateOfBirth", "siaLicenseExpiry"]);
+      // Normalize phone fields to E.164. Throws so the admin sees a clear
+      // 400 (caught by the route handler) rather than silently storing a
+      // value that SMS will later skip.
+      for (const [key, label] of [
+        ["phone", "Phone"],
+        ["emergencyContactPhone", "Emergency contact phone"],
+      ] as const) {
+        const err = normalizePhoneFieldInPlace(out, key, label);
+        if (err) throw Object.assign(new Error(err), { __badRequest: true });
+      }
       return out;
     },
     importSupported: true,
@@ -739,7 +790,16 @@ router.post("/admin/tables/:table", requireAdmin, async (req, res): Promise<void
     res.status(404).json({ error: "Not Found", message: `Unknown table '${tableName}'` });
     return;
   }
-  const coerced = cfg.coerceWrite((req.body ?? {}) as Record<string, unknown>);
+  let coerced: Record<string, unknown>;
+  try {
+    coerced = cfg.coerceWrite((req.body ?? {}) as Record<string, unknown>);
+  } catch (err: any) {
+    if (err?.__badRequest) {
+      res.status(400).json({ error: "Bad Request", message: err.message });
+      return;
+    }
+    throw err;
+  }
   const parsed = cfg.insertSchema.safeParse(coerced);
   if (!parsed.success) {
     res.status(400).json({
@@ -783,8 +843,23 @@ router.put("/admin/tables/:table/:id", requireAdmin, async (req, res): Promise<v
       delete body.password;
     }
     if (typeof body.email === "string") body.email = body.email.toLowerCase();
+    // Normalize phoneNumber to E.164 (same rule the public flows use) so
+    // admin edits don't silently break SMS dispatch for that user.
+    const phoneErr = normalizePhoneFieldInPlace(body, "phoneNumber", "Phone number");
+    if (phoneErr) {
+      res.status(400).json({ error: "Bad Request", message: phoneErr });
+      return;
+    }
   } else {
-    body = cfg.coerceWrite(body);
+    try {
+      body = cfg.coerceWrite(body);
+    } catch (err: any) {
+      if (err?.__badRequest) {
+        res.status(400).json({ error: "Bad Request", message: err.message });
+        return;
+      }
+      throw err;
+    }
   }
 
   // Strip undefined and immutable fields

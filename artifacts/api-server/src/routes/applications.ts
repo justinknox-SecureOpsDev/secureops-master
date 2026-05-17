@@ -286,6 +286,31 @@ router.post("/applications", publicApplicationLimiter, async (req, res): Promise
     });
     return;
   }
+  // Normalize each reference contact phone (if provided) so future
+  // reference-check SMS/voice flows can text them without per-row
+  // string-massaging. Empty/missing phone is allowed (references aren't
+  // strictly required to have a phone), but a non-empty unparseable
+  // value is rejected with a clear error pointing at the row.
+  let normalizedReferences: Array<Record<string, unknown>> | null = null;
+  if (Array.isArray(d.references)) {
+    normalizedReferences = [];
+    for (let i = 0; i < d.references.length; i++) {
+      const ref = { ...(d.references[i] as Record<string, unknown>) };
+      const rawPhone = ref.phone;
+      if (typeof rawPhone === "string" && rawPhone.trim()) {
+        const norm = normalizePhoneToE164(rawPhone);
+        if (!norm) {
+          res.status(400).json({
+            error: "Bad Request",
+            message: `Reference #${i + 1} phone number is invalid. Please enter a valid US phone number (e.g. (214) 555-1234) or include the country code (e.g. +44 20 1234 5678).`,
+          });
+          return;
+        }
+        ref.phone = norm;
+      }
+      normalizedReferences.push(ref);
+    }
+  }
   // Reject any submitted document path that was minted by an authenticated
   // upload session (i.e. starts with /objects/uploads/u/). Only anonymous
   // application-upload paths are accepted in this unauthenticated flow.
@@ -329,7 +354,7 @@ router.post("/applications", publicApplicationLimiter, async (req, res): Promise
       siaLicenseExpiry: d.siaLicenseExpiry ?? null,
       previousExperience: d.previousExperience ?? null,
       yearsExperience: d.yearsExperience ?? null,
-      references: d.references ?? null,
+      references: normalizedReferences ?? d.references ?? null,
       photoKey: d.photo?.objectPath ?? null,
       cvKey: d.cv?.objectPath ?? null,
       trainingCertificateKeys: d.trainingCertificates?.map((f) => f.objectPath) ?? null,
@@ -1049,6 +1074,20 @@ router.post("/onboarding/:token", tokenLookupLimiter, async (req, res): Promise<
   }
   const d = parsed.data;
 
+  // Normalize the emergency-contact phone to E.164 (same default-to-US
+  // rule as applicant phone) so SMS-style features (emergency notify-next-
+  // of-kin, future reference checks, admin "text emergency contact" tools)
+  // can dispatch without per-call string-massaging. Required field — a
+  // non-parseable value is rejected with a clear error.
+  const normalizedEmergencyPhone = normalizePhoneToE164(d.emergencyContactPhone);
+  if (!normalizedEmergencyPhone) {
+    res.status(400).json({
+      error: "Bad Request",
+      message: "Emergency contact phone is invalid. Please enter a valid US phone number (e.g. (214) 555-1234) or include the country code (e.g. +44 20 1234 5678).",
+    });
+    return;
+  }
+
   // Reject any submitted document path that was minted by an authenticated
   // upload session (i.e. starts with /objects/uploads/u/). Only anonymous
   // application-upload paths are valid in this token-based flow.
@@ -1118,7 +1157,7 @@ router.post("/onboarding/:token", tokenLookupLimiter, async (req, res): Promise<
     p45DocKey: d.p45Doc?.objectPath ?? null,
     emergencyContactName: d.emergencyContactName,
     emergencyContactRelationship: d.emergencyContactRelationship ?? null,
-    emergencyContactPhone: d.emergencyContactPhone,
+    emergencyContactPhone: normalizedEmergencyPhone,
     uniformShirt: d.uniformShirt ?? null,
     uniformTrousers: d.uniformTrousers ?? null,
     uniformJacket: d.uniformJacket ?? null,
@@ -1151,7 +1190,7 @@ router.post("/onboarding/:token", tokenLookupLimiter, async (req, res): Promise<
     payStubDocKey: d.p45Doc?.objectPath ?? null,
     emergencyContactName: d.emergencyContactName,
     emergencyContactRelationship: d.emergencyContactRelationship ?? null,
-    emergencyContactPhone: d.emergencyContactPhone,
+    emergencyContactPhone: normalizedEmergencyPhone,
     uniformShirt: d.uniformShirt ?? null,
     uniformTrousers: d.uniformTrousers ?? null,
     uniformJacket: d.uniformJacket ?? null,
