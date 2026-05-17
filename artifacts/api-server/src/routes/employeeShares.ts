@@ -311,17 +311,38 @@ router.get("/public/employee-shares/:token", tokenLookupLimiter, async (req, res
   // toggles further pare back the visible surface.
   const filenameOf = (key: string | null | undefined): string | null =>
     key ? (key.split("/").pop() ?? null) : null;
-  const docs = sections.documents ? [
-    { label: "CV / résumé", filename: filenameOf(row.cvKey) },
-    { label: "TX security license", filename: filenameOf(row.licenseDocKey) },
-    { label: "Passport / photo ID", filename: filenameOf(row.passportDocKey) },
-    { label: "Right-to-work doc", filename: filenameOf(row.rightToWorkDocKey) },
-    { label: "W-2 / pay stub", filename: filenameOf(row.payStubDocKey) },
-  ].filter((d) => !!d.filename) : [];
+
+  // Short-lived signed URLs (5 min) re-issued every time the recipient
+  // reloads the page. Section toggles already gate which entries are
+  // even constructed below, so a failure to sign one doc never leaks
+  // anything — we just emit `url: null` and the UI falls back to
+  // showing the filename without a download button.
+  const SIGN_TTL_SEC = 300;
+  const signKey = async (key: string | null | undefined): Promise<string | null> => {
+    if (!key) return null;
+    try { return await storage.getSignedDownloadURL(key, SIGN_TTL_SEC); }
+    catch (err) { req.log.warn({ err, key }, "Could not sign share document"); return null; }
+  };
+  const buildDoc = async (label: string, key: string | null | undefined) => ({
+    label,
+    filename: filenameOf(key),
+    url: await signKey(key),
+  });
+
+  const docs = sections.documents
+    ? (await Promise.all([
+        buildDoc("CV / résumé", row.cvKey),
+        buildDoc("TX security license", row.licenseDocKey),
+        buildDoc("Passport / photo ID", row.passportDocKey),
+        buildDoc("Right-to-work doc", row.rightToWorkDocKey),
+        buildDoc("W-2 / pay stub", row.payStubDocKey),
+      ])).filter((d) => !!d.filename)
+    : [];
   const certs = sections.trainingCerts
-    ? (Array.isArray(row.trainingCertificateKeys) ? row.trainingCertificateKeys as string[] : [])
-        .map((k, i) => ({ label: `Training certificate ${i + 1}`, filename: filenameOf(k) }))
-        .filter((d) => !!d.filename)
+    ? await Promise.all(
+        (Array.isArray(row.trainingCertificateKeys) ? row.trainingCertificateKeys as string[] : [])
+          .map((k, i) => buildDoc(`Training certificate ${i + 1}`, k))
+      ).then((arr) => arr.filter((d) => !!d.filename))
     : [];
 
   res.json({
@@ -377,6 +398,12 @@ router.get(
     const payload = await buildEmployeeProfilePdf(r.share.employeeUserId, {
       redactForPublicShare: true,
       publicSections: resolveSections(r.share.visibleSections),
+      // Embed short-lived signed download URLs so the recipient can
+      // open the underlying documents straight from the PDF without
+      // needing to re-load the share page. TTL matches the JSON
+      // surface — recipients reload for fresh links.
+      includeDocumentLinks: true,
+      documentLinkTtlSec: 300,
     });
     if (!payload) { res.status(404).json({ error: "Officer not found" }); return; }
 

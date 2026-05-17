@@ -57,9 +57,11 @@ function fmtDate(d: Date | string | null | undefined): string {
  *  - Bank account number: last 4 digits only.
  *  - Routing / sort code: last 4 digits only.
  * Documents (CV, license scan, passport, training certs) are referenced
- * by filename — NOT embedded, NOT linked — because the PDF can be
- * shared outside the auth boundary. The signed-URL paths only work for
- * the owning officer / admins.
+ * by filename and are never embedded inline. Clickable download links
+ * are only added when the caller opts in via `includeDocumentLinks`
+ * (the public share PDF does); admin/self downloads stay link-free
+ * because those consumers can hit the auth-gated download endpoints
+ * directly.
  *
  * The photo on file IS embedded inline (downscaled to a passport-style
  * thumb), because most consumers of this PDF expect a face shot.
@@ -78,6 +80,15 @@ export async function buildEmployeeProfilePdf(
      * keep their original behaviour (all sections shown).
      */
     publicSections?: Partial<EmployeeShareVisibleSections> | null;
+    /**
+     * Embed clickable, short-lived signed download URLs next to each
+     * document filename. Off by default — only the public share route
+     * opts in, because admin/self downloads can hit the auth-gated
+     * download endpoints directly.
+     */
+    includeDocumentLinks?: boolean;
+    /** TTL (seconds) for embedded document links. Clamped to 60–900. */
+    documentLinkTtlSec?: number;
   } = {},
 ): Promise<ProfilePdfPayload | null> {
   // When `redactForPublicShare` is true we strip every field that would
@@ -359,9 +370,11 @@ export async function buildEmployeeProfilePdf(
     doc.moveDown(0.4);
   }
 
-  // Documents — reference by filename only, NEVER embed.
-  // The "documents" section bundles every key EXCEPT training
-  // certificates, which get their own toggle (`trainingCerts`).
+  // Documents — reference by filename. When `publicDocLinks` is on we
+  // ALSO embed a short-lived signed download URL as a clickable PDF
+  // hyperlink for each entry. The "documents" section bundles every
+  // key EXCEPT training certificates, which get their own toggle
+  // (`trainingCerts`).
   const docs: Array<[string, string | null | undefined]> = [];
   if (show("documents")) {
     docs.push(
@@ -377,13 +390,52 @@ export async function buildEmployeeProfilePdf(
   if (show("trainingCerts")) {
     certs.forEach((k, i) => docs.push([`Training certificate ${i + 1}`, k]));
   }
-  const presentDocs = docs.filter(([, v]) => !!v);
+  const presentDocs = docs.filter(([, v]) => !!v) as Array<[string, string]>;
   if (presentDocs.length > 0) {
     section(`Documents on file (${presentDocs.length})`);
+
+    // Optionally pre-sign download URLs (short-lived) so each row can
+    // be a clickable link in the PDF. Best-effort: signing failures
+    // silently degrade to "filename only" — they NEVER break the PDF.
+    const wantLinks = opts.includeDocumentLinks === true;
+    const signed = new Map<string, string>();
+    if (wantLinks) {
+      const ttl = Math.max(60, Math.min(opts.documentLinkTtlSec ?? 300, 900));
+      await Promise.all(presentDocs.map(async ([, key]) => {
+        try { signed.set(key, await objectStorage.getSignedDownloadURL(key, ttl)); }
+        catch (err) { logger.warn({ err, key }, "[profilePdf] could not sign doc link"); }
+      }));
+    }
+
     doc.fillColor(MUTED).font("Helvetica-Oblique").fontSize(9)
-      .text("Files are stored securely. Originals are available to HR via the admin portal.", 56, doc.y, { width: doc.page.width - 112 });
+      .text(
+        wantLinks
+          ? "Download links are time-limited — reload the share page for fresh links if any have expired."
+          : "Files are stored securely. Originals are available to HR via the admin portal.",
+        56, doc.y, { width: doc.page.width - 112 });
     doc.moveDown(0.4);
-    writeRows(presentDocs.map(([label, path]) => [label, path!.split("/").pop() ?? "(on file)"] as [string, string]));
+
+    // Manual row renderer so we can attach a hyperlink to the value
+    // column when a signed URL is available.
+    for (const [label, key] of presentDocs) {
+      if (doc.y > doc.page.height - 90) doc.addPage();
+      const y = doc.y;
+      const name = key.split("/").pop() ?? "(on file)";
+      doc.fillColor(MUTED).font("Helvetica-Bold").fontSize(9).text(label, 56, y, { width: labelW });
+      const url = signed.get(key);
+      if (url) {
+        doc.fillColor("#1d4ed8").font("Helvetica").fontSize(10)
+          .text(name, valueX, y, {
+            width: doc.page.width - valueX - 56,
+            link: url,
+            underline: true,
+          });
+      } else {
+        doc.fillColor(TEXT).font("Helvetica").fontSize(10)
+          .text(name, valueX, y, { width: doc.page.width - valueX - 56 });
+      }
+      doc.y = Math.max(doc.y, y + rowGap);
+    }
   }
 
   const acks = row.acknowledgements && typeof row.acknowledgements === "object"

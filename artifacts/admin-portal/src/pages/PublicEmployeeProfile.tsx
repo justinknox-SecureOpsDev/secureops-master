@@ -12,7 +12,7 @@ type VisibleSections = {
   documents: boolean;
 };
 
-type DocEntry = { label: string; filename: string | null };
+type DocEntry = { label: string; filename: string | null; url?: string | null };
 
 type PublicProfile = {
   firstName: string | null;
@@ -202,15 +202,11 @@ export default function PublicEmployeeProfilePage() {
               <div className="text-xs uppercase tracking-wider text-muted-foreground mb-2">Documents on file</div>
               <ul className="text-sm space-y-1">
                 {documents.map((d) => (
-                  <li key={d.label} className="flex items-center gap-2 brand-navy">
-                    <FileText className="w-3.5 h-3.5 text-brand-gold flex-shrink-0" />
-                    <span className="text-muted-foreground">{d.label}:</span>
-                    <span className="truncate">{d.filename}</span>
-                  </li>
+                  <DocRow key={d.label} doc={d} />
                 ))}
               </ul>
               <div className="text-[11px] text-muted-foreground mt-1">
-                Originals are kept securely with HR — names shown for reference only.
+                Download links are time-limited. Reload this page if a link has expired.
               </div>
             </div>
           )}
@@ -220,11 +216,7 @@ export default function PublicEmployeeProfilePage() {
               <div className="text-xs uppercase tracking-wider text-muted-foreground mb-2">Training certificates</div>
               <ul className="text-sm space-y-1">
                 {trainingCerts.map((d) => (
-                  <li key={d.label} className="flex items-center gap-2 brand-navy">
-                    <FileText className="w-3.5 h-3.5 text-brand-gold flex-shrink-0" />
-                    <span className="text-muted-foreground">{d.label}:</span>
-                    <span className="truncate">{d.filename}</span>
-                  </li>
+                  <DocRow key={d.label} doc={d} />
                 ))}
               </ul>
             </div>
@@ -249,6 +241,28 @@ export default function PublicEmployeeProfilePage() {
         </div>
       </div>
     </div>
+  );
+}
+
+function DocRow({ doc }: { doc: DocEntry }) {
+  const name = doc.filename ?? "";
+  return (
+    <li className="flex items-center gap-2 brand-navy">
+      <FileText className="w-3.5 h-3.5 text-brand-gold flex-shrink-0" />
+      <span className="text-muted-foreground">{doc.label}:</span>
+      {doc.url ? (
+        <a
+          href={doc.url}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="truncate underline decoration-brand-gold/50 underline-offset-2 hover:decoration-brand-gold brand-navy"
+        >
+          {name}
+        </a>
+      ) : (
+        <span className="truncate">{name}</span>
+      )}
+    </li>
   );
 }
 
