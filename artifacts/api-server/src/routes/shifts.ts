@@ -92,6 +92,13 @@ router.get("/shifts", requireAuth, async (req, res): Promise<void> => {
   if (status) conditions.push(eq(shiftsTable.status, status));
   if (from) conditions.push(gte(shiftsTable.startTime, new Date(from)));
   if (to) conditions.push(lte(shiftsTable.startTime, new Date(to)));
+  // When the caller asks for "upcoming" shifts, exclude any whose end time
+  // has already passed. The shifts table is not actively swept into
+  // "completed", so past rows linger as status=upcoming and leak into Open
+  // Vacancies and the mobile Shifts tab. Filter them out here so every
+  // consumer (dashboard, admin shifts, employee shifts) sees only truly
+  // upcoming work.
+  if (status === "upcoming") conditions.push(gte(shiftsTable.endTime, new Date()));
 
   // Non-admins are limited: only shifts they're assigned to OR open shifts they qualify for.
   let restrictToEmployee: string | undefined;
@@ -137,9 +144,13 @@ router.get("/shifts", requireAuth, async (req, res): Promise<void> => {
           .where(inArray(sitesTable.id, siteIds));
         for (const s of siteRows) siteReqMap.set(s.id, Array.isArray(s.req) ? s.req : []);
       }
+      const nowMs = Date.now();
       shifts = all.filter((s) => {
         if (assignedIds.includes(s.id)) return true;
         if (s.status !== "upcoming") return false;
+        // Hide open shifts whose end time has already passed — they are no
+        // longer claimable and should not appear in the officer's feed.
+        if (new Date(s.endTime).getTime() < nowMs) return false;
         if (myMaxLevel < s.requiredLicenseLevel) return false;
         if ((countMap.get(s.id) ?? 0) >= s.headcount) return false;
         const req = s.siteId ? (siteReqMap.get(s.siteId) ?? []) : [];
