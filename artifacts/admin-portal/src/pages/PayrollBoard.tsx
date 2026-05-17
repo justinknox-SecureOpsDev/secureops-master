@@ -1,6 +1,6 @@
 import { Fragment, useEffect, useMemo, useState } from "react";
 import { useLocation } from "wouter";
-import { Banknote, Loader2, ChevronRight, ChevronDown, ArrowRight, AlertTriangle, Clock } from "lucide-react";
+import { Banknote, Loader2, ChevronRight, ChevronDown, ArrowRight, AlertTriangle, Clock, DollarSign } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -88,6 +88,14 @@ export default function PayrollBoardPage() {
   const [fixMode, setFixMode] = useState<"scheduled" | "custom">("scheduled");
   const [fixCustom, setFixCustom] = useState("");
   const [fixBusy, setFixBusy] = useState(false);
+  // Apply-rate dialog state. Lets admin set a per-entry pay-rate
+  // override on all underlying time entries of the currently selected
+  // buckets -- fixes "Pay rate is $0" warnings without rewriting
+  // shifts/employees.
+  const [rateDialogOpen, setRateDialogOpen] = useState(false);
+  const [rateInput, setRateInput] = useState("");
+  const [onlyZeroRate, setOnlyZeroRate] = useState(true);
+  const [rateBusy, setRateBusy] = useState(false);
   const [toast, setToast] = useState<{ kind: "ok" | "err"; msg: string } | null>(null);
   const [sites, setSites] = useState<Array<{ id: string; name: string }>>([]);
 
@@ -214,6 +222,44 @@ export default function PayrollBoardPage() {
     }
   };
 
+  // Apply a flat pay rate to every time entry inside the selected
+  // buckets. The server defaults to onlyZeroRate=true so valid rates
+  // aren't overwritten; admin can toggle that off.
+  const submitApplyRate = async () => {
+    const rate = parseFloat(rateInput);
+    if (!isFinite(rate) || rate <= 0) {
+      showToast("err", "Enter a pay rate greater than $0.");
+      return;
+    }
+    if (rate > 1000) {
+      showToast("err", "Pay rate must be $1,000/hr or less.");
+      return;
+    }
+    const timeEntryIds = Array.from(
+      new Set(selectedBuckets.flatMap((b) => b.entries.map((e) => e.id))),
+    );
+    if (timeEntryIds.length === 0) {
+      showToast("err", "Select at least one bucket first.");
+      return;
+    }
+    setRateBusy(true);
+    try {
+      const resp = await api<{ updatedCount: number; skippedCount: number }>(
+        "/payroll/board/apply-rate",
+        { method: "POST", body: { timeEntryIds, rate, onlyZeroRate } },
+      );
+      setRateDialogOpen(false);
+      const parts = [`Updated ${resp.updatedCount} entr${resp.updatedCount === 1 ? "y" : "ies"} at ${fmtUsd(rate)}/hr`];
+      if (resp.skippedCount > 0) parts.push(`${resp.skippedCount} skipped`);
+      showToast("ok", parts.join(" · "));
+      await reload();
+    } catch (e) {
+      showToast("err", `Couldn't apply rate: ${(e as Error).message}`);
+    } finally {
+      setRateBusy(false);
+    }
+  };
+
   const submitProcess = async () => {
     if (selectedBuckets.length === 0) return;
     setBusy(true);
@@ -321,6 +367,16 @@ export default function PayrollBoardPage() {
             <span className="ml-4 brand-gold">·  {fmtUsd(selGross)} gross</span>
           </div>
         </div>
+        <Button
+          variant="outline"
+          className="bg-white/10 border-white/30 text-white hover:bg-white/20"
+          onClick={() => { setRateInput(""); setOnlyZeroRate(true); setRateDialogOpen(true); }}
+          disabled={selectedBuckets.length === 0 || rateBusy}
+          title="Set a pay rate on all time entries inside the selected buckets"
+        >
+          {rateBusy ? <Loader2 className="w-4 h-4 animate-spin mr-2" /> : <DollarSign className="w-4 h-4 mr-2" />}
+          Apply pay rate
+        </Button>
         <Button
           className="bg-brand-gold text-brand-navy hover:bg-brand-gold/90"
           onClick={() => setDialogOpen(true)}
@@ -648,6 +704,63 @@ export default function PayrollBoardPage() {
             <Button onClick={submitProcess} disabled={busy} className="bg-brand-navy text-white hover:opacity-90">
               {busy ? <Loader2 className="w-4 h-4 animate-spin mr-2" /> : null}
               Confirm
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={rateDialogOpen} onOpenChange={setRateDialogOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Apply pay rate</DialogTitle>
+            <DialogDescription>
+              Set a per-entry pay rate on the time entries inside the {selectedBuckets.length}
+              {" "}selected officer-week{selectedBuckets.length === 1 ? "" : "s"}.
+              This overrides the shift’s pay rate and the employee’s default rate for these entries only;
+              the change is recorded in the audit log.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-3 py-2">
+            <div>
+              <Label className="text-xs">Pay rate (USD per hour)</Label>
+              <Input
+                type="number"
+                min="0"
+                step="0.01"
+                placeholder="e.g. 18.50"
+                value={rateInput}
+                onChange={(e) => setRateInput(e.target.value)}
+                className="h-9 mt-1"
+                autoFocus
+              />
+            </div>
+            <label className="flex items-start gap-3 p-3 border rounded cursor-pointer hover:bg-gray-50">
+              <input
+                type="checkbox"
+                checked={onlyZeroRate}
+                onChange={(e) => setOnlyZeroRate(e.target.checked)}
+                className="mt-1"
+              />
+              <div>
+                <div className="font-medium">Only fill in entries that currently have $0/hr</div>
+                <div className="text-xs text-muted-foreground">
+                  Safer for wide selections — valid rates already on file won’t change.
+                  Uncheck to force-overwrite every entry in the selection.
+                </div>
+              </div>
+            </label>
+            <div className="text-xs text-muted-foreground border-t pt-2">
+              Scope: {selectedBuckets.reduce((acc, b) => acc + b.entries.length, 0)} time entr{selectedBuckets.reduce((acc, b) => acc + b.entries.length, 0) === 1 ? "y" : "ies"} in {selectedBuckets.length} bucket{selectedBuckets.length === 1 ? "" : "s"}
+              {onlyZeroRate && (
+                <> · {selectedBuckets.reduce((acc, b) => acc + b.entries.filter((e) => e.rate <= 0).length, 0)} currently at $0/hr</>
+              )}
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setRateDialogOpen(false)} disabled={rateBusy}>Cancel</Button>
+            <Button onClick={submitApplyRate} disabled={rateBusy} className="bg-brand-navy text-white hover:opacity-90">
+              {rateBusy ? <Loader2 className="w-4 h-4 animate-spin mr-2" /> : null}
+              Apply
             </Button>
           </DialogFooter>
         </DialogContent>

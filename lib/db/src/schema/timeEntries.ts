@@ -19,6 +19,13 @@ export const timeEntriesTable = pgTable("time_entries", {
   clockOutLat: numeric("clock_out_lat", { precision: 10, scale: 6 }),
   clockOutLng: numeric("clock_out_lng", { precision: 10, scale: 6 }),
   hoursWorked: numeric("hours_worked", { precision: 6, scale: 2 }),
+  // Admin-set pay-rate override for this single entry. Takes precedence
+  // over shifts.pay_rate and employees.hourly_rate when present, and is
+  // the mechanism the Payroll Board "Apply pay rate" action writes to so
+  // admins can backfill historical clock-ins (and ad-hoc geo clock-ins
+  // with no shift) that would otherwise be invoiced at $0/hr. NULL means
+  // "use the inherited rate" (existing shift -> employee fallback).
+  payRateOverride: numeric("pay_rate_override", { precision: 8, scale: 2 }),
   isVerified: boolean("is_verified").notNull().default(false),
   // Approval workflow: admin must approve before payroll/invoicing picks up the entry.
   approvalStatus: text("approval_status").notNull().default("pending"), // pending | approved | rejected

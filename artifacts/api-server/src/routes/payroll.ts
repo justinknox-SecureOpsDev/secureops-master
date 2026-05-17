@@ -443,6 +443,7 @@ async function computeBoardBuckets(filters: {
       siteName: sitesTable.name,
       payRate: shiftsTable.payRate,
       employeeRate: employeesTable.hourlyRate,
+      payRateOverride: timeEntriesTable.payRateOverride,
       // Bank/direct-deposit fields drive bucket-level warnings so the admin
       // can spot payable rows that will fail the Pay Run CSV export.
       bankAccountName: employeesTable.bankAccountName,
@@ -492,9 +493,12 @@ async function computeBoardBuckets(filters: {
     const siteKey = r.siteId ?? "__nosite__";
     const key = `${r.employeeId}|${siteKey}|${periodStart}`;
     const hours = parseFloat(String(r.hoursWorked || "0"));
-    // Prefer shift.payRate; fall back to employee.hourlyRate so ad-hoc
-    // geo-clock-in entries (no shift) still get a rate.
-    const rate = parseFloat(String(r.payRate ?? r.employeeRate ?? "0"));
+    // Rate priority: per-entry admin override (set via the Payroll Board
+    // "Apply pay rate" action) -> the assigned shift's payRate -> the
+    // employee's default hourlyRate. The override exists so admins can
+    // backfill historical zero-rate entries (no shift on file, or hired
+    // before a rate was set) without rewriting shift/employee records.
+    const rate = parseFloat(String(r.payRateOverride ?? r.payRate ?? r.employeeRate ?? "0"));
     let b = buckets.get(key);
     if (!b) {
       b = {
@@ -991,6 +995,150 @@ router.post("/payroll/board/process", requireAdmin, async (req, res): Promise<vo
     processedCount: payrollEntryIds.length,
     skipped,
     unmatched,
+  });
+});
+
+/**
+ * POST /payroll/board/apply-rate
+ *   body: { timeEntryIds: string[], rate: number, onlyZeroRate?: boolean }
+ *
+ * Admin-only. Sets `time_entries.pay_rate_override = rate` on each given
+ * entry, which `computeBoardBuckets` reads as the highest-priority pay
+ * rate. Lets admins backfill rates on entries that had no shift.payRate
+ * and no employee.hourlyRate to fall back to (a $0 bucket warning).
+ *
+ * Guardrails:
+ *   - rate must be > 0 and <= $1000/hr (sanity ceiling, not policy).
+ *   - we refuse to touch entries that already belong to a processed/paid
+ *     payroll_entry — those numbers have already been exported to the
+ *     bank and shouldn't change.
+ *   - onlyZeroRate=true (default) skips entries whose current effective
+ *     rate is already > 0, so admins can safely click "Apply" on a wide
+ *     selection without overwriting valid rates. Pass `false` to force
+ *     overwrite (e.g. a true rate correction).
+ *   - Audit-logged with the resolved counts.
+ */
+const applyRateSchema = z.object({
+  timeEntryIds: z.array(z.string().uuid()).min(1, "timeEntryIds[] required"),
+  rate: z.number().positive("rate must be > 0").max(1000, "rate must be <= 1000"),
+  onlyZeroRate: z.boolean().optional().default(true),
+});
+
+router.post("/payroll/board/apply-rate", requireAdmin, async (req, res): Promise<void> => {
+  const parsed = applyRateSchema.safeParse(req.body);
+  if (!parsed.success) {
+    res.status(400).json({ error: "Bad Request", message: parsed.error.message, issues: parsed.error.issues });
+    return;
+  }
+  const { timeEntryIds, rate, onlyZeroRate } = parsed.data;
+
+  // Pull the candidates with their current effective rate so we can apply
+  // the onlyZeroRate filter, skip already-paid weeks, and produce an
+  // accurate audit summary.
+  const rows = await db
+    .select({
+      id: timeEntriesTable.id,
+      employeeId: timeEntriesTable.employeeId,
+      clockInTime: timeEntriesTable.clockInTime,
+      siteId: sql<string | null>`coalesce(${timeEntriesTable.siteId}, ${shiftsTable.siteId})`,
+      shiftRate: shiftsTable.payRate,
+      employeeRate: employeesTable.hourlyRate,
+      override: timeEntriesTable.payRateOverride,
+      approvalStatus: timeEntriesTable.approvalStatus,
+    })
+    .from(timeEntriesTable)
+    .leftJoin(shiftsTable, eq(timeEntriesTable.shiftId, shiftsTable.id))
+    .leftJoin(employeesTable, eq(employeesTable.userId, timeEntriesTable.employeeId))
+    .where(inArray(timeEntriesTable.id, timeEntryIds));
+
+  // Find time entries whose bucket is already processed/paid -- they get
+  // skipped. Match on (employeeId, siteId, mondayOfClockIn).
+  const peKeys = rows.map((r) => ({
+    id: r.id,
+    employeeId: r.employeeId,
+    siteId: r.siteId,
+    periodStart: isoDate(mondayOfWeekUTC(r.clockInTime)),
+  }));
+  const employeeIds = Array.from(new Set(peKeys.map((p) => p.employeeId)));
+  const existing = employeeIds.length === 0 ? [] : await db
+    .select({
+      employeeId: payrollEntriesTable.employeeId,
+      siteId: payrollEntriesTable.siteId,
+      periodStart: payrollEntriesTable.periodStart,
+      status: payrollEntriesTable.status,
+    })
+    .from(payrollEntriesTable)
+    .where(inArray(payrollEntriesTable.employeeId, employeeIds));
+  const peStatusByKey = new Map<string, string>();
+  for (const pe of existing) {
+    const k = `${pe.employeeId}|${pe.siteId ?? "__nosite__"}|${pe.periodStart}`;
+    peStatusByKey.set(k, pe.status);
+  }
+
+  const toUpdate: string[] = [];
+  const skipped: Array<{ id: string; reason: string }> = [];
+  for (const r of rows) {
+    const k = `${r.employeeId}|${r.siteId ?? "__nosite__"}|${isoDate(mondayOfWeekUTC(r.clockInTime))}`;
+    const peStatus = peStatusByKey.get(k);
+    if (peStatus === "processed" || peStatus === "paid") {
+      skipped.push({ id: r.id, reason: `bucket already ${peStatus}` });
+      continue;
+    }
+    if (onlyZeroRate) {
+      const effective = parseFloat(String(r.override ?? r.shiftRate ?? r.employeeRate ?? "0"));
+      if (effective > 0) {
+        skipped.push({ id: r.id, reason: "already has a non-zero rate" });
+        continue;
+      }
+    }
+    toUpdate.push(r.id);
+  }
+  const missing = timeEntryIds.filter((id) => !rows.some((r) => r.id === id));
+  for (const id of missing) skipped.push({ id, reason: "time entry not found" });
+
+  if (toUpdate.length > 0) {
+    await db
+      .update(timeEntriesTable)
+      .set({ payRateOverride: String(rate), updatedAt: new Date() })
+      .where(inArray(timeEntriesTable.id, toUpdate));
+  }
+
+  // First-class audit row -- separate action so ops can answer
+  // "which rate did admin X apply to which entries on which day?".
+  try {
+    await db.insert(auditLogsTable).values({
+      actorUserId: req.user?.userId ?? null,
+      actorEmail: req.user?.email ?? null,
+      actorRole: req.user?.role ?? null,
+      action: "payroll.board_apply_rate",
+      method: req.method,
+      path: req.originalUrl,
+      statusCode: 200,
+      ip: req.ip ?? null,
+      userAgent: req.headers["user-agent"] ?? null,
+      metadata: {
+        rate,
+        onlyZeroRate,
+        requestedCount: timeEntryIds.length,
+        updatedCount: toUpdate.length,
+        skippedCount: skipped.length,
+        // Cap per-row arrays so a 1000-entry batch doesn't bloat the
+        // audit JSONB. Counts above are authoritative; samples are for
+        // spot-debugging only.
+        updatedIdsSample: toUpdate.slice(0, 50),
+        skippedSample: skipped.slice(0, 50),
+        samplesTruncated: toUpdate.length > 50 || skipped.length > 50,
+      },
+    });
+  } catch (err) {
+    req.log?.error({ err }, "Failed to write payroll.board_apply_rate audit row");
+  }
+
+  res.status(200).json({
+    rate,
+    updatedCount: toUpdate.length,
+    skippedCount: skipped.length,
+    skipped,
   });
 });
 
