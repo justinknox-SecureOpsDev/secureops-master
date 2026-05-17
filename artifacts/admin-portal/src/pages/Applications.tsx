@@ -41,7 +41,7 @@ type ApproveResp = {
   onboardingUrl: string;
   onboardingToken: string;
   employeeId: string;
-  tempPasswordHint: string;
+  tempPassword: string;
   emailSent: boolean;
 };
 
@@ -702,9 +702,12 @@ function ApprovalSuccessDialog({ resp, onClose }: { resp: ApproveResp; onClose: 
                     </div>
                   </Field>
                   <Field label="Temporary password">
-                    <Input readOnly value="Last 4 of SSN" />
+                    <div className="flex gap-1">
+                      <Input readOnly value={resp.tempPassword} />
+                      <Button type="button" variant="outline" onClick={() => copy(resp.tempPassword)}><Copy className="w-4 h-4" /></Button>
+                    </div>
                     <p className="text-xs text-muted-foreground">
-                      Use the last 4 digits of the SSN provided on the application. The employee will be prompted to set a new password on first login.
+                      Shown once — also included in the onboarding email above. The employee will be prompted to set a new password on first login.
                     </p>
                   </Field>
                 </div>
@@ -726,9 +729,12 @@ function ApprovalSuccessDialog({ resp, onClose }: { resp: ApproveResp; onClose: 
                 </div>
               </Field>
               <Field label="Temporary password (for SecureOps mobile app)">
-                <Input readOnly value="Last 4 of SSN" />
+                <div className="flex gap-1">
+                  <Input readOnly value={resp.tempPassword} />
+                  <Button type="button" variant="outline" onClick={() => copy(resp.tempPassword)}><Copy className="w-4 h-4" /></Button>
+                </div>
                 <p className="text-xs text-muted-foreground">
-                  Email login: <strong>{resp.application.email}</strong>. Use the last 4 digits of the SSN provided on the application — the employee will be prompted to set a new password on first login.
+                  Email login: <strong>{resp.application.email}</strong>. This password is shown once — copy it now and share with the new hire. They will be prompted to set a new password on first login.
                 </p>
               </Field>
               <div className="text-xs text-amber-900 bg-amber-50 border border-amber-200 p-2 rounded">

@@ -656,6 +656,7 @@ router.post("/admin/applications/:id/approve", requireAdmin, async (req, res): P
       firstName: app.firstName,
       onboardingUrl,
       email: app.email,
+      tempPassword: result.tempPasswordPlain,
     });
     emailSent = await sendEmail({
       to: app.email,

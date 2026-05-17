@@ -10,7 +10,7 @@ Mobile + web operations platform for Williams Council Security Group (WCSG): rec
 - `pnpm --filter @workspace/db run push` — push DB schema (re-run after every schema change)
 - `pnpm --filter @workspace/api-server run build && pnpm --filter @workspace/scripts run check-security-headers` — pre-deploy: assert helmet CSP / CORS / HSTS / COR-P
 - Required env: `DATABASE_URL`, `SESSION_SECRET` (≥16 chars; production hard-fails if missing/short)
-- Optional env: `ALLOWED_ORIGINS`, `APP_BASE_URL`, `SMTP_*`, `EMERGENCY_CALL_NUMBER`, `GEOFENCE_RADIUS_MILES`, `SEED_DEMO_USERS=false`, `STRIPE_CONNECT_ENABLED`, `GEOCODING_ENABLED` (set `true` to enable best-effort US Census geocoding of applicant home addresses — required for the admin distance-from-site applicant filter; sends street/city/state/zip to `geocoding.geo.census.gov`)
+- Optional env: `ALLOWED_ORIGINS`, `APP_BASE_URL`, `SMTP_HOST` / `SMTP_PORT` / `SMTP_USER` / `SMTP_PASS` / `SMTP_FROM` (set all to enable outbound mail — onboarding-on-approve, password reset, invitations, request-info, license/training reminders; without them, endpoints return `emailSent:false` + URL so admin can share manually), `EMERGENCY_CALL_NUMBER`, `GEOFENCE_RADIUS_MILES`, `SEED_DEMO_USERS=false`, `STRIPE_CONNECT_ENABLED`, `GEOCODING_ENABLED` (set `true` to enable best-effort US Census geocoding of applicant home addresses — required for the admin distance-from-site applicant filter; sends street/city/state/zip to `geocoding.geo.census.gov`)
 
 ## Stack
 

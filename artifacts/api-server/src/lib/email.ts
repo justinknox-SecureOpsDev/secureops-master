@@ -58,6 +58,7 @@ export function renderOnboardingEmail(opts: {
   firstName: string;
   onboardingUrl: string;
   email: string;
+  tempPassword: string;
 }): { subject: string; text: string; html: string } {
   const subject = "Welcome to Williams Council Security Group — complete your onboarding";
   const text = [
@@ -68,8 +69,8 @@ export function renderOnboardingEmail(opts: {
     `Onboarding link (single use, expires in 14 days): ${opts.onboardingUrl}`,
     "",
     "After onboarding you can sign in to the SecureOps app with:",
-    `  Email:    ${opts.email}`,
-    `  Password: the last 4 digits of your SSN`,
+    `  Email:              ${opts.email}`,
+    `  Temporary password: ${opts.tempPassword}`,
     "(You will be asked to set a new password on first login.)",
     "",
     "— Williams Council Security Group",
@@ -88,8 +89,10 @@ export function renderOnboardingEmail(opts: {
       <p style="color:#555">This link is single use and expires in 14 days.</p>
       <hr style="border:none;border-top:1px solid #ddd;margin:24px 0"/>
       <p>After onboarding, sign in to the SecureOps app with:</p>
-      <pre style="background:#f6f1e1;padding:12px;border-radius:4px">Email:    ${escapeHtml(opts.email)}
-Password: the last 4 digits of your SSN</pre>
+      <div style="background:#f6f1e1;padding:14px 16px;border-left:3px solid #c9a84c;margin:12px 0;border-radius:4px;font-family:ui-monospace,Menlo,Consolas,monospace;font-size:14px">
+        <div><strong>Email:</strong> ${escapeHtml(opts.email)}</div>
+        <div><strong>Temporary password:</strong> ${escapeHtml(opts.tempPassword)}</div>
+      </div>
       <p style="color:#555;font-size:12px">You will be asked to set a new password on first login.</p>
     </div>
   `;
