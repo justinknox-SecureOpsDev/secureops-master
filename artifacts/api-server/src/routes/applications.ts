@@ -268,10 +268,102 @@ function geocodeApplicationInBackground(
 
 // ---- Public: submit application -------------------------------------------
 
+// Human-readable labels for every field the Apply form posts. Used to turn
+// Zod's terse "Required" / "Invalid input" messages into something the
+// applicant can actually act on ("Date of birth is required.").
+const APPLICATION_FIELD_LABELS: Record<string, string> = {
+  firstName: "First name",
+  lastName: "Last name",
+  email: "Email",
+  phone: "Phone number",
+  address: "Street address",
+  city: "City",
+  state: "State",
+  zip: "ZIP code",
+  dateOfBirth: "Date of birth",
+  cityOfBirth: "City of birth",
+  stateOfBirth: "State of birth",
+  niNumber: "SSN (last 4)",
+  i9Doc: "Completed Form I-9",
+  ssnCardDoc: "Social Security card",
+  idDocType: "Photo ID type",
+  idDoc: "Photo ID",
+  siaLicenseNumber: "TX security license number",
+  siaLicenseLevel: "License level",
+  siaLicenseExpiry: "License expiry date",
+  previousExperience: "Previous security experience",
+  yearsExperience: "Years of experience",
+  photo: "Head & shoulders photo",
+  cv: "CV / résumé",
+  trainingCertificates: "Training certificates",
+  availability: "Availability",
+};
+
+type ApplicationFieldError = { field: string; message: string };
+
+/**
+ * Map a Zod issue path (e.g. ["references", 0, "phone"]) to the form field
+ * token the Apply page uses (e.g. "ref:0:phone"). Returns null when the
+ * path falls outside the known submit surface so we can fall back to the
+ * raw Zod message instead of inventing a field that won't highlight.
+ */
+function applicationFieldFromPath(path: ReadonlyArray<PropertyKey>): { field: string; label: string } | null {
+  if (path.length === 0) return null;
+  const head = path[0];
+  if (head === "references") {
+    const idx = typeof path[1] === "number" ? path[1] : 0;
+    const sub = typeof path[2] === "string" ? path[2] : "name";
+    const subLabel = sub === "phone" ? "phone" : sub === "relationship" ? "relationship" : sub === "email" ? "email" : "name";
+    return { field: `ref:${idx}:${sub}`, label: `Reference #${idx + 1} ${subLabel}` };
+  }
+  if (typeof head !== "string") return null;
+  // File fields like i9Doc/photo can fail at the parent or on a child key
+  // (objectPath). Always collapse to the parent — that's what the form
+  // shows the inline error against.
+  if (head in APPLICATION_FIELD_LABELS) {
+    return { field: head, label: APPLICATION_FIELD_LABELS[head]! };
+  }
+  return null;
+}
+
+function applicationFieldErrorMessage(issue: z.core.$ZodIssue, label: string): string {
+  // Cover the common shapes a missing/empty value produces in zod/v4.
+  if (issue.code === "invalid_type") return `${label} is required.`;
+  if (issue.code === "too_small") {
+    const ts = issue as z.core.$ZodIssueTooSmall;
+    if (ts.origin === "array") return `Please add at least one ${label.toLowerCase()}.`;
+    if (ts.origin === "string") return `${label} is required.`;
+  }
+  if (issue.code === "invalid_value" || issue.code === "invalid_format") {
+    return `${label} is not valid.`;
+  }
+  // Fallback — still readable, just less branded.
+  return `${label}: ${issue.message}`;
+}
+
+function toApplicationFieldErrors(error: { issues: ReadonlyArray<z.core.$ZodIssue> }): ApplicationFieldError[] {
+  const seen = new Set<string>();
+  const out: ApplicationFieldError[] = [];
+  for (const issue of error.issues) {
+    const mapped = applicationFieldFromPath(issue.path);
+    if (!mapped) continue;
+    if (seen.has(mapped.field)) continue;
+    seen.add(mapped.field);
+    out.push({ field: mapped.field, message: applicationFieldErrorMessage(issue, mapped.label) });
+  }
+  return out;
+}
+
+function sendApplicationValidationError(res: Response, fieldErrors: ApplicationFieldError[], fallbackMessage: string): void {
+  const message = fieldErrors[0]?.message ?? fallbackMessage;
+  res.status(400).json({ error: "Bad Request", message, fieldErrors });
+}
+
 router.post("/applications", publicApplicationLimiter, async (req, res): Promise<void> => {
   const parsed = SubmitApplicationBody.safeParse(req.body);
   if (!parsed.success) {
-    res.status(400).json({ error: "Bad Request", message: parsed.error.message });
+    const fieldErrors = toApplicationFieldErrors({ issues: parsed.error.issues as unknown as ReadonlyArray<z.core.$ZodIssue> });
+    sendApplicationValidationError(res, fieldErrors, parsed.error.message);
     return;
   }
   const d = parsed.data;
@@ -280,10 +372,8 @@ router.post("/applications", publicApplicationLimiter, async (req, res): Promise
   // is US/+1 when no country code is present.
   const normalizedPhone = normalizePhoneToE164(d.phone);
   if (!normalizedPhone) {
-    res.status(400).json({
-      error: "Bad Request",
-      message: "Phone number is invalid. Please enter a valid US phone number (e.g. (214) 555-1234) or include the country code (e.g. +44 20 1234 5678).",
-    });
+    const message = "Phone number is invalid. Please enter a valid US phone number (e.g. (214) 555-1234) or include the country code (e.g. +44 20 1234 5678).";
+    sendApplicationValidationError(res, [{ field: "phone", message }], message);
     return;
   }
   // Normalize each reference contact phone (if provided) so future
@@ -300,10 +390,8 @@ router.post("/applications", publicApplicationLimiter, async (req, res): Promise
       if (typeof rawPhone === "string" && rawPhone.trim()) {
         const norm = normalizePhoneToE164(rawPhone);
         if (!norm) {
-          res.status(400).json({
-            error: "Bad Request",
-            message: `Reference #${i + 1} phone number is invalid. Please enter a valid US phone number (e.g. (214) 555-1234) or include the country code (e.g. +44 20 1234 5678).`,
-          });
+          const message = `Reference #${i + 1} phone number is invalid. Please enter a valid US phone number (e.g. (214) 555-1234) or include the country code (e.g. +44 20 1234 5678).`;
+          sendApplicationValidationError(res, [{ field: `ref:${i}:phone`, message }], message);
           return;
         }
         ref.phone = norm;

@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { api } from "@/lib/api";
+import { api, ApiError } from "@/lib/api";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -63,11 +63,37 @@ const STEPS = ["Personal", "I-9 & Identity", "TX License & experience", "Referen
 
 const I9_FORM_URL = "https://www.uscis.gov/sites/default/files/document/forms/i-9.pdf";
 
+type FieldError = { field?: string; message: string };
+
+// Map every server-recognised field token back to the step on which that
+// field is collected. Kept in sync with APPLICATION_FIELD_LABELS on the
+// server. References use the `ref:<i>:<sub>` namespace and always live on
+// step 3.
+const FIELD_TO_STEP: Record<string, number> = {
+  firstName: 0, lastName: 0, email: 0, phone: 0,
+  address: 0, city: 0, state: 0, zip: 0,
+  dateOfBirth: 0, cityOfBirth: 0, stateOfBirth: 0, niNumber: 0,
+  i9Doc: 1, ssnCardDoc: 1, idDocType: 1, idDoc: 1,
+  siaLicenseNumber: 2, siaLicenseLevel: 2, siaLicenseExpiry: 2,
+  yearsExperience: 2, previousExperience: 2,
+  photo: 3, cv: 3, trainingCertificates: 3,
+  availability: 4,
+};
+function stepForField(field: string | undefined): number {
+  if (!field) return 5;
+  if (field.startsWith("ref:")) return 3;
+  return FIELD_TO_STEP[field] ?? 5;
+}
+
 export function ApplyPage() {
   const [step, setStep] = useState(0);
   const [submitting, setSubmitting] = useState(false);
   const [submitted, setSubmitted] = useState(false);
-  const [error, setError] = useState<{ field?: string; message: string } | null>(null);
+  // `fieldErrors` are inline messages keyed by the same `name` tokens the
+  // Field/InlineError components look up. `generalError` is a non-field
+  // error (e.g. server outage) shown on the Review step.
+  const [fieldErrors, setFieldErrors] = useState<FieldError[]>([]);
+  const [generalError, setGeneralError] = useState<string | null>(null);
   const [form, setForm] = useState<Form>({
     firstName: "", lastName: "", email: "", phone: "",
     address: "", city: "", state: "", zip: "",
@@ -105,9 +131,8 @@ export function ApplyPage() {
     });
   }
 
-  type FieldError = { field?: string; message: string };
-  function validateStep(): FieldError | null {
-    if (step === 0) {
+  function validateStep(stepIndex: number = step): FieldError | null {
+    if (stepIndex === 0) {
       if (!form.firstName) return { field: "firstName", message: "First name is required." };
       if (!form.lastName) return { field: "lastName", message: "Last name is required." };
       if (!form.email) return { field: "email", message: "Email is required." };
@@ -124,20 +149,20 @@ export function ApplyPage() {
       if (!form.cityOfBirth.trim()) return { field: "cityOfBirth", message: "City of birth is required." };
       if (!form.stateOfBirth.trim()) return { field: "stateOfBirth", message: "State of birth is required." };
     }
-    if (step === 1) {
+    if (stepIndex === 1) {
       if (!form.i9Doc) return { field: "i9Doc", message: "Please upload your completed Form I-9." };
       if (!form.ssnCardDoc) return { field: "ssnCardDoc", message: "Please upload a photo of your Social Security card." };
       if (!form.idDocType) return { field: "idDocType", message: "Please select your photo ID type (driver's license or passport)." };
       if (!form.idDoc) return { field: "idDoc", message: "Please upload a photo of your driver's license or passport." };
     }
-    if (step === 2) {
+    if (stepIndex === 2) {
       if (!form.siaLicenseNumber.trim()) return { field: "siaLicenseNumber", message: "TX security license number is required." };
       if (!form.siaLicenseLevel) return { field: "siaLicenseLevel", message: "License level is required." };
       if (!form.siaLicenseExpiry) return { field: "siaLicenseExpiry", message: "License expiry date is required." };
       if (!form.yearsExperience.trim()) return { field: "yearsExperience", message: "Years of experience is required." };
       if (!form.previousExperience.trim()) return { field: "previousExperience", message: "Please describe your previous security experience." };
     }
-    if (step === 3) {
+    if (stepIndex === 3) {
       const filled = form.references.filter(
         (r) => r.name.trim() && r.relationship.trim() && r.phone.trim(),
       );
@@ -162,7 +187,7 @@ export function ApplyPage() {
         return { field: "trainingCertificates", message: "Please upload at least one training certificate." };
       }
     }
-    if (step === 4) {
+    if (stepIndex === 4) {
       if (form.availability.length === 0) {
         return { field: "availability", message: "Please tap at least one availability slot." };
       }
@@ -170,9 +195,34 @@ export function ApplyPage() {
     return null;
   }
 
+  /**
+   * Re-run every step's validator and jump the user to the first step that
+   * fails. Keeps the user from ever seeing "Personal" while a missing
+   * Photo ID is the real blocker.
+   */
+  function validateAllSteps(): { stepIndex: number; error: FieldError } | null {
+    for (let s = 0; s <= 4; s++) {
+      const err = validateStep(s);
+      if (err) return { stepIndex: s, error: err };
+    }
+    return null;
+  }
+
   async function submit() {
     setSubmitting(true);
-    setError(null);
+    setGeneralError(null);
+
+    // Re-run full client validation before sending so users rarely see a
+    // server-side rejection. If anything is missing, hop to the offending
+    // step and surface the inline error there.
+    const clientErr = validateAllSteps();
+    if (clientErr) {
+      setFieldErrors([clientErr.error]);
+      setStep(clientErr.stepIndex);
+      setSubmitting(false);
+      return;
+    }
+    setFieldErrors([]);
     try {
       const body = {
         firstName: form.firstName,
@@ -212,7 +262,34 @@ export function ApplyPage() {
       await api("/applications", { method: "POST", body });
       setSubmitted(true);
     } catch (e) {
-      setError({ message: (e as Error).message });
+      // Surface structured field errors when the server provides them so
+      // each one lands as an inline message under the offending input.
+      // Fall back to a banner-style general error otherwise.
+      if (e instanceof ApiError && e.data && typeof e.data === "object") {
+        const data = e.data as { fieldErrors?: Array<{ field?: string; message?: string }>; message?: string };
+        const serverFieldErrors: FieldError[] = Array.isArray(data.fieldErrors)
+          ? data.fieldErrors
+              .filter((fe): fe is { field: string; message: string } =>
+                typeof fe?.field === "string" && typeof fe?.message === "string")
+              .map((fe) => ({ field: fe.field, message: fe.message }))
+          : [];
+        if (serverFieldErrors.length > 0) {
+          setFieldErrors(serverFieldErrors);
+          setGeneralError(null);
+          // Jump to the earliest step containing a flagged field so the
+          // user immediately sees the inline highlight.
+          const earliest = serverFieldErrors
+            .map((fe) => stepForField(fe.field))
+            .reduce((a, b) => Math.min(a, b), 5);
+          setStep(Math.min(earliest, 5));
+        } else {
+          setFieldErrors([]);
+          setGeneralError(data.message ?? e.message);
+        }
+      } else {
+        setFieldErrors([]);
+        setGeneralError((e as Error).message);
+      }
     } finally {
       setSubmitting(false);
     }
@@ -244,29 +321,29 @@ export function ApplyPage() {
             <>
               <h2 className="brand-wordmark text-xl">Personal details</h2>
               <Two>
-                <Field label="First name *" name="firstName" error={error}><Input value={form.firstName} onChange={(e) => set("firstName", e.target.value)} /></Field>
-                <Field label="Last name *" name="lastName" error={error}><Input value={form.lastName} onChange={(e) => set("lastName", e.target.value)} /></Field>
+                <Field label="First name *" name="firstName" error={fieldErrors}><Input value={form.firstName} onChange={(e) => set("firstName", e.target.value)} /></Field>
+                <Field label="Last name *" name="lastName" error={fieldErrors}><Input value={form.lastName} onChange={(e) => set("lastName", e.target.value)} /></Field>
               </Two>
               <Two>
-                <Field label="Email *" name="email" error={error}><Input type="email" value={form.email} onChange={(e) => set("email", e.target.value)} /></Field>
-                <Field label="Phone *" name="phone" error={error}><Input value={form.phone} onChange={(e) => set("phone", e.target.value)} /></Field>
+                <Field label="Email *" name="email" error={fieldErrors}><Input type="email" value={form.email} onChange={(e) => set("email", e.target.value)} /></Field>
+                <Field label="Phone *" name="phone" error={fieldErrors}><Input value={form.phone} onChange={(e) => set("phone", e.target.value)} /></Field>
               </Two>
-              <Field label="Street address *" name="address" error={error}><Textarea rows={2} value={form.address} onChange={(e) => set("address", e.target.value)} placeholder="Street, apt/unit" /></Field>
+              <Field label="Street address *" name="address" error={fieldErrors}><Textarea rows={2} value={form.address} onChange={(e) => set("address", e.target.value)} placeholder="Street, apt/unit" /></Field>
               <Two>
-                <Field label="City *" name="city" error={error}><Input value={form.city} onChange={(e) => set("city", e.target.value)} /></Field>
-                <Field label="State *" name="state" error={error}><Input value={form.state} onChange={(e) => set("state", e.target.value.toUpperCase().slice(0, 2))} placeholder="TX" maxLength={2} /></Field>
+                <Field label="City *" name="city" error={fieldErrors}><Input value={form.city} onChange={(e) => set("city", e.target.value)} /></Field>
+                <Field label="State *" name="state" error={fieldErrors}><Input value={form.state} onChange={(e) => set("state", e.target.value.toUpperCase().slice(0, 2))} placeholder="TX" maxLength={2} /></Field>
               </Two>
               <Two>
-                <Field label="ZIP code *" name="zip" error={error}><Input value={form.zip} onChange={(e) => set("zip", e.target.value)} placeholder="75001" /></Field>
+                <Field label="ZIP code *" name="zip" error={fieldErrors}><Input value={form.zip} onChange={(e) => set("zip", e.target.value)} placeholder="75001" /></Field>
                 <div />
               </Two>
               <Two>
-                <Field label="Date of birth *" name="dateOfBirth" error={error}><Input type="date" value={form.dateOfBirth} onChange={(e) => set("dateOfBirth", e.target.value)} /></Field>
-                <Field label="SSN (last 4) *" name="niNumber" error={error}><Input value={form.niNumber} onChange={(e) => set("niNumber", e.target.value)} /></Field>
+                <Field label="Date of birth *" name="dateOfBirth" error={fieldErrors}><Input type="date" value={form.dateOfBirth} onChange={(e) => set("dateOfBirth", e.target.value)} /></Field>
+                <Field label="SSN (last 4) *" name="niNumber" error={fieldErrors}><Input value={form.niNumber} onChange={(e) => set("niNumber", e.target.value)} /></Field>
               </Two>
               <Two>
-                <Field label="City of birth *" name="cityOfBirth" error={error}><Input value={form.cityOfBirth} onChange={(e) => set("cityOfBirth", e.target.value)} /></Field>
-                <Field label="State / county of birth *" name="stateOfBirth" error={error}><Input value={form.stateOfBirth} onChange={(e) => set("stateOfBirth", e.target.value)} /></Field>
+                <Field label="City of birth *" name="cityOfBirth" error={fieldErrors}><Input value={form.cityOfBirth} onChange={(e) => set("cityOfBirth", e.target.value)} /></Field>
+                <Field label="State / county of birth *" name="stateOfBirth" error={fieldErrors}><Input value={form.stateOfBirth} onChange={(e) => set("stateOfBirth", e.target.value)} /></Field>
               </Two>
             </>
           )}
@@ -300,7 +377,7 @@ export function ApplyPage() {
                   onChange={(v) => set("i9Doc", v)}
                   uploadFn={uploadFileAnon}
                 />
-                <InlineError name="i9Doc" error={error} />
+                <InlineError name="i9Doc" error={fieldErrors} />
               </div>
               <div>
                 <FileUploadField
@@ -310,9 +387,9 @@ export function ApplyPage() {
                   onChange={(v) => set("ssnCardDoc", v)}
                   uploadFn={uploadFileAnon}
                 />
-                <InlineError name="ssnCardDoc" error={error} />
+                <InlineError name="ssnCardDoc" error={fieldErrors} />
               </div>
-              <Field label="Photo ID type *" name="idDocType" error={error}>
+              <Field label="Photo ID type *" name="idDocType" error={fieldErrors}>
                 <select
                   className="w-full border rounded h-10 px-3 bg-background"
                   value={form.idDocType}
@@ -337,7 +414,7 @@ export function ApplyPage() {
                   onChange={(v) => set("idDoc", v)}
                   uploadFn={uploadFileAnon}
                 />
-                <InlineError name="idDoc" error={error} />
+                <InlineError name="idDoc" error={fieldErrors} />
               </div>
             </>
           )}
@@ -345,8 +422,8 @@ export function ApplyPage() {
             <>
               <h2 className="brand-wordmark text-xl">TX security license & experience</h2>
               <Two>
-                <Field label="TX security license number *" name="siaLicenseNumber" error={error}><Input value={form.siaLicenseNumber} onChange={(e) => set("siaLicenseNumber", e.target.value)} /></Field>
-                <Field label="License level *" name="siaLicenseLevel" error={error}>
+                <Field label="TX security license number *" name="siaLicenseNumber" error={fieldErrors}><Input value={form.siaLicenseNumber} onChange={(e) => set("siaLicenseNumber", e.target.value)} /></Field>
+                <Field label="License level *" name="siaLicenseLevel" error={fieldErrors}>
                   <select className="w-full border rounded h-10 px-3 bg-background"
                     value={form.siaLicenseLevel} onChange={(e) => set("siaLicenseLevel", e.target.value)}>
                     <option value="">Select…</option>
@@ -357,10 +434,10 @@ export function ApplyPage() {
                 </Field>
               </Two>
               <Two>
-                <Field label="License expiry *" name="siaLicenseExpiry" error={error}><Input type="date" value={form.siaLicenseExpiry} onChange={(e) => set("siaLicenseExpiry", e.target.value)} /></Field>
-                <Field label="Years of experience *" name="yearsExperience" error={error}><Input type="number" min={0} value={form.yearsExperience} onChange={(e) => set("yearsExperience", e.target.value)} /></Field>
+                <Field label="License expiry *" name="siaLicenseExpiry" error={fieldErrors}><Input type="date" value={form.siaLicenseExpiry} onChange={(e) => set("siaLicenseExpiry", e.target.value)} /></Field>
+                <Field label="Years of experience *" name="yearsExperience" error={fieldErrors}><Input type="number" min={0} value={form.yearsExperience} onChange={(e) => set("yearsExperience", e.target.value)} /></Field>
               </Two>
-              <Field label="Describe your previous security experience *" name="previousExperience" error={error}>
+              <Field label="Describe your previous security experience *" name="previousExperience" error={fieldErrors}>
                 <Textarea rows={5} value={form.previousExperience} onChange={(e) => set("previousExperience", e.target.value)} />
               </Field>
             </>
@@ -377,11 +454,11 @@ export function ApplyPage() {
                     Reference {i + 1}{i === 0 ? " *" : ""}
                   </div>
                   <Two>
-                    <Field label={i === 0 ? "Name *" : "Name"} name={`ref:${i}:name`} error={error}><Input value={r.name} onChange={(e) => setRef(i, "name", e.target.value)} /></Field>
-                    <Field label={i === 0 ? "Relationship *" : "Relationship"} name={`ref:${i}:relationship`} error={error}><Input value={r.relationship} onChange={(e) => setRef(i, "relationship", e.target.value)} /></Field>
+                    <Field label={i === 0 ? "Name *" : "Name"} name={`ref:${i}:name`} error={fieldErrors}><Input value={r.name} onChange={(e) => setRef(i, "name", e.target.value)} /></Field>
+                    <Field label={i === 0 ? "Relationship *" : "Relationship"} name={`ref:${i}:relationship`} error={fieldErrors}><Input value={r.relationship} onChange={(e) => setRef(i, "relationship", e.target.value)} /></Field>
                   </Two>
                   <Two>
-                    <Field label={i === 0 ? "Phone *" : "Phone"} name={`ref:${i}:phone`} error={error}><Input value={r.phone} onChange={(e) => setRef(i, "phone", e.target.value)} /></Field>
+                    <Field label={i === 0 ? "Phone *" : "Phone"} name={`ref:${i}:phone`} error={fieldErrors}><Input value={r.phone} onChange={(e) => setRef(i, "phone", e.target.value)} /></Field>
                     <Field label="Email"><Input type="email" value={r.email} onChange={(e) => setRef(i, "email", e.target.value)} /></Field>
                   </Two>
                 </div>
@@ -389,16 +466,16 @@ export function ApplyPage() {
               <Two>
                 <div>
                   <FileUploadField label="Head & shoulders photo *" accept="image/*" value={form.photo} onChange={(v) => set("photo", v)} uploadFn={uploadFileAnon} />
-                  <InlineError name="photo" error={error} />
+                  <InlineError name="photo" error={fieldErrors} />
                 </div>
                 <div>
                   <FileUploadField label="CV (PDF / DOC) *" accept=".pdf,.doc,.docx" value={form.cv} onChange={(v) => set("cv", v)} uploadFn={uploadFileAnon} />
-                  <InlineError name="cv" error={error} />
+                  <InlineError name="cv" error={fieldErrors} />
                 </div>
               </Two>
               <div>
                 <MultiFileUploadField label="Training certificates * (upload at least one)" accept="image/*,.pdf" value={form.trainingCertificates} onChange={(v) => set("trainingCertificates", v)} uploadFn={uploadFileAnon} />
-                <InlineError name="trainingCertificates" error={error} />
+                <InlineError name="trainingCertificates" error={fieldErrors} />
               </div>
             </>
           )}
@@ -406,7 +483,7 @@ export function ApplyPage() {
             <>
               <h2 className="brand-wordmark text-xl">Availability *</h2>
               <p className="text-sm text-muted-foreground">Tap each shift period you can usually work. At least one slot is required.</p>
-              <InlineError name="availability" error={error} />
+              <InlineError name="availability" error={fieldErrors} />
               <div className="overflow-x-auto">
                 <table className="w-full text-sm">
                   <thead>
@@ -454,7 +531,25 @@ export function ApplyPage() {
                 <Sum k="Certificates" v={String(form.trainingCertificates.length)} />
                 <Sum k="Availability slots" v={String(form.availability.length)} />
               </dl>
-              {error && <div className="text-sm text-destructive bg-destructive/5 p-2 rounded border border-destructive/20">{error.message}</div>}
+              {generalError && <div className="text-sm text-destructive bg-destructive/5 p-2 rounded border border-destructive/20">{generalError}</div>}
+              {fieldErrors.length > 0 && (
+                <div className="text-sm text-destructive bg-destructive/5 p-3 rounded border border-destructive/20 space-y-1">
+                  <div className="font-semibold">Please fix the following before submitting:</div>
+                  <ul className="list-disc pl-5">
+                    {fieldErrors.map((fe, i) => (
+                      <li key={i}>
+                        <button
+                          type="button"
+                          className="underline hover:opacity-80 text-left"
+                          onClick={() => fe.field && setStep(stepForField(fe.field))}
+                        >
+                          {fe.message}
+                        </button>
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              )}
             </>
           )}
 
@@ -469,8 +564,9 @@ export function ApplyPage() {
                 className="bg-brand-navy hover:opacity-90 text-white"
                 onClick={() => {
                   const err = validateStep();
-                  if (err) { setError(err); return; }
-                  setError(null);
+                  if (err) { setFieldErrors([err]); setGeneralError(null); return; }
+                  setFieldErrors([]);
+                  setGeneralError(null);
                   setStep((s) => Math.min(STEPS.length - 1, s + 1));
                 }}
               >Continue <ChevronRight className="w-4 h-4 ml-1" /></Button>
@@ -511,22 +607,28 @@ function Stepper({ step, steps }: { step: number; steps: string[] }) {
   );
 }
 
-function Field({ label, name, error, children }: { label: string; name?: string; error?: { field?: string; message: string } | null; children: React.ReactNode }) {
-  const showError = !!name && !!error && error.field === name;
+function findFieldError(name: string | undefined, errors: FieldError[]): FieldError | undefined {
+  if (!name) return undefined;
+  return errors.find((e) => e.field === name);
+}
+
+function Field({ label, name, error, children }: { label: string; name?: string; error?: FieldError[]; children: React.ReactNode }) {
+  const match = findFieldError(name, error ?? []);
   return (
     <div className="space-y-1">
       <Label className="text-xs uppercase font-semibold text-foreground/80">{label}</Label>
       {children}
-      {showError && (
-        <div className="text-xs text-destructive">{error!.message}</div>
+      {match && (
+        <div className="text-xs text-destructive">{match.message}</div>
       )}
     </div>
   );
 }
 
-function InlineError({ name, error }: { name: string; error: { field?: string; message: string } | null }) {
-  if (!error || error.field !== name) return null;
-  return <div className="text-xs text-destructive mt-1">{error.message}</div>;
+function InlineError({ name, error }: { name: string; error: FieldError[] }) {
+  const match = findFieldError(name, error);
+  if (!match) return null;
+  return <div className="text-xs text-destructive mt-1">{match.message}</div>;
 }
 function Two({ children }: { children: React.ReactNode }) {
   return <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">{children}</div>;
