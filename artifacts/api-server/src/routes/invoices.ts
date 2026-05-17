@@ -1,5 +1,5 @@
 import { Router, type IRouter } from "express";
-import { eq, and, ilike, gte, lte, lt } from "drizzle-orm";
+import { eq, and, or, ilike, gte, lte, lt } from "drizzle-orm";
 import { db, invoicesTable, clientsTable, sitesTable, shiftsTable, timeEntriesTable, usersTable } from "@workspace/db";
 import { requireAdmin } from "../middlewares/auth";
 
@@ -106,7 +106,13 @@ router.post("/invoices/generate", requireAdmin, async (req, res): Promise<void> 
   const end = addDays(start, 7);
 
   const [site] = await db
-    .select({ id: sitesTable.id, name: sitesTable.name, address: sitesTable.address, clientId: sitesTable.clientId })
+    .select({
+      id: sitesTable.id,
+      name: sitesTable.name,
+      address: sitesTable.address,
+      clientId: sitesTable.clientId,
+      defaultBillRate: sitesTable.defaultBillRate,
+    })
     .from(sitesTable)
     .where(eq(sitesTable.id, siteId));
   if (!site) { res.status(404).json({ error: "Not Found", message: "Site not found" }); return; }
@@ -116,19 +122,31 @@ router.post("/invoices/generate", requireAdmin, async (req, res): Promise<void> 
     : [undefined];
   if (!client) { res.status(400).json({ error: "Bad Request", message: "Site has no linked client" }); return; }
 
+  // Approved hours billed at the SITE's bill rate (hour-for-hour against
+  // every entry's actual hoursWorked). The site rate is the single source
+  // of truth so a client's invoice can never drift from the contracted
+  // hourly rate just because one shift was posted with a stale billRate.
+  // shifts.billRate is kept as a defensive fallback for legacy sites that
+  // were created before defaultBillRate existed.
+  //
+  // We also include ad-hoc geo clock-ins (no linked shift): a time entry
+  // whose own siteId resolves to this site counts. That way every approved
+  // working hour at the site shows up on the invoice.
+  const siteBillRate = parseFloat(String(site.defaultBillRate ?? "0"));
+
   const entries = await db
     .select({
+      id: timeEntriesTable.id,
       hoursWorked: timeEntriesTable.hoursWorked,
-      billRate: shiftsTable.billRate,
-      shiftTitle: shiftsTable.title,
+      shiftBillRate: shiftsTable.billRate,
       employeeFirst: usersTable.firstName,
       employeeLast: usersTable.lastName,
     })
     .from(timeEntriesTable)
-    .innerJoin(shiftsTable, eq(timeEntriesTable.shiftId, shiftsTable.id))
+    .leftJoin(shiftsTable, eq(timeEntriesTable.shiftId, shiftsTable.id))
     .leftJoin(usersTable, eq(timeEntriesTable.employeeId, usersTable.id))
     .where(and(
-      eq(shiftsTable.siteId, siteId),
+      or(eq(shiftsTable.siteId, siteId), eq(timeEntriesTable.siteId, siteId)),
       eq(timeEntriesTable.approvalStatus, "approved"),
       gte(timeEntriesTable.clockInTime, start),
       lt(timeEntriesTable.clockInTime, end),
@@ -139,23 +157,60 @@ router.post("/invoices/generate", requireAdmin, async (req, res): Promise<void> 
     return;
   }
 
-  // Group by (shift title × billRate) so lines look like: "Kanvas L3 — 12h × £30 = £360"
-  const groups = new Map<string, { description: string; hours: number; rate: number; amount: number }>();
+  // Resolve the per-entry billable rate. Prefer the site's contracted
+  // rate; only fall back to the shift's billRate if the site has none
+  // (legacy data). If neither exists we refuse the whole invoice rather
+  // than silently sending the client a $0 line.
+  type Priced = { hours: number; rate: number; officerName: string };
+  const priced: Priced[] = [];
+  const unrated: string[] = [];
   for (const e of entries) {
-    const rate = parseFloat(String(e.billRate || "0"));
-    const hours = parseFloat(String(e.hoursWorked || "0"));
-    const key = `${e.shiftTitle}__${rate}`;
-    const cur = groups.get(key) ?? { description: e.shiftTitle ?? "Security services", hours: 0, rate, amount: 0 };
-    cur.hours += hours;
-    cur.amount += hours * rate;
+    const hours = parseFloat(String(e.hoursWorked ?? "0"));
+    if (!isFinite(hours) || hours <= 0) continue; // skip open/zero entries
+    const rate = siteBillRate > 0
+      ? siteBillRate
+      : parseFloat(String(e.shiftBillRate ?? "0"));
+    const officerName = [e.employeeFirst, e.employeeLast].filter(Boolean).join(" ") || "Unassigned officer";
+    if (rate <= 0) {
+      unrated.push(officerName);
+      continue;
+    }
+    priced.push({ hours, rate, officerName });
+  }
+  if (priced.length === 0) {
+    res.status(400).json({
+      error: "Bad Request",
+      message: "Cannot generate invoice: no bill rate on file. Set the site's default bill rate, then retry.",
+    });
+    return;
+  }
+  if (unrated.length > 0) {
+    req.log?.warn(
+      { siteId, weekStart, unratedCount: unrated.length },
+      "Some approved time entries had no resolvable bill rate and were excluded from the invoice",
+    );
+  }
+
+  // One line per (officer × rate). Reads naturally on the PDF:
+  //   "Smith, John  —  16.50h × $42.00  =  $693.00"
+  // If the client renegotiated mid-week and two rates apply, each officer
+  // gets one line per rate so the breakdown is auditable.
+  const groups = new Map<string, { description: string; hours: number; rate: number; amount: number }>();
+  for (const p of priced) {
+    const key = `${p.officerName}__${p.rate}`;
+    const cur = groups.get(key) ?? { description: p.officerName, hours: 0, rate: p.rate, amount: 0 };
+    cur.hours += p.hours;
+    cur.amount += p.hours * p.rate;
     groups.set(key, cur);
   }
-  const lineItems = Array.from(groups.values()).map((g) => ({
-    description: g.description,
-    hours: Math.round(g.hours * 100) / 100,
-    rate: g.rate,
-    amount: Math.round(g.amount * 100) / 100,
-  }));
+  const lineItems = Array.from(groups.values())
+    .sort((a, b) => a.description.localeCompare(b.description))
+    .map((g) => ({
+      description: g.description,
+      hours: Math.round(g.hours * 100) / 100,
+      rate: g.rate,
+      amount: Math.round(g.amount * 100) / 100,
+    }));
   const { subtotal, total } = calcTotals(lineItems, 0);
 
   const periodStart = isoDate(start);

@@ -265,6 +265,7 @@ export const TABLES: TableDescriptor[] = [
       { key: "clientId", label: "Client", type: "fk", fkTable: "clients", fkLabel: "name", required: true },
       { key: "name", label: "Name", type: "text", required: true },
       { key: "address", label: "Address", type: "textarea" },
+      { key: "defaultBillRate", label: "Bill Rate ($/hr)", type: "number" },
       { key: "locationLat", label: "Lat", type: "number", hiddenInGrid: true },
       { key: "locationLng", label: "Lng", type: "number", hiddenInGrid: true },
       { key: "notes", label: "Notes", type: "textarea", hiddenInGrid: true },
