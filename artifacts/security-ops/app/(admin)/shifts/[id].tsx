@@ -1,7 +1,7 @@
-import React, { useLayoutEffect } from "react";
+import React, { useLayoutEffect, useMemo, useState } from "react";
 import { useNavigation } from "expo-router";
 import { useTopPad } from "@/hooks/useTopPad";
-import { View, Text, StyleSheet, ScrollView, TouchableOpacity, ActivityIndicator, Platform } from "react-native";
+import { View, Text, StyleSheet, ScrollView, TouchableOpacity, ActivityIndicator, Platform, TextInput } from "react-native";
 import { useColors } from "@/hooks/useColors";
 import { confirmAction, notify } from "@/utils/confirm";
 import { useGetShift, getGetShiftQueryKey, useGetEmployees, getGetEmployeesQueryKey, useAssignEmployeeToShift, useUpdateShiftAssignment, getGetShiftsQueryKey } from "@workspace/api-client-react";
@@ -82,8 +82,21 @@ export default function ShiftDetailScreen() {
   const reqLevel = (shift as any).requiredLicenseLevel ?? 2;
   const headcount = (shift as any).headcount ?? 1;
   const unassignedAll = (allEmployees ?? []).filter((e) => !assignedIds.has(e.id));
-  const eligible = unassignedAll.filter((e: any) => (e.maxLicenseLevel ?? 0) >= reqLevel);
-  const ineligible = unassignedAll.filter((e: any) => (e.maxLicenseLevel ?? 0) < reqLevel);
+  const eligibleAll = unassignedAll.filter((e: any) => (e.maxLicenseLevel ?? 0) >= reqLevel);
+  const ineligibleAll = unassignedAll.filter((e: any) => (e.maxLicenseLevel ?? 0) < reqLevel);
+
+  // Search across the qualified + not-qualified lists. Matches first/last
+  // name and email so admins can find people fast on busy rosters.
+  const [search, setSearch] = useState("");
+  const q = search.trim().toLowerCase();
+  const matches = (e: any) => {
+    if (!q) return true;
+    const haystack = `${e.firstName ?? ""} ${e.lastName ?? ""} ${e.email ?? ""}`.toLowerCase();
+    return haystack.includes(q);
+  };
+  const eligible = useMemo(() => eligibleAll.filter(matches), [eligibleAll, q]);
+  const ineligible = useMemo(() => ineligibleAll.filter(matches), [ineligibleAll, q]);
+  const isSearching = q.length > 0;
   const duration = ((new Date(shift.endTime).getTime() - new Date(shift.startTime).getTime()) / 3600000).toFixed(1);
   const filled = (shift.assignments ?? []).length;
 
@@ -178,13 +191,39 @@ export default function ShiftDetailScreen() {
         ))}
       </View>
 
-      {eligible.length > 0 && (
+      {(eligibleAll.length > 0 || ineligibleAll.length > 0) && (
+        <View style={[styles.searchWrap, { backgroundColor: colors.card, borderColor: colors.border }]}>
+          <Feather name="search" size={16} color={colors.mutedForeground} />
+          <TextInput
+            value={search}
+            onChangeText={setSearch}
+            placeholder="Search officers by name or email"
+            placeholderTextColor={colors.mutedForeground}
+            style={[styles.searchInput, { color: colors.foreground }]}
+            autoCapitalize="none"
+            autoCorrect={false}
+            returnKeyType="search"
+          />
+          {search.length > 0 && (
+            <TouchableOpacity onPress={() => setSearch("")} accessibilityLabel="Clear search">
+              <Feather name="x" size={16} color={colors.mutedForeground} />
+            </TouchableOpacity>
+          )}
+        </View>
+      )}
+
+      {eligibleAll.length > 0 && (
         <View style={[styles.section, { backgroundColor: colors.card, borderColor: colors.border }]}>
-          <Text style={[styles.sectionTitle, { color: colors.accent }]}>ADD QUALIFIED PERSONNEL ({eligible.length})</Text>
+          <Text style={[styles.sectionTitle, { color: colors.accent }]}>
+            ADD QUALIFIED PERSONNEL ({eligible.length}{isSearching ? ` of ${eligibleAll.length}` : ""})
+          </Text>
           <Text style={{ color: colors.mutedForeground, fontSize: 11, marginBottom: 8 }}>
             Showing officers with {levelLabel(reqLevel)} or higher.
           </Text>
-          {eligible.slice(0, 15).map((emp: any) => (
+          {eligible.length === 0 && (
+            <Text style={[styles.emptyText, { color: colors.mutedForeground }]}>No qualified officers match “{search}”.</Text>
+          )}
+          {(isSearching ? eligible : eligible.slice(0, 15)).map((emp: any) => (
             <TouchableOpacity
               key={emp.id}
               style={[styles.personRow, { borderBottomColor: colors.border }]}
@@ -205,10 +244,15 @@ export default function ShiftDetailScreen() {
         </View>
       )}
 
-      {ineligible.length > 0 && (
+      {ineligibleAll.length > 0 && (
         <View style={[styles.section, { backgroundColor: colors.card, borderColor: colors.border, opacity: 0.7 }]}>
-          <Text style={[styles.sectionTitle, { color: colors.mutedForeground }]}>NOT QUALIFIED ({ineligible.length})</Text>
-          {ineligible.slice(0, 8).map((emp: any) => (
+          <Text style={[styles.sectionTitle, { color: colors.mutedForeground }]}>
+            NOT QUALIFIED ({ineligible.length}{isSearching ? ` of ${ineligibleAll.length}` : ""})
+          </Text>
+          {isSearching && ineligible.length === 0 && (
+            <Text style={[styles.emptyText, { color: colors.mutedForeground }]}>No matches.</Text>
+          )}
+          {(isSearching ? ineligible : ineligible.slice(0, 8)).map((emp: any) => (
             <View key={emp.id} style={[styles.personRow, { borderBottomColor: colors.border }]}>
               <View style={[styles.avatar, { backgroundColor: colors.secondary }]}>
                 <Text style={[styles.avatarText, { color: colors.mutedForeground }]}>{emp.firstName[0]}{emp.lastName[0]}</Text>
@@ -258,4 +302,16 @@ const styles = StyleSheet.create({
   personName: { flex: 1, fontSize: 14, fontWeight: "500" },
   removeBtn: { padding: 6, borderRadius: 6, borderWidth: 1 },
   emptyText: { fontSize: 13, fontStyle: "italic" },
+  searchWrap: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+    marginHorizontal: 16,
+    marginBottom: 12,
+    paddingHorizontal: 12,
+    paddingVertical: Platform.OS === "ios" ? 12 : 6,
+    borderRadius: 10,
+    borderWidth: 1,
+  },
+  searchInput: { flex: 1, fontSize: 14, paddingVertical: 6 },
 });
