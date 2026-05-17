@@ -11,7 +11,7 @@ import { api } from "@/lib/api";
 import type { TableDescriptor, Field } from "@/lib/tables";
 import { useFkOptions, invalidateFk, loadFkRows } from "@/lib/fk";
 import { getTable, getImportMatchByLabelFields, singularize } from "@/lib/tables";
-import { autoMap, buildErrorCsv, coerceCell, getImportableFields, readSpreadsheet, type ParsedSheet } from "@/lib/import";
+import { autoMap, buildErrorCsv, coerceCell, getImportableFields, readSpreadsheet, sampleFor, type ParsedSheet } from "@/lib/import";
 
 /** Normalize a raw cell value to a comparable lookup key. */
 function normalizeKey(v: unknown): string {
@@ -392,18 +392,60 @@ export function ImportWizard({
         )}
 
         {step === "upload" && (
-          <div className="py-8 text-center border-2 border-dashed rounded-lg">
-            <FileSpreadsheet className="w-10 h-10 mx-auto brand-gold mb-3" />
-            <p className="text-sm text-muted-foreground mb-3">
-              Drop or pick an Excel (.xlsx) or CSV file. The first sheet is used.
-            </p>
-            <input
-              type="file"
-              accept=".xlsx,.xls,.csv,.tsv"
-              disabled={busy}
-              onChange={(e) => { const f = e.target.files?.[0]; if (f) handleFile(f); }}
-              className="block mx-auto text-sm"
-            />
+          <div className="space-y-3">
+            <div className="py-8 text-center border-2 border-dashed rounded-lg">
+              <FileSpreadsheet className="w-10 h-10 mx-auto brand-gold mb-3" />
+              <p className="text-sm text-muted-foreground mb-3">
+                Drop or pick an Excel (.xlsx) or CSV file. The first sheet is used.
+              </p>
+              <input
+                type="file"
+                accept=".xlsx,.xls,.csv,.tsv"
+                disabled={busy}
+                onChange={(e) => { const f = e.target.files?.[0]; if (f) handleFile(f); }}
+                className="block mx-auto text-sm"
+              />
+            </div>
+            <details className="border rounded-lg group">
+              <summary className="cursor-pointer select-none px-3 py-2 text-sm font-medium brand-navy hover:bg-accent/30 rounded-lg">
+                What this template contains ({writableFields.length} columns)
+              </summary>
+              <div className="px-3 pb-3 pt-1">
+                <p className="text-xs text-muted-foreground mb-2">
+                  Your spreadsheet should have these columns (in any order). Required columns must
+                  be filled in for every row.
+                </p>
+                <div className="overflow-auto max-h-72 border rounded">
+                  <table className="w-full text-xs">
+                    <thead className="bg-card sticky top-0">
+                      <tr>
+                        <th className="text-left p-2">Column</th>
+                        <th className="text-left p-2">Example</th>
+                        <th className="text-left p-2 w-20">Required</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {writableFields.map((f) => {
+                        const example = sampleFor(f);
+                        return (
+                          <tr key={f.key} className="border-t">
+                            <td className="p-2 font-medium brand-navy">{f.label}</td>
+                            <td className="p-2 font-mono text-muted-foreground">
+                              {example === "" ? <span className="italic">(blank)</span> : example}
+                            </td>
+                            <td className="p-2">
+                              {f.required
+                                ? <span className="text-destructive font-semibold">Yes</span>
+                                : <span className="text-muted-foreground">No</span>}
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            </details>
           </div>
         )}
 

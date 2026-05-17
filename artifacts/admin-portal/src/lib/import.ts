@@ -225,7 +225,7 @@ export async function downloadTemplateXlsx(descriptor: TableDescriptor): Promise
   URL.revokeObjectURL(url);
 }
 
-function sampleFor(f: Field): string {
+export function sampleFor(f: Field): string {
   if (f.importExample !== undefined) return f.importExample;
   switch (f.type) {
     case "email": return "name@example.com";
