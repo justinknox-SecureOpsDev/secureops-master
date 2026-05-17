@@ -3,7 +3,7 @@ import { Link, useRoute, useLocation } from "wouter";
 import {
   LogOut, ClipboardList, UserPlus, FileText, ChevronsLeft, ChevronsRight,
   Database, Banknote, ChevronDown, ChevronRight, Receipt, Wallet, MailPlus,
-  AlertTriangle, ShieldCheck, Repeat, KeyRound, IdCard, Link2,
+  AlertTriangle, ShieldCheck, Repeat, KeyRound, IdCard, Link2, Download,
   type LucideIcon,
 } from "lucide-react";
 import { TABLES } from "@/lib/tables";
@@ -112,6 +112,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
     { href: "/swap-requests", label: "Swap Requests", Icon: Repeat },
     { href: "/incidents/share-links", label: "Incident shares", Icon: Link2 },
     { href: "/personnel/share-links", label: "Officer shares", Icon: Link2 },
+    { href: "/exports", label: "Exports", Icon: Download },
     { href: "/account/security", label: "My 2FA", Icon: KeyRound },
   ];
 

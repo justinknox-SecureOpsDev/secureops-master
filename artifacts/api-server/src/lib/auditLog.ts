@@ -87,6 +87,9 @@ const ACTION_RULES: Array<{ prefix: string; action: string }> = [
   { prefix: "/admin/users", action: "users.admin_change" },
   { prefix: "/admin/import/", action: "table.import" },
   { prefix: "/admin/tables/", action: "table.write" },
+  { prefix: "/admin/exports/preview", action: "exports.preview" },
+  { prefix: "/admin/exports/csv", action: "exports.csv" },
+  { prefix: "/admin/exports/pdf", action: "exports.pdf" },
   { prefix: "/admin", action: "admin.action" },
   { prefix: "/shifts/repeat", action: "shifts.repeat_create" },
   { prefix: "/shifts", action: "shifts.write" },
@@ -173,7 +176,7 @@ export function auditLogMiddleware(req: Request, res: Response, next: NextFuncti
           userAgent: typeof userAgent === "string" ? userAgent.slice(0, 500) : null,
           before: null,
           after: bodySnapshot ?? null,
-          metadata: null,
+          metadata: (res.locals?.["auditMetadata"] as Record<string, unknown> | undefined) ?? null,
         });
       } catch (err) {
         logger.warn({ err, path: routerPath, method: req.method }, "[audit] failed to persist log entry");

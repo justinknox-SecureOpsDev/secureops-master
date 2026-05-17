@@ -226,6 +226,26 @@ export const darPdfLimiter: RateLimitRequestHandler = rateLimit({
   },
 });
 
+// POST /admin/exports/* — admin-only data export endpoints (preview /
+// CSV / PDF). The PDF render in particular can scan up to ~10k rows
+// and stream a multi-page document, so we cap per-admin throughput to
+// keep one runaway tab from sustained-pinning a worker. 20/hr/user is
+// generous for normal "pull a weekly report" usage.
+const EXPORT_PER_USER_MAX = envInt("EXPORT_RATE_LIMIT_MAX", 20);
+
+export const exportLimiter: RateLimitRequestHandler = rateLimit({
+  windowMs: HOUR_MS,
+  limit: EXPORT_PER_USER_MAX,
+  standardHeaders: true,
+  legacyHeaders: false,
+  handler: tooMany,
+  keyGenerator: (req) => {
+    const uid = req.user?.userId;
+    if (uid) return `exp:u:${uid}`;
+    return `exp:ip:${ipKeyGenerator(req.ip ?? "")}`;
+  },
+});
+
 // POST /me/location — authenticated location pings from the mobile app.
 // The app pings every ~60s while clocked in, so a generous per-user cap
 // of 30/min still leaves 2x headroom for legitimate retries while

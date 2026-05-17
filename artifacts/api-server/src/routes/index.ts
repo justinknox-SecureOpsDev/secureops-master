@@ -29,6 +29,7 @@ import availabilityRouter from "./availability";
 import patrolRouter from "./patrol";
 import darRouter from "./dar";
 import trainingsRouter from "./trainings";
+import exportsRouter from "./exports";
 import { auditLogMiddleware } from "../lib/auditLog";
 
 const router: IRouter = Router();
@@ -68,5 +69,6 @@ router.use(availabilityRouter);
 router.use(patrolRouter);
 router.use(darRouter);
 router.use(trainingsRouter);
+router.use(exportsRouter);
 
 export default router;
