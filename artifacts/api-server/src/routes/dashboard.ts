@@ -1,5 +1,5 @@
 import { Router, type IRouter } from "express";
-import { eq, and, isNull, gte, lte, sql, ne } from "drizzle-orm";
+import { eq, and, isNull, gte, lte, sql, ne, inArray } from "drizzle-orm";
 import { db, usersTable, shiftsTable, incidentsTable, payrollEntriesTable, licensesTable, timeEntriesTable, shiftAssignmentsTable } from "@workspace/db";
 import { requireAuth, requireAdmin } from "../middlewares/auth";
 
@@ -104,6 +104,7 @@ router.get("/dashboard/employee-summary", requireAuth, async (req, res): Promise
       .select()
       .from(shiftsTable)
       .where(and(
+        inArray(shiftsTable.id, shiftIds),
         eq(shiftsTable.status, "upcoming"),
         gte(shiftsTable.startTime, now),
         lte(shiftsTable.startTime, new Date(now.getTime() + 7 * 24 * 60 * 60 * 1000)),
