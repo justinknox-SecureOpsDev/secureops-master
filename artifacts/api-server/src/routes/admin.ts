@@ -32,6 +32,7 @@ import {
 import { requireAdmin } from "../middlewares/auth";
 import { sendEmail, renderPasswordResetEmail, renderInviteEmail } from "../lib/email";
 import { disconnectUser } from "../lib/wsManager";
+import { writeEmployeeFieldChanges } from "../lib/employeeChangeLog";
 
 const router: IRouter = Router();
 
@@ -797,12 +798,41 @@ router.put("/admin/tables/:table/:id", requireAdmin, async (req, res): Promise<v
   }
 
   try {
+    // For the employees table, snapshot the row first so we can diff into
+    // employee_changes. The generic spreadsheet update bypasses the
+    // dedicated /employees/:id handler, so we have to replicate the log
+    // write here too — otherwise admin grid edits go untracked.
+    let beforeRow: Record<string, unknown> | null = null;
+    if (tableName === "employees") {
+      const rows = (await db
+        .select()
+        .from(cfg.table)
+        .where(eq((cfg.table as any).id, id))) as Record<string, unknown>[];
+      beforeRow = rows[0] ?? null;
+    }
+
     const updated = (await db.update(cfg.table).set(body).where(eq((cfg.table as any).id, id)).returning()) as unknown[];
     const row = updated[0];
     if (!row) {
       res.status(404).json({ error: "Not Found", message: `${cfg.label} not found` });
       return;
     }
+
+    if (tableName === "employees" && beforeRow) {
+      const employeeUserId = (beforeRow.userId as string | undefined)
+        ?? ((row as Record<string, unknown>).userId as string | undefined);
+      if (employeeUserId) {
+        await writeEmployeeFieldChanges({
+          employeeUserId,
+          keys: Object.keys(body),
+          before: beforeRow,
+          after: row as Record<string, unknown>,
+          actor: { userId: req.user!.userId, email: req.user!.email, role: req.user!.role },
+          log: req.log,
+        });
+      }
+    }
+
     res.json(row);
   } catch (err: any) {
     req.log.warn({ err }, "admin update failed");

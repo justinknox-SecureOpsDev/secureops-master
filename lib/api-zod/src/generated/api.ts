@@ -888,6 +888,48 @@ export const UpdateEmployeeResponse = zod.object({
 });
 
 /**
+ * Returns the most recent profile edits for one employee, newest
+first. Admin can read any employee's log; non-admin callers may
+only read their own. Sensitive field values (bank account number,
+SSN, signature) are masked at write time.
+
+ * @summary Recent per-field profile change log
+ */
+export const GetEmployeeChangesParams = zod.object({
+  id: zod.coerce.string(),
+});
+
+export const getEmployeeChangesQueryLimitDefault = 20;
+export const getEmployeeChangesQueryLimitMax = 100;
+
+export const GetEmployeeChangesQueryParams = zod.object({
+  limit: zod.coerce
+    .number()
+    .min(1)
+    .max(getEmployeeChangesQueryLimitMax)
+    .default(getEmployeeChangesQueryLimitDefault),
+});
+
+export const GetEmployeeChangesResponse = zod.object({
+  rows: zod.array(
+    zod.object({
+      id: zod.string(),
+      employeeUserId: zod.string(),
+      actorUserId: zod.string().nullish(),
+      actorEmail: zod.string().nullish(),
+      actorName: zod.string().nullish(),
+      actorRole: zod.string().nullish(),
+      source: zod.enum(["admin", "self"]),
+      field: zod.string(),
+      fieldLabel: zod.string().optional(),
+      oldValue: zod.string().nullish(),
+      newValue: zod.string().nullish(),
+      changedAt: zod.coerce.date(),
+    }),
+  ),
+});
+
+/**
  * @summary List shifts
  */
 export const GetShiftsQueryParams = zod.object({

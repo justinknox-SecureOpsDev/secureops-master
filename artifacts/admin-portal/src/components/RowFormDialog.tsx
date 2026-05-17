@@ -15,6 +15,70 @@ import { FileUploadField, MultiFileUploadField } from "./FileUploadField";
 import { openSignedObject, type UploadedFile } from "@/lib/upload";
 import { ExternalLink, MapPin, AlertTriangle, FileDown } from "lucide-react";
 
+type EmployeeChangeRow = {
+  id: string;
+  source: "admin" | "self";
+  field: string;
+  fieldLabel?: string;
+  oldValue: string | null;
+  newValue: string | null;
+  actorName: string | null;
+  actorEmail: string | null;
+  changedAt: string;
+};
+
+function RecentChangesPanel({ employeeUserId }: { employeeUserId: string }) {
+  const [rows, setRows] = useState<EmployeeChangeRow[] | null>(null);
+  const [err, setErr] = useState<string | null>(null);
+  useEffect(() => {
+    let cancelled = false;
+    setRows(null);
+    setErr(null);
+    (async () => {
+      try {
+        const data = await api<{ rows: EmployeeChangeRow[] }>(`/employees/${employeeUserId}/changes?limit=20`);
+        if (!cancelled) setRows(data.rows ?? []);
+      } catch (e) {
+        if (!cancelled) setErr((e as Error).message);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [employeeUserId]);
+  return (
+    <div className="mt-6 pt-4 border-t border-brand-gold/40">
+      <h3 className="text-sm font-semibold tracking-wide brand-navy mb-2">Recent changes</h3>
+      {err && <p className="text-xs text-destructive">{err}</p>}
+      {!err && rows === null && (
+        <p className="text-xs text-muted-foreground">Loading…</p>
+      )}
+      {rows && rows.length === 0 && (
+        <p className="text-xs text-muted-foreground">No profile edits recorded yet.</p>
+      )}
+      {rows && rows.length > 0 && (
+        <ul className="space-y-2 max-h-64 overflow-y-auto pr-1">
+          {rows.map((r) => (
+            <li key={r.id} className="text-xs border border-border rounded p-2 bg-muted/30">
+              <div className="flex items-center justify-between gap-2">
+                <span className="font-semibold brand-navy">{r.fieldLabel ?? r.field}</span>
+                <span className="text-muted-foreground">{new Date(r.changedAt).toLocaleString()}</span>
+              </div>
+              <div className="mt-1 grid grid-cols-[auto_1fr] gap-x-2">
+                <span className="text-muted-foreground">From:</span>
+                <span className="truncate">{r.oldValue ?? <em className="text-muted-foreground">empty</em>}</span>
+                <span className="text-muted-foreground">To:</span>
+                <span className="truncate">{r.newValue ?? <em className="text-muted-foreground">empty</em>}</span>
+              </div>
+              <div className="mt-1 text-muted-foreground">
+                By {r.actorName ?? r.actorEmail ?? "Unknown"} · {r.source === "self" ? "self-edit" : "admin"}
+              </div>
+            </li>
+          ))}
+        </ul>
+      )}
+    </div>
+  );
+}
+
 function FieldInput({
   field, value, onChange, onPickFkRow, filterValue,
 }: {
@@ -414,6 +478,9 @@ export function RowFormDialog({
           <pre className="text-xs text-destructive whitespace-pre-wrap bg-destructive/5 p-2 rounded border border-destructive/20">
             {error}
           </pre>
+        )}
+        {descriptor.name === "employees" && initial && (initial as { userId?: string }).userId && (
+          <RecentChangesPanel employeeUserId={String((initial as { userId: string }).userId)} />
         )}
         <DialogFooter>
           {initial && descriptor.name === "employees" && (

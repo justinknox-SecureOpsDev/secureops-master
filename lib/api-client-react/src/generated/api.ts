@@ -54,6 +54,8 @@ import type {
   GenerateInvoiceRequest,
   GeneratePayrollRequest,
   GetChatMessagesParams,
+  GetEmployeeChanges200,
+  GetEmployeeChangesParams,
   GetEmployeesParams,
   GetIncidentsParams,
   GetInvoicesParams,
@@ -2402,6 +2404,124 @@ export const useUpdateEmployee = <
 > => {
   return useMutation(getUpdateEmployeeMutationOptions(options));
 };
+
+/**
+ * Returns the most recent profile edits for one employee, newest
+first. Admin can read any employee's log; non-admin callers may
+only read their own. Sensitive field values (bank account number,
+SSN, signature) are masked at write time.
+
+ * @summary Recent per-field profile change log
+ */
+export const getGetEmployeeChangesUrl = (
+  id: string,
+  params?: GetEmployeeChangesParams,
+) => {
+  const normalizedParams = new URLSearchParams();
+
+  Object.entries(params || {}).forEach(([key, value]) => {
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? "null" : value.toString());
+    }
+  });
+
+  const stringifiedParams = normalizedParams.toString();
+
+  return stringifiedParams.length > 0
+    ? `/api/employees/${id}/changes?${stringifiedParams}`
+    : `/api/employees/${id}/changes`;
+};
+
+export const getEmployeeChanges = async (
+  id: string,
+  params?: GetEmployeeChangesParams,
+  options?: RequestInit,
+): Promise<GetEmployeeChanges200> => {
+  return customFetch<GetEmployeeChanges200>(
+    getGetEmployeeChangesUrl(id, params),
+    {
+      ...options,
+      method: "GET",
+    },
+  );
+};
+
+export const getGetEmployeeChangesQueryKey = (
+  id: string,
+  params?: GetEmployeeChangesParams,
+) => {
+  return [`/api/employees/${id}/changes`, ...(params ? [params] : [])] as const;
+};
+
+export const getGetEmployeeChangesQueryOptions = <
+  TData = Awaited<ReturnType<typeof getEmployeeChanges>>,
+  TError = ErrorType<unknown>,
+>(
+  id: string,
+  params?: GetEmployeeChangesParams,
+  options?: {
+    query?: UseQueryOptions<
+      Awaited<ReturnType<typeof getEmployeeChanges>>,
+      TError,
+      TData
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+) => {
+  const { query: queryOptions, request: requestOptions } = options ?? {};
+
+  const queryKey =
+    queryOptions?.queryKey ?? getGetEmployeeChangesQueryKey(id, params);
+
+  const queryFn: QueryFunction<
+    Awaited<ReturnType<typeof getEmployeeChanges>>
+  > = ({ signal }) =>
+    getEmployeeChanges(id, params, { signal, ...requestOptions });
+
+  return {
+    queryKey,
+    queryFn,
+    enabled: !!id,
+    ...queryOptions,
+  } as UseQueryOptions<
+    Awaited<ReturnType<typeof getEmployeeChanges>>,
+    TError,
+    TData
+  > & { queryKey: QueryKey };
+};
+
+export type GetEmployeeChangesQueryResult = NonNullable<
+  Awaited<ReturnType<typeof getEmployeeChanges>>
+>;
+export type GetEmployeeChangesQueryError = ErrorType<unknown>;
+
+/**
+ * @summary Recent per-field profile change log
+ */
+
+export function useGetEmployeeChanges<
+  TData = Awaited<ReturnType<typeof getEmployeeChanges>>,
+  TError = ErrorType<unknown>,
+>(
+  id: string,
+  params?: GetEmployeeChangesParams,
+  options?: {
+    query?: UseQueryOptions<
+      Awaited<ReturnType<typeof getEmployeeChanges>>,
+      TError,
+      TData
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+): UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+  const queryOptions = getGetEmployeeChangesQueryOptions(id, params, options);
+
+  const query = useQuery(queryOptions) as UseQueryResult<TData, TError> & {
+    queryKey: QueryKey;
+  };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
 
 /**
  * @summary List shifts

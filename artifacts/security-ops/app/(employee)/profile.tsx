@@ -156,6 +156,79 @@ function MyTrainingSection() {
   );
 }
 
+type ProfileChange = {
+  id: string;
+  source: "admin" | "self";
+  field: string;
+  fieldLabel?: string;
+  oldValue: string | null;
+  newValue: string | null;
+  actorName: string | null;
+  actorEmail: string | null;
+  changedAt: string;
+};
+
+function RecentUpdatesSection({ employeeUserId }: { employeeUserId?: string }) {
+  const colors = useColors();
+  const [items, setItems] = useState<ProfileChange[] | null>(null);
+  const [err, setErr] = useState<string | null>(null);
+  useEffect(() => {
+    if (!employeeUserId) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const data = await apiRequest(`/employees/${employeeUserId}/changes?limit=5`);
+        if (!cancelled) setItems((data?.rows ?? []) as ProfileChange[]);
+      } catch (e) {
+        if (!cancelled) setErr((e as Error).message);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [employeeUserId]);
+  if (!employeeUserId) return null;
+  const fmtWhen = (iso: string) => {
+    try {
+      const d = new Date(iso);
+      const diff = Date.now() - d.getTime();
+      const h = Math.floor(diff / 3600000);
+      if (h < 1) return "just now";
+      if (h < 24) return `${h}h ago`;
+      const days = Math.floor(h / 24);
+      if (days < 7) return `${days}d ago`;
+      return d.toLocaleDateString();
+    } catch { return iso; }
+  };
+  return (
+    <View style={[styles.section, { backgroundColor: colors.card, borderColor: colors.border }]}>
+      <Text style={[styles.sectionTitle, { color: colors.accent }]}>RECENT UPDATES</Text>
+      <Text style={[styles.emptyText, { color: colors.mutedForeground, fontStyle: "normal", marginBottom: 4 }]}>
+        Spot a mistake? Email HR to fix it.
+      </Text>
+      {err && <Text style={[styles.emptyText, { color: "#a33" }]}>{err}</Text>}
+      {!err && items === null ? (
+        <ActivityIndicator color={colors.primary} style={{ marginTop: 8 }} />
+      ) : items && items.length === 0 ? (
+        <Text style={[styles.emptyText, { color: colors.mutedForeground }]}>No recent profile changes.</Text>
+      ) : (
+        items?.map((c) => (
+          <View key={c.id} style={[styles.refRow, { borderBottomColor: colors.border }]}>
+            <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center" }}>
+              <Text style={{ color: colors.foreground, fontWeight: "600", fontSize: 13 }}>{c.fieldLabel ?? c.field}</Text>
+              <Text style={{ color: colors.mutedForeground, fontSize: 11 }}>{fmtWhen(c.changedAt)}</Text>
+            </View>
+            <Text style={{ color: colors.mutedForeground, fontSize: 12, marginTop: 2 }}>
+              {c.oldValue ?? "—"} → <Text style={{ color: colors.foreground }}>{c.newValue ?? "—"}</Text>
+            </Text>
+            <Text style={{ color: colors.mutedForeground, fontSize: 11, marginTop: 2 }}>
+              By {c.actorName ?? c.actorEmail ?? "Unknown"} · {c.source === "self" ? "you" : "admin"}
+            </Text>
+          </View>
+        ))
+      )}
+    </View>
+  );
+}
+
 export default function EmployeeProfileScreen() {
   const colors = useColors();
   const router = useRouter();
@@ -425,6 +498,8 @@ export default function EmployeeProfileScreen() {
           ))}
         </View>
       )}
+
+      <RecentUpdatesSection employeeUserId={userId} />
 
       <MyTrainingSection />
 

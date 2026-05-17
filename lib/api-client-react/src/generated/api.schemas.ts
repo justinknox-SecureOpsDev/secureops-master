@@ -271,6 +271,29 @@ export interface UpdateMyEmployeeRequest {
   trainingCertificateKeys?: string[] | null;
 }
 
+export type EmployeeChangeSource =
+  (typeof EmployeeChangeSource)[keyof typeof EmployeeChangeSource];
+
+export const EmployeeChangeSource = {
+  admin: "admin",
+  self: "self",
+} as const;
+
+export interface EmployeeChange {
+  id: string;
+  employeeUserId: string;
+  actorUserId?: string | null;
+  actorEmail?: string | null;
+  actorName?: string | null;
+  actorRole?: string | null;
+  source: EmployeeChangeSource;
+  field: string;
+  fieldLabel?: string;
+  oldValue?: string | null;
+  newValue?: string | null;
+  changedAt: string;
+}
+
 export type UpdateEmployeeRequestStatus =
   (typeof UpdateEmployeeRequestStatus)[keyof typeof UpdateEmployeeRequestStatus];
 
@@ -1385,6 +1408,18 @@ export const GetEmployeesStatus = {
   inactive: "inactive",
   pending: "pending",
 } as const;
+
+export type GetEmployeeChangesParams = {
+  /**
+   * @minimum 1
+   * @maximum 100
+   */
+  limit?: number;
+};
+
+export type GetEmployeeChanges200 = {
+  rows: EmployeeChange[];
+};
 
 export type GetShiftsParams = {
   status?: GetShiftsStatus;

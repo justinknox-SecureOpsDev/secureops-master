@@ -27,3 +27,4 @@ export * from "./officerAvailability";
 export * from "./patrolCheckpoints";
 export * from "./dailyActivityReports";
 export * from "./trainingCertifications";
+export * from "./employeeChanges";

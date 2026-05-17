@@ -1,10 +1,11 @@
 import { Router, type IRouter } from "express";
 import bcrypt from "bcryptjs";
-import { eq, ilike, and, sql } from "drizzle-orm";
-import { db, usersTable, employeesTable, licensesTable } from "@workspace/db";
+import { eq, ilike, and, sql, desc } from "drizzle-orm";
+import { db, usersTable, employeesTable, licensesTable, employeeChangesTable } from "@workspace/db";
 import { requireAuth, requireAdmin, verifyToken } from "../middlewares/auth";
 import type { Request, Response, NextFunction } from "express";
 import { buildEmployeeProfilePdf } from "../lib/profilePdf";
+import { writeEmployeeFieldChanges, CHANGE_FIELD_LABELS } from "../lib/employeeChangeLog";
 
 const router: IRouter = Router();
 
@@ -157,6 +158,7 @@ const ALL_EMP_PASSTHROUGH_KEYS = [
   ...SELF_UPDATABLE_EMP_KEYS,
   ...ADMIN_ONLY_EMP_KEYS,
 ] as const;
+
 
 router.get("/employees", requireAdmin, async (req, res): Promise<void> => {
   const { status, search } = req.query as { status?: string; search?: string };
@@ -331,6 +333,15 @@ router.put("/employees/:id", requireAuth, async (req, res): Promise<void> => {
 
   const isAdmin = req.user!.role === "admin";
 
+  // Snapshot the row BEFORE writes so we can diff field-by-field and
+  // populate the employee_changes log. We need both the user-level cols
+  // (firstName/lastName/status) and the employees-level cols.
+  const [beforeRow] = await db
+    .select(employeeSelect)
+    .from(usersTable)
+    .leftJoin(employeesTable, eq(usersTable.id, employeesTable.userId))
+    .where(eq(usersTable.id, id));
+
   const userUpdates: Record<string, unknown> = {};
   if (typeof body.firstName === "string") userUpdates.firstName = body.firstName;
   if (typeof body.lastName === "string") userUpdates.lastName = body.lastName;
@@ -367,6 +378,15 @@ router.put("/employees/:id", requireAuth, async (req, res): Promise<void> => {
     .leftJoin(employeesTable, eq(usersTable.id, employeesTable.userId))
     .where(eq(usersTable.id, id));
 
+  await writeEmployeeFieldChanges({
+    employeeUserId: id,
+    keys: [...Object.keys(userUpdates), ...Object.keys(empUpdates)],
+    before: beforeRow as Record<string, unknown> | undefined,
+    after: row as Record<string, unknown> | undefined,
+    actor: { userId: req.user!.userId, email: req.user!.email, role: req.user!.role },
+    log: req.log,
+  });
+
   const lc = await db
     .select({
       total: sql<number>`count(*)::int`,
@@ -381,6 +401,37 @@ router.put("/employees/:id", requireAuth, async (req, res): Promise<void> => {
     licenseCount: lc[0]?.total ?? 0,
     expiringLicenseCount: lc[0]?.expiringSoon ?? 0,
     maxLicenseLevel: lc[0]?.maxLevel ?? null,
+  });
+});
+
+/**
+ * GET /employees/:id/changes
+ *
+ * Recent profile change history for one employee. Admin can read any
+ * employee's log; non-admin callers may only read their own. Defaults to
+ * the most recent 20 rows; `limit` capped at 100.
+ */
+router.get("/employees/:id/changes", requireAuth, async (req, res): Promise<void> => {
+  const id = Array.isArray(req.params.id) ? req.params.id[0] : req.params.id;
+  if (req.user!.role !== "admin" && req.user!.userId !== id) {
+    res.status(403).json({ error: "Forbidden" });
+    return;
+  }
+  const limitRaw = parseInt(String((req.query as Record<string, string>).limit ?? "20"), 10);
+  const limit = Math.min(100, Math.max(1, Number.isFinite(limitRaw) ? limitRaw : 20));
+
+  const rows = await db
+    .select()
+    .from(employeeChangesTable)
+    .where(eq(employeeChangesTable.employeeUserId, id))
+    .orderBy(desc(employeeChangesTable.changedAt))
+    .limit(limit);
+
+  res.json({
+    rows: rows.map((r) => ({
+      ...r,
+      fieldLabel: CHANGE_FIELD_LABELS[r.field] ?? r.field,
+    })),
   });
 });
 
