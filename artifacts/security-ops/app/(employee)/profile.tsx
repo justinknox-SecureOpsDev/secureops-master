@@ -8,7 +8,9 @@ import { LicenseLevelBadge, levelLabel, levelColor } from "@/components/LicenseL
 import { useAuth } from "@/contexts/AuthContext";
 import { Feather } from "@expo/vector-icons";
 import { isBiometricAvailable, isBiometricEnabled, setBiometricEnabled, promptBiometric } from "@/utils/biometric";
-import { apiRequest } from "@/utils/api";
+import { apiRequest, API_BASE_URL } from "@/utils/api";
+import { storage } from "@/utils/storage";
+import { AUTH_TOKEN_KEY } from "@/contexts/AuthContext";
 
 function InfoRow({ label, value, icon }: { label: string; value?: string | number | null; icon: string }) {
   const colors = useColors();
@@ -469,6 +471,36 @@ export default function EmployeeProfileScreen() {
             <Text style={{ color: colors.foreground, fontSize: 14, fontWeight: "600" }}>Request a correction</Text>
             <Text style={{ color: colors.mutedForeground, fontSize: 12, marginTop: 2 }}>
               Email HR to fix anything you can't edit yourself
+            </Text>
+          </View>
+          <Feather name="chevron-right" size={16} color={colors.mutedForeground} />
+        </TouchableOpacity>
+        <TouchableOpacity
+          onPress={async () => {
+            // Token-in-query mirrors the server's `requireAuthOrQueryToken`
+            // shim — system browser can't set Authorization headers, so we
+            // hand it the same JWT we'd otherwise send as a Bearer header.
+            try {
+              const token = await storage.get(AUTH_TOKEN_KEY);
+              if (!token) {
+                Alert.alert("Sign-in required", "Please sign in again before downloading your profile.");
+                return;
+              }
+              const url = `${API_BASE_URL}/me/profile/pdf?token=${encodeURIComponent(token)}`;
+              const can = await Linking.canOpenURL(url);
+              if (can) await Linking.openURL(url);
+              else Alert.alert("Cannot open file", "No app on this device can open the PDF.");
+            } catch (e) {
+              Alert.alert("Could not download", (e as Error).message ?? "Unknown error");
+            }
+          }}
+          style={[styles.actionRow, { borderBottomColor: colors.border }]}
+        >
+          <Feather name="download" size={16} color={colors.accent} />
+          <View style={{ flex: 1 }}>
+            <Text style={{ color: colors.foreground, fontSize: 14, fontWeight: "600" }}>Download my profile (PDF)</Text>
+            <Text style={{ color: colors.mutedForeground, fontSize: 12, marginTop: 2 }}>
+              Branded summary you can share with a site or keep for your records (banking masked)
             </Text>
           </View>
           <Feather name="chevron-right" size={16} color={colors.mutedForeground} />

@@ -10,10 +10,10 @@ import {
 import { useFkOptions, invalidateFk } from "@/lib/fk";
 import { toFormValue, fromFormValue } from "@/lib/format";
 import { type Field, type TableDescriptor, singularize } from "@/lib/tables";
-import { api, ApiError } from "@/lib/api";
+import { api, ApiError, getToken } from "@/lib/api";
 import { FileUploadField, MultiFileUploadField } from "./FileUploadField";
 import { openSignedObject, type UploadedFile } from "@/lib/upload";
-import { ExternalLink, MapPin, AlertTriangle } from "lucide-react";
+import { ExternalLink, MapPin, AlertTriangle, FileDown } from "lucide-react";
 
 function FieldInput({
   field, value, onChange, onPickFkRow, filterValue,
@@ -416,6 +416,39 @@ export function RowFormDialog({
           </pre>
         )}
         <DialogFooter>
+          {initial && descriptor.name === "employees" && (
+            <Button
+              type="button"
+              variant="outline"
+              onClick={async () => {
+                const id = String((initial as { id?: unknown }).id ?? "");
+                if (!id) return;
+                try {
+                  const token = getToken();
+                  const res = await fetch(`/api/employees/${id}/profile/pdf`, {
+                    headers: token ? { Authorization: `Bearer ${token}` } : {},
+                  });
+                  if (!res.ok) throw new Error(`Request failed (${res.status})`);
+                  const blob = await res.blob();
+                  const cd = res.headers.get("Content-Disposition") ?? "";
+                  const m = /filename="?([^";]+)"?/i.exec(cd);
+                  const filename = m?.[1] ?? `wcsg-profile-${id.slice(0, 8)}.pdf`;
+                  const url = URL.createObjectURL(blob);
+                  const a = document.createElement("a");
+                  a.href = url; a.download = filename;
+                  document.body.appendChild(a); a.click(); a.remove();
+                  setTimeout(() => URL.revokeObjectURL(url), 1000);
+                } catch (e) {
+                  alert(`Could not download profile PDF: ${(e as Error).message}`);
+                }
+              }}
+              className="mr-auto"
+              title="Download a branded PDF of this officer's full profile (bank + SSN masked)"
+            >
+              <FileDown className="w-4 h-4 mr-1.5" />
+              Download profile PDF
+            </Button>
+          )}
           <Button variant="outline" onClick={() => onOpenChange(false)}>Cancel</Button>
           <Button onClick={submit} disabled={saving} className="bg-brand-navy text-white hover:opacity-90">
             {saving ? "Saving…" : initial ? "Save changes" : "Create"}

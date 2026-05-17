@@ -2,9 +2,54 @@ import { Router, type IRouter } from "express";
 import bcrypt from "bcryptjs";
 import { eq, ilike, and, sql } from "drizzle-orm";
 import { db, usersTable, employeesTable, licensesTable } from "@workspace/db";
-import { requireAuth, requireAdmin } from "../middlewares/auth";
+import { requireAuth, requireAdmin, verifyToken } from "../middlewares/auth";
+import type { Request, Response, NextFunction } from "express";
+import { buildEmployeeProfilePdf } from "../lib/profilePdf";
 
 const router: IRouter = Router();
+
+/**
+ * Lightweight auth shim for the profile-PDF download route only.
+ *
+ * The full `requireAuth` only accepts an `Authorization: Bearer …`
+ * header, which works for `fetch()` in the admin portal but not for the
+ * mobile app, where the cleanest way to surface a PDF to the user is
+ * `Linking.openURL(...)` into the system browser — which can't set
+ * custom headers.
+ *
+ * We therefore allow the same JWT to come in via `?token=` as a fallback,
+ * mirroring the WebSocket upgrade in `lib/wsManager.ts` (which has the
+ * same constraint). All the production hardening still applies: tokens
+ * are signed JWTs with TTL, the live user row is re-read (revocation
+ * check happens in the route handler below via `req.user`), and the
+ * route is otherwise a read-only download.
+ */
+function requireAuthOrQueryToken(req: Request, res: Response, next: NextFunction): void {
+  if (req.headers.authorization?.startsWith("Bearer ")) {
+    requireAuth(req, res, next);
+    return;
+  }
+  const q = req.query.token;
+  const token = typeof q === "string"
+    ? q
+    : Array.isArray(q) && typeof q[0] === "string"
+      ? q[0]
+      : undefined;
+  if (!token) {
+    res.status(401).json({ error: "Unauthorized", message: "No token provided" });
+    return;
+  }
+  try {
+    verifyToken(token);
+  } catch {
+    res.status(401).json({ error: "Unauthorized", message: "Invalid or expired token" });
+    return;
+  }
+  // Re-use the canonical auth pipeline (status/revocation/mustChangePassword)
+  // by synthesizing the standard Authorization header and delegating.
+  req.headers.authorization = `Bearer ${token}`;
+  requireAuth(req, res, next);
+}
 
 /**
  * Shared `select` projection for the Employee API contract — must stay in
@@ -243,6 +288,37 @@ router.get("/employees/:id", requireAuth, async (req, res): Promise<void> => {
     expiringLicenseCount: licenseCountsRaw[0]?.expiringSoon ?? 0,
     maxLicenseLevel: licenseCountsRaw[0]?.maxLevel ?? null,
   });
+});
+
+/**
+ * Download a branded WCSG officer profile PDF.
+ *
+ * Authorization mirrors `GET /employees/:id`: admins can pull any
+ * employee, employees can only pull themselves. Bank account /
+ * routing / SSN are masked in the PDF builder itself.
+ */
+router.get("/employees/:id/profile/pdf", requireAuthOrQueryToken, async (req, res): Promise<void> => {
+  const id = Array.isArray(req.params.id) ? req.params.id[0] : req.params.id;
+  if (req.user!.role !== "admin" && req.user!.userId !== id) {
+    res.status(403).json({ error: "Forbidden" });
+    return;
+  }
+  const payload = await buildEmployeeProfilePdf(id);
+  if (!payload) { res.status(404).json({ error: "Not Found", message: "Employee not found" }); return; }
+  res.setHeader("Content-Type", "application/pdf");
+  res.setHeader("Content-Disposition", `attachment; filename="${payload.filename}"`);
+  res.setHeader("Cache-Control", "private, no-store");
+  payload.stream.pipe(res);
+});
+
+/** Convenience self-route for the mobile app. */
+router.get("/me/profile/pdf", requireAuthOrQueryToken, async (req, res): Promise<void> => {
+  const payload = await buildEmployeeProfilePdf(req.user!.userId);
+  if (!payload) { res.status(404).json({ error: "Not Found", message: "Profile not found" }); return; }
+  res.setHeader("Content-Type", "application/pdf");
+  res.setHeader("Content-Disposition", `attachment; filename="${payload.filename}"`);
+  res.setHeader("Cache-Control", "private, no-store");
+  payload.stream.pipe(res);
 });
 
 router.put("/employees/:id", requireAuth, async (req, res): Promise<void> => {
