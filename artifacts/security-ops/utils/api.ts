@@ -16,6 +16,12 @@ function resolveApiBaseUrl(): string {
   if (explicit) {
     return /\/api$/.test(explicit) ? explicit : `${explicit}/api`;
   }
+  // On web, the API is served from the same origin via the path-based proxy
+  // (`/api` -> api-server). Using window.location.origin makes the bundle
+  // portable across dev/staging/prod without baking the host at build time.
+  if (typeof window !== "undefined" && window.location?.origin) {
+    return `${window.location.origin}/api`;
+  }
   const domain = process.env.EXPO_PUBLIC_DOMAIN?.replace(/^https?:\/\//, "").replace(/\/+$/, "");
   if (domain && domain !== "undefined") {
     return `https://${domain}/api`;

@@ -3,7 +3,6 @@ previewPath = "/"
 title = "SecureOps"
 version = "1.0.0"
 id = "artifacts/security-ops"
-router = "expo-domain"
 
 [[integratedSkills]]
 name = "expo"
