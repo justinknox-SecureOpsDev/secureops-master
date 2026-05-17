@@ -56,6 +56,14 @@ async function registerForPushNotifications() {
   try {
     await ensureAndroidChannel();
 
+    // Expo SDK 53+ removed remote push support from Expo Go on Android.
+    // Calling getExpoPushTokenAsync there throws a noisy error. Detect Expo
+    // Go and skip silently — push only works in dev/preview/production builds.
+    if (Constants.appOwnership === "expo") {
+      console.log("Push registration skipped: running in Expo Go (remote push requires a dev build)");
+      return;
+    }
+
     const { status: existingStatus } = await Notifications.getPermissionsAsync();
     let finalStatus = existingStatus;
 
