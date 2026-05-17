@@ -1,5 +1,5 @@
 import { Router, type IRouter } from "express";
-import { eq, sql } from "drizzle-orm";
+import { and, eq, isNull, sql } from "drizzle-orm";
 import { db, sitesTable, clientsTable } from "@workspace/db";
 import { requireAdmin } from "../middlewares/auth";
 import { geocodeOnelineAddress } from "../lib/geocode";
@@ -24,6 +24,52 @@ router.post("/sites/geocode", requireAdmin, async (req, res): Promise<void> => {
     return;
   }
   res.json({ lat: result.lat, lng: result.lng });
+});
+
+// Bulk backfill: walk every site that has an address but no lat/lng and try
+// to resolve it via the existing oneline Census geocoder. Re-runnable — only
+// touches rows that are still missing coords — and paced with a small delay
+// between calls so we don't hammer the public Census endpoint.
+router.post("/sites/geocode-missing", requireAdmin, async (req, res): Promise<void> => {
+  const rows = await db
+    .select({
+      id: sitesTable.id,
+      name: sitesTable.name,
+      address: sitesTable.address,
+    })
+    .from(sitesTable)
+    .where(and(isNull(sitesTable.locationLat), sql`length(trim(coalesce(${sitesTable.address}, ''))) > 0`));
+
+  let resolved = 0;
+  const unresolved: Array<{ id: string; name: string }> = [];
+
+  for (let i = 0; i < rows.length; i++) {
+    const row = rows[i];
+    const address = (row.address ?? "").trim();
+    if (!address) {
+      unresolved.push({ id: row.id, name: row.name });
+      continue;
+    }
+    const match = await geocodeOnelineAddress(address);
+    if (match) {
+      await db
+        .update(sitesTable)
+        .set({ locationLat: String(match.lat), locationLng: String(match.lng) })
+        .where(and(eq(sitesTable.id, row.id), isNull(sitesTable.locationLat)));
+      resolved++;
+    } else {
+      unresolved.push({ id: row.id, name: row.name });
+    }
+    // Rate-pace ~5 req/s so we stay polite with the free Census API.
+    if (i < rows.length - 1) await new Promise((r) => setTimeout(r, 200));
+  }
+
+  res.json({
+    candidates: rows.length,
+    resolved,
+    unresolved: unresolved.length,
+    unresolvedSites: unresolved.slice(0, 25),
+  });
 });
 
 router.get("/sites", requireAdmin, async (req, res): Promise<void> => {

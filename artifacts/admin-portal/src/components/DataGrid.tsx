@@ -8,7 +8,7 @@ import {
   AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
   AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
-import { ArrowUpDown, ArrowDown, ArrowUp, Pencil, Trash2, Plus, Upload, Download, RefreshCw, ExternalLink, Repeat, KeyRound, Copy, ShieldOff, FileText } from "lucide-react";
+import { ArrowUpDown, ArrowDown, ArrowUp, Pencil, Trash2, Plus, Upload, Download, RefreshCw, ExternalLink, Repeat, KeyRound, Copy, ShieldOff, FileText, MapPin } from "lucide-react";
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter,
 } from "@/components/ui/dialog";
@@ -158,6 +158,35 @@ export function DataGrid({
   const isShifts = descriptor.name === "shifts";
   const isUsers = descriptor.name === "users";
   const isIncidents = descriptor.name === "incidents";
+  const isSites = descriptor.name === "sites";
+  const [geocodeBackfillBusy, setGeocodeBackfillBusy] = useState(false);
+  const [geocodeBackfillResult, setGeocodeBackfillResult] = useState<{
+    candidates: number;
+    resolved: number;
+    unresolved: number;
+    unresolvedSites: Array<{ id: string; name: string }>;
+  } | null>(null);
+  const [geocodeBackfillError, setGeocodeBackfillError] = useState<string | null>(null);
+
+  async function runGeocodeBackfill() {
+    setGeocodeBackfillBusy(true);
+    setGeocodeBackfillError(null);
+    setGeocodeBackfillResult(null);
+    try {
+      const r = await api<{
+        candidates: number;
+        resolved: number;
+        unresolved: number;
+        unresolvedSites: Array<{ id: string; name: string }>;
+      }>(`/sites/geocode-missing`, { method: "POST" });
+      setGeocodeBackfillResult(r);
+      load();
+    } catch (e) {
+      setGeocodeBackfillError((e as Error).message);
+    } finally {
+      setGeocodeBackfillBusy(false);
+    }
+  }
 
   async function downloadIncidentPdf(row: Row) {
     const id = String((row as { id?: unknown }).id ?? "");
@@ -333,6 +362,17 @@ export function DataGrid({
             {isShifts && (
               <Button variant="outline" onClick={() => setRepeatOpen(true)} title="Create a series of shifts on selected days">
                 <Repeat className="w-4 h-4 mr-2" />Repeating Shift
+              </Button>
+            )}
+            {isSites && (
+              <Button
+                variant="outline"
+                onClick={runGeocodeBackfill}
+                disabled={geocodeBackfillBusy}
+                title="Look up lat/lng for every site that's still missing coordinates"
+              >
+                <MapPin className="w-4 h-4 mr-2" />
+                {geocodeBackfillBusy ? "Geocoding…" : "Geocode all missing"}
               </Button>
             )}
             <Button onClick={() => setCreating(true)} className="bg-brand-navy text-white hover:opacity-90">
@@ -635,6 +675,63 @@ export function DataGrid({
               )}
             </div>
             <DialogFooter><Button onClick={() => setResetResult(null)}>Done</Button></DialogFooter>
+          </DialogContent>
+        </Dialog>
+      )}
+
+      {(geocodeBackfillResult || geocodeBackfillError) && (
+        <Dialog open onOpenChange={(o) => { if (!o) { setGeocodeBackfillResult(null); setGeocodeBackfillError(null); } }}>
+          <DialogContent className="max-w-md">
+            <DialogHeader>
+              <DialogTitle className="brand-wordmark text-xl">Geocode backfill</DialogTitle>
+            </DialogHeader>
+            <div className="space-y-3 text-sm">
+              {geocodeBackfillError ? (
+                <div className="text-sm text-destructive bg-destructive/5 p-2 rounded border border-destructive/20">
+                  {geocodeBackfillError}
+                </div>
+              ) : geocodeBackfillResult ? (
+                <>
+                  <div>
+                    Checked <b>{geocodeBackfillResult.candidates}</b>{" "}
+                    {geocodeBackfillResult.candidates === 1 ? "site" : "sites"} missing
+                    coordinates.
+                  </div>
+                  <div className="flex gap-4">
+                    <div className="bg-emerald-50 border border-emerald-200 text-emerald-900 px-3 py-2 rounded flex-1">
+                      <div className="text-xs uppercase tracking-wide">Resolved</div>
+                      <div className="text-2xl font-semibold">{geocodeBackfillResult.resolved}</div>
+                    </div>
+                    <div className="bg-amber-50 border border-amber-200 text-amber-900 px-3 py-2 rounded flex-1">
+                      <div className="text-xs uppercase tracking-wide">Still unresolved</div>
+                      <div className="text-2xl font-semibold">{geocodeBackfillResult.unresolved}</div>
+                    </div>
+                  </div>
+                  {geocodeBackfillResult.unresolvedSites.length > 0 && (
+                    <div className="text-xs">
+                      <div className="text-muted-foreground mb-1">
+                        Couldn't find a match for these — open each one and check the address:
+                      </div>
+                      <ul className="list-disc pl-5 space-y-0.5">
+                        {geocodeBackfillResult.unresolvedSites.map((s) => (
+                          <li key={s.id}>{s.name}</li>
+                        ))}
+                        {geocodeBackfillResult.unresolved > geocodeBackfillResult.unresolvedSites.length && (
+                          <li className="text-muted-foreground">
+                            …and {geocodeBackfillResult.unresolved - geocodeBackfillResult.unresolvedSites.length} more
+                          </li>
+                        )}
+                      </ul>
+                    </div>
+                  )}
+                </>
+              ) : null}
+            </div>
+            <DialogFooter>
+              <Button onClick={() => { setGeocodeBackfillResult(null); setGeocodeBackfillError(null); }}>
+                Done
+              </Button>
+            </DialogFooter>
           </DialogContent>
         </Dialog>
       )}
