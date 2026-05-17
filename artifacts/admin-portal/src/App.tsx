@@ -23,6 +23,8 @@ import SwapRequestsPage from "@/pages/SwapRequests";
 import LicenseRenewalsPage from "@/pages/LicenseRenewals";
 import IncidentShareLinksPage from "@/pages/IncidentShareLinks";
 import PublicIncidentPage from "@/pages/PublicIncident";
+import EmployeeShareLinksPage from "@/pages/EmployeeShareLinks";
+import PublicEmployeeProfilePage from "@/pages/PublicEmployeeProfile";
 import SecurityPage from "@/pages/Security";
 import { DailyReportsPage } from "@/pages/DailyReports";
 import CompliancePage from "@/pages/Compliance";
@@ -56,6 +58,7 @@ function Routed() {
   if (location === "/terms") return <TermsPage />;
   if (location === "/data-rights") return <DataRightsPage />;
   if (location.startsWith("/share/incident/")) return <PublicIncidentPage />;
+  if (location.startsWith("/share/employee/")) return <PublicEmployeeProfilePage />;
 
   if (loading) {
     return (
@@ -91,6 +94,7 @@ function Routed() {
         <Route path="/swap-requests" component={SwapRequestsPage} />
         <Route path="/hr/license-renewals" component={LicenseRenewalsPage} />
         <Route path="/incidents/share-links" component={IncidentShareLinksPage} />
+        <Route path="/personnel/share-links" component={EmployeeShareLinksPage} />
         <Route path="/account/security" component={SecurityPage} />
         <Route path="/dar" component={DailyReportsPage} />
         <Route path="/compliance" component={CompliancePage} />

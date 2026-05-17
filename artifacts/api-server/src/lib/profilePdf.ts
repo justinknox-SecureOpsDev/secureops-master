@@ -68,7 +68,16 @@ function fmtDate(d: Date | string | null | undefined): string {
  */
 export async function buildEmployeeProfilePdf(
   userId: string,
+  opts: { redactForPublicShare?: boolean } = {},
 ): Promise<ProfilePdfPayload | null> {
+  // When `redactForPublicShare` is true we strip every field that would
+  // leak personal contact info, financial details, or internal HR data
+  // over the unauthenticated share-link surface intended for client
+  // contacts. Bank + SSN are ALREADY masked in the normal output; the
+  // public surface drops those sections entirely (along with email,
+  // phone, address, DOB, references, emergency contact, hourly rate
+  // and acknowledgement signatures).
+  const redactPublic = opts.redactForPublicShare === true;
   const [row] = await db
     .select({
       id: usersTable.id,
@@ -190,7 +199,7 @@ export async function buildEmployeeProfilePdf(
     .text(`${row.firstName ?? ""} ${row.lastName ?? ""}`.trim(), 56, heroTop, { width: photoX - 56 - 12 });
   doc.fillColor(MUTED).font("Helvetica").fontSize(11)
     .text("SECURITY OFFICER", 56, doc.y + 2);
-  if (row.hourlyRate) {
+  if (row.hourlyRate && !redactPublic) {
     doc.fillColor(GOLD).font("Helvetica-Bold").fontSize(12)
       .text(`$${Number(row.hourlyRate).toFixed(2)} / hour`, 56, doc.y + 6);
   }
@@ -221,28 +230,35 @@ export async function buildEmployeeProfilePdf(
     }
   };
 
-  section("Contact");
-  writeRows([
-    ["Email", row.email],
-    ["Phone", row.phone],
-    ["Address", row.address],
-  ]);
+  if (!redactPublic) {
+    section("Contact");
+    writeRows([
+      ["Email", row.email],
+      ["Phone", row.phone],
+      ["Address", row.address],
+    ]);
 
-  section("Personal details");
-  writeRows([
-    ["Date of birth", row.dateOfBirth],
-    ["City of birth", row.cityOfBirth],
-    ["State of birth", row.stateOfBirth],
-    ["SSN (last 4)", row.niNumber ? `••• •• ${String(row.niNumber).slice(-4)}` : null],
-    ["Right to work", row.rightToWorkStatus],
-  ]);
+    section("Personal details");
+    writeRows([
+      ["Date of birth", row.dateOfBirth],
+      ["City of birth", row.cityOfBirth],
+      ["State of birth", row.stateOfBirth],
+      ["SSN (last 4)", row.niNumber ? `••• •• ${String(row.niNumber).slice(-4)}` : null],
+      ["Right to work", row.rightToWorkStatus],
+    ]);
 
-  section("Emergency contact");
-  writeRows([
-    ["Name", row.emergencyContactName],
-    ["Relationship", row.emergencyContactRelationship],
-    ["Phone", row.emergencyContactPhone],
-  ]);
+    section("Emergency contact");
+    writeRows([
+      ["Name", row.emergencyContactName],
+      ["Relationship", row.emergencyContactRelationship],
+      ["Phone", row.emergencyContactPhone],
+    ]);
+  } else {
+    section("Right to work");
+    writeRows([
+      ["Status", row.rightToWorkStatus],
+    ]);
+  }
 
   section("TX security license");
   writeRows([
@@ -267,17 +283,19 @@ export async function buildEmployeeProfilePdf(
     ["Boots", row.uniformBoots],
   ]);
 
-  section("Banking & tax (masked)");
-  writeRows([
-    ["Account name", row.bankAccountName],
-    ["Account number", maskTail(row.bankAccountNumber)],
-    ["Routing / sort code", maskTail(row.bankBsb)],
-    ["Tax code", row.taxCode],
-    ["Direct deposit consent",
-      row.directDepositConsent === true ? "Yes"
-      : row.directDepositConsent === false ? "No"
-      : null],
-  ]);
+  if (!redactPublic) {
+    section("Banking & tax (masked)");
+    writeRows([
+      ["Account name", row.bankAccountName],
+      ["Account number", maskTail(row.bankAccountNumber)],
+      ["Routing / sort code", maskTail(row.bankBsb)],
+      ["Tax code", row.taxCode],
+      ["Direct deposit consent",
+        row.directDepositConsent === true ? "Yes"
+        : row.directDepositConsent === false ? "No"
+        : null],
+    ]);
+  }
 
   section("Experience");
   writeRows([
@@ -291,7 +309,7 @@ export async function buildEmployeeProfilePdf(
   }
 
   const refs = Array.isArray(row.references) ? row.references as Array<Record<string, unknown>> : [];
-  if (refs.length > 0) {
+  if (refs.length > 0 && !redactPublic) {
     section(`References (${refs.length})`);
     for (const r of refs) {
       const name = String(r?.name ?? "—");
@@ -338,7 +356,7 @@ export async function buildEmployeeProfilePdf(
         ? row.acknowledgements as Array<Record<string, unknown>>
         : Object.values(row.acknowledgements) as Array<Record<string, unknown>>)
     : [];
-  if (acks.length > 0) {
+  if (acks.length > 0 && !redactPublic) {
     section(`Acknowledgements (${acks.length})`);
     for (const a of acks) {
       const type = String(a?.type ?? "Acknowledgement");

@@ -13,7 +13,7 @@ import { type Field, type TableDescriptor, singularize } from "@/lib/tables";
 import { api, ApiError, getToken } from "@/lib/api";
 import { FileUploadField, MultiFileUploadField } from "./FileUploadField";
 import { openSignedObject, type UploadedFile } from "@/lib/upload";
-import { ExternalLink, MapPin, AlertTriangle, FileDown } from "lucide-react";
+import { ExternalLink, MapPin, AlertTriangle, FileDown, Link2 } from "lucide-react";
 
 type EmployeeChangeRow = {
   id: string;
@@ -514,6 +514,52 @@ export function RowFormDialog({
             >
               <FileDown className="w-4 h-4 mr-1.5" />
               Download profile PDF
+            </Button>
+          )}
+          {initial && descriptor.name === "employees" && (
+            <Button
+              type="button"
+              variant="outline"
+              onClick={async () => {
+                // Personnel grid rows are keyed by employees.id, but
+                // the share/profile surfaces are keyed by users.id.
+                // Prefer userId; server accepts either form.
+                const init = initial as { id?: unknown; userId?: unknown };
+                const id = String(init.userId ?? init.id ?? "");
+                if (!id) return;
+                const recipientLabel = window.prompt(
+                  "Optional recipient label (e.g. 'Acme Mall — Janet Park').\nLeave blank to skip — only you see this.",
+                  "",
+                );
+                if (recipientLabel === null) return; // user cancelled
+                const daysStr = window.prompt("Link expires in how many days? (1–365)", "30");
+                if (daysStr === null) return;
+                const days = Number(daysStr);
+                if (!Number.isFinite(days) || days <= 0 || days > 365) {
+                  alert("Expiry must be between 1 and 365 days.");
+                  return;
+                }
+                try {
+                  const created = await api<{ url: string }>(`/admin/employees/${id}/share`, {
+                    method: "POST",
+                    body: JSON.stringify({
+                      expiresInDays: days,
+                      recipientLabel: recipientLabel.trim() || null,
+                    }),
+                  });
+                  await navigator.clipboard?.writeText(created.url).catch(() => {});
+                  alert(
+                    `Share link created and copied to clipboard:\n\n${created.url}\n\n` +
+                    `Manage / revoke at Officer shares in the sidebar.`,
+                  );
+                } catch (e) {
+                  alert(`Could not create share link: ${(e as Error).message}`);
+                }
+              }}
+              title="Mint a no-login link to share this officer's profile with a client (sensitive fields redacted)"
+            >
+              <Link2 className="w-4 h-4 mr-1.5" />
+              Share with client…
             </Button>
           )}
           <Button variant="outline" onClick={() => onOpenChange(false)}>Cancel</Button>

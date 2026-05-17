@@ -110,6 +110,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
     { href: "/audit-log", label: "Audit Log", Icon: ShieldCheck },
     { href: "/swap-requests", label: "Swap Requests", Icon: Repeat },
     { href: "/incidents/share-links", label: "Incident shares", Icon: Link2 },
+    { href: "/personnel/share-links", label: "Officer shares", Icon: Link2 },
     { href: "/account/security", label: "My 2FA", Icon: KeyRound },
   ];
 
