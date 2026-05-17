@@ -25,12 +25,17 @@ export const shiftsTable = pgTable("shifts", {
   headcount: integer("headcount").notNull().default(1),
   isRepeat: boolean("is_repeat").notNull().default(false),
   repeatPattern: text("repeat_pattern"),
+  // Stable id shared by every occurrence created from a single repeat series.
+  // Nullable so legacy rows and ad-hoc single shifts keep working; admin UI
+  // groups by seriesId when present and falls back to site+title+pattern.
+  seriesId: uuid("series_id"),
   notes: text("notes"),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow().$onUpdate(() => new Date()),
 }, (t) => ({
   siteStartIdx: index("shifts_site_start_idx").on(t.siteId, t.startTime),
   startIdx: index("shifts_start_idx").on(t.startTime),
+  seriesIdx: index("shifts_series_idx").on(t.seriesId),
 }));
 
 export const insertShiftSchema = createInsertSchema(shiftsTable).omit({ id: true, createdAt: true, updatedAt: true });

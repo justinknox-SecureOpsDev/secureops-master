@@ -33,6 +33,7 @@ type Shift = {
   headcount: number;
   isRepeat: boolean;
   repeatPattern: string | null;
+  seriesId: string | null;
   notes: string | null;
   assignments: { id: string; status: string; employeeName: string | null }[];
 };
@@ -87,6 +88,7 @@ export default function ShiftsPage() {
   const [repeatOpen, setRepeatOpen] = useState(false);
   const [editSeries, setEditSeries] = useState<BulkSeriesTarget | null>(null);
   const [deleting, setDeleting] = useState<Shift | null>(null);
+  const [deletingSeries, setDeletingSeries] = useState<{ ids: string[]; title: string; total: number } | null>(null);
   const [version, setVersion] = useState(0);
 
   useEffect(() => {
@@ -159,11 +161,13 @@ export default function ShiftsPage() {
       }
 
       if (s.isRepeat) {
-        // Include repeatPattern in the key so two series at the same site
-        // with the same title but different patterns (e.g. different times
-        // or days of week) are NOT merged — bulk edit must only target
-        // shifts that truly belong to the same series.
-        const seriesKey = `${key}::${s.title}::${s.repeatPattern ?? ""}`;
+        // Prefer the explicit seriesId (set by /shifts/repeat on every new
+        // occurrence). Fall back to site+title+repeatPattern for legacy rows
+        // created before the seriesId column existed, so bulk edit still
+        // works for old data without merging unrelated series.
+        const seriesKey = s.seriesId
+          ? `sid::${s.seriesId}`
+          : `legacy::${key}::${s.title}::${s.repeatPattern ?? ""}`;
         let series = g.series.find((x) => x.key === seriesKey);
         if (!series) {
           series = { key: seriesKey, title: s.title, total: 0, occurrences: [], hidden: 0, allIds: [], siteLabel: g.siteLabel };
@@ -209,6 +213,21 @@ export default function ShiftsPage() {
       setVersion((v) => v + 1);
     } catch (e: any) {
       alert(e?.message || "Failed to delete shift");
+    }
+  };
+
+  const handleDeleteSeries = async () => {
+    if (!deletingSeries) return;
+    try {
+      const result = await api<{ deleted: number }>("/shifts/bulk", {
+        method: "DELETE",
+        body: { ids: deletingSeries.ids },
+      });
+      setDeletingSeries(null);
+      setVersion((v) => v + 1);
+      alert(`Deleted ${result.deleted} shift${result.deleted === 1 ? "" : "s"} from the series.`);
+    } catch (e: any) {
+      alert(e?.message || "Failed to delete series");
     }
   };
 
@@ -325,6 +344,18 @@ export default function ShiftsPage() {
                           >
                             <Pencil className="w-3.5 h-3.5 mr-1" /> Edit all {series.total}
                           </Button>
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            className="shrink-0 text-destructive hover:text-destructive"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setDeletingSeries({ ids: series.allIds, title: series.title, total: series.total });
+                            }}
+                            title={`Delete entire series (${series.total} shifts)`}
+                          >
+                            <Trash2 className="w-3.5 h-3.5 mr-1" /> Delete series
+                          </Button>
                         </div>
                         {sopen && (
                           <div className="px-4 pb-3">
@@ -386,6 +417,23 @@ export default function ShiftsPage() {
         initial={editing as any}
         onSaved={() => { setEditing(null); setCreating(false); setVersion((v) => v + 1); }}
       />
+
+      <AlertDialog open={!!deletingSeries} onOpenChange={(b) => { if (!b) setDeletingSeries(null); }}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Delete entire series?</AlertDialogTitle>
+            <AlertDialogDescription>
+              This permanently removes all {deletingSeries?.total} occurrences of "{deletingSeries?.title}" and every assignment attached to them. This cannot be undone.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction onClick={handleDeleteSeries} className="bg-destructive text-destructive-foreground hover:bg-destructive/90">
+              Delete {deletingSeries?.total} shifts
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
 
       <AlertDialog open={!!deleting} onOpenChange={(b) => { if (!b) setDeleting(null); }}>
         <AlertDialogContent>

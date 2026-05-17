@@ -1,4 +1,5 @@
 import { Router, type IRouter } from "express";
+import { randomUUID } from "node:crypto";
 import { eq, and, gte, lte, sql, or, isNull, inArray } from "drizzle-orm";
 import { db, shiftsTable, shiftAssignmentsTable, usersTable, licensesTable, sitesTable, clientsTable, trainingCertificationsTable } from "@workspace/db";
 import { requireAuth, requireAdmin } from "../middlewares/auth";
@@ -370,6 +371,10 @@ router.post("/shifts/repeat", requireAdmin, async (req, res): Promise<void> => {
   const wrapsOvernight = (eh * 60 + em) <= (sh * 60 + sm);
 
   const repeatPattern = JSON.stringify({ daysOfWeek: validDays.sort(), startTime, endTime, startDate, untilDate });
+  // Stable series identifier shared by every occurrence in this batch. Lets
+  // the admin UI group, bulk-edit, and bulk-delete a series without relying
+  // on fragile site+title+repeatPattern JSON comparisons.
+  const seriesId = randomUUID();
 
   const occurrences: { startTime: Date; endTime: Date }[] = [];
   for (let d = new Date(start); d <= until && occurrences.length < MAX_OCCURRENCES; d = new Date(d.getTime() + 86400000)) {
@@ -415,6 +420,7 @@ router.post("/shifts/repeat", requireAdmin, async (req, res): Promise<void> => {
       billableRate: String(bill),
       isRepeat: true,
       repeatPattern,
+      seriesId,
       notes: notes || null,
       status: "upcoming" as const,
       requiredLicenseLevel: lvl,
@@ -522,6 +528,18 @@ router.put("/shifts/bulk", requireAdmin, async (req, res): Promise<void> => {
   });
 
   res.json({ updated, total: rows.length });
+});
+
+// Bulk-delete a set of shifts (typically every occurrence in a recurring
+// series). Trivial wrapper made cheap by the new shifts.series_id column —
+// the admin UI passes the series's full id list.
+router.delete("/shifts/bulk", requireAdmin, async (req, res): Promise<void> => {
+  const { ids } = req.body ?? {};
+  if (!Array.isArray(ids) || ids.length === 0) {
+    res.status(400).json({ error: "Bad Request", message: "ids[] required" }); return;
+  }
+  const result = await db.delete(shiftsTable).where(inArray(shiftsTable.id, ids as string[])).returning({ id: shiftsTable.id });
+  res.json({ deleted: result.length });
 });
 
 router.get("/shifts/:id", requireAuth, async (req, res): Promise<void> => {
