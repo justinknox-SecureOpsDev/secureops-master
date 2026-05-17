@@ -1,7 +1,18 @@
 import { useEffect, useState } from "react";
 import { useRoute } from "wouter";
-import { Loader2, AlertTriangle, Download, ShieldCheck, BadgeCheck, Calendar } from "lucide-react";
+import { Loader2, AlertTriangle, Download, ShieldCheck, BadgeCheck, Calendar, FileText } from "lucide-react";
 import { Button } from "@/components/ui/button";
+
+type VisibleSections = {
+  license: boolean;
+  experience: boolean;
+  skills: boolean;
+  uniform: boolean;
+  trainingCerts: boolean;
+  documents: boolean;
+};
+
+type DocEntry = { label: string; filename: string | null };
 
 type PublicProfile = {
   firstName: string | null;
@@ -20,6 +31,9 @@ type PublicProfile = {
     jacket: string | null;
     boots: string | null;
   };
+  documents?: DocEntry[];
+  trainingCertificates?: DocEntry[];
+  visibleSections?: VisibleSections;
   share: { expiresAt: string; viewCount: number };
 };
 
@@ -75,12 +89,20 @@ export default function PublicEmployeeProfilePage() {
   }
 
   const fullName = `${data.firstName ?? ""} ${data.lastName ?? ""}`.trim() || "Officer";
-  const uniformFields = [
+  // Server already nulls out fields when a section is hidden; treat
+  // legacy responses (no visibleSections key) as "everything visible".
+  const sec: VisibleSections = data.visibleSections ?? {
+    license: true, experience: true, skills: true,
+    uniform: true, trainingCerts: true, documents: true,
+  };
+  const uniformFields = sec.uniform ? ([
     ["Shirt", data.uniform.shirt],
     ["Trousers", data.uniform.trousers],
     ["Jacket", data.uniform.jacket],
     ["Boots", data.uniform.boots],
-  ].filter(([, v]) => !!v) as [string, string][];
+  ].filter(([, v]) => !!v) as [string, string][]) : [];
+  const documents = (data.documents ?? []).filter((d) => !!d.filename);
+  const trainingCerts = (data.trainingCertificates ?? []).filter((d) => !!d.filename);
 
   return (
     <div className="min-h-screen bg-brand-cream">
@@ -172,6 +194,39 @@ export default function PublicEmployeeProfilePage() {
                   </div>
                 ))}
               </div>
+            </div>
+          )}
+
+          {documents.length > 0 && (
+            <div className="mt-6">
+              <div className="text-xs uppercase tracking-wider text-muted-foreground mb-2">Documents on file</div>
+              <ul className="text-sm space-y-1">
+                {documents.map((d) => (
+                  <li key={d.label} className="flex items-center gap-2 brand-navy">
+                    <FileText className="w-3.5 h-3.5 text-brand-gold flex-shrink-0" />
+                    <span className="text-muted-foreground">{d.label}:</span>
+                    <span className="truncate">{d.filename}</span>
+                  </li>
+                ))}
+              </ul>
+              <div className="text-[11px] text-muted-foreground mt-1">
+                Originals are kept securely with HR — names shown for reference only.
+              </div>
+            </div>
+          )}
+
+          {trainingCerts.length > 0 && (
+            <div className="mt-6">
+              <div className="text-xs uppercase tracking-wider text-muted-foreground mb-2">Training certificates</div>
+              <ul className="text-sm space-y-1">
+                {trainingCerts.map((d) => (
+                  <li key={d.label} className="flex items-center gap-2 brand-navy">
+                    <FileText className="w-3.5 h-3.5 text-brand-gold flex-shrink-0" />
+                    <span className="text-muted-foreground">{d.label}:</span>
+                    <span className="truncate">{d.filename}</span>
+                  </li>
+                ))}
+              </ul>
             </div>
           )}
 

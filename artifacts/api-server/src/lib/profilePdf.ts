@@ -9,6 +9,7 @@ import {
 } from "@workspace/db";
 import { logger } from "./logger";
 import { ObjectStorageService } from "./objectStorage";
+import type { EmployeeShareVisibleSections } from "@workspace/db";
 
 const objectStorage = new ObjectStorageService();
 
@@ -68,7 +69,16 @@ function fmtDate(d: Date | string | null | undefined): string {
  */
 export async function buildEmployeeProfilePdf(
   userId: string,
-  opts: { redactForPublicShare?: boolean } = {},
+  opts: {
+    redactForPublicShare?: boolean;
+    /**
+     * Per-section visibility overrides for the public-share surface.
+     * Only honoured when `redactForPublicShare` is true. Missing keys
+     * default to `true` so links minted before this feature shipped
+     * keep their original behaviour (all sections shown).
+     */
+    publicSections?: Partial<EmployeeShareVisibleSections> | null;
+  } = {},
 ): Promise<ProfilePdfPayload | null> {
   // When `redactForPublicShare` is true we strip every field that would
   // leak personal contact info, financial details, or internal HR data
@@ -78,6 +88,18 @@ export async function buildEmployeeProfilePdf(
   // phone, address, DOB, references, emergency contact, hourly rate
   // and acknowledgement signatures).
   const redactPublic = opts.redactForPublicShare === true;
+  const sec: EmployeeShareVisibleSections = {
+    license: opts.publicSections?.license ?? true,
+    experience: opts.publicSections?.experience ?? true,
+    skills: opts.publicSections?.skills ?? true,
+    uniform: opts.publicSections?.uniform ?? true,
+    trainingCerts: opts.publicSections?.trainingCerts ?? true,
+    documents: opts.publicSections?.documents ?? true,
+  };
+  // When not redacting (authenticated admin/self download), every
+  // section is unconditionally rendered — section toggles only matter
+  // on the public share surface.
+  const show = (k: keyof EmployeeShareVisibleSections): boolean => !redactPublic || sec[k];
   const [row] = await db
     .select({
       id: usersTable.id,
@@ -260,28 +282,32 @@ export async function buildEmployeeProfilePdf(
     ]);
   }
 
-  section("TX security license");
-  writeRows([
-    ["License number", row.siaLicenseNumber],
-    ["Level", row.siaLicenseLevel ? `L${row.siaLicenseLevel}` : null],
-    ["Expires", row.siaLicenseExpiry],
-  ]);
+  if (show("license")) {
+    section("TX security license");
+    writeRows([
+      ["License number", row.siaLicenseNumber],
+      ["Level", row.siaLicenseLevel ? `L${row.siaLicenseLevel}` : null],
+      ["Expires", row.siaLicenseExpiry],
+    ]);
 
-  if (licenses.length > 0) {
-    section(`Licenses on record (${licenses.length})`);
-    writeRows(licenses.map((l) => [
-      `${l.type}${l.level ? ` · L${l.level}` : ""}`,
-      `#${l.licenseNumber} · expires ${fmtDate(l.expiryDate)}`,
-    ] as [string, string]));
+    if (licenses.length > 0) {
+      section(`Licenses on record (${licenses.length})`);
+      writeRows(licenses.map((l) => [
+        `${l.type}${l.level ? ` · L${l.level}` : ""}`,
+        `#${l.licenseNumber} · expires ${fmtDate(l.expiryDate)}`,
+      ] as [string, string]));
+    }
   }
 
-  section("Uniform sizes");
-  writeRows([
-    ["Shirt", row.uniformShirt],
-    ["Trousers", row.uniformTrousers],
-    ["Jacket", row.uniformJacket],
-    ["Boots", row.uniformBoots],
-  ]);
+  if (show("uniform")) {
+    section("Uniform sizes");
+    writeRows([
+      ["Shirt", row.uniformShirt],
+      ["Trousers", row.uniformTrousers],
+      ["Jacket", row.uniformJacket],
+      ["Boots", row.uniformBoots],
+    ]);
+  }
 
   if (!redactPublic) {
     section("Banking & tax (masked)");
@@ -297,15 +323,17 @@ export async function buildEmployeeProfilePdf(
     ]);
   }
 
-  section("Experience");
-  writeRows([
-    ["Years", row.yearsExperience],
-  ]);
-  if (row.previousExperience) {
-    if (doc.y > doc.page.height - 120) doc.addPage();
-    doc.fillColor(TEXT).font("Helvetica").fontSize(10)
-      .text(row.previousExperience, 56, doc.y + 2, { width: doc.page.width - 112, lineGap: 2 });
-    doc.moveDown(0.4);
+  if (show("experience")) {
+    section("Experience");
+    writeRows([
+      ["Years", row.yearsExperience],
+    ]);
+    if (row.previousExperience) {
+      if (doc.y > doc.page.height - 120) doc.addPage();
+      doc.fillColor(TEXT).font("Helvetica").fontSize(10)
+        .text(row.previousExperience, 56, doc.y + 2, { width: doc.page.width - 112, lineGap: 2 });
+      doc.moveDown(0.4);
+    }
   }
 
   const refs = Array.isArray(row.references) ? row.references as Array<Record<string, unknown>> : [];
@@ -324,7 +352,7 @@ export async function buildEmployeeProfilePdf(
   }
 
   const skills = Array.isArray(row.skills) ? row.skills as string[] : [];
-  if (skills.length > 0) {
+  if (skills.length > 0 && show("skills")) {
     section("Skills & qualifications");
     doc.fillColor(TEXT).font("Helvetica").fontSize(10)
       .text(skills.join(" · "), 56, doc.y, { width: doc.page.width - 112 });
@@ -332,16 +360,23 @@ export async function buildEmployeeProfilePdf(
   }
 
   // Documents — reference by filename only, NEVER embed.
-  const docs: Array<[string, string | null | undefined]> = [
-    ["Photo", row.photoKey],
-    ["CV / résumé", row.cvKey],
-    ["TX security license", row.licenseDocKey],
-    ["Passport / photo ID", row.passportDocKey],
-    ["Right-to-work doc", row.rightToWorkDocKey],
-    ["W-2 / pay stub", row.payStubDocKey],
-  ];
+  // The "documents" section bundles every key EXCEPT training
+  // certificates, which get their own toggle (`trainingCerts`).
+  const docs: Array<[string, string | null | undefined]> = [];
+  if (show("documents")) {
+    docs.push(
+      ["Photo", row.photoKey],
+      ["CV / résumé", row.cvKey],
+      ["TX security license", row.licenseDocKey],
+      ["Passport / photo ID", row.passportDocKey],
+      ["Right-to-work doc", row.rightToWorkDocKey],
+      ["W-2 / pay stub", row.payStubDocKey],
+    );
+  }
   const certs = Array.isArray(row.trainingCertificateKeys) ? row.trainingCertificateKeys as string[] : [];
-  certs.forEach((k, i) => docs.push([`Training certificate ${i + 1}`, k]));
+  if (show("trainingCerts")) {
+    certs.forEach((k, i) => docs.push([`Training certificate ${i + 1}`, k]));
+  }
   const presentDocs = docs.filter(([, v]) => !!v);
   if (presentDocs.length > 0) {
     section(`Documents on file (${presentDocs.length})`);

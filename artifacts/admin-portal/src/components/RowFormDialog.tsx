@@ -14,6 +14,7 @@ import { api, ApiError, getToken } from "@/lib/api";
 import { FileUploadField, MultiFileUploadField } from "./FileUploadField";
 import { openSignedObject, type UploadedFile } from "@/lib/upload";
 import { ExternalLink, MapPin, AlertTriangle, FileDown, Link2 } from "lucide-react";
+import { EmployeeShareMintDialog } from "./EmployeeShareMintDialog";
 
 type EmployeeChangeRow = {
   id: string;
@@ -273,6 +274,7 @@ export function RowFormDialog({
   const [error, setError] = useState<string | null>(null);
   const [geocoding, setGeocoding] = useState(false);
   const [geocodeMsg, setGeocodeMsg] = useState<string | null>(null);
+  const [shareMintOpen, setShareMintOpen] = useState(false);
 
   const isSites = descriptor.name === "sites";
   const sitesAddress = (values["address"] ?? "").trim();
@@ -516,52 +518,36 @@ export function RowFormDialog({
               Download profile PDF
             </Button>
           )}
-          {initial && descriptor.name === "employees" && (
-            <Button
-              type="button"
-              variant="outline"
-              onClick={async () => {
-                // Personnel grid rows are keyed by employees.id, but
-                // the share/profile surfaces are keyed by users.id.
-                // Prefer userId; server accepts either form.
-                const init = initial as { id?: unknown; userId?: unknown };
-                const id = String(init.userId ?? init.id ?? "");
-                if (!id) return;
-                const recipientLabel = window.prompt(
-                  "Optional recipient label (e.g. 'Acme Mall — Janet Park').\nLeave blank to skip — only you see this.",
-                  "",
-                );
-                if (recipientLabel === null) return; // user cancelled
-                const daysStr = window.prompt("Link expires in how many days? (1–365)", "30");
-                if (daysStr === null) return;
-                const days = Number(daysStr);
-                if (!Number.isFinite(days) || days <= 0 || days > 365) {
-                  alert("Expiry must be between 1 and 365 days.");
-                  return;
-                }
-                try {
-                  const created = await api<{ url: string }>(`/admin/employees/${id}/share`, {
-                    method: "POST",
-                    body: JSON.stringify({
-                      expiresInDays: days,
-                      recipientLabel: recipientLabel.trim() || null,
-                    }),
-                  });
-                  await navigator.clipboard?.writeText(created.url).catch(() => {});
-                  alert(
-                    `Share link created and copied to clipboard:\n\n${created.url}\n\n` +
-                    `Manage / revoke at Officer shares in the sidebar.`,
-                  );
-                } catch (e) {
-                  alert(`Could not create share link: ${(e as Error).message}`);
-                }
-              }}
-              title="Mint a no-login link to share this officer's profile with a client (sensitive fields redacted)"
-            >
-              <Link2 className="w-4 h-4 mr-1.5" />
-              Share with client…
-            </Button>
-          )}
+          {initial && descriptor.name === "employees" && (() => {
+            // Personnel grid rows are keyed by employees.id, but the
+            // share/profile surfaces are keyed by users.id. Prefer
+            // userId; the server accepts either form.
+            const init = initial as { id?: unknown; userId?: unknown; firstName?: unknown; lastName?: unknown };
+            const id = String(init.userId ?? init.id ?? "");
+            const name = [init.firstName, init.lastName].filter(Boolean).join(" ").trim() || undefined;
+            return (
+              <>
+                <Button
+                  type="button"
+                  variant="outline"
+                  onClick={() => setShareMintOpen(true)}
+                  disabled={!id}
+                  title="Mint a no-login link to share this officer's profile with a client (sensitive fields always redacted; pick which optional sections show)"
+                >
+                  <Link2 className="w-4 h-4 mr-1.5" />
+                  Share with client…
+                </Button>
+                {id && (
+                  <EmployeeShareMintDialog
+                    open={shareMintOpen}
+                    onOpenChange={setShareMintOpen}
+                    employeeUserId={id}
+                    employeeName={name}
+                  />
+                )}
+              </>
+            );
+          })()}
           <Button variant="outline" onClick={() => onOpenChange(false)}>Cancel</Button>
           <Button onClick={submit} disabled={saving} className="bg-brand-navy text-white hover:opacity-90">
             {saving ? "Saving…" : initial ? "Save changes" : "Create"}

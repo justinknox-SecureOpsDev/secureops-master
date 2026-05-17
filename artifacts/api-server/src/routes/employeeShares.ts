@@ -4,6 +4,8 @@ import { randomBytes } from "node:crypto";
 import { Readable } from "node:stream";
 import {
   db, employeeShareLinksTable, usersTable, employeesTable,
+  DEFAULT_EMPLOYEE_SHARE_SECTIONS,
+  type EmployeeShareVisibleSections,
 } from "@workspace/db";
 import { requireAdmin } from "../middlewares/auth";
 import { tokenLookupLimiter, publicShareExpensiveLimiter } from "../middlewares/rateLimit";
@@ -34,13 +36,41 @@ function buildShareUrl(token: string): string | null {
   return origin ? `${origin}/admin-portal/share/employee/${token}` : null;
 }
 
+const SECTION_KEYS: ReadonlyArray<keyof EmployeeShareVisibleSections> = [
+  "license", "experience", "skills", "uniform", "trainingCerts", "documents",
+];
+
+/**
+ * Coerce arbitrary client input into a strict section map. Unknown
+ * keys are dropped; missing keys default to `true` (matches the legacy
+ * "everything visible" behaviour). Returns null when the caller did
+ * not provide a value at all so we can fall back to the column default.
+ */
+function coerceSections(input: unknown): EmployeeShareVisibleSections | null {
+  if (input === undefined || input === null) return null;
+  if (typeof input !== "object") return null;
+  const src = input as Record<string, unknown>;
+  const out: EmployeeShareVisibleSections = { ...DEFAULT_EMPLOYEE_SHARE_SECTIONS };
+  for (const k of SECTION_KEYS) {
+    if (k in src) out[k] = src[k] === true;
+  }
+  return out;
+}
+
+/** Treat null / partial rows as "every section enabled" — matches legacy behaviour. */
+function resolveSections(stored: unknown): EmployeeShareVisibleSections {
+  const coerced = coerceSections(stored);
+  return coerced ?? { ...DEFAULT_EMPLOYEE_SHARE_SECTIONS };
+}
+
 // ---------- Admin: mint a share link ----------
 router.post("/admin/employees/:id/share", requireAdmin, async (req, res): Promise<void> => {
   const adminId = req.user!.userId;
   const employeeUserId = String(req.params.id);
-  const { expiresInDays, recipientLabel } = (req.body ?? {}) as {
-    expiresInDays?: number; recipientLabel?: string;
+  const { expiresInDays, recipientLabel, visibleSections } = (req.body ?? {}) as {
+    expiresInDays?: number; recipientLabel?: string; visibleSections?: unknown;
   };
+  const sections = coerceSections(visibleSections);
 
   // Admin grid rows for "employees" are keyed by `employees.id` (the
   // employees-table PK), but the share / PDF surfaces are keyed by
@@ -81,9 +111,14 @@ router.post("/admin/employees/:id/share", requireAdmin, async (req, res): Promis
     createdBy: adminId,
     recipientLabel: recipientLabel?.trim() || null,
     expiresAt,
+    visibleSections: sections,
   }).returning();
 
-  res.status(201).json({ ...created, url: buildShareUrl(created.token)! });
+  res.status(201).json({
+    ...created,
+    visibleSections: resolveSections(created.visibleSections),
+    url: buildShareUrl(created.token)!,
+  });
 });
 
 // ---------- Admin: list share links (optionally per officer) ----------
@@ -104,6 +139,7 @@ router.get("/admin/employee-shares", requireAdmin, async (req, res): Promise<voi
       revokedAt: employeeShareLinksTable.revokedAt,
       viewCount: employeeShareLinksTable.viewCount,
       lastViewedAt: employeeShareLinksTable.lastViewedAt,
+      visibleSections: employeeShareLinksTable.visibleSections,
       createdAt: employeeShareLinksTable.createdAt,
       officerFirstName: officerUsers.firstName,
       officerLastName: officerUsers.lastName,
@@ -117,6 +153,7 @@ router.get("/admin/employee-shares", requireAdmin, async (req, res): Promise<voi
   const origin = trustedPublicOrigin();
   res.json(rows.map((r) => ({
     ...r,
+    visibleSections: resolveSections(r.visibleSections),
     url: origin ? `${origin}/admin-portal/share/employee/${r.token}` : null,
   })));
 });
@@ -201,11 +238,19 @@ router.get("/public/employee-shares/:token", tokenLookupLimiter, async (req, res
       uniformTrousers: employeesTable.uniformTrousers,
       uniformJacket: employeesTable.uniformJacket,
       uniformBoots: employeesTable.uniformBoots,
+      cvKey: employeesTable.cvKey,
+      licenseDocKey: employeesTable.licenseDocKey,
+      passportDocKey: employeesTable.passportDocKey,
+      rightToWorkDocKey: employeesTable.rightToWorkDocKey,
+      payStubDocKey: employeesTable.payStubDocKey,
+      trainingCertificateKeys: employeesTable.trainingCertificateKeys,
     })
     .from(usersTable)
     .leftJoin(employeesTable, eq(employeesTable.userId, usersTable.id))
     .where(and(eq(usersTable.id, r.share.employeeUserId), eq(usersTable.role, "employee")));
   if (!row) { res.status(404).json({ error: "Officer not found" }); return; }
+
+  const sections = resolveSections(r.share.visibleSections);
 
   // Re-check active+unexpired AND bump view count atomically. If the
   // admin revoked / the link expired between loadActiveShare and now,
@@ -224,24 +269,43 @@ router.get("/public/employee-shares/:token", tokenLookupLimiter, async (req, res
 
   // Sanitized payload — explicitly no email, no phone, no address, no
   // DOB, no SSN (even masked), no banking, no emergency contact, no
-  // hourly rate, no references, no acknowledgements.
+  // hourly rate, no references, no acknowledgements. Per-section
+  // toggles further pare back the visible surface.
+  const filenameOf = (key: string | null | undefined): string | null =>
+    key ? (key.split("/").pop() ?? null) : null;
+  const docs = sections.documents ? [
+    { label: "CV / résumé", filename: filenameOf(row.cvKey) },
+    { label: "TX security license", filename: filenameOf(row.licenseDocKey) },
+    { label: "Passport / photo ID", filename: filenameOf(row.passportDocKey) },
+    { label: "Right-to-work doc", filename: filenameOf(row.rightToWorkDocKey) },
+    { label: "W-2 / pay stub", filename: filenameOf(row.payStubDocKey) },
+  ].filter((d) => !!d.filename) : [];
+  const certs = sections.trainingCerts
+    ? (Array.isArray(row.trainingCertificateKeys) ? row.trainingCertificateKeys as string[] : [])
+        .map((k, i) => ({ label: `Training certificate ${i + 1}`, filename: filenameOf(k) }))
+        .filter((d) => !!d.filename)
+    : [];
+
   res.json({
     firstName: row.firstName,
     lastName: row.lastName,
     photoUrl,
-    licenseNumber: row.siaLicenseNumber,
-    licenseLevel: row.siaLicenseLevel,
-    licenseExpiry: row.siaLicenseExpiry,
-    yearsExperience: row.yearsExperience,
-    previousExperience: row.previousExperience,
+    licenseNumber: sections.license ? row.siaLicenseNumber : null,
+    licenseLevel: sections.license ? row.siaLicenseLevel : null,
+    licenseExpiry: sections.license ? row.siaLicenseExpiry : null,
+    yearsExperience: sections.experience ? row.yearsExperience : null,
+    previousExperience: sections.experience ? row.previousExperience : null,
     rightToWorkStatus: row.rightToWorkStatus,
-    skills: Array.isArray(row.skills) ? row.skills : [],
-    uniform: {
+    skills: sections.skills && Array.isArray(row.skills) ? row.skills : [],
+    uniform: sections.uniform ? {
       shirt: row.uniformShirt,
       trousers: row.uniformTrousers,
       jacket: row.uniformJacket,
       boots: row.uniformBoots,
-    },
+    } : { shirt: null, trousers: null, jacket: null, boots: null },
+    documents: docs,
+    trainingCertificates: certs,
+    visibleSections: sections,
     share: {
       expiresAt: r.share.expiresAt,
       viewCount: r.share.viewCount + 1,
@@ -270,8 +334,12 @@ router.get(
 
     // Critical: pass `redactForPublicShare` so the PDF drops banking,
     // SSN, contact, DOB, emergency contact, hourly rate, references,
-    // and acknowledgements.
-    const payload = await buildEmployeeProfilePdf(r.share.employeeUserId, { redactForPublicShare: true });
+    // and acknowledgements. The per-link `visibleSections` map further
+    // pares back which optional sections render.
+    const payload = await buildEmployeeProfilePdf(r.share.employeeUserId, {
+      redactForPublicShare: true,
+      publicSections: resolveSections(r.share.visibleSections),
+    });
     if (!payload) { res.status(404).json({ error: "Officer not found" }); return; }
 
     res.setHeader("Content-Type", "application/pdf");
