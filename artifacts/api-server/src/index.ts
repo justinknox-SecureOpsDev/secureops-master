@@ -1,8 +1,8 @@
 import http from "http";
 import app from "./app";
 import { logger } from "./lib/logger";
-import { attachWebSocketServer } from "./lib/wsManager";
-import { attachRadioWebSocketServer } from "./lib/radioGateway";
+import { attachWebSocketServer, handleChatUpgrade } from "./lib/wsManager";
+import { attachRadioWebSocketServer, handleRadioUpgrade } from "./lib/radioGateway";
 import { seedPolicies, backfillEmployeeProfileFields } from "@workspace/db";
 import { seedDemoUsers } from "./lib/seedDemoUsers";
 import { seedChatRooms } from "./lib/seedChatRooms";
@@ -24,6 +24,24 @@ if (Number.isNaN(port) || port <= 0) {
 const server = http.createServer(app);
 attachWebSocketServer(server);
 attachRadioWebSocketServer(server);
+
+// Single upgrade dispatcher. Both WS servers are created with
+// `noServer:true` so they don't fight over the http.Server's `upgrade`
+// event (when both attach via `{server,path}` the loser's handler calls
+// `abortHandshake(socket,400)` and silently kills the other path's
+// upgrade — that bug broke /api/ws/radio in production). Route by
+// pathname here; unknown paths get a clean 404.
+server.on("upgrade", (req, socket, head) => {
+  const url = new URL(req.url || "", "http://localhost");
+  if (url.pathname === "/api/ws") {
+    handleChatUpgrade(req, socket, head);
+  } else if (url.pathname === "/api/ws/radio") {
+    handleRadioUpgrade(req, socket, head);
+  } else {
+    socket.write("HTTP/1.1 404 Not Found\r\nConnection: close\r\n\r\n");
+    socket.destroy();
+  }
+});
 
 server.listen(port, () => {
   logger.info({ port }, "Server listening");

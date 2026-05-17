@@ -1,6 +1,7 @@
 import { WebSocket, WebSocketServer } from "ws";
 import type { IncomingMessage } from "http";
 import type { Server } from "http";
+import type { Duplex } from "stream";
 import { eq } from "drizzle-orm";
 import { db, usersTable, revokedTokensTable } from "@workspace/db";
 import { verifyToken } from "../middlewares/auth";
@@ -82,7 +83,13 @@ export function sendToUser(userId: string, payload: object) {
 }
 
 export function attachWebSocketServer(server: Server) {
-  wss = new WebSocketServer({ server, path: "/api/ws" });
+  // IMPORTANT: use `noServer:true` so this server does NOT register its own
+  // `upgrade` listener on the http.Server. We share that http.Server with the
+  // radio gateway; if both attached via `{server,path}` the first one to run
+  // would call `abortHandshake(socket,400)` on every path it did not own —
+  // which silently killed the radio WS upgrade in production. The single
+  // upgrade dispatcher in `index.ts` routes by pathname instead.
+  wss = new WebSocketServer({ noServer: true });
 
   // Heartbeat to clean dead connections
   const heartbeat = setInterval(() => {
@@ -203,4 +210,16 @@ export function attachWebSocketServer(server: Server) {
   });
 
   logger.info("WebSocket server attached at /api/ws");
+}
+
+/**
+ * Manually dispatch an `upgrade` event to the chat WS server. Called by the
+ * single `server.on('upgrade')` dispatcher in `index.ts` after it has
+ * matched the request pathname to `/api/ws`.
+ */
+export function handleChatUpgrade(req: IncomingMessage, socket: Duplex, head: Buffer): void {
+  if (!wss) { socket.destroy(); return; }
+  wss.handleUpgrade(req, socket, head, (ws) => {
+    wss!.emit("connection", ws, req);
+  });
 }

@@ -1,5 +1,6 @@
 import { WebSocket, WebSocketServer } from "ws";
 import type { IncomingMessage, Server } from "http";
+import type { Duplex } from "stream";
 import { eq, sql, and, inArray } from "drizzle-orm";
 import {
   db,
@@ -482,7 +483,11 @@ function onSocketClose(socket: RadioSocket): void {
 }
 
 export function attachRadioWebSocketServer(server: Server): void {
-  radioWss = new WebSocketServer({ server, path: "/api/ws/radio" });
+  // See the comment in wsManager.ts: both WS servers run in `noServer` mode
+  // and the single upgrade dispatcher in `index.ts` routes upgrades by
+  // pathname. Attaching with `{server,path}` would cause the other server's
+  // handler to abort the handshake before we ever saw it.
+  radioWss = new WebSocketServer({ noServer: true });
 
   const heartbeat = setInterval(() => {
     radioWss!.clients.forEach((ws) => {
@@ -597,3 +602,15 @@ export function attachRadioWebSocketServer(server: Server): void {
 }
 
 export function getRadioWss(): WebSocketServer | null { return radioWss; }
+
+/**
+ * Manually dispatch an `upgrade` event to the radio WS server. Called by
+ * the single `server.on('upgrade')` dispatcher in `index.ts` after it has
+ * matched the request pathname to `/api/ws/radio`.
+ */
+export function handleRadioUpgrade(req: IncomingMessage, socket: Duplex, head: Buffer): void {
+  if (!radioWss) { socket.destroy(); return; }
+  radioWss.handleUpgrade(req, socket, head, (ws) => {
+    radioWss!.emit("connection", ws, req);
+  });
+}
