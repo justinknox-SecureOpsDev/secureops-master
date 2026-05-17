@@ -224,7 +224,14 @@ async function loadPayRunRows(ids: string[]): Promise<PayRunRow[]> {
 
 function csvEscape(v: unknown): string {
   if (v == null) return "";
-  const s = String(v);
+  let s = String(v);
+  // Neutralise spreadsheet formula-injection prefixes (=, +, -, @, |, tab, CR).
+  // Prefixing with a single quote is the standard defence recognised by Excel,
+  // LibreOffice Calc, and Google Sheets; the quote is kept inside the quoted
+  // field so it does not appear in the displayed cell value.
+  if (/^[=+\-@|]/.test(s) || s.startsWith("\t") || s.startsWith("\r")) {
+    s = `'${s}`;
+  }
   if (/[",\n\r]/.test(s)) return `"${s.replace(/"/g, '""')}"`;
   return s;
 }
