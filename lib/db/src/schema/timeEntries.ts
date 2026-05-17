@@ -42,6 +42,14 @@ export const timeEntriesTable = pgTable("time_entries", {
   // Debounce timestamp for missed-checkpoint pages — we only notify admins
   // once per `sites.patrolIntervalMinutes` window per active shift.
   patrolLastNotifiedAt: timestamp("patrol_last_notified_at", { withTimezone: true }),
+  // Forgot-to-clock-out reminders sent to the officer when they're still
+  // clocked in past their assigned shift's scheduled end. Two tiers (~20m
+  // and ~60m after end). Stamped per-tier so we never re-send for the
+  // same active shift. NOT cleared on clock-out — the reminder job
+  // filters by `clock_out_time IS NULL` so stale stamps never re-fire,
+  // and keeping them around preserves the audit trail.
+  clockOutReminder1SentAt: timestamp("clock_out_reminder1_sent_at", { withTimezone: true }),
+  clockOutReminder2SentAt: timestamp("clock_out_reminder2_sent_at", { withTimezone: true }),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow().$onUpdate(() => new Date()),
 }, (t) => ({

@@ -727,6 +727,104 @@ export function startScheduledJobs(intervalMs: number = HOUR_MS): NodeJS.Timeout
     }
   }
 
+  /**
+   * Forgot-to-clock-out reminders. For each officer who is still clocked
+   * in past their assigned shift's scheduled end, push a friendly nudge
+   * at ~20m and ~60m after end. Skips entries with no linked shift
+   * (drop-in clock-ins have no scheduled end). Idempotent via
+   * `time_entries.clock_out_reminder1_sent_at` / `_reminder2_sent_at`,
+   * claimed atomically via UPDATE … RETURNING so two overlapping ticks
+   * never double-send.
+   */
+  async function sendForgotClockOutReminders(): Promise<void> {
+    try {
+      const now = Date.now();
+      const windows: Array<{
+        minOffset: number;
+        maxOffset: number;
+        column: "clockOutReminder1SentAt" | "clockOutReminder2SentAt";
+        label: string;
+      }> = [
+        // ~20 minutes past scheduled end. Window: 15–45m so a 5-minute
+        // tick can't miss it and a long previous tick can still catch up.
+        { minOffset: 15 * MIN_MS, maxOffset: 45 * MIN_MS, column: "clockOutReminder1SentAt", label: "first" },
+        // ~60 minutes past scheduled end, then stop.
+        { minOffset: 55 * MIN_MS, maxOffset: 24 * HOUR_MS, column: "clockOutReminder2SentAt", label: "second" },
+      ];
+
+      let totalSent = 0;
+      for (const w of windows) {
+        const sentColumn = w.column === "clockOutReminder1SentAt"
+          ? timeEntriesTable.clockOutReminder1SentAt
+          : timeEntriesTable.clockOutReminder2SentAt;
+        // Officer scheduled end happened between (now - maxOffset) and (now - minOffset).
+        const endMin = new Date(now - w.maxOffset);
+        const endMax = new Date(now - w.minOffset);
+
+        const rows = await db
+          .select({
+            entryId: timeEntriesTable.id,
+            employeeId: timeEntriesTable.employeeId,
+            siteName: sitesTable.name,
+          })
+          .from(timeEntriesTable)
+          .innerJoin(shiftsTable, eq(shiftsTable.id, timeEntriesTable.shiftId))
+          .leftJoin(sitesTable, eq(sitesTable.id, shiftsTable.siteId))
+          .where(and(
+            isNull(timeEntriesTable.clockOutTime),
+            isNull(sentColumn),
+            gte(shiftsTable.endTime, endMin),
+            lte(shiftsTable.endTime, endMax),
+          ));
+
+        for (const r of rows) {
+          const claimed = await db
+            .update(timeEntriesTable)
+            .set(w.column === "clockOutReminder1SentAt"
+              ? { clockOutReminder1SentAt: new Date() }
+              : { clockOutReminder2SentAt: new Date() })
+            .where(and(
+              eq(timeEntriesTable.id, r.entryId),
+              isNull(timeEntriesTable.clockOutTime),
+              isNull(sentColumn),
+            ))
+            .returning({ id: timeEntriesTable.id });
+          if (claimed.length === 0) continue;
+
+          const where = r.siteName ? r.siteName : "your shift";
+          let pushOk = false;
+          try {
+            await sendPushToUsers([r.employeeId], {
+              title: "Don't forget to clock out",
+              body: `Your shift at ${where} has ended. Tap to clock out.`,
+              data: { type: "forgot_clock_out", timeEntryId: r.entryId, tier: w.label },
+            });
+            pushOk = true;
+          } catch (err) {
+            logger.warn({ err, timeEntryId: r.entryId }, "[forgot-clock-out] push send failed");
+          }
+          if (!pushOk) {
+            // Roll back claim so a later tick can retry.
+            await db
+              .update(timeEntriesTable)
+              .set(w.column === "clockOutReminder1SentAt"
+                ? { clockOutReminder1SentAt: null }
+                : { clockOutReminder2SentAt: null })
+              .where(eq(timeEntriesTable.id, r.entryId))
+              .catch(() => {/* swallow */});
+            continue;
+          }
+          totalSent += 1;
+        }
+      }
+      if (totalSent > 0) {
+        logger.info({ totalSent }, "Sent forgot-clock-out reminders");
+      }
+    } catch (err) {
+      logger.error({ err }, "[forgot-clock-out] job failed");
+    }
+  }
+
   // Wrap a job with an in-process mutex so a slow tick never overlaps
   // its own next tick. Cross-instance protection comes from the atomic
   // UPDATE-RETURNING claims inside each job.
@@ -766,6 +864,8 @@ export function startScheduledJobs(intervalMs: number = HOUR_MS): NodeJS.Timeout
   // window is enforced inside the job; the tick cadence just bounds how
   // long an admin waits after the window closes.
   schedule("high-risk-digest", flushHighRiskSelfEditDigests, 5 * MIN_MS);
+  // Forgot-to-clock-out — every 5 minutes; idempotent per active shift.
+  schedule("forgot-clock-out", sendForgotClockOutReminders, 5 * MIN_MS);
   // Suppress lint about unused sql import.
   void sql;
 
