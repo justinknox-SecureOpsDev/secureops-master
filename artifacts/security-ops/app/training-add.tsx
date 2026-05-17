@@ -1,4 +1,5 @@
 import React, { useState } from "react";
+import { useTopPad } from "@/hooks/useTopPad";
 import { View, Text, StyleSheet, ScrollView, TextInput, TouchableOpacity, Platform, Alert, ActivityIndicator } from "react-native";
 import { useRouter } from "expo-router";
 import { Feather } from "@expo/vector-icons";
@@ -10,7 +11,7 @@ const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 export default function AddTrainingScreen() {
   const colors = useColors();
   const router = useRouter();
-  const topPad = Platform.OS === "web" ? 67 : 0;
+  const topPad = useTopPad();
 
   const [type, setType] = useState("");
   const [title, setTitle] = useState("");

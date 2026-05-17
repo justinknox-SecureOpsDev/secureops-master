@@ -1,4 +1,5 @@
 import React, { useEffect, useState, useCallback } from "react";
+import { useTopPad } from "@/hooks/useTopPad";
 import {
   View, Text, StyleSheet, ScrollView, TouchableOpacity, ActivityIndicator,
   Platform, RefreshControl,
@@ -60,7 +61,7 @@ function fmtRange(a: string, b: string): string {
 export default function PaystubsScreen() {
   const colors = useColors();
   const router = useRouter();
-  const topPad = Platform.OS === "web" ? 67 : 0;
+  const topPad = useTopPad();
   const [data, setData] = useState<PaystubsResponse | null>(null);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);

@@ -1,5 +1,6 @@
-import React from "react";
-import { View, Text, StyleSheet, ScrollView, TouchableOpacity, ActivityIndicator, Platform, Alert } from "react-native";
+import React, { useState, useEffect } from "react";
+import { useTopPad } from "@/hooks/useTopPad";
+import { View, Text, StyleSheet, ScrollView, TouchableOpacity, ActivityIndicator, Platform, Alert, Modal, TextInput, KeyboardAvoidingView } from "react-native";
 import { useColors } from "@/hooks/useColors";
 import { useGetEmployee, getGetEmployeeQueryKey, useGetLicenses, getGetLicensesQueryKey, useUpdateEmployee } from "@workspace/api-client-react";
 import { LicenseLevelBadge } from "@/components/LicenseLevelBadge";
@@ -26,7 +27,7 @@ export default function EmployeeDetailScreen() {
   const router = useRouter();
   const queryClient = useQueryClient();
   const { id } = useLocalSearchParams<{ id: string }>();
-  const topPad = Platform.OS === "web" ? 67 : 0;
+  const topPad = useTopPad();
 
   const { data: employee, isLoading } = useGetEmployee(id!, {
     query: { queryKey: getGetEmployeeQueryKey(id!), enabled: !!id }
@@ -38,6 +39,7 @@ export default function EmployeeDetailScreen() {
   );
 
   const updateEmployee = useUpdateEmployee();
+  const [editOpen, setEditOpen] = useState(false);
 
   const toggleStatus = async () => {
     if (!employee) return;
@@ -76,6 +78,13 @@ export default function EmployeeDetailScreen() {
         </TouchableOpacity>
         <Text style={[styles.pageTitle, { color: colors.foreground }]}>Employee Profile</Text>
         <TouchableOpacity
+          onPress={() => setEditOpen(true)}
+          style={[styles.editBtn, { borderColor: colors.primary, backgroundColor: colors.primary + "15" }]}
+        >
+          <Feather name="edit-2" size={14} color={colors.primary} />
+          <Text style={{ color: colors.primary, fontSize: 12, fontWeight: "700" }}>Edit</Text>
+        </TouchableOpacity>
+        <TouchableOpacity
           onPress={toggleStatus}
           style={[styles.statusToggle, { borderColor: employee.status === "active" ? "#22c55e" : colors.accent }]}
         >
@@ -84,6 +93,16 @@ export default function EmployeeDetailScreen() {
           </Text>
         </TouchableOpacity>
       </View>
+
+      <EditEmployeeModal
+        visible={editOpen}
+        employee={employee}
+        onClose={() => setEditOpen(false)}
+        onSaved={() => {
+          setEditOpen(false);
+          queryClient.invalidateQueries({ queryKey: getGetEmployeeQueryKey(id!) });
+        }}
+      />
 
       <View style={[styles.heroCard, { backgroundColor: colors.card, borderColor: colors.border }]}>
         <View style={[styles.bigAvatar, { backgroundColor: colors.primary + "20" }]}>
@@ -163,13 +182,141 @@ export default function EmployeeDetailScreen() {
   );
 }
 
+function EditEmployeeModal({
+  visible, employee, onClose, onSaved,
+}: {
+  visible: boolean;
+  employee: any;
+  onClose: () => void;
+  onSaved: () => void;
+}) {
+  const colors = useColors();
+  const updateEmployee = useUpdateEmployee();
+  const [saving, setSaving] = useState(false);
+  const [form, setForm] = useState({
+    firstName: "", lastName: "", phone: "", address: "",
+    hourlyRate: "", emergencyContactName: "", emergencyContactPhone: "",
+  });
+
+  useEffect(() => {
+    if (employee) {
+      setForm({
+        firstName: employee.firstName ?? "",
+        lastName: employee.lastName ?? "",
+        phone: employee.phone ?? "",
+        address: employee.address ?? "",
+        hourlyRate: employee.hourlyRate != null ? String(employee.hourlyRate) : "",
+        emergencyContactName: employee.emergencyContactName ?? "",
+        emergencyContactPhone: employee.emergencyContactPhone ?? "",
+      });
+    }
+  }, [employee, visible]);
+
+  const handleSave = async () => {
+    if (!employee) return;
+    setSaving(true);
+    try {
+      const payload: any = {
+        firstName: form.firstName.trim(),
+        lastName: form.lastName.trim(),
+        phone: form.phone.trim(),
+        address: form.address.trim(),
+        emergencyContactName: form.emergencyContactName.trim(),
+        emergencyContactPhone: form.emergencyContactPhone.trim(),
+      };
+      const rate = parseFloat(form.hourlyRate);
+      if (!isNaN(rate) && rate >= 0) payload.hourlyRate = rate;
+      await updateEmployee.mutateAsync({ id: employee.id, data: payload });
+      onSaved();
+    } catch (e: any) {
+      const msg = e?.response?.data?.message || e?.message || "Could not save changes.";
+      if (Platform.OS === "web") window.alert(msg);
+      else Alert.alert("Save failed", msg);
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const update = (key: keyof typeof form) => (v: string) => setForm((prev) => ({ ...prev, [key]: v }));
+
+  return (
+    <Modal visible={visible} animationType="slide" onRequestClose={onClose} presentationStyle="formSheet">
+      <View style={{ flex: 1, backgroundColor: colors.background }}>
+        <View style={[styles.modalHeader, { borderBottomColor: colors.border }]}>
+          <TouchableOpacity onPress={onClose} disabled={saving}>
+            <Text style={{ color: colors.mutedForeground, fontSize: 16 }}>Cancel</Text>
+          </TouchableOpacity>
+          <Text style={[styles.modalTitle, { color: colors.foreground }]}>Edit Employee</Text>
+          <TouchableOpacity onPress={handleSave} disabled={saving}>
+            {saving
+              ? <ActivityIndicator color={colors.primary} />
+              : <Text style={{ color: colors.primary, fontSize: 16, fontWeight: "700" }}>Save</Text>}
+          </TouchableOpacity>
+        </View>
+        <KeyboardAvoidingView behavior={Platform.OS === "ios" ? "padding" : undefined} style={{ flex: 1 }}>
+          <ScrollView contentContainerStyle={{ padding: 16 }} keyboardShouldPersistTaps="handled">
+            <Text style={[styles.modalSectionTitle, { color: colors.accent }]}>CONTACT INFO</Text>
+            <EditField colors={colors} label="First name" value={form.firstName} onChangeText={update("firstName")} autoCapitalize="words" />
+            <EditField colors={colors} label="Last name" value={form.lastName} onChangeText={update("lastName")} autoCapitalize="words" />
+            <EditField colors={colors} label="Phone" value={form.phone} onChangeText={update("phone")} keyboardType="phone-pad" />
+            <EditField colors={colors} label="Address" value={form.address} onChangeText={update("address")} autoCapitalize="words" />
+
+            <Text style={[styles.modalSectionTitle, { color: colors.accent, marginTop: 16 }]}>PAY</Text>
+            <EditField colors={colors} label="Hourly rate (USD)" value={form.hourlyRate} onChangeText={update("hourlyRate")} keyboardType="decimal-pad" />
+
+            <Text style={[styles.modalSectionTitle, { color: colors.accent, marginTop: 16 }]}>EMERGENCY CONTACT</Text>
+            <EditField colors={colors} label="Contact name" value={form.emergencyContactName} onChangeText={update("emergencyContactName")} autoCapitalize="words" />
+            <EditField colors={colors} label="Contact phone" value={form.emergencyContactPhone} onChangeText={update("emergencyContactPhone")} keyboardType="phone-pad" />
+
+            <Text style={[styles.modalNote, { color: colors.mutedForeground }]}>
+              Email, banking, and license details are edited from the admin portal.
+            </Text>
+          </ScrollView>
+        </KeyboardAvoidingView>
+      </View>
+    </Modal>
+  );
+}
+
+function EditField({
+  colors, label, value, onChangeText, keyboardType, autoCapitalize,
+}: {
+  colors: ReturnType<typeof useColors>;
+  label: string;
+  value: string;
+  onChangeText: (v: string) => void;
+  keyboardType?: "default" | "phone-pad" | "decimal-pad";
+  autoCapitalize?: "none" | "sentences" | "words";
+}) {
+  return (
+    <View style={{ marginBottom: 14 }}>
+      <Text style={[styles.fieldLabel, { color: colors.mutedForeground }]}>{label}</Text>
+      <TextInput
+        value={value}
+        onChangeText={onChangeText}
+        keyboardType={keyboardType}
+        autoCapitalize={autoCapitalize}
+        placeholderTextColor={colors.mutedForeground}
+        style={[styles.input, { color: colors.foreground, borderColor: colors.border, backgroundColor: colors.background }]}
+      />
+    </View>
+  );
+}
+
 const styles = StyleSheet.create({
   container: { flex: 1 },
   center: { flex: 1, justifyContent: "center", alignItems: "center" },
-  topBar: { flexDirection: "row", alignItems: "center", gap: 12, paddingHorizontal: 16, paddingBottom: 12, borderBottomWidth: 1 },
+  topBar: { flexDirection: "row", alignItems: "center", gap: 8, paddingHorizontal: 16, paddingBottom: 12, borderBottomWidth: 1 },
   backBtn: { padding: 8, borderRadius: 8, borderWidth: 1 },
   pageTitle: { flex: 1, fontSize: 18, fontWeight: "700" },
+  editBtn: { flexDirection: "row", alignItems: "center", gap: 4, paddingHorizontal: 10, paddingVertical: 6, borderRadius: 8, borderWidth: 1 },
   statusToggle: { paddingHorizontal: 12, paddingVertical: 6, borderRadius: 8, borderWidth: 1 },
+  modalHeader: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", paddingHorizontal: 16, paddingVertical: 14, borderBottomWidth: 1 },
+  modalTitle: { fontSize: 16, fontWeight: "700" },
+  modalSectionTitle: { fontSize: 11, fontWeight: "700", letterSpacing: 2, marginBottom: 12 },
+  modalNote: { fontSize: 12, fontStyle: "italic", marginTop: 20, textAlign: "center" },
+  fieldLabel: { fontSize: 11, fontWeight: "600", letterSpacing: 1, marginBottom: 6, textTransform: "uppercase" },
+  input: { borderWidth: 1, borderRadius: 8, paddingHorizontal: 12, paddingVertical: 10, fontSize: 15 },
   heroCard: { margin: 16, padding: 24, borderRadius: 14, borderWidth: 1, alignItems: "center", gap: 6 },
   bigAvatar: { width: 70, height: 70, borderRadius: 35, justifyContent: "center", alignItems: "center", marginBottom: 8 },
   bigAvatarText: { fontSize: 26, fontWeight: "700" },

@@ -1,4 +1,5 @@
 import React, { useState } from "react";
+import { useTopPad } from "@/hooks/useTopPad";
 import { View, Text, StyleSheet, FlatList, TouchableOpacity, ActivityIndicator, Platform, Modal, TextInput, ScrollView, Image } from "react-native";
 import { useColors } from "@/hooks/useColors";
 import { useGetIncidents, getGetIncidentsQueryKey, useCreateIncident } from "@workspace/api-client-react";
@@ -16,7 +17,7 @@ export default function EmployeeIncidentsScreen() {
   const colors = useColors();
   const queryClient = useQueryClient();
   const [showReport, setShowReport] = useState(false);
-  const topPad = Platform.OS === "web" ? 67 : 0;
+  const topPad = useTopPad();
 
   const [form, setForm] = useState({ title: "", description: "", severity: "medium" as string, location: "", actionsTaken: "" });
   const set = (k: string) => (v: string) => setForm((f) => ({ ...f, [k]: v }));

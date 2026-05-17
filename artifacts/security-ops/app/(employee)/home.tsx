@@ -1,4 +1,5 @@
 import React from "react";
+import { useTopPad } from "@/hooks/useTopPad";
 import { View, Text, StyleSheet, ScrollView, TouchableOpacity, ActivityIndicator, Platform, Image } from "react-native";
 import { useColors } from "@/hooks/useColors";
 import { useGetEmployeeDashboardSummary, getGetEmployeeDashboardSummaryQueryKey } from "@workspace/api-client-react";
@@ -22,7 +23,7 @@ export default function EmployeeHomeScreen() {
   const colors = useColors();
   const { logout, user } = useAuth();
   const router = useRouter();
-  const topPad = Platform.OS === "web" ? 67 : 0;
+  const topPad = useTopPad();
 
   const { data: summary, isLoading, error, refetch } = useGetEmployeeDashboardSummary({
     query: { queryKey: getGetEmployeeDashboardSummaryQueryKey() }

@@ -468,4 +468,46 @@ router.post("/chat/rooms/:id/messages", requireAuth, async (req, res): Promise<v
   res.status(201).json(broadcastPayload.message);
 });
 
+// DELETE /chat/messages/:id — admins delete anything; users delete only
+// their own messages. Broadcasts a `chat_message_deleted` event to every
+// authorized member so each open chat view can drop the bubble in real time.
+router.delete("/chat/messages/:id", requireAuth, async (req, res): Promise<void> => {
+  const id = req.params.id as string;
+  const [message] = await db
+    .select()
+    .from(chatMessagesTable)
+    .where(eq(chatMessagesTable.id, id))
+    .limit(1);
+  if (!message) {
+    res.status(404).json({ error: "Not Found", message: "Message not found" });
+    return;
+  }
+
+  const isOwner = message.userId === req.user!.userId;
+  const isAdmin = req.user!.role === "admin";
+  if (!isOwner && !isAdmin) {
+    res.status(403).json({ error: "Forbidden", message: "You can only delete your own messages" });
+    return;
+  }
+
+  const [room] = await db
+    .select()
+    .from(chatRoomsTable)
+    .where(eq(chatRoomsTable.id, message.roomId))
+    .limit(1);
+
+  await db.delete(chatMessagesTable).where(eq(chatMessagesTable.id, id));
+
+  if (room) {
+    const members = await resolveRoomMembers(room);
+    broadcastToRoom(
+      room.id,
+      { type: "chat_message_deleted", messageId: id, roomId: room.id },
+      members === null ? {} : { allowedUserIds: members },
+    );
+  }
+
+  res.json({ ok: true, id });
+});
+
 export default router;

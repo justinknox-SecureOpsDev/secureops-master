@@ -1,4 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useState } from "react";
+import { useTopPad } from "@/hooks/useTopPad";
 import {
   View, Text, StyleSheet, ScrollView, TextInput, TouchableOpacity,
   ActivityIndicator, Image, Platform, RefreshControl,
@@ -46,6 +47,7 @@ const STATUS_COLOR: Record<Renewal["status"], string> = {
 
 export default function LicenseRenewalScreen() {
   const colors = useColors();
+  const topPad = useTopPad();
   const router = useRouter();
 
   const [licenses, setLicenses] = useState<License[] | null>(null);
@@ -184,7 +186,7 @@ export default function LicenseRenewalScreen() {
 
   return (
     <SafeAreaView style={[styles.container, { backgroundColor: colors.background }]} edges={["top"]}>
-      <View style={[styles.header, { borderBottomColor: colors.border, paddingTop: Platform.OS === "web" ? 67 : 0 }]}>
+      <View style={[styles.header, { borderBottomColor: colors.border, paddingTop: topPad }]}>
         <TouchableOpacity onPress={() => router.back()} style={styles.backBtn}>
           <Feather name="chevron-left" size={22} color={colors.foreground} />
         </TouchableOpacity>

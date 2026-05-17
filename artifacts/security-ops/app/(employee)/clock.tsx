@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from "react";
+import { useTopPad } from "@/hooks/useTopPad";
 import { View, Text, StyleSheet, TouchableOpacity, ActivityIndicator, Alert, Platform, ScrollView } from "react-native";
 import { useColors } from "@/hooks/useColors";
 import { useClockIn, useClockOut, useGetActiveTimeEntry, getGetActiveTimeEntryQueryKey, useGetTimeEntries, getGetTimeEntriesQueryKey, updateMyLocation, useGetSites, getGetSitesQueryKey, getGetEmployeeDashboardSummaryQueryKey, getGetShiftsQueryKey } from "@workspace/api-client-react";
@@ -16,7 +17,7 @@ function formatDuration(seconds: number) {
 export default function EmployeeClockScreen() {
   const colors = useColors();
   const queryClient = useQueryClient();
-  const topPad = Platform.OS === "web" ? 67 : 0;
+  const topPad = useTopPad();
   const [elapsed, setElapsed] = useState(0);
   const [location, setLocation] = useState<{ lat: number; lon: number } | null>(null);
   const [locationLoading, setLocationLoading] = useState(false);

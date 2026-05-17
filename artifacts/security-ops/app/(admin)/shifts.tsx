@@ -1,4 +1,5 @@
 import React, { useState } from "react";
+import { useTopPad } from "@/hooks/useTopPad";
 import { View, Text, StyleSheet, FlatList, TouchableOpacity, ActivityIndicator, Platform } from "react-native";
 import { useColors } from "@/hooks/useColors";
 import { useGetShifts, getGetShiftsQueryKey } from "@workspace/api-client-react";
@@ -22,7 +23,7 @@ export default function AdminShiftsScreen() {
   const colors = useColors();
   const router = useRouter();
   const [filter, setFilter] = useState<string>("upcoming");
-  const topPad = Platform.OS === "web" ? 67 : 0;
+  const topPad = useTopPad();
 
   const { data: shifts, isLoading, error, refetch } = useGetShifts(
     { status: filter as any },

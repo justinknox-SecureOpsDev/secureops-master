@@ -1,4 +1,5 @@
 import React, { useState, useMemo } from "react";
+import { useTopPad } from "@/hooks/useTopPad";
 import { View, Text, StyleSheet, FlatList, TouchableOpacity, ActivityIndicator, Alert, Platform, ScrollView } from "react-native";
 import { useColors } from "@/hooks/useColors";
 import {
@@ -25,7 +26,7 @@ export default function AdminPayrollScreen() {
   const colors = useColors();
   const router = useRouter();
   const queryClient = useQueryClient();
-  const topPad = Platform.OS === "web" ? 67 : 0;
+  const topPad = useTopPad();
 
   const [filter, setFilter] = useState<typeof STATUS_FILTERS[number]>("pending");
   const [siteId, setSiteId] = useState<string>("");

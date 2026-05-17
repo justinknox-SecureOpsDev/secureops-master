@@ -1,4 +1,5 @@
 import React, { useState } from "react";
+import { useTopPad } from "@/hooks/useTopPad";
 import { View, Text, StyleSheet, FlatList, TouchableOpacity, ActivityIndicator, Alert, Platform, Modal, TextInput } from "react-native";
 import { useColors } from "@/hooks/useColors";
 import { useGetLicenses, getGetLicensesQueryKey, useCreateLicense, useGetEmployees, getGetEmployeesQueryKey } from "@workspace/api-client-react";
@@ -16,7 +17,7 @@ export default function AdminLicensesScreen() {
   const queryClient = useQueryClient();
   const [filter, setFilter] = useState<string>("all");
   const [showAdd, setShowAdd] = useState(false);
-  const topPad = Platform.OS === "web" ? 67 : 0;
+  const topPad = useTopPad();
 
   const [form, setForm] = useState<{ employeeId: string; type: string; level: 2 | 3 | 4 | null; licenseNumber: string; issueDate: string; expiryDate: string; issuingAuthority: string }>({ employeeId: "", type: "", level: 2, licenseNumber: "", issueDate: "", expiryDate: "", issuingAuthority: "" });
   const set = (k: string) => (v: any) => setForm((f) => ({ ...f, [k]: v }));

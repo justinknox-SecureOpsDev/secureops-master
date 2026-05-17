@@ -1,6 +1,7 @@
 import React from "react";
 import { View, Text, StyleSheet, ScrollView, TouchableOpacity, ActivityIndicator, Platform } from "react-native";
 import { useColors } from "@/hooks/useColors";
+import { useTopPad } from "@/hooks/useTopPad";
 import {
   useGetAdminDashboardSummary, getGetAdminDashboardSummaryQueryKey,
   useGetShifts, getGetShiftsQueryKey,
@@ -40,7 +41,7 @@ export default function AdminDashboardScreen() {
   const { logout, user } = useAuth();
   const router = useRouter();
   const insets = useSafeAreaInsets();
-  const topPad = Platform.OS === "web" ? 67 : 0;
+  const topPad = useTopPad();
   const { data: summary, isLoading, error, refetch } = useGetAdminDashboardSummary({
     query: { queryKey: getGetAdminDashboardSummaryQueryKey() }
   });

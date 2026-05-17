@@ -1,4 +1,5 @@
 import React, { useState } from "react";
+import { useTopPad } from "@/hooks/useTopPad";
 import { View, Text, StyleSheet, ScrollView, TouchableOpacity, TextInput, ActivityIndicator, Alert, Platform } from "react-native";
 import { useColors } from "@/hooks/useColors";
 import { useCreateEmployee, getGetEmployeesQueryKey } from "@workspace/api-client-react";
@@ -31,7 +32,7 @@ export default function CreateEmployeeScreen() {
   const router = useRouter();
   const queryClient = useQueryClient();
   const createEmployee = useCreateEmployee();
-  const topPad = Platform.OS === "web" ? 67 : 0;
+  const topPad = useTopPad();
 
   const [form, setForm] = useState({
     firstName: "", lastName: "", email: "", password: "", phone: "",

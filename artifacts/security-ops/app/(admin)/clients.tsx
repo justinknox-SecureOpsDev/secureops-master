@@ -1,4 +1,5 @@
 import React, { useState } from "react";
+import { useTopPad } from "@/hooks/useTopPad";
 import { View, Text, StyleSheet, FlatList, TouchableOpacity, ActivityIndicator, TextInput, Alert, Platform, Modal } from "react-native";
 import { useColors } from "@/hooks/useColors";
 import { useGetClients, getGetClientsQueryKey, useCreateClient } from "@workspace/api-client-react";
@@ -10,7 +11,7 @@ export default function ClientsScreen() {
   const colors = useColors();
   const router = useRouter();
   const queryClient = useQueryClient();
-  const topPad = Platform.OS === "web" ? 67 : 0;
+  const topPad = useTopPad();
 
   const { data: clients, isLoading, error, refetch } = useGetClients({ query: { queryKey: getGetClientsQueryKey() } });
   const createClient = useCreateClient();

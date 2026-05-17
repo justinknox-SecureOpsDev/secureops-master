@@ -1,4 +1,5 @@
 import React, { useState } from "react";
+import { useTopPad } from "@/hooks/useTopPad";
 import { View, Text, StyleSheet, FlatList, TouchableOpacity, ActivityIndicator, TextInput, Platform } from "react-native";
 import { useColors } from "@/hooks/useColors";
 import { useGetEmployees, getGetEmployeesQueryKey } from "@workspace/api-client-react";
@@ -12,7 +13,7 @@ export default function AdminEmployeesScreen() {
   const router = useRouter();
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState<string>("all");
-  const topPad = Platform.OS === "web" ? 67 : 0;
+  const topPad = useTopPad();
 
   const empParams: any = { status: statusFilter === "all" ? undefined : statusFilter, search: search || undefined };
   const { data: employees, isLoading, error, refetch } = useGetEmployees(

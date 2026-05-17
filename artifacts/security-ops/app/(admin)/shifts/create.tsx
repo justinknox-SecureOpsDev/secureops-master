@@ -1,4 +1,5 @@
 import React, { useState, useMemo } from "react";
+import { useTopPad } from "@/hooks/useTopPad";
 import { View, Text, StyleSheet, TouchableOpacity, TextInput, ActivityIndicator, Alert, Platform, Switch, ScrollView } from "react-native";
 import { useColors } from "@/hooks/useColors";
 import {
@@ -40,7 +41,7 @@ export default function CreateShiftScreen() {
   const router = useRouter();
   const queryClient = useQueryClient();
   const createShift = useCreateShift();
-  const topPad = Platform.OS === "web" ? 67 : 0;
+  const topPad = useTopPad();
 
   const { data: clients } = useGetClients({ query: { queryKey: getGetClientsQueryKey() } });
 

@@ -1,4 +1,5 @@
 import React, { useCallback, useEffect, useState } from "react";
+import { useTopPad } from "@/hooks/useTopPad";
 import {
   View, Text, StyleSheet, FlatList, TouchableOpacity, ActivityIndicator,
   RefreshControl, Platform,
@@ -38,6 +39,7 @@ const STATUS_COLOR: Record<SwapRow["status"], string> = {
 
 export default function SwapRequestsScreen() {
   const colors = useColors();
+  const topPad = useTopPad();
   const router = useRouter();
   const { user } = useAuth();
   const me = user?.id;
@@ -181,7 +183,7 @@ export default function SwapRequestsScreen() {
 
   return (
     <SafeAreaView style={[styles.container, { backgroundColor: colors.background }]} edges={["top"]}>
-      <View style={[styles.header, { borderBottomColor: colors.border, paddingTop: Platform.OS === "web" ? 67 : 0 }]}>
+      <View style={[styles.header, { borderBottomColor: colors.border, paddingTop: topPad }]}>
         <TouchableOpacity onPress={() => router.back()} style={styles.backBtn}>
           <Feather name="chevron-left" size={22} color={colors.foreground} />
         </TouchableOpacity>

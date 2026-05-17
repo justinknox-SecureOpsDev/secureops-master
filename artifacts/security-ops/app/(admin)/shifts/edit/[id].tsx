@@ -1,4 +1,5 @@
 import React, { useState, useMemo, useEffect } from "react";
+import { useTopPad } from "@/hooks/useTopPad";
 import { View, Text, StyleSheet, TouchableOpacity, TextInput, ActivityIndicator, Alert, Platform, Switch, ScrollView } from "react-native";
 import { useColors } from "@/hooks/useColors";
 import {
@@ -55,7 +56,7 @@ export default function EditShiftScreen() {
   const router = useRouter();
   const queryClient = useQueryClient();
   const { id } = useLocalSearchParams<{ id: string }>();
-  const topPad = Platform.OS === "web" ? 67 : 0;
+  const topPad = useTopPad();
 
   const { data: shift, isLoading } = useGetShift(id!, {
     query: { queryKey: getGetShiftQueryKey(id!), enabled: !!id },

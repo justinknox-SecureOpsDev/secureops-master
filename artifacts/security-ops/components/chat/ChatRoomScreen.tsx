@@ -1,7 +1,7 @@
 import React, { useEffect, useState, useRef, useCallback } from "react";
 import {
   View, Text, FlatList, TextInput, TouchableOpacity, StyleSheet,
-  KeyboardAvoidingView, Platform, ActivityIndicator,
+  KeyboardAvoidingView, Platform, ActivityIndicator, Alert,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { Feather } from "@expo/vector-icons";
@@ -22,7 +22,7 @@ export default function ChatRoomScreen({ roomId, roomName }: Props) {
   const colors = useColors();
   const router = useRouter();
   const { user } = useAuth();
-  const { subscribeToRoom, sendMessage } = useChat();
+  const { subscribeToRoom, subscribeToDeletes, sendMessage, deleteMessage } = useChat();
   const tabBarHeight = Platform.OS === "ios" ? 84 : 60;
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [loading, setLoading] = useState(true);
@@ -41,15 +41,18 @@ export default function ChatRoomScreen({ roomId, roomName }: Props) {
 
   useEffect(() => {
     loadMessages();
-    const unsub = subscribeToRoom(roomId, (msg) => {
+    const unsubNew = subscribeToRoom(roomId, (msg) => {
       setMessages((prev) => {
         if (prev.some((m) => m.id === msg.id)) return prev;
         return [...prev, msg];
       });
       setTimeout(() => listRef.current?.scrollToEnd({ animated: true }), 100);
     });
-    return unsub;
-  }, [roomId, subscribeToRoom, loadMessages]);
+    const unsubDel = subscribeToDeletes(roomId, (messageId) => {
+      setMessages((prev) => prev.filter((m) => m.id !== messageId));
+    });
+    return () => { unsubNew(); unsubDel(); };
+  }, [roomId, subscribeToRoom, subscribeToDeletes, loadMessages]);
 
   useEffect(() => {
     if (!loading && messages.length > 0) {
@@ -74,11 +77,46 @@ export default function ChatRoomScreen({ roomId, roomName }: Props) {
 
   const s = styles(colors);
   const isMe = (userId: string) => userId === user?.id;
+  const isAdmin = user?.role === "admin";
+
+  const handleLongPressMessage = (msg: ChatMessage) => {
+    const canDelete = isMe(msg.userId) || isAdmin;
+    if (!canDelete) return;
+    const doDelete = async () => {
+      // Optimistic: remove locally; WS will confirm for everyone else.
+      setMessages((prev) => prev.filter((m) => m.id !== msg.id));
+      try {
+        await deleteMessage(msg.id);
+      } catch (e: any) {
+        // Roll back on failure
+        setMessages((prev) => prev.some((m) => m.id === msg.id) ? prev : [...prev, msg].sort((a, b) =>
+          new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime()
+        ));
+        const message = e?.response?.data?.message || e?.message || "Could not delete message.";
+        if (Platform.OS === "web") window.alert(message);
+        else Alert.alert("Delete failed", message);
+      }
+    };
+    if (Platform.OS === "web") {
+      if (window.confirm("Delete this message? This cannot be undone.")) doDelete();
+    } else {
+      Alert.alert("Delete message?", "This cannot be undone.", [
+        { text: "Cancel", style: "cancel" },
+        { text: "Delete", style: "destructive", onPress: doDelete },
+      ]);
+    }
+  };
 
   const renderMessage = ({ item }: { item: ChatMessage }) => {
     const mine = isMe(item.userId);
+    const canDelete = mine || isAdmin;
     return (
-      <View style={[s.msgRow, mine && s.msgRowMine]}>
+      <TouchableOpacity
+        activeOpacity={canDelete ? 0.7 : 1}
+        onLongPress={() => handleLongPressMessage(item)}
+        delayLongPress={350}
+        style={[s.msgRow, mine && s.msgRowMine]}
+      >
         {!mine && (
           <View style={[s.avatar, { backgroundColor: colors.primary + "33" }]}>
             <Text style={[s.avatarText, { color: colors.primary }]}>
@@ -100,7 +138,7 @@ export default function ChatRoomScreen({ roomId, roomName }: Props) {
             {formatDistanceToNow(new Date(item.createdAt), { addSuffix: true })}
           </Text>
         </View>
-      </View>
+      </TouchableOpacity>
     );
   };
 

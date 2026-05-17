@@ -1,4 +1,5 @@
 import React, { useState } from "react";
+import { useTopPad } from "@/hooks/useTopPad";
 import { View, Text, StyleSheet, FlatList, TouchableOpacity, ActivityIndicator, TextInput, Alert, Platform, Modal } from "react-native";
 import { useColors } from "@/hooks/useColors";
 import {
@@ -16,7 +17,7 @@ export default function ClientSitesScreen() {
   const params = useLocalSearchParams<{ id: string }>();
   const clientId = String(params.id);
   const queryClient = useQueryClient();
-  const topPad = Platform.OS === "web" ? 67 : 0;
+  const topPad = useTopPad();
 
   const { data: client } = useGetClient(clientId, { query: { queryKey: getGetClientQueryKey(clientId) } });
   const { data: sites, isLoading } = useGetSites({ clientId }, { query: { queryKey: getGetSitesQueryKey({ clientId }) } });

@@ -15,13 +15,17 @@ export interface ChatMessage {
 interface ChatContextValue {
   connected: boolean;
   sendMessage: (roomId: string, content: string) => Promise<void>;
+  deleteMessage: (messageId: string) => Promise<void>;
   subscribeToRoom: (roomId: string, cb: (msg: ChatMessage) => void) => () => void;
+  subscribeToDeletes: (roomId: string, cb: (messageId: string) => void) => () => void;
 }
 
 const ChatContext = createContext<ChatContextValue>({
   connected: false,
   sendMessage: async () => {},
+  deleteMessage: async () => {},
   subscribeToRoom: () => () => {},
+  subscribeToDeletes: () => () => {},
 });
 
 export function ChatProvider({ children }: { children: React.ReactNode }) {
@@ -29,6 +33,7 @@ export function ChatProvider({ children }: { children: React.ReactNode }) {
   const wsRef = useRef<WebSocket | null>(null);
   const [connected, setConnected] = useState(false);
   const listenersRef = useRef<Map<string, Set<(msg: ChatMessage) => void>>>(new Map());
+  const deleteListenersRef = useRef<Map<string, Set<(messageId: string) => void>>>(new Map());
   const reconnectTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const connect = useCallback(() => {
@@ -53,6 +58,9 @@ export function ChatProvider({ children }: { children: React.ReactNode }) {
           const msg = data.message as ChatMessage;
           const listeners = listenersRef.current.get(msg.roomId);
           if (listeners) listeners.forEach((cb) => cb(msg));
+        } else if (data.type === "chat_message_deleted" && data.roomId && data.messageId) {
+          const listeners = deleteListenersRef.current.get(data.roomId);
+          if (listeners) listeners.forEach((cb) => cb(data.messageId));
         }
       } catch { /* ignore */ }
     };
@@ -73,6 +81,12 @@ export function ChatProvider({ children }: { children: React.ReactNode }) {
     return () => { listenersRef.current.get(roomId)?.delete(cb); };
   }, []);
 
+  const subscribeToDeletes = useCallback((roomId: string, cb: (messageId: string) => void) => {
+    if (!deleteListenersRef.current.has(roomId)) deleteListenersRef.current.set(roomId, new Set());
+    deleteListenersRef.current.get(roomId)!.add(cb);
+    return () => { deleteListenersRef.current.get(roomId)?.delete(cb); };
+  }, []);
+
   const sendMessage = useCallback(async (roomId: string, content: string) => {
     const { apiRequest } = await import("@/utils/api");
     await apiRequest(`/chat/rooms/${roomId}/messages`, {
@@ -81,8 +95,13 @@ export function ChatProvider({ children }: { children: React.ReactNode }) {
     });
   }, []);
 
+  const deleteMessage = useCallback(async (messageId: string) => {
+    const { apiRequest } = await import("@/utils/api");
+    await apiRequest(`/chat/messages/${messageId}`, { method: "DELETE" });
+  }, []);
+
   return (
-    <ChatContext.Provider value={{ connected, sendMessage, subscribeToRoom }}>
+    <ChatContext.Provider value={{ connected, sendMessage, deleteMessage, subscribeToRoom, subscribeToDeletes }}>
       {children}
     </ChatContext.Provider>
   );

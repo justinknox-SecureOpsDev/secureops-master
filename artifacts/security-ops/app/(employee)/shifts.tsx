@@ -1,4 +1,5 @@
 import React, { useState } from "react";
+import { useTopPad } from "@/hooks/useTopPad";
 import { View, Text, StyleSheet, FlatList, TouchableOpacity, ActivityIndicator, Platform } from "react-native";
 import { useColors } from "@/hooks/useColors";
 import { confirmAction, notify } from "@/utils/confirm";
@@ -26,7 +27,7 @@ export default function EmployeeShiftsScreen() {
   const [filter, setFilter] = useState<typeof FILTERS[number]>("available");
   const [busyId, setBusyId] = useState<string | null>(null);
   const [swapTarget, setSwapTarget] = useState<{ assignmentId: string; title: string } | null>(null);
-  const topPad = Platform.OS === "web" ? 67 : 0;
+  const topPad = useTopPad();
 
   const { data: me } = useGetMe({ query: { queryKey: getGetMeQueryKey() } });
   const myUserId = (me as any)?.id as string | undefined;

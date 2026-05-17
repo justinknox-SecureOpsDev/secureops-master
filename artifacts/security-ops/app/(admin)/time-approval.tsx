@@ -1,4 +1,5 @@
 import React, { useState, useMemo } from "react";
+import { useTopPad } from "@/hooks/useTopPad";
 import { View, Text, StyleSheet, FlatList, TouchableOpacity, ActivityIndicator, TextInput, Alert, Platform } from "react-native";
 import { useColors } from "@/hooks/useColors";
 import { useGetTimeEntries, getGetTimeEntriesQueryKey, useApproveTimeEntry } from "@workspace/api-client-react";
@@ -12,7 +13,7 @@ export default function TimeApprovalScreen() {
   const colors = useColors();
   const router = useRouter();
   const queryClient = useQueryClient();
-  const topPad = Platform.OS === "web" ? 67 : 0;
+  const topPad = useTopPad();
   const [filter, setFilter] = useState<typeof FILTERS[number]>("pending");
   const [edits, setEdits] = useState<Record<string, string>>({});
 

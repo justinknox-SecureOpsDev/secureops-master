@@ -1,4 +1,5 @@
 import React, { useEffect, useState } from "react";
+import { useTopPad } from "@/hooks/useTopPad";
 import { View, Text, StyleSheet, ScrollView, TouchableOpacity, ActivityIndicator, Platform, Image, Switch, Linking, Alert } from "react-native";
 import { useRouter } from "expo-router";
 import { useColors } from "@/hooks/useColors";
@@ -157,7 +158,7 @@ export default function EmployeeProfileScreen() {
   const colors = useColors();
   const router = useRouter();
   const { logout } = useAuth();
-  const topPad = Platform.OS === "web" ? 67 : 0;
+  const topPad = useTopPad();
   const [bioAvailable, setBioAvailable] = useState(false);
   const [bioOn, setBioOn] = useState(false);
   const [bioBusy, setBioBusy] = useState(false);

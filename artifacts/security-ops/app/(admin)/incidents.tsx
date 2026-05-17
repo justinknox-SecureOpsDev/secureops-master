@@ -1,4 +1,5 @@
 import React, { useState } from "react";
+import { useTopPad } from "@/hooks/useTopPad";
 import { View, Text, StyleSheet, FlatList, TouchableOpacity, ActivityIndicator, Platform, TextInput, Modal, ScrollView, Image } from "react-native";
 import { useColors } from "@/hooks/useColors";
 import { useGetIncidents, getGetIncidentsQueryKey, useUpdateIncident } from "@workspace/api-client-react";
@@ -40,7 +41,7 @@ export default function AdminIncidentsScreen() {
   const [selectedIncident, setSelectedIncident] = useState<any>(null);
   const [resolution, setResolution] = useState("");
   const [previewUri, setPreviewUri] = useState<string | null>(null);
-  const topPad = Platform.OS === "web" ? 67 : 0;
+  const topPad = useTopPad();
 
   const incParams: any = { status: filter };
   const { data: incidents, isLoading, error, refetch } = useGetIncidents(
