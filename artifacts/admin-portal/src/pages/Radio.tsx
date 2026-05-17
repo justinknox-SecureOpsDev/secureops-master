@@ -151,7 +151,7 @@ export default function RadioPage() {
     tick();
     const handle = window.setInterval(tick, 10_000);
     return () => { cancelled = true; window.clearInterval(handle); };
-  }, [activeId, speakers]);
+  }, [activeId]);
 
   // --- WS connection ---
   useEffect(() => {
@@ -162,9 +162,21 @@ export default function RadioPage() {
     ws.binaryType = "arraybuffer";
     wsRef.current = ws;
 
+    const abortLocalCapture = (): void => {
+      if (recRef.current && recRef.current.state !== "inactive") {
+        try { recRef.current.stop(); } catch { /* ignore */ }
+      }
+      if (streamRef.current) {
+        streamRef.current.getTracks().forEach((t) => t.stop());
+        streamRef.current = null;
+      }
+      recRef.current = null;
+      setRecState("idle");
+    };
+
     ws.onopen = () => setWsReady(true);
-    ws.onclose = () => { setWsReady(false); joinedRef.current.clear(); };
-    ws.onerror = () => setError("Radio connection lost. Reload to retry.");
+    ws.onclose = () => { setWsReady(false); joinedRef.current.clear(); abortLocalCapture(); };
+    ws.onerror = () => { setError("Radio connection lost. Reload to retry."); abortLocalCapture(); };
     ws.onmessage = (ev) => {
       if (typeof ev.data === "string") {
         try {
@@ -175,6 +187,8 @@ export default function RadioPage() {
             setSpeakers((s) => ({ ...s, [m.channelId]: null }));
           } else if (m.type === "denied") {
             setError(`Channel ${m.channelId}: ${m.reason}`);
+            // Server refused our claim — never let the UI think we're live.
+            abortLocalCapture();
           }
         } catch { /* ignore */ }
         return;
@@ -218,7 +232,7 @@ export default function RadioPage() {
   useEffect(() => {
     const p = playerRef.current; if (!p) return;
     for (const c of channels) p.setMuted(c.id, mutedChannels.has(c.id));
-  }, [mutedChannels, channels, speakers]);
+  }, [mutedChannels, channels]);
 
   function leaveChannel(channelId: string): void {
     const ws = wsRef.current;

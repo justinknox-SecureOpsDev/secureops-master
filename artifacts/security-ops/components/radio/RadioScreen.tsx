@@ -123,9 +123,20 @@ export default function RadioScreen(): React.JSX.Element {
       const ws = new WebSocket(buildRadioWsUrl(token));
       ws.binaryType = "arraybuffer";
       wsRef.current = ws;
+      const abortLocalCapture = (): void => {
+        if (recRef.current && recRef.current.state !== "inactive") {
+          try { recRef.current.stop(); } catch { /* ignore */ }
+        }
+        if (streamRef.current) {
+          streamRef.current.getTracks().forEach((t) => t.stop());
+          streamRef.current = null;
+        }
+        recRef.current = null;
+        setHolding(false);
+      };
       ws.onopen = () => setWsReady(true);
-      ws.onclose = () => { setWsReady(false); joinedRef.current.clear(); };
-      ws.onerror = () => setError("Radio connection lost.");
+      ws.onclose = () => { setWsReady(false); joinedRef.current.clear(); abortLocalCapture(); };
+      ws.onerror = () => { setError("Radio connection lost."); abortLocalCapture(); };
       ws.onmessage = (ev) => {
         if (typeof ev.data === "string") {
           try {
@@ -136,6 +147,8 @@ export default function RadioScreen(): React.JSX.Element {
               setSpeakers((s) => ({ ...s, [m.channelId]: null }));
             } else if (m.type === "denied") {
               setError(`Channel: ${m.reason}`);
+              // Server refused our claim — never let the UI think we're live.
+              abortLocalCapture();
             }
           } catch {}
           return;
@@ -176,7 +189,7 @@ export default function RadioScreen(): React.JSX.Element {
   useEffect(() => {
     const p = playerRef.current; if (!p) return;
     for (const c of channels) p.setMuted(c.id, mutedChannels.has(c.id));
-  }, [mutedChannels, channels, speakers]);
+  }, [mutedChannels, channels]);
 
   function leaveChannel(channelId: string): void {
     const ws = wsRef.current;
@@ -332,7 +345,7 @@ export default function RadioScreen(): React.JSX.Element {
 
             {!IS_WEB && (
               <Text style={[styles.muted, { textAlign: "center", marginTop: 20, paddingHorizontal: 24 }]}>
-                Listening + presence work on this device. Transmission and audio playback are available in the web app in v1; native streaming is coming in v1.1.
+                Presence only on this device — you can see who's transmitting, but live audio (listen and talk) is web-only in v1. Native streaming is coming in v1.1.
               </Text>
             )}
           </>
