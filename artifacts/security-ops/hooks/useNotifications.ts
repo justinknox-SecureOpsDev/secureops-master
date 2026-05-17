@@ -1,5 +1,6 @@
 import { useEffect } from "react";
 import * as Notifications from "expo-notifications";
+import Constants from "expo-constants";
 import { Platform } from "react-native";
 import { useAuth } from "@/contexts/AuthContext";
 import { apiRequest } from "@/utils/api";
@@ -14,6 +15,34 @@ Notifications.setNotificationHandler({
   }),
 });
 
+// Resolve the EAS projectId from app config. Hard-coding the slug here breaks
+// getExpoPushTokenAsync on Android — Expo's push service needs the real UUID.
+function getEasProjectId(): string | undefined {
+  return (
+    Constants.expoConfig?.extra?.eas?.projectId ??
+    (Constants as unknown as { easConfig?: { projectId?: string } }).easConfig?.projectId
+  );
+}
+
+async function ensureAndroidChannel() {
+  if (Platform.OS !== "android") return;
+  await Notifications.setNotificationChannelAsync("default", {
+    name: "Default",
+    importance: Notifications.AndroidImportance.MAX,
+    vibrationPattern: [0, 250, 250, 250],
+    lightColor: "#c9a84c",
+    sound: "default",
+  });
+  await Notifications.setNotificationChannelAsync("emergency", {
+    name: "Emergency alerts",
+    importance: Notifications.AndroidImportance.MAX,
+    vibrationPattern: [0, 500, 250, 500],
+    lightColor: "#ef4444",
+    sound: "default",
+    bypassDnd: true,
+  });
+}
+
 export function useNotifications() {
   const { user, token } = useAuth();
 
@@ -25,6 +54,8 @@ export function useNotifications() {
 
 async function registerForPushNotifications() {
   try {
+    await ensureAndroidChannel();
+
     const { status: existingStatus } = await Notifications.getPermissionsAsync();
     let finalStatus = existingStatus;
 
@@ -35,9 +66,13 @@ async function registerForPushNotifications() {
 
     if (finalStatus !== "granted") return;
 
-    const tokenData = await Notifications.getExpoPushTokenAsync({
-      projectId: "security-ops",
-    });
+    const projectId = getEasProjectId();
+    if (!projectId) {
+      console.log("Push registration skipped: no EAS projectId in app config");
+      return;
+    }
+
+    const tokenData = await Notifications.getExpoPushTokenAsync({ projectId });
 
     if (tokenData.data) {
       await apiRequest("/auth/push-token", {
@@ -46,7 +81,8 @@ async function registerForPushNotifications() {
       });
     }
   } catch (e) {
-    // Notifications not available on web / simulator without credentials
+    // Notifications not available on web / simulator without credentials.
+    // Logged at info level so it doesn't surface as a red error overlay.
     console.log("Push registration skipped:", e);
   }
 }
