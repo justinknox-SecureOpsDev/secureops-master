@@ -30,3 +30,5 @@ export * from "./dailyActivityReports";
 export * from "./trainingCertifications";
 export * from "./employeeChanges";
 export * from "./highRiskChangeQueue";
+export * from "./radioChannels";
+export * from "./radioTransmissions";

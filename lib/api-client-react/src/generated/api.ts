@@ -44,6 +44,7 @@ import type {
   CreateLicenseRequest,
   CreatePayrollRequest,
   CreatePolicyRequest,
+  CreateRadioChannelRequest,
   CreateShiftRequest,
   CreateSiteRequest,
   Employee,
@@ -61,6 +62,7 @@ import type {
   GetInvoicesParams,
   GetLicensesParams,
   GetPayrollEntriesParams,
+  GetRadioChannelTransmissionsParams,
   GetShiftsParams,
   GetSitesParams,
   GetTimeEntriesParams,
@@ -80,6 +82,8 @@ import type {
   Policy,
   PolicyGroup,
   PolicyPublic,
+  RadioChannel,
+  RadioTransmission,
   RegisterPushTokenBody,
   ReplacePolicyDocumentRequest,
   ResetPasswordRequest,
@@ -107,6 +111,7 @@ import type {
   UpdateMyLocationBody,
   UpdatePayrollRequest,
   UpdatePolicyRequest,
+  UpdateRadioChannelRequest,
   UpdateShiftRequest,
   UpdateSiteRequest,
   UploadUrlRequest,
@@ -5747,6 +5752,536 @@ export const useSendChatMessage = <
 > => {
   return useMutation(getSendChatMessageMutationOptions(options));
 };
+
+/**
+ * @summary List push-to-talk radio channels the caller can access
+ */
+export const getGetRadioChannelsUrl = () => {
+  return `/api/radio/channels`;
+};
+
+export const getRadioChannels = async (
+  options?: RequestInit,
+): Promise<RadioChannel[]> => {
+  return customFetch<RadioChannel[]>(getGetRadioChannelsUrl(), {
+    ...options,
+    method: "GET",
+  });
+};
+
+export const getGetRadioChannelsQueryKey = () => {
+  return [`/api/radio/channels`] as const;
+};
+
+export const getGetRadioChannelsQueryOptions = <
+  TData = Awaited<ReturnType<typeof getRadioChannels>>,
+  TError = ErrorType<unknown>,
+>(options?: {
+  query?: UseQueryOptions<
+    Awaited<ReturnType<typeof getRadioChannels>>,
+    TError,
+    TData
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}) => {
+  const { query: queryOptions, request: requestOptions } = options ?? {};
+
+  const queryKey = queryOptions?.queryKey ?? getGetRadioChannelsQueryKey();
+
+  const queryFn: QueryFunction<
+    Awaited<ReturnType<typeof getRadioChannels>>
+  > = ({ signal }) => getRadioChannels({ signal, ...requestOptions });
+
+  return { queryKey, queryFn, ...queryOptions } as UseQueryOptions<
+    Awaited<ReturnType<typeof getRadioChannels>>,
+    TError,
+    TData
+  > & { queryKey: QueryKey };
+};
+
+export type GetRadioChannelsQueryResult = NonNullable<
+  Awaited<ReturnType<typeof getRadioChannels>>
+>;
+export type GetRadioChannelsQueryError = ErrorType<unknown>;
+
+/**
+ * @summary List push-to-talk radio channels the caller can access
+ */
+
+export function useGetRadioChannels<
+  TData = Awaited<ReturnType<typeof getRadioChannels>>,
+  TError = ErrorType<unknown>,
+>(options?: {
+  query?: UseQueryOptions<
+    Awaited<ReturnType<typeof getRadioChannels>>,
+    TError,
+    TData
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+  const queryOptions = getGetRadioChannelsQueryOptions(options);
+
+  const query = useQuery(queryOptions) as UseQueryResult<TData, TError> & {
+    queryKey: QueryKey;
+  };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
+
+/**
+ * @summary List every radio channel (admin)
+ */
+export const getGetAdminRadioChannelsUrl = () => {
+  return `/api/admin/radio/channels`;
+};
+
+export const getAdminRadioChannels = async (
+  options?: RequestInit,
+): Promise<RadioChannel[]> => {
+  return customFetch<RadioChannel[]>(getGetAdminRadioChannelsUrl(), {
+    ...options,
+    method: "GET",
+  });
+};
+
+export const getGetAdminRadioChannelsQueryKey = () => {
+  return [`/api/admin/radio/channels`] as const;
+};
+
+export const getGetAdminRadioChannelsQueryOptions = <
+  TData = Awaited<ReturnType<typeof getAdminRadioChannels>>,
+  TError = ErrorType<unknown>,
+>(options?: {
+  query?: UseQueryOptions<
+    Awaited<ReturnType<typeof getAdminRadioChannels>>,
+    TError,
+    TData
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}) => {
+  const { query: queryOptions, request: requestOptions } = options ?? {};
+
+  const queryKey = queryOptions?.queryKey ?? getGetAdminRadioChannelsQueryKey();
+
+  const queryFn: QueryFunction<
+    Awaited<ReturnType<typeof getAdminRadioChannels>>
+  > = ({ signal }) => getAdminRadioChannels({ signal, ...requestOptions });
+
+  return { queryKey, queryFn, ...queryOptions } as UseQueryOptions<
+    Awaited<ReturnType<typeof getAdminRadioChannels>>,
+    TError,
+    TData
+  > & { queryKey: QueryKey };
+};
+
+export type GetAdminRadioChannelsQueryResult = NonNullable<
+  Awaited<ReturnType<typeof getAdminRadioChannels>>
+>;
+export type GetAdminRadioChannelsQueryError = ErrorType<unknown>;
+
+/**
+ * @summary List every radio channel (admin)
+ */
+
+export function useGetAdminRadioChannels<
+  TData = Awaited<ReturnType<typeof getAdminRadioChannels>>,
+  TError = ErrorType<unknown>,
+>(options?: {
+  query?: UseQueryOptions<
+    Awaited<ReturnType<typeof getAdminRadioChannels>>,
+    TError,
+    TData
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+  const queryOptions = getGetAdminRadioChannelsQueryOptions(options);
+
+  const query = useQuery(queryOptions) as UseQueryResult<TData, TError> & {
+    queryKey: QueryKey;
+  };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
+
+/**
+ * @summary Create a radio channel (admin)
+ */
+export const getCreateRadioChannelUrl = () => {
+  return `/api/admin/radio/channels`;
+};
+
+export const createRadioChannel = async (
+  createRadioChannelRequest: CreateRadioChannelRequest,
+  options?: RequestInit,
+): Promise<RadioChannel> => {
+  return customFetch<RadioChannel>(getCreateRadioChannelUrl(), {
+    ...options,
+    method: "POST",
+    headers: { "Content-Type": "application/json", ...options?.headers },
+    body: JSON.stringify(createRadioChannelRequest),
+  });
+};
+
+export const getCreateRadioChannelMutationOptions = <
+  TError = ErrorType<unknown>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof createRadioChannel>>,
+    TError,
+    { data: BodyType<CreateRadioChannelRequest> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof createRadioChannel>>,
+  TError,
+  { data: BodyType<CreateRadioChannelRequest> },
+  TContext
+> => {
+  const mutationKey = ["createRadioChannel"];
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof createRadioChannel>>,
+    { data: BodyType<CreateRadioChannelRequest> }
+  > = (props) => {
+    const { data } = props ?? {};
+
+    return createRadioChannel(data, requestOptions);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type CreateRadioChannelMutationResult = NonNullable<
+  Awaited<ReturnType<typeof createRadioChannel>>
+>;
+export type CreateRadioChannelMutationBody =
+  BodyType<CreateRadioChannelRequest>;
+export type CreateRadioChannelMutationError = ErrorType<unknown>;
+
+/**
+ * @summary Create a radio channel (admin)
+ */
+export const useCreateRadioChannel = <
+  TError = ErrorType<unknown>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof createRadioChannel>>,
+    TError,
+    { data: BodyType<CreateRadioChannelRequest> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationResult<
+  Awaited<ReturnType<typeof createRadioChannel>>,
+  TError,
+  { data: BodyType<CreateRadioChannelRequest> },
+  TContext
+> => {
+  return useMutation(getCreateRadioChannelMutationOptions(options));
+};
+
+/**
+ * @summary Rename or archive a radio channel (admin)
+ */
+export const getUpdateRadioChannelUrl = (id: string) => {
+  return `/api/admin/radio/channels/${id}`;
+};
+
+export const updateRadioChannel = async (
+  id: string,
+  updateRadioChannelRequest: UpdateRadioChannelRequest,
+  options?: RequestInit,
+): Promise<RadioChannel> => {
+  return customFetch<RadioChannel>(getUpdateRadioChannelUrl(id), {
+    ...options,
+    method: "PATCH",
+    headers: { "Content-Type": "application/json", ...options?.headers },
+    body: JSON.stringify(updateRadioChannelRequest),
+  });
+};
+
+export const getUpdateRadioChannelMutationOptions = <
+  TError = ErrorType<unknown>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof updateRadioChannel>>,
+    TError,
+    { id: string; data: BodyType<UpdateRadioChannelRequest> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof updateRadioChannel>>,
+  TError,
+  { id: string; data: BodyType<UpdateRadioChannelRequest> },
+  TContext
+> => {
+  const mutationKey = ["updateRadioChannel"];
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof updateRadioChannel>>,
+    { id: string; data: BodyType<UpdateRadioChannelRequest> }
+  > = (props) => {
+    const { id, data } = props ?? {};
+
+    return updateRadioChannel(id, data, requestOptions);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type UpdateRadioChannelMutationResult = NonNullable<
+  Awaited<ReturnType<typeof updateRadioChannel>>
+>;
+export type UpdateRadioChannelMutationBody =
+  BodyType<UpdateRadioChannelRequest>;
+export type UpdateRadioChannelMutationError = ErrorType<unknown>;
+
+/**
+ * @summary Rename or archive a radio channel (admin)
+ */
+export const useUpdateRadioChannel = <
+  TError = ErrorType<unknown>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof updateRadioChannel>>,
+    TError,
+    { id: string; data: BodyType<UpdateRadioChannelRequest> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationResult<
+  Awaited<ReturnType<typeof updateRadioChannel>>,
+  TError,
+  { id: string; data: BodyType<UpdateRadioChannelRequest> },
+  TContext
+> => {
+  return useMutation(getUpdateRadioChannelMutationOptions(options));
+};
+
+/**
+ * @summary Delete a radio channel (admin)
+ */
+export const getDeleteRadioChannelUrl = (id: string) => {
+  return `/api/admin/radio/channels/${id}`;
+};
+
+export const deleteRadioChannel = async (
+  id: string,
+  options?: RequestInit,
+): Promise<void> => {
+  return customFetch<void>(getDeleteRadioChannelUrl(id), {
+    ...options,
+    method: "DELETE",
+  });
+};
+
+export const getDeleteRadioChannelMutationOptions = <
+  TError = ErrorType<unknown>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof deleteRadioChannel>>,
+    TError,
+    { id: string },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof deleteRadioChannel>>,
+  TError,
+  { id: string },
+  TContext
+> => {
+  const mutationKey = ["deleteRadioChannel"];
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof deleteRadioChannel>>,
+    { id: string }
+  > = (props) => {
+    const { id } = props ?? {};
+
+    return deleteRadioChannel(id, requestOptions);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type DeleteRadioChannelMutationResult = NonNullable<
+  Awaited<ReturnType<typeof deleteRadioChannel>>
+>;
+
+export type DeleteRadioChannelMutationError = ErrorType<unknown>;
+
+/**
+ * @summary Delete a radio channel (admin)
+ */
+export const useDeleteRadioChannel = <
+  TError = ErrorType<unknown>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof deleteRadioChannel>>,
+    TError,
+    { id: string },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationResult<
+  Awaited<ReturnType<typeof deleteRadioChannel>>,
+  TError,
+  { id: string },
+  TContext
+> => {
+  return useMutation(getDeleteRadioChannelMutationOptions(options));
+};
+
+/**
+ * @summary Transmission history for a channel (admin)
+ */
+export const getGetRadioChannelTransmissionsUrl = (
+  id: string,
+  params?: GetRadioChannelTransmissionsParams,
+) => {
+  const normalizedParams = new URLSearchParams();
+
+  Object.entries(params || {}).forEach(([key, value]) => {
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? "null" : value.toString());
+    }
+  });
+
+  const stringifiedParams = normalizedParams.toString();
+
+  return stringifiedParams.length > 0
+    ? `/api/admin/radio/channels/${id}/transmissions?${stringifiedParams}`
+    : `/api/admin/radio/channels/${id}/transmissions`;
+};
+
+export const getRadioChannelTransmissions = async (
+  id: string,
+  params?: GetRadioChannelTransmissionsParams,
+  options?: RequestInit,
+): Promise<RadioTransmission[]> => {
+  return customFetch<RadioTransmission[]>(
+    getGetRadioChannelTransmissionsUrl(id, params),
+    {
+      ...options,
+      method: "GET",
+    },
+  );
+};
+
+export const getGetRadioChannelTransmissionsQueryKey = (
+  id: string,
+  params?: GetRadioChannelTransmissionsParams,
+) => {
+  return [
+    `/api/admin/radio/channels/${id}/transmissions`,
+    ...(params ? [params] : []),
+  ] as const;
+};
+
+export const getGetRadioChannelTransmissionsQueryOptions = <
+  TData = Awaited<ReturnType<typeof getRadioChannelTransmissions>>,
+  TError = ErrorType<unknown>,
+>(
+  id: string,
+  params?: GetRadioChannelTransmissionsParams,
+  options?: {
+    query?: UseQueryOptions<
+      Awaited<ReturnType<typeof getRadioChannelTransmissions>>,
+      TError,
+      TData
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+) => {
+  const { query: queryOptions, request: requestOptions } = options ?? {};
+
+  const queryKey =
+    queryOptions?.queryKey ??
+    getGetRadioChannelTransmissionsQueryKey(id, params);
+
+  const queryFn: QueryFunction<
+    Awaited<ReturnType<typeof getRadioChannelTransmissions>>
+  > = ({ signal }) =>
+    getRadioChannelTransmissions(id, params, { signal, ...requestOptions });
+
+  return {
+    queryKey,
+    queryFn,
+    enabled: !!id,
+    ...queryOptions,
+  } as UseQueryOptions<
+    Awaited<ReturnType<typeof getRadioChannelTransmissions>>,
+    TError,
+    TData
+  > & { queryKey: QueryKey };
+};
+
+export type GetRadioChannelTransmissionsQueryResult = NonNullable<
+  Awaited<ReturnType<typeof getRadioChannelTransmissions>>
+>;
+export type GetRadioChannelTransmissionsQueryError = ErrorType<unknown>;
+
+/**
+ * @summary Transmission history for a channel (admin)
+ */
+
+export function useGetRadioChannelTransmissions<
+  TData = Awaited<ReturnType<typeof getRadioChannelTransmissions>>,
+  TError = ErrorType<unknown>,
+>(
+  id: string,
+  params?: GetRadioChannelTransmissionsParams,
+  options?: {
+    query?: UseQueryOptions<
+      Awaited<ReturnType<typeof getRadioChannelTransmissions>>,
+      TError,
+      TData
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+): UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+  const queryOptions = getGetRadioChannelTransmissionsQueryOptions(
+    id,
+    params,
+    options,
+  );
+
+  const query = useQuery(queryOptions) as UseQueryResult<TData, TError> & {
+    queryKey: QueryKey;
+  };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
 
 /**
  * @summary Request a presigned URL for file upload

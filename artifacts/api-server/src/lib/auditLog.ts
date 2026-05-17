@@ -90,6 +90,7 @@ const ACTION_RULES: Array<{ prefix: string; action: string }> = [
   { prefix: "/admin/exports/preview", action: "exports.preview" },
   { prefix: "/admin/exports/csv", action: "exports.csv" },
   { prefix: "/admin/exports/pdf", action: "exports.pdf" },
+  { prefix: "/admin/radio/channels", action: "radio.channels_admin" },
   { prefix: "/admin", action: "admin.action" },
   { prefix: "/shifts/repeat", action: "shifts.repeat_create" },
   { prefix: "/shifts", action: "shifts.write" },

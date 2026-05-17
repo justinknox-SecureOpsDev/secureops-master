@@ -30,6 +30,7 @@ import patrolRouter from "./patrol";
 import darRouter from "./dar";
 import trainingsRouter from "./trainings";
 import exportsRouter from "./exports";
+import radioRouter from "./radio";
 import { auditLogMiddleware } from "../lib/auditLog";
 
 const router: IRouter = Router();
@@ -70,5 +71,6 @@ router.use(patrolRouter);
 router.use(darRouter);
 router.use(trainingsRouter);
 router.use(exportsRouter);
+router.use(radioRouter);
 
 export default router;

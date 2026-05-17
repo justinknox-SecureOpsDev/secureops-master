@@ -70,6 +70,13 @@ export default function EmployeeLayout() {
         }}
       />
       <Tabs.Screen
+        name="radio"
+        options={{
+          title: "Radio",
+          tabBarIcon: ({ color }) => <Feather name="radio" size={22} color={color} />,
+        }}
+      />
+      <Tabs.Screen
         name="profile"
         options={{
           title: "Profile",

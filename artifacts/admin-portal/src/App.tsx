@@ -27,6 +27,7 @@ import PublicIncidentPage from "@/pages/PublicIncident";
 import EmployeeShareLinksPage from "@/pages/EmployeeShareLinks";
 import PublicEmployeeProfilePage from "@/pages/PublicEmployeeProfile";
 import SecurityPage from "@/pages/Security";
+import RadioPage from "@/pages/Radio";
 import { DailyReportsPage } from "@/pages/DailyReports";
 import CompliancePage from "@/pages/Compliance";
 import ExportsPage from "@/pages/Exports";
@@ -99,6 +100,7 @@ function Routed() {
         <Route path="/incidents/share-links" component={IncidentShareLinksPage} />
         <Route path="/personnel/share-links" component={EmployeeShareLinksPage} />
         <Route path="/account/security" component={SecurityPage} />
+        <Route path="/radio" component={RadioPage} />
         <Route path="/dar" component={DailyReportsPage} />
         <Route path="/compliance" component={CompliancePage} />
         <Route path="/exports" component={ExportsPage} />

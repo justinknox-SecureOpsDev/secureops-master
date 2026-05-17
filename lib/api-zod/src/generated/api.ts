@@ -2114,6 +2114,107 @@ export const SendChatMessageBody = zod.object({
 });
 
 /**
+ * @summary List push-to-talk radio channels the caller can access
+ */
+export const GetRadioChannelsResponseItem = zod.object({
+  id: zod.string(),
+  name: zod.string(),
+  scope: zod.enum(["global", "all_officers", "admins", "site"]),
+  siteId: zod.string().nullish(),
+  siteName: zod.string().nullish(),
+  adminOnly: zod.boolean(),
+  archivedAt: zod.coerce.date().nullish(),
+  createdAt: zod.coerce.date(),
+});
+export const GetRadioChannelsResponse = zod.array(GetRadioChannelsResponseItem);
+
+/**
+ * @summary List every radio channel (admin)
+ */
+export const GetAdminRadioChannelsResponseItem = zod.object({
+  id: zod.string(),
+  name: zod.string(),
+  scope: zod.enum(["global", "all_officers", "admins", "site"]),
+  siteId: zod.string().nullish(),
+  siteName: zod.string().nullish(),
+  adminOnly: zod.boolean(),
+  archivedAt: zod.coerce.date().nullish(),
+  createdAt: zod.coerce.date(),
+});
+export const GetAdminRadioChannelsResponse = zod.array(
+  GetAdminRadioChannelsResponseItem,
+);
+
+/**
+ * @summary Create a radio channel (admin)
+ */
+
+export const CreateRadioChannelBody = zod.object({
+  name: zod.string().min(1),
+  scope: zod.enum(["global", "all_officers", "admins", "site"]),
+  siteId: zod.string().nullish(),
+});
+
+/**
+ * @summary Rename or archive a radio channel (admin)
+ */
+export const UpdateRadioChannelParams = zod.object({
+  id: zod.coerce.string(),
+});
+
+export const UpdateRadioChannelBody = zod.object({
+  name: zod.string().min(1).optional(),
+  archived: zod.boolean().optional(),
+});
+
+export const UpdateRadioChannelResponse = zod.object({
+  id: zod.string(),
+  name: zod.string(),
+  scope: zod.enum(["global", "all_officers", "admins", "site"]),
+  siteId: zod.string().nullish(),
+  siteName: zod.string().nullish(),
+  adminOnly: zod.boolean(),
+  archivedAt: zod.coerce.date().nullish(),
+  createdAt: zod.coerce.date(),
+});
+
+/**
+ * @summary Delete a radio channel (admin)
+ */
+export const DeleteRadioChannelParams = zod.object({
+  id: zod.coerce.string(),
+});
+
+/**
+ * @summary Transmission history for a channel (admin)
+ */
+export const GetRadioChannelTransmissionsParams = zod.object({
+  id: zod.coerce.string(),
+});
+
+export const getRadioChannelTransmissionsQueryLimitDefault = 100;
+
+export const GetRadioChannelTransmissionsQueryParams = zod.object({
+  limit: zod.coerce
+    .number()
+    .default(getRadioChannelTransmissionsQueryLimitDefault),
+});
+
+export const GetRadioChannelTransmissionsResponseItem = zod.object({
+  id: zod.string(),
+  channelId: zod.string(),
+  speakerUserId: zod.string(),
+  speakerName: zod.string().nullish(),
+  startedAt: zod.coerce.date(),
+  endedAt: zod.coerce.date().nullish(),
+  durationMs: zod.number().nullish(),
+  endedReason: zod.string().nullish(),
+});
+export const GetRadioChannelTransmissionsResponse = zod.array(
+  GetRadioChannelTransmissionsResponseItem,
+);
+
+/**
  * @summary Request a presigned URL for file upload
  */
 

@@ -1448,6 +1448,105 @@ paths:
               schema:
                 $ref: "#/components/schemas/ChatMessage"
 
+  /radio/channels:
+    get:
+      operationId: getRadioChannels
+      tags: [chat]
+      summary: List push-to-talk radio channels the caller can access
+      security:
+        - bearerAuth: []
+      responses:
+        "200":
+          description: List of channels
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: "#/components/schemas/RadioChannel" }
+
+  /admin/radio/channels:
+    get:
+      operationId: getAdminRadioChannels
+      tags: [chat]
+      summary: List every radio channel (admin)
+      security:
+        - bearerAuth: []
+      responses:
+        "200":
+          description: All channels
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: "#/components/schemas/RadioChannel" }
+    post:
+      operationId: createRadioChannel
+      tags: [chat]
+      summary: Create a radio channel (admin)
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/CreateRadioChannelRequest" }
+      responses:
+        "201":
+          description: Created
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/RadioChannel" }
+
+  /admin/radio/channels/{id}:
+    patch:
+      operationId: updateRadioChannel
+      tags: [chat]
+      summary: Rename or archive a radio channel (admin)
+      security:
+        - bearerAuth: []
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/UpdateRadioChannelRequest" }
+      responses:
+        "200":
+          description: Updated
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/RadioChannel" }
+    delete:
+      operationId: deleteRadioChannel
+      tags: [chat]
+      summary: Delete a radio channel (admin)
+      security:
+        - bearerAuth: []
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+      responses:
+        "204": { description: Deleted }
+
+  /admin/radio/channels/{id}/transmissions:
+    get:
+      operationId: getRadioChannelTransmissions
+      tags: [chat]
+      summary: Transmission history for a channel (admin)
+      security:
+        - bearerAuth: []
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+        - { name: limit, in: query, schema: { type: integer, default: 100 } }
+      responses:
+        "200":
+          description: Transmissions
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: "#/components/schemas/RadioTransmission" }
+
   /storage/uploads/request-url:
     post:
       tags: [storage]
@@ -1828,6 +1927,46 @@ paths:
 
 components:
   schemas:
+    RadioChannel:
+      type: object
+      required: [id, name, scope, adminOnly, createdAt]
+      properties:
+        id: { type: string }
+        name: { type: string }
+        scope: { type: string, enum: [global, all_officers, admins, site] }
+        siteId: { type: string, nullable: true }
+        siteName: { type: string, nullable: true }
+        adminOnly: { type: boolean }
+        archivedAt: { type: string, format: date-time, nullable: true }
+        createdAt: { type: string, format: date-time }
+
+    CreateRadioChannelRequest:
+      type: object
+      required: [name, scope]
+      properties:
+        name: { type: string, minLength: 1 }
+        scope: { type: string, enum: [global, all_officers, admins, site] }
+        siteId: { type: string, nullable: true }
+
+    UpdateRadioChannelRequest:
+      type: object
+      properties:
+        name: { type: string, minLength: 1 }
+        archived: { type: boolean }
+
+    RadioTransmission:
+      type: object
+      required: [id, channelId, speakerUserId, startedAt]
+      properties:
+        id: { type: string }
+        channelId: { type: string }
+        speakerUserId: { type: string }
+        speakerName: { type: string, nullable: true }
+        startedAt: { type: string, format: date-time }
+        endedAt: { type: string, format: date-time, nullable: true }
+        durationMs: { type: integer, nullable: true }
+        endedReason: { type: string, nullable: true }
+
     HealthStatus:
       type: object
       properties:

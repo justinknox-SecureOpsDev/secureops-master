@@ -2,9 +2,11 @@ import http from "http";
 import app from "./app";
 import { logger } from "./lib/logger";
 import { attachWebSocketServer } from "./lib/wsManager";
+import { attachRadioWebSocketServer } from "./lib/radioGateway";
 import { seedPolicies, backfillEmployeeProfileFields } from "@workspace/db";
 import { seedDemoUsers } from "./lib/seedDemoUsers";
 import { seedChatRooms } from "./lib/seedChatRooms";
+import { seedRadioChannels } from "./lib/seedRadioChannels";
 import { startScheduledJobs } from "./lib/scheduledJobs";
 
 const rawPort = process.env["PORT"];
@@ -21,6 +23,7 @@ if (Number.isNaN(port) || port <= 0) {
 
 const server = http.createServer(app);
 attachWebSocketServer(server);
+attachRadioWebSocketServer(server);
 
 server.listen(port, () => {
   logger.info({ port }, "Server listening");
@@ -73,6 +76,10 @@ seedDemoUsers()
 seedChatRooms()
   .then(() => logger.info("Canonical chat rooms ensured"))
   .catch((err) => logger.error({ err }, "Failed to seed canonical chat rooms"));
+
+seedRadioChannels()
+  .then(() => logger.info("Default radio channels ensured"))
+  .catch((err) => logger.error({ err }, "Failed to seed default radio channels"));
 
 server.on("error", (err) => {
   logger.error({ err }, "Server error");

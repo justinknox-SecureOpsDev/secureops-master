@@ -4,6 +4,7 @@ import {
   LogOut, ClipboardList, UserPlus, FileText, ChevronsLeft, ChevronsRight,
   Database, Banknote, ChevronDown, ChevronRight, Receipt, Wallet, MailPlus,
   AlertTriangle, ShieldCheck, Repeat, KeyRound, IdCard, Link2, Download,
+  Radio as RadioIcon,
   type LucideIcon,
 } from "lucide-react";
 import { TABLES } from "@/lib/tables";
@@ -106,6 +107,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   ];
 
   const securityLinks: LinkItem[] = [
+    { href: "/radio", label: "Radio", Icon: RadioIcon },
     { href: "/dar", label: "Daily Reports", Icon: ClipboardList },
     { href: "/compliance", label: "Compliance", Icon: ShieldCheck },
     { href: "/audit-log", label: "Audit Log", Icon: ShieldCheck },

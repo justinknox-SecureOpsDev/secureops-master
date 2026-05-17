@@ -5,6 +5,61 @@
  * SecureOps - Private Security Operations Platform API
  * OpenAPI spec version: 0.1.0
  */
+export type RadioChannelScope =
+  (typeof RadioChannelScope)[keyof typeof RadioChannelScope];
+
+export const RadioChannelScope = {
+  global: "global",
+  all_officers: "all_officers",
+  admins: "admins",
+  site: "site",
+} as const;
+
+export interface RadioChannel {
+  id: string;
+  name: string;
+  scope: RadioChannelScope;
+  siteId?: string | null;
+  siteName?: string | null;
+  adminOnly: boolean;
+  archivedAt?: string | null;
+  createdAt: string;
+}
+
+export type CreateRadioChannelRequestScope =
+  (typeof CreateRadioChannelRequestScope)[keyof typeof CreateRadioChannelRequestScope];
+
+export const CreateRadioChannelRequestScope = {
+  global: "global",
+  all_officers: "all_officers",
+  admins: "admins",
+  site: "site",
+} as const;
+
+export interface CreateRadioChannelRequest {
+  /** @minLength 1 */
+  name: string;
+  scope: CreateRadioChannelRequestScope;
+  siteId?: string | null;
+}
+
+export interface UpdateRadioChannelRequest {
+  /** @minLength 1 */
+  name?: string;
+  archived?: boolean;
+}
+
+export interface RadioTransmission {
+  id: string;
+  channelId: string;
+  speakerUserId: string;
+  speakerName?: string | null;
+  startedAt: string;
+  endedAt?: string | null;
+  durationMs?: number | null;
+  endedReason?: string | null;
+}
+
 export interface HealthStatus {
   status: string;
 }
@@ -1597,6 +1652,10 @@ export type GetChatMessagesParams = {
 
 export type SendChatMessageBody = {
   content: string;
+};
+
+export type GetRadioChannelTransmissionsParams = {
+  limit?: number;
 };
 
 export type SignMyObjectDownloadParams = {
