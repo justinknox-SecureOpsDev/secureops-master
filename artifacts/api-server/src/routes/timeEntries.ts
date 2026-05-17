@@ -87,7 +87,7 @@ router.get("/time-entries", requireAuth, async (req, res): Promise<void> => {
     .select(baseSelect)
     .from(timeEntriesTable)
     .leftJoin(shiftsTable, eq(timeEntriesTable.shiftId, shiftsTable.id))
-    .leftJoin(sitesTable, eq(shiftsTable.siteId, sitesTable.id))
+    .leftJoin(sitesTable, sql`${sitesTable.id} = coalesce(${timeEntriesTable.siteId}, ${shiftsTable.siteId})`)
     .leftJoin(usersTable, eq(timeEntriesTable.employeeId, usersTable.id))
     .where(conditions.length > 0 ? and(...conditions) : undefined);
 
@@ -260,7 +260,7 @@ router.get("/time-entries/active", requireAuth, async (req, res): Promise<void> 
     .select(baseSelect)
     .from(timeEntriesTable)
     .leftJoin(shiftsTable, eq(timeEntriesTable.shiftId, shiftsTable.id))
-    .leftJoin(sitesTable, eq(shiftsTable.siteId, sitesTable.id))
+    .leftJoin(sitesTable, sql`${sitesTable.id} = coalesce(${timeEntriesTable.siteId}, ${shiftsTable.siteId})`)
     .leftJoin(usersTable, eq(timeEntriesTable.employeeId, usersTable.id))
     .where(and(eq(timeEntriesTable.employeeId, req.user!.userId), isNull(timeEntriesTable.clockOutTime)));
 

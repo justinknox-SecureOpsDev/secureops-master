@@ -87,7 +87,14 @@ export default function TimeApprovalScreen() {
                 <View style={styles.cardHead}>
                   <View style={{ flex: 1 }}>
                     <Text style={[styles.name, { color: colors.foreground }]}>{item.employeeName}</Text>
-                    <Text style={[styles.sub, { color: colors.mutedForeground }]}>{item.shiftTitle} · {item.siteName ?? "—"}</Text>
+                    <Text style={[styles.sub, { color: colors.mutedForeground }]} numberOfLines={2}>
+                      <Feather name="briefcase" size={11} color={colors.mutedForeground} />{" "}
+                      {item.shiftTitle ?? "Walk-in (no shift)"}
+                    </Text>
+                    <Text style={[styles.sub, { color: colors.mutedForeground, marginTop: 2 }]} numberOfLines={1}>
+                      <Feather name="map-pin" size={11} color={colors.mutedForeground} />{" "}
+                      {item.siteName ?? "Site unknown"}
+                    </Text>
                   </View>
                   <View style={[styles.lvBadge, { backgroundColor: colors.primary + "20", borderColor: colors.primary }]}>
                     <Text style={{ color: colors.primary, fontSize: 11, fontWeight: "700" }}>${parseFloat(item.payRate ?? "0").toFixed(2)}/h</Text>
