@@ -1237,30 +1237,33 @@ export const ClockOutResponse = zod.object({
 /**
  * @summary Get current active time entry for logged in employee
  */
-export const GetActiveTimeEntryResponse = zod.object({
-  id: zod.string(),
-  shiftId: zod.string(),
-  shiftTitle: zod.string().optional(),
-  employeeId: zod.string(),
-  employeeName: zod.string().optional(),
-  clockInTime: zod.coerce.date(),
-  clockInLat: zod.number().optional(),
-  clockInLng: zod.number().optional(),
-  clockOutTime: zod.coerce.date().optional(),
-  clockOutLat: zod.number().optional(),
-  clockOutLng: zod.number().optional(),
-  hoursWorked: zod.number().optional(),
-  isVerified: zod.boolean(),
-  approvalStatus: zod.enum(["pending", "approved", "rejected"]),
-  approvedAt: zod.coerce.date().optional(),
-  approvedBy: zod.string().optional(),
-  siteId: zod.string().optional(),
-  siteName: zod.string().optional(),
-  payRate: zod.number().optional(),
-  billRate: zod.number().optional(),
-  notes: zod.string().optional(),
-  createdAt: zod.coerce.date(),
-});
+export const GetActiveTimeEntryResponse = zod.union([
+  zod.object({
+    id: zod.string(),
+    shiftId: zod.string(),
+    shiftTitle: zod.string().optional(),
+    employeeId: zod.string(),
+    employeeName: zod.string().optional(),
+    clockInTime: zod.coerce.date(),
+    clockInLat: zod.number().optional(),
+    clockInLng: zod.number().optional(),
+    clockOutTime: zod.coerce.date().optional(),
+    clockOutLat: zod.number().optional(),
+    clockOutLng: zod.number().optional(),
+    hoursWorked: zod.number().optional(),
+    isVerified: zod.boolean(),
+    approvalStatus: zod.enum(["pending", "approved", "rejected"]),
+    approvedAt: zod.coerce.date().optional(),
+    approvedBy: zod.string().optional(),
+    siteId: zod.string().optional(),
+    siteName: zod.string().optional(),
+    payRate: zod.number().optional(),
+    billRate: zod.number().optional(),
+    notes: zod.string().optional(),
+    createdAt: zod.coerce.date(),
+  }),
+  zod.null(),
+]);
 
 /**
  * @summary Get payroll entries

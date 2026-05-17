@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from "react";
 import { View, Text, StyleSheet, TouchableOpacity, ActivityIndicator, Alert, Platform, ScrollView } from "react-native";
 import { useColors } from "@/hooks/useColors";
-import { useClockIn, useClockOut, useGetActiveTimeEntry, getGetActiveTimeEntryQueryKey, useGetTimeEntries, getGetTimeEntriesQueryKey, updateMyLocation, useGetSites, getGetSitesQueryKey } from "@workspace/api-client-react";
+import { useClockIn, useClockOut, useGetActiveTimeEntry, getGetActiveTimeEntryQueryKey, useGetTimeEntries, getGetTimeEntriesQueryKey, updateMyLocation, useGetSites, getGetSitesQueryKey, getGetEmployeeDashboardSummaryQueryKey, getGetShiftsQueryKey } from "@workspace/api-client-react";
 import { Feather } from "@expo/vector-icons";
 import { useQueryClient } from "@tanstack/react-query";
 import * as Location from "expo-location";
@@ -91,8 +91,12 @@ export default function EmployeeClockScreen() {
       const result: any = await clockInMutation.mutateAsync({
         data: { lat, lng } as any,
       });
-      queryClient.invalidateQueries({ queryKey: getGetActiveTimeEntryQueryKey() });
-      queryClient.invalidateQueries({ queryKey: getGetTimeEntriesQueryKey() });
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: getGetActiveTimeEntryQueryKey() }),
+        queryClient.invalidateQueries({ queryKey: getGetTimeEntriesQueryKey() }),
+        queryClient.invalidateQueries({ queryKey: getGetEmployeeDashboardSummaryQueryKey() }),
+        queryClient.invalidateQueries({ queryKey: getGetShiftsQueryKey() }),
+      ]);
       const name = result?.geoResolved?.siteName ?? siteLabel;
       if (name) {
         Alert.alert("Clocked In", `Site: ${name}${result?.geoResolved?.distanceMiles != null ? ` (${result.geoResolved.distanceMiles} mi away)` : ""}.`);
@@ -141,8 +145,16 @@ export default function EmployeeClockScreen() {
           await clockOutMutation.mutateAsync({
             data: { timeEntryId: currentEntry.id, lat: location?.lat ?? 0, lng: location?.lon ?? 0 } as any,
           });
-          queryClient.invalidateQueries({ queryKey: getGetActiveTimeEntryQueryKey() });
-          queryClient.invalidateQueries({ queryKey: getGetTimeEntriesQueryKey() });
+          // Clear the active-entry cache *immediately* so the ON-DUTY ring
+          // flips to OFF DUTY without waiting for the refetch round-trip.
+          queryClient.setQueryData(getGetActiveTimeEntryQueryKey(), null);
+          setElapsed(0);
+          await Promise.all([
+            queryClient.invalidateQueries({ queryKey: getGetActiveTimeEntryQueryKey() }),
+            queryClient.invalidateQueries({ queryKey: getGetTimeEntriesQueryKey() }),
+            queryClient.invalidateQueries({ queryKey: getGetEmployeeDashboardSummaryQueryKey() }),
+            queryClient.invalidateQueries({ queryKey: getGetShiftsQueryKey() }),
+          ]);
         }
       }
     ]);

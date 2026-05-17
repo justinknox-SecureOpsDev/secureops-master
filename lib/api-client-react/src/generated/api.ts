@@ -3476,8 +3476,8 @@ export const getGetActiveTimeEntryUrl = () => {
 
 export const getActiveTimeEntry = async (
   options?: RequestInit,
-): Promise<TimeEntry> => {
-  return customFetch<TimeEntry>(getGetActiveTimeEntryUrl(), {
+): Promise<TimeEntry | null> => {
+  return customFetch<TimeEntry | null>(getGetActiveTimeEntryUrl(), {
     ...options,
     method: "GET",
   });
@@ -3489,7 +3489,7 @@ export const getGetActiveTimeEntryQueryKey = () => {
 
 export const getGetActiveTimeEntryQueryOptions = <
   TData = Awaited<ReturnType<typeof getActiveTimeEntry>>,
-  TError = ErrorType<ErrorResponse>,
+  TError = ErrorType<unknown>,
 >(options?: {
   query?: UseQueryOptions<
     Awaited<ReturnType<typeof getActiveTimeEntry>>,
@@ -3516,7 +3516,7 @@ export const getGetActiveTimeEntryQueryOptions = <
 export type GetActiveTimeEntryQueryResult = NonNullable<
   Awaited<ReturnType<typeof getActiveTimeEntry>>
 >;
-export type GetActiveTimeEntryQueryError = ErrorType<ErrorResponse>;
+export type GetActiveTimeEntryQueryError = ErrorType<unknown>;
 
 /**
  * @summary Get current active time entry for logged in employee
@@ -3524,7 +3524,7 @@ export type GetActiveTimeEntryQueryError = ErrorType<ErrorResponse>;
 
 export function useGetActiveTimeEntry<
   TData = Awaited<ReturnType<typeof getActiveTimeEntry>>,
-  TError = ErrorType<ErrorResponse>,
+  TError = ErrorType<unknown>,
 >(options?: {
   query?: UseQueryOptions<
     Awaited<ReturnType<typeof getActiveTimeEntry>>,

@@ -8,6 +8,7 @@ import {
   useGetEmployee, getGetEmployeeQueryKey,
   claimShift, useUpdateShiftAssignment,
   useClockIn, useGetActiveTimeEntry, getGetActiveTimeEntryQueryKey, getGetTimeEntriesQueryKey,
+  getGetEmployeeDashboardSummaryQueryKey,
 } from "@workspace/api-client-react";
 import * as Location from "expo-location";
 import { useQueryClient } from "@tanstack/react-query";
@@ -119,6 +120,7 @@ export default function EmployeeShiftsScreen() {
         queryClient.invalidateQueries({ queryKey: getGetActiveTimeEntryQueryKey() }),
         queryClient.invalidateQueries({ queryKey: getGetTimeEntriesQueryKey() }),
         queryClient.invalidateQueries({ queryKey: getGetShiftsQueryKey() }),
+        queryClient.invalidateQueries({ queryKey: getGetEmployeeDashboardSummaryQueryKey() }),
       ]);
       notify("Clocked In", `You're on duty for ${shift.title}. Open the Clock tab to clock out when finished.`);
     } catch (e: any) {
@@ -353,15 +355,30 @@ export default function EmployeeShiftsScreen() {
                   const now = Date.now();
                   const startMs = new Date(item.startTime).getTime();
                   const endMs = new Date(item.endTime).getTime();
+                  // True when *this* user is currently clocked in to *this* exact shift.
+                  const clockedInToThisShift =
+                    !!(activeEntry as any)?.id && (activeEntry as any)?.shiftId === item.id;
                   const canClockIn =
                     now >= startMs - 60 * 60 * 1000 &&
                     now <= endMs &&
                     item.status !== "completed" &&
                     item.status !== "cancelled" &&
                     !isClockedInElsewhere;
+                  // Once on duty, you can't release this shift — you have to clock
+                  // out first. Also hide once the shift is completed/cancelled.
+                  const canRelease =
+                    !clockedInToThisShift &&
+                    item.status !== "completed" &&
+                    item.status !== "cancelled";
                   return (
                     <View style={{ flexDirection: "row", gap: 8, flexWrap: "wrap" }}>
-                      {canClockIn && (
+                      {clockedInToThisShift && (
+                        <View style={[styles.statusBanner, { backgroundColor: "#22c55e20", borderColor: "#22c55e", flex: 1 }]}>
+                          <Feather name="clock" size={14} color="#22c55e" />
+                          <Text style={[styles.statusBannerText, { color: "#22c55e" }]}>On duty — clock out from the Clock tab</Text>
+                        </View>
+                      )}
+                      {canClockIn && !clockedInToThisShift && (
                         <TouchableOpacity
                           style={[styles.acceptBtn, { backgroundColor: "#22c55e", opacity: busy ? 0.6 : 1 }]}
                           onPress={() => handleClockInToShift(item)}
@@ -375,19 +392,21 @@ export default function EmployeeShiftsScreen() {
                           )}
                         </TouchableOpacity>
                       )}
-                      <TouchableOpacity
-                        style={[styles.declineBtn, { borderColor: colors.destructive, opacity: busy ? 0.6 : 1 }]}
-                        onPress={() => handleDecline(item, myAssign.id)}
-                        disabled={busy}
-                      >
-                        {busy && !canClockIn ? <ActivityIndicator color={colors.destructive} /> : (
-                          <>
-                            <Feather name="x" size={14} color={colors.destructive} />
-                            <Text style={[styles.declineText, { color: colors.destructive }]}>Release Shift</Text>
-                          </>
-                        )}
-                      </TouchableOpacity>
-                      {now < startMs && (
+                      {canRelease && (
+                        <TouchableOpacity
+                          style={[styles.declineBtn, { borderColor: colors.destructive, opacity: busy ? 0.6 : 1 }]}
+                          onPress={() => handleDecline(item, myAssign.id)}
+                          disabled={busy}
+                        >
+                          {busy && !canClockIn ? <ActivityIndicator color={colors.destructive} /> : (
+                            <>
+                              <Feather name="x" size={14} color={colors.destructive} />
+                              <Text style={[styles.declineText, { color: colors.destructive }]}>Release Shift</Text>
+                            </>
+                          )}
+                        </TouchableOpacity>
+                      )}
+                      {now < startMs && !clockedInToThisShift && (
                         <TouchableOpacity
                           style={[styles.declineBtn, { borderColor: colors.primary, opacity: busy ? 0.6 : 1 }]}
                           onPress={() => setSwapTarget({ assignmentId: myAssign.id, title: `${item.title} @ ${item.clientName}` })}

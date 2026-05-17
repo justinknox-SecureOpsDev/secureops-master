@@ -124,6 +124,13 @@ router.post("/time-entries/clock-in", requireAuth, async (req, res): Promise<voi
       res.status(404).json({ error: "Not Found", message: "Shift not found" });
       return;
     }
+    if (shift.status === "completed" || shift.status === "cancelled") {
+      res.status(409).json({
+        error: "Conflict",
+        message: `This shift is ${shift.status} — you can't clock in to it.`,
+      });
+      return;
+    }
     if (req.user!.role !== "admin") {
       const assignment = await db
         .select()
@@ -165,6 +172,16 @@ router.post("/time-entries/clock-in", requireAuth, async (req, res): Promise<voi
     approvalStatus: "pending",
   }).returning();
 
+  // When clocking into a specific shift, flip its status to "active" so the
+  // mobile app's My Shifts → Active tab (and admin dashboards) reflect the
+  // on-duty state. Don't downgrade if it's already past upcoming.
+  if (shiftId) {
+    await db
+      .update(shiftsTable)
+      .set({ status: "active" })
+      .where(and(eq(shiftsTable.id, shiftId), eq(shiftsTable.status, "upcoming")));
+  }
+
   const [shift] = shiftId
     ? await db.select().from(shiftsTable).where(eq(shiftsTable.id, shiftId))
     : [undefined];
@@ -204,6 +221,28 @@ router.post("/time-entries/clock-out", requireAuth, async (req, res): Promise<vo
     notes: notes || entry.notes,
   }).where(eq(timeEntriesTable.id, timeEntryId)).returning();
 
+  // If this entry was tied to a shift, mark the shift completed — but ONLY
+  // when no other officer still has an open time entry on it. The NOT EXISTS
+  // predicate runs inside the same UPDATE so we close the TOCTOU window
+  // between "check open entries" and "set completed": if another officer
+  // races a clock-in for the same shift between this clock-out's row update
+  // and the shift update, the WHERE will see their open entry and skip the
+  // status flip — leaving the shift correctly in "active".
+  if (updated.shiftId) {
+    await db
+      .update(shiftsTable)
+      .set({ status: "completed" })
+      .where(and(
+        eq(shiftsTable.id, updated.shiftId),
+        eq(shiftsTable.status, "active"),
+        sql`NOT EXISTS (
+          SELECT 1 FROM ${timeEntriesTable}
+          WHERE ${timeEntriesTable.shiftId} = ${updated.shiftId}
+            AND ${timeEntriesTable.clockOutTime} IS NULL
+        )`,
+      ));
+  }
+
   const [shift] = updated.shiftId
     ? await db.select().from(shiftsTable).where(eq(shiftsTable.id, updated.shiftId))
     : [undefined];
@@ -225,7 +264,11 @@ router.get("/time-entries/active", requireAuth, async (req, res): Promise<void> 
     .leftJoin(usersTable, eq(timeEntriesTable.employeeId, usersTable.id))
     .where(and(eq(timeEntriesTable.employeeId, req.user!.userId), isNull(timeEntriesTable.clockOutTime)));
 
-  if (!entry) { res.status(404).json({ error: "Not Found", message: "No active time entry" }); return; }
+  // Return 200 with null rather than 404 when there's no active entry — this
+  // lets react-query (and our mobile clock screen) cleanly clear stale data
+  // after a clock-out instead of treating "no entry" as an error and keeping
+  // the previous cached value.
+  if (!entry) { res.json(null); return; }
   res.json(entry);
 });
 

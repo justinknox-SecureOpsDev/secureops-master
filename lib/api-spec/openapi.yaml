@@ -856,17 +856,13 @@ paths:
       summary: Get current active time entry for logged in employee
       responses:
         "200":
-          description: Active time entry or null
+          description: Active time entry, or null when the caller is not currently clocked in.
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/TimeEntry"
-        "404":
-          description: No active entry
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/ErrorResponse"
+                oneOf:
+                  - $ref: "#/components/schemas/TimeEntry"
+                  - type: "null"
 
   /payroll:
     get:
