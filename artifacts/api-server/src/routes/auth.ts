@@ -14,6 +14,8 @@ import {
   resetPasswordLimiter,
 } from "../middlewares/rateLimit";
 import { sendEmail, renderPasswordResetEmail, renderPasswordChangedEmail } from "../lib/email";
+import { writeEmployeeFieldChanges } from "../lib/employeeChangeLog";
+import { diffHighRiskChanges, notifyAdminsOfHighRiskSelfEdit } from "../lib/highRiskSelfEditAlert";
 import jwt from "jsonwebtoken";
 import { verifyTotpOrRecovery } from "./totp";
 
@@ -551,7 +553,41 @@ router.patch("/me/employee", requireAuth, async (req, res): Promise<void> => {
   // Clear must-complete-profile once they've saved their profile.
   await db.update(usersTable).set({ mustCompleteProfile: false }).where(eq(usersTable.id, userId));
   const [employee] = await db.select().from(employeesTable).where(eq(employeesTable.userId, userId)).limit(1);
-  res.json(employee);
+
+  // Mirror the change-log + high-risk self-edit alert from PUT /employees/:id.
+  // This is the path the mobile app actually uses for banking and emergency-
+  // contact self-edits, so the alert has to be wired here too — otherwise
+  // the most important real-world trigger (an officer changing their bank
+  // account from the field) would never reach admins.
+  const changedKeys = Object.keys(updates);
+  await writeEmployeeFieldChanges({
+    employeeUserId: userId,
+    keys: changedKeys,
+    before: existing as Record<string, unknown> | undefined,
+    after: employee as Record<string, unknown> | undefined,
+    actor: { userId, email: user.email, role: user.role },
+    log: req.log,
+  });
+  const highRiskChanged = diffHighRiskChanges(
+    changedKeys,
+    existing as Record<string, unknown> | null | undefined,
+    employee as Record<string, unknown> | null | undefined,
+  );
+  if (highRiskChanged.length > 0) {
+    const officerName = [user.firstName, user.lastName].filter(Boolean).join(" ") || user.email;
+    void notifyAdminsOfHighRiskSelfEdit({
+      employeeUserId: userId,
+      officerName,
+      officerEmail: user.email,
+      changedFields: highRiskChanged,
+      log: req.log,
+    });
+  }
+
+  // Surface the alert flag in the response so the mobile UI can render a
+  // post-save confirmation toast ("HR was notified of this change") only
+  // when an alert actually fired, not on every profile save.
+  res.json({ ...employee, hrNotified: highRiskChanged.length > 0, hrNotifiedFields: highRiskChanged });
 });
 
 export default router;

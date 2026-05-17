@@ -102,6 +102,7 @@ import type {
   UpdateInvoiceRequest,
   UpdateLicenseRequest,
   UpdateMyEmployeeRequest,
+  UpdateMyEmployeeResponse,
   UpdateMyLocation200,
   UpdateMyLocationBody,
   UpdatePayrollRequest,
@@ -1647,13 +1648,16 @@ export const getUpdateMyEmployeeProfileUrl = () => {
 export const updateMyEmployeeProfile = async (
   updateMyEmployeeRequest: UpdateMyEmployeeRequest,
   options?: RequestInit,
-): Promise<Employee> => {
-  return customFetch<Employee>(getUpdateMyEmployeeProfileUrl(), {
-    ...options,
-    method: "PATCH",
-    headers: { "Content-Type": "application/json", ...options?.headers },
-    body: JSON.stringify(updateMyEmployeeRequest),
-  });
+): Promise<UpdateMyEmployeeResponse> => {
+  return customFetch<UpdateMyEmployeeResponse>(
+    getUpdateMyEmployeeProfileUrl(),
+    {
+      ...options,
+      method: "PATCH",
+      headers: { "Content-Type": "application/json", ...options?.headers },
+      body: JSON.stringify(updateMyEmployeeRequest),
+    },
+  );
 };
 
 export const getUpdateMyEmployeeProfileMutationOptions = <

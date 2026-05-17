@@ -6,6 +6,7 @@ import { requireAuth, requireAdmin, verifyToken } from "../middlewares/auth";
 import type { Request, Response, NextFunction } from "express";
 import { buildEmployeeProfilePdf } from "../lib/profilePdf";
 import { writeEmployeeFieldChanges, CHANGE_FIELD_LABELS } from "../lib/employeeChangeLog";
+import { diffHighRiskChanges, notifyAdminsOfHighRiskSelfEdit } from "../lib/highRiskSelfEditAlert";
 
 const router: IRouter = Router();
 
@@ -378,14 +379,40 @@ router.put("/employees/:id", requireAuth, async (req, res): Promise<void> => {
     .leftJoin(employeesTable, eq(usersTable.id, employeesTable.userId))
     .where(eq(usersTable.id, id));
 
+  const changedKeys = [...Object.keys(userUpdates), ...Object.keys(empUpdates)];
   await writeEmployeeFieldChanges({
     employeeUserId: id,
-    keys: [...Object.keys(userUpdates), ...Object.keys(empUpdates)],
+    keys: changedKeys,
     before: beforeRow as Record<string, unknown> | undefined,
     after: row as Record<string, unknown> | undefined,
     actor: { userId: req.user!.userId, email: req.user!.email, role: req.user!.role },
     log: req.log,
   });
+
+  // Out-of-band high-risk self-edit alerts. The employee_changes log above
+  // captures every field — this fan-out is the same-day push + email so
+  // admins can catch payroll fraud / a lost device before the next pay run.
+  // Gate: actor is the employee themselves AND at least one high-risk field
+  // actually changed value. Fire-and-forget; helper logs its own failures.
+  const isSelfEdit = req.user!.userId === id;
+  let highRiskChanged: string[] = [];
+  if (isSelfEdit) {
+    highRiskChanged = diffHighRiskChanges(
+      changedKeys,
+      beforeRow as Record<string, unknown> | null | undefined,
+      row as Record<string, unknown> | null | undefined,
+    );
+    if (highRiskChanged.length > 0 && row) {
+      const officerName = [row.firstName, row.lastName].filter(Boolean).join(" ") || (row.email as string);
+      void notifyAdminsOfHighRiskSelfEdit({
+        employeeUserId: id,
+        officerName,
+        officerEmail: (row.email as string) ?? "",
+        changedFields: highRiskChanged,
+        log: req.log,
+      });
+    }
+  }
 
   const lc = await db
     .select({

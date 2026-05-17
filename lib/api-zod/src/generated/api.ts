@@ -403,74 +403,94 @@ export const UpdateMyEmployeeProfileBody = zod
     "Strict allow-list of fields the employee may edit on their own profile.",
   );
 
-export const UpdateMyEmployeeProfileResponse = zod.object({
-  id: zod.string(),
-  userId: zod.string(),
-  email: zod.string(),
-  firstName: zod.string(),
-  lastName: zod.string(),
-  phone: zod.string().optional(),
-  role: zod.enum(["admin", "employee"]),
-  status: zod.enum(["active", "inactive", "pending"]),
-  address: zod.string().optional(),
-  dateOfBirth: zod.coerce.date().nullish(),
-  cityOfBirth: zod.string().nullish(),
-  stateOfBirth: zod.string().nullish(),
-  niNumber: zod
-    .string()
-    .nullish()
-    .describe("SSN last-4 (column name retains UK origin)"),
-  rightToWorkStatus: zod.string().nullish(),
-  rightToWorkDocKey: zod
-    .string()
-    .nullish()
-    .describe("Object-storage path for right-to-work doc"),
-  siaLicenseNumber: zod.string().nullish(),
-  siaLicenseLevel: zod
-    .union([zod.literal(2), zod.literal(3), zod.literal(4)])
-    .nullish(),
-  siaLicenseExpiry: zod.coerce.date().nullish(),
-  licenseDocKey: zod.string().nullish(),
-  passportDocKey: zod.string().nullish(),
-  previousExperience: zod.string().nullish(),
-  yearsExperience: zod.number().nullish(),
-  references: zod.array(zod.object({}).passthrough()).nullish(),
-  photoKey: zod.string().nullish(),
-  cvKey: zod.string().nullish(),
-  trainingCertificateKeys: zod.array(zod.string()).nullish(),
-  availability: zod.record(zod.string(), zod.unknown()).nullish(),
-  emergencyContactName: zod.string().optional(),
-  emergencyContactRelationship: zod.string().nullish(),
-  emergencyContactPhone: zod.string().optional(),
-  hourlyRate: zod.number().optional(),
-  bankAccountName: zod.string().optional(),
-  bankAccountNumber: zod.string().optional(),
-  bankBsb: zod.string().optional().describe("Routing \/ sort code"),
-  taxCode: zod.string().nullish(),
-  payStubDocKey: zod
-    .string()
-    .nullish()
-    .describe("W-2 \/ pay stub object-storage path"),
-  uniformShirt: zod.string().nullish(),
-  uniformTrousers: zod.string().nullish(),
-  uniformJacket: zod.string().nullish(),
-  uniformBoots: zod.string().nullish(),
-  directDepositConsent: zod.boolean().nullish(),
-  directDepositSignature: zod.string().nullish(),
-  acknowledgements: zod.record(zod.string(), zod.unknown()).nullish(),
-  applicationId: zod.string().nullish(),
-  onboardingSubmissionId: zod.string().nullish(),
-  skills: zod.array(zod.string()).optional(),
-  licenseCount: zod.number().optional(),
-  expiringLicenseCount: zod.number().optional(),
-  maxLicenseLevel: zod
-    .number()
-    .nullish()
-    .describe(
-      "Highest valid (non-expired) license level: 2, 3, or 4. Null if no valid license.",
-    ),
-  createdAt: zod.coerce.date(),
-});
+export const UpdateMyEmployeeProfileResponse = zod
+  .object({
+    id: zod.string(),
+    userId: zod.string(),
+    email: zod.string(),
+    firstName: zod.string(),
+    lastName: zod.string(),
+    phone: zod.string().optional(),
+    role: zod.enum(["admin", "employee"]),
+    status: zod.enum(["active", "inactive", "pending"]),
+    address: zod.string().optional(),
+    dateOfBirth: zod.coerce.date().nullish(),
+    cityOfBirth: zod.string().nullish(),
+    stateOfBirth: zod.string().nullish(),
+    niNumber: zod
+      .string()
+      .nullish()
+      .describe("SSN last-4 (column name retains UK origin)"),
+    rightToWorkStatus: zod.string().nullish(),
+    rightToWorkDocKey: zod
+      .string()
+      .nullish()
+      .describe("Object-storage path for right-to-work doc"),
+    siaLicenseNumber: zod.string().nullish(),
+    siaLicenseLevel: zod
+      .union([zod.literal(2), zod.literal(3), zod.literal(4)])
+      .nullish(),
+    siaLicenseExpiry: zod.coerce.date().nullish(),
+    licenseDocKey: zod.string().nullish(),
+    passportDocKey: zod.string().nullish(),
+    previousExperience: zod.string().nullish(),
+    yearsExperience: zod.number().nullish(),
+    references: zod.array(zod.object({}).passthrough()).nullish(),
+    photoKey: zod.string().nullish(),
+    cvKey: zod.string().nullish(),
+    trainingCertificateKeys: zod.array(zod.string()).nullish(),
+    availability: zod.record(zod.string(), zod.unknown()).nullish(),
+    emergencyContactName: zod.string().optional(),
+    emergencyContactRelationship: zod.string().nullish(),
+    emergencyContactPhone: zod.string().optional(),
+    hourlyRate: zod.number().optional(),
+    bankAccountName: zod.string().optional(),
+    bankAccountNumber: zod.string().optional(),
+    bankBsb: zod.string().optional().describe("Routing \/ sort code"),
+    taxCode: zod.string().nullish(),
+    payStubDocKey: zod
+      .string()
+      .nullish()
+      .describe("W-2 \/ pay stub object-storage path"),
+    uniformShirt: zod.string().nullish(),
+    uniformTrousers: zod.string().nullish(),
+    uniformJacket: zod.string().nullish(),
+    uniformBoots: zod.string().nullish(),
+    directDepositConsent: zod.boolean().nullish(),
+    directDepositSignature: zod.string().nullish(),
+    acknowledgements: zod.record(zod.string(), zod.unknown()).nullish(),
+    applicationId: zod.string().nullish(),
+    onboardingSubmissionId: zod.string().nullish(),
+    skills: zod.array(zod.string()).optional(),
+    licenseCount: zod.number().optional(),
+    expiringLicenseCount: zod.number().optional(),
+    maxLicenseLevel: zod
+      .number()
+      .nullish()
+      .describe(
+        "Highest valid (non-expired) license level: 2, 3, or 4. Null if no valid license.",
+      ),
+    createdAt: zod.coerce.date(),
+  })
+  .and(
+    zod.object({
+      hrNotified: zod
+        .boolean()
+        .optional()
+        .describe(
+          "True when an admin push + email was dispatched for this save.",
+        ),
+      hrNotifiedFields: zod
+        .array(zod.string())
+        .optional()
+        .describe(
+          "List of high-risk field keys (camelCase) that triggered the notification.",
+        ),
+    }),
+  )
+  .describe(
+    'Employee row after the self-edit, plus an out-of-band signal the mobile\nUI uses to render a \"HR was notified of this change\" confirmation\ntoast. `hrNotified` is `true` (and `hrNotifiedFields` non-empty) only\nwhen one or more high-risk fields actually changed value — banking,\nemergency contact, SSN, or signature.\n',
+  );
 
 /**
  * @summary Request a password reset link (always returns 200, even if no account matches, to avoid email enumeration)

@@ -351,7 +351,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/Employee"
+                $ref: "#/components/schemas/UpdateMyEmployeeResponse"
         "400":
           description: Validation failed or non-allow-listed field provided
           content:
@@ -2087,6 +2087,25 @@ components:
         token: { type: string }
         newPassword: { type: string, minLength: 8 }
       required: [token, newPassword]
+
+    UpdateMyEmployeeResponse:
+      description: |
+        Employee row after the self-edit, plus an out-of-band signal the mobile
+        UI uses to render a "HR was notified of this change" confirmation
+        toast. `hrNotified` is `true` (and `hrNotifiedFields` non-empty) only
+        when one or more high-risk fields actually changed value — banking,
+        emergency contact, SSN, or signature.
+      allOf:
+        - $ref: "#/components/schemas/Employee"
+        - type: object
+          properties:
+            hrNotified:
+              type: boolean
+              description: True when an admin push + email was dispatched for this save.
+            hrNotifiedFields:
+              type: array
+              description: List of high-risk field keys (camelCase) that triggered the notification.
+              items: { type: string }
 
     UpdateMyEmployeeRequest:
       type: object

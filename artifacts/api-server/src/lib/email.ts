@@ -480,6 +480,53 @@ export function renderLicenseExpiryEmail(opts: {
   return { subject, text, html };
 }
 
+export function renderHighRiskProfileChangeEmail(opts: {
+  officerName: string;
+  officerEmail: string;
+  fieldLabels: string[];
+  whenIso: string;
+  reviewUrl?: string;
+}): { subject: string; text: string; html: string } {
+  const subject = `Officer self-edit alert: ${opts.officerName} updated ${opts.fieldLabels.length === 1 ? opts.fieldLabels[0] : `${opts.fieldLabels.length} sensitive fields`}`;
+  const fieldsList = opts.fieldLabels.map((l) => `  • ${l}`).join("\n");
+  const reviewLine = opts.reviewUrl ? `\nReview the change log: ${opts.reviewUrl}\n` : "";
+  const text = [
+    `Heads up — an officer just self-updated one or more high-risk profile fields.`,
+    "",
+    `Officer: ${opts.officerName} (${opts.officerEmail})`,
+    `When:    ${opts.whenIso}`,
+    `Fields updated:`,
+    fieldsList,
+    reviewLine,
+    `If this change wasn't expected (lost device, password sharing, payroll fraud, etc.), revoke the officer's sessions and confirm the update with them by phone before the next pay run.`,
+    "",
+    "— Williams Council Security Group · SecureOps",
+  ].filter((l) => l !== undefined).join("\n");
+  const fieldsHtml = `<ul style="margin:8px 0 0 0;padding-left:20px">${
+    opts.fieldLabels.map((l) => `<li style="margin:4px 0">${escapeHtml(l)}</li>`).join("")
+  }</ul>`;
+  const reviewHtml = opts.reviewUrl
+    ? `<p style="margin:18px 0"><a href="${escapeAttr(opts.reviewUrl)}" style="background:#080c18;color:#c9a84c;padding:10px 18px;text-decoration:none;font-weight:bold;border-radius:4px">Open change log</a></p>`
+    : "";
+  const html = `
+    <div style="font-family:Georgia,serif;max-width:560px;margin:0 auto;color:#080c18">
+      <h2 style="color:#080c18;margin-top:0">Officer self-edit alert</h2>
+      <p>An officer just updated one or more high-risk profile fields from the SecureOps mobile app.</p>
+      <div style="background:#f6f1e1;padding:14px 16px;border-left:3px solid #c9a84c;margin:18px 0;border-radius:4px;font-size:14px">
+        <div><strong>Officer:</strong> ${escapeHtml(opts.officerName)} (${escapeHtml(opts.officerEmail)})</div>
+        <div><strong>When:</strong> ${escapeHtml(opts.whenIso)}</div>
+        <div style="margin-top:8px"><strong>Fields updated:</strong></div>
+        ${fieldsHtml}
+      </div>
+      ${reviewHtml}
+      <p style="color:#a33">If this change wasn't expected (lost device, payroll fraud, etc.), revoke the officer's sessions and confirm the update by phone before the next pay run.</p>
+      <hr style="border:none;border-top:1px solid #ddd;margin:24px 0"/>
+      <p style="color:#555;font-size:12px">— Williams Council Security Group · SecureOps</p>
+    </div>
+  `;
+  return { subject, text, html };
+}
+
 function escapeHtml(s: string): string {
   return s.replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]!));
 }

@@ -247,6 +247,21 @@ export interface ResetPasswordRequest {
 }
 
 /**
+ * Employee row after the self-edit, plus an out-of-band signal the mobile
+UI uses to render a "HR was notified of this change" confirmation
+toast. `hrNotified` is `true` (and `hrNotifiedFields` non-empty) only
+when one or more high-risk fields actually changed value — banking,
+emergency contact, SSN, or signature.
+
+ */
+export type UpdateMyEmployeeResponse = Employee & {
+  /** True when an admin push + email was dispatched for this save. */
+  hrNotified?: boolean;
+  /** List of high-risk field keys (camelCase) that triggered the notification. */
+  hrNotifiedFields?: string[];
+};
+
+/**
  * Strict allow-list of fields the employee may edit on their own profile.
  */
 export interface UpdateMyEmployeeRequest {

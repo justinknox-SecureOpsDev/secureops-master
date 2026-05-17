@@ -194,6 +194,7 @@ export default function EditProfileScreen() {
     }
   }
 
+  const [hrToast, setHrToast] = useState<string[] | null>(null);
   async function save() {
     setError(null);
     const payload: Record<string, unknown> = {};
@@ -222,12 +223,23 @@ export default function EditProfileScreen() {
       payload.trainingCertificateKeys = newCerts;
     }
     try {
-      await mut.mutateAsync({ data: payload as any });
+      // The server returns { …Employee, hrNotified, hrNotifiedFields[] } when
+      // a self-edit touches a high-risk field (banking, emergency contact, …).
+      // We surface that as a one-shot toast so officers see HR has been
+      // looped in — quietly when it didn't fire (most saves), explicitly
+      // when it did. Typed via the OpenAPI-generated UpdateMyEmployeeResponse.
+      const resp = await mut.mutateAsync({ data: payload as any });
       await updateUser({ mustCompleteProfile: false });
       qc.invalidateQueries({ queryKey: getGetEmployeeQueryKey(userId!) });
+      const notified = resp?.hrNotified === true && (resp?.hrNotifiedFields?.length ?? 0) > 0;
       if (isFirstRun) {
         if (user?.role === "admin") router.replace("/(admin)/dashboard");
         else router.replace("/(employee)/home");
+      } else if (notified) {
+        // Hold the screen open just long enough to show the confirmation,
+        // then go back automatically.
+        setHrToast(resp.hrNotifiedFields ?? []);
+        setTimeout(() => { router.back(); }, 2200);
       } else {
         router.back();
       }
@@ -235,6 +247,15 @@ export default function EditProfileScreen() {
       setError((e as Error).message || "Could not save profile");
     }
   }
+
+  const FIELD_LABELS_MOBILE: Record<string, string> = {
+    bankAccountName: "bank account name",
+    bankAccountNumber: "bank account number",
+    bankBsb: "routing / sort code",
+    emergencyContactName: "emergency contact name",
+    emergencyContactRelationship: "emergency contact relationship",
+    emergencyContactPhone: "emergency contact phone",
+  };
 
   if (isLoading || !profile) {
     return <View style={[styles.center, { backgroundColor: colors.background }]}><ActivityIndicator size="large" color={colors.primary} /></View>;
@@ -278,6 +299,7 @@ export default function EditProfileScreen() {
           <Field label="Name"><Input value={form.emergencyContactName} onChangeText={(v) => set("emergencyContactName", v)} /></Field>
           <Field label="Relationship"><Input value={form.emergencyContactRelationship} onChangeText={(v) => set("emergencyContactRelationship", v)} /></Field>
           <Field label="Phone"><Input value={form.emergencyContactPhone} onChangeText={(v) => set("emergencyContactPhone", v)} keyboardType="phone-pad" /></Field>
+          <NotifiedNote />
         </Section>
 
         <Section title="Uniform sizes">
@@ -291,6 +313,7 @@ export default function EditProfileScreen() {
           <Field label="Account name"><Input value={form.bankAccountName} onChangeText={(v) => set("bankAccountName", v)} /></Field>
           <Field label="Account number"><Input value={form.bankAccountNumber} onChangeText={(v) => set("bankAccountNumber", v)} keyboardType="number-pad" /></Field>
           <Field label="Routing / sort code"><Input value={form.bankBsb} onChangeText={(v) => set("bankBsb", v)} /></Field>
+          <NotifiedNote />
         </Section>
 
         <Section title="Documents">
@@ -394,6 +417,18 @@ export default function EditProfileScreen() {
           </View>
         )}
 
+        {hrToast && (
+          <View style={[styles.banner, { backgroundColor: colors.primary + "15", borderColor: colors.primary }]}>
+            <Feather name="check-circle" size={16} color={colors.primary} />
+            <Text style={{ color: colors.foreground, flex: 1, fontSize: 13, lineHeight: 18 }}>
+              HR was notified of this change
+              {hrToast.length === 1 && FIELD_LABELS_MOBILE[hrToast[0]]
+                ? ` (${FIELD_LABELS_MOBILE[hrToast[0]]}).`
+                : "."}
+            </Text>
+          </View>
+        )}
+
         <PreviewModal preview={preview} onClose={() => setPreview(null)} />
 
         <TouchableOpacity onPress={save} disabled={mut.isPending} style={[styles.button, { backgroundColor: colors.primary, opacity: mut.isPending ? 0.7 : 1 }]}>
@@ -403,6 +438,22 @@ export default function EditProfileScreen() {
         </TouchableOpacity>
       </ScrollView>
     </SafeAreaView>
+  );
+}
+
+/** Inline notice rendered under high-risk sections (banking, emergency contact)
+ * so officers understand that any change here triggers a same-day push + email
+ * to HR. Matches the server-side HIGH_RISK_SELF_EDIT_FIELDS gate in
+ * `routes/employees.ts`. */
+function NotifiedNote() {
+  const colors = useColors();
+  return (
+    <View style={{ flexDirection: "row", alignItems: "flex-start", gap: 6, marginTop: 2 }}>
+      <Feather name="shield" size={12} color={colors.mutedForeground} style={{ marginTop: 2 }} />
+      <Text style={[styles.note, { color: colors.mutedForeground, flex: 1 }]}>
+        HR is notified when you save changes here.
+      </Text>
+    </View>
   );
 }
 
