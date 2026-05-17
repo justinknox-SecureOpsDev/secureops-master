@@ -58,8 +58,8 @@ export default function EditShiftScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const topPad = useTopPad();
 
-  const { data: shift, isLoading } = useGetShift(id!, {
-    query: { queryKey: getGetShiftQueryKey(id!), enabled: !!id },
+  const { data: shift, isLoading, error, refetch } = useGetShift(id!, {
+    query: { queryKey: getGetShiftQueryKey(id!), enabled: !!id, retry: 1 },
   });
   const updateShift = useUpdateShift();
   const deleteShift = useDeleteShift();
@@ -175,10 +175,34 @@ export default function EditShiftScreen() {
     }
   };
 
-  if (isLoading || !shift) {
+  if (isLoading) {
     return (
       <View style={[styles.center, { backgroundColor: colors.background }]}>
         <ActivityIndicator size="large" color={colors.primary} />
+      </View>
+    );
+  }
+  if (!shift) {
+    const msg = !id
+      ? "No shift was selected. Go back and tap a shift to edit it."
+      : (error as any)?.response?.data?.message
+        || (error as any)?.message
+        || "We couldn't load that shift. It may have been deleted, or your session may have expired.";
+    return (
+      <View style={[styles.center, { backgroundColor: colors.background, padding: 24, gap: 16 }]}>
+        <Feather name="alert-triangle" size={36} color={colors.destructive} />
+        <Text style={{ color: colors.foreground, fontSize: 16, fontWeight: "600", textAlign: "center" }}>Couldn't load shift</Text>
+        <Text style={{ color: colors.mutedForeground, fontSize: 14, textAlign: "center" }}>{msg}</Text>
+        <View style={{ flexDirection: "row", gap: 10, marginTop: 8 }}>
+          <TouchableOpacity onPress={() => router.back()} style={[styles.backBtn, { borderColor: colors.border, paddingHorizontal: 16 }]}>
+            <Text style={{ color: colors.foreground, fontWeight: "600" }}>Back</Text>
+          </TouchableOpacity>
+          {id && (
+            <TouchableOpacity onPress={() => refetch()} style={[styles.submitBtn, { backgroundColor: colors.primary, paddingHorizontal: 20, marginTop: 0 }]}>
+              <Text style={[styles.submitText, { color: colors.primaryForeground }]}>Try again</Text>
+            </TouchableOpacity>
+          )}
+        </View>
       </View>
     );
   }
