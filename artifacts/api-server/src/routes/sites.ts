@@ -78,6 +78,27 @@ router.put("/sites/:id", requireAdmin, async (req, res): Promise<void> => {
   if (notes !== undefined) updates.notes = notes;
   const [site] = await db.update(sitesTable).set(updates).where(eq(sitesTable.id, id)).returning();
   if (!site) { res.status(404).json({ error: "Not Found" }); return; }
+  // Best-effort auto-geocode: if the row ends up with an address but no
+  // coordinates, look them up and write back. Never blocks the response
+  // on failure — same pattern as the applicant home-address geocoder.
+  if (site.address && site.locationLat == null && site.locationLng == null) {
+    try {
+      const result = await geocodeOnelineAddress(site.address);
+      if (result) {
+        const [updated] = await db
+          .update(sitesTable)
+          .set({ locationLat: String(result.lat), locationLng: String(result.lng) })
+          .where(eq(sitesTable.id, id))
+          .returning();
+        if (updated) {
+          res.json(updated);
+          return;
+        }
+      }
+    } catch (err) {
+      req.log.info({ err: (err as Error).message }, "Auto-geocode on site update failed");
+    }
+  }
   res.json(site);
 });
 

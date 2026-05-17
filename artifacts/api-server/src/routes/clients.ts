@@ -2,6 +2,7 @@ import { Router, type IRouter } from "express";
 import { eq } from "drizzle-orm";
 import { db, clientsTable, sitesTable } from "@workspace/db";
 import { requireAdmin } from "../middlewares/auth";
+import { geocodeOnelineAddress } from "../lib/geocode";
 
 const router: IRouter = Router();
 
@@ -65,12 +66,27 @@ router.post("/clients/:id/sites", requireAdmin, async (req, res): Promise<void> 
   if (!name) { res.status(400).json({ error: "Bad Request", message: "name is required" }); return; }
   const [client] = await db.select().from(clientsTable).where(eq(clientsTable.id, clientId));
   if (!client) { res.status(404).json({ error: "Not Found", message: "Client not found" }); return; }
+  let lat: string | null = locationLat != null ? String(locationLat) : null;
+  let lng: string | null = locationLng != null ? String(locationLng) : null;
+  // Best-effort auto-geocode when admin saved an address but no coords.
+  // Mirrors the applicant geocoder: never blocks the save, just logs on failure.
+  if (address && lat == null && lng == null) {
+    try {
+      const result = await geocodeOnelineAddress(address);
+      if (result) {
+        lat = String(result.lat);
+        lng = String(result.lng);
+      }
+    } catch (err) {
+      req.log.info({ err: (err as Error).message }, "Auto-geocode on site create failed");
+    }
+  }
   const [site] = await db.insert(sitesTable).values({
     clientId,
     name,
     address: address || null,
-    locationLat: locationLat != null ? String(locationLat) : null,
-    locationLng: locationLng != null ? String(locationLng) : null,
+    locationLat: lat,
+    locationLng: lng,
     notes: notes || null,
   }).returning();
   res.status(201).json({ ...site, clientName: client.name });
