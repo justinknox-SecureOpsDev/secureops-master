@@ -1,9 +1,5 @@
-import { and, eq } from "drizzle-orm";
-import { db, usersTable } from "@workspace/db";
+import { db, highRiskChangeQueueTable } from "@workspace/db";
 import type { Logger } from "pino";
-import { sendPushToUsers } from "./push";
-import { sendEmail, renderHighRiskProfileChangeEmail } from "./email";
-import { CHANGE_FIELD_LABELS } from "./employeeChangeLog";
 
 /**
  * Fields a self-edit must trigger an out-of-band admin alert for. The
@@ -51,58 +47,35 @@ export function diffHighRiskChanges(
 }
 
 /**
- * Fan-out a push + templated email to every active admin for a self-edit
- * touching one or more high-risk fields. Designed to be called as
- * fire-and-forget (`void notify…(…)`) — failures are logged but never
- * surface to the caller, so SMTP / Expo flakiness can't break a user's
- * profile save.
+ * Enqueue a high-risk self-edit for the per-officer admin digest.
  *
- * Idempotency / dedup is the caller's responsibility (the change-log gate
- * already filters out no-op writes).
+ * Designed to be called as fire-and-forget (`void enqueue…(…)`) from
+ * profile-save endpoints — failures are logged but never surface to the
+ * caller so DB blips can't break a user's profile save.
+ *
+ * The digest is fanned out by the `high-risk-digest` scheduled job in
+ * `lib/scheduledJobs.ts` once the oldest pending row for the officer is
+ * at least 15 minutes old. Multiple edits inside that window collapse
+ * into a single push + a single email listing every field that changed.
+ *
+ * Idempotency / dedup at the field level is the caller's responsibility
+ * (the change-log gate already filters no-op writes). Within a single
+ * digest window the job de-duplicates repeated edits of the same field
+ * down to one row before sending, so flipping bank-account-number twice
+ * still produces one digest entry.
  */
-export async function notifyAdminsOfHighRiskSelfEdit(opts: {
+export async function enqueueHighRiskSelfEdit(opts: {
   employeeUserId: string;
-  officerName: string;
-  officerEmail: string;
   changedFields: string[];
   log: Logger;
 }): Promise<void> {
-  const { employeeUserId, officerName, officerEmail, changedFields, log } = opts;
+  const { employeeUserId, changedFields, log } = opts;
   if (changedFields.length === 0) return;
   try {
-    const labels = changedFields.map((k) => CHANGE_FIELD_LABELS[k] ?? k);
-    const whenIso = new Date().toISOString();
-    const admins = await db
-      .select({ id: usersTable.id, email: usersTable.email })
-      .from(usersTable)
-      .where(and(eq(usersTable.role, "admin"), eq(usersTable.status, "active")));
-    if (admins.length === 0) return;
-
-    await sendPushToUsers(
-      admins.map((a) => a.id),
-      {
-        title: "Officer self-edit alert",
-        body: `${officerName} updated ${labels.length === 1 ? labels[0] : `${labels.length} sensitive fields`}. Tap to review.`,
-        data: { type: "high_risk_profile_change", employeeUserId, fields: changedFields },
-      },
-    );
-
-    const base = process.env.APP_BASE_URL
-      || (process.env.REPLIT_DOMAINS ? `https://${process.env.REPLIT_DOMAINS.split(",")[0]}` : "");
-    const reviewUrl = base ? `${base}/admin-portal/personnel/${employeeUserId}/changes` : undefined;
-    const tmpl = renderHighRiskProfileChangeEmail({
-      officerName,
-      officerEmail,
-      fieldLabels: labels,
-      whenIso,
-      reviewUrl,
-    });
-    await Promise.all(
-      admins
-        .filter((a) => !!a.email)
-        .map((a) => sendEmail({ to: a.email!, subject: tmpl.subject, text: tmpl.text, html: tmpl.html })),
-    );
+    await db
+      .insert(highRiskChangeQueueTable)
+      .values(changedFields.map((field) => ({ employeeUserId, field })));
   } catch (err) {
-    log.warn({ err, employeeUserId, fields: changedFields }, "high-risk self-edit alert dispatch failed");
+    log.warn({ err, employeeUserId, fields: changedFields }, "failed to enqueue high-risk self-edit alert");
   }
 }

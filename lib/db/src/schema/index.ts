@@ -29,3 +29,4 @@ export * from "./patrolCheckpoints";
 export * from "./dailyActivityReports";
 export * from "./trainingCertifications";
 export * from "./employeeChanges";
+export * from "./highRiskChangeQueue";

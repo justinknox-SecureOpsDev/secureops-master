@@ -15,7 +15,7 @@ import {
 } from "../middlewares/rateLimit";
 import { sendEmail, renderPasswordResetEmail, renderPasswordChangedEmail } from "../lib/email";
 import { writeEmployeeFieldChanges } from "../lib/employeeChangeLog";
-import { diffHighRiskChanges, notifyAdminsOfHighRiskSelfEdit } from "../lib/highRiskSelfEditAlert";
+import { diffHighRiskChanges, enqueueHighRiskSelfEdit } from "../lib/highRiskSelfEditAlert";
 import jwt from "jsonwebtoken";
 import { verifyTotpOrRecovery } from "./totp";
 
@@ -574,11 +574,8 @@ router.patch("/me/employee", requireAuth, async (req, res): Promise<void> => {
     employee as Record<string, unknown> | null | undefined,
   );
   if (highRiskChanged.length > 0) {
-    const officerName = [user.firstName, user.lastName].filter(Boolean).join(" ") || user.email;
-    void notifyAdminsOfHighRiskSelfEdit({
+    void enqueueHighRiskSelfEdit({
       employeeUserId: userId,
-      officerName,
-      officerEmail: user.email,
       changedFields: highRiskChanged,
       log: req.log,
     });

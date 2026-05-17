@@ -1,4 +1,4 @@
-import { lt, eq, and, or, isNull, gt, gte, lte, ne, sql } from "drizzle-orm";
+import { lt, eq, and, or, isNull, gt, gte, lte, ne, sql, inArray } from "drizzle-orm";
 import {
   db,
   revokedTokensTable,
@@ -10,10 +10,21 @@ import {
   sitesTable,
   timeEntriesTable,
   patrolScansTable,
+  highRiskChangeQueueTable,
 } from "@workspace/db";
 import { logger } from "./logger";
-import { sendEmail, renderLicenseExpiryEmail, renderTrainingExpiryEmail } from "./email";
+import { sendEmail, renderLicenseExpiryEmail, renderTrainingExpiryEmail, renderHighRiskProfileChangeEmail } from "./email";
 import { sendPushToUsers } from "./push";
+import { CHANGE_FIELD_LABELS } from "./employeeChangeLog";
+
+/**
+ * Coalescing window for the high-risk self-edit digest. Edits inside this
+ * window collapse into a single push + email per officer. 15 minutes is
+ * short enough to keep same-day visibility (admins still see the alert
+ * well before the next pay run) while cutting per-keystroke fan-out on
+ * larger rosters.
+ */
+const HIGH_RISK_DIGEST_WINDOW_MS = 15 * 60 * 1000;
 
 const HOUR_MS = 60 * 60 * 1000;
 const MIN_MS = 60 * 1000;
@@ -553,6 +564,169 @@ export function startScheduledJobs(intervalMs: number = HOUR_MS): NodeJS.Timeout
     }
   }
 
+  /**
+   * High-risk self-edit digest. Walks `high_risk_change_queue`, finds
+   * officers whose OLDEST pending row is at least `HIGH_RISK_DIGEST_WINDOW_MS`
+   * old, atomically claims their rows via DELETE … RETURNING (so two
+   * instances can never double-send the same digest), and fans out a
+   * single push + a single email to every active admin listing every
+   * field that changed in the window. On total delivery failure the
+   * rows are re-inserted with their original detectedAt so the next
+   * tick retries.
+   *
+   * Dedup: if the same field shows up multiple times in the window
+   * (officer flipped their account number back and forth) it collapses
+   * to one digest row, ordered by the earliest detectedAt — admins
+   * still see "this field changed", but not N near-identical entries.
+   */
+  async function flushHighRiskSelfEditDigests(): Promise<void> {
+    try {
+      const cutoff = new Date(Date.now() - HIGH_RISK_DIGEST_WINDOW_MS);
+      // Find officers whose oldest pending row is at least one window old.
+      // GROUP BY + HAVING keeps us from sending half-baked digests for
+      // officers who just started a burst of edits.
+      const due = await db.execute<{ employee_user_id: string }>(sql`
+        SELECT employee_user_id
+        FROM ${highRiskChangeQueueTable}
+        GROUP BY employee_user_id
+        HAVING MIN(${highRiskChangeQueueTable.detectedAt}) <= ${cutoff}
+      `);
+      const dueIds = (due.rows ?? []).map((r) => r.employee_user_id);
+      if (dueIds.length === 0) return;
+
+      // Pre-fetch the active-admin list once per tick — every digest in
+      // this tick goes to the same audience.
+      const admins = await db
+        .select({ id: usersTable.id, email: usersTable.email })
+        .from(usersTable)
+        .where(and(eq(usersTable.role, "admin"), eq(usersTable.status, "active")));
+      if (admins.length === 0) {
+        // No admins to notify — drop the queue so it doesn't grow forever
+        // (the change log still has the full per-field history).
+        await db
+          .delete(highRiskChangeQueueTable)
+          .where(inArray(highRiskChangeQueueTable.employeeUserId, dueIds))
+          .catch((err) => logger.warn({ err }, "[high-risk-digest] failed to drain queue with no admins"));
+        return;
+      }
+      const adminIds = admins.map((a) => a.id);
+      const adminEmails = admins.map((a) => a.email).filter((e): e is string => !!e);
+
+      const base = process.env.APP_BASE_URL
+        || (process.env.REPLIT_DOMAINS ? `https://${process.env.REPLIT_DOMAINS.split(",")[0]}` : "");
+
+      let totalSent = 0;
+      for (const employeeUserId of dueIds) {
+        // Atomically claim every pending row for this officer. Anything
+        // written after this DELETE will land in the NEXT digest.
+        const claimed = await db
+          .delete(highRiskChangeQueueTable)
+          .where(eq(highRiskChangeQueueTable.employeeUserId, employeeUserId))
+          .returning();
+        if (claimed.length === 0) continue;
+
+        // Dedup repeated edits of the same field down to the earliest
+        // detectedAt for that field, then sort earliest → latest so the
+        // digest reads in the order it happened.
+        const byField = new Map<string, Date>();
+        for (const row of claimed) {
+          const prev = byField.get(row.field);
+          if (!prev || row.detectedAt < prev) byField.set(row.field, row.detectedAt);
+        }
+        const dedupedChanges = Array.from(byField.entries())
+          .map(([field, when]) => ({ field, when }))
+          .sort((a, b) => a.when.getTime() - b.when.getTime());
+
+        const [officer] = await db
+          .select({
+            firstName: usersTable.firstName,
+            lastName: usersTable.lastName,
+            email: usersTable.email,
+          })
+          .from(usersTable)
+          .where(eq(usersTable.id, employeeUserId))
+          .limit(1);
+        // Officer deleted between enqueue and flush — nothing to send.
+        if (!officer) continue;
+        const officerName = [officer.firstName, officer.lastName].filter(Boolean).join(" ") || officer.email;
+
+        const changes = dedupedChanges.map((c) => ({
+          label: CHANGE_FIELD_LABELS[c.field] ?? c.field,
+          whenIso: c.when.toISOString(),
+        }));
+        const windowStartIso = dedupedChanges[0]!.when.toISOString();
+        const windowEndIso = dedupedChanges[dedupedChanges.length - 1]!.when.toISOString();
+        const reviewUrl = base ? `${base}/admin-portal/personnel/${employeeUserId}/changes` : undefined;
+
+        let pushOk = false;
+        let emailOk = false;
+        try {
+          const labels = changes.map((c) => c.label);
+          await sendPushToUsers(adminIds, {
+            title: "Officer self-edit alert",
+            body: `${officerName} updated ${labels.length === 1 ? labels[0] : `${labels.length} sensitive fields`}. Tap to review.`,
+            data: {
+              type: "high_risk_profile_change",
+              employeeUserId,
+              fields: dedupedChanges.map((c) => c.field),
+            },
+          });
+          pushOk = true;
+        } catch (err) {
+          logger.warn({ err, employeeUserId }, "[high-risk-digest] push send failed");
+        }
+
+        try {
+          const tmpl = renderHighRiskProfileChangeEmail({
+            officerName,
+            officerEmail: officer.email,
+            changes,
+            windowStartIso,
+            windowEndIso,
+            reviewUrl,
+          });
+          const results = await Promise.all(
+            adminEmails.map((to) =>
+              sendEmail({ to, subject: tmpl.subject, text: tmpl.text, html: tmpl.html })
+                .catch((err) => {
+                  logger.warn({ err, to, employeeUserId }, "[high-risk-digest] per-admin email failed");
+                  return false;
+                }),
+            ),
+          );
+          emailOk = results.some(Boolean);
+        } catch (err) {
+          logger.warn({ err, employeeUserId }, "[high-risk-digest] email send failed");
+        }
+
+        if (!pushOk && !emailOk) {
+          // Total delivery failure — re-insert the claimed rows so the
+          // next tick retries. Preserve original detectedAt so the
+          // 15-min window doesn't reset and a long-stuck SMTP outage
+          // can't silently hide the alert.
+          try {
+            await db.insert(highRiskChangeQueueTable).values(
+              claimed.map((r) => ({
+                employeeUserId: r.employeeUserId,
+                field: r.field,
+                detectedAt: r.detectedAt,
+              })),
+            );
+          } catch (err) {
+            logger.error({ err, employeeUserId }, "[high-risk-digest] failed to re-enqueue after delivery failure");
+          }
+          continue;
+        }
+        totalSent += 1;
+      }
+      if (totalSent > 0) {
+        logger.info({ totalSent }, "Sent high-risk self-edit digests");
+      }
+    } catch (err) {
+      logger.error({ err }, "[high-risk-digest] job failed");
+    }
+  }
+
   // Wrap a job with an in-process mutex so a slow tick never overlaps
   // its own next tick. Cross-instance protection comes from the atomic
   // UPDATE-RETURNING claims inside each job.
@@ -588,6 +762,10 @@ export function startScheduledJobs(intervalMs: number = HOUR_MS): NodeJS.Timeout
   schedule("shift-reminders", sendPreShiftReminders, 5 * MIN_MS);
   // Missed-checkpoint pages — every 5 minutes; debounced per active shift.
   schedule("missed-checkpoints", checkMissedPatrolCheckpoints, 5 * MIN_MS);
+  // High-risk self-edit digest — every 5 minutes. The 15-min coalescing
+  // window is enforced inside the job; the tick cadence just bounds how
+  // long an admin waits after the window closes.
+  schedule("high-risk-digest", flushHighRiskSelfEditDigests, 5 * MIN_MS);
   // Suppress lint about unused sql import.
   void sql;
 

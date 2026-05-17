@@ -480,21 +480,43 @@ export function renderLicenseExpiryEmail(opts: {
   return { subject, text, html };
 }
 
+/**
+ * Render the admin alert for one or more high-risk self-edits by a single
+ * officer, coalesced over a short digest window (default 15 min) so a
+ * burst of edits collapses into a single push + email.
+ *
+ * `changes` is the per-field detail with the timestamp each edit was
+ * detected. The template lists every row so admins can see exactly when
+ * each field was touched without leaving the email. If only one row is
+ * passed the layout degrades gracefully to the original single-change look.
+ */
 export function renderHighRiskProfileChangeEmail(opts: {
   officerName: string;
   officerEmail: string;
-  fieldLabels: string[];
-  whenIso: string;
+  changes: Array<{ label: string; whenIso: string }>;
+  windowStartIso: string;
+  windowEndIso: string;
   reviewUrl?: string;
 }): { subject: string; text: string; html: string } {
-  const subject = `Officer self-edit alert: ${opts.officerName} updated ${opts.fieldLabels.length === 1 ? opts.fieldLabels[0] : `${opts.fieldLabels.length} sensitive fields`}`;
-  const fieldsList = opts.fieldLabels.map((l) => `  • ${l}`).join("\n");
+  const labels = opts.changes.map((c) => c.label);
+  const subject = `Officer self-edit alert: ${opts.officerName} updated ${
+    labels.length === 1 ? labels[0] : `${labels.length} sensitive fields`
+  }`;
+  const fieldsList = opts.changes
+    .map((c) => `  • ${c.label}  (at ${c.whenIso})`)
+    .join("\n");
   const reviewLine = opts.reviewUrl ? `\nReview the change log: ${opts.reviewUrl}\n` : "";
+  const windowLine = opts.windowStartIso === opts.windowEndIso
+    ? `When:    ${opts.windowStartIso}`
+    : `Window:  ${opts.windowStartIso} → ${opts.windowEndIso}`;
+  const headline = labels.length === 1
+    ? `Heads up — an officer just self-updated a high-risk profile field.`
+    : `Heads up — an officer self-updated ${labels.length} high-risk profile fields in the last few minutes.`;
   const text = [
-    `Heads up — an officer just self-updated one or more high-risk profile fields.`,
+    headline,
     "",
     `Officer: ${opts.officerName} (${opts.officerEmail})`,
-    `When:    ${opts.whenIso}`,
+    windowLine,
     `Fields updated:`,
     fieldsList,
     reviewLine,
@@ -503,18 +525,26 @@ export function renderHighRiskProfileChangeEmail(opts: {
     "— Williams Council Security Group · SecureOps",
   ].filter((l) => l !== undefined).join("\n");
   const fieldsHtml = `<ul style="margin:8px 0 0 0;padding-left:20px">${
-    opts.fieldLabels.map((l) => `<li style="margin:4px 0">${escapeHtml(l)}</li>`).join("")
+    opts.changes
+      .map((c) => `<li style="margin:4px 0">${escapeHtml(c.label)} <span style="color:#666;font-size:12px">(at ${escapeHtml(c.whenIso)})</span></li>`)
+      .join("")
   }</ul>`;
   const reviewHtml = opts.reviewUrl
     ? `<p style="margin:18px 0"><a href="${escapeAttr(opts.reviewUrl)}" style="background:#080c18;color:#c9a84c;padding:10px 18px;text-decoration:none;font-weight:bold;border-radius:4px">Open change log</a></p>`
     : "";
+  const windowHtml = opts.windowStartIso === opts.windowEndIso
+    ? `<div><strong>When:</strong> ${escapeHtml(opts.windowStartIso)}</div>`
+    : `<div><strong>Window:</strong> ${escapeHtml(opts.windowStartIso)} → ${escapeHtml(opts.windowEndIso)}</div>`;
+  const intro = labels.length === 1
+    ? `An officer just updated a high-risk profile field from the SecureOps mobile app.`
+    : `An officer updated ${labels.length} high-risk profile fields from the SecureOps mobile app in the last few minutes (digest).`;
   const html = `
     <div style="font-family:Georgia,serif;max-width:560px;margin:0 auto;color:#080c18">
       <h2 style="color:#080c18;margin-top:0">Officer self-edit alert</h2>
-      <p>An officer just updated one or more high-risk profile fields from the SecureOps mobile app.</p>
+      <p>${intro}</p>
       <div style="background:#f6f1e1;padding:14px 16px;border-left:3px solid #c9a84c;margin:18px 0;border-radius:4px;font-size:14px">
         <div><strong>Officer:</strong> ${escapeHtml(opts.officerName)} (${escapeHtml(opts.officerEmail)})</div>
-        <div><strong>When:</strong> ${escapeHtml(opts.whenIso)}</div>
+        ${windowHtml}
         <div style="margin-top:8px"><strong>Fields updated:</strong></div>
         ${fieldsHtml}
       </div>

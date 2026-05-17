@@ -6,7 +6,7 @@ import { requireAuth, requireAdmin, verifyToken } from "../middlewares/auth";
 import type { Request, Response, NextFunction } from "express";
 import { buildEmployeeProfilePdf } from "../lib/profilePdf";
 import { writeEmployeeFieldChanges, CHANGE_FIELD_LABELS } from "../lib/employeeChangeLog";
-import { diffHighRiskChanges, notifyAdminsOfHighRiskSelfEdit } from "../lib/highRiskSelfEditAlert";
+import { diffHighRiskChanges, enqueueHighRiskSelfEdit } from "../lib/highRiskSelfEditAlert";
 
 const router: IRouter = Router();
 
@@ -403,11 +403,8 @@ router.put("/employees/:id", requireAuth, async (req, res): Promise<void> => {
       row as Record<string, unknown> | null | undefined,
     );
     if (highRiskChanged.length > 0 && row) {
-      const officerName = [row.firstName, row.lastName].filter(Boolean).join(" ") || (row.email as string);
-      void notifyAdminsOfHighRiskSelfEdit({
+      void enqueueHighRiskSelfEdit({
         employeeUserId: id,
-        officerName,
-        officerEmail: (row.email as string) ?? "",
         changedFields: highRiskChanged,
         log: req.log,
       });
