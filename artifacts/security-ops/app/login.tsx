@@ -11,11 +11,19 @@ import { Feather } from "@expo/vector-icons";
 import { API_BASE_URL } from "@/utils/api";
 
 async function postJson<T>(path: string, body: unknown): Promise<T> {
-  const res = await fetch(`${API_BASE_URL}${path}`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(body),
-  });
+  let res: Response;
+  try {
+    res = await fetch(`${API_BASE_URL}${path}`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    });
+  } catch (e) {
+    const reason = e instanceof Error ? e.message : String(e);
+    throw new Error(
+      `Can't reach the server (${reason}). Check your internet connection and try again.`,
+    );
+  }
   const data = await res.json().catch(() => ({}));
   if (!res.ok) throw new Error((data as any)?.message || `HTTP ${res.status}`);
   return data as T;

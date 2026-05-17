@@ -18,6 +18,7 @@ import { SafeAreaProvider } from "react-native-safe-area-context";
 import { ErrorBoundary } from "@/components/ErrorBoundary";
 import { AuthProvider } from "@/contexts/AuthContext";
 import { ChatProvider } from "@/contexts/ChatContext";
+import { API_BASE_URL } from "@/utils/api";
 import RootLayoutNav from "./RootLayoutNav";
 import { setBaseUrl, setAuthTokenGetter } from "@workspace/api-client-react";
 import { storage } from "@/utils/storage";
@@ -55,8 +56,11 @@ function onAppStateChange(status: AppStateStatus) {
   }
 }
 
-// Configure API Client
-setBaseUrl(`https://${process.env.EXPO_PUBLIC_DOMAIN}`);
+// Configure API Client. Use the same resolution as utils/api.ts so the
+// generated client and hand-written fetches always agree on the origin
+// (and so a bundle without EXPO_PUBLIC_DOMAIN still talks to the real
+// API instead of "https://undefined").
+setBaseUrl(API_BASE_URL.replace(/\/api$/, ""));
 setAuthTokenGetter(async () => {
   return await storage.get(AUTH_TOKEN_KEY);
 });
