@@ -76,11 +76,11 @@ export default function ShiftDetailScreen() {
     return m[s] || colors.mutedForeground;
   };
 
-  if (isLoading) return <View style={[styles.center, { backgroundColor: colors.background }]}><ActivityIndicator size="large" color={colors.primary} /></View>;
-  if (!shift) return <View style={[styles.center, { backgroundColor: colors.background }]}><Text style={{ color: colors.destructive }}>Shift not found</Text></View>;
-
-  const reqLevel = (shift as any).requiredLicenseLevel ?? 2;
-  const headcount = (shift as any).headcount ?? 1;
+  // NOTE: all hooks must run before any early return below, otherwise React
+  // throws "Rendered more hooks than during the previous render" when the
+  // shift transitions from loading→loaded.
+  const reqLevel = (shift as any)?.requiredLicenseLevel ?? 2;
+  const headcount = (shift as any)?.headcount ?? 1;
   const unassignedAll = (allEmployees ?? []).filter((e) => !assignedIds.has(e.id));
   const eligibleAll = unassignedAll.filter((e: any) => (e.maxLicenseLevel ?? 0) >= reqLevel);
   const ineligibleAll = unassignedAll.filter((e: any) => (e.maxLicenseLevel ?? 0) < reqLevel);
@@ -97,6 +97,10 @@ export default function ShiftDetailScreen() {
   const eligible = useMemo(() => eligibleAll.filter(matches), [eligibleAll, q]);
   const ineligible = useMemo(() => ineligibleAll.filter(matches), [ineligibleAll, q]);
   const isSearching = q.length > 0;
+
+  if (isLoading) return <View style={[styles.center, { backgroundColor: colors.background }]}><ActivityIndicator size="large" color={colors.primary} /></View>;
+  if (!shift) return <View style={[styles.center, { backgroundColor: colors.background }]}><Text style={{ color: colors.destructive }}>Shift not found</Text></View>;
+
   const duration = ((new Date(shift.endTime).getTime() - new Date(shift.startTime).getTime()) / 3600000).toFixed(1);
   const filled = (shift.assignments ?? []).length;
 
