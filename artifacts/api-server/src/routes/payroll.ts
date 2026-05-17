@@ -406,6 +406,11 @@ type BoardBucket = {
   entries: Array<{ id: string; clockInTime: string; hoursWorked: number; rate: number }>;
   existingPayrollEntryId: string | null;
   existingStatus: string | null; // pending | processed | paid | null (none)
+  // Per-bucket warnings surfaced on the Payroll Board so admins notice
+  // problems (zero rate, missing clock-out, missing bank info) BEFORE they
+  // hand the batch off to Pay Run. Same wording as Pay Run preview warnings
+  // where applicable, so the two pages stay consistent.
+  warnings: string[];
 };
 
 /**
@@ -438,6 +443,16 @@ async function computeBoardBuckets(filters: {
       siteName: sitesTable.name,
       payRate: shiftsTable.payRate,
       employeeRate: employeesTable.hourlyRate,
+      // Bank/direct-deposit fields drive bucket-level warnings so the admin
+      // can spot payable rows that will fail the Pay Run CSV export.
+      bankAccountName: employeesTable.bankAccountName,
+      bankAccountNumber: employeesTable.bankAccountNumber,
+      bankBsb: employeesTable.bankBsb,
+      directDepositConsent: employeesTable.directDepositConsent,
+      // Null hoursWorked = missing clock-out (the column is only stamped on
+      // clock-out). Track it explicitly so the warning is "missing clock-out"
+      // rather than the more confusing "zero hours" when summed.
+      hasClockOut: sql<boolean>`${timeEntriesTable.clockOutTime} IS NOT NULL`,
     })
     .from(timeEntriesTable)
     .leftJoin(shiftsTable, eq(timeEntriesTable.shiftId, shiftsTable.id))
@@ -458,6 +473,13 @@ async function computeBoardBuckets(filters: {
     gross: number;
     timeEntryIds: string[];
     entries: Array<{ id: string; clockInTime: string; hoursWorked: number; rate: number }>;
+    zeroRateEntries: number;
+    missingClockOutEntries: number;
+    zeroHoursEntries: number;
+    bankAccountName: string | null;
+    bankAccountNumber: string | null;
+    bankBsb: string | null;
+    directDepositConsent: boolean | null;
   };
   const buckets = new Map<string, Agg>();
   for (const r of rows) {
@@ -485,12 +507,25 @@ async function computeBoardBuckets(filters: {
         gross: 0,
         timeEntryIds: [],
         entries: [],
+        zeroRateEntries: 0,
+        missingClockOutEntries: 0,
+        zeroHoursEntries: 0,
+        bankAccountName: r.bankAccountName,
+        bankAccountNumber: r.bankAccountNumber,
+        bankBsb: r.bankBsb,
+        directDepositConsent: r.directDepositConsent,
       };
       buckets.set(key, b);
     }
     b.hours += hours;
     b.gross += hours * rate;
     b.timeEntryIds.push(r.timeEntryId);
+    if (rate <= 0) b.zeroRateEntries += 1;
+    if (!r.hasClockOut) b.missingClockOutEntries += 1;
+    // Zero-hour entries with a valid clock-out are a separate problem
+    // (manual edit, same-second in/out, etc) — track them so the warning
+    // can say "hours are 0" rather than misdiagnosing it as missing clock-out.
+    else if (hours <= 0) b.zeroHoursEntries += 1;
     b.entries.push({
       id: r.timeEntryId,
       clockInTime: r.clockInTime.toISOString(),
@@ -524,6 +559,48 @@ async function computeBoardBuckets(filters: {
   const out: BoardBucket[] = [];
   for (const [key, b] of buckets) {
     const ex = existingMap.get(key) ?? null;
+    const warnings: string[] = [];
+    if (b.zeroRateEntries > 0) {
+      warnings.push(
+        b.zeroRateEntries === b.entries.length
+          ? "Pay rate is $0 — no shift rate or employee fallback rate on file"
+          : `Pay rate is $0 on ${b.zeroRateEntries} of ${b.entries.length} entries`,
+      );
+    }
+    if (b.missingClockOutEntries > 0) {
+      warnings.push(
+        b.missingClockOutEntries === 1
+          ? "Missing clock-out on 1 time entry (hours counted as 0)"
+          : `Missing clock-out on ${b.missingClockOutEntries} time entries (hours counted as 0)`,
+      );
+    }
+    if (b.zeroHoursEntries > 0) {
+      warnings.push(
+        b.zeroHoursEntries === 1
+          ? "Hours worked is 0 on 1 time entry"
+          : `Hours worked is 0 on ${b.zeroHoursEntries} time entries`,
+      );
+    }
+    // Bucket-level zero-hours guard: catches the case where summed hours
+    // round to zero even though no individual entry tripped the per-entry
+    // counters (e.g. only sub-minute entries). Avoids duplicate messaging
+    // when a per-entry warning already fired.
+    if (
+      b.hours <= 0 &&
+      b.zeroHoursEntries === 0 &&
+      b.missingClockOutEntries === 0
+    ) {
+      warnings.push("Total hours worked is 0");
+    }
+    // Bank/direct-deposit checks mirror the Pay Run preview wording so the
+    // two pages stay consistent. Skipped when the bucket is already paid —
+    // the data is historical at that point.
+    if (ex?.status !== "paid") {
+      if (!b.bankAccountNumber) warnings.push("Missing bank account number");
+      if (!b.bankBsb) warnings.push("Missing routing/sort code");
+      if (!b.bankAccountName) warnings.push("Missing bank account name");
+      if (b.directDepositConsent !== true) warnings.push("Direct-deposit consent not on file");
+    }
     out.push({
       employeeId: b.employeeId,
       employeeName: b.employeeName,
@@ -538,6 +615,7 @@ async function computeBoardBuckets(filters: {
       entries: b.entries.sort((a, c) => a.clockInTime.localeCompare(c.clockInTime)),
       existingPayrollEntryId: ex?.id ?? null,
       existingStatus: ex?.status ?? null,
+      warnings,
     });
   }
   return out;

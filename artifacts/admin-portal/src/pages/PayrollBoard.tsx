@@ -1,6 +1,6 @@
 import { Fragment, useEffect, useMemo, useState } from "react";
 import { useLocation } from "wouter";
-import { Banknote, Loader2, ChevronRight, ChevronDown, ArrowRight } from "lucide-react";
+import { Banknote, Loader2, ChevronRight, ChevronDown, ArrowRight, AlertTriangle } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -23,6 +23,7 @@ type BoardBucket = {
   entries: Array<{ id: string; clockInTime: string; hoursWorked: number; rate: number }>;
   existingPayrollEntryId: string | null;
   existingStatus: string | null;
+  warnings: string[];
 };
 
 type BoardGroup = {
@@ -73,6 +74,7 @@ export default function PayrollBoardPage() {
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [openGroups, setOpenGroups] = useState<Set<string>>(new Set());
   const [openBuckets, setOpenBuckets] = useState<Set<string>>(new Set());
+  const [hideWarnings, setHideWarnings] = useState(false);
   const [busy, setBusy] = useState(false);
   const [dialogOpen, setDialogOpen] = useState(false);
   const [mode, setMode] = useState<"ach_csv" | "manual">("ach_csv");
@@ -141,8 +143,24 @@ export default function PayrollBoardPage() {
     setOpenGroups(next);
   };
 
+  // Apply the optional "Hide buckets with warnings" filter client-side so
+  // toggling doesn't require a round-trip. Groups that empty out after the
+  // filter are dropped entirely.
+  const visibleGroups = useMemo(() => {
+    if (!hideWarnings) return groups;
+    return groups
+      .map((g) => {
+        const buckets = g.buckets.filter((b) => b.warnings.length === 0);
+        if (buckets.length === 0) return null;
+        const totalHours = Math.round(buckets.reduce((a, b) => a + b.totalHours, 0) * 100) / 100;
+        const grossPay = Math.round(buckets.reduce((a, b) => a + b.grossPay, 0) * 100) / 100;
+        return { ...g, buckets, officerCount: buckets.length, totalHours, grossPay };
+      })
+      .filter((g): g is BoardGroup => g !== null);
+  }, [groups, hideWarnings]);
+
   // Build flat selection summary.
-  const allBuckets = useMemo(() => groups.flatMap((g) => g.buckets), [groups]);
+  const allBuckets = useMemo(() => visibleGroups.flatMap((g) => g.buckets), [visibleGroups]);
   const selectedBuckets = useMemo(
     () => allBuckets.filter((b) => selected.has(bucketKey(b))),
     [allBuckets, selected],
@@ -236,6 +254,15 @@ export default function PayrollBoardPage() {
         <Button variant="outline" onClick={() => void reload()} disabled={loading}>
           {loading ? <Loader2 className="w-4 h-4 animate-spin" /> : "Refresh"}
         </Button>
+        <label className="flex items-center gap-2 text-sm cursor-pointer ml-auto select-none">
+          <input
+            type="checkbox"
+            checked={hideWarnings}
+            onChange={(e) => setHideWarnings(e.target.checked)}
+            className="w-4 h-4"
+          />
+          Hide buckets with warnings
+        </label>
       </div>
 
       {/* Sticky selection toolbar */}
@@ -262,18 +289,21 @@ export default function PayrollBoardPage() {
         <div className="bg-white border rounded-lg p-12 text-center text-muted-foreground">
           <Loader2 className="w-6 h-6 animate-spin inline" />
         </div>
-      ) : groups.length === 0 ? (
+      ) : visibleGroups.length === 0 ? (
         <div className="bg-white border rounded-lg p-12 text-center text-muted-foreground">
-          No approved time entries match these filters.
+          {groups.length > 0 && hideWarnings
+            ? "All buckets have warnings — uncheck \"Hide buckets with warnings\" to see them."
+            : "No approved time entries match these filters."}
         </div>
       ) : (
         <div className="space-y-3">
-          {groups.map((g) => {
+          {visibleGroups.map((g) => {
             const gk = `${g.siteId ?? "__nosite__"}|${g.periodStart}`;
             const selectableKeys = g.buckets.filter(isSelectable).map(bucketKey);
             const allGroupSelected = selectableKeys.length > 0 && selectableKeys.every((k) => selected.has(k));
             const someGroupSelected = selectableKeys.some((k) => selected.has(k));
             const expanded = openGroups.has(gk);
+            const warningCount = g.buckets.filter((b) => b.warnings.length > 0).length;
             return (
               <div key={gk} className="bg-white border rounded-lg overflow-hidden">
                 <div className="flex items-center gap-3 px-4 py-3 bg-brand-navy text-white">
@@ -300,6 +330,15 @@ export default function PayrollBoardPage() {
                     </div>
                   </button>
                   <div className="flex items-center gap-3">
+                    {warningCount > 0 && (
+                      <span
+                        className="inline-flex items-center gap-1 text-xs px-2 py-0.5 rounded bg-amber-100 text-amber-900"
+                        title="One or more buckets have problems that will block Pay Run — expand to see details"
+                      >
+                        <AlertTriangle className="w-3 h-3" />
+                        {warningCount} warning{warningCount === 1 ? "" : "s"}
+                      </span>
+                    )}
                     {statusPill(g.status)}
                     <div className="text-right">
                       <div className="text-xs uppercase tracking-wider opacity-70">Gross</div>
@@ -339,7 +378,25 @@ export default function PayrollBoardPage() {
                                 />
                               </td>
                               <td className="px-3 py-2">
-                                <div className="font-medium">{b.employeeName ?? b.employeeId.slice(0, 8)}</div>
+                                <div className="flex items-center gap-2">
+                                  <span className="font-medium">{b.employeeName ?? b.employeeId.slice(0, 8)}</span>
+                                  {b.warnings.length > 0 && (
+                                    <span
+                                      className="inline-flex items-center gap-1 text-[10px] px-1.5 py-0.5 rounded bg-amber-100 text-amber-900"
+                                      title={b.warnings.join("\n")}
+                                    >
+                                      <AlertTriangle className="w-3 h-3" />
+                                      {b.warnings.length}
+                                    </span>
+                                  )}
+                                </div>
+                                {b.warnings.length > 0 && (
+                                  <ul className="mt-1 text-[11px] text-amber-800 list-disc list-inside">
+                                    {b.warnings.map((w, i) => (
+                                      <li key={i}>{w}</li>
+                                    ))}
+                                  </ul>
+                                )}
                               </td>
                               <td className="px-3 py-2 text-right">{b.totalHours.toFixed(2)}</td>
                               <td className="px-3 py-2 text-right">{fmtUsd(b.hourlyRate)}</td>
