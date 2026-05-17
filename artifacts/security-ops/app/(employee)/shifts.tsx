@@ -48,8 +48,15 @@ export default function EmployeeShiftsScreen() {
   });
   const isClockedInElsewhere = !!(activeEntry as any)?.id;
 
+  const nowMs = Date.now();
   const shifts = (allShifts ?? []).filter((s: any) => {
     const isAssigned = (s.assignments ?? []).some((a: any) => a.employeeId === myUserId);
+    // Hide shifts whose end time has already passed from "available" and "upcoming"
+    // (they're stale slots nobody clocked into).
+    if (filter === "available" || filter === "upcoming") {
+      const endMs = s.endTime ? new Date(s.endTime).getTime() : 0;
+      if (endMs && endMs < nowMs) return false;
+    }
     if (filter === "available") return !isAssigned;
     return isAssigned;
   });
