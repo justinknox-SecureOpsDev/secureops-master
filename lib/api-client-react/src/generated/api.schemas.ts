@@ -1229,6 +1229,22 @@ export interface ReviewApplicationRequest {
   notes?: string;
 }
 
+/**
+ * SMS fallback delivery status for the onboarding link.
+`sent` — Twilio accepted the message.
+`skipped` — Twilio not connected, or applicant phone is not valid E.164.
+`failed` — Twilio rejected the send.
+
+ */
+export type ApproveApplicationResponseSmsStatus =
+  (typeof ApproveApplicationResponseSmsStatus)[keyof typeof ApproveApplicationResponseSmsStatus];
+
+export const ApproveApplicationResponseSmsStatus = {
+  sent: "sent",
+  skipped: "skipped",
+  failed: "failed",
+} as const;
+
 export interface ApproveApplicationResponse {
   application: Application;
   onboardingUrl: string;
@@ -1236,6 +1252,12 @@ export interface ApproveApplicationResponse {
   employeeId: string;
   tempPassword: string;
   emailSent?: boolean;
+  /** SMS fallback delivery status for the onboarding link.
+`sent` — Twilio accepted the message.
+`skipped` — Twilio not connected, or applicant phone is not valid E.164.
+`failed` — Twilio rejected the send.
+ */
+  smsStatus?: ApproveApplicationResponseSmsStatus;
 }
 
 export interface PolicyPublic {

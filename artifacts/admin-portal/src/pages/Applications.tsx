@@ -6,7 +6,7 @@ import { Textarea } from "@/components/ui/textarea";
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter,
 } from "@/components/ui/dialog";
-import { ClipboardList, Search, Loader2, Copy, ExternalLink, MailCheck, MessageSquareWarning } from "lucide-react";
+import { ClipboardList, Search, Loader2, Copy, ExternalLink, MailCheck, MessageSquareWarning, MessageSquare } from "lucide-react";
 import { openSignedObject } from "@/lib/upload";
 import { AMENDMENT_FIELDS } from "@/lib/amendmentFields";
 
@@ -43,6 +43,7 @@ type ApproveResp = {
   employeeId: string;
   tempPassword: string;
   emailSent: boolean;
+  smsStatus: "sent" | "skipped" | "failed";
 };
 
 type RejectResp = Application & { emailSent: boolean };
@@ -676,49 +677,64 @@ function ApprovalSuccessDialog({ resp, onClose }: { resp: ApproveResp; onClose: 
         </DialogHeader>
         <div className="space-y-3 text-sm">
           {resp.emailSent ? (
-            <>
-              <div className="flex items-start gap-2 bg-emerald-50 border border-emerald-200 text-emerald-900 p-3 rounded">
-                <MailCheck className="w-5 h-5 mt-0.5 shrink-0" />
-                <div>
-                  <div className="font-medium">Onboarding email sent to {resp.application.email}</div>
-                  <div className="text-xs mt-0.5">
-                    Employee <strong>{fullName}</strong> has been created and emailed their onboarding link plus
-                    temporary login. The link expires in 14 days and can be used once.
-                  </div>
+            <div className="flex items-start gap-2 bg-emerald-50 border border-emerald-200 text-emerald-900 p-3 rounded">
+              <MailCheck className="w-5 h-5 mt-0.5 shrink-0" />
+              <div>
+                <div className="font-medium">Onboarding email sent to {resp.application.email}</div>
+                <div className="text-xs mt-0.5">
+                  Employee <strong>{fullName}</strong> has been created and emailed their onboarding link plus
+                  temporary login. The link expires in 14 days and can be used once.
                 </div>
               </div>
-              <details className="text-xs">
-                <summary className="cursor-pointer text-muted-foreground hover:text-foreground">
-                  Show link &amp; temporary password (for backup)
-                </summary>
-                <div className="mt-2 space-y-2">
-                  <Field label="Onboarding link">
-                    <div className="flex gap-1">
-                      <Input readOnly value={resp.onboardingUrl} />
-                      <Button type="button" variant="outline" onClick={() => copy(resp.onboardingUrl)}><Copy className="w-4 h-4" /></Button>
-                      <a className="inline-flex items-center" href={resp.onboardingUrl} target="_blank" rel="noreferrer">
-                        <Button type="button" variant="outline"><ExternalLink className="w-4 h-4" /></Button>
-                      </a>
-                    </div>
-                  </Field>
-                  <Field label="Temporary password">
-                    <div className="flex gap-1">
-                      <Input readOnly value={resp.tempPassword} />
-                      <Button type="button" variant="outline" onClick={() => copy(resp.tempPassword)}><Copy className="w-4 h-4" /></Button>
-                    </div>
-                    <p className="text-xs text-muted-foreground">
-                      Shown once — also included in the onboarding email above. The employee will be prompted to set a new password on first login.
-                    </p>
-                  </Field>
-                </div>
-              </details>
-            </>
+            </div>
           ) : (
-            <>
-              <p>
-                Employee <strong>{fullName}</strong> has been created.
-                Share the onboarding link below — it expires in 14 days and can be used once.
-              </p>
+            <div className="flex items-start gap-2 bg-amber-50 border border-amber-200 text-amber-900 p-3 rounded">
+              <MailCheck className="w-5 h-5 mt-0.5 shrink-0 opacity-60" />
+              <div>
+                <div className="font-medium">Onboarding email NOT sent to {resp.application.email}</div>
+                <div className="text-xs mt-0.5">
+                  Email delivery isn't configured or the send failed. Use the link below to share onboarding details manually.
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* SMS status is always shown so admins know whether the fallback reached the candidate,
+              independent of whether email succeeded. */}
+          {resp.smsStatus === "sent" && (
+            <div className="flex items-start gap-2 bg-emerald-50 border border-emerald-200 text-emerald-900 p-3 rounded">
+              <MessageSquare className="w-5 h-5 mt-0.5 shrink-0" />
+              <div>
+                <div className="font-medium">Onboarding link also texted to {resp.application.phone}</div>
+                <div className="text-xs mt-0.5">SMS fallback delivered via Twilio.</div>
+              </div>
+            </div>
+          )}
+          {resp.smsStatus === "failed" && (
+            <div className="flex items-start gap-2 bg-rose-50 border border-rose-200 text-rose-900 p-3 rounded">
+              <MessageSquare className="w-5 h-5 mt-0.5 shrink-0" />
+              <div>
+                <div className="font-medium">SMS to {resp.application.phone} failed</div>
+                <div className="text-xs mt-0.5">Twilio rejected the message — share the onboarding link manually.</div>
+              </div>
+            </div>
+          )}
+          {resp.smsStatus === "skipped" && (
+            <div className="text-xs text-muted-foreground border border-dashed rounded p-2">
+              SMS fallback not sent — Twilio isn't connected, or the applicant's phone isn't in E.164 format (e.g. <code>+12145551234</code>).
+            </div>
+          )}
+
+          {!resp.emailSent && (
+            <p>
+              Share the onboarding link below — it expires in 14 days and can be used once.
+            </p>
+          )}
+          <details className="text-xs" open={!resp.emailSent}>
+            <summary className="cursor-pointer text-muted-foreground hover:text-foreground">
+              {resp.emailSent ? "Show link & temporary password (for backup)" : "Onboarding link & temporary password"}
+            </summary>
+            <div className="mt-2 space-y-2">
               <Field label="Onboarding link">
                 <div className="flex gap-1">
                   <Input readOnly value={resp.onboardingUrl} />
@@ -734,16 +750,11 @@ function ApprovalSuccessDialog({ resp, onClose }: { resp: ApproveResp; onClose: 
                   <Button type="button" variant="outline" onClick={() => copy(resp.tempPassword)}><Copy className="w-4 h-4" /></Button>
                 </div>
                 <p className="text-xs text-muted-foreground">
-                  Email login: <strong>{resp.application.email}</strong>. This password is shown once — copy it now and share with the new hire. They will be prompted to set a new password on first login.
+                  Email login: <strong>{resp.application.email}</strong>. Shown once — the employee will be prompted to set a new password on first login.
                 </p>
               </Field>
-              <div className="text-xs text-amber-900 bg-amber-50 border border-amber-200 p-2 rounded">
-                Email delivery isn't configured — copy and send the link manually.
-                Set <code>SMTP_HOST</code>, <code>SMTP_PORT</code>, <code>SMTP_USER</code>, <code>SMTP_PASS</code>
-                {" "}(and optionally <code>SMTP_FROM</code>) to enable automatic emails.
-              </div>
-            </>
-          )}
+            </div>
+          </details>
         </div>
         <DialogFooter><Button onClick={onClose}>Done</Button></DialogFooter>
       </DialogContent>

@@ -29,6 +29,7 @@ import { z } from "zod/v4";
 import { requireAdmin } from "../middlewares/auth";
 import { sendPushToUsers } from "../lib/push";
 import { sendEmail, renderOnboardingEmail, renderResendOnboardingEmail, renderRejectionEmail, renderApplicationReceivedEmail, renderRequestInfoEmail } from "../lib/email";
+import { sendSmsToPhoneNumber } from "../lib/sms";
 
 const router: IRouter = Router();
 const policyStorage = new ObjectStorageService();
@@ -651,6 +652,7 @@ router.post("/admin/applications/:id/approve", requireAdmin, async (req, res): P
   const onboardingUrl = buildOnboardingUrl(token);
   const app = result.updated;
   let emailSent = false;
+  let smsStatus: "sent" | "skipped" | "failed" = "skipped";
   if (onboardingUrl) {
     const emailMsg = renderOnboardingEmail({
       firstName: app.firstName,
@@ -669,6 +671,21 @@ router.post("/admin/applications/:id/approve", requireAdmin, async (req, res): P
     } else {
       req.log.info({ employeeId: result.userId }, "Onboarding email not sent — admin must share link manually");
     }
+
+    // SMS fallback: text the onboarding link to the applicant's phone so
+    // they're reachable even if the email bounces or hits spam. The
+    // applicant gave us this phone on the application form — implied
+    // consent for onboarding-related comms. No-op when Twilio isn't
+    // connected or the number isn't valid E.164.
+    const smsBody =
+      `WCSG: Hi ${app.firstName}, your application is approved. ` +
+      `Complete onboarding here (expires in 14 days): ${onboardingUrl}`;
+    smsStatus = await sendSmsToPhoneNumber(app.phone, smsBody);
+    if (smsStatus === "sent") {
+      req.log.info({ employeeId: result.userId }, "Onboarding approval SMS sent");
+    } else if (smsStatus === "failed") {
+      req.log.warn({ employeeId: result.userId }, "Onboarding approval SMS delivery failed");
+    }
   } else {
     req.log.error({ employeeId: result.userId }, "Approve: APP_BASE_URL/REPLIT_DOMAINS unset; cannot build onboarding link");
   }
@@ -680,6 +697,7 @@ router.post("/admin/applications/:id/approve", requireAdmin, async (req, res): P
     employeeId: result.userId,
     tempPassword: result.tempPasswordPlain,
     emailSent,
+    smsStatus,
   });
 });
 

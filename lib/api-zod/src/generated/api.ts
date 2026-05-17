@@ -2674,6 +2674,12 @@ export const AdminApproveApplicationResponse = zod.object({
   employeeId: zod.string(),
   tempPassword: zod.string(),
   emailSent: zod.boolean().optional(),
+  smsStatus: zod
+    .enum(["sent", "skipped", "failed"])
+    .optional()
+    .describe(
+      "SMS fallback delivery status for the onboarding link.\n`sent` — Twilio accepted the message.\n`skipped` — Twilio not connected, or applicant phone is not valid E.164.\n`failed` — Twilio rejected the send.\n",
+    ),
 });
 
 export const GetOnboardingPrefillParams = zod.object({

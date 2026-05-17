@@ -3200,6 +3200,14 @@ components:
         employeeId: { type: string }
         tempPassword: { type: string }
         emailSent: { type: boolean }
+        smsStatus:
+          type: string
+          enum: [sent, skipped, failed]
+          description: |
+            SMS fallback delivery status for the onboarding link.
+            `sent` — Twilio accepted the message.
+            `skipped` — Twilio not connected, or applicant phone is not valid E.164.
+            `failed` — Twilio rejected the send.
 
     OnboardingPrefill:
       type: object

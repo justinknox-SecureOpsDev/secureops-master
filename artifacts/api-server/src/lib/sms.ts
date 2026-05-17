@@ -179,3 +179,35 @@ export async function sendSmsToUsers(userIds: string[], body: string): Promise<S
 
   return result;
 }
+
+/**
+ * Send a single SMS to a raw phone number, bypassing the user-opt-in lookup.
+ *
+ * Used for transactional one-off messages where there's no user account yet
+ * (or no opt-in flag is meaningful), e.g. texting a newly-approved applicant
+ * the onboarding link as a fallback to email. The applicant explicitly gave
+ * us this phone number on their application, so contacting them about that
+ * application is implied-consent.
+ *
+ * Caller MUST pass an E.164 number (`+` followed by 8–15 digits). Returns:
+ *   - `"sent"`     — SMS dispatched to Twilio successfully.
+ *   - `"skipped"`  — Twilio not configured OR number is not valid E.164.
+ *   - `"failed"`   — Twilio rejected the request.
+ *
+ * Never throws — mirrors how `push` / `sendSmsToUsers` degrade.
+ */
+export async function sendSmsToPhoneNumber(
+  phone: string | null | undefined,
+  body: string,
+): Promise<"sent" | "skipped" | "failed"> {
+  if (!phone || !/^\+\d{8,15}$/.test(phone)) return "skipped";
+  const creds = await getTwilioCreds();
+  if (!creds) return "skipped";
+  try {
+    await sendOne(creds, phone, body);
+    return "sent";
+  } catch (err) {
+    logger.warn({ err }, "[sms] one-off delivery failed");
+    return "failed";
+  }
+}
