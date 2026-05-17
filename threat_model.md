@@ -77,6 +77,7 @@ The P0 launch security pack tightened the controls described above. When re-scan
 - **System status surface**: `GET /admin/system/status` (admin-only) returns booleans for SMTP / SESSION_SECRET / base-URL / CORS configuration. Used by the admin shell to render an amber "degraded configuration" banner. The server also logs error-level messages at boot if any of these are missing in production.
 - **Public legal surface**: `/admin-portal/{privacy,terms,data-rights}` are publicly accessible and linked from the admin Apply page, admin Login, and the mobile login screen.
 - **DB indexes** on hot lookup paths: `shifts(siteId,startTime)`, `shiftAssignments(shiftId,status)`, `timeEntries(employeeId,clockInTime)`, `chatMessages(roomId,createdAt)`, `incidents(employeeId,occurredAt)`, plus `revoked_tokens(userId)` and `revoked_tokens(expiresAt)`.
+- **Emergency-contact phones are never SMS recipients.** `employees.emergency_contact_phone` (and the same column on `applications` / `onboarding_submissions`) is captured for HR/911 to call manually. `sendSmsToUsers` reads from `users` only, so it cannot reach those numbers. `sendSmsToPhoneNumber` (raw-phone one-off helper) calls `isEmergencyContactPhone` first and refuses with an `error` log if the target matches any emergency-contact-of-record. Policy + rationale live at the top of `artifacts/api-server/src/lib/sms.ts`.
 
 ## Production deployment checklist
 

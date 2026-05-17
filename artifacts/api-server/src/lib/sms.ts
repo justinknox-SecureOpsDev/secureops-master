@@ -14,10 +14,64 @@
  * rich payloads. SMS is a safety-net for high-importance alerts (emergency,
  * shift assignment, vacancy fill) when the recipient may not have the app
  * open.
+ *
+ * ────────────────────────────────────────────────────────────────────────
+ * POLICY — DO NOT TEXT EMERGENCY CONTACTS.
+ *
+ * `employees.emergency_contact_phone` (and the matching column on
+ * `applications` / `onboarding_submissions`) is captured for paper-trail
+ * purposes only: HR or 911 dispatch can call it manually in a real
+ * emergency. It is NEVER an SMS recipient.
+ *
+ * Emergency contacts have not consented to receive texts from WCSG. They
+ * are not users of the platform, they have no opt-out mechanism, and
+ * texting them would create a TCPA exposure and a privacy issue.
+ *
+ * Concretely:
+ *   - `sendSmsToUsers` reads from `users` only — emergency-contact rows
+ *     are not in `users`, so this path is structurally safe.
+ *   - `sendSmsToPhoneNumber` accepts a raw number. Callers MUST only pass
+ *     a number belonging to (a) the user themselves, or (b) an applicant
+ *     about their own application. Passing an emergency-contact phone
+ *     through this helper is forbidden — `assertNotEmergencyContactPhone`
+ *     enforces it at runtime and any new caller will be caught in review.
+ * ────────────────────────────────────────────────────────────────────────
  */
-import { db, usersTable } from "@workspace/db";
-import { inArray } from "drizzle-orm";
+import { db, usersTable, employeesTable, onboardingSubmissionsTable } from "@workspace/db";
+import { eq, inArray } from "drizzle-orm";
 import { logger } from "./logger";
+import { normalizePhoneToE164 } from "./phone";
+
+/**
+ * Returns true when `phone` matches an emergency-contact-of-record on any
+ * employee or onboarding submission. Used as a defensive guard before any
+ * one-off SMS — see the file-level POLICY block.
+ *
+ * (Note: the public `applications` table does not carry an emergency-
+ * contact phone — that field is only persisted by the onboarding form,
+ * which writes to both `onboarding_submissions` and the mirrored
+ * `employees` row. Both are checked here.)
+ *
+ * Input is re-normalized to E.164 before comparison so callers can pass a
+ * free-text number safely; every emergency-contact phone in the DB is
+ * already normalized at write time (see `lib/phone.ts`).
+ */
+export async function isEmergencyContactPhone(phone: string): Promise<boolean> {
+  const normalized = normalizePhoneToE164(phone);
+  if (!normalized) return false;
+  const [emp] = await db
+    .select({ id: employeesTable.userId })
+    .from(employeesTable)
+    .where(eq(employeesTable.emergencyContactPhone, normalized))
+    .limit(1);
+  if (emp) return true;
+  const [sub] = await db
+    .select({ id: onboardingSubmissionsTable.id })
+    .from(onboardingSubmissionsTable)
+    .where(eq(onboardingSubmissionsTable.emergencyContactPhone, normalized))
+    .limit(1);
+  return Boolean(sub);
+}
 
 interface TwilioCreds {
   accountSid: string;
@@ -201,6 +255,19 @@ export async function sendSmsToPhoneNumber(
   body: string,
 ): Promise<"sent" | "skipped" | "failed"> {
   if (!phone || !/^\+\d{8,15}$/.test(phone)) return "skipped";
+
+  // POLICY guard — emergency-contact numbers must never receive SMS.
+  // See the file header for the full rationale. We refuse rather than
+  // silently "skipped" so the failure is loud in logs if a future caller
+  // accidentally pipes the wrong field through here.
+  if (await isEmergencyContactPhone(phone)) {
+    logger.error(
+      { phoneTail: phone.slice(-4) },
+      "[sms] refusing to text an emergency-contact-of-record (TCPA/consent policy)",
+    );
+    return "skipped";
+  }
+
   const creds = await getTwilioCreds();
   if (!creds) return "skipped";
   try {
