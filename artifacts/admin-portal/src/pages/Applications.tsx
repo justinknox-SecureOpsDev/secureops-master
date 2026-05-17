@@ -6,7 +6,7 @@ import { Textarea } from "@/components/ui/textarea";
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter,
 } from "@/components/ui/dialog";
-import { ClipboardList, Search, Loader2, Copy, ExternalLink, MailCheck, MessageSquareWarning, MessageSquare } from "lucide-react";
+import { ClipboardList, Search, Loader2, Copy, ExternalLink, MailCheck, MailWarning, MailX, MessageSquare, MessageSquareWarning } from "lucide-react";
 import { openSignedObject } from "@/lib/upload";
 import { AMENDMENT_FIELDS } from "@/lib/amendmentFields";
 
@@ -33,8 +33,66 @@ type Application = {
   reviewedBy: string | null;
   reviewedAt: string | null;
   createdEmployeeId: string | null;
+  onboardingEmailStatus: "not_configured" | "sent" | "bounced" | "failed" | null;
+  onboardingEmailMessageId: string | null;
+  onboardingEmailResponse: string | null;
+  onboardingEmailError: string | null;
+  onboardingEmailSentAt: string | null;
+  onboardingEmailAttemptedAt: string | null;
   createdAt: string;
 };
+
+type DeliveryBadge = {
+  label: string;
+  className: string;
+  Icon: typeof MailCheck;
+  tooltip: string;
+};
+
+function deliveryBadge(a: Application): DeliveryBadge | null {
+  if (a.status !== "approved") return null;
+  const s = a.onboardingEmailStatus;
+  if (s === "sent") {
+    return {
+      label: "Delivered",
+      className: "bg-emerald-100 text-emerald-900 border-emerald-300",
+      Icon: MailCheck,
+      tooltip: a.onboardingEmailSentAt
+        ? `SMTP accepted ${new Date(a.onboardingEmailSentAt).toLocaleString()}`
+        : "SMTP accepted",
+    };
+  }
+  if (s === "bounced") {
+    return {
+      label: "Bounced",
+      className: "bg-rose-100 text-rose-900 border-rose-400",
+      Icon: MailX,
+      tooltip: a.onboardingEmailError ?? "Recipient rejected by mail server",
+    };
+  }
+  if (s === "failed") {
+    return {
+      label: "Failed",
+      className: "bg-rose-100 text-rose-900 border-rose-400",
+      Icon: MailX,
+      tooltip: a.onboardingEmailError ?? "SMTP transport error",
+    };
+  }
+  if (s === "not_configured") {
+    return {
+      label: "No SMTP",
+      className: "bg-amber-100 text-amber-900 border-amber-300",
+      Icon: MailWarning,
+      tooltip: "SMTP isn't configured — admin must share link manually",
+    };
+  }
+  return {
+    label: "Unknown",
+    className: "bg-muted text-foreground border-muted-foreground/30",
+    Icon: MailWarning,
+    tooltip: "No delivery status recorded yet",
+  };
+}
 
 type ApproveResp = {
   application: Application;
@@ -286,16 +344,19 @@ export function ApplicationsPage() {
               <th className="text-left px-3 py-2">TX Lic</th>
               <th className="text-left px-3 py-2">Submitted</th>
               <th className="text-left px-3 py-2">Status</th>
+              <th className="text-left px-3 py-2">Onboarding email</th>
               <th></th>
             </tr>
           </thead>
           <tbody>
-            {loading && (<tr><td colSpan={distanceActive ? 10 : 9} className="px-3 py-10 text-center text-muted-foreground"><Loader2 className="w-5 h-5 inline-block animate-spin" /></td></tr>)}
-            {!loading && items.length === 0 && (<tr><td colSpan={distanceActive ? 10 : 9} className="px-3 py-10 text-center text-muted-foreground">No applications.</td></tr>)}
+            {loading && (<tr><td colSpan={distanceActive ? 11 : 10} className="px-3 py-10 text-center text-muted-foreground"><Loader2 className="w-5 h-5 inline-block animate-spin" /></td></tr>)}
+            {!loading && items.length === 0 && (<tr><td colSpan={distanceActive ? 11 : 10} className="px-3 py-10 text-center text-muted-foreground">No applications.</td></tr>)}
             {items.map((a) => {
               const isEligible = a.status !== "approved" && a.status !== "rejected";
+              const badge = deliveryBadge(a);
+              const needsAttention = a.onboardingEmailStatus === "bounced" || a.onboardingEmailStatus === "failed";
               return (
-                <tr key={a.id} className="border-t hover:bg-accent/30">
+                <tr key={a.id} className={`border-t hover:bg-accent/30 ${needsAttention ? "bg-rose-50/60" : ""}`}>
                   <td className="px-3 py-2">
                     <input
                       type="checkbox"
@@ -321,6 +382,19 @@ export function ApplicationsPage() {
                     <span className={`inline-block px-2 py-0.5 text-[11px] uppercase rounded border ${STATUS_STYLES[a.status]}`}>
                       {a.status.replace("_", " ")}
                     </span>
+                  </td>
+                  <td className="px-3 py-2">
+                    {badge ? (
+                      <span
+                        title={badge.tooltip}
+                        className={`inline-flex items-center gap-1 px-2 py-0.5 text-[11px] uppercase rounded border ${badge.className}`}
+                      >
+                        <badge.Icon className="w-3 h-3" />
+                        {badge.label}
+                      </span>
+                    ) : (
+                      <span className="text-xs text-muted-foreground">—</span>
+                    )}
                   </td>
                   <td className="px-3 py-2 text-right">
                     <Button size="sm" variant="outline" onClick={() => setOpenId(a.id)}>Review</Button>
@@ -492,6 +566,11 @@ function ApplicationDialog({
           <div className="text-sm bg-emerald-50 border border-emerald-200 text-emerald-900 p-2 rounded">
             Approved — employee record created. Visit <strong>Onboarding</strong> to view their progress.
           </div>
+        )}
+        {app.status === "approved" && app.onboardingEmailStatus && (
+          <Section title="Onboarding email delivery">
+            <DeliveryDetails app={app} />
+          </Section>
         )}
         {error && <div className="text-sm text-destructive bg-destructive/5 p-2 rounded border border-destructive/20">{error}</div>}
         <DialogFooter className="gap-2 flex-wrap">
@@ -786,6 +865,57 @@ function Field({ label, children }: { label: string; children: React.ReactNode }
     </div>
   );
 }
+function DeliveryDetails({ app }: { app: Application }) {
+  const badge = deliveryBadge(app);
+  const isBad = app.onboardingEmailStatus === "bounced" || app.onboardingEmailStatus === "failed";
+  const isNoSmtp = app.onboardingEmailStatus === "not_configured";
+  const cls = isBad
+    ? "bg-rose-50 border-rose-300 text-rose-900"
+    : isNoSmtp
+      ? "bg-amber-50 border-amber-200 text-amber-900"
+      : "bg-emerald-50 border-emerald-200 text-emerald-900";
+  return (
+    <div className={`text-sm border rounded p-3 space-y-2 ${cls}`}>
+      <div className="flex items-center gap-2">
+        {badge && (
+          <span className={`inline-flex items-center gap-1 px-2 py-0.5 text-[11px] uppercase rounded border ${badge.className}`}>
+            <badge.Icon className="w-3 h-3" />{badge.label}
+          </span>
+        )}
+        <span className="text-xs">→ {app.email}</span>
+      </div>
+      {isBad && (
+        <div className="text-xs">
+          <strong>Needs attention:</strong> the candidate likely never received their onboarding link.
+          Confirm the email address with them and use "Resend onboarding link" on the Onboarding page once it's corrected.
+        </div>
+      )}
+      {isNoSmtp && (
+        <div className="text-xs">
+          SMTP isn't configured, so no email was attempted. Copy the onboarding link from the approval confirmation and share it manually.
+        </div>
+      )}
+      <dl className="grid grid-cols-[max-content_1fr] gap-x-3 gap-y-1 text-xs">
+        {app.onboardingEmailAttemptedAt && (
+          <><dt className="opacity-70">Last attempt</dt><dd>{new Date(app.onboardingEmailAttemptedAt).toLocaleString()}</dd></>
+        )}
+        {app.onboardingEmailSentAt && (
+          <><dt className="opacity-70">Accepted at</dt><dd>{new Date(app.onboardingEmailSentAt).toLocaleString()}</dd></>
+        )}
+        {app.onboardingEmailMessageId && (
+          <><dt className="opacity-70">Message ID</dt><dd className="font-mono break-all">{app.onboardingEmailMessageId}</dd></>
+        )}
+        {app.onboardingEmailResponse && (
+          <><dt className="opacity-70">SMTP response</dt><dd className="font-mono break-all">{app.onboardingEmailResponse}</dd></>
+        )}
+        {app.onboardingEmailError && (
+          <><dt className="opacity-70">Reason</dt><dd className="break-all">{app.onboardingEmailError}</dd></>
+        )}
+      </dl>
+    </div>
+  );
+}
+
 function FileLink({ k, path }: { k: string; path: string | null }) {
   if (!path) return null;
   return (

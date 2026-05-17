@@ -2468,6 +2468,23 @@ export const AdminListApplicationsResponseItem = zod.object({
   reviewerNotes: zod.string().nullish(),
   reviewedAt: zod.string().nullish(),
   createdEmployeeId: zod.string().nullish(),
+  onboardingEmailStatus: zod
+    .enum(["not_configured", "sent", "bounced", "failed"])
+    .nullish()
+    .describe(
+      "Last known SMTP delivery state for the onboarding\/approval email (null if never attempted).",
+    ),
+  onboardingEmailMessageId: zod.string().nullish(),
+  onboardingEmailResponse: zod
+    .string()
+    .nullish()
+    .describe("Raw SMTP response line, when available."),
+  onboardingEmailError: zod
+    .string()
+    .nullish()
+    .describe("Human-readable bounce or transport error reason."),
+  onboardingEmailSentAt: zod.string().nullish(),
+  onboardingEmailAttemptedAt: zod.string().nullish(),
   createdAt: zod.string(),
 });
 export const AdminListApplicationsResponse = zod.array(
@@ -2542,6 +2559,23 @@ export const AdminGetApplicationResponse = zod.object({
   reviewerNotes: zod.string().nullish(),
   reviewedAt: zod.string().nullish(),
   createdEmployeeId: zod.string().nullish(),
+  onboardingEmailStatus: zod
+    .enum(["not_configured", "sent", "bounced", "failed"])
+    .nullish()
+    .describe(
+      "Last known SMTP delivery state for the onboarding\/approval email (null if never attempted).",
+    ),
+  onboardingEmailMessageId: zod.string().nullish(),
+  onboardingEmailResponse: zod
+    .string()
+    .nullish()
+    .describe("Raw SMTP response line, when available."),
+  onboardingEmailError: zod
+    .string()
+    .nullish()
+    .describe("Human-readable bounce or transport error reason."),
+  onboardingEmailSentAt: zod.string().nullish(),
+  onboardingEmailAttemptedAt: zod.string().nullish(),
   createdAt: zod.string(),
 });
 
@@ -2617,6 +2651,23 @@ export const AdminMarkApplicationUnderReviewResponse = zod.object({
   reviewerNotes: zod.string().nullish(),
   reviewedAt: zod.string().nullish(),
   createdEmployeeId: zod.string().nullish(),
+  onboardingEmailStatus: zod
+    .enum(["not_configured", "sent", "bounced", "failed"])
+    .nullish()
+    .describe(
+      "Last known SMTP delivery state for the onboarding\/approval email (null if never attempted).",
+    ),
+  onboardingEmailMessageId: zod.string().nullish(),
+  onboardingEmailResponse: zod
+    .string()
+    .nullish()
+    .describe("Raw SMTP response line, when available."),
+  onboardingEmailError: zod
+    .string()
+    .nullish()
+    .describe("Human-readable bounce or transport error reason."),
+  onboardingEmailSentAt: zod.string().nullish(),
+  onboardingEmailAttemptedAt: zod.string().nullish(),
   createdAt: zod.string(),
 });
 
@@ -2692,6 +2743,23 @@ export const AdminRejectApplicationResponse = zod.object({
   reviewerNotes: zod.string().nullish(),
   reviewedAt: zod.string().nullish(),
   createdEmployeeId: zod.string().nullish(),
+  onboardingEmailStatus: zod
+    .enum(["not_configured", "sent", "bounced", "failed"])
+    .nullish()
+    .describe(
+      "Last known SMTP delivery state for the onboarding\/approval email (null if never attempted).",
+    ),
+  onboardingEmailMessageId: zod.string().nullish(),
+  onboardingEmailResponse: zod
+    .string()
+    .nullish()
+    .describe("Raw SMTP response line, when available."),
+  onboardingEmailError: zod
+    .string()
+    .nullish()
+    .describe("Human-readable bounce or transport error reason."),
+  onboardingEmailSentAt: zod.string().nullish(),
+  onboardingEmailAttemptedAt: zod.string().nullish(),
   createdAt: zod.string(),
 });
 
@@ -2768,6 +2836,23 @@ export const AdminApproveApplicationResponse = zod.object({
     reviewerNotes: zod.string().nullish(),
     reviewedAt: zod.string().nullish(),
     createdEmployeeId: zod.string().nullish(),
+    onboardingEmailStatus: zod
+      .enum(["not_configured", "sent", "bounced", "failed"])
+      .nullish()
+      .describe(
+        "Last known SMTP delivery state for the onboarding\/approval email (null if never attempted).",
+      ),
+    onboardingEmailMessageId: zod.string().nullish(),
+    onboardingEmailResponse: zod
+      .string()
+      .nullish()
+      .describe("Raw SMTP response line, when available."),
+    onboardingEmailError: zod
+      .string()
+      .nullish()
+      .describe("Human-readable bounce or transport error reason."),
+    onboardingEmailSentAt: zod.string().nullish(),
+    onboardingEmailAttemptedAt: zod.string().nullish(),
     createdAt: zod.string(),
   }),
   onboardingUrl: zod.string(),
@@ -2993,6 +3078,10 @@ export const AdminResendOnboardingLinkResponse = zod.object({
   onboardingUrl: zod.string(),
   onboardingToken: zod.string(),
   emailSent: zod.boolean().optional(),
+  emailDeliveryStatus: zod
+    .enum(["not_configured", "sent", "bounced", "failed"])
+    .nullish(),
+  emailDeliveryError: zod.string().nullish(),
 });
 
 /**

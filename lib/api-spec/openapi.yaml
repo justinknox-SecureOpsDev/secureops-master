@@ -3322,6 +3322,16 @@ components:
         reviewerNotes: { type: string, nullable: true }
         reviewedAt: { type: string, nullable: true }
         createdEmployeeId: { type: string, nullable: true }
+        onboardingEmailStatus:
+          type: string
+          nullable: true
+          enum: [not_configured, sent, bounced, failed]
+          description: "Last known SMTP delivery state for the onboarding/approval email (null if never attempted)."
+        onboardingEmailMessageId: { type: string, nullable: true }
+        onboardingEmailResponse: { type: string, nullable: true, description: "Raw SMTP response line, when available." }
+        onboardingEmailError: { type: string, nullable: true, description: "Human-readable bounce or transport error reason." }
+        onboardingEmailSentAt: { type: string, nullable: true }
+        onboardingEmailAttemptedAt: { type: string, nullable: true }
         createdAt: { type: string }
 
     ReviewApplicationRequest:
@@ -3532,3 +3542,8 @@ components:
         onboardingUrl: { type: string }
         onboardingToken: { type: string }
         emailSent: { type: boolean }
+        emailDeliveryStatus:
+          type: string
+          nullable: true
+          enum: [not_configured, sent, bounced, failed]
+        emailDeliveryError: { type: string, nullable: true }

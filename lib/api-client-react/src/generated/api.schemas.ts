@@ -1237,6 +1237,20 @@ export const ApplicationIdDocType = {
   passport: "passport",
 } as const;
 
+/**
+ * Last known SMTP delivery state for the onboarding/approval email (null if never attempted).
+ */
+export type ApplicationOnboardingEmailStatus =
+  | (typeof ApplicationOnboardingEmailStatus)[keyof typeof ApplicationOnboardingEmailStatus]
+  | null;
+
+export const ApplicationOnboardingEmailStatus = {
+  not_configured: "not_configured",
+  sent: "sent",
+  bounced: "bounced",
+  failed: "failed",
+} as const;
+
 export interface Application {
   id: string;
   status: ApplicationStatus;
@@ -1277,6 +1291,15 @@ export interface Application {
   reviewerNotes?: string | null;
   reviewedAt?: string | null;
   createdEmployeeId?: string | null;
+  /** Last known SMTP delivery state for the onboarding/approval email (null if never attempted). */
+  onboardingEmailStatus?: ApplicationOnboardingEmailStatus;
+  onboardingEmailMessageId?: string | null;
+  /** Raw SMTP response line, when available. */
+  onboardingEmailResponse?: string | null;
+  /** Human-readable bounce or transport error reason. */
+  onboardingEmailError?: string | null;
+  onboardingEmailSentAt?: string | null;
+  onboardingEmailAttemptedAt?: string | null;
   createdAt: string;
 }
 
@@ -1473,10 +1496,23 @@ export interface OnboardingDetail {
   applicationId?: string | null;
 }
 
+export type OnboardingLinkResponseEmailDeliveryStatus =
+  | (typeof OnboardingLinkResponseEmailDeliveryStatus)[keyof typeof OnboardingLinkResponseEmailDeliveryStatus]
+  | null;
+
+export const OnboardingLinkResponseEmailDeliveryStatus = {
+  not_configured: "not_configured",
+  sent: "sent",
+  bounced: "bounced",
+  failed: "failed",
+} as const;
+
 export interface OnboardingLinkResponse {
   onboardingUrl: string;
   onboardingToken: string;
   emailSent?: boolean;
+  emailDeliveryStatus?: OnboardingLinkResponseEmailDeliveryStatus;
+  emailDeliveryError?: string | null;
 }
 
 export type GetSitesParams = {

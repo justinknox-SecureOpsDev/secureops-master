@@ -41,17 +41,57 @@ export interface EmailMessage {
   html?: string;
 }
 
-export async function sendEmail(msg: EmailMessage): Promise<boolean> {
+/**
+ * Detailed outcome of an SMTP handoff.
+ *
+ *   status:
+ *     - "not_configured" — SMTP env vars missing; nothing was attempted.
+ *     - "sent"           — SMTP accepted the message with no rejected recipients.
+ *     - "bounced"        — SMTP rejected one or more recipients (synchronous bounce).
+ *                          Asynchronous bounces (delivery later refused by the
+ *                          recipient's MTA) are NOT captured here — those require
+ *                          provider webhooks (e.g. SendGrid Event API). The
+ *                          schema columns are nonetheless designed so a webhook
+ *                          handler can flip the row to "bounced" later.
+ *     - "failed"         — transport threw (network/auth/timeout).
+ */
+export type EmailSendStatus = "not_configured" | "sent" | "bounced" | "failed";
+
+export interface EmailSendResult {
+  status: EmailSendStatus;
+  ok: boolean;
+  messageId: string | null;
+  response: string | null;
+  rejected: string[];
+  error: string | null;
+}
+
+export async function sendEmailDetailed(msg: EmailMessage): Promise<EmailSendResult> {
   const t = getTransport();
-  if (!t) return false;
+  if (!t) {
+    return { status: "not_configured", ok: false, messageId: null, response: null, rejected: [], error: null };
+  }
   const from = process.env.SMTP_FROM || process.env.SMTP_USER!;
   try {
-    await t.sendMail({ from, to: msg.to, subject: msg.subject, text: msg.text, html: msg.html });
-    return true;
+    const info = await t.sendMail({ from, to: msg.to, subject: msg.subject, text: msg.text, html: msg.html });
+    const rejected = Array.isArray(info.rejected) ? info.rejected.map(String) : [];
+    const messageId = typeof info.messageId === "string" ? info.messageId : null;
+    const response = typeof info.response === "string" ? info.response : null;
+    if (rejected.length > 0) {
+      logger.warn({ to: msg.to, rejected, response }, "SMTP rejected recipient(s)");
+      return { status: "bounced", ok: false, messageId, response, rejected, error: null };
+    }
+    return { status: "sent", ok: true, messageId, response, rejected: [], error: null };
   } catch (err) {
+    const error = err instanceof Error ? `${err.name}: ${err.message}` : String(err);
     logger.error({ err, to: msg.to }, "Failed to send email");
-    return false;
+    return { status: "failed", ok: false, messageId: null, response: null, rejected: [], error };
   }
+}
+
+export async function sendEmail(msg: EmailMessage): Promise<boolean> {
+  const r = await sendEmailDetailed(msg);
+  return r.ok;
 }
 
 export function renderOnboardingEmail(opts: {

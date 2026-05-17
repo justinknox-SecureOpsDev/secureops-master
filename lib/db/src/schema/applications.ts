@@ -44,6 +44,21 @@ export const applicationsTable = pgTable("applications", {
   reviewedBy: uuid("reviewed_by"),
   reviewedAt: timestamp("reviewed_at", { withTimezone: true }),
   createdEmployeeId: uuid("created_employee_id"),
+  // Onboarding-approval email delivery state. Captured from the SMTP handoff
+  // when the admin approves the application (and again on resend). Lets HR
+  // see at a glance whether the candidate actually received their link.
+  //   status: null | "not_configured" | "sent" | "bounced" | "failed"
+  //   - not_configured: SMTP not set up; admin must share link manually
+  //   - sent: SMTP accepted with no rejected recipients
+  //   - bounced: SMTP rejected one or more recipients (response captured)
+  //   - failed: transport threw (network/auth error)
+  // messageId, response, error are pulled from the nodemailer result.
+  onboardingEmailStatus: text("onboarding_email_status"),
+  onboardingEmailMessageId: text("onboarding_email_message_id"),
+  onboardingEmailResponse: text("onboarding_email_response"),
+  onboardingEmailError: text("onboarding_email_error"),
+  onboardingEmailSentAt: timestamp("onboarding_email_sent_at", { withTimezone: true }),
+  onboardingEmailAttemptedAt: timestamp("onboarding_email_attempted_at", { withTimezone: true }),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow().$onUpdate(() => new Date()),
 });

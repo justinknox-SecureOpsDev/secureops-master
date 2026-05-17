@@ -28,7 +28,7 @@ import {
 import { z } from "zod/v4";
 import { requireAdmin } from "../middlewares/auth";
 import { sendPushToUsers } from "../lib/push";
-import { sendEmail, renderOnboardingEmail, renderResendOnboardingEmail, renderRejectionEmail, renderApplicationReceivedEmail, renderRequestInfoEmail } from "../lib/email";
+import { sendEmail, sendEmailDetailed, renderOnboardingEmail, renderResendOnboardingEmail, renderRejectionEmail, renderApplicationReceivedEmail, renderRequestInfoEmail } from "../lib/email";
 import { sendSmsToPhoneNumber } from "../lib/sms";
 
 const router: IRouter = Router();
@@ -218,6 +218,12 @@ function rowToApplication(r: ApplicationRow, distanceMiles: number | null = null
     trainingCertificateKeys: r.trainingCertificateKeys ?? null,
     availability: r.availability ?? null,
     reviewedAt: r.reviewedAt ? r.reviewedAt.toISOString() : null,
+    onboardingEmailStatus: r.onboardingEmailStatus ?? null,
+    onboardingEmailMessageId: r.onboardingEmailMessageId ?? null,
+    onboardingEmailResponse: r.onboardingEmailResponse ?? null,
+    onboardingEmailError: r.onboardingEmailError ?? null,
+    onboardingEmailSentAt: r.onboardingEmailSentAt ? r.onboardingEmailSentAt.toISOString() : null,
+    onboardingEmailAttemptedAt: r.onboardingEmailAttemptedAt ? r.onboardingEmailAttemptedAt.toISOString() : null,
     createdAt: r.createdAt.toISOString(),
   };
 }
@@ -653,6 +659,7 @@ router.post("/admin/applications/:id/approve", requireAdmin, async (req, res): P
   const app = result.updated;
   let emailSent = false;
   let smsStatus: "sent" | "skipped" | "failed" = "skipped";
+  let updatedApp = result.updated;
   if (onboardingUrl) {
     const emailMsg = renderOnboardingEmail({
       firstName: app.firstName,
@@ -660,16 +667,33 @@ router.post("/admin/applications/:id/approve", requireAdmin, async (req, res): P
       email: app.email,
       tempPassword: result.tempPasswordPlain,
     });
-    emailSent = await sendEmail({
+    const delivery = await sendEmailDetailed({
       to: app.email,
       subject: emailMsg.subject,
       text: emailMsg.text,
       html: emailMsg.html,
     });
-    if (emailSent) {
-      req.log.info({ employeeId: result.userId, to: app.email }, "Onboarding approval email sent");
+    emailSent = delivery.ok;
+    const now = new Date();
+    const [persisted] = await db.update(applicationsTable).set({
+      onboardingEmailStatus: delivery.status,
+      onboardingEmailMessageId: delivery.messageId,
+      onboardingEmailResponse: delivery.response,
+      onboardingEmailError: delivery.status === "bounced"
+        ? `Recipient(s) rejected: ${delivery.rejected.join(", ")}${delivery.response ? ` — ${delivery.response}` : ""}`
+        : delivery.error,
+      onboardingEmailAttemptedAt: now,
+      onboardingEmailSentAt: delivery.ok ? now : null,
+    }).where(eq(applicationsTable.id, appId)).returning();
+    if (persisted) updatedApp = persisted;
+    if (delivery.ok) {
+      req.log.info({ employeeId: result.userId, to: app.email, messageId: delivery.messageId }, "Onboarding approval email sent");
+    } else if (delivery.status === "bounced") {
+      req.log.warn({ employeeId: result.userId, to: app.email, rejected: delivery.rejected, response: delivery.response }, "Onboarding email bounced");
+    } else if (delivery.status === "failed") {
+      req.log.warn({ employeeId: result.userId, to: app.email, error: delivery.error }, "Onboarding email send failed");
     } else {
-      req.log.info({ employeeId: result.userId }, "Onboarding email not sent — admin must share link manually");
+      req.log.info({ employeeId: result.userId }, "Onboarding email not sent — SMTP not configured");
     }
 
     // SMS fallback: text the onboarding link to the applicant's phone so
@@ -691,7 +715,7 @@ router.post("/admin/applications/:id/approve", requireAdmin, async (req, res): P
   }
 
   res.json({
-    application: rowToApplication(result.updated),
+    application: rowToApplication(updatedApp),
     onboardingUrl,
     onboardingToken: token,
     employeeId: result.userId,
@@ -1262,21 +1286,46 @@ router.post("/admin/onboarding/:employeeId/resend", requireAdmin, async (req, re
   // Resend doesn't reset password; we don't include credentials in the email
   // (we don't have the plaintext anymore). Just the link.
   let emailSent = false;
+  let deliveryStatus: string | null = null;
+  let deliveryError: string | null = null;
   if (onboardingUrl) {
     const emailMsg = renderResendOnboardingEmail({
       firstName: user.firstName,
       onboardingUrl,
     });
-    emailSent = await sendEmail({
+    const delivery = await sendEmailDetailed({
       to: user.email,
       subject: emailMsg.subject,
       text: emailMsg.text,
       html: emailMsg.html,
     });
-    if (emailSent) {
-      req.log.info({ employeeId, to: user.email }, "Resent onboarding email sent");
+    emailSent = delivery.ok;
+    deliveryStatus = delivery.status;
+    deliveryError = delivery.status === "bounced"
+      ? `Recipient(s) rejected: ${delivery.rejected.join(", ")}${delivery.response ? ` — ${delivery.response}` : ""}`
+      : delivery.error;
+    // Mirror delivery state onto the originating application row (if any) so
+    // the Applications list reflects the latest known state, not just the
+    // outcome of the original approve email.
+    if (prev?.applicationId) {
+      const now = new Date();
+      await db.update(applicationsTable).set({
+        onboardingEmailStatus: delivery.status,
+        onboardingEmailMessageId: delivery.messageId,
+        onboardingEmailResponse: delivery.response,
+        onboardingEmailError: deliveryError,
+        onboardingEmailAttemptedAt: now,
+        onboardingEmailSentAt: delivery.ok ? now : null,
+      }).where(eq(applicationsTable.id, prev.applicationId));
+    }
+    if (delivery.ok) {
+      req.log.info({ employeeId, to: user.email, messageId: delivery.messageId }, "Resent onboarding email sent");
+    } else if (delivery.status === "bounced") {
+      req.log.warn({ employeeId, to: user.email, rejected: delivery.rejected, response: delivery.response }, "Resent onboarding email bounced");
+    } else if (delivery.status === "failed") {
+      req.log.warn({ employeeId, to: user.email, error: delivery.error }, "Resent onboarding email failed");
     } else {
-      req.log.info({ employeeId }, "Resent onboarding email not sent — admin must share link manually");
+      req.log.info({ employeeId }, "Resent onboarding email not sent — SMTP not configured");
     }
   } else {
     req.log.error({ employeeId }, "Resend onboarding: APP_BASE_URL/REPLIT_DOMAINS unset; cannot build link");
@@ -1286,6 +1335,8 @@ router.post("/admin/onboarding/:employeeId/resend", requireAdmin, async (req, re
     onboardingUrl,
     onboardingToken: token,
     emailSent,
+    emailDeliveryStatus: deliveryStatus,
+    emailDeliveryError: deliveryError,
   });
 });
 
