@@ -4,15 +4,74 @@ import { View, Text, StyleSheet, FlatList, TouchableOpacity, ActivityIndicator, 
 import { useColors } from "@/hooks/useColors";
 import { useGetEmployees, getGetEmployeesQueryKey } from "@workspace/api-client-react";
 import { Feather } from "@expo/vector-icons";
-import { useRouter } from "expo-router";
+import { useRouter, useLocalSearchParams } from "expo-router";
 
 const STATUS_FILTERS = ["all", "active", "inactive", "pending"] as const;
+
+const ONLINE_WINDOW_MS = 5 * 60 * 1000;
+const NEW_USER_WINDOW_MS = 7 * 24 * 60 * 60 * 1000;
+
+/**
+ * Subtle presence marker.
+ *  - Green ringed dot ("Online") when lastActiveAt is within ~5 min.
+ *  - Gold "NEW" pill when the user logged in for the first time within
+ *    the last 7 days. Helps admins notice freshly-onboarded officers
+ *    starting to use the app.
+ * Renders nothing when neither applies, so quiet rows stay clean.
+ */
+function PresenceMarker({ item }: { item: any }) {
+  const colors = useColors();
+  const now = Date.now();
+  const lastActiveMs = item.lastActiveAt ? new Date(item.lastActiveAt).getTime() : 0;
+  const firstLoginMs = item.firstLoginAt ? new Date(item.firstLoginAt).getTime() : 0;
+  const isOnline = lastActiveMs > 0 && now - lastActiveMs <= ONLINE_WINDOW_MS;
+  const isNew = firstLoginMs > 0 && now - firstLoginMs <= NEW_USER_WINDOW_MS;
+  if (!isOnline && !isNew) return null;
+  return (
+    <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
+      {isNew && (
+        <View
+          style={{
+            paddingHorizontal: 6,
+            paddingVertical: 2,
+            borderRadius: 4,
+            backgroundColor: colors.accent + "25",
+            borderWidth: 1,
+            borderColor: colors.accent,
+          }}
+          accessibilityLabel="Recently activated account"
+        >
+          <Text style={{ fontSize: 9, fontWeight: "700", color: colors.accent, letterSpacing: 0.5 }}>NEW</Text>
+        </View>
+      )}
+      {isOnline && (
+        <View
+          style={{
+            width: 10,
+            height: 10,
+            borderRadius: 5,
+            backgroundColor: "#22c55e",
+            borderWidth: 2,
+            borderColor: "#22c55e40",
+          }}
+          accessibilityLabel="Online now"
+        />
+      )}
+    </View>
+  );
+}
 
 export default function AdminEmployeesScreen() {
   const colors = useColors();
   const router = useRouter();
+  const { status: statusParam } = useLocalSearchParams<{ status?: string }>();
   const [search, setSearch] = useState("");
-  const [statusFilter, setStatusFilter] = useState<string>("all");
+  // Honour the ?status= query when the dashboard StatCards deep-link in.
+  // Falls back to "all" so direct nav to the tab keeps the existing behaviour.
+  const initialStatus = typeof statusParam === "string" && (STATUS_FILTERS as readonly string[]).includes(statusParam)
+    ? statusParam
+    : "all";
+  const [statusFilter, setStatusFilter] = useState<string>(initialStatus);
   const topPad = useTopPad();
 
   const empParams: any = { status: statusFilter === "all" ? undefined : statusFilter, search: search || undefined };
@@ -111,6 +170,7 @@ export default function AdminEmployeesScreen() {
                   {item.phone && <Text style={[styles.empPhone, { color: colors.mutedForeground }]}>{item.phone}</Text>}
                 </View>
                 <View style={styles.cardRight}>
+                  <PresenceMarker item={item} />
                   <View style={[styles.statusDot, { backgroundColor: getStatusColor(item.status) }]} />
                   <Text style={[styles.statusText, { color: getStatusColor(item.status) }]}>{item.status}</Text>
                   {(item.expiringLicenseCount ?? 0) > 0 && (

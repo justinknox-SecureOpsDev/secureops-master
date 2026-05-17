@@ -22,6 +22,11 @@ const employeeSelect = {
   role: usersTable.role,
   status: usersTable.status,
   createdAt: usersTable.createdAt,
+  // Login activity — surfaced to admins so the personnel list can render
+  // an "online now" dot and a "NEW" pill for freshly-active officers.
+  lastActiveAt: usersTable.lastActiveAt,
+  firstLoginAt: usersTable.firstLoginAt,
+  lastLoginAt: usersTable.lastLoginAt,
   // Contact / identity
   phone: employeesTable.phone,
   address: employeesTable.address,

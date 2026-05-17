@@ -166,8 +166,23 @@ router.post("/auth/login", loginIpLimiter, loginEmailLimiter, async (req, res): 
     return;
   }
   const token = signToken({ userId: user.id, email: user.email, role: user.role });
+  await stampLogin(user.id, user.firstLoginAt);
   res.json({ token, user: userPayload(user) });
 });
+
+// Best-effort: stamp first-login (sticky) + last-login on every successful
+// password auth. Fire-and-forget so a transient DB error never blocks
+// returning a session to the caller.
+async function stampLogin(userId: string, existingFirstLoginAt: Date | null): Promise<void> {
+  const now = new Date();
+  try {
+    await db.update(usersTable)
+      .set(existingFirstLoginAt ? { lastLoginAt: now } : { firstLoginAt: now, lastLoginAt: now })
+      .where(eq(usersTable.id, userId));
+  } catch {
+    // intentionally swallowed — login should still succeed.
+  }
+}
 
 // Second factor: exchange a valid challenge token + TOTP/recovery code for
 // a real session. Rate-limited identically to /auth/login by IP to slow
@@ -194,6 +209,7 @@ router.post("/auth/login-totp", loginIpLimiter, async (req, res): Promise<void> 
     return;
   }
   const token = signToken({ userId: user.id, email: user.email, role: user.role });
+  await stampLogin(user.id, user.firstLoginAt);
   res.json({ token, user: userPayload(user), via: ok });
 });
 

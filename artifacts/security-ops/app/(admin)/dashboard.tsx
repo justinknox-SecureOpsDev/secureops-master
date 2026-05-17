@@ -13,13 +13,29 @@ import { useRouter } from "expo-router";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { confirmAction, notify } from "@/utils/confirm";
 
-function StatCard({ label, value, color, icon }: { label: string; value: number | string; color?: string; icon: string }) {
+function StatCard({ label, value, color, icon, onPress }: { label: string; value: number | string; color?: string; icon: string; onPress?: () => void }) {
   const colors = useColors();
-  return (
-    <View style={[styles.statCard, { backgroundColor: colors.card, borderColor: colors.border }]}>
+  const body = (
+    <>
       <Feather name={icon as any} size={20} color={color || colors.primary} />
       <Text style={[styles.statValue, { color: color || colors.foreground }]}>{value}</Text>
       <Text style={[styles.statLabel, { color: colors.mutedForeground }]}>{label}</Text>
+    </>
+  );
+  if (onPress) {
+    return (
+      <TouchableOpacity
+        activeOpacity={0.7}
+        onPress={onPress}
+        style={[styles.statCard, { backgroundColor: colors.card, borderColor: colors.border }]}
+      >
+        {body}
+      </TouchableOpacity>
+    );
+  }
+  return (
+    <View style={[styles.statCard, { backgroundColor: colors.card, borderColor: colors.border }]}>
+      {body}
     </View>
   );
 }
@@ -114,20 +130,20 @@ export default function AdminDashboardScreen() {
       <View style={styles.section}>
         <Text style={[styles.sectionTitle, { color: colors.accent }]}>OPERATIONAL STATUS</Text>
         <View style={styles.statsGrid}>
-          <StatCard label="Active Shifts" value={summary?.activeShifts ?? 0} icon="activity" color={colors.primary} />
-          <StatCard label="Clocked In" value={summary?.clockedInNow ?? 0} icon="clock" color="#22c55e" />
-          <StatCard label="Open Incidents" value={summary?.openIncidents ?? 0} icon="alert-triangle" color={summary?.criticalIncidents ? colors.destructive : colors.accent} />
-          <StatCard label="Upcoming" value={summary?.upcomingShifts ?? 0} icon="calendar" />
+          <StatCard label="Active Shifts" value={summary?.activeShifts ?? 0} icon="activity" color={colors.primary} onPress={() => router.push("/(admin)/shifts" as any)} />
+          <StatCard label="Clocked In" value={summary?.clockedInNow ?? 0} icon="clock" color="#22c55e" onPress={() => router.push("/(admin)/live-map" as any)} />
+          <StatCard label="Open Incidents" value={summary?.openIncidents ?? 0} icon="alert-triangle" color={summary?.criticalIncidents ? colors.destructive : colors.accent} onPress={() => router.push("/(admin)/incidents" as any)} />
+          <StatCard label="Upcoming" value={summary?.upcomingShifts ?? 0} icon="calendar" onPress={() => router.push("/(admin)/shifts" as any)} />
         </View>
       </View>
 
       <View style={styles.section}>
         <Text style={[styles.sectionTitle, { color: colors.accent }]}>PERSONNEL</Text>
         <View style={styles.statsGrid}>
-          <StatCard label="Total Staff" value={summary?.totalEmployees ?? 0} icon="users" />
-          <StatCard label="Active" value={summary?.activeEmployees ?? 0} icon="user-check" color="#22c55e" />
-          <StatCard label="Pending" value={summary?.pendingEmployees ?? 0} icon="user-plus" color={colors.accent} />
-          <StatCard label="Expiring Licences" value={summary?.expiringLicenses ?? 0} icon="file-text" color={summary?.expiringLicenses ? colors.destructive : colors.mutedForeground} />
+          <StatCard label="Total Staff" value={summary?.totalEmployees ?? 0} icon="users" onPress={() => router.push({ pathname: "/(admin)/employees", params: { status: "all" } } as any)} />
+          <StatCard label="Active" value={summary?.activeEmployees ?? 0} icon="user-check" color="#22c55e" onPress={() => router.push({ pathname: "/(admin)/employees", params: { status: "active" } } as any)} />
+          <StatCard label="Pending" value={summary?.pendingEmployees ?? 0} icon="user-plus" color={colors.accent} onPress={() => router.push({ pathname: "/(admin)/employees", params: { status: "pending" } } as any)} />
+          <StatCard label="Expiring Licences" value={summary?.expiringLicenses ?? 0} icon="file-text" color={summary?.expiringLicenses ? colors.destructive : colors.mutedForeground} onPress={() => router.push("/(admin)/licenses" as any)} />
         </View>
       </View>
 

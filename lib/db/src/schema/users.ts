@@ -43,6 +43,15 @@ export const usersTable = pgTable("users", {
   // throttle) so it never becomes a per-request hot write. Used by admins
   // to decide whether revoking sessions is meaningful right now.
   lastActiveAt: timestamp("last_active_at", { withTimezone: true }),
+  // Set the first time the user ever successfully completes /auth/login
+  // (or /auth/login-totp). Stays sticky after that. Powers the "NEW"
+  // pill on the admin personnel list so admins can tell at a glance
+  // which freshly-onboarded officers have actually started using the app.
+  firstLoginAt: timestamp("first_login_at", { withTimezone: true }),
+  // Updated every successful login. Distinct from `lastActiveAt`, which
+  // tracks any authenticated request — `lastLoginAt` is only the password
+  // exchange itself, so it's a useful signal of "they re-entered creds".
+  lastLoginAt: timestamp("last_login_at", { withTimezone: true }),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow().$onUpdate(() => new Date()),
 });
