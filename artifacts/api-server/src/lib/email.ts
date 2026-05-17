@@ -435,18 +435,24 @@ export function renderLicenseExpiryEmail(opts: {
   expiryDate: string;
   daysRemaining: number;
 }): { subject: string; text: string; html: string } {
-  const urgency = opts.daysRemaining <= 7 ? "URGENT" : opts.daysRemaining <= 14 ? "Action needed" : "Reminder";
+  const urgency = opts.daysRemaining <= 7 ? "URGENT" : opts.daysRemaining <= 14 ? "Action needed" : opts.daysRemaining <= 30 ? "Reminder" : "Start renewal now";
   const subject = `${urgency}: your ${opts.licenseType} license expires in ${opts.daysRemaining} days`;
+  // The 60-day notice is intentionally the "start the paperwork" nudge —
+  // Texas DPS renewal turnaround has been running long, so officers need
+  // the full two months to file before the existing license lapses.
+  const headline = opts.daysRemaining > 30
+    ? `Texas DPS renewal can take several weeks right now — please start your ${opts.licenseType} license renewal today so you don't lose shift eligibility when it expires.`
+    : `This is a reminder that your ${opts.licenseType} license is due to expire soon.`;
   const text = [
     `Hi ${opts.firstName},`,
     "",
-    `This is a friendly reminder that your ${opts.licenseType} license is due to expire soon.`,
+    headline,
     "",
     `  License:    ${opts.licenseType} (${opts.licenseNumber})`,
     `  Expires:    ${opts.expiryDate}`,
     `  Days left:  ${opts.daysRemaining}`,
     "",
-    "Please renew before the expiry date. An expired license means you cannot be assigned to qualifying shifts.",
+    "Please renew before the expiry date. An expired license means you cannot clock in or be assigned to qualifying shifts.",
     "If you have already renewed, please send a copy of the new license to HR so we can update your record.",
     "",
     "— Williams Council Security Group",
@@ -456,13 +462,13 @@ export function renderLicenseExpiryEmail(opts: {
     <div style="font-family:Georgia,serif;max-width:560px;margin:0 auto;color:#080c18">
       <h2 style="color:#080c18">${escapeHtml(urgency)}: license renewal needed</h2>
       <p>Hi ${escapeHtml(opts.firstName)},</p>
-      <p>This is a friendly reminder that your <strong>${escapeHtml(opts.licenseType)}</strong> license is due to expire soon.</p>
+      <p>${escapeHtml(headline)}</p>
       <div style="background:#f6f1e1;padding:14px 16px;border-left:3px solid ${accent};margin:18px 0;border-radius:4px">
         <div><strong>License:</strong> ${escapeHtml(opts.licenseType)} (${escapeHtml(opts.licenseNumber)})</div>
         <div><strong>Expires:</strong> ${escapeHtml(opts.expiryDate)}</div>
         <div><strong>Days remaining:</strong> ${opts.daysRemaining}</div>
       </div>
-      <p>Please renew before the expiry date. An expired license means you cannot be assigned to qualifying shifts.</p>
+      <p>Please renew before the expiry date. An expired license means you cannot clock in or be assigned to qualifying shifts.</p>
       <p style="color:#555;font-size:13px">If you have already renewed, please send a copy of the new license to HR so we can update your record.</p>
       <hr style="border:none;border-top:2px solid #c9a84c;margin:24px 0"/>
       <p style="color:#080c18;font-weight:bold;margin:0">Williams Council Security Group</p>

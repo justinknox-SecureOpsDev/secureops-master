@@ -2,7 +2,7 @@ import React from "react";
 import { useTopPad } from "@/hooks/useTopPad";
 import { View, Text, StyleSheet, ScrollView, TouchableOpacity, ActivityIndicator, Platform, Image } from "react-native";
 import { useColors } from "@/hooks/useColors";
-import { useGetEmployeeDashboardSummary, getGetEmployeeDashboardSummaryQueryKey } from "@workspace/api-client-react";
+import { useGetEmployeeDashboardSummary, getGetEmployeeDashboardSummaryQueryKey, useGetLicenses, getGetLicensesQueryKey } from "@workspace/api-client-react";
 import { useAuth } from "@/contexts/AuthContext";
 import { Feather } from "@expo/vector-icons";
 import { useRouter } from "expo-router";
@@ -29,6 +29,37 @@ export default function EmployeeHomeScreen() {
     query: { queryKey: getGetEmployeeDashboardSummaryQueryKey() }
   });
 
+  // Pull the officer's own licenses so we can show a hard "you can't work
+  // right now" banner when every license is expired or none exist. We
+  // compute the worst-case nearest expiry too so the 60-day Texas DPS
+  // window is visible in-app — the email is a reminder, but officers live
+  // in the mobile app, so the warning belongs here too.
+  const { data: myLicenses } = useGetLicenses({}, { query: { queryKey: getGetLicensesQueryKey({}) } });
+  const licenseAlert = React.useMemo(() => {
+    const list = (myLicenses ?? []) as Array<{ expiryDate?: string; type?: string }>;
+    if (list.length === 0) {
+      return { kind: "missing" as const, daysRemaining: 0, type: null as string | null };
+    }
+    const todayMs = Date.now();
+    const dayMs = 24 * 60 * 60 * 1000;
+    let nearest: { days: number; type: string | null; expired: boolean } | null = null;
+    for (const l of list) {
+      if (!l.expiryDate) continue;
+      const days = Math.floor((new Date(l.expiryDate).getTime() - todayMs) / dayMs);
+      const expired = days < 0;
+      if (!nearest || days > nearest.days) {
+        // We care about the MAX days remaining across all licenses: if any
+        // one is still valid the officer can keep working. So we track the
+        // "best" license here.
+        nearest = { days, type: l.type ?? null, expired };
+      }
+    }
+    if (!nearest) return null;
+    if (nearest.expired) return { kind: "expired" as const, daysRemaining: nearest.days, type: nearest.type };
+    if (nearest.days <= 60) return { kind: "expiring" as const, daysRemaining: nearest.days, type: nearest.type };
+    return null;
+  }, [myLicenses]);
+
   if (isLoading) {
     return <View style={[styles.center, { backgroundColor: colors.background }]}><ActivityIndicator size="large" color={colors.primary} /></View>;
   }
@@ -47,6 +78,47 @@ export default function EmployeeHomeScreen() {
       </View>
 
       <EmergencyButton />
+
+      {licenseAlert && (
+        <TouchableOpacity
+          activeOpacity={0.85}
+          onPress={() => router.push("/license-renewal" as any)}
+          style={[
+            styles.licenseBanner,
+            licenseAlert.kind === "expiring"
+              ? { backgroundColor: colors.accent + "20", borderColor: colors.accent }
+              : { backgroundColor: colors.destructive + "20", borderColor: colors.destructive },
+          ]}
+        >
+          <Feather
+            name={licenseAlert.kind === "expiring" ? "alert-circle" : "alert-octagon"}
+            size={26}
+            color={licenseAlert.kind === "expiring" ? colors.accent : colors.destructive}
+          />
+          <View style={{ flex: 1 }}>
+            <Text
+              style={[
+                styles.licenseBannerTitle,
+                { color: licenseAlert.kind === "expiring" ? colors.accent : colors.destructive },
+              ]}
+            >
+              {licenseAlert.kind === "missing"
+                ? "NO ACTIVE LICENSE ON FILE"
+                : licenseAlert.kind === "expired"
+                ? "LICENSE EXPIRED — CANNOT WORK"
+                : `RENEW LICENSE — ${licenseAlert.daysRemaining} DAYS LEFT`}
+            </Text>
+            <Text style={[styles.licenseBannerBody, { color: colors.foreground }]}>
+              {licenseAlert.kind === "missing"
+                ? "You don't have a current security license on record. You can't clock in or claim shifts until HR has one on file."
+                : licenseAlert.kind === "expired"
+                ? "Your security license has expired. You can't clock in or claim shifts until you upload a renewed license."
+                : `Texas DPS renewals are running long. Start your ${licenseAlert.type ?? "security"} license renewal now so it processes before the expiry date.`}
+            </Text>
+            <Text style={[styles.licenseBannerCta, { color: colors.primary }]}>Tap to start renewal →</Text>
+          </View>
+        </TouchableOpacity>
+      )}
 
       {summary?.activeTimeEntry && (
         <View style={[styles.clockedInBanner, { backgroundColor: "#22c55e20", borderColor: "#22c55e" }]}>
@@ -162,6 +234,10 @@ const styles = StyleSheet.create({
   name: { fontSize: 17, fontWeight: "700" },
   logoutBtn: { padding: 8, borderRadius: 8, borderWidth: 1 },
   clockedInBanner: { flexDirection: "row", alignItems: "center", gap: 12, margin: 16, padding: 14, borderRadius: 12, borderWidth: 1 },
+  licenseBanner: { flexDirection: "row", alignItems: "flex-start", gap: 12, marginHorizontal: 16, marginTop: 12, padding: 14, borderRadius: 12, borderWidth: 2 },
+  licenseBannerTitle: { fontSize: 12, fontWeight: "800", letterSpacing: 1, marginBottom: 4 },
+  licenseBannerBody: { fontSize: 13, lineHeight: 18 },
+  licenseBannerCta: { fontSize: 12, fontWeight: "700", marginTop: 6 },
   clockedInTitle: { fontSize: 11, fontWeight: "700", letterSpacing: 2 },
   clockedInTime: { fontSize: 14, fontWeight: "600", marginTop: 2 },
   clockBtn: { paddingHorizontal: 14, paddingVertical: 8, borderRadius: 8 },

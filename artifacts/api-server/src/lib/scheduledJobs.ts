@@ -21,12 +21,12 @@ const MIN_MS = 60 * 1000;
 /**
  * Background maintenance jobs:
  *   1. Cleanup expired revoked-token rows (hourly).
- *   2. License expiry reminders — tiered emails + push at 30 / 14 / 7 days
+ *   2. License expiry reminders — tiered emails + push at 60 / 30 / 14 / 7 days
  *      before expiry. Runs hourly but is idempotent: it persists
  *      `licenses.last_reminder_tier` AND `last_reminder_for_expiry` so
  *      a license is never reminded twice for the same tier on the
  *      same expiry, while a renewed license (different expiry) is
- *      treated as a clean slate and gets the full 30/14/7 cycle.
+ *      treated as a clean slate and gets the full 60/30/14/7 cycle.
  *   3. Pre-shift reminders — push to assigned officers ~2 hours and
  *      ~30 minutes before shift start. Runs every 5 minutes; idempotent
  *      via `shift_assignments.reminder_2h_sent_at` / `reminder_30m_sent_at`,
@@ -69,7 +69,7 @@ export function startScheduledJobs(intervalMs: number = HOUR_MS): NodeJS.Timeout
       // bookkeeping correctly: a license that has not yet been
       // reminded at the 30-day tier still gets the 30-day notice when
       // it lands inside the 14-day window.
-      const tiers = [30, 14, 7];
+      const tiers = [60, 30, 14, 7];
       const today = new Date();
       const todayDateOnly = today.toISOString().slice(0, 10);
 
@@ -197,7 +197,7 @@ export function startScheduledJobs(intervalMs: number = HOUR_MS): NodeJS.Timeout
   }
 
   /**
-   * Training-certification expiry reminders. Same 30/14/7-day tiered
+   * Training-certification expiry reminders. Same 60/30/14/7-day tiered
    * pattern as license reminders (idempotent via lastReminderTier +
    * lastReminderForExpiry, atomic UPDATE...RETURNING claim, rollback on
    * total delivery failure). Skips rows with no expiryDate (perpetual
@@ -205,7 +205,7 @@ export function startScheduledJobs(intervalMs: number = HOUR_MS): NodeJS.Timeout
    */
   async function sendTrainingExpiryReminders(): Promise<void> {
     try {
-      const tiers = [30, 14, 7];
+      const tiers = [60, 30, 14, 7];
       const today = new Date();
       const todayDateOnly = today.toISOString().slice(0, 10);
 

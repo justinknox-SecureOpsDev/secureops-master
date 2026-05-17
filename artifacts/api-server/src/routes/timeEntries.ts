@@ -1,6 +1,6 @@
 import { Router, type IRouter } from "express";
 import { eq, and, gte, lte, isNull, sql } from "drizzle-orm";
-import { db, timeEntriesTable, shiftsTable, usersTable, sitesTable, shiftAssignmentsTable } from "@workspace/db";
+import { db, timeEntriesTable, shiftsTable, usersTable, sitesTable, shiftAssignmentsTable, licensesTable } from "@workspace/db";
 import { requireAuth, requireAdmin } from "../middlewares/auth";
 
 const router: IRouter = Router();
@@ -108,6 +108,29 @@ router.post("/time-entries/clock-in", requireAuth, async (req, res): Promise<voi
   if (existing.length > 0) {
     res.status(400).json({ error: "Bad Request", message: "Already clocked in" });
     return;
+  }
+
+  // License compliance: officers must hold at least one unexpired security
+  // license to clock in. Admins are exempt (they may be helping cover a
+  // shift or troubleshooting a stuck record on someone else's behalf).
+  // 403 with a precise message so the mobile UI can surface the exact
+  // reason — see the banner on the employee Home tab.
+  if (req.user!.role !== "admin") {
+    const [{ count: validLicenses }] = await db
+      .select({ count: sql<number>`count(*)::int` })
+      .from(licensesTable)
+      .where(and(
+        eq(licensesTable.employeeId, req.user!.userId),
+        gte(licensesTable.expiryDate, sql`current_date`),
+      ));
+    if (!validLicenses) {
+      res.status(403).json({
+        error: "Forbidden",
+        code: "license_expired",
+        message: "Your security license has expired or is missing. Upload a renewed license from Profile → My licenses before clocking in.",
+      });
+      return;
+    }
   }
 
   // Geo-resolve site if no shiftId provided.
