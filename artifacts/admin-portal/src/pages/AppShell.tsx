@@ -99,6 +99,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   ];
 
   const accountingLinks: LinkItem[] = [
+    { href: "/payroll/board", label: "Payroll Board", Icon: Wallet },
     { href: "/payroll/pay-run", label: "Pay Run", Icon: Banknote },
     { href: "/tables/invoices", label: "Invoices", Icon: Receipt },
     { href: "/tables/payroll_entries", label: "Payroll", Icon: Wallet },

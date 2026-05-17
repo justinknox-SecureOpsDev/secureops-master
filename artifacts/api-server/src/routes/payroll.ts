@@ -1,6 +1,9 @@
 import { Router, type IRouter } from "express";
 import { eq, and, gte, lte, lt, sql, inArray } from "drizzle-orm";
-import { db, payrollEntriesTable, usersTable, employeesTable, timeEntriesTable, shiftsTable, sitesTable } from "@workspace/db";
+import { db, payrollEntriesTable, usersTable, employeesTable, timeEntriesTable, shiftsTable, sitesTable, auditLogsTable } from "@workspace/db";
+import { isNull } from "drizzle-orm";
+import { z } from "zod/v4";
+// (employeesTable + sitesTable + auditLogsTable used by board endpoint below)
 import { requireAdmin } from "../middlewares/auth";
 
 const router: IRouter = Router();
@@ -366,6 +369,546 @@ router.post("/payroll/pay-run/stripe", requireAdmin, async (req, res): Promise<v
   // to the employee's connected account via stripe.transfers.create(), 3) on
   // success store stripeTransferId + mark paid.  Left as TODO until enabled.
   res.status(501).json({ error: "Not Implemented", message: "Stripe Connect transfer logic not wired yet — set up connected accounts first." });
+});
+
+// =============================================================================
+// PAYROLL BOARD — auto-flow from approved time entries.
+//
+// Compute-on-read: scans approved-but-unbilled time entries and groups them
+// by (employee × site × ISO week). The "Process selected" handoff upserts
+// payroll_entries with status='pending' (refusing to touch anything already
+// processed/paid), then the existing Pay Run page takes over.
+// =============================================================================
+
+// Monday 00:00:00 UTC of the week containing d.
+function mondayOfWeekUTC(d: Date): Date {
+  const x = new Date(d);
+  const day = x.getUTCDay();            // 0=Sun … 6=Sat
+  const diff = day === 0 ? -6 : 1 - day; // back up to Monday
+  x.setUTCDate(x.getUTCDate() + diff);
+  x.setUTCHours(0, 0, 0, 0);
+  return x;
+}
+
+type BoardBucket = {
+  employeeId: string;
+  employeeName: string | null;
+  siteId: string | null;
+  siteName: string | null;
+  periodStart: string; // YYYY-MM-DD (Monday)
+  periodEnd: string;   // YYYY-MM-DD (Sunday)
+  totalHours: number;
+  hourlyRate: number;  // avg rate over the bucket
+  grossPay: number;
+  timeEntryIds: string[];
+  // Lightweight per-entry detail so the admin UI can expand a bucket row and
+  // verify the underlying approved shifts without a second round-trip.
+  entries: Array<{ id: string; clockInTime: string; hoursWorked: number; rate: number }>;
+  existingPayrollEntryId: string | null;
+  existingStatus: string | null; // pending | processed | paid | null (none)
+};
+
+/**
+ * Build all approved time-entry buckets, with any existing payroll_entry
+ * status attached. Buckets where the existing entry is already processed
+ * or paid are still returned so the UI can show "Processed" status — the
+ * caller filters them out for "Ready" lists.
+ */
+async function computeBoardBuckets(filters: {
+  siteId?: string;
+  from?: Date;
+  to?: Date;
+}): Promise<BoardBucket[]> {
+  const conditions = [eq(timeEntriesTable.approvalStatus, "approved")];
+  if (filters.from) conditions.push(gte(timeEntriesTable.clockInTime, filters.from));
+  if (filters.to) conditions.push(lt(timeEntriesTable.clockInTime, filters.to));
+  if (filters.siteId) {
+    conditions.push(sql`coalesce(${timeEntriesTable.siteId}, ${shiftsTable.siteId}) = ${filters.siteId}`);
+  }
+
+  const rows = await db
+    .select({
+      timeEntryId: timeEntriesTable.id,
+      employeeId: timeEntriesTable.employeeId,
+      employeeFirst: usersTable.firstName,
+      employeeLast: usersTable.lastName,
+      clockInTime: timeEntriesTable.clockInTime,
+      hoursWorked: timeEntriesTable.hoursWorked,
+      siteId: sql<string | null>`coalesce(${timeEntriesTable.siteId}, ${shiftsTable.siteId})`,
+      siteName: sitesTable.name,
+      payRate: shiftsTable.payRate,
+      employeeRate: employeesTable.hourlyRate,
+    })
+    .from(timeEntriesTable)
+    .leftJoin(shiftsTable, eq(timeEntriesTable.shiftId, shiftsTable.id))
+    .leftJoin(sitesTable, sql`${sitesTable.id} = coalesce(${timeEntriesTable.siteId}, ${shiftsTable.siteId})`)
+    .leftJoin(usersTable, eq(timeEntriesTable.employeeId, usersTable.id))
+    .leftJoin(employeesTable, eq(employeesTable.userId, timeEntriesTable.employeeId))
+    .where(and(...conditions));
+
+  // Aggregate per (employeeId, siteId, mondayISO).
+  type Agg = {
+    employeeId: string;
+    employeeName: string | null;
+    siteId: string | null;
+    siteName: string | null;
+    periodStart: string;
+    periodEnd: string;
+    hours: number;
+    gross: number;
+    timeEntryIds: string[];
+    entries: Array<{ id: string; clockInTime: string; hoursWorked: number; rate: number }>;
+  };
+  const buckets = new Map<string, Agg>();
+  for (const r of rows) {
+    const monday = mondayOfWeekUTC(r.clockInTime);
+    const periodStart = isoDate(monday);
+    const periodEnd = isoDate(addDays(monday, 6));
+    const siteKey = r.siteId ?? "__nosite__";
+    const key = `${r.employeeId}|${siteKey}|${periodStart}`;
+    const hours = parseFloat(String(r.hoursWorked || "0"));
+    // Prefer shift.payRate; fall back to employee.hourlyRate so ad-hoc
+    // geo-clock-in entries (no shift) still get a rate.
+    const rate = parseFloat(String(r.payRate ?? r.employeeRate ?? "0"));
+    let b = buckets.get(key);
+    if (!b) {
+      b = {
+        employeeId: r.employeeId,
+        employeeName: r.employeeFirst || r.employeeLast
+          ? `${r.employeeFirst ?? ""} ${r.employeeLast ?? ""}`.trim()
+          : null,
+        siteId: r.siteId,
+        siteName: r.siteName,
+        periodStart,
+        periodEnd,
+        hours: 0,
+        gross: 0,
+        timeEntryIds: [],
+        entries: [],
+      };
+      buckets.set(key, b);
+    }
+    b.hours += hours;
+    b.gross += hours * rate;
+    b.timeEntryIds.push(r.timeEntryId);
+    b.entries.push({
+      id: r.timeEntryId,
+      clockInTime: r.clockInTime.toISOString(),
+      hoursWorked: Math.round(hours * 100) / 100,
+      rate: Math.round(rate * 100) / 100,
+    });
+  }
+
+  // Look up any existing payroll_entries for these buckets. We match on
+  // (employeeId, siteId, periodStart). Null siteId is a separate match
+  // because the unique index allows NULL there.
+  const employeeIds = Array.from(new Set(Array.from(buckets.values()).map((b) => b.employeeId)));
+  const existing = employeeIds.length === 0
+    ? []
+    : await db
+        .select({
+          id: payrollEntriesTable.id,
+          employeeId: payrollEntriesTable.employeeId,
+          siteId: payrollEntriesTable.siteId,
+          periodStart: payrollEntriesTable.periodStart,
+          status: payrollEntriesTable.status,
+        })
+        .from(payrollEntriesTable)
+        .where(inArray(payrollEntriesTable.employeeId, employeeIds));
+  const existingMap = new Map<string, { id: string; status: string }>();
+  for (const e of existing) {
+    const key = `${e.employeeId}|${e.siteId ?? "__nosite__"}|${e.periodStart}`;
+    existingMap.set(key, { id: e.id, status: e.status });
+  }
+
+  const out: BoardBucket[] = [];
+  for (const [key, b] of buckets) {
+    const ex = existingMap.get(key) ?? null;
+    out.push({
+      employeeId: b.employeeId,
+      employeeName: b.employeeName,
+      siteId: b.siteId,
+      siteName: b.siteName,
+      periodStart: b.periodStart,
+      periodEnd: b.periodEnd,
+      totalHours: Math.round(b.hours * 100) / 100,
+      hourlyRate: b.hours > 0 ? Math.round((b.gross / b.hours) * 100) / 100 : 0,
+      grossPay: Math.round(b.gross * 100) / 100,
+      timeEntryIds: b.timeEntryIds,
+      entries: b.entries.sort((a, c) => a.clockInTime.localeCompare(c.clockInTime)),
+      existingPayrollEntryId: ex?.id ?? null,
+      existingStatus: ex?.status ?? null,
+    });
+  }
+  return out;
+}
+
+/**
+ * GET /payroll/board?statusFilter=ready|partial|processed|all&siteId=…&from=…&to=…
+ *
+ * Returns approved time-entry buckets grouped by site → week.
+ *
+ * Bucket = one (employee × site × week). A bucket is "ready" when there is
+ * no payroll_entry yet, or its existing payroll_entry is still `pending`.
+ * A group is:
+ *   - ready:     every bucket is ready
+ *   - processed: every bucket is processed/paid
+ *   - partial:   a mix (e.g. officer A is paid for the week; officer B's
+ *                approval arrived later and is still ready)
+ *
+ * The default `statusFilter=ready` returns both `ready` AND `partial`
+ * groups, but trims out the already-processed buckets in partial groups —
+ * so newly-approved work in a partial week shows up as a ready delta
+ * immediately, while paid officers are not re-listed. This is the
+ * "Ready delta" semantic.
+ *
+ * NB: the granularity of the delta is per officer-week, not per individual
+ * time entry. The DB enforces a unique payroll_entry per
+ * (employeeId, siteId, periodStart), so once an officer's week has been
+ * processed it cannot be re-opened without admin intervention on the
+ * existing row in Pay Run. Newly approved time entries falling inside an
+ * already-paid officer-week are intentionally NOT silently merged into a
+ * second payroll_entry — they would create duplicate pay.
+ */
+router.get("/payroll/board", requireAdmin, async (req, res): Promise<void> => {
+  const { statusFilter = "ready", siteId, from, to } = req.query as Record<string, string | undefined>;
+  const filters: { siteId?: string; from?: Date; to?: Date } = {};
+  if (siteId) filters.siteId = siteId;
+  if (from) {
+    const d = new Date(from);
+    if (!Number.isNaN(d.getTime())) filters.from = d;
+  }
+  if (to) {
+    const d = new Date(to);
+    if (!Number.isNaN(d.getTime())) {
+      // Admin "to" date is inclusive: a YYYY-MM-DD value parses to midnight
+      // UTC of that day, but admins expect entries clocked-in during the
+      // selected date to appear. Roll forward 24h so the underlying
+      // `clockInTime < filters.to` comparison covers the whole day.
+      filters.to = new Date(d.getTime() + 24 * 60 * 60 * 1000);
+    }
+  }
+
+  const buckets = await computeBoardBuckets(filters);
+
+  // Group by site+week to compute group status and totals.
+  type Group = {
+    siteId: string | null;
+    siteName: string | null;
+    periodStart: string;
+    periodEnd: string;
+    buckets: BoardBucket[];
+    status: "ready" | "partial" | "processed";
+    totalHours: number;
+    grossPay: number;
+    officerCount: number;
+  };
+  const groups = new Map<string, Group>();
+  for (const b of buckets) {
+    const key = `${b.siteId ?? "__nosite__"}|${b.periodStart}`;
+    let g = groups.get(key);
+    if (!g) {
+      g = {
+        siteId: b.siteId,
+        siteName: b.siteName,
+        periodStart: b.periodStart,
+        periodEnd: b.periodEnd,
+        buckets: [],
+        status: "ready",
+        totalHours: 0,
+        grossPay: 0,
+        officerCount: 0,
+      };
+      groups.set(key, g);
+    }
+    g.buckets.push(b);
+    g.totalHours += b.totalHours;
+    g.grossPay += b.grossPay;
+    g.officerCount += 1;
+  }
+  for (const g of groups.values()) {
+    const processedCount = g.buckets.filter(
+      (b) => b.existingStatus === "processed" || b.existingStatus === "paid",
+    ).length;
+    if (processedCount === 0) g.status = "ready";
+    else if (processedCount === g.buckets.length) g.status = "processed";
+    else g.status = "partial";
+    g.totalHours = Math.round(g.totalHours * 100) / 100;
+    g.grossPay = Math.round(g.grossPay * 100) / 100;
+  }
+
+  const wanted = String(statusFilter || "ready");
+  let result = Array.from(groups.values());
+  if (wanted === "ready") {
+    // Ready delta: show ready + partial groups, but inside partial groups
+    // hide the already-processed buckets so admins only see what's actionable.
+    result = result
+      .filter((g) => g.status === "ready" || g.status === "partial")
+      .map((g) => {
+        if (g.status !== "partial") return g;
+        const readyBuckets = g.buckets.filter(
+          (b) => b.existingStatus !== "processed" && b.existingStatus !== "paid",
+        );
+        const totalHours = Math.round(readyBuckets.reduce((a, b) => a + b.totalHours, 0) * 100) / 100;
+        const grossPay = Math.round(readyBuckets.reduce((a, b) => a + b.grossPay, 0) * 100) / 100;
+        return { ...g, buckets: readyBuckets, officerCount: readyBuckets.length, totalHours, grossPay };
+      });
+  } else if (wanted !== "all") {
+    result = result.filter((g) => g.status === wanted);
+  }
+  result.sort((a, b) =>
+    b.periodStart.localeCompare(a.periodStart) ||
+    (a.siteName ?? "").localeCompare(b.siteName ?? ""),
+  );
+
+  res.json({ groups: result });
+});
+
+/**
+ * POST /payroll/board/process
+ *  body: { selections: [{employeeId, siteId|null, periodStart}], mode: "ach_csv"|"manual" }
+ *
+ * For each selection, recomputes hours/gross from current approved time
+ * entries and UPSERTs a payroll_entry in `pending` state. Existing entries
+ * that are already processed/paid are SKIPPED (never overwritten). Returns
+ * the resulting payroll_entry ids so the caller can pre-select them on the
+ * Pay Run page.
+ */
+const boardProcessSchema = z.object({
+  mode: z.enum(["ach_csv", "manual"]).default("ach_csv"),
+  selections: z.array(
+    z.object({
+      employeeId: z.string().uuid(),
+      siteId: z.string().uuid().nullable(),
+      periodStart: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "periodStart must be YYYY-MM-DD"),
+    }),
+  ).min(1, "selections[] required"),
+});
+
+router.post("/payroll/board/process", requireAdmin, async (req, res): Promise<void> => {
+  const parsed = boardProcessSchema.safeParse(req.body);
+  if (!parsed.success) {
+    res.status(400).json({ error: "Bad Request", message: parsed.error.message, issues: parsed.error.issues });
+    return;
+  }
+  const { selections, mode: safeMode } = parsed.data;
+
+  // Local audit helper so every exit path (success, 409 vanished, 409
+  // all-skipped) writes a payroll.board_process row. The task requires
+  // "every Process action" to be audited; bailing out early without
+  // logging would silently drop those attempts.
+  const writeAudit = async (statusCode: number, metadata: Record<string, unknown>) => {
+    try {
+      await db.insert(auditLogsTable).values({
+        actorUserId: req.user?.userId ?? null,
+        actorEmail: req.user?.email ?? null,
+        actorRole: req.user?.role ?? null,
+        action: "payroll.board_process",
+        method: req.method,
+        path: req.originalUrl,
+        statusCode,
+        ip: req.ip ?? null,
+        userAgent: req.headers["user-agent"] ?? null,
+        metadata: { mode: safeMode, selectionCount: selections.length, ...metadata },
+      });
+    } catch (err) {
+      req.log?.error({ err }, "Failed to write payroll.board_process audit row");
+    }
+  };
+
+  // Compute the full bucket set once and intersect with the caller's selections.
+  const all = await computeBoardBuckets({});
+  const wanted = new Set(
+    selections.map((s) => `${s.employeeId}|${s.siteId ?? "__nosite__"}|${s.periodStart}`),
+  );
+  const matchingKeys = new Set(
+    all.map((b) => `${b.employeeId}|${b.siteId ?? "__nosite__"}|${b.periodStart}`),
+  );
+  const matching = all.filter((b) =>
+    wanted.has(`${b.employeeId}|${b.siteId ?? "__nosite__"}|${b.periodStart}`),
+  );
+
+  // If the user clicked Process but every selected bucket vanished between
+  // load and submit (someone unapproved the time entries, or another admin
+  // processed them first), surface that explicitly instead of silently
+  // returning success with zero ids — otherwise Pay Run opens with nothing
+  // selected and the admin has no idea why.
+  const unmatched = selections.filter(
+    (s) => !matchingKeys.has(`${s.employeeId}|${s.siteId ?? "__nosite__"}|${s.periodStart}`),
+  );
+  if (matching.length === 0) {
+    await writeAudit(409, {
+      matchedCount: 0,
+      payrollEntryIds: [],
+      skipped: [],
+      unmatched,
+      outcome: "vanished",
+    });
+    res.status(409).json({
+      error: "Conflict",
+      message: "None of the selected payroll buckets are still available — they may have been unapproved or processed by another admin. Please reload the Payroll Board.",
+      unmatched,
+    });
+    return;
+  }
+
+  const createdIds: string[] = [];
+  const skipped: Array<{
+    employeeId: string;
+    siteId: string | null;
+    periodStart: string;
+    reason: string;
+    payrollEntryId?: string;
+  }> = [];
+
+  // Per-row idempotent upsert wrapped in a transaction with SELECT … FOR UPDATE.
+  //
+  // We do NOT rely on `ON CONFLICT (employeeId, siteId, periodStart)` because
+  // Postgres treats NULL siteIds as distinct in a unique index — repeated
+  // processing of a no-site bucket would silently insert duplicates and risk
+  // double-pay. The explicit lookup-then-write path here handles both null and
+  // non-null siteId identically, and never overwrites processed/paid rows.
+  for (const b of matching) {
+    if (b.existingStatus === "processed" || b.existingStatus === "paid") {
+      // Skipped buckets are NOT added to payrollEntryIds — Pay Run should
+      // only preselect rows the admin can still act on. The existing id
+      // is captured in `skipped` metadata for traceability.
+      skipped.push({
+        employeeId: b.employeeId,
+        siteId: b.siteId,
+        periodStart: b.periodStart,
+        reason: `already ${b.existingStatus}`,
+        payrollEntryId: b.existingPayrollEntryId ?? undefined,
+      });
+      continue;
+    }
+    const gross = b.grossPay;
+    const tax = Math.round(gross * 0.2 * 100) / 100;
+    const net = Math.round((gross - tax) * 100) / 100;
+
+    const id = await db.transaction(async (tx) => {
+      // Postgres treats NULLs in a unique index as distinct, so two concurrent
+      // requests for the same no-site bucket would both see "no existing row"
+      // and both insert. SELECT … FOR UPDATE can't help when there's no row
+      // to lock yet. Serialize at the bucket key with a transactional advisory
+      // lock so the lookup→insert is atomic across connections.
+      const lockKey = `payroll-board:${b.employeeId}|${b.siteId ?? "__nosite__"}|${b.periodStart}`;
+      await tx.execute(sql`select pg_advisory_xact_lock(hashtextextended(${lockKey}, 0))`);
+
+      const siteCond = b.siteId === null
+        ? isNull(payrollEntriesTable.siteId)
+        : eq(payrollEntriesTable.siteId, b.siteId);
+      const existing = await tx
+        .select({ id: payrollEntriesTable.id, status: payrollEntriesTable.status })
+        .from(payrollEntriesTable)
+        .where(and(
+          eq(payrollEntriesTable.employeeId, b.employeeId),
+          siteCond,
+          eq(payrollEntriesTable.periodStart, b.periodStart),
+        ))
+        .for("update");
+
+      if (existing.length > 0) {
+        const row = existing[0]!;
+        // Re-check inside the lock — another worker may have processed it.
+        if (row.status === "processed" || row.status === "paid") {
+          skipped.push({
+            employeeId: b.employeeId,
+            siteId: b.siteId,
+            periodStart: b.periodStart,
+            reason: `already ${row.status}`,
+            payrollEntryId: row.id,
+          });
+          return null;
+        }
+        await tx
+          .update(payrollEntriesTable)
+          .set({
+            totalHours: String(b.totalHours),
+            hourlyRate: String(b.hourlyRate),
+            grossPay: String(gross),
+            tax: String(tax),
+            netPay: String(net),
+            updatedAt: new Date(),
+          })
+          .where(eq(payrollEntriesTable.id, row.id));
+        return row.id;
+      }
+
+      const [inserted] = await tx
+        .insert(payrollEntriesTable)
+        .values({
+          employeeId: b.employeeId,
+          siteId: b.siteId,
+          periodStart: b.periodStart,
+          periodEnd: b.periodEnd,
+          totalHours: String(b.totalHours),
+          hourlyRate: String(b.hourlyRate),
+          grossPay: String(gross),
+          tax: String(tax),
+          netPay: String(net),
+          status: "pending",
+        })
+        .returning({ id: payrollEntriesTable.id });
+      return inserted?.id ?? null;
+    });
+    if (id) createdIds.push(id);
+  }
+
+  const payrollEntryIds = Array.from(new Set(createdIds));
+
+  // If every matched bucket got skipped (all processed/paid by the time we
+  // locked them), `payrollEntryIds` is empty. Returning 200 here would send
+  // the admin to Pay Run with no preselection and no explanation — surface
+  // it as a conflict instead. Still audit the attempt.
+  if (payrollEntryIds.length === 0) {
+    await writeAudit(409, {
+      matchedCount: matching.length,
+      payrollEntryIds: [],
+      skipped,
+      unmatched,
+      outcome: "all_skipped",
+      buckets: matching.map((b) => ({
+        employeeId: b.employeeId,
+        siteId: b.siteId,
+        periodStart: b.periodStart,
+        timeEntryIds: b.timeEntryIds,
+      })),
+    });
+    res.status(409).json({
+      error: "Conflict",
+      message: "All selected payroll buckets have already been processed or paid. Reload the Payroll Board to see the latest state.",
+      skipped,
+      unmatched,
+    });
+    return;
+  }
+
+  // Explicit audit row. The generic /payroll prefix would also tag this as
+  // "payroll.update" with the request body, but we want a first-class action
+  // type AND the resulting payroll_entry ids in the audit metadata so ops
+  // can answer "which Pay Run batch came from which Board click?".
+  await writeAudit(200, {
+    matchedCount: matching.length,
+    payrollEntryIds,
+    skipped,
+    unmatched,
+    outcome: "ok",
+    buckets: matching.map((b) => ({
+      employeeId: b.employeeId,
+      siteId: b.siteId,
+      periodStart: b.periodStart,
+      timeEntryIds: b.timeEntryIds,
+    })),
+  });
+
+  res.status(200).json({
+    payrollEntryIds,
+    mode: safeMode,
+    processedCount: payrollEntryIds.length,
+    skipped,
+    unmatched,
+  });
 });
 
 router.put("/payroll/:id", requireAdmin, async (req, res): Promise<void> => {

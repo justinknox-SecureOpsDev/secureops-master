@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Banknote, Download, CheckCircle2, AlertTriangle, Loader2, Zap } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -99,16 +99,58 @@ const groupBySiteAndWeek = (rows: PayrollRow[]): SiteGroup[] => {
 };
 
 export default function PayRunPage() {
+  // Honor `?ids=a,b,c&mode=ach_csv|manual` so the Payroll Board can hand off a
+  // pre-selected batch. We parse once at mount and feed `preselectIds` into the
+  // load effect so the rows are highlighted as soon as they arrive.
+  const initialPreselect = useMemo(() => {
+    if (typeof window === "undefined") return { ids: [] as string[], mode: null as null | "ach_csv" | "manual" };
+    const qs = new URLSearchParams(window.location.search);
+    const idsParam = qs.get("ids") ?? "";
+    const ids = idsParam.split(",").map((s) => s.trim()).filter(Boolean);
+    const modeParam = qs.get("mode");
+    const mode: "ach_csv" | "manual" | null =
+      modeParam === "ach_csv" || modeParam === "manual" ? modeParam : null;
+    return { ids, mode };
+  }, []);
+
   const [rows, setRows] = useState<PayrollRow[]>([]);
   const [loading, setLoading] = useState(true);
-  const [statusFilter, setStatusFilter] = useState<"pending" | "processed" | "all">("pending");
+  // When a board handoff arrives we widen the filter so the preselected rows
+  // are guaranteed to show up regardless of their current status.
+  const [statusFilter, setStatusFilter] = useState<"pending" | "processed" | "all">(
+    initialPreselect.ids.length > 0 ? "all" : "pending",
+  );
   const [periodStart, setPeriodStart] = useState("");
   const [periodEnd, setPeriodEnd] = useState("");
-  const [selected, setSelected] = useState<Set<string>>(new Set());
+  const [selected, setSelected] = useState<Set<string>>(new Set(initialPreselect.ids));
   const [preview, setPreview] = useState<Preview | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
   const [toast, setToast] = useState<{ kind: "ok" | "err"; msg: string } | null>(null);
   const [paidRef, setPaidRef] = useState("");
+  const [handoffBanner, setHandoffBanner] = useState<null | { count: number; mode: "ach_csv" | "manual" }>(
+    initialPreselect.ids.length > 0 && initialPreselect.mode
+      ? { count: initialPreselect.ids.length, mode: initialPreselect.mode }
+      : null,
+  );
+  // When the Payroll Board hands off a batch with a chosen mode, we actually
+  // preset the corresponding action: scroll its button into view, focus it
+  // (or the bank-reference input for manual), and ring it for visual emphasis.
+  const exportBtnRef = useRef<HTMLButtonElement | null>(null);
+  const markPaidBtnRef = useRef<HTMLButtonElement | null>(null);
+  const paidRefInputRef = useRef<HTMLInputElement | null>(null);
+  const presetMode = initialPreselect.mode;
+  useEffect(() => {
+    if (!presetMode || loading || rows.length === 0) return;
+    // Run once when rows first arrive after a handoff.
+    if (presetMode === "ach_csv") {
+      exportBtnRef.current?.scrollIntoView({ behavior: "smooth", block: "center" });
+      exportBtnRef.current?.focus();
+    } else if (presetMode === "manual") {
+      markPaidBtnRef.current?.scrollIntoView({ behavior: "smooth", block: "center" });
+      paidRefInputRef.current?.focus();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [loading]);
 
   const authHeaders = useMemo(
     () => ({ "Content-Type": "application/json", Authorization: `Bearer ${getToken() ?? ""}` }),
@@ -124,8 +166,16 @@ export default function PayRunPage() {
       if (periodEnd) params.set("periodEnd", periodEnd);
       const res = await fetch(`/api/payroll?${params.toString()}`, { headers: authHeaders });
       const data = await res.json();
-      setRows(Array.isArray(data) ? data : []);
-      setSelected(new Set());
+      const list: PayrollRow[] = Array.isArray(data) ? data : [];
+      setRows(list);
+      // Preserve a preselection that arrived via ?ids=… on first load, but
+      // narrow it to ids actually present in the current result set so the
+      // selected count never lies.
+      setSelected((prev) => {
+        const ids = new Set(list.map((r) => r.id));
+        const kept = new Set(Array.from(prev).filter((id) => ids.has(id)));
+        return kept;
+      });
       setPreview(null);
     } finally {
       setLoading(false);
@@ -264,6 +314,22 @@ export default function PayRunPage() {
         </div>
       )}
 
+      {handoffBanner && (
+        <div className="mb-4 px-4 py-3 rounded border border-amber-300 bg-amber-50 text-amber-900 flex items-center justify-between gap-3">
+          <div className="text-sm">
+            <strong>{handoffBanner.count}</strong> row{handoffBanner.count === 1 ? "" : "s"} pre-selected from the Payroll Board.
+            {handoffBanner.mode === "ach_csv"
+              ? <> Use <strong>Export ACH/CSV</strong> below to send the batch to your bank.</>
+              : <> Use <strong>Mark as paid</strong> below once you've sent the manual payment.</>}
+          </div>
+          <button
+            type="button"
+            className="text-xs underline opacity-70 hover:opacity-100"
+            onClick={() => setHandoffBanner(null)}
+          >dismiss</button>
+        </div>
+      )}
+
       {/* Filters */}
       <div className="flex flex-wrap gap-3 items-end mb-4 p-4 bg-white border rounded-lg">
         <div>
@@ -305,21 +371,24 @@ export default function PayRunPage() {
           Preview
         </Button>
         <Button
-          className="bg-brand-gold text-brand-navy hover:bg-brand-gold/90"
+          ref={exportBtnRef}
+          className={`bg-brand-gold text-brand-navy hover:bg-brand-gold/90 ${presetMode === "ach_csv" ? "ring-2 ring-offset-2 ring-offset-brand-navy ring-brand-gold animate-pulse" : ""}`}
           onClick={exportCsv}
           disabled={selected.size === 0 || busy !== null}
         >
           {busy === "csv" ? <Loader2 className="w-4 h-4 animate-spin mr-2" /> : <Download className="w-4 h-4 mr-2" />}
           Export ACH CSV
         </Button>
-        <div className="flex gap-2 items-center">
+        <div className={`flex gap-2 items-center ${presetMode === "manual" ? "ring-2 ring-offset-2 ring-offset-brand-navy ring-brand-gold rounded p-1" : ""}`}>
           <Input
+            ref={paidRefInputRef}
             placeholder="Bank ref. (optional)"
             className="h-9 w-44 text-brand-navy"
             value={paidRef}
             onChange={(e) => setPaidRef(e.target.value)}
           />
           <Button
+            ref={markPaidBtnRef}
             variant="outline"
             className="text-brand-navy"
             onClick={markPaid}
