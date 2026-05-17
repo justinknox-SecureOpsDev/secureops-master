@@ -542,6 +542,76 @@ router.delete("/shifts/bulk", requireAdmin, async (req, res): Promise<void> => {
   res.json({ deleted: result.length });
 });
 
+/**
+ * Repair recurring shifts that were created before the timezone fix landed:
+ * historically the repeat builder applied the chosen HH:MM directly to a UTC
+ * calendar date, so a "9:00 AM" Texas shift was stored as 09:00 UTC (04:00
+ * Central). Each shift's `repeatPattern` JSON still carries the intended
+ * local HH:MM, so we re-anchor every row to that local time using the UTC
+ * calendar date of the existing `startTime` as the day key (that's the day
+ * the bug originally aimed at).
+ *
+ * Body: `{ ids: string[], tz?: string }` (defaults to America/Chicago).
+ *
+ * Idempotent: a row already on the correct UTC instant is left untouched and
+ * counted under `alreadyCorrect`. Single (non-repeat) shifts and rows with a
+ * missing/unreadable repeatPattern are counted under `skipped` so the admin
+ * sees a precise tally.
+ */
+router.post("/shifts/series/fix-timezone", requireAdmin, async (req, res): Promise<void> => {
+  const { ids } = req.body ?? {};
+  if (!Array.isArray(ids) || ids.length === 0) {
+    res.status(400).json({ error: "Bad Request", message: "ids[] required" }); return;
+  }
+  // Repair zone is hard-pinned to America/Chicago: every affected series was
+  // created with that intent (WCSG operates in Texas), and pinning the zone
+  // keeps the operation idempotent regardless of which admin browser triggers
+  // it. We deliberately ignore any client-supplied tz here.
+  const tz = "America/Chicago";
+  const timeRe = /^\d{2}:\d{2}$/;
+
+  const rows = await db.select().from(shiftsTable).where(inArray(shiftsTable.id, ids as string[]));
+  if (rows.length === 0) {
+    res.status(404).json({ error: "Not Found", message: "no matching shifts" }); return;
+  }
+
+  let fixed = 0;
+  let alreadyCorrect = 0;
+  let skipped = 0;
+  await db.transaction(async (tx) => {
+    for (const r of rows) {
+      if (!r.isRepeat || !r.repeatPattern) { skipped++; continue; }
+      let pattern: { startTime?: unknown; endTime?: unknown } | null = null;
+      try { pattern = JSON.parse(r.repeatPattern); } catch { /* ignore */ }
+      const startStr = pattern?.startTime;
+      const endStr = pattern?.endTime;
+      if (typeof startStr !== "string" || !timeRe.test(startStr)
+          || typeof endStr !== "string" || !timeRe.test(endStr)) {
+        skipped++; continue;
+      }
+      const [sh, sm] = startStr.split(":").map(Number);
+      const [eh, em] = endStr.split(":").map(Number);
+      const wraps = (eh * 60 + em) <= (sh * 60 + sm);
+
+      const cur = new Date(r.startTime);
+      const y = cur.getUTCFullYear(), mo = cur.getUTCMonth() + 1, da = cur.getUTCDate();
+      const newStart = wallTimeToUtc(y, mo, da, sh, sm, tz);
+      const endBase = wraps ? new Date(Date.UTC(y, mo - 1, da) + 86400000) : new Date(Date.UTC(y, mo - 1, da));
+      const ey = endBase.getUTCFullYear(), em2 = endBase.getUTCMonth() + 1, ed = endBase.getUTCDate();
+      const newEnd = wallTimeToUtc(ey, em2, ed, eh, em, tz);
+
+      if (newStart.getTime() === new Date(r.startTime).getTime()
+          && newEnd.getTime() === new Date(r.endTime).getTime()) {
+        alreadyCorrect++; continue;
+      }
+      await tx.update(shiftsTable).set({ startTime: newStart, endTime: newEnd }).where(eq(shiftsTable.id, r.id));
+      fixed++;
+    }
+  });
+
+  res.json({ fixed, alreadyCorrect, skipped, total: rows.length });
+});
+
 router.get("/shifts/:id", requireAuth, async (req, res): Promise<void> => {
   const id = Array.isArray(req.params.id) ? req.params.id[0] : req.params.id;
   const [shift] = await db.select().from(shiftsTable).where(eq(shiftsTable.id, id));

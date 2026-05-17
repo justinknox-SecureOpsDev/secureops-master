@@ -59,6 +59,45 @@ function fmtTimeOfDay(iso: string): string {
   return d.toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" });
 }
 
+// "HH:MM" in the supplied IANA zone (24h) for an ISO instant. Used to
+// compare what a recurring shift actually starts at against the user's
+// originally-intended HH:MM stored in repeatPattern.
+function localHHMM(iso: string, tz: string): string | null {
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return null;
+  try {
+    const parts = new Intl.DateTimeFormat("en-GB", {
+      timeZone: tz, hour: "2-digit", minute: "2-digit", hour12: false,
+    }).formatToParts(d);
+    const h = parts.find((p) => p.type === "hour")?.value ?? "";
+    const m = parts.find((p) => p.type === "minute")?.value ?? "";
+    if (!h || !m) return null;
+    return `${h === "24" ? "00" : h}:${m}`;
+  } catch { return null; }
+}
+
+// WCSG operates in Texas. Detection and repair are both pinned to
+// America/Chicago so the action is idempotent regardless of where the
+// admin's browser is — running it from a laptop in another zone won't
+// shift times to that zone.
+const REPAIR_TZ = "America/Chicago";
+
+// A series is "affected" by the old UTC-instead-of-local bug when its first
+// occurrence's Central HH:MM doesn't match the intended HH:MM stored in
+// the repeatPattern. Returns the (intended, actual) pair so the UI can
+// explain the fix to the admin before they click.
+function detectSeriesTimezoneIssue(s: Shift | undefined): { intended: string; actual: string } | null {
+  if (!s || !s.repeatPattern) return null;
+  let pattern: { startTime?: unknown } | null = null;
+  try { pattern = JSON.parse(s.repeatPattern); } catch { return null; }
+  const intended = pattern?.startTime;
+  if (typeof intended !== "string" || !/^\d{2}:\d{2}$/.test(intended)) return null;
+  const actual = localHHMM(s.startTime, REPAIR_TZ);
+  if (!actual) return null;
+  if (actual === intended) return null;
+  return { intended, actual };
+}
+
 function levelBadge(level: number): { label: string; cls: string } {
   if (level >= 4) return { label: "L4 / PPO", cls: "bg-purple-100 text-purple-800 border-purple-300" };
   if (level === 3) return { label: "L3 Armed", cls: "bg-amber-100 text-amber-800 border-amber-300" };
@@ -87,9 +126,35 @@ export default function ShiftsPage() {
   const [creating, setCreating] = useState(false);
   const [repeatOpen, setRepeatOpen] = useState(false);
   const [editSeries, setEditSeries] = useState<BulkSeriesTarget | null>(null);
+  const [fixingSeries, setFixingSeries] = useState<
+    { ids: string[]; title: string; intended: string; actual: string } | null
+  >(null);
+  const [fixBusy, setFixBusy] = useState(false);
   const [deleting, setDeleting] = useState<Shift | null>(null);
   const [deletingSeries, setDeletingSeries] = useState<{ ids: string[]; title: string; total: number } | null>(null);
   const [version, setVersion] = useState(0);
+
+  const handleFixSeriesTz = async () => {
+    if (!fixingSeries) return;
+    setFixBusy(true);
+    try {
+      const result = await api<{ fixed: number; alreadyCorrect: number; skipped: number; total: number }>(
+        "/shifts/series/fix-timezone",
+        { method: "POST", body: { ids: fixingSeries.ids } },
+      );
+      alert(
+        `Fixed ${result.fixed} of ${result.total} shifts in "${fixingSeries.title}".`
+        + (result.alreadyCorrect ? `\n${result.alreadyCorrect} were already correct.` : "")
+        + (result.skipped ? `\n${result.skipped} skipped (no recurrence pattern on file).` : ""),
+      );
+      setFixingSeries(null);
+      setVersion((v) => v + 1);
+    } catch (e: any) {
+      alert(e?.message || "Failed to fix series times");
+    } finally {
+      setFixBusy(false);
+    }
+  };
 
   useEffect(() => {
     let cancelled = false;
@@ -312,6 +377,8 @@ export default function ShiftsPage() {
                   {g.series.map((series) => {
                     const sopen = isSeriesOpen(series.key);
                     const next = series.occurrences[0];
+                    const sampleShift = next ?? shifts.find((s) => series.allIds.includes(s.id));
+                    const tzIssue = detectSeriesTimezoneIssue(sampleShift);
                     return (
                       <div key={series.key} className="bg-amber-50/30">
                         <div className="w-full flex items-center gap-3 px-4 py-2.5 hover:bg-amber-50">
@@ -330,8 +397,32 @@ export default function ShiftsPage() {
                                 {next && <> · next: {fmtDateTime(next.startTime)}</>}
                                 {!next && series.hidden > 0 && <> · all upcoming occurrences are beyond 7 days</>}
                               </div>
+                              {tzIssue && (
+                                <div className="text-xs text-red-700 mt-0.5">
+                                  ⚠ Saved at {tzIssue.actual} local — looks like it should be {tzIssue.intended}. Click "Fix time" to repair.
+                                </div>
+                              )}
                             </div>
                           </button>
+                          {tzIssue && (
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              className="shrink-0 border-red-300 text-red-700 hover:bg-red-50"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                setFixingSeries({
+                                  ids: series.allIds,
+                                  title: series.title,
+                                  intended: tzIssue.intended,
+                                  actual: tzIssue.actual,
+                                });
+                              }}
+                              title={`Re-anchor all ${series.total} shifts to ${tzIssue.intended} local time`}
+                            >
+                              Fix time
+                            </Button>
+                          )}
                           <Button
                             variant="outline"
                             size="sm"
@@ -417,6 +508,27 @@ export default function ShiftsPage() {
         initial={editing as any}
         onSaved={() => { setEditing(null); setCreating(false); setVersion((v) => v + 1); }}
       />
+
+      <AlertDialog open={!!fixingSeries} onOpenChange={(b) => { if (!b && !fixBusy) setFixingSeries(null); }}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Fix recurring shift times?</AlertDialogTitle>
+            <AlertDialogDescription>
+              "{fixingSeries?.title}" was created before the timezone fix. Its shifts are saved
+              at <b>{fixingSeries?.actual}</b> Central time but the recurrence pattern says the
+              intended start was <b>{fixingSeries?.intended}</b>. This will re-anchor all{" "}
+              {fixingSeries?.ids.length} occurrences to <b>{fixingSeries?.intended}</b> in{" "}
+              America/Chicago (Texas). Safe to run more than once.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={fixBusy}>Cancel</AlertDialogCancel>
+            <AlertDialogAction onClick={(e) => { e.preventDefault(); handleFixSeriesTz(); }} disabled={fixBusy}>
+              {fixBusy ? "Fixing…" : "Fix times"}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
 
       <AlertDialog open={!!deletingSeries} onOpenChange={(b) => { if (!b) setDeletingSeries(null); }}>
         <AlertDialogContent>
