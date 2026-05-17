@@ -1184,6 +1184,11 @@ export interface SubmitApplicationRequest {
   firstName: string;
   lastName: string;
   email: string;
+  /** Phone number. Free-text accepted (e.g. "(214) 555-1234", "214-555-1234", "+44 20 1234 5678");
+server normalizes to E.164 on submit, defaulting to US/+1 when no country code is present.
+Invalid numbers (not 10 US digits, not 11 US digits starting with 1, or not "+" followed by 8–15 digits)
+return 400.
+ */
   phone: string;
   /** Street address (line 1, optionally line 2) */
   address: string;

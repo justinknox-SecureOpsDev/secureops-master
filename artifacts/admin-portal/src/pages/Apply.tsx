@@ -9,6 +9,24 @@ import { FileUploadField, MultiFileUploadField } from "@/components/FileUploadFi
 import { uploadFileAnon, type UploadedFile } from "@/lib/upload";
 import { CheckCircle2, ChevronLeft, ChevronRight } from "lucide-react";
 
+// Match the server-side normalizer in artifacts/api-server/src/lib/phone.ts.
+// Strips non-digits, then: keeps a leading "+", defaults to US/+1 for 10
+// digits, treats 11 digits starting with "1" as US/+1. Returns null otherwise.
+function normalizePhoneToE164(input: string): string | null {
+  if (typeof input !== "string") return null;
+  const trimmed = input.trim();
+  if (!trimmed) return null;
+  const hadPlus = trimmed.startsWith("+");
+  const digits = trimmed.replace(/\D/g, "");
+  if (!digits) return null;
+  let candidate: string;
+  if (hadPlus) candidate = `+${digits}`;
+  else if (digits.length === 10) candidate = `+1${digits}`;
+  else if (digits.length === 11 && digits.startsWith("1")) candidate = `+${digits}`;
+  else return null;
+  return /^\+\d{8,15}$/.test(candidate) ? candidate : null;
+}
+
 const DAYS = ["mon", "tue", "wed", "thu", "fri", "sat", "sun"] as const;
 const PERIODS = ["morning", "afternoon", "evening", "overnight"] as const;
 type Day = (typeof DAYS)[number];
@@ -92,6 +110,9 @@ export function ApplyPage() {
       if (!form.firstName || !form.lastName) return "First and last name are required.";
       if (!form.email) return "Email is required.";
       if (!form.phone) return "Phone is required.";
+      if (!normalizePhoneToE164(form.phone)) {
+        return "Phone number is invalid. Please enter a valid US phone number (e.g. (214) 555-1234) or include the country code (e.g. +44 20 1234 5678).";
+      }
       if (!form.address) return "Street address is required.";
       if (!form.city) return "City is required.";
       if (!form.state) return "State is required.";

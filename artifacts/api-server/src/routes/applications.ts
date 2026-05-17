@@ -30,6 +30,7 @@ import { requireAdmin } from "../middlewares/auth";
 import { sendPushToUsers } from "../lib/push";
 import { sendEmail, sendEmailDetailed, renderOnboardingEmail, renderResendOnboardingEmail, renderRejectionEmail, renderApplicationReceivedEmail, renderRequestInfoEmail } from "../lib/email";
 import { sendSmsToPhoneNumber } from "../lib/sms";
+import { normalizePhoneToE164 } from "../lib/phone";
 
 const router: IRouter = Router();
 const policyStorage = new ObjectStorageService();
@@ -274,6 +275,17 @@ router.post("/applications", publicApplicationLimiter, async (req, res): Promise
     return;
   }
   const d = parsed.data;
+  // Normalize phone to E.164 so the SMS fallback on approve actually
+  // reaches US applicants who typed "(214) 555-1234" etc. Default country
+  // is US/+1 when no country code is present.
+  const normalizedPhone = normalizePhoneToE164(d.phone);
+  if (!normalizedPhone) {
+    res.status(400).json({
+      error: "Bad Request",
+      message: "Phone number is invalid. Please enter a valid US phone number (e.g. (214) 555-1234) or include the country code (e.g. +44 20 1234 5678).",
+    });
+    return;
+  }
   // Reject any submitted document path that was minted by an authenticated
   // upload session (i.e. starts with /objects/uploads/u/). Only anonymous
   // application-upload paths are accepted in this unauthenticated flow.
@@ -297,7 +309,7 @@ router.post("/applications", publicApplicationLimiter, async (req, res): Promise
       firstName: d.firstName,
       lastName: d.lastName,
       email: d.email.toLowerCase(),
-      phone: d.phone,
+      phone: normalizedPhone,
       address: d.address,
       city: d.city ?? null,
       state: d.state ?? null,
@@ -894,7 +906,19 @@ router.post("/applications/amend/:token", tokenLookupLimiter, async (req, res): 
         res.status(400).json({ error: "Bad Request", message: `Field "${k}" must be text.` });
         return;
       }
-      updates[def.column] = raw;
+      if (k === "phone") {
+        const normalized = normalizePhoneToE164(raw);
+        if (!normalized) {
+          res.status(400).json({
+            error: "Bad Request",
+            message: "Phone number is invalid. Please enter a valid US phone number (e.g. (214) 555-1234) or include the country code (e.g. +44 20 1234 5678).",
+          });
+          return;
+        }
+        updates[def.column] = normalized;
+      } else {
+        updates[def.column] = raw;
+      }
     }
   }
 

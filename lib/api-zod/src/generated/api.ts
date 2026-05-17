@@ -2277,7 +2277,11 @@ export const SubmitApplicationBody = zod.object({
   firstName: zod.string(),
   lastName: zod.string(),
   email: zod.string(),
-  phone: zod.string(),
+  phone: zod
+    .string()
+    .describe(
+      'Phone number. Free-text accepted (e.g. \"(214) 555-1234\", \"214-555-1234\", \"+44 20 1234 5678\");\nserver normalizes to E.164 on submit, defaulting to US\/+1 when no country code is present.\nInvalid numbers (not 10 US digits, not 11 US digits starting with 1, or not \"+\" followed by 8–15 digits)\nreturn 400.\n',
+    ),
   address: zod.string().describe("Street address (line 1, optionally line 2)"),
   city: zod.string().nullish(),
   state: zod.string().nullish().describe("US state code, e.g. TX"),
