@@ -130,6 +130,9 @@ export default function ShiftsPage() {
     { ids: string[]; title: string; intended: string; actual: string } | null
   >(null);
   const [fixBusy, setFixBusy] = useState(false);
+  const [fixAllBusy, setFixAllBusy] = useState(false);
+  const [fixAllConfirm, setFixAllConfirm] = useState(false);
+  const [toast, setToast] = useState<{ kind: "ok" | "err"; msg: string } | null>(null);
   const [deleting, setDeleting] = useState<Shift | null>(null);
   const [deletingSeries, setDeletingSeries] = useState<{ ids: string[]; title: string; total: number } | null>(null);
   const [version, setVersion] = useState(0);
@@ -299,6 +302,60 @@ export default function ShiftsPage() {
   const totalCount = filtered.length;
   const repeatCount = filtered.filter((s) => s.isRepeat).length;
 
+  // Detect every recurring series currently in view that's still on the
+  // pre-fix UTC anchor, so we can offer a one-click "Fix all" at the top.
+  const affectedSeries = useMemo(() => {
+    const out: { ids: string[]; title: string; intended: string; actual: string }[] = [];
+    for (const g of groups) {
+      for (const series of g.series) {
+        const sample = series.occurrences[0] ?? shifts.find((s) => series.allIds.includes(s.id));
+        const tzIssue = detectSeriesTimezoneIssue(sample);
+        if (tzIssue) {
+          out.push({ ids: series.allIds, title: series.title, intended: tzIssue.intended, actual: tzIssue.actual });
+        }
+      }
+    }
+    return out;
+  }, [groups, shifts]);
+
+  const runFixAllSeriesTz = async () => {
+    if (affectedSeries.length === 0) return;
+    setFixAllConfirm(false);
+    setFixAllBusy(true);
+    setToast(null);
+    let totalFixed = 0;
+    let totalAlreadyCorrect = 0;
+    let totalSkipped = 0;
+    let totalShifts = 0;
+    let failures = 0;
+    const seriesCount = affectedSeries.length;
+    for (const s of affectedSeries) {
+      try {
+        const result = await api<{ fixed: number; alreadyCorrect: number; skipped: number; total: number }>(
+          "/shifts/series/fix-timezone",
+          { method: "POST", body: { ids: s.ids } },
+        );
+        totalFixed += result.fixed;
+        totalAlreadyCorrect += result.alreadyCorrect;
+        totalSkipped += result.skipped;
+        totalShifts += result.total;
+      } catch (e) {
+        console.error("Failed to fix series", s.title, e);
+        failures++;
+      }
+    }
+    setFixAllBusy(false);
+    setVersion((v) => v + 1);
+    const parts = [
+      `Fixed ${totalFixed}`,
+      `${totalAlreadyCorrect} already correct`,
+      `${totalSkipped} skipped`,
+    ];
+    if (failures > 0) parts.push(`${failures} series failed`);
+    const summary = `Re-anchored ${seriesCount} series (${totalShifts} shifts): ${parts.join(" · ")}.`;
+    setToast({ kind: failures > 0 ? "err" : "ok", msg: summary });
+  };
+
   return (
     <div className="flex-1 overflow-auto p-6 space-y-4">
       <div className="flex flex-wrap items-center gap-3">
@@ -338,6 +395,47 @@ export default function ShiftsPage() {
       <div className="text-xs text-muted-foreground">
         {loading ? "Loading…" : `${totalCount} shifts in view${repeatCount > 0 ? ` (${repeatCount} from recurring series)` : ""}`}
       </div>
+
+      {toast && (
+        <div
+          className={`flex items-start gap-3 rounded-lg border px-4 py-3 text-sm ${
+            toast.kind === "ok"
+              ? "bg-green-50 border-green-300 text-green-900"
+              : "bg-red-50 border-red-300 text-red-900"
+          }`}
+        >
+          <div className="flex-1">{toast.msg}</div>
+          <button
+            type="button"
+            onClick={() => setToast(null)}
+            className="text-xs underline shrink-0"
+          >
+            Dismiss
+          </button>
+        </div>
+      )}
+
+      {affectedSeries.length > 0 && (
+        <div className="flex items-center gap-3 rounded-lg border border-red-300 bg-red-50 px-4 py-3">
+          <div className="flex-1 text-sm text-red-800">
+            <span className="font-semibold">
+              {affectedSeries.length} recurring series {affectedSeries.length === 1 ? "has" : "have"} wrong times
+            </span>
+            <span className="ml-1">
+              — created before the timezone fix. Click below to re-anchor every occurrence in {statusFilter === "all" ? "all statuses" : `the "${statusFilter}" view`} to America/Chicago.
+            </span>
+          </div>
+          <Button
+            variant="outline"
+            size="sm"
+            className="shrink-0 border-red-400 text-red-700 hover:bg-red-100"
+            onClick={() => setFixAllConfirm(true)}
+            disabled={fixAllBusy}
+          >
+            {fixAllBusy ? "Fixing all…" : `Fix all ${affectedSeries.length}`}
+          </Button>
+        </div>
+      )}
 
       <div className="space-y-3">
         {!loading && groups.length === 0 && (
@@ -409,6 +507,7 @@ export default function ShiftsPage() {
                               variant="outline"
                               size="sm"
                               className="shrink-0 border-red-300 text-red-700 hover:bg-red-50"
+                              disabled={fixAllBusy}
                               onClick={(e) => {
                                 e.stopPropagation();
                                 setFixingSeries({
@@ -418,7 +517,11 @@ export default function ShiftsPage() {
                                   actual: tzIssue.actual,
                                 });
                               }}
-                              title={`Re-anchor all ${series.total} shifts to ${tzIssue.intended} local time`}
+                              title={
+                                fixAllBusy
+                                  ? "Bulk fix in progress…"
+                                  : `Re-anchor all ${series.total} shifts to ${tzIssue.intended} local time`
+                              }
                             >
                               Fix time
                             </Button>
@@ -508,6 +611,23 @@ export default function ShiftsPage() {
         initial={editing as any}
         onSaved={() => { setEditing(null); setCreating(false); setVersion((v) => v + 1); }}
       />
+
+      <AlertDialog open={fixAllConfirm} onOpenChange={(b) => { if (!b && !fixAllBusy) setFixAllConfirm(false); }}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Fix all {affectedSeries.length} affected series?</AlertDialogTitle>
+            <AlertDialogDescription>
+              This will re-anchor every occurrence of {affectedSeries.length} recurring series to their originally intended start times in America/Chicago (Texas). Each series is fixed independently; safe to run more than once. You'll see a summary when it finishes.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={fixAllBusy}>Cancel</AlertDialogCancel>
+            <AlertDialogAction onClick={(e) => { e.preventDefault(); runFixAllSeriesTz(); }} disabled={fixAllBusy}>
+              {fixAllBusy ? "Fixing all…" : `Fix all ${affectedSeries.length}`}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
 
       <AlertDialog open={!!fixingSeries} onOpenChange={(b) => { if (!b && !fixBusy) setFixingSeries(null); }}>
         <AlertDialogContent>
