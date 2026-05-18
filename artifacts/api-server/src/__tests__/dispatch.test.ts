@@ -5,7 +5,6 @@ import bcrypt from "bcryptjs";
 import { sql } from "drizzle-orm";
 import {
   db,
-  pool,
   usersTable,
   clientsTable,
   sitesTable,
@@ -136,7 +135,8 @@ afterAll(async () => {
   await db.execute(sql`DELETE FROM sites WHERE name LIKE ${TAG + "%"}`);
   await db.execute(sql`DELETE FROM clients WHERE name LIKE ${TAG + "%"}`);
   await db.execute(sql`DELETE FROM users WHERE last_name = ${TAG}`);
-  await pool.end();
+  // Pool is closed by globalTeardown — leaving it open here so other
+  // test files in the same vitest worker can keep using it.
 });
 
 function authed(token: string) {

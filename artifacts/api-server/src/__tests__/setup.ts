@@ -9,3 +9,8 @@ process.on("unhandledRejection", (err) => {
 });
 
 process.env.PORT = process.env.PORT ?? "0";
+
+// Share-link minting refuses to run without a trusted origin (no
+// Host-header fallback). Set a known value so the incident-share tests
+// can mint URLs deterministically.
+process.env.APP_BASE_URL = process.env.APP_BASE_URL ?? "http://localhost:8080";
