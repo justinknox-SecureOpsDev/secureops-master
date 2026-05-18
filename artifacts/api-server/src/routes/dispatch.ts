@@ -291,20 +291,20 @@ router.post("/dispatch/assign-nearest", requireAdminOrDispatcher, async (req, re
       maxLevel: sql<number | null>`(
         SELECT MAX(${licensesTable.level})::int
         FROM ${licensesTable}
-        WHERE ${licensesTable.employeeId} = ${usersTable.id}
+        WHERE ${licensesTable.employeeId} = "users"."id"
           AND ${licensesTable.expiryDate} >= current_date
       )`,
       alreadyAssigned: sql<boolean>`EXISTS (
         SELECT 1 FROM ${shiftAssignmentsTable}
         WHERE ${shiftAssignmentsTable.shiftId} = ${shiftId}
-          AND ${shiftAssignmentsTable.employeeId} = ${usersTable.id}
+          AND ${shiftAssignmentsTable.employeeId} = "users"."id"
           AND ${shiftAssignmentsTable.status} IN ('accepted','pending')
       )`,
       conflictingShift: sql<boolean>`EXISTS (
         SELECT 1
           FROM ${shiftAssignmentsTable} sa2
           JOIN ${shiftsTable} s2 ON s2.id = sa2.shift_id
-         WHERE sa2.employee_id = ${usersTable.id}
+         WHERE sa2.employee_id = "users"."id"
            AND sa2.status = 'accepted'
            AND s2.id <> ${shiftId}
            AND s2.start_time < ${shift.endTime}
@@ -415,6 +415,14 @@ router.post("/dispatch/assign-nearest", requireAdminOrDispatcher, async (req, re
 
   // Atomic assign with headcount re-check.
   const result = await db.transaction(async (tx) => {
+    // Serialize concurrent assignments against the same shift: take a
+    // row-level lock on the shift before re-checking filled count. The
+    // second tx blocks here, then sees the updated count and 409s,
+    // instead of racing past the count check and hitting a duplicate
+    // insert.
+    await tx.execute(
+      sql`SELECT id FROM ${shiftsTable} WHERE id = ${shiftId} FOR UPDATE`,
+    );
     const filledRows = await tx
       .select({ c: sql<number>`count(*)::int` })
       .from(shiftAssignmentsTable)
