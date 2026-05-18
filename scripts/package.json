@@ -7,6 +7,7 @@
     "hello": "tsx ./src/hello.ts",
     "seed": "tsx ./src/seed.ts",
     "check-security-headers": "tsx ./src/check-security-headers.ts",
+    "test-dispatcher-authz": "tsx --test ./src/test-dispatcher-authz.ts",
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },
   "dependencies": {

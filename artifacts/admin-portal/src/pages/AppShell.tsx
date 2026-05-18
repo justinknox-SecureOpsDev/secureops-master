@@ -4,7 +4,7 @@ import {
   LogOut, ClipboardList, UserPlus, FileText, ChevronsLeft, ChevronsRight,
   Database, Banknote, ChevronDown, ChevronRight, Receipt, Wallet, MailPlus,
   AlertTriangle, ShieldCheck, Repeat, KeyRound, IdCard, Link2, Download,
-  Radio as RadioIcon,
+  Radio as RadioIcon, Radar, MessageCircle, Users as UsersIcon,
   type LucideIcon,
 } from "lucide-react";
 import { TABLES } from "@/lib/tables";
@@ -19,9 +19,10 @@ type SystemStatus = {
   corsOriginsConfigured: boolean;
 };
 
-function useSystemStatus() {
+function useSystemStatus(role: string | undefined) {
   const [status, setStatus] = useState<SystemStatus | null>(null);
   useEffect(() => {
+    if (role !== "admin") return; // dispatcher is blocked from system status
     let cancelled = false;
     const token = (() => { try { return localStorage.getItem("wcsg.adminToken") || ""; } catch { return ""; } })();
     if (!token) return;
@@ -30,7 +31,7 @@ function useSystemStatus() {
       .then((data) => { if (!cancelled && data) setStatus(data); })
       .catch(() => { /* ignore */ });
     return () => { cancelled = true; };
-  }, []);
+  }, [role]);
   return status;
 }
 
@@ -68,7 +69,8 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   const [match, params] = useRoute("/tables/:table");
   const [location] = useLocation();
   const activeTable = match ? params?.table : null;
-  const systemStatus = useSystemStatus();
+  const isDispatcher = user?.role === "dispatcher";
+  const systemStatus = useSystemStatus(user?.role);
 
   const [collapsed, setCollapsed] = useState<boolean>(() => {
     try { return localStorage.getItem(COLLAPSE_KEY) === "1"; } catch { return false; }
@@ -107,6 +109,8 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   ];
 
   const securityLinks: LinkItem[] = [
+    { href: "/chat", label: "Chat", Icon: MessageCircle },
+    { href: "/personnel", label: "Personnel", Icon: UsersIcon },
     { href: "/radio", label: "Radio", Icon: RadioIcon },
     { href: "/dar", label: "Daily Reports", Icon: ClipboardList },
     { href: "/compliance", label: "Compliance", Icon: ShieldCheck },
@@ -119,6 +123,23 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   ];
 
   const operationsTables = TABLES.filter((t) => !ACCOUNTING_TABLE_NAMES.has(t.name));
+
+  // Dispatchers see a narrow side nav: Dispatch + Shifts board + Radio
+  // + their own 2FA. Personnel and incidents are reached through the
+  // Dispatch page itself, which uses dedicated dispatcher-safe read
+  // endpoints (`/dispatch/*`, `/employees`, `/sites`) — the generic
+  // `/admin/tables/*` grid stays admin-only.
+  const dispatcherOpsTables = operationsTables.filter((t) => t.name === "shifts");
+
+  const dispatchLink: LinkItem = { href: "/dispatch", label: "Dispatch", Icon: Radar };
+  const dispatcherCoreLinks: LinkItem[] = [
+    { href: "/chat", label: "Chat", Icon: MessageCircle },
+    { href: "/personnel", label: "Personnel", Icon: UsersIcon },
+  ];
+  const dispatcherSecurityLinks: LinkItem[] = [
+    { href: "/radio", label: "Radio", Icon: RadioIcon },
+    { href: "/account/security", label: "My 2FA", Icon: KeyRound },
+  ];
 
   const renderLink = ({ href, label, Icon, badge }: LinkItem) => {
     const active = location === href;
@@ -194,8 +215,51 @@ export function AppShell({ children }: { children: React.ReactNode }) {
         </div>
 
         <nav className="flex-1 overflow-y-auto py-3">
+          {/* Dispatch — pinned at top for both admin and dispatcher. */}
+          {renderLink(dispatchLink)}
+
+          {/* Dispatchers see a narrow read-only nav only. */}
+          {isDispatcher && (
+            <>
+              {dispatcherCoreLinks.map(renderLink)}
+
+              {!collapsed
+                ? <div className="mt-2"><SectionHeader id="security" label="Security" /></div>
+                : <div className="my-2 mx-3 border-t border-sidebar-border/40" />}
+              {(collapsed || openSections.security !== false) && dispatcherSecurityLinks.map(renderLink)}
+
+              {!collapsed
+                ? <div className="mt-2"><SectionHeader id="operations" label="Operations" /></div>
+                : <div className="my-2 mx-3 border-t border-sidebar-border/40" />}
+              {(collapsed || openSections.operations !== false) && dispatcherOpsTables.map((t) => {
+                const active = activeTable === t.name;
+                const initials = t.label.slice(0, 2).toUpperCase();
+                return (
+                  <Link
+                    key={t.name}
+                    href={`/tables/${t.name}`}
+                    title={collapsed ? t.label : undefined}
+                    className={`flex items-center text-sm border-l-2 transition-colors ${
+                      collapsed ? "justify-center px-0 py-2" : "justify-between gap-2 px-4 py-2"
+                    } ${
+                      active
+                        ? "bg-sidebar-accent text-sidebar-accent-foreground border-sidebar-primary"
+                        : "border-transparent hover:bg-sidebar-accent/50"
+                    }`}
+                  >
+                    {collapsed
+                      ? <span className="text-[11px] font-mono opacity-80">{initials}</span>
+                      : <span>{t.label}</span>}
+                  </Link>
+                );
+              })}
+            </>
+          )}
+
+          {/* Admins see the full nav below. */}
+          {!isDispatcher && <>
           {/* Human Resources */}
-          {!collapsed && <SectionHeader id="hr" label="Human Resources" />}
+          {!collapsed && <div className="mt-2"><SectionHeader id="hr" label="Human Resources" /></div>}
           {(collapsed || openSections.hr !== false) && hrLinks.map(renderLink)}
 
           {/* Accounting */}
@@ -243,6 +307,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
               </Link>
             );
           })}
+          </>}
         </nav>
 
         <div className={`border-t border-sidebar-border ${collapsed ? "p-2" : "p-4"} text-xs space-y-2`}>

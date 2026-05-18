@@ -31,6 +31,7 @@ import darRouter from "./dar";
 import trainingsRouter from "./trainings";
 import exportsRouter from "./exports";
 import radioRouter from "./radio";
+import dispatchRouter from "./dispatch";
 import { auditLogMiddleware } from "../lib/auditLog";
 
 const router: IRouter = Router();
@@ -72,5 +73,6 @@ router.use(darRouter);
 router.use(trainingsRouter);
 router.use(exportsRouter);
 router.use(radioRouter);
+router.use(dispatchRouter);
 
 export default router;

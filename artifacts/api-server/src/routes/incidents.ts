@@ -1,15 +1,33 @@
 import { Router, type IRouter } from "express";
-import { eq, and, sql } from "drizzle-orm";
+import { eq, and, or, sql } from "drizzle-orm";
 import { db, incidentsTable, usersTable, shiftsTable } from "@workspace/db";
-import { requireAuth, requireAdmin } from "../middlewares/auth";
+import { requireAuth, requireAdminOrDispatcher } from "../middlewares/auth";
 import { buildIncidentReportPdf } from "../lib/incidentPdf";
+import { broadcastToRoom } from "../lib/wsManager";
 
 const router: IRouter = Router();
+
+/**
+ * Push a lightweight "something changed in incidents" pulse to every
+ * connected admin and dispatcher. The Dispatch page subscribes to this
+ * (with polling as a fallback) so a brand-new emergency or status edit
+ * shows up without waiting on the 30s timer.
+ */
+async function broadcastIncidentChange(payload: { type: "incident:changed"; incidentId: string; severity?: string }): Promise<void> {
+  const recipients = await db
+    .select({ id: usersTable.id })
+    .from(usersTable)
+    .where(or(eq(usersTable.role, "admin"), eq(usersTable.role, "dispatcher")));
+  const ids = new Set(recipients.map((r) => r.id));
+  if (ids.size === 0) return;
+  broadcastToRoom("incidents", payload, { allowedUserIds: ids });
+}
 
 router.get("/incidents", requireAuth, async (req, res): Promise<void> => {
   const { employeeId, shiftId, severity, status } = req.query as Record<string, string | undefined>;
   const conditions = [];
-  if (req.user!.role !== "admin") {
+  const isPrivileged = req.user!.role === "admin" || req.user!.role === "dispatcher";
+  if (!isPrivileged) {
     conditions.push(eq(incidentsTable.employeeId, req.user!.userId));
   } else if (employeeId) {
     conditions.push(eq(incidentsTable.employeeId, employeeId));
@@ -75,6 +93,7 @@ router.post("/incidents", requireAuth, async (req, res): Promise<void> => {
   }).returning();
 
   const [user] = await db.select().from(usersTable).where(eq(usersTable.id, req.user!.userId));
+  await broadcastIncidentChange({ type: "incident:changed", incidentId: incident.id, severity: incident.severity });
   res.status(201).json({
     ...incident,
     employeeName: user ? `${user.firstName} ${user.lastName}` : null,
@@ -110,7 +129,7 @@ router.get("/incidents/:id", requireAuth, async (req, res): Promise<void> => {
     .where(eq(incidentsTable.id, id));
 
   if (!row) { res.status(404).json({ error: "Not Found" }); return; }
-  if (req.user!.role !== "admin" && row.employeeId !== req.user!.userId) {
+  if (req.user!.role !== "admin" && req.user!.role !== "dispatcher" && row.employeeId !== req.user!.userId) {
     res.status(403).json({ error: "Forbidden" }); return;
   }
   res.json(row);
@@ -134,7 +153,7 @@ router.get("/incidents/:id/pdf", requireAuth, async (req, res): Promise<void> =>
   payload.stream.pipe(res);
 });
 
-router.put("/incidents/:id", requireAdmin, async (req, res): Promise<void> => {
+router.put("/incidents/:id", requireAdminOrDispatcher, async (req, res): Promise<void> => {
   const id = Array.isArray(req.params.id) ? req.params.id[0] : req.params.id;
   const { status, adminNotes, resolvedAt } = req.body;
   const updates: Record<string, unknown> = {};
@@ -145,6 +164,7 @@ router.put("/incidents/:id", requireAdmin, async (req, res): Promise<void> => {
   const [incident] = await db.update(incidentsTable).set(updates).where(eq(incidentsTable.id, id)).returning();
   if (!incident) { res.status(404).json({ error: "Not Found" }); return; }
   const [user] = await db.select().from(usersTable).where(eq(usersTable.id, incident.employeeId));
+  await broadcastIncidentChange({ type: "incident:changed", incidentId: incident.id, severity: incident.severity });
   res.json({ ...incident, employeeName: user ? `${user.firstName} ${user.lastName}` : null, shiftTitle: null });
 });
 

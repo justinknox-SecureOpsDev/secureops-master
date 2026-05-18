@@ -153,6 +153,7 @@ export const TABLES: TableDescriptor[] = [
         key: "role", label: "Role", type: "select", required: true,
         options: [
           { label: "Admin", value: "admin" },
+          { label: "Dispatcher", value: "dispatcher" },
           { label: "Employee", value: "employee" },
         ],
       },

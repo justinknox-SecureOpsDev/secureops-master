@@ -31,6 +31,9 @@ import RadioPage from "@/pages/Radio";
 import { DailyReportsPage } from "@/pages/DailyReports";
 import CompliancePage from "@/pages/Compliance";
 import ExportsPage from "@/pages/Exports";
+import DispatchPage from "@/pages/Dispatch";
+import ChatPage from "@/pages/Chat";
+import PersonnelPage from "@/pages/Personnel";
 import NotFound from "@/pages/not-found";
 
 const queryClient = new QueryClient({
@@ -71,7 +74,7 @@ function Routed() {
     );
   }
   if (!user) return <LoginPage />;
-  if (user.role !== "admin") {
+  if (user.role !== "admin" && user.role !== "dispatcher") {
     return (
       <div className="min-h-screen flex items-center justify-center bg-brand-navy text-white p-6 text-center">
         <div>
@@ -84,33 +87,62 @@ function Routed() {
     );
   }
 
+  const isDispatcher = user.role === "dispatcher";
+
   return (
     <AppShell>
       <Switch>
-        <Route path="/" component={HomeRedirect} />
-        <Route path="/hr/applications" component={ApplicationsPage} />
-        <Route path="/hr/onboarding" component={OnboardingPage} />
-        <Route path="/hr/policies" component={PoliciesPage} />
-        <Route path="/hr/invitations" component={InvitationsPage} />
-        <Route path="/payroll/board" component={PayrollBoardPage} />
-        <Route path="/payroll/pay-run" component={PayRunPage} />
-        <Route path="/audit-log" component={AuditLogPage} />
-        <Route path="/swap-requests" component={SwapRequestsPage} />
-        <Route path="/hr/license-renewals" component={LicenseRenewalsPage} />
-        <Route path="/incidents/share-links" component={IncidentShareLinksPage} />
-        <Route path="/personnel/share-links" component={EmployeeShareLinksPage} />
-        <Route path="/account/security" component={SecurityPage} />
-        <Route path="/radio" component={RadioPage} />
-        <Route path="/dar" component={DailyReportsPage} />
-        <Route path="/compliance" component={CompliancePage} />
-        <Route path="/exports" component={ExportsPage} />
-        <Route path="/sites/:id" component={SiteDetailPage} />
-        <Route path="/tables/shifts" component={ShiftsPage} />
-        <Route path="/tables/:table" component={TablePage} />
-        <Route component={NotFound} />
+        {isDispatcher ? (
+          <>
+            <Route path="/" component={DispatchHomeRedirect} />
+            <Route path="/dispatch" component={DispatchPage} />
+            <Route path="/chat" component={ChatPage} />
+            <Route path="/personnel" component={PersonnelPage} />
+            <Route path="/tables/shifts" component={ShiftsPage} />
+            <Route path="/account/security" component={SecurityPage} />
+            <Route path="/radio" component={RadioPage} />
+            <Route component={NotFound} />
+          </>
+        ) : (
+          <>
+            <Route path="/" component={HomeRedirect} />
+            <Route path="/dispatch" component={DispatchPage} />
+            <Route path="/chat" component={ChatPage} />
+            <Route path="/personnel" component={PersonnelPage} />
+            <Route path="/hr/applications" component={ApplicationsPage} />
+            <Route path="/hr/onboarding" component={OnboardingPage} />
+            <Route path="/hr/policies" component={PoliciesPage} />
+            <Route path="/hr/invitations" component={InvitationsPage} />
+            <Route path="/payroll/board" component={PayrollBoardPage} />
+            <Route path="/payroll/pay-run" component={PayRunPage} />
+            <Route path="/audit-log" component={AuditLogPage} />
+            <Route path="/swap-requests" component={SwapRequestsPage} />
+            <Route path="/hr/license-renewals" component={LicenseRenewalsPage} />
+            <Route path="/incidents/share-links" component={IncidentShareLinksPage} />
+            <Route path="/personnel/share-links" component={EmployeeShareLinksPage} />
+            <Route path="/account/security" component={SecurityPage} />
+            <Route path="/radio" component={RadioPage} />
+            <Route path="/dar" component={DailyReportsPage} />
+            <Route path="/compliance" component={CompliancePage} />
+            <Route path="/exports" component={ExportsPage} />
+            <Route path="/sites/:id" component={SiteDetailPage} />
+            <Route path="/tables/shifts" component={ShiftsPage} />
+            <Route path="/tables/:table" component={TablePage} />
+            <Route component={NotFound} />
+          </>
+        )}
       </Switch>
     </AppShell>
   );
+}
+
+function DispatchHomeRedirect() {
+  const [, navigate] = useLocation();
+  // Dispatchers land on the unified command center.
+  if (typeof window !== "undefined") {
+    queueMicrotask(() => navigate("/dispatch", { replace: true }));
+  }
+  return null;
 }
 
 function App() {

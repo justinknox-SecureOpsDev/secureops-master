@@ -230,3 +230,26 @@ export function requireAdmin(req: Request, res: Response, next: NextFunction): v
     next();
   });
 }
+
+/**
+ * Authorize the Dispatch command center surface: admin OR dispatcher.
+ *
+ * The `dispatcher` role is a narrow operations role used by the unified
+ * `/admin-portal/dispatch` screen. Dispatchers can see the live map, the
+ * clock-in status board, open shifts in the next 72h, active incidents,
+ * and the broadcast composer; they can also assign officers to open
+ * shifts and add comments to incidents. They are NOT allowed into
+ * payroll, invoices, HR (apps/onboarding/invitations), the audit log,
+ * admin CRUD over `/admin/tables/*`, or the system-status endpoint —
+ * those stay gated by `requireAdmin`.
+ */
+export function requireAdminOrDispatcher(req: Request, res: Response, next: NextFunction): void {
+  requireAuth(req, res, () => {
+    const role = req.user?.role;
+    if (role !== "admin" && role !== "dispatcher") {
+      res.status(403).json({ error: "Forbidden", message: "Admin or dispatcher access required" });
+      return;
+    }
+    next();
+  });
+}

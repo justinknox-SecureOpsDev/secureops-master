@@ -1,8 +1,8 @@
 import { Router, type IRouter } from "express";
 import { randomUUID } from "node:crypto";
-import { eq, and, gte, lte, sql, or, isNull, inArray } from "drizzle-orm";
+import { eq, and, gt, gte, lt, lte, ne, sql, or, isNull, inArray } from "drizzle-orm";
 import { db, shiftsTable, shiftAssignmentsTable, usersTable, licensesTable, sitesTable, clientsTable, trainingCertificationsTable } from "@workspace/db";
-import { requireAuth, requireAdmin } from "../middlewares/auth";
+import { requireAuth, requireAdmin, requireAdminOrDispatcher } from "../middlewares/auth";
 
 const router: IRouter = Router();
 
@@ -86,7 +86,10 @@ async function getEmployeeHeldTrainings(employeeId: string): Promise<Set<string>
 
 router.get("/shifts", requireAuth, async (req, res): Promise<void> => {
   const { status, employeeId, from, to } = req.query as { status?: string; employeeId?: string; from?: string; to?: string };
-  const isAdmin = req.user!.role === "admin";
+  // Dispatchers get the same full read as admins (they need to see
+  // every shift to assign/notify). Employees stay scoped to their own
+  // assigned + qualifying-open shifts.
+  const isAdmin = req.user!.role === "admin" || req.user!.role === "dispatcher";
   const userId = req.user!.userId;
 
   const conditions = [];
@@ -800,7 +803,7 @@ router.post("/shifts/:id/claim", requireAuth, async (req, res): Promise<void> =>
   res.status(201).json({ ...assignment, employeeName: user ? `${user.firstName} ${user.lastName}` : null });
 });
 
-router.post("/shifts/:id/notify-vacancy", requireAdmin, async (req, res): Promise<void> => {
+router.post("/shifts/:id/notify-vacancy", requireAdminOrDispatcher, async (req, res): Promise<void> => {
   const shiftId = Array.isArray(req.params.id) ? req.params.id[0] : req.params.id;
 
   const [shift] = await db.select().from(shiftsTable).where(eq(shiftsTable.id, shiftId));
@@ -858,7 +861,7 @@ router.post("/shifts/:id/notify-vacancy", requireAdmin, async (req, res): Promis
   res.json({ notifiedCount: targetIds.length, vacanciesRemaining });
 });
 
-router.post("/shifts/:id/assignments", requireAdmin, async (req, res): Promise<void> => {
+router.post("/shifts/:id/assignments", requireAdminOrDispatcher, async (req, res): Promise<void> => {
   const shiftId = Array.isArray(req.params.id) ? req.params.id[0] : req.params.id;
   const { employeeId } = req.body;
   if (!employeeId) { res.status(400).json({ error: "Bad Request", message: "employeeId required" }); return; }
@@ -871,6 +874,33 @@ router.post("/shifts/:id/assignments", requireAdmin, async (req, res): Promise<v
     res.status(403).json({
       error: "Forbidden",
       message: `Employee's highest valid licence (${empLevel === 0 ? "none" : `Level ${empLevel}`}) does not meet the shift requirement (Level ${shift.requiredLicenseLevel}${shift.requiredLicenseLevel === 4 ? "/PPO" : ""}).`,
+    });
+    return;
+  }
+
+  // Double-book guard: refuse if the officer already has an accepted
+  // assignment on another shift whose [start,end) window overlaps this
+  // one. Dispatchers (and admins) can override by first revoking the
+  // conflicting assignment. This mirrors the eligibility filter used
+  // by /dispatch/assign-nearest, so explicit and auto picks share the
+  // same correctness floor.
+  const conflict = await db
+    .select({ id: shiftAssignmentsTable.id, otherShiftId: shiftsTable.id, otherTitle: shiftsTable.title })
+    .from(shiftAssignmentsTable)
+    .innerJoin(shiftsTable, eq(shiftAssignmentsTable.shiftId, shiftsTable.id))
+    .where(and(
+      eq(shiftAssignmentsTable.employeeId, employeeId),
+      eq(shiftAssignmentsTable.status, "accepted"),
+      ne(shiftsTable.id, shiftId),
+      lt(shiftsTable.startTime, shift.endTime),
+      gt(shiftsTable.endTime, shift.startTime),
+    ))
+    .limit(1);
+  if (conflict.length > 0) {
+    res.status(409).json({
+      error: "Conflict",
+      message: `Employee already has an accepted shift that overlaps this one${conflict[0].otherTitle ? ` ("${conflict[0].otherTitle}")` : ""}.`,
+      conflictingShiftId: conflict[0].otherShiftId,
     });
     return;
   }

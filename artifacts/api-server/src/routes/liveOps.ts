@@ -1,7 +1,7 @@
 import { Router, type IRouter } from "express";
 import { eq, isNull, and, sql, desc } from "drizzle-orm";
 import { db, usersTable, timeEntriesTable, shiftsTable, sitesTable, incidentsTable } from "@workspace/db";
-import { requireAuth, requireAdmin } from "../middlewares/auth";
+import { requireAuth, requireAdminOrDispatcher } from "../middlewares/auth";
 import { emergencyLimiter, locationLimiter } from "../middlewares/rateLimit";
 import { sendPushToUsers } from "../lib/push";
 import { sendSmsToUsers } from "../lib/sms";
@@ -40,7 +40,7 @@ router.post("/me/location", requireAuth, locationLimiter, async (req, res): Prom
 });
 
 // GET /admin/active-officers — list currently clocked-in officers with last known location.
-router.get("/admin/active-officers", requireAdmin, async (req, res): Promise<void> => {
+router.get("/admin/active-officers", requireAdminOrDispatcher, async (req, res): Promise<void> => {
   const rows = await db
     .select({
       userId: usersTable.id,

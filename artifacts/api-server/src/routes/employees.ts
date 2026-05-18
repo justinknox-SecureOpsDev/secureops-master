@@ -2,7 +2,7 @@ import { Router, type IRouter } from "express";
 import bcrypt from "bcryptjs";
 import { eq, ilike, and, sql, desc } from "drizzle-orm";
 import { db, usersTable, employeesTable, licensesTable, employeeChangesTable } from "@workspace/db";
-import { requireAuth, requireAdmin, verifyToken } from "../middlewares/auth";
+import { requireAuth, requireAdmin, requireAdminOrDispatcher, verifyToken } from "../middlewares/auth";
 import type { Request, Response, NextFunction } from "express";
 import { buildEmployeeProfilePdf } from "../lib/profilePdf";
 import { writeEmployeeFieldChanges, CHANGE_FIELD_LABELS } from "../lib/employeeChangeLog";
@@ -194,9 +194,34 @@ const ALL_EMP_PASSTHROUGH_KEYS = [
   ...ADMIN_ONLY_EMP_KEYS,
 ] as const;
 
+/**
+ * Operational-safe projection used when the caller is a dispatcher
+ * (not an admin). Includes only the identity / contact / licence
+ * summary fields a dispatcher needs to staff and route shifts. All
+ * HR / payroll / banking / right-to-work / personal-document fields
+ * are deliberately omitted — those stay admin-only and must never
+ * be returned to a dispatcher token, regardless of UI behaviour.
+ */
+const DISPATCHER_SAFE_EMP_FIELDS = [
+  "id", "userId", "email", "firstName", "lastName", "role", "status",
+  "createdAt", "lastActiveAt", "firstLoginAt", "lastLoginAt",
+  "phone",
+  "siaLicenseLevel", "siaLicenseExpiry",
+  "emergencyContactName", "emergencyContactPhone",
+] as const;
 
-router.get("/employees", requireAdmin, async (req, res): Promise<void> => {
+function projectForDispatcher<T extends Record<string, unknown>>(row: T): Partial<T> {
+  const out: Record<string, unknown> = {};
+  for (const k of DISPATCHER_SAFE_EMP_FIELDS) {
+    if (k in row) out[k] = row[k as keyof T];
+  }
+  return out as Partial<T>;
+}
+
+
+router.get("/employees", requireAdminOrDispatcher, async (req, res): Promise<void> => {
   const { status, search } = req.query as { status?: string; search?: string };
+  const isDispatcherOnly = req.user!.role === "dispatcher";
 
   let query = db
     .select(employeeSelect)
@@ -229,12 +254,21 @@ router.get("/employees", requireAdmin, async (req, res): Promise<void> => {
 
   const employees = rows.map((r) => {
     const lc = licenseMap.get(r.id);
-    return {
+    const enriched = {
       ...r,
       licenseCount: lc?.total ?? 0,
       expiringLicenseCount: lc?.expiringSoon ?? 0,
       maxLicenseLevel: lc?.maxLevel ?? null,
     };
+    if (isDispatcherOnly) {
+      return {
+        ...projectForDispatcher(enriched),
+        licenseCount: enriched.licenseCount,
+        expiringLicenseCount: enriched.expiringLicenseCount,
+        maxLicenseLevel: enriched.maxLicenseLevel,
+      };
+    }
+    return enriched;
   });
 
   res.json(employees);
@@ -300,7 +334,7 @@ router.post("/employees", requireAdmin, async (req, res): Promise<void> => {
 
 router.get("/employees/:id", requireAuth, async (req, res): Promise<void> => {
   const id = Array.isArray(req.params.id) ? req.params.id[0] : req.params.id;
-  if (req.user!.role !== "admin" && req.user!.userId !== id) {
+  if (req.user!.role !== "admin" && req.user!.role !== "dispatcher" && req.user!.userId !== id) {
     res.status(403).json({ error: "Forbidden" });
     return;
   }
@@ -324,12 +358,25 @@ router.get("/employees/:id", requireAuth, async (req, res): Promise<void> => {
     .from(licensesTable)
     .where(eq(licensesTable.employeeId, id));
 
-  res.json({
+  const enriched = {
     ...row,
     licenseCount: licenseCountsRaw[0]?.total ?? 0,
     expiringLicenseCount: licenseCountsRaw[0]?.expiringSoon ?? 0,
     maxLicenseLevel: licenseCountsRaw[0]?.maxLevel ?? null,
-  });
+  };
+  // Dispatcher: only the operational-safe subset (no banking / tax /
+  // right-to-work / personal docs). They may still hit this endpoint
+  // because the unified Dispatch panel deep-links to an officer card.
+  if (req.user!.role === "dispatcher") {
+    res.json({
+      ...projectForDispatcher(enriched),
+      licenseCount: enriched.licenseCount,
+      expiringLicenseCount: enriched.expiringLicenseCount,
+      maxLicenseLevel: enriched.maxLicenseLevel,
+    });
+    return;
+  }
+  res.json(enriched);
 });
 
 /**

@@ -132,7 +132,7 @@ async function isAuthorizedForRoom(
     if (!parts) return false;
     return userId === parts[0] || userId === parts[1];
   }
-  if (userRole === "admin") return true;
+  if (userRole === "admin" || userRole === "dispatcher") return true;
   const members = await resolveRoomMembers(room);
   if (members === null) return true;
   return members.has(userId);
@@ -440,9 +440,10 @@ router.post("/chat/rooms/:id/messages", requireAuth, async (req, res): Promise<v
     return;
   }
 
-  // Announcements channel: only admins post; everyone reads.
-  if (room.type === "announcements" && req.user!.role !== "admin") {
-    res.status(403).json({ error: "Forbidden", message: "Only admins can post in announcements" });
+  // Announcements channel: only admins + dispatchers post; everyone reads.
+  // Dispatchers run the broadcast composer on the unified Dispatch screen.
+  if (room.type === "announcements" && req.user!.role !== "admin" && req.user!.role !== "dispatcher") {
+    res.status(403).json({ error: "Forbidden", message: "Only admins or dispatchers can post in announcements" });
     return;
   }
 

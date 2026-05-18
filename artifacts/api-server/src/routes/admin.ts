@@ -173,7 +173,7 @@ const insertUserAdminSchema = z.object({
   passwordHash: z.string().optional(),
   firstName: z.string().min(1),
   lastName: z.string().min(1),
-  role: z.enum(["admin", "employee"]).default("employee"),
+  role: z.enum(["admin", "dispatcher", "employee"]).default("employee"),
   status: z.enum(["active", "inactive", "pending"]).default("active"),
   expoPushToken: z.string().nullable().optional(),
   phoneNumber: z.string().nullable().optional(),
@@ -185,7 +185,7 @@ const updateUserAdminSchema = z.object({
   password: z.string().min(6).optional(),
   firstName: z.string().min(1).optional(),
   lastName: z.string().min(1).optional(),
-  role: z.enum(["admin", "employee"]).optional(),
+  role: z.enum(["admin", "dispatcher", "employee"]).optional(),
   status: z.enum(["active", "inactive", "pending"]).optional(),
   expoPushToken: z.string().nullable().optional(),
   // Editable contact + SMS opt-in. Without these in the allow-list the

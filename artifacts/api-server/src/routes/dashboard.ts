@@ -5,6 +5,9 @@ import { requireAuth, requireAdmin } from "../middlewares/auth";
 
 const router: IRouter = Router();
 
+// Admin-only: this summary includes pendingPayroll which is out of scope
+// for the dispatcher role. Dispatchers get their roll-ups from
+// `/dispatch/*` instead.
 router.get("/dashboard/admin-summary", requireAdmin, async (req, res): Promise<void> => {
   const [totalEmp] = await db.select({ count: sql<number>`count(*)::int` }).from(usersTable);
   const [activeEmp] = await db.select({ count: sql<number>`count(*)::int` }).from(usersTable).where(eq(usersTable.status, "active"));
