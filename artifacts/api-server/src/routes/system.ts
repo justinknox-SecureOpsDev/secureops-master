@@ -19,6 +19,7 @@ router.get("/admin/system/status", requireAdmin, async (_req, res): Promise<void
   const baseUrlConfigured = Boolean(process.env.APP_BASE_URL || process.env.REPLIT_DOMAINS);
   const corsOriginsConfigured = Boolean(process.env.ALLOWED_ORIGINS || process.env.REPLIT_DOMAINS);
   const geofenceRadiusMiles = getGeofenceRadiusMiles();
+  const geofenceRadiusTooTight = geofenceRadiusMiles > 0 && geofenceRadiusMiles < 0.05;
   res.json({
     env,
     smtpConfigured,
@@ -26,6 +27,7 @@ router.get("/admin/system/status", requireAdmin, async (_req, res): Promise<void
     baseUrlConfigured,
     corsOriginsConfigured,
     geofenceRadiusMiles,
+    geofenceRadiusTooTight,
   });
 });
 

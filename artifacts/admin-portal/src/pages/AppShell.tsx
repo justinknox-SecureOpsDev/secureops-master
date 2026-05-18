@@ -18,6 +18,7 @@ type SystemStatus = {
   baseUrlConfigured: boolean;
   corsOriginsConfigured: boolean;
   geofenceRadiusMiles?: number;
+  geofenceRadiusTooTight?: boolean;
 };
 
 function useSystemStatus(role: string | undefined) {
@@ -43,6 +44,12 @@ function SystemBanner({ status }: { status: SystemStatus | null }) {
   if (!status.baseUrlConfigured) issues.push("APP_BASE_URL / REPLIT_DOMAINS is not set — outgoing email links cannot be built.");
   if (!status.corsOriginsConfigured) issues.push("CORS origins are not configured — browser clients will be blocked in production.");
   if (!status.sessionSecretOk) issues.push("SESSION_SECRET is missing or too short — sessions are insecure.");
+  if (status.geofenceRadiusTooTight && typeof status.geofenceRadiusMiles === "number") {
+    const feet = Math.round(status.geofenceRadiusMiles * 5280);
+    issues.push(
+      `GEOFENCE_RADIUS_MILES is set to ${status.geofenceRadiusMiles} mi (~${feet.toLocaleString()} ft) — tighter than typical phone GPS accuracy (~30–65 ft). Every site without a per-site override will page admins on normal GPS drift; recommend ≥ 0.1 mi (~528 ft).`,
+    );
+  }
   if (issues.length === 0) return null;
   return (
     <div className="bg-amber-100 border-b border-amber-300 text-amber-900 text-xs px-4 py-2 flex items-start gap-2">
