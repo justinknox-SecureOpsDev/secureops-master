@@ -43,10 +43,20 @@ async function getLastBreachMs(timeEntryId: string): Promise<number | null> {
   return row?.at ? new Date(row.at).getTime() : null;
 }
 
-function radiusMiles(): number {
+/**
+ * Resolve the configured geofence radius (miles). Exported so the
+ * dispatcher map and any future site-perimeter UI render the EXACT same
+ * boundary the backend uses to fire breach push/SMS — single source of
+ * truth, no drift.
+ */
+export function getGeofenceRadiusMiles(): number {
   const raw = process.env["GEOFENCE_RADIUS_MILES"];
   const n = raw ? parseFloat(raw) : NaN;
   return Number.isFinite(n) && n > 0 ? n : DEFAULT_RADIUS_MILES;
+}
+
+function radiusMiles(): number {
+  return getGeofenceRadiusMiles();
 }
 
 export function haversineMiles(lat1: number, lng1: number, lat2: number, lng2: number): number {

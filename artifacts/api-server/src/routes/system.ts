@@ -1,5 +1,6 @@
 import { Router, type IRouter } from "express";
 import { requireAdmin } from "../middlewares/auth";
+import { getGeofenceRadiusMiles } from "../lib/geofence";
 
 const router: IRouter = Router();
 
@@ -17,12 +18,14 @@ router.get("/admin/system/status", requireAdmin, async (_req, res): Promise<void
   const sessionSecretOk = Boolean(process.env.SESSION_SECRET && process.env.SESSION_SECRET.length >= 16);
   const baseUrlConfigured = Boolean(process.env.APP_BASE_URL || process.env.REPLIT_DOMAINS);
   const corsOriginsConfigured = Boolean(process.env.ALLOWED_ORIGINS || process.env.REPLIT_DOMAINS);
+  const geofenceRadiusMiles = getGeofenceRadiusMiles();
   res.json({
     env,
     smtpConfigured,
     sessionSecretOk,
     baseUrlConfigured,
     corsOriginsConfigured,
+    geofenceRadiusMiles,
   });
 });
 

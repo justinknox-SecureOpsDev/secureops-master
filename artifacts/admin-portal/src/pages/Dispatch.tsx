@@ -1034,6 +1034,33 @@ function AssignNearestDialog({
 
 // =========================================================== LIVE MAP
 
+/**
+ * Read the server-configured geofence radius (miles) so the dispatch map
+ * draws the same circle the backend uses to fire breach alerts. Uses
+ * /dispatch/config (admin OR dispatcher-accessible) so the map renders
+ * the correct boundary for both roles. Cached for 5 minutes — env-driven
+ * config doesn't need real-time freshness. Falls back to the same 0.25mi
+ * default the backend uses on any failure so the map still renders.
+ */
+function useGeofenceRadiusMiles(): number {
+  const { data } = useQuery({
+    queryKey: ["dispatch-config", "geofenceRadiusMiles"],
+    queryFn: async (): Promise<number> => {
+      try {
+        const body = await api<{ geofenceRadiusMiles?: number }>("/dispatch/config");
+        const n = body.geofenceRadiusMiles;
+        return typeof n === "number" && isFinite(n) && n > 0 ? n : 0.25;
+      } catch {
+        return 0.25;
+      }
+    },
+    staleTime: 5 * 60 * 1000,
+    gcTime: 30 * 60 * 1000,
+    retry: false,
+  });
+  return data ?? 0.25;
+}
+
 type MapPoint = {
   kind: "officer" | "incident" | "site";
   lat: number;
@@ -1043,7 +1070,7 @@ type MapPoint = {
   severity?: "low" | "medium" | "high" | "critical";
 };
 
-function buildLeafletHtml(points: MapPoint[]): string {
+function buildLeafletHtml(points: MapPoint[], geofenceRadiusMiles: number): string {
   // Coordinates are validated numbers; labels are JSON-encoded then
   // injected into the DOM via createTextNode, never innerHTML.
   // CRITICAL: we MUST escape `<` (and the U+2028/U+2029 line separators
@@ -1056,6 +1083,9 @@ function buildLeafletHtml(points: MapPoint[]): string {
     .replace(/</g, "\\u003c")
     .replace(/\u2028/g, "\\u2028")
     .replace(/\u2029/g, "\\u2029");
+  // Server geofence is evaluated in miles → convert to meters for L.circle.
+  // Clamp to a sane range so a misconfigured env can't paint the whole map.
+  const radiusMeters = Math.max(10, Math.min(geofenceRadiusMiles * 1609.344, 50_000));
   return `<!doctype html><html><head><meta charset="utf-8"/>
 <meta name="viewport" content="width=device-width,initial-scale=1"/>
 <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
@@ -1066,6 +1096,7 @@ function buildLeafletHtml(points: MapPoint[]): string {
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 <script>
 const pts = ${data};
+const GEOFENCE_RADIUS_M = ${radiusMeters};
 const SEV = { critical:'#dc2626', high:'#ea580c', medium:'#eab308', low:'#94a3b8' };
 function popup(label, sub){
   const w=document.createElement('div');w.className='popup';
@@ -1102,6 +1133,20 @@ else {
     if (p.kind === 'site') {
       // Site pins use a distinct square gold/navy icon so they read as
       // fixed locations vs. live circles for officers/incidents.
+      // Around each site we also paint a translucent gold disc sized to
+      // the configured geofence radius — dispatchers can see at a glance
+      // when an officer pin drifts outside the same boundary the backend
+      // uses to fire breach alerts. interactive:false + no popup/tooltip
+      // keeps it visually subordinate to the live pins.
+      L.circle([p.lat,p.lng], {
+        radius: GEOFENCE_RADIUS_M,
+        color: '#c9a84c',
+        weight: 1,
+        opacity: 0.45,
+        fillColor: '#c9a84c',
+        fillOpacity: 0.08,
+        interactive: false,
+      }).addTo(group);
       const icon = L.divIcon({
         className:'', html:'<div class="site-pin">S</div>',
         iconSize:[28,28], iconAnchor:[14,14]
@@ -1174,7 +1219,8 @@ function LiveMapPanel({
     return pts;
   }, [officers, sites, incidents]);
 
-  const html = useMemo(() => buildLeafletHtml(points), [points]);
+  const geofenceRadiusMiles = useGeofenceRadiusMiles();
+  const html = useMemo(() => buildLeafletHtml(points, geofenceRadiusMiles), [points, geofenceRadiusMiles]);
   const withCoords = points.filter((p) => p.kind === "officer").length;
   const withoutCoords = officers.length - withCoords;
   const siteCount = points.filter((p) => p.kind === "site").length;

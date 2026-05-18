@@ -13,8 +13,26 @@ import {
   officerAvailabilityWindowsTable,
 } from "@workspace/db";
 import { requireAdminOrDispatcher } from "../middlewares/auth";
+import { getGeofenceRadiusMiles } from "../lib/geofence";
 
 const router: IRouter = Router();
+
+/**
+ * GET /dispatch/config
+ *
+ * Dispatcher-safe operational config. Right now this only exposes the
+ * geofence radius (miles) so the Live Map can render the same circle
+ * the backend uses to fire breach push/SMS. Dispatchers are blocked
+ * from /admin/system/status; this endpoint is the parity-safe surface
+ * for the values they legitimately need on the map.
+ *
+ * Returns ONLY non-secret operational tunables.
+ */
+router.get("/dispatch/config", requireAdminOrDispatcher, (_req, res): void => {
+  res.json({
+    geofenceRadiusMiles: getGeofenceRadiusMiles(),
+  });
+});
 
 // Status board thresholds (minutes).
 //   late     — shift started > LATE_MIN ago, no clock-in

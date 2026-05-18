@@ -17,6 +17,7 @@ type SystemStatus = {
   sessionSecretOk: boolean;
   baseUrlConfigured: boolean;
   corsOriginsConfigured: boolean;
+  geofenceRadiusMiles?: number;
 };
 
 function useSystemStatus(role: string | undefined) {
