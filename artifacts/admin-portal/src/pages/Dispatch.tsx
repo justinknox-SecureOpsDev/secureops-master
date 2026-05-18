@@ -377,6 +377,26 @@ function DispatchTour({ onClose }: { onClose: () => void }) {
   const [idx, setIdx] = useState(0);
   const [rect, setRect] = useState<DOMRect | null>(null);
   const step = TOUR_STEPS[idx];
+  const tooltipRef = useRef<HTMLDivElement | null>(null);
+  const titleId = "dispatch-tour-title";
+  const bodyId = "dispatch-tour-body";
+  const stepDescId = `dispatch-tour-step-${idx}`;
+
+  // Attach aria-describedby to the spotlight target so SR users get context.
+  useEffect(() => {
+    const el = document.querySelector(step.selector) as HTMLElement | null;
+    if (!el) return;
+    const prev = el.getAttribute("aria-describedby");
+    const next = prev ? `${prev} ${stepDescId}` : stepDescId;
+    el.setAttribute("aria-describedby", next);
+    return () => {
+      const cur = el.getAttribute("aria-describedby");
+      if (!cur) return;
+      const cleaned = cur.split(/\s+/).filter((t) => t !== stepDescId).join(" ");
+      if (cleaned) el.setAttribute("aria-describedby", cleaned);
+      else el.removeAttribute("aria-describedby");
+    };
+  }, [step.selector, stepDescId]);
 
   useEffect(() => {
     const measure = () => {
@@ -427,8 +447,85 @@ function DispatchTour({ onClose }: { onClose: () => void }) {
   };
   const prev = () => { if (idx > 0) setIdx(idx - 1); };
 
+  // Restore focus to the trigger when the tour closes.
+  useEffect(() => {
+    const previouslyFocused = document.activeElement as HTMLElement | null;
+    return () => {
+      if (previouslyFocused && typeof previouslyFocused.focus === "function") {
+        previouslyFocused.focus();
+      }
+    };
+  }, []);
+
+  // Move focus into the tooltip when it opens or steps change.
+  useEffect(() => {
+    const root = tooltipRef.current;
+    if (!root) return;
+    const focusables = root.querySelectorAll<HTMLElement>(
+      'button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])',
+    );
+    const first = focusables[0];
+    if (first) first.focus();
+    else root.focus();
+  }, [idx]);
+
+  // Keyboard handling: Esc closes, Arrow/Enter navigate, Tab is trapped.
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") {
+        e.preventDefault();
+        onClose();
+        return;
+      }
+      if (e.key === "ArrowRight" || e.key === "Enter") {
+        const target = e.target as HTMLElement | null;
+        // Let Enter activate focused buttons normally; only intercept Enter
+        // when focus is on the tooltip container itself.
+        if (e.key === "Enter" && target && target.tagName === "BUTTON") return;
+        e.preventDefault();
+        next();
+        return;
+      }
+      if (e.key === "ArrowLeft") {
+        e.preventDefault();
+        prev();
+        return;
+      }
+      if (e.key === "Tab") {
+        const root = tooltipRef.current;
+        if (!root) return;
+        const focusables = Array.from(
+          root.querySelectorAll<HTMLElement>(
+            'button:not([disabled]), [href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])',
+          ),
+        ).filter((el) => !el.hasAttribute("disabled"));
+        if (focusables.length === 0) {
+          e.preventDefault();
+          root.focus();
+          return;
+        }
+        const first = focusables[0];
+        const last = focusables[focusables.length - 1];
+        const active = document.activeElement as HTMLElement | null;
+        if (e.shiftKey) {
+          if (active === first || !root.contains(active)) {
+            e.preventDefault();
+            last.focus();
+          }
+        } else {
+          if (active === last || !root.contains(active)) {
+            e.preventDefault();
+            first.focus();
+          }
+        }
+      }
+    };
+    document.addEventListener("keydown", onKey, true);
+    return () => document.removeEventListener("keydown", onKey, true);
+  }, [idx, onClose]);
+
   return (
-    <div className="fixed inset-0 z-[1000]" role="dialog" aria-label="Dispatch walkthrough">
+    <div className="fixed inset-0 z-[1000]">
       {/* Dim overlay; click anywhere outside the highlight or tooltip dismisses. */}
       <div
         className="absolute inset-0 bg-black/50"
@@ -448,17 +545,23 @@ function DispatchTour({ onClose }: { onClose: () => void }) {
         />
       )}
       <div
-        className="absolute bg-card text-card-foreground rounded-lg shadow-xl border p-4 space-y-3"
+        ref={tooltipRef}
+        className="absolute bg-card text-card-foreground rounded-lg shadow-xl border p-4 space-y-3 focus:outline-none"
         style={tooltipStyle}
         onClick={(e) => e.stopPropagation()}
         data-testid="dispatch-tour-tooltip"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby={titleId}
+        aria-describedby={bodyId}
+        tabIndex={-1}
       >
         <div className="flex items-start justify-between gap-2">
           <div>
             <div className="text-[11px] uppercase opacity-60 tracking-wide">
               Step {idx + 1} of {TOUR_STEPS.length}
             </div>
-            <div className="font-semibold text-sm mt-0.5">{step.title}</div>
+            <div id={titleId} className="font-semibold text-sm mt-0.5">{step.title}</div>
           </div>
           <button
             onClick={onClose}
@@ -469,7 +572,11 @@ function DispatchTour({ onClose }: { onClose: () => void }) {
             <X className="w-4 h-4" />
           </button>
         </div>
-        <p className="text-sm opacity-85 leading-snug">{step.body}</p>
+        <p id={bodyId} className="text-sm opacity-85 leading-snug">{step.body}</p>
+        {/* Hidden description anchored on the spotlighted panel for SR users. */}
+        <span id={stepDescId} className="sr-only">
+          {step.title}: {step.body}
+        </span>
         <div className="flex items-center justify-between pt-1">
           <div className="flex gap-1">
             {TOUR_STEPS.map((_, i) => (
