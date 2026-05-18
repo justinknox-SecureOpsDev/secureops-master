@@ -1,4 +1,4 @@
-import { useMemo } from "react";
+import { useMemo, useState } from "react";
 import { Radio } from "lucide-react";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { Link, useRoute, useLocation } from "wouter";
@@ -54,6 +54,13 @@ type Incident = {
 
 type ChatRoom = { id: string; name: string };
 
+type TrailPoint = {
+  lat: number;
+  lng: number;
+  capturedAt: string;
+  timeEntryId: string | null;
+};
+
 type LiveLocation = {
   userId: string;
   lastLat: string | null;
@@ -71,6 +78,8 @@ type LiveLocation = {
     lng: number;
     geofenceRadiusMiles: number;
   } | null;
+  trail: TrailPoint[];
+  trailWindow: "today" | "24h";
 };
 
 function fmtAgo(iso: string | null | undefined): string {
@@ -94,11 +103,12 @@ function fmtAgo(iso: string | null | undefined): string {
 function buildOfficerMapHtml(
   officer: { lat: number; lng: number; label: string; sub: string },
   site: { lat: number; lng: number; name: string; radiusMiles: number } | null,
+  trail: Array<{ lat: number; lng: number }>,
 ): string {
   const radiusMeters = site
     ? Math.max(10, Math.min(site.radiusMiles * 1609.344, 50_000))
     : 0;
-  const data = JSON.stringify({ officer, site, radiusMeters })
+  const data = JSON.stringify({ officer, site, radiusMeters, trail })
     .replace(/</g, "\\u003c")
     .replace(/\u2028/g, "\\u2028")
     .replace(/\u2029/g, "\\u2029");
@@ -125,6 +135,11 @@ L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',{
   attribution:'&copy; OpenStreetMap', maxZoom:19
 }).addTo(map);
 const group = L.featureGroup();
+if (D.trail && D.trail.length >= 2) {
+  L.polyline(D.trail.map(function(p){ return [p.lat, p.lng]; }), {
+    color: '#3b82f6', weight: 3, opacity: 0.7,
+  }).addTo(group);
+}
 if (D.site) {
   L.circle([D.site.lat, D.site.lng], {
     radius: D.radiusMeters, color:'#c9a84c', weight:1, opacity:0.5,
@@ -209,12 +224,19 @@ export default function OfficerProfilePage() {
     enabled: !!id,
   });
 
+  // Trail window toggle — "today" by default, "24h" expands to the
+  // rolling 24-hour breadcrumb so dispatchers can review where the
+  // officer was even after they clocked out.
+  const [trailWindow, setTrailWindow] = useState<"today" | "24h">("today");
+
   // Live location refreshes every 30s — same cadence as the Dispatch Live
   // Map — so dispatchers staying on this page during an active call see
   // fresh pings without manual refresh.
   const liveLocation = useQuery<LiveLocation>({
-    queryKey: ["officer-live", id],
-    queryFn: () => api<LiveLocation>(`/admin/officers/${encodeURIComponent(id)}/live`),
+    queryKey: ["officer-live", id, trailWindow],
+    queryFn: () => api<LiveLocation>(
+      `/admin/officers/${encodeURIComponent(id)}/live?window=${trailWindow}`,
+    ),
     enabled: !!id,
     refetchInterval: 30_000,
   });
@@ -265,21 +287,30 @@ export default function OfficerProfilePage() {
     return { lat, lng };
   }, [liveLocation.data]);
 
-  // Only render the embedded map when we actually have an officer pin AND
-  // the officer is currently clocked in (the brief from the task). When
-  // they're off-shift we still surface the last-ping line, but we don't
-  // paint a map view that would be stale and misleading.
+  // Render the embedded map whenever we have a usable officer pin. When
+  // clocked in we draw the active site circle; when off-shift we still
+  // show the pin + breadcrumb so the "last 24h" toggle has somewhere to
+  // paint the trail.
   const mapHtml = useMemo<string | null>(() => {
     const d = liveLocation.data;
-    if (!d || !d.clockedIn || !officerCoord) return null;
+    if (!d || !officerCoord) return null;
     const label = officer.data
       ? `${officer.data.firstName} ${officer.data.lastName}`
       : "Officer";
-    const sub = `${d.site?.name ?? d.shiftTitle ?? "on shift"} · ${fmtAgo(d.lastLocationAt)}`;
-    const site = d.site
+    const sub = d.clockedIn
+      ? `${d.site?.name ?? d.shiftTitle ?? "on shift"} · ${fmtAgo(d.lastLocationAt)}`
+      : `Off duty · last ping ${fmtAgo(d.lastLocationAt)}`;
+    const site = d.clockedIn && d.site
       ? { lat: d.site.lat, lng: d.site.lng, name: d.site.name, radiusMiles: d.site.geofenceRadiusMiles }
       : null;
-    return buildOfficerMapHtml({ lat: officerCoord.lat, lng: officerCoord.lng, label, sub }, site);
+    const trail = (d.trail ?? [])
+      .map((p) => ({ lat: p.lat, lng: p.lng }))
+      .filter((p) => Number.isFinite(p.lat) && Number.isFinite(p.lng));
+    return buildOfficerMapHtml(
+      { lat: officerCoord.lat, lng: officerCoord.lng, label, sub },
+      site,
+      trail,
+    );
   }, [liveLocation.data, officerCoord, officer.data]);
 
   const recent5 = useMemo<Incident[]>(() => {
@@ -493,6 +524,31 @@ export default function OfficerProfilePage() {
                     Not currently clocked in — pin reflects the last known position.
                   </div>
                 )}
+                <div className="flex items-center gap-2 pt-1" data-testid="officer-trail-toggle">
+                  <span className="text-[11px] uppercase opacity-60">Trail</span>
+                  <div className="inline-flex rounded border overflow-hidden">
+                    <button
+                      type="button"
+                      onClick={() => setTrailWindow("today")}
+                      className={`px-2 py-0.5 text-xs ${trailWindow === "today" ? "bg-brand-navy text-brand-gold" : "opacity-70 hover:opacity-100"}`}
+                      data-testid="officer-trail-today"
+                    >
+                      Today
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setTrailWindow("24h")}
+                      className={`px-2 py-0.5 text-xs border-l ${trailWindow === "24h" ? "bg-brand-navy text-brand-gold" : "opacity-70 hover:opacity-100"}`}
+                      data-testid="officer-trail-24h"
+                    >
+                      Last 24h
+                    </button>
+                  </div>
+                  <span className="text-xs opacity-60">
+                    {liveLocation.data.trail?.length ?? 0} ping
+                    {(liveLocation.data.trail?.length ?? 0) === 1 ? "" : "s"}
+                  </span>
+                </div>
               </div>
               {mapHtml && (
                 <iframe

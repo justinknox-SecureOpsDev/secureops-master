@@ -12,6 +12,7 @@ import {
   timeEntriesTable,
   patrolScansTable,
   highRiskChangeQueueTable,
+  locationPingsTable,
 } from "@workspace/db";
 import { logger } from "./logger";
 import { sendEmail, renderLicenseExpiryEmail, renderTrainingExpiryEmail, renderHighRiskProfileChangeEmail } from "./email";
@@ -882,9 +883,29 @@ export function startScheduledJobs(intervalMs: number = HOUR_MS): NodeJS.Timeout
     }
   }
 
+  // Prune old location-ping breadcrumb rows. Officer trails are stored
+  // per ping (~1/min while clocked in) so the table grows linearly with
+  // headcount; 30 days is well past anything Dispatch / incident review
+  // looks at and bounds storage.
+  async function cleanupOldLocationPings(): Promise<void> {
+    try {
+      const cutoff = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
+      const result = await db
+        .delete(locationPingsTable)
+        .where(lt(locationPingsTable.capturedAt, cutoff));
+      const removed = (result as { rowCount?: number | null }).rowCount ?? 0;
+      if (removed > 0) {
+        logger.info({ removed }, "Cleaned up old location pings");
+      }
+    } catch (err) {
+      logger.error({ err }, "Failed to clean up location pings");
+    }
+  }
+
   // Hourly maintenance.
   schedule("revoked-tokens", cleanupExpiredRevokedTokens, intervalMs);
   schedule("application-drafts", cleanupExpiredApplicationDrafts, intervalMs);
+  schedule("location-pings", cleanupOldLocationPings, intervalMs);
   // License expiry — hourly is plenty (and idempotent), avoids a
   // mid-day spike if many licenses cluster on one expiry date.
   schedule("license-expiry", sendLicenseExpiryReminders, intervalMs);

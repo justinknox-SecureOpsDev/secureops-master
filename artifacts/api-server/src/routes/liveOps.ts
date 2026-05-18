@@ -1,6 +1,6 @@
 import { Router, type IRouter } from "express";
-import { eq, isNull, and, sql, desc } from "drizzle-orm";
-import { db, usersTable, timeEntriesTable, shiftsTable, sitesTable, incidentsTable } from "@workspace/db";
+import { eq, isNull, and, sql, desc, gte, asc } from "drizzle-orm";
+import { db, usersTable, timeEntriesTable, shiftsTable, sitesTable, incidentsTable, locationPingsTable } from "@workspace/db";
 import { requireAuth, requireAdminOrDispatcher } from "../middlewares/auth";
 import { emergencyLimiter, locationLimiter } from "../middlewares/rateLimit";
 import { sendPushToUsers } from "../lib/push";
@@ -25,11 +25,32 @@ router.post("/me/location", requireAuth, locationLimiter, async (req, res): Prom
     res.status(400).json({ error: "Bad Request", message: "Valid lat (-90..90) and lng (-180..180) required" });
     return;
   }
+  const userId = req.user!.userId;
   await db.update(usersTable).set({
     lastLat: String(coord.lat),
     lastLng: String(coord.lng),
     lastLocationAt: new Date(),
-  }).where(eq(usersTable.id, req.user!.userId));
+  }).where(eq(usersTable.id, userId));
+
+  // Persist a breadcrumb row so admins can reconstruct an officer's
+  // movement during a shift or incident review. Look up an active time
+  // entry (if any) so the ping is linked to the shift it belongs to;
+  // off-shift pings are still stored (with a null timeEntryId) so the
+  // "last 24h" trail toggle has data to render.
+  const [active] = await db
+    .select({ id: timeEntriesTable.id })
+    .from(timeEntriesTable)
+    .where(and(eq(timeEntriesTable.employeeId, userId), isNull(timeEntriesTable.clockOutTime)))
+    .limit(1);
+  await db.insert(locationPingsTable).values({
+    userId,
+    timeEntryId: active?.id ?? null,
+    lat: String(coord.lat),
+    lng: String(coord.lng),
+  }).catch((err: unknown) => {
+    req.log.warn({ err }, "location ping insert failed");
+  });
+
   // Fire-and-forget geofence evaluation. We do not block the location
   // response on push/SMS dispatch — the mobile app pings every minute and
   // shouldn't pay the latency tax for a downstream alert pipeline.
@@ -138,6 +159,38 @@ router.get("/admin/officers/:id/live", requireAdminOrDispatcher, async (req, res
     }
   }
 
+  // Breadcrumb trail. Default window = today (since local midnight UTC) so
+  // the live profile shows the path walked on the current shift. Pass
+  // `?window=24h` to widen to a rolling 24-hour view (used by the "last
+  // 24h" toggle on the OfficerProfile page so dispatch can review where
+  // an officer was even after they clocked out).
+  const windowParam = Array.isArray(req.query.window) ? req.query.window[0] : req.query.window;
+  const since = windowParam === "24h"
+    ? new Date(Date.now() - 24 * 60 * 60 * 1000)
+    : (() => { const d = new Date(); d.setUTCHours(0, 0, 0, 0); return d; })();
+  // Hard cap so a misbehaving client (or an officer with very chatty
+  // location pings) can't drag a huge polyline into the admin browser.
+  const TRAIL_CAP = 1000;
+  const trailRows = await db
+    .select({
+      lat: locationPingsTable.lat,
+      lng: locationPingsTable.lng,
+      capturedAt: locationPingsTable.capturedAt,
+      timeEntryId: locationPingsTable.timeEntryId,
+    })
+    .from(locationPingsTable)
+    .where(and(eq(locationPingsTable.userId, id), gte(locationPingsTable.capturedAt, since)))
+    .orderBy(asc(locationPingsTable.capturedAt))
+    .limit(TRAIL_CAP);
+  const trail = trailRows
+    .map((r) => {
+      const lat = parseFloat(r.lat);
+      const lng = parseFloat(r.lng);
+      if (!Number.isFinite(lat) || !Number.isFinite(lng)) return null;
+      return { lat, lng, capturedAt: r.capturedAt, timeEntryId: r.timeEntryId };
+    })
+    .filter((p): p is { lat: number; lng: number; capturedAt: Date; timeEntryId: string | null } => p !== null);
+
   res.json({
     userId: user.userId,
     lastLat: user.lastLat,
@@ -148,6 +201,8 @@ router.get("/admin/officers/:id/live", requireAdminOrDispatcher, async (req, res
     shiftId: active?.shiftId ?? null,
     shiftTitle: active?.shiftTitle ?? null,
     site,
+    trail,
+    trailWindow: windowParam === "24h" ? "24h" : "today",
   });
 });
 
