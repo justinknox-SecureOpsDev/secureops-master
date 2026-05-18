@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import { Link, useRoute, useLocation } from "wouter";
-import { ArrowLeft, MapPin, Pencil, Plus, Trash2, QrCode, AlertTriangle } from "lucide-react";
+import { ArrowLeft, MapPin, Pencil, Plus, Trash2, QrCode, AlertTriangle, Radius } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { api } from "@/lib/api";
 import { useFkOptions } from "@/lib/fk";
@@ -56,6 +56,7 @@ export function SiteDetailPage() {
   const [creating, setCreating] = useState(false);
   const [scans, setScans] = useState<ScanRow[]>([]);
   const [scansLoading, setScansLoading] = useState(false);
+  const [geofenceRadiusMiles, setGeofenceRadiusMiles] = useState<number | null>(null);
 
   const loadSite = useCallback(async () => {
     if (!siteId) return;
@@ -89,6 +90,20 @@ export function SiteDetailPage() {
   }, [siteId]);
 
   useEffect(() => { loadSite(); loadCheckpoints(); loadScans(); }, [loadSite, loadCheckpoints, loadScans]);
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const body = await api<{ geofenceRadiusMiles?: number }>("/dispatch/config");
+        const n = body.geofenceRadiusMiles;
+        if (!cancelled && typeof n === "number" && isFinite(n) && n > 0) {
+          setGeofenceRadiusMiles(n);
+        }
+      } catch { /* keep null, UI will fall back to default copy */ }
+    })();
+    return () => { cancelled = true; };
+  }, []);
 
   async function createCheckpoint() {
     const label = newLabel.trim();
@@ -170,6 +185,21 @@ export function SiteDetailPage() {
                   Patrol interval: <span className="text-foreground font-medium">{site.patrolIntervalMinutes}m</span>
                 </div>
               )}
+              <div className="mt-1 text-xs text-muted-foreground inline-flex items-center gap-1">
+                <Radius className="w-3.5 h-3.5" />
+                Geofence radius:{" "}
+                <span className="text-foreground font-medium">
+                  {(() => {
+                    const r = geofenceRadiusMiles ?? 0.25;
+                    const feet = Math.round(r * 5280);
+                    return `${r} mi (≈ ${feet.toLocaleString()} ft)`;
+                  })()}
+                </span>
+                <span className="ml-1">
+                  — applies to every site (set via <code className="font-mono">GEOFENCE_RADIUS_MILES</code>).
+                  {site.locationLat == null || site.locationLng == null ? " Add coordinates above to enable breach alerts here." : ""}
+                </span>
+              </div>
               {site.notes && (
                 <div className="mt-2 text-sm whitespace-pre-wrap text-muted-foreground max-w-3xl">
                   {site.notes}
