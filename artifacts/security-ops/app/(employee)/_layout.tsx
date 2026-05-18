@@ -1,17 +1,26 @@
 import { Tabs } from "expo-router";
 import { Feather } from "@expo/vector-icons";
 import React from "react";
-import { Platform, StyleSheet, View, useColorScheme } from "react-native";
+import { Platform, StyleSheet, View } from "react-native";
 import { useColors } from "@/hooks/useColors";
 import { BlurView } from "expo-blur";
+import { TourProvider } from "@/contexts/TourContext";
+import WelcomeTour from "@/components/WelcomeTour";
 
 export default function EmployeeLayout() {
   const colors = useColors();
-  const colorScheme = useColorScheme();
-  const isDark = colorScheme === "dark";
   const isIOS = Platform.OS === "ios";
   const isWeb = Platform.OS === "web";
 
+  return (
+    <TourProvider>
+      <EmployeeTabs colors={colors} isIOS={isIOS} isWeb={isWeb} />
+      <WelcomeTour />
+    </TourProvider>
+  );
+}
+
+function EmployeeTabs({ colors, isIOS, isWeb }: { colors: ReturnType<typeof useColors>; isIOS: boolean; isWeb: boolean }) {
   return (
     <Tabs
       screenOptions={{

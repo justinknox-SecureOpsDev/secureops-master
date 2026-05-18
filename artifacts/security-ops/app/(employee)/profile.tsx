@@ -11,6 +11,7 @@ import { isBiometricAvailable, isBiometricEnabled, setBiometricEnabled, promptBi
 import { apiRequest, API_BASE_URL } from "@/utils/api";
 import { storage } from "@/utils/storage";
 import { AUTH_TOKEN_KEY } from "@/contexts/AuthContext";
+import { useTour } from "@/contexts/TourContext";
 
 function InfoRow({ label, value, icon }: { label: string; value?: string | number | null; icon: string }) {
   const colors = useColors();
@@ -233,6 +234,7 @@ export default function EmployeeProfileScreen() {
   const colors = useColors();
   const router = useRouter();
   const { logout } = useAuth();
+  const { open: openTour } = useTour();
   const topPad = useTopPad();
   const [bioAvailable, setBioAvailable] = useState(false);
   const [bioOn, setBioOn] = useState(false);
@@ -654,6 +656,20 @@ export default function EmployeeProfileScreen() {
             <Text style={{ color: colors.foreground, fontSize: 14, fontWeight: "600" }}>License renewals</Text>
             <Text style={{ color: colors.mutedForeground, fontSize: 12, marginTop: 2 }}>
               Submit a renewed license for admin approval
+            </Text>
+          </View>
+          <Feather name="chevron-right" size={16} color={colors.mutedForeground} />
+        </TouchableOpacity>
+        <TouchableOpacity
+          onPress={openTour}
+          style={[styles.actionRow, { borderBottomColor: colors.border }]}
+          testID="profile-replay-tour"
+        >
+          <Feather name="compass" size={16} color={colors.accent} />
+          <View style={{ flex: 1 }}>
+            <Text style={{ color: colors.foreground, fontSize: 14, fontWeight: "600" }}>Show me the app tour again</Text>
+            <Text style={{ color: colors.mutedForeground, fontSize: 12, marginTop: 2 }}>
+              Quick walkthrough of Home, Shifts, Clock, Incidents, and Chat
             </Text>
           </View>
           <Feather name="chevron-right" size={16} color={colors.mutedForeground} />
