@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link, useRoute, useLocation } from "wouter";
 import { ArrowLeft, MapPin, Pencil, Plus, Trash2, QrCode, AlertTriangle, Radius } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -41,12 +41,30 @@ function fmt(iso: string) {
   return new Date(iso).toLocaleString();
 }
 
+// Canonical geofence radius clamp range, shared by the build-time preview,
+// the in-iframe drag handle, and the parent's PATCH-time guard so all three
+// agree on the same min/max. Mirrors the spirit of the backend's float
+// validation: too-tight a radius creates false-breach pages (we already
+// surface a "tighter than typical GPS accuracy" warning at 0.05 mi), and
+// too-wide a radius silently disables breach alerts altogether.
+const GEOFENCE_MIN_MILES = 0.01;
+const GEOFENCE_MAX_MILES = 30;
+const METERS_PER_MILE = 1609.344;
+const GEOFENCE_MIN_METERS = GEOFENCE_MIN_MILES * METERS_PER_MILE; // ~16 m
+const GEOFENCE_MAX_METERS = GEOFENCE_MAX_MILES * METERS_PER_MILE; // ~48,280 m
+
 /**
  * Build the srcDoc for the embedded geofence preview map.
  *
  * Mirrors the styling of `buildLeafletHtml` in Dispatch.tsx: navy/gold
  * theme, square "S" site pin, translucent gold disc sized to the effective
  * geofence radius. Single site + circle only — no officer/incident pins.
+ *
+ * Interactive: the site pin is draggable (moves lat/lng) and a small gold
+ * edge handle on the east side resizes the radius. Each drag-end posts a
+ * `wcsg:geofence-change` message to the parent window, which PATCHes the
+ * site back to the API. The parent clamps the radius before saving so a
+ * runaway tiny drag can't permanently disable breach alerts.
  *
  * Inputs (lat/lng/radiusMiles) are validated numbers controlled by us;
  * label is JSON-encoded and rendered DOM-side via createTextNode so a
@@ -62,25 +80,33 @@ function buildSiteGeofenceHtml(
     .replace(/</g, "\\u003c")
     .replace(/\u2028/g, "\\u2028")
     .replace(/\u2029/g, "\\u2029");
-  const radiusMeters = Math.max(10, Math.min(radiusMiles * 1609.344, 50_000));
+  const radiusMeters = Math.max(GEOFENCE_MIN_METERS, Math.min(radiusMiles * METERS_PER_MILE, GEOFENCE_MAX_METERS));
   return `<!doctype html><html><head><meta charset="utf-8"/>
 <meta name="viewport" content="width=device-width,initial-scale=1"/>
 <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
 <style>html,body,#m{margin:0;padding:0;height:100%;background:#080c18}
-.site-pin{display:flex;align-items:center;justify-content:center;width:28px;height:28px;border-radius:6px;background:#080c18;color:#c9a84c;border:2px solid #c9a84c;font:bold 13px -apple-system,system-ui,sans-serif;box-shadow:0 1px 4px rgba(0,0,0,.35)}</style>
-</head><body><div id="m"></div>
+.site-pin{display:flex;align-items:center;justify-content:center;width:28px;height:28px;border-radius:6px;background:#080c18;color:#c9a84c;border:2px solid #c9a84c;font:bold 13px -apple-system,system-ui,sans-serif;box-shadow:0 1px 4px rgba(0,0,0,.35);cursor:move}
+.edge-handle{width:14px;height:14px;border-radius:50%;background:#c9a84c;border:2px solid #080c18;box-shadow:0 1px 3px rgba(0,0,0,.55);cursor:ew-resize}
+.readout{position:absolute;left:8px;bottom:8px;z-index:500;background:rgba(8,12,24,.85);color:#f0e6c8;font:600 11px -apple-system,system-ui,sans-serif;padding:4px 8px;border:1px solid #c9a84c;border-radius:4px;pointer-events:none}
+.readout.saving{color:#c9a84c}
+.readout.error{color:#fca5a5;border-color:#fca5a5}</style>
+</head><body><div id="m"></div><div id="r" class="readout"></div>
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 <script>
 const LAT = ${lat};
 const LNG = ${lng};
 const R_M = ${radiusMeters};
 const LABEL = ${safeLabel};
+const MIN_R_M = ${GEOFENCE_MIN_METERS}; // shared with parent / build-time clamp
+const MAX_R_M = ${GEOFENCE_MAX_METERS};
 const map = L.map('m', { zoomControl: true, attributionControl: true });
 L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
   attribution: '&copy; OpenStreetMap', maxZoom: 19
 }).addTo(map);
-const circle = L.circle([LAT, LNG], {
-  radius: R_M,
+let center = L.latLng(LAT, LNG);
+let radiusM = R_M;
+const circle = L.circle(center, {
+  radius: radiusM,
   color: '#c9a84c',
   weight: 1,
   opacity: 0.45,
@@ -88,16 +114,66 @@ const circle = L.circle([LAT, LNG], {
   fillOpacity: 0.08,
   interactive: false,
 }).addTo(map);
-const icon = L.divIcon({
+const siteIcon = L.divIcon({
   className: '', html: '<div class="site-pin">S</div>',
   iconSize: [28, 28], iconAnchor: [14, 14]
+});
+const handleIcon = L.divIcon({
+  className: '', html: '<div class="edge-handle"></div>',
+  iconSize: [14, 14], iconAnchor: [7, 7]
 });
 const tipEl = document.createElement('div');
 const b = document.createElement('b');
 b.appendChild(document.createTextNode(String(LABEL || '')));
 tipEl.appendChild(b);
-const marker = L.marker([LAT, LNG], { icon }).addTo(map);
-marker.bindTooltip(tipEl, { direction: 'top', offset: [0, -6], opacity: 0.95 });
+const siteMarker = L.marker(center, { icon: siteIcon, draggable: true, autoPan: true }).addTo(map);
+siteMarker.bindTooltip(tipEl, { direction: 'top', offset: [0, -6], opacity: 0.95 });
+function eastEdge(c, rm) {
+  const cosLat = Math.cos(c.lat * Math.PI / 180);
+  const dLng = rm / (111320 * Math.max(0.01, cosLat));
+  return L.latLng(c.lat, c.lng + dLng);
+}
+const handle = L.marker(eastEdge(center, radiusM), { icon: handleIcon, draggable: true, autoPan: true }).addTo(map);
+const readout = document.getElementById('r');
+function paintReadout(state) {
+  readout.className = 'readout' + (state ? ' ' + state : '');
+  const miles = radiusM / 1609.344;
+  const ft = Math.round(miles * 5280);
+  const prefix = state === 'saving' ? 'Saving… ' : state === 'error' ? 'Save failed — ' : '';
+  readout.textContent = prefix + 'Radius ' + miles.toFixed(3) + ' mi (~' + ft.toLocaleString() + ' ft) · ' + center.lat.toFixed(5) + ', ' + center.lng.toFixed(5);
+}
+paintReadout('');
+siteMarker.on('drag', (e) => {
+  center = e.latlng;
+  circle.setLatLng(center);
+  handle.setLatLng(eastEdge(center, radiusM));
+  paintReadout('');
+});
+siteMarker.on('dragend', () => post());
+handle.on('drag', (e) => {
+  const d = center.distanceTo(e.latlng);
+  radiusM = Math.max(MIN_R_M, Math.min(d, MAX_R_M));
+  circle.setRadius(radiusM);
+  // snap handle visually to the actual east edge so it stays on the perimeter
+  handle.setLatLng(eastEdge(center, radiusM));
+  paintReadout('');
+});
+handle.on('dragend', () => post());
+function post() {
+  paintReadout('saving');
+  parent.postMessage({
+    type: 'wcsg:geofence-change',
+    lat: center.lat,
+    lng: center.lng,
+    radiusMiles: Number((radiusM / 1609.344).toFixed(4)),
+  }, '*');
+}
+window.addEventListener('message', (ev) => {
+  const d = ev && ev.data;
+  if (!d || typeof d !== 'object') return;
+  if (d.type === 'wcsg:geofence-saved') paintReadout('');
+  else if (d.type === 'wcsg:geofence-save-failed') paintReadout('error');
+});
 map.fitBounds(circle.getBounds().pad(0.3), { maxZoom: 17 });
 </script></body></html>`;
 }
@@ -120,6 +196,16 @@ export function SiteDetailPage() {
   const [scans, setScans] = useState<ScanRow[]>([]);
   const [scansLoading, setScansLoading] = useState(false);
   const [globalGeofenceRadiusMiles, setGlobalGeofenceRadiusMiles] = useState<number | null>(null);
+  // Snapshot of the initial map state so the iframe srcDoc is built exactly
+  // once per site (any later in-place lat/lng/radius updates come from the
+  // map's own drag handlers, not React). This keeps the iframe from reloading
+  // out from under the user mid-drag.
+  const initialMapRef = useRef<{ lat: number; lng: number; r: number; name: string } | null>(null);
+  const iframeRef = useRef<HTMLIFrameElement | null>(null);
+  // Bumped on save failure to force the iframe to fully remount, guaranteeing
+  // the map visually rolls back to server-truth geometry even when the
+  // freshly computed srcDoc string happens to be byte-identical.
+  const [iframeVersion, setIframeVersion] = useState(0);
 
   const loadSite = useCallback(async () => {
     if (!siteId) return;
@@ -202,8 +288,16 @@ export function SiteDetailPage() {
     } catch (e) { alert((e as Error).message); }
   }
 
-  // Build the geofence preview HTML from the same effective radius the badge
-  // above displays, so saving an override re-renders the map at the new size.
+  // Reset the cached initial map snapshot when navigating to a different site.
+  useEffect(() => {
+    initialMapRef.current = null;
+  }, [siteId]);
+
+  // Build the geofence preview HTML from the effective radius the badge above
+  // displays. We snapshot the first valid (lat,lng,r) we see for this site into
+  // a ref so the srcDoc string stays stable across re-renders — the iframe's
+  // own drag handlers own the live state from that point forward, and we only
+  // re-key it when the underlying coords change via the Edit dialog.
   // Hooks must run unconditionally — must stay above any early return below.
   const geofenceMapHtml = useMemo(() => {
     if (!site) return null;
@@ -214,8 +308,109 @@ export function SiteDetailPage() {
     const hasOverride = Number.isFinite(overrideNum) && overrideNum > 0;
     const globalR = globalGeofenceRadiusMiles ?? 0.25;
     const effective = site.effectiveGeofenceRadiusMiles ?? (hasOverride ? overrideNum : globalR);
-    return buildSiteGeofenceHtml(lat, lng, effective, site.name);
+    if (!initialMapRef.current) {
+      initialMapRef.current = { lat, lng, r: effective, name: site.name };
+    }
+    const s = initialMapRef.current;
+    return buildSiteGeofenceHtml(s.lat, s.lng, s.r, s.name);
   }, [site, globalGeofenceRadiusMiles]);
+
+  // Save drag-end events from the iframe map back to the server. Clamp the
+  // radius defensively here too: the iframe already clamps to [16 m, 50 km]
+  // but a buggy or replayed message shouldn't be trusted blindly.
+  //
+  // Concurrency model: only one PATCH may be in flight at a time, but if the
+  // user releases another drag while a save is pending we stash the latest
+  // intent in `pendingRef` and fire it as soon as the in-flight save settles.
+  // This guarantees the final dragged position/radius always reaches the
+  // backend, while collapsing rapid-fire drag releases into the most recent.
+  const savingRef = useRef(false);
+  const pendingRef = useRef<{ lat: number; lng: number; r: number } | null>(null);
+  useEffect(() => {
+    // Capture siteId at effect-mount so async responses that resolve after
+    // the user has navigated to a different site can't bleed into the new
+    // page's state. The iframe element itself is resolved at send-time from
+    // iframeRef — capturing it at mount would be `null` on the very first
+    // render (site is still loading) and ACK messages would never reach the
+    // map's readout.
+    const ownSiteId = siteId;
+    let cancelled = false;
+    type Pending = { lat: number; lng: number; r: number };
+    async function flush(next: Pending) {
+      const reply = (type: "wcsg:geofence-saved" | "wcsg:geofence-save-failed") => {
+        if (cancelled) return;
+        iframeRef.current?.contentWindow?.postMessage({ type }, "*");
+      };
+      const replyOk = () => reply("wcsg:geofence-saved");
+      const replyErr = () => reply("wcsg:geofence-save-failed");
+      savingRef.current = true;
+      try {
+        const updated = await api<Site>(`/admin/tables/sites/${ownSiteId}`, {
+          method: "PATCH",
+          body: JSON.stringify({
+            locationLat: String(next.lat),
+            locationLng: String(next.lng),
+            geofenceRadiusMiles: String(next.r),
+          }),
+        });
+        if (cancelled) return;
+        // Optimistically merge the saved values into local state for the
+        // text badge above. The iframe srcDoc memo is gated by initialMapRef
+        // so this won't tear down the running map.
+        setSite((prev) => (prev && prev.id === ownSiteId ? { ...prev, ...updated } : prev));
+        replyOk();
+      } catch (e) {
+        if (cancelled) return;
+        replyErr();
+        alert(`Couldn't save geofence change: ${(e as Error).message}`);
+        // Reset the snapshot, drop queued saves, and force the iframe to
+        // remount via a version bump — otherwise the iframe would keep
+        // showing the unsaved dragged circle (React may skip updating srcDoc
+        // when the new string is byte-identical to the prior one).
+        initialMapRef.current = null;
+        pendingRef.current = null;
+        setIframeVersion((v) => v + 1);
+        loadSite();
+      } finally {
+        savingRef.current = false;
+        const queued = pendingRef.current;
+        if (queued && !cancelled) {
+          pendingRef.current = null;
+          // Fire-and-forget; this call sets savingRef again before awaiting.
+          void flush(queued);
+        }
+      }
+    }
+    function onMsg(ev: MessageEvent) {
+      // Only accept messages from our own iframe — ignore postMessage chatter
+      // from extensions, parent frames, or unrelated windows.
+      if (ev.source !== iframeRef.current?.contentWindow) return;
+      const d = ev.data as { type?: string; lat?: number; lng?: number; radiusMiles?: number } | null;
+      if (!d || typeof d !== "object" || d.type !== "wcsg:geofence-change") return;
+      if (typeof d.lat !== "number" || !isFinite(d.lat) || d.lat < -90 || d.lat > 90) return;
+      if (typeof d.lng !== "number" || !isFinite(d.lng) || d.lng < -180 || d.lng > 180) return;
+      if (typeof d.radiusMiles !== "number" || !isFinite(d.radiusMiles)) return;
+      const next: Pending = {
+        lat: d.lat,
+        lng: d.lng,
+        r: Math.max(GEOFENCE_MIN_MILES, Math.min(d.radiusMiles, GEOFENCE_MAX_MILES)),
+      };
+      if (savingRef.current) {
+        // Collapse rapid drag-releases: only the latest pending state matters.
+        pendingRef.current = next;
+        return;
+      }
+      void flush(next);
+    }
+    window.addEventListener("message", onMsg);
+    return () => {
+      // Mark this effect's flush callbacks stale before unmounting the
+      // listener so any in-flight save that resolves after navigation can't
+      // call setSite/loadSite/postMessage against the next site's state.
+      cancelled = true;
+      window.removeEventListener("message", onMsg);
+    };
+  }, [siteId, loadSite]);
 
   if (!sitesDescriptor) return null;
 
@@ -306,6 +501,8 @@ export function SiteDetailPage() {
                 <div className="mt-3 max-w-3xl">
                   <div className="rounded border overflow-hidden" style={{ height: 240 }}>
                     <iframe
+                      key={`geofence-${siteId}-${iframeVersion}`}
+                      ref={iframeRef}
                       title={`${site.name} geofence preview`}
                       srcDoc={geofenceMapHtml}
                       sandbox="allow-scripts"
@@ -314,7 +511,7 @@ export function SiteDetailPage() {
                     />
                   </div>
                   <div className="mt-1 text-[11px] text-muted-foreground">
-                    Gold circle shows the effective geofence — officers drifting outside trigger a breach alert.
+                    Drag the <strong>S</strong> pin to nudge the site's coordinates, or drag the small gold dot on the edge to resize the geofence. Changes save automatically.
                   </div>
                 </div>
               )}
@@ -447,7 +644,13 @@ export function SiteDetailPage() {
           onOpenChange={setEditing}
           descriptor={sitesDescriptor}
           initial={site as unknown as Record<string, unknown>}
-          onSaved={() => { setEditing(false); loadSite(); }}
+          onSaved={() => {
+            setEditing(false);
+            // Reset the snapshot so a manual coord/radius edit in the dialog
+            // takes effect in the iframe map on the next render.
+            initialMapRef.current = null;
+            loadSite();
+          }}
         />
       )}
     </div>
