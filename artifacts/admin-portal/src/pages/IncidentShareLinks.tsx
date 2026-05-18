@@ -137,8 +137,9 @@ export default function IncidentShareLinksPage() {
         <div className="text-sm font-semibold mb-3 brand-navy">Create a new link</div>
         <div className="grid grid-cols-1 md:grid-cols-4 gap-3 items-end">
           <div className="md:col-span-2">
-            <label className="text-xs text-muted-foreground">Incident</label>
+            <label htmlFor="share-incident" className="text-xs text-muted-foreground">Incident</label>
             <select
+              id="share-incident"
               value={pickIncidentId}
               onChange={(e) => setPickIncidentId(e.target.value)}
               className="w-full mt-1 border rounded-md px-2 py-2 text-sm bg-white"
@@ -152,13 +153,13 @@ export default function IncidentShareLinksPage() {
             </select>
           </div>
           <div>
-            <label className="text-xs text-muted-foreground">Recipient label (optional)</label>
-            <Input value={recipientLabel} onChange={(e) => setRecipientLabel(e.target.value)}
+            <label htmlFor="share-recipient" className="text-xs text-muted-foreground">Recipient label (optional)</label>
+            <Input id="share-recipient" value={recipientLabel} onChange={(e) => setRecipientLabel(e.target.value)}
               placeholder="e.g. Acme Mall — Janet Park" />
           </div>
           <div>
-            <label className="text-xs text-muted-foreground">Expires in (days)</label>
-            <Input value={expiresInDays} onChange={(e) => setExpiresInDays(e.target.value)}
+            <label htmlFor="share-expires" className="text-xs text-muted-foreground">Expires in (days)</label>
+            <Input id="share-expires" value={expiresInDays} onChange={(e) => setExpiresInDays(e.target.value)}
               inputMode="numeric" />
           </div>
         </div>

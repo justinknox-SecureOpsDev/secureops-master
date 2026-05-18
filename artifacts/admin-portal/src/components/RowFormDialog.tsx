@@ -1,5 +1,5 @@
-import { useEffect, useMemo, useState } from "react";
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
+import { useEffect, useId, useMemo, useRef, useState } from "react";
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
@@ -81,7 +81,7 @@ function RecentChangesPanel({ employeeUserId }: { employeeUserId: string }) {
 }
 
 function FieldInput({
-  field, value, onChange, onPickFkRow, filterValue,
+  field, value, onChange, onPickFkRow, filterValue, inputId, describedBy, invalid, autoFocus,
 }: {
   field: Field;
   value: string;
@@ -89,17 +89,29 @@ function FieldInput({
   onPickFkRow?: (row: Record<string, unknown> | null) => void;
   /** When field.filterBy is set, this is the value of the source form field used to filter FK options. */
   filterValue?: string;
+  inputId: string;
+  describedBy?: string;
+  invalid?: boolean;
+  autoFocus?: boolean;
 }) {
+  const ariaProps = {
+    id: inputId,
+    "aria-required": field.required || undefined,
+    "aria-invalid": invalid || undefined,
+    "aria-describedby": describedBy,
+  };
   const fk = useFkOptions(field.type === "fk" ? field.fkTable : undefined);
   const fkOptions = field.filterBy
     ? fk.options.filter((o) => String(o.row[field.filterBy!.fkRowKey] ?? "") === (filterValue ?? ""))
     : fk.options;
   if (field.type === "textarea") {
-    return <Textarea rows={3} value={value} onChange={(e) => onChange(e.target.value)} />;
+    return <Textarea {...ariaProps} autoFocus={autoFocus} rows={3} value={value} onChange={(e) => onChange(e.target.value)} />;
   }
   if (field.type === "json") {
     return (
       <Textarea
+        {...ariaProps}
+        autoFocus={autoFocus}
         rows={6}
         value={value}
         placeholder='{ }'
@@ -185,7 +197,7 @@ function FieldInput({
   if (field.type === "boolean") {
     return (
       <Select value={value || "false"} onValueChange={onChange}>
-        <SelectTrigger><SelectValue /></SelectTrigger>
+        <SelectTrigger {...ariaProps} autoFocus={autoFocus}><SelectValue /></SelectTrigger>
         <SelectContent>
           <SelectItem value="true">Yes</SelectItem>
           <SelectItem value="false">No</SelectItem>
@@ -196,7 +208,7 @@ function FieldInput({
   if (field.type === "select") {
     return (
       <Select value={value} onValueChange={onChange}>
-        <SelectTrigger><SelectValue placeholder="Select…" /></SelectTrigger>
+        <SelectTrigger {...ariaProps} autoFocus={autoFocus}><SelectValue placeholder="Select…" /></SelectTrigger>
         <SelectContent>
           {field.options?.map((o) => (
             <SelectItem key={o.value} value={o.value}>{o.label}</SelectItem>
@@ -217,7 +229,7 @@ function FieldInput({
           }
         }}
       >
-        <SelectTrigger>
+        <SelectTrigger {...ariaProps} autoFocus={autoFocus}>
           <SelectValue placeholder={
             fk.loading ? "Loading…"
             : field.filterBy && !filterValue ? `Pick ${field.filterBy.formKey} first…`
@@ -242,6 +254,8 @@ function FieldInput({
     : "text";
   return (
     <Input
+      {...ariaProps}
+      autoFocus={autoFocus}
       type={inputType}
       value={value}
       placeholder={field.placeholder}
@@ -272,9 +286,13 @@ export function RowFormDialog({
   const [values, setValues] = useState<Record<string, string>>({});
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [invalidKey, setInvalidKey] = useState<string | null>(null);
   const [geocoding, setGeocoding] = useState(false);
   const [geocodeMsg, setGeocodeMsg] = useState<string | null>(null);
   const [shareMintOpen, setShareMintOpen] = useState(false);
+  const formId = useId();
+  const errorId = `${formId}-error`;
+  const geocodeMsgId = `${formId}-geocode-msg`;
 
   const isSites = descriptor.name === "sites";
   const sitesAddress = (values["address"] ?? "").trim();
@@ -326,12 +344,14 @@ export function RowFormDialog({
     }
     setValues(v);
     setError(null);
+    setInvalidKey(null);
     setGeocodeMsg(null);
   }, [open, initial, editable, presetValues]);
 
   async function submit() {
     setSaving(true);
     setError(null);
+    setInvalidKey(null);
     try {
       const payload: Record<string, unknown> = {};
       for (const f of editable) {
@@ -344,6 +364,7 @@ export function RowFormDialog({
         } else if (v !== "" && v !== null) {
           payload[f.key] = v;
         } else if (!initial && f.required) {
+          setInvalidKey(f.key);
           throw new Error(`${f.label} is required`);
         }
       }
@@ -371,6 +392,8 @@ export function RowFormDialog({
     }
   }
 
+  const visibleFields = editable.filter((f) => !lockedSet.has(f.key));
+  const firstFocusableKey = visibleFields[0]?.key ?? null;
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
@@ -378,16 +401,20 @@ export function RowFormDialog({
           <DialogTitle>
             {initial ? `Edit ${singularize(descriptor.label)}` : `Add ${singularize(descriptor.label)}`}
           </DialogTitle>
+          <DialogDescription className="sr-only">
+            {initial
+              ? `Edit this ${singularize(descriptor.label).toLowerCase()}. Required fields are marked.`
+              : `Create a new ${singularize(descriptor.label).toLowerCase()}. Required fields are marked.`}
+          </DialogDescription>
         </DialogHeader>
         <div className="space-y-5 py-2">
           {(() => {
             // Group fields into sections in declared order. A field's `section`
             // starts a new section that all subsequent unsectioned fields fall
             // under, until the next field that declares a section.
-            const visible = editable.filter((f) => !lockedSet.has(f.key));
-            const groups: { section: string | null; fields: typeof visible }[] = [];
-            let current: { section: string | null; fields: typeof visible } | null = null;
-            for (const f of visible) {
+            const groups: { section: string | null; fields: typeof visibleFields }[] = [];
+            let current: { section: string | null; fields: typeof visibleFields } | null = null;
+            for (const f of visibleFields) {
               if (f.section || !current) {
                 current = { section: f.section ?? null, fields: [] };
                 groups.push(current);
@@ -402,14 +429,27 @@ export function RowFormDialog({
                   </div>
                 )}
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                  {g.fields.map((f) => (
+                  {g.fields.map((f) => {
+                    const fieldId = `${formId}-${f.key}`;
+                    const fieldErrorId = invalidKey === f.key ? errorId : undefined;
+                    return (
                     <div key={f.key} className={(f.type === "textarea" || f.type === "json" || f.type === "fileKeyList") ? "md:col-span-2" : ""}>
-                      <Label className="text-xs font-semibold uppercase tracking-wide brand-navy">
-                        {f.label}{f.required && <span className="text-destructive ml-1">*</span>}
+                      <Label htmlFor={fieldId} className="text-xs font-semibold uppercase tracking-wide brand-navy">
+                        {f.label}
+                        {f.required && (
+                          <>
+                            <span aria-hidden="true" className="text-destructive ml-1">*</span>
+                            <span className="sr-only"> (required)</span>
+                          </>
+                        )}
                       </Label>
                       <div className="mt-1">
                         <FieldInput
                   field={f}
+                  inputId={fieldId}
+                  describedBy={fieldErrorId}
+                  invalid={invalidKey === f.key}
+                  autoFocus={f.key === firstFocusableKey}
                   value={values[f.key] ?? ""}
                   filterValue={f.filterBy ? values[f.filterBy.formKey] ?? "" : undefined}
                   onChange={(v) => setValues((prev) => {
@@ -436,7 +476,8 @@ export function RowFormDialog({
                 />
                       </div>
                     </div>
-                  ))}
+                    );
+                  })}
                 </div>
               </div>
             ));
@@ -471,13 +512,18 @@ export function RowFormDialog({
                 {geocoding ? "Geocoding…" : sitesHasCoords ? "Re-geocode" : "Geocode address"}
               </Button>
             </div>
-            {geocodeMsg && (
-              <div className="text-xs text-muted-foreground">{geocodeMsg}</div>
-            )}
+            <div id={geocodeMsgId} aria-live="polite" className="text-xs text-muted-foreground min-h-0">
+              {geocodeMsg}
+            </div>
           </div>
         )}
         {error && (
-          <pre className="text-xs text-destructive whitespace-pre-wrap bg-destructive/5 p-2 rounded border border-destructive/20">
+          <pre
+            id={errorId}
+            role="alert"
+            aria-live="assertive"
+            className="text-xs text-destructive whitespace-pre-wrap bg-destructive/5 p-2 rounded border border-destructive/20"
+          >
             {error}
           </pre>
         )}

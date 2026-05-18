@@ -179,15 +179,17 @@ export function InvitationsPage() {
       </div>
 
       <div className="flex flex-wrap items-center gap-2">
-        <div className="flex items-center gap-1">
+        <div className="flex items-center gap-1" role="group" aria-label="Filter invitations">
           {FILTERS.map((f) => (
-            <button key={f.value} onClick={() => setFilter(f.value)}
+            <button key={f.value} type="button" onClick={() => setFilter(f.value)}
+              aria-pressed={filter === f.value}
               className={`text-xs px-3 py-1.5 rounded border ${
                 filter === f.value ? "bg-brand-navy text-white border-brand-navy" : "bg-background hover:bg-accent/40"
               }`}>{f.label}</button>
           ))}
         </div>
         <Input value={search} onChange={(e) => setSearch(e.target.value)}
+          aria-label="Search invitations"
           placeholder="Search name or email" className="w-64" />
         <div className="ml-auto flex items-center gap-2">
           <Button variant="outline" onClick={downloadCsv} disabled={counts.ready === 0}>
@@ -278,15 +280,17 @@ export function InvitationsPage() {
                         <code className="font-mono text-xs bg-amber-50 border border-amber-200 px-1.5 py-0.5 rounded">
                           {showPw ? r.tempPasswordPlain : "••••••••••"}
                         </code>
-                        <button title={showPw ? "Hide" : "Show"}
+                        <button type="button" title={showPw ? "Hide" : "Show"}
+                          aria-label={showPw ? "Hide temporary password" : "Show temporary password"}
                           onClick={() => setReveal((p) => { const n = new Set(p); n.has(r.id) ? n.delete(r.id) : n.add(r.id); return n; })}
                           className="opacity-60 hover:opacity-100">
-                          {showPw ? <EyeOff className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5" />}
+                          {showPw ? <EyeOff aria-hidden="true" className="w-3.5 h-3.5" /> : <Eye aria-hidden="true" className="w-3.5 h-3.5" />}
                         </button>
-                        <button title="Copy email + password"
+                        <button type="button" title="Copy email + password"
+                          aria-label="Copy email and temporary password"
                           onClick={() => copy(`${r.email}\t${r.tempPasswordPlain}`)}
                           className="opacity-60 hover:opacity-100">
-                          <Copy className="w-3.5 h-3.5" />
+                          <Copy aria-hidden="true" className="w-3.5 h-3.5" />
                         </button>
                       </div>
                     ) : (
@@ -387,9 +391,10 @@ export function InvitationsPage() {
                             <td className="px-2 py-1">{g.email}</td>
                             <td className="px-2 py-1 font-mono">{g.tempPassword}</td>
                             <td className="px-2 py-1 text-right">
-                              <button onClick={() => copy(`${g.email}\t${g.tempPassword}`)}
+                              <button type="button" onClick={() => copy(`${g.email}\t${g.tempPassword}`)}
+                                aria-label={`Copy ${g.email} and temporary password`}
                                 className="opacity-60 hover:opacity-100">
-                                <Copy className="w-3 h-3" />
+                                <Copy aria-hidden="true" className="w-3 h-3" />
                               </button>
                             </td>
                           </tr>

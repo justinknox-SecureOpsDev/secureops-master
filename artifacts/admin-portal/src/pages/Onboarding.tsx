@@ -69,15 +69,16 @@ export function OnboardingPage() {
           Track approved employees through onboarding. Resend links if needed.
         </p>
       </header>
-      <div className="flex items-center gap-1">
+      <div className="flex items-center gap-1" role="group" aria-label="Filter by status">
         {[{v:"",l:"All"},{v:"pending",l:"Pending"},{v:"completed",l:"Completed"}].map((s) => (
-          <button key={s.v} onClick={() => setStatus(s.v)}
+          <button key={s.v} type="button" onClick={() => setStatus(s.v)}
+            aria-pressed={status === s.v}
             className={`text-xs px-3 py-1.5 rounded border ${
               status === s.v ? "bg-brand-navy text-white border-brand-navy" : "bg-background hover:bg-accent/40"
             }`}>{s.l}</button>
         ))}
       </div>
-      {error && <div className="text-sm text-destructive bg-destructive/5 p-2 rounded border border-destructive/20">{error}</div>}
+      {error && <div role="alert" className="text-sm text-destructive bg-destructive/5 p-2 rounded border border-destructive/20">{error}</div>}
       <div className="bg-card rounded-lg border overflow-hidden">
         <table className="w-full text-sm">
           <thead className="bg-muted/50 text-xs uppercase tracking-wide">

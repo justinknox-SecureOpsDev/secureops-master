@@ -233,11 +233,13 @@ export function ApplicationsPage() {
         </a>
       </header>
       <div className="flex flex-wrap items-center gap-2">
-        <div className="flex items-center gap-1">
+        <div className="flex items-center gap-1" role="group" aria-label="Filter by status">
           {STATUSES.map((s) => (
             <button
               key={s.value}
+              type="button"
               onClick={() => setStatus(s.value)}
+              aria-pressed={status === s.value}
               className={`text-xs px-3 py-1.5 rounded border ${
                 status === s.value ? "bg-brand-navy text-white border-brand-navy" : "bg-background hover:bg-accent/40"
               }`}

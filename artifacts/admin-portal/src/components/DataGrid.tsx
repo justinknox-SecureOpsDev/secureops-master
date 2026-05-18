@@ -355,9 +355,10 @@ export function DataGrid({
               value={search}
               onChange={(e) => { setSearch(e.target.value); setPage(0); }}
               placeholder="Search…"
+              aria-label={`Search ${descriptor.plural}`}
               className="w-64"
             />
-            <Button variant="outline" size="icon" onClick={load} title="Refresh">
+            <Button variant="outline" size="icon" onClick={load} title="Refresh" aria-label="Refresh">
               <RefreshCw className="w-4 h-4" />
             </Button>
             {descriptor.importSupported && (
@@ -422,6 +423,7 @@ export function DataGrid({
               value={search}
               onChange={(e) => { setSearch(e.target.value); setPage(0); }}
               placeholder="Search…"
+              aria-label={`Search ${descriptor.plural}`}
               className="w-56 h-8"
             />
             <span className="text-xs text-muted-foreground">
@@ -429,7 +431,7 @@ export function DataGrid({
             </span>
           </div>
           <div className="flex items-center gap-2">
-            <Button variant="outline" size="sm" onClick={load} title="Refresh">
+            <Button variant="outline" size="sm" onClick={load} title="Refresh" aria-label="Refresh">
               <RefreshCw className="w-3.5 h-3.5" />
             </Button>
             <Button size="sm" onClick={() => setCreating(true)} className="bg-brand-navy text-white hover:opacity-90">
@@ -443,25 +445,37 @@ export function DataGrid({
         <Table>
           <TableHeader className="sticky top-0 bg-card z-10">
             <TableRow>
-              {gridFields.map((f) => (
-                <TableHead key={f.key}>
+              {gridFields.map((f) => {
+                const isSorted = sort.field === f.key;
+                const ariaSort: "ascending" | "descending" | "none" = isSorted
+                  ? (sort.dir === "asc" ? "ascending" : "descending")
+                  : "none";
+                return (
+                <TableHead key={f.key} aria-sort={f.derived ? undefined : ariaSort}>
                   {f.derived ? (
                     <span className="inline-flex items-center gap-1 font-semibold uppercase tracking-wide text-xs brand-navy">
                       {f.label}
                     </span>
                   ) : (
                     <button
+                      type="button"
                       onClick={() => toggleSort(f.key)}
+                      aria-label={`Sort by ${f.label}${
+                        isSorted
+                          ? ` (currently ${sort.dir === "asc" ? "ascending" : "descending"})`
+                          : ""
+                      }`}
                       className="inline-flex items-center gap-1 font-semibold uppercase tracking-wide text-xs brand-navy"
                     >
                       {f.label}
-                      {sort.field === f.key
-                        ? (sort.dir === "asc" ? <ArrowUp className="w-3 h-3" /> : <ArrowDown className="w-3 h-3" />)
-                        : <ArrowUpDown className="w-3 h-3 opacity-30" />}
+                      {isSorted
+                        ? (sort.dir === "asc" ? <ArrowUp aria-hidden="true" className="w-3 h-3" /> : <ArrowDown aria-hidden="true" className="w-3 h-3" />)
+                        : <ArrowUpDown aria-hidden="true" className="w-3 h-3 opacity-30" />}
                     </button>
                   )}
                 </TableHead>
-              ))}
+                );
+              })}
               <TableHead className="w-24 text-right">Actions</TableHead>
             </TableRow>
           </TableHeader>
@@ -486,7 +500,7 @@ export function DataGrid({
                 <TableCell className="text-right">
                   {descriptor.name === "sites" && (
                     <Link href={`/sites/${(r as any).id}`}>
-                      <Button variant="ghost" size="icon" title="Open site detail">
+                      <Button variant="ghost" size="icon" title="Open site detail" aria-label="Open site detail">
                         <ExternalLink className="w-4 h-4" />
                       </Button>
                     </Link>
@@ -497,6 +511,7 @@ export function DataGrid({
                       size="icon"
                       onClick={() => { setResetError(null); setResetTarget(toUserRow(r)); }}
                       title="Send password reset"
+                      aria-label="Send password reset"
                     >
                       <KeyRound className="w-4 h-4" />
                     </Button>
@@ -507,6 +522,7 @@ export function DataGrid({
                       size="icon"
                       onClick={() => { setRevokeError(null); setRevokeTarget(toUserRow(r)); }}
                       title="Revoke all active sessions for this user"
+                      aria-label="Revoke all active sessions for this user"
                     >
                       <ShieldOff className="w-4 h-4 text-destructive" />
                     </Button>
@@ -517,14 +533,15 @@ export function DataGrid({
                       size="icon"
                       onClick={() => downloadIncidentPdf(r)}
                       title="Download incident report (PDF)"
+                      aria-label="Download incident report (PDF)"
                     >
                       <FileText className="w-4 h-4" />
                     </Button>
                   )}
-                  <Button variant="ghost" size="icon" onClick={() => setEditing(r)} title="Edit">
+                  <Button variant="ghost" size="icon" onClick={() => setEditing(r)} title="Edit" aria-label={`Edit ${singularize(descriptor.label).toLowerCase()}`}>
                     <Pencil className="w-4 h-4" />
                   </Button>
-                  <Button variant="ghost" size="icon" onClick={() => setDeleting(r)} title="Delete">
+                  <Button variant="ghost" size="icon" onClick={() => setDeleting(r)} title="Delete" aria-label={`Delete ${singularize(descriptor.label).toLowerCase()}`}>
                     <Trash2 className="w-4 h-4 text-destructive" />
                   </Button>
                 </TableCell>
@@ -539,8 +556,8 @@ export function DataGrid({
           Page {page + 1} of {totalPages}
         </span>
         <div className="flex gap-2">
-          <Button variant="outline" disabled={page === 0} onClick={() => setPage((p) => Math.max(0, p - 1))}>Prev</Button>
-          <Button variant="outline" disabled={page + 1 >= totalPages} onClick={() => setPage((p) => p + 1)}>Next</Button>
+          <Button variant="outline" disabled={page === 0} onClick={() => setPage((p) => Math.max(0, p - 1))} aria-label="Previous page">Prev</Button>
+          <Button variant="outline" disabled={page + 1 >= totalPages} onClick={() => setPage((p) => p + 1)} aria-label="Next page">Next</Button>
         </div>
       </div>
 
