@@ -1,4 +1,5 @@
 import { useMemo } from "react";
+import { Radio } from "lucide-react";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { Link, useRoute, useLocation } from "wouter";
 import { api } from "@/lib/api";
@@ -52,6 +53,97 @@ type Incident = {
 };
 
 type ChatRoom = { id: string; name: string };
+
+type LiveLocation = {
+  userId: string;
+  lastLat: string | null;
+  lastLng: string | null;
+  lastLocationAt: string | null;
+  clockedIn: boolean;
+  clockInTime: string | null;
+  shiftId: string | null;
+  shiftTitle: string | null;
+  site: {
+    id: string;
+    name: string;
+    address: string | null;
+    lat: number;
+    lng: number;
+    geofenceRadiusMiles: number;
+  } | null;
+};
+
+function fmtAgo(iso: string | null | undefined): string {
+  if (!iso) return "no ping";
+  const mins = Math.round((Date.now() - new Date(iso).getTime()) / 60000);
+  if (mins < 1) return "just now";
+  if (mins < 60) return `${mins}m ago`;
+  const hrs = Math.floor(mins / 60);
+  if (hrs < 24) return `${hrs}h ago`;
+  const days = Math.floor(hrs / 24);
+  return `${days}d ago`;
+}
+
+/**
+ * Render a sandboxed Leaflet iframe with the officer's pin and (when
+ * clocked in) the active site's geofence circle. Coords are validated
+ * floats; labels are JSON-escaped + injected into a sandboxed iframe with
+ * `allow-scripts` only (no allow-same-origin) so nothing in here can read
+ * the admin origin or pivot back into the parent.
+ */
+function buildOfficerMapHtml(
+  officer: { lat: number; lng: number; label: string; sub: string },
+  site: { lat: number; lng: number; name: string; radiusMiles: number } | null,
+): string {
+  const radiusMeters = site
+    ? Math.max(10, Math.min(site.radiusMiles * 1609.344, 50_000))
+    : 0;
+  const data = JSON.stringify({ officer, site, radiusMeters })
+    .replace(/</g, "\\u003c")
+    .replace(/\u2028/g, "\\u2028")
+    .replace(/\u2029/g, "\\u2029");
+  return `<!doctype html><html><head><meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1"/>
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
+<style>html,body,#m{margin:0;padding:0;height:100%;background:#080c18}
+.popup{font:13px -apple-system,system-ui,sans-serif}.popup b{color:#080c18}
+.site-pin{display:flex;align-items:center;justify-content:center;width:24px;height:24px;border-radius:5px;background:#080c18;color:#c9a84c;border:2px solid #c9a84c;font:bold 11px -apple-system,system-ui,sans-serif;box-shadow:0 1px 4px rgba(0,0,0,.35)}</style>
+</head><body><div id="m"></div>
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script>
+const D = ${data};
+function txt(label, sub){
+  const w=document.createElement('div');w.className='popup';
+  const b=document.createElement('b');b.appendChild(document.createTextNode(String(label||'')));
+  w.appendChild(b);
+  if (sub){ w.appendChild(document.createElement('br'));
+    w.appendChild(document.createTextNode(String(sub))); }
+  return w;
+}
+const map = L.map('m',{zoomControl:true});
+L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',{
+  attribution:'&copy; OpenStreetMap', maxZoom:19
+}).addTo(map);
+const group = L.featureGroup();
+if (D.site) {
+  L.circle([D.site.lat, D.site.lng], {
+    radius: D.radiusMeters, color:'#c9a84c', weight:1, opacity:0.5,
+    fillColor:'#c9a84c', fillOpacity:0.08, interactive:false,
+  }).addTo(group);
+  const icon = L.divIcon({ className:'', html:'<div class="site-pin">S</div>',
+    iconSize:[24,24], iconAnchor:[12,12] });
+  L.marker([D.site.lat, D.site.lng], { icon })
+    .bindPopup(txt(D.site.name, 'Active site'))
+    .addTo(group);
+}
+const om = L.circleMarker([D.officer.lat, D.officer.lng], {
+  radius: 10, color:'#10b981', fillColor:'#10b981', fillOpacity:0.9, weight:3,
+}).bindPopup(txt(D.officer.label, D.officer.sub));
+om.addTo(group);
+group.addTo(map);
+map.fitBounds(group.getBounds().pad(0.4), { maxZoom: 16 });
+</script></body></html>`;
+}
 
 const STATUS_TONE: Record<string, string> = {
   active: "bg-emerald-600 text-white",
@@ -117,6 +209,16 @@ export default function OfficerProfilePage() {
     enabled: !!id,
   });
 
+  // Live location refreshes every 30s — same cadence as the Dispatch Live
+  // Map — so dispatchers staying on this page during an active call see
+  // fresh pings without manual refresh.
+  const liveLocation = useQuery<LiveLocation>({
+    queryKey: ["officer-live", id],
+    queryFn: () => api<LiveLocation>(`/admin/officers/${encodeURIComponent(id)}/live`),
+    enabled: !!id,
+    refetchInterval: 30_000,
+  });
+
   const recentIncidents = useQuery<Incident[]>({
     queryKey: ["officer-incidents-recent", id],
     queryFn: () => api<Incident[]>(`/incidents?employeeId=${encodeURIComponent(id)}`),
@@ -150,6 +252,35 @@ export default function OfficerProfilePage() {
     const upcoming = sorted.find((s) => new Date(s.startTime).getTime() > now);
     return upcoming ?? sorted[sorted.length - 1] ?? null;
   }, [todaysShifts.data]);
+
+  // Parsed officer lat/lng (numeric form, validated). Used both for the
+  // text "last ping" line and as the map pin. Anything that fails parsing
+  // is treated as "no recent ping" — same posture as Dispatch.
+  const officerCoord = useMemo<{ lat: number; lng: number } | null>(() => {
+    const d = liveLocation.data;
+    if (!d?.lastLat || !d?.lastLng) return null;
+    const lat = parseFloat(d.lastLat);
+    const lng = parseFloat(d.lastLng);
+    if (!isFinite(lat) || !isFinite(lng)) return null;
+    return { lat, lng };
+  }, [liveLocation.data]);
+
+  // Only render the embedded map when we actually have an officer pin AND
+  // the officer is currently clocked in (the brief from the task). When
+  // they're off-shift we still surface the last-ping line, but we don't
+  // paint a map view that would be stale and misleading.
+  const mapHtml = useMemo<string | null>(() => {
+    const d = liveLocation.data;
+    if (!d || !d.clockedIn || !officerCoord) return null;
+    const label = officer.data
+      ? `${officer.data.firstName} ${officer.data.lastName}`
+      : "Officer";
+    const sub = `${d.site?.name ?? d.shiftTitle ?? "on shift"} · ${fmtAgo(d.lastLocationAt)}`;
+    const site = d.site
+      ? { lat: d.site.lat, lng: d.site.lng, name: d.site.name, radiusMiles: d.site.geofenceRadiusMiles }
+      : null;
+    return buildOfficerMapHtml({ lat: officerCoord.lat, lng: officerCoord.lng, label, sub }, site);
+  }, [liveLocation.data, officerCoord, officer.data]);
 
   const recent5 = useMemo<Incident[]>(() => {
     const rows = recentIncidents.data ?? [];
@@ -299,6 +430,80 @@ export default function OfficerProfilePage() {
                 </Link>
               </div>
             </div>
+          )}
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader className="pb-3">
+          <CardTitle className="flex items-center gap-2 text-base">
+            <Radio className="w-5 h-5 brand-gold" />
+            Live location
+            {liveLocation.data?.clockedIn && (
+              <Badge className="bg-emerald-600 text-white text-[10px] uppercase">
+                on duty
+              </Badge>
+            )}
+            <span className="ml-auto text-xs opacity-60 font-normal">
+              {liveLocation.isFetching ? "refreshing…" : fmtAgo(liveLocation.data?.lastLocationAt)}
+            </span>
+          </CardTitle>
+        </CardHeader>
+        <CardContent className="p-0">
+          {liveLocation.isLoading && (
+            <div className="text-sm opacity-60 px-4 pb-4 flex items-center gap-2">
+              <Loader2 className="w-4 h-4 animate-spin" /> Loading…
+            </div>
+          )}
+          {liveLocation.error && (
+            <div className="text-xs text-red-700 px-4 pb-4">
+              Could not load location:{" "}
+              {liveLocation.error instanceof Error ? liveLocation.error.message : "unknown error"}
+            </div>
+          )}
+          {liveLocation.data && !liveLocation.isLoading && (
+            <>
+              <div className="text-sm px-4 pb-3 space-y-1">
+                {officerCoord ? (
+                  <div className="flex items-center gap-1 flex-wrap" data-testid="officer-last-ping">
+                    <MapPin className="w-3.5 h-3.5 brand-gold" />
+                    <span className="font-mono text-xs">
+                      {officerCoord.lat.toFixed(5)}, {officerCoord.lng.toFixed(5)}
+                    </span>
+                    <span className="opacity-70">
+                      · last ping {fmtAgo(liveLocation.data.lastLocationAt)}
+                    </span>
+                  </div>
+                ) : (
+                  <div className="opacity-60">No location ping on file yet.</div>
+                )}
+                {liveLocation.data.clockedIn && liveLocation.data.site && (
+                  <div className="opacity-70 text-xs">
+                    Active site: <span className="font-medium">{liveLocation.data.site.name}</span>
+                    {" · "}geofence {liveLocation.data.site.geofenceRadiusMiles.toFixed(2)} mi
+                  </div>
+                )}
+                {liveLocation.data.clockedIn && !liveLocation.data.site && (
+                  <div className="opacity-60 text-xs">
+                    Clocked in, but no site coordinates — map can't draw a perimeter.
+                  </div>
+                )}
+                {!liveLocation.data.clockedIn && officerCoord && (
+                  <div className="opacity-60 text-xs">
+                    Not currently clocked in — pin reflects the last known position.
+                  </div>
+                )}
+              </div>
+              {mapHtml && (
+                <iframe
+                  title="Officer live location"
+                  srcDoc={mapHtml}
+                  className="w-full h-64 border-0 border-t"
+                  sandbox="allow-scripts"
+                  data-testid="officer-live-map"
+                />
+              )}
+            </>
           )}
         </CardContent>
       </Card>

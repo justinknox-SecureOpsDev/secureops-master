@@ -5,7 +5,7 @@ import { requireAuth, requireAdminOrDispatcher } from "../middlewares/auth";
 import { emergencyLimiter, locationLimiter } from "../middlewares/rateLimit";
 import { sendPushToUsers } from "../lib/push";
 import { sendSmsToUsers } from "../lib/sms";
-import { evaluateGeofence } from "../lib/geofence";
+import { evaluateGeofence, getGeofenceRadiusMiles } from "../lib/geofence";
 
 const router: IRouter = Router();
 
@@ -66,6 +66,89 @@ router.get("/admin/active-officers", requireAdminOrDispatcher, async (req, res):
     .orderBy(desc(timeEntriesTable.clockInTime));
 
   res.json(rows);
+});
+
+// GET /admin/officers/:id/live — last known location for a single officer,
+// plus the active site (with effective geofence radius) when they're clocked
+// in. Powers the live-location card on the OfficerProfile page so dispatchers
+// don't have to bounce back to the Dispatch map during an active call.
+router.get("/admin/officers/:id/live", requireAdminOrDispatcher, async (req, res): Promise<void> => {
+  const id = Array.isArray(req.params.id) ? req.params.id[0] : req.params.id;
+  if (!id) { res.status(400).json({ error: "Bad Request", message: "id required" }); return; }
+
+  const [user] = await db
+    .select({
+      userId: usersTable.id,
+      firstName: usersTable.firstName,
+      lastName: usersTable.lastName,
+      lastLat: usersTable.lastLat,
+      lastLng: usersTable.lastLng,
+      lastLocationAt: usersTable.lastLocationAt,
+    })
+    .from(usersTable)
+    .where(eq(usersTable.id, id))
+    .limit(1);
+  if (!user) { res.status(404).json({ error: "Not Found", message: "Officer not found" }); return; }
+
+  const [active] = await db
+    .select({
+      timeEntryId: timeEntriesTable.id,
+      clockInTime: timeEntriesTable.clockInTime,
+      teSiteId: timeEntriesTable.siteId,
+      shiftId: timeEntriesTable.shiftId,
+      shiftTitle: shiftsTable.title,
+      shiftSiteId: shiftsTable.siteId,
+    })
+    .from(timeEntriesTable)
+    .leftJoin(shiftsTable, eq(shiftsTable.id, timeEntriesTable.shiftId))
+    .where(and(eq(timeEntriesTable.employeeId, id), isNull(timeEntriesTable.clockOutTime)))
+    .orderBy(desc(timeEntriesTable.clockInTime))
+    .limit(1);
+
+  let site: {
+    id: string; name: string; address: string | null;
+    lat: number; lng: number; geofenceRadiusMiles: number;
+  } | null = null;
+  if (active) {
+    const siteId = active.teSiteId ?? active.shiftSiteId;
+    if (siteId) {
+      const [s] = await db
+        .select({
+          id: sitesTable.id,
+          name: sitesTable.name,
+          address: sitesTable.address,
+          lat: sitesTable.locationLat,
+          lng: sitesTable.locationLng,
+          radiusOverride: sitesTable.geofenceRadiusMiles,
+        })
+        .from(sitesTable)
+        .where(eq(sitesTable.id, siteId))
+        .limit(1);
+      if (s && s.lat != null && s.lng != null) {
+        const lat = parseFloat(s.lat);
+        const lng = parseFloat(s.lng);
+        const overrideMiles = s.radiusOverride != null ? parseFloat(s.radiusOverride) : NaN;
+        const radius = Number.isFinite(overrideMiles) && overrideMiles > 0
+          ? overrideMiles
+          : getGeofenceRadiusMiles();
+        if (Number.isFinite(lat) && Number.isFinite(lng)) {
+          site = { id: s.id, name: s.name, address: s.address, lat, lng, geofenceRadiusMiles: radius };
+        }
+      }
+    }
+  }
+
+  res.json({
+    userId: user.userId,
+    lastLat: user.lastLat,
+    lastLng: user.lastLng,
+    lastLocationAt: user.lastLocationAt,
+    clockedIn: !!active,
+    clockInTime: active?.clockInTime ?? null,
+    shiftId: active?.shiftId ?? null,
+    shiftTitle: active?.shiftTitle ?? null,
+    site,
+  });
 });
 
 // POST /emergency — officer triggers panic alert. Creates a critical incident
