@@ -198,6 +198,7 @@ export function SiteDetailPage() {
                   const effective = site.effectiveGeofenceRadiusMiles
                     ?? (hasOverride ? overrideNum : globalR);
                   const feet = Math.round(effective * 5280);
+                  const tooTight = hasOverride && overrideNum < 0.05;
                   return (
                     <>
                       <span className="text-foreground font-medium">
@@ -210,6 +211,17 @@ export function SiteDetailPage() {
                           : <>— inherits the global default (set via <code className="font-mono">GEOFENCE_RADIUS_MILES</code>). Set a per-site value in <span className="underline">Edit site</span> to override.</>}
                         {site.locationLat == null || site.locationLng == null ? " Add coordinates above to enable breach alerts here." : ""}
                       </span>
+                      {tooTight && (
+                        <span
+                          role="status"
+                          className="basis-full mt-1 inline-flex items-start gap-1 text-xs font-semibold text-amber-800 bg-amber-100 border border-amber-300 rounded px-2 py-1"
+                        >
+                          <AlertTriangle className="w-3.5 h-3.5 mt-px shrink-0" />
+                          <span>
+                            Tighter than typical phone GPS accuracy (~30–65 ft). Expect frequent false-breach pages to admins; recommend ≥ 0.1 mi (~528 ft).
+                          </span>
+                        </span>
+                      )}
                     </>
                   );
                 })()}

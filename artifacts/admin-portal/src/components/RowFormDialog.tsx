@@ -444,6 +444,26 @@ export function RowFormDialog({
                         )}
                       </Label>
                       <div className="mt-1">
+                        {descriptor.name === "sites" && f.key === "geofenceRadiusMiles" && (() => {
+                          const raw = (values[f.key] ?? "").trim();
+                          if (raw === "") return null;
+                          const n = Number(raw);
+                          if (!Number.isFinite(n) || n <= 0 || n >= 0.05) return null;
+                          const feet = Math.round(n * 5280);
+                          return (
+                            <div
+                              role="status"
+                              aria-live="polite"
+                              className="mb-2 flex items-start gap-1.5 text-xs text-amber-800 bg-amber-100 border border-amber-300 rounded px-2 py-1.5"
+                            >
+                              <AlertTriangle className="w-3.5 h-3.5 mt-px shrink-0" />
+                              <span>
+                                <strong>{n} mi (~{feet.toLocaleString()} ft) is tighter than typical phone GPS accuracy (~30–65 ft on a good day, much worse indoors).</strong>{" "}
+                                Officers may be flagged as off-site every time their signal wobbles, paging admins on every breach. We recommend <strong>≥ 0.1 mi (~528 ft)</strong>. The value will still save if you proceed.
+                              </span>
+                            </div>
+                          );
+                        })()}
                         <FieldInput
                   field={f}
                   inputId={fieldId}
