@@ -34,6 +34,7 @@ import ExportsPage from "@/pages/Exports";
 import DispatchPage from "@/pages/Dispatch";
 import ChatPage from "@/pages/Chat";
 import PersonnelPage from "@/pages/Personnel";
+import OfficerProfilePage from "@/pages/OfficerProfile";
 import NotFound from "@/pages/not-found";
 
 const queryClient = new QueryClient({
@@ -98,6 +99,7 @@ function Routed() {
             <Route path="/dispatch" component={DispatchPage} />
             <Route path="/chat" component={ChatPage} />
             <Route path="/personnel" component={PersonnelPage} />
+            <Route path="/personnel/:id" component={OfficerProfilePage} />
             <Route path="/tables/shifts" component={ShiftsPage} />
             <Route path="/account/security" component={SecurityPage} />
             <Route path="/radio" component={RadioPage} />
@@ -109,6 +111,8 @@ function Routed() {
             <Route path="/dispatch" component={DispatchPage} />
             <Route path="/chat" component={ChatPage} />
             <Route path="/personnel" component={PersonnelPage} />
+            <Route path="/personnel/share-links" component={EmployeeShareLinksPage} />
+            <Route path="/personnel/:id" component={OfficerProfilePage} />
             <Route path="/hr/applications" component={ApplicationsPage} />
             <Route path="/hr/onboarding" component={OnboardingPage} />
             <Route path="/hr/policies" component={PoliciesPage} />
@@ -119,7 +123,6 @@ function Routed() {
             <Route path="/swap-requests" component={SwapRequestsPage} />
             <Route path="/hr/license-renewals" component={LicenseRenewalsPage} />
             <Route path="/incidents/share-links" component={IncidentShareLinksPage} />
-            <Route path="/personnel/share-links" component={EmployeeShareLinksPage} />
             <Route path="/account/security" component={SecurityPage} />
             <Route path="/radio" component={RadioPage} />
             <Route path="/dar" component={DailyReportsPage} />

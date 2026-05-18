@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Link } from "wouter";
+import { Link, useLocation } from "wouter";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { api, getToken } from "@/lib/api";
 import { Button } from "@/components/ui/button";
@@ -201,6 +201,12 @@ export default function DispatchPage() {
   const qc = useQueryClient();
   const { user } = useAuth();
   const [tourOpen, setTourOpen] = useState(false);
+  // Incident id that the Live Map asked to open. Lifted to the page so
+  // the map (right column) can hand off to the IncidentsPanel (left
+  // column) without either component leaving the Dispatch page — this
+  // is the dispatcher-safe path, since /incidents/share-links is admin-
+  // only. Cleared after the panel opens the matching dialog.
+  const [focusedIncidentId, setFocusedIncidentId] = useState<string | null>(null);
 
   // First-run coach-mark tour. Per-user remembered flag (localStorage)
   // so each dispatcher only sees it once, but a "Show me again" link
@@ -301,6 +307,8 @@ export default function DispatchPage() {
               updatedAt={incidents.dataUpdatedAt}
               onChange={refreshAll}
               wsState={wsState}
+              focusedIncidentId={focusedIncidentId}
+              onFocusConsumed={() => setFocusedIncidentId(null)}
             />
           </div>
           <div data-tour="status-board">
@@ -330,6 +338,7 @@ export default function DispatchPage() {
             error={officers.error}
             updatedAt={officers.dataUpdatedAt}
             incidents={incidents.data ?? []}
+            onFocusIncident={setFocusedIncidentId}
           />
           <div data-tour="broadcast">
             <BroadcastPanel rooms={rooms.data ?? []} />
@@ -632,12 +641,23 @@ function InlineError({ error }: { error: unknown }) {
 
 function IncidentsPanel({
   data, loading, error, updatedAt, onChange, wsState,
+  focusedIncidentId, onFocusConsumed,
 }: {
   data: Incident[]; loading: boolean; error: unknown; updatedAt: number | undefined;
   onChange: () => void; wsState: "connecting" | "open" | "closed";
+  focusedIncidentId?: string | null;
+  onFocusConsumed?: () => void;
 }) {
   const critical = data.filter((i) => i.severity === "critical");
   const others = data.filter((i) => i.severity !== "critical");
+  // When the Live Map deep-links to an incident, scroll its row into
+  // view so the auto-opened dialog has visible context underneath.
+  const focusRowRef = useRef<HTMLDivElement | null>(null);
+  useEffect(() => {
+    if (!focusedIncidentId) return;
+    const el = focusRowRef.current;
+    if (el) el.scrollIntoView({ behavior: "smooth", block: "center" });
+  }, [focusedIncidentId, data]);
   return (
     <Card className="border-2" style={{ borderColor: critical.length ? "#dc2626" : "transparent" }}>
       <CardHeader className="pb-3">
@@ -665,17 +685,38 @@ function IncidentsPanel({
         {loading && <div className="text-sm opacity-60">Loading…</div>}
         {!loading && !error && data.length === 0 && <div className="text-sm opacity-60">No active incidents.</div>}
         {[...critical, ...others].map((i) => (
-          <IncidentRow key={i.id} incident={i} onChange={onChange} />
+          <IncidentRow
+            key={i.id}
+            incident={i}
+            onChange={onChange}
+            autoOpen={focusedIncidentId === i.id}
+            onAutoOpenConsumed={onFocusConsumed}
+            rowRef={focusedIncidentId === i.id ? focusRowRef : undefined}
+          />
         ))}
       </CardContent>
     </Card>
   );
 }
 
-function IncidentRow({ incident, onChange }: { incident: Incident; onChange: () => void }) {
+function IncidentRow({
+  incident, onChange, autoOpen, onAutoOpenConsumed, rowRef,
+}: {
+  incident: Incident; onChange: () => void;
+  autoOpen?: boolean;
+  onAutoOpenConsumed?: () => void;
+  rowRef?: React.Ref<HTMLDivElement>;
+}) {
   const [open, setOpen] = useState(false);
+  // Auto-open when the Live Map deep-links to this incident.
+  useEffect(() => {
+    if (autoOpen) {
+      setOpen(true);
+      onAutoOpenConsumed?.();
+    }
+  }, [autoOpen, onAutoOpenConsumed]);
   return (
-    <>
+    <div ref={rowRef}>
       <button
         onClick={() => setOpen(true)}
         className="w-full text-left rounded border bg-card hover:bg-accent/50 p-3 transition-colors"
@@ -694,7 +735,7 @@ function IncidentRow({ incident, onChange }: { incident: Incident; onChange: () 
         </div>
       </button>
       <IncidentDialog incident={incident} open={open} onOpenChange={setOpen} onChange={onChange} />
-    </>
+    </div>
   );
 }
 
@@ -1068,6 +1109,12 @@ type MapPoint = {
   label: string;
   sub: string;
   severity?: "low" | "medium" | "high" | "critical";
+  // Pin-deep-link target. Set on officer/incident pins so the popup can
+  // render a "View profile" / "View incident" button that postMessages
+  // the id up to the parent dispatch shell. Sites have nowhere to go
+  // (covered by the dedicated /sites/:id route from the personnel grid).
+  officerId?: string;
+  incidentId?: string;
 };
 
 function buildLeafletHtml(points: MapPoint[], geofenceRadiusMiles: number): string {
@@ -1091,6 +1138,8 @@ function buildLeafletHtml(points: MapPoint[], geofenceRadiusMiles: number): stri
 <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
 <style>html,body,#m{margin:0;padding:0;height:100%;background:#080c18}
 .popup{font:13px -apple-system,system-ui,sans-serif}.popup b{color:#080c18}
+.popup-btn{margin-top:6px;background:#080c18;color:#c9a84c;border:1px solid #c9a84c;border-radius:4px;padding:4px 8px;font-size:12px;font-weight:600;cursor:pointer;font-family:inherit}
+.popup-btn:hover{background:#c9a84c;color:#080c18}
 .site-pin{display:flex;align-items:center;justify-content:center;width:28px;height:28px;border-radius:6px;background:#080c18;color:#c9a84c;border:2px solid #c9a84c;font:bold 13px -apple-system,system-ui,sans-serif;box-shadow:0 1px 4px rgba(0,0,0,.35)}</style>
 </head><body><div id="m"></div>
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
@@ -1098,11 +1147,30 @@ function buildLeafletHtml(points: MapPoint[], geofenceRadiusMiles: number): stri
 const pts = ${data};
 const GEOFENCE_RADIUS_M = ${radiusMeters};
 const SEV = { critical:'#dc2626', high:'#ea580c', medium:'#eab308', low:'#94a3b8' };
-function popup(label, sub){
+function popup(label, sub, officerId, incidentId){
   const w=document.createElement('div');w.className='popup';
   const b=document.createElement('b');b.appendChild(document.createTextNode(String(label||'')));
   w.appendChild(b);w.appendChild(document.createElement('br'));
-  w.appendChild(document.createTextNode(String(sub||'')));return w;
+  w.appendChild(document.createTextNode(String(sub||'')));
+  // Render a deep-link button on officer/incident pins. Built via
+  // createElement + addEventListener (never innerHTML) so any officer-
+  // controlled label/id can never break out into script context. The
+  // id itself is sent as a string in a structured postMessage; the
+  // parent admin shell validates and dispatches to the correct route.
+  if (officerId || incidentId) {
+    w.appendChild(document.createElement('br'));
+    const btn=document.createElement('button');
+    btn.className='popup-btn';
+    btn.appendChild(document.createTextNode(officerId ? 'View profile' : 'View incident'));
+    btn.addEventListener('click', function(){
+      try {
+        if (officerId) parent.postMessage({ type:'wcsg:openOfficer', userId:String(officerId) }, '*');
+        else if (incidentId) parent.postMessage({ type:'wcsg:openIncident', incidentId:String(incidentId) }, '*');
+      } catch(e) {}
+    });
+    w.appendChild(btn);
+  }
+  return w;
 }
 function tip(label, sub){
   // Leaflet's bindTooltip renders string content as HTML, so we MUST pass
@@ -1162,7 +1230,7 @@ else {
         weight: isInc ? 4 : 3,
       });
     }
-    m.bindPopup(popup(p.label, p.sub));
+    m.bindPopup(popup(p.label, p.sub, p.officerId, p.incidentId));
     // Hover tooltip surfaces the name instantly without a click, which is
     // what dispatchers want when scanning bunching/gaps. Content is built
     // via createTextNode (see tip()), never as a raw string — Leaflet
@@ -1177,11 +1245,44 @@ else {
 }
 
 function LiveMapPanel({
-  officers, sites, loading, error, updatedAt, incidents,
+  officers, sites, loading, error, updatedAt, incidents, onFocusIncident,
 }: {
   officers: ActiveOfficer[]; sites: Site[]; loading: boolean; error: unknown;
   updatedAt: number | undefined; incidents: Incident[];
+  onFocusIncident: (incidentId: string) => void;
 }) {
+  const [, navigate] = useLocation();
+
+  // Listen for popup deep-link clicks from inside the sandboxed leaflet
+  // iframe. We accept only our two known message shapes and validate the
+  // id is a plain string — every other message is ignored. The iframe is
+  // sandbox="allow-scripts" (no allow-same-origin), so its origin is
+  // "null" by design; filtering on shape + a `wcsg:` type prefix is the
+  // right contract here. Officer pins navigate to the role-shared
+  // /personnel/:id profile page; incident pins hand off to the
+  // Dispatch page's IncidentsPanel which opens the existing edit dialog
+  // — dispatcher-safe (no /incidents/share-links dependency).
+  useEffect(() => {
+    const handler = (ev: MessageEvent) => {
+      const data = ev.data;
+      if (!data || typeof data !== "object") return;
+      const type = (data as { type?: unknown }).type;
+      if (type === "wcsg:openOfficer") {
+        const uid = (data as { userId?: unknown }).userId;
+        if (typeof uid === "string" && uid.length > 0 && uid.length < 100) {
+          navigate(`/personnel/${encodeURIComponent(uid)}`);
+        }
+      } else if (type === "wcsg:openIncident") {
+        const iid = (data as { incidentId?: unknown }).incidentId;
+        if (typeof iid === "string" && iid.length > 0 && iid.length < 100) {
+          onFocusIncident(iid);
+        }
+      }
+    };
+    window.addEventListener("message", handler);
+    return () => window.removeEventListener("message", handler);
+  }, [navigate, onFocusIncident]);
+
   const points = useMemo<MapPoint[]>(() => {
     const pts: MapPoint[] = [];
     // Sites first so they sit underneath live circles when they overlap.
@@ -1203,6 +1304,7 @@ function LiveMapPanel({
         kind: "officer", lat, lng,
         label: `${o.firstName} ${o.lastName}`,
         sub: `${o.siteName ?? o.shiftTitle ?? "no site"} · ${fmtAgo(o.lastLocationAt)}`,
+        officerId: o.userId,
       });
     }
     for (const i of incidents) {
@@ -1214,6 +1316,7 @@ function LiveMapPanel({
         severity: i.severity,
         label: `[${i.severity.toUpperCase()}] ${i.title}`,
         sub: i.employeeName ?? i.locationDescription ?? i.status,
+        incidentId: i.id,
       });
     }
     return pts;
