@@ -93,6 +93,8 @@ type Site = {
   address: string | null;
   locationLat: string | null;
   locationLng: string | null;
+  geofenceRadiusMiles?: string | null;
+  effectiveGeofenceRadiusMiles?: number;
 };
 
 type ChatRoom = { id: string; name: string; type: string };
@@ -1115,9 +1117,14 @@ type MapPoint = {
   // (covered by the dedicated /sites/:id route from the personnel grid).
   officerId?: string;
   incidentId?: string;
+  /** Per-site effective geofence radius (miles). Set on `kind:"site"`
+   *  points so the map draws each site's circle at its own size — sites
+   *  with a per-site override (`sites.geofence_radius_miles`) draw at
+   *  that value, others fall back to the global default. */
+  radiusMiles?: number;
 };
 
-function buildLeafletHtml(points: MapPoint[], geofenceRadiusMiles: number): string {
+function buildLeafletHtml(points: MapPoint[], defaultGeofenceRadiusMiles: number): string {
   // Coordinates are validated numbers; labels are JSON-encoded then
   // injected into the DOM via createTextNode, never innerHTML.
   // CRITICAL: we MUST escape `<` (and the U+2028/U+2029 line separators
@@ -1132,7 +1139,10 @@ function buildLeafletHtml(points: MapPoint[], geofenceRadiusMiles: number): stri
     .replace(/\u2029/g, "\\u2029");
   // Server geofence is evaluated in miles → convert to meters for L.circle.
   // Clamp to a sane range so a misconfigured env can't paint the whole map.
-  const radiusMeters = Math.max(10, Math.min(geofenceRadiusMiles * 1609.344, 50_000));
+  // This is the FALLBACK used when a site point doesn't carry its own
+  // effective radius (e.g. older payload shape). Per-site overrides ride
+  // along on each MapPoint and are clamped inside the iframe script.
+  const defaultRadiusMeters = Math.max(10, Math.min(defaultGeofenceRadiusMiles * 1609.344, 50_000));
   return `<!doctype html><html><head><meta charset="utf-8"/>
 <meta name="viewport" content="width=device-width,initial-scale=1"/>
 <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
@@ -1145,7 +1155,16 @@ function buildLeafletHtml(points: MapPoint[], geofenceRadiusMiles: number): stri
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 <script>
 const pts = ${data};
-const GEOFENCE_RADIUS_M = ${radiusMeters};
+const DEFAULT_GEOFENCE_RADIUS_M = ${defaultRadiusMeters};
+function resolveRadiusM(p){
+  // Per-site override (miles, already resolved server-side) wins; otherwise
+  // fall back to the global default. Clamp to the same sane bounds the
+  // outer renderer uses so a bad row can't paint the whole map.
+  var miles = typeof p.radiusMiles === 'number' && isFinite(p.radiusMiles) && p.radiusMiles > 0
+    ? p.radiusMiles : null;
+  if (miles === null) return DEFAULT_GEOFENCE_RADIUS_M;
+  return Math.max(10, Math.min(miles * 1609.344, 50000));
+}
 const SEV = { critical:'#dc2626', high:'#ea580c', medium:'#eab308', low:'#94a3b8' };
 function popup(label, sub, officerId, incidentId){
   const w=document.createElement('div');w.className='popup';
@@ -1207,7 +1226,7 @@ else {
       // uses to fire breach alerts. interactive:false + no popup/tooltip
       // keeps it visually subordinate to the live pins.
       L.circle([p.lat,p.lng], {
-        radius: GEOFENCE_RADIUS_M,
+        radius: resolveRadiusM(p),
         color: '#c9a84c',
         weight: 1,
         opacity: 0.45,
@@ -1290,10 +1309,23 @@ function LiveMapPanel({
       if (!s.locationLat || !s.locationLng) continue;
       const lat = parseFloat(s.locationLat); const lng = parseFloat(s.locationLng);
       if (!isFinite(lat) || !isFinite(lng)) continue;
+      // Prefer the server-resolved effective radius (per-site override or
+      // global default, computed once on the API). Fall back to the raw
+      // override column if a stale client somehow lacks the decorated
+      // field, otherwise leave undefined and let the iframe use the
+      // global default.
+      let radiusMiles: number | undefined;
+      if (typeof s.effectiveGeofenceRadiusMiles === "number" && isFinite(s.effectiveGeofenceRadiusMiles) && s.effectiveGeofenceRadiusMiles > 0) {
+        radiusMiles = s.effectiveGeofenceRadiusMiles;
+      } else if (s.geofenceRadiusMiles != null) {
+        const n = Number(s.geofenceRadiusMiles);
+        if (isFinite(n) && n > 0) radiusMiles = n;
+      }
       pts.push({
         kind: "site", lat, lng,
         label: s.name,
         sub: s.address ?? "site",
+        radiusMiles,
       });
     }
     for (const o of officers) {

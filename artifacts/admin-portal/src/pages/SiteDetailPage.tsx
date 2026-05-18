@@ -16,6 +16,8 @@ type Site = {
   locationLat: string | null;
   locationLng: string | null;
   patrolIntervalMinutes: number | null;
+  geofenceRadiusMiles: string | null;
+  effectiveGeofenceRadiusMiles?: number;
 };
 
 type Checkpoint = {
@@ -56,7 +58,7 @@ export function SiteDetailPage() {
   const [creating, setCreating] = useState(false);
   const [scans, setScans] = useState<ScanRow[]>([]);
   const [scansLoading, setScansLoading] = useState(false);
-  const [geofenceRadiusMiles, setGeofenceRadiusMiles] = useState<number | null>(null);
+  const [globalGeofenceRadiusMiles, setGlobalGeofenceRadiusMiles] = useState<number | null>(null);
 
   const loadSite = useCallback(async () => {
     if (!siteId) return;
@@ -98,7 +100,7 @@ export function SiteDetailPage() {
         const body = await api<{ geofenceRadiusMiles?: number }>("/dispatch/config");
         const n = body.geofenceRadiusMiles;
         if (!cancelled && typeof n === "number" && isFinite(n) && n > 0) {
-          setGeofenceRadiusMiles(n);
+          setGlobalGeofenceRadiusMiles(n);
         }
       } catch { /* keep null, UI will fall back to default copy */ }
     })();
@@ -185,20 +187,32 @@ export function SiteDetailPage() {
                   Patrol interval: <span className="text-foreground font-medium">{site.patrolIntervalMinutes}m</span>
                 </div>
               )}
-              <div className="mt-1 text-xs text-muted-foreground inline-flex items-center gap-1">
+              <div className="mt-1 text-xs text-muted-foreground inline-flex items-center gap-1 flex-wrap">
                 <Radius className="w-3.5 h-3.5" />
                 Geofence radius:{" "}
-                <span className="text-foreground font-medium">
-                  {(() => {
-                    const r = geofenceRadiusMiles ?? 0.25;
-                    const feet = Math.round(r * 5280);
-                    return `${r} mi (≈ ${feet.toLocaleString()} ft)`;
-                  })()}
-                </span>
-                <span className="ml-1">
-                  — applies to every site (set via <code className="font-mono">GEOFENCE_RADIUS_MILES</code>).
-                  {site.locationLat == null || site.locationLng == null ? " Add coordinates above to enable breach alerts here." : ""}
-                </span>
+                {(() => {
+                  const overrideRaw = site.geofenceRadiusMiles;
+                  const overrideNum = overrideRaw != null ? Number(overrideRaw) : NaN;
+                  const hasOverride = Number.isFinite(overrideNum) && overrideNum > 0;
+                  const globalR = globalGeofenceRadiusMiles ?? 0.25;
+                  const effective = site.effectiveGeofenceRadiusMiles
+                    ?? (hasOverride ? overrideNum : globalR);
+                  const feet = Math.round(effective * 5280);
+                  return (
+                    <>
+                      <span className="text-foreground font-medium">
+                        {hasOverride ? "Override: " : "Default: "}
+                        {effective} mi (≈ {feet.toLocaleString()} ft)
+                      </span>
+                      <span className="ml-1">
+                        {hasOverride
+                          ? <>— per-site override (global default is {globalR} mi). Clear in <span className="underline">Edit site</span> to use the default.</>
+                          : <>— inherits the global default (set via <code className="font-mono">GEOFENCE_RADIUS_MILES</code>). Set a per-site value in <span className="underline">Edit site</span> to override.</>}
+                        {site.locationLat == null || site.locationLng == null ? " Add coordinates above to enable breach alerts here." : ""}
+                      </span>
+                    </>
+                  );
+                })()}
               </div>
               {site.notes && (
                 <div className="mt-2 text-sm whitespace-pre-wrap text-muted-foreground max-w-3xl">

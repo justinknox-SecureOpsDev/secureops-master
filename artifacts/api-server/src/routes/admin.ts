@@ -264,7 +264,7 @@ const tables: Record<string, TableConfig> = {
     insertSchema: insertSiteSchema as unknown as z.ZodSchema<any>,
     searchColumns: [sitesTable.name, sitesTable.address],
     orderBy: sitesTable.createdAt,
-    coerceWrite: (v) => applyNumericCoercion(v, ["locationLat", "locationLng"]),
+    coerceWrite: (v) => applyNumericCoercion(v, ["locationLat", "locationLng", "defaultPayRate", "defaultBillRate", "geofenceRadiusMiles"]),
     importSupported: true,
     label: "Site",
   },

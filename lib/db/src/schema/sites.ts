@@ -23,6 +23,14 @@ export const sitesTable = pgTable("sites", {
   // checkpoint at this site every N minutes. The missed-checkpoint
   // scheduled job pages admins when an officer goes silent past this window.
   patrolIntervalMinutes: integer("patrol_interval_minutes"),
+  // Optional per-site override (miles) for the live geofence radius. When
+  // NULL, the server falls back to the global GEOFENCE_RADIUS_MILES env
+  // default (≈0.25mi). Set higher for sprawling industrial parks, lower
+  // for dense downtown sites. Surfaced from /sites + /sites/:id so the
+  // dispatch map can draw the right circle per site, and resolved by
+  // evaluateGeofence() so breach push/SMS use the same boundary the
+  // dispatcher sees.
+  geofenceRadiusMiles: numeric("geofence_radius_miles", { precision: 5, scale: 3 }),
   // Slugs of training_certifications.type that any officer working a
   // shift at this site must hold (unexpired). Empty/null = no extra
   // training requirements beyond the shift's `requiredLicenseLevel`.

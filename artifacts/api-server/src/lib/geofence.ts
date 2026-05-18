@@ -99,6 +99,7 @@ export async function evaluateGeofence(userId: string, lat: number, lng: number)
       name: sitesTable.name,
       lat: sitesTable.locationLat,
       lng: sitesTable.locationLng,
+      radiusOverride: sitesTable.geofenceRadiusMiles,
     })
     .from(sitesTable)
     .where(eq(sitesTable.id, siteId))
@@ -107,7 +108,11 @@ export async function evaluateGeofence(userId: string, lat: number, lng: number)
   if (!site || site.lat == null || site.lng == null) return; // site has no geo — can't evaluate
 
   const distance = haversineMiles(lat, lng, Number(site.lat), Number(site.lng));
-  const radius = radiusMiles();
+  // Per-site override takes precedence; otherwise use the global env default.
+  // Reject non-finite / non-positive overrides defensively so a bad row in
+  // the DB can't paint the entire planet as "inside".
+  const override = site.radiusOverride != null ? Number(site.radiusOverride) : NaN;
+  const radius = Number.isFinite(override) && override > 0 ? override : radiusMiles();
   const nextState: "inside" | "outside" = distance <= radius ? "inside" : "outside";
   const prevState = active.geofenceState;
 

@@ -285,6 +285,13 @@ export const TABLES: TableDescriptor[] = [
       { key: "defaultBillRate", label: "Bill Rate ($/hr)", type: "number" },
       { key: "locationLat", label: "Lat", type: "number", hiddenInGrid: true },
       { key: "locationLng", label: "Lng", type: "number", hiddenInGrid: true },
+      {
+        key: "geofenceRadiusMiles",
+        label: "Geofence radius (mi) — leave blank to use global default",
+        type: "number",
+        hiddenInGrid: true,
+        placeholder: "e.g. 0.5 for a sprawling industrial park",
+      },
       { key: "notes", label: "Notes", type: "textarea", hiddenInGrid: true },
       { key: "createdAt", label: "Created", type: "datetime", readonly: true },
     ],

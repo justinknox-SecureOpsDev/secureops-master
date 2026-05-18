@@ -4,6 +4,17 @@ import { db, sitesTable, clientsTable } from "@workspace/db";
 import { requireAdmin, requireAdminOrDispatcher } from "../middlewares/auth";
 import { geocodeOnelineAddress } from "../lib/geocode";
 import { preparePreUpdateBody, maybeAutoGeocode } from "../lib/siteGeocode";
+import { getGeofenceRadiusMiles } from "../lib/geofence";
+
+// Resolve the effective geofence radius for a site row: per-site override
+// (when set and positive) wins, otherwise the global env default. Mirrors
+// the resolution evaluateGeofence() uses on every location ping so the
+// dispatch map / site detail UI render the same boundary the backend
+// alerts on.
+function effectiveGeofenceRadius(override: string | null | undefined): number {
+  const n = override != null ? Number(override) : NaN;
+  return Number.isFinite(n) && n > 0 ? n : getGeofenceRadiusMiles();
+}
 
 const router: IRouter = Router();
 
@@ -114,12 +125,20 @@ router.get("/sites", requireAdminOrDispatcher, async (req, res): Promise<void> =
       locationLat: sitesTable.locationLat,
       locationLng: sitesTable.locationLng,
       notes: sitesTable.notes,
+      geofenceRadiusMiles: sitesTable.geofenceRadiusMiles,
       createdAt: sitesTable.createdAt,
     })
     .from(sitesTable)
     .leftJoin(clientsTable, eq(sitesTable.clientId, clientsTable.id));
   const rows = clientId ? await base.where(eq(sitesTable.clientId, clientId)) : await base;
-  res.json(rows);
+  // Decorate every row with the resolved effective radius so the dispatch
+  // map can draw the right circle per site without re-implementing the
+  // override/global fallback rule client-side.
+  const decorated = rows.map((r) => ({
+    ...r,
+    effectiveGeofenceRadiusMiles: effectiveGeofenceRadius(r.geofenceRadiusMiles),
+  }));
+  res.json(decorated);
 });
 
 router.get("/sites/:id", requireAdminOrDispatcher, async (req, res): Promise<void> => {
@@ -134,24 +153,48 @@ router.get("/sites/:id", requireAdminOrDispatcher, async (req, res): Promise<voi
       locationLat: sitesTable.locationLat,
       locationLng: sitesTable.locationLng,
       notes: sitesTable.notes,
+      geofenceRadiusMiles: sitesTable.geofenceRadiusMiles,
       createdAt: sitesTable.createdAt,
     })
     .from(sitesTable)
     .leftJoin(clientsTable, eq(sitesTable.clientId, clientsTable.id))
     .where(eq(sitesTable.id, id));
   if (!site) { res.status(404).json({ error: "Not Found" }); return; }
-  res.json(site);
+  res.json({
+    ...site,
+    effectiveGeofenceRadiusMiles: effectiveGeofenceRadius(site.geofenceRadiusMiles),
+  });
 });
 
 router.put("/sites/:id", requireAdmin, async (req, res): Promise<void> => {
   const id = Array.isArray(req.params.id) ? req.params.id[0] : req.params.id;
-  const { name, address, locationLat, locationLng, notes } = req.body;
+  const { name, address, locationLat, locationLng, notes, geofenceRadiusMiles } = req.body;
   let updates: Record<string, unknown> = {};
   if (name !== undefined) updates.name = name;
   if (address !== undefined) updates.address = address;
   if (locationLat !== undefined) updates.locationLat = locationLat != null ? String(locationLat) : null;
   if (locationLng !== undefined) updates.locationLng = locationLng != null ? String(locationLng) : null;
   if (notes !== undefined) updates.notes = notes;
+  if (geofenceRadiusMiles !== undefined) {
+    // null / "" → clear override (use global default). Otherwise must be
+    // a positive finite number; 0 and negatives are rejected with 400 so
+    // admins see the problem immediately instead of silently dropping the
+    // field. (Clearing explicitly via null is the supported "use default"
+    // path — 0 would mean "no one is ever inside", which is never useful.)
+    if (geofenceRadiusMiles === null || geofenceRadiusMiles === "") {
+      updates.geofenceRadiusMiles = null;
+    } else {
+      const n = Number(geofenceRadiusMiles);
+      if (!Number.isFinite(n) || n <= 0) {
+        res.status(400).json({
+          error: "Bad Request",
+          message: "geofenceRadiusMiles must be a positive number (or null to clear).",
+        });
+        return;
+      }
+      updates.geofenceRadiusMiles = String(n);
+    }
+  }
 
   // Snapshot current row so we can detect an address change and invalidate
   // stale coords if the admin didn't also supply fresh lat/lng.
