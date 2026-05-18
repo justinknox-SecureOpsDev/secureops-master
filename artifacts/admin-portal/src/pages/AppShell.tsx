@@ -263,49 +263,22 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   return (
     <div className="flex flex-col h-screen w-full overflow-hidden bg-background">
       <header className="shrink-0 bg-sidebar text-sidebar-foreground border-b border-sidebar-border">
-        <div className="flex items-stretch">
-          <div className="flex items-center gap-2 px-4 py-2 border-r border-sidebar-border min-w-0">
-            <img
-              src={`${import.meta.env.BASE_URL}logo-256.png`}
-              alt="WCSG"
-              className="w-8 h-8 shrink-0 rounded-md object-contain"
-            />
-            <div className="min-w-0">
-              <div className="brand-wordmark text-xs leading-tight truncate">Williams Council</div>
-              <div className="brand-wordmark text-xs leading-tight brand-gold truncate">Security Group Inc.</div>
+        <div className="flex items-center gap-3 px-4 py-2 border-b border-sidebar-border/60">
+          <img
+            src={`${import.meta.env.BASE_URL}logo-256.png`}
+            alt="WCSG"
+            className="w-9 h-9 shrink-0 rounded-md object-contain"
+          />
+          <div className="flex-1 min-w-0 text-center">
+            <div className="brand-wordmark text-lg sm:text-xl leading-tight truncate">
+              Williams Council <span className="brand-gold">Security Group Inc.</span>
             </div>
+            <div className="text-[10px] uppercase tracking-[0.25em] opacity-60">Admin Portal</div>
           </div>
-
-          <nav
-            aria-label="Primary"
-            className="flex-1 flex items-stretch overflow-x-auto"
-          >
-            {groups.map((g) => {
-              const isActive = g.key === activeGroupKey;
-              const Icon = g.Icon;
-              return (
-                <button
-                  key={g.key}
-                  type="button"
-                  aria-current={isActive ? "page" : undefined}
-                  onClick={() => onTabClick(g)}
-                  className={`flex items-center gap-2 px-4 text-sm whitespace-nowrap border-b-2 transition-colors ${
-                    isActive
-                      ? "border-brand-gold text-white bg-sidebar-accent/40"
-                      : "border-transparent opacity-70 hover:opacity-100 hover:bg-sidebar-accent/30"
-                  }`}
-                >
-                  <Icon className="w-4 h-4" />
-                  <span>{g.label}</span>
-                </button>
-              );
-            })}
-          </nav>
-
-          <div className="flex items-center gap-2 px-3 border-l border-sidebar-border">
+          <div className="flex items-center gap-2 shrink-0">
             <div className="hidden md:block text-right leading-tight">
               <div className="text-xs opacity-80">{user?.firstName} {user?.lastName}</div>
-              <div className="text-[10px] opacity-50 truncate max-w-[160px]">{user?.email}</div>
+              <div className="text-[10px] opacity-50 truncate max-w-[180px]">{user?.email}</div>
             </div>
             <Button
               variant="ghost"
@@ -319,6 +292,32 @@ export function AppShell({ children }: { children: React.ReactNode }) {
             </Button>
           </div>
         </div>
+
+        <nav
+          aria-label="Primary"
+          className="flex items-stretch overflow-x-auto"
+        >
+          {groups.map((g) => {
+            const isActive = g.key === activeGroupKey;
+            const Icon = g.Icon;
+            return (
+              <button
+                key={g.key}
+                type="button"
+                aria-current={isActive ? "page" : undefined}
+                onClick={() => onTabClick(g)}
+                className={`flex items-center gap-2 px-4 py-2 text-sm whitespace-nowrap border-b-2 transition-colors ${
+                  isActive
+                    ? "border-brand-gold text-white bg-sidebar-accent/40"
+                    : "border-transparent opacity-70 hover:opacity-100 hover:bg-sidebar-accent/30"
+                }`}
+              >
+                <Icon className="w-4 h-4" />
+                <span>{g.label}</span>
+              </button>
+            );
+          })}
+        </nav>
       </header>
 
       <SystemBanner status={systemStatus} />
