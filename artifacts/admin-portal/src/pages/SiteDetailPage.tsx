@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { Link, useRoute, useLocation } from "wouter";
 import { ArrowLeft, MapPin, Pencil, Plus, Trash2, QrCode, AlertTriangle, Radius } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -39,6 +39,67 @@ type ScanRow = {
 
 function fmt(iso: string) {
   return new Date(iso).toLocaleString();
+}
+
+/**
+ * Build the srcDoc for the embedded geofence preview map.
+ *
+ * Mirrors the styling of `buildLeafletHtml` in Dispatch.tsx: navy/gold
+ * theme, square "S" site pin, translucent gold disc sized to the effective
+ * geofence radius. Single site + circle only — no officer/incident pins.
+ *
+ * Inputs (lat/lng/radiusMiles) are validated numbers controlled by us;
+ * label is JSON-encoded and rendered DOM-side via createTextNode so a
+ * malicious site name can't break out of the script context.
+ */
+function buildSiteGeofenceHtml(
+  lat: number,
+  lng: number,
+  radiusMiles: number,
+  label: string,
+): string {
+  const safeLabel = JSON.stringify(label)
+    .replace(/</g, "\\u003c")
+    .replace(/\u2028/g, "\\u2028")
+    .replace(/\u2029/g, "\\u2029");
+  const radiusMeters = Math.max(10, Math.min(radiusMiles * 1609.344, 50_000));
+  return `<!doctype html><html><head><meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1"/>
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
+<style>html,body,#m{margin:0;padding:0;height:100%;background:#080c18}
+.site-pin{display:flex;align-items:center;justify-content:center;width:28px;height:28px;border-radius:6px;background:#080c18;color:#c9a84c;border:2px solid #c9a84c;font:bold 13px -apple-system,system-ui,sans-serif;box-shadow:0 1px 4px rgba(0,0,0,.35)}</style>
+</head><body><div id="m"></div>
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script>
+const LAT = ${lat};
+const LNG = ${lng};
+const R_M = ${radiusMeters};
+const LABEL = ${safeLabel};
+const map = L.map('m', { zoomControl: true, attributionControl: true });
+L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+  attribution: '&copy; OpenStreetMap', maxZoom: 19
+}).addTo(map);
+const circle = L.circle([LAT, LNG], {
+  radius: R_M,
+  color: '#c9a84c',
+  weight: 1,
+  opacity: 0.45,
+  fillColor: '#c9a84c',
+  fillOpacity: 0.08,
+  interactive: false,
+}).addTo(map);
+const icon = L.divIcon({
+  className: '', html: '<div class="site-pin">S</div>',
+  iconSize: [28, 28], iconAnchor: [14, 14]
+});
+const tipEl = document.createElement('div');
+const b = document.createElement('b');
+b.appendChild(document.createTextNode(String(LABEL || '')));
+tipEl.appendChild(b);
+const marker = L.marker([LAT, LNG], { icon }).addTo(map);
+marker.bindTooltip(tipEl, { direction: 'top', offset: [0, -6], opacity: 0.95 });
+map.fitBounds(circle.getBounds().pad(0.3), { maxZoom: 17 });
+</script></body></html>`;
 }
 
 export function SiteDetailPage() {
@@ -141,6 +202,21 @@ export function SiteDetailPage() {
     } catch (e) { alert((e as Error).message); }
   }
 
+  // Build the geofence preview HTML from the same effective radius the badge
+  // above displays, so saving an override re-renders the map at the new size.
+  // Hooks must run unconditionally — must stay above any early return below.
+  const geofenceMapHtml = useMemo(() => {
+    if (!site) return null;
+    const lat = site.locationLat != null ? Number(site.locationLat) : NaN;
+    const lng = site.locationLng != null ? Number(site.locationLng) : NaN;
+    if (!isFinite(lat) || !isFinite(lng)) return null;
+    const overrideNum = site.geofenceRadiusMiles != null ? Number(site.geofenceRadiusMiles) : NaN;
+    const hasOverride = Number.isFinite(overrideNum) && overrideNum > 0;
+    const globalR = globalGeofenceRadiusMiles ?? 0.25;
+    const effective = site.effectiveGeofenceRadiusMiles ?? (hasOverride ? overrideNum : globalR);
+    return buildSiteGeofenceHtml(lat, lng, effective, site.name);
+  }, [site, globalGeofenceRadiusMiles]);
+
   if (!sitesDescriptor) return null;
 
   const clientName = site ? clientOptions.find((o) => o.id === site.clientId)?.label ?? "—" : "";
@@ -226,6 +302,22 @@ export function SiteDetailPage() {
                   );
                 })()}
               </div>
+              {geofenceMapHtml && (
+                <div className="mt-3 max-w-3xl">
+                  <div className="rounded border overflow-hidden" style={{ height: 240 }}>
+                    <iframe
+                      title={`${site.name} geofence preview`}
+                      srcDoc={geofenceMapHtml}
+                      sandbox="allow-scripts"
+                      referrerPolicy="no-referrer"
+                      style={{ width: "100%", height: "100%", border: 0, display: "block" }}
+                    />
+                  </div>
+                  <div className="mt-1 text-[11px] text-muted-foreground">
+                    Gold circle shows the effective geofence — officers drifting outside trigger a breach alert.
+                  </div>
+                </div>
+              )}
               {site.notes && (
                 <div className="mt-2 text-sm whitespace-pre-wrap text-muted-foreground max-w-3xl">
                   {site.notes}
