@@ -737,38 +737,45 @@ router.post("/shifts/:id/claim", requireAuth, async (req, res): Promise<void> =>
       if (!lockedRow) return undefined;
       const headcount: number = lockedRow.headcount;
 
+      // Pre-check duplicate BEFORE the INSERT. A 23505 thrown inside the
+      // transaction aborts it at the Postgres level, and the subsequent
+      // COMMIT then errors out — turning a friendly 409 into a 500. Since
+      // we already hold FOR UPDATE on the parent shift row, no concurrent
+      // claim by this same officer can slip in between this check and the
+      // insert below.
+      const dupRes = await tx.execute(sql`
+        SELECT 1 FROM shift_assignments
+        WHERE shift_id = ${shiftId}::uuid AND employee_id = ${userId}::uuid
+        LIMIT 1
+      `);
+      if ((dupRes as any).rows?.length) {
+        alreadyAssigned = true;
+        return undefined;
+      }
+
       const countRes = await tx.execute(sql`
         SELECT COUNT(*)::int AS c FROM shift_assignments WHERE shift_id = ${shiftId}::uuid
       `);
       const filled: number = (countRes as any).rows?.[0]?.c ?? 0;
       if (filled >= headcount) return undefined;
 
-      try {
-        // One-tap reserve: officer is committed immediately. No separate
-        // pending→accepted confirmation step (admins were getting confused
-        // about whether the slot was actually filled).
-        const inserted = await tx.execute(sql`
-          INSERT INTO shift_assignments (shift_id, employee_id, status)
-          VALUES (${shiftId}::uuid, ${userId}::uuid, 'accepted')
-          RETURNING id, shift_id, employee_id, status, created_at, updated_at
-        `);
-        const row = (inserted as any).rows?.[0];
-        return {
-          id: row.id,
-          shiftId: row.shift_id,
-          employeeId: row.employee_id,
-          status: row.status,
-          createdAt: row.created_at,
-          updatedAt: row.updated_at,
-        } as any;
-      } catch (e: any) {
-        // Unique violation = user already signed up
-        if (e?.code === "23505") {
-          alreadyAssigned = true;
-          return undefined;
-        }
-        throw e;
-      }
+      // One-tap reserve: officer is committed immediately. No separate
+      // pending→accepted confirmation step (admins were getting confused
+      // about whether the slot was actually filled).
+      const inserted = await tx.execute(sql`
+        INSERT INTO shift_assignments (shift_id, employee_id, status)
+        VALUES (${shiftId}::uuid, ${userId}::uuid, 'accepted')
+        RETURNING id, shift_id, employee_id, status, created_at, updated_at
+      `);
+      const row = (inserted as any).rows?.[0];
+      return {
+        id: row.id,
+        shiftId: row.shift_id,
+        employeeId: row.employee_id,
+        status: row.status,
+        createdAt: row.created_at,
+        updatedAt: row.updated_at,
+      } as any;
     });
   } catch (err) {
     req.log.error({ err }, "claim shift insert failed");

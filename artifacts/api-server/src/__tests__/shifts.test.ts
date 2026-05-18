@@ -158,6 +158,34 @@ describe("POST /shifts/:id/claim atomic concurrency", () => {
     expect(filled).toBe(1);
   });
 
+  it("returns a clean 409 when the same officer claims the same shift twice", async () => {
+    const shiftId = await insertOpenShift(`${TAG}-dup`, 2);
+
+    const first = await request(app)
+      .post(`/api/shifts/${shiftId}/claim`)
+      .set(authed(ctx.tokenA))
+      .send({});
+    expect(first.status).toBe(201);
+
+    // Second tap by the same officer must surface the friendly "already
+    // signed up" 409 — NOT a 500 from a transaction aborted by the
+    // 23505 unique-violation on (shift_id, employee_id).
+    const second = await request(app)
+      .post(`/api/shifts/${shiftId}/claim`)
+      .set(authed(ctx.tokenA))
+      .send({});
+    expect(second.status).toBe(409);
+    expect(second.body.error).toBe("Conflict");
+    expect(second.body.message).toMatch(/already signed up/i);
+
+    // And the duplicate must not have consumed another seat.
+    const [{ filled }] = await db
+      .select({ filled: sql<number>`count(*)::int` })
+      .from(shiftAssignmentsTable)
+      .where(sql`${shiftAssignmentsTable.shiftId} = ${shiftId}`);
+    expect(filled).toBe(1);
+  });
+
   it("returns 409 when the shift is not upcoming", async () => {
     const shiftId = await insertOpenShift(`${TAG}-closed`, 1);
     await db.execute(sql`UPDATE shifts SET status = 'completed' WHERE id = ${shiftId}::uuid`);
