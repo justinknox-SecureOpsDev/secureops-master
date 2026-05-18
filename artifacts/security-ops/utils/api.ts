@@ -12,16 +12,20 @@ import { AUTH_TOKEN_KEY } from "@/contexts/AuthContext";
  *      set) still talks to the real API instead of "https://undefined/api".
  */
 function resolveApiBaseUrl(): string {
+  // On web (browser), always use the same origin so requests are never
+  // cross-origin — this works correctly in dev, staging, and production
+  // without any env var, and avoids CORS rejections on the deployed API.
+  if (typeof window !== "undefined" && window.location?.origin) {
+    return `${window.location.origin}/api`;
+  }
+  // On native (React Native / Expo Go): EXPO_PUBLIC_API_BASE_URL takes
+  // priority — set this to the deployed production URL so physical devices
+  // can reach the API without going through the workspace-internal domain.
   const explicit = process.env.EXPO_PUBLIC_API_BASE_URL?.replace(/\/+$/, "");
   if (explicit) {
     return /\/api$/.test(explicit) ? explicit : `${explicit}/api`;
   }
-  // On web, the API is served from the same origin via the path-based proxy
-  // (`/api` -> api-server). Using window.location.origin makes the bundle
-  // portable across dev/staging/prod without baking the host at build time.
-  if (typeof window !== "undefined" && window.location?.origin) {
-    return `${window.location.origin}/api`;
-  }
+  // Fall back to EXPO_PUBLIC_DOMAIN injected by the dev workflow script.
   const domain = process.env.EXPO_PUBLIC_DOMAIN?.replace(/^https?:\/\//, "").replace(/\/+$/, "");
   if (domain && domain !== "undefined") {
     return `https://${domain}/api`;
