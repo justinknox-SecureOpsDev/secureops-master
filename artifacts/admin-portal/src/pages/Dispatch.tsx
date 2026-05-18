@@ -15,7 +15,9 @@ import {
 import {
   AlertTriangle, CheckCircle2, Clock, MapPin, MessageCircle, Radio, Send,
   ShieldAlert, UserCheck, Users, Megaphone, Loader2, RefreshCw, Wifi, WifiOff,
+  HelpCircle, X,
 } from "lucide-react";
+import { useAuth } from "@/lib/auth";
 
 type StatusRow = {
   assignmentId: string;
@@ -197,6 +199,25 @@ function useIncidentWs(onChange: () => void): "connecting" | "open" | "closed" {
 
 export default function DispatchPage() {
   const qc = useQueryClient();
+  const { user } = useAuth();
+  const [tourOpen, setTourOpen] = useState(false);
+
+  // First-run coach-mark tour. Per-user remembered flag (localStorage)
+  // so each dispatcher only sees it once, but a "Show me again" link
+  // in the header lets them re-open it any time.
+  const tourStorageKey = user ? `wcsg.dispatch.tour.seen.${user.id}` : null;
+  useEffect(() => {
+    if (!tourStorageKey) return;
+    try {
+      if (!localStorage.getItem(tourStorageKey)) setTourOpen(true);
+    } catch { /* private-mode / disabled storage — skip silently */ }
+  }, [tourStorageKey]);
+  const closeTour = () => {
+    setTourOpen(false);
+    if (tourStorageKey) {
+      try { localStorage.setItem(tourStorageKey, "1"); } catch { /* ignore */ }
+    }
+  };
 
   const board = useQuery<StatusBoard>({
     queryKey: ["dispatch", "status-board"],
@@ -255,34 +276,50 @@ export default function DispatchPage() {
             )}
           </p>
         </div>
-        <Button variant="outline" size="sm" onClick={refreshAll}>
-          <RefreshCw className="w-4 h-4 mr-2" /> Refresh
-        </Button>
+        <div className="flex items-center gap-2">
+          <Button
+            variant="ghost" size="sm"
+            onClick={() => setTourOpen(true)}
+            className="text-xs"
+            data-testid="dispatch-tour-reopen"
+          >
+            <HelpCircle className="w-4 h-4 mr-1" /> Show me again
+          </Button>
+          <Button variant="outline" size="sm" onClick={refreshAll}>
+            <RefreshCw className="w-4 h-4 mr-2" /> Refresh
+          </Button>
+        </div>
       </header>
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
         <div className="lg:col-span-2 space-y-4">
-          <IncidentsPanel
-            data={incidents.data ?? []}
-            loading={incidents.isLoading}
-            error={incidents.error}
-            updatedAt={incidents.dataUpdatedAt}
-            onChange={refreshAll}
-            wsState={wsState}
-          />
-          <StatusBoardPanel
-            data={board.data}
-            loading={board.isLoading}
-            error={board.error}
-            updatedAt={board.dataUpdatedAt}
-          />
-          <OpenShiftsPanel
-            data={openShifts.data ?? []}
-            loading={openShifts.isLoading}
-            error={openShifts.error}
-            updatedAt={openShifts.dataUpdatedAt}
-            onChange={refreshAll}
-          />
+          <div data-tour="incidents">
+            <IncidentsPanel
+              data={incidents.data ?? []}
+              loading={incidents.isLoading}
+              error={incidents.error}
+              updatedAt={incidents.dataUpdatedAt}
+              onChange={refreshAll}
+              wsState={wsState}
+            />
+          </div>
+          <div data-tour="status-board">
+            <StatusBoardPanel
+              data={board.data}
+              loading={board.isLoading}
+              error={board.error}
+              updatedAt={board.dataUpdatedAt}
+            />
+          </div>
+          <div data-tour="open-shifts">
+            <OpenShiftsPanel
+              data={openShifts.data ?? []}
+              loading={openShifts.isLoading}
+              error={openShifts.error}
+              updatedAt={openShifts.dataUpdatedAt}
+              onChange={refreshAll}
+            />
+          </div>
         </div>
 
         <div className="space-y-4">
@@ -294,7 +331,166 @@ export default function DispatchPage() {
             updatedAt={officers.dataUpdatedAt}
             incidents={incidents.data ?? []}
           />
-          <BroadcastPanel rooms={rooms.data ?? []} />
+          <div data-tour="broadcast">
+            <BroadcastPanel rooms={rooms.data ?? []} />
+          </div>
+        </div>
+      </div>
+
+      {tourOpen && <DispatchTour onClose={closeTour} />}
+    </div>
+  );
+}
+
+// =========================================================== COACH-MARK TOUR
+
+type TourStep = {
+  selector: string;
+  title: string;
+  body: string;
+};
+
+const TOUR_STEPS: TourStep[] = [
+  {
+    selector: '[data-tour="incidents"]',
+    title: "Active Incidents",
+    body: "Every open incident lands here in real time. Critical ones flash red — click any row to update status and add dispatcher notes.",
+  },
+  {
+    selector: '[data-tour="status-board"]',
+    title: "Clock-In Status Board",
+    body: "Today's shifts grouped by state: on duty, late (≥10m), no-show, early-out, and upcoming. Use it to spot coverage gaps at a glance.",
+  },
+  {
+    selector: '[data-tour="open-shifts"]',
+    title: "Open Shifts & Assign Nearest",
+    body: "Unfilled shifts in the next 72 hours. Hit \"Assign nearest\" to rank qualified officers by distance and one-tap fill the slot, or \"Notify\" to push the vacancy to everyone who qualifies.",
+  },
+  {
+    selector: '[data-tour="broadcast"]',
+    title: "Broadcast Composer",
+    body: "Pick a channel (📣 announcements goes org-wide), preview the thread if you want context, then send. Officers see it instantly in chat and push.",
+  },
+];
+
+function DispatchTour({ onClose }: { onClose: () => void }) {
+  const [idx, setIdx] = useState(0);
+  const [rect, setRect] = useState<DOMRect | null>(null);
+  const step = TOUR_STEPS[idx];
+
+  useEffect(() => {
+    const measure = () => {
+      const el = document.querySelector(step.selector) as HTMLElement | null;
+      if (!el) { setRect(null); return; }
+      el.scrollIntoView({ behavior: "smooth", block: "center" });
+      // Re-measure after the scroll has a chance to settle.
+      requestAnimationFrame(() => {
+        setRect(el.getBoundingClientRect());
+      });
+    };
+    measure();
+    const onResize = () => {
+      const el = document.querySelector(step.selector) as HTMLElement | null;
+      if (el) setRect(el.getBoundingClientRect());
+    };
+    window.addEventListener("resize", onResize);
+    window.addEventListener("scroll", onResize, true);
+    return () => {
+      window.removeEventListener("resize", onResize);
+      window.removeEventListener("scroll", onResize, true);
+    };
+  }, [step.selector]);
+
+  // Position the tooltip below the target when there's room, otherwise above.
+  const tooltipStyle = useMemo<React.CSSProperties>(() => {
+    if (!rect) {
+      return { top: "50%", left: "50%", transform: "translate(-50%, -50%)" };
+    }
+    const tooltipW = 360;
+    const tooltipH = 200;
+    const margin = 12;
+    const vw = window.innerWidth;
+    const vh = window.innerHeight;
+    const spaceBelow = vh - rect.bottom;
+    const placeBelow = spaceBelow >= tooltipH + margin;
+    const top = placeBelow
+      ? Math.min(rect.bottom + margin, vh - tooltipH - margin)
+      : Math.max(margin, rect.top - tooltipH - margin);
+    const rawLeft = rect.left + rect.width / 2 - tooltipW / 2;
+    const left = Math.max(margin, Math.min(rawLeft, vw - tooltipW - margin));
+    return { top, left, width: tooltipW };
+  }, [rect]);
+
+  const next = () => {
+    if (idx < TOUR_STEPS.length - 1) setIdx(idx + 1);
+    else onClose();
+  };
+  const prev = () => { if (idx > 0) setIdx(idx - 1); };
+
+  return (
+    <div className="fixed inset-0 z-[1000]" role="dialog" aria-label="Dispatch walkthrough">
+      {/* Dim overlay; click anywhere outside the highlight or tooltip dismisses. */}
+      <div
+        className="absolute inset-0 bg-black/50"
+        onClick={onClose}
+        data-testid="dispatch-tour-overlay"
+      />
+      {rect && (
+        <div
+          className="absolute pointer-events-none rounded-lg ring-4 ring-brand-gold"
+          style={{
+            top: rect.top - 6,
+            left: rect.left - 6,
+            width: rect.width + 12,
+            height: rect.height + 12,
+            boxShadow: "0 0 0 9999px rgba(0,0,0,0.5)",
+          }}
+        />
+      )}
+      <div
+        className="absolute bg-card text-card-foreground rounded-lg shadow-xl border p-4 space-y-3"
+        style={tooltipStyle}
+        onClick={(e) => e.stopPropagation()}
+        data-testid="dispatch-tour-tooltip"
+      >
+        <div className="flex items-start justify-between gap-2">
+          <div>
+            <div className="text-[11px] uppercase opacity-60 tracking-wide">
+              Step {idx + 1} of {TOUR_STEPS.length}
+            </div>
+            <div className="font-semibold text-sm mt-0.5">{step.title}</div>
+          </div>
+          <button
+            onClick={onClose}
+            className="opacity-60 hover:opacity-100"
+            aria-label="Close walkthrough"
+            data-testid="dispatch-tour-close"
+          >
+            <X className="w-4 h-4" />
+          </button>
+        </div>
+        <p className="text-sm opacity-85 leading-snug">{step.body}</p>
+        <div className="flex items-center justify-between pt-1">
+          <div className="flex gap-1">
+            {TOUR_STEPS.map((_, i) => (
+              <span
+                key={i}
+                className={`h-1.5 w-5 rounded-full ${i === idx ? "bg-brand-gold" : "bg-muted"}`}
+              />
+            ))}
+          </div>
+          <div className="flex items-center gap-2">
+            {idx > 0 && (
+              <Button size="sm" variant="ghost" onClick={prev}>Back</Button>
+            )}
+            <Button
+              size="sm"
+              onClick={next}
+              data-testid="dispatch-tour-next"
+            >
+              {idx < TOUR_STEPS.length - 1 ? "Next" : "Got it"}
+            </Button>
+          </div>
         </div>
       </div>
     </div>
