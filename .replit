@@ -54,5 +54,8 @@ SEED_DEMO_USERS = "false"
 APP_BASE_URL = "https://security-operations-suite.replit.app"
 ALLOWED_ORIGINS = "https://security-operations-suite.replit.app,https://secureops.williamscouncilsg.com"
 
+[userenv.shared]
+GEOCODING_ENABLED = "true"
+
 [objectStorage]
 defaultBucketID = "replit-objstore-932b0f1e-21e4-4a6f-a5f8-ab5a30523226"

@@ -1,5 +1,5 @@
 import { Router, type IRouter, type Request, type Response } from "express";
-import { eq, desc, ilike, or, sql, and, type SQL } from "drizzle-orm";
+import { eq, desc, ilike, or, sql, and, isNull, type SQL } from "drizzle-orm";
 import { sitesTable } from "@workspace/db";
 import { haversineMiles } from "../lib/geofence";
 import { geocodeUsAddress } from "../lib/geocode";
@@ -536,6 +536,90 @@ router.get("/admin/applications/:id", requireAdmin, async (req, res): Promise<vo
   const [row] = await db.select().from(applicationsTable).where(eq(applicationsTable.id, req.params.id as string)).limit(1);
   if (!row) { res.status(404).json({ error: "Not Found", message: "Application not found" }); return; }
   res.json(rowToApplication(row));
+});
+
+/**
+ * POST /admin/applications/geocode-missing
+ *
+ * Bulk backfill the home-address coordinates that drive the
+ * "Within distance of site" filter on the Applications page. Walks every
+ * application that has a street address but no location_lat/lng and runs
+ * the same Census Bureau geocoder used at submission time. Idempotent —
+ * only touches rows still missing coords — and paced to stay polite with
+ * the free public API.
+ *
+ * Honors GEOCODING_ENABLED so an admin can't accidentally start sending
+ * PII to a third party without the operator-level opt-in being on.
+ */
+let applicantsGeocodeBackfillRunning = false;
+router.post("/admin/applications/geocode-missing", requireAdmin, async (req, res): Promise<void> => {
+  if (process.env.GEOCODING_ENABLED !== "true") {
+    res.status(503).json({
+      error: "Geocoding Disabled",
+      message:
+        "Set GEOCODING_ENABLED=true on the server to enable applicant address geocoding (sends street/city/state/zip to the US Census Bureau geocoder).",
+    });
+    return;
+  }
+  if (applicantsGeocodeBackfillRunning) {
+    res.status(409).json({
+      error: "Already Running",
+      message: "An applicant address backfill is already in progress. Wait for it to finish and try again.",
+    });
+    return;
+  }
+  applicantsGeocodeBackfillRunning = true;
+  try {
+    const hasAddress = sql`length(trim(coalesce(${applicationsTable.address}, ''))) > 0`;
+    const missingCoord = or(isNull(applicationsTable.locationLat), isNull(applicationsTable.locationLng));
+    const rows = await db
+      .select({
+        id: applicationsTable.id,
+        address: applicationsTable.address,
+        city: applicationsTable.city,
+        state: applicationsTable.state,
+        zip: applicationsTable.zip,
+      })
+      .from(applicationsTable)
+      .where(and(missingCoord, hasAddress));
+
+    let resolved = 0;
+    let skippedRace = 0;
+    const unresolved: Array<{ id: string }> = [];
+    for (let i = 0; i < rows.length; i++) {
+      const r = rows[i];
+      const match = await geocodeUsAddress({
+        street: r.address,
+        city: r.city,
+        state: r.state,
+        zip: r.zip,
+      });
+      if (match) {
+        const updated = await db
+          .update(applicationsTable)
+          .set({ locationLat: String(match.lat), locationLng: String(match.lng) })
+          .where(and(
+            eq(applicationsTable.id, r.id),
+            or(isNull(applicationsTable.locationLat), isNull(applicationsTable.locationLng)),
+          ))
+          .returning({ id: applicationsTable.id });
+        if (updated.length > 0) resolved++;
+        else skippedRace++;
+      } else {
+        unresolved.push({ id: r.id });
+      }
+      if (i < rows.length - 1) await new Promise((rs) => setTimeout(rs, 200));
+    }
+
+    res.json({
+      candidates: rows.length,
+      resolved,
+      skippedRace,
+      unresolved: unresolved.length,
+    });
+  } finally {
+    applicantsGeocodeBackfillRunning = false;
+  }
 });
 
 router.post("/admin/applications/:id/review", requireAdmin, async (req, res): Promise<void> => {

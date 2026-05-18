@@ -150,6 +150,8 @@ export function ApplicationsPage() {
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [showBatch, setShowBatch] = useState(false);
   const [batchResult, setBatchResult] = useState<BatchResult | null>(null);
+  const [geoBackfillBusy, setGeoBackfillBusy] = useState(false);
+  const [geoBackfillResult, setGeoBackfillResult] = useState<string | null>(null);
 
   async function refresh() {
     setLoading(true); setError(null);
@@ -297,12 +299,44 @@ export function ApplicationsPage() {
           Clear
         </Button>
         <Button variant="default" size="sm" onClick={() => refresh()}>Apply</Button>
+        <Button
+          variant="outline"
+          size="sm"
+          disabled={geoBackfillBusy}
+          onClick={async () => {
+            setGeoBackfillBusy(true);
+            setGeoBackfillResult(null);
+            try {
+              const r = await api<{ candidates: number; resolved: number; unresolved: number }>(
+                "/admin/applications/geocode-missing",
+                { method: "POST" },
+              );
+              setGeoBackfillResult(
+                r.candidates === 0
+                  ? "All applicant addresses already have coordinates on file."
+                  : `Geocoded ${r.resolved} of ${r.candidates} applicants (${r.unresolved} unresolved). Re-apply your filter.`,
+              );
+              await refresh();
+            } catch (e) {
+              setGeoBackfillResult((e as Error).message);
+            } finally {
+              setGeoBackfillBusy(false);
+            }
+          }}
+          title="Look up coordinates for applicants whose home address has never been geocoded. Required for the distance filter."
+        >
+          {geoBackfillBusy ? <Loader2 className="w-3 h-3 animate-spin mr-1" /> : null}
+          Geocode applicant addresses
+        </Button>
         {distanceActive && (
           <div className="text-xs text-muted-foreground ml-auto">
-            Showing applicants within {maxMiles} mi of the selected site. Applicants without a geocoded address are hidden.
+            Showing applicants within {maxMiles} mi of the selected site. Applicants without a geocoded address are hidden — click "Geocode applicant addresses" to backfill.
           </div>
         )}
       </div>
+      {geoBackfillResult && (
+        <div className="text-xs px-3 py-2 rounded border bg-muted/30">{geoBackfillResult}</div>
+      )}
 
       {error && <div className="text-sm text-destructive bg-destructive/5 p-2 rounded border border-destructive/20">{error}</div>}
 
