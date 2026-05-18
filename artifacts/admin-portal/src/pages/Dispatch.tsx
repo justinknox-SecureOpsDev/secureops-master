@@ -770,6 +770,23 @@ function popup(label, sub){
   w.appendChild(b);w.appendChild(document.createElement('br'));
   w.appendChild(document.createTextNode(String(sub||'')));return w;
 }
+function tip(label, sub){
+  // Leaflet's bindTooltip renders string content as HTML, so we MUST pass
+  // an HTMLElement built with createTextNode — otherwise an officer name
+  // like "<img onerror=...>" would execute inside the iframe.
+  const w=document.createElement('div');
+  const b=document.createElement('b');
+  b.appendChild(document.createTextNode(String(label||'')));
+  w.appendChild(b);
+  if (sub) {
+    w.appendChild(document.createElement('br'));
+    const s=document.createElement('span');
+    s.style.opacity='0.8';s.style.fontSize='11px';
+    s.appendChild(document.createTextNode(String(sub)));
+    w.appendChild(s);
+  }
+  return w;
+}
 const map = L.map('m',{zoomControl:true});
 L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',{
   attribution:'&copy; OpenStreetMap', maxZoom:19
@@ -798,6 +815,11 @@ else {
       });
     }
     m.bindPopup(popup(p.label, p.sub));
+    // Hover tooltip surfaces the name instantly without a click, which is
+    // what dispatchers want when scanning bunching/gaps. Content is built
+    // via createTextNode (see tip()), never as a raw string — Leaflet
+    // bindTooltip treats string args as HTML.
+    m.bindTooltip(tip(p.label, p.sub), { direction:'top', offset:[0,-6], opacity:0.95 });
     m.addTo(group);
   });
   group.addTo(map);
