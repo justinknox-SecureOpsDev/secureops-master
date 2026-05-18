@@ -1,7 +1,8 @@
-import { useEffect, useState } from "react";
+import { useEffect, useId, useRef, useState } from "react";
 import { useRoute } from "wouter";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { FileUploadField } from "@/components/FileUploadField";
 import { uploadFileAnon, type UploadedFile } from "@/lib/upload";
@@ -30,7 +31,9 @@ export function AmendApplication() {
   const [values, setValues] = useState<Record<string, Value>>({});
   const [submitting, setSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
+  const [missingFields, setMissingFields] = useState<Set<string>>(new Set());
   const [done, setDone] = useState(false);
+  const headingRef = useRef<HTMLHeadingElement | null>(null);
 
   useEffect(() => {
     if (!token) return;
@@ -48,6 +51,11 @@ export function AmendApplication() {
       .finally(() => setLoading(false));
   }, [token]);
 
+  // After load/done, move focus to heading so screen readers announce.
+  useEffect(() => {
+    if (!loading) headingRef.current?.focus();
+  }, [loading, done]);
+
   async function submit(e: React.FormEvent) {
     e.preventDefault();
     if (!data) return;
@@ -59,9 +67,11 @@ export function AmendApplication() {
       return v == null || String(v).trim() === "";
     });
     if (missing.length > 0) {
+      setMissingFields(new Set(missing.map((m) => m.key)));
       setSubmitError(`Please complete all requested items: ${missing.map((m) => m.label).join(", ")}.`);
       return;
     }
+    setMissingFields(new Set());
     setSubmitting(true); setSubmitError(null);
     const payload: Record<string, unknown> = {};
     for (const f of data.fields) {
@@ -91,8 +101,8 @@ export function AmendApplication() {
   if (loading) {
     return (
       <Shell>
-        <div className="flex items-center justify-center py-16 text-muted-foreground">
-          <Loader2 className="w-5 h-5 animate-spin mr-2" /> Loading…
+        <div className="flex items-center justify-center py-16 text-muted-foreground" role="status" aria-live="polite">
+          <Loader2 className="w-5 h-5 animate-spin mr-2" aria-hidden="true" /> Loading…
         </div>
       </Shell>
     );
@@ -100,10 +110,10 @@ export function AmendApplication() {
   if (loadError) {
     return (
       <Shell>
-        <div className="bg-rose-50 border border-rose-200 text-rose-900 p-4 rounded flex items-start gap-2">
-          <ShieldAlert className="w-5 h-5 mt-0.5 shrink-0" />
+        <div className="bg-rose-50 border border-rose-200 text-rose-900 p-4 rounded flex items-start gap-2" role="alert">
+          <ShieldAlert className="w-5 h-5 mt-0.5 shrink-0" aria-hidden="true" />
           <div>
-            <div className="font-semibold">{loadError}</div>
+            <h1 ref={headingRef} tabIndex={-1} className="font-semibold focus:outline-none">{loadError}</h1>
             <div className="text-sm mt-1">If you believe this is a mistake, please contact the recruitment team.</div>
           </div>
         </div>
@@ -113,9 +123,9 @@ export function AmendApplication() {
   if (done) {
     return (
       <Shell>
-        <div className="bg-emerald-50 border border-emerald-200 text-emerald-900 p-6 rounded text-center">
-          <CheckCircle2 className="w-10 h-10 mx-auto mb-2" />
-          <div className="font-semibold text-lg">Thank you!</div>
+        <div className="bg-emerald-50 border border-emerald-200 text-emerald-900 p-6 rounded text-center" role="status">
+          <CheckCircle2 className="w-10 h-10 mx-auto mb-2" aria-hidden="true" />
+          <h1 ref={headingRef} tabIndex={-1} className="font-semibold text-lg focus:outline-none">Thank you!</h1>
           <p className="text-sm mt-1">
             Your updated information has been submitted. Our recruitment team will review it shortly.
           </p>
@@ -128,7 +138,7 @@ export function AmendApplication() {
   return (
     <Shell>
       <div className="space-y-2 mb-6">
-        <h1 className="brand-wordmark text-2xl">Hi {data.firstName},</h1>
+        <h1 ref={headingRef} tabIndex={-1} className="brand-wordmark text-2xl focus:outline-none">Hi {data.firstName},</h1>
         <p className="text-sm text-muted-foreground">
           We need a few more details to finish reviewing your application. Please complete the items below
           and submit. This link expires {new Date(data.expiresAt).toLocaleDateString()}.
@@ -141,17 +151,27 @@ export function AmendApplication() {
         )}
       </div>
 
-      <form onSubmit={submit} className="space-y-4">
+      <form onSubmit={submit} noValidate className="space-y-4" aria-label="Additional information requested">
         {data.fields.map((f) => (
           <FieldEditor
             key={f.key}
             field={f}
             value={values[f.key]}
-            onChange={(v) => setValues((prev) => ({ ...prev, [f.key]: v }))}
+            invalid={missingFields.has(f.key)}
+            onChange={(v) => {
+              setValues((prev) => ({ ...prev, [f.key]: v }));
+              if (missingFields.has(f.key)) {
+                setMissingFields((prev) => {
+                  const next = new Set(prev);
+                  next.delete(f.key);
+                  return next;
+                });
+              }
+            }}
           />
         ))}
         {submitError && (
-          <div className="text-sm text-destructive bg-destructive/5 p-2 rounded border border-destructive/20">{submitError}</div>
+          <div role="alert" className="text-sm text-destructive bg-destructive/5 p-2 rounded border border-destructive/20">{submitError}</div>
         )}
         <Button type="submit" disabled={submitting} className="w-full bg-brand-navy hover:opacity-90 text-white">
           {submitting ? "Submitting…" : "Submit updated information"}
@@ -162,21 +182,29 @@ export function AmendApplication() {
 }
 
 function FieldEditor({
-  field, value, onChange,
+  field, value, invalid, onChange,
 }: {
   field: AmendField;
   value: Value;
+  invalid: boolean;
   onChange: (v: Value) => void;
 }) {
+  const fieldId = useId();
+  const errorId = useId();
+  const helpId = useId();
+  const errorMessage = invalid ? `${field.label} is required.` : undefined;
+
   if (field.type === "file") {
     return (
       <div>
         <FileUploadField
-          label={field.label}
+          label={`${field.label} (required)`}
+          required
           accept={field.key === "photo" ? "image/*" : field.key === "cv" ? ".pdf,.doc,.docx" : "image/*,.pdf"}
           value={(value as UploadedFile | null) ?? null}
           onChange={(v) => onChange(v)}
           uploadFn={uploadFileAnon}
+          error={errorMessage}
         />
         {field.currentValue && !value && (
           <p className="text-xs text-muted-foreground mt-1">A file is already on file — uploading a new one will replace it.</p>
@@ -186,15 +214,35 @@ function FieldEditor({
   }
   return (
     <div className="space-y-1">
-      <label className="text-xs uppercase font-semibold text-foreground/80 block">{field.label}</label>
+      <Label htmlFor={fieldId} className="text-xs uppercase font-semibold text-foreground/80 block">
+        {field.label}
+        <span className="text-destructive ml-0.5" aria-hidden="true">*</span>
+        <span className="sr-only"> (required)</span>
+      </Label>
       {field.type === "textarea" ? (
-        <Textarea rows={3} value={(value as string) ?? ""} onChange={(e) => onChange(e.target.value)} />
+        <Textarea
+          id={fieldId}
+          rows={3}
+          value={(value as string) ?? ""}
+          onChange={(e) => onChange(e.target.value)}
+          aria-required="true"
+          aria-invalid={invalid ? true : undefined}
+          aria-describedby={invalid ? errorId : helpId}
+        />
       ) : (
         <Input
+          id={fieldId}
           type={field.type === "number" ? "number" : field.type === "date" ? "date" : "text"}
           value={(value as string) ?? ""}
           onChange={(e) => onChange(e.target.value)}
+          aria-required="true"
+          aria-invalid={invalid ? true : undefined}
+          aria-describedby={invalid ? errorId : helpId}
         />
+      )}
+      <span id={helpId} className="sr-only">Required.</span>
+      {invalid && (
+        <div id={errorId} role="alert" className="text-xs text-destructive">{errorMessage}</div>
       )}
     </div>
   );
@@ -203,12 +251,12 @@ function FieldEditor({
 function Shell({ children }: { children: React.ReactNode }) {
   return (
     <div className="min-h-screen bg-brand-cream py-8 px-4">
-      <div className="max-w-xl mx-auto bg-card rounded-lg border shadow-sm p-6">
+      <main className="max-w-xl mx-auto bg-card rounded-lg border shadow-sm p-6">
         <div className="brand-wordmark text-base brand-navy mb-4 pb-3 border-b">
           Williams Council Security Group
         </div>
         {children}
-      </div>
+      </main>
     </div>
   );
 }

@@ -47,6 +47,8 @@ type Prefill = {
 
 const STEPS = ["Bank & tax", "Emergency & uniform", "Documents", "Consent & sign"];
 
+type StepError = { field?: string; message: string };
+
 export function OnboardPage() {
   const [, params] = useRoute("/onboard/:token");
   const token = params?.token ?? "";
@@ -56,7 +58,7 @@ export function OnboardPage() {
   const [step, setStep] = useState(0);
   const [submitting, setSubmitting] = useState(false);
   const [submitted, setSubmitted] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const [error, setError] = useState<StepError | null>(null);
   const headingRef = useRef<HTMLHeadingElement | null>(null);
   // Skip the first focus so we don't yank focus past the brand header
   // when the page first renders.
@@ -119,6 +121,22 @@ export function OnboardPage() {
     headingRef.current?.focus();
   }, [step, submitted, loading, prefill]);
 
+  // Clear a stale step error as soon as the offending control becomes
+  // valid, so aria-invalid / the inline alert don't outlive the problem.
+  useEffect(() => {
+    if (!error) return;
+    const stillFailing = canAdvance();
+    if (!stillFailing || stillFailing.field !== error.field) {
+      setError(null);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [
+    bankSortCode, bankAccountNumber, bankAccountName,
+    emergencyContactName, emergencyContactPhone,
+    directDepositConsent, directDepositSignature,
+    viewed, acks,
+  ]);
+
   if (loading) {
     return (
       <div className="min-h-screen bg-background">
@@ -160,27 +178,30 @@ export function OnboardPage() {
     );
   }
 
-  function canAdvance(): true | string {
+  function canAdvance(): StepError | null {
     if (step === 0) {
-      if (!bankSortCode || !bankAccountNumber || !bankAccountName) return "All bank details are required.";
+      if (!bankSortCode) return { field: "bankSortCode", message: "Bank routing number is required." };
+      if (!bankAccountNumber) return { field: "bankAccountNumber", message: "Account number is required." };
+      if (!bankAccountName) return { field: "bankAccountName", message: "Account holder name is required." };
     }
     if (step === 1) {
-      if (!emergencyContactName || !emergencyContactPhone) return "Emergency contact name and phone required.";
+      if (!emergencyContactName) return { field: "emergencyContactName", message: "Emergency contact name is required." };
+      if (!emergencyContactPhone) return { field: "emergencyContactPhone", message: "Emergency contact phone is required." };
       if (!normalizePhoneToE164(emergencyContactPhone)) {
-        return "Emergency contact phone is invalid. Please enter a valid US phone number (e.g. (214) 555-1234) or include the country code (e.g. +44 20 1234 5678).";
+        return { field: "emergencyContactPhone", message: "Emergency contact phone is invalid. Please enter a valid US phone number (e.g. (214) 555-1234) or include the country code (e.g. +44 20 1234 5678)." };
       }
     }
     if (step === 3) {
-      if (!directDepositConsent) return "Please confirm direct deposit consent.";
-      if (!directDepositSignature.trim()) return "Please type your name as signature.";
+      if (!directDepositConsent) return { field: "directDepositConsent", message: "Please confirm direct deposit consent." };
+      if (!directDepositSignature.trim()) return { field: "directDepositSignature", message: "Please type your name as signature." };
       for (const p of policies) {
-        if (!viewed[p.slug]) return `Please open the document for: ${p.label}`;
+        if (!viewed[p.slug]) return { field: `policy:${p.slug}:view`, message: `Please open the document for: ${p.label}` };
         const v = acks[p.slug];
-        if (!v?.accepted) return `Please acknowledge: ${p.label}`;
-        if (!v.signature.trim()) return `Please sign: ${p.label}`;
+        if (!v?.accepted) return { field: `policy:${p.slug}:ack`, message: `Please acknowledge: ${p.label}` };
+        if (!v.signature.trim()) return { field: `policy:${p.slug}:sig`, message: `Please sign: ${p.label}` };
       }
     }
-    return true;
+    return null;
   }
 
   async function submit() {
@@ -212,7 +233,7 @@ export function OnboardPage() {
       await api(`/onboarding/${encodeURIComponent(token)}`, { method: "POST", body });
       setSubmitted(true);
     } catch (e) {
-      setError((e as Error).message);
+      setError({ message: (e as Error).message });
     } finally {
       setSubmitting(false);
     }
@@ -256,10 +277,10 @@ export function OnboardPage() {
             <>
               <h2 ref={headingRef} tabIndex={-1} className="brand-wordmark text-xl focus:outline-none">Bank &amp; tax details</h2>
               <Two>
-                <Field label="Bank routing number" required><Input inputMode="numeric" value={bankSortCode} onChange={(e) => setBankSortCode(e.target.value)} placeholder="9 digits" /></Field>
-                <Field label="Account number" required><Input inputMode="numeric" value={bankAccountNumber} onChange={(e) => setBankAccountNumber(e.target.value)} /></Field>
+                <Field label="Bank routing number" required name="bankSortCode" error={error}><Input inputMode="numeric" value={bankSortCode} onChange={(e) => setBankSortCode(e.target.value)} placeholder="9 digits" /></Field>
+                <Field label="Account number" required name="bankAccountNumber" error={error}><Input inputMode="numeric" value={bankAccountNumber} onChange={(e) => setBankAccountNumber(e.target.value)} /></Field>
               </Two>
-              <Field label="Account holder name" required><Input autoComplete="name" value={bankAccountName} onChange={(e) => setBankAccountName(e.target.value)} /></Field>
+              <Field label="Account holder name" required name="bankAccountName" error={error}><Input autoComplete="name" value={bankAccountName} onChange={(e) => setBankAccountName(e.target.value)} /></Field>
               <Two>
                 <Field label="SSN"><Input value={niNumberConfirmed} onChange={(e) => setNiNumberConfirmed(e.target.value)} placeholder="xxx-xx-xxxx" /></Field>
                 <Field label="W-4 filing status"><Input value={taxCode} onChange={(e) => setTaxCode(e.target.value)} placeholder="e.g. Single, Married" /></Field>
@@ -271,10 +292,10 @@ export function OnboardPage() {
             <>
               <h2 ref={headingRef} tabIndex={-1} className="brand-wordmark text-xl focus:outline-none">Emergency contact &amp; uniform</h2>
               <Two>
-                <Field label="Contact name" required><Input value={emergencyContactName} onChange={(e) => setEcn(e.target.value)} /></Field>
+                <Field label="Contact name" required name="emergencyContactName" error={error}><Input value={emergencyContactName} onChange={(e) => setEcn(e.target.value)} /></Field>
                 <Field label="Relationship"><Input value={emergencyContactRelationship} onChange={(e) => setEcr(e.target.value)} /></Field>
               </Two>
-              <Field label="Phone" required><Input type="tel" value={emergencyContactPhone} onChange={(e) => setEcp(e.target.value)} /></Field>
+              <Field label="Phone" required name="emergencyContactPhone" error={error}><Input type="tel" value={emergencyContactPhone} onChange={(e) => setEcp(e.target.value)} /></Field>
               <h3 className="text-sm uppercase tracking-wide opacity-70 pt-3">Uniform sizes</h3>
               <Two>
                 <Field label="Shirt"><Input value={uShirt} onChange={(e) => setUShirt(e.target.value)} placeholder="S / M / L / XL" /></Field>
@@ -289,8 +310,8 @@ export function OnboardPage() {
           {step === 2 && (
             <>
               <h2 ref={headingRef} tabIndex={-1} className="brand-wordmark text-xl focus:outline-none">Documents</h2>
-              <FileUploadField label="TX security license (photo of card)" accept="image/*,.pdf" value={siaLicenseDoc} onChange={setSiaDoc} uploadFn={uploadFileAnon} />
-              <FileUploadField label="Passport / driver's license / right-to-work document" accept="image/*,.pdf" value={passportDoc} onChange={setPassportDoc} uploadFn={uploadFileAnon} />
+              <FileUploadField label="TX security license (photo of card)" accept="image/*,.pdf" value={siaLicenseDoc} onChange={setSiaDoc} uploadFn={uploadFileAnon} error={error?.field === "siaLicenseDoc" ? error.message : undefined} />
+              <FileUploadField label="Passport / driver's license / right-to-work document" accept="image/*,.pdf" value={passportDoc} onChange={setPassportDoc} uploadFn={uploadFileAnon} error={error?.field === "passportDoc" ? error.message : undefined} />
             </>
           )}
           {step === 3 && (
@@ -301,6 +322,8 @@ export function OnboardPage() {
                 onConsentChange={setDdc}
                 signature={directDepositSignature}
                 onSignatureChange={setDds}
+                consentError={error?.field === "directDepositConsent" ? error.message : undefined}
+                signatureError={error?.field === "directDepositSignature" ? error.message : undefined}
               />
               {policies.length === 0 && (
                 <div className="text-sm text-muted-foreground italic p-3 border rounded">
@@ -317,11 +340,14 @@ export function OnboardPage() {
                   onChange={(next) =>
                     setAcks((prev) => ({ ...prev, [p.slug]: next }))
                   }
+                  viewError={error?.field === `policy:${p.slug}:view` ? error.message : undefined}
+                  ackError={error?.field === `policy:${p.slug}:ack` ? error.message : undefined}
+                  sigError={error?.field === `policy:${p.slug}:sig` ? error.message : undefined}
                 />
               ))}
               {error && (
                 <div role="alert" className="text-sm text-destructive bg-destructive/5 p-2 rounded border border-destructive/20">
-                  {error}
+                  {error.message}
                 </div>
               )}
             </>
@@ -330,7 +356,7 @@ export function OnboardPage() {
           {/* Error from in-step canAdvance() for steps 0-2 (step 3 renders its own error block above). */}
           {step !== 3 && error && (
             <div role="alert" className="text-sm text-destructive bg-destructive/5 p-2 rounded border border-destructive/20">
-              {error}
+              {error.message}
             </div>
           )}
 
@@ -342,8 +368,8 @@ export function OnboardPage() {
             {step < STEPS.length - 1 ? (
               <Button type="button" className="bg-brand-navy hover:opacity-90 text-white"
                 onClick={() => {
-                  const ok = canAdvance();
-                  if (ok !== true) { setError(ok); return; }
+                  const err = canAdvance();
+                  if (err) { setError(err); return; }
                   setError(null);
                   setStep((s) => s + 1);
                 }}
@@ -352,8 +378,8 @@ export function OnboardPage() {
               <Button type="submit" disabled={submitting}
                 className="bg-brand-navy hover:opacity-90 text-white"
                 onClick={() => {
-                  const ok = canAdvance();
-                  if (ok !== true) { setError(ok); return; }
+                  const err = canAdvance();
+                  if (err) { setError(err); return; }
                   submit();
                 }}>
                 {submitting ? "Submitting…" : "Complete onboarding"}
@@ -368,14 +394,19 @@ export function OnboardPage() {
 
 function ConsentBlock({
   consent, onConsentChange, signature, onSignatureChange,
+  consentError, signatureError,
 }: {
   consent: boolean;
   onConsentChange: (v: boolean) => void;
   signature: string;
   onSignatureChange: (v: string) => void;
+  consentError?: string;
+  signatureError?: string;
 }) {
   const consentId = useId();
   const sigId = useId();
+  const consentErrorId = useId();
+  const sigErrorId = useId();
   return (
     <div className="p-3 border rounded space-y-2 bg-muted/20">
       <div className="flex items-start gap-2">
@@ -384,12 +415,19 @@ function ConsentBlock({
           checked={consent}
           onCheckedChange={(v) => onConsentChange(!!v)}
           className="mt-0.5"
+          aria-required="true"
+          aria-invalid={consentError ? true : undefined}
+          aria-describedby={consentError ? consentErrorId : undefined}
         />
         <Label htmlFor={consentId} className="text-sm font-normal cursor-pointer leading-snug">
           I authorise Williams Council Security Group to pay my wages by direct deposit
           into the bank account specified above.
+          <span className="sr-only"> (required)</span>
         </Label>
       </div>
+      {consentError && (
+        <div id={consentErrorId} role="alert" className="text-xs text-destructive">{consentError}</div>
+      )}
       <div className="space-y-1">
         <Label htmlFor={sigId} className="text-xs uppercase font-semibold text-foreground/80">
           Type your full name as signature
@@ -403,7 +441,12 @@ function ConsentBlock({
           placeholder="Your full name"
           autoComplete="name"
           aria-required="true"
+          aria-invalid={signatureError ? true : undefined}
+          aria-describedby={signatureError ? sigErrorId : undefined}
         />
+        {signatureError && (
+          <div id={sigErrorId} role="alert" className="text-xs text-destructive">{signatureError}</div>
+        )}
       </div>
     </div>
   );
@@ -411,16 +454,23 @@ function ConsentBlock({
 
 function PolicyAck({
   policy, viewed, onView, ack, onChange,
+  viewError, ackError, sigError,
 }: {
   policy: PolicyDto;
   viewed: boolean;
   onView: () => void;
   ack: { accepted: boolean; signature: string };
   onChange: (next: { accepted: boolean; signature: string }) => void;
+  viewError?: string;
+  ackError?: string;
+  sigError?: string;
 }) {
   const ackId = useId();
   const sigId = useId();
   const helpId = useId();
+  const viewErrorId = useId();
+  const ackErrorId = useId();
+  const sigErrorId = useId();
   return (
     <div className="border rounded bg-muted/20 overflow-hidden">
       <div className="flex items-center justify-between gap-2 p-3 bg-background border-b">
@@ -466,6 +516,9 @@ function PolicyAck({
         </div>
       )}
       <div className="p-3 space-y-2">
+        {viewError && (
+          <div id={viewErrorId} role="alert" className="text-xs text-destructive">{viewError}</div>
+        )}
         <div className={`flex items-start gap-2 ${viewed ? "" : "opacity-60"}`}>
           <Checkbox
             id={ackId}
@@ -473,7 +526,8 @@ function PolicyAck({
             disabled={!viewed}
             onCheckedChange={(v) => onChange({ ...ack, accepted: !!v })}
             className="mt-0.5"
-            aria-describedby={!viewed ? helpId : undefined}
+            aria-describedby={[!viewed ? helpId : null, ackError ? ackErrorId : null].filter(Boolean).join(" ") || undefined}
+            aria-invalid={ackError ? true : undefined}
             aria-required="true"
           />
           <Label
@@ -488,6 +542,9 @@ function PolicyAck({
             )}
           </Label>
         </div>
+        {ackError && (
+          <div id={ackErrorId} role="alert" className="text-xs text-destructive">{ackError}</div>
+        )}
         <div className="space-y-1">
           <Label htmlFor={sigId} className="sr-only">
             Type your full name to sign the {policy.label}
@@ -500,7 +557,12 @@ function PolicyAck({
             onChange={(e) => onChange({ ...ack, signature: e.target.value })}
             aria-required="true"
             aria-label={`Signature for ${policy.label}`}
+            aria-invalid={sigError ? true : undefined}
+            aria-describedby={sigError ? sigErrorId : undefined}
           />
+          {sigError && (
+            <div id={sigErrorId} role="alert" className="text-xs text-destructive">{sigError}</div>
+          )}
         </div>
       </div>
     </div>
@@ -508,23 +570,31 @@ function PolicyAck({
 }
 
 function Field({
-  label, children, required,
+  label, children, required, name, error,
 }: {
   label: string;
   children: ReactNode;
   required?: boolean;
+  name?: string;
+  error?: StepError | null;
 }) {
   const fieldId = useId();
+  const errorId = useId();
+  const match = name && error?.field === name ? error : null;
   let control = children;
   let controlId = fieldId;
   if (isValidElement(children)) {
     const el = children as ReactElement<{
       id?: string;
+      "aria-describedby"?: string;
+      "aria-invalid"?: boolean | "true" | "false";
       "aria-required"?: boolean | "true" | "false";
     }>;
     controlId = el.props.id ?? fieldId;
     control = cloneElement(el, {
       id: controlId,
+      "aria-describedby": match ? errorId : el.props["aria-describedby"],
+      "aria-invalid": match ? true : el.props["aria-invalid"],
       "aria-required": required ? true : el.props["aria-required"],
     });
   }
@@ -540,6 +610,9 @@ function Field({
         )}
       </Label>
       {control}
+      {match && (
+        <div id={errorId} role="alert" className="text-xs text-destructive">{match.message}</div>
+      )}
     </div>
   );
 }
