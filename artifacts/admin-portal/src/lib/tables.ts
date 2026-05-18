@@ -101,8 +101,16 @@ export type TableDescriptor = {
   plural: string;
   /** Whether the import wizard is supported (server-side allowlist). */
   importSupported: boolean;
-  /** Field that best identifies a row (used for FK dropdown labels). */
+  /** Field that best identifies a row (used for FK dropdown labels, Excel
+   *  import label-matching, and template generation). */
   primaryLabelField: string;
+  /** Optional display-only override for FK dropdown / grid labels. When set,
+   *  takes precedence over `primaryLabelField` for *rendering* in
+   *  `useFkOptions` (and therefore the grid FK cell, row-form FK select, and
+   *  import wizard FK picker). Import label-matching still uses
+   *  `primaryLabelField` / `importMatchByLabelFields`, so existing Excel
+   *  imports keep working. */
+  primaryLabelFn?: (row: Record<string, unknown>) => string;
   /**
    * When this table is referenced as a foreign key and the importer chooses
    * "match by label" instead of "match by ID", these are the columns whose
@@ -127,6 +135,14 @@ export const TABLES: TableDescriptor[] = [
     plural: "users",
     importSupported: true,
     primaryLabelField: "email",
+    primaryLabelFn: (r) => {
+      const first = String(r.firstName ?? "").trim();
+      const last = String(r.lastName ?? "").trim();
+      const full = [first, last].filter(Boolean).join(" ");
+      const email = String(r.email ?? "").trim();
+      if (full && email) return `${full} (${email})`;
+      return full || email;
+    },
     fields: [
       { key: "id", label: "ID", type: "text", readonly: true, hiddenInGrid: true },
       { key: "email", label: "Email", type: "email", required: true },

@@ -37,14 +37,18 @@ export function useFkOptions(tableName: string | undefined) {
     if (!tableName) return;
     const t = getTable(tableName);
     const labelField = t?.primaryLabelField ?? "id";
+    const labelFn = t?.primaryLabelFn;
     setLoading(true);
     const p = loadFkRows(tableName);
     p.then((rows) => {
-      const mapped = rows.map((r) => ({
-        id: String(r.id ?? ""),
-        label: String(r[labelField] ?? r.id ?? ""),
-        row: r,
-      }));
+      const mapped = rows.map((r) => {
+        let label = "";
+        if (labelFn) {
+          try { label = labelFn(r).trim(); } catch { label = ""; }
+        }
+        if (!label) label = String(r[labelField] ?? r.id ?? "");
+        return { id: String(r.id ?? ""), label, row: r };
+      });
       setOpts(mapped);
     }).finally(() => setLoading(false));
   }, [tableName]);
