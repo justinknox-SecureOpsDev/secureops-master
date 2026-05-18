@@ -1,6 +1,6 @@
 import React, { useState } from "react";
 import { useTopPad } from "@/hooks/useTopPad";
-import { View, Text, StyleSheet, FlatList, TouchableOpacity, ActivityIndicator, Platform, Modal, TextInput, ScrollView, Image } from "react-native";
+import { View, Text, StyleSheet, FlatList, TouchableOpacity, ActivityIndicator, Platform, Modal, TextInput, ScrollView, Image, AccessibilityInfo, findNodeHandle } from "react-native";
 import { useColors } from "@/hooks/useColors";
 import { useGetIncidents, getGetIncidentsQueryKey, useCreateIncident } from "@workspace/api-client-react";
 import { Feather } from "@expo/vector-icons";
@@ -21,6 +21,9 @@ export default function EmployeeIncidentsScreen() {
 
   const [form, setForm] = useState({ title: "", description: "", severity: "medium" as string, location: "", actionsTaken: "" });
   const set = (k: string) => (v: string) => setForm((f) => ({ ...f, [k]: v }));
+  const [invalid, setInvalid] = useState<{ title: boolean; description: boolean }>({ title: false, description: false });
+  const titleRef = React.useRef<TextInput>(null);
+  const descRef = React.useRef<TextInput>(null);
   const [photos, setPhotos] = useState<UploadedFile[]>([]);
   const [pickingSource, setPickingSource] = useState<"camera" | "library" | null>(null);
   const [previewUri, setPreviewUri] = useState<string | null>(null);
@@ -51,13 +54,26 @@ export default function EmployeeIncidentsScreen() {
     setShowReport(false);
     setForm({ title: "", description: "", severity: "medium", location: "", actionsTaken: "" });
     setPhotos([]);
+    setInvalid({ title: false, description: false });
   };
 
   const handleReport = async () => {
-    if (!form.title || !form.description) {
+    const nextInvalid = { title: !form.title, description: !form.description };
+    if (nextInvalid.title || nextInvalid.description) {
+      setInvalid(nextInvalid);
+      const missing = [nextInvalid.title && "title", nextInvalid.description && "description"]
+        .filter(Boolean).join(" and ");
+      AccessibilityInfo.announceForAccessibility(`Cannot submit. Missing required ${missing}.`);
+      const focusTarget = nextInvalid.title ? titleRef.current : descRef.current;
+      if (focusTarget) {
+        const node = findNodeHandle(focusTarget);
+        if (node != null) { try { AccessibilityInfo.setAccessibilityFocus?.(node); } catch { /* best effort */ } }
+        try { focusTarget.focus?.(); } catch { /* best effort */ }
+      }
       notify("Missing Fields", "Title and description are required.");
       return;
     }
+    setInvalid({ title: false, description: false });
     try {
       await createMutation.mutateAsync({
         data: {
@@ -80,8 +96,13 @@ export default function EmployeeIncidentsScreen() {
   return (
     <View style={[styles.container, { backgroundColor: colors.background }]}>
       <View style={[styles.topBar, { paddingTop: topPad + 12, borderBottomColor: colors.border }]}>
-        <Text style={[styles.pageTitle, { color: colors.foreground }]}>My Incidents</Text>
-        <TouchableOpacity style={[styles.addBtn, { backgroundColor: colors.destructive }]} onPress={() => setShowReport(true)}>
+        <Text style={[styles.pageTitle, { color: colors.foreground }]} accessibilityRole="header">My Incidents</Text>
+        <TouchableOpacity
+          style={[styles.addBtn, { backgroundColor: colors.destructive }]}
+          onPress={() => setShowReport(true)}
+          accessibilityRole="button"
+          accessibilityLabel="Report a new incident"
+        >
           <Feather name="plus" size={18} color="#fff" />
         </TouchableOpacity>
       </View>
@@ -117,8 +138,13 @@ export default function EmployeeIncidentsScreen() {
             const c = SEVERITY_COLORS[item.severity] || colors.mutedForeground;
             const statusMap: Record<string, string> = { open: colors.destructive, under_review: colors.accent, resolved: colors.primary, closed: colors.mutedForeground };
             const sc = statusMap[item.status] || colors.mutedForeground;
+            const cardA11y = `${String(item.severity).toUpperCase()} severity, status ${String(item.status).replace("_", " ")}. ${item.title}. Occurred ${new Date(item.occurredAt).toLocaleString()}.`;
             return (
-              <View style={[styles.card, { backgroundColor: colors.card, borderColor: colors.border, borderLeftColor: c, borderLeftWidth: 3 }]}>
+              <View
+                style={[styles.card, { backgroundColor: colors.card, borderColor: colors.border, borderLeftColor: c, borderLeftWidth: 3 }]}
+                accessible
+                accessibilityLabel={cardA11y}
+              >
                 <View style={styles.cardHeader}>
                   <View style={[styles.badge, { backgroundColor: c + "20", borderColor: c }]}>
                     <Text style={[styles.badgeText, { color: c }]}>{item.severity.toUpperCase()}</Text>
@@ -163,50 +189,87 @@ export default function EmployeeIncidentsScreen() {
           <View style={styles.modalOverlay}>
             <View style={[styles.modalCard, { backgroundColor: colors.card, borderColor: colors.border }]}>
               <View style={styles.modalHeader}>
-                <Text style={[styles.modalTitle, { color: colors.foreground }]}>Report Incident</Text>
-                <TouchableOpacity onPress={closeReport}><Feather name="x" size={20} color={colors.mutedForeground} /></TouchableOpacity>
+                <Text style={[styles.modalTitle, { color: colors.foreground }]} accessibilityRole="header">Report Incident</Text>
+                <TouchableOpacity onPress={closeReport} accessibilityRole="button" accessibilityLabel="Close report form"><Feather name="x" size={20} color={colors.mutedForeground} /></TouchableOpacity>
               </View>
               <KeyboardAwareScrollViewCompat style={{ maxHeight: 460 }}>
                 {[
-                  { label: "Title *", key: "title", placeholder: "Brief description of incident" },
-                  { label: "Location", key: "location", placeholder: "Where did this occur?" },
-                ].map(({ label, key, placeholder }) => (
-                  <View key={key} style={{ marginBottom: 14 }}>
-                    <Text style={[styles.fieldLabel, { color: colors.mutedForeground }]}>{label}</Text>
-                    <TextInput
-                      style={[styles.fieldInput, { color: colors.foreground, borderColor: colors.border, backgroundColor: colors.secondary }]}
-                      value={(form as any)[key]}
-                      onChangeText={set(key)}
-                      placeholder={placeholder}
-                      placeholderTextColor={colors.mutedForeground}
-                    />
-                  </View>
-                ))}
+                  { label: "Title", key: "title", placeholder: "Brief description of incident", required: true },
+                  { label: "Location", key: "location", placeholder: "Where did this occur?", required: false },
+                ].map(({ label, key, placeholder, required }) => {
+                  const fieldKey = key as "title" | "location";
+                  const isInvalid = required && fieldKey === "title" && invalid.title;
+                  const a11yLabel = required
+                    ? `${label}, required${isInvalid ? `, invalid, ${label} is required` : ""}`
+                    : label;
+                  return (
+                    <View key={key} style={{ marginBottom: 14 }}>
+                      <Text style={[styles.fieldLabel, { color: isInvalid ? colors.destructive : colors.mutedForeground }]}>
+                        {label}{required ? " *" : ""}
+                      </Text>
+                      <TextInput
+                        ref={fieldKey === "title" ? titleRef : undefined}
+                        style={[styles.fieldInput, { color: colors.foreground, borderColor: isInvalid ? colors.destructive : colors.border, backgroundColor: colors.secondary }]}
+                        value={form[fieldKey]}
+                        onChangeText={(v) => {
+                          set(key)(v);
+                          if (isInvalid && v) setInvalid((i) => ({ ...i, title: false }));
+                        }}
+                        placeholder={placeholder}
+                        placeholderTextColor={colors.mutedForeground}
+                        accessibilityLabel={a11yLabel}
+                        accessibilityHint={placeholder}
+                      />
+                      {isInvalid && (
+                        <Text accessibilityLiveRegion="polite" style={{ color: colors.destructive, fontSize: 11, marginTop: 4 }}>
+                          {label} is required.
+                        </Text>
+                      )}
+                    </View>
+                  );
+                })}
 
-                <Text style={[styles.fieldLabel, { color: colors.mutedForeground }]}>Severity *</Text>
-                <View style={styles.severityRow}>
-                  {SEVERITY_LEVELS.map((s) => (
-                    <TouchableOpacity
-                      key={s}
-                      style={[styles.sevChip, { borderColor: form.severity === s ? SEVERITY_COLORS[s] : colors.border, backgroundColor: form.severity === s ? SEVERITY_COLORS[s] + "20" : "transparent" }]}
-                      onPress={() => set("severity")(s)}
-                    >
-                      <Text style={[styles.sevText, { color: form.severity === s ? SEVERITY_COLORS[s] : colors.mutedForeground }]}>{s.toUpperCase()}</Text>
-                    </TouchableOpacity>
-                  ))}
+                <Text style={[styles.fieldLabel, { color: colors.mutedForeground }]} accessibilityRole="header">Severity, required</Text>
+                <View style={styles.severityRow} accessibilityRole="radiogroup">
+                  {SEVERITY_LEVELS.map((s) => {
+                    const selected = form.severity === s;
+                    return (
+                      <TouchableOpacity
+                        key={s}
+                        style={[styles.sevChip, { borderColor: selected ? SEVERITY_COLORS[s] : colors.border, backgroundColor: selected ? SEVERITY_COLORS[s] + "20" : "transparent" }]}
+                        onPress={() => set("severity")(s)}
+                        accessibilityRole="radio"
+                        accessibilityLabel={`Severity ${s}`}
+                        accessibilityState={{ selected, checked: selected }}
+                      >
+                        <Text style={[styles.sevText, { color: selected ? SEVERITY_COLORS[s] : colors.mutedForeground }]}>{s.toUpperCase()}</Text>
+                      </TouchableOpacity>
+                    );
+                  })}
                 </View>
 
-                <Text style={[styles.fieldLabel, { color: colors.mutedForeground, marginTop: 14 }]}>Description *</Text>
+                <Text style={[styles.fieldLabel, { color: invalid.description ? colors.destructive : colors.mutedForeground, marginTop: 14 }]}>Description *</Text>
                 <TextInput
-                  style={[styles.fieldInput, styles.multilineInput, { color: colors.foreground, borderColor: colors.border, backgroundColor: colors.secondary }]}
+                  ref={descRef}
+                  style={[styles.fieldInput, styles.multilineInput, { color: colors.foreground, borderColor: invalid.description ? colors.destructive : colors.border, backgroundColor: colors.secondary }]}
                   value={form.description}
-                  onChangeText={set("description")}
+                  onChangeText={(v) => {
+                    set("description")(v);
+                    if (invalid.description && v) setInvalid((i) => ({ ...i, description: false }));
+                  }}
                   placeholder="Provide full details of what happened..."
                   placeholderTextColor={colors.mutedForeground}
                   multiline
                   numberOfLines={4}
                   textAlignVertical="top"
+                  accessibilityLabel={`Description, required${invalid.description ? ", invalid, description is required" : ""}`}
+                  accessibilityHint="Provide full details of what happened"
                 />
+                {invalid.description && (
+                  <Text accessibilityLiveRegion="polite" style={{ color: colors.destructive, fontSize: 11, marginTop: 4 }}>
+                    Description is required.
+                  </Text>
+                )}
 
                 <Text style={[styles.fieldLabel, { color: colors.mutedForeground, marginTop: 14 }]}>Actions Taken</Text>
                 <TextInput
@@ -218,6 +281,8 @@ export default function EmployeeIncidentsScreen() {
                   multiline
                   numberOfLines={3}
                   textAlignVertical="top"
+                  accessibilityLabel="Actions taken"
+                  accessibilityHint="Optional. What steps did you take immediately?"
                 />
 
                 <Text style={[styles.fieldLabel, { color: colors.mutedForeground, marginTop: 14 }]}>
@@ -228,6 +293,9 @@ export default function EmployeeIncidentsScreen() {
                     style={[styles.photoBtn, { borderColor: colors.primary, backgroundColor: colors.primary + "15", opacity: pickingSource ? 0.6 : 1 }]}
                     onPress={() => addPhoto("camera")}
                     disabled={!!pickingSource}
+                    accessibilityRole="button"
+                    accessibilityLabel="Take photo with camera"
+                    accessibilityState={{ disabled: !!pickingSource, busy: pickingSource === "camera" }}
                   >
                     {pickingSource === "camera"
                       ? <ActivityIndicator size="small" color={colors.primary} />
@@ -238,6 +306,9 @@ export default function EmployeeIncidentsScreen() {
                     style={[styles.photoBtn, { borderColor: colors.primary, backgroundColor: colors.primary + "15", opacity: pickingSource ? 0.6 : 1 }]}
                     onPress={() => addPhoto("library")}
                     disabled={!!pickingSource}
+                    accessibilityRole="button"
+                    accessibilityLabel="Add photo from library"
+                    accessibilityState={{ disabled: !!pickingSource, busy: pickingSource === "library" }}
                   >
                     {pickingSource === "library"
                       ? <ActivityIndicator size="small" color={colors.primary} />
@@ -248,14 +319,16 @@ export default function EmployeeIncidentsScreen() {
                 {photos.length > 0 && (
                   <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.thumbRow}>
                     {photos.map((p, idx) => (
-                      <View key={p.objectPath} style={styles.thumbWrap}>
-                        <Image source={{ uri: p.localUri }} style={styles.thumbImg} resizeMode="cover" />
+                      <View key={p.objectPath} style={styles.thumbWrap} accessibilityLabel={`Attached photo ${idx + 1} of ${photos.length}`}>
+                        <Image source={{ uri: p.localUri }} style={styles.thumbImg} resizeMode="cover" accessibilityIgnoresInvertColors />
                         <TouchableOpacity
                           style={[styles.removeBtn, { backgroundColor: colors.destructive }]}
                           onPress={async () => {
                             const ok = await confirmAction({ title: "Remove photo?", confirmText: "Remove", destructive: true });
                             if (ok) removePhoto(idx);
                           }}
+                          accessibilityRole="button"
+                          accessibilityLabel={`Remove photo ${idx + 1}`}
                         >
                           <Feather name="x" size={12} color="#fff" />
                         </TouchableOpacity>
@@ -268,6 +341,9 @@ export default function EmployeeIncidentsScreen() {
                 style={[styles.submitBtn, { backgroundColor: colors.destructive, opacity: createMutation.isPending ? 0.7 : 1 }]}
                 onPress={handleReport}
                 disabled={createMutation.isPending}
+                accessibilityRole="button"
+                accessibilityLabel="Submit incident report"
+                accessibilityState={{ disabled: createMutation.isPending, busy: createMutation.isPending }}
               >
                 {createMutation.isPending ? <ActivityIndicator color="#fff" /> : (
                   <>

@@ -47,6 +47,7 @@ function EmployeeTabs({ colors, isIOS, isWeb }: { colors: ReturnType<typeof useC
         name="home"
         options={{
           title: "Home",
+          tabBarAccessibilityLabel: "Home tab",
           tabBarIcon: ({ color }) => <Feather name="home" size={22} color={color} />,
         }}
       />
@@ -54,6 +55,7 @@ function EmployeeTabs({ colors, isIOS, isWeb }: { colors: ReturnType<typeof useC
         name="shifts"
         options={{
           title: "My Shifts",
+          tabBarAccessibilityLabel: "My shifts tab",
           tabBarIcon: ({ color }) => <Feather name="calendar" size={22} color={color} />,
         }}
       />
@@ -61,6 +63,7 @@ function EmployeeTabs({ colors, isIOS, isWeb }: { colors: ReturnType<typeof useC
         name="clock"
         options={{
           title: "Clock",
+          tabBarAccessibilityLabel: "Time clock tab",
           tabBarIcon: ({ color }) => <Feather name="clock" size={22} color={color} />,
         }}
       />
@@ -68,6 +71,7 @@ function EmployeeTabs({ colors, isIOS, isWeb }: { colors: ReturnType<typeof useC
         name="incidents"
         options={{
           title: "Incidents",
+          tabBarAccessibilityLabel: "Incidents tab",
           tabBarIcon: ({ color }) => <Feather name="alert-triangle" size={22} color={color} />,
         }}
       />
@@ -75,6 +79,7 @@ function EmployeeTabs({ colors, isIOS, isWeb }: { colors: ReturnType<typeof useC
         name="chat"
         options={{
           title: "Chat",
+          tabBarAccessibilityLabel: "Team chat tab",
           tabBarIcon: ({ color }) => <Feather name="message-circle" size={22} color={color} />,
         }}
       />
@@ -82,6 +87,7 @@ function EmployeeTabs({ colors, isIOS, isWeb }: { colors: ReturnType<typeof useC
         name="radio"
         options={{
           title: "Radio",
+          tabBarAccessibilityLabel: "Push to talk radio tab",
           tabBarIcon: ({ color }) => <Feather name="radio" size={22} color={color} />,
         }}
       />
@@ -89,6 +95,7 @@ function EmployeeTabs({ colors, isIOS, isWeb }: { colors: ReturnType<typeof useC
         name="profile"
         options={{
           title: "Profile",
+          tabBarAccessibilityLabel: "My profile tab",
           tabBarIcon: ({ color }) => <Feather name="user" size={22} color={color} />,
         }}
       />

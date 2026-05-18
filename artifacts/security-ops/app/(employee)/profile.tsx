@@ -45,7 +45,13 @@ function DocRow({ label, path, icon = "file-text" }: { label: string; path?: str
   const colors = useColors();
   if (!path) return null;
   return (
-    <TouchableOpacity onPress={() => openOwnedDoc(path)} style={[styles.docRow, { borderBottomColor: colors.border }]}>
+    <TouchableOpacity
+      onPress={() => openOwnedDoc(path)}
+      style={[styles.docRow, { borderBottomColor: colors.border }]}
+      accessibilityRole="link"
+      accessibilityLabel={`Open ${label}`}
+      accessibilityHint="Opens in your browser or document viewer"
+    >
       <Feather name={icon as any} size={16} color={colors.primary} />
       <Text style={{ flex: 1, color: colors.foreground, fontSize: 14, fontWeight: "600" }}>{label}</Text>
       <Feather name="external-link" size={14} color={colors.mutedForeground} />
@@ -300,8 +306,13 @@ export default function EmployeeProfileScreen() {
   return (
     <ScrollView style={[styles.container, { backgroundColor: colors.background }]} contentContainerStyle={{ paddingBottom: 100 }}>
       <View style={[styles.topBar, { paddingTop: topPad + 12, borderBottomColor: colors.border }]}>
-        <Text style={[styles.pageTitle, { color: colors.foreground }]}>My Profile</Text>
-        <TouchableOpacity onPress={logout} style={[styles.logoutBtn, { borderColor: colors.destructive + "50" }]}>
+        <Text style={[styles.pageTitle, { color: colors.foreground }]} accessibilityRole="header">My Profile</Text>
+        <TouchableOpacity
+          onPress={logout}
+          style={[styles.logoutBtn, { borderColor: colors.destructive + "50" }]}
+          accessibilityRole="button"
+          accessibilityLabel="Sign out of your account"
+        >
           <Feather name="log-out" size={16} color={colors.destructive} />
           <Text style={[styles.logoutText, { color: colors.destructive }]}>Sign Out</Text>
         </TouchableOpacity>
@@ -693,7 +704,15 @@ export default function EmployeeProfileScreen() {
                 {bioOn ? "Enabled" : "Disabled"}
               </Text>
             </View>
-            <Switch value={bioOn} onValueChange={toggleBio} disabled={bioBusy} />
+            <Switch
+              value={bioOn}
+              onValueChange={toggleBio}
+              disabled={bioBusy}
+              accessibilityLabel={Platform.OS === "ios" ? "Face ID or Touch ID unlock" : "Fingerprint unlock"}
+              accessibilityHint="Toggles biometric sign-in"
+              accessibilityRole="switch"
+              accessibilityState={{ checked: bioOn, disabled: bioBusy }}
+            />
           </View>
         )}
       </View>

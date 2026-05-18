@@ -110,12 +110,18 @@ export default function ChatRoomScreen({ roomId, roomName }: Props) {
   const renderMessage = ({ item }: { item: ChatMessage }) => {
     const mine = isMe(item.userId);
     const canDelete = mine || isAdmin;
+    const senderForA11y = mine ? "You" : item.userName;
+    const whenForA11y = formatDistanceToNow(new Date(item.createdAt), { addSuffix: true });
     return (
       <TouchableOpacity
         activeOpacity={canDelete ? 0.7 : 1}
         onLongPress={() => handleLongPressMessage(item)}
         delayLongPress={350}
         style={[s.msgRow, mine && s.msgRowMine]}
+        accessible
+        accessibilityRole={canDelete ? "button" : "text"}
+        accessibilityLabel={`${senderForA11y} said: ${item.content}. ${whenForA11y}.`}
+        accessibilityHint={canDelete ? "Double tap and hold to delete this message" : undefined}
       >
         {!mine && (
           <View style={[s.avatar, { backgroundColor: colors.primary + "33" }]}>
@@ -149,12 +155,13 @@ export default function ChatRoomScreen({ roomId, roomName }: Props) {
           onPress={() => (router.canGoBack() ? router.back() : router.replace("/(employee)/chat"))}
           style={s.backBtn}
           hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
+          accessibilityRole="button"
           accessibilityLabel="Back to chats"
         >
           <Feather name="chevron-left" size={26} color={colors.foreground} />
         </TouchableOpacity>
         <Feather name="hash" size={18} color={colors.primary} />
-        <Text style={[s.roomTitle, { color: colors.foreground }]} numberOfLines={1}>
+        <Text style={[s.roomTitle, { color: colors.foreground }]} numberOfLines={1} accessibilityRole="header">
           {roomName}
         </Text>
       </View>
@@ -189,8 +196,17 @@ export default function ChatRoomScreen({ roomId, roomName }: Props) {
             onChangeText={setText}
             multiline
             maxLength={1000}
+            accessibilityLabel={`Message ${roomName}`}
+            accessibilityHint="Type your message, then activate the send button"
           />
-          <TouchableOpacity onPress={handleSend} disabled={!text.trim() || sending} style={s.sendBtn}>
+          <TouchableOpacity
+            onPress={handleSend}
+            disabled={!text.trim() || sending}
+            style={s.sendBtn}
+            accessibilityRole="button"
+            accessibilityLabel="Send message"
+            accessibilityState={{ disabled: !text.trim() || sending, busy: sending }}
+          >
             {sending
               ? <ActivityIndicator size="small" color={colors.primary} />
               : <Feather name="send" size={20} color={text.trim() ? colors.primary : colors.mutedForeground} />

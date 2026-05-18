@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState } from "react";
-import { Pressable, Text, StyleSheet, Linking, Platform, ActivityIndicator, View, Animated, Easing } from "react-native";
+import { Pressable, Text, StyleSheet, Linking, Platform, ActivityIndicator, View, Animated, Easing, AccessibilityInfo } from "react-native";
 import { Feather } from "@expo/vector-icons";
 import * as Location from "expo-location";
 import { triggerEmergency } from "@workspace/api-client-react";
@@ -11,10 +11,23 @@ export default function EmergencyButton() {
   const [busy, setBusy] = useState(false);
   const [holding, setHolding] = useState(false);
   const [remaining, setRemaining] = useState(3);
+  const [screenReaderOn, setScreenReaderOn] = useState(false);
   const progress = useRef(new Animated.Value(0)).current;
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const tickRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const firedRef = useRef(false);
+
+  useEffect(() => {
+    let cancelled = false;
+    AccessibilityInfo.isScreenReaderEnabled().then((on) => {
+      if (!cancelled) setScreenReaderOn(on);
+    }).catch(() => {});
+    const sub = AccessibilityInfo.addEventListener("screenReaderChanged", (on) => setScreenReaderOn(on));
+    return () => {
+      cancelled = true;
+      sub.remove();
+    };
+  }, []);
 
   useEffect(() => () => {
     if (timerRef.current) clearTimeout(timerRef.current);
@@ -23,6 +36,7 @@ export default function EmergencyButton() {
 
   const fire = async () => {
     setBusy(true);
+    AccessibilityInfo.announceForAccessibility("Sending emergency alert");
     let lat: number | undefined;
     let lng: number | undefined;
     try {
@@ -38,6 +52,7 @@ export default function EmergencyButton() {
     try {
       const result = await triggerEmergency({ lat: lat as any, lng: lng as any });
       callNumber = (result as any).callNumber || "911";
+      AccessibilityInfo.announceForAccessibility("Emergency alert sent. Admins have been notified.");
     } catch (e: any) {
       notify("Alert Failed", e?.message || "Could not send alert. Try calling directly.");
     }
@@ -103,13 +118,42 @@ export default function EmergencyButton() {
     cleanupHold();
   };
 
+  // Screen-reader users can't perform a 3-second press gesture reliably, so
+  // when TalkBack/VoiceOver is active we bypass the hold entirely and use a
+  // confirmation prompt instead. The button also exposes a custom "activate"
+  // accessibility action so users can trigger it from the rotor/menu.
+  const activateViaScreenReader = async () => {
+    if (busy) return;
+    const ok = await confirmAction({
+      title: "Send emergency alert?",
+      message: "This notifies admins immediately and offers to dial emergency services.",
+      confirmText: "Send alert",
+      cancelText: "Cancel",
+      destructive: true,
+    });
+    if (ok) fire();
+  };
+
   const fillWidth = progress.interpolate({ inputRange: [0, 1], outputRange: ["0%", "100%"] });
 
   return (
     <Pressable
-      onPressIn={startHold}
-      onPressOut={cancelHold}
+      onPressIn={screenReaderOn ? undefined : startHold}
+      onPressOut={screenReaderOn ? undefined : cancelHold}
+      onPress={screenReaderOn ? activateViaScreenReader : undefined}
       disabled={busy}
+      accessibilityRole="button"
+      accessibilityLabel={busy ? "Sending emergency alert" : "Emergency alert"}
+      accessibilityHint={
+        screenReaderOn
+          ? "Double tap to send an emergency alert to admins and start a call."
+          : "Press and hold for three seconds to send an emergency alert to admins."
+      }
+      accessibilityState={{ busy, disabled: busy }}
+      accessibilityActions={[{ name: "activate", label: "Send emergency alert" }]}
+      onAccessibilityAction={(e) => {
+        if (e.nativeEvent.actionName === "activate") activateViaScreenReader();
+      }}
       style={({ pressed }) => [styles.btn, pressed && styles.btnPressed]}
     >
       <Animated.View pointerEvents="none" style={[styles.fill, { width: fillWidth }]} />
@@ -118,7 +162,11 @@ export default function EmergencyButton() {
       ) : (
         <View style={styles.row}>
           <Feather name="alert-octagon" size={22} color="#fff" />
-          <Text style={styles.text}>{holding ? `HOLD… ${remaining}` : "HOLD 3s FOR EMERGENCY"}</Text>
+          <Text style={styles.text}>
+            {screenReaderOn
+              ? "EMERGENCY — DOUBLE TAP"
+              : holding ? `HOLD… ${remaining}` : "HOLD 3s FOR EMERGENCY"}
+          </Text>
         </View>
       )}
     </Pressable>

@@ -8,7 +8,11 @@ import { Feather } from "@expo/vector-icons";
 import { useColors } from "@/hooks/useColors";
 import { apiRequest } from "@/utils/api";
 import { useAuth } from "@/contexts/AuthContext";
+import { storage } from "@/utils/storage";
 import { formatDistanceToNow } from "date-fns";
+
+const LAST_READ_KEY = "chat_room_last_read_v1";
+type LastReadMap = Record<string, string>;
 
 interface ChatRoom {
   id: string;
@@ -44,7 +48,26 @@ export default function ChatRoomsList({ onSelectRoom }: Props) {
   const [users, setUsers] = useState<ChatUser[]>([]);
   const [usersLoading, setUsersLoading] = useState(false);
   const [userSearch, setUserSearch] = useState("");
+  const [lastRead, setLastRead] = useState<LastReadMap>({});
   const isAdmin = user?.role === "admin";
+
+  useEffect(() => {
+    storage.get(LAST_READ_KEY).then((raw) => {
+      if (!raw) return;
+      try { setLastRead(JSON.parse(raw) as LastReadMap); } catch { /* ignore */ }
+    });
+  }, []);
+
+  const markRoomRead = useCallback(async (roomId: string) => {
+    const next: LastReadMap = { ...lastRead, [roomId]: new Date().toISOString() };
+    setLastRead(next);
+    await storage.set(LAST_READ_KEY, JSON.stringify(next));
+  }, [lastRead]);
+
+  const handleSelectRoom = useCallback((id: string, name: string) => {
+    void markRoomRead(id);
+    onSelectRoom(id, name);
+  }, [markRoomRead, onSelectRoom]);
 
   const fetchRooms = useCallback(async () => {
     try {
@@ -122,18 +145,21 @@ export default function ChatRoomsList({ onSelectRoom }: Props) {
   return (
     <SafeAreaView style={[s.container, { backgroundColor: colors.background }]} edges={["top", "bottom"]}>
       <View style={s.header}>
-        <Text style={[s.title, { color: colors.foreground }]}>Team Chat</Text>
+        <Text style={[s.title, { color: colors.foreground }]} accessibilityRole="header">Team Chat</Text>
         <Text style={[s.subtitle, { color: colors.mutedForeground }]}>
           Williams Council Security Group
         </Text>
       </View>
 
-      <View style={[s.tabs, { borderBottomColor: colors.border }]}>
+      <View style={[s.tabs, { borderBottomColor: colors.border }]} accessibilityRole="tablist">
         {(["channels", "direct"] as const).map((k) => (
           <TouchableOpacity
             key={k}
             onPress={() => setTab(k)}
             style={[s.tab, tab === k && { borderBottomColor: colors.primary }]}
+            accessibilityRole="tab"
+            accessibilityLabel={k === "channels" ? "Channels tab" : "Direct messages tab"}
+            accessibilityState={{ selected: tab === k }}
           >
             <Text style={[s.tabText, { color: tab === k ? colors.primary : colors.mutedForeground }]}>
               {k === "channels" ? "Channels" : "Direct"}
@@ -151,8 +177,9 @@ export default function ChatRoomsList({ onSelectRoom }: Props) {
             value={newRoom}
             onChangeText={setNewRoom}
             onSubmitEditing={createRoom}
+            accessibilityLabel="New channel name"
           />
-          <TouchableOpacity onPress={createRoom} disabled={creating} style={s.addBtn}>
+          <TouchableOpacity onPress={createRoom} disabled={creating} style={s.addBtn} accessibilityRole="button" accessibilityLabel="Create channel" accessibilityState={{ disabled: creating, busy: creating }}>
             {creating ? <ActivityIndicator size="small" color={colors.primary} /> : <Feather name="plus" size={20} color={colors.primary} />}
           </TouchableOpacity>
         </View>
@@ -163,6 +190,8 @@ export default function ChatRoomsList({ onSelectRoom }: Props) {
           onPress={openPicker}
           style={[s.newDmBtn, { backgroundColor: colors.primary }]}
           activeOpacity={0.85}
+          accessibilityRole="button"
+          accessibilityLabel="Start a new direct message"
         >
           <Feather name="edit" size={16} color="#080c18" />
           <Text style={s.newDmText}>New Direct Message</Text>
@@ -180,11 +209,27 @@ export default function ChatRoomsList({ onSelectRoom }: Props) {
           const initials = isDirect && item.otherUserName
             ? item.otherUserName.split(" ").map((n) => n[0]).join("").slice(0, 2).toUpperCase()
             : null;
+          const totalMessages = item.messageCount ?? 0;
+          const lastReadAt = lastRead[item.id] ? new Date(lastRead[item.id]).getTime() : 0;
+          const lastMsgAt = item.lastMessage ? new Date(item.lastMessage.createdAt).getTime() : 0;
+          const hasUnread = !!item.lastMessage && lastMsgAt > lastReadAt;
+          const unreadLabel = hasUnread ? "Unread message" : "No unread messages";
+          const a11yPieces = [
+            isDirect ? `Direct message with ${displayName}` : `Channel ${displayName}`,
+            unreadLabel,
+            item.lastMessage
+              ? `Last message from ${item.lastMessage.userName}: ${item.lastMessage.content}, ${formatDistanceToNow(new Date(item.lastMessage.createdAt), { addSuffix: true })}`
+              : "No messages yet",
+            totalMessages > 0 ? `${totalMessages} total message${totalMessages === 1 ? "" : "s"}` : null,
+          ].filter(Boolean).join(". ");
           return (
             <TouchableOpacity
               style={[s.roomCard, { backgroundColor: colors.card, borderColor: colors.border }]}
-              onPress={() => onSelectRoom(item.id, displayName)}
+              onPress={() => handleSelectRoom(item.id, displayName)}
               activeOpacity={0.75}
+              accessibilityRole="button"
+              accessibilityLabel={a11yPieces}
+              accessibilityHint="Opens the conversation"
             >
               <View style={[s.roomIcon, { backgroundColor: colors.primary + "22" }]}>
                 {isDirect && initials ? (
@@ -231,8 +276,8 @@ export default function ChatRoomsList({ onSelectRoom }: Props) {
         <View style={s.modalBackdrop}>
           <SafeAreaView style={[s.modalSheet, { backgroundColor: colors.background }]} edges={["bottom"]}>
             <View style={[s.modalHeader, { borderBottomColor: colors.border }]}>
-              <Text style={[s.modalTitle, { color: colors.foreground }]}>Start a Direct Message</Text>
-              <TouchableOpacity onPress={() => setPickerOpen(false)}>
+              <Text style={[s.modalTitle, { color: colors.foreground }]} accessibilityRole="header">Start a Direct Message</Text>
+              <TouchableOpacity onPress={() => setPickerOpen(false)} accessibilityRole="button" accessibilityLabel="Close people picker">
                 <Feather name="x" size={22} color={colors.mutedForeground} />
               </TouchableOpacity>
             </View>
@@ -256,11 +301,14 @@ export default function ChatRoomsList({ onSelectRoom }: Props) {
                 contentContainerStyle={{ padding: 16, gap: 6 }}
                 renderItem={({ item }) => {
                   const name = `${item.firstName} ${item.lastName}`;
+                  const roleLabel = item.role === "admin" ? "Admin" : "Officer";
                   return (
                     <TouchableOpacity
                       style={[s.userRow, { backgroundColor: colors.card, borderColor: colors.border }]}
                       onPress={() => startDirect(item.id, name)}
                       activeOpacity={0.75}
+                      accessibilityRole="button"
+                      accessibilityLabel={`Message ${name}, ${roleLabel}`}
                     >
                       <View style={[s.roomIcon, { backgroundColor: colors.primary + "22" }]}>
                         <Text style={{ color: colors.primary, fontWeight: "700", fontSize: 13 }}>

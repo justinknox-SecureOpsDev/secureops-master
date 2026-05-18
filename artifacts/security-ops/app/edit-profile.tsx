@@ -2,7 +2,7 @@ import React, { useEffect, useState } from "react";
 import {
   View, Text, TextInput, TouchableOpacity, StyleSheet,
   ActivityIndicator, ScrollView, Platform, Alert, Linking,
-  Image, Modal, Pressable,
+  Image, Modal, Pressable, AccessibilityInfo, findNodeHandle,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { Feather } from "@expo/vector-icons";
@@ -99,6 +99,9 @@ export default function EditProfileScreen() {
 
   const [form, setForm] = useState<Form>(empty);
   const [error, setError] = useState<string | null>(null);
+  const [invalid, setInvalid] = useState<{ emergencyContactName: boolean; emergencyContactPhone: boolean }>({ emergencyContactName: false, emergencyContactPhone: false });
+  const emName = React.useRef<TextInput>(null);
+  const emPhone = React.useRef<TextInput>(null);
   const mut = useUpdateMyEmployeeProfile();
 
   useEffect(() => {
@@ -197,13 +200,30 @@ export default function EditProfileScreen() {
   const [hrToast, setHrToast] = useState<string[] | null>(null);
   async function save() {
     setError(null);
-    const payload: Record<string, unknown> = {};
     const trim = (s: string) => s.trim();
+    const nameMissing = !trim(form.emergencyContactName);
+    const phoneMissing = !trim(form.emergencyContactPhone);
+    if (nameMissing || phoneMissing) {
+      setInvalid({ emergencyContactName: nameMissing, emergencyContactPhone: phoneMissing });
+      const missing = [nameMissing && "emergency contact name", phoneMissing && "emergency contact phone"].filter(Boolean).join(" and ");
+      const msg = `Cannot save. Missing required ${missing}.`;
+      setError(msg);
+      AccessibilityInfo.announceForAccessibility(msg);
+      const target = nameMissing ? emName.current : emPhone.current;
+      if (target) {
+        const node = findNodeHandle(target);
+        if (node != null) { try { AccessibilityInfo.setAccessibilityFocus?.(node); } catch { /* best effort */ } }
+        try { target.focus?.(); } catch { /* best effort */ }
+      }
+      return;
+    }
+    setInvalid({ emergencyContactName: false, emergencyContactPhone: false });
+    const payload: Record<string, unknown> = {};
     if (trim(form.phone)) payload.phone = trim(form.phone);
     if (trim(form.address)) payload.address = trim(form.address);
-    if (trim(form.emergencyContactName)) payload.emergencyContactName = trim(form.emergencyContactName);
+    payload.emergencyContactName = trim(form.emergencyContactName);
     payload.emergencyContactRelationship = trim(form.emergencyContactRelationship) || null;
-    if (trim(form.emergencyContactPhone)) payload.emergencyContactPhone = trim(form.emergencyContactPhone);
+    payload.emergencyContactPhone = trim(form.emergencyContactPhone);
     payload.uniformShirt = trim(form.uniformShirt) || null;
     payload.uniformTrousers = trim(form.uniformTrousers) || null;
     payload.uniformJacket = trim(form.uniformJacket) || null;
@@ -296,9 +316,32 @@ export default function EditProfileScreen() {
         </Section>
 
         <Section title="Emergency contact">
-          <Field label="Name"><Input value={form.emergencyContactName} onChangeText={(v) => set("emergencyContactName", v)} /></Field>
-          <Field label="Relationship"><Input value={form.emergencyContactRelationship} onChangeText={(v) => set("emergencyContactRelationship", v)} /></Field>
-          <Field label="Phone"><Input value={form.emergencyContactPhone} onChangeText={(v) => set("emergencyContactPhone", v)} keyboardType="phone-pad" /></Field>
+          <Field label="Name" required invalid={invalid.emergencyContactName} errorText="Emergency contact name is required.">
+            <Input
+              ref={emName}
+              value={form.emergencyContactName}
+              onChangeText={(v) => { set("emergencyContactName", v); if (invalid.emergencyContactName && v) setInvalid((i) => ({ ...i, emergencyContactName: false })); }}
+              accessibilityLabel={`Emergency contact name, required${invalid.emergencyContactName ? ", invalid, emergency contact name is required" : ""}`}
+              borderColor={invalid.emergencyContactName ? "error" : undefined}
+            />
+          </Field>
+          <Field label="Relationship">
+            <Input
+              value={form.emergencyContactRelationship}
+              onChangeText={(v) => set("emergencyContactRelationship", v)}
+              accessibilityLabel="Emergency contact relationship"
+            />
+          </Field>
+          <Field label="Phone" required invalid={invalid.emergencyContactPhone} errorText="Emergency contact phone is required.">
+            <Input
+              ref={emPhone}
+              value={form.emergencyContactPhone}
+              onChangeText={(v) => { set("emergencyContactPhone", v); if (invalid.emergencyContactPhone && v) setInvalid((i) => ({ ...i, emergencyContactPhone: false })); }}
+              keyboardType="phone-pad"
+              accessibilityLabel={`Emergency contact phone, required${invalid.emergencyContactPhone ? ", invalid, emergency contact phone is required" : ""}`}
+              borderColor={invalid.emergencyContactPhone ? "error" : undefined}
+            />
+          </Field>
           <NotifiedNote />
         </Section>
 
@@ -466,29 +509,37 @@ function Section({ title, children }: { title: string; children: React.ReactNode
     </View>
   );
 }
-function Field({ label, children }: { label: string; children: React.ReactNode }) {
+function Field({ label, required, invalid, errorText, children }: { label: string; required?: boolean; invalid?: boolean; errorText?: string; children: React.ReactNode }) {
   const colors = useColors();
   return (
     <View style={{ gap: 4 }}>
-      <Text style={[styles.label, { color: colors.mutedForeground }]}>{label}</Text>
+      <Text style={[styles.label, { color: invalid ? colors.destructive : colors.mutedForeground }]}>
+        {label}{required ? " *" : ""}
+      </Text>
       {children}
+      {invalid && errorText && (
+        <Text accessibilityLiveRegion="polite" style={{ color: colors.destructive, fontSize: 11 }}>{errorText}</Text>
+      )}
     </View>
   );
 }
-function Input(props: React.ComponentProps<typeof TextInput>) {
+type InputProps = React.ComponentProps<typeof TextInput> & { borderColor?: "error" };
+const Input = React.forwardRef<TextInput, InputProps>(function Input({ borderColor, ...props }, ref) {
   const colors = useColors();
+  const border = borderColor === "error" ? colors.destructive : colors.border;
   return (
     <TextInput
+      ref={ref}
       placeholderTextColor={colors.mutedForeground}
       {...props}
       style={[
-        { color: colors.foreground, borderColor: colors.border, backgroundColor: colors.secondary,
+        { color: colors.foreground, borderColor: border, backgroundColor: colors.secondary,
           borderWidth: 1, borderRadius: 8, paddingHorizontal: 12, paddingVertical: 10, fontSize: 14 },
         props.style,
       ]}
     />
   );
-}
+});
 function DocRow({
   label, current, originalKey, localUri, uploadingSource, onUpload, onClear, onPreview,
 }: {

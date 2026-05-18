@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from "react";
 import { useTopPad } from "@/hooks/useTopPad";
-import { View, Text, StyleSheet, TouchableOpacity, ActivityIndicator, Alert, Platform, ScrollView } from "react-native";
+import { View, Text, StyleSheet, TouchableOpacity, ActivityIndicator, Alert, Platform, ScrollView, AccessibilityInfo } from "react-native";
 import { useColors } from "@/hooks/useColors";
 import { useClockIn, useClockOut, useGetActiveTimeEntry, getGetActiveTimeEntryQueryKey, useGetTimeEntries, getGetTimeEntriesQueryKey, updateMyLocation, useGetSites, getGetSitesQueryKey, getGetEmployeeDashboardSummaryQueryKey, getGetShiftsQueryKey } from "@workspace/api-client-react";
 import { Feather } from "@expo/vector-icons";
@@ -92,6 +92,7 @@ export default function EmployeeClockScreen() {
       const result: any = await clockInMutation.mutateAsync({
         data: { lat, lng } as any,
       });
+      AccessibilityInfo.announceForAccessibility(`Clocked in${siteLabel ? ` at ${siteLabel}` : ""}. You are now on duty.`);
       await Promise.all([
         queryClient.invalidateQueries({ queryKey: getGetActiveTimeEntryQueryKey() }),
         queryClient.invalidateQueries({ queryKey: getGetTimeEntriesQueryKey() }),
@@ -146,6 +147,7 @@ export default function EmployeeClockScreen() {
           await clockOutMutation.mutateAsync({
             data: { timeEntryId: currentEntry.id, lat: location?.lat ?? 0, lng: location?.lon ?? 0 } as any,
           });
+          AccessibilityInfo.announceForAccessibility("Clocked out. You are now off duty.");
           // Clear the active-entry cache *immediately* so the ON-DUTY ring
           // flips to OFF DUTY without waiting for the refetch round-trip.
           queryClient.setQueryData(getGetActiveTimeEntryQueryKey(), null);
@@ -164,8 +166,14 @@ export default function EmployeeClockScreen() {
   return (
     <ScrollView style={[styles.container, { backgroundColor: colors.background }]} contentContainerStyle={{ paddingBottom: 100 }}>
       <View style={[styles.topBar, { paddingTop: topPad + 12, borderBottomColor: colors.border }]}>
-        <Text style={[styles.pageTitle, { color: colors.foreground }]}>Time Clock</Text>
-        <TouchableOpacity onPress={getLocation} style={[styles.locBtn, { borderColor: colors.border }]}>
+        <Text style={[styles.pageTitle, { color: colors.foreground }]} accessibilityRole="header">Time Clock</Text>
+        <TouchableOpacity
+          onPress={getLocation}
+          style={[styles.locBtn, { borderColor: colors.border }]}
+          accessibilityRole="button"
+          accessibilityLabel={location ? "Refresh location" : "Get location"}
+          accessibilityState={{ busy: locationLoading }}
+        >
           {locationLoading
             ? <ActivityIndicator size="small" color={colors.primary} />
             : <Feather name="map-pin" size={16} color={location ? colors.primary : colors.mutedForeground} />
@@ -173,7 +181,12 @@ export default function EmployeeClockScreen() {
         </TouchableOpacity>
       </View>
 
-      <View style={[styles.clockFace, { backgroundColor: colors.card, borderColor: isClockedIn ? "#22c55e" : colors.border }]}>
+      <View
+        style={[styles.clockFace, { backgroundColor: colors.card, borderColor: isClockedIn ? "#22c55e" : colors.border }]}
+        accessible
+        accessibilityLabel={isClockedIn ? `On duty for ${formatDuration(elapsed)}` : "Off duty"}
+        accessibilityLiveRegion="polite"
+      >
         <View style={[styles.clockRing, { borderColor: isClockedIn ? "#22c55e" : colors.border }]}>
           <Text style={[styles.clockTime, { color: isClockedIn ? "#22c55e" : colors.mutedForeground }]}>
             {isClockedIn ? formatDuration(elapsed) : "00:00:00"}
@@ -203,6 +216,9 @@ export default function EmployeeClockScreen() {
             style={[styles.mainBtn, { backgroundColor: isClockedIn ? colors.destructive : "#22c55e" }]}
             onPress={isClockedIn ? handleClockOut : handleClockIn}
             disabled={clockInMutation.isPending || clockOutMutation.isPending}
+            accessibilityRole="button"
+            accessibilityLabel={isClockedIn ? "Clock out, end your shift" : "Clock in, start your shift"}
+            accessibilityState={{ disabled: clockInMutation.isPending || clockOutMutation.isPending, busy: clockInMutation.isPending || clockOutMutation.isPending }}
           >
             {(clockInMutation.isPending || clockOutMutation.isPending) ? (
               <ActivityIndicator color="#fff" size="large" />

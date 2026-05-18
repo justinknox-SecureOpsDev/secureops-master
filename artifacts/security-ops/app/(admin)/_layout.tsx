@@ -48,6 +48,7 @@ export default function AdminLayout() {
         options={{
           title: "Overview",
           headerTitle: "WCSG — Operations",
+          tabBarAccessibilityLabel: "Overview tab",
           tabBarIcon: ({ color }) => <Feather name="home" size={22} color={color} />,
         }}
       />
@@ -55,6 +56,7 @@ export default function AdminLayout() {
         name="employees"
         options={{
           title: "Personnel",
+          tabBarAccessibilityLabel: "Personnel tab",
           tabBarIcon: ({ color }) => <Feather name="users" size={22} color={color} />,
         }}
       />
@@ -62,6 +64,7 @@ export default function AdminLayout() {
         name="shifts"
         options={{
           title: "Shifts",
+          tabBarAccessibilityLabel: "Shifts tab",
           tabBarIcon: ({ color }) => <Feather name="calendar" size={22} color={color} />,
         }}
       />
@@ -69,6 +72,7 @@ export default function AdminLayout() {
         name="live-map"
         options={{
           title: "Live Map",
+          tabBarAccessibilityLabel: "Live officer map tab",
           tabBarIcon: ({ color }) => <Feather name="map" size={22} color={color} />,
         }}
       />
@@ -76,6 +80,7 @@ export default function AdminLayout() {
         name="incidents"
         options={{
           title: "Incidents",
+          tabBarAccessibilityLabel: "Incidents tab",
           tabBarIcon: ({ color }) => <Feather name="alert-triangle" size={22} color={color} />,
         }}
       />
@@ -84,6 +89,7 @@ export default function AdminLayout() {
         options={{
           title: "Chat",
           headerTitle: "Team Chat",
+          tabBarAccessibilityLabel: "Team chat tab",
           tabBarIcon: ({ color }) => <Feather name="message-circle" size={22} color={color} />,
         }}
       />
@@ -92,6 +98,7 @@ export default function AdminLayout() {
         options={{
           title: "Radio",
           headerTitle: "Radio",
+          tabBarAccessibilityLabel: "Push to talk radio tab",
           tabBarIcon: ({ color }) => <Feather name="radio" size={22} color={color} />,
         }}
       />

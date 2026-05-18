@@ -2,6 +2,7 @@ import React, { useState } from "react";
 import {
   View, Text, TextInput, TouchableOpacity,
   StyleSheet, ActivityIndicator, ScrollView, Platform,
+  AccessibilityInfo, findNodeHandle,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { Feather } from "@expo/vector-icons";
@@ -23,26 +24,51 @@ export default function ChangePasswordScreen() {
   const [confirm, setConfirm] = useState("");
   const [show, setShow] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  type FieldErrors = { current: string | null; next: string | null; confirm: string | null };
+  const noErrors: FieldErrors = { current: null, next: null, confirm: null };
+  const [fieldErrors, setFieldErrors] = useState<FieldErrors>(noErrors);
+  const currentRef = React.useRef<TextInput>(null);
+  const nextRef = React.useRef<TextInput>(null);
+  const confirmRef = React.useRef<TextInput>(null);
   const mut = useChangePassword();
+
+  function fail(errors: FieldErrors, summary: string, target: React.RefObject<TextInput | null>) {
+    setFieldErrors(errors);
+    setError(summary);
+    AccessibilityInfo.announceForAccessibility(summary);
+    const t = target.current;
+    if (t) {
+      const node = findNodeHandle(t);
+      if (node != null) { try { AccessibilityInfo.setAccessibilityFocus?.(node); } catch { /* best effort */ } }
+      try { t.focus?.(); } catch { /* best effort */ }
+    }
+  }
 
   async function submit() {
     setError(null);
-    if (!current || !next || !confirm) {
-      setError("All fields are required");
+    const missing: FieldErrors = {
+      current: current ? null : "Current password is required.",
+      next: next ? null : "New password is required.",
+      confirm: confirm ? null : "Confirmation is required.",
+    };
+    if (missing.current || missing.next || missing.confirm) {
+      const first = missing.current ? currentRef : missing.next ? nextRef : confirmRef;
+      fail(missing, "All fields are required.", first);
       return;
     }
     if (next.length < 8) {
-      setError("New password must be at least 8 characters");
+      fail({ ...noErrors, next: "New password must be at least 8 characters." }, "New password must be at least 8 characters.", nextRef);
       return;
     }
     if (next !== confirm) {
-      setError("New password and confirmation do not match");
+      fail({ ...noErrors, confirm: "New password and confirmation do not match." }, "New password and confirmation do not match.", confirmRef);
       return;
     }
     if (next === current) {
-      setError("New password must be different from current password");
+      fail({ ...noErrors, next: "New password must be different from current password." }, "New password must be different from current password.", nextRef);
       return;
     }
+    setFieldErrors(noErrors);
     try {
       const resp = await mut.mutateAsync({ data: { currentPassword: current, newPassword: next } });
       // login() resets token + user atomically and is the right call after a session rotation.
@@ -94,28 +120,41 @@ export default function ChangePasswordScreen() {
           </View>
         )}
 
-        <Field label="Current password">
+        <Field label="Current password" required invalid={!!fieldErrors.current} errorText={fieldErrors.current ?? undefined}>
           <TextInput
-            value={current} onChangeText={setCurrent} secureTextEntry={!show}
+            ref={currentRef}
+            value={current}
+            onChangeText={(v) => { setCurrent(v); if (fieldErrors.current && v) setFieldErrors((e) => ({ ...e, current: null })); }}
+            secureTextEntry={!show}
             placeholder={isMandatory ? "Last 4 digits of your SSN" : "Current password"}
             placeholderTextColor={colors.mutedForeground}
-            style={[styles.input, { color: colors.foreground, borderColor: colors.border, backgroundColor: colors.secondary }]}
+            style={[styles.input, { color: colors.foreground, borderColor: fieldErrors.current ? colors.destructive : colors.border, backgroundColor: colors.secondary }]}
+            accessibilityLabel={`Current password, required${fieldErrors.current ? `, invalid, ${fieldErrors.current}` : ""}`}
           />
         </Field>
-        <Field label="New password">
+        <Field label="New password" required invalid={!!fieldErrors.next} errorText={fieldErrors.next ?? undefined}>
           <TextInput
-            value={next} onChangeText={setNext} secureTextEntry={!show}
+            ref={nextRef}
+            value={next}
+            onChangeText={(v) => { setNext(v); if (fieldErrors.next && v) setFieldErrors((e) => ({ ...e, next: null })); }}
+            secureTextEntry={!show}
             placeholder="At least 8 characters"
             placeholderTextColor={colors.mutedForeground}
-            style={[styles.input, { color: colors.foreground, borderColor: colors.border, backgroundColor: colors.secondary }]}
+            style={[styles.input, { color: colors.foreground, borderColor: fieldErrors.next ? colors.destructive : colors.border, backgroundColor: colors.secondary }]}
+            accessibilityLabel={`New password, required${fieldErrors.next ? `, invalid, ${fieldErrors.next}` : ""}`}
+            accessibilityHint="At least 8 characters"
           />
         </Field>
-        <Field label="Confirm new password">
+        <Field label="Confirm new password" required invalid={!!fieldErrors.confirm} errorText={fieldErrors.confirm ?? undefined}>
           <TextInput
-            value={confirm} onChangeText={setConfirm} secureTextEntry={!show}
+            ref={confirmRef}
+            value={confirm}
+            onChangeText={(v) => { setConfirm(v); if (fieldErrors.confirm && v) setFieldErrors((e) => ({ ...e, confirm: null })); }}
+            secureTextEntry={!show}
             placeholder="Re-enter new password"
             placeholderTextColor={colors.mutedForeground}
-            style={[styles.input, { color: colors.foreground, borderColor: colors.border, backgroundColor: colors.secondary }]}
+            style={[styles.input, { color: colors.foreground, borderColor: fieldErrors.confirm ? colors.destructive : colors.border, backgroundColor: colors.secondary }]}
+            accessibilityLabel={`Confirm new password, required${fieldErrors.confirm ? `, invalid, ${fieldErrors.confirm}` : ""}`}
           />
         </Field>
         <TouchableOpacity onPress={() => setShow((s) => !s)} style={styles.toggleRow}>
@@ -139,12 +178,19 @@ export default function ChangePasswordScreen() {
   );
 }
 
-function Field({ label, children }: { label: string; children: React.ReactNode }) {
+function Field({ label, required, invalid, errorText, children }: { label: string; required?: boolean; invalid?: boolean; errorText?: string; children: React.ReactNode }) {
   const colors = useColors();
   return (
     <View style={{ gap: 6 }}>
-      <Text style={[styles.label, { color: colors.mutedForeground }]}>{label}</Text>
+      <Text style={[styles.label, { color: invalid ? colors.destructive : colors.mutedForeground }]}>
+        {label}{required ? " *" : ""}
+      </Text>
       {children}
+      {invalid && errorText && (
+        <Text accessibilityLiveRegion="polite" style={{ color: colors.destructive, fontSize: 11 }}>
+          {errorText}
+        </Text>
+      )}
     </View>
   );
 }
