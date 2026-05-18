@@ -57,39 +57,36 @@ const MIN_MS = 60 * 1000;
  * the loop. They are self-throttling — each job's tick is a no-op if
  * there is nothing to do.
  */
-export function startScheduledJobs(intervalMs: number = HOUR_MS): NodeJS.Timeout[] {
-  const handles: NodeJS.Timeout[] = [];
-
-  async function cleanupExpiredRevokedTokens(): Promise<void> {
-    try {
-      const now = new Date();
-      const result = await db
-        .delete(revokedTokensTable)
-        .where(lt(revokedTokensTable.expiresAt, now));
-      const removed = (result as { rowCount?: number | null }).rowCount ?? 0;
-      if (removed > 0) {
-        logger.info({ removed }, "Cleaned up expired revoked tokens");
-      }
-    } catch (err) {
-      logger.error({ err }, "Failed to clean up revoked tokens");
+export async function cleanupExpiredRevokedTokens(): Promise<void> {
+  try {
+    const now = new Date();
+    const result = await db
+      .delete(revokedTokensTable)
+      .where(lt(revokedTokensTable.expiresAt, now));
+    const removed = (result as { rowCount?: number | null }).rowCount ?? 0;
+    if (removed > 0) {
+      logger.info({ removed }, "Cleaned up expired revoked tokens");
     }
+  } catch (err) {
+    logger.error({ err }, "Failed to clean up revoked tokens");
   }
+}
 
-  async function sendLicenseExpiryReminders(): Promise<void> {
-    try {
-      // Tiers run from biggest to smallest so a single sweep advances
-      // bookkeeping correctly: a license that has not yet been
-      // reminded at the 30-day tier still gets the 30-day notice when
-      // it lands inside the 14-day window.
-      const tiers = [60, 30, 14, 7];
-      const today = new Date();
-      const todayDateOnly = today.toISOString().slice(0, 10);
+export async function sendLicenseExpiryReminders(): Promise<void> {
+  try {
+    // Tiers run from biggest to smallest so a single sweep advances
+    // bookkeeping correctly: a license that has not yet been
+    // reminded at the 30-day tier still gets the 30-day notice when
+    // it lands inside the 14-day window.
+    const tiers = [60, 30, 14, 7];
+    const today = new Date();
+    const todayDateOnly = today.toISOString().slice(0, 10);
 
-      let totalSent = 0;
-      for (const tier of tiers) {
-        const cutoff = new Date(today.getTime() + tier * 24 * 60 * 60 * 1000)
-          .toISOString()
-          .slice(0, 10);
+    let totalSent = 0;
+    for (const tier of tiers) {
+      const cutoff = new Date(today.getTime() + tier * 24 * 60 * 60 * 1000)
+        .toISOString()
+        .slice(0, 10);
 
         // A license needs THIS tier's reminder when:
         //   - expiry is in the future and within `tier` days, AND
@@ -206,7 +203,124 @@ export function startScheduledJobs(intervalMs: number = HOUR_MS): NodeJS.Timeout
     } catch (err) {
       logger.error({ err }, "[license-expiry] reminder job failed");
     }
+}
+
+/**
+ * Pre-shift reminders. Push to officers assigned to a shift starting in
+ * ~2 hours and ~30 minutes. Skips cancelled or already-started/finished
+ * shifts (only `status='upcoming'` is reminded) and assignments not in
+ * `accepted` state (declined / pending fills are not reminded). Atomic
+ * UPDATE…RETURNING claim on `reminder2hSentAt` / `reminder30mSentAt`
+ * makes it idempotent against overlapping ticks AND ensures a shift
+ * cancelled mid-tick does not re-fire on the next tick.
+ */
+export async function sendPreShiftReminders(): Promise<void> {
+  try {
+    const now = Date.now();
+    // Two windows: 2-hour and 30-minute reminders. Use generous
+    // ±tick-width windows so a 5-minute job never misses a shift
+    // because the cron tick happened slightly before/after the
+    // exact target time.
+    const windows: Array<{ minOffset: number; maxOffset: number; column: "reminder2hSentAt" | "reminder30mSentAt"; label: string }> = [
+      { minOffset: 110 * MIN_MS, maxOffset: 130 * MIN_MS, column: "reminder2hSentAt", label: "2 hours" },
+      { minOffset: 25 * MIN_MS, maxOffset: 35 * MIN_MS, column: "reminder30mSentAt", label: "30 minutes" },
+    ];
+
+    let totalSent = 0;
+    for (const w of windows) {
+      const winStart = new Date(now + w.minOffset);
+      const winEnd = new Date(now + w.maxOffset);
+
+      const sentColumn = w.column === "reminder2hSentAt"
+        ? shiftAssignmentsTable.reminder2hSentAt
+        : shiftAssignmentsTable.reminder30mSentAt;
+
+      const rows = await db
+        .select({
+          assignmentId: shiftAssignmentsTable.id,
+          employeeId: shiftAssignmentsTable.employeeId,
+          shiftId: shiftsTable.id,
+          shiftTitle: shiftsTable.title,
+          startTime: shiftsTable.startTime,
+          shiftStatus: shiftsTable.status,
+          siteName: sitesTable.name,
+        })
+        .from(shiftAssignmentsTable)
+        .innerJoin(shiftsTable, eq(shiftsTable.id, shiftAssignmentsTable.shiftId))
+        .leftJoin(sitesTable, eq(sitesTable.id, shiftsTable.siteId))
+        .where(
+          and(
+            eq(shiftAssignmentsTable.status, "accepted"),
+            // Cancelled / completed / in-progress shifts must not be
+            // reminded. Only shifts the dispatcher has left in the
+            // upcoming state earn a pre-shift push.
+            eq(shiftsTable.status, "upcoming"),
+            gte(shiftsTable.startTime, winStart),
+            lte(shiftsTable.startTime, winEnd),
+            isNull(sentColumn),
+          ),
+        );
+
+      for (const r of rows) {
+        // Atomically claim this assignment for this window so two
+        // overlapping ticks (or two app instances) never double-push
+        // the same officer. We only proceed if the claim succeeded.
+        const claimed = await db
+          .update(shiftAssignmentsTable)
+          .set(w.column === "reminder2hSentAt"
+            ? { reminder2hSentAt: new Date() }
+            : { reminder30mSentAt: new Date() })
+          .where(
+            and(
+              eq(shiftAssignmentsTable.id, r.assignmentId),
+              isNull(sentColumn),
+            ),
+          )
+          .returning({ id: shiftAssignmentsTable.id });
+        if (claimed.length === 0) continue;
+
+        const startTxt = new Date(r.startTime).toLocaleString("en-US", {
+          weekday: "short",
+          hour: "numeric",
+          minute: "2-digit",
+          hour12: true,
+        });
+        const where = r.siteName ? ` @ ${r.siteName}` : "";
+        let pushOk = false;
+        try {
+          await sendPushToUsers([r.employeeId], {
+            title: `⏰ Shift starts in ${w.label}`,
+            body: `${r.shiftTitle}${where} — ${startTxt}`,
+            data: { type: "shift_reminder", shiftId: r.shiftId, when: w.label },
+          });
+          pushOk = true;
+        } catch (err) {
+          logger.warn({ err, assignmentId: r.assignmentId }, "[shift-reminder] push send failed");
+        }
+        if (!pushOk) {
+          // Roll back claim so a later tick can retry.
+          await db
+            .update(shiftAssignmentsTable)
+            .set(w.column === "reminder2hSentAt"
+              ? { reminder2hSentAt: null }
+              : { reminder30mSentAt: null })
+            .where(eq(shiftAssignmentsTable.id, r.assignmentId))
+            .catch(() => {/* swallow */});
+          continue;
+        }
+        totalSent += 1;
+      }
+    }
+    if (totalSent > 0) {
+      logger.info({ totalSent }, "Sent pre-shift reminders");
+    }
+  } catch (err) {
+    logger.error({ err }, "[shift-reminder] job failed");
   }
+}
+
+export function startScheduledJobs(intervalMs: number = HOUR_MS): NodeJS.Timeout[] {
+  const handles: NodeJS.Timeout[] = [];
 
   /**
    * Training-certification expiry reminders. Same 60/30/14/7-day tiered
@@ -328,105 +442,9 @@ export function startScheduledJobs(intervalMs: number = HOUR_MS): NodeJS.Timeout
     }
   }
 
-  async function sendPreShiftReminders(): Promise<void> {
-    try {
-      const now = Date.now();
-      // Two windows: 2-hour and 30-minute reminders. Use generous
-      // ±tick-width windows so a 5-minute job never misses a shift
-      // because the cron tick happened slightly before/after the
-      // exact target time.
-      const windows: Array<{ minOffset: number; maxOffset: number; column: "reminder2hSentAt" | "reminder30mSentAt"; label: string }> = [
-        { minOffset: 110 * MIN_MS, maxOffset: 130 * MIN_MS, column: "reminder2hSentAt", label: "2 hours" },
-        { minOffset: 25 * MIN_MS, maxOffset: 35 * MIN_MS, column: "reminder30mSentAt", label: "30 minutes" },
-      ];
-
-      let totalSent = 0;
-      for (const w of windows) {
-        const winStart = new Date(now + w.minOffset);
-        const winEnd = new Date(now + w.maxOffset);
-
-        const sentColumn = w.column === "reminder2hSentAt"
-          ? shiftAssignmentsTable.reminder2hSentAt
-          : shiftAssignmentsTable.reminder30mSentAt;
-
-        const rows = await db
-          .select({
-            assignmentId: shiftAssignmentsTable.id,
-            employeeId: shiftAssignmentsTable.employeeId,
-            shiftId: shiftsTable.id,
-            shiftTitle: shiftsTable.title,
-            startTime: shiftsTable.startTime,
-            siteName: sitesTable.name,
-          })
-          .from(shiftAssignmentsTable)
-          .innerJoin(shiftsTable, eq(shiftsTable.id, shiftAssignmentsTable.shiftId))
-          .leftJoin(sitesTable, eq(sitesTable.id, shiftsTable.siteId))
-          .where(
-            and(
-              eq(shiftAssignmentsTable.status, "accepted"),
-              gte(shiftsTable.startTime, winStart),
-              lte(shiftsTable.startTime, winEnd),
-              isNull(sentColumn),
-            ),
-          );
-
-        for (const r of rows) {
-          // Atomically claim this assignment for this window so two
-          // overlapping ticks (or two app instances) never double-push
-          // the same officer. We only proceed if the claim succeeded.
-          const claimed = await db
-            .update(shiftAssignmentsTable)
-            .set(w.column === "reminder2hSentAt"
-              ? { reminder2hSentAt: new Date() }
-              : { reminder30mSentAt: new Date() })
-            .where(
-              and(
-                eq(shiftAssignmentsTable.id, r.assignmentId),
-                isNull(sentColumn),
-              ),
-            )
-            .returning({ id: shiftAssignmentsTable.id });
-          if (claimed.length === 0) continue;
-
-          const startTxt = new Date(r.startTime).toLocaleString("en-US", {
-            weekday: "short",
-            hour: "numeric",
-            minute: "2-digit",
-            hour12: true,
-          });
-          const where = r.siteName ? ` @ ${r.siteName}` : "";
-          let pushOk = false;
-          try {
-            await sendPushToUsers([r.employeeId], {
-              title: `⏰ Shift starts in ${w.label}`,
-              body: `${r.shiftTitle}${where} — ${startTxt}`,
-              data: { type: "shift_reminder", shiftId: r.shiftId, when: w.label },
-            });
-            pushOk = true;
-          } catch (err) {
-            logger.warn({ err, assignmentId: r.assignmentId }, "[shift-reminder] push send failed");
-          }
-          if (!pushOk) {
-            // Roll back claim so a later tick can retry.
-            await db
-              .update(shiftAssignmentsTable)
-              .set(w.column === "reminder2hSentAt"
-                ? { reminder2hSentAt: null }
-                : { reminder30mSentAt: null })
-              .where(eq(shiftAssignmentsTable.id, r.assignmentId))
-              .catch(() => {/* swallow */});
-            continue;
-          }
-          totalSent += 1;
-        }
-      }
-      if (totalSent > 0) {
-        logger.info({ totalSent }, "Sent pre-shift reminders");
-      }
-    } catch (err) {
-      logger.error({ err }, "[shift-reminder] job failed");
-    }
-  }
+  // sendPreShiftReminders is module-scope (exported) for direct test
+  // invocation; resolves lexically below in schedule(...).
+  void sendPreShiftReminders;
 
   /**
    * Missed-checkpoint pager. For each currently-clocked-in officer at a
