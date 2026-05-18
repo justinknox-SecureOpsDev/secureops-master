@@ -82,32 +82,159 @@ function findFieldError(name: string | undefined, errors: FieldError[]): FieldEr
   return errors.find((e) => e.field === name);
 }
 
+const EMPTY_FORM: Form = {
+  firstName: "", lastName: "", email: "", phone: "",
+  address: "", city: "", state: "", zip: "",
+  dateOfBirth: "", cityOfBirth: "", stateOfBirth: "", niNumber: "",
+  i9Doc: null, ssnCardDoc: null, idDocType: "", idDoc: null,
+  siaLicenseNumber: "", siaLicenseLevel: "", siaLicenseExpiry: "",
+  previousExperience: "", yearsExperience: "",
+  references: [
+    { name: "", relationship: "", phone: "", email: "" },
+    { name: "", relationship: "", phone: "", email: "" },
+  ],
+  photo: null, cv: null, trainingCertificates: [],
+  availability: [],
+};
+
+// Defensive hydrator. Server stores the wizard state verbatim in jsonb,
+// so we coerce each field back into the expected shape before priming
+// React state — drops anything we don't recognize so a stale or
+// tampered draft can't crash the form.
+function hydrateForm(raw: unknown): Form {
+  const d = (raw ?? {}) as Record<string, unknown>;
+  const str = (k: string) => (typeof d[k] === "string" ? (d[k] as string) : "");
+  const file = (k: string): UploadedFile | null => {
+    const v = d[k];
+    if (!v || typeof v !== "object") return null;
+    const o = v as Partial<UploadedFile>;
+    if (typeof o.objectPath !== "string" || typeof o.name !== "string") return null;
+    return {
+      name: o.name,
+      objectPath: o.objectPath,
+      contentType: typeof o.contentType === "string" ? o.contentType : "application/octet-stream",
+      size: typeof o.size === "number" ? o.size : 0,
+    };
+  };
+  const fileArray = (k: string): UploadedFile[] => {
+    const v = d[k];
+    if (!Array.isArray(v)) return [];
+    return v
+      .map((entry): UploadedFile | null => {
+        if (!entry || typeof entry !== "object") return null;
+        const o = entry as Partial<UploadedFile>;
+        if (typeof o.objectPath !== "string" || typeof o.name !== "string") return null;
+        return {
+          name: o.name,
+          objectPath: o.objectPath,
+          contentType: typeof o.contentType === "string" ? o.contentType : "application/octet-stream",
+          size: typeof o.size === "number" ? o.size : 0,
+        };
+      })
+      .filter((x): x is UploadedFile => x !== null);
+  };
+  const refs = Array.isArray(d.references) ? d.references : [];
+  const referenceRows: Reference[] = [0, 1].map((i) => {
+    const r = (refs[i] ?? {}) as Partial<Reference>;
+    return {
+      name: typeof r.name === "string" ? r.name : "",
+      relationship: typeof r.relationship === "string" ? r.relationship : "",
+      phone: typeof r.phone === "string" ? r.phone : "",
+      email: typeof r.email === "string" ? r.email : "",
+    };
+  });
+  const availabilityRaw = Array.isArray(d.availability) ? d.availability : [];
+  const availability = availabilityRaw
+    .map((c): { day: Day; period: Period } | null => {
+      if (!c || typeof c !== "object") return null;
+      const o = c as { day?: unknown; period?: unknown };
+      if (typeof o.day !== "string" || typeof o.period !== "string") return null;
+      if (!DAYS.includes(o.day as Day)) return null;
+      if (!PERIODS.includes(o.period as Period)) return null;
+      return { day: o.day as Day, period: o.period as Period };
+    })
+    .filter((x): x is { day: Day; period: Period } => x !== null);
+  const idDocTypeRaw = str("idDocType");
+  return {
+    firstName: str("firstName"), lastName: str("lastName"), email: str("email"), phone: str("phone"),
+    address: str("address"), city: str("city"), state: str("state"), zip: str("zip"),
+    dateOfBirth: str("dateOfBirth"), cityOfBirth: str("cityOfBirth"), stateOfBirth: str("stateOfBirth"),
+    niNumber: str("niNumber"),
+    i9Doc: file("i9Doc"), ssnCardDoc: file("ssnCardDoc"),
+    idDocType: (idDocTypeRaw === "drivers_license" || idDocTypeRaw === "passport") ? idDocTypeRaw : "",
+    idDoc: file("idDoc"),
+    siaLicenseNumber: str("siaLicenseNumber"),
+    siaLicenseLevel: str("siaLicenseLevel"),
+    siaLicenseExpiry: str("siaLicenseExpiry"),
+    previousExperience: str("previousExperience"),
+    yearsExperience: str("yearsExperience"),
+    references: referenceRows,
+    photo: file("photo"), cv: file("cv"),
+    trainingCertificates: fileArray("trainingCertificates"),
+    availability,
+  };
+}
+
+type SaveState =
+  | { kind: "idle" }
+  | { kind: "saving" }
+  | { kind: "sent"; emailSent: boolean; toEmail: string }
+  | { kind: "error"; message: string };
+
 export function ApplyPage() {
   const [step, setStep] = useState(0);
   const [submitting, setSubmitting] = useState(false);
   const [submitted, setSubmitted] = useState(false);
   const [fieldErrors, setFieldErrors] = useState<FieldError[]>([]);
   const [generalError, setGeneralError] = useState<string | null>(null);
+  const [resumeLoading, setResumeLoading] = useState<boolean>(() => {
+    if (typeof window === "undefined") return false;
+    return new URLSearchParams(window.location.search).has("resume");
+  });
+  const [resumeError, setResumeError] = useState<string | null>(null);
+  const [resumed, setResumed] = useState(false);
+  const [draftToken, setDraftToken] = useState<string | null>(null);
+  const [saveState, setSaveState] = useState<SaveState>({ kind: "idle" });
   const headingRef = useRef<HTMLHeadingElement | null>(null);
   // Skip focusing the heading on the initial mount so first-time visitors
   // aren't yanked past the brand header. After any subsequent step change
   // we focus the new heading and announce it.
   const initialMount = useRef(true);
 
-  const [form, setForm] = useState<Form>({
-    firstName: "", lastName: "", email: "", phone: "",
-    address: "", city: "", state: "", zip: "",
-    dateOfBirth: "", cityOfBirth: "", stateOfBirth: "", niNumber: "",
-    i9Doc: null, ssnCardDoc: null, idDocType: "", idDoc: null,
-    siaLicenseNumber: "", siaLicenseLevel: "", siaLicenseExpiry: "",
-    previousExperience: "", yearsExperience: "",
-    references: [
-      { name: "", relationship: "", phone: "", email: "" },
-      { name: "", relationship: "", phone: "", email: "" },
-    ],
-    photo: null, cv: null, trainingCertificates: [],
-    availability: [],
-  });
+  const [form, setForm] = useState<Form>(EMPTY_FORM);
+
+  // On mount, if the URL has ?resume=<token>, fetch the saved draft
+  // and rehydrate the wizard at the step the applicant left off on.
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const params = new URLSearchParams(window.location.search);
+    const token = params.get("resume");
+    if (!token) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const out = await api<{ email: string; step: number; data: unknown; expiresAt: string }>(
+          `/applications/draft/${encodeURIComponent(token)}`,
+        );
+        if (cancelled) return;
+        setForm(hydrateForm(out.data));
+        const targetStep = Number.isFinite(out.step) ? Math.max(0, Math.min(STEPS.length - 1, Math.floor(out.step))) : 0;
+        setStep(targetStep);
+        setDraftToken(token);
+        setResumed(true);
+      } catch (e) {
+        if (cancelled) return;
+        if (e instanceof ApiError && (e.status === 404 || e.status === 410)) {
+          setResumeError("This resume link is no longer valid. You can start a new application below.");
+        } else {
+          setResumeError("We couldn't load your saved application. You can start a new one below.");
+        }
+      } finally {
+        if (!cancelled) setResumeLoading(false);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, []);
 
   useEffect(() => {
     if (initialMount.current) {
@@ -213,6 +340,40 @@ export function ApplyPage() {
     return null;
   }
 
+  async function saveDraft() {
+    setSaveState({ kind: "saving" });
+    setGeneralError(null);
+    const email = form.email.trim();
+    if (!email) {
+      setSaveState({ kind: "error", message: "Please enter your email on step 1 first — we need it to send your resume link." });
+      setStep(0);
+      setFieldErrors([{ field: "email", message: "Required to save your progress." }]);
+      return;
+    }
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+      setSaveState({ kind: "error", message: "That email doesn't look valid. Please fix it on step 1 before saving." });
+      setStep(0);
+      setFieldErrors([{ field: "email", message: "Enter a valid email so we can send your resume link." }]);
+      return;
+    }
+    try {
+      const body: Record<string, unknown> = { email, step, data: form };
+      if (draftToken) body.token = draftToken;
+      const out = await api<{ ok: boolean; emailSent: boolean; expiresAt: string }>(
+        "/applications/draft",
+        { method: "POST", body },
+      );
+      setSaveState({ kind: "sent", emailSent: out.emailSent, toEmail: email });
+    } catch (e) {
+      const msg = e instanceof ApiError
+        ? (e.status === 429
+          ? "You've saved a lot in a short time — please wait a few minutes before saving again."
+          : e.message)
+        : (e as Error).message;
+      setSaveState({ kind: "error", message: msg });
+    }
+  }
+
   async function submit() {
     setSubmitting(true);
     setGeneralError(null);
@@ -308,6 +469,18 @@ export function ApplyPage() {
     );
   }
 
+  if (resumeLoading) {
+    return (
+      <div className="min-h-screen bg-background">
+        <BrandHeader subtitle="Officer Application" />
+        <main className="max-w-3xl mx-auto px-6 py-16 text-center space-y-4">
+          <h1 className="brand-wordmark text-2xl" tabIndex={-1} ref={headingRef}>Loading your saved application…</h1>
+          <p className="text-muted-foreground">Restoring your answers and documents.</p>
+        </main>
+      </div>
+    );
+  }
+
   const stepLabel = STEPS[step];
   const errOnStep = (name: string) => findFieldError(name, fieldErrors)?.message;
 
@@ -321,6 +494,28 @@ export function ApplyPage() {
           Step {step + 1} of {STEPS.length}: {stepLabel}
         </div>
         <Stepper step={step} steps={STEPS} />
+        {resumed && (
+          <div role="status" className="mt-4 text-sm rounded border border-emerald-200 bg-emerald-50 text-emerald-900 p-3">
+            Welcome back — we've restored your saved application. You can keep filling it out below.
+          </div>
+        )}
+        {resumeError && (
+          <div role="alert" className="mt-4 text-sm rounded border border-amber-200 bg-amber-50 text-amber-900 p-3">
+            {resumeError}
+          </div>
+        )}
+        {saveState.kind === "sent" && (
+          <div role="status" className="mt-4 text-sm rounded border border-emerald-200 bg-emerald-50 text-emerald-900 p-3">
+            {saveState.emailSent
+              ? <>Your progress is saved. We just emailed a resume link to <strong>{saveState.toEmail}</strong> — it's good for 14 days. You can close this tab and come back any time.</>
+              : <>Your progress is saved for 14 days. We weren't able to email you a resume link right now — please contact our HR team if you need help getting back in.</>}
+          </div>
+        )}
+        {saveState.kind === "error" && (
+          <div role="alert" className="mt-4 text-sm rounded border border-destructive/30 bg-destructive/5 text-destructive p-3">
+            {saveState.message}
+          </div>
+        )}
         <form
           noValidate
           onSubmit={(e) => e.preventDefault()}
@@ -539,11 +734,21 @@ export function ApplyPage() {
             </>
           )}
 
-          <div className="flex justify-between pt-4 border-t">
+          <div className="flex flex-wrap items-center justify-between gap-3 pt-4 border-t">
             <Button type="button" variant="ghost" disabled={step === 0 || submitting}
               onClick={() => setStep((s) => Math.max(0, s - 1))}>
               <ChevronLeft className="w-4 h-4 mr-1" aria-hidden="true" /> Back
             </Button>
+            <div className="flex items-center gap-2 ml-auto">
+              <Button
+                type="button"
+                variant="outline"
+                disabled={submitting || saveState.kind === "saving"}
+                onClick={saveDraft}
+                title="Email yourself a link to come back and finish this application later."
+              >
+                {saveState.kind === "saving" ? "Saving…" : "Save & finish later"}
+              </Button>
             {step < STEPS.length - 1 ? (
               <Button
                 type="button"
@@ -563,6 +768,7 @@ export function ApplyPage() {
                 {submitting ? "Submitting…" : "Submit application"}
               </Button>
             )}
+            </div>
           </div>
         </form>
         <p className="text-[11px] text-muted-foreground text-center pt-6">

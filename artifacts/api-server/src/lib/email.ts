@@ -243,6 +243,49 @@ export function renderApplicationReceivedEmail(opts: {
   return { subject, text, html };
 }
 
+export function renderApplicationDraftResumeEmail(opts: {
+  firstName: string | null;
+  resumeUrl: string;
+  expiresInDays: number;
+}): { subject: string; text: string; html: string } {
+  const hello = opts.firstName && opts.firstName.trim().length > 0
+    ? `Hi ${opts.firstName.trim()},`
+    : "Hi there,";
+  const subject = "Pick up where you left off — Williams Council Security Group application";
+  const text = [
+    hello,
+    "",
+    "Here's the secure link to resume your officer application. Your answers and uploaded documents are saved — you'll land right back on the step you were on.",
+    "",
+    `Resume link (expires in ${opts.expiresInDays} days):`,
+    opts.resumeUrl,
+    "",
+    "If you didn't start an application, you can safely ignore this email.",
+    "",
+    "— Williams Council Security Group",
+  ].join("\n");
+  const html = `
+    <div style="font-family:Georgia,serif;max-width:560px;margin:0 auto;color:#080c18;background:#f0e6c8;padding:24px;border-radius:6px">
+      <h2 style="color:#080c18;margin-top:0">Williams Council Security Group</h2>
+      <p>${escapeHtml(hello)}</p>
+      <p>Here's the secure link to resume your officer application. Your answers and uploaded documents are saved — you'll land right back on the step you were on.</p>
+      <p style="text-align:center;margin:24px 0">
+        <a href="${escapeAttr(opts.resumeUrl)}"
+           style="display:inline-block;background:#080c18;color:#c9a84c;padding:12px 24px;text-decoration:none;border-radius:4px;font-weight:bold">
+          Resume my application
+        </a>
+      </p>
+      <p style="color:#555;font-size:12px">This link expires in ${opts.expiresInDays} days. If the button doesn't work, paste this URL into your browser:<br/>
+        <span style="word-break:break-all">${escapeHtml(opts.resumeUrl)}</span>
+      </p>
+      <p style="color:#555;font-size:12px">If you didn't start an application, you can safely ignore this email.</p>
+      <hr style="border:none;border-top:2px solid #c9a84c;margin:24px 0"/>
+      <p style="color:#080c18;font-weight:bold;margin:0">Williams Council Security Group</p>
+    </div>
+  `;
+  return { subject, text, html };
+}
+
 export function renderRequestInfoEmail(opts: {
   firstName: string;
   amendUrl: string;

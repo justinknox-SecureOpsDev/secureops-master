@@ -2,6 +2,7 @@ import { lt, eq, and, or, isNull, gt, gte, lte, ne, sql, inArray } from "drizzle
 import {
   db,
   revokedTokensTable,
+  applicationDraftsTable,
   licensesTable,
   trainingCertificationsTable,
   usersTable,
@@ -848,8 +849,24 @@ export function startScheduledJobs(intervalMs: number = HOUR_MS): NodeJS.Timeout
     handles.push(handle);
   }
 
+  async function cleanupExpiredApplicationDrafts(): Promise<void> {
+    try {
+      const now = new Date();
+      const result = await db
+        .delete(applicationDraftsTable)
+        .where(lt(applicationDraftsTable.expiresAt, now));
+      const removed = (result as { rowCount?: number | null }).rowCount ?? 0;
+      if (removed > 0) {
+        logger.info({ removed }, "Cleaned up expired application drafts");
+      }
+    } catch (err) {
+      logger.error({ err }, "Failed to clean up expired application drafts");
+    }
+  }
+
   // Hourly maintenance.
   schedule("revoked-tokens", cleanupExpiredRevokedTokens, intervalMs);
+  schedule("application-drafts", cleanupExpiredApplicationDrafts, intervalMs);
   // License expiry — hourly is plenty (and idempotent), avoids a
   // mid-day spike if many licenses cluster on one expiry date.
   schedule("license-expiry", sendLicenseExpiryReminders, intervalMs);

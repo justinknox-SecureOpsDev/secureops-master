@@ -8,6 +8,7 @@ import { randomBytes } from "crypto";
 import {
   db,
   applicationsTable,
+  applicationDraftsTable,
   usersTable,
   employeesTable,
   licensesTable,
@@ -16,7 +17,7 @@ import {
   applicationAmendmentTokensTable,
   policiesTable,
 } from "@workspace/db";
-import { publicApplicationLimiter, tokenLookupLimiter } from "../middlewares/rateLimit";
+import { publicApplicationLimiter, tokenLookupLimiter, applicationDraftIpLimiter, applicationDraftEmailLimiter } from "../middlewares/rateLimit";
 import { ObjectStorageService } from "../lib/objectStorage";
 import {
   SubmitApplicationBody,
@@ -28,7 +29,7 @@ import {
 import { z } from "zod/v4";
 import { requireAdmin } from "../middlewares/auth";
 import { sendPushToUsers } from "../lib/push";
-import { sendEmail, sendEmailDetailed, renderOnboardingEmail, renderResendOnboardingEmail, renderRejectionEmail, renderApplicationReceivedEmail, renderRequestInfoEmail } from "../lib/email";
+import { sendEmail, sendEmailDetailed, renderOnboardingEmail, renderResendOnboardingEmail, renderRejectionEmail, renderApplicationReceivedEmail, renderRequestInfoEmail, renderApplicationDraftResumeEmail } from "../lib/email";
 import { sendSmsToPhoneNumber } from "../lib/sms";
 import { normalizePhoneToE164 } from "../lib/phone";
 
@@ -469,6 +470,154 @@ router.post("/applications", publicApplicationLimiter, async (req, res): Promise
     req.log.error({ err }, "Failed to submit application");
     res.status(500).json({ error: "Internal Server Error", message: "Could not submit application" });
   }
+});
+
+// ---- Public: save / resume application draft ------------------------------
+
+const APPLICATION_DRAFT_TTL_DAYS = 14;
+// Cap the serialized payload at 1 MB so a malicious client can't blow up
+// the drafts table. Real wizards serialize to well under 50 KB.
+const APPLICATION_DRAFT_MAX_BYTES = 1024 * 1024;
+
+const SaveDraftBody = z.object({
+  token: z.string().min(20).max(128).optional(),
+  email: z.email(),
+  step: z.number().int().min(0).max(20),
+  data: z.record(z.string(), z.unknown()),
+});
+
+function buildResumeUrl(token: string): string | null {
+  const base = getTrustedBaseUrl();
+  return base ? `${base}/admin-portal/apply?resume=${encodeURIComponent(token)}` : null;
+}
+
+/**
+ * POST /applications/draft
+ *
+ * Save (or update) an in-progress application wizard and email the
+ * applicant a magic resume link. Public + rate-limited. The opaque
+ * token returned is the only credential needed to reload the draft,
+ * so it MUST stay high-entropy and is delivered only via email.
+ */
+router.post("/applications/draft", applicationDraftIpLimiter, applicationDraftEmailLimiter, async (req, res): Promise<void> => {
+  const parsed = SaveDraftBody.safeParse(req.body);
+  if (!parsed.success) {
+    res.status(400).json({ error: "Bad Request", message: parsed.error.message });
+    return;
+  }
+  const { email: rawEmail, step, data } = parsed.data;
+  const email = rawEmail.toLowerCase().trim();
+
+  // Cap the payload size — we don't want to let an unauthenticated
+  // caller dump arbitrary blobs into our drafts table.
+  const serialized = JSON.stringify(data);
+  if (serialized.length > APPLICATION_DRAFT_MAX_BYTES) {
+    res.status(413).json({ error: "Payload Too Large", message: "Draft is too large to save." });
+    return;
+  }
+
+  const now = new Date();
+  const expiresAt = new Date(now.getTime() + APPLICATION_DRAFT_TTL_DAYS * 86400_000);
+
+  // If the client sent an existing token, update that draft only if the
+  // token AND email match (defense in depth — prevents someone with a
+  // guessed token from overwriting another applicant's draft and
+  // hijacking the resume email destination).
+  let token: string | null = null;
+  if (parsed.data.token) {
+    const [existing] = await db
+      .select()
+      .from(applicationDraftsTable)
+      .where(eq(applicationDraftsTable.token, parsed.data.token))
+      .limit(1);
+    if (existing && existing.email === email && existing.expiresAt > now) {
+      await db.update(applicationDraftsTable).set({
+        step,
+        data,
+        expiresAt,
+        lastSentAt: now,
+      }).where(eq(applicationDraftsTable.id, existing.id));
+      token = existing.token;
+    }
+  }
+  if (!token) {
+    token = randomBytes(32).toString("base64url");
+    await db.insert(applicationDraftsTable).values({
+      token,
+      email,
+      step,
+      data,
+      lastSentAt: now,
+      expiresAt,
+    });
+  }
+
+  const resumeUrl = buildResumeUrl(token);
+  let emailSent = false;
+  if (resumeUrl) {
+    const firstName = typeof (data as { firstName?: unknown }).firstName === "string"
+      ? ((data as { firstName?: string }).firstName ?? null)
+      : null;
+    try {
+      const msg = renderApplicationDraftResumeEmail({
+        firstName,
+        resumeUrl,
+        expiresInDays: APPLICATION_DRAFT_TTL_DAYS,
+      });
+      emailSent = await sendEmail({ to: email, subject: msg.subject, text: msg.text, html: msg.html });
+      if (!emailSent) {
+        req.log.info({ to: email }, "Draft resume email not sent (SMTP not configured or send failed)");
+      }
+    } catch (err) {
+      req.log.error({ err }, "Failed to send application draft resume email");
+    }
+  } else {
+    req.log.warn("APP_BASE_URL / REPLIT_DOMAINS unset — cannot build resume URL for application draft");
+  }
+
+  // Never echo the token or URL in the response — the magic link must
+  // only be deliverable via the email channel the applicant supplied.
+  // Surfacing it in the JSON response would let anyone who can see the
+  // network tab grab another person's resume link.
+  res.json({
+    ok: true,
+    emailSent,
+    expiresAt: expiresAt.toISOString(),
+  });
+});
+
+/**
+ * GET /applications/draft/:token
+ *
+ * Public lookup — fetches the saved wizard state for a resume link.
+ * Token is high-entropy and the only credential needed; we still gate
+ * with the shared token-lookup rate limiter to slow blind guessing.
+ */
+router.get("/applications/draft/:token", tokenLookupLimiter, async (req, res): Promise<void> => {
+  const token = String(req.params.token ?? "");
+  if (!token) {
+    res.status(404).json({ error: "Not Found", message: "Draft not found." });
+    return;
+  }
+  const [row] = await db
+    .select()
+    .from(applicationDraftsTable)
+    .where(eq(applicationDraftsTable.token, token))
+    .limit(1);
+  if (!row) {
+    res.status(404).json({ error: "Not Found", message: "Draft not found or expired." });
+    return;
+  }
+  if (row.expiresAt <= new Date()) {
+    res.status(410).json({ error: "Gone", message: "This resume link has expired." });
+    return;
+  }
+  res.json({
+    email: row.email,
+    step: row.step,
+    data: row.data,
+    expiresAt: row.expiresAt.toISOString(),
+  });
 });
 
 // ---- Admin: list / get / review / reject / approve ------------------------

@@ -15,6 +15,7 @@ export * from "./chatMessages";
 export * from "./applications";
 export * from "./onboardingTokens";
 export * from "./applicationAmendmentTokens";
+export * from "./applicationDrafts";
 export * from "./passwordResetTokens";
 export * from "./onboardingSubmissions";
 export * from "./policies";

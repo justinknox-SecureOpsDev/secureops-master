@@ -155,6 +155,29 @@ export const tokenLookupLimiter: RateLimitRequestHandler = rateLimit({
   keyGenerator: (req) => `tk:ip:${ipKeyGenerator(req.ip ?? "")}`,
 });
 
+// POST /applications/draft — public "save and resume later" save action.
+// Sends an email per call, so we apply BOTH caps (mirrors forgot-password):
+//   - per-IP: stops one source from spraying drafts to many addresses
+//   - per-email: stops a distributed attacker rotating IPs from flooding
+//                a single target inbox with resume emails
+const APPLICATION_DRAFT_PER_IP_MAX = envInt("APPLICATION_DRAFT_RATE_LIMIT_MAX", 10);
+const APPLICATION_DRAFT_PER_EMAIL_MAX = envInt("APPLICATION_DRAFT_PER_EMAIL_MAX", 5);
+
+export const applicationDraftIpLimiter: RateLimitRequestHandler = rateLimit({
+  windowMs: HOUR_MS,
+  limit: APPLICATION_DRAFT_PER_IP_MAX,
+  standardHeaders: true,
+  legacyHeaders: false,
+  handler: tooMany,
+  keyGenerator: (req) => `pd:ip:${ipKeyGenerator(req.ip ?? "")}`,
+});
+
+export const applicationDraftEmailLimiter: RateLimitRequestHandler = makeLimiter({
+  max: APPLICATION_DRAFT_PER_EMAIL_MAX,
+  keyBy: "email",
+  tag: "pd",
+});
+
 // Stricter limiter for unauthenticated endpoints that do real work
 // (PDF render, attachment signing). Keeps a single recipient from
 // hammering the share PDF endpoint into a DoS.
