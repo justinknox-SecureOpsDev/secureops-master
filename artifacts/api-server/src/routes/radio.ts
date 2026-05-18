@@ -6,9 +6,12 @@ import {
   radioTransmissionsTable,
   sitesTable,
   usersTable,
+  auditLogsTable,
 } from "@workspace/db";
 import { requireAuth, requireAdmin } from "../middlewares/auth";
 import { listChannelsForUser } from "../lib/radioGateway";
+import { ObjectStorageService, ObjectNotFoundError } from "../lib/objectStorage";
+import { logger } from "../lib/logger";
 
 const router: IRouter = Router();
 
@@ -115,6 +118,9 @@ router.get("/admin/radio/channels/:id/transmissions", requireAdmin, async (req, 
       endedAt: radioTransmissionsTable.endedAt,
       durationMs: radioTransmissionsTable.durationMs,
       endedReason: radioTransmissionsTable.endedReason,
+      hasRecording: sql<boolean>`${radioTransmissionsTable.audioObjectKey} IS NOT NULL`,
+      audioBytes: radioTransmissionsTable.audioBytes,
+      audioMime: radioTransmissionsTable.audioMime,
     })
     .from(radioTransmissionsTable)
     .leftJoin(usersTable, eq(usersTable.id, radioTransmissionsTable.speakerUserId))
@@ -122,6 +128,61 @@ router.get("/admin/radio/channels/:id/transmissions", requireAdmin, async (req, 
     .orderBy(desc(radioTransmissionsTable.startedAt))
     .limit(limit);
   res.json(rows);
+});
+
+// GET /admin/radio/transmissions/:id/audio — stream the recorded clip.
+// Admin-only. Proxies the bytes from private object storage with the
+// stored mime type so an <audio> tag can play it directly.
+router.get("/admin/radio/transmissions/:id/audio", requireAdmin, async (req, res): Promise<void> => {
+  const id = String(req.params.id);
+  const [row] = await db
+    .select({
+      id: radioTransmissionsTable.id,
+      channelId: radioTransmissionsTable.channelId,
+      speakerUserId: radioTransmissionsTable.speakerUserId,
+      audioObjectKey: radioTransmissionsTable.audioObjectKey,
+      audioMime: radioTransmissionsTable.audioMime,
+      audioBytes: radioTransmissionsTable.audioBytes,
+    })
+    .from(radioTransmissionsTable)
+    .where(eq(radioTransmissionsTable.id, id))
+    .limit(1);
+  if (!row || !row.audioObjectKey) {
+    res.status(404).json({ error: "Not Found", message: "no recording for this transmission" });
+    return;
+  }
+  try {
+    const storage = new ObjectStorageService();
+    const { buffer, contentType } = await storage.downloadObjectBuffer(row.audioObjectKey);
+    res.setHeader("Content-Type", row.audioMime || contentType || "audio/webm");
+    res.setHeader("Content-Length", String(buffer.length));
+    res.setHeader("Cache-Control", "private, max-age=300");
+    res.status(200).end(buffer);
+    // Fire-and-forget audit so admins reviewing officer voice are traceable.
+    db.insert(auditLogsTable).values({
+      actorUserId: req.user!.userId,
+      actorEmail: req.user!.email ?? null,
+      actorRole: req.user!.role ?? null,
+      action: "radio.playback",
+      targetTable: "radio_transmissions",
+      targetId: row.id,
+      method: "GET",
+      path: req.originalUrl,
+      statusCode: 200,
+      ip: req.ip ?? null,
+      userAgent: req.get("user-agent") ?? null,
+      before: null,
+      after: null,
+      metadata: { channelId: row.channelId, speakerUserId: row.speakerUserId },
+    }).catch((err) => logger.warn({ err }, "[radio] failed to audit playback"));
+  } catch (err) {
+    if (err instanceof ObjectNotFoundError) {
+      res.status(404).json({ error: "Not Found", message: "recording is no longer available" });
+      return;
+    }
+    logger.error({ err, transmissionId: id }, "[radio] failed to stream recording");
+    res.status(500).json({ error: "Server Error", message: "failed to stream recording" });
+  }
 });
 
 export default router;

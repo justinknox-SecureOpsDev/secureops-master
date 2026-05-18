@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { api, getToken } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
 import { Button } from "@/components/ui/button";
-import { Radio as RadioIcon, Mic, MicOff, Volume2, VolumeX, Trash2, Archive, Plus, LogOut, LogIn } from "lucide-react";
+import { Radio as RadioIcon, Mic, MicOff, Volume2, VolumeX, Trash2, Archive, Plus, LogOut, LogIn, Play, Pause } from "lucide-react";
 
 type Channel = {
   id: string; name: string; scope: "global" | "all_officers" | "admins" | "site";
@@ -14,6 +14,9 @@ type Transmission = {
   id: string; channelId: string; speakerUserId: string;
   speakerName: string | null; startedAt: string; endedAt: string | null;
   durationMs: number | null; endedReason: string | null;
+  hasRecording?: boolean;
+  audioBytes?: number | null;
+  audioMime?: string | null;
 };
 
 function buildRadioWsUrl(token: string): string {
@@ -102,6 +105,9 @@ export default function RadioPage() {
   const [newSiteId, setNewSiteId] = useState<string>("");
   const [wsReady, setWsReady] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [playingId, setPlayingId] = useState<string | null>(null);
+  const playbackAudioRef = useRef<HTMLAudioElement | null>(null);
+  const playbackUrlRef = useRef<string | null>(null);
 
   const wsRef = useRef<WebSocket | null>(null);
   const recRef = useRef<MediaRecorder | null>(null);
@@ -233,6 +239,49 @@ export default function RadioPage() {
     const p = playerRef.current; if (!p) return;
     for (const c of channels) p.setMuted(c.id, mutedChannels.has(c.id));
   }, [mutedChannels, channels]);
+
+  function stopPlayback(): void {
+    const a = playbackAudioRef.current;
+    if (a) {
+      try { a.pause(); } catch {}
+      try { a.removeAttribute("src"); a.load(); } catch {}
+    }
+    if (playbackUrlRef.current) {
+      try { URL.revokeObjectURL(playbackUrlRef.current); } catch {}
+      playbackUrlRef.current = null;
+    }
+    playbackAudioRef.current = null;
+    setPlayingId(null);
+  }
+
+  async function togglePlayback(transmissionId: string): Promise<void> {
+    if (playingId === transmissionId) { stopPlayback(); return; }
+    stopPlayback();
+    try {
+      const token = getToken();
+      const res = await fetch(`/api/admin/radio/transmissions/${transmissionId}/audio`, {
+        headers: token ? { Authorization: `Bearer ${token}` } : {},
+      });
+      if (!res.ok) {
+        setError(res.status === 404 ? "Recording is not available." : `Playback failed (${res.status}).`);
+        return;
+      }
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      const audio = new Audio(url);
+      audio.onended = () => stopPlayback();
+      audio.onerror = () => { setError("Playback failed."); stopPlayback(); };
+      playbackAudioRef.current = audio;
+      playbackUrlRef.current = url;
+      setPlayingId(transmissionId);
+      await audio.play();
+    } catch (e) {
+      setError((e as Error)?.message ?? "Playback failed.");
+      stopPlayback();
+    }
+  }
+
+  useEffect(() => () => stopPlayback(), []);
 
   function leaveChannel(channelId: string): void {
     const ws = wsRef.current;
@@ -471,20 +520,36 @@ export default function RadioPage() {
               </div>
               <div className="divide-y text-sm max-h-[360px] overflow-y-auto">
                 {transmissions.length === 0 && <div className="p-3 opacity-60">No transmissions yet.</div>}
-                {transmissions.map((t) => (
-                  <div key={t.id} className="px-3 py-2 flex items-center justify-between">
-                    <div>
-                      <div className="font-medium">{t.speakerName ?? t.speakerUserId.slice(0, 8)}</div>
-                      <div className="text-[11px] opacity-60">
-                        {new Date(t.startedAt).toLocaleString()}
-                        {t.endedReason && ` · ${t.endedReason}`}
+                {transmissions.map((t) => {
+                  const isPlaying = playingId === t.id;
+                  const canPlay = !!t.hasRecording;
+                  return (
+                    <div key={t.id} className="px-3 py-2 flex items-center justify-between gap-3">
+                      <div className="min-w-0">
+                        <div className="font-medium truncate">{t.speakerName ?? t.speakerUserId.slice(0, 8)}</div>
+                        <div className="text-[11px] opacity-60">
+                          {new Date(t.startedAt).toLocaleString()}
+                          {t.endedReason && ` · ${t.endedReason}`}
+                          {!canPlay && t.endedAt && " · no recording"}
+                        </div>
+                      </div>
+                      <div className="flex items-center gap-2 shrink-0">
+                        <span className="text-xs tabular-nums opacity-70">
+                          {t.durationMs != null ? `${(t.durationMs / 1000).toFixed(1)}s` : "…"}
+                        </span>
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          disabled={!canPlay}
+                          title={canPlay ? (isPlaying ? "Stop playback" : "Play recording") : "No recording available"}
+                          onClick={() => togglePlayback(t.id)}
+                        >
+                          {isPlaying ? <Pause className="w-3.5 h-3.5" /> : <Play className="w-3.5 h-3.5" />}
+                        </Button>
                       </div>
                     </div>
-                    <div className="text-xs tabular-nums opacity-70">
-                      {t.durationMs != null ? `${(t.durationMs / 1000).toFixed(1)}s` : "…"}
-                    </div>
-                  </div>
-                ))}
+                  );
+                })}
               </div>
             </div>
           )}

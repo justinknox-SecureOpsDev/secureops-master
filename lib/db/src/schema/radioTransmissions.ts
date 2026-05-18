@@ -3,9 +3,13 @@ import { radioChannelsTable } from "./radioChannels";
 import { usersTable } from "./users";
 
 /**
- * One row per push-to-talk transmission. Audio payloads themselves are
- * NOT persisted (the channel is ephemeral by design); we only keep
- * speaker + timing metadata for audit and the admin transmission log.
+ * One row per push-to-talk transmission. When the speaker releases
+ * (or auto-times-out / disconnects), the gateway also concatenates
+ * the buffered audio frames and uploads them to private object
+ * storage; the resulting `/objects/...` path is stored in
+ * `audioObjectKey` so admins can play back past transmissions.
+ * Recordings are skipped if the per-transmission buffer ever exceeds
+ * the gateway's safety cap (see RECORD_MAX_BYTES in radioGateway.ts).
  */
 export const radioTransmissionsTable = pgTable("radio_transmissions", {
   id: uuid("id").primaryKey().defaultRandom(),
@@ -18,6 +22,9 @@ export const radioTransmissionsTable = pgTable("radio_transmissions", {
   // (max-duration safety cut), "disconnect" (speaker socket dropped),
   // "preempted" (admin force-cleared the lock).
   endedReason: text("ended_reason"),
+  audioObjectKey: text("audio_object_key"),
+  audioMime: text("audio_mime"),
+  audioBytes: integer("audio_bytes"),
 }, (t) => ({
   channelIdx: index("radio_transmissions_channel_started_idx").on(t.channelId, t.startedAt),
   speakerIdx: index("radio_transmissions_speaker_idx").on(t.speakerUserId),

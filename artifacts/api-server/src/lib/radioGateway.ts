@@ -16,6 +16,7 @@ import {
 } from "@workspace/db";
 import { verifyToken } from "../middlewares/auth";
 import { logger } from "./logger";
+import { ObjectStorageService } from "./objectStorage";
 
 /**
  * Live push-to-talk radio gateway.
@@ -63,6 +64,11 @@ import { logger } from "./logger";
 const MAX_TRANSMISSION_MS = 60_000;
 const MAX_FRAME_BYTES = 64 * 1024;
 const HEARTBEAT_MS = 30_000;
+// 5 MB per-transmission recording cap. 60s @ 24 kbps opus ≈ 180 KB,
+// so this leaves ~28x headroom for higher-bitrate clients while still
+// fencing off pathological / malicious senders.
+const RECORD_MAX_BYTES = 5 * 1024 * 1024;
+const RECORD_MIME = "audio/webm";
 
 // Per-user join rate-limit: window length and max joins in that window.
 // A reasonable human flips between maybe 4–5 channels in a minute; we
@@ -93,6 +99,12 @@ type SpeakerLock = {
   transmissionId: string;
   startedAt: Date;
   timeoutHandle: ReturnType<typeof setTimeout>;
+  // Recording buffer: every binary frame the speaker pushes is appended
+  // here so we can upload the concatenated clip on release. Set to null
+  // once the cap is exceeded — playback is best-effort and we'd rather
+  // skip a recording than blow up the process.
+  audioChunks: Buffer[] | null;
+  audioBytes: number;
 };
 
 // channelId → connected sockets that have joined it
@@ -295,10 +307,46 @@ async function releaseLock(channelId: string, reason: "released" | "timeout" | "
 
   const endedAt = new Date();
   const durationMs = endedAt.getTime() - lock.startedAt.getTime();
+
+  // Upload buffered audio to object storage (best-effort). We do this
+  // before the DB update so we can write the resulting object key in
+  // the same row. Empty buffers and over-cap transmissions are skipped.
+  let audioObjectKey: string | null = null;
+  let audioMime: string | null = null;
+  let audioBytes: number | null = null;
+  if (lock.audioChunks && lock.audioChunks.length > 0 && lock.audioBytes > 0) {
+    try {
+      const blob = Buffer.concat(lock.audioChunks, lock.audioBytes);
+      const storage = new ObjectStorageService();
+      audioObjectKey = await storage.saveObjectBuffer(
+        blob,
+        RECORD_MIME,
+        `radio-${channelId}`,
+      );
+      audioMime = RECORD_MIME;
+      audioBytes = blob.length;
+    } catch (err) {
+      logger.warn(
+        { err, channelId, transmissionId: lock.transmissionId },
+        "[radio] failed to upload transmission recording",
+      );
+    }
+  }
+  // Help the GC release the chunks promptly.
+  lock.audioChunks = null;
+  lock.audioBytes = 0;
+
   try {
     await db
       .update(radioTransmissionsTable)
-      .set({ endedAt, durationMs, endedReason: reason })
+      .set({
+        endedAt,
+        durationMs,
+        endedReason: reason,
+        audioObjectKey,
+        audioMime,
+        audioBytes,
+      })
       .where(eq(radioTransmissionsTable.id, lock.transmissionId));
   } catch (err) {
     logger.warn({ err, channelId, transmissionId: lock.transmissionId }, "[radio] failed to close transmission row");
@@ -361,6 +409,8 @@ async function claimLock(channelId: string, socket: RadioSocket): Promise<void> 
     transmissionId: row.id,
     startedAt,
     timeoutHandle,
+    audioChunks: [],
+    audioBytes: 0,
   };
   channelLocks.set(channelId, lock);
 
@@ -451,6 +501,22 @@ function handleBinary(socket: RadioSocket, data: Buffer): void {
   for (const [channelId, lock] of channelLocks) {
     if (lock.socket === socket && lock.speakerUserId === socket.userId) {
       broadcastAudio(channelId, data, socket);
+      // Capture for playback. Once we've exceeded the cap we null the
+      // buffer out so subsequent frames are not retained — the live
+      // fan-out above still works, only the recording is dropped.
+      if (lock.audioChunks) {
+        if (lock.audioBytes + data.byteLength > RECORD_MAX_BYTES) {
+          logger.warn(
+            { channelId, transmissionId: lock.transmissionId, bytes: lock.audioBytes },
+            "[radio] recording cap exceeded; skipping playback for this transmission",
+          );
+          lock.audioChunks = null;
+          lock.audioBytes = 0;
+        } else {
+          lock.audioChunks.push(data);
+          lock.audioBytes += data.byteLength;
+        }
+      }
       return;
     }
   }

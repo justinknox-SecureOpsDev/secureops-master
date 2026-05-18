@@ -56,6 +56,10 @@ const CSP_DIRECTIVES = {
   styleSrc: ["'self'", "'unsafe-inline'", "https://fonts.googleapis.com"],
   fontSrc: ["'self'", "https://fonts.gstatic.com", "data:"],
   imgSrc: ["'self'", "data:", "blob:", "https:"],
+  // mediaSrc covers <audio>/<video>. Radio playback streams recordings
+  // as fetched blobs (blob: URLs); we also allow https: for any future
+  // signed-URL direct embeds.
+  mediaSrc: ["'self'", "blob:", "https:"],
   connectSrc: ["'self'", "ws:", "wss:", "https://*.tile.openstreetmap.org"],
   frameAncestors: ["'none'"],
   baseUri: ["'self'"],
