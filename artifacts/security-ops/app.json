@@ -16,7 +16,7 @@
     },
     "ios": {
       "supportsTablet": false,
-      "bundleIdentifier": "com.williamscouncilsg.secureops",
+      "bundleIdentifier": "app.replit.secureops",
       "buildNumber": "1",
       "infoPlist": {
         "NSLocationWhenInUseUsageDescription": "SecureOps uses your location to verify you are on-site when you clock in and to share your live position with dispatch while you are on shift.",
@@ -25,7 +25,7 @@
       }
     },
     "android": {
-      "package": "com.williamscouncilsg.secureops",
+      "package": "app.replit.secureops",
       "versionCode": 1,
       "adaptiveIcon": {
         "foregroundImage": "./assets/images/icon.png",
