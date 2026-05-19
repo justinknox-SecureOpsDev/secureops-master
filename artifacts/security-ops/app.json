@@ -20,7 +20,8 @@
       "buildNumber": "1",
       "infoPlist": {
         "NSLocationWhenInUseUsageDescription": "SecureOps uses your location to verify you are on-site when you clock in and to share your live position with dispatch while you are on shift.",
-        "NSLocationAlwaysAndWhenInUseUsageDescription": "SecureOps uses your location in the background while you are clocked in so dispatch can be alerted if you leave your assigned site or trigger an emergency."
+        "NSLocationAlwaysAndWhenInUseUsageDescription": "SecureOps uses your location in the background while you are clocked in so dispatch can be alerted if you leave your assigned site or trigger an emergency.",
+        "ITSAppUsesNonExemptEncryption": false
       }
     },
     "android": {
@@ -31,16 +32,6 @@
         "backgroundColor": "#080c18"
       },
       "permissions": [
-        "android.permission.ACCESS_COARSE_LOCATION",
-        "android.permission.ACCESS_FINE_LOCATION",
-        "android.permission.ACCESS_BACKGROUND_LOCATION",
-        "android.permission.CAMERA",
-        "android.permission.READ_MEDIA_IMAGES",
-        "android.permission.VIBRATE",
-        "android.permission.POST_NOTIFICATIONS",
-        "android.permission.RECORD_AUDIO",
-        "android.permission.FOREGROUND_SERVICE",
-        "android.permission.FOREGROUND_SERVICE_LOCATION",
         "android.permission.ACCESS_COARSE_LOCATION",
         "android.permission.ACCESS_FINE_LOCATION",
         "android.permission.ACCESS_BACKGROUND_LOCATION",
