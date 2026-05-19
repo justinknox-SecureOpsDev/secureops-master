@@ -106,13 +106,14 @@ export async function seedDemoUsers(): Promise<void> {
     }
 
     const passwordOk = await bcrypt.compare(u.password, existing.passwordHash);
-    if (!passwordOk) {
-      const passwordHash = await bcrypt.hash(u.password, 10);
+    const needsUpdate = !passwordOk || existing.status !== "active" || existing.mustChangePassword;
+    if (needsUpdate) {
+      const passwordHash = passwordOk ? existing.passwordHash : await bcrypt.hash(u.password, 10);
       await db
         .update(usersTable)
-        .set({ passwordHash, mustChangePassword: false })
+        .set({ passwordHash, mustChangePassword: false, status: "active" })
         .where(eq(usersTable.id, existing.id));
-      logger.info({ email: u.email }, "Reset demo user password to documented value");
+      logger.info({ email: u.email }, "Reset demo user to documented credentials and active status");
     }
 
     if (u.role === "employee") {
