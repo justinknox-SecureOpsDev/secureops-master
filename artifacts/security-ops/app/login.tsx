@@ -1,8 +1,9 @@
 import React, { useState } from "react";
 import {
   View, Text, TextInput, TouchableOpacity,
-  StyleSheet, ActivityIndicator, Image, Linking,
+  StyleSheet, ActivityIndicator, Image,
 } from "react-native";
+import * as WebBrowser from "expo-web-browser";
 import { useRouter } from "expo-router";
 import { useAuth } from "@/contexts/AuthContext";
 import { useColors } from "@/hooks/useColors";
@@ -214,15 +215,15 @@ export default function LoginScreen() {
         </View>
 
         <View style={styles.legalRow}>
-          <TouchableOpacity onPress={() => Linking.openURL(legalUrl("privacy"))}>
+          <TouchableOpacity onPress={() => WebBrowser.openBrowserAsync(legalUrl("privacy"))}>
             <Text style={[styles.legalLink, { color: colors.mutedForeground }]}>Privacy</Text>
           </TouchableOpacity>
           <Text style={[styles.legalDot, { color: colors.mutedForeground }]}>·</Text>
-          <TouchableOpacity onPress={() => Linking.openURL(legalUrl("terms"))}>
+          <TouchableOpacity onPress={() => WebBrowser.openBrowserAsync(legalUrl("terms"))}>
             <Text style={[styles.legalLink, { color: colors.mutedForeground }]}>Terms</Text>
           </TouchableOpacity>
           <Text style={[styles.legalDot, { color: colors.mutedForeground }]}>·</Text>
-          <TouchableOpacity onPress={() => Linking.openURL(legalUrl("data-rights"))}>
+          <TouchableOpacity onPress={() => WebBrowser.openBrowserAsync(legalUrl("data-rights"))}>
             <Text style={[styles.legalLink, { color: colors.mutedForeground }]}>Your data rights</Text>
           </TouchableOpacity>
         </View>
