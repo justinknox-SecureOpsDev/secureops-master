@@ -4,7 +4,7 @@ import { logger } from "./lib/logger";
 import { attachWebSocketServer, handleChatUpgrade } from "./lib/wsManager";
 import { attachRadioWebSocketServer, handleRadioUpgrade } from "./lib/radioGateway";
 import { seedPolicies, backfillEmployeeProfileFields } from "@workspace/db";
-import { seedDemoUsers } from "./lib/seedDemoUsers";
+import { seedDemoUsers, ensureAdminAccountHealth } from "./lib/seedDemoUsers";
 import { seedChatRooms } from "./lib/seedChatRooms";
 import { seedRadioChannels } from "./lib/seedRadioChannels";
 import { startScheduledJobs } from "./lib/scheduledJobs";
@@ -82,6 +82,13 @@ seedPolicies()
 backfillEmployeeProfileFields()
   .then(() => logger.info("Employee profile backfill complete"))
   .catch((err) => logger.error({ err }, "Failed to backfill employee profile fields"));
+
+// Ensure active admin accounts are never stuck behind a forced-password-
+// change screen — clears mustChangePassword for all active admins on boot
+// so both dev and production stay consistent.
+ensureAdminAccountHealth()
+  .then(() => logger.info("Admin account health ensured"))
+  .catch((err) => logger.error({ err }, "Failed to ensure admin account health"));
 
 // Idempotently provision the documented demo accounts so `replit.md`
 // credentials always work. Disable with SEED_DEMO_USERS=false.

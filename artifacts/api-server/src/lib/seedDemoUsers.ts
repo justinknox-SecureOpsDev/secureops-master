@@ -1,5 +1,5 @@
 import bcrypt from "bcryptjs";
-import { eq } from "drizzle-orm";
+import { eq, and, ne } from "drizzle-orm";
 import { db, usersTable, employeesTable } from "@workspace/db";
 import { logger } from "./logger";
 
@@ -27,6 +27,36 @@ const DEMO_USERS: DemoUser[] = [
     role: "employee",
   },
 ];
+
+/**
+ * Clears the `mustChangePassword` flag for every active admin account.
+ *
+ * Admin accounts should never be blocked by a forced-change screen —
+ * they use the password-reset flow if they need to update credentials.
+ * The bulk-invite system only targets non-admin users, but flag drift
+ * can still occur across dev/production databases. This runs
+ * unconditionally on every boot so both environments stay consistent.
+ */
+export async function ensureAdminAccountHealth(): Promise<void> {
+  const fixed = await db
+    .update(usersTable)
+    .set({ mustChangePassword: false })
+    .where(
+      and(
+        eq(usersTable.role, "admin"),
+        eq(usersTable.status, "active"),
+        ne(usersTable.mustChangePassword, false),
+      ),
+    )
+    .returning({ email: usersTable.email });
+
+  if (fixed.length > 0) {
+    logger.info(
+      { emails: fixed.map((r) => r.email) },
+      "Cleared stale mustChangePassword flag on active admin accounts",
+    );
+  }
+}
 
 /**
  * Idempotently provision the two documented demo accounts so the
