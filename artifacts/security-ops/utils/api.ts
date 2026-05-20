@@ -30,7 +30,7 @@ function resolveApiBaseUrl(): string {
   if (domain && domain !== "undefined") {
     return `https://${domain}/api`;
   }
-  return "https://secureops.williamscouncilsecurity.com/api";
+  return "https://security-operations-suite.replit.app/api";
 }
 
 export const API_BASE_URL = resolveApiBaseUrl();
