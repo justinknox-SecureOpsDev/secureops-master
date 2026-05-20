@@ -1,7 +1,5 @@
 import { BlurView } from "expo-blur";
-import { isLiquidGlassAvailable } from "expo-glass-effect";
 import { Tabs } from "expo-router";
-import { Icon, Label, NativeTabs } from "expo-router/unstable-native-tabs";
 import { SymbolView } from "expo-symbols";
 import { Feather } from "@expo/vector-icons";
 import React from "react";
@@ -9,22 +7,7 @@ import { Platform, StyleSheet, View, useColorScheme } from "react-native";
 
 import { useColors } from "@/hooks/useColors";
 
-// IMPORTANT: iOS 26 uses NativeTabs for native tabs with liquid glass support.
-// NativeTabs intentionally does NOT use custom design tokens — liquid glass
-// is a system-level appearance provided by iOS and cannot be overridden.
-// Custom brand colors are applied only on the ClassicTabLayout path (older iOS / Android / web).
-function NativeTabLayout() {
-  return (
-    <NativeTabs>
-      <NativeTabs.Trigger name="index">
-        <Icon sf={{ default: "house", selected: "house.fill" }} />
-        <Label>Home</Label>
-      </NativeTabs.Trigger>
-    </NativeTabs>
-  );
-}
-
-function ClassicTabLayout() {
+export default function TabLayout() {
   const colors = useColors();
   const colorScheme = useColorScheme();
   const isDark = colorScheme === "dark";
@@ -76,11 +59,4 @@ function ClassicTabLayout() {
       />
     </Tabs>
   );
-}
-
-export default function TabLayout() {
-  if (isLiquidGlassAvailable()) {
-    return <NativeTabLayout />;
-  }
-  return <ClassicTabLayout />;
 }
