@@ -784,6 +784,35 @@ router.get("/admin/tables/:table", requireAdmin, async (req, res): Promise<void>
   res.json({ rows: safeRows, total: totalRows[0]?.count ?? 0, limit, offset });
 });
 
+// Single-row fetch — used by detail pages (e.g. SiteDetailPage) that need
+// the full row by id rather than a paginated list. Mirrors the list route's
+// users-table redaction so temp passwords / password hashes never leak.
+router.get("/admin/tables/:table/:id", requireAdmin, async (req, res): Promise<void> => {
+  const tableName = String(req.params.table);
+  const id = String(req.params.id);
+  const cfg = getConfig(tableName);
+  if (!cfg) {
+    res.status(404).json({ error: "Not Found", message: `Unknown table '${tableName}'` });
+    return;
+  }
+  const rows = (await db
+    .select()
+    .from(cfg.table)
+    .where(eq((cfg.table as any).id, id))
+    .limit(1)) as Record<string, unknown>[];
+  if (rows.length === 0) {
+    res.status(404).json({ error: "Not Found", message: `${tableName}/${id} not found` });
+    return;
+  }
+  const row = rows[0];
+  if (tableName === "users") {
+    const { passwordHash: _ph, tempPasswordPlain: _tp, ...safe } = row;
+    res.json(safe);
+    return;
+  }
+  res.json(row);
+});
+
 router.post("/admin/tables/:table", requireAdmin, async (req, res): Promise<void> => {
   const tableName = String(req.params.table);
   const cfg = getConfig(tableName);
