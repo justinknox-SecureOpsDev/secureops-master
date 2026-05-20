@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import {
   Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle,
 } from "@/components/ui/dialog";
@@ -54,6 +54,34 @@ export function RepeatingShiftDialog({
   const [notes, setNotes] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // Rate-card state — when the admin picks a site, fetch its per-license-level
+  // rates and auto-apply the one matching the chosen level. Mirrors ShiftDialog
+  // so a recurring series uses the contracted rate, not whatever was in the
+  // default "0" inputs.
+  type SiteRate = { id: string; licenseLevel: number; payRate: string; billRate: string; label: string | null };
+  const [siteRates, setSiteRates] = useState<SiteRate[]>([]);
+  const [siteRateId, setSiteRateId] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!open || !siteId) { setSiteRates([]); return; }
+    let cancelled = false;
+    api<SiteRate[]>(`/admin/sites/${siteId}/rates`)
+      .then((rows) => { if (!cancelled) setSiteRates(rows ?? []); })
+      .catch(() => { if (!cancelled) setSiteRates([]); });
+    return () => { cancelled = true; };
+  }, [open, siteId]);
+
+  // Auto-apply the matching rate as soon as the rate card resolves, or when
+  // the admin changes the level. Only fires if no manual rate override is in
+  // play yet (siteRateId tracks the active card pick).
+  useEffect(() => {
+    if (siteRates.length === 0) return;
+    const match = siteRates.find((r) => r.licenseLevel === Number(licenseLevel));
+    if (!match) return;
+    setPayRate(String(parseFloat(match.payRate)));
+    setBillRate(String(parseFloat(match.billRate)));
+    setSiteRateId(match.id);
+  }, [siteRates, licenseLevel]);
 
   const toggleDay = (d: number) => {
     setDays((prev) => prev.includes(d) ? prev.filter((x) => x !== d) : [...prev, d].sort());
@@ -64,6 +92,7 @@ export function RepeatingShiftDialog({
     setDays([1, 2, 3, 4, 5]); setStartTime("09:00"); setEndTime("17:00");
     setPayRate("0"); setBillRate("0"); setLicenseLevel("2"); setHeadcount("1");
     setNotes(""); setError(null);
+    setSiteRates([]); setSiteRateId(null);
   };
 
   const handleSubmit = async () => {
@@ -85,6 +114,7 @@ export function RepeatingShiftDialog({
             requiredLicenseLevel: Number(licenseLevel),
             headcount: Number(headcount) || 1,
             notes: notes.trim() || null,
+            siteRateId: siteRateId || null,
           },
           recurrence: {
             startDate, untilDate, daysOfWeek: days, startTime, endTime,
@@ -201,11 +231,17 @@ export function RepeatingShiftDialog({
           <div className="grid grid-cols-2 gap-3">
             <div>
               <Label>Pay rate ($/hr)</Label>
-              <Input type="number" step="0.01" value={payRate} onChange={(e) => setPayRate(e.target.value)} />
+              <Input
+                type="number" step="0.01" value={payRate}
+                onChange={(e) => { setPayRate(e.target.value); setSiteRateId(null); }}
+              />
             </div>
             <div>
               <Label>Bill rate ($/hr)</Label>
-              <Input type="number" step="0.01" value={billRate} onChange={(e) => setBillRate(e.target.value)} />
+              <Input
+                type="number" step="0.01" value={billRate}
+                onChange={(e) => { setBillRate(e.target.value); setSiteRateId(null); }}
+              />
             </div>
             <div>
               <Label>Min licence</Label>

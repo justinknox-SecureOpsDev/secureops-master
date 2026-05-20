@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { api } from "@/lib/api";
 import { getTable } from "@/lib/tables";
 import { RowFormDialog } from "@/components/RowFormDialog";
+import { ShiftDialog } from "@/components/ShiftDialog";
 import { RepeatingShiftDialog } from "@/components/RepeatingShiftDialog";
 import { BulkEditSeriesDialog, type BulkSeriesTarget } from "@/components/BulkEditSeriesDialog";
 import { Button } from "@/components/ui/button";
@@ -604,11 +605,10 @@ export default function ShiftsPage() {
         onSaved={() => { setEditSeries(null); setVersion((v) => v + 1); }}
       />
 
-      <RowFormDialog
+      <ShiftDialog
         open={!!editing || creating}
         onOpenChange={(b) => { if (!b) { setEditing(null); setCreating(false); } }}
-        descriptor={descriptor}
-        initial={editing as any}
+        initial={editing as unknown as React.ComponentProps<typeof ShiftDialog>["initial"]}
         onSaved={() => { setEditing(null); setCreating(false); setVersion((v) => v + 1); }}
       />
 

@@ -2,6 +2,7 @@ import { pgTable, text, uuid, timestamp, boolean, numeric, integer, index } from
 import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod/v4";
 import { sitesTable } from "./sites";
+import { siteRatesTable } from "./siteRates";
 
 export const shiftsTable = pgTable("shifts", {
   id: uuid("id").primaryKey().defaultRandom(),
@@ -22,6 +23,10 @@ export const shiftsTable = pgTable("shifts", {
   billableRate: numeric("billable_rate", { precision: 10, scale: 2 }),
   status: text("status").notNull().default("upcoming"),
   requiredLicenseLevel: integer("required_license_level").notNull().default(2),
+  // Optional FK to the site's pay/bill rate card for this license level.
+  // When set on shift create/edit, the shift's payRate + billRate are
+  // populated from this row; admin can still override per-shift.
+  siteRateId: uuid("site_rate_id").references(() => siteRatesTable.id, { onDelete: "set null" }),
   headcount: integer("headcount").notNull().default(1),
   isRepeat: boolean("is_repeat").notNull().default(false),
   repeatPattern: text("repeat_pattern"),

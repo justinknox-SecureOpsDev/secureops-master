@@ -535,6 +535,8 @@ export function SiteDetailPage() {
 
       {site && (
         <div className="p-6 space-y-8">
+          <SiteRateCard siteId={site.id} />
+
           <section>
             <div className="flex items-center justify-between mb-3">
               <h2 className="text-lg font-semibold inline-flex items-center gap-2">
@@ -654,5 +656,229 @@ export function SiteDetailPage() {
         />
       )}
     </div>
+  );
+}
+
+// ============================================================ SITE RATE CARD
+//
+// Per-license-level pay+bill rates for this site. Shifts pull from this card
+// during create/edit (with per-shift override), and invoice generation uses
+// the resulting shift.billRate as the primary rate. Admin-only data — never
+// rendered on officer-facing surfaces (commercial margin info).
+
+type SiteRateRow = {
+  id: string;
+  siteId: string;
+  licenseLevel: number;
+  payRate: string;
+  billRate: string;
+  label: string | null;
+};
+
+const LEVEL_OPTIONS: { value: number; name: string }[] = [
+  { value: 2, name: "L2 Unarmed" },
+  { value: 3, name: "L3 Armed" },
+  { value: 4, name: "L4 / PPO" },
+];
+
+function SiteRateCard({ siteId }: { siteId: string }) {
+  const [rows, setRows] = useState<SiteRateRow[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [err, setErr] = useState<string | null>(null);
+
+  // Draft form state for "add new rate" / "edit existing rate".
+  const [draftLevel, setDraftLevel] = useState<number>(2);
+  const [draftPay, setDraftPay] = useState<string>("");
+  const [draftBill, setDraftBill] = useState<string>("");
+  const [draftLabel, setDraftLabel] = useState<string>("");
+  const [saving, setSaving] = useState(false);
+
+  const load = useCallback(async () => {
+    setLoading(true);
+    setErr(null);
+    try {
+      const data = await api<SiteRateRow[]>(`/admin/sites/${siteId}/rates`);
+      setRows(data ?? []);
+    } catch (e) {
+      setErr((e as Error).message);
+    } finally {
+      setLoading(false);
+    }
+  }, [siteId]);
+
+  useEffect(() => { void load(); }, [load]);
+
+  // Configured levels — keep the picker honest about which slots are free vs
+  // already set (PUT upserts on conflict so re-using a level just edits it,
+  // but pre-selecting an unused level is a friendlier default).
+  const usedLevels = useMemo(() => new Set(rows.map((r) => r.licenseLevel)), [rows]);
+  useEffect(() => {
+    // When the row list changes, nudge the form to the first unused level so
+    // adding a second rate doesn't silently overwrite the first.
+    const firstFree = LEVEL_OPTIONS.find((o) => !usedLevels.has(o.value));
+    if (firstFree && !usedLevels.has(draftLevel) === false) {
+      setDraftLevel(firstFree.value);
+    }
+    // intentionally only depends on the rows snapshot
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [rows]);
+
+  async function saveDraft() {
+    const pay = Number(draftPay);
+    const bill = Number(draftBill);
+    if (!Number.isFinite(pay) || pay < 0 || !Number.isFinite(bill) || bill < 0) {
+      setErr("Pay and bill rates must be non-negative numbers");
+      return;
+    }
+    setSaving(true);
+    setErr(null);
+    try {
+      await api(`/admin/sites/${siteId}/rates`, {
+        method: "PUT",
+        body: JSON.stringify({
+          licenseLevel: draftLevel,
+          payRate: pay,
+          billRate: bill,
+          label: draftLabel.trim() || null,
+        }),
+      });
+      setDraftPay("");
+      setDraftBill("");
+      setDraftLabel("");
+      await load();
+    } catch (e) {
+      setErr((e as Error).message);
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function editExisting(row: SiteRateRow) {
+    // Populate the form with this row so the admin can adjust + re-save
+    // (PUT upserts on the (siteId, level) pair).
+    setDraftLevel(row.licenseLevel);
+    setDraftPay(String(parseFloat(row.payRate)));
+    setDraftBill(String(parseFloat(row.billRate)));
+    setDraftLabel(row.label ?? "");
+  }
+
+  async function removeRow(row: SiteRateRow) {
+    if (!confirm(`Remove the ${LEVEL_OPTIONS.find((o) => o.value === row.licenseLevel)?.name ?? `L${row.licenseLevel}`} rate for this site?`)) return;
+    try {
+      await api(`/admin/site-rates/${row.id}`, { method: "DELETE" });
+      await load();
+    } catch (e) {
+      setErr((e as Error).message);
+    }
+  }
+
+  return (
+    <section>
+      <div className="flex items-center justify-between mb-3">
+        <h2 className="text-lg font-semibold inline-flex items-center gap-2">
+          Rate card by license level
+        </h2>
+        <div className="text-xs text-muted-foreground">
+          Pay (officer) and bill (client) rates per position. Shifts default to these; admin can override per shift.
+        </div>
+      </div>
+
+      {err && (
+        <div className="mb-3 text-sm text-destructive border border-destructive/40 rounded px-3 py-2">{err}</div>
+      )}
+
+      {loading ? (
+        <div className="text-sm text-muted-foreground">Loading…</div>
+      ) : rows.length === 0 ? (
+        <div className="text-sm text-muted-foreground border rounded p-4">
+          No rates configured yet. Add the first license-level rate below — shifts at this site will pick it up automatically.
+        </div>
+      ) : (
+        <div className="border rounded overflow-hidden mb-3">
+          <table className="w-full text-sm">
+            <thead className="bg-muted/50">
+              <tr>
+                <th className="text-left px-3 py-2 font-medium">License level</th>
+                <th className="text-left px-3 py-2 font-medium">Label</th>
+                <th className="text-right px-3 py-2 font-medium">Pay $/hr</th>
+                <th className="text-right px-3 py-2 font-medium">Bill $/hr</th>
+                <th className="text-right px-3 py-2 font-medium">Actions</th>
+              </tr>
+            </thead>
+            <tbody>
+              {rows.map((r) => (
+                <tr key={r.id} className="border-t">
+                  <td className="px-3 py-2">{LEVEL_OPTIONS.find((o) => o.value === r.licenseLevel)?.name ?? `L${r.licenseLevel}`}</td>
+                  <td className="px-3 py-2 text-muted-foreground">{r.label ?? <span className="text-muted-foreground/60">—</span>}</td>
+                  <td className="px-3 py-2 text-right font-mono">${parseFloat(r.payRate).toFixed(2)}</td>
+                  <td className="px-3 py-2 text-right font-mono">${parseFloat(r.billRate).toFixed(2)}</td>
+                  <td className="px-3 py-2 text-right">
+                    <Button variant="ghost" size="sm" onClick={() => editExisting(r)}>
+                      <Pencil className="w-3.5 h-3.5" />
+                    </Button>
+                    <Button variant="ghost" size="sm" onClick={() => removeRow(r)}>
+                      <Trash2 className="w-3.5 h-3.5 text-destructive" />
+                    </Button>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+
+      <div className="border rounded p-3 bg-brand-cream/20">
+        <div className="text-xs font-semibold uppercase tracking-wide text-muted-foreground mb-2">
+          {usedLevels.has(draftLevel) ? "Update rate" : "Add rate"}
+        </div>
+        <div className="grid grid-cols-1 md:grid-cols-5 gap-2 items-end">
+          <div>
+            <label className="text-xs text-muted-foreground">License level</label>
+            <select
+              value={String(draftLevel)}
+              onChange={(e) => setDraftLevel(Number(e.target.value))}
+              className="w-full border rounded px-2 py-2 text-sm bg-background"
+            >
+              {LEVEL_OPTIONS.map((o) => (
+                <option key={o.value} value={String(o.value)}>
+                  {o.name}{usedLevels.has(o.value) ? " (set)" : ""}
+                </option>
+              ))}
+            </select>
+          </div>
+          <div>
+            <label className="text-xs text-muted-foreground">Label (optional)</label>
+            <input
+              value={draftLabel}
+              onChange={(e) => setDraftLabel(e.target.value)}
+              placeholder="e.g. Day post"
+              className="w-full border rounded px-2 py-2 text-sm bg-background"
+            />
+          </div>
+          <div>
+            <label className="text-xs text-muted-foreground">Pay $/hr</label>
+            <input
+              type="number" min="0" step="0.01"
+              value={draftPay}
+              onChange={(e) => setDraftPay(e.target.value)}
+              className="w-full border rounded px-2 py-2 text-sm bg-background"
+            />
+          </div>
+          <div>
+            <label className="text-xs text-muted-foreground">Bill $/hr</label>
+            <input
+              type="number" min="0" step="0.01"
+              value={draftBill}
+              onChange={(e) => setDraftBill(e.target.value)}
+              className="w-full border rounded px-2 py-2 text-sm bg-background"
+            />
+          </div>
+          <Button onClick={saveDraft} disabled={saving || draftPay === "" || draftBill === ""}>
+            <Plus className="w-3.5 h-3.5 mr-1" />
+            {saving ? "Saving…" : usedLevels.has(draftLevel) ? "Update" : "Add"}
+          </Button>
+        </div>
+      </div>
+    </section>
   );
 }

@@ -157,19 +157,22 @@ router.post("/invoices/generate", requireAdmin, async (req, res): Promise<void> 
     return;
   }
 
-  // Resolve the per-entry billable rate. Prefer the site's contracted
-  // rate; only fall back to the shift's billRate if the site has none
-  // (legacy data). If neither exists we refuse the whole invoice rather
-  // than silently sending the client a $0 line.
+  // Resolve the per-entry billable rate. Prefer the shift's billRate —
+  // since the new per-site rate card populates it from the site+license
+  // combo at shift-create time, this gives the right answer for L2 vs L3
+  // vs PPO shifts at the same site (which the single site.defaultBillRate
+  // can't express). Fall back to site.defaultBillRate if the shift has no
+  // rate set (legacy / ad-hoc geo clock-ins with no shiftId). If neither
+  // exists we refuse the whole invoice rather than silently sending the
+  // client a $0 line.
   type Priced = { hours: number; rate: number; officerName: string };
   const priced: Priced[] = [];
   const unrated: string[] = [];
   for (const e of entries) {
     const hours = parseFloat(String(e.hoursWorked ?? "0"));
     if (!isFinite(hours) || hours <= 0) continue; // skip open/zero entries
-    const rate = siteBillRate > 0
-      ? siteBillRate
-      : parseFloat(String(e.shiftBillRate ?? "0"));
+    const shiftBill = parseFloat(String(e.shiftBillRate ?? "0"));
+    const rate = shiftBill > 0 ? shiftBill : siteBillRate;
     const officerName = [e.employeeFirst, e.employeeLast].filter(Boolean).join(" ") || "Unassigned officer";
     if (rate <= 0) {
       unrated.push(officerName);
@@ -180,7 +183,7 @@ router.post("/invoices/generate", requireAdmin, async (req, res): Promise<void> 
   if (priced.length === 0) {
     res.status(400).json({
       error: "Bad Request",
-      message: "Cannot generate invoice: no bill rate on file. Set the site's default bill rate, then retry.",
+      message: "Cannot generate invoice: no bill rate on file. Set a per-license-level rate on the site's rate card, or fall back to the site's default bill rate.",
     });
     return;
   }

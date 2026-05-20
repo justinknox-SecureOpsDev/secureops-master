@@ -9,6 +9,7 @@ import {
   employeesTable,
   clientsTable,
   sitesTable,
+  siteRatesTable,
   shiftsTable,
   shiftAssignmentsTable,
   timeEntriesTable,
@@ -1355,6 +1356,66 @@ router.post("/admin/users/bulk-invite", requireAdmin, async (req, res): Promise<
     failed,
     counts: { total: targets.length, sent: sent.length, failed: failed.length },
   });
+});
+
+// ============================================================ SITE RATE CARDS
+//
+// Per-site pay+bill rate card keyed by license level (L2 unarmed / L3 armed /
+// L4 PPO). Shift create/edit pulls these into the form so each shift's pay
+// and bill amounts reflect the site + position combo, with per-shift override
+// still available. Admin-only — these are commercial rates and exposing them
+// to officers would leak each site's margin.
+
+// GET /admin/sites/:id/rates — list rate card rows for a site
+router.get("/admin/sites/:id/rates", requireAdmin, async (req, res): Promise<void> => {
+  const siteId = req.params.id as string;
+  const rows = await db
+    .select()
+    .from(siteRatesTable)
+    .where(eq(siteRatesTable.siteId, siteId))
+    .orderBy(asc(siteRatesTable.licenseLevel));
+  res.json(rows);
+});
+
+// PUT /admin/sites/:id/rates — upsert a row by (siteId, licenseLevel).
+// Body: { licenseLevel: 2|3|4, payRate: number|string, billRate: number|string, label?: string }
+router.put("/admin/sites/:id/rates", requireAdmin, async (req, res): Promise<void> => {
+  const siteId = req.params.id as string;
+  const { licenseLevel, payRate, billRate, label } = req.body ?? {};
+  const lvl = Number(licenseLevel);
+  if (![2, 3, 4].includes(lvl)) {
+    res.status(400).json({ error: "Bad Request", message: "licenseLevel must be 2, 3, or 4" });
+    return;
+  }
+  const pay = Number(payRate);
+  const bill = Number(billRate);
+  if (!Number.isFinite(pay) || pay < 0 || !Number.isFinite(bill) || bill < 0) {
+    res.status(400).json({ error: "Bad Request", message: "payRate and billRate must be non-negative numbers" });
+    return;
+  }
+  const [site] = await db.select({ id: sitesTable.id }).from(sitesTable).where(eq(sitesTable.id, siteId)).limit(1);
+  if (!site) { res.status(404).json({ error: "Not Found", message: "Site not found" }); return; }
+  const cleanLabel = typeof label === "string" && label.trim() ? label.trim().slice(0, 80) : null;
+
+  const [row] = await db
+    .insert(siteRatesTable)
+    .values({ siteId, licenseLevel: lvl, payRate: String(pay), billRate: String(bill), label: cleanLabel })
+    .onConflictDoUpdate({
+      target: [siteRatesTable.siteId, siteRatesTable.licenseLevel],
+      set: { payRate: String(pay), billRate: String(bill), label: cleanLabel, updatedAt: new Date() },
+    })
+    .returning();
+  res.json(row);
+});
+
+// DELETE /admin/site-rates/:id — remove a single rate-card row.
+// Shifts pointing at it have siteRateId set null (FK on delete: set null);
+// their snapshotted payRate/billRate are intentionally preserved.
+router.delete("/admin/site-rates/:id", requireAdmin, async (req, res): Promise<void> => {
+  const id = req.params.id as string;
+  const deleted = await db.delete(siteRatesTable).where(eq(siteRatesTable.id, id)).returning();
+  if (deleted.length === 0) { res.status(404).json({ error: "Not Found", message: "Rate not found" }); return; }
+  res.json({ ok: true });
 });
 
 // Read-only list for the Invitations page. Returns non-admin users with

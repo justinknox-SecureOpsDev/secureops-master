@@ -198,6 +198,7 @@ router.post("/shifts", requireAdmin, async (req, res): Promise<void> => {
     startTime, endTime,
     payRate, billRate, hourlyRate, billableRate,
     isRepeat, repeatPattern, notes, employeeIds, requiredLicenseLevel, headcount,
+    siteRateId,
   } = req.body;
 
   // Resolve site to populate clientName/location automatically.
@@ -244,6 +245,7 @@ router.post("/shifts", requireAdmin, async (req, res): Promise<void> => {
     status: "upcoming",
     requiredLicenseLevel: lvl,
     headcount: hc,
+    siteRateId: siteRateId || null,
   }).returning();
 
   if (employeeIds && Array.isArray(employeeIds) && employeeIds.length > 0) {
@@ -314,7 +316,7 @@ router.post("/shifts/repeat", requireAdmin, async (req, res): Promise<void> => {
     return;
   }
   const {
-    title, siteId, payRate, billRate, requiredLicenseLevel, headcount, notes,
+    title, siteId, payRate, billRate, requiredLicenseLevel, headcount, notes, siteRateId,
   } = base;
   const { startDate, untilDate, daysOfWeek, startTime, endTime } = recurrence;
   const tz: string = typeof recurrence.tz === "string" && recurrence.tz ? recurrence.tz : "America/Chicago";
@@ -428,6 +430,7 @@ router.post("/shifts/repeat", requireAdmin, async (req, res): Promise<void> => {
       status: "upcoming" as const,
       requiredLicenseLevel: lvl,
       headcount: hc,
+      siteRateId: siteRateId || null,
     }));
 
   const inserted = toInsert.length > 0
@@ -638,7 +641,7 @@ router.get("/shifts/:id", requireAuth, async (req, res): Promise<void> => {
 
 router.put("/shifts/:id", requireAdmin, async (req, res): Promise<void> => {
   const id = Array.isArray(req.params.id) ? req.params.id[0] : req.params.id;
-  const { title, siteId, startTime, endTime, payRate, billRate, hourlyRate, billableRate, status, notes, requiredLicenseLevel, headcount } = req.body;
+  const { title, siteId, startTime, endTime, payRate, billRate, hourlyRate, billableRate, status, notes, requiredLicenseLevel, headcount, siteRateId } = req.body;
   const updates: Record<string, unknown> = {};
   if (title) updates.title = title;
   if (siteId) {
@@ -665,6 +668,8 @@ router.put("/shifts/:id", requireAdmin, async (req, res): Promise<void> => {
     updates.requiredLicenseLevel = Number(requiredLicenseLevel);
   }
   if (headcount !== undefined) updates.headcount = Math.max(1, Number(headcount) || 1);
+  // Explicit null clears the FK (admin selected "Custom" rate); undefined leaves it alone.
+  if (siteRateId !== undefined) updates.siteRateId = siteRateId || null;
 
   const [shift] = await db.update(shiftsTable).set(updates).where(eq(shiftsTable.id, id)).returning();
   if (!shift) { res.status(404).json({ error: "Not Found" }); return; }
