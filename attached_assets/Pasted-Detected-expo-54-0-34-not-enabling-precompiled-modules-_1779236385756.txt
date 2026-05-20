@@ -1,0 +1,59 @@
+Detected expo=54.0.34; not enabling precompiled modules use because precompiled modules require expo>=55.0.21.
+Using Expo modules
+[Expo] Enabling modular headers for pod ExpoModulesCore
+[Expo] Enabling modular headers for pod React-RCTAppDelegate
+[Expo] Enabling modular headers for pod React-RCTFabric
+[Expo] Enabling modular headers for pod ReactAppDependencyProvider
+[Expo] Enabling modular headers for pod React-Core
+[Expo] Enabling modular headers for pod ReactCodegen
+[Expo] Enabling modular headers for pod RCTRequired
+[Expo] Enabling modular headers for pod RCTTypeSafety
+[Expo] Enabling modular headers for pod ReactCommon
+[Expo] Enabling modular headers for pod React-NativeModulesApple
+[Expo] Enabling modular headers for pod Yoga
+[Expo] Enabling modular headers for pod React-Fabric
+[Expo] Enabling modular headers for pod React-graphics
+[Expo] Enabling modular headers for pod React-utils
+[Expo] Enabling modular headers for pod React-featureflags
+[Expo] Enabling modular headers for pod React-debug
+[Expo] Enabling modular headers for pod React-ImageManager
+[Expo] Enabling modular headers for pod React-rendererdebug
+[Expo] Enabling modular headers for pod React-jsi
+[Expo] Enabling modular headers for pod React-renderercss
+[Expo] Enabling modular headers for pod hermes-engine
+[Expo] Enabling modular headers for pod glog
+[Expo] Enabling modular headers for pod boost
+[Expo] Enabling modular headers for pod DoubleConversion
+[Expo] Enabling modular headers for pod fast_float
+[Expo] Enabling modular headers for pod fmt
+[Expo] Enabling modular headers for pod RCT-Folly
+[Expo] Enabling modular headers for pod SocketRocket
+[Expo] Enabling modular headers for pod SDWebImage
+[Expo] Enabling modular headers for pod SDWebImageAVIFCoder
+[Expo] Enabling modular headers for pod SDWebImageSVGCoder
+[Expo] Enabling modular headers for pod SDWebImageWebPCoder
+[Expo] Enabling modular headers for pod libavif
+[Expo] Enabling modular headers for pod RNScreens
+[Expo] Enabling modular headers for pod EXStructuredHeaders
+[Expo] Enabling modular headers for pod EXUpdatesInterface
+[Expo] Enabling modular headers for pod EXManifests
+[Expo] Enabling modular headers for pod EASClient
+[Expo] Enabling modular headers for pod ReachabilitySwift
+[Reanimated] react-native-worklets package isn't installed. Please install a version between 0.5.0 and 0.8 to use Reanimated 4.1.7.
+[Reanimated] Failed to validate worklets version
+[!] Invalid `Podfile` file: 
+[!] Invalid `RNReanimated.podspec` file: [Reanimated] Failed to validate worklets version.
+ #  from /Users/expo/workingdir/build/node_modules/.pnpm/react-native-reanimated@4.1.7_react-native@0.81.5_@babel+core@7.29.0_@types+react@19.1.17_react@19.1.0__react@19.1.0/node_modules/react-native-reanimated/RNReanimated.podspec:5
+ #  -------------------------------------------
+ #  reanimated_package_json = JSON.parse(File.read(File.join(__dir__, "package.json")))
+ >  $config = find_config()
+ #  assert_minimal_react_native_version($config)
+ #  -------------------------------------------
+.
+ #  from /Users/expo/workingdir/build/artifacts/security-ops/ios/Podfile:42
+ #  -------------------------------------------
+ #  
+ >    config = use_native_modules!(config_command)
+ #  
+ #  -------------------------------------------
+pod install exited with non-zero code: 1
