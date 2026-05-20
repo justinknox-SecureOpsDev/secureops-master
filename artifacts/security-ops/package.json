@@ -10,7 +10,7 @@
     "build": "rm -rf web-dist && pnpm exec expo export --platform web --output-dir web-dist",
     "serve": "node server/serve-web.js",
     "typecheck": "tsc -p tsconfig.json --noEmit",
-    "submit:ios": "pnpm exec eas submit --platform ios --profile production --latest"
+    "submit:ios": "./node_modules/.bin/eas submit --platform ios --profile production --latest"
   },
   "devDependencies": {
     "@babel/core": "^7.25.2",
