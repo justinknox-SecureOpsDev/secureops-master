@@ -231,12 +231,6 @@ export default function LoginScreen() {
         <Text style={[styles.footer, { color: colors.mutedForeground }]}>
           © Williams Council Security Group
         </Text>
-        <Text
-          selectable
-          style={{ color: colors.primary, fontSize: 11, marginTop: 6, textAlign: "center", paddingHorizontal: 8 }}
-        >
-          api={String(API_BASE_URL || "(empty)")} len={String((API_BASE_URL || "").length)}
-        </Text>
       </View>
     </SafeAreaView>
   );
