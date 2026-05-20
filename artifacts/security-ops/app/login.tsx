@@ -233,9 +233,9 @@ export default function LoginScreen() {
         </Text>
         <Text
           selectable
-          style={[styles.footer, { color: colors.mutedForeground, fontSize: 9, marginTop: 4 }]}
+          style={{ color: colors.primary, fontSize: 11, marginTop: 6, textAlign: "center", paddingHorizontal: 8 }}
         >
-          api: {API_BASE_URL}
+          api={String(API_BASE_URL || "(empty)")} len={String((API_BASE_URL || "").length)}
         </Text>
       </View>
     </SafeAreaView>

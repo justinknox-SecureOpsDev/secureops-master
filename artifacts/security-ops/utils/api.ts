@@ -12,25 +12,20 @@ import { AUTH_TOKEN_KEY } from "@/contexts/AuthContext";
  *      set) still talks to the real API instead of "https://undefined/api".
  */
 function resolveApiBaseUrl(): string {
-  // On web (browser), always use the same origin so requests are never
-  // cross-origin — this works correctly in dev, staging, and production
-  // without any env var, and avoids CORS rejections on the deployed API.
-  if (typeof window !== "undefined" && window.location?.origin) {
+  const HARDCODED_PROD = "https://security-operations-suite.replit.app/api";
+  // Web (browser) — use same origin so we are never cross-origin.
+  // navigator.product === "ReactNative" tells us we are NOT in a real browser
+  // even when window/location are polyfilled by Expo.
+  const isReactNative =
+    typeof navigator !== "undefined" &&
+    (navigator as any).product === "ReactNative";
+  if (!isReactNative && typeof window !== "undefined" && window.location?.origin) {
     return `${window.location.origin}/api`;
   }
-  // On native (React Native / Expo Go): EXPO_PUBLIC_API_BASE_URL takes
-  // priority — set this to the deployed production URL so physical devices
-  // can reach the API without going through the workspace-internal domain.
-  const explicit = process.env.EXPO_PUBLIC_API_BASE_URL?.replace(/\/+$/, "");
-  if (explicit) {
-    return /\/api$/.test(explicit) ? explicit : `${explicit}/api`;
-  }
-  // Fall back to EXPO_PUBLIC_DOMAIN injected by the dev workflow script.
-  const domain = process.env.EXPO_PUBLIC_DOMAIN?.replace(/^https?:\/\//, "").replace(/\/+$/, "");
-  if (domain && domain !== "undefined") {
-    return `https://${domain}/api`;
-  }
-  return "https://security-operations-suite.replit.app/api";
+  // Native — always return the hardcoded production URL. Env vars are
+  // intentionally ignored here because OTA updates have repeatedly shipped
+  // without EXPO_PUBLIC_* values inlined, breaking login.
+  return HARDCODED_PROD;
 }
 
 export const API_BASE_URL = resolveApiBaseUrl();
