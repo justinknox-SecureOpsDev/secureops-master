@@ -34,7 +34,7 @@
     "production": {
       "ios": {
         "appleId": "justin.knox@williamscouncil.com",
-        "ascAppId": "6771144609"
+        "ascAppId": "6771162436"
       },
       "android": {
         "serviceAccountKeyPath": "./google-play-service-account.json",
