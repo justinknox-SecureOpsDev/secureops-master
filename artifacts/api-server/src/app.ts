@@ -52,8 +52,12 @@ app.use(
 //   - frame-ancestors: 'none' (no embedding the portal anywhere)
 const CSP_DIRECTIVES = {
   defaultSrc: ["'self'"],
-  scriptSrc: ["'self'"],
-  styleSrc: ["'self'", "'unsafe-inline'", "https://fonts.googleapis.com"],
+  // unpkg.com hosts the Leaflet build that the live-map srcdoc iframes load
+  // (admin Dispatch, SiteDetailPage, mobile LiveOfficerMap, OfficerProfile).
+  // The iframes inherit the parent CSP, so without these origins the map
+  // renders an empty blue tile background.
+  scriptSrc: ["'self'", "https://unpkg.com"],
+  styleSrc: ["'self'", "'unsafe-inline'", "https://fonts.googleapis.com", "https://unpkg.com"],
   fontSrc: ["'self'", "https://fonts.gstatic.com", "data:"],
   imgSrc: ["'self'", "data:", "blob:", "https:"],
   // mediaSrc covers <audio>/<video>. Radio playback streams recordings
