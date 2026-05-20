@@ -73,6 +73,10 @@ export function broadcastToRoom(
   }
 }
 
+export function getConnectedUserIds(): ReadonlySet<string> {
+  return new Set(connections.keys());
+}
+
 export function sendToUser(userId: string, payload: object) {
   const sockets = connections.get(userId);
   if (!sockets) return;

@@ -344,6 +344,45 @@ export default function PayrollBoardPage() {
           <Label className="text-xs">To</Label>
           <Input type="date" className="h-9" value={to} onChange={(e) => setTo(e.target.value)} />
         </div>
+        <div>
+          <Label className="text-xs">Quick range</Label>
+          <div className="flex gap-1 mt-0.5">
+            {[
+              { label: "This wk", days: 0 },
+              { label: "Last wk", days: -7 },
+              { label: "Last 2 wks", days: -14 },
+              { label: "This mo", days: -30 },
+            ].map(({ label, days }) => (
+              <button
+                key={label}
+                type="button"
+                className="px-2 py-1 text-xs border rounded hover:bg-accent"
+                onClick={() => {
+                  const now = new Date();
+                  const dayOfWeek = now.getDay();
+                  const monday = new Date(now);
+                  monday.setDate(now.getDate() - ((dayOfWeek + 6) % 7));
+                  const start = new Date(monday);
+                  start.setDate(monday.getDate() + days);
+                  const end = new Date(monday);
+                  end.setDate(monday.getDate() + 6);
+                  const iso = (d: Date) => d.toISOString().slice(0, 10);
+                  setFrom(iso(start));
+                  setTo(iso(end));
+                }}
+              >
+                {label}
+              </button>
+            ))}
+            <button
+              type="button"
+              className="px-2 py-1 text-xs border rounded hover:bg-accent"
+              onClick={() => { setFrom(""); setTo(""); }}
+            >
+              Clear
+            </button>
+          </div>
+        </div>
         <Button variant="outline" onClick={() => void reload()} disabled={loading}>
           {loading ? <Loader2 className="w-4 h-4 animate-spin" /> : "Refresh"}
         </Button>

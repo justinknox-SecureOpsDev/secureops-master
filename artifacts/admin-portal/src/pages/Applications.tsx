@@ -460,6 +460,10 @@ export function ApplicationsPage() {
             setItems((arr) => arr.map((x) => x.id === resp.application.id ? resp.application : x));
             setRequestInfo(resp);
           }}
+          onDeleted={(id) => {
+            setItems((arr) => arr.filter((x) => x.id !== id));
+            setOpenId(null);
+          }}
         />
       )}
       {approval && (
@@ -500,7 +504,7 @@ type BatchResult = {
 };
 
 function ApplicationDialog({
-  app, onClose, onUpdated, onApproved, onRejected, onInfoRequested,
+  app, onClose, onUpdated, onApproved, onRejected, onInfoRequested, onDeleted,
 }: {
   app: Application;
   onClose: () => void;
@@ -508,11 +512,23 @@ function ApplicationDialog({
   onApproved: (resp: ApproveResp) => void;
   onRejected: (resp: RejectResp) => void;
   onInfoRequested: (resp: RequestInfoResp) => void;
+  onDeleted: (id: string) => void;
 }) {
   const [notes, setNotes] = useState(app.reviewerNotes ?? "");
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [showRequestInfo, setShowRequestInfo] = useState(false);
+  const [confirmDelete, setConfirmDelete] = useState(false);
+
+  async function handleDelete() {
+    setBusy("delete"); setError(null);
+    try {
+      await api(`/admin/applications/${app.id}`, { method: "DELETE" });
+      onDeleted(app.id);
+      onClose();
+    } catch (e) { setError((e as Error).message); }
+    finally { setBusy(null); setConfirmDelete(false); }
+  }
 
   async function action(kind: "review" | "reject" | "approve") {
     setBusy(kind); setError(null);
@@ -611,6 +627,25 @@ function ApplicationDialog({
         {error && <div className="text-sm text-destructive bg-destructive/5 p-2 rounded border border-destructive/20">{error}</div>}
         <DialogFooter className="gap-2 flex-wrap">
           <Button variant="ghost" onClick={onClose}>Close</Button>
+          {app.status !== "approved" && !confirmDelete && (
+            <Button
+              variant="outline"
+              className="text-destructive border-destructive/40 hover:bg-destructive/5 mr-auto"
+              disabled={!!busy}
+              onClick={() => setConfirmDelete(true)}
+            >
+              Delete applicant
+            </Button>
+          )}
+          {confirmDelete && (
+            <div className="flex items-center gap-2 mr-auto">
+              <span className="text-sm text-destructive">Permanently delete this applicant?</span>
+              <Button variant="destructive" size="sm" disabled={busy === "delete"} onClick={handleDelete}>
+                {busy === "delete" ? "Deleting…" : "Yes, delete"}
+              </Button>
+              <Button variant="ghost" size="sm" onClick={() => setConfirmDelete(false)}>Cancel</Button>
+            </div>
+          )}
           {app.status !== "approved" && app.status !== "rejected" && (
             <Button variant="outline" disabled={!!busy} onClick={() => action("review")}>
               {busy === "review" ? "…" : "Mark under review"}

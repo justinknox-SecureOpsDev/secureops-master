@@ -12,6 +12,7 @@ import {
 } from "@workspace/db";
 import { requireAuth, requireAdmin } from "../middlewares/auth";
 import { broadcastToRoom } from "../lib/wsManager";
+import { sendPushToUsers } from "../lib/push";
 
 const router: IRouter = Router();
 
@@ -466,6 +467,27 @@ router.post("/chat/rooms/:id/messages", requireAuth, async (req, res): Promise<v
 
   const members = await resolveRoomMembers(room);
   broadcastToRoom(id, broadcastPayload, members === null ? {} : { allowedUserIds: members });
+
+  // Push notification to members who are not currently connected via WS.
+  // Skip announcements (members=null means broadcast to all — too broad for push).
+  if (members !== null && members.size > 0) {
+    const { getConnectedUserIds } = await import("../lib/wsManager");
+    const connectedIds = getConnectedUserIds();
+    const pushRecipients = Array.from(members).filter(
+      (uid) => uid !== req.user!.userId && !connectedIds.has(uid),
+    );
+    if (pushRecipients.length > 0) {
+      const senderName = user ? `${user.firstName} ${user.lastName}` : "Someone";
+      const isDirect = room.type === "direct";
+      const preview = content.trim().slice(0, 100);
+      void sendPushToUsers(pushRecipients, {
+        title: isDirect ? senderName : `#${room.name}`,
+        body: isDirect ? preview : `${senderName}: ${preview}`,
+        data: { roomId: id, type: "chat_message" },
+      });
+    }
+  }
+
   res.status(201).json(broadcastPayload.message);
 });
 

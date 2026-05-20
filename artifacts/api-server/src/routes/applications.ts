@@ -834,6 +834,19 @@ router.post("/admin/applications/:id/reject", requireAdmin, async (req, res): Pr
   res.json({ ...application, emailSent });
 });
 
+router.delete("/admin/applications/:id", requireAdmin, async (req, res): Promise<void> => {
+  const appId = req.params.id as string;
+  const [app] = await db.select().from(applicationsTable).where(eq(applicationsTable.id, appId)).limit(1);
+  if (!app) { res.status(404).json({ error: "Not Found", message: "Application not found" }); return; }
+  if (app.status === "approved") {
+    res.status(409).json({ error: "Conflict", message: "Approved applications cannot be deleted. Manage the employee record instead." });
+    return;
+  }
+  await db.delete(applicationAmendmentTokensTable).where(eq(applicationAmendmentTokensTable.applicationId, appId));
+  await db.delete(applicationsTable).where(eq(applicationsTable.id, appId));
+  res.status(204).end();
+});
+
 router.post("/admin/applications/:id/approve", requireAdmin, async (req, res): Promise<void> => {
   const parsed = AdminApproveApplicationBody.safeParse(req.body ?? {});
   if (!parsed.success) {
