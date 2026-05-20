@@ -500,8 +500,15 @@ export function DataGrid({
                 <TableCell className="text-right">
                   {descriptor.name === "sites" && (
                     <Link href={`/sites/${(r as any).id}`}>
-                      <Button variant="ghost" size="icon" title="Open site detail" aria-label="Open site detail">
-                        <ExternalLink className="w-4 h-4" />
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        title="Open site detail (rate card, checkpoints, geofence)"
+                        aria-label="Open site detail"
+                        className="mr-1 h-8"
+                      >
+                        <ExternalLink className="w-3.5 h-3.5 mr-1" />
+                        Open
                       </Button>
                     </Link>
                   )}
