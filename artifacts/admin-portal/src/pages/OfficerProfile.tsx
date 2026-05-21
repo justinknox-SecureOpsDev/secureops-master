@@ -165,7 +165,24 @@ const om = L.circleMarker([D.officer.lat, D.officer.lng], {
   radius: 10, color:'#10b981', fillColor:'#10b981', fillOpacity:0.9, weight:3,
 }).bindPopup(txt(D.officer.label, D.officer.sub));
 om.addTo(group);
-map.fitBounds(group.getBounds().pad(0.4), { maxZoom: 16 });
+// Compute fit bounds manually instead of group.getBounds(). FeatureGroup
+// iterates child layers and calls .getBounds() on each, which for L.circle
+// hits Circle.js:62 (this._map.layerPointToLatLng) and has thrown
+// "Cannot read properties of undefined" in this sandboxed iframe even after
+// .addTo(group). A lat/lng box, expanded by site radius, is bulletproof.
+const _bb = L.latLngBounds([]);
+_bb.extend([D.officer.lat, D.officer.lng]);
+if (D.trail && D.trail.length) {
+  D.trail.forEach(function(p){ _bb.extend([p.lat, p.lng]); });
+}
+if (D.site) {
+  var _cosLat = Math.cos(D.site.lat * Math.PI / 180);
+  var _dLat = D.radiusMeters / 111320;
+  var _dLng = D.radiusMeters / (111320 * Math.max(0.01, _cosLat));
+  _bb.extend([D.site.lat - _dLat, D.site.lng - _dLng]);
+  _bb.extend([D.site.lat + _dLat, D.site.lng + _dLng]);
+}
+if (_bb.isValid()) map.fitBounds(_bb.pad(0.4), { maxZoom: 16 });
 </script></body></html>`;
 }
 

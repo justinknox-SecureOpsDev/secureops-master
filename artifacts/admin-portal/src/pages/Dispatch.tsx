@@ -1266,7 +1266,24 @@ if(pts.length){
     m.bindTooltip(tip(p.label, p.sub), { direction:'top', offset:[0,-6], opacity:0.95 });
     m.addTo(group);
   });
-  map.fitBounds(group.getBounds().pad(0.3), { maxZoom: 14 });
+  // Compute fit bounds manually instead of group.getBounds(). FeatureGroup
+  // iterates child layers and calls .getBounds() on each, which for L.circle
+  // hits Circle.js:62 (this._map.layerPointToLatLng) and has thrown
+  // "Cannot read properties of undefined" in this sandboxed iframe even after
+  // .addTo(group). A lat/lng box, expanded by site radii, is bulletproof.
+  const _bb = L.latLngBounds([]);
+  pts.forEach(function(p){
+    _bb.extend([p.lat, p.lng]);
+    if (p.kind === 'site') {
+      var rm = resolveRadiusM(p);
+      var cosLat = Math.cos(p.lat * Math.PI / 180);
+      var dLat = rm / 111320;
+      var dLng = rm / (111320 * Math.max(0.01, cosLat));
+      _bb.extend([p.lat - dLat, p.lng - dLng]);
+      _bb.extend([p.lat + dLat, p.lng + dLng]);
+    }
+  });
+  if (_bb.isValid()) map.fitBounds(_bb.pad(0.3), { maxZoom: 14 });
 }
 </script></body></html>`;
 }

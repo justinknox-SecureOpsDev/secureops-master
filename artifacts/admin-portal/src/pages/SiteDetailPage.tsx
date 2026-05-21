@@ -184,7 +184,17 @@ window.addEventListener('message', (ev) => {
   if (d.type === 'wcsg:geofence-saved') paintReadout('');
   else if (d.type === 'wcsg:geofence-save-failed') paintReadout('error');
 });
-map.fitBounds(circle.getBounds().pad(0.3), { maxZoom: 17 });
+// Compute fit bounds manually instead of circle.getBounds(). The Leaflet
+// 1.9.4 Circle.getBounds() path (Circle.js:62) reads this._map.layerPointToLatLng
+// and has hit "Cannot read properties of undefined" in this sandboxed iframe
+// even after the circle is .addTo(map)'d. Manual lat/lng box is bulletproof.
+const _cosLat = Math.cos(center.lat * Math.PI / 180);
+const _dLat = radiusM / 111320;
+const _dLng = radiusM / (111320 * Math.max(0.01, _cosLat));
+map.fitBounds(L.latLngBounds(
+  [center.lat - _dLat, center.lng - _dLng],
+  [center.lat + _dLat, center.lng + _dLng],
+).pad(0.3), { maxZoom: 17 });
 </script></body></html>`;
 }
 
