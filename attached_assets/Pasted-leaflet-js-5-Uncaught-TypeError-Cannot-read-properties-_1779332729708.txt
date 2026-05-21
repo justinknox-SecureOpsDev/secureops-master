@@ -1,0 +1,171 @@
+leaflet.js:5 Uncaught TypeError: Cannot read properties of undefined (reading 'layerPointToLatLng')
+getBounds @ leaflet.js:5
+getBounds @ leaflet.js:5
+(anonymous) @ about:srcdoc:116
+leaflet.js:5 Uncaught TypeError: Cannot read properties of undefined (reading 'layerPointToLatLng')
+getBounds @ leaflet.js:5
+(anonymous) @ about:srcdoc:94
+leaflet.js:5 Uncaught Error: Set map center and zoom first.
+_checkIfLoaded @ leaflet.js:5
+getCenter @ leaflet.js:5
+_animMoveEnd @ leaflet.js:5
+fire @ leaflet.js:5
+_onPanTransitionEnd @ leaflet.js:5
+fire @ leaflet.js:5
+_complete @ leaflet.js:5
+_step @ leaflet.js:5
+_animate @ leaflet.js:5
+requestAnimationFrame
+x @ leaflet.js:5
+_animate @ leaflet.js:5
+requestAnimationFrame
+x @ leaflet.js:5
+_animate @ leaflet.js:5
+requestAnimationFrame
+x @ leaflet.js:5
+_animate @ leaflet.js:5
+requestAnimationFrame
+x @ leaflet.js:5
+_animate @ leaflet.js:5
+requestAnimationFrame
+x @ leaflet.js:5
+_animate @ leaflet.js:5
+requestAnimationFrame
+x @ leaflet.js:5
+_animate @ leaflet.js:5
+requestAnimationFrame
+x @ leaflet.js:5
+_animate @ leaflet.js:5
+requestAnimationFrame
+x @ leaflet.js:5
+_animate @ leaflet.js:5
+requestAnimationFrame
+x @ leaflet.js:5
+_animate @ leaflet.js:5
+requestAnimationFrame
+x @ leaflet.js:5
+_animate @ leaflet.js:5
+requestAnimationFrame
+x @ leaflet.js:5
+_animate @ leaflet.js:5
+run @ leaflet.js:5
+panBy @ leaflet.js:5
+(anonymous) @ leaflet.js:5
+requestAnimationFrame
+x @ leaflet.js:5
+_onDragEnd @ leaflet.js:5
+fire @ leaflet.js:5
+finishDrag @ leaflet.js:5
+_onUp @ leaflet.js:5
+o @ leaflet.js:5
+leaflet.js:5 Uncaught TypeError: Cannot read properties of undefined (reading 'layerPointToLatLng')
+getBounds @ leaflet.js:5
+getBounds @ leaflet.js:5
+(anonymous) @ about:srcdoc:116
+dispatch:1 Uncaught (in promise) Error: A listener indicated an asynchronous response by returning true, but the message channel closed before a response was received
+dispatch:1 Uncaught (in promise) Error: A listener indicated an asynchronous response by returning true, but the message channel closed before a response was received
+dispatch:1 Uncaught (in promise) Error: A listener indicated an asynchronous response by returning true, but the message channel closed before a response was received
+dispatch:1 Uncaught (in promise) Error: A listener indicated an asynchronous response by returning true, but the message channel closed before a response was received
+dispatch:1 Uncaught (in promise) Error: A listener indicated an asynchronous response by returning true, but the message channel closed before a response was received
+dispatch:1 Uncaught (in promise) Error: A listener indicated an asynchronous response by returning true, but the message channel closed before a response was received
+dispatch:1 Uncaught (in promise) Error: A listener indicated an asynchronous response by returning true, but the message channel closed before a response was received
+dispatch:1 Uncaught (in promise) Error: A listener indicated an asynchronous response by returning true, but the message channel closed before a response was received
+leaflet.js:5 Uncaught Error: Set map center and zoom first.
+_checkIfLoaded @ leaflet.js:5
+getCenter @ leaflet.js:5
+_animMoveEnd @ leaflet.js:5
+fire @ leaflet.js:5
+_onDragEnd @ leaflet.js:5
+fire @ leaflet.js:5
+finishDrag @ leaflet.js:5
+_onUp @ leaflet.js:5
+o @ leaflet.js:5
+Circle.js:62 Uncaught TypeError: Cannot read properties of undefined (reading 'layerPointToLatLng')
+getBounds @ Circle.js:62
+(anonymous) @ about:srcdoc:94
+Map.js:1281 Uncaught Error: Set map center and zoom first.
+_checkIfLoaded @ Map.js:1281
+getCenter @ Map.js:822
+_animMoveEnd @ Map.js:1644
+fire @ Events.js:195
+_onPanTransitionEnd @ Map.js:1600
+fire @ Events.js:195
+_complete @ PosAnimation.js:107
+_step @ PosAnimation.js:85
+_animate @ PosAnimation.js:74
+requestAnimationFrame
+requestAnimFrame @ Util.js:231
+_animate @ PosAnimation.js:73
+requestAnimationFrame
+requestAnimFrame @ Util.js:231
+_animate @ PosAnimation.js:73
+requestAnimationFrame
+requestAnimFrame @ Util.js:231
+_animate @ PosAnimation.js:73
+requestAnimationFrame
+requestAnimFrame @ Util.js:231
+_animate @ PosAnimation.js:73
+requestAnimationFrame
+requestAnimFrame @ Util.js:231
+_animate @ PosAnimation.js:73
+requestAnimationFrame
+requestAnimFrame @ Util.js:231
+_animate @ PosAnimation.js:73
+requestAnimationFrame
+requestAnimFrame @ Util.js:231
+_animate @ PosAnimation.js:73
+requestAnimationFrame
+requestAnimFrame @ Util.js:231
+_animate @ PosAnimation.js:73
+requestAnimationFrame
+requestAnimFrame @ Util.js:231
+_animate @ PosAnimation.js:73
+requestAnimationFrame
+requestAnimFrame @ Util.js:231
+_animate @ PosAnimation.js:73
+requestAnimationFrame
+requestAnimFrame @ Util.js:231
+_animate @ PosAnimation.js:73
+requestAnimationFrame
+requestAnimFrame @ Util.js:231
+_animate @ PosAnimation.js:73
+requestAnimationFrame
+requestAnimFrame @ Util.js:231
+_animate @ PosAnimation.js:73
+requestAnimationFrame
+requestAnimFrame @ Util.js:231
+_animate @ PosAnimation.js:73
+requestAnimationFrame
+requestAnimFrame @ Util.js:231
+_animate @ PosAnimation.js:73
+requestAnimationFrame
+requestAnimFrame @ Util.js:231
+_animate @ PosAnimation.js:73
+requestAnimationFrame
+requestAnimFrame @ Util.js:231
+_animate @ PosAnimation.js:73
+requestAnimationFrame
+requestAnimFrame @ Util.js:231
+_animate @ PosAnimation.js:73
+requestAnimationFrame
+requestAnimFrame @ Util.js:231
+_animate @ PosAnimation.js:73
+requestAnimationFrame
+requestAnimFrame @ Util.js:231
+_animate @ PosAnimation.js:73
+requestAnimationFrame
+requestAnimFrame @ Util.js:231
+_animate @ PosAnimation.js:73
+requestAnimationFrame
+requestAnimFrame @ Util.js:231
+_animate @ PosAnimation.js:73
+run @ PosAnimation.js:59
+panBy @ Map.js:346
+(anonymous) @ Map.Drag.js:220
+requestAnimationFrame
+requestAnimFrame @ Util.js:231
+_onDragEnd @ Map.Drag.js:219
+fire @ Events.js:195
+finishDrag @ Draggable.js:213
+_onUp @ Draggable.js:188
+(anonymous) @ DomEvent.js:108
