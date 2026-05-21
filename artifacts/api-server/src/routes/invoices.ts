@@ -60,6 +60,8 @@ router.get("/invoices", requireAdmin, async (req, res): Promise<void> => {
       dueDate: invoicesTable.dueDate,
       paidAt: invoicesTable.paidAt,
       notes: invoicesTable.notes,
+      autoSynced: invoicesTable.autoSynced,
+      lockedAt: invoicesTable.lockedAt,
       createdAt: invoicesTable.createdAt,
     })
     .from(invoicesTable)
