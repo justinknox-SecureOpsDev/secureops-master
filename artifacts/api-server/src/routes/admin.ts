@@ -1070,7 +1070,7 @@ router.post("/admin/import/:table", requireAdmin, async (req, res): Promise<void
       results.push({ index: i, ok: false, error: fkErrors.get(i)! });
       continue;
     }
-    const r = rows[i];
+    const r = cfg.coerceWrite(rows[i]);
     const parsed = cfg.insertSchema.safeParse(r);
     if (!parsed.success) {
       results.push({
@@ -1080,7 +1080,7 @@ router.post("/admin/import/:table", requireAdmin, async (req, res): Promise<void
       });
       continue;
     }
-    let values = cfg.coerceWrite(parsed.data as Record<string, unknown>);
+    let values = parsed.data as Record<string, unknown>;
     if (cfg.beforeInsert) values = await cfg.beforeInsert(values);
     validated.push({ index: i, values });
   }
