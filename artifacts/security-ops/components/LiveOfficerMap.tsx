@@ -65,13 +65,16 @@ function popupNode(label, sub, userId) {
   return wrap;
 }
 const map = L.map('m', { zoomControl: true });
+// Leaflet needs a view (center + zoom) BEFORE any layer that projects on add.
+// Without this, adding circles/markers can throw "Cannot read properties of
+// undefined (reading 'layerPointToLatLng')". fitBounds below replaces the view
+// when we have points; the no-points branch just keeps this default.
+map.setView(pts.length ? [pts[0].lat, pts[0].lng] : [39.8283, -98.5795], pts.length ? 12 : 4);
 L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
   attribution: '&copy; OpenStreetMap', maxZoom: 19,
 }).addTo(map);
-if (!pts.length) {
-  map.setView([51.5074, -0.1278], 4);
-} else {
-  const group = L.featureGroup();
+if (pts.length) {
+  const group = L.featureGroup().addTo(map);
   pts.forEach(p => {
     const m = L.circleMarker([p.lat, p.lng], {
       radius: 10, color: '#c9a84c', fillColor: '#c9a84c', fillOpacity: 0.9, weight: 3,
@@ -79,8 +82,12 @@ if (!pts.length) {
     m.bindPopup(popupNode(p.label, p.sub, p.userId));
     m.addTo(group);
   });
-  group.addTo(map);
-  map.fitBounds(group.getBounds().pad(0.3), { maxZoom: 15 });
+  // Manual bounds — avoid group.getBounds() / Circle.getBounds() paths that
+  // have intermittently hit "Cannot read properties of undefined" in
+  // sandboxed iframes even when layers are correctly added.
+  const _bb = L.latLngBounds([]);
+  pts.forEach(p => _bb.extend([p.lat, p.lng]));
+  if (_bb.isValid()) map.fitBounds(_bb.pad(0.3), { maxZoom: 15 });
 }
 </script></body></html>`;
 }
