@@ -1,9 +1,9 @@
 import http from "http";
 import app from "./app";
 import { logger } from "./lib/logger";
-import { attachWebSocketServer, handleChatUpgrade } from "./lib/wsManager";
-import { attachRadioWebSocketServer, handleRadioUpgrade } from "./lib/radioGateway";
-import { seedPolicies, backfillEmployeeProfileFields } from "@workspace/db";
+import { attachWebSocketServer, handleChatUpgrade, getWss } from "./lib/wsManager";
+import { attachRadioWebSocketServer, handleRadioUpgrade, getRadioWss } from "./lib/radioGateway";
+import { seedPolicies, backfillEmployeeProfileFields, pool } from "@workspace/db";
 import { seedDemoUsers, ensureAdminAccountHealth, ensureEmployeesRowsForAllUsers } from "./lib/seedDemoUsers";
 import { seedChatRooms } from "./lib/seedChatRooms";
 import { seedRadioChannels } from "./lib/seedRadioChannels";
@@ -117,3 +117,54 @@ server.on("error", (err) => {
   logger.error({ err }, "Server error");
   process.exit(1);
 });
+
+// ── Graceful shutdown ──────────────────────────────────────────────────────
+// The deployment platform sends SIGTERM before starting the replacement
+// process. Without this handler, Node exits instantly — the OS port enters
+// TIME_WAIT for a few seconds, the new process hits EADDRINUSE, and crashes.
+// The correct sequence: stop accepting → drain open connections → close WS
+// servers → release the DB pool → exit 0. A 10-second hard-kill guards
+// against connections that never drain (e.g. long-lived WebSockets that
+// missed the close frame).
+function gracefulShutdown(signal: string): void {
+  logger.info({ signal }, "Received shutdown signal — draining connections");
+
+  const forceExit = setTimeout(() => {
+    logger.error("Graceful shutdown timed out after 10 s — forcing exit");
+    process.exit(1);
+  }, 10_000);
+  // Don't let the timer keep the process alive past the normal exit.
+  forceExit.unref();
+
+  // 1. Stop accepting new HTTP/WS connections.
+  server.close(() => {
+    logger.info("HTTP server closed");
+
+    // 3. Release the database connection pool.
+    pool.end().then(() => {
+      logger.info("Database pool closed — exiting cleanly");
+      clearTimeout(forceExit);
+      process.exit(0);
+    }).catch((err) => {
+      logger.error({ err }, "Error closing database pool");
+      clearTimeout(forceExit);
+      process.exit(1);
+    });
+  });
+
+  // 2. Close WebSocket servers — this terminates all open sockets so
+  //    server.close() above doesn't wait forever for them to drain.
+  const chatWss = getWss();
+  if (chatWss) {
+    chatWss.clients.forEach((ws) => ws.terminate());
+    chatWss.close();
+  }
+  const radioWss = getRadioWss();
+  if (radioWss) {
+    radioWss.clients.forEach((ws) => ws.terminate());
+    radioWss.close();
+  }
+}
+
+process.on("SIGTERM", () => gracefulShutdown("SIGTERM"));
+process.on("SIGINT",  () => gracefulShutdown("SIGINT"));
