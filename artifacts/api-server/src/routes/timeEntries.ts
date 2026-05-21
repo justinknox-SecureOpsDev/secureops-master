@@ -195,6 +195,27 @@ router.post("/time-entries/clock-in", requireAuth, async (req, res): Promise<voi
     approvalStatus: "pending",
   }).returning();
 
+  // Seed users.lastLat/Lng from the clock-in coords so the officer pops up
+  // on the Dispatch Live Map immediately — without this, they only appear
+  // after the first 60s /me/location ping (and never at all if GPS was
+  // denied or we're running in a web preview that can't background-ping).
+  try {
+    const latNum = Number(lat);
+    const lngNum = Number(lng);
+    if (Number.isFinite(latNum) && Number.isFinite(lngNum)) {
+      await db
+        .update(usersTable)
+        .set({
+          lastLat: String(latNum),
+          lastLng: String(lngNum),
+          lastLocationAt: new Date(),
+        })
+        .where(eq(usersTable.id, req.user!.userId));
+    }
+  } catch (err) {
+    req.log.warn({ err }, "Failed to seed users.lastLat from clock-in coords");
+  }
+
   // When clocking into a specific shift, flip its status to "active" so the
   // mobile app's My Shifts → Active tab (and admin dashboards) reflect the
   // on-duty state. Don't downgrade if it's already past upcoming.
