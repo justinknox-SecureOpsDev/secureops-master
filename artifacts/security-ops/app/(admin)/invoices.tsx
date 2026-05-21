@@ -112,7 +112,7 @@ export default function AdminInvoicesScreen() {
           <View style={{ flex: 1, alignItems: "center" }}>
             <Text style={[styles.controlLabel, { color: colors.mutedForeground }]}>WEEK STARTING</Text>
             <Text style={{ color: colors.foreground, fontWeight: "700", fontSize: 14 }}>
-              {new Date(weekStart + "T00:00:00Z").toLocaleDateString([], { weekday: "short", day: "numeric", month: "short", year: "numeric" })}
+              {new Date(weekStart + "T00:00:00Z").toLocaleDateString([], { weekday: "short", day: "numeric", month: "short", year: "numeric", timeZone: "UTC" })}
             </Text>
           </View>
           <TouchableOpacity onPress={() => shiftWeek(1)} style={[styles.weekBtn, { borderColor: colors.border }]}>
@@ -190,7 +190,7 @@ export default function AdminInvoicesScreen() {
                   </Text>
                   <Feather name="clock" size={12} color={item.status === "overdue" ? colors.destructive : colors.mutedForeground} style={{ marginLeft: 8 }} />
                   <Text style={{ color: item.status === "overdue" ? colors.destructive : colors.mutedForeground, fontSize: 12 }}>
-                    Due {item.dueDate ? new Date(item.dueDate).toLocaleDateString() : "—"}
+                    Due {item.dueDate ? new Date(item.dueDate).toLocaleDateString([], { timeZone: "UTC" }) : "—"}
                   </Text>
                 </View>
 
