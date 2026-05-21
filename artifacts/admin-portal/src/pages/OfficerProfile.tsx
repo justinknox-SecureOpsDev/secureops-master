@@ -134,7 +134,10 @@ const map = L.map('m',{zoomControl:true});
 L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',{
   attribution:'&copy; OpenStreetMap', maxZoom:19
 }).addTo(map);
-const group = L.featureGroup();
+// Attach the group to the map BEFORE adding layers. L.circle uses a real
+// metric radius and projects on add, so adding it to an off-map group
+// throws "Cannot read properties of undefined (reading 'layerPointToLatLng')".
+const group = L.featureGroup().addTo(map);
 if (D.trail && D.trail.length >= 2) {
   L.polyline(D.trail.map(function(p){ return [p.lat, p.lng]; }), {
     color: '#3b82f6', weight: 3, opacity: 0.7,
@@ -155,7 +158,6 @@ const om = L.circleMarker([D.officer.lat, D.officer.lng], {
   radius: 10, color:'#10b981', fillColor:'#10b981', fillOpacity:0.9, weight:3,
 }).bindPopup(txt(D.officer.label, D.officer.sub));
 om.addTo(group);
-group.addTo(map);
 map.fitBounds(group.getBounds().pad(0.4), { maxZoom: 16 });
 </script></body></html>`;
 }

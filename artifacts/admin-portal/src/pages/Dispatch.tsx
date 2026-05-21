@@ -1214,7 +1214,10 @@ L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',{
 }).addTo(map);
 if(!pts.length){ map.setView([39.8283,-98.5795],4); }
 else {
-  const group = L.featureGroup();
+  // Attach the group to the map BEFORE adding layers. L.circle uses a real
+  // metric radius and projects on add, so adding it to an off-map group
+  // throws "Cannot read properties of undefined (reading 'layerPointToLatLng')".
+  const group = L.featureGroup().addTo(map);
   pts.forEach(p=>{
     let m;
     if (p.kind === 'site') {
@@ -1257,7 +1260,6 @@ else {
     m.bindTooltip(tip(p.label, p.sub), { direction:'top', offset:[0,-6], opacity:0.95 });
     m.addTo(group);
   });
-  group.addTo(map);
   map.fitBounds(group.getBounds().pad(0.3), { maxZoom: 14 });
 }
 </script></body></html>`;
