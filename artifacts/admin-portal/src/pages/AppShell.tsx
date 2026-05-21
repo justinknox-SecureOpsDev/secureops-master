@@ -273,7 +273,17 @@ export function AppShell({ children }: { children: React.ReactNode }) {
             <div className="brand-wordmark text-lg sm:text-xl leading-tight truncate">
               Williams Council <span className="brand-gold">Security Group Inc.</span>
             </div>
-            <div className="text-[10px] uppercase tracking-[0.25em] opacity-60">Admin Portal</div>
+            <div className="text-[10px] uppercase tracking-[0.25em] opacity-60 flex items-center justify-center gap-2">
+              <span>Admin Portal</span>
+              {import.meta.env.DEV && (
+                <span
+                  className="px-1.5 py-px rounded-sm bg-amber-400 text-amber-950 font-bold tracking-widest text-[9px]"
+                  title="You are viewing the development preview. Writes here do NOT reach the production database or TestFlight mobile app."
+                >
+                  DEV
+                </span>
+              )}
+            </div>
           </div>
           <div className="flex items-center gap-2 shrink-0">
             <div className="hidden md:block text-right leading-tight">
