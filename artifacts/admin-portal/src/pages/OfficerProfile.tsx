@@ -564,6 +564,7 @@ export default function OfficerProfilePage() {
               </div>
               {mapHtml && (
                 <iframe
+                  key={`officer-map-${MAP_BUILD_ID}`}
                   title="Officer live location"
                   srcDoc={mapHtml}
                   className="w-full h-64 border-0 border-t"

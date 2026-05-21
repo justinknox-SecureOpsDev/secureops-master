@@ -1394,6 +1394,7 @@ function LiveMapPanel({
           <div className="text-sm opacity-60 p-4">Loading…</div>
         ) : (
           <iframe
+            key={`dispatch-map-${MAP_BUILD_ID}`}
             title="Live officer map"
             srcDoc={html}
             className="w-full h-[24rem] border-0"

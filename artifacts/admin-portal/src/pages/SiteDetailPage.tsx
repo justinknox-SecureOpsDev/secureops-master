@@ -514,7 +514,7 @@ export function SiteDetailPage() {
                 <div className="mt-3 max-w-3xl">
                   <div className="rounded border overflow-hidden" style={{ height: 240 }}>
                     <iframe
-                      key={`geofence-${siteId}-${iframeVersion}`}
+                      key={`geofence-${siteId}-${iframeVersion}-${MAP_BUILD_ID}`}
                       ref={iframeRef}
                       title={`${site.name} geofence preview`}
                       srcDoc={geofenceMapHtml}
