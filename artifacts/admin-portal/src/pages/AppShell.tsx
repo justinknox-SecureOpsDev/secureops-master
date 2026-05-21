@@ -355,7 +355,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
             </Button>
             {!collapsed && (
               <div className="text-[10px] opacity-40 text-center pt-2 select-none">
-                v1.0 beta · © {new Date().getFullYear()} WCSG
+                v1.0 · © {new Date().getFullYear()} WCSG
               </div>
             )}
           </div>

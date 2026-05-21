@@ -58,9 +58,6 @@ export function LoginPage() {
       />
       <div className="w-full max-w-md bg-card rounded-xl shadow-2xl overflow-hidden relative">
         <div className="bg-brand-navy text-white p-6 text-center border-b-4 border-brand-gold relative">
-          <span className="absolute top-3 right-3 text-[9px] uppercase tracking-wider px-1.5 py-px rounded-sm bg-brand-gold/20 brand-gold border border-brand-gold/40">
-            Beta
-          </span>
           <img
             src={`${import.meta.env.BASE_URL}logo-256.png`}
             alt="Williams Council Security Group"
@@ -143,7 +140,7 @@ export function LoginPage() {
         </div>
       </div>
       <div className="absolute bottom-3 left-0 right-0 text-center text-[10px] text-white/40 select-none">
-        v1.0 beta · © {new Date().getFullYear()} Williams Council Security Group
+        v1.0 · © {new Date().getFullYear()} Williams Council Security Group
       </div>
     </div>
   );
