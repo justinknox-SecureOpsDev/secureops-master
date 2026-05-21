@@ -1124,6 +1124,11 @@ type MapPoint = {
   radiusMiles?: number;
 };
 
+// Random value re-evaluated on every HMR reload of this module. Included in
+// the iframe-srcdoc useMemo deps so that dev-time edits to the map template
+// actually take effect without a hard refresh of the browser tab.
+const MAP_BUILD_ID = Math.random().toString(36).slice(2, 10);
+
 function buildLeafletHtml(points: MapPoint[], defaultGeofenceRadiusMiles: number): string {
   // Coordinates are validated numbers; labels are JSON-encoded then
   // injected into the DOM via createTextNode, never innerHTML.
@@ -1358,7 +1363,12 @@ function LiveMapPanel({
   }, [officers, sites, incidents]);
 
   const geofenceRadiusMiles = useGeofenceRadiusMiles();
-  const html = useMemo(() => buildLeafletHtml(points, geofenceRadiusMiles), [points, geofenceRadiusMiles]);
+  // MAP_BUILD_ID re-evaluates on every HMR reload so dev-time edits to
+  // buildLeafletHtml actually take effect without a hard refresh.
+  const html = useMemo(
+    () => buildLeafletHtml(points, geofenceRadiusMiles),
+    [points, geofenceRadiusMiles, MAP_BUILD_ID],
+  );
   const withCoords = points.filter((p) => p.kind === "officer").length;
   const withoutCoords = officers.length - withCoords;
   const siteCount = points.filter((p) => p.kind === "site").length;

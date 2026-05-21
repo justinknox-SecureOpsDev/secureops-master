@@ -100,6 +100,11 @@ function fmtAgo(iso: string | null | undefined): string {
  * `allow-scripts` only (no allow-same-origin) so nothing in here can read
  * the admin origin or pivot back into the parent.
  */
+// Random value re-evaluated on every HMR reload of this module. Included in
+// the iframe-srcdoc useMemo deps so that dev-time edits to the map template
+// actually take effect without a hard refresh of the browser tab.
+const MAP_BUILD_ID = Math.random().toString(36).slice(2, 10);
+
 function buildOfficerMapHtml(
   officer: { lat: number; lng: number; label: string; sub: string },
   site: { lat: number; lng: number; name: string; radiusMiles: number } | null,
@@ -315,7 +320,10 @@ export default function OfficerProfilePage() {
       site,
       trail,
     );
-  }, [liveLocation.data, officerCoord, officer.data]);
+    // MAP_BUILD_ID re-evaluates on every HMR reload so dev-time edits to
+    // buildOfficerMapHtml actually take effect without a hard refresh.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [liveLocation.data, officerCoord, officer.data, MAP_BUILD_ID]);
 
   const recent5 = useMemo<Incident[]>(() => {
     const rows = recentIncidents.data ?? [];

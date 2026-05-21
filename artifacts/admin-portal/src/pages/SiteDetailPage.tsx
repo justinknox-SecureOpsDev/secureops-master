@@ -70,6 +70,11 @@ const GEOFENCE_MAX_METERS = GEOFENCE_MAX_MILES * METERS_PER_MILE; // ~48,280 m
  * label is JSON-encoded and rendered DOM-side via createTextNode so a
  * malicious site name can't break out of the script context.
  */
+// Random value re-evaluated on every HMR reload of this module. Included in
+// the iframe-srcdoc useMemo deps so that dev-time edits to the map template
+// actually take effect without a hard refresh of the browser tab.
+const MAP_BUILD_ID = Math.random().toString(36).slice(2, 10);
+
 function buildSiteGeofenceHtml(
   lat: number,
   lng: number,
@@ -318,7 +323,10 @@ export function SiteDetailPage() {
     }
     const s = initialMapRef.current;
     return buildSiteGeofenceHtml(s.lat, s.lng, s.r, s.name);
-  }, [site, globalGeofenceRadiusMiles]);
+    // MAP_BUILD_ID re-evaluates on every HMR reload of this module so dev-time
+    // edits to buildSiteGeofenceHtml actually take effect without a hard refresh.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [site, globalGeofenceRadiusMiles, MAP_BUILD_ID]);
 
   // Save drag-end events from the iframe map back to the server. Clamp the
   // radius defensively here too: the iframe already clamps to [16 m, 50 km]
