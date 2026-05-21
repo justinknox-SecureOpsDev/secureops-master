@@ -34,11 +34,18 @@ function getTransport(): Transporter | null {
   return cached;
 }
 
+export interface EmailAttachment {
+  filename: string;
+  content: Buffer;
+  contentType: string;
+}
+
 export interface EmailMessage {
   to: string;
   subject: string;
   text: string;
   html?: string;
+  attachments?: EmailAttachment[];
 }
 
 /**
@@ -73,7 +80,18 @@ export async function sendEmailDetailed(msg: EmailMessage): Promise<EmailSendRes
   }
   const from = process.env.SMTP_FROM || process.env.SMTP_USER!;
   try {
-    const info = await t.sendMail({ from, to: msg.to, subject: msg.subject, text: msg.text, html: msg.html });
+    const info = await t.sendMail({
+      from,
+      to: msg.to,
+      subject: msg.subject,
+      text: msg.text,
+      html: msg.html,
+      attachments: msg.attachments?.map((a) => ({
+        filename: a.filename,
+        content: a.content,
+        contentType: a.contentType,
+      })),
+    });
     const rejected = Array.isArray(info.rejected) ? info.rejected.map(String) : [];
     const messageId = typeof info.messageId === "string" ? info.messageId : null;
     const response = typeof info.response === "string" ? info.response : null;

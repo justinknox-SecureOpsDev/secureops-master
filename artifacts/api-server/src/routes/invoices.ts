@@ -3,6 +3,8 @@ import { eq, and, ilike } from "drizzle-orm";
 import { db, invoicesTable, sitesTable } from "@workspace/db";
 import { requireAdmin } from "../middlewares/auth";
 import { upsertWeeklyInvoice } from "../lib/invoiceSync";
+import { buildInvoicePdf } from "../lib/invoicePdf";
+import { sendEmailDetailed } from "../lib/email";
 
 const router: IRouter = Router();
 
@@ -163,6 +165,204 @@ router.post("/invoices/generate", requireAdmin, async (req, res): Promise<void> 
     .where(eq(invoicesTable.id, result.invoiceId));
   res.status(201).json({ ...withSite?.invoices, siteName: withSite?.sites?.name });
 });
+
+// Stream a branded PDF for a single invoice — used by the admin portal's
+// "Download PDF" button. No state is mutated; call POST /invoices/:id/send
+// to email + mark sent in one step.
+router.get("/invoices/:id/pdf", requireAdmin, async (req, res): Promise<void> => {
+  const id = Array.isArray(req.params.id) ? req.params.id[0] : req.params.id;
+  const [row] = await db
+    .select({
+      id: invoicesTable.id,
+      invoiceNumber: invoicesTable.invoiceNumber,
+      clientName: invoicesTable.clientName,
+      clientEmail: invoicesTable.clientEmail,
+      clientAddress: invoicesTable.clientAddress,
+      siteName: sitesTable.name,
+      periodStart: invoicesTable.periodStart,
+      periodEnd: invoicesTable.periodEnd,
+      dueDate: invoicesTable.dueDate,
+      createdAt: invoicesTable.createdAt,
+      lineItems: invoicesTable.lineItems,
+      subtotal: invoicesTable.subtotal,
+      taxAmount: invoicesTable.taxAmount,
+      totalAmount: invoicesTable.totalAmount,
+      notes: invoicesTable.notes,
+    })
+    .from(invoicesTable)
+    .leftJoin(sitesTable, eq(invoicesTable.siteId, sitesTable.id))
+    .where(eq(invoicesTable.id, id));
+
+  if (!row) { res.status(404).json({ error: "Not Found" }); return; }
+
+  const { filename, stream } = buildInvoicePdf({
+    ...row,
+    periodStart: row.periodStart ? (typeof row.periodStart === "string" ? row.periodStart : (row.periodStart as Date).toISOString().slice(0, 10)) : "",
+    periodEnd: row.periodEnd ? (typeof row.periodEnd === "string" ? row.periodEnd : (row.periodEnd as Date).toISOString().slice(0, 10)) : "",
+    lineItems: row.lineItems as InvoiceLineItem[] | null,
+  });
+
+  res.setHeader("Content-Type", "application/pdf");
+  res.setHeader("Content-Disposition", `attachment; filename="${filename}"`);
+  stream.pipe(res);
+  stream.on("error", (err) => {
+    req.log.error({ err }, "[invoicePdf] stream error");
+    if (!res.headersSent) res.status(500).json({ error: "PDF generation failed" });
+  });
+});
+
+// Email the invoice PDF to the client and mark status='sent'.
+// Body: { email?: string }  — uses stored clientEmail if not supplied;
+// returns { emailSent, emailStatus, emailAddress, invoiceNumber }.
+// If SMTP is not configured, still marks the invoice sent and returns
+// emailSent:false so the admin can send the PDF manually.
+router.post("/invoices/:id/send", requireAdmin, async (req, res): Promise<void> => {
+  const id = Array.isArray(req.params.id) ? req.params.id[0] : req.params.id;
+  const { email: overrideEmail } = req.body as { email?: string };
+
+  const [row] = await db
+    .select({
+      id: invoicesTable.id,
+      invoiceNumber: invoicesTable.invoiceNumber,
+      status: invoicesTable.status,
+      clientName: invoicesTable.clientName,
+      clientEmail: invoicesTable.clientEmail,
+      clientAddress: invoicesTable.clientAddress,
+      siteName: sitesTable.name,
+      periodStart: invoicesTable.periodStart,
+      periodEnd: invoicesTable.periodEnd,
+      dueDate: invoicesTable.dueDate,
+      createdAt: invoicesTable.createdAt,
+      lineItems: invoicesTable.lineItems,
+      subtotal: invoicesTable.subtotal,
+      taxAmount: invoicesTable.taxAmount,
+      totalAmount: invoicesTable.totalAmount,
+      notes: invoicesTable.notes,
+    })
+    .from(invoicesTable)
+    .leftJoin(sitesTable, eq(invoicesTable.siteId, sitesTable.id))
+    .where(eq(invoicesTable.id, id));
+
+  if (!row) { res.status(404).json({ error: "Not Found" }); return; }
+  if (row.status === "void") {
+    res.status(409).json({ error: "Conflict", message: "Cannot send a voided invoice." });
+    return;
+  }
+
+  const recipient = overrideEmail?.trim() || row.clientEmail?.trim() || null;
+
+  // Mark sent immediately — even when SMTP isn't configured the admin needs
+  // to be able to flag it as "sent via other channel".
+  const [updated] = await db
+    .update(invoicesTable)
+    .set({ status: "sent", autoSynced: false })
+    .where(eq(invoicesTable.id, id))
+    .returning();
+
+  if (!recipient) {
+    res.json({
+      emailSent: false,
+      emailStatus: "no_recipient",
+      emailAddress: null,
+      invoiceNumber: row.invoiceNumber,
+      status: updated.status,
+      message: "Invoice marked sent. No client email on file — add one to the invoice to email the PDF.",
+    });
+    return;
+  }
+
+  // Update the stored email if an override was provided.
+  if (overrideEmail?.trim() && overrideEmail.trim() !== row.clientEmail) {
+    await db.update(invoicesTable)
+      .set({ clientEmail: overrideEmail.trim() })
+      .where(eq(invoicesTable.id, id));
+  }
+
+  // Build PDF into a Buffer for the attachment.
+  const { buffer, filename } = buildInvoicePdf({
+    ...row,
+    clientEmail: recipient,
+    periodStart: row.periodStart ? (typeof row.periodStart === "string" ? row.periodStart : (row.periodStart as Date).toISOString().slice(0, 10)) : "",
+    periodEnd: row.periodEnd ? (typeof row.periodEnd === "string" ? row.periodEnd : (row.periodEnd as Date).toISOString().slice(0, 10)) : "",
+    lineItems: row.lineItems as InvoiceLineItem[] | null,
+  });
+
+  let pdfBuf: Buffer;
+  try {
+    pdfBuf = await buffer();
+  } catch (err) {
+    req.log.error({ err }, "[invoiceSend] PDF build failed");
+    res.status(500).json({ error: "PDF generation failed", invoiceNumber: row.invoiceNumber });
+    return;
+  }
+
+  const totalDisplay = parseFloat(String(row.totalAmount ?? "0")).toLocaleString("en-US", {
+    style: "currency", currency: "USD",
+  });
+  const period = `${row.periodStart} to ${row.periodEnd}`;
+
+  const emailResult = await sendEmailDetailed({
+    to: recipient,
+    subject: `Invoice ${row.invoiceNumber} — Williams Council Security Group`,
+    text: [
+      `Dear ${row.clientName ?? "Client"},`,
+      "",
+      `Please find attached invoice ${row.invoiceNumber} for security services provided during ${period}.`,
+      "",
+      `Invoice total: ${totalDisplay}${row.dueDate ? `\nDue date:      ${row.dueDate}` : ""}`,
+      "",
+      "Please reference the invoice number on your payment. For questions, contact billing@williamscouncilsecurity.com.",
+      "",
+      "— Williams Council Security Group",
+    ].join("\n"),
+    html: `
+      <div style="font-family:Georgia,serif;max-width:560px;margin:0 auto;color:#080c18">
+        <div style="background:#080c18;padding:20px 24px;border-radius:4px 4px 0 0">
+          <h2 style="color:#c9a84c;margin:0;font-size:18px">Williams Council Security Group</h2>
+          <p style="color:#f0e6c8;margin:4px 0 0;font-size:12px">Professional Security Services</p>
+        </div>
+        <div style="border:1px solid #ddd;border-top:none;padding:24px;border-radius:0 0 4px 4px">
+          <p>Dear ${escHtml(row.clientName ?? "Client")},</p>
+          <p>Please find attached invoice <strong>${escHtml(row.invoiceNumber)}</strong> for security services provided during <strong>${escHtml(period)}</strong>.</p>
+          <div style="background:#f6f1e1;padding:14px 16px;border-left:3px solid #c9a84c;margin:18px 0;border-radius:4px">
+            <div><strong>Invoice total:</strong> ${escHtml(totalDisplay)}</div>
+            ${row.dueDate ? `<div><strong>Due date:</strong> ${escHtml(row.dueDate)}</div>` : ""}
+            <div><strong>Invoice #:</strong> ${escHtml(row.invoiceNumber)}</div>
+          </div>
+          <p style="color:#555;font-size:13px">Please reference the invoice number on your payment. For questions, contact <a href="mailto:billing@williamscouncilsecurity.com">billing@williamscouncilsecurity.com</a>.</p>
+          <hr style="border:none;border-top:2px solid #c9a84c;margin:20px 0"/>
+          <p style="color:#080c18;font-weight:bold;margin:0;font-size:13px">Williams Council Security Group</p>
+        </div>
+      </div>
+    `,
+    attachments: [{ filename, content: pdfBuf, contentType: "application/pdf" }],
+  });
+
+  req.log.info(
+    { invoiceId: id, invoiceNumber: row.invoiceNumber, to: recipient, emailStatus: emailResult.status },
+    "[invoiceSend] invoice sent",
+  );
+
+  res.json({
+    emailSent: emailResult.ok,
+    emailStatus: emailResult.status,
+    emailAddress: recipient,
+    invoiceNumber: row.invoiceNumber,
+    status: updated.status,
+    ...(emailResult.error ? { emailError: emailResult.error } : {}),
+  });
+});
+
+type InvoiceLineItem = {
+  description: string;
+  hours?: number | null;
+  rate?: number | null;
+  amount: number;
+};
+
+function escHtml(s: string): string {
+  return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+}
 
 router.put("/invoices/:id", requireAdmin, async (req, res): Promise<void> => {
   const id = Array.isArray(req.params.id) ? req.params.id[0] : req.params.id;

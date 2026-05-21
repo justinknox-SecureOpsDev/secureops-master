@@ -1,7 +1,8 @@
-import { Fragment, useEffect, useMemo, useState } from "react";
+import { Fragment, useEffect, useMemo, useRef, useState } from "react";
 import {
   Receipt, Loader2, ChevronRight, ChevronDown, AlertTriangle,
   Lock, Pencil, RefreshCw, Send, CheckCircle2, FileText,
+  Download, Mail, X,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -111,6 +112,13 @@ const stateLabel = (s: SyncState): { label: string; cls: string; Icon: typeof Re
 const isSelectable = (row: InvoiceRow) =>
   row.status !== "paid" && row.status !== "void";
 
+type SendTarget = {
+  id: string;
+  invoiceNumber: string;
+  clientName: string | null;
+  email: string;
+};
+
 export default function InvoiceBoardPage() {
   const [rows, setRows] = useState<InvoiceRow[]>([]);
   const [loading, setLoading] = useState(true);
@@ -122,8 +130,12 @@ export default function InvoiceBoardPage() {
   const [openWeeks, setOpenWeeks] = useState<Set<string>>(new Set());
   const [openInvoices, setOpenInvoices] = useState<Set<string>>(new Set());
   const [busy, setBusy] = useState(false);
+  const [rowBusy, setRowBusy] = useState<Set<string>>(new Set());
   const [toast, setToast] = useState<{ kind: "ok" | "err"; msg: string } | null>(null);
   const [sites, setSites] = useState<Array<{ id: string; name: string }>>([]);
+  const [sendTarget, setSendTarget] = useState<SendTarget | null>(null);
+  const [sendEmailInput, setSendEmailInput] = useState("");
+  const sendInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     void (async () => {
@@ -233,6 +245,80 @@ export default function InvoiceBoardPage() {
     const next = new Set(openInvoices);
     if (next.has(id)) next.delete(id); else next.add(id);
     setOpenInvoices(next);
+  };
+
+  // Open send dialog. If the invoice already has a clientEmail pre-fill it.
+  const openSendDialog = (r: InvoiceRow) => {
+    setSendTarget({
+      id: r.id,
+      invoiceNumber: r.invoiceNumber,
+      clientName: r.clientName,
+      email: r.clientEmail ?? "",
+    });
+    setSendEmailInput(r.clientEmail ?? "");
+    setTimeout(() => sendInputRef.current?.focus(), 50);
+  };
+
+  const closeSendDialog = () => { setSendTarget(null); setSendEmailInput(""); };
+
+  // Send a single invoice. Optionally pass an email override.
+  const sendInvoice = async (id: string, emailOverride?: string) => {
+    setRowBusy((s) => new Set(s).add(id));
+    try {
+      const body: Record<string, string> = {};
+      if (emailOverride?.trim()) body.email = emailOverride.trim();
+      const r = await api<{
+        emailSent: boolean;
+        emailStatus: string;
+        emailAddress: string | null;
+        invoiceNumber: string;
+        message?: string;
+      }>(`/invoices/${id}/send`, { method: "POST", body });
+      if (r.emailSent) {
+        showToast("ok", `Invoice ${r.invoiceNumber} emailed to ${r.emailAddress} and marked sent.`);
+      } else if (r.emailStatus === "no_recipient") {
+        showToast("ok", `Invoice ${r.invoiceNumber} marked sent (no client email — PDF not sent).`);
+      } else {
+        showToast("err", `Invoice ${r.invoiceNumber} marked sent but email failed (${r.emailStatus}).`);
+      }
+      await reload();
+    } catch (e) {
+      showToast("err", `Send failed: ${(e as Error).message}`);
+    } finally {
+      setRowBusy((s) => { const n = new Set(s); n.delete(id); return n; });
+    }
+  };
+
+  const confirmSend = async () => {
+    if (!sendTarget) return;
+    closeSendDialog();
+    await sendInvoice(sendTarget.id, sendEmailInput || undefined);
+  };
+
+  // Bulk send: email all selected that have a clientEmail, mark all sent.
+  const bulkSendToClients = async () => {
+    if (selectedInvoices.length === 0) return;
+    const todo = selectedInvoices.filter((r) => r.status !== "paid" && r.status !== "void");
+    if (todo.length === 0) { showToast("err", "Nothing to send."); return; }
+    setBusy(true);
+    let emailed = 0, noEmail = 0, failed = 0;
+    for (const inv of todo) {
+      try {
+        const r = await api<{ emailSent: boolean; emailStatus: string }>(
+          `/invoices/${inv.id}/send`, { method: "POST", body: {} },
+        );
+        if (r.emailSent) emailed++;
+        else if (r.emailStatus === "no_recipient") noEmail++;
+        else failed++;
+      } catch { failed++; }
+    }
+    setBusy(false);
+    const parts = [];
+    if (emailed > 0) parts.push(`${emailed} emailed`);
+    if (noEmail > 0) parts.push(`${noEmail} marked sent (no email on file)`);
+    if (failed > 0) parts.push(`${failed} failed`);
+    showToast(failed > 0 ? "err" : "ok", parts.join(" · "));
+    await reload();
   };
 
   // Bulk status transition. Iterates selected rows and PUTs new status.
@@ -385,9 +471,19 @@ export default function InvoiceBoardPage() {
         <Button
           variant="outline"
           className="bg-white/10 border-white/30 text-white hover:bg-white/20"
+          onClick={() => void bulkSendToClients()}
+          disabled={selectedInvoices.length === 0 || busy}
+          title="Email PDF to each client and mark sent. Invoices without a stored client email are still marked sent."
+        >
+          {busy ? <Loader2 className="w-4 h-4 animate-spin mr-2" /> : <Mail className="w-4 h-4 mr-2" />}
+          Email to clients
+        </Button>
+        <Button
+          variant="outline"
+          className="bg-white/10 border-white/30 text-white hover:bg-white/20"
           onClick={() => void bulkSetStatus("sent")}
           disabled={selectedInvoices.length === 0 || busy}
-          title="Mark selected draft invoices as sent to the client"
+          title="Mark selected draft invoices as sent (status change only, no email)"
         >
           {busy ? <Loader2 className="w-4 h-4 animate-spin mr-2" /> : <Send className="w-4 h-4 mr-2" />}
           Mark sent
@@ -463,6 +559,7 @@ export default function InvoiceBoardPage() {
                         <th className="px-3 py-1.5 text-right">Total</th>
                         <th className="px-3 py-1.5">Due</th>
                         <th className="px-3 py-1.5">State</th>
+                        <th className="px-3 py-1.5 text-right">Actions</th>
                       </tr>
                     </thead>
                     <tbody>
@@ -551,10 +648,36 @@ export default function InvoiceBoardPage() {
                                   {label}
                                 </span>
                               </td>
+                              <td className="px-3 py-2">
+                                <div className="flex items-center justify-end gap-1">
+                                  <a
+                                    href={`/api/invoices/${r.id}/pdf`}
+                                    target="_blank"
+                                    rel="noopener noreferrer"
+                                    className="inline-flex items-center justify-center w-7 h-7 rounded hover:bg-gray-100 text-muted-foreground hover:text-brand-navy transition-colors"
+                                    title={`Download PDF — Invoice ${r.invoiceNumber}`}
+                                  >
+                                    <Download className="w-3.5 h-3.5" />
+                                  </a>
+                                  {r.status !== "paid" && r.status !== "void" && (
+                                    <button
+                                      type="button"
+                                      onClick={() => openSendDialog(r)}
+                                      disabled={rowBusy.has(r.id)}
+                                      className="inline-flex items-center justify-center w-7 h-7 rounded hover:bg-gray-100 text-muted-foreground hover:text-brand-navy transition-colors disabled:opacity-40"
+                                      title={r.clientEmail ? `Email to ${r.clientEmail}` : "Send — no client email on file (you can enter one)"}
+                                    >
+                                      {rowBusy.has(r.id)
+                                        ? <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                                        : <Mail className="w-3.5 h-3.5" />}
+                                    </button>
+                                  )}
+                                </div>
+                              </td>
                             </tr>
                             {open && (
                               <tr className="bg-gray-50/40">
-                                <td colSpan={8} className="px-3 py-2">
+                                <td colSpan={9} className="px-3 py-2">
                                   {lineCount === 0 ? (
                                     <div className="text-xs text-muted-foreground italic px-2 py-1">
                                       No line items yet. They populate as approved time entries roll in.
@@ -609,6 +732,69 @@ export default function InvoiceBoardPage() {
               </div>
             );
           })}
+        </div>
+      )}
+      {/* Send email confirmation dialog */}
+      {sendTarget && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm"
+          onClick={(e) => { if (e.target === e.currentTarget) closeSendDialog(); }}
+        >
+          <div className="bg-white rounded-xl shadow-2xl w-full max-w-md mx-4 overflow-hidden">
+            <div className="bg-brand-navy px-5 py-4 flex items-center justify-between">
+              <div className="flex items-center gap-2 text-white">
+                <Mail className="w-4 h-4 text-brand-gold" />
+                <span className="font-semibold text-sm">Send Invoice</span>
+              </div>
+              <button type="button" onClick={closeSendDialog} className="text-white/60 hover:text-white">
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+            <div className="px-5 py-5 space-y-4">
+              <div>
+                <p className="text-sm text-gray-600">
+                  Invoice <span className="font-mono font-semibold text-gray-800">{sendTarget.invoiceNumber}</span>
+                  {sendTarget.clientName ? <> for <span className="font-medium text-gray-800">{sendTarget.clientName}</span></> : ""}.
+                </p>
+                <p className="text-xs text-muted-foreground mt-1">
+                  A branded PDF will be emailed as an attachment and the invoice will be marked <strong>sent</strong>.
+                  {!sendTarget.email && (
+                    <> No client email is stored on this invoice — enter one below.</>
+                  )}
+                </p>
+              </div>
+              <div className="space-y-1">
+                <Label htmlFor="send-email-input" className="text-xs font-medium">
+                  Recipient email {!sendTarget.email && <span className="text-red-500">*</span>}
+                </Label>
+                <Input
+                  id="send-email-input"
+                  ref={sendInputRef}
+                  type="email"
+                  placeholder="client@example.com"
+                  value={sendEmailInput}
+                  onChange={(e) => setSendEmailInput(e.target.value)}
+                  onKeyDown={(e) => { if (e.key === "Enter" && sendEmailInput.trim()) void confirmSend(); }}
+                  className="h-9 text-sm"
+                />
+                {!sendTarget.email && sendEmailInput.trim() && (
+                  <p className="text-xs text-blue-600">This email will be saved to the invoice.</p>
+                )}
+              </div>
+              <div className="flex justify-end gap-2 pt-1">
+                <Button variant="outline" size="sm" onClick={closeSendDialog}>Cancel</Button>
+                <Button
+                  size="sm"
+                  className="bg-brand-navy text-white hover:bg-brand-navy/90"
+                  onClick={() => void confirmSend()}
+                  disabled={!sendEmailInput.trim()}
+                >
+                  <Mail className="w-3.5 h-3.5 mr-1.5" />
+                  Send PDF
+                </Button>
+              </div>
+            </div>
+          </div>
         </div>
       )}
     </div>
