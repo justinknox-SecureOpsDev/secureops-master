@@ -310,6 +310,31 @@ export default function EditProfileScreen() {
           <Text style={[styles.note, { color: colors.mutedForeground }]}>Contact admin to change the fields above.</Text>
         </Section>
 
+        <Section title="License updates">
+          <Text style={[styles.note, { color: colors.mutedForeground, marginBottom: 8 }]}>
+            Upgraded to L3 (armed) or L4 (PPO), or renewed your existing license? Submit the new card here and an admin will review it. Your displayed license level updates once approved.
+          </Text>
+          <TouchableOpacity
+            onPress={() => router.push("/license-renewal" as any)}
+            style={{
+              flexDirection: "row", alignItems: "center", gap: 12,
+              backgroundColor: colors.primary + "15", borderColor: colors.primary, borderWidth: 1,
+              borderRadius: 8, padding: 12,
+            }}
+            accessibilityRole="button"
+            accessibilityLabel="Submit a license update for admin review"
+          >
+            <Feather name="shield" size={18} color={colors.primary} />
+            <View style={{ flex: 1 }}>
+              <Text style={{ color: colors.foreground, fontSize: 14, fontWeight: "600" }}>Submit license update</Text>
+              <Text style={{ color: colors.mutedForeground, fontSize: 12, marginTop: 2 }}>
+                Upload the new card, level, and expiry for admin approval
+              </Text>
+            </View>
+            <Feather name="chevron-right" size={18} color={colors.mutedForeground} />
+          </TouchableOpacity>
+        </Section>
+
         <Section title="Contact">
           <Field label="Phone"><Input value={form.phone} onChangeText={(v) => set("phone", v)} /></Field>
           <Field label="Address"><Input value={form.address} onChangeText={(v) => set("address", v)} multiline /></Field>

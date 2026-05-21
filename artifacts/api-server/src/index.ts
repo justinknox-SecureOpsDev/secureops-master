@@ -4,7 +4,7 @@ import { logger } from "./lib/logger";
 import { attachWebSocketServer, handleChatUpgrade } from "./lib/wsManager";
 import { attachRadioWebSocketServer, handleRadioUpgrade } from "./lib/radioGateway";
 import { seedPolicies, backfillEmployeeProfileFields } from "@workspace/db";
-import { seedDemoUsers, ensureAdminAccountHealth } from "./lib/seedDemoUsers";
+import { seedDemoUsers, ensureAdminAccountHealth, ensureEmployeesRowsForAllUsers } from "./lib/seedDemoUsers";
 import { seedChatRooms } from "./lib/seedChatRooms";
 import { seedRadioChannels } from "./lib/seedRadioChannels";
 import { startScheduledJobs } from "./lib/scheduledJobs";
@@ -95,6 +95,13 @@ ensureAdminAccountHealth()
 seedDemoUsers()
   .then(() => logger.info("Demo users ensured"))
   .catch((err) => logger.error({ err }, "Failed to seed demo users"));
+
+// Backfill missing employees rows for every user (admin OR employee) so
+// Users / Personnel / Employees stay aligned. Idempotent — only inserts
+// rows the LEFT JOIN flags as missing.
+ensureEmployeesRowsForAllUsers()
+  .then(() => logger.info("Employees rows backfilled for all users"))
+  .catch((err) => logger.error({ err }, "Failed to backfill employees rows"));
 
 // Idempotently seed the canonical chat channel set (announcements,
 // per-license-level rooms, OPS, city rooms, elite, one-per-site).

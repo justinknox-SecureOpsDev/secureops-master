@@ -1,5 +1,5 @@
 import bcrypt from "bcryptjs";
-import { eq, and, ne } from "drizzle-orm";
+import { eq, and, ne, sql } from "drizzle-orm";
 import { db, usersTable, employeesTable } from "@workspace/db";
 import { logger } from "./logger";
 
@@ -98,7 +98,10 @@ export async function seedDemoUsers(): Promise<void> {
           mustCompleteProfile: false,
         })
         .returning();
-      if (created && u.role === "employee") {
+      if (created) {
+        // Every user (admin OR employee) gets an employees row so the
+        // Personnel / Employees / Users views stay consistent — admins
+        // work shifts too, so they need the same fields.
         await db.insert(employeesTable).values({ userId: created.id });
       }
       logger.info({ email: u.email, role: u.role }, "Seeded demo user");
@@ -116,16 +119,43 @@ export async function seedDemoUsers(): Promise<void> {
       logger.info({ email: u.email }, "Reset demo user to documented credentials and active status");
     }
 
-    if (u.role === "employee") {
-      const [emp] = await db
-        .select()
-        .from(employeesTable)
-        .where(eq(employeesTable.userId, existing.id))
-        .limit(1);
-      if (!emp) {
-        await db.insert(employeesTable).values({ userId: existing.id });
-        logger.info({ email: u.email }, "Created missing employees row for demo user");
-      }
+    const [emp] = await db
+      .select()
+      .from(employeesTable)
+      .where(eq(employeesTable.userId, existing.id))
+      .limit(1);
+    if (!emp) {
+      await db.insert(employeesTable).values({ userId: existing.id });
+      logger.info({ email: u.email }, "Created missing employees row for demo user");
     }
   }
+}
+
+/**
+ * Backfill: every user in the system must have an `employees` row.
+ *
+ * Historically only employee-role users got a row, so admins (who also
+ * cover shifts) were absent from the Employees grid and the
+ * `/employees` JOIN. This keeps the three personnel surfaces
+ * (Users / Personnel / Employees) in lockstep without changing roles.
+ *
+ * Safe to re-run on every boot: a single LEFT JOIN finds users with no
+ * `employees` row and inserts the bare-minimum link record (`userId`
+ * only). All other employee fields stay null until the user (or admin)
+ * fills them in.
+ */
+export async function ensureEmployeesRowsForAllUsers(): Promise<void> {
+  const missing = await db.execute(sql`
+    SELECT u.id, u.email
+    FROM users u
+    LEFT JOIN employees e ON e.user_id = u.id
+    WHERE e.id IS NULL
+  `);
+  const rows = missing.rows as { id: string; email: string }[];
+  if (rows.length === 0) return;
+  await db.insert(employeesTable).values(rows.map((r) => ({ userId: r.id })));
+  logger.info(
+    { count: rows.length, emails: rows.map((r) => r.email) },
+    "Backfilled missing employees rows so Personnel/Employees/Users views stay consistent",
+  );
 }
