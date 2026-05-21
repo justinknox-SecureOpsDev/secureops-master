@@ -100,6 +100,11 @@ const LABEL = ${safeLabel};
 const MIN_R_M = ${GEOFENCE_MIN_METERS}; // shared with parent / build-time clamp
 const MAX_R_M = ${GEOFENCE_MAX_METERS};
 const map = L.map('m', { zoomControl: true, attributionControl: true });
+// Leaflet requires a view (center + zoom) BEFORE any layer that needs
+// projection (L.circle uses a metric radius and projects on add). Without
+// this, adding a circle throws "Cannot read properties of undefined
+// (reading 'layerPointToLatLng')" / "Set map center and zoom first".
+map.setView([LAT, LNG], 16);
 L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
   attribution: '&copy; OpenStreetMap', maxZoom: 19
 }).addTo(map);
