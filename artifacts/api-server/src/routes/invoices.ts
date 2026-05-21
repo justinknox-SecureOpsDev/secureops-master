@@ -1,7 +1,8 @@
 import { Router, type IRouter } from "express";
-import { eq, and, or, ilike, gte, lte, lt } from "drizzle-orm";
-import { db, invoicesTable, clientsTable, sitesTable, shiftsTable, timeEntriesTable, usersTable } from "@workspace/db";
+import { eq, and, ilike } from "drizzle-orm";
+import { db, invoicesTable, sitesTable } from "@workspace/db";
 import { requireAdmin } from "../middlewares/auth";
+import { upsertWeeklyInvoice } from "../lib/invoiceSync";
 
 const router: IRouter = Router();
 
@@ -93,152 +94,72 @@ router.post("/invoices", requireAdmin, async (req, res): Promise<void> => {
   res.status(201).json(invoice);
 });
 
-// Generate weekly invoice for a site from APPROVED time entries.
-// Line items are grouped by shift title (the "assignment" name) at billRate.
+// Generate (or refresh) the weekly invoice for a site from APPROVED time
+// entries. Delegates to the same upsert the time-entry approval hook uses
+// so manual + auto behave identically: re-running for the same (siteId,
+// weekStart) updates the existing draft instead of creating duplicates,
+// and once an admin hand-edits the draft this becomes a no-op.
 router.post("/invoices/generate", requireAdmin, async (req, res): Promise<void> => {
   const { siteId, weekStart } = req.body;
   if (!siteId || !weekStart) {
     res.status(400).json({ error: "Bad Request", message: "siteId and weekStart required" });
     return;
   }
-  const start = new Date(`${weekStart}T00:00:00.000Z`);
-  if (Number.isNaN(start.getTime())) { res.status(400).json({ error: "Bad Request", message: "weekStart must be YYYY-MM-DD" }); return; }
-  const end = addDays(start, 7);
-
-  const [site] = await db
-    .select({
-      id: sitesTable.id,
-      name: sitesTable.name,
-      address: sitesTable.address,
-      clientId: sitesTable.clientId,
-      defaultBillRate: sitesTable.defaultBillRate,
-    })
-    .from(sitesTable)
-    .where(eq(sitesTable.id, siteId));
-  if (!site) { res.status(404).json({ error: "Not Found", message: "Site not found" }); return; }
-
-  const [client] = site.clientId
-    ? await db.select().from(clientsTable).where(eq(clientsTable.id, site.clientId))
-    : [undefined];
-  if (!client) { res.status(400).json({ error: "Bad Request", message: "Site has no linked client" }); return; }
-
-  // Approved hours billed at the SITE's bill rate (hour-for-hour against
-  // every entry's actual hoursWorked). The site rate is the single source
-  // of truth so a client's invoice can never drift from the contracted
-  // hourly rate just because one shift was posted with a stale billRate.
-  // shifts.billRate is kept as a defensive fallback for legacy sites that
-  // were created before defaultBillRate existed.
-  //
-  // We also include ad-hoc geo clock-ins (no linked shift): a time entry
-  // whose own siteId resolves to this site counts. That way every approved
-  // working hour at the site shows up on the invoice.
-  const siteBillRate = parseFloat(String(site.defaultBillRate ?? "0"));
-
-  const entries = await db
-    .select({
-      id: timeEntriesTable.id,
-      hoursWorked: timeEntriesTable.hoursWorked,
-      shiftBillRate: shiftsTable.billRate,
-      employeeFirst: usersTable.firstName,
-      employeeLast: usersTable.lastName,
-    })
-    .from(timeEntriesTable)
-    .leftJoin(shiftsTable, eq(timeEntriesTable.shiftId, shiftsTable.id))
-    .leftJoin(usersTable, eq(timeEntriesTable.employeeId, usersTable.id))
-    .where(and(
-      or(eq(shiftsTable.siteId, siteId), eq(timeEntriesTable.siteId, siteId)),
-      eq(timeEntriesTable.approvalStatus, "approved"),
-      gte(timeEntriesTable.clockInTime, start),
-      lt(timeEntriesTable.clockInTime, end),
-    ));
-
-  if (entries.length === 0) {
-    res.status(400).json({ error: "Bad Request", message: "No approved time entries for this site/week" });
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(String(weekStart))) {
+    res.status(400).json({ error: "Bad Request", message: "weekStart must be YYYY-MM-DD" });
     return;
   }
 
-  // Resolve the per-entry billable rate. Prefer the shift's billRate —
-  // since the new per-site rate card populates it from the site+license
-  // combo at shift-create time, this gives the right answer for L2 vs L3
-  // vs PPO shifts at the same site (which the single site.defaultBillRate
-  // can't express). Fall back to site.defaultBillRate if the shift has no
-  // rate set (legacy / ad-hoc geo clock-ins with no shiftId). If neither
-  // exists we refuse the whole invoice rather than silently sending the
-  // client a $0 line.
-  type Priced = { hours: number; rate: number; officerName: string };
-  const priced: Priced[] = [];
-  const unrated: string[] = [];
-  for (const e of entries) {
-    const hours = parseFloat(String(e.hoursWorked ?? "0"));
-    if (!isFinite(hours) || hours <= 0) continue; // skip open/zero entries
-    const shiftBill = parseFloat(String(e.shiftBillRate ?? "0"));
-    const rate = shiftBill > 0 ? shiftBill : siteBillRate;
-    const officerName = [e.employeeFirst, e.employeeLast].filter(Boolean).join(" ") || "Unassigned officer";
-    if (rate <= 0) {
-      unrated.push(officerName);
-      continue;
+  const result = await upsertWeeklyInvoice(String(siteId), String(weekStart));
+
+  // Preserve the prior route's error contract: 404 for missing site,
+  // 400 with the legacy "no bill rate on file" wording for unpriced
+  // entries, so existing mobile/admin callers and tests keep working.
+  if (result.status === "skipped" && !result.invoiceId) {
+    if (result.reason === "site not found") {
+      res.status(404).json({ error: "Not Found", message: "Site not found" });
+      return;
     }
-    priced.push({ hours, rate, officerName });
-  }
-  if (priced.length === 0) {
-    res.status(400).json({
-      error: "Bad Request",
-      message: "Cannot generate invoice: no bill rate on file. Set a per-license-level rate on the site's rate card, or fall back to the site's default bill rate.",
-    });
+    if (result.reason === "site has no client" || result.reason === "client not found") {
+      res.status(400).json({ error: "Bad Request", message: "Site has no linked client" });
+      return;
+    }
+    if (result.reason === "no priced entries") {
+      res.status(400).json({
+        error: "Bad Request",
+        message: "Cannot generate invoice: no bill rate on file. Set a per-license-level rate on the site's rate card, or fall back to the site's default bill rate.",
+      });
+      return;
+    }
+    if (result.reason === "invalid weekStart") {
+      res.status(400).json({ error: "Bad Request", message: "weekStart must be YYYY-MM-DD" });
+      return;
+    }
+    res.status(400).json({ error: "Bad Request", message: result.reason });
     return;
   }
-  if (unrated.length > 0) {
-    req.log?.warn(
-      { siteId, weekStart, unratedCount: unrated.length },
-      "Some approved time entries had no resolvable bill rate and were excluded from the invoice",
-    );
+  if (result.status === "skipped") {
+    // Existing draft is locked or hand-edited — return it as-is so the
+    // caller's UI can show "already on file" without an error.
+    const [existing] = await db
+      .select()
+      .from(invoicesTable)
+      .leftJoin(sitesTable, eq(invoicesTable.siteId, sitesTable.id))
+      .where(eq(invoicesTable.id, result.invoiceId!));
+    res.status(200).json({ ...existing?.invoices, siteName: existing?.sites?.name, skippedReason: result.reason });
+    return;
   }
 
-  // One line per (officer × rate). Reads naturally on the PDF:
-  //   "Smith, John  —  16.50h × $42.00  =  $693.00"
-  // If the client renegotiated mid-week and two rates apply, each officer
-  // gets one line per rate so the breakdown is auditable.
-  const groups = new Map<string, { description: string; hours: number; rate: number; amount: number }>();
-  for (const p of priced) {
-    const key = `${p.officerName}__${p.rate}`;
-    const cur = groups.get(key) ?? { description: p.officerName, hours: 0, rate: p.rate, amount: 0 };
-    cur.hours += p.hours;
-    cur.amount += p.hours * p.rate;
-    groups.set(key, cur);
-  }
-  const lineItems = Array.from(groups.values())
-    .sort((a, b) => a.description.localeCompare(b.description))
-    .map((g) => ({
-      description: g.description,
-      hours: Math.round(g.hours * 100) / 100,
-      rate: g.rate,
-      amount: Math.round(g.amount * 100) / 100,
-    }));
-  const { subtotal, total } = calcTotals(lineItems, 0);
-
-  const periodStart = isoDate(start);
-  const periodEnd = isoDate(addDays(start, 6));
-  const dueDate = isoDate(addDays(new Date(), client.paymentTermsDays));
-
-  const [invoice] = await db.insert(invoicesTable).values({
-    invoiceNumber: generateInvoiceNumber(),
-    clientId: client.id,
-    siteId: site.id,
-    periodStart,
-    periodEnd,
-    clientName: client.name,
-    clientEmail: client.contactEmail,
-    clientAddress: client.billingAddress,
-    lineItems,
-    subtotal: String(subtotal),
-    taxAmount: "0",
-    totalAmount: String(total),
-    status: "draft",
-    dueDate,
-    notes: `${site.name} — week of ${periodStart}`,
-  }).returning();
-
-  res.status(201).json({ ...invoice, siteName: site.name });
+  // Both "created" and "updated" are success — return 201 to match the
+  // OpenAPI contract this route has always advertised. Idempotency
+  // (re-running for the same week returns the same row) is now a
+  // server-side guarantee, not a contract change.
+  const [withSite] = await db
+    .select()
+    .from(invoicesTable)
+    .leftJoin(sitesTable, eq(invoicesTable.siteId, sitesTable.id))
+    .where(eq(invoicesTable.id, result.invoiceId));
+  res.status(201).json({ ...withSite?.invoices, siteName: withSite?.sites?.name });
 });
 
 router.put("/invoices/:id", requireAdmin, async (req, res): Promise<void> => {
@@ -253,10 +174,16 @@ router.put("/invoices/:id", requireAdmin, async (req, res): Promise<void> => {
     updates.subtotal = String(subtotal);
     updates.taxAmount = String(taxAmount ?? 0);
     updates.totalAmount = String(total);
+    // Admin hand-edited the billable totals — opt this row out of
+    // future auto-sync so the next time-entry approval can't clobber
+    // their numbers. The weekly lock job will still freeze it.
+    updates.autoSynced = false;
   }
   if (status) {
     updates.status = status;
     if (status === "paid") updates.paidAt = new Date();
+    // Any explicit status change past 'draft' also opts out of resync.
+    if (status !== "draft") updates.autoSynced = false;
   }
   if (dueDate) updates.dueDate = dueDate;
   if (notes !== undefined) updates.notes = notes;

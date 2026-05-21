@@ -18,6 +18,7 @@ import { logger } from "./logger";
 import { sendEmail, renderLicenseExpiryEmail, renderTrainingExpiryEmail, renderHighRiskProfileChangeEmail } from "./email";
 import { sendPushToUsers } from "./push";
 import { CHANGE_FIELD_LABELS } from "./employeeChangeLog";
+import { lockEndedWeekInvoices } from "./invoiceSync";
 
 /**
  * Coalescing window for the high-risk self-edit digest. Edits inside this
@@ -922,6 +923,11 @@ export function startScheduledJobs(intervalMs: number = HOUR_MS): NodeJS.Timeout
   schedule("high-risk-digest", flushHighRiskSelfEditDigests, 5 * MIN_MS);
   // Forgot-to-clock-out — every 5 minutes; idempotent per active shift.
   schedule("forgot-clock-out", sendForgotClockOutReminders, 5 * MIN_MS);
+  // Lock draft invoices whose week has ended (Mon 00:00 UTC). After
+  // locking, new approvals for that site roll into a fresh draft for
+  // the following week. Hourly is enough — the boundary check is purely
+  // by period_end < today, so even one tick on Monday morning catches up.
+  schedule("invoice-week-lock", lockEndedWeekInvoices, intervalMs);
   // Suppress lint about unused sql import.
   void sql;
 

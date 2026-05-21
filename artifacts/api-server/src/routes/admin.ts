@@ -36,6 +36,7 @@ import { disconnectUser } from "../lib/wsManager";
 import { writeEmployeeFieldChanges } from "../lib/employeeChangeLog";
 import { preparePreUpdateBody as prepareSitePreUpdate, maybeAutoGeocode as maybeAutoGeocodeSite } from "../lib/siteGeocode";
 import { normalizePhoneToE164 } from "../lib/phone";
+import { adminEditBreaksAutoSync } from "../lib/invoiceSync";
 
 /**
  * Coerce a free-text phone field on an admin CRUD payload into E.164 in place.
@@ -922,6 +923,14 @@ router.put("/admin/tables/:table/:id", requireAdmin, async (req, res): Promise<v
 
     if (tableName === "sites" && beforeRow) {
       body = prepareSitePreUpdate(beforeRow as any, body);
+    }
+
+    // Invoice auto-sync opt-out: any admin grid edit to a billable field
+    // flips auto_synced=false so the next time-entry approval can't
+    // overwrite their hand-tuned numbers. See lib/invoiceSync.ts for the
+    // full mutability contract.
+    if (tableName === "invoices" && adminEditBreaksAutoSync(body)) {
+      body.autoSynced = false;
     }
 
     const updated = (await db.update(cfg.table).set(body).where(eq((cfg.table as any).id, id)).returning()) as unknown[];

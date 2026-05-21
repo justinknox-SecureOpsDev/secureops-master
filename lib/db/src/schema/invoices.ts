@@ -1,4 +1,5 @@
-import { pgTable, text, uuid, timestamp, date, numeric, jsonb } from "drizzle-orm/pg-core";
+import { pgTable, text, uuid, timestamp, date, numeric, jsonb, boolean, uniqueIndex } from "drizzle-orm/pg-core";
+import { sql } from "drizzle-orm";
 import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod/v4";
 import { clientsTable } from "./clients";
@@ -23,9 +24,30 @@ export const invoicesTable = pgTable("invoices", {
   dueDate: date("due_date").notNull(),
   paidAt: timestamp("paid_at", { withTimezone: true }),
   notes: text("notes"),
+  // Auto-population bookkeeping (May 2026):
+  //   autoSynced = true  → invoiceSync.ts is allowed to rebuild line items
+  //                         from approved time entries for this site+week.
+  //                         Flipped to false the first time an admin edits
+  //                         lineItems / subtotal / totalAmount / tax so we
+  //                         never clobber a hand-tuned invoice.
+  //   lockedAt   = !null → the week has ended (or admin explicitly locked).
+  //                         New approvals roll into the next week's draft
+  //                         instead of touching this row.
+  autoSynced: boolean("auto_synced").notNull().default(true),
+  lockedAt: timestamp("locked_at", { withTimezone: true }),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow().$onUpdate(() => new Date()),
-});
+}, (table) => ({
+  // At most ONE actively-syncing draft per (site, week). Allows a separate
+  // adjustment draft once the original is locked at week-end (locked_at IS
+  // NOT NULL excludes it), and allows the auto-sync upsert to coexist with
+  // a hand-edited draft (auto_synced=false excludes it). Together with the
+  // race-safe INSERT in invoiceSync.ts, this guarantees that two concurrent
+  // approvals can never produce duplicate auto-synced drafts.
+  activeAutoDraftPerSiteWeek: uniqueIndex("invoices_active_auto_draft_per_week_idx")
+    .on(table.siteId, table.periodStart)
+    .where(sql`status = 'draft' AND locked_at IS NULL AND auto_synced = true`),
+}));
 
 export const insertInvoiceSchema = createInsertSchema(invoicesTable).omit({ id: true, createdAt: true, updatedAt: true });
 export type InsertInvoice = z.infer<typeof insertInvoiceSchema>;

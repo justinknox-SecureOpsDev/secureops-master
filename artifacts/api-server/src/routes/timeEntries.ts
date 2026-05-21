@@ -2,6 +2,7 @@ import { Router, type IRouter } from "express";
 import { eq, and, gte, lte, isNull, sql } from "drizzle-orm";
 import { db, timeEntriesTable, shiftsTable, usersTable, sitesTable, shiftAssignmentsTable, licensesTable } from "@workspace/db";
 import { requireAuth, requireAdmin } from "../middlewares/auth";
+import { upsertWeeklyInvoiceForTimeEntry } from "../lib/invoiceSync";
 
 const router: IRouter = Router();
 
@@ -440,6 +441,18 @@ router.post("/time-entries/:id/approve", requireAdmin, async (req, res): Promise
     ? await db.select().from(shiftsTable).where(eq(shiftsTable.id, updated.shiftId))
     : [undefined];
   const [user] = await db.select().from(usersTable).where(eq(usersTable.id, updated.employeeId));
+
+  // Auto-populate the per-site weekly client invoice. Approval is the
+  // only state that bills the client, so on "approved" we fold this
+  // entry into the (siteId, week-of-clockIn) draft. On "rejected" we
+  // also re-sync — if the entry was previously approved and rolled
+  // into a draft, the rebuild will drop its line and (if it was the
+  // only billable entry) prune the now-empty $0 draft. Best-effort:
+  // the response status doesn't depend on the invoice write.
+  if (decision === "approved" || decision === "rejected") {
+    void upsertWeeklyInvoiceForTimeEntry(updated);
+  }
+
   res.json({
     ...updated,
     shiftTitle: shift?.title,
