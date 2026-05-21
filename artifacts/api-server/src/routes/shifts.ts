@@ -919,7 +919,54 @@ router.post("/shifts/:id/assignments", requireAdminOrDispatcher, async (req, res
 
   // Admin assignment is final — the officer is on the schedule immediately.
   // No pending/accept dance: when admin taps "+", the slot is filled.
-  const [assignment] = await db.insert(shiftAssignmentsTable).values({ shiftId, employeeId, status: "accepted" }).returning();
+  // Race-safe: lock the parent shift row and re-check headcount inside the
+  // tx so a concurrent officer claim (or another dispatcher assigning at the
+  // same moment) cannot push us past the configured headcount. The unique
+  // index on (shift_id, employee_id) blocks duplicate assignments.
+  let assignment: typeof shiftAssignmentsTable.$inferSelect | undefined;
+  let outcome: string = "ok";
+  try {
+    assignment = await db.transaction(async (tx) => {
+      const locked = await tx.execute(sql`
+        SELECT headcount FROM shifts WHERE id = ${shiftId}::uuid FOR UPDATE
+      `);
+      const lockedRow = (locked as any).rows?.[0];
+      if (!lockedRow) { outcome = "missing"; return undefined; }
+      const headcount: number = lockedRow.headcount;
+
+      const dupRes = await tx.execute(sql`
+        SELECT 1 FROM shift_assignments
+        WHERE shift_id = ${shiftId}::uuid AND employee_id = ${employeeId}::uuid
+        LIMIT 1
+      `);
+      if ((dupRes as any).rows?.length) { outcome = "already"; return undefined; }
+
+      const countRes = await tx.execute(sql`
+        SELECT COUNT(*)::int AS c FROM shift_assignments WHERE shift_id = ${shiftId}::uuid
+      `);
+      const filled: number = (countRes as any).rows?.[0]?.c ?? 0;
+      if (filled >= headcount) { outcome = "full"; return undefined; }
+
+      const [row] = await tx.insert(shiftAssignmentsTable)
+        .values({ shiftId, employeeId, status: "accepted" })
+        .returning();
+      return row;
+    });
+  } catch (err) {
+    req.log.error({ err, shiftId, employeeId }, "admin assign shift insert failed");
+    res.status(500).json({ error: "Internal", message: "Could not assign officer" });
+    return;
+  }
+  if (!assignment) {
+    if (outcome === "already") {
+      res.status(409).json({ error: "Conflict", message: "Officer is already assigned to this shift" });
+    } else if (outcome === "full") {
+      res.status(409).json({ error: "Conflict", message: "This shift is already fully staffed" });
+    } else {
+      res.status(404).json({ error: "Not Found", message: "Shift not found" });
+    }
+    return;
+  }
   const [user] = await db.select().from(usersTable).where(eq(usersTable.id, employeeId));
 
   // Send push notification to the assigned employee
