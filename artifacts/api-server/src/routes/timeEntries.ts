@@ -10,6 +10,52 @@ function calcHours(clockIn: Date, clockOut: Date): number {
   return Math.round(((clockOut.getTime() - clockIn.getTime()) / 3600000) * 100) / 100;
 }
 
+const SHIFT_MATCH_GRACE_MS = 60 * 60 * 1000;
+
+// Find a scheduled shift at `siteId` whose window contains `whenAt`
+// (± 60-min grace). Used by clock-in (auto-attach for ad-hoc geo
+// clock-ins) and the backfill admin route — the goal is to recover the
+// per-shift `billRate` so the client gets billed at the rate posted for
+// that slot. We deliberately do NOT require the employee to have an
+// accepted assignment: client billing depends on the scheduled rate for
+// the slot, not on which officer ultimately covered it (fill-ins, last-
+// minute swaps, and pre-assignment-tracking history all need to bill
+// correctly). The officer's *pay* rate is resolved separately by the
+// payroll board and is not affected here.
+//
+// `employeeId` is accepted for symmetry/logging and possible future
+// preference (e.g. prefer an assigned shift if multiple match), but is
+// not currently used in the WHERE clause. Disambiguation when multiple
+// shifts overlap: pick the one whose startTime is closest to whenAt.
+// Skips junk seed rows pinned to the year 2099.
+export async function findMatchingScheduledShift(
+  _employeeId: string,
+  siteId: string,
+  whenAt: Date,
+): Promise<string | null> {
+  const lowerBound = new Date(whenAt.getTime() - SHIFT_MATCH_GRACE_MS);
+  const upperBound = new Date(whenAt.getTime() + SHIFT_MATCH_GRACE_MS);
+  const farFutureCutoff = new Date("2090-01-01T00:00:00Z");
+  const hits = await db
+    .select({ id: shiftsTable.id, startTime: shiftsTable.startTime })
+    .from(shiftsTable)
+    .where(and(
+      eq(shiftsTable.siteId, siteId),
+      lte(shiftsTable.startTime, upperBound),
+      gte(shiftsTable.endTime, lowerBound),
+      lte(shiftsTable.startTime, farFutureCutoff),
+    ));
+  if (hits.length === 0) return null;
+  if (hits.length === 1) return hits[0].id;
+  let best = hits[0];
+  let bestDelta = Math.abs(best.startTime.getTime() - whenAt.getTime());
+  for (const h of hits.slice(1)) {
+    const d = Math.abs(h.startTime.getTime() - whenAt.getTime());
+    if (d < bestDelta) { best = h; bestDelta = d; }
+  }
+  return best.id;
+}
+
 // Coalesce: prefer the time entry's direct siteId (set by geo-resolution when no shift),
 // otherwise fall back to the linked shift's siteId.
 const baseSelect = {
@@ -184,8 +230,29 @@ router.post("/time-entries/clock-in", requireAuth, async (req, res): Promise<voi
     }
   }
 
+  // Auto-attach a scheduled shift to ad-hoc geo clock-ins. If the officer
+  // has an `accepted` assignment at the resolved site whose window contains
+  // "now" (with a 60-min grace either side), we link the entry to that
+  // shift. This is what unlocks per-shift billRate for invoicing without
+  // forcing officers to explicitly pick a shift before clocking in. If
+  // none / many match we leave shiftId null and the entry stays ad-hoc.
+  let autoAttachedShiftId: string | null = null;
+  if (!shiftId && resolvedSite) {
+    autoAttachedShiftId = await findMatchingScheduledShift(
+      req.user!.userId,
+      resolvedSite.id,
+      new Date(),
+    );
+    if (autoAttachedShiftId) {
+      req.log.info(
+        { employeeId: req.user!.userId, siteId: resolvedSite.id, shiftId: autoAttachedShiftId },
+        "[clock-in] auto-attached ad-hoc clock-in to scheduled shift",
+      );
+    }
+  }
+
   const [entry] = await db.insert(timeEntriesTable).values({
-    shiftId: shiftId || null,
+    shiftId: shiftId || autoAttachedShiftId || null,
     siteId: resolvedSite ? resolvedSite.id : assignedShiftSiteId,
     employeeId: req.user!.userId,
     clockInTime: new Date(),
@@ -217,18 +284,22 @@ router.post("/time-entries/clock-in", requireAuth, async (req, res): Promise<voi
     req.log.warn({ err }, "Failed to seed users.lastLat from clock-in coords");
   }
 
-  // When clocking into a specific shift, flip its status to "active" so the
-  // mobile app's My Shifts → Active tab (and admin dashboards) reflect the
-  // on-duty state. Don't downgrade if it's already past upcoming.
-  if (shiftId) {
+  // When clocking into a specific shift — or auto-attached one — flip its
+  // status to "active" so the mobile app's My Shifts → Active tab (and
+  // admin dashboards) reflect the on-duty state. Without this, the
+  // matching clock-out completion flip (which requires status='active')
+  // never fires for auto-attached shifts and they'd hang in "upcoming"
+  // indefinitely. Don't downgrade if already past upcoming.
+  const effectiveShiftId = shiftId || autoAttachedShiftId;
+  if (effectiveShiftId) {
     await db
       .update(shiftsTable)
       .set({ status: "active" })
-      .where(and(eq(shiftsTable.id, shiftId), eq(shiftsTable.status, "upcoming")));
+      .where(and(eq(shiftsTable.id, effectiveShiftId), eq(shiftsTable.status, "upcoming")));
   }
 
-  const [shift] = shiftId
-    ? await db.select().from(shiftsTable).where(eq(shiftsTable.id, shiftId))
+  const [shift] = effectiveShiftId
+    ? await db.select().from(shiftsTable).where(eq(shiftsTable.id, effectiveShiftId))
     : [undefined];
   const [user] = await db.select().from(usersTable).where(eq(usersTable.id, req.user!.userId));
 
@@ -457,6 +528,96 @@ router.post("/time-entries/:id/approve", requireAdmin, async (req, res): Promise
     ...updated,
     shiftTitle: shift?.title,
     employeeName: user ? `${user.firstName} ${user.lastName}` : null,
+  });
+});
+
+// One-shot admin backfill: walk every time entry with no shiftId, try to
+// auto-attach a matching scheduled shift (same employee, same site, window
+// overlaps clockInTime ± 60 min, accepted assignment), then re-run the
+// invoice upsert for every entry we touched so historical approved hours
+// roll into priced draft invoices. Safe to re-run: rows that don't match
+// stay ad-hoc, rows that already have a shiftId are skipped. Returns a
+// summary; failures inside the per-row loop are logged but do not abort
+// the batch.
+router.post("/admin/time-entries/backfill-shift-attach", requireAdmin, async (req, res): Promise<void> => {
+  const candidates = await db
+    .select()
+    .from(timeEntriesTable)
+    .where(isNull(timeEntriesTable.shiftId));
+
+  let attached = 0;
+  let unmatched = 0;
+  const errors: Array<{ id: string; error: string }> = [];
+  const invoiceSyncQueue: Array<typeof timeEntriesTable.$inferSelect> = [];
+
+  for (const entry of candidates) {
+    if (!entry.siteId) { unmatched++; continue; }
+    try {
+      const matched = await findMatchingScheduledShift(
+        entry.employeeId,
+        entry.siteId,
+        entry.clockInTime,
+      );
+      if (!matched) { unmatched++; continue; }
+      // Race-safe: only update if shiftId is still NULL — protects against
+      // a concurrent clock-in / second backfill that already attached.
+      const updatedRows = await db
+        .update(timeEntriesTable)
+        .set({ shiftId: matched })
+        .where(and(eq(timeEntriesTable.id, entry.id), isNull(timeEntriesTable.shiftId)))
+        .returning();
+      if (updatedRows.length === 0) continue;
+      attached++;
+      if (updatedRows[0].approvalStatus === "approved") {
+        invoiceSyncQueue.push(updatedRows[0]);
+      }
+    } catch (err) {
+      errors.push({ id: entry.id, error: err instanceof Error ? err.message : String(err) });
+    }
+  }
+
+  // Run invoice upserts with bounded concurrency (4 at a time) so a
+  // big backfill doesn't fan out hundreds of parallel DB transactions.
+  // We await them so the response reports real success/failure counts,
+  // not "queued" — the operator needs to know whether invoices actually
+  // built. Per-row failures are collected, never abort the batch.
+  let invoiceSynced = 0;
+  const CONCURRENCY = 4;
+  for (let i = 0; i < invoiceSyncQueue.length; i += CONCURRENCY) {
+    const slice = invoiceSyncQueue.slice(i, i + CONCURRENCY);
+    const results = await Promise.allSettled(
+      slice.map(e => upsertWeeklyInvoiceForTimeEntry(e)),
+    );
+    results.forEach((r, j) => {
+      if (r.status === "fulfilled") {
+        invoiceSynced++;
+      } else {
+        errors.push({
+          id: slice[j].id,
+          error: `invoiceSync: ${r.reason instanceof Error ? r.reason.message : String(r.reason)}`,
+        });
+      }
+    });
+  }
+
+  req.log.info(
+    {
+      scanned: candidates.length,
+      attached,
+      unmatched,
+      invoiceSyncAttempted: invoiceSyncQueue.length,
+      invoiceSynced,
+      errorCount: errors.length,
+    },
+    "[admin] backfill-shift-attach complete",
+  );
+  res.json({
+    scanned: candidates.length,
+    attached,
+    unmatched,
+    invoiceSyncAttempted: invoiceSyncQueue.length,
+    invoiceSynced,
+    errors,
   });
 });
 
