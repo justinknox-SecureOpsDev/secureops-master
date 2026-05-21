@@ -440,6 +440,37 @@ function splitFullName(label: string): { firstName: string; lastName: string } {
   return { firstName: parts[0], lastName: parts.slice(1).join(" ") };
 }
 
+/** Auto-creates a site from a free-text name found in a time-entries import.
+ *  Sites require a client, so we find-or-create a placeholder "Imported"
+ *  client to attach to. The site can be moved to the correct client later.
+ *  Runs as its own transaction so the new site exists even if the surrounding
+ *  import partially fails. */
+async function autoCreateSiteFromName(label: string): Promise<string> {
+  const name = label.trim() || "Imported Site";
+  return await db.transaction(async (tx) => {
+    // Find or create the placeholder client
+    const existing = await tx.select({ id: clientsTable.id })
+      .from(clientsTable)
+      .where(eq(clientsTable.name, "Imported"))
+      .limit(1);
+    let clientId: string;
+    if (existing.length > 0) {
+      clientId = existing[0].id;
+    } else {
+      const [c] = await tx.insert(clientsTable).values({
+        name: "Imported",
+        contactName: "Import",
+        contactEmail: "import@imported.local",
+        paymentTermsDays: 30,
+      }).returning() as Array<{ id: string }>;
+      clientId = c.id;
+    }
+    // Create the site
+    const [s] = await tx.insert(sitesTable).values({ name, clientId }).returning() as Array<{ id: string }>;
+    return s.id;
+  });
+}
+
 /** Auto-creates a `pending` user + employee from a free-text full name found
  *  in a time-entries import. The placeholder email is unique-by-construction
  *  so the row inserts cleanly; `mustCompleteProfile=true` flags the row for
@@ -499,7 +530,7 @@ const fkResolution: Record<string, Record<string, FkRef>> = {
       ],
       altPrimaryKeys: shiftTitleWithLevelAlt,
     },
-    siteId: { table: sitesTable, matchColumns: [{ key: "name", col: sitesTable.name, type: "text" }] },
+    siteId: { table: sitesTable, matchColumns: [{ key: "name", col: sitesTable.name, type: "text" }], autoCreate: autoCreateSiteFromName },
   },
   licenses: {
     employeeId: { table: usersTable, matchColumns: [{ key: "email", col: usersTable.email, type: "text" }] },
