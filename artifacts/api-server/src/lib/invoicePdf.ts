@@ -1,9 +1,10 @@
 import PDFDocument from "pdfkit";
 import type { Readable } from "node:stream";
+import { brand } from "./brandConfig";
 
-const NAVY  = "#080c18";
-const GOLD  = "#c9a84c";
-const CREAM = "#f0e6c8";
+const NAVY  = brand.colorNavy;
+const GOLD  = brand.colorGold;
+const CREAM = brand.colorCream;
 const MUTED = "#666666";
 const TEXT  = "#1a1a1a";
 const LIGHT = "#f7f7f7";
@@ -63,7 +64,7 @@ export function buildInvoicePdf(inv: InvoicePdfInput): InvoicePdfPayload {
     margins: { top: 56, bottom: 56, left: 56, right: 56 },
     info: {
       Title: `Invoice ${inv.invoiceNumber}`,
-      Author: "Williams Council Security Group",
+      Author: brand.companyName,
       Subject: `Invoice ${inv.invoiceNumber} — ${inv.clientName ?? "Client"}`,
       CreationDate: new Date(),
     },
@@ -74,9 +75,9 @@ export function buildInvoicePdf(inv: InvoicePdfInput): InvoicePdfPayload {
   // ── Header band ──────────────────────────────────────────────────────────
   doc.rect(0, 0, W, 80).fill(NAVY);
   doc.fillColor(GOLD).font("Helvetica-Bold").fontSize(20)
-    .text("Williams Council Security Group", 56, 22, { characterSpacing: 0.2 });
+    .text(brand.companyName, 56, 22, { characterSpacing: 0.2 });
   doc.fillColor(CREAM).font("Helvetica").fontSize(9)
-    .text("Professional Security Services  ·  Invoice", 56, 50);
+    .text(`${brand.tagline}  ·  Invoice`, 56, 50);
   doc.rect(0, 80, W, 3).fill(GOLD);
 
   doc.y = 100;
@@ -216,7 +217,7 @@ export function buildInvoicePdf(inv: InvoicePdfInput): InvoicePdfPayload {
     .text("Payment information", 66, ftY);
   doc.fillColor(MUTED).font("Helvetica").fontSize(8)
     .text(
-      "Please reference the invoice number on payment. For questions, contact billing@williamscouncilsecurity.com.",
+      `Please reference the invoice number on payment. For questions, contact ${brand.billingEmail}.`,
       66, ftY + 13, { width: W - 132 },
     );
   doc.y += 58;
@@ -224,14 +225,15 @@ export function buildInvoicePdf(inv: InvoicePdfInput): InvoicePdfPayload {
   // Page footer
   const pfY = doc.page.height - 36;
   doc.fillColor(MUTED).font("Helvetica").fontSize(7.5).text(
-    `Generated ${new Date().toLocaleString()}  ·  Williams Council Security Group  ·  Invoice ${inv.invoiceNumber}`,
+    `Generated ${new Date().toLocaleString()}  ·  ${brand.companyName}  ·  Invoice ${inv.invoiceNumber}`,
     56, pfY, { width: W - 112, align: "center", lineBreak: false },
   );
 
   doc.end();
 
   const safeNum = inv.invoiceNumber.replace(/[^a-z0-9-]/gi, "-").toLowerCase();
-  const filename = `wcsg-invoice-${safeNum}.pdf`;
+  const safeShort = brand.shortName.replace(/[^a-z0-9]/gi, "-").toLowerCase();
+  const filename = `${safeShort}-invoice-${safeNum}.pdf`;
 
   const stream = doc as unknown as Readable;
 

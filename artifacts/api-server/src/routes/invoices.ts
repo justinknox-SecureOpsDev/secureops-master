@@ -5,6 +5,7 @@ import { requireAdmin } from "../middlewares/auth";
 import { upsertWeeklyInvoice } from "../lib/invoiceSync";
 import { buildInvoicePdf } from "../lib/invoicePdf";
 import { sendEmailDetailed } from "../lib/email";
+import { brand } from "../lib/brandConfig";
 
 const router: IRouter = Router();
 
@@ -303,7 +304,7 @@ router.post("/invoices/:id/send", requireAdmin, async (req, res): Promise<void> 
 
   const emailResult = await sendEmailDetailed({
     to: recipient,
-    subject: `Invoice ${row.invoiceNumber} — Williams Council Security Group`,
+    subject: `Invoice ${row.invoiceNumber} — ${brand.companyName}`,
     text: [
       `Dear ${row.clientName ?? "Client"},`,
       "",
@@ -311,27 +312,27 @@ router.post("/invoices/:id/send", requireAdmin, async (req, res): Promise<void> 
       "",
       `Invoice total: ${totalDisplay}${row.dueDate ? `\nDue date:      ${row.dueDate}` : ""}`,
       "",
-      "Please reference the invoice number on your payment. For questions, contact billing@williamscouncilsecurity.com.",
+      `Please reference the invoice number on your payment. For questions, contact ${brand.billingEmail}.`,
       "",
-      "— Williams Council Security Group",
+      `— ${brand.companyName}`,
     ].join("\n"),
     html: `
-      <div style="font-family:Georgia,serif;max-width:560px;margin:0 auto;color:#080c18">
-        <div style="background:#080c18;padding:20px 24px;border-radius:4px 4px 0 0">
-          <h2 style="color:#c9a84c;margin:0;font-size:18px">Williams Council Security Group</h2>
-          <p style="color:#f0e6c8;margin:4px 0 0;font-size:12px">Professional Security Services</p>
+      <div style="font-family:Georgia,serif;max-width:560px;margin:0 auto;color:${brand.colorNavy}">
+        <div style="background:${brand.colorNavy};padding:20px 24px;border-radius:4px 4px 0 0">
+          <h2 style="color:${brand.colorGold};margin:0;font-size:18px">${escHtml(brand.companyName)}</h2>
+          <p style="color:${brand.colorCream};margin:4px 0 0;font-size:12px">${escHtml(brand.tagline)}</p>
         </div>
         <div style="border:1px solid #ddd;border-top:none;padding:24px;border-radius:0 0 4px 4px">
           <p>Dear ${escHtml(row.clientName ?? "Client")},</p>
           <p>Please find attached invoice <strong>${escHtml(row.invoiceNumber)}</strong> for security services provided during <strong>${escHtml(period)}</strong>.</p>
-          <div style="background:#f6f1e1;padding:14px 16px;border-left:3px solid #c9a84c;margin:18px 0;border-radius:4px">
+          <div style="background:#f6f1e1;padding:14px 16px;border-left:3px solid ${brand.colorGold};margin:18px 0;border-radius:4px">
             <div><strong>Invoice total:</strong> ${escHtml(totalDisplay)}</div>
             ${row.dueDate ? `<div><strong>Due date:</strong> ${escHtml(row.dueDate)}</div>` : ""}
             <div><strong>Invoice #:</strong> ${escHtml(row.invoiceNumber)}</div>
           </div>
-          <p style="color:#555;font-size:13px">Please reference the invoice number on your payment. For questions, contact <a href="mailto:billing@williamscouncilsecurity.com">billing@williamscouncilsecurity.com</a>.</p>
-          <hr style="border:none;border-top:2px solid #c9a84c;margin:20px 0"/>
-          <p style="color:#080c18;font-weight:bold;margin:0;font-size:13px">Williams Council Security Group</p>
+          <p style="color:#555;font-size:13px">Please reference the invoice number on your payment. For questions, contact <a href="mailto:${escHtml(brand.billingEmail)}">${escHtml(brand.billingEmail)}</a>.</p>
+          <hr style="border:none;border-top:2px solid ${brand.colorGold};margin:20px 0"/>
+          <p style="color:${brand.colorNavy};font-weight:bold;margin:0;font-size:13px">${escHtml(brand.companyName)}</p>
         </div>
       </div>
     `,

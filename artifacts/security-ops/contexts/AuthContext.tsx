@@ -52,7 +52,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
     setAwaitingBiometric(true);
     setIsLoading(false);
-    const ok = await promptBiometric("Unlock SecureOps");
+    const ok = await promptBiometric(`Unlock ${process.env.EXPO_PUBLIC_APP_NAME ?? "SecureOps"}`);
     if (ok) {
       setTokenState(storedToken);
       setUser(parsedUser);
@@ -99,7 +99,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   };
 
   const retryBiometric = async () => {
-    const ok = await promptBiometric("Unlock SecureOps");
+    const ok = await promptBiometric(`Unlock ${process.env.EXPO_PUBLIC_APP_NAME ?? "SecureOps"}`);
     if (ok) {
       const storedToken = await storage.get(AUTH_TOKEN_KEY);
       const storedUser = await storage.get(AUTH_USER_KEY);

@@ -8,10 +8,11 @@ import {
   shiftsTable,
   sitesTable,
 } from "@workspace/db";
+import { brand } from "./brandConfig";
 
-const NAVY = "#080c18";
-const GOLD = "#c9a84c";
-const CREAM = "#f0e6c8";
+const NAVY = brand.colorNavy;
+const GOLD = brand.colorGold;
+const CREAM = brand.colorCream;
 const MUTED = "#666666";
 const TEXT = "#1a1a1a";
 
@@ -64,7 +65,7 @@ export async function buildDarPdf(darId: string): Promise<DarPdfPayload | null> 
   doc.rect(0, 0, doc.page.width, 80).fill(NAVY);
   doc.fillColor(GOLD)
     .font("Helvetica-Bold").fontSize(20)
-    .text("Williams Council Security Group", 56, 22);
+    .text(brand.companyName, 56, 22);
   doc.fillColor(CREAM)
     .font("Helvetica").fontSize(10)
     .text("Daily Activity Report", 56, 50);
@@ -135,7 +136,7 @@ export async function buildDarPdf(darId: string): Promise<DarPdfPayload | null> 
 
   const footerY = doc.page.height - 36;
   doc.fillColor(MUTED).font("Helvetica").fontSize(8).text(
-    `Generated ${new Date().toLocaleString()} · Williams Council Security Group · Confidential`,
+    `Generated ${new Date().toLocaleString()} · ${brand.companyName} · Confidential`,
     56, footerY,
     { width: doc.page.width - 112, align: "center", lineBreak: false },
   );
@@ -143,7 +144,7 @@ export async function buildDarPdf(darId: string): Promise<DarPdfPayload | null> 
   doc.end();
 
   const safeOfficer = officer.replace(/[^a-z0-9]+/gi, "-").replace(/^-+|-+$/g, "").toLowerCase().slice(0, 30) || "officer";
-  const filename = `wcsg-dar-${row.reportDate}-${safeOfficer}.pdf`;
+  const filename = `${brand.shortName.replace(/[^a-z0-9]/gi, "-").toLowerCase()}-dar-${row.reportDate}-${safeOfficer}.pdf`;
   return { filename, stream: doc as unknown as Readable };
 }
 

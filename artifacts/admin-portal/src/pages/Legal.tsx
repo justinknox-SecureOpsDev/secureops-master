@@ -1,9 +1,9 @@
 import { Link } from "wouter";
 
-const COMPANY = "Williams Council Security Group Inc.";
-const SHORT = "WCSG";
-const CONTACT_EMAIL = "privacy@williamscouncilsecurity.com";
-const POSTAL = "Williams Council Security Group Inc., Texas, USA";
+const COMPANY = (window as any).__BRAND__?.companyName ?? "Williams Council Security Group Inc.";
+const SHORT = (window as any).__BRAND__?.shortName ?? "WCSG";
+const CONTACT_EMAIL = (window as any).__BRAND__?.privacyEmail ?? "privacy@williamscouncilsecurity.com";
+const POSTAL = `${COMPANY}, Texas, USA`;
 
 function Page({
   title,
@@ -20,7 +20,7 @@ function Page({
         <div className="max-w-3xl mx-auto px-6 py-6 flex items-center gap-3">
           <img
             src={`${import.meta.env.BASE_URL}logo-256.png`}
-            alt="WCSG"
+            alt={SHORT}
             className="w-10 h-10 rounded-md object-contain"
           />
           <div>

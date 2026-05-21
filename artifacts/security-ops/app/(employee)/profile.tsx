@@ -301,7 +301,8 @@ export default function EmployeeProfileScreen() {
   const availabilitySlots = Array.isArray(p?.availability)
     ? (p.availability as any[])
     : (p?.availability && typeof p.availability === "object" ? Object.entries(p.availability).map(([day, period]) => ({ day, period })) : []);
-  const mailtoCorrection = `mailto:hr@williamscouncilsecurity.com?subject=${encodeURIComponent("Profile correction request")}&body=${encodeURIComponent(`Hi HR,\n\nPlease update the following on my profile:\n\n[describe what needs to change]\n\nThanks,\n${p?.firstName ?? ""} ${p?.lastName ?? ""}`)}`;
+  const hrEmail = process.env.EXPO_PUBLIC_HR_EMAIL ?? "hr@williamscouncilsecurity.com";
+  const mailtoCorrection = `mailto:${hrEmail}?subject=${encodeURIComponent("Profile correction request")}&body=${encodeURIComponent(`Hi HR,\n\nPlease update the following on my profile:\n\n[describe what needs to change]\n\nThanks,\n${p?.firstName ?? ""} ${p?.lastName ?? ""}`)}`;
 
   return (
     <ScrollView style={[styles.container, { backgroundColor: colors.background }]} contentContainerStyle={{ paddingBottom: 100 }}>

@@ -97,7 +97,7 @@ export default function WelcomeTour() {
 
           {idx === 0 && (
             <Text style={[styles.welcome, { color: colors.accent }]}>
-              Welcome to SecureOps
+              Welcome to {process.env.EXPO_PUBLIC_APP_NAME ?? "SecureOps"}
             </Text>
           )}
 

@@ -170,8 +170,8 @@ export function OnboardPage() {
           <CheckCircle2 className="w-16 h-16 text-emerald-700 mx-auto" aria-hidden="true" />
           <h1 className="brand-wordmark text-3xl" tabIndex={-1} ref={headingRef}>You're onboarded!</h1>
           <p className="text-muted-foreground">
-            Welcome to Williams Council Security Group, {prefill.firstName}. HR will reach out
-            with your start details and credentials for the SecureOps mobile app.
+            Welcome to {(window as any).__BRAND__?.companyName ?? "Williams Council Security Group"}, {prefill.firstName}. HR will reach out
+            with your start details and credentials for the {(window as any).__BRAND__?.appName ?? "SecureOps"} mobile app.
           </p>
         </main>
       </div>
@@ -420,7 +420,7 @@ function ConsentBlock({
           aria-describedby={consentError ? consentErrorId : undefined}
         />
         <Label htmlFor={consentId} className="text-sm font-normal cursor-pointer leading-snug">
-          I authorise Williams Council Security Group to pay my wages by direct deposit
+          I authorise {(window as any).__BRAND__?.companyName ?? "Williams Council Security Group"} to pay my wages by direct deposit
           into the bank account specified above.
           <span className="sr-only"> (required)</span>
         </Label>

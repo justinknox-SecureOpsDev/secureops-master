@@ -18,6 +18,7 @@ import {
 import { requireAdmin } from "../middlewares/auth";
 import { exportLimiter } from "../middlewares/rateLimit";
 import { logger } from "../lib/logger";
+import { brand as _brand } from "../lib/brandConfig";
 
 const router: IRouter = Router();
 
@@ -638,9 +639,9 @@ const DATASETS: Record<DatasetId, Dataset> = {
 
 // ---------- PDF render ----------------------------------------------
 
-const NAVY = "#080c18";
-const GOLD = "#c9a84c";
-const CREAM = "#f0e6c8";
+const NAVY  = _brand.colorNavy;
+const GOLD  = _brand.colorGold;
+const CREAM = _brand.colorCream;
 const MUTED = "#666666";
 const TEXT = "#1a1a1a";
 
@@ -664,8 +665,8 @@ function renderPdf(
     layout: "landscape",
     margins: { top: 56, bottom: 48, left: 36, right: 36 },
     info: {
-      Title: `WCSG Export — ${dataset.label}`,
-      Author: "Williams Council Security Group",
+      Title: `${_brand.shortName} Export — ${dataset.label}`,
+      Author: _brand.companyName,
       Subject: `Export of ${dataset.label} (${result.rows.length} rows)`,
       CreationDate: new Date(),
     },
@@ -685,7 +686,7 @@ function renderPdf(
     doc.save();
     doc.rect(0, 0, doc.page.width, firstPage ? 64 : 36).fill(NAVY);
     doc.fillColor(GOLD).font("Helvetica-Bold").fontSize(firstPage ? 16 : 11)
-      .text("Williams Council Security Group", usableLeft, firstPage ? 18 : 11);
+      .text(_brand.companyName, usableLeft, firstPage ? 18 : 11);
     if (firstPage) {
       doc.fillColor(CREAM).font("Helvetica").fontSize(9)
         .text(`Export — ${dataset.label}`, usableLeft, 42);
@@ -699,7 +700,7 @@ function renderPdf(
     for (let i = 0; i < range.count; i++) {
       doc.switchToPage(range.start + i);
       doc.fillColor(MUTED).font("Helvetica").fontSize(8).text(
-        `Generated ${new Date().toLocaleString()} · Williams Council Security Group · Confidential · page ${i + 1} of ${range.count}`,
+        `Generated ${new Date().toLocaleString()} · ${_brand.companyName} · Confidential · page ${i + 1} of ${range.count}`,
         usableLeft, pageHeight - 24,
         { width: usableWidth, align: "center", lineBreak: false },
       );

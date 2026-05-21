@@ -80,7 +80,7 @@ export default function RootLayoutNav() {
         <View style={[styles.iconCircle, { borderColor: colors.primary, backgroundColor: colors.primary + "15" }]}>
           <Feather name="lock" size={32} color={colors.primary} />
         </View>
-        <Text style={{ color: colors.foreground, fontSize: 20, fontWeight: "700" }}>SecureOps locked</Text>
+        <Text style={{ color: colors.foreground, fontSize: 20, fontWeight: "700" }}>{process.env.EXPO_PUBLIC_APP_NAME ?? "SecureOps"} locked</Text>
         <Text style={{ color: colors.mutedForeground, textAlign: "center", maxWidth: 280 }}>
           Use biometric to unlock, or sign in again with your password.
         </Text>

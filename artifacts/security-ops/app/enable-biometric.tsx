@@ -70,7 +70,7 @@ export default function EnableBiometricScreen() {
           Enable {Platform.OS === "ios" ? "Face ID / Touch ID" : "fingerprint"}?
         </Text>
         <Text style={[styles.body, { color: colors.mutedForeground }]}>
-          Use biometrics to unlock SecureOps faster. You can change this later.
+          Use biometrics to unlock {process.env.EXPO_PUBLIC_APP_NAME ?? "SecureOps"} faster. You can change this later.
         </Text>
         {error && (
           <View style={[styles.errorBox, { backgroundColor: colors.destructive + "20", borderColor: colors.destructive }]}>

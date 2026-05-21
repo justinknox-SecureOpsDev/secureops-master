@@ -47,7 +47,7 @@ export default function AdminLayout() {
         name="dashboard"
         options={{
           title: "Overview",
-          headerTitle: "WCSG — Operations",
+          headerTitle: `${process.env.EXPO_PUBLIC_COMPANY_SHORT_NAME ?? "WCSG"} — Operations`,
           tabBarAccessibilityLabel: "Overview tab",
           tabBarIcon: ({ color }) => <Feather name="home" size={22} color={color} />,
         }}

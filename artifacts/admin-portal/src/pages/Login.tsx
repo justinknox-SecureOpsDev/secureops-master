@@ -7,6 +7,7 @@ import { Loader2, AlertCircle } from "lucide-react";
 
 export function LoginPage() {
   const { login, loginTotp } = useAuth();
+  const brandCfg = (window as any).__BRAND__ as { companyName: string; appName: string } | undefined;
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [busy, setBusy] = useState(false);
@@ -60,11 +61,10 @@ export function LoginPage() {
         <div className="bg-brand-navy text-white p-6 text-center border-b-4 border-brand-gold relative">
           <img
             src={`${import.meta.env.BASE_URL}logo-256.png`}
-            alt="Williams Council Security Group"
+            alt={brandCfg?.companyName ?? "Williams Council Security Group"}
             className="w-24 h-24 mx-auto mb-3 object-contain drop-shadow-[0_4px_12px_rgba(201,168,76,0.35)]"
           />
-          <div className="brand-wordmark text-xl">Williams Council</div>
-          <div className="brand-wordmark text-xl brand-gold">Security Group</div>
+          <div className="brand-wordmark text-xl">{brandCfg?.companyName ?? "Williams Council Security Group"}</div>
           <div className="text-xs uppercase tracking-widest opacity-70 mt-1">Admin Portal</div>
         </div>
         {challengeToken ? (
@@ -129,7 +129,7 @@ export function LoginPage() {
             )}
           </Button>
           <p className="text-xs text-muted-foreground text-center pt-2">
-            Admin access only. Employees use the SecureOps mobile app.
+            Admin access only. Employees use the {brandCfg?.appName ?? "SecureOps"} mobile app.
           </p>
         </form>
         )}
@@ -140,7 +140,7 @@ export function LoginPage() {
         </div>
       </div>
       <div className="absolute bottom-3 left-0 right-0 text-center text-[10px] text-white/40 select-none">
-        v1.0 · © {new Date().getFullYear()} Williams Council Security Group
+        v1.0 · © {new Date().getFullYear()} {brandCfg?.companyName ?? "Williams Council Security Group"}
       </div>
     </div>
   );

@@ -32,6 +32,7 @@ import trainingsRouter from "./trainings";
 import exportsRouter from "./exports";
 import radioRouter from "./radio";
 import dispatchRouter from "./dispatch";
+import brandConfigRouter from "./brandConfig";
 import { auditLogMiddleware } from "../lib/auditLog";
 
 const router: IRouter = Router();
@@ -40,6 +41,9 @@ const router: IRouter = Router();
 // only persists 2xx writes and runs after the response is sent — so it
 // adds no latency to the request path.
 router.use(auditLogMiddleware);
+
+// Public brand config — no auth required, registered before auth middleware.
+router.use(brandConfigRouter);
 
 router.use(healthRouter);
 router.use(authRouter);

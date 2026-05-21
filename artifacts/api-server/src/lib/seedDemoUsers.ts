@@ -2,6 +2,7 @@ import bcrypt from "bcryptjs";
 import { eq, and, ne, sql } from "drizzle-orm";
 import { db, usersTable, employeesTable } from "@workspace/db";
 import { logger } from "./logger";
+import { brand } from "./brandConfig";
 
 type DemoUser = {
   email: string;
@@ -13,15 +14,15 @@ type DemoUser = {
 
 const DEMO_USERS: DemoUser[] = [
   {
-    email: "admin@secureops.com",
-    password: "Admin123!",
+    email: brand.demoAdminEmail,
+    password: brand.demoAdminPassword,
     firstName: "Admin",
     lastName: "User",
     role: "admin",
   },
   {
-    email: "john.smith@secureops.com",
-    password: "Employee123!",
+    email: brand.demoEmployeeEmail,
+    password: brand.demoEmployeePassword,
     firstName: "John",
     lastName: "Smith",
     role: "employee",

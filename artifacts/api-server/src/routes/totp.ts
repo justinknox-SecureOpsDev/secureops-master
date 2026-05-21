@@ -7,6 +7,7 @@ import { eq } from "drizzle-orm";
 import { randomBytes } from "crypto";
 import { db, usersTable } from "@workspace/db";
 import { requireAuth } from "../middlewares/auth";
+import { brand } from "../lib/brandConfig";
 
 // ±1 step window — matches Google Authenticator default tolerance for
 // minor clock drift between server and phone.
@@ -15,7 +16,7 @@ function checkTotp(token: string, secret: string): boolean {
 }
 
 const router = Router();
-const ISSUER = "WCSG SecureOps";
+const ISSUER = `${brand.shortName} ${brand.appName}`;
 
 function generateRecoveryCodes(n = 10): string[] {
   const codes: string[] = [];

@@ -85,6 +85,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   const activeTable = match ? params?.table : null;
   const isDispatcher = user?.role === "dispatcher";
   const systemStatus = useSystemStatus(user?.role);
+  const brandCfg = (window as any).__BRAND__ as { companyName: string; shortName: string; appName: string } | undefined;
 
   const [collapsed, setCollapsed] = useState<boolean>(() => {
     try { return localStorage.getItem(COLLAPSE_KEY) === "1"; } catch { return false; }
@@ -267,12 +268,12 @@ export function AppShell({ children }: { children: React.ReactNode }) {
         <div className="flex items-center gap-3 px-4 py-2 border-b border-sidebar-border/60">
           <img
             src={`${import.meta.env.BASE_URL}logo-256.png`}
-            alt="WCSG"
+            alt={brandCfg?.shortName ?? "WCSG"}
             className="w-9 h-9 shrink-0 rounded-md object-contain"
           />
           <div className="flex-1 min-w-0 text-center">
             <div className="brand-wordmark text-lg sm:text-xl leading-tight truncate">
-              Williams Council <span className="brand-gold">Security Group Inc.</span>
+              {brandCfg?.companyName ?? "Williams Council Security Group"}
             </div>
             <div className="text-[10px] uppercase tracking-[0.25em] opacity-60 flex items-center justify-center gap-2">
               <span>Admin Portal</span>
@@ -366,7 +367,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
             </Button>
             {!collapsed && (
               <div className="text-[10px] opacity-40 text-center pt-2 select-none">
-                v1.0 · © {new Date().getFullYear()} WCSG
+                v1.0 · © {new Date().getFullYear()} {brandCfg?.shortName ?? "WCSG"}
               </div>
             )}
           </div>

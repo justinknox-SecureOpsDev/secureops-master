@@ -253,7 +253,7 @@ function Shell({ children }: { children: React.ReactNode }) {
     <div className="min-h-screen bg-brand-cream py-8 px-4">
       <main className="max-w-xl mx-auto bg-card rounded-lg border shadow-sm p-6">
         <div className="brand-wordmark text-base brand-navy mb-4 pb-3 border-b">
-          Williams Council Security Group
+          {(window as any).__BRAND__?.companyName ?? "Williams Council Security Group"}
         </div>
         {children}
       </main>

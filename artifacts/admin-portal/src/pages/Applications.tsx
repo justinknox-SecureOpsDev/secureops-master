@@ -894,7 +894,7 @@ function ApprovalSuccessDialog({ resp, onClose }: { resp: ApproveResp; onClose: 
                   </a>
                 </div>
               </Field>
-              <Field label="Temporary password (for SecureOps mobile app)">
+              <Field label={`Temporary password (for ${(window as any).__BRAND__?.appName ?? "SecureOps"} mobile app)`}>
                 <div className="flex gap-1">
                   <Input readOnly value={resp.tempPassword} />
                   <Button type="button" variant="outline" onClick={() => copy(resp.tempPassword)}><Copy className="w-4 h-4" /></Button>

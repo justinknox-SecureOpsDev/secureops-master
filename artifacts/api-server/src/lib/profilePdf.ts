@@ -10,14 +10,14 @@ import {
 import { logger } from "./logger";
 import { ObjectStorageService } from "./objectStorage";
 import type { EmployeeShareVisibleSections } from "@workspace/db";
+import { brand } from "./brandConfig";
 
 const objectStorage = new ObjectStorageService();
 
-// WCSG brand tokens — mirror lib/incidentPdf.ts so the two documents
-// look like one product family when printed side-by-side.
-const NAVY = "#080c18";
-const GOLD = "#c9a84c";
-const CREAM = "#f0e6c8";
+// Brand tokens — driven by env vars so each client deployment has its own palette.
+const NAVY = brand.colorNavy;
+const GOLD = brand.colorGold;
+const CREAM = brand.colorCream;
 const MUTED = "#666666";
 const TEXT = "#1a1a1a";
 
@@ -204,7 +204,7 @@ export async function buildEmployeeProfilePdf(
     margins: { top: 56, bottom: 56, left: 56, right: 56 },
     info: {
       Title: `Officer Profile — ${row.firstName} ${row.lastName}`,
-      Author: "Williams Council Security Group",
+      Author: brand.companyName,
       Subject: `Profile ${row.id}`,
       CreationDate: new Date(),
     },
@@ -214,7 +214,7 @@ export async function buildEmployeeProfilePdf(
   doc.rect(0, 0, doc.page.width, 80).fill(NAVY);
   doc.fillColor(GOLD)
     .font("Helvetica-Bold").fontSize(20)
-    .text("Williams Council Security Group", 56, 22);
+    .text(brand.companyName, 56, 22);
   doc.fillColor(CREAM)
     .font("Helvetica").fontSize(10)
     .text("Confidential Officer Profile", 56, 50);
@@ -477,7 +477,7 @@ export async function buildEmployeeProfilePdf(
   // Footer on the final page.
   const footerY = doc.page.height - 36;
   doc.fillColor(MUTED).font("Helvetica").fontSize(8).text(
-    `Generated ${new Date().toLocaleString()} · Williams Council Security Group · Confidential — do not distribute`,
+    `Generated ${new Date().toLocaleString()} · ${brand.companyName} · Confidential — do not distribute`,
     56, footerY,
     { width: doc.page.width - 112, align: "center", lineBreak: false },
   );
@@ -486,6 +486,6 @@ export async function buildEmployeeProfilePdf(
 
   const safeName = `${row.firstName ?? ""}-${row.lastName ?? ""}`
     .replace(/[^a-z0-9]+/gi, "-").replace(/^-+|-+$/g, "").toLowerCase().slice(0, 40) || "officer";
-  const filename = `wcsg-profile-${safeName}-${new Date().toISOString().slice(0, 10)}.pdf`;
+  const filename = `${brand.shortName.replace(/[^a-z0-9]/gi, "-").toLowerCase()}-profile-${safeName}-${new Date().toISOString().slice(0, 10)}.pdf`;
   return { filename, stream: doc as unknown as Readable };
 }

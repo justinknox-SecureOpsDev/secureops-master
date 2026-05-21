@@ -71,11 +71,10 @@ export function ResetPasswordPage() {
         <div className="bg-brand-navy text-white p-6 text-center border-b-4 border-brand-gold">
           <img
             src={`${import.meta.env.BASE_URL}logo-256.png`}
-            alt="Williams Council Security Group"
+            alt={(window as any).__BRAND__?.companyName ?? "Williams Council Security Group"}
             className="w-20 h-20 mx-auto mb-3 object-contain"
           />
-          <div className="brand-wordmark text-lg">Williams Council</div>
-          <div className="brand-wordmark text-lg brand-gold">Security Group</div>
+          <div className="brand-wordmark text-lg">{(window as any).__BRAND__?.companyName ?? "Williams Council Security Group"}</div>
           <div className="text-xs uppercase tracking-widest opacity-70 mt-1">Reset password</div>
         </div>
 

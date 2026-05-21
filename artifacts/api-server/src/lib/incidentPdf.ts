@@ -10,13 +10,14 @@ import {
 } from "@workspace/db";
 import { logger } from "./logger";
 import { ObjectStorageService } from "./objectStorage";
+import { brand } from "./brandConfig";
 
 const objectStorage = new ObjectStorageService();
 
-// WCSG brand colors. Used as named tokens below so layout reads cleanly.
-const NAVY = "#080c18";
-const GOLD = "#c9a84c";
-const CREAM = "#f0e6c8";
+// Brand colors read from env so each client deployment gets its own palette.
+const NAVY = brand.colorNavy;
+const GOLD = brand.colorGold;
+const CREAM = brand.colorCream;
 const MUTED = "#666666";
 const TEXT = "#1a1a1a";
 
@@ -120,7 +121,7 @@ export async function buildIncidentReportPdf(
     margins: { top: 56, bottom: 56, left: 56, right: 56 },
     info: {
       Title: `Incident Report — ${row.title}`,
-      Author: "Williams Council Security Group",
+      Author: brand.companyName,
       Subject: `Incident ${row.id}`,
       CreationDate: new Date(),
     },
@@ -130,7 +131,7 @@ export async function buildIncidentReportPdf(
   doc.rect(0, 0, doc.page.width, 80).fill(NAVY);
   doc.fillColor(GOLD)
     .font("Helvetica-Bold").fontSize(20)
-    .text("Williams Council Security Group", 56, 22);
+    .text(brand.companyName, 56, 22);
   doc.fillColor(CREAM)
     .font("Helvetica").fontSize(10)
     .text("Confidential Incident Report", 56, 50);
@@ -236,7 +237,7 @@ export async function buildIncidentReportPdf(
   // already brands every page, so the bottom-of-doc footer is enough.
   const footerY = doc.page.height - 36;
   doc.fillColor(MUTED).font("Helvetica").fontSize(8).text(
-    `Generated ${new Date().toLocaleString()} · Williams Council Security Group · Confidential`,
+    `Generated ${new Date().toLocaleString()} · ${brand.companyName} · Confidential`,
     56, footerY,
     { width: doc.page.width - 112, align: "center", lineBreak: false },
   );
@@ -246,7 +247,7 @@ export async function buildIncidentReportPdf(
   // Sanitize filename to ASCII so Content-Disposition is universally happy.
   const safeTitle = row.title.replace(/[^a-z0-9]+/gi, "-").replace(/^-+|-+$/g, "").toLowerCase().slice(0, 40) || "incident";
   const dateTag = new Date(row.occurredAt).toISOString().slice(0, 10);
-  const filename = `wcsg-incident-${dateTag}-${safeTitle}.pdf`;
+  const filename = `${brand.shortName.replace(/[^a-z0-9]/gi, "-").toLowerCase()}-incident-${dateTag}-${safeTitle}.pdf`;
 
   return { filename, stream: doc as unknown as Readable };
 }

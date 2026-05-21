@@ -1,5 +1,6 @@
 import nodemailer, { type Transporter } from "nodemailer";
 import { logger } from "./logger";
+import { brand } from "./brandConfig";
 
 /**
  * Lightweight, env-gated SMTP sender.
@@ -118,7 +119,7 @@ export function renderOnboardingEmail(opts: {
   email: string;
   tempPassword: string;
 }): { subject: string; text: string; html: string } {
-  const subject = "Welcome to Williams Council Security Group — complete your onboarding";
+  const subject = `Welcome to ${brand.companyName} — complete your onboarding`;
   const text = [
     `Hi ${opts.firstName},`,
     "",
@@ -126,16 +127,16 @@ export function renderOnboardingEmail(opts: {
     "",
     `Onboarding link (single use, expires in 14 days): ${opts.onboardingUrl}`,
     "",
-    "After onboarding you can sign in to the SecureOps app with:",
+    `After onboarding you can sign in to the ${brand.appName} app with:`,
     `  Email:              ${opts.email}`,
     `  Temporary password: ${opts.tempPassword}`,
     "(You will be asked to set a new password on first login.)",
     "",
-    "— Williams Council Security Group",
+    `— ${brand.companyName}`,
   ].join("\n");
   const html = `
     <div style="font-family:Georgia,serif;max-width:560px;margin:0 auto;color:#080c18">
-      <h2 style="color:#080c18">Welcome to Williams Council Security Group</h2>
+      <h2 style="color:#080c18">Welcome to ${brand.companyName}</h2>
       <p>Hi ${escapeHtml(opts.firstName)},</p>
       <p>Your application has been approved. To finish onboarding, please complete the secure form below.</p>
       <p style="margin:24px 0">
@@ -146,7 +147,7 @@ export function renderOnboardingEmail(opts: {
       </p>
       <p style="color:#555">This link is single use and expires in 14 days.</p>
       <hr style="border:none;border-top:1px solid #ddd;margin:24px 0"/>
-      <p>After onboarding, sign in to the SecureOps app with:</p>
+      <p>After onboarding, sign in to the ${brand.appName} app with:</p>
       <div style="background:#f6f1e1;padding:14px 16px;border-left:3px solid #c9a84c;margin:12px 0;border-radius:4px;font-family:ui-monospace,Menlo,Consolas,monospace;font-size:14px">
         <div><strong>Email:</strong> ${escapeHtml(opts.email)}</div>
         <div><strong>Temporary password:</strong> ${escapeHtml(opts.tempPassword)}</div>
@@ -161,7 +162,7 @@ export function renderResendOnboardingEmail(opts: {
   firstName: string;
   onboardingUrl: string;
 }): { subject: string; text: string; html: string } {
-  const subject = "Your Williams Council Security Group onboarding link";
+  const subject = `Your ${brand.companyName} onboarding link`;
   const text = [
     `Hi ${opts.firstName},`,
     "",
@@ -169,11 +170,11 @@ export function renderResendOnboardingEmail(opts: {
     "",
     opts.onboardingUrl,
     "",
-    "— Williams Council Security Group",
+    `— ${brand.companyName}`,
   ].join("\n");
   const html = `
     <div style="font-family:Georgia,serif;max-width:560px;margin:0 auto;color:#080c18">
-      <h2 style="color:#080c18">Williams Council Security Group</h2>
+      <h2 style="color:#080c18">${brand.companyName}</h2>
       <p>Hi ${escapeHtml(opts.firstName)},</p>
       <p>Here is a fresh link to complete your onboarding.</p>
       <p style="margin:24px 0">
@@ -192,21 +193,21 @@ export function renderRejectionEmail(opts: {
   firstName: string;
   reviewerNotes?: string | null;
 }): { subject: string; text: string; html: string } {
-  const subject = "Update on your Williams Council Security Group application";
+  const subject = `Update on your ${brand.companyName} application`;
   const notesBlock = opts.reviewerNotes && opts.reviewerNotes.trim().length > 0
     ? `\n\nNotes from our recruitment team:\n${opts.reviewerNotes.trim()}\n`
     : "";
   const text = [
     `Hi ${opts.firstName},`,
     "",
-    "Thank you for taking the time to apply to Williams Council Security Group.",
+    `Thank you for taking the time to apply to ${brand.companyName}.`,
     "",
     "After careful consideration, we won't be moving forward with your application at this time.",
     "We genuinely appreciate your interest and the effort you put into applying, and we wish you the very best in your job search.",
     notesBlock,
     "You're welcome to apply again in the future as new positions open up.",
     "",
-    "— Williams Council Security Group",
+    `— ${brand.companyName}`,
   ].join("\n");
   const notesHtml = opts.reviewerNotes && opts.reviewerNotes.trim().length > 0
     ? `<div style="background:#f6f1e1;padding:12px;border-left:3px solid #c9a84c;margin:16px 0;border-radius:4px">
@@ -216,15 +217,15 @@ export function renderRejectionEmail(opts: {
     : "";
   const html = `
     <div style="font-family:Georgia,serif;max-width:560px;margin:0 auto;color:#080c18">
-      <h2 style="color:#080c18">Williams Council Security Group</h2>
+      <h2 style="color:#080c18">${brand.companyName}</h2>
       <p>Hi ${escapeHtml(opts.firstName)},</p>
-      <p>Thank you for taking the time to apply to Williams Council Security Group.</p>
+      <p>Thank you for taking the time to apply to ${brand.companyName}.</p>
       <p>After careful consideration, we won't be moving forward with your application at this time.
          We genuinely appreciate your interest and the effort you put into applying, and we wish you the very best in your job search.</p>
       ${notesHtml}
       <p style="color:#555">You're welcome to apply again in the future as new positions open up.</p>
       <hr style="border:none;border-top:1px solid #ddd;margin:24px 0"/>
-      <p style="color:#555;font-size:12px">— Williams Council Security Group</p>
+      <p style="color:#555;font-size:12px">— ${brand.companyName}</p>
     </div>
   `;
   return { subject, text, html };
@@ -235,27 +236,27 @@ export function renderApplicationReceivedEmail(opts: {
   reviewWindowDays?: number;
 }): { subject: string; text: string; html: string } {
   const days = opts.reviewWindowDays ?? 5;
-  const subject = "We've received your application — Williams Council Security Group";
+  const subject = `We've received your application — ${brand.companyName}`;
   const text = [
     `Hi ${opts.firstName},`,
     "",
-    "Thanks for applying to Williams Council Security Group. This is a quick note to confirm we've received your application.",
+    `Thanks for applying to ${brand.companyName}. This is a quick note to confirm we've received your application.`,
     "",
     `Our recruitment team will review your submission within ${days} business days and be in touch with next steps. If we need anything else from you in the meantime, we'll reach out by email or phone.`,
     "",
     "There's no need to reply to this message.",
     "",
-    "— Williams Council Security Group",
+    `— ${brand.companyName}`,
   ].join("\n");
   const html = `
     <div style="font-family:Georgia,serif;max-width:560px;margin:0 auto;color:#080c18;background:#f0e6c8;padding:24px;border-radius:6px">
-      <h2 style="color:#080c18;margin-top:0">Williams Council Security Group</h2>
+      <h2 style="color:#080c18;margin-top:0">${brand.companyName}</h2>
       <p>Hi ${escapeHtml(opts.firstName)},</p>
-      <p>Thanks for applying to Williams Council Security Group. This is a quick note to confirm we've received your application.</p>
+      <p>Thanks for applying to ${brand.companyName}. This is a quick note to confirm we've received your application.</p>
       <p>Our recruitment team will review your submission within <strong>${days} business days</strong> and be in touch with next steps. If we need anything else from you in the meantime, we'll reach out by email or phone.</p>
       <p style="color:#555">There's no need to reply to this message.</p>
       <hr style="border:none;border-top:2px solid #c9a84c;margin:24px 0"/>
-      <p style="color:#080c18;font-weight:bold;margin:0">Williams Council Security Group</p>
+      <p style="color:#080c18;font-weight:bold;margin:0">${brand.companyName}</p>
     </div>
   `;
   return { subject, text, html };
@@ -269,7 +270,7 @@ export function renderApplicationDraftResumeEmail(opts: {
   const hello = opts.firstName && opts.firstName.trim().length > 0
     ? `Hi ${opts.firstName.trim()},`
     : "Hi there,";
-  const subject = "Pick up where you left off — Williams Council Security Group application";
+  const subject = `Pick up where you left off — ${brand.companyName} application`;
   const text = [
     hello,
     "",
@@ -280,11 +281,11 @@ export function renderApplicationDraftResumeEmail(opts: {
     "",
     "If you didn't start an application, you can safely ignore this email.",
     "",
-    "— Williams Council Security Group",
+    `— ${brand.companyName}`,
   ].join("\n");
   const html = `
     <div style="font-family:Georgia,serif;max-width:560px;margin:0 auto;color:#080c18;background:#f0e6c8;padding:24px;border-radius:6px">
-      <h2 style="color:#080c18;margin-top:0">Williams Council Security Group</h2>
+      <h2 style="color:#080c18;margin-top:0">${brand.companyName}</h2>
       <p>${escapeHtml(hello)}</p>
       <p>Here's the secure link to resume your officer application. Your answers and uploaded documents are saved — you'll land right back on the step you were on.</p>
       <p style="text-align:center;margin:24px 0">
@@ -298,7 +299,7 @@ export function renderApplicationDraftResumeEmail(opts: {
       </p>
       <p style="color:#555;font-size:12px">If you didn't start an application, you can safely ignore this email.</p>
       <hr style="border:none;border-top:2px solid #c9a84c;margin:24px 0"/>
-      <p style="color:#080c18;font-weight:bold;margin:0">Williams Council Security Group</p>
+      <p style="color:#080c18;font-weight:bold;margin:0">${brand.companyName}</p>
     </div>
   `;
   return { subject, text, html };
@@ -310,7 +311,7 @@ export function renderRequestInfoEmail(opts: {
   note?: string | null;
   fieldLabels: string[];
 }): { subject: string; text: string; html: string } {
-  const subject = "We need a few more details on your application — Williams Council Security Group";
+  const subject = `We need a few more details on your application — ${brand.companyName}`;
   const fieldsList = opts.fieldLabels.map((l) => `  • ${l}`).join("\n");
   const noteBlock = opts.note && opts.note.trim().length > 0
     ? `\n\nNote from our team:\n${opts.note.trim()}\n`
@@ -318,7 +319,7 @@ export function renderRequestInfoEmail(opts: {
   const text = [
     `Hi ${opts.firstName},`,
     "",
-    "Thanks for applying to Williams Council Security Group. To finish reviewing your application, we need a few more details from you:",
+    `Thanks for applying to ${brand.companyName}. To finish reviewing your application, we need a few more details from you:`,
     "",
     fieldsList,
     noteBlock,
@@ -326,7 +327,7 @@ export function renderRequestInfoEmail(opts: {
     "",
     opts.amendUrl,
     "",
-    "— Williams Council Security Group",
+    `— ${brand.companyName}`,
   ].join("\n");
   const fieldsHtml = `<ul style="margin:8px 0 0 0;padding-left:20px">${
     opts.fieldLabels.map((l) => `<li style="margin:4px 0">${escapeHtml(l)}</li>`).join("")
@@ -339,7 +340,7 @@ export function renderRequestInfoEmail(opts: {
     : "";
   const html = `
     <div style="font-family:Georgia,serif;max-width:560px;margin:0 auto;color:#080c18;background:#f0e6c8;padding:24px;border-radius:6px">
-      <h2 style="color:#080c18;margin-top:0">Williams Council Security Group</h2>
+      <h2 style="color:#080c18;margin-top:0">${brand.companyName}</h2>
       <p>Hi ${escapeHtml(opts.firstName)},</p>
       <p>Thanks for applying. To finish reviewing your application, we need a few more details from you:</p>
       ${fieldsHtml}
@@ -354,7 +355,7 @@ export function renderRequestInfoEmail(opts: {
         <span style="word-break:break-all">${escapeHtml(opts.amendUrl)}</span>
       </p>
       <hr style="border:none;border-top:2px solid #c9a84c;margin:24px 0"/>
-      <p style="color:#080c18;font-weight:bold;margin:0">Williams Council Security Group</p>
+      <p style="color:#080c18;font-weight:bold;margin:0">${brand.companyName}</p>
     </div>
   `;
   return { subject, text, html };
@@ -365,24 +366,24 @@ export function renderPasswordResetEmail(opts: {
   resetUrl: string;
   expiresInMinutes: number;
 }): { subject: string; text: string; html: string } {
-  const subject = "Reset your Williams Council Security Group password";
+  const subject = `Reset your ${brand.companyName} password`;
   const text = [
     `Hi ${opts.firstName},`,
     "",
-    "We received a request to reset the password on your Williams Council Security Group account.",
+    `We received a request to reset the password on your ${brand.companyName} account.`,
     "",
     `Reset link (single use, expires in ${opts.expiresInMinutes} minutes):`,
     opts.resetUrl,
     "",
     "If you didn't request this, you can ignore this email — your password will stay the same.",
     "",
-    "— Williams Council Security Group",
+    `— ${brand.companyName}`,
   ].join("\n");
   const html = `
     <div style="font-family:Georgia,serif;max-width:560px;margin:0 auto;color:#080c18">
       <h2 style="color:#080c18">Reset your password</h2>
       <p>Hi ${escapeHtml(opts.firstName)},</p>
-      <p>We received a request to reset the password on your Williams Council Security Group account.</p>
+      <p>We received a request to reset the password on your ${brand.companyName} account.</p>
       <p style="margin:24px 0">
         <a href="${escapeAttr(opts.resetUrl)}"
            style="background:#c9a84c;color:#080c18;padding:12px 20px;text-decoration:none;font-weight:bold;border-radius:4px">
@@ -405,14 +406,14 @@ export function renderPasswordChangedEmail(opts: {
   hrContact?: string;
 }): { subject: string; text: string; html: string } {
   const action = opts.changeType === "reset" ? "reset" : "changed";
-  const subject = `Your Williams Council Security Group password was just ${action}`;
-  const hrContact = opts.hrContact ?? "hr@williamscouncilsecurity.com";
+  const subject = `Your ${brand.companyName} password was just ${action}`;
+  const hrContact = opts.hrContact ?? brand.hrEmail;
   const ipLine = opts.ip ? `Approximate location / IP: ${opts.ip}` : "Approximate location / IP: unknown";
   const uaLine = opts.userAgent ? `Device: ${opts.userAgent}` : "";
   const text = [
     `Hi ${opts.firstName},`,
     "",
-    `Your Williams Council Security Group password was just ${action}.`,
+    `Your ${brand.companyName} password was just ${action}.`,
     "",
     `Time: ${opts.whenIso}`,
     ipLine,
@@ -421,13 +422,13 @@ export function renderPasswordChangedEmail(opts: {
     `If this WAS you, no action is needed.`,
     `If this WASN'T you, contact HR immediately at ${hrContact} — your account may be compromised.`,
     "",
-    "— Williams Council Security Group",
+    `— ${brand.companyName}`,
   ].filter((l) => l !== "").join("\n");
   const html = `
     <div style="font-family:Georgia,serif;max-width:560px;margin:0 auto;color:#080c18">
       <h2 style="color:#080c18">Your password was just ${action}</h2>
       <p>Hi ${escapeHtml(opts.firstName)},</p>
-      <p>Your Williams Council Security Group password was just <strong>${action}</strong>.</p>
+      <p>Your ${brand.companyName} password was just <strong>${action}</strong>.</p>
       <div style="background:#f6f1e1;padding:12px;border-left:3px solid #c9a84c;margin:16px 0;border-radius:4px;font-size:14px">
         <div><strong>Time:</strong> ${escapeHtml(opts.whenIso)}</div>
         <div><strong>Approximate location / IP:</strong> ${escapeHtml(opts.ip || "unknown")}</div>
@@ -437,7 +438,7 @@ export function renderPasswordChangedEmail(opts: {
       <p style="color:#a33">If this <strong>wasn't</strong> you, contact HR immediately at
         <a href="mailto:${escapeAttr(hrContact)}">${escapeHtml(hrContact)}</a> — your account may be compromised.</p>
       <hr style="border:none;border-top:1px solid #ddd;margin:24px 0"/>
-      <p style="color:#555;font-size:12px">— Williams Council Security Group</p>
+      <p style="color:#555;font-size:12px">— ${brand.companyName}</p>
     </div>
   `;
   return { subject, text, html };
@@ -449,11 +450,11 @@ export function renderInviteEmail(opts: {
   tempPassword: string;
   loginUrl: string;
 }): { subject: string; text: string; html: string } {
-  const subject = "Welcome to Williams Council Security Group — your login";
+  const subject = `Welcome to ${brand.companyName} — your login`;
   const text = [
     `Hi ${opts.firstName},`,
     "",
-    "Your Williams Council Security Group account is ready.",
+    `Your ${brand.companyName} account is ready.`,
     "",
     `Sign in at: ${opts.loginUrl}`,
     `Email:      ${opts.email}`,
@@ -461,11 +462,11 @@ export function renderInviteEmail(opts: {
     "",
     "Please sign in and change your password as soon as possible.",
     "",
-    "— Williams Council Security Group",
+    `— ${brand.companyName}`,
   ].join("\n");
   const html = `
     <div style="font-family:Georgia,serif;max-width:560px;margin:0 auto;color:#080c18">
-      <h2 style="color:#080c18">Welcome to Williams Council Security Group</h2>
+      <h2 style="color:#080c18">Welcome to ${brand.companyName}</h2>
       <p>Hi ${escapeHtml(opts.firstName)},</p>
       <p>Your account is ready. Use the credentials below to sign in for the first time, then change your password.</p>
       <div style="background:#f6f1e1;padding:14px 16px;border-left:3px solid #c9a84c;margin:18px 0;border-radius:4px;font-family:ui-monospace,Menlo,Consolas,monospace;font-size:14px">
@@ -482,7 +483,7 @@ export function renderInviteEmail(opts: {
         <span style="word-break:break-all">${escapeHtml(opts.loginUrl)}</span>
       </p>
       <hr style="border:none;border-top:2px solid #c9a84c;margin:24px 0"/>
-      <p style="color:#080c18;font-weight:bold;margin:0">Williams Council Security Group</p>
+      <p style="color:#080c18;font-weight:bold;margin:0">${brand.companyName}</p>
     </div>
   `;
   return { subject, text, html };
@@ -509,7 +510,7 @@ export function renderTrainingExpiryEmail(opts: {
     "Please refresh before the expiry date. An expired certificate may make you ineligible for sites that require this training.",
     "Once renewed, please upload the new certificate from the mobile app (Profile → My training).",
     "",
-    "— Williams Council Security Group",
+    `— ${brand.companyName}`,
   ].join("\n");
   const accent = opts.daysRemaining <= 7 ? "#a33" : "#c9a84c";
   const html = `
@@ -526,7 +527,7 @@ export function renderTrainingExpiryEmail(opts: {
       <p>Please refresh before the expiry date. An expired certificate may make you ineligible for sites that require this training.</p>
       <p>Once renewed, please upload the new certificate from the mobile app (Profile → My training).</p>
       <hr style="border:none;border-top:2px solid #c9a84c;margin:24px 0"/>
-      <p style="color:#080c18;font-weight:bold;margin:0">Williams Council Security Group</p>
+      <p style="color:#080c18;font-weight:bold;margin:0">${brand.companyName}</p>
     </div>
   `;
   return { subject, text, html };
@@ -559,7 +560,7 @@ export function renderLicenseExpiryEmail(opts: {
     "Please renew before the expiry date. An expired license means you cannot clock in or be assigned to qualifying shifts.",
     "If you have already renewed, please send a copy of the new license to HR so we can update your record.",
     "",
-    "— Williams Council Security Group",
+    `— ${brand.companyName}`,
   ].join("\n");
   const accent = opts.daysRemaining <= 7 ? "#a33" : "#c9a84c";
   const html = `
@@ -575,7 +576,7 @@ export function renderLicenseExpiryEmail(opts: {
       <p>Please renew before the expiry date. An expired license means you cannot clock in or be assigned to qualifying shifts.</p>
       <p style="color:#555;font-size:13px">If you have already renewed, please send a copy of the new license to HR so we can update your record.</p>
       <hr style="border:none;border-top:2px solid #c9a84c;margin:24px 0"/>
-      <p style="color:#080c18;font-weight:bold;margin:0">Williams Council Security Group</p>
+      <p style="color:#080c18;font-weight:bold;margin:0">${brand.companyName}</p>
     </div>
   `;
   return { subject, text, html };
@@ -623,7 +624,7 @@ export function renderHighRiskProfileChangeEmail(opts: {
     reviewLine,
     `If this change wasn't expected (lost device, password sharing, payroll fraud, etc.), revoke the officer's sessions and confirm the update with them by phone before the next pay run.`,
     "",
-    "— Williams Council Security Group · SecureOps",
+    `— ${brand.companyName} · ${brand.appName}`,
   ].filter((l) => l !== undefined).join("\n");
   const fieldsHtml = `<ul style="margin:8px 0 0 0;padding-left:20px">${
     opts.changes
@@ -637,8 +638,8 @@ export function renderHighRiskProfileChangeEmail(opts: {
     ? `<div><strong>When:</strong> ${escapeHtml(opts.windowStartIso)}</div>`
     : `<div><strong>Window:</strong> ${escapeHtml(opts.windowStartIso)} → ${escapeHtml(opts.windowEndIso)}</div>`;
   const intro = labels.length === 1
-    ? `An officer just updated a high-risk profile field from the SecureOps mobile app.`
-    : `An officer updated ${labels.length} high-risk profile fields from the SecureOps mobile app in the last few minutes (digest).`;
+    ? `An officer just updated a high-risk profile field from the ${brand.appName} mobile app.`
+    : `An officer updated ${labels.length} high-risk profile fields from the ${brand.appName} mobile app in the last few minutes (digest).`;
   const html = `
     <div style="font-family:Georgia,serif;max-width:560px;margin:0 auto;color:#080c18">
       <h2 style="color:#080c18;margin-top:0">Officer self-edit alert</h2>
@@ -652,7 +653,7 @@ export function renderHighRiskProfileChangeEmail(opts: {
       ${reviewHtml}
       <p style="color:#a33">If this change wasn't expected (lost device, payroll fraud, etc.), revoke the officer's sessions and confirm the update by phone before the next pay run.</p>
       <hr style="border:none;border-top:1px solid #ddd;margin:24px 0"/>
-      <p style="color:#555;font-size:12px">— Williams Council Security Group · SecureOps</p>
+      <p style="color:#555;font-size:12px">— ${brand.companyName} · ${brand.appName}</p>
     </div>
   `;
   return { subject, text, html };

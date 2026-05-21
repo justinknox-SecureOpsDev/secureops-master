@@ -101,8 +101,7 @@ export default function LoginScreen() {
 
         {/* Brand text */}
         <View style={styles.brandBlock}>
-          <Text style={[styles.brandName, { color: colors.primary }]}>WILLIAMS COUNCIL</Text>
-          <Text style={[styles.brandSub, { color: colors.foreground }]}>SECURITY GROUP</Text>
+          <Text style={[styles.brandName, { color: colors.primary }]}>{(process.env.EXPO_PUBLIC_COMPANY_NAME ?? "Williams Council Security Group").toUpperCase()}</Text>
           <View style={styles.dividerRow}>
             <View style={[styles.dividerLine, { backgroundColor: colors.primary }]} />
             <Text style={[styles.motto, { color: colors.mutedForeground }]}>PROTECTION WITH PASSION</Text>
@@ -229,7 +228,7 @@ export default function LoginScreen() {
         </View>
 
         <Text style={[styles.footer, { color: colors.mutedForeground }]}>
-          © Williams Council Security Group
+          © {process.env.EXPO_PUBLIC_COMPANY_NAME ?? "Williams Council Security Group"}
         </Text>
       </View>
     </SafeAreaView>
@@ -241,8 +240,8 @@ function legalUrl(slug: "privacy" | "terms" | "data-rights"): string {
   // Resolve from EXPO_PUBLIC_API_BASE_URL when available; fall back to the
   // production wcsg domain so the links work in built clients too.
   const base =
-    process.env.EXPO_PUBLIC_API_BASE_URL?.replace(/\/+$/, "") ||
-    "https://secureops.williamscouncilsecurity.com";
+    (process.env.EXPO_PUBLIC_API_BASE_URL?.replace(/\/+$/, "")) ||
+    (process.env.EXPO_PUBLIC_PORTAL_BASE_URL ?? "https://secureops.williamscouncilsecurity.com");
   // Strip trailing /api if the env var pointed at the API root.
   const root = base.replace(/\/api$/, "");
   return `${root}/admin-portal/${slug}`;
