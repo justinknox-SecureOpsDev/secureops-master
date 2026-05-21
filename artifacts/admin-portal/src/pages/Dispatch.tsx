@@ -1209,14 +1209,15 @@ function tip(label, sub){
   return w;
 }
 const map = L.map('m',{zoomControl:true});
+// Leaflet requires a view (center + zoom) BEFORE any layer that needs
+// projection (L.circle uses a metric radius and projects on add). Without
+// this, adding a circle throws "Cannot read properties of undefined
+// (reading 'layerPointToLatLng')". fitBounds below replaces this view.
+map.setView([39.8283,-98.5795],4);
 L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',{
   attribution:'&copy; OpenStreetMap', maxZoom:19
 }).addTo(map);
-if(!pts.length){ map.setView([39.8283,-98.5795],4); }
-else {
-  // Attach the group to the map BEFORE adding layers. L.circle uses a real
-  // metric radius and projects on add, so adding it to an off-map group
-  // throws "Cannot read properties of undefined (reading 'layerPointToLatLng')".
+if(pts.length){
   const group = L.featureGroup().addTo(map);
   pts.forEach(p=>{
     let m;
