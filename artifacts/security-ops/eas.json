@@ -26,7 +26,11 @@
       "channel": "production",
       "autoIncrement": true,
       "env": {
-        "EXPO_PUBLIC_API_BASE_URL": "https://security-operations-suite.replit.app/api"
+        "EXPO_PUBLIC_API_BASE_URL": "https://wcsgisecureops.com/api",
+        "EXPO_PUBLIC_PORTAL_BASE_URL": "https://wcsgisecureops.com",
+        "EXPO_PUBLIC_APP_NAME": "SecureOps",
+        "EXPO_PUBLIC_COMPANY_NAME": "Williams Council Security Group",
+        "EXPO_PUBLIC_COMPANY_SHORT_NAME": "WCSG"
       },
       "android": {
         "buildType": "app-bundle"
