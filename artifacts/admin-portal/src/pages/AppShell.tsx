@@ -1,7 +1,7 @@
 import { useState, useEffect, useMemo } from "react";
 import { Link, useRoute, useLocation } from "wouter";
 import {
-  LogOut, ClipboardList, UserPlus, FileText, ChevronsLeft, ChevronsRight,
+  LogOut, ClipboardList, UserPlus, FileText, ChevronsLeft, ChevronsRight, Smartphone,
   Database, Banknote, Receipt, Wallet, MailPlus,
   AlertTriangle, ShieldCheck, Repeat, KeyRound, IdCard, Link2, Download,
   Radio as RadioIcon, Radar, MessageCircle, Users as UsersIcon,
@@ -314,6 +314,17 @@ export function AppShell({ children }: { children: React.ReactNode }) {
               <div className="text-xs opacity-80">{user?.firstName} {user?.lastName}</div>
               <div className="text-[10px] opacity-50 truncate max-w-[180px]">{user?.email}</div>
             </div>
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() => window.open("/", "_blank", "noopener,noreferrer")}
+              title="Open the SecureOps mobile app in a new tab"
+              aria-label="Open mobile app"
+              className="text-sidebar-foreground hover:bg-sidebar-accent gap-1.5"
+            >
+              <Smartphone className="w-4 h-4" />
+              <span className="hidden sm:inline text-xs">Open app</span>
+            </Button>
             <Button
               variant="ghost"
               size="sm"
