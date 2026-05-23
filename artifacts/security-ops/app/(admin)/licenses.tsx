@@ -22,7 +22,11 @@ export default function AdminLicensesScreen() {
   const [form, setForm] = useState<{ employeeId: string; type: string; level: 2 | 3 | 4 | null; licenseNumber: string; issueDate: string; expiryDate: string; issuingAuthority: string }>({ employeeId: "", type: "", level: 2, licenseNumber: "", issueDate: "", expiryDate: "", issuingAuthority: "" });
   const set = (k: string) => (v: any) => setForm((f) => ({ ...f, [k]: v }));
 
-  const lParams: any = { expiringSoon: filter === "expiring" ? true : undefined, expired: filter === "expired" ? true : undefined };
+  const lParams: any = filter === "expiring"
+    ? { status: "expiring_soon" }
+    : filter === "expired"
+    ? { status: "expired" }
+    : {};
   const { data: licenses, isLoading, error, refetch } = useGetLicenses(
     lParams,
     { query: { queryKey: getGetLicensesQueryKey(lParams) } },
