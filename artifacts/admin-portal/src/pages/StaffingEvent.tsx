@@ -155,13 +155,13 @@ function AddShiftDialog({ eventId, defaultDate }: { eventId: number; defaultDate
       <DialogContent>
         <DialogHeader><DialogTitle>Add shift</DialogTitle></DialogHeader>
         <div className="space-y-3 py-2">
-          <div className="grid grid-cols-3 gap-2">
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
             <div><Label>Date *</Label><Input type="date" value={date} onChange={(e) => setDate(e.target.value)} /></div>
             <div><Label>Start *</Label><Input type="time" value={startTime} onChange={(e) => setStartTime(e.target.value)} /></div>
             <div><Label>End *</Label><Input type="time" value={endTime} onChange={(e) => setEndTime(e.target.value)} /></div>
           </div>
           <div><Label>Position *</Label><Input value={position} onChange={(e) => setPosition(e.target.value)} placeholder="e.g. GATE 10 SEARCH" /></div>
-          <div className="grid grid-cols-3 gap-2">
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
             <div><Label>Area</Label><Input value={area} onChange={(e) => setArea(e.target.value)} placeholder="PERIM" /></div>
             <div><Label>Role</Label><Input value={role} onChange={(e) => setRole(e.target.value)} placeholder="GRD / SUP / MGR" /></div>
             <div><Label>Slots *</Label><Input type="number" min={1} value={slotsTotal} onChange={(e) => setSlotsTotal(parseInt(e.target.value || "1"))} /></div>
@@ -257,10 +257,10 @@ export default function StaffingEventPage() {
             </div>
             {ev.description && <div className="text-sm opacity-80 mt-2">{ev.description}</div>}
           </div>
-          <div className="flex items-center gap-2 shrink-0">
-            <Button variant="outline" size="sm" onClick={copyLink}><Copy className="w-4 h-4 mr-1" /> Copy public link</Button>
+          <div className="flex items-center gap-2 flex-wrap">
+            <Button variant="outline" size="sm" onClick={copyLink}><Copy className="w-4 h-4 mr-1" /> Copy link</Button>
             <a href={shareUrl} target="_blank" rel="noreferrer">
-              <Button variant="outline" size="sm"><ExternalLink className="w-4 h-4 mr-1" /> Open public page</Button>
+              <Button variant="outline" size="sm"><ExternalLink className="w-4 h-4 mr-1" /> Open public</Button>
             </a>
             <AddShiftDialog eventId={eventId} defaultDate={ev.startDate ?? undefined} />
           </div>

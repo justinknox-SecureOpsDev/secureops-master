@@ -76,14 +76,14 @@ function EventCard({ ev }: { ev: ShiftboardEvent }) {
 
       <CoverageBar filled={ev.filledSlots} total={ev.totalSlots} />
 
-      <div className="flex gap-2 pt-1">
-        <Link href={`/staffing/${ev.id}`} className="flex-1">
+      <div className="flex gap-2 pt-1 flex-wrap">
+        <Link href={`/staffing/${ev.id}`} className="flex-1 min-w-[120px]">
           <Button variant="default" size="sm" className="w-full">
             <ExternalLink className="w-4 h-4 mr-1" /> View
           </Button>
         </Link>
         <Button variant="outline" size="sm" onClick={copyLink} title={shareUrl}>
-          <Copy className="w-4 h-4 mr-1" /> Copy public link
+          <Copy className="w-4 h-4 mr-1" /> Copy link
         </Button>
       </div>
     </div>

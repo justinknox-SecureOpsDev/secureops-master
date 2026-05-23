@@ -5,7 +5,7 @@ import {
   Database, Banknote, Receipt, Wallet, MailPlus,
   AlertTriangle, ShieldCheck, Repeat, KeyRound, IdCard, Link2, Download,
   Radio as RadioIcon, Radar, MessageCircle, Users as UsersIcon,
-  Briefcase, Calculator, Shield, Settings, CalendarRange,
+  Briefcase, Calculator, Shield, Settings, CalendarRange, Menu, X,
   type LucideIcon,
 } from "lucide-react";
 import { TABLES } from "@/lib/tables";
@@ -93,6 +93,10 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   useEffect(() => {
     try { localStorage.setItem(COLLAPSE_KEY, collapsed ? "1" : "0"); } catch {}
   }, [collapsed]);
+
+  // Mobile sidebar drawer (hidden by default, toggled by hamburger). Auto-closes on navigation.
+  const [mobileOpen, setMobileOpen] = useState(false);
+  useEffect(() => { setMobileOpen(false); }, [location]);
 
   const groups: NavGroup[] = useMemo(() => {
     const hrLinks: LinkItem[] = [
@@ -274,15 +278,25 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   return (
     <div className="flex flex-col h-screen w-full overflow-hidden bg-background">
       <header className="shrink-0 bg-sidebar text-sidebar-foreground border-b border-sidebar-border">
-        <div className="flex items-center gap-3 px-4 py-2 border-b border-sidebar-border/60">
+        <div className="flex items-center gap-2 px-3 sm:px-4 py-2 border-b border-sidebar-border/60">
+          <Button
+            variant="ghost"
+            size="sm"
+            className="md:hidden text-sidebar-foreground hover:bg-sidebar-accent shrink-0 px-2"
+            onClick={() => setMobileOpen((v) => !v)}
+            aria-label={mobileOpen ? "Close menu" : "Open menu"}
+          >
+            {mobileOpen ? <X className="w-5 h-5" /> : <Menu className="w-5 h-5" />}
+          </Button>
           <img
             src={`${import.meta.env.BASE_URL}logo-256.png`}
             alt={brandCfg?.shortName ?? "WCSG"}
             className="w-9 h-9 shrink-0 rounded-md object-contain"
           />
           <div className="flex-1 min-w-0 text-center">
-            <div className="brand-wordmark text-lg sm:text-xl leading-tight truncate">
-              {brandCfg?.companyName ?? "Williams Council Security Group"}
+            <div className="brand-wordmark text-base sm:text-xl leading-tight truncate">
+              <span className="sm:hidden">{brandCfg?.shortName ?? "WCSG"}</span>
+              <span className="hidden sm:inline">{brandCfg?.companyName ?? "Williams Council Security Group"}</span>
             </div>
             <div className="text-[10px] uppercase tracking-[0.25em] opacity-60 flex items-center justify-center gap-2">
               <span>Admin Portal</span>
@@ -343,11 +357,21 @@ export function AppShell({ children }: { children: React.ReactNode }) {
 
       <SystemBanner status={systemStatus} />
 
-      <div className="flex flex-1 overflow-hidden">
+      <div className="flex flex-1 overflow-hidden relative">
+        {mobileOpen && (
+          <button
+            type="button"
+            aria-label="Close menu"
+            className="md:hidden fixed inset-0 top-[var(--mobile-top,0)] bg-black/50 z-30"
+            onClick={() => setMobileOpen(false)}
+          />
+        )}
         <aside
-          className={`shrink-0 bg-sidebar text-sidebar-foreground border-r border-sidebar-border flex flex-col transition-[width] duration-200 ease-out ${
-            collapsed ? "w-14" : "w-60"
-          }`}
+          className={`bg-sidebar text-sidebar-foreground border-r border-sidebar-border flex flex-col transition-[width,transform] duration-200 ease-out
+            md:shrink-0 md:relative md:translate-x-0
+            fixed inset-y-0 left-0 z-40 w-60
+            ${mobileOpen ? "translate-x-0 shadow-2xl" : "-translate-x-full md:translate-x-0"}
+            ${collapsed ? "md:w-14" : "md:w-60"}`}
         >
           {!collapsed && activeGroup && (
             <div className="px-4 py-3 border-b border-sidebar-border flex items-center gap-2">
