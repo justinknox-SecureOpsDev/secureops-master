@@ -36,6 +36,8 @@ import DispatchPage from "@/pages/Dispatch";
 import ChatPage from "@/pages/Chat";
 import PersonnelPage from "@/pages/Personnel";
 import OfficerProfilePage from "@/pages/OfficerProfile";
+import StaffingPage from "@/pages/Staffing";
+import StaffingEventPage from "@/pages/StaffingEvent";
 import NotFound from "@/pages/not-found";
 
 const queryClient = new QueryClient({
@@ -130,6 +132,8 @@ function Routed() {
           <Route path="/compliance" component={CompliancePage} />
           <Route path="/exports" component={ExportsPage} />
           <Route path="/sites/:id" component={SiteDetailPage} />
+          <Route path="/staffing" component={StaffingPage} />
+          <Route path="/staffing/:id" component={StaffingEventPage} />
           <Route path="/tables/shifts" component={ShiftsPage} />
           <Route path="/tables/:table" component={TablePage} />
           <Route component={NotFound} />

@@ -5,7 +5,7 @@ import {
   Database, Banknote, Receipt, Wallet, MailPlus,
   AlertTriangle, ShieldCheck, Repeat, KeyRound, IdCard, Link2, Download,
   Radio as RadioIcon, Radar, MessageCircle, Users as UsersIcon,
-  Briefcase, Calculator, Shield, Settings,
+  Briefcase, Calculator, Shield, Settings, CalendarRange,
   type LucideIcon,
 } from "lucide-react";
 import { TABLES } from "@/lib/tables";
@@ -143,6 +143,13 @@ export function AppShell({ children }: { children: React.ReactNode }) {
       items: [{ href: "/dispatch", label: "Live Map", Icon: Radar }],
     };
 
+    const staffingGroup: NavGroup = {
+      key: "staffing",
+      label: "Staffing",
+      Icon: CalendarRange,
+      items: [{ href: "/staffing", label: "Events", Icon: CalendarRange }],
+    };
+
     if (isDispatcher) {
       return [
         dispatchGroup,
@@ -170,6 +177,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
 
     return [
       dispatchGroup,
+      staffingGroup,
       { key: "hr", label: "Human Resources", Icon: Briefcase, items: hrLinks },
       { key: "accounting", label: "Accounting", Icon: Calculator, items: accountingLinks },
       { key: "security", label: "Security", Icon: Shield, items: securityLinks },
@@ -186,6 +194,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
       }
     }
     if (startsWith("/dispatch")) return "dispatch";
+    if (startsWith("/staffing")) return "staffing";
     if (startsWith("/hr")) return "hr";
     if (startsWith("/payroll")) return "accounting";
     if (startsWith("/tables")) {
