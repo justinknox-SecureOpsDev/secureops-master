@@ -133,7 +133,6 @@ export function AppShell({ children }: { children: React.ReactNode }) {
       href: `/tables/${t.name}`,
       label: t.label,
       Icon: Database,
-      badge: t.importSupported ? "IMPORT" : undefined,
     }));
 
     const settingsLinks: LinkItem[] = [
