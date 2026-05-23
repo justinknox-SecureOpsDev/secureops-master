@@ -10,6 +10,18 @@ export const employeesTable = pgTable("employees", {
   userId: uuid("user_id").notNull().unique().references(() => usersTable.id, { onDelete: "cascade" }),
   phone: text("phone"),
   address: text("address"),
+  // Geocoded home coordinates. Populated by the background geocoder when
+  // the employee saves/edits their address (PATCH /me/employee) or, for
+  // employees provisioned from an approved application, mirrored from
+  // `applications.location_lat/lng`. Drives the "distance from your home"
+  // sort + 50mi confirm-prompt on the mobile open-shifts list.
+  homeLat: numeric("home_lat", { precision: 10, scale: 6 }),
+  homeLng: numeric("home_lng", { precision: 10, scale: 6 }),
+  // Snapshot of the `address` value at the moment we last wrote
+  // home_lat/lng. Lets PATCH /me/employee skip re-geocoding when the
+  // address text hasn't actually changed, and lets the address-changed
+  // path invalidate stale coords without an extra read.
+  lastGeocodedAddress: text("last_geocoded_address"),
   dateOfBirth: date("date_of_birth"),
   cityOfBirth: text("city_of_birth"),
   stateOfBirth: text("state_of_birth"),

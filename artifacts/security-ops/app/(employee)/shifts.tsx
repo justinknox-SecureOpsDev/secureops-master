@@ -50,7 +50,8 @@ export default function EmployeeShiftsScreen() {
   const isClockedInElsewhere = !!(activeEntry as any)?.id;
 
   const nowMs = Date.now();
-  const shifts = (allShifts ?? []).filter((s: any) => {
+  const FAR_MILES = 50;
+  const shiftsUnsorted = (allShifts ?? []).filter((s: any) => {
     const isAssigned = (s.assignments ?? []).some((a: any) => a.employeeId === myUserId);
     // Hide shifts whose end time has already passed from "available" and "upcoming"
     // (they're stale slots nobody clocked into).
@@ -61,6 +62,24 @@ export default function EmployeeShiftsScreen() {
     if (filter === "available") return !isAssigned;
     return isAssigned;
   });
+  // On the "available" tab, surface shifts within 50 miles of the officer's
+  // home address first (nearest-first), then shifts farther than 50 mi
+  // (also nearest-first), then shifts with no distance on file (no site
+  // coords or no home coords yet) at the bottom in original order.
+  const shifts = filter === "available"
+    ? [...shiftsUnsorted].sort((a: any, b: any) => {
+        const da = typeof a.distanceMilesFromHome === "number" ? a.distanceMilesFromHome : null;
+        const db = typeof b.distanceMilesFromHome === "number" ? b.distanceMilesFromHome : null;
+        // Unknown distances last
+        if (da == null && db == null) return 0;
+        if (da == null) return 1;
+        if (db == null) return -1;
+        const aBucket = da < FAR_MILES ? 0 : 1;
+        const bBucket = db < FAR_MILES ? 0 : 1;
+        if (aBucket !== bBucket) return aBucket - bBucket;
+        return da - db;
+      })
+    : shiftsUnsorted;
 
   const myAssignmentFor = (shift: any) =>
     (shift.assignments ?? []).find((a: any) => a.employeeId === myUserId);
@@ -68,10 +87,15 @@ export default function EmployeeShiftsScreen() {
   const statusColor: Record<string, string> = { upcoming: colors.primary, active: "#22c55e", completed: colors.mutedForeground };
 
   const handleClaim = async (shift: any) => {
+    const dist = typeof shift.distanceMilesFromHome === "number" ? shift.distanceMilesFromHome : null;
+    const isFar = dist != null && dist >= FAR_MILES;
     const ok = await confirmAction({
-      title: "Reserve This Shift",
-      message: `${shift.title} @ ${shift.clientName}\n\nReserving books you onto this shift. You can release it later if you can't make it.`,
-      confirmText: "Reserve",
+      title: isFar ? "This Shift Is Far From Home" : "Reserve This Shift",
+      message: isFar
+        ? `${shift.title} @ ${shift.clientName}\n\nThis site is about ${Math.round(dist!)} miles from your home address. Make sure you can get there for the start time.\n\nReserving books you onto this shift. You can release it later if you can't make it.`
+        : `${shift.title} @ ${shift.clientName}${dist != null ? `\n\nAbout ${Math.round(dist)} mi from home.` : ""}\n\nReserving books you onto this shift. You can release it later if you can't make it.`,
+      confirmText: isFar ? `Reserve (${Math.round(dist!)} mi)` : "Reserve",
+      destructive: isFar,
     });
     if (!ok) return;
     setBusyId(shift.id);
@@ -279,6 +303,20 @@ export default function EmployeeShiftsScreen() {
                   <Feather name="map-pin" size={13} color={colors.mutedForeground} />
                   <Text style={[styles.detailText, { color: colors.mutedForeground }]} numberOfLines={1}>{item.location}</Text>
                 </View>
+
+                {typeof item.distanceMilesFromHome === "number" && (() => {
+                  const d = item.distanceMilesFromHome as number;
+                  const far = d >= FAR_MILES;
+                  const color = far ? colors.accent : "#22c55e";
+                  return (
+                    <View style={styles.detailRow}>
+                      <Feather name="navigation" size={13} color={color} />
+                      <Text style={[styles.detailText, { color, fontWeight: "600" }]}>
+                        {d < 1 ? "<1 mi" : `${Math.round(d)} mi`} from home{far ? " — far" : ""}
+                      </Text>
+                    </View>
+                  );
+                })()}
 
                 <View style={[styles.timeBlock, { backgroundColor: colors.secondary, borderColor: colors.border }]}>
                   <View style={styles.timeItem}>

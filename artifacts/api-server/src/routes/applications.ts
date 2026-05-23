@@ -960,6 +960,13 @@ router.post("/admin/applications/:id/approve", requireAdmin, async (req, res): P
         trainingCertificateKeys: app.trainingCertificateKeys ?? null,
         availability: app.availability ?? null,
         applicationId: app.id,
+        // Mirror the applicant's geocoded home coords so the mobile
+        // open-shifts "distance from home" sort works on day one for
+        // newly-provisioned officers (no need to wait for them to re-save
+        // their profile to trigger a fresh geocode).
+        homeLat: app.locationLat ?? null,
+        homeLng: app.locationLng ?? null,
+        lastGeocodedAddress: app.locationLat != null ? app.address : null,
       };
       const [existingEmployee] = await tx.select().from(employeesTable).where(eq(employeesTable.userId, userId)).limit(1);
       if (!existingEmployee) {

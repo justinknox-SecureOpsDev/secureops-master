@@ -1,8 +1,9 @@
 import { Router, type IRouter } from "express";
 import { randomUUID } from "node:crypto";
 import { eq, and, gt, gte, lt, lte, ne, sql, or, isNull, inArray } from "drizzle-orm";
-import { db, shiftsTable, shiftAssignmentsTable, usersTable, licensesTable, sitesTable, clientsTable, trainingCertificationsTable } from "@workspace/db";
+import { db, shiftsTable, shiftAssignmentsTable, usersTable, licensesTable, sitesTable, clientsTable, trainingCertificationsTable, employeesTable } from "@workspace/db";
 import { requireAuth, requireAdmin, requireAdminOrDispatcher } from "../middlewares/auth";
+import { haversineMiles } from "../lib/geofence";
 
 const router: IRouter = Router();
 
@@ -189,7 +190,59 @@ router.get("/shifts", requireAuth, async (req, res): Promise<void> => {
     assignmentMap.get(a.shiftId)!.push(a);
   }
 
-  res.json(shifts.map((s) => ({ ...s, assignments: assignmentMap.get(s.id) ?? [] })));
+  // Compute distanceMilesFromHome for the requesting employee so the mobile
+  // open-shifts list can sort nearest-first and prompt a confirmation on
+  // 50+mi shifts. Admins/dispatchers don't get a distance (their feed is
+  // global, not personal). Distance is always measured from the employee's
+  // geocoded home to the SITE's coordinates — never to shift.locationLat/Lng
+  // (those are an ad-hoc geo for site-less shifts and don't represent a
+  // canonical worksite location). Null when caller is admin, the employee
+  // has no home coords, the shift has no siteId, or the site has no coords.
+  let distanceMap: Map<string, number> | null = null;
+  if (!isAdmin) {
+    const [meEmp] = await db
+      .select({ homeLat: employeesTable.homeLat, homeLng: employeesTable.homeLng })
+      .from(employeesTable)
+      .where(eq(employeesTable.userId, userId))
+      .limit(1);
+    const homeLat = meEmp?.homeLat != null ? Number(meEmp.homeLat) : null;
+    const homeLng = meEmp?.homeLng != null ? Number(meEmp.homeLng) : null;
+    if (homeLat != null && homeLng != null && Number.isFinite(homeLat) && Number.isFinite(homeLng)) {
+      const siteIdsForDist = Array.from(new Set(
+        shifts.map((s) => s.siteId).filter((id): id is string => !!id),
+      ));
+      const siteCoordMap = new Map<string, { lat: number; lng: number }>();
+      if (siteIdsForDist.length > 0) {
+        const siteRows = await db
+          .select({ id: sitesTable.id, lat: sitesTable.locationLat, lng: sitesTable.locationLng })
+          .from(sitesTable)
+          .where(inArray(sitesTable.id, siteIdsForDist));
+        for (const r of siteRows) {
+          if (r.lat != null && r.lng != null) {
+            const lat = Number(r.lat);
+            const lng = Number(r.lng);
+            if (Number.isFinite(lat) && Number.isFinite(lng)) {
+              siteCoordMap.set(r.id, { lat, lng });
+            }
+          }
+        }
+      }
+      distanceMap = new Map();
+      for (const s of shifts) {
+        if (!s.siteId) continue;
+        const c = siteCoordMap.get(s.siteId);
+        if (!c) continue;
+        const d = haversineMiles(homeLat, homeLng, c.lat, c.lng);
+        distanceMap.set(s.id, Math.round(d * 10) / 10);
+      }
+    }
+  }
+
+  res.json(shifts.map((s) => ({
+    ...s,
+    assignments: assignmentMap.get(s.id) ?? [],
+    distanceMilesFromHome: distanceMap?.get(s.id) ?? null,
+  })));
 });
 
 router.post("/shifts", requireAdmin, async (req, res): Promise<void> => {

@@ -514,6 +514,8 @@ export interface Shift {
   repeatPattern?: ShiftRepeatPattern;
   notes?: string;
   assignments?: ShiftAssignment[];
+  /** Miles from the requesting employee's geocoded home address to the shift's site (haversine). Null when caller is admin/dispatcher, when either the employee or the site has no coords on file, or when the shift has no site. Used by the mobile open-shifts list to sort nearest-first and to prompt confirmation on shifts 50+ miles away. */
+  distanceMilesFromHome?: number | null;
   createdAt: string;
 }
 

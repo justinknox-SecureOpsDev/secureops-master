@@ -14,6 +14,7 @@ import {
   resetPasswordLimiter,
 } from "../middlewares/rateLimit";
 import { sendEmail, renderPasswordResetEmail, renderPasswordChangedEmail } from "../lib/email";
+import { geocodeOnelineAddress } from "../lib/geocode";
 import { writeEmployeeFieldChanges } from "../lib/employeeChangeLog";
 import { diffHighRiskChanges, enqueueHighRiskSelfEdit } from "../lib/highRiskSelfEditAlert";
 import jwt from "jsonwebtoken";
@@ -553,6 +554,40 @@ router.patch("/me/employee", requireAuth, async (req, res): Promise<void> => {
   // Clear must-complete-profile once they've saved their profile.
   await db.update(usersTable).set({ mustCompleteProfile: false }).where(eq(usersTable.id, userId));
   const [employee] = await db.select().from(employeesTable).where(eq(employeesTable.userId, userId)).limit(1);
+
+  // Best-effort background re-geocode of the home address. Fires only when
+  // the address text actually changed since the last geocode (or there are
+  // no coords on file). Powers the mobile open-shifts "distance from your
+  // home" sort + the 50mi confirm prompt. Kill-switched by GEOCODING_ENABLED
+  // because home addresses are PII sent to the US Census geocoder.
+  const beforeAddr = (existing as any)?.lastGeocodedAddress ?? null;
+  const beforeLat = (existing as any)?.homeLat ?? null;
+  const newAddr = (employee as any)?.address as string | null | undefined;
+  if (
+    process.env.GEOCODING_ENABLED === "true" &&
+    newAddr && newAddr.trim() &&
+    (beforeLat == null || newAddr !== beforeAddr)
+  ) {
+    void (async () => {
+      try {
+        const result = await geocodeOnelineAddress(newAddr);
+        if (!result) {
+          req.log.info({ userId }, "Geocode: no match for employee home address");
+          await db.update(employeesTable)
+            .set({ lastGeocodedAddress: newAddr })
+            .where(eq(employeesTable.userId, userId));
+          return;
+        }
+        await db.update(employeesTable).set({
+          homeLat: String(result.lat),
+          homeLng: String(result.lng),
+          lastGeocodedAddress: newAddr,
+        }).where(eq(employeesTable.userId, userId));
+      } catch (err) {
+        req.log.error({ err, userId }, "Background employee home geocode failed");
+      }
+    })();
+  }
 
   // Mirror the change-log + high-risk self-edit alert from PUT /employees/:id.
   // This is the path the mobile app actually uses for banking and emergency-
