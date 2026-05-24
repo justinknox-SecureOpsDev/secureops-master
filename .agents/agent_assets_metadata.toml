@@ -1,5 +1,4 @@
 uploads = []
-outputs = []
 
 [[generated]]
 id = "29Jtq7xWHEno8uF1_GCoh"
@@ -12,3 +11,9 @@ id = "_NGyVRpvjYRCgRPyE5I89"
 uri = "file://artifacts/security-ops/assets/images/login-bg.png"
 type = "image"
 title = "Security operations center dark background"
+
+[[outputs]]
+id = "zum-a00h1SS34T4S-pKkV"
+uri = "file://screenshots/play-tablet-10-v2.jpg"
+type = "image"
+title = "Google Play — 10\" tablet screenshot (login)"
