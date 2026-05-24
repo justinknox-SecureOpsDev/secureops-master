@@ -5,8 +5,9 @@ import { useColors } from "@/hooks/useColors";
 import { useGetEmployeeDashboardSummary, getGetEmployeeDashboardSummaryQueryKey, useGetLicenses, getGetLicensesQueryKey } from "@workspace/api-client-react";
 import { useAuth } from "@/contexts/AuthContext";
 import { Feather } from "@expo/vector-icons";
-import { useRouter } from "expo-router";
+import { useRouter, useFocusEffect } from "expo-router";
 import EmergencyButton from "@/components/EmergencyButton";
+import { apiRequest } from "@/utils/api";
 
 function SeverityBadge({ severity }: { severity: string }) {
   const colors = useColors();
@@ -35,6 +36,23 @@ export default function EmployeeHomeScreen() {
   // window is visible in-app — the email is a reminder, but officers live
   // in the mobile app, so the warning belongs here too.
   const { data: myLicenses } = useGetLicenses({}, { query: { queryKey: getGetLicensesQueryKey({}) } });
+
+  // Unread notifications badge. Polls cheaply every 30s while focused; also
+  // refetched on every focus so the badge clears immediately after the user
+  // visits the Notifications screen.
+  const [unreadCount, setUnreadCount] = React.useState(0);
+  const refreshUnread = React.useCallback(async () => {
+    try {
+      const r = await apiRequest("/me/notifications/unread-count") as { unreadCount: number };
+      setUnreadCount(r?.unreadCount ?? 0);
+    } catch { /* silent */ }
+  }, []);
+  useFocusEffect(React.useCallback(() => {
+    void refreshUnread();
+    const t = setInterval(() => { void refreshUnread(); }, 30_000);
+    return () => clearInterval(t);
+  }, [refreshUnread]));
+
   const licenseAlert = React.useMemo(() => {
     const list = (myLicenses ?? []) as Array<{ expiryDate?: string; type?: string }>;
     if (list.length === 0) {
@@ -72,6 +90,18 @@ export default function EmployeeHomeScreen() {
           <Text style={[styles.greeting, { color: colors.mutedForeground }]}>Good day,</Text>
           <Text style={[styles.name, { color: colors.foreground }]}>{user?.firstName} {user?.lastName}</Text>
         </View>
+        <TouchableOpacity
+          onPress={() => router.push("/notifications" as any)}
+          style={[styles.logoutBtn, { borderColor: colors.border, marginRight: 8 }]}
+          accessibilityLabel="Notifications"
+        >
+          <Feather name="bell" size={18} color={colors.mutedForeground} />
+          {unreadCount > 0 && (
+            <View style={[styles.bellBadge, { backgroundColor: colors.destructive, borderColor: colors.background }]}>
+              <Text style={styles.bellBadgeText}>{unreadCount > 99 ? "99+" : String(unreadCount)}</Text>
+            </View>
+          )}
+        </TouchableOpacity>
         <TouchableOpacity onPress={logout} style={[styles.logoutBtn, { borderColor: colors.border }]}>
           <Feather name="log-out" size={18} color={colors.mutedForeground} />
         </TouchableOpacity>
@@ -233,6 +263,12 @@ const styles = StyleSheet.create({
   greeting: { fontSize: 12, letterSpacing: 1 },
   name: { fontSize: 17, fontWeight: "700" },
   logoutBtn: { padding: 8, borderRadius: 8, borderWidth: 1 },
+  bellBadge: {
+    position: "absolute", top: -4, right: -4,
+    minWidth: 16, height: 16, borderRadius: 8, borderWidth: 1,
+    paddingHorizontal: 4, alignItems: "center", justifyContent: "center",
+  },
+  bellBadgeText: { color: "#fff", fontSize: 9, fontWeight: "800", lineHeight: 12 },
   clockedInBanner: { flexDirection: "row", alignItems: "center", gap: 12, margin: 16, padding: 14, borderRadius: 12, borderWidth: 1 },
   licenseBanner: { flexDirection: "row", alignItems: "flex-start", gap: 12, marginHorizontal: 16, marginTop: 12, padding: 14, borderRadius: 12, borderWidth: 2 },
   licenseBannerTitle: { fontSize: 12, fontWeight: "800", letterSpacing: 1, marginBottom: 4 },
