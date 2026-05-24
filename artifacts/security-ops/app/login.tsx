@@ -112,6 +112,16 @@ export default function LoginScreen() {
         {/* Login card */}
         <View style={[styles.card, { backgroundColor: colors.card, borderColor: colors.border }]}>
           <Text style={[styles.cardTitle, { color: colors.foreground }]}>COMMAND ACCESS</Text>
+          {/*
+           * Visible "no public sign-up" disclosure for App Store Review
+           * (Guideline 5.1.1(v)). SecureOps is a workforce app — accounts
+           * are provisioned by WCSG HR after an approved application. The
+           * reviewer is given a demo admin account in App Review Notes.
+           */}
+          <Text style={[styles.cardSubtitle, { color: colors.mutedForeground }]}>
+            Authorized WCSG personnel only. Accounts are issued by HR after onboarding —
+            contact your supervisor for access.
+          </Text>
 
           {error && (
             <View style={[styles.errorBox, { backgroundColor: colors.destructive + "25", borderColor: colors.destructive }]}>
@@ -316,6 +326,13 @@ const styles = StyleSheet.create({
     letterSpacing: 3,
     textAlign: "center",
     marginBottom: 4,
+  },
+  cardSubtitle: {
+    fontSize: 11,
+    lineHeight: 15,
+    textAlign: "center",
+    marginBottom: 4,
+    paddingHorizontal: 4,
   },
   errorBox: {
     flexDirection: "row",
