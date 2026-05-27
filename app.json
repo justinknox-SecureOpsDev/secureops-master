@@ -4,6 +4,12 @@
       "eas": {
         "projectId": "aa9efabc-eea3-483e-b145-5751b5b5562d"
       }
+    },
+    "ios": {
+      "bundleIdentifier": "com.williamscouncil.secureops",
+      "infoPlist": {
+        "ITSAppUsesNonExemptEncryption": false
+      }
     }
   }
 }
