@@ -1,38 +1,50 @@
 import nodemailer, { type Transporter } from "nodemailer";
+import { Resend } from "resend";
 import { logger } from "./logger";
 import { brand } from "./brandConfig";
 
 /**
- * Lightweight, env-gated SMTP sender.
+ * Env-gated email sender. Two transports, Resend preferred when configured:
  *
- * Required env to enable sending:
- *   SMTP_HOST, SMTP_PORT, SMTP_USER, SMTP_PASS, SMTP_FROM
+ *   Resend (preferred — better deliverability, no daily caps):
+ *     RESEND_API_KEY, RESEND_FROM (or falls back to SMTP_FROM)
  *
- * If any are missing, `sendEmail` returns false and logs a single info line —
- * callers fall back to surfacing the link/credentials in the API response so
- * the admin can share them manually.
+ *   SMTP (fallback):
+ *     SMTP_HOST, SMTP_PORT, SMTP_USER, SMTP_PASS, SMTP_FROM
+ *
+ * If neither is configured, `sendEmail` returns false and logs a single info line —
+ * callers fall back to surfacing the link/credentials in the API response so the
+ * admin can share them manually.
  */
 
-let cached: Transporter | null = null;
+let cachedSmtp: Transporter | null = null;
+let cachedResend: Resend | null = null;
 let warned = false;
+
+function getResend(): Resend | null {
+  if (!process.env.RESEND_API_KEY) return null;
+  if (cachedResend) return cachedResend;
+  cachedResend = new Resend(process.env.RESEND_API_KEY);
+  return cachedResend;
+}
 
 function getTransport(): Transporter | null {
   const { SMTP_HOST, SMTP_PORT, SMTP_USER, SMTP_PASS } = process.env;
   if (!SMTP_HOST || !SMTP_PORT || !SMTP_USER || !SMTP_PASS) {
-    if (!warned) {
-      logger.info("SMTP not configured — emails will not be sent (admins must share links manually).");
+    if (!warned && !process.env.RESEND_API_KEY) {
+      logger.info("Neither RESEND_API_KEY nor SMTP_* configured — emails will not be sent (admins must share links manually).");
       warned = true;
     }
     return null;
   }
-  if (cached) return cached;
-  cached = nodemailer.createTransport({
+  if (cachedSmtp) return cachedSmtp;
+  cachedSmtp = nodemailer.createTransport({
     host: SMTP_HOST,
     port: Number(SMTP_PORT),
     secure: Number(SMTP_PORT) === 465,
     auth: { user: SMTP_USER, pass: SMTP_PASS },
   });
-  return cached;
+  return cachedSmtp;
 }
 
 export interface EmailAttachment {
@@ -75,6 +87,44 @@ export interface EmailSendResult {
 }
 
 export async function sendEmailDetailed(msg: EmailMessage): Promise<EmailSendResult> {
+  // Prefer Resend when configured — better deliverability + no daily caps.
+  const resend = getResend();
+  if (resend) {
+    const from = process.env.RESEND_FROM || process.env.SMTP_FROM || `${brand.companyName} <onboarding@resend.dev>`;
+    try {
+      const { data, error } = await resend.emails.send({
+        from,
+        to: msg.to,
+        subject: msg.subject,
+        text: msg.text,
+        html: msg.html,
+        attachments: msg.attachments?.map((a) => ({
+          filename: a.filename,
+          content: a.content,
+          contentType: a.contentType,
+        })),
+      });
+      if (error) {
+        // Resend's API returns name+message on validation/auth errors AND
+        // on "domain not verified" / "address invalid" failures. Treat the
+        // latter as a synchronous bounce so callers + audit log can react.
+        const errStr = `${error.name}: ${error.message}`;
+        const looksBounced = /invalid.*(recipient|to|email)|address.*not.*exist|not.*verified/i.test(errStr);
+        if (looksBounced) {
+          logger.warn({ to: msg.to, error: errStr }, "Resend rejected recipient");
+          return { status: "bounced", ok: false, messageId: null, response: errStr, rejected: [msg.to], error: null };
+        }
+        logger.error({ to: msg.to, error: errStr }, "Resend send failed");
+        return { status: "failed", ok: false, messageId: null, response: null, rejected: [], error: errStr };
+      }
+      return { status: "sent", ok: true, messageId: data?.id ?? null, response: null, rejected: [], error: null };
+    } catch (err) {
+      const error = err instanceof Error ? `${err.name}: ${err.message}` : String(err);
+      logger.error({ err, to: msg.to }, "Failed to send email via Resend");
+      return { status: "failed", ok: false, messageId: null, response: null, rejected: [], error };
+    }
+  }
+
   const t = getTransport();
   if (!t) {
     return { status: "not_configured", ok: false, messageId: null, response: null, rejected: [], error: null };
