@@ -17,3 +17,9 @@ id = "zum-a00h1SS34T4S-pKkV"
 uri = "file://screenshots/play-tablet-10-v2.jpg"
 type = "image"
 title = "Google Play — 10\" tablet screenshot (login)"
+
+[[outputs]]
+id = "D0mAAsN1xAjtMSXPMV-zL"
+uri = "file://exports/wcsg-invite-contact-list.csv"
+type = "table"
+title = "WCSG Officer Invite Contact List (241 officers, 235 with phone + temp password)"
