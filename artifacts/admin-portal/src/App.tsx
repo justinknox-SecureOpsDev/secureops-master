@@ -1,4 +1,4 @@
-import { Switch, Route, Router as WouterRouter, useLocation } from "wouter";
+import { Switch, Route, Router as WouterRouter, useLocation, Redirect } from "wouter";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { Toaster } from "@/components/ui/toaster";
 import { TooltipProvider } from "@/components/ui/tooltip";
@@ -116,7 +116,7 @@ function Routed() {
           <Route path="/tables/shifts" component={ShiftsPage} />
           <Route path="/account/security" component={SecurityPage} />
           <Route path="/radio" component={RadioPage} />
-          <Route component={NotFound} />
+          <Route component={RootAwareNotFound} />
         </Switch>
       ) : (
         <Switch>
@@ -150,11 +150,20 @@ function Routed() {
           <Route path="/shifts/calendar" component={CalendarPage} />
           <Route path="/tables/shifts" component={ShiftsPage} />
           <Route path="/tables/:table" component={TablePage} />
-          <Route component={NotFound} />
+          <Route component={RootAwareNotFound} />
         </Switch>
       )}
     </AppShell>
   );
+}
+
+function RootAwareNotFound() {
+  // When the URL is the bare base (`/admin-portal` with no trailing slash),
+  // wouter reports the location as "" which matches no route. Treat it as the
+  // root so the role's home redirect fires; everything else is a real 404.
+  const [location] = useLocation();
+  if (location === "") return <Redirect to="/" />;
+  return <NotFound />;
 }
 
 function DispatchHomeRedirect() {

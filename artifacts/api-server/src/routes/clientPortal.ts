@@ -1068,7 +1068,7 @@ router.post(
       .limit(1);
 
     const baseUrl = getTrustedBaseUrl();
-    const loginUrl = baseUrl ? `${baseUrl}/admin-portal/` : null;
+    const loginUrl = baseUrl ? `${baseUrl}/admin-portal/client` : null;
 
     if (existing) {
       if (

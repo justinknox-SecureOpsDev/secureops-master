@@ -1,0 +1,1 @@
+- [wouter base routing](wouter-base-routing.md) — bare-base URL (no trailing slash) gives location "" → 404; role shells need a root-aware fallback.

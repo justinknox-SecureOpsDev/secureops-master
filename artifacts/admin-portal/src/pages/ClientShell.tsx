@@ -138,19 +138,24 @@ export function ClientShell() {
       {/* Page content */}
       <main className="flex-1 overflow-auto">
         <Switch>
-          {/* Root redirect: clients land on /admin-portal/ after login — send them to dashboard. */}
-          <Route path="/">
-            <Redirect to="/client" />
-          </Route>
           <Route path="/client" component={ClientDashboard} />
           <Route path="/client/shifts" component={ClientShifts} />
           <Route path="/client/request" component={ClientCoverageRequest} />
           <Route path="/client/reports" component={ClientReports} />
           <Route path="/client/invoices" component={ClientInvoices} />
           <Route path="/account/security" component={SecurityPage} />
-          <Route component={NotFound} />
+          {/* Root fallback: clients land on the bare portal base after login.
+              Depending on the trailing slash, wouter reports the location as
+              "/" or "" — both must route to the dashboard. Anything else 404s. */}
+          <Route component={ClientRootFallback} />
         </Switch>
       </main>
     </div>
   );
+}
+
+function ClientRootFallback() {
+  const [location] = useLocation();
+  if (location === "" || location === "/") return <Redirect to="/client" />;
+  return <NotFound />;
 }
