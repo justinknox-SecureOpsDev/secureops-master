@@ -676,6 +676,12 @@ export function getRadioWss(): WebSocketServer | null { return radioWss; }
  */
 export function handleRadioUpgrade(req: IncomingMessage, socket: Duplex, head: Buffer): void {
   if (!radioWss) { socket.destroy(); return; }
+  // Guard the raw socket during the handshake — an abort here would
+  // otherwise emit an unhandled 'error' and crash the process.
+  socket.on("error", (err) => {
+    logger.warn({ err }, "[radio] WS handshake socket error");
+    socket.destroy();
+  });
   radioWss.handleUpgrade(req, socket, head, (ws) => {
     radioWss!.emit("connection", ws, req);
   });

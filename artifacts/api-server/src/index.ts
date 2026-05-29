@@ -32,13 +32,29 @@ attachRadioWebSocketServer(server);
 // upgrade — that bug broke /api/ws/radio in production). Route by
 // pathname here; unknown paths get a clean 404.
 server.on("upgrade", (req, socket, head) => {
-  const url = new URL(req.url || "", "http://localhost");
-  if (url.pathname === "/api/ws") {
-    handleChatUpgrade(req, socket, head);
-  } else if (url.pathname === "/api/ws/radio") {
-    handleRadioUpgrade(req, socket, head);
-  } else {
-    socket.write("HTTP/1.1 404 Not Found\r\nConnection: close\r\n\r\n");
+  // Attach an error listener BEFORE the handshake. A client that aborts
+  // mid-upgrade (mobile network blip, navigate-away, ECONNRESET) makes the
+  // raw socket emit 'error'. With no listener, Node treats it as an
+  // uncaught exception and kills the whole process — a brief, random
+  // production outage. Handling it here keeps the server up.
+  socket.on("error", (err) => {
+    logger.warn({ err }, "WS upgrade socket error");
+    socket.destroy();
+  });
+  // Contain any synchronous throw (URL parsing, handshake) to this socket so
+  // it can never escalate into a process-killing uncaught exception.
+  try {
+    const url = new URL(req.url || "", "http://localhost");
+    if (url.pathname === "/api/ws") {
+      handleChatUpgrade(req, socket, head);
+    } else if (url.pathname === "/api/ws/radio") {
+      handleRadioUpgrade(req, socket, head);
+    } else {
+      socket.write("HTTP/1.1 404 Not Found\r\nConnection: close\r\n\r\n");
+      socket.destroy();
+    }
+  } catch (err) {
+    logger.warn({ err }, "WS upgrade dispatch failed");
     socket.destroy();
   }
 });
@@ -168,3 +184,23 @@ function gracefulShutdown(signal: string): void {
 
 process.on("SIGTERM", () => gracefulShutdown("SIGTERM"));
 process.on("SIGINT",  () => gracefulShutdown("SIGINT"));
+
+// ── Last-resort safety nets ────────────────────────────────────────────────
+// Without these, a single stray async error anywhere (a rejected promise no
+// one awaited, an EventEmitter 'error' with no listener) crashes the whole
+// process and takes the service down. We log loudly so the bug is still
+// visible, but we do NOT tear the server down for a recoverable rejection —
+// keeping the deployment up is the priority.
+process.on("unhandledRejection", (reason) => {
+  logger.error({ err: reason }, "Unhandled promise rejection — keeping process alive");
+});
+
+// An uncaughtException leaves the process in an unknown state, so the safe
+// move is to drain and let the platform start a fresh instance.
+let shuttingDownFromCrash = false;
+process.on("uncaughtException", (err) => {
+  logger.error({ err }, "Uncaught exception — draining and restarting");
+  if (shuttingDownFromCrash) return;
+  shuttingDownFromCrash = true;
+  gracefulShutdown("uncaughtException");
+});

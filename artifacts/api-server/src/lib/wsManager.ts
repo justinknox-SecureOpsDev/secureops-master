@@ -223,6 +223,12 @@ export function attachWebSocketServer(server: Server) {
  */
 export function handleChatUpgrade(req: IncomingMessage, socket: Duplex, head: Buffer): void {
   if (!wss) { socket.destroy(); return; }
+  // Guard the raw socket during the handshake — an abort here would
+  // otherwise emit an unhandled 'error' and crash the process.
+  socket.on("error", (err) => {
+    logger.warn({ err }, "Chat WS handshake socket error");
+    socket.destroy();
+  });
   wss.handleUpgrade(req, socket, head, (ws) => {
     wss!.emit("connection", ws, req);
   });
