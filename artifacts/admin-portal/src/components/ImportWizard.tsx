@@ -378,7 +378,7 @@ export function ImportWizard({
         <DialogHeader>
           <DialogTitle>
             Import {descriptor.label} —{" "}
-            <span className="brand-gold">
+            <span className="brand-gold-ink">
               {step === "upload" ? "Upload file"
                 : step === "map" ? "Map columns"
                 : step === "preview" ? "Preview & validate"
