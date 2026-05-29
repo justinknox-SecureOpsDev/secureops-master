@@ -18,7 +18,7 @@ interface ChatContextValue {
   deleteMessage: (messageId: string) => Promise<void>;
   subscribeToRoom: (roomId: string, cb: (msg: ChatMessage) => void) => () => void;
   subscribeToDeletes: (roomId: string, cb: (messageId: string) => void) => () => void;
-  /** Per-room unread counts (direct rooms only — the backend only tracks DMs). */
+  /** Per-room unread counts for every accessible room (direct + channels). */
   unreadByRoom: Record<string, number>;
   /** Sum of all unread counts, for a tab-level badge. */
   totalUnread: number;
@@ -59,7 +59,10 @@ export function ChatProvider({ children }: { children: React.ReactNode }) {
     if (!token) return;
     try {
       const { apiRequest } = await import("@/utils/api");
-      const counts = (await apiRequest("/chat/unread-counts")) as { roomId: string; unreadCount: number }[];
+      // scope=all so channels (#general, shift channels, city/elite) are
+      // badged too, not just direct messages. The server enforces the same
+      // per-room ACL as /chat/rooms for the non-direct rooms.
+      const counts = (await apiRequest("/chat/unread-counts?scope=all")) as { roomId: string; unreadCount: number }[];
       const map: Record<string, number> = {};
       for (const c of counts) {
         if (c.unreadCount > 0) map[c.roomId] = c.unreadCount;
