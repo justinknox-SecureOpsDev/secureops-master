@@ -394,14 +394,44 @@ router.post("/chat/direct", requireAuth, async (req, res): Promise<void> => {
 
 // ============================================================ UNREAD STATE
 
-// GET /chat/unread-counts — per-direct-room unread counts for the caller.
+// GET /chat/unread-counts — per-room unread counts for the caller.
 // Derived as messages newer than the caller's last-read watermark that were
-// not sent by the caller. Returned keyed by the other participant so the
-// Personnel grid can map straight from an officer's userId to their badge
-// without first resolving the DM room id. Rooms with no DM yet simply don't
-// appear (the client treats a missing entry as zero).
+// not sent by the caller. Each row carries the roomId plus, for direct rooms,
+// the other participant's userId so the Personnel grid can map straight from
+// an officer's userId to their badge without first resolving the DM room id.
+// Rooms with zero unread simply don't appear (clients treat a missing entry
+// as zero).
+//
+// By default only direct rooms are returned (the Personnel grid only cares
+// about DMs). Pass `?scope=all` to also include every non-direct room the
+// caller can access — used by the Chat sidebar, which badges every room. The
+// `scope=all` path enforces the same per-room ACL as `/chat/rooms`.
 router.get("/chat/unread-counts", requireAuth, async (req, res): Promise<void> => {
   const me = req.user!.userId;
+  const myRole = req.user!.role;
+  const scopeAll = req.query["scope"] === "all";
+
+  // Restrict the aggregate to the room ids the caller may see. For the
+  // direct-only default we lean on the cheap `direct_key LIKE` filter; for
+  // `scope=all` we resolve the full accessible room set (same logic as
+  // `/chat/rooms`) so non-direct ACLs (city/elite membership) are honored.
+  let roomFilter = sql`r.type = 'direct' AND r.direct_key LIKE ${"%" + me + "%"}`;
+  if (scopeAll) {
+    const candidates = await db
+      .select()
+      .from(chatRoomsTable)
+      .where(or(
+        ne(chatRoomsTable.type, "direct"),
+        sql`${chatRoomsTable.directKey} LIKE ${"%" + me + "%"}`,
+      ));
+    const authChecks = await Promise.all(
+      candidates.map((room) => isAuthorizedForRoom(me, myRole, room)),
+    );
+    const accessibleIds = candidates.filter((_, i) => authChecks[i]).map((r) => r.id);
+    if (accessibleIds.length === 0) { res.json([]); return; }
+    roomFilter = sql`r.id IN (${sql.join(accessibleIds.map((id) => sql`${id}`), sql`, `)})`;
+  }
+
   const result = await db.execute(sql`
     SELECT r.id AS "roomId",
            r.direct_key AS "directKey",
@@ -413,14 +443,17 @@ router.get("/chat/unread-counts", requireAuth, async (req, res): Promise<void> =
       ON m.room_id = r.id
       AND m.user_id <> ${me}
       AND m.created_at > COALESCE(rd.last_read_at, '1970-01-01'::timestamptz)
-    WHERE r.type = 'direct' AND r.direct_key LIKE ${"%" + me + "%"}
+    WHERE ${roomFilter}
     GROUP BY r.id, r.direct_key
     HAVING COUNT(m.id) > 0
   `);
-  const counts = (result.rows as { roomId: string; directKey: string; unreadCount: number }[]).map((row) => {
-    const parts = row.directKey.split(":");
-    const otherUserId = parts[0] === me ? parts[1] : parts[0];
-    return { roomId: row.roomId, otherUserId: otherUserId ?? "", unreadCount: row.unreadCount };
+  const counts = (result.rows as { roomId: string; directKey: string | null; unreadCount: number }[]).map((row) => {
+    let otherUserId = "";
+    if (row.directKey) {
+      const parts = row.directKey.split(":");
+      otherUserId = (parts[0] === me ? parts[1] : parts[0]) ?? "";
+    }
+    return { roomId: row.roomId, otherUserId, unreadCount: row.unreadCount };
   });
   res.json(counts);
 });

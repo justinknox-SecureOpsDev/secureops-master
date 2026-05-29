@@ -8,6 +8,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Send, Loader2, Wifi, WifiOff, MessageCircle } from "lucide-react";
 
 type Room = { id: string; name: string; type: string };
+type UnreadCount = { roomId: string; otherUserId: string; unreadCount: number };
 type Message = {
   id: string;
   roomId: string;
@@ -46,6 +47,22 @@ export default function ChatPage() {
     queryFn: () => api<Room[]>("/chat/rooms"),
   });
 
+  // Per-room unread badges for the sidebar. `scope=all` includes channels and
+  // DMs the dispatcher can access, not just direct rooms. Polls so badges stay
+  // fresh even when the WS misses a tick.
+  const unread = useQuery<UnreadCount[]>({
+    queryKey: ["chat", "unread-counts"],
+    queryFn: () => api<UnreadCount[]>("/chat/unread-counts?scope=all"),
+    refetchInterval: 20_000,
+  });
+  const unreadByRoom = useMemo(() => {
+    const map = new Map<string, number>();
+    for (const c of unread.data ?? []) {
+      if (c.unreadCount > 0) map.set(c.roomId, c.unreadCount);
+    }
+    return map;
+  }, [unread.data]);
+
   useEffect(() => {
     if (!roomId && rooms.data && rooms.data.length > 0) {
       const ann = rooms.data.find((r) => r.type === "announcements") ?? rooms.data[0];
@@ -66,6 +83,7 @@ export default function ChatPage() {
     mutationFn: (id: string) => api(`/chat/rooms/${id}/read`, { method: "POST" }),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["personnel", "unread-counts"] });
+      qc.invalidateQueries({ queryKey: ["chat", "unread-counts"] });
     },
   });
   useEffect(() => {
@@ -104,8 +122,13 @@ export default function ChatPage() {
         try {
           const msg = JSON.parse(typeof ev.data === "string" ? ev.data : "");
           // Chat broadcasts include the roomId; only refetch if relevant.
-          if (msg && (msg.type === "message" || msg.type === "chat:message") && msg.roomId === roomId) {
-            qc.invalidateQueries({ queryKey: ["chat", "messages", roomId] });
+          if (msg && (msg.type === "message" || msg.type === "chat:message")) {
+            // Refresh sidebar badges for any incoming message...
+            qc.invalidateQueries({ queryKey: ["chat", "unread-counts"] });
+            // ...but only refetch the message list for the open room.
+            if (msg.roomId === roomId) {
+              qc.invalidateQueries({ queryKey: ["chat", "messages", roomId] });
+            }
           }
         } catch { /* ignore */ }
       };
@@ -159,22 +182,37 @@ export default function ChatPage() {
                 {rooms.error instanceof Error ? rooms.error.message : "Could not load rooms."}
               </div>
             )}
-            {rooms.data?.map((r) => (
-              <button
-                key={r.id}
-                type="button"
-                onClick={() => setRoomId(r.id)}
-                className={`w-full text-left text-sm rounded px-2 py-1.5 transition-colors ${
-                  r.id === roomId ? "bg-accent text-accent-foreground" : "hover:bg-accent/50"
-                }`}
-              >
-                <div className="truncate">
-                  {r.name ?? r.type}
-                  {r.type === "announcements" && " 📣"}
-                </div>
-                <div className="text-[10px] opacity-60 uppercase tracking-wide">{r.type}</div>
-              </button>
-            ))}
+            {rooms.data?.map((r) => {
+              const n = r.id === roomId ? 0 : unreadByRoom.get(r.id) ?? 0;
+              return (
+                <button
+                  key={r.id}
+                  type="button"
+                  onClick={() => setRoomId(r.id)}
+                  className={`w-full text-left text-sm rounded px-2 py-1.5 transition-colors ${
+                    r.id === roomId ? "bg-accent text-accent-foreground" : "hover:bg-accent/50"
+                  }`}
+                  aria-label={
+                    n > 0
+                      ? `${r.name ?? r.type}, ${n} unread message${n === 1 ? "" : "s"}`
+                      : (r.name ?? r.type)
+                  }
+                >
+                  <div className="flex items-center gap-1.5">
+                    <span className={`truncate ${n > 0 ? "font-semibold" : ""}`}>
+                      {r.name ?? r.type}
+                      {r.type === "announcements" && " 📣"}
+                    </span>
+                    {n > 0 && (
+                      <span className="ml-auto flex-shrink-0 inline-flex items-center justify-center min-w-[1.25rem] h-5 px-1.5 rounded-full bg-red-600 text-white text-[10px] font-semibold leading-none">
+                        {n > 99 ? "99+" : n}
+                      </span>
+                    )}
+                  </div>
+                  <div className="text-[10px] opacity-60 uppercase tracking-wide">{r.type}</div>
+                </button>
+              );
+            })}
           </aside>
 
           <section className="flex flex-col min-h-0">
