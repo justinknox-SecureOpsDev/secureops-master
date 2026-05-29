@@ -77,6 +77,9 @@ export default function AdminIncidentsScreen() {
             key={f}
             style={[styles.filterChip, { borderColor: filter === f ? colors.primary : colors.border, backgroundColor: filter === f ? colors.primary + "20" : "transparent" }]}
             onPress={() => setFilter(f)}
+            accessibilityRole="button"
+            accessibilityState={{ selected: filter === f }}
+            accessibilityLabel={`Show ${f.replace("_", " ")} incidents`}
           >
             <Text style={[styles.filterText, { color: filter === f ? colors.primary : colors.mutedForeground }]}>
               {f.replace("_", " ").replace(/\b\w/g, (c) => c.toUpperCase())}
@@ -109,6 +112,9 @@ export default function AdminIncidentsScreen() {
             <TouchableOpacity
               style={[styles.card, { backgroundColor: colors.card, borderColor: item.severity === "critical" ? colors.destructive + "60" : colors.border }]}
               onPress={() => { setSelectedIncident(item); setResolution((item as any).adminNotes || ""); }}
+              accessibilityRole="button"
+              accessibilityLabel={`${item.severity} severity, ${item.status.replace("_", " ")}: ${item.title}. Reported by ${item.employeeName} on ${new Date(item.occurredAt).toLocaleDateString()}`}
+              accessibilityHint="Opens incident details"
             >
               <View style={styles.cardHeader}>
                 <SeverityBadge severity={item.severity} />
@@ -147,7 +153,7 @@ export default function AdminIncidentsScreen() {
             <View style={[styles.modalCard, { backgroundColor: colors.card, borderColor: colors.border }]}>
               <View style={styles.modalHeader}>
                 <Text style={[styles.modalTitle, { color: colors.foreground }]} numberOfLines={2}>{selectedIncident.title}</Text>
-                <TouchableOpacity onPress={() => setSelectedIncident(null)}>
+                <TouchableOpacity onPress={() => setSelectedIncident(null)} accessibilityRole="button" accessibilityLabel="Close incident details">
                   <Feather name="x" size={20} color={colors.mutedForeground} />
                 </TouchableOpacity>
               </View>
@@ -205,21 +211,22 @@ export default function AdminIncidentsScreen() {
                 onChangeText={setResolution}
                 multiline
                 numberOfLines={3}
+                accessibilityLabel="Resolution notes"
               />
 
               <View style={styles.modalActions}>
                 {selectedIncident.status === "open" && (
-                  <TouchableOpacity style={[styles.modalBtn, { backgroundColor: colors.accent + "20", borderColor: colors.accent }]} onPress={() => handleUpdateStatus(selectedIncident.id, "under_review")}>
+                  <TouchableOpacity style={[styles.modalBtn, { backgroundColor: colors.accent + "20", borderColor: colors.accent }]} onPress={() => handleUpdateStatus(selectedIncident.id, "under_review")} accessibilityRole="button" accessibilityLabel="Mark incident under review">
                     <Text style={[styles.modalBtnText, { color: colors.accent }]}>Under Review</Text>
                   </TouchableOpacity>
                 )}
                 {(selectedIncident.status === "open" || selectedIncident.status === "under_review") && (
-                  <TouchableOpacity style={[styles.modalBtn, { backgroundColor: colors.primary + "20", borderColor: colors.primary }]} onPress={() => handleUpdateStatus(selectedIncident.id, "resolved")}>
+                  <TouchableOpacity style={[styles.modalBtn, { backgroundColor: colors.primary + "20", borderColor: colors.primary }]} onPress={() => handleUpdateStatus(selectedIncident.id, "resolved")} accessibilityRole="button" accessibilityLabel="Mark incident resolved">
                     <Text style={[styles.modalBtnText, { color: colors.primary }]}>Resolve</Text>
                   </TouchableOpacity>
                 )}
                 {selectedIncident.status === "resolved" && (
-                  <TouchableOpacity style={[styles.modalBtn, { backgroundColor: colors.mutedForeground + "20", borderColor: colors.mutedForeground }]} onPress={() => handleUpdateStatus(selectedIncident.id, "closed")}>
+                  <TouchableOpacity style={[styles.modalBtn, { backgroundColor: colors.mutedForeground + "20", borderColor: colors.mutedForeground }]} onPress={() => handleUpdateStatus(selectedIncident.id, "closed")} accessibilityRole="button" accessibilityLabel="Close incident">
                     <Text style={[styles.modalBtnText, { color: colors.mutedForeground }]}>Close</Text>
                   </TouchableOpacity>
                 )}
@@ -231,8 +238,8 @@ export default function AdminIncidentsScreen() {
 
       {previewUri && (
         <Modal transparent animationType="fade" onRequestClose={() => setPreviewUri(null)}>
-          <TouchableOpacity style={styles.previewOverlay} activeOpacity={1} onPress={() => setPreviewUri(null)}>
-            <Image source={{ uri: previewUri }} style={styles.previewImg} resizeMode="contain" />
+          <TouchableOpacity style={styles.previewOverlay} activeOpacity={1} onPress={() => setPreviewUri(null)} accessibilityRole="button" accessibilityLabel="Close photo preview">
+            <Image source={{ uri: previewUri }} style={styles.previewImg} resizeMode="contain" accessibilityLabel="Incident photo" />
             <View style={styles.previewClose}><Feather name="x" size={28} color="#fff" /></View>
           </TouchableOpacity>
         </Modal>

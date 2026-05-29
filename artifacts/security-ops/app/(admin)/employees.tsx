@@ -93,6 +93,8 @@ export default function AdminEmployeesScreen() {
         <TouchableOpacity
           style={[styles.addBtn, { backgroundColor: colors.primary }]}
           onPress={() => router.push("/(admin)/employees/create")}
+          accessibilityRole="button"
+          accessibilityLabel="Add employee"
         >
           <Feather name="plus" size={20} color="#fff" />
         </TouchableOpacity>
@@ -109,7 +111,7 @@ export default function AdminEmployeesScreen() {
           autoCapitalize="none"
         />
         {search.length > 0 && (
-          <TouchableOpacity onPress={() => setSearch("")}>
+          <TouchableOpacity onPress={() => setSearch("")} accessibilityRole="button" accessibilityLabel="Clear search">
             <Feather name="x" size={16} color={colors.mutedForeground} />
           </TouchableOpacity>
         )}
@@ -121,6 +123,9 @@ export default function AdminEmployeesScreen() {
             key={f}
             style={[styles.filterChip, { borderColor: statusFilter === f ? colors.primary : colors.border, backgroundColor: statusFilter === f ? colors.primary + "20" : "transparent" }]}
             onPress={() => setStatusFilter(f)}
+            accessibilityRole="button"
+            accessibilityState={{ selected: statusFilter === f }}
+            accessibilityLabel={`Filter by ${f === "all" ? "all statuses" : f}`}
           >
             <Text style={[styles.filterText, { color: statusFilter === f ? colors.primary : colors.mutedForeground }]}>
               {f.charAt(0).toUpperCase() + f.slice(1)}
@@ -136,7 +141,7 @@ export default function AdminEmployeesScreen() {
       ) : error ? (
         <View style={styles.center}>
           <Text style={{ color: colors.destructive, marginBottom: 12 }}>Failed to load employees</Text>
-          <TouchableOpacity onPress={() => refetch()} style={[styles.retryBtn, { borderColor: colors.primary }]}>
+          <TouchableOpacity onPress={() => refetch()} style={[styles.retryBtn, { borderColor: colors.primary }]} accessibilityRole="button" accessibilityLabel="Retry loading employees">
             <Text style={{ color: colors.primary }}>Retry</Text>
           </TouchableOpacity>
         </View>
@@ -157,6 +162,9 @@ export default function AdminEmployeesScreen() {
             <TouchableOpacity
               style={[styles.card, { backgroundColor: colors.card, borderColor: colors.border }]}
               onPress={() => router.push(`/(admin)/employees/${item.id}` as any)}
+              accessibilityRole="button"
+              accessibilityLabel={`${item.firstName} ${item.lastName}, ${item.status}${(item.expiringLicenseCount ?? 0) > 0 ? `, ${item.expiringLicenseCount} expiring licence${item.expiringLicenseCount === 1 ? "" : "s"}` : ""}`}
+              accessibilityHint="Opens employee profile"
             >
               <View style={styles.cardRow}>
                 <View style={[styles.avatar, { backgroundColor: colors.primary + "20" }]}>

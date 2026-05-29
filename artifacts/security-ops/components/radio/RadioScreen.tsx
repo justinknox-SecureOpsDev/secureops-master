@@ -281,7 +281,14 @@ export default function RadioScreen(): React.JSX.Element {
           const active = c.id === activeId;
           const sp = speakers[c.id];
           return (
-            <TouchableOpacity key={c.id} onPress={() => setActiveId(c.id)} style={[styles.chip, active && { backgroundColor: colors.primary }]}>
+            <TouchableOpacity
+              key={c.id}
+              onPress={() => setActiveId(c.id)}
+              style={[styles.chip, active && { backgroundColor: colors.primary }]}
+              accessibilityRole="button"
+              accessibilityState={{ selected: active }}
+              accessibilityLabel={`${c.name} channel${sp ? `, ${sp.name} transmitting` : ""}`}
+            >
               <Text style={[styles.chipText, active && { color: "#fff" }]}>{c.name}</Text>
               {sp && <Feather name="volume-2" size={12} color={active ? "#fff" : "#16a34a"} style={{ marginLeft: 4 }} />}
             </TouchableOpacity>
@@ -313,6 +320,10 @@ export default function RadioScreen(): React.JSX.Element {
               onPressIn={startTalking}
               onPressOut={stopTalking}
               disabled={!!otherSpeaker || !wsReady || activeChannel.archivedAt !== null}
+              accessibilityRole="button"
+              accessibilityLabel={holding ? "Release to stop transmitting" : otherSpeaker ? "Channel busy" : "Hold to talk"}
+              accessibilityHint="Press and hold to transmit on this channel"
+              accessibilityState={{ disabled: !!otherSpeaker || !wsReady || activeChannel.archivedAt !== null, busy: holding }}
               style={({ pressed }) => [
                 styles.ptt,
                 {
@@ -326,17 +337,22 @@ export default function RadioScreen(): React.JSX.Element {
             </Pressable>
 
             <View style={{ flexDirection: "row", gap: 10, marginTop: 18 }}>
-              <TouchableOpacity onPress={() => toggleMute(activeChannel.id)} style={styles.smallBtn}>
+              <TouchableOpacity
+                onPress={() => toggleMute(activeChannel.id)}
+                style={styles.smallBtn}
+                accessibilityRole="button"
+                accessibilityLabel={mutedChannels.has(activeChannel.id) ? `Unmute ${activeChannel.name}` : `Mute ${activeChannel.name}`}
+              >
                 <Feather name={mutedChannels.has(activeChannel.id) ? "volume-x" : "volume-2"} size={14} color={colors.foreground} />
                 <Text style={styles.smallBtnText}>{mutedChannels.has(activeChannel.id) ? "Unmute" : "Mute"}</Text>
               </TouchableOpacity>
               {leftChannels.has(activeChannel.id) ? (
-                <TouchableOpacity onPress={() => rejoinChannel(activeChannel.id)} style={styles.smallBtn}>
+                <TouchableOpacity onPress={() => rejoinChannel(activeChannel.id)} style={styles.smallBtn} accessibilityRole="button" accessibilityLabel={`Rejoin ${activeChannel.name}`}>
                   <Feather name="log-in" size={14} color={colors.foreground} />
                   <Text style={styles.smallBtnText}>Rejoin</Text>
                 </TouchableOpacity>
               ) : (
-                <TouchableOpacity onPress={() => leaveChannel(activeChannel.id)} style={styles.smallBtn}>
+                <TouchableOpacity onPress={() => leaveChannel(activeChannel.id)} style={styles.smallBtn} accessibilityRole="button" accessibilityLabel={`Leave ${activeChannel.name}`}>
                   <Feather name="log-out" size={14} color={colors.foreground} />
                   <Text style={styles.smallBtnText}>Leave</Text>
                 </TouchableOpacity>

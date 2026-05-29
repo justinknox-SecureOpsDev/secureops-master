@@ -28,6 +28,8 @@ function StatCard({ label, value, color, icon, onPress }: { label: string; value
         activeOpacity={0.7}
         onPress={onPress}
         style={[styles.statCard, { backgroundColor: colors.card, borderColor: colors.border }]}
+        accessibilityRole="button"
+        accessibilityLabel={`${label}: ${value}`}
       >
         {body}
       </TouchableOpacity>
@@ -108,7 +110,7 @@ export default function AdminDashboardScreen() {
     return (
       <View style={[styles.center, { backgroundColor: colors.background }]}>
         <Text style={{ color: colors.destructive, marginBottom: 12 }}>Failed to load dashboard</Text>
-        <TouchableOpacity onPress={() => refetch()} style={[styles.retryBtn, { borderColor: colors.primary }]}>
+        <TouchableOpacity onPress={() => refetch()} style={[styles.retryBtn, { borderColor: colors.primary }]} accessibilityRole="button" accessibilityLabel="Retry loading dashboard">
           <Text style={{ color: colors.primary }}>Retry</Text>
         </TouchableOpacity>
       </View>
@@ -122,7 +124,12 @@ export default function AdminDashboardScreen() {
           <Text style={[styles.greeting, { color: colors.mutedForeground }]}>Welcome back,</Text>
           <Text style={[styles.name, { color: colors.foreground }]}>{user?.firstName} {user?.lastName}</Text>
         </View>
-        <TouchableOpacity onPress={logout} style={[styles.logoutBtn, { borderColor: colors.border }]}>
+        <TouchableOpacity
+          onPress={logout}
+          style={[styles.logoutBtn, { borderColor: colors.border }]}
+          accessibilityRole="button"
+          accessibilityLabel="Log out"
+        >
           <Feather name="log-out" size={18} color={colors.mutedForeground} />
         </TouchableOpacity>
       </View>
@@ -163,7 +170,12 @@ export default function AdminDashboardScreen() {
                 key={shift.id}
                 style={[styles.vacancyCard, { backgroundColor: colors.card, borderColor: colors.border, borderLeftColor: colors.accent }]}
               >
-                <TouchableOpacity onPress={() => router.push(`/(admin)/shifts/${shift.id}` as any)} style={{ flex: 1 }}>
+                <TouchableOpacity
+                  onPress={() => router.push(`/(admin)/shifts/${shift.id}` as any)}
+                  style={{ flex: 1 }}
+                  accessibilityRole="button"
+                  accessibilityLabel={`Open vacancy: ${shift.title}, ${shift.vacancies} of ${shift.headcount} open, Level ${shift.requiredLicenseLevel} or higher`}
+                >
                   <View style={{ flexDirection: "row", alignItems: "center", gap: 8, marginBottom: 4 }}>
                     <Text style={[styles.itemTitle, { color: colors.foreground }]} numberOfLines={1}>{shift.title}</Text>
                     <View style={[styles.vacancyPill, { backgroundColor: colors.accent + "25", borderColor: colors.accent }]}>
@@ -180,6 +192,9 @@ export default function AdminDashboardScreen() {
                   onPress={() => handleNotify(shift)}
                   disabled={isNotifying}
                   style={[styles.notifyBtn, { backgroundColor: colors.primary, opacity: isNotifying ? 0.6 : 1 }]}
+                  accessibilityRole="button"
+                  accessibilityLabel={`Notify qualified officers for ${shift.title}`}
+                  accessibilityState={{ disabled: isNotifying, busy: isNotifying }}
                 >
                   {isNotifying ? (
                     <ActivityIndicator color={colors.primaryForeground} size="small" />
@@ -210,6 +225,8 @@ export default function AdminDashboardScreen() {
               key={label}
               style={[styles.actionBtn, { backgroundColor: colors.card, borderColor: colors.border }]}
               onPress={() => router.push(route as any)}
+              accessibilityRole="button"
+              accessibilityLabel={label}
             >
               <Feather name={icon as any} size={22} color={colors.primary} />
               <Text style={[styles.actionLabel, { color: colors.foreground }]}>{label}</Text>
@@ -232,6 +249,8 @@ export default function AdminDashboardScreen() {
               key={incident.id}
               style={[styles.listItem, { backgroundColor: colors.card, borderColor: colors.border }]}
               onPress={() => router.push("/(admin)/incidents")}
+              accessibilityRole="button"
+              accessibilityLabel={`${incident.severity} severity incident: ${incident.title}. Reported by ${incident.employeeName} on ${new Date(incident.occurredAt).toLocaleDateString()}`}
             >
               <View style={styles.itemRow}>
                 <SeverityBadge severity={incident.severity} />
@@ -253,6 +272,8 @@ export default function AdminDashboardScreen() {
               key={shift.id}
               style={[styles.listItem, { backgroundColor: colors.card, borderColor: colors.border }]}
               onPress={() => router.push(`/(admin)/shifts/${shift.id}` as any)}
+              accessibilityRole="button"
+              accessibilityLabel={`Upcoming shift: ${shift.title} for ${shift.clientName} on ${new Date(shift.startTime).toLocaleString()}`}
             >
               <Text style={[styles.itemTitle, { color: colors.foreground }]}>{shift.title}</Text>
               <Text style={[styles.itemSub, { color: colors.mutedForeground }]}>

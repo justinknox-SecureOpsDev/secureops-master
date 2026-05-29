@@ -31,7 +31,13 @@ export default function AdminLiveMapScreen() {
             {officers.length} officer{officers.length === 1 ? "" : "s"} currently on duty
           </Text>
         </View>
-        <TouchableOpacity onPress={() => refetch()} style={[styles.refresh, { borderColor: colors.border }]}>
+        <TouchableOpacity
+          onPress={() => refetch()}
+          style={[styles.refresh, { borderColor: colors.border }]}
+          accessibilityRole="button"
+          accessibilityLabel="Refresh officer list"
+          accessibilityState={{ busy: isFetching }}
+        >
           {isFetching ? <ActivityIndicator size="small" color={colors.primary} /> : <Feather name="refresh-cw" size={16} color={colors.primary} />}
         </TouchableOpacity>
       </View>
@@ -81,6 +87,8 @@ export default function AdminLiveMapScreen() {
                       <TouchableOpacity
                         onPress={() => Linking.openURL(`https://www.google.com/maps?q=${lat},${lng}`)}
                         style={[styles.openMap, { borderColor: colors.primary }]}
+                        accessibilityRole="button"
+                        accessibilityLabel={`Open ${o.firstName} ${o.lastName}'s location in Google Maps`}
                       >
                         <Feather name="external-link" size={14} color={colors.primary} />
                         <Text style={{ color: colors.primary, fontSize: 12, fontWeight: "600" }}>Maps</Text>

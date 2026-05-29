@@ -34,7 +34,7 @@ export default function AdminShiftsScreen() {
     <View style={[styles.container, { backgroundColor: colors.background }]}>
       <View style={[styles.topBar, { paddingTop: topPad + 12, borderBottomColor: colors.border }]}>
         <Text style={[styles.pageTitle, { color: colors.foreground }]}>Shifts</Text>
-        <TouchableOpacity style={[styles.addBtn, { backgroundColor: colors.primary }]} onPress={() => router.push("/(admin)/shifts/create")}>
+        <TouchableOpacity style={[styles.addBtn, { backgroundColor: colors.primary }]} onPress={() => router.push("/(admin)/shifts/create")} accessibilityRole="button" accessibilityLabel="Create shift">
           <Feather name="plus" size={20} color="#fff" />
         </TouchableOpacity>
       </View>
@@ -45,6 +45,9 @@ export default function AdminShiftsScreen() {
             key={f}
             style={[styles.filterChip, { borderColor: filter === f ? colors.primary : colors.border, backgroundColor: filter === f ? colors.primary + "20" : "transparent" }]}
             onPress={() => setFilter(f)}
+            accessibilityRole="button"
+            accessibilityState={{ selected: filter === f }}
+            accessibilityLabel={`Show ${f} shifts`}
           >
             <Text style={[styles.filterText, { color: filter === f ? colors.primary : colors.mutedForeground }]}>{f.charAt(0).toUpperCase() + f.slice(1)}</Text>
           </TouchableOpacity>
@@ -56,7 +59,7 @@ export default function AdminShiftsScreen() {
       ) : error ? (
         <View style={styles.center}>
           <Text style={{ color: colors.destructive, marginBottom: 12 }}>Failed to load shifts</Text>
-          <TouchableOpacity onPress={() => refetch()} style={[styles.retryBtn, { borderColor: colors.primary }]}>
+          <TouchableOpacity onPress={() => refetch()} style={[styles.retryBtn, { borderColor: colors.primary }]} accessibilityRole="button" accessibilityLabel="Retry loading shifts">
             <Text style={{ color: colors.primary }}>Retry</Text>
           </TouchableOpacity>
         </View>
@@ -77,6 +80,9 @@ export default function AdminShiftsScreen() {
             <TouchableOpacity
               style={[styles.card, { backgroundColor: colors.card, borderColor: colors.border }]}
               onPress={() => router.push(`/(admin)/shifts/${item.id}` as any)}
+              accessibilityRole="button"
+              accessibilityLabel={`${item.title} for ${item.clientName}, ${item.status}, ${new Date(item.startTime).toLocaleString()}, ${item.assignments?.length ?? 0} assigned`}
+              accessibilityHint="Opens shift details"
             >
               <View style={styles.cardHeader}>
                 <Text style={[styles.shiftTitle, { color: colors.foreground }]}>{item.title}</Text>
@@ -84,6 +90,7 @@ export default function AdminShiftsScreen() {
                 <TouchableOpacity
                   onPress={(e) => { e.stopPropagation?.(); router.push(`/(admin)/shifts/edit/${item.id}` as any); }}
                   style={[styles.editBtn, { borderColor: colors.primary }]}
+                  accessibilityRole="button"
                   accessibilityLabel={`Edit ${item.title}`}
                   hitSlop={8}
                 >
