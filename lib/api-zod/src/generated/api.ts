@@ -2188,6 +2188,29 @@ export const SendChatMessageBody = zod.object({
 });
 
 /**
+ * @summary Per-direct-room unread message counts for the current user
+ */
+export const GetChatUnreadCountsResponseItem = zod.object({
+  roomId: zod.string(),
+  otherUserId: zod.string(),
+  unreadCount: zod.number(),
+});
+export const GetChatUnreadCountsResponse = zod.array(
+  GetChatUnreadCountsResponseItem,
+);
+
+/**
+ * @summary Mark a chat room as read up to now for the current user
+ */
+export const MarkChatRoomReadParams = zod.object({
+  id: zod.coerce.string(),
+});
+
+export const MarkChatRoomReadResponse = zod.object({
+  ok: zod.boolean(),
+});
+
+/**
  * @summary List push-to-talk radio channels the caller can access
  */
 export const GetRadioChannelsResponseItem = zod.object({

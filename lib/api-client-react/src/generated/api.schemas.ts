@@ -1117,6 +1117,12 @@ export interface ChatMessage {
   userRole?: string;
 }
 
+export interface ChatUnreadCount {
+  roomId: string;
+  otherUserId: string;
+  unreadCount: number;
+}
+
 export interface EmployeeDashboardSummary {
   nextShift?: Shift;
   activeTimeEntry?: TimeEntry;
@@ -1728,6 +1734,10 @@ export type GetChatMessagesParams = {
 
 export type SendChatMessageBody = {
   content: string;
+};
+
+export type MarkChatRoomRead200 = {
+  ok: boolean;
 };
 
 export type GetRadioChannelTransmissionsParams = {

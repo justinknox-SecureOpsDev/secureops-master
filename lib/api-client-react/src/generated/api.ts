@@ -31,6 +31,7 @@ import type {
   ChangePasswordRequest,
   ChatMessage,
   ChatRoom,
+  ChatUnreadCount,
   ChatUser,
   Client,
   ClockInRequest,
@@ -71,6 +72,7 @@ import type {
   Invoice,
   License,
   LoginRequest,
+  MarkChatRoomRead200,
   NotifyShiftVacancy200,
   OnboardingDetail,
   OnboardingLinkResponse,
@@ -5751,6 +5753,165 @@ export const useSendChatMessage = <
   TContext
 > => {
   return useMutation(getSendChatMessageMutationOptions(options));
+};
+
+/**
+ * @summary Per-direct-room unread message counts for the current user
+ */
+export const getGetChatUnreadCountsUrl = () => {
+  return `/api/chat/unread-counts`;
+};
+
+export const getChatUnreadCounts = async (
+  options?: RequestInit,
+): Promise<ChatUnreadCount[]> => {
+  return customFetch<ChatUnreadCount[]>(getGetChatUnreadCountsUrl(), {
+    ...options,
+    method: "GET",
+  });
+};
+
+export const getGetChatUnreadCountsQueryKey = () => {
+  return [`/api/chat/unread-counts`] as const;
+};
+
+export const getGetChatUnreadCountsQueryOptions = <
+  TData = Awaited<ReturnType<typeof getChatUnreadCounts>>,
+  TError = ErrorType<unknown>,
+>(options?: {
+  query?: UseQueryOptions<
+    Awaited<ReturnType<typeof getChatUnreadCounts>>,
+    TError,
+    TData
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}) => {
+  const { query: queryOptions, request: requestOptions } = options ?? {};
+
+  const queryKey = queryOptions?.queryKey ?? getGetChatUnreadCountsQueryKey();
+
+  const queryFn: QueryFunction<
+    Awaited<ReturnType<typeof getChatUnreadCounts>>
+  > = ({ signal }) => getChatUnreadCounts({ signal, ...requestOptions });
+
+  return { queryKey, queryFn, ...queryOptions } as UseQueryOptions<
+    Awaited<ReturnType<typeof getChatUnreadCounts>>,
+    TError,
+    TData
+  > & { queryKey: QueryKey };
+};
+
+export type GetChatUnreadCountsQueryResult = NonNullable<
+  Awaited<ReturnType<typeof getChatUnreadCounts>>
+>;
+export type GetChatUnreadCountsQueryError = ErrorType<unknown>;
+
+/**
+ * @summary Per-direct-room unread message counts for the current user
+ */
+
+export function useGetChatUnreadCounts<
+  TData = Awaited<ReturnType<typeof getChatUnreadCounts>>,
+  TError = ErrorType<unknown>,
+>(options?: {
+  query?: UseQueryOptions<
+    Awaited<ReturnType<typeof getChatUnreadCounts>>,
+    TError,
+    TData
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+  const queryOptions = getGetChatUnreadCountsQueryOptions(options);
+
+  const query = useQuery(queryOptions) as UseQueryResult<TData, TError> & {
+    queryKey: QueryKey;
+  };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
+
+/**
+ * @summary Mark a chat room as read up to now for the current user
+ */
+export const getMarkChatRoomReadUrl = (id: string) => {
+  return `/api/chat/rooms/${id}/read`;
+};
+
+export const markChatRoomRead = async (
+  id: string,
+  options?: RequestInit,
+): Promise<MarkChatRoomRead200> => {
+  return customFetch<MarkChatRoomRead200>(getMarkChatRoomReadUrl(id), {
+    ...options,
+    method: "POST",
+  });
+};
+
+export const getMarkChatRoomReadMutationOptions = <
+  TError = ErrorType<unknown>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof markChatRoomRead>>,
+    TError,
+    { id: string },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof markChatRoomRead>>,
+  TError,
+  { id: string },
+  TContext
+> => {
+  const mutationKey = ["markChatRoomRead"];
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof markChatRoomRead>>,
+    { id: string }
+  > = (props) => {
+    const { id } = props ?? {};
+
+    return markChatRoomRead(id, requestOptions);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type MarkChatRoomReadMutationResult = NonNullable<
+  Awaited<ReturnType<typeof markChatRoomRead>>
+>;
+
+export type MarkChatRoomReadMutationError = ErrorType<unknown>;
+
+/**
+ * @summary Mark a chat room as read up to now for the current user
+ */
+export const useMarkChatRoomRead = <
+  TError = ErrorType<unknown>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof markChatRoomRead>>,
+    TError,
+    { id: string },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationResult<
+  Awaited<ReturnType<typeof markChatRoomRead>>,
+  TError,
+  { id: string },
+  TContext
+> => {
+  return useMutation(getMarkChatRoomReadMutationOptions(options));
 };
 
 /**

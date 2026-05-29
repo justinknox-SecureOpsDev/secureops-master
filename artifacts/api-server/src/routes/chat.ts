@@ -5,6 +5,7 @@ import {
   chatRoomsTable,
   chatMessagesTable,
   chatRoomMembershipsTable,
+  chatRoomReadsTable,
   usersTable,
   licensesTable,
   sitesTable,
@@ -389,6 +390,62 @@ router.post("/chat/direct", requireAuth, async (req, res): Promise<void> => {
     name, type: "direct", directKey: key,
   }).returning();
   res.status(201).json(room);
+});
+
+// ============================================================ UNREAD STATE
+
+// GET /chat/unread-counts — per-direct-room unread counts for the caller.
+// Derived as messages newer than the caller's last-read watermark that were
+// not sent by the caller. Returned keyed by the other participant so the
+// Personnel grid can map straight from an officer's userId to their badge
+// without first resolving the DM room id. Rooms with no DM yet simply don't
+// appear (the client treats a missing entry as zero).
+router.get("/chat/unread-counts", requireAuth, async (req, res): Promise<void> => {
+  const me = req.user!.userId;
+  const result = await db.execute(sql`
+    SELECT r.id AS "roomId",
+           r.direct_key AS "directKey",
+           COUNT(m.id)::int AS "unreadCount"
+    FROM chat_rooms r
+    LEFT JOIN chat_room_reads rd
+      ON rd.room_id = r.id AND rd.user_id = ${me}
+    LEFT JOIN chat_messages m
+      ON m.room_id = r.id
+      AND m.user_id <> ${me}
+      AND m.created_at > COALESCE(rd.last_read_at, '1970-01-01'::timestamptz)
+    WHERE r.type = 'direct' AND r.direct_key LIKE ${"%" + me + "%"}
+    GROUP BY r.id, r.direct_key
+    HAVING COUNT(m.id) > 0
+  `);
+  const counts = (result.rows as { roomId: string; directKey: string; unreadCount: number }[]).map((row) => {
+    const parts = row.directKey.split(":");
+    const otherUserId = parts[0] === me ? parts[1] : parts[0];
+    return { roomId: row.roomId, otherUserId: otherUserId ?? "", unreadCount: row.unreadCount };
+  });
+  res.json(counts);
+});
+
+// POST /chat/rooms/:id/read — bump the caller's last-read watermark to now.
+// Idempotent upsert keyed on (room, user). Enforces the same room ACL as
+// reading messages so a caller can't mark rooms they can't access.
+router.post("/chat/rooms/:id/read", requireAuth, async (req, res): Promise<void> => {
+  const id = req.params.id as string;
+  const me = req.user!.userId;
+  const [room] = await db.select().from(chatRoomsTable).where(eq(chatRoomsTable.id, id)).limit(1);
+  if (!room) { res.status(404).json({ error: "Not Found", message: "Room not found" }); return; }
+  if (!(await isAuthorizedForRoom(me, req.user!.role, room))) {
+    res.status(403).json({ error: "Forbidden", message: "You are not a member of this room" });
+    return;
+  }
+  const now = new Date();
+  await db
+    .insert(chatRoomReadsTable)
+    .values({ roomId: id, userId: me, lastReadAt: now })
+    .onConflictDoUpdate({
+      target: [chatRoomReadsTable.roomId, chatRoomReadsTable.userId],
+      set: { lastReadAt: now },
+    });
+  res.json({ ok: true });
 });
 
 // ============================================================ MESSAGES

@@ -1448,6 +1448,47 @@ paths:
               schema:
                 $ref: "#/components/schemas/ChatMessage"
 
+  /chat/unread-counts:
+    get:
+      operationId: getChatUnreadCounts
+      tags: [chat]
+      summary: Per-direct-room unread message counts for the current user
+      security:
+        - bearerAuth: []
+      responses:
+        "200":
+          description: Unread counts for direct rooms the caller participates in
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/ChatUnreadCount"
+
+  /chat/rooms/{id}/read:
+    post:
+      operationId: markChatRoomRead
+      tags: [chat]
+      summary: Mark a chat room as read up to now for the current user
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Marked read
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  ok: { type: boolean }
+                required: [ok]
+
   /radio/channels:
     get:
       operationId: getRadioChannels
@@ -3167,6 +3208,17 @@ components:
         userRole:
           type: string
       required: [id, roomId, userId, content, createdAt, userName]
+
+    ChatUnreadCount:
+      type: object
+      properties:
+        roomId:
+          type: string
+        otherUserId:
+          type: string
+        unreadCount:
+          type: integer
+      required: [roomId, otherUserId, unreadCount]
 
     EmployeeDashboardSummary:
       type: object

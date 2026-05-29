@@ -60,6 +60,20 @@ export default function ChatPage() {
     refetchInterval: 20_000,
   });
 
+  // Mark the open room read whenever it's selected or new messages land in
+  // it, then refresh the Personnel unread badges so they clear immediately.
+  const markRead = useMutation({
+    mutationFn: (id: string) => api(`/chat/rooms/${id}/read`, { method: "POST" }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["personnel", "unread-counts"] });
+    },
+  });
+  useEffect(() => {
+    if (!roomId || !messages.data) return;
+    markRead.mutate(roomId);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [roomId, messages.data]);
+
   // Scroll to bottom when new messages land.
   useEffect(() => {
     if (!listRef.current) return;

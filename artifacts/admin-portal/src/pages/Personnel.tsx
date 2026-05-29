@@ -33,6 +33,12 @@ type ActiveOfficer = {
   siteName: string | null;
 };
 
+type UnreadCount = {
+  roomId: string;
+  otherUserId: string;
+  unreadCount: number;
+};
+
 const STATUS_TONE: Record<string, string> = {
   active: "bg-emerald-600 text-white",
   inactive: "bg-slate-400 text-white",
@@ -94,11 +100,28 @@ export default function PersonnelPage() {
     refetchInterval: 30_000,
   });
 
+  // Per-officer unread DM counts, keyed by the officer's userId so the
+  // message shortcut can render a badge without first resolving the DM room.
+  // Polled on the same 30s cadence as the active-officer roster.
+  const unreadCounts = useQuery<UnreadCount[]>({
+    queryKey: ["personnel", "unread-counts"],
+    queryFn: () => api<UnreadCount[]>("/chat/unread-counts"),
+    refetchInterval: 30_000,
+  });
+
   const activeById = useMemo(() => {
     const map = new Map<string, ActiveOfficer>();
     for (const o of activeOfficers.data ?? []) map.set(o.userId, o);
     return map;
   }, [activeOfficers.data]);
+
+  const unreadByUser = useMemo(() => {
+    const map = new Map<string, number>();
+    for (const c of unreadCounts.data ?? []) {
+      if (c.unreadCount > 0) map.set(c.otherUserId, c.unreadCount);
+    }
+    return map;
+  }, [unreadCounts.data]);
 
   const sorted = useMemo(() => {
     const data = employees.data ?? [];
@@ -237,20 +260,37 @@ export default function PersonnelPage() {
                               />
                               <span className="text-xs">{fmtAgo(live.lastLocationAt)}</span>
                             </Link>
-                            <button
-                              type="button"
-                              onClick={() => openDirect.mutate(e.id)}
-                              disabled={openDirect.isPending}
-                              className="inline-flex items-center justify-center rounded p-1 text-muted-foreground hover:bg-muted hover:text-foreground disabled:opacity-50"
-                              title={`Message ${e.firstName}`}
-                              aria-label={`Message ${e.firstName} ${e.lastName}`}
-                            >
-                              {openDirect.isPending && openDirect.variables === e.id ? (
-                                <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                              ) : (
-                                <MessageCircle className="w-3.5 h-3.5" />
-                              )}
-                            </button>
+                            {(() => {
+                              const unread = unreadByUser.get(e.id) ?? 0;
+                              return (
+                                <button
+                                  type="button"
+                                  onClick={() => openDirect.mutate(e.id)}
+                                  disabled={openDirect.isPending}
+                                  className="relative inline-flex items-center justify-center rounded p-1 text-muted-foreground hover:bg-muted hover:text-foreground disabled:opacity-50"
+                                  title={unread > 0 ? `Message ${e.firstName} · ${unread} unread` : `Message ${e.firstName}`}
+                                  aria-label={
+                                    unread > 0
+                                      ? `Message ${e.firstName} ${e.lastName}, ${unread} unread message${unread === 1 ? "" : "s"}`
+                                      : `Message ${e.firstName} ${e.lastName}`
+                                  }
+                                >
+                                  {openDirect.isPending && openDirect.variables === e.id ? (
+                                    <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                                  ) : (
+                                    <MessageCircle className="w-3.5 h-3.5" />
+                                  )}
+                                  {unread > 0 && (
+                                    <span
+                                      className="absolute -top-1 -right-1 min-w-[16px] h-4 px-1 rounded-full bg-red-600 text-white text-[10px] font-semibold leading-4 text-center"
+                                      aria-hidden="true"
+                                    >
+                                      {unread > 99 ? "99+" : unread}
+                                    </span>
+                                  )}
+                                </button>
+                              );
+                            })()}
                           </div>
                         ) : (
                           <span className="opacity-40">—</span>
