@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useMemo, useState, useEffect, useRef } from "react";
 import { Radio } from "lucide-react";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { Link, useRoute, useLocation } from "wouter";
@@ -9,6 +9,7 @@ import { Button } from "@/components/ui/button";
 import {
   ArrowLeft, User, Mail, Phone, ShieldCheck, AlertTriangle, Loader2,
   ExternalLink, MessageCircle, PhoneCall, Calendar, ShieldAlert, MapPin,
+  Play, Pause,
 } from "lucide-react";
 
 type Officer = {
@@ -165,6 +166,34 @@ const om = L.circleMarker([D.officer.lat, D.officer.lng], {
   radius: 10, color:'#10b981', fillColor:'#10b981', fillOpacity:0.9, weight:3,
 }).bindPopup(txt(D.officer.label, D.officer.sub));
 om.addTo(group);
+// Replay marker: a gold pin the parent drives along the breadcrumb via
+// postMessage. The iframe is sandboxed (allow-scripts only, no
+// allow-same-origin) so the parent can still postMessage in; we accept any
+// origin because this is a same-app internal control channel and the
+// payload is coordinate-only. Messages are coordinate-validated before use.
+var replayMarker = null;
+window.addEventListener('message', function(e){
+  var m = e && e.data;
+  if (!m || m.type !== 'replay') return;
+  if (m.show === false){
+    if (replayMarker){ map.removeLayer(replayMarker); replayMarker = null; }
+    return;
+  }
+  if (typeof m.lat !== 'number' || typeof m.lng !== 'number'
+      || !isFinite(m.lat) || !isFinite(m.lng)) return;
+  if (!replayMarker){
+    replayMarker = L.circleMarker([m.lat, m.lng], {
+      radius: 9, color:'#c9a84c', fillColor:'#c9a84c', fillOpacity:0.95,
+      weight:3,
+    }).addTo(map);
+    replayMarker.bindTooltip('', {
+      permanent:true, direction:'top', offset:[0,-8], className:'',
+    });
+  } else {
+    replayMarker.setLatLng([m.lat, m.lng]);
+  }
+  replayMarker.setTooltipContent(String(m.label || ''));
+});
 // Compute fit bounds manually instead of group.getBounds(). FeatureGroup
 // iterates child layers and calls .getBounds() on each, which for L.circle
 // hits Circle.js:62 (this._map.layerPointToLatLng) and has thrown
@@ -204,6 +233,14 @@ function fmtDateTime(iso: string | null | undefined): string {
   return new Date(iso).toLocaleString(undefined, {
     weekday: "short", month: "short", day: "numeric",
     hour: "numeric", minute: "2-digit",
+  });
+}
+
+// Compact clock used by the replay scrubber — weekday + HH:MM:SS so a
+// dispatcher can read "where was she at 9:42:15pm" off the slider.
+function fmtClock(t: number): string {
+  return new Date(t).toLocaleString(undefined, {
+    weekday: "short", hour: "numeric", minute: "2-digit", second: "2-digit",
   });
 }
 
@@ -255,16 +292,27 @@ export default function OfficerProfilePage() {
   // officer was even after they clocked out.
   const [trailWindow, setTrailWindow] = useState<"today" | "24h">("today");
 
+  // Trail replay scrubber. `scrubT` is a timestamp (ms) between the first and
+  // last breadcrumb ping; `null` means "follow live" (no replay, normal pin).
+  // While replaying we drive a gold marker inside the iframe via postMessage
+  // and pause the 30s auto-refetch so the map doesn't reload mid-scrub.
+  const [scrubT, setScrubT] = useState<number | null>(null);
+  const [playing, setPlaying] = useState(false);
+  const [speed, setSpeed] = useState<1 | 5 | 30>(5);
+  const mapIframeRef = useRef<HTMLIFrameElement | null>(null);
+  const replayEngaged = scrubT !== null;
+
   // Live location refreshes every 30s — same cadence as the Dispatch Live
   // Map — so dispatchers staying on this page during an active call see
-  // fresh pings without manual refresh.
+  // fresh pings without manual refresh. Paused while a dispatcher is
+  // scrubbing/replaying so the sandboxed iframe isn't torn down mid-replay.
   const liveLocation = useQuery<LiveLocation>({
     queryKey: ["officer-live", id, trailWindow],
     queryFn: () => api<LiveLocation>(
       `/admin/officers/${encodeURIComponent(id)}/live?window=${trailWindow}`,
     ),
     enabled: !!id,
-    refetchInterval: 30_000,
+    refetchInterval: replayEngaged ? false : 30_000,
   });
 
   const recentIncidents = useQuery<Incident[]>({
@@ -341,6 +389,82 @@ export default function OfficerProfilePage() {
     // buildOfficerMapHtml actually take effect without a hard refresh.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [liveLocation.data, officerCoord, officer.data, MAP_BUILD_ID]);
+
+  // Breadcrumb points usable for replay: finite coords + timestamps, sorted
+  // chronologically. Same source as the polyline, but carries the time axis
+  // the scrubber rides along.
+  const replayTrail = useMemo(() => {
+    return (liveLocation.data?.trail ?? [])
+      .map((p) => ({ lat: p.lat, lng: p.lng, t: new Date(p.capturedAt).getTime() }))
+      .filter((p) => Number.isFinite(p.lat) && Number.isFinite(p.lng) && Number.isFinite(p.t))
+      .sort((a, b) => a.t - b.t);
+  }, [liveLocation.data]);
+
+  const tMin = replayTrail.length ? replayTrail[0].t : 0;
+  const tMax = replayTrail.length ? replayTrail[replayTrail.length - 1].t : 0;
+  const canReplay = replayTrail.length >= 2 && tMax > tMin;
+
+  // Interpolate the officer's position at an arbitrary timestamp by walking
+  // the breadcrumb segments and lerping between the two surrounding pings.
+  const posAt = useMemo(() => {
+    return (t: number): { lat: number; lng: number } => {
+      if (replayTrail.length === 0) return { lat: 0, lng: 0 };
+      if (t <= replayTrail[0].t) return replayTrail[0];
+      const last = replayTrail[replayTrail.length - 1];
+      if (t >= last.t) return last;
+      for (let i = 0; i < replayTrail.length - 1; i++) {
+        const a = replayTrail[i];
+        const b = replayTrail[i + 1];
+        if (t >= a.t && t <= b.t) {
+          const f = b.t === a.t ? 0 : (t - a.t) / (b.t - a.t);
+          return { lat: a.lat + (b.lat - a.lat) * f, lng: a.lng + (b.lng - a.lng) * f };
+        }
+      }
+      return last;
+    };
+  }, [replayTrail]);
+
+  // Reset the scrubber whenever the trail window changes — the time axis
+  // (and the underlying breadcrumb) is now different.
+  useEffect(() => {
+    setScrubT(null);
+    setPlaying(false);
+  }, [trailWindow]);
+
+  // Playback loop: advance the scrub clock by `speed × elapsed` each tick so
+  // 1× is wall-clock, 5×/30× compress the trail. Stops at the last ping.
+  useEffect(() => {
+    if (!playing || !canReplay) return;
+    const STEP_MS = 100;
+    const handle = window.setInterval(() => {
+      setScrubT((prev) => {
+        const base = prev == null ? tMin : prev;
+        const next = base + speed * STEP_MS;
+        if (next >= tMax) {
+          setPlaying(false);
+          return tMax;
+        }
+        return next;
+      });
+    }, STEP_MS);
+    return () => window.clearInterval(handle);
+  }, [playing, canReplay, speed, tMin, tMax]);
+
+  // Drive the gold replay marker inside the sandboxed iframe via postMessage.
+  // When not replaying (scrubT null) we tell the iframe to hide the marker.
+  useEffect(() => {
+    const win = mapIframeRef.current?.contentWindow;
+    if (!win) return;
+    if (scrubT == null || !canReplay) {
+      win.postMessage({ type: "replay", show: false }, "*");
+      return;
+    }
+    const p = posAt(scrubT);
+    win.postMessage(
+      { type: "replay", show: true, lat: p.lat, lng: p.lng, label: fmtClock(scrubT) },
+      "*",
+    );
+  }, [scrubT, canReplay, posAt]);
 
   const recent5 = useMemo<Incident[]>(() => {
     const rows = recentIncidents.data ?? [];
@@ -581,6 +705,7 @@ export default function OfficerProfilePage() {
               </div>
               {mapHtml && (
                 <iframe
+                  ref={mapIframeRef}
                   key={`officer-map-${MAP_BUILD_ID}`}
                   title="Officer live location"
                   srcDoc={mapHtml}
@@ -588,6 +713,90 @@ export default function OfficerProfilePage() {
                   sandbox="allow-scripts"
                   data-testid="officer-live-map"
                 />
+              )}
+              {mapHtml && canReplay && (
+                <div
+                  className="px-4 py-3 border-t space-y-2"
+                  data-testid="officer-replay-controls"
+                >
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      className="h-7 px-2"
+                      onClick={() => {
+                        if (playing) {
+                          setPlaying(false);
+                          return;
+                        }
+                        // Start from the beginning when at (or past) the end.
+                        setScrubT((prev) =>
+                          prev == null || prev >= tMax ? tMin : prev,
+                        );
+                        setPlaying(true);
+                      }}
+                      data-testid="officer-replay-play"
+                    >
+                      {playing ? (
+                        <Pause className="w-3.5 h-3.5 mr-1" />
+                      ) : (
+                        <Play className="w-3.5 h-3.5 mr-1" />
+                      )}
+                      {playing ? "Pause" : "Play"}
+                    </Button>
+                    <div className="inline-flex rounded border overflow-hidden">
+                      {([1, 5, 30] as const).map((s) => (
+                        <button
+                          key={s}
+                          type="button"
+                          onClick={() => setSpeed(s)}
+                          className={`px-2 py-0.5 text-xs ${s !== 1 ? "border-l" : ""} ${speed === s ? "bg-brand-navy text-brand-gold" : "opacity-70 hover:opacity-100"}`}
+                          data-testid={`officer-replay-speed-${s}`}
+                        >
+                          {s}×
+                        </button>
+                      ))}
+                    </div>
+                    <span
+                      className="ml-auto text-xs font-mono opacity-80"
+                      data-testid="officer-replay-time"
+                    >
+                      {replayEngaged ? fmtClock(scrubT as number) : "live"}
+                    </span>
+                    {replayEngaged && (
+                      <Button
+                        size="sm"
+                        variant="ghost"
+                        className="h-7 px-2"
+                        onClick={() => {
+                          setPlaying(false);
+                          setScrubT(null);
+                        }}
+                        data-testid="officer-replay-live"
+                      >
+                        Back to live
+                      </Button>
+                    )}
+                  </div>
+                  <input
+                    type="range"
+                    min={tMin}
+                    max={tMax}
+                    step={1000}
+                    value={scrubT ?? tMax}
+                    onChange={(e) => {
+                      setPlaying(false);
+                      setScrubT(Number(e.target.value));
+                    }}
+                    className="w-full accent-[#c9a84c]"
+                    aria-label="Trail replay time slider"
+                    data-testid="officer-replay-slider"
+                  />
+                  <div className="flex justify-between text-[10px] opacity-60 font-mono">
+                    <span>{fmtClock(tMin)}</span>
+                    <span>{fmtClock(tMax)}</span>
+                  </div>
+                </div>
               )}
             </>
           )}
