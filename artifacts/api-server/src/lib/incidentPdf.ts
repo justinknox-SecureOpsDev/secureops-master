@@ -154,6 +154,7 @@ export async function buildIncidentReportPdf(
 
   // Metadata block — two columns.
   const fmtDate = (d: Date | null) => (d ? new Date(d).toLocaleString("en-US", {
+    timeZone: "America/Chicago",
     year: "numeric", month: "short", day: "numeric", hour: "numeric", minute: "2-digit",
   }) : "—");
   const employeeFull = [row.employeeFirst, row.employeeLast].filter(Boolean).join(" ") || "—";
@@ -237,7 +238,7 @@ export async function buildIncidentReportPdf(
   // already brands every page, so the bottom-of-doc footer is enough.
   const footerY = doc.page.height - 36;
   doc.fillColor(MUTED).font("Helvetica").fontSize(8).text(
-    `Generated ${new Date().toLocaleString()} · ${brand.companyName} · Confidential`,
+    `Generated ${new Date().toLocaleString("en-US", { timeZone: "America/Chicago" })} · ${brand.companyName} · Confidential`,
     56, footerY,
     { width: doc.page.width - 112, align: "center", lineBreak: false },
   );
