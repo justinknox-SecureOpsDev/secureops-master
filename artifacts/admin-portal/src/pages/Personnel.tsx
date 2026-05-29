@@ -1,11 +1,11 @@
 import { useMemo, useState } from "react";
-import { useQuery } from "@tanstack/react-query";
-import { Link } from "wouter";
+import { useQuery, useMutation } from "@tanstack/react-query";
+import { Link, useLocation } from "wouter";
 import { api } from "@/lib/api";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
-import { Users, Loader2, AlertTriangle, ArrowUpDown } from "lucide-react";
+import { Users, Loader2, AlertTriangle, ArrowUpDown, MessageCircle } from "lucide-react";
 
 type Employee = {
   id: string;
@@ -66,6 +66,16 @@ export default function PersonnelPage() {
   const [search, setSearch] = useState("");
   const [status, setStatus] = useState<string>("");
   const [sortKey, setSortKey] = useState<SortKey>("name");
+  const [, setLocation] = useLocation();
+
+  // Open (or create) a 1:1 DM with an on-duty officer and jump to Chat.
+  // The server upserts the direct room keyed on the participant pair, so
+  // repeated clicks always resolve to the same conversation.
+  const openDirect = useMutation({
+    mutationFn: (otherUserId: string) =>
+      api<{ id: string }>("/chat/direct", { method: "POST", body: { otherUserId } }),
+    onSuccess: (room) => setLocation(`/chat?room=${room.id}`),
+  });
 
   const employees = useQuery<Employee[]>({
     queryKey: ["personnel", search, status],
@@ -215,17 +225,33 @@ export default function PersonnelPage() {
                       </td>
                       <td className="p-2">
                         {live ? (
-                          <Link
-                            href={`/personnel/${e.id}`}
-                            className="inline-flex items-center gap-1.5 hover:underline"
-                            title={live.siteName ? `On duty at ${live.siteName}` : "On duty"}
-                          >
-                            <span
-                              className="inline-block w-2 h-2 rounded-full bg-emerald-500 ring-2 ring-emerald-500/30"
-                              aria-hidden="true"
-                            />
-                            <span className="text-xs">{fmtAgo(live.lastLocationAt)}</span>
-                          </Link>
+                          <div className="flex items-center gap-2">
+                            <Link
+                              href={`/personnel/${e.id}`}
+                              className="inline-flex items-center gap-1.5 hover:underline"
+                              title={live.siteName ? `On duty at ${live.siteName}` : "On duty"}
+                            >
+                              <span
+                                className="inline-block w-2 h-2 rounded-full bg-emerald-500 ring-2 ring-emerald-500/30"
+                                aria-hidden="true"
+                              />
+                              <span className="text-xs">{fmtAgo(live.lastLocationAt)}</span>
+                            </Link>
+                            <button
+                              type="button"
+                              onClick={() => openDirect.mutate(e.id)}
+                              disabled={openDirect.isPending}
+                              className="inline-flex items-center justify-center rounded p-1 text-muted-foreground hover:bg-muted hover:text-foreground disabled:opacity-50"
+                              title={`Message ${e.firstName}`}
+                              aria-label={`Message ${e.firstName} ${e.lastName}`}
+                            >
+                              {openDirect.isPending && openDirect.variables === e.id ? (
+                                <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                              ) : (
+                                <MessageCircle className="w-3.5 h-3.5" />
+                              )}
+                            </button>
+                          </div>
                         ) : (
                           <span className="opacity-40">—</span>
                         )}
