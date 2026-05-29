@@ -1373,14 +1373,12 @@ router.post("/admin/users/bulk-invite", requireAdmin, async (req, res): Promise<
   const targets = await db.select().from(usersTable)
     .where(and(inArray(usersTable.id, userIds), sql`${usersTable.role} <> 'admin'`));
 
-  // Officers use the SecureOps mobile app, not the admin portal. Link to the
-  // app's store page when configured (MOBILE_APP_URL), otherwise fall back to
-  // the deterministic Apple App Store URL for our published app id. The invite
-  // still sends without any URL — the email then tells officers to search the
-  // App Store for "SecureOps".
-  const appDownloadUrl =
-    process.env.MOBILE_APP_URL?.trim() ||
-    "https://apps.apple.com/app/id6773903231";
+  // Officers use the SecureOps mobile web app (the Expo app served at the
+  // domain root), NOT the admin portal at /admin-portal/. Link them to the
+  // root of the configured base URL. The invite still sends without a URL —
+  // the email then tells officers to open the SecureOps app manually.
+  const base = getAdminResetBaseUrl();
+  const appUrl = base ? `${base}/` : null;
 
   const sent: { userId: string; email: string; emailSent: boolean }[] = [];
   const failed: { userId: string; email: string; reason: string }[] = [];
@@ -1394,7 +1392,7 @@ router.post("/admin/users/bulk-invite", requireAdmin, async (req, res): Promise<
       firstName: u.firstName,
       email: u.email,
       tempPassword: u.tempPasswordPlain,
-      appDownloadUrl,
+      appUrl,
     });
     let ok = false;
     try {
