@@ -126,7 +126,7 @@ export default function ChangePasswordScreen() {
             value={current}
             onChangeText={(v) => { setCurrent(v); if (fieldErrors.current && v) setFieldErrors((e) => ({ ...e, current: null })); }}
             secureTextEntry={!show}
-            placeholder={isMandatory ? "Last 4 digits of your SSN" : "Current password"}
+            placeholder={isMandatory ? "Temporary password from your invite email" : "Current password"}
             placeholderTextColor={colors.mutedForeground}
             style={[styles.input, { color: colors.foreground, borderColor: fieldErrors.current ? colors.destructive : colors.border, backgroundColor: colors.secondary }]}
             accessibilityLabel={`Current password, required${fieldErrors.current ? `, invalid, ${fieldErrors.current}` : ""}`}

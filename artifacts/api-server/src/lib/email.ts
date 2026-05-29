@@ -498,19 +498,20 @@ export function renderInviteEmail(opts: {
   firstName: string;
   email: string;
   tempPassword: string;
-  loginUrl: string;
+  appDownloadUrl?: string | null;
 }): { subject: string; text: string; html: string } {
-  const subject = `Welcome to ${brand.companyName} — your login`;
+  const subject = `Welcome to ${brand.companyName} — your SecureOps login`;
   const text = [
     `Hi ${opts.firstName},`,
     "",
-    `Your ${brand.companyName} account is ready.`,
+    `Your ${brand.companyName} account is ready in the SecureOps mobile app.`,
     "",
-    `Sign in at: ${opts.loginUrl}`,
-    `Email:      ${opts.email}`,
+    "1. Install the SecureOps app on your phone" + (opts.appDownloadUrl ? `: ${opts.appDownloadUrl}` : " (search \"SecureOps\" in the App Store)."),
+    "2. Open the app and sign in with the credentials below.",
+    "3. You'll be asked to set a new password on first sign-in.",
+    "",
+    `Email:              ${opts.email}`,
     `Temporary password: ${opts.tempPassword}`,
-    "",
-    "Please sign in and change your password as soon as possible.",
     "",
     `— ${brand.companyName}`,
   ].join("\n");
@@ -518,20 +519,22 @@ export function renderInviteEmail(opts: {
     <div style="font-family:Georgia,serif;max-width:560px;margin:0 auto;color:#080c18">
       <h2 style="color:#080c18">Welcome to ${brand.companyName}</h2>
       <p>Hi ${escapeHtml(opts.firstName)},</p>
-      <p>Your account is ready. Use the credentials below to sign in for the first time, then change your password.</p>
+      <p>Your account is ready in the <strong>SecureOps</strong> mobile app. Install the app on your phone, then sign in with the credentials below — you'll set a new password on your first sign-in.</p>
       <div style="background:#f6f1e1;padding:14px 16px;border-left:3px solid #c9a84c;margin:18px 0;border-radius:4px;font-family:ui-monospace,Menlo,Consolas,monospace;font-size:14px">
         <div><strong>Email:</strong> ${escapeHtml(opts.email)}</div>
         <div><strong>Temporary password:</strong> ${escapeHtml(opts.tempPassword)}</div>
       </div>
+      ${opts.appDownloadUrl ? `
       <p style="text-align:center;margin:24px 0">
-        <a href="${escapeAttr(opts.loginUrl)}"
+        <a href="${escapeAttr(opts.appDownloadUrl)}"
            style="display:inline-block;background:#080c18;color:#c9a84c;padding:12px 24px;text-decoration:none;border-radius:4px;font-weight:bold">
-          Sign in
+          Download the SecureOps app
         </a>
       </p>
       <p style="color:#555;font-size:12px">If the button doesn't work, paste this URL into your browser:<br/>
-        <span style="word-break:break-all">${escapeHtml(opts.loginUrl)}</span>
-      </p>
+        <span style="word-break:break-all">${escapeHtml(opts.appDownloadUrl)}</span>
+      </p>` : `
+      <p style="color:#555;font-size:13px">Don't have the app yet? Search for <strong>"SecureOps"</strong> in the App Store and install it, then sign in with the credentials above.</p>`}
       <hr style="border:none;border-top:2px solid #c9a84c;margin:24px 0"/>
       <p style="color:#080c18;font-weight:bold;margin:0">${brand.companyName}</p>
     </div>

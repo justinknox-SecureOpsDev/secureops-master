@@ -26,6 +26,7 @@ const ALLOWED_TOP_SCREENS = new Set([
   "training-add",
   "dar",
   "patrol",
+  "notifications",
 ]);
 
 export default function RootLayoutNav() {
@@ -110,6 +111,7 @@ export default function RootLayoutNav() {
       <Stack.Screen name="training-add" />
       <Stack.Screen name="dar" />
       <Stack.Screen name="patrol" />
+      <Stack.Screen name="notifications" />
     </Stack>
   );
 }
