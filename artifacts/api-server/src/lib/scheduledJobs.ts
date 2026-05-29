@@ -282,6 +282,7 @@ export async function sendPreShiftReminders(): Promise<void> {
         if (claimed.length === 0) continue;
 
         const startTxt = new Date(r.startTime).toLocaleString("en-US", {
+          timeZone: "America/Chicago",
           weekday: "short",
           hour: "numeric",
           minute: "2-digit",

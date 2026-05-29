@@ -59,6 +59,24 @@ function shiftLevelLabel(lvl: number): string {
   return `L${lvl}+`;
 }
 
+// Company operating timezone (Central). Shift times are stored as UTC instants;
+// notification/SMS copy must render them in the officer's local zone, otherwise
+// the UTC clock reading is shown (e.g. a 5:30 PM Central start renders as
+// "10:30 PM", which reads like the shift's end time).
+export const COMPANY_TZ = "America/Chicago";
+
+/** Format a shift instant for human-facing push/SMS copy, in company time. */
+export function fmtShiftWhen(when: Date | string | number): string {
+  return new Date(when).toLocaleString("en-US", {
+    timeZone: COMPANY_TZ,
+    weekday: "short",
+    month: "short",
+    day: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+}
+
 /**
  * Slugs of training-certification types the officer currently holds with
  * either no expiry (perpetual) or an unexpired expiry. Used to enforce
@@ -319,7 +337,7 @@ router.post("/shifts", requireAdmin, async (req, res): Promise<void> => {
 
     if (eligibleIds.length > 0) {
       const { sendPushToUsers } = await import("../lib/push");
-      const start = new Date(shift.startTime).toLocaleString("en-AU", { weekday: "short", month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" });
+      const start = fmtShiftWhen(shift.startTime);
       const levelLabel = shiftLevelLabel(lvl);
       await sendPushToUsers(eligibleIds, {
         title: `🛡️ New ${levelLabel} Shift Available`,
@@ -851,7 +869,7 @@ router.post("/shifts/:id/claim", requireAuth, async (req, res): Promise<void> =>
   // Reminder push so the officer confirms the shift on-device (accountability trail).
   try {
     const { sendPushToUsers } = await import("../lib/push");
-    const start = new Date(shift.startTime).toLocaleString("en-GB", { weekday: "short", month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" });
+    const start = fmtShiftWhen(shift.startTime);
     await sendPushToUsers([userId], {
       title: "✅ Shift Reserved",
       body: `You're booked for ${shift.title} on ${start}.`,
@@ -903,7 +921,7 @@ router.post("/shifts/:id/notify-vacancy", requireAdminOrDispatcher, async (req, 
   if (targetIds.length > 0) {
     try {
       const { sendPushToUsers } = await import("../lib/push");
-      const start = new Date(shift.startTime).toLocaleString("en-US", { weekday: "short", month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" });
+      const start = fmtShiftWhen(shift.startTime);
       const levelLabel = shiftLevelLabel(shift.requiredLicenseLevel);
       await sendPushToUsers(targetIds, {
         title: `🛡️ Open ${levelLabel} Shift — ${vacanciesRemaining} vacancy${vacanciesRemaining === 1 ? "" : "s"}`,
@@ -1024,7 +1042,7 @@ router.post("/shifts/:id/assignments", requireAdminOrDispatcher, async (req, res
   // Send push notification to the assigned employee
   try {
     const { sendPushToUsers } = await import("../lib/push");
-    const start = new Date(shift.startTime).toLocaleString("en-AU", { weekday: "short", month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" });
+    const start = fmtShiftWhen(shift.startTime);
     await sendPushToUsers([employeeId], {
       title: "📋 New Shift Assigned",
       body: `You've been assigned to ${shift.title} on ${start}`,

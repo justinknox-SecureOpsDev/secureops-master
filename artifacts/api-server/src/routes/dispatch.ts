@@ -72,6 +72,8 @@ function haversineMiles(lat1: number, lng1: number, lat2: number, lng2: number):
  *   noShow   — shift started > NO_SHOW_MIN min ago, still no clock-in
  *   earlyOut — shift has scheduled end in future but officer already
  *              clocked out EARLY_OUT_MIN+ before end
+ *   completed — officer clocked in AND out and worked to (or near) the
+ *              scheduled end; never counts as late / no-show
  *   scheduled — accepted assignment that is upcoming and not yet due
  *
  * Bucketing is derived server-side so the UI never has to reason about
@@ -160,6 +162,7 @@ router.get("/dispatch/status-board", requireAdminOrDispatcher, async (_req, res)
     late: [] as unknown[],
     noShow: [] as unknown[],
     earlyOut: [] as unknown[],
+    completed: [] as unknown[],
     scheduled: [] as unknown[],
   };
 
@@ -168,7 +171,6 @@ router.get("/dispatch/status-board", requireAdminOrDispatcher, async (_req, res)
     const open = openByShift.get(key);
     const closed = closedByShift.get(key);
     const minsSinceStart = (now.getTime() - r.startTime.getTime()) / MS_MIN;
-    const minsToEnd = (r.endTime.getTime() - now.getTime()) / MS_MIN;
 
     const base = {
       assignmentId: r.assignmentId,
@@ -190,14 +192,28 @@ router.get("/dispatch/status-board", requireAdminOrDispatcher, async (_req, res)
       buckets.onDuty.push({ ...base, clockInTime: open.clockInTime, timeEntryId: open.id });
       continue;
     }
-    if (closed && minsToEnd > EARLY_OUT_MIN) {
-      buckets.earlyOut.push({
-        ...base,
-        clockOutTime: closed.clockOutTime,
-        minutesEarly: Math.round(minsToEnd),
-      });
+    if (closed) {
+      // Officer clocked in AND out. If they clocked out well before the
+      // scheduled end it's an early-out; otherwise the shift was worked
+      // to (or near) completion. Either way they clearly showed up, so
+      // this must NEVER fall through to the late / no-show branches.
+      // Compare the actual clock-out against the scheduled end (NOT `now`),
+      // so the classification is stable regardless of when the board is
+      // queried — otherwise a genuine early-out flips to "completed" once
+      // the current time passes the shift's end.
+      const minsEarly = (r.endTime.getTime() - closed.clockOutTime.getTime()) / MS_MIN;
+      if (minsEarly > EARLY_OUT_MIN) {
+        buckets.earlyOut.push({
+          ...base,
+          clockOutTime: closed.clockOutTime,
+          minutesEarly: Math.round(minsEarly),
+        });
+      } else {
+        buckets.completed.push({ ...base, clockOutTime: closed.clockOutTime });
+      }
       continue;
     }
+    // No clock-in on record for this shift.
     if (minsSinceStart > NO_SHOW_MIN) {
       buckets.noShow.push({ ...base, minutesLate: Math.round(minsSinceStart) });
     } else if (minsSinceStart > LATE_MIN) {

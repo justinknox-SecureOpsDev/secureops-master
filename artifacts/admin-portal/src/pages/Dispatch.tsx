@@ -43,6 +43,7 @@ type StatusBoard = {
   late: StatusRow[];
   noShow: StatusRow[];
   earlyOut: StatusRow[];
+  completed: StatusRow[];
   scheduled: StatusRow[];
 };
 
@@ -821,6 +822,7 @@ function StatusBoardPanel({
     late: data?.late.length ?? 0,
     noShow: data?.noShow.length ?? 0,
     earlyOut: data?.earlyOut.length ?? 0,
+    completed: data?.completed.length ?? 0,
     scheduled: data?.scheduled.length ?? 0,
   }), [data]);
 
@@ -841,17 +843,19 @@ function StatusBoardPanel({
         {loading && <div className="text-sm opacity-60">Loading…</div>}
         {!loading && data && (
           <Tabs defaultValue="onDuty">
-            <TabsList className="grid grid-cols-5 w-full">
+            <TabsList className="grid grid-cols-6 w-full">
               <TabsTrigger value="onDuty">On duty<Pill n={counts.onDuty} tone="ok" /></TabsTrigger>
               <TabsTrigger value="late">Late<Pill n={counts.late} tone="warn" /></TabsTrigger>
               <TabsTrigger value="noShow">No show<Pill n={counts.noShow} tone="bad" /></TabsTrigger>
               <TabsTrigger value="earlyOut">Early out<Pill n={counts.earlyOut} tone="warn" /></TabsTrigger>
+              <TabsTrigger value="completed">Completed<Pill n={counts.completed} tone="ok" /></TabsTrigger>
               <TabsTrigger value="scheduled">Scheduled<Pill n={counts.scheduled} tone="muted" /></TabsTrigger>
             </TabsList>
             <BucketTab value="onDuty" rows={data.onDuty} emptyMsg="No one clocked in." showClockIn />
             <BucketTab value="late" rows={data.late} emptyMsg="No late officers." showMinutesLate />
             <BucketTab value="noShow" rows={data.noShow} emptyMsg="No no-shows." showMinutesLate />
             <BucketTab value="earlyOut" rows={data.earlyOut} emptyMsg="No early clock-outs." showMinutesEarly />
+            <BucketTab value="completed" rows={data.completed} emptyMsg="No completed shifts yet." showClockOut />
             <BucketTab value="scheduled" rows={data.scheduled} emptyMsg="Nothing upcoming." />
           </Tabs>
         )}
@@ -871,10 +875,11 @@ function Pill({ n, tone }: { n: number; tone: "ok" | "warn" | "bad" | "muted" })
 }
 
 function BucketTab({
-  value, rows, emptyMsg, showMinutesLate, showMinutesEarly, showClockIn,
+  value, rows, emptyMsg, showMinutesLate, showMinutesEarly, showClockIn, showClockOut,
 }: {
   value: string; rows: StatusRow[]; emptyMsg: string;
   showMinutesLate?: boolean; showMinutesEarly?: boolean; showClockIn?: boolean;
+  showClockOut?: boolean;
 }) {
   return (
     <TabsContent value={value} className="mt-3 max-h-72 overflow-y-auto space-y-1">
@@ -890,6 +895,7 @@ function BucketTab({
           </div>
           <div className="text-right text-xs whitespace-nowrap">
             {showClockIn && r.clockInTime && <div className="opacity-70">in {fmtAgo(r.clockInTime)}</div>}
+            {showClockOut && r.clockOutTime && <div className="opacity-70">out {fmtAgo(r.clockOutTime)}</div>}
             {showMinutesLate && r.minutesLate != null && (
               <Badge className="bg-amber-500 text-black">{r.minutesLate}m late</Badge>
             )}
