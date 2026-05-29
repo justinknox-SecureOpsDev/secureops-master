@@ -8,10 +8,11 @@ import {
   AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
   AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
-import { ArrowUpDown, ArrowDown, ArrowUp, Pencil, Trash2, Plus, Upload, Download, RefreshCw, ExternalLink, Repeat, KeyRound, Copy, ShieldOff, FileText, MapPin } from "lucide-react";
+import { ArrowUpDown, ArrowDown, ArrowUp, Pencil, Trash2, Plus, Upload, Download, RefreshCw, ExternalLink, Repeat, KeyRound, Copy, ShieldOff, FileText, MapPin, UserPlus, Mail } from "lucide-react";
 import {
-  Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter,
+  Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription,
 } from "@/components/ui/dialog";
+import { Label } from "@/components/ui/label";
 import { Link } from "wouter";
 import { type TableDescriptor, type Field, singularize } from "@/lib/tables";
 import { api, getToken } from "@/lib/api";
@@ -159,6 +160,18 @@ export function DataGrid({
   const isUsers = descriptor.name === "users";
   const isIncidents = descriptor.name === "incidents";
   const isSites = descriptor.name === "sites";
+  const isClients = descriptor.name === "clients";
+  const [inviteTarget, setInviteTarget] = useState<Row | null>(null);
+  const [inviteForm, setInviteForm] = useState({ email: "", firstName: "", lastName: "" });
+  const [inviteBusy, setInviteBusy] = useState(false);
+  const [inviteError, setInviteError] = useState<string | null>(null);
+  const [inviteResult, setInviteResult] = useState<{
+    email: string;
+    status: string;
+    emailSent: boolean;
+    tempPassword?: string;
+    loginUrl?: string;
+  } | null>(null);
   const [geocodeBackfillBusy, setGeocodeBackfillBusy] = useState(false);
   const [geocodeBackfillResult, setGeocodeBackfillResult] = useState<{
     candidates: number;
@@ -267,6 +280,32 @@ export function DataGrid({
       setResetError((e as Error).message);
     } finally {
       setResetBusy(false);
+    }
+  }
+
+  async function confirmInvite() {
+    if (!inviteTarget) return;
+    setInviteBusy(true);
+    setInviteError(null);
+    try {
+      const res = await api<{
+        id: string;
+        email: string;
+        status: string;
+        emailSent: boolean;
+        loginUrl?: string;
+        tempPassword?: string;
+      }>("/admin/client-users/invite", {
+        method: "POST",
+        body: { ...inviteForm, clientId: String((inviteTarget as any).id) },
+      });
+      setInviteResult(res);
+      setInviteTarget(null);
+      setInviteForm({ email: "", firstName: "", lastName: "" });
+    } catch (e) {
+      setInviteError((e as Error).message);
+    } finally {
+      setInviteBusy(false);
     }
   }
 
@@ -545,6 +584,23 @@ export function DataGrid({
                       <FileText className="w-4 h-4" />
                     </Button>
                   )}
+                  {isClients && (
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      className="mr-1 h-8"
+                      onClick={() => {
+                        setInviteError(null);
+                        setInviteForm({ email: "", firstName: "", lastName: "" });
+                        setInviteTarget(r);
+                      }}
+                      title="Invite a portal user for this client"
+                      aria-label="Invite portal user"
+                    >
+                      <UserPlus className="w-3.5 h-3.5 mr-1" />
+                      Invite portal user
+                    </Button>
+                  )}
                   <Button variant="ghost" size="icon" onClick={() => setEditing(r)} title="Edit" aria-label={`Edit ${singularize(descriptor.label).toLowerCase()}`}>
                     <Pencil className="w-4 h-4" />
                   </Button>
@@ -653,6 +709,134 @@ export function DataGrid({
             <DialogFooter>
               <Button onClick={() => setRevokeDone(null)}>Close</Button>
             </DialogFooter>
+          </DialogContent>
+        </Dialog>
+      )}
+
+      <Dialog open={!!inviteTarget} onOpenChange={(b) => { if (!b && !inviteBusy) setInviteTarget(null); }}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle className="brand-wordmark text-xl flex items-center gap-2">
+              <UserPlus className="w-5 h-5" /> Invite portal user
+            </DialogTitle>
+            <DialogDescription>
+              Invite a client portal user for{" "}
+              <b>{String((inviteTarget as any)?.name ?? "this client")}</b>. A temporary
+              password is generated and emailed (if SMTP is configured); they'll set a new
+              password on first login. They will appear in the Client Users list linked to
+              this client.
+            </DialogDescription>
+          </DialogHeader>
+          <form
+            onSubmit={(e) => { e.preventDefault(); void confirmInvite(); }}
+            className="space-y-4"
+          >
+            <div className="grid grid-cols-2 gap-4">
+              <div className="space-y-1">
+                <Label htmlFor="invite-firstName">First name *</Label>
+                <Input
+                  id="invite-firstName"
+                  required
+                  value={inviteForm.firstName}
+                  onChange={(e) => setInviteForm((f) => ({ ...f, firstName: e.target.value }))}
+                />
+              </div>
+              <div className="space-y-1">
+                <Label htmlFor="invite-lastName">Last name *</Label>
+                <Input
+                  id="invite-lastName"
+                  required
+                  value={inviteForm.lastName}
+                  onChange={(e) => setInviteForm((f) => ({ ...f, lastName: e.target.value }))}
+                />
+              </div>
+            </div>
+            <div className="space-y-1">
+              <Label htmlFor="invite-email">Email address *</Label>
+              <Input
+                id="invite-email"
+                type="email"
+                required
+                value={inviteForm.email}
+                onChange={(e) => setInviteForm((f) => ({ ...f, email: e.target.value }))}
+              />
+            </div>
+            {inviteError && (
+              <div className="text-sm text-destructive bg-destructive/5 p-2 rounded border border-destructive/20">
+                {inviteError}
+              </div>
+            )}
+            <DialogFooter>
+              <Button type="button" variant="outline" disabled={inviteBusy} onClick={() => setInviteTarget(null)}>
+                Cancel
+              </Button>
+              <Button type="submit" disabled={inviteBusy} className="bg-brand-navy text-white gap-1">
+                <Mail className="w-4 h-4" />
+                {inviteBusy ? "Inviting…" : "Send invitation"}
+              </Button>
+            </DialogFooter>
+          </form>
+        </DialogContent>
+      </Dialog>
+
+      {inviteResult && (
+        <Dialog open onOpenChange={(o) => { if (!o) setInviteResult(null); }}>
+          <DialogContent className="max-w-xl">
+            <DialogHeader>
+              <DialogTitle className="brand-wordmark text-xl">
+                {inviteResult.status === "reinvited" ? "Client user re-invited" : "Client user invited"}
+              </DialogTitle>
+            </DialogHeader>
+            <div className="space-y-3 text-sm">
+              <div>
+                Portal access for <b>{inviteResult.email}</b> is ready. They now appear in the{" "}
+                <Link href="/hr/client-users" className="text-blue-700 hover:underline" onClick={() => setInviteResult(null)}>
+                  Client Users
+                </Link>{" "}
+                list linked to this client.
+              </div>
+              {inviteResult.emailSent ? (
+                <div className="bg-emerald-50 border border-emerald-200 text-emerald-900 p-3 rounded">
+                  <div className="font-medium">Invitation emailed to the user.</div>
+                  <div className="text-xs mt-0.5">They'll be prompted to set a new password on first login.</div>
+                </div>
+              ) : (
+                <div className="text-xs text-amber-900 bg-amber-50 border border-amber-200 p-2 rounded space-y-1">
+                  <div className="font-medium">Email wasn't sent (SMTP not configured) — share credentials manually.</div>
+                  {inviteResult.tempPassword && (
+                    <div className="flex items-center gap-2">
+                      <span>Temp password:</span>
+                      <code className="bg-white border rounded px-1.5 py-0.5">{inviteResult.tempPassword}</code>
+                      <Button
+                        variant="outline"
+                        size="icon"
+                        className="h-6 w-6"
+                        onClick={() => navigator.clipboard.writeText(inviteResult.tempPassword!)}
+                        title="Copy temp password"
+                      >
+                        <Copy className="w-3 h-3" />
+                      </Button>
+                    </div>
+                  )}
+                  {inviteResult.loginUrl && (
+                    <div className="flex items-center gap-2">
+                      <span>Login:</span>
+                      <a href={inviteResult.loginUrl} className="underline" target="_blank" rel="noreferrer">{inviteResult.loginUrl}</a>
+                      <Button
+                        variant="outline"
+                        size="icon"
+                        className="h-6 w-6"
+                        onClick={() => navigator.clipboard.writeText(inviteResult.loginUrl!)}
+                        title="Copy login URL"
+                      >
+                        <Copy className="w-3 h-3" />
+                      </Button>
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+            <DialogFooter><Button onClick={() => setInviteResult(null)}>Done</Button></DialogFooter>
           </DialogContent>
         </Dialog>
       )}
