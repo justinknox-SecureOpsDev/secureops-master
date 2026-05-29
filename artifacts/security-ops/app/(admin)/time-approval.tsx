@@ -48,16 +48,17 @@ export default function TimeApprovalScreen() {
   return (
     <View style={[styles.container, { backgroundColor: colors.background }]}>
       <View style={[styles.topBar, { paddingTop: topPad + 12, borderBottomColor: colors.border }]}>
-        <TouchableOpacity onPress={() => router.back()} style={[styles.backBtn, { borderColor: colors.border }]}>
+        <TouchableOpacity onPress={() => router.back()} style={[styles.backBtn, { borderColor: colors.border }]} accessibilityRole="button" accessibilityLabel="Go back">
           <Feather name="arrow-left" size={18} color={colors.foreground} />
         </TouchableOpacity>
-        <Text style={[styles.pageTitle, { color: colors.foreground }]}>Time Approval</Text>
+        <Text style={[styles.pageTitle, { color: colors.foreground }]} accessibilityRole="header">Time Approval</Text>
       </View>
 
       <View style={styles.filterRow}>
         {FILTERS.map((f) => (
           <TouchableOpacity key={f} onPress={() => setFilter(f)}
-            style={[styles.chip, { borderColor: filter === f ? colors.primary : colors.border, backgroundColor: filter === f ? colors.primary + "20" : "transparent" }]}>
+            style={[styles.chip, { borderColor: filter === f ? colors.primary : colors.border, backgroundColor: filter === f ? colors.primary + "20" : "transparent" }]}
+            accessibilityRole="button" accessibilityState={{ selected: filter === f }} accessibilityLabel={`Filter ${f.charAt(0).toUpperCase() + f.slice(1)}`}>
             <Text style={[styles.chipText, { color: filter === f ? colors.primary : colors.mutedForeground }]}>{f.charAt(0).toUpperCase() + f.slice(1)}</Text>
           </TouchableOpacity>
         ))}
@@ -113,6 +114,7 @@ export default function TimeApprovalScreen() {
                       onChangeText={(v) => setEdits((e) => ({ ...e, [item.id]: v }))}
                       keyboardType="decimal-pad"
                       style={[styles.input, { color: colors.foreground, borderColor: colors.border, backgroundColor: colors.secondary }]}
+                      accessibilityLabel={`Approve hours for ${item.employeeName}`}
                     />
                     <Text style={{ color: colors.mutedForeground, fontSize: 11 }}>Logged {logged}h</Text>
                   </View>
@@ -126,13 +128,15 @@ export default function TimeApprovalScreen() {
                   <View style={{ flexDirection: "row", gap: 8 }}>
                     <TouchableOpacity onPress={() => handle(item.id, "approved", logged)}
                       style={[styles.actBtn, { backgroundColor: "#22c55e" }]}
-                      disabled={approve.isPending}>
+                      disabled={approve.isPending}
+                      accessibilityRole="button" accessibilityLabel={`Approve time entry for ${item.employeeName}`} accessibilityState={{ disabled: approve.isPending, busy: approve.isPending }}>
                       <Feather name="check" size={14} color="#fff" />
                       <Text style={[styles.actText, { color: "#fff" }]}>Approve</Text>
                     </TouchableOpacity>
                     <TouchableOpacity onPress={() => handle(item.id, "rejected", logged)}
                       style={[styles.actBtn, { backgroundColor: "transparent", borderWidth: 1, borderColor: colors.destructive }]}
-                      disabled={approve.isPending}>
+                      disabled={approve.isPending}
+                      accessibilityRole="button" accessibilityLabel={`Reject time entry for ${item.employeeName}`} accessibilityState={{ disabled: approve.isPending, busy: approve.isPending }}>
                       <Feather name="x" size={14} color={colors.destructive} />
                       <Text style={[styles.actText, { color: colors.destructive }]}>Reject</Text>
                     </TouchableOpacity>

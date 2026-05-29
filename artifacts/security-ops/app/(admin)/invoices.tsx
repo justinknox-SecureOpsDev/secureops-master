@@ -76,10 +76,10 @@ export default function AdminInvoicesScreen() {
   return (
     <View style={[styles.container, { backgroundColor: colors.background }]}>
       <View style={[styles.topBar, { paddingTop: topPad + 12, borderBottomColor: colors.border }]}>
-        <TouchableOpacity onPress={() => router.back()} style={[styles.backBtn, { borderColor: colors.border }]}>
+        <TouchableOpacity onPress={() => router.back()} style={[styles.backBtn, { borderColor: colors.border }]} accessibilityRole="button" accessibilityLabel="Go back">
           <Feather name="arrow-left" size={18} color={colors.foreground} />
         </TouchableOpacity>
-        <Text style={[styles.pageTitle, { color: colors.foreground }]}>Invoices</Text>
+        <Text style={[styles.pageTitle, { color: colors.foreground }]} accessibilityRole="header">Invoices</Text>
       </View>
 
       <View style={[styles.controls, { backgroundColor: colors.card, borderColor: colors.border }]}>
@@ -87,7 +87,8 @@ export default function AdminInvoicesScreen() {
         <ScrollView horizontal showsHorizontalScrollIndicator={false}>
           <View style={{ flexDirection: "row", gap: 6 }}>
             <TouchableOpacity onPress={() => setSiteId("")}
-              style={[styles.chip, { borderColor: !siteId ? colors.primary : colors.border, backgroundColor: !siteId ? colors.primary + "20" : "transparent" }]}>
+              style={[styles.chip, { borderColor: !siteId ? colors.primary : colors.border, backgroundColor: !siteId ? colors.primary + "20" : "transparent" }]}
+              accessibilityRole="button" accessibilityState={{ selected: !siteId }} accessibilityLabel="All sites">
               <Text style={[styles.chipTxt, { color: !siteId ? colors.primary : colors.mutedForeground }]}>All Sites</Text>
             </TouchableOpacity>
             {((sites as any[]) ?? []).map((s) => {
@@ -95,7 +96,8 @@ export default function AdminInvoicesScreen() {
               const clientName = ((clients as any[]) ?? []).find((c) => c.id === s.clientId)?.name;
               return (
                 <TouchableOpacity key={s.id} onPress={() => setSiteId(s.id)}
-                  style={[styles.chip, { borderColor: sel ? colors.primary : colors.border, backgroundColor: sel ? colors.primary + "20" : "transparent" }]}>
+                  style={[styles.chip, { borderColor: sel ? colors.primary : colors.border, backgroundColor: sel ? colors.primary + "20" : "transparent" }]}
+                  accessibilityRole="button" accessibilityState={{ selected: sel }} accessibilityLabel={`Site ${s.name}${clientName ? `, ${clientName}` : ""}`}>
                   <Text style={[styles.chipTxt, { color: sel ? colors.primary : colors.foreground }]}>
                     {s.name}{clientName ? ` · ${clientName}` : ""}
                   </Text>
@@ -106,7 +108,7 @@ export default function AdminInvoicesScreen() {
         </ScrollView>
 
         <View style={styles.weekRow}>
-          <TouchableOpacity onPress={() => shiftWeek(-1)} style={[styles.weekBtn, { borderColor: colors.border }]}>
+          <TouchableOpacity onPress={() => shiftWeek(-1)} style={[styles.weekBtn, { borderColor: colors.border }]} accessibilityRole="button" accessibilityLabel="Previous week">
             <Feather name="chevron-left" size={16} color={colors.foreground} />
           </TouchableOpacity>
           <View style={{ flex: 1, alignItems: "center" }}>
@@ -115,13 +117,14 @@ export default function AdminInvoicesScreen() {
               {new Date(weekStart + "T00:00:00Z").toLocaleDateString([], { weekday: "short", day: "numeric", month: "short", year: "numeric", timeZone: "UTC" })}
             </Text>
           </View>
-          <TouchableOpacity onPress={() => shiftWeek(1)} style={[styles.weekBtn, { borderColor: colors.border }]}>
+          <TouchableOpacity onPress={() => shiftWeek(1)} style={[styles.weekBtn, { borderColor: colors.border }]} accessibilityRole="button" accessibilityLabel="Next week">
             <Feather name="chevron-right" size={16} color={colors.foreground} />
           </TouchableOpacity>
         </View>
 
         <TouchableOpacity onPress={runGenerate} disabled={generate.isPending}
-          style={[styles.genBtn, { backgroundColor: colors.primary, opacity: generate.isPending ? 0.6 : 1 }]}>
+          style={[styles.genBtn, { backgroundColor: colors.primary, opacity: generate.isPending ? 0.6 : 1 }]}
+          accessibilityRole="button" accessibilityLabel="Generate invoice for week" accessibilityState={{ disabled: generate.isPending, busy: generate.isPending }}>
           {generate.isPending ? <ActivityIndicator color={colors.primaryForeground} /> : (
             <>
               <Feather name="file-plus" size={14} color={colors.primaryForeground} />
@@ -134,7 +137,8 @@ export default function AdminInvoicesScreen() {
       <View style={styles.filterRow}>
         {FILTERS.map((f) => (
           <TouchableOpacity key={f} onPress={() => setFilter(f)}
-            style={[styles.chip, { borderColor: filter === f ? colors.primary : colors.border, backgroundColor: filter === f ? colors.primary + "20" : "transparent" }]}>
+            style={[styles.chip, { borderColor: filter === f ? colors.primary : colors.border, backgroundColor: filter === f ? colors.primary + "20" : "transparent" }]}
+            accessibilityRole="button" accessibilityState={{ selected: filter === f }} accessibilityLabel={`Filter ${f.charAt(0).toUpperCase() + f.slice(1)}`}>
             <Text style={[styles.chipTxt, { color: filter === f ? colors.primary : colors.mutedForeground }]}>{f.charAt(0).toUpperCase() + f.slice(1)}</Text>
           </TouchableOpacity>
         ))}
@@ -196,17 +200,17 @@ export default function AdminInvoicesScreen() {
 
                 <View style={{ flexDirection: "row", gap: 8 }}>
                   {item.status === "draft" && (
-                    <TouchableOpacity onPress={() => setStatus(item, "sent")} style={[styles.act, { borderColor: colors.primary }]}>
+                    <TouchableOpacity onPress={() => setStatus(item, "sent")} style={[styles.act, { borderColor: colors.primary }]} accessibilityRole="button" accessibilityLabel={`Mark invoice ${item.invoiceNumber} sent`}>
                       <Feather name="send" size={13} color={colors.primary} /><Text style={{ color: colors.primary, fontWeight: "700", fontSize: 13 }}>Mark Sent</Text>
                     </TouchableOpacity>
                   )}
                   {(item.status === "sent" || item.status === "overdue" || item.status === "draft") && (
-                    <TouchableOpacity onPress={() => setStatus(item, "paid")} style={[styles.act, { borderColor: "#22c55e" }]}>
+                    <TouchableOpacity onPress={() => setStatus(item, "paid")} style={[styles.act, { borderColor: "#22c55e" }]} accessibilityRole="button" accessibilityLabel={`Mark invoice ${item.invoiceNumber} paid`}>
                       <Feather name="check-circle" size={13} color="#22c55e" /><Text style={{ color: "#22c55e", fontWeight: "700", fontSize: 13 }}>Mark Paid</Text>
                     </TouchableOpacity>
                   )}
                   {item.status === "paid" && (
-                    <TouchableOpacity onPress={() => setStatus(item, "sent")} style={[styles.act, { borderColor: colors.mutedForeground }]}>
+                    <TouchableOpacity onPress={() => setStatus(item, "sent")} style={[styles.act, { borderColor: colors.mutedForeground }]} accessibilityRole="button" accessibilityLabel={`Mark invoice ${item.invoiceNumber} unpaid`}>
                       <Feather name="rotate-ccw" size={13} color={colors.mutedForeground} /><Text style={{ color: colors.mutedForeground, fontWeight: "700", fontSize: 13 }}>Mark Unpaid</Text>
                     </TouchableOpacity>
                   )}

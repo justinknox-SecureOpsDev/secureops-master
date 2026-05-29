@@ -65,18 +65,18 @@ export default function AdminLicensesScreen() {
   return (
     <View style={[styles.container, { backgroundColor: colors.background }]}>
       <View style={[styles.topBar, { paddingTop: topPad + 12, borderBottomColor: colors.border }]}>
-        <TouchableOpacity onPress={() => router.back()} style={[styles.backBtn, { borderColor: colors.border }]}>
+        <TouchableOpacity onPress={() => router.back()} style={[styles.backBtn, { borderColor: colors.border }]} accessibilityRole="button" accessibilityLabel="Go back">
           <Feather name="arrow-left" size={18} color={colors.foreground} />
         </TouchableOpacity>
-        <Text style={[styles.pageTitle, { color: colors.foreground }]}>Licences</Text>
-        <TouchableOpacity style={[styles.addBtn, { backgroundColor: colors.primary }]} onPress={() => setShowAdd(true)}>
+        <Text style={[styles.pageTitle, { color: colors.foreground }]} accessibilityRole="header">Licences</Text>
+        <TouchableOpacity style={[styles.addBtn, { backgroundColor: colors.primary }]} onPress={() => setShowAdd(true)} accessibilityRole="button" accessibilityLabel="Add licence">
           <Feather name="plus" size={18} color={colors.primaryForeground} />
         </TouchableOpacity>
       </View>
 
       <View style={styles.filterRow}>
         {TYPE_FILTERS.map((f) => (
-          <TouchableOpacity key={f} style={[styles.filterChip, { borderColor: filter === f ? colors.primary : colors.border, backgroundColor: filter === f ? colors.primary + "20" : "transparent" }]} onPress={() => setFilter(f)}>
+          <TouchableOpacity key={f} style={[styles.filterChip, { borderColor: filter === f ? colors.primary : colors.border, backgroundColor: filter === f ? colors.primary + "20" : "transparent" }]} onPress={() => setFilter(f)} accessibilityRole="button" accessibilityState={{ selected: filter === f }} accessibilityLabel={`Filter ${f.charAt(0).toUpperCase() + f.slice(1)}`}>
             <Text style={[styles.filterText, { color: filter === f ? colors.primary : colors.mutedForeground }]}>{f.charAt(0).toUpperCase() + f.slice(1)}</Text>
           </TouchableOpacity>
         ))}
@@ -87,7 +87,7 @@ export default function AdminLicensesScreen() {
       ) : error ? (
         <View style={styles.center}>
           <Text style={{ color: colors.destructive, marginBottom: 12 }}>Failed to load licences</Text>
-          <TouchableOpacity onPress={() => refetch()} style={[styles.retryBtn, { borderColor: colors.primary }]}><Text style={{ color: colors.primary }}>Retry</Text></TouchableOpacity>
+          <TouchableOpacity onPress={() => refetch()} style={[styles.retryBtn, { borderColor: colors.primary }]} accessibilityRole="button" accessibilityLabel="Retry loading licences"><Text style={{ color: colors.primary }}>Retry</Text></TouchableOpacity>
         </View>
       ) : (
         <FlatList
@@ -152,13 +152,13 @@ export default function AdminLicensesScreen() {
             <View style={[styles.modalCard, { backgroundColor: colors.card, borderColor: colors.border }]}>
               <View style={styles.modalHeader}>
                 <Text style={[styles.modalTitle, { color: colors.foreground }]}>Add Licence</Text>
-                <TouchableOpacity onPress={() => setShowAdd(false)}><Feather name="x" size={20} color={colors.mutedForeground} /></TouchableOpacity>
+                <TouchableOpacity onPress={() => setShowAdd(false)} accessibilityRole="button" accessibilityLabel="Close"><Feather name="x" size={20} color={colors.mutedForeground} /></TouchableOpacity>
               </View>
               <KeyboardAwareScrollViewCompat style={{ maxHeight: 420 }}>
                 <Text style={[styles.fieldLabel, { color: colors.mutedForeground }]}>Employee *</Text>
                 <View style={[styles.picker, { borderColor: colors.border }]}>
                   {(employees ?? []).map((e) => (
-                    <TouchableOpacity key={e.id} style={[styles.pickerItem, { backgroundColor: form.employeeId === e.id ? colors.primary + "20" : "transparent" }]} onPress={() => set("employeeId")(e.id)}>
+                    <TouchableOpacity key={e.id} style={[styles.pickerItem, { backgroundColor: form.employeeId === e.id ? colors.primary + "20" : "transparent" }]} onPress={() => set("employeeId")(e.id)} accessibilityRole="button" accessibilityState={{ selected: form.employeeId === e.id }} accessibilityLabel={`Employee ${e.firstName} ${e.lastName}`}>
                       <Text style={[styles.pickerText, { color: form.employeeId === e.id ? colors.primary : colors.foreground }]}>{e.firstName} {e.lastName}</Text>
                     </TouchableOpacity>
                   ))}
@@ -173,6 +173,9 @@ export default function AdminLicensesScreen() {
                         backgroundColor: form.level === lv ? colors.primary + "20" : "transparent",
                       }]}
                       onPress={() => set("level")(lv)}
+                      accessibilityRole="button"
+                      accessibilityState={{ selected: form.level === lv }}
+                      accessibilityLabel={lv === 4 ? "Level 4 PPO" : `Level ${lv}`}
                     >
                       <Text style={{ color: form.level === lv ? colors.primary : colors.foreground, fontWeight: "700", fontSize: 13 }}>
                         {lv === 4 ? "L4 / PPO" : `Level ${lv}`}
@@ -196,11 +199,12 @@ export default function AdminLicensesScreen() {
                       placeholder={placeholder}
                       placeholderTextColor={colors.mutedForeground}
                       autoCapitalize="none"
+                      accessibilityLabel={label}
                     />
                   </View>
                 ))}
               </KeyboardAwareScrollViewCompat>
-              <TouchableOpacity style={[styles.submitBtn, { backgroundColor: colors.primary }]} onPress={handleCreate} disabled={createLicense.isPending}>
+              <TouchableOpacity style={[styles.submitBtn, { backgroundColor: colors.primary }]} onPress={handleCreate} disabled={createLicense.isPending} accessibilityRole="button" accessibilityLabel="Save licence" accessibilityState={{ disabled: createLicense.isPending, busy: createLicense.isPending }}>
                 {createLicense.isPending ? <ActivityIndicator color={colors.primaryForeground} /> : <Text style={[styles.submitText, { color: colors.primaryForeground }]}>Save Licence</Text>}
               </TouchableOpacity>
             </View>

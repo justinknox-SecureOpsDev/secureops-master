@@ -76,13 +76,15 @@ export default function EmployeeDetailScreen() {
   return (
     <ScrollView style={[styles.container, { backgroundColor: colors.background }]} contentContainerStyle={{ paddingBottom: 100 }}>
       <View style={[styles.topBar, { paddingTop: topPad + 12, borderBottomColor: colors.border }]}>
-        <TouchableOpacity onPress={() => router.back()} style={[styles.backBtn, { borderColor: colors.border }]}>
+        <TouchableOpacity onPress={() => router.back()} style={[styles.backBtn, { borderColor: colors.border }]} accessibilityRole="button" accessibilityLabel="Go back">
           <Feather name="arrow-left" size={18} color={colors.foreground} />
         </TouchableOpacity>
-        <Text style={[styles.pageTitle, { color: colors.foreground }]}>Employee Profile</Text>
+        <Text style={[styles.pageTitle, { color: colors.foreground }]} accessibilityRole="header">Employee Profile</Text>
         <TouchableOpacity
           onPress={() => setEditOpen(true)}
           style={[styles.editBtn, { borderColor: colors.primary, backgroundColor: colors.primary + "15" }]}
+          accessibilityRole="button"
+          accessibilityLabel={`Edit ${employee.firstName} ${employee.lastName}`}
         >
           <Feather name="edit-2" size={14} color={colors.primary} />
           <Text style={{ color: colors.primary, fontSize: 12, fontWeight: "700" }}>Edit</Text>
@@ -90,6 +92,8 @@ export default function EmployeeDetailScreen() {
         <TouchableOpacity
           onPress={toggleStatus}
           style={[styles.statusToggle, { borderColor: employee.status === "active" ? "#22c55e" : colors.accent }]}
+          accessibilityRole="button"
+          accessibilityLabel={`Status ${employee.status}. Tap to set ${employee.status === "active" ? "inactive" : "active"}`}
         >
           <Text style={{ color: employee.status === "active" ? "#22c55e" : colors.accent, fontSize: 12, fontWeight: "600" }}>
             {employee.status.toUpperCase()}
@@ -246,11 +250,11 @@ function EditEmployeeModal({
     <Modal visible={visible} animationType="slide" onRequestClose={onClose} presentationStyle="formSheet">
       <View style={{ flex: 1, backgroundColor: colors.background }}>
         <View style={[styles.modalHeader, { borderBottomColor: colors.border }]}>
-          <TouchableOpacity onPress={onClose} disabled={saving}>
+          <TouchableOpacity onPress={onClose} disabled={saving} accessibilityRole="button" accessibilityLabel="Cancel editing">
             <Text style={{ color: colors.mutedForeground, fontSize: 16 }}>Cancel</Text>
           </TouchableOpacity>
-          <Text style={[styles.modalTitle, { color: colors.foreground }]}>Edit Employee</Text>
-          <TouchableOpacity onPress={handleSave} disabled={saving}>
+          <Text style={[styles.modalTitle, { color: colors.foreground }]} accessibilityRole="header">Edit Employee</Text>
+          <TouchableOpacity onPress={handleSave} disabled={saving} accessibilityRole="button" accessibilityLabel="Save changes" accessibilityState={{ disabled: saving, busy: saving }}>
             {saving
               ? <ActivityIndicator color={colors.primary} />
               : <Text style={{ color: colors.primary, fontSize: 16, fontWeight: "700" }}>Save</Text>}
@@ -301,6 +305,7 @@ function EditField({
         autoCapitalize={autoCapitalize}
         placeholderTextColor={colors.mutedForeground}
         style={[styles.input, { color: colors.foreground, borderColor: colors.border, backgroundColor: colors.background }]}
+        accessibilityLabel={label}
       />
     </View>
   );

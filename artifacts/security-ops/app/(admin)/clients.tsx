@@ -44,11 +44,11 @@ export default function ClientsScreen() {
   return (
     <View style={[styles.container, { backgroundColor: colors.background }]}>
       <View style={[styles.topBar, { paddingTop: topPad + 12, borderBottomColor: colors.border }]}>
-        <TouchableOpacity onPress={() => router.back()} style={[styles.backBtn, { borderColor: colors.border }]}>
+        <TouchableOpacity onPress={() => router.back()} style={[styles.backBtn, { borderColor: colors.border }]} accessibilityRole="button" accessibilityLabel="Go back">
           <Feather name="arrow-left" size={18} color={colors.foreground} />
         </TouchableOpacity>
-        <Text style={[styles.pageTitle, { color: colors.foreground }]}>Clients</Text>
-        <TouchableOpacity onPress={() => setShowForm(true)} style={[styles.addBtn, { backgroundColor: colors.primary }]}>
+        <Text style={[styles.pageTitle, { color: colors.foreground }]} accessibilityRole="header">Clients</Text>
+        <TouchableOpacity onPress={() => setShowForm(true)} style={[styles.addBtn, { backgroundColor: colors.primary }]} accessibilityRole="button" accessibilityLabel="New client">
           <Feather name="plus" size={16} color={colors.primaryForeground} />
           <Text style={{ color: colors.primaryForeground, fontWeight: "700", fontSize: 13 }}>New</Text>
         </TouchableOpacity>
@@ -59,7 +59,7 @@ export default function ClientsScreen() {
       ) : error ? (
         <View style={styles.center}>
           <Text style={{ color: colors.destructive }}>Failed to load</Text>
-          <TouchableOpacity onPress={() => refetch()}><Text style={{ color: colors.primary, marginTop: 8 }}>Retry</Text></TouchableOpacity>
+          <TouchableOpacity onPress={() => refetch()} accessibilityRole="button" accessibilityLabel="Retry loading clients"><Text style={{ color: colors.primary, marginTop: 8 }}>Retry</Text></TouchableOpacity>
         </View>
       ) : (
         <FlatList
@@ -77,6 +77,9 @@ export default function ClientsScreen() {
             <TouchableOpacity
               style={[styles.card, { backgroundColor: colors.card, borderColor: colors.border }]}
               onPress={() => router.push(`/(admin)/clients/${item.id}` as any)}
+              accessibilityRole="button"
+              accessibilityLabel={`Client ${item.name}, Net ${item.paymentTermsDays} payment terms`}
+              accessibilityHint="Opens client sites and details"
             >
               <View style={{ flex: 1 }}>
                 <Text style={[styles.name, { color: colors.foreground }]}>{item.name}</Text>
@@ -117,14 +120,15 @@ export default function ClientsScreen() {
                   placeholderTextColor={colors.mutedForeground}
                   keyboardType={key === "paymentTermsDays" ? "numeric" : key === "contactEmail" ? "email-address" : "default"}
                   autoCapitalize={key === "contactEmail" || key === "paymentTermsDays" ? "none" : "sentences"}
+                  accessibilityLabel={label}
                 />
               </View>
             ))}
             <View style={{ flexDirection: "row", gap: 10, marginTop: 8 }}>
-              <TouchableOpacity onPress={() => setShowForm(false)} style={[styles.btnSecondary, { borderColor: colors.border }]}>
+              <TouchableOpacity onPress={() => setShowForm(false)} style={[styles.btnSecondary, { borderColor: colors.border }]} accessibilityRole="button" accessibilityLabel="Cancel">
                 <Text style={{ color: colors.foreground, fontWeight: "600" }}>Cancel</Text>
               </TouchableOpacity>
-              <TouchableOpacity onPress={submit} style={[styles.btnPrimary, { backgroundColor: colors.primary, opacity: createClient.isPending ? 0.6 : 1 }]} disabled={createClient.isPending}>
+              <TouchableOpacity onPress={submit} style={[styles.btnPrimary, { backgroundColor: colors.primary, opacity: createClient.isPending ? 0.6 : 1 }]} disabled={createClient.isPending} accessibilityRole="button" accessibilityLabel="Create client" accessibilityState={{ disabled: createClient.isPending, busy: createClient.isPending }}>
                 {createClient.isPending ? <ActivityIndicator color={colors.primaryForeground} /> :
                   <Text style={{ color: colors.primaryForeground, fontWeight: "700" }}>Create</Text>
                 }

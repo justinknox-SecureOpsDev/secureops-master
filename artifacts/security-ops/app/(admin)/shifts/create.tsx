@@ -26,6 +26,7 @@ function Field({ label, value, onChangeText, placeholder, keyboardType, autoCapi
         placeholderTextColor={colors.mutedForeground}
         keyboardType={keyboardType || "default"}
         autoCapitalize={autoCapitalize || "sentences"}
+        accessibilityLabel={`${label}${required ? ", required" : ""}`}
       />
     </View>
   );
@@ -110,10 +111,10 @@ export default function CreateShiftScreen() {
   return (
     <View style={[styles.container, { backgroundColor: colors.background }]}>
       <View style={[styles.topBar, { paddingTop: topPad + 12, borderBottomColor: colors.border }]}>
-        <TouchableOpacity onPress={() => router.back()} style={[styles.backBtn, { borderColor: colors.border }]}>
+        <TouchableOpacity onPress={() => router.back()} style={[styles.backBtn, { borderColor: colors.border }]} accessibilityRole="button" accessibilityLabel="Go back">
           <Feather name="arrow-left" size={18} color={colors.foreground} />
         </TouchableOpacity>
-        <Text style={[styles.pageTitle, { color: colors.foreground }]}>Post New Shift</Text>
+        <Text style={[styles.pageTitle, { color: colors.foreground }]} accessibilityRole="header">Post New Shift</Text>
       </View>
 
       <KeyboardAwareScrollViewCompat contentContainerStyle={{ padding: 16, paddingBottom: 120 }}>
@@ -125,7 +126,8 @@ export default function CreateShiftScreen() {
           <View style={{ flexDirection: "row", gap: 8 }}>
             {(clients ?? []).length === 0 && (
               <TouchableOpacity onPress={() => router.push("/(admin)/clients" as any)}
-                style={[styles.pickChip, { borderColor: colors.accent, borderStyle: "dashed" }]}>
+                style={[styles.pickChip, { borderColor: colors.accent, borderStyle: "dashed" }]}
+                accessibilityRole="button" accessibilityLabel="Add a client">
                 <Feather name="plus" size={14} color={colors.accent} />
                 <Text style={{ color: colors.accent, fontWeight: "600" }}>Add a client</Text>
               </TouchableOpacity>
@@ -134,7 +136,8 @@ export default function CreateShiftScreen() {
               const sel = c.id === form.clientId;
               return (
                 <TouchableOpacity key={c.id} onPress={() => { setForm((f) => ({ ...f, clientId: c.id, siteId: "" })); }}
-                  style={[styles.pickChip, { borderColor: sel ? colors.primary : colors.border, backgroundColor: sel ? colors.primary + "20" : colors.card }]}>
+                  style={[styles.pickChip, { borderColor: sel ? colors.primary : colors.border, backgroundColor: sel ? colors.primary + "20" : colors.card }]}
+                  accessibilityRole="button" accessibilityState={{ selected: sel }} accessibilityLabel={`Client ${c.name}`}>
                   <Text style={{ color: sel ? colors.primary : colors.foreground, fontWeight: "600" }}>{c.name}</Text>
                 </TouchableOpacity>
               );
@@ -149,7 +152,8 @@ export default function CreateShiftScreen() {
               <View style={{ flexDirection: "row", gap: 8 }}>
                 {((sites as any[]) ?? []).length === 0 && (
                   <TouchableOpacity onPress={() => router.push(`/(admin)/clients/${form.clientId}` as any)}
-                    style={[styles.pickChip, { borderColor: colors.accent, borderStyle: "dashed" }]}>
+                    style={[styles.pickChip, { borderColor: colors.accent, borderStyle: "dashed" }]}
+                    accessibilityRole="button" accessibilityLabel="Add a site">
                     <Feather name="plus" size={14} color={colors.accent} />
                     <Text style={{ color: colors.accent, fontWeight: "600" }}>Add a site</Text>
                   </TouchableOpacity>
@@ -158,7 +162,8 @@ export default function CreateShiftScreen() {
                   const sel = s.id === form.siteId;
                   return (
                     <TouchableOpacity key={s.id} onPress={() => set("siteId")(s.id)}
-                      style={[styles.pickChip, { borderColor: sel ? colors.primary : colors.border, backgroundColor: sel ? colors.primary + "20" : colors.card }]}>
+                      style={[styles.pickChip, { borderColor: sel ? colors.primary : colors.border, backgroundColor: sel ? colors.primary + "20" : colors.card }]}
+                      accessibilityRole="button" accessibilityState={{ selected: sel }} accessibilityLabel={`Site ${s.name}`}>
                       <Feather name="map-pin" size={12} color={sel ? colors.primary : colors.mutedForeground} />
                       <Text style={{ color: sel ? colors.primary : colors.foreground, fontWeight: "600" }}>{s.name}</Text>
                     </TouchableOpacity>
@@ -187,7 +192,8 @@ export default function CreateShiftScreen() {
                 style={[styles.levelOpt, {
                   backgroundColor: selected ? colors.primary + "20" : colors.card,
                   borderColor: selected ? colors.primary : colors.border,
-                }]}>
+                }]}
+                accessibilityRole="radio" accessibilityState={{ selected }} accessibilityLabel={`${opt.label}. ${opt.sub}`}>
                 <View style={[styles.levelDot, { borderColor: selected ? colors.primary : colors.border, backgroundColor: selected ? colors.primary : "transparent" }]}>
                   {selected && <Feather name="check" size={12} color={colors.primaryForeground} />}
                 </View>
@@ -211,7 +217,8 @@ export default function CreateShiftScreen() {
           <Text style={[styles.switchLabel, { color: colors.foreground }]}>Repeating Shift</Text>
           <Switch value={form.isRepeat} onValueChange={set("isRepeat")}
             trackColor={{ false: colors.border, true: colors.primary + "80" }}
-            thumbColor={form.isRepeat ? colors.primary : colors.mutedForeground} />
+            thumbColor={form.isRepeat ? colors.primary : colors.mutedForeground}
+            accessibilityLabel="Repeating shift" accessibilityRole="switch" accessibilityState={{ checked: form.isRepeat }} />
         </View>
         {form.isRepeat && (
           <Field label="Repeat Pattern" value={form.repeatPattern} onChangeText={set("repeatPattern")} placeholder="weekly" autoCapitalize="none" />
@@ -229,7 +236,8 @@ export default function CreateShiftScreen() {
         </View>
 
         <TouchableOpacity style={[styles.submitBtn, { backgroundColor: colors.primary, opacity: createShift.isPending ? 0.7 : 1 }]}
-          onPress={handleCreate} disabled={createShift.isPending}>
+          onPress={handleCreate} disabled={createShift.isPending}
+          accessibilityRole="button" accessibilityLabel="Post shift" accessibilityState={{ disabled: createShift.isPending, busy: createShift.isPending }}>
           {createShift.isPending ? <ActivityIndicator color={colors.primaryForeground} /> : (
             <>
               <Feather name="send" size={18} color={colors.primaryForeground} />

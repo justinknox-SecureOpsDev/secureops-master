@@ -107,13 +107,14 @@ export default function ShiftDetailScreen() {
   return (
     <ScrollView style={[styles.container, { backgroundColor: colors.background }]} contentContainerStyle={{ paddingBottom: 100 }}>
       <View style={[styles.topBar, { paddingTop: topPad + 12, borderBottomColor: colors.border }]}>
-        <TouchableOpacity onPress={() => router.back()} style={[styles.backBtn, { borderColor: colors.border }]}>
+        <TouchableOpacity onPress={() => router.back()} style={[styles.backBtn, { borderColor: colors.border }]} accessibilityRole="button" accessibilityLabel="Go back">
           <Feather name="arrow-left" size={18} color={colors.foreground} />
         </TouchableOpacity>
-        <Text style={[styles.pageTitle, { color: colors.foreground }]} numberOfLines={1}>{shift.title}</Text>
+        <Text style={[styles.pageTitle, { color: colors.foreground }]} numberOfLines={1} accessibilityRole="header">{shift.title}</Text>
         <TouchableOpacity
           onPress={() => router.push(`/(admin)/shifts/edit/${id}` as any)}
           style={[styles.backBtn, { borderColor: colors.primary }]}
+          accessibilityRole="button"
           accessibilityLabel="Edit shift"
         >
           <Feather name="edit-2" size={16} color={colors.primary} />
@@ -188,7 +189,7 @@ export default function ShiftDetailScreen() {
             >
               <Text style={[styles.personName, { color: colors.foreground }]}>{a.employeeName}</Text>
             </TouchableOpacity>
-            <TouchableOpacity onPress={() => handleRemove(a.id, a.employeeName || "")} style={[styles.removeBtn, { borderColor: colors.destructive + "40" }]}>
+            <TouchableOpacity onPress={() => handleRemove(a.id, a.employeeName || "")} style={[styles.removeBtn, { borderColor: colors.destructive + "40" }]} accessibilityRole="button" accessibilityLabel={`Remove ${a.employeeName} from shift`}>
               <Feather name="x" size={16} color={colors.destructive} />
             </TouchableOpacity>
           </View>
@@ -207,9 +208,10 @@ export default function ShiftDetailScreen() {
             autoCapitalize="none"
             autoCorrect={false}
             returnKeyType="search"
+            accessibilityLabel="Search officers by name or email"
           />
           {search.length > 0 && (
-            <TouchableOpacity onPress={() => setSearch("")} accessibilityLabel="Clear search">
+            <TouchableOpacity onPress={() => setSearch("")} accessibilityRole="button" accessibilityLabel="Clear search">
               <Feather name="x" size={16} color={colors.mutedForeground} />
             </TouchableOpacity>
           )}
@@ -232,6 +234,8 @@ export default function ShiftDetailScreen() {
               key={emp.id}
               style={[styles.personRow, { borderBottomColor: colors.border }]}
               onPress={() => handleAssign(emp.id, `${emp.firstName} ${emp.lastName}`)}
+              accessibilityRole="button"
+              accessibilityLabel={`Assign ${emp.firstName} ${emp.lastName} to shift`}
             >
               <View style={[styles.avatar, { backgroundColor: colors.secondary }]}>
                 <Text style={[styles.avatarText, { color: colors.mutedForeground }]}>{emp.firstName[0]}{emp.lastName[0]}</Text>

@@ -53,14 +53,14 @@ export default function ClientSitesScreen() {
   return (
     <View style={[styles.container, { backgroundColor: colors.background }]}>
       <View style={[styles.topBar, { paddingTop: topPad + 12, borderBottomColor: colors.border }]}>
-        <TouchableOpacity onPress={() => router.back()} style={[styles.backBtn, { borderColor: colors.border }]}>
+        <TouchableOpacity onPress={() => router.back()} style={[styles.backBtn, { borderColor: colors.border }]} accessibilityRole="button" accessibilityLabel="Go back">
           <Feather name="arrow-left" size={18} color={colors.foreground} />
         </TouchableOpacity>
         <View style={{ flex: 1 }}>
-          <Text style={[styles.pageTitle, { color: colors.foreground }]}>{(client as any)?.name || "Client"}</Text>
+          <Text style={[styles.pageTitle, { color: colors.foreground }]} accessibilityRole="header">{(client as any)?.name || "Client"}</Text>
           <Text style={[styles.sub, { color: colors.mutedForeground }]}>Sites · Net {(client as any)?.paymentTermsDays ?? 30} payment terms</Text>
         </View>
-        <TouchableOpacity onPress={() => setShowForm(true)} style={[styles.addBtn, { backgroundColor: colors.primary }]}>
+        <TouchableOpacity onPress={() => setShowForm(true)} style={[styles.addBtn, { backgroundColor: colors.primary }]} accessibilityRole="button" accessibilityLabel="New site">
           <Feather name="plus" size={16} color={colors.primaryForeground} />
           <Text style={{ color: colors.primaryForeground, fontWeight: "700", fontSize: 13 }}>Site</Text>
         </TouchableOpacity>
@@ -110,14 +110,15 @@ export default function ClientSitesScreen() {
                   onChangeText={(v) => setForm((f) => ({ ...f, [key]: v }))}
                   style={[styles.input, { color: colors.foreground, borderColor: colors.border, backgroundColor: colors.secondary }]}
                   placeholderTextColor={colors.mutedForeground}
+                  accessibilityLabel={label}
                 />
               </View>
             ))}
             <View style={{ flexDirection: "row", gap: 10, marginTop: 8 }}>
-              <TouchableOpacity onPress={() => setShowForm(false)} style={[styles.btnSecondary, { borderColor: colors.border }]}>
+              <TouchableOpacity onPress={() => setShowForm(false)} style={[styles.btnSecondary, { borderColor: colors.border }]} accessibilityRole="button" accessibilityLabel="Cancel">
                 <Text style={{ color: colors.foreground, fontWeight: "600" }}>Cancel</Text>
               </TouchableOpacity>
-              <TouchableOpacity onPress={submit} style={[styles.btnPrimary, { backgroundColor: colors.primary, opacity: createSite.isPending ? 0.6 : 1 }]} disabled={createSite.isPending}>
+              <TouchableOpacity onPress={submit} style={[styles.btnPrimary, { backgroundColor: colors.primary, opacity: createSite.isPending ? 0.6 : 1 }]} disabled={createSite.isPending} accessibilityRole="button" accessibilityLabel="Create site" accessibilityState={{ disabled: createSite.isPending, busy: createSite.isPending }}>
                 {createSite.isPending ? <ActivityIndicator color={colors.primaryForeground} /> :
                   <Text style={{ color: colors.primaryForeground, fontWeight: "700" }}>Create</Text>}
               </TouchableOpacity>

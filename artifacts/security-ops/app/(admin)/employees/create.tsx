@@ -23,6 +23,7 @@ function Field({ label, value, onChangeText, placeholder, keyboardType, secureTe
         keyboardType={keyboardType || "default"}
         secureTextEntry={secureTextEntry}
         autoCapitalize={autoCapitalize || "words"}
+        accessibilityLabel={label}
       />
     </View>
   );
@@ -79,10 +80,10 @@ export default function CreateEmployeeScreen() {
   return (
     <View style={[styles.container, { backgroundColor: colors.background }]}>
       <View style={[styles.topBar, { paddingTop: topPad + 12, borderBottomColor: colors.border }]}>
-        <TouchableOpacity onPress={() => router.back()} style={[styles.backBtn, { borderColor: colors.border }]}>
+        <TouchableOpacity onPress={() => router.back()} style={[styles.backBtn, { borderColor: colors.border }]} accessibilityRole="button" accessibilityLabel="Go back">
           <Feather name="arrow-left" size={18} color={colors.foreground} />
         </TouchableOpacity>
-        <Text style={[styles.pageTitle, { color: colors.foreground }]}>Add Employee</Text>
+        <Text style={[styles.pageTitle, { color: colors.foreground }]} accessibilityRole="header">Add Employee</Text>
       </View>
 
       <KeyboardAwareScrollViewCompat contentContainerStyle={{ padding: 16, paddingBottom: 120 }}>
@@ -100,6 +101,9 @@ export default function CreateEmployeeScreen() {
               key={r}
               style={[styles.roleChip, { borderColor: form.role === r ? colors.primary : colors.border, backgroundColor: form.role === r ? colors.primary + "20" : "transparent" }]}
               onPress={() => set("role")(r)}
+              accessibilityRole="button"
+              accessibilityState={{ selected: form.role === r }}
+              accessibilityLabel={`Role: ${r.charAt(0).toUpperCase() + r.slice(1)}`}
             >
               <Feather name={r === "admin" ? "shield" : "user"} size={16} color={form.role === r ? colors.primary : colors.mutedForeground} />
               <Text style={[styles.roleText, { color: form.role === r ? colors.primary : colors.mutedForeground }]}>{r.charAt(0).toUpperCase() + r.slice(1)}</Text>
@@ -122,6 +126,9 @@ export default function CreateEmployeeScreen() {
           style={[styles.submitBtn, { backgroundColor: colors.primary, opacity: createEmployee.isPending ? 0.7 : 1 }]}
           onPress={handleCreate}
           disabled={createEmployee.isPending}
+          accessibilityRole="button"
+          accessibilityLabel="Create employee"
+          accessibilityState={{ disabled: createEmployee.isPending, busy: createEmployee.isPending }}
         >
           {createEmployee.isPending ? <ActivityIndicator color="#fff" /> : (
             <>

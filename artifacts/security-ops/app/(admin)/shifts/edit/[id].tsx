@@ -28,6 +28,7 @@ function Field({ label, value, onChangeText, placeholder, keyboardType, autoCapi
         placeholderTextColor={colors.mutedForeground}
         keyboardType={keyboardType || "default"}
         autoCapitalize={autoCapitalize || "sentences"}
+        accessibilityLabel={`${label}${required ? ", required" : ""}`}
       />
     </View>
   );
@@ -198,11 +199,11 @@ export default function EditShiftScreen() {
         <Text style={{ color: colors.foreground, fontSize: 16, fontWeight: "600", textAlign: "center" }}>Couldn't load shift</Text>
         <Text style={{ color: colors.mutedForeground, fontSize: 14, textAlign: "center" }}>{msg}</Text>
         <View style={{ flexDirection: "row", gap: 10, marginTop: 8 }}>
-          <TouchableOpacity onPress={() => router.back()} style={[styles.backBtn, { borderColor: colors.border, paddingHorizontal: 16 }]}>
+          <TouchableOpacity onPress={() => router.back()} style={[styles.backBtn, { borderColor: colors.border, paddingHorizontal: 16 }]} accessibilityRole="button" accessibilityLabel="Go back">
             <Text style={{ color: colors.foreground, fontWeight: "600" }}>Back</Text>
           </TouchableOpacity>
           {id && (
-            <TouchableOpacity onPress={() => refetch()} style={[styles.submitBtn, { backgroundColor: colors.primary, paddingHorizontal: 20, marginTop: 0 }]}>
+            <TouchableOpacity onPress={() => refetch()} style={[styles.submitBtn, { backgroundColor: colors.primary, paddingHorizontal: 20, marginTop: 0 }]} accessibilityRole="button" accessibilityLabel="Try again">
               <Text style={[styles.submitText, { color: colors.primaryForeground }]}>Try again</Text>
             </TouchableOpacity>
           )}
@@ -214,10 +215,10 @@ export default function EditShiftScreen() {
   return (
     <View style={[styles.container, { backgroundColor: colors.background }]}>
       <View style={[styles.topBar, { paddingTop: topPad + 12, borderBottomColor: colors.border }]}>
-        <TouchableOpacity onPress={() => router.back()} style={[styles.backBtn, { borderColor: colors.border }]}>
+        <TouchableOpacity onPress={() => router.back()} style={[styles.backBtn, { borderColor: colors.border }]} accessibilityRole="button" accessibilityLabel="Go back">
           <Feather name="arrow-left" size={18} color={colors.foreground} />
         </TouchableOpacity>
-        <Text style={[styles.pageTitle, { color: colors.foreground }]}>Edit Shift</Text>
+        <Text style={[styles.pageTitle, { color: colors.foreground }]} accessibilityRole="header">Edit Shift</Text>
       </View>
 
       <KeyboardAwareScrollViewCompat contentContainerStyle={{ padding: 16, paddingBottom: 120 }}>
@@ -231,7 +232,8 @@ export default function EditShiftScreen() {
               const sel = c.id === form.clientId;
               return (
                 <TouchableOpacity key={c.id} onPress={() => { setForm((f) => ({ ...f, clientId: c.id, siteId: f.clientId === c.id ? f.siteId : "" })); }}
-                  style={[styles.pickChip, { borderColor: sel ? colors.primary : colors.border, backgroundColor: sel ? colors.primary + "20" : colors.card }]}>
+                  style={[styles.pickChip, { borderColor: sel ? colors.primary : colors.border, backgroundColor: sel ? colors.primary + "20" : colors.card }]}
+                  accessibilityRole="button" accessibilityState={{ selected: sel }} accessibilityLabel={`Client ${c.name}`}>
                   <Text style={{ color: sel ? colors.primary : colors.foreground, fontWeight: "600" }}>{c.name}</Text>
                 </TouchableOpacity>
               );
@@ -248,7 +250,8 @@ export default function EditShiftScreen() {
                   const sel = s.id === form.siteId;
                   return (
                     <TouchableOpacity key={s.id} onPress={() => set("siteId")(s.id)}
-                      style={[styles.pickChip, { borderColor: sel ? colors.primary : colors.border, backgroundColor: sel ? colors.primary + "20" : colors.card }]}>
+                      style={[styles.pickChip, { borderColor: sel ? colors.primary : colors.border, backgroundColor: sel ? colors.primary + "20" : colors.card }]}
+                      accessibilityRole="button" accessibilityState={{ selected: sel }} accessibilityLabel={`Site ${s.name}`}>
                       <Feather name="map-pin" size={12} color={sel ? colors.primary : colors.mutedForeground} />
                       <Text style={{ color: sel ? colors.primary : colors.foreground, fontWeight: "600" }}>{s.name}</Text>
                     </TouchableOpacity>
@@ -275,7 +278,8 @@ export default function EditShiftScreen() {
               const sel = form.status === s;
               return (
                 <TouchableOpacity key={s} onPress={() => set("status")(s)}
-                  style={[styles.pickChip, { borderColor: sel ? colors.primary : colors.border, backgroundColor: sel ? colors.primary + "20" : colors.card }]}>
+                  style={[styles.pickChip, { borderColor: sel ? colors.primary : colors.border, backgroundColor: sel ? colors.primary + "20" : colors.card }]}
+                  accessibilityRole="button" accessibilityState={{ selected: sel }} accessibilityLabel={`Status ${s}`}>
                   <Text style={{ color: sel ? colors.primary : colors.foreground, fontWeight: "600", textTransform: "capitalize" }}>{s}</Text>
                 </TouchableOpacity>
               );
@@ -292,7 +296,8 @@ export default function EditShiftScreen() {
                 style={[styles.levelOpt, {
                   backgroundColor: selected ? colors.primary + "20" : colors.card,
                   borderColor: selected ? colors.primary : colors.border,
-                }]}>
+                }]}
+                accessibilityRole="radio" accessibilityState={{ selected }} accessibilityLabel={`${opt.label}. ${opt.sub}`}>
                 <View style={[styles.levelDot, { borderColor: selected ? colors.primary : colors.border, backgroundColor: selected ? colors.primary : "transparent" }]}>
                   {selected && <Feather name="check" size={12} color={colors.primaryForeground} />}
                 </View>
@@ -316,7 +321,8 @@ export default function EditShiftScreen() {
           <Text style={[styles.switchLabel, { color: colors.foreground }]}>Repeating Shift</Text>
           <Switch value={form.isRepeat} onValueChange={set("isRepeat")}
             trackColor={{ false: colors.border, true: colors.primary + "80" }}
-            thumbColor={form.isRepeat ? colors.primary : colors.mutedForeground} />
+            thumbColor={form.isRepeat ? colors.primary : colors.mutedForeground}
+            accessibilityLabel="Repeating shift" accessibilityRole="switch" accessibilityState={{ checked: form.isRepeat }} />
         </View>
         {form.isRepeat && (
           <Field label="Repeat Pattern" value={form.repeatPattern} onChangeText={set("repeatPattern")} placeholder="weekly" autoCapitalize="none" />
@@ -327,7 +333,8 @@ export default function EditShiftScreen() {
         <Field label="Client Bill Rate ($/hr)" value={form.billRate} onChangeText={set("billRate")} placeholder="30.00" keyboardType="decimal-pad" autoCapitalize="none" required />
 
         <TouchableOpacity style={[styles.submitBtn, { backgroundColor: colors.primary, opacity: updateShift.isPending ? 0.7 : 1 }]}
-          onPress={handleSave} disabled={updateShift.isPending}>
+          onPress={handleSave} disabled={updateShift.isPending}
+          accessibilityRole="button" accessibilityLabel="Save changes" accessibilityState={{ disabled: updateShift.isPending, busy: updateShift.isPending }}>
           {updateShift.isPending ? <ActivityIndicator color={colors.primaryForeground} /> : (
             <>
               <Feather name="save" size={18} color={colors.primaryForeground} />
@@ -337,7 +344,8 @@ export default function EditShiftScreen() {
         </TouchableOpacity>
 
         <TouchableOpacity style={[styles.deleteBtn, { borderColor: colors.destructive, opacity: deleteShift.isPending ? 0.5 : 1 }]}
-          onPress={handleDelete} disabled={deleteShift.isPending}>
+          onPress={handleDelete} disabled={deleteShift.isPending}
+          accessibilityRole="button" accessibilityLabel="Delete shift" accessibilityState={{ disabled: deleteShift.isPending, busy: deleteShift.isPending }}>
           <Feather name="trash-2" size={16} color={colors.destructive} />
           <Text style={[styles.deleteText, { color: colors.destructive }]}>Delete Shift</Text>
         </TouchableOpacity>
