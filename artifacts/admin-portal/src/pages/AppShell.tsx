@@ -11,6 +11,7 @@ import {
 import { TABLES } from "@/lib/tables";
 import { useAuth } from "@/lib/auth";
 import { Button } from "@/components/ui/button";
+import { useChatUnreadTotal } from "@/hooks/useChatUnreadTotal";
 
 type SystemStatus = {
   env: string;
@@ -68,6 +69,19 @@ function SystemBanner({ status }: { status: SystemStatus | null }) {
 const COLLAPSE_KEY = "wcsg.sidebarCollapsed";
 const ACTIVE_GROUP_KEY = "wcsg.activeGroup";
 
+/** Small red pill for unread counts, capped at "99+". */
+function UnreadBadge({ count, className = "" }: { count: number; className?: string }) {
+  if (count <= 0) return null;
+  return (
+    <span
+      className={`inline-flex items-center justify-center min-w-[1.125rem] h-[1.125rem] px-1 rounded-full bg-red-600 text-white text-[10px] font-semibold leading-none ${className}`}
+      aria-hidden="true"
+    >
+      {count > 99 ? "99+" : count}
+    </span>
+  );
+}
+
 type LinkItem = { href: string; label: string; Icon: LucideIcon; badge?: string };
 type NavGroup = {
   key: string;
@@ -85,6 +99,10 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   const activeTable = match ? params?.table : null;
   const isDispatcher = user?.role === "dispatcher";
   const systemStatus = useSystemStatus(user?.role);
+  // Aggregate unread chat badge — enabled for any admin/dispatcher (the only
+  // roles that reach the shell), surfaced on the Chat nav link and the group
+  // tab that hosts it so unread messages are visible from anywhere.
+  const chatUnread = useChatUnreadTotal(!!user);
   const brandCfg = (window as any).__BRAND__ as { companyName: string; shortName: string; appName: string } | undefined;
 
   const [collapsed, setCollapsed] = useState<boolean>(() => {
@@ -250,12 +268,18 @@ export function AppShell({ children }: { children: React.ReactNode }) {
 
   const renderLink = ({ href, label, Icon, badge }: LinkItem) => {
     const active = location === href || location.startsWith(href + "/");
+    const unread = href === "/chat" ? chatUnread : 0;
+    const ariaLabel =
+      unread > 0
+        ? `${label}, ${unread > 99 ? "99+" : unread} unread message${unread === 1 ? "" : "s"}`
+        : undefined;
     return (
       <Link
         key={href}
         href={href}
         title={collapsed ? label : undefined}
-        className={`flex items-center text-sm border-l-2 transition-colors ${
+        aria-label={ariaLabel}
+        className={`relative flex items-center text-sm border-l-2 transition-colors ${
           collapsed ? "justify-center px-0 py-2.5" : "gap-2 px-4 py-2"
         } ${
           active
@@ -264,10 +288,17 @@ export function AppShell({ children }: { children: React.ReactNode }) {
         }`}
       >
         <Icon className="w-4 h-4 shrink-0" />
+        {collapsed && unread > 0 && (
+          <UnreadBadge count={unread} className="absolute top-1 right-1 scale-90" />
+        )}
         {!collapsed && (
-          <span className="flex-1 flex items-center justify-between">
+          <span className="flex-1 flex items-center justify-between gap-2">
             <span>{label}</span>
-            {badge && <span className="text-[9px] brand-gold opacity-80">{badge}</span>}
+            {unread > 0 ? (
+              <UnreadBadge count={unread} />
+            ) : (
+              badge && <span className="text-[9px] brand-gold opacity-80">{badge}</span>
+            )}
           </span>
         )}
       </Link>
@@ -345,6 +376,10 @@ export function AppShell({ children }: { children: React.ReactNode }) {
           {groups.map((g) => {
             const isActive = g.key === activeGroupKey;
             const Icon = g.Icon;
+            // Surface the aggregate chat badge on the tab that hosts the Chat
+            // link when that group isn't the one currently open.
+            const hasChat = g.items.some((it) => it.href === "/chat");
+            const showTabBadge = hasChat && !isActive && chatUnread > 0;
             return (
               <button
                 key={g.key}
@@ -359,6 +394,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
               >
                 <Icon className="w-4 h-4" />
                 <span>{g.label}</span>
+                {showTabBadge && <UnreadBadge count={chatUnread} />}
               </button>
             );
           })}
