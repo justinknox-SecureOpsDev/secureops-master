@@ -133,7 +133,7 @@ export default function EmployeeShiftsScreen() {
   const myAssignmentFor = (shift: any) =>
     (shift.assignments ?? []).find((a: any) => a.employeeId === myUserId);
 
-  const statusColor: Record<string, string> = { upcoming: colors.primary, active: "#22c55e", completed: colors.mutedForeground };
+  const statusColor: Record<string, string> = { upcoming: colors.primary, active: colors.success, completed: colors.mutedForeground };
 
   const handleClaim = async (shift: any) => {
     const dist = typeof shift.distanceMilesFromHome === "number" ? shift.distanceMilesFromHome : null;
@@ -347,9 +347,9 @@ export default function EmployeeShiftsScreen() {
                   </View>
                 )}
                 {isAccepted && (
-                  <View style={[styles.statusBanner, { backgroundColor: "#22c55e20", borderColor: "#22c55e" }]}>
-                    <Feather name="check-circle" size={14} color="#22c55e" />
-                    <Text style={[styles.statusBannerText, { color: "#22c55e" }]}>Confirmed — you're committed to this shift</Text>
+                  <View style={[styles.statusBanner, { backgroundColor: colors.success + "20", borderColor: colors.success }]}>
+                    <Feather name="check-circle" size={14} color={colors.success} />
+                    <Text style={[styles.statusBannerText, { color: colors.success }]}>Confirmed — you're committed to this shift</Text>
                   </View>
                 )}
 
@@ -368,7 +368,7 @@ export default function EmployeeShiftsScreen() {
                 {typeof item.distanceMilesFromHome === "number" && (() => {
                   const d = item.distanceMilesFromHome as number;
                   const far = d >= FAR_MILES;
-                  const color = far ? colors.accent : "#22c55e";
+                  const color = far ? colors.accent : colors.success;
                   return (
                     <View style={styles.detailRow}>
                       <Feather name="navigation" size={13} color={color} />
@@ -434,14 +434,14 @@ export default function EmployeeShiftsScreen() {
                 {isPending && (
                   <View style={{ flexDirection: "row", gap: 8 }}>
                     <TouchableOpacity
-                      style={[styles.acceptBtn, { backgroundColor: "#22c55e", opacity: busy ? 0.6 : 1 }]}
+                      style={[styles.acceptBtn, { backgroundColor: colors.success, opacity: busy ? 0.6 : 1 }]}
                       onPress={() => handleAccept(item, myAssign!.id)}
                       disabled={busy}
                     >
-                      {busy ? <ActivityIndicator color="#fff" /> : (
+                      {busy ? <ActivityIndicator color={colors.successForeground} /> : (
                         <>
-                          <Feather name="check" size={16} color="#fff" />
-                          <Text style={[styles.acceptText, { color: "#fff" }]}>Accept</Text>
+                          <Feather name="check" size={16} color={colors.successForeground} />
+                          <Text style={[styles.acceptText, { color: colors.successForeground }]}>Accept</Text>
                         </>
                       )}
                     </TouchableOpacity>
@@ -480,21 +480,21 @@ export default function EmployeeShiftsScreen() {
                   return (
                     <View style={{ flexDirection: "row", gap: 8, flexWrap: "wrap" }}>
                       {clockedInToThisShift && (
-                        <View style={[styles.statusBanner, { backgroundColor: "#22c55e20", borderColor: "#22c55e", flex: 1 }]}>
-                          <Feather name="clock" size={14} color="#22c55e" />
-                          <Text style={[styles.statusBannerText, { color: "#22c55e" }]}>On duty — clock out from the Clock tab</Text>
+                        <View style={[styles.statusBanner, { backgroundColor: colors.success + "20", borderColor: colors.success, flex: 1 }]}>
+                          <Feather name="clock" size={14} color={colors.success} />
+                          <Text style={[styles.statusBannerText, { color: colors.success }]}>On duty — clock out from the Clock tab</Text>
                         </View>
                       )}
                       {canClockIn && !clockedInToThisShift && (
                         <TouchableOpacity
-                          style={[styles.acceptBtn, { backgroundColor: "#22c55e", opacity: busy ? 0.6 : 1 }]}
+                          style={[styles.acceptBtn, { backgroundColor: colors.success, opacity: busy ? 0.6 : 1 }]}
                           onPress={() => handleClockInToShift(item)}
                           disabled={busy}
                         >
-                          {busy ? <ActivityIndicator color="#fff" /> : (
+                          {busy ? <ActivityIndicator color={colors.successForeground} /> : (
                             <>
-                              <Feather name="play" size={16} color="#fff" />
-                              <Text style={[styles.acceptText, { color: "#fff" }]}>Clock In Now</Text>
+                              <Feather name="play" size={16} color={colors.successForeground} />
+                              <Text style={[styles.acceptText, { color: colors.successForeground }]}>Clock In Now</Text>
                             </>
                           )}
                         </TouchableOpacity>

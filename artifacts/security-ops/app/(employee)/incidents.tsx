@@ -11,10 +11,13 @@ import { confirmAction, notify } from "@/utils/confirm";
 import { AttachmentImage } from "@/components/AttachmentImage";
 
 const SEVERITY_LEVELS = ["low", "medium", "high", "critical"] as const;
-const SEVERITY_COLORS: Record<string, string> = { low: "#22c55e", medium: "#f59e0b", high: "#f97316", critical: "#ef4444" };
 
 export default function EmployeeIncidentsScreen() {
   const colors = useColors();
+  // Severity colors are theme-aware so they brighten in high-contrast mode and
+  // stay above WCAG AA. Used only as colored text + tinted background + border
+  // (never as a solid fill with light text), so each passes AA on both palettes.
+  const SEVERITY_COLORS: Record<string, string> = { low: colors.success, medium: colors.accent, high: "#f97316", critical: colors.destructive };
   const queryClient = useQueryClient();
   const [showReport, setShowReport] = useState(false);
   const topPad = useTopPad();
@@ -103,7 +106,7 @@ export default function EmployeeIncidentsScreen() {
           accessibilityRole="button"
           accessibilityLabel="Report a new incident"
         >
-          <Feather name="plus" size={18} color="#fff" />
+          <Feather name="plus" size={18} color={colors.destructiveForeground} />
         </TouchableOpacity>
       </View>
 
@@ -129,8 +132,8 @@ export default function EmployeeIncidentsScreen() {
               <Text style={[styles.emptyTitle, { color: colors.foreground }]}>No incidents reported</Text>
               <Text style={[styles.emptyText, { color: colors.mutedForeground }]}>Tap the + button to report an incident</Text>
               <TouchableOpacity style={[styles.reportBigBtn, { backgroundColor: colors.destructive }]} onPress={() => setShowReport(true)}>
-                <Feather name="alert-triangle" size={18} color="#fff" />
-                <Text style={styles.reportBigBtnText}>Report Incident</Text>
+                <Feather name="alert-triangle" size={18} color={colors.destructiveForeground} />
+                <Text style={[styles.reportBigBtnText, { color: colors.destructiveForeground }]}>Report Incident</Text>
               </TouchableOpacity>
             </View>
           }
@@ -330,7 +333,7 @@ export default function EmployeeIncidentsScreen() {
                           accessibilityRole="button"
                           accessibilityLabel={`Remove photo ${idx + 1}`}
                         >
-                          <Feather name="x" size={12} color="#fff" />
+                          <Feather name="x" size={12} color={colors.destructiveForeground} />
                         </TouchableOpacity>
                       </View>
                     ))}
@@ -345,10 +348,10 @@ export default function EmployeeIncidentsScreen() {
                 accessibilityLabel="Submit incident report"
                 accessibilityState={{ disabled: createMutation.isPending, busy: createMutation.isPending }}
               >
-                {createMutation.isPending ? <ActivityIndicator color="#fff" /> : (
+                {createMutation.isPending ? <ActivityIndicator color={colors.destructiveForeground} /> : (
                   <>
-                    <Feather name="alert-triangle" size={18} color="#fff" />
-                    <Text style={styles.submitText}>Submit Report</Text>
+                    <Feather name="alert-triangle" size={18} color={colors.destructiveForeground} />
+                    <Text style={[styles.submitText, { color: colors.destructiveForeground }]}>Submit Report</Text>
                   </>
                 )}
               </TouchableOpacity>

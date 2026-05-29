@@ -11,7 +11,7 @@ import { apiRequest } from "@/utils/api";
 
 function SeverityBadge({ severity }: { severity: string }) {
   const colors = useColors();
-  const map: Record<string, string> = { low: "#22c55e", medium: colors.accent, high: "#f97316", critical: colors.destructive };
+  const map: Record<string, string> = { low: colors.success, medium: colors.accent, high: "#f97316", critical: colors.destructive };
   const c = map[severity] || colors.mutedForeground;
   return (
     <View style={[styles.badge, { backgroundColor: c + "20", borderColor: c }]}>
@@ -98,7 +98,7 @@ export default function EmployeeHomeScreen() {
           <Feather name="bell" size={18} color={colors.mutedForeground} />
           {unreadCount > 0 && (
             <View style={[styles.bellBadge, { backgroundColor: colors.destructive, borderColor: colors.background }]}>
-              <Text style={styles.bellBadgeText}>{unreadCount > 99 ? "99+" : String(unreadCount)}</Text>
+              <Text style={[styles.bellBadgeText, { color: colors.destructiveForeground }]}>{unreadCount > 99 ? "99+" : String(unreadCount)}</Text>
             </View>
           )}
         </TouchableOpacity>
@@ -151,16 +151,16 @@ export default function EmployeeHomeScreen() {
       )}
 
       {summary?.activeTimeEntry && (
-        <View style={[styles.clockedInBanner, { backgroundColor: "#22c55e20", borderColor: "#22c55e" }]}>
-          <Feather name="clock" size={18} color="#22c55e" />
+        <View style={[styles.clockedInBanner, { backgroundColor: colors.success + "20", borderColor: colors.success }]}>
+          <Feather name="clock" size={18} color={colors.success} />
           <View style={{ flex: 1 }}>
-            <Text style={[styles.clockedInTitle, { color: "#22c55e" }]}>ON DUTY</Text>
+            <Text style={[styles.clockedInTitle, { color: colors.success }]}>ON DUTY</Text>
             <Text style={[styles.clockedInTime, { color: colors.foreground }]}>
               Clocked in {summary.activeTimeEntry.clockInTime ? new Date(summary.activeTimeEntry.clockInTime).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }) : ""}
             </Text>
           </View>
-          <TouchableOpacity style={[styles.clockBtn, { backgroundColor: "#22c55e" }]} onPress={() => router.push("/(employee)/clock")}>
-            <Text style={styles.clockBtnText}>View</Text>
+          <TouchableOpacity style={[styles.clockBtn, { backgroundColor: colors.success }]} onPress={() => router.push("/(employee)/clock")}>
+            <Text style={[styles.clockBtnText, { color: colors.successForeground }]}>View</Text>
           </TouchableOpacity>
         </View>
       )}
@@ -172,7 +172,7 @@ export default function EmployeeHomeScreen() {
             { label: "Hours Worked", value: `${parseFloat(summary?.hoursThisWeek as any ?? "0").toFixed(1)}h`, icon: "clock", color: colors.primary },
             { label: "Hours This Month", value: `${parseFloat(summary?.hoursThisMonth as any ?? "0").toFixed(1)}h`, icon: "calendar", color: colors.foreground },
             { label: "Upcoming Shifts", value: summary?.upcomingShifts?.length ?? 0, icon: "arrow-right-circle", color: colors.accent },
-            { label: "Pending Accept", value: summary?.pendingAssignments?.length ?? 0, icon: "alert-circle", color: "#22c55e" },
+            { label: "Pending Accept", value: summary?.pendingAssignments?.length ?? 0, icon: "alert-circle", color: colors.success },
           ].map(({ label, value, icon, color }) => (
             <View key={label} style={[styles.statCard, { backgroundColor: colors.card, borderColor: colors.border }]}>
               <Feather name={icon as any} size={18} color={color} />

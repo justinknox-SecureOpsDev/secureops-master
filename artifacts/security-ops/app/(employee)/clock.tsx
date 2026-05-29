@@ -223,16 +223,16 @@ export default function EmployeeClockScreen() {
       </View>
 
       <View
-        style={[styles.clockFace, { backgroundColor: colors.card, borderColor: isClockedIn ? "#22c55e" : colors.border }]}
+        style={[styles.clockFace, { backgroundColor: colors.card, borderColor: isClockedIn ? colors.success : colors.border }]}
         accessible
         accessibilityLabel={isClockedIn ? `On duty for ${formatDuration(elapsed)}` : "Off duty"}
         accessibilityLiveRegion="polite"
       >
-        <View style={[styles.clockRing, { borderColor: isClockedIn ? "#22c55e" : colors.border }]}>
-          <Text style={[styles.clockTime, { color: isClockedIn ? "#22c55e" : colors.mutedForeground }]}>
+        <View style={[styles.clockRing, { borderColor: isClockedIn ? colors.success : colors.border }]}>
+          <Text style={[styles.clockTime, { color: isClockedIn ? colors.success : colors.mutedForeground }]}>
             {isClockedIn ? formatDuration(elapsed) : "00:00:00"}
           </Text>
-          <Text style={[styles.clockStatus, { color: isClockedIn ? "#22c55e" : colors.mutedForeground }]}>
+          <Text style={[styles.clockStatus, { color: isClockedIn ? colors.success : colors.mutedForeground }]}>
             {isClockedIn ? "ON DUTY" : "OFF DUTY"}
           </Text>
         </View>
@@ -244,8 +244,8 @@ export default function EmployeeClockScreen() {
         )}
 
         <View style={styles.locationRow}>
-          <Feather name="map-pin" size={14} color={location ? "#22c55e" : colors.mutedForeground} />
-          <Text style={[styles.locationText, { color: location ? "#22c55e" : colors.mutedForeground }]}>
+          <Feather name="map-pin" size={14} color={location ? colors.success : colors.mutedForeground} />
+          <Text style={[styles.locationText, { color: location ? colors.success : colors.mutedForeground }]}>
             {location ? `${location.lat.toFixed(4)}, ${location.lon.toFixed(4)}` : "Location not available"}
           </Text>
         </View>
@@ -254,7 +254,7 @@ export default function EmployeeClockScreen() {
           <ActivityIndicator size="large" color={colors.primary} style={{ marginTop: 20 }} />
         ) : (
           <TouchableOpacity
-            style={[styles.mainBtn, { backgroundColor: isClockedIn ? colors.destructive : "#22c55e" }]}
+            style={[styles.mainBtn, { backgroundColor: isClockedIn ? colors.destructive : colors.success }]}
             onPress={isClockedIn ? handleClockOut : handleClockIn}
             disabled={clockInMutation.isPending || clockOutMutation.isPending}
             accessibilityRole="button"
@@ -262,11 +262,11 @@ export default function EmployeeClockScreen() {
             accessibilityState={{ disabled: clockInMutation.isPending || clockOutMutation.isPending, busy: clockInMutation.isPending || clockOutMutation.isPending }}
           >
             {(clockInMutation.isPending || clockOutMutation.isPending) ? (
-              <ActivityIndicator color="#fff" size="large" />
+              <ActivityIndicator color={isClockedIn ? colors.destructiveForeground : colors.successForeground} size="large" />
             ) : (
               <>
-                <Feather name={isClockedIn ? "square" : "play"} size={28} color="#fff" />
-                <Text style={styles.mainBtnText}>{isClockedIn ? "CLOCK OUT" : "CLOCK IN"}</Text>
+                <Feather name={isClockedIn ? "square" : "play"} size={28} color={isClockedIn ? colors.destructiveForeground : colors.successForeground} />
+                <Text style={[styles.mainBtnText, { color: isClockedIn ? colors.destructiveForeground : colors.successForeground }]}>{isClockedIn ? "CLOCK OUT" : "CLOCK IN"}</Text>
               </>
             )}
           </TouchableOpacity>
@@ -277,17 +277,18 @@ export default function EmployeeClockScreen() {
             accessibilityLiveRegion="polite"
             style={[
               styles.statusBanner,
-              statusMsg.kind === "error"
-                ? { backgroundColor: "#fef2f2", borderColor: "#fca5a5" }
-                : { backgroundColor: "#f0fdf4", borderColor: "#86efac" },
+              {
+                backgroundColor: (statusMsg.kind === "error" ? colors.destructive : colors.success) + "20",
+                borderColor: statusMsg.kind === "error" ? colors.destructive : colors.success,
+              },
             ]}
           >
             <Feather
               name={statusMsg.kind === "error" ? "alert-circle" : "check-circle"}
               size={16}
-              color={statusMsg.kind === "error" ? "#b91c1c" : "#15803d"}
+              color={statusMsg.kind === "error" ? colors.destructive : colors.success}
             />
-            <Text style={[styles.statusBannerText, { color: statusMsg.kind === "error" ? "#b91c1c" : "#15803d" }]}>
+            <Text style={[styles.statusBannerText, { color: statusMsg.kind === "error" ? colors.destructive : colors.success }]}>
               {statusMsg.text}
             </Text>
           </View>
@@ -375,8 +376,8 @@ export default function EmployeeClockScreen() {
                   </>}
                   {entry.clockInLat && (
                     <View style={styles.gpsTag}>
-                      <Feather name="map-pin" size={11} color="#22c55e" />
-                      <Text style={{ color: "#22c55e", fontSize: 11 }}>GPS</Text>
+                      <Feather name="map-pin" size={11} color={colors.success} />
+                      <Text style={{ color: colors.success, fontSize: 11 }}>GPS</Text>
                     </View>
                   )}
                 </View>
@@ -407,12 +408,12 @@ export default function EmployeeClockScreen() {
                 <Text style={[styles.modalBtnText, { color: colors.foreground }]}>Cancel</Text>
               </TouchableOpacity>
               <TouchableOpacity
-                style={[styles.modalBtn, { backgroundColor: confirmModal?.destructive ? colors.destructive : "#22c55e" }]}
+                style={[styles.modalBtn, { backgroundColor: confirmModal?.destructive ? colors.destructive : colors.success }]}
                 onPress={() => confirmModal?.onConfirm()}
                 accessibilityRole="button"
                 accessibilityLabel={confirmModal?.confirmText}
               >
-                <Text style={[styles.modalBtnText, { color: "#fff" }]}>{confirmModal?.confirmText}</Text>
+                <Text style={[styles.modalBtnText, { color: confirmModal?.destructive ? colors.destructiveForeground : colors.successForeground }]}>{confirmModal?.confirmText}</Text>
               </TouchableOpacity>
             </View>
           </View>

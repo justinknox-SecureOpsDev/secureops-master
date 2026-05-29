@@ -10,12 +10,13 @@ import { QueryClient, QueryClientProvider, focusManager, onlineManager } from "@
 import * as SplashScreen from "expo-splash-screen";
 import NetInfo from "@react-native-community/netinfo";
 import React, { useEffect } from "react";
-import { AppState, Platform, type AppStateStatus } from "react-native";
+import { AppState, Platform, Text, TextInput, type AppStateStatus } from "react-native";
 import { GestureHandlerRootView } from "react-native-gesture-handler";
 import { KeyboardProvider } from "react-native-keyboard-controller";
 import { SafeAreaProvider } from "react-native-safe-area-context";
 
 import { ErrorBoundary } from "@/components/ErrorBoundary";
+import { AccessibilityProvider } from "@/contexts/AccessibilityContext";
 import { AuthProvider } from "@/contexts/AuthContext";
 import { ChatProvider } from "@/contexts/ChatContext";
 import { API_BASE_URL } from "@/utils/api";
@@ -75,6 +76,26 @@ setAuthTokenGetter(async () => {
   return await storage.get(AUTH_TOKEN_KEY);
 });
 
+// Accessibility: honor the OS text-size setting (the multiplier RN applies is
+// PixelRatio.getFontScale()) across the whole app, but cap it so very large
+// system font sizes don't overflow the field-ops layouts (tab bars, badges,
+// time-clock buttons). allowFontScaling defaults to true, so we only need to
+// install the cap as a default prop on Text and TextInput.
+const MAX_FONT_SCALE = 1.4;
+type ScalableDefaults = { defaultProps?: { allowFontScaling?: boolean; maxFontSizeMultiplier?: number } };
+const TextWithDefaults = Text as unknown as ScalableDefaults;
+const TextInputWithDefaults = TextInput as unknown as ScalableDefaults;
+TextWithDefaults.defaultProps = {
+  ...TextWithDefaults.defaultProps,
+  allowFontScaling: true,
+  maxFontSizeMultiplier: MAX_FONT_SCALE,
+};
+TextInputWithDefaults.defaultProps = {
+  ...TextInputWithDefaults.defaultProps,
+  allowFontScaling: true,
+  maxFontSizeMultiplier: MAX_FONT_SCALE,
+};
+
 export default function RootLayout() {
   const [fontsLoaded, fontError] = useFonts({
     Inter_400Regular,
@@ -118,11 +139,13 @@ export default function RootLayout() {
         <QueryClientProvider client={queryClient}>
           <GestureHandlerRootView>
             <KeyboardProvider>
-              <AuthProvider>
-                <ChatProvider>
-                  <RootLayoutNav />
-                </ChatProvider>
-              </AuthProvider>
+              <AccessibilityProvider>
+                <AuthProvider>
+                  <ChatProvider>
+                    <RootLayoutNav />
+                  </ChatProvider>
+                </AuthProvider>
+              </AccessibilityProvider>
             </KeyboardProvider>
           </GestureHandlerRootView>
         </QueryClientProvider>

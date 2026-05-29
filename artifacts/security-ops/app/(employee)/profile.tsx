@@ -6,6 +6,7 @@ import { useColors } from "@/hooks/useColors";
 import { useGetMe, getGetMeQueryKey, useGetEmployee, getGetEmployeeQueryKey, useGetLicenses, getGetLicensesQueryKey } from "@workspace/api-client-react";
 import { LicenseLevelBadge, levelLabel, levelColor } from "@/components/LicenseLevelBadge";
 import { useAuth } from "@/contexts/AuthContext";
+import { useAccessibility } from "@/contexts/AccessibilityContext";
 import { Feather } from "@expo/vector-icons";
 import { isBiometricAvailable, isBiometricEnabled, setBiometricEnabled, promptBiometric } from "@/utils/biometric";
 import { apiRequest, API_BASE_URL } from "@/utils/api";
@@ -241,6 +242,7 @@ export default function EmployeeProfileScreen() {
   const router = useRouter();
   const { logout } = useAuth();
   const { open: openTour } = useTour();
+  const { highContrast, setHighContrast } = useAccessibility();
   const topPad = useTopPad();
   const [bioAvailable, setBioAvailable] = useState(false);
   const [bioOn, setBioOn] = useState(false);
@@ -288,7 +290,7 @@ export default function EmployeeProfileScreen() {
     const now = new Date();
     if (expiry < now) return { color: colors.destructive, label: "EXPIRED" };
     if (expiry <= new Date(now.getTime() + 30 * 86400000)) return { color: colors.accent, label: "EXPIRING" };
-    return { color: "#22c55e", label: "VALID" };
+    return { color: colors.success, label: "VALID" };
   };
 
   if (isLoading) return <View style={[styles.center, { backgroundColor: colors.background }]}><ActivityIndicator size="large" color={colors.primary} /></View>;
@@ -499,7 +501,7 @@ export default function EmployeeProfileScreen() {
           <Text style={[styles.sectionTitle, { color: colors.accent }]}>ACKNOWLEDGEMENTS</Text>
           {acks.map((a: any, i: number) => (
             <View key={i} style={[styles.infoRow, { borderBottomColor: colors.border }]}>
-              <Feather name={a?.accepted ? "check-circle" : "x-circle"} size={14} color={a?.accepted ? "#22c55e" : colors.destructive} />
+              <Feather name={a?.accepted ? "check-circle" : "x-circle"} size={14} color={a?.accepted ? colors.success : colors.destructive} />
               <View style={{ flex: 1 }}>
                 <Text style={[styles.infoValue, { color: colors.foreground }]}>{a?.type ?? "Acknowledgement"}</Text>
                 {a?.signature ? (
@@ -539,6 +541,36 @@ export default function EmployeeProfileScreen() {
             </View>
           );
         })}
+      </View>
+
+      <View style={[styles.section, { backgroundColor: colors.card, borderColor: colors.border }]}>
+        <Text style={[styles.sectionTitle, { color: colors.accent }]}>ACCESSIBILITY</Text>
+        <View style={[styles.actionRow, { borderBottomColor: "transparent" }]}>
+          <Feather name="eye" size={16} color={colors.primary} />
+          <View style={{ flex: 1 }}>
+            <Text style={{ color: colors.foreground, fontSize: 14, fontWeight: "600" }}>High-contrast mode</Text>
+            <Text style={{ color: colors.mutedForeground, fontSize: 12, marginTop: 2 }}>
+              Bolder colors for bright sun and low vision
+            </Text>
+          </View>
+          <Switch
+            value={highContrast}
+            onValueChange={setHighContrast}
+            accessibilityLabel="High-contrast mode"
+            accessibilityHint="Switches the app to a bolder, higher-contrast color theme"
+            accessibilityRole="switch"
+            accessibilityState={{ checked: highContrast }}
+          />
+        </View>
+        <View style={[styles.actionRow, { borderBottomColor: "transparent", paddingTop: 0 }]}>
+          <Feather name="type" size={16} color={colors.accent} />
+          <View style={{ flex: 1 }}>
+            <Text style={{ color: colors.foreground, fontSize: 14, fontWeight: "600" }}>Text size</Text>
+            <Text style={{ color: colors.mutedForeground, fontSize: 12, marginTop: 2 }}>
+              Follows your device’s display text size. Change it in your phone’s Display settings.
+            </Text>
+          </View>
+        </View>
       </View>
 
       <View style={[styles.section, { backgroundColor: colors.card, borderColor: colors.border }]}>
