@@ -1,6 +1,6 @@
 import React, { useState } from "react";
 import { useTopPad } from "@/hooks/useTopPad";
-import { View, Text, StyleSheet, FlatList, TouchableOpacity, ActivityIndicator, Platform } from "react-native";
+import { View, Text, StyleSheet, SectionList, TouchableOpacity, ActivityIndicator, Platform } from "react-native";
 import { useColors } from "@/hooks/useColors";
 import { confirmAction, notify } from "@/utils/confirm";
 import {
@@ -53,13 +53,18 @@ export default function EmployeeShiftsScreen() {
   const FAR_MILES = 50;
   const shiftsUnsorted = (allShifts ?? []).filter((s: any) => {
     const isAssigned = (s.assignments ?? []).some((a: any) => a.employeeId === myUserId);
-    // Hide shifts whose end time has already passed from "available" and "upcoming"
-    // (they're stale slots nobody clocked into).
-    if (filter === "available" || filter === "upcoming") {
+    if (filter === "available") {
+      // Available is forward-looking: only show shifts that haven't started yet
+      // (you can't reserve a slot that's already underway or finished).
+      const startMs = s.startTime ? new Date(s.startTime).getTime() : 0;
+      if (startMs && startMs < nowMs) return false;
+      return !isAssigned;
+    }
+    if (filter === "upcoming") {
+      // Hide my assigned shifts whose end time has already passed (stale slots).
       const endMs = s.endTime ? new Date(s.endTime).getTime() : 0;
       if (endMs && endMs < nowMs) return false;
     }
-    if (filter === "available") return !isAssigned;
     return isAssigned;
   });
   // On the "available" tab, surface shifts within 50 miles of the officer's
@@ -80,6 +85,45 @@ export default function EmployeeShiftsScreen() {
         return da - db;
       })
     : shiftsUnsorted;
+
+  const dayKey = (d: Date) => {
+    const y = d.getFullYear();
+    const m = String(d.getMonth() + 1).padStart(2, "0");
+    const day = String(d.getDate()).padStart(2, "0");
+    return `${y}-${m}-${day}`;
+  };
+  const dayLabel = (d: Date) => {
+    const today = new Date();
+    const tomorrow = new Date();
+    tomorrow.setDate(today.getDate() + 1);
+    if (dayKey(d) === dayKey(today)) return "Today";
+    if (dayKey(d) === dayKey(tomorrow)) return "Tomorrow";
+    return d.toLocaleDateString([], { weekday: "long", day: "numeric", month: "short" });
+  };
+
+  // Group shifts by day so the list reads as "Today / Tomorrow / <date>"
+  // sections instead of one long confusing scroll. Sections are ordered
+  // chronologically; within a day, "available" keeps the nearest-first order
+  // already applied above, everything else sorts by start time.
+  const sections = React.useMemo(() => {
+    const groups = new Map<string, any[]>();
+    for (const s of shifts) {
+      const k = dayKey(new Date(s.startTime));
+      if (!groups.has(k)) groups.set(k, []);
+      groups.get(k)!.push(s);
+    }
+    return Array.from(groups.entries())
+      .sort(([a], [b]) => a.localeCompare(b))
+      .map(([k, items]) => ({
+        key: k,
+        title: dayLabel(new Date(items[0].startTime)),
+        data: filter === "available"
+          ? items
+          : [...items].sort(
+              (a, b) => new Date(a.startTime).getTime() - new Date(b.startTime).getTime(),
+            ),
+      }));
+  }, [shifts, filter]);
 
   const myAssignmentFor = (shift: any) =>
     (shift.assignments ?? []).find((a: any) => a.employeeId === myUserId);
@@ -238,11 +282,23 @@ export default function EmployeeShiftsScreen() {
           <TouchableOpacity onPress={() => refetch()} style={[styles.retryBtn, { borderColor: colors.primary }]}><Text style={{ color: colors.primary }}>Retry</Text></TouchableOpacity>
         </View>
       ) : (
-        <FlatList
-          data={shifts}
+        <SectionList
+          sections={sections}
           keyExtractor={(item: any) => item.id}
           scrollEnabled={shifts.length > 0}
+          stickySectionHeadersEnabled={false}
           contentContainerStyle={{ padding: 16, paddingBottom: 100 }}
+          renderSectionHeader={({ section }: { section: any }) => (
+            <View style={styles.sectionHeader}>
+              <Text style={[styles.sectionHeaderText, { color: colors.foreground }]}>{section.title}</Text>
+              <View style={[styles.sectionCount, { backgroundColor: colors.secondary, borderColor: colors.border }]}>
+                <Text style={[styles.sectionCountText, { color: colors.mutedForeground }]}>
+                  {section.data.length} shift{section.data.length === 1 ? "" : "s"}
+                </Text>
+              </View>
+            </View>
+          )}
+          renderSectionFooter={() => <View style={{ height: 16 }} />}
           ItemSeparatorComponent={() => <View style={{ height: 10 }} />}
           ListEmptyComponent={
             <View style={styles.center}>
@@ -492,6 +548,10 @@ const styles = StyleSheet.create({
   filterRow: { flexDirection: "row", gap: 8, paddingHorizontal: 16, paddingTop: 16, paddingBottom: 8, flexWrap: "wrap" },
   filterChip: { paddingHorizontal: 14, paddingVertical: 6, borderRadius: 16, borderWidth: 1 },
   filterText: { fontSize: 13, fontWeight: "600" },
+  sectionHeader: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", marginBottom: 10 },
+  sectionHeaderText: { fontSize: 15, fontWeight: "800", letterSpacing: 0.3 },
+  sectionCount: { paddingHorizontal: 8, paddingVertical: 3, borderRadius: 10, borderWidth: 1 },
+  sectionCountText: { fontSize: 11, fontWeight: "600" },
   card: { borderRadius: 12, borderWidth: 1, padding: 14, gap: 10 },
   cardHeader: { flexDirection: "row", alignItems: "flex-start", gap: 10 },
   shiftTitle: { fontSize: 15, fontWeight: "700" },
