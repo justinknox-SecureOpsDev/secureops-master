@@ -23,3 +23,9 @@ id = "D0mAAsN1xAjtMSXPMV-zL"
 uri = "file://exports/wcsg-invite-contact-list.csv"
 type = "table"
 title = "WCSG Officer Invite Contact List (241 officers, 235 with phone + temp password)"
+
+[[outputs]]
+id = "yxUYR9bny38cktXVhs9B7"
+uri = "file://exports/wcsg-payroll-process.pdf"
+type = "pdf"
+title = "WCSG Payroll & Invoicing Process"
