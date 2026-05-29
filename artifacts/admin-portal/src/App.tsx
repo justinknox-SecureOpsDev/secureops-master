@@ -20,6 +20,7 @@ import PayrollBoardPage from "@/pages/PayrollBoard";
 import InvoiceBoardPage from "@/pages/InvoiceBoard";
 import { InvitationsPage } from "@/pages/Invitations";
 import ShiftsPage from "@/pages/Shifts";
+import CalendarPage from "@/pages/Calendar";
 import AuditLogPage from "@/pages/AuditLog";
 import SwapRequestsPage from "@/pages/SwapRequests";
 import LicenseRenewalsPage from "@/pages/LicenseRenewals";
@@ -111,6 +112,7 @@ function Routed() {
           <Route path="/chat" component={ChatPage} />
           <Route path="/personnel" component={PersonnelPage} />
           <Route path="/personnel/:id" component={OfficerProfilePage} />
+          <Route path="/shifts/calendar" component={CalendarPage} />
           <Route path="/tables/shifts" component={ShiftsPage} />
           <Route path="/account/security" component={SecurityPage} />
           <Route path="/radio" component={RadioPage} />
@@ -145,6 +147,7 @@ function Routed() {
           <Route path="/sites/:id" component={SiteDetailPage} />
           <Route path="/staffing" component={StaffingPage} />
           <Route path="/staffing/:id" component={StaffingEventPage} />
+          <Route path="/shifts/calendar" component={CalendarPage} />
           <Route path="/tables/shifts" component={ShiftsPage} />
           <Route path="/tables/:table" component={TablePage} />
           <Route component={NotFound} />

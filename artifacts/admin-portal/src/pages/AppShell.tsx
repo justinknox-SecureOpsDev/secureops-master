@@ -149,11 +149,14 @@ export function AppShell({ children }: { children: React.ReactNode }) {
     ];
 
     const operationsTables = TABLES.filter((t) => !ACCOUNTING_TABLE_NAMES.has(t.name));
-    const operationsLinks: LinkItem[] = operationsTables.map((t) => ({
-      href: `/tables/${t.name}`,
-      label: t.label,
-      Icon: Database,
-    }));
+    const operationsLinks: LinkItem[] = [
+      { href: "/shifts/calendar", label: "Shift Calendar", Icon: CalendarRange },
+      ...operationsTables.map((t) => ({
+        href: `/tables/${t.name}`,
+        label: t.label,
+        Icon: Database,
+      })),
+    ];
 
     const settingsLinks: LinkItem[] = [
       { href: "/account/security", label: "My 2FA", Icon: KeyRound },
@@ -190,9 +193,12 @@ export function AppShell({ children }: { children: React.ReactNode }) {
           key: "operations",
           label: "Operations",
           Icon: Database,
-          items: operationsTables
-            .filter((t) => t.name === "shifts")
-            .map((t) => ({ href: `/tables/${t.name}`, label: t.label, Icon: Database })),
+          items: [
+            { href: "/shifts/calendar", label: "Shift Calendar", Icon: CalendarRange },
+            ...operationsTables
+              .filter((t) => t.name === "shifts")
+              .map((t) => ({ href: `/tables/${t.name}`, label: t.label, Icon: Database })),
+          ],
         },
         { key: "settings", label: "Settings", Icon: Settings, items: settingsLinks },
       ];
@@ -225,6 +231,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
       return "operations";
     }
     if (startsWith("/sites")) return "operations";
+    if (startsWith("/shifts")) return "operations";
     if (startsWith("/personnel") || startsWith("/chat") || startsWith("/radio")
       || startsWith("/dar") || startsWith("/compliance") || startsWith("/audit-log")
       || startsWith("/swap-requests") || startsWith("/incidents") || startsWith("/exports")) {
