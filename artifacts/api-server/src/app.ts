@@ -144,6 +144,11 @@ app.use(
   }),
 );
 
+// Stripe webhooks must receive the raw body for signature verification.
+// This handler runs BEFORE express.json() so the body isn't parsed yet.
+// All other routes continue to use the JSON parser below.
+app.use("/api/client/stripe-webhook", express.raw({ type: "application/json" }));
+
 app.use(express.json({ limit: "1mb" }));
 app.use(express.urlencoded({ extended: true, limit: "1mb" }));
 

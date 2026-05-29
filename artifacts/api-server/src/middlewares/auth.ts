@@ -253,3 +253,40 @@ export function requireAdminOrDispatcher(req: Request, res: Response, next: Next
     next();
   });
 }
+
+/**
+ * Gate routes to authenticated users with role="client" only.
+ *
+ * Client users are external venue contacts (not staff) with access limited
+ * to data scoped to their own organisation's sites. This guard must be
+ * combined with the server-side scoping helper `getClientSiteIds` on every
+ * endpoint to ensure the caller can only see their own org's data.
+ *
+ * Security: we re-check the live DB role (already done in requireAuth) so
+ * a role demotion from "client" takes effect immediately without waiting for
+ * the JWT to expire.
+ */
+export function requireClient(req: Request, res: Response, next: NextFunction): void {
+  requireAuth(req, res, () => {
+    if (req.user?.role !== "client") {
+      res.status(403).json({ error: "Forbidden", message: "Client access required" });
+      return;
+    }
+    next();
+  });
+}
+
+/**
+ * Gate routes to admin OR client roles. Used for shared read endpoints
+ * where admins see everything and clients see their scoped subset.
+ */
+export function requireAdminOrClient(req: Request, res: Response, next: NextFunction): void {
+  requireAuth(req, res, () => {
+    const role = req.user?.role;
+    if (role !== "admin" && role !== "client") {
+      res.status(403).json({ error: "Forbidden", message: "Admin or client access required" });
+      return;
+    }
+    next();
+  });
+}

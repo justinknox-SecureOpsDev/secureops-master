@@ -1561,6 +1561,137 @@ export interface OnboardingLinkResponse {
   emailDeliveryError?: string | null;
 }
 
+export type ClientMeClient = {
+  id: string;
+  name: string;
+  address?: string | null;
+  paymentTermsDays?: number | null;
+};
+
+export type ClientMeSitesItem = {
+  id: string;
+  name: string;
+  address?: string | null;
+};
+
+export interface ClientMe {
+  client: ClientMeClient;
+  sites: ClientMeSitesItem[];
+}
+
+export type ClientShiftOfficersItem = {
+  initials: string;
+  licenseLevel: number;
+};
+
+export interface ClientShift {
+  id: string;
+  title: string;
+  siteId: string;
+  siteName?: string | null;
+  startTime: string;
+  endTime: string;
+  requiredLicenseLevel?: number | null;
+  headcount?: number;
+  status: string;
+  officers: ClientShiftOfficersItem[];
+}
+
+export interface ClientIncident {
+  id: string;
+  title: string;
+  description?: string | null;
+  severity: string;
+  status: string;
+  locationDescription?: string | null;
+  occurredAt: string;
+  resolvedAt?: string | null;
+  siteName?: string | null;
+}
+
+export interface ClientDar {
+  id: string;
+  reportDate: string;
+  submittedAt?: string | null;
+  summary: string;
+  observations?: string | null;
+  visitorsCount?: number;
+  patrolsCount?: number;
+  incidentsNoted?: string | null;
+  weather?: string | null;
+  siteId?: string | null;
+  siteName?: string | null;
+}
+
+export interface ClientInvoice {
+  id: string;
+  invoiceNumber: string | null;
+  siteId?: string | null;
+  siteName?: string | null;
+  periodStart?: string | null;
+  periodEnd?: string | null;
+  clientName?: string | null;
+  subtotal?: string | null;
+  taxAmount?: string | null;
+  totalAmount: string | null;
+  status: string;
+  dueDate?: string | null;
+  paidAt?: string | null;
+  notes?: string | null;
+}
+
+export type ShiftRequestStatus =
+  (typeof ShiftRequestStatus)[keyof typeof ShiftRequestStatus];
+
+export const ShiftRequestStatus = {
+  pending: "pending",
+  approved: "approved",
+  declined: "declined",
+} as const;
+
+export interface ShiftRequest {
+  id: string;
+  clientId: string;
+  siteId: string;
+  siteName?: string | null;
+  startDate: string;
+  endDate: string;
+  startTime: string;
+  endTime: string;
+  l2Count?: number;
+  l3Count?: number;
+  l4Count?: number;
+  notes?: string | null;
+  status: ShiftRequestStatus;
+  adminNote?: string | null;
+  createdShiftIds?: string[];
+  createdAt?: string;
+}
+
+export interface ClientUser {
+  id: string;
+  email: string;
+  firstName: string | null;
+  lastName: string | null;
+  status: string;
+  clientId: string | null;
+  clientName?: string | null;
+  createdAt?: string | null;
+}
+
+export interface StripeCheckoutResponse {
+  url: string;
+  sessionId?: string;
+}
+
+export interface ClientInviteResponse {
+  status: string;
+  userId: string;
+  emailSent: boolean;
+  tempPassword?: string | null;
+  onboardingUrl?: string | null;
+}
+
 export type GetSitesParams = {
   clientId?: string;
 };
@@ -1794,3 +1925,65 @@ export const AdminListOnboardingStatus = {
   pending: "pending",
   completed: "completed",
 } as const;
+
+export type GetClientSites200Item = { [key: string]: unknown };
+
+export type GetClientShiftsParams = {
+  from?: string;
+  to?: string;
+};
+
+export type GetClientIncidentsParams = {
+  limit?: number;
+};
+
+export type GetClientDarParams = {
+  limit?: number;
+};
+
+export type GetClientDar200 = {
+  reports?: ClientDar[];
+};
+
+export type CreateClientShiftRequestBody = {
+  siteId: string;
+  startDate: string;
+  endDate: string;
+  /** HH:MM */
+  startTime: string;
+  /** HH:MM */
+  endTime: string;
+  l2Count?: number;
+  l3Count?: number;
+  l4Count?: number;
+  notes?: string;
+};
+
+export type InviteClientUserBody = {
+  email: string;
+  firstName?: string;
+  lastName?: string;
+  clientId: string;
+};
+
+export type GetAdminShiftRequestsParams = {
+  status?: GetAdminShiftRequestsStatus;
+  clientId?: string;
+};
+
+export type GetAdminShiftRequestsStatus =
+  (typeof GetAdminShiftRequestsStatus)[keyof typeof GetAdminShiftRequestsStatus];
+
+export const GetAdminShiftRequestsStatus = {
+  pending: "pending",
+  approved: "approved",
+  declined: "declined",
+} as const;
+
+export type ApproveShiftRequestBody = {
+  adminNote?: string;
+};
+
+export type DeclineShiftRequestBody = {
+  adminNote?: string;
+};

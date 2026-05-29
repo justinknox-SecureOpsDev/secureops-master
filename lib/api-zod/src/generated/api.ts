@@ -3331,3 +3331,340 @@ export const ListActivePoliciesResponseItem = zod.object({
 export const ListActivePoliciesResponse = zod.array(
   ListActivePoliciesResponseItem,
 );
+
+/**
+ * @summary Get client org info and site list
+ */
+export const GetClientMeResponse = zod.object({
+  client: zod.object({
+    id: zod.string(),
+    name: zod.string(),
+    address: zod.string().nullish(),
+    paymentTermsDays: zod.number().nullish(),
+  }),
+  sites: zod.array(
+    zod.object({
+      id: zod.string(),
+      name: zod.string(),
+      address: zod.string().nullish(),
+    }),
+  ),
+});
+
+/**
+ * @summary List client's sites
+ */
+export const GetClientSitesResponseItem = zod.object({}).passthrough();
+export const GetClientSitesResponse = zod.array(GetClientSitesResponseItem);
+
+/**
+ * @summary Upcoming shifts at client sites (sanitized — no internal notes)
+ */
+export const GetClientShiftsQueryParams = zod.object({
+  from: zod.date().optional(),
+  to: zod.date().optional(),
+});
+
+export const GetClientShiftsResponseItem = zod.object({
+  id: zod.string(),
+  title: zod.string(),
+  siteId: zod.string(),
+  siteName: zod.string().nullish(),
+  startTime: zod.coerce.date(),
+  endTime: zod.coerce.date(),
+  requiredLicenseLevel: zod.number().nullish(),
+  headcount: zod.number().optional(),
+  status: zod.string(),
+  officers: zod.array(
+    zod.object({
+      initials: zod.string(),
+      licenseLevel: zod.number(),
+    }),
+  ),
+});
+export const GetClientShiftsResponse = zod.array(GetClientShiftsResponseItem);
+
+/**
+ * @summary Incidents at client sites (sanitized — no adminNotes or officer PII)
+ */
+export const getClientIncidentsQueryLimitDefault = 50;
+
+export const GetClientIncidentsQueryParams = zod.object({
+  limit: zod.coerce.number().default(getClientIncidentsQueryLimitDefault),
+});
+
+export const GetClientIncidentsResponseItem = zod.object({
+  id: zod.string(),
+  title: zod.string(),
+  description: zod.string().nullish(),
+  severity: zod.string(),
+  status: zod.string(),
+  locationDescription: zod.string().nullish(),
+  occurredAt: zod.coerce.date(),
+  resolvedAt: zod.coerce.date().nullish(),
+  siteName: zod.string().nullish(),
+});
+export const GetClientIncidentsResponse = zod.array(
+  GetClientIncidentsResponseItem,
+);
+
+/**
+ * @summary Download redacted incident PDF
+ */
+export const GetClientIncidentPdfParams = zod.object({
+  id: zod.coerce.string().uuid(),
+});
+
+/**
+ * @summary Daily activity reports at client sites
+ */
+export const getClientDarQueryLimitDefault = 50;
+
+export const GetClientDarQueryParams = zod.object({
+  limit: zod.coerce.number().default(getClientDarQueryLimitDefault),
+});
+
+export const GetClientDarResponse = zod.object({
+  reports: zod
+    .array(
+      zod.object({
+        id: zod.string(),
+        reportDate: zod.coerce.date(),
+        submittedAt: zod.coerce.date().nullish(),
+        summary: zod.string(),
+        observations: zod.string().nullish(),
+        visitorsCount: zod.number().optional(),
+        patrolsCount: zod.number().optional(),
+        incidentsNoted: zod.string().nullish(),
+        weather: zod.string().nullish(),
+        siteId: zod.string().nullish(),
+        siteName: zod.string().nullish(),
+      }),
+    )
+    .optional(),
+});
+
+/**
+ * @summary Download DAR PDF (scoped to client sites)
+ */
+export const GetClientDarPdfParams = zod.object({
+  id: zod.coerce.string().uuid(),
+});
+
+/**
+ * @summary Client invoices (sent/paid/overdue only — no drafts)
+ */
+export const GetClientInvoicesResponseItem = zod.object({
+  id: zod.string(),
+  invoiceNumber: zod.string().nullable(),
+  siteId: zod.string().nullish(),
+  siteName: zod.string().nullish(),
+  periodStart: zod.coerce.date().nullish(),
+  periodEnd: zod.coerce.date().nullish(),
+  clientName: zod.string().nullish(),
+  subtotal: zod.string().nullish(),
+  taxAmount: zod.string().nullish(),
+  totalAmount: zod.string().nullable(),
+  status: zod.string(),
+  dueDate: zod.coerce.date().nullish(),
+  paidAt: zod.coerce.date().nullish(),
+  notes: zod.string().nullish(),
+});
+export const GetClientInvoicesResponse = zod.array(
+  GetClientInvoicesResponseItem,
+);
+
+/**
+ * @summary Download invoice PDF
+ */
+export const GetClientInvoicePdfParams = zod.object({
+  id: zod.coerce.string().uuid(),
+});
+
+/**
+ * @summary Create Stripe Checkout session for invoice payment
+ */
+export const CreateClientInvoiceCheckoutParams = zod.object({
+  id: zod.coerce.string().uuid(),
+});
+
+export const CreateClientInvoiceCheckoutResponse = zod.object({
+  url: zod.string(),
+  sessionId: zod.string().optional(),
+});
+
+/**
+ * @summary List coverage requests for the calling client
+ */
+export const GetClientShiftRequestsResponseItem = zod.object({
+  id: zod.string(),
+  clientId: zod.string(),
+  siteId: zod.string(),
+  siteName: zod.string().nullish(),
+  startDate: zod.string(),
+  endDate: zod.string(),
+  startTime: zod.string(),
+  endTime: zod.string(),
+  l2Count: zod.number().optional(),
+  l3Count: zod.number().optional(),
+  l4Count: zod.number().optional(),
+  notes: zod.string().nullish(),
+  status: zod.enum(["pending", "approved", "declined"]),
+  adminNote: zod.string().nullish(),
+  createdShiftIds: zod.array(zod.string()).optional(),
+  createdAt: zod.coerce.date().optional(),
+});
+export const GetClientShiftRequestsResponse = zod.array(
+  GetClientShiftRequestsResponseItem,
+);
+
+/**
+ * @summary Submit a coverage request
+ */
+export const createClientShiftRequestBodyL2CountDefault = 0;
+export const createClientShiftRequestBodyL3CountDefault = 0;
+export const createClientShiftRequestBodyL4CountDefault = 0;
+
+export const CreateClientShiftRequestBody = zod.object({
+  siteId: zod.string(),
+  startDate: zod.coerce.date(),
+  endDate: zod.coerce.date(),
+  startTime: zod.string().describe("HH:MM"),
+  endTime: zod.string().describe("HH:MM"),
+  l2Count: zod.number().default(createClientShiftRequestBodyL2CountDefault),
+  l3Count: zod.number().default(createClientShiftRequestBodyL3CountDefault),
+  l4Count: zod.number().default(createClientShiftRequestBodyL4CountDefault),
+  notes: zod.string().optional(),
+});
+
+/**
+ * @summary List all users with role=client
+ */
+export const GetAdminClientUsersResponseItem = zod.object({
+  id: zod.string(),
+  email: zod.string(),
+  firstName: zod.string().nullable(),
+  lastName: zod.string().nullable(),
+  status: zod.string(),
+  clientId: zod.string().nullable(),
+  clientName: zod.string().nullish(),
+  createdAt: zod.coerce.date().nullish(),
+});
+export const GetAdminClientUsersResponse = zod.array(
+  GetAdminClientUsersResponseItem,
+);
+
+/**
+ * @summary Invite a client portal user by email + clientId
+ */
+export const InviteClientUserBody = zod.object({
+  email: zod.string().email(),
+  firstName: zod.string().optional(),
+  lastName: zod.string().optional(),
+  clientId: zod.string(),
+});
+
+export const InviteClientUserResponse = zod.object({
+  status: zod.string(),
+  userId: zod.string(),
+  emailSent: zod.boolean(),
+  tempPassword: zod.string().nullish(),
+  onboardingUrl: zod.string().nullish(),
+});
+
+/**
+ * @summary Remove client portal access for a user
+ */
+export const DeleteClientUserParams = zod.object({
+  id: zod.coerce.string().uuid(),
+});
+
+/**
+ * @summary List all coverage requests
+ */
+export const GetAdminShiftRequestsQueryParams = zod.object({
+  status: zod.enum(["pending", "approved", "declined"]).optional(),
+  clientId: zod.coerce.string().optional(),
+});
+
+export const GetAdminShiftRequestsResponseItem = zod.object({
+  id: zod.string(),
+  clientId: zod.string(),
+  siteId: zod.string(),
+  siteName: zod.string().nullish(),
+  startDate: zod.string(),
+  endDate: zod.string(),
+  startTime: zod.string(),
+  endTime: zod.string(),
+  l2Count: zod.number().optional(),
+  l3Count: zod.number().optional(),
+  l4Count: zod.number().optional(),
+  notes: zod.string().nullish(),
+  status: zod.enum(["pending", "approved", "declined"]),
+  adminNote: zod.string().nullish(),
+  createdShiftIds: zod.array(zod.string()).optional(),
+  createdAt: zod.coerce.date().optional(),
+});
+export const GetAdminShiftRequestsResponse = zod.array(
+  GetAdminShiftRequestsResponseItem,
+);
+
+/**
+ * @summary Approve a coverage request and create real shifts
+ */
+export const ApproveShiftRequestParams = zod.object({
+  id: zod.coerce.string().uuid(),
+});
+
+export const ApproveShiftRequestBody = zod.object({
+  adminNote: zod.string().optional(),
+});
+
+export const ApproveShiftRequestResponse = zod.object({
+  id: zod.string(),
+  clientId: zod.string(),
+  siteId: zod.string(),
+  siteName: zod.string().nullish(),
+  startDate: zod.string(),
+  endDate: zod.string(),
+  startTime: zod.string(),
+  endTime: zod.string(),
+  l2Count: zod.number().optional(),
+  l3Count: zod.number().optional(),
+  l4Count: zod.number().optional(),
+  notes: zod.string().nullish(),
+  status: zod.enum(["pending", "approved", "declined"]),
+  adminNote: zod.string().nullish(),
+  createdShiftIds: zod.array(zod.string()).optional(),
+  createdAt: zod.coerce.date().optional(),
+});
+
+/**
+ * @summary Decline a coverage request
+ */
+export const DeclineShiftRequestParams = zod.object({
+  id: zod.coerce.string().uuid(),
+});
+
+export const DeclineShiftRequestBody = zod.object({
+  adminNote: zod.string().optional(),
+});
+
+export const DeclineShiftRequestResponse = zod.object({
+  id: zod.string(),
+  clientId: zod.string(),
+  siteId: zod.string(),
+  siteName: zod.string().nullish(),
+  startDate: zod.string(),
+  endDate: zod.string(),
+  startTime: zod.string(),
+  endTime: zod.string(),
+  l2Count: zod.number().optional(),
+  l3Count: zod.number().optional(),
+  l4Count: zod.number().optional(),
+  notes: zod.string().nullish(),
+  status: zod.enum(["pending", "approved", "declined"]),
+  adminNote: zod.string().nullish(),
+  createdShiftIds: zod.array(zod.string()).optional(),
+  createdAt: zod.coerce.date().optional(),
+});

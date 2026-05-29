@@ -21,6 +21,15 @@ export type DarPdfPayload = {
   stream: Readable;
 };
 
+export type DarPdfOptions = {
+  /**
+   * When true, officer PII (full name, email, signature) is redacted
+   * from the PDF. Use this for any client-portal or external-facing
+   * download where the recipient is not entitled to see staff details.
+   */
+  redactForClient?: boolean;
+};
+
 /**
  * Render a WCSG Daily Activity Report as a branded PDF stream.
  *
@@ -28,8 +37,12 @@ export type DarPdfPayload = {
  * checks that the report exists. Output mirrors the incident PDF
  * (cover bar, gold underline section heads, single-page footer) so
  * client deliverables feel like one product.
+ *
+ * Pass `{ redactForClient: true }` to strip officer PII (name/email/signature)
+ * before serving to external client-portal users.
  */
-export async function buildDarPdf(darId: string): Promise<DarPdfPayload | null> {
+export async function buildDarPdf(darId: string, opts: DarPdfOptions = {}): Promise<DarPdfPayload | null> {
+  const { redactForClient = false } = opts;
   const [row] = await db
     .select({
       id: dailyActivityReportsTable.id,
@@ -82,12 +95,19 @@ export async function buildDarPdf(darId: string): Promise<DarPdfPayload | null> 
     year: "numeric", month: "short", day: "numeric", hour: "numeric", minute: "2-digit",
   }) : "—");
   const officer = [row.employeeFirst, row.employeeLast].filter(Boolean).join(" ") || "—";
+
+  // Client-facing PDFs redact officer PII: full name, email, and signature
+  // are never visible to external clients. Only operational content
+  // (site, shift window, counts, narrative) is included.
   const meta: Array<[string, string]> = [
     ["Report ID", row.id],
     ["Report Date", row.reportDate],
     ["Submitted", fmtDate(row.submittedAt)],
-    ["Officer", officer],
-    ["Officer Email", row.employeeEmail ?? "—"],
+    // Officer name/email omitted when redacting for client
+    ...(!redactForClient ? [
+      ["Officer", officer],
+      ["Officer Email", row.employeeEmail ?? "—"],
+    ] as Array<[string, string]> : []),
     ["Site", row.siteName ?? "—"],
     ["Site Address", row.siteAddress ?? "—"],
     ["Shift", row.shiftTitle ? `${row.shiftTitle} (${fmtDate(row.shiftStart)} → ${fmtDate(row.shiftEnd)})` : "—"],
@@ -125,7 +145,8 @@ export async function buildDarPdf(darId: string): Promise<DarPdfPayload | null> 
       .text(row.incidentsNoted, 56, doc.y, { width: doc.page.width - 112, lineGap: 2 });
   }
 
-  if (row.signature) {
+  // Signature is officer PII — omitted from client-facing PDFs.
+  if (row.signature && !redactForClient) {
     doc.moveDown(1.2);
     sectionHeader(doc, "Officer Signature");
     doc.fillColor(TEXT).font("Helvetica-Oblique").fontSize(14)
@@ -143,8 +164,15 @@ export async function buildDarPdf(darId: string): Promise<DarPdfPayload | null> 
 
   doc.end();
 
-  const safeOfficer = officer.replace(/[^a-z0-9]+/gi, "-").replace(/^-+|-+$/g, "").toLowerCase().slice(0, 30) || "officer";
-  const filename = `${brand.shortName.replace(/[^a-z0-9]/gi, "-").toLowerCase()}-dar-${row.reportDate}-${safeOfficer}.pdf`;
+  // Redacted PDFs use a generic filename so officer identity is not
+  // leaked even through the Content-Disposition header.
+  const shortName = brand.shortName.replace(/[^a-z0-9]/gi, "-").toLowerCase();
+  const filename = redactForClient
+    ? `${shortName}-dar-${row.reportDate}.pdf`
+    : (() => {
+        const safeOfficer = officer.replace(/[^a-z0-9]+/gi, "-").replace(/^-+|-+$/g, "").toLowerCase().slice(0, 30) || "officer";
+        return `${shortName}-dar-${row.reportDate}-${safeOfficer}.pdf`;
+      })();
   return { filename, stream: doc as unknown as Readable };
 }
 

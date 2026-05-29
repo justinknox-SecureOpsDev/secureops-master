@@ -34,6 +34,8 @@ tags:
     description: Client management with payment terms
   - name: sites
     description: Sites under a client (each holds its own shifts)
+  - name: clientPortal
+    description: Login-gated portal for external client users (role=client)
 
 paths:
   /clients:
@@ -1966,6 +1968,349 @@ paths:
                 type: array
                 items: { $ref: "#/components/schemas/PolicyPublic" }
 
+  # ---- Client portal (role=client) ----
+
+  /client/me:
+    get:
+      operationId: getClientMe
+      tags: [clientPortal]
+      summary: Get client org info and site list
+      security: [{ bearerAuth: [] }]
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ClientMe" }
+        "403": { description: Forbidden }
+
+  /client/sites:
+    get:
+      operationId: getClientSites
+      tags: [clientPortal]
+      summary: List client's sites
+      security: [{ bearerAuth: [] }]
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { type: array, items: { type: object } }
+
+  /client/shifts:
+    get:
+      operationId: getClientShifts
+      tags: [clientPortal]
+      summary: Upcoming shifts at client sites (sanitized — no internal notes)
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - in: query
+          name: from
+          schema: { type: string, format: date-time }
+        - in: query
+          name: to
+          schema: { type: string, format: date-time }
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { type: array, items: { $ref: "#/components/schemas/ClientShift" } }
+
+  /client/incidents:
+    get:
+      operationId: getClientIncidents
+      tags: [clientPortal]
+      summary: Incidents at client sites (sanitized — no adminNotes or officer PII)
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - in: query
+          name: limit
+          schema: { type: integer, default: 50 }
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { type: array, items: { $ref: "#/components/schemas/ClientIncident" } }
+
+  /client/incidents/{id}/pdf:
+    get:
+      operationId: getClientIncidentPdf
+      tags: [clientPortal]
+      summary: Download redacted incident PDF
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        "200":
+          description: PDF file
+          content:
+            application/pdf:
+              schema: { type: string, format: binary }
+        "403": { description: Forbidden }
+        "404": { description: Not Found }
+
+  /client/dar:
+    get:
+      operationId: getClientDar
+      tags: [clientPortal]
+      summary: Daily activity reports at client sites
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - in: query
+          name: limit
+          schema: { type: integer, default: 50 }
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  reports:
+                    type: array
+                    items: { $ref: "#/components/schemas/ClientDar" }
+
+  /client/dar/{id}/pdf:
+    get:
+      operationId: getClientDarPdf
+      tags: [clientPortal]
+      summary: Download DAR PDF (scoped to client sites)
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        "200":
+          description: PDF file
+          content:
+            application/pdf:
+              schema: { type: string, format: binary }
+        "403": { description: Forbidden }
+        "404": { description: Not Found }
+
+  /client/invoices:
+    get:
+      operationId: getClientInvoices
+      tags: [clientPortal]
+      summary: Client invoices (sent/paid/overdue only — no drafts)
+      security: [{ bearerAuth: [] }]
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { type: array, items: { $ref: "#/components/schemas/ClientInvoice" } }
+
+  /client/invoices/{id}/pdf:
+    get:
+      operationId: getClientInvoicePdf
+      tags: [clientPortal]
+      summary: Download invoice PDF
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        "200":
+          description: PDF file
+          content:
+            application/pdf:
+              schema: { type: string, format: binary }
+
+  /client/invoices/{id}/checkout:
+    post:
+      operationId: createClientInvoiceCheckout
+      tags: [clientPortal]
+      summary: Create Stripe Checkout session for invoice payment
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/StripeCheckoutResponse" }
+        "503": { description: Stripe not configured }
+
+  /client/shift-requests:
+    get:
+      operationId: getClientShiftRequests
+      tags: [clientPortal]
+      summary: List coverage requests for the calling client
+      security: [{ bearerAuth: [] }]
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { type: array, items: { $ref: "#/components/schemas/ShiftRequest" } }
+    post:
+      operationId: createClientShiftRequest
+      tags: [clientPortal]
+      summary: Submit a coverage request
+      security: [{ bearerAuth: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [siteId, startDate, endDate, startTime, endTime]
+              properties:
+                siteId: { type: string }
+                startDate: { type: string, format: date }
+                endDate: { type: string, format: date }
+                startTime: { type: string, description: "HH:MM" }
+                endTime: { type: string, description: "HH:MM" }
+                l2Count: { type: integer, default: 0 }
+                l3Count: { type: integer, default: 0 }
+                l4Count: { type: integer, default: 0 }
+                notes: { type: string }
+      responses:
+        "201":
+          description: Created
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ShiftRequest" }
+
+  /admin/client-users:
+    get:
+      operationId: getAdminClientUsers
+      tags: [clientPortal]
+      summary: List all users with role=client
+      security: [{ bearerAuth: [] }]
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { type: array, items: { $ref: "#/components/schemas/ClientUser" } }
+
+  /admin/client-users/invite:
+    post:
+      operationId: inviteClientUser
+      tags: [clientPortal]
+      summary: Invite a client portal user by email + clientId
+      security: [{ bearerAuth: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [email, clientId]
+              properties:
+                email: { type: string, format: email }
+                firstName: { type: string }
+                lastName: { type: string }
+                clientId: { type: string }
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ClientInviteResponse" }
+        "409": { description: Conflict }
+
+  /admin/client-users/{id}:
+    delete:
+      operationId: deleteClientUser
+      tags: [clientPortal]
+      summary: Remove client portal access for a user
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        "200": { description: OK }
+        "404": { description: Not Found }
+
+  /admin/shift-requests:
+    get:
+      operationId: getAdminShiftRequests
+      tags: [clientPortal]
+      summary: List all coverage requests
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - in: query
+          name: status
+          schema: { type: string, enum: [pending, approved, declined] }
+        - in: query
+          name: clientId
+          schema: { type: string }
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { type: array, items: { $ref: "#/components/schemas/ShiftRequest" } }
+
+  /admin/shift-requests/{id}/approve:
+    post:
+      operationId: approveShiftRequest
+      tags: [clientPortal]
+      summary: Approve a coverage request and create real shifts
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema: { type: string, format: uuid }
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                adminNote: { type: string }
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ShiftRequest" }
+
+  /admin/shift-requests/{id}/decline:
+    post:
+      operationId: declineShiftRequest
+      tags: [clientPortal]
+      summary: Decline a coverage request
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema: { type: string, format: uuid }
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                adminNote: { type: string }
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ShiftRequest" }
+
 components:
   schemas:
     RadioChannel:
@@ -3648,3 +3993,148 @@ components:
           nullable: true
           enum: [not_configured, sent, bounced, failed]
         emailDeliveryError: { type: string, nullable: true }
+
+    ClientMe:
+      type: object
+      required: [client, sites]
+      properties:
+        client:
+          type: object
+          required: [id, name]
+          properties:
+            id: { type: string }
+            name: { type: string }
+            address: { type: string, nullable: true }
+            paymentTermsDays: { type: integer, nullable: true }
+        sites:
+          type: array
+          items:
+            type: object
+            required: [id, name]
+            properties:
+              id: { type: string }
+              name: { type: string }
+              address: { type: string, nullable: true }
+
+    ClientShift:
+      type: object
+      required: [id, title, siteId, startTime, endTime, status, officers]
+      properties:
+        id: { type: string }
+        title: { type: string }
+        siteId: { type: string }
+        siteName: { type: string, nullable: true }
+        startTime: { type: string, format: date-time }
+        endTime: { type: string, format: date-time }
+        requiredLicenseLevel: { type: integer, nullable: true }
+        headcount: { type: integer }
+        status: { type: string }
+        officers:
+          type: array
+          items:
+            type: object
+            required: [initials, licenseLevel]
+            properties:
+              initials: { type: string }
+              licenseLevel: { type: integer }
+
+    ClientIncident:
+      type: object
+      required: [id, title, severity, status, occurredAt]
+      properties:
+        id: { type: string }
+        title: { type: string }
+        description: { type: string, nullable: true }
+        severity: { type: string }
+        status: { type: string }
+        locationDescription: { type: string, nullable: true }
+        occurredAt: { type: string, format: date-time }
+        resolvedAt: { type: string, format: date-time, nullable: true }
+        siteName: { type: string, nullable: true }
+
+    ClientDar:
+      type: object
+      required: [id, reportDate, summary]
+      properties:
+        id: { type: string }
+        reportDate: { type: string, format: date }
+        submittedAt: { type: string, format: date-time, nullable: true }
+        summary: { type: string }
+        observations: { type: string, nullable: true }
+        visitorsCount: { type: integer }
+        patrolsCount: { type: integer }
+        incidentsNoted: { type: string, nullable: true }
+        weather: { type: string, nullable: true }
+        siteId: { type: string, nullable: true }
+        siteName: { type: string, nullable: true }
+
+    ClientInvoice:
+      type: object
+      required: [id, invoiceNumber, status, totalAmount]
+      properties:
+        id: { type: string }
+        invoiceNumber: { type: string, nullable: true }
+        siteId: { type: string, nullable: true }
+        siteName: { type: string, nullable: true }
+        periodStart: { type: string, format: date-time, nullable: true }
+        periodEnd: { type: string, format: date-time, nullable: true }
+        clientName: { type: string, nullable: true }
+        subtotal: { type: string, nullable: true }
+        taxAmount: { type: string, nullable: true }
+        totalAmount: { type: string, nullable: true }
+        status: { type: string }
+        dueDate: { type: string, format: date, nullable: true }
+        paidAt: { type: string, format: date-time, nullable: true }
+        notes: { type: string, nullable: true }
+
+    ShiftRequest:
+      type: object
+      required: [id, clientId, siteId, status, startDate, endDate, startTime, endTime]
+      properties:
+        id: { type: string }
+        clientId: { type: string }
+        siteId: { type: string }
+        siteName: { type: string, nullable: true }
+        startDate: { type: string }
+        endDate: { type: string }
+        startTime: { type: string }
+        endTime: { type: string }
+        l2Count: { type: integer }
+        l3Count: { type: integer }
+        l4Count: { type: integer }
+        notes: { type: string, nullable: true }
+        status: { type: string, enum: [pending, approved, declined] }
+        adminNote: { type: string, nullable: true }
+        createdShiftIds: { type: array, items: { type: string } }
+        createdAt: { type: string, format: date-time }
+
+    ClientUser:
+      type: object
+      required: [id, email, firstName, lastName, status, clientId]
+      properties:
+        id: { type: string }
+        email: { type: string }
+        firstName: { type: string, nullable: true }
+        lastName: { type: string, nullable: true }
+        status: { type: string }
+        clientId: { type: string, nullable: true }
+        clientName: { type: string, nullable: true }
+        createdAt: { type: string, format: date-time, nullable: true }
+
+    StripeCheckoutResponse:
+      type: object
+      required: [url]
+      properties:
+        url: { type: string }
+        sessionId: { type: string }
+
+    ClientInviteResponse:
+      type: object
+      required: [status, userId, emailSent]
+      properties:
+        status: { type: string }
+        userId: { type: string }
+        emailSent: { type: boolean }
+        tempPassword: { type: string, nullable: true }
+        onboardingUrl: { type: string, nullable: true }
+

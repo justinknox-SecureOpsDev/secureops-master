@@ -24,6 +24,12 @@ export const invoicesTable = pgTable("invoices", {
   dueDate: date("due_date").notNull(),
   paidAt: timestamp("paid_at", { withTimezone: true }),
   notes: text("notes"),
+  // Stripe invoice payment (client portal). Both columns are nullable —
+  // they are only populated when a client pays online via Stripe Checkout.
+  // stripeCheckoutSessionId: the Checkout session used to initiate payment.
+  // stripePaymentIntentId: the confirmed PaymentIntent (authoritative source of truth).
+  stripeCheckoutSessionId: text("stripe_checkout_session_id"),
+  stripePaymentIntentId: text("stripe_payment_intent_id"),
   // Auto-population bookkeeping (May 2026):
   //   autoSynced = true  → invoiceSync.ts is allowed to rebuild line items
   //                         from approved time entries for this site+week.

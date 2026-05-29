@@ -123,6 +123,8 @@ export function AppShell({ children }: { children: React.ReactNode }) {
       { href: "/hr/invitations", label: "Invitations", Icon: MailPlus },
       { href: "/hr/license-renewals", label: "License renewals", Icon: IdCard },
       { href: "/hr/policies", label: "Policies", Icon: FileText },
+      { href: "/hr/client-users", label: "Client Users", Icon: Briefcase },
+      { href: "/hr/coverage-requests", label: "Coverage Requests", Icon: ClipboardList },
     ];
 
     const accountingLinks: LinkItem[] = [

@@ -1,6 +1,7 @@
 import { pgTable, text, uuid, timestamp, numeric, boolean, jsonb } from "drizzle-orm/pg-core";
 import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod/v4";
+import { clientsTable } from "./clients";
 
 export const usersTable = pgTable("users", {
   id: uuid("id").primaryKey().defaultRandom(),
@@ -43,6 +44,10 @@ export const usersTable = pgTable("users", {
   // throttle) so it never becomes a per-request hot write. Used by admins
   // to decide whether revoking sessions is meaningful right now.
   lastActiveAt: timestamp("last_active_at", { withTimezone: true }),
+  // For role="client" users — links to the client organisation they represent.
+  // Null for admin/dispatcher/employee accounts. The client portal enforces
+  // server-side that every data access is scoped to sites owned by this clientId.
+  clientId: uuid("client_id").references(() => clientsTable.id, { onDelete: "set null" }),
   // Set the first time the user ever successfully completes /auth/login
   // (or /auth/login-totp). Stays sticky after that. Powers the "NEW"
   // pill on the admin personnel list so admins can tell at a glance

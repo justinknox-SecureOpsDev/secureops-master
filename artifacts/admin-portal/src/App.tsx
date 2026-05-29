@@ -39,6 +39,9 @@ import OfficerProfilePage from "@/pages/OfficerProfile";
 import StaffingPage from "@/pages/Staffing";
 import StaffingEventPage from "@/pages/StaffingEvent";
 import NotFound from "@/pages/not-found";
+import { ClientShell } from "@/pages/ClientShell";
+import ClientUsers from "@/pages/ClientUsers";
+import CoverageRequests from "@/pages/CoverageRequests";
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -78,6 +81,12 @@ function Routed() {
     );
   }
   if (!user) return <LoginPage />;
+
+  // Client portal users get their own isolated shell
+  if (user.role === "client") {
+    return <ClientShell />;
+  }
+
   if (user.role !== "admin" && user.role !== "dispatcher") {
     return (
       <div className="min-h-screen flex items-center justify-center bg-brand-navy text-white p-6 text-center">
@@ -119,6 +128,8 @@ function Routed() {
           <Route path="/hr/onboarding" component={OnboardingPage} />
           <Route path="/hr/policies" component={PoliciesPage} />
           <Route path="/hr/invitations" component={InvitationsPage} />
+          <Route path="/hr/client-users" component={ClientUsers} />
+          <Route path="/hr/coverage-requests" component={CoverageRequests} />
           <Route path="/payroll/board" component={PayrollBoardPage} />
           <Route path="/invoices/board" component={InvoiceBoardPage} />
           <Route path="/payroll/pay-run" component={PayRunPage} />

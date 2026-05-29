@@ -25,6 +25,7 @@ import type {
   AdminSignObjectDownloadParams,
   Application,
   ApproveApplicationResponse,
+  ApproveShiftRequestBody,
   ApproveTimeEntryRequest,
   AssignShiftRequest,
   AuthResponse,
@@ -34,10 +35,17 @@ import type {
   ChatUnreadCount,
   ChatUser,
   Client,
+  ClientIncident,
+  ClientInviteResponse,
+  ClientInvoice,
+  ClientMe,
+  ClientShift,
+  ClientUser,
   ClockInRequest,
   ClockOutRequest,
   CreateChatRoomBody,
   CreateClientRequest,
+  CreateClientShiftRequestBody,
   CreateDirectChatBody,
   CreateEmployeeRequest,
   CreateIncidentRequest,
@@ -48,6 +56,7 @@ import type {
   CreateRadioChannelRequest,
   CreateShiftRequest,
   CreateSiteRequest,
+  DeclineShiftRequestBody,
   Employee,
   EmployeeDashboardSummary,
   ErrorResponse,
@@ -55,7 +64,13 @@ import type {
   ForgotPasswordResponse,
   GenerateInvoiceRequest,
   GeneratePayrollRequest,
+  GetAdminShiftRequestsParams,
   GetChatMessagesParams,
+  GetClientDar200,
+  GetClientDarParams,
+  GetClientIncidentsParams,
+  GetClientShiftsParams,
+  GetClientSites200Item,
   GetEmployeeChanges200,
   GetEmployeeChangesParams,
   GetEmployeesParams,
@@ -69,6 +84,7 @@ import type {
   GetTimeEntriesParams,
   HealthStatus,
   Incident,
+  InviteClientUserBody,
   Invoice,
   License,
   LoginRequest,
@@ -93,9 +109,11 @@ import type {
   SendChatMessageBody,
   Shift,
   ShiftAssignment,
+  ShiftRequest,
   SignMyObjectDownload200,
   SignMyObjectDownloadParams,
   Site,
+  StripeCheckoutResponse,
   SubmitApplicationRequest,
   SubmitOnboardingRequest,
   TimeEntry,
@@ -8164,3 +8182,1542 @@ export function useListActivePolicies<
 
   return { ...query, queryKey: queryOptions.queryKey };
 }
+
+/**
+ * @summary Get client org info and site list
+ */
+export const getGetClientMeUrl = () => {
+  return `/api/client/me`;
+};
+
+export const getClientMe = async (options?: RequestInit): Promise<ClientMe> => {
+  return customFetch<ClientMe>(getGetClientMeUrl(), {
+    ...options,
+    method: "GET",
+  });
+};
+
+export const getGetClientMeQueryKey = () => {
+  return [`/api/client/me`] as const;
+};
+
+export const getGetClientMeQueryOptions = <
+  TData = Awaited<ReturnType<typeof getClientMe>>,
+  TError = ErrorType<void>,
+>(options?: {
+  query?: UseQueryOptions<
+    Awaited<ReturnType<typeof getClientMe>>,
+    TError,
+    TData
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}) => {
+  const { query: queryOptions, request: requestOptions } = options ?? {};
+
+  const queryKey = queryOptions?.queryKey ?? getGetClientMeQueryKey();
+
+  const queryFn: QueryFunction<Awaited<ReturnType<typeof getClientMe>>> = ({
+    signal,
+  }) => getClientMe({ signal, ...requestOptions });
+
+  return { queryKey, queryFn, ...queryOptions } as UseQueryOptions<
+    Awaited<ReturnType<typeof getClientMe>>,
+    TError,
+    TData
+  > & { queryKey: QueryKey };
+};
+
+export type GetClientMeQueryResult = NonNullable<
+  Awaited<ReturnType<typeof getClientMe>>
+>;
+export type GetClientMeQueryError = ErrorType<void>;
+
+/**
+ * @summary Get client org info and site list
+ */
+
+export function useGetClientMe<
+  TData = Awaited<ReturnType<typeof getClientMe>>,
+  TError = ErrorType<void>,
+>(options?: {
+  query?: UseQueryOptions<
+    Awaited<ReturnType<typeof getClientMe>>,
+    TError,
+    TData
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+  const queryOptions = getGetClientMeQueryOptions(options);
+
+  const query = useQuery(queryOptions) as UseQueryResult<TData, TError> & {
+    queryKey: QueryKey;
+  };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
+
+/**
+ * @summary List client's sites
+ */
+export const getGetClientSitesUrl = () => {
+  return `/api/client/sites`;
+};
+
+export const getClientSites = async (
+  options?: RequestInit,
+): Promise<GetClientSites200Item[]> => {
+  return customFetch<GetClientSites200Item[]>(getGetClientSitesUrl(), {
+    ...options,
+    method: "GET",
+  });
+};
+
+export const getGetClientSitesQueryKey = () => {
+  return [`/api/client/sites`] as const;
+};
+
+export const getGetClientSitesQueryOptions = <
+  TData = Awaited<ReturnType<typeof getClientSites>>,
+  TError = ErrorType<unknown>,
+>(options?: {
+  query?: UseQueryOptions<
+    Awaited<ReturnType<typeof getClientSites>>,
+    TError,
+    TData
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}) => {
+  const { query: queryOptions, request: requestOptions } = options ?? {};
+
+  const queryKey = queryOptions?.queryKey ?? getGetClientSitesQueryKey();
+
+  const queryFn: QueryFunction<Awaited<ReturnType<typeof getClientSites>>> = ({
+    signal,
+  }) => getClientSites({ signal, ...requestOptions });
+
+  return { queryKey, queryFn, ...queryOptions } as UseQueryOptions<
+    Awaited<ReturnType<typeof getClientSites>>,
+    TError,
+    TData
+  > & { queryKey: QueryKey };
+};
+
+export type GetClientSitesQueryResult = NonNullable<
+  Awaited<ReturnType<typeof getClientSites>>
+>;
+export type GetClientSitesQueryError = ErrorType<unknown>;
+
+/**
+ * @summary List client's sites
+ */
+
+export function useGetClientSites<
+  TData = Awaited<ReturnType<typeof getClientSites>>,
+  TError = ErrorType<unknown>,
+>(options?: {
+  query?: UseQueryOptions<
+    Awaited<ReturnType<typeof getClientSites>>,
+    TError,
+    TData
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+  const queryOptions = getGetClientSitesQueryOptions(options);
+
+  const query = useQuery(queryOptions) as UseQueryResult<TData, TError> & {
+    queryKey: QueryKey;
+  };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
+
+/**
+ * @summary Upcoming shifts at client sites (sanitized — no internal notes)
+ */
+export const getGetClientShiftsUrl = (params?: GetClientShiftsParams) => {
+  const normalizedParams = new URLSearchParams();
+
+  Object.entries(params || {}).forEach(([key, value]) => {
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? "null" : value.toString());
+    }
+  });
+
+  const stringifiedParams = normalizedParams.toString();
+
+  return stringifiedParams.length > 0
+    ? `/api/client/shifts?${stringifiedParams}`
+    : `/api/client/shifts`;
+};
+
+export const getClientShifts = async (
+  params?: GetClientShiftsParams,
+  options?: RequestInit,
+): Promise<ClientShift[]> => {
+  return customFetch<ClientShift[]>(getGetClientShiftsUrl(params), {
+    ...options,
+    method: "GET",
+  });
+};
+
+export const getGetClientShiftsQueryKey = (params?: GetClientShiftsParams) => {
+  return [`/api/client/shifts`, ...(params ? [params] : [])] as const;
+};
+
+export const getGetClientShiftsQueryOptions = <
+  TData = Awaited<ReturnType<typeof getClientShifts>>,
+  TError = ErrorType<unknown>,
+>(
+  params?: GetClientShiftsParams,
+  options?: {
+    query?: UseQueryOptions<
+      Awaited<ReturnType<typeof getClientShifts>>,
+      TError,
+      TData
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+) => {
+  const { query: queryOptions, request: requestOptions } = options ?? {};
+
+  const queryKey = queryOptions?.queryKey ?? getGetClientShiftsQueryKey(params);
+
+  const queryFn: QueryFunction<Awaited<ReturnType<typeof getClientShifts>>> = ({
+    signal,
+  }) => getClientShifts(params, { signal, ...requestOptions });
+
+  return { queryKey, queryFn, ...queryOptions } as UseQueryOptions<
+    Awaited<ReturnType<typeof getClientShifts>>,
+    TError,
+    TData
+  > & { queryKey: QueryKey };
+};
+
+export type GetClientShiftsQueryResult = NonNullable<
+  Awaited<ReturnType<typeof getClientShifts>>
+>;
+export type GetClientShiftsQueryError = ErrorType<unknown>;
+
+/**
+ * @summary Upcoming shifts at client sites (sanitized — no internal notes)
+ */
+
+export function useGetClientShifts<
+  TData = Awaited<ReturnType<typeof getClientShifts>>,
+  TError = ErrorType<unknown>,
+>(
+  params?: GetClientShiftsParams,
+  options?: {
+    query?: UseQueryOptions<
+      Awaited<ReturnType<typeof getClientShifts>>,
+      TError,
+      TData
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+): UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+  const queryOptions = getGetClientShiftsQueryOptions(params, options);
+
+  const query = useQuery(queryOptions) as UseQueryResult<TData, TError> & {
+    queryKey: QueryKey;
+  };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
+
+/**
+ * @summary Incidents at client sites (sanitized — no adminNotes or officer PII)
+ */
+export const getGetClientIncidentsUrl = (params?: GetClientIncidentsParams) => {
+  const normalizedParams = new URLSearchParams();
+
+  Object.entries(params || {}).forEach(([key, value]) => {
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? "null" : value.toString());
+    }
+  });
+
+  const stringifiedParams = normalizedParams.toString();
+
+  return stringifiedParams.length > 0
+    ? `/api/client/incidents?${stringifiedParams}`
+    : `/api/client/incidents`;
+};
+
+export const getClientIncidents = async (
+  params?: GetClientIncidentsParams,
+  options?: RequestInit,
+): Promise<ClientIncident[]> => {
+  return customFetch<ClientIncident[]>(getGetClientIncidentsUrl(params), {
+    ...options,
+    method: "GET",
+  });
+};
+
+export const getGetClientIncidentsQueryKey = (
+  params?: GetClientIncidentsParams,
+) => {
+  return [`/api/client/incidents`, ...(params ? [params] : [])] as const;
+};
+
+export const getGetClientIncidentsQueryOptions = <
+  TData = Awaited<ReturnType<typeof getClientIncidents>>,
+  TError = ErrorType<unknown>,
+>(
+  params?: GetClientIncidentsParams,
+  options?: {
+    query?: UseQueryOptions<
+      Awaited<ReturnType<typeof getClientIncidents>>,
+      TError,
+      TData
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+) => {
+  const { query: queryOptions, request: requestOptions } = options ?? {};
+
+  const queryKey =
+    queryOptions?.queryKey ?? getGetClientIncidentsQueryKey(params);
+
+  const queryFn: QueryFunction<
+    Awaited<ReturnType<typeof getClientIncidents>>
+  > = ({ signal }) => getClientIncidents(params, { signal, ...requestOptions });
+
+  return { queryKey, queryFn, ...queryOptions } as UseQueryOptions<
+    Awaited<ReturnType<typeof getClientIncidents>>,
+    TError,
+    TData
+  > & { queryKey: QueryKey };
+};
+
+export type GetClientIncidentsQueryResult = NonNullable<
+  Awaited<ReturnType<typeof getClientIncidents>>
+>;
+export type GetClientIncidentsQueryError = ErrorType<unknown>;
+
+/**
+ * @summary Incidents at client sites (sanitized — no adminNotes or officer PII)
+ */
+
+export function useGetClientIncidents<
+  TData = Awaited<ReturnType<typeof getClientIncidents>>,
+  TError = ErrorType<unknown>,
+>(
+  params?: GetClientIncidentsParams,
+  options?: {
+    query?: UseQueryOptions<
+      Awaited<ReturnType<typeof getClientIncidents>>,
+      TError,
+      TData
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+): UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+  const queryOptions = getGetClientIncidentsQueryOptions(params, options);
+
+  const query = useQuery(queryOptions) as UseQueryResult<TData, TError> & {
+    queryKey: QueryKey;
+  };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
+
+/**
+ * @summary Download redacted incident PDF
+ */
+export const getGetClientIncidentPdfUrl = (id: string) => {
+  return `/api/client/incidents/${id}/pdf`;
+};
+
+export const getClientIncidentPdf = async (
+  id: string,
+  options?: RequestInit,
+): Promise<Blob> => {
+  return customFetch<Blob>(getGetClientIncidentPdfUrl(id), {
+    ...options,
+    method: "GET",
+  });
+};
+
+export const getGetClientIncidentPdfQueryKey = (id: string) => {
+  return [`/api/client/incidents/${id}/pdf`] as const;
+};
+
+export const getGetClientIncidentPdfQueryOptions = <
+  TData = Awaited<ReturnType<typeof getClientIncidentPdf>>,
+  TError = ErrorType<void>,
+>(
+  id: string,
+  options?: {
+    query?: UseQueryOptions<
+      Awaited<ReturnType<typeof getClientIncidentPdf>>,
+      TError,
+      TData
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+) => {
+  const { query: queryOptions, request: requestOptions } = options ?? {};
+
+  const queryKey =
+    queryOptions?.queryKey ?? getGetClientIncidentPdfQueryKey(id);
+
+  const queryFn: QueryFunction<
+    Awaited<ReturnType<typeof getClientIncidentPdf>>
+  > = ({ signal }) => getClientIncidentPdf(id, { signal, ...requestOptions });
+
+  return {
+    queryKey,
+    queryFn,
+    enabled: !!id,
+    ...queryOptions,
+  } as UseQueryOptions<
+    Awaited<ReturnType<typeof getClientIncidentPdf>>,
+    TError,
+    TData
+  > & { queryKey: QueryKey };
+};
+
+export type GetClientIncidentPdfQueryResult = NonNullable<
+  Awaited<ReturnType<typeof getClientIncidentPdf>>
+>;
+export type GetClientIncidentPdfQueryError = ErrorType<void>;
+
+/**
+ * @summary Download redacted incident PDF
+ */
+
+export function useGetClientIncidentPdf<
+  TData = Awaited<ReturnType<typeof getClientIncidentPdf>>,
+  TError = ErrorType<void>,
+>(
+  id: string,
+  options?: {
+    query?: UseQueryOptions<
+      Awaited<ReturnType<typeof getClientIncidentPdf>>,
+      TError,
+      TData
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+): UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+  const queryOptions = getGetClientIncidentPdfQueryOptions(id, options);
+
+  const query = useQuery(queryOptions) as UseQueryResult<TData, TError> & {
+    queryKey: QueryKey;
+  };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
+
+/**
+ * @summary Daily activity reports at client sites
+ */
+export const getGetClientDarUrl = (params?: GetClientDarParams) => {
+  const normalizedParams = new URLSearchParams();
+
+  Object.entries(params || {}).forEach(([key, value]) => {
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? "null" : value.toString());
+    }
+  });
+
+  const stringifiedParams = normalizedParams.toString();
+
+  return stringifiedParams.length > 0
+    ? `/api/client/dar?${stringifiedParams}`
+    : `/api/client/dar`;
+};
+
+export const getClientDar = async (
+  params?: GetClientDarParams,
+  options?: RequestInit,
+): Promise<GetClientDar200> => {
+  return customFetch<GetClientDar200>(getGetClientDarUrl(params), {
+    ...options,
+    method: "GET",
+  });
+};
+
+export const getGetClientDarQueryKey = (params?: GetClientDarParams) => {
+  return [`/api/client/dar`, ...(params ? [params] : [])] as const;
+};
+
+export const getGetClientDarQueryOptions = <
+  TData = Awaited<ReturnType<typeof getClientDar>>,
+  TError = ErrorType<unknown>,
+>(
+  params?: GetClientDarParams,
+  options?: {
+    query?: UseQueryOptions<
+      Awaited<ReturnType<typeof getClientDar>>,
+      TError,
+      TData
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+) => {
+  const { query: queryOptions, request: requestOptions } = options ?? {};
+
+  const queryKey = queryOptions?.queryKey ?? getGetClientDarQueryKey(params);
+
+  const queryFn: QueryFunction<Awaited<ReturnType<typeof getClientDar>>> = ({
+    signal,
+  }) => getClientDar(params, { signal, ...requestOptions });
+
+  return { queryKey, queryFn, ...queryOptions } as UseQueryOptions<
+    Awaited<ReturnType<typeof getClientDar>>,
+    TError,
+    TData
+  > & { queryKey: QueryKey };
+};
+
+export type GetClientDarQueryResult = NonNullable<
+  Awaited<ReturnType<typeof getClientDar>>
+>;
+export type GetClientDarQueryError = ErrorType<unknown>;
+
+/**
+ * @summary Daily activity reports at client sites
+ */
+
+export function useGetClientDar<
+  TData = Awaited<ReturnType<typeof getClientDar>>,
+  TError = ErrorType<unknown>,
+>(
+  params?: GetClientDarParams,
+  options?: {
+    query?: UseQueryOptions<
+      Awaited<ReturnType<typeof getClientDar>>,
+      TError,
+      TData
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+): UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+  const queryOptions = getGetClientDarQueryOptions(params, options);
+
+  const query = useQuery(queryOptions) as UseQueryResult<TData, TError> & {
+    queryKey: QueryKey;
+  };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
+
+/**
+ * @summary Download DAR PDF (scoped to client sites)
+ */
+export const getGetClientDarPdfUrl = (id: string) => {
+  return `/api/client/dar/${id}/pdf`;
+};
+
+export const getClientDarPdf = async (
+  id: string,
+  options?: RequestInit,
+): Promise<Blob> => {
+  return customFetch<Blob>(getGetClientDarPdfUrl(id), {
+    ...options,
+    method: "GET",
+  });
+};
+
+export const getGetClientDarPdfQueryKey = (id: string) => {
+  return [`/api/client/dar/${id}/pdf`] as const;
+};
+
+export const getGetClientDarPdfQueryOptions = <
+  TData = Awaited<ReturnType<typeof getClientDarPdf>>,
+  TError = ErrorType<void>,
+>(
+  id: string,
+  options?: {
+    query?: UseQueryOptions<
+      Awaited<ReturnType<typeof getClientDarPdf>>,
+      TError,
+      TData
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+) => {
+  const { query: queryOptions, request: requestOptions } = options ?? {};
+
+  const queryKey = queryOptions?.queryKey ?? getGetClientDarPdfQueryKey(id);
+
+  const queryFn: QueryFunction<Awaited<ReturnType<typeof getClientDarPdf>>> = ({
+    signal,
+  }) => getClientDarPdf(id, { signal, ...requestOptions });
+
+  return {
+    queryKey,
+    queryFn,
+    enabled: !!id,
+    ...queryOptions,
+  } as UseQueryOptions<
+    Awaited<ReturnType<typeof getClientDarPdf>>,
+    TError,
+    TData
+  > & { queryKey: QueryKey };
+};
+
+export type GetClientDarPdfQueryResult = NonNullable<
+  Awaited<ReturnType<typeof getClientDarPdf>>
+>;
+export type GetClientDarPdfQueryError = ErrorType<void>;
+
+/**
+ * @summary Download DAR PDF (scoped to client sites)
+ */
+
+export function useGetClientDarPdf<
+  TData = Awaited<ReturnType<typeof getClientDarPdf>>,
+  TError = ErrorType<void>,
+>(
+  id: string,
+  options?: {
+    query?: UseQueryOptions<
+      Awaited<ReturnType<typeof getClientDarPdf>>,
+      TError,
+      TData
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+): UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+  const queryOptions = getGetClientDarPdfQueryOptions(id, options);
+
+  const query = useQuery(queryOptions) as UseQueryResult<TData, TError> & {
+    queryKey: QueryKey;
+  };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
+
+/**
+ * @summary Client invoices (sent/paid/overdue only — no drafts)
+ */
+export const getGetClientInvoicesUrl = () => {
+  return `/api/client/invoices`;
+};
+
+export const getClientInvoices = async (
+  options?: RequestInit,
+): Promise<ClientInvoice[]> => {
+  return customFetch<ClientInvoice[]>(getGetClientInvoicesUrl(), {
+    ...options,
+    method: "GET",
+  });
+};
+
+export const getGetClientInvoicesQueryKey = () => {
+  return [`/api/client/invoices`] as const;
+};
+
+export const getGetClientInvoicesQueryOptions = <
+  TData = Awaited<ReturnType<typeof getClientInvoices>>,
+  TError = ErrorType<unknown>,
+>(options?: {
+  query?: UseQueryOptions<
+    Awaited<ReturnType<typeof getClientInvoices>>,
+    TError,
+    TData
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}) => {
+  const { query: queryOptions, request: requestOptions } = options ?? {};
+
+  const queryKey = queryOptions?.queryKey ?? getGetClientInvoicesQueryKey();
+
+  const queryFn: QueryFunction<
+    Awaited<ReturnType<typeof getClientInvoices>>
+  > = ({ signal }) => getClientInvoices({ signal, ...requestOptions });
+
+  return { queryKey, queryFn, ...queryOptions } as UseQueryOptions<
+    Awaited<ReturnType<typeof getClientInvoices>>,
+    TError,
+    TData
+  > & { queryKey: QueryKey };
+};
+
+export type GetClientInvoicesQueryResult = NonNullable<
+  Awaited<ReturnType<typeof getClientInvoices>>
+>;
+export type GetClientInvoicesQueryError = ErrorType<unknown>;
+
+/**
+ * @summary Client invoices (sent/paid/overdue only — no drafts)
+ */
+
+export function useGetClientInvoices<
+  TData = Awaited<ReturnType<typeof getClientInvoices>>,
+  TError = ErrorType<unknown>,
+>(options?: {
+  query?: UseQueryOptions<
+    Awaited<ReturnType<typeof getClientInvoices>>,
+    TError,
+    TData
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+  const queryOptions = getGetClientInvoicesQueryOptions(options);
+
+  const query = useQuery(queryOptions) as UseQueryResult<TData, TError> & {
+    queryKey: QueryKey;
+  };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
+
+/**
+ * @summary Download invoice PDF
+ */
+export const getGetClientInvoicePdfUrl = (id: string) => {
+  return `/api/client/invoices/${id}/pdf`;
+};
+
+export const getClientInvoicePdf = async (
+  id: string,
+  options?: RequestInit,
+): Promise<Blob> => {
+  return customFetch<Blob>(getGetClientInvoicePdfUrl(id), {
+    ...options,
+    method: "GET",
+  });
+};
+
+export const getGetClientInvoicePdfQueryKey = (id: string) => {
+  return [`/api/client/invoices/${id}/pdf`] as const;
+};
+
+export const getGetClientInvoicePdfQueryOptions = <
+  TData = Awaited<ReturnType<typeof getClientInvoicePdf>>,
+  TError = ErrorType<unknown>,
+>(
+  id: string,
+  options?: {
+    query?: UseQueryOptions<
+      Awaited<ReturnType<typeof getClientInvoicePdf>>,
+      TError,
+      TData
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+) => {
+  const { query: queryOptions, request: requestOptions } = options ?? {};
+
+  const queryKey = queryOptions?.queryKey ?? getGetClientInvoicePdfQueryKey(id);
+
+  const queryFn: QueryFunction<
+    Awaited<ReturnType<typeof getClientInvoicePdf>>
+  > = ({ signal }) => getClientInvoicePdf(id, { signal, ...requestOptions });
+
+  return {
+    queryKey,
+    queryFn,
+    enabled: !!id,
+    ...queryOptions,
+  } as UseQueryOptions<
+    Awaited<ReturnType<typeof getClientInvoicePdf>>,
+    TError,
+    TData
+  > & { queryKey: QueryKey };
+};
+
+export type GetClientInvoicePdfQueryResult = NonNullable<
+  Awaited<ReturnType<typeof getClientInvoicePdf>>
+>;
+export type GetClientInvoicePdfQueryError = ErrorType<unknown>;
+
+/**
+ * @summary Download invoice PDF
+ */
+
+export function useGetClientInvoicePdf<
+  TData = Awaited<ReturnType<typeof getClientInvoicePdf>>,
+  TError = ErrorType<unknown>,
+>(
+  id: string,
+  options?: {
+    query?: UseQueryOptions<
+      Awaited<ReturnType<typeof getClientInvoicePdf>>,
+      TError,
+      TData
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+): UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+  const queryOptions = getGetClientInvoicePdfQueryOptions(id, options);
+
+  const query = useQuery(queryOptions) as UseQueryResult<TData, TError> & {
+    queryKey: QueryKey;
+  };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
+
+/**
+ * @summary Create Stripe Checkout session for invoice payment
+ */
+export const getCreateClientInvoiceCheckoutUrl = (id: string) => {
+  return `/api/client/invoices/${id}/checkout`;
+};
+
+export const createClientInvoiceCheckout = async (
+  id: string,
+  options?: RequestInit,
+): Promise<StripeCheckoutResponse> => {
+  return customFetch<StripeCheckoutResponse>(
+    getCreateClientInvoiceCheckoutUrl(id),
+    {
+      ...options,
+      method: "POST",
+    },
+  );
+};
+
+export const getCreateClientInvoiceCheckoutMutationOptions = <
+  TError = ErrorType<void>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof createClientInvoiceCheckout>>,
+    TError,
+    { id: string },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof createClientInvoiceCheckout>>,
+  TError,
+  { id: string },
+  TContext
+> => {
+  const mutationKey = ["createClientInvoiceCheckout"];
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof createClientInvoiceCheckout>>,
+    { id: string }
+  > = (props) => {
+    const { id } = props ?? {};
+
+    return createClientInvoiceCheckout(id, requestOptions);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type CreateClientInvoiceCheckoutMutationResult = NonNullable<
+  Awaited<ReturnType<typeof createClientInvoiceCheckout>>
+>;
+
+export type CreateClientInvoiceCheckoutMutationError = ErrorType<void>;
+
+/**
+ * @summary Create Stripe Checkout session for invoice payment
+ */
+export const useCreateClientInvoiceCheckout = <
+  TError = ErrorType<void>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof createClientInvoiceCheckout>>,
+    TError,
+    { id: string },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationResult<
+  Awaited<ReturnType<typeof createClientInvoiceCheckout>>,
+  TError,
+  { id: string },
+  TContext
+> => {
+  return useMutation(getCreateClientInvoiceCheckoutMutationOptions(options));
+};
+
+/**
+ * @summary List coverage requests for the calling client
+ */
+export const getGetClientShiftRequestsUrl = () => {
+  return `/api/client/shift-requests`;
+};
+
+export const getClientShiftRequests = async (
+  options?: RequestInit,
+): Promise<ShiftRequest[]> => {
+  return customFetch<ShiftRequest[]>(getGetClientShiftRequestsUrl(), {
+    ...options,
+    method: "GET",
+  });
+};
+
+export const getGetClientShiftRequestsQueryKey = () => {
+  return [`/api/client/shift-requests`] as const;
+};
+
+export const getGetClientShiftRequestsQueryOptions = <
+  TData = Awaited<ReturnType<typeof getClientShiftRequests>>,
+  TError = ErrorType<unknown>,
+>(options?: {
+  query?: UseQueryOptions<
+    Awaited<ReturnType<typeof getClientShiftRequests>>,
+    TError,
+    TData
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}) => {
+  const { query: queryOptions, request: requestOptions } = options ?? {};
+
+  const queryKey =
+    queryOptions?.queryKey ?? getGetClientShiftRequestsQueryKey();
+
+  const queryFn: QueryFunction<
+    Awaited<ReturnType<typeof getClientShiftRequests>>
+  > = ({ signal }) => getClientShiftRequests({ signal, ...requestOptions });
+
+  return { queryKey, queryFn, ...queryOptions } as UseQueryOptions<
+    Awaited<ReturnType<typeof getClientShiftRequests>>,
+    TError,
+    TData
+  > & { queryKey: QueryKey };
+};
+
+export type GetClientShiftRequestsQueryResult = NonNullable<
+  Awaited<ReturnType<typeof getClientShiftRequests>>
+>;
+export type GetClientShiftRequestsQueryError = ErrorType<unknown>;
+
+/**
+ * @summary List coverage requests for the calling client
+ */
+
+export function useGetClientShiftRequests<
+  TData = Awaited<ReturnType<typeof getClientShiftRequests>>,
+  TError = ErrorType<unknown>,
+>(options?: {
+  query?: UseQueryOptions<
+    Awaited<ReturnType<typeof getClientShiftRequests>>,
+    TError,
+    TData
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+  const queryOptions = getGetClientShiftRequestsQueryOptions(options);
+
+  const query = useQuery(queryOptions) as UseQueryResult<TData, TError> & {
+    queryKey: QueryKey;
+  };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
+
+/**
+ * @summary Submit a coverage request
+ */
+export const getCreateClientShiftRequestUrl = () => {
+  return `/api/client/shift-requests`;
+};
+
+export const createClientShiftRequest = async (
+  createClientShiftRequestBody: CreateClientShiftRequestBody,
+  options?: RequestInit,
+): Promise<ShiftRequest> => {
+  return customFetch<ShiftRequest>(getCreateClientShiftRequestUrl(), {
+    ...options,
+    method: "POST",
+    headers: { "Content-Type": "application/json", ...options?.headers },
+    body: JSON.stringify(createClientShiftRequestBody),
+  });
+};
+
+export const getCreateClientShiftRequestMutationOptions = <
+  TError = ErrorType<unknown>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof createClientShiftRequest>>,
+    TError,
+    { data: BodyType<CreateClientShiftRequestBody> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof createClientShiftRequest>>,
+  TError,
+  { data: BodyType<CreateClientShiftRequestBody> },
+  TContext
+> => {
+  const mutationKey = ["createClientShiftRequest"];
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof createClientShiftRequest>>,
+    { data: BodyType<CreateClientShiftRequestBody> }
+  > = (props) => {
+    const { data } = props ?? {};
+
+    return createClientShiftRequest(data, requestOptions);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type CreateClientShiftRequestMutationResult = NonNullable<
+  Awaited<ReturnType<typeof createClientShiftRequest>>
+>;
+export type CreateClientShiftRequestMutationBody =
+  BodyType<CreateClientShiftRequestBody>;
+export type CreateClientShiftRequestMutationError = ErrorType<unknown>;
+
+/**
+ * @summary Submit a coverage request
+ */
+export const useCreateClientShiftRequest = <
+  TError = ErrorType<unknown>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof createClientShiftRequest>>,
+    TError,
+    { data: BodyType<CreateClientShiftRequestBody> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationResult<
+  Awaited<ReturnType<typeof createClientShiftRequest>>,
+  TError,
+  { data: BodyType<CreateClientShiftRequestBody> },
+  TContext
+> => {
+  return useMutation(getCreateClientShiftRequestMutationOptions(options));
+};
+
+/**
+ * @summary List all users with role=client
+ */
+export const getGetAdminClientUsersUrl = () => {
+  return `/api/admin/client-users`;
+};
+
+export const getAdminClientUsers = async (
+  options?: RequestInit,
+): Promise<ClientUser[]> => {
+  return customFetch<ClientUser[]>(getGetAdminClientUsersUrl(), {
+    ...options,
+    method: "GET",
+  });
+};
+
+export const getGetAdminClientUsersQueryKey = () => {
+  return [`/api/admin/client-users`] as const;
+};
+
+export const getGetAdminClientUsersQueryOptions = <
+  TData = Awaited<ReturnType<typeof getAdminClientUsers>>,
+  TError = ErrorType<unknown>,
+>(options?: {
+  query?: UseQueryOptions<
+    Awaited<ReturnType<typeof getAdminClientUsers>>,
+    TError,
+    TData
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}) => {
+  const { query: queryOptions, request: requestOptions } = options ?? {};
+
+  const queryKey = queryOptions?.queryKey ?? getGetAdminClientUsersQueryKey();
+
+  const queryFn: QueryFunction<
+    Awaited<ReturnType<typeof getAdminClientUsers>>
+  > = ({ signal }) => getAdminClientUsers({ signal, ...requestOptions });
+
+  return { queryKey, queryFn, ...queryOptions } as UseQueryOptions<
+    Awaited<ReturnType<typeof getAdminClientUsers>>,
+    TError,
+    TData
+  > & { queryKey: QueryKey };
+};
+
+export type GetAdminClientUsersQueryResult = NonNullable<
+  Awaited<ReturnType<typeof getAdminClientUsers>>
+>;
+export type GetAdminClientUsersQueryError = ErrorType<unknown>;
+
+/**
+ * @summary List all users with role=client
+ */
+
+export function useGetAdminClientUsers<
+  TData = Awaited<ReturnType<typeof getAdminClientUsers>>,
+  TError = ErrorType<unknown>,
+>(options?: {
+  query?: UseQueryOptions<
+    Awaited<ReturnType<typeof getAdminClientUsers>>,
+    TError,
+    TData
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+  const queryOptions = getGetAdminClientUsersQueryOptions(options);
+
+  const query = useQuery(queryOptions) as UseQueryResult<TData, TError> & {
+    queryKey: QueryKey;
+  };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
+
+/**
+ * @summary Invite a client portal user by email + clientId
+ */
+export const getInviteClientUserUrl = () => {
+  return `/api/admin/client-users/invite`;
+};
+
+export const inviteClientUser = async (
+  inviteClientUserBody: InviteClientUserBody,
+  options?: RequestInit,
+): Promise<ClientInviteResponse> => {
+  return customFetch<ClientInviteResponse>(getInviteClientUserUrl(), {
+    ...options,
+    method: "POST",
+    headers: { "Content-Type": "application/json", ...options?.headers },
+    body: JSON.stringify(inviteClientUserBody),
+  });
+};
+
+export const getInviteClientUserMutationOptions = <
+  TError = ErrorType<void>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof inviteClientUser>>,
+    TError,
+    { data: BodyType<InviteClientUserBody> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof inviteClientUser>>,
+  TError,
+  { data: BodyType<InviteClientUserBody> },
+  TContext
+> => {
+  const mutationKey = ["inviteClientUser"];
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof inviteClientUser>>,
+    { data: BodyType<InviteClientUserBody> }
+  > = (props) => {
+    const { data } = props ?? {};
+
+    return inviteClientUser(data, requestOptions);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type InviteClientUserMutationResult = NonNullable<
+  Awaited<ReturnType<typeof inviteClientUser>>
+>;
+export type InviteClientUserMutationBody = BodyType<InviteClientUserBody>;
+export type InviteClientUserMutationError = ErrorType<void>;
+
+/**
+ * @summary Invite a client portal user by email + clientId
+ */
+export const useInviteClientUser = <
+  TError = ErrorType<void>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof inviteClientUser>>,
+    TError,
+    { data: BodyType<InviteClientUserBody> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationResult<
+  Awaited<ReturnType<typeof inviteClientUser>>,
+  TError,
+  { data: BodyType<InviteClientUserBody> },
+  TContext
+> => {
+  return useMutation(getInviteClientUserMutationOptions(options));
+};
+
+/**
+ * @summary Remove client portal access for a user
+ */
+export const getDeleteClientUserUrl = (id: string) => {
+  return `/api/admin/client-users/${id}`;
+};
+
+export const deleteClientUser = async (
+  id: string,
+  options?: RequestInit,
+): Promise<void> => {
+  return customFetch<void>(getDeleteClientUserUrl(id), {
+    ...options,
+    method: "DELETE",
+  });
+};
+
+export const getDeleteClientUserMutationOptions = <
+  TError = ErrorType<void>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof deleteClientUser>>,
+    TError,
+    { id: string },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof deleteClientUser>>,
+  TError,
+  { id: string },
+  TContext
+> => {
+  const mutationKey = ["deleteClientUser"];
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof deleteClientUser>>,
+    { id: string }
+  > = (props) => {
+    const { id } = props ?? {};
+
+    return deleteClientUser(id, requestOptions);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type DeleteClientUserMutationResult = NonNullable<
+  Awaited<ReturnType<typeof deleteClientUser>>
+>;
+
+export type DeleteClientUserMutationError = ErrorType<void>;
+
+/**
+ * @summary Remove client portal access for a user
+ */
+export const useDeleteClientUser = <
+  TError = ErrorType<void>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof deleteClientUser>>,
+    TError,
+    { id: string },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationResult<
+  Awaited<ReturnType<typeof deleteClientUser>>,
+  TError,
+  { id: string },
+  TContext
+> => {
+  return useMutation(getDeleteClientUserMutationOptions(options));
+};
+
+/**
+ * @summary List all coverage requests
+ */
+export const getGetAdminShiftRequestsUrl = (
+  params?: GetAdminShiftRequestsParams,
+) => {
+  const normalizedParams = new URLSearchParams();
+
+  Object.entries(params || {}).forEach(([key, value]) => {
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? "null" : value.toString());
+    }
+  });
+
+  const stringifiedParams = normalizedParams.toString();
+
+  return stringifiedParams.length > 0
+    ? `/api/admin/shift-requests?${stringifiedParams}`
+    : `/api/admin/shift-requests`;
+};
+
+export const getAdminShiftRequests = async (
+  params?: GetAdminShiftRequestsParams,
+  options?: RequestInit,
+): Promise<ShiftRequest[]> => {
+  return customFetch<ShiftRequest[]>(getGetAdminShiftRequestsUrl(params), {
+    ...options,
+    method: "GET",
+  });
+};
+
+export const getGetAdminShiftRequestsQueryKey = (
+  params?: GetAdminShiftRequestsParams,
+) => {
+  return [`/api/admin/shift-requests`, ...(params ? [params] : [])] as const;
+};
+
+export const getGetAdminShiftRequestsQueryOptions = <
+  TData = Awaited<ReturnType<typeof getAdminShiftRequests>>,
+  TError = ErrorType<unknown>,
+>(
+  params?: GetAdminShiftRequestsParams,
+  options?: {
+    query?: UseQueryOptions<
+      Awaited<ReturnType<typeof getAdminShiftRequests>>,
+      TError,
+      TData
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+) => {
+  const { query: queryOptions, request: requestOptions } = options ?? {};
+
+  const queryKey =
+    queryOptions?.queryKey ?? getGetAdminShiftRequestsQueryKey(params);
+
+  const queryFn: QueryFunction<
+    Awaited<ReturnType<typeof getAdminShiftRequests>>
+  > = ({ signal }) =>
+    getAdminShiftRequests(params, { signal, ...requestOptions });
+
+  return { queryKey, queryFn, ...queryOptions } as UseQueryOptions<
+    Awaited<ReturnType<typeof getAdminShiftRequests>>,
+    TError,
+    TData
+  > & { queryKey: QueryKey };
+};
+
+export type GetAdminShiftRequestsQueryResult = NonNullable<
+  Awaited<ReturnType<typeof getAdminShiftRequests>>
+>;
+export type GetAdminShiftRequestsQueryError = ErrorType<unknown>;
+
+/**
+ * @summary List all coverage requests
+ */
+
+export function useGetAdminShiftRequests<
+  TData = Awaited<ReturnType<typeof getAdminShiftRequests>>,
+  TError = ErrorType<unknown>,
+>(
+  params?: GetAdminShiftRequestsParams,
+  options?: {
+    query?: UseQueryOptions<
+      Awaited<ReturnType<typeof getAdminShiftRequests>>,
+      TError,
+      TData
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+): UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+  const queryOptions = getGetAdminShiftRequestsQueryOptions(params, options);
+
+  const query = useQuery(queryOptions) as UseQueryResult<TData, TError> & {
+    queryKey: QueryKey;
+  };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
+
+/**
+ * @summary Approve a coverage request and create real shifts
+ */
+export const getApproveShiftRequestUrl = (id: string) => {
+  return `/api/admin/shift-requests/${id}/approve`;
+};
+
+export const approveShiftRequest = async (
+  id: string,
+  approveShiftRequestBody: ApproveShiftRequestBody,
+  options?: RequestInit,
+): Promise<ShiftRequest> => {
+  return customFetch<ShiftRequest>(getApproveShiftRequestUrl(id), {
+    ...options,
+    method: "POST",
+    headers: { "Content-Type": "application/json", ...options?.headers },
+    body: JSON.stringify(approveShiftRequestBody),
+  });
+};
+
+export const getApproveShiftRequestMutationOptions = <
+  TError = ErrorType<unknown>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof approveShiftRequest>>,
+    TError,
+    { id: string; data: BodyType<ApproveShiftRequestBody> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof approveShiftRequest>>,
+  TError,
+  { id: string; data: BodyType<ApproveShiftRequestBody> },
+  TContext
+> => {
+  const mutationKey = ["approveShiftRequest"];
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof approveShiftRequest>>,
+    { id: string; data: BodyType<ApproveShiftRequestBody> }
+  > = (props) => {
+    const { id, data } = props ?? {};
+
+    return approveShiftRequest(id, data, requestOptions);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type ApproveShiftRequestMutationResult = NonNullable<
+  Awaited<ReturnType<typeof approveShiftRequest>>
+>;
+export type ApproveShiftRequestMutationBody = BodyType<ApproveShiftRequestBody>;
+export type ApproveShiftRequestMutationError = ErrorType<unknown>;
+
+/**
+ * @summary Approve a coverage request and create real shifts
+ */
+export const useApproveShiftRequest = <
+  TError = ErrorType<unknown>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof approveShiftRequest>>,
+    TError,
+    { id: string; data: BodyType<ApproveShiftRequestBody> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationResult<
+  Awaited<ReturnType<typeof approveShiftRequest>>,
+  TError,
+  { id: string; data: BodyType<ApproveShiftRequestBody> },
+  TContext
+> => {
+  return useMutation(getApproveShiftRequestMutationOptions(options));
+};
+
+/**
+ * @summary Decline a coverage request
+ */
+export const getDeclineShiftRequestUrl = (id: string) => {
+  return `/api/admin/shift-requests/${id}/decline`;
+};
+
+export const declineShiftRequest = async (
+  id: string,
+  declineShiftRequestBody: DeclineShiftRequestBody,
+  options?: RequestInit,
+): Promise<ShiftRequest> => {
+  return customFetch<ShiftRequest>(getDeclineShiftRequestUrl(id), {
+    ...options,
+    method: "POST",
+    headers: { "Content-Type": "application/json", ...options?.headers },
+    body: JSON.stringify(declineShiftRequestBody),
+  });
+};
+
+export const getDeclineShiftRequestMutationOptions = <
+  TError = ErrorType<unknown>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof declineShiftRequest>>,
+    TError,
+    { id: string; data: BodyType<DeclineShiftRequestBody> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof declineShiftRequest>>,
+  TError,
+  { id: string; data: BodyType<DeclineShiftRequestBody> },
+  TContext
+> => {
+  const mutationKey = ["declineShiftRequest"];
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof declineShiftRequest>>,
+    { id: string; data: BodyType<DeclineShiftRequestBody> }
+  > = (props) => {
+    const { id, data } = props ?? {};
+
+    return declineShiftRequest(id, data, requestOptions);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type DeclineShiftRequestMutationResult = NonNullable<
+  Awaited<ReturnType<typeof declineShiftRequest>>
+>;
+export type DeclineShiftRequestMutationBody = BodyType<DeclineShiftRequestBody>;
+export type DeclineShiftRequestMutationError = ErrorType<unknown>;
+
+/**
+ * @summary Decline a coverage request
+ */
+export const useDeclineShiftRequest = <
+  TError = ErrorType<unknown>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof declineShiftRequest>>,
+    TError,
+    { id: string; data: BodyType<DeclineShiftRequestBody> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationResult<
+  Awaited<ReturnType<typeof declineShiftRequest>>,
+  TError,
+  { id: string; data: BodyType<DeclineShiftRequestBody> },
+  TContext
+> => {
+  return useMutation(getDeclineShiftRequestMutationOptions(options));
+};
