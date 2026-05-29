@@ -1,8 +1,7 @@
 import React, { useState, useEffect } from "react";
 import { useTopPad } from "@/hooks/useTopPad";
-import { View, Text, StyleSheet, TouchableOpacity, ActivityIndicator, Platform, ScrollView, AccessibilityInfo } from "react-native";
+import { View, Text, StyleSheet, TouchableOpacity, ActivityIndicator, Platform, ScrollView, AccessibilityInfo, Modal } from "react-native";
 import { useColors } from "@/hooks/useColors";
-import { confirmAction, notify } from "@/utils/confirm";
 import { useClockIn, useClockOut, useGetActiveTimeEntry, getGetActiveTimeEntryQueryKey, useGetTimeEntries, getGetTimeEntriesQueryKey, updateMyLocation, useGetSites, getGetSitesQueryKey, getGetEmployeeDashboardSummaryQueryKey, getGetShiftsQueryKey } from "@workspace/api-client-react";
 import { Feather } from "@expo/vector-icons";
 import { useQueryClient } from "@tanstack/react-query";
@@ -22,6 +21,17 @@ export default function EmployeeClockScreen() {
   const [elapsed, setElapsed] = useState(0);
   const [location, setLocation] = useState<{ lat: number; lon: number } | null>(null);
   const [locationLoading, setLocationLoading] = useState(false);
+  // In-app confirm + status. We deliberately avoid window.confirm/window.alert:
+  // mobile browsers (iOS Safari especially) frequently suppress native JS
+  // dialogs, which would silently abort clock-in with no feedback.
+  const [confirmModal, setConfirmModal] = useState<null | {
+    title: string;
+    message: string;
+    confirmText: string;
+    destructive?: boolean;
+    onConfirm: () => void;
+  }>(null);
+  const [statusMsg, setStatusMsg] = useState<null | { kind: "info" | "error"; text: string }>(null);
 
   const { data: currentEntry, isLoading: entryLoading } = useGetActiveTimeEntry({
     query: { queryKey: getGetActiveTimeEntryQueryKey() }
@@ -101,56 +111,56 @@ export default function EmployeeClockScreen() {
         queryClient.invalidateQueries({ queryKey: getGetShiftsQueryKey() }),
       ]);
       const name = result?.geoResolved?.siteName ?? siteLabel;
-      if (name) {
-        notify("Clocked In", `Site: ${name}${result?.geoResolved?.distanceMiles != null ? ` (${result.geoResolved.distanceMiles} mi away)` : ""}.`);
-      }
+      setStatusMsg({
+        kind: "info",
+        text: name
+          ? `Clocked in at ${name}${result?.geoResolved?.distanceMiles != null ? ` (${result.geoResolved.distanceMiles} mi away)` : ""}.`
+          : "You're clocked in. You are now on duty.",
+      });
     } catch (e: any) {
       const msg = e?.response?.data?.message || e?.message || "Clock-in failed";
-      notify("Cannot Clock In", msg);
+      setStatusMsg({ kind: "error", text: msg });
     }
   };
 
   const handleClockIn = async () => {
+    setStatusMsg(null);
     if (!location) {
       if (isWeb) {
-        // Web preview can't use browser GPS inside the workspace iframe — let
-        // the user manually pick a site whose coordinates we'll use instead.
+        // Browser GPS may be unavailable/denied — let the user manually pick a
+        // site whose coordinates we'll use instead.
         setShowSitePicker(true);
         return;
       }
-      notify("Location Required", "We need your GPS to identify which site you're at. Please enable location and try again.");
+      setStatusMsg({ kind: "error", text: "Location required — enable GPS so we can identify your site, then try again." });
       return;
     }
-    const ok = await confirmAction({
+    setConfirmModal({
       title: "Clock In",
       message: "Start your shift now? Your location will be used to identify the site.",
       confirmText: "Clock In",
+      onConfirm: () => {
+        setConfirmModal(null);
+        performClockIn(location.lat, location.lon);
+      },
     });
-    if (!ok) return;
-    await performClockIn(location.lat, location.lon);
   };
 
   const handlePickSite = (site: any) => {
     setShowSitePicker(false);
+    setStatusMsg(null);
     const lat = site?.locationLat != null ? Number(site.locationLat) : null;
     const lng = site?.locationLng != null ? Number(site.locationLng) : null;
     if (lat == null || lng == null || Number.isNaN(lat) || Number.isNaN(lng)) {
-      notify("Site Has No Coordinates", `${site?.name ?? "This site"} doesn't have a saved location yet. Add lat/lng to the site in the admin portal first.`);
+      setStatusMsg({ kind: "error", text: `${site?.name ?? "This site"} doesn't have a saved location yet. Ask an admin to add its address in the portal first.` });
       return;
     }
     setLocation({ lat, lon: lng });
     performClockIn(lat, lng, site.name);
   };
 
-  const handleClockOut = async () => {
+  const performClockOut = async () => {
     if (!currentEntry?.id) return;
-    const ok = await confirmAction({
-      title: "Clock Out",
-      message: "End your shift now?",
-      confirmText: "Clock Out",
-      destructive: true,
-    });
-    if (!ok) return;
     try {
       await clockOutMutation.mutateAsync({
         data: { timeEntryId: currentEntry.id, lat: location?.lat ?? 0, lng: location?.lon ?? 0 } as any,
@@ -160,6 +170,7 @@ export default function EmployeeClockScreen() {
       // flips to OFF DUTY without waiting for the refetch round-trip.
       queryClient.setQueryData(getGetActiveTimeEntryQueryKey(), null);
       setElapsed(0);
+      setStatusMsg({ kind: "info", text: "Clocked out. You are now off duty." });
       await Promise.all([
         queryClient.invalidateQueries({ queryKey: getGetActiveTimeEntryQueryKey() }),
         queryClient.invalidateQueries({ queryKey: getGetTimeEntriesQueryKey() }),
@@ -168,8 +179,23 @@ export default function EmployeeClockScreen() {
       ]);
     } catch (e: any) {
       const msg = e?.response?.data?.message || e?.message || "Clock-out failed";
-      notify("Clock-Out Failed", msg);
+      setStatusMsg({ kind: "error", text: msg });
     }
+  };
+
+  const handleClockOut = async () => {
+    if (!currentEntry?.id) return;
+    setStatusMsg(null);
+    setConfirmModal({
+      title: "Clock Out",
+      message: "End your shift now?",
+      confirmText: "Clock Out",
+      destructive: true,
+      onConfirm: () => {
+        setConfirmModal(null);
+        performClockOut();
+      },
+    });
   };
 
   return (
@@ -238,6 +264,27 @@ export default function EmployeeClockScreen() {
               </>
             )}
           </TouchableOpacity>
+        )}
+
+        {statusMsg && (
+          <View
+            accessibilityLiveRegion="polite"
+            style={[
+              styles.statusBanner,
+              statusMsg.kind === "error"
+                ? { backgroundColor: "#fef2f2", borderColor: "#fca5a5" }
+                : { backgroundColor: "#f0fdf4", borderColor: "#86efac" },
+            ]}
+          >
+            <Feather
+              name={statusMsg.kind === "error" ? "alert-circle" : "check-circle"}
+              size={16}
+              color={statusMsg.kind === "error" ? "#b91c1c" : "#15803d"}
+            />
+            <Text style={[styles.statusBannerText, { color: statusMsg.kind === "error" ? "#b91c1c" : "#15803d" }]}>
+              {statusMsg.text}
+            </Text>
+          </View>
         )}
       </View>
 
@@ -333,6 +380,38 @@ export default function EmployeeClockScreen() {
           })}
         </View>
       )}
+
+      <Modal
+        visible={!!confirmModal}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setConfirmModal(null)}
+      >
+        <View style={styles.modalOverlay}>
+          <View style={[styles.modalCard, { backgroundColor: colors.card, borderColor: colors.border }]}>
+            <Text style={[styles.modalTitle, { color: colors.foreground }]}>{confirmModal?.title}</Text>
+            <Text style={[styles.modalMessage, { color: colors.mutedForeground }]}>{confirmModal?.message}</Text>
+            <View style={styles.modalActions}>
+              <TouchableOpacity
+                style={[styles.modalBtn, { borderColor: colors.border, borderWidth: 1 }]}
+                onPress={() => setConfirmModal(null)}
+                accessibilityRole="button"
+                accessibilityLabel="Cancel"
+              >
+                <Text style={[styles.modalBtnText, { color: colors.foreground }]}>Cancel</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={[styles.modalBtn, { backgroundColor: confirmModal?.destructive ? colors.destructive : "#22c55e" }]}
+                onPress={() => confirmModal?.onConfirm()}
+                accessibilityRole="button"
+                accessibilityLabel={confirmModal?.confirmText}
+              >
+                <Text style={[styles.modalBtnText, { color: "#fff" }]}>{confirmModal?.confirmText}</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
     </ScrollView>
   );
 }
@@ -351,6 +430,15 @@ const styles = StyleSheet.create({
   locationText: { fontSize: 12 },
   mainBtn: { width: 120, height: 120, borderRadius: 60, justifyContent: "center", alignItems: "center", gap: 8, marginTop: 8 },
   mainBtnText: { color: "#fff", fontWeight: "800", fontSize: 14, letterSpacing: 1 },
+  statusBanner: { flexDirection: "row", alignItems: "center", gap: 8, marginTop: 16, paddingHorizontal: 12, paddingVertical: 10, borderRadius: 10, borderWidth: 1, alignSelf: "stretch" },
+  statusBannerText: { flex: 1, fontSize: 13, fontWeight: "600" },
+  modalOverlay: { flex: 1, backgroundColor: "rgba(0,0,0,0.5)", justifyContent: "center", alignItems: "center", padding: 24 },
+  modalCard: { width: "100%", maxWidth: 360, borderRadius: 16, borderWidth: 1, padding: 20, gap: 8 },
+  modalTitle: { fontSize: 18, fontWeight: "800" },
+  modalMessage: { fontSize: 14, lineHeight: 20 },
+  modalActions: { flexDirection: "row", justifyContent: "flex-end", gap: 10, marginTop: 16 },
+  modalBtn: { paddingHorizontal: 18, paddingVertical: 10, borderRadius: 10, minWidth: 96, alignItems: "center" },
+  modalBtnText: { fontSize: 14, fontWeight: "700" },
   section: { paddingHorizontal: 16, paddingTop: 20 },
   sectionTitle: { fontSize: 11, fontWeight: "700", letterSpacing: 2, marginBottom: 12 },
   entryCard: { borderRadius: 10, borderWidth: 1, padding: 12, marginBottom: 8, gap: 6 },
