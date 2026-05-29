@@ -6,6 +6,7 @@ import { useColors } from "@/hooks/useColors";
 import { BlurView } from "expo-blur";
 import { TourProvider } from "@/contexts/TourContext";
 import WelcomeTour from "@/components/WelcomeTour";
+import { useChat } from "@/contexts/ChatContext";
 
 export default function EmployeeLayout() {
   const colors = useColors();
@@ -21,6 +22,7 @@ export default function EmployeeLayout() {
 }
 
 function EmployeeTabs({ colors, isIOS, isWeb }: { colors: ReturnType<typeof useColors>; isIOS: boolean; isWeb: boolean }) {
+  const { totalUnread } = useChat();
   return (
     <Tabs
       screenOptions={{
@@ -79,7 +81,12 @@ function EmployeeTabs({ colors, isIOS, isWeb }: { colors: ReturnType<typeof useC
         name="chat"
         options={{
           title: "Chat",
-          tabBarAccessibilityLabel: "Team chat tab",
+          tabBarAccessibilityLabel:
+            totalUnread > 0
+              ? `Team chat tab, ${totalUnread} unread message${totalUnread === 1 ? "" : "s"}`
+              : "Team chat tab",
+          tabBarBadge: totalUnread > 0 ? (totalUnread > 99 ? "99+" : totalUnread) : undefined,
+          tabBarBadgeStyle: { backgroundColor: colors.primary, color: "#080c18", fontWeight: "700" },
           tabBarIcon: ({ color }) => <Feather name="message-circle" size={22} color={color} />,
         }}
       />

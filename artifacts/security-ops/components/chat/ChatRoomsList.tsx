@@ -8,11 +8,8 @@ import { Feather } from "@expo/vector-icons";
 import { useColors } from "@/hooks/useColors";
 import { apiRequest } from "@/utils/api";
 import { useAuth } from "@/contexts/AuthContext";
-import { storage } from "@/utils/storage";
+import { useChat } from "@/contexts/ChatContext";
 import { formatDistanceToNow } from "date-fns";
-
-const LAST_READ_KEY = "chat_room_last_read_v1";
-type LastReadMap = Record<string, string>;
 
 interface ChatRoom {
   id: string;
@@ -38,6 +35,7 @@ interface Props {
 export default function ChatRoomsList({ onSelectRoom }: Props) {
   const colors = useColors();
   const { user } = useAuth();
+  const { unreadByRoom, markRoomRead, refreshUnread } = useChat();
   const [rooms, setRooms] = useState<ChatRoom[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -48,21 +46,7 @@ export default function ChatRoomsList({ onSelectRoom }: Props) {
   const [users, setUsers] = useState<ChatUser[]>([]);
   const [usersLoading, setUsersLoading] = useState(false);
   const [userSearch, setUserSearch] = useState("");
-  const [lastRead, setLastRead] = useState<LastReadMap>({});
   const isAdmin = user?.role === "admin";
-
-  useEffect(() => {
-    storage.get(LAST_READ_KEY).then((raw) => {
-      if (!raw) return;
-      try { setLastRead(JSON.parse(raw) as LastReadMap); } catch { /* ignore */ }
-    });
-  }, []);
-
-  const markRoomRead = useCallback(async (roomId: string) => {
-    const next: LastReadMap = { ...lastRead, [roomId]: new Date().toISOString() };
-    setLastRead(next);
-    await storage.set(LAST_READ_KEY, JSON.stringify(next));
-  }, [lastRead]);
 
   const handleSelectRoom = useCallback((id: string, name: string) => {
     void markRoomRead(id);
@@ -81,7 +65,7 @@ export default function ChatRoomsList({ onSelectRoom }: Props) {
     }
   }, []);
 
-  useEffect(() => { fetchRooms(); }, [fetchRooms]);
+  useEffect(() => { fetchRooms(); void refreshUnread(); }, [fetchRooms, refreshUnread]);
 
   const createRoom = async () => {
     if (!newRoom.trim()) return;
@@ -210,10 +194,11 @@ export default function ChatRoomsList({ onSelectRoom }: Props) {
             ? item.otherUserName.split(" ").map((n) => n[0]).join("").slice(0, 2).toUpperCase()
             : null;
           const totalMessages = item.messageCount ?? 0;
-          const lastReadAt = lastRead[item.id] ? new Date(lastRead[item.id]).getTime() : 0;
-          const lastMsgAt = item.lastMessage ? new Date(item.lastMessage.createdAt).getTime() : 0;
-          const hasUnread = !!item.lastMessage && lastMsgAt > lastReadAt;
-          const unreadLabel = hasUnread ? "Unread message" : "No unread messages";
+          const unreadCount = unreadByRoom[item.id] ?? 0;
+          const hasUnread = unreadCount > 0;
+          const unreadLabel = hasUnread
+            ? `${unreadCount} unread message${unreadCount === 1 ? "" : "s"}`
+            : "No unread messages";
           const a11yPieces = [
             isDirect ? `Direct message with ${displayName}` : `Channel ${displayName}`,
             unreadLabel,
@@ -240,17 +225,23 @@ export default function ChatRoomsList({ onSelectRoom }: Props) {
               </View>
               <View style={s.roomInfo}>
                 <View style={s.roomTopRow}>
-                  <Text style={[s.roomName, { color: colors.foreground }]} numberOfLines={1}>
+                  <Text
+                    style={[s.roomName, { color: colors.foreground }, hasUnread && s.roomNameUnread]}
+                    numberOfLines={1}
+                  >
                     {displayName}
                   </Text>
                   {item.lastMessage && (
-                    <Text style={[s.time, { color: colors.mutedForeground }]}>
+                    <Text style={[s.time, { color: hasUnread ? colors.primary : colors.mutedForeground }]}>
                       {formatDistanceToNow(new Date(item.lastMessage.createdAt), { addSuffix: true })}
                     </Text>
                   )}
                 </View>
                 {item.lastMessage ? (
-                  <Text style={[s.lastMsg, { color: colors.mutedForeground }]} numberOfLines={1}>
+                  <Text
+                    style={[s.lastMsg, { color: hasUnread ? colors.foreground : colors.mutedForeground }, hasUnread && s.lastMsgUnread]}
+                    numberOfLines={1}
+                  >
                     {!isDirect && <Text style={{ fontWeight: "600" }}>{item.lastMessage.userName}: </Text>}
                     {item.lastMessage.content}
                   </Text>
@@ -258,7 +249,17 @@ export default function ChatRoomsList({ onSelectRoom }: Props) {
                   <Text style={[s.lastMsg, { color: colors.mutedForeground }]}>No messages yet</Text>
                 )}
               </View>
-              <Feather name="chevron-right" size={16} color={colors.mutedForeground} />
+              {hasUnread ? (
+                <View
+                  style={[s.unreadBadge, { backgroundColor: colors.primary }]}
+                  accessibilityElementsHidden
+                  importantForAccessibility="no-hide-descendants"
+                >
+                  <Text style={s.unreadBadgeText}>{unreadCount > 99 ? "99+" : unreadCount}</Text>
+                </View>
+              ) : (
+                <Feather name="chevron-right" size={16} color={colors.mutedForeground} />
+              )}
             </TouchableOpacity>
           );
         }}
@@ -368,8 +369,15 @@ const styles = (colors: ReturnType<typeof useColors>) => StyleSheet.create({
   roomInfo: { flex: 1 },
   roomTopRow: { flexDirection: "row", justifyContent: "space-between", alignItems: "center", gap: 8 },
   roomName: { fontSize: 15, fontWeight: "600", flex: 1 },
+  roomNameUnread: { fontWeight: "800" },
   time: { fontSize: 12 },
   lastMsg: { fontSize: 13, marginTop: 2 },
+  lastMsgUnread: { fontWeight: "600" },
+  unreadBadge: {
+    minWidth: 22, height: 22, borderRadius: 11, paddingHorizontal: 6,
+    alignItems: "center", justifyContent: "center",
+  },
+  unreadBadgeText: { color: "#080c18", fontSize: 12, fontWeight: "800" },
   emptyText: { marginTop: 12, fontSize: 16 },
   modalBackdrop: { flex: 1, backgroundColor: "#00000088", justifyContent: "flex-end" },
   modalSheet: { maxHeight: "85%", minHeight: "60%", borderTopLeftRadius: 20, borderTopRightRadius: 20, overflow: "hidden" },

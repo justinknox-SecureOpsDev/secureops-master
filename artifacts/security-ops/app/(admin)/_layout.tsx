@@ -4,6 +4,7 @@ import React from "react";
 import { Platform, StyleSheet, View, useColorScheme } from "react-native";
 import { useColors } from "@/hooks/useColors";
 import { BlurView } from "expo-blur";
+import { useChat } from "@/contexts/ChatContext";
 
 export default function AdminLayout() {
   const colors = useColors();
@@ -11,6 +12,7 @@ export default function AdminLayout() {
   const isDark = colorScheme === "dark";
   const isIOS = Platform.OS === "ios";
   const isWeb = Platform.OS === "web";
+  const { totalUnread } = useChat();
 
   return (
     <Tabs
@@ -89,7 +91,12 @@ export default function AdminLayout() {
         options={{
           title: "Chat",
           headerTitle: "Team Chat",
-          tabBarAccessibilityLabel: "Team chat tab",
+          tabBarAccessibilityLabel:
+            totalUnread > 0
+              ? `Team chat tab, ${totalUnread} unread message${totalUnread === 1 ? "" : "s"}`
+              : "Team chat tab",
+          tabBarBadge: totalUnread > 0 ? (totalUnread > 99 ? "99+" : totalUnread) : undefined,
+          tabBarBadgeStyle: { backgroundColor: colors.primary, color: "#080c18", fontWeight: "700" },
           tabBarIcon: ({ color }) => <Feather name="message-circle" size={22} color={color} />,
         }}
       />

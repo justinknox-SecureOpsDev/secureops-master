@@ -22,7 +22,7 @@ export default function ChatRoomScreen({ roomId, roomName }: Props) {
   const colors = useColors();
   const router = useRouter();
   const { user } = useAuth();
-  const { subscribeToRoom, subscribeToDeletes, sendMessage, deleteMessage } = useChat();
+  const { subscribeToRoom, subscribeToDeletes, sendMessage, deleteMessage, markRoomRead } = useChat();
   const tabBarHeight = Platform.OS === "ios" ? 84 : 60;
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [loading, setLoading] = useState(true);
@@ -41,18 +41,23 @@ export default function ChatRoomScreen({ roomId, roomName }: Props) {
 
   useEffect(() => {
     loadMessages();
+    // Entering the room clears its unread badge (server watermark + local state).
+    void markRoomRead(roomId);
     const unsubNew = subscribeToRoom(roomId, (msg) => {
       setMessages((prev) => {
         if (prev.some((m) => m.id === msg.id)) return prev;
         return [...prev, msg];
       });
+      // Messages arriving while the room is open are already seen — keep the
+      // read watermark current so the badge never re-appears behind the user.
+      if (msg.userId !== user?.id) void markRoomRead(roomId);
       setTimeout(() => listRef.current?.scrollToEnd({ animated: true }), 100);
     });
     const unsubDel = subscribeToDeletes(roomId, (messageId) => {
       setMessages((prev) => prev.filter((m) => m.id !== messageId));
     });
     return () => { unsubNew(); unsubDel(); };
-  }, [roomId, subscribeToRoom, subscribeToDeletes, loadMessages]);
+  }, [roomId, subscribeToRoom, subscribeToDeletes, loadMessages, markRoomRead, user?.id]);
 
   useEffect(() => {
     if (!loading && messages.length > 0) {
