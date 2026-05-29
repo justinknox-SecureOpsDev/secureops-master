@@ -4,6 +4,7 @@ import { eq, and, gt, gte, lt, lte, ne, sql, or, isNull, inArray } from "drizzle
 import { db, shiftsTable, shiftAssignmentsTable, usersTable, licensesTable, sitesTable, clientsTable, trainingCertificationsTable, employeesTable } from "@workspace/db";
 import { requireAuth, requireAdmin, requireAdminOrDispatcher } from "../middlewares/auth";
 import { haversineMiles } from "../lib/geofence";
+import { getEffectiveLevel, effectiveLevelSql } from "../lib/eligibility";
 
 const router: IRouter = Router();
 
@@ -51,19 +52,11 @@ function localDateInTz(utcMs: number, tz: string): string {
   }
 }
 
-async function getEmployeeMaxLevel(employeeId: string): Promise<number | null> {
-  const rows = await db
-    .select({ level: licensesTable.level })
-    .from(licensesTable)
-    .where(and(
-      eq(licensesTable.employeeId, employeeId),
-      gte(licensesTable.expiryDate, sql`current_date`),
-    ));
-  let max: number | null = null;
-  for (const r of rows) {
-    if (r.level != null && (max == null || r.level > max)) max = r.level;
-  }
-  return max;
+/** Short label for a shift's required level used in push/SMS copy. */
+function shiftLevelLabel(lvl: number): string {
+  if (lvl <= 1) return "Support";
+  if (lvl === 4) return "L4/PPO";
+  return `L${lvl}+`;
 }
 
 /**
@@ -115,7 +108,7 @@ router.get("/shifts", requireAuth, async (req, res): Promise<void> => {
 
   let shifts;
   if (restrictToEmployee) {
-    const myMaxLevel = !isAdmin ? (await getEmployeeMaxLevel(userId)) ?? 0 : 4;
+    const myMaxLevel = !isAdmin ? await getEffectiveLevel(userId) : 4;
     const myHeldTrainings = !isAdmin ? await getEmployeeHeldTrainings(userId) : new Set<string>();
     const assignedRows = await db
       .select({ shiftId: shiftAssignmentsTable.shiftId })
@@ -273,7 +266,7 @@ router.post("/shifts", requireAdmin, async (req, res): Promise<void> => {
     return;
   }
 
-  const lvl = [2, 3, 4].includes(Number(requiredLicenseLevel)) ? Number(requiredLicenseLevel) : 2;
+  const lvl = [1, 2, 3, 4].includes(Number(requiredLicenseLevel)) ? Number(requiredLicenseLevel) : 2;
   const hc = Math.max(1, Number(headcount) || 1);
   // payRate/billRate are the canonical fields; legacy hourlyRate/billableRate fall back when not set.
   const finalPay = payRate != null ? Number(payRate) : (hourlyRate != null ? Number(hourlyRate) : 0);
@@ -312,21 +305,22 @@ router.post("/shifts", requireAdmin, async (req, res): Promise<void> => {
     const candidates = await db
       .select({
         userId: usersTable.id,
-        maxLevel: sql<number | null>`max(${licensesTable.level}) filter (where ${licensesTable.expiryDate} >= current_date)`,
+        effLevel: effectiveLevelSql,
       })
       .from(usersTable)
       .leftJoin(licensesTable, eq(licensesTable.employeeId, usersTable.id))
+      .leftJoin(employeesTable, eq(employeesTable.userId, usersTable.id))
       .where(and(eq(usersTable.role, "employee"), eq(usersTable.status, "active")))
       .groupBy(usersTable.id);
 
     const eligibleIds = candidates
-      .filter((c) => (c.maxLevel ?? 0) >= lvl)
+      .filter((c) => c.effLevel >= lvl)
       .map((c) => c.userId);
 
     if (eligibleIds.length > 0) {
       const { sendPushToUsers } = await import("../lib/push");
       const start = new Date(shift.startTime).toLocaleString("en-AU", { weekday: "short", month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" });
-      const levelLabel = lvl === 4 ? "L4/PPO" : `L${lvl}+`;
+      const levelLabel = shiftLevelLabel(lvl);
       await sendPushToUsers(eligibleIds, {
         title: `🛡️ New ${levelLabel} Shift Available`,
         body: `${shift.title} @ ${shift.clientName} — ${start}`,
@@ -410,7 +404,7 @@ router.post("/shifts/repeat", requireAdmin, async (req, res): Promise<void> => {
     .where(eq(sitesTable.id, siteId));
   if (!site) { res.status(400).json({ error: "Bad Request", message: "Site not found" }); return; }
 
-  const lvl = [2, 3, 4].includes(Number(requiredLicenseLevel)) ? Number(requiredLicenseLevel) : 2;
+  const lvl = [1, 2, 3, 4].includes(Number(requiredLicenseLevel)) ? Number(requiredLicenseLevel) : 2;
   const hc = Math.max(1, Number(headcount) || 1);
   const pay = Number(payRate) || 0;
   const bill = Number(billRate) || 0;
@@ -526,7 +520,7 @@ router.put("/shifts/bulk", requireAdmin, async (req, res): Promise<void> => {
   }
   if (changes.requiredLicenseLevel != null && changes.requiredLicenseLevel !== "") {
     const n = Number(changes.requiredLicenseLevel);
-    if (![2, 3, 4].includes(n)) { res.status(400).json({ error: "Bad Request", message: "requiredLicenseLevel must be 2|3|4" }); return; }
+    if (![1, 2, 3, 4].includes(n)) { res.status(400).json({ error: "Bad Request", message: "requiredLicenseLevel must be 1|2|3|4" }); return; }
     setCommon.requiredLicenseLevel = n;
   }
   if (changes.headcount != null && changes.headcount !== "") {
@@ -717,7 +711,7 @@ router.put("/shifts/:id", requireAdmin, async (req, res): Promise<void> => {
   if (billableRate !== undefined && billRate === undefined) { updates.billRate = String(billableRate); updates.billableRate = String(billableRate); }
   if (status) updates.status = status;
   if (notes !== undefined) updates.notes = notes;
-  if (requiredLicenseLevel !== undefined && [2, 3, 4].includes(Number(requiredLicenseLevel))) {
+  if (requiredLicenseLevel !== undefined && [1, 2, 3, 4].includes(Number(requiredLicenseLevel))) {
     updates.requiredLicenseLevel = Number(requiredLicenseLevel);
   }
   if (headcount !== undefined) updates.headcount = Math.max(1, Number(headcount) || 1);
@@ -746,11 +740,13 @@ router.post("/shifts/:id/claim", requireAuth, async (req, res): Promise<void> =>
     return;
   }
 
-  const myLevel = (await getEmployeeMaxLevel(userId)) ?? 0;
+  const myLevel = await getEffectiveLevel(userId);
   if (myLevel < shift.requiredLicenseLevel) {
     res.status(403).json({
       error: "Forbidden",
-      message: `This shift requires Level ${shift.requiredLicenseLevel}${shift.requiredLicenseLevel === 4 ? "/PPO" : ""}. Your highest valid licence is ${myLevel === 0 ? "none" : `Level ${myLevel}`}.`,
+      message: shift.requiredLicenseLevel <= 1
+        ? `This is a support shift. Your account isn't cleared to claim it yet — ask your administrator to set you up as support staff.`
+        : `This shift requires Level ${shift.requiredLicenseLevel}${shift.requiredLicenseLevel === 4 ? "/PPO" : ""}. Your highest valid licence is ${myLevel === 0 ? "none" : `Level ${myLevel}`}.`,
     });
     return;
   }
@@ -891,23 +887,24 @@ router.post("/shifts/:id/notify-vacancy", requireAdminOrDispatcher, async (req, 
   const candidates = await db
     .select({
       userId: usersTable.id,
-      maxLevel: sql<number | null>`max(${licensesTable.level}) filter (where ${licensesTable.expiryDate} >= current_date)`,
+      effLevel: effectiveLevelSql,
     })
     .from(usersTable)
     .leftJoin(licensesTable, eq(licensesTable.employeeId, usersTable.id))
+    .leftJoin(employeesTable, eq(employeesTable.userId, usersTable.id))
     .where(and(eq(usersTable.role, "employee"), eq(usersTable.status, "active")))
     .groupBy(usersTable.id);
 
   const assignedSet = new Set(assignedIds.filter(Boolean));
   const targetIds = candidates
-    .filter((c) => (c.maxLevel ?? 0) >= shift.requiredLicenseLevel && !assignedSet.has(c.userId))
+    .filter((c) => c.effLevel >= shift.requiredLicenseLevel && !assignedSet.has(c.userId))
     .map((c) => c.userId);
 
   if (targetIds.length > 0) {
     try {
       const { sendPushToUsers } = await import("../lib/push");
       const start = new Date(shift.startTime).toLocaleString("en-US", { weekday: "short", month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" });
-      const levelLabel = shift.requiredLicenseLevel === 4 ? "L4/PPO" : `L${shift.requiredLicenseLevel}+`;
+      const levelLabel = shiftLevelLabel(shift.requiredLicenseLevel);
       await sendPushToUsers(targetIds, {
         title: `🛡️ Open ${levelLabel} Shift — ${vacanciesRemaining} vacancy${vacanciesRemaining === 1 ? "" : "s"}`,
         body: `${shift.title} @ ${shift.clientName} — ${start}. Tap to reserve.`,
@@ -934,11 +931,13 @@ router.post("/shifts/:id/assignments", requireAdminOrDispatcher, async (req, res
   const [shift] = await db.select().from(shiftsTable).where(eq(shiftsTable.id, shiftId));
   if (!shift) { res.status(404).json({ error: "Not Found" }); return; }
 
-  const empLevel = (await getEmployeeMaxLevel(employeeId)) ?? 0;
+  const empLevel = await getEffectiveLevel(employeeId);
   if (empLevel < shift.requiredLicenseLevel) {
     res.status(403).json({
       error: "Forbidden",
-      message: `Employee's highest valid licence (${empLevel === 0 ? "none" : `Level ${empLevel}`}) does not meet the shift requirement (Level ${shift.requiredLicenseLevel}${shift.requiredLicenseLevel === 4 ? "/PPO" : ""}).`,
+      message: shift.requiredLicenseLevel <= 1
+        ? `This is a support shift. The selected employee isn't cleared for it — set their position to support staff or assign a licensed officer.`
+        : `Employee's highest valid licence (${empLevel === 0 ? "none" : `Level ${empLevel}`}) does not meet the shift requirement (Level ${shift.requiredLicenseLevel}${shift.requiredLicenseLevel === 4 ? "/PPO" : ""}).`,
     });
     return;
   }

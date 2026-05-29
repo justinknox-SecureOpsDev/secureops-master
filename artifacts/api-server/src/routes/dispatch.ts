@@ -9,6 +9,7 @@ import {
   sitesTable,
   incidentsTable,
   licensesTable,
+  employeesTable,
   chatRoomsTable,
   officerAvailabilityWindowsTable,
 } from "@workspace/db";
@@ -312,6 +313,22 @@ router.post("/dispatch/assign-nearest", requireAdminOrDispatcher, async (req, re
         WHERE ${licensesTable.employeeId} = "users"."id"
           AND ${licensesTable.expiryDate} >= current_date
       )`,
+      // Effective capability level: greater of highest unexpired licence level
+      // and the position baseline (support_staff → 1). Drives eligibility so
+      // support staff surface for level-1 support shifts even without a licence.
+      effLevel: sql<number>`GREATEST(
+        COALESCE((
+          SELECT MAX(${licensesTable.level})::int
+          FROM ${licensesTable}
+          WHERE ${licensesTable.employeeId} = "users"."id"
+            AND ${licensesTable.expiryDate} >= current_date
+        ), 0),
+        COALESCE((
+          SELECT CASE WHEN ${employeesTable.position} = 'support_staff' THEN 1 ELSE 0 END
+          FROM ${employeesTable}
+          WHERE ${employeesTable.userId} = "users"."id"
+        ), 0)
+      )`,
       alreadyAssigned: sql<boolean>`EXISTS (
         SELECT 1 FROM ${shiftAssignmentsTable}
         WHERE ${shiftAssignmentsTable.shiftId} = ${shiftId}
@@ -380,7 +397,7 @@ router.post("/dispatch/assign-nearest", requireAdminOrDispatcher, async (req, re
     availabilityCovers: boolean;
   };
   const candidates: Candidate[] = qualified
-    .filter((q) => (q.maxLevel ?? 0) >= shift.requiredLicenseLevel)
+    .filter((q) => (q.effLevel ?? 0) >= shift.requiredLicenseLevel)
     .map((q) => {
       const lat = q.lastLat ? parseFloat(q.lastLat) : null;
       const lng = q.lastLng ? parseFloat(q.lastLng) : null;

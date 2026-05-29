@@ -8,6 +8,10 @@ import { onboardingSubmissionsTable } from "./onboardingSubmissions";
 export const employeesTable = pgTable("employees", {
   id: uuid("id").primaryKey().defaultRandom(),
   userId: uuid("user_id").notNull().unique().references(() => usersTable.id, { onDelete: "cascade" }),
+  // Job position. 'officer' (default) work licensed security shifts; 'support_staff'
+  // are non-licensed and can work level-1 ("support / no licence required") shifts.
+  // Drives the effective-capability-level eligibility model (see lib/eligibility.ts).
+  position: text("position").notNull().default("officer"),
   phone: text("phone"),
   address: text("address"),
   // Geocoded home coordinates. Populated by the background geocoder when

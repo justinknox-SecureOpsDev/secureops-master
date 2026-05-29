@@ -140,6 +140,17 @@ export type EmployeeAvailability = { [key: string]: unknown } | null;
 
 export type EmployeeAcknowledgements = { [key: string]: unknown } | null;
 
+/**
+ * Job position. 'officer' work licensed security shifts; 'support_staff' are non-licensed and may work level-1 (support / no licence required) shifts.
+ */
+export type EmployeePosition =
+  (typeof EmployeePosition)[keyof typeof EmployeePosition];
+
+export const EmployeePosition = {
+  officer: "officer",
+  support_staff: "support_staff",
+} as const;
+
 export interface Employee {
   id: string;
   userId: string;
@@ -193,7 +204,9 @@ export interface Employee {
   skills?: string[];
   licenseCount?: number;
   expiringLicenseCount?: number;
-  /** Highest valid (non-expired) license level: 2, 3, or 4. Null if no valid license. */
+  /** Job position. 'officer' work licensed security shifts; 'support_staff' are non-licensed and may work level-1 (support / no licence required) shifts. */
+  position?: EmployeePosition;
+  /** Highest valid (non-expired) license level: 2, 3, or 4. Null if no valid license. Note: this reflects licences only — a support_staff officer with no licence is still null here. */
   maxLicenseLevel?: number | null;
   createdAt: string;
 }
@@ -204,6 +217,14 @@ export type CreateEmployeeRequestRole =
 export const CreateEmployeeRequestRole = {
   admin: "admin",
   employee: "employee",
+} as const;
+
+export type CreateEmployeeRequestPosition =
+  (typeof CreateEmployeeRequestPosition)[keyof typeof CreateEmployeeRequestPosition];
+
+export const CreateEmployeeRequestPosition = {
+  officer: "officer",
+  support_staff: "support_staff",
 } as const;
 
 export type CreateEmployeeRequestSiaLicenseLevel =
@@ -232,6 +253,7 @@ export interface CreateEmployeeRequest {
   firstName: string;
   lastName: string;
   role: CreateEmployeeRequestRole;
+  position?: CreateEmployeeRequestPosition;
   phone?: string;
   address?: string;
   dateOfBirth?: string | null;
@@ -446,12 +468,13 @@ export const ShiftStatus = {
 } as const;
 
 /**
- * Minimum license level required (2=unarmed, 3=armed, 4=PPO)
+ * Minimum license level required (1=support/no licence, 2=unarmed, 3=armed, 4=PPO)
  */
 export type ShiftRequiredLicenseLevel =
   (typeof ShiftRequiredLicenseLevel)[keyof typeof ShiftRequiredLicenseLevel];
 
 export const ShiftRequiredLicenseLevel = {
+  NUMBER_1: 1,
   NUMBER_2: 2,
   NUMBER_3: 3,
   NUMBER_4: 4,
@@ -506,7 +529,7 @@ export interface Shift {
   /** Legacy alias for billRate */
   billableRate?: number;
   status: ShiftStatus;
-  /** Minimum license level required (2=unarmed, 3=armed, 4=PPO) */
+  /** Minimum license level required (1=support/no licence, 2=unarmed, 3=armed, 4=PPO) */
   requiredLicenseLevel: ShiftRequiredLicenseLevel;
   /** Total number of officers needed for this shift */
   headcount: number;
@@ -523,6 +546,7 @@ export type CreateShiftRequestRequiredLicenseLevel =
   (typeof CreateShiftRequestRequiredLicenseLevel)[keyof typeof CreateShiftRequestRequiredLicenseLevel];
 
 export const CreateShiftRequestRequiredLicenseLevel = {
+  NUMBER_1: 1,
   NUMBER_2: 2,
   NUMBER_3: 3,
   NUMBER_4: 4,
@@ -570,6 +594,7 @@ export type UpdateShiftRequestRequiredLicenseLevel =
   (typeof UpdateShiftRequestRequiredLicenseLevel)[keyof typeof UpdateShiftRequestRequiredLicenseLevel];
 
 export const UpdateShiftRequestRequiredLicenseLevel = {
+  NUMBER_1: 1,
   NUMBER_2: 2,
   NUMBER_3: 3,
   NUMBER_4: 4,

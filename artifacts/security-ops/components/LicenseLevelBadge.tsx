@@ -4,12 +4,14 @@ import { useColors } from "@/hooks/useColors";
 
 export function levelLabel(lvl: number | null | undefined): string {
   if (lvl == null) return "No Licence";
+  if (lvl <= 1) return "Support";
   if (lvl === 4) return "L4 / PPO";
   return `Level ${lvl}`;
 }
 
 export function levelColor(lvl: number | null | undefined, colors: ReturnType<typeof useColors>): string {
   if (lvl == null) return colors.mutedForeground;
+  if (lvl <= 1) return "#0ea5e9";
   if (lvl === 4) return "#a855f7";
   if (lvl === 3) return colors.accent;
   return "#22c55e";

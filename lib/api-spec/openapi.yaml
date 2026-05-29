@@ -2118,10 +2118,14 @@ components:
           type: integer
         expiringLicenseCount:
           type: integer
+        position:
+          type: string
+          enum: [officer, support_staff]
+          description: "Job position. 'officer' work licensed security shifts; 'support_staff' are non-licensed and may work level-1 (support / no licence required) shifts."
         maxLicenseLevel:
           type: integer
           nullable: true
-          description: "Highest valid (non-expired) license level: 2, 3, or 4. Null if no valid license."
+          description: "Highest valid (non-expired) license level: 2, 3, or 4. Null if no valid license. Note: this reflects licences only — a support_staff officer with no licence is still null here."
         createdAt:
           type: string
           format: date-time
@@ -2145,6 +2149,9 @@ components:
         role:
           type: string
           enum: [admin, employee]
+        position:
+          type: string
+          enum: [officer, support_staff]
         phone: { type: string }
         address: { type: string }
         dateOfBirth: { type: string, format: date, nullable: true }
@@ -2368,8 +2375,8 @@ components:
           enum: [upcoming, active, completed, cancelled]
         requiredLicenseLevel:
           type: integer
-          enum: [2, 3, 4]
-          description: "Minimum license level required (2=unarmed, 3=armed, 4=PPO)"
+          enum: [1, 2, 3, 4]
+          description: "Minimum license level required (1=support/no licence, 2=unarmed, 3=armed, 4=PPO)"
         headcount:
           type: integer
           description: Total number of officers needed for this shift
@@ -2408,7 +2415,7 @@ components:
         billRate: { type: number, description: "Client bill per hour" }
         requiredLicenseLevel:
           type: integer
-          enum: [2, 3, 4]
+          enum: [1, 2, 3, 4]
         headcount:
           type: integer
           minimum: 1
@@ -2441,7 +2448,7 @@ components:
           enum: [upcoming, active, completed, cancelled]
         requiredLicenseLevel:
           type: integer
-          enum: [2, 3, 4]
+          enum: [1, 2, 3, 4]
         headcount:
           type: integer
           minimum: 1

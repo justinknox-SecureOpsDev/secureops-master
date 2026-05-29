@@ -286,6 +286,9 @@ const tables: Record<string, TableConfig> = {
       ]);
       out = applyDateCoercion(out, ["startTime", "endTime"]);
       out = applyIntCoercion(out, ["requiredLicenseLevel", "headcount"]);
+      if (out.requiredLicenseLevel != null && ![1, 2, 3, 4].includes(Number(out.requiredLicenseLevel))) {
+        throw Object.assign(new Error("requiredLicenseLevel must be 1, 2, 3, or 4"), { __badRequest: true });
+      }
       return out;
     },
     importSupported: true,
@@ -500,7 +503,7 @@ async function autoCreateEmployeeFromName(label: string): Promise<string> {
 const shiftTitleWithLevelAlt = (s: any): string[] => {
   const title = normText(s.title);
   const lvl = s.requiredLicenseLevel;
-  return title && (lvl === 2 || lvl === 3 || lvl === 4)
+  return title && (lvl === 1 || lvl === 2 || lvl === 3 || lvl === 4)
     ? [`${title} ${lvl}`]
     : [];
 };

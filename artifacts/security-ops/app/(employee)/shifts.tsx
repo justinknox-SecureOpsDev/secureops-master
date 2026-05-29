@@ -35,6 +35,11 @@ export default function EmployeeShiftsScreen() {
     query: { queryKey: getGetEmployeeQueryKey(myUserId!), enabled: !!myUserId },
   });
   const myMaxLevel = (myEmployee as any)?.maxLicenseLevel as number | null | undefined;
+  const myPosition = (myEmployee as any)?.position as string | undefined;
+  const isSupportStaff = myPosition === "support_staff";
+  // Effective clearance: support staff are cleared for level-1 support shifts
+  // even without a licence; licensed officers keep their licence level.
+  const myEffectiveLevel = myMaxLevel ?? (isSupportStaff ? 1 : null);
 
   const statusParam = filter === "available" ? "upcoming" : filter;
   const { data: allShifts, isLoading, error, refetch } = useGetShifts(
@@ -234,13 +239,13 @@ export default function EmployeeShiftsScreen() {
           <View style={{ flexDirection: "row", alignItems: "center", gap: 6, marginTop: 4 }}>
             <Feather name="award" size={11} color={colors.mutedForeground} />
             <Text style={{ color: colors.mutedForeground, fontSize: 11 }}>
-              Your clearance: {levelLabel(myMaxLevel ?? null)}
+              Your clearance: {levelLabel(myEffectiveLevel)}
             </Text>
           </View>
         </View>
       </View>
 
-      {!myMaxLevel && myEmployee && (
+      {!myMaxLevel && !isSupportStaff && myEmployee && (
         <TouchableOpacity
           onPress={() => router.push("/edit-profile")}
           style={{

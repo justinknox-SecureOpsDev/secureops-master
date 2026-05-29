@@ -103,6 +103,8 @@ const employeeSelect = {
   role: usersTable.role,
   status: usersTable.status,
   createdAt: usersTable.createdAt,
+  // Position / role (officer | support_staff)
+  position: employeesTable.position,
   // Login activity — surfaced to admins so the personnel list can render
   // an "online now" dot and a "NEW" pill for freshly-active officers.
   lastActiveAt: usersTable.lastActiveAt,
@@ -179,6 +181,7 @@ const SELF_UPDATABLE_EMP_KEYS = [
  * `hourlyRate` is special-cased (numeric → string) below.
  */
 const ADMIN_ONLY_EMP_KEYS = [
+  "position",
   "dateOfBirth", "cityOfBirth", "stateOfBirth", "niNumber",
   "rightToWorkStatus", "rightToWorkDocKey",
   "siaLicenseNumber", "siaLicenseLevel", "siaLicenseExpiry", "licenseDocKey", "passportDocKey",

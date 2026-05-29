@@ -195,6 +195,14 @@ export const TABLES: TableDescriptor[] = [
         },
       },
       { key: "userId", label: "User", type: "fk", fkTable: "users", fkLabel: "email", required: true, section: "Identity", importResolveByLabel: true, importExample: "name@example.com" },
+      {
+        key: "position", label: "Position", type: "select", section: "Identity",
+        options: [
+          { label: "Officer (licensed)", value: "officer" },
+          { label: "Support staff (no licence)", value: "support_staff" },
+        ],
+        importExample: "officer",
+      },
       // --- Contact ---
       { key: "phone", label: "Phone", type: "text", section: "Contact & Identity", importExample: "+1 512 555 0142" },
       { key: "address", label: "Address", type: "textarea", hiddenInGrid: true, importExample: "123 Main St, Austin, TX 78701" },
@@ -314,6 +322,7 @@ export const TABLES: TableDescriptor[] = [
       {
         key: "requiredLicenseLevel", label: "Min Licence", type: "select", required: true,
         options: [
+          { label: "Support (no licence)", value: "1" },
           { label: "Level 2 (unarmed)", value: "2" },
           { label: "Level 3 (armed)", value: "3" },
           { label: "Level 4 (PPO)", value: "4" },

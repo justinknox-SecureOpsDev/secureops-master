@@ -49,7 +49,7 @@ export function RepeatingShiftDialog({
   const [endTime, setEndTime] = useState("17:00");
   const [payRate, setPayRate] = useState("0");
   const [billRate, setBillRate] = useState("0");
-  const [licenseLevel, setLicenseLevel] = useState<"2" | "3" | "4">("2");
+  const [licenseLevel, setLicenseLevel] = useState<"1" | "2" | "3" | "4">("2");
   const [headcount, setHeadcount] = useState("1");
   const [notes, setNotes] = useState("");
   const [submitting, setSubmitting] = useState(false);
@@ -245,9 +245,10 @@ export function RepeatingShiftDialog({
             </div>
             <div>
               <Label>Min licence</Label>
-              <Select value={licenseLevel} onValueChange={(v) => setLicenseLevel(v as "2" | "3" | "4")}>
+              <Select value={licenseLevel} onValueChange={(v) => setLicenseLevel(v as "1" | "2" | "3" | "4")}>
                 <SelectTrigger><SelectValue /></SelectTrigger>
                 <SelectContent>
+                  <SelectItem value="1">Support (no licence)</SelectItem>
                   <SelectItem value="2">Level 2 (unarmed)</SelectItem>
                   <SelectItem value="3">Level 3 (armed)</SelectItem>
                   <SelectItem value="4">Level 4 (PPO)</SelectItem>

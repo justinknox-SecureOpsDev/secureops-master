@@ -33,7 +33,8 @@ function Field({ label, value, onChangeText, placeholder, keyboardType, autoCapi
   );
 }
 
-const LEVELS: Array<{ value: 2 | 3 | 4; label: string; sub: string }> = [
+const LEVELS: Array<{ value: 1 | 2 | 3 | 4; label: string; sub: string }> = [
+  { value: 1, label: "Support", sub: "No licence required — support staff or any officer" },
   { value: 2, label: "Level 2", sub: "Unarmed — any qualified officer" },
   { value: 3, label: "Level 3", sub: "Armed — L3 or L4 officers only" },
   { value: 4, label: "L4 / PPO", sub: "Personal Protection — L4 only" },
@@ -84,7 +85,7 @@ export default function EditShiftScreen() {
     billRate: "",
     isRepeat: false,
     repeatPattern: "",
-    requiredLicenseLevel: 2 as 2 | 3 | 4,
+    requiredLicenseLevel: 2 as 1 | 2 | 3 | 4,
     headcount: "1",
     status: "upcoming" as "upcoming" | "active" | "completed" | "cancelled",
   });
@@ -110,7 +111,7 @@ export default function EditShiftScreen() {
       billRate: String((shift as any).billRate ?? ""),
       isRepeat: !!shift.isRepeat,
       repeatPattern: typeof shift.repeatPattern === "string" ? shift.repeatPattern : (shift.repeatPattern ? JSON.stringify(shift.repeatPattern) : ""),
-      requiredLicenseLevel: ((shift as any).requiredLicenseLevel ?? 2) as 2 | 3 | 4,
+      requiredLicenseLevel: ((shift as any).requiredLicenseLevel ?? 2) as 1 | 2 | 3 | 4,
       headcount: String((shift as any).headcount ?? 1),
       status: (shift.status as any) ?? "upcoming",
     }));

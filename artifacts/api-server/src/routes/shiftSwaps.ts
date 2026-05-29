@@ -8,28 +8,11 @@ import {
   shiftsTable,
   sitesTable,
   usersTable,
-  licensesTable,
 } from "@workspace/db";
 import { requireAuth, requireAdmin } from "../middlewares/auth";
+import { getEffectiveLevel } from "../lib/eligibility";
 
 const router = Router();
-
-const LICENSE_RANK: Record<number, number> = { 2: 1, 3: 2, 4: 3 };
-
-async function maxLicenseLevelFor(employeeId: string): Promise<number> {
-  const rows = await db
-    .select({ level: licensesTable.level, expiryDate: licensesTable.expiryDate })
-    .from(licensesTable)
-    .where(eq(licensesTable.employeeId, employeeId));
-  const today = new Date().toISOString().slice(0, 10);
-  let max = 0;
-  for (const r of rows) {
-    if (r.expiryDate && r.expiryDate < today) continue;
-    const rank = r.level != null ? (LICENSE_RANK[r.level] ?? 0) : 0;
-    if (rank > max) max = rank;
-  }
-  return max;
-}
 
 async function pushSafely(userIds: string[], title: string, body: string, data?: Record<string, unknown>) {
   try {
@@ -119,8 +102,8 @@ router.post("/shifts/swap-requests", requireAuth, async (req, res): Promise<void
     return;
   }
 
-  const required = LICENSE_RANK[shift.requiredLicenseLevel] ?? 1;
-  const targetMax = await maxLicenseLevelFor(targetUserId);
+  const required = shift.requiredLicenseLevel;
+  const targetMax = await getEffectiveLevel(targetUserId);
   if (targetMax < required) {
     res.status(400).json({
       error: "Bad Request",
@@ -196,7 +179,7 @@ router.get("/me/swap-targets/:assignmentId", requireAuth, async (req, res): Prom
     res.status(400).json({ error: "Bad Request", message: "Shift has already started" });
     return;
   }
-  const required = LICENSE_RANK[shift.requiredLicenseLevel] ?? 1;
+  const required = shift.requiredLicenseLevel;
 
   const employees = await db
     .select({ id: usersTable.id, firstName: usersTable.firstName, lastName: usersTable.lastName })
@@ -207,7 +190,7 @@ router.get("/me/swap-targets/:assignmentId", requireAuth, async (req, res): Prom
   const eligible: Array<{ id: string; firstName: string; lastName: string }> = [];
   for (const e of employees) {
     if (e.id === me) continue;
-    const lvl = await maxLicenseLevelFor(e.id);
+    const lvl = await getEffectiveLevel(e.id);
     if (lvl >= required) eligible.push(e);
   }
   res.json(eligible);
@@ -399,8 +382,8 @@ router.post("/admin/swap-requests/:id/approve", requireAdmin, async (req, res): 
       if (!targetUser || targetUser.role !== "employee" || targetUser.status !== "active")
         return { code: 409 as const, body: { error: "Conflict", message: "Target officer is no longer eligible" } };
 
-      const required = LICENSE_RANK[shiftRow.requiredLicenseLevel] ?? 1;
-      const targetMax = await maxLicenseLevelFor(swap.targetUserId);
+      const required = shiftRow.requiredLicenseLevel;
+      const targetMax = await getEffectiveLevel(swap.targetUserId);
       if (targetMax < required)
         return { code: 409 as const, body: { error: "Conflict", message: "Target officer no longer holds the required license" } };
 

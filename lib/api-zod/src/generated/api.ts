@@ -464,11 +464,17 @@ export const UpdateMyEmployeeProfileResponse = zod
     skills: zod.array(zod.string()).optional(),
     licenseCount: zod.number().optional(),
     expiringLicenseCount: zod.number().optional(),
+    position: zod
+      .enum(["officer", "support_staff"])
+      .optional()
+      .describe(
+        "Job position. 'officer' work licensed security shifts; 'support_staff' are non-licensed and may work level-1 (support \/ no licence required) shifts.",
+      ),
     maxLicenseLevel: zod
       .number()
       .nullish()
       .describe(
-        "Highest valid (non-expired) license level: 2, 3, or 4. Null if no valid license.",
+        "Highest valid (non-expired) license level: 2, 3, or 4. Null if no valid license. Note: this reflects licences only — a support_staff officer with no licence is still null here.",
       ),
     createdAt: zod.coerce.date(),
   })
@@ -650,11 +656,17 @@ export const GetEmployeesResponseItem = zod.object({
   skills: zod.array(zod.string()).optional(),
   licenseCount: zod.number().optional(),
   expiringLicenseCount: zod.number().optional(),
+  position: zod
+    .enum(["officer", "support_staff"])
+    .optional()
+    .describe(
+      "Job position. 'officer' work licensed security shifts; 'support_staff' are non-licensed and may work level-1 (support \/ no licence required) shifts.",
+    ),
   maxLicenseLevel: zod
     .number()
     .nullish()
     .describe(
-      "Highest valid (non-expired) license level: 2, 3, or 4. Null if no valid license.",
+      "Highest valid (non-expired) license level: 2, 3, or 4. Null if no valid license. Note: this reflects licences only — a support_staff officer with no licence is still null here.",
     ),
   createdAt: zod.coerce.date(),
 });
@@ -669,6 +681,7 @@ export const CreateEmployeeBody = zod.object({
   firstName: zod.string(),
   lastName: zod.string(),
   role: zod.enum(["admin", "employee"]),
+  position: zod.enum(["officer", "support_staff"]).optional(),
   phone: zod.string().optional(),
   address: zod.string().optional(),
   dateOfBirth: zod.coerce.date().nullish(),
@@ -777,11 +790,17 @@ export const GetEmployeeResponse = zod.object({
   skills: zod.array(zod.string()).optional(),
   licenseCount: zod.number().optional(),
   expiringLicenseCount: zod.number().optional(),
+  position: zod
+    .enum(["officer", "support_staff"])
+    .optional()
+    .describe(
+      "Job position. 'officer' work licensed security shifts; 'support_staff' are non-licensed and may work level-1 (support \/ no licence required) shifts.",
+    ),
   maxLicenseLevel: zod
     .number()
     .nullish()
     .describe(
-      "Highest valid (non-expired) license level: 2, 3, or 4. Null if no valid license.",
+      "Highest valid (non-expired) license level: 2, 3, or 4. Null if no valid license. Note: this reflects licences only — a support_staff officer with no licence is still null here.",
     ),
   createdAt: zod.coerce.date(),
 });
@@ -898,11 +917,17 @@ export const UpdateEmployeeResponse = zod.object({
   skills: zod.array(zod.string()).optional(),
   licenseCount: zod.number().optional(),
   expiringLicenseCount: zod.number().optional(),
+  position: zod
+    .enum(["officer", "support_staff"])
+    .optional()
+    .describe(
+      "Job position. 'officer' work licensed security shifts; 'support_staff' are non-licensed and may work level-1 (support \/ no licence required) shifts.",
+    ),
   maxLicenseLevel: zod
     .number()
     .nullish()
     .describe(
-      "Highest valid (non-expired) license level: 2, 3, or 4. Null if no valid license.",
+      "Highest valid (non-expired) license level: 2, 3, or 4. Null if no valid license. Note: this reflects licences only — a support_staff officer with no licence is still null here.",
     ),
   createdAt: zod.coerce.date(),
 });
@@ -980,8 +1005,10 @@ export const GetShiftsResponseItem = zod.object({
   billableRate: zod.number().optional().describe("Legacy alias for billRate"),
   status: zod.enum(["upcoming", "active", "completed", "cancelled"]),
   requiredLicenseLevel: zod
-    .union([zod.literal(2), zod.literal(3), zod.literal(4)])
-    .describe("Minimum license level required (2=unarmed, 3=armed, 4=PPO)"),
+    .union([zod.literal(1), zod.literal(2), zod.literal(3), zod.literal(4)])
+    .describe(
+      "Minimum license level required (1=support\/no licence, 2=unarmed, 3=armed, 4=PPO)",
+    ),
   headcount: zod
     .number()
     .describe("Total number of officers needed for this shift"),
@@ -1026,6 +1053,7 @@ export const CreateShiftBody = zod.object({
   payRate: zod.number().describe("Officer pay per hour"),
   billRate: zod.number().describe("Client bill per hour"),
   requiredLicenseLevel: zod.union([
+    zod.literal(1),
     zod.literal(2),
     zod.literal(3),
     zod.literal(4),
@@ -1066,8 +1094,10 @@ export const GetShiftResponse = zod.object({
   billableRate: zod.number().optional().describe("Legacy alias for billRate"),
   status: zod.enum(["upcoming", "active", "completed", "cancelled"]),
   requiredLicenseLevel: zod
-    .union([zod.literal(2), zod.literal(3), zod.literal(4)])
-    .describe("Minimum license level required (2=unarmed, 3=armed, 4=PPO)"),
+    .union([zod.literal(1), zod.literal(2), zod.literal(3), zod.literal(4)])
+    .describe(
+      "Minimum license level required (1=support\/no licence, 2=unarmed, 3=armed, 4=PPO)",
+    ),
   headcount: zod
     .number()
     .describe("Total number of officers needed for this shift"),
@@ -1113,7 +1143,7 @@ export const UpdateShiftBody = zod.object({
   billRate: zod.number().optional(),
   status: zod.enum(["upcoming", "active", "completed", "cancelled"]).optional(),
   requiredLicenseLevel: zod
-    .union([zod.literal(2), zod.literal(3), zod.literal(4)])
+    .union([zod.literal(1), zod.literal(2), zod.literal(3), zod.literal(4)])
     .optional(),
   headcount: zod.number().min(1).optional(),
   notes: zod.string().optional(),
@@ -1140,8 +1170,10 @@ export const UpdateShiftResponse = zod.object({
   billableRate: zod.number().optional().describe("Legacy alias for billRate"),
   status: zod.enum(["upcoming", "active", "completed", "cancelled"]),
   requiredLicenseLevel: zod
-    .union([zod.literal(2), zod.literal(3), zod.literal(4)])
-    .describe("Minimum license level required (2=unarmed, 3=armed, 4=PPO)"),
+    .union([zod.literal(1), zod.literal(2), zod.literal(3), zod.literal(4)])
+    .describe(
+      "Minimum license level required (1=support\/no licence, 2=unarmed, 3=armed, 4=PPO)",
+    ),
   headcount: zod
     .number()
     .describe("Total number of officers needed for this shift"),
@@ -1803,8 +1835,10 @@ export const GetAdminDashboardSummaryResponse = zod.object({
         .describe("Legacy alias for billRate"),
       status: zod.enum(["upcoming", "active", "completed", "cancelled"]),
       requiredLicenseLevel: zod
-        .union([zod.literal(2), zod.literal(3), zod.literal(4)])
-        .describe("Minimum license level required (2=unarmed, 3=armed, 4=PPO)"),
+        .union([zod.literal(1), zod.literal(2), zod.literal(3), zod.literal(4)])
+        .describe(
+          "Minimum license level required (1=support\/no licence, 2=unarmed, 3=armed, 4=PPO)",
+        ),
       headcount: zod
         .number()
         .describe("Total number of officers needed for this shift"),
@@ -1868,8 +1902,10 @@ export const GetEmployeeDashboardSummaryResponse = zod.object({
         .describe("Legacy alias for billRate"),
       status: zod.enum(["upcoming", "active", "completed", "cancelled"]),
       requiredLicenseLevel: zod
-        .union([zod.literal(2), zod.literal(3), zod.literal(4)])
-        .describe("Minimum license level required (2=unarmed, 3=armed, 4=PPO)"),
+        .union([zod.literal(1), zod.literal(2), zod.literal(3), zod.literal(4)])
+        .describe(
+          "Minimum license level required (1=support\/no licence, 2=unarmed, 3=armed, 4=PPO)",
+        ),
       headcount: zod
         .number()
         .describe("Total number of officers needed for this shift"),
@@ -1955,8 +1991,10 @@ export const GetEmployeeDashboardSummaryResponse = zod.object({
         .describe("Legacy alias for billRate"),
       status: zod.enum(["upcoming", "active", "completed", "cancelled"]),
       requiredLicenseLevel: zod
-        .union([zod.literal(2), zod.literal(3), zod.literal(4)])
-        .describe("Minimum license level required (2=unarmed, 3=armed, 4=PPO)"),
+        .union([zod.literal(1), zod.literal(2), zod.literal(3), zod.literal(4)])
+        .describe(
+          "Minimum license level required (1=support\/no licence, 2=unarmed, 3=armed, 4=PPO)",
+        ),
       headcount: zod
         .number()
         .describe("Total number of officers needed for this shift"),

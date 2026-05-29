@@ -8,30 +8,13 @@ import {
   shiftsTable,
   shiftAssignmentsTable,
   sitesTable,
-  licensesTable,
 } from "@workspace/db";
 import { requireAuth } from "../middlewares/auth";
+import { getEffectiveLevel } from "../lib/eligibility";
 
 const router: IRouter = Router();
 
 // ---------- shared helpers ----------
-
-const LICENSE_RANK: Record<number, number> = { 2: 1, 3: 2, 4: 3 };
-
-async function maxLicenseLevelFor(userId: string): Promise<number> {
-  const rows = await db
-    .select({ level: licensesTable.level, expiryDate: licensesTable.expiryDate })
-    .from(licensesTable)
-    .where(eq(licensesTable.employeeId, userId));
-  const today = new Date().toISOString().slice(0, 10);
-  let max = 0;
-  for (const r of rows) {
-    if (r.expiryDate && r.expiryDate < today) continue;
-    const rank = r.level != null ? (LICENSE_RANK[r.level] ?? 0) : 0;
-    if (rank > max) max = rank;
-  }
-  return max;
-}
 
 const HHMM_RE = /^([01]\d|2[0-3]):[0-5]\d$/;
 const hhmmToMin = (s: string): number => {
@@ -188,7 +171,7 @@ router.get("/me/suggested-shifts", requireAuth, requireEmployee, async (req, res
       .from(employeesTable)
       .where(eq(employeesTable.userId, userId))
       .limit(1),
-    maxLicenseLevelFor(userId),
+    getEffectiveLevel(userId),
   ]);
 
   if (windows.length === 0) { res.json({ shifts: [], reason: "no_windows" }); return; }

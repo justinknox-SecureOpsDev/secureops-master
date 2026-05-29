@@ -31,7 +31,8 @@ function Field({ label, value, onChangeText, placeholder, keyboardType, autoCapi
   );
 }
 
-const LEVELS: Array<{ value: 2 | 3 | 4; label: string; sub: string }> = [
+const LEVELS: Array<{ value: 1 | 2 | 3 | 4; label: string; sub: string }> = [
+  { value: 1, label: "Support", sub: "No licence required — support staff or any officer" },
   { value: 2, label: "Level 2", sub: "Unarmed — any qualified officer" },
   { value: 3, label: "Level 3", sub: "Armed — L3 or L4 officers only" },
   { value: 4, label: "L4 / PPO", sub: "Personal Protection — L4 only" },
@@ -66,7 +67,7 @@ export default function CreateShiftScreen() {
     billRate: "",
     isRepeat: false,
     repeatPattern: "",
-    requiredLicenseLevel: 2 as 2 | 3 | 4,
+    requiredLicenseLevel: 2 as 1 | 2 | 3 | 4,
     headcount: "1",
   });
   const set = (key: string) => (val: any) => setForm((f) => ({ ...f, [key]: val }));
