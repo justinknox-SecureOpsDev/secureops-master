@@ -29,3 +29,21 @@ id = "yxUYR9bny38cktXVhs9B7"
 uri = "file://exports/wcsg-payroll-process.pdf"
 type = "pdf"
 title = "WCSG Payroll & Invoicing Process"
+
+[[outputs]]
+id = "ai460TEBVyZbvc7d0MiQN"
+uri = "file://exports/wcsg-officer-app-guide.pdf"
+type = "pdf"
+title = "Officer Mobile App Guide"
+
+[[outputs]]
+id = "_fL5CajTrs8phu6ImW_94"
+uri = "file://exports/wcsg-admin-app-guide.pdf"
+type = "pdf"
+title = "Admin Mobile App Guide"
+
+[[outputs]]
+id = "7hoqt-snQR02u2Il-0MUR"
+uri = "file://exports/wcsg-admin-portal-guide.pdf"
+type = "pdf"
+title = "Admin Web Portal Guide"
