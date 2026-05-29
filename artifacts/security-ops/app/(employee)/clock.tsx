@@ -1,7 +1,8 @@
 import React, { useState, useEffect } from "react";
 import { useTopPad } from "@/hooks/useTopPad";
-import { View, Text, StyleSheet, TouchableOpacity, ActivityIndicator, Alert, Platform, ScrollView, AccessibilityInfo } from "react-native";
+import { View, Text, StyleSheet, TouchableOpacity, ActivityIndicator, Platform, ScrollView, AccessibilityInfo } from "react-native";
 import { useColors } from "@/hooks/useColors";
+import { confirmAction, notify } from "@/utils/confirm";
 import { useClockIn, useClockOut, useGetActiveTimeEntry, getGetActiveTimeEntryQueryKey, useGetTimeEntries, getGetTimeEntriesQueryKey, updateMyLocation, useGetSites, getGetSitesQueryKey, getGetEmployeeDashboardSummaryQueryKey, getGetShiftsQueryKey } from "@workspace/api-client-react";
 import { Feather } from "@expo/vector-icons";
 import { useQueryClient } from "@tanstack/react-query";
@@ -101,11 +102,11 @@ export default function EmployeeClockScreen() {
       ]);
       const name = result?.geoResolved?.siteName ?? siteLabel;
       if (name) {
-        Alert.alert("Clocked In", `Site: ${name}${result?.geoResolved?.distanceMiles != null ? ` (${result.geoResolved.distanceMiles} mi away)` : ""}.`);
+        notify("Clocked In", `Site: ${name}${result?.geoResolved?.distanceMiles != null ? ` (${result.geoResolved.distanceMiles} mi away)` : ""}.`);
       }
     } catch (e: any) {
       const msg = e?.response?.data?.message || e?.message || "Clock-in failed";
-      Alert.alert("Cannot Clock In", msg);
+      notify("Cannot Clock In", msg);
     }
   };
 
@@ -117,13 +118,16 @@ export default function EmployeeClockScreen() {
         setShowSitePicker(true);
         return;
       }
-      Alert.alert("Location Required", "We need your GPS to identify which site you're at. Please enable location and try again.");
+      notify("Location Required", "We need your GPS to identify which site you're at. Please enable location and try again.");
       return;
     }
-    Alert.alert("Clock In", "Start your shift now? Your location will be used to identify the site.", [
-      { text: "Cancel", style: "cancel" },
-      { text: "Clock In", onPress: () => performClockIn(location.lat, location.lon) },
-    ]);
+    const ok = await confirmAction({
+      title: "Clock In",
+      message: "Start your shift now? Your location will be used to identify the site.",
+      confirmText: "Clock In",
+    });
+    if (!ok) return;
+    await performClockIn(location.lat, location.lon);
   };
 
   const handlePickSite = (site: any) => {
@@ -131,7 +135,7 @@ export default function EmployeeClockScreen() {
     const lat = site?.locationLat != null ? Number(site.locationLat) : null;
     const lng = site?.locationLng != null ? Number(site.locationLng) : null;
     if (lat == null || lng == null || Number.isNaN(lat) || Number.isNaN(lng)) {
-      Alert.alert("Site Has No Coordinates", `${site?.name ?? "This site"} doesn't have a saved location yet. Add lat/lng to the site in the admin portal first.`);
+      notify("Site Has No Coordinates", `${site?.name ?? "This site"} doesn't have a saved location yet. Add lat/lng to the site in the admin portal first.`);
       return;
     }
     setLocation({ lat, lon: lng });
@@ -140,27 +144,32 @@ export default function EmployeeClockScreen() {
 
   const handleClockOut = async () => {
     if (!currentEntry?.id) return;
-    Alert.alert("Clock Out", "End your shift now?", [
-      { text: "Cancel", style: "cancel" },
-      {
-        text: "Clock Out", style: "destructive", onPress: async () => {
-          await clockOutMutation.mutateAsync({
-            data: { timeEntryId: currentEntry.id, lat: location?.lat ?? 0, lng: location?.lon ?? 0 } as any,
-          });
-          AccessibilityInfo.announceForAccessibility("Clocked out. You are now off duty.");
-          // Clear the active-entry cache *immediately* so the ON-DUTY ring
-          // flips to OFF DUTY without waiting for the refetch round-trip.
-          queryClient.setQueryData(getGetActiveTimeEntryQueryKey(), null);
-          setElapsed(0);
-          await Promise.all([
-            queryClient.invalidateQueries({ queryKey: getGetActiveTimeEntryQueryKey() }),
-            queryClient.invalidateQueries({ queryKey: getGetTimeEntriesQueryKey() }),
-            queryClient.invalidateQueries({ queryKey: getGetEmployeeDashboardSummaryQueryKey() }),
-            queryClient.invalidateQueries({ queryKey: getGetShiftsQueryKey() }),
-          ]);
-        }
-      }
-    ]);
+    const ok = await confirmAction({
+      title: "Clock Out",
+      message: "End your shift now?",
+      confirmText: "Clock Out",
+      destructive: true,
+    });
+    if (!ok) return;
+    try {
+      await clockOutMutation.mutateAsync({
+        data: { timeEntryId: currentEntry.id, lat: location?.lat ?? 0, lng: location?.lon ?? 0 } as any,
+      });
+      AccessibilityInfo.announceForAccessibility("Clocked out. You are now off duty.");
+      // Clear the active-entry cache *immediately* so the ON-DUTY ring
+      // flips to OFF DUTY without waiting for the refetch round-trip.
+      queryClient.setQueryData(getGetActiveTimeEntryQueryKey(), null);
+      setElapsed(0);
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: getGetActiveTimeEntryQueryKey() }),
+        queryClient.invalidateQueries({ queryKey: getGetTimeEntriesQueryKey() }),
+        queryClient.invalidateQueries({ queryKey: getGetEmployeeDashboardSummaryQueryKey() }),
+        queryClient.invalidateQueries({ queryKey: getGetShiftsQueryKey() }),
+      ]);
+    } catch (e: any) {
+      const msg = e?.response?.data?.message || e?.message || "Clock-out failed";
+      notify("Clock-Out Failed", msg);
+    }
   };
 
   return (
