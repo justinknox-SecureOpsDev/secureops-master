@@ -35,23 +35,22 @@ export function useNotifications() {
     void registerForPushNotifications();
   }, [user, token]);
 
-  // Deep-link chat-message notification taps straight into the room. Warm taps
-  // (app foreground/background) come through the response listener; cold-start
-  // taps (app was killed) come through getLastNotificationResponseAsync.
+  // Deep-link any notification tap to a sensible target screen — chat rooms,
+  // shifts, the clock, license/training renewal, swap requests, and the admin
+  // incident/map/employee views. Warm taps (app foreground/background) come
+  // through the response listener; cold-start taps (app was killed) come
+  // through getLastNotificationResponseAsync. Unknown/legacy notifications fall
+  // back to the default landing screen by doing nothing here.
   useEffect(() => {
     if (Platform.OS === "web" || isExpoGo) return;
 
     let cancelled = false;
     let subscription: { remove: () => void } | undefined;
 
-    const navigateToRoom = (data: unknown): void => {
-      const d = data as { type?: string; roomId?: string; roomName?: string } | null | undefined;
-      if (!d || d.type !== "chat_message" || !d.roomId) return;
-      const group = roleRef.current === "admin" ? "(admin)" : "(employee)";
-      router.push({
-        pathname: `/${group}/chat/[id]` as never,
-        params: { id: String(d.roomId), name: d.roomName ? String(d.roomName) : "Chat" },
-      });
+    const navigateForNotification = (data: unknown): void => {
+      const target = resolveNotificationTarget(data, roleRef.current);
+      if (!target) return;
+      router.push({ pathname: target.pathname as never, params: target.params });
     };
 
     void (async () => {
@@ -60,17 +59,17 @@ export function useNotifications() {
 
         // Cold start: the app was launched by tapping a notification. Defer
         // briefly so the root redirect guard finishes landing the user inside
-        // their role group before we push the chat route on top of it.
+        // their role group before we push the target route on top of it.
         const last = await Notifications.getLastNotificationResponseAsync();
         if (!cancelled && last) {
           setTimeout(() => {
-            if (!cancelled) navigateToRoom(last.notification.request.content.data);
+            if (!cancelled) navigateForNotification(last.notification.request.content.data);
           }, 800);
         }
 
         if (cancelled) return;
         subscription = Notifications.addNotificationResponseReceivedListener((response) => {
-          navigateToRoom(response.notification.request.content.data);
+          navigateForNotification(response.notification.request.content.data);
         });
       } catch (e) {
         console.log("Notification response listener skipped:", e);
@@ -82,6 +81,82 @@ export function useNotifications() {
       subscription?.remove();
     };
   }, [router]);
+}
+
+type NavTarget = { pathname: string; params?: Record<string, string> };
+
+// Map a push notification's `data` payload + the recipient's role to a deep-link
+// target. Returns null for unknown/legacy notifications so the caller falls back
+// to the default landing screen. Senders set `data.type`; the legacy missed-
+// patrol push used `data.kind`, so we honour that too.
+function resolveNotificationTarget(data: unknown, role: string | undefined): NavTarget | null {
+  const d = data as Record<string, unknown> | null | undefined;
+  if (!d) return null;
+  const type =
+    typeof d.type === "string" ? d.type : typeof d.kind === "string" ? d.kind : undefined;
+  if (!type) return null;
+
+  const group = role === "admin" ? "(admin)" : "(employee)";
+  const str = (v: unknown): string | undefined => (v == null ? undefined : String(v));
+
+  switch (type) {
+    // Chat — deep-link into the room so the header can be labelled.
+    case "chat_message": {
+      if (!d.roomId) return null;
+      return {
+        pathname: `/${group}/chat/[id]`,
+        params: { id: String(d.roomId), name: d.roomName ? String(d.roomName) : "Chat" },
+      };
+    }
+
+    // Shift lifecycle — assignment, reservation, open vacancy, pre-shift
+    // reminder all live on the shifts tab (admin or employee).
+    case "shift_assigned":
+    case "shift_reserved":
+    case "shift_available":
+    case "shift_vacancy_reminder":
+    case "shift_reminder":
+      return { pathname: `/${group}/shifts` };
+
+    // Clock — forgot-to-clock-out nudge.
+    case "forgot_clock_out":
+      return { pathname: "/(employee)/clock" };
+
+    // License / training renewal.
+    case "license_expiry_reminder":
+      return { pathname: "/license-renewal" };
+    case "training_expiry_reminder":
+      return { pathname: "/training-add" };
+
+    // Shift swaps — request, accept/decline, approval/rejection, cancellation.
+    case "swap-request":
+    case "swap-update":
+    case "swap-approved":
+    case "swap-rejected":
+    case "swap-cancelled":
+      return { pathname: "/swap-requests" };
+    // Admin gets pinged when an officer-to-officer swap needs approval.
+    case "swap-pending-approval":
+      return role === "admin" ? { pathname: "/swap-requests" } : null;
+
+    // Admin-only alerts. These are only sent to admins; guard on role so a
+    // stray payload never routes a non-admin into the admin tab group.
+    case "emergency":
+      return role === "admin" ? { pathname: "/(admin)/incidents" } : null;
+    case "geofence_breach":
+    case "missed_checkpoint":
+      return role === "admin" ? { pathname: "/(admin)/live-map" } : null;
+    case "high_risk_profile_change": {
+      if (role !== "admin") return null;
+      const id = str(d.employeeUserId);
+      return id
+        ? { pathname: "/(admin)/employees/[id]", params: { id } }
+        : { pathname: "/(admin)/employees" };
+    }
+
+    default:
+      return null;
+  }
 }
 
 async function registerForPushNotifications() {

@@ -564,7 +564,7 @@ export function startScheduledJobs(intervalMs: number = HOUR_MS): NodeJS.Timeout
           await sendPushToUsers(adminIds, {
             title: "⚠ Missed patrol checkpoint",
             body: `${officerName} hasn't scanned at ${a.siteName} for over ${intervalMin}m.`,
-            data: { kind: "missed_checkpoint", siteId: a.siteId!, timeEntryId: a.id },
+            data: { type: "missed_checkpoint", siteId: a.siteId!, timeEntryId: a.id },
           });
           pagedCount += 1;
         } catch (err) {
