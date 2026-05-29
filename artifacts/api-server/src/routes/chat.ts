@@ -573,7 +573,9 @@ router.post("/chat/rooms/:id/messages", requireAuth, async (req, res): Promise<v
       void sendPushToUsers(pushRecipients, {
         title: isDirect ? senderName : `#${room.name}`,
         body: isDirect ? preview : `${senderName}: ${preview}`,
-        data: { roomId: id, type: "chat_message" },
+        // roomName lets the mobile app label the chat screen header when the
+        // notification tap deep-links straight into the room.
+        data: { roomId: id, type: "chat_message", roomName: isDirect ? senderName : room.name },
       });
     }
   }

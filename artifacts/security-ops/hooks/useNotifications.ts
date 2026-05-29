@@ -1,6 +1,7 @@
-import { useEffect } from "react";
+import { useEffect, useRef } from "react";
 import Constants from "expo-constants";
 import { Platform } from "react-native";
+import { useRouter } from "expo-router";
 import { useAuth } from "@/contexts/AuthContext";
 import { apiRequest } from "@/utils/api";
 
@@ -21,11 +22,66 @@ function getEasProjectId(): string | undefined {
 
 export function useNotifications() {
   const { user, token } = useAuth();
+  const router = useRouter();
+
+  // Keep the latest role in a ref so the long-lived notification-response
+  // listener routes taps into the correct navigation group without being
+  // re-created every time the user object changes identity.
+  const roleRef = useRef<string | undefined>(user?.role);
+  useEffect(() => { roleRef.current = user?.role; }, [user?.role]);
 
   useEffect(() => {
     if (!user || !token || Platform.OS === "web") return;
     void registerForPushNotifications();
   }, [user, token]);
+
+  // Deep-link chat-message notification taps straight into the room. Warm taps
+  // (app foreground/background) come through the response listener; cold-start
+  // taps (app was killed) come through getLastNotificationResponseAsync.
+  useEffect(() => {
+    if (Platform.OS === "web" || isExpoGo) return;
+
+    let cancelled = false;
+    let subscription: { remove: () => void } | undefined;
+
+    const navigateToRoom = (data: unknown): void => {
+      const d = data as { type?: string; roomId?: string; roomName?: string } | null | undefined;
+      if (!d || d.type !== "chat_message" || !d.roomId) return;
+      const group = roleRef.current === "admin" ? "(admin)" : "(employee)";
+      router.push({
+        pathname: `/${group}/chat/[id]` as never,
+        params: { id: String(d.roomId), name: d.roomName ? String(d.roomName) : "Chat" },
+      });
+    };
+
+    void (async () => {
+      try {
+        const Notifications = await import("expo-notifications");
+
+        // Cold start: the app was launched by tapping a notification. Defer
+        // briefly so the root redirect guard finishes landing the user inside
+        // their role group before we push the chat route on top of it.
+        const last = await Notifications.getLastNotificationResponseAsync();
+        if (!cancelled && last) {
+          setTimeout(() => {
+            if (!cancelled) navigateToRoom(last.notification.request.content.data);
+          }, 800);
+        }
+
+        if (cancelled) return;
+        subscription = Notifications.addNotificationResponseReceivedListener((response) => {
+          navigateToRoom(response.notification.request.content.data);
+        });
+      } catch (e) {
+        console.log("Notification response listener skipped:", e);
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+      subscription?.remove();
+    };
+  }, [router]);
 }
 
 async function registerForPushNotifications() {
