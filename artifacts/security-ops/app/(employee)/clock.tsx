@@ -42,8 +42,14 @@ export default function EmployeeClockScreen() {
     { query: { queryKey: getGetTimeEntriesQueryKey({}) } },
   );
 
-  const clockInMutation = useClockIn();
-  const clockOutMutation = useClockOut();
+  // networkMode "always" is critical here: clocking in/out are time-sensitive,
+  // user-initiated actions that must NEVER be silently paused by React Query's
+  // online detection. With the default "online" mode, a flaky/false "offline"
+  // reading would pause mutateAsync indefinitely — the button spins and no
+  // request is sent. "always" fires the request regardless and surfaces real
+  // network failures to the catch handler so the user gets actionable feedback.
+  const clockInMutation = useClockIn({ mutation: { networkMode: "always" } });
+  const clockOutMutation = useClockOut({ mutation: { networkMode: "always" } });
 
   // Web preview (canvas iframe) often blocks geolocation. Let the user pick a
   // site manually as a fallback so the clock function is testable on web.

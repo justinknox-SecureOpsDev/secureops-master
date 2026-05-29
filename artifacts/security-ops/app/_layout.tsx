@@ -43,12 +43,22 @@ const queryClient = new QueryClient({
 });
 
 // React Query on native doesn't auto-detect focus/online events — wire them up.
-onlineManager.setEventListener((setOnline) => {
-  const unsub = NetInfo.addEventListener((state) => {
-    setOnline(!!state.isConnected);
+// IMPORTANT: native only. On web, React Query already ships a reliable online
+// manager (navigator.onLine + window "online"/"offline" events). Replacing it
+// with @react-native-community/netinfo on web is both unnecessary and risky:
+// netinfo's web layer can report `isConnected` falsy (transient reachability
+// probe failures), which flips onlineManager to "offline" and PAUSES every
+// mutation (default networkMode: "online"). A paused mutation's mutateAsync
+// hangs forever — the clock-in/out button spins and no request is ever sent.
+// Guarding to native mirrors the focusManager guard in onAppStateChange below.
+if (Platform.OS !== "web") {
+  onlineManager.setEventListener((setOnline) => {
+    const unsub = NetInfo.addEventListener((state) => {
+      setOnline(!!state.isConnected);
+    });
+    return () => unsub();
   });
-  return () => unsub();
-});
+}
 
 function onAppStateChange(status: AppStateStatus) {
   if (Platform.OS !== "web") {
