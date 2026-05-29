@@ -43,10 +43,11 @@ function DefaultValueInput({
   field, value, onChange,
 }: { field: Field; value: string; onChange: (v: string) => void }) {
   const fk = useFkOptions(field.type === "fk" ? field.fkTable : undefined);
+  const defaultLabel = `Default value for ${field.label}`;
   if (field.type === "fk") {
     return (
       <Select value={value} onValueChange={onChange}>
-        <SelectTrigger className="h-8 text-xs"><SelectValue placeholder="Pick…" /></SelectTrigger>
+        <SelectTrigger className="h-8 text-xs" aria-label={defaultLabel}><SelectValue placeholder="Pick…" /></SelectTrigger>
         <SelectContent className="max-h-72">
           {fk.options.map((o) => (
             <SelectItem key={o.id} value={o.id}>{o.label}</SelectItem>
@@ -58,7 +59,7 @@ function DefaultValueInput({
   if (field.type === "select") {
     return (
       <Select value={value} onValueChange={onChange}>
-        <SelectTrigger className="h-8 text-xs"><SelectValue placeholder="Pick…" /></SelectTrigger>
+        <SelectTrigger className="h-8 text-xs" aria-label={defaultLabel}><SelectValue placeholder="Pick…" /></SelectTrigger>
         <SelectContent>
           {field.options?.map((o) => (
             <SelectItem key={o.value} value={o.value}>{o.label}</SelectItem>
@@ -72,6 +73,7 @@ function DefaultValueInput({
       className="h-8 text-xs"
       value={value}
       placeholder="(blank)"
+      aria-label={defaultLabel}
       onChange={(e) => onChange(e.target.value)}
     />
   );
@@ -385,8 +387,16 @@ export function ImportWizard({
           </DialogTitle>
         </DialogHeader>
 
+        {/* Polite step-change announcement for screen readers. */}
+        <div role="status" aria-live="polite" aria-atomic="true" className="sr-only">
+          {step === "upload" ? "Step 1 of 4: Upload file"
+            : step === "map" ? "Step 2 of 4: Map columns"
+            : step === "preview" ? "Step 3 of 4: Preview and validate"
+            : "Step 4 of 4: Import complete"}
+        </div>
+
         {error && (
-          <div className="text-sm text-destructive bg-destructive/5 p-3 rounded border border-destructive/20">
+          <div role="alert" className="text-sm text-destructive bg-destructive/5 p-3 rounded border border-destructive/20">
             {error}
           </div>
         )}
@@ -402,6 +412,7 @@ export function ImportWizard({
                 type="file"
                 accept=".xlsx,.xls,.csv,.tsv"
                 disabled={busy}
+                aria-label="Choose an Excel or CSV file to import"
                 onChange={(e) => { const f = e.target.files?.[0]; if (f) handleFile(f); }}
                 className="block mx-auto text-sm"
               />
@@ -472,7 +483,7 @@ export function ImportWizard({
                     value={mapping[h] ?? ""}
                     onValueChange={(v) => setMapping((m) => ({ ...m, [h]: v === "__skip__" ? "" : v }))}
                   >
-                    <SelectTrigger className="h-8 text-xs"><SelectValue placeholder="Skip" /></SelectTrigger>
+                    <SelectTrigger className="h-8 text-xs" aria-label={`Map spreadsheet column "${h}" to a field`}><SelectValue placeholder="Skip" /></SelectTrigger>
                     <SelectContent>
                       <SelectItem value="__skip__">Skip this column</SelectItem>
                       {writableFields.map((f) => (
@@ -511,7 +522,7 @@ export function ImportWizard({
                             value={mode}
                             onValueChange={(v) => setResolveBy((prev) => ({ ...prev, [f.key]: v as "id" | "label" }))}
                           >
-                            <SelectTrigger className="h-8 text-xs">
+                            <SelectTrigger className="h-8 text-xs" aria-label={`How to match the ${f.label} column`}>
                               <SelectValue />
                             </SelectTrigger>
                             <SelectContent>
@@ -543,7 +554,7 @@ export function ImportWizard({
                                         [f.key]: { ...(prev[f.key] ?? {}), [mf]: v === "__none__" ? "" : v },
                                       }))}
                                     >
-                                      <SelectTrigger className="h-7 text-[11px]">
+                                      <SelectTrigger className="h-7 text-[11px]" aria-label={`Spreadsheet column for ${target?.fields.find((x) => x.key === mf)?.label ?? mf}`}>
                                         <SelectValue placeholder="Pick column…" />
                                       </SelectTrigger>
                                       <SelectContent>
@@ -622,7 +633,10 @@ export function ImportWizard({
               );
             })()}
             {previewIssues.length > 0 && (
-              <div className="text-xs bg-amber-50 border border-amber-200 rounded p-2 max-h-32 overflow-auto">
+              <div role="alert" className="text-xs bg-amber-50 border border-amber-200 rounded p-2 max-h-32 overflow-auto">
+                <div className="font-semibold mb-1">
+                  {previewIssues.length} row {previewIssues.length === 1 ? "issue" : "issues"} found — fix before importing:
+                </div>
                 {previewIssues.slice(0, 30).map((i, n) => <div key={n}>{i.message}</div>)}
                 {previewIssues.length > 30 && <div className="italic">…and {previewIssues.length - 30} more</div>}
               </div>
@@ -665,6 +679,9 @@ export function ImportWizard({
 
         {step === "result" && result && (
           <div className="space-y-3 text-sm">
+            <div role="status" aria-live="polite" className="sr-only">
+              Import complete. {result.inserted} of {result.total} rows inserted, {result.failed} failed.
+            </div>
             <div className="grid grid-cols-3 gap-3">
               <div className="border rounded p-3">
                 <div className="text-xs text-muted-foreground">Total rows</div>
