@@ -82,8 +82,14 @@ export default function ShiftDetailScreen() {
   const reqLevel = (shift as any)?.requiredLicenseLevel ?? 2;
   const headcount = (shift as any)?.headcount ?? 1;
   const unassignedAll = (allEmployees ?? []).filter((e) => !assignedIds.has(e.id));
-  const eligibleAll = unassignedAll.filter((e: any) => (e.maxLicenseLevel ?? 0) >= reqLevel);
-  const ineligibleAll = unassignedAll.filter((e: any) => (e.maxLicenseLevel ?? 0) < reqLevel);
+  // Effective clearance mirrors the server's eligibility helper: a licensed
+  // officer's level is their highest unexpired licence; support staff carry a
+  // baseline of 1 ("Support / no licence required"); higher levels cover lower.
+  // Filtering on raw maxLicenseLevel alone wrongly hid support / non-licensed
+  // staff from level-1 (Support) shifts.
+  const effLevel = (e: any) => Math.max(e.maxLicenseLevel ?? 0, e.position === "support_staff" ? 1 : 0);
+  const eligibleAll = unassignedAll.filter((e: any) => effLevel(e) >= reqLevel);
+  const ineligibleAll = unassignedAll.filter((e: any) => effLevel(e) < reqLevel);
 
   // Search across the qualified + not-qualified lists. Matches first/last
   // name and email so admins can find people fast on busy rosters.

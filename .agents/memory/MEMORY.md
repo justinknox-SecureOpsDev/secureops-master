@@ -1,2 +1,3 @@
 - [Prod "Failed to load" transients](prod-failed-to-load-transients.md) — "Failed to load X" cards in prod usually = Reserved-VM redeploy restart window, not a backend bug; confirm with healthz + logs.
 - [wouter bare-base routing](wouter-base-routing.md) — wouter with bare base "" 404 gotcha (client portal login).
+- [expo-router Tabs reuse](expo-router-tabs-reuse.md) — dynamic detail/edit routes need a nested Stack, not flat Tabs siblings (instance reuse leaks stale params/state)

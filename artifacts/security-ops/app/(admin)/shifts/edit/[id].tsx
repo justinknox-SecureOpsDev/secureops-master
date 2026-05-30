@@ -94,9 +94,13 @@ export default function EditShiftScreen() {
 
   // Prefill once the shift loads AND we know the site→client mapping. The
   // shift row only stores siteId, so we resolve clientId via the sites list.
-  const [hydrated, setHydrated] = useState(false);
+  // Track WHICH shift id we hydrated from, not just a boolean. If this screen
+  // instance is ever reused for a different id (e.g. navigator reuse), a plain
+  // boolean would keep the previous shift's values in the form — the "editing
+  // switches to a different shift" bug. Re-hydrating when id changes is safe.
+  const [hydratedId, setHydratedId] = useState<string | null>(null);
   useEffect(() => {
-    if (!shift || hydrated) return;
+    if (!shift || hydratedId === id) return;
     const siteId = (shift as any).siteId ?? "";
     const matchedSite = siteId ? ((allSites as any[]) ?? []).find((s) => s.id === siteId) : undefined;
     if (siteId && !matchedSite) return; // wait for sites to load before hydrating
@@ -116,8 +120,8 @@ export default function EditShiftScreen() {
       headcount: String((shift as any).headcount ?? 1),
       status: (shift.status as any) ?? "upcoming",
     }));
-    setHydrated(true);
-  }, [shift, hydrated]);
+    setHydratedId(id);
+  }, [shift, id, hydratedId, allSites]);
 
   const { data: sites } = useGetSites({ clientId: form.clientId || undefined } as any, {
     query: { queryKey: getGetSitesQueryKey({ clientId: form.clientId || undefined } as any), enabled: !!form.clientId },

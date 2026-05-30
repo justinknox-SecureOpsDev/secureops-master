@@ -66,6 +66,10 @@ export default function AdminLayout() {
         name="shifts"
         options={{
           title: "Shifts",
+          // The Shifts tab hosts a nested Stack whose screens render their own
+          // in-screen headers — suppress the tab navigator's native header so
+          // we don't double up.
+          headerShown: false,
           tabBarAccessibilityLabel: "Shifts tab",
           tabBarIcon: ({ color }) => <Feather name="calendar" size={22} color={color} />,
         }}
@@ -119,8 +123,10 @@ export default function AdminLayout() {
       <Tabs.Screen name="time-approval" options={{ href: null, headerTitle: "Time Approval" }} />
       <Tabs.Screen name="employees/[id]" options={{ href: null, headerTitle: "Employee Profile" }} />
       <Tabs.Screen name="employees/create" options={{ href: null, headerTitle: "Add Employee" }} />
-      <Tabs.Screen name="shifts/[id]" options={{ href: null, headerTitle: "Shift Details" }} />
-      <Tabs.Screen name="shifts/create" options={{ href: null, headerTitle: "Create Shift" }} />
+      {/* shifts/* (list, detail, create, edit) live in a nested Stack — see
+          app/(admin)/shifts/_layout.tsx — so they must NOT be registered as
+          flat tab screens here (doing so reused a single instance and leaked
+          an extra tab into the bar). */}
       <Tabs.Screen name="chat/[id]" options={{ href: null, headerShown: false }} />
     </Tabs>
   );
