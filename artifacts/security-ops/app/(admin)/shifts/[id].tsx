@@ -46,11 +46,18 @@ export default function ShiftDetailScreen() {
 
   const assignedIds = new Set((shift?.assignments ?? []).map((a) => a.employeeId));
 
-  const handleAssign = async (employeeId: string, name: string) => {
-    const ok = await confirmAction({ title: "Assign Officer", message: `Assign ${name} to this shift?`, confirmText: "Assign" });
+  const handleAssign = async (employeeId: string, name: string, overrideLicense = false) => {
+    const ok = overrideLicense
+      ? await confirmAction({
+          title: "Override License Requirement",
+          message: `${name} isn't cleared for this shift's required license level. Assign anyway? This override is recorded in the audit log.`,
+          confirmText: "Assign Anyway",
+          destructive: true,
+        })
+      : await confirmAction({ title: "Assign Officer", message: `Assign ${name} to this shift?`, confirmText: "Assign" });
     if (!ok) return;
     try {
-      await assignMutation.mutateAsync({ id: id!, data: { employeeId } });
+      await assignMutation.mutateAsync({ id: id!, data: { employeeId, ...(overrideLicense ? { overrideLicense: true } : {}) } });
       queryClient.invalidateQueries({ queryKey: getGetShiftQueryKey(id!) });
       queryClient.invalidateQueries({ queryKey: getGetShiftsQueryKey() });
     } catch (e: any) {
@@ -266,8 +273,17 @@ export default function ShiftDetailScreen() {
           {isSearching && ineligible.length === 0 && (
             <Text style={[styles.emptyText, { color: colors.mutedForeground }]}>No matches.</Text>
           )}
+          <Text style={{ color: colors.mutedForeground, fontSize: 11, marginBottom: 8 }}>
+            Below the required {levelLabel(reqLevel)}. Tap to assign with a license override (audit-logged).
+          </Text>
           {(isSearching ? ineligible : ineligible.slice(0, 8)).map((emp: any) => (
-            <View key={emp.id} style={[styles.personRow, { borderBottomColor: colors.border }]}>
+            <TouchableOpacity
+              key={emp.id}
+              style={[styles.personRow, { borderBottomColor: colors.border }]}
+              onPress={() => handleAssign(emp.id, `${emp.firstName} ${emp.lastName}`, true)}
+              accessibilityRole="button"
+              accessibilityLabel={`Assign ${emp.firstName} ${emp.lastName} with license override`}
+            >
               <View style={[styles.avatar, { backgroundColor: colors.secondary }]}>
                 <Text style={[styles.avatarText, { color: colors.mutedForeground }]}>{emp.firstName[0]}{emp.lastName[0]}</Text>
               </View>
@@ -277,8 +293,8 @@ export default function ShiftDetailScreen() {
                   <LicenseLevelBadge level={emp.maxLicenseLevel} size="sm" />
                 </View>
               </View>
-              <Feather name="lock" size={16} color={colors.mutedForeground} />
-            </View>
+              <Feather name="alert-triangle" size={16} color={colors.accent} />
+            </TouchableOpacity>
           ))}
         </View>
       )}

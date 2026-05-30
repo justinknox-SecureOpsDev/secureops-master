@@ -611,19 +611,9 @@ router.post("/dispatch/officers/:userId/clock-in", requireAdmin, async (req, res
     return;
   }
 
-  // Refuse a second open entry — mirrors the self clock-in guard.
-  const open = await db
-    .select({ id: timeEntriesTable.id })
-    .from(timeEntriesTable)
-    .where(and(eq(timeEntriesTable.employeeId, userId), isNull(timeEntriesTable.clockOutTime)))
-    .limit(1);
-  if (open.length > 0) {
-    res.status(400).json({ error: "Bad Request", message: "Officer is already clocked in." });
-    return;
-  }
-
-  // Resolve the site: prefer the shift's site, fall back to an explicit
-  // siteId. A clock-in with no site at all is allowed (ad-hoc) but rare.
+  // Resolve the site (read-only, safe outside the tx): prefer the shift's
+  // site, fall back to an explicit siteId. A clock-in with no site at all is
+  // allowed (ad-hoc) but rare.
   let resolvedSiteId: string | null = null;
   if (shiftId) {
     const [shift] = await db.select().from(shiftsTable).where(eq(shiftsTable.id, shiftId)).limit(1);
@@ -639,31 +629,55 @@ router.post("/dispatch/officers/:userId/clock-in", requireAdmin, async (req, res
     resolvedSiteId = site.id;
   }
 
-  const actorName = `${req.user?.userId ?? "admin"}`;
-  const dispatchNote = `Clocked in by dispatch (admin ${actorName})`;
-  const [entry] = await db.insert(timeEntriesTable).values({
-    shiftId: shiftId || null,
-    siteId: resolvedSiteId,
-    employeeId: userId,
-    clockInTime: new Date(),
-    clockInLat: null,
-    clockInLng: null,
-    notes: notes ? `${dispatchNote} — ${notes}` : dispatchNote,
-    isVerified: false,
-    approvalStatus: "pending",
-  }).returning();
+  const dispatchNote = `Clocked in by dispatch (admin ${req.user?.userId ?? "admin"})`;
 
-  // Flip the linked shift active so My Shifts / dashboards reflect on-duty.
-  if (shiftId) {
-    await db
-      .update(shiftsTable)
-      .set({ status: "active" })
-      .where(and(eq(shiftsTable.id, shiftId), eq(shiftsTable.status, "upcoming")));
+  // Atomic open-entry guard + insert. There is no DB-level uniqueness on
+  // "one open entry per officer", so concurrent dispatch clicks could each
+  // pass a bare check-then-insert and double-clock the officer. We serialize
+  // per-officer by taking a row lock on the officer's users row (FOR UPDATE)
+  // inside the tx; any racing request blocks here until the first commits,
+  // then sees the open entry and bails with a 409.
+  const outcome = await db.transaction(async (tx) => {
+    await tx.execute(sql`SELECT 1 FROM ${usersTable} WHERE ${usersTable.id} = ${userId} FOR UPDATE`);
+
+    const open = await tx
+      .select({ id: timeEntriesTable.id })
+      .from(timeEntriesTable)
+      .where(and(eq(timeEntriesTable.employeeId, userId), isNull(timeEntriesTable.clockOutTime)))
+      .limit(1);
+    if (open.length > 0) return { conflict: true as const };
+
+    const [entry] = await tx.insert(timeEntriesTable).values({
+      shiftId: shiftId || null,
+      siteId: resolvedSiteId,
+      employeeId: userId,
+      clockInTime: new Date(),
+      clockInLat: null,
+      clockInLng: null,
+      notes: notes ? `${dispatchNote} — ${notes}` : dispatchNote,
+      isVerified: false,
+      approvalStatus: "pending",
+    }).returning();
+
+    // Flip the linked shift active so My Shifts / dashboards reflect on-duty.
+    if (shiftId) {
+      await tx
+        .update(shiftsTable)
+        .set({ status: "active" })
+        .where(and(eq(shiftsTable.id, shiftId), eq(shiftsTable.status, "upcoming")));
+    }
+
+    return { entry };
+  });
+
+  if ("conflict" in outcome) {
+    res.status(409).json({ error: "Conflict", message: "Officer is already clocked in." });
+    return;
   }
 
   req.log.info({ officerId: userId, shiftId, siteId: resolvedSiteId, actor: req.user?.userId }, "dispatch on-behalf clock-in");
   res.status(201).json({
-    ...entry,
+    ...outcome.entry,
     officerName: `${officer.firstName} ${officer.lastName}`,
   });
 });
@@ -687,6 +701,9 @@ router.post("/dispatch/officers/:userId/clock-out", requireAdmin, async (req, re
         .select()
         .from(timeEntriesTable)
         .where(and(eq(timeEntriesTable.employeeId, userId), isNull(timeEntriesTable.clockOutTime)))
+        // Deterministic pick: if bad data ever left >1 open entry, close the
+        // most recently opened one rather than an arbitrary row.
+        .orderBy(desc(timeEntriesTable.clockInTime))
         .limit(1);
 
   if (!entry) {

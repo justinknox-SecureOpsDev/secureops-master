@@ -37,6 +37,7 @@ type StatusRow = {
   minutesEarly?: number;
   clockInTime?: string;
   clockOutTime?: string;
+  timeEntryId?: string;
 };
 
 type StatusBoard = {
@@ -304,6 +305,8 @@ export default function DispatchPage() {
               loading={board.isLoading}
               error={board.error}
               updatedAt={board.dataUpdatedAt}
+              isAdmin={user?.role === "admin"}
+              onChange={refreshAll}
             />
           </div>
           <div data-tour="open-shifts">
@@ -799,8 +802,11 @@ function IncidentDialog({
 // =========================================================== STATUS BOARD
 
 function StatusBoardPanel({
-  data, loading, error, updatedAt,
-}: { data?: StatusBoard; loading: boolean; error: unknown; updatedAt: number | undefined }) {
+  data, loading, error, updatedAt, isAdmin, onChange,
+}: {
+  data?: StatusBoard; loading: boolean; error: unknown; updatedAt: number | undefined;
+  isAdmin?: boolean; onChange?: () => void;
+}) {
   const counts = useMemo(() => ({
     onDuty: data?.onDuty.length ?? 0,
     late: data?.late.length ?? 0,
@@ -809,6 +815,40 @@ function StatusBoardPanel({
     completed: data?.completed.length ?? 0,
     scheduled: data?.scheduled.length ?? 0,
   }), [data]);
+
+  // Admin-only on-behalf clock control. We track the busy row id so only the
+  // tapped button shows a spinner while the others stay live.
+  const [pendingId, setPendingId] = useState<string | null>(null);
+  const [clockError, setClockError] = useState<string | null>(null);
+
+  const clockIn = useMutation({
+    mutationFn: (r: StatusRow) =>
+      api(`/dispatch/officers/${r.userId}/clock-in`, { method: "POST", body: { shiftId: r.shiftId } }),
+    onMutate: (r) => { setClockError(null); setPendingId(r.assignmentId); },
+    onSuccess: () => onChange?.(),
+    onError: (e) => setClockError(e instanceof Error ? e.message : "Could not clock in officer."),
+    onSettled: () => setPendingId(null),
+  });
+  const clockOut = useMutation({
+    mutationFn: (r: StatusRow) =>
+      api(`/dispatch/officers/${r.userId}/clock-out`, {
+        method: "POST",
+        body: r.timeEntryId ? { timeEntryId: r.timeEntryId } : {},
+      }),
+    onMutate: (r) => { setClockError(null); setPendingId(r.assignmentId); },
+    onSuccess: () => onChange?.(),
+    onError: (e) => setClockError(e instanceof Error ? e.message : "Could not clock out officer."),
+    onSettled: () => setPendingId(null),
+  });
+
+  const clockProps = isAdmin
+    ? {
+        isAdmin: true as const,
+        pendingId,
+        onClockIn: (r: StatusRow) => clockIn.mutate(r),
+        onClockOut: (r: StatusRow) => clockOut.mutate(r),
+      }
+    : {};
 
   return (
     <Card>
@@ -835,14 +875,15 @@ function StatusBoardPanel({
               <TabsTrigger value="completed">Completed<Pill n={counts.completed} tone="ok" /></TabsTrigger>
               <TabsTrigger value="scheduled">Scheduled<Pill n={counts.scheduled} tone="muted" /></TabsTrigger>
             </TabsList>
-            <BucketTab value="onDuty" rows={data.onDuty} emptyMsg="No one clocked in." showClockIn />
-            <BucketTab value="late" rows={data.late} emptyMsg="No late officers." showMinutesLate />
-            <BucketTab value="noShow" rows={data.noShow} emptyMsg="No no-shows." showMinutesLate />
+            <BucketTab value="onDuty" rows={data.onDuty} emptyMsg="No one clocked in." showClockIn clockAction="out" {...clockProps} />
+            <BucketTab value="late" rows={data.late} emptyMsg="No late officers." showMinutesLate clockAction="in" {...clockProps} />
+            <BucketTab value="noShow" rows={data.noShow} emptyMsg="No no-shows." showMinutesLate clockAction="in" {...clockProps} />
             <BucketTab value="earlyOut" rows={data.earlyOut} emptyMsg="No early clock-outs." showMinutesEarly />
             <BucketTab value="completed" rows={data.completed} emptyMsg="No completed shifts yet." showClockOut />
-            <BucketTab value="scheduled" rows={data.scheduled} emptyMsg="Nothing upcoming." />
+            <BucketTab value="scheduled" rows={data.scheduled} emptyMsg="Nothing upcoming." clockAction="in" {...clockProps} />
           </Tabs>
         )}
+        {clockError && <div className="mt-2 text-xs text-red-700">{clockError}</div>}
       </CardContent>
     </Card>
   );
@@ -860,10 +901,13 @@ function Pill({ n, tone }: { n: number; tone: "ok" | "warn" | "bad" | "muted" })
 
 function BucketTab({
   value, rows, emptyMsg, showMinutesLate, showMinutesEarly, showClockIn, showClockOut,
+  isAdmin, clockAction, pendingId, onClockIn, onClockOut,
 }: {
   value: string; rows: StatusRow[]; emptyMsg: string;
   showMinutesLate?: boolean; showMinutesEarly?: boolean; showClockIn?: boolean;
   showClockOut?: boolean;
+  isAdmin?: boolean; clockAction?: "in" | "out"; pendingId?: string | null;
+  onClockIn?: (r: StatusRow) => void; onClockOut?: (r: StatusRow) => void;
 }) {
   return (
     <TabsContent value={value} className="mt-3 max-h-72 overflow-y-auto space-y-1">
@@ -887,6 +931,24 @@ function BucketTab({
               <Badge className="bg-orange-500 text-white">{r.minutesEarly}m early</Badge>
             )}
           </div>
+          {isAdmin && clockAction === "in" && onClockIn && (
+            <Button
+              size="sm" variant="outline" className="h-7 text-xs"
+              disabled={pendingId === r.assignmentId}
+              onClick={() => onClockIn(r)}
+            >
+              {pendingId === r.assignmentId ? "…" : "Clock in"}
+            </Button>
+          )}
+          {isAdmin && clockAction === "out" && onClockOut && (
+            <Button
+              size="sm" variant="outline" className="h-7 text-xs"
+              disabled={pendingId === r.assignmentId}
+              onClick={() => onClockOut(r)}
+            >
+              {pendingId === r.assignmentId ? "…" : "Clock out"}
+            </Button>
+          )}
         </div>
       ))}
     </TabsContent>

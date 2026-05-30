@@ -1226,6 +1226,12 @@ export const AssignEmployeeToShiftParams = zod.object({
 
 export const AssignEmployeeToShiftBody = zod.object({
   employeeId: zod.string(),
+  overrideLicense: zod
+    .boolean()
+    .optional()
+    .describe(
+      "When true, an admin or dispatcher bypasses the shift's license-level requirement for this assignment. Only the clearance check is skipped; the double-book conflict guard and headcount cap still apply. The override is recorded in the audit log.",
+    ),
 });
 
 /**

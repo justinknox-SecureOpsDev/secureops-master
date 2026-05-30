@@ -14,6 +14,8 @@ export type Candidate = {
   conflictingShift?: boolean;
   availabilityKnown?: boolean;
   availabilityCovers?: boolean;
+  meetsLicense?: boolean;
+  effectiveLevel?: number;
 };
 
 export type AssignNearestResult = {
@@ -37,33 +39,57 @@ export function AssignNearestDialog({
   shiftId, open, onOpenChange, onAssigned,
 }: { shiftId: string; open: boolean; onOpenChange: (v: boolean) => void; onAssigned: () => void }) {
   const [result, setResult] = useState<AssignNearestResult | null>(null);
+  // Override the license-level requirement: surfaces under-licensed officers
+  // (flagged, sunk below qualified ones) and skips the clearance check on
+  // assignment. Audit-logged server-side. Conflict / availability guards stay.
+  const [override, setOverride] = useState(false);
   const dryRun = useMutation({
-    mutationFn: () => api<AssignNearestResult>("/dispatch/assign-nearest", {
+    mutationFn: (overrideLicense: boolean) => api<AssignNearestResult>("/dispatch/assign-nearest", {
       method: "POST",
-      body: { shiftId, dryRun: true },
+      body: { shiftId, dryRun: true, overrideLicense },
     }),
     onSuccess: (data) => setResult(data),
   });
   const assign = useMutation({
-    mutationFn: (employeeId: string) =>
+    mutationFn: ({ employeeId, overrideLicense }: { employeeId: string; overrideLicense: boolean }) =>
       api(`/shifts/${shiftId}/assignments`, {
         method: "POST",
-        body: { employeeId, status: "accepted" },
+        body: { employeeId, status: "accepted", overrideLicense },
       }),
     onSuccess: () => { onAssigned(); onOpenChange(false); },
   });
 
   useEffect(() => {
-    if (open) { setResult(null); assign.reset(); dryRun.mutate(); }
+    if (open) { setResult(null); setOverride(false); assign.reset(); dryRun.mutate(false); }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open]);
+
+  const toggleOverride = (next: boolean) => {
+    setOverride(next);
+    setResult(null);
+    dryRun.mutate(next);
+  };
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="max-w-md">
         <DialogHeader>
-          <DialogTitle>Assign nearest qualified officer</DialogTitle>
+          <DialogTitle>{override ? "Assign nearest officer (license override)" : "Assign nearest qualified officer"}</DialogTitle>
         </DialogHeader>
+        <label className="flex items-center gap-2 text-xs cursor-pointer rounded border px-2 py-1.5 bg-amber-50 border-amber-200">
+          <input
+            type="checkbox"
+            checked={override}
+            onChange={(e) => toggleOverride(e.target.checked)}
+            disabled={dryRun.isPending || assign.isPending}
+          />
+          <span>
+            Override license-level requirement
+            <span className="block text-[11px] text-amber-700">
+              Surfaces under-licensed officers and skips the clearance check. Audit-logged.
+            </span>
+          </span>
+        </label>
         <div className="space-y-2 text-sm">
           {dryRun.isPending && <div className="opacity-60">Ranking candidates…</div>}
           {dryRun.isError && (
@@ -72,7 +98,9 @@ export function AssignNearestDialog({
             </div>
           )}
           {result && result.candidates.length === 0 && (
-            <div className="opacity-70">No qualified officers available.</div>
+            <div className="opacity-70">
+              {override ? "No officers available." : "No qualified officers available."}
+            </div>
           )}
           {result && !result.siteHasCoords && (
             <div className="text-xs p-2 bg-amber-100 text-amber-900 rounded">
@@ -82,12 +110,18 @@ export function AssignNearestDialog({
           {result?.candidates.slice(0, 8).map((c, idx) => {
             const reason = candidateBlockReason(c);
             const disabled = !!reason;
+            const underLicensed = c.meetsLicense === false;
             return (
               <div key={c.userId} className="flex items-center justify-between rounded border px-2 py-1.5">
                 <div className="flex items-center gap-2 min-w-0">
                   <span className="text-xs opacity-50 w-5">{idx + 1}.</span>
                   <div className="min-w-0">
                     <div className="truncate">{c.name}</div>
+                    {underLicensed && (
+                      <div className="text-[11px] text-amber-700 truncate">
+                        ⚠ under required license{c.effectiveLevel != null ? ` (L${c.effectiveLevel})` : ""}
+                      </div>
+                    )}
                     {reason && (
                       <div className="text-[11px] text-amber-700 truncate">{reason}</div>
                     )}
@@ -99,9 +133,9 @@ export function AssignNearestDialog({
                   </span>
                   <Button
                     size="sm"
-                    variant={idx === 0 && !disabled ? "default" : "outline"}
+                    variant={idx === 0 && !disabled && !underLicensed ? "default" : "outline"}
                     disabled={disabled || assign.isPending}
-                    onClick={() => assign.mutate(c.userId)}
+                    onClick={() => assign.mutate({ employeeId: c.userId, overrideLicense: override })}
                   >
                     Assign
                   </Button>
