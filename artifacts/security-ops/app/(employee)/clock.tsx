@@ -2,7 +2,7 @@ import React, { useState, useEffect } from "react";
 import { useTopPad } from "@/hooks/useTopPad";
 import { View, Text, StyleSheet, TouchableOpacity, ActivityIndicator, Platform, ScrollView, AccessibilityInfo, Modal } from "react-native";
 import { useColors } from "@/hooks/useColors";
-import { useClockIn, useClockOut, useGetActiveTimeEntry, getGetActiveTimeEntryQueryKey, useGetTimeEntries, getGetTimeEntriesQueryKey, updateMyLocation, useGetSites, getGetSitesQueryKey, getGetEmployeeDashboardSummaryQueryKey, getGetShiftsQueryKey } from "@workspace/api-client-react";
+import { useClockIn, useClockOut, useGetActiveTimeEntry, getGetActiveTimeEntryQueryKey, useGetTimeEntries, getGetTimeEntriesQueryKey, updateMyLocation, useGetMyClockInSites, getGetMyClockInSitesQueryKey, getGetEmployeeDashboardSummaryQueryKey, getGetShiftsQueryKey } from "@workspace/api-client-react";
 import { Feather } from "@expo/vector-icons";
 import { useQueryClient } from "@tanstack/react-query";
 import * as Location from "expo-location";
@@ -55,8 +55,8 @@ export default function EmployeeClockScreen() {
   // site manually as a fallback so the clock function is testable on web.
   const isWeb = Platform.OS === "web";
   const [showSitePicker, setShowSitePicker] = useState(false);
-  const { data: sitesList } = useGetSites({} as any, {
-    query: { queryKey: getGetSitesQueryKey({} as any), enabled: isWeb },
+  const { data: sitesList } = useGetMyClockInSites({
+    query: { queryKey: getGetMyClockInSitesQueryKey(), enabled: isWeb },
   });
 
   const isClockedIn = !!currentEntry?.id;

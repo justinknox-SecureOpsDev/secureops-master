@@ -183,6 +183,20 @@ export const GetSitesResponseItem = zod.object({
 export const GetSitesResponse = zod.array(GetSitesResponseItem);
 
 /**
+ * @summary List sites (minimal fields) the current officer can select for a manual clock-in (web GPS fallback)
+ */
+export const GetMyClockInSitesResponseItem = zod.object({
+  id: zod.string(),
+  name: zod.string(),
+  address: zod.string().optional(),
+  locationLat: zod.number().optional(),
+  locationLng: zod.number().optional(),
+});
+export const GetMyClockInSitesResponse = zod.array(
+  GetMyClockInSitesResponseItem,
+);
+
+/**
  * @summary Get site
  */
 export const GetSiteParams = zod.object({

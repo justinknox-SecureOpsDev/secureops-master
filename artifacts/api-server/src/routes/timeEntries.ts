@@ -1,7 +1,7 @@
 import { Router, type IRouter } from "express";
 import { eq, and, gte, lte, isNull, sql } from "drizzle-orm";
 import { db, timeEntriesTable, shiftsTable, usersTable, sitesTable, shiftAssignmentsTable, licensesTable } from "@workspace/db";
-import { requireAuth, requireAdmin } from "../middlewares/auth";
+import { requireAuth, requireAdmin, requireStaff } from "../middlewares/auth";
 import { upsertWeeklyInvoiceForTimeEntry } from "../lib/invoiceSync";
 
 const router: IRouter = Router();
@@ -114,6 +114,23 @@ async function resolveNearestSite(lat: number, lng: number): Promise<{ id: strin
   }
   return best;
 }
+
+// Minimal site list for the officer manual clock-in picker (web GPS fallback).
+// Employees can't call admin /sites, so this exposes ONLY the fields the picker
+// needs (id, name, address, coords) — no client, bill rate, geofence or notes.
+router.get("/me/clock-in-sites", requireStaff, async (_req, res): Promise<void> => {
+  const rows = await db
+    .select({
+      id: sitesTable.id,
+      name: sitesTable.name,
+      address: sitesTable.address,
+      locationLat: sitesTable.locationLat,
+      locationLng: sitesTable.locationLng,
+    })
+    .from(sitesTable)
+    .orderBy(sitesTable.name);
+  res.json(rows);
+});
 
 router.get("/time-entries", requireAuth, async (req, res): Promise<void> => {
   const { employeeId, shiftId, siteId, approvalStatus, from, to } = req.query as Record<string, string | undefined>;

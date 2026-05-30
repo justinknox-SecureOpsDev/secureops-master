@@ -831,6 +831,14 @@ export interface UpdateClientRequest {
   notes?: string;
 }
 
+export interface ClockInSite {
+  id: string;
+  name: string;
+  address?: string;
+  locationLat?: number;
+  locationLng?: number;
+}
+
 export interface CreateSiteRequest {
   /** Optional when posting to /clients/{id}/sites */
   clientId?: string;

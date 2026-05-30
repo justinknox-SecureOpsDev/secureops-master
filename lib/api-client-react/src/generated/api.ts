@@ -42,6 +42,7 @@ import type {
   ClientShift,
   ClientUser,
   ClockInRequest,
+  ClockInSite,
   ClockOutRequest,
   CreateChatRoomBody,
   CreateClientRequest,
@@ -740,6 +741,81 @@ export function useGetSites<
   },
 ): UseQueryResult<TData, TError> & { queryKey: QueryKey } {
   const queryOptions = getGetSitesQueryOptions(params, options);
+
+  const query = useQuery(queryOptions) as UseQueryResult<TData, TError> & {
+    queryKey: QueryKey;
+  };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
+
+/**
+ * @summary List sites (minimal fields) the current officer can select for a manual clock-in (web GPS fallback)
+ */
+export const getGetMyClockInSitesUrl = () => {
+  return `/api/me/clock-in-sites`;
+};
+
+export const getMyClockInSites = async (
+  options?: RequestInit,
+): Promise<ClockInSite[]> => {
+  return customFetch<ClockInSite[]>(getGetMyClockInSitesUrl(), {
+    ...options,
+    method: "GET",
+  });
+};
+
+export const getGetMyClockInSitesQueryKey = () => {
+  return [`/api/me/clock-in-sites`] as const;
+};
+
+export const getGetMyClockInSitesQueryOptions = <
+  TData = Awaited<ReturnType<typeof getMyClockInSites>>,
+  TError = ErrorType<unknown>,
+>(options?: {
+  query?: UseQueryOptions<
+    Awaited<ReturnType<typeof getMyClockInSites>>,
+    TError,
+    TData
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}) => {
+  const { query: queryOptions, request: requestOptions } = options ?? {};
+
+  const queryKey = queryOptions?.queryKey ?? getGetMyClockInSitesQueryKey();
+
+  const queryFn: QueryFunction<
+    Awaited<ReturnType<typeof getMyClockInSites>>
+  > = ({ signal }) => getMyClockInSites({ signal, ...requestOptions });
+
+  return { queryKey, queryFn, ...queryOptions } as UseQueryOptions<
+    Awaited<ReturnType<typeof getMyClockInSites>>,
+    TError,
+    TData
+  > & { queryKey: QueryKey };
+};
+
+export type GetMyClockInSitesQueryResult = NonNullable<
+  Awaited<ReturnType<typeof getMyClockInSites>>
+>;
+export type GetMyClockInSitesQueryError = ErrorType<unknown>;
+
+/**
+ * @summary List sites (minimal fields) the current officer can select for a manual clock-in (web GPS fallback)
+ */
+
+export function useGetMyClockInSites<
+  TData = Awaited<ReturnType<typeof getMyClockInSites>>,
+  TError = ErrorType<unknown>,
+>(options?: {
+  query?: UseQueryOptions<
+    Awaited<ReturnType<typeof getMyClockInSites>>,
+    TError,
+    TData
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+  const queryOptions = getGetMyClockInSitesQueryOptions(options);
 
   const query = useQuery(queryOptions) as UseQueryResult<TData, TError> & {
     queryKey: QueryKey;

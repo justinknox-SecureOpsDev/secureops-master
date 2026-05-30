@@ -141,6 +141,20 @@ paths:
                 type: array
                 items: { $ref: "#/components/schemas/Site" }
 
+  /me/clock-in-sites:
+    get:
+      operationId: getMyClockInSites
+      tags: [sites]
+      summary: "List sites (minimal fields) the current officer can select for a manual clock-in (web GPS fallback)"
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: "#/components/schemas/ClockInSite" }
+
   /sites/{id}:
     get:
       operationId: getSite
@@ -3247,6 +3261,16 @@ components:
         notes: { type: string }
         createdAt: { type: string, format: date-time }
       required: [id, clientId, name, createdAt]
+
+    ClockInSite:
+      type: object
+      properties:
+        id: { type: string }
+        name: { type: string }
+        address: { type: string }
+        locationLat: { type: number }
+        locationLng: { type: number }
+      required: [id, name]
 
     CreateSiteRequest:
       type: object
