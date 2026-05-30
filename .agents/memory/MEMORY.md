@@ -1,1 +1,2 @@
-- [wouter base routing](wouter-base-routing.md) — bare-base URL (no trailing slash) gives location "" → 404; role shells need a root-aware fallback.
+- [Prod "Failed to load" transients](prod-failed-to-load-transients.md) — "Failed to load X" cards in prod usually = Reserved-VM redeploy restart window, not a backend bug; confirm with healthz + logs.
+- [wouter bare-base routing](wouter-base-routing.md) — wouter with bare base "" 404 gotcha (client portal login).
