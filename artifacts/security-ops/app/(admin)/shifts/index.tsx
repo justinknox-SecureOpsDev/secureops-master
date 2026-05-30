@@ -1,6 +1,6 @@
-import React, { useState } from "react";
+import React, { useState, useMemo } from "react";
 import { useTopPad } from "@/hooks/useTopPad";
-import { View, Text, StyleSheet, FlatList, TouchableOpacity, ActivityIndicator, Platform } from "react-native";
+import { View, Text, StyleSheet, FlatList, TouchableOpacity, ActivityIndicator, Platform, TextInput } from "react-native";
 import { useColors } from "@/hooks/useColors";
 import { useGetShifts, getGetShiftsQueryKey } from "@workspace/api-client-react";
 import { Feather } from "@expo/vector-icons";
@@ -23,12 +23,29 @@ export default function AdminShiftsScreen() {
   const colors = useColors();
   const router = useRouter();
   const [filter, setFilter] = useState<string>("upcoming");
+  const [search, setSearch] = useState("");
   const topPad = useTopPad();
 
   const { data: shifts, isLoading, error, refetch } = useGetShifts(
     { status: filter as any },
     { query: { queryKey: getGetShiftsQueryKey({ status: filter as any }) } },
   );
+
+  // Search across title, client and location so admins can find a shift fast on
+  // a busy roster, then sort by start time. Upcoming/active read best soonest-
+  // first; completed/cancelled read best most-recent-first.
+  const q = search.trim().toLowerCase();
+  const visibleShifts = useMemo(() => {
+    const list = (shifts ?? []).filter((s: any) => {
+      if (!q) return true;
+      return `${s.title ?? ""} ${s.clientName ?? ""} ${s.location ?? ""}`.toLowerCase().includes(q);
+    });
+    const dir = filter === "completed" || filter === "cancelled" ? -1 : 1;
+    return [...list].sort(
+      (a: any, b: any) => (new Date(a.startTime).getTime() - new Date(b.startTime).getTime()) * dir,
+    );
+  }, [shifts, q, filter]);
+  const isSearching = q.length > 0;
 
   return (
     <View style={[styles.container, { backgroundColor: colors.background }]}>
@@ -54,6 +71,26 @@ export default function AdminShiftsScreen() {
         ))}
       </View>
 
+      <View style={[styles.searchWrap, { backgroundColor: colors.card, borderColor: colors.border }]}>
+        <Feather name="search" size={16} color={colors.mutedForeground} />
+        <TextInput
+          value={search}
+          onChangeText={setSearch}
+          placeholder="Search by title, client or location"
+          placeholderTextColor={colors.mutedForeground}
+          style={[styles.searchInput, { color: colors.foreground }]}
+          autoCapitalize="none"
+          autoCorrect={false}
+          returnKeyType="search"
+          accessibilityLabel="Search shifts by title, client or location"
+        />
+        {search.length > 0 && (
+          <TouchableOpacity onPress={() => setSearch("")} accessibilityRole="button" accessibilityLabel="Clear search">
+            <Feather name="x" size={16} color={colors.mutedForeground} />
+          </TouchableOpacity>
+        )}
+      </View>
+
       {isLoading ? (
         <View style={styles.center}><ActivityIndicator size="large" color={colors.primary} /></View>
       ) : error ? (
@@ -65,15 +102,18 @@ export default function AdminShiftsScreen() {
         </View>
       ) : (
         <FlatList
-          data={shifts ?? []}
+          data={visibleShifts}
           keyExtractor={(item) => item.id}
-          scrollEnabled={!!(shifts && shifts.length > 0)}
+          keyboardShouldPersistTaps="handled"
+          scrollEnabled={visibleShifts.length > 0}
           contentContainerStyle={{ padding: 16, paddingBottom: 100 }}
           ItemSeparatorComponent={() => <View style={{ height: 8 }} />}
           ListEmptyComponent={
             <View style={styles.center}>
-              <Feather name="calendar" size={40} color={colors.mutedForeground} />
-              <Text style={[styles.emptyText, { color: colors.mutedForeground }]}>No {filter} shifts</Text>
+              <Feather name={isSearching ? "search" : "calendar"} size={40} color={colors.mutedForeground} />
+              <Text style={[styles.emptyText, { color: colors.mutedForeground }]}>
+                {isSearching ? `No ${filter} shifts match “${search}”` : `No ${filter} shifts`}
+              </Text>
             </View>
           }
           renderItem={({ item }) => (
@@ -139,6 +179,18 @@ const styles = StyleSheet.create({
   filterScroll: { flexDirection: "row", gap: 8, paddingHorizontal: 16, paddingVertical: 12, flexWrap: "wrap" },
   filterChip: { paddingHorizontal: 12, paddingVertical: 6, borderRadius: 16, borderWidth: 1 },
   filterText: { fontSize: 13, fontWeight: "600" },
+  searchWrap: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+    marginHorizontal: 16,
+    marginBottom: 4,
+    paddingHorizontal: 12,
+    paddingVertical: Platform.OS === "ios" ? 12 : 6,
+    borderRadius: 10,
+    borderWidth: 1,
+  },
+  searchInput: { flex: 1, fontSize: 14, paddingVertical: 6 },
   card: { borderRadius: 12, borderWidth: 1, padding: 14, gap: 8 },
   cardHeader: { flexDirection: "row", justifyContent: "space-between", alignItems: "center" },
   shiftTitle: { fontSize: 15, fontWeight: "700", flex: 1, marginRight: 8 },

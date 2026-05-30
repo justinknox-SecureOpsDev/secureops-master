@@ -27,6 +27,18 @@ render their own in-screen headers. Defensive extra: prefill effects should key 
 route param (`hydratedId === id`) not a boolean, so they self-correct even if an instance
 is ever reused.
 
+**Same-named `[id]` across sibling routes in ONE Stack still bleeds params.**
+Even with the nested Stack + param-keyed prefill above, the "edit opens the WRONG
+shift most of the time" bug came back. Root cause: `shifts/[id]` (detail) and
+`shifts/edit/[id]` (edit) both expose a dynamic segment literally named `id` in the
+same Stack, so expo-router merges that param across the stacked screens and
+`useLocalSearchParams` on the edit screen can read the detail screen's `id`. Fix:
+give each route a DISTINCT param name — rename the edit route to
+`shifts/edit/[shiftId].tsx` and read `const { shiftId: id } = useLocalSearchParams()`
+(alias to keep the body unchanged). Positional path-template callers
+(`.../edit/${item.id}`) need no change. Rule: never reuse a dynamic segment name
+across two routes that can co-exist in the same navigator stack.
+
 **Related:** Mobile shift eligibility must use EFFECTIVE level
 `max(maxLicenseLevel, position==='support_staff' ? 1 : 0)`, not raw `maxLicenseLevel`, to
 mirror the server's `getEffectiveLevel`/`positionBaselineLevel` — otherwise support /

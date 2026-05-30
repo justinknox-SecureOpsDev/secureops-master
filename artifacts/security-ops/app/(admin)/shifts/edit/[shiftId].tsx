@@ -58,7 +58,13 @@ export default function EditShiftScreen() {
   const colors = useColors();
   const router = useRouter();
   const queryClient = useQueryClient();
-  const { id } = useLocalSearchParams<{ id: string }>();
+  // Route param is named `shiftId` (NOT `id`) on purpose. The sibling detail
+  // route `shifts/[id]` also lives in this Stack; if both used `id`, expo-router
+  // merges the same-named param across the stacked screens and the edit screen
+  // can read the detail screen's `id` — opening the WRONG shift in the editor.
+  // A distinct name keeps this screen's param isolated. Aliased to `id` locally
+  // so the rest of the screen is unchanged.
+  const { shiftId: id } = useLocalSearchParams<{ shiftId: string }>();
   const topPad = useTopPad();
   const navigation = useNavigation();
   useLayoutEffect(() => { (navigation as any).setOptions?.({ headerShown: false }); }, [navigation]);
