@@ -1202,6 +1202,83 @@ paths:
               schema:
                 $ref: "#/components/schemas/License"
 
+  /admin/license-renewals:
+    get:
+      operationId: getAdminLicenseRenewals
+      tags: [licenses]
+      summary: List license renewal requests (admin)
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: status
+          in: query
+          schema:
+            type: string
+            enum: [pending, approved, rejected]
+      responses:
+        "200":
+          description: List of license renewal requests
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/LicenseRenewal"
+
+  /admin/license-renewals/{id}/approve:
+    post:
+      operationId: approveLicenseRenewal
+      tags: [licenses]
+      summary: Approve a license renewal request (admin)
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/LicenseRenewalDecisionRequest"
+      responses:
+        "200":
+          description: Approved
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/LicenseRenewal"
+
+  /admin/license-renewals/{id}/reject:
+    post:
+      operationId: rejectLicenseRenewal
+      tags: [licenses]
+      summary: Reject a license renewal request (admin)
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/LicenseRenewalRejectRequest"
+      responses:
+        "200":
+          description: Rejected
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/LicenseRenewal"
+
   /dashboard/admin-summary:
     get:
       operationId: getAdminDashboardSummary
@@ -3427,6 +3504,85 @@ components:
           format: date
         notes:
           type: string
+
+    LicenseRenewal:
+      type: object
+      properties:
+        id:
+          type: string
+        employeeId:
+          type: string
+        licenseId:
+          type: string
+          nullable: true
+        licenseType:
+          type: string
+        licenseLevel:
+          type: integer
+          enum: [2, 3, 4]
+          nullable: true
+        licenseNumber:
+          type: string
+        issuingAuthority:
+          type: string
+          nullable: true
+        issueDate:
+          type: string
+          format: date
+          nullable: true
+        expiryDate:
+          type: string
+          format: date
+        docKey:
+          type: string
+        notes:
+          type: string
+          nullable: true
+        status:
+          type: string
+          enum: [pending, approved, rejected]
+        decisionNote:
+          type: string
+          nullable: true
+        decidedAt:
+          type: string
+          format: date-time
+          nullable: true
+        createdAt:
+          type: string
+          format: date-time
+        employeeFirstName:
+          type: string
+          nullable: true
+        employeeLastName:
+          type: string
+          nullable: true
+        employeeEmail:
+          type: string
+          nullable: true
+      required:
+        - id
+        - employeeId
+        - licenseType
+        - licenseNumber
+        - expiryDate
+        - docKey
+        - status
+        - createdAt
+
+    LicenseRenewalDecisionRequest:
+      type: object
+      properties:
+        decisionNote:
+          type: string
+
+    LicenseRenewalRejectRequest:
+      type: object
+      properties:
+        decisionNote:
+          type: string
+      required:
+        - decisionNote
 
     AdminDashboardSummary:
       type: object

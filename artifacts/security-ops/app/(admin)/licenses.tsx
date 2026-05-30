@@ -2,7 +2,7 @@ import React, { useState } from "react";
 import { useTopPad } from "@/hooks/useTopPad";
 import { View, Text, StyleSheet, FlatList, TouchableOpacity, ActivityIndicator, Alert, Platform, Modal, TextInput } from "react-native";
 import { useColors } from "@/hooks/useColors";
-import { useGetLicenses, getGetLicensesQueryKey, useCreateLicense, useGetEmployees, getGetEmployeesQueryKey } from "@workspace/api-client-react";
+import { useGetLicenses, getGetLicensesQueryKey, useCreateLicense, useGetEmployees, getGetEmployeesQueryKey, useGetAdminLicenseRenewals, getGetAdminLicenseRenewalsQueryKey } from "@workspace/api-client-react";
 import { LicenseLevelBadge } from "@/components/LicenseLevelBadge";
 import { Feather } from "@expo/vector-icons";
 import { useRouter } from "expo-router";
@@ -37,6 +37,12 @@ export default function AdminLicensesScreen() {
     { query: { queryKey: getGetEmployeesQueryKey({ status: "active" as any }) } },
   );
 
+  const { data: pendingRenewals } = useGetAdminLicenseRenewals(
+    { status: "pending" },
+    { query: { queryKey: getGetAdminLicenseRenewalsQueryKey({ status: "pending" }) } },
+  );
+  const pendingCount = pendingRenewals?.length ?? 0;
+
   const createLicense = useCreateLicense();
 
   const getLicenseStatus = (expiryDate: string) => {
@@ -69,6 +75,20 @@ export default function AdminLicensesScreen() {
           <Feather name="arrow-left" size={18} color={colors.foreground} />
         </TouchableOpacity>
         <Text style={[styles.pageTitle, { color: colors.foreground }]} accessibilityRole="header">Licences</Text>
+        <TouchableOpacity
+          style={[styles.approvalsBtn, { borderColor: colors.border }]}
+          onPress={() => router.push("/(admin)/license-approvals" as any)}
+          accessibilityRole="button"
+          accessibilityLabel={pendingCount > 0 ? `Licence approvals, ${pendingCount} pending` : "Licence approvals"}
+        >
+          <Feather name="check-square" size={16} color={colors.foreground} />
+          <Text style={[styles.approvalsText, { color: colors.foreground }]}>Approvals</Text>
+          {pendingCount > 0 && (
+            <View style={[styles.countPill, { backgroundColor: colors.primary }]}>
+              <Text style={[styles.countPillText, { color: colors.primaryForeground }]}>{pendingCount > 99 ? "99+" : pendingCount}</Text>
+            </View>
+          )}
+        </TouchableOpacity>
         <TouchableOpacity style={[styles.addBtn, { backgroundColor: colors.primary }]} onPress={() => setShowAdd(true)} accessibilityRole="button" accessibilityLabel="Add licence">
           <Feather name="plus" size={18} color={colors.primaryForeground} />
         </TouchableOpacity>
@@ -222,6 +242,10 @@ const styles = StyleSheet.create({
   backBtn: { padding: 8, borderRadius: 8, borderWidth: 1 },
   pageTitle: { flex: 1, fontSize: 22, fontWeight: "700" },
   addBtn: { width: 36, height: 36, borderRadius: 10, justifyContent: "center", alignItems: "center" },
+  approvalsBtn: { flexDirection: "row", alignItems: "center", gap: 5, paddingHorizontal: 10, paddingVertical: 7, borderRadius: 10, borderWidth: 1 },
+  approvalsText: { fontSize: 13, fontWeight: "600" },
+  countPill: { minWidth: 18, height: 18, borderRadius: 9, paddingHorizontal: 5, justifyContent: "center", alignItems: "center" },
+  countPillText: { fontSize: 10, fontWeight: "800" },
   filterRow: { flexDirection: "row", gap: 8, paddingHorizontal: 16, paddingVertical: 10 },
   filterChip: { paddingHorizontal: 14, paddingVertical: 6, borderRadius: 16, borderWidth: 1 },
   filterText: { fontSize: 13, fontWeight: "600" },

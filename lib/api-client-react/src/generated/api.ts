@@ -64,6 +64,7 @@ import type {
   ForgotPasswordResponse,
   GenerateInvoiceRequest,
   GeneratePayrollRequest,
+  GetAdminLicenseRenewalsParams,
   GetAdminShiftRequestsParams,
   GetChatMessagesParams,
   GetClientDar200,
@@ -87,6 +88,9 @@ import type {
   InviteClientUserBody,
   Invoice,
   License,
+  LicenseRenewal,
+  LicenseRenewalDecisionRequest,
+  LicenseRenewalRejectRequest,
   LoginRequest,
   MarkChatRoomRead200,
   NotifyShiftVacancy200,
@@ -4847,6 +4851,282 @@ export const useUpdateLicense = <
   TContext
 > => {
   return useMutation(getUpdateLicenseMutationOptions(options));
+};
+
+/**
+ * @summary List license renewal requests (admin)
+ */
+export const getGetAdminLicenseRenewalsUrl = (
+  params?: GetAdminLicenseRenewalsParams,
+) => {
+  const normalizedParams = new URLSearchParams();
+
+  Object.entries(params || {}).forEach(([key, value]) => {
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? "null" : value.toString());
+    }
+  });
+
+  const stringifiedParams = normalizedParams.toString();
+
+  return stringifiedParams.length > 0
+    ? `/api/admin/license-renewals?${stringifiedParams}`
+    : `/api/admin/license-renewals`;
+};
+
+export const getAdminLicenseRenewals = async (
+  params?: GetAdminLicenseRenewalsParams,
+  options?: RequestInit,
+): Promise<LicenseRenewal[]> => {
+  return customFetch<LicenseRenewal[]>(getGetAdminLicenseRenewalsUrl(params), {
+    ...options,
+    method: "GET",
+  });
+};
+
+export const getGetAdminLicenseRenewalsQueryKey = (
+  params?: GetAdminLicenseRenewalsParams,
+) => {
+  return [`/api/admin/license-renewals`, ...(params ? [params] : [])] as const;
+};
+
+export const getGetAdminLicenseRenewalsQueryOptions = <
+  TData = Awaited<ReturnType<typeof getAdminLicenseRenewals>>,
+  TError = ErrorType<unknown>,
+>(
+  params?: GetAdminLicenseRenewalsParams,
+  options?: {
+    query?: UseQueryOptions<
+      Awaited<ReturnType<typeof getAdminLicenseRenewals>>,
+      TError,
+      TData
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+) => {
+  const { query: queryOptions, request: requestOptions } = options ?? {};
+
+  const queryKey =
+    queryOptions?.queryKey ?? getGetAdminLicenseRenewalsQueryKey(params);
+
+  const queryFn: QueryFunction<
+    Awaited<ReturnType<typeof getAdminLicenseRenewals>>
+  > = ({ signal }) =>
+    getAdminLicenseRenewals(params, { signal, ...requestOptions });
+
+  return { queryKey, queryFn, ...queryOptions } as UseQueryOptions<
+    Awaited<ReturnType<typeof getAdminLicenseRenewals>>,
+    TError,
+    TData
+  > & { queryKey: QueryKey };
+};
+
+export type GetAdminLicenseRenewalsQueryResult = NonNullable<
+  Awaited<ReturnType<typeof getAdminLicenseRenewals>>
+>;
+export type GetAdminLicenseRenewalsQueryError = ErrorType<unknown>;
+
+/**
+ * @summary List license renewal requests (admin)
+ */
+
+export function useGetAdminLicenseRenewals<
+  TData = Awaited<ReturnType<typeof getAdminLicenseRenewals>>,
+  TError = ErrorType<unknown>,
+>(
+  params?: GetAdminLicenseRenewalsParams,
+  options?: {
+    query?: UseQueryOptions<
+      Awaited<ReturnType<typeof getAdminLicenseRenewals>>,
+      TError,
+      TData
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+): UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+  const queryOptions = getGetAdminLicenseRenewalsQueryOptions(params, options);
+
+  const query = useQuery(queryOptions) as UseQueryResult<TData, TError> & {
+    queryKey: QueryKey;
+  };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
+
+/**
+ * @summary Approve a license renewal request (admin)
+ */
+export const getApproveLicenseRenewalUrl = (id: string) => {
+  return `/api/admin/license-renewals/${id}/approve`;
+};
+
+export const approveLicenseRenewal = async (
+  id: string,
+  licenseRenewalDecisionRequest?: LicenseRenewalDecisionRequest,
+  options?: RequestInit,
+): Promise<LicenseRenewal> => {
+  return customFetch<LicenseRenewal>(getApproveLicenseRenewalUrl(id), {
+    ...options,
+    method: "POST",
+    headers: { "Content-Type": "application/json", ...options?.headers },
+    body: JSON.stringify(licenseRenewalDecisionRequest),
+  });
+};
+
+export const getApproveLicenseRenewalMutationOptions = <
+  TError = ErrorType<unknown>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof approveLicenseRenewal>>,
+    TError,
+    { id: string; data: BodyType<LicenseRenewalDecisionRequest> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof approveLicenseRenewal>>,
+  TError,
+  { id: string; data: BodyType<LicenseRenewalDecisionRequest> },
+  TContext
+> => {
+  const mutationKey = ["approveLicenseRenewal"];
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof approveLicenseRenewal>>,
+    { id: string; data: BodyType<LicenseRenewalDecisionRequest> }
+  > = (props) => {
+    const { id, data } = props ?? {};
+
+    return approveLicenseRenewal(id, data, requestOptions);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type ApproveLicenseRenewalMutationResult = NonNullable<
+  Awaited<ReturnType<typeof approveLicenseRenewal>>
+>;
+export type ApproveLicenseRenewalMutationBody =
+  BodyType<LicenseRenewalDecisionRequest>;
+export type ApproveLicenseRenewalMutationError = ErrorType<unknown>;
+
+/**
+ * @summary Approve a license renewal request (admin)
+ */
+export const useApproveLicenseRenewal = <
+  TError = ErrorType<unknown>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof approveLicenseRenewal>>,
+    TError,
+    { id: string; data: BodyType<LicenseRenewalDecisionRequest> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationResult<
+  Awaited<ReturnType<typeof approveLicenseRenewal>>,
+  TError,
+  { id: string; data: BodyType<LicenseRenewalDecisionRequest> },
+  TContext
+> => {
+  return useMutation(getApproveLicenseRenewalMutationOptions(options));
+};
+
+/**
+ * @summary Reject a license renewal request (admin)
+ */
+export const getRejectLicenseRenewalUrl = (id: string) => {
+  return `/api/admin/license-renewals/${id}/reject`;
+};
+
+export const rejectLicenseRenewal = async (
+  id: string,
+  licenseRenewalRejectRequest: LicenseRenewalRejectRequest,
+  options?: RequestInit,
+): Promise<LicenseRenewal> => {
+  return customFetch<LicenseRenewal>(getRejectLicenseRenewalUrl(id), {
+    ...options,
+    method: "POST",
+    headers: { "Content-Type": "application/json", ...options?.headers },
+    body: JSON.stringify(licenseRenewalRejectRequest),
+  });
+};
+
+export const getRejectLicenseRenewalMutationOptions = <
+  TError = ErrorType<unknown>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof rejectLicenseRenewal>>,
+    TError,
+    { id: string; data: BodyType<LicenseRenewalRejectRequest> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof rejectLicenseRenewal>>,
+  TError,
+  { id: string; data: BodyType<LicenseRenewalRejectRequest> },
+  TContext
+> => {
+  const mutationKey = ["rejectLicenseRenewal"];
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof rejectLicenseRenewal>>,
+    { id: string; data: BodyType<LicenseRenewalRejectRequest> }
+  > = (props) => {
+    const { id, data } = props ?? {};
+
+    return rejectLicenseRenewal(id, data, requestOptions);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type RejectLicenseRenewalMutationResult = NonNullable<
+  Awaited<ReturnType<typeof rejectLicenseRenewal>>
+>;
+export type RejectLicenseRenewalMutationBody =
+  BodyType<LicenseRenewalRejectRequest>;
+export type RejectLicenseRenewalMutationError = ErrorType<unknown>;
+
+/**
+ * @summary Reject a license renewal request (admin)
+ */
+export const useRejectLicenseRenewal = <
+  TError = ErrorType<unknown>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof rejectLicenseRenewal>>,
+    TError,
+    { id: string; data: BodyType<LicenseRenewalRejectRequest> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationResult<
+  Awaited<ReturnType<typeof rejectLicenseRenewal>>,
+  TError,
+  { id: string; data: BodyType<LicenseRenewalRejectRequest> },
+  TContext
+> => {
+  return useMutation(getRejectLicenseRenewalMutationOptions(options));
 };
 
 /**

@@ -1051,6 +1051,54 @@ export interface UpdateLicenseRequest {
   notes?: string;
 }
 
+export type LicenseRenewalLicenseLevel =
+  | (typeof LicenseRenewalLicenseLevel)[keyof typeof LicenseRenewalLicenseLevel]
+  | null;
+
+export const LicenseRenewalLicenseLevel = {
+  NUMBER_2: 2,
+  NUMBER_3: 3,
+  NUMBER_4: 4,
+} as const;
+
+export type LicenseRenewalStatus =
+  (typeof LicenseRenewalStatus)[keyof typeof LicenseRenewalStatus];
+
+export const LicenseRenewalStatus = {
+  pending: "pending",
+  approved: "approved",
+  rejected: "rejected",
+} as const;
+
+export interface LicenseRenewal {
+  id: string;
+  employeeId: string;
+  licenseId?: string | null;
+  licenseType: string;
+  licenseLevel?: LicenseRenewalLicenseLevel;
+  licenseNumber: string;
+  issuingAuthority?: string | null;
+  issueDate?: string | null;
+  expiryDate: string;
+  docKey: string;
+  notes?: string | null;
+  status: LicenseRenewalStatus;
+  decisionNote?: string | null;
+  decidedAt?: string | null;
+  createdAt: string;
+  employeeFirstName?: string | null;
+  employeeLastName?: string | null;
+  employeeEmail?: string | null;
+}
+
+export interface LicenseRenewalDecisionRequest {
+  decisionNote?: string;
+}
+
+export interface LicenseRenewalRejectRequest {
+  decisionNote: string;
+}
+
 export interface AdminDashboardSummary {
   totalEmployees: number;
   activeEmployees: number;
@@ -1827,6 +1875,19 @@ export const GetLicensesStatus = {
   valid: "valid",
   expiring_soon: "expiring_soon",
   expired: "expired",
+} as const;
+
+export type GetAdminLicenseRenewalsParams = {
+  status?: GetAdminLicenseRenewalsStatus;
+};
+
+export type GetAdminLicenseRenewalsStatus =
+  (typeof GetAdminLicenseRenewalsStatus)[keyof typeof GetAdminLicenseRenewalsStatus];
+
+export const GetAdminLicenseRenewalsStatus = {
+  pending: "pending",
+  approved: "approved",
+  rejected: "rejected",
 } as const;
 
 export type CreateChatRoomBody = {

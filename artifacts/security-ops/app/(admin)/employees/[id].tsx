@@ -3,7 +3,7 @@ import { useNavigation } from "expo-router";
 import { useTopPad } from "@/hooks/useTopPad";
 import { View, Text, StyleSheet, ScrollView, TouchableOpacity, ActivityIndicator, Platform, Alert, Modal, TextInput, KeyboardAvoidingView } from "react-native";
 import { useColors } from "@/hooks/useColors";
-import { useGetEmployee, getGetEmployeeQueryKey, useGetLicenses, getGetLicensesQueryKey, useUpdateEmployee } from "@workspace/api-client-react";
+import { useGetEmployee, getGetEmployeeQueryKey, useGetLicenses, getGetLicensesQueryKey, useUpdateEmployee, useCreateLicense } from "@workspace/api-client-react";
 import { LicenseLevelBadge } from "@/components/LicenseLevelBadge";
 import { Feather } from "@expo/vector-icons";
 import { useLocalSearchParams, useRouter } from "expo-router";
@@ -43,6 +43,7 @@ export default function EmployeeDetailScreen() {
 
   const updateEmployee = useUpdateEmployee();
   const [editOpen, setEditOpen] = useState(false);
+  const [addLicOpen, setAddLicOpen] = useState(false);
 
   const toggleStatus = async () => {
     if (!employee) return;
@@ -111,6 +112,18 @@ export default function EmployeeDetailScreen() {
         }}
       />
 
+      <AddLicenseModal
+        visible={addLicOpen}
+        employeeId={id!}
+        employeeName={`${employee.firstName} ${employee.lastName}`}
+        onClose={() => setAddLicOpen(false)}
+        onSaved={() => {
+          setAddLicOpen(false);
+          queryClient.invalidateQueries({ queryKey: getGetLicensesQueryKey({ employeeId: id! }) });
+          queryClient.invalidateQueries({ queryKey: getGetEmployeeQueryKey(id!) });
+        }}
+      />
+
       <View style={[styles.heroCard, { backgroundColor: colors.card, borderColor: colors.border }]}>
         <View style={[styles.bigAvatar, { backgroundColor: colors.primary + "20" }]}>
           <Text style={[styles.bigAvatarText, { color: colors.primary }]}>{employee.firstName[0]}{employee.lastName[0]}</Text>
@@ -161,7 +174,18 @@ export default function EmployeeDetailScreen() {
       )}
 
       <View style={[styles.section, { backgroundColor: colors.card, borderColor: colors.border }]}>
-        <Text style={[styles.sectionTitle, { color: colors.accent }]}>LICENCES ({licenses?.length ?? 0})</Text>
+        <View style={styles.licSectionHeader}>
+          <Text style={[styles.sectionTitle, { color: colors.accent, marginBottom: 0 }]}>LICENCES ({licenses?.length ?? 0})</Text>
+          <TouchableOpacity
+            onPress={() => setAddLicOpen(true)}
+            style={[styles.addLicBtn, { borderColor: colors.primary, backgroundColor: colors.primary + "15" }]}
+            accessibilityRole="button"
+            accessibilityLabel="Add licence"
+          >
+            <Feather name="plus" size={13} color={colors.primary} />
+            <Text style={{ color: colors.primary, fontSize: 12, fontWeight: "700" }}>Add</Text>
+          </TouchableOpacity>
+        </View>
         {(licenses?.length ?? 0) === 0 ? (
           <Text style={[styles.emptyText, { color: colors.mutedForeground }]}>No licences on file</Text>
         ) : (
@@ -276,7 +300,7 @@ function EditEmployeeModal({
             <EditField colors={colors} label="Contact phone" value={form.emergencyContactPhone} onChangeText={update("emergencyContactPhone")} keyboardType="phone-pad" />
 
             <Text style={[styles.modalNote, { color: colors.mutedForeground }]}>
-              Email, banking, and license details are edited from the admin portal.
+              Email and banking details are edited from the admin portal. Add licences from the Licences section.
             </Text>
           </ScrollView>
         </KeyboardAvoidingView>
@@ -311,6 +335,100 @@ function EditField({
   );
 }
 
+function AddLicenseModal({
+  visible, employeeId, employeeName, onClose, onSaved,
+}: {
+  visible: boolean;
+  employeeId: string;
+  employeeName: string;
+  onClose: () => void;
+  onSaved: () => void;
+}) {
+  const colors = useColors();
+  const createLicense = useCreateLicense();
+  const [form, setForm] = useState<{ type: string; level: 2 | 3 | 4; licenseNumber: string; issueDate: string; expiryDate: string; issuingAuthority: string }>({
+    type: "", level: 2, licenseNumber: "", issueDate: "", expiryDate: "", issuingAuthority: "",
+  });
+  const set = (k: keyof typeof form) => (v: any) => setForm((f) => ({ ...f, [k]: v }));
+
+  useEffect(() => {
+    if (visible) setForm({ type: "", level: 2, licenseNumber: "", issueDate: "", expiryDate: "", issuingAuthority: "" });
+  }, [visible]);
+
+  const handleSave = async () => {
+    if (!form.type.trim() || !form.licenseNumber.trim() || !form.expiryDate.trim()) {
+      const msg = "Licence type, number and expiry date are required.";
+      if (Platform.OS === "web") window.alert(msg); else Alert.alert("Missing fields", msg);
+      return;
+    }
+    try {
+      await createLicense.mutateAsync({
+        data: {
+          employeeId,
+          type: form.type.trim(),
+          level: form.level,
+          licenseNumber: form.licenseNumber.trim(),
+          expiryDate: form.expiryDate.trim(),
+          issueDate: form.issueDate.trim() || undefined,
+          issuingAuthority: form.issuingAuthority.trim() || undefined,
+        } as any,
+      });
+      onSaved();
+    } catch (e: any) {
+      const msg = e?.response?.data?.message || e?.message || "Could not add licence.";
+      if (Platform.OS === "web") window.alert(msg); else Alert.alert("Save failed", msg);
+    }
+  };
+
+  return (
+    <Modal visible={visible} animationType="slide" onRequestClose={onClose} presentationStyle="formSheet">
+      <View style={{ flex: 1, backgroundColor: colors.background }}>
+        <View style={[styles.modalHeader, { borderBottomColor: colors.border }]}>
+          <TouchableOpacity onPress={onClose} disabled={createLicense.isPending} accessibilityRole="button" accessibilityLabel="Cancel">
+            <Text style={{ color: colors.mutedForeground, fontSize: 16 }}>Cancel</Text>
+          </TouchableOpacity>
+          <Text style={[styles.modalTitle, { color: colors.foreground }]} accessibilityRole="header">Add Licence</Text>
+          <TouchableOpacity onPress={handleSave} disabled={createLicense.isPending} accessibilityRole="button" accessibilityLabel="Save licence" accessibilityState={{ disabled: createLicense.isPending, busy: createLicense.isPending }}>
+            {createLicense.isPending ? <ActivityIndicator color={colors.primary} /> : <Text style={{ color: colors.primary, fontSize: 16, fontWeight: "700" }}>Save</Text>}
+          </TouchableOpacity>
+        </View>
+        <KeyboardAvoidingView behavior={Platform.OS === "ios" ? "padding" : undefined} style={{ flex: 1 }}>
+          <ScrollView contentContainerStyle={{ padding: 16 }} keyboardShouldPersistTaps="handled">
+            <Text style={[styles.modalNote, { color: colors.mutedForeground, marginTop: 0, marginBottom: 16 }]}>For {employeeName}</Text>
+
+            <Text style={[styles.fieldLabel, { color: colors.mutedForeground }]}>Licence level</Text>
+            <View style={{ flexDirection: "row", gap: 8, marginBottom: 16 }}>
+              {([2, 3, 4] as const).map((lv) => (
+                <TouchableOpacity
+                  key={lv}
+                  style={[styles.lvlChip, {
+                    borderColor: form.level === lv ? colors.primary : colors.border,
+                    backgroundColor: form.level === lv ? colors.primary + "20" : "transparent",
+                  }]}
+                  onPress={() => set("level")(lv)}
+                  accessibilityRole="button"
+                  accessibilityState={{ selected: form.level === lv }}
+                  accessibilityLabel={lv === 4 ? "Level 4 PPO" : `Level ${lv}`}
+                >
+                  <Text style={{ color: form.level === lv ? colors.primary : colors.foreground, fontWeight: "700", fontSize: 13 }}>
+                    {lv === 4 ? "L4 / PPO" : `Level ${lv}`}
+                  </Text>
+                </TouchableOpacity>
+              ))}
+            </View>
+
+            <EditField colors={colors} label="Licence type" value={form.type} onChangeText={set("type")} autoCapitalize="words" />
+            <EditField colors={colors} label="Licence number" value={form.licenseNumber} onChangeText={set("licenseNumber")} />
+            <EditField colors={colors} label="Issuing authority" value={form.issuingAuthority} onChangeText={set("issuingAuthority")} autoCapitalize="words" />
+            <EditField colors={colors} label="Issue date (YYYY-MM-DD)" value={form.issueDate} onChangeText={set("issueDate")} />
+            <EditField colors={colors} label="Expiry date (YYYY-MM-DD)" value={form.expiryDate} onChangeText={set("expiryDate")} />
+          </ScrollView>
+        </KeyboardAvoidingView>
+      </View>
+    </Modal>
+  );
+}
+
 const styles = StyleSheet.create({
   container: { flex: 1 },
   center: { flex: 1, justifyContent: "center", alignItems: "center" },
@@ -337,6 +455,9 @@ const styles = StyleSheet.create({
   infoContent: { flex: 1 },
   infoLabel: { fontSize: 11, marginBottom: 2 },
   infoValue: { fontSize: 14 },
+  licSectionHeader: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", marginBottom: 12 },
+  addLicBtn: { flexDirection: "row", alignItems: "center", gap: 4, paddingHorizontal: 10, paddingVertical: 5, borderRadius: 8, borderWidth: 1 },
+  lvlChip: { flex: 1, paddingVertical: 10, borderRadius: 8, borderWidth: 1.5, alignItems: "center" },
   skillsWrap: { flexDirection: "row", flexWrap: "wrap", gap: 8 },
   skillChip: { paddingHorizontal: 10, paddingVertical: 5, borderRadius: 6, borderWidth: 1 },
   skillText: { fontSize: 13, fontWeight: "500" },

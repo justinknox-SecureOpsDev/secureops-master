@@ -1774,6 +1774,107 @@ export const UpdateLicenseResponse = zod.object({
 });
 
 /**
+ * @summary List license renewal requests (admin)
+ */
+export const GetAdminLicenseRenewalsQueryParams = zod.object({
+  status: zod.enum(["pending", "approved", "rejected"]).optional(),
+});
+
+export const GetAdminLicenseRenewalsResponseItem = zod.object({
+  id: zod.string(),
+  employeeId: zod.string(),
+  licenseId: zod.string().nullish(),
+  licenseType: zod.string(),
+  licenseLevel: zod
+    .union([zod.literal(2), zod.literal(3), zod.literal(4)])
+    .nullish(),
+  licenseNumber: zod.string(),
+  issuingAuthority: zod.string().nullish(),
+  issueDate: zod.coerce.date().nullish(),
+  expiryDate: zod.coerce.date(),
+  docKey: zod.string(),
+  notes: zod.string().nullish(),
+  status: zod.enum(["pending", "approved", "rejected"]),
+  decisionNote: zod.string().nullish(),
+  decidedAt: zod.coerce.date().nullish(),
+  createdAt: zod.coerce.date(),
+  employeeFirstName: zod.string().nullish(),
+  employeeLastName: zod.string().nullish(),
+  employeeEmail: zod.string().nullish(),
+});
+export const GetAdminLicenseRenewalsResponse = zod.array(
+  GetAdminLicenseRenewalsResponseItem,
+);
+
+/**
+ * @summary Approve a license renewal request (admin)
+ */
+export const ApproveLicenseRenewalParams = zod.object({
+  id: zod.coerce.string(),
+});
+
+export const ApproveLicenseRenewalBody = zod.object({
+  decisionNote: zod.string().optional(),
+});
+
+export const ApproveLicenseRenewalResponse = zod.object({
+  id: zod.string(),
+  employeeId: zod.string(),
+  licenseId: zod.string().nullish(),
+  licenseType: zod.string(),
+  licenseLevel: zod
+    .union([zod.literal(2), zod.literal(3), zod.literal(4)])
+    .nullish(),
+  licenseNumber: zod.string(),
+  issuingAuthority: zod.string().nullish(),
+  issueDate: zod.coerce.date().nullish(),
+  expiryDate: zod.coerce.date(),
+  docKey: zod.string(),
+  notes: zod.string().nullish(),
+  status: zod.enum(["pending", "approved", "rejected"]),
+  decisionNote: zod.string().nullish(),
+  decidedAt: zod.coerce.date().nullish(),
+  createdAt: zod.coerce.date(),
+  employeeFirstName: zod.string().nullish(),
+  employeeLastName: zod.string().nullish(),
+  employeeEmail: zod.string().nullish(),
+});
+
+/**
+ * @summary Reject a license renewal request (admin)
+ */
+export const RejectLicenseRenewalParams = zod.object({
+  id: zod.coerce.string(),
+});
+
+export const RejectLicenseRenewalBody = zod.object({
+  decisionNote: zod.string(),
+});
+
+export const RejectLicenseRenewalResponse = zod.object({
+  id: zod.string(),
+  employeeId: zod.string(),
+  licenseId: zod.string().nullish(),
+  licenseType: zod.string(),
+  licenseLevel: zod
+    .union([zod.literal(2), zod.literal(3), zod.literal(4)])
+    .nullish(),
+  licenseNumber: zod.string(),
+  issuingAuthority: zod.string().nullish(),
+  issueDate: zod.coerce.date().nullish(),
+  expiryDate: zod.coerce.date(),
+  docKey: zod.string(),
+  notes: zod.string().nullish(),
+  status: zod.enum(["pending", "approved", "rejected"]),
+  decisionNote: zod.string().nullish(),
+  decidedAt: zod.coerce.date().nullish(),
+  createdAt: zod.coerce.date(),
+  employeeFirstName: zod.string().nullish(),
+  employeeLastName: zod.string().nullish(),
+  employeeEmail: zod.string().nullish(),
+});
+
+/**
  * @summary Admin dashboard summary stats
  */
 export const GetAdminDashboardSummaryResponse = zod.object({
