@@ -943,21 +943,34 @@ router.post("/shifts/:id/notify-vacancy", requireAdminOrDispatcher, async (req, 
 
 router.post("/shifts/:id/assignments", requireAdminOrDispatcher, async (req, res): Promise<void> => {
   const shiftId = Array.isArray(req.params.id) ? req.params.id[0] : req.params.id;
-  const { employeeId } = req.body;
+  const { employeeId, overrideLicense } = req.body;
   if (!employeeId) { res.status(400).json({ error: "Bad Request", message: "employeeId required" }); return; }
 
   const [shift] = await db.select().from(shiftsTable).where(eq(shiftsTable.id, shiftId));
   if (!shift) { res.status(404).json({ error: "Not Found" }); return; }
 
+  // License-level gate. Admins and dispatchers may explicitly override it
+  // (e.g. an officer whose renewal is in flight, or a judgement call for an
+  // urgent post) by passing `overrideLicense: true`. The override skips ONLY
+  // this clearance check — the double-book conflict guard and headcount cap
+  // below still apply. The override is recorded in the audit log (this route
+  // is under the audited `/shifts` prefix and the request body is captured).
   const empLevel = await getEffectiveLevel(employeeId);
   if (empLevel < shift.requiredLicenseLevel) {
-    res.status(403).json({
-      error: "Forbidden",
-      message: shift.requiredLicenseLevel <= 1
-        ? `This is a support shift. The selected employee isn't cleared for it — set their position to support staff or assign a licensed officer.`
-        : `Employee's highest valid licence (${empLevel === 0 ? "none" : `Level ${empLevel}`}) does not meet the shift requirement (Level ${shift.requiredLicenseLevel}${shift.requiredLicenseLevel === 4 ? "/PPO" : ""}).`,
-    });
-    return;
+    if (overrideLicense === true) {
+      req.log.warn(
+        { shiftId, employeeId, empLevel, requiredLicenseLevel: shift.requiredLicenseLevel, actor: req.user?.userId },
+        "license requirement overridden on manual shift assignment",
+      );
+    } else {
+      res.status(403).json({
+        error: "Forbidden",
+        message: shift.requiredLicenseLevel <= 1
+          ? `This is a support shift. The selected employee isn't cleared for it — set their position to support staff or assign a licensed officer.`
+          : `Employee's highest valid licence (${empLevel === 0 ? "none" : `Level ${empLevel}`}) does not meet the shift requirement (Level ${shift.requiredLicenseLevel}${shift.requiredLicenseLevel === 4 ? "/PPO" : ""}).`,
+      });
+      return;
+    }
   }
 
   // Double-book guard: refuse if the officer already has an accepted

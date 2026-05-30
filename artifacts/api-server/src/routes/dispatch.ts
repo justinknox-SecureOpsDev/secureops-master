@@ -1,5 +1,5 @@
 import { Router, type IRouter } from "express";
-import { and, asc, desc, eq, gte, inArray, lte, ne, or, sql } from "drizzle-orm";
+import { and, asc, desc, eq, gte, inArray, isNull, lte, ne, or, sql } from "drizzle-orm";
 import {
   db,
   usersTable,
@@ -13,7 +13,7 @@ import {
   chatRoomsTable,
   officerAvailabilityWindowsTable,
 } from "@workspace/db";
-import { requireAdminOrDispatcher } from "../middlewares/auth";
+import { requireAdmin, requireAdminOrDispatcher } from "../middlewares/auth";
 import { getGeofenceRadiusMiles } from "../lib/geofence";
 
 const router: IRouter = Router();
@@ -289,7 +289,9 @@ router.get("/dispatch/open-shifts", requireAdminOrDispatcher, async (req, res): 
  * the UI can pick the next.
  */
 router.post("/dispatch/assign-nearest", requireAdminOrDispatcher, async (req, res): Promise<void> => {
-  const { shiftId, dryRun } = (req.body ?? {}) as { shiftId?: string; dryRun?: boolean };
+  const { shiftId, dryRun, overrideLicense } = (req.body ?? {}) as {
+    shiftId?: string; dryRun?: boolean; overrideLicense?: boolean;
+  };
   if (!shiftId) {
     res.status(400).json({ error: "Bad Request", message: "shiftId required" });
     return;
@@ -407,13 +409,20 @@ router.post("/dispatch/assign-nearest", requireAdminOrDispatcher, async (req, re
     distanceMiles: number | null;
     lastLocationAt: Date | null;
     maxLicenseLevel: number | null;
+    effectiveLevel: number;
+    meetsLicense: boolean;
     alreadyAssigned: boolean;
     conflictingShift: boolean;
     availabilityKnown: boolean;
     availabilityCovers: boolean;
   };
+  // Normally only officers whose effective level meets the requirement are
+  // ranked. With overrideLicense (admin/dispatcher judgement call) we include
+  // under-licensed officers too, flagged via `meetsLicense:false`, and sink
+  // them below qualified candidates so the auto-pick still prefers a qualified
+  // officer when one is available.
   const candidates: Candidate[] = qualified
-    .filter((q) => (q.effLevel ?? 0) >= shift.requiredLicenseLevel)
+    .filter((q) => overrideLicense === true || (q.effLevel ?? 0) >= shift.requiredLicenseLevel)
     .map((q) => {
       const lat = q.lastLat ? parseFloat(q.lastLat) : null;
       const lng = q.lastLng ? parseFloat(q.lastLng) : null;
@@ -427,6 +436,8 @@ router.post("/dispatch/assign-nearest", requireAdminOrDispatcher, async (req, re
         distanceMiles: distance,
         lastLocationAt: q.lastLocationAt,
         maxLicenseLevel: q.maxLevel,
+        effectiveLevel: q.effLevel ?? 0,
+        meetsLicense: (q.effLevel ?? 0) >= shift.requiredLicenseLevel,
         alreadyAssigned: q.alreadyAssigned,
         conflictingShift: q.conflictingShift,
         availabilityKnown: a?.hasAny ?? false,
@@ -434,12 +445,12 @@ router.post("/dispatch/assign-nearest", requireAdminOrDispatcher, async (req, re
       };
     })
     .sort((a, b) => {
-      // Hard-deprioritize already-assigned / conflicting / unavailable
-      // candidates: they remain visible in the response (so the UI can
-      // explain why someone is missing) but are pushed to the bottom
+      // Hard-deprioritize already-assigned / conflicting / unavailable /
+      // under-licensed candidates: they remain visible in the response (so the
+      // UI can explain why someone is flagged) but are pushed to the bottom
       // and excluded from the auto-pick.
-      const aBad = a.alreadyAssigned || a.conflictingShift || (a.availabilityKnown && !a.availabilityCovers);
-      const bBad = b.alreadyAssigned || b.conflictingShift || (b.availabilityKnown && !b.availabilityCovers);
+      const aBad = a.alreadyAssigned || a.conflictingShift || (a.availabilityKnown && !a.availabilityCovers) || !a.meetsLicense;
+      const bBad = b.alreadyAssigned || b.conflictingShift || (b.availabilityKnown && !b.availabilityCovers) || !b.meetsLicense;
       if (aBad !== bBad) return aBad ? 1 : -1;
       const da = a.distanceMiles ?? Number.POSITIVE_INFINITY;
       const db_ = b.distanceMiles ?? Number.POSITIVE_INFINITY;
@@ -571,6 +582,161 @@ router.get("/dispatch/broadcast-rooms", requireAdminOrDispatcher, async (_req, r
     .where(ne(chatRoomsTable.type, "direct"))
     .orderBy(asc(chatRoomsTable.name));
   res.json(rooms);
+});
+
+/** Round worked hours to 0.01h, matching the self clock-out path. */
+function calcHoursWorked(clockIn: Date, clockOut: Date): number {
+  return Math.round(((clockOut.getTime() - clockIn.getTime()) / 3_600_000) * 100) / 100;
+}
+
+/**
+ * POST /dispatch/officers/:userId/clock-in { shiftId?, siteId?, notes? }
+ *
+ * Admin-only on-behalf clock-in from the Dispatch status board (e.g. an
+ * officer whose phone died, or a manual correction). Unlike the officer
+ * self clock-in this carries NO GPS coords (the dispatcher isn't on site),
+ * so clockInLat/Lng stay null and there is no geofence/radius resolution.
+ * Site is resolved from the shift (preferred), else an explicit siteId.
+ * The action is audit-logged under the `/dispatch` prefix.
+ */
+router.post("/dispatch/officers/:userId/clock-in", requireAdmin, async (req, res): Promise<void> => {
+  const userId = Array.isArray(req.params.userId) ? req.params.userId[0] : req.params.userId;
+  const { shiftId, siteId, notes } = (req.body ?? {}) as {
+    shiftId?: string; siteId?: string; notes?: string;
+  };
+
+  const [officer] = await db.select().from(usersTable).where(eq(usersTable.id, userId)).limit(1);
+  if (!officer || officer.role !== "employee") {
+    res.status(404).json({ error: "Not Found", message: "Officer not found" });
+    return;
+  }
+
+  // Refuse a second open entry — mirrors the self clock-in guard.
+  const open = await db
+    .select({ id: timeEntriesTable.id })
+    .from(timeEntriesTable)
+    .where(and(eq(timeEntriesTable.employeeId, userId), isNull(timeEntriesTable.clockOutTime)))
+    .limit(1);
+  if (open.length > 0) {
+    res.status(400).json({ error: "Bad Request", message: "Officer is already clocked in." });
+    return;
+  }
+
+  // Resolve the site: prefer the shift's site, fall back to an explicit
+  // siteId. A clock-in with no site at all is allowed (ad-hoc) but rare.
+  let resolvedSiteId: string | null = null;
+  if (shiftId) {
+    const [shift] = await db.select().from(shiftsTable).where(eq(shiftsTable.id, shiftId)).limit(1);
+    if (!shift) { res.status(404).json({ error: "Not Found", message: "Shift not found" }); return; }
+    if (shift.status === "completed" || shift.status === "cancelled") {
+      res.status(409).json({ error: "Conflict", message: `This shift is ${shift.status} — you can't clock in to it.` });
+      return;
+    }
+    resolvedSiteId = shift.siteId ?? null;
+  } else if (siteId) {
+    const [site] = await db.select({ id: sitesTable.id }).from(sitesTable).where(eq(sitesTable.id, siteId)).limit(1);
+    if (!site) { res.status(404).json({ error: "Not Found", message: "Site not found" }); return; }
+    resolvedSiteId = site.id;
+  }
+
+  const actorName = `${req.user?.userId ?? "admin"}`;
+  const dispatchNote = `Clocked in by dispatch (admin ${actorName})`;
+  const [entry] = await db.insert(timeEntriesTable).values({
+    shiftId: shiftId || null,
+    siteId: resolvedSiteId,
+    employeeId: userId,
+    clockInTime: new Date(),
+    clockInLat: null,
+    clockInLng: null,
+    notes: notes ? `${dispatchNote} — ${notes}` : dispatchNote,
+    isVerified: false,
+    approvalStatus: "pending",
+  }).returning();
+
+  // Flip the linked shift active so My Shifts / dashboards reflect on-duty.
+  if (shiftId) {
+    await db
+      .update(shiftsTable)
+      .set({ status: "active" })
+      .where(and(eq(shiftsTable.id, shiftId), eq(shiftsTable.status, "upcoming")));
+  }
+
+  req.log.info({ officerId: userId, shiftId, siteId: resolvedSiteId, actor: req.user?.userId }, "dispatch on-behalf clock-in");
+  res.status(201).json({
+    ...entry,
+    officerName: `${officer.firstName} ${officer.lastName}`,
+  });
+});
+
+/**
+ * POST /dispatch/officers/:userId/clock-out { timeEntryId?, notes? }
+ *
+ * Admin-only on-behalf clock-out from the Dispatch status board. Closes the
+ * officer's open entry (by explicit timeEntryId, else the single open entry),
+ * stamps clockOutTime=now, computes hoursWorked, and completes the linked
+ * shift when no other officer is still clocked in. No GPS coords (dispatcher
+ * isn't on site). Audit-logged under the `/dispatch` prefix.
+ */
+router.post("/dispatch/officers/:userId/clock-out", requireAdmin, async (req, res): Promise<void> => {
+  const userId = Array.isArray(req.params.userId) ? req.params.userId[0] : req.params.userId;
+  const { timeEntryId, notes } = (req.body ?? {}) as { timeEntryId?: string; notes?: string };
+
+  const [entry] = timeEntryId
+    ? await db.select().from(timeEntriesTable).where(eq(timeEntriesTable.id, timeEntryId)).limit(1)
+    : await db
+        .select()
+        .from(timeEntriesTable)
+        .where(and(eq(timeEntriesTable.employeeId, userId), isNull(timeEntriesTable.clockOutTime)))
+        .limit(1);
+
+  if (!entry) {
+    res.status(404).json({ error: "Not Found", message: "No open time entry for this officer." });
+    return;
+  }
+  if (entry.employeeId !== userId) {
+    res.status(400).json({ error: "Bad Request", message: "That time entry does not belong to this officer." });
+    return;
+  }
+  if (entry.clockOutTime) {
+    res.status(409).json({ error: "Conflict", message: "Officer is already clocked out." });
+    return;
+  }
+
+  const clockOut = new Date();
+  const dispatchNote = `Clocked out by dispatch (admin ${req.user?.userId ?? "admin"})`;
+  const [updated] = await db.update(timeEntriesTable).set({
+    clockOutTime: clockOut,
+    clockOutLat: null,
+    clockOutLng: null,
+    hoursWorked: String(calcHoursWorked(entry.clockInTime, clockOut)),
+    notes: notes
+      ? `${entry.notes ? `${entry.notes} — ` : ""}${dispatchNote} — ${notes}`
+      : `${entry.notes ? `${entry.notes} — ` : ""}${dispatchNote}`,
+  }).where(eq(timeEntriesTable.id, entry.id)).returning();
+
+  // Complete the shift only when no other officer still has an open entry,
+  // mirroring the self clock-out's TOCTOU-safe NOT EXISTS predicate.
+  if (updated.shiftId) {
+    await db
+      .update(shiftsTable)
+      .set({ status: "completed" })
+      .where(and(
+        eq(shiftsTable.id, updated.shiftId),
+        eq(shiftsTable.status, "active"),
+        sql`NOT EXISTS (
+          SELECT 1 FROM ${timeEntriesTable}
+          WHERE ${timeEntriesTable.shiftId} = ${updated.shiftId}
+            AND ${timeEntriesTable.clockOutTime} IS NULL
+        )`,
+      ));
+  }
+
+  req.log.info({ officerId: userId, timeEntryId: updated.id, actor: req.user?.userId }, "dispatch on-behalf clock-out");
+  const [officer] = await db.select().from(usersTable).where(eq(usersTable.id, userId)).limit(1);
+  res.json({
+    ...updated,
+    officerName: officer ? `${officer.firstName} ${officer.lastName}` : null,
+  });
 });
 
 export default router;

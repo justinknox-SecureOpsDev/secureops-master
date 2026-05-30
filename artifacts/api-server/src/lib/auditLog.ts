@@ -92,6 +92,7 @@ const ACTION_RULES: Array<{ prefix: string; action: string }> = [
   { prefix: "/admin/exports/pdf", action: "exports.pdf" },
   { prefix: "/admin/radio/channels", action: "radio.channels_admin" },
   { prefix: "/admin", action: "admin.action" },
+  { prefix: "/dispatch", action: "dispatch.write" },
   { prefix: "/shifts/repeat", action: "shifts.repeat_create" },
   { prefix: "/shifts", action: "shifts.write" },
   { prefix: "/clients", action: "clients.write" },
