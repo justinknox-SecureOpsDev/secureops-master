@@ -114,3 +114,25 @@
 .bg-brand-navy { background-color: hsl(224 51% 6%); }
 .bg-brand-gold { background-color: hsl(43 53% 54%); }
 .bg-brand-cream { background-color: hsl(44 60% 86%); }
+
+/* Deep-link highlight flash. Mirrors the mobile app's useHighlightFlash:
+   when an admin opens an incident/shift/officer via a notification or share
+   link, the matching row snaps to a gold tint + ring, holds, then eases back
+   so the eye lands on the exact item instead of the top of the list. */
+@keyframes wcsg-deep-link-flash {
+  0%, 55% {
+    background-color: hsl(43 53% 54% / 0.22);
+    box-shadow: inset 0 0 0 2px hsl(43 53% 44% / 0.9);
+  }
+  100% {
+    background-color: transparent;
+    box-shadow: inset 0 0 0 2px transparent;
+  }
+}
+.wcsg-deep-link-flash {
+  animation: wcsg-deep-link-flash 1.8s ease-out forwards;
+  scroll-margin: 6rem;
+}
+@media (prefers-reduced-motion: reduce) {
+  .wcsg-deep-link-flash { animation-duration: 0.01ms; }
+}

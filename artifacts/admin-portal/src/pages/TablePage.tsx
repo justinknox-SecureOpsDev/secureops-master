@@ -26,9 +26,18 @@ export function TablePage() {
     return Object.keys(out).length ? out : undefined;
   }, [search]);
 
+  // Deep-link target row. Accept a generic `focus` id plus the entity-specific
+  // names the mobile push payloads carry (e.g. `incidentId`) so a link/alert
+  // can scroll to + highlight the exact row on any table page.
+  const focusId = useMemo(() => {
+    const sp = new URLSearchParams(search);
+    const singular = tableName.replace(/s$/, "");
+    return sp.get("focus") || (singular ? sp.get(`${singular}Id`) : null) || null;
+  }, [search, tableName]);
+
   if (!descriptor) return null;
   const key = `${descriptor.name}:${urlFilter ? Object.entries(urlFilter).map(([k, v]) => `${k}=${v}`).sort().join("&") : ""}`;
-  return <DataGrid key={key} descriptor={descriptor} filter={urlFilter} />;
+  return <DataGrid key={key} descriptor={descriptor} filter={urlFilter} focusId={focusId} />;
 }
 
 export function HomeRedirect() {

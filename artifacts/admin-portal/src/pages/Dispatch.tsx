@@ -18,6 +18,7 @@ import {
   HelpCircle, X,
 } from "lucide-react";
 import { useAuth } from "@/lib/auth";
+import { useFirstQueryParam } from "@/hooks/useDeepLinkFocus";
 import { AssignNearestDialog } from "@/components/AssignNearestDialog";
 
 type StatusRow = {
@@ -196,6 +197,17 @@ export default function DispatchPage() {
   // only. Cleared after the panel opens the matching dialog.
   const [focusedIncidentId, setFocusedIncidentId] = useState<string | null>(null);
 
+  // Deep-link params (alert / notification / share link). An incidentId focuses
+  // the matching active incident (scroll + open dialog); userId/siteId center
+  // the live map on that officer/site — the web mirror of the mobile
+  // emergency / geofence-breach deep links.
+  const deepLinkIncidentId = useFirstQueryParam("incidentId", "focus");
+  const deepLinkUserId = useFirstQueryParam("userId");
+  const deepLinkSiteId = useFirstQueryParam("siteId");
+  useEffect(() => {
+    if (deepLinkIncidentId) setFocusedIncidentId(deepLinkIncidentId);
+  }, [deepLinkIncidentId]);
+
   // First-run coach-mark tour. Per-user remembered flag (localStorage)
   // so each dispatcher only sees it once, but a "Show me again" link
   // in the header lets them re-open it any time.
@@ -329,6 +341,8 @@ export default function DispatchPage() {
             updatedAt={officers.dataUpdatedAt}
             incidents={incidents.data ?? []}
             onFocusIncident={setFocusedIncidentId}
+            focusUserId={deepLinkUserId}
+            focusSiteId={deepLinkSiteId}
           />
           <div data-tour="broadcast">
             <BroadcastPanel rooms={rooms.data ?? []} />
@@ -1082,7 +1096,11 @@ type MapPoint = {
 // actually take effect without a hard refresh of the browser tab.
 const MAP_BUILD_ID = Math.random().toString(36).slice(2, 10);
 
-function buildLeafletHtml(points: MapPoint[], defaultGeofenceRadiusMiles: number): string {
+function buildLeafletHtml(
+  points: MapPoint[],
+  defaultGeofenceRadiusMiles: number,
+  focusCenter?: { lat: number; lng: number },
+): string {
   // Coordinates are validated numbers; labels are JSON-encoded then
   // injected into the DOM via createTextNode, never innerHTML.
   // CRITICAL: we MUST escape `<` (and the U+2028/U+2029 line separators
@@ -1238,15 +1256,19 @@ if(pts.length){
   });
   if (_bb.isValid()) map.fitBounds(_bb.pad(0.3), { maxZoom: 14 });
 }
+${focusCenter ? `try { map.setView([${focusCenter.lat}, ${focusCenter.lng}], 15); } catch (e) {}` : ""}
 </script></body></html>`;
 }
 
 function LiveMapPanel({
   officers, sites, loading, error, updatedAt, incidents, onFocusIncident,
+  focusUserId, focusSiteId,
 }: {
   officers: ActiveOfficer[]; sites: Site[]; loading: boolean; error: unknown;
   updatedAt: number | undefined; incidents: Incident[];
   onFocusIncident: (incidentId: string) => void;
+  focusUserId?: string | null;
+  focusSiteId?: string | null;
 }) {
   const [, navigate] = useLocation();
 
@@ -1333,11 +1355,33 @@ function LiveMapPanel({
   }, [officers, sites, incidents]);
 
   const geofenceRadiusMiles = useGeofenceRadiusMiles();
+
+  // Resolve a deep-link focus center: an officer (emergency / geofence-breach
+  // alert) or a site. The map zooms here after fitBounds so the relevant pin
+  // is centered (mirrors the mobile live-map deep link).
+  const focusCenter = useMemo<{ lat: number; lng: number } | undefined>(() => {
+    if (focusUserId) {
+      const o = officers.find((x) => x.userId === focusUserId);
+      if (o?.lastLat && o?.lastLng) {
+        const lat = parseFloat(o.lastLat); const lng = parseFloat(o.lastLng);
+        if (isFinite(lat) && isFinite(lng)) return { lat, lng };
+      }
+    }
+    if (focusSiteId) {
+      const s = sites.find((x) => x.id === focusSiteId);
+      if (s?.locationLat && s?.locationLng) {
+        const lat = parseFloat(s.locationLat); const lng = parseFloat(s.locationLng);
+        if (isFinite(lat) && isFinite(lng)) return { lat, lng };
+      }
+    }
+    return undefined;
+  }, [focusUserId, focusSiteId, officers, sites]);
+
   // MAP_BUILD_ID re-evaluates on every HMR reload so dev-time edits to
   // buildLeafletHtml actually take effect without a hard refresh.
   const html = useMemo(
-    () => buildLeafletHtml(points, geofenceRadiusMiles),
-    [points, geofenceRadiusMiles, MAP_BUILD_ID],
+    () => buildLeafletHtml(points, geofenceRadiusMiles, focusCenter),
+    [points, geofenceRadiusMiles, focusCenter, MAP_BUILD_ID],
   );
   const withCoords = points.filter((p) => p.kind === "officer").length;
   const withoutCoords = officers.length - withCoords;
@@ -1373,14 +1417,20 @@ function LiveMapPanel({
         )}
         {officers.length > 0 && (
           <div className="border-t p-2 space-y-1 max-h-40 overflow-y-auto">
-            {officers.slice(0, 12).map((o) => (
-              <div key={o.userId} className="flex items-center gap-2 text-xs px-2">
-                <div className="w-1.5 h-1.5 rounded-full bg-emerald-500 flex-shrink-0" />
-                <span className="flex-1 truncate">{o.firstName} {o.lastName}</span>
-                <span className="opacity-60">{o.siteName ?? "—"}</span>
-                <span className="opacity-50 whitespace-nowrap">{fmtAgo(o.lastLocationAt)}</span>
-              </div>
-            ))}
+            {officers.slice(0, 12).map((o) => {
+              const isFocus = !!focusUserId && o.userId === focusUserId;
+              return (
+                <div
+                  key={o.userId}
+                  className={`flex items-center gap-2 text-xs px-2 rounded${isFocus ? " wcsg-deep-link-flash" : ""}`}
+                >
+                  <div className={`w-1.5 h-1.5 rounded-full flex-shrink-0 ${isFocus ? "bg-brand-gold" : "bg-emerald-500"}`} />
+                  <span className="flex-1 truncate">{o.firstName} {o.lastName}</span>
+                  <span className="opacity-60">{o.siteName ?? "—"}</span>
+                  <span className="opacity-50 whitespace-nowrap">{fmtAgo(o.lastLocationAt)}</span>
+                </div>
+              );
+            })}
           </div>
         )}
       </CardContent>

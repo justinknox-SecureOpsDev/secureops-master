@@ -23,6 +23,7 @@ import { RowFormDialog } from "./RowFormDialog";
 import { ImportWizard } from "./ImportWizard";
 import { RepeatingShiftDialog } from "./RepeatingShiftDialog";
 import { downloadTemplateXlsx } from "@/lib/import";
+import { useDeepLinkFocus } from "@/hooks/useDeepLinkFocus";
 
 type Row = Record<string, unknown>;
 
@@ -106,7 +107,7 @@ function renderCell(f: Field, value: unknown) {
 }
 
 export function DataGrid({
-  descriptor, filter, presetValues, lockedFields, hideHeader, compact,
+  descriptor, filter, presetValues, lockedFields, hideHeader, compact, focusId,
 }: {
   descriptor: TableDescriptor;
   /** Equality filters appended to the list query, e.g. { siteId: "abc" }. */
@@ -119,6 +120,8 @@ export function DataGrid({
   hideHeader?: boolean;
   /** Tighter padding for embedded use. */
   compact?: boolean;
+  /** Deep-link target: scroll to + highlight the row whose id matches (when on the loaded page). */
+  focusId?: string | null;
 }) {
   const visibleFields = useMemo(
     () => descriptor.fields.filter((f) => !f.hiddenInGrid),
@@ -128,6 +131,14 @@ export function DataGrid({
   const [rows, setRows] = useState<Row[]>([]);
   const [total, setTotal] = useState(0);
   const [loading, setLoading] = useState(false);
+  // Deep-link: scroll to + highlight the row whose id matches focusId once it
+  // is present in the currently loaded page (mirrors the mobile notification
+  // deep links). If the target lives on another page it simply no-ops.
+  const focusPresent = focusId != null && rows.some((r) => String((r as any).id) === focusId);
+  const { ref: focusRowRef, flashing: focusFlashing } = useDeepLinkFocus(
+    focusPresent ? focusId : null,
+    !loading && rows.length > 0,
+  );
   const [search, setSearch] = useState("");
   const [debounced, setDebounced] = useState("");
   const [sort, setSort] = useState<{ field: string; dir: "asc" | "desc" }>({
@@ -527,8 +538,14 @@ export function DataGrid({
                 </TableCell>
               </TableRow>
             )}
-            {rows.map((r) => (
-              <TableRow key={String((r as any).id)} className="hover:bg-accent/40">
+            {rows.map((r) => {
+              const isFocusRow = focusId != null && String((r as any).id) === focusId;
+              return (
+              <TableRow
+                key={String((r as any).id)}
+                ref={isFocusRow ? (focusRowRef as unknown as React.Ref<HTMLTableRowElement>) : undefined}
+                className={`hover:bg-accent/40${isFocusRow && focusFlashing ? " wcsg-deep-link-flash" : ""}`}
+              >
                 {gridFields.map((f) => (
                   <TableCell key={f.key} className="text-sm max-w-[260px] truncate">
                     {f.derived
@@ -609,7 +626,8 @@ export function DataGrid({
                   </Button>
                 </TableCell>
               </TableRow>
-            ))}
+              );
+            })}
           </TableBody>
         </Table>
       </div>

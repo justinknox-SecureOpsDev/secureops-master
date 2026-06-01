@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { api } from "@/lib/api";
+import { useDeepLinkFocus, useFirstQueryParam } from "@/hooks/useDeepLinkFocus";
 import { getTable } from "@/lib/tables";
 import { RowFormDialog } from "@/components/RowFormDialog";
 import { ShiftDialog } from "@/components/ShiftDialog";
@@ -273,6 +274,31 @@ export default function ShiftsPage() {
   const isSeriesOpen = (key: string) => openSeries[key] === true; // default closed
   const toggleSite = (key: string) => setOpenSites((s) => ({ ...s, [key]: !isSiteOpen(key) }));
   const toggleSeries = (key: string) => setOpenSeries((s) => ({ ...s, [key]: !isSeriesOpen(key) }));
+
+  // Deep-link: scroll to + highlight a specific shift opened from a link or
+  // push notification (mirrors the mobile shifts screen). Accept a generic
+  // `focus` id or the `shiftId` the mobile payloads carry.
+  const focusShiftId = useFirstQueryParam("focus", "shiftId");
+  const { ref: focusShiftRef, flashing: focusShiftFlashing } = useDeepLinkFocus(
+    focusShiftId,
+    !loading && shifts.length > 0,
+  );
+
+  // Auto-expand the site group + series that contain the target shift so it is
+  // actually rendered (series default collapsed) before we scroll to it.
+  useEffect(() => {
+    if (!focusShiftId || loading) return;
+    const target = shifts.find((s) => s.id === focusShiftId);
+    if (!target) return;
+    const groupKey = target.siteId ?? NO_SITE_KEY;
+    setOpenSites((s) => ({ ...s, [groupKey]: true }));
+    if (target.isRepeat) {
+      const seriesKey = target.seriesId
+        ? `sid::${target.seriesId}`
+        : `legacy::${groupKey}::${target.title}::${target.repeatPattern ?? ""}`;
+      setOpenSeries((s) => ({ ...s, [seriesKey]: true }));
+    }
+  }, [focusShiftId, loading, shifts]);
 
   const handleDelete = async () => {
     if (!deleting) return;
@@ -567,6 +593,8 @@ export default function ShiftsPage() {
                                     onEdit={() => setEditing(s)}
                                     onDelete={() => setDeleting(s)}
                                     indent
+                                    focusRef={s.id === focusShiftId ? focusShiftRef : undefined}
+                                    highlight={s.id === focusShiftId && focusShiftFlashing}
                                   />
                                 ))}
                               </div>
@@ -583,6 +611,8 @@ export default function ShiftsPage() {
                       shift={s}
                       onEdit={() => setEditing(s)}
                       onDelete={() => setDeleting(s)}
+                      focusRef={s.id === focusShiftId ? focusShiftRef : undefined}
+                      highlight={s.id === focusShiftId && focusShiftFlashing}
                     />
                   ))}
                 </div>
@@ -688,18 +718,23 @@ export default function ShiftsPage() {
 }
 
 function ShiftRow({
-  shift, onEdit, onDelete, indent,
+  shift, onEdit, onDelete, indent, focusRef, highlight,
 }: {
   shift: Shift;
   onEdit: () => void;
   onDelete: () => void;
   indent?: boolean;
+  focusRef?: React.MutableRefObject<HTMLElement | null>;
+  highlight?: boolean;
 }) {
   const lvl = levelBadge(shift.requiredLicenseLevel);
   const filled = (shift.assignments ?? []).filter((a) => a.status === "accepted").length;
   const sameDay = new Date(shift.startTime).toDateString() === new Date(shift.endTime).toDateString();
   return (
-    <div className={`flex items-center gap-3 px-4 py-2.5 ${indent ? "" : ""}`}>
+    <div
+      ref={focusRef as React.Ref<HTMLDivElement> | undefined}
+      className={`flex items-center gap-3 px-4 py-2.5${highlight ? " wcsg-deep-link-flash" : ""}`}
+    >
       <div className="flex-1 min-w-0">
         <div className="flex items-center gap-2 flex-wrap">
           <span className="font-medium truncate">{shift.title}</span>
