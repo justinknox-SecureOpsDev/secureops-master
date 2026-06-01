@@ -91,10 +91,15 @@ export default function PatrolScreen() {
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: colors.background }}>
       <View style={[styles.header, { borderBottomColor: colors.border }]}>
-        <TouchableOpacity onPress={() => router.back()} style={{ padding: 4 }}>
+        <TouchableOpacity
+          onPress={() => router.back()}
+          style={{ padding: 4 }}
+          accessibilityRole="button"
+          accessibilityLabel="Go back"
+        >
           <Feather name="chevron-left" size={22} color={colors.foreground} />
         </TouchableOpacity>
-        <Text style={[styles.headerTitle, { color: colors.foreground }]}>Patrol scan</Text>
+        <Text style={[styles.headerTitle, { color: colors.foreground }]} accessibilityRole="header">Patrol scan</Text>
         <View style={{ width: 30 }} />
       </View>
 
@@ -116,11 +121,16 @@ export default function PatrolScreen() {
             autoCorrect={false}
             style={[styles.input, { color: colors.foreground, borderColor: colors.border, marginTop: 10 }]}
             maxLength={32}
+            accessibilityLabel="Checkpoint code, required"
+            accessibilityHint="Type or paste the code printed on the QR or NFC tag"
           />
           <TouchableOpacity
             onPress={submit}
             disabled={submitting}
             style={[styles.submitBtn, { backgroundColor: colors.accent, opacity: submitting ? 0.6 : 1 }]}
+            accessibilityRole="button"
+            accessibilityLabel="Log scan"
+            accessibilityState={{ disabled: submitting, busy: submitting }}
           >
             {submitting ? (
               <ActivityIndicator color={colors.primary} />
@@ -129,15 +139,18 @@ export default function PatrolScreen() {
             )}
           </TouchableOpacity>
           {lastResult && (
-            <Text style={[styles.resultText, {
-              color: lastResult.startsWith("✓") ? "#22c55e" : "#ef4444",
-            }]}>
+            <Text
+              accessibilityLiveRegion="polite"
+              style={[styles.resultText, {
+                color: lastResult.startsWith("✓") ? "#22c55e" : "#ef4444",
+              }]}
+            >
               {lastResult}
             </Text>
           )}
         </View>
 
-        <Text style={[styles.sectionHeader, { color: colors.foreground }]}>Recent scans</Text>
+        <Text style={[styles.sectionHeader, { color: colors.foreground }]} accessibilityRole="header">Recent scans</Text>
         {scans === null ? (
           <ActivityIndicator color={colors.accent} style={{ marginTop: 16 }} />
         ) : scans.length === 0 ? (

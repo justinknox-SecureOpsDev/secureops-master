@@ -90,7 +90,12 @@ export default function ChangePasswordScreen() {
     <SafeAreaView style={[styles.container, { backgroundColor: colors.background }]}>
       <ScrollView contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled">
         {!isMandatory && (
-          <TouchableOpacity onPress={() => router.back()} style={styles.backRow}>
+          <TouchableOpacity
+            onPress={() => router.back()}
+            style={styles.backRow}
+            accessibilityRole="button"
+            accessibilityLabel="Go back"
+          >
             <Feather name="chevron-left" size={20} color={colors.foreground} />
             <Text style={{ color: colors.foreground }}>Back</Text>
           </TouchableOpacity>
@@ -98,7 +103,7 @@ export default function ChangePasswordScreen() {
 
         <View style={styles.header}>
           <Feather name="lock" size={28} color={colors.primary} />
-          <Text style={[styles.title, { color: colors.foreground }]}>
+          <Text style={[styles.title, { color: colors.foreground }]} accessibilityRole="header">
             {isMandatory ? "Set a new password" : "Change password"}
           </Text>
           {isMandatory && (
@@ -157,7 +162,13 @@ export default function ChangePasswordScreen() {
             accessibilityLabel={`Confirm new password, required${fieldErrors.confirm ? `, invalid, ${fieldErrors.confirm}` : ""}`}
           />
         </Field>
-        <TouchableOpacity onPress={() => setShow((s) => !s)} style={styles.toggleRow}>
+        <TouchableOpacity
+          onPress={() => setShow((s) => !s)}
+          style={styles.toggleRow}
+          accessibilityRole="switch"
+          accessibilityLabel="Show passwords"
+          accessibilityState={{ checked: show }}
+        >
           <Feather name={show ? "eye-off" : "eye"} size={14} color={colors.mutedForeground} />
           <Text style={{ color: colors.mutedForeground, fontSize: 12 }}>{show ? "Hide" : "Show"} passwords</Text>
         </TouchableOpacity>
@@ -166,6 +177,9 @@ export default function ChangePasswordScreen() {
           onPress={submit}
           disabled={mut.isPending}
           style={[styles.button, { backgroundColor: colors.primary, opacity: mut.isPending ? 0.7 : 1 }]}
+          accessibilityRole="button"
+          accessibilityLabel={isMandatory ? "Continue" : "Update password"}
+          accessibilityState={{ disabled: mut.isPending, busy: mut.isPending }}
         >
           {mut.isPending ? <ActivityIndicator color={colors.primaryForeground} /> : (
             <Text style={[styles.buttonText, { color: colors.primaryForeground }]}>

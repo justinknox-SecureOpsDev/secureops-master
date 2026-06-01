@@ -94,10 +94,15 @@ export default function DarScreen() {
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: colors.background }}>
       <View style={[styles.header, { borderBottomColor: colors.border }]}>
-        <TouchableOpacity onPress={() => router.back()} style={{ padding: 4 }}>
+        <TouchableOpacity
+          onPress={() => router.back()}
+          style={{ padding: 4 }}
+          accessibilityRole="button"
+          accessibilityLabel="Go back"
+        >
           <Feather name="chevron-left" size={22} color={colors.foreground} />
         </TouchableOpacity>
-        <Text style={[styles.headerTitle, { color: colors.foreground }]}>Daily Activity Report</Text>
+        <Text style={[styles.headerTitle, { color: colors.foreground }]} accessibilityRole="header">Daily Activity Report</Text>
         <View style={{ width: 30 }} />
       </View>
 
@@ -119,6 +124,8 @@ export default function DarScreen() {
               placeholder="What happened during your shift?"
               placeholderTextColor={colors.mutedForeground}
               style={[fieldStyle, { minHeight: 100, textAlignVertical: "top" }]}
+              accessibilityLabel="Summary, required"
+              accessibilityHint="Write at least a sentence summarizing your shift"
             />
 
             <Label color={colors.foreground}>Observations</Label>
@@ -128,16 +135,17 @@ export default function DarScreen() {
               placeholder="Anything notable — equipment, hazards, behavior…"
               placeholderTextColor={colors.mutedForeground}
               style={[fieldStyle, { minHeight: 70, textAlignVertical: "top" }]}
+              accessibilityLabel="Observations, optional"
             />
 
             <View style={{ flexDirection: "row", gap: 12 }}>
               <View style={{ flex: 1 }}>
                 <Label color={colors.foreground}>Visitors</Label>
-                <TextInput value={visitors} onChangeText={setVisitors} keyboardType="number-pad" style={fieldStyle} />
+                <TextInput value={visitors} onChangeText={setVisitors} keyboardType="number-pad" style={fieldStyle} accessibilityLabel="Number of visitors" />
               </View>
               <View style={{ flex: 1 }}>
                 <Label color={colors.foreground}>Patrols</Label>
-                <TextInput value={patrols} onChangeText={setPatrols} keyboardType="number-pad" style={fieldStyle} />
+                <TextInput value={patrols} onChangeText={setPatrols} keyboardType="number-pad" style={fieldStyle} accessibilityLabel="Number of patrols" />
               </View>
             </View>
 
@@ -148,6 +156,7 @@ export default function DarScreen() {
               placeholder="Brief note (file separate Incident reports as needed)"
               placeholderTextColor={colors.mutedForeground}
               style={[fieldStyle, { minHeight: 60, textAlignVertical: "top" }]}
+              accessibilityLabel="Incidents noted, optional"
             />
 
             <Label color={colors.foreground}>Weather</Label>
@@ -156,6 +165,7 @@ export default function DarScreen() {
               placeholder="Clear / Rain / Storm…"
               placeholderTextColor={colors.mutedForeground}
               style={fieldStyle}
+              accessibilityLabel="Weather, optional"
             />
 
             <Label color={colors.foreground}>Signature (type your name) *</Label>
@@ -164,12 +174,17 @@ export default function DarScreen() {
               placeholder="First Last"
               placeholderTextColor={colors.mutedForeground}
               style={fieldStyle}
+              accessibilityLabel="Signature, required"
+              accessibilityHint="Type your full name to sign off"
             />
 
             <TouchableOpacity
               onPress={submit}
               disabled={submitting}
               style={[styles.submitBtn, { backgroundColor: colors.accent, opacity: submitting ? 0.6 : 1 }]}
+              accessibilityRole="button"
+              accessibilityLabel="Submit report"
+              accessibilityState={{ disabled: submitting, busy: submitting }}
             >
               {submitting
                 ? <ActivityIndicator color={colors.primary} />
@@ -177,7 +192,7 @@ export default function DarScreen() {
             </TouchableOpacity>
           </View>
 
-          <Text style={[styles.sectionHeader, { color: colors.foreground }]}>My recent reports</Text>
+          <Text style={[styles.sectionHeader, { color: colors.foreground }]} accessibilityRole="header">My recent reports</Text>
           {rows === null ? (
             <ActivityIndicator color={colors.accent} style={{ marginTop: 16 }} />
           ) : rows.length === 0 ? (

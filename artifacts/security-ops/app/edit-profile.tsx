@@ -285,13 +285,18 @@ export default function EditProfileScreen() {
     <SafeAreaView style={[styles.container, { backgroundColor: colors.background }]}>
       <ScrollView contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled">
         {!isFirstRun && (
-          <TouchableOpacity onPress={() => router.back()} style={styles.backRow}>
+          <TouchableOpacity
+            onPress={() => router.back()}
+            style={styles.backRow}
+            accessibilityRole="button"
+            accessibilityLabel="Go back"
+          >
             <Feather name="chevron-left" size={20} color={colors.foreground} />
             <Text style={{ color: colors.foreground }}>Back</Text>
           </TouchableOpacity>
         )}
 
-        <Text style={[styles.title, { color: colors.foreground }]}>Edit profile</Text>
+        <Text style={[styles.title, { color: colors.foreground }]} accessibilityRole="header">Edit profile</Text>
         {isFirstRun && (
           <View style={[styles.banner, { backgroundColor: colors.primary + "15", borderColor: colors.primary }]}>
             <Feather name="info" size={16} color={colors.primary} />
@@ -336,8 +341,8 @@ export default function EditProfileScreen() {
         </Section>
 
         <Section title="Contact">
-          <Field label="Phone"><Input value={form.phone} onChangeText={(v) => set("phone", v)} /></Field>
-          <Field label="Address"><Input value={form.address} onChangeText={(v) => set("address", v)} multiline /></Field>
+          <Field label="Phone"><Input value={form.phone} onChangeText={(v) => set("phone", v)} accessibilityLabel="Phone" keyboardType="phone-pad" /></Field>
+          <Field label="Address"><Input value={form.address} onChangeText={(v) => set("address", v)} multiline accessibilityLabel="Address" /></Field>
         </Section>
 
         <Section title="Emergency contact">
@@ -371,16 +376,16 @@ export default function EditProfileScreen() {
         </Section>
 
         <Section title="Uniform sizes">
-          <Field label="Shirt"><Input value={form.uniformShirt} onChangeText={(v) => set("uniformShirt", v)} /></Field>
-          <Field label="Trousers"><Input value={form.uniformTrousers} onChangeText={(v) => set("uniformTrousers", v)} /></Field>
-          <Field label="Jacket"><Input value={form.uniformJacket} onChangeText={(v) => set("uniformJacket", v)} /></Field>
-          <Field label="Boots"><Input value={form.uniformBoots} onChangeText={(v) => set("uniformBoots", v)} /></Field>
+          <Field label="Shirt"><Input value={form.uniformShirt} onChangeText={(v) => set("uniformShirt", v)} accessibilityLabel="Shirt size" /></Field>
+          <Field label="Trousers"><Input value={form.uniformTrousers} onChangeText={(v) => set("uniformTrousers", v)} accessibilityLabel="Trousers size" /></Field>
+          <Field label="Jacket"><Input value={form.uniformJacket} onChangeText={(v) => set("uniformJacket", v)} accessibilityLabel="Jacket size" /></Field>
+          <Field label="Boots"><Input value={form.uniformBoots} onChangeText={(v) => set("uniformBoots", v)} accessibilityLabel="Boots size" /></Field>
         </Section>
 
         <Section title="Bank details">
-          <Field label="Account name"><Input value={form.bankAccountName} onChangeText={(v) => set("bankAccountName", v)} /></Field>
-          <Field label="Account number"><Input value={form.bankAccountNumber} onChangeText={(v) => set("bankAccountNumber", v)} keyboardType="number-pad" /></Field>
-          <Field label="Routing / sort code"><Input value={form.bankBsb} onChangeText={(v) => set("bankBsb", v)} /></Field>
+          <Field label="Account name"><Input value={form.bankAccountName} onChangeText={(v) => set("bankAccountName", v)} accessibilityLabel="Bank account name" /></Field>
+          <Field label="Account number"><Input value={form.bankAccountNumber} onChangeText={(v) => set("bankAccountNumber", v)} keyboardType="number-pad" accessibilityLabel="Bank account number" /></Field>
+          <Field label="Routing / sort code"><Input value={form.bankBsb} onChangeText={(v) => set("bankBsb", v)} accessibilityLabel="Routing or sort code" /></Field>
           <NotifiedNote />
         </Section>
 
@@ -445,6 +450,9 @@ export default function EditProfileScreen() {
                 onPress={() => handleUpload("trainingCertificateKeys", "camera")}
                 disabled={!!uploading}
                 style={[styles.docBtn, { borderColor: colors.primary, backgroundColor: colors.primary + "10", flex: 1 }]}
+                accessibilityRole="button"
+                accessibilityLabel="Take photo of training certificate"
+                accessibilityState={{ disabled: !!uploading, busy: uploading === "trainingCertificateKeys:camera" }}
               >
                 {uploading === "trainingCertificateKeys:camera" ? <ActivityIndicator color={colors.primary} /> : (
                   <>
@@ -457,6 +465,9 @@ export default function EditProfileScreen() {
                 onPress={() => handleUpload("trainingCertificateKeys", "library")}
                 disabled={!!uploading}
                 style={[styles.docBtn, { borderColor: colors.primary, backgroundColor: colors.primary + "10", flex: 1 }]}
+                accessibilityRole="button"
+                accessibilityLabel="Choose training certificate from library"
+                accessibilityState={{ disabled: !!uploading, busy: uploading === "trainingCertificateKeys:library" }}
               >
                 {uploading === "trainingCertificateKeys:library" ? <ActivityIndicator color={colors.primary} /> : (
                   <>
@@ -474,7 +485,7 @@ export default function EditProfileScreen() {
 
         <Section title="Skills">
           <Field label="Comma-separated">
-            <Input value={form.skills} onChangeText={(v) => set("skills", v)} placeholder="e.g. CPR, Crowd control, First aid" />
+            <Input value={form.skills} onChangeText={(v) => set("skills", v)} placeholder="e.g. CPR, Crowd control, First aid" accessibilityLabel="Skills, comma-separated" />
           </Field>
         </Section>
 
@@ -499,7 +510,14 @@ export default function EditProfileScreen() {
 
         <PreviewModal preview={preview} onClose={() => setPreview(null)} />
 
-        <TouchableOpacity onPress={save} disabled={mut.isPending} style={[styles.button, { backgroundColor: colors.primary, opacity: mut.isPending ? 0.7 : 1 }]}>
+        <TouchableOpacity
+          onPress={save}
+          disabled={mut.isPending}
+          style={[styles.button, { backgroundColor: colors.primary, opacity: mut.isPending ? 0.7 : 1 }]}
+          accessibilityRole="button"
+          accessibilityLabel={isFirstRun ? "Save and continue" : "Save changes"}
+          accessibilityState={{ disabled: mut.isPending, busy: mut.isPending }}
+        >
           {mut.isPending ? <ActivityIndicator color={colors.primaryForeground} /> : (
             <Text style={[styles.buttonText, { color: colors.primaryForeground }]}>{isFirstRun ? "Save and continue" : "Save changes"}</Text>
           )}
@@ -607,6 +625,9 @@ function DocRow({
             onPress={() => onUpload("camera")}
             disabled={busy}
             style={[styles.docBtn, { borderColor: colors.primary, backgroundColor: colors.primary + "10", flex: 1 }]}
+            accessibilityRole="button"
+            accessibilityLabel={`Take photo of ${label}`}
+            accessibilityState={{ disabled: busy, busy: uploadingSource === "camera" }}
           >
             {uploadingSource === "camera" ? <ActivityIndicator color={colors.primary} /> : (
               <>
@@ -619,6 +640,9 @@ function DocRow({
             onPress={() => onUpload("library")}
             disabled={busy}
             style={[styles.docBtn, { borderColor: colors.primary, backgroundColor: colors.primary + "10", flex: 1 }]}
+            accessibilityRole="button"
+            accessibilityLabel={`${hasFile ? "Replace" : "Choose from library"} ${label}`}
+            accessibilityState={{ disabled: busy, busy: uploadingSource === "library" }}
           >
             {uploadingSource === "library" ? <ActivityIndicator color={colors.primary} /> : (
               <>
@@ -630,7 +654,14 @@ function DocRow({
             )}
           </TouchableOpacity>
           {hasFile && (
-            <TouchableOpacity onPress={onClear} disabled={busy} style={[styles.docBtn, { borderColor: colors.border }]}>
+            <TouchableOpacity
+              onPress={onClear}
+              disabled={busy}
+              style={[styles.docBtn, { borderColor: colors.border }]}
+              accessibilityRole="button"
+              accessibilityLabel={`Remove ${label}`}
+              accessibilityState={{ disabled: busy }}
+            >
               <Feather name="x" size={14} color={colors.foreground} />
             </TouchableOpacity>
           )}
@@ -672,7 +703,12 @@ function CertRow({
         )}
       </Pressable>
       <Text style={{ flex: 1, color: colors.foreground, fontSize: 13 }} numberOfLines={1}>{label}</Text>
-      <TouchableOpacity onPress={onRemove} style={styles.certAction}>
+      <TouchableOpacity
+        onPress={onRemove}
+        style={styles.certAction}
+        accessibilityRole="button"
+        accessibilityLabel={`Remove ${label}`}
+      >
         <Feather name="trash-2" size={13} color={colors.destructive} />
         <Text style={{ color: colors.destructive, fontSize: 12, fontWeight: "600" }}>Remove</Text>
       </TouchableOpacity>
@@ -692,10 +728,15 @@ function PreviewModal({
       <Pressable onPress={onClose} style={styles.modalBackdrop}>
         <View style={styles.modalCard} pointerEvents="box-none">
           <View style={[styles.modalHeader, { backgroundColor: colors.card, borderColor: colors.border }]}>
-            <Text style={{ color: colors.foreground, fontWeight: "700", flex: 1 }} numberOfLines={1}>
+            <Text style={{ color: colors.foreground, fontWeight: "700", flex: 1 }} numberOfLines={1} accessibilityRole="header">
               {preview?.label ?? "Preview"}
             </Text>
-            <TouchableOpacity onPress={onClose} hitSlop={10}>
+            <TouchableOpacity
+              onPress={onClose}
+              hitSlop={10}
+              accessibilityRole="button"
+              accessibilityLabel="Close preview"
+            >
               <Feather name="x" size={20} color={colors.foreground} />
             </TouchableOpacity>
           </View>

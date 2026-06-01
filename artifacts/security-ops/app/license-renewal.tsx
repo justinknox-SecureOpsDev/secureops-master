@@ -187,10 +187,15 @@ export default function LicenseRenewalScreen() {
   return (
     <SafeAreaView style={[styles.container, { backgroundColor: colors.background }]} edges={["top"]}>
       <View style={[styles.header, { borderBottomColor: colors.border, paddingTop: topPad }]}>
-        <TouchableOpacity onPress={() => router.back()} style={styles.backBtn}>
+        <TouchableOpacity
+          onPress={() => router.back()}
+          style={styles.backBtn}
+          accessibilityRole="button"
+          accessibilityLabel="Go back"
+        >
           <Feather name="chevron-left" size={22} color={colors.foreground} />
         </TouchableOpacity>
-        <Text style={[styles.headerTitle, { color: colors.foreground }]}>License renewals</Text>
+        <Text style={[styles.headerTitle, { color: colors.foreground }]} accessibilityRole="header">License renewals</Text>
       </View>
 
       <ScrollView
@@ -200,7 +205,7 @@ export default function LicenseRenewalScreen() {
         {/* ----- History ----- */}
         {renewals && renewals.length > 0 && (
           <View>
-            <Text style={[styles.sectionTitle, { color: colors.foreground }]}>Your submissions</Text>
+            <Text style={[styles.sectionTitle, { color: colors.foreground }]} accessibilityRole="header">Your submissions</Text>
             <View style={{ gap: 8, marginTop: 8 }}>
               {renewals.map((r) => {
                 const sc = STATUS_COLOR[r.status];
@@ -232,7 +237,7 @@ export default function LicenseRenewalScreen() {
 
         {/* ----- New submission ----- */}
         <View>
-          <Text style={[styles.sectionTitle, { color: colors.foreground }]}>Submit a renewal</Text>
+          <Text style={[styles.sectionTitle, { color: colors.foreground }]} accessibilityRole="header">Submit a renewal</Text>
           <Text style={[styles.help, { color: colors.mutedForeground }]}>
             Pick the license you renewed (or "New license"), enter the new details, attach a photo of the renewed card, and submit for admin review.
           </Text>
@@ -249,6 +254,10 @@ export default function LicenseRenewalScreen() {
                     borderColor: picked ? colors.primary : colors.border,
                     backgroundColor: picked ? colors.primary + "15" : colors.card,
                   }]}
+                  accessibilityRole="button"
+                  accessibilityLabel={`${l.type}${l.level != null ? `, level ${l.level}` : ""}, number ${l.licenseNumber}, expires ${l.expiryDate}`}
+                  accessibilityHint="Select this license to renew"
+                  accessibilityState={{ selected: picked }}
                 >
                   <View style={{ flex: 1 }}>
                     <Text style={[styles.licType, { color: colors.foreground }]}>
@@ -269,6 +278,10 @@ export default function LicenseRenewalScreen() {
                 backgroundColor: renewLicenseId === "new" ? colors.primary + "15" : colors.card,
                 borderStyle: "dashed",
               }]}
+              accessibilityRole="button"
+              accessibilityLabel="New license"
+              accessibilityHint="Add a license that is not in your list"
+              accessibilityState={{ selected: renewLicenseId === "new" }}
             >
               <Feather name="plus-circle" size={16} color={colors.primary} />
               <Text style={[styles.licType, { color: colors.foreground, marginLeft: 8 }]}>New license</Text>
@@ -301,6 +314,9 @@ export default function LicenseRenewalScreen() {
                         borderColor: picked ? colors.primary : colors.border,
                         backgroundColor: picked ? colors.primary + "20" : "transparent",
                       }]}
+                      accessibilityRole="button"
+                      accessibilityLabel={opt.label}
+                      accessibilityState={{ selected: picked }}
                     >
                       <Text style={{ color: colors.foreground, fontSize: 12, fontWeight: picked ? "700" : "500" }}>
                         {opt.label}
@@ -323,7 +339,11 @@ export default function LicenseRenewalScreen() {
                     <Text style={{ color: colors.foreground, fontSize: 12, fontWeight: "600" }} numberOfLines={1}>{uploaded.name}</Text>
                     <Text style={{ color: colors.mutedForeground, fontSize: 11 }}>{Math.round(uploaded.size / 1024)} KB</Text>
                   </View>
-                  <TouchableOpacity onPress={() => setUploaded(null)}>
+                  <TouchableOpacity
+                    onPress={() => setUploaded(null)}
+                    accessibilityRole="button"
+                    accessibilityLabel="Remove attached photo"
+                  >
                     <Feather name="x" size={16} color={colors.destructive} />
                   </TouchableOpacity>
                 </View>
@@ -333,6 +353,9 @@ export default function LicenseRenewalScreen() {
                     onPress={() => pickPhoto("camera")}
                     disabled={uploading}
                     style={[styles.uploadBtn, { borderColor: colors.border, opacity: uploading ? 0.6 : 1 }]}
+                    accessibilityRole="button"
+                    accessibilityLabel="Take photo of renewed license with camera"
+                    accessibilityState={{ disabled: uploading, busy: uploading }}
                   >
                     {uploading ? <ActivityIndicator size="small" color={colors.primary} /> : <Feather name="camera" size={16} color={colors.primary} />}
                     <Text style={{ color: colors.foreground, fontSize: 13, marginLeft: 6 }}>Camera</Text>
@@ -341,6 +364,9 @@ export default function LicenseRenewalScreen() {
                     onPress={() => pickPhoto("library")}
                     disabled={uploading}
                     style={[styles.uploadBtn, { borderColor: colors.border, opacity: uploading ? 0.6 : 1 }]}
+                    accessibilityRole="button"
+                    accessibilityLabel="Choose photo of renewed license from library"
+                    accessibilityState={{ disabled: uploading, busy: uploading }}
                   >
                     {uploading ? <ActivityIndicator size="small" color={colors.primary} /> : <Feather name="image" size={16} color={colors.primary} />}
                     <Text style={{ color: colors.foreground, fontSize: 13, marginLeft: 6 }}>Library</Text>
@@ -352,6 +378,9 @@ export default function LicenseRenewalScreen() {
                 onPress={submit}
                 disabled={submitting}
                 style={[styles.submitBtn, { backgroundColor: colors.primary, opacity: submitting ? 0.6 : 1 }]}
+                accessibilityRole="button"
+                accessibilityLabel="Submit renewal for review"
+                accessibilityState={{ disabled: submitting, busy: submitting }}
               >
                 {submitting ? <ActivityIndicator color="#fff" /> : <Feather name="upload" size={16} color="#fff" />}
                 <Text style={[styles.submitText, { color: "#fff" }]}>
@@ -379,6 +408,7 @@ function Field({ label, value, onChange, colors, placeholder, multiline }: {
         placeholder={placeholder}
         placeholderTextColor={colors.mutedForeground}
         multiline={multiline}
+        accessibilityLabel={label}
         style={[styles.input, {
           color: colors.foreground,
           backgroundColor: colors.card,

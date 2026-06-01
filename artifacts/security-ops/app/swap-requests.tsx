@@ -146,6 +146,10 @@ export default function SwapRequestsScreen() {
               style={[styles.btn, { backgroundColor: "#22c55e", opacity: busyId === item.id ? 0.6 : 1 }]}
               onPress={() => respond(item, "accepted")}
               disabled={busyId === item.id}
+              accessibilityRole="button"
+              accessibilityLabel={`Accept swap for ${item.siteName ?? "shift"}`}
+              accessibilityHint="If admin approves, this shift becomes yours"
+              accessibilityState={{ disabled: busyId === item.id, busy: busyId === item.id }}
             >
               <Feather name="check" size={14} color="#fff" />
               <Text style={[styles.btnText, { color: "#fff" }]}>Accept</Text>
@@ -154,6 +158,10 @@ export default function SwapRequestsScreen() {
               style={[styles.btn, { borderWidth: 1.5, borderColor: colors.destructive, opacity: busyId === item.id ? 0.6 : 1 }]}
               onPress={() => respond(item, "declined")}
               disabled={busyId === item.id}
+              accessibilityRole="button"
+              accessibilityLabel={`Decline swap for ${item.siteName ?? "shift"}`}
+              accessibilityHint="The requester will be notified"
+              accessibilityState={{ disabled: busyId === item.id, busy: busyId === item.id }}
             >
               <Feather name="x" size={14} color={colors.destructive} />
               <Text style={[styles.btnText, { color: colors.destructive }]}>Decline</Text>
@@ -166,6 +174,10 @@ export default function SwapRequestsScreen() {
             style={[styles.btn, { borderWidth: 1.5, borderColor: colors.destructive, marginTop: 10, opacity: busyId === item.id ? 0.6 : 1 }]}
             onPress={() => cancel(item)}
             disabled={busyId === item.id}
+            accessibilityRole="button"
+            accessibilityLabel={`Cancel your swap request for ${item.siteName ?? "shift"}`}
+            accessibilityHint="Your shift stays assigned to you"
+            accessibilityState={{ disabled: busyId === item.id, busy: busyId === item.id }}
           >
             <Feather name="x" size={14} color={colors.destructive} />
             <Text style={[styles.btnText, { color: colors.destructive }]}>Cancel request</Text>
@@ -184,10 +196,15 @@ export default function SwapRequestsScreen() {
   return (
     <SafeAreaView style={[styles.container, { backgroundColor: colors.background }]} edges={["top"]}>
       <View style={[styles.header, { borderBottomColor: colors.border, paddingTop: topPad }]}>
-        <TouchableOpacity onPress={() => router.back()} style={styles.backBtn}>
+        <TouchableOpacity
+          onPress={() => router.back()}
+          style={styles.backBtn}
+          accessibilityRole="button"
+          accessibilityLabel="Go back"
+        >
           <Feather name="chevron-left" size={22} color={colors.foreground} />
         </TouchableOpacity>
-        <Text style={[styles.title, { color: colors.foreground, fontSize: 18 }]}>Shift Swaps</Text>
+        <Text style={[styles.title, { color: colors.foreground, fontSize: 18 }]} accessibilityRole="header">Shift Swaps</Text>
       </View>
       {loading ? (
         <View style={styles.center}><ActivityIndicator color={colors.primary} /></View>

@@ -51,32 +51,44 @@ export default function AddTrainingScreen() {
   return (
     <ScrollView style={{ flex: 1, backgroundColor: colors.background }} contentContainerStyle={{ paddingTop: topPad + 16, padding: 16, paddingBottom: 80 }}>
       <View style={{ flexDirection: "row", alignItems: "center", marginBottom: 16 }}>
-        <TouchableOpacity onPress={() => router.back()} style={{ padding: 6, marginRight: 6 }}>
+        <TouchableOpacity
+          onPress={() => router.back()}
+          style={{ padding: 6, marginRight: 6 }}
+          accessibilityRole="button"
+          accessibilityLabel="Go back"
+        >
           <Feather name="arrow-left" size={20} color={colors.foreground} />
         </TouchableOpacity>
-        <Text style={{ color: colors.foreground, fontSize: 20, fontWeight: "700" }}>Add training certificate</Text>
+        <Text style={{ color: colors.foreground, fontSize: 20, fontWeight: "700" }} accessibilityRole="header">Add training certificate</Text>
       </View>
 
       <Text style={[styles.label, { color: colors.mutedForeground }]}>Title</Text>
-      <TextInput value={title} onChangeText={setTitle} placeholder="e.g. CPR/AED 2-year" placeholderTextColor={colors.mutedForeground} style={[styles.input, { color: colors.foreground, borderColor: colors.border, backgroundColor: colors.card }]} />
+      <TextInput value={title} onChangeText={setTitle} placeholder="e.g. CPR/AED 2-year" placeholderTextColor={colors.mutedForeground} style={[styles.input, { color: colors.foreground, borderColor: colors.border, backgroundColor: colors.card }]} accessibilityLabel="Title, required" />
 
       <Text style={[styles.label, { color: colors.mutedForeground }]}>Type / slug</Text>
-      <TextInput value={type} onChangeText={setType} autoCapitalize="none" placeholder="e.g. cpr, first_aid, fire_safety" placeholderTextColor={colors.mutedForeground} style={[styles.input, { color: colors.foreground, borderColor: colors.border, backgroundColor: colors.card }]} />
+      <TextInput value={type} onChangeText={setType} autoCapitalize="none" placeholder="e.g. cpr, first_aid, fire_safety" placeholderTextColor={colors.mutedForeground} style={[styles.input, { color: colors.foreground, borderColor: colors.border, backgroundColor: colors.card }]} accessibilityLabel="Type or slug, required" accessibilityHint="Lowercase, no spaces. Sites match required training by this slug" />
       <Text style={[styles.help, { color: colors.mutedForeground }]}>Sites match required training by this slug. Lowercase, no spaces.</Text>
 
       <Text style={[styles.label, { color: colors.mutedForeground }]}>Issuing authority (optional)</Text>
-      <TextInput value={issuingAuthority} onChangeText={setIssuingAuthority} placeholder="e.g. Red Cross" placeholderTextColor={colors.mutedForeground} style={[styles.input, { color: colors.foreground, borderColor: colors.border, backgroundColor: colors.card }]} />
+      <TextInput value={issuingAuthority} onChangeText={setIssuingAuthority} placeholder="e.g. Red Cross" placeholderTextColor={colors.mutedForeground} style={[styles.input, { color: colors.foreground, borderColor: colors.border, backgroundColor: colors.card }]} accessibilityLabel="Issuing authority, optional" />
 
       <Text style={[styles.label, { color: colors.mutedForeground }]}>Certificate # (optional)</Text>
-      <TextInput value={certificateNumber} onChangeText={setCertificateNumber} placeholderTextColor={colors.mutedForeground} style={[styles.input, { color: colors.foreground, borderColor: colors.border, backgroundColor: colors.card }]} />
+      <TextInput value={certificateNumber} onChangeText={setCertificateNumber} placeholderTextColor={colors.mutedForeground} style={[styles.input, { color: colors.foreground, borderColor: colors.border, backgroundColor: colors.card }]} accessibilityLabel="Certificate number, optional" />
 
       <Text style={[styles.label, { color: colors.mutedForeground }]}>Issued (YYYY-MM-DD, optional)</Text>
-      <TextInput value={issueDate} onChangeText={setIssueDate} placeholder="2025-01-15" placeholderTextColor={colors.mutedForeground} autoCapitalize="none" style={[styles.input, { color: colors.foreground, borderColor: colors.border, backgroundColor: colors.card }]} />
+      <TextInput value={issueDate} onChangeText={setIssueDate} placeholder="2025-01-15" placeholderTextColor={colors.mutedForeground} autoCapitalize="none" style={[styles.input, { color: colors.foreground, borderColor: colors.border, backgroundColor: colors.card }]} accessibilityLabel="Issue date, optional" accessibilityHint="Format: year, month, day" />
 
       <Text style={[styles.label, { color: colors.mutedForeground }]}>Expires (YYYY-MM-DD, leave blank if perpetual)</Text>
-      <TextInput value={expiryDate} onChangeText={setExpiryDate} placeholder="2027-01-15" placeholderTextColor={colors.mutedForeground} autoCapitalize="none" style={[styles.input, { color: colors.foreground, borderColor: colors.border, backgroundColor: colors.card }]} />
+      <TextInput value={expiryDate} onChangeText={setExpiryDate} placeholder="2027-01-15" placeholderTextColor={colors.mutedForeground} autoCapitalize="none" style={[styles.input, { color: colors.foreground, borderColor: colors.border, backgroundColor: colors.card }]} accessibilityLabel="Expiry date, optional" accessibilityHint="Format: year, month, day. Leave blank if perpetual" />
 
-      <TouchableOpacity onPress={submit} disabled={busy} style={[styles.submit, { backgroundColor: colors.primary, opacity: busy ? 0.6 : 1 }]}>
+      <TouchableOpacity
+        onPress={submit}
+        disabled={busy}
+        style={[styles.submit, { backgroundColor: colors.primary, opacity: busy ? 0.6 : 1 }]}
+        accessibilityRole="button"
+        accessibilityLabel="Save certificate"
+        accessibilityState={{ disabled: busy, busy }}
+      >
         {busy ? <ActivityIndicator color="#fff" /> : <Text style={{ color: "#fff", fontWeight: "700" }}>Save certificate</Text>}
       </TouchableOpacity>
     </ScrollView>

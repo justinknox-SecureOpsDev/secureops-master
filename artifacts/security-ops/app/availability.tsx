@@ -143,10 +143,15 @@ export default function AvailabilityScreen() {
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: colors.background }}>
       <View style={[styles.header, { borderBottomColor: colors.border }]}>
-        <TouchableOpacity onPress={() => router.back()} style={{ padding: 4 }}>
+        <TouchableOpacity
+          onPress={() => router.back()}
+          style={{ padding: 4 }}
+          accessibilityRole="button"
+          accessibilityLabel="Go back"
+        >
           <Feather name="chevron-left" size={22} color={colors.foreground} />
         </TouchableOpacity>
-        <Text style={[styles.headerTitle, { color: colors.foreground }]}>My availability</Text>
+        <Text style={[styles.headerTitle, { color: colors.foreground }]} accessibilityRole="header">My availability</Text>
         <View style={{ width: 30 }} />
       </View>
 
@@ -168,6 +173,8 @@ export default function AvailabilityScreen() {
             placeholderTextColor={colors.mutedForeground}
             keyboardType="number-pad"
             style={[styles.input, { color: colors.foreground, borderColor: colors.border }]}
+            accessibilityLabel="Max hours per week, optional"
+            accessibilityHint="Suggested shifts will skip anything that would push you over this cap"
           />
           <Text style={[styles.helperText, { color: colors.mutedForeground, marginTop: 6 }]}>
             Suggested shifts will skip anything that would push you over this cap.
@@ -181,8 +188,13 @@ export default function AvailabilityScreen() {
           return (
             <View key={day} style={[styles.card, { backgroundColor: colors.card, borderColor: colors.border }]}>
               <View style={styles.dayHeader}>
-                <Text style={[styles.dayTitle, { color: colors.foreground }]}>{label}</Text>
-                <TouchableOpacity onPress={() => addWindow(day)} style={[styles.addBtn, { borderColor: colors.accent }]}>
+                <Text style={[styles.dayTitle, { color: colors.foreground }]} accessibilityRole="header">{label}</Text>
+                <TouchableOpacity
+                  onPress={() => addWindow(day)}
+                  style={[styles.addBtn, { borderColor: colors.accent }]}
+                  accessibilityRole="button"
+                  accessibilityLabel={`Add availability window for ${label}`}
+                >
                   <Feather name="plus" size={14} color={colors.accent} />
                   <Text style={{ color: colors.accent, fontWeight: "600", fontSize: 12 }}>Add window</Text>
                 </TouchableOpacity>
@@ -199,6 +211,8 @@ export default function AvailabilityScreen() {
                       placeholderTextColor={colors.mutedForeground}
                       style={[styles.timeInput, { color: colors.foreground, borderColor: colors.border }]}
                       maxLength={5}
+                      accessibilityLabel={`${label} start time`}
+                      accessibilityHint="24-hour format, hours and minutes"
                     />
                     <Text style={{ color: colors.mutedForeground }}>to</Text>
                     <TextInput
@@ -208,8 +222,15 @@ export default function AvailabilityScreen() {
                       placeholderTextColor={colors.mutedForeground}
                       style={[styles.timeInput, { color: colors.foreground, borderColor: colors.border }]}
                       maxLength={5}
+                      accessibilityLabel={`${label} end time`}
+                      accessibilityHint="24-hour format, hours and minutes"
                     />
-                    <TouchableOpacity onPress={() => removeWindow(w._idx)} style={{ padding: 6 }}>
+                    <TouchableOpacity
+                      onPress={() => removeWindow(w._idx)}
+                      style={{ padding: 6 }}
+                      accessibilityRole="button"
+                      accessibilityLabel={`Remove ${label} window ${w.startTime} to ${w.endTime}`}
+                    >
                       <Feather name="trash-2" size={16} color="#ef4444" />
                     </TouchableOpacity>
                   </View>
@@ -223,6 +244,9 @@ export default function AvailabilityScreen() {
           onPress={save}
           disabled={saving}
           style={[styles.saveBtn, { backgroundColor: colors.accent, opacity: saving ? 0.6 : 1 }]}
+          accessibilityRole="button"
+          accessibilityLabel="Save availability"
+          accessibilityState={{ disabled: saving, busy: saving }}
         >
           {saving ? (
             <ActivityIndicator color={colors.primary} />
@@ -231,7 +255,7 @@ export default function AvailabilityScreen() {
           )}
         </TouchableOpacity>
 
-        <Text style={[styles.sectionHeader, { color: colors.foreground }]}>Suggested shifts</Text>
+        <Text style={[styles.sectionHeader, { color: colors.foreground }]} accessibilityRole="header">Suggested shifts</Text>
         <Text style={[styles.helperText, { color: colors.mutedForeground, marginBottom: 8 }]}>
           Open shifts in the next 14 days that fit your windows and your license.
         </Text>
@@ -250,6 +274,9 @@ export default function AvailabilityScreen() {
               key={s.id}
               onPress={() => router.push("/(employee)/shifts" as any)}
               style={[styles.card, { backgroundColor: colors.card, borderColor: colors.border }]}
+              accessibilityRole="button"
+              accessibilityLabel={`${s.title}${s.siteName ? `, ${s.siteName}` : ""}, ${fmtDate(s.startTime)}, level ${s.requiredLicenseLevel} required, $${Number(s.payRate).toFixed(2)} per hour`}
+              accessibilityHint="Opens the Shifts tab to claim"
             >
               <Text style={{ color: colors.foreground, fontWeight: "700", fontSize: 14 }}>{s.title}</Text>
               {s.siteName ? (
