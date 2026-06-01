@@ -208,10 +208,15 @@ describe("dispatch status-board bucketing", () => {
     const HOUR = 60 * 60 * 1000;
     const MIN = 60 * 1000;
 
-    // scheduled: starts in 4h, no clock-in yet
+    // scheduled: started a couple minutes ago (well within LATE_MIN=10) so
+    // it is always inside the status-board's today / currently-running
+    // window regardless of wall-clock time, yet not yet "late". A future
+    // start (e.g. +4h) is flaky: run late in the day it crosses midnight
+    // and falls outside the board's [startOfDay, endOfDay] window, so the
+    // shift never appears in any bucket.
     const scheduledShift = await insertShift({
       title: `${TAG}-bucket-scheduled`,
-      start: new Date(now + 4 * HOUR),
+      start: new Date(now - 2 * MIN),
       end: new Date(now + 8 * HOUR),
     });
     // late: started 20 min ago (>LATE_MIN=10), no clock-in

@@ -232,14 +232,16 @@ describe("Pay Run lifecycle (pending → processed → paid)", () => {
     expect(unbankedRow.status).toBe("pending"); // untouched
 
     // ----- Step 3: re-export is idempotent (no second processing) -----
-    // The route still issues a 200 with a fresh CSV body, but the
-    // UPDATE has `status='pending'` in its WHERE clause, so the banked
-    // row's batchReference / paidBy must remain unchanged.
+    // Re-exporting the same ids finds nothing payable: the banked row is
+    // already `processed` (excluded so we never emit a duplicate payment
+    // line) and the unbanked row still carries warnings. The route refuses
+    // with 400, and crucially the banked row's batchReference / status must
+    // remain exactly as the first export left them.
     const csv2 = await request(app)
       .post("/api/payroll/pay-run/export-csv")
       .set(authed(ctx.adminToken))
       .send({ ids, batchReference: `${TAG}-SECOND` });
-    expect(csv2.status).toBe(200);
+    expect(csv2.status).toBe(400);
     const [stillProcessed] = await db
       .select({
         status: payrollEntriesTable.status,

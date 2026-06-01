@@ -98,8 +98,10 @@ beforeAll(async () => {
   const shiftStart = new Date(weekStart.getTime() + 2 * 86400_000 + 9 * 3600_000);
   const shiftEnd = new Date(shiftStart.getTime() + 8 * 3600_000);
 
-  // Rated shift: shifts.billRate also set, but the route should pick the
-  // site rate ($42) over the shift rate ($99) — we assert on $42 below.
+  // Rated shift has NO bill rate of its own (0), so invoice generation must
+  // fall through to the site's defaultBillRate ($42) per the documented
+  // shifts.billRate -> sites.defaultBillRate priority chain — we assert on
+  // $42 below.
   const [ratedShift] = await db
     .insert(shiftsTable)
     .values({
@@ -111,7 +113,7 @@ beforeAll(async () => {
       headcount: 1,
       status: "completed",
       payRate: "25.00",
-      billRate: "99.00",
+      billRate: "0",
     })
     .returning({ id: shiftsTable.id });
   ctx.ratedShiftId = ratedShift.id;
@@ -173,7 +175,7 @@ function authed(token: string) {
 }
 
 describe("POST /invoices/generate", () => {
-  it("builds a draft invoice using the site's defaultBillRate (not shift billRate)", async () => {
+  it("builds a draft invoice using the site's defaultBillRate when the shift has no bill rate", async () => {
     const weekStart = previousMondayISO();
     const res = await request(app)
       .post("/api/invoices/generate")
@@ -187,7 +189,8 @@ describe("POST /invoices/generate", () => {
     expect(Array.isArray(res.body.lineItems)).toBe(true);
     expect(res.body.lineItems.length).toBe(1);
     const line = res.body.lineItems[0];
-    // Site rate ($42) wins over shift billRate ($99). 8h * $42 = $336.
+    // Shift carries no bill rate, so the site's defaultBillRate ($42) is
+    // used. 8h * $42 = $336.
     expect(line.rate).toBe(42);
     expect(line.hours).toBe(8);
     expect(line.amount).toBe(336);

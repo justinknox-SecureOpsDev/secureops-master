@@ -7,3 +7,4 @@
 - [Upload MIME octet-stream fallback](upload-mime-octet-stream.md) — browser sends octet-stream for .doc/.docx → 415; client+server derive MIME from extension; raw parser needs type:()=>true.
 - [Drizzle date vs timestamp coercion](drizzle-date-vs-timestamp-coercion.md) — pg `date` cols want ISO strings, `timestamp` cols want Date objects; only coerce timestamps in admin CRUD.
 - [Pay-run export atomic-claim](pay-run-export-atomic-claim.md) — AP/pay-run CSV rows must come from UPDATE…RETURNING claim (status=approved only), not read-then-update, or you double-pay.
+- [api-server suite WS broadcast flake](api-server-ws-broadcast-flake.md) — wsBroadcast.test.ts passes alone but flakes under full parallel run (500ms collectFor window starved by load); not a regression.
