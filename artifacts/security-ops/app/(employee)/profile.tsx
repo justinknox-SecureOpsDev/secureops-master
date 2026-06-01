@@ -134,8 +134,14 @@ function MyTrainingSection() {
   return (
     <View style={[styles.section, { backgroundColor: colors.card, borderColor: colors.border }]}>
       <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between" }}>
-        <Text style={[styles.sectionTitle, { color: colors.accent }]}>MY TRAINING ({items?.length ?? 0})</Text>
-        <TouchableOpacity onPress={() => router.push("/training-add" as any)} style={{ flexDirection: "row", alignItems: "center", gap: 4 }}>
+        <Text style={[styles.sectionTitle, { color: colors.accent }]} accessibilityRole="header">MY TRAINING ({items?.length ?? 0})</Text>
+        <TouchableOpacity
+          onPress={() => router.push("/training-add" as any)}
+          style={{ flexDirection: "row", alignItems: "center", gap: 4 }}
+          accessibilityRole="button"
+          accessibilityLabel="Add training certificate"
+          accessibilityHint="Opens the form to upload a training certificate"
+        >
           <Feather name="plus" size={14} color={colors.primary} />
           <Text style={{ color: colors.primary, fontSize: 12, fontWeight: "600" }}>Add</Text>
         </TouchableOpacity>
@@ -578,6 +584,8 @@ export default function EmployeeProfileScreen() {
         <TouchableOpacity
           onPress={() => router.push("/edit-profile" as any)}
           style={[styles.actionRow, { borderBottomColor: colors.border }]}
+          accessibilityRole="button"
+          accessibilityLabel="Edit profile"
         >
           <Feather name="edit-3" size={16} color={colors.primary} />
           <Text style={{ color: colors.foreground, flex: 1, fontSize: 14, fontWeight: "600" }}>Edit profile</Text>
@@ -586,6 +594,9 @@ export default function EmployeeProfileScreen() {
         <TouchableOpacity
           onPress={() => Linking.openURL(mailtoCorrection).catch(() => Alert.alert("Email unavailable", "Could not open your email app. Please contact HR directly."))}
           style={[styles.actionRow, { borderBottomColor: colors.border }]}
+          accessibilityRole="button"
+          accessibilityLabel="Request a correction"
+          accessibilityHint="Emails HR to fix anything you can't edit yourself"
         >
           <Feather name="alert-circle" size={16} color={colors.accent} />
           <View style={{ flex: 1 }}>
@@ -616,6 +627,9 @@ export default function EmployeeProfileScreen() {
             }
           }}
           style={[styles.actionRow, { borderBottomColor: colors.border }]}
+          accessibilityRole="button"
+          accessibilityLabel="Download my profile as PDF"
+          accessibilityHint="Branded summary you can share or keep, with banking masked"
         >
           <Feather name="download" size={16} color={colors.accent} />
           <View style={{ flex: 1 }}>
@@ -629,6 +643,9 @@ export default function EmployeeProfileScreen() {
         <TouchableOpacity
           onPress={() => router.push("/paystubs" as any)}
           style={[styles.actionRow, { borderBottomColor: colors.border }]}
+          accessibilityRole="button"
+          accessibilityLabel="My paystubs"
+          accessibilityHint="View pay history and year-to-date totals"
         >
           <Feather name="dollar-sign" size={16} color={colors.accent} />
           <View style={{ flex: 1 }}>
@@ -642,6 +659,9 @@ export default function EmployeeProfileScreen() {
         <TouchableOpacity
           onPress={() => router.push("/swap-requests" as any)}
           style={[styles.actionRow, { borderBottomColor: colors.border }]}
+          accessibilityRole="button"
+          accessibilityLabel="Shift swaps"
+          accessibilityHint="See and respond to swap requests"
         >
           <Feather name="repeat" size={16} color={colors.accent} />
           <View style={{ flex: 1 }}>
@@ -655,6 +675,9 @@ export default function EmployeeProfileScreen() {
         <TouchableOpacity
           onPress={() => router.push("/dar" as any)}
           style={[styles.actionRow, { borderBottomColor: colors.border }]}
+          accessibilityRole="button"
+          accessibilityLabel="Daily activity report"
+          accessibilityHint="File or review your end-of-shift summaries"
         >
           <Feather name="clipboard" size={16} color={colors.accent} />
           <View style={{ flex: 1 }}>
@@ -668,6 +691,9 @@ export default function EmployeeProfileScreen() {
         <TouchableOpacity
           onPress={() => router.push("/patrol" as any)}
           style={[styles.actionRow, { borderBottomColor: colors.border }]}
+          accessibilityRole="button"
+          accessibilityLabel="Patrol scan"
+          accessibilityHint="Scan checkpoint codes during rounds"
         >
           <Feather name="map-pin" size={16} color={colors.accent} />
           <View style={{ flex: 1 }}>
@@ -681,6 +707,9 @@ export default function EmployeeProfileScreen() {
         <TouchableOpacity
           onPress={() => router.push("/availability" as any)}
           style={[styles.actionRow, { borderBottomColor: colors.border }]}
+          accessibilityRole="button"
+          accessibilityLabel="My availability"
+          accessibilityHint="Set weekly hours and see matching open shifts"
         >
           <Feather name="calendar" size={16} color={colors.accent} />
           <View style={{ flex: 1 }}>
@@ -694,6 +723,9 @@ export default function EmployeeProfileScreen() {
         <TouchableOpacity
           onPress={() => router.push("/license-renewal" as any)}
           style={[styles.actionRow, { borderBottomColor: colors.border }]}
+          accessibilityRole="button"
+          accessibilityLabel="License renewals"
+          accessibilityHint="Submit a renewed license for admin approval"
         >
           <Feather name="credit-card" size={16} color={colors.accent} />
           <View style={{ flex: 1 }}>
@@ -708,6 +740,9 @@ export default function EmployeeProfileScreen() {
           onPress={openTour}
           style={[styles.actionRow, { borderBottomColor: colors.border }]}
           testID="profile-replay-tour"
+          accessibilityRole="button"
+          accessibilityLabel="Show me the app tour again"
+          accessibilityHint="Quick walkthrough of Home, Shifts, Clock, Incidents, and Chat"
         >
           <Feather name="compass" size={16} color={colors.accent} />
           <View style={{ flex: 1 }}>
@@ -721,6 +756,8 @@ export default function EmployeeProfileScreen() {
         <TouchableOpacity
           onPress={() => router.push({ pathname: "/change-password" as any, params: { mode: "self" } })}
           style={[styles.actionRow, { borderBottomColor: colors.border }]}
+          accessibilityRole="button"
+          accessibilityLabel="Change password"
         >
           <Feather name="lock" size={16} color={colors.primary} />
           <Text style={{ color: colors.foreground, flex: 1, fontSize: 14, fontWeight: "600" }}>Change password</Text>

@@ -235,7 +235,7 @@ export default function EmployeeShiftsScreen() {
     <View style={[styles.container, { backgroundColor: colors.background }]}>
       <View style={[styles.topBar, { paddingTop: topPad + 12, borderBottomColor: colors.border }]}>
         <View style={{ flex: 1 }}>
-          <Text style={[styles.pageTitle, { color: colors.foreground }]}>Shifts</Text>
+          <Text style={[styles.pageTitle, { color: colors.foreground }]} accessibilityRole="header">Shifts</Text>
           <View style={{ flexDirection: "row", alignItems: "center", gap: 6, marginTop: 4 }}>
             <Feather name="award" size={11} color={colors.mutedForeground} />
             <Text style={{ color: colors.mutedForeground, fontSize: 11 }}>
@@ -248,6 +248,9 @@ export default function EmployeeShiftsScreen() {
       {!myMaxLevel && !isSupportStaff && myEmployee && (
         <TouchableOpacity
           onPress={() => router.push("/edit-profile")}
+          accessibilityRole="button"
+          accessibilityLabel="No active TX security licence on file. You can't claim shifts until admin verifies your licence. Tap to upload a photo of your card or contact admin."
+          accessibilityHint="Opens your profile to upload a licence"
           style={{
             margin: 12, padding: 12, borderRadius: 10, borderWidth: 1,
             borderColor: colors.accent, backgroundColor: colors.accent + "15",
@@ -267,16 +270,23 @@ export default function EmployeeShiftsScreen() {
         </TouchableOpacity>
       )}
 
-      <View style={styles.filterRow}>
-        {FILTERS.map((f) => (
-          <TouchableOpacity
-            key={f}
-            style={[styles.filterChip, { borderColor: filter === f ? colors.primary : colors.border, backgroundColor: filter === f ? colors.primary + "20" : "transparent" }]}
-            onPress={() => setFilter(f)}
-          >
-            <Text style={[styles.filterText, { color: filter === f ? colors.primary : colors.mutedForeground }]}>{f.charAt(0).toUpperCase() + f.slice(1)}</Text>
-          </TouchableOpacity>
-        ))}
+      <View style={styles.filterRow} accessibilityRole="tablist">
+        {FILTERS.map((f) => {
+          const selected = filter === f;
+          const fLabel = f.charAt(0).toUpperCase() + f.slice(1);
+          return (
+            <TouchableOpacity
+              key={f}
+              style={[styles.filterChip, { borderColor: selected ? colors.primary : colors.border, backgroundColor: selected ? colors.primary + "20" : "transparent" }]}
+              onPress={() => setFilter(f)}
+              accessibilityRole="tab"
+              accessibilityLabel={`${fLabel} shifts`}
+              accessibilityState={{ selected }}
+            >
+              <Text style={[styles.filterText, { color: selected ? colors.primary : colors.mutedForeground }]}>{fLabel}</Text>
+            </TouchableOpacity>
+          );
+        })}
       </View>
 
       {isLoading ? (
@@ -284,7 +294,7 @@ export default function EmployeeShiftsScreen() {
       ) : error ? (
         <View style={styles.center}>
           <Text style={{ color: colors.destructive, marginBottom: 12 }}>Failed to load shifts</Text>
-          <TouchableOpacity onPress={() => refetch()} style={[styles.retryBtn, { borderColor: colors.primary }]}><Text style={{ color: colors.primary }}>Retry</Text></TouchableOpacity>
+          <TouchableOpacity onPress={() => refetch()} style={[styles.retryBtn, { borderColor: colors.primary }]} accessibilityRole="button" accessibilityLabel="Retry loading shifts"><Text style={{ color: colors.primary }}>Retry</Text></TouchableOpacity>
         </View>
       ) : (
         <SectionList
@@ -421,6 +431,9 @@ export default function EmployeeShiftsScreen() {
                     style={[styles.claimBtn, { backgroundColor: colors.primary, opacity: busy ? 0.6 : 1 }]}
                     onPress={() => handleClaim(item)}
                     disabled={busy}
+                    accessibilityRole="button"
+                    accessibilityLabel={`Reserve slot for ${item.title} at ${item.clientName}`}
+                    accessibilityState={{ disabled: busy, busy }}
                   >
                     {busy ? <ActivityIndicator color={colors.primaryForeground} /> : (
                       <>
@@ -437,6 +450,9 @@ export default function EmployeeShiftsScreen() {
                       style={[styles.acceptBtn, { backgroundColor: colors.success, opacity: busy ? 0.6 : 1 }]}
                       onPress={() => handleAccept(item, myAssign!.id)}
                       disabled={busy}
+                      accessibilityRole="button"
+                      accessibilityLabel={`Accept shift ${item.title} at ${item.clientName}`}
+                      accessibilityState={{ disabled: busy, busy }}
                     >
                       {busy ? <ActivityIndicator color={colors.successForeground} /> : (
                         <>
@@ -449,6 +465,9 @@ export default function EmployeeShiftsScreen() {
                       style={[styles.declineBtn, { borderColor: colors.destructive, opacity: busy ? 0.6 : 1 }]}
                       onPress={() => handleDecline(item, myAssign!.id)}
                       disabled={busy}
+                      accessibilityRole="button"
+                      accessibilityLabel={`Decline shift ${item.title} at ${item.clientName}`}
+                      accessibilityState={{ disabled: busy, busy }}
                     >
                       <Feather name="x" size={16} color={colors.destructive} />
                       <Text style={[styles.declineText, { color: colors.destructive }]}>Decline</Text>
@@ -490,6 +509,9 @@ export default function EmployeeShiftsScreen() {
                           style={[styles.acceptBtn, { backgroundColor: colors.success, opacity: busy ? 0.6 : 1 }]}
                           onPress={() => handleClockInToShift(item)}
                           disabled={busy}
+                          accessibilityRole="button"
+                          accessibilityLabel={`Clock in now to ${item.title} at ${item.clientName}`}
+                          accessibilityState={{ disabled: busy, busy }}
                         >
                           {busy ? <ActivityIndicator color={colors.successForeground} /> : (
                             <>
@@ -504,6 +526,9 @@ export default function EmployeeShiftsScreen() {
                           style={[styles.declineBtn, { borderColor: colors.destructive, opacity: busy ? 0.6 : 1 }]}
                           onPress={() => handleDecline(item, myAssign.id)}
                           disabled={busy}
+                          accessibilityRole="button"
+                          accessibilityLabel={`Release shift ${item.title} at ${item.clientName}`}
+                          accessibilityState={{ disabled: busy, busy: busy && !canClockIn }}
                         >
                           {busy && !canClockIn ? <ActivityIndicator color={colors.destructive} /> : (
                             <>
@@ -518,6 +543,10 @@ export default function EmployeeShiftsScreen() {
                           style={[styles.declineBtn, { borderColor: colors.primary, opacity: busy ? 0.6 : 1 }]}
                           onPress={() => setSwapTarget({ assignmentId: myAssign.id, title: `${item.title} @ ${item.clientName}` })}
                           disabled={busy}
+                          accessibilityRole="button"
+                          accessibilityLabel={`Request swap for ${item.title} at ${item.clientName}`}
+                          accessibilityHint="Opens the shift swap request form"
+                          accessibilityState={{ disabled: busy }}
                         >
                           <Feather name="repeat" size={14} color={colors.primary} />
                           <Text style={[styles.declineText, { color: colors.primary }]}>Request Swap</Text>

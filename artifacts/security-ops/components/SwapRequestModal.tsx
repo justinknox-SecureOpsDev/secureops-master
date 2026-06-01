@@ -74,8 +74,8 @@ export function SwapRequestModal({
       <View style={styles.backdrop}>
         <View style={[styles.sheet, { backgroundColor: colors.card, borderColor: colors.border }]}>
           <View style={styles.head}>
-            <Text style={[styles.title, { color: colors.foreground }]}>Request shift swap</Text>
-            <TouchableOpacity onPress={onClose}>
+            <Text style={[styles.title, { color: colors.foreground }]} accessibilityRole="header">Request shift swap</Text>
+            <TouchableOpacity onPress={onClose} accessibilityRole="button" accessibilityLabel="Close swap request">
               <Feather name="x" size={22} color={colors.mutedForeground} />
             </TouchableOpacity>
           </View>
@@ -90,6 +90,8 @@ export function SwapRequestModal({
               value={search}
               onChangeText={setSearch}
               autoCapitalize="none"
+              accessibilityLabel="Search officers"
+              accessibilityHint="Filter the officer list by name"
             />
           </View>
 
@@ -112,6 +114,9 @@ export function SwapRequestModal({
                 return (
                   <TouchableOpacity
                     onPress={() => setPickedId(item.id)}
+                    accessibilityRole="radio"
+                    accessibilityLabel={`${item.firstName} ${item.lastName}`}
+                    accessibilityState={{ selected: picked, checked: picked }}
                     style={[
                       styles.row,
                       {
@@ -140,12 +145,17 @@ export function SwapRequestModal({
             onChangeText={setReason}
             multiline
             maxLength={500}
+            accessibilityLabel="Reason"
+            accessibilityHint="Optional. Why you want to swap this shift"
           />
 
           <TouchableOpacity
             style={[styles.submit, { backgroundColor: colors.primary, opacity: submitting || !pickedId ? 0.6 : 1 }]}
             disabled={submitting || !pickedId}
             onPress={submit}
+            accessibilityRole="button"
+            accessibilityLabel="Send swap request"
+            accessibilityState={{ disabled: submitting || !pickedId, busy: submitting }}
           >
             {submitting ? <ActivityIndicator color={colors.primaryForeground} /> : (
               <Text style={[styles.submitText, { color: colors.primaryForeground }]}>Send request</Text>

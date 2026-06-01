@@ -86,14 +86,16 @@ export default function EmployeeHomeScreen() {
     <ScrollView style={[styles.container, { backgroundColor: colors.background }]} contentContainerStyle={{ paddingBottom: 100 }}>
       <View style={[styles.header, { paddingTop: topPad + 16, borderBottomColor: colors.border }]}>
         <Image source={require("@/assets/images/logo.png")} style={styles.logoSmall} resizeMode="contain" />
-        <View style={{ flex: 1 }}>
+        <View style={{ flex: 1 }} accessible accessibilityRole="header">
           <Text style={[styles.greeting, { color: colors.mutedForeground }]}>Good day,</Text>
           <Text style={[styles.name, { color: colors.foreground }]}>{user?.firstName} {user?.lastName}</Text>
         </View>
         <TouchableOpacity
           onPress={() => router.push("/notifications" as any)}
           style={[styles.logoutBtn, { borderColor: colors.border, marginRight: 8 }]}
-          accessibilityLabel="Notifications"
+          accessibilityRole="button"
+          accessibilityLabel={unreadCount > 0 ? `Notifications, ${unreadCount} unread` : "Notifications"}
+          accessibilityHint="Opens your notifications"
         >
           <Feather name="bell" size={18} color={colors.mutedForeground} />
           {unreadCount > 0 && (
@@ -102,7 +104,12 @@ export default function EmployeeHomeScreen() {
             </View>
           )}
         </TouchableOpacity>
-        <TouchableOpacity onPress={logout} style={[styles.logoutBtn, { borderColor: colors.border }]}>
+        <TouchableOpacity
+          onPress={logout}
+          style={[styles.logoutBtn, { borderColor: colors.border }]}
+          accessibilityRole="button"
+          accessibilityLabel="Sign out of your account"
+        >
           <Feather name="log-out" size={18} color={colors.mutedForeground} />
         </TouchableOpacity>
       </View>
@@ -113,6 +120,15 @@ export default function EmployeeHomeScreen() {
         <TouchableOpacity
           activeOpacity={0.85}
           onPress={() => router.push("/license-renewal" as any)}
+          accessibilityRole="button"
+          accessibilityLabel={
+            licenseAlert.kind === "missing"
+              ? "No active license on file. Tap to start renewal."
+              : licenseAlert.kind === "expired"
+              ? "License expired, you cannot work. Tap to start renewal."
+              : `Renew license, ${licenseAlert.daysRemaining} days left. Tap to start renewal.`
+          }
+          accessibilityHint="Opens the license renewal screen"
           style={[
             styles.licenseBanner,
             licenseAlert.kind === "expiring"
@@ -159,7 +175,13 @@ export default function EmployeeHomeScreen() {
               Clocked in {summary.activeTimeEntry.clockInTime ? new Date(summary.activeTimeEntry.clockInTime).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }) : ""}
             </Text>
           </View>
-          <TouchableOpacity style={[styles.clockBtn, { backgroundColor: colors.success }]} onPress={() => router.push("/(employee)/clock")}>
+          <TouchableOpacity
+            style={[styles.clockBtn, { backgroundColor: colors.success }]}
+            onPress={() => router.push("/(employee)/clock")}
+            accessibilityRole="button"
+            accessibilityLabel="View clock"
+            accessibilityHint="Opens the clock screen to clock out"
+          >
             <Text style={[styles.clockBtnText, { color: colors.successForeground }]}>View</Text>
           </TouchableOpacity>
         </View>
@@ -188,6 +210,9 @@ export default function EmployeeHomeScreen() {
           <TouchableOpacity
             style={[styles.bigClockBtn, { backgroundColor: colors.primary }]}
             onPress={() => router.push("/(employee)/clock")}
+            accessibilityRole="button"
+            accessibilityLabel="Clock in"
+            accessibilityHint="Opens the clock screen to start your shift"
           >
             <Feather name="clock" size={24} color={colors.primaryForeground} />
             <Text style={[styles.bigClockText, { color: colors.primaryForeground }]}>Clock In</Text>
@@ -201,6 +226,9 @@ export default function EmployeeHomeScreen() {
           <TouchableOpacity
             style={[styles.nextShiftCard, { backgroundColor: colors.card, borderColor: colors.primary + "50" }]}
             onPress={() => router.push("/(employee)/shifts")}
+            accessibilityRole="button"
+            accessibilityLabel={`Next shift: ${summary.nextShift.title} at ${summary.nextShift.clientName}, ${summary.nextShift.location}, ${new Date(summary.nextShift.startTime).toLocaleString([], { weekday: "short", month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" })}`}
+            accessibilityHint="Opens your shifts"
           >
             <View style={[styles.shiftAccent, { backgroundColor: colors.primary }]} />
             <View style={{ flex: 1, gap: 4 }}>
@@ -244,6 +272,8 @@ export default function EmployeeHomeScreen() {
               key={label}
               style={[styles.quickBtn, { backgroundColor: colors.card, borderColor: colors.border }]}
               onPress={() => router.push(route as any)}
+              accessibilityRole="button"
+              accessibilityLabel={label}
             >
               <Feather name={icon as any} size={20} color={colors.primary} />
               <Text style={[styles.quickLabel, { color: colors.foreground }]}>{label}</Text>

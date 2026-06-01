@@ -97,10 +97,15 @@ export default function PaystubsScreen() {
         }
       >
         <View style={[styles.topBar, { paddingTop: topPad + 12, borderBottomColor: colors.border }]}>
-          <TouchableOpacity onPress={() => router.back()} style={styles.backBtn}>
+          <TouchableOpacity
+            onPress={() => router.back()}
+            style={styles.backBtn}
+            accessibilityRole="button"
+            accessibilityLabel="Go back"
+          >
             <Feather name="chevron-left" size={22} color={colors.foreground} />
           </TouchableOpacity>
-          <Text style={[styles.pageTitle, { color: colors.foreground }]}>My Paystubs</Text>
+          <Text style={[styles.pageTitle, { color: colors.foreground }]} accessibilityRole="header">My Paystubs</Text>
           <View style={{ width: 32 }} />
         </View>
 
@@ -140,8 +145,14 @@ export default function PaystubsScreen() {
 
             {data.rows.map((row) => {
               const sc = statusColor(row.status, colors);
+              const stubA11y = `Paystub ${fmtRange(row.periodStart, row.periodEnd)}${row.siteName ? `, ${row.siteName}` : ""}. ${STATUS_LABEL[row.status]}. ${Number(row.totalHours).toFixed(2)} hours at ${fmtUsd(row.hourlyRate)} per hour. Gross ${fmtUsd(row.grossPay)}, tax ${fmtUsd(row.tax)}, net pay ${fmtUsd(row.netPay)}.${row.status === "paid" && row.paidAt ? ` Paid ${new Date(row.paidAt).toLocaleDateString()}.` : ""}`;
               return (
-                <View key={row.id} style={[styles.stub, { backgroundColor: colors.card, borderColor: colors.border }]}>
+                <View
+                  key={row.id}
+                  style={[styles.stub, { backgroundColor: colors.card, borderColor: colors.border }]}
+                  accessible
+                  accessibilityLabel={stubA11y}
+                >
                   <View style={styles.stubHead}>
                     <View style={{ flex: 1 }}>
                       <Text style={[styles.stubPeriod, { color: colors.foreground }]}>
