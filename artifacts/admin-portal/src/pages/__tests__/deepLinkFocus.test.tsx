@@ -12,9 +12,9 @@ import { memoryLocation } from "wouter/memory-location";
  *   - and stay a quiet no-op when the id doesn't exist or is already on page 1.
  *
  * This mounts the real TablePage -> DataGrid -> useDeepLinkFocus stack so the
- * URL-param parsing, the multi-page locate scan, and the flash render are all
- * exercised together. The `@/lib/api` data source and the table registry are
- * the only things stubbed.
+ * URL-param parsing, the position-based page resolution, and the flash render
+ * are all exercised together. The `@/lib/api` data source and the table
+ * registry are the only things stubbed.
  */
 
 const PAGE_SIZE = 25;
@@ -26,24 +26,58 @@ const hoisted = vi.hoisted(() => ({
   calls: [] as string[],
 }));
 
-vi.mock("@/lib/api", () => ({
-  // DataGrid + fk both call api(path) without the leading `/api` prefix.
-  api: vi.fn(async (path: string) => {
-    hoisted.calls.push(path);
-    const url = new URL(path, "http://test.local");
-    const m = /\/admin\/tables\/([^/?]+)/.exec(url.pathname);
-    const table = m?.[1];
-    if (table !== "widgets") return { rows: [], total: 0 };
-    const limit = Number(url.searchParams.get("limit") ?? String(PAGE_SIZE));
-    const offset = Number(url.searchParams.get("offset") ?? "0");
-    return {
-      rows: hoisted.rows.slice(offset, offset + limit),
-      total: hoisted.rows.length,
-    };
-  }),
-  getToken: () => null,
-  ApiError: class ApiError extends Error {},
-}));
+vi.mock("@/lib/api", () => {
+  // Mirror the real ApiError shape DataGrid inspects (`status` + `data.code`)
+  // so the position fast-path's authoritative "row not in result set" 404 is
+  // recognized as such.
+  class ApiError extends Error {
+    status: number;
+    data: unknown;
+    constructor(status: number, data?: unknown) {
+      super("api error");
+      this.status = status;
+      this.data = data;
+    }
+  }
+  return {
+    // DataGrid + fk both call api(path) without the leading `/api` prefix.
+    api: vi.fn(async (path: string) => {
+      hoisted.calls.push(path);
+      const url = new URL(path, "http://test.local");
+
+      // Fast path: /admin/tables/<table>/<id>/position -> { index, page }.
+      // Production uses this first to resolve a deep-linked row's page; only
+      // falls back to a batch scan if it's unavailable.
+      const posM = /\/admin\/tables\/([^/?]+)\/([^/?]+)\/position/.exec(
+        url.pathname,
+      );
+      if (posM) {
+        const [, table, id] = posM;
+        if (table !== "widgets") {
+          throw new ApiError(404, { code: "row_not_in_result_set" });
+        }
+        const index = hoisted.rows.findIndex((r) => r.id === id);
+        if (index < 0) {
+          throw new ApiError(404, { code: "row_not_in_result_set" });
+        }
+        const ps = Number(url.searchParams.get("pageSize") ?? String(PAGE_SIZE));
+        return { index, page: Math.floor(index / ps) };
+      }
+
+      const m = /\/admin\/tables\/([^/?]+)/.exec(url.pathname);
+      const table = m?.[1];
+      if (table !== "widgets") return { rows: [], total: 0 };
+      const limit = Number(url.searchParams.get("limit") ?? String(PAGE_SIZE));
+      const offset = Number(url.searchParams.get("offset") ?? "0");
+      return {
+        rows: hoisted.rows.slice(offset, offset + limit),
+        total: hoisted.rows.length,
+      };
+    }),
+    getToken: () => null,
+    ApiError,
+  };
+});
 
 vi.mock("@/lib/tables", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@/lib/tables")>();
@@ -129,16 +163,17 @@ describe("deep-link focus on a paginated admin table", () => {
     await waitFor(() => expect(screen.getByText("Widget 0")).toBeTruthy());
     expect(screen.getByText("Page 1 of 3")).toBeTruthy();
 
-    // Give the locate scan time to run and (correctly) find nothing.
+    // The position lookup runs and authoritatively reports the row is absent,
+    // so the grid stays on page 1 (no batch scan / no page jump).
     await waitFor(() =>
-      expect(hoisted.calls.some((c) => c.includes("limit=500"))).toBe(true),
+      expect(
+        hoisted.calls.some((c) => c.includes("/row-does-not-exist/position")),
+      ).toBe(true),
     );
     expect(screen.getByText("Page 1 of 3")).toBeTruthy();
 
     // Nothing on the page is flashed.
-    expect(
-      document.querySelector(".wcsg-deep-link-flash"),
-    ).toBeNull();
+    expect(document.querySelector(".wcsg-deep-link-flash")).toBeNull();
     expect(scrollSpy).not.toHaveBeenCalled();
   });
 

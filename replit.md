@@ -6,6 +6,7 @@ Mobile + web operations platform for Williams Council Security Group (WCSG): rec
 
 - `pnpm --filter @workspace/api-server run dev` — API server (port 8080)
 - `pnpm run typecheck` / `pnpm run build` — workspace-wide TS check / build. **Registered as the `typecheck` validation step (CI gate), so `pnpm run typecheck` runs automatically on validation / pre-deploy.**
+- `pnpm -r --if-present run test` — run all workspace test suites (api-server Vitest, admin-portal Vitest/RTL, security-ops Vitest). **Registered as the `test` validation step (CI gate), so it runs automatically on validation / pre-deploy — any failing unit/component test blocks release. Self-contained: no workflow / DB / device required.**
 - `pnpm --filter @workspace/api-spec run codegen` — regen API hooks + Zod from OpenAPI
 - `pnpm --filter @workspace/db run push` — push DB schema (re-run after every schema change)
 - `pnpm --filter @workspace/api-server run build && pnpm --filter @workspace/scripts run check-security-headers` — pre-deploy: assert helmet CSP / CORS / HSTS / COR-P. **Registered as the `security-headers` validation step (CI gate), so it runs automatically on validation / pre-deploy.**
