@@ -4,7 +4,7 @@ import { Platform } from "react-native";
 import { useRouter } from "expo-router";
 import { useAuth } from "@/contexts/AuthContext";
 import { apiRequest } from "@/utils/api";
-import { resolveNotificationTarget } from "./resolveNotificationTarget";
+import { setupNotificationDeepLinking } from "./notificationDeepLink";
 
 // Detect Expo Go. SDK 53 removed remote-push support in Expo Go on Android
 // and the `expo-notifications` module logs a red-box ERROR at *import time*
@@ -43,48 +43,24 @@ export function useNotifications() {
   // through getLastNotificationResponseAsync. Unknown/legacy notifications fall
   // back to the default landing screen by doing nothing here.
   useEffect(() => {
-    if (Platform.OS === "web" || isExpoGo) return;
-
-    let cancelled = false;
-    let subscription: { remove: () => void } | undefined;
-
-    const navigateForNotification = (data: unknown): void => {
-      const target = resolveNotificationTarget(data, roleRef.current);
-      if (!target) return;
-      // Stamp a per-tap nonce so the destination screen re-fires its scroll-to /
-      // highlight effect even when the same item is tapped twice in a row (the
-      // id param alone wouldn't change, so the effect wouldn't re-run).
-      const params = { ...(target.params ?? {}), _hlTs: String(Date.now()) };
-      router.push({ pathname: target.pathname as never, params });
-    };
-
-    void (async () => {
-      try {
+    return setupNotificationDeepLinking({
+      platformOS: Platform.OS,
+      isExpoGo,
+      getRole: () => roleRef.current,
+      push: (target) =>
+        router.push({ pathname: target.pathname as never, params: target.params }),
+      loadNotifications: async () => {
         const Notifications = await import("expo-notifications");
-
-        // Cold start: the app was launched by tapping a notification. Defer
-        // briefly so the root redirect guard finishes landing the user inside
-        // their role group before we push the target route on top of it.
-        const last = await Notifications.getLastNotificationResponseAsync();
-        if (!cancelled && last) {
-          setTimeout(() => {
-            if (!cancelled) navigateForNotification(last.notification.request.content.data);
-          }, 800);
-        }
-
-        if (cancelled) return;
-        subscription = Notifications.addNotificationResponseReceivedListener((response) => {
-          navigateForNotification(response.notification.request.content.data);
-        });
-      } catch (e) {
-        console.log("Notification response listener skipped:", e);
-      }
-    })();
-
-    return () => {
-      cancelled = true;
-      subscription?.remove();
-    };
+        return {
+          getLastNotificationResponseAsync: () =>
+            Notifications.getLastNotificationResponseAsync(),
+          addNotificationResponseReceivedListener: (listener) =>
+            Notifications.addNotificationResponseReceivedListener((response) =>
+              listener(response),
+            ),
+        };
+      },
+    });
   }, [router]);
 }
 
