@@ -115,7 +115,7 @@ export default function EmployeeIncidentsScreen() {
       ) : error ? (
         <View style={styles.center}>
           <Text style={{ color: colors.destructive, marginBottom: 12 }}>Failed to load incidents</Text>
-          <TouchableOpacity onPress={() => refetch()} style={[styles.retryBtn, { borderColor: colors.primary }]}><Text style={{ color: colors.primary }}>Retry</Text></TouchableOpacity>
+          <TouchableOpacity onPress={() => refetch()} accessibilityRole="button" accessibilityLabel="Retry loading incidents" style={[styles.retryBtn, { borderColor: colors.primary }]}><Text style={{ color: colors.primary }}>Retry</Text></TouchableOpacity>
         </View>
       ) : (
         <FlatList
@@ -131,7 +131,7 @@ export default function EmployeeIncidentsScreen() {
               </View>
               <Text style={[styles.emptyTitle, { color: colors.foreground }]}>No incidents reported</Text>
               <Text style={[styles.emptyText, { color: colors.mutedForeground }]}>Tap the + button to report an incident</Text>
-              <TouchableOpacity style={[styles.reportBigBtn, { backgroundColor: colors.destructive }]} onPress={() => setShowReport(true)}>
+              <TouchableOpacity style={[styles.reportBigBtn, { backgroundColor: colors.destructive }]} onPress={() => setShowReport(true)} accessibilityRole="button" accessibilityLabel="Report an incident">
                 <Feather name="alert-triangle" size={18} color={colors.destructiveForeground} />
                 <Text style={[styles.reportBigBtnText, { color: colors.destructiveForeground }]}>Report Incident</Text>
               </TouchableOpacity>
@@ -362,7 +362,7 @@ export default function EmployeeIncidentsScreen() {
 
       {previewUri && (
         <Modal transparent animationType="fade" onRequestClose={() => setPreviewUri(null)}>
-          <TouchableOpacity style={styles.previewOverlay} activeOpacity={1} onPress={() => setPreviewUri(null)}>
+          <TouchableOpacity style={styles.previewOverlay} activeOpacity={1} onPress={() => setPreviewUri(null)} accessibilityRole="button" accessibilityLabel="Close photo preview">
             <Image source={{ uri: previewUri }} style={styles.previewImg} resizeMode="contain" />
             <View style={styles.previewClose}>
               <Feather name="x" size={28} color="#fff" />

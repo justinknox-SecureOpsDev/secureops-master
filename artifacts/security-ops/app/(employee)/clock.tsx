@@ -322,7 +322,11 @@ export default function EmployeeClockScreen() {
         <View style={[styles.section, { backgroundColor: colors.card, borderColor: colors.border, marginHorizontal: 16, borderRadius: 12, borderWidth: 1, padding: 16 }]}>
           <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
             <Text style={[styles.sectionTitle, { color: colors.accent }]}>PICK A SITE</Text>
-            <TouchableOpacity onPress={() => setShowSitePicker(false)}>
+            <TouchableOpacity
+              onPress={() => setShowSitePicker(false)}
+              accessibilityRole="button"
+              accessibilityLabel="Close site picker"
+            >
               <Feather name="x" size={18} color={colors.mutedForeground} />
             </TouchableOpacity>
           </View>
@@ -336,6 +340,9 @@ export default function EmployeeClockScreen() {
                 key={s.id}
                 onPress={() => handlePickSite(s)}
                 disabled={!hasCoords}
+                accessibilityRole="button"
+                accessibilityLabel={hasCoords ? `Clock in at ${s.name}` : `${s.name}, needs setup, unavailable`}
+                accessibilityState={{ disabled: !hasCoords }}
                 style={[
                   styles.entryCard,
                   { backgroundColor: colors.background, borderColor: colors.border, padding: 12, opacity: hasCoords ? 1 : 0.55 },
