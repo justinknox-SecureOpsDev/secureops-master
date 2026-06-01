@@ -1,7 +1,8 @@
-import React, { useState } from "react";
+import React, { useState, useRef, useEffect } from "react";
 import { useTopPad } from "@/hooks/useTopPad";
-import { View, Text, StyleSheet, SectionList, TouchableOpacity, ActivityIndicator, Platform } from "react-native";
+import { View, Text, StyleSheet, SectionList, TouchableOpacity, ActivityIndicator, Platform, Animated } from "react-native";
 import { useColors } from "@/hooks/useColors";
+import { useHighlightFlash } from "@/hooks/useHighlightFlash";
 import { confirmAction, notify } from "@/utils/confirm";
 import {
   useGetShifts, getGetShiftsQueryKey,
@@ -16,7 +17,7 @@ import { useQueryClient } from "@tanstack/react-query";
 import { Feather } from "@expo/vector-icons";
 import { LicenseLevelBadge, levelLabel } from "@/components/LicenseLevelBadge";
 import { SwapRequestModal } from "@/components/SwapRequestModal";
-import { useRouter } from "expo-router";
+import { useRouter, useLocalSearchParams } from "expo-router";
 
 const FILTERS = ["available", "upcoming", "active", "completed"] as const;
 
@@ -28,6 +29,24 @@ export default function EmployeeShiftsScreen() {
   const [busyId, setBusyId] = useState<string | null>(null);
   const [swapTarget, setSwapTarget] = useState<{ assignmentId: string; title: string } | null>(null);
   const topPad = useTopPad();
+
+  // Deep-link highlight: a notification tap can land here with a shiftId (+ a
+  // filter hint and per-tap nonce) so we jump to the right tab, scroll to the
+  // exact shift and flash it. Missing/stale ids degrade to the plain list.
+  const { shiftId: highlightShiftId, filter: filterParam, _hlTs } =
+    useLocalSearchParams<{ shiftId?: string; filter?: string; _hlTs?: string }>();
+  const sectionListRef = useRef<SectionList<any>>(null);
+  const flashAnim = useHighlightFlash(
+    highlightShiftId ? `${highlightShiftId}:${_hlTs ?? ""}` : null,
+  );
+
+  // Honour the filter hint from the notification so the targeted shift's tab is
+  // the one actually showing before we try to scroll to it.
+  useEffect(() => {
+    if (filterParam && (FILTERS as readonly string[]).includes(filterParam)) {
+      setFilter(filterParam as typeof FILTERS[number]);
+    }
+  }, [filterParam, _hlTs]);
 
   const { data: me } = useGetMe({ query: { queryKey: getGetMeQueryKey() } });
   const myUserId = (me as any)?.id as string | undefined;
@@ -129,6 +148,28 @@ export default function EmployeeShiftsScreen() {
             ),
       }));
   }, [shifts, filter]);
+
+  // Once the right tab's data is in, scroll the targeted shift into view. Runs
+  // on a short delay so the SectionList has laid out its rows; silently no-ops
+  // when the shift isn't in the current list (stale / wrong filter).
+  useEffect(() => {
+    if (!highlightShiftId) return;
+    let sectionIndex = -1;
+    let itemIndex = -1;
+    sections.forEach((s, sIdx) => {
+      const idx = s.data.findIndex((it: any) => it.id === highlightShiftId);
+      if (idx >= 0) { sectionIndex = sIdx; itemIndex = idx; }
+    });
+    if (sectionIndex < 0) return;
+    const t = setTimeout(() => {
+      try {
+        sectionListRef.current?.scrollToLocation({
+          sectionIndex, itemIndex, viewPosition: 0.3, animated: true,
+        });
+      } catch { /* layout not ready / out of range — leave list as-is */ }
+    }, 350);
+    return () => clearTimeout(t);
+  }, [highlightShiftId, _hlTs, sections]);
 
   const myAssignmentFor = (shift: any) =>
     (shift.assignments ?? []).find((a: any) => a.employeeId === myUserId);
@@ -298,10 +339,12 @@ export default function EmployeeShiftsScreen() {
         </View>
       ) : (
         <SectionList
+          ref={sectionListRef}
           sections={sections}
           keyExtractor={(item: any) => item.id}
           scrollEnabled={shifts.length > 0}
           stickySectionHeadersEnabled={false}
+          onScrollToIndexFailed={() => { /* row not measured yet — ignore */ }}
           contentContainerStyle={{ padding: 16, paddingBottom: 100 }}
           renderSectionHeader={({ section }: { section: any }) => (
             <View style={styles.sectionHeader}>
@@ -333,10 +376,18 @@ export default function EmployeeShiftsScreen() {
             const isPending = myAssign?.status === "pending";
             const isAccepted = myAssign?.status === "accepted";
             const busy = busyId === item.id;
+            const isHighlighted = highlightShiftId === item.id;
             return (
-              <View style={[styles.card, {
-                backgroundColor: colors.card,
-                borderColor: isPending ? colors.accent : colors.border,
+              <Animated.View style={[styles.card, {
+                backgroundColor: isHighlighted
+                  ? flashAnim.interpolate({ inputRange: [0, 1], outputRange: [colors.card, colors.primary + "26"] })
+                  : colors.card,
+                borderColor: isHighlighted
+                  ? flashAnim.interpolate({ inputRange: [0, 1], outputRange: [isPending ? colors.accent : colors.border, colors.primary] })
+                  : (isPending ? colors.accent : colors.border),
+                borderWidth: isHighlighted
+                  ? flashAnim.interpolate({ inputRange: [0, 1], outputRange: [1, 2] })
+                  : 1,
                 borderLeftColor: sc,
                 borderLeftWidth: 3,
               }]}>
@@ -555,7 +606,7 @@ export default function EmployeeShiftsScreen() {
                     </View>
                   );
                 })()}
-              </View>
+              </Animated.View>
             );
           }}
         />

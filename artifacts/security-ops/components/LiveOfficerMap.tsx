@@ -27,13 +27,22 @@ function pickPos(o: ActiveOfficer): { lat: number; lng: number } | null {
   return { lat, lng };
 }
 
-function buildLeafletHtml(points: Array<{ lat: number; lng: number; label: string; sub: string; userId: string }>): string {
+function buildLeafletHtml(
+  points: Array<{ lat: number; lng: number; label: string; sub: string; userId: string }>,
+  focusUserId?: string,
+  focusKey?: string,
+): string {
   // Coordinates are numbers (validated upstream); labels and userIds are user-controlled
   // strings. Pass them as JSON, then build popup DOM via createTextNode + a button whose
   // click postMessages the userId to the parent — admin-side XSS is impossible even if
   // an officer sets their name to "<img onerror=...>".
   const data = JSON.stringify(points);
+  const focus = JSON.stringify(focusUserId ?? null);
+  // focusKey is embedded as an HTML comment so that repeated alert taps for the
+  // same officer change the srcDoc string and force the iframe to re-render +
+  // re-center, even though the points payload is identical.
   return `<!doctype html><html><head><meta charset="utf-8"/>
+<!-- focusKey:${String(focusKey ?? "")} -->
 <meta name="viewport" content="width=device-width, initial-scale=1"/>
 <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
 <style>html,body,#m{margin:0;padding:0;height:100%;background:#080c18}
@@ -73,14 +82,20 @@ map.setView(pts.length ? [pts[0].lat, pts[0].lng] : [39.8283, -98.5795], pts.len
 L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
   attribution: '&copy; OpenStreetMap', maxZoom: 19,
 }).addTo(map);
+const focusId = ${focus};
 if (pts.length) {
   const group = L.featureGroup().addTo(map);
+  const markers = {};
   pts.forEach(p => {
+    const isFocus = focusId && String(p.userId) === String(focusId);
     const m = L.circleMarker([p.lat, p.lng], {
-      radius: 10, color: '#c9a84c', fillColor: '#c9a84c', fillOpacity: 0.9, weight: 3,
+      radius: isFocus ? 14 : 10,
+      color: isFocus ? '#f0e6c8' : '#c9a84c',
+      fillColor: '#c9a84c', fillOpacity: 0.9, weight: isFocus ? 5 : 3,
     });
     m.bindPopup(popupNode(p.label, p.sub, p.userId));
     m.addTo(group);
+    markers[String(p.userId)] = { marker: m, lat: p.lat, lng: p.lng };
   });
   // Manual bounds — avoid group.getBounds() / Circle.getBounds() paths that
   // have intermittently hit "Cannot read properties of undefined" in
@@ -88,6 +103,13 @@ if (pts.length) {
   const _bb = L.latLngBounds([]);
   pts.forEach(p => _bb.extend([p.lat, p.lng]));
   if (_bb.isValid()) map.fitBounds(_bb.pad(0.3), { maxZoom: 15 });
+  // When an alert deep-links to a specific officer, recenter on them and open
+  // their popup so the admin sees exactly who triggered the alert.
+  const focused = focusId ? markers[String(focusId)] : null;
+  if (focused) {
+    map.setView([focused.lat, focused.lng], 15);
+    try { focused.marker.openPopup(); } catch (e) {}
+  }
 }
 </script></body></html>`;
 }
@@ -96,9 +118,11 @@ interface Props {
   officers: ActiveOfficer[];
   height?: number;
   onSelectOfficer?: (userId: string) => void;
+  focusUserId?: string | null;
+  focusKey?: string | null;
 }
 
-export default function LiveOfficerMap({ officers, height = 380, onSelectOfficer }: Props) {
+export default function LiveOfficerMap({ officers, height = 380, onSelectOfficer, focusUserId, focusKey }: Props) {
   const colors = useColors();
 
   const points = useMemo(
@@ -115,7 +139,10 @@ export default function LiveOfficerMap({ officers, height = 380, onSelectOfficer
     [officers],
   );
 
-  const html = useMemo(() => buildLeafletHtml(points), [points]);
+  const html = useMemo(
+    () => buildLeafletHtml(points, focusUserId ?? undefined, focusKey ?? undefined),
+    [points, focusUserId, focusKey],
+  );
 
   // Listen for "View profile" clicks from inside the leaflet iframe (web only).
   useEffect(() => {
@@ -167,6 +194,11 @@ export default function LiveOfficerMap({ officers, height = 380, onSelectOfficer
           officersWithPos.map(({ officer, pos }) => {
             const label = `${officer.firstName} ${officer.lastName}`;
             const sub = [officer.shiftTitle, officer.siteName].filter(Boolean).join(" — ") || "On duty";
+            const isFocus = !!focusUserId && officer.userId === focusUserId;
+            const rowStyle = {
+              flexDirection: "row" as const, gap: 10, alignItems: "flex-start" as const,
+              ...(isFocus ? { borderWidth: 1, borderColor: colors.primary, backgroundColor: colors.primary + "22", borderRadius: 8, padding: 8 } : null),
+            };
             const inner = (
               <>
                 <Feather name="map-pin" size={16} color="#c9a84c" />
@@ -187,14 +219,14 @@ export default function LiveOfficerMap({ officers, height = 380, onSelectOfficer
                   onPress={() => onSelectOfficer(officer.userId)}
                   accessibilityRole="button"
                   accessibilityLabel={`View profile for ${label}`}
-                  style={{ flexDirection: "row", gap: 10, alignItems: "flex-start" }}
+                  style={rowStyle}
                 >
                   {inner}
                 </TouchableOpacity>
               );
             }
             return (
-              <View key={officer.userId} style={{ flexDirection: "row", gap: 10, alignItems: "flex-start" }}>
+              <View key={officer.userId} style={rowStyle}>
                 {inner}
               </View>
             );

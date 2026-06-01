@@ -1,12 +1,15 @@
-import React, { useState } from "react";
+import React, { useState, useRef, useEffect } from "react";
 import { useTopPad } from "@/hooks/useTopPad";
-import { View, Text, StyleSheet, FlatList, TouchableOpacity, ActivityIndicator, Platform, TextInput, Modal, ScrollView, Image } from "react-native";
+import { View, Text, StyleSheet, FlatList, TouchableOpacity, ActivityIndicator, Platform, TextInput, Modal, ScrollView, Image, Animated } from "react-native";
 import { useColors } from "@/hooks/useColors";
 import { useGetIncidents, getGetIncidentsQueryKey, useUpdateIncident } from "@workspace/api-client-react";
 import { Feather } from "@expo/vector-icons";
 import { useQueryClient } from "@tanstack/react-query";
 import { AttachmentImage } from "@/components/AttachmentImage";
-import { useRouter } from "expo-router";
+import { useRouter, useLocalSearchParams } from "expo-router";
+import { useHighlightFlash } from "@/hooks/useHighlightFlash";
+
+const AnimatedTouchable = Animated.createAnimatedComponent(TouchableOpacity);
 
 const STATUS_FILTERS = ["open", "under_review", "resolved", "closed"] as const;
 const SEVERITIES = ["low", "medium", "high", "critical"] as const;
@@ -43,11 +46,33 @@ export default function AdminIncidentsScreen() {
   const [previewUri, setPreviewUri] = useState<string | null>(null);
   const topPad = useTopPad();
 
+  // Deep-link highlight: an emergency-alert tap lands here with the incident id
+  // so we scroll to + flash the exact incident card. Emergencies create an
+  // `open` incident, which is the default filter; stale ids just no-op.
+  const { incidentId: highlightIncidentId, _hlTs } =
+    useLocalSearchParams<{ incidentId?: string; _hlTs?: string }>();
+  const listRef = useRef<FlatList<any>>(null);
+  const flashAnim = useHighlightFlash(
+    highlightIncidentId ? `${highlightIncidentId}:${_hlTs ?? ""}` : null,
+  );
+
   const incParams: any = { status: filter };
   const { data: incidents, isLoading, error, refetch } = useGetIncidents(
     incParams,
     { query: { queryKey: getGetIncidentsQueryKey(incParams) } },
   );
+
+  useEffect(() => {
+    if (!highlightIncidentId || !incidents) return;
+    const index = incidents.findIndex((i) => i.id === highlightIncidentId);
+    if (index < 0) return; // not in the current status filter — leave list as-is
+    const t = setTimeout(() => {
+      try {
+        listRef.current?.scrollToIndex({ index, viewPosition: 0.3, animated: true });
+      } catch { /* not measured yet — onScrollToIndexFailed handles it */ }
+    }, 350);
+    return () => clearTimeout(t);
+  }, [highlightIncidentId, _hlTs, incidents]);
 
   const updateMutation = useUpdateIncident();
 
@@ -97,9 +122,11 @@ export default function AdminIncidentsScreen() {
         </View>
       ) : (
         <FlatList
+          ref={listRef}
           data={incidents ?? []}
           keyExtractor={(item) => item.id}
           scrollEnabled={!!(incidents && incidents.length > 0)}
+          onScrollToIndexFailed={() => { /* row not measured yet — ignore */ }}
           contentContainerStyle={{ padding: 16, paddingBottom: 100 }}
           ItemSeparatorComponent={() => <View style={{ height: 10 }} />}
           ListEmptyComponent={
@@ -108,9 +135,22 @@ export default function AdminIncidentsScreen() {
               <Text style={[styles.emptyText, { color: colors.mutedForeground }]}>No {filter.replace("_", " ")} incidents</Text>
             </View>
           }
-          renderItem={({ item }) => (
-            <TouchableOpacity
-              style={[styles.card, { backgroundColor: colors.card, borderColor: item.severity === "critical" ? colors.destructive + "60" : colors.border }]}
+          renderItem={({ item }) => {
+            const isHighlighted = highlightIncidentId === item.id;
+            const baseBorder = item.severity === "critical" ? colors.destructive + "60" : colors.border;
+            return (
+            <AnimatedTouchable
+              style={[styles.card, {
+                backgroundColor: isHighlighted
+                  ? flashAnim.interpolate({ inputRange: [0, 1], outputRange: [colors.card, colors.primary + "26"] })
+                  : colors.card,
+                borderColor: isHighlighted
+                  ? flashAnim.interpolate({ inputRange: [0, 1], outputRange: [baseBorder, colors.primary] })
+                  : baseBorder,
+                borderWidth: isHighlighted
+                  ? flashAnim.interpolate({ inputRange: [0, 1], outputRange: [1, 2] })
+                  : 1,
+              }]}
               onPress={() => { setSelectedIncident(item); setResolution((item as any).adminNotes || ""); }}
               accessibilityRole="button"
               accessibilityLabel={`${item.severity} severity, ${item.status.replace("_", " ")}: ${item.title}. Reported by ${item.employeeName} on ${new Date(item.occurredAt).toLocaleDateString()}`}
@@ -142,8 +182,9 @@ export default function AdminIncidentsScreen() {
                   </Text>
                 </View>
               )}
-            </TouchableOpacity>
-          )}
+            </AnimatedTouchable>
+            );
+          }}
         />
       )}
 

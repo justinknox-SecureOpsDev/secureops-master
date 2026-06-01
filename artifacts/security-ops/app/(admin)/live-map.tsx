@@ -1,11 +1,14 @@
-import React from "react";
-import { View, Text, StyleSheet, ScrollView, Platform, ActivityIndicator, TouchableOpacity, Linking } from "react-native";
+import React, { useRef, useEffect } from "react";
+import { View, Text, StyleSheet, ScrollView, Platform, ActivityIndicator, TouchableOpacity, Linking, Animated } from "react-native";
 import { useColors } from "@/hooks/useColors";
 import { useGetActiveOfficers, getGetActiveOfficersQueryKey } from "@workspace/api-client-react";
 import { Feather } from "@expo/vector-icons";
 import LiveOfficerMap from "@/components/LiveOfficerMap";
 import { formatDistanceToNow } from "date-fns";
-import { useRouter } from "expo-router";
+import { useRouter, useLocalSearchParams } from "expo-router";
+import { useHighlightFlash } from "@/hooks/useHighlightFlash";
+
+const AnimatedTouchable = Animated.createAnimatedComponent(TouchableOpacity);
 
 export default function AdminLiveMapScreen() {
   const colors = useColors();
@@ -22,8 +25,32 @@ export default function AdminLiveMapScreen() {
 
   const officers = (data ?? []) as any[];
 
+  // Deep-link focus: geofence-breach / emergency alerts pass userId (the
+  // officer) and missed-checkpoint passes timeEntryId. Resolve both to a userId
+  // so we can recenter the map + flash the matching list row. Stale ids no-op.
+  const { userId: focusUserParam, timeEntryId: focusTeParam, _hlTs } =
+    useLocalSearchParams<{ userId?: string; timeEntryId?: string; _hlTs?: string }>();
+  const focusUserId =
+    focusUserParam ||
+    (focusTeParam ? officers.find((o) => o.timeEntryId === focusTeParam)?.userId : undefined) ||
+    undefined;
+  const scrollRef = useRef<ScrollView>(null);
+  const listY = useRef(0);
+  const rowOffsets = useRef<Record<string, number>>({});
+  const flashAnim = useHighlightFlash(focusUserId ? `${focusUserId}:${_hlTs ?? ""}` : null);
+
+  useEffect(() => {
+    if (!focusUserId) return;
+    const t = setTimeout(() => {
+      const rel = rowOffsets.current[focusUserId];
+      if (rel == null) return; // officer not in the active list — leave scroll alone
+      scrollRef.current?.scrollTo({ y: Math.max(0, listY.current + rel - 24), animated: true });
+    }, 400);
+    return () => clearTimeout(t);
+  }, [focusUserId, _hlTs, officers]);
+
   return (
-    <ScrollView style={[styles.container, { backgroundColor: colors.background }]} contentContainerStyle={{ paddingBottom: 120, paddingTop: topPad }}>
+    <ScrollView ref={scrollRef} style={[styles.container, { backgroundColor: colors.background }]} contentContainerStyle={{ paddingBottom: 120, paddingTop: topPad }}>
       <View style={styles.header}>
         <View style={{ flex: 1 }}>
           <Text style={[styles.title, { color: colors.foreground }]}>Live Map</Text>
@@ -46,9 +73,18 @@ export default function AdminLiveMapScreen() {
         <View style={styles.center}><ActivityIndicator color={colors.primary} /></View>
       ) : (
         <>
-          <LiveOfficerMap officers={officers} height={380} onSelectOfficer={openOfficer} />
+          <LiveOfficerMap
+            officers={officers}
+            height={380}
+            onSelectOfficer={openOfficer}
+            focusUserId={focusUserId}
+            focusKey={_hlTs}
+          />
 
-          <View style={styles.list}>
+          <View
+            style={styles.list}
+            onLayout={(e) => { listY.current = e.nativeEvent.layout.y; }}
+          >
             {officers.length === 0 ? (
               <View style={styles.emptyBox}>
                 <Feather name="users" size={36} color={colors.mutedForeground} />
@@ -63,13 +99,25 @@ export default function AdminLiveMapScreen() {
                 const ago = o.lastLocationAt
                   ? formatDistanceToNow(new Date(o.lastLocationAt), { addSuffix: true })
                   : "since clock-in";
+                const isHighlighted = !!focusUserId && o.userId === focusUserId;
                 return (
-                  <TouchableOpacity
+                  <AnimatedTouchable
                     key={o.timeEntryId}
+                    onLayout={(e: any) => { rowOffsets.current[o.userId] = e.nativeEvent.layout.y; }}
                     onPress={() => openOfficer(o.userId)}
                     accessibilityRole="button"
                     accessibilityLabel={`View profile for ${o.firstName} ${o.lastName}`}
-                    style={[styles.card, { backgroundColor: colors.card, borderColor: colors.border }]}
+                    style={[styles.card, {
+                      backgroundColor: isHighlighted
+                        ? flashAnim.interpolate({ inputRange: [0, 1], outputRange: [colors.card, colors.primary + "26"] })
+                        : colors.card,
+                      borderColor: isHighlighted
+                        ? flashAnim.interpolate({ inputRange: [0, 1], outputRange: [colors.border, colors.primary] })
+                        : colors.border,
+                      borderWidth: isHighlighted
+                        ? flashAnim.interpolate({ inputRange: [0, 1], outputRange: [1, 2] })
+                        : 1,
+                    }]}
                   >
                     <View style={[styles.dot, { backgroundColor: "#22c55e" }]} />
                     <View style={{ flex: 1 }}>
@@ -95,7 +143,7 @@ export default function AdminLiveMapScreen() {
                       </TouchableOpacity>
                     )}
                     <Feather name="chevron-right" size={18} color={colors.mutedForeground} />
-                  </TouchableOpacity>
+                  </AnimatedTouchable>
                 );
               })
             )}

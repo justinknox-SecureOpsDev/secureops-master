@@ -28,17 +28,36 @@ export function resolveNotificationTarget(
     }
 
     // Shift lifecycle — assignment, reservation, open vacancy, pre-shift
-    // reminder all live on the shifts tab (admin or employee).
+    // reminder all live on the shifts tab (admin or employee). Carry the
+    // shiftId so the list can scroll to + highlight the exact shift, plus a
+    // filter hint pointing at the tab the shift actually lives under.
     case "shift_assigned":
     case "shift_reserved":
+    case "shift_reminder": {
+      const shiftId = str(d.shiftId);
+      return {
+        pathname: `/${group}/shifts`,
+        params: shiftId ? { shiftId, filter: "upcoming" } : undefined,
+      };
+    }
     case "shift_available":
-    case "shift_vacancy_reminder":
-    case "shift_reminder":
-      return { pathname: `/${group}/shifts` };
+    case "shift_vacancy_reminder": {
+      const shiftId = str(d.shiftId);
+      return {
+        pathname: `/${group}/shifts`,
+        params: shiftId ? { shiftId, filter: "available" } : undefined,
+      };
+    }
 
-    // Clock — forgot-to-clock-out nudge.
-    case "forgot_clock_out":
-      return { pathname: "/(employee)/clock" };
+    // Clock — forgot-to-clock-out nudge. Highlight the open entry on the clock
+    // tab's recent-entries list.
+    case "forgot_clock_out": {
+      const timeEntryId = str(d.timeEntryId);
+      return {
+        pathname: "/(employee)/clock",
+        params: timeEntryId ? { timeEntryId } : undefined,
+      };
+    }
 
     // License / training renewal.
     case "license_expiry_reminder":
@@ -59,11 +78,41 @@ export function resolveNotificationTarget(
 
     // Admin-only alerts. These are only sent to admins; guard on role so a
     // stray payload never routes a non-admin into the admin tab group.
-    case "emergency":
-      return role === "admin" ? { pathname: "/(admin)/incidents" } : null;
-    case "geofence_breach":
-    case "missed_checkpoint":
-      return role === "admin" ? { pathname: "/(admin)/live-map" } : null;
+    case "emergency": {
+      if (role !== "admin") return null;
+      const incidentId = str(d.incidentId);
+      return {
+        pathname: "/(admin)/incidents",
+        params: incidentId ? { incidentId } : undefined,
+      };
+    }
+    case "geofence_breach": {
+      if (role !== "admin") return null;
+      // Center the live map on the breaching officer.
+      const userId = str(d.userId);
+      const siteId = str(d.siteId);
+      const params: Record<string, string> = {};
+      if (userId) params.userId = userId;
+      if (siteId) params.siteId = siteId;
+      return {
+        pathname: "/(admin)/live-map",
+        params: Object.keys(params).length ? params : undefined,
+      };
+    }
+    case "missed_checkpoint": {
+      if (role !== "admin") return null;
+      // The missed-checkpoint payload carries the time entry + site (no userId);
+      // the map resolves the officer from the active time entry.
+      const timeEntryId = str(d.timeEntryId);
+      const siteId = str(d.siteId);
+      const params: Record<string, string> = {};
+      if (timeEntryId) params.timeEntryId = timeEntryId;
+      if (siteId) params.siteId = siteId;
+      return {
+        pathname: "/(admin)/live-map",
+        params: Object.keys(params).length ? params : undefined,
+      };
+    }
     case "high_risk_profile_change": {
       if (role !== "admin") return null;
       const id = str(d.employeeUserId);

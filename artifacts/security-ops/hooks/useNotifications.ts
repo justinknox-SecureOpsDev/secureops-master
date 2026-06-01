@@ -51,7 +51,11 @@ export function useNotifications() {
     const navigateForNotification = (data: unknown): void => {
       const target = resolveNotificationTarget(data, roleRef.current);
       if (!target) return;
-      router.push({ pathname: target.pathname as never, params: target.params });
+      // Stamp a per-tap nonce so the destination screen re-fires its scroll-to /
+      // highlight effect even when the same item is tapped twice in a row (the
+      // id param alone wouldn't change, so the effect wouldn't re-run).
+      const params = { ...(target.params ?? {}), _hlTs: String(Date.now()) };
+      router.push({ pathname: target.pathname as never, params });
     };
 
     void (async () => {

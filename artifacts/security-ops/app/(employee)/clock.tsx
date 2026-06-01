@@ -1,7 +1,9 @@
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useRef } from "react";
 import { useTopPad } from "@/hooks/useTopPad";
-import { View, Text, StyleSheet, TouchableOpacity, ActivityIndicator, Platform, ScrollView, AccessibilityInfo, Modal } from "react-native";
+import { View, Text, StyleSheet, TouchableOpacity, ActivityIndicator, Platform, ScrollView, AccessibilityInfo, Modal, Animated } from "react-native";
 import { useColors } from "@/hooks/useColors";
+import { useHighlightFlash } from "@/hooks/useHighlightFlash";
+import { useLocalSearchParams } from "expo-router";
 import { useClockIn, useClockOut, useGetActiveTimeEntry, getGetActiveTimeEntryQueryKey, useGetTimeEntries, getGetTimeEntriesQueryKey, updateMyLocation, useGetMyClockInSites, getGetMyClockInSitesQueryKey, getGetEmployeeDashboardSummaryQueryKey, getGetShiftsQueryKey } from "@workspace/api-client-react";
 import { Feather } from "@expo/vector-icons";
 import { useQueryClient } from "@tanstack/react-query";
@@ -41,6 +43,27 @@ export default function EmployeeClockScreen() {
     {},
     { query: { queryKey: getGetTimeEntriesQueryKey({}) } },
   );
+
+  // Deep-link highlight: a "forgot to clock out" tap lands here with the open
+  // entry's id so we can scroll to + flash it in the recent-entries list.
+  const { timeEntryId: highlightEntryId, _hlTs } =
+    useLocalSearchParams<{ timeEntryId?: string; _hlTs?: string }>();
+  const scrollRef = useRef<ScrollView>(null);
+  const recentSectionY = useRef(0);
+  const entryOffsets = useRef<Record<string, number>>({});
+  const flashAnim = useHighlightFlash(
+    highlightEntryId ? `${highlightEntryId}:${_hlTs ?? ""}` : null,
+  );
+
+  useEffect(() => {
+    if (!highlightEntryId) return;
+    const t = setTimeout(() => {
+      const rel = entryOffsets.current[highlightEntryId];
+      if (rel == null) return; // entry not in the recent list — leave scroll alone
+      scrollRef.current?.scrollTo({ y: Math.max(0, recentSectionY.current + rel - 24), animated: true });
+    }, 350);
+    return () => clearTimeout(t);
+  }, [highlightEntryId, _hlTs, recentEntries]);
 
   // networkMode "always" is critical here: clocking in/out are time-sensitive,
   // user-initiated actions that must NEVER be silently paused by React Query's
@@ -205,7 +228,7 @@ export default function EmployeeClockScreen() {
   };
 
   return (
-    <ScrollView style={[styles.container, { backgroundColor: colors.background }]} contentContainerStyle={{ paddingBottom: 100 }}>
+    <ScrollView ref={scrollRef} style={[styles.container, { backgroundColor: colors.background }]} contentContainerStyle={{ paddingBottom: 100 }}>
       <View style={[styles.topBar, { paddingTop: topPad + 12, borderBottomColor: colors.border }]}>
         <Text style={[styles.pageTitle, { color: colors.foreground }]} accessibilityRole="header">Time Clock</Text>
         <TouchableOpacity
@@ -346,12 +369,30 @@ export default function EmployeeClockScreen() {
       )}
 
       {(recentEntries?.length ?? 0) > 0 && (
-        <View style={styles.section}>
+        <View
+          style={styles.section}
+          onLayout={(e) => { recentSectionY.current = e.nativeEvent.layout.y; }}
+        >
           <Text style={[styles.sectionTitle, { color: colors.accent }]}>RECENT TIME ENTRIES</Text>
           {recentEntries!.slice(0, 5).map((entry: any) => {
             const hrs = entry.hoursWorked ? parseFloat(entry.hoursWorked as any).toFixed(2) : null;
+            const isHighlighted = highlightEntryId === entry.id;
             return (
-              <View key={entry.id} style={[styles.entryCard, { backgroundColor: colors.card, borderColor: colors.border }]}>
+              <Animated.View
+                key={entry.id}
+                onLayout={(e) => { entryOffsets.current[entry.id] = e.nativeEvent.layout.y; }}
+                style={[styles.entryCard, {
+                  backgroundColor: isHighlighted
+                    ? flashAnim.interpolate({ inputRange: [0, 1], outputRange: [colors.card, colors.primary + "26"] })
+                    : colors.card,
+                  borderColor: isHighlighted
+                    ? flashAnim.interpolate({ inputRange: [0, 1], outputRange: [colors.border, colors.primary] })
+                    : colors.border,
+                  borderWidth: isHighlighted
+                    ? flashAnim.interpolate({ inputRange: [0, 1], outputRange: [1, 2] })
+                    : 1,
+                }]}
+              >
                 <View style={styles.entryHeader}>
                   <Text style={[styles.entryDate, { color: colors.foreground }]}>
                     {new Date(entry.clockInTime).toLocaleDateString([], { weekday: "short", month: "short", day: "numeric" })}
@@ -382,7 +423,7 @@ export default function EmployeeClockScreen() {
                   )}
                 </View>
                 {entry.notes && <Text style={[styles.entryNotes, { color: colors.mutedForeground }]}>{entry.notes}</Text>}
-              </View>
+              </Animated.View>
             );
           })}
         </View>
