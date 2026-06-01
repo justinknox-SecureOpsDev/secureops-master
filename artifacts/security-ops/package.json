@@ -10,6 +10,7 @@
     "build": "rm -rf web-dist && pnpm exec expo export --platform web --output-dir web-dist",
     "serve": "node server/serve-web.js",
     "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "vitest run",
     "submit:ios": "./node_modules/.bin/eas submit --platform ios --profile production --latest"
   },
   "devDependencies": {
@@ -56,6 +57,7 @@
     "react-native-web": "^0.21.0",
     "react-native-worklets": "0.5.1",
     "typescript": "~5.9.2",
+    "vitest": "^4.1.6",
     "zod": "catalog:",
     "zod-validation-error": "^3.4.0"
   },
