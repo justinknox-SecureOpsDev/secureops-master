@@ -18,6 +18,14 @@ import {
   incidentsTable,
   licensesTable,
   trainingCertificationsTable,
+  subcontractorsTable,
+  subcontractorCoisTable,
+  subcontractorContractsTable,
+  subcontractorInvoicesTable,
+  insertSubcontractorSchema,
+  insertSubcontractorCoiSchema,
+  insertSubcontractorContractSchema,
+  insertSubcontractorInvoiceSchema,
   passwordResetTokensTable,
   insertEmployeeSchema,
   insertClientSchema,
@@ -382,6 +390,54 @@ const tables: Record<string, TableConfig> = {
     coerceWrite: (v) => v,
     importSupported: false,
     label: "Training certification",
+  },
+  subcontractors: {
+    table: subcontractorsTable,
+    insertSchema: insertSubcontractorSchema as unknown as z.ZodSchema<any>,
+    searchColumns: [subcontractorsTable.companyName, subcontractorsTable.contactName, subcontractorsTable.contactEmail, subcontractorsTable.status],
+    orderBy: subcontractorsTable.companyName,
+    coerceWrite: (v) => applyIntCoercion(v, ["paymentTermsDays"]),
+    importSupported: true,
+    label: "Subcontractor",
+  },
+  subcontractor_cois: {
+    table: subcontractorCoisTable,
+    insertSchema: insertSubcontractorCoiSchema as unknown as z.ZodSchema<any>,
+    searchColumns: [subcontractorCoisTable.coverageType, subcontractorCoisTable.insurer, subcontractorCoisTable.policyNumber],
+    orderBy: subcontractorCoisTable.expiryDate,
+    coerceWrite: (v) =>
+      // effectiveDate / expiryDate are `date` columns — drizzle-zod expects
+      // ISO date strings, NOT Date objects, so they pass through untouched
+      // (same as licenses.expiryDate).
+      applyNumericCoercion(v, ["coverageAmount"]),
+    importSupported: false,
+    label: "Certificate of Insurance",
+  },
+  subcontractor_contracts: {
+    table: subcontractorContractsTable,
+    insertSchema: insertSubcontractorContractSchema as unknown as z.ZodSchema<any>,
+    searchColumns: [subcontractorContractsTable.title, subcontractorContractsTable.contractType, subcontractorContractsTable.status],
+    orderBy: subcontractorContractsTable.createdAt,
+    coerceWrite: (v) =>
+      // startDate / endDate are `date` columns — pass ISO strings through.
+      applyNumericCoercion(v, ["value"]),
+    importSupported: false,
+    label: "Subcontractor contract",
+  },
+  subcontractor_invoices: {
+    table: subcontractorInvoicesTable,
+    insertSchema: insertSubcontractorInvoiceSchema as unknown as z.ZodSchema<any>,
+    searchColumns: [subcontractorInvoicesTable.invoiceNumber, subcontractorInvoicesTable.description, subcontractorInvoicesTable.status],
+    orderBy: subcontractorInvoicesTable.createdAt,
+    coerceWrite: (v) => {
+      // issueDate / dueDate are `date` columns (ISO strings); approvedAt /
+      // paidAt are `timestamp` columns and DO need Date coercion.
+      let out = applyDateCoercion(v, ["approvedAt", "paidAt"]);
+      out = applyNumericCoercion(out, ["subtotal", "taxAmount", "totalAmount"]);
+      return out;
+    },
+    importSupported: false,
+    label: "Subcontractor invoice",
   },
 };
 

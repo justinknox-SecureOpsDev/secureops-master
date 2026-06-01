@@ -4,3 +4,5 @@
 - [Codegen breaks Metro resolver](codegen-metro-stale-resolver.md) — after `api-spec codegen`, restart the expo workflow; orval's folder-clean leaves Metro caching "Unable to resolve ./generated/api".
 - [One-open-time-entry invariant](single-open-time-entry-invariant.md) — no DB uniqueness on open time entries per officer; clock-in paths must guard concurrency (FOR UPDATE on users row) themselves.
 - [requireAuth admits client role](auth-requireauth-admits-client.md) — bare requireAuth lets external client-portal users in too; staff/officer-only internal-data endpoints must use requireStaff, not requireAuth.
+- [Drizzle date vs timestamp coercion](drizzle-date-vs-timestamp-coercion.md) — pg `date` cols want ISO strings, `timestamp` cols want Date objects; only coerce timestamps in admin CRUD.
+- [Pay-run export atomic-claim](pay-run-export-atomic-claim.md) — AP/pay-run CSV rows must come from UPDATE…RETURNING claim (status=approved only), not read-then-update, or you double-pay.

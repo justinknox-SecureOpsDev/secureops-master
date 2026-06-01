@@ -38,3 +38,7 @@ export * from "./radioChannels";
 export * from "./radioTransmissions";
 export * from "./locationPings";
 export * from "./notifications";
+export * from "./subcontractors";
+export * from "./subcontractorCois";
+export * from "./subcontractorContracts";
+export * from "./subcontractorInvoices";

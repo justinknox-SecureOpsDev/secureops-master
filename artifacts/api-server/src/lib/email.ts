@@ -633,6 +633,58 @@ export function renderLicenseExpiryEmail(opts: {
   return { subject, text, html };
 }
 
+export function renderCoiExpiryEmail(opts: {
+  companyName: string;
+  coverageType: string;
+  policyNumber: string | null;
+  insurer: string | null;
+  expiryDate: string;
+  daysRemaining: number;
+}): { subject: string; text: string; html: string } {
+  const urgency = opts.daysRemaining <= 7 ? "URGENT" : opts.daysRemaining <= 14 ? "Action needed" : opts.daysRemaining <= 30 ? "Reminder" : "Heads up";
+  const coverageLabel = opts.coverageType.replace(/_/g, " ");
+  const subject = `${urgency}: ${opts.companyName} insurance (${coverageLabel}) expires in ${opts.daysRemaining} days`;
+  const headline = opts.daysRemaining > 30
+    ? `A subcontractor's certificate of insurance is approaching expiry — please request an updated COI from ${opts.companyName} before it lapses.`
+    : `A subcontractor's certificate of insurance is due to expire soon. An uninsured subcontractor should not be performing work.`;
+  const text = [
+    "Hi team,",
+    "",
+    headline,
+    "",
+    `  Subcontractor:  ${opts.companyName}`,
+    `  Coverage:       ${coverageLabel}`,
+    `  Insurer:        ${opts.insurer ?? "—"}`,
+    `  Policy #:       ${opts.policyNumber ?? "—"}`,
+    `  Expires:        ${opts.expiryDate}`,
+    `  Days left:      ${opts.daysRemaining}`,
+    "",
+    "Request an updated certificate of insurance and upload it from the Subcontractors area in the admin portal.",
+    "",
+    `— ${brand.companyName}`,
+  ].join("\n");
+  const accent = opts.daysRemaining <= 7 ? "#a33" : "#c9a84c";
+  const html = `
+    <div style="font-family:Georgia,serif;max-width:560px;margin:0 auto;color:#080c18">
+      <h2 style="color:#080c18">${escapeHtml(urgency)}: subcontractor insurance expiring</h2>
+      <p>Hi team,</p>
+      <p>${escapeHtml(headline)}</p>
+      <div style="background:#f6f1e1;padding:14px 16px;border-left:3px solid ${accent};margin:18px 0;border-radius:4px">
+        <div><strong>Subcontractor:</strong> ${escapeHtml(opts.companyName)}</div>
+        <div><strong>Coverage:</strong> ${escapeHtml(coverageLabel)}</div>
+        <div><strong>Insurer:</strong> ${escapeHtml(opts.insurer ?? "—")}</div>
+        <div><strong>Policy #:</strong> ${escapeHtml(opts.policyNumber ?? "—")}</div>
+        <div><strong>Expires:</strong> ${escapeHtml(opts.expiryDate)}</div>
+        <div><strong>Days remaining:</strong> ${opts.daysRemaining}</div>
+      </div>
+      <p>Request an updated certificate of insurance and upload it from the Subcontractors area in the admin portal.</p>
+      <hr style="border:none;border-top:2px solid #c9a84c;margin:24px 0"/>
+      <p style="color:#080c18;font-weight:bold;margin:0">${brand.companyName}</p>
+    </div>
+  `;
+  return { subject, text, html };
+}
+
 /**
  * Render the admin alert for one or more high-risk self-edits by a single
  * officer, coalesced over a short digest window (default 15 min) so a

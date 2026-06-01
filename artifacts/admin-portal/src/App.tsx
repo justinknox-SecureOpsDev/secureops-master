@@ -16,6 +16,7 @@ import { ApplicationsPage } from "@/pages/Applications";
 import { OnboardingPage } from "@/pages/Onboarding";
 import { PoliciesPage } from "@/pages/Policies";
 import PayRunPage from "@/pages/PayRun";
+import SubcontractorPayRunPage from "@/pages/SubcontractorPayRun";
 import PayrollBoardPage from "@/pages/PayrollBoard";
 import InvoiceBoardPage from "@/pages/InvoiceBoard";
 import { InvitationsPage } from "@/pages/Invitations";
@@ -135,6 +136,7 @@ function Routed() {
           <Route path="/payroll/board" component={PayrollBoardPage} />
           <Route path="/invoices/board" component={InvoiceBoardPage} />
           <Route path="/payroll/pay-run" component={PayRunPage} />
+          <Route path="/subcontractors/pay-run" component={SubcontractorPayRunPage} />
           <Route path="/audit-log" component={AuditLogPage} />
           <Route path="/swap-requests" component={SwapRequestsPage} />
           <Route path="/hr/license-renewals" component={LicenseRenewalsPage} />

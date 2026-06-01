@@ -35,6 +35,7 @@ import radioRouter from "./radio";
 import dispatchRouter from "./dispatch";
 import brandConfigRouter from "./brandConfig";
 import clientPortalRouter from "./clientPortal";
+import subcontractorPayRunRouter from "./subcontractorPayRun";
 import { auditLogMiddleware } from "../lib/auditLog";
 
 const router: IRouter = Router();
@@ -82,5 +83,6 @@ router.use(exportsRouter);
 router.use(radioRouter);
 router.use(dispatchRouter);
 router.use(clientPortalRouter);
+router.use(subcontractorPayRunRouter);
 
 export default router;

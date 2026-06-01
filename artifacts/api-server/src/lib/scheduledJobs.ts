@@ -13,9 +13,11 @@ import {
   patrolScansTable,
   highRiskChangeQueueTable,
   locationPingsTable,
+  subcontractorCoisTable,
+  subcontractorsTable,
 } from "@workspace/db";
 import { logger } from "./logger";
-import { sendEmail, renderLicenseExpiryEmail, renderTrainingExpiryEmail, renderHighRiskProfileChangeEmail } from "./email";
+import { sendEmail, renderLicenseExpiryEmail, renderTrainingExpiryEmail, renderHighRiskProfileChangeEmail, renderCoiExpiryEmail } from "./email";
 import { sendPushToUsers } from "./push";
 import { CHANGE_FIELD_LABELS } from "./employeeChangeLog";
 import { lockEndedWeekInvoices } from "./invoiceSync";
@@ -213,6 +215,144 @@ export async function sendLicenseExpiryReminders(): Promise<void> {
     } catch (err) {
       logger.error({ err }, "[license-expiry] reminder job failed");
     }
+}
+
+/**
+ * Subcontractor COI (certificate of insurance) expiry reminders. Mirrors the
+ * license-expiry job: tiered reminders at 60/30/14/7 days, idempotent via
+ * `last_reminder_tier` + `last_reminder_for_expiry` (a renewed COI with a new
+ * expiry date re-arms automatically). Unlike licenses, the audience is the
+ * ACTIVE ADMIN team (subcontractors are vendors, not portal users) — every
+ * due COI fans out a single push + email per admin so HR can chase an updated
+ * certificate before coverage lapses.
+ */
+export async function sendCoiExpiryReminders(): Promise<void> {
+  try {
+    const tiers = [60, 30, 14, 7];
+    const today = new Date();
+    const todayDateOnly = today.toISOString().slice(0, 10);
+
+    // Audience is the active admin team. Pre-fetch once; if there are no
+    // admins there is nobody to notify, so skip without stamping bookkeeping
+    // (a COI must still be remindable once an admin exists).
+    const admins = await db
+      .select({ id: usersTable.id, email: usersTable.email })
+      .from(usersTable)
+      .where(and(eq(usersTable.role, "admin"), eq(usersTable.status, "active")));
+    if (admins.length === 0) return;
+    const adminIds = admins.map((a) => a.id);
+    const adminEmails = admins.map((a) => a.email).filter((e): e is string => !!e);
+
+    let totalSent = 0;
+    for (const tier of tiers) {
+      const cutoff = new Date(today.getTime() + tier * 24 * 60 * 60 * 1000)
+        .toISOString()
+        .slice(0, 10);
+
+      const candidates = await db
+        .select({
+          id: subcontractorCoisTable.id,
+          coverageType: subcontractorCoisTable.coverageType,
+          insurer: subcontractorCoisTable.insurer,
+          policyNumber: subcontractorCoisTable.policyNumber,
+          expiryDate: subcontractorCoisTable.expiryDate,
+          companyName: subcontractorsTable.companyName,
+        })
+        .from(subcontractorCoisTable)
+        .innerJoin(subcontractorsTable, eq(subcontractorsTable.id, subcontractorCoisTable.subcontractorId))
+        .where(
+          and(
+            gte(subcontractorCoisTable.expiryDate, todayDateOnly),
+            lte(subcontractorCoisTable.expiryDate, cutoff),
+            eq(subcontractorsTable.status, "active"),
+            or(
+              isNull(subcontractorCoisTable.lastReminderForExpiry),
+              ne(subcontractorCoisTable.lastReminderForExpiry, subcontractorCoisTable.expiryDate),
+              isNull(subcontractorCoisTable.lastReminderTier),
+              gt(subcontractorCoisTable.lastReminderTier, tier),
+            ),
+          ),
+        );
+
+      for (const coi of candidates) {
+        // Atomically claim this (COI, tier) pair so overlapping ticks / a
+        // second instance can never double-send.
+        const claimed = await db
+          .update(subcontractorCoisTable)
+          .set({
+            lastReminderTier: tier,
+            lastReminderSentAt: new Date(),
+            lastReminderForExpiry: coi.expiryDate,
+          })
+          .where(
+            and(
+              eq(subcontractorCoisTable.id, coi.id),
+              or(
+                isNull(subcontractorCoisTable.lastReminderForExpiry),
+                ne(subcontractorCoisTable.lastReminderForExpiry, coi.expiryDate),
+                isNull(subcontractorCoisTable.lastReminderTier),
+                gt(subcontractorCoisTable.lastReminderTier, tier),
+              ),
+            ),
+          )
+          .returning({ id: subcontractorCoisTable.id });
+
+        if (claimed.length === 0) continue; // someone else got it
+
+        const expiry = new Date(coi.expiryDate);
+        const daysRemaining = Math.max(
+          0,
+          Math.ceil((expiry.getTime() - today.getTime()) / (24 * 60 * 60 * 1000)),
+        );
+        const tpl = renderCoiExpiryEmail({
+          companyName: coi.companyName,
+          coverageType: coi.coverageType,
+          policyNumber: coi.policyNumber,
+          insurer: coi.insurer,
+          expiryDate: coi.expiryDate,
+          daysRemaining,
+        });
+
+        let emailOk = false;
+        let pushOk = false;
+        try {
+          const results = await Promise.all(
+            adminEmails.map((to) => sendEmail({ to, subject: tpl.subject, text: tpl.text, html: tpl.html })),
+          );
+          emailOk = results.some(Boolean);
+        } catch (err) {
+          logger.warn({ err, coiId: coi.id }, "[coi-expiry] email send failed");
+        }
+        try {
+          await sendPushToUsers(adminIds, {
+            title: `Subcontractor insurance expires in ${daysRemaining} days`,
+            body: `${coi.companyName}'s ${coi.coverageType.replace(/_/g, " ")} COI expires on ${coi.expiryDate}. Request an updated certificate.`,
+            data: { type: "coi_expiry_reminder", coiId: coi.id, tier },
+          });
+          pushOk = true;
+        } catch (err) {
+          logger.warn({ err, coiId: coi.id }, "[coi-expiry] push send failed");
+        }
+
+        // Neither channel delivered — roll back bookkeeping so the next tick
+        // retries.
+        if (!emailOk && !pushOk) {
+          await db
+            .update(subcontractorCoisTable)
+            .set({ lastReminderTier: null, lastReminderSentAt: null, lastReminderForExpiry: null })
+            .where(eq(subcontractorCoisTable.id, coi.id))
+            .catch((err) => logger.warn({ err, coiId: coi.id }, "[coi-expiry] failed to rollback bookkeeping"));
+          continue;
+        }
+        totalSent += 1;
+      }
+    }
+    if (totalSent > 0) {
+      logger.info({ totalSent }, "Sent COI expiry reminders");
+    }
+  } catch (err) {
+    logger.error({ err }, "[coi-expiry] reminder job failed");
+  }
 }
 
 /**
@@ -1050,6 +1190,8 @@ export function startScheduledJobs(intervalMs: number = HOUR_MS): NodeJS.Timeout
   schedule("license-expiry", sendLicenseExpiryReminders, intervalMs);
   // Training-cert expiry — same hourly cadence as license expiry.
   schedule("training-expiry", sendTrainingExpiryReminders, intervalMs);
+  // Subcontractor COI expiry — hourly, idempotent, fans out to active admins.
+  schedule("coi-expiry", sendCoiExpiryReminders, intervalMs);
   // Pre-shift reminders — every 5 minutes is the right cadence for the
   // 30-minute window without being too chatty.
   schedule("shift-reminders", sendPreShiftReminders, 5 * MIN_MS);

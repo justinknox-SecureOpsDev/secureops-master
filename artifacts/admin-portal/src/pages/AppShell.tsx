@@ -5,7 +5,7 @@ import {
   Database, Banknote, Receipt, Wallet, MailPlus,
   AlertTriangle, ShieldCheck, Repeat, KeyRound, IdCard, Link2, Download,
   Radio as RadioIcon, Radar, MessageCircle, Users as UsersIcon,
-  Briefcase, Calculator, Shield, Settings, CalendarRange, Menu, X,
+  Briefcase, Calculator, Shield, Settings, CalendarRange, Menu, X, Building2,
   type LucideIcon,
 } from "lucide-react";
 import { TABLES } from "@/lib/tables";
@@ -91,6 +91,12 @@ type NavGroup = {
 };
 
 const ACCOUNTING_TABLE_NAMES = new Set(["payroll_entries", "invoices"]);
+const SUBCONTRACTOR_TABLE_NAMES = new Set([
+  "subcontractors",
+  "subcontractor_cois",
+  "subcontractor_contracts",
+  "subcontractor_invoices",
+]);
 
 export function AppShell({ children }: { children: React.ReactNode }) {
   const { user, logout } = useAuth();
@@ -148,7 +154,17 @@ export function AppShell({ children }: { children: React.ReactNode }) {
       { href: "/exports", label: "Exports", Icon: Download },
     ];
 
-    const operationsTables = TABLES.filter((t) => !ACCOUNTING_TABLE_NAMES.has(t.name));
+    const operationsTables = TABLES.filter(
+      (t) => !ACCOUNTING_TABLE_NAMES.has(t.name) && !SUBCONTRACTOR_TABLE_NAMES.has(t.name),
+    );
+
+    const subcontractorLinks: LinkItem[] = [
+      { href: "/tables/subcontractors", label: "Subcontractors", Icon: Building2 },
+      { href: "/tables/subcontractor_cois", label: "Certificates of Insurance", Icon: ShieldCheck },
+      { href: "/tables/subcontractor_contracts", label: "Contracts", Icon: FileText },
+      { href: "/tables/subcontractor_invoices", label: "Invoices", Icon: Receipt },
+      { href: "/subcontractors/pay-run", label: "Pay Run", Icon: Banknote },
+    ];
     const operationsLinks: LinkItem[] = [
       { href: "/shifts/calendar", label: "Shift Calendar", Icon: CalendarRange },
       ...operationsTables.map((t) => ({
@@ -209,6 +225,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
       staffingGroup,
       { key: "hr", label: "Human Resources", Icon: Briefcase, items: hrLinks },
       { key: "accounting", label: "Accounting", Icon: Calculator, items: accountingLinks },
+      { key: "subcontractors", label: "Subcontractors", Icon: Building2, items: subcontractorLinks },
       { key: "security", label: "Security", Icon: Shield, items: securityLinks },
       { key: "operations", label: "Operations", Icon: Database, items: operationsLinks },
       { key: "settings", label: "Settings", Icon: Settings, items: settingsLinks },
