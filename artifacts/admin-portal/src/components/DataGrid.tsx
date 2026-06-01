@@ -15,7 +15,7 @@ import {
 import { Label } from "@/components/ui/label";
 import { Link } from "wouter";
 import { type TableDescriptor, type Field, singularize } from "@/lib/tables";
-import { api, getToken } from "@/lib/api";
+import { api, getToken, ApiError } from "@/lib/api";
 import { formatCell } from "@/lib/format";
 import { useFkOptions } from "@/lib/fk";
 import { openSignedObject } from "@/lib/upload";
@@ -374,22 +374,59 @@ export function DataGrid({
   // change the row's page.
   const locateSigRef = useRef<string | null>(null);
 
+  function locateParams(extra: Record<string, string>): URLSearchParams {
+    const params = new URLSearchParams(extra);
+    if (debounced) params.set("search", debounced);
+    params.set("sort", sort.field);
+    params.set("dir", sort.dir);
+    if (filter) {
+      for (const [k, v] of Object.entries(filter)) {
+        if (v) params.set(`filter[${k}]`, v);
+      }
+    }
+    return params;
+  }
+
+  // Fast path: ask the server for the row's global position under the current
+  // sort/filter/search and jump straight to its page. Returns true once the
+  // page has been resolved (row found OR authoritatively absent), false when the
+  // endpoint is unavailable so the caller falls back to the batch scan.
+  async function locateViaPosition(id: string): Promise<boolean> {
+    try {
+      const params = locateParams({ pageSize: String(pageSize) });
+      const pos = await api<{ index: number; page: number }>(
+        `/admin/tables/${descriptor.name}/${id}/position?${params}`,
+      );
+      if (typeof pos.page === "number" && pos.page >= 0) {
+        setPage(pos.page);
+      } else if (typeof pos.index === "number" && pos.index >= 0) {
+        setPage(Math.floor(pos.index / pageSize));
+      }
+      return true;
+    } catch (e) {
+      // Only the endpoint's OWN "row not in result set" 404 is authoritative
+      // (deleted / filtered out) — a scan would just waste requests, so skip it.
+      // A bare 404 (endpoint missing on an older server) or any other error
+      // means the fast path is unavailable → fall back to the batch scan.
+      const code = e instanceof ApiError
+        ? (e.data as { code?: string } | undefined)?.code
+        : undefined;
+      if (e instanceof ApiError && e.status === 404 && code === "row_not_in_result_set") {
+        return true;
+      }
+      return false;
+    }
+  }
+
   async function locateFocusRow(id: string) {
     setLocating(true);
     try {
+      if (await locateViaPosition(id)) return;
+      // Fallback: scan the same sorted/filtered result set in batches. Kept for
+      // resilience if the position endpoint is unavailable.
       let offset = 0;
       while (true) {
-        const params = new URLSearchParams();
-        params.set("limit", String(LOCATE_BATCH));
-        params.set("offset", String(offset));
-        if (debounced) params.set("search", debounced);
-        params.set("sort", sort.field);
-        params.set("dir", sort.dir);
-        if (filter) {
-          for (const [k, v] of Object.entries(filter)) {
-            if (v) params.set(`filter[${k}]`, v);
-          }
-        }
+        const params = locateParams({ limit: String(LOCATE_BATCH), offset: String(offset) });
         const data = await api<{ rows: Row[]; total: number }>(
           `/admin/tables/${descriptor.name}?${params}`,
         );

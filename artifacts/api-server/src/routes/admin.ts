@@ -793,35 +793,26 @@ async function resolveImportFks(
 
 // ---- Routes ----------------------------------------------------------------
 
-router.get("/admin/tables", requireAdmin, (_req, res): void => {
-  const list = Object.entries(tables).map(([name, cfg]) => ({
-    name,
-    label: cfg.label,
-    importSupported: cfg.importSupported,
-  }));
-  res.json(list);
-});
-
-router.get("/admin/tables/:table", requireAdmin, async (req, res): Promise<void> => {
-  const tableName = String(req.params.table);
-  const cfg = getConfig(tableName);
-  if (!cfg) {
-    res.status(404).json({ error: "Not Found", message: `Unknown table '${tableName}'` });
-    return;
-  }
-
-  const limitRaw = Number(req.query.limit ?? 50);
-  const offsetRaw = Number(req.query.offset ?? 0);
-  const limit = Math.min(Math.max(1, Number.isFinite(limitRaw) ? limitRaw : 50), 500);
-  const offset = Math.max(0, Number.isFinite(offsetRaw) ? offsetRaw : 0);
-  const search = typeof req.query.search === "string" ? req.query.search.trim() : "";
-  const sortField = typeof req.query.sort === "string" ? req.query.sort : "";
-  const sortDir = req.query.dir === "asc" ? "asc" : "desc";
+/**
+ * Build the shared WHERE clause + sort column/dir for the generic table list
+ * from a request's query (search / filter[col] / sort / dir). Extracted so the
+ * list handler and the row-position handler stay byte-for-byte identical in how
+ * they filter and order — otherwise a deep-link could resolve to a page the
+ * list never renders the row on.
+ */
+function buildListQueryParts(
+  cfg: TableConfig,
+  tableName: string,
+  query: Request["query"],
+): { where: any; sortColumn: AnyColumn; sortDir: "asc" | "desc" } {
+  const search = typeof query.search === "string" ? query.search.trim() : "";
+  const sortField = typeof query.sort === "string" ? query.sort : "";
+  const sortDir = query.dir === "asc" ? "asc" : "desc";
 
   // Equality filters via ?filter[col]=val. Whitelisted to actual table columns
   // so callers can't inject arbitrary SQL identifiers.
   const filterClauses = [] as any[];
-  const rawFilter = req.query.filter;
+  const rawFilter = query.filter;
   if (rawFilter && typeof rawFilter === "object" && !Array.isArray(rawFilter)) {
     for (const [col, val] of Object.entries(rawFilter as Record<string, unknown>)) {
       const column = (cfg.table as any)[col];
@@ -859,10 +850,40 @@ router.get("/admin/tables/:table", requireAdmin, async (req, res): Promise<void>
     : searchClause;
 
   const sortColumn = sortField && (cfg.table as any)[sortField] ? (cfg.table as any)[sortField] : cfg.orderBy;
+  return { where, sortColumn, sortDir };
+}
+
+router.get("/admin/tables", requireAdmin, (_req, res): void => {
+  const list = Object.entries(tables).map(([name, cfg]) => ({
+    name,
+    label: cfg.label,
+    importSupported: cfg.importSupported,
+  }));
+  res.json(list);
+});
+
+router.get("/admin/tables/:table", requireAdmin, async (req, res): Promise<void> => {
+  const tableName = String(req.params.table);
+  const cfg = getConfig(tableName);
+  if (!cfg) {
+    res.status(404).json({ error: "Not Found", message: `Unknown table '${tableName}'` });
+    return;
+  }
+
+  const limitRaw = Number(req.query.limit ?? 50);
+  const offsetRaw = Number(req.query.offset ?? 0);
+  const limit = Math.min(Math.max(1, Number.isFinite(limitRaw) ? limitRaw : 50), 500);
+  const offset = Math.max(0, Number.isFinite(offsetRaw) ? offsetRaw : 0);
+
+  const { where, sortColumn, sortDir } = buildListQueryParts(cfg, tableName, req.query);
+  // Stable secondary sort on the primary key so ties on the chosen column have a
+  // deterministic order. Without this, two rows sharing a sort value could swap
+  // pages between requests, which would also break the row-position deep-link.
+  const idColumn = (cfg.table as any).id as AnyColumn;
   const order = sortDir === "asc" ? asc(sortColumn) : desc(sortColumn);
 
   const [rows, totalRows] = await Promise.all([
-    db.select().from(cfg.table).where(where).orderBy(order).limit(limit).offset(offset),
+    db.select().from(cfg.table).where(where).orderBy(order, asc(idColumn)).limit(limit).offset(offset),
     db.select({ count: sql<number>`count(*)::int` }).from(cfg.table).where(where),
   ]);
 
@@ -902,6 +923,64 @@ router.get("/admin/tables/:table/:id", requireAdmin, async (req, res): Promise<v
     return;
   }
   res.json(row);
+});
+
+// Row position — returns a row's 0-based global index (and the page it lands on)
+// under the SAME sort/filter/search the list grid uses, computed entirely in the
+// DB via a single window-function query. Powers instant deep-link focus: the
+// grid jumps straight to the right page instead of scanning the result set in
+// client-side batches. Uses the identical (sort, id) ordering as the list route
+// so the page returned here is exactly where the list renders the row.
+router.get("/admin/tables/:table/:id/position", requireAdmin, async (req, res): Promise<void> => {
+  const tableName = String(req.params.table);
+  const id = String(req.params.id);
+  const cfg = getConfig(tableName);
+  if (!cfg) {
+    res.status(404).json({ error: "Not Found", message: `Unknown table '${tableName}'` });
+    return;
+  }
+
+  const pageSizeRaw = Number(req.query.pageSize ?? 25);
+  const pageSize = Math.min(Math.max(1, Number.isFinite(pageSizeRaw) ? pageSizeRaw : 25), 500);
+
+  const { where, sortColumn, sortDir } = buildListQueryParts(cfg, tableName, req.query);
+  const idColumn = (cfg.table as any).id as AnyColumn;
+  // Match the list route's ORDER BY exactly (chosen column + id tiebreaker) so
+  // row_number() yields the row's real position in the rendered list.
+  const orderSql = sortDir === "asc"
+    ? sql`${sortColumn} asc, ${idColumn} asc`
+    : sql`${sortColumn} desc, ${idColumn} asc`;
+
+  const ranked = db
+    .select({
+      id: sql`${idColumn}`.as("rid"),
+      idx: sql<number>`(row_number() over (order by ${orderSql}) - 1)::int`.as("idx"),
+    })
+    .from(cfg.table)
+    .where(where)
+    .as("ranked");
+
+  const found = (await db
+    .select({ idx: ranked.idx })
+    .from(ranked)
+    .where(eq(ranked.id, id))
+    .limit(1)) as Array<{ idx: number }>;
+
+  if (found.length === 0) {
+    // Row isn't in the filtered/searched set (deleted, filtered out, or wrong
+    // id). The `code` marker lets the client tell THIS authoritative 404 apart
+    // from a generic missing-route 404 (older server without this endpoint) so
+    // it only skips the fallback scan when the row is genuinely absent.
+    res.status(404).json({
+      error: "Not Found",
+      code: "row_not_in_result_set",
+      message: `${tableName}/${id} not in result set`,
+    });
+    return;
+  }
+
+  const index = found[0].idx;
+  res.json({ id, index, page: Math.floor(index / pageSize), pageSize });
 });
 
 router.post("/admin/tables/:table", requireAdmin, async (req, res): Promise<void> => {
