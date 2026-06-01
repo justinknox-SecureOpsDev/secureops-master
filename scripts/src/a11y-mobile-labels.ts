@@ -49,6 +49,34 @@ const OFFICER_SCREEN_GLOBS = [
   "components/chat/ChatRoomsList.tsx",
 ];
 
+// Admin-facing screens that have been made screen-reader friendly and must
+// stay that way. Chat screens (app/(admin)/chat.tsx, chat/[id].tsx) are
+// intentionally excluded — they're hardened under a separate chat-a11y effort.
+// NB: expo-router dynamic-route filenames contain literal square brackets
+// (e.g. [id].tsx). node:fs globSync treats `[...]` as a character class, so the
+// brackets are escaped POSIX-style as `[[]` and `[]]` to match them literally.
+const ADMIN_SCREEN_GLOBS = [
+  "app/(admin)/dashboard.tsx",
+  "app/(admin)/employees.tsx",
+  "app/(admin)/employees/[[]id[]].tsx",
+  "app/(admin)/employees/create.tsx",
+  "app/(admin)/incidents.tsx",
+  "app/(admin)/live-map.tsx",
+  "app/(admin)/payroll.tsx",
+  "app/(admin)/invoices.tsx",
+  "app/(admin)/licenses.tsx",
+  "app/(admin)/license-approvals.tsx",
+  "app/(admin)/clients.tsx",
+  "app/(admin)/clients/[[]id[]].tsx",
+  "app/(admin)/time-approval.tsx",
+  "app/(admin)/shifts/index.tsx",
+  "app/(admin)/shifts/[[]id[]].tsx",
+  "app/(admin)/shifts/create.tsx",
+  "app/(admin)/shifts/edit/[[]shiftId[]].tsx",
+];
+
+const SCREEN_GLOBS = [...OFFICER_SCREEN_GLOBS, ...ADMIN_SCREEN_GLOBS];
+
 // Interactive components that must expose a label or role to assistive tech.
 const INTERACTIVE_TAGS = new Set([
   "TouchableOpacity",
@@ -142,7 +170,7 @@ function scanFile(absPath: string, label: string): Finding[] {
 
 function main(): void {
   const files: string[] = [];
-  for (const pattern of OFFICER_SCREEN_GLOBS) {
+  for (const pattern of SCREEN_GLOBS) {
     const matches = globSync(pattern, { cwd: APP_ROOT });
     if (matches.length === 0) {
       console.error(
@@ -153,11 +181,11 @@ function main(): void {
   }
 
   if (files.length === 0) {
-    console.error("No officer screens to scan — check OFFICER_SCREEN_GLOBS.");
+    console.error("No screens to scan — check OFFICER_SCREEN_GLOBS / ADMIN_SCREEN_GLOBS.");
     process.exit(1);
   }
 
-  console.log(`Mobile a11y label scan over ${files.length} officer screen(s):`);
+  console.log(`Mobile a11y label scan over ${files.length} screen(s):`);
 
   const allFindings: Finding[] = [];
   for (const rel of [...new Set(files)].sort()) {

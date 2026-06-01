@@ -109,6 +109,7 @@ export default function AdminEmployeesScreen() {
           value={search}
           onChangeText={setSearch}
           autoCapitalize="none"
+          accessibilityLabel="Search personnel by name or email"
         />
         {search.length > 0 && (
           <TouchableOpacity onPress={() => setSearch("")} accessibilityRole="button" accessibilityLabel="Clear search">
