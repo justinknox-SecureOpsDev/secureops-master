@@ -45,6 +45,10 @@ type StatusFilter = (typeof STATUS_OPTIONS)[number];
 
 const NO_SITE_KEY = "__no_site__";
 const ONE_WEEK_MS = 7 * 24 * 60 * 60 * 1000;
+// How many extra (beyond-this-week) occurrences a single "Load more" click
+// reveals, so very long series stay performant instead of dumping hundreds of
+// rows at once.
+const LOAD_MORE_PAGE = 50;
 
 function fmtDateTime(iso: string): string {
   const d = new Date(iso);
@@ -124,6 +128,9 @@ export default function ShiftsPage() {
   const [search, setSearch] = useState("");
   const [openSites, setOpenSites] = useState<Record<string, boolean>>({});
   const [openSeries, setOpenSeries] = useState<Record<string, boolean>>({});
+  // Per-series count of beyond-this-week occurrences the admin has revealed via
+  // "Load more" / "Show all". Keyed by series key; absent ⇒ 0 revealed.
+  const [seriesReveal, setSeriesReveal] = useState<Record<string, number>>({});
   const [editing, setEditing] = useState<Shift | null>(null);
   const [creating, setCreating] = useState(false);
   const [repeatOpen, setRepeatOpen] = useState(false);
@@ -213,7 +220,7 @@ export default function ShiftsPage() {
       siteLabel: string;
       clientLabel: string | null;
       singles: Shift[];
-      series: { key: string; title: string; total: number; occurrences: Shift[]; windowCount: number; hidden: number; allIds: string[]; siteLabel: string }[];
+      series: { key: string; title: string; total: number; occurrences: Shift[]; later: Shift[]; windowCount: number; hidden: number; allIds: string[]; siteLabel: string }[];
     };
 
     const map = new Map<string, Group>();
@@ -245,7 +252,7 @@ export default function ShiftsPage() {
           : `legacy::${key}::${s.title}::${s.repeatPattern ?? ""}`;
         let series = g.series.find((x) => x.key === seriesKey);
         if (!series) {
-          series = { key: seriesKey, title: s.title, total: 0, occurrences: [], windowCount: 0, hidden: 0, allIds: [], siteLabel: g.siteLabel };
+          series = { key: seriesKey, title: s.title, total: 0, occurrences: [], later: [], windowCount: 0, hidden: 0, allIds: [], siteLabel: g.siteLabel };
           g.series.push(series);
         }
         series.total++;
@@ -258,7 +265,9 @@ export default function ShiftsPage() {
           // default 7-day window, so the scroll-to + highlight has a row to hit.
           series.occurrences.push(s);
         } else {
-          series.hidden++;
+          // Beyond the 7-day window: kept aside so the admin can reveal them
+          // on demand via "Load more" / "Show all".
+          series.later.push(s);
         }
       } else {
         g.singles.push(s);
@@ -268,7 +277,11 @@ export default function ShiftsPage() {
     // Sort within each group/series
     for (const g of map.values()) {
       g.singles.sort((a, b) => a.startTime.localeCompare(b.startTime));
-      for (const s of g.series) s.occurrences.sort((a, b) => a.startTime.localeCompare(b.startTime));
+      for (const s of g.series) {
+        s.occurrences.sort((a, b) => a.startTime.localeCompare(b.startTime));
+        s.later.sort((a, b) => a.startTime.localeCompare(b.startTime));
+        s.hidden = s.later.length;
+      }
       g.series.sort((a, b) => a.title.localeCompare(b.title));
     }
 
@@ -399,7 +412,7 @@ export default function ShiftsPage() {
         <div>
           <h1 className="text-2xl font-bold">Shifts</h1>
           <p className="text-sm text-muted-foreground">
-            Grouped by location. Recurring shifts collapsed — only the next 7 days shown.
+            Grouped by location. Recurring shifts collapsed — the next 7 days show by default; expand a series to load later dates.
           </p>
         </div>
         <div className="ml-auto flex flex-wrap items-center gap-2">
@@ -588,29 +601,77 @@ export default function ShiftsPage() {
                             <Trash2 className="w-3.5 h-3.5 mr-1" /> Delete series
                           </Button>
                         </div>
-                        {sopen && (
-                          <div className="px-4 pb-3">
-                            {series.occurrences.length === 0 ? (
-                              <div className="text-xs text-muted-foreground italic px-7 py-3">
-                                No occurrences in the next 7 days.
-                              </div>
-                            ) : (
-                              <div className="divide-y border rounded bg-background">
-                                {series.occurrences.map((s) => (
-                                  <ShiftRow
-                                    key={s.id}
-                                    shift={s}
-                                    onEdit={() => setEditing(s)}
-                                    onDelete={() => setDeleting(s)}
-                                    indent
-                                    focusRef={s.id === focusShiftId ? focusShiftRef : undefined}
-                                    highlight={s.id === focusShiftId && focusShiftFlashing}
-                                  />
-                                ))}
-                              </div>
-                            )}
-                          </div>
-                        )}
+                        {sopen && (() => {
+                          const revealed = Math.min(seriesReveal[series.key] ?? 0, series.later.length);
+                          const laterToShow = series.later.slice(0, revealed);
+                          const displayed = [...series.occurrences, ...laterToShow];
+                          const remaining = series.later.length - revealed;
+                          return (
+                            <div className="px-4 pb-3 space-y-2">
+                              {displayed.length === 0 ? (
+                                <div className="text-xs text-muted-foreground italic px-7 py-3">
+                                  No occurrences in the next 7 days.
+                                </div>
+                              ) : (
+                                <div className="divide-y border rounded bg-background">
+                                  {displayed.map((s) => (
+                                    <ShiftRow
+                                      key={s.id}
+                                      shift={s}
+                                      onEdit={() => setEditing(s)}
+                                      onDelete={() => setDeleting(s)}
+                                      indent
+                                      focusRef={s.id === focusShiftId ? focusShiftRef : undefined}
+                                      highlight={s.id === focusShiftId && focusShiftFlashing}
+                                    />
+                                  ))}
+                                </div>
+                              )}
+                              {series.later.length > 0 && (
+                                <div className="flex flex-wrap items-center gap-3 px-1 text-xs">
+                                  <span className="text-muted-foreground">
+                                    Showing {displayed.length} of {series.total} occurrences
+                                    {remaining > 0 && <> · {remaining} later {remaining === 1 ? "date" : "dates"} hidden</>}
+                                  </span>
+                                  {remaining > 0 && (
+                                    <>
+                                      <button
+                                        type="button"
+                                        className="font-medium text-brand-gold hover:underline"
+                                        onClick={() =>
+                                          setSeriesReveal((m) => ({
+                                            ...m,
+                                            [series.key]: Math.min(revealed + LOAD_MORE_PAGE, series.later.length),
+                                          }))
+                                        }
+                                      >
+                                        Load {Math.min(LOAD_MORE_PAGE, remaining)} more
+                                      </button>
+                                      <button
+                                        type="button"
+                                        className="font-medium text-brand-gold hover:underline"
+                                        onClick={() =>
+                                          setSeriesReveal((m) => ({ ...m, [series.key]: series.later.length }))
+                                        }
+                                      >
+                                        Show all {series.total}
+                                      </button>
+                                    </>
+                                  )}
+                                  {revealed > 0 && (
+                                    <button
+                                      type="button"
+                                      className="font-medium text-muted-foreground hover:underline"
+                                      onClick={() => setSeriesReveal((m) => ({ ...m, [series.key]: 0 }))}
+                                    >
+                                      Show less
+                                    </button>
+                                  )}
+                                </div>
+                              )}
+                            </div>
+                          );
+                        })()}
                       </div>
                     );
                   })}
