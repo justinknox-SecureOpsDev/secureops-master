@@ -45,6 +45,8 @@ const OFFICER_SCREEN_GLOBS = [
   "app/(employee)/clock.tsx",
   "app/(employee)/incidents.tsx",
   "app/(employee)/profile.tsx",
+  "components/chat/ChatRoomScreen.tsx",
+  "components/chat/ChatRoomsList.tsx",
 ];
 
 // Interactive components that must expose a label or role to assistive tech.
