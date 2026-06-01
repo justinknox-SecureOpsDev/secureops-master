@@ -30,6 +30,7 @@ pending/rejected/failed jump straight to paid.
 
 **Why:** money leaves a bank from these files; a duplicate or out-of-state line
 is a real double-payment. **How to apply:** mirror this whenever cloning a
-pay-run/AP flow. Note: the pre-existing officer Pay Run (`routes/payroll.ts`)
-still uses the older read-then-update + `status != 'paid'` pattern — if touched,
-apply the same hardening.
+pay-run/AP flow. Both pay-runs now use this hardened pattern: officer Pay Run
+(`routes/payroll.ts`, payable state `pending`) and subcontractor Pay Run
+(`routes/subcontractorPayRun.ts`, payable state `approved`). Keep any new
+pay-run/AP export consistent with them.

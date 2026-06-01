@@ -260,7 +260,9 @@ router.post("/payroll/pay-run/preview", requireAdmin, async (req, res): Promise<
     rows,
     counts: {
       total: rows.length,
-      payable: rows.filter((r) => r.warnings.length === 0 && r.status !== "paid").length,
+      // Only "pending" rows are actually exportable; preview reflects that so the
+      // count matches what Export will pay.
+      payable: rows.filter((r) => r.status === "pending" && r.warnings.length === 0).length,
       withWarnings: rows.filter((r) => r.warnings.length > 0).length,
       alreadyPaid: rows.filter((r) => r.status === "paid").length,
     },
@@ -275,13 +277,41 @@ router.post("/payroll/pay-run/export-csv", requireAdmin, async (req, res): Promi
     return;
   }
   const rows = await loadPayRunRows(ids);
-  const payable = rows.filter((r) => r.status !== "paid" && r.warnings.length === 0);
-  if (payable.length === 0) {
-    res.status(400).json({ error: "Bad Request", message: "No rows are payable (already paid or missing bank info)." });
+  // ONLY "pending" rows are exportable. A processed/paid row must never be
+  // re-emitted into a new CSV (that would generate a duplicate outbound payment
+  // file), and a payable row with warnings is not exported.
+  const eligible = rows.filter((r) => r.status === "pending" && r.warnings.length === 0);
+  if (eligible.length === 0) {
+    res.status(400).json({ error: "Bad Request", message: "No rows are payable (must be pending, with bank info, and not already processed/paid)." });
     return;
   }
 
   const batchId = (batchReference && String(batchReference).trim()) || `BATCH-${new Date().toISOString().slice(0, 10).replace(/-/g, "")}-${Date.now().toString(36).slice(-4).toUpperCase()}`;
+
+  // Concurrency-safe claim: atomically transition pending → processed and let
+  // RETURNING tell us which rows THIS request actually won. The CSV is built
+  // only from claimed rows, so two concurrent exports can never both emit a
+  // payment line for the same entry (the loser's claim returns nothing).
+  const claimed = await db
+    .update(payrollEntriesTable)
+    .set({
+      status: "processed",
+      paidMethod: "ach_csv",
+      paymentReference: batchId,
+      paidBy: req.user!.userId,
+      updatedAt: new Date(),
+    })
+    .where(and(
+      inArray(payrollEntriesTable.id, eligible.map((r) => r.id)),
+      eq(payrollEntriesTable.status, "pending"),
+    ))
+    .returning({ id: payrollEntriesTable.id });
+  const claimedIds = new Set(claimed.map((c) => c.id));
+  const payable = eligible.filter((r) => claimedIds.has(r.id));
+  if (payable.length === 0) {
+    res.status(409).json({ error: "Conflict", message: "Selected rows were already processed by another export." });
+    return;
+  }
 
   // Standard ACH-style CSV. Most US business banks accept this column shape on
   // their bulk-upload portal; remap on their side if not exact.
@@ -305,21 +335,6 @@ router.post("/payroll/pay-run/export-csv", requireAdmin, async (req, res): Promi
   );
   const csv = [header, ...lines].join("\r\n") + "\r\n";
 
-  // Mark each payable row as processed (pending → processed). Don't touch already-processed rows' originals.
-  await db
-    .update(payrollEntriesTable)
-    .set({
-      status: "processed",
-      paidMethod: "ach_csv",
-      paymentReference: batchId,
-      paidBy: req.user!.userId,
-      updatedAt: new Date(),
-    })
-    .where(and(
-      inArray(payrollEntriesTable.id, payable.map((r) => r.id)),
-      eq(payrollEntriesTable.status, "pending"),
-    ));
-
   const filename = `wcsg-payroll-${batchId}.csv`;
   res.setHeader("Content-Type", "text/csv; charset=utf-8");
   res.setHeader("Content-Disposition", `attachment; filename="${filename}"`);
@@ -336,8 +351,11 @@ router.post("/payroll/pay-run/mark-paid", requireAdmin, async (req, res): Promis
     return;
   }
   const safeMethod = ["manual", "ach_csv", "stripe"].includes(method) ? method : "manual";
-  // Only flip rows that are NOT already paid — guards against accidental
-  // double-write (and preserves the original paidAt / batch reference).
+  // Only rows that have reached a payable state can be confirmed paid:
+  //   - "processed": the normal path (ACH CSV exported, awaiting bank confirm)
+  //   - "pending":   direct manual payment without exporting a CSV
+  // failed / paid are intentionally NOT mark-payable from here (a failed payment
+  // needs investigation, and paid is already done — preserves original paidAt).
   const updated = await db
     .update(payrollEntriesTable)
     .set({
@@ -350,7 +368,7 @@ router.post("/payroll/pay-run/mark-paid", requireAdmin, async (req, res): Promis
     })
     .where(and(
       inArray(payrollEntriesTable.id, ids),
-      sql`${payrollEntriesTable.status} <> 'paid'`,
+      inArray(payrollEntriesTable.status, ["pending", "processed"]),
     ))
     .returning({ id: payrollEntriesTable.id });
   res.json({ marked: updated.length, skipped: ids.length - updated.length, ids: updated.map((r) => r.id) });
