@@ -2,7 +2,7 @@ import React, { useState, useRef, useEffect } from "react";
 import { useTopPad } from "@/hooks/useTopPad";
 import { View, Text, StyleSheet, FlatList, TouchableOpacity, ActivityIndicator, Platform, TextInput, Modal, ScrollView, Image, Animated } from "react-native";
 import { useColors } from "@/hooks/useColors";
-import { useGetIncidents, getGetIncidentsQueryKey, useUpdateIncident } from "@workspace/api-client-react";
+import { useGetIncidents, getGetIncidentsQueryKey, useGetIncident, getGetIncidentQueryKey, useUpdateIncident } from "@workspace/api-client-react";
 import { Feather } from "@expo/vector-icons";
 import { useQueryClient } from "@tanstack/react-query";
 import { AttachmentImage } from "@/components/AttachmentImage";
@@ -47,14 +47,34 @@ export default function AdminIncidentsScreen() {
   const topPad = useTopPad();
 
   // Deep-link highlight: an emergency-alert tap lands here with the incident id
-  // so we scroll to + flash the exact incident card. Emergencies create an
-  // `open` incident, which is the default filter; stale ids just no-op.
+  // so we scroll to + flash the exact incident card. The incident may not live
+  // under the currently selected status filter (the admin switched filters, or
+  // it has since moved to under_review/resolved), so we fetch it by id and
+  // auto-switch the filter to its status — making the deep-link reliable in
+  // every state. Stale/deleted ids just no-op.
   const { incidentId: highlightIncidentId, _hlTs } =
     useLocalSearchParams<{ incidentId?: string; _hlTs?: string }>();
   const listRef = useRef<FlatList<any>>(null);
   const flashAnim = useHighlightFlash(
     highlightIncidentId ? `${highlightIncidentId}:${_hlTs ?? ""}` : null,
   );
+
+  const { data: highlightIncident } = useGetIncident(highlightIncidentId ?? "", {
+    query: {
+      enabled: !!highlightIncidentId,
+      queryKey: getGetIncidentQueryKey(highlightIncidentId ?? ""),
+    },
+  });
+
+  // When the deep-linked incident isn't under the active filter, switch to its
+  // real status so the list below contains it; the scroll/flash effect then
+  // reveals it once the re-fetched list arrives.
+  useEffect(() => {
+    if (!highlightIncidentId || !highlightIncident) return;
+    if (highlightIncident.status && highlightIncident.status !== filter) {
+      setFilter(highlightIncident.status);
+    }
+  }, [highlightIncidentId, _hlTs, highlightIncident, filter]);
 
   const incParams: any = { status: filter };
   const { data: incidents, isLoading, error, refetch } = useGetIncidents(
