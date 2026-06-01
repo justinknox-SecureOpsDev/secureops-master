@@ -20,6 +20,18 @@ author = "agent"
 task = "workflow.run"
 args = "a11y-mobile"
 
+[[workflows.workflow.tasks]]
+task = "workflow.run"
+args = "typecheck"
+
+[[workflows.workflow.tasks]]
+task = "workflow.run"
+args = "security-headers"
+
+[[workflows.workflow.tasks]]
+task = "workflow.run"
+args = "a11y"
+
 [[workflows.workflow]]
 name = "a11y-mobile"
 author = "agent"
@@ -27,6 +39,39 @@ author = "agent"
 [[workflows.workflow.tasks]]
 task = "shell.exec"
 args = "pnpm --filter @workspace/scripts run a11y-mobile"
+
+[workflows.workflow.metadata]
+isValidation = true
+
+[[workflows.workflow]]
+name = "typecheck"
+author = "agent"
+
+[[workflows.workflow.tasks]]
+task = "shell.exec"
+args = "pnpm run typecheck"
+
+[workflows.workflow.metadata]
+isValidation = true
+
+[[workflows.workflow]]
+name = "security-headers"
+author = "agent"
+
+[[workflows.workflow.tasks]]
+task = "shell.exec"
+args = "pnpm --filter @workspace/api-server run build && pnpm --filter @workspace/scripts run check-security-headers"
+
+[workflows.workflow.metadata]
+isValidation = true
+
+[[workflows.workflow]]
+name = "a11y"
+author = "agent"
+
+[[workflows.workflow.tasks]]
+task = "shell.exec"
+args = "pnpm --filter @workspace/scripts run a11y"
 
 [workflows.workflow.metadata]
 isValidation = true
