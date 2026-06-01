@@ -291,6 +291,8 @@ export default function ChatRoomsList({ onSelectRoom }: Props) {
                 value={userSearch}
                 onChangeText={setUserSearch}
                 autoFocus={Platform.OS === "web"}
+                accessibilityLabel="Search people"
+                accessibilityHint="Filters the list of people you can message"
               />
             </View>
             {usersLoading ? (
