@@ -8,6 +8,7 @@ import { useQueryClient } from "@tanstack/react-query";
 import { AttachmentImage } from "@/components/AttachmentImage";
 import { useRouter, useLocalSearchParams } from "expo-router";
 import { useHighlightFlash } from "@/hooks/useHighlightFlash";
+import { resolveDeepLinkFilter, findHighlightIndex, isHighlightedIncident } from "@/hooks/incidentDeepLink";
 
 const AnimatedTouchable = Animated.createAnimatedComponent(TouchableOpacity);
 
@@ -70,10 +71,8 @@ export default function AdminIncidentsScreen() {
   // real status so the list below contains it; the scroll/flash effect then
   // reveals it once the re-fetched list arrives.
   useEffect(() => {
-    if (!highlightIncidentId || !highlightIncident) return;
-    if (highlightIncident.status && highlightIncident.status !== filter) {
-      setFilter(highlightIncident.status);
-    }
+    const next = resolveDeepLinkFilter(highlightIncidentId, highlightIncident, filter);
+    if (next) setFilter(next);
   }, [highlightIncidentId, _hlTs, highlightIncident, filter]);
 
   const incParams: any = { status: filter };
@@ -83,8 +82,7 @@ export default function AdminIncidentsScreen() {
   );
 
   useEffect(() => {
-    if (!highlightIncidentId || !incidents) return;
-    const index = incidents.findIndex((i) => i.id === highlightIncidentId);
+    const index = findHighlightIndex(incidents, highlightIncidentId);
     if (index < 0) return; // not in the current status filter — leave list as-is
     const t = setTimeout(() => {
       try {
@@ -156,7 +154,7 @@ export default function AdminIncidentsScreen() {
             </View>
           }
           renderItem={({ item }) => {
-            const isHighlighted = highlightIncidentId === item.id;
+            const isHighlighted = isHighlightedIncident(item.id, highlightIncidentId);
             const baseBorder = item.severity === "critical" ? colors.destructive + "60" : colors.border;
             return (
             <AnimatedTouchable
