@@ -196,6 +196,11 @@ export default function ShiftsPage() {
     );
   }, [shifts, search]);
 
+  // Deep-link target id (generic `focus` or mobile `shiftId`). Declared before
+  // the grouping memo so a deep-linked occurrence beyond the default 7-day
+  // window can still be surfaced (see windowing logic below).
+  const focusShiftId = useFirstQueryParam("focus", "shiftId");
+
   // Group by site, then within each site split into single shifts and
   // repeat-series (grouped by title). For repeat-series, only keep
   // occurrences in the next 7 days.
@@ -208,7 +213,7 @@ export default function ShiftsPage() {
       siteLabel: string;
       clientLabel: string | null;
       singles: Shift[];
-      series: { key: string; title: string; total: number; occurrences: Shift[]; hidden: number; allIds: string[]; siteLabel: string }[];
+      series: { key: string; title: string; total: number; occurrences: Shift[]; windowCount: number; hidden: number; allIds: string[]; siteLabel: string }[];
     };
 
     const map = new Map<string, Group>();
@@ -240,12 +245,17 @@ export default function ShiftsPage() {
           : `legacy::${key}::${s.title}::${s.repeatPattern ?? ""}`;
         let series = g.series.find((x) => x.key === seriesKey);
         if (!series) {
-          series = { key: seriesKey, title: s.title, total: 0, occurrences: [], hidden: 0, allIds: [], siteLabel: g.siteLabel };
+          series = { key: seriesKey, title: s.title, total: 0, occurrences: [], windowCount: 0, hidden: 0, allIds: [], siteLabel: g.siteLabel };
           g.series.push(series);
         }
         series.total++;
         series.allIds.push(s.id);
         if (new Date(s.startTime).getTime() <= cutoff) {
+          series.occurrences.push(s);
+          series.windowCount++;
+        } else if (s.id === focusShiftId) {
+          // Surface a deep-linked occurrence even when it falls outside the
+          // default 7-day window, so the scroll-to + highlight has a row to hit.
           series.occurrences.push(s);
         } else {
           series.hidden++;
@@ -268,7 +278,7 @@ export default function ShiftsPage() {
       if (b.key === NO_SITE_KEY) return -1;
       return a.siteLabel.localeCompare(b.siteLabel);
     });
-  }, [filtered]);
+  }, [filtered, focusShiftId]);
 
   const isSiteOpen = (key: string) => openSites[key] !== false; // default open
   const isSeriesOpen = (key: string) => openSeries[key] === true; // default closed
@@ -276,9 +286,9 @@ export default function ShiftsPage() {
   const toggleSeries = (key: string) => setOpenSeries((s) => ({ ...s, [key]: !isSeriesOpen(key) }));
 
   // Deep-link: scroll to + highlight a specific shift opened from a link or
-  // push notification (mirrors the mobile shifts screen). Accept a generic
-  // `focus` id or the `shiftId` the mobile payloads carry.
-  const focusShiftId = useFirstQueryParam("focus", "shiftId");
+  // push notification (mirrors the mobile shifts screen). `focusShiftId` is
+  // resolved above (before the grouping memo) from a generic `focus` id or the
+  // `shiftId` the mobile payloads carry.
   const { ref: focusShiftRef, flashing: focusShiftFlashing } = useDeepLinkFocus(
     focusShiftId,
     !loading && shifts.length > 0,
@@ -517,7 +527,7 @@ export default function ShiftsPage() {
                             <div className="flex-1 min-w-0">
                               <div className="font-medium truncate">{series.title}</div>
                               <div className="text-xs text-muted-foreground">
-                                {series.total} total · {series.occurrences.length} this week
+                                {series.total} total · {series.windowCount} this week
                                 {series.hidden > 0 && <> · {series.hidden} after this week (hidden)</>}
                                 {next && <> · next: {fmtDateTime(next.startTime)}</>}
                                 {!next && series.hidden > 0 && <> · all upcoming occurrences are beyond 7 days</>}
