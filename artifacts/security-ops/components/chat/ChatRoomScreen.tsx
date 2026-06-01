@@ -1,7 +1,7 @@
 import React, { useEffect, useState, useRef, useCallback } from "react";
 import {
   View, Text, FlatList, TextInput, TouchableOpacity, StyleSheet,
-  KeyboardAvoidingView, Platform, ActivityIndicator, Alert,
+  KeyboardAvoidingView, Platform, ActivityIndicator, Alert, AccessibilityInfo,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { Feather } from "@expo/vector-icons";
@@ -44,13 +44,22 @@ export default function ChatRoomScreen({ roomId, roomName }: Props) {
     // Entering the room clears its unread badge (server watermark + local state).
     void markRoomRead(roomId);
     const unsubNew = subscribeToRoom(roomId, (msg) => {
+      let isNew = false;
       setMessages((prev) => {
         if (prev.some((m) => m.id === msg.id)) return prev;
+        isNew = true;
         return [...prev, msg];
       });
       // Messages arriving while the room is open are already seen — keep the
       // read watermark current so the badge never re-appears behind the user.
-      if (msg.userId !== user?.id) void markRoomRead(roomId);
+      if (msg.userId !== user?.id) {
+        void markRoomRead(roomId);
+        // Announce incoming messages from others so screen-reader users hear
+        // new chat without having to manually re-scan the message list.
+        if (isNew) {
+          AccessibilityInfo.announceForAccessibility(`New message from ${msg.userName}: ${msg.content}`);
+        }
+      }
       setTimeout(() => listRef.current?.scrollToEnd({ animated: true }), 100);
     });
     const unsubDel = subscribeToDeletes(roomId, (messageId) => {
