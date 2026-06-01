@@ -66,7 +66,7 @@ export function PrivacyPage() {
         <li>
           <strong>Employment information:</strong> address, date of birth, last
           four digits of SSN, right-to-work and Texas security license details,
-          uploaded documents (CV, photo ID, training certificates, passport),
+          uploaded documents (resume, photo ID, training certificates, passport),
           uniform sizes, and emergency contact.
         </li>
         <li>

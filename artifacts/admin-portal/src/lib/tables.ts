@@ -231,7 +231,7 @@ export const TABLES: TableDescriptor[] = [
       { key: "references", label: "References", type: "json", hiddenInGrid: true, importExample: '[{"name":"Jane Doe","phone":"+1 512 555 0199","relationship":"Former supervisor"}]' },
       // --- Personal docs ---
       { key: "photoKey", label: "Photo", type: "fileKey", hiddenInGrid: true, section: "Personal Documents" },
-      { key: "cvKey", label: "Résumé / CV", type: "fileKey", hiddenInGrid: true },
+      { key: "cvKey", label: "Resume", type: "fileKey", hiddenInGrid: true },
       { key: "trainingCertificateKeys", label: "Training Certificates", type: "fileKeyList", hiddenInGrid: true },
       { key: "availability", label: "Weekly Availability", type: "json", hiddenInGrid: true, importExample: '{"mon":["am","pm"],"tue":["pm"],"wed":[],"thu":["am","pm","night"],"fri":["night"],"sat":["pm","night"],"sun":[]}' },
       // --- Emergency contact ---

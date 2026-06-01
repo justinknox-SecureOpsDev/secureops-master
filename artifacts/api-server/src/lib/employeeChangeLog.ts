@@ -42,7 +42,7 @@ export const CHANGE_FIELD_LABELS: Record<string, string> = {
   yearsExperience: "Years of experience",
   references: "References",
   photoKey: "Photo",
-  cvKey: "Résumé / CV",
+  cvKey: "Resume",
   trainingCertificateKeys: "Training certificates",
   availability: "Availability",
   emergencyContactName: "Emergency contact name",

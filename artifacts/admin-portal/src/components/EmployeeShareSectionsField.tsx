@@ -25,7 +25,7 @@ export const SECTION_LABELS: Array<[keyof VisibleSections, string, string]> = [
   ["skills", "Skills & qualifications", "The officer's skills tag list."],
   ["uniform", "Uniform sizes", "Shirt, trousers, jacket, boots — useful when prepping kit."],
   ["trainingCerts", "Training certificates", "Filenames of training certs on file (no downloads)."],
-  ["documents", "Documents on file", "Filenames of CV, license scan, passport, right-to-work, pay stub (no downloads)."],
+  ["documents", "Documents on file", "Filenames of resume, license scan, passport, right-to-work, pay stub (no downloads)."],
 ];
 
 export function EmployeeShareSectionsField({

@@ -351,7 +351,7 @@ router.get("/public/employee-shares/:token", tokenLookupLimiter, async (req, res
 
   const docs = sections.documents
     ? [
-        buildDoc("CV / résumé", row.cvKey, "cv"),
+        buildDoc("Resume", row.cvKey, "cv"),
         buildDoc("TX security license", row.licenseDocKey, "license"),
         buildDoc("Passport / photo ID", row.passportDocKey, "passport"),
         buildDoc("Right-to-work doc", row.rightToWorkDocKey, "right-to-work"),

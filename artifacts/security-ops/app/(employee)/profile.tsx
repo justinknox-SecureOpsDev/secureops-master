@@ -483,7 +483,7 @@ export default function EmployeeProfileScreen() {
       <View style={[styles.section, { backgroundColor: colors.card, borderColor: colors.border }]}>
         <Text style={[styles.sectionTitle, { color: colors.accent }]}>DOCUMENTS</Text>
         <DocRow label="Photo" path={p?.photoKey} icon="image" />
-        <DocRow label="CV / résumé" path={p?.cvKey} icon="file-text" />
+        <DocRow label="Resume" path={p?.cvKey} icon="file-text" />
         <DocRow label="TX security license" path={p?.licenseDocKey} icon="credit-card" />
         <DocRow label="Passport / photo ID" path={p?.passportDocKey} icon="book" />
         <DocRow label="Right-to-work doc" path={p?.rightToWorkDocKey} icon="check-circle" />

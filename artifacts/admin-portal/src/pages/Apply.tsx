@@ -319,7 +319,7 @@ export function ApplyPage() {
         }
       }
       if (!form.photo) return { field: "photo", message: "Please upload a head & shoulders photo." };
-      if (!form.cv) return { field: "cv", message: "Please upload your CV." };
+      if (!form.cv) return { field: "cv", message: "Please upload your resume." };
       if (form.trainingCertificates.length === 0) {
         return { field: "trainingCertificates", message: "Please upload at least one training certificate." };
       }
@@ -667,7 +667,7 @@ export function ApplyPage() {
               ))}
               <Two>
                 <FileUploadField label="Head & shoulders photo" required accept="image/*" value={form.photo} onChange={(v) => set("photo", v)} uploadFn={uploadFileAnon} error={errOnStep("photo")} />
-                <FileUploadField label="CV (PDF / DOC)" required accept=".pdf,.doc,.docx" value={form.cv} onChange={(v) => set("cv", v)} uploadFn={uploadFileAnon} error={errOnStep("cv")} />
+                <FileUploadField label="Resume (PDF / DOC)" required accept=".pdf,.doc,.docx" value={form.cv} onChange={(v) => set("cv", v)} uploadFn={uploadFileAnon} error={errOnStep("cv")} />
               </Two>
               <MultiFileUploadField
                 label="Training certificates"
@@ -704,7 +704,7 @@ export function ApplyPage() {
                 <Sum k="TX license" v={form.siaLicenseNumber ? `${form.siaLicenseNumber} (L${form.siaLicenseLevel || "?"})` : "—"} />
                 <Sum k="Experience" v={form.yearsExperience ? `${form.yearsExperience} yrs` : "—"} />
                 <Sum k="Photo" v={form.photo ? form.photo.name : "—"} />
-                <Sum k="CV" v={form.cv ? form.cv.name : "—"} />
+                <Sum k="Resume" v={form.cv ? form.cv.name : "—"} />
                 <Sum k="Certificates" v={String(form.trainingCertificates.length)} />
                 <Sum k="Availability slots" v={String(form.availability.length)} />
               </dl>

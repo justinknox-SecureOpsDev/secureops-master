@@ -600,7 +600,7 @@ function ApplicationDialog({
             />
             {app.rightToWorkDocKey && <FileLink k="Right-to-work (legacy)" path={app.rightToWorkDocKey} />}
             <FileLink k="Photo" path={app.photoKey} />
-            <FileLink k="CV" path={app.cvKey} />
+            <FileLink k="Resume" path={app.cvKey} />
             {(app.trainingCertificateKeys ?? []).map((k, i) => (
               <FileLink key={i} k={`Certificate ${i + 1}`} path={k} />
             ))}

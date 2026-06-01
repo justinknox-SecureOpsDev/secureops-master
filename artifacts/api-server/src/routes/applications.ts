@@ -66,7 +66,7 @@ const AMENDABLE_FIELDS: Record<string, { column: string; type: AmendmentFieldTyp
   previousExperience:  { column: "previousExperience",   type: "textarea", label: "Previous security experience" },
   yearsExperience:     { column: "yearsExperience",      type: "number",   label: "Years of experience" },
   photo:               { column: "photoKey",             type: "file",     label: "Profile photo" },
-  cv:                  { column: "cvKey",                type: "file",     label: "CV / résumé" },
+  cv:                  { column: "cvKey",                type: "file",     label: "Resume" },
 };
 
 const RequestInfoBody = z.object({
@@ -295,7 +295,7 @@ const APPLICATION_FIELD_LABELS: Record<string, string> = {
   previousExperience: "Previous security experience",
   yearsExperience: "Years of experience",
   photo: "Head & shoulders photo",
-  cv: "CV / résumé",
+  cv: "Resume",
   trainingCertificates: "Training certificates",
   availability: "Availability",
 };

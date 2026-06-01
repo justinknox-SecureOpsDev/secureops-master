@@ -23,7 +23,7 @@ export const AMENDMENT_FIELDS: AmendmentFieldDef[] = [
   { key: "previousExperience", label: "Previous security experience", type: "textarea" },
   { key: "yearsExperience", label: "Years of experience", type: "number" },
   { key: "photo", label: "Profile photo", type: "file", accept: "image/*", dbKey: "photoKey" },
-  { key: "cv", label: "CV / résumé", type: "file", accept: ".pdf,.doc,.docx", dbKey: "cvKey" },
+  { key: "cv", label: "Resume", type: "file", accept: ".pdf,.doc,.docx", dbKey: "cvKey" },
 ];
 
 export const AMENDMENT_FIELD_MAP: Record<string, AmendmentFieldDef> =

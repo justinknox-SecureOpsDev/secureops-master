@@ -388,7 +388,7 @@ export async function buildEmployeeProfilePdf(
   if (show("documents")) {
     docs.push(
       ["Photo", row.photoKey],
-      ["CV / résumé", row.cvKey],
+      ["Resume", row.cvKey],
       ["TX security license", row.licenseDocKey],
       ["Passport / photo ID", row.passportDocKey],
       ["Right-to-work doc", row.rightToWorkDocKey],
