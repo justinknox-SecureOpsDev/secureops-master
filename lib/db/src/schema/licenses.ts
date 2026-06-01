@@ -1,4 +1,4 @@
-import { pgTable, text, uuid, timestamp, date, integer } from "drizzle-orm/pg-core";
+import { pgTable, text, uuid, timestamp, date, integer, index } from "drizzle-orm/pg-core";
 import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod/v4";
 import { usersTable } from "./users";
@@ -26,7 +26,11 @@ export const licensesTable = pgTable("licenses", {
   lastReminderForExpiry: date("last_reminder_for_expiry"),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow().$onUpdate(() => new Date()),
-});
+}, (t) => ({
+  // Backs the admin grid's default sort (expiryDate) + id tiebreaker. Date
+  // ties are common across licenses, so the id makes ordering deterministic.
+  expiryIdx: index("licenses_expiry_idx").on(t.expiryDate, t.id),
+}));
 
 export const insertLicenseSchema = createInsertSchema(licensesTable).omit({ id: true, createdAt: true, updatedAt: true });
 export type InsertLicense = z.infer<typeof insertLicenseSchema>;

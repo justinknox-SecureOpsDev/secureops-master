@@ -1,4 +1,4 @@
-import { pgTable, text, uuid, timestamp, date, numeric } from "drizzle-orm/pg-core";
+import { pgTable, text, uuid, timestamp, date, numeric, index } from "drizzle-orm/pg-core";
 import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod/v4";
 import { subcontractorsTable } from "./subcontractors";
@@ -31,7 +31,10 @@ export const subcontractorInvoicesTable = pgTable("subcontractor_invoices", {
   notes: text("notes"),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow().$onUpdate(() => new Date()),
-});
+}, (t) => ({
+  // Backs the admin grid's default sort (createdAt desc) + id tiebreaker.
+  createdIdx: index("subcontractor_invoices_created_idx").on(t.createdAt, t.id),
+}));
 
 export const insertSubcontractorInvoiceSchema = createInsertSchema(subcontractorInvoicesTable).omit({ id: true, createdAt: true, updatedAt: true });
 export type InsertSubcontractorInvoice = z.infer<typeof insertSubcontractorInvoiceSchema>;

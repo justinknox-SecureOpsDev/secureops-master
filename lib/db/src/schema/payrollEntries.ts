@@ -1,4 +1,4 @@
-import { pgTable, text, uuid, timestamp, date, numeric, uniqueIndex } from "drizzle-orm/pg-core";
+import { pgTable, text, uuid, timestamp, date, numeric, uniqueIndex, index } from "drizzle-orm/pg-core";
 import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod/v4";
 import { usersTable } from "./users";
@@ -28,6 +28,9 @@ export const payrollEntriesTable = pgTable("payroll_entries", {
   updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow().$onUpdate(() => new Date()),
 }, (t) => ({
   uniquePerWeek: uniqueIndex("payroll_employee_site_week_unique").on(t.employeeId, t.siteId, t.periodStart),
+  // Backs the admin grid's default sort (periodStart) + id tiebreaker. Date
+  // ties are common, so the id keeps ordering + deep-link position deterministic.
+  periodStartIdx: index("payroll_period_start_idx").on(t.periodStart, t.id),
 }));
 
 export const insertPayrollEntrySchema = createInsertSchema(payrollEntriesTable).omit({ id: true, createdAt: true, updatedAt: true });

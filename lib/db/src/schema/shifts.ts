@@ -39,7 +39,9 @@ export const shiftsTable = pgTable("shifts", {
   updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow().$onUpdate(() => new Date()),
 }, (t) => ({
   siteStartIdx: index("shifts_site_start_idx").on(t.siteId, t.startTime),
-  startIdx: index("shifts_start_idx").on(t.startTime),
+  // Includes id so the admin grid's default sort (startTime + id tiebreaker)
+  // and the row-position deep-link stay fully index-ordered at scale.
+  startIdx: index("shifts_start_idx").on(t.startTime, t.id),
   seriesIdx: index("shifts_series_idx").on(t.seriesId),
 }));
 

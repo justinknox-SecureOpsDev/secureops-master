@@ -1,4 +1,4 @@
-import { pgTable, text, uuid, timestamp, date, numeric, jsonb, boolean, uniqueIndex } from "drizzle-orm/pg-core";
+import { pgTable, text, uuid, timestamp, date, numeric, jsonb, boolean, uniqueIndex, index } from "drizzle-orm/pg-core";
 import { sql } from "drizzle-orm";
 import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod/v4";
@@ -53,6 +53,8 @@ export const invoicesTable = pgTable("invoices", {
   activeAutoDraftPerSiteWeek: uniqueIndex("invoices_active_auto_draft_per_week_idx")
     .on(table.siteId, table.periodStart)
     .where(sql`status = 'draft' AND locked_at IS NULL AND auto_synced = true`),
+  // Backs the admin grid's default sort (createdAt desc) + id tiebreaker.
+  createdIdx: index("invoices_created_idx").on(table.createdAt, table.id),
 }));
 
 export const insertInvoiceSchema = createInsertSchema(invoicesTable).omit({ id: true, createdAt: true, updatedAt: true });

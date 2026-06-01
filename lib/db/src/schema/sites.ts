@@ -1,4 +1,4 @@
-import { pgTable, text, uuid, timestamp, numeric, integer, jsonb } from "drizzle-orm/pg-core";
+import { pgTable, text, uuid, timestamp, numeric, integer, jsonb, index } from "drizzle-orm/pg-core";
 import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod/v4";
 import { clientsTable } from "./clients";
@@ -37,7 +37,10 @@ export const sitesTable = pgTable("sites", {
   requiredTrainings: jsonb("required_trainings").$type<string[]>(),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow().$onUpdate(() => new Date()),
-});
+}, (t) => ({
+  // Backs the admin grid's default sort (createdAt desc) + id tiebreaker.
+  createdIdx: index("sites_created_idx").on(t.createdAt, t.id),
+}));
 
 export const insertSiteSchema = createInsertSchema(sitesTable).omit({ id: true, createdAt: true, updatedAt: true });
 export type InsertSite = z.infer<typeof insertSiteSchema>;

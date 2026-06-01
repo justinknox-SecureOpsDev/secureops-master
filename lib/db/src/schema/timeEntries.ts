@@ -56,6 +56,9 @@ export const timeEntriesTable = pgTable("time_entries", {
   employeeClockInIdx: index("time_entries_employee_clockin_idx").on(t.employeeId, t.clockInTime),
   approvalIdx: index("time_entries_approval_idx").on(t.approvalStatus),
   siteIdx: index("time_entries_site_idx").on(t.siteId),
+  // Backs the admin grid's default sort (clockInTime desc) + id tiebreaker.
+  // Leading clockInTime, distinct from the employee-scoped index above.
+  clockInIdx: index("time_entries_clockin_idx").on(t.clockInTime, t.id),
 }));
 
 export const insertTimeEntrySchema = createInsertSchema(timeEntriesTable).omit({ id: true, createdAt: true, updatedAt: true });

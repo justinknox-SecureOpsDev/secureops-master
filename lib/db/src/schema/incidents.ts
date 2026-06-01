@@ -23,6 +23,9 @@ export const incidentsTable = pgTable("incidents", {
 }, (t) => ({
   employeeOccurredIdx: index("incidents_employee_occurred_idx").on(t.employeeId, t.occurredAt),
   severityIdx: index("incidents_severity_idx").on(t.severity),
+  // Backs the admin grid's default sort (occurredAt desc) + id tiebreaker.
+  // Leading occurredAt, distinct from the employee-scoped index above.
+  occurredIdx: index("incidents_occurred_idx").on(t.occurredAt, t.id),
 }));
 
 export const insertIncidentSchema = createInsertSchema(incidentsTable).omit({ id: true, createdAt: true, updatedAt: true });

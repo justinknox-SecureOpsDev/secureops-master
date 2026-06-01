@@ -34,7 +34,8 @@ export const trainingCertificationsTable = pgTable("training_certifications", {
   updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow().$onUpdate(() => new Date()),
 }, (t) => ({
   empTypeIdx: index("training_employee_type_idx").on(t.employeeId, t.type),
-  expiryIdx: index("training_expiry_idx").on(t.expiryDate),
+  // Includes id for the admin grid's default sort (expiryDate + id tiebreaker).
+  expiryIdx: index("training_expiry_idx").on(t.expiryDate, t.id),
 }));
 
 export type TrainingCertification = typeof trainingCertificationsTable.$inferSelect;

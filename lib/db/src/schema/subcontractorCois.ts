@@ -1,4 +1,4 @@
-import { pgTable, text, uuid, timestamp, date, numeric, integer } from "drizzle-orm/pg-core";
+import { pgTable, text, uuid, timestamp, date, numeric, integer, index } from "drizzle-orm/pg-core";
 import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod/v4";
 import { subcontractorsTable } from "./subcontractors";
@@ -24,7 +24,10 @@ export const subcontractorCoisTable = pgTable("subcontractor_cois", {
   lastReminderForExpiry: date("last_reminder_for_expiry"),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow().$onUpdate(() => new Date()),
-});
+}, (t) => ({
+  // Backs the admin grid's default sort (expiryDate) + id tiebreaker.
+  expiryIdx: index("subcontractor_cois_expiry_idx").on(t.expiryDate, t.id),
+}));
 
 export const insertSubcontractorCoiSchema = createInsertSchema(subcontractorCoisTable).omit({ id: true, createdAt: true, updatedAt: true });
 export type InsertSubcontractorCoi = z.infer<typeof insertSubcontractorCoiSchema>;

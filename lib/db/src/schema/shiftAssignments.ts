@@ -20,6 +20,8 @@ export const shiftAssignmentsTable = pgTable("shift_assignments", {
   shiftEmployeeUnique: uniqueIndex("shift_assignments_shift_employee_unique").on(t.shiftId, t.employeeId),
   shiftStatusIdx: index("shift_assignments_shift_status_idx").on(t.shiftId, t.status),
   employeeIdx: index("shift_assignments_employee_idx").on(t.employeeId),
+  // Backs the admin grid's default sort (createdAt desc) + id tiebreaker.
+  createdIdx: index("shift_assignments_created_idx").on(t.createdAt, t.id),
 }));
 
 export const insertShiftAssignmentSchema = createInsertSchema(shiftAssignmentsTable).omit({ id: true, createdAt: true, updatedAt: true });
