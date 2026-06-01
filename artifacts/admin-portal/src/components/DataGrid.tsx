@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import {
@@ -133,7 +133,9 @@ export function DataGrid({
   const [loading, setLoading] = useState(false);
   // Deep-link: scroll to + highlight the row whose id matches focusId once it
   // is present in the currently loaded page (mirrors the mobile notification
-  // deep links). If the target lives on another page it simply no-ops.
+  // deep links). If the target lives on a later page, `locateFocusRow` below
+  // first jumps the grid to the page that contains it.
+  const [locating, setLocating] = useState(false);
   const focusPresent = focusId != null && rows.some((r) => String((r as any).id) === focusId);
   const { ref: focusRowRef, flashing: focusFlashing } = useDeepLinkFocus(
     focusPresent ? focusId : null,
@@ -361,6 +363,60 @@ export function DataGrid({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [descriptor.name, debounced, page, sort, filterKey]);
 
+  // Deep-link page resolution: when focusId points at a row that isn't on the
+  // currently loaded page, scan the same sorted/filtered result set in batches
+  // to find the target's global index, then jump the grid to the page that
+  // contains it so the scroll-to + flash can fire. Bounded by `total`; if the
+  // row can't be found (deleted / filtered out) it gives up quietly.
+  const LOCATE_BATCH = 500;
+  // Remember the (focusId + sort + filter + search) signature we've already
+  // attempted so we don't re-scan in a loop, but DO re-scan when any of those
+  // change the row's page.
+  const locateSigRef = useRef<string | null>(null);
+
+  async function locateFocusRow(id: string) {
+    setLocating(true);
+    try {
+      let offset = 0;
+      while (true) {
+        const params = new URLSearchParams();
+        params.set("limit", String(LOCATE_BATCH));
+        params.set("offset", String(offset));
+        if (debounced) params.set("search", debounced);
+        params.set("sort", sort.field);
+        params.set("dir", sort.dir);
+        if (filter) {
+          for (const [k, v] of Object.entries(filter)) {
+            if (v) params.set(`filter[${k}]`, v);
+          }
+        }
+        const data = await api<{ rows: Row[]; total: number }>(
+          `/admin/tables/${descriptor.name}?${params}`,
+        );
+        const idx = data.rows.findIndex((r) => String((r as any).id) === id);
+        if (idx >= 0) {
+          setPage(Math.floor((offset + idx) / pageSize));
+          return;
+        }
+        offset += LOCATE_BATCH;
+        if (data.rows.length < LOCATE_BATCH || offset >= data.total) return;
+      }
+    } catch (e) {
+      console.error(e);
+    } finally {
+      setLocating(false);
+    }
+  }
+
+  useEffect(() => {
+    if (!focusId || loading || locating || focusPresent) return;
+    const sig = `${focusId}|${descriptor.name}|${debounced}|${sort.field}:${sort.dir}|${filterKey}`;
+    if (locateSigRef.current === sig) return;
+    locateSigRef.current = sig;
+    void locateFocusRow(focusId);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [focusId, loading, locating, focusPresent, descriptor.name, debounced, sort.field, sort.dir, filterKey]);
+
   const lockedSet = useMemo(() => new Set(lockedFields ?? []), [lockedFields]);
   const gridFields = useMemo(
     () => visibleFields.filter((f) => !lockedSet.has(f.key)),
@@ -397,7 +453,7 @@ export function DataGrid({
               {descriptor.label}
             </h1>
             <p className="text-xs text-muted-foreground">
-              {loading ? "Loading…" : `${total.toLocaleString()} ${descriptor.plural}`}
+              {loading || locating ? "Loading…" : `${total.toLocaleString()} ${descriptor.plural}`}
             </p>
           </div>
           <div className="flex items-center gap-2">
@@ -477,7 +533,7 @@ export function DataGrid({
               className="w-56 h-8"
             />
             <span className="text-xs text-muted-foreground">
-              {loading ? "Loading…" : `${total.toLocaleString()} ${descriptor.plural}`}
+              {loading || locating ? "Loading…" : `${total.toLocaleString()} ${descriptor.plural}`}
             </span>
           </div>
           <div className="flex items-center gap-2">
