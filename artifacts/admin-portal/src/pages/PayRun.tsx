@@ -335,6 +335,7 @@ export default function PayRunPage() {
         <div>
           <Label className="text-xs">Status</Label>
           <select
+            aria-label="Filter by status"
             className="block border rounded h-9 px-2 text-sm"
             value={statusFilter}
             onChange={(e) => setStatusFilter(e.target.value as typeof statusFilter)}
@@ -346,11 +347,11 @@ export default function PayRunPage() {
         </div>
         <div>
           <Label className="text-xs">Period start ≥</Label>
-          <Input type="date" className="h-9" value={periodStart} onChange={(e) => setPeriodStart(e.target.value)} />
+          <Input aria-label="Period start on or after" type="date" className="h-9" value={periodStart} onChange={(e) => setPeriodStart(e.target.value)} />
         </div>
         <div>
           <Label className="text-xs">Period end ≤</Label>
-          <Input type="date" className="h-9" value={periodEnd} onChange={(e) => setPeriodEnd(e.target.value)} />
+          <Input aria-label="Period end on or before" type="date" className="h-9" value={periodEnd} onChange={(e) => setPeriodEnd(e.target.value)} />
         </div>
         <Button variant="outline" onClick={() => void reload()} disabled={loading}>
           {loading ? <Loader2 className="w-4 h-4 animate-spin" /> : "Refresh"}
@@ -461,6 +462,7 @@ export default function PayRunPage() {
                 <div className="flex items-center gap-3 px-4 py-3 bg-brand-navy text-white">
                   <input
                     type="checkbox"
+                    aria-label="Select all rows for this site"
                     checked={siteAllSelected}
                     ref={(el) => { if (el) el.indeterminate = !siteAllSelected && siteSomeSelected; }}
                     onChange={() => toggleMany(siteIds)}
@@ -489,6 +491,7 @@ export default function PayRunPage() {
                       <div className="flex items-center gap-3 px-4 py-2 bg-gray-50 border-b">
                         <input
                           type="checkbox"
+                          aria-label="Select all rows for this week"
                           checked={weekAll}
                           ref={(el) => { if (el) el.indeterminate = !weekAll && weekSome; }}
                           onChange={() => toggleMany(weekIds)}
@@ -522,7 +525,7 @@ export default function PayRunPage() {
                             return (
                               <tr key={r.id} className={`border-t hover:bg-gray-50 ${hasWarn ? "bg-amber-50/40" : ""}`}>
                                 <td className="px-3 py-2">
-                                  <input type="checkbox" checked={selected.has(r.id)} onChange={() => toggle(r.id)} />
+                                  <input type="checkbox" aria-label={`Select payroll row for ${r.employeeName ?? r.employeeId.slice(0, 8)}`} checked={selected.has(r.id)} onChange={() => toggle(r.id)} />
                                 </td>
                                 <td className="px-3 py-2">
                                   <div className="font-medium">{r.employeeName ?? r.employeeId.slice(0, 8)}</div>

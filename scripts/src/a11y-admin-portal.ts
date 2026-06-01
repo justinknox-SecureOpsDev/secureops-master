@@ -11,6 +11,11 @@
  *   - Public Amend form          /admin-portal/amend/:token     (token minted here)
  *   - DataGrid table page        /admin-portal/tables/employees (admin login)
  *   - Import wizard dialog        (opened on the employees table page)
+ *   - Pay Run page               /admin-portal/payroll/pay-run  (admin login)
+ *   - Applications HR page       /admin-portal/hr/applications  (admin login)
+ *   - Onboarding HR page         /admin-portal/hr/onboarding    (admin login)
+ *   - Audit Log page             /admin-portal/audit-log        (admin login)
+ *   - Site detail page           /admin-portal/sites/:id        (admin login, site seeded here)
  *
  * Run on demand:
  *   pnpm --filter @workspace/scripts run a11y
@@ -50,6 +55,8 @@ import {
   applicationsTable,
   onboardingTokensTable,
   applicationAmendmentTokensTable,
+  clientsTable,
+  sitesTable,
 } from "@workspace/db";
 
 const BASE_URL = (process.env.A11Y_BASE_URL ?? "http://localhost:80").replace(/\/$/, "");
@@ -337,11 +344,39 @@ async function adminLogin(): Promise<string> {
 type Seeded = {
   onboardToken: string;
   amendToken: string;
+  siteId: string;
   cleanup: () => Promise<void>;
 };
 
+/** Find an existing site, or create a throwaway client + site, so the
+ *  authenticated Site Detail page (/sites/:id) renders a real record rather
+ *  than its "Site not found" state. Returns the site id plus an optional
+ *  cleanup that only removes rows this function created. */
+async function seedSite(): Promise<{ siteId: string; cleanup: () => Promise<void> }> {
+  const [existing] = await db.select({ id: sitesTable.id }).from(sitesTable).limit(1);
+  if (existing) return { siteId: existing.id, cleanup: async () => {} };
+
+  const [client] = await db
+    .insert(clientsTable)
+    .values({ name: `A11y Probe Client ${randomBytes(4).toString("hex")}` })
+    .returning({ id: clientsTable.id });
+  const [site] = await db
+    .insert(sitesTable)
+    .values({ clientId: client.id, name: "A11y Probe Site", address: "1 Test Plaza" })
+    .returning({ id: sitesTable.id });
+
+  return {
+    siteId: site.id,
+    cleanup: async () => {
+      // Deleting the client cascades to its sites (onDelete: "cascade").
+      await db.delete(clientsTable).where(eq(clientsTable.id, client.id));
+    },
+  };
+}
+
 /** Mint short-lived onboarding + amendment tokens so the token-gated public
- *  forms actually render their fields (not the "invalid link" error state). */
+ *  forms actually render their fields (not the "invalid link" error state),
+ *  and ensure a site exists for the authenticated Site Detail surface. */
 async function seedTokens(): Promise<Seeded> {
   // Onboarding token must reference a real user row. Prefer an employee, fall
   // back to any user so the suite still runs on a sparsely-seeded DB.
@@ -387,13 +422,16 @@ async function seedTokens(): Promise<Seeded> {
     })
     .returning({ id: applicationAmendmentTokensTable.id });
 
+  const { siteId, cleanup: cleanupSite } = await seedSite();
+
   async function cleanup() {
     await db.delete(onboardingTokensTable).where(eq(onboardingTokensTable.id, onboardRow.id));
     await db.delete(applicationAmendmentTokensTable).where(eq(applicationAmendmentTokensTable.id, amendRow.id));
     await db.delete(applicationsTable).where(eq(applicationsTable.id, app.id));
+    await cleanupSite();
   }
 
-  return { onboardToken, amendToken, cleanup };
+  return { onboardToken, amendToken, siteId, cleanup };
 }
 
 async function runAxe(page: Page, scopeSelector?: string): Promise<AxeViolation[]> {
@@ -455,6 +493,44 @@ function buildSurfaces(seeded: Seeded, adminToken: string): Surface[] {
         await importBtn.waitFor({ timeout: 20_000 });
         await importBtn.click();
         await page.getByRole("dialog").waitFor({ timeout: 20_000 });
+      },
+    },
+    {
+      name: "Pay Run page (/payroll/pay-run)",
+      open: async (page) => {
+        await openAuthed(page, `${PORTAL}/payroll/pay-run`, adminToken);
+        await page.getByRole("heading", { name: /pay run/i }).first().waitFor({ timeout: 20_000 });
+      },
+    },
+    {
+      name: "Applications HR page (/hr/applications)",
+      open: async (page) => {
+        await openAuthed(page, `${PORTAL}/hr/applications`, adminToken);
+        await page.getByRole("heading", { name: /applications/i }).first().waitFor({ timeout: 20_000 });
+      },
+    },
+    {
+      name: "Onboarding HR page (/hr/onboarding)",
+      open: async (page) => {
+        await openAuthed(page, `${PORTAL}/hr/onboarding`, adminToken);
+        await page.getByRole("heading", { name: /onboarding/i }).first().waitFor({ timeout: 20_000 });
+      },
+    },
+    {
+      name: "Audit Log page (/audit-log)",
+      open: async (page) => {
+        await openAuthed(page, `${PORTAL}/audit-log`, adminToken);
+        await page.getByRole("heading", { name: /audit log/i }).first().waitFor({ timeout: 20_000 });
+      },
+    },
+    {
+      name: "Site detail page (/sites/:id)",
+      open: async (page) => {
+        await openAuthed(page, `${PORTAL}/sites/${seeded.siteId}`, adminToken);
+        // The header swaps the "Loading site…" placeholder for the site name
+        // <h1> once the record resolves. Wait for that heading so axe scans the
+        // populated page, not the loading state.
+        await page.getByRole("heading", { level: 1 }).first().waitFor({ timeout: 20_000 });
       },
     },
   ];

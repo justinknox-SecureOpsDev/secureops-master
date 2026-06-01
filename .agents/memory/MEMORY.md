@@ -9,3 +9,4 @@
 - [Pay-run export atomic-claim](pay-run-export-atomic-claim.md) — AP/pay-run CSV rows must come from UPDATE…RETURNING claim (status=approved only), not read-then-update, or you double-pay.
 - [api-server suite WS broadcast flake](api-server-ws-broadcast-flake.md) — wsBroadcast.test.ts passes alone but flakes under full parallel run (500ms collectFor window starved by load); not a regression.
 - [Admin grid sort indexes](admin-grid-sort-indexes.md) — every admin-CRUD table's default sort column needs a (col, id) composite index; list + position deep-link both order by (sortCol, id).
+- [axe parent-opacity contrast](axe-parent-opacity-contrast.md) — Tailwind opacity-* on a container dims descendants; axe flags blended contrast. Fix on the leaf text node, not the child.

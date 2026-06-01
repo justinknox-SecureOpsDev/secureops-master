@@ -248,7 +248,7 @@ export function ApplicationsPage() {
         </div>
         <form className="flex gap-2 ml-auto" onSubmit={(e) => { e.preventDefault(); refresh(); }}>
           <Input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search name / email / phone / city" className="w-64" />
-          <Button type="submit" variant="outline"><Search className="w-4 h-4" /></Button>
+          <Button type="submit" variant="outline" aria-label="Search applications"><Search className="w-4 h-4" /></Button>
         </form>
       </div>
 
@@ -267,6 +267,7 @@ export function ApplicationsPage() {
         <div className="flex flex-col">
           <label className="text-[11px] uppercase tracking-wide text-muted-foreground mb-1">Within distance of site</label>
           <select
+            aria-label="Within distance of site"
             value={nearSiteId}
             onChange={(e) => setNearSiteId(e.target.value)}
             className="h-9 px-2 rounded border bg-background text-sm w-64"
@@ -282,6 +283,7 @@ export function ApplicationsPage() {
         <div className="flex flex-col">
           <label className="text-[11px] uppercase tracking-wide text-muted-foreground mb-1">Max miles</label>
           <select
+            aria-label="Maximum miles from site"
             value={maxMiles}
             onChange={(e) => setMaxMiles(e.target.value)}
             disabled={!nearSiteId}

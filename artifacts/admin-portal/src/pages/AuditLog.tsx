@@ -123,6 +123,7 @@ export default function AuditLogPage() {
       <div className="border-b border-border bg-muted/30 px-6 py-3 flex flex-wrap items-center gap-3">
         <Filter className="w-4 h-4 text-muted-foreground" />
         <select
+          aria-label="Filter by action"
           value={actionFilter}
           onChange={(e) => { setActionFilter(e.target.value); setPage(0); }}
           className="text-sm border rounded px-2 py-1 bg-background"

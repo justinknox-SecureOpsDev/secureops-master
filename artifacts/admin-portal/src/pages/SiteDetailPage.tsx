@@ -858,6 +858,7 @@ function SiteRateCard({ siteId }: { siteId: string }) {
           <div>
             <label className="text-xs text-muted-foreground">License level</label>
             <select
+              aria-label="License level"
               value={String(draftLevel)}
               onChange={(e) => setDraftLevel(Number(e.target.value))}
               className="w-full border rounded px-2 py-2 text-sm bg-background"
@@ -881,6 +882,7 @@ function SiteRateCard({ siteId }: { siteId: string }) {
           <div>
             <label className="text-xs text-muted-foreground">Pay $/hr</label>
             <input
+              aria-label="Pay rate dollars per hour"
               type="number" min="0" step="0.01"
               value={draftPay}
               onChange={(e) => setDraftPay(e.target.value)}
@@ -890,6 +892,7 @@ function SiteRateCard({ siteId }: { siteId: string }) {
           <div>
             <label className="text-xs text-muted-foreground">Bill $/hr</label>
             <input
+              aria-label="Bill rate dollars per hour"
               type="number" min="0" step="0.01"
               value={draftBill}
               onChange={(e) => setDraftBill(e.target.value)}

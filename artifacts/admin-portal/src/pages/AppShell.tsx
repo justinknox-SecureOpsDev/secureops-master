@@ -354,8 +354,8 @@ export function AppShell({ children }: { children: React.ReactNode }) {
               <span className="sm:hidden">{brandCfg?.shortName ?? "WCSG"}</span>
               <span className="hidden sm:inline">{brandCfg?.companyName ?? "Williams Council Security Group"}</span>
             </div>
-            <div className="text-[10px] uppercase tracking-[0.25em] opacity-60 flex items-center justify-center gap-2">
-              <span>Admin Portal</span>
+            <div className="text-[10px] uppercase tracking-[0.25em] flex items-center justify-center gap-2">
+              <span className="opacity-60">Admin Portal</span>
               {import.meta.env.DEV && (
                 <span
                   className="px-1.5 py-px rounded-sm bg-amber-400 text-amber-950 font-bold tracking-widest text-[9px]"
@@ -471,7 +471,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
               {!collapsed && <span className="ml-2 text-xs">Collapse</span>}
             </Button>
             {!collapsed && (
-              <div className="text-[10px] opacity-40 text-center pt-2 select-none">
+              <div className="text-[10px] opacity-60 text-center pt-2 select-none">
                 v1.0 · © {new Date().getFullYear()} {brandCfg?.shortName ?? "WCSG"}
               </div>
             )}
