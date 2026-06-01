@@ -5,6 +5,7 @@ import { useRouter } from "expo-router";
 import { useAuth } from "@/contexts/AuthContext";
 import { apiRequest } from "@/utils/api";
 import { setupNotificationDeepLinking } from "./notificationDeepLink";
+import { registerForPushNotifications as runPushRegistration } from "./pushRegistration";
 
 // Detect Expo Go. SDK 53 removed remote-push support in Expo Go on Android
 // and the `expo-notifications` module logs a red-box ERROR at *import time*
@@ -33,7 +34,35 @@ export function useNotifications() {
 
   useEffect(() => {
     if (!user || !token || Platform.OS === "web") return;
-    void registerForPushNotifications();
+    void runPushRegistration({
+      platformOS: Platform.OS,
+      isExpoGo,
+      getProjectId: getEasProjectId,
+      loadNotifications: async () => {
+        const Notifications = await import("expo-notifications");
+        return {
+          setNotificationHandler: (handler) =>
+            Notifications.setNotificationHandler(
+              handler as Parameters<typeof Notifications.setNotificationHandler>[0],
+            ),
+          setNotificationChannelAsync: (channelId, channel) =>
+            Notifications.setNotificationChannelAsync(
+              channelId,
+              channel as Parameters<typeof Notifications.setNotificationChannelAsync>[1],
+            ),
+          AndroidImportance: { MAX: Notifications.AndroidImportance.MAX },
+          getPermissionsAsync: () => Notifications.getPermissionsAsync(),
+          requestPermissionsAsync: () => Notifications.requestPermissionsAsync(),
+          getExpoPushTokenAsync: (options) => Notifications.getExpoPushTokenAsync(options),
+        };
+      },
+      postPushToken: async (pushToken) => {
+        await apiRequest("/auth/push-token", {
+          method: "POST",
+          body: JSON.stringify({ token: pushToken }),
+        });
+      },
+    });
   }, [user, token]);
 
   // Deep-link any notification tap to a sensible target screen — chat rooms,
@@ -62,65 +91,4 @@ export function useNotifications() {
       },
     });
   }, [router]);
-}
-
-async function registerForPushNotifications() {
-  try {
-    if (isExpoGo) {
-      // Skip silently in Expo Go — importing expo-notifications here would
-      // trigger its own red-box error on Android.
-      return;
-    }
-
-    const Notifications = await import("expo-notifications");
-
-    Notifications.setNotificationHandler({
-      handleNotification: async () => ({
-        shouldShowAlert: true,
-        shouldPlaySound: true,
-        shouldSetBadge: true,
-        shouldShowBanner: true,
-        shouldShowList: true,
-      }),
-    });
-
-    if (Platform.OS === "android") {
-      await Notifications.setNotificationChannelAsync("default", {
-        name: "Default",
-        importance: Notifications.AndroidImportance.MAX,
-        vibrationPattern: [0, 250, 250, 250],
-        lightColor: "#c9a84c",
-        sound: "default",
-      });
-      await Notifications.setNotificationChannelAsync("emergency", {
-        name: "Emergency alerts",
-        importance: Notifications.AndroidImportance.MAX,
-        vibrationPattern: [0, 500, 250, 500],
-        lightColor: "#ef4444",
-        sound: "default",
-        bypassDnd: true,
-      });
-    }
-
-    const { status: existingStatus } = await Notifications.getPermissionsAsync();
-    let finalStatus = existingStatus;
-    if (existingStatus !== "granted") {
-      const { status } = await Notifications.requestPermissionsAsync();
-      finalStatus = status;
-    }
-    if (finalStatus !== "granted") return;
-
-    const projectId = getEasProjectId();
-    if (!projectId) return;
-
-    const tokenData = await Notifications.getExpoPushTokenAsync({ projectId });
-    if (tokenData.data) {
-      await apiRequest("/auth/push-token", {
-        method: "POST",
-        body: JSON.stringify({ token: tokenData.data }),
-      });
-    }
-  } catch (e) {
-    console.log("Push registration skipped:", e);
-  }
 }
