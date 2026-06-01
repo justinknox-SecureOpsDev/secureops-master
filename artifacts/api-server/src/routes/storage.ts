@@ -41,6 +41,40 @@ const ALLOWED_CONTENT_TYPES = new Set([
   "text/plain",
 ]);
 
+/**
+ * Extension → MIME map covering exactly `ALLOWED_CONTENT_TYPES`.
+ *
+ * Browsers frequently report an empty or generic `application/octet-stream`
+ * type for Word documents (`.doc`/`.docx`) and any file whose extension the
+ * OS hasn't registered. Without a fallback those legitimate uploads get a 415.
+ * The client now infers the type from the extension, but we mirror it here so
+ * the server stays robust against older/stale clients and isn't coupled to
+ * frontend behavior.
+ */
+const EXTENSION_CONTENT_TYPES: Record<string, string> = {
+  pdf: "application/pdf",
+  doc: "application/msword",
+  docx: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+  jpg: "image/jpeg",
+  jpeg: "image/jpeg",
+  png: "image/png",
+  gif: "image/gif",
+  webp: "image/webp",
+  txt: "text/plain",
+};
+
+/**
+ * Resolve the effective content type. If the declared type is missing or the
+ * generic `application/octet-stream`, fall back to the file extension. Returns
+ * the normalized declared type otherwise.
+ */
+function resolveContentType(declaredType: string, fileName: string): string {
+  const normalized = declaredType.split(";")[0].trim().toLowerCase();
+  if (normalized && normalized !== "application/octet-stream") return normalized;
+  const ext = fileName.split(".").pop()?.toLowerCase() ?? "";
+  return EXTENSION_CONTENT_TYPES[ext] ?? normalized;
+}
+
 const router: IRouter = Router();
 const objectStorageService = new ObjectStorageService();
 
@@ -52,7 +86,10 @@ const objectStorageService = new ObjectStorageService();
  */
 const applicationRawParser = express.raw({
   limit: `${APPLICATION_MAX_UPLOAD_BYTES}b`,
-  type: "*/*",
+  // Always buffer the body regardless of Content-Type. Browsers occasionally
+  // omit or send an empty/generic type for documents; `"*/*"` would skip
+  // parsing when no Content-Type header is present, leaving req.body unparsed.
+  type: () => true,
 });
 
 /**
@@ -85,7 +122,8 @@ async function handleUploadUrlRequest(
 
   // Restrict to MIME types the application legitimately handles. This prevents
   // the private bucket from being used as generic arbitrary-file storage.
-  const normalizedType = contentType.split(";")[0].trim().toLowerCase();
+  // Empty/octet-stream declarations fall back to the filename extension.
+  const normalizedType = resolveContentType(contentType, name);
   if (!ALLOWED_CONTENT_TYPES.has(normalizedType)) {
     res.status(415).json({
       error: "Unsupported Media Type",
@@ -151,8 +189,14 @@ router.post(
   applicationUploadLimiter,
   applicationRawParser,
   async (req: Request, res: Response) => {
-    const rawType = req.headers["content-type"] ?? "";
-    const normalizedType = rawType.split(";")[0].trim().toLowerCase();
+    // X-File-Name is advisory only (display on client). Sanitised, never used
+    // in storage paths. Also used to recover the MIME type when the browser
+    // sends an empty/octet-stream Content-Type (common for .doc/.docx).
+    const rawName = String(req.headers["x-file-name"] ?? "upload");
+    const safeName = rawName.replace(/[^\w\s.\-()]/g, "").slice(0, 255) || "upload";
+
+    const rawType = String(req.headers["content-type"] ?? "");
+    const normalizedType = resolveContentType(rawType, safeName);
 
     if (!ALLOWED_CONTENT_TYPES.has(normalizedType)) {
       res.status(415).json({
@@ -167,11 +211,6 @@ router.post(
       res.status(400).json({ error: "Bad Request", message: "Empty or missing file body" });
       return;
     }
-
-    // X-File-Name is advisory only (display on client). Sanitised, never used
-    // in storage paths.
-    const rawName = String(req.headers["x-file-name"] ?? "upload");
-    const safeName = rawName.replace(/[^\w\s.\-()]/g, "").slice(0, 255) || "upload";
 
     try {
       const objectPath = await objectStorageService.saveObjectBuffer(body, normalizedType);

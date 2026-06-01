@@ -21,6 +21,38 @@ export type UploadedFile = {
 };
 
 /**
+ * Extension → MIME map covering exactly the server's upload allow-list
+ * (`ALLOWED_CONTENT_TYPES` in api-server storage routes).
+ */
+const EXT_CONTENT_TYPES: Record<string, string> = {
+  pdf: "application/pdf",
+  doc: "application/msword",
+  docx: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+  jpg: "image/jpeg",
+  jpeg: "image/jpeg",
+  png: "image/png",
+  gif: "image/gif",
+  webp: "image/webp",
+  txt: "text/plain",
+};
+
+/**
+ * Resolve a usable Content-Type for an upload.
+ *
+ * Browsers frequently report an empty or generic `application/octet-stream`
+ * type for Word documents (`.doc`/`.docx`) and any file whose extension the
+ * OS hasn't registered. The server validates uploads against a strict MIME
+ * allow-list, so an empty/generic type is rejected with 415. Fall back to the
+ * file extension so legitimate resumes and documents still upload.
+ */
+export function resolveContentType(file: File): string {
+  const declared = file.type?.trim().toLowerCase();
+  if (declared && declared !== "application/octet-stream") return declared;
+  const ext = file.name.split(".").pop()?.toLowerCase() ?? "";
+  return EXT_CONTENT_TYPES[ext] ?? declared ?? "application/octet-stream";
+}
+
+/**
  * Request a presigned URL via the given API path, then PUT the file directly
  * to the returned GCS signed URL.
  */
@@ -28,7 +60,7 @@ async function uploadFileTo(file: File, endpoint: string): Promise<UploadedFile>
   const meta = {
     name: file.name,
     size: file.size,
-    contentType: file.type || "application/octet-stream",
+    contentType: resolveContentType(file),
   };
   const { uploadURL, objectPath } = await api<{ uploadURL: string; objectPath: string }>(
     endpoint,
@@ -64,7 +96,7 @@ export async function uploadFile(file: File): Promise<UploadedFile> {
  * The API enforces: 10 MB body limit, MIME allow-list, per-IP rate limit.
  */
 export async function uploadFileAnon(file: File): Promise<UploadedFile> {
-  const contentType = file.type || "application/octet-stream";
+  const contentType = resolveContentType(file);
 
   const res = await fetch("/api/storage/uploads/application-file", {
     method: "POST",
