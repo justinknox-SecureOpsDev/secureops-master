@@ -15,16 +15,30 @@
  * Run on demand:
  *   pnpm --filter @workspace/scripts run a11y
  *
- * Requires the dev workflows (admin-portal + api-server) to be running so the
- * shared proxy serves both. Override the proxy origin / admin credentials with
- * A11Y_BASE_URL, A11Y_ADMIN_EMAIL, A11Y_ADMIN_PASSWORD.
+ * Self-bootstrapping: the scan needs the admin-portal + api-server served behind
+ * the shared proxy, plus a seeded admin account. Rather than require a human to
+ * start those workflows by hand first, this script brings up whatever is missing
+ * itself (spawning the same `dev` commands the workflows use), waits for them to
+ * be reachable, and ensures the documented admin account exists before scanning.
+ * Anything it started, it tears down on exit. If a prerequisite genuinely can't
+ * be brought up, it fails with a clear "prerequisite not ready" message that is
+ * distinct from a real accessibility violation, so a cold-environment run never
+ * produces a confusing false negative.
+ *
+ * Override the proxy origin / admin credentials with A11Y_BASE_URL,
+ * A11Y_ADMIN_EMAIL, A11Y_ADMIN_PASSWORD. When custom admin credentials are
+ * supplied they are used as-is (the account is assumed to already exist); the
+ * auto-seed only runs for the default documented admin.
  *
  * Chromium is resolved from the Nix-provided system binary (PLAYWRIGHT_CHROMIUM
  * or `which chromium`) because the Playwright-bundled headless shell is missing
  * shared libraries in this environment.
  */
-import { execSync } from "node:child_process";
+import { execSync, spawn, type ChildProcess } from "node:child_process";
 import { randomBytes } from "node:crypto";
+import { fileURLToPath } from "node:url";
+import path from "node:path";
+import bcrypt from "bcryptjs";
 import { chromium, type Browser, type Page } from "playwright";
 import AxeBuilder from "@axe-core/playwright";
 import { eq } from "drizzle-orm";
@@ -32,6 +46,7 @@ import {
   db,
   pool,
   usersTable,
+  employeesTable,
   applicationsTable,
   onboardingTokensTable,
   applicationAmendmentTokensTable,
@@ -42,7 +57,49 @@ const PORTAL = `${BASE_URL}/admin-portal`;
 const API = `${BASE_URL}/api`;
 const ADMIN_EMAIL = process.env.A11Y_ADMIN_EMAIL ?? "admin@secureops.com";
 const ADMIN_PASSWORD = process.env.A11Y_ADMIN_PASSWORD ?? "Admin123!";
+// Only auto-provision the admin when the caller is relying on the default
+// documented credentials. If they passed their own, we must not clobber a real
+// account's password — we assume it already exists and is usable.
+const USING_DEFAULT_ADMIN = !process.env.A11Y_ADMIN_EMAIL && !process.env.A11Y_ADMIN_PASSWORD;
 const TOKEN_KEY = "wcsg.adminToken";
+
+// Workspace root, resolved from this file (scripts/src/<file> -> ../../..).
+const WORKSPACE_ROOT = path.resolve(fileURLToPath(import.meta.url), "../../..");
+// How long to wait for a freshly-spawned service to answer behind the proxy.
+const STARTUP_TIMEOUT_MS = 180_000;
+
+const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+
+/**
+ * The prerequisite services the scan needs behind the shared proxy. `localPort`
+ * + `env` mirror each artifact's `.replit-artifact/artifact.toml` so a service
+ * we spawn lands on exactly the port the proxy routes to. `healthUrl` is hit
+ * through the proxy (not the raw port) so "reachable" means the same thing the
+ * browser will experience.
+ */
+type ServiceSpec = {
+  name: string;
+  packageFilter: string;
+  healthUrl: string;
+  env: Record<string, string>;
+};
+
+const SERVICES: ServiceSpec[] = [
+  {
+    name: "api-server",
+    packageFilter: "@workspace/api-server",
+    healthUrl: `${API}/healthz`,
+    env: { PORT: "8080", NODE_ENV: "development" },
+  },
+  {
+    name: "admin-portal",
+    packageFilter: "@workspace/admin-portal",
+    healthUrl: `${BASE_URL}/admin-portal/`,
+    env: { PORT: "25580", BASE_PATH: "/admin-portal/" },
+  },
+];
+
+type ServiceHandle = { spec: ServiceSpec; child: ChildProcess; tail: () => string };
 
 // WCAG 2.0 + 2.1, levels A and AA. axe groups its rules under these tags.
 const AXE_TAGS = ["wcag2a", "wcag2aa", "wcag21a", "wcag21aa"];
@@ -71,18 +128,210 @@ function resolveChromium(): string {
   }
 }
 
-async function adminLogin(): Promise<string> {
-  const res = await fetch(`${API}/auth/login`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ email: ADMIN_EMAIL, password: ADMIN_PASSWORD }),
-  });
-  if (!res.ok) {
-    throw new Error(`Admin login failed (${res.status}). Is api-server running and seeded?`);
+/** A prerequisite (service / account) couldn't be brought up. Thrown so the
+ *  top-level handler can phrase the exit clearly as an environment problem,
+ *  never as an accessibility violation. */
+class PrerequisiteError extends Error {}
+
+const indent = (s: string) => s.split("\n").map((l) => `      ${l}`).join("\n");
+
+/** True when the URL answers behind the proxy with a real application response.
+ *  A network error or a proxy 5xx (502/503/504 = upstream not up yet) is
+ *  treated as "not reachable". */
+async function isReachable(url: string): Promise<boolean> {
+  try {
+    const res = await fetch(url, { signal: AbortSignal.timeout(4000) });
+    return res.status < 500;
+  } catch {
+    return false;
   }
-  const data = (await res.json()) as { token?: string };
-  if (!data.token) throw new Error("Admin login returned no token (2FA enabled on this account?).");
-  return data.token;
+}
+
+/** Spawn a service's `dev` command as a detached process group so we can later
+ *  kill the whole tree (pnpm -> node -> …). Keeps a rolling tail of its output
+ *  for diagnostics if it never comes up. */
+function spawnService(spec: ServiceSpec): ServiceHandle {
+  const child = spawn("pnpm", ["--filter", spec.packageFilter, "run", "dev"], {
+    cwd: WORKSPACE_ROOT,
+    env: { ...process.env, ...spec.env },
+    stdio: ["ignore", "pipe", "pipe"],
+    detached: true,
+  });
+  const lines: string[] = [];
+  const capture = (buf: Buffer) => {
+    for (const line of buf.toString().split("\n")) {
+      if (!line.trim()) continue;
+      lines.push(line);
+      if (lines.length > 40) lines.shift();
+    }
+  };
+  child.stdout?.on("data", capture);
+  child.stderr?.on("data", capture);
+  child.on("error", (e) => lines.push(`spawn error: ${e.message}`));
+  return { spec, child, tail: () => lines.join("\n") || "(no output captured)" };
+}
+
+async function waitForService(spec: ServiceSpec, timeoutMs: number): Promise<void> {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    if (await isReachable(spec.healthUrl)) return;
+    await sleep(2000);
+  }
+  throw new PrerequisiteError(
+    `${spec.name} did not become reachable at ${spec.healthUrl} within ${Math.round(timeoutMs / 1000)}s`,
+  );
+}
+
+/** Make sure both prerequisite services answer behind the proxy. Anything
+ *  already running is reused; anything missing is started here and returned so
+ *  the caller can tear it down afterwards. Every service is then waited on —
+ *  including pre-existing ones — so a service that happens to be mid-restart
+ *  (e.g. the dev workflows all bouncing at once) is given time to settle rather
+ *  than producing a confusing transient failure. */
+async function ensureServices(): Promise<ServiceHandle[]> {
+  const spawned: ServiceHandle[] = [];
+  for (const spec of SERVICES) {
+    if (await isReachable(spec.healthUrl)) {
+      console.log(`  • ${spec.name}: already running`);
+      continue;
+    }
+    console.log(`  • ${spec.name}: not running — starting "${spec.packageFilter} run dev"…`);
+    spawned.push(spawnService(spec));
+  }
+  for (const spec of SERVICES) {
+    const handle = spawned.find((h) => h.spec === spec);
+    try {
+      await waitForService(spec, STARTUP_TIMEOUT_MS);
+      console.log(`  ✓ ${spec.name}: ready`);
+    } catch (err) {
+      if (handle) {
+        console.error(`\n  ⚠️  ${spec.name} failed to start. Last output:\n${indent(handle.tail())}\n`);
+      }
+      throw err;
+    }
+  }
+  return spawned;
+}
+
+/** Stop every service we spawned: SIGTERM the process group, then SIGKILL any
+ *  stragglers so no detached dev server outlives the scan. */
+async function stopServices(handles: ServiceHandle[]): Promise<void> {
+  if (handles.length === 0) return;
+  const killGroup = (handle: ServiceHandle, signal: NodeJS.Signals) => {
+    if (handle.child.pid == null) return;
+    try {
+      process.kill(-handle.child.pid, signal);
+    } catch {
+      /* already gone */
+    }
+  };
+  for (const handle of handles) killGroup(handle, "SIGTERM");
+  await sleep(3000);
+  for (const handle of handles) killGroup(handle, "SIGKILL");
+}
+
+/**
+ * Guarantee the documented admin can log in, so the scan never fails just
+ * because the DB wasn't seeded (e.g. SEED_DEMO_USERS=false, or the api-server
+ * we reused had seeding disabled). No-op when the caller supplied their own
+ * credentials — we won't touch a real account.
+ */
+async function ensureSeededAdmin(): Promise<void> {
+  if (!USING_DEFAULT_ADMIN) {
+    console.log(`  • admin account: using caller-supplied credentials as-is`);
+    return;
+  }
+  const [existing] = await db
+    .select()
+    .from(usersTable)
+    .where(eq(usersTable.email, ADMIN_EMAIL))
+    .limit(1);
+
+  if (!existing) {
+    const passwordHash = await bcrypt.hash(ADMIN_PASSWORD, 10);
+    const [created] = await db
+      .insert(usersTable)
+      .values({
+        email: ADMIN_EMAIL,
+        passwordHash,
+        firstName: "Admin",
+        lastName: "User",
+        role: "admin",
+        status: "active",
+        mustChangePassword: false,
+        mustCompleteProfile: false,
+      })
+      .returning();
+    if (created) await db.insert(employeesTable).values({ userId: created.id });
+    console.log(`  ✓ admin account: seeded ${ADMIN_EMAIL}`);
+    return;
+  }
+
+  // Exists already — make sure it can actually authenticate (active + password
+  // matches the documented value). Leaves a healthy account untouched.
+  const passwordOk = await bcrypt.compare(ADMIN_PASSWORD, existing.passwordHash);
+  if (!passwordOk || existing.status !== "active" || existing.mustChangePassword) {
+    const passwordHash = passwordOk ? existing.passwordHash : await bcrypt.hash(ADMIN_PASSWORD, 10);
+    await db
+      .update(usersTable)
+      .set({ passwordHash, status: "active", mustChangePassword: false })
+      .where(eq(usersTable.id, existing.id));
+    if (!passwordOk) {
+      console.warn(
+        `  ⚠ admin account: reset ${ADMIN_EMAIL} password to the documented default ` +
+          `(demo/dev parity; only runs in default-credential mode — supply A11Y_ADMIN_EMAIL/PASSWORD to use a custom account untouched)`,
+      );
+    } else {
+      console.log(`  ✓ admin account: reactivated ${ADMIN_EMAIL} (password left unchanged)`);
+    }
+  } else {
+    console.log(`  • admin account: ${ADMIN_EMAIL} already usable`);
+  }
+}
+
+async function adminLogin(): Promise<string> {
+  // Retry briefly on transient connectivity blips (proxy 5xx / network errors)
+  // so a service flapping mid-restart doesn't masquerade as a credential
+  // failure. A genuine 401 fails fast.
+  const deadline = Date.now() + 30_000;
+  for (;;) {
+    let res: Awaited<ReturnType<typeof fetch>>;
+    try {
+      res = await fetch(`${API}/auth/login`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ email: ADMIN_EMAIL, password: ADMIN_PASSWORD }),
+      });
+    } catch (err) {
+      if (Date.now() < deadline) {
+        await sleep(2000);
+        continue;
+      }
+      throw new PrerequisiteError(`Admin login could not reach the api-server: ${(err as Error).message}`);
+    }
+
+    if ((res.status === 502 || res.status === 503 || res.status === 504) && Date.now() < deadline) {
+      await sleep(2000);
+      continue;
+    }
+
+    if (!res.ok) {
+      const reason =
+        res.status === 401
+          ? USING_DEFAULT_ADMIN
+            ? "the seeded admin account couldn't authenticate"
+            : "check the A11Y_ADMIN_EMAIL / A11Y_ADMIN_PASSWORD you supplied"
+          : "the api-server returned an unexpected status";
+      throw new PrerequisiteError(`Admin login failed (${res.status}) for ${ADMIN_EMAIL} — ${reason}.`);
+    }
+
+    const data = (await res.json()) as { token?: string; needsTotp?: boolean };
+    if (data.needsTotp) {
+      throw new PrerequisiteError(`Admin account ${ADMIN_EMAIL} has 2FA enabled — cannot log in headlessly.`);
+    }
+    if (!data.token) throw new PrerequisiteError("Admin login returned no token.");
+    return data.token;
+  }
 }
 
 type Seeded = {
@@ -250,14 +499,23 @@ async function main() {
   console.log(`Accessibility scan against ${PORTAL}`);
   const executablePath = resolveChromium();
 
-  const adminToken = await adminLogin();
-  const seeded = await seedTokens();
-
+  let spawned: ServiceHandle[] = [];
   let browser: Browser | null = null;
+  let seeded: Seeded | null = null;
   let totalFailures = 0;
   let setupFailures = 0;
 
   try {
+    // 1) Bring up (or reuse) the services and ensure the admin can log in.
+    //    A failure here is an environment/prerequisite problem, not an a11y one.
+    console.log("Preparing prerequisites…");
+    spawned = await ensureServices();
+    await ensureSeededAdmin();
+    const adminToken = await adminLogin();
+    seeded = await seedTokens();
+
+    // 2) Run the actual scan.
+    console.log("");
     browser = await chromium.launch({ executablePath, args: ["--no-sandbox"] });
     const surfaces = buildSurfaces(seeded, adminToken);
 
@@ -277,7 +535,8 @@ async function main() {
     }
   } finally {
     if (browser) await browser.close();
-    await seeded.cleanup();
+    if (seeded) await seeded.cleanup();
+    await stopServices(spawned);
     await pool.end();
   }
 
@@ -288,11 +547,20 @@ async function main() {
   if (totalFailures > 0) {
     console.error(`Accessibility scan FAILED: ${totalFailures} critical/serious violation(s).`);
   }
-  if (totalFailures > 0 || setupFailures > 0) process.exit(1);
+  if (totalFailures > 0 || setupFailures > 0) {
+    process.exitCode = 1;
+    return;
+  }
   console.log("Accessibility scan passed: no critical/serious violations on any surface.");
 }
 
 main().catch((err) => {
-  console.error("Accessibility scan errored:", err);
-  process.exit(1);
+  if (err instanceof PrerequisiteError) {
+    // Prerequisite couldn't be satisfied — phrase this clearly so it's never
+    // mistaken for an accessibility violation in CI / pre-deploy output.
+    console.error(`\nAccessibility scan could not run — prerequisite not ready:\n  ${err.message}`);
+  } else {
+    console.error("Accessibility scan errored:", err);
+  }
+  process.exitCode = 1;
 });
