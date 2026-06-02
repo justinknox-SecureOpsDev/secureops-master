@@ -37,6 +37,7 @@ type Row = {
 const hoisted = vi.hoisted(() => ({
   rows: [] as Row[],
   ownerRows: [] as { id: string; name: string }[],
+  shiftRows: [] as { id: string; name: string; siteId: string; payRate: number }[],
   listCalls: 0,
   creates: [] as Record<string, unknown>[],
   updates: [] as { id: string; body: Record<string, unknown> }[],
@@ -54,6 +55,13 @@ vi.mock("@/lib/api", () => ({
     // the dialog only ever lists this table to populate its dropdown.
     if (table === "owners") {
       return { rows: hoisted.ownerRows, total: hoisted.ownerRows.length };
+    }
+    // FK option source for the linked shift field. Each shift row carries a
+    // `siteId` so the dependent dropdown can be filtered by the chosen site, and
+    // a `payRate` so the autofill mapping has something to copy. Named
+    // `siteshifts` to avoid colliding with the real `shifts` table in TABLES.
+    if (table === "siteshifts") {
+      return { rows: hoisted.shiftRows, total: hoisted.shiftRows.length };
     }
     if (table !== "widgets") return { rows: [], total: 0 };
     if (method === "GET") {
@@ -128,6 +136,60 @@ const ownersTable = {
   name: "owners",
   label: "Owners",
   plural: "owners",
+  importSupported: false,
+  primaryLabelField: "name",
+  fields: [
+    { key: "id", label: "ID", type: "text", readonly: true },
+    { key: "name", label: "Name", type: "text", required: true },
+  ],
+} as unknown as TableDescriptor;
+
+// Descriptor exercising the *linked* FK behaviours that drive shift-assignment:
+//  - `siteId` is the source select the dependent dropdown filters against.
+//  - `shiftId` is a virtual FK whose options are narrowed to the chosen site
+//    (`filterBy`) and which, on pick, copies values from the picked shift row
+//    into real form fields (`autofill`). Being virtual it is never submitted and
+//    is the field the dialog clears when the source (`siteId`) changes.
+//  - `assignedShiftId` / `payRate` are the real fields the autofill targets.
+const linkedDescriptor = {
+  name: "widgets",
+  label: "Widgets",
+  plural: "widgets",
+  importSupported: false,
+  primaryLabelField: "name",
+  fields: [
+    { key: "id", label: "ID", type: "text", readonly: true, hiddenInGrid: true },
+    { key: "name", label: "Name", type: "text", required: true },
+    {
+      key: "siteId",
+      label: "Site",
+      type: "select",
+      options: [
+        { label: "Site A", value: "site-a" },
+        { label: "Site B", value: "site-b" },
+      ],
+    },
+    {
+      key: "shiftId",
+      label: "Shift",
+      type: "fk",
+      fkTable: "siteshifts",
+      virtual: true,
+      filterBy: { fkRowKey: "siteId", formKey: "siteId" },
+      autofill: { assignedShiftId: "id", payRate: "payRate" },
+    },
+    { key: "assignedShiftId", label: "Assigned Shift ID", type: "text" },
+    { key: "payRate", label: "Pay Rate", type: "number" },
+  ],
+} as unknown as TableDescriptor;
+
+// FK target table for the linked dropdown — registered so option labels resolve.
+// Named `siteshifts` (not `shifts`) so it doesn't shadow the real shifts table
+// already in TABLES, whose primaryLabelField wouldn't match these test rows.
+const siteShiftsTable = {
+  name: "siteshifts",
+  label: "Site Shifts",
+  plural: "siteshifts",
   importSupported: false,
   primaryLabelField: "name",
   fields: [
@@ -337,5 +399,126 @@ describe("RowFormDialog dropdown (select / boolean) and linked-record (FK) field
     expect(hoisted.updates[0].id).toBe("w1");
     expect(hoisted.updates[0].body).toMatchObject({ active: true });
     expect(hoisted.creates).toHaveLength(0);
+  });
+});
+
+/**
+ * Linked FK fields — the most error-prone part of the form, used by the
+ * shift-assignment flows. `filterBy` narrows a dependent dropdown to rows
+ * matching another field's value (pick a site -> only that site's shifts show),
+ * changing the source clears the dependent virtual selection, and `autofill`
+ * copies values from the picked FK row into other (real, submitted) fields.
+ */
+describe("RowFormDialog linked FK fields (filterBy narrowing + clearing, autofill copy)", () => {
+  beforeAll(() => {
+    // Same Radix/jsdom polyfills the dropdown suite relies on.
+    const proto = window.HTMLElement.prototype as unknown as Record<string, unknown>;
+    proto.hasPointerCapture = proto.hasPointerCapture ?? (() => false);
+    proto.setPointerCapture = proto.setPointerCapture ?? (() => {});
+    proto.releasePointerCapture = proto.releasePointerCapture ?? (() => {});
+    proto.scrollIntoView = proto.scrollIntoView ?? (() => {});
+    if (!("ResizeObserver" in globalThis)) {
+      (globalThis as unknown as { ResizeObserver: unknown }).ResizeObserver = class {
+        observe() {}
+        unobserve() {}
+        disconnect() {}
+      };
+    }
+    TABLES.push(siteShiftsTable);
+  });
+
+  afterAll(() => {
+    const i = TABLES.indexOf(siteShiftsTable);
+    if (i >= 0) TABLES.splice(i, 1);
+  });
+
+  beforeEach(() => {
+    hoisted.rows = [];
+    // Two shifts at site-a, one at site-b — lets us assert the dropdown is
+    // narrowed to exactly the chosen site's shifts.
+    hoisted.shiftRows = [
+      { id: "sh1", name: "Mon Day Shift", siteId: "site-a", payRate: 25 },
+      { id: "sh2", name: "Tue Night Shift", siteId: "site-a", payRate: 30 },
+      { id: "sh3", name: "Wed Patrol", siteId: "site-b", payRate: 28 },
+    ];
+    hoisted.listCalls = 0;
+    hoisted.creates = [];
+    hoisted.updates = [];
+    invalidateFk("siteshifts"); // module-level FK cache survives across tests
+    vi.clearAllMocks();
+  });
+
+  it("filterBy: narrows the dependent dropdown to the chosen site and clears it when the site changes", async () => {
+    render(<DataGrid descriptor={linkedDescriptor} />);
+    await waitFor(() => expect(hoisted.listCalls).toBeGreaterThanOrEqual(1));
+
+    fireEvent.click(screen.getByRole("button", { name: /add widget/i }));
+    const dialog = await screen.findByRole("dialog");
+
+    // Before a site is picked the dependent dropdown prompts for the source.
+    expect(within(dialog).getByLabelText(/^shift/i).textContent).toMatch(/pick siteId first/i);
+
+    // Pick Site A -> the dependent dropdown should only list site-a's shifts.
+    await chooseOption(within(dialog).getByLabelText(/^site/i), "Site A");
+
+    const shiftTrigger = within(dialog).getByLabelText(/^shift/i);
+    fireEvent.keyDown(shiftTrigger, { key: "ArrowDown" });
+    expect(await screen.findByRole("option", { name: "Mon Day Shift" })).toBeTruthy();
+    expect(screen.getByRole("option", { name: "Tue Night Shift" })).toBeTruthy();
+    // Site B's shift is filtered out.
+    expect(screen.queryByRole("option", { name: "Wed Patrol" })).toBeNull();
+
+    // Select one of site-a's shifts; the trigger now shows that selection.
+    fireEvent.click(screen.getByRole("option", { name: "Mon Day Shift" }));
+    await waitFor(() =>
+      expect(within(dialog).getByLabelText(/^shift/i).textContent).toMatch(/Mon Day Shift/),
+    );
+
+    // Change the source site -> the dependent selection is cleared...
+    await chooseOption(within(dialog).getByLabelText(/^site/i), "Site B");
+    await waitFor(() =>
+      expect(within(dialog).getByLabelText(/^shift/i).textContent).not.toMatch(/Mon Day Shift/),
+    );
+
+    // ...and the dropdown is now narrowed to site-b's shift instead.
+    fireEvent.keyDown(within(dialog).getByLabelText(/^shift/i), { key: "ArrowDown" });
+    expect(await screen.findByRole("option", { name: "Wed Patrol" })).toBeTruthy();
+    expect(screen.queryByRole("option", { name: "Mon Day Shift" })).toBeNull();
+    expect(screen.queryByRole("option", { name: "Tue Night Shift" })).toBeNull();
+  });
+
+  it("autofill: picking a shift copies the mapped values into the target fields and submits them", async () => {
+    render(<DataGrid descriptor={linkedDescriptor} />);
+    await waitFor(() => expect(hoisted.listCalls).toBeGreaterThanOrEqual(1));
+
+    fireEvent.click(screen.getByRole("button", { name: /add widget/i }));
+    const dialog = await screen.findByRole("dialog");
+
+    fireEvent.change(within(dialog).getByLabelText(/^name/i), {
+      target: { value: "Assignment" },
+    });
+
+    // Pick a site, then a shift; the shift's id + payRate autofill the targets.
+    await chooseOption(within(dialog).getByLabelText(/^site/i), "Site A");
+    await chooseOption(within(dialog).getByLabelText(/^shift/i), "Tue Night Shift");
+
+    // The autofill copied the picked shift's row values into the real fields.
+    await waitFor(() =>
+      expect((within(dialog).getByLabelText(/^assigned shift id/i) as HTMLInputElement).value).toBe("sh2"),
+    );
+    expect((within(dialog).getByLabelText(/^pay rate/i) as HTMLInputElement).value).toBe("30");
+
+    fireEvent.click(within(dialog).getByRole("button", { name: "Create" }));
+
+    await waitFor(() => expect(hoisted.creates).toHaveLength(1));
+    // The autofilled values are submitted on the real fields...
+    expect(hoisted.creates[0]).toMatchObject({
+      name: "Assignment",
+      siteId: "site-a",
+      assignedShiftId: "sh2",
+      payRate: "30",
+    });
+    // ...while the virtual `shiftId` helper field is never sent to the API.
+    expect(hoisted.creates[0]).not.toHaveProperty("shiftId");
   });
 });
