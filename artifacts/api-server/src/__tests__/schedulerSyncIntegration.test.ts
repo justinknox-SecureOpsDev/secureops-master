@@ -178,10 +178,10 @@ describe("inbound shift webhook: upsert creates a row and never echoes back out"
       requiredLicenseLevel: 2,
       headcount: 1,
       status: "upcoming",
-      // Past-dated: conflict resolution compares this against the DB row's
-      // wall-clock updatedAt (the moment SecureOps wrote it). A scheduler
-      // timestamp older than the local write means SecureOps wins the
-      // tiebreaker, so a re-pull of an unchanged shift is skipped.
+      // The first pull writes this row as syncSource='scheduler' with
+      // externalUpdatedAt = this timestamp. The second pull carries the SAME
+      // updatedAt, so the scheduler-vs-scheduler comparison ("strictly newer
+      // than externalUpdatedAt") is not satisfied and the re-pull is skipped.
       updatedAt: "2025-01-01T00:00:00.000Z",
     };
 
@@ -520,6 +520,7 @@ describe("last-write-wins: newer scheduler update applies, older one is ignored"
   });
 });
 
+
 // ---------------------------------------------------------------------------
 // 2c. Delete path: an inbound delete payload removes the matching local row by
 //     externalId; an unknown externalId is a no-op ("skipped" / "not found").
@@ -689,6 +690,227 @@ describe("delete path: removes the matching row, no-ops on unknown externalId", 
   });
 });
 
+
+// ---------------------------------------------------------------------------
+// 2d. Clock-skew resistance: when the row was last written BY the scheduler
+//     (syncSource='scheduler'), the tiebreaker compares the incoming updatedAt
+//     against the stored externalUpdatedAt (the scheduler's OWN previous
+//     timestamp) — same clock, apples-to-apples — NOT against SecureOps's
+//     wall-clock updated_at. This makes conflict resolution correct even when
+//     the two systems' clocks are skewed:
+//       - scheduler ahead: a stale (out-of-order) update is still rejected,
+//         even though its timestamp is far ahead of SecureOps's wall clock.
+//       - scheduler behind: a genuinely fresh update is still applied, even
+//         though its timestamp is older than SecureOps's wall clock.
+//     A naive wall-clock comparison would get BOTH of these wrong.
+// ---------------------------------------------------------------------------
+
+describe("conflict resolution is resistant to clock skew between SecureOps and the scheduler", () => {
+  afterEach(async () => {
+    await db.execute(
+      sql`DELETE FROM time_entries WHERE employee_id = ${ctx.employeeId}::uuid`,
+    );
+  });
+
+  it("processInboundShift: rejects a stale scheduler update when the scheduler clock runs AHEAD", async () => {
+    const externalId = `${TAG}-skew-ahead-${randomUUID().slice(0, 8)}`;
+
+    // Row last written by the scheduler. externalUpdatedAt is the scheduler's
+    // own clock (running ahead). The wall-clock updated_at lags far behind, so
+    // a naive comparison would wrongly accept the stale payload below.
+    const [local] = await db
+      .insert(shiftsTable)
+      .values({
+        title: `${TAG} Last Scheduler Write`,
+        siteId: ctx.siteId,
+        startTime: new Date("2026-09-01T08:00:00.000Z"),
+        endTime: new Date("2026-09-01T16:00:00.000Z"),
+        payRate: "20",
+        billRate: "30",
+        headcount: 2,
+        requiredLicenseLevel: 2,
+        status: "upcoming",
+        externalId,
+        externalSource: SCHEDULER_SOURCE,
+        externalUpdatedAt: new Date("2030-01-02T00:00:00.000Z"),
+        updatedAt: new Date("2026-09-01T00:00:00.000Z"),
+        syncSource: SCHEDULER_SOURCE,
+      })
+      .returning({ id: shiftsTable.id });
+
+    const result = await processInboundShift({
+      id: externalId,
+      title: `${TAG} Stale Reorder`,
+      siteName: ctx.siteName,
+      startTime: "2026-09-01T09:00:00.000Z",
+      endTime: "2026-09-01T17:00:00.000Z",
+      payRate: "99",
+      billRate: "99",
+      requiredLicenseLevel: 4,
+      headcount: 9,
+      status: "cancelled",
+      // Older than externalUpdatedAt, but still far ahead of the wall clock.
+      updatedAt: "2030-01-01T00:00:00.000Z",
+    });
+
+    expect(result.action).toBe("skipped");
+    expect(result.secureopsId).toBe(local.id);
+
+    const [row] = await db
+      .select()
+      .from(shiftsTable)
+      .where(eq(shiftsTable.id, local.id));
+    expect(row.title).toBe(`${TAG} Last Scheduler Write`);
+    expect(row.payRate).toBe("20.00");
+    expect(row.headcount).toBe(2);
+    expect(row.requiredLicenseLevel).toBe(2);
+    expect(row.status).toBe("upcoming");
+  });
+
+  it("processInboundShift: applies a fresh scheduler update when the scheduler clock LAGS", async () => {
+    const externalId = `${TAG}-skew-lag-${randomUUID().slice(0, 8)}`;
+
+    // Row last written by the scheduler with a lagging clock; the wall-clock
+    // updated_at is far ahead, so a naive comparison would wrongly skip the
+    // genuinely-newer payload below.
+    const [local] = await db
+      .insert(shiftsTable)
+      .values({
+        title: `${TAG} Old Scheduler Write`,
+        siteId: ctx.siteId,
+        startTime: new Date("2026-09-02T08:00:00.000Z"),
+        endTime: new Date("2026-09-02T16:00:00.000Z"),
+        payRate: "20",
+        billRate: "30",
+        headcount: 1,
+        requiredLicenseLevel: 2,
+        status: "upcoming",
+        externalId,
+        externalSource: SCHEDULER_SOURCE,
+        externalUpdatedAt: new Date("2020-01-01T00:00:00.000Z"),
+        updatedAt: new Date("2026-09-02T00:00:00.000Z"),
+        syncSource: SCHEDULER_SOURCE,
+      })
+      .returning({ id: shiftsTable.id });
+
+    const result = await processInboundShift({
+      id: externalId,
+      title: `${TAG} Fresh Update`,
+      siteName: ctx.siteName,
+      startTime: "2026-09-02T09:00:00.000Z",
+      endTime: "2026-09-02T17:00:00.000Z",
+      payRate: "27",
+      billRate: "37",
+      requiredLicenseLevel: 3,
+      headcount: 5,
+      status: "upcoming",
+      // Newer than externalUpdatedAt, but older than the wall clock.
+      updatedAt: "2020-01-02T00:00:00.000Z",
+    });
+
+    expect(result.action).toBe("updated");
+    expect(result.secureopsId).toBe(local.id);
+
+    const [row] = await db
+      .select()
+      .from(shiftsTable)
+      .where(eq(shiftsTable.id, local.id));
+    expect(row.title).toBe(`${TAG} Fresh Update`);
+    expect(row.payRate).toBe("27.00");
+    expect(row.billRate).toBe("37.00");
+    expect(row.headcount).toBe(5);
+    expect(row.requiredLicenseLevel).toBe(3);
+  });
+
+  it("processInboundClockEvent: rejects a stale scheduler update when the scheduler clock runs AHEAD", async () => {
+    const externalId = `${TAG}-skew-clock-${randomUUID().slice(0, 8)}`;
+    const clockIn = new Date("2026-09-03T09:00:00.000Z");
+    const localClockOut = new Date(clockIn.getTime() + 4 * 3600 * 1000);
+
+    const [local] = await db
+      .insert(timeEntriesTable)
+      .values({
+        employeeId: ctx.employeeId,
+        siteId: ctx.siteId,
+        clockInTime: clockIn,
+        clockOutTime: localClockOut,
+        hoursWorked: "4",
+        approvalStatus: "pending",
+        isVerified: false,
+        externalId,
+        externalSource: SCHEDULER_SOURCE,
+        externalUpdatedAt: new Date("2030-01-02T00:00:00.000Z"),
+        updatedAt: new Date("2026-09-03T00:00:00.000Z"),
+        syncSource: SCHEDULER_SOURCE,
+      })
+      .returning({ id: timeEntriesTable.id });
+
+    const result = await processInboundClockEvent({
+      id: externalId,
+      employeeEmail: ctx.employeeEmail,
+      siteName: ctx.siteName,
+      clockInTime: clockIn.toISOString(),
+      // Would rewrite the clock-out to 10h if (wrongly) applied.
+      clockOutTime: new Date(clockIn.getTime() + 10 * 3600 * 1000).toISOString(),
+      // Older than externalUpdatedAt, but still far ahead of the wall clock.
+      updatedAt: "2030-01-01T00:00:00.000Z",
+    });
+
+    expect(result.action).toBe("skipped");
+    expect(result.secureopsId).toBe(local.id);
+
+    const [row] = await db
+      .select()
+      .from(timeEntriesTable)
+      .where(eq(timeEntriesTable.id, local.id));
+    expect(Number(row.hoursWorked)).toBe(4);
+    expect(new Date(row.clockOutTime!).toISOString()).toBe(localClockOut.toISOString());
+  });
+
+  it("processInboundClockEvent: applies a fresh scheduler update when the scheduler clock LAGS", async () => {
+    const externalId = `${TAG}-skew-clock-lag-${randomUUID().slice(0, 8)}`;
+    const clockIn = new Date("2026-09-05T09:00:00.000Z");
+
+    const [local] = await db
+      .insert(timeEntriesTable)
+      .values({
+        employeeId: ctx.employeeId,
+        siteId: ctx.siteId,
+        clockInTime: clockIn,
+        clockOutTime: null,
+        hoursWorked: null,
+        approvalStatus: "pending",
+        isVerified: false,
+        externalId,
+        externalSource: SCHEDULER_SOURCE,
+        externalUpdatedAt: new Date("2020-01-01T00:00:00.000Z"),
+        updatedAt: new Date("2026-09-05T00:00:00.000Z"),
+        syncSource: SCHEDULER_SOURCE,
+      })
+      .returning({ id: timeEntriesTable.id });
+
+    const result = await processInboundClockEvent({
+      id: externalId,
+      employeeEmail: ctx.employeeEmail,
+      siteName: ctx.siteName,
+      clockInTime: clockIn.toISOString(),
+      clockOutTime: new Date(clockIn.getTime() + 8 * 3600 * 1000).toISOString(),
+      // Newer than externalUpdatedAt, but older than the wall clock.
+      updatedAt: "2020-01-02T00:00:00.000Z",
+    });
+
+    expect(result.action).toBe("updated");
+    expect(result.secureopsId).toBe(local.id);
+
+    const [row] = await db
+      .select()
+      .from(timeEntriesTable)
+      .where(eq(timeEntriesTable.id, local.id));
+    expect(row.clockOutTime).not.toBeNull();
+    expect(Number(row.hoursWorked)).toBe(8);
+  });
+});
+
 // ---------------------------------------------------------------------------
 // 3. Reconcile job: advances the cursor and skips already-synced entries.
 // ---------------------------------------------------------------------------
@@ -727,8 +949,10 @@ describe("scheduler reconciliation job", () => {
       requiredLicenseLevel: 2,
       headcount: 1,
       status: "upcoming",
-      // Past-dated so the second pull of this unchanged shift is skipped by
-      // the last-write-wins tiebreaker (see the webhook idempotency test).
+      // After the first tick the row is syncSource='scheduler' with
+      // externalUpdatedAt = this timestamp; the second tick carries the same
+      // updatedAt, so the scheduler-vs-scheduler tiebreaker skips it (see the
+      // webhook idempotency test).
       updatedAt: "2025-01-01T00:00:00.000Z",
     };
 

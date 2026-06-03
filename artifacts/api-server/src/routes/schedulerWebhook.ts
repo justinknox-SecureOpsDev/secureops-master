@@ -127,6 +127,62 @@ async function resolveShiftByExternalId(externalShiftId: string): Promise<string
 // Clock-in deduplication tolerance window: 5 minutes either side
 const DEDUP_TOLERANCE_MS = 5 * 60 * 1000;
 
+// -------------------------------------------------------------------------
+// Last-write-wins conflict resolution
+//
+// The scheduler and SecureOps keep INDEPENDENT clocks. The inbound payload's
+// `updatedAt` is stamped by the scheduler; the local row's `updatedAt` column
+// is stamped by SecureOps's own server wall-clock at write time. Comparing
+// those two directly is only valid up to the clock skew between the systems —
+// if the scheduler runs ahead, stale (out-of-order) scheduler updates can
+// win; if it lags, genuinely fresh ones can be wrongly skipped.
+//
+// Decision: compare on the SCHEDULER's own clock whenever we can, falling back
+// to wall-clock only for rows a human edited locally:
+//
+//   • Row last written BY the scheduler (`syncSource === 'scheduler'`):
+//     `externalUpdatedAt` holds the scheduler timestamp of that last write —
+//     i.e. the SAME clock as the incoming payload. Apply iff the incoming
+//     timestamp is strictly newer. This is the common case (repeated pulls,
+//     reconciliation, out-of-order webhook delivery) and is fully immune to
+//     clock skew, since both sides of the comparison come from the scheduler.
+//
+//   • Row last written LOCALLY (`syncSource === 'local'`, or no scheduler
+//     timestamp recorded yet): a genuine SecureOps edit owns the row and we
+//     have no scheduler-clock reference for that edit. Fall back to the
+//     wall-clock comparison and let SecureOps win ties within a 1 s grace
+//     window, so only a scheduler change that is clearly newer overrides a
+//     local edit ("local edits win unless genuinely superseded").
+// -------------------------------------------------------------------------
+const LOCAL_EDIT_TIE_GRACE_MS = 1000;
+
+export function shouldApplyInboundUpdate(
+  existing: { syncSource: string; externalUpdatedAt: Date | string | null; updatedAt: Date | string },
+  incomingUpdatedAt: Date,
+): { apply: boolean; reason?: string } {
+  // Scheduler-vs-scheduler: apples-to-apples on the scheduler's own clock.
+  if (existing.syncSource === SCHEDULER_SOURCE && existing.externalUpdatedAt != null) {
+    const lastSchedulerTs = new Date(existing.externalUpdatedAt).getTime();
+    if (incomingUpdatedAt.getTime() > lastSchedulerTs) {
+      return { apply: true };
+    }
+    return {
+      apply: false,
+      reason: "incoming is not newer than last synced scheduler timestamp (externalUpdatedAt)",
+    };
+  }
+
+  // Local edit owns the row: wall-clock comparison, SecureOps wins ties.
+  const localUpdatedAt = new Date(existing.updatedAt).getTime();
+  if (incomingUpdatedAt.getTime() - localUpdatedAt > LOCAL_EDIT_TIE_GRACE_MS) {
+    return { apply: true };
+  }
+  return {
+    apply: false,
+    reason: "local edit is same age or newer (SecureOps wins tiebreaker)",
+  };
+}
+
 /**
  * Process a single inbound shift payload (upsert or delete).
  * Used by both the webhook handler and the reconciliation job.
@@ -166,12 +222,10 @@ export async function processInboundShift(payload: SchedulerShiftPayload): Promi
     .limit(1);
 
   if (existing) {
-    // Last-write-wins conflict resolution.
-    // SecureOps wins tiebreaker within 1 second: only apply incoming if it is
-    // GENUINELY newer by more than 1 s. Equal or within-1 s → SecureOps wins.
-    const localUpdatedAt = new Date(existing.updatedAt);
-    if (incomingUpdatedAt.getTime() - localUpdatedAt.getTime() <= 1000) {
-      return { action: "skipped", secureopsId: existing.id, skipReason: "local is same age or newer (SecureOps wins tiebreaker)" };
+    // Last-write-wins conflict resolution — see `shouldApplyInboundUpdate`.
+    const decision = shouldApplyInboundUpdate(existing, incomingUpdatedAt);
+    if (!decision.apply) {
+      return { action: "skipped", secureopsId: existing.id, skipReason: decision.reason };
     }
 
     const lvl = typeof payload.requiredLicenseLevel === "number"
@@ -305,10 +359,10 @@ export async function processInboundClockEvent(payload: SchedulerClockEventPaylo
     .limit(1);
 
   if (byExternal) {
-    // Last-write-wins — SecureOps wins tiebreaker within 1 second.
-    const localUpdatedAt = new Date(byExternal.updatedAt);
-    if (incomingUpdatedAt.getTime() - localUpdatedAt.getTime() <= 1000) {
-      return { action: "skipped", secureopsId: byExternal.id, skipReason: "local is same age or newer (SecureOps wins tiebreaker)" };
+    // Last-write-wins conflict resolution — see `shouldApplyInboundUpdate`.
+    const decision = shouldApplyInboundUpdate(byExternal, incomingUpdatedAt);
+    if (!decision.apply) {
+      return { action: "skipped", secureopsId: byExternal.id, skipReason: decision.reason };
     }
     await db.update(timeEntriesTable).set({
       clockOutTime: clockOut ?? byExternal.clockOutTime,
