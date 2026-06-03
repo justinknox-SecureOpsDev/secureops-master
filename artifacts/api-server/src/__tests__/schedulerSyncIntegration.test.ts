@@ -14,7 +14,7 @@ import {
 } from "@workspace/db";
 import app from "../app";
 import { signPayload, SCHEDULER_SOURCE } from "../lib/schedulerSync";
-import { processInboundClockEvent } from "../routes/schedulerWebhook";
+import { processInboundClockEvent, processInboundShift } from "../routes/schedulerWebhook";
 import { runSchedulerReconciliation } from "../lib/scheduledJobs";
 
 // ---------------------------------------------------------------------------
@@ -296,6 +296,227 @@ describe("inbound clock-event dedup within ±5 min", () => {
       .from(timeEntriesTable)
       .where(eq(timeEntriesTable.employeeId, ctx.employeeId));
     expect(rows).toHaveLength(2);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// 2b. Last-write-wins conflict resolution: a genuinely-newer scheduler update
+//     overwrites the local row; an older scheduler update is ignored so local
+//     edits survive. Guards against a regression that flips the comparison
+//     direction or compares the wrong timestamp (which would silently corrupt
+//     shift / clock data).
+//
+//     The tiebreaker compares the incoming payload.updatedAt against the LOCAL
+//     row's wall-clock `updated_at` (set the moment SecureOps last wrote it).
+//     Local rows below are inserted "now", so a far-future payload is genuinely
+//     newer and a far-past payload is genuinely older — independent of clock skew.
+// ---------------------------------------------------------------------------
+
+describe("last-write-wins: newer scheduler update applies, older one is ignored", () => {
+  const FAR_FUTURE = "2999-01-01T00:00:00.000Z";
+  const FAR_PAST = "2000-01-01T00:00:00.000Z";
+
+  afterEach(async () => {
+    await db.execute(
+      sql`DELETE FROM time_entries WHERE employee_id = ${ctx.employeeId}::uuid`,
+    );
+  });
+
+  // --- Shifts (processInboundShift) -----------------------------------------
+
+  it("processInboundShift: a newer scheduler update overwrites the local row", async () => {
+    const externalId = `${TAG}-lww-shift-new-${randomUUID().slice(0, 8)}`;
+
+    // Local row written "now" — its wall-clock updated_at is the comparison base.
+    const [local] = await db
+      .insert(shiftsTable)
+      .values({
+        title: `${TAG} Local Title`,
+        siteId: ctx.siteId,
+        startTime: new Date("2026-08-01T08:00:00.000Z"),
+        endTime: new Date("2026-08-01T16:00:00.000Z"),
+        payRate: "10",
+        billRate: "20",
+        headcount: 1,
+        requiredLicenseLevel: 2,
+        status: "upcoming",
+        externalId,
+        externalSource: SCHEDULER_SOURCE,
+        externalUpdatedAt: new Date(FAR_PAST),
+        syncSource: "local",
+      })
+      .returning({ id: shiftsTable.id });
+
+    const result = await processInboundShift({
+      id: externalId,
+      title: `${TAG} Scheduler Title`,
+      siteName: ctx.siteName,
+      startTime: "2026-08-01T09:00:00.000Z",
+      endTime: "2026-08-01T17:00:00.000Z",
+      payRate: "25",
+      billRate: "35",
+      requiredLicenseLevel: 3,
+      headcount: 4,
+      status: "upcoming",
+      updatedAt: FAR_FUTURE,
+    });
+
+    expect(result.action).toBe("updated");
+    expect(result.secureopsId).toBe(local.id);
+
+    const [row] = await db
+      .select()
+      .from(shiftsTable)
+      .where(eq(shiftsTable.id, local.id));
+    // Fields actually changed to the scheduler's values.
+    expect(row.title).toBe(`${TAG} Scheduler Title`);
+    expect(row.payRate).toBe("25.00");
+    expect(row.billRate).toBe("35.00");
+    expect(row.headcount).toBe(4);
+    expect(row.requiredLicenseLevel).toBe(3);
+    expect(row.syncSource).toBe(SCHEDULER_SOURCE);
+  });
+
+  it("processInboundShift: an older scheduler update is skipped (local edits preserved)", async () => {
+    const externalId = `${TAG}-lww-shift-old-${randomUUID().slice(0, 8)}`;
+
+    const [local] = await db
+      .insert(shiftsTable)
+      .values({
+        title: `${TAG} Local Wins Title`,
+        siteId: ctx.siteId,
+        startTime: new Date("2026-08-02T08:00:00.000Z"),
+        endTime: new Date("2026-08-02T16:00:00.000Z"),
+        payRate: "15",
+        billRate: "22",
+        headcount: 2,
+        requiredLicenseLevel: 2,
+        status: "upcoming",
+        externalId,
+        externalSource: SCHEDULER_SOURCE,
+        externalUpdatedAt: new Date(FAR_PAST),
+        syncSource: "local",
+      })
+      .returning({ id: shiftsTable.id });
+
+    const result = await processInboundShift({
+      id: externalId,
+      title: `${TAG} Stale Scheduler Title`,
+      siteName: ctx.siteName,
+      startTime: "2026-08-02T09:00:00.000Z",
+      endTime: "2026-08-02T17:00:00.000Z",
+      payRate: "99",
+      billRate: "99",
+      requiredLicenseLevel: 4,
+      headcount: 9,
+      status: "cancelled",
+      updatedAt: FAR_PAST,
+    });
+
+    expect(result.action).toBe("skipped");
+    expect(result.secureopsId).toBe(local.id);
+
+    const [row] = await db
+      .select()
+      .from(shiftsTable)
+      .where(eq(shiftsTable.id, local.id));
+    // Nothing changed — the stale scheduler payload was rejected.
+    expect(row.title).toBe(`${TAG} Local Wins Title`);
+    expect(row.payRate).toBe("15.00");
+    expect(row.billRate).toBe("22.00");
+    expect(row.headcount).toBe(2);
+    expect(row.requiredLicenseLevel).toBe(2);
+    expect(row.status).toBe("upcoming");
+  });
+
+  // --- Clock events (processInboundClockEvent) ------------------------------
+
+  it("processInboundClockEvent: a newer scheduler update overwrites the local row", async () => {
+    const externalId = `${TAG}-lww-clock-new-${randomUUID().slice(0, 8)}`;
+    const clockIn = new Date("2026-08-03T09:00:00.000Z");
+
+    // Matched by externalId (not the ±5 min dedup path), so the tiebreaker runs.
+    const [local] = await db
+      .insert(timeEntriesTable)
+      .values({
+        employeeId: ctx.employeeId,
+        siteId: ctx.siteId,
+        clockInTime: clockIn,
+        clockOutTime: null,
+        hoursWorked: null,
+        approvalStatus: "pending",
+        isVerified: false,
+        externalId,
+        externalSource: SCHEDULER_SOURCE,
+        externalUpdatedAt: new Date(FAR_PAST),
+        syncSource: "local",
+      })
+      .returning({ id: timeEntriesTable.id });
+
+    const result = await processInboundClockEvent({
+      id: externalId,
+      employeeEmail: ctx.employeeEmail,
+      siteName: ctx.siteName,
+      clockInTime: clockIn.toISOString(),
+      clockOutTime: new Date(clockIn.getTime() + 8 * 3600 * 1000).toISOString(),
+      updatedAt: FAR_FUTURE,
+    });
+
+    expect(result.action).toBe("updated");
+    expect(result.secureopsId).toBe(local.id);
+
+    const [row] = await db
+      .select()
+      .from(timeEntriesTable)
+      .where(eq(timeEntriesTable.id, local.id));
+    // The clock-out + hours were filled in by the newer scheduler update.
+    expect(row.clockOutTime).not.toBeNull();
+    expect(Number(row.hoursWorked)).toBe(8);
+    expect(row.syncSource).toBe(SCHEDULER_SOURCE);
+  });
+
+  it("processInboundClockEvent: an older scheduler update is skipped (local edits preserved)", async () => {
+    const externalId = `${TAG}-lww-clock-old-${randomUUID().slice(0, 8)}`;
+    const clockIn = new Date("2026-08-04T09:00:00.000Z");
+    const localClockOut = new Date(clockIn.getTime() + 4 * 3600 * 1000);
+
+    const [local] = await db
+      .insert(timeEntriesTable)
+      .values({
+        employeeId: ctx.employeeId,
+        siteId: ctx.siteId,
+        clockInTime: clockIn,
+        clockOutTime: localClockOut,
+        hoursWorked: "4",
+        approvalStatus: "pending",
+        isVerified: false,
+        externalId,
+        externalSource: SCHEDULER_SOURCE,
+        externalUpdatedAt: new Date(FAR_PAST),
+        syncSource: "local",
+      })
+      .returning({ id: timeEntriesTable.id });
+
+    const result = await processInboundClockEvent({
+      id: externalId,
+      employeeEmail: ctx.employeeEmail,
+      siteName: ctx.siteName,
+      clockInTime: clockIn.toISOString(),
+      // A stale update that would have rewritten the clock-out to 10h.
+      clockOutTime: new Date(clockIn.getTime() + 10 * 3600 * 1000).toISOString(),
+      updatedAt: FAR_PAST,
+    });
+
+    expect(result.action).toBe("skipped");
+    expect(result.secureopsId).toBe(local.id);
+
+    const [row] = await db
+      .select()
+      .from(timeEntriesTable)
+      .where(eq(timeEntriesTable.id, local.id));
+    // Local clock-out + hours untouched by the stale scheduler payload.
+    expect(Number(row.hoursWorked)).toBe(4);
+    expect(new Date(row.clockOutTime!).toISOString()).toBe(localClockOut.toISOString());
   });
 });
 
