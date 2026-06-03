@@ -521,6 +521,175 @@ describe("last-write-wins: newer scheduler update applies, older one is ignored"
 });
 
 // ---------------------------------------------------------------------------
+// 2c. Delete path: an inbound delete payload removes the matching local row by
+//     externalId; an unknown externalId is a no-op ("skipped" / "not found").
+//     Guards against a regression that deletes the wrong row, deletes nothing
+//     when it should, or silently leaves stale shifts/clock entries behind.
+// ---------------------------------------------------------------------------
+
+describe("delete path: removes the matching row, no-ops on unknown externalId", () => {
+  afterEach(async () => {
+    await db.execute(
+      sql`DELETE FROM time_entries WHERE employee_id = ${ctx.employeeId}::uuid`,
+    );
+  });
+
+  // --- Shifts (processInboundShift) -----------------------------------------
+
+  it("processInboundShift: a delete payload removes the existing scheduler-originated shift", async () => {
+    const externalId = `${TAG}-del-shift-${randomUUID().slice(0, 8)}`;
+
+    const [local] = await db
+      .insert(shiftsTable)
+      .values({
+        title: `${TAG} Doomed Shift`,
+        siteId: ctx.siteId,
+        startTime: new Date("2026-09-01T08:00:00.000Z"),
+        endTime: new Date("2026-09-01T16:00:00.000Z"),
+        payRate: "20",
+        billRate: "30",
+        headcount: 1,
+        requiredLicenseLevel: 2,
+        status: "upcoming",
+        externalId,
+        externalSource: SCHEDULER_SOURCE,
+        syncSource: SCHEDULER_SOURCE,
+      })
+      .returning({ id: shiftsTable.id });
+
+    const result = await processInboundShift({
+      id: externalId,
+      updatedAt: "2026-09-02T00:00:00.000Z",
+      deleted: true,
+    });
+
+    expect(result.action).toBe("deleted");
+    expect(result.secureopsId).toBe(local.id);
+
+    // The row is actually gone — no stale shift left behind.
+    const rows = await db
+      .select({ id: shiftsTable.id })
+      .from(shiftsTable)
+      .where(eq(shiftsTable.id, local.id));
+    expect(rows).toHaveLength(0);
+  });
+
+  it("processInboundShift: a delete for an unknown externalId is skipped and deletes nothing", async () => {
+    // A bystander scheduler-originated shift that must survive an unrelated delete.
+    const survivorExternalId = `${TAG}-del-shift-survivor-${randomUUID().slice(0, 8)}`;
+    const [survivor] = await db
+      .insert(shiftsTable)
+      .values({
+        title: `${TAG} Survivor Shift`,
+        siteId: ctx.siteId,
+        startTime: new Date("2026-09-03T08:00:00.000Z"),
+        endTime: new Date("2026-09-03T16:00:00.000Z"),
+        payRate: "20",
+        billRate: "30",
+        headcount: 1,
+        requiredLicenseLevel: 2,
+        status: "upcoming",
+        externalId: survivorExternalId,
+        externalSource: SCHEDULER_SOURCE,
+        syncSource: SCHEDULER_SOURCE,
+      })
+      .returning({ id: shiftsTable.id });
+
+    const result = await processInboundShift({
+      id: `${TAG}-del-shift-nonexistent-${randomUUID().slice(0, 8)}`,
+      updatedAt: "2026-09-04T00:00:00.000Z",
+      deleted: true,
+    });
+
+    expect(result.action).toBe("skipped");
+    expect(result.skipReason).toBe("not found");
+    expect(result.secureopsId).toBeUndefined();
+
+    // The unrelated shift is untouched — the delete targeted nothing.
+    const rows = await db
+      .select({ id: shiftsTable.id })
+      .from(shiftsTable)
+      .where(eq(shiftsTable.id, survivor.id));
+    expect(rows).toHaveLength(1);
+  });
+
+  // --- Clock events (processInboundClockEvent) ------------------------------
+
+  it("processInboundClockEvent: a delete payload removes the existing scheduler-originated entry", async () => {
+    const externalId = `${TAG}-del-clock-${randomUUID().slice(0, 8)}`;
+
+    const [local] = await db
+      .insert(timeEntriesTable)
+      .values({
+        employeeId: ctx.employeeId,
+        siteId: ctx.siteId,
+        clockInTime: new Date("2026-09-05T09:00:00.000Z"),
+        approvalStatus: "pending",
+        isVerified: false,
+        externalId,
+        externalSource: SCHEDULER_SOURCE,
+        syncSource: SCHEDULER_SOURCE,
+      })
+      .returning({ id: timeEntriesTable.id });
+
+    const result = await processInboundClockEvent({
+      id: externalId,
+      action: "delete",
+      employeeEmail: "",
+      clockInTime: "",
+      updatedAt: "2026-09-06T00:00:00.000Z",
+    });
+
+    expect(result.action).toBe("deleted");
+    expect(result.secureopsId).toBe(local.id);
+
+    // The row is actually gone — no stale clock entry left behind.
+    const rows = await db
+      .select({ id: timeEntriesTable.id })
+      .from(timeEntriesTable)
+      .where(eq(timeEntriesTable.id, local.id));
+    expect(rows).toHaveLength(0);
+  });
+
+  it("processInboundClockEvent: a delete for an unknown externalId is skipped and deletes nothing", async () => {
+    // A bystander scheduler-originated clock entry that must survive.
+    const survivorExternalId = `${TAG}-del-clock-survivor-${randomUUID().slice(0, 8)}`;
+    const [survivor] = await db
+      .insert(timeEntriesTable)
+      .values({
+        employeeId: ctx.employeeId,
+        siteId: ctx.siteId,
+        clockInTime: new Date("2026-09-07T09:00:00.000Z"),
+        approvalStatus: "pending",
+        isVerified: false,
+        externalId: survivorExternalId,
+        externalSource: SCHEDULER_SOURCE,
+        syncSource: SCHEDULER_SOURCE,
+      })
+      .returning({ id: timeEntriesTable.id });
+
+    const result = await processInboundClockEvent({
+      id: `${TAG}-del-clock-nonexistent-${randomUUID().slice(0, 8)}`,
+      action: "delete",
+      employeeEmail: "",
+      clockInTime: "",
+      updatedAt: "2026-09-08T00:00:00.000Z",
+    });
+
+    expect(result.action).toBe("skipped");
+    expect(result.skipReason).toBe("not found");
+    expect(result.secureopsId).toBeUndefined();
+
+    // The unrelated entry is untouched — the delete targeted nothing.
+    const rows = await db
+      .select({ id: timeEntriesTable.id })
+      .from(timeEntriesTable)
+      .where(eq(timeEntriesTable.id, survivor.id));
+    expect(rows).toHaveLength(1);
+  });
+});
+
+// ---------------------------------------------------------------------------
 // 3. Reconcile job: advances the cursor and skips already-synced entries.
 // ---------------------------------------------------------------------------
 
