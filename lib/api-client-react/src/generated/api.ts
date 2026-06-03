@@ -18,6 +18,7 @@ import type {
 
 import type {
   ActiveOfficer,
+  AdminClockOutSubcontractorEntryBody,
   AdminDashboardSummary,
   AdminListApplicationsParams,
   AdminListOnboardingParams,
@@ -65,6 +66,7 @@ import type {
   ForgotPasswordResponse,
   GenerateInvoiceRequest,
   GeneratePayrollRequest,
+  GenerateSubcontractorQrBody,
   GetAdminLicenseRenewalsParams,
   GetAdminShiftRequestsParams,
   GetChatMessagesParams,
@@ -83,6 +85,7 @@ import type {
   GetRadioChannelTransmissionsParams,
   GetShiftsParams,
   GetSitesParams,
+  GetSubcontractorEntriesParams,
   GetTimeEntriesParams,
   HealthStatus,
   Incident,
@@ -119,6 +122,12 @@ import type {
   SignMyObjectDownloadParams,
   Site,
   StripeCheckoutResponse,
+  SubcontractorClockInfo,
+  SubcontractorClockToggleBody,
+  SubcontractorClockToggleResponse,
+  SubcontractorQrLookup,
+  SubcontractorQrResponse,
+  SubcontractorTimeEntry,
   SubmitApplicationRequest,
   SubmitOnboardingRequest,
   TimeEntry,
@@ -10076,4 +10085,565 @@ export const useDeclineShiftRequest = <
   TContext
 > => {
   return useMutation(getDeclineShiftRequestMutationOptions(options));
+};
+
+/**
+ * @summary Get the existing subcontractor QR clock-in token for a site (admin)
+ */
+export const getGetSubcontractorQrUrl = (siteId: string) => {
+  return `/api/admin/sites/${siteId}/subcontractor-qr`;
+};
+
+export const getSubcontractorQr = async (
+  siteId: string,
+  options?: RequestInit,
+): Promise<SubcontractorQrLookup> => {
+  return customFetch<SubcontractorQrLookup>(getGetSubcontractorQrUrl(siteId), {
+    ...options,
+    method: "GET",
+  });
+};
+
+export const getGetSubcontractorQrQueryKey = (siteId: string) => {
+  return [`/api/admin/sites/${siteId}/subcontractor-qr`] as const;
+};
+
+export const getGetSubcontractorQrQueryOptions = <
+  TData = Awaited<ReturnType<typeof getSubcontractorQr>>,
+  TError = ErrorType<unknown>,
+>(
+  siteId: string,
+  options?: {
+    query?: UseQueryOptions<
+      Awaited<ReturnType<typeof getSubcontractorQr>>,
+      TError,
+      TData
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+) => {
+  const { query: queryOptions, request: requestOptions } = options ?? {};
+
+  const queryKey =
+    queryOptions?.queryKey ?? getGetSubcontractorQrQueryKey(siteId);
+
+  const queryFn: QueryFunction<
+    Awaited<ReturnType<typeof getSubcontractorQr>>
+  > = ({ signal }) => getSubcontractorQr(siteId, { signal, ...requestOptions });
+
+  return {
+    queryKey,
+    queryFn,
+    enabled: !!siteId,
+    ...queryOptions,
+  } as UseQueryOptions<
+    Awaited<ReturnType<typeof getSubcontractorQr>>,
+    TError,
+    TData
+  > & { queryKey: QueryKey };
+};
+
+export type GetSubcontractorQrQueryResult = NonNullable<
+  Awaited<ReturnType<typeof getSubcontractorQr>>
+>;
+export type GetSubcontractorQrQueryError = ErrorType<unknown>;
+
+/**
+ * @summary Get the existing subcontractor QR clock-in token for a site (admin)
+ */
+
+export function useGetSubcontractorQr<
+  TData = Awaited<ReturnType<typeof getSubcontractorQr>>,
+  TError = ErrorType<unknown>,
+>(
+  siteId: string,
+  options?: {
+    query?: UseQueryOptions<
+      Awaited<ReturnType<typeof getSubcontractorQr>>,
+      TError,
+      TData
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+): UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+  const queryOptions = getGetSubcontractorQrQueryOptions(siteId, options);
+
+  const query = useQuery(queryOptions) as UseQueryResult<TData, TError> & {
+    queryKey: QueryKey;
+  };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
+
+/**
+ * @summary Generate (or rotate) the subcontractor QR clock-in token for a site (admin)
+ */
+export const getGenerateSubcontractorQrUrl = (siteId: string) => {
+  return `/api/admin/sites/${siteId}/subcontractor-qr`;
+};
+
+export const generateSubcontractorQr = async (
+  siteId: string,
+  generateSubcontractorQrBody: GenerateSubcontractorQrBody,
+  options?: RequestInit,
+): Promise<SubcontractorQrResponse> => {
+  return customFetch<SubcontractorQrResponse>(
+    getGenerateSubcontractorQrUrl(siteId),
+    {
+      ...options,
+      method: "POST",
+      headers: { "Content-Type": "application/json", ...options?.headers },
+      body: JSON.stringify(generateSubcontractorQrBody),
+    },
+  );
+};
+
+export const getGenerateSubcontractorQrMutationOptions = <
+  TError = ErrorType<unknown>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof generateSubcontractorQr>>,
+    TError,
+    { siteId: string; data: BodyType<GenerateSubcontractorQrBody> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof generateSubcontractorQr>>,
+  TError,
+  { siteId: string; data: BodyType<GenerateSubcontractorQrBody> },
+  TContext
+> => {
+  const mutationKey = ["generateSubcontractorQr"];
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof generateSubcontractorQr>>,
+    { siteId: string; data: BodyType<GenerateSubcontractorQrBody> }
+  > = (props) => {
+    const { siteId, data } = props ?? {};
+
+    return generateSubcontractorQr(siteId, data, requestOptions);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type GenerateSubcontractorQrMutationResult = NonNullable<
+  Awaited<ReturnType<typeof generateSubcontractorQr>>
+>;
+export type GenerateSubcontractorQrMutationBody =
+  BodyType<GenerateSubcontractorQrBody>;
+export type GenerateSubcontractorQrMutationError = ErrorType<unknown>;
+
+/**
+ * @summary Generate (or rotate) the subcontractor QR clock-in token for a site (admin)
+ */
+export const useGenerateSubcontractorQr = <
+  TError = ErrorType<unknown>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof generateSubcontractorQr>>,
+    TError,
+    { siteId: string; data: BodyType<GenerateSubcontractorQrBody> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationResult<
+  Awaited<ReturnType<typeof generateSubcontractorQr>>,
+  TError,
+  { siteId: string; data: BodyType<GenerateSubcontractorQrBody> },
+  TContext
+> => {
+  return useMutation(getGenerateSubcontractorQrMutationOptions(options));
+};
+
+/**
+ * @summary List all subcontractor time entries (admin), filterable by siteId / dateFrom / dateTo
+ */
+export const getGetSubcontractorEntriesUrl = (
+  params?: GetSubcontractorEntriesParams,
+) => {
+  const normalizedParams = new URLSearchParams();
+
+  Object.entries(params || {}).forEach(([key, value]) => {
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? "null" : value.toString());
+    }
+  });
+
+  const stringifiedParams = normalizedParams.toString();
+
+  return stringifiedParams.length > 0
+    ? `/api/admin/subcontractor-entries?${stringifiedParams}`
+    : `/api/admin/subcontractor-entries`;
+};
+
+export const getSubcontractorEntries = async (
+  params?: GetSubcontractorEntriesParams,
+  options?: RequestInit,
+): Promise<SubcontractorTimeEntry[]> => {
+  return customFetch<SubcontractorTimeEntry[]>(
+    getGetSubcontractorEntriesUrl(params),
+    {
+      ...options,
+      method: "GET",
+    },
+  );
+};
+
+export const getGetSubcontractorEntriesQueryKey = (
+  params?: GetSubcontractorEntriesParams,
+) => {
+  return [
+    `/api/admin/subcontractor-entries`,
+    ...(params ? [params] : []),
+  ] as const;
+};
+
+export const getGetSubcontractorEntriesQueryOptions = <
+  TData = Awaited<ReturnType<typeof getSubcontractorEntries>>,
+  TError = ErrorType<unknown>,
+>(
+  params?: GetSubcontractorEntriesParams,
+  options?: {
+    query?: UseQueryOptions<
+      Awaited<ReturnType<typeof getSubcontractorEntries>>,
+      TError,
+      TData
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+) => {
+  const { query: queryOptions, request: requestOptions } = options ?? {};
+
+  const queryKey =
+    queryOptions?.queryKey ?? getGetSubcontractorEntriesQueryKey(params);
+
+  const queryFn: QueryFunction<
+    Awaited<ReturnType<typeof getSubcontractorEntries>>
+  > = ({ signal }) =>
+    getSubcontractorEntries(params, { signal, ...requestOptions });
+
+  return { queryKey, queryFn, ...queryOptions } as UseQueryOptions<
+    Awaited<ReturnType<typeof getSubcontractorEntries>>,
+    TError,
+    TData
+  > & { queryKey: QueryKey };
+};
+
+export type GetSubcontractorEntriesQueryResult = NonNullable<
+  Awaited<ReturnType<typeof getSubcontractorEntries>>
+>;
+export type GetSubcontractorEntriesQueryError = ErrorType<unknown>;
+
+/**
+ * @summary List all subcontractor time entries (admin), filterable by siteId / dateFrom / dateTo
+ */
+
+export function useGetSubcontractorEntries<
+  TData = Awaited<ReturnType<typeof getSubcontractorEntries>>,
+  TError = ErrorType<unknown>,
+>(
+  params?: GetSubcontractorEntriesParams,
+  options?: {
+    query?: UseQueryOptions<
+      Awaited<ReturnType<typeof getSubcontractorEntries>>,
+      TError,
+      TData
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+): UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+  const queryOptions = getGetSubcontractorEntriesQueryOptions(params, options);
+
+  const query = useQuery(queryOptions) as UseQueryResult<TData, TError> & {
+    queryKey: QueryKey;
+  };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
+
+/**
+ * @summary Admin force-close a stuck subcontractor entry (admin)
+ */
+export const getAdminClockOutSubcontractorEntryUrl = (id: string) => {
+  return `/api/admin/subcontractor-entries/${id}/clock-out`;
+};
+
+export const adminClockOutSubcontractorEntry = async (
+  id: string,
+  adminClockOutSubcontractorEntryBody: AdminClockOutSubcontractorEntryBody,
+  options?: RequestInit,
+): Promise<SubcontractorTimeEntry> => {
+  return customFetch<SubcontractorTimeEntry>(
+    getAdminClockOutSubcontractorEntryUrl(id),
+    {
+      ...options,
+      method: "PATCH",
+      headers: { "Content-Type": "application/json", ...options?.headers },
+      body: JSON.stringify(adminClockOutSubcontractorEntryBody),
+    },
+  );
+};
+
+export const getAdminClockOutSubcontractorEntryMutationOptions = <
+  TError = ErrorType<unknown>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof adminClockOutSubcontractorEntry>>,
+    TError,
+    { id: string; data: BodyType<AdminClockOutSubcontractorEntryBody> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof adminClockOutSubcontractorEntry>>,
+  TError,
+  { id: string; data: BodyType<AdminClockOutSubcontractorEntryBody> },
+  TContext
+> => {
+  const mutationKey = ["adminClockOutSubcontractorEntry"];
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof adminClockOutSubcontractorEntry>>,
+    { id: string; data: BodyType<AdminClockOutSubcontractorEntryBody> }
+  > = (props) => {
+    const { id, data } = props ?? {};
+
+    return adminClockOutSubcontractorEntry(id, data, requestOptions);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type AdminClockOutSubcontractorEntryMutationResult = NonNullable<
+  Awaited<ReturnType<typeof adminClockOutSubcontractorEntry>>
+>;
+export type AdminClockOutSubcontractorEntryMutationBody =
+  BodyType<AdminClockOutSubcontractorEntryBody>;
+export type AdminClockOutSubcontractorEntryMutationError = ErrorType<unknown>;
+
+/**
+ * @summary Admin force-close a stuck subcontractor entry (admin)
+ */
+export const useAdminClockOutSubcontractorEntry = <
+  TError = ErrorType<unknown>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof adminClockOutSubcontractorEntry>>,
+    TError,
+    { id: string; data: BodyType<AdminClockOutSubcontractorEntryBody> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationResult<
+  Awaited<ReturnType<typeof adminClockOutSubcontractorEntry>>,
+  TError,
+  { id: string; data: BodyType<AdminClockOutSubcontractorEntryBody> },
+  TContext
+> => {
+  return useMutation(
+    getAdminClockOutSubcontractorEntryMutationOptions(options),
+  );
+};
+
+/**
+ * @summary Validate a site QR token and return site context (public)
+ */
+export const getGetSubcontractorClockInfoUrl = (token: string) => {
+  return `/api/subcontractor/clock/${token}`;
+};
+
+export const getSubcontractorClockInfo = async (
+  token: string,
+  options?: RequestInit,
+): Promise<SubcontractorClockInfo> => {
+  return customFetch<SubcontractorClockInfo>(
+    getGetSubcontractorClockInfoUrl(token),
+    {
+      ...options,
+      method: "GET",
+    },
+  );
+};
+
+export const getGetSubcontractorClockInfoQueryKey = (token: string) => {
+  return [`/api/subcontractor/clock/${token}`] as const;
+};
+
+export const getGetSubcontractorClockInfoQueryOptions = <
+  TData = Awaited<ReturnType<typeof getSubcontractorClockInfo>>,
+  TError = ErrorType<ErrorResponse>,
+>(
+  token: string,
+  options?: {
+    query?: UseQueryOptions<
+      Awaited<ReturnType<typeof getSubcontractorClockInfo>>,
+      TError,
+      TData
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+) => {
+  const { query: queryOptions, request: requestOptions } = options ?? {};
+
+  const queryKey =
+    queryOptions?.queryKey ?? getGetSubcontractorClockInfoQueryKey(token);
+
+  const queryFn: QueryFunction<
+    Awaited<ReturnType<typeof getSubcontractorClockInfo>>
+  > = ({ signal }) =>
+    getSubcontractorClockInfo(token, { signal, ...requestOptions });
+
+  return {
+    queryKey,
+    queryFn,
+    enabled: !!token,
+    ...queryOptions,
+  } as UseQueryOptions<
+    Awaited<ReturnType<typeof getSubcontractorClockInfo>>,
+    TError,
+    TData
+  > & { queryKey: QueryKey };
+};
+
+export type GetSubcontractorClockInfoQueryResult = NonNullable<
+  Awaited<ReturnType<typeof getSubcontractorClockInfo>>
+>;
+export type GetSubcontractorClockInfoQueryError = ErrorType<ErrorResponse>;
+
+/**
+ * @summary Validate a site QR token and return site context (public)
+ */
+
+export function useGetSubcontractorClockInfo<
+  TData = Awaited<ReturnType<typeof getSubcontractorClockInfo>>,
+  TError = ErrorType<ErrorResponse>,
+>(
+  token: string,
+  options?: {
+    query?: UseQueryOptions<
+      Awaited<ReturnType<typeof getSubcontractorClockInfo>>,
+      TError,
+      TData
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+): UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+  const queryOptions = getGetSubcontractorClockInfoQueryOptions(token, options);
+
+  const query = useQuery(queryOptions) as UseQueryResult<TData, TError> & {
+    queryKey: QueryKey;
+  };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
+
+/**
+ * @summary Toggle clock-in / clock-out for a subcontractor via the site QR token (public, rate-limited)
+ */
+export const getSubcontractorClockToggleUrl = (token: string) => {
+  return `/api/subcontractor/clock/${token}`;
+};
+
+export const subcontractorClockToggle = async (
+  token: string,
+  subcontractorClockToggleBody: SubcontractorClockToggleBody,
+  options?: RequestInit,
+): Promise<SubcontractorClockToggleResponse> => {
+  return customFetch<SubcontractorClockToggleResponse>(
+    getSubcontractorClockToggleUrl(token),
+    {
+      ...options,
+      method: "POST",
+      headers: { "Content-Type": "application/json", ...options?.headers },
+      body: JSON.stringify(subcontractorClockToggleBody),
+    },
+  );
+};
+
+export const getSubcontractorClockToggleMutationOptions = <
+  TError = ErrorType<ErrorResponse>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof subcontractorClockToggle>>,
+    TError,
+    { token: string; data: BodyType<SubcontractorClockToggleBody> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof subcontractorClockToggle>>,
+  TError,
+  { token: string; data: BodyType<SubcontractorClockToggleBody> },
+  TContext
+> => {
+  const mutationKey = ["subcontractorClockToggle"];
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof subcontractorClockToggle>>,
+    { token: string; data: BodyType<SubcontractorClockToggleBody> }
+  > = (props) => {
+    const { token, data } = props ?? {};
+
+    return subcontractorClockToggle(token, data, requestOptions);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type SubcontractorClockToggleMutationResult = NonNullable<
+  Awaited<ReturnType<typeof subcontractorClockToggle>>
+>;
+export type SubcontractorClockToggleMutationBody =
+  BodyType<SubcontractorClockToggleBody>;
+export type SubcontractorClockToggleMutationError = ErrorType<ErrorResponse>;
+
+/**
+ * @summary Toggle clock-in / clock-out for a subcontractor via the site QR token (public, rate-limited)
+ */
+export const useSubcontractorClockToggle = <
+  TError = ErrorType<ErrorResponse>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof subcontractorClockToggle>>,
+    TError,
+    { token: string; data: BodyType<SubcontractorClockToggleBody> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationResult<
+  Awaited<ReturnType<typeof subcontractorClockToggle>>,
+  TError,
+  { token: string; data: BodyType<SubcontractorClockToggleBody> },
+  TContext
+> => {
+  return useMutation(getSubcontractorClockToggleMutationOptions(options));
 };

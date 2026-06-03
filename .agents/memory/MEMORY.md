@@ -2,6 +2,7 @@
 - [wouter bare-base routing](wouter-base-routing.md) — wouter with bare base "" 404 gotcha (client portal login).
 - [expo-router Tabs reuse](expo-router-tabs-reuse.md) — dynamic detail/edit routes need a nested Stack, not flat Tabs siblings (instance reuse leaks stale params/state)
 - [Codegen breaks Metro resolver](codegen-metro-stale-resolver.md) — after `api-spec codegen`, restart the expo workflow; orval's folder-clean leaves Metro caching "Unable to resolve ./generated/api".
+- [api-server no hot reload](api-server-no-hot-reload.md) — dev script is build+start (no watcher); new/changed routes 404 until the api-server workflow is restarted.
 - [One-open-time-entry invariant](single-open-time-entry-invariant.md) — no DB uniqueness on open time entries per officer; clock-in paths must guard concurrency (FOR UPDATE on users row) themselves.
 - [requireAuth admits client role](auth-requireauth-admits-client.md) — bare requireAuth lets external client-portal users in too; staff/officer-only internal-data endpoints must use requireStaff, not requireAuth.
 - [Upload MIME octet-stream fallback](upload-mime-octet-stream.md) — browser sends octet-stream for .doc/.docx → 415; client+server derive MIME from extension; raw parser needs type:()=>true.

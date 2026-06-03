@@ -2402,8 +2402,190 @@ paths:
             application/json:
               schema: { $ref: "#/components/schemas/ShiftRequest" }
 
+  /admin/sites/{siteId}/subcontractor-qr:
+    get:
+      operationId: getSubcontractorQr
+      tags: [sites]
+      summary: Get the existing subcontractor QR clock-in token for a site (admin)
+      parameters:
+        - { name: siteId, in: path, required: true, schema: { type: string } }
+      responses:
+        "200":
+          description: Existing token (or exists=false)
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/SubcontractorQrLookup" }
+    post:
+      operationId: generateSubcontractorQr
+      tags: [sites]
+      summary: Generate (or rotate) the subcontractor QR clock-in token for a site (admin)
+      parameters:
+        - { name: siteId, in: path, required: true, schema: { type: string } }
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                rotate: { type: boolean }
+      responses:
+        "200":
+          description: QR token created or rotated
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/SubcontractorQrResponse" }
+
+  /admin/subcontractor-entries:
+    get:
+      operationId: getSubcontractorEntries
+      tags: [timeEntries]
+      summary: List all subcontractor time entries (admin), filterable by siteId / dateFrom / dateTo
+      parameters:
+        - { name: siteId, in: query, schema: { type: string } }
+        - { name: dateFrom, in: query, schema: { type: string } }
+        - { name: dateTo, in: query, schema: { type: string } }
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: "#/components/schemas/SubcontractorTimeEntry" }
+
+  /admin/subcontractor-entries/{id}/clock-out:
+    patch:
+      operationId: adminClockOutSubcontractorEntry
+      tags: [timeEntries]
+      summary: Admin force-close a stuck subcontractor entry (admin)
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                clockOutAt: { type: string, format: date-time }
+                notes: { type: string }
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/SubcontractorTimeEntry" }
+
+  /subcontractor/clock/{token}:
+    get:
+      operationId: getSubcontractorClockInfo
+      tags: [timeEntries]
+      summary: Validate a site QR token and return site context (public)
+      parameters:
+        - { name: token, in: path, required: true, schema: { type: string } }
+      responses:
+        "200":
+          description: Token valid — site info returned
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/SubcontractorClockInfo" }
+        "410":
+          description: Token invalid or deactivated
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ErrorResponse" }
+    post:
+      operationId: subcontractorClockToggle
+      tags: [timeEntries]
+      summary: Toggle clock-in / clock-out for a subcontractor via the site QR token (public, rate-limited)
+      parameters:
+        - { name: token, in: path, required: true, schema: { type: string } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name, company]
+              properties:
+                name: { type: string }
+                company: { type: string }
+                badgeId: { type: string }
+      responses:
+        "200":
+          description: Clocked out
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/SubcontractorClockToggleResponse" }
+        "201":
+          description: Clocked in
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/SubcontractorClockToggleResponse" }
+        "410":
+          description: Token invalid or deactivated
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ErrorResponse" }
+
 components:
   schemas:
+    SubcontractorQrResponse:
+      type: object
+      required: [id, token, clockUrl, siteName, createdAt]
+      properties:
+        id: { type: string }
+        token: { type: string }
+        clockUrl: { type: string }
+        siteName: { type: string }
+        createdAt: { type: string, format: date-time }
+
+    SubcontractorQrLookup:
+      type: object
+      required: [exists, siteName]
+      properties:
+        exists: { type: boolean }
+        id: { type: string }
+        token: { type: string }
+        clockUrl: { type: string }
+        siteName: { type: string }
+        createdAt: { type: string, format: date-time }
+
+    SubcontractorTimeEntry:
+      type: object
+      required: [id, siteId, name, company, clockInAt]
+      properties:
+        id: { type: string }
+        siteId: { type: string }
+        siteName: { type: string, nullable: true }
+        name: { type: string }
+        company: { type: string }
+        badgeId: { type: string, nullable: true }
+        clockInAt: { type: string, format: date-time }
+        clockOutAt: { type: string, format: date-time, nullable: true }
+        hoursWorked: { type: string, nullable: true }
+        notes: { type: string, nullable: true }
+        createdAt: { type: string, format: date-time }
+
+    SubcontractorClockInfo:
+      type: object
+      required: [siteId, siteName]
+      properties:
+        siteId: { type: string }
+        siteName: { type: string }
+
+    SubcontractorClockToggleResponse:
+      type: object
+      required: [action, entryId, name, company, siteName, clockInAt]
+      properties:
+        action: { type: string, enum: [clocked_in, clocked_out] }
+        entryId: { type: string }
+        name: { type: string }
+        company: { type: string }
+        siteName: { type: string }
+        clockInAt: { type: string, format: date-time }
+        clockOutAt: { type: string, format: date-time, nullable: true }
+        hoursWorked: { type: string, nullable: true }
+
     RadioChannel:
       type: object
       required: [id, name, scope, adminOnly, createdAt]

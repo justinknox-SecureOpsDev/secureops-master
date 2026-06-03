@@ -186,9 +186,15 @@ importers:
 
   artifacts/admin-portal:
     dependencies:
+      '@types/qrcode':
+        specifier: ^1.5.6
+        version: 1.5.6
       exceljs:
         specifier: ^4.4.0
         version: 4.4.0
+      qrcode:
+        specifier: ^1.5.4
+        version: 1.5.4
     devDependencies:
       '@hookform/resolvers':
         specifier: ^3.10.0

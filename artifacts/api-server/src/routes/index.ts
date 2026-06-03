@@ -36,6 +36,7 @@ import dispatchRouter from "./dispatch";
 import brandConfigRouter from "./brandConfig";
 import clientPortalRouter from "./clientPortal";
 import subcontractorPayRunRouter from "./subcontractorPayRun";
+import subcontractorRouter from "./subcontractor";
 import schedulerWebhookRouter from "./schedulerWebhook";
 import schedulerAdminRouter from "./schedulerAdmin";
 import { auditLogMiddleware } from "../lib/auditLog";
@@ -86,6 +87,7 @@ router.use(radioRouter);
 router.use(dispatchRouter);
 router.use(clientPortalRouter);
 router.use(subcontractorPayRunRouter);
+router.use(subcontractorRouter);
 router.use(schedulerWebhookRouter);
 router.use(schedulerAdminRouter);
 

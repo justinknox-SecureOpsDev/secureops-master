@@ -5,6 +5,61 @@
  * SecureOps - Private Security Operations Platform API
  * OpenAPI spec version: 0.1.0
  */
+export interface SubcontractorQrResponse {
+  id: string;
+  token: string;
+  clockUrl: string;
+  siteName: string;
+  createdAt: string;
+}
+
+export interface SubcontractorQrLookup {
+  exists: boolean;
+  id?: string;
+  token?: string;
+  clockUrl?: string;
+  siteName: string;
+  createdAt?: string;
+}
+
+export interface SubcontractorTimeEntry {
+  id: string;
+  siteId: string;
+  siteName?: string | null;
+  name: string;
+  company: string;
+  badgeId?: string | null;
+  clockInAt: string;
+  clockOutAt?: string | null;
+  hoursWorked?: string | null;
+  notes?: string | null;
+  createdAt?: string;
+}
+
+export interface SubcontractorClockInfo {
+  siteId: string;
+  siteName: string;
+}
+
+export type SubcontractorClockToggleResponseAction =
+  (typeof SubcontractorClockToggleResponseAction)[keyof typeof SubcontractorClockToggleResponseAction];
+
+export const SubcontractorClockToggleResponseAction = {
+  clocked_in: "clocked_in",
+  clocked_out: "clocked_out",
+} as const;
+
+export interface SubcontractorClockToggleResponse {
+  action: SubcontractorClockToggleResponseAction;
+  entryId: string;
+  name: string;
+  company: string;
+  siteName: string;
+  clockInAt: string;
+  clockOutAt?: string | null;
+  hoursWorked?: string | null;
+}
+
 export type RadioChannelScope =
   (typeof RadioChannelScope)[keyof typeof RadioChannelScope];
 
@@ -2057,4 +2112,25 @@ export type ApproveShiftRequestBody = {
 
 export type DeclineShiftRequestBody = {
   adminNote?: string;
+};
+
+export type GenerateSubcontractorQrBody = {
+  rotate?: boolean;
+};
+
+export type GetSubcontractorEntriesParams = {
+  siteId?: string;
+  dateFrom?: string;
+  dateTo?: string;
+};
+
+export type AdminClockOutSubcontractorEntryBody = {
+  clockOutAt?: string;
+  notes?: string;
+};
+
+export type SubcontractorClockToggleBody = {
+  name: string;
+  company: string;
+  badgeId?: string;
 };

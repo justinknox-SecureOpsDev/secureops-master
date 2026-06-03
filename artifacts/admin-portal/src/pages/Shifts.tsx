@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { api } from "@/lib/api";
 import { useDeepLinkFocus, useFirstQueryParam } from "@/hooks/useDeepLinkFocus";
 import { getTable } from "@/lib/tables";
@@ -8,6 +8,9 @@ import { RepeatingShiftDialog } from "@/components/RepeatingShiftDialog";
 import { BulkEditSeriesDialog, type BulkSeriesTarget } from "@/components/BulkEditSeriesDialog";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import {
+  Dialog, DialogContent, DialogHeader, DialogTitle,
+} from "@/components/ui/dialog";
 import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from "@/components/ui/select";
@@ -784,6 +787,7 @@ export default function ShiftsPage() {
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
+
     </div>
   );
 }

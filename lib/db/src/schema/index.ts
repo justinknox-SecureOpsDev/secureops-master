@@ -43,3 +43,5 @@ export * from "./subcontractorCois";
 export * from "./subcontractorContracts";
 export * from "./subcontractorInvoices";
 export * from "./schedulerSyncCursors";
+export * from "./subcontractorQrTokens";
+export * from "./subcontractorTimeEntries";

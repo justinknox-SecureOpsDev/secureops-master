@@ -80,6 +80,8 @@
     "zod": "catalog:"
   },
   "dependencies": {
-    "exceljs": "^4.4.0"
+    "@types/qrcode": "^1.5.6",
+    "exceljs": "^4.4.0",
+    "qrcode": "^1.5.4"
   }
 }

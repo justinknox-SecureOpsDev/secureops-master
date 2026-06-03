@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import QRCode from "qrcode";
 import { Link, useRoute, useLocation } from "wouter";
-import { ArrowLeft, MapPin, Pencil, Plus, Trash2, QrCode, AlertTriangle, Radius } from "lucide-react";
+import { ArrowLeft, MapPin, Pencil, Plus, Trash2, QrCode, AlertTriangle, Radius, RefreshCw, Printer, Loader2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { api } from "@/lib/api";
 import { useFkOptions } from "@/lib/fk";
@@ -560,6 +561,8 @@ export function SiteDetailPage() {
         <div className="p-6 space-y-8">
           <SiteRateCard siteId={site.id} />
 
+          <SubcontractorQrCard siteId={site.id} siteName={site.name} />
+
           <section>
             <div className="flex items-center justify-between mb-3">
               <h2 className="text-lg font-semibold inline-flex items-center gap-2">
@@ -905,6 +908,153 @@ function SiteRateCard({ siteId }: { siteId: string }) {
           </Button>
         </div>
       </div>
+    </section>
+  );
+}
+
+// ===================================================== SUBCONTRACTOR QR CARD
+//
+// One persistent QR code per site. Subcontractors scan it to clock in (and
+// scan/submit again to clock out) without a WCSG account. The QR encodes a
+// public toggle URL keyed by a per-site token. Rotating the token mints a new
+// one and invalidates the old printed code.
+
+type SubcontractorQr = {
+  exists?: boolean;
+  id?: string;
+  token?: string;
+  clockUrl?: string;
+  siteName?: string;
+  createdAt?: string;
+};
+
+function SubcontractorQrCard({ siteId, siteName }: { siteId: string; siteName: string }) {
+  const [qr, setQr] = useState<SubcontractorQr | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [working, setWorking] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+  const canvasRef = useRef<HTMLCanvasElement | null>(null);
+
+  const load = useCallback(async () => {
+    setLoading(true);
+    setErr(null);
+    try {
+      const data = await api<SubcontractorQr>(`/admin/sites/${siteId}/subcontractor-qr`);
+      setQr(data ?? null);
+    } catch (e) {
+      setErr((e as Error).message);
+    } finally {
+      setLoading(false);
+    }
+  }, [siteId]);
+
+  useEffect(() => { void load(); }, [load]);
+
+  async function generate(rotate: boolean) {
+    setWorking(true);
+    setErr(null);
+    try {
+      const data = await api<SubcontractorQr>(`/admin/sites/${siteId}/subcontractor-qr`, {
+        method: "POST",
+        body: JSON.stringify({ rotate }),
+      });
+      setQr({ ...data, exists: true });
+    } catch (e) {
+      setErr((e as Error).message);
+    } finally {
+      setWorking(false);
+    }
+  }
+
+  const clockUrl = qr?.exists && qr.clockUrl ? qr.clockUrl : null;
+
+  useEffect(() => {
+    if (!clockUrl || !canvasRef.current) return;
+    QRCode.toCanvas(canvasRef.current, clockUrl, {
+      width: 220,
+      margin: 2,
+      color: { dark: "#080c18", light: "#f0e6c8" },
+    }).catch(() => {});
+  }, [clockUrl]);
+
+  function handlePrint() {
+    if (!clockUrl || !canvasRef.current) return;
+    const dataUrl = canvasRef.current.toDataURL("image/png");
+    const win = window.open("", "_blank");
+    if (!win) return;
+    win.document.write(`
+      <html><head><title>Subcontractor QR — ${siteName}</title>
+      <style>body{font-family:sans-serif;text-align:center;padding:40px;background:#f0e6c8;color:#080c18}
+      h1{font-size:18px;margin-bottom:4px}p{font-size:13px;margin:4px 0;opacity:.7}
+      .url{font-size:11px;word-break:break-all;margin-top:12px;background:#fff;padding:8px;border-radius:6px}
+      </style></head><body>
+      <h1>Subcontractor Check-In</h1>
+      <p>${siteName}</p>
+      <img src="${dataUrl}" width="240" />
+      <div class="url">${clockUrl}</div>
+      <p style="margin-top:16px;font-size:11px">Scan to clock in or out</p>
+      </body></html>`);
+    win.document.close();
+    win.print();
+  }
+
+  return (
+    <section>
+      <div className="flex items-center justify-between mb-3">
+        <h2 className="text-lg font-semibold inline-flex items-center gap-2">
+          <QrCode className="w-4 h-4" /> Subcontractor QR clock-in
+        </h2>
+        <div className="text-xs text-muted-foreground max-w-md text-right">
+          One persistent code for this site. Subcontractors scan it to clock in, and scan again to clock out — no WCSG account needed.
+        </div>
+      </div>
+
+      {err && (
+        <div className="mb-3 text-sm text-destructive border border-destructive/40 rounded px-3 py-2">{err}</div>
+      )}
+
+      {loading ? (
+        <div className="text-sm text-muted-foreground">Loading…</div>
+      ) : clockUrl ? (
+        <div className="border rounded p-4 flex flex-col sm:flex-row gap-4 items-center sm:items-start">
+          <div className="flex justify-center p-3 rounded-lg shrink-0" style={{ background: "#f0e6c8" }}>
+            <canvas ref={canvasRef} />
+          </div>
+          <div className="flex-1 min-w-0 space-y-3">
+            <div className="text-xs text-muted-foreground space-y-1">
+              <div className="break-all bg-muted/50 border rounded p-2 font-mono">{clockUrl}</div>
+              {qr?.createdAt && <div>Created: {fmt(qr.createdAt)}</div>}
+            </div>
+            <div className="flex flex-wrap gap-2">
+              <Button variant="outline" size="sm" onClick={handlePrint}>
+                <Printer className="w-3.5 h-3.5 mr-1" /> Print
+              </Button>
+              <Button variant="outline" size="sm" onClick={() => generate(true)} disabled={working}>
+                {working ? <Loader2 className="w-3.5 h-3.5 mr-1 animate-spin" /> : <RefreshCw className="w-3.5 h-3.5 mr-1" />}
+                Rotate code
+              </Button>
+            </div>
+            <div className="text-xs text-muted-foreground">
+              Rotating mints a new code and invalidates the old printed one.
+            </div>
+          </div>
+        </div>
+      ) : (
+        <div className="border rounded p-4 space-y-3">
+          <div className="text-sm text-muted-foreground">
+            No QR code generated for this site yet. Create one for subcontractors to scan.
+          </div>
+          <Button
+            size="sm"
+            style={{ background: "#080c18", color: "#f0e6c8" }}
+            onClick={() => generate(false)}
+            disabled={working}
+          >
+            {working ? <Loader2 className="w-3.5 h-3.5 mr-1 animate-spin" /> : <QrCode className="w-3.5 h-3.5 mr-1" />}
+            Generate QR code
+          </Button>
+        </div>
+      )}
     </section>
   );
 }

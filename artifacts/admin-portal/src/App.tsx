@@ -13,6 +13,8 @@ import { ApplyPage } from "@/pages/Apply";
 import { OnboardPage } from "@/pages/Onboard";
 import { ResetPasswordPage } from "@/pages/ResetPassword";
 import { AmendApplication } from "@/pages/AmendApplication";
+import SubcontractorClockInPage from "@/pages/SubcontractorClockIn";
+import SubcontractorEntriesPage from "@/pages/SubcontractorEntries";
 import { PrivacyPage, TermsPage, DataRightsPage } from "@/pages/Legal";
 import { ApplicationsPage } from "@/pages/Applications";
 import { OnboardingPage } from "@/pages/Onboarding";
@@ -77,6 +79,7 @@ function Routed() {
   if (location === "/data-rights") return <DataRightsPage />;
   if (location.startsWith("/share/incident/")) return <PublicIncidentPage />;
   if (location.startsWith("/share/employee/")) return <PublicEmployeeProfilePage />;
+  if (location.startsWith("/subcontractor/clock/")) return <SubcontractorClockInPage />;
 
   if (loading) {
     return (
@@ -136,6 +139,7 @@ function Routed() {
           <Route path="/invoices/board" component={InvoiceBoardPage} />
           <Route path="/payroll/pay-run" component={PayRunPage} />
           <Route path="/subcontractors/pay-run" component={SubcontractorPayRunPage} />
+          <Route path="/subcontractors/clock-in-entries" component={SubcontractorEntriesPage} />
           <Route path="/audit-log" component={AuditLogPage} />
           <Route path="/swap-requests" component={SwapRequestsPage} />
           <Route path="/hr/license-renewals" component={LicenseRenewalsPage} />

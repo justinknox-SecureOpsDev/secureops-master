@@ -170,6 +170,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
       { href: "/tables/subcontractor_contracts", label: "Contracts", Icon: FileText },
       { href: "/tables/subcontractor_invoices", label: "Invoices", Icon: Receipt },
       { href: "/subcontractors/pay-run", label: "Pay Run", Icon: Banknote },
+      { href: "/subcontractors/clock-in-entries", label: "Clock-In Entries", Icon: ClipboardList },
     ];
     const operationsLinks: LinkItem[] = [
       { href: "/shifts/calendar", label: "Shift Calendar", Icon: CalendarRange },

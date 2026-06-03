@@ -3789,3 +3789,126 @@ export const DeclineShiftRequestResponse = zod.object({
   createdShiftIds: zod.array(zod.string()).optional(),
   createdAt: zod.coerce.date().optional(),
 });
+
+/**
+ * @summary Get the existing subcontractor QR clock-in token for a site (admin)
+ */
+export const GetSubcontractorQrParams = zod.object({
+  siteId: zod.coerce.string(),
+});
+
+export const GetSubcontractorQrResponse = zod.object({
+  exists: zod.boolean(),
+  id: zod.string().optional(),
+  token: zod.string().optional(),
+  clockUrl: zod.string().optional(),
+  siteName: zod.string(),
+  createdAt: zod.coerce.date().optional(),
+});
+
+/**
+ * @summary Generate (or rotate) the subcontractor QR clock-in token for a site (admin)
+ */
+export const GenerateSubcontractorQrParams = zod.object({
+  siteId: zod.coerce.string(),
+});
+
+export const GenerateSubcontractorQrBody = zod.object({
+  rotate: zod.boolean().optional(),
+});
+
+export const GenerateSubcontractorQrResponse = zod.object({
+  id: zod.string(),
+  token: zod.string(),
+  clockUrl: zod.string(),
+  siteName: zod.string(),
+  createdAt: zod.coerce.date(),
+});
+
+/**
+ * @summary List all subcontractor time entries (admin), filterable by siteId / dateFrom / dateTo
+ */
+export const GetSubcontractorEntriesQueryParams = zod.object({
+  siteId: zod.coerce.string().optional(),
+  dateFrom: zod.coerce.string().optional(),
+  dateTo: zod.coerce.string().optional(),
+});
+
+export const GetSubcontractorEntriesResponseItem = zod.object({
+  id: zod.string(),
+  siteId: zod.string(),
+  siteName: zod.string().nullish(),
+  name: zod.string(),
+  company: zod.string(),
+  badgeId: zod.string().nullish(),
+  clockInAt: zod.coerce.date(),
+  clockOutAt: zod.coerce.date().nullish(),
+  hoursWorked: zod.string().nullish(),
+  notes: zod.string().nullish(),
+  createdAt: zod.coerce.date().optional(),
+});
+export const GetSubcontractorEntriesResponse = zod.array(
+  GetSubcontractorEntriesResponseItem,
+);
+
+/**
+ * @summary Admin force-close a stuck subcontractor entry (admin)
+ */
+export const AdminClockOutSubcontractorEntryParams = zod.object({
+  id: zod.coerce.string(),
+});
+
+export const AdminClockOutSubcontractorEntryBody = zod.object({
+  clockOutAt: zod.coerce.date().optional(),
+  notes: zod.string().optional(),
+});
+
+export const AdminClockOutSubcontractorEntryResponse = zod.object({
+  id: zod.string(),
+  siteId: zod.string(),
+  siteName: zod.string().nullish(),
+  name: zod.string(),
+  company: zod.string(),
+  badgeId: zod.string().nullish(),
+  clockInAt: zod.coerce.date(),
+  clockOutAt: zod.coerce.date().nullish(),
+  hoursWorked: zod.string().nullish(),
+  notes: zod.string().nullish(),
+  createdAt: zod.coerce.date().optional(),
+});
+
+/**
+ * @summary Validate a site QR token and return site context (public)
+ */
+export const GetSubcontractorClockInfoParams = zod.object({
+  token: zod.coerce.string(),
+});
+
+export const GetSubcontractorClockInfoResponse = zod.object({
+  siteId: zod.string(),
+  siteName: zod.string(),
+});
+
+/**
+ * @summary Toggle clock-in / clock-out for a subcontractor via the site QR token (public, rate-limited)
+ */
+export const SubcontractorClockToggleParams = zod.object({
+  token: zod.coerce.string(),
+});
+
+export const SubcontractorClockToggleBody = zod.object({
+  name: zod.string(),
+  company: zod.string(),
+  badgeId: zod.string().optional(),
+});
+
+export const SubcontractorClockToggleResponse = zod.object({
+  action: zod.enum(["clocked_in", "clocked_out"]),
+  entryId: zod.string(),
+  name: zod.string(),
+  company: zod.string(),
+  siteName: zod.string(),
+  clockInAt: zod.coerce.date(),
+  clockOutAt: zod.coerce.date().nullish(),
+  hoursWorked: zod.string().nullish(),
+});
