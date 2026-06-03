@@ -5,6 +5,7 @@ import { db, shiftsTable, shiftAssignmentsTable, usersTable, licensesTable, site
 import { requireAuth, requireAdmin, requireAdminOrDispatcher } from "../middlewares/auth";
 import { haversineMiles } from "../lib/geofence";
 import { getEffectiveLevel, effectiveLevelSql } from "../lib/eligibility";
+import { pushShiftUpsert, pushShiftDelete } from "../lib/schedulerSync";
 
 const router: IRouter = Router();
 
@@ -349,6 +350,9 @@ router.post("/shifts", requireAdmin, async (req, res): Promise<void> => {
     req.log.warn({ err }, "Failed to broadcast new shift push");
   }
 
+  // Outbound sync to scheduler (best-effort, after response)
+  void pushShiftUpsert(shift);
+
   res.status(201).json({ ...shift, assignments: [] });
 });
 
@@ -502,6 +506,10 @@ router.post("/shifts/repeat", requireAdmin, async (req, res): Promise<void> => {
     ? await db.insert(shiftsTable).values(toInsert).returning()
     : [];
 
+  // Outbound sync: push each created shift to the scheduler (best-effort).
+  // None of these are scheduler-sourced, so loop prevention doesn't apply.
+  for (const s of inserted) void pushShiftUpsert(s);
+
   res.status(201).json({
     created: inserted.length,
     skippedExisting: occurrences.length - inserted.length,
@@ -525,7 +533,8 @@ router.put("/shifts/bulk", requireAdmin, async (req, res): Promise<void> => {
   const newStart = typeof changes.startTime === "string" && timeRe.test(changes.startTime) ? changes.startTime : null;
   const newEnd = typeof changes.endTime === "string" && timeRe.test(changes.endTime) ? changes.endTime : null;
 
-  const setCommon: Record<string, unknown> = {};
+  // Reset syncSource so edits to scheduler-origin records propagate back.
+  const setCommon: Record<string, unknown> = { syncSource: "local" };
   if (changes.payRate != null && changes.payRate !== "") {
     const n = Number(changes.payRate);
     if (!Number.isFinite(n)) { res.status(400).json({ error: "Bad Request", message: "payRate must be a number" }); return; }
@@ -598,6 +607,13 @@ router.put("/shifts/bulk", requireAdmin, async (req, res): Promise<void> => {
     }
   });
 
+  // Outbound sync: push each updated shift (best-effort). Re-fetch the updated
+  // rows so we send current data rather than pre-update values.
+  if (updated > 0) {
+    const updatedRows = await db.select().from(shiftsTable).where(inArray(shiftsTable.id, ids as string[]));
+    for (const s of updatedRows) void pushShiftUpsert(s);
+  }
+
   res.json({ updated, total: rows.length });
 });
 
@@ -609,7 +625,17 @@ router.delete("/shifts/bulk", requireAdmin, async (req, res): Promise<void> => {
   if (!Array.isArray(ids) || ids.length === 0) {
     res.status(400).json({ error: "Bad Request", message: "ids[] required" }); return;
   }
+  // Fetch externalId/syncSource before deletion so we can push the delete events.
+  const toDelete = await db
+    .select({ id: shiftsTable.id, externalId: shiftsTable.externalId, syncSource: shiftsTable.syncSource })
+    .from(shiftsTable)
+    .where(inArray(shiftsTable.id, ids as string[]));
+
   const result = await db.delete(shiftsTable).where(inArray(shiftsTable.id, ids as string[])).returning({ id: shiftsTable.id });
+
+  // Outbound sync: push delete events (best-effort, skips scheduler-sourced rows).
+  for (const s of toDelete) void pushShiftDelete(s);
+
   res.json({ deleted: result.length });
 });
 
@@ -736,14 +762,25 @@ router.put("/shifts/:id", requireAdmin, async (req, res): Promise<void> => {
   // Explicit null clears the FK (admin selected "Custom" rate); undefined leaves it alone.
   if (siteRateId !== undefined) updates.siteRateId = siteRateId || null;
 
+  // Always reset syncSource to 'local' on admin edits so that changes to
+  // scheduler-origin records (syncSource='scheduler') get pushed back rather
+  // than being suppressed by the loop-prevention guard in pushShiftUpsert.
+  updates.syncSource = "local";
+
   const [shift] = await db.update(shiftsTable).set(updates).where(eq(shiftsTable.id, id)).returning();
   if (!shift) { res.status(404).json({ error: "Not Found" }); return; }
+  // Outbound sync to scheduler (best-effort, after response)
+  void pushShiftUpsert(shift);
   res.json({ ...shift, assignments: [] });
 });
 
 router.delete("/shifts/:id", requireAdmin, async (req, res): Promise<void> => {
   const id = Array.isArray(req.params.id) ? req.params.id[0] : req.params.id;
+  // Fetch the row before deletion so we can include externalId + syncSource in the push.
+  const [toDelete] = await db.select({ id: shiftsTable.id, externalId: shiftsTable.externalId, syncSource: shiftsTable.syncSource }).from(shiftsTable).where(eq(shiftsTable.id, id));
   await db.delete(shiftsTable).where(eq(shiftsTable.id, id));
+  // Outbound sync to scheduler (best-effort)
+  if (toDelete) void pushShiftDelete(toDelete);
   res.sendStatus(204);
 });
 

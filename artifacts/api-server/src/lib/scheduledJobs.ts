@@ -15,12 +15,14 @@ import {
   locationPingsTable,
   subcontractorCoisTable,
   subcontractorsTable,
+  schedulerSyncCursorsTable,
 } from "@workspace/db";
 import { logger } from "./logger";
 import { sendEmail, renderLicenseExpiryEmail, renderTrainingExpiryEmail, renderHighRiskProfileChangeEmail, renderCoiExpiryEmail } from "./email";
 import { sendPushToUsers } from "./push";
 import { CHANGE_FIELD_LABELS } from "./employeeChangeLog";
 import { lockEndedWeekInvoices } from "./invoiceSync";
+import { isSchedulerConfigured, fetchSchedulerDelta } from "./schedulerSync";
 
 /**
  * Coalescing window for the high-risk self-edit digest. Edits inside this
@@ -1211,8 +1213,114 @@ export function startScheduledJobs(intervalMs: number = HOUR_MS): NodeJS.Timeout
   // the following week. Hourly is enough — the boundary check is purely
   // by period_end < today, so even one tick on Monday morning catches up.
   schedule("invoice-week-lock", lockEndedWeekInvoices, intervalMs);
+  // Scheduler reconciliation safety net — every 15 minutes. Fetches any
+  // shifts/clock-events the scheduler published while SecureOps was down or
+  // mid-restart. Skips silently when the integration is not configured.
+  schedule("scheduler-reconcile", runSchedulerReconciliation, 15 * MIN_MS);
   // Suppress lint about unused sql import.
   void sql;
 
   return handles;
+}
+
+// ---------------------------------------------------------------------------
+// Event Staff Scheduler reconciliation job
+// ---------------------------------------------------------------------------
+
+/**
+ * Pull any missed shifts/clock-events from the scheduler since the stored
+ * cursor, apply them via the shared upsert logic, and advance the cursor.
+ *
+ * Safe to call concurrently: the cursor UPDATE is atomic (INSERT ON CONFLICT
+ * DO UPDATE); a second tick that starts before the first finishes will re-read
+ * the same cursor and re-apply the same payload (idempotent).
+ */
+async function runSchedulerReconciliation(): Promise<void> {
+  if (!isSchedulerConfigured()) return;
+
+  // Lazily import to avoid circular deps at module-load time.
+  const { reconcileSchedulerDelta } = await import("../routes/schedulerWebhook");
+
+  const [cursor] = await db
+    .select()
+    .from(schedulerSyncCursorsTable)
+    .where(eq(schedulerSyncCursorsTable.cursorKey, "shifts"));
+
+  const since = cursor?.cursorValue ?? "1970-01-01T00:00:00.000Z";
+
+  const delta = await fetchSchedulerDelta(since);
+  if (!delta) {
+    // fetchSchedulerDelta already logged a warning; record the error.
+    const now = new Date();
+    await db
+      .insert(schedulerSyncCursorsTable)
+      .values({
+        cursorKey: "shifts",
+        cursorValue: since,
+        lastSyncAt: now,
+        lastSyncError: "fetchSchedulerDelta failed — see server logs",
+        updatedAt: now,
+      })
+      .onConflictDoUpdate({
+        target: schedulerSyncCursorsTable.cursorKey,
+        set: {
+          lastSyncAt: now,
+          lastSyncError: "fetchSchedulerDelta failed — see server logs",
+          updatedAt: now,
+        },
+      });
+    return;
+  }
+
+  let counts: Awaited<ReturnType<typeof reconcileSchedulerDelta>>;
+  try {
+    counts = await reconcileSchedulerDelta(delta.shifts, delta.clockEvents);
+  } catch (err) {
+    logger.error({ err }, "[scheduler-reconcile] reconcileSchedulerDelta threw");
+    return;
+  }
+
+  const now = new Date();
+  const nextCursor = delta.nextCursor ?? now.toISOString();
+
+  await db
+    .insert(schedulerSyncCursorsTable)
+    .values({
+      cursorKey: "shifts",
+      cursorValue: nextCursor,
+      lastSyncAt: now,
+      lastSyncError: null,
+      lastSyncShiftsProcessed: String(
+        counts.shiftsCreated + counts.shiftsUpdated + counts.shiftsDeleted,
+      ),
+      lastSyncEventsProcessed: String(
+        counts.eventsCreated + counts.eventsUpdated + counts.eventsDeleted,
+      ),
+      updatedAt: now,
+    })
+    .onConflictDoUpdate({
+      target: schedulerSyncCursorsTable.cursorKey,
+      set: {
+        cursorValue: nextCursor,
+        lastSyncAt: now,
+        lastSyncError: null,
+        lastSyncShiftsProcessed: String(
+          counts.shiftsCreated + counts.shiftsUpdated + counts.shiftsDeleted,
+        ),
+        lastSyncEventsProcessed: String(
+          counts.eventsCreated + counts.eventsUpdated + counts.eventsDeleted,
+        ),
+        updatedAt: now,
+      },
+    });
+
+  if (
+    counts.shiftsCreated + counts.shiftsUpdated + counts.shiftsDeleted +
+    counts.eventsCreated + counts.eventsUpdated + counts.eventsDeleted > 0
+  ) {
+    logger.info(
+      { since, nextCursor, ...counts },
+      "[scheduler-reconcile] delta applied",
+    );
+  }
 }

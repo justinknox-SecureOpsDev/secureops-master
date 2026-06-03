@@ -3,6 +3,7 @@ import { eq, and, gte, lte, isNull, sql } from "drizzle-orm";
 import { db, timeEntriesTable, shiftsTable, usersTable, sitesTable, shiftAssignmentsTable, licensesTable } from "@workspace/db";
 import { requireAuth, requireAdmin, requireStaff } from "../middlewares/auth";
 import { upsertWeeklyInvoiceForTimeEntry } from "../lib/invoiceSync";
+import { pushClockEvent } from "../lib/schedulerSync";
 
 const router: IRouter = Router();
 
@@ -320,6 +321,17 @@ router.post("/time-entries/clock-in", requireAuth, async (req, res): Promise<voi
     : [undefined];
   const [user] = await db.select().from(usersTable).where(eq(usersTable.id, req.user!.userId));
 
+  // Outbound sync: push clock-in event to scheduler (best-effort)
+  if (user) {
+    void pushClockEvent({
+      ...entry,
+      employeeEmail: user.email,
+      employeeName: `${user.firstName} ${user.lastName}`,
+      shiftExternalId: (shift as any)?.externalId ?? null,
+      siteName: resolvedSite?.name ?? null,
+    });
+  }
+
   res.status(201).json({
     ...entry,
     shiftTitle: shift?.title ?? null,
@@ -346,12 +358,15 @@ router.post("/time-entries/clock-out", requireAuth, async (req, res): Promise<vo
   const clockOut = new Date();
   const hours = calcHours(entry.clockInTime, clockOut);
 
+  // Reset syncSource to 'local' so clock-outs of scheduler-origin entries
+  // are pushed back rather than suppressed by the loop-prevention guard.
   const [updated] = await db.update(timeEntriesTable).set({
     clockOutTime: clockOut,
     clockOutLat: String(lat),
     clockOutLng: String(lng),
     hoursWorked: String(hours),
     notes: notes || entry.notes,
+    syncSource: "local",
   }).where(eq(timeEntriesTable.id, timeEntryId)).returning();
 
   // If this entry was tied to a shift, mark the shift completed — but ONLY
@@ -380,6 +395,17 @@ router.post("/time-entries/clock-out", requireAuth, async (req, res): Promise<vo
     ? await db.select().from(shiftsTable).where(eq(shiftsTable.id, updated.shiftId))
     : [undefined];
   const [user] = await db.select().from(usersTable).where(eq(usersTable.id, updated.employeeId));
+
+  // Outbound sync: push clock-out event to scheduler (best-effort)
+  if (user) {
+    void pushClockEvent({
+      ...updated,
+      employeeEmail: user.email,
+      employeeName: `${user.firstName} ${user.lastName}`,
+      shiftExternalId: (shift as any)?.externalId ?? null,
+      siteName: null,
+    });
+  }
 
   res.json({
     ...updated,
@@ -465,10 +491,12 @@ router.patch("/time-entries/:id/clock-out", requireAdmin, async (req, res): Prom
 
   const hours = calcHours(existing.clockInTime, targetClockOut);
 
+  // Reset syncSource so admin force-clock-outs of scheduler-origin entries propagate back.
   const [updated] = await db.update(timeEntriesTable).set({
     clockOutTime: targetClockOut,
     hoursWorked: String(hours),
     notes: notes ?? existing.notes,
+    syncSource: "local",
   }).where(eq(timeEntriesTable.id, id)).returning();
 
   // Mirror the clock-out endpoint's shift-completion flip so an open shift

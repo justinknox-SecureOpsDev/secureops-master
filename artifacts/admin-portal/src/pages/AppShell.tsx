@@ -6,6 +6,7 @@ import {
   AlertTriangle, ShieldCheck, Repeat, KeyRound, IdCard, Link2, Download,
   Radio as RadioIcon, Radar, MessageCircle, Users as UsersIcon,
   Briefcase, Calculator, Shield, Settings, CalendarRange, Menu, X, Building2,
+  ArrowLeftRight,
   type LucideIcon,
 } from "lucide-react";
 import { TABLES } from "@/lib/tables";
@@ -176,6 +177,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
 
     const settingsLinks: LinkItem[] = [
       { href: "/account/security", label: "My 2FA", Icon: KeyRound },
+      { href: "/settings/scheduler-integration", label: "Scheduler Integration", Icon: ArrowLeftRight },
     ];
 
     const dispatchGroup: NavGroup = {

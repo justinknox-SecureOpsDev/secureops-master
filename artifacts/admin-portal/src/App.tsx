@@ -42,6 +42,7 @@ import PersonnelPage from "@/pages/Personnel";
 import OfficerProfilePage from "@/pages/OfficerProfile";
 import StaffingPage from "@/pages/Staffing";
 import StaffingEventPage from "@/pages/StaffingEvent";
+import SchedulerIntegrationPage from "@/pages/SchedulerIntegration";
 import NotFound from "@/pages/not-found";
 import { ClientShell } from "@/pages/ClientShell";
 import ClientUsers from "@/pages/ClientUsers";
@@ -140,6 +141,7 @@ function Routed() {
           <Route path="/hr/license-renewals" component={LicenseRenewalsPage} />
           <Route path="/incidents/share-links" component={IncidentShareLinksPage} />
           <Route path="/account/security" component={SecurityPage} />
+          <Route path="/settings/scheduler-integration" component={SchedulerIntegrationPage} />
           <Route path="/radio" component={RadioPage} />
           <Route path="/dar" component={DailyReportsPage} />
           <Route path="/compliance" component={CompliancePage} />

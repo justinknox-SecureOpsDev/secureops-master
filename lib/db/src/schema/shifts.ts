@@ -1,4 +1,4 @@
-import { pgTable, text, uuid, timestamp, boolean, numeric, integer, index } from "drizzle-orm/pg-core";
+import { pgTable, text, uuid, timestamp, boolean, numeric, integer, index, uniqueIndex } from "drizzle-orm/pg-core";
 import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod/v4";
 import { sitesTable } from "./sites";
@@ -35,6 +35,16 @@ export const shiftsTable = pgTable("shifts", {
   // groups by seriesId when present and falls back to site+title+pattern.
   seriesId: uuid("series_id"),
   notes: text("notes"),
+  // External-sync fields for Event Staff Scheduler integration.
+  // externalId = the scheduler's own ID for this shift.
+  // externalSource = 'scheduler' (only known external source for now).
+  // externalUpdatedAt = the scheduler's updatedAt for last-write-wins conflict resolution.
+  // syncSource = 'local' | 'scheduler'; 'scheduler' means the change originated from the
+  //   scheduler — the outbound sync hook skips echoing it back (loop prevention).
+  externalId: text("external_id"),
+  externalSource: text("external_source"),
+  externalUpdatedAt: timestamp("external_updated_at", { withTimezone: true }),
+  syncSource: text("sync_source").notNull().default("local"),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow().$onUpdate(() => new Date()),
 }, (t) => ({
@@ -43,6 +53,9 @@ export const shiftsTable = pgTable("shifts", {
   // and the row-position deep-link stay fully index-ordered at scale.
   startIdx: index("shifts_start_idx").on(t.startTime, t.id),
   seriesIdx: index("shifts_series_idx").on(t.seriesId),
+  // Unique constraint on (externalSource, externalId) for atomic concurrent upserts.
+  // NULL values do not violate uniqueness in Postgres, so local-only rows are safe.
+  externalIdx: uniqueIndex("shifts_external_uniq").on(t.externalSource, t.externalId),
 }));
 
 export const insertShiftSchema = createInsertSchema(shiftsTable).omit({ id: true, createdAt: true, updatedAt: true });

@@ -1,6 +1,7 @@
 import { Router, type IRouter } from "express";
 import { requireAdmin } from "../middlewares/auth";
 import { getGeofenceRadiusMiles } from "../lib/geofence";
+import { isSchedulerConfigured } from "../lib/schedulerSync";
 
 const router: IRouter = Router();
 
@@ -20,6 +21,7 @@ router.get("/admin/system/status", requireAdmin, async (_req, res): Promise<void
   const corsOriginsConfigured = Boolean(process.env.ALLOWED_ORIGINS || process.env.REPLIT_DOMAINS);
   const geofenceRadiusMiles = getGeofenceRadiusMiles();
   const geofenceRadiusTooTight = geofenceRadiusMiles > 0 && geofenceRadiusMiles < 0.05;
+  const schedulerConfigured = isSchedulerConfigured();
   res.json({
     env,
     smtpConfigured,
@@ -28,6 +30,7 @@ router.get("/admin/system/status", requireAdmin, async (_req, res): Promise<void
     corsOriginsConfigured,
     geofenceRadiusMiles,
     geofenceRadiusTooTight,
+    schedulerConfigured,
   });
 });
 

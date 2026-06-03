@@ -1,4 +1,4 @@
-import { pgTable, text, uuid, timestamp, boolean, numeric, index } from "drizzle-orm/pg-core";
+import { pgTable, text, uuid, timestamp, boolean, numeric, index, uniqueIndex } from "drizzle-orm/pg-core";
 import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod/v4";
 import { shiftsTable } from "./shifts";
@@ -50,6 +50,15 @@ export const timeEntriesTable = pgTable("time_entries", {
   // and keeping them around preserves the audit trail.
   clockOutReminder1SentAt: timestamp("clock_out_reminder1_sent_at", { withTimezone: true }),
   clockOutReminder2SentAt: timestamp("clock_out_reminder2_sent_at", { withTimezone: true }),
+  // External-sync fields for Event Staff Scheduler integration.
+  // externalId = the scheduler's clock-event ID; used for idempotent upsert.
+  // externalSource = 'scheduler' (only known external source).
+  // externalUpdatedAt = scheduler's updatedAt for last-write-wins conflict resolution.
+  // syncSource = 'local' | 'scheduler'; 'scheduler' suppresses outbound echo (loop prevention).
+  externalId: text("external_id"),
+  externalSource: text("external_source"),
+  externalUpdatedAt: timestamp("external_updated_at", { withTimezone: true }),
+  syncSource: text("sync_source").notNull().default("local"),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow().$onUpdate(() => new Date()),
 }, (t) => ({
@@ -59,6 +68,9 @@ export const timeEntriesTable = pgTable("time_entries", {
   // Backs the admin grid's default sort (clockInTime desc) + id tiebreaker.
   // Leading clockInTime, distinct from the employee-scoped index above.
   clockInIdx: index("time_entries_clockin_idx").on(t.clockInTime, t.id),
+  // Unique constraint on (externalSource, externalId) for atomic concurrent upserts.
+  // NULL values do not violate uniqueness in Postgres, so local-only rows are safe.
+  externalIdx: uniqueIndex("time_entries_external_uniq").on(t.externalSource, t.externalId),
 }));
 
 export const insertTimeEntrySchema = createInsertSchema(timeEntriesTable).omit({ id: true, createdAt: true, updatedAt: true });

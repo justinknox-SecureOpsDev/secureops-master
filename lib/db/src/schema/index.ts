@@ -42,3 +42,4 @@ export * from "./subcontractors";
 export * from "./subcontractorCois";
 export * from "./subcontractorContracts";
 export * from "./subcontractorInvoices";
+export * from "./schedulerSyncCursors";

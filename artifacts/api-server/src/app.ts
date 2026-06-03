@@ -149,7 +149,18 @@ app.use(
 // All other routes continue to use the JSON parser below.
 app.use("/api/client/stripe-webhook", express.raw({ type: "application/json" }));
 
-app.use(express.json({ limit: "1mb" }));
+// Use the `verify` callback to capture the raw body buffer for HMAC-SHA256
+// webhook signature verification. This is the correct Express pattern:
+// the verify callback fires while body-parser reads the stream, so the
+// parsed JSON body is still populated normally via req.body.
+// Scheduler webhook handlers read (req as any).rawBody; all other routes
+// simply ignore it.
+app.use(express.json({
+  limit: "1mb",
+  verify: (req, _res, buf) => {
+    (req as any).rawBody = buf.toString("utf8");
+  },
+}));
 app.use(express.urlencoded({ extended: true, limit: "1mb" }));
 
 app.use("/api", router);
