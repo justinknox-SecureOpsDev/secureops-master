@@ -24,6 +24,7 @@ import { ImportWizard } from "./ImportWizard";
 import { RepeatingShiftDialog } from "./RepeatingShiftDialog";
 import { downloadTemplateXlsx } from "@/lib/import";
 import { useDeepLinkFocus } from "@/hooks/useDeepLinkFocus";
+import { useIsMobile } from "@/hooks/use-mobile";
 
 type Row = Record<string, unknown>;
 
@@ -140,6 +141,8 @@ export function DataGrid({
     () => descriptor.fields.filter((f) => !f.hiddenInGrid),
     [descriptor],
   );
+
+  const isMobile = useIsMobile();
 
   const [rows, setRows] = useState<Row[]>([]);
   const [total, setTotal] = useState(0);
@@ -494,25 +497,103 @@ export function DataGrid({
 
   const padX = compact ? "px-3" : "px-6";
 
+  // Row action buttons, shared between the desktop table and the mobile card
+  // layout so the per-table special cases (users / incidents / clients / sites)
+  // stay in exactly one place.
+  const renderRowActions = (r: Row) => (
+    <>
+      {descriptor.name === "sites" && (
+        <Link href={`/sites/${(r as any).id}`}>
+          <Button
+            variant="outline"
+            size="sm"
+            title="Open site detail (rate card, checkpoints, geofence)"
+            aria-label="Open site detail"
+            className="mr-1 h-8"
+          >
+            <ExternalLink className="w-3.5 h-3.5 mr-1" />
+            Open
+          </Button>
+        </Link>
+      )}
+      {isUsers && (
+        <Button
+          variant="ghost"
+          size="icon"
+          onClick={() => { setResetError(null); setResetTarget(toUserRow(r)); }}
+          title="Send password reset"
+          aria-label="Send password reset"
+        >
+          <KeyRound className="w-4 h-4" />
+        </Button>
+      )}
+      {isUsers && (
+        <Button
+          variant="ghost"
+          size="icon"
+          onClick={() => { setRevokeError(null); setRevokeTarget(toUserRow(r)); }}
+          title="Revoke all active sessions for this user"
+          aria-label="Revoke all active sessions for this user"
+        >
+          <ShieldOff className="w-4 h-4 text-destructive" />
+        </Button>
+      )}
+      {isIncidents && (
+        <Button
+          variant="ghost"
+          size="icon"
+          onClick={() => downloadIncidentPdf(r)}
+          title="Download incident report (PDF)"
+          aria-label="Download incident report (PDF)"
+        >
+          <FileText className="w-4 h-4" />
+        </Button>
+      )}
+      {isClients && (
+        <Button
+          variant="outline"
+          size="sm"
+          className="mr-1 h-8"
+          onClick={() => {
+            setInviteError(null);
+            setInviteForm({ email: "", firstName: "", lastName: "" });
+            setInviteTarget(r);
+          }}
+          title="Invite a portal user for this client"
+          aria-label="Invite portal user"
+        >
+          <UserPlus className="w-3.5 h-3.5 mr-1" />
+          Invite portal user
+        </Button>
+      )}
+      <Button variant="ghost" size="icon" onClick={() => setEditing(r)} title="Edit" aria-label={`Edit ${singularize(descriptor.label).toLowerCase()}`}>
+        <Pencil className="w-4 h-4" />
+      </Button>
+      <Button variant="ghost" size="icon" onClick={() => setDeleting(r)} title="Delete" aria-label={`Delete ${singularize(descriptor.label).toLowerCase()}`}>
+        <Trash2 className="w-4 h-4 text-destructive" />
+      </Button>
+    </>
+  );
+
   return (
     <div className="flex flex-col h-full">
       {!hideHeader && (
-        <div className={`flex items-center justify-between gap-3 ${padX} py-4 border-b bg-card`}>
+        <div className={`flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between ${padX} py-4 border-b bg-card`}>
           <div>
-            <h1 className="text-2xl brand-navy" style={{ fontFamily: "Georgia, serif", fontWeight: 700 }}>
+            <h1 className="text-xl sm:text-2xl brand-navy" style={{ fontFamily: "Georgia, serif", fontWeight: 700 }}>
               {descriptor.label}
             </h1>
             <p className="text-xs text-muted-foreground">
               {loading || locating ? "Loading…" : `${total.toLocaleString()} ${descriptor.plural}`}
             </p>
           </div>
-          <div className="flex items-center gap-2">
+          <div className="flex flex-wrap items-center gap-2">
             <Input
               value={search}
               onChange={(e) => { setSearch(e.target.value); setPage(0); }}
               placeholder="Search…"
               aria-label={`Search ${descriptor.plural}`}
-              className="w-64"
+              className="w-full sm:w-64"
             />
             <Button variant="outline" size="icon" onClick={load} title="Refresh" aria-label="Refresh">
               <RefreshCw className="w-4 h-4" />
@@ -573,20 +654,20 @@ export function DataGrid({
         </div>
       )}
       {hideHeader && (
-        <div className={`flex items-center justify-between gap-2 ${padX} py-2 border-b bg-card`}>
-          <div className="flex items-center gap-2">
+        <div className={`flex flex-wrap items-center justify-between gap-2 ${padX} py-2 border-b bg-card`}>
+          <div className="flex flex-1 min-w-0 items-center gap-2">
             <Input
               value={search}
               onChange={(e) => { setSearch(e.target.value); setPage(0); }}
               placeholder="Search…"
               aria-label={`Search ${descriptor.plural}`}
-              className="w-56 h-8"
+              className="flex-1 min-w-0 sm:flex-none sm:w-56 h-8"
             />
-            <span className="text-xs text-muted-foreground">
+            <span className="text-xs text-muted-foreground whitespace-nowrap">
               {loading || locating ? "Loading…" : `${total.toLocaleString()} ${descriptor.plural}`}
             </span>
           </div>
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-2 shrink-0">
             <Button variant="outline" size="sm" onClick={load} title="Refresh" aria-label="Refresh">
               <RefreshCw className="w-3.5 h-3.5" />
             </Button>
@@ -598,6 +679,7 @@ export function DataGrid({
       )}
 
       <div className="flex-1 overflow-auto bg-background">
+        {!isMobile && (
         <Table>
           <TableHeader className="sticky top-0 bg-card z-10">
             <TableRow>
@@ -660,85 +742,60 @@ export function DataGrid({
                   </TableCell>
                 ))}
                 <TableCell className="text-right">
-                  {descriptor.name === "sites" && (
-                    <Link href={`/sites/${(r as any).id}`}>
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        title="Open site detail (rate card, checkpoints, geofence)"
-                        aria-label="Open site detail"
-                        className="mr-1 h-8"
-                      >
-                        <ExternalLink className="w-3.5 h-3.5 mr-1" />
-                        Open
-                      </Button>
-                    </Link>
-                  )}
-                  {isUsers && (
-                    <Button
-                      variant="ghost"
-                      size="icon"
-                      onClick={() => { setResetError(null); setResetTarget(toUserRow(r)); }}
-                      title="Send password reset"
-                      aria-label="Send password reset"
-                    >
-                      <KeyRound className="w-4 h-4" />
-                    </Button>
-                  )}
-                  {isUsers && (
-                    <Button
-                      variant="ghost"
-                      size="icon"
-                      onClick={() => { setRevokeError(null); setRevokeTarget(toUserRow(r)); }}
-                      title="Revoke all active sessions for this user"
-                      aria-label="Revoke all active sessions for this user"
-                    >
-                      <ShieldOff className="w-4 h-4 text-destructive" />
-                    </Button>
-                  )}
-                  {isIncidents && (
-                    <Button
-                      variant="ghost"
-                      size="icon"
-                      onClick={() => downloadIncidentPdf(r)}
-                      title="Download incident report (PDF)"
-                      aria-label="Download incident report (PDF)"
-                    >
-                      <FileText className="w-4 h-4" />
-                    </Button>
-                  )}
-                  {isClients && (
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      className="mr-1 h-8"
-                      onClick={() => {
-                        setInviteError(null);
-                        setInviteForm({ email: "", firstName: "", lastName: "" });
-                        setInviteTarget(r);
-                      }}
-                      title="Invite a portal user for this client"
-                      aria-label="Invite portal user"
-                    >
-                      <UserPlus className="w-3.5 h-3.5 mr-1" />
-                      Invite portal user
-                    </Button>
-                  )}
-                  <Button variant="ghost" size="icon" onClick={() => setEditing(r)} title="Edit" aria-label={`Edit ${singularize(descriptor.label).toLowerCase()}`}>
-                    <Pencil className="w-4 h-4" />
-                  </Button>
-                  <Button variant="ghost" size="icon" onClick={() => setDeleting(r)} title="Delete" aria-label={`Delete ${singularize(descriptor.label).toLowerCase()}`}>
-                    <Trash2 className="w-4 h-4 text-destructive" />
-                  </Button>
+                  {renderRowActions(r)}
                 </TableCell>
               </TableRow>
               );
             })}
           </TableBody>
         </Table>
+        )}
+
+        {/* Mobile card layout — the wide multi-column table is unusable on a
+            phone, so each row becomes a stacked label/value card carrying the
+            same per-row actions. Rendered instead of (not on top of) the table
+            so the DOM holds a single copy of each row. */}
+        {isMobile && (
+        <div className="flex flex-col gap-3 p-3">
+          {rows.length === 0 && !loading && (
+            <div className="text-center text-muted-foreground py-12 text-sm">
+              No {descriptor.plural} yet. Tap <b>Add {singularize(descriptor.label)}</b> to create one
+              {descriptor.importSupported ? " or use Import to bulk-load." : "."}
+            </div>
+          )}
+          {rows.map((r) => {
+            const isFocusRow = focusId != null && String((r as any).id) === focusId;
+            return (
+              <div
+                key={String((r as any).id)}
+                ref={isFocusRow ? (focusRowRef as unknown as React.Ref<HTMLDivElement>) : undefined}
+                className={`rounded-lg border bg-card shadow-sm p-3${isFocusRow && focusFlashing ? " wcsg-deep-link-flash" : ""}`}
+              >
+                <dl className="divide-y divide-border/60">
+                  {gridFields.map((f) => (
+                    <div key={f.key} className="flex items-start justify-between gap-3 py-1.5">
+                      <dt className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground shrink-0 pt-0.5">
+                        {f.label}
+                      </dt>
+                      <dd className="text-sm text-right min-w-0 break-words">
+                        {f.derived
+                          ? <DerivedCell field={f} sourceField={descriptor.fields.find((x) => x.key === f.derived!.fromField)} row={r} />
+                          : renderCell(f, (r as any)[f.key])}
+                      </dd>
+                    </div>
+                  ))}
+                </dl>
+                <div className="flex flex-wrap items-center justify-end gap-1 pt-2 mt-1 border-t">
+                  {renderRowActions(r)}
+                </div>
+              </div>
+            );
+          })}
+        </div>
+        )}
       </div>
 
-      <div className="flex items-center justify-between px-6 py-3 border-t bg-card text-sm">
+      <div className={`flex items-center justify-between ${padX} py-3 border-t bg-card text-sm`}>
         <span className="text-muted-foreground">
           Page {page + 1} of {totalPages}
         </span>

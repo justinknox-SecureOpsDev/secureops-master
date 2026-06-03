@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, vi } from "vitest";
+import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { render, screen, waitFor } from "@testing-library/react";
 import { Router } from "wouter";
 import { memoryLocation } from "wouter/memory-location";
@@ -187,5 +187,67 @@ describe("deep-link focus on a paginated admin table", () => {
     expect(scrollSpy).toHaveBeenCalled();
     // The grid never advances past page 1 — the row was already there.
     expect(screen.getByText("Page 1 of 3")).toBeTruthy();
+  });
+});
+
+describe("deep-link focus on the mobile card layout", () => {
+  let scrollSpy: ReturnType<typeof vi.spyOn>;
+  let originalInnerWidth: number;
+  let originalMatchMedia: typeof window.matchMedia;
+
+  beforeEach(() => {
+    hoisted.rows = [];
+    hoisted.calls = [];
+    vi.clearAllMocks();
+    scrollSpy = vi.spyOn(Element.prototype, "scrollIntoView");
+
+    // Force the responsive grid into its single-render mobile (card) branch:
+    // useIsMobile() seeds from innerWidth and then subscribes via matchMedia.
+    originalInnerWidth = window.innerWidth;
+    originalMatchMedia = window.matchMedia;
+    Object.defineProperty(window, "innerWidth", {
+      configurable: true,
+      writable: true,
+      value: 375,
+    });
+    window.matchMedia = vi.fn().mockImplementation((query: string) => ({
+      matches: true,
+      media: query,
+      onchange: null,
+      addEventListener: vi.fn(),
+      removeEventListener: vi.fn(),
+      addListener: vi.fn(),
+      removeListener: vi.fn(),
+      dispatchEvent: vi.fn(),
+    })) as unknown as typeof window.matchMedia;
+  });
+
+  afterEach(() => {
+    Object.defineProperty(window, "innerWidth", {
+      configurable: true,
+      writable: true,
+      value: originalInnerWidth,
+    });
+    window.matchMedia = originalMatchMedia;
+  });
+
+  it("renders rows as cards and still scrolls + flashes the focused row", async () => {
+    // 60 rows, page size 25 -> row-40 lives on page index 1 = "Page 2".
+    hoisted.rows = makeRows(60);
+    renderTablePage("row-40");
+
+    await waitFor(() => expect(screen.getByText("Widget 40")).toBeTruthy());
+
+    // Mobile branch renders cards, not a <table>.
+    expect(document.querySelector("table")).toBeNull();
+
+    // The focused card (a div, not a tr) is scrolled into view and flashed.
+    await waitFor(() => {
+      const flashed = document.querySelector(".wcsg-deep-link-flash");
+      expect(flashed).not.toBeNull();
+      expect(flashed?.tagName).toBe("DIV");
+      expect(flashed?.textContent).toContain("Widget 40");
+    });
+    expect(scrollSpy).toHaveBeenCalled();
   });
 });
