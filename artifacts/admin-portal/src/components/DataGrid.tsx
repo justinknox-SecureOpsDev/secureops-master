@@ -82,6 +82,19 @@ function DerivedCell({
   const match = options.find((o) => o.id === String(fkValue));
   const label = field.derived.render(match?.row ?? null);
   const text = label.trim() || "—";
+  const linkRoute = field.derived.linkRoute;
+  if (linkRoute && text !== "—") {
+    return (
+      <Link
+        href={linkRoute(String(fkValue))}
+        onClick={(e) => e.stopPropagation()}
+        className="text-blue-700 hover:underline"
+        title="Open profile"
+      >
+        {text}
+      </Link>
+    );
+  }
   const linkTo = field.derived.linkTo;
   if (linkTo && text !== "—") {
     const href = `/tables/${linkTo.table}?filter[${linkTo.filterField}]=${encodeURIComponent(String(fkValue))}`;

@@ -89,6 +89,13 @@ export type Field = {
      * into the related record from any grid that resolves to it.
      */
     linkTo?: { table: string; filterField: string };
+    /**
+     * Optional direct-route click target, built from the resolved fk value.
+     * When set it takes precedence over `linkTo`, so the cell links straight to
+     * an app route (e.g. an employee's officer profile) instead of a grid
+     * filter. Return value is a wouter route under the portal base.
+     */
+    linkRoute?: (fkValue: string) => string;
   };
 };
 
@@ -191,7 +198,7 @@ export const TABLES: TableDescriptor[] = [
             const full = [first, last].filter(Boolean).join(" ");
             return full || String(u.email ?? "").trim();
           },
-          linkTo: { table: "employees", filterField: "userId" },
+          linkRoute: (userId) => `/personnel/${encodeURIComponent(userId)}`,
         },
       },
       { key: "userId", label: "User", type: "fk", fkTable: "users", fkLabel: "email", required: true, section: "Identity", importResolveByLabel: true, importExample: "name@example.com" },

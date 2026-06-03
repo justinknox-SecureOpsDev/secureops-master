@@ -14,7 +14,7 @@ const router = Router();
  * Cached for 5 minutes at the edge/CDN level — brand config changes require
  * a server restart anyway.
  */
-router.get("/api/brand", (_req, res) => {
+router.get("/brand", (_req, res) => {
   res.setHeader("Cache-Control", "public, max-age=300");
   res.json({
     companyName: brand.companyName,
