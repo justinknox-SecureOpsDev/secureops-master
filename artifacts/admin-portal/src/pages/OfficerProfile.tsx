@@ -1,15 +1,18 @@
-import { useMemo, useState, useEffect, useRef } from "react";
+import { useMemo, useState, useEffect, useRef, type ReactNode } from "react";
 import { Radio } from "lucide-react";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { Link, useRoute, useLocation } from "wouter";
 import { api } from "@/lib/api";
+import { openSignedObject } from "@/lib/upload";
+import { useAuth } from "@/lib/auth";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
   ArrowLeft, User, Mail, Phone, ShieldCheck, AlertTriangle, Loader2,
   ExternalLink, MessageCircle, PhoneCall, Calendar, ShieldAlert, MapPin,
-  Play, Pause,
+  Play, Pause, FileText, Shirt, ClipboardList, Briefcase, Banknote,
+  BadgeCheck,
 } from "lucide-react";
 
 type Officer = {
@@ -23,6 +26,50 @@ type Officer = {
   maxLicenseLevel: number | null;
   licenseCount: number;
   expiringLicenseCount: number;
+  // Full HR projection — present only for admins (the server strips these
+  // for dispatchers via projectForDispatcher), so the full-profile block
+  // below is additionally gated on the viewer's own admin role.
+  position?: string | null;
+  createdAt?: string | null;
+  firstLoginAt?: string | null;
+  lastLoginAt?: string | null;
+  lastActiveAt?: string | null;
+  address?: string | null;
+  dateOfBirth?: string | null;
+  cityOfBirth?: string | null;
+  stateOfBirth?: string | null;
+  niNumber?: string | null;
+  rightToWorkStatus?: string | null;
+  rightToWorkDocKey?: string | null;
+  siaLicenseNumber?: string | null;
+  siaLicenseLevel?: number | null;
+  siaLicenseExpiry?: string | null;
+  licenseDocKey?: string | null;
+  passportDocKey?: string | null;
+  previousExperience?: string | null;
+  yearsExperience?: number | null;
+  references?: unknown;
+  photoKey?: string | null;
+  cvKey?: string | null;
+  trainingCertificateKeys?: unknown;
+  availability?: unknown;
+  emergencyContactName?: string | null;
+  emergencyContactRelationship?: string | null;
+  emergencyContactPhone?: string | null;
+  hourlyRate?: string | null;
+  bankAccountName?: string | null;
+  bankAccountNumber?: string | null;
+  bankBsb?: string | null;
+  taxCode?: string | null;
+  payStubDocKey?: string | null;
+  uniformShirt?: string | null;
+  uniformTrousers?: string | null;
+  uniformJacket?: string | null;
+  uniformBoots?: string | null;
+  directDepositConsent?: boolean | null;
+  directDepositSignature?: string | null;
+  acknowledgements?: unknown;
+  skills?: string[] | null;
 };
 
 type ShiftAssignment = {
@@ -251,6 +298,149 @@ function endOfToday(): Date {
   const d = new Date(); d.setHours(23, 59, 59, 999); return d;
 }
 
+// ── Full-profile helpers (admin-only HR view) ───────────────────────────
+function fmtDate(iso: string | null | undefined): string | null {
+  if (!iso) return null;
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return String(iso);
+  return d.toLocaleDateString(undefined, { year: "numeric", month: "short", day: "numeric" });
+}
+
+function fmtRate(v: string | number | null | undefined): string | null {
+  if (v == null || v === "") return null;
+  const num = Number(v);
+  return Number.isFinite(num) ? `$${num.toFixed(2)}/hr` : String(v);
+}
+
+function titleCase(s: string | null | undefined): string | null {
+  if (!s) return null;
+  return s.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
+}
+
+function yesNo(v: boolean | null | undefined): string | null {
+  return v == null ? null : v ? "Yes" : "No";
+}
+
+// Bank account numbers are masked to the last 4 digits in this read-only
+// view; full banking detail stays in the editable Personnel grid.
+function maskTail(v: string | null | undefined, keep = 4): string | null {
+  if (!v) return null;
+  const s = String(v);
+  if (s.length <= keep) return "•".repeat(s.length);
+  return "••••" + s.slice(-keep);
+}
+
+function renderReferences(refs: unknown): ReactNode {
+  if (!refs) return <span className="opacity-50">—</span>;
+  const arr = Array.isArray(refs) ? refs : [refs];
+  if (arr.length === 0) return <span className="opacity-50">—</span>;
+  return (
+    <ul className="space-y-1">
+      {arr.map((r, i) => {
+        if (r && typeof r === "object") {
+          const o = r as Record<string, unknown>;
+          const parts = [o.name, o.relationship, o.company, o.phone, o.email]
+            .filter((x) => x != null && x !== "")
+            .map(String);
+          return <li key={i}>{parts.length ? parts.join(" · ") : JSON.stringify(r)}</li>;
+        }
+        return <li key={i}>{String(r)}</li>;
+      })}
+    </ul>
+  );
+}
+
+function renderAvailability(av: unknown): ReactNode {
+  if (!av) return <span className="opacity-50">—</span>;
+  if (typeof av === "string") return av || <span className="opacity-50">—</span>;
+  if (Array.isArray(av)) {
+    if (av.length === 0) return <span className="opacity-50">—</span>;
+    return av.map((x) => (x && typeof x === "object" ? JSON.stringify(x) : String(x))).join(", ");
+  }
+  if (typeof av === "object") {
+    const on = Object.entries(av as Record<string, unknown>)
+      .filter(([, v]) => v === true || (typeof v === "string" && v))
+      .map(([k, v]) => (v === true ? titleCase(k) : `${titleCase(k)}: ${v}`));
+    return on.length ? on.join(", ") : <span className="opacity-50">—</span>;
+  }
+  return String(av);
+}
+
+function renderAcks(ack: unknown): ReactNode {
+  if (!ack) return <span className="opacity-50">—</span>;
+  if (Array.isArray(ack)) {
+    return ack.length ? (
+      <ul className="space-y-0.5">
+        {ack.map((a, i) => (
+          <li key={i}>✓ {a && typeof a === "object" ? JSON.stringify(a) : String(a)}</li>
+        ))}
+      </ul>
+    ) : <span className="opacity-50">—</span>;
+  }
+  if (typeof ack === "object") {
+    const entries = Object.entries(ack as Record<string, unknown>);
+    return entries.length ? (
+      <ul className="space-y-0.5">
+        {entries.map(([k, v]) => <li key={k}>{v ? "✓" : "✗"} {titleCase(k)}</li>)}
+      </ul>
+    ) : <span className="opacity-50">—</span>;
+  }
+  return String(ack);
+}
+
+// trainingCertificateKeys is freeform jsonb — accept an array of plain object
+// keys (strings) or {objectPath|key|docKey, name|filename|label} entries.
+function certEntries(v: unknown): Array<{ label: string; key: string }> {
+  if (!v) return [];
+  const arr = Array.isArray(v) ? v : [v];
+  const out: Array<{ label: string; key: string }> = [];
+  arr.forEach((item, i) => {
+    if (typeof item === "string" && item) {
+      out.push({ label: `Certificate ${i + 1}`, key: item });
+    } else if (item && typeof item === "object") {
+      const o = item as Record<string, unknown>;
+      const key = (o.objectPath ?? o.key ?? o.docKey) as string | undefined;
+      const label = (o.name ?? o.filename ?? o.label) as string | undefined;
+      if (key) out.push({ label: label ?? `Certificate ${i + 1}`, key });
+    }
+  });
+  return out;
+}
+
+/** A labelled read-only field; renders an em-dash when the value is empty. */
+function Field({ label, value }: { label: string; value: string | number | null | undefined }) {
+  const empty = value === null || value === undefined || value === "";
+  return (
+    <div className="min-w-0">
+      <div className="text-[11px] uppercase opacity-60">{label}</div>
+      <div className="text-sm break-words">
+        {empty ? <span className="opacity-50">—</span> : value}
+      </div>
+    </div>
+  );
+}
+
+/** A document field that opens the private object via a short-lived signed URL. */
+function DocButton({ label, objectKey }: { label: string; objectKey: string | null | undefined }) {
+  return (
+    <div className="min-w-0">
+      <div className="text-[11px] uppercase opacity-60">{label}</div>
+      {objectKey ? (
+        <Button
+          variant="outline"
+          size="sm"
+          className="h-7 mt-0.5"
+          onClick={() => { void openSignedObject(objectKey); }}
+        >
+          <FileText className="w-3.5 h-3.5 mr-1" /> View
+        </Button>
+      ) : (
+        <div className="text-sm opacity-50">— not on file</div>
+      )}
+    </div>
+  );
+}
+
 /**
  * Officer profile page reachable from the Dispatch Live Map "View profile"
  * popup action and the personnel roster. Both dispatchers and admins can
@@ -264,6 +454,11 @@ export default function OfficerProfilePage() {
   const [, params] = useRoute<{ id: string }>("/personnel/:id");
   const [, navigate] = useLocation();
   const id = params?.id ?? "";
+  // Full HR profile is admin-only. Dispatchers reach this same route from the
+  // Live Map but the server already strips sensitive fields for them; this
+  // gate keeps the full-profile block from rendering even if that changes.
+  const { user } = useAuth();
+  const isAdmin = user?.role === "admin";
 
   const officer = useQuery<Officer>({
     queryKey: ["officer", id],
@@ -617,6 +812,187 @@ export default function OfficerProfilePage() {
           )}
         </CardContent>
       </Card>
+
+      {isAdmin && officer.data && (
+        <>
+          <Card>
+            <CardHeader className="pb-3">
+              <CardTitle className="flex items-center gap-2 text-base">
+                <Briefcase className="w-5 h-5 brand-gold" />
+                Employment &amp; identity
+              </CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-3">
+              <div className="grid grid-cols-2 sm:grid-cols-3 gap-x-4 gap-y-3">
+                <Field label="Position" value={titleCase(officer.data.position)} />
+                <Field label="Hourly rate" value={fmtRate(officer.data.hourlyRate)} />
+                <Field label="Date added" value={fmtDate(officer.data.createdAt)} />
+                <Field label="Date of birth" value={fmtDate(officer.data.dateOfBirth)} />
+                <Field label="City of birth" value={officer.data.cityOfBirth} />
+                <Field label="State of birth" value={officer.data.stateOfBirth} />
+                <Field label="SSN (last 4)" value={officer.data.niNumber} />
+                <Field label="First login" value={fmtDate(officer.data.firstLoginAt)} />
+                <Field label="Last login" value={fmtDate(officer.data.lastLoginAt)} />
+              </div>
+              <Field label="Address" value={officer.data.address} />
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardHeader className="pb-3">
+              <CardTitle className="flex items-center gap-2 text-base">
+                <BadgeCheck className="w-5 h-5 brand-gold" />
+                Right to work &amp; licence
+              </CardTitle>
+            </CardHeader>
+            <CardContent>
+              <div className="grid grid-cols-2 sm:grid-cols-3 gap-x-4 gap-y-3">
+                <Field label="Right to work" value={titleCase(officer.data.rightToWorkStatus)} />
+                <Field label="TX licence #" value={officer.data.siaLicenseNumber} />
+                <Field
+                  label="Licence level"
+                  value={officer.data.siaLicenseLevel != null ? `L${officer.data.siaLicenseLevel}` : null}
+                />
+                <Field label="Licence expiry" value={fmtDate(officer.data.siaLicenseExpiry)} />
+                <DocButton label="Right-to-work doc" objectKey={officer.data.rightToWorkDocKey} />
+                <DocButton label="Licence doc" objectKey={officer.data.licenseDocKey} />
+                <DocButton label="Passport doc" objectKey={officer.data.passportDocKey} />
+              </div>
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardHeader className="pb-3">
+              <CardTitle className="flex items-center gap-2 text-base">
+                <Briefcase className="w-5 h-5 brand-gold" />
+                Experience &amp; skills
+              </CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-3">
+              <div className="grid grid-cols-2 sm:grid-cols-3 gap-x-4 gap-y-3">
+                <Field label="Years experience" value={officer.data.yearsExperience} />
+                <Field label="Skills" value={(officer.data.skills ?? []).join(", ") || null} />
+              </div>
+              <Field label="Previous experience" value={officer.data.previousExperience} />
+              <div>
+                <div className="text-[11px] uppercase opacity-60">References</div>
+                <div className="text-sm">{renderReferences(officer.data.references)}</div>
+              </div>
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardHeader className="pb-3">
+              <CardTitle className="flex items-center gap-2 text-base">
+                <Phone className="w-5 h-5 brand-gold" />
+                Emergency contact
+              </CardTitle>
+            </CardHeader>
+            <CardContent>
+              <div className="grid grid-cols-2 sm:grid-cols-3 gap-x-4 gap-y-3">
+                <Field label="Name" value={officer.data.emergencyContactName} />
+                <Field label="Relationship" value={officer.data.emergencyContactRelationship} />
+                <Field label="Phone (call only)" value={officer.data.emergencyContactPhone} />
+              </div>
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardHeader className="pb-3">
+              <CardTitle className="flex items-center gap-2 text-base">
+                <Banknote className="w-5 h-5 brand-gold" />
+                Pay &amp; banking
+              </CardTitle>
+            </CardHeader>
+            <CardContent>
+              <div className="grid grid-cols-2 sm:grid-cols-3 gap-x-4 gap-y-3">
+                <Field label="Hourly rate" value={fmtRate(officer.data.hourlyRate)} />
+                <Field label="Account name" value={officer.data.bankAccountName} />
+                <Field label="Account number" value={maskTail(officer.data.bankAccountNumber)} />
+                <Field label="Routing / BSB" value={officer.data.bankBsb} />
+                <Field label="Tax code" value={officer.data.taxCode} />
+                <Field label="Direct deposit consent" value={yesNo(officer.data.directDepositConsent)} />
+                <Field label="DD signature" value={officer.data.directDepositSignature} />
+                <DocButton label="W-2 / pay stub" objectKey={officer.data.payStubDocKey} />
+              </div>
+              <div className="mt-2 text-[11px] opacity-50">
+                Account number masked to last 4. Full banking detail is editable in the Personnel grid.
+              </div>
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardHeader className="pb-3">
+              <CardTitle className="flex items-center gap-2 text-base">
+                <Shirt className="w-5 h-5 brand-gold" />
+                Uniform sizes
+              </CardTitle>
+            </CardHeader>
+            <CardContent>
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-x-4 gap-y-3">
+                <Field label="Shirt" value={officer.data.uniformShirt} />
+                <Field label="Trousers" value={officer.data.uniformTrousers} />
+                <Field label="Jacket" value={officer.data.uniformJacket} />
+                <Field label="Boots" value={officer.data.uniformBoots} />
+              </div>
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardHeader className="pb-3">
+              <CardTitle className="flex items-center gap-2 text-base">
+                <FileText className="w-5 h-5 brand-gold" />
+                Documents
+              </CardTitle>
+            </CardHeader>
+            <CardContent>
+              <div className="grid grid-cols-2 sm:grid-cols-3 gap-x-4 gap-y-3">
+                <DocButton label="Photo" objectKey={officer.data.photoKey} />
+                <DocButton label="CV / résumé" objectKey={officer.data.cvKey} />
+              </div>
+              <div className="mt-3">
+                <div className="text-[11px] uppercase opacity-60 mb-1">Training certificates</div>
+                {certEntries(officer.data.trainingCertificateKeys).length === 0 ? (
+                  <div className="text-sm opacity-50">— none on file</div>
+                ) : (
+                  <div className="flex flex-wrap gap-2">
+                    {certEntries(officer.data.trainingCertificateKeys).map((c, i) => (
+                      <Button
+                        key={i}
+                        variant="outline"
+                        size="sm"
+                        className="h-7"
+                        onClick={() => { void openSignedObject(c.key); }}
+                      >
+                        <FileText className="w-3.5 h-3.5 mr-1" /> {c.label}
+                      </Button>
+                    ))}
+                  </div>
+                )}
+              </div>
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardHeader className="pb-3">
+              <CardTitle className="flex items-center gap-2 text-base">
+                <ClipboardList className="w-5 h-5 brand-gold" />
+                Availability &amp; acknowledgements
+              </CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-3">
+              <div>
+                <div className="text-[11px] uppercase opacity-60">Availability</div>
+                <div className="text-sm">{renderAvailability(officer.data.availability)}</div>
+              </div>
+              <div>
+                <div className="text-[11px] uppercase opacity-60">Acknowledgements</div>
+                <div className="text-sm">{renderAcks(officer.data.acknowledgements)}</div>
+              </div>
+            </CardContent>
+          </Card>
+        </>
+      )}
 
       <Card>
         <CardHeader className="pb-3">
