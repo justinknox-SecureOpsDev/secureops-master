@@ -5,7 +5,7 @@ import { db, shiftsTable, shiftAssignmentsTable, usersTable, licensesTable, site
 import { requireAuth, requireAdmin, requireAdminOrDispatcher } from "../middlewares/auth";
 import { haversineMiles } from "../lib/geofence";
 import { getEffectiveLevel, effectiveLevelSql } from "../lib/eligibility";
-import { pushShiftUpsert, pushShiftDelete } from "../lib/schedulerSync";
+import { pushShiftUpsert, pushShiftDelete, pushAssignmentEvent } from "../lib/schedulerSync";
 
 const router: IRouter = Router();
 
@@ -916,6 +916,18 @@ router.post("/shifts/:id/claim", requireAuth, async (req, res): Promise<void> =>
     req.log.warn({ err }, "Failed to send claim confirmation push");
   }
 
+  // Keep the scheduler's roster in sync: an officer self-claimed this shift.
+  void pushAssignmentEvent({
+    action: "created",
+    assignmentId: assignment.id,
+    shiftId: shift.id,
+    shiftExternalId: shift.externalId,
+    shiftSyncSource: shift.syncSource,
+    employeeEmail: user?.email ?? "",
+    employeeName: user ? `${user.firstName} ${user.lastName}` : "",
+    status: assignment.status,
+  });
+
   res.status(201).json({ ...assignment, employeeName: user ? `${user.firstName} ${user.lastName}` : null });
 });
 
@@ -1107,6 +1119,18 @@ router.post("/shifts/:id/assignments", requireAdminOrDispatcher, async (req, res
     req.log.warn({ err }, "Failed to send assignment push");
   }
 
+  // Keep the scheduler's roster in sync: an officer was added to this shift.
+  void pushAssignmentEvent({
+    action: "created",
+    assignmentId: assignment.id,
+    shiftId: shift.id,
+    shiftExternalId: shift.externalId,
+    shiftSyncSource: shift.syncSource,
+    employeeEmail: user?.email ?? "",
+    employeeName: user ? `${user.firstName} ${user.lastName}` : "",
+    status: assignment.status,
+  });
+
   res.status(201).json({ ...assignment, employeeName: user ? `${user.firstName} ${user.lastName}` : null });
 });
 
@@ -1127,6 +1151,26 @@ router.put("/shifts/:id/assignments/:assignmentId", requireAuth, async (req, res
   // Declining frees the slot — delete the assignment row so headcount opens back up.
   if (status === "declined") {
     await db.delete(shiftAssignmentsTable).where(eq(shiftAssignmentsTable.id, assignmentId));
+
+    // Keep the scheduler's roster in sync: an officer was removed from this shift.
+    const [parentShift] = await db
+      .select({ id: shiftsTable.id, externalId: shiftsTable.externalId, syncSource: shiftsTable.syncSource })
+      .from(shiftsTable)
+      .where(eq(shiftsTable.id, existing.shiftId));
+    const [declinedUser] = await db.select().from(usersTable).where(eq(usersTable.id, existing.employeeId));
+    if (parentShift) {
+      void pushAssignmentEvent({
+        action: "deleted",
+        assignmentId,
+        shiftId: existing.shiftId,
+        shiftExternalId: parentShift.externalId,
+        shiftSyncSource: parentShift.syncSource,
+        employeeEmail: declinedUser?.email ?? "",
+        employeeName: declinedUser ? `${declinedUser.firstName} ${declinedUser.lastName}` : "",
+        status: "declined",
+      });
+    }
+
     res.json({ id: assignmentId, status: "declined", removed: true });
     return;
   }

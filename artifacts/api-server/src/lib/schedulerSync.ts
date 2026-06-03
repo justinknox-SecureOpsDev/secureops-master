@@ -135,6 +135,17 @@ export type OutboundShiftDelete = {
   deletedAt: string;
 };
 
+export type OutboundAssignmentEvent = {
+  action: "created" | "deleted";
+  assignmentSecureopsId: string;
+  shiftSecureopsId: string;
+  shiftExternalId?: string | null;
+  employeeEmail: string;
+  employeeName: string;
+  status: string;
+  occurredAt: string;
+};
+
 /**
  * Push a created or updated shift to the scheduler.
  * Skips when `syncSource === 'scheduler'` to prevent echo loops.
@@ -242,6 +253,42 @@ export async function pushClockEvent(entry: {
   };
 
   await postToScheduler("/api/secureops-webhook/clock-events", body);
+}
+
+/**
+ * Push a shift-assignment change (officer added or removed) to the scheduler so
+ * its roster view stays in sync. `action: "created"` for a new assignment
+ * (officer self-claim or admin/dispatcher forced assign); `action: "deleted"`
+ * when an assignment is declined/removed and the slot frees up.
+ *
+ * Loop prevention: skips when the parent shift's `syncSource === 'scheduler'`,
+ * since those assignment changes originated on the scheduler side.
+ */
+export async function pushAssignmentEvent(evt: {
+  action: "created" | "deleted";
+  assignmentId: string;
+  shiftId: string;
+  shiftExternalId?: string | null;
+  shiftSyncSource?: string | null;
+  employeeEmail: string;
+  employeeName: string;
+  status: string;
+}): Promise<void> {
+  if (evt.shiftSyncSource === SCHEDULER_SOURCE) return;
+  if (!isSchedulerConfigured()) return;
+
+  const body: OutboundAssignmentEvent = {
+    action: evt.action,
+    assignmentSecureopsId: evt.assignmentId,
+    shiftSecureopsId: evt.shiftId,
+    shiftExternalId: evt.shiftExternalId ?? null,
+    employeeEmail: evt.employeeEmail,
+    employeeName: evt.employeeName,
+    status: evt.status,
+    occurredAt: new Date().toISOString(),
+  };
+
+  await postToScheduler("/api/secureops-webhook/assignments", body);
 }
 
 /**

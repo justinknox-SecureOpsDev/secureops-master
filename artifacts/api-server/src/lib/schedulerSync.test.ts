@@ -175,6 +175,74 @@ describe("loop prevention", () => {
     });
     expect(fetchSpy).not.toHaveBeenCalled();
   });
+
+  it("pushAssignmentEvent skips when the parent shift's syncSource is 'scheduler'", async () => {
+    const { pushAssignmentEvent } = await import("./schedulerSync");
+    const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response("{}", { status: 200 }));
+
+    await pushAssignmentEvent({
+      action: "created",
+      assignmentId: "a-1",
+      shiftId: "shift-1",
+      shiftExternalId: "ext-1",
+      shiftSyncSource: "scheduler",
+      employeeEmail: "j@example.com",
+      employeeName: "Jane",
+      status: "accepted",
+    });
+    expect(fetchSpy).not.toHaveBeenCalled();
+  });
+
+  it("pushAssignmentEvent fires a 'created' event when the parent shift is local", async () => {
+    const { pushAssignmentEvent } = await import("./schedulerSync");
+    const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response("{}", { status: 200 }));
+
+    await pushAssignmentEvent({
+      action: "created",
+      assignmentId: "a-2",
+      shiftId: "shift-2",
+      shiftExternalId: null,
+      shiftSyncSource: "local",
+      employeeEmail: "j@example.com",
+      employeeName: "Jane Officer",
+      status: "accepted",
+    });
+
+    expect(fetchSpy).toHaveBeenCalledOnce();
+    const [url, opts] = fetchSpy.mock.calls[0] as [string, RequestInit];
+    expect(url).toContain("/api/secureops-webhook/assignments");
+    expect(opts.headers).toMatchObject({ "X-WCSG-Source": "secureops" });
+    const body = JSON.parse(opts.body as string);
+    expect(body).toMatchObject({
+      action: "created",
+      assignmentSecureopsId: "a-2",
+      shiftSecureopsId: "shift-2",
+      employeeEmail: "j@example.com",
+      status: "accepted",
+    });
+  });
+
+  it("pushAssignmentEvent fires a 'deleted' event when an assignment is removed", async () => {
+    const { pushAssignmentEvent } = await import("./schedulerSync");
+    const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response("{}", { status: 200 }));
+
+    await pushAssignmentEvent({
+      action: "deleted",
+      assignmentId: "a-3",
+      shiftId: "shift-3",
+      shiftExternalId: "ext-3",
+      shiftSyncSource: "local",
+      employeeEmail: "j@example.com",
+      employeeName: "Jane Officer",
+      status: "declined",
+    });
+
+    expect(fetchSpy).toHaveBeenCalledOnce();
+    const [url, opts] = fetchSpy.mock.calls[0] as [string, RequestInit];
+    expect(url).toContain("/api/secureops-webhook/assignments");
+    const body = JSON.parse(opts.body as string);
+    expect(body).toMatchObject({ action: "deleted", assignmentSecureopsId: "a-3", status: "declined" });
+  });
 });
 
 // ---------------------------------------------------------------------------

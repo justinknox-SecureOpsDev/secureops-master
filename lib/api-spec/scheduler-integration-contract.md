@@ -109,7 +109,42 @@ Called when a time entry (clock in, clock out, or approval-status change) is rec
 
 ---
 
-### 2.4 `POST /api/secureops-ping`
+### 2.4 `POST /api/secureops-webhook/assignments`
+
+Called when an officer is added to or removed from a shift in SecureOps. This keeps the scheduler's roster view in sync independent of shift-level changes. Triggered by:
+
+- An admin/dispatcher forcing an assignment (`POST /shifts/:id/assignments`) → `action: "created"`.
+- An officer self-claiming an open shift (`POST /shifts/:id/claim`) → `action: "created"`.
+- An assignment being declined/removed (`PUT /shifts/:id/assignments/:assignmentId` with `{ "status": "declined" }`) → `action: "deleted"`.
+
+**Loop prevention:** SecureOps skips this push when the parent shift's `sync_source = "scheduler"` (the assignment change originated on the scheduler side).
+
+**Request body:**
+```json
+{
+  "action": "created",
+  "assignmentSecureopsId": "uuid",
+  "shiftSecureopsId": "uuid",
+  "shiftExternalId": "scheduler-shift-id-or-null",
+  "employeeEmail": "officer@example.com",
+  "employeeName": "Jane Officer",
+  "status": "accepted",
+  "occurredAt": "2026-06-08T12:34:56.789Z"
+}
+```
+
+- `action`: `"created"` (officer added) or `"deleted"` (officer removed / declined).
+- `shiftExternalId`: present when the parent shift is linked to a scheduler shift; use it to locate the roster entry, falling back to `shiftSecureopsId`.
+- `status`: the assignment's status — `"accepted"` on create, `"declined"` on delete.
+- `occurredAt`: ISO-8601 timestamp of when the change happened in SecureOps.
+
+**Expected response:** `HTTP 200` or `201` with any JSON body (SecureOps ignores the body).
+
+**Idempotency:** The scheduler should upsert/remove the roster entry keyed by `assignmentSecureopsId`. Match the officer by `employeeEmail`.
+
+---
+
+### 2.5 `POST /api/secureops-ping`
 
 SecureOps calls this to verify connectivity when an admin clicks "Test connection".
 
@@ -122,7 +157,7 @@ SecureOps calls this to verify connectivity when an admin clicks "Test connectio
 
 ---
 
-### 2.5 `POST /api/secureops-delta`
+### 2.6 `POST /api/secureops-delta`
 
 Called by the SecureOps reconciliation job (every 15 minutes) to fetch any changes that were missed while SecureOps was restarting.
 
