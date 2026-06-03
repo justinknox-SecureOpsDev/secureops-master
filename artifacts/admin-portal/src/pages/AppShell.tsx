@@ -1,15 +1,14 @@
 import { useState, useEffect, useMemo } from "react";
-import { Link, useRoute, useLocation } from "wouter";
+import { Link, useLocation } from "wouter";
 import {
   LogOut, ClipboardList, UserPlus, FileText, ChevronsLeft, ChevronsRight, Smartphone,
   Database, Banknote, Receipt, Wallet, MailPlus,
   AlertTriangle, ShieldCheck, Repeat, KeyRound, IdCard, Link2, Download,
   Radio as RadioIcon, Radar, MessageCircle, Users as UsersIcon,
   Briefcase, Calculator, Shield, Settings, CalendarRange, Menu, X, Building2,
-  ArrowLeftRight,
+  ArrowLeftRight, GraduationCap,
   type LucideIcon,
 } from "lucide-react";
-import { TABLES } from "@/lib/tables";
 import { useAuth } from "@/lib/auth";
 import { Button } from "@/components/ui/button";
 import { useChatUnreadTotal } from "@/hooks/useChatUnreadTotal";
@@ -96,19 +95,199 @@ type NavGroup = {
   items: LinkItem[];
 };
 
-const ACCOUNTING_TABLE_NAMES = new Set(["payroll_entries", "invoices"]);
-const SUBCONTRACTOR_TABLE_NAMES = new Set([
-  "subcontractors",
-  "subcontractor_cois",
-  "subcontractor_contracts",
-  "subcontractor_invoices",
-]);
+/**
+ * Builds the role-aligned top-level navigation. Pure (depends only on role) so
+ * the route→group mapping can be unit-tested without rendering the shell.
+ *
+ * Admins get the full set of operational tabs; dispatchers get a leaner IA.
+ * The dispatcher Dispatch tab is intentionally Live-Map-only — reusing the
+ * admin Dispatch group (which also owns chat/radio/personnel) would duplicate
+ * those routes and make the dispatcher Security tab non-authoritative, because
+ * `resolveGroupKey` returns the first group whose item matches the location.
+ */
+export function buildNavGroups(isDispatcher: boolean): NavGroup[] {
+  const dispatchGroup: NavGroup = {
+    key: "dispatch",
+    label: "Dispatch",
+    Icon: Radar,
+    items: [
+      { href: "/dispatch", label: "Live Map", Icon: Radar },
+      { href: "/chat", label: "Chat", Icon: MessageCircle },
+      { href: "/radio", label: "Radio", Icon: RadioIcon },
+      { href: "/personnel", label: "Personnel", Icon: UsersIcon },
+      { href: "/tables/incidents", label: "Incidents", Icon: AlertTriangle },
+      { href: "/dar", label: "Daily Reports", Icon: ClipboardList },
+      { href: "/incidents/share-links", label: "Incident shares", Icon: Link2 },
+      { href: "/personnel/share-links", label: "Officer shares", Icon: Link2 },
+    ],
+  };
+
+  const staffingGroup: NavGroup = {
+    key: "staffing",
+    label: "Staffing",
+    Icon: CalendarRange,
+    items: [
+      { href: "/shifts/calendar", label: "Shift Calendar", Icon: CalendarRange },
+      { href: "/tables/shifts", label: "Shifts", Icon: Database },
+      { href: "/tables/shift_assignments", label: "Shift Assignments", Icon: ClipboardList },
+      { href: "/tables/time_entries", label: "Time Entries", Icon: Database },
+      { href: "/swap-requests", label: "Swap Requests", Icon: Repeat },
+      { href: "/staffing", label: "Events", Icon: CalendarRange },
+      { href: "/hr/coverage-requests", label: "Coverage Requests", Icon: ClipboardList },
+    ],
+  };
+
+  const hrGroup: NavGroup = {
+    key: "hr",
+    label: "Human Resources",
+    Icon: Briefcase,
+    items: [
+      { href: "/hr/applications", label: "Applications", Icon: ClipboardList },
+      { href: "/hr/onboarding", label: "Onboarding", Icon: UserPlus },
+      { href: "/hr/invitations", label: "Invitations", Icon: MailPlus },
+      { href: "/hr/policies", label: "Policies", Icon: FileText },
+      { href: "/tables/employees", label: "Employees", Icon: UsersIcon },
+    ],
+  };
+
+  const complianceGroup: NavGroup = {
+    key: "compliance",
+    label: "Compliance & Training",
+    Icon: ShieldCheck,
+    items: [
+      { href: "/hr/license-renewals", label: "License Renewals", Icon: IdCard },
+      { href: "/compliance", label: "Compliance", Icon: ShieldCheck },
+      { href: "/tables/licenses", label: "Licences", Icon: IdCard },
+      { href: "/tables/training-certifications", label: "Training", Icon: GraduationCap },
+    ],
+  };
+
+  const administrationGroup: NavGroup = {
+    key: "administration",
+    label: "Administration",
+    Icon: Building2,
+    items: [
+      { href: "/tables/clients", label: "Clients", Icon: Briefcase },
+      { href: "/tables/sites", label: "Sites", Icon: Building2 },
+      { href: "/hr/client-users", label: "Client Users", Icon: UsersIcon },
+      { href: "/tables/subcontractors", label: "Subcontractors", Icon: Building2 },
+      { href: "/tables/subcontractor_cois", label: "Certificates of Insurance", Icon: ShieldCheck },
+      { href: "/tables/subcontractor_contracts", label: "Contracts", Icon: FileText },
+      { href: "/tables/subcontractor_invoices", label: "Invoices", Icon: Receipt },
+      { href: "/subcontractors/pay-run", label: "Subcontractor Pay Run", Icon: Banknote },
+      { href: "/subcontractors/clock-in-entries", label: "Clock-In Entries", Icon: ClipboardList },
+    ],
+  };
+
+  const accountingGroup: NavGroup = {
+    key: "accounting",
+    label: "Accounting",
+    Icon: Calculator,
+    items: [
+      { href: "/payroll/board", label: "Payroll Board", Icon: Wallet },
+      { href: "/payroll/pay-run", label: "Pay Run", Icon: Banknote },
+      { href: "/invoices/board", label: "Invoice Board", Icon: Receipt },
+      { href: "/tables/invoices", label: "Invoices (raw)", Icon: Receipt },
+      { href: "/tables/payroll_entries", label: "Payroll entries", Icon: Wallet },
+    ],
+  };
+
+  const settingsGroup: NavGroup = {
+    key: "settings",
+    label: "Settings",
+    Icon: Settings,
+    items: [
+      { href: "/account/security", label: "My 2FA", Icon: KeyRound },
+      { href: "/tables/users", label: "Users", Icon: UsersIcon },
+      { href: "/audit-log", label: "Audit Log", Icon: ShieldCheck },
+      { href: "/exports", label: "Exports", Icon: Download },
+      { href: "/settings/scheduler-integration", label: "Scheduler Integration", Icon: ArrowLeftRight },
+    ],
+  };
+
+  if (isDispatcher) {
+    return [
+      {
+        key: "dispatch",
+        label: "Dispatch",
+        Icon: Radar,
+        items: [{ href: "/dispatch", label: "Live Map", Icon: Radar }],
+      },
+      {
+        key: "security",
+        label: "Security",
+        Icon: Shield,
+        items: [
+          { href: "/chat", label: "Chat", Icon: MessageCircle },
+          { href: "/personnel", label: "Personnel", Icon: UsersIcon },
+          { href: "/radio", label: "Radio", Icon: RadioIcon },
+        ],
+      },
+      {
+        key: "operations",
+        label: "Operations",
+        Icon: Database,
+        items: [
+          { href: "/shifts/calendar", label: "Shift Calendar", Icon: CalendarRange },
+          { href: "/tables/shifts", label: "Shifts", Icon: Database },
+        ],
+      },
+      {
+        key: "settings",
+        label: "Settings",
+        Icon: Settings,
+        items: [
+          { href: "/account/security", label: "My 2FA", Icon: KeyRound },
+          { href: "/settings/scheduler-integration", label: "Scheduler Integration", Icon: ArrowLeftRight },
+        ],
+      },
+    ];
+  }
+
+  return [
+    dispatchGroup,
+    staffingGroup,
+    hrGroup,
+    complianceGroup,
+    administrationGroup,
+    accountingGroup,
+    settingsGroup,
+  ];
+}
+
+/**
+ * Resolves the current location to a nav group key. First match wins: an exact
+ * item href (or a sub-path of one) takes precedence, then a small set of
+ * fallback heuristics handle dynamic routes (e.g. `/sites/:id`, `/staffing/:id`)
+ * that have no nav item of their own. Returns null when nothing matches.
+ */
+export function resolveGroupKey(groups: NavGroup[], location: string): string | null {
+  const startsWith = (prefix: string) => location === prefix || location.startsWith(prefix + "/");
+  for (const g of groups) {
+    for (const item of g.items) {
+      if (location === item.href || startsWith(item.href)) return g.key;
+    }
+  }
+  // Dynamic sub-routes that aren't represented by their own nav item.
+  if (startsWith("/sites") || startsWith("/subcontractors")) return "administration";
+  if (startsWith("/payroll") || startsWith("/invoices")) return "accounting";
+  if (startsWith("/shifts") || startsWith("/staffing") || startsWith("/swap-requests")) return "staffing";
+  if (startsWith("/compliance")) return "compliance";
+  if (startsWith("/dispatch") || startsWith("/chat") || startsWith("/radio")
+    || startsWith("/dar") || startsWith("/personnel") || startsWith("/incidents")) {
+    return "dispatch";
+  }
+  if (startsWith("/account") || startsWith("/settings")
+    || startsWith("/audit-log") || startsWith("/exports") || startsWith("/tables")) {
+    return "settings";
+  }
+  if (startsWith("/hr")) return "hr";
+  return null;
+}
 
 export function AppShell({ children }: { children: React.ReactNode }) {
   const { user, logout } = useAuth();
-  const [match, params] = useRoute("/tables/:table");
   const [location, setLocation] = useLocation();
-  const activeTable = match ? params?.table : null;
   const isDispatcher = user?.role === "dispatcher";
   const systemStatus = useSystemStatus(user?.role);
   // Aggregate unread chat badge — enabled for any admin/dispatcher (the only
@@ -128,143 +307,12 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   const [mobileOpen, setMobileOpen] = useState(false);
   useEffect(() => { setMobileOpen(false); }, [location]);
 
-  const groups: NavGroup[] = useMemo(() => {
-    const hrLinks: LinkItem[] = [
-      { href: "/hr/applications", label: "Applications", Icon: ClipboardList },
-      { href: "/hr/onboarding", label: "Onboarding", Icon: UserPlus },
-      { href: "/hr/invitations", label: "Invitations", Icon: MailPlus },
-      { href: "/hr/license-renewals", label: "License renewals", Icon: IdCard },
-      { href: "/hr/policies", label: "Policies", Icon: FileText },
-      { href: "/hr/client-users", label: "Client Users", Icon: Briefcase },
-      { href: "/hr/coverage-requests", label: "Coverage Requests", Icon: ClipboardList },
-    ];
+  const groups = useMemo(() => buildNavGroups(isDispatcher), [isDispatcher]);
 
-    const accountingLinks: LinkItem[] = [
-      { href: "/payroll/board", label: "Payroll Board", Icon: Wallet },
-      { href: "/payroll/pay-run", label: "Pay Run", Icon: Banknote },
-      { href: "/invoices/board", label: "Invoice Board", Icon: Receipt },
-      { href: "/tables/invoices", label: "Invoices (raw)", Icon: Receipt },
-      { href: "/tables/payroll_entries", label: "Payroll entries", Icon: Wallet },
-    ];
-
-    const securityLinks: LinkItem[] = [
-      { href: "/chat", label: "Chat", Icon: MessageCircle },
-      { href: "/personnel", label: "Personnel", Icon: UsersIcon },
-      { href: "/radio", label: "Radio", Icon: RadioIcon },
-      { href: "/dar", label: "Daily Reports", Icon: ClipboardList },
-      { href: "/compliance", label: "Compliance", Icon: ShieldCheck },
-      { href: "/audit-log", label: "Audit Log", Icon: ShieldCheck },
-      { href: "/swap-requests", label: "Swap Requests", Icon: Repeat },
-      { href: "/incidents/share-links", label: "Incident shares", Icon: Link2 },
-      { href: "/personnel/share-links", label: "Officer shares", Icon: Link2 },
-      { href: "/exports", label: "Exports", Icon: Download },
-    ];
-
-    const operationsTables = TABLES.filter(
-      (t) => !ACCOUNTING_TABLE_NAMES.has(t.name) && !SUBCONTRACTOR_TABLE_NAMES.has(t.name),
-    );
-
-    const subcontractorLinks: LinkItem[] = [
-      { href: "/tables/subcontractors", label: "Subcontractors", Icon: Building2 },
-      { href: "/tables/subcontractor_cois", label: "Certificates of Insurance", Icon: ShieldCheck },
-      { href: "/tables/subcontractor_contracts", label: "Contracts", Icon: FileText },
-      { href: "/tables/subcontractor_invoices", label: "Invoices", Icon: Receipt },
-      { href: "/subcontractors/pay-run", label: "Pay Run", Icon: Banknote },
-      { href: "/subcontractors/clock-in-entries", label: "Clock-In Entries", Icon: ClipboardList },
-    ];
-    const operationsLinks: LinkItem[] = [
-      { href: "/shifts/calendar", label: "Shift Calendar", Icon: CalendarRange },
-      ...operationsTables.map((t) => ({
-        href: `/tables/${t.name}`,
-        label: t.label,
-        Icon: Database,
-      })),
-    ];
-
-    const settingsLinks: LinkItem[] = [
-      { href: "/account/security", label: "My 2FA", Icon: KeyRound },
-      { href: "/settings/scheduler-integration", label: "Scheduler Integration", Icon: ArrowLeftRight },
-    ];
-
-    const dispatchGroup: NavGroup = {
-      key: "dispatch",
-      label: "Dispatch",
-      Icon: Radar,
-      items: [{ href: "/dispatch", label: "Live Map", Icon: Radar }],
-    };
-
-    const staffingGroup: NavGroup = {
-      key: "staffing",
-      label: "Staffing",
-      Icon: CalendarRange,
-      items: [{ href: "/staffing", label: "Events", Icon: CalendarRange }],
-    };
-
-    if (isDispatcher) {
-      return [
-        dispatchGroup,
-        {
-          key: "security",
-          label: "Security",
-          Icon: Shield,
-          items: [
-            { href: "/chat", label: "Chat", Icon: MessageCircle },
-            { href: "/personnel", label: "Personnel", Icon: UsersIcon },
-            { href: "/radio", label: "Radio", Icon: RadioIcon },
-          ],
-        },
-        {
-          key: "operations",
-          label: "Operations",
-          Icon: Database,
-          items: [
-            { href: "/shifts/calendar", label: "Shift Calendar", Icon: CalendarRange },
-            ...operationsTables
-              .filter((t) => t.name === "shifts")
-              .map((t) => ({ href: `/tables/${t.name}`, label: t.label, Icon: Database })),
-          ],
-        },
-        { key: "settings", label: "Settings", Icon: Settings, items: settingsLinks },
-      ];
-    }
-
-    return [
-      dispatchGroup,
-      staffingGroup,
-      { key: "hr", label: "Human Resources", Icon: Briefcase, items: hrLinks },
-      { key: "accounting", label: "Accounting", Icon: Calculator, items: accountingLinks },
-      { key: "subcontractors", label: "Subcontractors", Icon: Building2, items: subcontractorLinks },
-      { key: "security", label: "Security", Icon: Shield, items: securityLinks },
-      { key: "operations", label: "Operations", Icon: Database, items: operationsLinks },
-      { key: "settings", label: "Settings", Icon: Settings, items: settingsLinks },
-    ];
-  }, [isDispatcher]);
-
-  const groupForLocation = useMemo(() => {
-    const startsWith = (prefix: string) => location === prefix || location.startsWith(prefix + "/");
-    for (const g of groups) {
-      for (const item of g.items) {
-        if (location === item.href || startsWith(item.href)) return g.key;
-      }
-    }
-    if (startsWith("/dispatch")) return "dispatch";
-    if (startsWith("/staffing")) return "staffing";
-    if (startsWith("/hr")) return "hr";
-    if (startsWith("/payroll")) return "accounting";
-    if (startsWith("/tables")) {
-      if (activeTable && ACCOUNTING_TABLE_NAMES.has(activeTable)) return "accounting";
-      return "operations";
-    }
-    if (startsWith("/sites")) return "operations";
-    if (startsWith("/shifts")) return "operations";
-    if (startsWith("/personnel") || startsWith("/chat") || startsWith("/radio")
-      || startsWith("/dar") || startsWith("/compliance") || startsWith("/audit-log")
-      || startsWith("/swap-requests") || startsWith("/incidents") || startsWith("/exports")) {
-      return "security";
-    }
-    if (startsWith("/account")) return "settings";
-    return null;
-  }, [groups, location, activeTable]);
+  const groupForLocation = useMemo(
+    () => resolveGroupKey(groups, location),
+    [groups, location],
+  );
 
   const [activeGroupKey, setActiveGroupKey] = useState<string>(() => {
     try {
@@ -420,14 +468,22 @@ export function AppShell({ children }: { children: React.ReactNode }) {
                 type="button"
                 aria-current={isActive ? "page" : undefined}
                 onClick={() => onTabClick(g)}
-                className={`flex items-center gap-2 px-4 py-2 text-sm whitespace-nowrap border-b-2 transition-colors ${
+                className={`group flex items-center gap-2 px-4 py-2 text-sm whitespace-nowrap border-b-2 transition-colors ${
                   isActive
                     ? "border-brand-gold text-white bg-sidebar-accent/40"
-                    : "border-transparent opacity-70 hover:opacity-100 hover:bg-sidebar-accent/30"
+                    : "border-transparent hover:bg-sidebar-accent/30"
                 }`}
               >
-                <Icon className="w-4 h-4" />
-                <span>{g.label}</span>
+                {/* Dim only the icon + label on inactive tabs — never an
+                    ancestor of the unread badge, since CSS opacity composites
+                    the whole subtree and would drop the badge below the WCAG
+                    contrast threshold (axe color-contrast). */}
+                <Icon
+                  className={`w-4 h-4 ${isActive ? "" : "opacity-70 group-hover:opacity-100 transition-opacity"}`}
+                />
+                <span className={isActive ? "" : "opacity-70 group-hover:opacity-100 transition-opacity"}>
+                  {g.label}
+                </span>
                 {showTabBadge && <UnreadBadge count={chatUnread} />}
               </button>
             );
