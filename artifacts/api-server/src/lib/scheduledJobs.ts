@@ -1235,7 +1235,7 @@ export function startScheduledJobs(intervalMs: number = HOUR_MS): NodeJS.Timeout
  * DO UPDATE); a second tick that starts before the first finishes will re-read
  * the same cursor and re-apply the same payload (idempotent).
  */
-async function runSchedulerReconciliation(): Promise<void> {
+export async function runSchedulerReconciliation(): Promise<void> {
   if (!isSchedulerConfigured()) return;
 
   // Lazily import to avoid circular deps at module-load time.
