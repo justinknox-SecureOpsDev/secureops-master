@@ -1,8 +1,10 @@
 import { Switch, Route, Router as WouterRouter, useLocation, Redirect } from "wouter";
+import { useEffect } from "react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { Toaster } from "@/components/ui/toaster";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { AuthProvider, useAuth } from "@/lib/auth";
+import { setToken } from "@/lib/api";
 import { LoginPage } from "@/pages/Login";
 import { AppShell } from "@/pages/AppShell";
 import { TablePage, HomeRedirect } from "@/pages/TablePage";
@@ -90,16 +92,12 @@ function Routed() {
   }
 
   if (user.role !== "admin" && user.role !== "dispatcher") {
-    return (
-      <div className="min-h-screen flex items-center justify-center bg-brand-navy text-white p-6 text-center">
-        <div>
-          <div className="brand-wordmark text-xl mb-2">Admin access required</div>
-          <p className="text-sm opacity-70">
-            Your account ({user.email}) is not an admin. Sign in with an admin account.
-          </p>
-        </div>
-      </div>
-    );
+    // Officers/employees don't belong in the admin portal — they end up here
+    // when they open the portal URL (old invite links, a bookmark, word of
+    // mouth) and sign in. Instead of dead-ending them on an "admin access
+    // required" screen, send them to the SecureOps app served at the domain
+    // root, which is where officers actually sign in.
+    return <OfficerAppRedirect email={user.email} />;
   }
 
   const isDispatcher = user.role === "dispatcher";
@@ -156,6 +154,34 @@ function Routed() {
         </Switch>
       )}
     </AppShell>
+  );
+}
+
+function OfficerAppRedirect({ email }: { email: string }) {
+  const appUrl =
+    typeof window !== "undefined" ? `${window.location.origin}/` : "/";
+  useEffect(() => {
+    // Drop the admin-portal session so the officer isn't left half-signed-in
+    // here, then bounce to the SecureOps app at the domain root.
+    setToken(null);
+    const t = setTimeout(() => {
+      window.location.replace(appUrl);
+    }, 1600);
+    return () => clearTimeout(t);
+  }, [appUrl]);
+  return (
+    <div className="min-h-screen flex items-center justify-center bg-brand-navy text-white p-6 text-center">
+      <div className="max-w-sm">
+        <div className="brand-wordmark text-xl mb-2">Taking you to the SecureOps app…</div>
+        <p className="text-sm opacity-70 mb-4">
+          Officer accounts ({email}) sign in through the SecureOps app, not the admin
+          portal. Redirecting you now.
+        </p>
+        <a href={appUrl} className="text-sm underline" style={{ color: "#c9a84c" }}>
+          Continue now
+        </a>
+      </div>
+    </div>
   );
 }
 

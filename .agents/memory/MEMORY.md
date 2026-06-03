@@ -10,4 +10,5 @@
 - [api-server suite WS broadcast flake](api-server-ws-broadcast-flake.md) — wsBroadcast.test.ts passes alone but flakes under full parallel run (500ms collectFor window starved by load); not a regression.
 - [Admin grid sort indexes](admin-grid-sort-indexes.md) — every admin-CRUD table's default sort column needs a (col, id) composite index; list + position deep-link both order by (sortCol, id).
 - [axe parent-opacity contrast](axe-parent-opacity-contrast.md) — Tailwind opacity-* on a container dims descendants; axe flags blended contrast. Fix on the leaf text node, not the child.
+- [Officers on admin portal](officer-on-admin-portal.md) — employees who sign into /admin-portal/ must be redirected to the SecureOps app root /, not dead-ended on "Admin access required".
 - [Admin grid derived-name links](admin-grid-derived-name-links.md) — derived cell linkTo back to its own table self-filters (feels like a no-op click); use linkRoute for profile navigation.
