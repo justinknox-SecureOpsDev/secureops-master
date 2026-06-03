@@ -912,6 +912,149 @@ describe("conflict resolution is resistant to clock skew between SecureOps and t
 });
 
 // ---------------------------------------------------------------------------
+// 2d. Delete path over the HTTP webhook routes (end-to-end).
+//     The unit-level delete logic above is exercised against
+//     processInbound{Shift,ClockEvent} directly, but the HTTP routes that wrap
+//     them are only ever tested for upserts. A delete payload omits almost all
+//     fields (no title/startTime/employeeEmail/clockInTime) — exactly the shape
+//     most likely to trip the InboundShiftSchema / InboundClockEventSchema Zod
+//     validation or the canonical mapping (deleted / action). These tests post
+//     a signed { action: "delete" } body through the real router so a 400 from
+//     request validation, or a mis-set `deleted` flag, would be caught.
+// ---------------------------------------------------------------------------
+
+describe("delete over the HTTP webhook routes (signed payloads)", () => {
+  beforeEach(() => {
+    process.env.SCHEDULER_BASE_URL = "https://scheduler.example.com";
+    process.env.SCHEDULER_SHARED_SECRET = SECRET;
+    vi.restoreAllMocks();
+  });
+
+  afterEach(async () => {
+    vi.restoreAllMocks();
+    await db.execute(
+      sql`DELETE FROM time_entries WHERE employee_id = ${ctx.employeeId}::uuid`,
+    );
+  });
+
+  function postShift(body: object) {
+    const s = JSON.stringify(body);
+    return request(app)
+      .post("/api/scheduler-webhook/shifts")
+      .set("Content-Type", "application/json")
+      .set("X-WCSG-Signature", signPayload(s, SECRET))
+      .send(s);
+  }
+
+  function postClockEvent(body: object) {
+    const s = JSON.stringify(body);
+    return request(app)
+      .post("/api/scheduler-webhook/clock-events")
+      .set("Content-Type", "application/json")
+      .set("X-WCSG-Signature", signPayload(s, SECRET))
+      .send(s);
+  }
+
+  it("POST /scheduler-webhook/shifts with action:'delete' returns 200 + deleted and removes the row", async () => {
+    const externalId = `${TAG}-http-del-shift-${randomUUID().slice(0, 8)}`;
+    const [local] = await db
+      .insert(shiftsTable)
+      .values({
+        title: `${TAG} HTTP Doomed Shift`,
+        siteId: ctx.siteId,
+        startTime: new Date("2026-10-01T08:00:00.000Z"),
+        endTime: new Date("2026-10-01T16:00:00.000Z"),
+        payRate: "20",
+        billRate: "30",
+        headcount: 1,
+        requiredLicenseLevel: 2,
+        status: "upcoming",
+        externalId,
+        externalSource: SCHEDULER_SOURCE,
+        syncSource: SCHEDULER_SOURCE,
+      })
+      .returning({ id: shiftsTable.id });
+
+    // A delete-shaped payload: only id / action / updatedAt — no title,
+    // startTime or endTime. This must pass Zod validation and map to deleted.
+    const res = await postShift({
+      id: externalId,
+      action: "delete",
+      updatedAt: "2026-10-02T00:00:00.000Z",
+    });
+
+    expect(res.status).toBe(200);
+    expect(res.body).toMatchObject({ ok: true, action: "deleted" });
+    expect(res.body.secureopsId).toBe(local.id);
+
+    const rows = await db
+      .select({ id: shiftsTable.id })
+      .from(shiftsTable)
+      .where(eq(shiftsTable.id, local.id));
+    expect(rows).toHaveLength(0);
+  });
+
+  it("POST /scheduler-webhook/shifts delete for an unknown externalId returns 200 + skipped", async () => {
+    const res = await postShift({
+      id: `${TAG}-http-del-shift-nonexistent-${randomUUID().slice(0, 8)}`,
+      action: "delete",
+      updatedAt: "2026-10-03T00:00:00.000Z",
+    });
+
+    expect(res.status).toBe(200);
+    expect(res.body).toMatchObject({ ok: true, action: "skipped" });
+    expect(res.body.skipReason).toBe("not found");
+  });
+
+  it("POST /scheduler-webhook/clock-events with action:'delete' returns 200 + deleted and removes the row", async () => {
+    const externalId = `${TAG}-http-del-clock-${randomUUID().slice(0, 8)}`;
+    const [local] = await db
+      .insert(timeEntriesTable)
+      .values({
+        employeeId: ctx.employeeId,
+        siteId: ctx.siteId,
+        clockInTime: new Date("2026-10-04T09:00:00.000Z"),
+        approvalStatus: "pending",
+        isVerified: false,
+        externalId,
+        externalSource: SCHEDULER_SOURCE,
+        syncSource: SCHEDULER_SOURCE,
+      })
+      .returning({ id: timeEntriesTable.id });
+
+    // No employeeEmail / clockInTime — the delete-shaped payload that the
+    // route's Zod schema (employeeEmail/clockInTime optional) must accept.
+    const res = await postClockEvent({
+      id: externalId,
+      action: "delete",
+      updatedAt: "2026-10-05T00:00:00.000Z",
+    });
+
+    expect(res.status).toBe(200);
+    expect(res.body).toMatchObject({ ok: true, action: "deleted" });
+    expect(res.body.secureopsId).toBe(local.id);
+
+    const rows = await db
+      .select({ id: timeEntriesTable.id })
+      .from(timeEntriesTable)
+      .where(eq(timeEntriesTable.id, local.id));
+    expect(rows).toHaveLength(0);
+  });
+
+  it("POST /scheduler-webhook/clock-events delete for an unknown externalId returns 200 + skipped", async () => {
+    const res = await postClockEvent({
+      id: `${TAG}-http-del-clock-nonexistent-${randomUUID().slice(0, 8)}`,
+      action: "delete",
+      updatedAt: "2026-10-06T00:00:00.000Z",
+    });
+
+    expect(res.status).toBe(200);
+    expect(res.body).toMatchObject({ ok: true, action: "skipped" });
+    expect(res.body.skipReason).toBe("not found");
+  });
+});
+
+// ---------------------------------------------------------------------------
 // 3. Reconcile job: advances the cursor and skips already-synced entries.
 // ---------------------------------------------------------------------------
 
