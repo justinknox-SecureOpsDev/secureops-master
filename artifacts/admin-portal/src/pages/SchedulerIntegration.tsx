@@ -18,6 +18,8 @@ type SchedulerStatus = {
   eventsCursor: string;
 };
 
+const SYNC_STALE_MS = 30 * 60 * 1000;
+
 type TestResult = { ok: boolean; error?: string };
 type ResyncResult = {
   ok: boolean;
@@ -179,12 +181,44 @@ export default function SchedulerIntegrationPage() {
           </div>
         ) : (
           <div className="space-y-1">
-            <div className="flex items-center gap-2 mb-3">
-              <CheckCircle className="w-4 h-4 text-green-400" />
-              <span className="text-green-300 text-sm font-medium">Configured</span>
-            </div>
+            {(() => {
+              const overdue =
+                !status.lastSyncAt ||
+                Date.now() - new Date(status.lastSyncAt).getTime() > SYNC_STALE_MS;
+              const unhealthy = Boolean(status.lastSyncError) || overdue;
+              return unhealthy ? (
+                <div className="flex items-start gap-3 bg-red-900/30 border border-red-600/40 rounded-lg p-3 mb-3">
+                  <XCircle className="w-5 h-5 text-red-400 shrink-0 mt-0.5" />
+                  <div>
+                    <p className="text-red-300 font-medium text-sm">
+                      {status.lastSyncError ? "Last sync failed" : "Sync is overdue"}
+                    </p>
+                    <p className="text-red-200/70 text-xs mt-1">
+                      {status.lastSyncError
+                        ? "The most recent sync recorded an error. Resync now or check the scheduler connection."
+                        : `No successful sync in over 30 minutes (last: ${fmtTs(status.lastSyncAt)}). The reconciliation job may be stalled or the scheduler unreachable.`}
+                    </p>
+                  </div>
+                </div>
+              ) : (
+                <div className="flex items-center gap-2 mb-3">
+                  <CheckCircle className="w-4 h-4 text-green-400" />
+                  <span className="text-green-300 text-sm font-medium">Configured · healthy</span>
+                </div>
+              );
+            })()}
             <StatRow label="Scheduler URL" value={status.baseUrl ?? "—"} />
-            <StatRow label="Last sync" value={fmtTs(status.lastSyncAt)} />
+            <StatRow
+              label="Last sync"
+              value={
+                !status.lastSyncAt ||
+                Date.now() - new Date(status.lastSyncAt).getTime() > SYNC_STALE_MS ? (
+                  <span className="text-red-300">{fmtTs(status.lastSyncAt)}</span>
+                ) : (
+                  fmtTs(status.lastSyncAt)
+                )
+              }
+            />
             <StatRow
               label="Last sync error"
               value={

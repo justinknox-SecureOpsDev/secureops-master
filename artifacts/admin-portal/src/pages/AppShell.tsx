@@ -22,6 +22,8 @@ type SystemStatus = {
   corsOriginsConfigured: boolean;
   geofenceRadiusMiles?: number;
   geofenceRadiusTooTight?: boolean;
+  schedulerConfigured?: boolean;
+  schedulerSyncHealthy?: boolean;
 };
 
 function useSystemStatus(role: string | undefined) {
@@ -52,6 +54,9 @@ function SystemBanner({ status }: { status: SystemStatus | null }) {
     issues.push(
       `GEOFENCE_RADIUS_MILES is set to ${status.geofenceRadiusMiles} mi (~${feet.toLocaleString()} ft) — tighter than typical phone GPS accuracy (~30–65 ft). Every site without a per-site override will page admins on normal GPS drift; recommend ≥ 0.1 mi (~528 ft).`,
     );
+  }
+  if (status.schedulerConfigured && status.schedulerSyncHealthy === false) {
+    issues.push("Scheduler integration is failing or falling behind — the last sync errored or is more than 30 minutes overdue. Open Settings → Scheduler Integration to view the error and resync.");
   }
   if (issues.length === 0) return null;
   return (
