@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from "react";
 import { useTopPad } from "@/hooks/useTopPad";
-import { View, Text, StyleSheet, TouchableOpacity, ActivityIndicator, Platform, ScrollView, AccessibilityInfo, Modal, Animated } from "react-native";
+import { View, Text, StyleSheet, TouchableOpacity, ActivityIndicator, Platform, ScrollView, AccessibilityInfo, Modal, Animated, TextInput } from "react-native";
 import { useColors } from "@/hooks/useColors";
 import { useHighlightFlash } from "@/hooks/useHighlightFlash";
 import { useLocalSearchParams } from "expo-router";
@@ -31,8 +31,10 @@ export default function EmployeeClockScreen() {
     message: string;
     confirmText: string;
     destructive?: boolean;
+    showCorrectionInput?: boolean;
     onConfirm: () => void;
   }>(null);
+  const [correctionNote, setCorrectionNote] = useState("");
   const [statusMsg, setStatusMsg] = useState<null | { kind: "info" | "error"; text: string }>(null);
 
   const { data: currentEntry, isLoading: entryLoading } = useGetActiveTimeEntry({
@@ -190,11 +192,22 @@ export default function EmployeeClockScreen() {
 
   const performClockOut = async () => {
     if (!currentEntry?.id) return;
+    const trimmedCorrection = correctionNote.trim();
     try {
       await clockOutMutation.mutateAsync({
-        data: { timeEntryId: currentEntry.id, lat: location?.lat ?? 0, lng: location?.lon ?? 0 } as any,
+        data: {
+          timeEntryId: currentEntry.id,
+          lat: location?.lat ?? 0,
+          lng: location?.lon ?? 0,
+          ...(trimmedCorrection ? { correctionNote: trimmedCorrection } : {}),
+        } as any,
       });
-      AccessibilityInfo.announceForAccessibility("Clocked out. You are now off duty.");
+      setCorrectionNote("");
+      AccessibilityInfo.announceForAccessibility(
+        trimmedCorrection
+          ? "Clocked out. Your time correction request was sent to an admin."
+          : "Clocked out. You are now off duty.",
+      );
       // Clear the active-entry cache *immediately* so the ON-DUTY ring
       // flips to OFF DUTY without waiting for the refetch round-trip.
       queryClient.setQueryData(getGetActiveTimeEntryQueryKey(), null);
@@ -215,11 +228,13 @@ export default function EmployeeClockScreen() {
   const handleClockOut = async () => {
     if (!currentEntry?.id) return;
     setStatusMsg(null);
+    setCorrectionNote("");
     setConfirmModal({
       title: "Clock Out",
-      message: "End your shift now?",
+      message: "End your shift now? If your clock-in or clock-out time is wrong, add a correction note and an admin will fix it.",
       confirmText: "Clock Out",
       destructive: true,
+      showCorrectionInput: true,
       onConfirm: () => {
         setConfirmModal(null);
         performClockOut();
@@ -446,6 +461,18 @@ export default function EmployeeClockScreen() {
           <View style={[styles.modalCard, { backgroundColor: colors.card, borderColor: colors.border }]}>
             <Text style={[styles.modalTitle, { color: colors.foreground }]}>{confirmModal?.title}</Text>
             <Text style={[styles.modalMessage, { color: colors.mutedForeground }]}>{confirmModal?.message}</Text>
+            {confirmModal?.showCorrectionInput && (
+              <TextInput
+                style={[styles.correctionInput, { color: colors.foreground, borderColor: colors.border, backgroundColor: colors.background }]}
+                value={correctionNote}
+                onChangeText={setCorrectionNote}
+                placeholder="Time correction note (optional)"
+                placeholderTextColor={colors.mutedForeground}
+                multiline
+                numberOfLines={3}
+                accessibilityLabel="Time correction note"
+              />
+            )}
             <View style={styles.modalActions}>
               <TouchableOpacity
                 style={[styles.modalBtn, { borderColor: colors.border, borderWidth: 1 }]}
@@ -491,6 +518,7 @@ const styles = StyleSheet.create({
   modalCard: { width: "100%", maxWidth: 360, borderRadius: 16, borderWidth: 1, padding: 20, gap: 8 },
   modalTitle: { fontSize: 18, fontWeight: "800" },
   modalMessage: { fontSize: 14, lineHeight: 20 },
+  correctionInput: { marginTop: 12, borderWidth: 1, borderRadius: 10, paddingHorizontal: 12, paddingVertical: 10, fontSize: 14, minHeight: 72, textAlignVertical: "top" },
   modalActions: { flexDirection: "row", justifyContent: "flex-end", gap: 10, marginTop: 16 },
   modalBtn: { paddingHorizontal: 18, paddingVertical: 10, borderRadius: 10, minWidth: 96, alignItems: "center" },
   modalBtnText: { fontSize: 14, fontWeight: "700" },

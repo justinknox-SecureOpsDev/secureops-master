@@ -286,3 +286,71 @@ describe("POST /time-entries/clock-in auto-assigns to an open shift at the site"
     await db.delete(shiftsTable).where(eq(shiftsTable.id, shiftId));
   });
 });
+
+describe("POST /time-entries/clock-out time-correction request", () => {
+  it("flags the entry and stores the note when the officer submits a correction on clock-out", async () => {
+    await deleteOpenEntries(ctx.licensedEmployeeId);
+    const clockIn = await request(app)
+      .post("/api/time-entries/clock-in")
+      .set(authed(ctx.licensedToken))
+      .send({ lat: -54.123456, lng: -12.654321 });
+    expect(clockIn.status).toBe(201);
+    const entryId = clockIn.body.id as string;
+
+    const res = await request(app)
+      .post("/api/time-entries/clock-out")
+      .set(authed(ctx.licensedToken))
+      .send({ timeEntryId: entryId, lat: -54.123456, lng: -12.654321, correctionNote: "  I forgot to clock in at 8am  " });
+    expect(res.status).toBe(200);
+    expect(res.body.correctionRequested).toBe(true);
+    expect(res.body.correctionNote).toBe("I forgot to clock in at 8am");
+
+    await deleteOpenEntries(ctx.licensedEmployeeId);
+    await db.delete(timeEntriesTable).where(eq(timeEntriesTable.id, entryId));
+  });
+
+  it("does NOT clear an existing correction flag/note when a later admin clock-out sends a whitespace-only note", async () => {
+    await deleteOpenEntries(ctx.licensedEmployeeId);
+    // Seed an already-flagged, still-open entry directly.
+    const [seeded] = await db
+      .insert(timeEntriesTable)
+      .values({
+        employeeId: ctx.licensedEmployeeId,
+        siteId: ctx.nearSiteId,
+        clockInTime: new Date(Date.now() - 3600_000),
+        correctionRequested: true,
+        correctionNote: "Original officer request",
+      })
+      .returning({ id: timeEntriesTable.id });
+
+    const res = await request(app)
+      .post("/api/time-entries/clock-out")
+      .set(authed(ctx.licensedToken))
+      .send({ timeEntryId: seeded.id, lat: -54.123456, lng: -12.654321, correctionNote: "   " });
+    expect(res.status).toBe(200);
+    // Whitespace-only note must leave the prior flag + note intact.
+    expect(res.body.correctionRequested).toBe(true);
+    expect(res.body.correctionNote).toBe("Original officer request");
+
+    await db.delete(timeEntriesTable).where(eq(timeEntriesTable.id, seeded.id));
+  });
+
+  it("does NOT flag the entry when no correction note is provided", async () => {
+    await deleteOpenEntries(ctx.licensedEmployeeId);
+    const clockIn = await request(app)
+      .post("/api/time-entries/clock-in")
+      .set(authed(ctx.licensedToken))
+      .send({ lat: -54.123456, lng: -12.654321 });
+    expect(clockIn.status).toBe(201);
+    const entryId = clockIn.body.id as string;
+
+    const res = await request(app)
+      .post("/api/time-entries/clock-out")
+      .set(authed(ctx.licensedToken))
+      .send({ timeEntryId: entryId, lat: -54.123456, lng: -12.654321 });
+    expect(res.status).toBe(200);
+    expect(res.body.correctionRequested).toBe(false);
+
+    await db.delete(timeEntriesTable).where(eq(timeEntriesTable.id, entryId));
+  });
+});

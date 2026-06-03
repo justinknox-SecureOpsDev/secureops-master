@@ -106,6 +106,18 @@ export default function TimeApprovalScreen() {
                   {new Date(item.clockInTime).toLocaleString()} → {item.clockOutTime ? new Date(item.clockOutTime).toLocaleString() : "—"}
                 </Text>
 
+                {item.correctionRequested && (
+                  <View style={[styles.correctionBox, { backgroundColor: colors.destructive + "15", borderColor: colors.destructive }]}>
+                    <View style={styles.correctionHead}>
+                      <Feather name="alert-triangle" size={12} color={colors.destructive} />
+                      <Text style={[styles.correctionTitle, { color: colors.destructive }]}>Time correction requested</Text>
+                    </View>
+                    {item.correctionNote ? (
+                      <Text style={[styles.correctionNote, { color: colors.foreground }]}>{item.correctionNote}</Text>
+                    ) : null}
+                  </View>
+                )}
+
                 {filter === "pending" ? (
                   <View style={[styles.editRow, { borderColor: colors.border }]}>
                     <Text style={{ color: colors.mutedForeground, fontSize: 12 }}>Approve hours:</Text>
@@ -165,6 +177,10 @@ const styles = StyleSheet.create({
   name: { fontSize: 14, fontWeight: "700" },
   sub: { fontSize: 12, marginTop: 2 },
   line: { fontSize: 12 },
+  correctionBox: { marginTop: 8, padding: 10, borderRadius: 8, borderWidth: 1, gap: 4 },
+  correctionHead: { flexDirection: "row", alignItems: "center", gap: 6 },
+  correctionTitle: { fontSize: 12, fontWeight: "700" },
+  correctionNote: { fontSize: 13, lineHeight: 18 },
   lvBadge: { paddingHorizontal: 8, paddingVertical: 4, borderRadius: 6, borderWidth: 1 },
   editRow: { flexDirection: "row", alignItems: "center", gap: 8, padding: 8, borderRadius: 6, borderWidth: 1 },
   input: { width: 80, height: 36, borderWidth: 1, borderRadius: 6, paddingHorizontal: 10, fontSize: 14, textAlign: "center" },

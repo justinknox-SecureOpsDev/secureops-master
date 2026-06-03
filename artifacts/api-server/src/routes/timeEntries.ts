@@ -223,6 +223,8 @@ const baseSelect = {
   approvedAt: timeEntriesTable.approvedAt,
   approvedBy: timeEntriesTable.approvedBy,
   notes: timeEntriesTable.notes,
+  correctionRequested: timeEntriesTable.correctionRequested,
+  correctionNote: timeEntriesTable.correctionNote,
   createdAt: timeEntriesTable.createdAt,
   shiftTitle: shiftsTable.title,
   siteId: sql<string | null>`coalesce(${timeEntriesTable.siteId}, ${shiftsTable.siteId})`,
@@ -485,7 +487,7 @@ router.post("/time-entries/clock-in", requireAuth, async (req, res): Promise<voi
 });
 
 router.post("/time-entries/clock-out", requireAuth, async (req, res): Promise<void> => {
-  const { timeEntryId, lat, lng, notes } = req.body;
+  const { timeEntryId, lat, lng, notes, correctionNote } = req.body;
   if (!timeEntryId || lat == null || lng == null) {
     res.status(400).json({ error: "Bad Request", message: "timeEntryId, lat, lng required" });
     return;
@@ -500,6 +502,16 @@ router.post("/time-entries/clock-out", requireAuth, async (req, res): Promise<vo
   const clockOut = new Date();
   const hours = calcHours(entry.clockInTime, clockOut);
 
+  // Time-correction request: when the officer leaves a non-empty correction
+  // note on clock-out, flag the entry so admins know to adjust the recorded
+  // times before approving it for payroll. Empty/whitespace-only notes leave
+  // the existing flag untouched (so re-clocking-out without a note doesn't
+  // silently clear a previously raised request).
+  // Cap the free-text note to a sane length so an oversized body can't bloat
+  // the row / admin UI. 1 KB is plenty for "I forgot to clock in at 8am".
+  const trimmedCorrection = typeof correctionNote === "string" ? correctionNote.trim().slice(0, 1000) : "";
+  const hasCorrection = trimmedCorrection.length > 0;
+
   // Reset syncSource to 'local' so clock-outs of scheduler-origin entries
   // are pushed back rather than suppressed by the loop-prevention guard.
   const [updated] = await db.update(timeEntriesTable).set({
@@ -508,6 +520,7 @@ router.post("/time-entries/clock-out", requireAuth, async (req, res): Promise<vo
     clockOutLng: String(lng),
     hoursWorked: String(hours),
     notes: notes || entry.notes,
+    ...(hasCorrection ? { correctionRequested: true, correctionNote: trimmedCorrection } : {}),
     syncSource: "local",
   }).where(eq(timeEntriesTable.id, timeEntryId)).returning();
 

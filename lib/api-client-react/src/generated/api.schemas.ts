@@ -718,6 +718,8 @@ export interface TimeEntry {
   payRate?: number;
   billRate?: number;
   notes?: string;
+  correctionRequested?: boolean;
+  correctionNote?: string;
   createdAt: string;
 }
 
@@ -738,6 +740,11 @@ export interface ClockOutRequest {
   lat: number;
   lng: number;
   notes?: string;
+  /** Optional officer-submitted time-correction request. When present, the
+entry is flagged so admins know the recorded clock in/out times need
+adjusting before approval.
+ */
+  correctionNote?: string;
 }
 
 export type PayrollEntryStatus =

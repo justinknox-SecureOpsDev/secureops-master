@@ -430,6 +430,8 @@ export const TABLES: TableDescriptor[] = [
         ],
       },
       { key: "notes", label: "Notes", type: "textarea", hiddenInGrid: true },
+      { key: "correctionRequested", label: "Correction Requested", type: "boolean" },
+      { key: "correctionNote", label: "Correction Note", type: "textarea", hiddenInGrid: true },
     ],
   },
   {

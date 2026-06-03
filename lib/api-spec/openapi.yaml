@@ -3246,6 +3246,10 @@ components:
           type: number
         notes:
           type: string
+        correctionRequested:
+          type: boolean
+        correctionNote:
+          type: string
         createdAt:
           type: string
           format: date-time
@@ -3288,6 +3292,12 @@ components:
           type: number
         notes:
           type: string
+        correctionNote:
+          type: string
+          description: |
+            Optional officer-submitted time-correction request. When present, the
+            entry is flagged so admins know the recorded clock in/out times need
+            adjusting before approval.
       required:
         - timeEntryId
         - lat

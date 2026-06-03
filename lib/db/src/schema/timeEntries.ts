@@ -32,6 +32,13 @@ export const timeEntriesTable = pgTable("time_entries", {
   approvedAt: timestamp("approved_at", { withTimezone: true }),
   approvedBy: uuid("approved_by").references(() => usersTable.id, { onDelete: "set null" }),
   notes: text("notes"),
+  // Officer-submitted time-correction request. When an officer clocks out and
+  // the recorded clock in/out times are wrong, they can flag the entry and
+  // leave a note so an admin knows to adjust it before approving for payroll.
+  // `correctionRequested` drives the badge on the admin review surfaces;
+  // `correctionNote` is the officer's explanation of what needs fixing.
+  correctionRequested: boolean("correction_requested").notNull().default(false),
+  correctionNote: text("correction_note"),
   // Live geofence state for THIS active shift. `inside` while the officer's
   // last location ping is within GEOFENCE_RADIUS_MILES of the shift's site,
   // `outside` if they've drifted out (admins are pushed once on the

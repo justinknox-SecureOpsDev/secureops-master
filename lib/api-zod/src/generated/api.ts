@@ -287,6 +287,8 @@ export const ApproveTimeEntryResponse = zod.object({
   payRate: zod.number().optional(),
   billRate: zod.number().optional(),
   notes: zod.string().optional(),
+  correctionRequested: zod.boolean().optional(),
+  correctionNote: zod.string().optional(),
   createdAt: zod.coerce.date(),
 });
 
@@ -1313,6 +1315,8 @@ export const GetTimeEntriesResponseItem = zod.object({
   payRate: zod.number().optional(),
   billRate: zod.number().optional(),
   notes: zod.string().optional(),
+  correctionRequested: zod.boolean().optional(),
+  correctionNote: zod.string().optional(),
   createdAt: zod.coerce.date(),
 });
 export const GetTimeEntriesResponse = zod.array(GetTimeEntriesResponseItem);
@@ -1339,6 +1343,12 @@ export const ClockOutBody = zod.object({
   lat: zod.number(),
   lng: zod.number(),
   notes: zod.string().optional(),
+  correctionNote: zod
+    .string()
+    .optional()
+    .describe(
+      "Optional officer-submitted time-correction request. When present, the\nentry is flagged so admins know the recorded clock in\/out times need\nadjusting before approval.\n",
+    ),
 });
 
 export const ClockOutResponse = zod.object({
@@ -1363,6 +1373,8 @@ export const ClockOutResponse = zod.object({
   payRate: zod.number().optional(),
   billRate: zod.number().optional(),
   notes: zod.string().optional(),
+  correctionRequested: zod.boolean().optional(),
+  correctionNote: zod.string().optional(),
   createdAt: zod.coerce.date(),
 });
 
@@ -1392,6 +1404,8 @@ export const GetActiveTimeEntryResponse = zod.union([
     payRate: zod.number().optional(),
     billRate: zod.number().optional(),
     notes: zod.string().optional(),
+    correctionRequested: zod.boolean().optional(),
+    correctionNote: zod.string().optional(),
     createdAt: zod.coerce.date(),
   }),
   zod.null(),
@@ -2079,6 +2093,8 @@ export const GetEmployeeDashboardSummaryResponse = zod.object({
       payRate: zod.number().optional(),
       billRate: zod.number().optional(),
       notes: zod.string().optional(),
+      correctionRequested: zod.boolean().optional(),
+      correctionNote: zod.string().optional(),
       createdAt: zod.coerce.date(),
     })
     .optional(),
