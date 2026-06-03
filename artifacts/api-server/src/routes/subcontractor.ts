@@ -11,6 +11,7 @@ import {
 import { requireAdmin } from "../middlewares/auth";
 import { tokenLookupLimiter } from "../middlewares/rateLimit";
 import { logger } from "../lib/logger";
+import { upsertWeeklyInvoiceForSubcontractorEntry } from "../lib/invoiceSync";
 
 async function writeAuditLog(opts: {
   actorUserId: string | null;
@@ -223,6 +224,10 @@ router.patch("/admin/subcontractor-entries/:id/clock-out", requireAdmin, async (
       adminForceClockOut: true,
     },
   });
+
+  // Roll the now-closed entry into this site's weekly draft invoice
+  // (best-effort, mirrors the officer time-entry approval hook).
+  void upsertWeeklyInvoiceForSubcontractorEntry(updated!);
 
   const [site] = await db.select({ name: sitesTable.name }).from(sitesTable).where(eq(sitesTable.id, existing.siteId));
 
@@ -459,6 +464,10 @@ router.post("/subcontractor/clock/:token", tokenLookupLimiter, async (req, res):
       action: "subcontractor_clock_out",
       metadata: { entryId: open.id, name: open.name, company: open.company, siteId: open.siteId },
     });
+
+    // Roll the now-closed entry into this site's weekly draft invoice
+    // (best-effort, mirrors the officer time-entry approval hook).
+    void upsertWeeklyInvoiceForSubcontractorEntry(updated!);
 
     res.json({
       action: "clocked_out",

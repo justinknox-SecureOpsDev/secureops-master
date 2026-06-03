@@ -1,4 +1,4 @@
-import { and, eq, gte, isNull, lt, or, sql } from "drizzle-orm";
+import { and, eq, gte, isNull, isNotNull, lt, or, sql } from "drizzle-orm";
 import {
   db,
   invoicesTable,
@@ -7,7 +7,9 @@ import {
   shiftsTable,
   timeEntriesTable,
   usersTable,
+  subcontractorTimeEntriesTable,
   type TimeEntry,
+  type SubcontractorTimeEntry,
 } from "@workspace/db";
 import { logger } from "./logger";
 
@@ -215,6 +217,42 @@ export async function upsertWeeklyInvoice(
     cur.amount += hours * rate;
     groups.set(key, cur);
   }
+  // Subcontractor hours (Task #277). Closed entries only (clockOutAt set,
+  // hoursWorked > 0) for this site+week. Subcontractors have no shift and
+  // no system account, so there's no shift-level billRate to fall back
+  // from — they're billed at the site's defaultBillRate. When the site
+  // has no default bill rate, these lines are skipped (rate <= 0), exactly
+  // like an officer entry whose shift+site can't resolve a rate; if that
+  // leaves the whole week with zero priced lines the upsert refuses with
+  // "no priced entries" (surfaced as the explicit 400 by the route).
+  const subEntries = await db
+    .select({
+      hoursWorked: subcontractorTimeEntriesTable.hoursWorked,
+      name: subcontractorTimeEntriesTable.name,
+      company: subcontractorTimeEntriesTable.company,
+    })
+    .from(subcontractorTimeEntriesTable)
+    .where(
+      and(
+        eq(subcontractorTimeEntriesTable.siteId, siteId),
+        isNotNull(subcontractorTimeEntriesTable.clockOutAt),
+        gte(subcontractorTimeEntriesTable.clockInAt, start),
+        lt(subcontractorTimeEntriesTable.clockInAt, end),
+      ),
+    );
+  for (const e of subEntries) {
+    const hours = parseFloat(String(e.hoursWorked ?? "0"));
+    if (!isFinite(hours) || hours <= 0) continue;
+    const rate = siteBillRate;
+    if (rate <= 0) continue;
+    const label = `${e.name} (${e.company}) — subcontractor`;
+    const key = `sub__${label}__${rate}`;
+    const cur = groups.get(key) ?? { description: label, hours: 0, rate, amount: 0 };
+    cur.hours += hours;
+    cur.amount += hours * rate;
+    groups.set(key, cur);
+  }
+
   const lineItems = Array.from(groups.values())
     .sort((a, b) => a.description.localeCompare(b.description))
     .map((g) => ({
@@ -369,6 +407,35 @@ export async function upsertWeeklyInvoiceForTimeEntry(entry: TimeEntry): Promise
     return result;
   } catch (err) {
     logger.warn({ err, timeEntryId: entry.id }, "[invoice-sync] upsert from approval failed");
+    return null;
+  }
+}
+
+/**
+ * Resolve (siteId, weekStart) for a subcontractor entry and call
+ * upsertWeeklyInvoice. Subcontractor entries anchor directly to a site
+ * (no shift), so the site is always present. Keyed on clockInAt week to
+ * mirror the officer flow. Never throws — best-effort hook from the
+ * subcontractor clock-out handlers.
+ */
+export async function upsertWeeklyInvoiceForSubcontractorEntry(
+  entry: SubcontractorTimeEntry,
+): Promise<UpsertResult | null> {
+  try {
+    if (!entry.siteId) return null;
+    const clockIn = entry.clockInAt ? new Date(entry.clockInAt) : null;
+    if (!clockIn || Number.isNaN(clockIn.getTime())) return null;
+    const weekStart = weekStartIsoUtc(clockIn);
+    const result = await upsertWeeklyInvoice(entry.siteId, weekStart);
+    if (result.status === "created" || result.status === "updated") {
+      logger.info(
+        { siteId: entry.siteId, weekStart, invoiceId: result.invoiceId, total: result.totalAmount, lines: result.lineCount, status: result.status },
+        "[invoice-sync] draft invoice synced from subcontractor clock-out",
+      );
+    }
+    return result;
+  } catch (err) {
+    logger.warn({ err, subEntryId: entry.id }, "[invoice-sync] upsert from subcontractor clock-out failed");
     return null;
   }
 }
