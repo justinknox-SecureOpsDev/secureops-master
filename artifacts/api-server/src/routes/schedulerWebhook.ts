@@ -401,7 +401,20 @@ export async function processInboundClockEvent(payload: SchedulerClockEventPaylo
     .limit(1);
 
   if (nearMatch) {
-    // Merge: update the existing entry with the external ID + any missing data
+    // Last-write-wins conflict resolution — same intent as the external-ID path
+    // above. This is the FIRST time we'd link this inbound scheduler event to a
+    // pre-existing local clock-in (the local row has no externalId yet, so its
+    // syncSource is 'local' and `shouldApplyInboundUpdate` falls through to the
+    // wall-clock "local edits win ties" branch). A late / out-of-order scheduler
+    // event must NOT stamp its external ID + partial data onto a local entry the
+    // officer has since updated locally (e.g. a real clock-out / hours edit).
+    const decision = shouldApplyInboundUpdate(nearMatch, incomingUpdatedAt);
+    if (!decision.apply) {
+      return { action: "skipped", secureopsId: nearMatch.id, mergedExisting: false, skipReason: decision.reason };
+    }
+    // Merge: update the existing entry with the external ID + any missing data.
+    // Local non-null values still take precedence (the local clock-in is
+    // authoritative for its own data); the scheduler event only fills the gaps.
     await db.update(timeEntriesTable).set({
       externalId: payload.id,
       externalSource: SCHEDULER_SOURCE,

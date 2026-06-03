@@ -297,6 +297,56 @@ describe("inbound clock-event dedup within ±5 min", () => {
       .where(eq(timeEntriesTable.employeeId, ctx.employeeId));
     expect(rows).toHaveLength(2);
   });
+
+  it("skips the merge when the local entry is newer than the inbound scheduler event", async () => {
+    const clockIn = new Date("2026-07-05T09:00:00.000Z");
+    const localClockOut = new Date(clockIn.getTime() + 4 * 3600 * 1000);
+
+    // A pre-existing local clock-in the officer has already clocked out of
+    // (real local clock-out + hours). Inserted "now", so its wall-clock
+    // updated_at is far newer than the stale scheduler timestamp below.
+    const [local] = await db
+      .insert(timeEntriesTable)
+      .values({
+        employeeId: ctx.employeeId,
+        siteId: ctx.siteId,
+        clockInTime: clockIn,
+        clockOutTime: localClockOut,
+        hoursWorked: "4",
+        approvalStatus: "pending",
+        isVerified: false,
+        syncSource: "local",
+      })
+      .returning({ id: timeEntriesTable.id });
+
+    // A late / out-of-order scheduler event within the ±5 min window, but stamped
+    // far in the past — it would have rewritten the clock-out to 10h and linked
+    // its external ID onto the newer local entry.
+    const externalId = `${TAG}-clock-stale-${randomUUID().slice(0, 8)}`;
+    const result = await processInboundClockEvent({
+      id: externalId,
+      employeeEmail: ctx.employeeEmail,
+      siteName: ctx.siteName,
+      clockInTime: new Date(clockIn.getTime() + 2 * 60 * 1000).toISOString(),
+      clockOutTime: new Date(clockIn.getTime() + 10 * 3600 * 1000).toISOString(),
+      updatedAt: "2000-01-01T00:00:00.000Z",
+    });
+
+    expect(result.action).toBe("skipped");
+    expect(result.secureopsId).toBe(local.id);
+
+    // The local row is untouched: data preserved AND not linked to the scheduler.
+    const rows = await db
+      .select()
+      .from(timeEntriesTable)
+      .where(eq(timeEntriesTable.employeeId, ctx.employeeId));
+    expect(rows).toHaveLength(1);
+    expect(rows[0].id).toBe(local.id);
+    expect(rows[0].externalId).toBeNull();
+    expect(rows[0].externalSource).toBeNull();
+    expect(Number(rows[0].hoursWorked)).toBe(4);
+    expect(new Date(rows[0].clockOutTime!).toISOString()).toBe(localClockOut.toISOString());
+  });
 });
 
 // ---------------------------------------------------------------------------
