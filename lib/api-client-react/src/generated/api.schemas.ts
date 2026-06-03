@@ -2129,6 +2129,15 @@ export type AdminClockOutSubcontractorEntryBody = {
   notes?: string;
 };
 
+export type AdminUpdateSubcontractorEntryBody = {
+  name?: string;
+  company?: string;
+  badgeId?: string | null;
+  clockInAt?: string;
+  clockOutAt?: string | null;
+  notes?: string | null;
+};
+
 export type SubcontractorClockToggleBody = {
   name: string;
   company: string;

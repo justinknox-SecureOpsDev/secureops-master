@@ -24,6 +24,7 @@ import type {
   AdminListOnboardingParams,
   AdminSignObjectDownload200,
   AdminSignObjectDownloadParams,
+  AdminUpdateSubcontractorEntryBody,
   Application,
   ApproveApplicationResponse,
   ApproveShiftRequestBody,
@@ -10463,6 +10464,98 @@ export const useAdminClockOutSubcontractorEntry = <
   return useMutation(
     getAdminClockOutSubcontractorEntryMutationOptions(options),
   );
+};
+
+/**
+ * @summary Admin edit / correct a subcontractor time entry (admin)
+ */
+export const getAdminUpdateSubcontractorEntryUrl = (id: string) => {
+  return `/api/admin/subcontractor-entries/${id}`;
+};
+
+export const adminUpdateSubcontractorEntry = async (
+  id: string,
+  adminUpdateSubcontractorEntryBody: AdminUpdateSubcontractorEntryBody,
+  options?: RequestInit,
+): Promise<SubcontractorTimeEntry> => {
+  return customFetch<SubcontractorTimeEntry>(
+    getAdminUpdateSubcontractorEntryUrl(id),
+    {
+      ...options,
+      method: "PATCH",
+      headers: { "Content-Type": "application/json", ...options?.headers },
+      body: JSON.stringify(adminUpdateSubcontractorEntryBody),
+    },
+  );
+};
+
+export const getAdminUpdateSubcontractorEntryMutationOptions = <
+  TError = ErrorType<ErrorResponse>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof adminUpdateSubcontractorEntry>>,
+    TError,
+    { id: string; data: BodyType<AdminUpdateSubcontractorEntryBody> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof adminUpdateSubcontractorEntry>>,
+  TError,
+  { id: string; data: BodyType<AdminUpdateSubcontractorEntryBody> },
+  TContext
+> => {
+  const mutationKey = ["adminUpdateSubcontractorEntry"];
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof adminUpdateSubcontractorEntry>>,
+    { id: string; data: BodyType<AdminUpdateSubcontractorEntryBody> }
+  > = (props) => {
+    const { id, data } = props ?? {};
+
+    return adminUpdateSubcontractorEntry(id, data, requestOptions);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type AdminUpdateSubcontractorEntryMutationResult = NonNullable<
+  Awaited<ReturnType<typeof adminUpdateSubcontractorEntry>>
+>;
+export type AdminUpdateSubcontractorEntryMutationBody =
+  BodyType<AdminUpdateSubcontractorEntryBody>;
+export type AdminUpdateSubcontractorEntryMutationError =
+  ErrorType<ErrorResponse>;
+
+/**
+ * @summary Admin edit / correct a subcontractor time entry (admin)
+ */
+export const useAdminUpdateSubcontractorEntry = <
+  TError = ErrorType<ErrorResponse>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof adminUpdateSubcontractorEntry>>,
+    TError,
+    { id: string; data: BodyType<AdminUpdateSubcontractorEntryBody> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationResult<
+  Awaited<ReturnType<typeof adminUpdateSubcontractorEntry>>,
+  TError,
+  { id: string; data: BodyType<AdminUpdateSubcontractorEntryBody> },
+  TContext
+> => {
+  return useMutation(getAdminUpdateSubcontractorEntryMutationOptions(options));
 };
 
 /**

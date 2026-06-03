@@ -6,7 +6,7 @@ import { Label } from "@/components/ui/label";
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter,
 } from "@/components/ui/dialog";
-import { RefreshCw, Download, Clock, AlertTriangle } from "lucide-react";
+import { RefreshCw, Download, Clock, AlertTriangle, Pencil } from "lucide-react";
 
 type Entry = {
   id: string;
@@ -26,6 +26,24 @@ function fmtDateTime(iso: string | null | undefined): string {
   const d = new Date(iso);
   if (isNaN(d.getTime())) return iso;
   return d.toLocaleString(undefined, { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" });
+}
+
+// Convert an ISO string to a value suitable for <input type="datetime-local">
+// (local time, no timezone, "YYYY-MM-DDTHH:mm").
+function isoToLocalInput(iso: string | null | undefined): string {
+  if (!iso) return "";
+  const d = new Date(iso);
+  if (isNaN(d.getTime())) return "";
+  const pad = (n: number) => String(n).padStart(2, "0");
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+}
+
+// Convert a datetime-local value back to an ISO string (interpreting it as local time).
+function localInputToIso(value: string): string | null {
+  if (!value) return null;
+  const d = new Date(value);
+  if (isNaN(d.getTime())) return null;
+  return d.toISOString();
 }
 
 function exportCsv(entries: Entry[]): void {
@@ -62,7 +80,74 @@ export default function SubcontractorEntriesPage() {
   const [forceClockOutBusy, setForceClockOutBusy] = useState(false);
   const [forceClockOutError, setForceClockOutError] = useState<string | null>(null);
 
+  const [editTarget, setEditTarget] = useState<Entry | null>(null);
+  const [editForm, setEditForm] = useState({
+    name: "",
+    company: "",
+    badgeId: "",
+    clockInAt: "",
+    clockOutAt: "",
+    notes: "",
+  });
+  const [editBusy, setEditBusy] = useState(false);
+  const [editError, setEditError] = useState<string | null>(null);
+
   const refresh = useCallback(() => setVersion((v) => v + 1), []);
+
+  function openEdit(e: Entry) {
+    setEditTarget(e);
+    setEditError(null);
+    setEditForm({
+      name: e.name,
+      company: e.company,
+      badgeId: e.badgeId ?? "",
+      clockInAt: isoToLocalInput(e.clockInAt),
+      clockOutAt: isoToLocalInput(e.clockOutAt),
+      notes: e.notes ?? "",
+    });
+  }
+
+  async function handleEditSave() {
+    if (!editTarget) return;
+    if (!editForm.name.trim()) { setEditError("Name is required."); return; }
+    if (!editForm.company.trim()) { setEditError("Company is required."); return; }
+    if (!editForm.clockInAt) { setEditError("Clock-in time is required."); return; }
+
+    const clockInIso = localInputToIso(editForm.clockInAt);
+    if (!clockInIso) { setEditError("Clock-in time is invalid."); return; }
+
+    let clockOutIso: string | null = null;
+    if (editForm.clockOutAt) {
+      clockOutIso = localInputToIso(editForm.clockOutAt);
+      if (!clockOutIso) { setEditError("Clock-out time is invalid."); return; }
+      if (new Date(clockOutIso).getTime() <= new Date(clockInIso).getTime()) {
+        setEditError("Clock-out must be after clock-in.");
+        return;
+      }
+    }
+
+    setEditBusy(true);
+    setEditError(null);
+    try {
+      await api(`/admin/subcontractor-entries/${editTarget.id}`, {
+        method: "PATCH",
+        body: {
+          name: editForm.name.trim(),
+          company: editForm.company.trim(),
+          badgeId: editForm.badgeId.trim() ? editForm.badgeId.trim() : null,
+          clockInAt: clockInIso,
+          clockOutAt: clockOutIso,
+          notes: editForm.notes.trim() ? editForm.notes.trim() : null,
+        },
+      });
+      setEditTarget(null);
+      refresh();
+    } catch (e) {
+      setEditError((e as Error).message);
+    } finally {
+      setEditBusy(false);
+    }
+  }
 
   useEffect(() => {
     setLoading(true);
@@ -169,14 +254,24 @@ export default function SubcontractorEntriesPage() {
                     <td className="p-3 text-muted-foreground">{e.siteName ?? "—"}</td>
                     <td className="p-3">{fmtDateTime(e.clockInAt)}</td>
                     <td className="p-3">
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        className="text-amber-700 border-amber-300 hover:bg-amber-50"
-                        onClick={() => { setForceClockOutTarget(e); setForceClockOutError(null); }}
-                      >
-                        Force Clock-Out
-                      </Button>
+                      <div className="flex gap-2">
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={() => openEdit(e)}
+                        >
+                          <Pencil className="w-3.5 h-3.5 mr-1" />
+                          Edit
+                        </Button>
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          className="text-amber-700 border-amber-300 hover:bg-amber-50"
+                          onClick={() => { setForceClockOutTarget(e); setForceClockOutError(null); }}
+                        >
+                          Force Clock-Out
+                        </Button>
+                      </div>
                     </td>
                   </tr>
                 ))}
@@ -209,6 +304,7 @@ export default function SubcontractorEntriesPage() {
                   <th className="text-left p-3 font-medium">Clock In</th>
                   <th className="text-left p-3 font-medium">Clock Out</th>
                   <th className="text-left p-3 font-medium">Hours</th>
+                  <th className="text-left p-3 font-medium">Actions</th>
                 </tr>
               </thead>
               <tbody className="divide-y">
@@ -221,6 +317,12 @@ export default function SubcontractorEntriesPage() {
                     <td className="p-3">{fmtDateTime(e.clockInAt)}</td>
                     <td className="p-3">{fmtDateTime(e.clockOutAt)}</td>
                     <td className="p-3 font-medium">{e.hoursWorked ? `${e.hoursWorked} hrs` : "—"}</td>
+                    <td className="p-3">
+                      <Button variant="outline" size="sm" onClick={() => openEdit(e)}>
+                        <Pencil className="w-3.5 h-3.5 mr-1" />
+                        Edit
+                      </Button>
+                    </td>
                   </tr>
                 ))}
               </tbody>
@@ -228,6 +330,85 @@ export default function SubcontractorEntriesPage() {
           </div>
         )}
       </div>
+
+      {/* Edit entry dialog */}
+      <Dialog open={!!editTarget} onOpenChange={(open) => { if (!open) setEditTarget(null); }}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Edit Clock-In Entry</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-3">
+            <div className="grid grid-cols-2 gap-3">
+              <div className="space-y-1">
+                <Label className="text-xs">Name</Label>
+                <Input
+                  value={editForm.name}
+                  onChange={(e) => setEditForm((f) => ({ ...f, name: e.target.value }))}
+                />
+              </div>
+              <div className="space-y-1">
+                <Label className="text-xs">Company</Label>
+                <Input
+                  value={editForm.company}
+                  onChange={(e) => setEditForm((f) => ({ ...f, company: e.target.value }))}
+                />
+              </div>
+            </div>
+            <div className="space-y-1">
+              <Label className="text-xs">Badge ID</Label>
+              <Input
+                value={editForm.badgeId}
+                onChange={(e) => setEditForm((f) => ({ ...f, badgeId: e.target.value }))}
+                placeholder="Optional"
+              />
+            </div>
+            <div className="grid grid-cols-2 gap-3">
+              <div className="space-y-1">
+                <Label className="text-xs">Clock In</Label>
+                <Input
+                  type="datetime-local"
+                  value={editForm.clockInAt}
+                  onChange={(e) => setEditForm((f) => ({ ...f, clockInAt: e.target.value }))}
+                />
+              </div>
+              <div className="space-y-1">
+                <Label className="text-xs">Clock Out</Label>
+                <Input
+                  type="datetime-local"
+                  value={editForm.clockOutAt}
+                  onChange={(e) => setEditForm((f) => ({ ...f, clockOutAt: e.target.value }))}
+                />
+                <p className="text-[11px] text-muted-foreground">Leave blank to keep the entry open.</p>
+              </div>
+            </div>
+            <div className="space-y-1">
+              <Label className="text-xs">Notes</Label>
+              <Input
+                value={editForm.notes}
+                onChange={(e) => setEditForm((f) => ({ ...f, notes: e.target.value }))}
+                placeholder="Optional"
+              />
+            </div>
+            {editError && (
+              <div className="text-red-600 bg-red-50 border border-red-200 rounded p-2 text-xs">
+                {editError}
+              </div>
+            )}
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setEditTarget(null)} disabled={editBusy}>
+              Cancel
+            </Button>
+            <Button
+              style={{ background: "#080c18", color: "#f0e6c8" }}
+              onClick={handleEditSave}
+              disabled={editBusy}
+            >
+              {editBusy ? "Saving…" : "Save Changes"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       {/* Force clock-out dialog */}
       <Dialog open={!!forceClockOutTarget} onOpenChange={(open) => { if (!open) setForceClockOutTarget(null); }}>

@@ -3878,6 +3878,36 @@ export const AdminClockOutSubcontractorEntryResponse = zod.object({
 });
 
 /**
+ * @summary Admin edit / correct a subcontractor time entry (admin)
+ */
+export const AdminUpdateSubcontractorEntryParams = zod.object({
+  id: zod.coerce.string(),
+});
+
+export const AdminUpdateSubcontractorEntryBody = zod.object({
+  name: zod.string().optional(),
+  company: zod.string().optional(),
+  badgeId: zod.string().nullish(),
+  clockInAt: zod.coerce.date().optional(),
+  clockOutAt: zod.coerce.date().nullish(),
+  notes: zod.string().nullish(),
+});
+
+export const AdminUpdateSubcontractorEntryResponse = zod.object({
+  id: zod.string(),
+  siteId: zod.string(),
+  siteName: zod.string().nullish(),
+  name: zod.string(),
+  company: zod.string(),
+  badgeId: zod.string().nullish(),
+  clockInAt: zod.coerce.date(),
+  clockOutAt: zod.coerce.date().nullish(),
+  hoursWorked: zod.string().nullish(),
+  notes: zod.string().nullish(),
+  createdAt: zod.coerce.date().optional(),
+});
+
+/**
  * @summary Validate a site QR token and return site context (public)
  */
 export const GetSubcontractorClockInfoParams = zod.object({

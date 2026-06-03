@@ -230,6 +230,152 @@ router.patch("/admin/subcontractor-entries/:id/clock-out", requireAdmin, async (
 });
 
 // ---------------------------------------------------------------------------
+// Admin: edit / correct a subcontractor time entry
+// PATCH /admin/subcontractor-entries/:id
+//   Editable fields: name, company, badgeId, clockInAt, clockOutAt, notes.
+//   Recomputes hoursWorked; rejects clock-out before clock-in.
+// ---------------------------------------------------------------------------
+router.patch("/admin/subcontractor-entries/:id", requireAdmin, async (req, res): Promise<void> => {
+  const { id } = req.params as { id: string };
+  const body = (req.body ?? {}) as Record<string, unknown>;
+
+  const [existing] = await db.select().from(subcontractorTimeEntriesTable).where(eq(subcontractorTimeEntriesTable.id, id));
+  if (!existing) { res.status(404).json({ error: "Not Found" }); return; }
+
+  const updates: {
+    name?: string;
+    company?: string;
+    badgeId?: string | null;
+    clockInAt?: Date;
+    clockOutAt?: Date | null;
+    notes?: string | null;
+  } = {};
+
+  if (body.name !== undefined) {
+    if (typeof body.name !== "string" || !body.name.trim()) {
+      res.status(400).json({ error: "Bad Request", message: "name must be a non-empty string." });
+      return;
+    }
+    updates.name = body.name.trim();
+  }
+
+  if (body.company !== undefined) {
+    if (typeof body.company !== "string" || !body.company.trim()) {
+      res.status(400).json({ error: "Bad Request", message: "company must be a non-empty string." });
+      return;
+    }
+    updates.company = body.company.trim();
+  }
+
+  if (body.badgeId !== undefined) {
+    if (body.badgeId === null) {
+      updates.badgeId = null;
+    } else if (typeof body.badgeId === "string") {
+      updates.badgeId = body.badgeId.trim() ? body.badgeId.trim() : null;
+    } else {
+      res.status(400).json({ error: "Bad Request", message: "badgeId must be a string or null." });
+      return;
+    }
+  }
+
+  if (body.notes !== undefined) {
+    if (body.notes === null) {
+      updates.notes = null;
+    } else if (typeof body.notes === "string") {
+      updates.notes = body.notes.trim() ? body.notes.trim() : null;
+    } else {
+      res.status(400).json({ error: "Bad Request", message: "notes must be a string or null." });
+      return;
+    }
+  }
+
+  if (body.clockInAt !== undefined) {
+    const parsed = new Date(body.clockInAt as string);
+    if (isNaN(parsed.getTime())) {
+      res.status(400).json({ error: "Bad Request", message: "clockInAt must be a valid ISO timestamp." });
+      return;
+    }
+    updates.clockInAt = parsed;
+  }
+
+  if (body.clockOutAt !== undefined) {
+    if (body.clockOutAt === null) {
+      updates.clockOutAt = null;
+    } else {
+      const parsed = new Date(body.clockOutAt as string);
+      if (isNaN(parsed.getTime())) {
+        res.status(400).json({ error: "Bad Request", message: "clockOutAt must be a valid ISO timestamp." });
+        return;
+      }
+      updates.clockOutAt = parsed;
+    }
+  }
+
+  // Resolve the effective clock-in / clock-out after applying edits.
+  const effectiveClockIn = updates.clockInAt ?? existing.clockInAt;
+  const effectiveClockOut = body.clockOutAt !== undefined ? updates.clockOutAt! : existing.clockOutAt;
+
+  if (effectiveClockOut && effectiveClockOut.getTime() <= effectiveClockIn.getTime()) {
+    res.status(400).json({ error: "Bad Request", message: "Clock-out must be after clock-in." });
+    return;
+  }
+
+  // Recompute hours whenever either timestamp could have changed.
+  const timestampsTouched = updates.clockInAt !== undefined || body.clockOutAt !== undefined;
+  const setValues: Record<string, unknown> = { ...updates };
+  if (timestampsTouched) {
+    setValues.hoursWorked = effectiveClockOut ? String(calcHours(effectiveClockIn, effectiveClockOut)) : null;
+  }
+
+  if (Object.keys(setValues).length === 0) {
+    const [site] = await db.select({ name: sitesTable.name }).from(sitesTable).where(eq(sitesTable.id, existing.siteId));
+    res.json({ ...existing, siteName: site?.name ?? null });
+    return;
+  }
+
+  const [updated] = await db
+    .update(subcontractorTimeEntriesTable)
+    .set(setValues)
+    .where(eq(subcontractorTimeEntriesTable.id, id))
+    .returning();
+
+  const changedFields = Object.keys(setValues);
+  void writeAuditLog({
+    actorUserId: req.user!.userId,
+    actorEmail: req.user!.email,
+    actorRole: req.user!.role,
+    action: "subcontractor_entry_edit",
+    metadata: {
+      entryId: existing.id,
+      siteId: existing.siteId,
+      changedFields,
+      before: {
+        name: existing.name,
+        company: existing.company,
+        badgeId: existing.badgeId,
+        clockInAt: existing.clockInAt.toISOString(),
+        clockOutAt: existing.clockOutAt ? existing.clockOutAt.toISOString() : null,
+        hoursWorked: existing.hoursWorked,
+        notes: existing.notes,
+      },
+      after: {
+        name: updated!.name,
+        company: updated!.company,
+        badgeId: updated!.badgeId,
+        clockInAt: updated!.clockInAt.toISOString(),
+        clockOutAt: updated!.clockOutAt ? updated!.clockOutAt.toISOString() : null,
+        hoursWorked: updated!.hoursWorked,
+        notes: updated!.notes,
+      },
+    },
+  });
+
+  const [site] = await db.select({ name: sitesTable.name }).from(sitesTable).where(eq(sitesTable.id, existing.siteId));
+
+  res.json({ ...updated, siteName: site?.name ?? null });
+});
+
+// ---------------------------------------------------------------------------
 // Public: get site info for a QR token
 // GET /subcontractor/clock/:token
 // ---------------------------------------------------------------------------
