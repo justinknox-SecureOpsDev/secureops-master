@@ -1,9 +1,10 @@
 import { Router, type IRouter } from "express";
-import { eq, and, gte, lte, isNull, sql } from "drizzle-orm";
+import { eq, and, gte, lte, ne, isNull, sql } from "drizzle-orm";
 import { db, timeEntriesTable, shiftsTable, usersTable, sitesTable, shiftAssignmentsTable, licensesTable } from "@workspace/db";
 import { requireAuth, requireAdmin, requireStaff } from "../middlewares/auth";
 import { upsertWeeklyInvoiceForTimeEntry } from "../lib/invoiceSync";
 import { pushClockEvent } from "../lib/schedulerSync";
+import { getEffectiveLevel } from "../lib/eligibility";
 
 const router: IRouter = Router();
 
@@ -55,6 +56,153 @@ export async function findMatchingScheduledShift(
     if (d < bestDelta) { best = h; bestDelta = d; }
   }
   return best.id;
+}
+
+// Pick the candidate whose startTime is closest to `whenAt`.
+function closestByStart<T extends { startTime: Date }>(rows: T[], whenAt: Date): T | null {
+  if (rows.length === 0) return null;
+  let best = rows[0];
+  let bestDelta = Math.abs(best.startTime.getTime() - whenAt.getTime());
+  for (const r of rows.slice(1)) {
+    const d = Math.abs(r.startTime.getTime() - whenAt.getTime());
+    if (d < bestDelta) { best = r; bestDelta = d; }
+  }
+  return best;
+}
+
+// Resolve which scheduled shift an ad-hoc geo clock-in should attach to,
+// auto-assigning the officer to an open shift when they aren't already
+// rostered. This is what makes a clocked-in officer surface on the Dispatch
+// clock-in status board: that board is driven entirely by *accepted*
+// shift_assignments, so an officer with only an open time entry (and no
+// assignment) never appears as "on duty". Resolution order:
+//
+//   1. The officer already has an accepted assignment for a shift at this
+//      site whose window contains "now" (±60-min grace) — attach to that
+//      shift (closest start). No new assignment.
+//   2. No assignment yet → find an OPEN shift (accepted count < headcount)
+//      at this site in the window and atomically self-assign the officer to
+//      it (race-safe: FOR UPDATE on the shift row + headcount re-check,
+//      mirroring POST /shifts/:id/claim). Returns that shift.
+//   3. Nothing open / nothing matched → fall back to the billing-only
+//      attach (findMatchingScheduledShift) so per-shift billRate is still
+//      recovered for invoicing even when no slot could be claimed.
+async function resolveOrAssignShiftForAdHocClockIn(
+  employeeId: string,
+  siteId: string,
+  whenAt: Date,
+  log: { info: (obj: unknown, msg: string) => void; warn: (obj: unknown, msg: string) => void },
+): Promise<string | null> {
+  const lowerBound = new Date(whenAt.getTime() - SHIFT_MATCH_GRACE_MS);
+  const upperBound = new Date(whenAt.getTime() + SHIFT_MATCH_GRACE_MS);
+  const farFutureCutoff = new Date("2090-01-01T00:00:00Z");
+
+  // 1. Already rostered on a shift at this site in the window.
+  const assigned = await db
+    .select({ id: shiftsTable.id, startTime: shiftsTable.startTime })
+    .from(shiftAssignmentsTable)
+    .innerJoin(shiftsTable, eq(shiftAssignmentsTable.shiftId, shiftsTable.id))
+    .where(and(
+      eq(shiftAssignmentsTable.employeeId, employeeId),
+      eq(shiftAssignmentsTable.status, "accepted"),
+      eq(shiftsTable.siteId, siteId),
+      lte(shiftsTable.startTime, upperBound),
+      gte(shiftsTable.endTime, lowerBound),
+      lte(shiftsTable.startTime, farFutureCutoff),
+    ));
+  const ownShift = closestByStart(assigned, whenAt);
+  if (ownShift) return ownShift.id;
+
+  // 2. Not rostered — look for an open shift at this site to auto-assign.
+  // Only shifts the officer is actually eligible for: the auto-assign must
+  // honour the same licence hierarchy the manual claim route enforces, so we
+  // never create an assignment record asserting an under-licensed officer
+  // covered a higher-level (e.g. armed) shift. Effective level = MAX(highest
+  // unexpired licence, support-staff baseline); higher covers lower.
+  const effectiveLevel = await getEffectiveLevel(employeeId);
+  const candidates = await db
+    .select({
+      id: shiftsTable.id,
+      startTime: shiftsTable.startTime,
+      headcount: shiftsTable.headcount,
+      requiredLicenseLevel: shiftsTable.requiredLicenseLevel,
+      filled: sql<number>`(
+        SELECT count(*)::int FROM ${shiftAssignmentsTable}
+        WHERE ${shiftAssignmentsTable.shiftId} = ${shiftsTable.id}
+          AND ${shiftAssignmentsTable.status} = 'accepted'
+      )`,
+    })
+    .from(shiftsTable)
+    .where(and(
+      eq(shiftsTable.siteId, siteId),
+      lte(shiftsTable.startTime, upperBound),
+      gte(shiftsTable.endTime, lowerBound),
+      lte(shiftsTable.startTime, farFutureCutoff),
+      ne(shiftsTable.status, "cancelled"),
+      ne(shiftsTable.status, "completed"),
+    ));
+
+  // Try open shifts in order of closeness to "now". Stop at the first one we
+  // can atomically claim a slot on. Skip shifts requiring a higher licence
+  // level than the officer holds.
+  const openOrdered = candidates
+    .filter((c) => c.filled < c.headcount && c.requiredLicenseLevel <= effectiveLevel)
+    .sort((a, b) =>
+      Math.abs(a.startTime.getTime() - whenAt.getTime()) -
+      Math.abs(b.startTime.getTime() - whenAt.getTime()),
+    );
+
+  for (const c of openOrdered) {
+    try {
+      const claimed = await db.transaction(async (tx) => {
+        // Lock the shift row so concurrent claims serialize on it.
+        const locked = await tx.execute(sql`
+          SELECT headcount FROM shifts WHERE id = ${c.id}::uuid FOR UPDATE
+        `);
+        const lockedRow = (locked as any).rows?.[0];
+        if (!lockedRow) return false;
+        const headcount: number = lockedRow.headcount;
+
+        // Already assigned (shouldn't happen — step 1 covers it — but the
+        // unique index makes this race-safe anyway).
+        const dupRes = await tx.execute(sql`
+          SELECT 1 FROM shift_assignments
+          WHERE shift_id = ${c.id}::uuid AND employee_id = ${employeeId}::uuid
+          LIMIT 1
+        `);
+        if ((dupRes as any).rows?.length) return true;
+
+        // Count ALL assignment rows (any status), mirroring the authoritative
+        // recheck in POST /shifts/:id/claim. Declines DELETE the row, so in
+        // practice every row is 'accepted'; counting all keeps the fullness
+        // gate identical to the manual claim path.
+        const countRes = await tx.execute(sql`
+          SELECT count(*)::int AS c FROM shift_assignments
+          WHERE shift_id = ${c.id}::uuid
+        `);
+        const filled: number = (countRes as any).rows?.[0]?.c ?? 0;
+        if (filled >= headcount) return false;
+
+        await tx.execute(sql`
+          INSERT INTO shift_assignments (shift_id, employee_id, status)
+          VALUES (${c.id}::uuid, ${employeeId}::uuid, 'accepted')
+        `);
+        return true;
+      });
+      if (claimed) {
+        log.info(
+          { employeeId, siteId, shiftId: c.id },
+          "[clock-in] auto-assigned ad-hoc clock-in to open shift at site",
+        );
+        return c.id;
+      }
+    } catch (err) {
+      log.warn({ err, shiftId: c.id }, "[clock-in] auto-assign attempt failed, trying next open shift");
+    }
+  }
+
+  // 3. Nothing claimable — fall back to billing-only attach.
+  return findMatchingScheduledShift(employeeId, siteId, whenAt);
 }
 
 // Coalesce: prefer the time entry's direct siteId (set by geo-resolution when no shift),
@@ -248,25 +396,19 @@ router.post("/time-entries/clock-in", requireAuth, async (req, res): Promise<voi
     }
   }
 
-  // Auto-attach a scheduled shift to ad-hoc geo clock-ins. If the officer
-  // has an `accepted` assignment at the resolved site whose window contains
-  // "now" (with a 60-min grace either side), we link the entry to that
-  // shift. This is what unlocks per-shift billRate for invoicing without
-  // forcing officers to explicitly pick a shift before clocking in. If
-  // none / many match we leave shiftId null and the entry stays ad-hoc.
+  // Resolve (and, when needed, auto-assign) the scheduled shift for an
+  // ad-hoc geo clock-in. Prefers the officer's own accepted assignment at
+  // the resolved site; otherwise self-assigns them to an open shift there so
+  // they show up on the Dispatch status board's "On duty" tab. Falls back to
+  // a billing-only attach when nothing is claimable. See the helper above.
   let autoAttachedShiftId: string | null = null;
   if (!shiftId && resolvedSite) {
-    autoAttachedShiftId = await findMatchingScheduledShift(
+    autoAttachedShiftId = await resolveOrAssignShiftForAdHocClockIn(
       req.user!.userId,
       resolvedSite.id,
       new Date(),
+      req.log,
     );
-    if (autoAttachedShiftId) {
-      req.log.info(
-        { employeeId: req.user!.userId, siteId: resolvedSite.id, shiftId: autoAttachedShiftId },
-        "[clock-in] auto-attached ad-hoc clock-in to scheduled shift",
-      );
-    }
   }
 
   const [entry] = await db.insert(timeEntriesTable).values({

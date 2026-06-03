@@ -10,6 +10,8 @@ import {
   sitesTable,
   licensesTable,
   timeEntriesTable,
+  shiftsTable,
+  shiftAssignmentsTable,
 } from "@workspace/db";
 import app from "../app";
 import { signToken } from "../middlewares/auth";
@@ -95,9 +97,11 @@ afterAll(async () => {
   const ids = [ctx.licensedEmployeeId, ctx.unlicensedEmployeeId].filter(Boolean);
   if (ids.length > 0) {
     const arr = sql.raw(`ARRAY['${ids.join("','")}']::uuid[]`);
+    await db.execute(sql`DELETE FROM shift_assignments WHERE employee_id = ANY(${arr})`);
     await db.execute(sql`DELETE FROM time_entries WHERE employee_id = ANY(${arr})`);
     await db.execute(sql`DELETE FROM licenses WHERE employee_id = ANY(${arr})`);
   }
+  await db.execute(sql`DELETE FROM shifts WHERE site_id IN (SELECT id FROM sites WHERE name LIKE ${TAG + "%"})`);
   await db.execute(sql`DELETE FROM sites WHERE name LIKE ${TAG + "%"}`);
   await db.execute(sql`DELETE FROM clients WHERE name LIKE ${TAG + "%"}`);
   await db.execute(sql`DELETE FROM users WHERE last_name = ${TAG}`);
@@ -155,5 +159,130 @@ describe("POST /time-entries/clock-in geo-resolution", () => {
       .send({ lat: 32.7767, lng: -96.797 });
     expect(res.status).toBe(403);
     expect(res.body.code).toBe("license_expired");
+  });
+});
+
+describe("POST /time-entries/clock-in auto-assigns to an open shift at the site", () => {
+  async function makeShiftAtNearSite(headcount: number): Promise<string> {
+    // Window straddles "now" so it falls inside the ±60-min match grace.
+    const start = new Date(Date.now() - 5 * 60_000);
+    const end = new Date(Date.now() + 6 * 3600_000);
+    const [shift] = await db
+      .insert(shiftsTable)
+      .values({
+        siteId: ctx.nearSiteId,
+        title: `${TAG}-shift`,
+        startTime: start,
+        endTime: end,
+        status: "upcoming",
+        headcount,
+        requiredLicenseLevel: 2,
+      })
+      .returning({ id: shiftsTable.id });
+    return shift.id;
+  }
+
+  it("self-assigns an unrostered officer to an open shift and links the time entry to it", async () => {
+    await deleteOpenEntries(ctx.licensedEmployeeId);
+    await db.delete(shiftAssignmentsTable).where(eq(shiftAssignmentsTable.employeeId, ctx.licensedEmployeeId));
+    const shiftId = await makeShiftAtNearSite(2);
+
+    const res = await request(app)
+      .post("/api/time-entries/clock-in")
+      .set(authed(ctx.licensedToken))
+      .send({ lat: -54.123456, lng: -12.654321 });
+    expect(res.status).toBe(201);
+
+    // The time entry must be linked to the open shift...
+    const [entry] = await db
+      .select({ shiftId: timeEntriesTable.shiftId })
+      .from(timeEntriesTable)
+      .where(eq(timeEntriesTable.id, res.body.id));
+    expect(entry.shiftId).toBe(shiftId);
+
+    // ...and an accepted assignment must now exist (this is what makes the
+    // officer show up on the Dispatch status board's "On duty" tab).
+    const assignments = await db
+      .select({ status: shiftAssignmentsTable.status })
+      .from(shiftAssignmentsTable)
+      .where(and(
+        eq(shiftAssignmentsTable.shiftId, shiftId),
+        eq(shiftAssignmentsTable.employeeId, ctx.licensedEmployeeId),
+      ));
+    expect(assignments).toHaveLength(1);
+    expect(assignments[0].status).toBe("accepted");
+
+    await deleteOpenEntries(ctx.licensedEmployeeId);
+    await db.delete(shiftAssignmentsTable).where(eq(shiftAssignmentsTable.employeeId, ctx.licensedEmployeeId));
+    await db.delete(shiftsTable).where(eq(shiftsTable.id, shiftId));
+  });
+
+  it("does NOT auto-assign an officer to an open shift requiring a higher licence level", async () => {
+    await deleteOpenEntries(ctx.licensedEmployeeId);
+    await db.delete(shiftAssignmentsTable).where(eq(shiftAssignmentsTable.employeeId, ctx.licensedEmployeeId));
+    // Officer holds an L3 licence; this open shift requires L4.
+    const start = new Date(Date.now() - 5 * 60_000);
+    const end = new Date(Date.now() + 6 * 3600_000);
+    const [shift] = await db
+      .insert(shiftsTable)
+      .values({
+        siteId: ctx.nearSiteId,
+        title: `${TAG}-l4-shift`,
+        startTime: start,
+        endTime: end,
+        status: "upcoming",
+        headcount: 2,
+        requiredLicenseLevel: 4,
+      })
+      .returning({ id: shiftsTable.id });
+
+    const res = await request(app)
+      .post("/api/time-entries/clock-in")
+      .set(authed(ctx.licensedToken))
+      .send({ lat: -54.123456, lng: -12.654321 });
+    expect(res.status).toBe(201);
+
+    // The officer still clocks in (ad-hoc) but must NOT be assigned to the
+    // higher-level shift.
+    const ours = await db
+      .select({ id: shiftAssignmentsTable.id })
+      .from(shiftAssignmentsTable)
+      .where(and(
+        eq(shiftAssignmentsTable.shiftId, shift.id),
+        eq(shiftAssignmentsTable.employeeId, ctx.licensedEmployeeId),
+      ));
+    expect(ours).toHaveLength(0);
+
+    await deleteOpenEntries(ctx.licensedEmployeeId);
+    await db.delete(shiftsTable).where(eq(shiftsTable.id, shift.id));
+  });
+
+  it("does NOT create a duplicate assignment when the shift is full and the officer isn't already on it", async () => {
+    await deleteOpenEntries(ctx.licensedEmployeeId);
+    await db.delete(shiftAssignmentsTable).where(eq(shiftAssignmentsTable.employeeId, ctx.licensedEmployeeId));
+    const shiftId = await makeShiftAtNearSite(1);
+    // Fill the single slot with a throwaway officer.
+    const otherId = await makeEmployee("filler");
+    await db.insert(shiftAssignmentsTable).values({ shiftId, employeeId: otherId, status: "accepted" });
+
+    const res = await request(app)
+      .post("/api/time-entries/clock-in")
+      .set(authed(ctx.licensedToken))
+      .send({ lat: -54.123456, lng: -12.654321 });
+    expect(res.status).toBe(201);
+
+    // Officer still clocks in (ad-hoc), but is NOT assigned to the full shift.
+    const ours = await db
+      .select({ id: shiftAssignmentsTable.id })
+      .from(shiftAssignmentsTable)
+      .where(and(
+        eq(shiftAssignmentsTable.shiftId, shiftId),
+        eq(shiftAssignmentsTable.employeeId, ctx.licensedEmployeeId),
+      ));
+    expect(ours).toHaveLength(0);
+
+    await deleteOpenEntries(ctx.licensedEmployeeId);
+    await db.delete(shiftAssignmentsTable).where(eq(shiftAssignmentsTable.shiftId, shiftId));
+    await db.delete(shiftsTable).where(eq(shiftsTable.id, shiftId));
   });
 });
