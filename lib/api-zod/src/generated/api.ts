@@ -1327,12 +1327,18 @@ export const GetTimeEntriesResponse = zod.array(GetTimeEntriesResponseItem);
 export const ClockInBody = zod
   .object({
     shiftId: zod.string().nullish(),
-    lat: zod.number(),
-    lng: zod.number(),
+    siteId: zod
+      .string()
+      .nullish()
+      .describe(
+        "Explicitly chosen site. Skips geo-resolution; coordinates not required.",
+      ),
+    lat: zod.number().optional(),
+    lng: zod.number().optional(),
     notes: zod.string().optional(),
   })
   .describe(
-    "Clock in. If shiftId is provided, the entry is linked to that shift. Otherwise the\nserver geo-resolves the nearest Site within 1 mile of (lat, lng) and links that.\n",
+    "Clock in. Resolution priority: (1) if shiftId is provided, the entry is linked to\nthat shift (no geo check); (2) else if siteId is provided, the entry is linked to\nthat explicitly-picked site (no geo check — used when GPS is unavailable or the site\nhas no saved coordinates); (3) else the server geo-resolves the nearest Site within\n1 mile of (lat, lng) and links that. lat\/lng are optional when shiftId or siteId is\nsupplied.\n",
   );
 
 /**

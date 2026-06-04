@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from "react";
 import { useTopPad } from "@/hooks/useTopPad";
-import { View, Text, StyleSheet, TouchableOpacity, ActivityIndicator, Platform, ScrollView, AccessibilityInfo, Modal, Animated, TextInput } from "react-native";
+import { View, Text, StyleSheet, TouchableOpacity, ActivityIndicator, ScrollView, AccessibilityInfo, Modal, Animated, TextInput } from "react-native";
 import { useColors } from "@/hooks/useColors";
 import { useHighlightFlash } from "@/hooks/useHighlightFlash";
 import { useLocalSearchParams } from "expo-router";
@@ -76,12 +76,13 @@ export default function EmployeeClockScreen() {
   const clockInMutation = useClockIn({ mutation: { networkMode: "always" } });
   const clockOutMutation = useClockOut({ mutation: { networkMode: "always" } });
 
-  // Web preview (canvas iframe) often blocks geolocation. Let the user pick a
-  // site manually as a fallback so the clock function is testable on web.
-  const isWeb = Platform.OS === "web";
+  // Manual site picker fallback. Needed whenever GPS is unavailable (web preview
+  // blocks geolocation; native GPS can be denied/off) OR the officer's venue has
+  // a Site with no saved coordinates, where geo-resolution can never match. The
+  // officer's explicit pick is sent as siteId and the server skips the geo check.
   const [showSitePicker, setShowSitePicker] = useState(false);
   const { data: sitesList } = useGetMyClockInSites({
-    query: { queryKey: getGetMyClockInSitesQueryKey(), enabled: isWeb },
+    query: { queryKey: getGetMyClockInSitesQueryKey() },
   });
 
   const isClockedIn = !!currentEntry?.id;
@@ -129,10 +130,14 @@ export default function EmployeeClockScreen() {
     return () => { cancelled = true; clearInterval(t); };
   }, [isClockedIn]);
 
-  const performClockIn = async (lat: number, lng: number, siteLabel?: string) => {
+  const performClockIn = async (opts: { lat?: number; lng?: number; siteId?: string; siteLabel?: string }) => {
+    const { lat, lng, siteId, siteLabel } = opts;
     try {
       const result: any = await clockInMutation.mutateAsync({
-        data: { lat, lng } as any,
+        data: {
+          ...(lat != null && lng != null ? { lat, lng } : {}),
+          ...(siteId ? { siteId } : {}),
+        } as any,
       });
       AccessibilityInfo.announceForAccessibility(`Clocked in${siteLabel ? ` at ${siteLabel}` : ""}. You are now on duty.`);
       await Promise.all([
@@ -152,18 +157,18 @@ export default function EmployeeClockScreen() {
       const status = e?.response?.status;
       const code = e?.response?.data?.error;
       const msg = e?.response?.data?.message || e?.message || "Clock-in failed";
-      // Mobile-web GPS is geolocated from wifi/IP, not satellites, so it is
-      // frequently off by miles. A "No Site Nearby" (422) rejection on web
-      // usually means the browser fix was wrong — NOT that the officer is
-      // actually far from their post. Rather than dead-ending on an error,
-      // fall back to the manual site picker (which clocks in using the site's
-      // own coordinates). The `!siteLabel` guard prevents a loop when the
-      // failing attempt was itself a manual pick.
-      if (isWeb && !siteLabel && (status === 422 || code === "No Site Nearby")) {
+      // GPS is unreliable: mobile-web is geolocated from wifi/IP (often off by
+      // miles) and native GPS can be denied/off. A "No Site Nearby" (422) usually
+      // means the fix was wrong — NOT that the officer is actually far from their
+      // post — and some venues have no saved site coordinates at all. Rather than
+      // dead-ending, fall back to the manual site picker, which sends the chosen
+      // siteId and lets the server skip the geo check. The `!siteLabel` guard
+      // prevents a loop when the failing attempt was itself a manual pick.
+      if (!siteLabel && (status === 422 || code === "No Site Nearby")) {
         setShowSitePicker(true);
         setStatusMsg({
           kind: "info",
-          text: "We couldn't match your location to a site automatically — your browser's GPS may be off. Pick your site below to clock in.",
+          text: "We couldn't match your location to a site automatically. Pick your site below to clock in.",
         });
         return;
       }
@@ -174,13 +179,9 @@ export default function EmployeeClockScreen() {
   const handleClockIn = async () => {
     setStatusMsg(null);
     if (!location) {
-      if (isWeb) {
-        // Browser GPS may be unavailable/denied — let the user manually pick a
-        // site whose coordinates we'll use instead.
-        setShowSitePicker(true);
-        return;
-      }
-      setStatusMsg({ kind: "error", text: "Location required — enable GPS so we can identify your site, then try again." });
+      // GPS unavailable/denied (web preview or native permission off) — let the
+      // officer pick their site manually instead of dead-ending.
+      setShowSitePicker(true);
       return;
     }
     setConfirmModal({
@@ -189,7 +190,7 @@ export default function EmployeeClockScreen() {
       confirmText: "Clock In",
       onConfirm: () => {
         setConfirmModal(null);
-        performClockIn(location.lat, location.lon);
+        performClockIn({ lat: location.lat, lng: location.lon });
       },
     });
   };
@@ -197,14 +198,18 @@ export default function EmployeeClockScreen() {
   const handlePickSite = (site: any) => {
     setShowSitePicker(false);
     setStatusMsg(null);
+    // Send the explicit siteId so the server can clock in even when the site has
+    // no saved coordinates. Include coords too when the site has them (seeds the
+    // live map and geofence), but they're no longer required.
     const lat = site?.locationLat != null ? Number(site.locationLat) : null;
     const lng = site?.locationLng != null ? Number(site.locationLng) : null;
-    if (lat == null || lng == null || Number.isNaN(lat) || Number.isNaN(lng)) {
-      setStatusMsg({ kind: "error", text: `${site?.name ?? "This site"} doesn't have a saved location yet. Ask an admin to add its address in the portal first.` });
-      return;
-    }
-    setLocation({ lat, lon: lng });
-    performClockIn(lat, lng, site.name);
+    const hasCoords = lat != null && lng != null && !Number.isNaN(lat) && !Number.isNaN(lng);
+    if (hasCoords) setLocation({ lat: lat!, lon: lng! });
+    performClockIn({
+      ...(hasCoords ? { lat: lat!, lng: lng! } : {}),
+      siteId: site.id,
+      siteLabel: site.name,
+    });
   };
 
   const performClockOut = async () => {
@@ -327,6 +332,19 @@ export default function EmployeeClockScreen() {
           </TouchableOpacity>
         )}
 
+        {!isClockedIn && !entryLoading && !showSitePicker && (
+          <TouchableOpacity
+            onPress={() => { setStatusMsg(null); setShowSitePicker(true); }}
+            accessibilityRole="button"
+            accessibilityLabel="Pick your site to clock in"
+            style={{ marginTop: 14 }}
+          >
+            <Text style={{ color: colors.primary, fontSize: 13, textDecorationLine: "underline", textAlign: "center" }}>
+              Location not working? Pick your site
+            </Text>
+          </TouchableOpacity>
+        )}
+
         {statusMsg && (
           <View
             accessibilityLiveRegion="polite"
@@ -350,7 +368,7 @@ export default function EmployeeClockScreen() {
         )}
       </View>
 
-      {isWeb && showSitePicker && (
+      {showSitePicker && (
         <View style={[styles.section, { backgroundColor: colors.card, borderColor: colors.border, marginHorizontal: 16, borderRadius: 12, borderWidth: 1, padding: 16 }]}>
           <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
             <Text style={[styles.sectionTitle, { color: colors.accent }]}>PICK A SITE</Text>
@@ -363,44 +381,27 @@ export default function EmployeeClockScreen() {
             </TouchableOpacity>
           </View>
           <Text style={{ color: colors.mutedForeground, fontSize: 12, marginBottom: 10 }}>
-            Browser GPS isn't available in this preview. Pick the site you're clocking in at:
+            Tap the site you're clocking in at:
           </Text>
-          {((sitesList as any[]) ?? []).map((s: any) => {
-            const hasCoords = s?.locationLat != null && s?.locationLng != null;
-            return (
-              <TouchableOpacity
-                key={s.id}
-                onPress={() => handlePickSite(s)}
-                disabled={!hasCoords}
-                accessibilityRole="button"
-                accessibilityLabel={hasCoords ? `Clock in at ${s.name}` : `${s.name}, needs setup, unavailable`}
-                accessibilityState={{ disabled: !hasCoords }}
-                style={[
-                  styles.entryCard,
-                  { backgroundColor: colors.background, borderColor: colors.border, padding: 12, opacity: hasCoords ? 1 : 0.55 },
-                ]}
-              >
-                <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
-                  <Feather name="map-pin" size={14} color={hasCoords ? colors.primary : colors.mutedForeground} />
-                  <Text style={[{ color: colors.foreground, fontWeight: "600", flex: 1 }]}>{s.name}</Text>
-                  {hasCoords ? (
-                    <Feather name="chevron-right" size={16} color={colors.mutedForeground} />
-                  ) : (
-                    <View style={{ flexDirection: "row", alignItems: "center", gap: 4, backgroundColor: "#fef3c7", borderColor: "#fcd34d", borderWidth: 1, paddingHorizontal: 6, paddingVertical: 2, borderRadius: 4 }}>
-                      <Feather name="alert-triangle" size={10} color="#92400e" />
-                      <Text style={{ color: "#92400e", fontSize: 10, fontWeight: "700" }}>NEEDS SETUP</Text>
-                    </View>
-                  )}
-                </View>
-                {s.address && <Text style={{ color: colors.mutedForeground, fontSize: 12, marginTop: 4, marginLeft: 22 }}>{s.address}</Text>}
-                {!hasCoords && (
-                  <Text style={{ color: "#92400e", fontSize: 11, marginTop: 4, marginLeft: 22 }}>
-                    Ask an admin to geocode this site's address.
-                  </Text>
-                )}
-              </TouchableOpacity>
-            );
-          })}
+          {((sitesList as any[]) ?? []).map((s: any) => (
+            <TouchableOpacity
+              key={s.id}
+              onPress={() => handlePickSite(s)}
+              accessibilityRole="button"
+              accessibilityLabel={`Clock in at ${s.name}`}
+              style={[
+                styles.entryCard,
+                { backgroundColor: colors.background, borderColor: colors.border, padding: 12 },
+              ]}
+            >
+              <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
+                <Feather name="map-pin" size={14} color={colors.primary} />
+                <Text style={[{ color: colors.foreground, fontWeight: "600", flex: 1 }]}>{s.name}</Text>
+                <Feather name="chevron-right" size={16} color={colors.mutedForeground} />
+              </View>
+              {s.address ? <Text style={{ color: colors.mutedForeground, fontSize: 12, marginTop: 4, marginLeft: 22 }}>{s.address}</Text> : null}
+            </TouchableOpacity>
+          ))}
           {((sitesList as any[]) ?? []).length === 0 && (
             <Text style={{ color: colors.mutedForeground, fontSize: 12, textAlign: "center", padding: 20 }}>No sites configured.</Text>
           )}

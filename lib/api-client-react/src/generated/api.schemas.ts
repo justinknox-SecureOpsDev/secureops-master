@@ -724,14 +724,20 @@ export interface TimeEntry {
 }
 
 /**
- * Clock in. If shiftId is provided, the entry is linked to that shift. Otherwise the
-server geo-resolves the nearest Site within 1 mile of (lat, lng) and links that.
+ * Clock in. Resolution priority: (1) if shiftId is provided, the entry is linked to
+that shift (no geo check); (2) else if siteId is provided, the entry is linked to
+that explicitly-picked site (no geo check — used when GPS is unavailable or the site
+has no saved coordinates); (3) else the server geo-resolves the nearest Site within
+1 mile of (lat, lng) and links that. lat/lng are optional when shiftId or siteId is
+supplied.
 
  */
 export interface ClockInRequest {
   shiftId?: string | null;
-  lat: number;
-  lng: number;
+  /** Explicitly chosen site. Skips geo-resolution; coordinates not required. */
+  siteId?: string | null;
+  lat?: number;
+  lng?: number;
   notes?: string;
 }
 

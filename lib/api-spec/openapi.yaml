@@ -3265,21 +3265,26 @@ components:
     ClockInRequest:
       type: object
       description: |
-        Clock in. If shiftId is provided, the entry is linked to that shift. Otherwise the
-        server geo-resolves the nearest Site within 1 mile of (lat, lng) and links that.
+        Clock in. Resolution priority: (1) if shiftId is provided, the entry is linked to
+        that shift (no geo check); (2) else if siteId is provided, the entry is linked to
+        that explicitly-picked site (no geo check — used when GPS is unavailable or the site
+        has no saved coordinates); (3) else the server geo-resolves the nearest Site within
+        1 mile of (lat, lng) and links that. lat/lng are optional when shiftId or siteId is
+        supplied.
       properties:
         shiftId:
           type: string
           nullable: true
+        siteId:
+          type: string
+          nullable: true
+          description: Explicitly chosen site. Skips geo-resolution; coordinates not required.
         lat:
           type: number
         lng:
           type: number
         notes:
           type: string
-      required:
-        - lat
-        - lng
 
     ClockOutRequest:
       type: object

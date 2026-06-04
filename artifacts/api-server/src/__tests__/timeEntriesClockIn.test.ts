@@ -354,3 +354,180 @@ describe("POST /time-entries/clock-out time-correction request", () => {
     await db.delete(timeEntriesTable).where(eq(timeEntriesTable.id, entryId));
   });
 });
+
+describe("POST /time-entries/clock-in by explicit siteId (GPS-less manual pick)", () => {
+  async function makeNoCoordsSite(suffix: string): Promise<string> {
+    // No locationLat/locationLng — mirrors the production sites that broke geo
+    // clock-in and forced officers onto the manual-picker path.
+    const [site] = await db
+      .insert(sitesTable)
+      .values({
+        clientId: ctx.clientId,
+        name: `${TAG}-nocoords-${suffix}`,
+        address: "2 No Coords Rd",
+      })
+      .returning({ id: sitesTable.id });
+    return site.id;
+  }
+
+  async function makeShiftWithAssignment(siteId: string, employeeId: string): Promise<string> {
+    const start = new Date(Date.now() - 5 * 60_000);
+    const end = new Date(Date.now() + 6 * 3600_000);
+    const [shift] = await db
+      .insert(shiftsTable)
+      .values({
+        siteId,
+        title: `${TAG}-pick-shift`,
+        startTime: start,
+        endTime: end,
+        status: "upcoming",
+        headcount: 2,
+        requiredLicenseLevel: 2,
+      })
+      .returning({ id: shiftsTable.id });
+    await db.insert(shiftAssignmentsTable).values({ shiftId: shift.id, employeeId, status: "accepted" });
+    return shift.id;
+  }
+
+  it("allows clock-in to a no-coords site the officer is rostered at and links to their own shift", async () => {
+    await deleteOpenEntries(ctx.licensedEmployeeId);
+    await db.delete(shiftAssignmentsTable).where(eq(shiftAssignmentsTable.employeeId, ctx.licensedEmployeeId));
+    const siteId = await makeNoCoordsSite("allowed");
+    const shiftId = await makeShiftWithAssignment(siteId, ctx.licensedEmployeeId);
+
+    const res = await request(app)
+      .post("/api/time-entries/clock-in")
+      .set(authed(ctx.licensedToken))
+      .send({ siteId });
+    expect(res.status).toBe(201);
+
+    const [entry] = await db
+      .select({ siteId: timeEntriesTable.siteId, shiftId: timeEntriesTable.shiftId })
+      .from(timeEntriesTable)
+      .where(eq(timeEntriesTable.id, res.body.id));
+    expect(entry.siteId).toBe(siteId);
+    expect(entry.shiftId).toBe(shiftId);
+
+    await deleteOpenEntries(ctx.licensedEmployeeId);
+    await db.delete(shiftAssignmentsTable).where(eq(shiftAssignmentsTable.shiftId, shiftId));
+    await db.delete(shiftsTable).where(eq(shiftsTable.id, shiftId));
+    await db.delete(sitesTable).where(eq(sitesTable.id, siteId));
+  });
+
+  it("rejects clock-in (403 not_rostered_here) to a site the officer is NOT rostered at", async () => {
+    await deleteOpenEntries(ctx.licensedEmployeeId);
+    await db.delete(shiftAssignmentsTable).where(eq(shiftAssignmentsTable.employeeId, ctx.licensedEmployeeId));
+    const siteId = await makeNoCoordsSite("forbidden");
+
+    const res = await request(app)
+      .post("/api/time-entries/clock-in")
+      .set(authed(ctx.licensedToken))
+      .send({ siteId });
+    expect(res.status).toBe(403);
+    expect(res.body.code).toBe("not_rostered_here");
+
+    // No time entry should have been created.
+    const open = await db
+      .select({ id: timeEntriesTable.id })
+      .from(timeEntriesTable)
+      .where(and(eq(timeEntriesTable.employeeId, ctx.licensedEmployeeId), isNull(timeEntriesTable.clockOutTime)));
+    expect(open).toHaveLength(0);
+
+    await db.delete(sitesTable).where(eq(sitesTable.id, siteId));
+  });
+
+  it("never auto-assigns the GPS-less picked-site path to an open shift the officer isn't on", async () => {
+    await deleteOpenEntries(ctx.licensedEmployeeId);
+    await db.delete(shiftAssignmentsTable).where(eq(shiftAssignmentsTable.employeeId, ctx.licensedEmployeeId));
+    const siteId = await makeNoCoordsSite("noautoassign");
+    // The officer's own accepted shift at the site...
+    const ownShiftId = await makeShiftWithAssignment(siteId, ctx.licensedEmployeeId);
+    // ...plus a SEPARATE open shift at the same site the officer is NOT on.
+    const start = new Date(Date.now() - 5 * 60_000);
+    const end = new Date(Date.now() + 6 * 3600_000);
+    const [openShift] = await db
+      .insert(shiftsTable)
+      .values({
+        siteId,
+        title: `${TAG}-open-shift`,
+        startTime: start,
+        endTime: end,
+        status: "upcoming",
+        headcount: 2,
+        requiredLicenseLevel: 2,
+      })
+      .returning({ id: shiftsTable.id });
+
+    const res = await request(app)
+      .post("/api/time-entries/clock-in")
+      .set(authed(ctx.licensedToken))
+      .send({ siteId });
+    expect(res.status).toBe(201);
+
+    // Attached to their OWN shift, not the open one.
+    const [entry] = await db
+      .select({ shiftId: timeEntriesTable.shiftId })
+      .from(timeEntriesTable)
+      .where(eq(timeEntriesTable.id, res.body.id));
+    expect(entry.shiftId).toBe(ownShiftId);
+
+    // No assignment was created on the open shift — the GPS-less path must not
+    // self-assign the officer to slots they didn't already hold.
+    const openAssignments = await db
+      .select({ id: shiftAssignmentsTable.id })
+      .from(shiftAssignmentsTable)
+      .where(and(
+        eq(shiftAssignmentsTable.shiftId, openShift.id),
+        eq(shiftAssignmentsTable.employeeId, ctx.licensedEmployeeId),
+      ));
+    expect(openAssignments).toHaveLength(0);
+
+    await deleteOpenEntries(ctx.licensedEmployeeId);
+    await db.delete(shiftAssignmentsTable).where(eq(shiftAssignmentsTable.employeeId, ctx.licensedEmployeeId));
+    await db.delete(shiftsTable).where(eq(shiftsTable.id, ownShiftId));
+    await db.delete(shiftsTable).where(eq(shiftsTable.id, openShift.id));
+    await db.delete(sitesTable).where(eq(sitesTable.id, siteId));
+  });
+});
+
+describe("GET /me/clock-in-sites picker visibility", () => {
+  it("returns only the sites the officer is rostered at", async () => {
+    await deleteOpenEntries(ctx.licensedEmployeeId);
+    await db.delete(shiftAssignmentsTable).where(eq(shiftAssignmentsTable.employeeId, ctx.licensedEmployeeId));
+
+    const [rosteredSite] = await db
+      .insert(sitesTable)
+      .values({ clientId: ctx.clientId, name: `${TAG}-picker-rostered`, address: "3 Rostered Rd" })
+      .returning({ id: sitesTable.id });
+    const [otherSite] = await db
+      .insert(sitesTable)
+      .values({ clientId: ctx.clientId, name: `${TAG}-picker-other`, address: "4 Other Rd" })
+      .returning({ id: sitesTable.id });
+    const start = new Date(Date.now() - 5 * 60_000);
+    const end = new Date(Date.now() + 6 * 3600_000);
+    const [shift] = await db
+      .insert(shiftsTable)
+      .values({
+        siteId: rosteredSite.id,
+        title: `${TAG}-picker-shift`,
+        startTime: start,
+        endTime: end,
+        status: "upcoming",
+        headcount: 2,
+        requiredLicenseLevel: 2,
+      })
+      .returning({ id: shiftsTable.id });
+    await db.insert(shiftAssignmentsTable).values({ shiftId: shift.id, employeeId: ctx.licensedEmployeeId, status: "accepted" });
+
+    const res = await request(app).get("/api/me/clock-in-sites").set(authed(ctx.licensedToken));
+    expect(res.status).toBe(200);
+    const ids = (res.body as Array<{ id: string }>).map((s) => s.id);
+    expect(ids).toContain(rosteredSite.id);
+    expect(ids).not.toContain(otherSite.id);
+
+    await db.delete(shiftAssignmentsTable).where(eq(shiftAssignmentsTable.shiftId, shift.id));
+    await db.delete(shiftsTable).where(eq(shiftsTable.id, shift.id));
+    await db.delete(sitesTable).where(eq(sitesTable.id, rosteredSite.id));
+    await db.delete(sitesTable).where(eq(sitesTable.id, otherSite.id));
+  });
+});

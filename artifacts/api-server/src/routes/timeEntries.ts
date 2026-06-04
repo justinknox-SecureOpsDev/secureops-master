@@ -1,5 +1,5 @@
 import { Router, type IRouter } from "express";
-import { eq, and, gte, lte, ne, isNull, sql } from "drizzle-orm";
+import { eq, and, gte, lte, ne, isNull, inArray, sql } from "drizzle-orm";
 import { db, timeEntriesTable, shiftsTable, usersTable, sitesTable, shiftAssignmentsTable, licensesTable } from "@workspace/db";
 import { requireAuth, requireAdmin, requireStaff } from "../middlewares/auth";
 import { upsertWeeklyInvoiceForTimeEntry } from "../lib/invoiceSync";
@@ -205,6 +205,38 @@ async function resolveOrAssignShiftForAdHocClockIn(
   return findMatchingScheduledShift(employeeId, siteId, whenAt);
 }
 
+// How long after a shift ends an officer may still self-clock-in to its site
+// via the GPS-less manual picker (covers late clock-ins). There is no early
+// bound beyond excluding far-future seed rows — an officer rostered at a site
+// is allowed to pick it. Used to gate BOTH the picker list AND the explicit-
+// siteId clock-in path so a clock-in carrying no location proof can only land
+// on a site the officer is actually rostered at. Blocks remote-site time /
+// dispatch spoofing introduced by trusting an arbitrary picked siteId.
+const CLOCK_IN_PICK_END_GRACE_MS = 2 * 60 * 60 * 1000;
+
+// Accepted, live-or-upcoming shifts for an officer (any site), used to derive
+// which sites the manual picker may offer and which the explicit-siteId path
+// may accept. Excludes cancelled/completed shifts and 2099 seed junk.
+async function officerRosteredShiftsForPicker(
+  employeeId: string,
+  whenAt: Date,
+): Promise<Array<{ shiftId: string; siteId: string | null; startTime: Date }>> {
+  const endFloor = new Date(whenAt.getTime() - CLOCK_IN_PICK_END_GRACE_MS);
+  const farFutureCutoff = new Date("2090-01-01T00:00:00Z");
+  return db
+    .select({ shiftId: shiftsTable.id, siteId: shiftsTable.siteId, startTime: shiftsTable.startTime })
+    .from(shiftAssignmentsTable)
+    .innerJoin(shiftsTable, eq(shiftAssignmentsTable.shiftId, shiftsTable.id))
+    .where(and(
+      eq(shiftAssignmentsTable.employeeId, employeeId),
+      eq(shiftAssignmentsTable.status, "accepted"),
+      ne(shiftsTable.status, "cancelled"),
+      ne(shiftsTable.status, "completed"),
+      gte(shiftsTable.endTime, endFloor),
+      lte(shiftsTable.startTime, farFutureCutoff),
+    ));
+}
+
 // Coalesce: prefer the time entry's direct siteId (set by geo-resolution when no shift),
 // otherwise fall back to the linked shift's siteId.
 const baseSelect = {
@@ -269,7 +301,20 @@ async function resolveNearestSite(lat: number, lng: number): Promise<{ id: strin
 // Minimal site list for the officer manual clock-in picker (web GPS fallback).
 // Employees can't call admin /sites, so this exposes ONLY the fields the picker
 // needs (id, name, address, coords) — no client, bill rate, geofence or notes.
-router.get("/me/clock-in-sites", requireStaff, async (_req, res): Promise<void> => {
+router.get("/me/clock-in-sites", requireStaff, async (req, res): Promise<void> => {
+  // Non-admins only see sites they're actually rostered at (an accepted, live-or-
+  // upcoming shift). The picker is the GPS-less clock-in fallback, so leaving it
+  // unfiltered would let an officer self-clock-in to an arbitrary remote site.
+  // Admins (covering a post / troubleshooting a stuck record) see every site.
+  let allowedSiteIds: string[] | null = null;
+  if (req.user!.role !== "admin") {
+    const rostered = await officerRosteredShiftsForPicker(req.user!.userId, new Date());
+    allowedSiteIds = [...new Set(rostered.map((r) => r.siteId).filter((x): x is string => x != null))];
+    if (allowedSiteIds.length === 0) {
+      res.json([]);
+      return;
+    }
+  }
   const rows = await db
     .select({
       id: sitesTable.id,
@@ -279,6 +324,7 @@ router.get("/me/clock-in-sites", requireStaff, async (_req, res): Promise<void> 
       locationLng: sitesTable.locationLng,
     })
     .from(sitesTable)
+    .where(allowedSiteIds ? inArray(sitesTable.id, allowedSiteIds) : undefined)
     .orderBy(sitesTable.name);
   res.json(rows);
 });
@@ -310,9 +356,14 @@ router.get("/time-entries", requireAuth, async (req, res): Promise<void> => {
 });
 
 router.post("/time-entries/clock-in", requireAuth, async (req, res): Promise<void> => {
-  const { shiftId, lat, lng, notes } = req.body;
-  if (lat == null || lng == null) {
-    res.status(400).json({ error: "Bad Request", message: "lat, lng required" });
+  const { shiftId, siteId: bodySiteId, lat, lng, notes } = req.body;
+  const hasCoords = lat != null && lng != null;
+  // Coordinates are only mandatory for the geo-resolve path. When the officer
+  // selects a shift (shiftId) or explicitly picks their site (siteId) we trust
+  // that choice and don't need GPS — critical for venues whose Site has no
+  // saved coordinates, where geo-resolution can never match.
+  if (!hasCoords && !shiftId && !bodySiteId) {
+    res.status(400).json({ error: "Bad Request", message: "Provide your location, pick your site, or select a reserved shift to clock in." });
     return;
   }
   const existing = await db
@@ -351,6 +402,8 @@ router.post("/time-entries/clock-in", requireAuth, async (req, res): Promise<voi
   // Geo-resolve site if no shiftId provided.
   let resolvedSite: { id: string; name: string; distanceMiles: number } | null = null;
   let assignedShiftSiteId: string | null = null;
+  let pickedSite: { id: string; name: string } | null = null;
+  let pickedOwnShiftId: string | null = null;
   if (shiftId) {
     // Validate the shift exists and the user is assigned to it (admins may
     // clock in on behalf of any user, but normal employees can only clock in
@@ -387,6 +440,35 @@ router.post("/time-entries/clock-in", requireAuth, async (req, res): Promise<voi
       }
     }
     assignedShiftSiteId = shift.siteId ?? null;
+  } else if (bodySiteId) {
+    // Officer explicitly picked their site (web GPS unavailable, or the site has
+    // no saved coordinates so geo-resolution can never match it). Because this
+    // path carries NO location proof, a non-admin may only clock in to a site
+    // they're actually rostered at (an accepted, live-or-upcoming shift) —
+    // otherwise it would let anyone fabricate presence at an arbitrary remote
+    // site and even auto-attach to its open shifts. Admins are trusted (covering
+    // a post / fixing a stuck record). The geo-radius check is still skipped:
+    // the accepted-assignment is the authorization instead.
+    const [site] = await db.select().from(sitesTable).where(eq(sitesTable.id, bodySiteId));
+    if (!site) {
+      res.status(404).json({ error: "Not Found", message: "Site not found" });
+      return;
+    }
+    if (req.user!.role !== "admin") {
+      const rostered = await officerRosteredShiftsForPicker(req.user!.userId, new Date());
+      const ownShift = closestByStart(rostered.filter((r) => r.siteId === site.id), new Date());
+      if (!ownShift) {
+        res.status(403).json({
+          error: "Forbidden",
+          code: "not_rostered_here",
+          message: "You don't have a shift at this site. Tap your reserved shift in the Shifts tab, or move closer so GPS can place you.",
+        });
+        return;
+      }
+      pickedOwnShiftId = ownShift.shiftId;
+    }
+    assignedShiftSiteId = site.id;
+    pickedSite = { id: site.id, name: site.name };
   } else {
     resolvedSite = await resolveNearestSite(Number(lat), Number(lng));
     if (!resolvedSite) {
@@ -404,13 +486,28 @@ router.post("/time-entries/clock-in", requireAuth, async (req, res): Promise<voi
   // they show up on the Dispatch status board's "On duty" tab. Falls back to
   // a billing-only attach when nothing is claimable. See the helper above.
   let autoAttachedShiftId: string | null = null;
-  if (!shiftId && resolvedSite) {
-    autoAttachedShiftId = await resolveOrAssignShiftForAdHocClockIn(
-      req.user!.userId,
-      resolvedSite.id,
-      new Date(),
-      req.log,
-    );
+  if (!shiftId) {
+    if (resolvedSite) {
+      // GPS-verified ad-hoc clock-in: the officer is physically within range of
+      // the resolved site, so it's safe to auto-assign them to an open shift
+      // there (so they surface as "on duty" on the Dispatch board).
+      autoAttachedShiftId = await resolveOrAssignShiftForAdHocClockIn(
+        req.user!.userId,
+        resolvedSite.id,
+        new Date(),
+        req.log,
+      );
+    } else if (pickedSite) {
+      // Manually-picked site carries NO location proof, so we NEVER auto-assign
+      // it to an arbitrary open shift. Non-admins attach only to their own
+      // rostered shift validated above; admins get a billing-only match so the
+      // per-shift billRate is still recovered for invoicing.
+      if (pickedOwnShiftId) {
+        autoAttachedShiftId = pickedOwnShiftId;
+      } else if (req.user!.role === "admin") {
+        autoAttachedShiftId = await findMatchingScheduledShift(req.user!.userId, pickedSite.id, new Date());
+      }
+    }
   }
 
   const [entry] = await db.insert(timeEntriesTable).values({
@@ -418,8 +515,8 @@ router.post("/time-entries/clock-in", requireAuth, async (req, res): Promise<voi
     siteId: resolvedSite ? resolvedSite.id : assignedShiftSiteId,
     employeeId: req.user!.userId,
     clockInTime: new Date(),
-    clockInLat: String(lat),
-    clockInLng: String(lng),
+    clockInLat: hasCoords ? String(lat) : null,
+    clockInLng: hasCoords ? String(lng) : null,
     notes: notes || null,
     isVerified: false,
     approvalStatus: "pending",
@@ -432,7 +529,7 @@ router.post("/time-entries/clock-in", requireAuth, async (req, res): Promise<voi
   try {
     const latNum = Number(lat);
     const lngNum = Number(lng);
-    if (Number.isFinite(latNum) && Number.isFinite(lngNum)) {
+    if (hasCoords && Number.isFinite(latNum) && Number.isFinite(lngNum)) {
       await db
         .update(usersTable)
         .set({
@@ -472,7 +569,7 @@ router.post("/time-entries/clock-in", requireAuth, async (req, res): Promise<voi
       employeeEmail: user.email,
       employeeName: `${user.firstName} ${user.lastName}`,
       shiftExternalId: (shift as any)?.externalId ?? null,
-      siteName: resolvedSite?.name ?? null,
+      siteName: resolvedSite?.name ?? pickedSite?.name ?? null,
     });
   }
 
@@ -480,7 +577,7 @@ router.post("/time-entries/clock-in", requireAuth, async (req, res): Promise<voi
     ...entry,
     shiftTitle: shift?.title ?? null,
     siteId: entry.siteId ?? shift?.siteId ?? null,
-    siteName: resolvedSite?.name ?? null,
+    siteName: resolvedSite?.name ?? pickedSite?.name ?? null,
     geoResolved: resolvedSite ? { siteName: resolvedSite.name, distanceMiles: Math.round(resolvedSite.distanceMiles * 100) / 100 } : null,
     employeeName: user ? `${user.firstName} ${user.lastName}` : null,
   });
