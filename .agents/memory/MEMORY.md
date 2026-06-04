@@ -11,6 +11,7 @@
 - [api-server suite WS broadcast flake](api-server-ws-broadcast-flake.md) — wsBroadcast.test.ts passes alone but flakes under full parallel run (500ms collectFor window starved by load); not a regression.
 - [Admin grid sort indexes](admin-grid-sort-indexes.md) — every admin-CRUD table's default sort column needs a (col, id) composite index; list + position deep-link both order by (sortCol, id).
 - [axe parent-opacity contrast](axe-parent-opacity-contrast.md) — Tailwind opacity-* on a container dims descendants; axe flags blended contrast. Fix on the leaf text node, not the child.
+- [admin-portal light theme](admin-portal-light-theme.md) — admin-portal is LIGHT (shadcn tokens); never hardcode text-white/bg-white/dark color boxes or text renders invisible.
 - [Web GPS geo-radius fallback](web-gps-geo-radius-fallback.md) — mobile-web GPS is wifi/IP-based & off by miles; geo clock-in must fall back to manual site picker on 422, not just on missing location.
 - [Responsive single-render ref parity](responsive-single-render-ref-parity.md) — dual-layout→useIsMobile single-render: re-attach every per-row ref/handler to BOTH branches or behavior dies on one viewport.
 - [Auto-assign on clock-in eligibility](auto-assign-on-clockin-eligibility.md) — any path creating an accepted shift_assignment (incl. ad-hoc clock-in auto-assign) must apply the claim route's licence-level gate.
