@@ -149,7 +149,24 @@ export default function EmployeeClockScreen() {
           : "You're clocked in. You are now on duty.",
       });
     } catch (e: any) {
+      const status = e?.response?.status;
+      const code = e?.response?.data?.error;
       const msg = e?.response?.data?.message || e?.message || "Clock-in failed";
+      // Mobile-web GPS is geolocated from wifi/IP, not satellites, so it is
+      // frequently off by miles. A "No Site Nearby" (422) rejection on web
+      // usually means the browser fix was wrong — NOT that the officer is
+      // actually far from their post. Rather than dead-ending on an error,
+      // fall back to the manual site picker (which clocks in using the site's
+      // own coordinates). The `!siteLabel` guard prevents a loop when the
+      // failing attempt was itself a manual pick.
+      if (isWeb && !siteLabel && (status === 422 || code === "No Site Nearby")) {
+        setShowSitePicker(true);
+        setStatusMsg({
+          kind: "info",
+          text: "We couldn't match your location to a site automatically — your browser's GPS may be off. Pick your site below to clock in.",
+        });
+        return;
+      }
       setStatusMsg({ kind: "error", text: msg });
     }
   };
