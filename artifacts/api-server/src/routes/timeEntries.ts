@@ -70,6 +70,45 @@ function closestByStart<T extends { startTime: Date }>(rows: T[], whenAt: Date):
   return best;
 }
 
+// Clock-in window: an officer may only clock into a shift from 30 minutes
+// before its scheduled start until its scheduled end. Blocks clocking into a
+// wrong-date / not-yet-started shift (e.g. tapping OR site-picking a shift
+// days out) which otherwise polluted the Dispatch board with phantom "on
+// duty" officers attached to a shift outside today. Late officers may still
+// clock in during the shift (flagged "late" on the board). Admins bypass this
+// — they fix stuck records / cover posts on others' behalf via the dedicated
+// dispatch on-behalf endpoint. Returns a 409-shaped rejection, or null when
+// the current time is inside the allowed window.
+const CLOCK_IN_EARLY_GRACE_MS = 30 * 60_000;
+
+function clockInWindowRejection(
+  shift: { startTime: Date; endTime: Date },
+  now: Date,
+): { error: string; code: string; message: string } | null {
+  const opensAt = new Date(shift.startTime.getTime() - CLOCK_IN_EARLY_GRACE_MS);
+  const tz = process.env.PAYROLL_TIMEZONE?.trim() || "America/Chicago";
+  const fmtWhen = (d: Date): string =>
+    d.toLocaleString("en-US", {
+      timeZone: tz, weekday: "short", month: "short", day: "numeric",
+      hour: "numeric", minute: "2-digit",
+    });
+  if (now < opensAt) {
+    return {
+      error: "Too Early",
+      code: "clock_in_too_early",
+      message: `This shift starts ${fmtWhen(shift.startTime)}. You can clock in from ${fmtWhen(opensAt)} (30 minutes before the start).`,
+    };
+  }
+  if (now > shift.endTime) {
+    return {
+      error: "Shift Ended",
+      code: "clock_in_after_end",
+      message: `This shift ended ${fmtWhen(shift.endTime)}. Ask your supervisor to record this time for you.`,
+    };
+  }
+  return null;
+}
+
 // Resolve which scheduled shift an ad-hoc geo clock-in should attach to,
 // auto-assigning the officer to an open shift when they aren't already
 // rostered. This is what makes a clocked-in officer surface on the Dispatch
@@ -220,11 +259,11 @@ const CLOCK_IN_PICK_END_GRACE_MS = 2 * 60 * 60 * 1000;
 async function officerRosteredShiftsForPicker(
   employeeId: string,
   whenAt: Date,
-): Promise<Array<{ shiftId: string; siteId: string | null; startTime: Date }>> {
+): Promise<Array<{ shiftId: string; siteId: string | null; startTime: Date; endTime: Date }>> {
   const endFloor = new Date(whenAt.getTime() - CLOCK_IN_PICK_END_GRACE_MS);
   const farFutureCutoff = new Date("2090-01-01T00:00:00Z");
   return db
-    .select({ shiftId: shiftsTable.id, siteId: shiftsTable.siteId, startTime: shiftsTable.startTime })
+    .select({ shiftId: shiftsTable.id, siteId: shiftsTable.siteId, startTime: shiftsTable.startTime, endTime: shiftsTable.endTime })
     .from(shiftAssignmentsTable)
     .innerJoin(shiftsTable, eq(shiftAssignmentsTable.shiftId, shiftsTable.id))
     .where(and(
@@ -438,6 +477,13 @@ router.post("/time-entries/clock-in", requireAuth, async (req, res): Promise<voi
         });
         return;
       }
+
+      // Clock-in window guard — see clockInWindowRejection.
+      const windowRej = clockInWindowRejection(shift, new Date());
+      if (windowRej) {
+        res.status(409).json(windowRej);
+        return;
+      }
     }
     assignedShiftSiteId = shift.siteId ?? null;
   } else if (bodySiteId) {
@@ -463,6 +509,15 @@ router.post("/time-entries/clock-in", requireAuth, async (req, res): Promise<voi
           code: "not_rostered_here",
           message: "You don't have a shift at this site. Tap your reserved shift in the Shifts tab, or move closer so GPS can place you.",
         });
+        return;
+      }
+      // Same clock-in window applies on the GPS-less site-pick path — the
+      // picker eligibility query has no early bound (an officer rostered at a
+      // site sees it regardless of date), so without this an officer could
+      // clock into a shift days out by picking its site.
+      const windowRej = clockInWindowRejection(ownShift, new Date());
+      if (windowRej) {
+        res.status(409).json(windowRej);
         return;
       }
       pickedOwnShiftId = ownShift.shiftId;

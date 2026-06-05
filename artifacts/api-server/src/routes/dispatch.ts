@@ -162,9 +162,18 @@ router.get("/dispatch/status-board", requireAdminOrDispatcher, async (_req, res)
     .where(isNull(timeEntriesTable.clockOutTime))
     .orderBy(asc(timeEntriesTable.clockInTime));
 
-  // Officers already on duty must not also appear as late / no-show /
-  // scheduled — they're clearly present, so we skip their assignment rows.
-  const onDutyUserIds = new Set(openEntries.map((e) => e.userId));
+  // An officer clocked into a shift must not ALSO surface as late / no-show /
+  // scheduled for THAT same shift. We skip per (officer, shift) so a second
+  // assignment later the same day still shows up. When the open entry has no
+  // shift attached (ad-hoc, billing-only) we can't disambiguate which roster
+  // it covers, so we fall back to skipping that officer's rows entirely to
+  // avoid double-counting a clearly-present officer.
+  const onDutyShiftKeys = new Set(
+    openEntries.filter((e) => e.shiftId).map((e) => `${e.userId}:${e.shiftId}`),
+  );
+  const onDutyUsersNoShift = new Set(
+    openEntries.filter((e) => !e.shiftId).map((e) => e.userId),
+  );
 
   // Closed entries for the windowed shifts — used to classify earlyOut /
   // completed for officers who clocked in and back out.
@@ -220,8 +229,9 @@ router.get("/dispatch/status-board", requireAdminOrDispatcher, async (_req, res)
   };
 
   for (const r of rows) {
-    // Clocked in right now → already represented in onDuty above.
-    if (onDutyUserIds.has(r.userId)) continue;
+    // Clocked into THIS shift (or clocked in with no shift attached) → already
+    // represented in onDuty above.
+    if (onDutyShiftKeys.has(`${r.userId}:${r.shiftId}`) || onDutyUsersNoShift.has(r.userId)) continue;
     const key = `${r.shiftId}:${r.userId}`;
     const closed = closedByShift.get(key);
     const minsSinceStart = (now.getTime() - r.startTime.getTime()) / MS_MIN;
