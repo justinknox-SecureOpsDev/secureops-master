@@ -19,4 +19,5 @@
 - [Officers on admin portal](officer-on-admin-portal.md) — employees who sign into /admin-portal/ must be redirected to the SecureOps app root /, not dead-ended on "Admin access required".
 - [Admin grid derived-name links](admin-grid-derived-name-links.md) — derived cell linkTo back to its own table self-filters (feels like a no-op click); use linkRoute for profile navigation.
 - [Scheduler sync LWW tiebreaker](scheduler-sync-lww-tiebreaker.md) — inbound upsert tiebreaks incoming updatedAt vs the LOCAL row's wall-clock updatedAt; tests expecting "skipped" must past-date the payload.
+- [Site/client hard-delete data loss](site-delete-cascade-data-loss.md) — deleting a site/client splits dependents (SET NULL survivors vs CASCADE deletes); all 4 delete paths must hit the shared blocker guard.
 - [Holiday rate cent-rounding](holiday-rate-cent-rounding.md) — round holiday premium rate to cents BEFORE × hours, identically in payroll + invoicing, or displayed-rate×hours drifts from gross.

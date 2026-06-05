@@ -39,6 +39,7 @@ import {
   insertLicenseSchema,
 } from "@workspace/db";
 import { requireAdmin } from "../middlewares/auth";
+import { siteBlockersForOne, clientDeletionBlockers, refuseIfBlocked } from "../lib/siteDeletion";
 import { sendEmail, renderPasswordResetEmail, renderInviteEmail } from "../lib/email";
 import { disconnectUser } from "../lib/wsManager";
 import { writeEmployeeFieldChanges } from "../lib/employeeChangeLog";
@@ -1142,6 +1143,14 @@ router.delete("/admin/tables/:table/:id", requireAdmin, async (req, res): Promis
   if (!cfg) {
     res.status(404).json({ error: "Not Found", message: `Unknown table '${tableName}'` });
     return;
+  }
+  // Guard against silent operational-data loss when deleting a site (or a
+  // client, which CASCADE-deletes its sites). See lib/siteDeletion.ts for why.
+  if (tableName === "sites") {
+    if (refuseIfBlocked(res, await siteBlockersForOne(id), "site")) return;
+  }
+  if (tableName === "clients") {
+    if (refuseIfBlocked(res, await clientDeletionBlockers(id), "client")) return;
   }
   try {
     const result = (await db.delete(cfg.table).where(eq((cfg.table as any).id, id)).returning()) as unknown[];

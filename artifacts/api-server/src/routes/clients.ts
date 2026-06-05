@@ -3,6 +3,7 @@ import { eq } from "drizzle-orm";
 import { db, clientsTable, sitesTable } from "@workspace/db";
 import { requireAdmin } from "../middlewares/auth";
 import { geocodeOnelineAddress } from "../lib/geocode";
+import { clientDeletionBlockers, refuseIfBlocked } from "../lib/siteDeletion";
 
 const router: IRouter = Router();
 
@@ -56,6 +57,9 @@ router.put("/clients/:id", requireAdmin, async (req, res): Promise<void> => {
 
 router.delete("/clients/:id", requireAdmin, async (req, res): Promise<void> => {
   const id = Array.isArray(req.params.id) ? req.params.id[0] : req.params.id;
+  // Deleting a client CASCADE-deletes its sites, which would silently null/cascade
+  // their operational data. Refuse while any of that exists. See lib/siteDeletion.ts.
+  if (refuseIfBlocked(res, await clientDeletionBlockers(id), "client")) return;
   await db.delete(clientsTable).where(eq(clientsTable.id, id));
   res.sendStatus(204);
 });

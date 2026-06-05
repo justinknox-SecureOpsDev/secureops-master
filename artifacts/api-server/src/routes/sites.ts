@@ -5,6 +5,7 @@ import { requireAdmin, requireAdminOrDispatcher } from "../middlewares/auth";
 import { geocodeOnelineAddress } from "../lib/geocode";
 import { preparePreUpdateBody, maybeAutoGeocode } from "../lib/siteGeocode";
 import { getGeofenceRadiusMiles } from "../lib/geofence";
+import { siteBlockersForOne, refuseIfBlocked } from "../lib/siteDeletion";
 
 // Resolve the effective geofence radius for a site row: per-site override
 // (when set and positive) wins, otherwise the global env default. Mirrors
@@ -213,6 +214,10 @@ router.put("/sites/:id", requireAdmin, async (req, res): Promise<void> => {
 
 router.delete("/sites/:id", requireAdmin, async (req, res): Promise<void> => {
   const id = Array.isArray(req.params.id) ? req.params.id[0] : req.params.id;
+
+  // Guard against silent operational-data loss. See lib/siteDeletion.ts.
+  if (refuseIfBlocked(res, await siteBlockersForOne(id), "site")) return;
+
   await db.delete(sitesTable).where(eq(sitesTable.id, id));
   res.sendStatus(204);
 });
