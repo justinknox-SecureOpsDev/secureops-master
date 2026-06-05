@@ -115,6 +115,16 @@ function fmtTime(iso: string | null | undefined): string {
   });
 }
 
+function fmtDate(iso: string | null | undefined): string {
+  if (!iso) return "—";
+  const d = new Date(iso);
+  return d.toLocaleDateString(undefined, {
+    weekday: "short",
+    month: "short",
+    day: "numeric",
+  });
+}
+
 function fmtAgo(iso: string | null | undefined): string {
   if (!iso) return "no ping";
   const mins = Math.round((Date.now() - new Date(iso).getTime()) / 60000);
@@ -1011,10 +1021,16 @@ function OpenShiftRow({ shift, onChange }: { shift: OpenShift; onChange: () => v
         <div className="flex-1 min-w-0">
           <div className="font-medium text-sm">{shift.title ?? shift.siteName ?? "Shift"}</div>
           <div className="text-xs opacity-70">
-            {shift.siteName ?? "—"} · {fmtTime(shift.startTime)} – {fmtTime(shift.endTime)}
+            <span className="font-medium">{fmtDate(shift.startTime)}</span> · {shift.siteName ?? "—"} · {fmtTime(shift.startTime)} – {fmtTime(shift.endTime)}
           </div>
           <div className="text-xs opacity-60 mt-1 flex flex-wrap gap-2">
-            <span>{shift.filled} / {shift.headcount} filled</span>
+            {shift.filled > 0 && shift.filled < shift.headcount ? (
+              <span className="font-medium text-amber-700">
+                {shift.headcount - shift.filled} of {shift.headcount} slot{shift.headcount - shift.filled === 1 ? "" : "s"} still open ({shift.filled} assigned)
+              </span>
+            ) : (
+              <span>{shift.filled} / {shift.headcount} filled</span>
+            )}
             <span>· L{shift.requiredLicenseLevel}+</span>
             {shift.payRate && <span>· ${shift.payRate}/hr</span>}
           </div>
