@@ -9,6 +9,7 @@ import {
   clientsTable,
   sitesTable,
   shiftsTable,
+  shiftAssignmentsTable,
   timeEntriesTable,
   schedulerSyncCursorsTable,
 } from "@workspace/db";
@@ -1228,5 +1229,300 @@ describe("scheduler reconciliation job", () => {
     expect(cursor.lastSyncError).toBeTruthy();
     // Cursor stays at the epoch default — a failed pull must not advance it.
     expect(cursor.cursorValue).toBe("1970-01-01T00:00:00.000Z");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// 4. Negative paths on the HTTP webhook routes: the security + robustness
+//    boundary of an endpoint reachable from the internet. These assert that
+//    requireHmac (503 unconfigured / 401 unsigned-or-wrong) and the Zod
+//    request schemas (400 malformed) reject bad input BEFORE any DB write.
+//    Also covers the assignedOfficerEmails branch that creates assignment
+//    rows on a freshly created shift.
+// ---------------------------------------------------------------------------
+
+describe("scheduler webhook rejects unsigned and malformed requests", () => {
+  afterEach(async () => {
+    vi.restoreAllMocks();
+    await db.execute(
+      sql`DELETE FROM shift_assignments WHERE employee_id = ${ctx.employeeId}::uuid`,
+    );
+    await db.execute(sql`DELETE FROM shifts WHERE external_id LIKE ${TAG + "%"}`);
+    await db.execute(
+      sql`DELETE FROM time_entries WHERE employee_id = ${ctx.employeeId}::uuid`,
+    );
+    // Restore env to the fully-configured baseline for the next test.
+    process.env.SCHEDULER_BASE_URL = "https://scheduler.example.com";
+    process.env.SCHEDULER_SHARED_SECRET = SECRET;
+  });
+
+  // --- 503: integration not configured (no shared secret) -------------------
+
+  it("returns 503 when SCHEDULER_SHARED_SECRET is unset", async () => {
+    delete process.env.SCHEDULER_SHARED_SECRET;
+
+    const body = JSON.stringify({
+      id: `${TAG}-noenv-${randomUUID().slice(0, 8)}`,
+      action: "upsert",
+      title: `${TAG} No Env`,
+      siteName: ctx.siteName,
+      startTime: "2026-11-01T08:00:00.000Z",
+      endTime: "2026-11-01T16:00:00.000Z",
+      updatedAt: "2026-10-31T00:00:00.000Z",
+    });
+
+    const res = await request(app)
+      .post("/api/scheduler-webhook/shifts")
+      .set("Content-Type", "application/json")
+      // A signature is irrelevant — the missing-secret guard runs first.
+      .set("X-WCSG-Signature", "0".repeat(64))
+      .send(body);
+
+    expect(res.status).toBe(503);
+    expect(res.body).toMatchObject({ error: "Service Unavailable" });
+  });
+
+  it("returns 503 on the clock-events route when SCHEDULER_SHARED_SECRET is unset", async () => {
+    delete process.env.SCHEDULER_SHARED_SECRET;
+
+    const body = JSON.stringify({
+      id: `${TAG}-noenv-clock-${randomUUID().slice(0, 8)}`,
+      action: "upsert",
+      employeeEmail: ctx.employeeEmail,
+      clockInTime: "2026-11-01T09:00:00.000Z",
+      updatedAt: "2026-10-31T00:00:00.000Z",
+    });
+
+    const res = await request(app)
+      .post("/api/scheduler-webhook/clock-events")
+      .set("Content-Type", "application/json")
+      .set("X-WCSG-Signature", "0".repeat(64))
+      .send(body);
+
+    expect(res.status).toBe(503);
+    expect(res.body).toMatchObject({ error: "Service Unavailable" });
+  });
+
+  // --- 401: missing or wrong HMAC signature ---------------------------------
+
+  it("returns 401 when the X-WCSG-Signature header is missing", async () => {
+    const body = JSON.stringify({
+      id: `${TAG}-unsigned-${randomUUID().slice(0, 8)}`,
+      action: "upsert",
+      title: `${TAG} Unsigned`,
+      siteName: ctx.siteName,
+      startTime: "2026-11-02T08:00:00.000Z",
+      endTime: "2026-11-02T16:00:00.000Z",
+      updatedAt: "2026-11-01T00:00:00.000Z",
+    });
+
+    const res = await request(app)
+      .post("/api/scheduler-webhook/shifts")
+      .set("Content-Type", "application/json")
+      .send(body);
+
+    expect(res.status).toBe(401);
+    expect(res.body).toMatchObject({ error: "Unauthorized" });
+
+    // The unsigned payload must NOT have created a row.
+    const rows = await db
+      .select({ id: shiftsTable.id })
+      .from(shiftsTable)
+      .where(eq(shiftsTable.externalId, JSON.parse(body).id));
+    expect(rows).toHaveLength(0);
+  });
+
+  it("returns 401 when the X-WCSG-Signature is wrong (signed with the wrong secret)", async () => {
+    const body = JSON.stringify({
+      id: `${TAG}-wrongsig-${randomUUID().slice(0, 8)}`,
+      action: "upsert",
+      title: `${TAG} Wrong Sig`,
+      siteName: ctx.siteName,
+      startTime: "2026-11-03T08:00:00.000Z",
+      endTime: "2026-11-03T16:00:00.000Z",
+      updatedAt: "2026-11-02T00:00:00.000Z",
+    });
+
+    const res = await request(app)
+      .post("/api/scheduler-webhook/shifts")
+      .set("Content-Type", "application/json")
+      // Valid 64-char hex HMAC, but computed with a different secret.
+      .set("X-WCSG-Signature", signPayload(body, "the-wrong-secret"))
+      .send(body);
+
+    expect(res.status).toBe(401);
+    expect(res.body).toMatchObject({ error: "Unauthorized" });
+
+    const rows = await db
+      .select({ id: shiftsTable.id })
+      .from(shiftsTable)
+      .where(eq(shiftsTable.externalId, JSON.parse(body).id));
+    expect(rows).toHaveLength(0);
+  });
+
+  it("returns 401 on the clock-events route when the signature is missing", async () => {
+    const body = JSON.stringify({
+      id: `${TAG}-unsigned-clock-${randomUUID().slice(0, 8)}`,
+      action: "upsert",
+      employeeEmail: ctx.employeeEmail,
+      clockInTime: "2026-11-03T09:00:00.000Z",
+      updatedAt: "2026-11-02T00:00:00.000Z",
+    });
+
+    const res = await request(app)
+      .post("/api/scheduler-webhook/clock-events")
+      .set("Content-Type", "application/json")
+      .send(body);
+
+    expect(res.status).toBe(401);
+    expect(res.body).toMatchObject({ error: "Unauthorized" });
+  });
+
+  // --- 400: malformed body (passes HMAC, fails Zod) -------------------------
+
+  // Sign the EXACT bytes we send, so the request clears requireHmac and the
+  // 400 is unambiguously a Zod validation failure (not an auth failure).
+  function postSignedShift(body: object) {
+    const s = JSON.stringify(body);
+    return request(app)
+      .post("/api/scheduler-webhook/shifts")
+      .set("Content-Type", "application/json")
+      .set("X-WCSG-Signature", signPayload(s, SECRET))
+      .send(s);
+  }
+
+  function postSignedClockEvent(body: object) {
+    const s = JSON.stringify(body);
+    return request(app)
+      .post("/api/scheduler-webhook/clock-events")
+      .set("Content-Type", "application/json")
+      .set("X-WCSG-Signature", signPayload(s, SECRET))
+      .send(s);
+  }
+
+  it("returns 400 when the shift payload is missing updatedAt", async () => {
+    const res = await postSignedShift({
+      id: `${TAG}-bad-noupdated-${randomUUID().slice(0, 8)}`,
+      action: "upsert",
+      title: `${TAG} Bad`,
+      siteName: ctx.siteName,
+      startTime: "2026-11-04T08:00:00.000Z",
+      endTime: "2026-11-04T16:00:00.000Z",
+      // updatedAt intentionally omitted
+    });
+
+    expect(res.status).toBe(400);
+    expect(res.body).toMatchObject({ error: "Bad Request" });
+    expect(Array.isArray(res.body.issues)).toBe(true);
+    expect(res.body.issues.some((i: { path: (string | number)[] }) => i.path.includes("updatedAt"))).toBe(true);
+  });
+
+  it("returns 400 when the shift payload is missing id", async () => {
+    const res = await postSignedShift({
+      action: "upsert",
+      title: `${TAG} Bad No Id`,
+      siteName: ctx.siteName,
+      startTime: "2026-11-05T08:00:00.000Z",
+      endTime: "2026-11-05T16:00:00.000Z",
+      updatedAt: "2026-11-04T00:00:00.000Z",
+      // id intentionally omitted
+    });
+
+    expect(res.status).toBe(400);
+    expect(res.body).toMatchObject({ error: "Bad Request" });
+    expect(res.body.issues.some((i: { path: (string | number)[] }) => i.path.includes("id"))).toBe(true);
+  });
+
+  it("returns 400 when the shift payload has an invalid action", async () => {
+    const res = await postSignedShift({
+      id: `${TAG}-bad-action-${randomUUID().slice(0, 8)}`,
+      action: "frobnicate",
+      title: `${TAG} Bad Action`,
+      siteName: ctx.siteName,
+      startTime: "2026-11-06T08:00:00.000Z",
+      endTime: "2026-11-06T16:00:00.000Z",
+      updatedAt: "2026-11-05T00:00:00.000Z",
+    });
+
+    expect(res.status).toBe(400);
+    expect(res.body).toMatchObject({ error: "Bad Request" });
+    expect(res.body.issues.some((i: { path: (string | number)[] }) => i.path.includes("action"))).toBe(true);
+  });
+
+  it("returns 400 when the clock-event payload is missing updatedAt", async () => {
+    const res = await postSignedClockEvent({
+      id: `${TAG}-bad-clock-noupdated-${randomUUID().slice(0, 8)}`,
+      action: "upsert",
+      employeeEmail: ctx.employeeEmail,
+      clockInTime: "2026-11-06T09:00:00.000Z",
+      // updatedAt intentionally omitted
+    });
+
+    expect(res.status).toBe(400);
+    expect(res.body).toMatchObject({ error: "Bad Request" });
+    expect(res.body.issues.some((i: { path: (string | number)[] }) => i.path.includes("updatedAt"))).toBe(true);
+  });
+
+  // --- assignedOfficerEmails: assignment rows created on a new shift --------
+
+  it("creates shift_assignment rows for assignedOfficerEmails on a newly created shift", async () => {
+    const externalId = `${TAG}-assign-${randomUUID().slice(0, 8)}`;
+    const res = await postSignedShift({
+      id: externalId,
+      action: "upsert",
+      title: `${TAG} Assigned Shift`,
+      siteName: ctx.siteName,
+      startTime: "2026-11-07T08:00:00.000Z",
+      endTime: "2026-11-07T16:00:00.000Z",
+      payRate: "22",
+      billRate: "30",
+      requiredLicenseLevel: 2,
+      headcount: 2,
+      status: "upcoming",
+      assignedOfficerEmails: [ctx.employeeEmail],
+      updatedAt: "2026-11-06T00:00:00.000Z",
+    });
+
+    expect(res.status).toBe(200);
+    expect(res.body).toMatchObject({ ok: true, action: "created" });
+    const shiftId = res.body.secureopsId as string;
+    expect(shiftId).toBeTruthy();
+
+    // The assignment row was created for the resolved officer.
+    const assignments = await db
+      .select()
+      .from(shiftAssignmentsTable)
+      .where(eq(shiftAssignmentsTable.shiftId, shiftId));
+    expect(assignments).toHaveLength(1);
+    expect(assignments[0].employeeId).toBe(ctx.employeeId);
+    expect(assignments[0].status).toBe("accepted");
+  });
+
+  it("ignores assignedOfficerEmails entries that don't resolve to a known officer", async () => {
+    const externalId = `${TAG}-assign-unknown-${randomUUID().slice(0, 8)}`;
+    const res = await postSignedShift({
+      id: externalId,
+      action: "upsert",
+      title: `${TAG} Assigned Unknown`,
+      siteName: ctx.siteName,
+      startTime: "2026-11-08T08:00:00.000Z",
+      endTime: "2026-11-08T16:00:00.000Z",
+      requiredLicenseLevel: 2,
+      headcount: 1,
+      status: "upcoming",
+      assignedOfficerEmails: [`${TAG}-nobody-${randomUUID().slice(0, 8)}@example.test`],
+      updatedAt: "2026-11-07T00:00:00.000Z",
+    });
+
+    expect(res.status).toBe(200);
+    expect(res.body).toMatchObject({ ok: true, action: "created" });
+    const shiftId = res.body.secureopsId as string;
+
+    // Unknown email is silently skipped — no assignment row created.
+    const assignments = await db
+      .select({ id: shiftAssignmentsTable.id })
+      .from(shiftAssignmentsTable)
+      .where(eq(shiftAssignmentsTable.shiftId, shiftId));
+    expect(assignments).toHaveLength(0);
   });
 });
