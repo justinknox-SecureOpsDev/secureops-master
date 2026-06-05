@@ -23,22 +23,50 @@
  *                       matching index on the live table.
  *   - MISSING ENUM    — a `pgEnum` type is absent, or is missing one of the
  *                       values declared in code.
+ *   - MISSING FK      — a `references(() => ..., { onDelete })` relationship has
+ *                       no matching foreign-key constraint on the live table
+ *                       (so deletes don't cascade / set-null as intended,
+ *                       leaving orphaned rows).
+ *   - FK ACTION       — the foreign key exists but its ON DELETE action differs
+ *                       (e.g. code declares `cascade` but the DB has `no action`).
+ *   - MISSING DEFAULT — a column `.default(...)` is absent in the DB, so an
+ *                       INSERT that omits the column fails (or writes NULL).
+ *   - DEFAULT MISMATCH— the column default exists but differs from code.
  *
- *   Differences the other direction (extra DB columns / indexes / enum values
- *   that exist only in the database) are intentionally ignored — that is not a
- *   release blocker for the test gates and `push` reconciles it separately.
+ *   Foreign keys are matched by their *definition* (local columns → referenced
+ *   table/columns), not by constraint name, so drizzle vs DB auto-naming never
+ *   produces a false positive. Default values are normalised so semantically
+ *   equal expressions compare equal (e.g. `now()` vs `CURRENT_TIMESTAMP`, and
+ *   `'0'::numeric` vs the code literal `"0"`).
+ *
+ *   Differences the other direction (extra DB columns / indexes / enum values /
+ *   foreign keys / defaults that exist only in the database) are intentionally
+ *   ignored — that is not a release blocker for the test gates and `push`
+ *   reconciles it separately.
  *
  * Usage:
  *   pnpm --filter @workspace/scripts run check-schema-drift
  *
  * Exit codes: 0 = in sync, 1 = drift detected (or DB unreachable).
  */
-import { is } from "drizzle-orm";
-import { PgTable, getTableConfig, isPgEnum } from "drizzle-orm/pg-core";
+import { is, getTableName, SQL } from "drizzle-orm";
+import { PgDialect, PgTable, getTableConfig, isPgEnum } from "drizzle-orm/pg-core";
 import * as schema from "@workspace/db/schema";
 import pg from "pg";
 import { fileURLToPath } from "node:url";
 import { realpathSync } from "node:fs";
+
+const dialect = new PgDialect();
+
+/**
+ * A column default declared in code. We branch on whether drizzle stored a SQL
+ * expression (e.g. `defaultNow()` / `defaultRandom()` / `sql\`...\``) or a plain
+ * literal (string / number / boolean / array), because the two compare against
+ * the live `pg_get_expr()` text differently.
+ */
+type ExpectedDefault =
+  | { kind: "expr"; canonical: string; display: string }
+  | { kind: "literal"; value: string; display: string };
 
 export interface ExpectedColumn {
   /** Actual database column name. */
@@ -47,11 +75,30 @@ export interface ExpectedColumn {
   type: string;
   /** Whether the column is NOT NULL in code. */
   notNull: boolean;
+  /**
+   * The DB-level default declared in code, or null when there is none. Note a
+   * JS-only `$default(fn)` / `$onUpdate(fn)` does NOT create a DB default, so it
+   * is intentionally left null here.
+   */
+  default?: ExpectedDefault | null;
 }
 
 export interface ExpectedIndex {
   /** Actual database index name (the explicit name passed to index()). */
   name: string;
+}
+
+export interface ExpectedForeignKey {
+  /** Drizzle-generated constraint name — for friendly output only. */
+  name: string;
+  /**
+   * Definition key (local columns → referenced table/columns). FKs are matched
+   * on this, not on the constraint name, so drizzle vs DB auto-naming can never
+   * yield a false positive.
+   */
+  defKey: string;
+  /** Normalised ON DELETE action: "no action" | "cascade" | "set null" | … */
+  onDelete: string;
 }
 
 export interface ExpectedTable {
@@ -63,6 +110,7 @@ export interface ExpectedTable {
   tableName: string;
   columns: ExpectedColumn[];
   indexes: ExpectedIndex[];
+  foreignKeys?: ExpectedForeignKey[];
 }
 
 export interface ExpectedEnum {
@@ -78,8 +126,19 @@ export interface ExpectedEnum {
 export interface LiveColumn {
   type: string;
   notNull: boolean;
+  /** Raw `pg_get_expr()` default expression, or null when the column has none. */
+  default: string | null;
 }
 export type LiveTable = Map<string, LiveColumn>; // column name → metadata.
+
+interface LiveForeignKey {
+  /** Live constraint name — for friendly output only. */
+  name: string;
+  /** Normalised ON DELETE action. */
+  onDelete: string;
+}
+/** key = `${schema}.${table}` → (FK definition key → metadata). */
+type LiveForeignKeys = Map<string, Map<string, LiveForeignKey>>;
 
 /**
  * Normalise a SQL type string so the code-declared type and the live DB type
@@ -90,6 +149,131 @@ export type LiveTable = Map<string, LiveColumn>; // column name → metadata.
  */
 export function canonicalType(raw: string): string {
   return raw.trim().toLowerCase().replace(/\s+/g, "");
+}
+
+/**
+ * Normalise a SQL *expression* default (e.g. `now()`, `gen_random_uuid()`) so the
+ * code form and the live `pg_get_expr()` form compare equal: lowercase, strip
+ * whitespace, and fold the `CURRENT_TIMESTAMP` keyword onto `now()` (Postgres
+ * accepts both, and drizzle-kit / the DB may render either).
+ */
+function canonicalExpr(raw: string): string {
+  return raw
+    .trim()
+    .toLowerCase()
+    .replace(/\s+/g, "")
+    .replace(/current_timestamp/g, "now()");
+}
+
+/**
+ * Reduce a live `pg_get_expr()` literal default to its bare value by removing a
+ * trailing `::type` cast (e.g. `'pending'::text` → `'pending'`, `'0'::numeric` →
+ * `'0'`) and any surrounding single quotes (`'pending'` → `pending`). Leaves
+ * unquoted literals like `false` / `2` untouched.
+ */
+function stripDbLiteral(raw: string): string {
+  let s = raw.trim();
+  // Drop one trailing cast: ::<type> where the type may contain spaces (e.g.
+  // "character varying"), quotes, and a precision/scale modifier.
+  s = s.replace(/::"?[a-z0-9_ ]+"?(\s*\([0-9, ]*\))?\s*$/i, "").trim();
+  if (s.length >= 2 && s.startsWith("'") && s.endsWith("'")) {
+    s = s.slice(1, -1).replace(/''/g, "'");
+  }
+  return s;
+}
+
+/**
+ * Build the code-side default descriptor for a column, or null when the column
+ * has no DB-level default. A JS-only `$default(fn)` leaves `column.default`
+ * undefined (only `defaultFn` is set), so it correctly maps to null here.
+ */
+function expectedDefaultFor(rawDefault: unknown): ExpectedDefault | null {
+  if (rawDefault === undefined) return null;
+  if (is(rawDefault, SQL)) {
+    const text = dialect.sqlToQuery(rawDefault).sql;
+    return { kind: "expr", canonical: canonicalExpr(text), display: text };
+  }
+  // Literal: array/object defaults (jsonb) serialise via JSON, everything else
+  // (string / number / boolean) via String().
+  const value =
+    typeof rawDefault === "object" && rawDefault !== null
+      ? JSON.stringify(rawDefault)
+      : String(rawDefault);
+  return { kind: "literal", value, display: value };
+}
+
+/** Is `s` a plain numeric literal (so `0` / `0.00` / `2` can compare by value)? */
+function isNumericLiteral(s: string): boolean {
+  return s.length > 0 && /^[+-]?(\d+\.?\d*|\.\d+)$/.test(s.trim());
+}
+
+/** Fold a boolean literal to a canonical "true"/"false", or null if not boolean. */
+function normalizeBoolLiteral(s: string): string | null {
+  switch (s.trim().toLowerCase()) {
+    case "true":
+    case "t":
+      return "true";
+    case "false":
+    case "f":
+      return "false";
+    default:
+      return null;
+  }
+}
+
+/**
+ * Does the live default (raw pg_get_expr text, or null) match the code default?
+ *
+ * Literal defaults are compared **case-sensitively** on their bare value:
+ * a text / JSON literal such as `'PENDING'` vs `'pending'` (or a JSON key/value
+ * case difference) is real drift, NOT a cosmetic one, so we must not fold case.
+ * The only normalisation applied is semantically safe: numerics compare by value
+ * (`0` == `0.00`) and booleans fold `t`/`f` ↔ `true`/`false`. SQL-expression
+ * defaults keep their own whitespace/keyword canonicalisation via canonicalExpr.
+ */
+function defaultMatches(expected: ExpectedDefault, live: string | null): boolean {
+  if (live === null) return false; // code expects a default, DB has none.
+  if (expected.kind === "expr") {
+    return canonicalExpr(live) === expected.canonical;
+  }
+  const liveValue = stripDbLiteral(live);
+  if (liveValue === expected.value) return true;
+  if (isNumericLiteral(liveValue) && isNumericLiteral(expected.value)) {
+    return Number(liveValue) === Number(expected.value);
+  }
+  const liveBool = normalizeBoolLiteral(liveValue);
+  const expectedBool = normalizeBoolLiteral(expected.value);
+  if (liveBool !== null && expectedBool !== null) {
+    return liveBool === expectedBool;
+  }
+  return false;
+}
+
+/** Map a `pg_constraint.confdeltype` char to the drizzle ON DELETE action text. */
+function confDelTypeToAction(c: string): string {
+  switch (c) {
+    case "c":
+      return "cascade";
+    case "n":
+      return "set null";
+    case "d":
+      return "set default";
+    case "r":
+      return "restrict";
+    case "a":
+    default:
+      return "no action";
+  }
+}
+
+/** Stable definition key for a foreign key: local cols → referenced table/cols. */
+function fkDefKey(
+  localCols: string[],
+  foreignSchema: string,
+  foreignTable: string,
+  foreignCols: string[],
+): string {
+  return `(${localCols.join(",")}) -> ${foreignSchema}.${foreignTable}(${foreignCols.join(",")})`;
 }
 
 /**
@@ -106,19 +290,34 @@ export function collectExpectedFrom(schemaObj: Record<string, unknown>): {
   for (const [exportName, value] of Object.entries(schemaObj)) {
     if (is(value, PgTable)) {
       const cfg = getTableConfig(value);
+      const dbSchema = cfg.schema ?? "public";
       tables.push({
         exportName,
-        dbSchema: cfg.schema ?? "public",
+        dbSchema,
         tableName: cfg.name,
         columns: cfg.columns.map((c) => ({
           name: c.name,
           type: canonicalType(c.getSQLType()),
           notNull: c.notNull,
+          default: expectedDefaultFor((c as { default?: unknown }).default),
         })),
         indexes: cfg.indexes
           .map((idx) => idx.config.name)
           .filter((n): n is string => Boolean(n))
           .map((name) => ({ name })),
+        foreignKeys: cfg.foreignKeys.map((fk) => {
+          const ref = fk.reference();
+          const localCols = ref.columns.map((c) => c.name);
+          const foreignCfg = getTableConfig(ref.foreignTable);
+          const foreignSchema = foreignCfg.schema ?? "public";
+          const foreignTable = getTableName(ref.foreignTable);
+          const foreignCols = ref.foreignColumns.map((c) => c.name);
+          return {
+            name: fk.getName(),
+            defKey: fkDefKey(localCols, foreignSchema, foreignTable, foreignCols),
+            onDelete: fk.onDelete ?? "no action",
+          };
+        }),
       });
     } else if (isPgEnum(value)) {
       enums.push({
@@ -152,15 +351,19 @@ export async function loadLiveColumns(
     column_name: string;
     data_type: string;
     not_null: boolean;
+    column_default: string | null;
   }>(
     `SELECT n.nspname AS table_schema,
             c.relname AS table_name,
             a.attname AS column_name,
             format_type(a.atttypid, a.atttypmod) AS data_type,
-            a.attnotnull AS not_null
+            a.attnotnull AS not_null,
+            pg_get_expr(ad.adbin, ad.adrelid) AS column_default
        FROM pg_attribute a
        JOIN pg_class c ON c.oid = a.attrelid
        JOIN pg_namespace n ON n.oid = c.relnamespace
+       LEFT JOIN pg_attrdef ad
+         ON ad.adrelid = a.attrelid AND ad.adnum = a.attnum
       WHERE c.relkind = 'r'
         AND a.attnum > 0
         AND NOT a.attisdropped
@@ -177,6 +380,70 @@ export async function loadLiveColumns(
     cols.set(r.column_name, {
       type: canonicalType(r.data_type),
       notNull: r.not_null,
+      default: r.column_default,
+    });
+  }
+  return live;
+}
+
+async function loadLiveForeignKeys(
+  client: pg.Client,
+): Promise<LiveForeignKeys> {
+  // For every foreign-key constraint, resolve the local columns, the referenced
+  // table, and the referenced columns (ordered to match drizzle's), plus the
+  // ON DELETE action char. We key FKs by their definition (not their name) so a
+  // differing constraint auto-name never registers as drift.
+  const { rows } = await client.query<{
+    constraint_name: string;
+    table_schema: string;
+    table_name: string;
+    on_delete: string;
+    local_cols: string[];
+    foreign_schema: string;
+    foreign_table: string;
+    foreign_cols: string[];
+  }>(
+    `SELECT con.conname AS constraint_name,
+            ns.nspname AS table_schema,
+            cl.relname AS table_name,
+            con.confdeltype AS on_delete,
+            (SELECT array_agg(att.attname::text ORDER BY u.ord)
+               FROM unnest(con.conkey) WITH ORDINALITY AS u(attnum, ord)
+               JOIN pg_attribute att
+                 ON att.attrelid = con.conrelid AND att.attnum = u.attnum
+            ) AS local_cols,
+            fns.nspname AS foreign_schema,
+            fcl.relname AS foreign_table,
+            (SELECT array_agg(att.attname::text ORDER BY u.ord)
+               FROM unnest(con.confkey) WITH ORDINALITY AS u(attnum, ord)
+               JOIN pg_attribute att
+                 ON att.attrelid = con.confrelid AND att.attnum = u.attnum
+            ) AS foreign_cols
+       FROM pg_constraint con
+       JOIN pg_class cl ON cl.oid = con.conrelid
+       JOIN pg_namespace ns ON ns.oid = cl.relnamespace
+       JOIN pg_class fcl ON fcl.oid = con.confrelid
+       JOIN pg_namespace fns ON fns.oid = fcl.relnamespace
+      WHERE con.contype = 'f'
+        AND ns.nspname NOT IN ('pg_catalog', 'information_schema')`,
+  );
+  const live: LiveForeignKeys = new Map();
+  for (const r of rows) {
+    const tableKey = `${r.table_schema}.${r.table_name}`;
+    let fks = live.get(tableKey);
+    if (!fks) {
+      fks = new Map();
+      live.set(tableKey, fks);
+    }
+    const defKey = fkDefKey(
+      r.local_cols ?? [],
+      r.foreign_schema,
+      r.foreign_table,
+      r.foreign_cols ?? [],
+    );
+    fks.set(defKey, {
+      name: r.constraint_name,
+      onDelete: confDelTypeToAction(r.on_delete),
     });
   }
   return live;
@@ -254,6 +521,10 @@ export interface DriftResult {
   missingIndexes: string[];
   missingEnumTypes: string[];
   missingEnumValues: string[];
+  missingDefaults: string[];
+  defaultMismatches: string[];
+  missingForeignKeys: string[];
+  fkActionMismatches: string[];
 }
 
 /** True if any drift dimension flagged at least one difference. */
@@ -265,7 +536,11 @@ export function hasAnyDrift(r: DriftResult): boolean {
     r.nullabilityMismatches.length > 0 ||
     r.missingIndexes.length > 0 ||
     r.missingEnumTypes.length > 0 ||
-    r.missingEnumValues.length > 0
+    r.missingEnumValues.length > 0 ||
+    r.missingDefaults.length > 0 ||
+    r.defaultMismatches.length > 0 ||
+    r.missingForeignKeys.length > 0 ||
+    r.fkActionMismatches.length > 0
   );
 }
 
@@ -281,6 +556,7 @@ export function computeDrift(
   liveColumns: Map<string, LiveTable>,
   liveIndexes: Map<string, Set<string>>,
   liveEnums: Map<string, Set<string>>,
+  liveForeignKeys: LiveForeignKeys = new Map(),
 ): DriftResult {
   const missingTables: ExpectedTable[] = [];
   const missingColumns: string[] = [];
@@ -289,6 +565,10 @@ export function computeDrift(
   const missingIndexes: string[] = [];
   const missingEnumTypes: string[] = [];
   const missingEnumValues: string[] = [];
+  const missingDefaults: string[] = [];
+  const defaultMismatches: string[] = [];
+  const missingForeignKeys: string[] = [];
+  const fkActionMismatches: string[] = [];
 
   for (const t of expected) {
     const key = `${t.dbSchema}.${t.tableName}`;
@@ -313,11 +593,38 @@ export function computeDrift(
           `${key}.${col.name}  code=${col.notNull ? "NOT NULL" : "NULLABLE"}  db=${liveCol.notNull ? "NOT NULL" : "NULLABLE"}  (export: ${t.exportName})`,
         );
       }
+      // Default check (only when code declares a DB-level default; extra
+      // DB-only defaults are ignored, consistent with the other dimensions).
+      if (col.default) {
+        if (liveCol.default === null) {
+          missingDefaults.push(
+            `${key}.${col.name}  code default=${col.default.display}  db=(none)  (export: ${t.exportName})`,
+          );
+        } else if (!defaultMatches(col.default, liveCol.default)) {
+          defaultMismatches.push(
+            `${key}.${col.name}  code=${col.default.display}  db=${liveCol.default}  (export: ${t.exportName})`,
+          );
+        }
+      }
     }
     const liveIdx = liveIndexes.get(key) ?? new Set<string>();
     for (const idx of t.indexes) {
       if (!liveIdx.has(idx.name)) {
         missingIndexes.push(`${key}.${idx.name}  (export: ${t.exportName})`);
+      }
+    }
+    const liveFks =
+      liveForeignKeys.get(key) ?? new Map<string, LiveForeignKey>();
+    for (const fk of t.foreignKeys ?? []) {
+      const liveFk = liveFks.get(fk.defKey);
+      if (!liveFk) {
+        missingForeignKeys.push(
+          `${key} ${fk.defKey}  ON DELETE ${fk.onDelete}  (constraint: ${fk.name}, export: ${t.exportName})`,
+        );
+      } else if (liveFk.onDelete !== fk.onDelete) {
+        fkActionMismatches.push(
+          `${key} ${fk.defKey}  ON DELETE code=${fk.onDelete}  db=${liveFk.onDelete}  (constraint: ${fk.name}, export: ${t.exportName})`,
+        );
       }
     }
   }
@@ -344,6 +651,10 @@ export function computeDrift(
     missingIndexes,
     missingEnumTypes,
     missingEnumValues,
+    missingDefaults,
+    defaultMismatches,
+    missingForeignKeys,
+    fkActionMismatches,
   };
 }
 
@@ -371,12 +682,14 @@ async function main(): Promise<void> {
   let liveColumns: Map<string, LiveTable>;
   let liveIndexes: Map<string, Set<string>>;
   let liveEnums: Map<string, Set<string>>;
+  let liveForeignKeys: LiveForeignKeys;
   try {
     await client.connect();
     // Sequential: a single pg.Client cannot run concurrent queries.
     liveColumns = await loadLiveColumns(client);
     liveIndexes = await loadLiveIndexes(client);
     liveEnums = await loadLiveEnums(client);
+    liveForeignKeys = await loadLiveForeignKeys(client);
   } catch (err) {
     console.error(
       `[check-schema-drift] Could not read the live database schema: ${
@@ -394,13 +707,23 @@ async function main(): Promise<void> {
     liveColumns,
     liveIndexes,
     liveEnums,
+    liveForeignKeys,
   );
 
   if (!hasAnyDrift(result)) {
     const indexCount = expected.reduce((n, t) => n + t.indexes.length, 0);
+    const fkCount = expected.reduce(
+      (n, t) => n + (t.foreignKeys?.length ?? 0),
+      0,
+    );
+    const defaultCount = expected.reduce(
+      (n, t) => n + t.columns.filter((c) => c.default).length,
+      0,
+    );
     console.log(
       `[check-schema-drift] OK — all ${expected.length} schema tables, their ` +
-        `columns (types + nullability), ${indexCount} named indexes, and ` +
+        `columns (types + nullability + ${defaultCount} defaults), ${indexCount} ` +
+        `named indexes, ${fkCount} foreign keys (incl. ON DELETE), and ` +
         `${expectedEnums.length} enum types match the live database.`,
     );
     return;
@@ -433,13 +756,26 @@ async function main(): Promise<void> {
   for (const line of result.missingEnumValues) {
     console.error(`  • MISSING ENUM VAL ${line}`);
   }
+  for (const line of result.missingForeignKeys) {
+    console.error(`  • MISSING FK       ${line}`);
+  }
+  for (const line of result.fkActionMismatches) {
+    console.error(`  • FK ACTION        ${line}`);
+  }
+  for (const line of result.missingDefaults) {
+    console.error(`  • MISSING DEFAULT  ${line}`);
+  }
+  for (const line of result.defaultMismatches) {
+    console.error(`  • DEFAULT MISMATCH ${line}`);
+  }
   console.error(
     "\nThis usually means a schema change was committed without applying it to the\n" +
       "database. Run:\n\n" +
       "  pnpm --filter @workspace/db run push\n\n" +
       "then re-run this check. (Leaving it unapplied makes the `test` and\n" +
       '`security-headers` gates fail later with a cryptic "column ... does not exist",\n' +
-      "or — for type/nullability/index drift — only surfaces at runtime in production.)",
+      "or — for type/nullability/index/FK/default drift — only surfaces at runtime\n" +
+      "in production, e.g. orphaned rows on delete or inserts that omit a defaulted column.)",
   );
   process.exit(1);
 }

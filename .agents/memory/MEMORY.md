@@ -32,3 +32,4 @@
 - [Time-entry correction history](time-entry-correction-history.md) — officer entry change history filters audit_logs by entryId, NOT action (two edit paths emit different generic actions); new edit paths must stamp lastEdited cols + res.locals.auditMetadata.
 - [Scheduler roster two paths](scheduler-roster-shared-path.md) — scheduler shift data arrives via webhook AND periodic pull; new field side-effects must go on SchedulerShiftPayload + shared processInboundShift, not the route.
 - [scripts CLI testability](scripts-cli-testability.md) — guard scripts/ CLI main() behind isMainModule before importing helpers in a tsx --test; DB-backed script tests need their own gate, use .js import ext.
+- [pg name[] arrays not parsed](pg-name-array-not-parsed.md) — node-postgres returns name[]/array_agg(name) as a raw string, not JS array; cast ::text inside array_agg when consuming pg_catalog introspection.
