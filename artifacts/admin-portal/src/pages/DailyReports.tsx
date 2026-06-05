@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { ClipboardList, RefreshCw, X, Download } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { api, getToken } from "@/lib/api";
+import { api, fetchWithAuth } from "@/lib/api";
 
 type Row = {
   id: string;
@@ -201,10 +201,7 @@ export function DailyReportsPage() {
 
 async function downloadDarPdf(id: string) {
   try {
-    const token = getToken();
-    const res = await fetch(`/api/dar/${id}/pdf`, {
-      headers: token ? { Authorization: `Bearer ${token}` } : {},
-    });
+    const res = await fetchWithAuth(`/api/dar/${id}/pdf`);
     if (!res.ok) throw new Error(`Request failed (${res.status})`);
     const blob = await res.blob();
     const cd = res.headers.get("Content-Disposition") ?? "";

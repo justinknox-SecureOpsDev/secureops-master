@@ -10,7 +10,7 @@ import {
 import { useFkOptions, invalidateFk } from "@/lib/fk";
 import { toFormValue, fromFormValue } from "@/lib/format";
 import { type Field, type TableDescriptor, singularize } from "@/lib/tables";
-import { api, ApiError, getToken } from "@/lib/api";
+import { api, ApiError, fetchWithAuth } from "@/lib/api";
 import { FileUploadField, MultiFileUploadField } from "./FileUploadField";
 import { openSignedObject, type UploadedFile } from "@/lib/upload";
 import { ExternalLink, MapPin, AlertTriangle, FileDown, Link2 } from "lucide-react";
@@ -559,10 +559,7 @@ export function RowFormDialog({
                 const id = String((initial as { id?: unknown }).id ?? "");
                 if (!id) return;
                 try {
-                  const token = getToken();
-                  const res = await fetch(`/api/employees/${id}/profile/pdf`, {
-                    headers: token ? { Authorization: `Bearer ${token}` } : {},
-                  });
+                  const res = await fetchWithAuth(`/api/employees/${id}/profile/pdf`);
                   if (!res.ok) throw new Error(`Request failed (${res.status})`);
                   const blob = await res.blob();
                   const cd = res.headers.get("Content-Disposition") ?? "";

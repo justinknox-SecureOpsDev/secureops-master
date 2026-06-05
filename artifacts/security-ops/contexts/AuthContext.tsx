@@ -1,5 +1,5 @@
 import React, { createContext, useContext, useState, useEffect, useCallback, ReactNode } from "react";
-import { User } from "@workspace/api-client-react";
+import { User, setUnauthorizedHandler } from "@workspace/api-client-react";
 import { storage } from "@/utils/storage";
 import {
   isBiometricEnabled,
@@ -115,6 +115,18 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setAwaitingBiometric(false);
     await logout();
   };
+
+  // When any authenticated API call comes back 401 (expired/revoked session),
+  // clear the dead session so RootLayoutNav routes the user back to login
+  // instead of every screen dead-ending on "failed to load".
+  useEffect(() => {
+    setUnauthorizedHandler(() => {
+      void logout();
+    });
+    return () => setUnauthorizedHandler(null);
+    // logout only closes over stable state setters + storage; register once.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   return (
     <AuthContext.Provider value={{

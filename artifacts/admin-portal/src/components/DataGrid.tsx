@@ -15,7 +15,7 @@ import {
 import { Label } from "@/components/ui/label";
 import { Link } from "wouter";
 import { type TableDescriptor, type Field, singularize } from "@/lib/tables";
-import { api, getToken, ApiError } from "@/lib/api";
+import { api, fetchWithAuth, ApiError } from "@/lib/api";
 import { formatCell } from "@/lib/format";
 import { useFkOptions } from "@/lib/fk";
 import { openSignedObject } from "@/lib/upload";
@@ -247,10 +247,7 @@ export function DataGrid({
     try {
       // Direct fetch (the shared `api` helper is JSON-only) so we can read
       // the bytes as a Blob and honor the server's Content-Disposition.
-      const token = getToken();
-      const res = await fetch(`/api/incidents/${id}/pdf`, {
-        headers: token ? { Authorization: `Bearer ${token}` } : {},
-      });
+      const res = await fetchWithAuth(`/api/incidents/${id}/pdf`);
       if (!res.ok) throw new Error(`Request failed (${res.status})`);
       const blob = await res.blob();
       const cd = res.headers.get("Content-Disposition") ?? "";

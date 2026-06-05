@@ -14,6 +14,41 @@ export class ApiError extends Error {
   }
 }
 
+let _unauthorizedHandler: (() => void) | null = null;
+
+/**
+ * Register a handler invoked when an *authenticated* request (one that carried
+ * a token) is rejected with HTTP 401 — i.e. the admin session is expired or
+ * revoked. Lets the app clear the dead session and route back to the login
+ * screen instead of dead-ending every page on "failed". Not fired for 401s on
+ * requests with no token (e.g. a failed login). Pass null to clear.
+ */
+export function setUnauthorizedHandler(handler: (() => void) | null): void {
+  _unauthorizedHandler = handler;
+}
+
+/**
+ * Authenticated fetch that returns the raw Response — for blob/PDF/CSV
+ * downloads and callers that need custom status handling (where the JSON-only
+ * `api()` helper doesn't fit). Injects the current admin token and, exactly
+ * like `api()`, fires the unauthorized handler when an *authenticated* request
+ * is rejected with 401, so an expired/revoked session routes back to login
+ * instead of dead-ending the screen. Pass the full path (e.g. `/api/...`).
+ */
+export async function fetchWithAuth(
+  path: string,
+  init: RequestInit = {},
+): Promise<Response> {
+  const token = getToken();
+  const headers = new Headers(init.headers);
+  if (token) headers.set("Authorization", `Bearer ${token}`);
+  const res = await fetch(path, { ...init, headers });
+  if (res.status === 401 && token) {
+    _unauthorizedHandler?.();
+  }
+  return res;
+}
+
 export async function api<T = unknown>(
   path: string,
   init: Omit<RequestInit, "body"> & { body?: unknown } = {},
@@ -41,6 +76,9 @@ export async function api<T = unknown>(
     try { data = JSON.parse(text); } catch { data = text; }
   }
   if (!res.ok) {
+    if (res.status === 401 && token) {
+      _unauthorizedHandler?.();
+    }
     const msg =
       (data as { message?: string; error?: string })?.message ??
       (data as { error?: string })?.error ??

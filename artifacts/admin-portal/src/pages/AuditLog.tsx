@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { ChevronLeft, ChevronRight, RefreshCw, Filter, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { fetchWithAuth } from "@/lib/api";
 
 type AuditLog = {
   id: string;
@@ -45,10 +46,6 @@ const ACTION_PRESETS = [
   "incidents.write",
 ];
 
-function token(): string {
-  try { return localStorage.getItem("wcsg.adminToken") || ""; } catch { return ""; }
-}
-
 function methodColor(m: string): string {
   switch (m) {
     case "POST":   return "bg-emerald-100 text-emerald-800 border-emerald-300";
@@ -78,9 +75,7 @@ export default function AuditLogPage() {
       params.set("offset", String(page * PAGE_SIZE));
       if (actionFilter) params.set("action", actionFilter);
       if (tableFilter) params.set("targetTable", tableFilter);
-      const r = await fetch(`/api/admin/audit-logs?${params}`, {
-        headers: { Authorization: `Bearer ${token()}` },
-      });
+      const r = await fetchWithAuth(`/api/admin/audit-logs?${params}`);
       if (!r.ok) throw new Error(`HTTP ${r.status}`);
       const j = (await r.json()) as Resp;
       setData(j);

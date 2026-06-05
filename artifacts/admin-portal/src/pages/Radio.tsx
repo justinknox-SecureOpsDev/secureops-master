@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { api, getToken } from "@/lib/api";
+import { api, getToken, fetchWithAuth } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
 import { Button } from "@/components/ui/button";
 import { Radio as RadioIcon, Mic, MicOff, Volume2, VolumeX, Trash2, Archive, Plus, LogOut, LogIn, Play, Pause } from "lucide-react";
@@ -258,10 +258,7 @@ export default function RadioPage() {
     if (playingId === transmissionId) { stopPlayback(); return; }
     stopPlayback();
     try {
-      const token = getToken();
-      const res = await fetch(`/api/admin/radio/transmissions/${transmissionId}/audio`, {
-        headers: token ? { Authorization: `Bearer ${token}` } : {},
-      });
+      const res = await fetchWithAuth(`/api/admin/radio/transmissions/${transmissionId}/audio`);
       if (!res.ok) {
         setError(res.status === 404 ? "Recording is not available." : `Playback failed (${res.status}).`);
         return;

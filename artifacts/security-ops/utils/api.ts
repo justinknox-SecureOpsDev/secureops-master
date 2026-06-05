@@ -1,3 +1,5 @@
+import { notifyUnauthorized } from "@workspace/api-client-react";
+
 import { storage } from "@/utils/storage";
 import { AUTH_TOKEN_KEY } from "@/contexts/AuthContext";
 
@@ -49,6 +51,12 @@ export async function apiRequest(path: string, options: RequestInit = {}) {
     );
   }
   if (!res.ok) {
+    // An authenticated request was rejected — the session token is expired or
+    // revoked. Let the app clear it and route back to login instead of leaving
+    // every screen stuck on "failed".
+    if (res.status === 401 && token) {
+      notifyUnauthorized();
+    }
     const err = await res.json().catch(() => ({ message: "Request failed" }));
     throw new Error(err.message || `HTTP ${res.status}`);
   }

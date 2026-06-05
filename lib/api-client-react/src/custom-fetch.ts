@@ -44,6 +44,27 @@ export function setAuthTokenGetter(getter: AuthTokenGetter | null): void {
   _authTokenGetter = getter;
 }
 
+let _unauthorizedHandler: (() => void) | null = null;
+
+/**
+ * Register a handler invoked when an *authenticated* request (one that carried
+ * an `Authorization` header) is rejected with HTTP 401 — i.e. the session token
+ * is expired or revoked. The app can use this to clear the dead session and
+ * route the user back to login instead of dead-ending every screen on an error.
+ *
+ * Not fired for 401s on requests that carried no token (e.g. pre-login polling
+ * or a failed login attempt), so it never interferes with the login flow.
+ * Pass `null` to clear the handler.
+ */
+export function setUnauthorizedHandler(handler: (() => void) | null): void {
+  _unauthorizedHandler = handler;
+}
+
+/** Invoke the registered unauthorized handler, if any. Safe to call when none set. */
+export function notifyUnauthorized(): void {
+  _unauthorizedHandler?.();
+}
+
 function isRequest(input: RequestInfo | URL): input is Request {
   return typeof Request !== "undefined" && input instanceof Request;
 }
@@ -359,10 +380,14 @@ export async function customFetch<T = unknown>(
   }
 
   const requestInfo = { method, url: resolveUrl(input) };
+  const sentAuth = headers.has("authorization");
 
   const response = await fetch(input, { ...init, method, headers });
 
   if (!response.ok) {
+    if (response.status === 401 && sentAuth) {
+      notifyUnauthorized();
+    }
     const errorData = await parseErrorBody(response, method);
     throw new ApiError(response, errorData, requestInfo);
   }

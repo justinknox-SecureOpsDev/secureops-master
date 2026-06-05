@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { useLocation } from "wouter";
 import { Receipt, Download, CreditCard, CheckCircle2, AlertTriangle, ChevronDown, ChevronUp } from "lucide-react";
-import { api, getToken } from "@/lib/api";
+import { api, fetchWithAuth } from "@/lib/api";
 import { Button } from "@/components/ui/button";
 import { useToast } from "@/hooks/use-toast";
 
@@ -48,10 +48,7 @@ function InvoiceRow({ inv, onPaid }: { inv: Invoice; onPaid: () => void }) {
   const cfg = STATUS_CFG[inv.status] ?? { label: inv.status, cls: "bg-gray-100 text-gray-500", icon: null };
 
   async function downloadPdf() {
-    const token = getToken();
-    const res = await fetch(`/api/client/invoices/${inv.id}/pdf`, {
-      headers: { Authorization: `Bearer ${token ?? ""}` },
-    });
+    const res = await fetchWithAuth(`/api/client/invoices/${inv.id}/pdf`);
     if (!res.ok) { toast({ title: "PDF not available.", variant: "destructive" }); return; }
     const blob = await res.blob();
     const a = document.createElement("a");

@@ -3,7 +3,7 @@ import { Banknote, Download, CheckCircle2, AlertTriangle, Loader2, Zap } from "l
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { getToken } from "@/lib/api";
+import { fetchWithAuth } from "@/lib/api";
 
 type InvoiceRow = {
   id: string;
@@ -74,7 +74,7 @@ export default function SubcontractorPayRunPage() {
   const [paidRef, setPaidRef] = useState("");
 
   const authHeaders = useMemo(
-    () => ({ "Content-Type": "application/json", Authorization: `Bearer ${getToken() ?? ""}` }),
+    () => ({ "Content-Type": "application/json" }),
     [],
   );
 
@@ -84,7 +84,7 @@ export default function SubcontractorPayRunPage() {
       // The generic admin grid endpoint returns the full invoice list; we
       // filter client-side by status so the page stays self-contained (no new
       // list endpoint needed — payments use the dedicated pay-run endpoints).
-      const res = await fetch(`/api/admin/tables/subcontractor_invoices?limit=500&offset=0`, { headers: authHeaders });
+      const res = await fetchWithAuth(`/api/admin/tables/subcontractor_invoices?limit=500&offset=0`, { headers: authHeaders });
       const data = await res.json();
       const list: InvoiceRow[] = Array.isArray(data?.rows) ? data.rows : Array.isArray(data) ? data : [];
       const filtered = statusFilter === "all" ? list : list.filter((r) => r.status === statusFilter);
@@ -129,7 +129,7 @@ export default function SubcontractorPayRunPage() {
     if (selected.size === 0) return;
     setBusy("preview");
     try {
-      const res = await fetch("/api/subcontractor-pay-run/preview", {
+      const res = await fetchWithAuth("/api/subcontractor-pay-run/preview", {
         method: "POST",
         headers: authHeaders,
         body: JSON.stringify({ ids: Array.from(selected) }),
@@ -147,7 +147,7 @@ export default function SubcontractorPayRunPage() {
     if (selected.size === 0) return;
     setBusy("csv");
     try {
-      const res = await fetch("/api/subcontractor-pay-run/export-csv", {
+      const res = await fetchWithAuth("/api/subcontractor-pay-run/export-csv", {
         method: "POST",
         headers: authHeaders,
         body: JSON.stringify({ ids: Array.from(selected) }),
@@ -181,7 +181,7 @@ export default function SubcontractorPayRunPage() {
     if (selected.size === 0) return;
     setBusy("paid");
     try {
-      const res = await fetch("/api/subcontractor-pay-run/mark-paid", {
+      const res = await fetchWithAuth("/api/subcontractor-pay-run/mark-paid", {
         method: "POST",
         headers: authHeaders,
         body: JSON.stringify({ ids: Array.from(selected), paymentReference: paidRef || null, method: "manual" }),
@@ -201,7 +201,7 @@ export default function SubcontractorPayRunPage() {
   const stripePay = async () => {
     setBusy("stripe");
     try {
-      const res = await fetch("/api/subcontractor-pay-run/stripe", {
+      const res = await fetchWithAuth("/api/subcontractor-pay-run/stripe", {
         method: "POST",
         headers: authHeaders,
         body: JSON.stringify({ ids: Array.from(selected) }),

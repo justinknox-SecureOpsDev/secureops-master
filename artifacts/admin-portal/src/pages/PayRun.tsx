@@ -3,7 +3,7 @@ import { Banknote, Download, CheckCircle2, AlertTriangle, Loader2, Zap } from "l
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { getToken } from "@/lib/api";
+import { fetchWithAuth } from "@/lib/api";
 
 type PayrollRow = {
   id: string;
@@ -153,7 +153,7 @@ export default function PayRunPage() {
   }, [loading]);
 
   const authHeaders = useMemo(
-    () => ({ "Content-Type": "application/json", Authorization: `Bearer ${getToken() ?? ""}` }),
+    () => ({ "Content-Type": "application/json" }),
     [],
   );
 
@@ -164,7 +164,7 @@ export default function PayRunPage() {
       if (statusFilter !== "all") params.set("status", statusFilter);
       if (periodStart) params.set("periodStart", periodStart);
       if (periodEnd) params.set("periodEnd", periodEnd);
-      const res = await fetch(`/api/payroll?${params.toString()}`, { headers: authHeaders });
+      const res = await fetchWithAuth(`/api/payroll?${params.toString()}`, { headers: authHeaders });
       const data = await res.json();
       const list: PayrollRow[] = Array.isArray(data) ? data : [];
       setRows(list);
@@ -211,7 +211,7 @@ export default function PayRunPage() {
     if (selected.size === 0) return;
     setBusy("preview");
     try {
-      const res = await fetch("/api/payroll/pay-run/preview", {
+      const res = await fetchWithAuth("/api/payroll/pay-run/preview", {
         method: "POST",
         headers: authHeaders,
         body: JSON.stringify({ ids: Array.from(selected) }),
@@ -229,7 +229,7 @@ export default function PayRunPage() {
     if (selected.size === 0) return;
     setBusy("csv");
     try {
-      const res = await fetch("/api/payroll/pay-run/export-csv", {
+      const res = await fetchWithAuth("/api/payroll/pay-run/export-csv", {
         method: "POST",
         headers: authHeaders,
         body: JSON.stringify({ ids: Array.from(selected) }),
@@ -263,7 +263,7 @@ export default function PayRunPage() {
     if (selected.size === 0) return;
     setBusy("paid");
     try {
-      const res = await fetch("/api/payroll/pay-run/mark-paid", {
+      const res = await fetchWithAuth("/api/payroll/pay-run/mark-paid", {
         method: "POST",
         headers: authHeaders,
         body: JSON.stringify({ ids: Array.from(selected), paymentReference: paidRef || null, method: "manual" }),
@@ -283,7 +283,7 @@ export default function PayRunPage() {
   const stripePay = async () => {
     setBusy("stripe");
     try {
-      const res = await fetch("/api/payroll/pay-run/stripe", {
+      const res = await fetchWithAuth("/api/payroll/pay-run/stripe", {
         method: "POST",
         headers: authHeaders,
         body: JSON.stringify({ ids: Array.from(selected) }),

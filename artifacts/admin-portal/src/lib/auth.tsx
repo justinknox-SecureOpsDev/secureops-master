@@ -1,5 +1,5 @@
 import { createContext, useContext, useEffect, useState, type ReactNode } from "react";
-import { api, getToken, setToken } from "./api";
+import { api, getToken, setToken, setUnauthorizedHandler } from "./api";
 
 type User = { id: string; email: string; firstName: string; lastName: string; role: string };
 type AuthCtx = {
@@ -54,6 +54,15 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setToken(null);
     setUser(null);
   }
+
+  // When any authenticated API call comes back 401 (expired/revoked session),
+  // clear the dead session so the router falls back to the login screen instead
+  // of every page (grids, dashboards) dead-ending on "failed".
+  useEffect(() => {
+    setUnauthorizedHandler(() => logout());
+    return () => setUnauthorizedHandler(null);
+  }, []);
+
   return <Ctx.Provider value={{ user, loading, login, loginTotp, logout }}>{children}</Ctx.Provider>;
 }
 

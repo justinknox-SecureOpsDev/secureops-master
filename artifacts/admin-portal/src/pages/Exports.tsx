@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { Download, FileSpreadsheet, FileText, Loader2, RefreshCw, AlertTriangle } from "lucide-react";
-import { api, ApiError, getToken } from "@/lib/api";
+import { api, ApiError, fetchWithAuth } from "@/lib/api";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 
@@ -234,13 +234,9 @@ export default function ExportsPage() {
     setError(null);
     setDownloading(format);
     try {
-      const token = getToken();
-      const res = await fetch(`/api/admin/exports/${format}`, {
+      const res = await fetchWithAuth(`/api/admin/exports/${format}`, {
         method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          ...(token ? { Authorization: `Bearer ${token}` } : {}),
-        },
+        headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ dataset: datasetId, filters: stripEmpty(filters) }),
       });
       if (!res.ok) {

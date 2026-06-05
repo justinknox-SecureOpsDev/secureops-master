@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { FileText, AlertTriangle, ClipboardList, Download, ChevronDown, ChevronUp } from "lucide-react";
-import { api, getToken } from "@/lib/api";
+import { api, fetchWithAuth } from "@/lib/api";
 import { Button } from "@/components/ui/button";
 
 type Incident = {
@@ -48,9 +48,8 @@ function IncidentCard({ inc }: { inc: Incident }) {
   const base = (window as any).__BASE_URL__ as string | undefined ?? "/admin-portal";
 
   async function downloadPdf() {
-    const token = getToken();
     const url = `/api/client/incidents/${inc.id}/pdf`;
-    const res = await fetch(url, { headers: { Authorization: `Bearer ${token ?? ""}` } });
+    const res = await fetchWithAuth(url);
     if (!res.ok) { alert("PDF not available."); return; }
     const blob = await res.blob();
     const a = document.createElement("a");
@@ -108,10 +107,7 @@ function DarCard({ dar }: { dar: DAR }) {
   const [expanded, setExpanded] = useState(false);
 
   async function downloadPdf() {
-    const token = getToken();
-    const res = await fetch(`/api/client/dar/${dar.id}/pdf`, {
-      headers: { Authorization: `Bearer ${token ?? ""}` },
-    });
+    const res = await fetchWithAuth(`/api/client/dar/${dar.id}/pdf`);
     if (!res.ok) { alert("PDF not available."); return; }
     const blob = await res.blob();
     const a = document.createElement("a");

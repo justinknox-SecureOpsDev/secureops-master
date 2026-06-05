@@ -10,6 +10,7 @@ import {
   type LucideIcon,
 } from "lucide-react";
 import { useAuth } from "@/lib/auth";
+import { fetchWithAuth } from "@/lib/api";
 import { Button } from "@/components/ui/button";
 import { useChatUnreadTotal } from "@/hooks/useChatUnreadTotal";
 
@@ -32,7 +33,7 @@ function useSystemStatus(role: string | undefined) {
     let cancelled = false;
     const token = (() => { try { return localStorage.getItem("wcsg.adminToken") || ""; } catch { return ""; } })();
     if (!token) return;
-    fetch("/api/admin/system/status", { headers: { Authorization: `Bearer ${token}` } })
+    fetchWithAuth("/api/admin/system/status")
       .then((r) => (r.ok ? r.json() : null))
       .then((data) => { if (!cancelled && data) setStatus(data); })
       .catch(() => {});
