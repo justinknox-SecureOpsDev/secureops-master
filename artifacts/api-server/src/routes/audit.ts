@@ -13,6 +13,9 @@ const router: IRouter = Router();
  *   - `actorUserId`    exact match
  *   - `targetTable`    exact match
  *   - `targetId`       exact match
+ *   - `entryId`        exact match against `metadata->>'entryId'` (used to
+ *                      surface the full edit history of a single record, e.g.
+ *                      a corrected subcontractor time entry)
  *   - `from` / `to`    ISO timestamps
  *   - `limit` (≤200, default 100), `offset` (default 0)
  *
@@ -29,6 +32,7 @@ router.get("/admin/audit-logs", requireAdmin, async (req, res): Promise<void> =>
   if (q.actorUserId) conditions.push(eq(auditLogsTable.actorUserId, q.actorUserId));
   if (q.targetTable) conditions.push(eq(auditLogsTable.targetTable, q.targetTable));
   if (q.targetId) conditions.push(eq(auditLogsTable.targetId, q.targetId));
+  if (q.entryId) conditions.push(sql`${auditLogsTable.metadata}->>'entryId' = ${q.entryId}`);
   if (q.from) {
     const d = new Date(q.from);
     if (!Number.isNaN(d.getTime())) conditions.push(gte(auditLogsTable.createdAt, d));

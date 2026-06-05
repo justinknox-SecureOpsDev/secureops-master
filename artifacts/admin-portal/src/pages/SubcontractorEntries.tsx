@@ -30,17 +30,58 @@ function fmtDateTime(iso: string | null | undefined): string {
   return d.toLocaleString(undefined, { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" });
 }
 
-function EditedBadge({ entry }: { entry: Entry }) {
+// Snapshot of the entry's editable fields, captured in the audit log
+// before/after each correction.
+type EntrySnapshot = {
+  name?: string | null;
+  company?: string | null;
+  badgeId?: string | null;
+  clockInAt?: string | null;
+  clockOutAt?: string | null;
+  hoursWorked?: string | null;
+  notes?: string | null;
+};
+
+type AuditRow = {
+  id: string;
+  actorEmail: string | null;
+  createdAt: string;
+  metadata: {
+    entryId?: string;
+    before?: EntrySnapshot;
+    after?: EntrySnapshot;
+  } | null;
+};
+
+// User-facing fields we surface in the change history, in display order.
+const HISTORY_FIELDS: { key: keyof EntrySnapshot; label: string; isDate?: boolean }[] = [
+  { key: "name", label: "Name" },
+  { key: "company", label: "Company" },
+  { key: "badgeId", label: "Badge ID" },
+  { key: "clockInAt", label: "Clock In", isDate: true },
+  { key: "clockOutAt", label: "Clock Out", isDate: true },
+  { key: "hoursWorked", label: "Hours" },
+  { key: "notes", label: "Notes" },
+];
+
+function fmtSnapshotValue(value: string | null | undefined, isDate: boolean): string {
+  if (value === null || value === undefined || value === "") return "—";
+  return isDate ? fmtDateTime(value) : value;
+}
+
+function EditedBadge({ entry, onClick }: { entry: Entry; onClick: (e: Entry) => void }) {
   if (!entry.lastEditedAt) return null;
   const who = entry.lastEditedByEmail ?? "an admin";
   return (
-    <span
-      className="inline-flex items-center gap-1 rounded-full bg-amber-100 text-amber-800 border border-amber-300 px-1.5 py-0.5 text-[10px] font-medium leading-none"
-      title={`Edited by ${who} on ${fmtDateTime(entry.lastEditedAt)}`}
+    <button
+      type="button"
+      onClick={() => onClick(entry)}
+      className="inline-flex items-center gap-1 rounded-full bg-amber-100 text-amber-800 border border-amber-300 px-1.5 py-0.5 text-[10px] font-medium leading-none hover:bg-amber-200 focus:outline-none focus:ring-2 focus:ring-amber-400 cursor-pointer"
+      title={`Edited by ${who} on ${fmtDateTime(entry.lastEditedAt)} — view full change history`}
     >
       <Pencil className="w-2.5 h-2.5" />
       Edited
-    </span>
+    </button>
   );
 }
 
@@ -110,7 +151,28 @@ export default function SubcontractorEntriesPage() {
   const [editBusy, setEditBusy] = useState(false);
   const [editError, setEditError] = useState<string | null>(null);
 
+  const [historyTarget, setHistoryTarget] = useState<Entry | null>(null);
+  const [historyRows, setHistoryRows] = useState<AuditRow[]>([]);
+  const [historyLoading, setHistoryLoading] = useState(false);
+  const [historyError, setHistoryError] = useState<string | null>(null);
+
   const refresh = useCallback(() => setVersion((v) => v + 1), []);
+
+  function openHistory(e: Entry) {
+    setHistoryTarget(e);
+    setHistoryRows([]);
+    setHistoryError(null);
+    setHistoryLoading(true);
+    const qs = new URLSearchParams({
+      action: "subcontractor_entry_edit",
+      entryId: e.id,
+      limit: "200",
+    }).toString();
+    api<{ rows: AuditRow[] }>(`/admin/audit-logs?${qs}`)
+      .then((data) => setHistoryRows(data.rows))
+      .catch((err) => setHistoryError((err as Error).message))
+      .finally(() => setHistoryLoading(false));
+  }
 
   function openEdit(e: Entry) {
     setEditTarget(e);
@@ -269,7 +331,7 @@ export default function SubcontractorEntriesPage() {
                     <td className="p-3 font-medium">
                       <span className="inline-flex items-center gap-2">
                         {e.name}
-                        <EditedBadge entry={e} />
+                        <EditedBadge entry={e} onClick={openHistory} />
                       </span>
                     </td>
                     <td className="p-3 text-muted-foreground">{e.company}</td>
@@ -336,7 +398,7 @@ export default function SubcontractorEntriesPage() {
                     <td className="p-3 font-medium">
                       <span className="inline-flex items-center gap-2">
                         {e.name}
-                        <EditedBadge entry={e} />
+                        <EditedBadge entry={e} onClick={openHistory} />
                       </span>
                     </td>
                     <td className="p-3 text-muted-foreground">{e.company}</td>
@@ -433,6 +495,85 @@ export default function SubcontractorEntriesPage() {
               disabled={editBusy}
             >
               {editBusy ? "Saving…" : "Save Changes"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Change history dialog */}
+      <Dialog open={!!historyTarget} onOpenChange={(open) => { if (!open) setHistoryTarget(null); }}>
+        <DialogContent className="max-w-2xl">
+          <DialogHeader>
+            <DialogTitle>Change History</DialogTitle>
+          </DialogHeader>
+          <div className="text-sm">
+            {historyTarget && (
+              <p className="text-muted-foreground mb-3">
+                Corrections to <strong>{historyTarget.name}</strong> ({historyTarget.company})
+              </p>
+            )}
+            {historyLoading ? (
+              <div className="text-muted-foreground p-4">Loading…</div>
+            ) : historyError ? (
+              <div className="flex items-center gap-2 text-red-600 bg-red-50 border border-red-200 rounded p-3">
+                <AlertTriangle className="w-4 h-4 shrink-0" />
+                {historyError}
+              </div>
+            ) : historyRows.length === 0 ? (
+              <div className="text-muted-foreground p-4 text-center border rounded-lg bg-slate-50">
+                No recorded edits for this entry.
+              </div>
+            ) : (
+              <div className="space-y-4 max-h-[60vh] overflow-y-auto pr-1">
+                {historyRows.map((row) => {
+                  const before = row.metadata?.before ?? {};
+                  const after = row.metadata?.after ?? {};
+                  const changes = HISTORY_FIELDS.filter(
+                    (f) => (before[f.key] ?? null) !== (after[f.key] ?? null),
+                  );
+                  return (
+                    <div key={row.id} className="border rounded-lg p-3 space-y-2">
+                      <div className="flex items-center justify-between gap-2 text-xs">
+                        <span className="font-medium text-slate-700">
+                          {row.actorEmail ?? "an admin"}
+                        </span>
+                        <span className="text-muted-foreground">{fmtDateTime(row.createdAt)}</span>
+                      </div>
+                      {changes.length === 0 ? (
+                        <p className="text-xs text-muted-foreground">No field-level changes recorded.</p>
+                      ) : (
+                        <table className="w-full text-xs">
+                          <thead>
+                            <tr className="text-left text-muted-foreground">
+                              <th className="font-medium pb-1">Field</th>
+                              <th className="font-medium pb-1">Before</th>
+                              <th className="font-medium pb-1">After</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {changes.map((f) => (
+                              <tr key={f.key} className="align-top">
+                                <td className="pr-3 py-0.5 font-medium text-slate-600">{f.label}</td>
+                                <td className="pr-3 py-0.5 text-red-700 line-through">
+                                  {fmtSnapshotValue(before[f.key], !!f.isDate)}
+                                </td>
+                                <td className="py-0.5 text-emerald-700">
+                                  {fmtSnapshotValue(after[f.key], !!f.isDate)}
+                                </td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setHistoryTarget(null)}>
+              Close
             </Button>
           </DialogFooter>
         </DialogContent>
