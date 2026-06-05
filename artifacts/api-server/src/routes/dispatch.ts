@@ -1,5 +1,5 @@
 import { Router, type IRouter } from "express";
-import { and, asc, desc, eq, gte, inArray, isNull, lte, ne, or, sql } from "drizzle-orm";
+import { and, asc, desc, eq, gte, inArray, isNull, lt, lte, ne, or, sql } from "drizzle-orm";
 import {
   db,
   usersTable,
@@ -15,6 +15,7 @@ import {
 } from "@workspace/db";
 import { requireAdmin, requireAdminOrDispatcher } from "../middlewares/auth";
 import { getGeofenceRadiusMiles } from "../lib/geofence";
+import { businessDayWindow, businessTimeZone } from "../lib/businessTime";
 
 const router: IRouter = Router();
 
@@ -61,9 +62,10 @@ function haversineMiles(lat1: number, lng1: number, lat2: number, lng2: number):
  * GET /dispatch/status-board
  *
  * Single roll-up the Dispatch screen uses to render the clock-in status
- * board. Window = today (00:00–24:00 in the server's local day) plus any
- * shift currently in progress, so an overnight shift that started
- * yesterday but hasn't ended still appears. Buckets:
+ * board. Window = today (00:00–24:00 in the BUSINESS timezone — Central by
+ * default, NOT the server's UTC day) plus any shift currently in progress,
+ * so an overnight shift that started yesterday but hasn't ended still
+ * appears. Buckets:
  *
  *   onDuty   — officer has ANY open time_entry (clockOutTime IS NULL),
  *              i.e. they are clocked in right now. Sourced directly from
@@ -84,11 +86,11 @@ function haversineMiles(lat1: number, lng1: number, lat2: number, lng2: number):
  */
 router.get("/dispatch/status-board", requireAdminOrDispatcher, async (_req, res): Promise<void> => {
   const now = new Date();
-  // "Today" window: start-of-day → start-of-tomorrow. Anything still
-  // open past midnight (endTime >= now) is also pulled in so overnight
-  // shifts don't drop off the board at 00:00.
-  const startOfDay = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 0, 0, 0);
-  const endOfDay = new Date(startOfDay.getTime() + 24 * 60 * MS_MIN);
+  // "Today" window: start-of-day → start-of-tomorrow, in the BUSINESS timezone
+  // (Central by default, NOT the server's UTC). Anything still open past
+  // midnight (endTime >= now) is also pulled in so overnight shifts don't drop
+  // off the board at 00:00.
+  const { startOfDay, endOfDay } = businessDayWindow(now, businessTimeZone());
 
   const rows = await db
     .select({
@@ -116,7 +118,7 @@ router.get("/dispatch/status-board", requireAdminOrDispatcher, async (_req, res)
       // Either the shift starts today, or it's currently running
       // (started earlier and not yet ended).
       or(
-        and(gte(shiftsTable.startTime, startOfDay), lte(shiftsTable.startTime, endOfDay)),
+        and(gte(shiftsTable.startTime, startOfDay), lt(shiftsTable.startTime, endOfDay)),
         and(lte(shiftsTable.startTime, now), gte(shiftsTable.endTime, now)),
       ),
     ))

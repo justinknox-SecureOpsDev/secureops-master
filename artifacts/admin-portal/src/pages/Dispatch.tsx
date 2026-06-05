@@ -105,6 +105,11 @@ type ChatRoom = { id: string; name: string; type: string };
 type ChatMessage = { id: string; content: string | null; userName?: string | null; createdAt: string };
 
 
+// WCSG operates on Central Time. All board dates/times render in Central
+// regardless of the viewer's browser timezone, matching the server-side
+// status-board day window (PAYROLL_TIMEZONE, default America/Chicago).
+const WCSG_TZ = "America/Chicago";
+
 function fmtTime(iso: string | null | undefined): string {
   if (!iso) return "—";
   const d = new Date(iso);
@@ -112,6 +117,7 @@ function fmtTime(iso: string | null | undefined): string {
     weekday: "short",
     hour: "numeric",
     minute: "2-digit",
+    timeZone: WCSG_TZ,
   });
 }
 
@@ -122,6 +128,7 @@ function fmtDate(iso: string | null | undefined): string {
     weekday: "short",
     month: "short",
     day: "numeric",
+    timeZone: WCSG_TZ,
   });
 }
 
