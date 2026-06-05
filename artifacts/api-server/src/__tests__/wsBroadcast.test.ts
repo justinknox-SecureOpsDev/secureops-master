@@ -128,23 +128,84 @@ function connectAuthed(token: string, timeoutMs = 4000): Promise<WebSocket> {
   });
 }
 
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+type ChatFrame = { type: "chat_message"; message: { content: string; roomId: string } };
+
 /**
- * Wait `windowMs` and return every parsed message that arrived during the
- * window. Used to assert "this socket did NOT receive a message" — the only
- * reliable way is to give the broadcast time to fan out and then look.
+ * Build a type-guard for `chat_message` WS frames, optionally scoped to a
+ * single room. Used both to count expected deliveries and to filter the
+ * frames returned to each test.
  */
-function collectFor(ws: WebSocket, windowMs: number): Promise<unknown[]> {
-  return new Promise((resolve) => {
-    const received: unknown[] = [];
+function chatFrameMatcher(roomId?: string): (m: unknown) => m is ChatFrame {
+  return (m: unknown): m is ChatFrame =>
+    typeof m === "object"
+    && m !== null
+    && (m as { type?: string }).type === "chat_message"
+    && (roomId === undefined || (m as { message?: { roomId?: string } }).message?.roomId === roomId);
+}
+
+/**
+ * Deterministically collect broadcast frames while `trigger` runs.
+ *
+ * Replaces the old fixed-window collector that flaked under full-suite load:
+ * rather than sleeping a flat 250/500ms and hoping the broadcast landed inside
+ * that window, we arm message listeners up front, fire the trigger, then resolve
+ * as soon as every subject that is EXPECTED to receive frames has received its
+ * expected count (bounded by a generous deadline). After the positive
+ * recipients are satisfied we wait a short settle window so that any erroneous
+ * over-delivery to a subject that should have received nothing still surfaces —
+ * server-side fan-out is a single synchronous loop, so a leak frame travels the
+ * same loopback hop and arrives within the settle window. The result is a test
+ * that is fast on the happy path and immune to CPU-starved timing windows.
+ */
+async function collectBroadcast(
+  subjects: Array<{ key: string; ws: WebSocket }>,
+  match: (m: unknown) => boolean,
+  expected: Record<string, number>,
+  trigger: () => Promise<void>,
+  opts: { deadlineMs?: number; settleMs?: number } = {},
+): Promise<Map<string, unknown[]>> {
+  const deadlineMs = opts.deadlineMs ?? 4000;
+  const settleMs = opts.settleMs ?? 200;
+  const collected = new Map<string, unknown[]>();
+  const listeners = new Map<string, (data: WebSocket.RawData) => void>();
+
+  const positivesMet = () =>
+    subjects.every(({ key }) => collected.get(key)!.length >= (expected[key] ?? 0));
+
+  let onProgress: () => void = () => {};
+  for (const { key, ws } of subjects) {
+    collected.set(key, []);
     const onMsg = (data: WebSocket.RawData) => {
-      try { received.push(JSON.parse(data.toString())); } catch { /* ignore */ }
+      let parsed: unknown;
+      try { parsed = JSON.parse(data.toString()); } catch { return; }
+      if (match(parsed)) {
+        collected.get(key)!.push(parsed);
+        onProgress();
+      }
     };
+    listeners.set(key, onMsg);
     ws.on("message", onMsg);
-    setTimeout(() => {
-      ws.off("message", onMsg);
-      resolve(received);
-    }, windowMs);
+  }
+
+  const allPositivesMet = new Promise<void>((resolve) => {
+    onProgress = () => { if (positivesMet()) resolve(); };
+    if (positivesMet()) resolve();
   });
+
+  await trigger();
+
+  await Promise.race([allPositivesMet, sleep(deadlineMs)]);
+  // Give any stray over-delivery time to surface before we stop listening.
+  await sleep(settleMs);
+
+  for (const { key, ws } of subjects) {
+    ws.off("message", listeners.get(key)!);
+  }
+  return collected;
 }
 
 function waitForClose(ws: WebSocket, timeoutMs = 4000): Promise<{ code: number; reason: string }> {
@@ -166,33 +227,36 @@ describe("WebSocket broadcast scoping + live revocation", () => {
     ]);
 
     try {
-      // Pre-arm collectors BEFORE the HTTP POST so we cannot miss the
-      // broadcast frame triggered by the route handler.
-      const alicePromise = collectFor(aliceWs, 500);
-      const bobPromise = collectFor(bobWs, 500);
-      const carolPromise = collectFor(carolWs, 500);
-
       // Drive the REAL route — this is the regression surface. The
       // handler computes `resolveRoomMembers(room)` and passes that as
       // `allowedUserIds` to `broadcastToRoom`. If a future change drops
       // the allow-list or miscomputes membership, carol (an admin who
       // is NOT in this DM) would see the frame and this test fails.
-      const res = await request(app)
-        .post(`/api/chat/rooms/${ctx.dmRoomId}/messages`)
-        .set("Authorization", `Bearer ${ctx.alice.token}`)
-        .send({ content: "private hello" });
+      //
+      // `collectBroadcast` arms the listeners BEFORE firing the POST so we
+      // cannot miss the frame, then resolves as soon as both participants
+      // have received (deterministic) — not after a fixed sleep.
+      let res!: request.Response;
+      const collected = await collectBroadcast(
+        [
+          { key: "alice", ws: aliceWs },
+          { key: "bob", ws: bobWs },
+          { key: "carol", ws: carolWs },
+        ],
+        chatFrameMatcher(),
+        { alice: 1, bob: 1, carol: 0 },
+        async () => {
+          res = await request(app)
+            .post(`/api/chat/rooms/${ctx.dmRoomId}/messages`)
+            .set("Authorization", `Bearer ${ctx.alice.token}`)
+            .send({ content: "private hello" });
+        },
+      );
       expect(res.status).toBe(201);
 
-      const [aliceMsgs, bobMsgs, carolMsgs] = await Promise.all([alicePromise, bobPromise, carolPromise]);
-
-      const chatFrames = (msgs: unknown[]) =>
-        msgs.filter((m): m is { type: string; message: { content: string } } =>
-          typeof m === "object" && m !== null && (m as { type?: string }).type === "chat_message",
-        );
-
-      const aliceChat = chatFrames(aliceMsgs);
-      const bobChat = chatFrames(bobMsgs);
-      const carolChat = chatFrames(carolMsgs);
+      const aliceChat = collected.get("alice") as ChatFrame[];
+      const bobChat = collected.get("bob") as ChatFrame[];
+      const carolChat = collected.get("carol") as ChatFrame[];
 
       expect(aliceChat).toHaveLength(1);
       expect(bobChat).toHaveLength(1);
@@ -411,15 +475,6 @@ afterAll(async () => {
   await db.execute(sql`DELETE FROM users WHERE last_name = ${TAG2}`);
 });
 
-function chatFramesFor(msgs: unknown[], roomId: string): Array<{ message: { content: string; roomId: string } }> {
-  return msgs.filter((m): m is { type: string; message: { content: string; roomId: string } } =>
-    typeof m === "object"
-      && m !== null
-      && (m as { type?: string }).type === "chat_message"
-      && (m as { message?: { roomId?: string } }).message?.roomId === roomId,
-  );
-}
-
 /**
  * Open a WS connection against the room-test server (separate http.Server
  * from the first describe block) and wait for the `connected` hello.
@@ -447,32 +502,37 @@ function connectRoomUser(token: string, timeoutMs = 4000): Promise<WebSocket> {
  * that arrive on each subject's already-open socket. Returns the parsed
  * `chat_message` frames per user that target the posted room.
  *
- * Arming the collectors BEFORE issuing the POST is essential — the route
- * handler fans out synchronously after the DB insert returns, and a
- * collector attached too late would miss the broadcast and yield a false
- * negative ("no leak"). The 250ms window gives the loopback fan-out
- * plenty of head-room without slowing the suite meaningfully.
+ * `expected` maps a subject's user id to how many room-scoped frames it
+ * should receive (omit a subject to mean zero). `collectBroadcast` arms the
+ * listeners BEFORE issuing the POST — the route handler fans out
+ * synchronously after the DB insert returns, so a listener attached too late
+ * would miss the broadcast and yield a false negative ("no leak"). It then
+ * resolves as soon as every positive recipient has its expected frames, plus
+ * a short settle window to catch any over-delivery to a subject that should
+ * have received nothing — deterministic under full-suite load.
  */
 async function postAndCollect(
   poster: RoomUser,
   roomId: string,
   content: string,
   subjects: RoomUser[],
-): Promise<Map<string, Array<{ message: { content: string; roomId: string } }>>> {
-  const windowMs = 250;
-  const pending = subjects.map((u) => ({
-    u,
-    promise: collectFor(u.ws!, windowMs),
-  }));
-  const res = await request(app)
-    .post(`/api/chat/rooms/${roomId}/messages`)
-    .set("Authorization", `Bearer ${poster.token}`)
-    .send({ content });
-  expect(res.status).toBe(201);
-  const out = new Map<string, Array<{ message: { content: string; roomId: string } }>>();
-  for (const { u, promise } of pending) {
-    const msgs = await promise;
-    out.set(u.id, chatFramesFor(msgs, roomId));
+  expected: Record<string, number>,
+): Promise<Map<string, ChatFrame[]>> {
+  const collected = await collectBroadcast(
+    subjects.map((u) => ({ key: u.id, ws: u.ws! })),
+    chatFrameMatcher(roomId),
+    expected,
+    async () => {
+      const res = await request(app)
+        .post(`/api/chat/rooms/${roomId}/messages`)
+        .set("Authorization", `Bearer ${poster.token}`)
+        .send({ content });
+      expect(res.status).toBe(201);
+    },
+  );
+  const out = new Map<string, ChatFrame[]>();
+  for (const u of subjects) {
+    out.set(u.id, (collected.get(u.id) ?? []) as ChatFrame[]);
   }
   return out;
 }
@@ -489,7 +549,9 @@ describe("WebSocket broadcast scoping by room type", () => {
 
   it("ops rooms broadcast to admins only (officers never see ops traffic)", async () => {
     const subjects = [rooms.admin, rooms.l3Officer, rooms.l2Officer, rooms.noLicOfficer, rooms.explicit];
-    const got = await postAndCollect(rooms.admin, rooms.opsRoomId, "ops-channel-traffic", subjects);
+    const got = await postAndCollect(rooms.admin, rooms.opsRoomId, "ops-channel-traffic", subjects, {
+      [rooms.admin.id]: 1,
+    });
     expect(got.get(rooms.admin.id)).toHaveLength(1);
     for (const u of [rooms.l3Officer, rooms.l2Officer, rooms.noLicOfficer, rooms.explicit]) {
       expect(got.get(u.id)).toHaveLength(0);
@@ -498,7 +560,10 @@ describe("WebSocket broadcast scoping by room type", () => {
 
   it("license_level rooms reach officers at-or-above the threshold and exclude under-qualified officers", async () => {
     const subjects = [rooms.admin, rooms.l3Officer, rooms.l2Officer, rooms.noLicOfficer, rooms.explicit];
-    const got = await postAndCollect(rooms.admin, rooms.licenseRoomId, "lic3-only", subjects);
+    const got = await postAndCollect(rooms.admin, rooms.licenseRoomId, "lic3-only", subjects, {
+      [rooms.admin.id]: 1,
+      [rooms.l3Officer.id]: 1,
+    });
     expect(got.get(rooms.admin.id)).toHaveLength(1);     // admin always in
     expect(got.get(rooms.l3Officer.id)).toHaveLength(1); // L3 ≥ 3 → in
     expect(got.get(rooms.l2Officer.id)).toHaveLength(0); // L2 < 3 → out
@@ -519,6 +584,7 @@ describe("WebSocket broadcast scoping by room type", () => {
         rooms.licenseRoomId,
         "post-expiry-lic3",
         [rooms.admin, rooms.l3Officer],
+        { [rooms.admin.id]: 1 },
       );
       expect(got.get(rooms.admin.id)).toHaveLength(1);
       expect(got.get(rooms.l3Officer.id)).toHaveLength(0);
@@ -530,7 +596,10 @@ describe("WebSocket broadcast scoping by room type", () => {
 
   it("site rooms reach officers who clear MIN(required_license_level) across the site's shifts and exclude the rest", async () => {
     const subjects = [rooms.admin, rooms.l3Officer, rooms.l2Officer, rooms.noLicOfficer, rooms.explicit];
-    const got = await postAndCollect(rooms.admin, rooms.siteRoomId, "site-traffic", subjects);
+    const got = await postAndCollect(rooms.admin, rooms.siteRoomId, "site-traffic", subjects, {
+      [rooms.admin.id]: 1,
+      [rooms.l3Officer.id]: 1,
+    });
     expect(got.get(rooms.admin.id)).toHaveLength(1);
     expect(got.get(rooms.l3Officer.id)).toHaveLength(1); // qualifies for the L3 shift
     expect(got.get(rooms.l2Officer.id)).toHaveLength(0);
@@ -540,7 +609,10 @@ describe("WebSocket broadcast scoping by room type", () => {
 
   it("city rooms reach only admins + users with an active/invited membership row", async () => {
     const subjects = [rooms.admin, rooms.l3Officer, rooms.l2Officer, rooms.noLicOfficer, rooms.explicit];
-    const got = await postAndCollect(rooms.admin, rooms.cityRoomId, "city-traffic", subjects);
+    const got = await postAndCollect(rooms.admin, rooms.cityRoomId, "city-traffic", subjects, {
+      [rooms.admin.id]: 1,
+      [rooms.explicit.id]: 1,
+    });
     expect(got.get(rooms.admin.id)).toHaveLength(1);
     expect(got.get(rooms.explicit.id)).toHaveLength(1); // active membership → in
     for (const u of [rooms.l3Officer, rooms.l2Officer, rooms.noLicOfficer]) {
@@ -550,7 +622,10 @@ describe("WebSocket broadcast scoping by room type", () => {
 
   it("elite rooms reach only admins + explicit members; revoking the membership cuts the next broadcast", async () => {
     const subjects = [rooms.admin, rooms.l3Officer, rooms.l2Officer, rooms.noLicOfficer, rooms.explicit];
-    const before = await postAndCollect(rooms.admin, rooms.eliteRoomId, "elite-first", subjects);
+    const before = await postAndCollect(rooms.admin, rooms.eliteRoomId, "elite-first", subjects, {
+      [rooms.admin.id]: 1,
+      [rooms.explicit.id]: 1,
+    });
     expect(before.get(rooms.admin.id)).toHaveLength(1);
     expect(before.get(rooms.explicit.id)).toHaveLength(1);
     for (const u of [rooms.l3Officer, rooms.l2Officer, rooms.noLicOfficer]) {
@@ -569,6 +644,7 @@ describe("WebSocket broadcast scoping by room type", () => {
       rooms.eliteRoomId,
       "elite-after-revoke",
       [rooms.admin, rooms.explicit],
+      { [rooms.admin.id]: 1 },
     );
     expect(after.get(rooms.admin.id)).toHaveLength(1);
     expect(after.get(rooms.explicit.id)).toHaveLength(0);
@@ -581,7 +657,9 @@ describe("WebSocket broadcast scoping by room type", () => {
     // dropped the allow-list, every leftover legacy room in the DB would
     // start leaking to every employee — exactly what this assertion blocks.
     const subjects = [rooms.admin, rooms.l3Officer, rooms.l2Officer, rooms.noLicOfficer, rooms.explicit];
-    const got = await postAndCollect(rooms.admin, rooms.legacyRoomId, "legacy-shift-room", subjects);
+    const got = await postAndCollect(rooms.admin, rooms.legacyRoomId, "legacy-shift-room", subjects, {
+      [rooms.admin.id]: 1,
+    });
     expect(got.get(rooms.admin.id)).toHaveLength(1);
     for (const u of [rooms.l3Officer, rooms.l2Officer, rooms.noLicOfficer, rooms.explicit]) {
       expect(got.get(u.id)).toHaveLength(0);
