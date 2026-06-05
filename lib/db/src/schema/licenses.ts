@@ -13,6 +13,10 @@ export const licensesTable = pgTable("licenses", {
   issueDate: date("issue_date"),
   expiryDate: date("expiry_date").notNull(),
   notes: text("notes"),
+  // Photo / scan of the physical license card. Captured when an officer
+  // submits a renewal and carried onto the license record on approval so
+  // the current card image is always viewable from the officer profile.
+  docKey: text("doc_key"),
   // Expiry-reminder bookkeeping. We send tiered reminders at 30 / 14 / 7
   // days before expiry. `lastReminderTier` is the smallest threshold we
   // have already sent for the current expiryDate, so we never re-send

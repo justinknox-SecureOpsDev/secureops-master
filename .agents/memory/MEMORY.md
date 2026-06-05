@@ -23,3 +23,4 @@
 - [Production custom domain](production-domain.md) — live domain is wcsgisecureops.com (getDeploymentInfo primaryUrl); APP_BASE_URL must equal it; dev privacy is a platform toggle not code.
 - [Site/client hard-delete data loss](site-delete-cascade-data-loss.md) — deleting a site/client splits dependents (SET NULL survivors vs CASCADE deletes); all 4 delete paths must hit the shared blocker guard.
 - [Holiday rate cent-rounding](holiday-rate-cent-rounding.md) — round holiday premium rate to cents BEFORE × hours, identically in payroll + invoicing, or displayed-rate×hours drifts from gross.
+- [Two license surfaces](two-license-surfaces.md) — license data lives in BOTH licenses table (eligibility) and employees.sia*+licenseDocKey (what OfficerProfile/PDF render); any license change must write both.

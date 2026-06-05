@@ -5,6 +5,7 @@ import {
   licenseRenewalRequestsTable,
   licensesTable,
   usersTable,
+  employeesTable,
 } from "@workspace/db";
 import { requireAuth, requireAdmin } from "../middlewares/auth";
 
@@ -204,6 +205,8 @@ router.post("/admin/license-renewals/:id/approve", requireAdmin, async (req, res
           issuingAuthority: renewal.issuingAuthority,
           issueDate: renewal.issueDate,
           expiryDate: renewal.expiryDate,
+          // Carry the renewed card photo onto the license record.
+          docKey: renewal.docKey,
           // Clear reminder bookkeeping so the new expiry gets a fresh
           // 30/14/7 reminder cycle.
           lastReminderTier: null,
@@ -225,6 +228,7 @@ router.post("/admin/license-renewals/:id/approve", requireAdmin, async (req, res
           issuingAuthority: renewal.issuingAuthority,
           issueDate: renewal.issueDate,
           expiryDate: renewal.expiryDate,
+          docKey: renewal.docKey,
         })
         .returning({ id: licensesTable.id });
       licenseId = inserted.id;
@@ -241,6 +245,19 @@ router.post("/admin/license-renewals/:id/approve", requireAdmin, async (req, res
       })
       .where(eq(licenseRenewalRequestsTable.id, id))
       .returning();
+
+    // Mirror the approved license onto the officer's profile summary so the
+    // admin OfficerProfile (and the profile PDF) shows the renewed level,
+    // number, expiry and card photo — not stale onboarding-time values.
+    await tx
+      .update(employeesTable)
+      .set({
+        siaLicenseLevel: renewal.licenseLevel,
+        siaLicenseNumber: renewal.licenseNumber,
+        siaLicenseExpiry: renewal.expiryDate,
+        licenseDocKey: renewal.docKey,
+      })
+      .where(eq(employeesTable.userId, renewal.employeeId));
 
     return { code: 200 as const, body: updatedRenewal, employeeId: renewal.employeeId };
   });
