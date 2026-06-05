@@ -6,7 +6,7 @@ import {
   AlertTriangle, ShieldCheck, Repeat, KeyRound, IdCard, Link2, Download,
   Radio as RadioIcon, Radar, MessageCircle, Users as UsersIcon,
   Briefcase, Calculator, Shield, Settings, CalendarRange, Menu, X, Building2,
-  ArrowLeftRight, GraduationCap,
+  ArrowLeftRight, GraduationCap, LifeBuoy,
   type LucideIcon,
 } from "lucide-react";
 import { useAuth } from "@/lib/auth";
@@ -200,6 +200,7 @@ export function buildNavGroups(isDispatcher: boolean): NavGroup[] {
       { href: "/account/security", label: "My 2FA", Icon: KeyRound },
       { href: "/tables/users", label: "Users", Icon: UsersIcon },
       { href: "/audit-log", label: "Audit Log", Icon: ShieldCheck },
+      { href: "/recovery/shifts", label: "Shift Recovery", Icon: LifeBuoy },
       { href: "/exports", label: "Exports", Icon: Download },
       { href: "/settings/scheduler-integration", label: "Scheduler Integration", Icon: ArrowLeftRight },
     ],

@@ -27,6 +27,7 @@ import { InvitationsPage } from "@/pages/Invitations";
 import ShiftsPage from "@/pages/Shifts";
 import CalendarPage from "@/pages/Calendar";
 import AuditLogPage from "@/pages/AuditLog";
+import ShiftRecoveryPage from "@/pages/ShiftRecovery";
 import SwapRequestsPage from "@/pages/SwapRequests";
 import LicenseRenewalsPage from "@/pages/LicenseRenewals";
 import IncidentShareLinksPage from "@/pages/IncidentShareLinks";
@@ -141,6 +142,7 @@ function Routed() {
           <Route path="/subcontractors/pay-run" component={SubcontractorPayRunPage} />
           <Route path="/subcontractors/clock-in-entries" component={SubcontractorEntriesPage} />
           <Route path="/audit-log" component={AuditLogPage} />
+          <Route path="/recovery/shifts" component={ShiftRecoveryPage} />
           <Route path="/swap-requests" component={SwapRequestsPage} />
           <Route path="/hr/license-renewals" component={LicenseRenewalsPage} />
           <Route path="/incidents/share-links" component={IncidentShareLinksPage} />

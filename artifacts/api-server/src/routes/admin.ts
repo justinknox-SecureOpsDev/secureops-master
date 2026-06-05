@@ -1,5 +1,5 @@
 import { Router, type IRouter, type Request, type Response } from "express";
-import { eq, sql, desc, asc, ilike, or, and, inArray, type AnyColumn } from "drizzle-orm";
+import { eq, sql, desc, asc, ilike, or, and, inArray, isNull, type AnyColumn } from "drizzle-orm";
 import bcrypt from "bcryptjs";
 import { randomBytes } from "node:crypto";
 import { z } from "zod/v4";
@@ -1654,6 +1654,133 @@ router.get("/admin/users/invitations", requireAdmin, async (_req, res): Promise<
     .where(sql`${usersTable.role} <> 'admin'`)
     .orderBy(asc(usersTable.lastName), asc(usersTable.firstName));
   res.json(rows);
+});
+
+// ---------------------------------------------------------------------------
+// Orphaned-shift recovery
+//
+// When a site is hard-deleted, its shifts are ON DELETE SET NULL (not cascade),
+// so they survive with site_id = NULL — they keep their title, client_name,
+// times, rates and assignments, but are no longer attached to a site. This pair
+// of admin-only endpoints lets an admin re-link those orphaned shifts to a site
+// they recreate (e.g. after an accidental site delete). Assignments hang off the
+// shift row, so relinking the shift is sufficient — nothing else moves.
+// Both are auto-audited (2xx writes on /admin/*).
+// ---------------------------------------------------------------------------
+
+// Preview: orphaned shifts (site_id IS NULL) grouped by (title, client_name)
+// so the admin can pick which group belongs to the site being restored.
+router.get("/admin/orphaned-shifts", requireAdmin, async (_req, res): Promise<void> => {
+  const result = await db.execute(sql`
+    SELECT
+      s.title AS title,
+      s.client_name AS client_name,
+      count(DISTINCT s.id)::int AS shift_count,
+      count(DISTINCT s.id) FILTER (WHERE s.status = 'upcoming')::int AS upcoming_count,
+      count(DISTINCT s.id) FILTER (WHERE s.status = 'active')::int AS active_count,
+      count(DISTINCT s.id) FILTER (WHERE s.status = 'completed')::int AS completed_count,
+      count(DISTINCT sa.id)::int AS assignment_count,
+      min(s.start_time) AS earliest,
+      max(s.start_time) AS latest
+    FROM shifts s
+    LEFT JOIN shift_assignments sa ON sa.shift_id = s.id
+    WHERE s.site_id IS NULL
+    GROUP BY s.title, s.client_name
+    ORDER BY count(DISTINCT s.id) DESC, s.title ASC
+  `);
+  const groups = (result.rows as unknown as Array<Record<string, unknown>>).map((r) => ({
+    title: r.title as string,
+    clientName: (r.client_name as string | null) ?? null,
+    shiftCount: Number(r.shift_count ?? 0),
+    upcomingCount: Number(r.upcoming_count ?? 0),
+    activeCount: Number(r.active_count ?? 0),
+    completedCount: Number(r.completed_count ?? 0),
+    assignmentCount: Number(r.assignment_count ?? 0),
+    earliest: r.earliest ?? null,
+    latest: r.latest ?? null,
+  }));
+  const totalShifts = groups.reduce((n, g) => n + g.shiftCount, 0);
+  const totalAssignments = groups.reduce((n, g) => n + g.assignmentCount, 0);
+  res.json({ groups, totalShifts, totalAssignments });
+});
+
+const reattachShiftsSchema = z
+  .object({
+    siteId: z.string().uuid(),
+    // A group is the (title, clientName) pair the preview groups by. Matching
+    // on the pair (not title alone) means two different deleted sites that
+    // happened to share a shift title don't get reattached together.
+    groups: z
+      .array(
+        z.object({
+          title: z.string().min(1),
+          clientName: z.string().nullable().optional(),
+        }),
+      )
+      .optional(),
+    shiftIds: z.array(z.string().uuid()).optional(),
+  })
+  .refine((v) => (v.groups?.length ?? 0) > 0 || (v.shiftIds?.length ?? 0) > 0, {
+    message: "Provide at least one group or shiftId to reattach",
+  });
+
+// Reattach orphaned shifts (site_id IS NULL) to an existing site, matched by
+// (title, clientName) group and/or explicit shift ids. Only ever touches
+// currently-orphaned rows — the isNull guard makes it safe to re-run and
+// impossible to steal a shift that already belongs to another site.
+router.post("/admin/orphaned-shifts/reattach", requireAdmin, async (req, res): Promise<void> => {
+  const parsed = reattachShiftsSchema.safeParse(req.body);
+  if (!parsed.success) {
+    res.status(400).json({ error: "Invalid request", details: parsed.error.flatten() });
+    return;
+  }
+  const { siteId, groups, shiftIds } = parsed.data;
+
+  const [site] = await db
+    .select({ id: sitesTable.id, name: sitesTable.name })
+    .from(sitesTable)
+    .where(eq(sitesTable.id, siteId))
+    .limit(1);
+  if (!site) {
+    res.status(404).json({ error: "Target site not found" });
+    return;
+  }
+
+  const matchers = [];
+  if (groups && groups.length > 0) {
+    for (const g of groups) {
+      // IS NOT DISTINCT FROM so a NULL clientName matches the NULL group too,
+      // since regular `=` never matches NULL. Scalar params only (no array
+      // binding) — drizzle's `ANY(array)` is a known footgun in this repo.
+      matchers.push(
+        and(
+          eq(shiftsTable.title, g.title),
+          sql`${shiftsTable.clientName} IS NOT DISTINCT FROM ${g.clientName ?? null}`,
+        ),
+      );
+    }
+  }
+  if (shiftIds && shiftIds.length > 0) matchers.push(inArray(shiftsTable.id, shiftIds));
+  const matchCondition = matchers.length === 1 ? matchers[0] : or(...matchers);
+
+  const updated = await db
+    .update(shiftsTable)
+    .set({ siteId })
+    .where(and(isNull(shiftsTable.siteId), matchCondition))
+    .returning({ id: shiftsTable.id });
+
+  const reattached = updated.length;
+  let assignmentsAffected = 0;
+  if (reattached > 0) {
+    const ids = updated.map((r) => r.id);
+    const [cnt] = await db
+      .select({ c: sql<number>`count(*)::int` })
+      .from(shiftAssignmentsTable)
+      .where(inArray(shiftAssignmentsTable.shiftId, ids));
+    assignmentsAffected = cnt?.c ?? 0;
+  }
+
+  res.json({ reattached, assignmentsAffected, siteId, siteName: site.name });
 });
 
 export default router;

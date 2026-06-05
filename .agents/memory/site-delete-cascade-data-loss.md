@@ -15,3 +15,13 @@ Hard-deleting a `sites` row (or a `clients` row, since `sites.client_id` is `ON 
 **The guard (lib/siteDeletion.ts):** every delete path — `DELETE /sites/:id`, `DELETE /clients/:id`, and the generic `DELETE /admin/tables/{sites,clients}/:id` — must call the shared blocker check and refuse with 409 + a `blockers` count map while any dependent rows exist. Keep all four wired to the single shared helper; do not re-add a delete path that bypasses it.
 
 **How to apply:** if you add a new table that references `sites.id` or `clients.id`, decide its `onDelete` deliberately (prefer RESTRICT/guard over silent CASCADE/SET NULL for operational data) and add it to the blocker query so the guard stays complete.
+
+## Orphaned-shift recovery — group by the full nullable key
+
+The repair tool reattaches `site_id IS NULL` shifts to a recreated site, grouped by **(title, client_name)** — never title alone (two deleted sites sharing a title would reattach together).
+
+**Why the nullable column is the trap:** SQL treats `NULL` and `''` (empty string) as **distinct** groups. So:
+- Server matching must use `client_name IS NOT DISTINCT FROM <param>` (plain `=` never matches NULL), with scalar params — do NOT array-bind into `ANY()` (known drizzle footgun here).
+- Any client-side group identity key (React keys, selection maps) must encode NULL with a sentinel, **never** collapse `null` to `""` — otherwise the null group and empty-string group collide into one key and select together.
+
+**How to apply:** whenever you group/dedup/reattach on a nullable column, treat NULL as its own value end-to-end (sentinel in keys, `IS NOT DISTINCT FROM` in SQL) and add a regression test proving null vs empty-string stay separate. Inherent limit: two deleted sites that shared BOTH title and client name still can't be told apart by this key.
