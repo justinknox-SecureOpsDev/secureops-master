@@ -135,8 +135,8 @@ packages = ["yakut", "eas-cli"]
 
 [userenv.production]
 SEED_DEMO_USERS = "false"
-APP_BASE_URL = "https://security-operations-suite.replit.app"
-ALLOWED_ORIGINS = "https://security-operations-suite.replit.app,https://secureops.williamscouncilsg.com"
+APP_BASE_URL = "https://wcsgisecureops.com"
+ALLOWED_ORIGINS = "https://wcsgisecureops.com,https://secureops.williamscouncilsg.com,https://security-operations-suite.replit.app"
 
 [userenv.shared]
 GEOCODING_ENABLED = "true"
