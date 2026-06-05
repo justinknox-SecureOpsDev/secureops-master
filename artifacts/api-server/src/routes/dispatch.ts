@@ -65,8 +65,11 @@ function haversineMiles(lat1: number, lng1: number, lat2: number, lng2: number):
  * shift currently in progress, so an overnight shift that started
  * yesterday but hasn't ended still appears. Buckets:
  *
- *   onDuty   — officer has an open time_entry (clockOutTime IS NULL)
- *              for this shift
+ *   onDuty   — officer has ANY open time_entry (clockOutTime IS NULL),
+ *              i.e. they are clocked in right now. Sourced directly from
+ *              open time entries (not the accepted-assignment join) so the
+ *              count matches the dashboard's "clocked in now" and an officer
+ *              attached to a shift outside today's window still surfaces.
  *   late     — shift started > LATE_MIN min ago and the officer is not
  *              clocked in; degrades to noShow after NO_SHOW_MIN
  *   noShow   — shift started > NO_SHOW_MIN min ago, still no clock-in
@@ -121,19 +124,56 @@ router.get("/dispatch/status-board", requireAdminOrDispatcher, async (_req, res)
 
   const windowStart = new Date(Math.min(startOfDay.getTime(), now.getTime() - 8 * 60 * MS_MIN));
 
-  // One pass through open time entries for officers in our window — used
-  // to detect on-duty and early-out without round-tripping per row.
-  const userIds = [...new Set(rows.map((r) => r.userId))];
-  const shiftIds = [...new Set(rows.map((r) => r.shiftId))];
-  const openByShift = new Map<string, { id: string; clockInTime: Date; userId: string }>();
+  // -- onDuty: authoritative "clocked in right now" set ----------------------
+  // Driven directly by OPEN time entries (clockOutTime IS NULL), NOT by the
+  // accepted-assignment-in-window join above. An officer is on duty the moment
+  // they clock in — regardless of whether their attached shift falls in today's
+  // window (e.g. an overnight that started earlier, an officer attached to the
+  // wrong shift, or an ad-hoc geo clock-in with no shift at all). Sourcing this
+  // from the assignment join silently dropped those officers, so the board's
+  // count diverged from the dashboard's "clocked in now". Site name falls back
+  // to the time entry's own siteId when the entry has no shift.
+  const openEntries = await db
+    .select({
+      timeEntryId: timeEntriesTable.id,
+      userId: timeEntriesTable.employeeId,
+      shiftId: timeEntriesTable.shiftId,
+      clockInTime: timeEntriesTable.clockInTime,
+      teSiteId: timeEntriesTable.siteId,
+      shiftTitle: shiftsTable.title,
+      startTime: shiftsTable.startTime,
+      endTime: shiftsTable.endTime,
+      shiftSiteId: shiftsTable.siteId,
+      siteName: sitesTable.name,
+      siteAddress: sitesTable.address,
+      firstName: usersTable.firstName,
+      lastName: usersTable.lastName,
+      lastLat: usersTable.lastLat,
+      lastLng: usersTable.lastLng,
+      lastLocationAt: usersTable.lastLocationAt,
+    })
+    .from(timeEntriesTable)
+    .innerJoin(usersTable, eq(timeEntriesTable.employeeId, usersTable.id))
+    .leftJoin(shiftsTable, eq(timeEntriesTable.shiftId, shiftsTable.id))
+    .leftJoin(
+      sitesTable,
+      sql`${sitesTable.id} = coalesce(${shiftsTable.siteId}, ${timeEntriesTable.siteId})`,
+    )
+    .where(isNull(timeEntriesTable.clockOutTime))
+    .orderBy(asc(timeEntriesTable.clockInTime));
+
+  // Officers already on duty must not also appear as late / no-show /
+  // scheduled — they're clearly present, so we skip their assignment rows.
+  const onDutyUserIds = new Set(openEntries.map((e) => e.userId));
+
+  // Closed entries for the windowed shifts — used to classify earlyOut /
+  // completed for officers who clocked in and back out.
   const closedByShift = new Map<string, { clockOutTime: Date; userId: string }>();
-  if (userIds.length > 0 && shiftIds.length > 0) {
+  {
     const entries = await db
       .select({
-        id: timeEntriesTable.id,
         userId: timeEntriesTable.employeeId,
         shiftId: timeEntriesTable.shiftId,
-        clockInTime: timeEntriesTable.clockInTime,
         clockOutTime: timeEntriesTable.clockOutTime,
       })
       .from(timeEntriesTable)
@@ -141,24 +181,37 @@ router.get("/dispatch/status-board", requireAdminOrDispatcher, async (_req, res)
         gte(timeEntriesTable.clockInTime, windowStart),
       ));
     for (const e of entries) {
-      if (!e.shiftId) continue;
-      if (e.clockOutTime == null) {
-        openByShift.set(`${e.shiftId}:${e.userId}`, {
-          id: e.id, clockInTime: e.clockInTime, userId: e.userId,
-        });
-      } else {
-        // Keep the latest closed entry per (shift,user)
-        const k = `${e.shiftId}:${e.userId}`;
-        const prev = closedByShift.get(k);
-        if (!prev || e.clockOutTime > prev.clockOutTime) {
-          closedByShift.set(k, { clockOutTime: e.clockOutTime, userId: e.userId });
-        }
+      if (!e.shiftId || e.clockOutTime == null) continue;
+      // Keep the latest closed entry per (shift,user)
+      const k = `${e.shiftId}:${e.userId}`;
+      const prev = closedByShift.get(k);
+      if (!prev || e.clockOutTime > prev.clockOutTime) {
+        closedByShift.set(k, { clockOutTime: e.clockOutTime, userId: e.userId });
       }
     }
   }
 
   const buckets = {
-    onDuty: [] as unknown[],
+    onDuty: openEntries.map((e) => ({
+      // Synthetic but unique key for the UI (no assignment is guaranteed for
+      // an ad-hoc / wrong-shift clock-in). The clock-out action uses
+      // timeEntryId, so on-behalf clock-out still works from this row.
+      assignmentId: e.timeEntryId,
+      shiftId: e.shiftId,
+      shiftTitle: e.shiftTitle ?? null,
+      startTime: e.startTime ?? null,
+      endTime: e.endTime ?? null,
+      siteId: e.shiftSiteId ?? e.teSiteId ?? null,
+      siteName: e.siteName ?? null,
+      siteAddress: e.siteAddress ?? null,
+      userId: e.userId,
+      officerName: `${e.firstName} ${e.lastName}`,
+      lastLat: e.lastLat,
+      lastLng: e.lastLng,
+      lastLocationAt: e.lastLocationAt,
+      clockInTime: e.clockInTime,
+      timeEntryId: e.timeEntryId,
+    })) as unknown[],
     late: [] as unknown[],
     noShow: [] as unknown[],
     earlyOut: [] as unknown[],
@@ -167,8 +220,9 @@ router.get("/dispatch/status-board", requireAdminOrDispatcher, async (_req, res)
   };
 
   for (const r of rows) {
+    // Clocked in right now → already represented in onDuty above.
+    if (onDutyUserIds.has(r.userId)) continue;
     const key = `${r.shiftId}:${r.userId}`;
-    const open = openByShift.get(key);
     const closed = closedByShift.get(key);
     const minsSinceStart = (now.getTime() - r.startTime.getTime()) / MS_MIN;
 
@@ -188,10 +242,6 @@ router.get("/dispatch/status-board", requireAdminOrDispatcher, async (_req, res)
       lastLocationAt: r.lastLocationAt,
     };
 
-    if (open) {
-      buckets.onDuty.push({ ...base, clockInTime: open.clockInTime, timeEntryId: open.id });
-      continue;
-    }
     if (closed) {
       // Officer clocked in AND out. If they clocked out well before the
       // scheduled end it's an early-out; otherwise the shift was worked

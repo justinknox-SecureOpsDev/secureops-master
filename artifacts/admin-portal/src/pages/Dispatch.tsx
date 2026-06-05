@@ -23,10 +23,10 @@ import { AssignNearestDialog } from "@/components/AssignNearestDialog";
 
 type StatusRow = {
   assignmentId: string;
-  shiftId: string;
+  shiftId: string | null;
   shiftTitle: string | null;
-  startTime: string;
-  endTime: string;
+  startTime: string | null;
+  endTime: string | null;
   siteName: string | null;
   siteAddress: string | null;
   userId: string;
