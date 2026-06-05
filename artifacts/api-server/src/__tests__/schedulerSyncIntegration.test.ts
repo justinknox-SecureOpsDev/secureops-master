@@ -1232,6 +1232,90 @@ describe("scheduler reconciliation job", () => {
     // Cursor stays at the epoch default — a failed pull must not advance it.
     expect(cursor.cursorValue).toBe("1970-01-01T00:00:00.000Z");
   });
+
+  it("reconciles assignedOfficerEmails through the reconcile job (add + remove via the periodic pull)", async () => {
+    // A second officer so we can assert add + remove across two pulls.
+    const otherEmail = `${TAG}-recon-officer2-${randomUUID().slice(0, 6)}@example.test`;
+    const [other] = await db
+      .insert(usersTable)
+      .values({
+        email: otherEmail,
+        passwordHash,
+        firstName: "ReconSync2",
+        lastName: TAG,
+        role: "employee",
+        status: "active",
+        tokensValidAfter: new Date(0),
+      })
+      .returning({ id: usersTable.id });
+
+    const externalId = `${TAG}-recon-roster-${randomUUID().slice(0, 8)}`;
+
+    // The delta pull carries a FULL roster in `assignedOfficerEmails`, exactly
+    // like the webhook payload. The reconcile job must apply it the same way.
+    let roster: string[] = [ctx.employeeEmail];
+    let updatedAt = "2026-08-01T00:00:00.000Z";
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (_url, opts) => {
+      const sent = JSON.parse((opts?.body as string) ?? "{}") as { since?: string };
+      return new Response(
+        JSON.stringify({
+          shifts: [{
+            id: externalId,
+            title: `${TAG} Recon Roster Shift`,
+            siteName: ctx.siteName,
+            startTime: "2026-08-15T08:00:00.000Z",
+            endTime: "2026-08-15T16:00:00.000Z",
+            payRate: "20",
+            billRate: "28",
+            requiredLicenseLevel: 2,
+            headcount: 2,
+            status: "upcoming",
+            assignedOfficerEmails: roster,
+            updatedAt,
+          }],
+          clockEvents: [],
+          nextCursor: `${sent.since}-next`,
+        }),
+        { status: 200, headers: { "Content-Type": "application/json" } },
+      );
+    });
+
+    // --- First tick: creates the shift and assigns officer #1.
+    await runSchedulerReconciliation();
+
+    const [shift] = await db
+      .select({ id: shiftsTable.id })
+      .from(shiftsTable)
+      .where(and(
+        eq(shiftsTable.externalSource, SCHEDULER_SOURCE),
+        eq(shiftsTable.externalId, externalId),
+      ));
+    expect(shift).toBeTruthy();
+
+    const afterCreate = await db
+      .select({ employeeId: shiftAssignmentsTable.employeeId, status: shiftAssignmentsTable.status })
+      .from(shiftAssignmentsTable)
+      .where(eq(shiftAssignmentsTable.shiftId, shift.id));
+    expect(afterCreate).toHaveLength(1);
+    expect(afterCreate[0].employeeId).toBe(ctx.employeeId);
+    expect(afterCreate[0].status).toBe("accepted");
+
+    // --- Second tick: scheduler drops officer #1 and adds officer #2, with a
+    //     strictly-newer updatedAt so the shift update wins the tiebreaker.
+    roster = [otherEmail];
+    updatedAt = "2026-08-02T00:00:00.000Z";
+    await runSchedulerReconciliation();
+
+    const afterUpdate = await db
+      .select({ employeeId: shiftAssignmentsTable.employeeId })
+      .from(shiftAssignmentsTable)
+      .where(eq(shiftAssignmentsTable.shiftId, shift.id));
+    expect(afterUpdate).toHaveLength(1);
+    expect(afterUpdate[0].employeeId).toBe(other.id);
+
+    // Cleanup the shift created by this test (its assignments cascade).
+    await db.delete(shiftsTable).where(eq(shiftsTable.id, shift.id));
+  });
 });
 
 // ---------------------------------------------------------------------------

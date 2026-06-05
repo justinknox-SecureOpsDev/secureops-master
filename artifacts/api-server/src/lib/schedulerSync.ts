@@ -376,6 +376,16 @@ export type SchedulerShiftPayload = {
   headcount?: number | null;
   status?: string | null;
   notes?: string | null;
+  /**
+   * Full set of officer emails the scheduler considers assigned to this shift.
+   * The scheduler is authoritative for the roster: when present, SecureOps adds
+   * assignments for newly-listed officers and removes assignments for officers
+   * no longer listed. `undefined` means "no roster info in this payload" (leave
+   * assignments untouched); an empty array means "clear the roster". Carried by
+   * both the webhook payload AND the delta pull so the reconcile job stays in
+   * sync with the webhook handler.
+   */
+  assignedOfficerEmails?: string[];
   updatedAt: string;
   deleted?: boolean;
 };

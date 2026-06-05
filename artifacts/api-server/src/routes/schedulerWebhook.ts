@@ -143,6 +143,52 @@ async function resolveShiftByExternalId(externalShiftId: string): Promise<string
 // Clock-in deduplication tolerance window: 5 minutes either side
 const DEDUP_TOLERANCE_MS = 5 * 60 * 1000;
 
+/**
+ * Reconcile a shift's officer roster against the scheduler's authoritative
+ * `assignedOfficerEmails` list. Shared by the webhook handler AND the scheduled
+ * reconciliation job (via `processInboundShift`) so a roster change syncs the
+ * same way whether it arrives by webhook or the periodic delta pull.
+ *
+ * We add an accepted assignment for each listed officer (idempotent) and remove
+ * assignments for officers no longer listed — mirroring the decline path in
+ * shifts.ts, which DELETEs the assignment to free the slot. Unknown emails are
+ * silently skipped. An empty list clears the entire roster.
+ */
+async function reconcileShiftRoster(shiftId: string, assignedOfficerEmails: string[]): Promise<void> {
+  // Resolve the listed emails to known officer userIds (unknown emails skipped).
+  const desiredUserIds = new Set<string>();
+  for (const email of assignedOfficerEmails) {
+    const userId = await resolveUserByEmail(email);
+    if (userId) desiredUserIds.add(userId);
+  }
+  const desiredIds = [...desiredUserIds];
+
+  // Add: insert an accepted assignment for each desired officer (idempotent).
+  for (const userId of desiredIds) {
+    try {
+      await db.insert(shiftAssignmentsTable).values({
+        shiftId,
+        employeeId: userId,
+        status: "accepted",
+      }).onConflictDoNothing();
+    } catch {
+      // ignore duplicate assignment errors
+    }
+  }
+
+  // Remove: delete assignments for officers no longer in the scheduler's roster.
+  if (desiredIds.length > 0) {
+    await db.delete(shiftAssignmentsTable).where(and(
+      eq(shiftAssignmentsTable.shiftId, shiftId),
+      notInArray(shiftAssignmentsTable.employeeId, desiredIds),
+    ));
+  } else {
+    await db.delete(shiftAssignmentsTable).where(
+      eq(shiftAssignmentsTable.shiftId, shiftId),
+    );
+  }
+}
+
 // -------------------------------------------------------------------------
 // Last-write-wins conflict resolution
 //
@@ -264,6 +310,12 @@ export async function processInboundShift(payload: SchedulerShiftPayload): Promi
       syncSource: SCHEDULER_SOURCE,
     }).where(eq(shiftsTable.id, existing.id));
 
+    // Reconcile the officer roster when the scheduler supplied one. An omitted
+    // field means "no roster info in this payload" — leave assignments untouched.
+    if (payload.assignedOfficerEmails !== undefined) {
+      await reconcileShiftRoster(existing.id, payload.assignedOfficerEmails);
+    }
+
     return { action: "updated", secureopsId: existing.id };
   }
 
@@ -318,6 +370,12 @@ export async function processInboundShift(payload: SchedulerShiftPayload): Promi
     },
   })
   .returning();
+
+  // Reconcile the officer roster when the scheduler supplied one. An omitted
+  // field means "no roster info in this payload" — leave assignments untouched.
+  if (payload.assignedOfficerEmails !== undefined) {
+    await reconcileShiftRoster(created.id, payload.assignedOfficerEmails);
+  }
 
   return { action: "created", secureopsId: created.id };
 }
@@ -529,6 +587,14 @@ router.post("/scheduler-webhook/shifts", webhookLimiter, requireHmac, async (req
   // title/startTime/endTime are optional in the Zod schema (to allow partial
   // updates), but SchedulerShiftPayload only makes them truly optional — the
   // processInboundShift function validates that they're present for creates.
+  // Officer-roster reconciliation against `assignedOfficerEmails` is handled
+  // inside `processInboundShift` (shared with the scheduled reconciliation job),
+  // so a roster change syncs the same way whether it arrives by webhook or the
+  // periodic delta pull. The scheduler is authoritative for the roster: a
+  // present list is the FULL set of assigned officers (omitted = leave untouched,
+  // empty array = clear). Reconciliation only runs on "created"/"updated"; a
+  // "skipped" stale-payload result leaves the roster alone and "deleted"
+  // cascades assignments away.
   const canonical: SchedulerShiftPayload = {
     id: payload.id,
     title: payload.title ?? undefined,
@@ -541,67 +607,12 @@ router.post("/scheduler-webhook/shifts", webhookLimiter, requireHmac, async (req
     headcount: payload.headcount,
     status: payload.status,
     notes: payload.notes,
+    assignedOfficerEmails: payload.assignedOfficerEmails,
     updatedAt: payload.updatedAt,
     deleted: payload.action === "delete",
   };
 
   const result = await processInboundShift(canonical);
-
-  // Reconcile the officer roster against `assignedOfficerEmails`.
-  //
-  // For both a newly created shift AND an updated existing shift, the scheduler
-  // is authoritative for the roster: the payload carries the FULL set of officers
-  // who should be assigned. We add assignments for newly-listed officers and
-  // remove assignments for officers no longer listed (mirroring the decline path
-  // in shifts.ts, which DELETEs the assignment to free the slot).
-  //
-  // Gating:
-  //   • Only act on "created" / "updated" — a "skipped" result means the shift
-  //     update itself lost the last-write-wins tiebreaker (stale payload), so we
-  //     must NOT touch the roster either. "deleted" cascades assignments away.
-  //   • Only reconcile when `assignedOfficerEmails` is present. An omitted field
-  //     means "no roster information in this payload" and leaves assignments
-  //     untouched; an explicit empty array means "clear the roster".
-  if (
-    (result.action === "created" || result.action === "updated") &&
-    result.secureopsId &&
-    payload.assignedOfficerEmails !== undefined
-  ) {
-    const shiftId = result.secureopsId;
-
-    // Resolve the listed emails to known officer userIds (unknown emails skipped).
-    const desiredUserIds = new Set<string>();
-    for (const email of payload.assignedOfficerEmails) {
-      const userId = await resolveUserByEmail(email);
-      if (userId) desiredUserIds.add(userId);
-    }
-    const desiredIds = [...desiredUserIds];
-
-    // Add: insert an accepted assignment for each desired officer (idempotent).
-    for (const userId of desiredIds) {
-      try {
-        await db.insert(shiftAssignmentsTable).values({
-          shiftId,
-          employeeId: userId,
-          status: "accepted",
-        }).onConflictDoNothing();
-      } catch {
-        // ignore duplicate assignment errors
-      }
-    }
-
-    // Remove: delete assignments for officers no longer in the scheduler's roster.
-    if (desiredIds.length > 0) {
-      await db.delete(shiftAssignmentsTable).where(and(
-        eq(shiftAssignmentsTable.shiftId, shiftId),
-        notInArray(shiftAssignmentsTable.employeeId, desiredIds),
-      ));
-    } else {
-      await db.delete(shiftAssignmentsTable).where(
-        eq(shiftAssignmentsTable.shiftId, shiftId),
-      );
-    }
-  }
 
   res.json({ ok: true, ...result });
 });

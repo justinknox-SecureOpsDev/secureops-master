@@ -30,3 +30,4 @@
 - [Two license surfaces](two-license-surfaces.md) — license data lives in BOTH licenses table (eligibility) and employees.sia*+licenseDocKey (what OfficerProfile/PDF render); any license change must write both.
 - [Release gate schema drift](release-gate-schema-drift.md) — forgotten `db push` after a schema-adding commit breaks test/security-headers gates (`column ... does not exist`) while typecheck stays green; fix = push, not code.
 - [Time-entry correction history](time-entry-correction-history.md) — officer entry change history filters audit_logs by entryId, NOT action (two edit paths emit different generic actions); new edit paths must stamp lastEdited cols + res.locals.auditMetadata.
+- [Scheduler roster two paths](scheduler-roster-shared-path.md) — scheduler shift data arrives via webhook AND periodic pull; new field side-effects must go on SchedulerShiftPayload + shared processInboundShift, not the route.
