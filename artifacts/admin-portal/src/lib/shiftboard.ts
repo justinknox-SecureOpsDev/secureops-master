@@ -1,10 +1,14 @@
+import { api as serverApi } from "@/lib/api";
+
+// Public share links point at the scheduler's own user-facing page. This is a
+// browser navigation target, NOT an API call, so it keeps using the scheduler
+// origin directly. All actual API traffic is proxied through the SecureOps API
+// server (see below), which holds the shared HMAC secret and signs requests.
 const DEFAULT_BASE = "https://event-staff-scheduler.replit.app";
 
 export const SHIFTBOARD_BASE_URL: string =
   (import.meta.env.VITE_SHIFTBOARD_URL as string | undefined)?.replace(/\/$/, "") ||
   DEFAULT_BASE;
-
-export const SHIFTBOARD_API = `${SHIFTBOARD_BASE_URL}/api`;
 
 export type ShiftboardEvent = {
   id: number;
@@ -57,42 +61,26 @@ export type ShiftboardStats = {
   byDay: { date: string; totalSlots: number; filledSlots: number }[];
 };
 
-async function api<T>(path: string, init?: RequestInit): Promise<T> {
-  const res = await fetch(`${SHIFTBOARD_API}${path}`, {
-    ...init,
-    headers: {
-      "Content-Type": "application/json",
-      ...(init?.headers ?? {}),
-    },
-  });
-  if (!res.ok) {
-    let msg = `${res.status} ${res.statusText}`;
-    try {
-      const body = await res.json();
-      if (body?.error || body?.message) msg = body.error || body.message;
-    } catch {}
-    throw new Error(msg);
-  }
-  if (res.status === 204) return undefined as unknown as T;
-  return (await res.json()) as T;
-}
-
+// All scheduler API calls are proxied through the SecureOps API server, which
+// attaches the admin JWT (via `serverApi`) and signs the forwarded request with
+// the shared HMAC secret. The browser never talks to the scheduler API or holds
+// the secret.
 export const shiftboard = {
-  listEvents: () => api<ShiftboardEvent[]>(`/events`),
+  listEvents: () => serverApi<ShiftboardEvent[]>(`/admin/scheduler/events`),
   createEvent: (body: {
     name: string;
     location: string;
     description?: string;
     startDate?: string;
     endDate?: string;
-  }) => api<ShiftboardEvent>(`/events`, { method: "POST", body: JSON.stringify(body) }),
-  getEventFull: (id: number) => api<ShiftboardEventFull>(`/events/${id}/full`),
-  getEventStats: (id: number) => api<ShiftboardStats>(`/events/${id}/stats`),
+  }) => serverApi<ShiftboardEvent>(`/admin/scheduler/events`, { method: "POST", body }),
+  getEventFull: (id: number) => serverApi<ShiftboardEventFull>(`/admin/scheduler/events/${id}/full`),
+  getEventStats: (id: number) => serverApi<ShiftboardStats>(`/admin/scheduler/events/${id}/stats`),
   updateEvent: (
     id: number,
     body: Partial<{ name: string; location: string; description: string; startDate: string; endDate: string }>,
-  ) => api<ShiftboardEvent>(`/events/${id}`, { method: "PATCH", body: JSON.stringify(body) }),
-  deleteEvent: (id: number) => api<void>(`/events/${id}`, { method: "DELETE" }),
+  ) => serverApi<ShiftboardEvent>(`/admin/scheduler/events/${id}`, { method: "PATCH", body }),
+  deleteEvent: (id: number) => serverApi<void>(`/admin/scheduler/events/${id}`, { method: "DELETE" }),
   addShift: (
     eventId: number,
     body: {
@@ -107,9 +95,11 @@ export const shiftboard = {
       slotsTotal: number;
       notes?: string;
     },
-  ) => api<ShiftboardShift>(`/events/${eventId}/shifts`, { method: "POST", body: JSON.stringify(body) }),
+  ) => serverApi<ShiftboardShift>(`/admin/scheduler/events/${eventId}/shifts`, { method: "POST", body }),
   deleteSignup: (signupId: number, name: string) =>
-    api<void>(`/signups/${signupId}?name=${encodeURIComponent(name)}`, { method: "DELETE" }),
+    serverApi<void>(`/admin/scheduler/signups/${signupId}?name=${encodeURIComponent(name)}`, {
+      method: "DELETE",
+    }),
 };
 
 export function publicShareUrl(slug: string): string {

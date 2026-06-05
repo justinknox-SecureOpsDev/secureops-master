@@ -353,3 +353,90 @@ The cursor is stored in `scheduler_sync_cursors` (keyed `"shifts"` and `"clock_e
 | `SCHEDULER_SHARED_SECRET` | Yes | Shared HMAC secret — must be the same on both sides; generate with `openssl rand -hex 32` |
 
 Both must be set for the integration to activate. SecureOps operates in read/write-only mode for local data when the integration is inactive (no sync, no outbound calls).
+
+---
+
+## 9. Event-management endpoints the Scheduler must accept HMAC on
+
+> **Status:** Action required on the scheduler side. These are the scheduler's own
+> event-management endpoints (its admin UI API). The SecureOps admin portal drives
+> them from the **Staffing** page. Because a browser cannot hold the shared secret,
+> SecureOps no longer calls these from the browser — it proxies every call through
+> the API server (admin-JWT authenticated), which signs the forwarded request with
+> `X-WCSG-Signature` + `X-WCSG-Source: secureops` exactly as in Section 1.
+>
+> **The problem:** these routes currently reject a valid `X-WCSG-Signature` the same
+> way they reject a missing one — they return `401 {"error":"Authentication required"}`
+> for no signature, a bogus signature, **and a correctly-computed signature alike**.
+> They only honor the scheduler's own login/session auth, so they never inspect
+> `X-WCSG-Signature`. (For contrast, `POST /api/secureops-ping` accepts the same
+> signature and returns `200`.) `GET /api/events` is currently public.
+
+**Required change:** on each endpoint below, accept the request when it carries
+`X-WCSG-Source: secureops` **and** a valid `X-WCSG-Signature` (per Section 1), *in
+addition to* the existing session auth used by the scheduler's own UI — i.e. allow
+**either** a logged-in session **or** a valid HMAC signature. This is the same
+verification already implemented for the `/api/secureops-webhook/*` endpoints;
+reuse that middleware.
+
+| Method | Scheduler path | Signed body (SecureOps signs the raw bytes shown) |
+|---|---|---|
+| `GET` | `/api/events` | `""` (empty — body-less) |
+| `POST` | `/api/events` | `{ "name", "location", "description"?, "startDate"?, "endDate"? }` |
+| `GET` | `/api/events/:id/full` | `""` |
+| `GET` | `/api/events/:id/stats` | `""` |
+| `PATCH` | `/api/events/:id` | partial of `{ "name", "location", "description", "startDate", "endDate" }` |
+| `DELETE` | `/api/events/:id` | `""` |
+| `POST` | `/api/events/:id/shifts` | `{ "date", "startTime", "endTime", "position", "area"?, "role"?, "shiftType"?, "posCode"?, "slotsTotal", "notes"? }` |
+| `DELETE` | `/api/signups/:id?name=<name>` | `""` (the signup name is a query param, not a body) |
+
+**Critical implementation note — sign/verify over the RAW body bytes.** SecureOps
+computes `HMAC-SHA256(secret, JSON.stringify(body))` and sends that exact string on
+the wire. For body-less requests (every `GET` and `DELETE` above) the signed input
+is the **empty string** `""`, so the scheduler must HMAC the empty string for those.
+Do **not** re-serialize the parsed JSON before verifying — key ordering / whitespace
+differences will break the signature. Capture the raw body, e.g. with Express:
+
+```js
+import crypto from "node:crypto";
+
+// 1. Capture the raw body alongside JSON parsing.
+app.use(express.json({
+  verify: (req, _res, buf) => { req.rawBody = buf.toString("utf8"); },
+}));
+
+// 2. Allow EITHER a logged-in session OR a valid SecureOps HMAC signature.
+function allowSessionOrSecureOpsHmac(req, res, next) {
+  if (req.isAuthenticated?.() /* existing scheduler session check */) return next();
+
+  const sig = req.get("X-WCSG-Signature");
+  const src = req.get("X-WCSG-Source");
+  const raw = req.rawBody ?? ""; // "" for GET/DELETE
+  if (src === "secureops" && sig && sig.length === 64) {
+    const expected = crypto
+      .createHmac("sha256", process.env.SHARED_SECRET) // same secret as the webhook endpoints
+      .update(raw, "utf8")
+      .digest("hex");
+    try {
+      if (crypto.timingSafeEqual(Buffer.from(expected, "hex"), Buffer.from(sig, "hex"))) {
+        return next();
+      }
+    } catch { /* fall through to 401 */ }
+  }
+  return res.status(401).json({ error: "Authentication required" });
+}
+
+// 3. Apply to the event-management routes:
+app.get("/api/events", allowSessionOrSecureOpsHmac, listEventsHandler);
+app.post("/api/events", allowSessionOrSecureOpsHmac, createEventHandler);
+app.get("/api/events/:id/full", allowSessionOrSecureOpsHmac, getEventFullHandler);
+app.get("/api/events/:id/stats", allowSessionOrSecureOpsHmac, getEventStatsHandler);
+app.patch("/api/events/:id", allowSessionOrSecureOpsHmac, updateEventHandler);
+app.delete("/api/events/:id", allowSessionOrSecureOpsHmac, deleteEventHandler);
+app.post("/api/events/:id/shifts", allowSessionOrSecureOpsHmac, addShiftHandler);
+app.delete("/api/signups/:id", allowSessionOrSecureOpsHmac, deleteSignupHandler);
+```
+
+Once these routes honor the signature, the SecureOps Staffing page (create / edit /
+delete event, add shift, delete signup, plus list / detail / stats) works
+end-to-end with no further SecureOps-side change.

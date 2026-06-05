@@ -6,15 +6,112 @@
  * POST /admin/scheduler/resync   — trigger an immediate reconciliation pull
  */
 
-import { Router, type IRouter } from "express";
+import { Router, type IRouter, type Request, type Response } from "express";
 import { eq } from "drizzle-orm";
 import { db, schedulerSyncCursorsTable } from "@workspace/db";
 import { requireAdmin } from "../middlewares/auth";
-import { isSchedulerConfigured, testSchedulerConnection, fetchSchedulerDelta } from "../lib/schedulerSync";
+import {
+  isSchedulerConfigured,
+  testSchedulerConnection,
+  fetchSchedulerDelta,
+  forwardToScheduler,
+  type SchedulerProxyResult,
+} from "../lib/schedulerSync";
 import { reconcileSchedulerDelta } from "./schedulerWebhook";
 import { logger } from "../lib/logger";
 
 const router: IRouter = Router();
+
+// ---------------------------------------------------------------------------
+// Event-management proxy
+//
+// The admin portal cannot hold the scheduler's shared HMAC secret, so it can
+// never sign requests to the scheduler directly. Instead it authenticates to
+// THIS API with its admin JWT (requireAdmin), and we sign + forward the call
+// to the scheduler on its behalf. Each handler relays the scheduler's status
+// code and body verbatim, and surfaces a clear 503 when the integration is
+// not configured (rather than letting the portal see a raw auth error).
+// ---------------------------------------------------------------------------
+
+/**
+ * Relay a `forwardToScheduler` result back to the portal. Handles the
+ * not-configured (null) case as a friendly 503 and network failures as 502.
+ */
+async function relayToScheduler(
+  res: Response,
+  run: () => Promise<SchedulerProxyResult | null>,
+): Promise<void> {
+  let result: SchedulerProxyResult | null;
+  try {
+    result = await run();
+  } catch (err) {
+    logger.warn({ err }, "[schedulerAdmin] proxy request to scheduler failed");
+    res.status(502).json({
+      error: "Bad Gateway",
+      message: "Could not reach the Event Staff Scheduler. Please try again.",
+    });
+    return;
+  }
+
+  if (result === null) {
+    res.status(503).json({
+      error: "Service Unavailable",
+      message: "Scheduler integration not configured",
+    });
+    return;
+  }
+
+  res.status(result.status).json(result.body ?? null);
+}
+
+function eventId(req: Request): string {
+  return encodeURIComponent(String(req.params.id));
+}
+
+// List events
+router.get("/admin/scheduler/events", requireAdmin, async (req, res): Promise<void> => {
+  await relayToScheduler(res, () => forwardToScheduler("GET", "/api/events"));
+});
+
+// Create event
+router.post("/admin/scheduler/events", requireAdmin, async (req, res): Promise<void> => {
+  await relayToScheduler(res, () => forwardToScheduler("POST", "/api/events", { body: req.body }));
+});
+
+// Get full event (event + shifts + signups)
+router.get("/admin/scheduler/events/:id/full", requireAdmin, async (req, res): Promise<void> => {
+  await relayToScheduler(res, () => forwardToScheduler("GET", `/api/events/${eventId(req)}/full`));
+});
+
+// Get event coverage stats
+router.get("/admin/scheduler/events/:id/stats", requireAdmin, async (req, res): Promise<void> => {
+  await relayToScheduler(res, () => forwardToScheduler("GET", `/api/events/${eventId(req)}/stats`));
+});
+
+// Update event
+router.patch("/admin/scheduler/events/:id", requireAdmin, async (req, res): Promise<void> => {
+  await relayToScheduler(res, () => forwardToScheduler("PATCH", `/api/events/${eventId(req)}`, { body: req.body }));
+});
+
+// Delete event
+router.delete("/admin/scheduler/events/:id", requireAdmin, async (req, res): Promise<void> => {
+  await relayToScheduler(res, () => forwardToScheduler("DELETE", `/api/events/${eventId(req)}`));
+});
+
+// Add a shift to an event
+router.post("/admin/scheduler/events/:id/shifts", requireAdmin, async (req, res): Promise<void> => {
+  await relayToScheduler(res, () => forwardToScheduler("POST", `/api/events/${eventId(req)}/shifts`, { body: req.body }));
+});
+
+// Delete a signup (name passed through as a query param)
+router.delete("/admin/scheduler/signups/:id", requireAdmin, async (req, res): Promise<void> => {
+  const sid = encodeURIComponent(String(req.params.id));
+  const rawName = req.query.name;
+  const name = Array.isArray(rawName) ? String(rawName[0]) : typeof rawName === "string" ? rawName : undefined;
+  await relayToScheduler(res, () =>
+    forwardToScheduler("DELETE", `/api/signups/${sid}`, { query: { name } }),
+  );
+});
 
 router.get("/admin/scheduler/status", requireAdmin, async (_req, res): Promise<void> => {
   const configured = isSchedulerConfigured();

@@ -92,6 +92,75 @@ async function postToScheduler(path: string, body: unknown): Promise<boolean> {
   }
 }
 
+/**
+ * Result of an admin-proxied request to the scheduler. `body` is the parsed
+ * JSON (or raw text) of the scheduler's response so the proxy route can relay
+ * both the status code and payload back to the portal verbatim.
+ */
+export type SchedulerProxyResult = {
+  ok: boolean;
+  status: number;
+  body: unknown;
+};
+
+/**
+ * Forward an admin-initiated event-management request to the scheduler with a
+ * valid HMAC signature, and return the scheduler's status + parsed body.
+ *
+ * The signature is computed over the EXACT raw body bytes that are sent on the
+ * wire (the empty string for body-less GET/DELETE requests) so the scheduler's
+ * constant-time signature check matches what it receives.
+ *
+ * Returns null when the integration is not configured (no base URL / secret).
+ * Throws on network/timeout failure — callers map that to a 502.
+ */
+export async function forwardToScheduler(
+  method: string,
+  path: string,
+  opts: { body?: unknown; query?: Record<string, unknown> } = {},
+): Promise<SchedulerProxyResult | null> {
+  const cfg = getSchedulerConfig();
+  if (!cfg) return null;
+
+  const hasBody = opts.body !== undefined && opts.body !== null;
+  const payload = hasBody ? JSON.stringify(opts.body) : "";
+  const sig = signPayload(payload, cfg.secret);
+
+  let url = `${cfg.baseUrl}${path}`;
+  if (opts.query) {
+    const qs = new URLSearchParams();
+    for (const [k, v] of Object.entries(opts.query)) {
+      if (v !== undefined && v !== null) qs.set(k, String(v));
+    }
+    const s = qs.toString();
+    if (s) url += `?${s}`;
+  }
+
+  const headers: Record<string, string> = {
+    "X-WCSG-Signature": sig,
+    "X-WCSG-Source": "secureops",
+  };
+  if (hasBody) headers["Content-Type"] = "application/json";
+
+  const res = await fetch(url, {
+    method,
+    headers,
+    body: hasBody ? payload : undefined,
+    signal: AbortSignal.timeout(10_000),
+  });
+
+  const text = await res.text();
+  let body: unknown = null;
+  if (text) {
+    try {
+      body = JSON.parse(text);
+    } catch {
+      body = text;
+    }
+  }
+  return { ok: res.ok, status: res.status, body };
+}
+
 // ---------------------------------------------------------------------------
 // Outbound payload shapes (what SecureOps sends to the scheduler)
 // ---------------------------------------------------------------------------
