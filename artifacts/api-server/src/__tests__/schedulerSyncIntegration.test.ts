@@ -2,7 +2,7 @@ import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } 
 import request from "supertest";
 import { randomUUID } from "node:crypto";
 import bcrypt from "bcryptjs";
-import { and, eq, sql } from "drizzle-orm";
+import { and, eq, inArray, sql } from "drizzle-orm";
 import {
   db,
   usersTable,
@@ -10,6 +10,7 @@ import {
   sitesTable,
   shiftsTable,
   shiftAssignmentsTable,
+  licensesTable,
   timeEntriesTable,
   schedulerSyncCursorsTable,
 } from "@workspace/db";
@@ -17,6 +18,7 @@ import app from "../app";
 import { signPayload, SCHEDULER_SOURCE } from "../lib/schedulerSync";
 import { processInboundClockEvent, processInboundShift } from "../routes/schedulerWebhook";
 import { runSchedulerReconciliation } from "../lib/scheduledJobs";
+import { signToken } from "../middlewares/auth";
 
 // ---------------------------------------------------------------------------
 // End-to-end coverage of the Event Staff Scheduler sync pipeline:
@@ -1524,5 +1526,321 @@ describe("scheduler webhook rejects unsigned and malformed requests", () => {
       .from(shiftAssignmentsTable)
       .where(eq(shiftAssignmentsTable.shiftId, shiftId));
     expect(assignments).toHaveLength(0);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// 5. Assignment sync end-to-end: the real HTTP endpoints the app uses to add
+//    and remove officers must drive the correct outbound scheduler push.
+//
+//    The unit tests already cover pushAssignmentEvent in isolation; what they
+//    do NOT prove is that the live handlers wire it up correctly — that the
+//    claim / admin-assign / decline routes pass the right action and the
+//    parent shift's syncSource so loop prevention actually engages. A wiring
+//    slip (wrong origin flag, missing call) would silently stop roster updates
+//    from syncing even though the helper is fine. These tests exercise:
+//      POST /shifts/:id/claim                       -> action "created"
+//      POST /shifts/:id/assignments (admin assign)  -> action "created"
+//      PUT  /shifts/:id/assignments/:aid {declined} -> action "deleted"
+//    on a LOCAL shift (push fires) and on a scheduler-origin shift (no push).
+//
+//    The push is fire-and-forget (`void pushAssignmentEvent(...)`), so after
+//    the HTTP response we poll the fetch spy for the outbound call.
+// ---------------------------------------------------------------------------
+
+describe("assignment endpoints drive the outbound scheduler push end-to-end", () => {
+  const ASSIGN_PATH = "/api/secureops-webhook/assignments";
+
+  const lctx = {
+    adminId: "",
+    adminToken: "",
+    officerId: "",
+    officerEmail: "",
+    officerToken: "",
+    officer2Id: "",
+    officer2Email: "",
+    createdShiftIds: [] as string[],
+  };
+
+  function authed(token: string) {
+    return { Authorization: `Bearer ${token}` };
+  }
+
+  // Outbound fetch calls that targeted the assignment webhook.
+  function assignmentCalls(spy: ReturnType<typeof vi.spyOn>) {
+    return (spy.mock.calls as unknown[][]).filter((c) =>
+      String(c[0]).includes(ASSIGN_PATH),
+    );
+  }
+
+  // The push is fired with `void` (not awaited by the handler), so the fetch
+  // may land a tick or two after the HTTP response. Poll until it shows up.
+  async function waitForAssignmentCall(
+    spy: ReturnType<typeof vi.spyOn>,
+    timeoutMs = 3000,
+  ): Promise<unknown[] | undefined> {
+    const deadline = Date.now() + timeoutMs;
+    while (Date.now() < deadline) {
+      const calls = assignmentCalls(spy);
+      if (calls.length > 0) return calls[0];
+      await new Promise((r) => setTimeout(r, 10));
+    }
+    return undefined;
+  }
+
+  function parseBody(call: unknown[]): Record<string, unknown> {
+    const init = call[1] as { body?: string } | undefined;
+    return JSON.parse(init?.body ?? "{}") as Record<string, unknown>;
+  }
+
+  // Create a shift directly in the DB. `scheduler` controls whether the row is
+  // stamped as scheduler-originated (which must suppress the outbound push).
+  async function makeShift(opts: { scheduler: boolean }): Promise<string> {
+    const start = new Date(Date.now() + 6 * 60 * 60 * 1000);
+    const end = new Date(start.getTime() + 4 * 60 * 60 * 1000);
+    const [row] = await db
+      .insert(shiftsTable)
+      .values({
+        title: `${TAG} Assign E2E`,
+        siteId: ctx.siteId,
+        startTime: start,
+        endTime: end,
+        payRate: "22",
+        billRate: "30",
+        requiredLicenseLevel: 2,
+        headcount: 5,
+        status: "upcoming",
+        ...(opts.scheduler
+          ? {
+              externalId: `${TAG}-assign-${randomUUID().slice(0, 8)}`,
+              externalSource: SCHEDULER_SOURCE,
+              syncSource: SCHEDULER_SOURCE,
+            }
+          : { syncSource: "local" }),
+      })
+      .returning({ id: shiftsTable.id });
+    lctx.createdShiftIds.push(row.id);
+    return row.id;
+  }
+
+  beforeAll(async () => {
+    const futureDate = new Date(Date.now() + 365 * 24 * 60 * 60 * 1000)
+      .toISOString()
+      .slice(0, 10);
+
+    const adminEmail = `${TAG}-admin-${randomUUID().slice(0, 6)}@example.test`;
+    const [admin] = await db
+      .insert(usersTable)
+      .values({
+        email: adminEmail,
+        passwordHash,
+        firstName: "Admin",
+        lastName: TAG,
+        role: "admin",
+        status: "active",
+        tokensValidAfter: new Date(0),
+      })
+      .returning({ id: usersTable.id });
+    lctx.adminId = admin.id;
+    lctx.adminToken = signToken({ userId: admin.id, email: adminEmail, role: "admin" });
+
+    // Two officers, each with a level-3 licence that covers the level-2 shifts
+    // created above (claim/admin-assign both gate on effective licence level).
+    const officerEmail = `${TAG}-officer-e2e-${randomUUID().slice(0, 6)}@example.test`;
+    const [officer] = await db
+      .insert(usersTable)
+      .values({
+        email: officerEmail,
+        passwordHash,
+        firstName: "Officer",
+        lastName: TAG,
+        role: "employee",
+        status: "active",
+        tokensValidAfter: new Date(0),
+      })
+      .returning({ id: usersTable.id });
+    lctx.officerId = officer.id;
+    lctx.officerEmail = officerEmail;
+    lctx.officerToken = signToken({ userId: officer.id, email: officerEmail, role: "employee" });
+
+    const officer2Email = `${TAG}-officer2-e2e-${randomUUID().slice(0, 6)}@example.test`;
+    const [officer2] = await db
+      .insert(usersTable)
+      .values({
+        email: officer2Email,
+        passwordHash,
+        firstName: "Officer",
+        lastName: TAG,
+        role: "employee",
+        status: "active",
+        tokensValidAfter: new Date(0),
+      })
+      .returning({ id: usersTable.id });
+    lctx.officer2Id = officer2.id;
+    lctx.officer2Email = officer2Email;
+
+    for (const empId of [lctx.officerId, lctx.officer2Id]) {
+      await db.insert(licensesTable).values({
+        employeeId: empId,
+        type: "tx-security",
+        level: 3,
+        licenseNumber: `${TAG}-${empId.slice(0, 6)}`,
+        expiryDate: futureDate,
+      });
+    }
+  });
+
+  beforeEach(() => {
+    // Fully configured so loop prevention is the ONLY thing that can suppress
+    // an outbound push — a zero-call assertion is therefore meaningful.
+    process.env.SCHEDULER_BASE_URL = "https://scheduler.example.com";
+    process.env.SCHEDULER_SHARED_SECRET = SECRET;
+    vi.restoreAllMocks();
+  });
+
+  afterEach(async () => {
+    vi.restoreAllMocks();
+    // Free seats / remove rows between cases so headcount + dup guards reset.
+    const ids = lctx.createdShiftIds;
+    if (ids.length > 0) {
+      await db.delete(shiftAssignmentsTable).where(
+        inArray(shiftAssignmentsTable.shiftId, ids),
+      );
+    }
+  });
+
+  afterAll(async () => {
+    // Clean up everything this block created (the file-level afterAll deletes
+    // users by last_name=TAG, but not these assignments / shifts / licences).
+    const ids = lctx.createdShiftIds;
+    if (ids.length > 0) {
+      await db.delete(shiftAssignmentsTable).where(
+        inArray(shiftAssignmentsTable.shiftId, ids),
+      );
+      await db.delete(shiftsTable).where(inArray(shiftsTable.id, ids));
+    }
+    await db.execute(
+      sql`DELETE FROM licenses WHERE employee_id IN (${sql.join(
+        [lctx.officerId, lctx.officer2Id].map((id) => sql`${id}::uuid`),
+        sql`, `,
+      )})`,
+    );
+  });
+
+  // --- LOCAL shift: the push fires with the right action -------------------
+
+  it("POST /shifts/:id/claim fires an outbound 'created' assignment push", async () => {
+    const fetchSpy = vi
+      .spyOn(globalThis, "fetch")
+      .mockResolvedValue(new Response("{}", { status: 200 }));
+
+    const shiftId = await makeShift({ scheduler: false });
+
+    const res = await request(app)
+      .post(`/api/shifts/${shiftId}/claim`)
+      .set(authed(lctx.officerToken))
+      .send({});
+    expect(res.status).toBe(201);
+
+    const call = await waitForAssignmentCall(fetchSpy);
+    expect(call, "expected an outbound assignment push after claim").toBeTruthy();
+    const body = parseBody(call!);
+    expect(body.action).toBe("created");
+    expect(body.shiftSecureopsId).toBe(shiftId);
+    expect(body.employeeEmail).toBe(lctx.officerEmail);
+    // Exactly one assignment push for this single claim.
+    expect(assignmentCalls(fetchSpy)).toHaveLength(1);
+  });
+
+  it("POST /shifts/:id/assignments (admin assign) fires an outbound 'created' push", async () => {
+    const fetchSpy = vi
+      .spyOn(globalThis, "fetch")
+      .mockResolvedValue(new Response("{}", { status: 200 }));
+
+    const shiftId = await makeShift({ scheduler: false });
+
+    const res = await request(app)
+      .post(`/api/shifts/${shiftId}/assignments`)
+      .set(authed(lctx.adminToken))
+      .send({ employeeId: lctx.officer2Id });
+    expect(res.status).toBe(201);
+
+    const call = await waitForAssignmentCall(fetchSpy);
+    expect(call, "expected an outbound assignment push after admin assign").toBeTruthy();
+    const body = parseBody(call!);
+    expect(body.action).toBe("created");
+    expect(body.shiftSecureopsId).toBe(shiftId);
+    expect(body.employeeEmail).toBe(lctx.officer2Email);
+    expect(assignmentCalls(fetchSpy)).toHaveLength(1);
+  });
+
+  it("PUT /shifts/:id/assignments/:aid {declined} fires an outbound 'deleted' push", async () => {
+    const fetchSpy = vi
+      .spyOn(globalThis, "fetch")
+      .mockResolvedValue(new Response("{}", { status: 200 }));
+
+    const shiftId = await makeShift({ scheduler: false });
+    // Seed an existing assignment directly so the decline endpoint has a row to
+    // remove (the decline path itself is what we're exercising end-to-end).
+    const [assignment] = await db
+      .insert(shiftAssignmentsTable)
+      .values({ shiftId, employeeId: lctx.officerId, status: "accepted" })
+      .returning({ id: shiftAssignmentsTable.id });
+
+    const res = await request(app)
+      .put(`/api/shifts/${shiftId}/assignments/${assignment.id}`)
+      .set(authed(lctx.officerToken))
+      .send({ status: "declined" });
+    expect(res.status).toBe(200);
+    expect(res.body).toMatchObject({ removed: true });
+
+    const call = await waitForAssignmentCall(fetchSpy);
+    expect(call, "expected an outbound assignment push after decline").toBeTruthy();
+    const body = parseBody(call!);
+    expect(body.action).toBe("deleted");
+    expect(body.shiftSecureopsId).toBe(shiftId);
+    expect(body.employeeEmail).toBe(lctx.officerEmail);
+    expect(assignmentCalls(fetchSpy)).toHaveLength(1);
+  });
+
+  // --- SCHEDULER-origin shift: loop prevention -> NO outbound push ---------
+
+  it("fires NO outbound push for any of the three endpoints when the shift originated on the scheduler", async () => {
+    const fetchSpy = vi
+      .spyOn(globalThis, "fetch")
+      .mockResolvedValue(new Response("{}", { status: 200 }));
+
+    // Claim a scheduler-origin shift.
+    const claimShiftId = await makeShift({ scheduler: true });
+    const claimRes = await request(app)
+      .post(`/api/shifts/${claimShiftId}/claim`)
+      .set(authed(lctx.officerToken))
+      .send({});
+    expect(claimRes.status).toBe(201);
+
+    // Admin-assign onto a scheduler-origin shift.
+    const assignShiftId = await makeShift({ scheduler: true });
+    const assignRes = await request(app)
+      .post(`/api/shifts/${assignShiftId}/assignments`)
+      .set(authed(lctx.adminToken))
+      .send({ employeeId: lctx.officer2Id });
+    expect(assignRes.status).toBe(201);
+
+    // Decline an assignment on a scheduler-origin shift.
+    const declineShiftId = await makeShift({ scheduler: true });
+    const [assignment] = await db
+      .insert(shiftAssignmentsTable)
+      .values({ shiftId: declineShiftId, employeeId: lctx.officerId, status: "accepted" })
+      .returning({ id: shiftAssignmentsTable.id });
+    const declineRes = await request(app)
+      .put(`/api/shifts/${declineShiftId}/assignments/${assignment.id}`)
+      .set(authed(lctx.officerToken))
+      .send({ status: "declined" });
+    expect(declineRes.status).toBe(200);
+
+    // Give any errant fire-and-forget push a chance to land, then assert none
+    // of the three reached the scheduler (loop prevention engaged end-to-end).
+    await new Promise((r) => setTimeout(r, 250));
+    expect(assignmentCalls(fetchSpy)).toHaveLength(0);
   });
 });
