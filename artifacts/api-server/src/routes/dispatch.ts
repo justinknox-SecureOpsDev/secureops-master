@@ -529,7 +529,10 @@ router.post("/dispatch/assign-nearest", requireAdminOrDispatcher, async (req, re
   if (dryRun || !top) {
     res.json({
       siteHasCoords: siteLat !== null && siteLng !== null,
-      candidates: candidates.slice(0, 20),
+      // Return the full ranked roster (already computed above) so the admin
+      // can search for ANY officer in the assign dialog, not just the nearest
+      // few. The auto-pick still uses the top eligible candidate.
+      candidates,
       topCandidate: top,
     });
     return;

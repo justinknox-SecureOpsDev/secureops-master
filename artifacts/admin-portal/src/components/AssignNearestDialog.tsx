@@ -43,6 +43,7 @@ export function AssignNearestDialog({
   // (flagged, sunk below qualified ones) and skips the clearance check on
   // assignment. Audit-logged server-side. Conflict / availability guards stay.
   const [override, setOverride] = useState(false);
+  const [search, setSearch] = useState("");
   const dryRun = useMutation({
     mutationFn: (overrideLicense: boolean) => api<AssignNearestResult>("/dispatch/assign-nearest", {
       method: "POST",
@@ -60,7 +61,7 @@ export function AssignNearestDialog({
   });
 
   useEffect(() => {
-    if (open) { setResult(null); setOverride(false); assign.reset(); dryRun.mutate(false); }
+    if (open) { setResult(null); setOverride(false); setSearch(""); assign.reset(); dryRun.mutate(false); }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open]);
 
@@ -107,42 +108,72 @@ export function AssignNearestDialog({
               Site has no coordinates — ranking falls back to most-recent location ping.
             </div>
           )}
-          {result?.candidates.slice(0, 8).map((c, idx) => {
-            const reason = candidateBlockReason(c);
-            const disabled = !!reason;
-            const underLicensed = c.meetsLicense === false;
-            return (
-              <div key={c.userId} className="flex items-center justify-between rounded border px-2 py-1.5">
-                <div className="flex items-center gap-2 min-w-0">
-                  <span className="text-xs opacity-50 w-5">{idx + 1}.</span>
-                  <div className="min-w-0">
-                    <div className="truncate">{c.name}</div>
-                    {underLicensed && (
-                      <div className="text-[11px] text-amber-700 truncate">
-                        ⚠ under required license{c.effectiveLevel != null ? ` (L${c.effectiveLevel})` : ""}
-                      </div>
-                    )}
-                    {reason && (
-                      <div className="text-[11px] text-amber-700 truncate">{reason}</div>
-                    )}
+          {result && result.candidates.length > 0 && (
+            <input
+              type="text"
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              placeholder="Search officers by name…"
+              aria-label="Search officers by name"
+              className="w-full rounded border px-2 py-1.5 text-sm"
+            />
+          )}
+          {(() => {
+            if (!result) return null;
+            const q = search.trim().toLowerCase();
+            // No search: show the nearest 8 (the smart default). With a search
+            // term: filter the full ranked roster so any officer is reachable.
+            const matches = q
+              ? result.candidates.filter((c) => c.name.toLowerCase().includes(q))
+              : result.candidates.slice(0, 8);
+            if (q && matches.length === 0) {
+              return <div className="text-xs opacity-60">No officers match “{search.trim()}”.</div>;
+            }
+            const rankByUser = new Map(result.candidates.map((c, i) => [c.userId, i + 1]));
+            return matches.map((c) => {
+              const rank = rankByUser.get(c.userId) ?? 0;
+              const reason = candidateBlockReason(c);
+              const disabled = !!reason;
+              const underLicensed = c.meetsLicense === false;
+              const recommended = result.topCandidate?.userId === c.userId;
+              return (
+                <div key={c.userId} className="flex items-center justify-between rounded border px-2 py-1.5">
+                  <div className="flex items-center gap-2 min-w-0">
+                    <span className="text-xs opacity-50 w-5">{rank}.</span>
+                    <div className="min-w-0">
+                      <div className="truncate">{c.name}</div>
+                      {underLicensed && (
+                        <div className="text-[11px] text-amber-700 truncate">
+                          ⚠ under required license{c.effectiveLevel != null ? ` (L${c.effectiveLevel})` : ""}
+                        </div>
+                      )}
+                      {reason && (
+                        <div className="text-[11px] text-amber-700 truncate">{reason}</div>
+                      )}
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <span className="text-xs opacity-70 whitespace-nowrap">
+                      {c.distanceMiles == null ? "no GPS" : `${c.distanceMiles.toFixed(1)} mi`}
+                    </span>
+                    <Button
+                      size="sm"
+                      variant={recommended && !disabled && !underLicensed ? "default" : "outline"}
+                      disabled={disabled || assign.isPending}
+                      onClick={() => assign.mutate({ employeeId: c.userId, overrideLicense: override })}
+                    >
+                      Assign
+                    </Button>
                   </div>
                 </div>
-                <div className="flex items-center gap-2">
-                  <span className="text-xs opacity-70 whitespace-nowrap">
-                    {c.distanceMiles == null ? "no GPS" : `${c.distanceMiles.toFixed(1)} mi`}
-                  </span>
-                  <Button
-                    size="sm"
-                    variant={idx === 0 && !disabled && !underLicensed ? "default" : "outline"}
-                    disabled={disabled || assign.isPending}
-                    onClick={() => assign.mutate({ employeeId: c.userId, overrideLicense: override })}
-                  >
-                    Assign
-                  </Button>
-                </div>
-              </div>
-            );
-          })}
+              );
+            });
+          })()}
+          {result && !search.trim() && result.candidates.length > 8 && (
+            <div className="text-[11px] opacity-60">
+              Showing nearest 8 of {result.candidates.length}. Search to find a specific officer.
+            </div>
+          )}
           {assign.isError && (
             <div className="text-xs text-red-700">
               {assign.error instanceof Error ? assign.error.message : "Could not assign officer."}

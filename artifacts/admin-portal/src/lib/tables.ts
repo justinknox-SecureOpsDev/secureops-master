@@ -317,6 +317,19 @@ export const TABLES: TableDescriptor[] = [
     plural: "shifts",
     importSupported: true,
     primaryLabelField: "title",
+    // FK dropdowns (e.g. "Add shift assignment") show the title alone, which is
+    // ambiguous when the same post repeats daily. Append the start date + time
+    // so the admin can tell which occurrence they're assigning.
+    primaryLabelFn: (row) => {
+      const title = String(row.title ?? "").trim();
+      const start = row.startTime ? new Date(String(row.startTime)) : null;
+      if (!start || Number.isNaN(start.getTime())) return title;
+      const when = start.toLocaleString("en-US", {
+        weekday: "short", month: "short", day: "numeric",
+        hour: "numeric", minute: "2-digit",
+      });
+      return title ? `${title} — ${when}` : when;
+    },
     importMatchByLabelFields: ["title", "startTime"],
     fields: [
       { key: "id", label: "ID", type: "text", readonly: true, hiddenInGrid: true },
