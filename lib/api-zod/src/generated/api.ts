@@ -3939,6 +3939,11 @@ export const GetSubcontractorClockInfoParams = zod.object({
 export const GetSubcontractorClockInfoResponse = zod.object({
   siteId: zod.string(),
   siteName: zod.string(),
+  companies: zod
+    .array(zod.string())
+    .describe(
+      "Known subcontractor company names (master vendor records plus previously-seen companies) offered as a dropdown on the clock-in page, so the case-insensitive clock-out match isn't broken by spelling or casing drift.",
+    ),
 });
 
 /**

@@ -4,12 +4,22 @@ import { Loader2, AlertTriangle, QrCode, CheckCircle2, LogOut, Building2, User, 
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 
 const API = "/api";
+
+const OTHER_COMPANY = "__other__";
 
 type SiteInfo = {
   siteId: string;
   siteName: string;
+  companies: string[];
 };
 
 type ToggleResult = {
@@ -41,6 +51,8 @@ export default function SubcontractorClockInPage() {
   const [error, setError] = useState<string | null>(null);
 
   const [form, setForm] = useState({ name: "", company: "", badgeId: "" });
+  // When true, the company is typed manually (not in the known-companies list).
+  const [companyOther, setCompanyOther] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
   const [result, setResult] = useState<ToggleResult | null>(null);
@@ -87,6 +99,7 @@ export default function SubcontractorClockInPage() {
   function reset() {
     setResult(null);
     setForm({ name: "", company: "", badgeId: "" });
+    setCompanyOther(false);
     setFormError(null);
   }
 
@@ -199,12 +212,50 @@ export default function SubcontractorClockInPage() {
                 <Label className="flex items-center gap-1 text-xs font-medium">
                   <Building2 className="w-3 h-3" /> Company *
                 </Label>
-                <Input
-                  placeholder="Your company name"
-                  value={form.company}
-                  onChange={(e) => setForm((f) => ({ ...f, company: e.target.value }))}
-                  disabled={submitting}
-                />
+                {siteInfo.companies.length > 0 ? (
+                  <>
+                    <Select
+                      value={companyOther ? OTHER_COMPANY : (form.company || undefined)}
+                      onValueChange={(v) => {
+                        if (v === OTHER_COMPANY) {
+                          setCompanyOther(true);
+                          setForm((f) => ({ ...f, company: "" }));
+                        } else {
+                          setCompanyOther(false);
+                          setForm((f) => ({ ...f, company: v }));
+                        }
+                      }}
+                      disabled={submitting}
+                    >
+                      <SelectTrigger>
+                        <SelectValue placeholder="Select your company" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {siteInfo.companies.map((c) => (
+                          <SelectItem key={c} value={c}>{c}</SelectItem>
+                        ))}
+                        <SelectItem value={OTHER_COMPANY}>Other (not listed)…</SelectItem>
+                      </SelectContent>
+                    </Select>
+                    {companyOther && (
+                      <Input
+                        className="mt-2"
+                        placeholder="Type your company name"
+                        value={form.company}
+                        onChange={(e) => setForm((f) => ({ ...f, company: e.target.value }))}
+                        disabled={submitting}
+                        autoFocus
+                      />
+                    )}
+                  </>
+                ) : (
+                  <Input
+                    placeholder="Your company name"
+                    value={form.company}
+                    onChange={(e) => setForm((f) => ({ ...f, company: e.target.value }))}
+                    disabled={submitting}
+                  />
+                )}
               </div>
               <div className="space-y-1">
                 <Label className="flex items-center gap-1 text-xs font-medium">

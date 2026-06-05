@@ -2604,10 +2604,18 @@ components:
 
     SubcontractorClockInfo:
       type: object
-      required: [siteId, siteName]
+      required: [siteId, siteName, companies]
       properties:
         siteId: { type: string }
         siteName: { type: string }
+        companies:
+          type: array
+          items: { type: string }
+          description: >-
+            Known subcontractor company names (master vendor records plus
+            previously-seen companies) offered as a dropdown on the clock-in
+            page, so the case-insensitive clock-out match isn't broken by
+            spelling or casing drift.
 
     SubcontractorClockToggleResponse:
       type: object

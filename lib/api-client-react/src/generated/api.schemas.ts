@@ -39,6 +39,8 @@ export interface SubcontractorTimeEntry {
 export interface SubcontractorClockInfo {
   siteId: string;
   siteName: string;
+  /** Known subcontractor company names (master vendor records plus previously-seen companies) offered as a dropdown on the clock-in page, so the case-insensitive clock-out match isn't broken by spelling or casing drift. */
+  companies: string[];
 }
 
 export type SubcontractorClockToggleResponseAction =

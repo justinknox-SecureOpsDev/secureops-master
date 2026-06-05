@@ -5,6 +5,7 @@ import {
   db,
   subcontractorQrTokensTable,
   subcontractorTimeEntriesTable,
+  subcontractorsTable,
   sitesTable,
   auditLogsTable,
 } from "@workspace/db";
@@ -399,9 +400,27 @@ router.get("/subcontractor/clock/:token", tokenLookupLimiter, async (req, res): 
     return;
   }
 
+  // Known company names for the clock-in dropdown: master vendor records plus
+  // any company already seen in time entries, deduped case-insensitively and
+  // sorted. Offering a fixed list keeps the (name, company) clock-out match
+  // from breaking when someone retypes their company with different spelling.
+  const [vendorRows, entryRows] = await Promise.all([
+    db.select({ company: subcontractorsTable.companyName }).from(subcontractorsTable),
+    db.selectDistinct({ company: subcontractorTimeEntriesTable.company }).from(subcontractorTimeEntriesTable),
+  ]);
+  const seenCompanies = new Map<string, string>();
+  for (const r of [...vendorRows, ...entryRows]) {
+    const name = (r.company ?? "").trim();
+    if (!name) continue;
+    const key = name.toLowerCase();
+    if (!seenCompanies.has(key)) seenCompanies.set(key, name);
+  }
+  const companies = [...seenCompanies.values()].sort((a, b) => a.localeCompare(b));
+
   res.json({
     siteId: site.id,
     siteName: site.name,
+    companies,
   });
 });
 
