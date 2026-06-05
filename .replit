@@ -40,6 +40,10 @@ args = "test"
 task = "workflow.run"
 args = "schema-drift"
 
+[[workflows.workflow.tasks]]
+task = "workflow.run"
+args = "schema-drift-test"
+
 [[workflows.workflow]]
 name = "a11y-mobile"
 author = "agent"
@@ -102,6 +106,17 @@ author = "agent"
 [[workflows.workflow.tasks]]
 task = "shell.exec"
 args = "pnpm --filter @workspace/scripts run check-schema-drift"
+
+[workflows.workflow.metadata]
+isValidation = true
+
+[[workflows.workflow]]
+name = "schema-drift-test"
+author = "agent"
+
+[[workflows.workflow.tasks]]
+task = "shell.exec"
+args = "pnpm --filter @workspace/scripts run test-schema-drift"
 
 [workflows.workflow.metadata]
 isValidation = true

@@ -37,8 +37,10 @@ import { is } from "drizzle-orm";
 import { PgTable, getTableConfig, isPgEnum } from "drizzle-orm/pg-core";
 import * as schema from "@workspace/db/schema";
 import pg from "pg";
+import { fileURLToPath } from "node:url";
+import { realpathSync } from "node:fs";
 
-interface ExpectedColumn {
+export interface ExpectedColumn {
   /** Actual database column name. */
   name: string;
   /** Canonical SQL type (whitespace-normalised getSQLType()). */
@@ -47,12 +49,12 @@ interface ExpectedColumn {
   notNull: boolean;
 }
 
-interface ExpectedIndex {
+export interface ExpectedIndex {
   /** Actual database index name (the explicit name passed to index()). */
   name: string;
 }
 
-interface ExpectedTable {
+export interface ExpectedTable {
   /** TS identifier exported from the schema barrel (for friendlier output). */
   exportName: string;
   /** Actual database schema (defaults to "public"). */
@@ -63,7 +65,7 @@ interface ExpectedTable {
   indexes: ExpectedIndex[];
 }
 
-interface ExpectedEnum {
+export interface ExpectedEnum {
   /** TS identifier exported from the schema barrel (for friendlier output). */
   exportName: string;
   dbSchema: string;
@@ -73,11 +75,11 @@ interface ExpectedEnum {
   values: string[];
 }
 
-interface LiveColumn {
+export interface LiveColumn {
   type: string;
   notNull: boolean;
 }
-type LiveTable = Map<string, LiveColumn>; // column name → metadata.
+export type LiveTable = Map<string, LiveColumn>; // column name → metadata.
 
 /**
  * Normalise a SQL type string so the code-declared type and the live DB type
@@ -86,14 +88,22 @@ type LiveTable = Map<string, LiveColumn>; // column name → metadata.
  * difference is whitespace inside the modifier parens (drizzle emits
  * `numeric(10, 2)` while `format_type` emits `numeric(10,2)`).
  */
-function canonicalType(raw: string): string {
+export function canonicalType(raw: string): string {
   return raw.trim().toLowerCase().replace(/\s+/g, "");
 }
 
-function collectExpected(): { tables: ExpectedTable[]; enums: ExpectedEnum[] } {
+/**
+ * Build the expected table/enum descriptors from any Drizzle schema-shaped
+ * object (a record of exported `pgTable` / `pgEnum` values). Parameterised so
+ * tests can feed a synthetic schema instead of the real `@workspace/db` barrel.
+ */
+export function collectExpectedFrom(schemaObj: Record<string, unknown>): {
+  tables: ExpectedTable[];
+  enums: ExpectedEnum[];
+} {
   const tables: ExpectedTable[] = [];
   const enums: ExpectedEnum[] = [];
-  for (const [exportName, value] of Object.entries(schema)) {
+  for (const [exportName, value] of Object.entries(schemaObj)) {
     if (is(value, PgTable)) {
       const cfg = getTableConfig(value);
       tables.push({
@@ -122,7 +132,15 @@ function collectExpected(): { tables: ExpectedTable[]; enums: ExpectedEnum[] } {
   return { tables, enums };
 }
 
-async function loadLiveColumns(
+/** Expected descriptors derived from the real `@workspace/db` schema barrel. */
+export function collectExpected(): {
+  tables: ExpectedTable[];
+  enums: ExpectedEnum[];
+} {
+  return collectExpectedFrom(schema as Record<string, unknown>);
+}
+
+export async function loadLiveColumns(
   client: pg.Client,
 ): Promise<Map<string, LiveTable>> {
   // key = `${schema}.${table}` → (column name → {type, notNull}).
@@ -164,7 +182,7 @@ async function loadLiveColumns(
   return live;
 }
 
-async function loadLiveIndexes(
+export async function loadLiveIndexes(
   client: pg.Client,
 ): Promise<Map<string, Set<string>>> {
   // key = `${schema}.${table}` → set of index names on that table.
@@ -196,7 +214,7 @@ async function loadLiveIndexes(
   return live;
 }
 
-async function loadLiveEnums(
+export async function loadLiveEnums(
   client: pg.Client,
 ): Promise<Map<string, Set<string>>> {
   // key = `${schema}.${enum type}` → set of enum values.
@@ -225,6 +243,108 @@ async function loadLiveEnums(
     values.add(r.enum_value);
   }
   return live;
+}
+
+/** Structured result of comparing the expected schema against the live DB. */
+export interface DriftResult {
+  missingTables: ExpectedTable[];
+  missingColumns: string[];
+  typeMismatches: string[];
+  nullabilityMismatches: string[];
+  missingIndexes: string[];
+  missingEnumTypes: string[];
+  missingEnumValues: string[];
+}
+
+/** True if any drift dimension flagged at least one difference. */
+export function hasAnyDrift(r: DriftResult): boolean {
+  return (
+    r.missingTables.length > 0 ||
+    r.missingColumns.length > 0 ||
+    r.typeMismatches.length > 0 ||
+    r.nullabilityMismatches.length > 0 ||
+    r.missingIndexes.length > 0 ||
+    r.missingEnumTypes.length > 0 ||
+    r.missingEnumValues.length > 0
+  );
+}
+
+/**
+ * Pure comparison: diff the code-declared schema (expected tables + enums)
+ * against the live database snapshot (the three `loadLive*` maps). No I/O —
+ * deterministic and directly unit-testable. Differences in the other direction
+ * (extra DB columns / indexes / enum values) are intentionally ignored.
+ */
+export function computeDrift(
+  expected: ExpectedTable[],
+  expectedEnums: ExpectedEnum[],
+  liveColumns: Map<string, LiveTable>,
+  liveIndexes: Map<string, Set<string>>,
+  liveEnums: Map<string, Set<string>>,
+): DriftResult {
+  const missingTables: ExpectedTable[] = [];
+  const missingColumns: string[] = [];
+  const typeMismatches: string[] = [];
+  const nullabilityMismatches: string[] = [];
+  const missingIndexes: string[] = [];
+  const missingEnumTypes: string[] = [];
+  const missingEnumValues: string[] = [];
+
+  for (const t of expected) {
+    const key = `${t.dbSchema}.${t.tableName}`;
+    const liveCols = liveColumns.get(key);
+    if (!liveCols) {
+      missingTables.push(t);
+      continue;
+    }
+    for (const col of t.columns) {
+      const liveCol = liveCols.get(col.name);
+      if (!liveCol) {
+        missingColumns.push(`${key}.${col.name}  (export: ${t.exportName})`);
+        continue;
+      }
+      if (liveCol.type !== col.type) {
+        typeMismatches.push(
+          `${key}.${col.name}  code=${col.type}  db=${liveCol.type}  (export: ${t.exportName})`,
+        );
+      }
+      if (liveCol.notNull !== col.notNull) {
+        nullabilityMismatches.push(
+          `${key}.${col.name}  code=${col.notNull ? "NOT NULL" : "NULLABLE"}  db=${liveCol.notNull ? "NOT NULL" : "NULLABLE"}  (export: ${t.exportName})`,
+        );
+      }
+    }
+    const liveIdx = liveIndexes.get(key) ?? new Set<string>();
+    for (const idx of t.indexes) {
+      if (!liveIdx.has(idx.name)) {
+        missingIndexes.push(`${key}.${idx.name}  (export: ${t.exportName})`);
+      }
+    }
+  }
+
+  for (const e of expectedEnums) {
+    const key = `${e.dbSchema}.${e.enumName}`;
+    const liveValues = liveEnums.get(key);
+    if (!liveValues) {
+      missingEnumTypes.push(`${key}  (export: ${e.exportName})`);
+      continue;
+    }
+    for (const v of e.values) {
+      if (!liveValues.has(v)) {
+        missingEnumValues.push(`${key} → '${v}'  (export: ${e.exportName})`);
+      }
+    }
+  }
+
+  return {
+    missingTables,
+    missingColumns,
+    typeMismatches,
+    nullabilityMismatches,
+    missingIndexes,
+    missingEnumTypes,
+    missingEnumValues,
+  };
 }
 
 async function main(): Promise<void> {
@@ -268,76 +388,15 @@ async function main(): Promise<void> {
     await client.end().catch(() => {});
   }
 
-  const missingTables: ExpectedTable[] = [];
-  const missingColumns: string[] = [];
-  const typeMismatches: string[] = [];
-  const nullabilityMismatches: string[] = [];
-  const missingIndexes: string[] = [];
-  const missingEnumTypes: string[] = [];
-  const missingEnumValues: string[] = [];
+  const result = computeDrift(
+    expected,
+    expectedEnums,
+    liveColumns,
+    liveIndexes,
+    liveEnums,
+  );
 
-  for (const t of expected) {
-    const key = `${t.dbSchema}.${t.tableName}`;
-    const liveCols = liveColumns.get(key);
-    if (!liveCols) {
-      missingTables.push(t);
-      continue;
-    }
-    for (const col of t.columns) {
-      const liveCol = liveCols.get(col.name);
-      if (!liveCol) {
-        missingColumns.push(
-          `${key}.${col.name}  (export: ${t.exportName})`,
-        );
-        continue;
-      }
-      if (liveCol.type !== col.type) {
-        typeMismatches.push(
-          `${key}.${col.name}  code=${col.type}  db=${liveCol.type}  (export: ${t.exportName})`,
-        );
-      }
-      if (liveCol.notNull !== col.notNull) {
-        nullabilityMismatches.push(
-          `${key}.${col.name}  code=${col.notNull ? "NOT NULL" : "NULLABLE"}  db=${liveCol.notNull ? "NOT NULL" : "NULLABLE"}  (export: ${t.exportName})`,
-        );
-      }
-    }
-    const liveIdx = liveIndexes.get(key) ?? new Set<string>();
-    for (const idx of t.indexes) {
-      if (!liveIdx.has(idx.name)) {
-        missingIndexes.push(
-          `${key}.${idx.name}  (export: ${t.exportName})`,
-        );
-      }
-    }
-  }
-
-  for (const e of expectedEnums) {
-    const key = `${e.dbSchema}.${e.enumName}`;
-    const liveValues = liveEnums.get(key);
-    if (!liveValues) {
-      missingEnumTypes.push(`${key}  (export: ${e.exportName})`);
-      continue;
-    }
-    for (const v of e.values) {
-      if (!liveValues.has(v)) {
-        missingEnumValues.push(
-          `${key} → '${v}'  (export: ${e.exportName})`,
-        );
-      }
-    }
-  }
-
-  const hasDrift =
-    missingTables.length > 0 ||
-    missingColumns.length > 0 ||
-    typeMismatches.length > 0 ||
-    nullabilityMismatches.length > 0 ||
-    missingIndexes.length > 0 ||
-    missingEnumTypes.length > 0 ||
-    missingEnumValues.length > 0;
-
-  if (!hasDrift) {
+  if (!hasAnyDrift(result)) {
     const indexCount = expected.reduce((n, t) => n + t.indexes.length, 0);
     console.log(
       `[check-schema-drift] OK — all ${expected.length} schema tables, their ` +
@@ -351,27 +410,27 @@ async function main(): Promise<void> {
     "[check-schema-drift] FAIL — the code schema does not match the live database.\n" +
       "The following differences were found between lib/db/src/schema/ and the DB:\n",
   );
-  for (const t of missingTables) {
+  for (const t of result.missingTables) {
     console.error(
       `  • MISSING TABLE    ${t.dbSchema}.${t.tableName}  (export: ${t.exportName})`,
     );
   }
-  for (const line of missingColumns) {
+  for (const line of result.missingColumns) {
     console.error(`  • MISSING COLUMN   ${line}`);
   }
-  for (const line of typeMismatches) {
+  for (const line of result.typeMismatches) {
     console.error(`  • TYPE MISMATCH    ${line}`);
   }
-  for (const line of nullabilityMismatches) {
+  for (const line of result.nullabilityMismatches) {
     console.error(`  • NULLABILITY      ${line}`);
   }
-  for (const line of missingIndexes) {
+  for (const line of result.missingIndexes) {
     console.error(`  • MISSING INDEX    ${line}`);
   }
-  for (const line of missingEnumTypes) {
+  for (const line of result.missingEnumTypes) {
     console.error(`  • MISSING ENUM     ${line}`);
   }
-  for (const line of missingEnumValues) {
+  for (const line of result.missingEnumValues) {
     console.error(`  • MISSING ENUM VAL ${line}`);
   }
   console.error(
@@ -385,7 +444,24 @@ async function main(): Promise<void> {
   process.exit(1);
 }
 
-main().catch((err) => {
-  console.error("[check-schema-drift] crashed:", err);
-  process.exit(1);
-});
+/**
+ * Only run the CLI when this file is executed directly (e.g. via tsx), not when
+ * it is imported by a test. Without this guard, importing the module would run
+ * `main()` and call `process.exit`, killing the test runner.
+ */
+function isMainModule(): boolean {
+  const entry = process.argv[1];
+  if (!entry) return false;
+  try {
+    return realpathSync(entry) === realpathSync(fileURLToPath(import.meta.url));
+  } catch {
+    return false;
+  }
+}
+
+if (isMainModule()) {
+  main().catch((err) => {
+    console.error("[check-schema-drift] crashed:", err);
+    process.exit(1);
+  });
+}
