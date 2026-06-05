@@ -70,12 +70,12 @@ isValidation = true
 name = "security-headers"
 author = "agent"
 
-[[workflows.workflow.tasks]]
-task = "shell.exec"
-args = "pnpm --filter @workspace/api-server run build && pnpm --filter @workspace/scripts run check-security-headers"
-
 [workflows.workflow.metadata]
 isValidation = true
+
+[[workflows.workflow.tasks]]
+task = "shell.exec"
+args = "pnpm --filter @workspace/scripts run check-security-headers"
 
 [[workflows.workflow]]
 name = "a11y"

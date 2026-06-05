@@ -5,21 +5,28 @@
  * required directive when adding a new third-party dependency.
  *
  * Usage:
- *   pnpm --filter @workspace/api-server run build
  *   pnpm --filter @workspace/scripts run check-security-headers
  *
- * Spawns the already-built `artifacts/api-server/dist/index.mjs` as a
- * child process with NODE_ENV=production and known ALLOWED_ORIGINS, then
- * makes real HTTP requests to assert headers. Exits 0 on pass, 1 on fail.
+ * Builds the api-server into a private, isolated output dir (NOT the shared
+ * `artifacts/api-server/dist/`) and spawns that build as a child process with
+ * NODE_ENV=production and known ALLOWED_ORIGINS, then makes real HTTP requests
+ * to assert headers. Exits 0 on pass, 1 on fail.
+ *
+ * The isolated output dir is important: when the api-server *dev* workflow is
+ * running, it rebuilds the shared `dist/` (esbuild clears it mid-build), so a
+ * gate that spawned `dist/index.mjs` would intermittently fail with
+ * "Cannot find module .../dist/index.mjs". Building/spawning from our own dir
+ * sidesteps that race entirely.
  */
-import { spawn, type ChildProcess } from "child_process";
+import { spawn, spawnSync, type ChildProcess } from "child_process";
 import http from "http";
 import { fileURLToPath } from "url";
 import path from "path";
 import net from "net";
+import { mkdtempSync, rmSync } from "fs";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
-const SERVER_ENTRY = path.resolve(here, "../../artifacts/api-server/dist/index.mjs");
+const API_SERVER_DIR = path.resolve(here, "../../artifacts/api-server");
 
 interface Check {
   name: string;
@@ -73,6 +80,28 @@ async function request(port: number, path: string, headers: Record<string, strin
 }
 
 async function main(): Promise<void> {
+  // Build into a private dir, NOT the shared artifacts/api-server/dist/, so we
+  // never race the dev workflow rebuilding (and momentarily clearing) that
+  // directory mid-run. It must live INSIDE the api-server artifact dir so that
+  // externalized deps (pdfkit, sharp, bcrypt, …) still resolve via the same
+  // node_modules chain as the normal dist/ build.
+  const outDir = mkdtempSync(path.join(API_SERVER_DIR, ".secheaders-build-"));
+  console.log(`[build] building api-server into isolated dir ${outDir}`);
+  const buildRes = spawnSync(
+    "node",
+    ["./build.mjs"],
+    {
+      cwd: API_SERVER_DIR,
+      env: { ...process.env, API_SERVER_OUT_DIR: outDir },
+      stdio: ["ignore", "inherit", "inherit"],
+    },
+  );
+  if (buildRes.status !== 0) {
+    rmSync(outDir, { recursive: true, force: true });
+    throw new Error(`api-server build failed (exit code ${buildRes.status ?? "null"})`);
+  }
+  const serverEntry = path.join(outDir, "index.mjs");
+
   const port = await pickFreePort();
   // Reuse the existing DATABASE_URL — /api/healthz doesn't actually touch
   // the DB, but the api-server's import graph initializes a Drizzle pool
@@ -91,7 +120,7 @@ async function main(): Promise<void> {
 
   let child: ChildProcess | null = null;
   try {
-    child = spawn("node", [SERVER_ENTRY], { env, stdio: ["ignore", "ignore", "pipe"] });
+    child = spawn("node", [serverEntry], { env, stdio: ["ignore", "ignore", "pipe"] });
     let stderr = "";
     child.stderr?.on("data", (b: Buffer) => { stderr += b.toString(); });
     child.on("exit", (code) => {
@@ -155,6 +184,7 @@ async function main(): Promise<void> {
         child!.on("exit", () => { clearTimeout(to); r(); });
       });
     }
+    rmSync(outDir, { recursive: true, force: true });
   }
 }
 
