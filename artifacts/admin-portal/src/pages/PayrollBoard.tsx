@@ -1,6 +1,6 @@
 import { Fragment, useEffect, useMemo, useState } from "react";
 import { useLocation } from "wouter";
-import { Banknote, Loader2, ChevronRight, ChevronDown, ArrowRight, AlertTriangle, Clock, DollarSign } from "lucide-react";
+import { Banknote, Loader2, ChevronRight, ChevronDown, ArrowRight, AlertTriangle, Clock, DollarSign, Pencil } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -20,7 +20,7 @@ type BoardBucket = {
   hourlyRate: number;
   grossPay: number;
   timeEntryIds: string[];
-  entries: Array<{ id: string; clockInTime: string; hoursWorked: number; rate: number; holiday: string | null; hasClockOut: boolean; scheduledEnd: string | null }>;
+  entries: Array<{ id: string; clockInTime: string; hoursWorked: number; rate: number; holiday: string | null; hasClockOut: boolean; scheduledEnd: string | null; lastEditedByEmail: string | null; lastEditedAt: string | null }>;
   existingPayrollEntryId: string | null;
   existingStatus: string | null;
   warnings: string[];
@@ -39,6 +39,50 @@ type BoardGroup = {
 };
 
 type StatusFilter = "ready" | "partial" | "processed" | "all";
+
+// Snapshot of a time entry's editable fields, captured in the audit log
+// before/after each admin correction. Mirrors timeEntryAudit.ts on the server.
+type EntrySnapshot = {
+  clockInTime?: string | null;
+  clockOutTime?: string | null;
+  hoursWorked?: string | null;
+  payRateOverride?: string | null;
+  notes?: string | null;
+};
+
+type AuditRow = {
+  id: string;
+  actorEmail: string | null;
+  createdAt: string;
+  metadata: {
+    entryId?: string;
+    before?: EntrySnapshot;
+    after?: EntrySnapshot;
+  } | null;
+};
+
+type HistoryEntry = { id: string; lastEditedByEmail: string | null; lastEditedAt: string | null };
+
+// User-facing fields surfaced in the change history, in display order.
+const HISTORY_FIELDS: { key: keyof EntrySnapshot; label: string; isDate?: boolean }[] = [
+  { key: "clockInTime", label: "Clock In", isDate: true },
+  { key: "clockOutTime", label: "Clock Out", isDate: true },
+  { key: "hoursWorked", label: "Hours" },
+  { key: "payRateOverride", label: "Pay rate override" },
+  { key: "notes", label: "Notes" },
+];
+
+const fmtDateTime = (iso: string | null | undefined): string => {
+  if (!iso) return "—";
+  const d = new Date(iso);
+  if (isNaN(d.getTime())) return iso;
+  return d.toLocaleString(undefined, { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" });
+};
+
+const fmtSnapshotValue = (value: string | null | undefined, isDate: boolean): string => {
+  if (value === null || value === undefined || value === "") return "—";
+  return isDate ? fmtDateTime(value) : value;
+};
 
 const fmtUsd = (n: number) =>
   `$${Number(n).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
@@ -98,6 +142,26 @@ export default function PayrollBoardPage() {
   const [rateBusy, setRateBusy] = useState(false);
   const [toast, setToast] = useState<{ kind: "ok" | "err"; msg: string } | null>(null);
   const [sites, setSites] = useState<Array<{ id: string; name: string }>>([]);
+  // Per-entry correction history dialog state. Sourced from audit_logs filtered
+  // by entry id (the global audit middleware records before/after on each edit).
+  const [historyTarget, setHistoryTarget] = useState<HistoryEntry | null>(null);
+  const [historyRows, setHistoryRows] = useState<AuditRow[]>([]);
+  const [historyLoading, setHistoryLoading] = useState(false);
+  const [historyError, setHistoryError] = useState<string | null>(null);
+
+  const openHistory = (e: HistoryEntry) => {
+    setHistoryTarget(e);
+    setHistoryRows([]);
+    setHistoryError(null);
+    setHistoryLoading(true);
+    // Officer time-entry edits go through the generic audit middleware (no
+    // dedicated action), so filter on entryId alone.
+    const qs = new URLSearchParams({ entryId: e.id, limit: "200" }).toString();
+    api<{ rows: AuditRow[] }>(`/admin/audit-logs?${qs}`)
+      .then((data) => setHistoryRows(data.rows))
+      .catch((err) => setHistoryError((err as Error).message))
+      .finally(() => setHistoryLoading(false));
+  };
 
   useEffect(() => {
     void (async () => {
@@ -607,6 +671,17 @@ export default function PayrollBoardPage() {
                                           <td className="px-2 py-1 font-mono text-[10px] text-muted-foreground">
                                             <div className="flex items-center gap-2">
                                               <span>{e.id}</span>
+                                              {e.lastEditedAt && (
+                                                <button
+                                                  type="button"
+                                                  onClick={() => openHistory({ id: e.id, lastEditedByEmail: e.lastEditedByEmail, lastEditedAt: e.lastEditedAt })}
+                                                  className="inline-flex items-center gap-1 rounded-full bg-amber-100 text-amber-800 border border-amber-300 px-1.5 py-0.5 text-[10px] font-medium leading-none hover:bg-amber-200 focus:outline-none focus:ring-2 focus:ring-amber-400 cursor-pointer font-sans normal-case"
+                                                  title={`Edited by ${e.lastEditedByEmail ?? "an admin"} on ${fmtDateTime(e.lastEditedAt)} — view full change history`}
+                                                >
+                                                  <Pencil className="w-2.5 h-2.5" />
+                                                  Edited
+                                                </button>
+                                              )}
                                               {!e.hasClockOut && (
                                                 <Button
                                                   size="sm"
@@ -812,6 +887,85 @@ export default function PayrollBoardPage() {
             <Button onClick={submitApplyRate} disabled={rateBusy} className="bg-brand-navy text-white hover:opacity-90">
               {rateBusy ? <Loader2 className="w-4 h-4 animate-spin mr-2" /> : null}
               Apply
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Per-entry correction history dialog */}
+      <Dialog open={!!historyTarget} onOpenChange={(open) => { if (!open) setHistoryTarget(null); }}>
+        <DialogContent className="max-w-2xl">
+          <DialogHeader>
+            <DialogTitle>Change History</DialogTitle>
+            {historyTarget && (
+              <DialogDescription>
+                Corrections to time entry <span className="font-mono">{historyTarget.id}</span>
+              </DialogDescription>
+            )}
+          </DialogHeader>
+          <div className="text-sm">
+            {historyLoading ? (
+              <div className="text-muted-foreground p-4">Loading…</div>
+            ) : historyError ? (
+              <div className="flex items-center gap-2 text-red-600 bg-red-50 border border-red-200 rounded p-3">
+                <AlertTriangle className="w-4 h-4 shrink-0" />
+                {historyError}
+              </div>
+            ) : historyRows.length === 0 ? (
+              <div className="text-muted-foreground p-4 text-center border rounded-lg bg-slate-50">
+                No recorded edits for this entry.
+              </div>
+            ) : (
+              <div className="space-y-4 max-h-[60vh] overflow-y-auto pr-1">
+                {historyRows.map((row) => {
+                  const before = row.metadata?.before ?? {};
+                  const after = row.metadata?.after ?? {};
+                  const changes = HISTORY_FIELDS.filter(
+                    (f) => (before[f.key] ?? null) !== (after[f.key] ?? null),
+                  );
+                  return (
+                    <div key={row.id} className="border rounded-lg p-3 space-y-2">
+                      <div className="flex items-center justify-between gap-2 text-xs">
+                        <span className="font-medium text-slate-700">
+                          {row.actorEmail ?? "an admin"}
+                        </span>
+                        <span className="text-muted-foreground">{fmtDateTime(row.createdAt)}</span>
+                      </div>
+                      {changes.length === 0 ? (
+                        <p className="text-xs text-muted-foreground">No field-level changes recorded.</p>
+                      ) : (
+                        <table className="w-full text-xs">
+                          <thead>
+                            <tr className="text-left text-muted-foreground">
+                              <th className="font-medium pb-1">Field</th>
+                              <th className="font-medium pb-1">Before</th>
+                              <th className="font-medium pb-1">After</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {changes.map((f) => (
+                              <tr key={f.key} className="align-top">
+                                <td className="pr-3 py-0.5 font-medium text-slate-600">{f.label}</td>
+                                <td className="pr-3 py-0.5 text-red-700 line-through">
+                                  {fmtSnapshotValue(before[f.key], !!f.isDate)}
+                                </td>
+                                <td className="py-0.5 text-emerald-700">
+                                  {fmtSnapshotValue(after[f.key], !!f.isDate)}
+                                </td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setHistoryTarget(null)}>
+              Close
             </Button>
           </DialogFooter>
         </DialogContent>

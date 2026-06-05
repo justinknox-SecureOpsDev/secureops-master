@@ -32,6 +32,14 @@ export const timeEntriesTable = pgTable("time_entries", {
   approvedAt: timestamp("approved_at", { withTimezone: true }),
   approvedBy: uuid("approved_by").references(() => usersTable.id, { onDelete: "set null" }),
   notes: text("notes"),
+  // Admin-correction provenance. Stamped whenever an admin edits/adjusts this
+  // entry (clock-out fix, generic grid edit). A non-null `lastEditedAt` flags
+  // the record as admin-corrected so reviewers can open its before/after change
+  // history (sourced from audit_logs filtered by entry id). `lastEditedByUserId`
+  // is a soft FK (set null) so deleting an admin doesn't orphan the entry.
+  lastEditedByUserId: uuid("last_edited_by_user_id").references(() => usersTable.id, { onDelete: "set null" }),
+  lastEditedByEmail: text("last_edited_by_email"),
+  lastEditedAt: timestamp("last_edited_at", { withTimezone: true }),
   // Officer-submitted time-correction request. When an officer clocks out and
   // the recorded clock in/out times are wrong, they can flag the entry and
   // leave a note so an admin knows to adjust it before approving for payroll.

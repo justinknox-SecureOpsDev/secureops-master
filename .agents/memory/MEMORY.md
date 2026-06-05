@@ -29,3 +29,4 @@
 - [Clock-in paths & dispatch board](clockin-paths-and-dispatch-board.md) — 30min-before→end window must guard explicit-shift AND site-pick paths (GPS auto-attach already time-bounded); dispatch onDuty = all open entries, skip per (userId,shiftId).
 - [Two license surfaces](two-license-surfaces.md) — license data lives in BOTH licenses table (eligibility) and employees.sia*+licenseDocKey (what OfficerProfile/PDF render); any license change must write both.
 - [Release gate schema drift](release-gate-schema-drift.md) — forgotten `db push` after a schema-adding commit breaks test/security-headers gates (`column ... does not exist`) while typecheck stays green; fix = push, not code.
+- [Time-entry correction history](time-entry-correction-history.md) — officer entry change history filters audit_logs by entryId, NOT action (two edit paths emit different generic actions); new edit paths must stamp lastEdited cols + res.locals.auditMetadata.

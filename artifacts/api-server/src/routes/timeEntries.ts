@@ -5,6 +5,7 @@ import { requireAuth, requireAdmin, requireStaff } from "../middlewares/auth";
 import { upsertWeeklyInvoiceForTimeEntry } from "../lib/invoiceSync";
 import { pushClockEvent } from "../lib/schedulerSync";
 import { getEffectiveLevel } from "../lib/eligibility";
+import { buildTimeEntryAuditMetadata, timeEntrySnapshot } from "../lib/timeEntryAudit";
 
 const router: IRouter = Router();
 
@@ -799,12 +800,25 @@ router.patch("/time-entries/:id/clock-out", requireAdmin, async (req, res): Prom
   const hours = calcHours(existing.clockInTime, targetClockOut);
 
   // Reset syncSource so admin force-clock-outs of scheduler-origin entries propagate back.
+  // Stamp last-edited provenance so reviewers can see this was admin-corrected.
   const [updated] = await db.update(timeEntriesTable).set({
     clockOutTime: targetClockOut,
     hoursWorked: String(hours),
     notes: notes ?? existing.notes,
     syncSource: "local",
+    lastEditedByUserId: req.user!.userId,
+    lastEditedByEmail: req.user!.email,
+    lastEditedAt: new Date(),
   }).where(eq(timeEntriesTable.id, id)).returning();
+
+  // Record a before/after change-history entry, keyed by entry id, so the
+  // Payroll Board can surface the full correction provenance. The global
+  // auditLogMiddleware persists res.locals.auditMetadata into audit_logs.
+  res.locals["auditMetadata"] = buildTimeEntryAuditMetadata(
+    id,
+    timeEntrySnapshot(existing),
+    timeEntrySnapshot(updated),
+  );
 
   // Mirror the clock-out endpoint's shift-completion flip so an open shift
   // doesn't stay "active" after the admin patches the only outstanding entry.

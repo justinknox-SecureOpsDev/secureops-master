@@ -430,7 +430,7 @@ type BoardBucket = {
   timeEntryIds: string[];
   // Lightweight per-entry detail so the admin UI can expand a bucket row and
   // verify the underlying approved shifts without a second round-trip.
-  entries: Array<{ id: string; clockInTime: string; hoursWorked: number; rate: number; holiday: string | null; hasClockOut: boolean; scheduledEnd: string | null }>;
+  entries: Array<{ id: string; clockInTime: string; hoursWorked: number; rate: number; holiday: string | null; hasClockOut: boolean; scheduledEnd: string | null; lastEditedByEmail: string | null; lastEditedAt: string | null }>;
   existingPayrollEntryId: string | null;
   existingStatus: string | null; // pending | processed | paid | null (none)
   // Per-bucket warnings surfaced on the Payroll Board so admins notice
@@ -484,6 +484,10 @@ async function computeBoardBuckets(filters: {
       // Scheduled shift end is surfaced so the Payroll Board can offer a
       // one-click "Set clock-out to scheduled end" fix on stuck entries.
       shiftEndTime: shiftsTable.endTime,
+      // Admin-correction provenance — drives the "Edited" badge + change
+      // history dialog on the Payroll Board's per-entry detail rows.
+      lastEditedByEmail: timeEntriesTable.lastEditedByEmail,
+      lastEditedAt: timeEntriesTable.lastEditedAt,
     })
     .from(timeEntriesTable)
     .leftJoin(shiftsTable, eq(timeEntriesTable.shiftId, shiftsTable.id))
@@ -503,7 +507,7 @@ async function computeBoardBuckets(filters: {
     hours: number;
     gross: number;
     timeEntryIds: string[];
-    entries: Array<{ id: string; clockInTime: string; hoursWorked: number; rate: number; holiday: string | null; hasClockOut: boolean; scheduledEnd: string | null }>;
+    entries: Array<{ id: string; clockInTime: string; hoursWorked: number; rate: number; holiday: string | null; hasClockOut: boolean; scheduledEnd: string | null; lastEditedByEmail: string | null; lastEditedAt: string | null }>;
     zeroRateEntries: number;
     missingClockOutEntries: number;
     zeroHoursEntries: number;
@@ -576,6 +580,8 @@ async function computeBoardBuckets(filters: {
       holiday: holidayName,
       hasClockOut: !!r.hasClockOut,
       scheduledEnd: r.shiftEndTime ? r.shiftEndTime.toISOString() : null,
+      lastEditedByEmail: r.lastEditedByEmail ?? null,
+      lastEditedAt: r.lastEditedAt ? r.lastEditedAt.toISOString() : null,
     });
   }
 

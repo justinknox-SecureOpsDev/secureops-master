@@ -46,6 +46,7 @@ import { writeEmployeeFieldChanges } from "../lib/employeeChangeLog";
 import { preparePreUpdateBody as prepareSitePreUpdate, maybeAutoGeocode as maybeAutoGeocodeSite } from "../lib/siteGeocode";
 import { normalizePhoneToE164 } from "../lib/phone";
 import { adminEditBreaksAutoSync } from "../lib/invoiceSync";
+import { buildTimeEntryAuditMetadata, timeEntrySnapshot } from "../lib/timeEntryAudit";
 
 /**
  * Coerce a free-text phone field on an admin CRUD payload into E.164 in place.
@@ -1083,7 +1084,7 @@ router.put("/admin/tables/:table/:id", requireAdmin, async (req, res): Promise<v
     // invalidate stale lat/lng (so the post-update auto-geocode picks up
     // fresh coords for the new address).
     let beforeRow: Record<string, unknown> | null = null;
-    if (tableName === "employees" || tableName === "sites") {
+    if (tableName === "employees" || tableName === "sites" || tableName === "time_entries") {
       const rows = (await db
         .select()
         .from(cfg.table)
@@ -1093,6 +1094,14 @@ router.put("/admin/tables/:table/:id", requireAdmin, async (req, res): Promise<v
 
     if (tableName === "sites" && beforeRow) {
       body = prepareSitePreUpdate(beforeRow as any, body);
+    }
+
+    // Stamp admin-correction provenance on officer time-entry grid edits so
+    // the Payroll Board can flag the entry as edited and open its history.
+    if (tableName === "time_entries" && beforeRow) {
+      body.lastEditedByUserId = req.user!.userId;
+      body.lastEditedByEmail = req.user!.email;
+      body.lastEditedAt = new Date();
     }
 
     // Invoice auto-sync opt-out: any admin grid edit to a billable field
@@ -1127,6 +1136,17 @@ router.put("/admin/tables/:table/:id", requireAdmin, async (req, res): Promise<v
           log: req.log,
         });
       }
+    }
+
+    // Officer time-entry grid edit: record a before/after change-history entry
+    // keyed by entry id (mirrors the clock-out fix + subcontractor pattern) so
+    // reviewers get full correction provenance from audit_logs.
+    if (tableName === "time_entries" && beforeRow) {
+      res.locals["auditMetadata"] = buildTimeEntryAuditMetadata(
+        id,
+        timeEntrySnapshot(beforeRow as Record<string, unknown>),
+        timeEntrySnapshot(row as Record<string, unknown>),
+      );
     }
 
     res.json(row);
