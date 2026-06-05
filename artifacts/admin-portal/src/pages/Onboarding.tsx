@@ -5,7 +5,7 @@ import { Input } from "@/components/ui/input";
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter,
 } from "@/components/ui/dialog";
-import { UserPlus, Loader2, Copy, ExternalLink } from "lucide-react";
+import { UserPlus, Loader2, Copy, ExternalLink, Search } from "lucide-react";
 import { openSignedObject } from "@/lib/upload";
 
 type Item = {
@@ -43,6 +43,7 @@ export function OnboardingPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [status, setStatus] = useState("");
+  const [search, setSearch] = useState("");
   const [openId, setOpenId] = useState<string | null>(null);
   const [resend, setResend] = useState<ResendResp | null>(null);
 
@@ -59,6 +60,15 @@ export function OnboardingPage() {
 
   const opened = useMemo(() => items.find((i) => i.employeeId === openId) ?? null, [items, openId]);
 
+  const filtered = useMemo(() => {
+    const q = search.trim().toLowerCase();
+    if (!q) return items;
+    return items.filter((i) =>
+      `${i.firstName} ${i.lastName}`.toLowerCase().includes(q) ||
+      i.email.toLowerCase().includes(q),
+    );
+  }, [items, search]);
+
   return (
     <div className="flex-1 overflow-auto p-6 space-y-4">
       <header>
@@ -69,14 +79,27 @@ export function OnboardingPage() {
           Track approved employees through onboarding. Resend links if needed.
         </p>
       </header>
-      <div className="flex items-center gap-1" role="group" aria-label="Filter by status">
-        {[{v:"",l:"All"},{v:"pending",l:"Pending"},{v:"completed",l:"Completed"}].map((s) => (
-          <button key={s.v} type="button" onClick={() => setStatus(s.v)}
-            aria-pressed={status === s.v}
-            className={`text-xs px-3 py-1.5 rounded border ${
-              status === s.v ? "bg-brand-navy text-white border-brand-navy" : "bg-background hover:bg-accent/40"
-            }`}>{s.l}</button>
-        ))}
+      <div className="flex flex-wrap items-center gap-3">
+        <div className="flex items-center gap-1" role="group" aria-label="Filter by status">
+          {[{v:"",l:"All"},{v:"pending",l:"Pending"},{v:"completed",l:"Completed"}].map((s) => (
+            <button key={s.v} type="button" onClick={() => setStatus(s.v)}
+              aria-pressed={status === s.v}
+              className={`text-xs px-3 py-1.5 rounded border ${
+                status === s.v ? "bg-brand-navy text-white border-brand-navy" : "bg-background hover:bg-accent/40"
+              }`}>{s.l}</button>
+          ))}
+        </div>
+        <div className="relative ml-auto w-full sm:w-64">
+          <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground pointer-events-none" />
+          <Input
+            type="search"
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            placeholder="Search by name or email"
+            aria-label="Search onboarding records by name or email"
+            className="pl-8"
+          />
+        </div>
       </div>
       {error && <div role="alert" className="text-sm text-destructive bg-destructive/5 p-2 rounded border border-destructive/20">{error}</div>}
       <div className="bg-card rounded-lg border overflow-hidden">
@@ -94,7 +117,8 @@ export function OnboardingPage() {
           <tbody>
             {loading && (<tr><td colSpan={6} className="px-3 py-10 text-center text-muted-foreground"><Loader2 className="w-5 h-5 inline-block animate-spin" /></td></tr>)}
             {!loading && items.length === 0 && (<tr><td colSpan={6} className="px-3 py-10 text-center text-muted-foreground">No onboarding records yet.</td></tr>)}
-            {items.map((i) => (
+            {!loading && items.length > 0 && filtered.length === 0 && (<tr><td colSpan={6} className="px-3 py-10 text-center text-muted-foreground">No matches for “{search}”.</td></tr>)}
+            {filtered.map((i) => (
               <tr key={i.employeeId} className="border-t hover:bg-accent/30">
                 <td className="px-3 py-2 font-medium">{i.firstName} {i.lastName}</td>
                 <td className="px-3 py-2">{i.email}</td>
