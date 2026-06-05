@@ -64,7 +64,7 @@ const dialect = new PgDialect();
  * literal (string / number / boolean / array), because the two compare against
  * the live `pg_get_expr()` text differently.
  */
-type ExpectedDefault =
+export type ExpectedDefault =
   | { kind: "expr"; canonical: string; display: string }
   | { kind: "literal"; value: string; display: string };
 
@@ -157,7 +157,7 @@ export function canonicalType(raw: string): string {
  * whitespace, and fold the `CURRENT_TIMESTAMP` keyword onto `now()` (Postgres
  * accepts both, and drizzle-kit / the DB may render either).
  */
-function canonicalExpr(raw: string): string {
+export function canonicalExpr(raw: string): string {
   return raw
     .trim()
     .toLowerCase()
@@ -171,7 +171,7 @@ function canonicalExpr(raw: string): string {
  * `'0'`) and any surrounding single quotes (`'pending'` → `pending`). Leaves
  * unquoted literals like `false` / `2` untouched.
  */
-function stripDbLiteral(raw: string): string {
+export function stripDbLiteral(raw: string): string {
   let s = raw.trim();
   // Drop one trailing cast: ::<type> where the type may contain spaces (e.g.
   // "character varying"), quotes, and a precision/scale modifier.
@@ -187,7 +187,7 @@ function stripDbLiteral(raw: string): string {
  * has no DB-level default. A JS-only `$default(fn)` leaves `column.default`
  * undefined (only `defaultFn` is set), so it correctly maps to null here.
  */
-function expectedDefaultFor(rawDefault: unknown): ExpectedDefault | null {
+export function expectedDefaultFor(rawDefault: unknown): ExpectedDefault | null {
   if (rawDefault === undefined) return null;
   if (is(rawDefault, SQL)) {
     const text = dialect.sqlToQuery(rawDefault).sql;
@@ -231,7 +231,7 @@ function normalizeBoolLiteral(s: string): string | null {
  * (`0` == `0.00`) and booleans fold `t`/`f` ↔ `true`/`false`. SQL-expression
  * defaults keep their own whitespace/keyword canonicalisation via canonicalExpr.
  */
-function defaultMatches(expected: ExpectedDefault, live: string | null): boolean {
+export function defaultMatches(expected: ExpectedDefault, live: string | null): boolean {
   if (live === null) return false; // code expects a default, DB has none.
   if (expected.kind === "expr") {
     return canonicalExpr(live) === expected.canonical;
@@ -250,7 +250,7 @@ function defaultMatches(expected: ExpectedDefault, live: string | null): boolean
 }
 
 /** Map a `pg_constraint.confdeltype` char to the drizzle ON DELETE action text. */
-function confDelTypeToAction(c: string): string {
+export function confDelTypeToAction(c: string): string {
   switch (c) {
     case "c":
       return "cascade";
@@ -267,7 +267,7 @@ function confDelTypeToAction(c: string): string {
 }
 
 /** Stable definition key for a foreign key: local cols → referenced table/cols. */
-function fkDefKey(
+export function fkDefKey(
   localCols: string[],
   foreignSchema: string,
   foreignTable: string,

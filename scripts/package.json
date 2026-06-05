@@ -8,6 +8,7 @@
     "seed": "tsx ./src/seed.ts",
     "check-security-headers": "tsx ./src/check-security-headers.ts",
     "check-schema-drift": "tsx ./src/check-schema-drift.ts",
+    "test": "vitest run",
     "test-schema-drift": "tsx --test ./src/test-schema-drift.ts",
     "test-dispatcher-authz": "tsx --test ./src/test-dispatcher-authz.ts",
     "a11y": "tsx ./src/a11y-admin-portal.ts",
@@ -26,6 +27,7 @@
     "@types/node": "catalog:",
     "@types/pg": "^8.18.0",
     "playwright": "^1.60.0",
-    "tsx": "catalog:"
+    "tsx": "catalog:",
+    "vitest": "^4.1.6"
   }
 }
