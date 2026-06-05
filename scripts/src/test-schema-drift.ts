@@ -44,11 +44,13 @@ import {
   loadLiveColumns,
   loadLiveIndexes,
   loadLiveEnums,
+  loadLiveForeignKeys,
   computeDrift,
   hasAnyDrift,
   type ExpectedTable,
   type ExpectedEnum,
   type LiveTable,
+  type LiveForeignKeys,
 } from "./check-schema-drift.js";
 
 const CONNECTION =
@@ -78,13 +80,26 @@ const widget = s.table(
     // "numeric(10,2)" — the whitespace guard must treat them as equal.
     price: numeric("price", { precision: 10, scale: 2 }),
     qty: integer("qty").notNull(),
+    // A DB-level literal default — materialised as `DEFAULT 'pending'` below.
+    // Exercises loadLiveColumns' column_default query + defaultMatches.
+    status: text("status").default("pending"),
     createdAt: timestamp("created_at", { withTimezone: true }),
   },
   (t) => [index("widget_name_idx").on(t.name)],
 );
 
+// A second table carrying a foreign key (with an ON DELETE action) back to
+// widget — materialised as `REFERENCES widget(id) ON DELETE CASCADE` below.
+// Exercises loadLiveForeignKeys + the FK / onDelete drift dimensions.
+const gadget = s.table("gadget", {
+  id: uuid("id").primaryKey(),
+  widgetId: uuid("widget_id").references(() => widget.id, {
+    onDelete: "cascade",
+  }),
+});
+
 // The object passed to collectExpectedFrom mirrors a schema barrel.
-const syntheticSchema = { widget, moodEnum };
+const syntheticSchema = { widget, gadget, moodEnum };
 
 // ---------------------------------------------------------------------------
 // Throwaway DB objects matching the synthetic schema above.
@@ -94,10 +109,12 @@ const client = new pg.Client({ connectionString: CONNECTION });
 let liveColumns: Map<string, LiveTable>;
 let liveIndexes: Map<string, Set<string>>;
 let liveEnums: Map<string, Set<string>>;
+let liveForeignKeys: LiveForeignKeys;
 let baseTables: ExpectedTable[];
 let baseEnums: ExpectedEnum[];
 
 const KEY = `${SCHEMA_NAME}.widget`;
+const GADGET_KEY = `${SCHEMA_NAME}.gadget`;
 const ENUM_KEY = `${SCHEMA_NAME}.widget_mood`;
 
 /** Deep-clone the baseline expected tables so a mutation can't leak between tests. */
@@ -106,6 +123,7 @@ function cloneTables(): ExpectedTable[] {
     ...t,
     columns: t.columns.map((c) => ({ ...c })),
     indexes: t.indexes.map((i) => ({ ...i })),
+    foreignKeys: t.foreignKeys?.map((f) => ({ ...f })),
   }));
 }
 
@@ -128,6 +146,7 @@ before(async () => {
        name text NOT NULL,
        price numeric(10, 2),
        qty integer NOT NULL,
+       status text DEFAULT 'pending',
        created_at timestamptz,
        CONSTRAINT widget_name_unique UNIQUE (name)
      )`,
@@ -135,10 +154,17 @@ before(async () => {
   await client.query(
     `CREATE INDEX widget_name_idx ON "${SCHEMA_NAME}".widget (name)`,
   );
+  await client.query(
+    `CREATE TABLE "${SCHEMA_NAME}".gadget (
+       id uuid PRIMARY KEY,
+       widget_id uuid REFERENCES "${SCHEMA_NAME}".widget (id) ON DELETE CASCADE
+     )`,
+  );
 
   liveColumns = await loadLiveColumns(client);
   liveIndexes = await loadLiveIndexes(client);
   liveEnums = await loadLiveEnums(client);
+  liveForeignKeys = await loadLiveForeignKeys(client);
 
   const expected = collectExpectedFrom(syntheticSchema);
   baseTables = expected.tables;
@@ -160,7 +186,7 @@ test("baseline: code schema matches the live DB (no drift)", () => {
   assert.equal(tbl!.dbSchema, SCHEMA_NAME);
   assert.ok(liveColumns.has(KEY), "live columns should include the widget table");
 
-  const r = computeDrift(baseTables, baseEnums, liveColumns, liveIndexes, liveEnums);
+  const r = computeDrift(baseTables, baseEnums, liveColumns, liveIndexes, liveEnums, liveForeignKeys);
   assert.equal(
     hasAnyDrift(r),
     false,
@@ -194,7 +220,7 @@ test("false-positive guard: .unique() constraint is NOT treated as a named index
     .indexes.map((i) => i.name);
   assert.deepEqual(expectedIdxNames, ["widget_name_idx"]);
   // So no MISSING INDEX is reported for the unique constraint.
-  const r = computeDrift(baseTables, baseEnums, liveColumns, liveIndexes, liveEnums);
+  const r = computeDrift(baseTables, baseEnums, liveColumns, liveIndexes, liveEnums, liveForeignKeys);
   assert.equal(r.missingIndexes.length, 0);
 });
 
@@ -207,7 +233,7 @@ test("drift: MISSING TABLE is detected", () => {
     columns: [{ name: "id", type: "uuid", notNull: true }],
     indexes: [],
   });
-  const r = computeDrift(tables, baseEnums, liveColumns, liveIndexes, liveEnums);
+  const r = computeDrift(tables, baseEnums, liveColumns, liveIndexes, liveEnums, liveForeignKeys);
   assert.equal(r.missingTables.length, 1);
   assert.equal(r.missingTables[0]!.tableName, "ghost");
   assert.equal(hasAnyDrift(r), true);
@@ -218,7 +244,7 @@ test("drift: MISSING COLUMN is detected", () => {
   tables
     .find((t) => t.tableName === "widget")!
     .columns.push({ name: "ghost_col", type: "text", notNull: false });
-  const r = computeDrift(tables, baseEnums, liveColumns, liveIndexes, liveEnums);
+  const r = computeDrift(tables, baseEnums, liveColumns, liveIndexes, liveEnums, liveForeignKeys);
   assert.equal(r.missingColumns.length, 1);
   assert.match(r.missingColumns[0]!, /ghost_col/);
   assert.equal(hasAnyDrift(r), true);
@@ -230,7 +256,7 @@ test("drift: TYPE MISMATCH is detected", () => {
     .find((t) => t.tableName === "widget")!
     .columns.find((c) => c.name === "qty")!;
   qty.type = "text"; // code says text, DB is integer
-  const r = computeDrift(tables, baseEnums, liveColumns, liveIndexes, liveEnums);
+  const r = computeDrift(tables, baseEnums, liveColumns, liveIndexes, liveEnums, liveForeignKeys);
   assert.equal(r.typeMismatches.length, 1);
   assert.match(r.typeMismatches[0]!, /code=text\s+db=integer/);
   assert.equal(hasAnyDrift(r), true);
@@ -242,7 +268,7 @@ test("drift: TYPE MISMATCH catches numeric width change", () => {
     .find((t) => t.tableName === "widget")!
     .columns.find((c) => c.name === "price")!;
   price.type = canonicalType("numeric(8, 2)"); // code narrowed; DB is 10,2
-  const r = computeDrift(tables, baseEnums, liveColumns, liveIndexes, liveEnums);
+  const r = computeDrift(tables, baseEnums, liveColumns, liveIndexes, liveEnums, liveForeignKeys);
   assert.equal(r.typeMismatches.length, 1);
   assert.match(r.typeMismatches[0]!, /code=numeric\(8,2\)\s+db=numeric\(10,2\)/);
   assert.equal(hasAnyDrift(r), true);
@@ -254,7 +280,7 @@ test("drift: NULLABILITY mismatch is detected", () => {
     .find((t) => t.tableName === "widget")!
     .columns.find((c) => c.name === "price")!;
   price.notNull = true; // code says NOT NULL, DB is nullable
-  const r = computeDrift(tables, baseEnums, liveColumns, liveIndexes, liveEnums);
+  const r = computeDrift(tables, baseEnums, liveColumns, liveIndexes, liveEnums, liveForeignKeys);
   assert.equal(r.nullabilityMismatches.length, 1);
   assert.match(r.nullabilityMismatches[0]!, /code=NOT NULL\s+db=NULLABLE/);
   assert.equal(hasAnyDrift(r), true);
@@ -265,7 +291,7 @@ test("drift: MISSING INDEX is detected", () => {
   tables
     .find((t) => t.tableName === "widget")!
     .indexes.push({ name: "widget_ghost_idx" });
-  const r = computeDrift(tables, baseEnums, liveColumns, liveIndexes, liveEnums);
+  const r = computeDrift(tables, baseEnums, liveColumns, liveIndexes, liveEnums, liveForeignKeys);
   assert.equal(r.missingIndexes.length, 1);
   assert.match(r.missingIndexes[0]!, /widget_ghost_idx/);
   assert.equal(hasAnyDrift(r), true);
@@ -279,7 +305,7 @@ test("drift: MISSING ENUM TYPE is detected", () => {
     enumName: "ghost_enum",
     values: ["a", "b"],
   });
-  const r = computeDrift(baseTables, enums, liveColumns, liveIndexes, liveEnums);
+  const r = computeDrift(baseTables, enums, liveColumns, liveIndexes, liveEnums, liveForeignKeys);
   assert.equal(r.missingEnumTypes.length, 1);
   assert.match(r.missingEnumTypes[0]!, /ghost_enum/);
   assert.equal(hasAnyDrift(r), true);
@@ -288,8 +314,103 @@ test("drift: MISSING ENUM TYPE is detected", () => {
 test("drift: MISSING ENUM VALUE is detected", () => {
   const enums = cloneEnums();
   enums.find((e) => e.enumName === "widget_mood")!.values.push("angry");
-  const r = computeDrift(baseTables, enums, liveColumns, liveIndexes, liveEnums);
+  const r = computeDrift(baseTables, enums, liveColumns, liveIndexes, liveEnums, liveForeignKeys);
   assert.equal(r.missingEnumValues.length, 1);
   assert.match(r.missingEnumValues[0]!, new RegExp(`${ENUM_KEY}.+angry`));
+  assert.equal(hasAnyDrift(r), true);
+});
+
+// ---------------------------------------------------------------------------
+// Defaults — exercises loadLiveColumns' column_default query end-to-end.
+// ---------------------------------------------------------------------------
+
+test("baseline: column default round-trips with no drift (false-positive guard)", () => {
+  // The synthetic `status text DEFAULT 'pending'` was materialised and read
+  // back; collectExpectedFrom must record the code default and defaultMatches
+  // must treat the live `'pending'::text` as equal — so no default drift.
+  const statusCol = baseTables
+    .find((t) => t.tableName === "widget")!
+    .columns.find((c) => c.name === "status")!;
+  assert.ok(statusCol.default, "status should carry a code default");
+  assert.equal(statusCol.default!.display, "pending");
+  const liveStatus = liveColumns.get(KEY)!.get("status")!;
+  assert.match(liveStatus.default ?? "", /'pending'/);
+
+  const r = computeDrift(baseTables, baseEnums, liveColumns, liveIndexes, liveEnums, liveForeignKeys);
+  assert.equal(r.missingDefaults.length, 0);
+  assert.equal(r.defaultMismatches.length, 0);
+});
+
+test("drift: MISSING DEFAULT is detected", () => {
+  // Code declares a default on a column the DB has none for (qty has no DB
+  // default), so an INSERT omitting it would fail / write NULL.
+  const tables = cloneTables();
+  const qty = tables
+    .find((t) => t.tableName === "widget")!
+    .columns.find((c) => c.name === "qty")!;
+  qty.default = { kind: "literal", value: "0", display: "0" };
+  const r = computeDrift(tables, baseEnums, liveColumns, liveIndexes, liveEnums, liveForeignKeys);
+  assert.equal(r.missingDefaults.length, 1);
+  assert.match(r.missingDefaults[0]!, /\.qty\b/);
+  assert.match(r.missingDefaults[0]!, /db=\(none\)/);
+  assert.equal(hasAnyDrift(r), true);
+});
+
+test("drift: DEFAULT MISMATCH is detected", () => {
+  // Code default diverges from the live `'pending'` literal.
+  const tables = cloneTables();
+  const status = tables
+    .find((t) => t.tableName === "widget")!
+    .columns.find((c) => c.name === "status")!;
+  status.default = { kind: "literal", value: "active", display: "active" };
+  const r = computeDrift(tables, baseEnums, liveColumns, liveIndexes, liveEnums, liveForeignKeys);
+  assert.equal(r.defaultMismatches.length, 1);
+  assert.match(r.defaultMismatches[0]!, /\.status\b/);
+  assert.match(r.defaultMismatches[0]!, /code=active/);
+  assert.equal(hasAnyDrift(r), true);
+});
+
+// ---------------------------------------------------------------------------
+// Foreign keys — exercises loadLiveForeignKeys end-to-end.
+// ---------------------------------------------------------------------------
+
+test("baseline: foreign key round-trips with no drift (false-positive guard)", () => {
+  // The synthetic gadget.widget_id FK was materialised as
+  // `REFERENCES widget(id) ON DELETE CASCADE`; loadLiveForeignKeys must read it
+  // back keyed by definition with the cascade action, so no FK drift.
+  const gadgetTbl = baseTables.find((t) => t.tableName === "gadget")!;
+  assert.equal(gadgetTbl.foreignKeys?.length, 1);
+  assert.equal(gadgetTbl.foreignKeys![0]!.onDelete, "cascade");
+  const liveFks = liveForeignKeys.get(GADGET_KEY);
+  assert.ok(liveFks, "gadget should have a live foreign key");
+  assert.equal(liveFks!.get(gadgetTbl.foreignKeys![0]!.defKey)?.onDelete, "cascade");
+
+  const r = computeDrift(baseTables, baseEnums, liveColumns, liveIndexes, liveEnums, liveForeignKeys);
+  assert.equal(r.missingForeignKeys.length, 0);
+  assert.equal(r.fkActionMismatches.length, 0);
+});
+
+test("drift: MISSING FK (different referenced target) is detected", () => {
+  // Code points the FK at a different target than the DB has, so the live FK
+  // (keyed by definition) won't match — reported as a missing foreign key.
+  const tables = cloneTables();
+  const fk = tables.find((t) => t.tableName === "gadget")!.foreignKeys![0]!;
+  fk.defKey = `(widget_id) -> ${SCHEMA_NAME}.widget(name)`; // DB references (id)
+  const r = computeDrift(tables, baseEnums, liveColumns, liveIndexes, liveEnums, liveForeignKeys);
+  assert.equal(r.missingForeignKeys.length, 1);
+  assert.match(r.missingForeignKeys[0]!, new RegExp(`${GADGET_KEY}`));
+  assert.match(r.missingForeignKeys[0]!, /widget\(name\)/);
+  assert.equal(hasAnyDrift(r), true);
+});
+
+test("drift: FK ACTION mismatch (onDelete differs) is detected", () => {
+  // Same FK definition, but code declares SET NULL while the DB has CASCADE.
+  const tables = cloneTables();
+  const fk = tables.find((t) => t.tableName === "gadget")!.foreignKeys![0]!;
+  fk.onDelete = "set null";
+  const r = computeDrift(tables, baseEnums, liveColumns, liveIndexes, liveEnums, liveForeignKeys);
+  assert.equal(r.fkActionMismatches.length, 1);
+  assert.match(r.fkActionMismatches[0]!, /code=set null/);
+  assert.match(r.fkActionMismatches[0]!, /db=cascade/);
   assert.equal(hasAnyDrift(r), true);
 });

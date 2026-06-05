@@ -131,14 +131,14 @@ export interface LiveColumn {
 }
 export type LiveTable = Map<string, LiveColumn>; // column name → metadata.
 
-interface LiveForeignKey {
+export interface LiveForeignKey {
   /** Live constraint name — for friendly output only. */
   name: string;
   /** Normalised ON DELETE action. */
   onDelete: string;
 }
 /** key = `${schema}.${table}` → (FK definition key → metadata). */
-type LiveForeignKeys = Map<string, Map<string, LiveForeignKey>>;
+export type LiveForeignKeys = Map<string, Map<string, LiveForeignKey>>;
 
 /**
  * Normalise a SQL type string so the code-declared type and the live DB type
@@ -386,7 +386,7 @@ export async function loadLiveColumns(
   return live;
 }
 
-async function loadLiveForeignKeys(
+export async function loadLiveForeignKeys(
   client: pg.Client,
 ): Promise<LiveForeignKeys> {
   // For every foreign-key constraint, resolve the local columns, the referenced
