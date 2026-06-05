@@ -3,6 +3,7 @@ import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod/v4";
 import { sitesTable } from "./sites";
 import { subcontractorQrTokensTable } from "./subcontractorQrTokens";
+import { usersTable } from "./users";
 
 /**
  * A subcontractor clock-in/out record, anchored to a SITE.
@@ -23,6 +24,14 @@ export const subcontractorTimeEntriesTable = pgTable("subcontractor_time_entries
   clockOutAt: timestamp("clock_out_at", { withTimezone: true }),
   hoursWorked: numeric("hours_worked", { precision: 6, scale: 2 }),
   notes: text("notes"),
+  // Manual-correction provenance: stamped only when an admin edits this entry
+  // via PATCH /admin/subcontractor-entries/:id. Self-reported QR entries leave
+  // these null, so a non-null `lastEditedAt` flags a record as admin-corrected.
+  // `lastEditedByUserId` is a soft FK (set null) so deleting an admin does not
+  // erase the correction history; the historical email keeps it meaningful.
+  lastEditedByUserId: uuid("last_edited_by_user_id").references(() => usersTable.id, { onDelete: "set null" }),
+  lastEditedByEmail: text("last_edited_by_email"),
+  lastEditedAt: timestamp("last_edited_at", { withTimezone: true }),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
 }, (t) => ({
   siteIdx: index("sub_time_entries_site_idx").on(t.siteId),

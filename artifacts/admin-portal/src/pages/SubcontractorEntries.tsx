@@ -19,6 +19,8 @@ type Entry = {
   clockOutAt: string | null;
   hoursWorked: string | null;
   notes: string | null;
+  lastEditedByEmail: string | null;
+  lastEditedAt: string | null;
 };
 
 function fmtDateTime(iso: string | null | undefined): string {
@@ -26,6 +28,20 @@ function fmtDateTime(iso: string | null | undefined): string {
   const d = new Date(iso);
   if (isNaN(d.getTime())) return iso;
   return d.toLocaleString(undefined, { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" });
+}
+
+function EditedBadge({ entry }: { entry: Entry }) {
+  if (!entry.lastEditedAt) return null;
+  const who = entry.lastEditedByEmail ?? "an admin";
+  return (
+    <span
+      className="inline-flex items-center gap-1 rounded-full bg-amber-100 text-amber-800 border border-amber-300 px-1.5 py-0.5 text-[10px] font-medium leading-none"
+      title={`Edited by ${who} on ${fmtDateTime(entry.lastEditedAt)}`}
+    >
+      <Pencil className="w-2.5 h-2.5" />
+      Edited
+    </span>
+  );
 }
 
 // Convert an ISO string to a value suitable for <input type="datetime-local">
@@ -47,7 +63,7 @@ function localInputToIso(value: string): string | null {
 }
 
 function exportCsv(entries: Entry[]): void {
-  const headers = ["ID", "Name", "Company", "Badge ID", "Site", "Clock In", "Clock Out", "Hours"];
+  const headers = ["ID", "Name", "Company", "Badge ID", "Site", "Clock In", "Clock Out", "Hours", "Edited By", "Edited At"];
   const rows = entries.map((e) => [
     e.id,
     e.name,
@@ -57,6 +73,8 @@ function exportCsv(entries: Entry[]): void {
     e.clockInAt,
     e.clockOutAt ?? "",
     e.hoursWorked ?? "",
+    e.lastEditedByEmail ?? "",
+    e.lastEditedAt ?? "",
   ]);
   const csv = [headers, ...rows].map((r) => r.map((v) => `"${String(v).replace(/"/g, '""')}"`).join(",")).join("\n");
   const blob = new Blob([csv], { type: "text/csv" });
@@ -248,7 +266,12 @@ export default function SubcontractorEntriesPage() {
               <tbody className="divide-y">
                 {openEntries.map((e) => (
                   <tr key={e.id} className="hover:bg-slate-50">
-                    <td className="p-3 font-medium">{e.name}</td>
+                    <td className="p-3 font-medium">
+                      <span className="inline-flex items-center gap-2">
+                        {e.name}
+                        <EditedBadge entry={e} />
+                      </span>
+                    </td>
                     <td className="p-3 text-muted-foreground">{e.company}</td>
                     <td className="p-3 text-muted-foreground">{e.badgeId ?? "—"}</td>
                     <td className="p-3 text-muted-foreground">{e.siteName ?? "—"}</td>
@@ -310,7 +333,12 @@ export default function SubcontractorEntriesPage() {
               <tbody className="divide-y">
                 {closedEntries.map((e) => (
                   <tr key={e.id} className="hover:bg-slate-50">
-                    <td className="p-3 font-medium">{e.name}</td>
+                    <td className="p-3 font-medium">
+                      <span className="inline-flex items-center gap-2">
+                        {e.name}
+                        <EditedBadge entry={e} />
+                      </span>
+                    </td>
                     <td className="p-3 text-muted-foreground">{e.company}</td>
                     <td className="p-3 text-muted-foreground">{e.badgeId ?? "—"}</td>
                     <td className="p-3 text-muted-foreground">{e.siteName ?? "—"}</td>

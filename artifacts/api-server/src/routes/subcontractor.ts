@@ -161,6 +161,8 @@ router.get("/admin/subcontractor-entries", requireAdmin, async (req, res): Promi
       clockOutAt: subcontractorTimeEntriesTable.clockOutAt,
       hoursWorked: subcontractorTimeEntriesTable.hoursWorked,
       notes: subcontractorTimeEntriesTable.notes,
+      lastEditedByEmail: subcontractorTimeEntriesTable.lastEditedByEmail,
+      lastEditedAt: subcontractorTimeEntriesTable.lastEditedAt,
       createdAt: subcontractorTimeEntriesTable.createdAt,
       siteName: sitesTable.name,
     })
@@ -338,6 +340,12 @@ router.patch("/admin/subcontractor-entries/:id", requireAdmin, async (req, res):
     res.json({ ...existing, siteName: site?.name ?? null });
     return;
   }
+
+  // Stamp who corrected this entry and when, so the Clock-In Entries page can
+  // distinguish admin-corrected records from self-reported QR scans.
+  setValues.lastEditedByUserId = req.user!.userId;
+  setValues.lastEditedByEmail = req.user!.email;
+  setValues.lastEditedAt = new Date();
 
   const [updated] = await db
     .update(subcontractorTimeEntriesTable)
