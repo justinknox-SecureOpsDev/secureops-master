@@ -1527,6 +1527,96 @@ describe("scheduler webhook rejects unsigned and malformed requests", () => {
       .where(eq(shiftAssignmentsTable.shiftId, shiftId));
     expect(assignments).toHaveLength(0);
   });
+
+  it("reconciles assignedOfficerEmails when the scheduler edits an existing shift (add + remove)", async () => {
+    // A second officer we can add to / remove from the roster.
+    const otherEmail = `${TAG}-officer2-${randomUUID().slice(0, 6)}@example.test`;
+    const [other] = await db
+      .insert(usersTable)
+      .values({
+        email: otherEmail,
+        passwordHash,
+        firstName: "Sync2",
+        lastName: TAG,
+        role: "employee",
+        status: "active",
+        tokensValidAfter: new Date(0),
+      })
+      .returning({ id: usersTable.id });
+
+    const externalId = `${TAG}-assign-update-${randomUUID().slice(0, 8)}`;
+
+    // 1. Create the shift with officer #1 on the roster.
+    const created = await postSignedShift({
+      id: externalId,
+      action: "upsert",
+      title: `${TAG} Roster Shift`,
+      siteName: ctx.siteName,
+      startTime: "2026-11-09T08:00:00.000Z",
+      endTime: "2026-11-09T16:00:00.000Z",
+      requiredLicenseLevel: 2,
+      headcount: 2,
+      status: "upcoming",
+      assignedOfficerEmails: [ctx.employeeEmail],
+      updatedAt: "2026-11-08T00:00:00.000Z",
+    });
+    expect(created.body).toMatchObject({ ok: true, action: "created" });
+    const shiftId = created.body.secureopsId as string;
+
+    const initial = await db
+      .select({ employeeId: shiftAssignmentsTable.employeeId })
+      .from(shiftAssignmentsTable)
+      .where(eq(shiftAssignmentsTable.shiftId, shiftId));
+    expect(initial.map((a) => a.employeeId)).toEqual([ctx.employeeId]);
+
+    // 2. The scheduler edits the shift: officer #1 is dropped, officer #2 added.
+    //    A strictly-newer updatedAt so the shift update wins the tiebreaker.
+    const updated = await postSignedShift({
+      id: externalId,
+      action: "upsert",
+      title: `${TAG} Roster Shift`,
+      siteName: ctx.siteName,
+      startTime: "2026-11-09T08:00:00.000Z",
+      endTime: "2026-11-09T16:00:00.000Z",
+      requiredLicenseLevel: 2,
+      headcount: 2,
+      status: "upcoming",
+      assignedOfficerEmails: [otherEmail],
+      updatedAt: "2026-11-08T12:00:00.000Z",
+    });
+    expect(updated.body).toMatchObject({ ok: true, action: "updated" });
+
+    // Roster reconciled: officer #1 removed, officer #2 added.
+    const after = await db
+      .select({ employeeId: shiftAssignmentsTable.employeeId, status: shiftAssignmentsTable.status })
+      .from(shiftAssignmentsTable)
+      .where(eq(shiftAssignmentsTable.shiftId, shiftId));
+    expect(after).toHaveLength(1);
+    expect(after[0].employeeId).toBe(other.id);
+    expect(after[0].status).toBe("accepted");
+
+    // 3. A stale edit (older updatedAt) must NOT touch the roster.
+    const stale = await postSignedShift({
+      id: externalId,
+      action: "upsert",
+      title: `${TAG} Roster Shift`,
+      siteName: ctx.siteName,
+      startTime: "2026-11-09T08:00:00.000Z",
+      endTime: "2026-11-09T16:00:00.000Z",
+      requiredLicenseLevel: 2,
+      headcount: 2,
+      status: "upcoming",
+      assignedOfficerEmails: [ctx.employeeEmail],
+      updatedAt: "2026-11-07T00:00:00.000Z",
+    });
+    expect(stale.body).toMatchObject({ ok: true, action: "skipped" });
+
+    const afterStale = await db
+      .select({ employeeId: shiftAssignmentsTable.employeeId })
+      .from(shiftAssignmentsTable)
+      .where(eq(shiftAssignmentsTable.shiftId, shiftId));
+    expect(afterStale.map((a) => a.employeeId)).toEqual([other.id]);
+  });
 });
 
 // ---------------------------------------------------------------------------

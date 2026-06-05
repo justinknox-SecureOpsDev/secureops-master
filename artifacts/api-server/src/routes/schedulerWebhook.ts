@@ -12,7 +12,7 @@
  */
 
 import { Router, type IRouter, type Request, type Response, type NextFunction } from "express";
-import { eq, and, sql, gte, lte, or } from "drizzle-orm";
+import { eq, and, sql, gte, lte, or, inArray, notInArray } from "drizzle-orm";
 import { z } from "zod/v4";
 import { db, shiftsTable, timeEntriesTable, usersTable, sitesTable, shiftAssignmentsTable } from "@workspace/db";
 import { verifySignature, SCHEDULER_SOURCE, type SchedulerShiftPayload, type SchedulerClockEventPayload } from "../lib/schedulerSync";
@@ -547,20 +547,59 @@ router.post("/scheduler-webhook/shifts", webhookLimiter, requireHmac, async (req
 
   const result = await processInboundShift(canonical);
 
-  // If there are assigned officers, create assignments for a newly created shift
-  if (result.action === "created" && result.secureopsId && payload.assignedOfficerEmails?.length) {
+  // Reconcile the officer roster against `assignedOfficerEmails`.
+  //
+  // For both a newly created shift AND an updated existing shift, the scheduler
+  // is authoritative for the roster: the payload carries the FULL set of officers
+  // who should be assigned. We add assignments for newly-listed officers and
+  // remove assignments for officers no longer listed (mirroring the decline path
+  // in shifts.ts, which DELETEs the assignment to free the slot).
+  //
+  // Gating:
+  //   • Only act on "created" / "updated" — a "skipped" result means the shift
+  //     update itself lost the last-write-wins tiebreaker (stale payload), so we
+  //     must NOT touch the roster either. "deleted" cascades assignments away.
+  //   • Only reconcile when `assignedOfficerEmails` is present. An omitted field
+  //     means "no roster information in this payload" and leaves assignments
+  //     untouched; an explicit empty array means "clear the roster".
+  if (
+    (result.action === "created" || result.action === "updated") &&
+    result.secureopsId &&
+    payload.assignedOfficerEmails !== undefined
+  ) {
+    const shiftId = result.secureopsId;
+
+    // Resolve the listed emails to known officer userIds (unknown emails skipped).
+    const desiredUserIds = new Set<string>();
     for (const email of payload.assignedOfficerEmails) {
       const userId = await resolveUserByEmail(email);
-      if (!userId) continue;
+      if (userId) desiredUserIds.add(userId);
+    }
+    const desiredIds = [...desiredUserIds];
+
+    // Add: insert an accepted assignment for each desired officer (idempotent).
+    for (const userId of desiredIds) {
       try {
         await db.insert(shiftAssignmentsTable).values({
-          shiftId: result.secureopsId,
+          shiftId,
           employeeId: userId,
           status: "accepted",
         }).onConflictDoNothing();
       } catch {
         // ignore duplicate assignment errors
       }
+    }
+
+    // Remove: delete assignments for officers no longer in the scheduler's roster.
+    if (desiredIds.length > 0) {
+      await db.delete(shiftAssignmentsTable).where(and(
+        eq(shiftAssignmentsTable.shiftId, shiftId),
+        notInArray(shiftAssignmentsTable.employeeId, desiredIds),
+      ));
+    } else {
+      await db.delete(shiftAssignmentsTable).where(
+        eq(shiftAssignmentsTable.shiftId, shiftId),
+      );
     }
   }
 
