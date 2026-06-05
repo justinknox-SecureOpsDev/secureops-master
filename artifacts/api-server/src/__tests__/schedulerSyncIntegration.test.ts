@@ -13,6 +13,7 @@ import {
   licensesTable,
   timeEntriesTable,
   schedulerSyncCursorsTable,
+  notificationsTable,
 } from "@workspace/db";
 import app from "../app";
 import { signPayload, SCHEDULER_SOURCE } from "../lib/schedulerSync";
@@ -1700,6 +1701,116 @@ describe("scheduler webhook rejects unsigned and malformed requests", () => {
       .from(shiftAssignmentsTable)
       .where(eq(shiftAssignmentsTable.shiftId, shiftId));
     expect(afterStale.map((a) => a.employeeId)).toEqual([other.id]);
+  });
+
+  it("notifies officers the scheduler adds and drops from a shift roster", async () => {
+    // A second officer to swap onto the roster.
+    const otherEmail = `${TAG}-officer3-${randomUUID().slice(0, 6)}@example.test`;
+    const [other] = await db
+      .insert(usersTable)
+      .values({
+        email: otherEmail,
+        passwordHash,
+        firstName: "Sync3",
+        lastName: TAG,
+        role: "employee",
+        status: "active",
+        tokensValidAfter: new Date(0),
+      })
+      .returning({ id: usersTable.id });
+
+    const externalId = `${TAG}-assign-notify-${randomUUID().slice(0, 8)}`;
+
+    // 1. Create the shift with officer #1 → officer #1 gets a "shift_assigned".
+    const created = await postSignedShift({
+      id: externalId,
+      action: "upsert",
+      title: `${TAG} Notify Shift`,
+      siteName: ctx.siteName,
+      startTime: "2026-11-10T08:00:00.000Z",
+      endTime: "2026-11-10T16:00:00.000Z",
+      requiredLicenseLevel: 2,
+      headcount: 2,
+      status: "upcoming",
+      assignedOfficerEmails: [ctx.employeeEmail],
+      updatedAt: "2026-11-09T00:00:00.000Z",
+    });
+    expect(created.body).toMatchObject({ ok: true, action: "created" });
+    const shiftId = created.body.secureopsId as string;
+
+    const assignNotif = await db
+      .select({ type: notificationsTable.type, data: notificationsTable.data })
+      .from(notificationsTable)
+      .where(and(
+        eq(notificationsTable.userId, ctx.employeeId),
+        eq(notificationsTable.type, "shift_assigned"),
+        sql`${notificationsTable.data} ->> 'shiftId' = ${shiftId}`,
+      ));
+    expect(assignNotif).toHaveLength(1);
+
+    // 2. Swap rosters: drop officer #1, add officer #2.
+    const updated = await postSignedShift({
+      id: externalId,
+      action: "upsert",
+      title: `${TAG} Notify Shift`,
+      siteName: ctx.siteName,
+      startTime: "2026-11-10T08:00:00.000Z",
+      endTime: "2026-11-10T16:00:00.000Z",
+      requiredLicenseLevel: 2,
+      headcount: 2,
+      status: "upcoming",
+      assignedOfficerEmails: [otherEmail],
+      updatedAt: "2026-11-09T12:00:00.000Z",
+    });
+    expect(updated.body).toMatchObject({ ok: true, action: "updated" });
+
+    // Officer #1 (removed) gets a "shift_unassigned".
+    const removeNotif = await db
+      .select({ type: notificationsTable.type })
+      .from(notificationsTable)
+      .where(and(
+        eq(notificationsTable.userId, ctx.employeeId),
+        eq(notificationsTable.type, "shift_unassigned"),
+        sql`${notificationsTable.data} ->> 'shiftId' = ${shiftId}`,
+      ));
+    expect(removeNotif).toHaveLength(1);
+
+    // Officer #2 (added) gets a "shift_assigned".
+    const addNotif = await db
+      .select({ type: notificationsTable.type })
+      .from(notificationsTable)
+      .where(and(
+        eq(notificationsTable.userId, other.id),
+        eq(notificationsTable.type, "shift_assigned"),
+        sql`${notificationsTable.data} ->> 'shiftId' = ${shiftId}`,
+      ));
+    expect(addNotif).toHaveLength(1);
+
+    // 3. Re-sending the same roster must NOT re-notify (no real change).
+    const noop = await postSignedShift({
+      id: externalId,
+      action: "upsert",
+      title: `${TAG} Notify Shift`,
+      siteName: ctx.siteName,
+      startTime: "2026-11-10T08:00:00.000Z",
+      endTime: "2026-11-10T16:00:00.000Z",
+      requiredLicenseLevel: 2,
+      headcount: 2,
+      status: "upcoming",
+      assignedOfficerEmails: [otherEmail],
+      updatedAt: "2026-11-09T18:00:00.000Z",
+    });
+    expect(noop.body).toMatchObject({ ok: true, action: "updated" });
+
+    const addNotifAfter = await db
+      .select({ id: notificationsTable.id })
+      .from(notificationsTable)
+      .where(and(
+        eq(notificationsTable.userId, other.id),
+        eq(notificationsTable.type, "shift_assigned"),
+        sql`${notificationsTable.data} ->> 'shiftId' = ${shiftId}`,
+      ));
+    expect(addNotifAfter).toHaveLength(1);
   });
 });
 

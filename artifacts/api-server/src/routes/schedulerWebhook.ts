@@ -16,6 +16,7 @@ import { eq, and, sql, gte, lte, or, inArray, notInArray } from "drizzle-orm";
 import { z } from "zod/v4";
 import { db, shiftsTable, timeEntriesTable, usersTable, sitesTable, shiftAssignmentsTable } from "@workspace/db";
 import { verifySignature, SCHEDULER_SOURCE, type SchedulerShiftPayload, type SchedulerClockEventPayload } from "../lib/schedulerSync";
+import { logger } from "../lib/logger";
 import rateLimit, { MemoryStore } from "express-rate-limit";
 
 const router: IRouter = Router();
@@ -163,6 +164,19 @@ async function reconcileShiftRoster(shiftId: string, assignedOfficerEmails: stri
   }
   const desiredIds = [...desiredUserIds];
 
+  // Snapshot the roster BEFORE mutating so we can compute who was actually
+  // added vs. removed, and only notify officers whose status really changed
+  // (mirrors the claim / admin-assign / decline flows, which notify on the
+  // single roster change they perform).
+  const existingRows = await db
+    .select({ employeeId: shiftAssignmentsTable.employeeId })
+    .from(shiftAssignmentsTable)
+    .where(eq(shiftAssignmentsTable.shiftId, shiftId));
+  const existingIds = new Set(existingRows.map((r) => r.employeeId));
+
+  const addedIds = desiredIds.filter((id) => !existingIds.has(id));
+  const removedIds = [...existingIds].filter((id) => !desiredUserIds.has(id));
+
   // Add: insert an accepted assignment for each desired officer (idempotent).
   for (const userId of desiredIds) {
     try {
@@ -186,6 +200,53 @@ async function reconcileShiftRoster(shiftId: string, assignedOfficerEmails: stri
     await db.delete(shiftAssignmentsTable).where(
       eq(shiftAssignmentsTable.shiftId, shiftId),
     );
+  }
+
+  // Notify officers the scheduler just added / dropped, reusing the same push +
+  // SMS helpers (and respecting their opt-in/consent rules) as the in-app
+  // assign / decline flows. Because this runs from the webhook AND the scheduled
+  // reconciliation job, scheduler-driven roster changes are surfaced no matter
+  // which path applied them. Best-effort: notification failures must never fail
+  // the sync or roll back the roster change.
+  if (addedIds.length > 0 || removedIds.length > 0) {
+    try {
+      const [shiftRow] = await db
+        .select({ title: shiftsTable.title, startTime: shiftsTable.startTime })
+        .from(shiftsTable)
+        .where(eq(shiftsTable.id, shiftId))
+        .limit(1);
+      const title = shiftRow?.title ?? "a shift";
+      const { fmtShiftWhen } = await import("./shifts");
+      const when = shiftRow?.startTime ? fmtShiftWhen(shiftRow.startTime) : "the scheduled time";
+      const { sendPushToUsers } = await import("../lib/push");
+      const { sendSmsToUsers } = await import("../lib/sms");
+
+      if (addedIds.length > 0) {
+        await sendPushToUsers(addedIds, {
+          title: "📋 New Shift Assigned",
+          body: `You've been assigned to ${title} on ${when}`,
+          data: { type: "shift_assigned", shiftId },
+        });
+        sendSmsToUsers(
+          addedIds,
+          `[WCSG] You've been assigned to ${title} on ${when}. Open the app for details.`,
+        ).catch((err: unknown) => logger.warn({ err, shiftId }, "scheduler-roster assign SMS dispatch failed"));
+      }
+
+      if (removedIds.length > 0) {
+        await sendPushToUsers(removedIds, {
+          title: "🚫 Shift Assignment Removed",
+          body: `You've been removed from ${title} on ${when}`,
+          data: { type: "shift_unassigned", shiftId },
+        });
+        sendSmsToUsers(
+          removedIds,
+          `[WCSG] You've been removed from ${title} on ${when}. Open the app for details.`,
+        ).catch((err: unknown) => logger.warn({ err, shiftId }, "scheduler-roster removal SMS dispatch failed"));
+      }
+    } catch (err) {
+      logger.warn({ err, shiftId }, "scheduler-roster change notification failed");
+    }
   }
 }
 
