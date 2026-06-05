@@ -16,7 +16,7 @@ import {
 } from "@workspace/db";
 import app from "../app";
 import { signPayload, SCHEDULER_SOURCE } from "../lib/schedulerSync";
-import { processInboundClockEvent, processInboundShift } from "../routes/schedulerWebhook";
+import { processInboundClockEvent, processInboundShift, webhookRateLimitStore } from "../routes/schedulerWebhook";
 import { runSchedulerReconciliation } from "../lib/scheduledJobs";
 import { signToken } from "../middlewares/auth";
 
@@ -1842,5 +1842,115 @@ describe("assignment endpoints drive the outbound scheduler push end-to-end", ()
     // of the three reached the scheduler (loop prevention engaged end-to-end).
     await new Promise((r) => setTimeout(r, 250));
     expect(assignmentCalls(fetchSpy)).toHaveLength(0);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// 6. Rate limiting: the public webhook routes (reachable from the internet)
+//    are guarded by a per-IP limiter (`webhookLimiter`). Flooding past the
+//    cap from a single source must short-circuit to 429 BEFORE the HMAC
+//    check or any DB work, so the endpoint can't be used for brute-force
+//    signature guessing or DB-write flooding.
+//
+//    The production default is 120 req / 5 min. To assert the 429 branch
+//    without firing 120+ requests, we drive a low override via the
+//    `SCHEDULER_WEBHOOK_RATE_LIMIT` env var and reset the shared per-IP
+//    counter before each case so the boundary is deterministic. A
+//    regression that removes the limiter (no 429) or loosens it (raises
+//    the cap so the override is ignored) makes one of these assertions fail.
+// ---------------------------------------------------------------------------
+
+describe("scheduler webhook rate limiter blocks request floods", () => {
+  const RATE_LIMIT = 5;
+  let prevRateLimit: string | undefined;
+
+  beforeEach(() => {
+    prevRateLimit = process.env.SCHEDULER_WEBHOOK_RATE_LIMIT;
+    process.env.SCHEDULER_WEBHOOK_RATE_LIMIT = String(RATE_LIMIT);
+    // Fully configured so signed requests clear requireHmac and would reach
+    // the DB if the limiter let them through.
+    process.env.SCHEDULER_BASE_URL = "https://scheduler.example.com";
+    process.env.SCHEDULER_SHARED_SECRET = SECRET;
+    // The limiter is shared across the whole app instance for the test run;
+    // clear the per-IP counter so each case starts from a known state.
+    webhookRateLimitStore.resetAll();
+  });
+
+  afterEach(() => {
+    if (prevRateLimit === undefined) delete process.env.SCHEDULER_WEBHOOK_RATE_LIMIT;
+    else process.env.SCHEDULER_WEBHOOK_RATE_LIMIT = prevRateLimit;
+    // Leave a clean counter for any later suites.
+    webhookRateLimitStore.resetAll();
+  });
+
+  // A fully-signed delete payload for an externalId that doesn't exist:
+  // it clears requireHmac + Zod and resolves to a cheap "skipped / not
+  // found" (a single SELECT, no writes), so legitimate-but-allowed calls
+  // are distinguishable from rate-limited (429) ones.
+  function floodShift() {
+    const body = JSON.stringify({
+      id: `${TAG}-flood-${randomUUID().slice(0, 8)}`,
+      action: "delete",
+      updatedAt: "2027-01-01T00:00:00.000Z",
+    });
+    return request(app)
+      .post("/api/scheduler-webhook/shifts")
+      .set("Content-Type", "application/json")
+      .set("X-WCSG-Signature", signPayload(body, SECRET))
+      .send(body);
+  }
+
+  function floodClockEvent() {
+    const body = JSON.stringify({
+      id: `${TAG}-flood-clock-${randomUUID().slice(0, 8)}`,
+      action: "delete",
+      updatedAt: "2027-01-01T00:00:00.000Z",
+    });
+    return request(app)
+      .post("/api/scheduler-webhook/clock-events")
+      .set("Content-Type", "application/json")
+      .set("X-WCSG-Signature", signPayload(body, SECRET))
+      .send(body);
+  }
+
+  it("returns 429 once a single IP floods past the per-IP cap on /shifts", async () => {
+    // Drive more than the cap from one simulated IP within the window.
+    const total = RATE_LIMIT + 5;
+    const statuses: number[] = [];
+    let limitedBody: { error?: string; message?: string } | undefined;
+
+    for (let i = 0; i < total; i++) {
+      const res = await floodShift();
+      statuses.push(res.status);
+      if (res.status === 429 && !limitedBody) limitedBody = res.body;
+    }
+
+    // Requests up to the cap are allowed through (the limiter isn't blanket-
+    // blocking legitimate traffic) — guards against a regression to limit 0.
+    const allowed = statuses.filter((s) => s !== 429);
+    const blocked = statuses.filter((s) => s === 429);
+    expect(allowed).toHaveLength(RATE_LIMIT);
+    expect(blocked).toHaveLength(total - RATE_LIMIT);
+
+    // The over-cap requests short-circuit to the documented 429 response.
+    expect(limitedBody).toMatchObject({
+      error: "Too Many Requests",
+      message: "Webhook rate limit exceeded",
+    });
+  });
+
+  it("returns 429 once a single IP floods past the per-IP cap on /clock-events", async () => {
+    const total = RATE_LIMIT + 3;
+    const statuses: number[] = [];
+
+    for (let i = 0; i < total; i++) {
+      const res = await floodClockEvent();
+      statuses.push(res.status);
+    }
+
+    // The /shifts and /clock-events routes share the same limiter, so the
+    // clock-events surface is protected too.
+    expect(statuses.filter((s) => s === 429)).toHaveLength(total - RATE_LIMIT);
+    expect(statuses[total - 1]).toBe(429);
   });
 });

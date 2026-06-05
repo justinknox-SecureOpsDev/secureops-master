@@ -16,19 +16,35 @@ import { eq, and, sql, gte, lte, or } from "drizzle-orm";
 import { z } from "zod/v4";
 import { db, shiftsTable, timeEntriesTable, usersTable, sitesTable, shiftAssignmentsTable } from "@workspace/db";
 import { verifySignature, SCHEDULER_SOURCE, type SchedulerShiftPayload, type SchedulerClockEventPayload } from "../lib/schedulerSync";
-import rateLimit from "express-rate-limit";
+import rateLimit, { MemoryStore } from "express-rate-limit";
 
 const router: IRouter = Router();
 
 // -------------------------------------------------------------------------
 // Rate limiter: 120 req / 5 min per IP — generous for legitimate webhook
-// traffic, tight enough to slow down brute-force signature guessing.
+// traffic, tight enough to slow down brute-force signature guessing and
+// DB-write flooding. The cap is env-configurable (default 120), mirroring
+// the limiters in middlewares/rateLimit.ts so tests can drive a low
+// override without firing 120+ requests.
+//
+// The store is exported so tests can reset the per-IP counter between cases
+// (the limiter is shared across the whole app instance for the test run).
 // -------------------------------------------------------------------------
+function webhookRateLimit(): number {
+  const raw = process.env.SCHEDULER_WEBHOOK_RATE_LIMIT;
+  if (raw === undefined || raw === "") return 120;
+  const n = parseInt(raw, 10);
+  return Number.isFinite(n) && n > 0 ? n : 120;
+}
+
+export const webhookRateLimitStore: MemoryStore = new MemoryStore();
+
 const webhookLimiter = rateLimit({
   windowMs: 5 * 60 * 1000,
-  limit: 120,
+  limit: () => webhookRateLimit(),
   standardHeaders: true,
   legacyHeaders: false,
+  store: webhookRateLimitStore,
   handler: (_req: Request, res: Response) => {
     res.status(429).json({ error: "Too Many Requests", message: "Webhook rate limit exceeded" });
   },
