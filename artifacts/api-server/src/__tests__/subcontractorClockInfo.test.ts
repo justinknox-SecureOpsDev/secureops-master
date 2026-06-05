@@ -20,7 +20,7 @@ type Ctx = {
   token: string;
   vendorIds: string[];
 };
-const ctx = { vendorIds: [] } as Ctx;
+const ctx = { vendorIds: [] as string[] } as Ctx;
 
 beforeAll(async () => {
   const [client] = await db

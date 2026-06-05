@@ -5,6 +5,7 @@ import { isNull } from "drizzle-orm";
 import { z } from "zod/v4";
 // (employeesTable + sitesTable + auditLogsTable used by board endpoint below)
 import { requireAdmin } from "../middlewares/auth";
+import { getFederalHolidayName, HOLIDAY_PAY_MULTIPLIER } from "../lib/holidays";
 
 const router: IRouter = Router();
 
@@ -71,6 +72,7 @@ router.post("/payroll/generate", requireAdmin, async (req, res): Promise<void> =
   const entries = await db
     .select({
       employeeId: timeEntriesTable.employeeId,
+      clockInTime: timeEntriesTable.clockInTime,
       hoursWorked: timeEntriesTable.hoursWorked,
       payRate: shiftsTable.payRate,
     })
@@ -89,9 +91,16 @@ router.post("/payroll/generate", requireAdmin, async (req, res): Promise<void> =
   for (const e of entries) {
     const hours = parseFloat(String(e.hoursWorked || "0"));
     const rate = parseFloat(String(e.payRate || "0"));
+    // Federal-holiday premium (1.5×): an entry clocked in on a US federal
+    // holiday (in PAYROLL_TIMEZONE) earns time-and-a-half on the whole entry.
+    // Round the premium rate to cents so it reconciles with the per-entry rate
+    // surfaced elsewhere (Payroll Board, invoices) — rate × hours == gross.
+    const effectiveRate = getFederalHolidayName(e.clockInTime)
+      ? Math.round(rate * HOLIDAY_PAY_MULTIPLIER * 100) / 100
+      : rate;
     const cur = perEmployee.get(e.employeeId) ?? { totalHours: 0, gross: 0 };
     cur.totalHours += hours;
-    cur.gross += hours * rate;
+    cur.gross += hours * effectiveRate;
     perEmployee.set(e.employeeId, cur);
   }
 
@@ -421,7 +430,7 @@ type BoardBucket = {
   timeEntryIds: string[];
   // Lightweight per-entry detail so the admin UI can expand a bucket row and
   // verify the underlying approved shifts without a second round-trip.
-  entries: Array<{ id: string; clockInTime: string; hoursWorked: number; rate: number; hasClockOut: boolean; scheduledEnd: string | null }>;
+  entries: Array<{ id: string; clockInTime: string; hoursWorked: number; rate: number; holiday: string | null; hasClockOut: boolean; scheduledEnd: string | null }>;
   existingPayrollEntryId: string | null;
   existingStatus: string | null; // pending | processed | paid | null (none)
   // Per-bucket warnings surfaced on the Payroll Board so admins notice
@@ -494,7 +503,7 @@ async function computeBoardBuckets(filters: {
     hours: number;
     gross: number;
     timeEntryIds: string[];
-    entries: Array<{ id: string; clockInTime: string; hoursWorked: number; rate: number; hasClockOut: boolean; scheduledEnd: string | null }>;
+    entries: Array<{ id: string; clockInTime: string; hoursWorked: number; rate: number; holiday: string | null; hasClockOut: boolean; scheduledEnd: string | null }>;
     zeroRateEntries: number;
     missingClockOutEntries: number;
     zeroHoursEntries: number;
@@ -517,6 +526,14 @@ async function computeBoardBuckets(filters: {
     // backfill historical zero-rate entries (no shift on file, or hired
     // before a rate was set) without rewriting shift/employee records.
     const rate = parseFloat(String(r.payRateOverride ?? r.payRate ?? r.employeeRate ?? "0"));
+    // Federal-holiday premium (1.5×): entries clocked in on a US federal
+    // holiday (in PAYROLL_TIMEZONE) earn time-and-a-half on the whole entry.
+    // The effective rate flows into the bucket gross AND the per-entry detail
+    // so the admin UI's "hours × rate = line gross" reconciles with the total.
+    const holidayName = getFederalHolidayName(r.clockInTime);
+    const effectiveRate = holidayName
+      ? Math.round(rate * HOLIDAY_PAY_MULTIPLIER * 100) / 100
+      : rate;
     let b = buckets.get(key);
     if (!b) {
       b = {
@@ -543,7 +560,7 @@ async function computeBoardBuckets(filters: {
       buckets.set(key, b);
     }
     b.hours += hours;
-    b.gross += hours * rate;
+    b.gross += hours * effectiveRate;
     b.timeEntryIds.push(r.timeEntryId);
     if (rate <= 0) b.zeroRateEntries += 1;
     if (!r.hasClockOut) b.missingClockOutEntries += 1;
@@ -555,7 +572,8 @@ async function computeBoardBuckets(filters: {
       id: r.timeEntryId,
       clockInTime: r.clockInTime.toISOString(),
       hoursWorked: Math.round(hours * 100) / 100,
-      rate: Math.round(rate * 100) / 100,
+      rate: Math.round(effectiveRate * 100) / 100,
+      holiday: holidayName,
       hasClockOut: !!r.hasClockOut,
       scheduledEnd: r.shiftEndTime ? r.shiftEndTime.toISOString() : null,
     });

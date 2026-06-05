@@ -20,7 +20,7 @@ type BoardBucket = {
   hourlyRate: number;
   grossPay: number;
   timeEntryIds: string[];
-  entries: Array<{ id: string; clockInTime: string; hoursWorked: number; rate: number; hasClockOut: boolean; scheduledEnd: string | null }>;
+  entries: Array<{ id: string; clockInTime: string; hoursWorked: number; rate: number; holiday: string | null; hasClockOut: boolean; scheduledEnd: string | null }>;
   existingPayrollEntryId: string | null;
   existingStatus: string | null;
   warnings: string[];
@@ -586,7 +586,19 @@ export default function PayrollBoardPage() {
                                     <tbody>
                                       {b.entries.map((e) => (
                                         <tr key={e.id} className={`border-t border-gray-200 ${!e.hasClockOut ? "bg-amber-50/60" : ""}`}>
-                                          <td className="px-2 py-1">{new Date(e.clockInTime).toLocaleString()}</td>
+                                          <td className="px-2 py-1">
+                                            <div className="flex items-center gap-1.5">
+                                              <span>{new Date(e.clockInTime).toLocaleString()}</span>
+                                              {e.holiday && (
+                                                <span
+                                                  className="inline-flex items-center rounded bg-amber-100 px-1.5 py-0.5 text-[10px] font-medium text-amber-900"
+                                                  title={`${e.holiday} — holiday pay (1.5×)`}
+                                                >
+                                                  Holiday 1.5×
+                                                </span>
+                                              )}
+                                            </div>
+                                          </td>
                                           <td className="px-2 py-1 text-right">
                                             {e.hasClockOut ? e.hoursWorked.toFixed(2) : <span className="text-amber-800">— no clock-out</span>}
                                           </td>

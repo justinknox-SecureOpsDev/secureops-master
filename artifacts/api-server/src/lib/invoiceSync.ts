@@ -12,6 +12,7 @@ import {
   type SubcontractorTimeEntry,
 } from "@workspace/db";
 import { logger } from "./logger";
+import { getFederalHolidayName, HOLIDAY_PAY_MULTIPLIER } from "./holidays";
 
 /**
  * Auto-population of weekly client invoices (May 2026).
@@ -185,6 +186,7 @@ export async function upsertWeeklyInvoice(
   const entries = await db
     .select({
       hoursWorked: timeEntriesTable.hoursWorked,
+      clockInTime: timeEntriesTable.clockInTime,
       shiftBillRate: shiftsTable.billRate,
       employeeFirst: usersTable.firstName,
       employeeLast: usersTable.lastName,
@@ -207,12 +209,20 @@ export async function upsertWeeklyInvoice(
     const hours = parseFloat(String(e.hoursWorked ?? "0"));
     if (!isFinite(hours) || hours <= 0) continue;
     const shiftBill = parseFloat(String(e.shiftBillRate ?? "0"));
-    const rate = shiftBill > 0 ? shiftBill : siteBillRate;
-    if (rate <= 0) continue;
+    const baseRate = shiftBill > 0 ? shiftBill : siteBillRate;
+    if (baseRate <= 0) continue;
     const officerName =
       [e.employeeFirst, e.employeeLast].filter(Boolean).join(" ") || "Unassigned officer";
-    const key = `${officerName}__${rate}`;
-    const cur = groups.get(key) ?? { description: officerName, hours: 0, rate, amount: 0 };
+    // Federal-holiday premium (1.5×): hours worked on a US federal holiday
+    // (clock-in date in PAYROLL_TIMEZONE) are billed at time-and-a-half and
+    // split into their own line item so the client sees the premium plainly.
+    const holidayName = getFederalHolidayName(e.clockInTime);
+    const rate = holidayName ? Math.round(baseRate * HOLIDAY_PAY_MULTIPLIER * 100) / 100 : baseRate;
+    const description = holidayName
+      ? `${officerName} — Holiday (${holidayName}, ${HOLIDAY_PAY_MULTIPLIER}×)`
+      : officerName;
+    const key = `${officerName}__${rate}__${holidayName ?? ""}`;
+    const cur = groups.get(key) ?? { description, hours: 0, rate, amount: 0 };
     cur.hours += hours;
     cur.amount += hours * rate;
     groups.set(key, cur);
@@ -228,6 +238,7 @@ export async function upsertWeeklyInvoice(
   const subEntries = await db
     .select({
       hoursWorked: subcontractorTimeEntriesTable.hoursWorked,
+      clockInAt: subcontractorTimeEntriesTable.clockInAt,
       name: subcontractorTimeEntriesTable.name,
       company: subcontractorTimeEntriesTable.company,
     })
@@ -243,9 +254,15 @@ export async function upsertWeeklyInvoice(
   for (const e of subEntries) {
     const hours = parseFloat(String(e.hoursWorked ?? "0"));
     if (!isFinite(hours) || hours <= 0) continue;
-    const rate = siteBillRate;
-    if (rate <= 0) continue;
-    const label = `${e.name} (${e.company}) — subcontractor`;
+    if (siteBillRate <= 0) continue;
+    // Subcontractor hours worked on a federal holiday are billed to the
+    // client at the same 1.5× premium as officer hours, split into a
+    // dedicated line item.
+    const holidayName = getFederalHolidayName(e.clockInAt);
+    const rate = holidayName ? Math.round(siteBillRate * HOLIDAY_PAY_MULTIPLIER * 100) / 100 : siteBillRate;
+    const label = holidayName
+      ? `${e.name} (${e.company}) — subcontractor, Holiday (${holidayName}, ${HOLIDAY_PAY_MULTIPLIER}×)`
+      : `${e.name} (${e.company}) — subcontractor`;
     const key = `sub__${label}__${rate}`;
     const cur = groups.get(key) ?? { description: label, hours: 0, rate, amount: 0 };
     cur.hours += hours;

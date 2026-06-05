@@ -29,7 +29,7 @@ Any failure blocks release.
 
 - **Target: Reserved VM (always-on), NOT Autoscale.** The API is stateful: in-process WebSocket registry (`lib/wsManager.ts`, `/api/ws`) and in-process scheduled jobs (`lib/scheduledJobs.ts`, started once at boot with a mutex). Autoscale scale-to-zero / multi-replica causes uptime dips, dropped WS, and double-firing jobs. `artifacts/api-server/.replit-artifact/artifact.toml` declares `deploymentTarget = "vm"`; the top-level publish target must also be Reserved VM.
 - **Required env**: `DATABASE_URL`, `SESSION_SECRET` (≥16 chars; production hard-fails if missing/short).
-- **Optional env**: `ALLOWED_ORIGINS`, `APP_BASE_URL`, `SMTP_HOST/PORT/USER/PASS/FROM` (set all to enable outbound mail; without them endpoints return `emailSent:false` + URL for manual share), `EMERGENCY_CALL_NUMBER`, `GEOFENCE_RADIUS_MILES`, `SEED_DEMO_USERS=false`, `STRIPE_CONNECT_ENABLED`, `GEOCODING_ENABLED` (US Census geocoding of applicant addresses for the distance-from-site filter).
+- **Optional env**: `ALLOWED_ORIGINS`, `APP_BASE_URL`, `SMTP_HOST/PORT/USER/PASS/FROM` (set all to enable outbound mail; without them endpoints return `emailSent:false` + URL for manual share), `EMERGENCY_CALL_NUMBER`, `GEOFENCE_RADIUS_MILES`, `SEED_DEMO_USERS=false`, `STRIPE_CONNECT_ENABLED`, `GEOCODING_ENABLED` (US Census geocoding of applicant addresses for the distance-from-site filter), `PAYROLL_TIMEZONE` (IANA tz used to resolve a clock-in instant to a calendar date for federal-holiday pay; default `America/Chicago`, invalid values fall back to default).
 
 ## Where things live
 
@@ -78,6 +78,7 @@ Any failure blocks release.
 
 - **Auto-populated + idempotent**: every time-entry approval (`POST /time-entries/:id/approve {decision:"approved"}`) fires `lib/invoiceSync.upsertWeeklyInvoiceForTimeEntry` — finds-or-creates a `draft` invoice keyed on (`siteId`, `periodStart`=Monday 00:00 UTC) and rebuilds line items from all currently-approved entries that ISO week. Rejection re-syncs (removes line, prunes empty draft). Manual `POST /invoices/generate {siteId, weekStart}` delegates to the same upsert.
   - Hours = each entry's `hoursWorked` (open / 0-hour skipped). Rate = `shifts.billRate` → `sites.defaultBillRate` → refuse (400). Includes ad-hoc geo clock-ins. Line items grouped per (officer, rate). Due = today + `clients.paymentTermsDays`.
+  - **Federal-holiday billing (1.5×)**: hours whose clock-in date (in `PAYROLL_TIMEZONE`) lands on a US federal holiday are billed at time-and-a-half (`billRate × 1.5`, rounded to cents) and split into their own line item — description `… — Holiday (<Holiday Name>, 1.5×)`. Applies to officer AND subcontractor lines. Holiday calendar in `lib/holidays.ts`.
 - **Lifecycle / mutability**: syncable iff `status='draft' AND locked_at IS NULL AND auto_synced=true`. Out-of-sync events:
   - **Admin edit** of billable fields (via `PUT /invoices/:id` or generic `PUT /admin/tables/invoices/:id`) flips `auto_synced=false` — late approvals become the admin's responsibility (logged warning).
   - **Week end**: hourly `lockEndedWeekInvoices` stamps `locked_at` on drafts whose `period_end < today (UTC)`. Late approval for a locked week creates a **new adjustment draft** — enabled by partial unique index `invoices_active_auto_draft_per_week_idx` on `(site_id, period_start) WHERE status='draft' AND locked_at IS NULL AND auto_synced=true`.
@@ -86,6 +87,7 @@ Any failure blocks release.
 ### Payroll
 
 - **Rate priority**: `time_entries.pay_rate_override` (admin) → `shifts.payRate` → `employees.hourlyRate` → $0 (warning). Backfill override via Payroll Board "Apply pay rate" (`POST /payroll/board/apply-rate {timeEntryIds[], rate, onlyZeroRate?}`, admin-only, audited). Refuses `processed`/`paid` buckets. `onlyZeroRate=true` (default) skips non-zero rates. Pay Run re-runs `computeBoardBuckets` at process time.
+- **Federal-holiday pay (1.5×)**: after the base rate is resolved, hours whose clock-in date (in `PAYROLL_TIMEZONE`) lands on a US federal holiday are paid at time-and-a-half (`effectiveRate = baseRate × 1.5`). Applies in both `/payroll/generate` and `computeBoardBuckets` (board gross + per-entry detail carry the effective rate; each entry exposes a `holiday: string|null` name). The Payroll Board shows an amber "Holiday 1.5×" badge. Whole-entry qualification by clock-in date — no midnight split. Calendar + policy in `lib/holidays.ts` (`HOLIDAY_PAY_MULTIPLIER`, `getFederalHolidayName`); 11 actual (not bank-observed) federal holiday dates, computed + memoized per year.
 - **Pay Run** (`/admin-portal/payroll/pay-run`): pending → processed (after CSV export) → paid.
   - `POST /payroll/pay-run/preview {ids[]}` → rows + per-row warnings (missing bank/routing/name, no DD consent, zero/negative net). Warnings + already-paid excluded from CSV.
   - `POST /payroll/pay-run/export-csv {ids[], batchReference?}` → `wcsg-payroll-<batch>.csv`; atomically marks payable rows `processed`, `paidMethod='ach_csv'`, `paymentReference=<batch>`, `paidBy=admin`. Idempotent.
@@ -138,6 +140,7 @@ Any failure blocks release.
 - Orval: list hooks take `(params, { query: { queryKey } })`; mutation hooks take `{id, data}` (or nested `{id, assignmentId, data}`). Codegen post-step rewrites `lib/api-zod/src/index.ts` to only re-export `./generated/api` (avoids TS2308).
 - expo-notifications on web warns but doesn't crash — push registration skipped on web.
 - Admin grid derived "name" cells: `derived.linkRoute` opens a route (e.g. employee name → `/personnel/:userId`); `derived.linkTo` filters a grid. Don't point `linkTo` back at its own table — it self-filters and looks like a no-op click.
+- Holiday pay (`lib/holidays.ts`) matches **actual** federal-holiday dates, NOT the bank-observed substitute (a Sat July 4 stays July 4, not observed-Friday) — WCSG pays whoever works the real day. Qualification is by clock-in date in `PAYROLL_TIMEZONE`, so a night shift starting 8pm CT on the holiday counts even though it's already next-day UTC. Multiplier is a fixed 1.5× (not configurable).
 
 ## Pointers
 
