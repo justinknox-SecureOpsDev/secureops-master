@@ -4,18 +4,35 @@ import { logger } from "./logger";
 import { brand } from "./brandConfig";
 
 /**
- * Env-gated email sender. Two transports, Resend preferred when configured:
+ * Env-gated email sender. Two transports — Resend and SMTP. Which one is tried
+ * first is controlled by EMAIL_PROVIDER:
  *
- *   Resend (preferred — better deliverability, no daily caps):
- *     RESEND_API_KEY, RESEND_FROM (or falls back to SMTP_FROM)
+ *   EMAIL_PROVIDER=smtp   → SMTP first (e.g. Gmail / Google Workspace), Resend
+ *                           as automatic fallback if SMTP isn't configured or
+ *                           the send fails.
+ *   EMAIL_PROVIDER=resend → Resend only.
+ *   EMAIL_PROVIDER=auto   → (default) Resend first, SMTP fallback. Preserves the
+ *                           original behaviour for existing deployments.
  *
- *   SMTP (fallback):
- *     SMTP_HOST, SMTP_PORT, SMTP_USER, SMTP_PASS, SMTP_FROM
+ *   Resend config:  RESEND_API_KEY, RESEND_FROM (or falls back to SMTP_FROM)
+ *   SMTP config:    SMTP_HOST, SMTP_PORT, SMTP_USER, SMTP_PASS, SMTP_FROM
+ *
+ * A "failed" send (transport/auth/quota error) falls through to the other
+ * provider; a "bounced" send (recipient rejected) does NOT — retrying a bad
+ * recipient on a second provider would just bounce again.
  *
  * If neither is configured, `sendEmail` returns false and logs a single info line —
  * callers fall back to surfacing the link/credentials in the API response so the
  * admin can share them manually.
  */
+
+type EmailProviderPref = "smtp" | "resend" | "auto";
+
+function emailProviderPref(): EmailProviderPref {
+  const v = (process.env.EMAIL_PROVIDER ?? "").trim().toLowerCase();
+  if (v === "smtp" || v === "resend") return v;
+  return "auto";
+}
 
 let cachedSmtp: Transporter | null = null;
 let cachedResend: Resend | null = null;
@@ -86,49 +103,49 @@ export interface EmailSendResult {
   error: string | null;
 }
 
-export async function sendEmailDetailed(msg: EmailMessage): Promise<EmailSendResult> {
-  // Prefer Resend when configured — better deliverability + no daily caps.
+// Returns null when this provider isn't configured (so the caller can try the
+// other one); otherwise the concrete send outcome.
+async function sendViaResend(msg: EmailMessage): Promise<EmailSendResult | null> {
   const resend = getResend();
-  if (resend) {
-    const from = process.env.RESEND_FROM || process.env.SMTP_FROM || `${brand.companyName} <onboarding@resend.dev>`;
-    try {
-      const { data, error } = await resend.emails.send({
-        from,
-        to: msg.to,
-        subject: msg.subject,
-        text: msg.text,
-        html: msg.html,
-        attachments: msg.attachments?.map((a) => ({
-          filename: a.filename,
-          content: a.content,
-          contentType: a.contentType,
-        })),
-      });
-      if (error) {
-        // Resend's API returns name+message on validation/auth errors AND
-        // on "domain not verified" / "address invalid" failures. Treat the
-        // latter as a synchronous bounce so callers + audit log can react.
-        const errStr = `${error.name}: ${error.message}`;
-        const looksBounced = /invalid.*(recipient|to|email)|address.*not.*exist|not.*verified/i.test(errStr);
-        if (looksBounced) {
-          logger.warn({ to: msg.to, error: errStr }, "Resend rejected recipient");
-          return { status: "bounced", ok: false, messageId: null, response: errStr, rejected: [msg.to], error: null };
-        }
-        logger.error({ to: msg.to, error: errStr }, "Resend send failed");
-        return { status: "failed", ok: false, messageId: null, response: null, rejected: [], error: errStr };
+  if (!resend) return null;
+  const from = process.env.RESEND_FROM || process.env.SMTP_FROM || `${brand.companyName} <onboarding@resend.dev>`;
+  try {
+    const { data, error } = await resend.emails.send({
+      from,
+      to: msg.to,
+      subject: msg.subject,
+      text: msg.text,
+      html: msg.html,
+      attachments: msg.attachments?.map((a) => ({
+        filename: a.filename,
+        content: a.content,
+        contentType: a.contentType,
+      })),
+    });
+    if (error) {
+      // Resend's API returns name+message on validation/auth errors AND
+      // on "domain not verified" / "address invalid" failures. Treat the
+      // latter as a synchronous bounce so callers + audit log can react.
+      const errStr = `${error.name}: ${error.message}`;
+      const looksBounced = /invalid.*(recipient|to|email)|address.*not.*exist|not.*verified/i.test(errStr);
+      if (looksBounced) {
+        logger.warn({ to: msg.to, error: errStr }, "Resend rejected recipient");
+        return { status: "bounced", ok: false, messageId: null, response: errStr, rejected: [msg.to], error: null };
       }
-      return { status: "sent", ok: true, messageId: data?.id ?? null, response: null, rejected: [], error: null };
-    } catch (err) {
-      const error = err instanceof Error ? `${err.name}: ${err.message}` : String(err);
-      logger.error({ err, to: msg.to }, "Failed to send email via Resend");
-      return { status: "failed", ok: false, messageId: null, response: null, rejected: [], error };
+      logger.error({ to: msg.to, error: errStr }, "Resend send failed");
+      return { status: "failed", ok: false, messageId: null, response: null, rejected: [], error: errStr };
     }
+    return { status: "sent", ok: true, messageId: data?.id ?? null, response: null, rejected: [], error: null };
+  } catch (err) {
+    const error = err instanceof Error ? `${err.name}: ${err.message}` : String(err);
+    logger.error({ err, to: msg.to }, "Failed to send email via Resend");
+    return { status: "failed", ok: false, messageId: null, response: null, rejected: [], error };
   }
+}
 
+async function sendViaSmtp(msg: EmailMessage): Promise<EmailSendResult | null> {
   const t = getTransport();
-  if (!t) {
-    return { status: "not_configured", ok: false, messageId: null, response: null, rejected: [], error: null };
-  }
+  if (!t) return null;
   const from = process.env.SMTP_FROM || process.env.SMTP_USER!;
   try {
     const info = await t.sendMail({
@@ -156,6 +173,28 @@ export async function sendEmailDetailed(msg: EmailMessage): Promise<EmailSendRes
     logger.error({ err, to: msg.to }, "Failed to send email");
     return { status: "failed", ok: false, messageId: null, response: null, rejected: [], error };
   }
+}
+
+export async function sendEmailDetailed(msg: EmailMessage): Promise<EmailSendResult> {
+  const pref = emailProviderPref();
+  const order: Array<"smtp" | "resend"> =
+    pref === "smtp" ? ["smtp", "resend"] : pref === "resend" ? ["resend"] : ["resend", "smtp"];
+
+  let lastFailure: EmailSendResult | null = null;
+  for (const provider of order) {
+    const result = provider === "smtp" ? await sendViaSmtp(msg) : await sendViaResend(msg);
+    if (result === null) continue; // provider not configured — try the next one
+    // Success, or a hard bounce (retrying a rejected recipient elsewhere would
+    // just bounce again) — return immediately.
+    if (result.ok || result.status === "bounced") return result;
+    // Transient/transport failure (auth, quota, network) — remember it and let
+    // the next provider try.
+    lastFailure = result;
+  }
+
+  return (
+    lastFailure ?? { status: "not_configured", ok: false, messageId: null, response: null, rejected: [], error: null }
+  );
 }
 
 export async function sendEmail(msg: EmailMessage): Promise<boolean> {

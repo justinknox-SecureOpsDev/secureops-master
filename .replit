@@ -140,6 +140,7 @@ ALLOWED_ORIGINS = "https://security-operations-suite.replit.app,https://secureop
 
 [userenv.shared]
 GEOCODING_ENABLED = "true"
+EMAIL_PROVIDER = "smtp"
 
 [objectStorage]
 defaultBucketID = "replit-objstore-932b0f1e-21e4-4a6f-a5f8-ab5a30523226"
