@@ -123,11 +123,14 @@ async function sendViaResend(msg: EmailMessage): Promise<EmailSendResult | null>
       })),
     });
     if (error) {
-      // Resend's API returns name+message on validation/auth errors AND
-      // on "domain not verified" / "address invalid" failures. Treat the
-      // latter as a synchronous bounce so callers + audit log can react.
+      // Resend's API returns name+message on validation/auth errors AND on
+      // recipient-rejection failures. Only treat *recipient-specific* rejections
+      // as a synchronous bounce (retrying those on another provider would just
+      // bounce again). Domain/sender/config errors (e.g. "domain not verified")
+      // are NOT recipient bounces — leave them as "failed" so the orchestrator
+      // can fall through to the other provider (e.g. SMTP).
       const errStr = `${error.name}: ${error.message}`;
-      const looksBounced = /invalid.*(recipient|to|email)|address.*not.*exist|not.*verified/i.test(errStr);
+      const looksBounced = /invalid.*(recipient|to|email)|address.*not.*exist/i.test(errStr);
       if (looksBounced) {
         logger.warn({ to: msg.to, error: errStr }, "Resend rejected recipient");
         return { status: "bounced", ok: false, messageId: null, response: errStr, rejected: [msg.to], error: null };
