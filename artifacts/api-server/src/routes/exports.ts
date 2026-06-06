@@ -371,8 +371,11 @@ const payrollDataset: Dataset = {
         Number(r.totalHours).toFixed(2),
         fmtMoney(r.hourlyRate),
         fmtMoney(r.grossPay),
-        fmtMoney(r.tax),
-        fmtMoney(r.netPay),
+        // 1099 contractors — no tax is withheld; net always equals gross.
+        // Normalise on export so any legacy row stored with withholding still
+        // reports full gross.
+        fmtMoney("0"),
+        fmtMoney(r.grossPay),
         r.status,
         r.paidMethod ?? "",
         r.paymentReference ?? "",

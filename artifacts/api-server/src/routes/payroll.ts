@@ -53,7 +53,9 @@ router.get("/payroll", requireAdmin, async (req, res): Promise<void> => {
     .leftJoin(sitesTable, eq(payrollEntriesTable.siteId, sitesTable.id))
     .where(conditions.length > 0 ? and(...conditions) : undefined);
 
-  res.json(rows);
+  // 1099 contractors — no tax is withheld; net always equals gross. Normalise on
+  // read so any legacy row stored with withholding still shows full gross.
+  res.json(rows.map((r) => ({ ...r, tax: "0", netPay: r.grossPay })));
 });
 
 // Generate weekly payroll for a site from APPROVED time entries.
@@ -116,8 +118,9 @@ router.post("/payroll/generate", requireAdmin, async (req, res): Promise<void> =
   for (const [employeeId, agg] of perEmployee) {
     const totalHours = Math.round(agg.totalHours * 100) / 100;
     const gross = Math.round(agg.gross * 100) / 100;
-    const tax = Math.round(gross * 0.2 * 100) / 100;
-    const net = Math.round((gross - tax) * 100) / 100;
+    // 1099 contractors — no tax is withheld; net always equals gross.
+    const tax = 0;
+    const net = gross;
     const avgRate = totalHours > 0 ? Math.round((gross / totalHours) * 100) / 100 : 0;
 
     // Upsert by (employee, site, periodStart) — a re-generate replaces the totals.
@@ -224,13 +227,16 @@ async function loadPayRunRows(ids: string[]): Promise<PayRunRow[]> {
     .where(inArray(payrollEntriesTable.id, ids));
 
   return rows.map((r) => {
+    // 1099 contractors — no tax is withheld; net always equals gross. Normalise on
+    // read so any legacy row stored with withholding still pays full gross.
+    const netPay = r.grossPay;
     const warnings: string[] = [];
     if (!r.bankAccountNumber) warnings.push("Missing bank account number");
     if (!r.bankBsb) warnings.push("Missing routing/sort code");
     if (!r.bankAccountName) warnings.push("Missing bank account name");
     if (r.directDepositConsent !== true) warnings.push("Direct-deposit consent not on file");
-    if (Number(r.netPay) <= 0) warnings.push("Net pay is zero or negative");
-    return { ...r, warnings };
+    if (Number(netPay) <= 0) warnings.push("Net pay is zero or negative");
+    return { ...r, tax: "0", netPay, warnings };
   });
 }
 
@@ -308,6 +314,10 @@ router.post("/payroll/pay-run/export-csv", requireAdmin, async (req, res): Promi
       paidMethod: "ach_csv",
       paymentReference: batchId,
       paidBy: req.user!.userId,
+      // 1099 contractors — no tax withheld. Correct any legacy withholding on the
+      // row at payment time so the ledger matches what the CSV actually pays.
+      tax: "0",
+      netPay: sql`${payrollEntriesTable.grossPay}`,
       updatedAt: new Date(),
     })
     .where(and(
@@ -912,8 +922,9 @@ router.post("/payroll/board/process", requireAdmin, async (req, res): Promise<vo
       continue;
     }
     const gross = b.grossPay;
-    const tax = Math.round(gross * 0.2 * 100) / 100;
-    const net = Math.round((gross - tax) * 100) / 100;
+    // 1099 contractors — no tax is withheld; net always equals gross.
+    const tax = 0;
+    const net = gross;
 
     const id = await db.transaction(async (tx) => {
       // Postgres treats NULLs in a unique index as distinct, so two concurrent

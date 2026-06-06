@@ -168,6 +168,13 @@ describe("Pay Run lifecycle (pending → processed → paid)", () => {
     expect(Array.isArray(gen.body)).toBe(true);
     expect(gen.body.length).toBeGreaterThanOrEqual(2);
 
+    // 1099 contractors: no tax is withheld — every generated row must have
+    // tax === 0 and net === gross.
+    for (const r of gen.body as { tax: string; grossPay: string; netPay: string }[]) {
+      expect(Number(r.tax)).toBe(0);
+      expect(Number(r.netPay)).toBe(Number(r.grossPay));
+    }
+
     const byEmployee = new Map<string, { id: string; status: string }>(
       gen.body.map((r: { id: string; employeeId: string; status: string }) => [
         r.employeeId,
@@ -190,6 +197,9 @@ describe("Pay Run lifecycle (pending → processed → paid)", () => {
     expect(preview.body.counts.payable).toBe(1);        // banked only
     expect(preview.body.counts.withWarnings).toBe(1);   // unbanked
     expect(preview.body.counts.alreadyPaid).toBe(0);
+    // 1099: preview totals carry no tax and net equals gross.
+    expect(preview.body.totals.tax).toBe(0);
+    expect(preview.body.totals.net).toBe(preview.body.totals.gross);
 
     type PreviewRow = { id: string; warnings: string[] };
     const bankedPreview = preview.body.rows.find((r: PreviewRow) => r.id === bankedEntryId);

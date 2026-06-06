@@ -421,7 +421,6 @@ export default function PayRunPage() {
             <div><span className="text-muted-foreground">With warnings:</span> <strong className="text-amber-700">{preview.counts.withWarnings}</strong></div>
             <div><span className="text-muted-foreground">Already paid:</span> <strong>{preview.counts.alreadyPaid}</strong></div>
             <div><span className="text-muted-foreground">Gross:</span> <strong>{fmtUsd(preview.totals.gross)}</strong></div>
-            <div><span className="text-muted-foreground">Tax:</span> <strong>{fmtUsd(preview.totals.tax)}</strong></div>
             <div><span className="text-muted-foreground">Net (to pay):</span> <strong className="brand-gold">{fmtUsd(preview.totals.net)}</strong></div>
           </div>
           {preview.rows.some((r) => r.warnings.length > 0) && (
@@ -513,7 +512,6 @@ export default function PayRunPage() {
                             <th className="px-3 py-1.5 text-right">Hours</th>
                             <th className="px-3 py-1.5 text-right">Rate</th>
                             <th className="px-3 py-1.5 text-right">Gross</th>
-                            <th className="px-3 py-1.5 text-right">Tax</th>
                             <th className="px-3 py-1.5 text-right">Net</th>
                             <th className="px-3 py-1.5">Status</th>
                           </tr>
@@ -541,7 +539,6 @@ export default function PayRunPage() {
                                 <td className="px-3 py-2 text-right">{Number(r.totalHours).toFixed(2)}</td>
                                 <td className="px-3 py-2 text-right">{fmtUsd(r.hourlyRate)}</td>
                                 <td className="px-3 py-2 text-right">{fmtUsd(r.grossPay)}</td>
-                                <td className="px-3 py-2 text-right text-muted-foreground">{fmtUsd(r.tax)}</td>
                                 <td className="px-3 py-2 text-right font-semibold">{fmtUsd(r.netPay)}</td>
                                 <td className="px-3 py-2">
                                   <span className={`text-xs px-2 py-0.5 rounded ${

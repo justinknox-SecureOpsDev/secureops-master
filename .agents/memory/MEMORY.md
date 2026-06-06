@@ -23,6 +23,7 @@
 - [Production custom domain](production-domain.md) — live domain is wcsgisecureops.com (getDeploymentInfo primaryUrl); APP_BASE_URL must equal it; dev privacy is a platform toggle not code.
 - [Site/client hard-delete data loss](site-delete-cascade-data-loss.md) — deleting a site/client splits dependents (SET NULL survivors vs CASCADE deletes); all 4 delete paths must hit the shared blocker guard.
 - [Holiday rate cent-rounding](holiday-rate-cent-rounding.md) — round holiday premium rate to cents BEFORE × hours, identically in payroll + invoicing, or displayed-rate×hours drifts from gross.
+- [Payroll 1099 — no tax](payroll-1099-no-tax.md) — all WCSG workers are 1099; payroll NEVER withholds tax (net=gross), enforced at compute + read + write surfaces.
 - [Server day = business TZ](server-calendar-day-must-use-business-tz.md) — server "which calendar day" logic must use PAYROLL_TIMEZONE/Central (lib/businessTime.ts), not UTC, or evening shifts fall into the wrong day.
 - [Dispatch open-shifts recurring](dispatch-open-shifts-recurring-confusion.md) — "staffed shows as open" = recurring shifts on other days + multi-shift-per-day venues, not a counting bug; show per-row dates.
 - [admin-portal HTTP paths & 401 logout](admin-portal-http-paths.md) — admin-portal has TWO auth HTTP paths (api() + fetchWithAuth); cross-cutting behavior like 401 auto-logout must cover both, gated on token-was-sent.

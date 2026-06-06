@@ -340,6 +340,11 @@ const tables: Record<string, TableConfig> = {
     coerceWrite: (v) => {
       let out = applyDateCoercion(v, ["paidAt"]);
       out = applyNumericCoercion(out, ["totalHours", "hourlyRate", "grossPay", "tax", "netPay"]);
+      // 1099 contractors — no tax is withheld; net always equals gross. Enforce
+      // the invariant on every write so a manual edit/import can never
+      // reintroduce withholding.
+      out.tax = "0";
+      if (out.grossPay != null) out.netPay = out.grossPay;
       return out;
     },
     importSupported: true,

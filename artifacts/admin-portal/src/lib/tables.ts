@@ -462,7 +462,6 @@ export const TABLES: TableDescriptor[] = [
       { key: "totalHours", label: "Hours", type: "number" },
       { key: "hourlyRate", label: "Rate ($)", type: "number" },
       { key: "grossPay", label: "Gross ($)", type: "number" },
-      { key: "tax", label: "Tax ($)", type: "number" },
       { key: "netPay", label: "Net ($)", type: "number" },
       {
         key: "status", label: "Status", type: "select",

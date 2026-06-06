@@ -145,7 +145,7 @@ export default function PaystubsScreen() {
 
             {data.rows.map((row) => {
               const sc = statusColor(row.status, colors);
-              const stubA11y = `Paystub ${fmtRange(row.periodStart, row.periodEnd)}${row.siteName ? `, ${row.siteName}` : ""}. ${STATUS_LABEL[row.status]}. ${Number(row.totalHours).toFixed(2)} hours at ${fmtUsd(row.hourlyRate)} per hour. Gross ${fmtUsd(row.grossPay)}, tax ${fmtUsd(row.tax)}, net pay ${fmtUsd(row.netPay)}.${row.status === "paid" && row.paidAt ? ` Paid ${new Date(row.paidAt).toLocaleDateString()}.` : ""}`;
+              const stubA11y = `Paystub ${fmtRange(row.periodStart, row.periodEnd)}${row.siteName ? `, ${row.siteName}` : ""}. ${STATUS_LABEL[row.status]}. ${Number(row.totalHours).toFixed(2)} hours at ${fmtUsd(row.hourlyRate)} per hour. Gross ${fmtUsd(row.grossPay)}, net pay ${fmtUsd(row.netPay)}.${row.status === "paid" && row.paidAt ? ` Paid ${new Date(row.paidAt).toLocaleDateString()}.` : ""}`;
               return (
                 <View
                   key={row.id}
@@ -179,10 +179,6 @@ export default function PaystubsScreen() {
                     <View style={styles.stubGridCell}>
                       <Text style={[styles.stubLabel, { color: colors.mutedForeground }]}>Gross</Text>
                       <Text style={[styles.stubValue, { color: colors.foreground }]}>{fmtUsd(row.grossPay)}</Text>
-                    </View>
-                    <View style={styles.stubGridCell}>
-                      <Text style={[styles.stubLabel, { color: colors.mutedForeground }]}>Tax</Text>
-                      <Text style={[styles.stubValue, { color: colors.foreground }]}>−{fmtUsd(row.tax)}</Text>
                     </View>
                   </View>
 
