@@ -7,7 +7,7 @@ import {
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { api } from "@/lib/api";
+import { api, fetchWithAuth } from "@/lib/api";
 
 type LineItem = {
   description: string;
@@ -181,6 +181,33 @@ export default function InvoiceBoardPage() {
   const showToast = (kind: "ok" | "err", msg: string) => {
     setToast({ kind, msg });
     setTimeout(() => setToast(null), 5000);
+  };
+
+  // Invoice PDF download. The admin portal authenticates with a bearer token
+  // (not a cookie), so a plain <a href="/api/.../pdf"> opens an unauthenticated
+  // request and the server replies 401 "No token provided". We fetch the PDF
+  // with the token attached, then trigger a client-side blob download.
+  const [pdfBusy, setPdfBusy] = useState<Set<string>>(new Set());
+  const downloadPdf = async (id: string, invoiceNumber: string) => {
+    setPdfBusy((s) => new Set(s).add(id));
+    try {
+      const res = await fetchWithAuth(`/api/invoices/${id}/pdf`);
+      if (!res.ok) {
+        showToast("err", `Could not download PDF for invoice ${invoiceNumber}.`);
+        return;
+      }
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `invoice-${invoiceNumber}.pdf`;
+      a.click();
+      URL.revokeObjectURL(url);
+    } catch (e) {
+      showToast("err", `Could not download PDF: ${(e as Error).message}`);
+    } finally {
+      setPdfBusy((s) => { const n = new Set(s); n.delete(id); return n; });
+    }
   };
 
   // Group invoices by ISO week (periodStart). Newest week first.
@@ -650,15 +677,17 @@ export default function InvoiceBoardPage() {
                               </td>
                               <td className="px-3 py-2">
                                 <div className="flex items-center justify-end gap-1">
-                                  <a
-                                    href={`/api/invoices/${r.id}/pdf`}
-                                    target="_blank"
-                                    rel="noopener noreferrer"
-                                    className="inline-flex items-center justify-center w-7 h-7 rounded hover:bg-gray-100 text-muted-foreground hover:text-brand-navy transition-colors"
+                                  <button
+                                    type="button"
+                                    onClick={() => downloadPdf(r.id, r.invoiceNumber)}
+                                    disabled={pdfBusy.has(r.id)}
+                                    className="inline-flex items-center justify-center w-7 h-7 rounded hover:bg-gray-100 text-muted-foreground hover:text-brand-navy transition-colors disabled:opacity-40"
                                     title={`Download PDF — Invoice ${r.invoiceNumber}`}
                                   >
-                                    <Download className="w-3.5 h-3.5" />
-                                  </a>
+                                    {pdfBusy.has(r.id)
+                                      ? <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                                      : <Download className="w-3.5 h-3.5" />}
+                                  </button>
                                   {r.status !== "paid" && r.status !== "void" && (
                                     <button
                                       type="button"
