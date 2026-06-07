@@ -2,7 +2,7 @@ import React from "react";
 import { useTopPad } from "@/hooks/useTopPad";
 import { View, Text, StyleSheet, ScrollView, TouchableOpacity, ActivityIndicator, Platform, Image } from "react-native";
 import { useColors } from "@/hooks/useColors";
-import { useGetEmployeeDashboardSummary, getGetEmployeeDashboardSummaryQueryKey, useGetLicenses, getGetLicensesQueryKey } from "@workspace/api-client-react";
+import { useGetEmployeeDashboardSummary, getGetEmployeeDashboardSummaryQueryKey, useGetLicenses, getGetLicensesQueryKey, useGetEmployee, getGetEmployeeQueryKey } from "@workspace/api-client-react";
 import { useAuth } from "@/contexts/AuthContext";
 import { Feather } from "@expo/vector-icons";
 import { useRouter, useFocusEffect } from "expo-router";
@@ -36,6 +36,30 @@ export default function EmployeeHomeScreen() {
   // window is visible in-app — the email is a reminder, but officers live
   // in the mobile app, so the warning belongs here too.
   const { data: myLicenses } = useGetLicenses({}, { query: { queryKey: getGetLicensesQueryKey({}) } });
+
+  // Officer profile completeness. We pull the officer's own employee record and
+  // check the fields they're expected to keep current themselves: contact info,
+  // emergency contact, and the bank fields actually needed for ACH payout
+  // (account number + routing). Bank *account name* is intentionally excluded —
+  // it isn't required for WCSG's deposits. When anything is blank we surface a
+  // tappable banner that lists exactly what's missing and opens edit-profile,
+  // so officers can self-correct (and stay payable) without waiting on HR.
+  const userId = user?.id;
+  const { data: employeeProfile } = useGetEmployee(userId!, {
+    query: { queryKey: getGetEmployeeQueryKey(userId!), enabled: !!userId },
+  });
+  const profileGaps = React.useMemo(() => {
+    if (!employeeProfile) return [] as string[];
+    const blank = (v: unknown) => !(typeof v === "string" && v.trim().length > 0);
+    const gaps: string[] = [];
+    if (blank(employeeProfile.phone)) gaps.push("phone number");
+    if (blank(employeeProfile.address)) gaps.push("home address");
+    if (blank(employeeProfile.emergencyContactName)) gaps.push("emergency contact name");
+    if (blank(employeeProfile.emergencyContactPhone)) gaps.push("emergency contact phone");
+    if (blank(employeeProfile.bankAccountNumber)) gaps.push("bank account number");
+    if (blank(employeeProfile.bankBsb)) gaps.push("bank routing number");
+    return gaps;
+  }, [employeeProfile]);
 
   // Unread notifications badge. Polls cheaply every 30s while focused; also
   // refetched on every focus so the badge clears immediately after the user
@@ -162,6 +186,26 @@ export default function EmployeeHomeScreen() {
                 : `Texas DPS renewals are running long. Start your ${licenseAlert.type ?? "security"} license renewal now so it processes before the expiry date.`}
             </Text>
             <Text style={[styles.licenseBannerCta, { color: colors.primary }]}>Tap to start renewal →</Text>
+          </View>
+        </TouchableOpacity>
+      )}
+
+      {profileGaps.length > 0 && (
+        <TouchableOpacity
+          activeOpacity={0.85}
+          onPress={() => router.push("/edit-profile" as any)}
+          accessibilityRole="button"
+          accessibilityLabel={`Your profile is incomplete. Still needed: ${profileGaps.join(", ")}. Tap to complete your profile.`}
+          accessibilityHint="Opens the edit profile screen"
+          style={[styles.licenseBanner, { backgroundColor: colors.accent + "20", borderColor: colors.accent }]}
+        >
+          <Feather name="user-plus" size={26} color={colors.accent} />
+          <View style={{ flex: 1 }}>
+            <Text style={[styles.licenseBannerTitle, { color: colors.accent }]}>COMPLETE YOUR PROFILE</Text>
+            <Text style={[styles.licenseBannerBody, { color: colors.foreground }]}>
+              Some details are still missing: {profileGaps.join(", ")}. Keeping these current helps us reach you and pay you on time.
+            </Text>
+            <Text style={[styles.licenseBannerCta, { color: colors.primary }]}>Tap to update your profile →</Text>
           </View>
         </TouchableOpacity>
       )}
