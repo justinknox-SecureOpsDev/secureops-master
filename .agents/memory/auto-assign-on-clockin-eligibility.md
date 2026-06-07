@@ -13,10 +13,18 @@ non-null matching shiftId — ad-hoc clock-ins with null shiftId never appear as
 duty otherwise).
 
 **Rule:** any path that creates an `accepted` shift_assignment row (auto-assign on
-clock-in, dispatch auto-assign, swaps, admin-assign) must apply the same licence-level
-eligibility gate as `POST /shifts/:id/claim` — `shift.requiredLicenseLevel <=
-getEffectiveLevel(userId)` (higher covers lower; effective level = MAX(highest
-unexpired licence, support-staff baseline)).
+clock-in, dispatch auto-assign, swaps, admin-assign, AND the scheduler-webhook roster
+sync `reconcileShiftRoster`) must apply the same licence-level eligibility gate as
+`POST /shifts/:id/claim` — `shift.requiredLicenseLevel <= getEffectiveLevel(userId)`
+(higher covers lower; effective level = MAX(highest unexpired licence, support-staff
+baseline)).
+
+**Scheduler roster sync:** the external scheduler is NOT trusted to vet clearance, so
+`reconcileShiftRoster` SKIPS under-licensed officers in `assignedOfficerEmails` (logged
+warn), treating them exactly like an unlisted email — not added, and removed from the
+roster if a later edit raises the bar above their level. Tests that roster a *secondary*
+officer onto a level-≥2 shift must now give that officer an unexpired licence in setup,
+or the gate correctly drops them and the assertion fails.
 
 **Why:** the clock-in handler only checks the officer holds *some* unexpired licence,
 not the shift's required level. Without the extra gate, an L2/L3 officer could be

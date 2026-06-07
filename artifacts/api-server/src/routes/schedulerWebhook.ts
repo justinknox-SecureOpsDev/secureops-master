@@ -16,6 +16,7 @@ import { eq, and, sql, gte, lte, or, inArray, notInArray } from "drizzle-orm";
 import { z } from "zod/v4";
 import { db, shiftsTable, timeEntriesTable, usersTable, sitesTable, shiftAssignmentsTable } from "@workspace/db";
 import { verifySignature, SCHEDULER_SOURCE, type SchedulerShiftPayload, type SchedulerClockEventPayload } from "../lib/schedulerSync";
+import { getEffectiveLevel } from "../lib/eligibility";
 import { logger } from "../lib/logger";
 import rateLimit, { MemoryStore } from "express-rate-limit";
 
@@ -154,13 +155,44 @@ const DEDUP_TOLERANCE_MS = 5 * 60 * 1000;
  * assignments for officers no longer listed — mirroring the decline path in
  * shifts.ts, which DELETEs the assignment to free the slot. Unknown emails are
  * silently skipped. An empty list clears the entire roster.
+ *
+ * Eligibility gate: per the "auto-assign on clock-in eligibility" invariant,
+ * any path that creates an accepted shift_assignment must apply the same
+ * licence-level check the manual claim / admin-assign routes use. The scheduler
+ * is NOT trusted to have vetted officer clearance, so each listed officer's
+ * effective level (`getEffectiveLevel`, max of unexpired licence level and the
+ * support-staff baseline) is compared against the shift's `requiredLicenseLevel`.
+ * Under-licensed officers are SKIPPED (never rostered) with a logged warning —
+ * the conservative, fail-closed choice consistent with the claim route, which
+ * 403s an unqualified officer. A skipped officer is treated exactly like an
+ * unlisted one: not added, and removed if previously on the roster.
  */
 async function reconcileShiftRoster(shiftId: string, assignedOfficerEmails: string[]): Promise<void> {
-  // Resolve the listed emails to known officer userIds (unknown emails skipped).
+  // The shift's clearance bar. Defaults to 1 (support) if the row is somehow
+  // missing a level, so we never gate harder than the shift actually requires.
+  const [shiftLevelRow] = await db
+    .select({ requiredLicenseLevel: shiftsTable.requiredLicenseLevel })
+    .from(shiftsTable)
+    .where(eq(shiftsTable.id, shiftId))
+    .limit(1);
+  const requiredLicenseLevel = shiftLevelRow?.requiredLicenseLevel ?? 1;
+
+  // Resolve the listed emails to known officer userIds (unknown emails skipped),
+  // then drop any officer whose effective licence level doesn't meet the shift's
+  // requirement (logged, so dispatch can see who the scheduler tried to roster).
   const desiredUserIds = new Set<string>();
   for (const email of assignedOfficerEmails) {
     const userId = await resolveUserByEmail(email);
-    if (userId) desiredUserIds.add(userId);
+    if (!userId) continue;
+    const effLevel = await getEffectiveLevel(userId);
+    if (effLevel < requiredLicenseLevel) {
+      logger.warn(
+        { shiftId, userId, email, effLevel, requiredLicenseLevel },
+        "scheduler-roster skipped under-licensed officer (effective level below shift requirement)",
+      );
+      continue;
+    }
+    desiredUserIds.add(userId);
   }
   const desiredIds = [...desiredUserIds];
 

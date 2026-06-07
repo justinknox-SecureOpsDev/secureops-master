@@ -66,6 +66,18 @@ beforeAll(async () => {
     .returning({ id: usersTable.id });
   ctx.employeeId = emp.id;
 
+  // Give the shared officer an unexpired Level-3 licence so they clear the
+  // Level-2 shifts the roster-reconcile tests assign them to. Without this the
+  // scheduler eligibility gate (effective level vs requiredLicenseLevel) would
+  // skip them as under-licensed.
+  await db.insert(licensesTable).values({
+    employeeId: ctx.employeeId,
+    type: "tx-security",
+    level: 3,
+    licenseNumber: `${TAG}-shared-${randomUUID().slice(0, 6)}`,
+    expiryDate: new Date("2999-01-01T00:00:00.000Z").toISOString().slice(0, 10),
+  });
+
   const [client] = await db
     .insert(clientsTable)
     .values({ name: `${TAG}-client` })
@@ -1249,6 +1261,13 @@ describe("scheduler reconciliation job", () => {
         tokensValidAfter: new Date(0),
       })
       .returning({ id: usersTable.id });
+    await db.insert(licensesTable).values({
+      employeeId: other.id,
+      type: "tx-security",
+      level: 3,
+      licenseNumber: `${TAG}-${other.id.slice(0, 6)}`,
+      expiryDate: new Date("2999-01-01T00:00:00.000Z").toISOString().slice(0, 10),
+    });
 
     const externalId = `${TAG}-recon-roster-${randomUUID().slice(0, 8)}`;
 
@@ -1613,6 +1632,107 @@ describe("scheduler webhook rejects unsigned and malformed requests", () => {
     expect(assignments).toHaveLength(0);
   });
 
+  it("skips an under-licensed officer the scheduler tries to roster (eligibility gate)", async () => {
+    // An officer with NO licence (effective level 0) — below a Level-2 shift.
+    const underEmail = `${TAG}-underlic-${randomUUID().slice(0, 6)}@example.test`;
+    const [under] = await db
+      .insert(usersTable)
+      .values({
+        email: underEmail,
+        passwordHash,
+        firstName: "UnderLicensed",
+        lastName: TAG,
+        role: "employee",
+        status: "active",
+        tokensValidAfter: new Date(0),
+      })
+      .returning({ id: usersTable.id });
+
+    const externalId = `${TAG}-assign-underlic-${randomUUID().slice(0, 8)}`;
+    const res = await postSignedShift({
+      id: externalId,
+      action: "upsert",
+      title: `${TAG} Armed Post`,
+      siteName: ctx.siteName,
+      startTime: "2026-11-08T20:00:00.000Z",
+      endTime: "2026-11-09T04:00:00.000Z",
+      // Level-2 shift; the under-licensed officer (level 0) must be skipped while
+      // the shared, Level-3-licensed officer is rostered as normal.
+      requiredLicenseLevel: 2,
+      headcount: 2,
+      status: "upcoming",
+      assignedOfficerEmails: [ctx.employeeEmail, underEmail],
+      updatedAt: "2026-11-07T12:00:00.000Z",
+    });
+
+    expect(res.status).toBe(200);
+    expect(res.body).toMatchObject({ ok: true, action: "created" });
+    const shiftId = res.body.secureopsId as string;
+
+    // Only the eligible officer is on the roster; the under-licensed one is gone.
+    const assignments = await db
+      .select({ employeeId: shiftAssignmentsTable.employeeId, status: shiftAssignmentsTable.status })
+      .from(shiftAssignmentsTable)
+      .where(eq(shiftAssignmentsTable.shiftId, shiftId));
+    expect(assignments).toHaveLength(1);
+    expect(assignments[0].employeeId).toBe(ctx.employeeId);
+    expect(assignments[0].status).toBe("accepted");
+    expect(assignments.some((a) => a.employeeId === under.id)).toBe(false);
+  });
+
+  it("drops a rostered officer when a scheduler edit raises the licence bar above their level", async () => {
+    // The shared officer holds a Level-3 licence: eligible for a Level-3 shift,
+    // but NOT once the scheduler raises the requirement to Level-4/PPO.
+    const externalId = `${TAG}-assign-raise-${randomUUID().slice(0, 8)}`;
+
+    // 1. Level-3 shift — the Level-3 officer is rostered as normal.
+    const created = await postSignedShift({
+      id: externalId,
+      action: "upsert",
+      title: `${TAG} Raise Shift`,
+      siteName: ctx.siteName,
+      startTime: "2026-11-10T08:00:00.000Z",
+      endTime: "2026-11-10T16:00:00.000Z",
+      requiredLicenseLevel: 3,
+      headcount: 1,
+      status: "upcoming",
+      assignedOfficerEmails: [ctx.employeeEmail],
+      updatedAt: "2026-11-09T00:00:00.000Z",
+    });
+    expect(created.body).toMatchObject({ ok: true, action: "created" });
+    const shiftId = created.body.secureopsId as string;
+
+    const initial = await db
+      .select({ employeeId: shiftAssignmentsTable.employeeId })
+      .from(shiftAssignmentsTable)
+      .where(eq(shiftAssignmentsTable.shiftId, shiftId));
+    expect(initial.map((a) => a.employeeId)).toEqual([ctx.employeeId]);
+
+    // 2. The scheduler raises the requirement to Level-4 (strictly-newer
+    //    updatedAt) while keeping the same roster. The now-under-licensed
+    //    officer must be dropped by the eligibility gate.
+    const raised = await postSignedShift({
+      id: externalId,
+      action: "upsert",
+      title: `${TAG} Raise Shift`,
+      siteName: ctx.siteName,
+      startTime: "2026-11-10T08:00:00.000Z",
+      endTime: "2026-11-10T16:00:00.000Z",
+      requiredLicenseLevel: 4,
+      headcount: 1,
+      status: "upcoming",
+      assignedOfficerEmails: [ctx.employeeEmail],
+      updatedAt: "2026-11-09T12:00:00.000Z",
+    });
+    expect(raised.body).toMatchObject({ ok: true, action: "updated" });
+
+    const after = await db
+      .select({ employeeId: shiftAssignmentsTable.employeeId })
+      .from(shiftAssignmentsTable)
+      .where(eq(shiftAssignmentsTable.shiftId, shiftId));
+    expect(after).toHaveLength(0);
+  });
+
   it("reconciles assignedOfficerEmails when the scheduler edits an existing shift (add + remove)", async () => {
     // A second officer we can add to / remove from the roster.
     const otherEmail = `${TAG}-officer2-${randomUUID().slice(0, 6)}@example.test`;
@@ -1628,6 +1748,13 @@ describe("scheduler webhook rejects unsigned and malformed requests", () => {
         tokensValidAfter: new Date(0),
       })
       .returning({ id: usersTable.id });
+    await db.insert(licensesTable).values({
+      employeeId: other.id,
+      type: "tx-security",
+      level: 3,
+      licenseNumber: `${TAG}-${other.id.slice(0, 6)}`,
+      expiryDate: new Date("2999-01-01T00:00:00.000Z").toISOString().slice(0, 10),
+    });
 
     const externalId = `${TAG}-assign-update-${randomUUID().slice(0, 8)}`;
 
@@ -1718,6 +1845,13 @@ describe("scheduler webhook rejects unsigned and malformed requests", () => {
         tokensValidAfter: new Date(0),
       })
       .returning({ id: usersTable.id });
+    await db.insert(licensesTable).values({
+      employeeId: other.id,
+      type: "tx-security",
+      level: 3,
+      licenseNumber: `${TAG}-${other.id.slice(0, 6)}`,
+      expiryDate: new Date("2999-01-01T00:00:00.000Z").toISOString().slice(0, 10),
+    });
 
     const externalId = `${TAG}-assign-notify-${randomUUID().slice(0, 8)}`;
 
