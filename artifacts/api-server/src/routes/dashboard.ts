@@ -9,13 +9,18 @@ const router: IRouter = Router();
 // for the dispatcher role. Dispatchers get their roll-ups from
 // `/dispatch/*` instead.
 router.get("/dashboard/admin-summary", requireAdmin, async (req, res): Promise<void> => {
+  const now = new Date();
   const [totalEmp] = await db.select({ count: sql<number>`count(*)::int` }).from(usersTable);
   const [activeEmp] = await db.select({ count: sql<number>`count(*)::int` }).from(usersTable).where(eq(usersTable.status, "active"));
   const [pendingEmp] = await db.select({ count: sql<number>`count(*)::int` }).from(usersTable).where(eq(usersTable.status, "pending"));
   const [activeShifts] = await db.select({ count: sql<number>`count(*)::int` }).from(shiftsTable).where(eq(shiftsTable.status, "active"));
   const sevenDays = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000);
+  // Past rows linger as status=upcoming (status isn't auto-advanced), so bound
+  // by endTime>=now — matches the Shifts list convention so in-progress shifts
+  // aren't dropped while truly-past ones are excluded.
   const [upcomingShifts] = await db.select({ count: sql<number>`count(*)::int` }).from(shiftsTable).where(and(
     eq(shiftsTable.status, "upcoming"),
+    gte(shiftsTable.endTime, now),
     lte(shiftsTable.startTime, sevenDays),
   ));
   const [openIncidents] = await db.select({ count: sql<number>`count(*)::int` }).from(incidentsTable).where(ne(incidentsTable.status, "closed"));
@@ -54,7 +59,10 @@ router.get("/dashboard/admin-summary", requireAdmin, async (req, res): Promise<v
   const upcomingShiftsList = await db
     .select()
     .from(shiftsTable)
-    .where(eq(shiftsTable.status, "upcoming"))
+    .where(and(
+      eq(shiftsTable.status, "upcoming"),
+      gte(shiftsTable.endTime, now),
+    ))
     .orderBy(shiftsTable.startTime)
     .limit(5);
 

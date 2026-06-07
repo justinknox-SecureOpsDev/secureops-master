@@ -26,6 +26,7 @@
 - [Payroll 1099 — no tax](payroll-1099-no-tax.md) — all WCSG workers are 1099; payroll NEVER withholds tax (net=gross), enforced at compute + read + write surfaces.
 - [Server day = business TZ](server-calendar-day-must-use-business-tz.md) — server "which calendar day" logic must use PAYROLL_TIMEZONE/Central (lib/businessTime.ts), not UTC, or evening shifts fall into the wrong day.
 - [Dispatch open-shifts recurring](dispatch-open-shifts-recurring-confusion.md) — "staffed shows as open" = recurring shifts on other days + multi-shift-per-day venues, not a counting bug; show per-row dates.
+- [shift.status not auto-advanced](shift-status-not-auto-advanced.md) — status stays "upcoming" forever; any upcoming surface must add a time bound (convention: endTime>=now).
 - [admin-portal HTTP paths & 401 logout](admin-portal-http-paths.md) — admin-portal has TWO auth HTTP paths (api() + fetchWithAuth); cross-cutting behavior like 401 auto-logout must cover both, gated on token-was-sent.
 - [Clock-in paths & dispatch board](clockin-paths-and-dispatch-board.md) — 30min-before→end window must guard explicit-shift AND site-pick paths (GPS auto-attach already time-bounded); dispatch onDuty = all open entries, skip per (userId,shiftId).
 - [Two license surfaces](two-license-surfaces.md) — license data lives in BOTH licenses table (eligibility) and employees.sia*+licenseDocKey (what OfficerProfile/PDF render); any license change must write both.
