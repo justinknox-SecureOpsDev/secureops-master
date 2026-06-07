@@ -14,6 +14,7 @@ import {
   timeEntriesTable,
   schedulerSyncCursorsTable,
   notificationsTable,
+  auditLogsTable,
 } from "@workspace/db";
 import app from "../app";
 import { signPayload, SCHEDULER_SOURCE } from "../lib/schedulerSync";
@@ -41,6 +42,7 @@ const ctx = {
   siteName: `${TAG}-site`,
   employeeId: "",
   employeeEmail: "",
+  adminId: "",
 };
 
 // Preserve and restore scheduler env so other test files are unaffected.
@@ -65,6 +67,21 @@ beforeAll(async () => {
     })
     .returning({ id: usersTable.id });
   ctx.employeeId = emp.id;
+
+  // An admin to receive the eligibility-skip alert (push + in-app notification).
+  const [adm] = await db
+    .insert(usersTable)
+    .values({
+      email: `${TAG}-admin-${randomUUID().slice(0, 6)}@example.test`,
+      passwordHash,
+      firstName: "SyncAdmin",
+      lastName: TAG,
+      role: "admin",
+      status: "active",
+      tokensValidAfter: new Date(0),
+    })
+    .returning({ id: usersTable.id });
+  ctx.adminId = adm.id;
 
   // Give the shared officer an unexpired Level-3 licence so they clear the
   // Level-2 shifts the roster-reconcile tests assign them to. Without this the
@@ -1678,6 +1695,35 @@ describe("scheduler webhook rejects unsigned and malformed requests", () => {
     expect(assignments[0].employeeId).toBe(ctx.employeeId);
     expect(assignments[0].status).toBe("accepted");
     expect(assignments.some((a) => a.employeeId === under.id)).toBe(false);
+
+    // The skip must be surfaced to dispatch: a persistent audit-log row naming
+    // the officer, shift, their effective level, and the required level.
+    const [auditRow] = await db
+      .select({ action: auditLogsTable.action, targetId: auditLogsTable.targetId, metadata: auditLogsTable.metadata })
+      .from(auditLogsTable)
+      .where(and(
+        eq(auditLogsTable.action, "scheduler.eligibility_skip"),
+        eq(auditLogsTable.targetId, shiftId),
+      ))
+      .limit(1);
+    expect(auditRow).toBeDefined();
+    const meta = auditRow!.metadata as { requiredLicenseLevel: number; skipped: Array<{ userId: string; effectiveLevel: number; requiredLevel: number; email: string }> };
+    expect(meta.requiredLicenseLevel).toBe(2);
+    const skippedEntry = meta.skipped.find((s) => s.userId === under.id);
+    expect(skippedEntry).toBeDefined();
+    expect(skippedEntry!.effectiveLevel).toBe(0);
+    expect(skippedEntry!.requiredLevel).toBe(2);
+    expect(skippedEntry!.email).toBe(underEmail);
+
+    // …and an in-app notification to the admin (persisted by sendPushToUsers).
+    const adminNotifs = await db
+      .select({ type: notificationsTable.type, data: notificationsTable.data })
+      .from(notificationsTable)
+      .where(and(
+        eq(notificationsTable.userId, ctx.adminId),
+        eq(notificationsTable.type, "scheduler_eligibility_skip"),
+      ));
+    expect(adminNotifs.some((nft) => (nft.data as { shiftId?: string } | null)?.shiftId === shiftId)).toBe(true);
   });
 
   it("drops a rostered officer when a scheduler edit raises the licence bar above their level", async () => {

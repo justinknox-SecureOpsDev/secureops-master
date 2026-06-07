@@ -196,6 +196,38 @@ describe("resolveNotificationTarget", () => {
         ).toBeNull();
       });
     });
+
+    describe("scheduler_eligibility_skip", () => {
+      it("deep-links admins to the shift so they can re-assign", () => {
+        expect(
+          resolveNotificationTarget(
+            { type: "scheduler_eligibility_skip", shiftId: 77 },
+            "admin",
+          ),
+        ).toEqual({
+          pathname: "/(admin)/shifts",
+          params: { shiftId: "77", filter: "upcoming" },
+        });
+      });
+
+      it("falls back to the shifts list when shiftId is missing", () => {
+        expect(
+          resolveNotificationTarget({ type: "scheduler_eligibility_skip" }, "admin"),
+        ).toEqual({ pathname: "/(admin)/shifts" });
+      });
+
+      it("returns null for non-admins", () => {
+        expect(
+          resolveNotificationTarget(
+            { type: "scheduler_eligibility_skip", shiftId: 77 },
+            "employee",
+          ),
+        ).toBeNull();
+        expect(
+          resolveNotificationTarget({ type: "scheduler_eligibility_skip" }, undefined),
+        ).toBeNull();
+      });
+    });
   });
 
   describe("legacy `kind` key and unknown types", () => {

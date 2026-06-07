@@ -14,7 +14,7 @@
 import { Router, type IRouter, type Request, type Response, type NextFunction } from "express";
 import { eq, and, sql, gte, lte, or, inArray, notInArray } from "drizzle-orm";
 import { z } from "zod/v4";
-import { db, shiftsTable, timeEntriesTable, usersTable, sitesTable, shiftAssignmentsTable } from "@workspace/db";
+import { db, shiftsTable, timeEntriesTable, usersTable, sitesTable, shiftAssignmentsTable, auditLogsTable } from "@workspace/db";
 import { verifySignature, SCHEDULER_SOURCE, type SchedulerShiftPayload, type SchedulerClockEventPayload } from "../lib/schedulerSync";
 import { getEffectiveLevel } from "../lib/eligibility";
 import { logger } from "../lib/logger";
@@ -181,6 +181,7 @@ async function reconcileShiftRoster(shiftId: string, assignedOfficerEmails: stri
   // then drop any officer whose effective licence level doesn't meet the shift's
   // requirement (logged, so dispatch can see who the scheduler tried to roster).
   const desiredUserIds = new Set<string>();
+  const skipped: Array<{ userId: string; email: string; effLevel: number }> = [];
   for (const email of assignedOfficerEmails) {
     const userId = await resolveUserByEmail(email);
     if (!userId) continue;
@@ -190,6 +191,7 @@ async function reconcileShiftRoster(shiftId: string, assignedOfficerEmails: stri
         { shiftId, userId, email, effLevel, requiredLicenseLevel },
         "scheduler-roster skipped under-licensed officer (effective level below shift requirement)",
       );
+      skipped.push({ userId, email, effLevel });
       continue;
     }
     desiredUserIds.add(userId);
@@ -278,6 +280,88 @@ async function reconcileShiftRoster(shiftId: string, assignedOfficerEmails: stri
       }
     } catch (err) {
       logger.warn({ err, shiftId }, "scheduler-roster change notification failed");
+    }
+  }
+
+  // Surface eligibility skips to dispatch. The scheduler tried to roster these
+  // officers but their effective licence level is below the shift's requirement,
+  // so they were NOT added and the slot may quietly stay short-staffed. Make the
+  // skip visible to admins two ways so it never goes unnoticed:
+  //   1. A persistent audit-log row (action `scheduler.eligibility_skip`,
+  //      queryable at /admin/audit-logs) recording officer + shift + their
+  //      effective level + the required level.
+  //   2. A real-time push to every admin, deep-linking to the shift so they can
+  //      assign a qualified officer / open the slot.
+  // Runs from the webhook AND the scheduled reconciliation job (both go through
+  // here), so the skip surfaces no matter which path applied the sync.
+  // Best-effort: failures here must never fail the sync or roll back the roster.
+  if (skipped.length > 0) {
+    try {
+      const [shiftRow] = await db
+        .select({ title: shiftsTable.title })
+        .from(shiftsTable)
+        .where(eq(shiftsTable.id, shiftId))
+        .limit(1);
+      const title = shiftRow?.title ?? "a shift";
+
+      // Resolve names for the skipped officers so the records are human-readable.
+      const nameRows = await db
+        .select({ id: usersTable.id, firstName: usersTable.firstName, lastName: usersTable.lastName })
+        .from(usersTable)
+        .where(inArray(usersTable.id, skipped.map((s) => s.userId)));
+      const nameById = new Map(
+        nameRows.map((r) => [r.id, `${r.firstName ?? ""} ${r.lastName ?? ""}`.trim()]),
+      );
+      const skippedDetail = skipped.map((s) => ({
+        userId: s.userId,
+        email: s.email,
+        name: nameById.get(s.userId) || s.email,
+        effectiveLevel: s.effLevel,
+        requiredLevel: requiredLicenseLevel,
+      }));
+
+      // 1. Persistent, queryable audit record (one row per sync, listing every
+      //    skipped officer). System-actor: no req.user — the scheduler drove it.
+      try {
+        await db.insert(auditLogsTable).values({
+          actorUserId: null,
+          actorEmail: null,
+          actorRole: "scheduler",
+          action: "scheduler.eligibility_skip",
+          targetTable: "shifts",
+          targetId: shiftId,
+          method: "POST",
+          path: "/scheduler/roster-sync",
+          statusCode: 200,
+          ip: null,
+          userAgent: null,
+          metadata: { shiftId, shiftTitle: title, requiredLicenseLevel, skipped: skippedDetail },
+        });
+      } catch (err) {
+        logger.warn({ err, shiftId }, "scheduler-roster eligibility-skip audit write failed");
+      }
+
+      // 2. Real-time alert to admins, deep-linking to the shift.
+      const admins = await db
+        .select({ id: usersTable.id })
+        .from(usersTable)
+        .where(eq(usersTable.role, "admin"));
+      const adminIds = admins.map((a) => a.id);
+      if (adminIds.length > 0) {
+        const names = skippedDetail.map((s) => s.name).join(", ");
+        const body =
+          skippedDetail.length === 1
+            ? `${names} can't be rostered on ${title} — their licence level (${skippedDetail[0]!.effectiveLevel}) is below the required level ${requiredLicenseLevel}. Assign a qualified officer.`
+            : `${skippedDetail.length} officers can't be rostered on ${title} (below required licence level ${requiredLicenseLevel}): ${names}. Assign qualified officers.`;
+        const { sendPushToUsers } = await import("../lib/push");
+        await sendPushToUsers(adminIds, {
+          title: "⚠️ Unqualified officer on schedule",
+          body,
+          data: { type: "scheduler_eligibility_skip", shiftId },
+        });
+      }
+    } catch (err) {
+      logger.warn({ err, shiftId }, "scheduler-roster eligibility-skip surfacing failed");
     }
   }
 }

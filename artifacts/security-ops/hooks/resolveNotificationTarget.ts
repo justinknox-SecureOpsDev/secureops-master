@@ -121,6 +121,18 @@ export function resolveNotificationTarget(
         : { pathname: "/(admin)/employees" };
     }
 
+    // The scheduler tried to roster an under-licensed officer; the slot may be
+    // short-staffed. Deep-link the admin to the shift so they can assign a
+    // qualified officer.
+    case "scheduler_eligibility_skip": {
+      if (role !== "admin") return null;
+      const shiftId = str(d.shiftId);
+      return {
+        pathname: "/(admin)/shifts",
+        params: shiftId ? { shiftId, filter: "upcoming" } : undefined,
+      };
+    }
+
     default:
       return null;
   }

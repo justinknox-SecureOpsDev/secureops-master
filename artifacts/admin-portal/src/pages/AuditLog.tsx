@@ -44,6 +44,7 @@ const ACTION_PRESETS = [
   "sites.write",
   "invoices.write",
   "incidents.write",
+  "scheduler.eligibility_skip",
 ];
 
 function methodColor(m: string): string {
