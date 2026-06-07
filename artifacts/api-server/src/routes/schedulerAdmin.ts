@@ -61,6 +61,28 @@ async function relayToScheduler(
     return;
   }
 
+  // Do NOT relay a downstream 401/403 verbatim. The portal's generic api() /
+  // fetchWithAuth helpers treat ANY token-carrying 401 as "the admin session
+  // expired" and force a logout/redirect. But a 401/403 here means the SCHEDULER
+  // rejected our forwarded (HMAC-signed) request — most likely a shared-secret
+  // mismatch or the scheduler's own auth failing — NOT that the admin's portal
+  // session is invalid. Remap it to a 502 with a clear integration error so the
+  // admin stays logged in and sees an actionable message instead of being
+  // bounced to the login screen. All other statuses (2xx/400/404/409/…) relay
+  // verbatim.
+  if (result.status === 401 || result.status === 403) {
+    logger.warn(
+      { status: result.status },
+      "[schedulerAdmin] scheduler rejected the forwarded request (auth failure)",
+    );
+    res.status(502).json({
+      error: "Bad Gateway",
+      message:
+        "The scheduler rejected the request — the integration may be misconfigured. Check the shared secret.",
+    });
+    return;
+  }
+
   res.status(result.status).json(result.body ?? null);
 }
 

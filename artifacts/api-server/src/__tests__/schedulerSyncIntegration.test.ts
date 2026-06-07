@@ -2239,3 +2239,141 @@ describe("scheduler webhook rate limiter blocks request floods", () => {
     expect(statuses[total - 1]).toBe(429);
   });
 });
+
+// ---------------------------------------------------------------------------
+// 7. Admin scheduler proxy: a downstream auth failure must NOT surface as a
+//    portal 401 (which the admin portal's api()/fetchWithAuth helpers treat as
+//    "your session expired" -> logout + redirect to login). Instead the proxy
+//    remaps the scheduler's 401/403 to a 502 with a clear integration error so
+//    the admin stays logged in. All other downstream statuses (2xx/400/404/...)
+//    must still pass through verbatim.
+// ---------------------------------------------------------------------------
+
+describe("admin scheduler proxy remaps downstream auth failures (no portal logout)", () => {
+  const pctx = { adminToken: "" };
+
+  beforeAll(async () => {
+    const adminEmail = `${TAG}-proxy-admin-${randomUUID().slice(0, 6)}@example.test`;
+    const [admin] = await db
+      .insert(usersTable)
+      .values({
+        email: adminEmail,
+        passwordHash,
+        firstName: "Proxy",
+        lastName: TAG,
+        role: "admin",
+        status: "active",
+        tokensValidAfter: new Date(0),
+      })
+      .returning({ id: usersTable.id });
+    pctx.adminToken = signToken({ userId: admin.id, email: adminEmail, role: "admin" });
+  });
+
+  beforeEach(() => {
+    // Fully configured so the proxy actually forwards (rather than short-
+    // circuiting to a 503 not-configured).
+    process.env.SCHEDULER_BASE_URL = "https://scheduler.example.com";
+    process.env.SCHEDULER_SHARED_SECRET = SECRET;
+    vi.restoreAllMocks();
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  function authed(token: string) {
+    return { Authorization: `Bearer ${token}` };
+  }
+
+  for (const downstream of [401, 403]) {
+    it(`remaps a downstream ${downstream} to a 502 integration error (admin not logged out)`, async () => {
+      vi.spyOn(globalThis, "fetch").mockResolvedValue(
+        new Response(JSON.stringify({ error: "Unauthorized" }), { status: downstream }),
+      );
+
+      const res = await request(app)
+        .get("/api/admin/scheduler/events")
+        .set(authed(pctx.adminToken));
+
+      // Critically NOT a 401/403 — that's what would have logged the admin out.
+      expect(res.status).toBe(502);
+      expect(res.body).toMatchObject({ error: "Bad Gateway" });
+      expect(String(res.body.message)).toMatch(/scheduler rejected/i);
+    });
+  }
+
+  it("remaps a downstream 401 on POST (create event) to a 502 too", async () => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      new Response(JSON.stringify({ error: "Unauthorized" }), { status: 401 }),
+    );
+
+    const res = await request(app)
+      .post("/api/admin/scheduler/events")
+      .set(authed(pctx.adminToken))
+      .send({ name: "Test", location: "Dallas" });
+
+    expect(res.status).toBe(502);
+    expect(res.body).toMatchObject({ error: "Bad Gateway" });
+  });
+
+  it("passes a downstream 2xx through verbatim", async () => {
+    const payload = [{ id: 1, name: "FIFA Dallas" }];
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      new Response(JSON.stringify(payload), { status: 200 }),
+    );
+
+    const res = await request(app)
+      .get("/api/admin/scheduler/events")
+      .set(authed(pctx.adminToken));
+
+    expect(res.status).toBe(200);
+    expect(res.body).toEqual(payload);
+  });
+
+  it("passes a downstream 400 through verbatim", async () => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      new Response(JSON.stringify({ error: "Bad Request", message: "name required" }), { status: 400 }),
+    );
+
+    const res = await request(app)
+      .post("/api/admin/scheduler/events")
+      .set(authed(pctx.adminToken))
+      .send({ location: "Dallas" });
+
+    expect(res.status).toBe(400);
+    expect(res.body).toMatchObject({ error: "Bad Request", message: "name required" });
+  });
+
+  it("passes a downstream 404 through verbatim", async () => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      new Response(JSON.stringify({ error: "Not Found" }), { status: 404 }),
+    );
+
+    const res = await request(app)
+      .get("/api/admin/scheduler/events/999/full")
+      .set(authed(pctx.adminToken));
+
+    expect(res.status).toBe(404);
+    expect(res.body).toMatchObject({ error: "Not Found" });
+  });
+
+  it("passes a downstream 409 conflict through verbatim", async () => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      new Response(JSON.stringify({ error: "Conflict", message: "event already exists" }), { status: 409 }),
+    );
+
+    const res = await request(app)
+      .post("/api/admin/scheduler/events")
+      .set(authed(pctx.adminToken))
+      .send({ name: "Dup", location: "Dallas" });
+
+    expect(res.status).toBe(409);
+    expect(res.body).toMatchObject({ error: "Conflict", message: "event already exists" });
+  });
+
+  it("still returns 401 for a genuinely unauthenticated portal request (no token)", async () => {
+    // No fetch spy needed — requireAdmin rejects before any forwarding.
+    const res = await request(app).get("/api/admin/scheduler/events");
+    expect(res.status).toBe(401);
+  });
+});
