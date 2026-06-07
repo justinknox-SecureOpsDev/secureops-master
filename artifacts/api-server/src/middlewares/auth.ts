@@ -255,6 +255,47 @@ export function requireAdminOrDispatcher(req: Request, res: Response, next: Next
 }
 
 /**
+ * Authorize shift/schedule management: admin OR lead.
+ *
+ * The `lead` role is a mobile-only scheduling supervisor. Leads create and
+ * edit shifts (including recurring) and manage the roster across ALL sites,
+ * but must never see financial data (pay/bill rates, payroll, invoices,
+ * client billing terms). This guard deliberately EXCLUDES dispatcher so that
+ * granting leads write access to shifts does not silently escalate the
+ * narrower dispatcher role (which can assign to open shifts but not create
+ * or delete them). Finance fields are stripped at the response layer for
+ * leads on every surface gated here.
+ */
+export function requireAdminOrLead(req: Request, res: Response, next: NextFunction): void {
+  requireAuth(req, res, () => {
+    const role = req.user?.role;
+    if (role !== "admin" && role !== "lead") {
+      res.status(403).json({ error: "Forbidden", message: "Admin or lead access required" });
+      return;
+    }
+    next();
+  });
+}
+
+/**
+ * Authorize scheduling/staffing reads + officer assignment: admin OR
+ * dispatcher OR lead. Used for the shared roster surfaces (sites list,
+ * employee list, assigning an officer to a shift) that all three scheduling
+ * roles need. Employee/PII rows are projected down for dispatcher/lead at the
+ * response layer; finance is never included for leads.
+ */
+export function requireSchedulingStaff(req: Request, res: Response, next: NextFunction): void {
+  requireAuth(req, res, () => {
+    const role = req.user?.role;
+    if (role !== "admin" && role !== "dispatcher" && role !== "lead") {
+      res.status(403).json({ error: "Forbidden", message: "Admin, dispatcher, or lead access required" });
+      return;
+    }
+    next();
+  });
+}
+
+/**
  * Gate routes to authenticated users with role="client" only.
  *
  * Client users are external venue contacts (not staff) with access limited

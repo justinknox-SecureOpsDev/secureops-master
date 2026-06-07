@@ -14,6 +14,7 @@ import { useLocalSearchParams, useRouter } from "expo-router";
 import { useQueryClient } from "@tanstack/react-query";
 import { KeyboardAwareScrollViewCompat } from "@/components/KeyboardAwareScrollViewCompat";
 import { confirmAction } from "@/utils/confirm";
+import { useAuth } from "@/contexts/AuthContext";
 
 function Field({ label, value, onChangeText, placeholder, keyboardType, autoCapitalize, required }: any) {
   const colors = useColors();
@@ -65,6 +66,9 @@ export default function EditShiftScreen() {
   // A distinct name keeps this screen's param isolated. Aliased to `id` locally
   // so the rest of the screen is unchanged.
   const { shiftId: id } = useLocalSearchParams<{ shiftId: string }>();
+  const { user } = useAuth();
+  // Leads never see or edit rates; the server ignores any rate fields they send.
+  const isLead = user?.role === "lead";
   const topPad = useTopPad();
   const navigation = useNavigation();
   useLayoutEffect(() => { (navigation as any).setOptions?.({ headerShown: false }); }, [navigation]);
@@ -139,8 +143,9 @@ export default function EditShiftScreen() {
   );
 
   const handleSave = async () => {
-    if (!form.title || !form.siteId || !form.startTime || !form.endTime || !form.payRate || !form.billRate) {
-      Alert.alert("Missing Fields", "Title, site, times, pay rate and bill rate are required.");
+    const ratesRequired = !isLead;
+    if (!form.title || !form.siteId || !form.startTime || !form.endTime || (ratesRequired && (!form.payRate || !form.billRate))) {
+      Alert.alert("Missing Fields", ratesRequired ? "Title, site, times, pay rate and bill rate are required." : "Title, site and times are required.");
       return;
     }
     try {
@@ -152,8 +157,8 @@ export default function EditShiftScreen() {
           notes: form.notes || undefined,
           startTime: new Date(form.startTime).toISOString(),
           endTime: new Date(form.endTime).toISOString(),
-          payRate: parseFloat(form.payRate),
-          billRate: parseFloat(form.billRate),
+          // Leads omit rates; server ignores them anyway.
+          ...(isLead ? {} : { payRate: parseFloat(form.payRate), billRate: parseFloat(form.billRate) }),
           isRepeat: form.isRepeat,
           repeatPattern: form.isRepeat ? (form.repeatPattern as any) || undefined : undefined,
           requiredLicenseLevel: form.requiredLicenseLevel,
@@ -338,9 +343,13 @@ export default function EditShiftScreen() {
           <Field label="Repeat Pattern" value={form.repeatPattern} onChangeText={set("repeatPattern")} placeholder="weekly" autoCapitalize="none" />
         )}
 
-        <Text style={[styles.sectionLabel, { color: colors.accent, marginTop: 20 }]}>RATES</Text>
-        <Field label="Officer Pay Rate ($/hr)" value={form.payRate} onChangeText={set("payRate")} placeholder="18.00" keyboardType="decimal-pad" autoCapitalize="none" required />
-        <Field label="Client Bill Rate ($/hr)" value={form.billRate} onChangeText={set("billRate")} placeholder="30.00" keyboardType="decimal-pad" autoCapitalize="none" required />
+        {!isLead && (
+          <>
+            <Text style={[styles.sectionLabel, { color: colors.accent, marginTop: 20 }]}>RATES</Text>
+            <Field label="Officer Pay Rate ($/hr)" value={form.payRate} onChangeText={set("payRate")} placeholder="18.00" keyboardType="decimal-pad" autoCapitalize="none" required />
+            <Field label="Client Bill Rate ($/hr)" value={form.billRate} onChangeText={set("billRate")} placeholder="30.00" keyboardType="decimal-pad" autoCapitalize="none" required />
+          </>
+        )}
 
         <TouchableOpacity style={[styles.submitBtn, { backgroundColor: colors.primary, opacity: updateShift.isPending ? 0.7 : 1 }]}
           onPress={handleSave} disabled={updateShift.isPending}

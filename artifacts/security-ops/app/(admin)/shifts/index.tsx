@@ -5,6 +5,7 @@ import { useColors } from "@/hooks/useColors";
 import { useGetShifts, getGetShiftsQueryKey } from "@workspace/api-client-react";
 import { Feather } from "@expo/vector-icons";
 import { useRouter } from "expo-router";
+import { useAuth } from "@/contexts/AuthContext";
 
 const STATUS_FILTERS = ["upcoming", "active", "completed", "cancelled"] as const;
 
@@ -22,6 +23,10 @@ function StatusBadge({ status }: { status: string }) {
 export default function AdminShiftsScreen() {
   const colors = useColors();
   const router = useRouter();
+  const { user, logout } = useAuth();
+  // Leads live entirely inside the Shifts tab (no profile tab to sign out from),
+  // so the sign-out control + the finance-bearing rate tag are handled here.
+  const isLead = user?.role === "lead";
   const [filter, setFilter] = useState<string>("upcoming");
   const [search, setSearch] = useState("");
   const topPad = useTopPad();
@@ -51,9 +56,16 @@ export default function AdminShiftsScreen() {
     <View style={[styles.container, { backgroundColor: colors.background }]}>
       <View style={[styles.topBar, { paddingTop: topPad + 12, borderBottomColor: colors.border }]}>
         <Text style={[styles.pageTitle, { color: colors.foreground }]}>Shifts</Text>
-        <TouchableOpacity style={[styles.addBtn, { backgroundColor: colors.primary }]} onPress={() => router.push("/(admin)/shifts/create")} accessibilityRole="button" accessibilityLabel="Create shift">
-          <Feather name="plus" size={20} color="#fff" />
-        </TouchableOpacity>
+        <View style={styles.topBarActions}>
+          <TouchableOpacity style={[styles.addBtn, { backgroundColor: colors.primary }]} onPress={() => router.push("/(admin)/shifts/create")} accessibilityRole="button" accessibilityLabel="Create shift">
+            <Feather name="plus" size={20} color="#fff" />
+          </TouchableOpacity>
+          {isLead && (
+            <TouchableOpacity style={[styles.signOutBtn, { borderColor: colors.border }]} onPress={() => logout()} accessibilityRole="button" accessibilityLabel="Sign out">
+              <Feather name="log-out" size={18} color={colors.mutedForeground} />
+            </TouchableOpacity>
+          )}
+        </View>
       </View>
 
       <View style={styles.filterScroll}>
@@ -153,10 +165,14 @@ export default function AdminShiftsScreen() {
                 </Text>
               </View>
               <View style={styles.bottomRow}>
-                <View style={styles.rateTag}>
-                  <Text style={[styles.rateText, { color: colors.primary }]}>${parseFloat(item.hourlyRate as any).toFixed(2)}/hr</Text>
-                  {item.billableRate && <Text style={[styles.billText, { color: colors.mutedForeground }]}> · ${parseFloat(item.billableRate as any).toFixed(2)} billable</Text>}
-                </View>
+                {isLead ? (
+                  <View style={styles.rateTag} />
+                ) : (
+                  <View style={styles.rateTag}>
+                    <Text style={[styles.rateText, { color: colors.primary }]}>${parseFloat(item.hourlyRate as any).toFixed(2)}/hr</Text>
+                    {item.billableRate && <Text style={[styles.billText, { color: colors.mutedForeground }]}> · ${parseFloat(item.billableRate as any).toFixed(2)} billable</Text>}
+                  </View>
+                )}
                 <View style={styles.assignRow}>
                   <Feather name="users" size={13} color={colors.mutedForeground} />
                   <Text style={[styles.assignText, { color: colors.mutedForeground }]}>{item.assignments?.length ?? 0} assigned</Text>
@@ -176,6 +192,8 @@ const styles = StyleSheet.create({
   topBar: { flexDirection: "row", justifyContent: "space-between", alignItems: "center", paddingHorizontal: 16, paddingBottom: 12, borderBottomWidth: 1 },
   pageTitle: { fontSize: 22, fontWeight: "700" },
   addBtn: { width: 36, height: 36, borderRadius: 10, justifyContent: "center", alignItems: "center" },
+  topBarActions: { flexDirection: "row", alignItems: "center", gap: 8 },
+  signOutBtn: { width: 36, height: 36, borderRadius: 10, borderWidth: 1, justifyContent: "center", alignItems: "center" },
   filterScroll: { flexDirection: "row", gap: 8, paddingHorizontal: 16, paddingVertical: 12, flexWrap: "wrap" },
   filterChip: { paddingHorizontal: 12, paddingVertical: 6, borderRadius: 16, borderWidth: 1 },
   filterText: { fontSize: 13, fontWeight: "600" },

@@ -36,4 +36,6 @@ export const brand = {
   demoAdminPassword: process.env.DEMO_ADMIN_PASSWORD  ?? "Admin123!",
   demoEmployeeEmail: process.env.DEMO_EMPLOYEE_EMAIL  ?? "officer@secureops.com",
   demoEmployeePassword: process.env.DEMO_EMPLOYEE_PASSWORD ?? "Employee123!",
+  demoLeadEmail:     process.env.DEMO_LEAD_EMAIL      ?? "lead@secureops.com",
+  demoLeadPassword:  process.env.DEMO_LEAD_PASSWORD   ?? "Lead123!",
 } as const;

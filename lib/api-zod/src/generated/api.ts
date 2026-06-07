@@ -330,7 +330,7 @@ export const LoginResponse = zod.object({
     email: zod.string(),
     firstName: zod.string(),
     lastName: zod.string(),
-    role: zod.enum(["admin", "employee"]),
+    role: zod.enum(["admin", "employee", "lead"]),
     status: zod.enum(["active", "inactive", "pending"]),
     mustChangePassword: zod
       .boolean()
@@ -372,7 +372,7 @@ export const ChangePasswordResponse = zod.object({
     email: zod.string(),
     firstName: zod.string(),
     lastName: zod.string(),
-    role: zod.enum(["admin", "employee"]),
+    role: zod.enum(["admin", "employee", "lead"]),
     status: zod.enum(["active", "inactive", "pending"]),
     mustChangePassword: zod
       .boolean()
@@ -427,7 +427,7 @@ export const UpdateMyEmployeeProfileResponse = zod
     firstName: zod.string(),
     lastName: zod.string(),
     phone: zod.string().optional(),
-    role: zod.enum(["admin", "employee"]),
+    role: zod.enum(["admin", "employee", "lead"]),
     status: zod.enum(["active", "inactive", "pending"]),
     address: zod.string().optional(),
     dateOfBirth: zod.coerce.date().nullish(),
@@ -561,7 +561,7 @@ export const ResetPasswordResponse = zod.object({
     email: zod.string(),
     firstName: zod.string(),
     lastName: zod.string(),
-    role: zod.enum(["admin", "employee"]),
+    role: zod.enum(["admin", "employee", "lead"]),
     status: zod.enum(["active", "inactive", "pending"]),
     mustChangePassword: zod
       .boolean()
@@ -587,7 +587,7 @@ export const GetMeResponse = zod.object({
   email: zod.string(),
   firstName: zod.string(),
   lastName: zod.string(),
-  role: zod.enum(["admin", "employee"]),
+  role: zod.enum(["admin", "employee", "lead"]),
   status: zod.enum(["active", "inactive", "pending"]),
   mustChangePassword: zod
     .boolean()
@@ -619,7 +619,7 @@ export const GetEmployeesResponseItem = zod.object({
   firstName: zod.string(),
   lastName: zod.string(),
   phone: zod.string().optional(),
-  role: zod.enum(["admin", "employee"]),
+  role: zod.enum(["admin", "employee", "lead"]),
   status: zod.enum(["active", "inactive", "pending"]),
   address: zod.string().optional(),
   dateOfBirth: zod.coerce.date().nullish(),
@@ -696,7 +696,7 @@ export const CreateEmployeeBody = zod.object({
   password: zod.string(),
   firstName: zod.string(),
   lastName: zod.string(),
-  role: zod.enum(["admin", "employee"]),
+  role: zod.enum(["admin", "employee", "lead"]),
   position: zod.enum(["officer", "support_staff"]).optional(),
   phone: zod.string().optional(),
   address: zod.string().optional(),
@@ -753,7 +753,7 @@ export const GetEmployeeResponse = zod.object({
   firstName: zod.string(),
   lastName: zod.string(),
   phone: zod.string().optional(),
-  role: zod.enum(["admin", "employee"]),
+  role: zod.enum(["admin", "employee", "lead"]),
   status: zod.enum(["active", "inactive", "pending"]),
   address: zod.string().optional(),
   dateOfBirth: zod.coerce.date().nullish(),
@@ -880,7 +880,7 @@ export const UpdateEmployeeResponse = zod.object({
   firstName: zod.string(),
   lastName: zod.string(),
   phone: zod.string().optional(),
-  role: zod.enum(["admin", "employee"]),
+  role: zod.enum(["admin", "employee", "lead"]),
   status: zod.enum(["active", "inactive", "pending"]),
   address: zod.string().optional(),
   dateOfBirth: zod.coerce.date().nullish(),

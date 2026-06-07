@@ -1,7 +1,7 @@
 import { Router, type IRouter } from "express";
 import { and, eq, isNull, or, sql } from "drizzle-orm";
 import { db, sitesTable, clientsTable } from "@workspace/db";
-import { requireAdmin, requireAdminOrDispatcher } from "../middlewares/auth";
+import { requireAdmin, requireAdminOrDispatcher, requireSchedulingStaff } from "../middlewares/auth";
 import { geocodeOnelineAddress } from "../lib/geocode";
 import { preparePreUpdateBody, maybeAutoGeocode } from "../lib/siteGeocode";
 import { getGeofenceRadiusMiles } from "../lib/geofence";
@@ -114,7 +114,7 @@ router.post("/sites/geocode-missing", requireAdmin, async (req, res): Promise<vo
   });
 });
 
-router.get("/sites", requireAdminOrDispatcher, async (req, res): Promise<void> => {
+router.get("/sites", requireSchedulingStaff, async (req, res): Promise<void> => {
   const { clientId } = req.query as { clientId?: string };
   const base = db
     .select({

@@ -36,3 +36,5 @@
 - [Scheduler roster two paths](scheduler-roster-shared-path.md) — scheduler shift data arrives via webhook AND periodic pull; new field side-effects must go on SchedulerShiftPayload + shared processInboundShift, not the route.
 - [scripts CLI testability](scripts-cli-testability.md) — guard scripts/ CLI main() behind isMainModule before importing helpers in a tsx --test; DB-backed script tests need their own gate, use .js import ext.
 - [pg name[] arrays not parsed](pg-name-array-not-parsed.md) — node-postgres returns name[]/array_agg(name) as a raw string, not JS array; cast ::text inside array_agg when consuming pg_catalog introspection.
+- [/tmp/logs are refresh snapshots](tmp-logs-are-refresh-snapshots.md) — /tmp/logs files are frozen at last refresh_all_logs call, not live; after restart_workflow call refresh_all_logs before trusting them.
+- [Clock-in nearest-site test pollution](clockin-nearest-site-test-pollution.md) — timeEntriesClockIn geo tests flake in full suite (pass alone) from an orphan site at the fixed test coords; it's DB pollution, not a code regression.

@@ -5,6 +5,7 @@ import { Platform, StyleSheet, View, useColorScheme } from "react-native";
 import { useColors } from "@/hooks/useColors";
 import { BlurView } from "expo-blur";
 import { useChat } from "@/contexts/ChatContext";
+import { useAuth } from "@/contexts/AuthContext";
 
 export default function AdminLayout() {
   const colors = useColors();
@@ -13,6 +14,12 @@ export default function AdminLayout() {
   const isIOS = Platform.OS === "ios";
   const isWeb = Platform.OS === "web";
   const { totalUnread } = useChat();
+  const { user } = useAuth();
+  // Leads share the admin shell but only manage scheduling — they get the
+  // Shifts tab and nothing else (no dashboard / personnel / live-map /
+  // incidents / chat / radio). Hiding a tab with href:null keeps the screen
+  // routable but off the tab bar.
+  const isLead = user?.role === "lead";
 
   return (
     <Tabs
@@ -51,6 +58,7 @@ export default function AdminLayout() {
           title: "Overview",
           headerTitle: `${process.env.EXPO_PUBLIC_COMPANY_SHORT_NAME ?? "WCSG"} — Operations`,
           tabBarAccessibilityLabel: "Overview tab",
+          href: isLead ? null : undefined,
           tabBarIcon: ({ color }) => <Feather name="home" size={22} color={color} />,
         }}
       />
@@ -59,6 +67,7 @@ export default function AdminLayout() {
         options={{
           title: "Personnel",
           tabBarAccessibilityLabel: "Personnel tab",
+          href: isLead ? null : undefined,
           tabBarIcon: ({ color }) => <Feather name="users" size={22} color={color} />,
         }}
       />
@@ -79,6 +88,7 @@ export default function AdminLayout() {
         options={{
           title: "Live Map",
           tabBarAccessibilityLabel: "Live officer map tab",
+          href: isLead ? null : undefined,
           tabBarIcon: ({ color }) => <Feather name="map" size={22} color={color} />,
         }}
       />
@@ -87,6 +97,7 @@ export default function AdminLayout() {
         options={{
           title: "Incidents",
           tabBarAccessibilityLabel: "Incidents tab",
+          href: isLead ? null : undefined,
           tabBarIcon: ({ color }) => <Feather name="alert-triangle" size={22} color={color} />,
         }}
       />
@@ -101,6 +112,7 @@ export default function AdminLayout() {
               : "Team chat tab",
           tabBarBadge: totalUnread > 0 ? (totalUnread > 99 ? "99+" : totalUnread) : undefined,
           tabBarBadgeStyle: { backgroundColor: colors.primary, color: "#080c18", fontWeight: "700" },
+          href: isLead ? null : undefined,
           tabBarIcon: ({ color }) => <Feather name="message-circle" size={22} color={color} />,
         }}
       />
@@ -110,6 +122,7 @@ export default function AdminLayout() {
           title: "Radio",
           headerTitle: "Radio",
           tabBarAccessibilityLabel: "Push to talk radio tab",
+          href: isLead ? null : undefined,
           tabBarIcon: ({ color }) => <Feather name="radio" size={22} color={color} />,
         }}
       />

@@ -2,7 +2,7 @@ import { Router, type IRouter } from "express";
 import { randomUUID } from "node:crypto";
 import { eq, and, gt, gte, lt, lte, ne, sql, or, isNull, inArray } from "drizzle-orm";
 import { db, shiftsTable, shiftAssignmentsTable, usersTable, licensesTable, sitesTable, clientsTable, trainingCertificationsTable, employeesTable } from "@workspace/db";
-import { requireAuth, requireAdmin, requireAdminOrDispatcher } from "../middlewares/auth";
+import { requireAuth, requireAdmin, requireAdminOrDispatcher, requireAdminOrLead, requireSchedulingStaff } from "../middlewares/auth";
 import { haversineMiles } from "../lib/geofence";
 import { getEffectiveLevel, effectiveLevelSql } from "../lib/eligibility";
 import { pushShiftUpsert, pushShiftDelete, pushAssignmentEvent } from "../lib/schedulerSync";
@@ -97,12 +97,26 @@ async function getEmployeeHeldTrainings(employeeId: string): Promise<Set<string>
   return new Set(rows.map((r) => r.type));
 }
 
+/**
+ * Remove every financial field from a shift row before returning it to a
+ * `lead` caller. Leads schedule and staff shifts but must never see pay/bill
+ * rates. No-op for any other role. Kept inline (not exported) because shift
+ * finance has a fixed, small field set; centralising it here means every
+ * lead-reachable shift response strips the same keys.
+ */
+function stripShiftFinanceForLead<T extends Record<string, unknown>>(role: string | undefined, shift: T): T {
+  if (role !== "lead") return shift;
+  const { payRate, billRate, hourlyRate, billableRate, ...rest } = shift as Record<string, unknown>;
+  return rest as T;
+}
+
 router.get("/shifts", requireAuth, async (req, res): Promise<void> => {
   const { status, employeeId, from, to } = req.query as { status?: string; employeeId?: string; from?: string; to?: string };
-  // Dispatchers get the same full read as admins (they need to see
-  // every shift to assign/notify). Employees stay scoped to their own
-  // assigned + qualifying-open shifts.
-  const isAdmin = req.user!.role === "admin" || req.user!.role === "dispatcher";
+  // Dispatchers and leads get the same full read as admins (they need to see
+  // every shift to assign/notify/schedule). Employees stay scoped to their own
+  // assigned + qualifying-open shifts. Leads have finance stripped below.
+  const role = req.user!.role;
+  const isAdmin = role === "admin" || role === "dispatcher" || role === "lead";
   const userId = req.user!.userId;
 
   const conditions = [];
@@ -250,14 +264,14 @@ router.get("/shifts", requireAuth, async (req, res): Promise<void> => {
     }
   }
 
-  res.json(shifts.map((s) => ({
+  res.json(shifts.map((s) => stripShiftFinanceForLead(role, {
     ...s,
     assignments: assignmentMap.get(s.id) ?? [],
     distanceMilesFromHome: distanceMap?.get(s.id) ?? null,
   })));
 });
 
-router.post("/shifts", requireAdmin, async (req, res): Promise<void> => {
+router.post("/shifts", requireAdminOrLead, async (req, res): Promise<void> => {
   const {
     title, siteId, clientName: bodyClientName, location: bodyLocation, locationLat, locationLng,
     startTime, endTime,
@@ -265,19 +279,28 @@ router.post("/shifts", requireAdmin, async (req, res): Promise<void> => {
     isRepeat, repeatPattern, notes, employeeIds, requiredLicenseLevel, headcount,
     siteRateId,
   } = req.body;
+  // Leads never see or set rates; ignore any client-supplied rate fields and
+  // fall back to the site's configured defaults so payroll/invoicing still
+  // resolve a rate (never let a lead post a 0 that would poison the chain).
+  const isLead = req.user!.role === "lead";
 
-  // Resolve site to populate clientName/location automatically.
+  // Resolve site to populate clientName/location automatically. Also pull the
+  // site's default rates so lead-created shifts inherit them.
   let resolvedClientName = bodyClientName ?? null;
   let resolvedLocation = bodyLocation ?? null;
+  let siteDefaultPay: string | null = null;
+  let siteDefaultBill: string | null = null;
   if (siteId) {
     const [site] = await db
-      .select({ id: sitesTable.id, name: sitesTable.name, address: sitesTable.address, lat: sitesTable.locationLat, lng: sitesTable.locationLng, clientName: clientsTable.name })
+      .select({ id: sitesTable.id, name: sitesTable.name, address: sitesTable.address, lat: sitesTable.locationLat, lng: sitesTable.locationLng, clientName: clientsTable.name, defaultPayRate: sitesTable.defaultPayRate, defaultBillRate: sitesTable.defaultBillRate })
       .from(sitesTable)
       .leftJoin(clientsTable, eq(sitesTable.clientId, clientsTable.id))
       .where(eq(sitesTable.id, siteId));
     if (!site) { res.status(400).json({ error: "Bad Request", message: "Site not found" }); return; }
     resolvedClientName = site.clientName ?? resolvedClientName ?? null;
     resolvedLocation = site.address ?? resolvedLocation ?? site.name;
+    siteDefaultPay = site.defaultPayRate ?? null;
+    siteDefaultBill = site.defaultBillRate ?? null;
   }
 
   if (!title || !startTime || !endTime) {
@@ -285,11 +308,32 @@ router.post("/shifts", requireAdmin, async (req, res): Promise<void> => {
     return;
   }
 
+  // Leads inherit rates ONLY from the site default and must fail closed if the
+  // site has no usable defaults — never silently persist a 0 that would poison
+  // payroll/invoicing downstream.
+  if (isLead) {
+    if (!siteId) {
+      res.status(400).json({ error: "Bad Request", message: "Select a site — leads post shifts against a site." });
+      return;
+    }
+    const payOk = siteDefaultPay != null && Number.isFinite(Number(siteDefaultPay)) && Number(siteDefaultPay) > 0;
+    const billOk = siteDefaultBill != null && Number.isFinite(Number(siteDefaultBill)) && Number(siteDefaultBill) > 0;
+    if (!payOk || !billOk) {
+      res.status(400).json({ error: "Bad Request", message: "This site has no default pay/bill rate configured. An admin must set the site's default rates before a shift can be posted here." });
+      return;
+    }
+  }
+
   const lvl = [1, 2, 3, 4].includes(Number(requiredLicenseLevel)) ? Number(requiredLicenseLevel) : 2;
   const hc = Math.max(1, Number(headcount) || 1);
   // payRate/billRate are the canonical fields; legacy hourlyRate/billableRate fall back when not set.
-  const finalPay = payRate != null ? Number(payRate) : (hourlyRate != null ? Number(hourlyRate) : 0);
-  const finalBill = billRate != null ? Number(billRate) : (billableRate != null ? Number(billableRate) : 0);
+  // Leads: rates come only from the site default (validated non-zero above).
+  const finalPay = isLead
+    ? Number(siteDefaultPay)
+    : (payRate != null ? Number(payRate) : (hourlyRate != null ? Number(hourlyRate) : 0));
+  const finalBill = isLead
+    ? Number(siteDefaultBill)
+    : (billRate != null ? Number(billRate) : (billableRate != null ? Number(billableRate) : 0));
 
   const [shift] = await db.insert(shiftsTable).values({
     title,
@@ -353,7 +397,7 @@ router.post("/shifts", requireAdmin, async (req, res): Promise<void> => {
   // Outbound sync to scheduler (best-effort, after response)
   void pushShiftUpsert(shift);
 
-  res.status(201).json({ ...shift, assignments: [] });
+  res.status(201).json(stripShiftFinanceForLead(req.user!.role, { ...shift, assignments: [] }));
 });
 
 /**
@@ -727,12 +771,14 @@ router.get("/shifts/:id", requireAuth, async (req, res): Promise<void> => {
     .leftJoin(usersTable, eq(shiftAssignmentsTable.employeeId, usersTable.id))
     .where(eq(shiftAssignmentsTable.shiftId, id));
 
-  res.json({ ...shift, assignments });
+  res.json(stripShiftFinanceForLead(req.user!.role, { ...shift, assignments }));
 });
 
-router.put("/shifts/:id", requireAdmin, async (req, res): Promise<void> => {
+router.put("/shifts/:id", requireAdminOrLead, async (req, res): Promise<void> => {
   const id = Array.isArray(req.params.id) ? req.params.id[0] : req.params.id;
   const { title, siteId, startTime, endTime, payRate, billRate, hourlyRate, billableRate, status, notes, requiredLicenseLevel, headcount, siteRateId } = req.body;
+  // Leads must not change rates — ignore any rate fields they submit.
+  const isLead = req.user!.role === "lead";
   const updates: Record<string, unknown> = {};
   if (title) updates.title = title;
   if (siteId) {
@@ -749,10 +795,12 @@ router.put("/shifts/:id", requireAdmin, async (req, res): Promise<void> => {
   }
   if (startTime) updates.startTime = new Date(startTime);
   if (endTime) updates.endTime = new Date(endTime);
-  if (payRate !== undefined) { updates.payRate = String(payRate); updates.hourlyRate = String(payRate); }
-  if (billRate !== undefined) { updates.billRate = String(billRate); updates.billableRate = String(billRate); }
-  if (hourlyRate !== undefined && payRate === undefined) { updates.payRate = String(hourlyRate); updates.hourlyRate = String(hourlyRate); }
-  if (billableRate !== undefined && billRate === undefined) { updates.billRate = String(billableRate); updates.billableRate = String(billableRate); }
+  if (!isLead) {
+    if (payRate !== undefined) { updates.payRate = String(payRate); updates.hourlyRate = String(payRate); }
+    if (billRate !== undefined) { updates.billRate = String(billRate); updates.billableRate = String(billRate); }
+    if (hourlyRate !== undefined && payRate === undefined) { updates.payRate = String(hourlyRate); updates.hourlyRate = String(hourlyRate); }
+    if (billableRate !== undefined && billRate === undefined) { updates.billRate = String(billableRate); updates.billableRate = String(billableRate); }
+  }
   if (status) updates.status = status;
   if (notes !== undefined) updates.notes = notes;
   if (requiredLicenseLevel !== undefined && [1, 2, 3, 4].includes(Number(requiredLicenseLevel))) {
@@ -771,10 +819,10 @@ router.put("/shifts/:id", requireAdmin, async (req, res): Promise<void> => {
   if (!shift) { res.status(404).json({ error: "Not Found" }); return; }
   // Outbound sync to scheduler (best-effort, after response)
   void pushShiftUpsert(shift);
-  res.json({ ...shift, assignments: [] });
+  res.json(stripShiftFinanceForLead(req.user!.role, { ...shift, assignments: [] }));
 });
 
-router.delete("/shifts/:id", requireAdmin, async (req, res): Promise<void> => {
+router.delete("/shifts/:id", requireAdminOrLead, async (req, res): Promise<void> => {
   const id = Array.isArray(req.params.id) ? req.params.id[0] : req.params.id;
   // Fetch the row before deletion so we can include externalId + syncSource in the push.
   const [toDelete] = await db.select({ id: shiftsTable.id, externalId: shiftsTable.externalId, syncSource: shiftsTable.syncSource }).from(shiftsTable).where(eq(shiftsTable.id, id));
@@ -990,7 +1038,7 @@ router.post("/shifts/:id/notify-vacancy", requireAdminOrDispatcher, async (req, 
   res.json({ notifiedCount: targetIds.length, vacanciesRemaining });
 });
 
-router.post("/shifts/:id/assignments", requireAdminOrDispatcher, async (req, res): Promise<void> => {
+router.post("/shifts/:id/assignments", requireSchedulingStaff, async (req, res): Promise<void> => {
   const shiftId = Array.isArray(req.params.id) ? req.params.id[0] : req.params.id;
   const { employeeId, overrideLicense } = req.body;
   if (!employeeId) { res.status(400).json({ error: "Bad Request", message: "employeeId required" }); return; }
@@ -1142,8 +1190,10 @@ router.put("/shifts/:id/assignments/:assignmentId", requireAuth, async (req, res
   const [existing] = await db.select().from(shiftAssignmentsTable).where(eq(shiftAssignmentsTable.id, assignmentId));
   if (!existing) { res.status(404).json({ error: "Not Found" }); return; }
 
-  // Non-admins can only modify their own assignments.
-  if (req.user!.role !== "admin" && existing.employeeId !== req.user!.userId) {
+  // Admins and leads manage the roster (e.g. remove an officer to free a
+  // slot); everyone else can only modify their own assignment.
+  const canManageRoster = req.user!.role === "admin" || req.user!.role === "lead";
+  if (!canManageRoster && existing.employeeId !== req.user!.userId) {
     res.status(403).json({ error: "Forbidden", message: "You can only update your own assignments" });
     return;
   }

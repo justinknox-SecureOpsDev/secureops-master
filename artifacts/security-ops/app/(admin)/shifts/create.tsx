@@ -12,6 +12,7 @@ import { Feather } from "@expo/vector-icons";
 import { useRouter } from "expo-router";
 import { useQueryClient } from "@tanstack/react-query";
 import { KeyboardAwareScrollViewCompat } from "@/components/KeyboardAwareScrollViewCompat";
+import { useAuth } from "@/contexts/AuthContext";
 
 function Field({ label, value, onChangeText, placeholder, keyboardType, autoCapitalize, required }: any) {
   const colors = useColors();
@@ -45,6 +46,9 @@ export default function CreateShiftScreen() {
   const queryClient = useQueryClient();
   const createShift = useCreateShift();
   const topPad = useTopPad();
+  const { user } = useAuth();
+  // Leads never set rates — the server inherits them from the site default.
+  const isLead = user?.role === "lead";
   const navigation = useNavigation();
   useLayoutEffect(() => { (navigation as any).setOptions?.({ headerShown: false }); }, [navigation]);
 
@@ -80,8 +84,9 @@ export default function CreateShiftScreen() {
   const selectedSite = useMemo(() => (sites ?? []).find((s: any) => s.id === form.siteId), [sites, form.siteId]);
 
   const handleCreate = async () => {
-    if (!form.title || !form.siteId || !form.startTime || !form.endTime || !form.payRate || !form.billRate) {
-      Alert.alert("Missing Fields", "Title, site, times, pay rate and bill rate are required.");
+    const ratesRequired = !isLead;
+    if (!form.title || !form.siteId || !form.startTime || !form.endTime || (ratesRequired && (!form.payRate || !form.billRate))) {
+      Alert.alert("Missing Fields", ratesRequired ? "Title, site, times, pay rate and bill rate are required." : "Title, site and times are required.");
       return;
     }
     try {
@@ -92,8 +97,8 @@ export default function CreateShiftScreen() {
           notes: form.notes || undefined,
           startTime: new Date(form.startTime).toISOString(),
           endTime: new Date(form.endTime).toISOString(),
-          payRate: parseFloat(form.payRate),
-          billRate: parseFloat(form.billRate),
+          // Leads omit rates entirely; the server resolves them from the site default.
+          ...(isLead ? {} : { payRate: parseFloat(form.payRate), billRate: parseFloat(form.billRate) }),
           isRepeat: form.isRepeat,
           repeatPattern: form.isRepeat ? (form.repeatPattern as any) || undefined : undefined,
           requiredLicenseLevel: form.requiredLicenseLevel,
@@ -224,9 +229,13 @@ export default function CreateShiftScreen() {
           <Field label="Repeat Pattern" value={form.repeatPattern} onChangeText={set("repeatPattern")} placeholder="weekly" autoCapitalize="none" />
         )}
 
-        <Text style={[styles.sectionLabel, { color: colors.accent, marginTop: 20 }]}>RATES (this site / assignment)</Text>
-        <Field label="Officer Pay Rate ($/hr)" value={form.payRate} onChangeText={set("payRate")} placeholder="18.00" keyboardType="decimal-pad" autoCapitalize="none" required />
-        <Field label="Client Bill Rate ($/hr)" value={form.billRate} onChangeText={set("billRate")} placeholder="30.00" keyboardType="decimal-pad" autoCapitalize="none" required />
+        {!isLead && (
+          <>
+            <Text style={[styles.sectionLabel, { color: colors.accent, marginTop: 20 }]}>RATES (this site / assignment)</Text>
+            <Field label="Officer Pay Rate ($/hr)" value={form.payRate} onChangeText={set("payRate")} placeholder="18.00" keyboardType="decimal-pad" autoCapitalize="none" required />
+            <Field label="Client Bill Rate ($/hr)" value={form.billRate} onChangeText={set("billRate")} placeholder="30.00" keyboardType="decimal-pad" autoCapitalize="none" required />
+          </>
+        )}
 
         <View style={[styles.broadcastNote, { backgroundColor: colors.accent + "15", borderColor: colors.accent + "50" }]}>
           <Feather name="bell" size={14} color={colors.accent} />

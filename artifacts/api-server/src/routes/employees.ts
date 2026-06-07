@@ -2,7 +2,7 @@ import { Router, type IRouter } from "express";
 import bcrypt from "bcryptjs";
 import { eq, ilike, and, sql, desc } from "drizzle-orm";
 import { db, usersTable, employeesTable, licensesTable, employeeChangesTable } from "@workspace/db";
-import { requireAuth, requireAdmin, requireAdminOrDispatcher, verifyToken } from "../middlewares/auth";
+import { requireAuth, requireAdmin, requireAdminOrDispatcher, requireSchedulingStaff, verifyToken } from "../middlewares/auth";
 import type { Request, Response, NextFunction } from "express";
 import { buildEmployeeProfilePdf } from "../lib/profilePdf";
 import { writeEmployeeFieldChanges, CHANGE_FIELD_LABELS } from "../lib/employeeChangeLog";
@@ -222,9 +222,11 @@ function projectForDispatcher<T extends Record<string, unknown>>(row: T): Partia
 }
 
 
-router.get("/employees", requireAdminOrDispatcher, async (req, res): Promise<void> => {
+router.get("/employees", requireSchedulingStaff, async (req, res): Promise<void> => {
   const { status, search } = req.query as { status?: string; search?: string };
-  const isDispatcherOnly = req.user!.role === "dispatcher";
+  // Both dispatchers and leads get the PII/finance-stripped projection — they
+  // need the roster to staff shifts but must not see bank/SSN/etc.
+  const isDispatcherOnly = req.user!.role === "dispatcher" || req.user!.role === "lead";
 
   let query = db
     .select(employeeSelect)
@@ -367,10 +369,12 @@ router.get("/employees/:id", requireAuth, async (req, res): Promise<void> => {
     expiringLicenseCount: licenseCountsRaw[0]?.expiringSoon ?? 0,
     maxLicenseLevel: licenseCountsRaw[0]?.maxLevel ?? null,
   };
-  // Dispatcher: only the operational-safe subset (no banking / tax /
-  // right-to-work / personal docs). They may still hit this endpoint
-  // because the unified Dispatch panel deep-links to an officer card.
-  if (req.user!.role === "dispatcher") {
+  // Dispatcher AND lead: only the operational-safe subset (no banking / tax /
+  // right-to-work / personal docs). Dispatchers deep-link here from the Dispatch
+  // panel; leads must never see finance even on a self-read, so they get the
+  // same stripped projection (defense-in-depth — the mobile lead UI never
+  // navigates here, but a manual call must not leak rates/banking).
+  if (req.user!.role === "dispatcher" || req.user!.role === "lead") {
     res.json({
       ...projectForDispatcher(enriched),
       licenseCount: enriched.licenseCount,

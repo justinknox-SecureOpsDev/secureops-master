@@ -2723,7 +2723,7 @@ components:
           type: string
         role:
           type: string
-          enum: [admin, employee]
+          enum: [admin, employee, lead]
         status:
           type: string
           enum: [active, inactive, pending]
@@ -2762,7 +2762,7 @@ components:
           type: string
         role:
           type: string
-          enum: [admin, employee]
+          enum: [admin, employee, lead]
         status:
           type: string
           enum: [active, inactive, pending]
@@ -2851,7 +2851,7 @@ components:
         lastName: { type: string }
         role:
           type: string
-          enum: [admin, employee]
+          enum: [admin, employee, lead]
         position:
           type: string
           enum: [officer, support_staff]
