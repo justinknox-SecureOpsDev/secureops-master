@@ -60,11 +60,9 @@ export default function RootLayoutNav() {
     // Default landing.
     if (!inAuthGroup && !ALLOWED_TOP_SCREENS.has(top ?? "")) {
       if (user.role === "admin") router.replace("/(admin)/dashboard");
-      else if (user.role === "lead") router.replace("/(admin)/shifts");
       else router.replace("/(employee)/home");
     } else if (top === "login") {
       if (user.role === "admin") router.replace("/(admin)/dashboard");
-      else if (user.role === "lead") router.replace("/(admin)/shifts");
       else router.replace("/(employee)/home");
     }
   }, [user, isLoading, awaitingBiometric, segments]);

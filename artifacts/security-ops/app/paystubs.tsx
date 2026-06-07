@@ -8,6 +8,7 @@ import { useRouter, Stack } from "expo-router";
 import { Feather } from "@expo/vector-icons";
 import { useColors } from "@/hooks/useColors";
 import { apiRequest } from "@/utils/api";
+import { useAuth } from "@/contexts/AuthContext";
 
 type PaystubRow = {
   id: string;
@@ -62,6 +63,11 @@ export default function PaystubsScreen() {
   const colors = useColors();
   const router = useRouter();
   const topPad = useTopPad();
+  const { user } = useAuth();
+  // Leads must never see financial data. This screen is top-level (deep-linkable
+  // via /paystubs), so a route-level guard is required — hiding the link in the
+  // profile UI is not enough. Bounce leads to Home before any fetch.
+  const isLead = user?.role === "lead";
   const [data, setData] = useState<PaystubsResponse | null>(null);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -80,7 +86,12 @@ export default function PaystubsScreen() {
     }
   }, []);
 
-  useEffect(() => { void load(); }, [load]);
+  useEffect(() => {
+    if (isLead) { router.replace("/(employee)/home"); return; }
+    void load();
+  }, [load, isLead, router]);
+
+  if (isLead) return null;
 
   return (
     <>

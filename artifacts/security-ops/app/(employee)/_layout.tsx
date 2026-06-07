@@ -7,6 +7,7 @@ import { BlurView } from "expo-blur";
 import { TourProvider } from "@/contexts/TourContext";
 import WelcomeTour from "@/components/WelcomeTour";
 import { useChat } from "@/contexts/ChatContext";
+import { useAuth } from "@/contexts/AuthContext";
 
 export default function EmployeeLayout() {
   const colors = useColors();
@@ -23,6 +24,11 @@ export default function EmployeeLayout() {
 
 function EmployeeTabs({ colors, isIOS, isWeb }: { colors: ReturnType<typeof useColors>; isIOS: boolean; isWeb: boolean }) {
   const { totalUnread } = useChat();
+  const { user } = useAuth();
+  // Leads get the full employee experience PLUS a scheduling tab. The Schedule
+  // tab hosts a nested Stack (app/(employee)/schedule) that re-exports the admin
+  // shift screens. href:null keeps it off the tab bar for regular employees.
+  const isLead = user?.role === "lead";
   return (
     <Tabs
       screenOptions={{
@@ -59,6 +65,16 @@ function EmployeeTabs({ colors, isIOS, isWeb }: { colors: ReturnType<typeof useC
           title: "My Shifts",
           tabBarAccessibilityLabel: "My shifts tab",
           tabBarIcon: ({ color }) => <Feather name="calendar" size={22} color={color} />,
+        }}
+      />
+      <Tabs.Screen
+        name="schedule"
+        options={{
+          title: "Schedule",
+          headerShown: false,
+          href: isLead ? undefined : null,
+          tabBarAccessibilityLabel: "Schedule shifts tab",
+          tabBarIcon: ({ color }) => <Feather name="clipboard" size={22} color={color} />,
         }}
       />
       <Tabs.Screen

@@ -17,6 +17,7 @@
 - [Responsive single-render ref parity](responsive-single-render-ref-parity.md) — dual-layout→useIsMobile single-render: re-attach every per-row ref/handler to BOTH branches or behavior dies on one viewport.
 - [Auto-assign on clock-in eligibility](auto-assign-on-clockin-eligibility.md) — any path creating an accepted shift_assignment (incl. ad-hoc clock-in auto-assign) must apply the claim route's licence-level gate.
 - [Officers on admin portal](officer-on-admin-portal.md) — employees who sign into /admin-portal/ must be redirected to the SecureOps app root /, not dead-ended on "Admin access required".
+- [Lead no-finance invariant](lead-no-finance-invariant.md) — leads must see zero finance; deep-linkable top-level screens (paystubs/edit-profile) need in-screen role guards, not just hidden links/tabs.
 - [Admin grid derived-name links](admin-grid-derived-name-links.md) — derived cell linkTo back to its own table self-filters (feels like a no-op click); use linkRoute for profile navigation.
 - [Scheduler sync LWW tiebreaker](scheduler-sync-lww-tiebreaker.md) — inbound upsert tiebreaks incoming updatedAt vs the LOCAL row's wall-clock updatedAt; tests expecting "skipped" must past-date the payload.
 - [Email provider fallback](email-provider-fallback.md) — EMAIL_PROVIDER selects Resend/SMTP; only true recipient rejections are "bounced" (stops fallback), quota/auth/domain errors must stay "failed".

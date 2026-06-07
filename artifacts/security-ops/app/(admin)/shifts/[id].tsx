@@ -7,7 +7,7 @@ import { confirmAction, notify } from "@/utils/confirm";
 import { useGetShift, getGetShiftQueryKey, useGetEmployees, getGetEmployeesQueryKey, useAssignEmployeeToShift, useUpdateShiftAssignment, getGetShiftsQueryKey } from "@workspace/api-client-react";
 import { LicenseLevelBadge, levelLabel } from "@/components/LicenseLevelBadge";
 import { Feather } from "@expo/vector-icons";
-import { useLocalSearchParams, useRouter } from "expo-router";
+import { useLocalSearchParams, useRouter, useSegments } from "expo-router";
 import { useQueryClient } from "@tanstack/react-query";
 import { useAuth } from "@/contexts/AuthContext";
 
@@ -28,6 +28,10 @@ function InfoRow({ label, value, icon }: { label: string; value?: string | null;
 export default function ShiftDetailScreen() {
   const colors = useColors();
   const router = useRouter();
+  const segments = useSegments();
+  // Mounted in both the admin Shifts tab and the lead's employee-shell Schedule
+  // tab — keep own-stack nav (edit) inside whichever group is hosting us.
+  const shiftBase = segments[0] === "(employee)" ? "/(employee)/schedule" : "/(admin)/shifts";
   const queryClient = useQueryClient();
   const { id } = useLocalSearchParams<{ id: string }>();
   const { user } = useAuth();
@@ -130,7 +134,7 @@ export default function ShiftDetailScreen() {
         </TouchableOpacity>
         <Text style={[styles.pageTitle, { color: colors.foreground }]} numberOfLines={1} accessibilityRole="header">{shift.title}</Text>
         <TouchableOpacity
-          onPress={() => router.push(`/(admin)/shifts/edit/${id}` as any)}
+          onPress={() => router.push(`${shiftBase}/edit/${id}` as any)}
           style={[styles.backBtn, { borderColor: colors.primary }]}
           accessibilityRole="button"
           accessibilityLabel="Edit shift"

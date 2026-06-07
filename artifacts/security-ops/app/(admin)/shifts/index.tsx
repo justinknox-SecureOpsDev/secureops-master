@@ -4,7 +4,7 @@ import { View, Text, StyleSheet, FlatList, TouchableOpacity, ActivityIndicator, 
 import { useColors } from "@/hooks/useColors";
 import { useGetShifts, getGetShiftsQueryKey } from "@workspace/api-client-react";
 import { Feather } from "@expo/vector-icons";
-import { useRouter } from "expo-router";
+import { useRouter, useSegments } from "expo-router";
 import { useAuth } from "@/contexts/AuthContext";
 
 const STATUS_FILTERS = ["upcoming", "active", "completed", "cancelled"] as const;
@@ -23,6 +23,12 @@ function StatusBadge({ status }: { status: string }) {
 export default function AdminShiftsScreen() {
   const colors = useColors();
   const router = useRouter();
+  const segments = useSegments();
+  // These scheduling screens are mounted in BOTH shells: the admin Shifts tab
+  // (`(admin)/shifts`) and the lead's employee-shell Schedule tab
+  // (`(employee)/schedule`, which re-exports them). Resolve own-stack nav
+  // against the current group so a lead stays inside the employee shell.
+  const shiftBase = segments[0] === "(employee)" ? "/(employee)/schedule" : "/(admin)/shifts";
   const { user, logout } = useAuth();
   // Leads live entirely inside the Shifts tab (no profile tab to sign out from),
   // so the sign-out control + the finance-bearing rate tag are handled here.
@@ -57,7 +63,7 @@ export default function AdminShiftsScreen() {
       <View style={[styles.topBar, { paddingTop: topPad + 12, borderBottomColor: colors.border }]}>
         <Text style={[styles.pageTitle, { color: colors.foreground }]}>Shifts</Text>
         <View style={styles.topBarActions}>
-          <TouchableOpacity style={[styles.addBtn, { backgroundColor: colors.primary }]} onPress={() => router.push("/(admin)/shifts/create")} accessibilityRole="button" accessibilityLabel="Create shift">
+          <TouchableOpacity style={[styles.addBtn, { backgroundColor: colors.primary }]} onPress={() => router.push(`${shiftBase}/create` as any)} accessibilityRole="button" accessibilityLabel="Create shift">
             <Feather name="plus" size={20} color="#fff" />
           </TouchableOpacity>
           {isLead && (
@@ -131,7 +137,7 @@ export default function AdminShiftsScreen() {
           renderItem={({ item }) => (
             <TouchableOpacity
               style={[styles.card, { backgroundColor: colors.card, borderColor: colors.border }]}
-              onPress={() => router.push(`/(admin)/shifts/${item.id}` as any)}
+              onPress={() => router.push(`${shiftBase}/${item.id}` as any)}
               accessibilityRole="button"
               accessibilityLabel={`${item.title} for ${item.clientName}, ${item.status}, ${new Date(item.startTime).toLocaleString()}, ${item.assignments?.length ?? 0} assigned`}
               accessibilityHint="Opens shift details"
@@ -140,7 +146,7 @@ export default function AdminShiftsScreen() {
                 <Text style={[styles.shiftTitle, { color: colors.foreground }]}>{item.title}</Text>
                 <StatusBadge status={item.status} />
                 <TouchableOpacity
-                  onPress={(e) => { e.stopPropagation?.(); router.push(`/(admin)/shifts/edit/${item.id}` as any); }}
+                  onPress={(e) => { e.stopPropagation?.(); router.push(`${shiftBase}/edit/${item.id}` as any); }}
                   style={[styles.editBtn, { borderColor: colors.primary }]}
                   accessibilityRole="button"
                   accessibilityLabel={`Edit ${item.title}`}

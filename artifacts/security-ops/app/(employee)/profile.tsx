@@ -246,7 +246,10 @@ function RecentUpdatesSection({ employeeUserId }: { employeeUserId?: string }) {
 export default function EmployeeProfileScreen() {
   const colors = useColors();
   const router = useRouter();
-  const { logout } = useAuth();
+  const { logout, user } = useAuth();
+  // Leads keep the "no financial info" invariant inside the employee
+  // experience: hide their own pay rate, paystubs and W-2 doc.
+  const isLead = user?.role === "lead";
   const { open: openTour } = useTour();
   const { highContrast, setHighContrast } = useAccessibility();
   const topPad = useTopPad();
@@ -333,11 +336,11 @@ export default function EmployeeProfileScreen() {
           <View style={{ flex: 1, gap: 2 }}>
             <Text style={[styles.heroName, { color: colors.foreground }]}>{p?.firstName} {p?.lastName}</Text>
             <View style={[styles.roleBadge, { backgroundColor: colors.primary + "20", borderColor: colors.primary + "50" }]}>
-              <Text style={[styles.roleText, { color: colors.primary }]}>SECURITY OFFICER</Text>
+              <Text style={[styles.roleText, { color: colors.primary }]}>{isLead ? "SHIFT LEAD" : "SECURITY OFFICER"}</Text>
             </View>
           </View>
         </View>
-        {p?.hourlyRate && (
+        {!isLead && p?.hourlyRate && (
           <View style={[styles.rateBar, { backgroundColor: colors.secondary, borderColor: colors.border }]}>
             <Feather name="dollar-sign" size={14} color={colors.accent} />
             <Text style={[styles.rateText, { color: colors.accent }]}>${parseFloat(p.hourlyRate as any).toFixed(2)}/hr</Text>
@@ -411,17 +414,19 @@ export default function EmployeeProfileScreen() {
         )}
       </View>
 
-      <View style={[styles.section, { backgroundColor: colors.card, borderColor: colors.border }]}>
-        <Text style={[styles.sectionTitle, { color: colors.accent }]}>BANKING & TAX</Text>
-        <InfoRow label="Account name" value={p?.bankAccountName} icon="user" />
-        <InfoRow label="Account number" value={p?.bankAccountNumber ? `••••${String(p.bankAccountNumber).slice(-4)}` : null} icon="credit-card" />
-        <InfoRow label="Routing / sort code" value={p?.bankBsb} icon="hash" />
-        <InfoRow label="Tax code" value={p?.taxCode} icon="file-text" />
-        <InfoRow label="Direct deposit consent" value={p?.directDepositConsent ? "Yes" : (p?.directDepositConsent === false ? "No" : null)} icon="check" />
-        {!p?.bankAccountNumber && (
-          <Text style={[styles.emptyText, { color: colors.mutedForeground }]}>No banking details on file.</Text>
-        )}
-      </View>
+      {!isLead && (
+        <View style={[styles.section, { backgroundColor: colors.card, borderColor: colors.border }]}>
+          <Text style={[styles.sectionTitle, { color: colors.accent }]}>BANKING & TAX</Text>
+          <InfoRow label="Account name" value={p?.bankAccountName} icon="user" />
+          <InfoRow label="Account number" value={p?.bankAccountNumber ? `••••${String(p.bankAccountNumber).slice(-4)}` : null} icon="credit-card" />
+          <InfoRow label="Routing / sort code" value={p?.bankBsb} icon="hash" />
+          <InfoRow label="Tax code" value={p?.taxCode} icon="file-text" />
+          <InfoRow label="Direct deposit consent" value={p?.directDepositConsent ? "Yes" : (p?.directDepositConsent === false ? "No" : null)} icon="check" />
+          {!p?.bankAccountNumber && (
+            <Text style={[styles.emptyText, { color: colors.mutedForeground }]}>No banking details on file.</Text>
+          )}
+        </View>
+      )}
 
       <View style={[styles.section, { backgroundColor: colors.card, borderColor: colors.border }]}>
         <Text style={[styles.sectionTitle, { color: colors.accent }]}>EXPERIENCE</Text>
@@ -493,7 +498,7 @@ export default function EmployeeProfileScreen() {
         <DocRow label="TX security license" path={p?.licenseDocKey} icon="credit-card" />
         <DocRow label="Passport / photo ID" path={p?.passportDocKey} icon="book" />
         <DocRow label="Right-to-work doc" path={p?.rightToWorkDocKey} icon="check-circle" />
-        <DocRow label="W-2 / pay stub" path={p?.payStubDocKey} icon="dollar-sign" />
+        {!isLead && <DocRow label="W-2 / pay stub" path={p?.payStubDocKey} icon="dollar-sign" />}
         {certs.map((k, i) => (
           <DocRow key={k + i} label={`Training certificate ${i + 1}`} path={k} icon="award" />
         ))}
@@ -640,22 +645,24 @@ export default function EmployeeProfileScreen() {
           </View>
           <Feather name="chevron-right" size={16} color={colors.mutedForeground} />
         </TouchableOpacity>
-        <TouchableOpacity
-          onPress={() => router.push("/paystubs" as any)}
-          style={[styles.actionRow, { borderBottomColor: colors.border }]}
-          accessibilityRole="button"
-          accessibilityLabel="My paystubs"
-          accessibilityHint="View pay history and year-to-date totals"
-        >
-          <Feather name="dollar-sign" size={16} color={colors.accent} />
-          <View style={{ flex: 1 }}>
-            <Text style={{ color: colors.foreground, fontSize: 14, fontWeight: "600" }}>My paystubs</Text>
-            <Text style={{ color: colors.mutedForeground, fontSize: 12, marginTop: 2 }}>
-              View pay history and year-to-date totals
-            </Text>
-          </View>
-          <Feather name="chevron-right" size={16} color={colors.mutedForeground} />
-        </TouchableOpacity>
+        {!isLead && (
+          <TouchableOpacity
+            onPress={() => router.push("/paystubs" as any)}
+            style={[styles.actionRow, { borderBottomColor: colors.border }]}
+            accessibilityRole="button"
+            accessibilityLabel="My paystubs"
+            accessibilityHint="View pay history and year-to-date totals"
+          >
+            <Feather name="dollar-sign" size={16} color={colors.accent} />
+            <View style={{ flex: 1 }}>
+              <Text style={{ color: colors.foreground, fontSize: 14, fontWeight: "600" }}>My paystubs</Text>
+              <Text style={{ color: colors.mutedForeground, fontSize: 12, marginTop: 2 }}>
+                View pay history and year-to-date totals
+              </Text>
+            </View>
+            <Feather name="chevron-right" size={16} color={colors.mutedForeground} />
+          </TouchableOpacity>
+        )}
         <TouchableOpacity
           onPress={() => router.push("/swap-requests" as any)}
           style={[styles.actionRow, { borderBottomColor: colors.border }]}

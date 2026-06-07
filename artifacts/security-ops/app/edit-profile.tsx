@@ -91,6 +91,9 @@ export default function EditProfileScreen() {
   const qc = useQueryClient();
   const { user, updateUser } = useAuth();
   const userId = user?.id;
+  // Leads keep the "no financial info" invariant: never show or submit their
+  // hourly rate / bank details in the self-edit profile screen.
+  const isLead = user?.role === "lead";
   const isFirstRun = user?.mustCompleteProfile === true;
 
   const { data: profile, isLoading } = useGetEmployee(userId!, {
@@ -228,9 +231,13 @@ export default function EditProfileScreen() {
     payload.uniformTrousers = trim(form.uniformTrousers) || null;
     payload.uniformJacket = trim(form.uniformJacket) || null;
     payload.uniformBoots = trim(form.uniformBoots) || null;
-    payload.bankAccountName = trim(form.bankAccountName) || null;
-    payload.bankAccountNumber = trim(form.bankAccountNumber) || null;
-    payload.bankBsb = trim(form.bankBsb) || null;
+    // Leads never edit banking — don't send these fields (the section is hidden,
+    // so the form values would be empty and could wipe data we never showed).
+    if (!isLead) {
+      payload.bankAccountName = trim(form.bankAccountName) || null;
+      payload.bankAccountNumber = trim(form.bankAccountNumber) || null;
+      payload.bankBsb = trim(form.bankBsb) || null;
+    }
     const skills = form.skills.split(",").map((s) => s.trim()).filter(Boolean);
     payload.skills = skills;
     // Only send doc keys that actually changed from what's on the profile.
@@ -310,7 +317,7 @@ export default function EditProfileScreen() {
           <ReadOnly label="Email" value={profile.email} />
           <ReadOnly label="Name" value={`${profile.firstName} ${profile.lastName}`} />
           <ReadOnly label="Role" value={profile.role ?? "employee"} />
-          {profile.hourlyRate != null && <ReadOnly label="Hourly rate" value={`$${parseFloat(profile.hourlyRate as any).toFixed(2)}`} />}
+          {!isLead && profile.hourlyRate != null && <ReadOnly label="Hourly rate" value={`$${parseFloat(profile.hourlyRate as any).toFixed(2)}`} />}
           {profile.siaLicenseNumber && <ReadOnly label="License" value={`L${profile.siaLicenseLevel ?? "?"} · ${profile.siaLicenseNumber}`} />}
           <Text style={[styles.note, { color: colors.mutedForeground }]}>Contact admin to change the fields above.</Text>
         </Section>
@@ -382,12 +389,14 @@ export default function EditProfileScreen() {
           <Field label="Boots"><Input value={form.uniformBoots} onChangeText={(v) => set("uniformBoots", v)} accessibilityLabel="Boots size" /></Field>
         </Section>
 
-        <Section title="Bank details">
-          <Field label="Account name"><Input value={form.bankAccountName} onChangeText={(v) => set("bankAccountName", v)} accessibilityLabel="Bank account name" /></Field>
-          <Field label="Account number"><Input value={form.bankAccountNumber} onChangeText={(v) => set("bankAccountNumber", v)} keyboardType="number-pad" accessibilityLabel="Bank account number" /></Field>
-          <Field label="Routing / sort code"><Input value={form.bankBsb} onChangeText={(v) => set("bankBsb", v)} accessibilityLabel="Routing or sort code" /></Field>
-          <NotifiedNote />
-        </Section>
+        {!isLead && (
+          <Section title="Bank details">
+            <Field label="Account name"><Input value={form.bankAccountName} onChangeText={(v) => set("bankAccountName", v)} accessibilityLabel="Bank account name" /></Field>
+            <Field label="Account number"><Input value={form.bankAccountNumber} onChangeText={(v) => set("bankAccountNumber", v)} keyboardType="number-pad" accessibilityLabel="Bank account number" /></Field>
+            <Field label="Routing / sort code"><Input value={form.bankBsb} onChangeText={(v) => set("bankBsb", v)} accessibilityLabel="Routing or sort code" /></Field>
+            <NotifiedNote />
+          </Section>
+        )}
 
         <Section title="Documents">
           <Text style={[styles.note, { color: colors.mutedForeground }]}>

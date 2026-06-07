@@ -18,12 +18,17 @@ import { Feather } from "@expo/vector-icons";
 import { LicenseLevelBadge, levelLabel } from "@/components/LicenseLevelBadge";
 import { SwapRequestModal } from "@/components/SwapRequestModal";
 import { useRouter, useLocalSearchParams } from "expo-router";
+import { useAuth } from "@/contexts/AuthContext";
 
 const FILTERS = ["available", "upcoming", "active", "completed"] as const;
 
 export default function EmployeeShiftsScreen() {
   const colors = useColors();
   const router = useRouter();
+  // Leads keep the "no financial info" invariant even in the employee
+  // experience: hide per-shift pay/earnings on their own My Shifts list.
+  const { user } = useAuth();
+  const isLead = user?.role === "lead";
   const queryClient = useQueryClient();
   const [filter, setFilter] = useState<typeof FILTERS[number]>("available");
   const [busyId, setBusyId] = useState<string | null>(null);
@@ -447,12 +452,14 @@ export default function EmployeeShiftsScreen() {
                   <Text style={[styles.detailText, { color: colors.mutedForeground }]} numberOfLines={1}>{item.location}</Text>
                 </View>
 
-                <View style={styles.rateRow}>
-                  <Text style={[styles.rateText, { color: colors.primary }]}>${parseFloat(item.payRate ?? item.hourlyRate ?? "0").toFixed(2)}/hr</Text>
-                  <Text style={[styles.earnText, { color: colors.mutedForeground }]}>
-                    ≈ ${(parseFloat(item.payRate ?? item.hourlyRate ?? "0") * parseFloat(duration)).toFixed(2)} total
-                  </Text>
-                </View>
+                {!isLead && (
+                  <View style={styles.rateRow}>
+                    <Text style={[styles.rateText, { color: colors.primary }]}>${parseFloat(item.payRate ?? item.hourlyRate ?? "0").toFixed(2)}/hr</Text>
+                    <Text style={[styles.earnText, { color: colors.mutedForeground }]}>
+                      ≈ ${(parseFloat(item.payRate ?? item.hourlyRate ?? "0") * parseFloat(duration)).toFixed(2)} total
+                    </Text>
+                  </View>
+                )}
 
                 {item.notes && (
                   <View style={[styles.notesBox, { backgroundColor: colors.secondary, borderColor: colors.border }]}>
