@@ -197,6 +197,22 @@ export const GetMyClockInSitesResponse = zod.array(
 );
 
 /**
+ * @summary List the current officer's reserved shifts that are clockable right now (no finance fields)
+ */
+export const GetMyClockInShiftsResponseItem = zod.object({
+  shiftId: zod.string(),
+  title: zod.string().optional(),
+  siteId: zod.string().nullish(),
+  siteName: zod.string().nullish(),
+  address: zod.string().nullish(),
+  startTime: zod.coerce.date(),
+  endTime: zod.coerce.date(),
+});
+export const GetMyClockInShiftsResponse = zod.array(
+  GetMyClockInShiftsResponseItem,
+);
+
+/**
  * @summary Get site
  */
 export const GetSiteParams = zod.object({

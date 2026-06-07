@@ -44,6 +44,7 @@ import type {
   ClientShift,
   ClientUser,
   ClockInRequest,
+  ClockInShift,
   ClockInSite,
   ClockOutRequest,
   CreateChatRoomBody,
@@ -826,6 +827,81 @@ export function useGetMyClockInSites<
   request?: SecondParameter<typeof customFetch>;
 }): UseQueryResult<TData, TError> & { queryKey: QueryKey } {
   const queryOptions = getGetMyClockInSitesQueryOptions(options);
+
+  const query = useQuery(queryOptions) as UseQueryResult<TData, TError> & {
+    queryKey: QueryKey;
+  };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
+
+/**
+ * @summary List the current officer's reserved shifts that are clockable right now (no finance fields)
+ */
+export const getGetMyClockInShiftsUrl = () => {
+  return `/api/me/clock-in-shifts`;
+};
+
+export const getMyClockInShifts = async (
+  options?: RequestInit,
+): Promise<ClockInShift[]> => {
+  return customFetch<ClockInShift[]>(getGetMyClockInShiftsUrl(), {
+    ...options,
+    method: "GET",
+  });
+};
+
+export const getGetMyClockInShiftsQueryKey = () => {
+  return [`/api/me/clock-in-shifts`] as const;
+};
+
+export const getGetMyClockInShiftsQueryOptions = <
+  TData = Awaited<ReturnType<typeof getMyClockInShifts>>,
+  TError = ErrorType<unknown>,
+>(options?: {
+  query?: UseQueryOptions<
+    Awaited<ReturnType<typeof getMyClockInShifts>>,
+    TError,
+    TData
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}) => {
+  const { query: queryOptions, request: requestOptions } = options ?? {};
+
+  const queryKey = queryOptions?.queryKey ?? getGetMyClockInShiftsQueryKey();
+
+  const queryFn: QueryFunction<
+    Awaited<ReturnType<typeof getMyClockInShifts>>
+  > = ({ signal }) => getMyClockInShifts({ signal, ...requestOptions });
+
+  return { queryKey, queryFn, ...queryOptions } as UseQueryOptions<
+    Awaited<ReturnType<typeof getMyClockInShifts>>,
+    TError,
+    TData
+  > & { queryKey: QueryKey };
+};
+
+export type GetMyClockInShiftsQueryResult = NonNullable<
+  Awaited<ReturnType<typeof getMyClockInShifts>>
+>;
+export type GetMyClockInShiftsQueryError = ErrorType<unknown>;
+
+/**
+ * @summary List the current officer's reserved shifts that are clockable right now (no finance fields)
+ */
+
+export function useGetMyClockInShifts<
+  TData = Awaited<ReturnType<typeof getMyClockInShifts>>,
+  TError = ErrorType<unknown>,
+>(options?: {
+  query?: UseQueryOptions<
+    Awaited<ReturnType<typeof getMyClockInShifts>>,
+    TError,
+    TData
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+  const queryOptions = getGetMyClockInShiftsQueryOptions(options);
 
   const query = useQuery(queryOptions) as UseQueryResult<TData, TError> & {
     queryKey: QueryKey;

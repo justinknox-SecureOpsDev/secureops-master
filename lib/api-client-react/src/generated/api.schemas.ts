@@ -912,6 +912,16 @@ export interface ClockInSite {
   locationLng?: number;
 }
 
+export interface ClockInShift {
+  shiftId: string;
+  title?: string;
+  siteId?: string | null;
+  siteName?: string | null;
+  address?: string | null;
+  startTime: string;
+  endTime: string;
+}
+
 export interface CreateSiteRequest {
   /** Optional when posting to /clients/{id}/sites */
   clientId?: string;

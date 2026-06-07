@@ -155,6 +155,20 @@ paths:
                 type: array
                 items: { $ref: "#/components/schemas/ClockInSite" }
 
+  /me/clock-in-shifts:
+    get:
+      operationId: getMyClockInShifts
+      tags: [shifts]
+      summary: "List the current officer's reserved shifts that are clockable right now (no finance fields)"
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: "#/components/schemas/ClockInShift" }
+
   /sites/{id}:
     get:
       operationId: getSite
@@ -3512,6 +3526,18 @@ components:
         locationLat: { type: number }
         locationLng: { type: number }
       required: [id, name]
+
+    ClockInShift:
+      type: object
+      properties:
+        shiftId: { type: string }
+        title: { type: string }
+        siteId: { type: string, nullable: true }
+        siteName: { type: string, nullable: true }
+        address: { type: string, nullable: true }
+        startTime: { type: string, format: date-time }
+        endTime: { type: string, format: date-time }
+      required: [shiftId, startTime, endTime]
 
     CreateSiteRequest:
       type: object

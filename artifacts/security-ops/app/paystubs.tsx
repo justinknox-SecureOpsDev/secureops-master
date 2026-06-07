@@ -87,7 +87,7 @@ export default function PaystubsScreen() {
   }, []);
 
   useEffect(() => {
-    if (isLead) { router.replace("/(employee)/home"); return; }
+    if (isLead) { router.replace("/(admin)/shifts"); return; }
     void load();
   }, [load, isLead, router]);
 

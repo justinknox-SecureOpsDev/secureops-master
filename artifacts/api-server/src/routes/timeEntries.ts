@@ -369,6 +369,44 @@ router.get("/me/clock-in-sites", requireStaff, async (req, res): Promise<void> =
   res.json(rows);
 });
 
+// Reserved shifts the current officer can clock into RIGHT NOW. This is the
+// preferred manual clock-in picker: selecting a shift binds the time entry to
+// that shift, so payRate/billRate resolve from the shift and payroll/invoicing
+// stay clean (vs. an ad-hoc site pick that carries no rate). Only shifts inside
+// the live clock-in window are returned — from 30 min before start until end —
+// mirroring clockInWindowRejection, so the list never offers a shift the
+// /clock-in handler would reject. Officer-facing: NO finance fields exposed.
+router.get("/me/clock-in-shifts", requireStaff, async (req, res): Promise<void> => {
+  const now = new Date();
+  const opensCutoff = new Date(now.getTime() + CLOCK_IN_EARLY_GRACE_MS);
+  const farFutureCutoff = new Date("2090-01-01T00:00:00Z");
+  const rows = await db
+    .select({
+      shiftId: shiftsTable.id,
+      title: shiftsTable.title,
+      siteId: shiftsTable.siteId,
+      siteName: sitesTable.name,
+      address: sitesTable.address,
+      startTime: shiftsTable.startTime,
+      endTime: shiftsTable.endTime,
+    })
+    .from(shiftAssignmentsTable)
+    .innerJoin(shiftsTable, eq(shiftAssignmentsTable.shiftId, shiftsTable.id))
+    .leftJoin(sitesTable, eq(shiftsTable.siteId, sitesTable.id))
+    .where(and(
+      eq(shiftAssignmentsTable.employeeId, req.user!.userId),
+      eq(shiftAssignmentsTable.status, "accepted"),
+      ne(shiftsTable.status, "cancelled"),
+      ne(shiftsTable.status, "completed"),
+      // Window: now >= startTime - 30min  AND  now <= endTime.
+      lte(shiftsTable.startTime, opensCutoff),
+      gte(shiftsTable.endTime, now),
+      lte(shiftsTable.startTime, farFutureCutoff),
+    ))
+    .orderBy(shiftsTable.startTime);
+  res.json(rows);
+});
+
 router.get("/time-entries", requireAuth, async (req, res): Promise<void> => {
   const { employeeId, shiftId, siteId, approvalStatus, from, to } = req.query as Record<string, string | undefined>;
 

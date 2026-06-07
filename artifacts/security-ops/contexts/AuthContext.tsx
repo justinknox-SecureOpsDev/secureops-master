@@ -1,4 +1,5 @@
 import React, { createContext, useContext, useState, useEffect, useCallback, ReactNode } from "react";
+import { useQueryClient } from "@tanstack/react-query";
 import { User, setUnauthorizedHandler } from "@workspace/api-client-react";
 import { storage } from "@/utils/storage";
 import {
@@ -34,6 +35,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [token, setTokenState] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [awaitingBiometric, setAwaitingBiometric] = useState(false);
+  const queryClient = useQueryClient();
 
   const tryRestoreCachedSession = useCallback(async () => {
     const storedToken = await storage.get(AUTH_TOKEN_KEY);
@@ -69,6 +71,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, [tryRestoreCachedSession]);
 
   const login = async (newUser: User, newToken: string) => {
+    // Drop any cached query data from a previous session so one user can never
+    // see another's data (e.g. an admin's cached payroll/invoices surfacing to
+    // a lead who signs in next on the same device).
+    queryClient.clear();
     setUser(newUser);
     setTokenState(newToken);
     setAwaitingBiometric(false);
@@ -82,6 +88,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setAwaitingBiometric(false);
     await storage.remove(AUTH_TOKEN_KEY);
     await storage.remove(AUTH_USER_KEY);
+    // Purge cached query data so the next user on this device starts clean.
+    queryClient.clear();
   };
 
   const updateUser = async (patch: Partial<User>) => {

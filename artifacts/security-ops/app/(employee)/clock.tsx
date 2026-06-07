@@ -4,7 +4,7 @@ import { View, Text, StyleSheet, TouchableOpacity, ActivityIndicator, ScrollView
 import { useColors } from "@/hooks/useColors";
 import { useHighlightFlash } from "@/hooks/useHighlightFlash";
 import { useLocalSearchParams } from "expo-router";
-import { useClockIn, useClockOut, useGetActiveTimeEntry, getGetActiveTimeEntryQueryKey, useGetTimeEntries, getGetTimeEntriesQueryKey, updateMyLocation, useGetMyClockInSites, getGetMyClockInSitesQueryKey, getGetEmployeeDashboardSummaryQueryKey, getGetShiftsQueryKey } from "@workspace/api-client-react";
+import { useClockIn, useClockOut, useGetActiveTimeEntry, getGetActiveTimeEntryQueryKey, useGetTimeEntries, getGetTimeEntriesQueryKey, updateMyLocation, useGetMyClockInShifts, getGetMyClockInShiftsQueryKey, getGetEmployeeDashboardSummaryQueryKey, getGetShiftsQueryKey } from "@workspace/api-client-react";
 import { Feather } from "@expo/vector-icons";
 import { useQueryClient } from "@tanstack/react-query";
 import * as Location from "expo-location";
@@ -76,13 +76,15 @@ export default function EmployeeClockScreen() {
   const clockInMutation = useClockIn({ mutation: { networkMode: "always" } });
   const clockOutMutation = useClockOut({ mutation: { networkMode: "always" } });
 
-  // Manual site picker fallback. Needed whenever GPS is unavailable (web preview
+  // Manual shift picker fallback. Needed whenever GPS is unavailable (web preview
   // blocks geolocation; native GPS can be denied/off) OR the officer's venue has
   // a Site with no saved coordinates, where geo-resolution can never match. The
-  // officer's explicit pick is sent as siteId and the server skips the geo check.
-  const [showSitePicker, setShowSitePicker] = useState(false);
-  const { data: sitesList } = useGetMyClockInSites({
-    query: { queryKey: getGetMyClockInSitesQueryKey() },
+  // officer taps a reserved shift; we send its shiftId so the server skips the
+  // geo check AND the time entry binds to the shift (pay/bill rates resolve from
+  // it, so payroll/invoicing stay clean — an ad-hoc site pick carries no rate).
+  const [showShiftPicker, setShowShiftPicker] = useState(false);
+  const { data: shiftsList } = useGetMyClockInShifts({
+    query: { queryKey: getGetMyClockInShiftsQueryKey() },
   });
 
   const isClockedIn = !!currentEntry?.id;
@@ -130,12 +132,13 @@ export default function EmployeeClockScreen() {
     return () => { cancelled = true; clearInterval(t); };
   }, [isClockedIn]);
 
-  const performClockIn = async (opts: { lat?: number; lng?: number; siteId?: string; siteLabel?: string }) => {
-    const { lat, lng, siteId, siteLabel } = opts;
+  const performClockIn = async (opts: { lat?: number; lng?: number; siteId?: string; shiftId?: string; siteLabel?: string }) => {
+    const { lat, lng, siteId, shiftId, siteLabel } = opts;
     try {
       const result: any = await clockInMutation.mutateAsync({
         data: {
           ...(lat != null && lng != null ? { lat, lng } : {}),
+          ...(shiftId ? { shiftId } : {}),
           ...(siteId ? { siteId } : {}),
         } as any,
       });
@@ -165,10 +168,10 @@ export default function EmployeeClockScreen() {
       // siteId and lets the server skip the geo check. The `!siteLabel` guard
       // prevents a loop when the failing attempt was itself a manual pick.
       if (!siteLabel && (status === 422 || code === "No Site Nearby")) {
-        setShowSitePicker(true);
+        setShowShiftPicker(true);
         setStatusMsg({
           kind: "info",
-          text: "We couldn't match your location to a site automatically. Pick your site below to clock in.",
+          text: "We couldn't match your location to a site automatically. Tap your reserved shift below to clock in.",
         });
         return;
       }
@@ -180,8 +183,8 @@ export default function EmployeeClockScreen() {
     setStatusMsg(null);
     if (!location) {
       // GPS unavailable/denied (web preview or native permission off) — let the
-      // officer pick their site manually instead of dead-ending.
-      setShowSitePicker(true);
+      // officer pick their reserved shift manually instead of dead-ending.
+      setShowShiftPicker(true);
       return;
     }
     setConfirmModal({
@@ -195,20 +198,15 @@ export default function EmployeeClockScreen() {
     });
   };
 
-  const handlePickSite = (site: any) => {
-    setShowSitePicker(false);
+  const handlePickShift = (shift: any) => {
+    setShowShiftPicker(false);
     setStatusMsg(null);
-    // Send the explicit siteId so the server can clock in even when the site has
-    // no saved coordinates. Include coords too when the site has them (seeds the
-    // live map and geofence), but they're no longer required.
-    const lat = site?.locationLat != null ? Number(site.locationLat) : null;
-    const lng = site?.locationLng != null ? Number(site.locationLng) : null;
-    const hasCoords = lat != null && lng != null && !Number.isNaN(lat) && !Number.isNaN(lng);
-    if (hasCoords) setLocation({ lat: lat!, lon: lng! });
+    // Send the shiftId so the server binds the time entry to this reserved shift
+    // (pay/bill rates resolve from it) and skips the geo check. siteLabel doubles
+    // as the loop guard in performClockIn's 422 handler.
     performClockIn({
-      ...(hasCoords ? { lat: lat!, lng: lng! } : {}),
-      siteId: site.id,
-      siteLabel: site.name,
+      shiftId: shift.shiftId,
+      siteLabel: shift.siteName ?? shift.title ?? "your shift",
     });
   };
 
@@ -240,6 +238,7 @@ export default function EmployeeClockScreen() {
         queryClient.invalidateQueries({ queryKey: getGetTimeEntriesQueryKey() }),
         queryClient.invalidateQueries({ queryKey: getGetEmployeeDashboardSummaryQueryKey() }),
         queryClient.invalidateQueries({ queryKey: getGetShiftsQueryKey() }),
+        queryClient.invalidateQueries({ queryKey: getGetMyClockInShiftsQueryKey() }),
       ]);
     } catch (e: any) {
       const msg = e?.response?.data?.message || e?.message || "Clock-out failed";
@@ -332,15 +331,15 @@ export default function EmployeeClockScreen() {
           </TouchableOpacity>
         )}
 
-        {!isClockedIn && !entryLoading && !showSitePicker && (
+        {!isClockedIn && !entryLoading && !showShiftPicker && (
           <TouchableOpacity
-            onPress={() => { setStatusMsg(null); setShowSitePicker(true); }}
+            onPress={() => { setStatusMsg(null); setShowShiftPicker(true); }}
             accessibilityRole="button"
-            accessibilityLabel="Pick your site to clock in"
+            accessibilityLabel="Pick your reserved shift to clock in"
             style={{ marginTop: 14 }}
           >
             <Text style={{ color: colors.primary, fontSize: 13, textDecorationLine: "underline", textAlign: "center" }}>
-              Location not working? Pick your site
+              Location not working? Pick your shift
             </Text>
           </TouchableOpacity>
         )}
@@ -368,42 +367,49 @@ export default function EmployeeClockScreen() {
         )}
       </View>
 
-      {showSitePicker && (
+      {showShiftPicker && (
         <View style={[styles.section, { backgroundColor: colors.card, borderColor: colors.border, marginHorizontal: 16, borderRadius: 12, borderWidth: 1, padding: 16 }]}>
           <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
-            <Text style={[styles.sectionTitle, { color: colors.accent }]}>PICK A SITE</Text>
+            <Text style={[styles.sectionTitle, { color: colors.accent }]}>PICK A SHIFT</Text>
             <TouchableOpacity
-              onPress={() => setShowSitePicker(false)}
+              onPress={() => setShowShiftPicker(false)}
               accessibilityRole="button"
-              accessibilityLabel="Close site picker"
+              accessibilityLabel="Close shift picker"
             >
               <Feather name="x" size={18} color={colors.mutedForeground} />
             </TouchableOpacity>
           </View>
           <Text style={{ color: colors.mutedForeground, fontSize: 12, marginBottom: 10 }}>
-            Tap the site you're clocking in at:
+            Tap your reserved shift to clock in:
           </Text>
-          {((sitesList as any[]) ?? []).map((s: any) => (
+          {((shiftsList as any[]) ?? []).map((s: any) => (
             <TouchableOpacity
-              key={s.id}
-              onPress={() => handlePickSite(s)}
+              key={s.shiftId}
+              onPress={() => handlePickShift(s)}
               accessibilityRole="button"
-              accessibilityLabel={`Clock in at ${s.name}`}
+              accessibilityLabel={`Clock in to ${s.title ?? "shift"}${s.siteName ? ` at ${s.siteName}` : ""}`}
               style={[
                 styles.entryCard,
                 { backgroundColor: colors.background, borderColor: colors.border, padding: 12 },
               ]}
             >
               <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
-                <Feather name="map-pin" size={14} color={colors.primary} />
-                <Text style={[{ color: colors.foreground, fontWeight: "600", flex: 1 }]}>{s.name}</Text>
+                <Feather name="briefcase" size={14} color={colors.primary} />
+                <Text style={[{ color: colors.foreground, fontWeight: "600", flex: 1 }]}>{s.title ?? s.siteName ?? "Shift"}</Text>
                 <Feather name="chevron-right" size={16} color={colors.mutedForeground} />
               </View>
-              {s.address ? <Text style={{ color: colors.mutedForeground, fontSize: 12, marginTop: 4, marginLeft: 22 }}>{s.address}</Text> : null}
+              <Text style={{ color: colors.mutedForeground, fontSize: 12, marginTop: 4, marginLeft: 22 }}>
+                {new Date(s.startTime).toLocaleString([], { weekday: "short", hour: "2-digit", minute: "2-digit" })}
+                {" – "}
+                {new Date(s.endTime).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
+                {s.siteName ? ` · ${s.siteName}` : ""}
+              </Text>
             </TouchableOpacity>
           ))}
-          {((sitesList as any[]) ?? []).length === 0 && (
-            <Text style={{ color: colors.mutedForeground, fontSize: 12, textAlign: "center", padding: 20 }}>No sites configured.</Text>
+          {((shiftsList as any[]) ?? []).length === 0 && (
+            <Text style={{ color: colors.mutedForeground, fontSize: 12, textAlign: "center", padding: 20 }}>
+              No shifts to clock into right now. You can clock in from 30 minutes before a reserved shift starts — reserve shifts in the Shifts tab.
+            </Text>
           )}
         </View>
       )}
