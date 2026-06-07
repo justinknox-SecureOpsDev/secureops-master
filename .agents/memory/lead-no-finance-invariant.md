@@ -1,45 +1,42 @@
 ---
-name: Lead role "no financial info" invariant
-description: Where finance must be hidden for the mobile lead role, and how leads are confined in the app shell
+name: Lead role finance/PII boundary (full employee + scheduling)
+description: What a lead CAN vs CANNOT see after leads became full employees with scheduling powers
 ---
 
-The mobile **lead** role manages scheduling + staffing but must NEVER see financial
-data (payRate / billRate / hourlyRate / earnings / bank / tax / payroll / paystubs /
-W-2 / invoices / client billing terms).
+The mobile **lead** role is a **full employee PLUS scheduling powers**. A lead lives in
+the normal `(employee)` shell (Home / My Shifts / Clock / Incidents / Chat / Radio /
+Profile) and reaches scheduling via a lead-only **Schedule** tab
+(`app/(employee)/schedule`, re-exports the `(admin)/shifts` screens). There is NO
+redirect into the admin shell anymore.
 
-**Why:** It is a hard product/security policy, not a cosmetic choice. A code review
-caught real leaks after the first pass hid only tab/link entry points.
+**The boundary is OWN vs OTHER, not "all finance".**
+- A lead SEES their OWN finance like any officer: own hourly rate + banking/tax +
+  W-2 doc on their Profile, own paystubs (`/me/payroll`), own rate readonly + editable
+  bank details in edit-profile.
+- A lead must NEVER see OTHER people's finance/PII: pay/bill rates on the shifts they
+  schedule, and other officers' banking/SSN/tax on the roster.
 
-**Current shell design:** Leads live in the **admin shell** (`app/(admin)/`) but are
-confined to the **Shifts stack only**. The tab bar is pruned for leads in
-`app/(admin)/_layout.tsx` (href:null on non-shifts tabs), and `RootLayoutNav` enforces
-the route-level half: a lead in any auth group who is NOT in `(admin)/shifts` is
-bounced to `/(admin)/shifts`. That single catch-all covers deep-links into every other
-admin screen (payroll/invoices/dashboard/clients/employees) AND the entire `(employee)`
-shell. Leads land on `/(admin)/shifts` from RootLayoutNav's default-landing and
-post-login branches; sign-out lives on `(admin)/shifts/index.tsx`.
+**Why:** Product policy (Task: "make Lead a full employee + scheduling"). Earlier design
+made leads restricted-admins with ALL finance hidden incl. their own — that was wrong;
+they are employees who also schedule.
 
-**How to apply — three layers, all required:**
-1. **Server projection/guards** strip finance for leads on every read (shifts finance
-   strip + rate fallback, clients/sites/employees lead projections). This is the real
-   boundary — server 403s/strips so a lead never *fetches* finance.
-2. **Route confinement** (`RootLayoutNav` lead catch-all + `(admin)/_layout` tab prune)
-   keeps leads on Shifts. Hiding a tab is NOT enough on its own.
-3. **Cross-session cache purge:** `AuthContext` calls `queryClient.clear()` on BOTH
-   `login()` and `logout()`. Without this, a prior admin session's cached payroll/
-   invoice data lingers in the React Query cache and surfaces to a lead who signs in
-   next on the same device — even though the server would 403 a fresh fetch.
+**How the OTHER-people boundary is enforced (keep these unchanged):**
+1. `stripShiftFinanceForLead` in `routes/shifts.ts` strips payRate/billRate for leads on
+   every `/shifts` read. **Consequence:** the lead's own `(employee)/shifts.tsx` My Shifts
+   list keeps its `{!isLead && ...}` per-shift pay row hidden — the data is stripped
+   server-side, so showing it would render $0.00. Own rate comes from Profile, not here.
+2. Roster/employee projection: `GET /employees/:id` strips finance/PII for a lead reading
+   SOMEONE ELSE, but returns the FULL record on a **lead self-read**
+   (`role==="lead" && userId===id`). `GET /employees` list stays stripped (roster = others).
+3. The `(admin)/shifts/*` screens (create/edit/[id]/index) hide pay/bill rate fields for
+   leads — these are the "shifts they schedule" surfaces.
 
-**Top-level deep-linkable screens escape the group catch-all.** Expo-router top-level
-screens (e.g. `app/paystubs.tsx`) are NOT inside `(admin)`/`(employee)`, so the
-RootLayoutNav group-guard does not catch them. Any finance-bearing top-level screen
-needs its OWN in-screen lead guard: `const isLead = user?.role === "lead"` →
-`router.replace("/(admin)/shifts")` in an effect + `if (isLead) return null` before any
-fetch/render. `paystubs.tsx` already does this. Add the same to any future top-level
-finance route.
+**Own-finance endpoints already work for leads with no change:** `/me/payroll` pins to
+`req.user.userId`; `SELF_UPDATABLE_EMP_KEYS` (PUT `/employees/:id` non-admin path)
+includes bank fields, so leads self-edit banking like employees.
 
-**Historical note:** an earlier design put leads in the *employee* shell with a
-lead-only "Schedule" tab (`app/(employee)/schedule`, still present in
-`(employee)/_layout.tsx`). That path is now dormant — RootLayoutNav bounces leads out
-of the employee shell — but the code was left in place rather than ripped out. If you
-revisit the lead shell, reconcile these two designs instead of assuming only one exists.
+**`AuthContext` purges the React Query cache on login/logout** (`queryClient.clear()`) so a
+prior admin session's cached payroll/invoice data can't linger for the next signed-in user.
+
+**Defense-in-depth leftover:** `(admin)/_layout.tsx` still prunes non-shifts tabs for leads
+(`href:null`). Leads no longer land in the admin shell, so this is dormant but harmless.

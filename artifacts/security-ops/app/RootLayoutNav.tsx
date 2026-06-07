@@ -57,29 +57,18 @@ export default function RootLayoutNav() {
       return;
     }
 
-    // Leads share the admin shell but may ONLY manage scheduling — they are
-    // confined to the (admin)/shifts stack. If a lead deep-links into any other
-    // (admin) screen (payroll / invoices / dashboard / clients / employees / …)
-    // or into the (employee) shell, bounce them back to Shifts. This is the
-    // route-level half of the "lead sees no finance" invariant; the tab bar is
-    // also pruned for leads in app/(admin)/_layout.tsx, and the React Query
-    // cache is cleared on auth changes so no prior session's data lingers.
-    if (user.role === "lead" && inAuthGroup) {
-      const inShiftsStack = top === "(admin)" && (segments[1] as string | undefined) === "shifts";
-      if (!inShiftsStack) {
-        router.replace("/(admin)/shifts");
-        return;
-      }
-    }
+    // A lead is a full employee PLUS scheduling powers — they land in the
+    // normal (employee) shell (Home / My Shifts / Clock / Incidents / Chat /
+    // Radio / Profile) and reach scheduling via the lead-only Schedule tab
+    // (app/(employee)/schedule, which re-exports the admin shift screens).
+    // No special redirect: leads are treated exactly like employees here.
 
     // Default landing.
     if (!inAuthGroup && !ALLOWED_TOP_SCREENS.has(top ?? "")) {
-      if (user.role === "lead") router.replace("/(admin)/shifts");
-      else if (user.role === "admin") router.replace("/(admin)/dashboard");
+      if (user.role === "admin") router.replace("/(admin)/dashboard");
       else router.replace("/(employee)/home");
     } else if (top === "login") {
-      if (user.role === "lead") router.replace("/(admin)/shifts");
-      else if (user.role === "admin") router.replace("/(admin)/dashboard");
+      if (user.role === "admin") router.replace("/(admin)/dashboard");
       else router.replace("/(employee)/home");
     }
   }, [user, isLoading, awaitingBiometric, segments]);

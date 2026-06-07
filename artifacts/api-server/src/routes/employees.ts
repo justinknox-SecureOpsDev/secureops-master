@@ -378,12 +378,14 @@ router.get("/employees/:id", requireAuth, async (req, res): Promise<void> => {
     expiringLicenseCount: licenseCountsRaw[0]?.expiringSoon ?? 0,
     maxLicenseLevel: licenseCountsRaw[0]?.maxLevel ?? null,
   };
-  // Dispatcher AND lead: only the operational-safe subset (no banking / tax /
-  // right-to-work / personal docs). Dispatchers deep-link here from the Dispatch
-  // panel; leads must never see finance even on a self-read, so they get the
-  // same stripped projection (defense-in-depth — the mobile lead UI never
-  // navigates here, but a manual call must not leak rates/banking).
-  if (req.user!.role === "dispatcher" || req.user!.role === "lead") {
+  // Dispatcher AND lead reading SOMEONE ELSE: only the operational-safe subset
+  // (no banking / tax / right-to-work / personal docs). Dispatchers deep-link
+  // here from the Dispatch panel; leads reach it from the scheduling roster.
+  // A lead is a full employee, so reading their OWN record returns the complete
+  // profile (own rate, banking, docs) exactly like a regular employee — only
+  // OTHER officers' PII/finance is stripped from a lead.
+  const isLeadSelfRead = req.user!.role === "lead" && req.user!.userId === id;
+  if ((req.user!.role === "dispatcher" || req.user!.role === "lead") && !isLeadSelfRead) {
     res.json({
       ...projectForDispatcher(enriched),
       licenseCount: enriched.licenseCount,
