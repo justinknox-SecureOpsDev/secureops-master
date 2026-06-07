@@ -1,6 +1,6 @@
 import React, { useState, useRef, useEffect } from "react";
 import { useTopPad } from "@/hooks/useTopPad";
-import { View, Text, StyleSheet, SectionList, TouchableOpacity, ActivityIndicator, Platform, Animated } from "react-native";
+import { View, Text, StyleSheet, SectionList, TouchableOpacity, ActivityIndicator, Animated } from "react-native";
 import { useColors } from "@/hooks/useColors";
 import { useHighlightFlash } from "@/hooks/useHighlightFlash";
 import { confirmAction, notify } from "@/utils/confirm";
@@ -414,53 +414,37 @@ export default function EmployeeShiftsScreen() {
                   </View>
                 )}
 
-                <View style={{ flexDirection: "row", gap: 6, alignItems: "center", flexWrap: "wrap" }}>
+                <View style={styles.metaRow}>
                   <LicenseLevelBadge level={item.requiredLicenseLevel} size="sm" />
-                  <Text style={{ color: colors.mutedForeground, fontSize: 11 }}>
-                    {filled}/{item.headcount} filled
+                  <View style={[styles.metaChip, { backgroundColor: colors.secondary, borderColor: colors.border }]}>
+                    <Feather name="users" size={11} color={colors.mutedForeground} />
+                    <Text style={[styles.metaChipText, { color: colors.mutedForeground }]}>{filled}/{item.headcount}</Text>
+                  </View>
+                  {typeof item.distanceMilesFromHome === "number" && (() => {
+                    const d = item.distanceMilesFromHome as number;
+                    const far = d >= FAR_MILES;
+                    const color = far ? colors.accent : colors.success;
+                    return (
+                      <View style={[styles.metaChip, { backgroundColor: color + "15", borderColor: color + "55" }]}>
+                        <Feather name="navigation" size={11} color={color} />
+                        <Text style={[styles.metaChipText, { color, fontWeight: "700" }]}>
+                          {d < 1 ? "<1 mi" : `${Math.round(d)} mi`}{far ? " · far" : ""}
+                        </Text>
+                      </View>
+                    );
+                  })()}
+                </View>
+
+                <View style={styles.detailRow}>
+                  <Feather name="calendar" size={13} color={colors.mutedForeground} />
+                  <Text style={[styles.detailText, { color: colors.foreground, fontWeight: "600" }]} numberOfLines={1}>
+                    {start.toLocaleDateString([], { weekday: "short", day: "numeric", month: "short" })} · {start.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })} – {new Date(item.endTime).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
                   </Text>
                 </View>
 
                 <View style={styles.detailRow}>
                   <Feather name="map-pin" size={13} color={colors.mutedForeground} />
                   <Text style={[styles.detailText, { color: colors.mutedForeground }]} numberOfLines={1}>{item.location}</Text>
-                </View>
-
-                {typeof item.distanceMilesFromHome === "number" && (() => {
-                  const d = item.distanceMilesFromHome as number;
-                  const far = d >= FAR_MILES;
-                  const color = far ? colors.accent : colors.success;
-                  return (
-                    <View style={styles.detailRow}>
-                      <Feather name="navigation" size={13} color={color} />
-                      <Text style={[styles.detailText, { color, fontWeight: "600" }]}>
-                        {d < 1 ? "<1 mi" : `${Math.round(d)} mi`} from home{far ? " — far" : ""}
-                      </Text>
-                    </View>
-                  );
-                })()}
-
-                <View style={[styles.timeBlock, { backgroundColor: colors.secondary, borderColor: colors.border }]}>
-                  <View style={styles.timeItem}>
-                    <Text style={[styles.timeLabel, { color: colors.mutedForeground }]}>DATE</Text>
-                    <Text style={[styles.timeValue, { color: colors.foreground }]}>
-                      {start.toLocaleDateString([], { weekday: "short", day: "numeric", month: "short" })}
-                    </Text>
-                  </View>
-                  <View style={[styles.timeDivider, { backgroundColor: colors.border }]} />
-                  <View style={styles.timeItem}>
-                    <Text style={[styles.timeLabel, { color: colors.mutedForeground }]}>START</Text>
-                    <Text style={[styles.timeValue, { color: colors.foreground }]}>
-                      {start.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
-                    </Text>
-                  </View>
-                  <View style={[styles.timeDivider, { backgroundColor: colors.border }]} />
-                  <View style={styles.timeItem}>
-                    <Text style={[styles.timeLabel, { color: colors.mutedForeground }]}>END</Text>
-                    <Text style={[styles.timeValue, { color: colors.foreground }]}>
-                      {new Date(item.endTime).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
-                    </Text>
-                  </View>
                 </View>
 
                 <View style={styles.rateRow}>
@@ -647,11 +631,9 @@ const styles = StyleSheet.create({
   statusBannerText: { fontSize: 12, fontWeight: "700", flex: 1 },
   detailRow: { flexDirection: "row", alignItems: "center", gap: 6 },
   detailText: { fontSize: 12, flex: 1 },
-  timeBlock: { flexDirection: "row", borderRadius: 8, borderWidth: 1, overflow: "hidden" },
-  timeItem: { flex: 1, alignItems: "center", paddingVertical: 10 },
-  timeLabel: { fontSize: 9, fontWeight: "700", letterSpacing: 1, marginBottom: 3 },
-  timeValue: { fontSize: 14, fontWeight: "600" },
-  timeDivider: { width: 1 },
+  metaRow: { flexDirection: "row", gap: 6, alignItems: "center", flexWrap: "wrap" },
+  metaChip: { flexDirection: "row", alignItems: "center", gap: 4, paddingHorizontal: 8, paddingVertical: 3, borderRadius: 12, borderWidth: 1 },
+  metaChipText: { fontSize: 11, fontWeight: "600" },
   rateRow: { flexDirection: "row", alignItems: "center", gap: 8 },
   rateText: { fontSize: 13, fontWeight: "700" },
   earnText: { fontSize: 12, flex: 1 },
