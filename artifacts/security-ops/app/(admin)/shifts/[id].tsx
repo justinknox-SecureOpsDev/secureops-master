@@ -141,7 +141,6 @@ export default function ShiftDetailScreen() {
         <View style={styles.heroRow}>
           <Feather name="briefcase" size={18} color={colors.primary} />
           <Text style={[styles.clientName, { color: colors.primary }]}>{shift.clientName}</Text>
-          {shift.isRepeat && <View style={[styles.repeatBadge, { backgroundColor: colors.accent + "20" }]}><Text style={[styles.repeatText, { color: colors.accent }]}>REPEAT</Text></View>}
         </View>
         <View style={{ flexDirection: "row", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
           <LicenseLevelBadge level={reqLevel} size="md" />
@@ -180,7 +179,6 @@ export default function ShiftDetailScreen() {
         <Text style={[styles.sectionTitle, { color: colors.accent }]}>SCHEDULE</Text>
         <InfoRow label="Start Time" value={new Date(shift.startTime).toLocaleString()} icon="play-circle" />
         <InfoRow label="End Time" value={new Date(shift.endTime).toLocaleString()} icon="stop-circle" />
-        {shift.isRepeat && <InfoRow label="Repeat Pattern" value={shift.repeatPattern} icon="repeat" />}
         <InfoRow label="Notes" value={shift.notes} icon="file-text" />
       </View>
 
@@ -314,8 +312,6 @@ const styles = StyleSheet.create({
   heroRow: { flexDirection: "row", alignItems: "center", gap: 8 },
   clientName: { fontSize: 17, fontWeight: "700", flex: 1 },
   heroSub: { fontSize: 13, flex: 1 },
-  repeatBadge: { paddingHorizontal: 7, paddingVertical: 2, borderRadius: 4 },
-  repeatText: { fontSize: 10, fontWeight: "700" },
   statsRow: { flexDirection: "row", paddingTop: 14, borderTopWidth: 1, marginTop: 4 },
   statItem: { flex: 1, alignItems: "center" },
   statVal: { fontSize: 20, fontWeight: "700" },
