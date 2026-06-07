@@ -4,7 +4,7 @@ import { logger } from "./lib/logger";
 import { attachWebSocketServer, handleChatUpgrade, getWss } from "./lib/wsManager";
 import { attachRadioWebSocketServer, handleRadioUpgrade, getRadioWss } from "./lib/radioGateway";
 import { seedPolicies, backfillEmployeeProfileFields, pool } from "@workspace/db";
-import { seedDemoUsers, ensureAdminAccountHealth, ensureEmployeesRowsForAllUsers } from "./lib/seedDemoUsers";
+import { seedDemoUsers, ensureAdminAccountHealth, ensureEmployeesRowsForAllUsers, backfillUserPhoneNumbersFromEmployees } from "./lib/seedDemoUsers";
 import { seedChatRooms } from "./lib/seedChatRooms";
 import { seedRadioChannels } from "./lib/seedRadioChannels";
 import { startScheduledJobs } from "./lib/scheduledJobs";
@@ -118,6 +118,14 @@ seedDemoUsers()
 ensureEmployeesRowsForAllUsers()
   .then(() => logger.info("Employees rows backfilled for all users"))
   .catch((err) => logger.error({ err }, "Failed to backfill employees rows"));
+
+// One-time idempotent repair: copy employees.phone -> users.phoneNumber for
+// historical rows so officers are SMS-reachable and their number shows on the
+// user profile. Forward-sync keeps both columns aligned after this; once
+// repaired, this selects 0 rows and no-ops.
+backfillUserPhoneNumbersFromEmployees()
+  .then(() => logger.info("User phone numbers backfilled from employee files"))
+  .catch((err) => logger.error({ err }, "Failed to backfill user phone numbers"));
 
 // Idempotently seed the canonical chat channel set (announcements,
 // per-license-level rooms, OPS, city rooms, elite, one-per-site).

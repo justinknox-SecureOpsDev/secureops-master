@@ -22,6 +22,7 @@
 - [Scheduler sync LWW tiebreaker](scheduler-sync-lww-tiebreaker.md) — inbound upsert tiebreaks incoming updatedAt vs the LOCAL row's wall-clock updatedAt; tests expecting "skipped" must past-date the payload.
 - [Email provider fallback](email-provider-fallback.md) — EMAIL_PROVIDER selects Resend/SMTP; only true recipient rejections are "bounced" (stops fallback), quota/auth/domain errors must stay "failed".
 - [Production custom domain](production-domain.md) — live domain is wcsgisecureops.com (getDeploymentInfo primaryUrl); APP_BASE_URL must equal it; dev privacy is a platform toggle not code.
+- [Prod data backfills run in-app](prod-data-backfill-runs-in-app.md) — agent executeSql only writes dev (prod is read-only & a separate DB); repair prod DATA via an idempotent boot backfill + republish, not from the agent loop.
 - [Site/client hard-delete data loss](site-delete-cascade-data-loss.md) — deleting a site/client splits dependents (SET NULL survivors vs CASCADE deletes); all 4 delete paths must hit the shared blocker guard.
 - [Holiday rate cent-rounding](holiday-rate-cent-rounding.md) — round holiday premium rate to cents BEFORE × hours, identically in payroll + invoicing, or displayed-rate×hours drifts from gross.
 - [Payroll 1099 — no tax](payroll-1099-no-tax.md) — all WCSG workers are 1099; payroll NEVER withholds tax (net=gross), enforced at compute + read + write surfaces.

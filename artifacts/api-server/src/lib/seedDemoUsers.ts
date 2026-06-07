@@ -3,6 +3,7 @@ import { eq, and, ne, sql } from "drizzle-orm";
 import { db, usersTable, employeesTable } from "@workspace/db";
 import { logger } from "./logger";
 import { brand } from "./brandConfig";
+import { normalizePhoneToE164 } from "./phone";
 
 type DemoUser = {
   email: string;
@@ -166,4 +167,69 @@ export async function ensureEmployeesRowsForAllUsers(): Promise<void> {
     { count: rows.length, emails: rows.map((r) => r.email) },
     "Backfilled missing employees rows so Personnel/Employees/Users views stay consistent",
   );
+}
+
+/**
+ * One-time, idempotent repair: copy each officer's HR-file phone
+ * (`employees.phone`) into their account record (`users.phoneNumber`).
+ *
+ * `users.phoneNumber` is the ONLY field the SMS pipeline reads, and it's what
+ * the account/user profile displays. An earlier bulk import populated only
+ * `employees.phone` (often without a `+1` country code), leaving accounts
+ * SMS-unreachable and showing no phone on the user profile. The forward-sync
+ * write paths keep both columns aligned going forward; this boot pass repairs
+ * the historical rows that pre-date that fix.
+ *
+ * Idempotent: only touches users whose `phoneNumber` is missing/non-E.164 and
+ * who have a normalizable `employees.phone`. Once repaired (and with
+ * forward-sync in place) subsequent boots select 0 rows and no-op. Numbers
+ * that can't be normalized to valid E.164 (e.g. junk placeholders) are skipped.
+ */
+export async function backfillUserPhoneNumbersFromEmployees(): Promise<void> {
+  const candidates = await db.execute(sql`
+    SELECT u.id, e.phone AS emp_phone
+    FROM users u
+    JOIN employees e ON e.user_id = u.id
+    WHERE (u.phone_number IS NULL OR u.phone_number !~ '^\\+\\d{8,15}$')
+      AND e.phone IS NOT NULL AND e.phone <> ''
+  `);
+  const rows = candidates.rows as { id: string; emp_phone: string }[];
+  if (rows.length === 0) return;
+
+  let updated = 0;
+  let skipped = 0;
+  for (const r of rows) {
+    const norm = normalizePhoneToE164(r.emp_phone);
+    if (!norm) {
+      skipped++;
+      continue;
+    }
+    // Fill the account record (SMS source of truth) and normalize the HR file
+    // in place so the two columns match exactly going forward. The guard on the
+    // users update means a profile edit that lands a valid number between our
+    // SELECT and this UPDATE wins — we never clobber a concurrently-fixed phone.
+    const res = await db
+      .update(usersTable)
+      .set({ phoneNumber: norm })
+      .where(
+        and(
+          eq(usersTable.id, r.id),
+          sql`(${usersTable.phoneNumber} IS NULL OR ${usersTable.phoneNumber} !~ '^\\+\\d{8,15}$')`,
+        ),
+      );
+    if ((res.rowCount ?? 0) === 0) continue;
+    if (r.emp_phone !== norm) {
+      await db.update(employeesTable).set({ phone: norm }).where(eq(employeesTable.userId, r.id));
+    }
+    updated++;
+  }
+
+  // Only log when we actually repaired rows. Unnormalizable junk numbers stay
+  // candidates across boots; logging them every time would be pure noise.
+  if (updated > 0) {
+    logger.info(
+      { updated, skipped },
+      "Backfilled users.phoneNumber from employees.phone so SMS can reach officers and the user profile shows their number",
+    );
+  }
 }
