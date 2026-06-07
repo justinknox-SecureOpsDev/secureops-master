@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -385,6 +385,9 @@ export function ImportWizard({
                 : "Done"}
             </span>
           </DialogTitle>
+          <DialogDescription className="sr-only">
+            Bulk import {descriptor.label.toLowerCase()} from a spreadsheet: upload a file, map its columns, preview and validate, then import.
+          </DialogDescription>
         </DialogHeader>
 
         {/* Polite step-change announcement for screen readers. */}

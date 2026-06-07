@@ -3,7 +3,7 @@ import { useMutation } from "@tanstack/react-query";
 import { api } from "@/lib/api";
 import { Button } from "@/components/ui/button";
 import {
-  Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter,
+  Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogFooter,
 } from "@/components/ui/dialog";
 
 export type Candidate = {
@@ -76,6 +76,9 @@ export function AssignNearestDialog({
       <DialogContent className="max-w-md">
         <DialogHeader>
           <DialogTitle>{override ? "Assign nearest officer (license override)" : "Assign nearest qualified officer"}</DialogTitle>
+          <DialogDescription className="sr-only">
+            Rank available officers by distance from the site and assign one to fill this shift.
+          </DialogDescription>
         </DialogHeader>
         <label className="flex items-center gap-2 text-xs cursor-pointer rounded border px-2 py-1.5 bg-amber-50 border-amber-200">
           <input

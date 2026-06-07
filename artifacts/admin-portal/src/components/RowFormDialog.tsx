@@ -407,6 +407,11 @@ export function RowFormDialog({
               : `Create a new ${singularize(descriptor.label).toLowerCase()}. Required fields are marked.`}
           </DialogDescription>
         </DialogHeader>
+        <form
+          id={formId}
+          className="contents"
+          onSubmit={(e) => { e.preventDefault(); if (!saving) submit(); }}
+        >
         <div className="space-y-5 py-2">
           {(() => {
             // Group fields into sections in declared order. A field's `section`
@@ -611,11 +616,12 @@ export function RowFormDialog({
               </>
             );
           })()}
-          <Button variant="outline" onClick={() => onOpenChange(false)}>Cancel</Button>
-          <Button onClick={submit} disabled={saving} className="bg-brand-navy text-white hover:opacity-90">
+          <Button type="button" variant="outline" onClick={() => onOpenChange(false)}>Cancel</Button>
+          <Button type="submit" disabled={saving} className="bg-brand-navy text-white hover:opacity-90">
             {saving ? "Saving…" : initial ? "Save changes" : "Create"}
           </Button>
         </DialogFooter>
+        </form>
       </DialogContent>
     </Dialog>
   );

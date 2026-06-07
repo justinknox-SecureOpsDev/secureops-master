@@ -3,7 +3,7 @@ import { MailPlus, KeyRound, Loader2, Eye, EyeOff, Copy, Download, Send, AlertTr
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import {
-  Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter,
+  Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogFooter,
 } from "@/components/ui/dialog";
 import {
   AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
@@ -366,6 +366,9 @@ export function InvitationsPage() {
               <DialogTitle className="brand-wordmark text-xl flex items-center gap-2">
                 <KeyRound className="w-5 h-5 brand-gold" /> Temporary passwords generated
               </DialogTitle>
+              <DialogDescription className="sr-only">
+                Review the temporary passwords that were generated for the selected users.
+              </DialogDescription>
             </DialogHeader>
             <div className="space-y-3 text-sm">
               <div className="grid grid-cols-3 gap-2">
@@ -461,6 +464,9 @@ export function InvitationsPage() {
           <DialogContent className="max-w-2xl max-h-[85vh] overflow-y-auto">
             <DialogHeader>
               <DialogTitle className="brand-wordmark text-xl">Invite emails — results</DialogTitle>
+              <DialogDescription className="sr-only">
+                Summary of which invite emails were sent and which failed.
+              </DialogDescription>
             </DialogHeader>
             <div className="space-y-3 text-sm">
               <div className="grid grid-cols-3 gap-2">

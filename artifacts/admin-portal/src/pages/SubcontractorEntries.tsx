@@ -4,7 +4,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import {
-  Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter,
+  Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogFooter,
 } from "@/components/ui/dialog";
 import { RefreshCw, Download, Clock, AlertTriangle, Pencil } from "lucide-react";
 
@@ -426,6 +426,9 @@ export default function SubcontractorEntriesPage() {
         <DialogContent>
           <DialogHeader>
             <DialogTitle>Edit Clock-In Entry</DialogTitle>
+            <DialogDescription className="sr-only">
+              Correct the details of this subcontractor clock-in entry.
+            </DialogDescription>
           </DialogHeader>
           <div className="space-y-3">
             <div className="grid grid-cols-2 gap-3">
@@ -505,6 +508,9 @@ export default function SubcontractorEntriesPage() {
         <DialogContent className="max-w-2xl">
           <DialogHeader>
             <DialogTitle>Change History</DialogTitle>
+            <DialogDescription className="sr-only">
+              Audit trail of corrections made to this clock-in entry.
+            </DialogDescription>
           </DialogHeader>
           <div className="text-sm">
             {historyTarget && (
@@ -584,6 +590,9 @@ export default function SubcontractorEntriesPage() {
         <DialogContent>
           <DialogHeader>
             <DialogTitle>Force Clock-Out</DialogTitle>
+            <DialogDescription className="sr-only">
+              Manually clock out a stuck subcontractor entry using the current time.
+            </DialogDescription>
           </DialogHeader>
           <div className="text-sm space-y-2">
             <p>

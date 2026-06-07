@@ -3,7 +3,7 @@ import { api } from "@/lib/api";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import {
-  Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter,
+  Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogFooter,
 } from "@/components/ui/dialog";
 import { UserPlus, Loader2, Copy, ExternalLink, Search } from "lucide-react";
 import { openSignedObject } from "@/lib/upload";
@@ -146,7 +146,12 @@ export function OnboardingPage() {
       {resend && (
         <Dialog open onOpenChange={(o) => { if (!o) setResend(null); }}>
           <DialogContent className="max-w-xl">
-            <DialogHeader><DialogTitle className="brand-wordmark text-xl">New onboarding link</DialogTitle></DialogHeader>
+            <DialogHeader>
+              <DialogTitle className="brand-wordmark text-xl">New onboarding link</DialogTitle>
+              <DialogDescription className="sr-only">
+                A fresh onboarding link for this employee. Previous links are invalidated.
+              </DialogDescription>
+            </DialogHeader>
             <div className="space-y-2 text-sm">
               {resend.emailSent ? (
                 <div className="bg-emerald-50 border border-emerald-200 text-emerald-900 p-3 rounded">
@@ -214,6 +219,9 @@ function DetailDialog({
               <span className={`ml-2 inline-block px-2 py-0.5 text-[11px] uppercase rounded border ${STATUS_STYLES[d.status]}`}>{d.status}</span>
             )}
           </DialogTitle>
+          <DialogDescription className="sr-only">
+            Onboarding submission details for this employee.
+          </DialogDescription>
         </DialogHeader>
         {error && <div className="text-sm text-destructive bg-destructive/5 p-2 rounded border border-destructive/20">{error}</div>}
         {!d ? <Loader2 className="w-5 h-5 animate-spin" /> : (

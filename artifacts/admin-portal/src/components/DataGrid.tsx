@@ -874,6 +874,9 @@ export function DataGrid({
           <DialogContent className="max-w-md">
             <DialogHeader>
               <DialogTitle className="brand-wordmark text-xl">Sessions revoked</DialogTitle>
+              <DialogDescription className="sr-only">
+                Confirmation that all active sessions for this user have been invalidated.
+              </DialogDescription>
             </DialogHeader>
             <div className="text-sm space-y-2">
               <p>
@@ -964,6 +967,9 @@ export function DataGrid({
               <DialogTitle className="brand-wordmark text-xl">
                 {inviteResult.status === "reinvited" ? "Client user re-invited" : "Client user invited"}
               </DialogTitle>
+              <DialogDescription className="sr-only">
+                Details of the client portal user who was just invited.
+              </DialogDescription>
             </DialogHeader>
             <div className="space-y-3 text-sm">
               <div>
@@ -1053,6 +1059,9 @@ export function DataGrid({
           <DialogContent className="max-w-xl">
             <DialogHeader>
               <DialogTitle className="brand-wordmark text-xl">Password reset link issued</DialogTitle>
+              <DialogDescription className="sr-only">
+                A single-use password reset link for this user, with delivery status.
+              </DialogDescription>
             </DialogHeader>
             <div className="space-y-3 text-sm">
               <div>
@@ -1104,6 +1113,9 @@ export function DataGrid({
           <DialogContent className="max-w-md">
             <DialogHeader>
               <DialogTitle className="brand-wordmark text-xl">Geocode backfill</DialogTitle>
+              <DialogDescription className="sr-only">
+                Results of looking up coordinates for sites missing or with changed addresses.
+              </DialogDescription>
             </DialogHeader>
             <div className="space-y-3 text-sm">
               {geocodeBackfillError ? (

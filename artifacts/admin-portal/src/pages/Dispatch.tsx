@@ -10,7 +10,7 @@ import {
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import { Textarea } from "@/components/ui/textarea";
 import {
-  Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter,
+  Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogFooter,
 } from "@/components/ui/dialog";
 import {
   AlertTriangle, CheckCircle2, Clock, MapPin, MessageCircle, Radio, Send,
@@ -786,6 +786,9 @@ function IncidentDialog({
             </Badge>
             {incident.title}
           </DialogTitle>
+          <DialogDescription className="sr-only">
+            Incident details. Review and update the status and dispatcher notes.
+          </DialogDescription>
         </DialogHeader>
         <div className="space-y-3 text-sm">
           <div className="opacity-80">{incident.description ?? "No description."}</div>

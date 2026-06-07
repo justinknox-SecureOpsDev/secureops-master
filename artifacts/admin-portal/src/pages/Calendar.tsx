@@ -4,7 +4,7 @@ import { api } from "@/lib/api";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import {
-  Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter,
+  Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogFooter,
 } from "@/components/ui/dialog";
 import {
   ChevronLeft, ChevronRight, CalendarDays, Clock, MapPin, Users, Megaphone,
@@ -316,6 +316,9 @@ function DayShiftsDialog({
       <DialogContent className="max-w-md">
         <DialogHeader>
           <DialogTitle>{heading}</DialogTitle>
+          <DialogDescription className="sr-only">
+            Shifts scheduled on this day.
+          </DialogDescription>
         </DialogHeader>
         <div className="space-y-1.5 max-h-[60vh] overflow-y-auto">
           {shifts.map((s) => {
@@ -375,6 +378,9 @@ function ShiftDetailDialog({
                 <Badge className="bg-emerald-600 hover:bg-emerald-600">Filled</Badge>
               )}
             </DialogTitle>
+            <DialogDescription className="sr-only">
+              Shift details, staffing status, and assigned officers.
+            </DialogDescription>
           </DialogHeader>
 
           <div className="space-y-2 text-sm">

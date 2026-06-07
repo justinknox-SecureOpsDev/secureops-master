@@ -9,7 +9,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import {
-  Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogTrigger,
+  Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogFooter, DialogTrigger,
 } from "@/components/ui/dialog";
 import { useToast } from "@/hooks/use-toast";
 import {
@@ -153,7 +153,12 @@ function AddShiftDialog({ eventId, defaultDate }: { eventId: number; defaultDate
         <Button size="sm" variant="outline"><Plus className="w-4 h-4 mr-1" /> Add shift</Button>
       </DialogTrigger>
       <DialogContent>
-        <DialogHeader><DialogTitle>Add shift</DialogTitle></DialogHeader>
+        <DialogHeader>
+          <DialogTitle>Add shift</DialogTitle>
+          <DialogDescription className="sr-only">
+            Add a new shift slot to this staffing event.
+          </DialogDescription>
+        </DialogHeader>
         <div className="space-y-3 py-2">
           <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
             <div><Label>Date *</Label><Input type="date" value={date} onChange={(e) => setDate(e.target.value)} /></div>

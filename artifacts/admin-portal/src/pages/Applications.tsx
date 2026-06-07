@@ -4,7 +4,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import {
-  Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter,
+  Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogFooter,
 } from "@/components/ui/dialog";
 import { ClipboardList, Search, Loader2, Copy, ExternalLink, MailCheck, MailWarning, MailX, MessageSquare, MessageSquareWarning } from "lucide-react";
 import { openSignedObject } from "@/lib/upload";
@@ -565,6 +565,9 @@ function ApplicationDialog({
               {app.status.replace("_", " ")}
             </span>
           </DialogTitle>
+          <DialogDescription className="sr-only">
+            Full application details for this applicant.
+          </DialogDescription>
         </DialogHeader>
         <div className="grid grid-cols-2 gap-4 text-sm">
           <Info k="Email" v={app.email} />
@@ -730,6 +733,9 @@ function RequestInfoDialog({
             <MessageSquareWarning className="w-5 h-5 brand-gold" />
             Request more info from {app.firstName}
           </DialogTitle>
+          <DialogDescription className="sr-only">
+            Select which fields the applicant must resubmit via a secure link.
+          </DialogDescription>
         </DialogHeader>
         <div className="space-y-4 text-sm">
           <p className="text-muted-foreground">
@@ -779,6 +785,9 @@ function RequestInfoResultDialog({ resp, onClose }: { resp: RequestInfoResp; onC
       <DialogContent className="max-w-xl">
         <DialogHeader>
           <DialogTitle className="brand-wordmark text-xl">Info request sent</DialogTitle>
+          <DialogDescription className="sr-only">
+            Confirmation that the applicant was asked to provide more information.
+          </DialogDescription>
         </DialogHeader>
         <div className="space-y-3 text-sm">
           {resp.emailSent ? (
@@ -826,6 +835,9 @@ function ApprovalSuccessDialog({ resp, onClose }: { resp: ApproveResp; onClose: 
       <DialogContent className="max-w-xl">
         <DialogHeader>
           <DialogTitle className="brand-wordmark text-xl">Application approved</DialogTitle>
+          <DialogDescription className="sr-only">
+            Confirmation that the application was approved and the employee onboarding started.
+          </DialogDescription>
         </DialogHeader>
         <div className="space-y-3 text-sm">
           {resp.emailSent ? (
@@ -1006,6 +1018,9 @@ function RejectionResultDialog({ resp, onClose }: { resp: RejectResp; onClose: (
       <DialogContent className="max-w-lg">
         <DialogHeader>
           <DialogTitle className="brand-wordmark text-xl">Application rejected</DialogTitle>
+          <DialogDescription className="sr-only">
+            Confirmation that the application was rejected and the applicant notified.
+          </DialogDescription>
         </DialogHeader>
         <div className="space-y-3 text-sm">
           {resp.emailSent ? (
@@ -1110,6 +1125,9 @@ function BatchRequestInfoDialog({
             <MessageSquareWarning className="w-5 h-5 brand-gold" />
             Request more info — {apps.length} applicant{apps.length === 1 ? "" : "s"}
           </DialogTitle>
+          <DialogDescription className="sr-only">
+            Select which fields these applicants must resubmit via a secure link.
+          </DialogDescription>
         </DialogHeader>
         <div className="space-y-4 text-sm">
           <div className="bg-muted/40 border rounded p-3 max-h-32 overflow-y-auto">
@@ -1179,6 +1197,9 @@ function BatchResultDialog({ result, onClose }: { result: BatchResult; onClose: 
       <DialogContent className="max-w-2xl max-h-[85vh] overflow-y-auto">
         <DialogHeader>
           <DialogTitle className="brand-wordmark text-xl">Batch info request — results</DialogTitle>
+          <DialogDescription className="sr-only">
+            Summary of which applicants were emailed and which failed.
+          </DialogDescription>
         </DialogHeader>
         <div className="space-y-3 text-sm">
           <div className="grid grid-cols-3 gap-2">

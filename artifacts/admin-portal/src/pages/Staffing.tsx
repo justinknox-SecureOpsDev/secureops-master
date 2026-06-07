@@ -7,7 +7,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import {
-  Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogTrigger,
+  Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogFooter, DialogTrigger,
 } from "@/components/ui/dialog";
 import { useToast } from "@/hooks/use-toast";
 import { shiftboard, publicShareUrl, SHIFTBOARD_BASE_URL, type ShiftboardEvent } from "@/lib/shiftboard";
@@ -124,7 +124,12 @@ function NewEventDialog() {
         <Button size="sm"><Plus className="w-4 h-4 mr-1" /> New event</Button>
       </DialogTrigger>
       <DialogContent>
-        <DialogHeader><DialogTitle>New staffing event</DialogTitle></DialogHeader>
+        <DialogHeader>
+          <DialogTitle>New staffing event</DialogTitle>
+          <DialogDescription className="sr-only">
+            Create a new staffing event with its details.
+          </DialogDescription>
+        </DialogHeader>
         <div className="space-y-3 py-2">
           <div>
             <Label>Name *</Label>
