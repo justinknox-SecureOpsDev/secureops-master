@@ -28,6 +28,7 @@ type Ctx = {
   dispatcherId: string;
   leadToken: string;
   dispatcherToken: string;
+  officerToken: string;
   clientId: string;
   siteId: string;
   shiftId: string;
@@ -59,6 +60,14 @@ async function makeEmployeeRow(userId: string, suffix: string): Promise<void> {
     bankAccountNumber: `00${suffix}11223344`,
     bankBsb: "123456",
     taxCode: "1099",
+    // PII / right-to-work / personal documents — must never reach a
+    // dispatcher (or a lead reading another officer) via the stripped projection.
+    dateOfBirth: "1990-01-01",
+    niNumber: `NI${suffix}`,
+    rightToWorkStatus: "citizen",
+    rightToWorkDocKey: `rtw/${suffix}.pdf`,
+    passportDocKey: `passport/${suffix}.pdf`,
+    cvKey: `cv/${suffix}.pdf`,
     skills: [],
   });
 }
@@ -145,6 +154,11 @@ beforeAll(async () => {
     email: `${TAG}-dispatch@example.test`,
     role: "dispatcher",
   });
+  ctx.officerToken = signToken({
+    userId: ctx.officerId,
+    email: `${TAG}-officer@example.test`,
+    role: "employee",
+  });
 });
 
 afterAll(async () => {
@@ -206,6 +220,56 @@ describe("GET /employees/:id — lead self vs other finance boundary", () => {
     expect(otherRes.status).toBe(200);
     expect(otherRes.body).not.toHaveProperty("hourlyRate");
     expect(otherRes.body).not.toHaveProperty("bankAccountNumber");
+  });
+
+  it("lets a dispatcher open ANOTHER officer's profile (200) with only the operational-safe projection", async () => {
+    const res = await request(app)
+      .get(`/api/employees/${ctx.officerId}`)
+      .set(authed(ctx.dispatcherToken));
+    // The dispatcher deep-links here from the Dispatch panel — must succeed.
+    expect(res.status).toBe(200);
+    // Operational identity/contact/licence summary stays.
+    expect(res.body.id).toBe(ctx.officerId);
+    expect(res.body.email).toBeTruthy();
+    expect(res.body).toHaveProperty("firstName");
+    expect(res.body).toHaveProperty("lastName");
+    expect(res.body).toHaveProperty("siaLicenseLevel");
+    // Banking / tax must be gone.
+    expect(res.body).not.toHaveProperty("hourlyRate");
+    expect(res.body).not.toHaveProperty("bankAccountName");
+    expect(res.body).not.toHaveProperty("bankAccountNumber");
+    expect(res.body).not.toHaveProperty("bankBsb");
+    expect(res.body).not.toHaveProperty("taxCode");
+    // Right-to-work must be gone.
+    expect(res.body).not.toHaveProperty("rightToWorkStatus");
+    expect(res.body).not.toHaveProperty("rightToWorkDocKey");
+    // Personal docs / sensitive PII must be gone.
+    expect(res.body).not.toHaveProperty("passportDocKey");
+    expect(res.body).not.toHaveProperty("cvKey");
+    expect(res.body).not.toHaveProperty("dateOfBirth");
+    expect(res.body).not.toHaveProperty("niNumber");
+  });
+
+  it("forbids a plain employee from reading ANOTHER officer's profile (403)", async () => {
+    const res = await request(app)
+      .get(`/api/employees/${ctx.dispatcherId}`)
+      .set(authed(ctx.officerToken));
+    expect(res.status).toBe(403);
+    // No record leaks in the forbidden body.
+    expect(res.body).not.toHaveProperty("hourlyRate");
+    expect(res.body).not.toHaveProperty("bankAccountNumber");
+    expect(res.body).not.toHaveProperty("email");
+  });
+
+  it("still lets a plain employee read their OWN profile (200, full record)", async () => {
+    const res = await request(app)
+      .get(`/api/employees/${ctx.officerId}`)
+      .set(authed(ctx.officerToken));
+    expect(res.status).toBe(200);
+    expect(res.body.id).toBe(ctx.officerId);
+    // Own finance is visible to a regular employee.
+    expect(res.body.hourlyRate).toBe("37.50");
+    expect(res.body.bankAccountNumber).toBe("00officer11223344");
   });
 });
 
