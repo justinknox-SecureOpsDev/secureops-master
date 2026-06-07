@@ -348,7 +348,17 @@ router.post("/employees", requireAdmin, async (req, res): Promise<void> => {
 
 router.get("/employees/:id", requireAuth, async (req, res): Promise<void> => {
   const id = Array.isArray(req.params.id) ? req.params.id[0] : req.params.id;
-  if (req.user!.role !== "admin" && req.user!.role !== "dispatcher" && req.user!.userId !== id) {
+  // Admins and dispatchers may read any employee; leads may read any employee
+  // too (they reach this from the scheduling roster) but only see the
+  // operational-safe subset for OTHERS — finance/PII is stripped below. Plain
+  // employees may only read their own row. Lead self-read returns the full
+  // record (see the projection branch below).
+  if (
+    req.user!.role !== "admin" &&
+    req.user!.role !== "dispatcher" &&
+    req.user!.role !== "lead" &&
+    req.user!.userId !== id
+  ) {
     res.status(403).json({ error: "Forbidden" });
     return;
   }
