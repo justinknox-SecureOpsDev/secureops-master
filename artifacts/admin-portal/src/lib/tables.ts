@@ -161,6 +161,7 @@ export const TABLES: TableDescriptor[] = [
         options: [
           { label: "Admin", value: "admin" },
           { label: "Dispatcher", value: "dispatcher" },
+          { label: "Lead", value: "lead" },
           { label: "Employee", value: "employee" },
         ],
       },
