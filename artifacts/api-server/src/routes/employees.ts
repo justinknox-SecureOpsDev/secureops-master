@@ -321,6 +321,15 @@ router.post("/employees", requireAdmin, async (req, res): Promise<void> => {
   }
   await db.insert(employeesTable).values(empValues as typeof employeesTable.$inferInsert);
 
+  // Mirror the (now-normalized) phone onto the account record so the new
+  // employee is SMS-reachable and shows a phone in the account profile, not
+  // just the HR file. See the sync note in PUT /employees/:id.
+  if (typeof empValues.phone === "string") {
+    await db.update(usersTable)
+      .set({ phoneNumber: empValues.phone })
+      .where(eq(usersTable.id, user.id));
+  }
+
   // Re-read via the canonical projection so the response shape matches
   // GET /employees/:id and the OpenAPI Employee schema exactly.
   const [row] = await db
@@ -469,6 +478,19 @@ router.put("/employees/:id", requireAuth, async (req, res): Promise<void> => {
   }
   if (Object.keys(empUpdates).length > 0) {
     await db.update(employeesTable).set(empUpdates).where(eq(employeesTable.userId, id));
+  }
+
+  // Keep the account record's phone in sync with the employee file.
+  // `employees.phone` is the HR/display field; `users.phoneNumber` is what the
+  // account profile and the SMS pipeline actually read. Without this mirror, an
+  // officer who edits their phone (mobile profile) updates the file but stays
+  // unreachable by SMS. Done as an isolated write so it never pollutes the
+  // employee_changes diff or high-risk-self-edit fan-out (which already track
+  // the `phone` field).
+  if (Object.hasOwn(empUpdates, "phone")) {
+    await db.update(usersTable)
+      .set({ phoneNumber: (empUpdates.phone as string | null) ?? null })
+      .where(eq(usersTable.id, id));
   }
 
   const [row] = await db

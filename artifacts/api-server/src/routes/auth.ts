@@ -6,6 +6,7 @@ import { z } from "zod/v4";
 import { db, usersTable, employeesTable, passwordResetTokensTable, revokedTokensTable } from "@workspace/db";
 import { requireAuth, signToken, tokenTtlSeconds } from "../middlewares/auth";
 import { disconnectUser } from "../lib/wsManager";
+import { normalizePhoneToE164 } from "../lib/phone";
 import {
   forgotPasswordEmailLimiter,
   forgotPasswordIpLimiter,
@@ -508,6 +509,38 @@ router.patch("/me/employee", requireAuth, async (req, res): Promise<void> => {
     res.status(400).json({ error: "Bad Request", message: "No editable fields provided" });
     return;
   }
+  // Normalize officer-entered phone numbers to E.164 (same default-to-US rule
+  // as the public flows) so a self-service profile edit never stores an
+  // un-prefixed number the SMS pipeline can't dispatch to. A provided-but-empty
+  // (or whitespace) value is treated as an explicit clear -> null so both
+  // columns stay consistent rather than persisting a junk blank string.
+  const mutableUpdates = updates as Record<string, unknown>;
+  if (Object.hasOwn(updates, "phone")) {
+    const raw = updates.phone;
+    if (typeof raw === "string" && raw.trim()) {
+      const norm = normalizePhoneToE164(raw);
+      if (!norm) {
+        res.status(400).json({ error: "Bad Request", message: "Phone number is invalid. Please enter a valid US phone number (e.g. (214) 555-1234) or include the country code (e.g. +44 20 1234 5678)." });
+        return;
+      }
+      mutableUpdates.phone = norm;
+    } else {
+      mutableUpdates.phone = null;
+    }
+  }
+  if (Object.hasOwn(updates, "emergencyContactPhone")) {
+    const raw = updates.emergencyContactPhone;
+    if (typeof raw === "string" && raw.trim()) {
+      const norm = normalizePhoneToE164(raw);
+      if (!norm) {
+        res.status(400).json({ error: "Bad Request", message: "Emergency contact phone is invalid. Please enter a valid US phone number (e.g. (214) 555-1234) or include the country code (e.g. +44 20 1234 5678)." });
+        return;
+      }
+      mutableUpdates.emergencyContactPhone = norm;
+    } else {
+      mutableUpdates.emergencyContactPhone = null;
+    }
+  }
   const userId = req.user!.userId;
   // Make sure the user behind the JWT still exists. If not, surface a clear
   // 401 so the mobile app can prompt re-login instead of looping on the form.
@@ -551,8 +584,14 @@ router.patch("/me/employee", requireAuth, async (req, res): Promise<void> => {
   } else {
     await db.update(employeesTable).set(updates).where(eq(employeesTable.userId, userId));
   }
-  // Clear must-complete-profile once they've saved their profile.
-  await db.update(usersTable).set({ mustCompleteProfile: false }).where(eq(usersTable.id, userId));
+  // Clear must-complete-profile once they've saved their profile, and mirror
+  // any phone edit onto the account record so `users.phoneNumber` (the SMS
+  // source of truth + account-profile display) stays in sync with the employee
+  // file. Without this, an officer updating their phone here stays unreachable
+  // by SMS.
+  const userPatch: Record<string, unknown> = { mustCompleteProfile: false };
+  if (Object.hasOwn(updates, "phone")) userPatch.phoneNumber = mutableUpdates.phone ?? null;
+  await db.update(usersTable).set(userPatch).where(eq(usersTable.id, userId));
   const [employee] = await db.select().from(employeesTable).where(eq(employeesTable.userId, userId)).limit(1);
 
   // Best-effort background re-geocode of the home address. Fires only when

@@ -919,6 +919,10 @@ router.post("/admin/applications/:id/approve", requireAdmin, async (req, res): P
           passwordHash,
           firstName: app.firstName,
           lastName: app.lastName,
+          // Mirror the applicant's (already E.164-normalized) phone onto the
+          // account record so the new officer is SMS-reachable and shows a
+          // phone in the account profile, not just the employee file.
+          phoneNumber: app.phone,
           status: "pending",
           mustChangePassword: true,
           mustCompleteProfile: true,
@@ -929,6 +933,10 @@ router.post("/admin/applications/:id/approve", requireAdmin, async (req, res): P
           passwordHash,
           firstName: app.firstName,
           lastName: app.lastName,
+          // Mirror the applicant's (already E.164-normalized) phone onto the
+          // account record so the new officer is SMS-reachable and shows a
+          // phone in the account profile, not just the employee file.
+          phoneNumber: app.phone,
           role: "employee",
           status: "pending",
           mustChangePassword: true,

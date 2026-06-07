@@ -1067,6 +1067,18 @@ router.put("/admin/tables/:table/:id", requireAdmin, async (req, res): Promise<v
       }
       throw err;
     }
+    // Normalize employee phone fields the same way the dedicated /employees
+    // handler does, so generic-grid edits can't store an un-prefixed number
+    // that the SMS pipeline can't dispatch to (and so the mirror below copies
+    // a clean E.164 value into users.phoneNumber).
+    if (tableName === "employees") {
+      const phoneErr = normalizePhoneFieldInPlace(body, "phone", "Phone number")
+        ?? normalizePhoneFieldInPlace(body, "emergencyContactPhone", "Emergency contact phone");
+      if (phoneErr) {
+        res.status(400).json({ error: "Bad Request", message: phoneErr });
+        return;
+      }
+    }
   }
 
   // Strip undefined and immutable fields
@@ -1126,6 +1138,30 @@ router.put("/admin/tables/:table/:id", requireAdmin, async (req, res): Promise<v
 
     if (tableName === "sites") {
       row = await maybeAutoGeocodeSite(row as Record<string, unknown>, req.log);
+    }
+
+    // Keep employees.phone <-> users.phoneNumber in sync (SMS source of truth +
+    // account-profile display). The generic grid bypasses the dedicated
+    // /employees and /admin/users handlers, so the mirror has to be replicated
+    // here for both directions.
+    if (tableName === "employees" && Object.hasOwn(body, "phone")) {
+      const employeeUserId = (beforeRow?.userId as string | undefined)
+        ?? ((row as Record<string, unknown>).userId as string | undefined);
+      if (employeeUserId) {
+        await db.update(usersTable)
+          .set({ phoneNumber: (body.phone as string | null) ?? null })
+          .where(eq(usersTable.id, employeeUserId));
+      }
+    }
+    // Reverse mirror. NOTE: a phoneNumber edit on the users grid intentionally
+    // does NOT emit an employee_changes row (writeEmployeeFieldChanges only runs
+    // for tableName==='employees'); the users-table request itself is still
+    // captured by the audit middleware. Officer phone edits that need field-
+    // change history go through the employees grid / dedicated handlers.
+    if (tableName === "users" && Object.hasOwn(body, "phoneNumber")) {
+      await db.update(employeesTable)
+        .set({ phone: (body.phoneNumber as string | null) ?? null })
+        .where(eq(employeesTable.userId, id));
     }
 
     if (tableName === "employees" && beforeRow) {
