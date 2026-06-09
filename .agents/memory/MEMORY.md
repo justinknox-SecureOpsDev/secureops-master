@@ -41,3 +41,4 @@
 - [pg name[] arrays not parsed](pg-name-array-not-parsed.md) — node-postgres returns name[]/array_agg(name) as a raw string, not JS array; cast ::text inside array_agg when consuming pg_catalog introspection.
 - [/tmp/logs are refresh snapshots](tmp-logs-are-refresh-snapshots.md) — /tmp/logs files are frozen at last refresh_all_logs call, not live; after restart_workflow call refresh_all_logs before trusting them.
 - [Clock-in nearest-site test pollution](clockin-nearest-site-test-pollution.md) — timeEntriesClockIn geo tests flake in full suite (pass alone) from an orphan site at the fixed test coords; it's DB pollution, not a code regression.
+- [Notification routing policy](notification-routing-policy.md) — safety events (SOS/incidents)→all admins; HR events (profile-edit email/application/onboarding)→single brand.adminNotifyEmail inbox.

@@ -29,7 +29,8 @@ import {
 import { z } from "zod/v4";
 import { requireAdmin } from "../middlewares/auth";
 import { sendPushToUsers } from "../lib/push";
-import { sendEmail, sendEmailDetailed, renderOnboardingEmail, renderResendOnboardingEmail, renderRejectionEmail, renderApplicationReceivedEmail, renderRequestInfoEmail, renderApplicationDraftResumeEmail } from "../lib/email";
+import { sendEmail, sendEmailDetailed, renderOnboardingEmail, renderResendOnboardingEmail, renderRejectionEmail, renderApplicationReceivedEmail, renderRequestInfoEmail, renderApplicationDraftResumeEmail, renderNewApplicationAdminEmail, renderOnboardingCompletedAdminEmail } from "../lib/email";
+import { brand } from "../lib/brandConfig";
 import { sendSmsToPhoneNumber } from "../lib/sms";
 import { normalizePhoneToE164 } from "../lib/phone";
 
@@ -464,6 +465,22 @@ router.post("/applications", publicApplicationLimiter, async (req, res): Promise
       }
     } catch (mailErr) {
       req.log.error({ err: mailErr, applicationId: row.id }, "Failed to send application confirmation email");
+    }
+    // Notify the dedicated admin inbox of the new submission. No-op when
+    // SMTP isn't configured; never blocks the applicant response.
+    try {
+      const base = process.env.APP_BASE_URL
+        || (process.env.REPLIT_DOMAINS ? `https://${process.env.REPLIT_DOMAINS.split(",")[0]}` : "");
+      const tmpl = renderNewApplicationAdminEmail({
+        applicantName: `${row.firstName} ${row.lastName}`,
+        applicantEmail: row.email,
+        applicantPhone: row.phone ?? undefined,
+        reviewUrl: base ? `${base}/admin-portal/hr/applications` : undefined,
+      });
+      void sendEmail({ to: brand.adminNotifyEmail, subject: tmpl.subject, text: tmpl.text, html: tmpl.html })
+        .catch((err) => req.log.warn({ err, applicationId: row.id }, "new-application admin email failed"));
+    } catch (mailErr) {
+      req.log.warn({ err: mailErr, applicationId: row.id }, "Failed to send new-application admin email");
     }
     res.status(201).json(rowToApplication(row));
   } catch (err) {
@@ -1556,13 +1573,26 @@ router.post("/onboarding/:token", tokenLookupLimiter, async (req, res): Promise<
   await db.update(usersTable).set({ status: "active" }).where(eq(usersTable.id, t.employeeId));
   await db.update(onboardingTokensTable).set({ consumedAt: new Date() }).where(eq(onboardingTokensTable.id, t.id));
 
-  // Notify any admins via push
-  const admins = await db.select({ id: usersTable.id }).from(usersTable).where(eq(usersTable.role, "admin"));
-  if (admins.length) {
-    sendPushToUsers(admins.map((a) => a.id), {
-      title: "✅ Onboarding completed",
-      body: `Onboarding submitted by employee.`,
-    }).catch(() => {});
+  // Notify the dedicated admin inbox that onboarding is complete.
+  try {
+    const [completedUser] = await db
+      .select({ firstName: usersTable.firstName, lastName: usersTable.lastName, email: usersTable.email })
+      .from(usersTable)
+      .where(eq(usersTable.id, t.employeeId))
+      .limit(1);
+    const officerName = completedUser
+      ? ([completedUser.firstName, completedUser.lastName].filter(Boolean).join(" ") || completedUser.email || "An employee")
+      : "An employee";
+    const base = process.env.APP_BASE_URL
+      || (process.env.REPLIT_DOMAINS ? `https://${process.env.REPLIT_DOMAINS.split(",")[0]}` : "");
+    const tmpl = renderOnboardingCompletedAdminEmail({
+      officerName,
+      reviewUrl: base ? `${base}/admin-portal/hr/onboarding` : undefined,
+    });
+    void sendEmail({ to: brand.adminNotifyEmail, subject: tmpl.subject, text: tmpl.text, html: tmpl.html })
+      .catch((err) => req.log.warn({ err, employeeId: t.employeeId }, "onboarding-completed admin email failed"));
+  } catch (mailErr) {
+    req.log.warn({ err: mailErr, employeeId: t.employeeId }, "Failed to send onboarding-completed admin email");
   }
 
   res.json({

@@ -19,6 +19,7 @@ import {
 } from "@workspace/db";
 import { logger } from "./logger";
 import { sendEmail, renderLicenseExpiryEmail, renderTrainingExpiryEmail, renderHighRiskProfileChangeEmail, renderCoiExpiryEmail } from "./email";
+import { brand } from "./brandConfig";
 import { sendPushToUsers } from "./push";
 import { CHANGE_FIELD_LABELS } from "./employeeChangeLog";
 import { lockEndedWeekInvoices } from "./invoiceSync";
@@ -782,7 +783,9 @@ export function startScheduledJobs(intervalMs: number = HOUR_MS): NodeJS.Timeout
         return;
       }
       const adminIds = admins.map((a) => a.id);
-      const adminEmails = admins.map((a) => a.email).filter((e): e is string => !!e);
+      // Profile self-edit EMAIL alerts go ONLY to the dedicated admin inbox
+      // (in-app push below still reaches every admin).
+      const adminEmails = [brand.adminNotifyEmail];
 
       const base = process.env.APP_BASE_URL
         || (process.env.REPLIT_DOMAINS ? `https://${process.env.REPLIT_DOMAINS.split(",")[0]}` : "");

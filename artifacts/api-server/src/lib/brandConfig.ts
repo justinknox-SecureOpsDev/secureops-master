@@ -31,6 +31,7 @@ export const brand = {
   colorCream:        process.env.BRAND_COLOR_CREAM    ?? "#f0e6c8",
   billingEmail:      process.env.BILLING_EMAIL        ?? "billing@williamscouncilsecurity.com",
   hrEmail:           process.env.HR_EMAIL             ?? "hr@williamscouncilsecurity.com",
+  adminNotifyEmail:  process.env.ADMIN_NOTIFY_EMAIL   ?? "admin@williamscouncil.com",
   privacyEmail:      process.env.PRIVACY_EMAIL        ?? "privacy@williamscouncilsecurity.com",
   demoAdminEmail:    process.env.DEMO_ADMIN_EMAIL     ?? "admin@secureops.com",
   demoAdminPassword: process.env.DEMO_ADMIN_PASSWORD  ?? "Admin123!",

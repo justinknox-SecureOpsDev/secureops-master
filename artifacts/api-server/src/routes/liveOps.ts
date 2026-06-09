@@ -5,6 +5,7 @@ import { requireAuth, requireAdminOrDispatcher } from "../middlewares/auth";
 import { emergencyLimiter, locationLimiter } from "../middlewares/rateLimit";
 import { sendPushToUsers } from "../lib/push";
 import { sendSmsToUsers } from "../lib/sms";
+import { sendEmail, renderEmergencyAlertEmail } from "../lib/email";
 import { evaluateGeofence, getGeofenceRadiusMiles } from "../lib/geofence";
 
 const router: IRouter = Router();
@@ -250,8 +251,9 @@ router.post("/emergency", requireAuth, emergencyLimiter, async (req, res): Promi
     occurredAt: new Date(),
   }).returning();
 
-  const admins = await db.select({ id: usersTable.id }).from(usersTable).where(eq(usersTable.role, "admin"));
+  const admins = await db.select({ id: usersTable.id, email: usersTable.email }).from(usersTable).where(eq(usersTable.role, "admin"));
   const adminIds = admins.map((a) => a.id);
+  const adminEmails = admins.map((a) => a.email).filter((e): e is string => !!e);
 
   // Fire-and-forget push to all admins. We log dispatch failures so
   // systemic regressions (e.g. Expo creds rotated) are visible without
@@ -270,6 +272,30 @@ router.post("/emergency", requireAuth, emergencyLimiter, async (req, res): Promi
     adminIds,
     `[WCSG EMERGENCY] ${user.firstName} ${user.lastName} pressed the panic button${locTxt}. Open the app immediately.`,
   ).catch((err: unknown) => req.log.warn({ err, incidentId: incident.id }, "emergency SMS dispatch failed"));
+
+  // Email to all admins — third channel alongside in-app push + SMS so the
+  // alert lands even for admins who only watch their inbox. No-op when SMTP
+  // isn't configured.
+  if (adminEmails.length) {
+    const base = process.env.APP_BASE_URL
+      || (process.env.REPLIT_DOMAINS ? `https://${process.env.REPLIT_DOMAINS.split(",")[0]}` : "");
+    const tmpl = renderEmergencyAlertEmail({
+      officerName: `${user.firstName} ${user.lastName}`,
+      occurredAtIso: incident.occurredAt.toISOString(),
+      locationText: haveCoords ? `${useLat!.toFixed(6)}, ${useLng!.toFixed(6)}` : undefined,
+      message: message?.trim() || undefined,
+      reviewUrl: base ? `${base}/admin-portal/incidents/${incident.id}` : undefined,
+    });
+    Promise.all(
+      adminEmails.map((to) =>
+        sendEmail({ to, subject: tmpl.subject, text: tmpl.text, html: tmpl.html })
+          .catch((err: unknown) => {
+            req.log.warn({ err, to, incidentId: incident.id }, "emergency per-admin email failed");
+            return false;
+          }),
+      ),
+    ).catch((err: unknown) => req.log.warn({ err, incidentId: incident.id }, "emergency email dispatch failed"));
+  }
 
   // Notify any connected websocket clients in admin push channels via the chat broadcast pipe is overkill;
   // keep it to the push notification + incident record. Map view + incidents list will refresh on next poll.

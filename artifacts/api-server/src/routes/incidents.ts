@@ -4,6 +4,7 @@ import { db, incidentsTable, usersTable, shiftsTable } from "@workspace/db";
 import { requireAuth, requireAdminOrDispatcher } from "../middlewares/auth";
 import { buildIncidentReportPdf } from "../lib/incidentPdf";
 import { broadcastToRoom } from "../lib/wsManager";
+import { sendPushToUsers } from "../lib/push";
 
 const router: IRouter = Router();
 
@@ -94,6 +95,20 @@ router.post("/incidents", requireAuth, async (req, res): Promise<void> => {
 
   const [user] = await db.select().from(usersTable).where(eq(usersTable.id, req.user!.userId));
   await broadcastIncidentChange({ type: "incident:changed", incidentId: incident.id, severity: incident.severity });
+
+  // Notify every admin (in-app + push). The WS pulse above only reaches
+  // currently-connected admins/dispatchers; this ensures the report lands
+  // for all admins even if they're offline.
+  const reporterName = user ? `${user.firstName} ${user.lastName}` : "An officer";
+  const admins = await db.select({ id: usersTable.id }).from(usersTable).where(eq(usersTable.role, "admin"));
+  if (admins.length) {
+    sendPushToUsers(admins.map((a) => a.id), {
+      title: `New incident report — ${incident.severity}`,
+      body: `${reporterName} reported: ${incident.title}`,
+      data: { type: "incident", incidentId: incident.id, severity: incident.severity },
+    }).catch((err: unknown) => req.log.warn({ err, incidentId: incident.id }, "incident admin push failed"));
+  }
+
   res.status(201).json({
     ...incident,
     employeeName: user ? `${user.firstName} ${user.lastName}` : null,

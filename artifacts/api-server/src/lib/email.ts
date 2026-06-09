@@ -804,6 +804,121 @@ export function renderHighRiskProfileChangeEmail(opts: {
   return { subject, text, html };
 }
 
+export function renderEmergencyAlertEmail(opts: {
+  officerName: string;
+  occurredAtIso: string;
+  locationText?: string;
+  message?: string;
+  reviewUrl?: string;
+}): { subject: string; text: string; html: string } {
+  const subject = `🚨 EMERGENCY — ${opts.officerName} triggered a panic alert`;
+  const locLine = opts.locationText ? `Location: ${opts.locationText}` : "Location: not available";
+  const msgLine = opts.message ? `Message: ${opts.message}` : undefined;
+  const reviewLine = opts.reviewUrl ? `\nOpen the incident: ${opts.reviewUrl}\n` : "";
+  const text = [
+    `An officer just pressed the emergency panic button. Verify their safety immediately.`,
+    "",
+    `Officer: ${opts.officerName}`,
+    `When:    ${opts.occurredAtIso}`,
+    locLine,
+    msgLine,
+    reviewLine,
+    `— ${brand.companyName} · ${brand.appName}`,
+  ].filter((l) => l !== undefined).join("\n");
+  const locHtml = opts.locationText
+    ? `<div><strong>Location:</strong> ${escapeHtml(opts.locationText)}</div>`
+    : `<div><strong>Location:</strong> not available</div>`;
+  const msgHtml = opts.message
+    ? `<div style="margin-top:8px"><strong>Message:</strong> ${escapeHtml(opts.message)}</div>`
+    : "";
+  const reviewHtml = opts.reviewUrl
+    ? `<p style="margin:18px 0"><a href="${escapeAttr(opts.reviewUrl)}" style="background:#a30000;color:#fff;padding:10px 18px;text-decoration:none;font-weight:bold;border-radius:4px">Open incident</a></p>`
+    : "";
+  const html = `
+    <div style="font-family:Georgia,serif;max-width:560px;margin:0 auto;color:#080c18">
+      <h2 style="color:#a30000;margin-top:0">🚨 Emergency panic alert</h2>
+      <p>An officer just pressed the emergency panic button. Verify their safety immediately.</p>
+      <div style="background:#fbeaea;padding:14px 16px;border-left:3px solid #a30000;margin:18px 0;border-radius:4px;font-size:14px">
+        <div><strong>Officer:</strong> ${escapeHtml(opts.officerName)}</div>
+        <div><strong>When:</strong> ${escapeHtml(opts.occurredAtIso)}</div>
+        ${locHtml}
+        ${msgHtml}
+      </div>
+      ${reviewHtml}
+      <hr style="border:none;border-top:1px solid #ddd;margin:24px 0"/>
+      <p style="color:#555;font-size:12px">— ${brand.companyName} · ${brand.appName}</p>
+    </div>
+  `;
+  return { subject, text, html };
+}
+
+export function renderNewApplicationAdminEmail(opts: {
+  applicantName: string;
+  applicantEmail: string;
+  applicantPhone?: string;
+  reviewUrl?: string;
+}): { subject: string; text: string; html: string } {
+  const subject = `New application: ${opts.applicantName}`;
+  const phoneLine = opts.applicantPhone ? `Phone: ${opts.applicantPhone}` : undefined;
+  const reviewLine = opts.reviewUrl ? `\nReview the application: ${opts.reviewUrl}\n` : "";
+  const text = [
+    `A new employment application was just submitted.`,
+    "",
+    `Applicant: ${opts.applicantName}`,
+    `Email:     ${opts.applicantEmail}`,
+    phoneLine,
+    reviewLine,
+    `— ${brand.companyName} · ${brand.appName}`,
+  ].filter((l) => l !== undefined).join("\n");
+  const phoneHtml = opts.applicantPhone
+    ? `<div><strong>Phone:</strong> ${escapeHtml(opts.applicantPhone)}</div>`
+    : "";
+  const reviewHtml = opts.reviewUrl
+    ? `<p style="margin:18px 0"><a href="${escapeAttr(opts.reviewUrl)}" style="background:#080c18;color:#c9a84c;padding:10px 18px;text-decoration:none;font-weight:bold;border-radius:4px">Review application</a></p>`
+    : "";
+  const html = `
+    <div style="font-family:Georgia,serif;max-width:560px;margin:0 auto;color:#080c18">
+      <h2 style="color:#080c18;margin-top:0">New application received</h2>
+      <p>A new employment application was just submitted.</p>
+      <div style="background:#f6f1e1;padding:14px 16px;border-left:3px solid #c9a84c;margin:18px 0;border-radius:4px;font-size:14px">
+        <div><strong>Applicant:</strong> ${escapeHtml(opts.applicantName)}</div>
+        <div><strong>Email:</strong> ${escapeHtml(opts.applicantEmail)}</div>
+        ${phoneHtml}
+      </div>
+      ${reviewHtml}
+      <hr style="border:none;border-top:1px solid #ddd;margin:24px 0"/>
+      <p style="color:#555;font-size:12px">— ${brand.companyName} · ${brand.appName}</p>
+    </div>
+  `;
+  return { subject, text, html };
+}
+
+export function renderOnboardingCompletedAdminEmail(opts: {
+  officerName: string;
+  reviewUrl?: string;
+}): { subject: string; text: string; html: string } {
+  const subject = `Onboarding completed: ${opts.officerName}`;
+  const reviewLine = opts.reviewUrl ? `\nReview onboarding: ${opts.reviewUrl}\n` : "";
+  const text = [
+    `${opts.officerName} just completed onboarding and is now active.`,
+    reviewLine,
+    `— ${brand.companyName} · ${brand.appName}`,
+  ].filter((l) => l !== undefined).join("\n");
+  const reviewHtml = opts.reviewUrl
+    ? `<p style="margin:18px 0"><a href="${escapeAttr(opts.reviewUrl)}" style="background:#080c18;color:#c9a84c;padding:10px 18px;text-decoration:none;font-weight:bold;border-radius:4px">Review onboarding</a></p>`
+    : "";
+  const html = `
+    <div style="font-family:Georgia,serif;max-width:560px;margin:0 auto;color:#080c18">
+      <h2 style="color:#080c18;margin-top:0">Onboarding completed</h2>
+      <p><strong>${escapeHtml(opts.officerName)}</strong> just completed onboarding and is now active.</p>
+      ${reviewHtml}
+      <hr style="border:none;border-top:1px solid #ddd;margin:24px 0"/>
+      <p style="color:#555;font-size:12px">— ${brand.companyName} · ${brand.appName}</p>
+    </div>
+  `;
+  return { subject, text, html };
+}
+
 function escapeHtml(s: string): string {
   return s.replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]!));
 }
