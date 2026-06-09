@@ -3985,3 +3985,63 @@ export const SubcontractorClockToggleResponse = zod.object({
   clockOutAt: zod.coerce.date().nullish(),
   hoursWorked: zod.string().nullish(),
 });
+
+/**
+ * Authenticated internal users (officer/lead/employee/admin) report a pay
+discrepancy (missed payment, underpayment, missing hours, etc.). On
+submit the report is emailed to the dedicated admin inbox and becomes
+visible in the Admin Portal. External client accounts are rejected.
+
+ * @summary Submit a payment discrepancy report (officer)
+ */
+
+export const CreatePaymentDiscrepancyBody = zod.object({
+  discrepancyType: zod.enum([
+    "missed_payment",
+    "underpaid",
+    "missing_hours",
+    "incorrect_rate",
+    "other",
+  ]),
+  payPeriodStart: zod.coerce.date().nullish().describe("ISO date (YYYY-MM-DD)"),
+  payPeriodEnd: zod.coerce.date().nullish().describe("ISO date (YYYY-MM-DD)"),
+  shiftDate: zod.coerce.date().nullish().describe("ISO date (YYYY-MM-DD)"),
+  expectedAmount: zod
+    .number()
+    .nullish()
+    .describe("Amount the officer expected to be paid (USD)"),
+  receivedAmount: zod
+    .number()
+    .nullish()
+    .describe("Amount actually received (USD)"),
+  description: zod.string().min(1).describe("Details of the discrepancy"),
+});
+
+/**
+ * @summary List the caller's own submitted payment discrepancies
+ */
+export const ListMyPaymentDiscrepanciesResponseItem = zod.object({
+  id: zod.string(),
+  employeeId: zod.string(),
+  discrepancyType: zod.enum([
+    "missed_payment",
+    "underpaid",
+    "missing_hours",
+    "incorrect_rate",
+    "other",
+  ]),
+  payPeriodStart: zod.coerce.date().nullish(),
+  payPeriodEnd: zod.coerce.date().nullish(),
+  shiftDate: zod.coerce.date().nullish(),
+  expectedAmount: zod.string().nullish().describe("Decimal string (USD)"),
+  receivedAmount: zod.string().nullish().describe("Decimal string (USD)"),
+  description: zod.string(),
+  status: zod.enum(["open", "under_review", "resolved"]),
+  adminNotes: zod.string().nullish(),
+  resolvedAt: zod.coerce.date().nullish(),
+  createdAt: zod.coerce.date(),
+  updatedAt: zod.coerce.date(),
+});
+export const ListMyPaymentDiscrepanciesResponse = zod.array(
+  ListMyPaymentDiscrepanciesResponseItem,
+);

@@ -660,6 +660,38 @@ export default function EmployeeProfileScreen() {
           <Feather name="chevron-right" size={16} color={colors.mutedForeground} />
         </TouchableOpacity>
         <TouchableOpacity
+          onPress={() => router.push("/payment-discrepancy" as any)}
+          style={[styles.actionRow, { borderBottomColor: colors.border }]}
+          accessibilityRole="button"
+          accessibilityLabel="Report a pay issue"
+          accessibilityHint="Submit a payment discrepancy to the office"
+        >
+          <Feather name="alert-circle" size={16} color={colors.accent} />
+          <View style={{ flex: 1 }}>
+            <Text style={{ color: colors.foreground, fontSize: 14, fontWeight: "600" }}>Report a pay issue</Text>
+            <Text style={{ color: colors.mutedForeground, fontSize: 12, marginTop: 2 }}>
+              Tell us about a missed payment or pay discrepancy
+            </Text>
+          </View>
+          <Feather name="chevron-right" size={16} color={colors.mutedForeground} />
+        </TouchableOpacity>
+        <TouchableOpacity
+          onPress={() => router.push("/policies" as any)}
+          style={[styles.actionRow, { borderBottomColor: colors.border }]}
+          accessibilityRole="button"
+          accessibilityLabel="Policies and procedures"
+          accessibilityHint="Browse and open company policy documents"
+        >
+          <Feather name="book-open" size={16} color={colors.accent} />
+          <View style={{ flex: 1 }}>
+            <Text style={{ color: colors.foreground, fontSize: 14, fontWeight: "600" }}>Policies & procedures</Text>
+            <Text style={{ color: colors.mutedForeground, fontSize: 12, marginTop: 2 }}>
+              Read company policies and procedures
+            </Text>
+          </View>
+          <Feather name="chevron-right" size={16} color={colors.mutedForeground} />
+        </TouchableOpacity>
+        <TouchableOpacity
           onPress={() => router.push("/swap-requests" as any)}
           style={[styles.actionRow, { borderBottomColor: colors.border }]}
           accessibilityRole="button"

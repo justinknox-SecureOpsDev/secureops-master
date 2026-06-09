@@ -55,6 +55,7 @@ import type {
   CreateIncidentRequest,
   CreateInvoiceRequest,
   CreateLicenseRequest,
+  CreatePaymentDiscrepancyRequest,
   CreatePayrollRequest,
   CreatePolicyRequest,
   CreateRadioChannelRequest,
@@ -106,6 +107,7 @@ import type {
   OnboardingPrefill,
   OnboardingSubmission,
   PasswordResetTokenInfo,
+  PaymentDiscrepancy,
   PayrollEntry,
   Policy,
   PolicyGroup,
@@ -10816,3 +10818,171 @@ export const useSubcontractorClockToggle = <
 > => {
   return useMutation(getSubcontractorClockToggleMutationOptions(options));
 };
+
+/**
+ * Authenticated internal users (officer/lead/employee/admin) report a pay
+discrepancy (missed payment, underpayment, missing hours, etc.). On
+submit the report is emailed to the dedicated admin inbox and becomes
+visible in the Admin Portal. External client accounts are rejected.
+
+ * @summary Submit a payment discrepancy report (officer)
+ */
+export const getCreatePaymentDiscrepancyUrl = () => {
+  return `/api/payment-discrepancies`;
+};
+
+export const createPaymentDiscrepancy = async (
+  createPaymentDiscrepancyRequest: CreatePaymentDiscrepancyRequest,
+  options?: RequestInit,
+): Promise<PaymentDiscrepancy> => {
+  return customFetch<PaymentDiscrepancy>(getCreatePaymentDiscrepancyUrl(), {
+    ...options,
+    method: "POST",
+    headers: { "Content-Type": "application/json", ...options?.headers },
+    body: JSON.stringify(createPaymentDiscrepancyRequest),
+  });
+};
+
+export const getCreatePaymentDiscrepancyMutationOptions = <
+  TError = ErrorType<ErrorResponse>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof createPaymentDiscrepancy>>,
+    TError,
+    { data: BodyType<CreatePaymentDiscrepancyRequest> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof createPaymentDiscrepancy>>,
+  TError,
+  { data: BodyType<CreatePaymentDiscrepancyRequest> },
+  TContext
+> => {
+  const mutationKey = ["createPaymentDiscrepancy"];
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof createPaymentDiscrepancy>>,
+    { data: BodyType<CreatePaymentDiscrepancyRequest> }
+  > = (props) => {
+    const { data } = props ?? {};
+
+    return createPaymentDiscrepancy(data, requestOptions);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type CreatePaymentDiscrepancyMutationResult = NonNullable<
+  Awaited<ReturnType<typeof createPaymentDiscrepancy>>
+>;
+export type CreatePaymentDiscrepancyMutationBody =
+  BodyType<CreatePaymentDiscrepancyRequest>;
+export type CreatePaymentDiscrepancyMutationError = ErrorType<ErrorResponse>;
+
+/**
+ * @summary Submit a payment discrepancy report (officer)
+ */
+export const useCreatePaymentDiscrepancy = <
+  TError = ErrorType<ErrorResponse>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof createPaymentDiscrepancy>>,
+    TError,
+    { data: BodyType<CreatePaymentDiscrepancyRequest> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationResult<
+  Awaited<ReturnType<typeof createPaymentDiscrepancy>>,
+  TError,
+  { data: BodyType<CreatePaymentDiscrepancyRequest> },
+  TContext
+> => {
+  return useMutation(getCreatePaymentDiscrepancyMutationOptions(options));
+};
+
+/**
+ * @summary List the caller's own submitted payment discrepancies
+ */
+export const getListMyPaymentDiscrepanciesUrl = () => {
+  return `/api/me/payment-discrepancies`;
+};
+
+export const listMyPaymentDiscrepancies = async (
+  options?: RequestInit,
+): Promise<PaymentDiscrepancy[]> => {
+  return customFetch<PaymentDiscrepancy[]>(getListMyPaymentDiscrepanciesUrl(), {
+    ...options,
+    method: "GET",
+  });
+};
+
+export const getListMyPaymentDiscrepanciesQueryKey = () => {
+  return [`/api/me/payment-discrepancies`] as const;
+};
+
+export const getListMyPaymentDiscrepanciesQueryOptions = <
+  TData = Awaited<ReturnType<typeof listMyPaymentDiscrepancies>>,
+  TError = ErrorType<unknown>,
+>(options?: {
+  query?: UseQueryOptions<
+    Awaited<ReturnType<typeof listMyPaymentDiscrepancies>>,
+    TError,
+    TData
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}) => {
+  const { query: queryOptions, request: requestOptions } = options ?? {};
+
+  const queryKey =
+    queryOptions?.queryKey ?? getListMyPaymentDiscrepanciesQueryKey();
+
+  const queryFn: QueryFunction<
+    Awaited<ReturnType<typeof listMyPaymentDiscrepancies>>
+  > = ({ signal }) => listMyPaymentDiscrepancies({ signal, ...requestOptions });
+
+  return { queryKey, queryFn, ...queryOptions } as UseQueryOptions<
+    Awaited<ReturnType<typeof listMyPaymentDiscrepancies>>,
+    TError,
+    TData
+  > & { queryKey: QueryKey };
+};
+
+export type ListMyPaymentDiscrepanciesQueryResult = NonNullable<
+  Awaited<ReturnType<typeof listMyPaymentDiscrepancies>>
+>;
+export type ListMyPaymentDiscrepanciesQueryError = ErrorType<unknown>;
+
+/**
+ * @summary List the caller's own submitted payment discrepancies
+ */
+
+export function useListMyPaymentDiscrepancies<
+  TData = Awaited<ReturnType<typeof listMyPaymentDiscrepancies>>,
+  TError = ErrorType<unknown>,
+>(options?: {
+  query?: UseQueryOptions<
+    Awaited<ReturnType<typeof listMyPaymentDiscrepancies>>,
+    TError,
+    TData
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+  const queryOptions = getListMyPaymentDiscrepanciesQueryOptions(options);
+
+  const query = useQuery(queryOptions) as UseQueryResult<TData, TError> & {
+    queryKey: QueryKey;
+  };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}

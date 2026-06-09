@@ -2577,6 +2577,54 @@ paths:
             application/json:
               schema: { $ref: "#/components/schemas/ErrorResponse" }
 
+  /payment-discrepancies:
+    post:
+      tags: [paymentDiscrepancies]
+      operationId: createPaymentDiscrepancy
+      summary: Submit a payment discrepancy report (officer)
+      description: |
+        Authenticated internal users (officer/lead/employee/admin) report a pay
+        discrepancy (missed payment, underpayment, missing hours, etc.). On
+        submit the report is emailed to the dedicated admin inbox and becomes
+        visible in the Admin Portal. External client accounts are rejected.
+      security: [{ bearerAuth: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/CreatePaymentDiscrepancyRequest" }
+      responses:
+        "201":
+          description: Created
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/PaymentDiscrepancy" }
+        "400":
+          description: Bad Request
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ErrorResponse" }
+        "403":
+          description: Forbidden
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ErrorResponse" }
+
+  /me/payment-discrepancies:
+    get:
+      tags: [paymentDiscrepancies]
+      operationId: listMyPaymentDiscrepancies
+      summary: List the caller's own submitted payment discrepancies
+      security: [{ bearerAuth: [] }]
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: "#/components/schemas/PaymentDiscrepancy" }
+
 components:
   schemas:
     SubcontractorQrResponse:
@@ -4288,6 +4336,41 @@ components:
         fileKey: { type: string, nullable: true }
         fileName: { type: string, nullable: true }
         viewUrl: { type: string, nullable: true, description: "Signed download URL for the policy PDF" }
+
+    PaymentDiscrepancyType:
+      type: string
+      enum: [missed_payment, underpaid, missing_hours, incorrect_rate, other]
+
+    CreatePaymentDiscrepancyRequest:
+      type: object
+      required: [discrepancyType, description]
+      properties:
+        discrepancyType: { $ref: "#/components/schemas/PaymentDiscrepancyType" }
+        payPeriodStart: { type: string, format: date, nullable: true, description: "ISO date (YYYY-MM-DD)" }
+        payPeriodEnd: { type: string, format: date, nullable: true, description: "ISO date (YYYY-MM-DD)" }
+        shiftDate: { type: string, format: date, nullable: true, description: "ISO date (YYYY-MM-DD)" }
+        expectedAmount: { type: number, nullable: true, description: "Amount the officer expected to be paid (USD)" }
+        receivedAmount: { type: number, nullable: true, description: "Amount actually received (USD)" }
+        description: { type: string, minLength: 1, description: "Details of the discrepancy" }
+
+    PaymentDiscrepancy:
+      type: object
+      required: [id, employeeId, discrepancyType, description, status, createdAt, updatedAt]
+      properties:
+        id: { type: string }
+        employeeId: { type: string }
+        discrepancyType: { $ref: "#/components/schemas/PaymentDiscrepancyType" }
+        payPeriodStart: { type: string, format: date, nullable: true }
+        payPeriodEnd: { type: string, format: date, nullable: true }
+        shiftDate: { type: string, format: date, nullable: true }
+        expectedAmount: { type: string, nullable: true, description: "Decimal string (USD)" }
+        receivedAmount: { type: string, nullable: true, description: "Decimal string (USD)" }
+        description: { type: string }
+        status: { type: string, enum: [open, under_review, resolved] }
+        adminNotes: { type: string, nullable: true }
+        resolvedAt: { type: string, format: date-time, nullable: true }
+        createdAt: { type: string, format: date-time }
+        updatedAt: { type: string, format: date-time }
 
     Policy:
       type: object

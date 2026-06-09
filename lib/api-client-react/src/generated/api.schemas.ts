@@ -1552,6 +1552,64 @@ export interface OnboardingPrefill {
   policies: PolicyPublic[];
 }
 
+export type PaymentDiscrepancyType =
+  (typeof PaymentDiscrepancyType)[keyof typeof PaymentDiscrepancyType];
+
+export const PaymentDiscrepancyType = {
+  missed_payment: "missed_payment",
+  underpaid: "underpaid",
+  missing_hours: "missing_hours",
+  incorrect_rate: "incorrect_rate",
+  other: "other",
+} as const;
+
+export interface CreatePaymentDiscrepancyRequest {
+  discrepancyType: PaymentDiscrepancyType;
+  /** ISO date (YYYY-MM-DD) */
+  payPeriodStart?: string | null;
+  /** ISO date (YYYY-MM-DD) */
+  payPeriodEnd?: string | null;
+  /** ISO date (YYYY-MM-DD) */
+  shiftDate?: string | null;
+  /** Amount the officer expected to be paid (USD) */
+  expectedAmount?: number | null;
+  /** Amount actually received (USD) */
+  receivedAmount?: number | null;
+  /**
+   * Details of the discrepancy
+   * @minLength 1
+   */
+  description: string;
+}
+
+export type PaymentDiscrepancyStatus =
+  (typeof PaymentDiscrepancyStatus)[keyof typeof PaymentDiscrepancyStatus];
+
+export const PaymentDiscrepancyStatus = {
+  open: "open",
+  under_review: "under_review",
+  resolved: "resolved",
+} as const;
+
+export interface PaymentDiscrepancy {
+  id: string;
+  employeeId: string;
+  discrepancyType: PaymentDiscrepancyType;
+  payPeriodStart?: string | null;
+  payPeriodEnd?: string | null;
+  shiftDate?: string | null;
+  /** Decimal string (USD) */
+  expectedAmount?: string | null;
+  /** Decimal string (USD) */
+  receivedAmount?: string | null;
+  description: string;
+  status: PaymentDiscrepancyStatus;
+  adminNotes?: string | null;
+  resolvedAt?: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
 export interface Policy {
   id: string;
   slug: string;

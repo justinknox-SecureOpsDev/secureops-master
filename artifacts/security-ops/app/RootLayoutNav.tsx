@@ -22,6 +22,8 @@ const ALLOWED_TOP_SCREENS = new Set([
   "availability",
   "license-renewal",
   "paystubs",
+  "policies",
+  "payment-discrepancy",
   "swap-requests",
   "training-add",
   "dar",
@@ -113,6 +115,8 @@ export default function RootLayoutNav() {
       <Stack.Screen name="availability" />
       <Stack.Screen name="license-renewal" />
       <Stack.Screen name="paystubs" />
+      <Stack.Screen name="policies" />
+      <Stack.Screen name="payment-discrepancy" />
       <Stack.Screen name="swap-requests" />
       <Stack.Screen name="training-add" />
       <Stack.Screen name="dar" />

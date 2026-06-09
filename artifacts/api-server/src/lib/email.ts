@@ -919,6 +919,64 @@ export function renderOnboardingCompletedAdminEmail(opts: {
   return { subject, text, html };
 }
 
+export function renderPaymentDiscrepancyEmail(opts: {
+  officerName: string;
+  officerEmail?: string;
+  discrepancyType: string;
+  payPeriod?: string;
+  shiftDate?: string;
+  expectedAmount?: string;
+  receivedAmount?: string;
+  description: string;
+  reviewUrl?: string;
+}): { subject: string; text: string; html: string } {
+  const typeLabel = opts.discrepancyType.replace(/_/g, " ");
+  const subject = `Payment discrepancy: ${opts.officerName} (${typeLabel})`;
+  const rows: { label: string; value: string | undefined }[] = [
+    { label: "Officer", value: opts.officerName },
+    { label: "Email", value: opts.officerEmail },
+    { label: "Type", value: typeLabel },
+    { label: "Pay period", value: opts.payPeriod },
+    { label: "Shift date", value: opts.shiftDate },
+    { label: "Expected", value: opts.expectedAmount ? `$${opts.expectedAmount}` : undefined },
+    { label: "Received", value: opts.receivedAmount ? `$${opts.receivedAmount}` : undefined },
+  ].filter((r) => r.value !== undefined && r.value !== "");
+  const reviewLine = opts.reviewUrl ? `\nReview in the Admin Portal: ${opts.reviewUrl}\n` : "";
+  const text = [
+    `A payment discrepancy was just submitted.`,
+    "",
+    ...rows.map((r) => `${r.label}: ${r.value}`),
+    "",
+    `Details:`,
+    opts.description,
+    reviewLine,
+    `— ${brand.companyName} · ${brand.appName}`,
+  ].join("\n");
+  const rowsHtml = rows
+    .map((r) => `<div><strong>${escapeHtml(r.label)}:</strong> ${escapeHtml(r.value!)}</div>`)
+    .join("");
+  const reviewHtml = opts.reviewUrl
+    ? `<p style="margin:18px 0"><a href="${escapeAttr(opts.reviewUrl)}" style="background:#080c18;color:#c9a84c;padding:10px 18px;text-decoration:none;font-weight:bold;border-radius:4px">Open in Admin Portal</a></p>`
+    : "";
+  const html = `
+    <div style="font-family:Georgia,serif;max-width:560px;margin:0 auto;color:#080c18">
+      <h2 style="color:#080c18;margin-top:0">Payment discrepancy reported</h2>
+      <p>A payment discrepancy was just submitted by an officer.</p>
+      <div style="background:#f6f1e1;padding:14px 16px;border-left:3px solid #c9a84c;margin:18px 0;border-radius:4px;font-size:14px">
+        ${rowsHtml}
+      </div>
+      <div style="margin:18px 0">
+        <strong>Details</strong>
+        <p style="white-space:pre-wrap;margin:6px 0 0">${escapeHtml(opts.description)}</p>
+      </div>
+      ${reviewHtml}
+      <hr style="border:none;border-top:1px solid #ddd;margin:24px 0"/>
+      <p style="color:#555;font-size:12px">— ${brand.companyName} · ${brand.appName}</p>
+    </div>
+  `;
+  return { subject, text, html };
+}
+
 function escapeHtml(s: string): string {
   return s.replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]!));
 }

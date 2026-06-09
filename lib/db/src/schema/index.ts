@@ -21,6 +21,7 @@ export * from "./applicationDrafts";
 export * from "./passwordResetTokens";
 export * from "./onboardingSubmissions";
 export * from "./policies";
+export * from "./paymentDiscrepancies";
 export * from "./revokedTokens";
 export * from "./auditLogs";
 export * from "./shiftSwapRequests";

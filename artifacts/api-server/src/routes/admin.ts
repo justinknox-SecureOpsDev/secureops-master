@@ -37,6 +37,8 @@ import {
   insertInvoiceSchema,
   insertIncidentSchema,
   insertLicenseSchema,
+  paymentDiscrepanciesTable,
+  insertPaymentDiscrepancySchema,
 } from "@workspace/db";
 import { requireAdmin } from "../middlewares/auth";
 import { siteBlockersForOne, clientDeletionBlockers, refuseIfBlocked } from "../lib/siteDeletion";
@@ -445,6 +447,25 @@ const tables: Record<string, TableConfig> = {
     },
     importSupported: false,
     label: "Subcontractor invoice",
+  },
+  payment_discrepancies: {
+    table: paymentDiscrepanciesTable,
+    insertSchema: insertPaymentDiscrepancySchema as unknown as z.ZodSchema<any>,
+    searchColumns: [
+      paymentDiscrepanciesTable.description,
+      paymentDiscrepanciesTable.discrepancyType,
+      paymentDiscrepanciesTable.status,
+    ],
+    orderBy: paymentDiscrepanciesTable.createdAt,
+    coerceWrite: (v) => {
+      // payPeriodStart/End and shiftDate are pg `date` columns (ISO strings) —
+      // do NOT date-coerce them; only resolvedAt is a `timestamp`.
+      let out = applyDateCoercion(v, ["resolvedAt"]);
+      out = applyNumericCoercion(out, ["expectedAmount", "receivedAmount"]);
+      return out;
+    },
+    importSupported: false,
+    label: "Payment discrepancy",
   },
 };
 

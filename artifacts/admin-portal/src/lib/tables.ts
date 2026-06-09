@@ -137,6 +137,45 @@ export function getImportMatchByLabelFields(t: TableDescriptor): string[] {
 
 export const TABLES: TableDescriptor[] = [
   {
+    name: "payment_discrepancies",
+    label: "Payment Discrepancies",
+    plural: "payment discrepancies",
+    importSupported: false,
+    primaryLabelField: "description",
+    fields: [
+      { key: "id", label: "ID", type: "text", readonly: true, hiddenInGrid: true },
+      { key: "employeeId", label: "Officer", type: "fk", fkTable: "users", fkLabel: "email", required: true },
+      {
+        key: "discrepancyType", label: "Type", type: "select", required: true,
+        options: [
+          { label: "Missed payment", value: "missed_payment" },
+          { label: "Underpaid", value: "underpaid" },
+          { label: "Missing hours", value: "missing_hours" },
+          { label: "Incorrect rate", value: "incorrect_rate" },
+          { label: "Other", value: "other" },
+        ],
+      },
+      {
+        key: "status", label: "Status", type: "select", required: true,
+        options: [
+          { label: "Open", value: "open" },
+          { label: "Under review", value: "under_review" },
+          { label: "Resolved", value: "resolved" },
+        ],
+      },
+      { key: "payPeriodStart", label: "Pay Period Start", type: "date", hiddenInGrid: true },
+      { key: "payPeriodEnd", label: "Pay Period End", type: "date", hiddenInGrid: true },
+      { key: "shiftDate", label: "Shift Date", type: "date" },
+      { key: "expectedAmount", label: "Expected ($)", type: "text" },
+      { key: "receivedAmount", label: "Received ($)", type: "text" },
+      { key: "description", label: "Description", type: "textarea", required: true },
+      { key: "adminNotes", label: "Admin Notes", type: "textarea", hiddenInGrid: true },
+      { key: "resolvedAt", label: "Resolved At", type: "datetime", hiddenInGrid: true },
+      { key: "createdAt", label: "Submitted", type: "datetime", readonly: true },
+      { key: "updatedAt", label: "Updated", type: "datetime", readonly: true, hiddenInGrid: true },
+    ],
+  },
+  {
     name: "users",
     label: "Users",
     plural: "users",

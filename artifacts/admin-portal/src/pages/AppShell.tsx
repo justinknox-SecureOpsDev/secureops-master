@@ -190,6 +190,7 @@ export function buildNavGroups(isDispatcher: boolean): NavGroup[] {
       { href: "/invoices/board", label: "Invoice Board", Icon: Receipt },
       { href: "/tables/invoices", label: "Invoices (raw)", Icon: Receipt },
       { href: "/tables/payroll_entries", label: "Payroll entries", Icon: Wallet },
+      { href: "/tables/payment_discrepancies", label: "Payment Discrepancies", Icon: AlertTriangle },
     ],
   };
 
