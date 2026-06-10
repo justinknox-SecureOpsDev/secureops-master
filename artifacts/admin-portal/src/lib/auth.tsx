@@ -1,13 +1,23 @@
 import { createContext, useContext, useEffect, useState, type ReactNode } from "react";
 import { api, getToken, setToken, setUnauthorizedHandler } from "./api";
 
-type User = { id: string; email: string; firstName: string; lastName: string; role: string };
+type User = {
+  id: string;
+  email: string;
+  firstName: string;
+  lastName: string;
+  role: string;
+  mustChangePassword?: boolean;
+};
 type AuthCtx = {
   user: User | null;
   loading: boolean;
   login: (email: string, password: string) => Promise<void>;
   loginTotp: (challengeToken: string, code: string) => Promise<void>;
   logout: () => void;
+  /** Swap in a fresh session (token + user) — used after a mandatory
+   *  first-login password change rotates the JWT server-side. */
+  applySession: (token: string, user: User) => void;
 };
 
 const Ctx = createContext<AuthCtx | null>(null);
@@ -54,6 +64,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setToken(null);
     setUser(null);
   }
+  function applySession(token: string, u: User) {
+    setToken(token);
+    setUser(u);
+  }
 
   // When any authenticated API call comes back 401 (expired/revoked session),
   // clear the dead session so the router falls back to the login screen instead
@@ -63,7 +77,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     return () => setUnauthorizedHandler(null);
   }, []);
 
-  return <Ctx.Provider value={{ user, loading, login, loginTotp, logout }}>{children}</Ctx.Provider>;
+  return <Ctx.Provider value={{ user, loading, login, loginTotp, logout, applySession }}>{children}</Ctx.Provider>;
 }
 
 export function useAuth(): AuthCtx {

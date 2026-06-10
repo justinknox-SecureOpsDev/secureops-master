@@ -42,3 +42,4 @@
 - [/tmp/logs are refresh snapshots](tmp-logs-are-refresh-snapshots.md) — /tmp/logs files are frozen at last refresh_all_logs call, not live; after restart_workflow call refresh_all_logs before trusting them.
 - [Clock-in nearest-site test pollution](clockin-nearest-site-test-pollution.md) — timeEntriesClockIn geo tests flake in full suite (pass alone) from an orphan site at the fixed test coords; it's DB pollution, not a code regression.
 - [Notification routing policy](notification-routing-policy.md) — safety events (SOS/incidents)→all admins; HR events (profile-edit email/application/onboarding)→single brand.adminNotifyEmail inbox.
+- [admin-portal mustChangePassword gate](admin-portal-mustchangepassword-gate.md) — temp-pw/client users hit 403 on every non-/auth route until rotated; portal must gate behind a first-login change screen (raw fetch, not api()).

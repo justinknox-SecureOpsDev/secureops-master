@@ -48,6 +48,7 @@ import StaffingEventPage from "@/pages/StaffingEvent";
 import SchedulerIntegrationPage from "@/pages/SchedulerIntegration";
 import NotFound from "@/pages/not-found";
 import { ClientShell } from "@/pages/ClientShell";
+import { MandatoryPasswordChange } from "@/pages/MandatoryPasswordChange";
 import ClientUsers from "@/pages/ClientUsers";
 import CoverageRequests from "@/pages/CoverageRequests";
 
@@ -90,6 +91,14 @@ function Routed() {
     );
   }
   if (!user) return <LoginPage />;
+
+  // First-login credential rotation: invited users (notably client contacts)
+  // arrive with a temporary password and mustChangePassword=true. The API
+  // blocks every non-/auth route with 403 until they rotate it, so gate the
+  // whole portal behind a mandatory change screen before any role routing.
+  if (user.mustChangePassword) {
+    return <MandatoryPasswordChange />;
+  }
 
   // Client portal users get their own isolated shell
   if (user.role === "client") {
