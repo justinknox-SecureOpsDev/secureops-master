@@ -28,3 +28,15 @@ client invites started landing there.
   "current password is incorrect".
 - `/auth/me` (bootstrap on refresh) returns `mustChangePassword`, so the gate
   survives a hard refresh.
+
+## Related: `/client*` routes are client-role only
+
+The `/client*` routes exist only inside `ClientShell`, rendered only for
+`role === "client"`. An admin/dispatcher who opens a client sign-in link or
+bookmark (e.g. the URL in a client invite email) lands on `/client` in the
+admin router and dead-ends on the dev-facing "404 Page Not Found — Did you
+forget to add the page to the router?". Admins have no client account, so
+`App.tsx` redirects any admin/dispatcher hitting `/client` or `/client/*` back
+to admin home (`/`) before the role switch. A logged-out visitor on the same
+link is fine: they hit LoginPage, then after a client login `ClientShell`
+renders the matching `/client*` route.

@@ -114,6 +114,15 @@ function Routed() {
     return <OfficerAppRedirect email={user.email} />;
   }
 
+  // The /client* routes belong to the client portal (rendered only for
+  // role === "client" above). An admin/dispatcher who opens a client sign-in
+  // link or bookmark — e.g. the URL from a client invite email — would land
+  // here and dead-end on a developer-facing 404. They have no client account,
+  // so bounce them to their own admin home instead.
+  if (location === "/client" || location.startsWith("/client/")) {
+    return <Redirect to="/" />;
+  }
+
   const isDispatcher = user.role === "dispatcher";
 
   return (
