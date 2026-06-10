@@ -118,9 +118,10 @@ function Routed() {
   // role === "client" above). An admin/dispatcher who opens a client sign-in
   // link or bookmark — e.g. the URL from a client invite email — would land
   // here and dead-end on a developer-facing 404. They have no client account,
-  // so bounce them to their own admin home instead.
+  // so show a clear notice with a one-tap way to sign out and sign in as the
+  // client (the correct way to view/test the portal in this browser).
   if (location === "/client" || location.startsWith("/client/")) {
-    return <Redirect to="/" />;
+    return <ClientPortalNotice email={user.email} />;
   }
 
   const isDispatcher = user.role === "dispatcher";
@@ -206,6 +207,42 @@ function OfficerAppRedirect({ email }: { email: string }) {
         <a href={appUrl} className="text-sm underline" style={{ color: "#c9a84c" }}>
           Continue now
         </a>
+      </div>
+    </div>
+  );
+}
+
+function ClientPortalNotice({ email }: { email: string }) {
+  const { logout } = useAuth();
+  const [, navigate] = useLocation();
+  return (
+    <div className="min-h-screen flex items-center justify-center bg-brand-navy text-white p-6 text-center">
+      <div className="max-w-md">
+        <div className="brand-wordmark text-xl mb-2">Client portal</div>
+        <p className="text-sm opacity-80 mb-1">
+          You're signed in as <span className="font-semibold">{email}</span> (a
+          staff account).
+        </p>
+        <p className="text-sm opacity-70 mb-6">
+          The client portal is only for client accounts. To open it, sign out and
+          sign in with the client's email and the password from their invite
+          email — or open the invite link in a private / incognito window.
+        </p>
+        <div className="flex flex-col gap-3 items-center">
+          <button
+            onClick={logout}
+            className="px-4 py-2 rounded font-semibold"
+            style={{ background: "#c9a84c", color: "#080c18" }}
+          >
+            Sign out to sign in as the client
+          </button>
+          <button
+            onClick={() => navigate("/")}
+            className="text-sm underline opacity-80 hover:opacity-100"
+          >
+            Go to admin home
+          </button>
+        </div>
       </div>
     </div>
   );
