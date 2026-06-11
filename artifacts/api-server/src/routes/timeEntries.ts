@@ -938,9 +938,13 @@ router.patch("/time-entries/:id/times", requireAdmin, async (req, res): Promise<
 
   // Reset syncSource so corrections of scheduler-origin entries propagate back.
   // Stamp last-edited provenance so reviewers can see this was admin-corrected.
+  // Saving a correction also resolves any pending correction request, so the
+  // officer's amber "Correction" badge clears once the admin has fixed it.
   const updates: Record<string, unknown> = {
     clockInTime: targetClockIn,
     syncSource: "local",
+    correctionRequested: false,
+    correctionNote: null,
     lastEditedByUserId: req.user!.userId,
     lastEditedByEmail: req.user!.email,
     lastEditedAt: new Date(),
@@ -985,6 +989,41 @@ router.patch("/time-entries/:id/times", requireAdmin, async (req, res): Promise<
         )`,
       ));
   }
+
+  const [shift] = updated.shiftId
+    ? await db.select().from(shiftsTable).where(eq(shiftsTable.id, updated.shiftId))
+    : [undefined];
+  const [user] = await db.select().from(usersTable).where(eq(usersTable.id, updated.employeeId));
+
+  res.json({
+    ...updated,
+    shiftTitle: shift?.title,
+    employeeName: user ? `${user.firstName} ${user.lastName}` : null,
+  });
+});
+
+// Admin dismisses an officer's time-correction request without touching the
+// timestamps — e.g. when the request was a misunderstanding or already resolved.
+// Clears correctionRequested/correctionNote so the amber "Correction" badge goes
+// away. Distinct from PATCH /times, which clears the flag as a side effect of an
+// actual edit.
+router.post("/time-entries/:id/dismiss-correction", requireAdmin, async (req, res): Promise<void> => {
+  const id = Array.isArray(req.params.id) ? req.params.id[0] : req.params.id;
+
+  const [existing] = await db.select().from(timeEntriesTable).where(eq(timeEntriesTable.id, id));
+  if (!existing) { res.status(404).json({ error: "Not Found" }); return; }
+
+  const [updated] = await db
+    .update(timeEntriesTable)
+    .set({ correctionRequested: false, correctionNote: null })
+    .where(eq(timeEntriesTable.id, id))
+    .returning();
+
+  res.locals["auditMetadata"] = buildTimeEntryAuditMetadata(
+    id,
+    timeEntrySnapshot(existing),
+    timeEntrySnapshot(updated),
+  );
 
   const [shift] = updated.shiftId
     ? await db.select().from(shiftsTable).where(eq(shiftsTable.id, updated.shiftId))

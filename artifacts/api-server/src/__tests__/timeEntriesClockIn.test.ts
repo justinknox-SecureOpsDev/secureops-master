@@ -24,6 +24,7 @@ type Ctx = {
   unlicensedEmployeeId: string;
   licensedToken: string;
   unlicensedToken: string;
+  adminToken: string;
   clientId: string;
   // Site with coords inside the 1-mile resolve radius of (32.7767, -96.7970).
   nearSiteId: string;
@@ -58,6 +59,24 @@ beforeAll(async () => {
     userId: ctx.unlicensedEmployeeId,
     email: `${TAG}-nolic@example.test`,
     role: "employee",
+  });
+
+  const [admin] = await db
+    .insert(usersTable)
+    .values({
+      email: `${TAG}-admin@example.test`,
+      passwordHash,
+      firstName: "Admin",
+      lastName: TAG,
+      role: "admin",
+      status: "active",
+      tokensValidAfter: new Date(0),
+    })
+    .returning({ id: usersTable.id });
+  ctx.adminToken = signToken({
+    userId: admin.id,
+    email: `${TAG}-admin@example.test`,
+    role: "admin",
   });
 
   // Only the "licensed" officer gets an unexpired license.
@@ -352,6 +371,87 @@ describe("POST /time-entries/clock-out time-correction request", () => {
     expect(res.body.correctionRequested).toBe(false);
 
     await db.delete(timeEntriesTable).where(eq(timeEntriesTable.id, entryId));
+  });
+});
+
+describe("admin resolving an officer's time-correction request", () => {
+  it("clears the correction flag/note when admin saves a timestamp correction (PATCH /times)", async () => {
+    const clockIn = new Date(Date.now() - 3 * 3600_000);
+    const [seeded] = await db
+      .insert(timeEntriesTable)
+      .values({
+        employeeId: ctx.licensedEmployeeId,
+        siteId: ctx.nearSiteId,
+        clockInTime: clockIn,
+        clockOutTime: new Date(Date.now() - 3600_000),
+        correctionRequested: true,
+        correctionNote: "Clock-in was 30 min late",
+      })
+      .returning({ id: timeEntriesTable.id });
+
+    const res = await request(app)
+      .patch(`/api/time-entries/${seeded.id}/times`)
+      .set(authed(ctx.adminToken))
+      .send({ clockInTime: new Date(Date.now() - 4 * 3600_000).toISOString() });
+    expect(res.status).toBe(200);
+    expect(res.body.correctionRequested).toBe(false);
+    expect(res.body.correctionNote).toBeNull();
+
+    await db.delete(timeEntriesTable).where(eq(timeEntriesTable.id, seeded.id));
+  });
+
+  it("clears the correction flag/note via POST /dismiss-correction without changing timestamps", async () => {
+    const clockIn = new Date(Date.now() - 3 * 3600_000);
+    const clockOut = new Date(Date.now() - 3600_000);
+    const [seeded] = await db
+      .insert(timeEntriesTable)
+      .values({
+        employeeId: ctx.licensedEmployeeId,
+        siteId: ctx.nearSiteId,
+        clockInTime: clockIn,
+        clockOutTime: clockOut,
+        correctionRequested: true,
+        correctionNote: "Please double-check",
+      })
+      .returning({ id: timeEntriesTable.id });
+
+    const res = await request(app)
+      .post(`/api/time-entries/${seeded.id}/dismiss-correction`)
+      .set(authed(ctx.adminToken));
+    expect(res.status).toBe(200);
+    expect(res.body.correctionRequested).toBe(false);
+    expect(res.body.correctionNote).toBeNull();
+    expect(new Date(res.body.clockInTime).getTime()).toBe(clockIn.getTime());
+    expect(new Date(res.body.clockOutTime).getTime()).toBe(clockOut.getTime());
+
+    await db.delete(timeEntriesTable).where(eq(timeEntriesTable.id, seeded.id));
+  });
+
+  it("rejects a non-admin calling POST /dismiss-correction", async () => {
+    const [seeded] = await db
+      .insert(timeEntriesTable)
+      .values({
+        employeeId: ctx.licensedEmployeeId,
+        siteId: ctx.nearSiteId,
+        clockInTime: new Date(Date.now() - 3600_000),
+        correctionRequested: true,
+        correctionNote: "officer note",
+      })
+      .returning({ id: timeEntriesTable.id });
+
+    const res = await request(app)
+      .post(`/api/time-entries/${seeded.id}/dismiss-correction`)
+      .set(authed(ctx.licensedToken));
+    expect(res.status).toBe(403);
+
+    await db.delete(timeEntriesTable).where(eq(timeEntriesTable.id, seeded.id));
+  });
+
+  it("returns 404 from POST /dismiss-correction for an unknown entry", async () => {
+    const res = await request(app)
+      .post(`/api/time-entries/${randomUUID()}/dismiss-correction`)
+      .set(authed(ctx.adminToken));
+    expect(res.status).toBe(404);
   });
 });
 

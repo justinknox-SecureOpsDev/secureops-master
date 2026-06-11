@@ -504,6 +504,22 @@ export function SiteDetailPage() {
     }
   }
 
+  // Admin-only: dismiss an officer's correction request without editing the
+  // timestamps (e.g. it was already handled or a misunderstanding). Clears the
+  // amber "Correction" badge via POST /time-entries/:id/dismiss-correction.
+  async function dismissCorrection(t: TimeEntryRow) {
+    setTeActionError(null);
+    setTeActioningId(t.id);
+    try {
+      await api(`/time-entries/${t.id}/dismiss-correction`, { method: "POST" });
+      await loadTimeEntries();
+    } catch (e) {
+      setTeActionError((e as Error).message);
+    } finally {
+      setTeActioningId(null);
+    }
+  }
+
   const loadSubEntries = useCallback(async () => {
     if (!siteId) return;
     setSubLoading(true);
@@ -1083,6 +1099,17 @@ export function SiteDetailPage() {
                               <AlertTriangle className="w-3 h-3" /> Correction
                             </span>
                           )}
+                          {isAdmin && t.correctionRequested && (
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              className="h-6 px-2 text-xs"
+                              onClick={() => dismissCorrection(t)}
+                              disabled={teActioningId === t.id}
+                            >
+                              {teActioningId === t.id ? <Loader2 className="w-3 h-3 animate-spin" /> : "Dismiss"}
+                            </Button>
+                          )}
                         </span>
                       </div>
                       <div className="grid grid-cols-2 gap-x-3 gap-y-1 text-sm">
@@ -1242,6 +1269,17 @@ export function SiteDetailPage() {
                             >
                               <AlertTriangle className="w-3 h-3" /> Correction
                             </span>
+                          )}
+                          {isAdmin && t.correctionRequested && (
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              className="ml-1 h-6 px-2 text-xs"
+                              onClick={() => dismissCorrection(t)}
+                              disabled={teActioningId === t.id}
+                            >
+                              {teActioningId === t.id ? <Loader2 className="w-3 h-3 animate-spin" /> : "Dismiss"}
+                            </Button>
                           )}
                         </td>
                         {isAdmin && (
