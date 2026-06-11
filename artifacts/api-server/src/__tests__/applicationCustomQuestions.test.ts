@@ -446,3 +446,126 @@ describe("POST /applications — custom-answer handling", () => {
     expect(answers.some((a) => a.questionId === q.id)).toBe(false);
   });
 });
+
+describe("Admin review surfaces — custom answers display", () => {
+  type DisplayAnswer = {
+    questionId: string;
+    label: string;
+    fieldType: string;
+    value: unknown;
+  };
+
+  // Submit one application carrying a full spread of custom-answer types and
+  // return both its id and the denormalized answers the server stored.
+  async function submitWithAnswers(suffix: string): Promise<{
+    appId: string;
+    questionIds: { shortQ: string; numQ: string; selectQ: string; multiQ: string };
+    stored: DisplayAnswer[];
+  }> {
+    const shortQ = await createQuestion({ label: "Nickname", fieldType: "short_text" });
+    const numQ = await createQuestion({ label: "Years driving", fieldType: "number" });
+    const selectQ = await createQuestion({
+      label: "Shift",
+      fieldType: "select",
+      options: ["Day", "Night"],
+    });
+    const multiQ = await createQuestion({
+      label: "Languages",
+      fieldType: "multiselect",
+      options: ["English", "Spanish", "French"],
+    });
+
+    const body = buildApplicationBody(suffix);
+    body.customAnswers = [
+      { questionId: shortQ.id, value: "Jay" },
+      { questionId: numQ.id, value: "5" },
+      { questionId: selectQ.id, value: "Night" },
+      { questionId: multiQ.id, value: ["English", "Spanish"] },
+    ];
+    const post = await request(app).post("/api/applications").send(body);
+    expect(post.status).toBe(201);
+
+    const row = await fetchApplicationByEmail(body.email as string);
+    return {
+      appId: row.id,
+      questionIds: { shortQ: shortQ.id, numQ: numQ.id, selectQ: selectQ.id, multiQ: multiQ.id },
+      stored: (row.customAnswers as DisplayAnswer[]) ?? [],
+    };
+  }
+
+  function expectAnswersIntact(answers: DisplayAnswer[], ids: { shortQ: string; numQ: string; selectQ: string; multiQ: string }) {
+    const byId = new Map(answers.map((a) => [a.questionId, a]));
+    expect(byId.get(ids.shortQ)).toMatchObject({ label: "Nickname", fieldType: "short_text", value: "Jay" });
+    expect(byId.get(ids.numQ)).toMatchObject({ label: "Years driving", fieldType: "number", value: 5 });
+    expect(byId.get(ids.selectQ)).toMatchObject({ label: "Shift", fieldType: "select", value: "Night" });
+    expect(byId.get(ids.multiQ)).toMatchObject({
+      label: "Languages",
+      fieldType: "multiselect",
+      value: ["English", "Spanish"],
+    });
+  }
+
+  it("returns customAnswers verbatim in the admin list (label/fieldType/value preserved)", async () => {
+    const { appId, questionIds } = await submitWithAnswers("admin-list");
+
+    const res = await request(app)
+      .get("/api/admin/applications")
+      .set(authed(ctx.adminToken));
+    expect(res.status).toBe(200);
+
+    const found = (res.body as Array<{ id: string; customAnswers: DisplayAnswer[] }>).find(
+      (a) => a.id === appId,
+    );
+    expect(found).toBeTruthy();
+    expectAnswersIntact(found!.customAnswers, questionIds);
+  });
+
+  it("returns customAnswers verbatim in the admin detail view", async () => {
+    const { appId, questionIds, stored } = await submitWithAnswers("admin-detail");
+
+    const res = await request(app)
+      .get(`/api/admin/applications/${appId}`)
+      .set(authed(ctx.adminToken));
+    expect(res.status).toBe(200);
+    expect(res.body.id).toBe(appId);
+    expectAnswersIntact(res.body.customAnswers as DisplayAnswer[], questionIds);
+    // The display layer is a pass-through: what HR sees equals what was stored.
+    expect(res.body.customAnswers).toEqual(stored);
+  });
+
+  it("keeps historical answers readable after the question is later edited", async () => {
+    const { appId, questionIds } = await submitWithAnswers("admin-edited");
+
+    // HR renames + relabels the question type after the fact. The applicant's
+    // already-submitted answer must keep its original denormalized snapshot.
+    const patch = await request(app)
+      .patch(`/api/admin/application-questions/${questionIds.shortQ}`)
+      .set(authed(ctx.adminToken))
+      .send({ label: "Preferred name", fieldType: "long_text" });
+    expect(patch.status).toBe(200);
+
+    const res = await request(app)
+      .get(`/api/admin/applications/${appId}`)
+      .set(authed(ctx.adminToken));
+    expect(res.status).toBe(200);
+    // Original snapshot survives the edit — not re-resolved against the live question.
+    expectAnswersIntact(res.body.customAnswers as DisplayAnswer[], questionIds);
+  });
+
+  it("keeps historical answers readable after the question is later deleted", async () => {
+    const { appId, questionIds } = await submitWithAnswers("admin-deleted");
+
+    const del = await request(app)
+      .delete(`/api/admin/application-questions/${questionIds.shortQ}`)
+      .set(authed(ctx.adminToken));
+    expect(del.status).toBe(200);
+
+    // The question no longer exists, but its denormalized answer is still on the
+    // application and must surface to reviewers unchanged.
+    const res = await request(app)
+      .get(`/api/admin/applications/${appId}`)
+      .set(authed(ctx.adminToken));
+    expect(res.status).toBe(200);
+    expectAnswersIntact(res.body.customAnswers as DisplayAnswer[], questionIds);
+  });
+});
