@@ -8,6 +8,7 @@ import { useAuth } from "@/lib/auth";
 import { useFkOptions } from "@/lib/fk";
 import { getTable } from "@/lib/tables";
 import { RowFormDialog } from "@/components/RowFormDialog";
+import { useIsMobile } from "@/hooks/use-mobile";
 
 type Site = {
   id: string;
@@ -263,6 +264,7 @@ export function SiteDetailPage() {
   // (mirrors the mobile time-approval screen), and any action error.
   const { user } = useAuth();
   const isAdmin = user?.role === "admin";
+  const isMobile = useIsMobile();
   const [teActioningId, setTeActioningId] = useState<string | null>(null);
   const [teHoursEdits, setTeHoursEdits] = useState<Record<string, string>>({});
   const [teActionError, setTeActionError] = useState<string | null>(null);
@@ -953,6 +955,85 @@ export function SiteDetailPage() {
               <div className="text-sm text-muted-foreground border rounded p-4">
                 No time entries for this site in the selected date range.
               </div>
+            ) : isMobile ? (
+              <div className="space-y-3">
+                {timeEntries.map((t) => {
+                  const status = (t.approvalStatus ?? "pending").toLowerCase();
+                  const isPending = status === "pending";
+                  const clockedOut = !!t.clockOutTime;
+                  const busy = teActioningId === t.id;
+                  const canAct = isAdmin && isPending && clockedOut;
+                  return (
+                    <div key={t.id} className="border rounded-lg p-3 space-y-2">
+                      <div className="flex items-start justify-between gap-2">
+                        <span className="font-medium">{t.employeeName?.trim() || "—"}</span>
+                        <span className="flex flex-wrap items-center justify-end gap-1.5">
+                          <span className={
+                            t.approvalStatus === "approved" ? "text-emerald-600 text-sm"
+                            : t.approvalStatus === "rejected" ? "text-destructive text-sm"
+                            : "text-amber-600 text-sm"
+                          }>
+                            {t.approvalStatus
+                              ? t.approvalStatus.charAt(0).toUpperCase() + t.approvalStatus.slice(1)
+                              : "—"}
+                          </span>
+                          {t.correctionRequested && (
+                            <span
+                              className="inline-flex items-center gap-1 text-xs text-amber-600"
+                              title={t.correctionNote || "Officer requested a time correction."}
+                            >
+                              <AlertTriangle className="w-3 h-3" /> Correction
+                            </span>
+                          )}
+                        </span>
+                      </div>
+                      <div className="grid grid-cols-2 gap-x-3 gap-y-1 text-sm">
+                        <span className="text-muted-foreground">Clock in</span>
+                        <span className="text-right">{t.clockInTime ? fmt(t.clockInTime) : "—"}</span>
+                        <span className="text-muted-foreground">Clock out</span>
+                        <span className="text-right">{t.clockOutTime ? fmt(t.clockOutTime) : <span className="text-amber-600">In progress</span>}</span>
+                        <span className="text-muted-foreground">Hours</span>
+                        <span className="text-right tabular-nums">{t.hoursWorked != null ? Number(t.hoursWorked).toFixed(2) : "—"}</span>
+                      </div>
+                      {isAdmin && canAct && (
+                        <div className="flex flex-wrap items-end gap-2 pt-1 border-t mt-1">
+                          <label className="flex flex-col text-xs text-muted-foreground">
+                            Hours
+                            <input
+                              type="number"
+                              step="0.25"
+                              min="0"
+                              inputMode="decimal"
+                              aria-label={`Approve hours for ${t.employeeName?.trim() || "officer"}`}
+                              value={teHoursEdits[t.id] ?? (t.hoursWorked != null ? Number(t.hoursWorked).toFixed(2) : "")}
+                              onChange={(e) => setTeHoursEdits((prev) => ({ ...prev, [t.id]: e.target.value }))}
+                              disabled={busy}
+                              className="mt-0.5 w-24 border rounded px-2 py-1.5 text-sm text-right tabular-nums bg-background text-foreground"
+                            />
+                          </label>
+                          <Button
+                            size="sm"
+                            className="flex-1 min-w-[5rem]"
+                            onClick={() => decideTimeEntry(t, "approved")}
+                            disabled={busy}
+                          >
+                            {busy ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : "Approve"}
+                          </Button>
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            className="flex-1 min-w-[5rem]"
+                            onClick={() => decideTimeEntry(t, "rejected")}
+                            disabled={busy}
+                          >
+                            Reject
+                          </Button>
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
             ) : (
               <>
                 <div className="flex flex-wrap items-stretch gap-2 mb-3">
@@ -998,7 +1079,7 @@ export function SiteDetailPage() {
                     </div>
                   )}
                 </div>
-                <div className="border rounded overflow-hidden">
+                <div className="border rounded overflow-x-auto">
                 <table className="w-full text-sm">
                   <thead className="bg-muted/50">
                     <tr>
