@@ -887,6 +887,117 @@ router.patch("/time-entries/:id/clock-out", requireAdmin, async (req, res): Prom
   });
 });
 
+// Admin corrects the clock-in and/or clock-out timestamps on an existing
+// time entry. Unlike PATCH /time-entries/:id/clock-out (which only FILLS a
+// missing clock-out), this overwrites already-set timestamps for genuine
+// corrections — e.g. resolving an officer's "wrong time" correction request
+// inline from the Site Detail page. Recomputes hoursWorked, stamps last-edited
+// provenance, records before/after audit metadata, and re-syncs the weekly
+// client invoice when the entry is already approved so billed hours track the
+// correction (best-effort, mirrors the approve route).
+router.patch("/time-entries/:id/times", requireAdmin, async (req, res): Promise<void> => {
+  const id = Array.isArray(req.params.id) ? req.params.id[0] : req.params.id;
+  const { clockInTime, clockOutTime, notes } = req.body ?? {};
+
+  if (clockInTime === undefined && clockOutTime === undefined) {
+    res.status(400).json({ error: "Bad Request", message: "Provide clockInTime and/or clockOutTime to correct." });
+    return;
+  }
+
+  const [existing] = await db.select().from(timeEntriesTable).where(eq(timeEntriesTable.id, id));
+  if (!existing) { res.status(404).json({ error: "Not Found" }); return; }
+
+  let targetClockIn = existing.clockInTime;
+  if (clockInTime !== undefined) {
+    const parsed = new Date(clockInTime);
+    if (isNaN(parsed.getTime())) {
+      res.status(400).json({ error: "Bad Request", message: "clockInTime must be a valid ISO timestamp." });
+      return;
+    }
+    targetClockIn = parsed;
+  }
+
+  let targetClockOut = existing.clockOutTime;
+  if (clockOutTime !== undefined) {
+    if (clockOutTime === null) {
+      res.status(400).json({ error: "Bad Request", message: "clockOutTime can't be cleared here." });
+      return;
+    }
+    const parsed = new Date(clockOutTime);
+    if (isNaN(parsed.getTime())) {
+      res.status(400).json({ error: "Bad Request", message: "clockOutTime must be a valid ISO timestamp." });
+      return;
+    }
+    targetClockOut = parsed;
+  }
+
+  if (targetClockOut && targetClockIn.getTime() >= targetClockOut.getTime()) {
+    res.status(400).json({ error: "Bad Request", message: "Clock-out must be after clock-in." });
+    return;
+  }
+
+  // Reset syncSource so corrections of scheduler-origin entries propagate back.
+  // Stamp last-edited provenance so reviewers can see this was admin-corrected.
+  const updates: Record<string, unknown> = {
+    clockInTime: targetClockIn,
+    syncSource: "local",
+    lastEditedByUserId: req.user!.userId,
+    lastEditedByEmail: req.user!.email,
+    lastEditedAt: new Date(),
+  };
+  if (notes !== undefined) updates.notes = notes;
+  if (targetClockOut) {
+    updates.clockOutTime = targetClockOut;
+    updates.hoursWorked = String(calcHours(targetClockIn, targetClockOut));
+  }
+
+  const [updated] = await db.update(timeEntriesTable).set(updates).where(eq(timeEntriesTable.id, id)).returning();
+
+  // Record a before/after change-history entry, keyed by entry id, so the
+  // Payroll Board can surface the full correction provenance. The global
+  // auditLogMiddleware persists res.locals.auditMetadata into audit_logs.
+  res.locals["auditMetadata"] = buildTimeEntryAuditMetadata(
+    id,
+    timeEntrySnapshot(existing),
+    timeEntrySnapshot(updated),
+  );
+
+  // If the entry is already approved, re-sync the weekly client invoice so the
+  // corrected hours flow through (best-effort, matches the approve route).
+  if (updated.approvalStatus === "approved") {
+    void upsertWeeklyInvoiceForTimeEntry(updated);
+  }
+
+  // Mirror the clock-out endpoints' shift-completion flip: if this correction
+  // set a clock-out on the last outstanding entry, the linked shift shouldn't
+  // stay "active". (No-op when the corrected entry has no clock-out.)
+  if (updated.shiftId && updated.clockOutTime) {
+    await db
+      .update(shiftsTable)
+      .set({ status: "completed" })
+      .where(and(
+        eq(shiftsTable.id, updated.shiftId),
+        eq(shiftsTable.status, "active"),
+        sql`NOT EXISTS (
+          SELECT 1 FROM ${timeEntriesTable}
+          WHERE ${timeEntriesTable.shiftId} = ${updated.shiftId}
+            AND ${timeEntriesTable.clockOutTime} IS NULL
+        )`,
+      ));
+  }
+
+  const [shift] = updated.shiftId
+    ? await db.select().from(shiftsTable).where(eq(shiftsTable.id, updated.shiftId))
+    : [undefined];
+  const [user] = await db.select().from(usersTable).where(eq(usersTable.id, updated.employeeId));
+
+  res.json({
+    ...updated,
+    shiftTitle: shift?.title,
+    employeeName: user ? `${user.firstName} ${user.lastName}` : null,
+  });
+});
+
 // Admin approves/rejects a time entry. Approval is required before payroll/invoice picks it up.
 router.post("/time-entries/:id/approve", requireAdmin, async (req, res): Promise<void> => {
   const id = Array.isArray(req.params.id) ? req.params.id[0] : req.params.id;

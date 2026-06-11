@@ -65,6 +65,16 @@ function fmt(iso: string) {
   return new Date(iso).toLocaleString();
 }
 
+// ISO timestamp -> value for a <input type="datetime-local"> in LOCAL time
+// (YYYY-MM-DDTHH:mm). Returns "" for null/invalid so the input stays empty.
+function toLocalInput(iso: string | null): string {
+  if (!iso) return "";
+  const d = new Date(iso);
+  if (isNaN(d.getTime())) return "";
+  const pad = (n: number) => String(n).padStart(2, "0");
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+}
+
 // Local YYYY-MM-DD for date inputs (avoids UTC off-by-one from toISOString).
 function ymd(d: Date): string {
   const y = d.getFullYear();
@@ -268,6 +278,11 @@ export function SiteDetailPage() {
   const [teActioningId, setTeActioningId] = useState<string | null>(null);
   const [teHoursEdits, setTeHoursEdits] = useState<Record<string, string>>({});
   const [teActionError, setTeActionError] = useState<string | null>(null);
+  // Inline timestamp correction: which row's clock-in/out times are being
+  // edited, the draft datetime-local values, and whether a save is in flight.
+  const [teTimeEditingId, setTeTimeEditingId] = useState<string | null>(null);
+  const [teTimeDraft, setTeTimeDraft] = useState<{ clockIn: string; clockOut: string }>({ clockIn: "", clockOut: "" });
+  const [teTimeSaving, setTeTimeSaving] = useState(false);
 
   // Subcontractor (QR-based) time entries for this site. Reuses the same
   // From/To date range as the officer time-entries list above.
@@ -443,6 +458,49 @@ export function SiteDetailPage() {
       setTeActionError((e as Error).message);
     } finally {
       setTeActioningId(null);
+    }
+  }
+
+  // Open the inline timestamp editor for a row, prefilling the draft from the
+  // entry's current clock-in / clock-out times (in the admin's local zone).
+  function startEditTimes(t: TimeEntryRow) {
+    setTeActionError(null);
+    setTeTimeEditingId(t.id);
+    setTeTimeDraft({ clockIn: toLocalInput(t.clockInTime), clockOut: toLocalInput(t.clockOutTime) });
+  }
+
+  function cancelEditTimes() {
+    setTeTimeEditingId(null);
+    setTeTimeDraft({ clockIn: "", clockOut: "" });
+  }
+
+  // Admin-only: correct a time entry's clock-in / clock-out timestamps inline
+  // via PATCH /time-entries/:id/times. The server recomputes hours, stamps
+  // last-edited provenance, and re-syncs the invoice if the entry is approved.
+  async function saveEditTimes(t: TimeEntryRow) {
+    const { clockIn, clockOut } = teTimeDraft;
+    if (!clockIn) {
+      setTeActionError("Enter a clock-in time.");
+      return;
+    }
+    const clockInIso = new Date(clockIn).toISOString();
+    const clockOutIso = clockOut ? new Date(clockOut).toISOString() : null;
+    if (clockOutIso && new Date(clockOutIso).getTime() <= new Date(clockInIso).getTime()) {
+      setTeActionError("Clock-out must be after clock-in.");
+      return;
+    }
+    setTeActionError(null);
+    setTeTimeSaving(true);
+    try {
+      const body: { clockInTime: string; clockOutTime?: string } = { clockInTime: clockInIso };
+      if (clockOutIso) body.clockOutTime = clockOutIso;
+      await api(`/time-entries/${t.id}/times`, { method: "PATCH", body });
+      cancelEditTimes();
+      await loadTimeEntries();
+    } catch (e) {
+      setTeActionError((e as Error).message);
+    } finally {
+      setTeTimeSaving(false);
     }
   }
 
@@ -1098,11 +1156,34 @@ export function SiteDetailPage() {
                       const clockedOut = !!t.clockOutTime;
                       const busy = teActioningId === t.id;
                       const canAct = isAdmin && isPending && clockedOut;
+                      const editingTimes = teTimeEditingId === t.id;
                       return (
                       <tr key={t.id} className="border-t align-top">
                         <td className="px-3 py-2">{t.employeeName?.trim() || "—"}</td>
-                        <td className="px-3 py-2 text-muted-foreground">{t.clockInTime ? fmt(t.clockInTime) : "—"}</td>
-                        <td className="px-3 py-2 text-muted-foreground">{t.clockOutTime ? fmt(t.clockOutTime) : <span className="text-amber-600">In progress</span>}</td>
+                        <td className="px-3 py-2 text-muted-foreground">
+                          {editingTimes ? (
+                            <input
+                              type="datetime-local"
+                              aria-label={`Clock in for ${t.employeeName?.trim() || "officer"}`}
+                              value={teTimeDraft.clockIn}
+                              onChange={(e) => setTeTimeDraft((d) => ({ ...d, clockIn: e.target.value }))}
+                              disabled={teTimeSaving}
+                              className="border rounded px-2 py-1 text-sm bg-background text-foreground"
+                            />
+                          ) : t.clockInTime ? fmt(t.clockInTime) : "—"}
+                        </td>
+                        <td className="px-3 py-2 text-muted-foreground">
+                          {editingTimes ? (
+                            <input
+                              type="datetime-local"
+                              aria-label={`Clock out for ${t.employeeName?.trim() || "officer"}`}
+                              value={teTimeDraft.clockOut}
+                              onChange={(e) => setTeTimeDraft((d) => ({ ...d, clockOut: e.target.value }))}
+                              disabled={teTimeSaving}
+                              className="border rounded px-2 py-1 text-sm bg-background text-foreground"
+                            />
+                          ) : t.clockOutTime ? fmt(t.clockOutTime) : <span className="text-amber-600">In progress</span>}
+                        </td>
                         <td className="px-3 py-2 text-right tabular-nums">{t.hoursWorked != null ? Number(t.hoursWorked).toFixed(2) : "—"}</td>
                         <td className="px-3 py-2">
                           <span className={
@@ -1125,8 +1206,26 @@ export function SiteDetailPage() {
                         </td>
                         {isAdmin && (
                           <td className="px-3 py-2">
-                            {canAct ? (
+                            {editingTimes ? (
                               <div className="flex items-center justify-end gap-2">
+                                <Button
+                                  size="sm"
+                                  onClick={() => saveEditTimes(t)}
+                                  disabled={teTimeSaving}
+                                >
+                                  {teTimeSaving ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : "Save times"}
+                                </Button>
+                                <Button
+                                  variant="outline"
+                                  size="sm"
+                                  onClick={cancelEditTimes}
+                                  disabled={teTimeSaving}
+                                >
+                                  Cancel
+                                </Button>
+                              </div>
+                            ) : canAct ? (
+                              <div className="flex flex-wrap items-center justify-end gap-2">
                                 <input
                                   type="number"
                                   step="0.25"
@@ -1153,10 +1252,25 @@ export function SiteDetailPage() {
                                 >
                                   Reject
                                 </Button>
+                                <Button
+                                  variant="ghost"
+                                  size="sm"
+                                  onClick={() => startEditTimes(t)}
+                                  disabled={busy}
+                                >
+                                  <Pencil className="w-3.5 h-3.5 mr-1" />Edit times
+                                </Button>
                               </div>
                             ) : (
-                              <div className="text-right text-xs text-muted-foreground">
-                                {!clockedOut ? "—" : status === "approved" ? "Approved" : status === "rejected" ? "Rejected" : "—"}
+                              <div className="flex items-center justify-end gap-2 text-xs text-muted-foreground">
+                                <span>{!clockedOut ? "—" : status === "approved" ? "Approved" : status === "rejected" ? "Rejected" : "—"}</span>
+                                <Button
+                                  variant="ghost"
+                                  size="sm"
+                                  onClick={() => startEditTimes(t)}
+                                >
+                                  <Pencil className="w-3.5 h-3.5 mr-1" />Edit times
+                                </Button>
                               </div>
                             )}
                           </td>
