@@ -14,3 +14,10 @@ process.env.PORT = process.env.PORT ?? "0";
 // Host-header fallback). Set a known value so the incident-share tests
 // can mint URLs deterministically.
 process.env.APP_BASE_URL = process.env.APP_BASE_URL ?? "http://localhost:8080";
+
+// The public POST /applications limiter defaults to 5/IP/hour. Tests run
+// from a single source IP (127.0.0.1) and several suites submit real
+// applications, which would otherwise trip the limiter and flake. Lift the
+// cap in the test env only.
+process.env.APPLICATION_SUBMIT_RATE_LIMIT_MAX =
+  process.env.APPLICATION_SUBMIT_RATE_LIMIT_MAX ?? "1000";
