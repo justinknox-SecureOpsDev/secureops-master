@@ -9,8 +9,9 @@ import {
 import { ClipboardList, Search, Loader2, Copy, ExternalLink, MailCheck, MailWarning, MailX, MessageSquare, MessageSquareWarning } from "lucide-react";
 import { openSignedObject } from "@/lib/upload";
 import { AMENDMENT_FIELDS } from "@/lib/amendmentFields";
+import { useAuth } from "@/lib/auth";
 
-type ApplicationStatus = "submitted" | "under_review" | "info_requested" | "approved" | "rejected";
+type ApplicationStatus = "submitted" | "under_review" | "info_requested" | "awaiting_second_approval" | "approved" | "rejected";
 
 type Application = {
   id: string;
@@ -33,6 +34,10 @@ type Application = {
   reviewerNotes: string | null;
   reviewedBy: string | null;
   reviewedAt: string | null;
+  firstApprovedBy: string | null;
+  firstApprovedAt: string | null;
+  secondApprovedBy: string | null;
+  secondApprovedAt: string | null;
   createdEmployeeId: string | null;
   onboardingEmailStatus: "not_configured" | "sent" | "bounced" | "failed" | null;
   onboardingEmailMessageId: string | null;
@@ -97,6 +102,11 @@ function deliveryBadge(a: Application): DeliveryBadge | null {
 
 type ApproveResp = {
   application: Application;
+  // Present (true) only on the FIRST of two approvals; the provisioning fields
+  // below are then absent. On the final (second) approval this is absent/false
+  // and the provisioning fields are populated.
+  awaitingSecondApproval?: boolean;
+  firstApprovedBy?: string | null;
   onboardingUrl: string;
   onboardingToken: string;
   employeeId: string;
@@ -112,6 +122,7 @@ const STATUSES = [
   { value: "submitted", label: "Submitted" },
   { value: "under_review", label: "Under review" },
   { value: "info_requested", label: "Info requested" },
+  { value: "awaiting_second_approval", label: "Awaiting 2nd approval" },
   { value: "approved", label: "Approved" },
   { value: "rejected", label: "Rejected" },
 ];
@@ -120,6 +131,7 @@ const STATUS_STYLES: Record<string, string> = {
   submitted: "bg-blue-100 text-blue-900 border-blue-300",
   under_review: "bg-amber-100 text-amber-900 border-amber-300",
   info_requested: "bg-orange-100 text-orange-900 border-orange-300",
+  awaiting_second_approval: "bg-purple-100 text-purple-900 border-purple-300",
   approved: "bg-emerald-100 text-emerald-900 border-emerald-300",
   rejected: "bg-rose-100 text-rose-900 border-rose-300",
 };
@@ -146,6 +158,7 @@ export function ApplicationsPage() {
   const [sites, setSites] = useState<{ id: string; name: string; locationLat: string | null; locationLng: string | null }[]>([]);
   const [openId, setOpenId] = useState<string | null>(null);
   const [approval, setApproval] = useState<ApproveResp | null>(null);
+  const [firstApprovalNotice, setFirstApprovalNotice] = useState<Application | null>(null);
   const [rejection, setRejection] = useState<RejectResp | null>(null);
   const [requestInfo, setRequestInfo] = useState<RequestInfoResp | null>(null);
   const [selected, setSelected] = useState<Set<string>>(new Set());
@@ -419,7 +432,7 @@ export function ApplicationsPage() {
                   <td className="px-3 py-2 text-muted-foreground">{new Date(a.createdAt).toLocaleString()}</td>
                   <td className="px-3 py-2">
                     <span className={`inline-block px-2 py-0.5 text-[11px] uppercase rounded border ${STATUS_STYLES[a.status]}`}>
-                      {a.status.replace("_", " ")}
+                      {a.status.replaceAll("_", " ")}
                     </span>
                   </td>
                   <td className="px-3 py-2">
@@ -452,7 +465,14 @@ export function ApplicationsPage() {
           onUpdated={(updated) => { setItems((arr) => arr.map((x) => x.id === updated.id ? updated : x)); }}
           onApproved={(resp) => {
             setItems((arr) => arr.map((x) => x.id === resp.application.id ? resp.application : x));
-            setApproval(resp);
+            // First of two approvals: no provisioning happened — show the
+            // "awaiting second approval" notice instead of the onboarding-link
+            // success dialog (which only applies to the final approval).
+            if (resp.awaitingSecondApproval) {
+              setFirstApprovalNotice(resp.application);
+            } else {
+              setApproval(resp);
+            }
           }}
           onRejected={(resp) => {
             const { emailSent: _es, ...app } = resp;
@@ -471,6 +491,33 @@ export function ApplicationsPage() {
       )}
       {approval && (
         <ApprovalSuccessDialog resp={approval} onClose={() => setApproval(null)} />
+      )}
+      {firstApprovalNotice && (
+        <Dialog open onOpenChange={(o) => { if (!o) setFirstApprovalNotice(null); }}>
+          <DialogContent className="max-w-md">
+            <DialogHeader>
+              <DialogTitle className="brand-wordmark text-xl">First approval recorded</DialogTitle>
+              <DialogDescription className="sr-only">
+                The first of two required approvals has been recorded for this application.
+              </DialogDescription>
+            </DialogHeader>
+            <div className="space-y-3 text-sm">
+              <div className="flex items-start gap-2 bg-purple-50 border border-purple-200 text-purple-900 p-3 rounded">
+                <ClipboardList className="w-5 h-5 mt-0.5 shrink-0" />
+                <div>
+                  <div className="font-medium">
+                    {firstApprovalNotice.firstName} {firstApprovalNotice.lastName} is awaiting a second approval
+                  </div>
+                  <div className="text-xs mt-0.5">
+                    A second, different admin must give the final approval before the candidate is issued
+                    an onboarding link. No account or email has been created yet.
+                  </div>
+                </div>
+              </div>
+            </div>
+            <DialogFooter><Button onClick={() => setFirstApprovalNotice(null)}>Done</Button></DialogFooter>
+          </DialogContent>
+        </Dialog>
       )}
       {rejection && (
         <RejectionResultDialog resp={rejection} onClose={() => setRejection(null)} />
@@ -517,6 +564,7 @@ function ApplicationDialog({
   onInfoRequested: (resp: RequestInfoResp) => void;
   onDeleted: (id: string) => void;
 }) {
+  const { user } = useAuth();
   const [notes, setNotes] = useState(app.reviewerNotes ?? "");
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -563,7 +611,7 @@ function ApplicationDialog({
           <DialogTitle className="brand-wordmark text-xl">
             {app.firstName} {app.lastName}
             <span className={`ml-2 inline-block px-2 py-0.5 text-[11px] uppercase rounded border ${STATUS_STYLES[app.status]}`}>
-              {app.status.replace("_", " ")}
+              {app.status.replaceAll("_", " ")}
             </span>
           </DialogTitle>
           <DialogDescription className="sr-only">
@@ -632,9 +680,17 @@ function ApplicationDialog({
         <Section title="Reviewer notes">
           <Textarea rows={3} value={notes} onChange={(e) => setNotes(e.target.value)} placeholder="Internal notes (optional)" />
         </Section>
+        {app.status === "awaiting_second_approval" && (
+          <div className="text-sm bg-purple-50 border border-purple-200 text-purple-900 p-2 rounded">
+            {user && app.firstApprovedBy === user.id
+              ? "You gave the first approval. A second, different admin must give the final approval before onboarding can begin."
+              : "A first approval has been recorded by another admin. You can give the final (second) approval to create the account and issue the onboarding link."}
+          </div>
+        )}
         {app.createdEmployeeId && (
           <div className="text-sm bg-emerald-50 border border-emerald-200 text-emerald-900 p-2 rounded">
-            Approved — employee record created. Visit <strong>Onboarding</strong> to view their progress.
+            Approved — login account created (pending). The full employee profile is created once the
+            candidate completes onboarding. Visit <strong>Onboarding</strong> to view their progress.
           </div>
         )}
         {app.status === "approved" && app.onboardingEmailStatus && (
@@ -679,11 +735,27 @@ function ApplicationDialog({
               {busy === "reject" ? "…" : "Reject"}
             </Button>
           )}
-          {app.status !== "approved" && (
-            <Button className="bg-brand-navy hover:opacity-90 text-white" disabled={!!busy} onClick={() => action("approve")}>
-              {busy === "approve" ? "Approving…" : "Approve & create employee"}
-            </Button>
-          )}
+          {app.status !== "approved" && (() => {
+            const awaitingSecond = app.status === "awaiting_second_approval";
+            // Separation of duty: the admin who gave the first approval cannot
+            // also give the second — disable the button for them (server also
+            // enforces this with a 409).
+            const isFirstApprover = awaitingSecond && !!user && app.firstApprovedBy === user.id;
+            return (
+              <Button
+                className="bg-brand-navy hover:opacity-90 text-white"
+                disabled={!!busy || isFirstApprover}
+                title={isFirstApprover ? "You gave the first approval — a different admin must give the final approval" : undefined}
+                onClick={() => action("approve")}
+              >
+                {busy === "approve"
+                  ? "Approving…"
+                  : awaitingSecond
+                    ? "Give 2nd approval"
+                    : "Approve (1 of 2)"}
+              </Button>
+            );
+          })()}
         </DialogFooter>
       </DialogContent>
       {showRequestInfo && (

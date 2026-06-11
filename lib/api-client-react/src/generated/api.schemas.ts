@@ -1540,6 +1540,8 @@ export type ApplicationStatus =
 export const ApplicationStatus = {
   submitted: "submitted",
   under_review: "under_review",
+  info_requested: "info_requested",
+  awaiting_second_approval: "awaiting_second_approval",
   approved: "approved",
   rejected: "rejected",
 } as const;
@@ -1610,6 +1612,12 @@ export interface Application {
   customAnswers?: ApplicationCustomAnswersItem[] | null;
   reviewerNotes?: string | null;
   reviewedAt?: string | null;
+  /** Admin user id who gave the first of two required approvals (null until first approval). */
+  firstApprovedBy?: string | null;
+  firstApprovedAt?: string | null;
+  /** Admin user id who gave the final (second) approval — must differ from firstApprovedBy. */
+  secondApprovedBy?: string | null;
+  secondApprovedAt?: string | null;
   createdEmployeeId?: string | null;
   /** Last known SMTP delivery state for the onboarding/approval email (null if never attempted). */
   onboardingEmailStatus?: ApplicationOnboardingEmailStatus;
@@ -1643,12 +1651,26 @@ export const ApproveApplicationResponseSmsStatus = {
   failed: "failed",
 } as const;
 
+/**
+ * Response to an approve action. Employee applications require TWO distinct
+admin approvals before an onboarding link is issued.
+- First approval: `awaitingSecondApproval=true` and only `application`
+  (+ `firstApprovedBy`) are returned; no account/link/email is created.
+- Final (second) approval: `awaitingSecondApproval` is absent/false and
+  the provisioning fields (`onboardingUrl`, `onboardingToken`,
+  `employeeId`, `tempPassword`) are populated.
+
+ */
 export interface ApproveApplicationResponse {
   application: Application;
-  onboardingUrl: string;
-  onboardingToken: string;
-  employeeId: string;
-  tempPassword: string;
+  /** True when this was the first of two approvals; no provisioning happened yet. */
+  awaitingSecondApproval?: boolean;
+  /** Admin user id who gave the first approval (present on the first-approval response). */
+  firstApprovedBy?: string | null;
+  onboardingUrl?: string;
+  onboardingToken?: string;
+  employeeId?: string;
+  tempPassword?: string;
   emailSent?: boolean;
   /** SMS fallback delivery status for the onboarding link.
 `sent` — Twilio accepted the message.

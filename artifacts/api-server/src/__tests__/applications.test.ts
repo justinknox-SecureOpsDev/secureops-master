@@ -8,8 +8,11 @@ import {
   usersTable,
   employeesTable,
   applicationsTable,
+  applicationAmendmentTokensTable,
   onboardingTokensTable,
+  onboardingSubmissionsTable,
   licensesTable,
+  policiesTable,
 } from "@workspace/db";
 import app from "../app";
 import { signToken } from "../middlewares/auth";
@@ -20,8 +23,10 @@ const passwordHash = bcrypt.hashSync("test-password", 4);
 
 type Ctx = {
   adminId: string;
+  admin2Id: string;
   employeeId: string;
   adminToken: string;
+  admin2Token: string;
   employeeToken: string;
 };
 const ctx = {} as Ctx;
@@ -82,161 +87,328 @@ function buildApplicationBody(suffix: string) {
   };
 }
 
-beforeAll(async () => {
-  ctx.adminId = await makeUser("admin", "admin");
-  ctx.employeeId = await makeUser("employee", "emp");
-  ctx.adminToken = signToken({ userId: ctx.adminId, email: `${TAG}-admin@example.test`, role: "admin" });
-  ctx.employeeToken = signToken({ userId: ctx.employeeId, email: `${TAG}-emp@example.test`, role: "employee" });
-});
-
-afterAll(async () => {
-  // applications -> created users via createdEmployeeId. Clean tokens and
-  // licenses first (FK), then dependent users (the newly provisioned
-  // applicant users get tagged with last_name=TAG via the application row).
-  await db.execute(sql`DELETE FROM onboarding_tokens WHERE employee_id IN (SELECT id FROM users WHERE last_name = ${TAG})`);
-  await db.execute(sql`DELETE FROM licenses WHERE employee_id IN (SELECT id FROM users WHERE last_name = ${TAG})`);
-  await db.execute(sql`DELETE FROM employees WHERE user_id IN (SELECT id FROM users WHERE last_name = ${TAG})`);
-  await db.execute(sql`DELETE FROM applications WHERE last_name = ${TAG}`);
-  await db.execute(sql`DELETE FROM users WHERE last_name = ${TAG}`);
-});
+// Insert an application row directly so we sidestep publicApplicationLimiter
+// (5/hr/IP — would flake on repeated test runs). Defaults carry a TX licence
+// so the onboarding-completion path can materialize a License row.
+async function insertApplication(
+  suffix: string,
+  overrides: Partial<typeof applicationsTable.$inferInsert> = {},
+): Promise<string> {
+  const futureExpiry = new Date(Date.now() + 365 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
+  const [row] = await db
+    .insert(applicationsTable)
+    .values({
+      firstName: "Jane",
+      lastName: TAG,
+      email: `${TAG}-${suffix}@example.test`,
+      phone: "+12145550100",
+      address: "100 Test Way",
+      city: "Dallas",
+      state: "TX",
+      zip: "75201",
+      siaLicenseNumber: `${TAG}-SIA-${suffix}`,
+      siaLicenseLevel: 3,
+      siaLicenseExpiry: futureExpiry,
+      status: "under_review",
+      ...overrides,
+    })
+    .returning({ id: applicationsTable.id });
+  return row.id;
+}
 
 function authed(token: string) {
   return { Authorization: `Bearer ${token}` };
 }
 
-describe("admin application approve flow", () => {
-  it("provisions user + employee + license + onboarding token, then refuses re-approve as 409", async () => {
-    // Insert the application directly so we sidestep publicApplicationLimiter
-    // (5/hr/IP — would flake repeated test runs).
-    const futureExpiry = new Date(Date.now() + 365 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
-    const applicantEmail = `${TAG}-applicant@example.test`;
-    const [applicationRow] = await db
-      .insert(applicationsTable)
-      .values({
-        firstName: "Jane",
-        lastName: TAG,
-        email: applicantEmail,
-        phone: "+12145550100",
-        address: "100 Test Way",
-        city: "Dallas",
-        state: "TX",
-        zip: "75201",
-        siaLicenseNumber: `${TAG}-SIA`,
-        siaLicenseLevel: 3,
-        siaLicenseExpiry: futureExpiry,
-        status: "under_review",
-      })
-      .returning({ id: applicationsTable.id });
+function approve(appId: string, token: string, body: Record<string, unknown> = {}) {
+  return request(app).post(`/api/admin/applications/${appId}/approve`).set(authed(token)).send(body);
+}
 
-    // ---- happy path: admin approves ----
-    const res = await request(app)
-      .post(`/api/admin/applications/${applicationRow.id}/approve`)
-      .set(authed(ctx.adminToken))
-      .send({ notes: "Looks good — onboarding link sent." });
+// Drive both approvals (two distinct admins) and return the final response.
+async function approveTwice(appId: string) {
+  const first = await approve(appId, ctx.adminToken, { notes: "First sign-off." });
+  expect(first.status).toBe(200);
+  expect(first.body.awaitingSecondApproval).toBe(true);
+  const second = await approve(appId, ctx.admin2Token, { notes: "Second sign-off." });
+  expect(second.status).toBe(200);
+  return second;
+}
 
+beforeAll(async () => {
+  ctx.adminId = await makeUser("admin", "admin");
+  ctx.admin2Id = await makeUser("admin", "admin2");
+  ctx.employeeId = await makeUser("employee", "emp");
+  ctx.adminToken = signToken({ userId: ctx.adminId, email: `${TAG}-admin@example.test`, role: "admin" });
+  ctx.admin2Token = signToken({ userId: ctx.admin2Id, email: `${TAG}-admin2@example.test`, role: "admin" });
+  ctx.employeeToken = signToken({ userId: ctx.employeeId, email: `${TAG}-emp@example.test`, role: "employee" });
+});
+
+afterAll(async () => {
+  // applications -> created users via createdEmployeeId. Clean dependents first
+  // (FK), then the newly provisioned applicant users (tagged last_name=TAG via
+  // the application row). onboarding_submissions cascade on user delete but we
+  // remove them explicitly for clarity.
+  await db.execute(sql`DELETE FROM onboarding_tokens WHERE employee_id IN (SELECT id FROM users WHERE last_name = ${TAG})`);
+  await db.execute(sql`DELETE FROM licenses WHERE employee_id IN (SELECT id FROM users WHERE last_name = ${TAG})`);
+  await db.execute(sql`DELETE FROM employees WHERE user_id IN (SELECT id FROM users WHERE last_name = ${TAG})`);
+  await db.execute(sql`DELETE FROM onboarding_submissions WHERE employee_id IN (SELECT id FROM users WHERE last_name = ${TAG})`);
+  await db.execute(sql`DELETE FROM application_amendment_tokens WHERE application_id IN (SELECT id FROM applications WHERE last_name = ${TAG})`);
+  await db.execute(sql`DELETE FROM applications WHERE last_name = ${TAG}`);
+  await db.execute(sql`DELETE FROM users WHERE last_name = ${TAG}`);
+});
+
+describe("admin application two-step approve flow", () => {
+  it("first approval records the approver and provisions NOTHING", async () => {
+    const appId = await insertApplication("first");
+
+    const res = await approve(appId, ctx.adminToken, { notes: "Looks good — needs a 2nd sign-off." });
     expect(res.status).toBe(200);
+    expect(res.body.awaitingSecondApproval).toBe(true);
+    expect(res.body.firstApprovedBy).toBe(ctx.adminId);
+    expect(res.body.application.status).toBe("awaiting_second_approval");
+    // No onboarding link / temp password is issued on the first approval.
+    expect(res.body.onboardingToken).toBeUndefined();
+    expect(res.body.tempPassword).toBeUndefined();
+
+    // ---- DB invariants: gate recorded, nothing provisioned ----
+    const [appAfter] = await db.select().from(applicationsTable).where(eq(applicationsTable.id, appId));
+    expect(appAfter.status).toBe("awaiting_second_approval");
+    expect(appAfter.firstApprovedBy).toBe(ctx.adminId);
+    expect(appAfter.firstApprovedAt).toBeTruthy();
+    expect(appAfter.secondApprovedBy).toBeNull();
+    expect(appAfter.createdEmployeeId).toBeNull();
+
+    // No user account, employee profile, license, or onboarding token yet.
+    const users = await db.select().from(usersTable).where(eq(usersTable.email, `${TAG}-first@example.test`));
+    expect(users.length).toBe(0);
+    const tokens = await db.select().from(onboardingTokensTable).where(eq(onboardingTokensTable.applicationId, appId));
+    expect(tokens.length).toBe(0);
+  });
+
+  it("rejects a second approval from the SAME admin (separation of duty)", async () => {
+    const appId = await insertApplication("sameadmin");
+
+    const first = await approve(appId, ctx.adminToken);
+    expect(first.status).toBe(200);
+    expect(first.body.awaitingSecondApproval).toBe(true);
+
+    // Same admin tries to satisfy the gate alone — must be refused.
+    const second = await approve(appId, ctx.adminToken);
+    expect(second.status).toBe(409);
+    expect(second.body.message).toMatch(/first approval/i);
+
+    // Still awaiting a second, distinct approver; nothing provisioned.
+    const [appAfter] = await db.select().from(applicationsTable).where(eq(applicationsTable.id, appId));
+    expect(appAfter.status).toBe("awaiting_second_approval");
+    expect(appAfter.createdEmployeeId).toBeNull();
+  });
+
+  it("second distinct admin finalizes: creates pending User + onboarding token, but NO Employee/License", async () => {
+    const appId = await insertApplication("final");
+
+    const res = await approveTwice(appId);
     expect(res.body.employeeId).toBeTruthy();
     expect(res.body.onboardingToken).toBeTruthy();
     expect(res.body.onboardingUrl).toMatch(/\/admin-portal\/onboard\//);
-    // Temp password must be returned exactly once so the admin can share
-    // it manually if SMTP is unconfigured. Must NOT be derivable from
-    // applicant data (we check it's not the SSN/email/etc.).
+    // Temp password returned once for manual sharing; must NOT be derivable
+    // from applicant data.
     expect(typeof res.body.tempPassword).toBe("string");
     expect(res.body.tempPassword.length).toBeGreaterThanOrEqual(10);
     expect(res.body.tempPassword).not.toBe("123-45-6789");
 
     const newUserId: string = res.body.employeeId;
 
-    // ---- DB invariants ----
+    // ---- login account exists, pending, must change pw + complete profile ----
     const [newUser] = await db.select().from(usersTable).where(eq(usersTable.id, newUserId));
-    expect(newUser.email).toBe(applicantEmail);
+    expect(newUser.email).toBe(`${TAG}-final@example.test`);
     expect(newUser.role).toBe("employee");
     expect(newUser.status).toBe("pending");
     expect(newUser.mustChangePassword).toBe(true);
+    expect(newUser.mustCompleteProfile).toBe(true);
 
-    const [emp] = await db.select().from(employeesTable).where(eq(employeesTable.userId, newUserId));
-    expect(emp).toBeTruthy();
-    expect(emp.applicationId).toBe(applicationRow.id);
-    expect(emp.siaLicenseNumber).toBe(`${TAG}-SIA`);
-
-    const tokens = await db
-      .select()
-      .from(onboardingTokensTable)
-      .where(eq(onboardingTokensTable.employeeId, newUserId));
-    const liveTokens = tokens.filter((t) => t.consumedAt == null);
+    // ---- onboarding token minted and live ----
+    const liveTokens = (
+      await db.select().from(onboardingTokensTable).where(eq(onboardingTokensTable.employeeId, newUserId))
+    ).filter((t) => t.consumedAt == null);
     expect(liveTokens.length).toBe(1);
     expect(liveTokens[0].token).toBe(res.body.onboardingToken);
 
-    const licenses = await db
-      .select()
-      .from(licensesTable)
-      .where(eq(licensesTable.employeeId, newUserId));
-    expect(licenses.length).toBe(1);
-    expect(licenses[0].level).toBe(3);
-    expect(licenses[0].licenseNumber).toBe(`${TAG}-SIA`);
+    // ---- CRITICAL: employee profile + license deferred to onboarding ----
+    const emps = await db.select().from(employeesTable).where(eq(employeesTable.userId, newUserId));
+    expect(emps.length).toBe(0);
+    const licenses = await db.select().from(licensesTable).where(eq(licensesTable.employeeId, newUserId));
+    expect(licenses.length).toBe(0);
 
-    // Application row marked approved + linked to the new user.
-    const [appAfter] = await db
-      .select()
-      .from(applicationsTable)
-      .where(eq(applicationsTable.id, applicationRow.id));
+    // ---- application marked approved + linked to the new user ----
+    const [appAfter] = await db.select().from(applicationsTable).where(eq(applicationsTable.id, appId));
     expect(appAfter.status).toBe("approved");
     expect(appAfter.createdEmployeeId).toBe(newUserId);
-    expect(appAfter.reviewedBy).toBe(ctx.adminId);
+    expect(appAfter.firstApprovedBy).toBe(ctx.adminId);
+    expect(appAfter.secondApprovedBy).toBe(ctx.admin2Id);
 
-    // ---- re-approve must be a clean 409, not a 500 ----
-    const reapprove = await request(app)
-      .post(`/api/admin/applications/${applicationRow.id}/approve`)
-      .set(authed(ctx.adminToken))
-      .send({});
+    // ---- re-approve after final approval must be a clean 409 ----
+    const reapprove = await approve(appId, ctx.adminToken);
     expect(reapprove.status).toBe(409);
     expect(reapprove.body.message).toMatch(/already approved/i);
   });
 
-  it("returns 409 when the applicant's email collides with an existing admin", async () => {
-    // The email-conflict guard refuses to re-provision any user that isn't
-    // an employee in pending/inactive state. Admin accounts are off limits
-    // — otherwise the HR pipeline could silently overwrite an admin's
-    // credentials.
-    const collidingEmail = `${TAG}-admin@example.test`; // same as ctx.adminId
-    const [appRow] = await db
-      .insert(applicationsTable)
-      .values({
-        firstName: "Conflict",
-        lastName: TAG,
-        email: collidingEmail,
-        phone: "+12145550100",
-        address: "1 Conflict Way",
-        status: "submitted",
-      })
-      .returning({ id: applicationsTable.id });
+  it("request-info resets the two-admin approval gate", async () => {
+    const appId = await insertApplication("reset");
+
+    const first = await approve(appId, ctx.adminToken);
+    expect(first.status).toBe(200);
 
     const res = await request(app)
-      .post(`/api/admin/applications/${appRow.id}/approve`)
+      .post(`/api/admin/applications/${appId}/request-info`)
       .set(authed(ctx.adminToken))
-      .send({});
+      .send({ requestedFields: ["phone"], note: "Please reconfirm your phone." });
+    expect(res.status).toBe(200);
+
+    const [appAfter] = await db.select().from(applicationsTable).where(eq(applicationsTable.id, appId));
+    expect(appAfter.status).toBe("info_requested");
+    expect(appAfter.firstApprovedBy).toBeNull();
+    expect(appAfter.firstApprovedAt).toBeNull();
+    expect(appAfter.secondApprovedBy).toBeNull();
+    expect(appAfter.secondApprovedAt).toBeNull();
+  });
+
+  it("applicant amendment resets the two-admin approval gate", async () => {
+    // Seed an info_requested application that (defensively) still carries stale
+    // approvals, so we can prove the amend path clears all 4 columns even if
+    // they were somehow non-null. Bump back to under_review on success.
+    const appId = await insertApplication("amendreset", {
+      status: "info_requested",
+      firstApprovedBy: ctx.adminId,
+      firstApprovedAt: new Date(),
+      secondApprovedBy: ctx.admin2Id,
+      secondApprovedAt: new Date(),
+    });
+
+    const amendToken = `${TAG}-amend-${randomUUID()}`;
+    await db.insert(applicationAmendmentTokensTable).values({
+      token: amendToken,
+      applicationId: appId,
+      requestedFields: ["phone"],
+      requestedBy: ctx.adminId,
+      expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000),
+    });
+
+    const res = await request(app)
+      .post(`/api/applications/amend/${amendToken}`)
+      .send({ values: { phone: "(214) 555-0177" } });
+    expect(res.status).toBe(200);
+
+    const [appAfter] = await db.select().from(applicationsTable).where(eq(applicationsTable.id, appId));
+    expect(appAfter.status).toBe("under_review");
+    expect(appAfter.firstApprovedBy).toBeNull();
+    expect(appAfter.firstApprovedAt).toBeNull();
+    expect(appAfter.secondApprovedBy).toBeNull();
+    expect(appAfter.secondApprovedAt).toBeNull();
+    // The amended field was applied + normalized to E.164.
+    expect(appAfter.phone).toBe("+12145550177");
+
+    // Token consumed so a re-submit can't double-apply.
+    const [tok] = await db
+      .select()
+      .from(applicationAmendmentTokensTable)
+      .where(eq(applicationAmendmentTokensTable.token, amendToken));
+    expect(tok.consumedAt).toBeTruthy();
+  });
+
+  it("refuses to provision when applicant email collides with an existing admin (second approval)", async () => {
+    // The email-conflict guard refuses to re-provision any user that isn't an
+    // employee in pending/inactive state. Admin accounts are off limits. The
+    // collision is only checked at the SECOND approval (where the account is
+    // actually provisioned), so we seed the row already awaiting a second sign-
+    // off with a first approver who differs from the finalizing admin.
+    const appId = await insertApplication("collide", {
+      email: `${TAG}-admin@example.test`, // collides with ctx.adminId (an admin)
+      status: "awaiting_second_approval",
+      firstApprovedBy: ctx.admin2Id,
+      firstApprovedAt: new Date(),
+    });
+
+    // admin1 (different from the first approver) gives the final approval and
+    // hits the collision against their own admin account.
+    const res = await approve(appId, ctx.adminToken);
     expect(res.status).toBe(409);
     expect(res.body.message).toMatch(/already exists/i);
   });
 
   it("blocks non-admin employees from approving an application (403)", async () => {
-    const [appRow] = await db
-      .insert(applicationsTable)
-      .values({
-        firstName: "Forbidden",
-        lastName: TAG,
-        email: `${TAG}-forbid@example.test`,
-        phone: "+12145550100",
-        address: "1 Forbid Way",
-        status: "submitted",
-      })
-      .returning({ id: applicationsTable.id });
+    const appId = await insertApplication("forbid");
+    const res = await approve(appId, ctx.employeeToken);
+    expect(res.status).toBe(403);
+  });
+});
+
+describe("onboarding completion materializes the employee profile + license", () => {
+  it("creates the Employee row and License only once onboarding is submitted", async () => {
+    const appId = await insertApplication("onboard");
+    const approveRes = await approveTwice(appId);
+    const newUserId: string = approveRes.body.employeeId;
+    const onboardingToken: string = approveRes.body.onboardingToken;
+
+    // Sanity: still nothing materialized right after approval.
+    expect((await db.select().from(employeesTable).where(eq(employeesTable.userId, newUserId))).length).toBe(0);
+    expect((await db.select().from(licensesTable).where(eq(licensesTable.employeeId, newUserId))).length).toBe(0);
+
+    // The server requires an acknowledgement (with the exact policyId) for
+    // every CURRENTLY-ACTIVE policy that has an uploaded file. Default seeded
+    // policies have no fileKey and are excluded, so build acks from whatever
+    // is active-for-validation right now to stay robust if a real policy file
+    // exists in the shared dev DB.
+    const allPolicies = await db.select().from(policiesTable);
+    const activeForValidation = allPolicies.filter((p) => p.isActive && !!p.fileKey);
+    const acknowledgements = activeForValidation.map((p) => ({
+      type: p.slug,
+      accepted: true,
+      signature: `Jane ${TAG}`,
+      timestamp: new Date().toISOString(),
+      policyId: p.id,
+      policyVersion: p.version,
+    }));
 
     const res = await request(app)
-      .post(`/api/admin/applications/${appRow.id}/approve`)
-      .set(authed(ctx.employeeToken))
-      .send({});
-    expect(res.status).toBe(403);
+      .post(`/api/onboarding/${onboardingToken}`)
+      .send({
+        bankSortCode: "021000021",
+        bankAccountNumber: "123456789",
+        bankAccountName: `Jane ${TAG}`,
+        emergencyContactName: "Kin Person",
+        emergencyContactRelationship: "Sibling",
+        emergencyContactPhone: "(214) 555-0150",
+        uniformShirt: "L",
+        directDepositConsent: true,
+        directDepositSignature: `Jane ${TAG}`,
+        acknowledgements,
+      });
+    expect(res.status).toBe(200);
+
+    // ---- Employee profile now exists, sourced from the application ----
+    const [emp] = await db.select().from(employeesTable).where(eq(employeesTable.userId, newUserId));
+    expect(emp).toBeTruthy();
+    expect(emp.applicationId).toBe(appId);
+    expect(emp.siaLicenseNumber).toBe(`${TAG}-SIA-onboard`);
+    expect(emp.bankAccountName).toBe(`Jane ${TAG}`);
+    // Emergency phone normalized to E.164 on the employee record.
+    expect(emp.emergencyContactPhone).toMatch(/^\+1\d{10}$/);
+
+    // ---- License materialized from the declared TX licence ----
+    const licenses = await db.select().from(licensesTable).where(eq(licensesTable.employeeId, newUserId));
+    expect(licenses.length).toBe(1);
+    expect(licenses[0].level).toBe(3);
+    expect(licenses[0].licenseNumber).toBe(`${TAG}-SIA-onboard`);
+
+    // ---- user activated, onboarding token consumed ----
+    const [userAfter] = await db.select().from(usersTable).where(eq(usersTable.id, newUserId));
+    expect(userAfter.status).toBe("active");
+    const [tok] = await db.select().from(onboardingTokensTable).where(eq(onboardingTokensTable.token, onboardingToken));
+    expect(tok.consumedAt).toBeTruthy();
+
+    // ---- a submission row was persisted ----
+    const subs = await db.select().from(onboardingSubmissionsTable).where(eq(onboardingSubmissionsTable.employeeId, newUserId));
+    expect(subs.length).toBe(1);
   });
 });
 

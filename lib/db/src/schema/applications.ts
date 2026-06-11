@@ -47,6 +47,17 @@ export const applicationsTable = pgTable("applications", {
   reviewerNotes: text("reviewer_notes"),
   reviewedBy: uuid("reviewed_by"),
   reviewedAt: timestamp("reviewed_at", { withTimezone: true }),
+  // Two-admin approval gate. An application must be approved by TWO distinct
+  // admins before an onboarding link is issued. The first approval records
+  // first_approved_by/at and flips status to "awaiting_second_approval"; the
+  // second approval (which must come from a *different* admin) records
+  // second_approved_by/at and finalizes status to "approved". Both columns are
+  // cleared whenever the application is sent back for more info or amended, so
+  // the gate always restarts from zero after applicant-side changes.
+  firstApprovedBy: uuid("first_approved_by"),
+  firstApprovedAt: timestamp("first_approved_at", { withTimezone: true }),
+  secondApprovedBy: uuid("second_approved_by"),
+  secondApprovedAt: timestamp("second_approved_at", { withTimezone: true }),
   createdEmployeeId: uuid("created_employee_id"),
   // Onboarding-approval email delivery state. Captured from the SMTP handoff
   // when the admin approves the application (and again on resend). Lets HR

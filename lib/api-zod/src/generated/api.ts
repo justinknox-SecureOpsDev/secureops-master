@@ -3045,7 +3045,14 @@ export const AdminListApplicationsQueryParams = zod.object({
 
 export const AdminListApplicationsResponseItem = zod.object({
   id: zod.string(),
-  status: zod.enum(["submitted", "under_review", "approved", "rejected"]),
+  status: zod.enum([
+    "submitted",
+    "under_review",
+    "info_requested",
+    "awaiting_second_approval",
+    "approved",
+    "rejected",
+  ]),
   firstName: zod.string(),
   lastName: zod.string(),
   email: zod.string(),
@@ -3112,6 +3119,20 @@ export const AdminListApplicationsResponseItem = zod.object({
     ),
   reviewerNotes: zod.string().nullish(),
   reviewedAt: zod.string().nullish(),
+  firstApprovedBy: zod
+    .string()
+    .nullish()
+    .describe(
+      "Admin user id who gave the first of two required approvals (null until first approval).",
+    ),
+  firstApprovedAt: zod.string().nullish(),
+  secondApprovedBy: zod
+    .string()
+    .nullish()
+    .describe(
+      "Admin user id who gave the final (second) approval — must differ from firstApprovedBy.",
+    ),
+  secondApprovedAt: zod.string().nullish(),
   createdEmployeeId: zod.string().nullish(),
   onboardingEmailStatus: zod
     .enum(["not_configured", "sent", "bounced", "failed"])
@@ -3142,7 +3163,14 @@ export const AdminGetApplicationParams = zod.object({
 
 export const AdminGetApplicationResponse = zod.object({
   id: zod.string(),
-  status: zod.enum(["submitted", "under_review", "approved", "rejected"]),
+  status: zod.enum([
+    "submitted",
+    "under_review",
+    "info_requested",
+    "awaiting_second_approval",
+    "approved",
+    "rejected",
+  ]),
   firstName: zod.string(),
   lastName: zod.string(),
   email: zod.string(),
@@ -3209,6 +3237,20 @@ export const AdminGetApplicationResponse = zod.object({
     ),
   reviewerNotes: zod.string().nullish(),
   reviewedAt: zod.string().nullish(),
+  firstApprovedBy: zod
+    .string()
+    .nullish()
+    .describe(
+      "Admin user id who gave the first of two required approvals (null until first approval).",
+    ),
+  firstApprovedAt: zod.string().nullish(),
+  secondApprovedBy: zod
+    .string()
+    .nullish()
+    .describe(
+      "Admin user id who gave the final (second) approval — must differ from firstApprovedBy.",
+    ),
+  secondApprovedAt: zod.string().nullish(),
   createdEmployeeId: zod.string().nullish(),
   onboardingEmailStatus: zod
     .enum(["not_configured", "sent", "bounced", "failed"])
@@ -3240,7 +3282,14 @@ export const AdminMarkApplicationUnderReviewBody = zod.object({
 
 export const AdminMarkApplicationUnderReviewResponse = zod.object({
   id: zod.string(),
-  status: zod.enum(["submitted", "under_review", "approved", "rejected"]),
+  status: zod.enum([
+    "submitted",
+    "under_review",
+    "info_requested",
+    "awaiting_second_approval",
+    "approved",
+    "rejected",
+  ]),
   firstName: zod.string(),
   lastName: zod.string(),
   email: zod.string(),
@@ -3307,6 +3356,20 @@ export const AdminMarkApplicationUnderReviewResponse = zod.object({
     ),
   reviewerNotes: zod.string().nullish(),
   reviewedAt: zod.string().nullish(),
+  firstApprovedBy: zod
+    .string()
+    .nullish()
+    .describe(
+      "Admin user id who gave the first of two required approvals (null until first approval).",
+    ),
+  firstApprovedAt: zod.string().nullish(),
+  secondApprovedBy: zod
+    .string()
+    .nullish()
+    .describe(
+      "Admin user id who gave the final (second) approval — must differ from firstApprovedBy.",
+    ),
+  secondApprovedAt: zod.string().nullish(),
   createdEmployeeId: zod.string().nullish(),
   onboardingEmailStatus: zod
     .enum(["not_configured", "sent", "bounced", "failed"])
@@ -3338,7 +3401,14 @@ export const AdminRejectApplicationBody = zod.object({
 
 export const AdminRejectApplicationResponse = zod.object({
   id: zod.string(),
-  status: zod.enum(["submitted", "under_review", "approved", "rejected"]),
+  status: zod.enum([
+    "submitted",
+    "under_review",
+    "info_requested",
+    "awaiting_second_approval",
+    "approved",
+    "rejected",
+  ]),
   firstName: zod.string(),
   lastName: zod.string(),
   email: zod.string(),
@@ -3405,6 +3475,20 @@ export const AdminRejectApplicationResponse = zod.object({
     ),
   reviewerNotes: zod.string().nullish(),
   reviewedAt: zod.string().nullish(),
+  firstApprovedBy: zod
+    .string()
+    .nullish()
+    .describe(
+      "Admin user id who gave the first of two required approvals (null until first approval).",
+    ),
+  firstApprovedAt: zod.string().nullish(),
+  secondApprovedBy: zod
+    .string()
+    .nullish()
+    .describe(
+      "Admin user id who gave the final (second) approval — must differ from firstApprovedBy.",
+    ),
+  secondApprovedAt: zod.string().nullish(),
   createdEmployeeId: zod.string().nullish(),
   onboardingEmailStatus: zod
     .enum(["not_configured", "sent", "bounced", "failed"])
@@ -3434,108 +3518,145 @@ export const AdminApproveApplicationBody = zod.object({
   notes: zod.string().optional(),
 });
 
-export const AdminApproveApplicationResponse = zod.object({
-  application: zod.object({
-    id: zod.string(),
-    status: zod.enum(["submitted", "under_review", "approved", "rejected"]),
-    firstName: zod.string(),
-    lastName: zod.string(),
-    email: zod.string(),
-    phone: zod.string(),
-    address: zod.string(),
-    city: zod.string().nullish(),
-    state: zod.string().nullish(),
-    zip: zod.string().nullish(),
-    locationLat: zod
-      .number()
-      .nullish()
-      .describe("Geocoded latitude (best-effort, may be null)."),
-    locationLng: zod
-      .number()
-      .nullish()
-      .describe("Geocoded longitude (best-effort, may be null)."),
-    distanceMiles: zod
-      .number()
-      .nullish()
+export const AdminApproveApplicationResponse = zod
+  .object({
+    application: zod.object({
+      id: zod.string(),
+      status: zod.enum([
+        "submitted",
+        "under_review",
+        "info_requested",
+        "awaiting_second_approval",
+        "approved",
+        "rejected",
+      ]),
+      firstName: zod.string(),
+      lastName: zod.string(),
+      email: zod.string(),
+      phone: zod.string(),
+      address: zod.string(),
+      city: zod.string().nullish(),
+      state: zod.string().nullish(),
+      zip: zod.string().nullish(),
+      locationLat: zod
+        .number()
+        .nullish()
+        .describe("Geocoded latitude (best-effort, may be null)."),
+      locationLng: zod
+        .number()
+        .nullish()
+        .describe("Geocoded longitude (best-effort, may be null)."),
+      distanceMiles: zod
+        .number()
+        .nullish()
+        .describe(
+          "Distance in miles from the queried site. Only populated when nearSiteId+maxMiles filter is active.",
+        ),
+      dateOfBirth: zod.string().nullish(),
+      cityOfBirth: zod.string().nullish(),
+      stateOfBirth: zod.string().nullish(),
+      niNumber: zod.string().nullish(),
+      rightToWorkStatus: zod.string().nullish(),
+      rightToWorkDocKey: zod.string().nullish(),
+      i9DocKey: zod.string().nullish(),
+      ssnCardDocKey: zod.string().nullish(),
+      idDocType: zod.enum(["drivers_license", "passport"]).nullish(),
+      idDocKey: zod.string().nullish(),
+      siaLicenseNumber: zod.string().nullish(),
+      siaLicenseLevel: zod.number().nullish(),
+      siaLicenseExpiry: zod.string().nullish(),
+      previousExperience: zod.string().nullish(),
+      yearsExperience: zod.number().nullish(),
+      references: zod
+        .array(
+          zod.object({
+            name: zod.string(),
+            relationship: zod.string(),
+            phone: zod.string(),
+            email: zod.string().optional(),
+          }),
+        )
+        .nullish(),
+      photoKey: zod.string().nullish(),
+      cvKey: zod.string().nullish(),
+      trainingCertificateKeys: zod.array(zod.string()).nullish(),
+      availability: zod
+        .array(
+          zod.object({
+            day: zod.enum(["mon", "tue", "wed", "thu", "fri", "sat", "sun"]),
+            period: zod.enum(["morning", "afternoon", "evening", "overnight"]),
+          }),
+        )
+        .nullish(),
+      customAnswers: zod
+        .array(zod.record(zod.string(), zod.unknown()))
+        .nullish()
+        .describe(
+          "Denormalized answers to admin-defined custom questions: { questionId, label, fieldType, value }.",
+        ),
+      reviewerNotes: zod.string().nullish(),
+      reviewedAt: zod.string().nullish(),
+      firstApprovedBy: zod
+        .string()
+        .nullish()
+        .describe(
+          "Admin user id who gave the first of two required approvals (null until first approval).",
+        ),
+      firstApprovedAt: zod.string().nullish(),
+      secondApprovedBy: zod
+        .string()
+        .nullish()
+        .describe(
+          "Admin user id who gave the final (second) approval — must differ from firstApprovedBy.",
+        ),
+      secondApprovedAt: zod.string().nullish(),
+      createdEmployeeId: zod.string().nullish(),
+      onboardingEmailStatus: zod
+        .enum(["not_configured", "sent", "bounced", "failed"])
+        .nullish()
+        .describe(
+          "Last known SMTP delivery state for the onboarding\/approval email (null if never attempted).",
+        ),
+      onboardingEmailMessageId: zod.string().nullish(),
+      onboardingEmailResponse: zod
+        .string()
+        .nullish()
+        .describe("Raw SMTP response line, when available."),
+      onboardingEmailError: zod
+        .string()
+        .nullish()
+        .describe("Human-readable bounce or transport error reason."),
+      onboardingEmailSentAt: zod.string().nullish(),
+      onboardingEmailAttemptedAt: zod.string().nullish(),
+      createdAt: zod.string(),
+    }),
+    awaitingSecondApproval: zod
+      .boolean()
+      .optional()
       .describe(
-        "Distance in miles from the queried site. Only populated when nearSiteId+maxMiles filter is active.",
+        "True when this was the first of two approvals; no provisioning happened yet.",
       ),
-    dateOfBirth: zod.string().nullish(),
-    cityOfBirth: zod.string().nullish(),
-    stateOfBirth: zod.string().nullish(),
-    niNumber: zod.string().nullish(),
-    rightToWorkStatus: zod.string().nullish(),
-    rightToWorkDocKey: zod.string().nullish(),
-    i9DocKey: zod.string().nullish(),
-    ssnCardDocKey: zod.string().nullish(),
-    idDocType: zod.enum(["drivers_license", "passport"]).nullish(),
-    idDocKey: zod.string().nullish(),
-    siaLicenseNumber: zod.string().nullish(),
-    siaLicenseLevel: zod.number().nullish(),
-    siaLicenseExpiry: zod.string().nullish(),
-    previousExperience: zod.string().nullish(),
-    yearsExperience: zod.number().nullish(),
-    references: zod
-      .array(
-        zod.object({
-          name: zod.string(),
-          relationship: zod.string(),
-          phone: zod.string(),
-          email: zod.string().optional(),
-        }),
-      )
-      .nullish(),
-    photoKey: zod.string().nullish(),
-    cvKey: zod.string().nullish(),
-    trainingCertificateKeys: zod.array(zod.string()).nullish(),
-    availability: zod
-      .array(
-        zod.object({
-          day: zod.enum(["mon", "tue", "wed", "thu", "fri", "sat", "sun"]),
-          period: zod.enum(["morning", "afternoon", "evening", "overnight"]),
-        }),
-      )
-      .nullish(),
-    customAnswers: zod
-      .array(zod.record(zod.string(), zod.unknown()))
-      .nullish()
-      .describe(
-        "Denormalized answers to admin-defined custom questions: { questionId, label, fieldType, value }.",
-      ),
-    reviewerNotes: zod.string().nullish(),
-    reviewedAt: zod.string().nullish(),
-    createdEmployeeId: zod.string().nullish(),
-    onboardingEmailStatus: zod
-      .enum(["not_configured", "sent", "bounced", "failed"])
-      .nullish()
-      .describe(
-        "Last known SMTP delivery state for the onboarding\/approval email (null if never attempted).",
-      ),
-    onboardingEmailMessageId: zod.string().nullish(),
-    onboardingEmailResponse: zod
+    firstApprovedBy: zod
       .string()
       .nullish()
-      .describe("Raw SMTP response line, when available."),
-    onboardingEmailError: zod
-      .string()
-      .nullish()
-      .describe("Human-readable bounce or transport error reason."),
-    onboardingEmailSentAt: zod.string().nullish(),
-    onboardingEmailAttemptedAt: zod.string().nullish(),
-    createdAt: zod.string(),
-  }),
-  onboardingUrl: zod.string(),
-  onboardingToken: zod.string(),
-  employeeId: zod.string(),
-  tempPassword: zod.string(),
-  emailSent: zod.boolean().optional(),
-  smsStatus: zod
-    .enum(["sent", "skipped", "failed"])
-    .optional()
-    .describe(
-      "SMS fallback delivery status for the onboarding link.\n`sent` — Twilio accepted the message.\n`skipped` — Twilio not connected, or applicant phone is not valid E.164.\n`failed` — Twilio rejected the send.\n",
-    ),
-});
+      .describe(
+        "Admin user id who gave the first approval (present on the first-approval response).",
+      ),
+    onboardingUrl: zod.string().optional(),
+    onboardingToken: zod.string().optional(),
+    employeeId: zod.string().optional(),
+    tempPassword: zod.string().optional(),
+    emailSent: zod.boolean().optional(),
+    smsStatus: zod
+      .enum(["sent", "skipped", "failed"])
+      .optional()
+      .describe(
+        "SMS fallback delivery status for the onboarding link.\n`sent` — Twilio accepted the message.\n`skipped` — Twilio not connected, or applicant phone is not valid E.164.\n`failed` — Twilio rejected the send.\n",
+      ),
+  })
+  .describe(
+    "Response to an approve action. Employee applications require TWO distinct\nadmin approvals before an onboarding link is issued.\n- First approval: `awaitingSecondApproval=true` and only `application`\n  (+ `firstApprovedBy`) are returned; no account\/link\/email is created.\n- Final (second) approval: `awaitingSecondApproval` is absent\/false and\n  the provisioning fields (`onboardingUrl`, `onboardingToken`,\n  `employeeId`, `tempPassword`) are populated.\n",
+  );
 
 export const GetOnboardingPrefillParams = zod.object({
   token: zod.coerce.string(),

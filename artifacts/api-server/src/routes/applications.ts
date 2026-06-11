@@ -231,6 +231,10 @@ function rowToApplication(r: ApplicationRow, distanceMiles: number | null = null
     trainingCertificateKeys: r.trainingCertificateKeys ?? null,
     availability: r.availability ?? null,
     reviewedAt: r.reviewedAt ? r.reviewedAt.toISOString() : null,
+    firstApprovedBy: r.firstApprovedBy ?? null,
+    firstApprovedAt: r.firstApprovedAt ? r.firstApprovedAt.toISOString() : null,
+    secondApprovedBy: r.secondApprovedBy ?? null,
+    secondApprovedAt: r.secondApprovedAt ? r.secondApprovedAt.toISOString() : null,
     onboardingEmailStatus: r.onboardingEmailStatus ?? null,
     onboardingEmailMessageId: r.onboardingEmailMessageId ?? null,
     onboardingEmailResponse: r.onboardingEmailResponse ?? null,
@@ -1303,7 +1307,8 @@ router.post("/admin/applications/:id/approve", requireAdmin, async (req, res): P
 
   type ErrorBody = { error: string; message: string };
   type ApproveResult =
-    | { updated: ApplicationRow; userId: string; tempPasswordPlain: string }
+    | { kind: "first"; updated: ApplicationRow }
+    | { kind: "second"; updated: ApplicationRow; userId: string; tempPasswordPlain: string }
     | { error: { status: number; body: ErrorBody } };
 
   let result: ApproveResult;
@@ -1322,6 +1327,44 @@ router.post("/admin/applications/:id/approve", requireAdmin, async (req, res): P
       }
       if (app.status === "approved" && app.createdEmployeeId) {
         return { error: { status: 409, body: { error: "Conflict", message: "Application already approved" } } };
+      }
+
+      // ---------------------------- FIRST APPROVAL ----------------------------
+      // Any non-approved application that is NOT yet awaiting a second sign-off
+      // gets its first approval recorded here. We deliberately provision
+      // NOTHING (no user account, no onboarding link, no email) until a second,
+      // distinct admin signs off. Always (re)write firstApprovedBy and clear any
+      // stale second-approval columns so the two-admin gate restarts cleanly
+      // even if the row carried leftover values from an earlier cycle.
+      if (app.status !== "awaiting_second_approval") {
+        const [updated] = await tx.update(applicationsTable).set({
+          status: "awaiting_second_approval",
+          reviewerNotes: notes ?? app.reviewerNotes ?? null,
+          reviewedBy: reviewerId,
+          reviewedAt: new Date(),
+          firstApprovedBy: reviewerId,
+          firstApprovedAt: new Date(),
+          secondApprovedBy: null,
+          secondApprovedAt: null,
+        }).where(eq(applicationsTable.id, appId)).returning();
+        return { kind: "first", updated };
+      }
+
+      // --------------------------- SECOND APPROVAL ----------------------------
+      // The application already carries one approval. The second approval MUST
+      // come from a different admin — a single admin cannot approve the same
+      // application twice to satisfy the gate on their own (separation of duty).
+      if (app.firstApprovedBy && app.firstApprovedBy === reviewerId) {
+        return {
+          error: {
+            status: 409,
+            body: {
+              error: "Conflict",
+              message:
+                "You already gave the first approval. A second, different admin must give the final approval.",
+            },
+          },
+        };
       }
 
       // Generate a cryptographically random temp password — never derive it
@@ -1386,65 +1429,13 @@ router.post("/admin/applications/:id/approve", requireAdmin, async (req, res): P
         userId = u.id;
       }
 
-      // Mirror every applicant field onto the employee row so admins see the
-      // full applicant profile in the Employees grid (no need to dig back into
-      // the application record). On re-approve we update the existing row.
-      const employeeFromApp = {
-        phone: app.phone,
-        address: app.address,
-        dateOfBirth: app.dateOfBirth ?? null,
-        cityOfBirth: app.cityOfBirth ?? null,
-        stateOfBirth: app.stateOfBirth ?? null,
-        niNumber: app.niNumber ?? null,
-        rightToWorkStatus: app.rightToWorkStatus ?? null,
-        rightToWorkDocKey: app.rightToWorkDocKey ?? null,
-        siaLicenseNumber: app.siaLicenseNumber ?? null,
-        siaLicenseLevel: app.siaLicenseLevel ?? null,
-        siaLicenseExpiry: app.siaLicenseExpiry ?? null,
-        previousExperience: app.previousExperience ?? null,
-        yearsExperience: app.yearsExperience ?? null,
-        references: app.references ?? null,
-        photoKey: app.photoKey ?? null,
-        cvKey: app.cvKey ?? null,
-        trainingCertificateKeys: app.trainingCertificateKeys ?? null,
-        availability: app.availability ?? null,
-        applicationId: app.id,
-        // Mirror the applicant's geocoded home coords so the mobile
-        // open-shifts "distance from home" sort works on day one for
-        // newly-provisioned officers (no need to wait for them to re-save
-        // their profile to trigger a fresh geocode).
-        homeLat: app.locationLat ?? null,
-        homeLng: app.locationLng ?? null,
-        lastGeocodedAddress: app.locationLat != null ? app.address : null,
-      };
-      const [existingEmployee] = await tx.select().from(employeesTable).where(eq(employeesTable.userId, userId)).limit(1);
-      if (!existingEmployee) {
-        await tx.insert(employeesTable).values({ userId, ...employeeFromApp });
-      } else {
-        await tx.update(employeesTable).set(employeeFromApp).where(eq(employeesTable.userId, userId));
-      }
-
-      // Create a licence row whenever the applicant declared *any* TX
-      // licence info (number, level, or expiry). Previously we required
-      // BOTH number and expiry, which silently dropped applications that
-      // only filled in the level — leaving the officer with
-      // maxLicenseLevel=null on mobile and unable to claim shifts.
-      // Missing fields are stored as a 30-day placeholder so admin sees
-      // an "expiring soon" row to verify and complete.
-      const hasAnyLicenceInfo =
-        !!app.siaLicenseNumber || app.siaLicenseLevel != null || !!app.siaLicenseExpiry;
-      if (hasAnyLicenceInfo) {
-        const placeholderExpiry = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000)
-          .toISOString().slice(0, 10);
-        await tx.insert(licensesTable).values({
-          employeeId: userId,
-          type: "SIA",
-          level: app.siaLicenseLevel ?? null,
-          licenseNumber: app.siaLicenseNumber || "PENDING-VERIFICATION",
-          issuingAuthority: "SIA",
-          expiryDate: app.siaLicenseExpiry || placeholderExpiry,
-        });
-      }
+      // NOTE: the Employee profile row and License row are intentionally NOT
+      // created here. Per product policy the full employee profile is only
+      // materialized when the candidate COMPLETES onboarding
+      // (POST /onboarding/:token), which builds the employee row from the
+      // application data + the onboarding submission in one place. Final
+      // approval only creates the login account (status=pending) so the
+      // candidate appears in Personnel and can be issued an onboarding link.
 
       await tx.update(onboardingTokensTable)
         .set({ consumedAt: new Date() })
@@ -1469,10 +1460,12 @@ router.post("/admin/applications/:id/approve", requireAdmin, async (req, res): P
         reviewerNotes: notes ?? app.reviewerNotes ?? null,
         reviewedBy: reviewerId,
         reviewedAt: new Date(),
+        secondApprovedBy: reviewerId,
+        secondApprovedAt: new Date(),
         createdEmployeeId: userId,
       }).where(eq(applicationsTable.id, appId)).returning();
 
-      return { updated, userId, tempPasswordPlain };
+      return { kind: "second", updated, userId, tempPasswordPlain };
     });
   } catch (err) {
     req.log.error({ err }, "Approve transaction failed");
@@ -1481,6 +1474,18 @@ router.post("/admin/applications/:id/approve", requireAdmin, async (req, res): P
   }
 
   if ("error" in result) { res.status(result.error.status).json(result.error.body); return; }
+
+  // First approval recorded — no provisioning, no onboarding email yet. Return
+  // the updated application so the admin UI can reflect "awaiting second
+  // approval" and surface who gave the first sign-off.
+  if (result.kind === "first") {
+    res.json({
+      application: rowToApplication(result.updated),
+      awaitingSecondApproval: true,
+      firstApprovedBy: result.updated.firstApprovedBy,
+    });
+    return;
+  }
 
   const onboardingUrl = buildOnboardingUrl(token);
   const app = result.updated;
@@ -1597,6 +1602,13 @@ router.post("/admin/applications/:id/request-info", requireAdmin, async (req, re
     status: "info_requested",
     reviewedBy: req.user!.userId,
     reviewedAt: new Date(),
+    // Sending the application back for more info resets the two-admin approval
+    // gate — any prior approvals are no longer valid once the applicant's data
+    // can change, so both admins must re-approve the updated submission.
+    firstApprovedBy: null,
+    firstApprovedAt: null,
+    secondApprovedBy: null,
+    secondApprovedAt: null,
   }).where(eq(applicationsTable.id, appId)).returning();
 
   const amendUrl = buildAmendUrl(token);
@@ -1770,9 +1782,16 @@ router.post("/applications/amend/:token", tokenLookupLimiter, async (req, res): 
     if (Object.keys(updates).length > 0) {
       await tx.update(applicationsTable).set(updates).where(eq(applicationsTable.id, t.applicationId));
     }
-    // Bump back to under_review so admin sees it ready to re-evaluate.
-    await tx.update(applicationsTable).set({ status: "under_review" })
-      .where(eq(applicationsTable.id, t.applicationId));
+    // Bump back to under_review so admin sees it ready to re-evaluate, and
+    // reset the two-admin approval gate: the applicant just changed their data,
+    // so any prior approvals are stale and both admins must re-approve.
+    await tx.update(applicationsTable).set({
+      status: "under_review",
+      firstApprovedBy: null,
+      firstApprovedAt: null,
+      secondApprovedBy: null,
+      secondApprovedAt: null,
+    }).where(eq(applicationsTable.id, t.applicationId));
     await tx.update(applicationAmendmentTokensTable).set({ consumedAt: new Date() })
       .where(eq(applicationAmendmentTokensTable.id, t.id));
     const [row] = await tx.select().from(applicationsTable).where(eq(applicationsTable.id, t.applicationId)).limit(1);
@@ -1968,14 +1987,49 @@ router.post("/onboarding/:token", tokenLookupLimiter, async (req, res): Promise<
     [row] = await db.insert(onboardingSubmissionsTable).values(values).returning();
   }
 
-  // Mirror every onboarding-submission field onto the employee row so admins
-  // see the full profile in the Employees grid without opening the onboarding
-  // detail dialog.
-  await db.update(employeesTable).set({
+  // Build the full employee profile now — onboarding completion is the FIRST
+  // time the employee row is materialized (creation is deferred from approval
+  // per product policy). We merge the application-sourced profile (phone,
+  // address, licence details, geocoded home coords, etc.) with the onboarding
+  // submission fields so admins see the complete profile in the Employees grid.
+  let app: ApplicationRow | null = null;
+  if (t.applicationId) {
+    const [a] = await db.select().from(applicationsTable).where(eq(applicationsTable.id, t.applicationId)).limit(1);
+    app = a ?? null;
+  }
+
+  const employeeFields = {
+    // ---- application-sourced profile (previously written at approval time) ----
+    phone: app?.phone ?? null,
+    address: app?.address ?? null,
+    dateOfBirth: app?.dateOfBirth ?? null,
+    cityOfBirth: app?.cityOfBirth ?? null,
+    stateOfBirth: app?.stateOfBirth ?? null,
+    rightToWorkStatus: app?.rightToWorkStatus ?? null,
+    rightToWorkDocKey: app?.rightToWorkDocKey ?? null,
+    siaLicenseNumber: app?.siaLicenseNumber ?? null,
+    siaLicenseLevel: app?.siaLicenseLevel ?? null,
+    siaLicenseExpiry: app?.siaLicenseExpiry ?? null,
+    previousExperience: app?.previousExperience ?? null,
+    yearsExperience: app?.yearsExperience ?? null,
+    references: app?.references ?? null,
+    photoKey: app?.photoKey ?? null,
+    cvKey: app?.cvKey ?? null,
+    trainingCertificateKeys: app?.trainingCertificateKeys ?? null,
+    availability: app?.availability ?? null,
+    applicationId: app?.id ?? null,
+    // Mirror the applicant's geocoded home coords so the mobile open-shifts
+    // "distance from home" sort works on day one for the new officer.
+    homeLat: app?.locationLat ?? null,
+    homeLng: app?.locationLng ?? null,
+    lastGeocodedAddress: app && app.locationLat != null ? app.address : null,
+    // ---- onboarding-submission fields ----
     bankAccountName: d.bankAccountName,
     bankAccountNumber: d.bankAccountNumber,
     bankBsb: d.bankSortCode,
-    niNumber: d.niNumberConfirmed ?? null,
+    // Prefer the NI/SSN value the applicant reconfirmed during onboarding;
+    // fall back to what they supplied on the application so we don't blank it.
+    niNumber: d.niNumberConfirmed ?? app?.niNumber ?? null,
     taxCode: d.taxCode ?? null,
     payStubDocKey: d.p45Doc?.objectPath ?? null,
     emergencyContactName: d.emergencyContactName,
@@ -1991,7 +2045,40 @@ router.post("/onboarding/:token", tokenLookupLimiter, async (req, res): Promise<
     directDepositSignature: d.directDepositSignature ?? null,
     acknowledgements: enrichedAcks,
     onboardingSubmissionId: row.id,
-  }).where(eq(employeesTable.userId, t.employeeId));
+  };
+
+  // Create-or-update: for the normal flow the employee row does not exist yet,
+  // but a re-onboard of a previously-active officer may already have one.
+  const [existingEmployee] = await db.select().from(employeesTable).where(eq(employeesTable.userId, t.employeeId)).limit(1);
+  if (existingEmployee) {
+    await db.update(employeesTable).set(employeeFields).where(eq(employeesTable.userId, t.employeeId));
+  } else {
+    await db.insert(employeesTable).values({ userId: t.employeeId, ...employeeFields });
+  }
+
+  // Materialize the licence row from the applicant's declared TX licence info.
+  // This was previously created at approval; it now lives here so the employee
+  // profile + licence appear together only once onboarding completes. Guarded
+  // by an existence check so a re-onboard does not create duplicate licences.
+  // Missing fields are stored as a 30-day placeholder so admin sees an
+  // "expiring soon" row to verify and complete.
+  const hasAnyLicenceInfo =
+    !!app?.siaLicenseNumber || app?.siaLicenseLevel != null || !!app?.siaLicenseExpiry;
+  if (hasAnyLicenceInfo) {
+    const [existingLicense] = await db.select().from(licensesTable).where(eq(licensesTable.employeeId, t.employeeId)).limit(1);
+    if (!existingLicense) {
+      const placeholderExpiry = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000)
+        .toISOString().slice(0, 10);
+      await db.insert(licensesTable).values({
+        employeeId: t.employeeId,
+        type: "SIA",
+        level: app?.siaLicenseLevel ?? null,
+        licenseNumber: app?.siaLicenseNumber || "PENDING-VERIFICATION",
+        issuingAuthority: "SIA",
+        expiryDate: app?.siaLicenseExpiry || placeholderExpiry,
+      });
+    }
+  }
 
   // Activate user, mark token consumed
   await db.update(usersTable).set({ status: "active" }).where(eq(usersTable.id, t.employeeId));

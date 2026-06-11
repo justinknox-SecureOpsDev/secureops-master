@@ -4496,7 +4496,7 @@ components:
       required: [id, status, firstName, lastName, email, phone, address, createdAt]
       properties:
         id: { type: string }
-        status: { type: string, enum: [submitted, under_review, approved, rejected] }
+        status: { type: string, enum: [submitted, under_review, info_requested, awaiting_second_approval, approved, rejected] }
         firstName: { type: string }
         lastName: { type: string }
         email: { type: string }
@@ -4546,6 +4546,10 @@ components:
             additionalProperties: true
         reviewerNotes: { type: string, nullable: true }
         reviewedAt: { type: string, nullable: true }
+        firstApprovedBy: { type: string, nullable: true, description: "Admin user id who gave the first of two required approvals (null until first approval)." }
+        firstApprovedAt: { type: string, nullable: true }
+        secondApprovedBy: { type: string, nullable: true, description: "Admin user id who gave the final (second) approval — must differ from firstApprovedBy." }
+        secondApprovedAt: { type: string, nullable: true }
         createdEmployeeId: { type: string, nullable: true }
         onboardingEmailStatus:
           type: string
@@ -4566,9 +4570,19 @@ components:
 
     ApproveApplicationResponse:
       type: object
-      required: [application, onboardingUrl, onboardingToken, employeeId, tempPassword]
+      required: [application]
+      description: |
+        Response to an approve action. Employee applications require TWO distinct
+        admin approvals before an onboarding link is issued.
+        - First approval: `awaitingSecondApproval=true` and only `application`
+          (+ `firstApprovedBy`) are returned; no account/link/email is created.
+        - Final (second) approval: `awaitingSecondApproval` is absent/false and
+          the provisioning fields (`onboardingUrl`, `onboardingToken`,
+          `employeeId`, `tempPassword`) are populated.
       properties:
         application: { $ref: "#/components/schemas/Application" }
+        awaitingSecondApproval: { type: boolean, description: "True when this was the first of two approvals; no provisioning happened yet." }
+        firstApprovedBy: { type: string, nullable: true, description: "Admin user id who gave the first approval (present on the first-approval response)." }
         onboardingUrl: { type: string }
         onboardingToken: { type: string }
         employeeId: { type: string }
