@@ -103,6 +103,50 @@ describe("ResponsiveTable desktop layout", () => {
     expect(screen.getByText("Summary Tiles")).toBeTruthy();
     expect(screen.getByRole("table")).toBeTruthy();
   });
+
+  it("wraps the table in a keyboard-focusable scroll region when scrollAriaLabel is set", () => {
+    render(
+      <ResponsiveTable
+        data={rows}
+        columns={baseColumns()}
+        getRowKey={(r) => r.id}
+        scrollAriaLabel="My records table"
+      />,
+    );
+
+    // The scroll area is exposed as a focusable region for axe's scrollable-region rule.
+    const region = screen.getByRole("region", { name: "My records table" });
+    expect(region.getAttribute("tabindex")).toBe("0");
+    expect(region.querySelector("table")).toBeTruthy();
+  });
+
+  it("omits the scroll region (no role=region) when scrollAriaLabel is absent", () => {
+    render(
+      <ResponsiveTable
+        data={rows}
+        columns={baseColumns()}
+        getRowKey={(r) => r.id}
+      />,
+    );
+    expect(screen.queryByRole("region")).toBeNull();
+    expect(screen.getByRole("table")).toBeTruthy();
+  });
+
+  it("applies theadClassName to the desktop <thead>", () => {
+    render(
+      <ResponsiveTable
+        data={rows}
+        columns={baseColumns()}
+        getRowKey={(r) => r.id}
+        theadClassName="text-xs uppercase tracking-wide"
+      />,
+    );
+    const thead = screen.getByRole("table").querySelector("thead")!;
+    // Existing base class is preserved alongside the override.
+    expect(thead.className).toContain("bg-muted/50");
+    expect(thead.className).toContain("text-xs");
+    expect(thead.className).toContain("uppercase");
+  });
 });
 
 describe("ResponsiveTable mobile layout", () => {
@@ -207,6 +251,39 @@ describe("ResponsiveTable mobile layout", () => {
       ".border.rounded-lg",
     ) as HTMLElement;
     expect(cardWithout.querySelector(".border-t")).toBeNull();
+  });
+
+  it("applies cardClassName per row, supporting both string and function forms", () => {
+    // String form: same class on every card.
+    const stringForm = render(
+      <ResponsiveTable
+        data={rows}
+        columns={baseColumns()}
+        getRowKey={(r) => r.id}
+        cardClassName="bg-card"
+      />,
+    );
+    stringForm.container
+      .querySelectorAll(".border.rounded-lg")
+      .forEach((card) => expect(card.className).toContain("bg-card"));
+    stringForm.unmount();
+
+    // Function form: per-row class (highlight only the inactive row).
+    const fnForm = render(
+      <ResponsiveTable
+        data={rows}
+        columns={baseColumns()}
+        getRowKey={(r) => r.id}
+        cardClassName={(r) => (r.status === "inactive" ? "bg-rose-50/60" : "bg-card")}
+      />,
+    );
+    const cards = Array.from(
+      fnForm.container.querySelectorAll(".border.rounded-lg"),
+    ) as HTMLElement[];
+    // rows[0] = Alice (active) -> bg-card; rows[1] = Bob (inactive) -> rose highlight.
+    expect(cards[0].className).toContain("bg-card");
+    expect(cards[0].className).not.toContain("bg-rose-50/60");
+    expect(cards[1].className).toContain("bg-rose-50/60");
   });
 
   it("prefers `mobileCell` and `mobileLabel` over the desktop `cell`/`header`", () => {

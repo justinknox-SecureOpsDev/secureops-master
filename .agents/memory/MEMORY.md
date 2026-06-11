@@ -44,4 +44,5 @@
 - [Notification routing policy](notification-routing-policy.md) — safety events (SOS/incidents)→all admins; HR events (profile-edit email/application/onboarding)→single brand.adminNotifyEmail inbox.
 - [Configurable form optional payload](configurable-form-optional-payload.md) — admin-configurable public form must OMIT blank optional built-ins; generated Zod is optional() not nullish(), so ""/0/null 400s.
 - [Admin nav snapshot test](admin-portal-nav-snapshot.md) — adding/removing an admin sidebar nav item breaks navGroups.test.ts exact-list assertion; update the test array in lockstep.
+- [a11y gate Onboard-form flake](a11y-onboard-form-flake.md) — a11y gate can fail on the public /onboard/:token form (Onboard.tsx) for env reasons; if that's the only failure & you didn't touch it, it's a pre-existing flake.
 - [admin-portal mustChangePassword gate](admin-portal-mustchangepassword-gate.md) — temp-pw/client users hit 403 on every non-/auth route until rotated; portal must gate behind a first-login change screen (raw fetch, not api()).

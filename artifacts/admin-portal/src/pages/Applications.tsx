@@ -10,7 +10,8 @@ import { ClipboardList, Search, Loader2, Copy, ExternalLink, MailCheck, MailWarn
 import { openSignedObject } from "@/lib/upload";
 import { AMENDMENT_FIELDS } from "@/lib/amendmentFields";
 import { useAuth } from "@/lib/auth";
-import { useIsMobile } from "@/hooks/use-mobile";
+import { cn } from "@/lib/utils";
+import { ResponsiveTable, type ResponsiveColumn } from "@/components/ResponsiveTable";
 
 type ApplicationStatus = "submitted" | "under_review" | "info_requested" | "awaiting_second_approval" | "approved" | "rejected";
 
@@ -167,7 +168,6 @@ export function ApplicationsPage() {
   const [batchResult, setBatchResult] = useState<BatchResult | null>(null);
   const [geoBackfillBusy, setGeoBackfillBusy] = useState(false);
   const [geoBackfillResult, setGeoBackfillResult] = useState<string | null>(null);
-  const isMobile = useIsMobile();
 
   async function refresh() {
     setLoading(true); setError(null);
@@ -376,81 +376,24 @@ export function ApplicationsPage() {
         </div>
       )}
 
-      {isMobile ? (
-        <div className="space-y-3">
-          {loading && (<div className="bg-card rounded-lg border px-3 py-10 text-center text-muted-foreground"><Loader2 className="w-5 h-5 inline-block animate-spin" /></div>)}
-          {!loading && items.length === 0 && (<div className="bg-card rounded-lg border px-3 py-10 text-center text-muted-foreground">No applications.</div>)}
-          {items.map((a) => {
-            const isEligible = a.status !== "approved" && a.status !== "rejected";
-            const badge = deliveryBadge(a);
-            const needsAttention = a.onboardingEmailStatus === "bounced" || a.onboardingEmailStatus === "failed";
-            return (
-              <div key={a.id} className={`bg-card rounded-lg border p-3 space-y-2 ${needsAttention ? "bg-rose-50/60" : ""}`}>
-                <div className="flex items-start gap-3">
-                  <input
-                    type="checkbox"
-                    className="mt-1"
-                    aria-label={`Select ${a.firstName} ${a.lastName}`}
-                    checked={selected.has(a.id)}
-                    onChange={() => toggleRow(a.id)}
-                    disabled={!isEligible}
-                    title={isEligible ? undefined : `Cannot request info on ${a.status} applications`}
-                  />
-                  <div className="flex-1 min-w-0">
-                    <div className="flex items-start justify-between gap-2">
-                      <span className="font-medium">{a.firstName} {a.lastName}</span>
-                      <span className={`inline-block px-2 py-0.5 text-[11px] uppercase rounded border shrink-0 ${STATUS_STYLES[a.status]}`}>
-                        {a.status.replaceAll("_", " ")}
-                      </span>
-                    </div>
-                  </div>
-                </div>
-                <div className="grid grid-cols-3 gap-x-3 gap-y-1 text-sm">
-                  <span className="text-muted-foreground text-xs">Email</span>
-                  <span className="col-span-2 text-right break-all">{a.email}</span>
-                  <span className="text-muted-foreground text-xs">Phone</span>
-                  <span className="col-span-2 text-right">{a.phone}</span>
-                  <span className="text-muted-foreground text-xs">City</span>
-                  <span className="col-span-2 text-right">{[a.city, a.state].filter(Boolean).join(", ") || "—"}</span>
-                  {distanceActive && (
-                    <>
-                      <span className="text-muted-foreground text-xs">Distance</span>
-                      <span className="col-span-2 text-right font-mono text-xs">{a.distanceMiles != null ? `${a.distanceMiles.toFixed(1)} mi` : "—"}</span>
-                    </>
-                  )}
-                  <span className="text-muted-foreground text-xs">TX Lic</span>
-                  <span className="col-span-2 text-right">{a.siaLicenseLevel ? `L${a.siaLicenseLevel}` : "—"}</span>
-                  <span className="text-muted-foreground text-xs">Submitted</span>
-                  <span className="col-span-2 text-right text-muted-foreground">{new Date(a.createdAt).toLocaleString()}</span>
-                  <span className="text-muted-foreground text-xs">Onboarding email</span>
-                  <span className="col-span-2 text-right">
-                    {badge ? (
-                      <span
-                        title={badge.tooltip}
-                        className={`inline-flex items-center gap-1 px-2 py-0.5 text-[11px] uppercase rounded border ${badge.className}`}
-                      >
-                        <badge.Icon className="w-3 h-3" />
-                        {badge.label}
-                      </span>
-                    ) : (
-                      <span className="text-xs text-muted-foreground">—</span>
-                    )}
-                  </span>
-                </div>
-                <div className="pt-1 border-t">
-                  <Button size="sm" variant="outline" className="w-full" onClick={() => setOpenId(a.id)}>Review</Button>
-                </div>
-              </div>
-            );
-          })}
-        </div>
+      {loading ? (
+        <div className="bg-card rounded-lg border px-3 py-10 text-center text-muted-foreground"><Loader2 className="w-5 h-5 inline-block animate-spin" /></div>
+      ) : items.length === 0 ? (
+        <div className="bg-card rounded-lg border px-3 py-10 text-center text-muted-foreground">No applications.</div>
       ) : (
-      <div className="bg-card rounded-lg border overflow-hidden">
-        <div className="overflow-x-auto" tabIndex={0} role="region" aria-label="Applications table">
-        <table className="w-full text-sm">
-          <thead className="bg-muted/50 text-xs uppercase tracking-wide">
-            <tr>
-              <th className="px-3 py-2 w-8">
+        <ResponsiveTable
+          data={items}
+          getRowKey={(a) => a.id}
+          scrollAriaLabel="Applications table"
+          theadClassName="text-xs uppercase tracking-wide"
+          cardClassName={(a) => cn("bg-card", (a.onboardingEmailStatus === "bounced" || a.onboardingEmailStatus === "failed") && "bg-rose-50/60")}
+          rowClassName={(a) => cn("hover:bg-accent/30", (a.onboardingEmailStatus === "bounced" || a.onboardingEmailStatus === "failed") && "bg-rose-50/60")}
+          columns={[
+            {
+              id: "select",
+              mobile: "hidden",
+              thClassName: "w-8",
+              header: (
                 <input
                   type="checkbox"
                   aria-label="Select all"
@@ -459,29 +402,31 @@ export function ApplicationsPage() {
                   onChange={toggleAll}
                   disabled={eligible.length === 0}
                 />
-              </th>
-              <th className="text-left px-3 py-2">Applicant</th>
-              <th className="text-left px-3 py-2">Email</th>
-              <th className="text-left px-3 py-2">Phone</th>
-              <th className="text-left px-3 py-2">City</th>
-              {distanceActive && <th className="text-left px-3 py-2">Distance</th>}
-              <th className="text-left px-3 py-2">TX Lic</th>
-              <th className="text-left px-3 py-2">Submitted</th>
-              <th className="text-left px-3 py-2">Status</th>
-              <th className="text-left px-3 py-2">Onboarding email</th>
-              <th></th>
-            </tr>
-          </thead>
-          <tbody>
-            {loading && (<tr><td colSpan={distanceActive ? 11 : 10} className="px-3 py-10 text-center text-muted-foreground"><Loader2 className="w-5 h-5 inline-block animate-spin" /></td></tr>)}
-            {!loading && items.length === 0 && (<tr><td colSpan={distanceActive ? 11 : 10} className="px-3 py-10 text-center text-muted-foreground">No applications.</td></tr>)}
-            {items.map((a) => {
-              const isEligible = a.status !== "approved" && a.status !== "rejected";
-              const badge = deliveryBadge(a);
-              const needsAttention = a.onboardingEmailStatus === "bounced" || a.onboardingEmailStatus === "failed";
-              return (
-                <tr key={a.id} className={`border-t hover:bg-accent/30 ${needsAttention ? "bg-rose-50/60" : ""}`}>
-                  <td className="px-3 py-2">
+              ),
+              cell: (a) => {
+                const isEligible = a.status !== "approved" && a.status !== "rejected";
+                return (
+                  <input
+                    type="checkbox"
+                    aria-label={`Select ${a.firstName} ${a.lastName}`}
+                    checked={selected.has(a.id)}
+                    onChange={() => toggleRow(a.id)}
+                    disabled={!isEligible}
+                    title={isEligible ? undefined : `Cannot request info on ${a.status} applications`}
+                  />
+                );
+              },
+            },
+            {
+              id: "applicant",
+              header: "Applicant",
+              mobile: "title",
+              cell: (a) => `${a.firstName} ${a.lastName}`,
+              tdClassName: "font-medium",
+              mobileCell: (a) => {
+                const isEligible = a.status !== "approved" && a.status !== "rejected";
+                return (
+                  <span className="inline-flex items-center gap-2">
                     <input
                       type="checkbox"
                       aria-label={`Select ${a.firstName} ${a.lastName}`}
@@ -490,46 +435,90 @@ export function ApplicationsPage() {
                       disabled={!isEligible}
                       title={isEligible ? undefined : `Cannot request info on ${a.status} applications`}
                     />
-                  </td>
-                  <td className="px-3 py-2 font-medium">{a.firstName} {a.lastName}</td>
-                  <td className="px-3 py-2">{a.email}</td>
-                  <td className="px-3 py-2">{a.phone}</td>
-                  <td className="px-3 py-2">{[a.city, a.state].filter(Boolean).join(", ") || "—"}</td>
-                  {distanceActive && (
-                    <td className="px-3 py-2 font-mono text-xs">
-                      {a.distanceMiles != null ? `${a.distanceMiles.toFixed(1)} mi` : "—"}
-                    </td>
-                  )}
-                  <td className="px-3 py-2">{a.siaLicenseLevel ? `L${a.siaLicenseLevel}` : "—"}</td>
-                  <td className="px-3 py-2 text-muted-foreground">{new Date(a.createdAt).toLocaleString()}</td>
-                  <td className="px-3 py-2">
-                    <span className={`inline-block px-2 py-0.5 text-[11px] uppercase rounded border ${STATUS_STYLES[a.status]}`}>
-                      {a.status.replaceAll("_", " ")}
-                    </span>
-                  </td>
-                  <td className="px-3 py-2">
-                    {badge ? (
-                      <span
-                        title={badge.tooltip}
-                        className={`inline-flex items-center gap-1 px-2 py-0.5 text-[11px] uppercase rounded border ${badge.className}`}
-                      >
-                        <badge.Icon className="w-3 h-3" />
-                        {badge.label}
-                      </span>
-                    ) : (
-                      <span className="text-xs text-muted-foreground">—</span>
-                    )}
-                  </td>
-                  <td className="px-3 py-2 text-right">
-                    <Button size="sm" variant="outline" onClick={() => setOpenId(a.id)}>Review</Button>
-                  </td>
-                </tr>
-              );
-            })}
-          </tbody>
-        </table>
-        </div>
-      </div>
+                    {a.firstName} {a.lastName}
+                  </span>
+                );
+              },
+            },
+            {
+              id: "email",
+              header: "Email",
+              cell: (a) => a.email,
+              mobileValueClassName: "break-all",
+            },
+            {
+              id: "phone",
+              header: "Phone",
+              cell: (a) => a.phone,
+            },
+            {
+              id: "city",
+              header: "City",
+              cell: (a) => [a.city, a.state].filter(Boolean).join(", ") || "—",
+            },
+            ...(distanceActive
+              ? [{
+                  id: "distance",
+                  header: "Distance",
+                  cell: (a: Application) => (a.distanceMiles != null ? `${a.distanceMiles.toFixed(1)} mi` : "—"),
+                  tdClassName: "font-mono text-xs",
+                  mobileValueClassName: "font-mono text-xs",
+                } satisfies ResponsiveColumn<Application>]
+              : []),
+            {
+              id: "txlic",
+              header: "TX Lic",
+              cell: (a) => (a.siaLicenseLevel ? `L${a.siaLicenseLevel}` : "—"),
+            },
+            {
+              id: "submitted",
+              header: "Submitted",
+              cell: (a) => new Date(a.createdAt).toLocaleString(),
+              tdClassName: "text-muted-foreground",
+              mobileValueClassName: "text-muted-foreground",
+            },
+            {
+              id: "status",
+              header: "Status",
+              mobile: "meta",
+              cell: (a) => (
+                <span className={`inline-block px-2 py-0.5 text-[11px] uppercase rounded border shrink-0 ${STATUS_STYLES[a.status]}`}>
+                  {a.status.replaceAll("_", " ")}
+                </span>
+              ),
+            },
+            {
+              id: "onboardingEmail",
+              header: "Onboarding email",
+              cell: (a) => {
+                const badge = deliveryBadge(a);
+                return badge ? (
+                  <span
+                    title={badge.tooltip}
+                    className={`inline-flex items-center gap-1 px-2 py-0.5 text-[11px] uppercase rounded border ${badge.className}`}
+                  >
+                    <badge.Icon className="w-3 h-3" />
+                    {badge.label}
+                  </span>
+                ) : (
+                  <span className="text-xs text-muted-foreground">—</span>
+                );
+              },
+            },
+            {
+              id: "actions",
+              header: "",
+              align: "right",
+              mobile: "actions",
+              cell: (a) => (
+                <Button size="sm" variant="outline" onClick={() => setOpenId(a.id)}>Review</Button>
+              ),
+              mobileCell: (a) => (
+                <Button size="sm" variant="outline" className="w-full" onClick={() => setOpenId(a.id)}>Review</Button>
+              ),
+            },
+          ]}
+        />
       )}
 
       {opened && (

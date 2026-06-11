@@ -7,7 +7,7 @@ import {
 } from "@/components/ui/dialog";
 import { UserPlus, Loader2, Copy, ExternalLink, Search } from "lucide-react";
 import { openSignedObject } from "@/lib/upload";
-import { useIsMobile } from "@/hooks/use-mobile";
+import { ResponsiveTable } from "@/components/ResponsiveTable";
 
 type Item = {
   employeeId: string;
@@ -47,7 +47,6 @@ export function OnboardingPage() {
   const [search, setSearch] = useState("");
   const [openId, setOpenId] = useState<string | null>(null);
   const [resend, setResend] = useState<ResendResp | null>(null);
-  const isMobile = useIsMobile();
 
   async function refresh() {
     setLoading(true); setError(null);
@@ -104,67 +103,70 @@ export function OnboardingPage() {
         </div>
       </div>
       {error && <div role="alert" className="text-sm text-destructive bg-destructive/5 p-2 rounded border border-destructive/20">{error}</div>}
-      {isMobile ? (
-        <div className="space-y-3">
-          {loading && (<div className="bg-card rounded-lg border px-3 py-10 text-center text-muted-foreground"><Loader2 className="w-5 h-5 inline-block animate-spin" /></div>)}
-          {!loading && items.length === 0 && (<div className="bg-card rounded-lg border px-3 py-10 text-center text-muted-foreground">No onboarding records yet.</div>)}
-          {!loading && items.length > 0 && filtered.length === 0 && (<div className="bg-card rounded-lg border px-3 py-10 text-center text-muted-foreground">No matches for “{search}”.</div>)}
-          {filtered.map((i) => (
-            <div key={i.employeeId} className="bg-card rounded-lg border p-3 space-y-2">
-              <div className="flex items-start justify-between gap-2">
-                <span className="font-medium">{i.firstName} {i.lastName}</span>
-                <span className={`inline-block px-2 py-0.5 text-[11px] uppercase rounded border ${STATUS_STYLES[i.status]}`}>{i.status}</span>
-              </div>
-              <div className="grid grid-cols-3 gap-x-3 gap-y-1 text-sm">
-                <span className="text-muted-foreground text-xs">Email</span>
-                <span className="col-span-2 text-right break-all">{i.email}</span>
-                <span className="text-muted-foreground text-xs">Token expires</span>
-                <span className="col-span-2 text-right text-muted-foreground">{i.tokenExpiresAt ? new Date(i.tokenExpiresAt).toLocaleString() : "—"}</span>
-                <span className="text-muted-foreground text-xs">Submitted</span>
-                <span className="col-span-2 text-right text-muted-foreground">{i.submittedAt ? new Date(i.submittedAt).toLocaleString() : "—"}</span>
-              </div>
-              <div className="pt-1 border-t">
-                <Button size="sm" variant="outline" className="w-full" onClick={() => setOpenId(i.employeeId)}>View</Button>
-              </div>
-            </div>
-          ))}
-        </div>
+      {loading ? (
+        <div className="bg-card rounded-lg border px-3 py-10 text-center text-muted-foreground"><Loader2 className="w-5 h-5 inline-block animate-spin" /></div>
+      ) : items.length === 0 ? (
+        <div className="bg-card rounded-lg border px-3 py-10 text-center text-muted-foreground">No onboarding records yet.</div>
+      ) : filtered.length === 0 ? (
+        <div className="bg-card rounded-lg border px-3 py-10 text-center text-muted-foreground">No matches for “{search}”.</div>
       ) : (
-      <div className="bg-card rounded-lg border overflow-hidden">
-        <div className="overflow-x-auto" tabIndex={0} role="region" aria-label="Onboarding records table">
-        <table className="w-full text-sm">
-          <thead className="bg-muted/50 text-xs uppercase tracking-wide">
-            <tr>
-              <th className="text-left px-3 py-2">Employee</th>
-              <th className="text-left px-3 py-2">Email</th>
-              <th className="text-left px-3 py-2">Status</th>
-              <th className="text-left px-3 py-2">Token expires</th>
-              <th className="text-left px-3 py-2">Submitted</th>
-              <th></th>
-            </tr>
-          </thead>
-          <tbody>
-            {loading && (<tr><td colSpan={6} className="px-3 py-10 text-center text-muted-foreground"><Loader2 className="w-5 h-5 inline-block animate-spin" /></td></tr>)}
-            {!loading && items.length === 0 && (<tr><td colSpan={6} className="px-3 py-10 text-center text-muted-foreground">No onboarding records yet.</td></tr>)}
-            {!loading && items.length > 0 && filtered.length === 0 && (<tr><td colSpan={6} className="px-3 py-10 text-center text-muted-foreground">No matches for “{search}”.</td></tr>)}
-            {filtered.map((i) => (
-              <tr key={i.employeeId} className="border-t hover:bg-accent/30">
-                <td className="px-3 py-2 font-medium">{i.firstName} {i.lastName}</td>
-                <td className="px-3 py-2">{i.email}</td>
-                <td className="px-3 py-2">
-                  <span className={`inline-block px-2 py-0.5 text-[11px] uppercase rounded border ${STATUS_STYLES[i.status]}`}>{i.status}</span>
-                </td>
-                <td className="px-3 py-2 text-muted-foreground">{i.tokenExpiresAt ? new Date(i.tokenExpiresAt).toLocaleString() : "—"}</td>
-                <td className="px-3 py-2 text-muted-foreground">{i.submittedAt ? new Date(i.submittedAt).toLocaleString() : "—"}</td>
-                <td className="px-3 py-2 text-right">
-                  <Button size="sm" variant="outline" onClick={() => setOpenId(i.employeeId)}>View</Button>
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-        </div>
-      </div>
+        <ResponsiveTable
+          data={filtered}
+          getRowKey={(i) => i.employeeId}
+          scrollAriaLabel="Onboarding records table"
+          theadClassName="text-xs uppercase tracking-wide"
+          cardClassName="bg-card"
+          rowClassName="hover:bg-accent/30"
+          columns={[
+            {
+              id: "employee",
+              header: "Employee",
+              mobile: "title",
+              cell: (i) => `${i.firstName} ${i.lastName}`,
+              tdClassName: "font-medium",
+            },
+            {
+              id: "email",
+              header: "Email",
+              cell: (i) => i.email,
+              mobileValueClassName: "break-all",
+            },
+            {
+              id: "status",
+              header: "Status",
+              mobile: "meta",
+              cell: (i) => (
+                <span className={`inline-block px-2 py-0.5 text-[11px] uppercase rounded border ${STATUS_STYLES[i.status]}`}>{i.status}</span>
+              ),
+            },
+            {
+              id: "tokenExpires",
+              header: "Token expires",
+              cell: (i) => (i.tokenExpiresAt ? new Date(i.tokenExpiresAt).toLocaleString() : "—"),
+              tdClassName: "text-muted-foreground",
+              mobileValueClassName: "text-muted-foreground",
+            },
+            {
+              id: "submitted",
+              header: "Submitted",
+              cell: (i) => (i.submittedAt ? new Date(i.submittedAt).toLocaleString() : "—"),
+              tdClassName: "text-muted-foreground",
+              mobileValueClassName: "text-muted-foreground",
+            },
+            {
+              id: "actions",
+              header: "",
+              align: "right",
+              mobile: "actions",
+              cell: (i) => (
+                <Button size="sm" variant="outline" onClick={() => setOpenId(i.employeeId)}>View</Button>
+              ),
+              mobileCell: (i) => (
+                <Button size="sm" variant="outline" className="w-full" onClick={() => setOpenId(i.employeeId)}>View</Button>
+              ),
+            },
+          ]}
+        />
       )}
 
       {opened && (
