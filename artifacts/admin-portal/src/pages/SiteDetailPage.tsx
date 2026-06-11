@@ -8,7 +8,7 @@ import { useAuth } from "@/lib/auth";
 import { useFkOptions } from "@/lib/fk";
 import { getTable } from "@/lib/tables";
 import { RowFormDialog } from "@/components/RowFormDialog";
-import { useIsMobile } from "@/hooks/use-mobile";
+import { ResponsiveTable, type ResponsiveColumn } from "@/components/ResponsiveTable";
 
 type Site = {
   id: string;
@@ -274,7 +274,6 @@ export function SiteDetailPage() {
   // (mirrors the mobile time-approval screen), and any action error.
   const { user } = useAuth();
   const isAdmin = user?.role === "admin";
-  const isMobile = useIsMobile();
   const [teActioningId, setTeActioningId] = useState<string | null>(null);
   const [teHoursEdits, setTeHoursEdits] = useState<Record<string, string>>({});
   const [teActionError, setTeActionError] = useState<string | null>(null);
@@ -898,65 +897,67 @@ export function SiteDetailPage() {
               <div className="text-sm text-muted-foreground border rounded p-4">
                 No checkpoints yet. Add one above to start logging patrol scans.
               </div>
-            ) : isMobile ? (
-              <div className="space-y-3">
-                {checkpoints.map((c) => (
-                  <div key={c.id} className="border rounded-lg p-3 space-y-2">
-                    <div className="flex items-start justify-between gap-2">
-                      <span className="font-medium">{c.label}</span>
+            ) : (
+              <ResponsiveTable
+                data={checkpoints}
+                getRowKey={(c) => c.id}
+                columns={[
+                  {
+                    id: "label",
+                    header: "Label",
+                    mobile: "title",
+                    cell: (c) => c.label,
+                  },
+                  {
+                    id: "code",
+                    header: "Code",
+                    cell: (c) => c.code,
+                    tdClassName: "font-mono text-xs",
+                    mobileValueClassName: "font-mono text-xs",
+                  },
+                  {
+                    id: "status",
+                    header: "Status",
+                    mobile: "meta",
+                    cell: (c) => (
+                      <span className={c.isActive ? "text-emerald-600" : "text-muted-foreground"}>
+                        {c.isActive ? "Active" : "Disabled"}
+                      </span>
+                    ),
+                    mobileCell: (c) => (
                       <span className={c.isActive ? "text-emerald-600 text-sm" : "text-muted-foreground text-sm"}>
                         {c.isActive ? "Active" : "Disabled"}
                       </span>
-                    </div>
-                    <div className="grid grid-cols-2 gap-x-3 gap-y-1 text-sm">
-                      <span className="text-muted-foreground">Code</span>
-                      <span className="text-right font-mono text-xs">{c.code}</span>
-                    </div>
-                    <div className="flex flex-wrap items-center gap-2 pt-1 border-t mt-1">
-                      <Button variant="outline" size="sm" className="flex-1 min-w-[5rem]" onClick={() => toggleActive(c)}>
-                        {c.isActive ? "Disable" : "Enable"}
-                      </Button>
-                      <Button variant="outline" size="sm" className="flex-1 min-w-[5rem]" onClick={() => deleteCheckpoint(c)}>
-                        <Trash2 className="w-3.5 h-3.5 text-destructive mr-1" /> Delete
-                      </Button>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            ) : (
-              <div className="border rounded overflow-x-auto">
-                <table className="w-full text-sm">
-                  <thead className="bg-muted/50">
-                    <tr>
-                      <th className="text-left px-3 py-2 font-medium">Label</th>
-                      <th className="text-left px-3 py-2 font-medium">Code</th>
-                      <th className="text-left px-3 py-2 font-medium">Status</th>
-                      <th className="text-right px-3 py-2 font-medium">Actions</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {checkpoints.map((c) => (
-                      <tr key={c.id} className="border-t">
-                        <td className="px-3 py-2">{c.label}</td>
-                        <td className="px-3 py-2 font-mono text-xs">{c.code}</td>
-                        <td className="px-3 py-2">
-                          <span className={c.isActive ? "text-emerald-600" : "text-muted-foreground"}>
-                            {c.isActive ? "Active" : "Disabled"}
-                          </span>
-                        </td>
-                        <td className="px-3 py-2 text-right">
-                          <Button variant="ghost" size="sm" onClick={() => toggleActive(c)}>
-                            {c.isActive ? "Disable" : "Enable"}
-                          </Button>
-                          <Button variant="ghost" size="sm" onClick={() => deleteCheckpoint(c)}>
-                            <Trash2 className="w-3.5 h-3.5 text-destructive" />
-                          </Button>
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
+                    ),
+                  },
+                  {
+                    id: "actions",
+                    header: "Actions",
+                    align: "right",
+                    mobile: "actions",
+                    cell: (c) => (
+                      <>
+                        <Button variant="ghost" size="sm" onClick={() => toggleActive(c)}>
+                          {c.isActive ? "Disable" : "Enable"}
+                        </Button>
+                        <Button variant="ghost" size="sm" onClick={() => deleteCheckpoint(c)}>
+                          <Trash2 className="w-3.5 h-3.5 text-destructive" />
+                        </Button>
+                      </>
+                    ),
+                    mobileCell: (c) => (
+                      <>
+                        <Button variant="outline" size="sm" className="flex-1 min-w-[5rem]" onClick={() => toggleActive(c)}>
+                          {c.isActive ? "Disable" : "Enable"}
+                        </Button>
+                        <Button variant="outline" size="sm" className="flex-1 min-w-[5rem]" onClick={() => deleteCheckpoint(c)}>
+                          <Trash2 className="w-3.5 h-3.5 text-destructive mr-1" /> Delete
+                        </Button>
+                      </>
+                    ),
+                  },
+                ]}
+              />
             )}
           </section>
 
@@ -973,42 +974,34 @@ export function SiteDetailPage() {
               <div className="text-sm text-muted-foreground border rounded p-4">
                 No scans recorded at this site yet.
               </div>
-            ) : isMobile ? (
-              <div className="space-y-3">
-                {scans.map((s) => (
-                  <div key={s.id} className="border rounded-lg p-3 space-y-2">
-                    <div className="flex items-start justify-between gap-2">
-                      <span className="font-medium">{[s.firstName, s.lastName].filter(Boolean).join(" ") || "—"}</span>
-                      <span className="text-sm text-muted-foreground text-right">{fmt(s.scannedAt)}</span>
-                    </div>
-                    <div className="grid grid-cols-2 gap-x-3 gap-y-1 text-sm">
-                      <span className="text-muted-foreground">Checkpoint</span>
-                      <span className="text-right">{s.checkpointLabel ?? <span className="text-muted-foreground">(removed)</span>}</span>
-                    </div>
-                  </div>
-                ))}
-              </div>
             ) : (
-              <div className="border rounded overflow-x-auto">
-                <table className="w-full text-sm">
-                  <thead className="bg-muted/50">
-                    <tr>
-                      <th className="text-left px-3 py-2 font-medium">When</th>
-                      <th className="text-left px-3 py-2 font-medium">Officer</th>
-                      <th className="text-left px-3 py-2 font-medium">Checkpoint</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {scans.map((s) => (
-                      <tr key={s.id} className="border-t">
-                        <td className="px-3 py-2 text-muted-foreground">{fmt(s.scannedAt)}</td>
-                        <td className="px-3 py-2">{[s.firstName, s.lastName].filter(Boolean).join(" ") || "—"}</td>
-                        <td className="px-3 py-2">{s.checkpointLabel ?? <span className="text-muted-foreground">(removed)</span>}</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
+              <ResponsiveTable
+                data={scans}
+                getRowKey={(s) => s.id}
+                columns={[
+                  {
+                    id: "when",
+                    header: "When",
+                    mobile: "meta",
+                    cell: (s) => fmt(s.scannedAt),
+                    tdClassName: "text-muted-foreground",
+                    mobileCell: (s) => (
+                      <span className="text-sm text-muted-foreground text-right">{fmt(s.scannedAt)}</span>
+                    ),
+                  },
+                  {
+                    id: "officer",
+                    header: "Officer",
+                    mobile: "title",
+                    cell: (s) => [s.firstName, s.lastName].filter(Boolean).join(" ") || "—",
+                  },
+                  {
+                    id: "checkpoint",
+                    header: "Checkpoint",
+                    cell: (s) => s.checkpointLabel ?? <span className="text-muted-foreground">(removed)</span>,
+                  },
+                ]}
+              />
             )}
           </section>
 
@@ -1069,241 +1062,241 @@ export function SiteDetailPage() {
               <div className="text-sm text-muted-foreground border rounded p-4">
                 No time entries for this site in the selected date range.
               </div>
-            ) : isMobile ? (
-              <div className="space-y-3">
-                {timeEntries.map((t) => {
-                  const status = (t.approvalStatus ?? "pending").toLowerCase();
-                  const isPending = status === "pending";
-                  const clockedOut = !!t.clockOutTime;
-                  const busy = teActioningId === t.id;
-                  const canAct = isAdmin && isPending && clockedOut;
-                  return (
-                    <div key={t.id} className="border rounded-lg p-3 space-y-2">
-                      <div className="flex items-start justify-between gap-2">
-                        <span className="font-medium">{t.employeeName?.trim() || "—"}</span>
-                        <span className="flex flex-wrap items-center justify-end gap-1.5">
-                          <span className={
-                            t.approvalStatus === "approved" ? "text-emerald-600 text-sm"
-                            : t.approvalStatus === "rejected" ? "text-destructive text-sm"
-                            : "text-amber-600 text-sm"
-                          }>
-                            {t.approvalStatus
-                              ? t.approvalStatus.charAt(0).toUpperCase() + t.approvalStatus.slice(1)
-                              : "—"}
-                          </span>
-                          {t.correctionRequested && (
-                            <span
-                              className="inline-flex items-center gap-1 text-xs text-amber-600"
-                              title={t.correctionNote || "Officer requested a time correction."}
-                            >
-                              <AlertTriangle className="w-3 h-3" /> Correction
-                            </span>
-                          )}
-                          {isAdmin && t.correctionRequested && (
-                            <Button
-                              variant="ghost"
-                              size="sm"
-                              className="h-6 px-2 text-xs"
-                              onClick={() => dismissCorrection(t)}
-                              disabled={teActioningId === t.id}
-                            >
-                              {teActioningId === t.id ? <Loader2 className="w-3 h-3 animate-spin" /> : "Dismiss"}
-                            </Button>
-                          )}
+            ) : (
+              <ResponsiveTable
+                data={timeEntries}
+                getRowKey={(t) => t.id}
+                rowClassName="align-top"
+                cardActionsClassName="items-end"
+                desktopHeader={
+                  <div className="flex flex-wrap items-stretch gap-2 mb-3">
+                    <div className="border rounded px-3 py-2 bg-muted/30">
+                      <div className="text-xs text-muted-foreground">Total hours</div>
+                      <div className="text-lg font-semibold tabular-nums">
+                        {timeEntriesSummary.totalHours.toFixed(2)}
+                      </div>
+                    </div>
+                    <div className="border rounded px-3 py-2 bg-muted/30">
+                      <div className="text-xs text-muted-foreground">Entries</div>
+                      <div className="text-lg font-semibold tabular-nums">
+                        {timeEntriesSummary.count}
+                      </div>
+                    </div>
+                    <div className="border rounded px-3 py-2 bg-muted/30">
+                      <div className="text-xs text-muted-foreground">Officers</div>
+                      <div className="text-lg font-semibold tabular-nums">
+                        {timeEntriesSummary.headcount}
+                      </div>
+                    </div>
+                    <div className="border rounded px-3 py-2 bg-muted/30">
+                      <div className="text-xs text-muted-foreground">Approved</div>
+                      <div className="text-lg font-semibold tabular-nums text-emerald-600">
+                        {timeEntriesSummary.approvedCount}
+                        <span className="text-xs font-normal text-muted-foreground ml-1">
+                          ({timeEntriesSummary.approvedHours.toFixed(2)} hrs)
                         </span>
                       </div>
-                      <div className="grid grid-cols-2 gap-x-3 gap-y-1 text-sm">
-                        <span className="text-muted-foreground">Clock in</span>
-                        <span className="text-right">{t.clockInTime ? fmt(t.clockInTime) : "—"}</span>
-                        <span className="text-muted-foreground">Clock out</span>
-                        <span className="text-right">{t.clockOutTime ? fmt(t.clockOutTime) : <span className="text-amber-600">In progress</span>}</span>
-                        <span className="text-muted-foreground">Hours</span>
-                        <span className="text-right tabular-nums">{t.hoursWorked != null ? Number(t.hoursWorked).toFixed(2) : "—"}</span>
-                      </div>
-                      {isAdmin && canAct && (
-                        <div className="flex flex-wrap items-end gap-2 pt-1 border-t mt-1">
-                          <label className="flex flex-col text-xs text-muted-foreground">
-                            Hours
-                            <input
-                              type="number"
-                              step="0.25"
-                              min="0"
-                              inputMode="decimal"
-                              aria-label={`Approve hours for ${t.employeeName?.trim() || "officer"}`}
-                              value={teHoursEdits[t.id] ?? (t.hoursWorked != null ? Number(t.hoursWorked).toFixed(2) : "")}
-                              onChange={(e) => setTeHoursEdits((prev) => ({ ...prev, [t.id]: e.target.value }))}
-                              disabled={busy}
-                              className="mt-0.5 w-24 border rounded px-2 py-1.5 text-sm text-right tabular-nums bg-background text-foreground"
-                            />
-                          </label>
-                          <Button
-                            size="sm"
-                            className="flex-1 min-w-[5rem]"
-                            onClick={() => decideTimeEntry(t, "approved")}
-                            disabled={busy}
-                          >
-                            {busy ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : "Approve"}
-                          </Button>
-                          <Button
-                            variant="outline"
-                            size="sm"
-                            className="flex-1 min-w-[5rem]"
-                            onClick={() => decideTimeEntry(t, "rejected")}
-                            disabled={busy}
-                          >
-                            Reject
-                          </Button>
-                        </div>
-                      )}
                     </div>
-                  );
-                })}
-              </div>
-            ) : (
-              <>
-                <div className="flex flex-wrap items-stretch gap-2 mb-3">
-                  <div className="border rounded px-3 py-2 bg-muted/30">
-                    <div className="text-xs text-muted-foreground">Total hours</div>
-                    <div className="text-lg font-semibold tabular-nums">
-                      {timeEntriesSummary.totalHours.toFixed(2)}
-                    </div>
-                  </div>
-                  <div className="border rounded px-3 py-2 bg-muted/30">
-                    <div className="text-xs text-muted-foreground">Entries</div>
-                    <div className="text-lg font-semibold tabular-nums">
-                      {timeEntriesSummary.count}
-                    </div>
-                  </div>
-                  <div className="border rounded px-3 py-2 bg-muted/30">
-                    <div className="text-xs text-muted-foreground">Officers</div>
-                    <div className="text-lg font-semibold tabular-nums">
-                      {timeEntriesSummary.headcount}
-                    </div>
-                  </div>
-                  <div className="border rounded px-3 py-2 bg-muted/30">
-                    <div className="text-xs text-muted-foreground">Approved</div>
-                    <div className="text-lg font-semibold tabular-nums text-emerald-600">
-                      {timeEntriesSummary.approvedCount}
-                      <span className="text-xs font-normal text-muted-foreground ml-1">
-                        ({timeEntriesSummary.approvedHours.toFixed(2)} hrs)
-                      </span>
-                    </div>
-                  </div>
-                  <div className="border rounded px-3 py-2 bg-muted/30">
-                    <div className="text-xs text-muted-foreground">Pending</div>
-                    <div className="text-lg font-semibold tabular-nums text-amber-600">
-                      {timeEntriesSummary.pendingCount}
-                    </div>
-                  </div>
-                  {timeEntriesSummary.rejectedCount > 0 && (
                     <div className="border rounded px-3 py-2 bg-muted/30">
-                      <div className="text-xs text-muted-foreground">Rejected</div>
-                      <div className="text-lg font-semibold tabular-nums text-destructive">
-                        {timeEntriesSummary.rejectedCount}
+                      <div className="text-xs text-muted-foreground">Pending</div>
+                      <div className="text-lg font-semibold tabular-nums text-amber-600">
+                        {timeEntriesSummary.pendingCount}
                       </div>
                     </div>
-                  )}
-                </div>
-                <div className="border rounded overflow-x-auto">
-                <table className="w-full text-sm">
-                  <thead className="bg-muted/50">
-                    <tr>
-                      <th className="text-left px-3 py-2 font-medium">Officer</th>
-                      <th className="text-left px-3 py-2 font-medium">Clock in</th>
-                      <th className="text-left px-3 py-2 font-medium">Clock out</th>
-                      <th className="text-right px-3 py-2 font-medium">Hours</th>
-                      <th className="text-left px-3 py-2 font-medium">Status</th>
-                      {isAdmin && <th className="text-right px-3 py-2 font-medium">Actions</th>}
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {timeEntries.map((t) => {
-                      const status = (t.approvalStatus ?? "pending").toLowerCase();
-                      const isPending = status === "pending";
-                      const clockedOut = !!t.clockOutTime;
-                      const busy = teActioningId === t.id;
-                      const canAct = isAdmin && isPending && clockedOut;
-                      const editingTimes = teTimeEditingId === t.id;
-                      return (
-                      <tr key={t.id} className="border-t align-top">
-                        <td className="px-3 py-2">{t.employeeName?.trim() || "—"}</td>
-                        <td className="px-3 py-2 text-muted-foreground">
-                          {editingTimes ? (
-                            <input
-                              type="datetime-local"
-                              aria-label={`Clock in for ${t.employeeName?.trim() || "officer"}`}
-                              value={teTimeDraft.clockIn}
-                              onChange={(e) => setTeTimeDraft((d) => ({ ...d, clockIn: e.target.value }))}
-                              disabled={teTimeSaving}
-                              className="border rounded px-2 py-1 text-sm bg-background text-foreground"
-                            />
-                          ) : t.clockInTime ? fmt(t.clockInTime) : "—"}
-                        </td>
-                        <td className="px-3 py-2 text-muted-foreground">
-                          {editingTimes ? (
-                            <input
-                              type="datetime-local"
-                              aria-label={`Clock out for ${t.employeeName?.trim() || "officer"}`}
-                              value={teTimeDraft.clockOut}
-                              onChange={(e) => setTeTimeDraft((d) => ({ ...d, clockOut: e.target.value }))}
-                              disabled={teTimeSaving}
-                              className="border rounded px-2 py-1 text-sm bg-background text-foreground"
-                            />
-                          ) : t.clockOutTime ? fmt(t.clockOutTime) : <span className="text-amber-600">In progress</span>}
-                        </td>
-                        <td className="px-3 py-2 text-right tabular-nums">{t.hoursWorked != null ? Number(t.hoursWorked).toFixed(2) : "—"}</td>
-                        <td className="px-3 py-2">
-                          <span className={
-                            t.approvalStatus === "approved" ? "text-emerald-600"
-                            : t.approvalStatus === "rejected" ? "text-destructive"
-                            : "text-amber-600"
-                          }>
-                            {t.approvalStatus
-                              ? t.approvalStatus.charAt(0).toUpperCase() + t.approvalStatus.slice(1)
-                              : "—"}
+                    {timeEntriesSummary.rejectedCount > 0 && (
+                      <div className="border rounded px-3 py-2 bg-muted/30">
+                        <div className="text-xs text-muted-foreground">Rejected</div>
+                        <div className="text-lg font-semibold tabular-nums text-destructive">
+                          {timeEntriesSummary.rejectedCount}
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                }
+                columns={[
+                  {
+                    id: "officer",
+                    header: "Officer",
+                    mobile: "title",
+                    cell: (t) => t.employeeName?.trim() || "—",
+                  },
+                  {
+                    id: "clockIn",
+                    header: "Clock in",
+                    tdClassName: "text-muted-foreground",
+                    cell: (t) =>
+                      teTimeEditingId === t.id ? (
+                        <input
+                          type="datetime-local"
+                          aria-label={`Clock in for ${t.employeeName?.trim() || "officer"}`}
+                          value={teTimeDraft.clockIn}
+                          onChange={(e) => setTeTimeDraft((d) => ({ ...d, clockIn: e.target.value }))}
+                          disabled={teTimeSaving}
+                          className="border rounded px-2 py-1 text-sm bg-background text-foreground"
+                        />
+                      ) : t.clockInTime ? fmt(t.clockInTime) : "—",
+                    mobileCell: (t) => (t.clockInTime ? fmt(t.clockInTime) : "—"),
+                  },
+                  {
+                    id: "clockOut",
+                    header: "Clock out",
+                    tdClassName: "text-muted-foreground",
+                    cell: (t) =>
+                      teTimeEditingId === t.id ? (
+                        <input
+                          type="datetime-local"
+                          aria-label={`Clock out for ${t.employeeName?.trim() || "officer"}`}
+                          value={teTimeDraft.clockOut}
+                          onChange={(e) => setTeTimeDraft((d) => ({ ...d, clockOut: e.target.value }))}
+                          disabled={teTimeSaving}
+                          className="border rounded px-2 py-1 text-sm bg-background text-foreground"
+                        />
+                      ) : t.clockOutTime ? fmt(t.clockOutTime) : <span className="text-amber-600">In progress</span>,
+                    mobileCell: (t) =>
+                      t.clockOutTime ? fmt(t.clockOutTime) : <span className="text-amber-600">In progress</span>,
+                  },
+                  {
+                    id: "hours",
+                    header: "Hours",
+                    align: "right",
+                    tdClassName: "tabular-nums",
+                    mobileValueClassName: "tabular-nums",
+                    cell: (t) => (t.hoursWorked != null ? Number(t.hoursWorked).toFixed(2) : "—"),
+                  },
+                  {
+                    id: "status",
+                    header: "Status",
+                    mobile: "meta",
+                    cell: (t) => (
+                      <>
+                        <span className={
+                          t.approvalStatus === "approved" ? "text-emerald-600"
+                          : t.approvalStatus === "rejected" ? "text-destructive"
+                          : "text-amber-600"
+                        }>
+                          {t.approvalStatus
+                            ? t.approvalStatus.charAt(0).toUpperCase() + t.approvalStatus.slice(1)
+                            : "—"}
+                        </span>
+                        {t.correctionRequested && (
+                          <span
+                            className="ml-2 inline-flex items-center gap-1 text-xs text-amber-600"
+                            title={t.correctionNote || "Officer requested a time correction."}
+                          >
+                            <AlertTriangle className="w-3 h-3" /> Correction
                           </span>
-                          {t.correctionRequested && (
-                            <span
-                              className="ml-2 inline-flex items-center gap-1 text-xs text-amber-600"
-                              title={t.correctionNote || "Officer requested a time correction."}
-                            >
-                              <AlertTriangle className="w-3 h-3" /> Correction
-                            </span>
-                          )}
-                          {isAdmin && t.correctionRequested && (
-                            <Button
-                              variant="ghost"
-                              size="sm"
-                              className="ml-1 h-6 px-2 text-xs"
-                              onClick={() => dismissCorrection(t)}
-                              disabled={teActioningId === t.id}
-                            >
-                              {teActioningId === t.id ? <Loader2 className="w-3 h-3 animate-spin" /> : "Dismiss"}
-                            </Button>
-                          )}
-                        </td>
-                        {isAdmin && (
-                          <td className="px-3 py-2">
-                            {editingTimes ? (
-                              <div className="flex items-center justify-end gap-2">
-                                <Button
-                                  size="sm"
-                                  onClick={() => saveEditTimes(t)}
-                                  disabled={teTimeSaving}
-                                >
-                                  {teTimeSaving ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : "Save times"}
-                                </Button>
-                                <Button
-                                  variant="outline"
-                                  size="sm"
-                                  onClick={cancelEditTimes}
-                                  disabled={teTimeSaving}
-                                >
-                                  Cancel
-                                </Button>
-                              </div>
-                            ) : canAct ? (
-                              <div className="flex flex-wrap items-center justify-end gap-2">
+                        )}
+                        {isAdmin && t.correctionRequested && (
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            className="ml-1 h-6 px-2 text-xs"
+                            onClick={() => dismissCorrection(t)}
+                            disabled={teActioningId === t.id}
+                          >
+                            {teActioningId === t.id ? <Loader2 className="w-3 h-3 animate-spin" /> : "Dismiss"}
+                          </Button>
+                        )}
+                      </>
+                    ),
+                    mobileCell: (t) => (
+                      <>
+                        <span className={
+                          t.approvalStatus === "approved" ? "text-emerald-600 text-sm"
+                          : t.approvalStatus === "rejected" ? "text-destructive text-sm"
+                          : "text-amber-600 text-sm"
+                        }>
+                          {t.approvalStatus
+                            ? t.approvalStatus.charAt(0).toUpperCase() + t.approvalStatus.slice(1)
+                            : "—"}
+                        </span>
+                        {t.correctionRequested && (
+                          <span
+                            className="inline-flex items-center gap-1 text-xs text-amber-600"
+                            title={t.correctionNote || "Officer requested a time correction."}
+                          >
+                            <AlertTriangle className="w-3 h-3" /> Correction
+                          </span>
+                        )}
+                        {isAdmin && t.correctionRequested && (
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            className="h-6 px-2 text-xs"
+                            onClick={() => dismissCorrection(t)}
+                            disabled={teActioningId === t.id}
+                          >
+                            {teActioningId === t.id ? <Loader2 className="w-3 h-3 animate-spin" /> : "Dismiss"}
+                          </Button>
+                        )}
+                      </>
+                    ),
+                  },
+                  ...(isAdmin
+                    ? [{
+                        id: "actions",
+                        header: "Actions",
+                        thClassName: "text-right",
+                        mobile: "actions" as const,
+                        cell: (t: TimeEntryRow) => {
+                          const status = (t.approvalStatus ?? "pending").toLowerCase();
+                          const isPending = status === "pending";
+                          const clockedOut = !!t.clockOutTime;
+                          const busy = teActioningId === t.id;
+                          const canAct = isAdmin && isPending && clockedOut;
+                          const editingTimes = teTimeEditingId === t.id;
+                          return editingTimes ? (
+                            <div className="flex items-center justify-end gap-2">
+                              <Button size="sm" onClick={() => saveEditTimes(t)} disabled={teTimeSaving}>
+                                {teTimeSaving ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : "Save times"}
+                              </Button>
+                              <Button variant="outline" size="sm" onClick={cancelEditTimes} disabled={teTimeSaving}>
+                                Cancel
+                              </Button>
+                            </div>
+                          ) : canAct ? (
+                            <div className="flex flex-wrap items-center justify-end gap-2">
+                              <input
+                                type="number"
+                                step="0.25"
+                                min="0"
+                                inputMode="decimal"
+                                aria-label={`Approve hours for ${t.employeeName?.trim() || "officer"}`}
+                                value={teHoursEdits[t.id] ?? (t.hoursWorked != null ? Number(t.hoursWorked).toFixed(2) : "")}
+                                onChange={(e) => setTeHoursEdits((prev) => ({ ...prev, [t.id]: e.target.value }))}
+                                disabled={busy}
+                                className="w-20 border rounded px-2 py-1 text-sm text-right tabular-nums bg-background text-foreground"
+                              />
+                              <Button size="sm" onClick={() => decideTimeEntry(t, "approved")} disabled={busy}>
+                                {busy ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : "Approve"}
+                              </Button>
+                              <Button variant="outline" size="sm" onClick={() => decideTimeEntry(t, "rejected")} disabled={busy}>
+                                Reject
+                              </Button>
+                              <Button variant="ghost" size="sm" onClick={() => startEditTimes(t)} disabled={busy}>
+                                <Pencil className="w-3.5 h-3.5 mr-1" />Edit times
+                              </Button>
+                            </div>
+                          ) : (
+                            <div className="flex items-center justify-end gap-2 text-xs text-muted-foreground">
+                              <span>{!clockedOut ? "—" : status === "approved" ? "Approved" : status === "rejected" ? "Rejected" : "—"}</span>
+                              <Button variant="ghost" size="sm" onClick={() => startEditTimes(t)}>
+                                <Pencil className="w-3.5 h-3.5 mr-1" />Edit times
+                              </Button>
+                            </div>
+                          );
+                        },
+                        mobileCell: (t: TimeEntryRow) => {
+                          const status = (t.approvalStatus ?? "pending").toLowerCase();
+                          const isPending = status === "pending";
+                          const clockedOut = !!t.clockOutTime;
+                          const busy = teActioningId === t.id;
+                          const canAct = isAdmin && isPending && clockedOut;
+                          if (!canAct) return null;
+                          return (
+                            <>
+                              <label className="flex flex-col text-xs text-muted-foreground">
+                                Hours
                                 <input
                                   type="number"
                                   step="0.25"
@@ -1313,53 +1306,33 @@ export function SiteDetailPage() {
                                   value={teHoursEdits[t.id] ?? (t.hoursWorked != null ? Number(t.hoursWorked).toFixed(2) : "")}
                                   onChange={(e) => setTeHoursEdits((prev) => ({ ...prev, [t.id]: e.target.value }))}
                                   disabled={busy}
-                                  className="w-20 border rounded px-2 py-1 text-sm text-right tabular-nums bg-background text-foreground"
+                                  className="mt-0.5 w-24 border rounded px-2 py-1.5 text-sm text-right tabular-nums bg-background text-foreground"
                                 />
-                                <Button
-                                  size="sm"
-                                  onClick={() => decideTimeEntry(t, "approved")}
-                                  disabled={busy}
-                                >
-                                  {busy ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : "Approve"}
-                                </Button>
-                                <Button
-                                  variant="outline"
-                                  size="sm"
-                                  onClick={() => decideTimeEntry(t, "rejected")}
-                                  disabled={busy}
-                                >
-                                  Reject
-                                </Button>
-                                <Button
-                                  variant="ghost"
-                                  size="sm"
-                                  onClick={() => startEditTimes(t)}
-                                  disabled={busy}
-                                >
-                                  <Pencil className="w-3.5 h-3.5 mr-1" />Edit times
-                                </Button>
-                              </div>
-                            ) : (
-                              <div className="flex items-center justify-end gap-2 text-xs text-muted-foreground">
-                                <span>{!clockedOut ? "—" : status === "approved" ? "Approved" : status === "rejected" ? "Rejected" : "—"}</span>
-                                <Button
-                                  variant="ghost"
-                                  size="sm"
-                                  onClick={() => startEditTimes(t)}
-                                >
-                                  <Pencil className="w-3.5 h-3.5 mr-1" />Edit times
-                                </Button>
-                              </div>
-                            )}
-                          </td>
-                        )}
-                      </tr>
-                      );
-                    })}
-                  </tbody>
-                </table>
-                </div>
-              </>
+                              </label>
+                              <Button
+                                size="sm"
+                                className="flex-1 min-w-[5rem]"
+                                onClick={() => decideTimeEntry(t, "approved")}
+                                disabled={busy}
+                              >
+                                {busy ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : "Approve"}
+                              </Button>
+                              <Button
+                                variant="outline"
+                                size="sm"
+                                className="flex-1 min-w-[5rem]"
+                                onClick={() => decideTimeEntry(t, "rejected")}
+                                disabled={busy}
+                              >
+                                Reject
+                              </Button>
+                            </>
+                          );
+                        },
+                      } as ResponsiveColumn<TimeEntryRow>]
+                    : []),
+                ]}
+              />
             )}
           </section>
 
@@ -1395,56 +1368,55 @@ export function SiteDetailPage() {
               <div className="text-sm text-muted-foreground border rounded p-4">
                 No subcontractor time entries for this site in the selected date range.
               </div>
-            ) : isMobile ? (
-              <div className="space-y-3">
-                {subEntries.map((s) => (
-                  <div key={s.id} className="border rounded-lg p-3 space-y-2">
-                    <div className="flex items-start justify-between gap-2">
-                      <span className="font-medium">{s.name?.trim() || "—"}</span>
+            ) : (
+              <ResponsiveTable
+                data={subEntries}
+                getRowKey={(s) => s.id}
+                columns={[
+                  {
+                    id: "name",
+                    header: "Name",
+                    mobile: "title",
+                    cell: (s) => s.name?.trim() || "—",
+                  },
+                  {
+                    id: "company",
+                    header: "Company",
+                    cell: (s) => s.company?.trim() || "—",
+                  },
+                  {
+                    id: "badge",
+                    header: "Badge",
+                    tdClassName: "text-muted-foreground",
+                    cell: (s) => s.badgeId?.trim() || "—",
+                  },
+                  {
+                    id: "clockIn",
+                    header: "Clock in",
+                    tdClassName: "text-muted-foreground",
+                    cell: (s) => (s.clockInAt ? fmt(s.clockInAt) : "—"),
+                  },
+                  {
+                    id: "clockOut",
+                    header: "Clock out",
+                    tdClassName: "text-muted-foreground",
+                    cell: (s) => (s.clockOutAt ? fmt(s.clockOutAt) : <span className="text-amber-600">In progress</span>),
+                  },
+                  {
+                    id: "hours",
+                    header: "Hours",
+                    align: "right",
+                    mobile: "meta",
+                    tdClassName: "tabular-nums",
+                    cell: (s) => (s.hoursWorked != null ? Number(s.hoursWorked).toFixed(2) : "—"),
+                    mobileCell: (s) => (
                       <span className="text-right tabular-nums text-sm">
                         {s.hoursWorked != null ? `${Number(s.hoursWorked).toFixed(2)} hrs` : "—"}
                       </span>
-                    </div>
-                    <div className="grid grid-cols-2 gap-x-3 gap-y-1 text-sm">
-                      <span className="text-muted-foreground">Company</span>
-                      <span className="text-right">{s.company?.trim() || "—"}</span>
-                      <span className="text-muted-foreground">Badge</span>
-                      <span className="text-right">{s.badgeId?.trim() || "—"}</span>
-                      <span className="text-muted-foreground">Clock in</span>
-                      <span className="text-right">{s.clockInAt ? fmt(s.clockInAt) : "—"}</span>
-                      <span className="text-muted-foreground">Clock out</span>
-                      <span className="text-right">{s.clockOutAt ? fmt(s.clockOutAt) : <span className="text-amber-600">In progress</span>}</span>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            ) : (
-              <div className="border rounded overflow-x-auto">
-                <table className="w-full text-sm">
-                  <thead className="bg-muted/50">
-                    <tr>
-                      <th className="text-left px-3 py-2 font-medium">Name</th>
-                      <th className="text-left px-3 py-2 font-medium">Company</th>
-                      <th className="text-left px-3 py-2 font-medium">Badge</th>
-                      <th className="text-left px-3 py-2 font-medium">Clock in</th>
-                      <th className="text-left px-3 py-2 font-medium">Clock out</th>
-                      <th className="text-right px-3 py-2 font-medium">Hours</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {subEntries.map((s) => (
-                      <tr key={s.id} className="border-t">
-                        <td className="px-3 py-2">{s.name?.trim() || "—"}</td>
-                        <td className="px-3 py-2">{s.company?.trim() || "—"}</td>
-                        <td className="px-3 py-2 text-muted-foreground">{s.badgeId?.trim() || "—"}</td>
-                        <td className="px-3 py-2 text-muted-foreground">{s.clockInAt ? fmt(s.clockInAt) : "—"}</td>
-                        <td className="px-3 py-2 text-muted-foreground">{s.clockOutAt ? fmt(s.clockOutAt) : <span className="text-amber-600">In progress</span>}</td>
-                        <td className="px-3 py-2 text-right tabular-nums">{s.hoursWorked != null ? Number(s.hoursWorked).toFixed(2) : "—"}</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
+                    ),
+                  },
+                ]}
+              />
             )}
           </section>
         </div>
@@ -1492,7 +1464,6 @@ const LEVEL_OPTIONS: { value: number; name: string }[] = [
 ];
 
 function SiteRateCard({ siteId }: { siteId: string }) {
-  const isMobile = useIsMobile();
   const [rows, setRows] = useState<SiteRateRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [err, setErr] = useState<string | null>(null);
@@ -1604,63 +1575,70 @@ function SiteRateCard({ siteId }: { siteId: string }) {
         <div className="text-sm text-muted-foreground border rounded p-4">
           No rates configured yet. Add the first license-level rate below — shifts at this site will pick it up automatically.
         </div>
-      ) : isMobile ? (
-        <div className="space-y-3 mb-3">
-          {rows.map((r) => (
-            <div key={r.id} className="border rounded-lg p-3 space-y-2">
-              <div className="flex items-start justify-between gap-2">
-                <span className="font-medium">{LEVEL_OPTIONS.find((o) => o.value === r.licenseLevel)?.name ?? `L${r.licenseLevel}`}</span>
-                <span className="text-sm text-muted-foreground text-right">{r.label ?? "—"}</span>
-              </div>
-              <div className="grid grid-cols-2 gap-x-3 gap-y-1 text-sm">
-                <span className="text-muted-foreground">Pay $/hr</span>
-                <span className="text-right font-mono">${parseFloat(r.payRate).toFixed(2)}</span>
-                <span className="text-muted-foreground">Bill $/hr</span>
-                <span className="text-right font-mono">${parseFloat(r.billRate).toFixed(2)}</span>
-              </div>
-              <div className="flex flex-wrap items-center gap-2 pt-1 border-t mt-1">
-                <Button variant="outline" size="sm" className="flex-1 min-w-[5rem]" onClick={() => editExisting(r)}>
-                  <Pencil className="w-3.5 h-3.5 mr-1" /> Edit
-                </Button>
-                <Button variant="outline" size="sm" className="flex-1 min-w-[5rem]" onClick={() => removeRow(r)}>
-                  <Trash2 className="w-3.5 h-3.5 text-destructive mr-1" /> Remove
-                </Button>
-              </div>
-            </div>
-          ))}
-        </div>
       ) : (
-        <div className="border rounded overflow-x-auto mb-3">
-          <table className="w-full text-sm">
-            <thead className="bg-muted/50">
-              <tr>
-                <th className="text-left px-3 py-2 font-medium">License level</th>
-                <th className="text-left px-3 py-2 font-medium">Label</th>
-                <th className="text-right px-3 py-2 font-medium">Pay $/hr</th>
-                <th className="text-right px-3 py-2 font-medium">Bill $/hr</th>
-                <th className="text-right px-3 py-2 font-medium">Actions</th>
-              </tr>
-            </thead>
-            <tbody>
-              {rows.map((r) => (
-                <tr key={r.id} className="border-t">
-                  <td className="px-3 py-2">{LEVEL_OPTIONS.find((o) => o.value === r.licenseLevel)?.name ?? `L${r.licenseLevel}`}</td>
-                  <td className="px-3 py-2 text-muted-foreground">{r.label ?? <span className="text-muted-foreground/60">—</span>}</td>
-                  <td className="px-3 py-2 text-right font-mono">${parseFloat(r.payRate).toFixed(2)}</td>
-                  <td className="px-3 py-2 text-right font-mono">${parseFloat(r.billRate).toFixed(2)}</td>
-                  <td className="px-3 py-2 text-right">
-                    <Button variant="ghost" size="sm" onClick={() => editExisting(r)}>
-                      <Pencil className="w-3.5 h-3.5" />
-                    </Button>
-                    <Button variant="ghost" size="sm" onClick={() => removeRow(r)}>
-                      <Trash2 className="w-3.5 h-3.5 text-destructive" />
-                    </Button>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
+        <ResponsiveTable
+          data={rows}
+          getRowKey={(r) => r.id}
+          className="mb-3"
+          columns={[
+            {
+              id: "level",
+              header: "License level",
+              mobile: "title",
+              cell: (r) => LEVEL_OPTIONS.find((o) => o.value === r.licenseLevel)?.name ?? `L${r.licenseLevel}`,
+            },
+            {
+              id: "label",
+              header: "Label",
+              mobile: "meta",
+              tdClassName: "text-muted-foreground",
+              cell: (r) => r.label ?? <span className="text-muted-foreground/60">—</span>,
+              mobileCell: (r) => <span className="text-sm text-muted-foreground text-right">{r.label ?? "—"}</span>,
+            },
+            {
+              id: "pay",
+              header: "Pay $/hr",
+              align: "right",
+              tdClassName: "font-mono",
+              mobileValueClassName: "font-mono",
+              cell: (r) => `$${parseFloat(r.payRate).toFixed(2)}`,
+            },
+            {
+              id: "bill",
+              header: "Bill $/hr",
+              align: "right",
+              tdClassName: "font-mono",
+              mobileValueClassName: "font-mono",
+              cell: (r) => `$${parseFloat(r.billRate).toFixed(2)}`,
+            },
+            {
+              id: "actions",
+              header: "Actions",
+              align: "right",
+              mobile: "actions",
+              cell: (r) => (
+                <>
+                  <Button variant="ghost" size="sm" onClick={() => editExisting(r)}>
+                    <Pencil className="w-3.5 h-3.5" />
+                  </Button>
+                  <Button variant="ghost" size="sm" onClick={() => removeRow(r)}>
+                    <Trash2 className="w-3.5 h-3.5 text-destructive" />
+                  </Button>
+                </>
+              ),
+              mobileCell: (r) => (
+                <>
+                  <Button variant="outline" size="sm" className="flex-1 min-w-[5rem]" onClick={() => editExisting(r)}>
+                    <Pencil className="w-3.5 h-3.5 mr-1" /> Edit
+                  </Button>
+                  <Button variant="outline" size="sm" className="flex-1 min-w-[5rem]" onClick={() => removeRow(r)}>
+                    <Trash2 className="w-3.5 h-3.5 text-destructive mr-1" /> Remove
+                  </Button>
+                </>
+              ),
+            },
+          ]}
+        />
       )}
 
       <div className="border rounded p-3 bg-brand-cream/20">
