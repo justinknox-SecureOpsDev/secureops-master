@@ -7,6 +7,7 @@ import {
 } from "@/components/ui/dialog";
 import { UserPlus, Loader2, Copy, ExternalLink, Search } from "lucide-react";
 import { openSignedObject } from "@/lib/upload";
+import { useIsMobile } from "@/hooks/use-mobile";
 
 type Item = {
   employeeId: string;
@@ -46,6 +47,7 @@ export function OnboardingPage() {
   const [search, setSearch] = useState("");
   const [openId, setOpenId] = useState<string | null>(null);
   const [resend, setResend] = useState<ResendResp | null>(null);
+  const isMobile = useIsMobile();
 
   async function refresh() {
     setLoading(true); setError(null);
@@ -102,7 +104,34 @@ export function OnboardingPage() {
         </div>
       </div>
       {error && <div role="alert" className="text-sm text-destructive bg-destructive/5 p-2 rounded border border-destructive/20">{error}</div>}
+      {isMobile ? (
+        <div className="space-y-3">
+          {loading && (<div className="bg-card rounded-lg border px-3 py-10 text-center text-muted-foreground"><Loader2 className="w-5 h-5 inline-block animate-spin" /></div>)}
+          {!loading && items.length === 0 && (<div className="bg-card rounded-lg border px-3 py-10 text-center text-muted-foreground">No onboarding records yet.</div>)}
+          {!loading && items.length > 0 && filtered.length === 0 && (<div className="bg-card rounded-lg border px-3 py-10 text-center text-muted-foreground">No matches for “{search}”.</div>)}
+          {filtered.map((i) => (
+            <div key={i.employeeId} className="bg-card rounded-lg border p-3 space-y-2">
+              <div className="flex items-start justify-between gap-2">
+                <span className="font-medium">{i.firstName} {i.lastName}</span>
+                <span className={`inline-block px-2 py-0.5 text-[11px] uppercase rounded border ${STATUS_STYLES[i.status]}`}>{i.status}</span>
+              </div>
+              <div className="grid grid-cols-3 gap-x-3 gap-y-1 text-sm">
+                <span className="text-muted-foreground text-xs">Email</span>
+                <span className="col-span-2 text-right break-all">{i.email}</span>
+                <span className="text-muted-foreground text-xs">Token expires</span>
+                <span className="col-span-2 text-right text-muted-foreground">{i.tokenExpiresAt ? new Date(i.tokenExpiresAt).toLocaleString() : "—"}</span>
+                <span className="text-muted-foreground text-xs">Submitted</span>
+                <span className="col-span-2 text-right text-muted-foreground">{i.submittedAt ? new Date(i.submittedAt).toLocaleString() : "—"}</span>
+              </div>
+              <div className="pt-1 border-t">
+                <Button size="sm" variant="outline" className="w-full" onClick={() => setOpenId(i.employeeId)}>View</Button>
+              </div>
+            </div>
+          ))}
+        </div>
+      ) : (
       <div className="bg-card rounded-lg border overflow-hidden">
+        <div className="overflow-x-auto" tabIndex={0} role="region" aria-label="Onboarding records table">
         <table className="w-full text-sm">
           <thead className="bg-muted/50 text-xs uppercase tracking-wide">
             <tr>
@@ -134,7 +163,9 @@ export function OnboardingPage() {
             ))}
           </tbody>
         </table>
+        </div>
       </div>
+      )}
 
       {opened && (
         <DetailDialog

@@ -3,6 +3,7 @@ import { ChevronLeft, ChevronRight, RefreshCw, Filter, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { fetchWithAuth } from "@/lib/api";
+import { useIsMobile } from "@/hooks/use-mobile";
 
 type AuditLog = {
   id: string;
@@ -66,6 +67,7 @@ export default function AuditLogPage() {
   const [actorEmailFilter, setActorEmailFilter] = useState("");
   const [tableFilter, setTableFilter] = useState("");
   const [expandedId, setExpandedId] = useState<string | null>(null);
+  const isMobile = useIsMobile();
 
   const load = async () => {
     setLoading(true);
@@ -165,7 +167,78 @@ export default function AuditLogPage() {
           </div>
         )}
 
+        {isMobile ? (
+          <div className="space-y-3">
+            {loading && (
+              <div className="border border-border rounded-md bg-card px-3 py-8 text-center text-muted-foreground text-xs">Loading…</div>
+            )}
+            {!loading && filteredRows.length === 0 && (
+              <div className="border border-border rounded-md bg-card px-3 py-8 text-center text-muted-foreground text-xs">No entries match the current filters.</div>
+            )}
+            {!loading && filteredRows.map((r) => {
+              const isOpen = expandedId === r.id;
+              return (
+                <div key={r.id} className="border border-border rounded-lg bg-card overflow-hidden">
+                  <button
+                    type="button"
+                    onClick={() => setExpandedId(isOpen ? null : r.id)}
+                    className="w-full text-left p-3 space-y-2 hover:bg-muted/30"
+                  >
+                    <div className="flex items-start justify-between gap-2">
+                      <span className="text-xs font-mono bg-muted px-1.5 py-0.5 rounded">{r.action}</span>
+                      <span className="text-xs text-right">{r.statusCode ?? "—"}</span>
+                    </div>
+                    <div className="grid grid-cols-3 gap-x-3 gap-y-1 text-sm">
+                      <span className="text-muted-foreground text-xs">When</span>
+                      <span className="col-span-2 text-right text-xs text-muted-foreground">{new Date(r.createdAt).toLocaleString()}</span>
+                      <span className="text-muted-foreground text-xs">Actor</span>
+                      <span className="col-span-2 text-right">
+                        <span className="font-medium">{r.actorEmail ?? "(anonymous)"}</span>
+                        {r.actorRole && <span className="text-[10px] uppercase opacity-60 ml-1">{r.actorRole}</span>}
+                      </span>
+                      <span className="text-muted-foreground text-xs">Target</span>
+                      <span className="col-span-2 text-right text-xs">
+                        {r.targetTable ? (
+                          <>
+                            <span>{r.targetTable}</span>
+                            {r.targetId && <span className="font-mono opacity-60 ml-1 break-all">{r.targetId}</span>}
+                          </>
+                        ) : <span className="opacity-40">—</span>}
+                      </span>
+                      <span className="text-muted-foreground text-xs">Method</span>
+                      <span className="col-span-2 text-right">
+                        <span className={`text-[10px] font-semibold border rounded px-1.5 py-0.5 ${methodColor(r.method)}`}>{r.method}</span>
+                      </span>
+                      <span className="text-muted-foreground text-xs">Path</span>
+                      <span className="col-span-2 text-right text-xs font-mono opacity-70 break-all">{r.path}</span>
+                    </div>
+                  </button>
+                  {isOpen && (
+                    <div className="border-t border-border bg-muted/20 px-3 py-3 space-y-3 text-xs">
+                      <div>
+                        <div className="font-semibold mb-1">Request body (after)</div>
+                        <pre className="bg-background border border-border rounded p-2 overflow-auto max-h-64 text-[11px]">
+                          {r.after ? JSON.stringify(r.after, null, 2) : "(none)"}
+                        </pre>
+                      </div>
+                      <div>
+                        <div className="font-semibold mb-1">Context</div>
+                        <div className="space-y-0.5 text-[11px]">
+                          <div><span className="opacity-60">IP:</span> {r.ip ?? "—"}</div>
+                          <div><span className="opacity-60">User-Agent:</span> <span className="opacity-80 break-all">{r.userAgent ?? "—"}</span></div>
+                          <div><span className="opacity-60">Actor user ID:</span> <span className="font-mono break-all">{r.actorUserId ?? "—"}</span></div>
+                          <div><span className="opacity-60">Audit ID:</span> <span className="font-mono break-all">{r.id}</span></div>
+                        </div>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        ) : (
         <div className="border border-border rounded-md overflow-hidden bg-card">
+          <div className="overflow-x-auto" tabIndex={0} role="region" aria-label="Audit log table">
           <table className="w-full text-sm">
             <thead className="bg-muted/40 text-left text-xs uppercase tracking-wide text-muted-foreground">
               <tr>
@@ -248,7 +321,9 @@ export default function AuditLogPage() {
               })}
             </tbody>
           </table>
+          </div>
         </div>
+        )}
 
         <div className="flex items-center justify-end gap-2 mt-4">
           <Button

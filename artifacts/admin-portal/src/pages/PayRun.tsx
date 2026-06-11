@@ -4,6 +4,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { fetchWithAuth } from "@/lib/api";
+import { useIsMobile } from "@/hooks/use-mobile";
 
 type PayrollRow = {
   id: string;
@@ -113,6 +114,7 @@ export default function PayRunPage() {
     return { ids, mode };
   }, []);
 
+  const isMobile = useIsMobile();
   const [rows, setRows] = useState<PayrollRow[]>([]);
   const [loading, setLoading] = useState(true);
   // When a board handoff arrives we widen the filter so the preselected rows
@@ -504,6 +506,58 @@ export default function PayRunPage() {
                           Week net: <strong className="text-brand-navy">{fmtUsd(weekTotal)}</strong>
                         </div>
                       </div>
+                      {isMobile ? (
+                        <div className="divide-y">
+                          {weekRows.map((r) => {
+                            const pv = preview?.rows.find((p) => p.id === r.id);
+                            const hasWarn = pv && pv.warnings.length > 0;
+                            return (
+                              <div key={r.id} className={`p-3 space-y-2 ${hasWarn ? "bg-amber-50/40" : ""}`}>
+                                <div className="flex items-start gap-3">
+                                  <input type="checkbox" className="mt-1" aria-label={`Select payroll row for ${r.employeeName ?? r.employeeId.slice(0, 8)}`} checked={selected.has(r.id)} onChange={() => toggle(r.id)} />
+                                  <div className="flex-1 min-w-0">
+                                    <div className="flex items-start justify-between gap-2">
+                                      <span className="font-medium">{r.employeeName ?? r.employeeId.slice(0, 8)}</span>
+                                      <span className={`text-xs px-2 py-0.5 rounded shrink-0 ${
+                                        r.status === "paid" ? "bg-green-100 text-green-800" :
+                                        r.status === "processed" ? "bg-blue-100 text-blue-800" :
+                                        "bg-gray-100 text-gray-700"
+                                      }`}>{r.status}</span>
+                                    </div>
+                                    {pv && (
+                                      <div className="text-xs text-muted-foreground mt-0.5 break-words">
+                                        {pv.bankAccountName ?? "—"} · rt {pv.bankBsb ?? "—"} · acct {maskAccount(pv.bankAccountNumber)}
+                                        {hasWarn && (
+                                          <span className="ml-2 text-amber-700">⚠ {pv.warnings[0]}{pv.warnings.length > 1 ? ` (+${pv.warnings.length - 1})` : ""}</span>
+                                        )}
+                                      </div>
+                                    )}
+                                  </div>
+                                </div>
+                                <div className="grid grid-cols-4 gap-2 text-center text-sm pl-7">
+                                  <div>
+                                    <div className="text-[10px] uppercase tracking-wider text-muted-foreground">Hours</div>
+                                    <div>{Number(r.totalHours).toFixed(2)}</div>
+                                  </div>
+                                  <div>
+                                    <div className="text-[10px] uppercase tracking-wider text-muted-foreground">Rate</div>
+                                    <div>{fmtUsd(r.hourlyRate)}</div>
+                                  </div>
+                                  <div>
+                                    <div className="text-[10px] uppercase tracking-wider text-muted-foreground">Gross</div>
+                                    <div>{fmtUsd(r.grossPay)}</div>
+                                  </div>
+                                  <div>
+                                    <div className="text-[10px] uppercase tracking-wider text-muted-foreground">Net</div>
+                                    <div className="font-semibold">{fmtUsd(r.netPay)}</div>
+                                  </div>
+                                </div>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      ) : (
+                      <div className="overflow-x-auto" tabIndex={0} role="region" aria-label="Weekly payroll rows table">
                       <table className="w-full text-sm">
                         <thead className="text-left text-[10px] uppercase tracking-wider text-muted-foreground">
                           <tr>
@@ -552,6 +606,8 @@ export default function PayRunPage() {
                           })}
                         </tbody>
                       </table>
+                      </div>
+                      )}
                     </div>
                   );
                 })}

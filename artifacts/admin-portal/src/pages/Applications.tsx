@@ -10,6 +10,7 @@ import { ClipboardList, Search, Loader2, Copy, ExternalLink, MailCheck, MailWarn
 import { openSignedObject } from "@/lib/upload";
 import { AMENDMENT_FIELDS } from "@/lib/amendmentFields";
 import { useAuth } from "@/lib/auth";
+import { useIsMobile } from "@/hooks/use-mobile";
 
 type ApplicationStatus = "submitted" | "under_review" | "info_requested" | "awaiting_second_approval" | "approved" | "rejected";
 
@@ -166,6 +167,7 @@ export function ApplicationsPage() {
   const [batchResult, setBatchResult] = useState<BatchResult | null>(null);
   const [geoBackfillBusy, setGeoBackfillBusy] = useState(false);
   const [geoBackfillResult, setGeoBackfillResult] = useState<string | null>(null);
+  const isMobile = useIsMobile();
 
   async function refresh() {
     setLoading(true); setError(null);
@@ -374,7 +376,77 @@ export function ApplicationsPage() {
         </div>
       )}
 
+      {isMobile ? (
+        <div className="space-y-3">
+          {loading && (<div className="bg-card rounded-lg border px-3 py-10 text-center text-muted-foreground"><Loader2 className="w-5 h-5 inline-block animate-spin" /></div>)}
+          {!loading && items.length === 0 && (<div className="bg-card rounded-lg border px-3 py-10 text-center text-muted-foreground">No applications.</div>)}
+          {items.map((a) => {
+            const isEligible = a.status !== "approved" && a.status !== "rejected";
+            const badge = deliveryBadge(a);
+            const needsAttention = a.onboardingEmailStatus === "bounced" || a.onboardingEmailStatus === "failed";
+            return (
+              <div key={a.id} className={`bg-card rounded-lg border p-3 space-y-2 ${needsAttention ? "bg-rose-50/60" : ""}`}>
+                <div className="flex items-start gap-3">
+                  <input
+                    type="checkbox"
+                    className="mt-1"
+                    aria-label={`Select ${a.firstName} ${a.lastName}`}
+                    checked={selected.has(a.id)}
+                    onChange={() => toggleRow(a.id)}
+                    disabled={!isEligible}
+                    title={isEligible ? undefined : `Cannot request info on ${a.status} applications`}
+                  />
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-start justify-between gap-2">
+                      <span className="font-medium">{a.firstName} {a.lastName}</span>
+                      <span className={`inline-block px-2 py-0.5 text-[11px] uppercase rounded border shrink-0 ${STATUS_STYLES[a.status]}`}>
+                        {a.status.replaceAll("_", " ")}
+                      </span>
+                    </div>
+                  </div>
+                </div>
+                <div className="grid grid-cols-3 gap-x-3 gap-y-1 text-sm">
+                  <span className="text-muted-foreground text-xs">Email</span>
+                  <span className="col-span-2 text-right break-all">{a.email}</span>
+                  <span className="text-muted-foreground text-xs">Phone</span>
+                  <span className="col-span-2 text-right">{a.phone}</span>
+                  <span className="text-muted-foreground text-xs">City</span>
+                  <span className="col-span-2 text-right">{[a.city, a.state].filter(Boolean).join(", ") || "—"}</span>
+                  {distanceActive && (
+                    <>
+                      <span className="text-muted-foreground text-xs">Distance</span>
+                      <span className="col-span-2 text-right font-mono text-xs">{a.distanceMiles != null ? `${a.distanceMiles.toFixed(1)} mi` : "—"}</span>
+                    </>
+                  )}
+                  <span className="text-muted-foreground text-xs">TX Lic</span>
+                  <span className="col-span-2 text-right">{a.siaLicenseLevel ? `L${a.siaLicenseLevel}` : "—"}</span>
+                  <span className="text-muted-foreground text-xs">Submitted</span>
+                  <span className="col-span-2 text-right text-muted-foreground">{new Date(a.createdAt).toLocaleString()}</span>
+                  <span className="text-muted-foreground text-xs">Onboarding email</span>
+                  <span className="col-span-2 text-right">
+                    {badge ? (
+                      <span
+                        title={badge.tooltip}
+                        className={`inline-flex items-center gap-1 px-2 py-0.5 text-[11px] uppercase rounded border ${badge.className}`}
+                      >
+                        <badge.Icon className="w-3 h-3" />
+                        {badge.label}
+                      </span>
+                    ) : (
+                      <span className="text-xs text-muted-foreground">—</span>
+                    )}
+                  </span>
+                </div>
+                <div className="pt-1 border-t">
+                  <Button size="sm" variant="outline" className="w-full" onClick={() => setOpenId(a.id)}>Review</Button>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      ) : (
       <div className="bg-card rounded-lg border overflow-hidden">
+        <div className="overflow-x-auto" tabIndex={0} role="region" aria-label="Applications table">
         <table className="w-full text-sm">
           <thead className="bg-muted/50 text-xs uppercase tracking-wide">
             <tr>
@@ -456,7 +528,9 @@ export function ApplicationsPage() {
             })}
           </tbody>
         </table>
+        </div>
       </div>
+      )}
 
       {opened && (
         <ApplicationDialog
