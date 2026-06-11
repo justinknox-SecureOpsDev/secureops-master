@@ -9,10 +9,10 @@ import {
   sitesTable,
 } from "@workspace/db";
 import { brand } from "./brandConfig";
+import { drawBrandHeader } from "./pdfHeader";
 
 const NAVY = brand.colorNavy;
 const GOLD = brand.colorGold;
-const CREAM = brand.colorCream;
 const MUTED = "#666666";
 const TEXT = "#1a1a1a";
 
@@ -74,20 +74,13 @@ export async function buildDarPdf(darId: string, opts: DarPdfOptions = {}): Prom
 
   const doc = new PDFDocument({ size: "LETTER", margin: 56, bufferPages: true });
 
-  // Header bar.
-  doc.rect(0, 0, doc.page.width, 80).fill(NAVY);
-  doc.fillColor(GOLD)
-    .font("Helvetica-Bold").fontSize(20)
-    .text(brand.companyName, 56, 22);
-  doc.fillColor(CREAM)
-    .font("Helvetica").fontSize(10)
-    .text("Daily Activity Report", 56, 50);
-  doc.rect(0, 80, doc.page.width, 3).fill(GOLD);
+  // Header bar — logo badge above the company name.
+  const top = drawBrandHeader(doc, "Daily Activity Report") + 22;
 
   // Title row.
   doc.fillColor(TEXT).font("Helvetica-Bold").fontSize(18)
-    .text(`Activity Report — ${row.reportDate}`, 56, 110, { width: 480 });
-  doc.y = Math.max(doc.y, 138);
+    .text(`Activity Report — ${row.reportDate}`, 56, top, { width: 480 });
+  doc.y = Math.max(doc.y, top + 28);
   doc.moveDown(0.5);
 
   // Metadata.

@@ -11,13 +11,13 @@ import {
 import { logger } from "./logger";
 import { ObjectStorageService } from "./objectStorage";
 import { brand } from "./brandConfig";
+import { drawBrandHeader } from "./pdfHeader";
 
 const objectStorage = new ObjectStorageService();
 
 // Brand colors read from env so each client deployment gets its own palette.
 const NAVY = brand.colorNavy;
 const GOLD = brand.colorGold;
-const CREAM = brand.colorCream;
 const MUTED = "#666666";
 const TEXT = "#1a1a1a";
 
@@ -127,29 +127,20 @@ export async function buildIncidentReportPdf(
     },
   });
 
-  // Header band — navy + gold rule.
-  doc.rect(0, 0, doc.page.width, 80).fill(NAVY);
-  doc.fillColor(GOLD)
-    .font("Helvetica-Bold").fontSize(20)
-    .text(brand.companyName, 56, 22);
-  doc.fillColor(CREAM)
-    .font("Helvetica").fontSize(10)
-    .text("Confidential Incident Report", 56, 50);
-  doc.rect(0, 80, doc.page.width, 3).fill(GOLD);
-  doc.moveDown(2);
-  doc.y = 110;
+  // Header band — navy + gold rule, logo badge above the company name.
+  const top = drawBrandHeader(doc, "Confidential Incident Report") + 22;
 
   // Title row + severity pill.
-  doc.fillColor(TEXT).font("Helvetica-Bold").fontSize(18).text(row.title, 56, 110, { width: 380 });
+  doc.fillColor(TEXT).font("Helvetica-Bold").fontSize(18).text(row.title, 56, top, { width: 380 });
   const sevColor = SEVERITY_COLOR[row.severity] ?? MUTED;
   const pillX = doc.page.width - 56 - 110;
-  doc.roundedRect(pillX, 110, 110, 26, 4).fill(sevColor);
+  doc.roundedRect(pillX, top, 110, 26, 4).fill(sevColor);
   doc.fillColor("white").font("Helvetica-Bold").fontSize(10)
-    .text(row.severity.toUpperCase(), pillX, 117, { width: 110, align: "center" });
+    .text(row.severity.toUpperCase(), pillX, top + 7, { width: 110, align: "center" });
   doc.fillColor(MUTED).font("Helvetica").fontSize(9)
-    .text(`Status: ${row.status}`, pillX, 140, { width: 110, align: "center" });
+    .text(`Status: ${row.status}`, pillX, top + 30, { width: 110, align: "center" });
 
-  doc.y = Math.max(doc.y, 160);
+  doc.y = Math.max(doc.y, top + 50);
   doc.moveDown(0.5);
 
   // Metadata block — two columns.

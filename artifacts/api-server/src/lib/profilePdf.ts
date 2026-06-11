@@ -11,13 +11,13 @@ import { logger } from "./logger";
 import { ObjectStorageService } from "./objectStorage";
 import type { EmployeeShareVisibleSections } from "@workspace/db";
 import { brand } from "./brandConfig";
+import { drawBrandHeader } from "./pdfHeader";
 
 const objectStorage = new ObjectStorageService();
 
 // Brand tokens — driven by env vars so each client deployment has its own palette.
 const NAVY = brand.colorNavy;
 const GOLD = brand.colorGold;
-const CREAM = brand.colorCream;
 const MUTED = "#666666";
 const TEXT = "#1a1a1a";
 
@@ -210,18 +210,11 @@ export async function buildEmployeeProfilePdf(
     },
   });
 
-  // Header band.
-  doc.rect(0, 0, doc.page.width, 80).fill(NAVY);
-  doc.fillColor(GOLD)
-    .font("Helvetica-Bold").fontSize(20)
-    .text(brand.companyName, 56, 22);
-  doc.fillColor(CREAM)
-    .font("Helvetica").fontSize(10)
-    .text("Confidential Officer Profile", 56, 50);
-  doc.rect(0, 80, doc.page.width, 3).fill(GOLD);
+  // Header band — logo badge above the company name.
+  const headerBottom = drawBrandHeader(doc, "Confidential Officer Profile");
 
   // Hero: name + photo + role badge.
-  doc.y = 100;
+  doc.y = headerBottom + 18;
   const heroTop = doc.y;
   const photoX = doc.page.width - 56 - 110;
   const photoY = heroTop;

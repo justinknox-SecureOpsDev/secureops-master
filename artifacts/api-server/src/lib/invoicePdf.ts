@@ -1,6 +1,7 @@
 import PDFDocument from "pdfkit";
 import type { Readable } from "node:stream";
 import { brand } from "./brandConfig";
+import { drawBrandHeader } from "./pdfHeader";
 
 const NAVY  = brand.colorNavy;
 const GOLD  = brand.colorGold;
@@ -72,22 +73,17 @@ export function buildInvoicePdf(inv: InvoicePdfInput): InvoicePdfPayload {
 
   const W = doc.page.width;
 
-  // ── Header band ──────────────────────────────────────────────────────────
-  doc.rect(0, 0, W, 80).fill(NAVY);
-  doc.fillColor(GOLD).font("Helvetica-Bold").fontSize(20)
-    .text(brand.companyName, 56, 22, { characterSpacing: 0.2 });
-  doc.fillColor(CREAM).font("Helvetica").fontSize(9)
-    .text(`${brand.tagline}  ·  Invoice`, 56, 50);
-  doc.rect(0, 80, W, 3).fill(GOLD);
+  // ── Header band — logo badge above the company name ───────────────────────
+  const top = drawBrandHeader(doc, `${brand.tagline}  ·  Invoice`);
 
-  doc.y = 100;
+  doc.y = top;
 
   // ── Invoice header: number + dates ────────────────────────────────────────
   const colL = 56;
   const colR = W / 2 + 20;
 
   // Left: Bill To
-  let y = 106;
+  let y = top + 6;
   doc.fillColor(MUTED).font("Helvetica-Bold").fontSize(8)
     .text("BILL TO", colL, y, { characterSpacing: 0.8 });
   y += 13;
@@ -111,7 +107,7 @@ export function buildInvoicePdf(inv: InvoicePdfInput): InvoicePdfPayload {
   }
 
   // Right: invoice meta box
-  const boxY = 100;
+  const boxY = top + 6;
   const boxW = 200;
   const boxX = W - 56 - boxW;
   doc.rect(boxX, boxY, boxW, 96).fill(LIGHT);
