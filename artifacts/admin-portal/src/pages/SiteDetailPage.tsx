@@ -335,6 +335,41 @@ export function SiteDetailPage() {
     }
   }, [siteId, teFrom, teTo]);
 
+  // Roll-up summary for the time-entries list, recomputed whenever the rows
+  // change. The From/To filter reloads `timeEntries`, so this tracks the range.
+  const timeEntriesSummary = useMemo(() => {
+    let totalHours = 0;
+    let approvedHours = 0;
+    let pendingCount = 0;
+    let approvedCount = 0;
+    let rejectedCount = 0;
+    const officers = new Set<string>();
+    for (const t of timeEntries) {
+      const h = t.hoursWorked != null ? Number(t.hoursWorked) : 0;
+      const hours = Number.isFinite(h) ? h : 0;
+      totalHours += hours;
+      const officer = t.employeeName?.trim();
+      if (officer) officers.add(officer);
+      if (t.approvalStatus === "approved") {
+        approvedCount += 1;
+        approvedHours += hours;
+      } else if (t.approvalStatus === "rejected") {
+        rejectedCount += 1;
+      } else {
+        pendingCount += 1;
+      }
+    }
+    return {
+      count: timeEntries.length,
+      headcount: officers.size,
+      totalHours,
+      approvedHours,
+      pendingCount,
+      approvedCount,
+      rejectedCount,
+    };
+  }, [timeEntries]);
+
   async function exportTimeEntriesCsv() {
     if (!siteId) return;
     setTeExporting(true);
@@ -919,7 +954,51 @@ export function SiteDetailPage() {
                 No time entries for this site in the selected date range.
               </div>
             ) : (
-              <div className="border rounded overflow-hidden">
+              <>
+                <div className="flex flex-wrap items-stretch gap-2 mb-3">
+                  <div className="border rounded px-3 py-2 bg-muted/30">
+                    <div className="text-xs text-muted-foreground">Total hours</div>
+                    <div className="text-lg font-semibold tabular-nums">
+                      {timeEntriesSummary.totalHours.toFixed(2)}
+                    </div>
+                  </div>
+                  <div className="border rounded px-3 py-2 bg-muted/30">
+                    <div className="text-xs text-muted-foreground">Entries</div>
+                    <div className="text-lg font-semibold tabular-nums">
+                      {timeEntriesSummary.count}
+                    </div>
+                  </div>
+                  <div className="border rounded px-3 py-2 bg-muted/30">
+                    <div className="text-xs text-muted-foreground">Officers</div>
+                    <div className="text-lg font-semibold tabular-nums">
+                      {timeEntriesSummary.headcount}
+                    </div>
+                  </div>
+                  <div className="border rounded px-3 py-2 bg-muted/30">
+                    <div className="text-xs text-muted-foreground">Approved</div>
+                    <div className="text-lg font-semibold tabular-nums text-emerald-600">
+                      {timeEntriesSummary.approvedCount}
+                      <span className="text-xs font-normal text-muted-foreground ml-1">
+                        ({timeEntriesSummary.approvedHours.toFixed(2)} hrs)
+                      </span>
+                    </div>
+                  </div>
+                  <div className="border rounded px-3 py-2 bg-muted/30">
+                    <div className="text-xs text-muted-foreground">Pending</div>
+                    <div className="text-lg font-semibold tabular-nums text-amber-600">
+                      {timeEntriesSummary.pendingCount}
+                    </div>
+                  </div>
+                  {timeEntriesSummary.rejectedCount > 0 && (
+                    <div className="border rounded px-3 py-2 bg-muted/30">
+                      <div className="text-xs text-muted-foreground">Rejected</div>
+                      <div className="text-lg font-semibold tabular-nums text-destructive">
+                        {timeEntriesSummary.rejectedCount}
+                      </div>
+                    </div>
+                  )}
+                </div>
+                <div className="border rounded overflow-hidden">
                 <table className="w-full text-sm">
                   <thead className="bg-muted/50">
                     <tr>
@@ -1006,7 +1085,8 @@ export function SiteDetailPage() {
                     })}
                   </tbody>
                 </table>
-              </div>
+                </div>
+              </>
             )}
           </section>
 
