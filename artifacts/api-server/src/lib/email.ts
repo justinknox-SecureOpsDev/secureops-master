@@ -91,8 +91,13 @@ export interface EmailMessage {
  *                          schema columns are nonetheless designed so a webhook
  *                          handler can flip the row to "bounced" later.
  *     - "failed"         — transport threw (network/auth/timeout).
+ *     - "suppressed"     — non-production environment; nothing was sent on purpose
+ *                          (see `emailSendingEnabled`). `ok` is true so scheduled
+ *                          jobs treat the reminder as handled and don't roll back /
+ *                          retry every tick, but the status records that no mail
+ *                          actually left the building.
  */
-export type EmailSendStatus = "not_configured" | "sent" | "bounced" | "failed";
+export type EmailSendStatus = "not_configured" | "sent" | "bounced" | "failed" | "suppressed";
 
 export interface EmailSendResult {
   status: EmailSendStatus;
@@ -178,7 +183,28 @@ async function sendViaSmtp(msg: EmailMessage): Promise<EmailSendResult | null> {
   }
 }
 
+/**
+ * Outbound email is only actually delivered in production. In any non-production
+ * environment (the Replit dev workspace, preview deploys, etc.) the send is
+ * suppressed and logged instead — otherwise every server restart, scheduled job,
+ * or code path exercised during development would flood the real admin/HR inboxes
+ * with live mail. Set EMAIL_DEV_SEND=true to force real delivery in dev when
+ * deliberately testing the email pipeline.
+ */
+function emailSendingEnabled(): boolean {
+  if (process.env.NODE_ENV === "production") return true;
+  return (process.env.EMAIL_DEV_SEND ?? "").trim().toLowerCase() === "true";
+}
+
 export async function sendEmailDetailed(msg: EmailMessage): Promise<EmailSendResult> {
+  if (!emailSendingEnabled()) {
+    logger.info(
+      { to: msg.to, subject: msg.subject },
+      "Email suppressed (non-production environment). Set EMAIL_DEV_SEND=true to send.",
+    );
+    return { status: "suppressed", ok: true, messageId: null, response: "suppressed:non-production", rejected: [], error: null };
+  }
+
   const pref = emailProviderPref();
   const order: Array<"smtp" | "resend"> =
     pref === "smtp" ? ["smtp", "resend"] : pref === "resend" ? ["resend"] : ["resend", "smtp"];

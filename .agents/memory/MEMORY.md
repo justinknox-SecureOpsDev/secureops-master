@@ -47,3 +47,4 @@
 - [a11y gate Onboard-form flake](a11y-onboard-form-flake.md) — a11y gate can fail on the public /onboard/:token form (Onboard.tsx) for env reasons; if that's the only failure & you didn't touch it, it's a pre-existing flake.
 - [admin-portal mustChangePassword gate](admin-portal-mustchangepassword-gate.md) — temp-pw/client users hit 403 on every non-/auth route until rotated; portal must gate behind a first-login change screen (raw fetch, not api()).
 - [PDF brand header & embedded assets](pdf-brand-header.md) — all 4 api-server PDFs share one drawBrandHeader; binary assets must be base64-embedded (esbuild bundles away fs paths); band-height changes need a hard-coded-Y audit (invoice boxY trap).
+- [Dev/test email suppression](dev-email-suppression.md) — sendEmailDetailed only sends in production (dev/test suppressed; EMAIL_DEV_SEND=true overrides); dev secrets ARE the prod mail account, so dev sends flooded real inboxes.
