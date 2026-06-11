@@ -4,6 +4,7 @@ import { Link, useRoute, useLocation } from "wouter";
 import { ArrowLeft, MapPin, Pencil, Plus, Trash2, QrCode, AlertTriangle, Radius, RefreshCw, Printer, Loader2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { api, fetchWithAuth } from "@/lib/api";
+import { useAuth } from "@/lib/auth";
 import { useFkOptions } from "@/lib/fk";
 import { getTable } from "@/lib/tables";
 import { RowFormDialog } from "@/components/RowFormDialog";
@@ -45,6 +46,8 @@ type TimeEntryRow = {
   clockOutTime: string | null;
   hoursWorked: string | null;
   approvalStatus: string | null;
+  correctionRequested?: boolean | null;
+  correctionNote?: string | null;
 };
 
 type SubEntryRow = {
@@ -256,6 +259,13 @@ export function SiteDetailPage() {
   });
   const [teTo, setTeTo] = useState<string>(() => ymd(new Date()));
   const [teExporting, setTeExporting] = useState(false);
+  // Inline approve/reject: which row is mid-action, per-row hours overrides
+  // (mirrors the mobile time-approval screen), and any action error.
+  const { user } = useAuth();
+  const isAdmin = user?.role === "admin";
+  const [teActioningId, setTeActioningId] = useState<string | null>(null);
+  const [teHoursEdits, setTeHoursEdits] = useState<Record<string, string>>({});
+  const [teActionError, setTeActionError] = useState<string | null>(null);
 
   // Subcontractor (QR-based) time entries for this site. Reuses the same
   // From/To date range as the officer time-entries list above.
@@ -363,6 +373,39 @@ export function SiteDetailPage() {
       setTeError((e as Error).message);
     } finally {
       setTeExporting(false);
+    }
+  }
+
+  // Admin-only: approve/reject a single time entry inline, reusing
+  // POST /time-entries/:id/approve. On approve we may pass an edited
+  // hours override (mirrors the mobile time-approval screen); on reject
+  // we leave hours untouched. The list re-fetches so the new status shows.
+  async function decideTimeEntry(t: TimeEntryRow, decision: "approved" | "rejected") {
+    if (!t.clockOutTime) {
+      setTeActionError("This entry is still in progress — wait until the officer clocks out before approving or rejecting it.");
+      return;
+    }
+    setTeActionError(null);
+    setTeActioningId(t.id);
+    try {
+      const body: { decision: "approved" | "rejected"; hoursWorked?: number } = { decision };
+      if (decision === "approved") {
+        const raw = teHoursEdits[t.id];
+        const hours = raw != null && raw !== "" ? parseFloat(raw) : (t.hoursWorked != null ? parseFloat(t.hoursWorked) : NaN);
+        if (!Number.isFinite(hours) || hours <= 0) {
+          setTeActionError("Enter a positive number of hours before approving.");
+          setTeActioningId(null);
+          return;
+        }
+        body.hoursWorked = hours;
+      }
+      await api(`/time-entries/${t.id}/approve`, { method: "POST", body });
+      setTeHoursEdits((e) => { const n = { ...e }; delete n[t.id]; return n; });
+      await loadTimeEntries();
+    } catch (e) {
+      setTeActionError((e as Error).message);
+    } finally {
+      setTeActioningId(null);
     }
   }
 
@@ -863,6 +906,12 @@ export function SiteDetailPage() {
               </div>
             )}
 
+            {teActionError && (
+              <div className="text-sm text-destructive border border-destructive/40 rounded p-3 mb-3">
+                {teActionError}
+              </div>
+            )}
+
             {teLoading ? (
               <div className="text-sm text-muted-foreground">Loading…</div>
             ) : timeEntries.length === 0 ? (
@@ -879,11 +928,18 @@ export function SiteDetailPage() {
                       <th className="text-left px-3 py-2 font-medium">Clock out</th>
                       <th className="text-right px-3 py-2 font-medium">Hours</th>
                       <th className="text-left px-3 py-2 font-medium">Status</th>
+                      {isAdmin && <th className="text-right px-3 py-2 font-medium">Actions</th>}
                     </tr>
                   </thead>
                   <tbody>
-                    {timeEntries.map((t) => (
-                      <tr key={t.id} className="border-t">
+                    {timeEntries.map((t) => {
+                      const status = (t.approvalStatus ?? "pending").toLowerCase();
+                      const isPending = status === "pending";
+                      const clockedOut = !!t.clockOutTime;
+                      const busy = teActioningId === t.id;
+                      const canAct = isAdmin && isPending && clockedOut;
+                      return (
+                      <tr key={t.id} className="border-t align-top">
                         <td className="px-3 py-2">{t.employeeName?.trim() || "—"}</td>
                         <td className="px-3 py-2 text-muted-foreground">{t.clockInTime ? fmt(t.clockInTime) : "—"}</td>
                         <td className="px-3 py-2 text-muted-foreground">{t.clockOutTime ? fmt(t.clockOutTime) : <span className="text-amber-600">In progress</span>}</td>
@@ -898,9 +954,56 @@ export function SiteDetailPage() {
                               ? t.approvalStatus.charAt(0).toUpperCase() + t.approvalStatus.slice(1)
                               : "—"}
                           </span>
+                          {t.correctionRequested && (
+                            <span
+                              className="ml-2 inline-flex items-center gap-1 text-xs text-amber-600"
+                              title={t.correctionNote || "Officer requested a time correction."}
+                            >
+                              <AlertTriangle className="w-3 h-3" /> Correction
+                            </span>
+                          )}
                         </td>
+                        {isAdmin && (
+                          <td className="px-3 py-2">
+                            {canAct ? (
+                              <div className="flex items-center justify-end gap-2">
+                                <input
+                                  type="number"
+                                  step="0.25"
+                                  min="0"
+                                  inputMode="decimal"
+                                  aria-label={`Approve hours for ${t.employeeName?.trim() || "officer"}`}
+                                  value={teHoursEdits[t.id] ?? (t.hoursWorked != null ? Number(t.hoursWorked).toFixed(2) : "")}
+                                  onChange={(e) => setTeHoursEdits((prev) => ({ ...prev, [t.id]: e.target.value }))}
+                                  disabled={busy}
+                                  className="w-20 border rounded px-2 py-1 text-sm text-right tabular-nums bg-background text-foreground"
+                                />
+                                <Button
+                                  size="sm"
+                                  onClick={() => decideTimeEntry(t, "approved")}
+                                  disabled={busy}
+                                >
+                                  {busy ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : "Approve"}
+                                </Button>
+                                <Button
+                                  variant="outline"
+                                  size="sm"
+                                  onClick={() => decideTimeEntry(t, "rejected")}
+                                  disabled={busy}
+                                >
+                                  Reject
+                                </Button>
+                              </div>
+                            ) : (
+                              <div className="text-right text-xs text-muted-foreground">
+                                {!clockedOut ? "—" : status === "approved" ? "Approved" : status === "rejected" ? "Rejected" : "—"}
+                              </div>
+                            )}
+                          </td>
+                        )}
                       </tr>
-                    ))}
+                      );
+                    })}
                   </tbody>
                 </table>
               </div>
