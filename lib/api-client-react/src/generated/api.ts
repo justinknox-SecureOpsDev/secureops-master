@@ -27,7 +27,9 @@ import type {
   AdminSignObjectDownloadParams,
   AdminUpdateSubcontractorEntryBody,
   Application,
+  ApplicationFieldConfig,
   ApplicationQuestion,
+  ApplicationTemplate,
   ApproveApplicationResponse,
   ApproveShiftRequestBody,
   ApproveTimeEntryRequest,
@@ -119,6 +121,7 @@ import type {
   RadioChannel,
   RadioTransmission,
   RegisterPushTokenBody,
+  ReorderApplicationFieldsRequest,
   ReorderApplicationQuestionsRequest,
   ReplacePolicyDocumentRequest,
   ResetPasswordRequest,
@@ -142,6 +145,7 @@ import type {
   TimeEntry,
   TriggerEmergency201,
   TriggerEmergencyBody,
+  UpdateApplicationFieldRequest,
   UpdateApplicationQuestionRequest,
   UpdateAssignmentRequest,
   UpdateClientRequest,
@@ -7297,7 +7301,7 @@ export function useAdminSignObjectDownload<
 }
 
 /**
- * @summary Public list of enabled custom application questions
+ * @summary Public application form template (built-in field config + custom questions)
  */
 export const getGetApplicationTemplateUrl = () => {
   return `/api/application-template`;
@@ -7305,8 +7309,8 @@ export const getGetApplicationTemplateUrl = () => {
 
 export const getApplicationTemplate = async (
   options?: RequestInit,
-): Promise<ApplicationQuestion[]> => {
-  return customFetch<ApplicationQuestion[]>(getGetApplicationTemplateUrl(), {
+): Promise<ApplicationTemplate> => {
+  return customFetch<ApplicationTemplate>(getGetApplicationTemplateUrl(), {
     ...options,
     method: "GET",
   });
@@ -7349,7 +7353,7 @@ export type GetApplicationTemplateQueryResult = NonNullable<
 export type GetApplicationTemplateQueryError = ErrorType<unknown>;
 
 /**
- * @summary Public list of enabled custom application questions
+ * @summary Public application form template (built-in field config + custom questions)
  */
 
 export function useGetApplicationTemplate<
@@ -7810,6 +7814,266 @@ export const useAdminDeleteApplicationQuestion = <
   TContext
 > => {
   return useMutation(getAdminDeleteApplicationQuestionMutationOptions(options));
+};
+
+/**
+ * @summary List effective config for built-in application fields (admin)
+ */
+export const getAdminListApplicationFieldsUrl = () => {
+  return `/api/admin/application-fields`;
+};
+
+export const adminListApplicationFields = async (
+  options?: RequestInit,
+): Promise<ApplicationFieldConfig[]> => {
+  return customFetch<ApplicationFieldConfig[]>(
+    getAdminListApplicationFieldsUrl(),
+    {
+      ...options,
+      method: "GET",
+    },
+  );
+};
+
+export const getAdminListApplicationFieldsQueryKey = () => {
+  return [`/api/admin/application-fields`] as const;
+};
+
+export const getAdminListApplicationFieldsQueryOptions = <
+  TData = Awaited<ReturnType<typeof adminListApplicationFields>>,
+  TError = ErrorType<unknown>,
+>(options?: {
+  query?: UseQueryOptions<
+    Awaited<ReturnType<typeof adminListApplicationFields>>,
+    TError,
+    TData
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}) => {
+  const { query: queryOptions, request: requestOptions } = options ?? {};
+
+  const queryKey =
+    queryOptions?.queryKey ?? getAdminListApplicationFieldsQueryKey();
+
+  const queryFn: QueryFunction<
+    Awaited<ReturnType<typeof adminListApplicationFields>>
+  > = ({ signal }) => adminListApplicationFields({ signal, ...requestOptions });
+
+  return { queryKey, queryFn, ...queryOptions } as UseQueryOptions<
+    Awaited<ReturnType<typeof adminListApplicationFields>>,
+    TError,
+    TData
+  > & { queryKey: QueryKey };
+};
+
+export type AdminListApplicationFieldsQueryResult = NonNullable<
+  Awaited<ReturnType<typeof adminListApplicationFields>>
+>;
+export type AdminListApplicationFieldsQueryError = ErrorType<unknown>;
+
+/**
+ * @summary List effective config for built-in application fields (admin)
+ */
+
+export function useAdminListApplicationFields<
+  TData = Awaited<ReturnType<typeof adminListApplicationFields>>,
+  TError = ErrorType<unknown>,
+>(options?: {
+  query?: UseQueryOptions<
+    Awaited<ReturnType<typeof adminListApplicationFields>>,
+    TError,
+    TData
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+  const queryOptions = getAdminListApplicationFieldsQueryOptions(options);
+
+  const query = useQuery(queryOptions) as UseQueryResult<TData, TError> & {
+    queryKey: QueryKey;
+  };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
+
+/**
+ * @summary Reorder built-in application fields within a section (admin)
+ */
+export const getAdminReorderApplicationFieldsUrl = () => {
+  return `/api/admin/application-fields/reorder`;
+};
+
+export const adminReorderApplicationFields = async (
+  reorderApplicationFieldsRequest: ReorderApplicationFieldsRequest,
+  options?: RequestInit,
+): Promise<ApplicationFieldConfig[]> => {
+  return customFetch<ApplicationFieldConfig[]>(
+    getAdminReorderApplicationFieldsUrl(),
+    {
+      ...options,
+      method: "POST",
+      headers: { "Content-Type": "application/json", ...options?.headers },
+      body: JSON.stringify(reorderApplicationFieldsRequest),
+    },
+  );
+};
+
+export const getAdminReorderApplicationFieldsMutationOptions = <
+  TError = ErrorType<unknown>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof adminReorderApplicationFields>>,
+    TError,
+    { data: BodyType<ReorderApplicationFieldsRequest> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof adminReorderApplicationFields>>,
+  TError,
+  { data: BodyType<ReorderApplicationFieldsRequest> },
+  TContext
+> => {
+  const mutationKey = ["adminReorderApplicationFields"];
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof adminReorderApplicationFields>>,
+    { data: BodyType<ReorderApplicationFieldsRequest> }
+  > = (props) => {
+    const { data } = props ?? {};
+
+    return adminReorderApplicationFields(data, requestOptions);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type AdminReorderApplicationFieldsMutationResult = NonNullable<
+  Awaited<ReturnType<typeof adminReorderApplicationFields>>
+>;
+export type AdminReorderApplicationFieldsMutationBody =
+  BodyType<ReorderApplicationFieldsRequest>;
+export type AdminReorderApplicationFieldsMutationError = ErrorType<unknown>;
+
+/**
+ * @summary Reorder built-in application fields within a section (admin)
+ */
+export const useAdminReorderApplicationFields = <
+  TError = ErrorType<unknown>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof adminReorderApplicationFields>>,
+    TError,
+    { data: BodyType<ReorderApplicationFieldsRequest> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationResult<
+  Awaited<ReturnType<typeof adminReorderApplicationFields>>,
+  TError,
+  { data: BodyType<ReorderApplicationFieldsRequest> },
+  TContext
+> => {
+  return useMutation(getAdminReorderApplicationFieldsMutationOptions(options));
+};
+
+/**
+ * @summary Override a built-in application field (admin)
+ */
+export const getAdminUpdateApplicationFieldUrl = (key: string) => {
+  return `/api/admin/application-fields/${key}`;
+};
+
+export const adminUpdateApplicationField = async (
+  key: string,
+  updateApplicationFieldRequest: UpdateApplicationFieldRequest,
+  options?: RequestInit,
+): Promise<ApplicationFieldConfig> => {
+  return customFetch<ApplicationFieldConfig>(
+    getAdminUpdateApplicationFieldUrl(key),
+    {
+      ...options,
+      method: "PATCH",
+      headers: { "Content-Type": "application/json", ...options?.headers },
+      body: JSON.stringify(updateApplicationFieldRequest),
+    },
+  );
+};
+
+export const getAdminUpdateApplicationFieldMutationOptions = <
+  TError = ErrorType<unknown>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof adminUpdateApplicationField>>,
+    TError,
+    { key: string; data: BodyType<UpdateApplicationFieldRequest> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof adminUpdateApplicationField>>,
+  TError,
+  { key: string; data: BodyType<UpdateApplicationFieldRequest> },
+  TContext
+> => {
+  const mutationKey = ["adminUpdateApplicationField"];
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof adminUpdateApplicationField>>,
+    { key: string; data: BodyType<UpdateApplicationFieldRequest> }
+  > = (props) => {
+    const { key, data } = props ?? {};
+
+    return adminUpdateApplicationField(key, data, requestOptions);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type AdminUpdateApplicationFieldMutationResult = NonNullable<
+  Awaited<ReturnType<typeof adminUpdateApplicationField>>
+>;
+export type AdminUpdateApplicationFieldMutationBody =
+  BodyType<UpdateApplicationFieldRequest>;
+export type AdminUpdateApplicationFieldMutationError = ErrorType<unknown>;
+
+/**
+ * @summary Override a built-in application field (admin)
+ */
+export const useAdminUpdateApplicationField = <
+  TError = ErrorType<unknown>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof adminUpdateApplicationField>>,
+    TError,
+    { key: string; data: BodyType<UpdateApplicationFieldRequest> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationResult<
+  Awaited<ReturnType<typeof adminUpdateApplicationField>>,
+  TError,
+  { key: string; data: BodyType<UpdateApplicationFieldRequest> },
+  TContext
+> => {
+  return useMutation(getAdminUpdateApplicationFieldMutationOptions(options));
 };
 
 /**

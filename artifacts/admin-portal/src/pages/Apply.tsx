@@ -69,6 +69,65 @@ type TemplateQuestion = {
   enabled: boolean;
 };
 
+// Effective per-field config returned by GET /application-template (built-in
+// fields only, already filtered to the visible ones and sorted section→order).
+type EffectiveField = {
+  key: string;
+  section: number;
+  label: string;
+  helpText: string | null;
+  required: boolean;
+  hidden: boolean;
+  sortOrder: number;
+  locked: boolean;
+};
+
+// Client mirror of the server registry
+// (artifacts/api-server/src/lib/applicationFields.ts). Used as the fallback
+// when /application-template can't be reached, and to default each field's
+// label/required when no override row exists.
+const CLIENT_FIELD_DEFS: Array<{ key: string; section: number; defaultLabel: string; defaultHelp: string | null; defaultRequired: boolean; locked: boolean }> = [
+  { key: "firstName", section: 0, defaultLabel: "First name", defaultHelp: null, defaultRequired: true, locked: true },
+  { key: "lastName", section: 0, defaultLabel: "Last name", defaultHelp: null, defaultRequired: true, locked: true },
+  { key: "email", section: 0, defaultLabel: "Email", defaultHelp: null, defaultRequired: true, locked: true },
+  { key: "phone", section: 0, defaultLabel: "Phone", defaultHelp: null, defaultRequired: true, locked: true },
+  { key: "address", section: 0, defaultLabel: "Street address", defaultHelp: null, defaultRequired: true, locked: true },
+  { key: "city", section: 0, defaultLabel: "City", defaultHelp: null, defaultRequired: true, locked: false },
+  { key: "state", section: 0, defaultLabel: "State", defaultHelp: null, defaultRequired: true, locked: false },
+  { key: "zip", section: 0, defaultLabel: "ZIP code", defaultHelp: null, defaultRequired: true, locked: false },
+  { key: "dateOfBirth", section: 0, defaultLabel: "Date of birth", defaultHelp: null, defaultRequired: true, locked: false },
+  { key: "niNumber", section: 0, defaultLabel: "SSN (last 4)", defaultHelp: null, defaultRequired: true, locked: false },
+  { key: "cityOfBirth", section: 0, defaultLabel: "City of birth", defaultHelp: null, defaultRequired: true, locked: false },
+  { key: "stateOfBirth", section: 0, defaultLabel: "State / county of birth", defaultHelp: null, defaultRequired: true, locked: false },
+  { key: "i9Doc", section: 1, defaultLabel: "Completed Form I-9 (PDF or photos of all pages)", defaultHelp: null, defaultRequired: true, locked: false },
+  { key: "ssnCardDoc", section: 1, defaultLabel: "Social Security card (photo of front)", defaultHelp: null, defaultRequired: true, locked: false },
+  { key: "idDocType", section: 1, defaultLabel: "Photo ID type", defaultHelp: null, defaultRequired: true, locked: false },
+  { key: "idDoc", section: 1, defaultLabel: "Photo ID", defaultHelp: null, defaultRequired: true, locked: false },
+  { key: "siaLicenseNumber", section: 2, defaultLabel: "TX security license number", defaultHelp: null, defaultRequired: true, locked: false },
+  { key: "siaLicenseLevel", section: 2, defaultLabel: "License level", defaultHelp: null, defaultRequired: true, locked: false },
+  { key: "siaLicenseExpiry", section: 2, defaultLabel: "License expiry", defaultHelp: null, defaultRequired: true, locked: false },
+  { key: "yearsExperience", section: 2, defaultLabel: "Years of experience", defaultHelp: null, defaultRequired: true, locked: false },
+  { key: "previousExperience", section: 2, defaultLabel: "Describe your previous security experience", defaultHelp: null, defaultRequired: true, locked: false },
+  { key: "references", section: 3, defaultLabel: "References", defaultHelp: null, defaultRequired: true, locked: false },
+  { key: "photo", section: 3, defaultLabel: "Head & shoulders photo", defaultHelp: null, defaultRequired: true, locked: false },
+  { key: "cv", section: 3, defaultLabel: "Resume (PDF / DOC)", defaultHelp: null, defaultRequired: true, locked: false },
+  { key: "trainingCertificates", section: 3, defaultLabel: "Training certificates", defaultHelp: null, defaultRequired: true, locked: false },
+  { key: "availability", section: 4, defaultLabel: "Availability", defaultHelp: null, defaultRequired: true, locked: false },
+];
+
+const CLIENT_DEFAULT_FIELDS: EffectiveField[] = (() => {
+  const counters = new Map<number, number>();
+  return CLIENT_FIELD_DEFS.map((d) => {
+    const n = counters.get(d.section) ?? 0;
+    counters.set(d.section, n + 1);
+    return {
+      key: d.key, section: d.section, label: d.defaultLabel, helpText: d.defaultHelp,
+      required: d.defaultRequired, hidden: false, sortOrder: n, locked: d.locked,
+    };
+  });
+})();
+const CLIENT_DEFAULTS_BY_KEY = new Map(CLIENT_DEFAULT_FIELDS.map((f) => [f.key, f]));
+
 // Base wizard steps; an "Additional questions" step is spliced in before
 // "Review" at runtime when the admin has defined custom questions.
 const BASE_STEPS = ["Personal", "I-9 & Identity", "TX License & experience", "References & docs", "Availability"];
@@ -223,6 +282,31 @@ export function ApplyPage() {
 
   const [form, setForm] = useState<Form>(EMPTY_FORM);
   const [questions, setQuestions] = useState<TemplateQuestion[]>([]);
+  // Effective built-in field config. Starts as the static defaults so the form
+  // renders immediately; replaced by the admin's overrides once the template
+  // loads. Hidden fields are absent from this list (the server filters them).
+  const [fields, setFields] = useState<EffectiveField[]>(CLIENT_DEFAULT_FIELDS);
+
+  // ---- Built-in field config helpers --------------------------------------
+  const fieldMap = new Map(fields.map((f) => [f.key, f]));
+  // A built-in field is visible iff it's present in the effective config
+  // (the server omits hidden fields from the template response).
+  const visibleField = (key: string): boolean => fieldMap.has(key);
+  const cfgOf = (key: string): EffectiveField =>
+    fieldMap.get(key) ?? CLIENT_DEFAULTS_BY_KEY.get(key)!;
+  const labelOf = (key: string): string => cfgOf(key).label;
+  const helpOf = (key: string): string | null => cfgOf(key).helpText;
+  // Required only matters for visible fields; a hidden field is never enforced.
+  const isReq = (key: string): boolean => visibleField(key) && cfgOf(key).required;
+  // Whether the admin renamed a field away from its default label (used to
+  // decide if a dynamic default label like the photo-ID prompt still applies).
+  const isRelabeled = (key: string): boolean =>
+    cfgOf(key).label !== (CLIENT_DEFAULTS_BY_KEY.get(key)?.label ?? "");
+  const orderedKeys = (section: number): string[] =>
+    [...fields]
+      .filter((f) => f.section === section)
+      .sort((a, b) => a.sortOrder - b.sortOrder)
+      .map((f) => f.key);
 
   // Admin-defined custom questions get their own step before Review.
   const hasCustom = questions.length > 0;
@@ -243,10 +327,21 @@ export function ApplyPage() {
     let cancelled = false;
     (async () => {
       try {
-        const out = await api<TemplateQuestion[]>("/application-template");
-        if (!cancelled && Array.isArray(out)) setQuestions(out);
+        const out = await api<{ questions?: TemplateQuestion[]; fieldConfig?: EffectiveField[] } | TemplateQuestion[]>(
+          "/application-template",
+        );
+        if (cancelled) return;
+        // New shape: { questions, fieldConfig }. Tolerate the legacy array shape.
+        if (Array.isArray(out)) {
+          setQuestions(out);
+        } else {
+          if (Array.isArray(out.questions)) setQuestions(out.questions);
+          if (Array.isArray(out.fieldConfig) && out.fieldConfig.length > 0) {
+            setFields(out.fieldConfig);
+          }
+        }
       } catch {
-        /* ignore — custom questions are additive */
+        /* ignore — keep default field config + no custom questions */
       }
     })();
     return () => { cancelled = true; };
@@ -321,63 +416,69 @@ export function ApplyPage() {
   }
 
   function validateStep(stepIndex: number = step): FieldError | null {
+    // Required checks are gated on the field's effective config (isReq returns
+    // false for hidden or admin-optional fields). Format checks (phone) only
+    // run when the field is visible and the applicant entered a value.
     if (stepIndex === 0) {
-      if (!form.firstName) return { field: "firstName", message: "First name is required." };
-      if (!form.lastName) return { field: "lastName", message: "Last name is required." };
-      if (!form.email) return { field: "email", message: "Email is required." };
-      if (!form.phone) return { field: "phone", message: "Phone is required." };
-      if (!normalizePhoneToE164(form.phone)) {
+      if (isReq("firstName") && !form.firstName) return { field: "firstName", message: `${labelOf("firstName")} is required.` };
+      if (isReq("lastName") && !form.lastName) return { field: "lastName", message: `${labelOf("lastName")} is required.` };
+      if (isReq("email") && !form.email) return { field: "email", message: `${labelOf("email")} is required.` };
+      if (isReq("phone") && !form.phone) return { field: "phone", message: `${labelOf("phone")} is required.` };
+      if (visibleField("phone") && form.phone && !normalizePhoneToE164(form.phone)) {
         return { field: "phone", message: "Phone number is invalid. Please enter a valid US phone number (e.g. (214) 555-1234) or include the country code (e.g. +44 20 1234 5678)." };
       }
-      if (!form.address) return { field: "address", message: "Street address is required." };
-      if (!form.city) return { field: "city", message: "City is required." };
-      if (!form.state) return { field: "state", message: "State is required." };
-      if (!form.zip) return { field: "zip", message: "ZIP code is required." };
-      if (!form.dateOfBirth) return { field: "dateOfBirth", message: "Date of birth is required." };
-      if (!form.niNumber.trim()) return { field: "niNumber", message: "SSN (last 4) is required." };
-      if (!form.cityOfBirth.trim()) return { field: "cityOfBirth", message: "City of birth is required." };
-      if (!form.stateOfBirth.trim()) return { field: "stateOfBirth", message: "State of birth is required." };
+      if (isReq("address") && !form.address) return { field: "address", message: `${labelOf("address")} is required.` };
+      if (isReq("city") && !form.city) return { field: "city", message: `${labelOf("city")} is required.` };
+      if (isReq("state") && !form.state) return { field: "state", message: `${labelOf("state")} is required.` };
+      if (isReq("zip") && !form.zip) return { field: "zip", message: `${labelOf("zip")} is required.` };
+      if (isReq("dateOfBirth") && !form.dateOfBirth) return { field: "dateOfBirth", message: `${labelOf("dateOfBirth")} is required.` };
+      if (isReq("niNumber") && !form.niNumber.trim()) return { field: "niNumber", message: `${labelOf("niNumber")} is required.` };
+      if (isReq("cityOfBirth") && !form.cityOfBirth.trim()) return { field: "cityOfBirth", message: `${labelOf("cityOfBirth")} is required.` };
+      if (isReq("stateOfBirth") && !form.stateOfBirth.trim()) return { field: "stateOfBirth", message: `${labelOf("stateOfBirth")} is required.` };
     }
     if (stepIndex === 1) {
-      if (!form.i9Doc) return { field: "i9Doc", message: "Please upload your completed Form I-9." };
-      if (!form.ssnCardDoc) return { field: "ssnCardDoc", message: "Please upload a photo of your Social Security card." };
-      if (!form.idDocType) return { field: "idDocType", message: "Please select your photo ID type (driver's license or passport)." };
-      if (!form.idDoc) return { field: "idDoc", message: "Please upload a photo of your driver's license or passport." };
+      if (isReq("i9Doc") && !form.i9Doc) return { field: "i9Doc", message: "Please upload your completed Form I-9." };
+      if (isReq("ssnCardDoc") && !form.ssnCardDoc) return { field: "ssnCardDoc", message: "Please upload a photo of your Social Security card." };
+      if (isReq("idDocType") && !form.idDocType) return { field: "idDocType", message: "Please select your photo ID type (driver's license or passport)." };
+      if (isReq("idDoc") && !form.idDoc) return { field: "idDoc", message: "Please upload a photo of your driver's license or passport." };
     }
     if (stepIndex === 2) {
-      if (!form.siaLicenseNumber.trim()) return { field: "siaLicenseNumber", message: "TX security license number is required." };
-      if (!form.siaLicenseLevel) return { field: "siaLicenseLevel", message: "License level is required." };
-      if (!form.siaLicenseExpiry) return { field: "siaLicenseExpiry", message: "License expiry date is required." };
-      if (!form.yearsExperience.trim()) return { field: "yearsExperience", message: "Years of experience is required." };
-      if (!form.previousExperience.trim()) return { field: "previousExperience", message: "Please describe your previous security experience." };
+      if (isReq("siaLicenseNumber") && !form.siaLicenseNumber.trim()) return { field: "siaLicenseNumber", message: `${labelOf("siaLicenseNumber")} is required.` };
+      if (isReq("siaLicenseLevel") && !form.siaLicenseLevel) return { field: "siaLicenseLevel", message: `${labelOf("siaLicenseLevel")} is required.` };
+      if (isReq("siaLicenseExpiry") && !form.siaLicenseExpiry) return { field: "siaLicenseExpiry", message: `${labelOf("siaLicenseExpiry")} is required.` };
+      if (isReq("yearsExperience") && !form.yearsExperience.trim()) return { field: "yearsExperience", message: `${labelOf("yearsExperience")} is required.` };
+      if (isReq("previousExperience") && !form.previousExperience.trim()) return { field: "previousExperience", message: "Please describe your previous security experience." };
     }
     if (stepIndex === 3) {
-      const filled = form.references.filter(
-        (r) => r.name.trim() && r.relationship.trim() && r.phone.trim(),
-      );
-      if (filled.length === 0) {
-        return { field: "ref:0:name", message: "Please provide at least one reference with name, relationship, and phone." };
-      }
-      for (let i = 0; i < form.references.length; i++) {
-        const r = form.references[i];
-        const anyTouched = r.name.trim() || r.relationship.trim() || r.phone.trim() || r.email.trim();
-        if (anyTouched) {
-          if (!r.name.trim()) return { field: `ref:${i}:name`, message: `Reference #${i + 1} name is required.` };
-          if (!r.relationship.trim()) return { field: `ref:${i}:relationship`, message: `Reference #${i + 1} relationship is required.` };
-          if (!r.phone.trim()) return { field: `ref:${i}:phone`, message: `Reference #${i + 1} phone is required.` };
+      if (visibleField("references")) {
+        const filled = form.references.filter(
+          (r) => r.name.trim() && r.relationship.trim() && r.phone.trim(),
+        );
+        if (isReq("references") && filled.length === 0) {
+          return { field: "ref:0:name", message: "Please provide at least one reference with name, relationship, and phone." };
         }
-        if (r.phone.trim() && !normalizePhoneToE164(r.phone)) {
-          return { field: `ref:${i}:phone`, message: `Reference #${i + 1} phone is invalid. Please enter a valid US phone number (e.g. (214) 555-1234) or include the country code (e.g. +44 20 1234 5678).` };
+        // Data-quality: a partially filled reference row must be completed.
+        for (let i = 0; i < form.references.length; i++) {
+          const r = form.references[i];
+          const anyTouched = r.name.trim() || r.relationship.trim() || r.phone.trim() || r.email.trim();
+          if (anyTouched) {
+            if (!r.name.trim()) return { field: `ref:${i}:name`, message: `Reference #${i + 1} name is required.` };
+            if (!r.relationship.trim()) return { field: `ref:${i}:relationship`, message: `Reference #${i + 1} relationship is required.` };
+            if (!r.phone.trim()) return { field: `ref:${i}:phone`, message: `Reference #${i + 1} phone is required.` };
+          }
+          if (r.phone.trim() && !normalizePhoneToE164(r.phone)) {
+            return { field: `ref:${i}:phone`, message: `Reference #${i + 1} phone is invalid. Please enter a valid US phone number (e.g. (214) 555-1234) or include the country code (e.g. +44 20 1234 5678).` };
+          }
         }
       }
-      if (!form.photo) return { field: "photo", message: "Please upload a head & shoulders photo." };
-      if (!form.cv) return { field: "cv", message: "Please upload your resume." };
-      if (form.trainingCertificates.length === 0) {
+      if (isReq("photo") && !form.photo) return { field: "photo", message: "Please upload a head & shoulders photo." };
+      if (isReq("cv") && !form.cv) return { field: "cv", message: "Please upload your resume." };
+      if (isReq("trainingCertificates") && form.trainingCertificates.length === 0) {
         return { field: "trainingCertificates", message: "Please upload at least one training certificate." };
       }
     }
     if (stepIndex === 4) {
-      if (form.availability.length === 0) {
+      if (isReq("availability") && form.availability.length === 0) {
         return { field: "availability", message: "Please select at least one availability slot." };
       }
     }
@@ -451,50 +552,69 @@ export function ApplyPage() {
     }
     setFieldErrors([]);
     try {
-      const body = {
+      // Build the payload from the effective field config. Hidden fields are
+      // omitted entirely (the server also nulls them), and optional fields that
+      // were left blank are omitted so they don't violate the optional Zod
+      // shapes (e.g. enum/number/file fields can't accept ""/0/null).
+      const body: Record<string, unknown> = {
         firstName: form.firstName,
         lastName: form.lastName,
         email: form.email,
         phone: form.phone,
         address: form.address,
-        city: form.city,
-        state: form.state,
-        zip: form.zip,
-        dateOfBirth: form.dateOfBirth,
-        cityOfBirth: form.cityOfBirth,
-        stateOfBirth: form.stateOfBirth,
-        niNumber: form.niNumber,
-        i9Doc: form.i9Doc,
-        ssnCardDoc: form.ssnCardDoc,
-        idDocType: form.idDocType,
-        idDoc: form.idDoc,
-        siaLicenseNumber: form.siaLicenseNumber,
-        siaLicenseLevel: Number(form.siaLicenseLevel),
-        siaLicenseExpiry: form.siaLicenseExpiry,
-        previousExperience: form.previousExperience,
-        yearsExperience: Number(form.yearsExperience),
-        references: form.references
+      };
+      const putStr = (key: string, value: string) => {
+        if (visibleField(key) && value.trim() !== "") body[key] = value;
+      };
+      const putFile = (key: string, value: UploadedFile | null) => {
+        if (visibleField(key) && value) body[key] = value;
+      };
+      putStr("city", form.city);
+      putStr("state", form.state);
+      putStr("zip", form.zip);
+      putStr("dateOfBirth", form.dateOfBirth);
+      putStr("cityOfBirth", form.cityOfBirth);
+      putStr("stateOfBirth", form.stateOfBirth);
+      putStr("niNumber", form.niNumber);
+      putFile("i9Doc", form.i9Doc);
+      putFile("ssnCardDoc", form.ssnCardDoc);
+      if (visibleField("idDocType") && form.idDocType) body.idDocType = form.idDocType;
+      putFile("idDoc", form.idDoc);
+      putStr("siaLicenseNumber", form.siaLicenseNumber);
+      if (visibleField("siaLicenseLevel") && form.siaLicenseLevel) {
+        body.siaLicenseLevel = Number(form.siaLicenseLevel);
+      }
+      putStr("siaLicenseExpiry", form.siaLicenseExpiry);
+      putStr("previousExperience", form.previousExperience);
+      if (visibleField("yearsExperience") && form.yearsExperience.trim() !== "") {
+        body.yearsExperience = Number(form.yearsExperience);
+      }
+      if (visibleField("references")) {
+        const refs = form.references
           .filter((r) => r.name.trim() && r.relationship.trim() && r.phone.trim())
           .map((r) => ({
             name: r.name,
             relationship: r.relationship,
             phone: r.phone,
             email: r.email || undefined,
-          })),
-        photo: form.photo,
-        cv: form.cv,
-        trainingCertificates: form.trainingCertificates,
-        availability: form.availability,
-        customAnswers: questions
-          .map((q) => ({ questionId: q.id, value: form.customAnswers[q.id] }))
-          .filter((a) => {
-            const v = a.value;
-            if (v === null || v === undefined) return false;
-            if (typeof v === "string") return v.trim().length > 0;
-            if (Array.isArray(v)) return v.length > 0;
-            return true;
-          }),
-      };
+          }));
+        if (refs.length > 0) body.references = refs;
+      }
+      putFile("photo", form.photo);
+      putFile("cv", form.cv);
+      if (visibleField("trainingCertificates") && form.trainingCertificates.length > 0) {
+        body.trainingCertificates = form.trainingCertificates;
+      }
+      if (visibleField("availability")) body.availability = form.availability;
+      body.customAnswers = questions
+        .map((q) => ({ questionId: q.id, value: form.customAnswers[q.id] }))
+        .filter((a) => {
+          const v = a.value;
+          if (v === null || v === undefined) return false;
+          if (typeof v === "string") return v.trim().length > 0;
+          if (Array.isArray(v)) return v.length > 0;
+          return true;
+        });
       await api("/applications", { method: "POST", body });
       setSubmitted(true);
     } catch (e) {
@@ -557,6 +677,206 @@ export function ApplyPage() {
   const stepLabel = STEPS[step];
   const errOnStep = (name: string) => findFieldError(name, fieldErrors)?.message;
 
+  // Render help text beneath a file upload (FileUploadField has no help slot).
+  const fileHelp = (key: string): ReactNode => {
+    const h = helpOf(key);
+    return h?.trim() ? <p className="text-xs text-muted-foreground">{h.trim()}</p> : null;
+  };
+
+  // Render a single built-in field by key, honouring its effective label /
+  // required / help config. Returns null when the field is hidden.
+  function renderField(key: string): { node: ReactNode; width: "half" | "full" } | null {
+    if (!visibleField(key)) return null;
+    const req = isReq(key);
+    const label = labelOf(key);
+    const help = helpOf(key);
+    switch (key) {
+      case "firstName":
+        return { width: "half", node: <Field label={label} help={help} required={req} name="firstName" error={fieldErrors}><Input autoComplete="given-name" value={form.firstName} onChange={(e) => set("firstName", e.target.value)} /></Field> };
+      case "lastName":
+        return { width: "half", node: <Field label={label} help={help} required={req} name="lastName" error={fieldErrors}><Input autoComplete="family-name" value={form.lastName} onChange={(e) => set("lastName", e.target.value)} /></Field> };
+      case "email":
+        return { width: "half", node: <Field label={label} help={help} required={req} name="email" error={fieldErrors}><Input type="email" autoComplete="email" value={form.email} onChange={(e) => set("email", e.target.value)} /></Field> };
+      case "phone":
+        return { width: "half", node: <Field label={label} help={help} required={req} name="phone" error={fieldErrors}><Input type="tel" autoComplete="tel" value={form.phone} onChange={(e) => set("phone", e.target.value)} /></Field> };
+      case "address":
+        return { width: "full", node: <Field label={label} help={help} required={req} name="address" error={fieldErrors}><Textarea rows={2} autoComplete="street-address" value={form.address} onChange={(e) => set("address", e.target.value)} placeholder="Street, apt/unit" /></Field> };
+      case "city":
+        return { width: "half", node: <Field label={label} help={help} required={req} name="city" error={fieldErrors}><Input autoComplete="address-level2" value={form.city} onChange={(e) => set("city", e.target.value)} /></Field> };
+      case "state":
+        return { width: "half", node: <Field label={label} help={help} required={req} name="state" error={fieldErrors}><Input autoComplete="address-level1" value={form.state} onChange={(e) => set("state", e.target.value.toUpperCase().slice(0, 2))} placeholder="TX" maxLength={2} /></Field> };
+      case "zip":
+        return { width: "half", node: <Field label={label} help={help} required={req} name="zip" error={fieldErrors}><Input autoComplete="postal-code" value={form.zip} onChange={(e) => set("zip", e.target.value)} placeholder="75001" /></Field> };
+      case "dateOfBirth":
+        return { width: "half", node: <Field label={label} help={help} required={req} name="dateOfBirth" error={fieldErrors}><Input type="date" autoComplete="bday" value={form.dateOfBirth} onChange={(e) => set("dateOfBirth", e.target.value)} /></Field> };
+      case "niNumber":
+        return { width: "half", node: <Field label={label} help={help} required={req} name="niNumber" error={fieldErrors}><Input inputMode="numeric" value={form.niNumber} onChange={(e) => set("niNumber", e.target.value)} /></Field> };
+      case "cityOfBirth":
+        return { width: "half", node: <Field label={label} help={help} required={req} name="cityOfBirth" error={fieldErrors}><Input value={form.cityOfBirth} onChange={(e) => set("cityOfBirth", e.target.value)} /></Field> };
+      case "stateOfBirth":
+        return { width: "half", node: <Field label={label} help={help} required={req} name="stateOfBirth" error={fieldErrors}><Input value={form.stateOfBirth} onChange={(e) => set("stateOfBirth", e.target.value)} /></Field> };
+      case "i9Doc":
+        return { width: "full", node: (
+          <div className="space-y-1">
+            <FileUploadField label={label} required={req} accept="image/*,.pdf" value={form.i9Doc} onChange={(v) => set("i9Doc", v)} uploadFn={uploadFileAnon} error={errOnStep("i9Doc")} />
+            {fileHelp("i9Doc")}
+          </div>
+        ) };
+      case "ssnCardDoc":
+        return { width: "full", node: (
+          <div className="space-y-1">
+            <FileUploadField label={label} required={req} accept="image/*,.pdf" value={form.ssnCardDoc} onChange={(v) => set("ssnCardDoc", v)} uploadFn={uploadFileAnon} error={errOnStep("ssnCardDoc")} />
+            {fileHelp("ssnCardDoc")}
+          </div>
+        ) };
+      case "idDocType":
+        return { width: "full", node: (
+          <Field label={label} help={help} required={req} name="idDocType" error={fieldErrors}>
+            <select
+              className="w-full border rounded h-10 px-3 bg-background focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+              value={form.idDocType}
+              onChange={(e) => set("idDocType", e.target.value as Form["idDocType"])}
+            >
+              <option value="">Select…</option>
+              <option value="drivers_license">Driver's License</option>
+              <option value="passport">Passport</option>
+            </select>
+          </Field>
+        ) };
+      case "idDoc": {
+        // Default label is dynamic (depends on the chosen ID type); an admin
+        // rename overrides it, otherwise fall back to the contextual prompt.
+        const dyn =
+          form.idDocType === "passport"
+            ? "Passport (photo of ID page)"
+            : form.idDocType === "drivers_license"
+            ? "Driver's License (photo of front)"
+            : "Photo ID (select type above first)";
+        const idLabel = isRelabeled("idDoc") ? label : dyn;
+        return { width: "full", node: (
+          <div className="space-y-1">
+            <FileUploadField label={idLabel} required={req} accept="image/*,.pdf" value={form.idDoc} onChange={(v) => set("idDoc", v)} uploadFn={uploadFileAnon} error={errOnStep("idDoc")} />
+            {fileHelp("idDoc")}
+          </div>
+        ) };
+      }
+      case "siaLicenseNumber":
+        return { width: "half", node: <Field label={label} help={help} required={req} name="siaLicenseNumber" error={fieldErrors}><Input value={form.siaLicenseNumber} onChange={(e) => set("siaLicenseNumber", e.target.value)} /></Field> };
+      case "siaLicenseLevel":
+        return { width: "half", node: (
+          <Field label={label} help={help} required={req} name="siaLicenseLevel" error={fieldErrors}>
+            <select className="w-full border rounded h-10 px-3 bg-background focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+              value={form.siaLicenseLevel} onChange={(e) => set("siaLicenseLevel", e.target.value)}>
+              <option value="">Select…</option>
+              <option value="2">L2 — Unarmed</option>
+              <option value="3">L3 — Armed</option>
+              <option value="4">L4 — PPO</option>
+            </select>
+          </Field>
+        ) };
+      case "siaLicenseExpiry":
+        return { width: "half", node: <Field label={label} help={help} required={req} name="siaLicenseExpiry" error={fieldErrors}><Input type="date" value={form.siaLicenseExpiry} onChange={(e) => set("siaLicenseExpiry", e.target.value)} /></Field> };
+      case "yearsExperience":
+        return { width: "half", node: <Field label={label} help={help} required={req} name="yearsExperience" error={fieldErrors}><Input type="number" min={0} value={form.yearsExperience} onChange={(e) => set("yearsExperience", e.target.value)} /></Field> };
+      case "previousExperience":
+        return { width: "full", node: (
+          <Field label={label} help={help} required={req} name="previousExperience" error={fieldErrors}>
+            <Textarea rows={5} value={form.previousExperience} onChange={(e) => set("previousExperience", e.target.value)} />
+          </Field>
+        ) };
+      case "references":
+        return { width: "full", node: (
+          <div className="space-y-3">
+            <p className="text-sm text-muted-foreground">
+              {help?.trim()
+                ? help.trim()
+                : req
+                  ? "At least one complete reference is required (name, relationship, and phone)."
+                  : "Add any professional references (name, relationship, and phone)."}
+            </p>
+            {form.references.map((r, i) => (
+              <fieldset key={i} className="p-3 border rounded space-y-2 bg-muted/30">
+                <legend className="text-xs uppercase tracking-wide opacity-70 px-1">
+                  Reference {i + 1}{i === 0 ? (req ? " (required)" : " (optional)") : " (optional)"}
+                </legend>
+                <Two>
+                  <Field label="Name" required={req && i === 0} name={`ref:${i}:name`} error={fieldErrors}><Input value={r.name} onChange={(e) => setRef(i, "name", e.target.value)} /></Field>
+                  <Field label="Relationship" required={req && i === 0} name={`ref:${i}:relationship`} error={fieldErrors}><Input value={r.relationship} onChange={(e) => setRef(i, "relationship", e.target.value)} /></Field>
+                </Two>
+                <Two>
+                  <Field label="Phone" required={req && i === 0} name={`ref:${i}:phone`} error={fieldErrors}><Input type="tel" value={r.phone} onChange={(e) => setRef(i, "phone", e.target.value)} /></Field>
+                  <Field label="Email"><Input type="email" value={r.email} onChange={(e) => setRef(i, "email", e.target.value)} /></Field>
+                </Two>
+              </fieldset>
+            ))}
+          </div>
+        ) };
+      case "photo":
+        return { width: "half", node: (
+          <div className="space-y-1">
+            <FileUploadField label={label} required={req} accept="image/*" value={form.photo} onChange={(v) => set("photo", v)} uploadFn={uploadFileAnon} error={errOnStep("photo")} />
+            {fileHelp("photo")}
+          </div>
+        ) };
+      case "cv":
+        return { width: "half", node: (
+          <div className="space-y-1">
+            <FileUploadField label={label} required={req} accept=".pdf,.doc,.docx" value={form.cv} onChange={(v) => set("cv", v)} uploadFn={uploadFileAnon} error={errOnStep("cv")} />
+            {fileHelp("cv")}
+          </div>
+        ) };
+      case "trainingCertificates":
+        return { width: "full", node: (
+          <div className="space-y-1">
+            <MultiFileUploadField
+              label={label}
+              required={req}
+              accept="image/*,.pdf"
+              value={form.trainingCertificates}
+              onChange={(v) => set("trainingCertificates", v)}
+              uploadFn={uploadFileAnon}
+              error={errOnStep("trainingCertificates")}
+            />
+            {fileHelp("trainingCertificates")}
+          </div>
+        ) };
+      default:
+        return null;
+    }
+  }
+
+  // Lay out a section's visible fields in config order, pairing consecutive
+  // half-width fields into two-column rows and giving full-width fields a row.
+  function renderSection(section: number): ReactNode {
+    const out: ReactNode[] = [];
+    let pending: ReactNode | null = null;
+    let pendingKey = "";
+    const flush = () => {
+      if (pending !== null) {
+        out.push(<Two key={`pair-${pendingKey}`}>{pending}<div /></Two>);
+        pending = null;
+      }
+    };
+    for (const key of orderedKeys(section)) {
+      const r = renderField(key);
+      if (!r) continue;
+      if (r.width === "half") {
+        if (pending !== null) {
+          out.push(<Two key={`pair-${pendingKey}-${key}`}>{pending}{r.node}</Two>);
+          pending = null;
+        } else {
+          pending = r.node;
+          pendingKey = key;
+        }
+      } else {
+        flush();
+        out.push(<div key={key}>{r.node}</div>);
+      }
+    }
+    flush();
+    return <>{out}</>;
+  }
+
   return (
     <div className="min-h-screen bg-background">
       <BrandHeader subtitle="Officer Application" />
@@ -598,168 +918,66 @@ export function ApplyPage() {
           {step === 0 && (
             <>
               <h2 ref={headingRef} tabIndex={-1} className="brand-wordmark text-xl focus:outline-none">Personal details</h2>
-              <Two>
-                <Field label="First name" required name="firstName" error={fieldErrors}><Input autoComplete="given-name" value={form.firstName} onChange={(e) => set("firstName", e.target.value)} /></Field>
-                <Field label="Last name" required name="lastName" error={fieldErrors}><Input autoComplete="family-name" value={form.lastName} onChange={(e) => set("lastName", e.target.value)} /></Field>
-              </Two>
-              <Two>
-                <Field label="Email" required name="email" error={fieldErrors}><Input type="email" autoComplete="email" value={form.email} onChange={(e) => set("email", e.target.value)} /></Field>
-                <Field label="Phone" required name="phone" error={fieldErrors}><Input type="tel" autoComplete="tel" value={form.phone} onChange={(e) => set("phone", e.target.value)} /></Field>
-              </Two>
-              <Field label="Street address" required name="address" error={fieldErrors}><Textarea rows={2} autoComplete="street-address" value={form.address} onChange={(e) => set("address", e.target.value)} placeholder="Street, apt/unit" /></Field>
-              <Two>
-                <Field label="City" required name="city" error={fieldErrors}><Input autoComplete="address-level2" value={form.city} onChange={(e) => set("city", e.target.value)} /></Field>
-                <Field label="State" required name="state" error={fieldErrors}><Input autoComplete="address-level1" value={form.state} onChange={(e) => set("state", e.target.value.toUpperCase().slice(0, 2))} placeholder="TX" maxLength={2} /></Field>
-              </Two>
-              <Two>
-                <Field label="ZIP code" required name="zip" error={fieldErrors}><Input autoComplete="postal-code" value={form.zip} onChange={(e) => set("zip", e.target.value)} placeholder="75001" /></Field>
-                <div />
-              </Two>
-              <Two>
-                <Field label="Date of birth" required name="dateOfBirth" error={fieldErrors}><Input type="date" autoComplete="bday" value={form.dateOfBirth} onChange={(e) => set("dateOfBirth", e.target.value)} /></Field>
-                <Field label="SSN (last 4)" required name="niNumber" error={fieldErrors}><Input inputMode="numeric" value={form.niNumber} onChange={(e) => set("niNumber", e.target.value)} /></Field>
-              </Two>
-              <Two>
-                <Field label="City of birth" required name="cityOfBirth" error={fieldErrors}><Input value={form.cityOfBirth} onChange={(e) => set("cityOfBirth", e.target.value)} /></Field>
-                <Field label="State / county of birth" required name="stateOfBirth" error={fieldErrors}><Input value={form.stateOfBirth} onChange={(e) => set("stateOfBirth", e.target.value)} /></Field>
-              </Two>
+              {renderSection(0)}
             </>
           )}
           {step === 1 && (
             <>
               <h2 ref={headingRef} tabIndex={-1} className="brand-wordmark text-xl focus:outline-none">I-9 Employment Eligibility</h2>
-              <p className="text-sm text-muted-foreground">
-                Federal law requires every new hire to complete a Form I-9 and present
-                identity + work-authorization documents. Download the blank form, fill in
-                Section 1, sign it, and upload it below — plus a photo of your Social
-                Security card and either your driver's license or passport.
-              </p>
-              <div className="p-3 border rounded bg-amber-50 text-sm">
-                <a
-                  href={I9_FORM_URL}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="font-semibold underline text-amber-900"
-                >
-                  Download blank Form I-9 (USCIS, opens in a new tab)
-                </a>
-                <div className="text-xs text-amber-900/80 mt-1">
-                  Print, complete Section 1, sign and date, then scan or photograph all pages.
-                </div>
-              </div>
-              <FileUploadField
-                label="Completed Form I-9 (PDF or photos of all pages)"
-                required
-                accept="image/*,.pdf"
-                value={form.i9Doc}
-                onChange={(v) => set("i9Doc", v)}
-                uploadFn={uploadFileAnon}
-                error={errOnStep("i9Doc")}
-              />
-              <FileUploadField
-                label="Social Security card (photo of front)"
-                required
-                accept="image/*,.pdf"
-                value={form.ssnCardDoc}
-                onChange={(v) => set("ssnCardDoc", v)}
-                uploadFn={uploadFileAnon}
-                error={errOnStep("ssnCardDoc")}
-              />
-              <Field label="Photo ID type" required name="idDocType" error={fieldErrors}>
-                <select
-                  className="w-full border rounded h-10 px-3 bg-background focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
-                  value={form.idDocType}
-                  onChange={(e) => set("idDocType", e.target.value as Form["idDocType"])}
-                >
-                  <option value="">Select…</option>
-                  <option value="drivers_license">Driver's License</option>
-                  <option value="passport">Passport</option>
-                </select>
-              </Field>
-              <FileUploadField
-                label={
-                  form.idDocType === "passport"
-                    ? "Passport (photo of ID page)"
-                    : form.idDocType === "drivers_license"
-                    ? "Driver's License (photo of front)"
-                    : "Photo ID (select type above first)"
-                }
-                required
-                accept="image/*,.pdf"
-                value={form.idDoc}
-                onChange={(v) => set("idDoc", v)}
-                uploadFn={uploadFileAnon}
-                error={errOnStep("idDoc")}
-              />
+              {orderedKeys(1).length > 0 && (
+                <>
+                  <p className="text-sm text-muted-foreground">
+                    Federal law requires every new hire to complete a Form I-9 and present
+                    identity + work-authorization documents. Download the blank form, fill in
+                    Section 1, sign it, and upload it below — plus a photo of your Social
+                    Security card and either your driver's license or passport.
+                  </p>
+                  <div className="p-3 border rounded bg-amber-50 text-sm">
+                    <a
+                      href={I9_FORM_URL}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="font-semibold underline text-amber-900"
+                    >
+                      Download blank Form I-9 (USCIS, opens in a new tab)
+                    </a>
+                    <div className="text-xs text-amber-900/80 mt-1">
+                      Print, complete Section 1, sign and date, then scan or photograph all pages.
+                    </div>
+                  </div>
+                </>
+              )}
+              {renderSection(1)}
             </>
           )}
           {step === 2 && (
             <>
               <h2 ref={headingRef} tabIndex={-1} className="brand-wordmark text-xl focus:outline-none">TX security license &amp; experience</h2>
-              <Two>
-                <Field label="TX security license number" required name="siaLicenseNumber" error={fieldErrors}><Input value={form.siaLicenseNumber} onChange={(e) => set("siaLicenseNumber", e.target.value)} /></Field>
-                <Field label="License level" required name="siaLicenseLevel" error={fieldErrors}>
-                  <select className="w-full border rounded h-10 px-3 bg-background focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
-                    value={form.siaLicenseLevel} onChange={(e) => set("siaLicenseLevel", e.target.value)}>
-                    <option value="">Select…</option>
-                    <option value="2">L2 — Unarmed</option>
-                    <option value="3">L3 — Armed</option>
-                    <option value="4">L4 — PPO</option>
-                  </select>
-                </Field>
-              </Two>
-              <Two>
-                <Field label="License expiry" required name="siaLicenseExpiry" error={fieldErrors}><Input type="date" value={form.siaLicenseExpiry} onChange={(e) => set("siaLicenseExpiry", e.target.value)} /></Field>
-                <Field label="Years of experience" required name="yearsExperience" error={fieldErrors}><Input type="number" min={0} value={form.yearsExperience} onChange={(e) => set("yearsExperience", e.target.value)} /></Field>
-              </Two>
-              <Field label="Describe your previous security experience" required name="previousExperience" error={fieldErrors}>
-                <Textarea rows={5} value={form.previousExperience} onChange={(e) => set("previousExperience", e.target.value)} />
-              </Field>
+              {renderSection(2)}
             </>
           )}
           {step === 3 && (
             <>
               <h2 ref={headingRef} tabIndex={-1} className="brand-wordmark text-xl focus:outline-none">References &amp; documents</h2>
-              <p className="text-sm text-muted-foreground">
-                At least one complete reference is required (name, relationship, and phone).
-              </p>
-              {form.references.map((r, i) => (
-                <fieldset key={i} className="p-3 border rounded space-y-2 bg-muted/30">
-                  <legend className="text-xs uppercase tracking-wide opacity-70 px-1">
-                    Reference {i + 1}{i === 0 ? " (required)" : " (optional)"}
-                  </legend>
-                  <Two>
-                    <Field label="Name" required={i === 0} name={`ref:${i}:name`} error={fieldErrors}><Input value={r.name} onChange={(e) => setRef(i, "name", e.target.value)} /></Field>
-                    <Field label="Relationship" required={i === 0} name={`ref:${i}:relationship`} error={fieldErrors}><Input value={r.relationship} onChange={(e) => setRef(i, "relationship", e.target.value)} /></Field>
-                  </Two>
-                  <Two>
-                    <Field label="Phone" required={i === 0} name={`ref:${i}:phone`} error={fieldErrors}><Input type="tel" value={r.phone} onChange={(e) => setRef(i, "phone", e.target.value)} /></Field>
-                    <Field label="Email"><Input type="email" value={r.email} onChange={(e) => setRef(i, "email", e.target.value)} /></Field>
-                  </Two>
-                </fieldset>
-              ))}
-              <Two>
-                <FileUploadField label="Head & shoulders photo" required accept="image/*" value={form.photo} onChange={(v) => set("photo", v)} uploadFn={uploadFileAnon} error={errOnStep("photo")} />
-                <FileUploadField label="Resume (PDF / DOC)" required accept=".pdf,.doc,.docx" value={form.cv} onChange={(v) => set("cv", v)} uploadFn={uploadFileAnon} error={errOnStep("cv")} />
-              </Two>
-              <MultiFileUploadField
-                label="Training certificates"
-                required
-                accept="image/*,.pdf"
-                value={form.trainingCertificates}
-                onChange={(v) => set("trainingCertificates", v)}
-                uploadFn={uploadFileAnon}
-                error={errOnStep("trainingCertificates")}
-              />
+              {renderSection(3)}
             </>
           )}
           {step === 4 && (
-            <AvailabilityGrid
-              headingRef={headingRef}
-              value={form.availability}
-              onToggle={toggleAvail}
-              error={errOnStep("availability")}
-            />
+            visibleField("availability") ? (
+              <AvailabilityGrid
+                headingRef={headingRef}
+                value={form.availability}
+                onToggle={toggleAvail}
+                error={errOnStep("availability")}
+                label={labelOf("availability")}
+                required={isReq("availability")}
+                help={helpOf("availability")}
+              />
+            ) : (
+              <h2 ref={headingRef} tabIndex={-1} className="brand-wordmark text-xl focus:outline-none">
+                {labelOf("availability")}
+              </h2>
+            )
           )}
           {hasCustom && step === CUSTOM_STEP && (
             <CustomAnswersStep
@@ -867,22 +1085,34 @@ export function ApplyPage() {
 }
 
 function AvailabilityGrid({
-  headingRef, value, onToggle, error,
+  headingRef, value, onToggle, error, label, required, help,
 }: {
   headingRef: React.Ref<HTMLHeadingElement>;
   value: { day: Day; period: Period }[];
   onToggle: (d: Day, p: Period) => void;
   error?: string;
+  label: string;
+  required: boolean;
+  help?: string | null;
 }) {
   const errorId = useId();
   return (
     <>
       <h2 ref={headingRef} tabIndex={-1} className="brand-wordmark text-xl focus:outline-none">
-        Availability <span className="text-destructive" aria-hidden="true">*</span>
-        <span className="sr-only"> (required)</span>
+        {label}
+        {required && (
+          <>
+            {" "}<span className="text-destructive" aria-hidden="true">*</span>
+            <span className="sr-only"> (required)</span>
+          </>
+        )}
       </h2>
       <p className="text-sm text-muted-foreground">
-        Select each shift period you can usually work. At least one slot is required.
+        {help?.trim()
+          ? help.trim()
+          : required
+            ? "Select each shift period you can usually work. At least one slot is required."
+            : "Select each shift period you can usually work."}
       </p>
       {error && (
         <div id={errorId} role="alert" className="text-xs text-destructive">
@@ -948,17 +1178,21 @@ function Stepper({ step, steps }: { step: number; steps: string[] }) {
 }
 
 function Field({
-  label, name, error, children, required,
+  label, name, error, children, required, help,
 }: {
   label: string;
   name?: string;
   error?: FieldError[];
   children: ReactNode;
   required?: boolean;
+  help?: string | null;
 }) {
   const fieldId = useId();
   const errorId = useId();
+  const helpId = useId();
   const match = findFieldError(name, error ?? []);
+  const helpText = help?.trim() ? help.trim() : null;
+  const describedBy = [match ? errorId : null, helpText ? helpId : null].filter(Boolean).join(" ") || undefined;
   // Wire the visual <Label> to the underlying control, and pipe both the
   // error message and aria-invalid into the control via cloneElement so
   // every input/select/textarea is properly labelled and validated for AT.
@@ -977,7 +1211,7 @@ function Field({
     controlId = el.props.id ?? fieldId;
     control = cloneElement(el, {
       id: controlId,
-      "aria-describedby": match ? errorId : el.props["aria-describedby"],
+      "aria-describedby": describedBy ?? el.props["aria-describedby"],
       "aria-invalid": match ? true : el.props["aria-invalid"],
       "aria-required": required ? true : el.props["aria-required"],
     });
@@ -993,6 +1227,7 @@ function Field({
           </>
         )}
       </Label>
+      {helpText && <div id={helpId} className="text-xs text-muted-foreground">{helpText}</div>}
       {control}
       {match && (
         <div id={errorId} role="alert" className="text-xs text-destructive">{match.message}</div>

@@ -1795,15 +1795,13 @@ paths:
     get:
       tags: [applications]
       operationId: getApplicationTemplate
-      summary: Public list of enabled custom application questions
+      summary: Public application form template (built-in field config + custom questions)
       responses:
         "200":
           description: OK
           content:
             application/json:
-              schema:
-                type: array
-                items: { $ref: "#/components/schemas/ApplicationQuestion" }
+              schema: { $ref: "#/components/schemas/ApplicationTemplate" }
 
   /admin/application-questions:
     get:
@@ -1896,6 +1894,64 @@ paths:
                 type: object
                 properties:
                   ok: { type: boolean }
+
+  /admin/application-fields:
+    get:
+      tags: [applications]
+      operationId: adminListApplicationFields
+      summary: List effective config for built-in application fields (admin)
+      security:
+        - bearerAuth: []
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: "#/components/schemas/ApplicationFieldConfig" }
+
+  /admin/application-fields/reorder:
+    post:
+      tags: [applications]
+      operationId: adminReorderApplicationFields
+      summary: Reorder built-in application fields within a section (admin)
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/ReorderApplicationFieldsRequest" }
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: "#/components/schemas/ApplicationFieldConfig" }
+
+  /admin/application-fields/{key}:
+    patch:
+      tags: [applications]
+      operationId: adminUpdateApplicationField
+      summary: Override a built-in application field (admin)
+      security:
+        - bearerAuth: []
+      parameters:
+        - { name: key, in: path, required: true, schema: { type: string } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/UpdateApplicationFieldRequest" }
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ApplicationFieldConfig" }
 
   /applications:
     post:
@@ -4314,35 +4370,67 @@ components:
           type: array
           items: { type: string }
 
+    ApplicationFieldConfig:
+      type: object
+      required: [key, section, label, required, hidden, sortOrder, locked]
+      properties:
+        key: { type: string, description: "Stable built-in field identifier." }
+        section: { type: integer, description: "Wizard step index (0=Personal, 1=I-9 & Identity, 2=TX License & experience, 3=References & docs, 4=Availability)." }
+        label: { type: string, description: "Effective label (override or default)." }
+        helpText: { type: string, nullable: true, description: "Effective help text (override or default; null when none)." }
+        required: { type: boolean, description: "Effective required-ness. Always true for locked fields." }
+        hidden: { type: boolean, description: "Whether the field is hidden from the public form. Always false for locked fields." }
+        sortOrder: { type: integer, description: "Effective order within the field's section." }
+        locked: { type: boolean, description: "Locked fields (firstName, lastName, email, phone, address) stay required+visible; only the label may be changed." }
+
+    ApplicationTemplate:
+      type: object
+      required: [questions, fieldConfig]
+      properties:
+        questions:
+          type: array
+          description: "Admin-defined custom questions, in display order."
+          items: { $ref: "#/components/schemas/ApplicationQuestion" }
+        fieldConfig:
+          type: array
+          description: "Effective config for built-in fields, sorted by section then sortOrder."
+          items: { $ref: "#/components/schemas/ApplicationFieldConfig" }
+
+    UpdateApplicationFieldRequest:
+      type: object
+      description: |
+        Partial override for a built-in field. Omitted keys leave the existing
+        override untouched. For helpText, null clears any override (revert to
+        default); empty string hides the default help text. requiredOverride and
+        hidden are ignored for locked fields.
+      properties:
+        labelOverride: { type: string, nullable: true, description: "Rename the field. Null/empty reverts to the built-in default label." }
+        helpTextOverride: { type: string, nullable: true, description: "Override help text. Null reverts to default; empty string clears help." }
+        requiredOverride: { type: boolean, nullable: true, description: "Force required/optional. Null reverts to the built-in default. Ignored for locked fields." }
+        hidden: { type: boolean, description: "Hide/show the field. Ignored for locked fields." }
+
+    ReorderApplicationFieldsRequest:
+      type: object
+      required: [section, keys]
+      properties:
+        section: { type: integer, description: "Section index whose fields are being reordered." }
+        keys:
+          type: array
+          description: "Complete ordered list of the field keys in this section."
+          items: { type: string }
+
     SubmitApplicationRequest:
       type: object
+      # Only the five locked core fields are unconditionally required at the
+      # contract level. Every other built-in field is conditionally required
+      # based on the admin's per-field config (application_field_config), which
+      # the server enforces dynamically in POST /applications.
       required:
         - firstName
         - lastName
         - email
         - phone
         - address
-        - city
-        - state
-        - zip
-        - dateOfBirth
-        - cityOfBirth
-        - stateOfBirth
-        - niNumber
-        - i9Doc
-        - ssnCardDoc
-        - idDocType
-        - idDoc
-        - siaLicenseNumber
-        - siaLicenseLevel
-        - siaLicenseExpiry
-        - previousExperience
-        - yearsExperience
-        - references
-        - photo
-        - cv
-        - trainingCertificates
-        - availability
       properties:
         firstName: { type: string }
         lastName: { type: string }
@@ -4383,17 +4471,14 @@ components:
         yearsExperience: { type: integer }
         references:
           type: array
-          minItems: 1
           items: { $ref: "#/components/schemas/ApplicationReference" }
         photo: { $ref: "#/components/schemas/UploadedFile" }
         cv: { $ref: "#/components/schemas/UploadedFile" }
         trainingCertificates:
           type: array
-          minItems: 1
           items: { $ref: "#/components/schemas/UploadedFile" }
         availability:
           type: array
-          minItems: 1
           items: { $ref: "#/components/schemas/AvailabilityCell" }
         customAnswers:
           type: array

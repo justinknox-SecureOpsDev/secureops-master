@@ -2538,31 +2538,71 @@ export const AdminSignObjectDownloadResponse = zod.object({
 });
 
 /**
- * @summary Public list of enabled custom application questions
+ * @summary Public application form template (built-in field config + custom questions)
  */
-export const GetApplicationTemplateResponseItem = zod.object({
-  id: zod.string(),
-  label: zod.string(),
-  helpText: zod.string().nullish(),
-  fieldType: zod.enum([
-    "short_text",
-    "long_text",
-    "number",
-    "date",
-    "select",
-    "multiselect",
-    "yes_no",
-  ]),
-  required: zod.boolean(),
-  options: zod.array(zod.string()).nullish(),
-  sortOrder: zod.number(),
-  enabled: zod.boolean(),
-  createdAt: zod.string().nullish(),
-  updatedAt: zod.string().nullish(),
+export const GetApplicationTemplateResponse = zod.object({
+  questions: zod
+    .array(
+      zod.object({
+        id: zod.string(),
+        label: zod.string(),
+        helpText: zod.string().nullish(),
+        fieldType: zod.enum([
+          "short_text",
+          "long_text",
+          "number",
+          "date",
+          "select",
+          "multiselect",
+          "yes_no",
+        ]),
+        required: zod.boolean(),
+        options: zod.array(zod.string()).nullish(),
+        sortOrder: zod.number(),
+        enabled: zod.boolean(),
+        createdAt: zod.string().nullish(),
+        updatedAt: zod.string().nullish(),
+      }),
+    )
+    .describe("Admin-defined custom questions, in display order."),
+  fieldConfig: zod
+    .array(
+      zod.object({
+        key: zod.string().describe("Stable built-in field identifier."),
+        section: zod
+          .number()
+          .describe(
+            "Wizard step index (0=Personal, 1=I-9 & Identity, 2=TX License & experience, 3=References & docs, 4=Availability).",
+          ),
+        label: zod.string().describe("Effective label (override or default)."),
+        helpText: zod
+          .string()
+          .nullish()
+          .describe(
+            "Effective help text (override or default; null when none).",
+          ),
+        required: zod
+          .boolean()
+          .describe("Effective required-ness. Always true for locked fields."),
+        hidden: zod
+          .boolean()
+          .describe(
+            "Whether the field is hidden from the public form. Always false for locked fields.",
+          ),
+        sortOrder: zod
+          .number()
+          .describe("Effective order within the field's section."),
+        locked: zod
+          .boolean()
+          .describe(
+            "Locked fields (firstName, lastName, email, phone, address) stay required+visible; only the label may be changed.",
+          ),
+      }),
+    )
+    .describe(
+      "Effective config for built-in fields, sorted by section then sortOrder.",
+    ),
 });
-export const GetApplicationTemplateResponse = zod.array(
-  GetApplicationTemplateResponseItem,
-);
 
 /**
  * @summary List all custom application questions (admin)
@@ -2701,9 +2741,155 @@ export const AdminDeleteApplicationQuestionResponse = zod.object({
 });
 
 /**
+ * @summary List effective config for built-in application fields (admin)
+ */
+export const AdminListApplicationFieldsResponseItem = zod.object({
+  key: zod.string().describe("Stable built-in field identifier."),
+  section: zod
+    .number()
+    .describe(
+      "Wizard step index (0=Personal, 1=I-9 & Identity, 2=TX License & experience, 3=References & docs, 4=Availability).",
+    ),
+  label: zod.string().describe("Effective label (override or default)."),
+  helpText: zod
+    .string()
+    .nullish()
+    .describe("Effective help text (override or default; null when none)."),
+  required: zod
+    .boolean()
+    .describe("Effective required-ness. Always true for locked fields."),
+  hidden: zod
+    .boolean()
+    .describe(
+      "Whether the field is hidden from the public form. Always false for locked fields.",
+    ),
+  sortOrder: zod
+    .number()
+    .describe("Effective order within the field's section."),
+  locked: zod
+    .boolean()
+    .describe(
+      "Locked fields (firstName, lastName, email, phone, address) stay required+visible; only the label may be changed.",
+    ),
+});
+export const AdminListApplicationFieldsResponse = zod.array(
+  AdminListApplicationFieldsResponseItem,
+);
+
+/**
+ * @summary Reorder built-in application fields within a section (admin)
+ */
+export const AdminReorderApplicationFieldsBody = zod.object({
+  section: zod
+    .number()
+    .describe("Section index whose fields are being reordered."),
+  keys: zod
+    .array(zod.string())
+    .describe("Complete ordered list of the field keys in this section."),
+});
+
+export const AdminReorderApplicationFieldsResponseItem = zod.object({
+  key: zod.string().describe("Stable built-in field identifier."),
+  section: zod
+    .number()
+    .describe(
+      "Wizard step index (0=Personal, 1=I-9 & Identity, 2=TX License & experience, 3=References & docs, 4=Availability).",
+    ),
+  label: zod.string().describe("Effective label (override or default)."),
+  helpText: zod
+    .string()
+    .nullish()
+    .describe("Effective help text (override or default; null when none)."),
+  required: zod
+    .boolean()
+    .describe("Effective required-ness. Always true for locked fields."),
+  hidden: zod
+    .boolean()
+    .describe(
+      "Whether the field is hidden from the public form. Always false for locked fields.",
+    ),
+  sortOrder: zod
+    .number()
+    .describe("Effective order within the field's section."),
+  locked: zod
+    .boolean()
+    .describe(
+      "Locked fields (firstName, lastName, email, phone, address) stay required+visible; only the label may be changed.",
+    ),
+});
+export const AdminReorderApplicationFieldsResponse = zod.array(
+  AdminReorderApplicationFieldsResponseItem,
+);
+
+/**
+ * @summary Override a built-in application field (admin)
+ */
+export const AdminUpdateApplicationFieldParams = zod.object({
+  key: zod.coerce.string(),
+});
+
+export const AdminUpdateApplicationFieldBody = zod
+  .object({
+    labelOverride: zod
+      .string()
+      .nullish()
+      .describe(
+        "Rename the field. Null\/empty reverts to the built-in default label.",
+      ),
+    helpTextOverride: zod
+      .string()
+      .nullish()
+      .describe(
+        "Override help text. Null reverts to default; empty string clears help.",
+      ),
+    requiredOverride: zod
+      .boolean()
+      .nullish()
+      .describe(
+        "Force required\/optional. Null reverts to the built-in default. Ignored for locked fields.",
+      ),
+    hidden: zod
+      .boolean()
+      .optional()
+      .describe("Hide\/show the field. Ignored for locked fields."),
+  })
+  .describe(
+    "Partial override for a built-in field. Omitted keys leave the existing\noverride untouched. For helpText, null clears any override (revert to\ndefault); empty string hides the default help text. requiredOverride and\nhidden are ignored for locked fields.\n",
+  );
+
+export const AdminUpdateApplicationFieldResponse = zod.object({
+  key: zod.string().describe("Stable built-in field identifier."),
+  section: zod
+    .number()
+    .describe(
+      "Wizard step index (0=Personal, 1=I-9 & Identity, 2=TX License & experience, 3=References & docs, 4=Availability).",
+    ),
+  label: zod.string().describe("Effective label (override or default)."),
+  helpText: zod
+    .string()
+    .nullish()
+    .describe("Effective help text (override or default; null when none)."),
+  required: zod
+    .boolean()
+    .describe("Effective required-ness. Always true for locked fields."),
+  hidden: zod
+    .boolean()
+    .describe(
+      "Whether the field is hidden from the public form. Always false for locked fields.",
+    ),
+  sortOrder: zod
+    .number()
+    .describe("Effective order within the field's section."),
+  locked: zod
+    .boolean()
+    .describe(
+      "Locked fields (firstName, lastName, email, phone, address) stay required+visible; only the label may be changed.",
+    ),
+});
+
+/**
  * @summary Submit a public job application
  */
-
 export const SubmitApplicationBody = zod.object({
   firstName: zod.string(),
   lastName: zod.string(),
@@ -2714,13 +2900,13 @@ export const SubmitApplicationBody = zod.object({
       'Phone number. Free-text accepted (e.g. \"(214) 555-1234\", \"214-555-1234\", \"+44 20 1234 5678\");\nserver normalizes to E.164 on submit, defaulting to US\/+1 when no country code is present.\nInvalid numbers (not 10 US digits, not 11 US digits starting with 1, or not \"+\" followed by 8–15 digits)\nreturn 400.\n',
     ),
   address: zod.string().describe("Street address (line 1, optionally line 2)"),
-  city: zod.string(),
-  state: zod.string().describe("US state code, e.g. TX"),
-  zip: zod.string(),
-  dateOfBirth: zod.string(),
-  cityOfBirth: zod.string(),
-  stateOfBirth: zod.string(),
-  niNumber: zod.string(),
+  city: zod.string().optional(),
+  state: zod.string().optional().describe("US state code, e.g. TX"),
+  zip: zod.string().optional(),
+  dateOfBirth: zod.string().optional(),
+  cityOfBirth: zod.string().optional(),
+  stateOfBirth: zod.string().optional(),
+  niNumber: zod.string().optional(),
   rightToWorkStatus: zod
     .string()
     .nullish()
@@ -2745,6 +2931,7 @@ export const SubmitApplicationBody = zod.object({
       contentType: zod.string().optional(),
       size: zod.number().optional(),
     })
+    .optional()
     .describe("Completed Form I-9."),
   ssnCardDoc: zod
     .object({
@@ -2753,9 +2940,11 @@ export const SubmitApplicationBody = zod.object({
       contentType: zod.string().optional(),
       size: zod.number().optional(),
     })
+    .optional()
     .describe("Photo\/scan of Social Security card."),
   idDocType: zod
     .enum(["drivers_license", "passport"])
+    .optional()
     .describe("Which ID accompanies the SSN card."),
   idDoc: zod
     .object({
@@ -2764,12 +2953,15 @@ export const SubmitApplicationBody = zod.object({
       contentType: zod.string().optional(),
       size: zod.number().optional(),
     })
+    .optional()
     .describe("Photo\/scan of driver's license OR passport."),
-  siaLicenseNumber: zod.string(),
-  siaLicenseLevel: zod.union([zod.literal(2), zod.literal(3), zod.literal(4)]),
-  siaLicenseExpiry: zod.string(),
-  previousExperience: zod.string(),
-  yearsExperience: zod.number(),
+  siaLicenseNumber: zod.string().optional(),
+  siaLicenseLevel: zod
+    .union([zod.literal(2), zod.literal(3), zod.literal(4)])
+    .optional(),
+  siaLicenseExpiry: zod.string().optional(),
+  previousExperience: zod.string().optional(),
+  yearsExperience: zod.number().optional(),
   references: zod
     .array(
       zod.object({
@@ -2779,19 +2971,23 @@ export const SubmitApplicationBody = zod.object({
         email: zod.string().optional(),
       }),
     )
-    .min(1),
-  photo: zod.object({
-    name: zod.string(),
-    objectPath: zod.string(),
-    contentType: zod.string().optional(),
-    size: zod.number().optional(),
-  }),
-  cv: zod.object({
-    name: zod.string(),
-    objectPath: zod.string(),
-    contentType: zod.string().optional(),
-    size: zod.number().optional(),
-  }),
+    .optional(),
+  photo: zod
+    .object({
+      name: zod.string(),
+      objectPath: zod.string(),
+      contentType: zod.string().optional(),
+      size: zod.number().optional(),
+    })
+    .optional(),
+  cv: zod
+    .object({
+      name: zod.string(),
+      objectPath: zod.string(),
+      contentType: zod.string().optional(),
+      size: zod.number().optional(),
+    })
+    .optional(),
   trainingCertificates: zod
     .array(
       zod.object({
@@ -2801,7 +2997,7 @@ export const SubmitApplicationBody = zod.object({
         size: zod.number().optional(),
       }),
     )
-    .min(1),
+    .optional(),
   availability: zod
     .array(
       zod.object({
@@ -2809,7 +3005,7 @@ export const SubmitApplicationBody = zod.object({
         period: zod.enum(["morning", "afternoon", "evening", "overnight"]),
       }),
     )
-    .min(1),
+    .optional(),
   customAnswers: zod
     .array(
       zod.object({

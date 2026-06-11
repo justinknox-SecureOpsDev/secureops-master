@@ -1406,6 +1406,57 @@ export interface ReorderApplicationQuestionsRequest {
   ids: string[];
 }
 
+export interface ApplicationFieldConfig {
+  /** Stable built-in field identifier. */
+  key: string;
+  /** Wizard step index (0=Personal, 1=I-9 & Identity, 2=TX License & experience, 3=References & docs, 4=Availability). */
+  section: number;
+  /** Effective label (override or default). */
+  label: string;
+  /** Effective help text (override or default; null when none). */
+  helpText?: string | null;
+  /** Effective required-ness. Always true for locked fields. */
+  required: boolean;
+  /** Whether the field is hidden from the public form. Always false for locked fields. */
+  hidden: boolean;
+  /** Effective order within the field's section. */
+  sortOrder: number;
+  /** Locked fields (firstName, lastName, email, phone, address) stay required+visible; only the label may be changed. */
+  locked: boolean;
+}
+
+export interface ApplicationTemplate {
+  /** Admin-defined custom questions, in display order. */
+  questions: ApplicationQuestion[];
+  /** Effective config for built-in fields, sorted by section then sortOrder. */
+  fieldConfig: ApplicationFieldConfig[];
+}
+
+/**
+ * Partial override for a built-in field. Omitted keys leave the existing
+override untouched. For helpText, null clears any override (revert to
+default); empty string hides the default help text. requiredOverride and
+hidden are ignored for locked fields.
+
+ */
+export interface UpdateApplicationFieldRequest {
+  /** Rename the field. Null/empty reverts to the built-in default label. */
+  labelOverride?: string | null;
+  /** Override help text. Null reverts to default; empty string clears help. */
+  helpTextOverride?: string | null;
+  /** Force required/optional. Null reverts to the built-in default. Ignored for locked fields. */
+  requiredOverride?: boolean | null;
+  /** Hide/show the field. Ignored for locked fields. */
+  hidden?: boolean;
+}
+
+export interface ReorderApplicationFieldsRequest {
+  /** Section index whose fields are being reordered. */
+  section: number;
+  /** Complete ordered list of the field keys in this section. */
+  keys: string[];
+}
+
 /**
  * Which ID accompanies the SSN card.
  */
@@ -1443,14 +1494,14 @@ return 400.
   phone: string;
   /** Street address (line 1, optionally line 2) */
   address: string;
-  city: string;
+  city?: string;
   /** US state code, e.g. TX */
-  state: string;
-  zip: string;
-  dateOfBirth: string;
-  cityOfBirth: string;
-  stateOfBirth: string;
-  niNumber: string;
+  state?: string;
+  zip?: string;
+  dateOfBirth?: string;
+  cityOfBirth?: string;
+  stateOfBirth?: string;
+  niNumber?: string;
   /**
    * Deprecated US right-to-work status string (kept for back-compat; I-9 + SSN + photo ID are the authoritative US set).
    * @deprecated
@@ -1462,26 +1513,23 @@ return 400.
    */
   rightToWorkDoc?: UploadedFile | null;
   /** Completed Form I-9. */
-  i9Doc: UploadedFile;
+  i9Doc?: UploadedFile;
   /** Photo/scan of Social Security card. */
-  ssnCardDoc: UploadedFile;
+  ssnCardDoc?: UploadedFile;
   /** Which ID accompanies the SSN card. */
-  idDocType: SubmitApplicationRequestIdDocType;
+  idDocType?: SubmitApplicationRequestIdDocType;
   /** Photo/scan of driver's license OR passport. */
-  idDoc: UploadedFile;
-  siaLicenseNumber: string;
-  siaLicenseLevel: SubmitApplicationRequestSiaLicenseLevel;
-  siaLicenseExpiry: string;
-  previousExperience: string;
-  yearsExperience: number;
-  /** @minItems 1 */
-  references: ApplicationReference[];
-  photo: UploadedFile;
-  cv: UploadedFile;
-  /** @minItems 1 */
-  trainingCertificates: UploadedFile[];
-  /** @minItems 1 */
-  availability: AvailabilityCell[];
+  idDoc?: UploadedFile;
+  siaLicenseNumber?: string;
+  siaLicenseLevel?: SubmitApplicationRequestSiaLicenseLevel;
+  siaLicenseExpiry?: string;
+  previousExperience?: string;
+  yearsExperience?: number;
+  references?: ApplicationReference[];
+  photo?: UploadedFile;
+  cv?: UploadedFile;
+  trainingCertificates?: UploadedFile[];
+  availability?: AvailabilityCell[];
   /** Answers to admin-defined custom questions (application_questions). */
   customAnswers?: SubmitApplicationRequestCustomAnswersItem[] | null;
 }

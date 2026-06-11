@@ -76,6 +76,32 @@ function draftFromQuestion(q: Question): Draft {
 const INPUT_CLASS =
   "w-full border rounded h-10 px-3 bg-background focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring";
 
+// Mirrors APPLICATION_FIELD_SECTIONS in the api-server registry.
+const FIELD_SECTIONS = [
+  "Personal details",
+  "I-9 & Identity",
+  "TX license & experience",
+  "References & documents",
+  "Availability",
+] as const;
+
+type EffectiveField = {
+  key: string;
+  section: number;
+  label: string;
+  helpText: string | null;
+  required: boolean;
+  hidden: boolean;
+  sortOrder: number;
+  locked: boolean;
+};
+
+type FieldDraft = { label: string; helpText: string; required: boolean; hidden: boolean };
+
+function fieldDraftFrom(f: EffectiveField): FieldDraft {
+  return { label: f.label, helpText: f.helpText ?? "", required: f.required, hidden: f.hidden };
+}
+
 export function ApplicationBuilderPage() {
   const [questions, setQuestions] = useState<Question[]>([]);
   const [loading, setLoading] = useState(true);
@@ -214,15 +240,25 @@ export function ApplicationBuilderPage() {
 
   return (
     <div className="max-w-3xl mx-auto p-4 sm:p-6 space-y-6">
-      <div className="flex items-start justify-between gap-4">
+      <div>
+        <h1 className="brand-wordmark text-2xl">Application form builder</h1>
+        <p className="text-sm text-muted-foreground mt-1">
+          Customize the public officer application: rename built-in fields, mark them optional, hide them, or reorder them — and add your own custom questions.
+        </p>
+      </div>
+
+      <StandardFieldsManager />
+
+      <div className="flex items-start justify-between gap-4 pt-2 border-t">
         <div>
-          <h1 className="brand-wordmark text-2xl">Application form builder</h1>
+          <h2 className="brand-wordmark text-xl mt-4">Custom questions</h2>
           <p className="text-sm text-muted-foreground mt-1">
             Custom questions appear on the public officer application in an "Additional questions" step, just before review.
           </p>
         </div>
         {!showCreate && (
           <Button
+            className="mt-4"
             onClick={() => {
               setCreateDraft(EMPTY_DRAFT);
               setShowCreate(true);
@@ -407,6 +443,237 @@ function DraftEditor({ draft, onChange }: { draft: Draft; onChange: (d: Draft) =
         <Label htmlFor="q-help">Help text (optional)</Label>
         <Input id="q-help" value={draft.helpText} onChange={(e) => set("helpText", e.target.value)} placeholder="Shown under the question" />
       </div>
+    </div>
+  );
+}
+
+function StandardFieldsManager() {
+  const [fields, setFields] = useState<EffectiveField[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [editingKey, setEditingKey] = useState<string | null>(null);
+  const [draft, setDraft] = useState<FieldDraft>({ label: "", helpText: "", required: false, hidden: false });
+
+  async function load() {
+    setLoading(true);
+    setError(null);
+    try {
+      const data = await api<EffectiveField[]>("/admin/application-fields");
+      setFields(data);
+    } catch (e) {
+      setError(e instanceof ApiError ? e.message : (e as Error).message);
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  useEffect(() => {
+    void load();
+  }, []);
+
+  async function saveEdit(key: string) {
+    if (!draft.label.trim()) {
+      setError("Field label cannot be empty.");
+      return;
+    }
+    setBusy(true);
+    setError(null);
+    try {
+      await api(`/admin/application-fields/${key}`, {
+        method: "PATCH",
+        body: {
+          labelOverride: draft.label.trim(),
+          helpTextOverride: draft.helpText.trim() ? draft.helpText.trim() : "",
+          requiredOverride: draft.required,
+          hidden: draft.hidden,
+        },
+      });
+      setEditingKey(null);
+      await load();
+    } catch (e) {
+      setError(e instanceof ApiError ? e.message : (e as Error).message);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function toggleHidden(f: EffectiveField) {
+    setBusy(true);
+    setError(null);
+    try {
+      await api(`/admin/application-fields/${f.key}`, { method: "PATCH", body: { hidden: !f.hidden } });
+      await load();
+    } catch (e) {
+      setError(e instanceof ApiError ? e.message : (e as Error).message);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function reorder(section: number, sectionKeys: string[], index: number, dir: -1 | 1) {
+    const target = index + dir;
+    if (target < 0 || target >= sectionKeys.length) return;
+    const keys = [...sectionKeys];
+    [keys[index], keys[target]] = [keys[target], keys[index]];
+    // Optimistic: reassign sortOrder within the section, keep others as-is.
+    setFields((prev) => {
+      const orderByKey = new Map(keys.map((k, i) => [k, i]));
+      return [...prev]
+        .map((f) => (f.section === section ? { ...f, sortOrder: orderByKey.get(f.key) ?? f.sortOrder } : f))
+        .sort((a, b) => (a.section - b.section) || (a.sortOrder - b.sortOrder));
+    });
+    setBusy(true);
+    setError(null);
+    try {
+      await api("/admin/application-fields/reorder", { method: "POST", body: { section, keys } });
+      await load();
+    } catch (e) {
+      setError(e instanceof ApiError ? e.message : (e as Error).message);
+      await load();
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  const bySection = FIELD_SECTIONS.map((_, s) => fields.filter((f) => f.section === s));
+
+  return (
+    <div className="space-y-4">
+      <h2 className="brand-wordmark text-xl">Standard fields</h2>
+      {error && (
+        <div role="alert" className="rounded border border-destructive/40 bg-destructive/10 text-destructive text-sm px-3 py-2">
+          {error}
+        </div>
+      )}
+      {loading ? (
+        <div className="flex items-center gap-2 text-muted-foreground text-sm">
+          <Loader2 className="w-4 h-4 animate-spin" /> Loading…
+        </div>
+      ) : (
+        <div className="space-y-5">
+          {FIELD_SECTIONS.map((sectionLabel, s) => {
+            const sectionFields = bySection[s];
+            if (sectionFields.length === 0) return null;
+            const sectionKeys = sectionFields.map((f) => f.key);
+            return (
+              <div key={s} className="space-y-2">
+                <div className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">{sectionLabel}</div>
+                <ul className="space-y-2">
+                  {sectionFields.map((f, i) => (
+                    <li key={f.key} className="rounded-lg border bg-card">
+                      {editingKey === f.key ? (
+                        <div className="p-4 space-y-3">
+                          <div className="space-y-1">
+                            <Label htmlFor={`f-label-${f.key}`}>Field label</Label>
+                            <Input id={`f-label-${f.key}`} value={draft.label} onChange={(e) => setDraft({ ...draft, label: e.target.value })} />
+                          </div>
+                          <div className="space-y-1">
+                            <Label htmlFor={`f-help-${f.key}`}>Help text (optional)</Label>
+                            <Input id={`f-help-${f.key}`} value={draft.helpText} onChange={(e) => setDraft({ ...draft, helpText: e.target.value })} placeholder="Shown under the field" />
+                          </div>
+                          <div className="flex items-center gap-4">
+                            <label className="flex items-center gap-2 text-sm">
+                              <input type="checkbox" className="h-4 w-4" checked={draft.required} disabled={f.locked} onChange={(e) => setDraft({ ...draft, required: e.target.checked })} />
+                              Required
+                            </label>
+                            <label className="flex items-center gap-2 text-sm">
+                              <input type="checkbox" className="h-4 w-4" checked={!draft.hidden} disabled={f.locked} onChange={(e) => setDraft({ ...draft, hidden: !e.target.checked })} />
+                              Visible on form
+                            </label>
+                          </div>
+                          {f.locked && (
+                            <p className="text-xs text-muted-foreground">
+                              This is a core field — it's always required and visible. You can only rename it or change its help text.
+                            </p>
+                          )}
+                          <div className="flex justify-end gap-2 pt-1">
+                            <Button variant="outline" onClick={() => setEditingKey(null)} disabled={busy}>Cancel</Button>
+                            <Button onClick={() => saveEdit(f.key)} disabled={busy}>
+                              {busy ? <Loader2 className="w-4 h-4 mr-1.5 animate-spin" /> : <Check className="w-4 h-4 mr-1.5" />}
+                              Save
+                            </Button>
+                          </div>
+                        </div>
+                      ) : (
+                        <div className="flex items-start gap-3 p-3">
+                          <div className="flex flex-col items-center pt-0.5">
+                            <button
+                              type="button"
+                              className="text-muted-foreground hover:text-foreground disabled:opacity-30"
+                              aria-label={`Move "${f.label}" up`}
+                              onClick={() => reorder(s, sectionKeys, i, -1)}
+                              disabled={busy || i === 0}
+                            >
+                              <ChevronUp className="w-4 h-4" />
+                            </button>
+                            <GripVertical className="w-4 h-4 text-muted-foreground/40" aria-hidden="true" />
+                            <button
+                              type="button"
+                              className="text-muted-foreground hover:text-foreground disabled:opacity-30"
+                              aria-label={`Move "${f.label}" down`}
+                              onClick={() => reorder(s, sectionKeys, i, 1)}
+                              disabled={busy || i === sectionFields.length - 1}
+                            >
+                              <ChevronDown className="w-4 h-4" />
+                            </button>
+                          </div>
+                          <div className="flex-1 min-w-0">
+                            <div className="flex items-center gap-2 flex-wrap">
+                              <span className="font-medium">{f.label}</span>
+                              {f.required && (
+                                <span className="text-[10px] uppercase tracking-wide font-semibold rounded px-1.5 py-0.5 bg-amber-100 text-amber-800">
+                                  Required
+                                </span>
+                              )}
+                              {f.hidden && (
+                                <span className="text-[10px] uppercase tracking-wide font-semibold rounded px-1.5 py-0.5 bg-muted text-muted-foreground">
+                                  Hidden
+                                </span>
+                              )}
+                              {f.locked && (
+                                <span className="text-[10px] uppercase tracking-wide font-semibold rounded px-1.5 py-0.5 bg-brand-navy/10 text-brand-navy">
+                                  Core
+                                </span>
+                              )}
+                            </div>
+                            {f.helpText && <div className="text-xs text-muted-foreground mt-0.5 italic">{f.helpText}</div>}
+                          </div>
+                          <div className="flex items-center gap-1">
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              aria-label={f.hidden ? `Show "${f.label}"` : `Hide "${f.label}"`}
+                              title={f.locked ? "Core fields are always visible" : f.hidden ? "Show on form" : "Hide from form"}
+                              onClick={() => toggleHidden(f)}
+                              disabled={busy || f.locked}
+                            >
+                              <Power className={`w-4 h-4 ${f.hidden ? "text-muted-foreground" : "text-emerald-600"}`} />
+                            </Button>
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              aria-label={`Edit "${f.label}"`}
+                              onClick={() => {
+                                setEditingKey(f.key);
+                                setDraft(fieldDraftFrom(f));
+                                setError(null);
+                              }}
+                              disabled={busy}
+                            >
+                              <Pencil className="w-4 h-4" />
+                            </Button>
+                          </div>
+                        </div>
+                      )}
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            );
+          })}
+        </div>
+      )}
     </div>
   );
 }

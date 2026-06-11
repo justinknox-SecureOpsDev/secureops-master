@@ -16,8 +16,15 @@ import {
   onboardingTokensTable,
   onboardingSubmissionsTable,
   applicationAmendmentTokensTable,
+  applicationFieldConfigTable,
   policiesTable,
 } from "@workspace/db";
+import {
+  APPLICATION_FIELD_REGISTRY,
+  mergeApplicationFields,
+  isBuiltInApplicationField,
+  type EffectiveApplicationField,
+} from "../lib/applicationFields";
 import { publicApplicationLimiter, tokenLookupLimiter, applicationDraftIpLimiter, applicationDraftEmailLimiter } from "../middlewares/rateLimit";
 import { ObjectStorageService } from "../lib/objectStorage";
 import {
@@ -332,6 +339,28 @@ const CreateQuestionBody = z.object({
 const UpdateQuestionBody = CreateQuestionBody.partial();
 const ReorderQuestionsBody = z.object({ ids: z.array(z.string().uuid()).max(200) });
 
+// ---- Built-in field config (form builder for hardcoded fields) -----------
+
+// PATCH body for a single built-in field override. `undefined` (omitted) keys
+// leave the stored override untouched; the explicit nulls below let an admin
+// revert an override to the registry default.
+const UpdateApplicationFieldBody = z.object({
+  labelOverride: z.string().trim().max(300).nullish(),
+  helpTextOverride: z.string().trim().max(1000).nullish(),
+  requiredOverride: z.boolean().nullish(),
+  hidden: z.boolean().optional(),
+});
+const ReorderApplicationFieldsBody = z.object({
+  section: z.number().int().min(0).max(APPLICATION_FIELD_REGISTRY.length),
+  keys: z.array(z.string().min(1).max(100)).max(100),
+});
+
+/** Load all override rows and merge them with the registry. */
+async function loadEffectiveApplicationFields(): Promise<EffectiveApplicationField[]> {
+  const rows = await db.select().from(applicationFieldConfigTable);
+  return mergeApplicationFields(rows);
+}
+
 /**
  * Fire-and-forget background geocode. Writes location_lat/lng to the row
  * if Census returns a match. Errors are logged but never propagated —
@@ -520,6 +549,47 @@ router.post("/applications", publicApplicationLimiter, async (req, res): Promise
       return;
     }
   }
+  // Load the admin's per-field config and enforce required/hidden dynamically.
+  // The contract only mandates the five locked core fields; every other
+  // built-in field is required (or not) according to application_field_config.
+  const effectiveFields = await loadEffectiveApplicationFields();
+  const fieldCfg = new Map(effectiveFields.map((f) => [f.key, f]));
+  const isFieldHidden = (key: string): boolean => fieldCfg.get(key)?.hidden ?? false;
+  // Whether the applicant actually supplied a value for a built-in field.
+  const fieldPresent = (key: string): boolean => {
+    switch (key) {
+      case "city": return !!d.city?.trim();
+      case "state": return !!d.state?.trim();
+      case "zip": return !!d.zip?.trim();
+      case "dateOfBirth": return !!d.dateOfBirth?.trim();
+      case "cityOfBirth": return !!d.cityOfBirth?.trim();
+      case "stateOfBirth": return !!d.stateOfBirth?.trim();
+      case "niNumber": return !!d.niNumber?.trim();
+      case "i9Doc": return !!d.i9Doc?.objectPath;
+      case "ssnCardDoc": return !!d.ssnCardDoc?.objectPath;
+      case "idDocType": return !!d.idDocType;
+      case "idDoc": return !!d.idDoc?.objectPath;
+      case "siaLicenseNumber": return !!d.siaLicenseNumber?.trim();
+      case "siaLicenseLevel": return d.siaLicenseLevel !== undefined && d.siaLicenseLevel !== null;
+      case "siaLicenseExpiry": return !!d.siaLicenseExpiry?.trim();
+      case "previousExperience": return !!d.previousExperience?.trim();
+      case "yearsExperience": return d.yearsExperience !== undefined && d.yearsExperience !== null;
+      case "references": return Array.isArray(d.references) && d.references.length > 0;
+      case "photo": return !!d.photo?.objectPath;
+      case "cv": return !!d.cv?.objectPath;
+      case "trainingCertificates": return Array.isArray(d.trainingCertificates) && d.trainingCertificates.length > 0;
+      case "availability": return Array.isArray(d.availability) && d.availability.length > 0;
+      default: return true;
+    }
+  };
+  for (const f of effectiveFields) {
+    if (f.locked || f.hidden || !f.required) continue;
+    if (!fieldPresent(f.key)) {
+      const message = `${f.label} is required.`;
+      sendApplicationValidationError(res, [{ field: f.key, message }], message);
+      return;
+    }
+  }
   // Validate + denormalize answers to admin-defined custom questions. We store
   // [{ questionId, label, fieldType, value }] so HR can read historical answers
   // even after a question is later edited or deleted.
@@ -557,30 +627,32 @@ router.post("/applications", publicApplicationLimiter, async (req, res): Promise
       email: d.email.toLowerCase(),
       phone: normalizedPhone,
       address: d.address,
-      city: d.city ?? null,
-      state: d.state ?? null,
-      zip: d.zip ?? null,
-      dateOfBirth: d.dateOfBirth ?? null,
-      cityOfBirth: d.cityOfBirth ?? null,
-      stateOfBirth: d.stateOfBirth ?? null,
-      niNumber: d.niNumber ?? null,
+      // Hidden built-in fields are stored as null even if a value slips through
+      // (e.g. a stale client). Otherwise persist whatever the applicant gave.
+      city: isFieldHidden("city") ? null : (d.city ?? null),
+      state: isFieldHidden("state") ? null : (d.state ?? null),
+      zip: isFieldHidden("zip") ? null : (d.zip ?? null),
+      dateOfBirth: isFieldHidden("dateOfBirth") ? null : (d.dateOfBirth ?? null),
+      cityOfBirth: isFieldHidden("cityOfBirth") ? null : (d.cityOfBirth ?? null),
+      stateOfBirth: isFieldHidden("stateOfBirth") ? null : (d.stateOfBirth ?? null),
+      niNumber: isFieldHidden("niNumber") ? null : (d.niNumber ?? null),
       rightToWorkStatus: d.rightToWorkStatus ?? null,
       rightToWorkDocKey: d.rightToWorkDoc?.objectPath ?? null,
-      i9DocKey: d.i9Doc.objectPath,
-      ssnCardDocKey: d.ssnCardDoc.objectPath,
-      idDocType: d.idDocType,
-      idDocKey: d.idDoc.objectPath,
-      siaLicenseNumber: d.siaLicenseNumber,
-      siaLicenseLevel: d.siaLicenseLevel,
-      siaLicenseExpiry: d.siaLicenseExpiry,
-      previousExperience: d.previousExperience,
-      yearsExperience: d.yearsExperience,
-      references: normalizedReferences ?? d.references,
+      i9DocKey: isFieldHidden("i9Doc") ? null : (d.i9Doc?.objectPath ?? null),
+      ssnCardDocKey: isFieldHidden("ssnCardDoc") ? null : (d.ssnCardDoc?.objectPath ?? null),
+      idDocType: isFieldHidden("idDocType") ? null : (d.idDocType ?? null),
+      idDocKey: isFieldHidden("idDoc") ? null : (d.idDoc?.objectPath ?? null),
+      siaLicenseNumber: isFieldHidden("siaLicenseNumber") ? null : (d.siaLicenseNumber ?? null),
+      siaLicenseLevel: isFieldHidden("siaLicenseLevel") ? null : (d.siaLicenseLevel ?? null),
+      siaLicenseExpiry: isFieldHidden("siaLicenseExpiry") ? null : (d.siaLicenseExpiry ?? null),
+      previousExperience: isFieldHidden("previousExperience") ? null : (d.previousExperience ?? null),
+      yearsExperience: isFieldHidden("yearsExperience") ? null : (d.yearsExperience ?? null),
+      references: isFieldHidden("references") ? null : (normalizedReferences ?? d.references ?? null),
       customAnswers: storedCustomAnswers,
-      photoKey: d.photo.objectPath,
-      cvKey: d.cv.objectPath,
-      trainingCertificateKeys: d.trainingCertificates.map((f) => f.objectPath),
-      availability: d.availability,
+      photoKey: isFieldHidden("photo") ? null : (d.photo?.objectPath ?? null),
+      cvKey: isFieldHidden("cv") ? null : (d.cv?.objectPath ?? null),
+      trainingCertificateKeys: isFieldHidden("trainingCertificates") ? null : (d.trainingCertificates?.map((f) => f.objectPath) ?? null),
+      availability: isFieldHidden("availability") ? null : (d.availability ?? null),
     }).returning();
     // Best-effort background geocode so admins can filter by distance later.
     // Never blocks the applicant response.
@@ -623,14 +695,92 @@ router.post("/applications", publicApplicationLimiter, async (req, res): Promise
 
 // ---- Form builder: custom question CRUD ----------------------------------
 
-/** Public: enabled custom questions for the Apply form, in display order. */
+/**
+ * Public: the full Apply form template — built-in field config (labels, help,
+ * required, hidden, order) plus enabled admin-defined custom questions.
+ */
 router.get("/application-template", async (_req, res): Promise<void> => {
-  const rows = await db
-    .select()
-    .from(applicationQuestionsTable)
-    .where(eq(applicationQuestionsTable.enabled, true))
-    .orderBy(asc(applicationQuestionsTable.sortOrder), asc(applicationQuestionsTable.id));
-  res.json(rows.map(questionToApi));
+  const [rows, fieldConfig] = await Promise.all([
+    db
+      .select()
+      .from(applicationQuestionsTable)
+      .where(eq(applicationQuestionsTable.enabled, true))
+      .orderBy(asc(applicationQuestionsTable.sortOrder), asc(applicationQuestionsTable.id)),
+    loadEffectiveApplicationFields(),
+  ]);
+  // Hidden built-in fields are not surfaced to the public form at all.
+  const visible = fieldConfig.filter((f) => !f.hidden);
+  res.json({ questions: rows.map(questionToApi), fieldConfig: visible });
+});
+
+// ---- Admin: built-in field config CRUD -----------------------------------
+
+/** Admin: effective config for every built-in field (incl. hidden + locked). */
+router.get("/admin/application-fields", requireAdmin, async (_req, res): Promise<void> => {
+  res.json(await loadEffectiveApplicationFields());
+});
+
+// Registered before the :key route so it isn't shadowed by the path param.
+router.post("/admin/application-fields/reorder", requireAdmin, async (req, res): Promise<void> => {
+  const parsed = ReorderApplicationFieldsBody.safeParse(req.body);
+  if (!parsed.success) {
+    res.status(400).json({ error: "Bad Request", message: parsed.error.message });
+    return;
+  }
+  const { section, keys } = parsed.data;
+  // The submitted keys must be exactly the built-in fields in this section —
+  // a complete permutation — so stale clients can't gap or duplicate orders.
+  const sectionKeys = APPLICATION_FIELD_REGISTRY.filter((f) => f.section === section).map((f) => f.key);
+  const sameSet = keys.length === sectionKeys.length
+    && new Set(keys).size === keys.length
+    && keys.every((k) => sectionKeys.includes(k));
+  if (!sameSet) {
+    res.status(409).json({ error: "Conflict", message: "Field set changed; reload and try again." });
+    return;
+  }
+  await db.transaction(async (tx) => {
+    for (let i = 0; i < keys.length; i++) {
+      await tx
+        .insert(applicationFieldConfigTable)
+        .values({ fieldKey: keys[i], sortOrder: i })
+        .onConflictDoUpdate({
+          target: applicationFieldConfigTable.fieldKey,
+          set: { sortOrder: i, updatedAt: new Date() },
+        });
+    }
+  });
+  res.json(await loadEffectiveApplicationFields());
+});
+
+router.patch("/admin/application-fields/:key", requireAdmin, async (req, res): Promise<void> => {
+  const key = Array.isArray(req.params.key) ? req.params.key[0] : req.params.key;
+  if (!isBuiltInApplicationField(key)) {
+    res.status(404).json({ error: "Not Found", message: "Unknown application field." });
+    return;
+  }
+  const parsed = UpdateApplicationFieldBody.safeParse(req.body);
+  if (!parsed.success) {
+    res.status(400).json({ error: "Bad Request", message: parsed.error.message });
+    return;
+  }
+  const d = parsed.data;
+  const def = APPLICATION_FIELD_REGISTRY.find((f) => f.key === key)!;
+  // Locked core fields (firstName, lastName, email, phone, address) may only be
+  // relabelled — never made optional or hidden. Silently drop those overrides.
+  const update: Partial<typeof applicationFieldConfigTable.$inferInsert> = { fieldKey: key };
+  if (d.labelOverride !== undefined) update.labelOverride = d.labelOverride ?? null;
+  if (d.helpTextOverride !== undefined) update.helpTextOverride = d.helpTextOverride ?? null;
+  if (!def.locked) {
+    if (d.requiredOverride !== undefined) update.requiredOverride = d.requiredOverride ?? null;
+    if (d.hidden !== undefined) update.hidden = d.hidden;
+  }
+  update.updatedAt = new Date();
+  await db
+    .insert(applicationFieldConfigTable)
+    .values(update as typeof applicationFieldConfigTable.$inferInsert)
+    .onConflictDoUpdate({ target: applicationFieldConfigTable.fieldKey, set: update });
+  const merged = await loadEffectiveApplicationFields();
+  res.json(merged.find((f) => f.key === key));
 });
 
 /** Admin: full list (enabled + disabled) in display order. */
