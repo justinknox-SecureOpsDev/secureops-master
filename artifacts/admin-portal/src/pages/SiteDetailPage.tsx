@@ -882,8 +882,33 @@ export function SiteDetailPage() {
               <div className="text-sm text-muted-foreground border rounded p-4">
                 No checkpoints yet. Add one above to start logging patrol scans.
               </div>
+            ) : isMobile ? (
+              <div className="space-y-3">
+                {checkpoints.map((c) => (
+                  <div key={c.id} className="border rounded-lg p-3 space-y-2">
+                    <div className="flex items-start justify-between gap-2">
+                      <span className="font-medium">{c.label}</span>
+                      <span className={c.isActive ? "text-emerald-600 text-sm" : "text-muted-foreground text-sm"}>
+                        {c.isActive ? "Active" : "Disabled"}
+                      </span>
+                    </div>
+                    <div className="grid grid-cols-2 gap-x-3 gap-y-1 text-sm">
+                      <span className="text-muted-foreground">Code</span>
+                      <span className="text-right font-mono text-xs">{c.code}</span>
+                    </div>
+                    <div className="flex flex-wrap items-center gap-2 pt-1 border-t mt-1">
+                      <Button variant="outline" size="sm" className="flex-1 min-w-[5rem]" onClick={() => toggleActive(c)}>
+                        {c.isActive ? "Disable" : "Enable"}
+                      </Button>
+                      <Button variant="outline" size="sm" className="flex-1 min-w-[5rem]" onClick={() => deleteCheckpoint(c)}>
+                        <Trash2 className="w-3.5 h-3.5 text-destructive mr-1" /> Delete
+                      </Button>
+                    </div>
+                  </div>
+                ))}
+              </div>
             ) : (
-              <div className="border rounded overflow-hidden">
+              <div className="border rounded overflow-x-auto">
                 <table className="w-full text-sm">
                   <thead className="bg-muted/50">
                     <tr>
@@ -932,8 +957,23 @@ export function SiteDetailPage() {
               <div className="text-sm text-muted-foreground border rounded p-4">
                 No scans recorded at this site yet.
               </div>
+            ) : isMobile ? (
+              <div className="space-y-3">
+                {scans.map((s) => (
+                  <div key={s.id} className="border rounded-lg p-3 space-y-2">
+                    <div className="flex items-start justify-between gap-2">
+                      <span className="font-medium">{[s.firstName, s.lastName].filter(Boolean).join(" ") || "—"}</span>
+                      <span className="text-sm text-muted-foreground text-right">{fmt(s.scannedAt)}</span>
+                    </div>
+                    <div className="grid grid-cols-2 gap-x-3 gap-y-1 text-sm">
+                      <span className="text-muted-foreground">Checkpoint</span>
+                      <span className="text-right">{s.checkpointLabel ?? <span className="text-muted-foreground">(removed)</span>}</span>
+                    </div>
+                  </div>
+                ))}
+              </div>
             ) : (
-              <div className="border rounded overflow-hidden">
+              <div className="border rounded overflow-x-auto">
                 <table className="w-full text-sm">
                   <thead className="bg-muted/50">
                     <tr>
@@ -1317,8 +1357,31 @@ export function SiteDetailPage() {
               <div className="text-sm text-muted-foreground border rounded p-4">
                 No subcontractor time entries for this site in the selected date range.
               </div>
+            ) : isMobile ? (
+              <div className="space-y-3">
+                {subEntries.map((s) => (
+                  <div key={s.id} className="border rounded-lg p-3 space-y-2">
+                    <div className="flex items-start justify-between gap-2">
+                      <span className="font-medium">{s.name?.trim() || "—"}</span>
+                      <span className="text-right tabular-nums text-sm">
+                        {s.hoursWorked != null ? `${Number(s.hoursWorked).toFixed(2)} hrs` : "—"}
+                      </span>
+                    </div>
+                    <div className="grid grid-cols-2 gap-x-3 gap-y-1 text-sm">
+                      <span className="text-muted-foreground">Company</span>
+                      <span className="text-right">{s.company?.trim() || "—"}</span>
+                      <span className="text-muted-foreground">Badge</span>
+                      <span className="text-right">{s.badgeId?.trim() || "—"}</span>
+                      <span className="text-muted-foreground">Clock in</span>
+                      <span className="text-right">{s.clockInAt ? fmt(s.clockInAt) : "—"}</span>
+                      <span className="text-muted-foreground">Clock out</span>
+                      <span className="text-right">{s.clockOutAt ? fmt(s.clockOutAt) : <span className="text-amber-600">In progress</span>}</span>
+                    </div>
+                  </div>
+                ))}
+              </div>
             ) : (
-              <div className="border rounded overflow-hidden">
+              <div className="border rounded overflow-x-auto">
                 <table className="w-full text-sm">
                   <thead className="bg-muted/50">
                     <tr>
@@ -1391,6 +1454,7 @@ const LEVEL_OPTIONS: { value: number; name: string }[] = [
 ];
 
 function SiteRateCard({ siteId }: { siteId: string }) {
+  const isMobile = useIsMobile();
   const [rows, setRows] = useState<SiteRateRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [err, setErr] = useState<string | null>(null);
@@ -1502,8 +1566,33 @@ function SiteRateCard({ siteId }: { siteId: string }) {
         <div className="text-sm text-muted-foreground border rounded p-4">
           No rates configured yet. Add the first license-level rate below — shifts at this site will pick it up automatically.
         </div>
+      ) : isMobile ? (
+        <div className="space-y-3 mb-3">
+          {rows.map((r) => (
+            <div key={r.id} className="border rounded-lg p-3 space-y-2">
+              <div className="flex items-start justify-between gap-2">
+                <span className="font-medium">{LEVEL_OPTIONS.find((o) => o.value === r.licenseLevel)?.name ?? `L${r.licenseLevel}`}</span>
+                <span className="text-sm text-muted-foreground text-right">{r.label ?? "—"}</span>
+              </div>
+              <div className="grid grid-cols-2 gap-x-3 gap-y-1 text-sm">
+                <span className="text-muted-foreground">Pay $/hr</span>
+                <span className="text-right font-mono">${parseFloat(r.payRate).toFixed(2)}</span>
+                <span className="text-muted-foreground">Bill $/hr</span>
+                <span className="text-right font-mono">${parseFloat(r.billRate).toFixed(2)}</span>
+              </div>
+              <div className="flex flex-wrap items-center gap-2 pt-1 border-t mt-1">
+                <Button variant="outline" size="sm" className="flex-1 min-w-[5rem]" onClick={() => editExisting(r)}>
+                  <Pencil className="w-3.5 h-3.5 mr-1" /> Edit
+                </Button>
+                <Button variant="outline" size="sm" className="flex-1 min-w-[5rem]" onClick={() => removeRow(r)}>
+                  <Trash2 className="w-3.5 h-3.5 text-destructive mr-1" /> Remove
+                </Button>
+              </div>
+            </div>
+          ))}
+        </div>
       ) : (
-        <div className="border rounded overflow-hidden mb-3">
+        <div className="border rounded overflow-x-auto mb-3">
           <table className="w-full text-sm">
             <thead className="bg-muted/50">
               <tr>
