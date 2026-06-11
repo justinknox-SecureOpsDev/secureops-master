@@ -32,6 +32,7 @@ describe("buildNavGroups", () => {
     const hr = adminGroups.find((g) => g.key === "hr");
     expect(hr?.items.map((i) => i.href)).toEqual([
       "/hr/applications",
+      "/hr/application-builder",
       "/hr/onboarding",
       "/hr/invitations",
       "/hr/policies",

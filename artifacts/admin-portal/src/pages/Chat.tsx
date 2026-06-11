@@ -5,7 +5,7 @@ import { api, getToken } from "@/lib/api";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Send, Loader2, Wifi, WifiOff, MessageCircle } from "lucide-react";
+import { Send, Loader2, Wifi, WifiOff, MessageCircle, Trash2 } from "lucide-react";
 
 type Room = { id: string; name: string; type: string };
 type UnreadCount = { roomId: string; otherUserId: string; unreadCount: number };
@@ -91,6 +91,17 @@ export default function ChatPage() {
     markRead.mutate(roomId);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [roomId, messages.data]);
+
+  // Admin-only: permanently delete a group channel (messages + memberships
+  // cascade server-side). Direct messages are not deletable.
+  const deleteRoom = useMutation({
+    mutationFn: (id: string) => api(`/chat/rooms/${id}`, { method: "DELETE" }),
+    onSuccess: (_data, id) => {
+      if (id === roomId) setRoomId("");
+      qc.invalidateQueries({ queryKey: ["chat", "rooms"] });
+      qc.invalidateQueries({ queryKey: ["chat", "unread-counts"] });
+    },
+  });
 
   // Scroll to bottom when new messages land.
   useEffect(() => {
@@ -184,33 +195,58 @@ export default function ChatPage() {
             )}
             {rooms.data?.map((r) => {
               const n = r.id === roomId ? 0 : unreadByRoom.get(r.id) ?? 0;
+              const selected = r.id === roomId;
               return (
-                <button
+                <div
                   key={r.id}
-                  type="button"
-                  onClick={() => setRoomId(r.id)}
-                  className={`w-full text-left text-sm rounded px-2 py-1.5 transition-colors ${
-                    r.id === roomId ? "bg-accent text-accent-foreground" : "hover:bg-accent/50"
+                  className={`group flex items-stretch rounded transition-colors ${
+                    selected ? "bg-accent text-accent-foreground" : "hover:bg-accent/50"
                   }`}
-                  aria-label={
-                    n > 0
-                      ? `${r.name ?? r.type}, ${n} unread message${n === 1 ? "" : "s"}`
-                      : (r.name ?? r.type)
-                  }
                 >
-                  <div className="flex items-center gap-1.5">
-                    <span className={`truncate ${n > 0 ? "font-semibold" : ""}`}>
-                      {r.name ?? r.type}
-                      {r.type === "announcements" && " 📣"}
-                    </span>
-                    {n > 0 && (
-                      <span className="ml-auto flex-shrink-0 inline-flex items-center justify-center min-w-[1.25rem] h-5 px-1.5 rounded-full bg-red-600 text-white text-[10px] font-semibold leading-none">
-                        {n > 99 ? "99+" : n}
+                  <button
+                    type="button"
+                    onClick={() => setRoomId(r.id)}
+                    className="flex-1 min-w-0 text-left text-sm px-2 py-1.5"
+                    aria-label={
+                      n > 0
+                        ? `${r.name ?? r.type}, ${n} unread message${n === 1 ? "" : "s"}`
+                        : (r.name ?? r.type)
+                    }
+                  >
+                    <div className="flex items-center gap-1.5">
+                      <span className={`truncate ${n > 0 ? "font-semibold" : ""}`}>
+                        {r.name ?? r.type}
+                        {r.type === "announcements" && " 📣"}
                       </span>
-                    )}
-                  </div>
-                  <div className="text-[10px] opacity-60 uppercase tracking-wide">{r.type}</div>
-                </button>
+                      {n > 0 && (
+                        <span className="ml-auto flex-shrink-0 inline-flex items-center justify-center min-w-[1.25rem] h-5 px-1.5 rounded-full bg-red-600 text-white text-[10px] font-semibold leading-none">
+                          {n > 99 ? "99+" : n}
+                        </span>
+                      )}
+                    </div>
+                    <div className="text-[10px] opacity-60 uppercase tracking-wide">{r.type}</div>
+                  </button>
+                  {r.type !== "direct" && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        if (
+                          window.confirm(
+                            `Delete the "${r.name ?? r.type}" channel?\n\nThis permanently removes the channel and all of its messages for everyone. This cannot be undone.`,
+                          )
+                        ) {
+                          deleteRoom.mutate(r.id);
+                        }
+                      }}
+                      disabled={deleteRoom.isPending}
+                      className="flex-shrink-0 self-stretch px-2 text-muted-foreground opacity-0 transition-opacity hover:text-red-600 focus:opacity-100 group-hover:opacity-100 disabled:opacity-50"
+                      aria-label={`Delete ${r.name ?? r.type} channel`}
+                      title="Delete channel"
+                    >
+                      <Trash2 className="w-3.5 h-3.5" />
+                    </button>
+                  )}
+                </div>
               );
             })}
           </aside>

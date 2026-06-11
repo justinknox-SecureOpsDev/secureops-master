@@ -6,7 +6,7 @@ import {
   AlertTriangle, ShieldCheck, Repeat, KeyRound, IdCard, Link2, Download,
   Radio as RadioIcon, Radar, MessageCircle, Users as UsersIcon,
   Briefcase, Calculator, Shield, Settings, CalendarRange, Menu, X, Building2,
-  ArrowLeftRight, GraduationCap, LifeBuoy,
+  ArrowLeftRight, GraduationCap, LifeBuoy, FormInput,
   type LucideIcon,
 } from "lucide-react";
 import { useAuth } from "@/lib/auth";
@@ -144,6 +144,7 @@ export function buildNavGroups(isDispatcher: boolean): NavGroup[] {
     Icon: Briefcase,
     items: [
       { href: "/hr/applications", label: "Applications", Icon: ClipboardList },
+      { href: "/hr/application-builder", label: "Application Builder", Icon: FormInput },
       { href: "/hr/onboarding", label: "Onboarding", Icon: UserPlus },
       { href: "/hr/invitations", label: "Invitations", Icon: MailPlus },
       { href: "/hr/policies", label: "Policies", Icon: FileText },

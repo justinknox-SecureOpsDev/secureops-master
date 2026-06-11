@@ -1,5 +1,5 @@
 import { Router, type IRouter, type Request, type Response } from "express";
-import { eq, desc, ilike, or, sql, and, isNull, type SQL } from "drizzle-orm";
+import { eq, desc, asc, ilike, or, sql, and, isNull, type SQL } from "drizzle-orm";
 import { sitesTable } from "@workspace/db";
 import { haversineMiles } from "../lib/geofence";
 import { geocodeUsAddress } from "../lib/geocode";
@@ -8,6 +8,7 @@ import { randomBytes } from "crypto";
 import {
   db,
   applicationsTable,
+  applicationQuestionsTable,
   applicationDraftsTable,
   usersTable,
   employeesTable,
@@ -218,6 +219,7 @@ function rowToApplication(r: ApplicationRow, distanceMiles: number | null = null
     dateOfBirth: r.dateOfBirth ?? null,
     siaLicenseExpiry: r.siaLicenseExpiry ?? null,
     references: r.references ?? null,
+    customAnswers: r.customAnswers ?? null,
     trainingCertificateKeys: r.trainingCertificateKeys ?? null,
     availability: r.availability ?? null,
     reviewedAt: r.reviewedAt ? r.reviewedAt.toISOString() : null,
@@ -230,6 +232,105 @@ function rowToApplication(r: ApplicationRow, distanceMiles: number | null = null
     createdAt: r.createdAt.toISOString(),
   };
 }
+
+// ---- Custom application questions (form builder) -------------------------
+
+const CUSTOM_FIELD_TYPES = [
+  "short_text",
+  "long_text",
+  "number",
+  "date",
+  "select",
+  "multiselect",
+  "yes_no",
+] as const;
+type CustomFieldType = (typeof CUSTOM_FIELD_TYPES)[number];
+
+type ApplicationQuestionRow = typeof applicationQuestionsTable.$inferSelect;
+
+function customTypeNeedsOptions(t: CustomFieldType): boolean {
+  return t === "select" || t === "multiselect";
+}
+
+function questionToApi(q: ApplicationQuestionRow) {
+  return {
+    id: q.id,
+    label: q.label,
+    helpText: q.helpText ?? null,
+    fieldType: q.fieldType,
+    required: q.required,
+    options: q.options ?? null,
+    sortOrder: q.sortOrder,
+    enabled: q.enabled,
+    createdAt: q.createdAt ? q.createdAt.toISOString() : null,
+    updatedAt: q.updatedAt ? q.updatedAt.toISOString() : null,
+  };
+}
+
+function isCustomAnswerPresent(v: unknown): boolean {
+  if (v === null || v === undefined) return false;
+  if (typeof v === "string") return v.trim().length > 0;
+  if (Array.isArray(v)) return v.length > 0;
+  return true;
+}
+
+/**
+ * Coerce + validate a single submitted answer against its question definition.
+ * Returns the normalized value to store (or null when not answered), and an
+ * error string when the answer is required-but-missing or the wrong shape.
+ */
+function coerceCustomAnswer(q: ApplicationQuestionRow, raw: unknown): { value: unknown; error?: string } {
+  if (!isCustomAnswerPresent(raw)) {
+    if (q.required) return { value: null, error: `"${q.label}" is required.` };
+    return { value: null };
+  }
+  switch (q.fieldType as CustomFieldType) {
+    case "short_text":
+    case "long_text":
+    case "date": {
+      if (typeof raw !== "string") return { value: null, error: `"${q.label}" is invalid.` };
+      return { value: raw.trim() };
+    }
+    case "number": {
+      const n = typeof raw === "number" ? raw : Number(String(raw).trim());
+      if (!Number.isFinite(n)) return { value: null, error: `"${q.label}" must be a number.` };
+      return { value: n };
+    }
+    case "yes_no": {
+      if (typeof raw === "boolean") return { value: raw };
+      const s = String(raw).toLowerCase();
+      if (s === "true" || s === "yes") return { value: true };
+      if (s === "false" || s === "no") return { value: false };
+      return { value: null, error: `"${q.label}" must be yes or no.` };
+    }
+    case "select": {
+      if (typeof raw !== "string" || !(q.options ?? []).includes(raw)) {
+        return { value: null, error: `"${q.label}" has an invalid selection.` };
+      }
+      return { value: raw };
+    }
+    case "multiselect": {
+      if (!Array.isArray(raw)) return { value: null, error: `"${q.label}" is invalid.` };
+      const opts = q.options ?? [];
+      const vals = raw.filter((x): x is string => typeof x === "string" && opts.includes(x));
+      if (q.required && vals.length === 0) return { value: null, error: `"${q.label}" is required.` };
+      return { value: vals };
+    }
+    default:
+      return { value: null };
+  }
+}
+
+const CreateQuestionBody = z.object({
+  label: z.string().trim().min(1).max(300),
+  helpText: z.string().trim().max(1000).nullish(),
+  fieldType: z.enum(CUSTOM_FIELD_TYPES),
+  required: z.boolean().optional(),
+  options: z.array(z.string().trim().min(1).max(200)).max(50).nullish(),
+  enabled: z.boolean().optional(),
+});
+const UpdateQuestionBody = CreateQuestionBody.partial();
+const ReorderQuestionsBody = z.object({ ids: z.array(z.string().uuid()).max(200) });
 
 /**
  * Fire-and-forget background geocode. Writes location_lat/lng to the row
@@ -419,6 +520,36 @@ router.post("/applications", publicApplicationLimiter, async (req, res): Promise
       return;
     }
   }
+  // Validate + denormalize answers to admin-defined custom questions. We store
+  // [{ questionId, label, fieldType, value }] so HR can read historical answers
+  // even after a question is later edited or deleted.
+  let storedCustomAnswers: Array<Record<string, unknown>> | null = null;
+  {
+    const questions = await db
+      .select()
+      .from(applicationQuestionsTable)
+      .where(eq(applicationQuestionsTable.enabled, true));
+    if (questions.length > 0) {
+      const submitted = new Map<string, unknown>();
+      if (Array.isArray(d.customAnswers)) {
+        for (const a of d.customAnswers as Array<{ questionId?: unknown; value?: unknown }>) {
+          if (a && typeof a.questionId === "string") submitted.set(a.questionId, a.value);
+        }
+      }
+      const out: Array<Record<string, unknown>> = [];
+      for (const q of questions) {
+        const { value, error } = coerceCustomAnswer(q, submitted.get(q.id));
+        if (error) {
+          sendApplicationValidationError(res, [{ field: `custom:${q.id}`, message: error }], error);
+          return;
+        }
+        if (value !== null && value !== undefined) {
+          out.push({ questionId: q.id, label: q.label, fieldType: q.fieldType, value });
+        }
+      }
+      storedCustomAnswers = out;
+    }
+  }
   try {
     const [row] = await db.insert(applicationsTable).values({
       firstName: d.firstName,
@@ -445,6 +576,7 @@ router.post("/applications", publicApplicationLimiter, async (req, res): Promise
       previousExperience: d.previousExperience,
       yearsExperience: d.yearsExperience,
       references: normalizedReferences ?? d.references,
+      customAnswers: storedCustomAnswers,
       photoKey: d.photo.objectPath,
       cvKey: d.cv.objectPath,
       trainingCertificateKeys: d.trainingCertificates.map((f) => f.objectPath),
@@ -487,6 +619,147 @@ router.post("/applications", publicApplicationLimiter, async (req, res): Promise
     req.log.error({ err }, "Failed to submit application");
     res.status(500).json({ error: "Internal Server Error", message: "Could not submit application" });
   }
+});
+
+// ---- Form builder: custom question CRUD ----------------------------------
+
+/** Public: enabled custom questions for the Apply form, in display order. */
+router.get("/application-template", async (_req, res): Promise<void> => {
+  const rows = await db
+    .select()
+    .from(applicationQuestionsTable)
+    .where(eq(applicationQuestionsTable.enabled, true))
+    .orderBy(asc(applicationQuestionsTable.sortOrder), asc(applicationQuestionsTable.id));
+  res.json(rows.map(questionToApi));
+});
+
+/** Admin: full list (enabled + disabled) in display order. */
+router.get("/admin/application-questions", requireAdmin, async (_req, res): Promise<void> => {
+  const rows = await db
+    .select()
+    .from(applicationQuestionsTable)
+    .orderBy(asc(applicationQuestionsTable.sortOrder), asc(applicationQuestionsTable.id));
+  res.json(rows.map(questionToApi));
+});
+
+router.post("/admin/application-questions", requireAdmin, async (req, res): Promise<void> => {
+  const parsed = CreateQuestionBody.safeParse(req.body);
+  if (!parsed.success) {
+    res.status(400).json({ error: "Bad Request", message: parsed.error.message });
+    return;
+  }
+  const d = parsed.data;
+  if (customTypeNeedsOptions(d.fieldType) && (!d.options || d.options.length < 1)) {
+    res.status(400).json({ error: "Bad Request", message: "Dropdown and multi-select questions need at least one option." });
+    return;
+  }
+  const [{ maxSort }] = await db
+    .select({ maxSort: sql<number>`coalesce(max(${applicationQuestionsTable.sortOrder}), -1)` })
+    .from(applicationQuestionsTable);
+  const [row] = await db
+    .insert(applicationQuestionsTable)
+    .values({
+      label: d.label,
+      helpText: d.helpText ?? null,
+      fieldType: d.fieldType,
+      required: d.required ?? false,
+      options: customTypeNeedsOptions(d.fieldType) ? (d.options ?? []) : null,
+      enabled: d.enabled ?? true,
+      sortOrder: (maxSort ?? -1) + 1,
+    })
+    .returning();
+  res.status(201).json(questionToApi(row));
+});
+
+// Registered before the :id routes so it isn't shadowed by path params.
+router.post("/admin/application-questions/reorder", requireAdmin, async (req, res): Promise<void> => {
+  const parsed = ReorderQuestionsBody.safeParse(req.body);
+  if (!parsed.success) {
+    res.status(400).json({ error: "Bad Request", message: parsed.error.message });
+    return;
+  }
+  const { ids } = parsed.data;
+  if (new Set(ids).size !== ids.length) {
+    res.status(400).json({ error: "Bad Request", message: "ids must not contain duplicates" });
+    return;
+  }
+  const conflict = await db.transaction(async (tx) => {
+    const existing = await tx.select({ id: applicationQuestionsTable.id }).from(applicationQuestionsTable);
+    const existingIds = new Set(existing.map((r) => r.id));
+    // ids must be a complete permutation of the current question set, or stale
+    // clients could create duplicate/gapped sort orders.
+    if (ids.length !== existingIds.size || ids.some((id) => !existingIds.has(id))) {
+      return true;
+    }
+    for (let i = 0; i < ids.length; i++) {
+      await tx
+        .update(applicationQuestionsTable)
+        .set({ sortOrder: i })
+        .where(eq(applicationQuestionsTable.id, ids[i]));
+    }
+    return false;
+  });
+  if (conflict) {
+    res.status(409).json({ error: "Conflict", message: "Question set changed; reload and try again" });
+    return;
+  }
+  const rows = await db
+    .select()
+    .from(applicationQuestionsTable)
+    .orderBy(asc(applicationQuestionsTable.sortOrder), asc(applicationQuestionsTable.id));
+  res.json(rows.map(questionToApi));
+});
+
+router.patch("/admin/application-questions/:id", requireAdmin, async (req, res): Promise<void> => {
+  const id = Array.isArray(req.params.id) ? req.params.id[0] : req.params.id;
+  const parsed = UpdateQuestionBody.safeParse(req.body);
+  if (!parsed.success) {
+    res.status(400).json({ error: "Bad Request", message: parsed.error.message });
+    return;
+  }
+  const [existing] = await db
+    .select()
+    .from(applicationQuestionsTable)
+    .where(eq(applicationQuestionsTable.id, id))
+    .limit(1);
+  if (!existing) {
+    res.status(404).json({ error: "Not Found", message: "Question not found" });
+    return;
+  }
+  const d = parsed.data;
+  const nextType = (d.fieldType ?? existing.fieldType) as CustomFieldType;
+  const nextOptions = customTypeNeedsOptions(nextType)
+    ? (d.options !== undefined ? (d.options ?? []) : (existing.options ?? []))
+    : null;
+  if (customTypeNeedsOptions(nextType) && (nextOptions === null || nextOptions.length < 1)) {
+    res.status(400).json({ error: "Bad Request", message: "Dropdown and multi-select questions need at least one option." });
+    return;
+  }
+  const update: Partial<typeof applicationQuestionsTable.$inferInsert> = { options: nextOptions };
+  if (d.label !== undefined) update.label = d.label;
+  if (d.helpText !== undefined) update.helpText = d.helpText ?? null;
+  if (d.fieldType !== undefined) update.fieldType = d.fieldType;
+  if (d.required !== undefined) update.required = d.required;
+  if (d.enabled !== undefined) update.enabled = d.enabled;
+  const [row] = await db
+    .update(applicationQuestionsTable)
+    .set(update)
+    .where(eq(applicationQuestionsTable.id, id))
+    .returning();
+  res.json(questionToApi(row));
+});
+
+router.delete("/admin/application-questions/:id", requireAdmin, async (req, res): Promise<void> => {
+  const id = Array.isArray(req.params.id) ? req.params.id[0] : req.params.id;
+  const [row] = await db
+    .delete(applicationQuestionsTable)
+    .where(eq(applicationQuestionsTable.id, id))
+    .returning();
+  if (!row) {
+    res.status(404).json({ error: "Not Found", message: "Question not found" });
+    return;
+  }
+  res.json({ ok: true });
 });
 
 // ---- Public: save / resume application draft ------------------------------

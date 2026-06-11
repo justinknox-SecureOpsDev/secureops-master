@@ -27,7 +27,7 @@ export default function ClientSitesScreen() {
   const createSite = useCreateClientSite();
 
   const [showForm, setShowForm] = useState(false);
-  const [form, setForm] = useState({ name: "", address: "", contactName: "", contactPhone: "", notes: "" });
+  const [form, setForm] = useState({ name: "", address: "", notes: "" });
 
   const submit = async () => {
     if (!form.name) { Alert.alert("Missing", "Site name required."); return; }
@@ -37,14 +37,12 @@ export default function ClientSitesScreen() {
         data: {
           name: form.name,
           address: form.address || undefined,
-          contactName: form.contactName || undefined,
-          contactPhone: form.contactPhone || undefined,
           notes: form.notes || undefined,
         } as any,
       });
       queryClient.invalidateQueries({ queryKey: getGetSitesQueryKey({ clientId }) });
       setShowForm(false);
-      setForm({ name: "", address: "", contactName: "", contactPhone: "", notes: "" });
+      setForm({ name: "", address: "", notes: "" });
     } catch (e: any) {
       Alert.alert("Failed", e?.response?.data?.message || e?.message || "Could not create site");
     }
@@ -99,8 +97,6 @@ export default function ClientSitesScreen() {
             {([
               ["Site Name *", "name"],
               ["Address", "address"],
-              ["Contact Name", "contactName"],
-              ["Contact Phone", "contactPhone"],
               ["Notes", "notes"],
             ] as const).map(([label, key]) => (
               <View key={key} style={{ marginBottom: 10 }}>

@@ -15,6 +15,7 @@ export * from "./chatRoomMemberships";
 export * from "./chatMessages";
 export * from "./chatRoomReads";
 export * from "./applications";
+export * from "./applicationQuestions";
 export * from "./onboardingTokens";
 export * from "./applicationAmendmentTokens";
 export * from "./applicationDrafts";

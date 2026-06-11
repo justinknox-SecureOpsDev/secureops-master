@@ -1332,6 +1332,80 @@ export interface AvailabilityCell {
   period: AvailabilityCellPeriod;
 }
 
+export type ApplicationQuestionFieldType =
+  (typeof ApplicationQuestionFieldType)[keyof typeof ApplicationQuestionFieldType];
+
+export const ApplicationQuestionFieldType = {
+  short_text: "short_text",
+  long_text: "long_text",
+  number: "number",
+  date: "date",
+  select: "select",
+  multiselect: "multiselect",
+  yes_no: "yes_no",
+} as const;
+
+export interface ApplicationQuestion {
+  id: string;
+  label: string;
+  helpText?: string | null;
+  fieldType: ApplicationQuestionFieldType;
+  required: boolean;
+  options?: string[] | null;
+  sortOrder: number;
+  enabled: boolean;
+  createdAt?: string | null;
+  updatedAt?: string | null;
+}
+
+export type CreateApplicationQuestionRequestFieldType =
+  (typeof CreateApplicationQuestionRequestFieldType)[keyof typeof CreateApplicationQuestionRequestFieldType];
+
+export const CreateApplicationQuestionRequestFieldType = {
+  short_text: "short_text",
+  long_text: "long_text",
+  number: "number",
+  date: "date",
+  select: "select",
+  multiselect: "multiselect",
+  yes_no: "yes_no",
+} as const;
+
+export interface CreateApplicationQuestionRequest {
+  label: string;
+  helpText?: string | null;
+  fieldType: CreateApplicationQuestionRequestFieldType;
+  required?: boolean;
+  options?: string[] | null;
+  enabled?: boolean;
+}
+
+export type UpdateApplicationQuestionRequestFieldType =
+  (typeof UpdateApplicationQuestionRequestFieldType)[keyof typeof UpdateApplicationQuestionRequestFieldType];
+
+export const UpdateApplicationQuestionRequestFieldType = {
+  short_text: "short_text",
+  long_text: "long_text",
+  number: "number",
+  date: "date",
+  select: "select",
+  multiselect: "multiselect",
+  yes_no: "yes_no",
+} as const;
+
+export interface UpdateApplicationQuestionRequest {
+  label?: string;
+  helpText?: string | null;
+  fieldType?: UpdateApplicationQuestionRequestFieldType;
+  required?: boolean;
+  options?: string[] | null;
+  enabled?: boolean;
+}
+
+export interface ReorderApplicationQuestionsRequest {
+  ids: string[];
+}
+
 /**
  * Which ID accompanies the SSN card.
  */
@@ -1351,6 +1425,11 @@ export const SubmitApplicationRequestSiaLicenseLevel = {
   NUMBER_3: 3,
   NUMBER_4: 4,
 } as const;
+
+export type SubmitApplicationRequestCustomAnswersItem = {
+  questionId: string;
+  value: unknown;
+};
 
 export interface SubmitApplicationRequest {
   firstName: string;
@@ -1403,6 +1482,8 @@ return 400.
   trainingCertificates: UploadedFile[];
   /** @minItems 1 */
   availability: AvailabilityCell[];
+  /** Answers to admin-defined custom questions (application_questions). */
+  customAnswers?: SubmitApplicationRequestCustomAnswersItem[] | null;
 }
 
 export type ApplicationStatus =
@@ -1423,6 +1504,8 @@ export const ApplicationIdDocType = {
   drivers_license: "drivers_license",
   passport: "passport",
 } as const;
+
+export type ApplicationCustomAnswersItem = { [key: string]: unknown };
 
 /**
  * Last known SMTP delivery state for the onboarding/approval email (null if never attempted).
@@ -1475,6 +1558,8 @@ export interface Application {
   cvKey?: string | null;
   trainingCertificateKeys?: string[] | null;
   availability?: AvailabilityCell[] | null;
+  /** Denormalized answers to admin-defined custom questions: { questionId, label, fieldType, value }. */
+  customAnswers?: ApplicationCustomAnswersItem[] | null;
   reviewerNotes?: string | null;
   reviewedAt?: string | null;
   createdEmployeeId?: string | null;
@@ -2045,6 +2130,10 @@ export type CreateChatRoomBody = {
   shiftId?: string;
 };
 
+export type DeleteChatRoom200 = {
+  ok?: boolean;
+};
+
 export type UpdateMyLocationBody = {
   lat: number;
   lng: number;
@@ -2107,6 +2196,10 @@ export type AdminSignObjectDownloadParams = {
 
 export type AdminSignObjectDownload200 = {
   url: string;
+};
+
+export type AdminDeleteApplicationQuestion200 = {
+  ok?: boolean;
 };
 
 export type AdminListApplicationsParams = {

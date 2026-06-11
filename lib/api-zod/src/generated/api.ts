@@ -2230,6 +2230,17 @@ export const CreateChatRoomBody = zod.object({
 });
 
 /**
+ * @summary Delete a chat room (group channel). Direct messages cannot be deleted.
+ */
+export const DeleteChatRoomParams = zod.object({
+  id: zod.coerce.string(),
+});
+
+export const DeleteChatRoomResponse = zod.object({
+  ok: zod.boolean().optional(),
+});
+
+/**
  * @summary Update authenticated user's last known location
  */
 export const UpdateMyLocationBody = zod.object({
@@ -2527,6 +2538,169 @@ export const AdminSignObjectDownloadResponse = zod.object({
 });
 
 /**
+ * @summary Public list of enabled custom application questions
+ */
+export const GetApplicationTemplateResponseItem = zod.object({
+  id: zod.string(),
+  label: zod.string(),
+  helpText: zod.string().nullish(),
+  fieldType: zod.enum([
+    "short_text",
+    "long_text",
+    "number",
+    "date",
+    "select",
+    "multiselect",
+    "yes_no",
+  ]),
+  required: zod.boolean(),
+  options: zod.array(zod.string()).nullish(),
+  sortOrder: zod.number(),
+  enabled: zod.boolean(),
+  createdAt: zod.string().nullish(),
+  updatedAt: zod.string().nullish(),
+});
+export const GetApplicationTemplateResponse = zod.array(
+  GetApplicationTemplateResponseItem,
+);
+
+/**
+ * @summary List all custom application questions (admin)
+ */
+export const AdminListApplicationQuestionsResponseItem = zod.object({
+  id: zod.string(),
+  label: zod.string(),
+  helpText: zod.string().nullish(),
+  fieldType: zod.enum([
+    "short_text",
+    "long_text",
+    "number",
+    "date",
+    "select",
+    "multiselect",
+    "yes_no",
+  ]),
+  required: zod.boolean(),
+  options: zod.array(zod.string()).nullish(),
+  sortOrder: zod.number(),
+  enabled: zod.boolean(),
+  createdAt: zod.string().nullish(),
+  updatedAt: zod.string().nullish(),
+});
+export const AdminListApplicationQuestionsResponse = zod.array(
+  AdminListApplicationQuestionsResponseItem,
+);
+
+/**
+ * @summary Create a custom application question (admin)
+ */
+export const AdminCreateApplicationQuestionBody = zod.object({
+  label: zod.string(),
+  helpText: zod.string().nullish(),
+  fieldType: zod.enum([
+    "short_text",
+    "long_text",
+    "number",
+    "date",
+    "select",
+    "multiselect",
+    "yes_no",
+  ]),
+  required: zod.boolean().optional(),
+  options: zod.array(zod.string()).nullish(),
+  enabled: zod.boolean().optional(),
+});
+
+/**
+ * @summary Reorder custom application questions (admin)
+ */
+export const AdminReorderApplicationQuestionsBody = zod.object({
+  ids: zod.array(zod.string()),
+});
+
+export const AdminReorderApplicationQuestionsResponseItem = zod.object({
+  id: zod.string(),
+  label: zod.string(),
+  helpText: zod.string().nullish(),
+  fieldType: zod.enum([
+    "short_text",
+    "long_text",
+    "number",
+    "date",
+    "select",
+    "multiselect",
+    "yes_no",
+  ]),
+  required: zod.boolean(),
+  options: zod.array(zod.string()).nullish(),
+  sortOrder: zod.number(),
+  enabled: zod.boolean(),
+  createdAt: zod.string().nullish(),
+  updatedAt: zod.string().nullish(),
+});
+export const AdminReorderApplicationQuestionsResponse = zod.array(
+  AdminReorderApplicationQuestionsResponseItem,
+);
+
+/**
+ * @summary Update a custom application question (admin)
+ */
+export const AdminUpdateApplicationQuestionParams = zod.object({
+  id: zod.coerce.string(),
+});
+
+export const AdminUpdateApplicationQuestionBody = zod.object({
+  label: zod.string().optional(),
+  helpText: zod.string().nullish(),
+  fieldType: zod
+    .enum([
+      "short_text",
+      "long_text",
+      "number",
+      "date",
+      "select",
+      "multiselect",
+      "yes_no",
+    ])
+    .optional(),
+  required: zod.boolean().optional(),
+  options: zod.array(zod.string()).nullish(),
+  enabled: zod.boolean().optional(),
+});
+
+export const AdminUpdateApplicationQuestionResponse = zod.object({
+  id: zod.string(),
+  label: zod.string(),
+  helpText: zod.string().nullish(),
+  fieldType: zod.enum([
+    "short_text",
+    "long_text",
+    "number",
+    "date",
+    "select",
+    "multiselect",
+    "yes_no",
+  ]),
+  required: zod.boolean(),
+  options: zod.array(zod.string()).nullish(),
+  sortOrder: zod.number(),
+  enabled: zod.boolean(),
+  createdAt: zod.string().nullish(),
+  updatedAt: zod.string().nullish(),
+});
+
+/**
+ * @summary Delete a custom application question (admin)
+ */
+export const AdminDeleteApplicationQuestionParams = zod.object({
+  id: zod.coerce.string(),
+});
+
+export const AdminDeleteApplicationQuestionResponse = zod.object({
+  ok: zod.boolean().optional(),
+});
+
+/**
  * @summary Submit a public job application
  */
 
@@ -2636,6 +2810,17 @@ export const SubmitApplicationBody = zod.object({
       }),
     )
     .min(1),
+  customAnswers: zod
+    .array(
+      zod.object({
+        questionId: zod.string(),
+        value: zod.unknown(),
+      }),
+    )
+    .nullish()
+    .describe(
+      "Answers to admin-defined custom questions (application_questions).",
+    ),
 });
 
 /**
@@ -2723,6 +2908,12 @@ export const AdminListApplicationsResponseItem = zod.object({
       }),
     )
     .nullish(),
+  customAnswers: zod
+    .array(zod.record(zod.string(), zod.unknown()))
+    .nullish()
+    .describe(
+      "Denormalized answers to admin-defined custom questions: { questionId, label, fieldType, value }.",
+    ),
   reviewerNotes: zod.string().nullish(),
   reviewedAt: zod.string().nullish(),
   createdEmployeeId: zod.string().nullish(),
@@ -2814,6 +3005,12 @@ export const AdminGetApplicationResponse = zod.object({
       }),
     )
     .nullish(),
+  customAnswers: zod
+    .array(zod.record(zod.string(), zod.unknown()))
+    .nullish()
+    .describe(
+      "Denormalized answers to admin-defined custom questions: { questionId, label, fieldType, value }.",
+    ),
   reviewerNotes: zod.string().nullish(),
   reviewedAt: zod.string().nullish(),
   createdEmployeeId: zod.string().nullish(),
@@ -2906,6 +3103,12 @@ export const AdminMarkApplicationUnderReviewResponse = zod.object({
       }),
     )
     .nullish(),
+  customAnswers: zod
+    .array(zod.record(zod.string(), zod.unknown()))
+    .nullish()
+    .describe(
+      "Denormalized answers to admin-defined custom questions: { questionId, label, fieldType, value }.",
+    ),
   reviewerNotes: zod.string().nullish(),
   reviewedAt: zod.string().nullish(),
   createdEmployeeId: zod.string().nullish(),
@@ -2998,6 +3201,12 @@ export const AdminRejectApplicationResponse = zod.object({
       }),
     )
     .nullish(),
+  customAnswers: zod
+    .array(zod.record(zod.string(), zod.unknown()))
+    .nullish()
+    .describe(
+      "Denormalized answers to admin-defined custom questions: { questionId, label, fieldType, value }.",
+    ),
   reviewerNotes: zod.string().nullish(),
   reviewedAt: zod.string().nullish(),
   createdEmployeeId: zod.string().nullish(),
@@ -3091,6 +3300,12 @@ export const AdminApproveApplicationResponse = zod.object({
         }),
       )
       .nullish(),
+    customAnswers: zod
+      .array(zod.record(zod.string(), zod.unknown()))
+      .nullish()
+      .describe(
+        "Denormalized answers to admin-defined custom questions: { questionId, label, fieldType, value }.",
+      ),
     reviewerNotes: zod.string().nullish(),
     reviewedAt: zod.string().nullish(),
     createdEmployeeId: zod.string().nullish(),

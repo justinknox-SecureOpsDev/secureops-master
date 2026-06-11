@@ -17,6 +17,7 @@ import SubcontractorClockInPage from "@/pages/SubcontractorClockIn";
 import SubcontractorEntriesPage from "@/pages/SubcontractorEntries";
 import { PrivacyPage, TermsPage, DataRightsPage } from "@/pages/Legal";
 import { ApplicationsPage } from "@/pages/Applications";
+import { ApplicationBuilderPage } from "@/pages/ApplicationBuilder";
 import { OnboardingPage } from "@/pages/Onboarding";
 import { PoliciesPage } from "@/pages/Policies";
 import PayRunPage from "@/pages/PayRun";
@@ -150,6 +151,7 @@ function Routed() {
           <Route path="/personnel/share-links" component={EmployeeShareLinksPage} />
           <Route path="/personnel/:id" component={OfficerProfilePage} />
           <Route path="/hr/applications" component={ApplicationsPage} />
+          <Route path="/hr/application-builder" component={ApplicationBuilderPage} />
           <Route path="/hr/onboarding" component={OnboardingPage} />
           <Route path="/hr/policies" component={PoliciesPage} />
           <Route path="/hr/invitations" component={InvitationsPage} />

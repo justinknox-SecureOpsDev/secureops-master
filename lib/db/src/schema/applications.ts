@@ -36,6 +36,10 @@ export const applicationsTable = pgTable("applications", {
   previousExperience: text("previous_experience"),
   yearsExperience: integer("years_experience"),
   references: jsonb("references"),
+  // Answers to admin-defined custom questions (application_questions). Stored
+  // denormalized: [{ questionId, label, fieldType, value }] so HR can still
+  // read historical answers even if a question is later edited or deleted.
+  customAnswers: jsonb("custom_answers"),
   photoKey: text("photo_key"),
   cvKey: text("cv_key"),
   trainingCertificateKeys: jsonb("training_certificate_keys"),

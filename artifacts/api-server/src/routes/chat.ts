@@ -358,6 +358,22 @@ router.post("/chat/rooms", requireAuth, requireAdmin, async (req, res): Promise<
   res.status(201).json(room);
 });
 
+// DELETE /chat/rooms/:id — admin deletes a group channel. Direct messages
+// (1:1 DMs) are never deletable here. Messages, memberships and read
+// watermarks are removed automatically by ON DELETE CASCADE.
+router.delete("/chat/rooms/:id", requireAuth, requireAdmin, async (req, res): Promise<void> => {
+  const id = Array.isArray(req.params.id) ? req.params.id[0] : req.params.id;
+  const [room] = await db.select().from(chatRoomsTable).where(eq(chatRoomsTable.id, id)).limit(1);
+  if (!room) { res.status(404).json({ error: "Not Found", message: "Room not found" }); return; }
+  if (room.type === "direct") {
+    res.status(400).json({ error: "Bad Request", message: "Direct messages cannot be deleted" });
+    return;
+  }
+  await db.delete(chatRoomsTable).where(eq(chatRoomsTable.id, id));
+  req.log.info({ roomId: id, roomName: room.name, roomType: room.type }, "Chat room deleted");
+  res.json({ ok: true });
+});
+
 // GET /chat/users — DM picker
 router.get("/chat/users", requireAuth, async (req, res): Promise<void> => {
   const me = req.user!.userId;

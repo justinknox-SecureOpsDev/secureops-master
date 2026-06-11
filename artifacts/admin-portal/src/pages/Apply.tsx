@@ -53,9 +53,25 @@ type Form = {
   cv: UploadedFile | null;
   trainingCertificates: UploadedFile[];
   availability: { day: Day; period: Period }[];
+  customAnswers: Record<string, unknown>;
 };
 
-const STEPS = ["Personal", "I-9 & Identity", "TX License & experience", "References & docs", "Availability", "Review"];
+const CUSTOM_FIELD_TYPES = ["short_text", "long_text", "number", "date", "select", "multiselect", "yes_no"] as const;
+type CustomFieldType = (typeof CUSTOM_FIELD_TYPES)[number];
+type TemplateQuestion = {
+  id: string;
+  label: string;
+  helpText: string | null;
+  fieldType: CustomFieldType;
+  required: boolean;
+  options: string[] | null;
+  sortOrder: number;
+  enabled: boolean;
+};
+
+// Base wizard steps; an "Additional questions" step is spliced in before
+// "Review" at runtime when the admin has defined custom questions.
+const BASE_STEPS = ["Personal", "I-9 & Identity", "TX License & experience", "References & docs", "Availability"];
 
 const I9_FORM_URL = "https://www.uscis.gov/sites/default/files/document/forms/i-9.pdf";
 
@@ -95,6 +111,7 @@ const EMPTY_FORM: Form = {
   ],
   photo: null, cv: null, trainingCertificates: [],
   availability: [],
+  customAnswers: {},
 };
 
 // Defensive hydrator. Server stores the wizard state verbatim in jsonb,
@@ -172,6 +189,9 @@ function hydrateForm(raw: unknown): Form {
     photo: file("photo"), cv: file("cv"),
     trainingCertificates: fileArray("trainingCertificates"),
     availability,
+    customAnswers: (d.customAnswers && typeof d.customAnswers === "object" && !Array.isArray(d.customAnswers))
+      ? (d.customAnswers as Record<string, unknown>)
+      : {},
   };
 }
 
@@ -202,6 +222,35 @@ export function ApplyPage() {
   const initialMount = useRef(true);
 
   const [form, setForm] = useState<Form>(EMPTY_FORM);
+  const [questions, setQuestions] = useState<TemplateQuestion[]>([]);
+
+  // Admin-defined custom questions get their own step before Review.
+  const hasCustom = questions.length > 0;
+  const STEPS = hasCustom ? [...BASE_STEPS, "Additional questions", "Review"] : [...BASE_STEPS, "Review"];
+  const CUSTOM_STEP = BASE_STEPS.length; // 5
+  const REVIEW_STEP = STEPS.length - 1;
+  // Map a (possibly server-sent) field name to its wizard step. Custom-answer
+  // errors come back as "custom:<questionId>".
+  const localStepForField = (field?: string): number => {
+    if (field && field.startsWith("custom:")) return hasCustom ? CUSTOM_STEP : REVIEW_STEP;
+    const b = stepForField(field);
+    return b === 5 ? REVIEW_STEP : b;
+  };
+
+  // Load the admin-defined custom questions. Non-fatal: the form still works
+  // (built-in fields only) if this fails or returns nothing.
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const out = await api<TemplateQuestion[]>("/application-template");
+        if (!cancelled && Array.isArray(out)) setQuestions(out);
+      } catch {
+        /* ignore — custom questions are additive */
+      }
+    })();
+    return () => { cancelled = true; };
+  }, []);
 
   // On mount, if the URL has ?resume=<token>, fetch the saved draft
   // and rehydrate the wizard at the step the applicant left off on.
@@ -248,6 +297,9 @@ export function ApplyPage() {
 
   function set<K extends keyof Form>(k: K, v: Form[K]) {
     setForm((f) => ({ ...f, [k]: v }));
+  }
+  function setCustom(qid: string, v: unknown) {
+    setForm((f) => ({ ...f, customAnswers: { ...f.customAnswers, [qid]: v } }));
   }
   function setRef(i: number, k: keyof Reference, v: string) {
     setForm((f) => {
@@ -329,11 +381,23 @@ export function ApplyPage() {
         return { field: "availability", message: "Please select at least one availability slot." };
       }
     }
+    if (hasCustom && stepIndex === CUSTOM_STEP) {
+      for (const q of questions) {
+        if (!q.required) continue;
+        const v = form.customAnswers[q.id];
+        const present = Array.isArray(v)
+          ? v.length > 0
+          : typeof v === "string"
+            ? v.trim().length > 0
+            : v !== null && v !== undefined;
+        if (!present) return { field: `custom:${q.id}`, message: `"${q.label}" is required.` };
+      }
+    }
     return null;
   }
 
   function validateAllSteps(): { stepIndex: number; error: FieldError } | null {
-    for (let s = 0; s <= 4; s++) {
+    for (let s = 0; s < REVIEW_STEP; s++) {
       const err = validateStep(s);
       if (err) return { stepIndex: s, error: err };
     }
@@ -421,6 +485,15 @@ export function ApplyPage() {
         cv: form.cv,
         trainingCertificates: form.trainingCertificates,
         availability: form.availability,
+        customAnswers: questions
+          .map((q) => ({ questionId: q.id, value: form.customAnswers[q.id] }))
+          .filter((a) => {
+            const v = a.value;
+            if (v === null || v === undefined) return false;
+            if (typeof v === "string") return v.trim().length > 0;
+            if (Array.isArray(v)) return v.length > 0;
+            return true;
+          }),
       };
       await api("/applications", { method: "POST", body });
       setSubmitted(true);
@@ -437,9 +510,9 @@ export function ApplyPage() {
           setFieldErrors(serverFieldErrors);
           setGeneralError(null);
           const earliest = serverFieldErrors
-            .map((fe) => stepForField(fe.field))
-            .reduce((a, b) => Math.min(a, b), 5);
-          setStep(Math.min(earliest, 5));
+            .map((fe) => localStepForField(fe.field))
+            .reduce((a, b) => Math.min(a, b), REVIEW_STEP);
+          setStep(Math.min(earliest, REVIEW_STEP));
         } else {
           setFieldErrors([]);
           setGeneralError(data.message ?? e.message);
@@ -688,7 +761,16 @@ export function ApplyPage() {
               error={errOnStep("availability")}
             />
           )}
-          {step === 5 && (
+          {hasCustom && step === CUSTOM_STEP && (
+            <CustomAnswersStep
+              headingRef={headingRef}
+              questions={questions}
+              values={form.customAnswers}
+              onChange={setCustom}
+              fieldErrors={fieldErrors}
+            />
+          )}
+          {step === REVIEW_STEP && (
             <>
               <h2 ref={headingRef} tabIndex={-1} className="brand-wordmark text-xl focus:outline-none">Review &amp; submit</h2>
               <p className="text-sm text-muted-foreground">Please verify your details before sending.</p>
@@ -722,7 +804,7 @@ export function ApplyPage() {
                         <button
                           type="button"
                           className="underline hover:opacity-80 text-left focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring rounded"
-                          onClick={() => fe.field && setStep(stepForField(fe.field))}
+                          onClick={() => fe.field && setStep(localStepForField(fe.field))}
                         >
                           {fe.message}
                         </button>
@@ -924,4 +1006,126 @@ function Two({ children }: { children: ReactNode }) {
 }
 function Sum({ k, v }: { k: string; v: string }) {
   return (<><dt className="text-muted-foreground">{k}</dt><dd className="font-medium truncate">{v}</dd></>);
+}
+
+const CUSTOM_INPUT_CLASS =
+  "w-full border rounded h-10 px-3 bg-background focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring";
+
+function CustomAnswersStep({
+  headingRef, questions, values, onChange, fieldErrors,
+}: {
+  headingRef: React.Ref<HTMLHeadingElement>;
+  questions: TemplateQuestion[];
+  values: Record<string, unknown>;
+  onChange: (qid: string, v: unknown) => void;
+  fieldErrors: FieldError[];
+}) {
+  return (
+    <>
+      <h2 ref={headingRef} tabIndex={-1} className="brand-wordmark text-xl focus:outline-none">Additional questions</h2>
+      <p className="text-sm text-muted-foreground">A few more questions from our hiring team.</p>
+      {questions.map((q) => (
+        <CustomQuestionField
+          key={q.id}
+          q={q}
+          value={values[q.id]}
+          onChange={(v) => onChange(q.id, v)}
+          errorMsg={findFieldError(`custom:${q.id}`, fieldErrors)?.message}
+        />
+      ))}
+    </>
+  );
+}
+
+function CustomQuestionField({
+  q, value, onChange, errorMsg,
+}: {
+  q: TemplateQuestion;
+  value: unknown;
+  onChange: (v: unknown) => void;
+  errorMsg?: string;
+}) {
+  const fieldId = useId();
+  const errorId = useId();
+  const helpId = useId();
+  const help = q.helpText?.trim();
+  const describedBy = [errorMsg ? errorId : null, help ? helpId : null].filter(Boolean).join(" ") || undefined;
+  const invalid = errorMsg ? true : undefined;
+  const requiredMark = q.required ? (
+    <><span className="text-destructive ml-0.5" aria-hidden="true">*</span><span className="sr-only"> (required)</span></>
+  ) : null;
+  const helpNode = help ? <div id={helpId} className="text-xs text-muted-foreground">{help}</div> : null;
+  const errorNode = errorMsg ? <div id={errorId} role="alert" className="text-xs text-destructive">{errorMsg}</div> : null;
+  const strVal = typeof value === "string" ? value : "";
+
+  if (q.fieldType === "multiselect") {
+    const arr = Array.isArray(value) ? (value as unknown[]).filter((x): x is string => typeof x === "string") : [];
+    return (
+      <fieldset className="space-y-1">
+        <legend className="text-xs uppercase font-semibold text-foreground/80">{q.label}{requiredMark}</legend>
+        {helpNode}
+        <div className="space-y-1.5 pt-1" aria-describedby={describedBy}>
+          {(q.options ?? []).map((opt) => {
+            const checked = arr.includes(opt);
+            return (
+              <label key={opt} className="flex items-center gap-2 text-sm">
+                <input
+                  type="checkbox"
+                  className="h-4 w-4"
+                  checked={checked}
+                  onChange={(e) => onChange(e.target.checked ? [...arr, opt] : arr.filter((x) => x !== opt))}
+                />
+                {opt}
+              </label>
+            );
+          })}
+        </div>
+        {errorNode}
+      </fieldset>
+    );
+  }
+
+  let control: ReactNode;
+  switch (q.fieldType) {
+    case "long_text":
+      control = <Textarea id={fieldId} rows={3} aria-describedby={describedBy} aria-invalid={invalid} aria-required={q.required || undefined} value={strVal} onChange={(e) => onChange(e.target.value)} />;
+      break;
+    case "number":
+      control = <Input id={fieldId} type="number" inputMode="decimal" aria-describedby={describedBy} aria-invalid={invalid} aria-required={q.required || undefined} value={strVal} onChange={(e) => onChange(e.target.value)} />;
+      break;
+    case "date":
+      control = <Input id={fieldId} type="date" aria-describedby={describedBy} aria-invalid={invalid} aria-required={q.required || undefined} value={strVal} onChange={(e) => onChange(e.target.value)} />;
+      break;
+    case "select":
+      control = (
+        <select id={fieldId} className={CUSTOM_INPUT_CLASS} aria-describedby={describedBy} aria-invalid={invalid} aria-required={q.required || undefined} value={strVal} onChange={(e) => onChange(e.target.value)}>
+          <option value="">Select…</option>
+          {(q.options ?? []).map((opt) => <option key={opt} value={opt}>{opt}</option>)}
+        </select>
+      );
+      break;
+    case "yes_no": {
+      const yn = value === true ? "yes" : value === false ? "no" : "";
+      control = (
+        <select id={fieldId} className={CUSTOM_INPUT_CLASS} aria-describedby={describedBy} aria-invalid={invalid} aria-required={q.required || undefined} value={yn} onChange={(e) => onChange(e.target.value === "yes" ? true : e.target.value === "no" ? false : null)}>
+          <option value="">Select…</option>
+          <option value="yes">Yes</option>
+          <option value="no">No</option>
+        </select>
+      );
+      break;
+    }
+    case "short_text":
+    default:
+      control = <Input id={fieldId} aria-describedby={describedBy} aria-invalid={invalid} aria-required={q.required || undefined} value={strVal} onChange={(e) => onChange(e.target.value)} />;
+      break;
+  }
+  return (
+    <div className="space-y-1">
+      <Label htmlFor={fieldId} className="text-xs uppercase font-semibold text-foreground/80">{q.label}{requiredMark}</Label>
+      {helpNode}
+      {control}
+      {errorNode}
+    </div>
+  );
 }

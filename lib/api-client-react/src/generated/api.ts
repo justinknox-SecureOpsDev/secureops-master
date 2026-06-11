@@ -20,12 +20,14 @@ import type {
   ActiveOfficer,
   AdminClockOutSubcontractorEntryBody,
   AdminDashboardSummary,
+  AdminDeleteApplicationQuestion200,
   AdminListApplicationsParams,
   AdminListOnboardingParams,
   AdminSignObjectDownload200,
   AdminSignObjectDownloadParams,
   AdminUpdateSubcontractorEntryBody,
   Application,
+  ApplicationQuestion,
   ApproveApplicationResponse,
   ApproveShiftRequestBody,
   ApproveTimeEntryRequest,
@@ -47,6 +49,7 @@ import type {
   ClockInShift,
   ClockInSite,
   ClockOutRequest,
+  CreateApplicationQuestionRequest,
   CreateChatRoomBody,
   CreateClientRequest,
   CreateClientShiftRequestBody,
@@ -62,6 +65,7 @@ import type {
   CreateShiftRequest,
   CreateSiteRequest,
   DeclineShiftRequestBody,
+  DeleteChatRoom200,
   Employee,
   EmployeeDashboardSummary,
   ErrorResponse,
@@ -115,6 +119,7 @@ import type {
   RadioChannel,
   RadioTransmission,
   RegisterPushTokenBody,
+  ReorderApplicationQuestionsRequest,
   ReplacePolicyDocumentRequest,
   ResetPasswordRequest,
   ReviewApplicationRequest,
@@ -137,6 +142,7 @@ import type {
   TimeEntry,
   TriggerEmergency201,
   TriggerEmergencyBody,
+  UpdateApplicationQuestionRequest,
   UpdateAssignmentRequest,
   UpdateClientRequest,
   UpdateEmployeeRequest,
@@ -5611,6 +5617,90 @@ export const useCreateChatRoom = <
 };
 
 /**
+ * @summary Delete a chat room (group channel). Direct messages cannot be deleted.
+ */
+export const getDeleteChatRoomUrl = (id: string) => {
+  return `/api/chat/rooms/${id}`;
+};
+
+export const deleteChatRoom = async (
+  id: string,
+  options?: RequestInit,
+): Promise<DeleteChatRoom200> => {
+  return customFetch<DeleteChatRoom200>(getDeleteChatRoomUrl(id), {
+    ...options,
+    method: "DELETE",
+  });
+};
+
+export const getDeleteChatRoomMutationOptions = <
+  TError = ErrorType<unknown>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof deleteChatRoom>>,
+    TError,
+    { id: string },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof deleteChatRoom>>,
+  TError,
+  { id: string },
+  TContext
+> => {
+  const mutationKey = ["deleteChatRoom"];
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof deleteChatRoom>>,
+    { id: string }
+  > = (props) => {
+    const { id } = props ?? {};
+
+    return deleteChatRoom(id, requestOptions);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type DeleteChatRoomMutationResult = NonNullable<
+  Awaited<ReturnType<typeof deleteChatRoom>>
+>;
+
+export type DeleteChatRoomMutationError = ErrorType<unknown>;
+
+/**
+ * @summary Delete a chat room (group channel). Direct messages cannot be deleted.
+ */
+export const useDeleteChatRoom = <
+  TError = ErrorType<unknown>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof deleteChatRoom>>,
+    TError,
+    { id: string },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationResult<
+  Awaited<ReturnType<typeof deleteChatRoom>>,
+  TError,
+  { id: string },
+  TContext
+> => {
+  return useMutation(getDeleteChatRoomMutationOptions(options));
+};
+
+/**
  * @summary Update authenticated user's last known location
  */
 export const getUpdateMyLocationUrl = () => {
@@ -7205,6 +7295,522 @@ export function useAdminSignObjectDownload<
 
   return { ...query, queryKey: queryOptions.queryKey };
 }
+
+/**
+ * @summary Public list of enabled custom application questions
+ */
+export const getGetApplicationTemplateUrl = () => {
+  return `/api/application-template`;
+};
+
+export const getApplicationTemplate = async (
+  options?: RequestInit,
+): Promise<ApplicationQuestion[]> => {
+  return customFetch<ApplicationQuestion[]>(getGetApplicationTemplateUrl(), {
+    ...options,
+    method: "GET",
+  });
+};
+
+export const getGetApplicationTemplateQueryKey = () => {
+  return [`/api/application-template`] as const;
+};
+
+export const getGetApplicationTemplateQueryOptions = <
+  TData = Awaited<ReturnType<typeof getApplicationTemplate>>,
+  TError = ErrorType<unknown>,
+>(options?: {
+  query?: UseQueryOptions<
+    Awaited<ReturnType<typeof getApplicationTemplate>>,
+    TError,
+    TData
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}) => {
+  const { query: queryOptions, request: requestOptions } = options ?? {};
+
+  const queryKey =
+    queryOptions?.queryKey ?? getGetApplicationTemplateQueryKey();
+
+  const queryFn: QueryFunction<
+    Awaited<ReturnType<typeof getApplicationTemplate>>
+  > = ({ signal }) => getApplicationTemplate({ signal, ...requestOptions });
+
+  return { queryKey, queryFn, ...queryOptions } as UseQueryOptions<
+    Awaited<ReturnType<typeof getApplicationTemplate>>,
+    TError,
+    TData
+  > & { queryKey: QueryKey };
+};
+
+export type GetApplicationTemplateQueryResult = NonNullable<
+  Awaited<ReturnType<typeof getApplicationTemplate>>
+>;
+export type GetApplicationTemplateQueryError = ErrorType<unknown>;
+
+/**
+ * @summary Public list of enabled custom application questions
+ */
+
+export function useGetApplicationTemplate<
+  TData = Awaited<ReturnType<typeof getApplicationTemplate>>,
+  TError = ErrorType<unknown>,
+>(options?: {
+  query?: UseQueryOptions<
+    Awaited<ReturnType<typeof getApplicationTemplate>>,
+    TError,
+    TData
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+  const queryOptions = getGetApplicationTemplateQueryOptions(options);
+
+  const query = useQuery(queryOptions) as UseQueryResult<TData, TError> & {
+    queryKey: QueryKey;
+  };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
+
+/**
+ * @summary List all custom application questions (admin)
+ */
+export const getAdminListApplicationQuestionsUrl = () => {
+  return `/api/admin/application-questions`;
+};
+
+export const adminListApplicationQuestions = async (
+  options?: RequestInit,
+): Promise<ApplicationQuestion[]> => {
+  return customFetch<ApplicationQuestion[]>(
+    getAdminListApplicationQuestionsUrl(),
+    {
+      ...options,
+      method: "GET",
+    },
+  );
+};
+
+export const getAdminListApplicationQuestionsQueryKey = () => {
+  return [`/api/admin/application-questions`] as const;
+};
+
+export const getAdminListApplicationQuestionsQueryOptions = <
+  TData = Awaited<ReturnType<typeof adminListApplicationQuestions>>,
+  TError = ErrorType<unknown>,
+>(options?: {
+  query?: UseQueryOptions<
+    Awaited<ReturnType<typeof adminListApplicationQuestions>>,
+    TError,
+    TData
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}) => {
+  const { query: queryOptions, request: requestOptions } = options ?? {};
+
+  const queryKey =
+    queryOptions?.queryKey ?? getAdminListApplicationQuestionsQueryKey();
+
+  const queryFn: QueryFunction<
+    Awaited<ReturnType<typeof adminListApplicationQuestions>>
+  > = ({ signal }) =>
+    adminListApplicationQuestions({ signal, ...requestOptions });
+
+  return { queryKey, queryFn, ...queryOptions } as UseQueryOptions<
+    Awaited<ReturnType<typeof adminListApplicationQuestions>>,
+    TError,
+    TData
+  > & { queryKey: QueryKey };
+};
+
+export type AdminListApplicationQuestionsQueryResult = NonNullable<
+  Awaited<ReturnType<typeof adminListApplicationQuestions>>
+>;
+export type AdminListApplicationQuestionsQueryError = ErrorType<unknown>;
+
+/**
+ * @summary List all custom application questions (admin)
+ */
+
+export function useAdminListApplicationQuestions<
+  TData = Awaited<ReturnType<typeof adminListApplicationQuestions>>,
+  TError = ErrorType<unknown>,
+>(options?: {
+  query?: UseQueryOptions<
+    Awaited<ReturnType<typeof adminListApplicationQuestions>>,
+    TError,
+    TData
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+  const queryOptions = getAdminListApplicationQuestionsQueryOptions(options);
+
+  const query = useQuery(queryOptions) as UseQueryResult<TData, TError> & {
+    queryKey: QueryKey;
+  };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
+
+/**
+ * @summary Create a custom application question (admin)
+ */
+export const getAdminCreateApplicationQuestionUrl = () => {
+  return `/api/admin/application-questions`;
+};
+
+export const adminCreateApplicationQuestion = async (
+  createApplicationQuestionRequest: CreateApplicationQuestionRequest,
+  options?: RequestInit,
+): Promise<ApplicationQuestion> => {
+  return customFetch<ApplicationQuestion>(
+    getAdminCreateApplicationQuestionUrl(),
+    {
+      ...options,
+      method: "POST",
+      headers: { "Content-Type": "application/json", ...options?.headers },
+      body: JSON.stringify(createApplicationQuestionRequest),
+    },
+  );
+};
+
+export const getAdminCreateApplicationQuestionMutationOptions = <
+  TError = ErrorType<unknown>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof adminCreateApplicationQuestion>>,
+    TError,
+    { data: BodyType<CreateApplicationQuestionRequest> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof adminCreateApplicationQuestion>>,
+  TError,
+  { data: BodyType<CreateApplicationQuestionRequest> },
+  TContext
+> => {
+  const mutationKey = ["adminCreateApplicationQuestion"];
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof adminCreateApplicationQuestion>>,
+    { data: BodyType<CreateApplicationQuestionRequest> }
+  > = (props) => {
+    const { data } = props ?? {};
+
+    return adminCreateApplicationQuestion(data, requestOptions);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type AdminCreateApplicationQuestionMutationResult = NonNullable<
+  Awaited<ReturnType<typeof adminCreateApplicationQuestion>>
+>;
+export type AdminCreateApplicationQuestionMutationBody =
+  BodyType<CreateApplicationQuestionRequest>;
+export type AdminCreateApplicationQuestionMutationError = ErrorType<unknown>;
+
+/**
+ * @summary Create a custom application question (admin)
+ */
+export const useAdminCreateApplicationQuestion = <
+  TError = ErrorType<unknown>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof adminCreateApplicationQuestion>>,
+    TError,
+    { data: BodyType<CreateApplicationQuestionRequest> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationResult<
+  Awaited<ReturnType<typeof adminCreateApplicationQuestion>>,
+  TError,
+  { data: BodyType<CreateApplicationQuestionRequest> },
+  TContext
+> => {
+  return useMutation(getAdminCreateApplicationQuestionMutationOptions(options));
+};
+
+/**
+ * @summary Reorder custom application questions (admin)
+ */
+export const getAdminReorderApplicationQuestionsUrl = () => {
+  return `/api/admin/application-questions/reorder`;
+};
+
+export const adminReorderApplicationQuestions = async (
+  reorderApplicationQuestionsRequest: ReorderApplicationQuestionsRequest,
+  options?: RequestInit,
+): Promise<ApplicationQuestion[]> => {
+  return customFetch<ApplicationQuestion[]>(
+    getAdminReorderApplicationQuestionsUrl(),
+    {
+      ...options,
+      method: "POST",
+      headers: { "Content-Type": "application/json", ...options?.headers },
+      body: JSON.stringify(reorderApplicationQuestionsRequest),
+    },
+  );
+};
+
+export const getAdminReorderApplicationQuestionsMutationOptions = <
+  TError = ErrorType<unknown>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof adminReorderApplicationQuestions>>,
+    TError,
+    { data: BodyType<ReorderApplicationQuestionsRequest> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof adminReorderApplicationQuestions>>,
+  TError,
+  { data: BodyType<ReorderApplicationQuestionsRequest> },
+  TContext
+> => {
+  const mutationKey = ["adminReorderApplicationQuestions"];
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof adminReorderApplicationQuestions>>,
+    { data: BodyType<ReorderApplicationQuestionsRequest> }
+  > = (props) => {
+    const { data } = props ?? {};
+
+    return adminReorderApplicationQuestions(data, requestOptions);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type AdminReorderApplicationQuestionsMutationResult = NonNullable<
+  Awaited<ReturnType<typeof adminReorderApplicationQuestions>>
+>;
+export type AdminReorderApplicationQuestionsMutationBody =
+  BodyType<ReorderApplicationQuestionsRequest>;
+export type AdminReorderApplicationQuestionsMutationError = ErrorType<unknown>;
+
+/**
+ * @summary Reorder custom application questions (admin)
+ */
+export const useAdminReorderApplicationQuestions = <
+  TError = ErrorType<unknown>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof adminReorderApplicationQuestions>>,
+    TError,
+    { data: BodyType<ReorderApplicationQuestionsRequest> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationResult<
+  Awaited<ReturnType<typeof adminReorderApplicationQuestions>>,
+  TError,
+  { data: BodyType<ReorderApplicationQuestionsRequest> },
+  TContext
+> => {
+  return useMutation(
+    getAdminReorderApplicationQuestionsMutationOptions(options),
+  );
+};
+
+/**
+ * @summary Update a custom application question (admin)
+ */
+export const getAdminUpdateApplicationQuestionUrl = (id: string) => {
+  return `/api/admin/application-questions/${id}`;
+};
+
+export const adminUpdateApplicationQuestion = async (
+  id: string,
+  updateApplicationQuestionRequest: UpdateApplicationQuestionRequest,
+  options?: RequestInit,
+): Promise<ApplicationQuestion> => {
+  return customFetch<ApplicationQuestion>(
+    getAdminUpdateApplicationQuestionUrl(id),
+    {
+      ...options,
+      method: "PATCH",
+      headers: { "Content-Type": "application/json", ...options?.headers },
+      body: JSON.stringify(updateApplicationQuestionRequest),
+    },
+  );
+};
+
+export const getAdminUpdateApplicationQuestionMutationOptions = <
+  TError = ErrorType<unknown>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof adminUpdateApplicationQuestion>>,
+    TError,
+    { id: string; data: BodyType<UpdateApplicationQuestionRequest> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof adminUpdateApplicationQuestion>>,
+  TError,
+  { id: string; data: BodyType<UpdateApplicationQuestionRequest> },
+  TContext
+> => {
+  const mutationKey = ["adminUpdateApplicationQuestion"];
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof adminUpdateApplicationQuestion>>,
+    { id: string; data: BodyType<UpdateApplicationQuestionRequest> }
+  > = (props) => {
+    const { id, data } = props ?? {};
+
+    return adminUpdateApplicationQuestion(id, data, requestOptions);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type AdminUpdateApplicationQuestionMutationResult = NonNullable<
+  Awaited<ReturnType<typeof adminUpdateApplicationQuestion>>
+>;
+export type AdminUpdateApplicationQuestionMutationBody =
+  BodyType<UpdateApplicationQuestionRequest>;
+export type AdminUpdateApplicationQuestionMutationError = ErrorType<unknown>;
+
+/**
+ * @summary Update a custom application question (admin)
+ */
+export const useAdminUpdateApplicationQuestion = <
+  TError = ErrorType<unknown>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof adminUpdateApplicationQuestion>>,
+    TError,
+    { id: string; data: BodyType<UpdateApplicationQuestionRequest> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationResult<
+  Awaited<ReturnType<typeof adminUpdateApplicationQuestion>>,
+  TError,
+  { id: string; data: BodyType<UpdateApplicationQuestionRequest> },
+  TContext
+> => {
+  return useMutation(getAdminUpdateApplicationQuestionMutationOptions(options));
+};
+
+/**
+ * @summary Delete a custom application question (admin)
+ */
+export const getAdminDeleteApplicationQuestionUrl = (id: string) => {
+  return `/api/admin/application-questions/${id}`;
+};
+
+export const adminDeleteApplicationQuestion = async (
+  id: string,
+  options?: RequestInit,
+): Promise<AdminDeleteApplicationQuestion200> => {
+  return customFetch<AdminDeleteApplicationQuestion200>(
+    getAdminDeleteApplicationQuestionUrl(id),
+    {
+      ...options,
+      method: "DELETE",
+    },
+  );
+};
+
+export const getAdminDeleteApplicationQuestionMutationOptions = <
+  TError = ErrorType<unknown>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof adminDeleteApplicationQuestion>>,
+    TError,
+    { id: string },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof adminDeleteApplicationQuestion>>,
+  TError,
+  { id: string },
+  TContext
+> => {
+  const mutationKey = ["adminDeleteApplicationQuestion"];
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof adminDeleteApplicationQuestion>>,
+    { id: string }
+  > = (props) => {
+    const { id } = props ?? {};
+
+    return adminDeleteApplicationQuestion(id, requestOptions);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type AdminDeleteApplicationQuestionMutationResult = NonNullable<
+  Awaited<ReturnType<typeof adminDeleteApplicationQuestion>>
+>;
+
+export type AdminDeleteApplicationQuestionMutationError = ErrorType<unknown>;
+
+/**
+ * @summary Delete a custom application question (admin)
+ */
+export const useAdminDeleteApplicationQuestion = <
+  TError = ErrorType<unknown>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof adminDeleteApplicationQuestion>>,
+    TError,
+    { id: string },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationResult<
+  Awaited<ReturnType<typeof adminDeleteApplicationQuestion>>,
+  TError,
+  { id: string },
+  TContext
+> => {
+  return useMutation(getAdminDeleteApplicationQuestionMutationOptions(options));
+};
 
 /**
  * @summary Submit a public job application

@@ -29,6 +29,7 @@ type Application = {
   photoKey: string | null; cvKey: string | null;
   trainingCertificateKeys: string[] | null;
   availability: { day: string; period: string }[] | null;
+  customAnswers: { questionId: string; label: string; fieldType: string; value: unknown }[] | null;
   reviewerNotes: string | null;
   reviewedBy: string | null;
   reviewedAt: string | null;
@@ -616,6 +617,18 @@ function ApplicationDialog({
             <p className="text-xs text-muted-foreground">{app.availability.length} slots selected</p>
           </Section>
         )}
+        {app.customAnswers && app.customAnswers.length > 0 && (
+          <Section title="Additional questions">
+            <dl className="text-sm space-y-2">
+              {app.customAnswers.map((a) => (
+                <div key={a.questionId}>
+                  <dt className="text-muted-foreground text-xs">{a.label}</dt>
+                  <dd className="font-medium whitespace-pre-wrap">{formatCustomAnswer(a.value)}</dd>
+                </div>
+              ))}
+            </dl>
+          </Section>
+        )}
         <Section title="Reviewer notes">
           <Textarea rows={3} value={notes} onChange={(e) => setNotes(e.target.value)} placeholder="Internal notes (optional)" />
         </Section>
@@ -926,6 +939,15 @@ function ApprovalSuccessDialog({ resp, onClose }: { resp: ApproveResp; onClose: 
   );
 }
 
+function formatCustomAnswer(value: unknown): string {
+  if (value === null || value === undefined || value === "") return "—";
+  if (typeof value === "boolean") return value ? "Yes" : "No";
+  if (Array.isArray(value)) {
+    const items = value.filter((x) => x !== null && x !== undefined && x !== "").map((x) => String(x));
+    return items.length > 0 ? items.join(", ") : "—";
+  }
+  return String(value);
+}
 function Info({ k, v }: { k: string; v: string | null | undefined }) {
   return (
     <div>

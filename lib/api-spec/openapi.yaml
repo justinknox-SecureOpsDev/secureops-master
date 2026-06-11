@@ -1377,6 +1377,25 @@ paths:
               schema:
                 $ref: "#/components/schemas/ChatRoom"
 
+  /chat/rooms/{id}:
+    delete:
+      operationId: deleteChatRoom
+      tags: [chat]
+      summary: Delete a chat room (group channel). Direct messages cannot be deleted.
+      security:
+        - bearerAuth: []
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+      responses:
+        "200":
+          description: Deleted
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  ok: { type: boolean }
+
   /me/location:
     post:
       operationId: updateMyLocation
@@ -1771,6 +1790,112 @@ paths:
         "401": { description: Unauthorized }
         "403": { description: Admin access required }
         "404": { description: Object not found }
+
+  /application-template:
+    get:
+      tags: [applications]
+      operationId: getApplicationTemplate
+      summary: Public list of enabled custom application questions
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: "#/components/schemas/ApplicationQuestion" }
+
+  /admin/application-questions:
+    get:
+      tags: [applications]
+      operationId: adminListApplicationQuestions
+      summary: List all custom application questions (admin)
+      security:
+        - bearerAuth: []
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: "#/components/schemas/ApplicationQuestion" }
+    post:
+      tags: [applications]
+      operationId: adminCreateApplicationQuestion
+      summary: Create a custom application question (admin)
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/CreateApplicationQuestionRequest" }
+      responses:
+        "201":
+          description: Created
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ApplicationQuestion" }
+
+  /admin/application-questions/reorder:
+    post:
+      tags: [applications]
+      operationId: adminReorderApplicationQuestions
+      summary: Reorder custom application questions (admin)
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/ReorderApplicationQuestionsRequest" }
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: "#/components/schemas/ApplicationQuestion" }
+
+  /admin/application-questions/{id}:
+    patch:
+      tags: [applications]
+      operationId: adminUpdateApplicationQuestion
+      summary: Update a custom application question (admin)
+      security:
+        - bearerAuth: []
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/UpdateApplicationQuestionRequest" }
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ApplicationQuestion" }
+    delete:
+      tags: [applications]
+      operationId: adminDeleteApplicationQuestion
+      summary: Delete a custom application question (admin)
+      security:
+        - bearerAuth: []
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+      responses:
+        "200":
+          description: Deleted
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  ok: { type: boolean }
 
   /applications:
     post:
@@ -4139,6 +4264,56 @@ components:
         day: { type: string, enum: [mon, tue, wed, thu, fri, sat, sun] }
         period: { type: string, enum: [morning, afternoon, evening, overnight] }
 
+    ApplicationQuestion:
+      type: object
+      required: [id, label, fieldType, required, sortOrder, enabled]
+      properties:
+        id: { type: string }
+        label: { type: string }
+        helpText: { type: string, nullable: true }
+        fieldType:
+          type: string
+          enum: [short_text, long_text, number, date, select, multiselect, yes_no]
+        required: { type: boolean }
+        options: { type: array, nullable: true, items: { type: string } }
+        sortOrder: { type: integer }
+        enabled: { type: boolean }
+        createdAt: { type: string, nullable: true }
+        updatedAt: { type: string, nullable: true }
+
+    CreateApplicationQuestionRequest:
+      type: object
+      required: [label, fieldType]
+      properties:
+        label: { type: string }
+        helpText: { type: string, nullable: true }
+        fieldType:
+          type: string
+          enum: [short_text, long_text, number, date, select, multiselect, yes_no]
+        required: { type: boolean }
+        options: { type: array, nullable: true, items: { type: string } }
+        enabled: { type: boolean }
+
+    UpdateApplicationQuestionRequest:
+      type: object
+      properties:
+        label: { type: string }
+        helpText: { type: string, nullable: true }
+        fieldType:
+          type: string
+          enum: [short_text, long_text, number, date, select, multiselect, yes_no]
+        required: { type: boolean }
+        options: { type: array, nullable: true, items: { type: string } }
+        enabled: { type: boolean }
+
+    ReorderApplicationQuestionsRequest:
+      type: object
+      required: [ids]
+      properties:
+        ids:
+          type: array
+          items: { type: string }
+
     SubmitApplicationRequest:
       type: object
       required:
@@ -4220,6 +4395,16 @@ components:
           type: array
           minItems: 1
           items: { $ref: "#/components/schemas/AvailabilityCell" }
+        customAnswers:
+          type: array
+          nullable: true
+          description: "Answers to admin-defined custom questions (application_questions)."
+          items:
+            type: object
+            required: [questionId, value]
+            properties:
+              questionId: { type: string }
+              value: {}
 
     Application:
       type: object
@@ -4267,6 +4452,13 @@ components:
           type: array
           nullable: true
           items: { $ref: "#/components/schemas/AvailabilityCell" }
+        customAnswers:
+          type: array
+          nullable: true
+          description: "Denormalized answers to admin-defined custom questions: { questionId, label, fieldType, value }."
+          items:
+            type: object
+            additionalProperties: true
         reviewerNotes: { type: string, nullable: true }
         reviewedAt: { type: string, nullable: true }
         createdEmployeeId: { type: string, nullable: true }
