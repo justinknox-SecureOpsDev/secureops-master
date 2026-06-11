@@ -786,6 +786,12 @@ router.get("/time-entries/active", requireAuth, async (req, res): Promise<void> 
 // the new clock-out and clockIn (rounded to 0.01h, matching clock-out).
 // Rejects entries that already have a clockOutTime to avoid silently
 // overwriting verified payroll data.
+//
+// Normally the filled entry is still pending (POST /approve refuses entries
+// with a null clockOutTime), so there are no billed hours to reconcile. But an
+// admin CAN force an open entry to approvalStatus='approved' via the generic
+// CRUD grid; in that case we re-sync the weekly client invoice here so the
+// corrected billed hours track the fill (best-effort, mirrors /times + /approve).
 router.patch("/time-entries/:id/clock-out", requireAdmin, async (req, res): Promise<void> => {
   const id = Array.isArray(req.params.id) ? req.params.id[0] : req.params.id;
   const { clockOutTime, useShiftEnd, notes } = req.body ?? {};
@@ -857,6 +863,13 @@ router.patch("/time-entries/:id/clock-out", requireAdmin, async (req, res): Prom
     timeEntrySnapshot(existing),
     timeEntrySnapshot(updated),
   );
+
+  // If the entry was force-approved while still open (via the generic CRUD
+  // grid), re-sync the weekly client invoice so the newly billed hours flow
+  // through (best-effort, matches the /times + /approve routes).
+  if (updated.approvalStatus === "approved") {
+    void upsertWeeklyInvoiceForTimeEntry(updated);
+  }
 
   // Mirror the clock-out endpoint's shift-completion flip so an open shift
   // doesn't stay "active" after the admin patches the only outstanding entry.

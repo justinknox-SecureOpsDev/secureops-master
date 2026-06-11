@@ -376,13 +376,11 @@ describe("PATCH /time-entries/:id/clock-out — admin fill missing clock-out", (
     });
   });
 
-  // Unlike PATCH /time-entries/:id/times, this route does NOT re-sync the
-  // weekly client invoice. By design: an entry can only be approved AFTER it
-  // has a clock-out (POST /time-entries/:id/approve refuses entries with a
-  // null clockOutTime), so an entry reaching this "fill missing clock-out"
-  // route is never in an approved/billable state — there are no billed hours
-  // to reconcile. These tests pin that behavior so a future change that adds
-  // billing here is a conscious decision rather than a silent surprise.
+  // A pending entry is never billable, so filling its clock-out must NOT touch
+  // the weekly client invoice. But an admin CAN force an open entry to
+  // approved via the generic CRUD grid; filling that entry's clock-out MUST
+  // re-sync the invoice so the billed hours track the correction (mirrors the
+  // /times + /approve routes).
   describe("invoice sync", () => {
     beforeEach(async () => {
       await db.delete(invoicesTable).where(eq(invoicesTable.siteId, ctx.siteId));
@@ -406,6 +404,35 @@ describe("PATCH /time-entries/:id/clock-out — admin fill missing clock-out", (
         .from(invoicesTable)
         .where(and(eq(invoicesTable.siteId, ctx.siteId), eq(invoicesTable.periodStart, weekStart)));
       expect(rows).toHaveLength(0);
+    });
+
+    it("creates/updates the weekly invoice when filling a clock-out on an approved entry", async () => {
+      // An admin force-approved this entry while it was still open (possible via
+      // the generic CRUD grid). Filling the clock-out should bill the hours.
+      const id = await insertOpenEntry({ approvalStatus: "approved" });
+      const weekStart = weekStartIsoUtc(BASE_CLOCK_IN);
+
+      const res = await request(app)
+        .patch(`/api/time-entries/${id}/clock-out`)
+        .set(authed(ctx.adminToken))
+        .send({ clockOutTime: new Date(BASE_CLOCK_IN.getTime() + 5 * 3600_000).toISOString() });
+      expect(res.status).toBe(200);
+      expect(res.body.hoursWorked).toBe("5.00");
+
+      // Best-effort async sync — poll briefly for the draft invoice to appear.
+      const deadline = Date.now() + 2000;
+      let rows: (typeof invoicesTable.$inferSelect)[] = [];
+      while (Date.now() < deadline) {
+        rows = await db
+          .select()
+          .from(invoicesTable)
+          .where(and(eq(invoicesTable.siteId, ctx.siteId), eq(invoicesTable.periodStart, weekStart)));
+        if (rows.length > 0) break;
+        await new Promise((r) => setTimeout(r, 50));
+      }
+      expect(rows).toHaveLength(1);
+      // 5h × $40 shift billRate = $200.00 billed for the week.
+      expect(Number(rows[0].totalAmount)).toBe(200);
     });
   });
 });
