@@ -21,6 +21,7 @@ import {
 } from "@workspace/db";
 import {
   APPLICATION_FIELD_REGISTRY,
+  APPLICATION_FIELD_SECTIONS,
   mergeApplicationFields,
   isBuiltInApplicationField,
   type EffectiveApplicationField,
@@ -351,8 +352,8 @@ const UpdateApplicationFieldBody = z.object({
   hidden: z.boolean().optional(),
 });
 const ReorderApplicationFieldsBody = z.object({
-  section: z.number().int().min(0).max(APPLICATION_FIELD_REGISTRY.length),
-  keys: z.array(z.string().min(1).max(100)).max(100),
+  section: z.number().int().min(0).max(APPLICATION_FIELD_SECTIONS.length - 1),
+  keys: z.array(z.string().min(1).max(100)).min(1).max(100),
 });
 
 /** Load all override rows and merge them with the registry. */
