@@ -122,6 +122,7 @@ export default function AdminLayout() {
       <Tabs.Screen name="clients" options={{ href: null, headerTitle: "Clients" }} />
       <Tabs.Screen name="clients/[id]" options={{ href: null, headerTitle: "Client Sites" }} />
       <Tabs.Screen name="time-approval" options={{ href: null, headerTitle: "Time Approval" }} />
+      <Tabs.Screen name="shift-approvals" options={{ href: null, headerTitle: "Shift Approvals" }} />
       <Tabs.Screen name="employees/[id]" options={{ href: null, headerTitle: "Employee Profile" }} />
       <Tabs.Screen name="employees/create" options={{ href: null, headerTitle: "Add Employee" }} />
       {/* shifts/* (list, detail, create, edit) live in a nested Stack — see

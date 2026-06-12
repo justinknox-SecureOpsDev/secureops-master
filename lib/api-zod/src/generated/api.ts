@@ -1056,7 +1056,11 @@ export const GetShiftsResponseItem = zod.object({
         shiftId: zod.string(),
         employeeId: zod.string(),
         employeeName: zod.string().optional(),
-        status: zod.enum(["pending", "accepted", "declined"]),
+        status: zod
+          .enum(["pending", "accepted", "declined", "pending_approval"])
+          .describe(
+            "Assignment state. `pending` = admin-invited, awaiting the officer's acceptance. `pending_approval` = officer self-claimed, awaiting an admin's approval (slot is held — counts toward headcount — but the officer is not yet confirmed). `accepted` = confirmed on the roster. `declined` = removed (the row is deleted, freeing the slot).",
+          ),
         createdAt: zod.coerce.date(),
       }),
     )
@@ -1145,7 +1149,11 @@ export const GetShiftResponse = zod.object({
         shiftId: zod.string(),
         employeeId: zod.string(),
         employeeName: zod.string().optional(),
-        status: zod.enum(["pending", "accepted", "declined"]),
+        status: zod
+          .enum(["pending", "accepted", "declined", "pending_approval"])
+          .describe(
+            "Assignment state. `pending` = admin-invited, awaiting the officer's acceptance. `pending_approval` = officer self-claimed, awaiting an admin's approval (slot is held — counts toward headcount — but the officer is not yet confirmed). `accepted` = confirmed on the roster. `declined` = removed (the row is deleted, freeing the slot).",
+          ),
         createdAt: zod.coerce.date(),
       }),
     )
@@ -1221,7 +1229,11 @@ export const UpdateShiftResponse = zod.object({
         shiftId: zod.string(),
         employeeId: zod.string(),
         employeeName: zod.string().optional(),
-        status: zod.enum(["pending", "accepted", "declined"]),
+        status: zod
+          .enum(["pending", "accepted", "declined", "pending_approval"])
+          .describe(
+            "Assignment state. `pending` = admin-invited, awaiting the officer's acceptance. `pending_approval` = officer self-claimed, awaiting an admin's approval (slot is held — counts toward headcount — but the officer is not yet confirmed). `accepted` = confirmed on the roster. `declined` = removed (the row is deleted, freeing the slot).",
+          ),
         createdAt: zod.coerce.date(),
       }),
     )
@@ -1295,7 +1307,11 @@ export const UpdateShiftAssignmentResponse = zod.object({
   shiftId: zod.string(),
   employeeId: zod.string(),
   employeeName: zod.string().optional(),
-  status: zod.enum(["pending", "accepted", "declined"]),
+  status: zod
+    .enum(["pending", "accepted", "declined", "pending_approval"])
+    .describe(
+      "Assignment state. `pending` = admin-invited, awaiting the officer's acceptance. `pending_approval` = officer self-claimed, awaiting an admin's approval (slot is held — counts toward headcount — but the officer is not yet confirmed). `accepted` = confirmed on the roster. `declined` = removed (the row is deleted, freeing the slot).",
+    ),
   createdAt: zod.coerce.date(),
 });
 
@@ -2011,7 +2027,11 @@ export const GetAdminDashboardSummaryResponse = zod.object({
             shiftId: zod.string(),
             employeeId: zod.string(),
             employeeName: zod.string().optional(),
-            status: zod.enum(["pending", "accepted", "declined"]),
+            status: zod
+              .enum(["pending", "accepted", "declined", "pending_approval"])
+              .describe(
+                "Assignment state. `pending` = admin-invited, awaiting the officer's acceptance. `pending_approval` = officer self-claimed, awaiting an admin's approval (slot is held — counts toward headcount — but the officer is not yet confirmed). `accepted` = confirmed on the roster. `declined` = removed (the row is deleted, freeing the slot).",
+              ),
             createdAt: zod.coerce.date(),
           }),
         )
@@ -2078,7 +2098,11 @@ export const GetEmployeeDashboardSummaryResponse = zod.object({
             shiftId: zod.string(),
             employeeId: zod.string(),
             employeeName: zod.string().optional(),
-            status: zod.enum(["pending", "accepted", "declined"]),
+            status: zod
+              .enum(["pending", "accepted", "declined", "pending_approval"])
+              .describe(
+                "Assignment state. `pending` = admin-invited, awaiting the officer's acceptance. `pending_approval` = officer self-claimed, awaiting an admin's approval (slot is held — counts toward headcount — but the officer is not yet confirmed). `accepted` = confirmed on the roster. `declined` = removed (the row is deleted, freeing the slot).",
+              ),
             createdAt: zod.coerce.date(),
           }),
         )
@@ -2169,7 +2193,11 @@ export const GetEmployeeDashboardSummaryResponse = zod.object({
             shiftId: zod.string(),
             employeeId: zod.string(),
             employeeName: zod.string().optional(),
-            status: zod.enum(["pending", "accepted", "declined"]),
+            status: zod
+              .enum(["pending", "accepted", "declined", "pending_approval"])
+              .describe(
+                "Assignment state. `pending` = admin-invited, awaiting the officer's acceptance. `pending_approval` = officer self-claimed, awaiting an admin's approval (slot is held — counts toward headcount — but the officer is not yet confirmed). `accepted` = confirmed on the roster. `declined` = removed (the row is deleted, freeing the slot).",
+              ),
             createdAt: zod.coerce.date(),
           }),
         )
@@ -2189,7 +2217,11 @@ export const GetEmployeeDashboardSummaryResponse = zod.object({
       shiftId: zod.string(),
       employeeId: zod.string(),
       employeeName: zod.string().optional(),
-      status: zod.enum(["pending", "accepted", "declined"]),
+      status: zod
+        .enum(["pending", "accepted", "declined", "pending_approval"])
+        .describe(
+          "Assignment state. `pending` = admin-invited, awaiting the officer's acceptance. `pending_approval` = officer self-claimed, awaiting an admin's approval (slot is held — counts toward headcount — but the officer is not yet confirmed). `accepted` = confirmed on the roster. `declined` = removed (the row is deleted, freeing the slot).",
+        ),
       createdAt: zod.coerce.date(),
     }),
   ),

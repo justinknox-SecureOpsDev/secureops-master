@@ -121,6 +121,12 @@ export function resolveNotificationTarget(
         : { pathname: "/(admin)/employees" };
     }
 
+    // An officer self-claimed a shift and needs an approval decision. Admin-only.
+    case "shift_claim_request": {
+      if (role !== "admin") return null;
+      return { pathname: "/(admin)/shift-approvals" };
+    }
+
     // The scheduler tried to roster an under-licensed officer; the slot may be
     // short-staffed. Deep-link the admin to the shift so they can assign a
     // qualified officer.

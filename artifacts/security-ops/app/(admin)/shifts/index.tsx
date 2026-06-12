@@ -42,6 +42,25 @@ export default function AdminShiftsScreen() {
     { query: { queryKey: getGetShiftsQueryKey({ status: filter as any }) } },
   );
 
+  // Self-claims awaiting approval, surfaced as a badge on the Approvals entry.
+  // Always reads the upcoming list (React Query dedupes when the active filter
+  // is already "upcoming") so the count stays accurate on any filter. Admins
+  // approve from a dedicated screen; the shell-aware guard keeps leads out.
+  const isAdminShell = segments[0] === "(admin)";
+  const { data: upcomingForBadge } = useGetShifts(
+    { status: "upcoming" as any },
+    { query: { queryKey: getGetShiftsQueryKey({ status: "upcoming" as any }), enabled: isAdminShell } },
+  );
+  const pendingApprovalCount = useMemo(() => {
+    let n = 0;
+    for (const s of (upcomingForBadge ?? []) as any[]) {
+      for (const a of (s.assignments ?? []) as any[]) {
+        if (a.status === "pending_approval") n++;
+      }
+    }
+    return n;
+  }, [upcomingForBadge]);
+
   // Search across title, client and location so admins can find a shift fast on
   // a busy roster, then sort by start time. Upcoming/active read best soonest-
   // first; completed/cancelled read best most-recent-first.
@@ -63,6 +82,21 @@ export default function AdminShiftsScreen() {
       <View style={[styles.topBar, { paddingTop: topPad + 12, borderBottomColor: colors.border }]}>
         <Text style={[styles.pageTitle, { color: colors.foreground }]}>Shifts</Text>
         <View style={styles.topBarActions}>
+          {isAdminShell && (
+            <TouchableOpacity
+              style={[styles.approvalsBtn, { borderColor: pendingApprovalCount > 0 ? colors.accent : colors.border }]}
+              onPress={() => router.push("/(admin)/shift-approvals" as any)}
+              accessibilityRole="button"
+              accessibilityLabel={pendingApprovalCount > 0 ? `Shift approvals, ${pendingApprovalCount} pending` : "Shift approvals"}
+            >
+              <Feather name="user-check" size={18} color={pendingApprovalCount > 0 ? colors.accent : colors.mutedForeground} />
+              {pendingApprovalCount > 0 && (
+                <View style={[styles.approvalsBadge, { backgroundColor: colors.accent }]}>
+                  <Text style={styles.approvalsBadgeText}>{pendingApprovalCount > 99 ? "99+" : pendingApprovalCount}</Text>
+                </View>
+              )}
+            </TouchableOpacity>
+          )}
           <TouchableOpacity style={[styles.addBtn, { backgroundColor: colors.primary }]} onPress={() => router.push(`${shiftBase}/create` as any)} accessibilityRole="button" accessibilityLabel="Create shift">
             <Feather name="plus" size={20} color="#fff" />
           </TouchableOpacity>
@@ -198,6 +232,9 @@ const styles = StyleSheet.create({
   topBar: { flexDirection: "row", justifyContent: "space-between", alignItems: "center", paddingHorizontal: 16, paddingBottom: 12, borderBottomWidth: 1 },
   pageTitle: { fontSize: 22, fontWeight: "700" },
   addBtn: { width: 36, height: 36, borderRadius: 10, justifyContent: "center", alignItems: "center" },
+  approvalsBtn: { width: 36, height: 36, borderRadius: 10, borderWidth: 1, justifyContent: "center", alignItems: "center" },
+  approvalsBadge: { position: "absolute", top: -4, right: -4, minWidth: 16, height: 16, borderRadius: 8, paddingHorizontal: 3, justifyContent: "center", alignItems: "center" },
+  approvalsBadgeText: { color: "#080c18", fontSize: 10, fontWeight: "700" },
   topBarActions: { flexDirection: "row", alignItems: "center", gap: 8 },
   signOutBtn: { width: 36, height: 36, borderRadius: 10, borderWidth: 1, justifyContent: "center", alignItems: "center" },
   filterScroll: { flexDirection: "row", gap: 8, paddingHorizontal: 16, paddingVertical: 12, flexWrap: "wrap" },

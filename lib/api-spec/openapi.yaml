@@ -3413,7 +3413,13 @@ components:
           type: string
         status:
           type: string
-          enum: [pending, accepted, declined]
+          enum: [pending, accepted, declined, pending_approval]
+          description: >-
+            Assignment state. `pending` = admin-invited, awaiting the officer's
+            acceptance. `pending_approval` = officer self-claimed, awaiting an
+            admin's approval (slot is held — counts toward headcount — but the
+            officer is not yet confirmed). `accepted` = confirmed on the roster.
+            `declined` = removed (the row is deleted, freeing the slot).
         createdAt:
           type: string
           format: date-time

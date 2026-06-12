@@ -123,6 +123,25 @@ describe("setupNotificationDeepLinking", () => {
       expect(typeof arg.params._hlTs).toBe("string");
     });
 
+    it("routes an admin shift_claim_request to the approvals screen", async () => {
+      const { deps, h } = buildDeps({ role: "admin" });
+      setupNotificationDeepLinking(deps);
+      await h.flush();
+
+      h.fireWarmTap({ type: "shift_claim_request", shiftId: 9 });
+      expect(h.push).toHaveBeenCalledTimes(1);
+      expect(h.push.mock.calls[0][0].pathname).toBe("/(admin)/shift-approvals");
+    });
+
+    it("ignores shift_claim_request for non-admins", async () => {
+      const { deps, h } = buildDeps({ role: "employee" });
+      setupNotificationDeepLinking(deps);
+      await h.flush();
+
+      h.fireWarmTap({ type: "shift_claim_request", shiftId: 9 });
+      expect(h.push).not.toHaveBeenCalled();
+    });
+
     it("does not push for an unknown/unresolvable notification type", async () => {
       const { deps, h } = buildDeps({ role: "employee" });
       setupNotificationDeepLinking(deps);

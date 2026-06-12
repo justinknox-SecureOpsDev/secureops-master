@@ -145,7 +145,7 @@ describe("POST /shifts/:id/claim atomic concurrency", () => {
     const winner = a.status === 201 ? a : b;
     const loser = a.status === 409 ? a : b;
     expect(winner.body.shiftId).toBe(shiftId);
-    expect(winner.body.status).toBe("accepted");
+    expect(winner.body.status).toBe("pending_approval");
     expect(loser.body.error).toBe("Conflict");
     expect(loser.body.message).toMatch(/fully staffed/i);
 
@@ -196,5 +196,34 @@ describe("POST /shifts/:id/claim atomic concurrency", () => {
       .send({});
     expect(res.status).toBe(409);
     expect(res.body.message).toMatch(/no longer open/i);
+  });
+});
+
+describe("PUT /shifts/:id/assignments/:assignmentId approval authorization", () => {
+  it("forbids an officer from self-approving their own pending_approval claim", async () => {
+    const shiftId = await insertOpenShift(`${TAG}-selfapprove`, 1);
+
+    // Officer claims the shift — this creates a HELD pending_approval row.
+    const claim = await request(app)
+      .post(`/api/shifts/${shiftId}/claim`)
+      .set(authed(ctx.tokenA))
+      .send({});
+    expect(claim.status).toBe(201);
+    expect(claim.body.status).toBe("pending_approval");
+    const assignmentId = claim.body.id as string;
+
+    // The officer must NOT be able to elevate their own request to accepted.
+    const escalate = await request(app)
+      .put(`/api/shifts/${shiftId}/assignments/${assignmentId}`)
+      .set(authed(ctx.tokenA))
+      .send({ status: "accepted" });
+    expect(escalate.status).toBe(403);
+
+    // Row must remain pending_approval — approval requires an admin/lead.
+    const [row] = await db
+      .select({ status: shiftAssignmentsTable.status })
+      .from(shiftAssignmentsTable)
+      .where(sql`${shiftAssignmentsTable.id} = ${assignmentId}::uuid`);
+    expect(row.status).toBe("pending_approval");
   });
 });

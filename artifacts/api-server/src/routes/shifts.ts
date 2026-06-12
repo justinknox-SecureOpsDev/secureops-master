@@ -916,12 +916,14 @@ router.post("/shifts/:id/claim", requireAuth, async (req, res): Promise<void> =>
       const filled: number = (countRes as any).rows?.[0]?.c ?? 0;
       if (filled >= headcount) return undefined;
 
-      // One-tap reserve: officer is committed immediately. No separate
-      // pending→accepted confirmation step (admins were getting confused
-      // about whether the slot was actually filled).
+      // Officer self-claim: create a HELD slot pending admin approval. The
+      // slot counts toward headcount immediately (the COUNT(*) above includes
+      // every status) so the seat can't be double-claimed, but the officer
+      // isn't confirmed on the roster until an admin approves (status ->
+      // 'accepted'). Rejection deletes the row and frees the seat.
       const inserted = await tx.execute(sql`
         INSERT INTO shift_assignments (shift_id, employee_id, status)
-        VALUES (${shiftId}::uuid, ${userId}::uuid, 'accepted')
+        VALUES (${shiftId}::uuid, ${userId}::uuid, 'pending_approval')
         RETURNING id, shift_id, employee_id, status, created_at, updated_at
       `);
       const row = (inserted as any).rows?.[0];
@@ -951,17 +953,43 @@ router.post("/shifts/:id/claim", requireAuth, async (req, res): Promise<void> =>
 
   const [user] = await db.select().from(usersTable).where(eq(usersTable.id, userId));
 
-  // Reminder push so the officer confirms the shift on-device (accountability trail).
+  // Let the officer know their request is in (the slot is held, not yet confirmed).
   try {
     const { sendPushToUsers } = await import("../lib/push");
     const start = fmtShiftWhen(shift.startTime);
     await sendPushToUsers([userId], {
-      title: "✅ Shift Reserved",
-      body: `You're booked for ${shift.title} on ${start}.`,
+      title: "🕓 Shift Request Submitted",
+      body: `Your request for ${shift.title} on ${start} is awaiting admin approval.`,
       data: { type: "shift_reserved", shiftId },
     });
   } catch (err) {
     req.log.warn({ err }, "Failed to send claim confirmation push");
+  }
+
+  // Notify admins that an officer self-claimed and needs an approval decision.
+  try {
+    const admins = await db
+      .select({ id: usersTable.id })
+      .from(usersTable)
+      .where(eq(usersTable.role, "admin"));
+    const adminIds = admins.map((a) => a.id);
+    if (adminIds.length) {
+      const officerName = user ? `${user.firstName} ${user.lastName}` : "An officer";
+      const start = fmtShiftWhen(shift.startTime);
+      const { sendPushToUsers } = await import("../lib/push");
+      const { sendSmsToUsers } = await import("../lib/sms");
+      await sendPushToUsers(adminIds, {
+        title: "🕓 Shift Claim Awaiting Approval",
+        body: `${officerName} requested ${shift.title} on ${start}. Tap to approve or decline.`,
+        data: { type: "shift_claim_request", shiftId },
+      });
+      void sendSmsToUsers(
+        adminIds,
+        `WCSG: ${officerName} requested ${shift.title} on ${start}. Approve or decline in the SecureOps app.`,
+      );
+    }
+  } catch (err) {
+    req.log.warn({ err }, "Failed to notify admins of shift claim");
   }
 
   // Keep the scheduler's roster in sync: an officer self-claimed this shift.
@@ -1204,7 +1232,7 @@ router.put("/shifts/:id/assignments/:assignmentId", requireAuth, async (req, res
 
     // Keep the scheduler's roster in sync: an officer was removed from this shift.
     const [parentShift] = await db
-      .select({ id: shiftsTable.id, externalId: shiftsTable.externalId, syncSource: shiftsTable.syncSource })
+      .select({ id: shiftsTable.id, title: shiftsTable.title, startTime: shiftsTable.startTime, externalId: shiftsTable.externalId, syncSource: shiftsTable.syncSource })
       .from(shiftsTable)
       .where(eq(shiftsTable.id, existing.shiftId));
     const [declinedUser] = await db.select().from(usersTable).where(eq(usersTable.id, existing.employeeId));
@@ -1221,13 +1249,85 @@ router.put("/shifts/:id/assignments/:assignmentId", requireAuth, async (req, res
       });
     }
 
+    // If an admin/lead rejected an officer's pending self-claim, tell the officer
+    // their request wasn't approved and the slot is open again.
+    if (
+      canManageRoster &&
+      existing.status === "pending_approval" &&
+      existing.employeeId !== req.user!.userId
+    ) {
+      try {
+        const { sendPushToUsers } = await import("../lib/push");
+        const start = parentShift ? fmtShiftWhen(parentShift.startTime) : "";
+        await sendPushToUsers([existing.employeeId], {
+          title: "Shift Request Declined",
+          body: `Your request for ${parentShift?.title ?? "a shift"}${start ? ` on ${start}` : ""} wasn't approved. The slot is open again.`,
+          data: { type: "shift_available", shiftId: existing.shiftId },
+        });
+      } catch (err) {
+        req.log.warn({ err }, "Failed to send claim rejection push");
+      }
+    }
+
     res.json({ id: assignmentId, status: "declined", removed: true });
     return;
   }
 
+  // A non-manager (officer) may only ACCEPT an admin-issued invite
+  // (existing.status === 'pending'). They must never be able to approve their
+  // own self-claim (pending_approval -> accepted) or set any other status —
+  // approving a claim is an admin/lead-only decision. (Declining their own row
+  // is already handled above.)
+  if (!canManageRoster && !(status === "accepted" && existing.status === "pending")) {
+    res.status(403).json({ error: "Forbidden", message: "Only an admin can approve this request" });
+    return;
+  }
+
+  // Capture whether this is an admin/lead approving an officer's self-claim
+  // BEFORE we overwrite the status, so we can confirm them on the roster and
+  // notify them. (Officer-accepts-an-admin-invite — existing.status 'pending',
+  // actor === employee — is intentionally excluded.)
+  const isApprovingClaim =
+    existing.status === "pending_approval" &&
+    canManageRoster &&
+    existing.employeeId !== req.user!.userId &&
+    status === "accepted";
+
   const [assignment] = await db.update(shiftAssignmentsTable).set({ status }).where(eq(shiftAssignmentsTable.id, assignmentId)).returning();
   if (!assignment) { res.status(404).json({ error: "Not Found" }); return; }
   const [user] = await db.select().from(usersTable).where(eq(usersTable.id, assignment.employeeId));
+
+  if (isApprovingClaim) {
+    const [parentShift] = await db
+      .select({ id: shiftsTable.id, title: shiftsTable.title, startTime: shiftsTable.startTime, externalId: shiftsTable.externalId, syncSource: shiftsTable.syncSource })
+      .from(shiftsTable)
+      .where(eq(shiftsTable.id, existing.shiftId));
+    // Now confirmed — sync the accepted assignment onto the scheduler roster.
+    if (parentShift) {
+      void pushAssignmentEvent({
+        action: "created",
+        assignmentId,
+        shiftId: existing.shiftId,
+        shiftExternalId: parentShift.externalId,
+        shiftSyncSource: parentShift.syncSource,
+        employeeEmail: user?.email ?? "",
+        employeeName: user ? `${user.firstName} ${user.lastName}` : "",
+        status: "accepted",
+      });
+    }
+    try {
+      const { sendPushToUsers } = await import("../lib/push");
+      const start = parentShift ? fmtShiftWhen(parentShift.startTime) : "";
+      await sendPushToUsers([assignment.employeeId], {
+        title: "✅ Shift Request Approved",
+        body: `You're confirmed for ${parentShift?.title ?? "your shift"}${start ? ` on ${start}` : ""}.`,
+        data: { type: "shift_assigned", shiftId: existing.shiftId },
+      });
+    } catch (err) {
+      req.log.warn({ err }, "Failed to send claim approval push");
+    }
+  }
+
   res.json({ ...assignment, employeeName: user ? `${user.firstName} ${user.lastName}` : null });
 });
 

@@ -20,7 +20,7 @@ import {
 } from "@/components/ui/alert-dialog";
 import {
   ChevronDown, ChevronRight, MapPin, Repeat, Pencil, Trash2,
-  Users, Plus, RefreshCw, CalendarRange,
+  Users, Plus, RefreshCw, CalendarRange, UserCheck, Check, X,
 } from "lucide-react";
 
 type Shift = {
@@ -149,6 +149,18 @@ export default function ShiftsPage() {
   const [deletingSeries, setDeletingSeries] = useState<{ ids: string[]; title: string; total: number } | null>(null);
   const [version, setVersion] = useState(0);
 
+  // Officer self-claims awaiting an approval decision. Derived from the upcoming
+  // list (independent of the status filter) so the panel is always visible while
+  // there are pending requests. Each /shifts row carries its assignments with
+  // id/status/employeeName, so no dedicated endpoint is needed.
+  type PendingClaim = {
+    shiftId: string; assignmentId: string; employeeName: string | null;
+    shiftTitle: string; clientName: string | null; location: string | null;
+    startTime: string; endTime: string; requiredLicenseLevel: number;
+  };
+  const [pendingClaims, setPendingClaims] = useState<PendingClaim[]>([]);
+  const [claimBusyId, setClaimBusyId] = useState<string | null>(null);
+
   const handleFixSeriesTz = async () => {
     if (!fixingSeries) return;
     setFixBusy(true);
@@ -189,6 +201,42 @@ export default function ShiftsPage() {
       .finally(() => { if (!cancelled) setLoading(false); });
     return () => { cancelled = true; };
   }, [statusFilter, version]);
+
+  useEffect(() => {
+    let cancelled = false;
+    api<Shift[]>(`/shifts?status=upcoming`)
+      .then((rows) => {
+        if (cancelled) return;
+        const out: PendingClaim[] = [];
+        for (const s of rows ?? []) {
+          for (const a of s.assignments ?? []) {
+            if (a.status !== "pending_approval") continue;
+            out.push({
+              shiftId: s.id, assignmentId: a.id, employeeName: a.employeeName,
+              shiftTitle: s.title, clientName: s.clientName, location: s.location,
+              startTime: s.startTime, endTime: s.endTime, requiredLicenseLevel: s.requiredLicenseLevel,
+            });
+          }
+        }
+        out.sort((a, b) => a.startTime.localeCompare(b.startTime));
+        setPendingClaims(out);
+      })
+      .catch(() => { if (!cancelled) setPendingClaims([]); });
+    return () => { cancelled = true; };
+  }, [version]);
+
+  const decideClaim = async (shiftId: string, assignmentId: string, decision: "accepted" | "declined") => {
+    setClaimBusyId(assignmentId);
+    try {
+      await api(`/shifts/${shiftId}/assignments/${assignmentId}`, { method: "PUT", body: { status: decision } });
+      setVersion((v) => v + 1);
+      setToast({ kind: "ok", msg: decision === "accepted" ? "Shift claim approved — the officer is now confirmed." : "Shift claim declined — the slot is open again." });
+    } catch (e: any) {
+      setToast({ kind: "err", msg: e?.message || "Failed to update the claim." });
+    } finally {
+      setClaimBusyId(null);
+    }
+  };
 
   const siteIndex = useMemo(() => {
     const m = new Map<string, { name: string; clientName: string | null }>();
@@ -487,6 +535,51 @@ export default function ShiftsPage() {
           >
             {fixAllBusy ? "Fixing all…" : `Fix all ${affectedSeries.length}`}
           </Button>
+        </div>
+      )}
+
+      {pendingClaims.length > 0 && (
+        <div className="rounded-lg border border-amber-300 bg-amber-50 overflow-hidden">
+          <div className="px-4 py-3 border-b border-amber-200 flex items-center gap-2">
+            <UserCheck className="w-4 h-4 text-amber-700 shrink-0" />
+            <span className="font-semibold text-amber-900">
+              {pendingClaims.length} shift {pendingClaims.length === 1 ? "claim" : "claims"} awaiting approval
+            </span>
+          </div>
+          <div className="divide-y divide-amber-200">
+            {pendingClaims.map((c) => {
+              const busy = claimBusyId === c.assignmentId;
+              const lvl = levelBadge(c.requiredLicenseLevel);
+              return (
+                <div key={c.assignmentId} className="flex flex-wrap items-center gap-3 px-4 py-3">
+                  <div className="flex-1 min-w-0">
+                    <div className="font-medium truncate">{c.employeeName ?? "Officer"}</div>
+                    <div className="text-xs text-muted-foreground truncate">
+                      {c.shiftTitle}{c.clientName ? ` · ${c.clientName}` : ""}{c.location ? ` · ${c.location}` : ""}
+                    </div>
+                    <div className="text-xs text-muted-foreground">
+                      {fmtDateTime(c.startTime)} – {fmtTimeOfDay(c.endTime)}
+                    </div>
+                  </div>
+                  <span className={`text-xs px-2 py-0.5 rounded border ${lvl.cls}`}>{lvl.label}</span>
+                  <div className="flex items-center gap-2 shrink-0">
+                    <Button size="sm" disabled={busy} onClick={() => decideClaim(c.shiftId, c.assignmentId, "accepted")}>
+                      <Check className="w-3.5 h-3.5 mr-1" /> Approve
+                    </Button>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      disabled={busy}
+                      className="border-red-300 text-red-700 hover:bg-red-50"
+                      onClick={() => decideClaim(c.shiftId, c.assignmentId, "declined")}
+                    >
+                      <X className="w-3.5 h-3.5 mr-1" /> Decline
+                    </Button>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
         </div>
       )}
 

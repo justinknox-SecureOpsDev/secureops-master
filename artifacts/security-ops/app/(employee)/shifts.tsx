@@ -185,11 +185,11 @@ export default function EmployeeShiftsScreen() {
     const dist = typeof shift.distanceMilesFromHome === "number" ? shift.distanceMilesFromHome : null;
     const isFar = dist != null && dist >= FAR_MILES;
     const ok = await confirmAction({
-      title: isFar ? "This Shift Is Far From Home" : "Reserve This Shift",
+      title: isFar ? "This Shift Is Far From Home" : "Request This Shift",
       message: isFar
-        ? `${shift.title} @ ${shift.clientName}\n\nThis site is about ${Math.round(dist!)} miles from your home address. Make sure you can get there for the start time.\n\nReserving books you onto this shift. You can release it later if you can't make it.`
-        : `${shift.title} @ ${shift.clientName}${dist != null ? `\n\nAbout ${Math.round(dist)} mi from home.` : ""}\n\nReserving books you onto this shift. You can release it later if you can't make it.`,
-      confirmText: isFar ? `Reserve (${Math.round(dist!)} mi)` : "Reserve",
+        ? `${shift.title} @ ${shift.clientName}\n\nThis site is about ${Math.round(dist!)} miles from your home address. Make sure you can get there for the start time.\n\nRequesting holds the slot and sends it to an admin for approval. You'll be notified once it's confirmed.`
+        : `${shift.title} @ ${shift.clientName}${dist != null ? `\n\nAbout ${Math.round(dist)} mi from home.` : ""}\n\nRequesting holds the slot and sends it to an admin for approval. You'll be notified once it's confirmed.`,
+      confirmText: isFar ? `Request (${Math.round(dist!)} mi)` : "Request",
       destructive: isFar,
     });
     if (!ok) return;
@@ -198,10 +198,10 @@ export default function EmployeeShiftsScreen() {
       await claimShift(shift.id);
       await queryClient.invalidateQueries({ queryKey: getGetShiftsQueryKey() });
       setFilter("upcoming");
-      notify("Shift Reserved", "You're booked. See it under 'Upcoming'.");
+      notify("Request Submitted", "Your request is awaiting admin approval. See it under 'Upcoming'.");
     } catch (e: any) {
-      const msg = e?.response?.data?.message || e?.message || "Could not reserve this shift.";
-      notify("Reservation Failed", msg);
+      const msg = e?.response?.data?.message || e?.message || "Could not request this shift.";
+      notify("Request Failed", msg);
     } finally {
       setBusyId(null);
     }
@@ -380,6 +380,8 @@ export default function EmployeeShiftsScreen() {
             const myAssign = myAssignmentFor(item);
             const isPending = myAssign?.status === "pending";
             const isAccepted = myAssign?.status === "accepted";
+            const isPendingApproval = myAssign?.status === "pending_approval";
+            const accentBorder = isPending || isPendingApproval;
             const busy = busyId === item.id;
             const isHighlighted = highlightShiftId === item.id;
             return (
@@ -388,8 +390,8 @@ export default function EmployeeShiftsScreen() {
                   ? flashAnim.interpolate({ inputRange: [0, 1], outputRange: [colors.card, colors.primary + "26"] })
                   : colors.card,
                 borderColor: isHighlighted
-                  ? flashAnim.interpolate({ inputRange: [0, 1], outputRange: [isPending ? colors.accent : colors.border, colors.primary] })
-                  : (isPending ? colors.accent : colors.border),
+                  ? flashAnim.interpolate({ inputRange: [0, 1], outputRange: [accentBorder ? colors.accent : colors.border, colors.primary] })
+                  : (accentBorder ? colors.accent : colors.border),
                 borderWidth: isHighlighted
                   ? flashAnim.interpolate({ inputRange: [0, 1], outputRange: [1, 2] })
                   : 1,
@@ -410,6 +412,12 @@ export default function EmployeeShiftsScreen() {
                   <View style={[styles.statusBanner, { backgroundColor: colors.accent + "20", borderColor: colors.accent }]}>
                     <Feather name="alert-circle" size={14} color={colors.accent} />
                     <Text style={[styles.statusBannerText, { color: colors.accent }]}>Awaiting your acceptance</Text>
+                  </View>
+                )}
+                {isPendingApproval && (
+                  <View style={[styles.statusBanner, { backgroundColor: colors.accent + "20", borderColor: colors.accent }]}>
+                    <Feather name="clock" size={14} color={colors.accent} />
+                    <Text style={[styles.statusBannerText, { color: colors.accent }]}>Requested — awaiting admin approval</Text>
                   </View>
                 )}
                 {isAccepted && (
@@ -474,13 +482,13 @@ export default function EmployeeShiftsScreen() {
                     onPress={() => handleClaim(item)}
                     disabled={busy}
                     accessibilityRole="button"
-                    accessibilityLabel={`Reserve slot for ${item.title} at ${item.clientName}`}
+                    accessibilityLabel={`Request slot for ${item.title} at ${item.clientName}`}
                     accessibilityState={{ disabled: busy, busy }}
                   >
                     {busy ? <ActivityIndicator color={colors.primaryForeground} /> : (
                       <>
                         <Feather name="bookmark" size={16} color={colors.primaryForeground} />
-                        <Text style={[styles.claimText, { color: colors.primaryForeground }]}>Reserve Slot</Text>
+                        <Text style={[styles.claimText, { color: colors.primaryForeground }]}>Request Slot</Text>
                       </>
                     )}
                   </TouchableOpacity>

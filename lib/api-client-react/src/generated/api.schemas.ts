@@ -550,6 +550,9 @@ export const ShiftRepeatPattern = {
   monthly: "monthly",
 } as const;
 
+/**
+ * Assignment state. `pending` = admin-invited, awaiting the officer's acceptance. `pending_approval` = officer self-claimed, awaiting an admin's approval (slot is held — counts toward headcount — but the officer is not yet confirmed). `accepted` = confirmed on the roster. `declined` = removed (the row is deleted, freeing the slot).
+ */
 export type ShiftAssignmentStatus =
   (typeof ShiftAssignmentStatus)[keyof typeof ShiftAssignmentStatus];
 
@@ -557,6 +560,7 @@ export const ShiftAssignmentStatus = {
   pending: "pending",
   accepted: "accepted",
   declined: "declined",
+  pending_approval: "pending_approval",
 } as const;
 
 export interface ShiftAssignment {
@@ -564,6 +568,7 @@ export interface ShiftAssignment {
   shiftId: string;
   employeeId: string;
   employeeName?: string;
+  /** Assignment state. `pending` = admin-invited, awaiting the officer's acceptance. `pending_approval` = officer self-claimed, awaiting an admin's approval (slot is held — counts toward headcount — but the officer is not yet confirmed). `accepted` = confirmed on the roster. `declined` = removed (the row is deleted, freeing the slot). */
   status: ShiftAssignmentStatus;
   createdAt: string;
 }
