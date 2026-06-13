@@ -430,7 +430,12 @@ router.get("/time-entries", requireAuth, async (req, res): Promise<void> => {
     .leftJoin(usersTable, eq(timeEntriesTable.employeeId, usersTable.id))
     .where(conditions.length > 0 ? and(...conditions) : undefined);
 
-  res.json(rows);
+  // Bill rate (client markup) is admin-only. Officers may see their own pay
+  // rate but never what the client is charged.
+  const safeRows = req.user!.role === "admin"
+    ? rows
+    : rows.map(({ billRate, ...rest }) => rest);
+  res.json(safeRows);
 });
 
 router.post("/time-entries/clock-in", requireAuth, async (req, res): Promise<void> => {
@@ -774,6 +779,12 @@ router.get("/time-entries/active", requireAuth, async (req, res): Promise<void> 
   // after a clock-out instead of treating "no entry" as an error and keeping
   // the previous cached value.
   if (!entry) { res.json(null); return; }
+  // Bill rate (client markup) is admin-only; strip it for officers/leads.
+  if (req.user!.role !== "admin") {
+    const { billRate, ...rest } = entry;
+    res.json(rest);
+    return;
+  }
   res.json(entry);
 });
 

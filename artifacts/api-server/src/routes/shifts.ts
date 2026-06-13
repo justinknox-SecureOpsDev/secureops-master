@@ -98,15 +98,23 @@ async function getEmployeeHeldTrainings(employeeId: string): Promise<Set<string>
 }
 
 /**
- * Remove every financial field from a shift row before returning it to a
- * `lead` caller. Leads schedule and staff shifts but must never see pay/bill
- * rates. No-op for any other role. Kept inline (not exported) because shift
- * finance has a fixed, small field set; centralising it here means every
- * lead-reachable shift response strips the same keys.
+ * Strip financial fields from a shift row based on the caller's role before
+ * returning it. Bill rate (what the CLIENT is charged) is commercial data that
+ * must never leave the admin boundary — no non-admin role may see it. Pay rate
+ * is the officer's own compensation, so officers/dispatchers keep it; leads see
+ * NO finance at all (lead-no-finance invariant). Kept inline (not exported)
+ * because shift finance has a fixed, small field set; centralising it here means
+ * every reachable shift response strips the same keys.
  */
-function stripShiftFinanceForLead<T extends Record<string, unknown>>(role: string | undefined, shift: T): T {
-  if (role !== "lead") return shift;
-  const { payRate, billRate, hourlyRate, billableRate, ...rest } = shift as Record<string, unknown>;
+function stripShiftFinanceForRole<T extends Record<string, unknown>>(role: string | undefined, shift: T): T {
+  if (role === "admin") return shift;
+  if (role === "lead") {
+    const { payRate, billRate, hourlyRate, billableRate, ...rest } = shift as Record<string, unknown>;
+    return rest as T;
+  }
+  // Officers, dispatchers, and any other non-admin: keep pay rate (their own
+  // compensation) but remove the client-facing bill rate / billable rate.
+  const { billRate, billableRate, ...rest } = shift as Record<string, unknown>;
   return rest as T;
 }
 
@@ -264,7 +272,7 @@ router.get("/shifts", requireAuth, async (req, res): Promise<void> => {
     }
   }
 
-  res.json(shifts.map((s) => stripShiftFinanceForLead(role, {
+  res.json(shifts.map((s) => stripShiftFinanceForRole(role, {
     ...s,
     assignments: assignmentMap.get(s.id) ?? [],
     distanceMilesFromHome: distanceMap?.get(s.id) ?? null,
@@ -397,7 +405,7 @@ router.post("/shifts", requireAdminOrLead, async (req, res): Promise<void> => {
   // Outbound sync to scheduler (best-effort, after response)
   void pushShiftUpsert(shift);
 
-  res.status(201).json(stripShiftFinanceForLead(req.user!.role, { ...shift, assignments: [] }));
+  res.status(201).json(stripShiftFinanceForRole(req.user!.role, { ...shift, assignments: [] }));
 });
 
 /**
@@ -771,7 +779,7 @@ router.get("/shifts/:id", requireAuth, async (req, res): Promise<void> => {
     .leftJoin(usersTable, eq(shiftAssignmentsTable.employeeId, usersTable.id))
     .where(eq(shiftAssignmentsTable.shiftId, id));
 
-  res.json(stripShiftFinanceForLead(req.user!.role, { ...shift, assignments }));
+  res.json(stripShiftFinanceForRole(req.user!.role, { ...shift, assignments }));
 });
 
 router.put("/shifts/:id", requireAdminOrLead, async (req, res): Promise<void> => {
@@ -819,7 +827,7 @@ router.put("/shifts/:id", requireAdminOrLead, async (req, res): Promise<void> =>
   if (!shift) { res.status(404).json({ error: "Not Found" }); return; }
   // Outbound sync to scheduler (best-effort, after response)
   void pushShiftUpsert(shift);
-  res.json(stripShiftFinanceForLead(req.user!.role, { ...shift, assignments: [] }));
+  res.json(stripShiftFinanceForRole(req.user!.role, { ...shift, assignments: [] }));
 });
 
 router.delete("/shifts/:id", requireAdminOrLead, async (req, res): Promise<void> => {

@@ -10,6 +10,7 @@ import {
   clientsTable,
   sitesTable,
   shiftsTable,
+  shiftAssignmentsTable,
   payrollEntriesTable,
 } from "@workspace/db";
 import app from "../app";
@@ -166,6 +167,7 @@ afterAll(async () => {
   if (ids.length > 0) {
     const arr = sql.raw(`ARRAY['${ids.join("','")}']::uuid[]`);
     await db.execute(sql`DELETE FROM payroll_entries WHERE employee_id = ANY(${arr})`);
+    await db.execute(sql`DELETE FROM shift_assignments WHERE employee_id = ANY(${arr})`);
     await db.execute(sql`DELETE FROM employees WHERE user_id = ANY(${arr})`);
   }
   await db.execute(sql`DELETE FROM shifts WHERE title LIKE ${TAG + "%"}`);
@@ -285,6 +287,29 @@ describe("GET /shifts — lead finance stripping", () => {
     expect(shift).not.toHaveProperty("billRate");
     expect(shift).not.toHaveProperty("hourlyRate");
     expect(shift).not.toHaveProperty("billableRate");
+  });
+});
+
+describe("GET /shifts — bill rate is admin-only for officers", () => {
+  it("strips billRate but keeps the officer's own payRate", async () => {
+    // Officers only see shifts they're assigned to (or open ones they qualify
+    // for); pin an accepted assignment so the fixture shift is in their feed.
+    await db.insert(shiftAssignmentsTable).values({
+      shiftId: ctx.shiftId,
+      employeeId: ctx.officerId,
+      status: "accepted",
+    });
+    const res = await request(app)
+      .get("/api/shifts")
+      .set(authed(ctx.officerToken));
+    expect(res.status).toBe(200);
+    const shift = (res.body as Array<Record<string, unknown>>).find((s) => s.id === ctx.shiftId);
+    expect(shift).toBeTruthy();
+    // Bill rate (client markup) is commercial data — never visible to a non-admin.
+    expect(shift).not.toHaveProperty("billRate");
+    expect(shift).not.toHaveProperty("billableRate");
+    // Pay rate is the officer's own compensation — must remain visible.
+    expect(shift).toHaveProperty("payRate", "30.00");
   });
 });
 
