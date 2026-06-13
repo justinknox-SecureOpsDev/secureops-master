@@ -32,11 +32,15 @@ function plusDaysIso(days: number): string {
 }
 
 export function RepeatingShiftDialog({
-  open, onOpenChange, onCreated,
+  open, onOpenChange, onCreated, initialSiteId,
 }: {
   open: boolean;
   onOpenChange: (b: boolean) => void;
   onCreated: () => void;
+  // When launched from a specific site's detail page, prefill the series to
+  // that site so the admin doesn't have to re-pick it. Optional — the standalone
+  // Shifts page passes nothing and the admin chooses a site as before.
+  initialSiteId?: string | null;
 }) {
   const sites = useFkOptions("sites");
 
@@ -70,6 +74,13 @@ export function RepeatingShiftDialog({
       .catch(() => { if (!cancelled) setSiteRates([]); });
     return () => { cancelled = true; };
   }, [open, siteId]);
+
+  // Prefill the site when opened from a site's detail page (see initialSiteId).
+  // Also clear any prior rate-card selection so a stale siteRateId from a
+  // previously chosen site can't carry over into this site's series.
+  useEffect(() => {
+    if (open && initialSiteId) { setSiteId(initialSiteId); setSiteRateId(null); }
+  }, [open, initialSiteId]);
 
   // Auto-apply the matching rate as soon as the rate card resolves, or when
   // the admin changes the level. Only fires if no manual rate override is in
@@ -171,7 +182,7 @@ export function RepeatingShiftDialog({
             </div>
             <div className="col-span-2">
               <Label>Site <span className="text-destructive">*</span></Label>
-              <Select value={siteId} onValueChange={setSiteId}>
+              <Select value={siteId} onValueChange={(v) => { setSiteId(v); setSiteRateId(null); }}>
                 <SelectTrigger><SelectValue placeholder={sites.loading ? "Loading sites…" : "Pick a site"} /></SelectTrigger>
                 <SelectContent>
                   {sites.options.map((o) => (

@@ -1,13 +1,15 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import QRCode from "qrcode";
 import { Link, useRoute, useLocation } from "wouter";
-import { ArrowLeft, MapPin, Pencil, Plus, Trash2, QrCode, AlertTriangle, Radius, RefreshCw, Printer, Loader2 } from "lucide-react";
+import { ArrowLeft, MapPin, Pencil, Plus, Trash2, QrCode, AlertTriangle, Radius, RefreshCw, Printer, Loader2, CalendarPlus, Repeat } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { api, fetchWithAuth } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
 import { useFkOptions } from "@/lib/fk";
 import { getTable } from "@/lib/tables";
 import { RowFormDialog } from "@/components/RowFormDialog";
+import { ShiftDialog } from "@/components/ShiftDialog";
+import { RepeatingShiftDialog } from "@/components/RepeatingShiftDialog";
 import { ResponsiveTable, type ResponsiveColumn } from "@/components/ResponsiveTable";
 
 type Site = {
@@ -274,6 +276,9 @@ export function SiteDetailPage() {
   // (mirrors the mobile time-approval screen), and any action error.
   const { user } = useAuth();
   const isAdmin = user?.role === "admin";
+  // Single-shift create mirrors the server gate (POST /shifts = admin OR lead);
+  // repeating series is admin-only (POST /shifts/repeat = requireAdmin → isAdmin).
+  const canCreateShift = user?.role === "admin" || user?.role === "lead";
   const [teActioningId, setTeActioningId] = useState<string | null>(null);
   const [teHoursEdits, setTeHoursEdits] = useState<Record<string, string>>({});
   const [teActionError, setTeActionError] = useState<string | null>(null);
@@ -298,6 +303,18 @@ export function SiteDetailPage() {
   // the map visually rolls back to server-truth geometry even when the
   // freshly computed srcDoc string happens to be byte-identical.
   const [iframeVersion, setIframeVersion] = useState(0);
+
+  // Shift creation launched from this site's page — the dialogs are prefilled to
+  // the current site so an admin can post coverage without bouncing to the
+  // standalone Shifts page. shiftMsg is a transient post-create confirmation.
+  const [creatingShift, setCreatingShift] = useState(false);
+  const [repeatingShift, setRepeatingShift] = useState(false);
+  const [shiftMsg, setShiftMsg] = useState<string | null>(null);
+  // Stable `initial` for the single-shift create dialog. ShiftDialog resets its
+  // form whenever `open` or `initial` changes, so this must be memoised on the
+  // (stable) route siteId — an inline object would reset the form every render.
+  // Declared here with the other hooks so it stays above all early returns.
+  const shiftCreateInitial = useMemo(() => ({ siteId }), [siteId]);
 
   const loadSite = useCallback(async () => {
     if (!siteId) return;
@@ -868,6 +885,38 @@ export function SiteDetailPage() {
         <div className="p-6 space-y-8">
           <SiteRateCard siteId={site.id} />
 
+          {canCreateShift && (
+            <section>
+              <div className="flex items-center justify-between mb-3 gap-2 flex-wrap">
+                <h2 className="text-lg font-semibold inline-flex items-center gap-2">
+                  <CalendarPlus className="w-4 h-4" /> Shifts
+                </h2>
+                <div className="flex gap-2">
+                  <Button size="sm" onClick={() => { setShiftMsg(null); setCreatingShift(true); }}>
+                    <Plus className="w-3.5 h-3.5 mr-1" /> New shift
+                  </Button>
+                  {isAdmin && (
+                    <Button size="sm" variant="outline" onClick={() => { setShiftMsg(null); setRepeatingShift(true); }}>
+                      <Repeat className="w-3.5 h-3.5 mr-1" /> Repeating shifts
+                    </Button>
+                  )}
+                </div>
+              </div>
+              <p className="text-sm text-muted-foreground max-w-3xl">
+                Post a one-off shift{isAdmin ? " or a recurring series" : ""} for{" "}
+                <span className="font-medium text-foreground">{site.name}</span>. The site is
+                prefilled, and pay/bill rates default to this site's rate card for the chosen
+                license level — override any field per shift.
+              </p>
+              {shiftMsg && (
+                <div className="mt-3 inline-flex items-center gap-2 text-sm text-emerald-800 bg-emerald-50 border border-emerald-200 rounded px-3 py-2">
+                  <span>{shiftMsg}</span>
+                  <Link href="/tables/shifts" className="underline font-medium">View all shifts</Link>
+                </div>
+              )}
+            </section>
+          )}
+
           <SubcontractorQrCard siteId={site.id} siteName={site.name} />
 
           <section>
@@ -1435,6 +1484,24 @@ export function SiteDetailPage() {
             initialMapRef.current = null;
             loadSite();
           }}
+        />
+      )}
+
+      {site && canCreateShift && (
+        <ShiftDialog
+          open={creatingShift}
+          onOpenChange={setCreatingShift}
+          initial={shiftCreateInitial}
+          onSaved={() => { setCreatingShift(false); setShiftMsg("New shift created for this site."); }}
+        />
+      )}
+
+      {site && isAdmin && (
+        <RepeatingShiftDialog
+          open={repeatingShift}
+          onOpenChange={setRepeatingShift}
+          initialSiteId={site.id}
+          onCreated={() => { setRepeatingShift(false); setShiftMsg("Repeating shifts created for this site."); }}
         />
       )}
     </div>
