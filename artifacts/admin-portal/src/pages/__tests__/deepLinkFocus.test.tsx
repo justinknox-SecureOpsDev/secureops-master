@@ -190,6 +190,14 @@ describe("deep-link focus on a paginated admin table", () => {
   });
 });
 
+// This suite forces the responsive grid into its single-render mobile (card)
+// branch, which renders a full page of cards on top of the deep-link page
+// resolution. It is the heaviest test in the file and, under the full parallel
+// `pnpm -r` workspace run, CPU contention can push it past vitest's 5s default
+// per-test timeout even though it passes comfortably in isolation. A generous
+// per-test timeout removes the flake without masking a real hang.
+const MOBILE_CARD_TEST_TIMEOUT_MS = 20000;
+
 describe("deep-link focus on the mobile card layout", () => {
   let scrollSpy: ReturnType<typeof vi.spyOn>;
   let originalInnerWidth: number;
@@ -249,5 +257,5 @@ describe("deep-link focus on the mobile card layout", () => {
       expect(flashed?.textContent).toContain("Widget 40");
     });
     expect(scrollSpy).toHaveBeenCalled();
-  });
+  }, MOBILE_CARD_TEST_TIMEOUT_MS);
 });

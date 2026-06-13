@@ -409,6 +409,14 @@ describe("RowFormDialog dropdown (select / boolean) and linked-record (FK) field
  * changing the source clears the dependent virtual selection, and `autofill`
  * copies values from the picked FK row into other (real, submitted) fields.
  */
+// The `filterBy` test drives the most Radix Select open/close + option-render
+// cycles in this file (open site, pick, open shift, pick, change site, reopen
+// shift). Under the full parallel `pnpm -r` workspace run, CPU contention can
+// push it past vitest's 5s default per-test timeout even though it passes
+// comfortably in isolation. A generous per-test timeout removes the flake
+// without masking a real hang.
+const FILTER_BY_TEST_TIMEOUT_MS = 20000;
+
 describe("RowFormDialog linked FK fields (filterBy narrowing + clearing, autofill copy)", () => {
   beforeAll(() => {
     // Same Radix/jsdom polyfills the dropdown suite relies on.
@@ -485,7 +493,7 @@ describe("RowFormDialog linked FK fields (filterBy narrowing + clearing, autofil
     expect(await screen.findByRole("option", { name: "Wed Patrol" })).toBeTruthy();
     expect(screen.queryByRole("option", { name: "Mon Day Shift" })).toBeNull();
     expect(screen.queryByRole("option", { name: "Tue Night Shift" })).toBeNull();
-  });
+  }, FILTER_BY_TEST_TIMEOUT_MS);
 
   it("autofill: picking a shift copies the mapped values into the target fields and submits them", async () => {
     render(<DataGrid descriptor={linkedDescriptor} />);
