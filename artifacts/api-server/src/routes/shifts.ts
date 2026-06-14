@@ -6,6 +6,7 @@ import { requireAuth, requireAdmin, requireAdminOrDispatcher, requireAdminOrLead
 import { haversineMiles } from "../lib/geofence";
 import { getEffectiveLevel, effectiveLevelSql } from "../lib/eligibility";
 import { pushShiftUpsert, pushShiftDelete, pushAssignmentEvent } from "../lib/schedulerSync";
+import { MAX_SHIFT_HOURS, validateShiftWindow } from "../lib/shiftWindow";
 
 const router: IRouter = Router();
 
@@ -316,6 +317,15 @@ router.post("/shifts", requireAdminOrLead, async (req, res): Promise<void> => {
     return;
   }
 
+  // Reject impossible / typo'd shift windows (NaN, end<=start, or >24h). A
+  // multi-day window almost always means a wrong end DATE; left unguarded it
+  // makes the rostered officers look on-duty for days, silently blocking every
+  // overlapping assignment + self clock-in. Shared validator across all writers.
+  {
+    const w = validateShiftWindow(new Date(startTime), new Date(endTime));
+    if (!w.ok) { res.status(400).json({ error: "Bad Request", message: w.message }); return; }
+  }
+
   // Leads inherit rates ONLY from the site default and must fail closed if the
   // site has no usable defaults — never silently persist a 0 that would poison
   // payroll/invoicing downstream.
@@ -452,7 +462,7 @@ router.post("/shifts/repeat", requireAdmin, async (req, res): Promise<void> => {
   }
 
   const dateRe = /^\d{4}-\d{2}-\d{2}$/;
-  const timeRe = /^\d{2}:\d{2}$/;
+  const timeRe = /^([01]\d|2[0-3]):[0-5]\d$/;
   if (!dateRe.test(startDate) || !dateRe.test(untilDate)) {
     res.status(400).json({ error: "Bad Request", message: "dates must be YYYY-MM-DD" });
     return;
@@ -495,6 +505,18 @@ router.post("/shifts/repeat", requireAdmin, async (req, res): Promise<void> => {
   const [sh, sm] = startTime.split(":").map(Number);
   const [eh, em] = endTime.split(":").map(Number);
   const wrapsOvernight = (eh * 60 + em) <= (sh * 60 + sm);
+
+  // Defense-in-depth: each occurrence is bounded to one day by construction
+  // (and the stricter HH:MM regex above already rejects out-of-range times like
+  // "25:00"), but verify the per-occurrence span so a recurring series can't
+  // seed multi-day shifts either.
+  const occurrenceMinutes = wrapsOvernight
+    ? (eh * 60 + em) + 1440 - (sh * 60 + sm)
+    : (eh * 60 + em) - (sh * 60 + sm);
+  if (occurrenceMinutes <= 0 || occurrenceMinutes > MAX_SHIFT_HOURS * 60) {
+    res.status(400).json({ error: "Bad Request", message: `Each shift in the series must be between 1 minute and ${MAX_SHIFT_HOURS} hours long — check the start/end times.` });
+    return;
+  }
 
   const repeatPattern = JSON.stringify({ daysOfWeek: validDays.sort(), startTime, endTime, startDate, untilDate });
   // Stable series identifier shared by every occurrence in this batch. Lets
@@ -581,7 +603,7 @@ router.put("/shifts/bulk", requireAdmin, async (req, res): Promise<void> => {
     res.status(400).json({ error: "Bad Request", message: "changes object required" }); return;
   }
   const tz: string = typeof changes.tz === "string" && changes.tz ? changes.tz : "America/Chicago";
-  const timeRe = /^\d{2}:\d{2}$/;
+  const timeRe = /^([01]\d|2[0-3]):[0-5]\d$/;
   const newStart = typeof changes.startTime === "string" && timeRe.test(changes.startTime) ? changes.startTime : null;
   const newEnd = typeof changes.endTime === "string" && timeRe.test(changes.endTime) ? changes.endTime : null;
 
@@ -616,45 +638,59 @@ router.put("/shifts/bulk", requireAdmin, async (req, res): Promise<void> => {
   const rows = await db.select().from(shiftsTable).where(inArray(shiftsTable.id, ids as string[]));
   if (rows.length === 0) { res.status(404).json({ error: "Not Found", message: "no matching shifts" }); return; }
 
+  // Build every row's patch up front so one bad resulting window rejects the
+  // WHOLE batch — never partially apply a series edit (which would leave some
+  // occurrences valid and others poisoning the overlap guard). A time-only edit
+  // can still produce an invalid window per-row (e.g. moving only the start of
+  // an overnight shift past its end), so validate the EFFECTIVE window here too.
+  const patches: { id: string; patch: Record<string, unknown> }[] = [];
+  for (const r of rows) {
+    const patch: Record<string, unknown> = { ...setCommon };
+    if (newStart || newEnd) {
+      // Anchor on the existing start day as observed in `tz`.
+      const startDateLocal = localDateInTz(new Date(r.startTime).getTime(), tz);
+      const [y, mo, da] = startDateLocal.split("-").map(Number);
+      if (newStart) {
+        const [sh, sm] = newStart.split(":").map(Number);
+        patch.startTime = wallTimeToUtc(y, mo, da, sh, sm, tz);
+      }
+      if (newEnd) {
+        const [eh, eM] = newEnd.split(":").map(Number);
+        // Decide overnight: if the user supplied newStart, compare HH:MM
+        // pairs directly. Otherwise preserve the existing shift's
+        // overnight-ness by comparing the local dates of the existing
+        // start vs. end in `tz` (NOT raw UTC proximity, which breaks
+        // for normal multi-hour overnight shifts).
+        let wraps: boolean;
+        if (newStart) {
+          const [sh2, sm2] = newStart.split(":").map(Number);
+          wraps = (eh * 60 + eM) <= (sh2 * 60 + sm2);
+        } else {
+          const endDateLocal = localDateInTz(new Date(r.endTime).getTime(), tz);
+          wraps = endDateLocal !== startDateLocal;
+        }
+        let ey = y, em3 = mo, ed = da;
+        if (wraps) {
+          const next = new Date(Date.UTC(y, mo - 1, da) + 86400000);
+          ey = next.getUTCFullYear();
+          em3 = next.getUTCMonth() + 1;
+          ed = next.getUTCDate();
+        }
+        patch.endTime = wallTimeToUtc(ey, em3, ed, eh, eM, tz);
+      }
+      const effStart = (patch.startTime as Date | undefined) ?? new Date(r.startTime);
+      const effEnd = (patch.endTime as Date | undefined) ?? new Date(r.endTime);
+      const w = validateShiftWindow(effStart, effEnd);
+      if (!w.ok) { res.status(400).json({ error: "Bad Request", message: w.message }); return; }
+    }
+    if (Object.keys(patch).length === 0) continue;
+    patches.push({ id: r.id, patch });
+  }
+
   let updated = 0;
   await db.transaction(async (tx) => {
-    for (const r of rows) {
-      const patch: Record<string, unknown> = { ...setCommon };
-      if (newStart || newEnd) {
-        // Anchor on the existing start day as observed in `tz`.
-        const startDateLocal = localDateInTz(new Date(r.startTime).getTime(), tz);
-        const [y, mo, da] = startDateLocal.split("-").map(Number);
-        if (newStart) {
-          const [sh, sm] = newStart.split(":").map(Number);
-          patch.startTime = wallTimeToUtc(y, mo, da, sh, sm, tz);
-        }
-        if (newEnd) {
-          const [eh, eM] = newEnd.split(":").map(Number);
-          // Decide overnight: if the user supplied newStart, compare HH:MM
-          // pairs directly. Otherwise preserve the existing shift's
-          // overnight-ness by comparing the local dates of the existing
-          // start vs. end in `tz` (NOT raw UTC proximity, which breaks
-          // for normal multi-hour overnight shifts).
-          let wraps: boolean;
-          if (newStart) {
-            const [sh2, sm2] = newStart.split(":").map(Number);
-            wraps = (eh * 60 + eM) <= (sh2 * 60 + sm2);
-          } else {
-            const endDateLocal = localDateInTz(new Date(r.endTime).getTime(), tz);
-            wraps = endDateLocal !== startDateLocal;
-          }
-          let ey = y, em3 = mo, ed = da;
-          if (wraps) {
-            const next = new Date(Date.UTC(y, mo - 1, da) + 86400000);
-            ey = next.getUTCFullYear();
-            em3 = next.getUTCMonth() + 1;
-            ed = next.getUTCDate();
-          }
-          patch.endTime = wallTimeToUtc(ey, em3, ed, eh, eM, tz);
-        }
-      }
-      if (Object.keys(patch).length === 0) continue;
-      await tx.update(shiftsTable).set(patch).where(eq(shiftsTable.id, r.id));
+    for (const p of patches) {
+      await tx.update(shiftsTable).set(p.patch).where(eq(shiftsTable.id, p.id));
       updated++;
     }
   });
@@ -717,7 +753,7 @@ router.post("/shifts/series/fix-timezone", requireAdmin, async (req, res): Promi
   // keeps the operation idempotent regardless of which admin browser triggers
   // it. We deliberately ignore any client-supplied tz here.
   const tz = "America/Chicago";
-  const timeRe = /^\d{2}:\d{2}$/;
+  const timeRe = /^([01]\d|2[0-3]):[0-5]\d$/;
 
   const rows = await db.select().from(shiftsTable).where(inArray(shiftsTable.id, ids as string[]));
   if (rows.length === 0) {
@@ -803,6 +839,20 @@ router.put("/shifts/:id", requireAdminOrLead, async (req, res): Promise<void> =>
   }
   if (startTime) updates.startTime = new Date(startTime);
   if (endTime) updates.endTime = new Date(endTime);
+  // Validate the EFFECTIVE [start,end) window whenever either bound changes, so
+  // an edit can't introduce a multi-day shift that poisons overlap checks.
+  // Falls back to the stored value for whichever bound isn't being changed.
+  if (startTime || endTime) {
+    const [cur] = await db
+      .select({ startTime: shiftsTable.startTime, endTime: shiftsTable.endTime })
+      .from(shiftsTable)
+      .where(eq(shiftsTable.id, id));
+    if (!cur) { res.status(404).json({ error: "Not Found" }); return; }
+    const effStart = (updates.startTime as Date | undefined) ?? cur.startTime;
+    const effEnd = (updates.endTime as Date | undefined) ?? cur.endTime;
+    const w = validateShiftWindow(effStart, effEnd);
+    if (!w.ok) { res.status(400).json({ error: "Bad Request", message: w.message }); return; }
+  }
   if (!isLead) {
     if (payRate !== undefined) { updates.payRate = String(payRate); updates.hourlyRate = String(payRate); }
     if (billRate !== undefined) { updates.billRate = String(billRate); updates.billableRate = String(billRate); }

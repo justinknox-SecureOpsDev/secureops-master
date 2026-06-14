@@ -8,6 +8,7 @@ import { seedDemoUsers, ensureAdminAccountHealth, ensureEmployeesRowsForAllUsers
 import { seedChatRooms } from "./lib/seedChatRooms";
 import { seedRadioChannels } from "./lib/seedRadioChannels";
 import { startScheduledJobs } from "./lib/scheduledJobs";
+import { repairInsoSocialShiftEndTime } from "./lib/dataRepairs";
 
 const rawPort = process.env["PORT"];
 
@@ -126,6 +127,14 @@ ensureEmployeesRowsForAllUsers()
 backfillUserPhoneNumbersFromEmployees()
   .then(() => logger.info("User phone numbers backfilled from employee files"))
   .catch((err) => logger.error({ err }, "Failed to backfill user phone numbers"));
+
+// One-time idempotent data repair: correct a single shift whose end DATE was
+// typed a week out (174h instead of ~6h), which silently blocked overlapping
+// assignments + self clock-in for the two rostered officers. Guarded on the
+// exact bad value, so it no-ops once fixed and on any DB without that row.
+repairInsoSocialShiftEndTime()
+  .then(() => logger.info("Malformed shift end-time repair complete"))
+  .catch((err) => logger.error({ err }, "Failed to repair malformed shift end time"));
 
 // Idempotently seed the canonical chat channel set (announcements,
 // per-license-level rooms, OPS, city rooms, elite, one-per-site).

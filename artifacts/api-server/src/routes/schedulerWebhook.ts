@@ -17,6 +17,7 @@ import { z } from "zod/v4";
 import { db, shiftsTable, timeEntriesTable, usersTable, sitesTable, shiftAssignmentsTable, auditLogsTable } from "@workspace/db";
 import { verifySignature, SCHEDULER_SOURCE, type SchedulerShiftPayload, type SchedulerClockEventPayload } from "../lib/schedulerSync";
 import { getEffectiveLevel } from "../lib/eligibility";
+import { validateShiftWindow } from "../lib/shiftWindow";
 import { logger } from "../lib/logger";
 import rateLimit, { MemoryStore } from "express-rate-limit";
 
@@ -467,6 +468,20 @@ export async function processInboundShift(payload: SchedulerShiftPayload): Promi
       return { action: "skipped", secureopsId: existing.id, skipReason: decision.reason };
     }
 
+    // Reject malformed external windows (NaN, end<=start, >24h) — a multi-day
+    // shift from the scheduler poisons overlap/clock-in exactly like a local
+    // one. Quarantine rather than ingest: skip with a reason that surfaces in
+    // the webhook response + logs so operators can fix it upstream.
+    {
+      const effStart = payload.startTime ? new Date(payload.startTime) : new Date(existing.startTime);
+      const effEnd = payload.endTime ? new Date(payload.endTime) : new Date(existing.endTime);
+      const w = validateShiftWindow(effStart, effEnd);
+      if (!w.ok) {
+        logger.warn({ externalId: payload.id, secureopsId: existing.id, reason: w.message }, "[scheduler] skipped inbound shift update: invalid window");
+        return { action: "skipped", secureopsId: existing.id, skipReason: w.message };
+      }
+    }
+
     const lvl = typeof payload.requiredLicenseLevel === "number"
       ? ([1, 2, 3, 4].includes(payload.requiredLicenseLevel) ? payload.requiredLicenseLevel : existing.requiredLicenseLevel)
       : existing.requiredLicenseLevel;
@@ -499,6 +514,16 @@ export async function processInboundShift(payload: SchedulerShiftPayload): Promi
   // Create new shift
   if (!payload.title || !payload.startTime || !payload.endTime) {
     return { action: "skipped", skipReason: "missing required fields (title, startTime, endTime)" };
+  }
+
+  // Same window guard as the update path — never ingest a multi-day / inverted
+  // shift from the scheduler.
+  {
+    const w = validateShiftWindow(new Date(payload.startTime), new Date(payload.endTime));
+    if (!w.ok) {
+      logger.warn({ externalId: payload.id, reason: w.message }, "[scheduler] skipped inbound shift create: invalid window");
+      return { action: "skipped", skipReason: w.message };
+    }
   }
 
   const lvl = typeof payload.requiredLicenseLevel === "number"
