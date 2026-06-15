@@ -430,6 +430,7 @@ export function ApplyPage() {
       if (isReq("address") && !form.address) return { field: "address", message: `${labelOf("address")} is required.` };
       if (isReq("city") && !form.city) return { field: "city", message: `${labelOf("city")} is required.` };
       if (isReq("state") && !form.state) return { field: "state", message: `${labelOf("state")} is required.` };
+      if (visibleField("state") && form.state && form.state.length !== 2) return { field: "state", message: `${labelOf("state")} must be a 2-letter abbreviation (e.g. TX).` };
       if (isReq("zip") && !form.zip) return { field: "zip", message: `${labelOf("zip")} is required.` };
       if (isReq("dateOfBirth") && !form.dateOfBirth) return { field: "dateOfBirth", message: `${labelOf("dateOfBirth")} is required.` };
       if (isReq("niNumber") && !form.niNumber.trim()) return { field: "niNumber", message: `${labelOf("niNumber")} is required.` };
@@ -704,7 +705,7 @@ export function ApplyPage() {
       case "city":
         return { width: "half", node: <Field label={label} help={help} required={req} name="city" error={fieldErrors}><Input autoComplete="address-level2" value={form.city} onChange={(e) => set("city", e.target.value)} /></Field> };
       case "state":
-        return { width: "half", node: <Field label={label} help={help} required={req} name="state" error={fieldErrors}><Input autoComplete="address-level1" value={form.state} onChange={(e) => set("state", e.target.value.toUpperCase().slice(0, 2))} placeholder="TX" maxLength={2} /></Field> };
+        return { width: "half", node: <Field label={label} help={help} required={req} name="state" error={fieldErrors}><Input autoComplete="address-level1" value={form.state} onChange={(e) => set("state", e.target.value.replace(/[^a-zA-Z]/g, "").toUpperCase().slice(0, 2))} placeholder="TX" maxLength={2} /></Field> };
       case "zip":
         return { width: "half", node: <Field label={label} help={help} required={req} name="zip" error={fieldErrors}><Input autoComplete="postal-code" value={form.zip} onChange={(e) => set("zip", e.target.value)} placeholder="75001" /></Field> };
       case "dateOfBirth":
