@@ -398,6 +398,12 @@ export type UpdateMyEmployeeResponse = Employee & {
   hrNotifiedFields?: string[];
 };
 
+export type UpdateMyEmployeeRequestReferencesItem = {
+  name: string;
+  relationship?: string;
+  phone?: string;
+};
+
 /**
  * Strict allow-list of fields the employee may edit on their own profile.
  */
@@ -421,6 +427,13 @@ export interface UpdateMyEmployeeRequest {
   passportDocKey?: string | null;
   rightToWorkDocKey?: string | null;
   trainingCertificateKeys?: string[] | null;
+  previousExperience?: string | null;
+  /**
+   * @minimum 0
+   * @maximum 99
+   */
+  yearsExperience?: number | null;
+  references?: UpdateMyEmployeeRequestReferencesItem[] | null;
 }
 
 export type EmployeeChangeSource =

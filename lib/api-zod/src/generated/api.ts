@@ -409,6 +409,9 @@ export const ChangePasswordResponse = zod.object({
 /**
  * @summary Self-service edit of allow-listed employee profile fields
  */
+export const updateMyEmployeeProfileBodyYearsExperienceMin = 0;
+export const updateMyEmployeeProfileBodyYearsExperienceMax = 99;
+
 export const UpdateMyEmployeeProfileBody = zod
   .object({
     phone: zod.string().optional(),
@@ -430,6 +433,21 @@ export const UpdateMyEmployeeProfileBody = zod
     passportDocKey: zod.string().nullish(),
     rightToWorkDocKey: zod.string().nullish(),
     trainingCertificateKeys: zod.array(zod.string()).nullish(),
+    previousExperience: zod.string().nullish(),
+    yearsExperience: zod
+      .number()
+      .min(updateMyEmployeeProfileBodyYearsExperienceMin)
+      .max(updateMyEmployeeProfileBodyYearsExperienceMax)
+      .nullish(),
+    references: zod
+      .array(
+        zod.object({
+          name: zod.string(),
+          relationship: zod.string().optional(),
+          phone: zod.string().optional(),
+        }),
+      )
+      .nullish(),
   })
   .describe(
     "Strict allow-list of fields the employee may edit on their own profile.",

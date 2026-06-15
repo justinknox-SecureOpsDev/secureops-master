@@ -73,6 +73,9 @@ type Form = {
   passportDocKey: string | null;
   /** Officers can append new certs and remove existing ones; staged locally until Save. */
   trainingCertificateKeys: string[] | null;
+  previousExperience: string;
+  yearsExperience: string;
+  references: Array<{ name: string; relationship: string; phone: string }>;
 };
 
 const empty: Form = {
@@ -83,6 +86,9 @@ const empty: Form = {
   skills: "",
   photoKey: null, licenseDocKey: null, passportDocKey: null,
   trainingCertificateKeys: null,
+  previousExperience: "",
+  yearsExperience: "",
+  references: [],
 };
 
 export default function EditProfileScreen() {
@@ -120,6 +126,15 @@ export default function EditProfileScreen() {
       bankAccountNumber: profile.bankAccountNumber ?? "",
       bankBsb: profile.bankBsb ?? "",
       skills: (profile.skills ?? []).join(", "),
+      previousExperience: (profile as any).previousExperience ?? "",
+      yearsExperience: (profile as any).yearsExperience != null ? String((profile as any).yearsExperience) : "",
+      references: Array.isArray((profile as any).references)
+        ? (profile as any).references.map((r: any) => ({
+            name: String(r?.name ?? ""),
+            relationship: String(r?.relationship ?? ""),
+            phone: String(r?.phone ?? ""),
+          }))
+        : [],
       photoKey: profile.photoKey ?? null,
       licenseDocKey: profile.licenseDocKey ?? null,
       passportDocKey: profile.passportDocKey ?? null,
@@ -139,6 +154,19 @@ export default function EditProfileScreen() {
       const next = [...(f.trainingCertificateKeys ?? [])];
       next.splice(idx, 1);
       return { ...f, trainingCertificateKeys: next };
+    });
+  }
+  function addRef() {
+    setForm((f) => ({ ...f, references: [...f.references, { name: "", relationship: "", phone: "" }] }));
+  }
+  function removeRef(idx: number) {
+    setForm((f) => ({ ...f, references: f.references.filter((_, i) => i !== idx) }));
+  }
+  function updateRef(idx: number, field: "name" | "relationship" | "phone", value: string) {
+    setForm((f) => {
+      const refs = [...f.references];
+      refs[idx] = { ...refs[idx], [field]: value };
+      return { ...f, references: refs };
     });
   }
   function confirmRemoveCert(idx: number) {
@@ -233,6 +261,13 @@ export default function EditProfileScreen() {
     payload.bankBsb = trim(form.bankBsb) || null;
     const skills = form.skills.split(",").map((s) => s.trim()).filter(Boolean);
     payload.skills = skills;
+    const yearsNum = form.yearsExperience.trim() ? parseInt(form.yearsExperience.trim(), 10) : null;
+    payload.yearsExperience = (yearsNum !== null && Number.isFinite(yearsNum)) ? yearsNum : null;
+    payload.previousExperience = form.previousExperience.trim() || null;
+    const validRefs = form.references.filter((r) => r.name.trim());
+    payload.references = validRefs.length > 0
+      ? validRefs.map((r) => ({ name: r.name.trim(), relationship: r.relationship.trim() || undefined, phone: r.phone.trim() || undefined }))
+      : null;
     // Only send doc keys that actually changed from what's on the profile.
     if (form.photoKey !== (profile?.photoKey ?? null)) payload.photoKey = form.photoKey;
     if (form.licenseDocKey !== (profile?.licenseDocKey ?? null)) payload.licenseDocKey = form.licenseDocKey;
@@ -487,6 +522,91 @@ export default function EditProfileScreen() {
           <Field label="Comma-separated">
             <Input value={form.skills} onChangeText={(v) => set("skills", v)} placeholder="e.g. CPR, Crowd control, First aid" accessibilityLabel="Skills, comma-separated" />
           </Field>
+        </Section>
+
+        <Section title="Experience">
+          <Field label="Years in security">
+            <Input
+              value={form.yearsExperience}
+              onChangeText={(v) => set("yearsExperience", v.replace(/[^0-9]/g, ""))}
+              keyboardType="number-pad"
+              placeholder="e.g. 3"
+              accessibilityLabel="Years of experience in security"
+            />
+          </Field>
+          <Field label="Previous experience">
+            <Input
+              value={form.previousExperience}
+              onChangeText={(v) => set("previousExperience", v)}
+              multiline
+              numberOfLines={4}
+              placeholder="Briefly describe your previous security roles, employers, or relevant work…"
+              accessibilityLabel="Previous experience"
+              style={{ minHeight: 90, textAlignVertical: "top" }}
+            />
+          </Field>
+        </Section>
+
+        <Section title="References">
+          {form.references.map((r, i) => (
+            <View
+              key={i}
+              style={{ gap: 8, paddingBottom: 12, borderBottomWidth: i < form.references.length - 1 ? 1 : 0, borderBottomColor: "#e2e8f0" }}
+            >
+              <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center" }}>
+                <Text style={{ color: "#374151", fontWeight: "600" as const, fontSize: 13 }}>Reference {i + 1}</Text>
+                <TouchableOpacity
+                  onPress={() => removeRef(i)}
+                  accessibilityRole="button"
+                  accessibilityLabel={`Remove reference ${i + 1}`}
+                  style={{ padding: 4 }}
+                >
+                  <Feather name="x" size={16} color="#ef4444" />
+                </TouchableOpacity>
+              </View>
+              <Field label="Name *">
+                <Input
+                  value={r.name}
+                  onChangeText={(v) => updateRef(i, "name", v)}
+                  placeholder="Full name"
+                  accessibilityLabel={`Reference ${i + 1} name, required`}
+                />
+              </Field>
+              <Field label="Relationship">
+                <Input
+                  value={r.relationship}
+                  onChangeText={(v) => updateRef(i, "relationship", v)}
+                  placeholder="e.g. Former supervisor"
+                  accessibilityLabel={`Reference ${i + 1} relationship`}
+                />
+              </Field>
+              <Field label="Phone">
+                <Input
+                  value={r.phone}
+                  onChangeText={(v) => updateRef(i, "phone", v)}
+                  keyboardType="phone-pad"
+                  placeholder="Contact number"
+                  accessibilityLabel={`Reference ${i + 1} phone`}
+                />
+              </Field>
+            </View>
+          ))}
+          {form.references.length < 10 && (
+            <TouchableOpacity
+              onPress={addRef}
+              style={{ flexDirection: "row", alignItems: "center", gap: 8, paddingVertical: 6 }}
+              accessibilityRole="button"
+              accessibilityLabel="Add reference"
+            >
+              <Feather name="plus-circle" size={16} color="#c9a84c" />
+              <Text style={{ color: "#c9a84c", fontWeight: "600" as const, fontSize: 14 }}>Add reference</Text>
+            </TouchableOpacity>
+          )}
+          {form.references.length === 0 && (
+            <Text style={{ color: "#6b7280", fontSize: 12 }}>
+              No references added yet. Tap "Add reference" to add up to 10.
+            </Text>
+          )}
         </Section>
 
         {error && (

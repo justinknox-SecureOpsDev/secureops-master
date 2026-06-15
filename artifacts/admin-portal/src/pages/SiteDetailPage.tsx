@@ -1540,6 +1540,7 @@ function SiteRateCard({ siteId }: { siteId: string }) {
   const [draftPay, setDraftPay] = useState<string>("");
   const [draftBill, setDraftBill] = useState<string>("");
   const [draftLabel, setDraftLabel] = useState<string>("");
+  const [draftId, setDraftId] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
 
   const load = useCallback(async () => {
@@ -1557,22 +1558,11 @@ function SiteRateCard({ siteId }: { siteId: string }) {
 
   useEffect(() => { void load(); }, [load]);
 
-  // Configured levels — keep the picker honest about which slots are free vs
-  // already set (PUT upserts on conflict so re-using a level just edits it,
-  // but pre-selecting an unused level is a friendlier default).
-  const usedLevels = useMemo(() => new Set(rows.map((r) => r.licenseLevel)), [rows]);
-  useEffect(() => {
-    // When the row list changes, nudge the form to the first unused level so
-    // adding a second rate doesn't silently overwrite the first.
-    const firstFree = LEVEL_OPTIONS.find((o) => !usedLevels.has(o.value));
-    if (firstFree && !usedLevels.has(draftLevel) === false) {
-      setDraftLevel(firstFree.value);
-    }
-    // intentionally only depends on the rows snapshot
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [rows]);
-
   async function saveDraft() {
+    if (!draftLabel.trim()) {
+      setErr("Label is required — it identifies this rate in shift pickers");
+      return;
+    }
     const pay = Number(draftPay);
     const bill = Number(draftBill);
     if (!Number.isFinite(pay) || pay < 0 || !Number.isFinite(bill) || bill < 0) {
@@ -1585,15 +1575,17 @@ function SiteRateCard({ siteId }: { siteId: string }) {
       await api(`/admin/sites/${siteId}/rates`, {
         method: "PUT",
         body: JSON.stringify({
+          ...(draftId ? { id: draftId } : {}),
           licenseLevel: draftLevel,
           payRate: pay,
           billRate: bill,
-          label: draftLabel.trim() || null,
+          label: draftLabel.trim(),
         }),
       });
       setDraftPay("");
       setDraftBill("");
       setDraftLabel("");
+      setDraftId(null);
       await load();
     } catch (e) {
       setErr((e as Error).message);
@@ -1602,9 +1594,10 @@ function SiteRateCard({ siteId }: { siteId: string }) {
     }
   }
 
-  async function editExisting(row: SiteRateRow) {
-    // Populate the form with this row so the admin can adjust + re-save
-    // (PUT upserts on the (siteId, level) pair).
+  function editExisting(row: SiteRateRow) {
+    // Track the id so PUT can UPDATE in-place, supporting label renames without
+    // orphaning the old row or breaking shift.siteRateId back-references.
+    setDraftId(row.id);
     setDraftLevel(row.licenseLevel);
     setDraftPay(String(parseFloat(row.payRate)));
     setDraftBill(String(parseFloat(row.billRate)));
@@ -1612,7 +1605,9 @@ function SiteRateCard({ siteId }: { siteId: string }) {
   }
 
   async function removeRow(row: SiteRateRow) {
-    if (!confirm(`Remove the ${LEVEL_OPTIONS.find((o) => o.value === row.licenseLevel)?.name ?? `L${row.licenseLevel}`} rate for this site?`)) return;
+    const levelName = LEVEL_OPTIONS.find((o) => o.value === row.licenseLevel)?.name ?? `L${row.licenseLevel}`;
+    const displayName = row.label ? `${levelName} — ${row.label}` : levelName;
+    if (!confirm(`Remove the "${displayName}" rate for this site? Existing shifts that referenced it will keep their snapshotted pay/bill amounts.`)) return;
     try {
       await api(`/admin/site-rates/${row.id}`, { method: "DELETE" });
       await load();
@@ -1709,8 +1704,19 @@ function SiteRateCard({ siteId }: { siteId: string }) {
       )}
 
       <div className="border rounded p-3 bg-brand-cream/20">
-        <div className="text-xs font-semibold uppercase tracking-wide text-muted-foreground mb-2">
-          {usedLevels.has(draftLevel) ? "Update rate" : "Add rate"}
+        <div className="flex items-center justify-between mb-2">
+          <div className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+            {draftId ? "Edit rate" : "Add rate"}
+          </div>
+          {draftId && (
+            <button
+              type="button"
+              onClick={() => { setDraftId(null); setDraftPay(""); setDraftBill(""); setDraftLabel(""); }}
+              className="text-xs text-muted-foreground hover:text-foreground underline-offset-2 hover:underline"
+            >
+              Cancel edit
+            </button>
+          )}
         </div>
         <div className="grid grid-cols-1 md:grid-cols-5 gap-2 items-end">
           <div>
@@ -1723,13 +1729,13 @@ function SiteRateCard({ siteId }: { siteId: string }) {
             >
               {LEVEL_OPTIONS.map((o) => (
                 <option key={o.value} value={String(o.value)}>
-                  {o.name}{usedLevels.has(o.value) ? " (set)" : ""}
+                  {o.name}
                 </option>
               ))}
             </select>
           </div>
           <div>
-            <label className="text-xs text-muted-foreground">Label (optional)</label>
+            <label className="text-xs text-muted-foreground">Label <span className="text-destructive">*</span></label>
             <input
               value={draftLabel}
               onChange={(e) => setDraftLabel(e.target.value)}
@@ -1759,7 +1765,7 @@ function SiteRateCard({ siteId }: { siteId: string }) {
           </div>
           <Button onClick={saveDraft} disabled={saving || draftPay === "" || draftBill === ""}>
             <Plus className="w-3.5 h-3.5 mr-1" />
-            {saving ? "Saving…" : usedLevels.has(draftLevel) ? "Update" : "Add"}
+            {saving ? "Saving…" : draftId ? "Update" : "Add"}
           </Button>
         </div>
       </div>

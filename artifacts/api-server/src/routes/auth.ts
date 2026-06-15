@@ -496,6 +496,18 @@ const PatchMeEmployeeBody = z.object({
   passportDocKey: ObjectKey.nullable().optional(),
   rightToWorkDocKey: ObjectKey.nullable().optional(),
   trainingCertificateKeys: z.array(ObjectKey).max(50).nullable().optional(),
+  // Work history — editable by the officer so they can keep their profile
+  // current without an admin round-trip. Not high-risk (no financial / safety
+  // consequence) so no HR alert is triggered for these fields.
+  previousExperience: z.string().max(4000).nullable().optional(),
+  yearsExperience: z.number().int().min(0).max(99).nullable().optional(),
+  // References: max 10 entries, each with a required name. phone/relationship
+  // are optional so officers can add what they know without full details.
+  references: z.array(z.object({
+    name: z.string().min(1).max(200),
+    relationship: z.string().max(200).optional(),
+    phone: z.string().max(50).optional(),
+  })).max(10).nullable().optional(),
 }).strict();
 
 router.patch("/me/employee", requireAuth, async (req, res): Promise<void> => {

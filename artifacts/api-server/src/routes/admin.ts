@@ -1671,15 +1671,26 @@ router.get("/admin/sites/:id/rates", requireAdmin, async (req, res): Promise<voi
     .select()
     .from(siteRatesTable)
     .where(eq(siteRatesTable.siteId, siteId))
-    .orderBy(asc(siteRatesTable.licenseLevel));
+    .orderBy(asc(siteRatesTable.licenseLevel), asc(siteRatesTable.label));
   res.json(rows);
 });
 
-// PUT /admin/sites/:id/rates — upsert a row by (siteId, licenseLevel).
-// Body: { licenseLevel: 2|3|4, payRate: number|string, billRate: number|string, label?: string }
+// PUT /admin/sites/:id/rates — upsert or edit-by-id a rate-card row.
+// Body: { licenseLevel: 2|3|4, payRate: number|string, billRate: number|string,
+//         label: string (required), id?: uuid }
+// • With `id`: UPDATE the specific row in-place (supports label rename without
+//   orphaning the old entry and its shift back-references).
+// • Without `id`: INSERT, or on conflict (siteId, licenseLevel, label) UPDATE rates.
+// Label is required so every row is unambiguously identifiable in shift pickers.
 router.put("/admin/sites/:id/rates", requireAdmin, async (req, res): Promise<void> => {
   const siteId = req.params.id as string;
-  const { licenseLevel, payRate, billRate, label } = req.body ?? {};
+  const { id: rateId, licenseLevel, payRate, billRate, label } = req.body ?? {};
+
+  const cleanLabel = typeof label === "string" ? label.trim().slice(0, 80) : "";
+  if (!cleanLabel) {
+    res.status(400).json({ error: "Bad Request", message: "label is required (max 80 chars) so shift pickers can tell rates apart" });
+    return;
+  }
   const lvl = Number(licenseLevel);
   if (![2, 3, 4].includes(lvl)) {
     res.status(400).json({ error: "Bad Request", message: "licenseLevel must be 2, 3, or 4" });
@@ -1693,16 +1704,31 @@ router.put("/admin/sites/:id/rates", requireAdmin, async (req, res): Promise<voi
   }
   const [site] = await db.select({ id: sitesTable.id }).from(sitesTable).where(eq(sitesTable.id, siteId)).limit(1);
   if (!site) { res.status(404).json({ error: "Not Found", message: "Site not found" }); return; }
-  const cleanLabel = typeof label === "string" && label.trim() ? label.trim().slice(0, 80) : null;
 
-  const [row] = await db
-    .insert(siteRatesTable)
-    .values({ siteId, licenseLevel: lvl, payRate: String(pay), billRate: String(bill), label: cleanLabel })
-    .onConflictDoUpdate({
-      target: [siteRatesTable.siteId, siteRatesTable.licenseLevel],
-      set: { payRate: String(pay), billRate: String(bill), label: cleanLabel, updatedAt: new Date() },
-    })
-    .returning();
+  let row;
+  if (typeof rateId === "string" && rateId) {
+    // Edit-by-id: the admin is renaming a label or adjusting rates on an existing row.
+    // UPDATE rather than re-insert so the row id (and any shift.siteRateId references)
+    // stay intact — the shift audit trail doesn't lose its link to the rate.
+    const [existing] = await db.select({ id: siteRatesTable.id })
+      .from(siteRatesTable).where(eq(siteRatesTable.id, rateId)).limit(1);
+    if (!existing) { res.status(404).json({ error: "Not Found", message: "Rate not found" }); return; }
+    [row] = await db.update(siteRatesTable)
+      .set({ licenseLevel: lvl, payRate: String(pay), billRate: String(bill), label: cleanLabel, updatedAt: new Date() })
+      .where(eq(siteRatesTable.id, rateId))
+      .returning();
+  } else {
+    // New row: INSERT; if the (siteId, level, label) triple already exists, just update
+    // pay+bill so re-saving the same named rate is idempotent.
+    [row] = await db
+      .insert(siteRatesTable)
+      .values({ siteId, licenseLevel: lvl, payRate: String(pay), billRate: String(bill), label: cleanLabel })
+      .onConflictDoUpdate({
+        target: [siteRatesTable.siteId, siteRatesTable.licenseLevel, siteRatesTable.label],
+        set: { payRate: String(pay), billRate: String(bill), updatedAt: new Date() },
+      })
+      .returning();
+  }
   res.json(row);
 });
 

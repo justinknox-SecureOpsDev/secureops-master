@@ -3231,6 +3231,18 @@ components:
           type: array
           nullable: true
           items: { type: string }
+        previousExperience: { type: string, nullable: true }
+        yearsExperience: { type: integer, minimum: 0, maximum: 99, nullable: true }
+        references:
+          type: array
+          nullable: true
+          items:
+            type: object
+            required: [name]
+            properties:
+              name: { type: string }
+              relationship: { type: string }
+              phone: { type: string }
 
     EmployeeChange:
       type: object

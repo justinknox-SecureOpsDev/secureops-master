@@ -8,7 +8,7 @@ import { seedDemoUsers, ensureAdminAccountHealth, ensureEmployeesRowsForAllUsers
 import { seedChatRooms } from "./lib/seedChatRooms";
 import { seedRadioChannels } from "./lib/seedRadioChannels";
 import { startScheduledJobs } from "./lib/scheduledJobs";
-import { repairInsoSocialShiftEndTime } from "./lib/dataRepairs";
+import { backfillSiteRateLabels, repairInsoSocialShiftEndTime } from "./lib/dataRepairs";
 
 const rawPort = process.env["PORT"];
 
@@ -135,6 +135,14 @@ backfillUserPhoneNumbersFromEmployees()
 repairInsoSocialShiftEndTime()
   .then(() => logger.info("Malformed shift end-time repair complete"))
   .catch((err) => logger.error({ err }, "Failed to repair malformed shift end time"));
+
+// Idempotent backfill: assign label = 'Standard' to any site_rates rows that
+// still carry a NULL label (legacy rows from before the multi-rate-per-level
+// feature). Must run BEFORE `db push` applies the new (siteId, level, label)
+// unique constraint; after that push the WHERE IS NULL guard is always a no-op.
+backfillSiteRateLabels()
+  .then(() => logger.info("Site rate label backfill complete"))
+  .catch((err) => logger.error({ err }, "Failed to backfill site rate labels"));
 
 // Idempotently seed the canonical chat channel set (announcements,
 // per-license-level rooms, OPS, city rooms, elite, one-per-site).
