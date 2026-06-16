@@ -1523,7 +1523,7 @@ type SiteRateRow = {
   licenseLevel: number;
   payRate: string;
   billRate: string;
-  label: string | null;
+  label: string;
 };
 
 const LEVEL_OPTIONS: { value: number; name: string }[] = [
@@ -1603,7 +1603,7 @@ function SiteRateCard({ siteId }: { siteId: string }) {
     setDraftLevel(row.licenseLevel);
     setDraftPay(String(parseFloat(row.payRate)));
     setDraftBill(String(parseFloat(row.billRate)));
-    setDraftLabel(row.label ?? "");
+    setDraftLabel(row.label);
   }
 
   async function removeRow(row: SiteRateRow) {
@@ -1656,8 +1656,8 @@ function SiteRateCard({ siteId }: { siteId: string }) {
               header: "Label",
               mobile: "meta",
               tdClassName: "text-muted-foreground",
-              cell: (r) => r.label ?? <span className="text-muted-foreground/60">—</span>,
-              mobileCell: (r) => <span className="text-sm text-muted-foreground text-right">{r.label ?? "—"}</span>,
+              cell: (r) => r.label,
+              mobileCell: (r) => <span className="text-sm text-muted-foreground text-right">{r.label}</span>,
             },
             {
               id: "pay",

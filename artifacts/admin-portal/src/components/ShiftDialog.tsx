@@ -19,7 +19,7 @@ type SiteRate = {
   licenseLevel: number;
   payRate: string;
   billRate: string;
-  label: string | null;
+  label: string;
 };
 
 type ShiftInitial = {
@@ -52,7 +52,7 @@ function toLocalInput(iso: string | undefined | null): string {
   return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
 }
 
-function levelLabel(level: number, customLabel: string | null): string {
+function levelLabel(level: number, customLabel: string): string {
   const base = level <= 1 ? "Support (no licence)" : level === 4 ? "L4 / PPO" : level === 3 ? "L3 Armed" : "L2 Unarmed";
   return customLabel ? `${base} — ${customLabel}` : base;
 }
@@ -120,16 +120,19 @@ export function ShiftDialog({ open, onOpenChange, initial, onSaved }: Props) {
   // Auto-suggest the rate matching the currently selected license level
   // whenever the site's rate card finishes loading or the level changes —
   // but only if the admin hasn't already picked a rate manually.
+  // Auto-apply only when exactly one rate matches (unambiguous); when
+  // multiple labeled rates exist for the same level, leave it for the admin
+  // to pick from the card rather than silently picking the wrong one.
   useEffect(() => {
     if (!open) return;
     if (siteRateId) return; // already chosen, don't overwrite
     if (siteRates.length === 0) return;
-    const match = siteRates.find((r) => r.licenseLevel === requiredLicenseLevel);
-    if (match) {
-      setPayRate(String(match.payRate));
-      setBillRate(String(match.billRate));
-      setSiteRateId(match.id);
-    }
+    const matches = siteRates.filter((r) => r.licenseLevel === requiredLicenseLevel);
+    if (matches.length !== 1) return;
+    const [match] = matches;
+    setPayRate(String(match.payRate));
+    setBillRate(String(match.billRate));
+    setSiteRateId(match.id);
   }, [siteRates, requiredLicenseLevel, siteRateId, open]);
 
   const matchingRate = useMemo(
@@ -222,10 +225,10 @@ export function ShiftDialog({ open, onOpenChange, initial, onSaved }: Props) {
                 onValueChange={(v) => {
                   const lvl = Number(v);
                   setRequiredLicenseLevel(lvl);
-                  // Switch the selected site rate to the one matching the
-                  // new level, if the site has one configured.
-                  const match = siteRates.find((r) => r.licenseLevel === lvl);
-                  if (match) applySiteRate(match);
+                  // Auto-apply only when unambiguous; if multiple labeled rates
+                  // exist for this level, clear selection so the admin picks.
+                  const matches = siteRates.filter((r) => r.licenseLevel === lvl);
+                  if (matches.length === 1) applySiteRate(matches[0]);
                   else setSiteRateId(null);
                 }}
               >

@@ -31,7 +31,7 @@ function plusDaysIso(days: number): string {
   return new Date(Date.now() + days * 86_400_000).toISOString().slice(0, 10);
 }
 
-function levelLabel(level: number, label: string | null): string {
+function levelLabel(level: number, label: string): string {
   const base = level <= 1 ? "Support (no licence)" : level === 4 ? "L4 / PPO" : level === 3 ? "L3 Armed" : "L2 Unarmed";
   return label ? `${base} — ${label}` : base;
 }
@@ -67,7 +67,7 @@ export function RepeatingShiftDialog({
   // rates and auto-apply the one matching the chosen level. Mirrors ShiftDialog
   // so a recurring series uses the contracted rate, not whatever was in the
   // default "0" inputs.
-  type SiteRate = { id: string; licenseLevel: number; payRate: string; billRate: string; label: string | null };
+  type SiteRate = { id: string; licenseLevel: number; payRate: string; billRate: string; label: string };
   const [siteRates, setSiteRates] = useState<SiteRate[]>([]);
   const [siteRateId, setSiteRateId] = useState<string | null>(null);
   const [ratesLoading, setRatesLoading] = useState(false);
