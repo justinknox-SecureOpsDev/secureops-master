@@ -1,17 +1,19 @@
 import React from "react";
-import { View, Text, StyleSheet, ScrollView, TouchableOpacity, ActivityIndicator, Platform } from "react-native";
+import { View, Text, StyleSheet, ScrollView, TouchableOpacity, ActivityIndicator, Platform, Alert } from "react-native";
 import { useColors } from "@/hooks/useColors";
 import { useTopPad } from "@/hooks/useTopPad";
 import {
   useGetAdminDashboardSummary, getGetAdminDashboardSummaryQueryKey,
   useGetShifts, getGetShiftsQueryKey,
   useNotifyShiftVacancy,
+  useUpdateShiftAssignment,
 } from "@workspace/api-client-react";
 import { useAuth } from "@/contexts/AuthContext";
 import { Feather } from "@expo/vector-icons";
 import { useRouter } from "expo-router";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { confirmAction, notify } from "@/utils/confirm";
+import { useQueryClient } from "@tanstack/react-query";
 
 function StatCard({ label, value, color, icon, onPress }: { label: string; value: number | string; color?: string; icon: string; onPress?: () => void }) {
   const colors = useColors();
@@ -69,6 +71,39 @@ export default function AdminDashboardScreen() {
   );
   const notifyMutation = useNotifyShiftVacancy();
   const [notifyingId, setNotifyingId] = React.useState<string | null>(null);
+  const queryClient = useQueryClient();
+  const updateAssignment = useUpdateShiftAssignment();
+  const [decidingId, setDecidingId] = React.useState<string | null>(null);
+
+  const pendingClaims = React.useMemo(() => {
+    const rows: { assignmentId: string; shiftId: string; employeeName: string; shiftTitle: string; startTime: string; requiredLicenseLevel: number }[] = [];
+    for (const s of (upcomingShifts ?? []) as any[]) {
+      for (const a of (s.assignments ?? []) as any[]) {
+        if (a.status !== "pending_approval") continue;
+        rows.push({
+          assignmentId: a.id,
+          shiftId: s.id,
+          employeeName: a.employeeName ?? "Officer",
+          shiftTitle: s.title ?? "Shift",
+          startTime: s.startTime,
+          requiredLicenseLevel: s.requiredLicenseLevel ?? 0,
+        });
+      }
+    }
+    return rows.sort((a, b) => new Date(a.startTime).getTime() - new Date(b.startTime).getTime());
+  }, [upcomingShifts]);
+
+  const decideAssignment = async (shiftId: string, assignmentId: string, decision: "accepted" | "declined") => {
+    setDecidingId(assignmentId);
+    try {
+      await updateAssignment.mutateAsync({ id: shiftId, assignmentId, data: { status: decision } } as any);
+      queryClient.invalidateQueries({ queryKey: getGetShiftsQueryKey({ status: "upcoming" as any }) });
+    } catch (e: any) {
+      Alert.alert("Failed", e?.response?.data?.message || e?.message || "Could not update the request.");
+    } finally {
+      setDecidingId(null);
+    }
+  };
 
   const openVacancies = (upcomingShifts ?? [])
     .map((s: any) => {
@@ -153,6 +188,69 @@ export default function AdminDashboardScreen() {
           <StatCard label="Expiring Licences" value={summary?.expiringLicenses ?? 0} icon="file-text" color={summary?.expiringLicenses ? colors.destructive : colors.mutedForeground} onPress={() => router.push("/(admin)/licenses" as any)} />
         </View>
       </View>
+
+      {pendingClaims.length > 0 && (
+        <View style={styles.section}>
+          <View style={{ flexDirection: "row", alignItems: "center", marginBottom: 12 }}>
+            <Text style={[styles.sectionTitle, { color: colors.accent, marginBottom: 0, flex: 1 }]}>
+              SHIFT CLAIM APPROVALS ({pendingClaims.length})
+            </Text>
+            <Feather name="user-check" size={14} color={colors.accent} />
+          </View>
+          {pendingClaims.map((claim) => {
+            const start = new Date(claim.startTime);
+            const isBusy = decidingId === claim.assignmentId;
+            return (
+              <View
+                key={claim.assignmentId}
+                style={[styles.claimCard, { backgroundColor: colors.card, borderColor: colors.border }]}
+              >
+                <View style={{ flex: 1, marginBottom: 10 }}>
+                  <View style={{ flexDirection: "row", alignItems: "center", gap: 8, marginBottom: 2 }}>
+                    <Text style={[styles.itemTitle, { color: colors.foreground }]} numberOfLines={1}>{claim.employeeName}</Text>
+                    <View style={[styles.levelBadge, { backgroundColor: colors.accent + "20", borderColor: colors.accent }]}>
+                      <Text style={{ color: colors.accent, fontSize: 10, fontWeight: "700" }}>L{claim.requiredLicenseLevel}</Text>
+                    </View>
+                  </View>
+                  <Text style={[styles.itemSub, { color: colors.mutedForeground }]} numberOfLines={1}>
+                    {claim.shiftTitle} · {start.toLocaleDateString([], { weekday: "short", day: "numeric", month: "short" })} {start.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
+                  </Text>
+                </View>
+                <View style={{ flexDirection: "row", gap: 8 }}>
+                  <TouchableOpacity
+                    style={[styles.decideBtn, { backgroundColor: "#22c55e", opacity: isBusy ? 0.6 : 1 }]}
+                    disabled={isBusy}
+                    onPress={() => decideAssignment(claim.shiftId, claim.assignmentId, "accepted")}
+                    accessibilityRole="button"
+                    accessibilityLabel={`Approve ${claim.employeeName} for ${claim.shiftTitle}`}
+                    accessibilityState={{ disabled: isBusy, busy: isBusy }}
+                  >
+                    {isBusy && decidingId === claim.assignmentId ? (
+                      <ActivityIndicator size="small" color="#fff" />
+                    ) : (
+                      <>
+                        <Feather name="check" size={13} color="#fff" />
+                        <Text style={styles.decideBtnText}>Approve</Text>
+                      </>
+                    )}
+                  </TouchableOpacity>
+                  <TouchableOpacity
+                    style={[styles.decideBtn, { backgroundColor: "transparent", borderWidth: 1, borderColor: "#ef4444", opacity: isBusy ? 0.6 : 1 }]}
+                    disabled={isBusy}
+                    onPress={() => decideAssignment(claim.shiftId, claim.assignmentId, "declined")}
+                    accessibilityRole="button"
+                    accessibilityLabel={`Decline ${claim.employeeName} for ${claim.shiftTitle}`}
+                    accessibilityState={{ disabled: isBusy, busy: isBusy }}
+                  >
+                    <Feather name="x" size={13} color="#ef4444" />
+                    <Text style={[styles.decideBtnText, { color: "#ef4444" }]}>Decline</Text>
+                  </TouchableOpacity>
+                </View>
+              </View>
+            );
+          })}
+        </View>
+      )}
 
       {openVacancies.length > 0 && (
         <View style={styles.section}>
@@ -334,4 +432,13 @@ const styles = StyleSheet.create({
   },
   notifyText: { fontSize: 12, fontWeight: "700" },
   retryBtn: { paddingHorizontal: 20, paddingVertical: 8, borderRadius: 8, borderWidth: 1 },
+  claimCard: {
+    padding: 12, borderRadius: 10, borderWidth: 1, marginBottom: 8,
+  },
+  levelBadge: { paddingHorizontal: 6, paddingVertical: 2, borderRadius: 4, borderWidth: 1 },
+  decideBtn: {
+    flex: 1, flexDirection: "row", alignItems: "center", justifyContent: "center",
+    gap: 5, paddingVertical: 8, borderRadius: 8,
+  },
+  decideBtnText: { fontSize: 12, fontWeight: "700", color: "#fff" },
 });

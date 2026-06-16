@@ -64,6 +64,17 @@ type OpenShift = {
   payRate: string | null;
 };
 
+type PendingClaim = {
+  assignmentId: string;
+  shiftId: string;
+  employeeName: string;
+  shiftTitle: string;
+  siteName: string | null;
+  startTime: string;
+  endTime: string;
+  requiredLicenseLevel: number;
+};
+
 type Incident = {
   id: string;
   title: string;
@@ -252,6 +263,30 @@ export default function DispatchPage() {
     queryFn: () => api<OpenShift[]>("/dispatch/open-shifts?hours=72"),
     refetchInterval: 60_000,
   });
+  const pendingClaimsQuery = useQuery<PendingClaim[]>({
+    queryKey: ["dispatch", "pending-claims"],
+    queryFn: async () => {
+      const shifts = await api<any[]>("/shifts?status=upcoming");
+      const rows: PendingClaim[] = [];
+      for (const s of (shifts ?? [])) {
+        for (const a of (s.assignments ?? []) as any[]) {
+          if (a.status !== "pending_approval") continue;
+          rows.push({
+            assignmentId: a.id,
+            shiftId: s.id,
+            employeeName: a.employeeName ?? "Officer",
+            shiftTitle: s.title ?? "Shift",
+            siteName: s.siteName ?? s.location ?? null,
+            startTime: s.startTime,
+            endTime: s.endTime,
+            requiredLicenseLevel: s.requiredLicenseLevel ?? 0,
+          });
+        }
+      }
+      return rows.sort((a, b) => new Date(a.startTime).getTime() - new Date(b.startTime).getTime());
+    },
+    refetchInterval: 30_000,
+  });
   const incidents = useQuery<Incident[]>({
     queryKey: ["dispatch", "active-incidents"],
     queryFn: () => api<Incident[]>("/dispatch/active-incidents"),
@@ -338,6 +373,15 @@ export default function DispatchPage() {
               onChange={refreshAll}
             />
           </div>
+          <div data-tour="claim-approvals">
+            <PendingClaimsPanel
+              data={pendingClaimsQuery.data ?? []}
+              loading={pendingClaimsQuery.isLoading}
+              error={pendingClaimsQuery.error}
+              updatedAt={pendingClaimsQuery.dataUpdatedAt}
+              onChange={refreshAll}
+            />
+          </div>
           <div data-tour="open-shifts">
             <OpenShiftsPanel
               data={openShifts.data ?? []}
@@ -390,6 +434,11 @@ const TOUR_STEPS: TourStep[] = [
     selector: '[data-tour="status-board"]',
     title: "Clock-In Status Board",
     body: "Today's shifts grouped by state: on duty, late (≥10m), no-show, early-out, and upcoming. Use it to spot coverage gaps at a glance.",
+  },
+  {
+    selector: '[data-tour="claim-approvals"]',
+    title: "Shift Claim Approvals",
+    body: "Officer self-claims land here awaiting your decision. Approve confirms them on the roster and notifies them; Decline frees the slot and lets the officer know their request wasn't approved.",
   },
   {
     selector: '[data-tour="open-shifts"]',
@@ -986,6 +1035,115 @@ function BucketTab({
         </div>
       ))}
     </TabsContent>
+  );
+}
+
+// =========================================================== PENDING CLAIMS
+
+function PendingClaimsPanel({
+  data, loading, error, updatedAt, onChange,
+}: {
+  data: PendingClaim[]; loading: boolean; error: unknown; updatedAt: number | undefined;
+  onChange: () => void;
+}) {
+  return (
+    <Card>
+      <CardHeader className="pb-3">
+        <CardTitle className="flex items-center gap-2 text-base">
+          <UserCheck className="w-5 h-5 brand-gold" />
+          Shift Claim Approvals
+          {data.length > 0 && (
+            <Badge className="bg-amber-500 text-black ml-1 text-[11px]">{data.length} pending</Badge>
+          )}
+          <span className="ml-auto flex items-center gap-2 text-xs opacity-60 font-normal">
+            <FreshnessLabel updatedAt={updatedAt} />
+          </span>
+        </CardTitle>
+      </CardHeader>
+      <CardContent className="space-y-2 max-h-[20rem] overflow-y-auto">
+        <InlineError error={error} />
+        {loading && <div className="text-sm opacity-60">Loading…</div>}
+        {!loading && !error && data.length === 0 && (
+          <div className="flex items-center gap-2 text-sm opacity-60">
+            <CheckCircle2 className="w-4 h-4 text-emerald-600" />
+            No shift claims awaiting approval.
+          </div>
+        )}
+        {data.map((claim) => (
+          <PendingClaimRow key={claim.assignmentId} claim={claim} onChange={onChange} />
+        ))}
+      </CardContent>
+    </Card>
+  );
+}
+
+function PendingClaimRow({ claim, onChange }: { claim: PendingClaim; onChange: () => void }) {
+  const approve = useMutation({
+    mutationFn: () =>
+      api(`/shifts/${claim.shiftId}/assignments/${claim.assignmentId}`, {
+        method: "PUT",
+        body: { status: "accepted" },
+      }),
+    onSuccess: onChange,
+  });
+  const decline = useMutation({
+    mutationFn: () =>
+      api(`/shifts/${claim.shiftId}/assignments/${claim.assignmentId}`, {
+        method: "PUT",
+        body: { status: "declined" },
+      }),
+    onSuccess: onChange,
+  });
+  const busy = approve.isPending || decline.isPending;
+
+  return (
+    <div className="rounded border bg-card p-3 space-y-2">
+      <div className="flex items-start gap-2">
+        <div className="flex-1 min-w-0">
+          <div className="font-medium text-sm">{claim.employeeName}</div>
+          <div className="text-xs opacity-70 truncate">
+            {claim.shiftTitle}{claim.siteName ? ` · ${claim.siteName}` : ""}
+          </div>
+          <div className="text-xs opacity-60 mt-0.5">
+            {fmtTime(claim.startTime)} – {fmtTime(claim.endTime)}
+          </div>
+        </div>
+        <Badge variant="outline" className="text-[10px] shrink-0">L{claim.requiredLicenseLevel}+</Badge>
+      </div>
+      {(approve.isError || decline.isError) && (
+        <div className="text-xs text-red-700">
+          {((approve.error ?? decline.error) instanceof Error
+            ? (approve.error ?? decline.error) as Error
+            : { message: "Could not update the request." }
+          ).message}
+        </div>
+      )}
+      <div className="flex gap-2">
+        <Button
+          size="sm"
+          className="h-7 text-xs flex-1 bg-emerald-600 hover:bg-emerald-700 text-white"
+          disabled={busy}
+          onClick={() => approve.mutate()}
+        >
+          {approve.isPending
+            ? <Loader2 className="w-3 h-3 animate-spin mr-1" />
+            : <CheckCircle2 className="w-3 h-3 mr-1" />}
+          Approve
+        </Button>
+        <Button
+          size="sm"
+          variant="outline"
+          className="h-7 text-xs flex-1 border-red-300 text-red-700 hover:bg-red-50 dark:hover:bg-red-950"
+          disabled={busy}
+          onClick={() => decline.mutate()}
+        >
+          {decline.isPending
+            ? <Loader2 className="w-3 h-3 animate-spin mr-1" />
+            : <X className="w-3 h-3 mr-1" />}
+          Decline
+        </Button>
+      </div>
+    </div>
   );
 }
 

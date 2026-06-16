@@ -24,7 +24,7 @@ export const siteRatesTable = pgTable("site_rates", {
   licenseLevel: integer("license_level").notNull(),
   payRate: numeric("pay_rate", { precision: 10, scale: 2 }).notNull(),
   billRate: numeric("bill_rate", { precision: 10, scale: 2 }).notNull(),
-  label: text("label"),
+  label: text("label").notNull(),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow().$onUpdate(() => new Date()),
 }, (t) => ({
