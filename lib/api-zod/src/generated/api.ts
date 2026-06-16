@@ -416,6 +416,13 @@ export const UpdateMyEmployeeProfileBody = zod
   .object({
     phone: zod.string().optional(),
     address: zod.string().optional(),
+    dateOfBirth: zod.string().nullish(),
+    cityOfBirth: zod.string().nullish(),
+    stateOfBirth: zod.string().nullish(),
+    niNumber: zod.string().nullish(),
+    rightToWorkStatus: zod.string().nullish(),
+    taxCode: zod.string().nullish(),
+    directDepositConsent: zod.boolean().nullish(),
     emergencyContactName: zod.string().optional(),
     emergencyContactRelationship: zod.string().nullish(),
     emergencyContactPhone: zod.string().optional(),

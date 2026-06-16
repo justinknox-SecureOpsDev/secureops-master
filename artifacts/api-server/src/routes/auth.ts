@@ -473,6 +473,18 @@ const ObjectKey = z.string().min(1).max(512).startsWith("/objects/");
 const PatchMeEmployeeBody = z.object({
   phone: z.string().optional(),
   address: z.string().optional(),
+  // Personal details — employee-owned PII the officer may self-maintain.
+  // dateOfBirth maps to a pg `date` column (ISO YYYY-MM-DD); "" is treated as an
+  // explicit clear in the handler below. niNumber (SSN last 4), rightToWorkStatus
+  // and directDepositConsent are compliance/financial-sensitive and fire a
+  // same-day HR alert on change (see HIGH_RISK_SELF_EDIT_FIELDS).
+  dateOfBirth: z.union([z.string().regex(/^\d{4}-\d{2}-\d{2}$/), z.literal("")]).nullable().optional(),
+  cityOfBirth: z.string().max(120).nullable().optional(),
+  stateOfBirth: z.string().max(120).nullable().optional(),
+  niNumber: z.string().max(64).nullable().optional(),
+  rightToWorkStatus: z.string().max(120).nullable().optional(),
+  taxCode: z.string().max(64).nullable().optional(),
+  directDepositConsent: z.boolean().nullable().optional(),
   emergencyContactName: z.string().optional(),
   emergencyContactRelationship: z.string().nullable().optional(),
   emergencyContactPhone: z.string().optional(),
@@ -487,9 +499,11 @@ const PatchMeEmployeeBody = z.object({
   // Self-service document refresh (Task #31). Object paths look like
   // "/objects/<uuid>" — the value the presigned-upload flow returns.
   // We enforce that prefix so officers cannot persist arbitrary strings
-  // as document references. The license number / expiry / right-to-work
-  // *status* still require admin (those are compliance fields). Officers
-  // can only swap the *file* they previously uploaded.
+  // as document references. License number / level / expiry still require
+  // admin (compliance-verified eligibility inputs). Officers can only swap
+  // the *file* they previously uploaded. NOTE: right-to-work *status* IS now
+  // self-editable above (treated as self-attested, not HR-verified — it fires
+  // a same-day HR alert for re-verification via HIGH_RISK_SELF_EDIT_FIELDS).
   photoKey: ObjectKey.nullable().optional(),
   cvKey: ObjectKey.nullable().optional(),
   licenseDocKey: ObjectKey.nullable().optional(),
@@ -551,6 +565,24 @@ router.patch("/me/employee", requireAuth, async (req, res): Promise<void> => {
       mutableUpdates.emergencyContactPhone = norm;
     } else {
       mutableUpdates.emergencyContactPhone = null;
+    }
+  }
+  // Normalize date of birth: an empty/whitespace value clears it (null), and any
+  // provided value must be a real calendar date in YYYY-MM-DD form. We round-trip
+  // through Date so impossible dates (e.g. 2026-02-30) are rejected with a 400
+  // instead of blowing up the pg `date` cast with a 500.
+  if (Object.hasOwn(updates, "dateOfBirth")) {
+    const raw = updates.dateOfBirth;
+    if (typeof raw === "string" && raw.trim()) {
+      const d = raw.trim();
+      const dt = new Date(`${d}T00:00:00Z`);
+      if (Number.isNaN(dt.getTime()) || dt.toISOString().slice(0, 10) !== d) {
+        res.status(400).json({ error: "Bad Request", message: "Date of birth must be a valid date in YYYY-MM-DD format." });
+        return;
+      }
+      mutableUpdates.dateOfBirth = d;
+    } else {
+      mutableUpdates.dateOfBirth = null;
     }
   }
   const userId = req.user!.userId;

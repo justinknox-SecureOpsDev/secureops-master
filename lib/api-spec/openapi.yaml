@@ -3206,6 +3206,17 @@ components:
       properties:
         phone: { type: string }
         address: { type: string }
+        # Personal details — employee-owned identity / PII the officer can keep
+        # current themselves. dateOfBirth is an ISO YYYY-MM-DD date string ("" or
+        # null clears it). niNumber (SSN last 4) and rightToWorkStatus are
+        # compliance-sensitive: changing them fires a same-day HR alert.
+        dateOfBirth: { type: string, nullable: true }
+        cityOfBirth: { type: string, nullable: true }
+        stateOfBirth: { type: string, nullable: true }
+        niNumber: { type: string, nullable: true }
+        rightToWorkStatus: { type: string, nullable: true }
+        taxCode: { type: string, nullable: true }
+        directDepositConsent: { type: boolean, nullable: true }
         emergencyContactName: { type: string }
         emergencyContactRelationship: { type: string, nullable: true }
         emergencyContactPhone: { type: string }

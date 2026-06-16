@@ -410,6 +410,13 @@ export type UpdateMyEmployeeRequestReferencesItem = {
 export interface UpdateMyEmployeeRequest {
   phone?: string;
   address?: string;
+  dateOfBirth?: string | null;
+  cityOfBirth?: string | null;
+  stateOfBirth?: string | null;
+  niNumber?: string | null;
+  rightToWorkStatus?: string | null;
+  taxCode?: string | null;
+  directDepositConsent?: boolean | null;
   emergencyContactName?: string;
   emergencyContactRelationship?: string | null;
   emergencyContactPhone?: string;

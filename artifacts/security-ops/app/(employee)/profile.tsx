@@ -319,15 +319,25 @@ export default function EmployeeProfileScreen() {
     <ScrollView style={[styles.container, { backgroundColor: colors.background }]} contentContainerStyle={{ paddingBottom: 100 }}>
       <View style={[styles.topBar, { paddingTop: topPad + 12, borderBottomColor: colors.border }]}>
         <Text style={[styles.pageTitle, { color: colors.foreground }]} accessibilityRole="header">My Profile</Text>
-        <TouchableOpacity
-          onPress={logout}
-          style={[styles.logoutBtn, { borderColor: colors.destructive + "50" }]}
-          accessibilityRole="button"
-          accessibilityLabel="Sign out of your account"
-        >
-          <Feather name="log-out" size={16} color={colors.destructive} />
-          <Text style={[styles.logoutText, { color: colors.destructive }]}>Sign Out</Text>
-        </TouchableOpacity>
+        <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
+          <TouchableOpacity
+            onPress={() => router.push("/edit-profile" as any)}
+            style={[styles.editBtn, { backgroundColor: colors.primary }]}
+            accessibilityRole="button"
+            accessibilityLabel="Edit your profile"
+          >
+            <Feather name="edit-3" size={14} color="#fff" />
+            <Text style={styles.editBtnText}>Edit</Text>
+          </TouchableOpacity>
+          <TouchableOpacity
+            onPress={logout}
+            style={[styles.logoutBtn, { borderColor: colors.destructive + "50" }]}
+            accessibilityRole="button"
+            accessibilityLabel="Sign out of your account"
+          >
+            <Feather name="log-out" size={16} color={colors.destructive} />
+          </TouchableOpacity>
+        </View>
       </View>
 
       <View style={[styles.heroCard, { backgroundColor: colors.card, borderColor: colors.border }]}>
@@ -838,8 +848,9 @@ const styles = StyleSheet.create({
   center: { flex: 1, justifyContent: "center", alignItems: "center" },
   topBar: { flexDirection: "row", justifyContent: "space-between", alignItems: "center", paddingHorizontal: 16, paddingBottom: 12, borderBottomWidth: 1 },
   pageTitle: { fontSize: 22, fontWeight: "700" },
-  logoutBtn: { flexDirection: "row", alignItems: "center", gap: 6, paddingHorizontal: 12, paddingVertical: 7, borderRadius: 8, borderWidth: 1 },
-  logoutText: { fontSize: 13, fontWeight: "600" },
+  logoutBtn: { padding: 8, borderRadius: 8, borderWidth: 1 },
+  editBtn: { flexDirection: "row", alignItems: "center", gap: 5, paddingHorizontal: 14, paddingVertical: 8, borderRadius: 8 },
+  editBtnText: { color: "#fff", fontSize: 13, fontWeight: "700" },
   heroCard: { margin: 16, padding: 18, borderRadius: 14, borderWidth: 1, gap: 12 },
   heroRow: { flexDirection: "row", alignItems: "center", gap: 14 },
   brandLogo: { width: 60, height: 60, borderRadius: 30 },

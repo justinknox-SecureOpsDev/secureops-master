@@ -2,7 +2,7 @@ import React, { useEffect, useState } from "react";
 import {
   View, Text, TextInput, TouchableOpacity, StyleSheet,
   ActivityIndicator, ScrollView, Platform, Alert, Linking,
-  Image, Modal, Pressable, AccessibilityInfo, findNodeHandle,
+  Image, Modal, Pressable, AccessibilityInfo, findNodeHandle, Switch,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { Feather } from "@expo/vector-icons";
@@ -55,6 +55,13 @@ function useDocPreview(objectKey: string | null, localUri: string | null): strin
 type Form = {
   phone: string;
   address: string;
+  dateOfBirth: string;
+  cityOfBirth: string;
+  stateOfBirth: string;
+  niNumber: string;
+  rightToWorkStatus: string;
+  taxCode: string;
+  directDepositConsent: boolean;
   emergencyContactName: string;
   emergencyContactRelationship: string;
   emergencyContactPhone: string;
@@ -80,6 +87,8 @@ type Form = {
 
 const empty: Form = {
   phone: "", address: "",
+  dateOfBirth: "", cityOfBirth: "", stateOfBirth: "", niNumber: "", rightToWorkStatus: "", taxCode: "",
+  directDepositConsent: false,
   emergencyContactName: "", emergencyContactRelationship: "", emergencyContactPhone: "",
   uniformShirt: "", uniformTrousers: "", uniformJacket: "", uniformBoots: "",
   bankAccountName: "", bankAccountNumber: "", bankBsb: "",
@@ -115,6 +124,13 @@ export default function EditProfileScreen() {
     setForm({
       phone: profile.phone ?? "",
       address: profile.address ?? "",
+      dateOfBirth: profile.dateOfBirth ?? "",
+      cityOfBirth: profile.cityOfBirth ?? "",
+      stateOfBirth: profile.stateOfBirth ?? "",
+      niNumber: profile.niNumber ?? "",
+      rightToWorkStatus: profile.rightToWorkStatus ?? "",
+      taxCode: profile.taxCode ?? "",
+      directDepositConsent: profile.directDepositConsent ?? false,
       emergencyContactName: profile.emergencyContactName ?? "",
       emergencyContactRelationship: profile.emergencyContactRelationship ?? "",
       emergencyContactPhone: profile.emergencyContactPhone ?? "",
@@ -143,6 +159,7 @@ export default function EditProfileScreen() {
   }, [profile]);
 
   function set<K extends keyof Form>(k: K, v: string) { setForm((f) => ({ ...f, [k]: v })); }
+  function setBool<K extends keyof Form>(k: K, v: boolean) { setForm((f) => ({ ...f, [k]: v })); }
   function setDoc<K extends "photoKey" | "licenseDocKey" | "passportDocKey">(k: K, v: string | null) {
     setForm((f) => ({ ...f, [k]: v }));
   }
@@ -249,6 +266,21 @@ export default function EditProfileScreen() {
     const payload: Record<string, unknown> = {};
     if (trim(form.phone)) payload.phone = trim(form.phone);
     if (trim(form.address)) payload.address = trim(form.address);
+    // Personal details — always sent (empty → null clears) so the officer has
+    // full control over their own identity / tax fields. dateOfBirth goes as a
+    // bare YYYY-MM-DD string; the server validates it and clears on empty.
+    payload.dateOfBirth = trim(form.dateOfBirth) || null;
+    payload.cityOfBirth = trim(form.cityOfBirth) || null;
+    payload.stateOfBirth = trim(form.stateOfBirth) || null;
+    payload.niNumber = trim(form.niNumber) || null;
+    payload.rightToWorkStatus = trim(form.rightToWorkStatus) || null;
+    payload.taxCode = trim(form.taxCode) || null;
+    // Only send the consent toggle when it actually changed, so a first save by
+    // an officer whose consent was never set (null) doesn't register a
+    // null → false "change" and fire a spurious HR alert.
+    if (form.directDepositConsent !== (profile?.directDepositConsent ?? false)) {
+      payload.directDepositConsent = form.directDepositConsent;
+    }
     payload.emergencyContactName = trim(form.emergencyContactName);
     payload.emergencyContactRelationship = trim(form.emergencyContactRelationship) || null;
     payload.emergencyContactPhone = trim(form.emergencyContactPhone);
@@ -307,6 +339,9 @@ export default function EditProfileScreen() {
     bankAccountName: "bank account name",
     bankAccountNumber: "bank account number",
     bankBsb: "routing / sort code",
+    niNumber: "SSN (last 4)",
+    rightToWorkStatus: "right to work",
+    directDepositConsent: "direct deposit consent",
     emergencyContactName: "emergency contact name",
     emergencyContactRelationship: "emergency contact relationship",
     emergencyContactPhone: "emergency contact phone",
@@ -380,6 +415,44 @@ export default function EditProfileScreen() {
           <Field label="Address"><Input value={form.address} onChangeText={(v) => set("address", v)} multiline accessibilityLabel="Address" /></Field>
         </Section>
 
+        <Section title="Personal details">
+          <Field label="Date of birth">
+            <Input
+              value={form.dateOfBirth}
+              onChangeText={(v) => set("dateOfBirth", v)}
+              placeholder="YYYY-MM-DD"
+              autoCapitalize="none"
+              autoCorrect={false}
+              accessibilityLabel="Date of birth, format year dash month dash day"
+            />
+          </Field>
+          <Field label="City of birth">
+            <Input value={form.cityOfBirth} onChangeText={(v) => set("cityOfBirth", v)} placeholder="e.g. Dallas" accessibilityLabel="City of birth" />
+          </Field>
+          <Field label="State of birth">
+            <Input value={form.stateOfBirth} onChangeText={(v) => set("stateOfBirth", v)} placeholder="e.g. TX" accessibilityLabel="State of birth" />
+          </Field>
+          <Field label="SSN (last 4)">
+            <Input
+              value={form.niNumber}
+              onChangeText={(v) => set("niNumber", v.replace(/[^0-9]/g, ""))}
+              keyboardType="number-pad"
+              maxLength={4}
+              placeholder="Last 4 digits"
+              accessibilityLabel="Social security number, last four digits"
+            />
+          </Field>
+          <Field label="Right to work">
+            <Input
+              value={form.rightToWorkStatus}
+              onChangeText={(v) => set("rightToWorkStatus", v)}
+              placeholder="e.g. US Citizen, Permanent Resident, Work Visa"
+              accessibilityLabel="Right to work status"
+            />
+          </Field>
+          <NotifiedNote />
+        </Section>
+
         <Section title="Emergency contact">
           <Field label="Name" required invalid={invalid.emergencyContactName} errorText="Emergency contact name is required.">
             <Input
@@ -417,10 +490,26 @@ export default function EditProfileScreen() {
           <Field label="Boots"><Input value={form.uniformBoots} onChangeText={(v) => set("uniformBoots", v)} accessibilityLabel="Boots size" /></Field>
         </Section>
 
-        <Section title="Bank details">
+        <Section title="Banking & tax">
           <Field label="Account name"><Input value={form.bankAccountName} onChangeText={(v) => set("bankAccountName", v)} accessibilityLabel="Bank account name" /></Field>
           <Field label="Account number"><Input value={form.bankAccountNumber} onChangeText={(v) => set("bankAccountNumber", v)} keyboardType="number-pad" accessibilityLabel="Bank account number" /></Field>
           <Field label="Routing / sort code"><Input value={form.bankBsb} onChangeText={(v) => set("bankBsb", v)} accessibilityLabel="Routing or sort code" /></Field>
+          <Field label="Tax code"><Input value={form.taxCode} onChangeText={(v) => set("taxCode", v)} autoCapitalize="characters" accessibilityLabel="Tax code" /></Field>
+          <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: 12 }}>
+            <View style={{ flex: 1 }}>
+              <Text style={[styles.label, { color: colors.foreground }]}>Direct deposit consent</Text>
+              <Text style={[styles.note, { color: colors.mutedForeground }]}>
+                Authorize WCSG to pay you by direct deposit to the account above.
+              </Text>
+            </View>
+            <Switch
+              value={form.directDepositConsent}
+              onValueChange={(v) => setBool("directDepositConsent", v)}
+              trackColor={{ true: colors.primary, false: colors.border }}
+              accessibilityLabel="Direct deposit consent"
+              accessibilityRole="switch"
+            />
+          </View>
           <NotifiedNote />
         </Section>
 
