@@ -48,6 +48,15 @@ async function makeEmployee(suffix: string): Promise<string> {
 }
 
 beforeAll(async () => {
+  // Scrub orphan rows from any crashed previous run that share our TAG prefix.
+  // Deleting users cascades their licenses, shift_assignments, and time_entries.
+  // Shifts whose siteId references the orphan site are left in place (SET NULL FK)
+  // but are harmless; we then delete the orphan site + client.
+  await db.execute(sql`DELETE FROM users WHERE email LIKE 'clockin-test-%'`);
+  await db.execute(sql`DELETE FROM shifts WHERE site_id IN (SELECT id FROM sites WHERE name LIKE 'clockin-test-%')`);
+  await db.execute(sql`DELETE FROM sites WHERE name LIKE 'clockin-test-%'`);
+  await db.execute(sql`DELETE FROM clients WHERE name LIKE 'clockin-test-%'`);
+
   ctx.licensedEmployeeId = await makeEmployee("lic");
   ctx.unlicensedEmployeeId = await makeEmployee("nolic");
   ctx.licensedToken = signToken({

@@ -181,6 +181,7 @@ const b = document.createElement('b');
 b.appendChild(document.createTextNode(String(LABEL || '')));
 tipEl.appendChild(b);
 const siteMarker = L.marker(center, { icon: siteIcon, draggable: true, autoPan: true }).addTo(map);
+siteMarker.getElement()?.setAttribute('aria-label', 'Site location — drag to reposition');
 siteMarker.bindTooltip(tipEl, { direction: 'top', offset: [0, -6], opacity: 0.95 });
 function eastEdge(c, rm) {
   const cosLat = Math.cos(c.lat * Math.PI / 180);
@@ -188,6 +189,7 @@ function eastEdge(c, rm) {
   return L.latLng(c.lat, c.lng + dLng);
 }
 const handle = L.marker(eastEdge(center, radiusM), { icon: handleIcon, draggable: true, autoPan: true }).addTo(map);
+handle.getElement()?.setAttribute('aria-label', 'Geofence radius — drag to resize');
 const readout = document.getElementById('r');
 function paintReadout(state) {
   readout.className = 'readout' + (state ? ' ' + state : '');
