@@ -123,6 +123,7 @@ function EmployeeTabs({ colors, isIOS, isWeb }: { colors: ReturnType<typeof useC
         }}
       />
       <Tabs.Screen name="chat/[id]" options={{ href: null, headerShown: false }} />
+      <Tabs.Screen name="ops-plan" options={{ href: null, headerShown: false }} />
     </Tabs>
   );
 }

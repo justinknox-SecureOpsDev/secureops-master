@@ -525,6 +525,23 @@ export default function EmployeeShiftsScreen() {
                   </View>
                 )}
 
+                {isAccepted && item.shiftType === "ppo_detail" && (
+                  <TouchableOpacity
+                    style={[styles.opsPlanBtn, { borderColor: colors.accent, backgroundColor: colors.accent + "12" }]}
+                    onPress={() => router.push({
+                      pathname: "/(employee)/ops-plan/[id]",
+                      params: { id: item.id, title: item.title, client: item.clientName },
+                    })}
+                    accessibilityRole="button"
+                    accessibilityLabel={`View protection ops plan for ${item.title} at ${item.clientName}`}
+                    accessibilityHint="Opens the protection package: principals, threats, itinerary and instructions"
+                  >
+                    <Feather name="shield" size={16} color={colors.accent} />
+                    <Text style={[styles.opsPlanText, { color: colors.accent }]}>View Protection Ops Plan</Text>
+                    <Feather name="chevron-right" size={16} color={colors.accent} style={{ marginLeft: "auto" }} />
+                  </TouchableOpacity>
+                )}
+
                 {isAccepted && myAssign && (() => {
                   // Show "Clock In Now" from 1 hour before start through end of
                   // shift; outside that window only the Release button shows.
@@ -662,4 +679,6 @@ const styles = StyleSheet.create({
   acceptText: { fontSize: 14, fontWeight: "700" },
   declineBtn: { flex: 1, flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 6, paddingVertical: 12, borderRadius: 8, borderWidth: 1.5 },
   declineText: { fontSize: 14, fontWeight: "700" },
+  opsPlanBtn: { flexDirection: "row", alignItems: "center", gap: 8, paddingVertical: 11, paddingHorizontal: 12, borderRadius: 8, borderWidth: 1.5 },
+  opsPlanText: { fontSize: 14, fontWeight: "700" },
 });

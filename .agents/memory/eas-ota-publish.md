@@ -19,6 +19,12 @@ Publishing an EAS Update (OTA) for the Expo mobile app from inside the agent env
    `EAS_NO_VCS=1 ./node_modules/.bin/eas update --branch production --skip-bundler --input-dir dist --platform android --message "…" --non-interactive`
 3. Repeat for `ios` (re-export overwrites `dist`; warm cache makes it quick).
 
+**The UPLOAD step (not just export) can also blow the 120 s cap** — `eas update` runs a
+"Computing project fingerprints" phase that sometimes hangs past the window (seen on the
+iOS upload; android usually squeaks through). Fix: add `EAS_SKIP_AUTO_FINGERPRINT=1` to the
+`eas update` env. Fingerprints are only used to warn about runtime mismatches; skipping is
+safe for an OTA whose runtimeVersion already matches the installed build.
+
 Publishing per platform creates two single-platform update groups on the branch. EAS serves the right one per platform + runtimeVersion, so it is functionally equivalent to one combined group.
 
 ## Why `EAS_NO_VCS=1` is mandatory here
