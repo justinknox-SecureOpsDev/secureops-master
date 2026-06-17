@@ -6,6 +6,7 @@ import { useColors } from "@/hooks/useColors";
 import { confirmAction, notify } from "@/utils/confirm";
 import { useGetShift, getGetShiftQueryKey, useGetEmployees, getGetEmployeesQueryKey, useAssignEmployeeToShift, useUpdateShiftAssignment, getGetShiftsQueryKey } from "@workspace/api-client-react";
 import { LicenseLevelBadge, levelLabel } from "@/components/LicenseLevelBadge";
+import { ProtectionPackageView } from "@/components/ProtectionPackageView";
 import { Feather } from "@expo/vector-icons";
 import { useLocalSearchParams, useRouter, useSegments } from "expo-router";
 import { useQueryClient } from "@tanstack/react-query";
@@ -192,6 +193,8 @@ export default function ShiftDetailScreen() {
         <InfoRow label="End Time" value={new Date(shift.endTime).toLocaleString()} icon="stop-circle" />
         <InfoRow label="Notes" value={shift.notes} icon="file-text" />
       </View>
+
+      {(shift as any).shiftType === "ppo_detail" && <ProtectionPackageView shiftId={id!} />}
 
       <View style={[styles.section, { backgroundColor: colors.card, borderColor: colors.border }]}>
         <Text style={[styles.sectionTitle, { color: colors.accent }]}>ASSIGNED PERSONNEL ({shift.assignments?.length ?? 0})</Text>

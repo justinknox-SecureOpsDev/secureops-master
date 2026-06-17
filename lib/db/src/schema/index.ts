@@ -48,3 +48,6 @@ export * from "./subcontractorInvoices";
 export * from "./schedulerSyncCursors";
 export * from "./subcontractorQrTokens";
 export * from "./subcontractorTimeEntries";
+export * from "./protectionDetails";
+export * from "./protectionPersons";
+export * from "./protectionDestinations";

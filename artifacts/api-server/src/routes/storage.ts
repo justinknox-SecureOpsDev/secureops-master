@@ -7,8 +7,15 @@ import {
 import { ObjectStorageService, ObjectNotFoundError } from "../lib/objectStorage";
 import { requireAdmin, requireAuth } from "../middlewares/auth";
 import { uploadUrlLimiter, applicationUploadLimiter } from "../middlewares/rateLimit";
-import { db, employeesTable, incidentsTable, licenseRenewalRequestsTable } from "@workspace/db";
-import { eq } from "drizzle-orm";
+import {
+  db,
+  employeesTable,
+  incidentsTable,
+  licenseRenewalRequestsTable,
+  protectionPersonsTable,
+  shiftAssignmentsTable,
+} from "@workspace/db";
+import { and, eq, inArray, sql } from "drizzle-orm";
 
 /**
  * Maximum declared file size accepted for presigned upload URL requests.
@@ -77,6 +84,51 @@ function resolveContentType(declaredType: string, fileName: string): string {
 
 const router: IRouter = Router();
 const objectStorageService = new ObjectStorageService();
+
+/**
+ * Authorize signing a protection-detail (PPO) principal/threat photo.
+ *
+ * These photos are uploaded by admins and stored in
+ * `protection_persons.photoKeys`, so they live outside the officer's own
+ * upload prefix and are never in the caller's `owned` set. Access mirrors the
+ * GET /shifts/:id/protection-detail read rule:
+ *   - admin / dispatcher / lead may sign any protection photo;
+ *   - an `employee` may sign only photos belonging to a shift they have an
+ *     ACCEPTED assignment to.
+ * External `client` users (and any other role) are always refused.
+ *
+ * Matching on the photo key is EXACT (jsonb array membership via
+ * `jsonb_exists`), never a prefix — a partial path must not unlock a sibling.
+ */
+async function canSignProtectionPhoto(
+  path: string,
+  userId: string,
+  role: string,
+): Promise<boolean> {
+  const isStaffReader = role === "admin" || role === "dispatcher" || role === "lead";
+  if (!isStaffReader && role !== "employee") return false;
+
+  const rows = await db
+    .select({ shiftId: protectionPersonsTable.shiftId })
+    .from(protectionPersonsTable)
+    .where(sql`jsonb_exists(${protectionPersonsTable.photoKeys}, ${path})`);
+  if (rows.length === 0) return false;
+  if (isStaffReader) return true;
+
+  const shiftIds = [...new Set(rows.map((r) => r.shiftId))];
+  const [assignment] = await db
+    .select({ id: shiftAssignmentsTable.id })
+    .from(shiftAssignmentsTable)
+    .where(
+      and(
+        inArray(shiftAssignmentsTable.shiftId, shiftIds),
+        eq(shiftAssignmentsTable.employeeId, userId),
+        eq(shiftAssignmentsTable.status, "accepted"),
+      ),
+    )
+    .limit(1);
+  return Boolean(assignment);
+}
 
 /**
  * Per-route raw-body parser for the anonymous application upload endpoint.
@@ -253,10 +305,14 @@ router.get("/me/storage/sign", requireAuth, async (req: Request, res: Response) 
       .from(employeesTable)
       .where(eq(employeesTable.userId, req.user!.userId));
 
-    if (!emp) {
-      res.status(403).json({ error: "Forbidden", message: "No employee record" });
-      return;
-    }
+    // A missing employee row is NOT an early 403 here. Staff readers
+    // (admin/dispatcher/lead) typically have no employee record, yet may be
+    // authorized to sign protection-detail photos in the check further down.
+    // So we only build the "owned employee document" set when an employee row
+    // exists and defer the final allow/deny to the combined owned/protection
+    // authorization. Non-staff callers with no employee row simply end up with
+    // an empty `owned` set and fall through to a 403 unless a protection rule
+    // grants access.
 
     // Only honour employee document keys that live under the caller's own
     // upload prefix. The authenticated upload endpoint mints paths at
@@ -270,43 +326,61 @@ router.get("/me/storage/sign", requireAuth, async (req: Request, res: Response) 
     // excluded here and remain accessible only to admins via /admin/storage/sign.
     const ownedPrefix = `/objects/uploads/u/${req.user!.userId}/`;
     const owned = new Set<string>();
-    for (const k of [emp.photoKey, emp.cvKey, emp.licenseDocKey, emp.passportDocKey, emp.rightToWorkDocKey, emp.payStubDocKey]) {
-      if (k && k.startsWith(ownedPrefix)) owned.add(k);
-    }
-    if (Array.isArray(emp.trainingCertificateKeys)) {
-      for (const k of emp.trainingCertificateKeys as unknown[]) {
-        if (typeof k === "string" && k.startsWith(ownedPrefix)) owned.add(k);
+    // All of the "owned object" sources below — employee document keys, the
+    // caller's own incident attachments, and their own license-renewal docs —
+    // are employee-scoped, so we only consult them when an employee row exists.
+    // A staff reader (admin/dispatcher/lead) with no employee row therefore
+    // gets an empty `owned` set and can only reach a signed URL through the
+    // protection-photo rule below, keeping the newly-reachable callers after
+    // the removed early-return to exactly the authorized protection readers.
+    if (emp) {
+      for (const k of [emp.photoKey, emp.cvKey, emp.licenseDocKey, emp.passportDocKey, emp.rightToWorkDocKey, emp.payStubDocKey]) {
+        if (k && k.startsWith(ownedPrefix)) owned.add(k);
       }
-    }
-
-    // Defense in depth: also allow signing attachments on incidents the user
-    // owns, but only when the path is under their bound upload prefix. The
-    // create endpoint already enforces this prefix, so DB-stored values are
-    // trustworthy; this guard prevents regressions if that ever changes.
-    const myIncidents = await db
-      .select({ attachments: incidentsTable.attachments })
-      .from(incidentsTable)
-      .where(eq(incidentsTable.employeeId, req.user!.userId));
-    for (const inc of myIncidents) {
-      if (Array.isArray(inc.attachments)) {
-        for (const k of inc.attachments) {
+      if (Array.isArray(emp.trainingCertificateKeys)) {
+        for (const k of emp.trainingCertificateKeys as unknown[]) {
           if (typeof k === "string" && k.startsWith(ownedPrefix)) owned.add(k);
         }
       }
+
+      // Defense in depth: also allow signing attachments on incidents the user
+      // owns, but only when the path is under their bound upload prefix. The
+      // create endpoint already enforces this prefix, so DB-stored values are
+      // trustworthy; this guard prevents regressions if that ever changes.
+      const myIncidents = await db
+        .select({ attachments: incidentsTable.attachments })
+        .from(incidentsTable)
+        .where(eq(incidentsTable.employeeId, req.user!.userId));
+      for (const inc of myIncidents) {
+        if (Array.isArray(inc.attachments)) {
+          for (const k of inc.attachments) {
+            if (typeof k === "string" && k.startsWith(ownedPrefix)) owned.add(k);
+          }
+        }
+      }
+
+      // Also allow signing the doc attached to the caller's own license-renewal
+      // submissions, again only when the path is under their bound upload
+      // prefix (the create endpoint enforces this).
+      const myRenewals = await db
+        .select({ docKey: licenseRenewalRequestsTable.docKey })
+        .from(licenseRenewalRequestsTable)
+        .where(eq(licenseRenewalRequestsTable.employeeId, req.user!.userId));
+      for (const r of myRenewals) {
+        if (typeof r.docKey === "string" && r.docKey.startsWith(ownedPrefix)) owned.add(r.docKey);
+      }
     }
 
-    // Also allow signing the doc attached to the caller's own license-renewal
-    // submissions, again only when the path is under their bound upload
-    // prefix (the create endpoint enforces this).
-    const myRenewals = await db
-      .select({ docKey: licenseRenewalRequestsTable.docKey })
-      .from(licenseRenewalRequestsTable)
-      .where(eq(licenseRenewalRequestsTable.employeeId, req.user!.userId));
-    for (const r of myRenewals) {
-      if (typeof r.docKey === "string" && r.docKey.startsWith(ownedPrefix)) owned.add(r.docKey);
+    // Protection-detail photos are admin-uploaded, so they live outside the
+    // caller's own upload prefix and won't be in `owned`. An officer with an
+    // ACCEPTED assignment to the parent shift — or a staff reader
+    // (admin/dispatcher/lead) — may still sign them, mirroring the
+    // GET /shifts/:id/protection-detail read rule.
+    let allowed = owned.has(path);
+    if (!allowed) {
+      allowed = await canSignProtectionPhoto(path, req.user!.userId, req.user!.role);
     }
-
-    if (!owned.has(path)) {
+    if (!allowed) {
       res.status(403).json({ error: "Forbidden", message: "You do not own this object" });
       return;
     }

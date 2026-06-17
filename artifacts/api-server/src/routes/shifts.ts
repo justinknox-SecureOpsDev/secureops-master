@@ -286,7 +286,7 @@ router.post("/shifts", requireAdminOrLead, async (req, res): Promise<void> => {
     startTime, endTime,
     payRate, billRate, hourlyRate, billableRate,
     isRepeat, repeatPattern, notes, employeeIds, requiredLicenseLevel, headcount,
-    siteRateId,
+    siteRateId, shiftType,
   } = req.body;
   // Leads never see or set rates; ignore any client-supplied rate fields and
   // fall back to the site's configured defaults so payroll/invoicing still
@@ -373,6 +373,7 @@ router.post("/shifts", requireAdminOrLead, async (req, res): Promise<void> => {
     requiredLicenseLevel: lvl,
     headcount: hc,
     siteRateId: siteRateId || null,
+    shiftType: shiftType === "ppo_detail" ? "ppo_detail" : "standard",
   }).returning();
 
   if (employeeIds && Array.isArray(employeeIds) && employeeIds.length > 0) {
@@ -820,7 +821,7 @@ router.get("/shifts/:id", requireAuth, async (req, res): Promise<void> => {
 
 router.put("/shifts/:id", requireAdminOrLead, async (req, res): Promise<void> => {
   const id = Array.isArray(req.params.id) ? req.params.id[0] : req.params.id;
-  const { title, siteId, startTime, endTime, payRate, billRate, hourlyRate, billableRate, status, notes, requiredLicenseLevel, headcount, siteRateId } = req.body;
+  const { title, siteId, startTime, endTime, payRate, billRate, hourlyRate, billableRate, status, notes, requiredLicenseLevel, headcount, siteRateId, shiftType } = req.body;
   // Leads must not change rates — ignore any rate fields they submit.
   const isLead = req.user!.role === "lead";
   const updates: Record<string, unknown> = {};
@@ -865,6 +866,7 @@ router.put("/shifts/:id", requireAdminOrLead, async (req, res): Promise<void> =>
     updates.requiredLicenseLevel = Number(requiredLicenseLevel);
   }
   if (headcount !== undefined) updates.headcount = Math.max(1, Number(headcount) || 1);
+  if (shiftType === "standard" || shiftType === "ppo_detail") updates.shiftType = shiftType;
   // Explicit null clears the FK (admin selected "Custom" rate); undefined leaves it alone.
   if (siteRateId !== undefined) updates.siteRateId = siteRateId || null;
 

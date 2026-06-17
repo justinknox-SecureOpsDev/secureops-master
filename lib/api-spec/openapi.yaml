@@ -714,6 +714,85 @@ paths:
         "204":
           description: Deleted
 
+  /shifts/{id}/protection-detail:
+    get:
+      operationId: getProtectionDetail
+      tags: [shifts]
+      summary: Get the executive-protection (PPO) package for a shift
+      description: >-
+        Highly sensitive. Readable only by admins/dispatchers/leads and officers
+        with an ACCEPTED assignment to this shift. Returns an empty package
+        (null fields, empty arrays) when no package has been built yet.
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Protection package
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ProtectionDetail"
+        "403":
+          description: Not authorized to view this shift's protection package
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: Shift not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+    put:
+      operationId: updateProtectionDetail
+      tags: [shifts]
+      summary: Create/replace the executive-protection (PPO) package for a shift
+      description: >-
+        Admin-only. Replaces the entire package (pre-plan fields + principals +
+        threats + destinations) in one transaction. Destinations are geocoded
+        best-effort from their address. Audited — raw PII is redacted from the
+        audit snapshot; only actor/path/shift/counts are recorded.
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ProtectionDetailRequest"
+      responses:
+        "200":
+          description: Updated package
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ProtectionDetail"
+        "403":
+          description: Admin only
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: Shift not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
   /shifts/{id}/claim:
     post:
       operationId: claimShift
@@ -3342,6 +3421,10 @@ components:
         status:
           type: string
           enum: [upcoming, active, completed, cancelled]
+        shiftType:
+          type: string
+          enum: [standard, ppo_detail]
+          description: "'standard' guard shift or 'ppo_detail' executive/close-protection detail (unlocks the protection package)"
         requiredLicenseLevel:
           type: integer
           enum: [1, 2, 3, 4]
@@ -3392,6 +3475,10 @@ components:
         repeatPattern:
           type: string
           enum: [daily, weekly, fortnightly, monthly]
+        shiftType:
+          type: string
+          enum: [standard, ppo_detail]
+          description: "'ppo_detail' unlocks the executive-protection package; defaults to 'standard'"
         notes: { type: string }
       required:
         - title
@@ -3421,6 +3508,9 @@ components:
         headcount:
           type: integer
           minimum: 1
+        shiftType:
+          type: string
+          enum: [standard, ppo_detail]
         notes: { type: string }
 
     ShiftAssignment:
@@ -3476,6 +3566,138 @@ components:
           enum: [accepted, declined]
       required:
         - status
+
+    ProtectionPerson:
+      type: object
+      description: A principal (protectee) or threat/subject of interest on a protection detail.
+      properties:
+        id: { type: string }
+        kind:
+          type: string
+          enum: [principal, threat]
+        seq: { type: integer }
+        name: { type: string, nullable: true }
+        relationship: { type: string, nullable: true }
+        sex: { type: string, nullable: true }
+        age: { type: string, nullable: true }
+        height: { type: string, nullable: true }
+        weight: { type: string, nullable: true }
+        hairColor: { type: string, nullable: true }
+        eyeColor: { type: string, nullable: true }
+        distinguishingFeatures: { type: string, nullable: true }
+        notes: { type: string, nullable: true }
+        photoKeys:
+          type: array
+          items: { type: string }
+      required:
+        - id
+        - kind
+        - seq
+        - photoKeys
+
+    ProtectionDestination:
+      type: object
+      description: An ordered, geocoded stop on a protection detail's itinerary.
+      properties:
+        id: { type: string }
+        seq: { type: integer }
+        label: { type: string, nullable: true }
+        address: { type: string, nullable: true }
+        lat: { type: number, nullable: true }
+        lng: { type: number, nullable: true }
+        arrivalTime: { type: string, format: date-time, nullable: true }
+        notes: { type: string, nullable: true }
+      required:
+        - id
+        - seq
+
+    ProtectionDetail:
+      type: object
+      description: >-
+        Full executive-protection (PPO) package for a shift. Pre-plan fields plus
+        principals, threats, and destinations. Empty/null when not yet built.
+      properties:
+        shiftId: { type: string }
+        threatLevel: { type: string, nullable: true }
+        missionSummary: { type: string, nullable: true }
+        dressCode: { type: string, nullable: true }
+        armamentInstructions: { type: string, nullable: true }
+        communicationPlan: { type: string, nullable: true }
+        medicalNotes: { type: string, nullable: true }
+        emergencyRendezvous: { type: string, nullable: true }
+        vehicleDetails: { type: string, nullable: true }
+        specialInstructions: { type: string, nullable: true }
+        principals:
+          type: array
+          items: { $ref: "#/components/schemas/ProtectionPerson" }
+        threats:
+          type: array
+          items: { $ref: "#/components/schemas/ProtectionPerson" }
+        destinations:
+          type: array
+          items: { $ref: "#/components/schemas/ProtectionDestination" }
+      required:
+        - shiftId
+        - principals
+        - threats
+        - destinations
+
+    ProtectionPersonInput:
+      type: object
+      description: Input shape for one principal or threat. `kind` is implied by which array it appears in.
+      properties:
+        name: { type: string, maxLength: 200 }
+        relationship: { type: string, maxLength: 200 }
+        sex: { type: string, maxLength: 100 }
+        age: { type: string, maxLength: 100 }
+        height: { type: string, maxLength: 100 }
+        weight: { type: string, maxLength: 100 }
+        hairColor: { type: string, maxLength: 100 }
+        eyeColor: { type: string, maxLength: 100 }
+        distinguishingFeatures: { type: string, maxLength: 4000 }
+        notes: { type: string, maxLength: 4000 }
+        photoKeys:
+          type: array
+          maxItems: 12
+          items: { type: string, maxLength: 500 }
+
+    ProtectionDestinationInput:
+      type: object
+      properties:
+        label: { type: string, maxLength: 200 }
+        address: { type: string, maxLength: 500 }
+        lat: { type: number }
+        lng: { type: number }
+        arrivalTime: { type: string, format: date-time }
+        notes: { type: string, maxLength: 4000 }
+
+    ProtectionDetailRequest:
+      type: object
+      description: >-
+        Replace-all body for a shift's PPO package. Every field optional; sending
+        empty arrays clears the corresponding section.
+      properties:
+        threatLevel: { type: string, maxLength: 200 }
+        missionSummary: { type: string, maxLength: 8000 }
+        dressCode: { type: string, maxLength: 4000 }
+        armamentInstructions: { type: string, maxLength: 4000 }
+        communicationPlan: { type: string, maxLength: 4000 }
+        medicalNotes: { type: string, maxLength: 4000 }
+        emergencyRendezvous: { type: string, maxLength: 4000 }
+        vehicleDetails: { type: string, maxLength: 4000 }
+        specialInstructions: { type: string, maxLength: 8000 }
+        principals:
+          type: array
+          maxItems: 20
+          items: { $ref: "#/components/schemas/ProtectionPersonInput" }
+        threats:
+          type: array
+          maxItems: 50
+          items: { $ref: "#/components/schemas/ProtectionPersonInput" }
+        destinations:
+          type: array
+          maxItems: 50
+          items: { $ref: "#/components/schemas/ProtectionDestinationInput" }
 
     TimeEntry:
       type: object

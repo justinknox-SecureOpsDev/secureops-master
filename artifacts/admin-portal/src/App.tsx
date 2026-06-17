@@ -26,6 +26,7 @@ import PayrollBoardPage from "@/pages/PayrollBoard";
 import InvoiceBoardPage from "@/pages/InvoiceBoard";
 import { InvitationsPage } from "@/pages/Invitations";
 import ShiftsPage from "@/pages/Shifts";
+import ProtectionDetailPage from "@/pages/ProtectionDetail";
 import CalendarPage from "@/pages/Calendar";
 import AuditLogPage from "@/pages/AuditLog";
 import ShiftRecoveryPage from "@/pages/ShiftRecovery";
@@ -177,6 +178,7 @@ function Routed() {
           <Route path="/staffing" component={StaffingPage} />
           <Route path="/staffing/:id" component={StaffingEventPage} />
           <Route path="/shifts/calendar" component={CalendarPage} />
+          <Route path="/shifts/:id/protection" component={ProtectionDetailPage} />
           <Route path="/tables/shifts" component={ShiftsPage} />
           <Route path="/tables/:table" component={TablePage} />
           <Route component={RootAwareNotFound} />

@@ -118,6 +118,8 @@ import type {
   Policy,
   PolicyGroup,
   PolicyPublic,
+  ProtectionDetail,
+  ProtectionDetailRequest,
   RadioChannel,
   RadioTransmission,
   RegisterPushTokenBody,
@@ -3164,6 +3166,183 @@ export const useDeleteShift = <
   TContext
 > => {
   return useMutation(getDeleteShiftMutationOptions(options));
+};
+
+/**
+ * Highly sensitive. Readable only by admins/dispatchers/leads and officers with an ACCEPTED assignment to this shift. Returns an empty package (null fields, empty arrays) when no package has been built yet.
+ * @summary Get the executive-protection (PPO) package for a shift
+ */
+export const getGetProtectionDetailUrl = (id: string) => {
+  return `/api/shifts/${id}/protection-detail`;
+};
+
+export const getProtectionDetail = async (
+  id: string,
+  options?: RequestInit,
+): Promise<ProtectionDetail> => {
+  return customFetch<ProtectionDetail>(getGetProtectionDetailUrl(id), {
+    ...options,
+    method: "GET",
+  });
+};
+
+export const getGetProtectionDetailQueryKey = (id: string) => {
+  return [`/api/shifts/${id}/protection-detail`] as const;
+};
+
+export const getGetProtectionDetailQueryOptions = <
+  TData = Awaited<ReturnType<typeof getProtectionDetail>>,
+  TError = ErrorType<ErrorResponse>,
+>(
+  id: string,
+  options?: {
+    query?: UseQueryOptions<
+      Awaited<ReturnType<typeof getProtectionDetail>>,
+      TError,
+      TData
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+) => {
+  const { query: queryOptions, request: requestOptions } = options ?? {};
+
+  const queryKey = queryOptions?.queryKey ?? getGetProtectionDetailQueryKey(id);
+
+  const queryFn: QueryFunction<
+    Awaited<ReturnType<typeof getProtectionDetail>>
+  > = ({ signal }) => getProtectionDetail(id, { signal, ...requestOptions });
+
+  return {
+    queryKey,
+    queryFn,
+    enabled: !!id,
+    ...queryOptions,
+  } as UseQueryOptions<
+    Awaited<ReturnType<typeof getProtectionDetail>>,
+    TError,
+    TData
+  > & { queryKey: QueryKey };
+};
+
+export type GetProtectionDetailQueryResult = NonNullable<
+  Awaited<ReturnType<typeof getProtectionDetail>>
+>;
+export type GetProtectionDetailQueryError = ErrorType<ErrorResponse>;
+
+/**
+ * @summary Get the executive-protection (PPO) package for a shift
+ */
+
+export function useGetProtectionDetail<
+  TData = Awaited<ReturnType<typeof getProtectionDetail>>,
+  TError = ErrorType<ErrorResponse>,
+>(
+  id: string,
+  options?: {
+    query?: UseQueryOptions<
+      Awaited<ReturnType<typeof getProtectionDetail>>,
+      TError,
+      TData
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+): UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+  const queryOptions = getGetProtectionDetailQueryOptions(id, options);
+
+  const query = useQuery(queryOptions) as UseQueryResult<TData, TError> & {
+    queryKey: QueryKey;
+  };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
+
+/**
+ * Admin-only. Replaces the entire package (pre-plan fields + principals + threats + destinations) in one transaction. Destinations are geocoded best-effort from their address. Audited — raw PII is redacted from the audit snapshot; only actor/path/shift/counts are recorded.
+ * @summary Create/replace the executive-protection (PPO) package for a shift
+ */
+export const getUpdateProtectionDetailUrl = (id: string) => {
+  return `/api/shifts/${id}/protection-detail`;
+};
+
+export const updateProtectionDetail = async (
+  id: string,
+  protectionDetailRequest: ProtectionDetailRequest,
+  options?: RequestInit,
+): Promise<ProtectionDetail> => {
+  return customFetch<ProtectionDetail>(getUpdateProtectionDetailUrl(id), {
+    ...options,
+    method: "PUT",
+    headers: { "Content-Type": "application/json", ...options?.headers },
+    body: JSON.stringify(protectionDetailRequest),
+  });
+};
+
+export const getUpdateProtectionDetailMutationOptions = <
+  TError = ErrorType<ErrorResponse>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof updateProtectionDetail>>,
+    TError,
+    { id: string; data: BodyType<ProtectionDetailRequest> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof updateProtectionDetail>>,
+  TError,
+  { id: string; data: BodyType<ProtectionDetailRequest> },
+  TContext
+> => {
+  const mutationKey = ["updateProtectionDetail"];
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof updateProtectionDetail>>,
+    { id: string; data: BodyType<ProtectionDetailRequest> }
+  > = (props) => {
+    const { id, data } = props ?? {};
+
+    return updateProtectionDetail(id, data, requestOptions);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type UpdateProtectionDetailMutationResult = NonNullable<
+  Awaited<ReturnType<typeof updateProtectionDetail>>
+>;
+export type UpdateProtectionDetailMutationBody =
+  BodyType<ProtectionDetailRequest>;
+export type UpdateProtectionDetailMutationError = ErrorType<ErrorResponse>;
+
+/**
+ * @summary Create/replace the executive-protection (PPO) package for a shift
+ */
+export const useUpdateProtectionDetail = <
+  TError = ErrorType<ErrorResponse>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof updateProtectionDetail>>,
+    TError,
+    { id: string; data: BodyType<ProtectionDetailRequest> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationResult<
+  Awaited<ReturnType<typeof updateProtectionDetail>>,
+  TError,
+  { id: string; data: BodyType<ProtectionDetailRequest> },
+  TContext
+> => {
+  return useMutation(getUpdateProtectionDetailMutationOptions(options));
 };
 
 /**
