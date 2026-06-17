@@ -34,3 +34,13 @@ After that, `push-force` is a clean no-op ("[✓] Changes applied", no prompt).
 **How to apply:** if a post-merge / `db push` log keeps printing a truncate prompt for a
 unique constraint that "should already exist", check `pg_constraint` vs `pg_indexes` for
 that name — if it's an index but not a constraint, promote it with `USING INDEX`.
+
+**Side effect — creates a one-time dev↔prod publish diff.** Promoting the index to a
+constraint in DEV makes DEV diverge from PROD (which still has the bare index). The next
+Publish will try to add that unique constraint to prod. This is low-risk, non-destructive:
+prod's existing index already enforces the same uniqueness (so no duplicate-row failure and
+no data loss possible without the user explicitly choosing "overwrite data"), and at worst
+it's a benign name-collision on that one statement. After one reconciling publish, dev and
+prod both have the constraint and all future post-merges + publishes are clean. Replit
+Publish (not drizzle-kit) computes the prod diff; agent must NEVER run DDL against prod —
+the supported path is Publish.
