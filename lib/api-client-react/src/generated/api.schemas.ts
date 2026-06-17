@@ -791,6 +791,7 @@ export interface ProtectionDestination {
   lat?: number | null;
   lng?: number | null;
   arrivalTime?: string | null;
+  departureTime?: string | null;
   notes?: string | null;
 }
 
@@ -849,6 +850,7 @@ export interface ProtectionDestinationInput {
   lat?: number;
   lng?: number;
   arrivalTime?: string;
+  departureTime?: string;
   /** @maxLength 4000 */
   notes?: string;
 }

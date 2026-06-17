@@ -197,7 +197,17 @@ describe("PUT /shifts/:id/protection-detail — write authorization", () => {
         ],
         threats: [{ name: "Subject X", notes: "loiterer" }],
         // Explicit coords so the server skips network geocoding in the test.
-        destinations: [{ label: "HQ", address: "100 Congress Ave", lat: 30.27, lng: -97.74 }],
+        destinations: [
+          {
+            label: "HQ",
+            address: "100 Congress Ave",
+            lat: 30.27,
+            lng: -97.74,
+            arrivalTime: "2026-07-01T15:00:00.000Z",
+            departureTime: "2026-07-01T17:30:00.000Z",
+          },
+          { label: "Hotel", address: "200 E 6th St", lat: 30.268, lng: -97.74 },
+        ],
       });
     expect(res.status).toBe(200);
     expect(res.body.threatLevel).toBe("elevated");
@@ -207,8 +217,48 @@ describe("PUT /shifts/:id/protection-detail — write authorization", () => {
     expect(res.body.principals[0].age).toBe("early 40s");
     expect(res.body.principals[0].photoKeys).toContain(PHOTO_KEY);
     expect(res.body.threats).toHaveLength(1);
-    expect(res.body.destinations).toHaveLength(1);
+    expect(res.body.destinations).toHaveLength(2);
+    // Destinations come back ordered by seq = array position.
+    expect(res.body.destinations[0].seq).toBe(0);
+    expect(res.body.destinations[0].label).toBe("HQ");
     expect(res.body.destinations[0].lat).toBe(30.27);
+    // Both arrival and departure times round-trip end-to-end.
+    expect(res.body.destinations[0].arrivalTime).toBe("2026-07-01T15:00:00.000Z");
+    expect(res.body.destinations[0].departureTime).toBe("2026-07-01T17:30:00.000Z");
+    // Optional times stay null when omitted.
+    expect(res.body.destinations[1].seq).toBe(1);
+    expect(res.body.destinations[1].label).toBe("Hotel");
+    expect(res.body.destinations[1].arrivalTime).toBeNull();
+    expect(res.body.destinations[1].departureTime).toBeNull();
+  });
+
+  it("re-saves destinations in a new order (itinerary reorder round-trips)", async () => {
+    const reordered = await request(app)
+      .put(protUrl())
+      .set(authed(ctx.adminToken))
+      .send({
+        // Re-send the principals/threats unchanged: this PUT is replace-all, so
+        // omitting them would wipe the package state later read-auth tests rely
+        // on (principal name + photoKey). We only reorder the destinations.
+        threatLevel: "elevated",
+        missionSummary: `${TAG} mission`,
+        principals: [
+          { name: "Principal One", relationship: "CEO", age: "early 40s", photoKeys: [PHOTO_KEY] },
+        ],
+        threats: [{ name: "Subject X", notes: "loiterer" }],
+        // Same two stops as the build test, but swapped — the replace-all PUT
+        // re-derives seq from array position, so the new order must persist.
+        destinations: [
+          { label: "Hotel", address: "200 E 6th St", lat: 30.268, lng: -97.74 },
+          { label: "HQ", address: "100 Congress Ave", lat: 30.27, lng: -97.74 },
+        ],
+      });
+    expect(reordered.status).toBe(200);
+    expect(reordered.body.destinations).toHaveLength(2);
+    expect(reordered.body.destinations[0].seq).toBe(0);
+    expect(reordered.body.destinations[0].label).toBe("Hotel");
+    expect(reordered.body.destinations[1].seq).toBe(1);
+    expect(reordered.body.destinations[1].label).toBe("HQ");
   });
 });
 

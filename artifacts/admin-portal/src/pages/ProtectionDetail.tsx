@@ -11,7 +11,7 @@ import {
 } from "@/components/ui/select";
 import {
   ArrowLeft, Plus, Trash2, Shield, ShieldAlert, MapPin, User,
-  ImagePlus, X, Loader2, Save, AlertTriangle, Lock,
+  ImagePlus, X, Loader2, Save, AlertTriangle, Lock, ChevronUp, ChevronDown,
 } from "lucide-react";
 
 /**
@@ -53,6 +53,7 @@ type DestResponse = {
   lat: number | null;
   lng: number | null;
   arrivalTime: string | null;
+  departureTime: string | null;
   notes: string | null;
 };
 type ProtectionResponse = {
@@ -100,6 +101,7 @@ type DestDraft = {
   label: string;
   address: string;
   arrivalTime: string;
+  departureTime: string;
   notes: string;
   lat: number | null;
   lng: number | null;
@@ -133,7 +135,7 @@ function emptyPerson(): PersonDraft {
   };
 }
 function emptyDest(): DestDraft {
-  return { _uid: uid(), label: "", address: "", arrivalTime: "", notes: "", lat: null, lng: null };
+  return { _uid: uid(), label: "", address: "", arrivalTime: "", departureTime: "", notes: "", lat: null, lng: null };
 }
 
 function personToDraft(p: PersonResponse): PersonDraft {
@@ -158,6 +160,7 @@ function destToDraft(d: DestResponse): DestDraft {
     label: d.label ?? "",
     address: d.address ?? "",
     arrivalTime: isoToLocal(d.arrivalTime),
+    departureTime: isoToLocal(d.departureTime),
     notes: d.notes ?? "",
     lat: typeof d.lat === "number" ? d.lat : null,
     lng: typeof d.lng === "number" ? d.lng : null,
@@ -408,12 +411,16 @@ function PersonEditor({
 }
 
 function DestEditor({
-  dest, index, onChange, onRemove,
+  dest, index, onChange, onRemove, onMoveUp, onMoveDown, isFirst, isLast,
 }: {
   dest: DestDraft;
   index: number;
   onChange: (patch: Partial<DestDraft>) => void;
   onRemove: () => void;
+  onMoveUp: () => void;
+  onMoveDown: () => void;
+  isFirst: boolean;
+  isLast: boolean;
 }) {
   return (
     <div className="rounded-lg border border-brand-gold/40 bg-brand-cream/30 p-4 space-y-3">
@@ -424,17 +431,39 @@ function DestEditor({
           </span>
           Destination {index + 1}
         </div>
-        <Button
-          variant="ghost"
-          size="sm"
-          className="text-destructive hover:text-destructive"
-          onClick={onRemove}
-        >
-          <Trash2 className="w-3.5 h-3.5 mr-1" /> Remove
-        </Button>
+        <div className="flex items-center gap-1">
+          <Button
+            variant="ghost"
+            size="sm"
+            className="px-2"
+            disabled={isFirst}
+            onClick={onMoveUp}
+            aria-label={`Move destination ${index + 1} up`}
+          >
+            <ChevronUp className="w-4 h-4" />
+          </Button>
+          <Button
+            variant="ghost"
+            size="sm"
+            className="px-2"
+            disabled={isLast}
+            onClick={onMoveDown}
+            aria-label={`Move destination ${index + 1} down`}
+          >
+            <ChevronDown className="w-4 h-4" />
+          </Button>
+          <Button
+            variant="ghost"
+            size="sm"
+            className="text-destructive hover:text-destructive"
+            onClick={onRemove}
+          >
+            <Trash2 className="w-3.5 h-3.5 mr-1" /> Remove
+          </Button>
+        </div>
       </div>
 
-      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
         <div>
           <Label>Label</Label>
           <Input value={dest.label} maxLength={200} placeholder="e.g. Hotel, Venue, Airport" onChange={(e) => onChange({ label: e.target.value })} />
@@ -442,6 +471,10 @@ function DestEditor({
         <div>
           <Label>Arrival time</Label>
           <Input type="datetime-local" value={dest.arrivalTime} onChange={(e) => onChange({ arrivalTime: e.target.value })} />
+        </div>
+        <div>
+          <Label>Departure time</Label>
+          <Input type="datetime-local" value={dest.departureTime} onChange={(e) => onChange({ departureTime: e.target.value })} />
         </div>
       </div>
 
@@ -554,6 +587,17 @@ export default function ProtectionDetailPage() {
   function removeDest(uidKey: string) {
     setDestinations((prev) => prev.filter((d) => d._uid !== uidKey));
   }
+  // Reorder the itinerary by swapping adjacent stops. seq is derived from array
+  // position on save, so reordering the array is all that's needed to persist.
+  function moveDest(index: number, dir: -1 | 1) {
+    setDestinations((prev) => {
+      const j = index + dir;
+      if (j < 0 || j >= prev.length) return prev;
+      const next = [...prev];
+      [next[index], next[j]] = [next[j], next[index]];
+      return next;
+    });
+  }
 
   function personPayload(p: PersonDraft) {
     const out: Record<string, unknown> = {};
@@ -581,6 +625,10 @@ export default function ProtectionDetailPage() {
     if (d.arrivalTime) {
       const iso = localToIso(d.arrivalTime);
       if (iso) out.arrivalTime = iso;
+    }
+    if (d.departureTime) {
+      const iso = localToIso(d.departureTime);
+      if (iso) out.departureTime = iso;
     }
     if (typeof d.lat === "number" && typeof d.lng === "number") {
       out.lat = d.lat;
@@ -861,6 +909,10 @@ export default function ProtectionDetailPage() {
                     index={i}
                     onChange={(patch) => patchDest(d._uid, patch)}
                     onRemove={() => removeDest(d._uid)}
+                    onMoveUp={() => moveDest(i, -1)}
+                    onMoveDown={() => moveDest(i, 1)}
+                    isFirst={i === 0}
+                    isLast={i === destinations.length - 1}
                   />
                 ))}
               </div>

@@ -1378,6 +1378,7 @@ export const GetProtectionDetailResponse = zod
           lat: zod.number().nullish(),
           lng: zod.number().nullish(),
           arrivalTime: zod.coerce.date().nullish(),
+          departureTime: zod.coerce.date().nullish(),
           notes: zod.string().nullish(),
         })
         .describe(
@@ -1651,6 +1652,7 @@ export const UpdateProtectionDetailBody = zod
           lat: zod.number().optional(),
           lng: zod.number().optional(),
           arrivalTime: zod.coerce.date().optional(),
+          departureTime: zod.coerce.date().optional(),
           notes: zod
             .string()
             .max(updateProtectionDetailBodyDestinationsItemNotesMax)
@@ -1730,6 +1732,7 @@ export const UpdateProtectionDetailResponse = zod
           lat: zod.number().nullish(),
           lng: zod.number().nullish(),
           arrivalTime: zod.coerce.date().nullish(),
+          departureTime: zod.coerce.date().nullish(),
           notes: zod.string().nullish(),
         })
         .describe(

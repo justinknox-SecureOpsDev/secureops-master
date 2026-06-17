@@ -220,6 +220,7 @@ export function ProtectionPackageView({ shiftId }: { shiftId: string }) {
                 const subtitle = [
                   d.address,
                   d.arrivalTime ? `Arrive ${new Date(d.arrivalTime).toLocaleString()}` : null,
+                  d.departureTime ? `Depart ${new Date(d.departureTime).toLocaleString()}` : null,
                 ].filter(Boolean).join(" · ");
                 const canMap = (d.lat != null && d.lng != null) || !!(d.address || d.label);
                 return (

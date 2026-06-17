@@ -3606,6 +3606,7 @@ components:
         lat: { type: number, nullable: true }
         lng: { type: number, nullable: true }
         arrivalTime: { type: string, format: date-time, nullable: true }
+        departureTime: { type: string, format: date-time, nullable: true }
         notes: { type: string, nullable: true }
       required:
         - id
@@ -3669,6 +3670,7 @@ components:
         lat: { type: number }
         lng: { type: number }
         arrivalTime: { type: string, format: date-time }
+        departureTime: { type: string, format: date-time }
         notes: { type: string, maxLength: 4000 }
 
     ProtectionDetailRequest:

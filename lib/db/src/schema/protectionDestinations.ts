@@ -19,6 +19,7 @@ export const protectionDestinationsTable = pgTable("protection_destinations", {
   lat: numeric("lat", { precision: 10, scale: 6 }),
   lng: numeric("lng", { precision: 10, scale: 6 }),
   arrivalTime: timestamp("arrival_time", { withTimezone: true }),
+  departureTime: timestamp("departure_time", { withTimezone: true }),
   notes: text("notes"),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow().$onUpdate(() => new Date()),

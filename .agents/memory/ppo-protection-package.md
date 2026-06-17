@@ -18,6 +18,16 @@ geocoded `protection_destinations`. It holds the most sensitive PII in the syste
 - **Write** (`PUT`): admin only (`requireAdmin`), replace-all, geocodes
   destinations. Audited as `shifts.write` (router-level audit middleware; raw
   body redacted to counts).
+  - **Replace-all wipes omitted sub-collections.** The PUT deletes+reinserts
+    persons AND destinations from the body (`body.principals ?? []` etc.), so any
+    caller/test that re-saves to tweak one collection MUST re-send the others or
+    it silently nukes them — and downstream state-dependent reads (e.g. the
+    photo-sign tests that need a principal's `photoKey` present) will fail.
+  - **Destination ordering is positional**: `seq` is derived from array index on
+    write, so reordering = reorder the array (no explicit seq field from client).
+  - **arrival/departure are timestamptz** → coerce client ISO strings to `Date`
+    (`new Date(...)`) before insert; passing the raw string into a drizzle
+    timestamp column is the latent bug that was here.
 - **Photos**: `canSignProtectionPhoto(path, userId, role)` mirrors the read rule —
   exact `jsonb_exists(photoKeys, path)` membership, staff readers allowed, employees
   need an accepted assignment to a parent shift.

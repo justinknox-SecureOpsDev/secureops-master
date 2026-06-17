@@ -72,6 +72,7 @@ function serializeDest(d: DestRow) {
     lat: d.lat === null ? null : Number(d.lat),
     lng: d.lng === null ? null : Number(d.lng),
     arrivalTime: d.arrivalTime ? d.arrivalTime.toISOString() : null,
+    departureTime: d.departureTime ? d.departureTime.toISOString() : null,
     notes: d.notes,
   };
 }
@@ -241,6 +242,7 @@ router.put("/shifts/:id/protection-detail", requireAdmin, async (req: Request, r
           lat,
           lng,
           arrivalTime: d.arrivalTime ?? null,
+          departureTime: d.departureTime ?? null,
           notes: d.notes ?? null,
         };
       }),
@@ -289,7 +291,9 @@ router.put("/shifts/:id/protection-detail", requireAdmin, async (req: Request, r
         address: d.address,
         lat: d.lat === null ? null : String(d.lat),
         lng: d.lng === null ? null : String(d.lng),
-        arrivalTime: d.arrivalTime,
+        // timestamp columns take Date objects, not ISO strings.
+        arrivalTime: d.arrivalTime ? new Date(d.arrivalTime) : null,
+        departureTime: d.departureTime ? new Date(d.departureTime) : null,
         notes: d.notes,
       }));
       if (destRows.length > 0) {
