@@ -1,4 +1,5 @@
 - [Prod "Failed to load" transients](prod-failed-to-load-transients.md) — "Failed to load X" cards in prod usually = Reserved-VM redeploy restart window, not a backend bug; confirm with healthz + logs.
+- [Deploy nix-layer integrity failure](deploy-nix-layer-integrity.md) — publish suddenly fails caching nix-0 ("corrupt nix store paths") when Replit's cached nix layer is evicted & rebuilds, exposing corrupt managed Expo toolchain (eas-cli/node22) paths; Replit-side, not user code.
 - [EAS OTA publish recipe](eas-ota-publish.md) — detached eas exports get reaper-killed (~2-4min, not OOM); publish via foreground per-platform `expo export` + `eas update --skip-bundler`, set EAS_NO_VCS=1.
 - [wouter bare-base routing](wouter-base-routing.md) — wouter with bare base "" 404 gotcha (client portal login).
 - [expo-router Tabs reuse](expo-router-tabs-reuse.md) — dynamic detail/edit routes need a nested Stack, not flat Tabs siblings (instance reuse leaks stale params/state)
