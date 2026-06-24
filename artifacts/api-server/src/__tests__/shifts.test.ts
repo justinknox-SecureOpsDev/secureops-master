@@ -23,8 +23,10 @@ const passwordHash = bcrypt.hashSync("test-password", 4);
 type Ctx = {
   employeeAId: string;
   employeeBId: string;
+  employeeCId: string;
   tokenA: string;
   tokenB: string;
+  tokenC: string;
   clientId: string;
   siteId: string;
 };
@@ -49,6 +51,9 @@ async function makeEmployee(suffix: string): Promise<string> {
 beforeAll(async () => {
   ctx.employeeAId = await makeEmployee("a");
   ctx.employeeBId = await makeEmployee("b");
+  // Employee C intentionally holds NO licence (and is not support staff): the
+  // level-2 eligibility floor must still let them see/claim unarmed shifts.
+  ctx.employeeCId = await makeEmployee("c");
 
   const futureDate = new Date(Date.now() + 365 * 24 * 60 * 60 * 1000)
     .toISOString()
@@ -85,10 +90,15 @@ beforeAll(async () => {
     email: `${TAG}-b@example.test`,
     role: "employee",
   });
+  ctx.tokenC = signToken({
+    userId: ctx.employeeCId,
+    email: `${TAG}-c@example.test`,
+    role: "employee",
+  });
 });
 
 afterAll(async () => {
-  const ids = [ctx.employeeAId, ctx.employeeBId].filter(Boolean);
+  const ids = [ctx.employeeAId, ctx.employeeBId, ctx.employeeCId].filter(Boolean);
   if (ids.length > 0) {
     await db.execute(
       sql`DELETE FROM shift_assignments WHERE employee_id = ANY(${sql.raw(`ARRAY['${ids.join("','")}']::uuid[]`)})`,
@@ -104,7 +114,7 @@ function authed(token: string) {
   return { Authorization: `Bearer ${token}` };
 }
 
-async function insertOpenShift(title: string, headcount: number): Promise<string> {
+async function insertOpenShift(title: string, headcount: number, level = 2): Promise<string> {
   const start = new Date(Date.now() + 6 * 60 * 60 * 1000);
   const end = new Date(start.getTime() + 4 * 60 * 60 * 1000);
   const [row] = await db
@@ -114,7 +124,7 @@ async function insertOpenShift(title: string, headcount: number): Promise<string
       siteId: ctx.siteId,
       startTime: start,
       endTime: end,
-      requiredLicenseLevel: 2,
+      requiredLicenseLevel: level,
       headcount,
       status: "upcoming",
     })
@@ -225,5 +235,67 @@ describe("PUT /shifts/:id/assignments/:assignmentId approval authorization", () 
       .from(shiftAssignmentsTable)
       .where(sql`${shiftAssignmentsTable.id} = ${assignmentId}::uuid`);
     expect(row.status).toBe("pending_approval");
+  });
+});
+
+describe("license eligibility floor — level-2 unarmed open to all employees", () => {
+  it("lets an unlicensed employee CLAIM a level-2 unarmed shift", async () => {
+    const shiftId = await insertOpenShift(`${TAG}-l2-open`, 1, 2);
+    const res = await request(app)
+      .post(`/api/shifts/${shiftId}/claim`)
+      .set(authed(ctx.tokenC))
+      .send({});
+    expect(res.status, `expected 201, got ${res.status}: ${JSON.stringify(res.body)}`).toBe(201);
+    expect(res.body.shiftId).toBe(shiftId);
+  });
+
+  it("shows a level-2 unarmed shift to an unlicensed employee in their feed", async () => {
+    const shiftId = await insertOpenShift(`${TAG}-l2-visible`, 1, 2);
+    const res = await request(app).get(`/api/shifts`).set(authed(ctx.tokenC));
+    expect(res.status).toBe(200);
+    const ids = (res.body as Array<{ id: string }>).map((s) => s.id);
+    expect(ids).toContain(shiftId);
+  });
+
+  it("still blocks an unlicensed employee from a level-3 armed shift", async () => {
+    const shiftId = await insertOpenShift(`${TAG}-l3-armed`, 1, 3);
+    const res = await request(app)
+      .post(`/api/shifts/${shiftId}/claim`)
+      .set(authed(ctx.tokenC))
+      .send({});
+    expect(res.status).toBe(403);
+    expect(res.body.message).toMatch(/Level 3/);
+  });
+
+  it("does NOT let a non-employee account (no employees row) claim an unarmed shift", async () => {
+    // The level-2 floor is an EMPLOYEE benefit. An admin user is provisioned
+    // with NO employees row, so it is not a worker: it must read as effective 0
+    // and be refused even on a level-2 unarmed shift. (The claim route is bare
+    // `requireAuth`, so without the employee gate the floor would let any
+    // authenticated non-employee claim unarmed shifts.)
+    const [nonEmp] = await db
+      .insert(usersTable)
+      .values({
+        email: `${TAG}-nonemp-${randomUUID().slice(0, 6)}@example.test`,
+        passwordHash,
+        firstName: "Admin",
+        lastName: TAG,
+        role: "admin",
+        status: "active",
+        tokensValidAfter: new Date(0),
+      })
+      .returning({ id: usersTable.id });
+    const token = signToken({
+      userId: nonEmp.id,
+      email: `${TAG}-nonemp@example.test`,
+      role: "admin",
+    });
+
+    const shiftId = await insertOpenShift(`${TAG}-l2-nonemp`, 1, 2);
+    const res = await request(app)
+      .post(`/api/shifts/${shiftId}/claim`)
+      .set(authed(token))
+      .send({});
+    expect(res.status, `expected 403, got ${res.status}: ${JSON.stringify(res.body)}`).toBe(403);
   });
 });

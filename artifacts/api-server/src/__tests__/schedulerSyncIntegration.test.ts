@@ -84,9 +84,9 @@ beforeAll(async () => {
   ctx.adminId = adm.id;
 
   // Give the shared officer an unexpired Level-3 licence so they clear the
-  // Level-2 shifts the roster-reconcile tests assign them to. Without this the
-  // scheduler eligibility gate (effective level vs requiredLicenseLevel) would
-  // skip them as under-licensed.
+  // armed (Level-3) shifts the eligibility-gate tests assign them to. (Level-2
+  // unarmed shifts are open to every employee via the eligibility floor, so a
+  // licence isn't needed for those — only for armed/PPO work.)
   await db.insert(licensesTable).values({
     employeeId: ctx.employeeId,
     type: "tx-security",
@@ -1650,7 +1650,8 @@ describe("scheduler webhook rejects unsigned and malformed requests", () => {
   });
 
   it("skips an under-licensed officer the scheduler tries to roster (eligibility gate)", async () => {
-    // An officer with NO licence (effective level 0) — below a Level-2 shift.
+    // An officer with NO licence (effective level 2 — the unarmed floor) — still
+    // below a Level-3 armed shift, so the eligibility gate must skip them.
     const underEmail = `${TAG}-underlic-${randomUUID().slice(0, 6)}@example.test`;
     const [under] = await db
       .insert(usersTable)
@@ -1673,9 +1674,10 @@ describe("scheduler webhook rejects unsigned and malformed requests", () => {
       siteName: ctx.siteName,
       startTime: "2026-11-08T20:00:00.000Z",
       endTime: "2026-11-09T04:00:00.000Z",
-      // Level-2 shift; the under-licensed officer (level 0) must be skipped while
-      // the shared, Level-3-licensed officer is rostered as normal.
-      requiredLicenseLevel: 2,
+      // Level-3 armed shift; the under-licensed officer (effective level 2 — the
+      // unarmed floor) must be skipped while the shared, Level-3-licensed officer
+      // is rostered as normal. (Level-2 unarmed shifts are open to all employees.)
+      requiredLicenseLevel: 3,
       headcount: 2,
       status: "upcoming",
       assignedOfficerEmails: [ctx.employeeEmail, underEmail],
@@ -1708,11 +1710,11 @@ describe("scheduler webhook rejects unsigned and malformed requests", () => {
       .limit(1);
     expect(auditRow).toBeDefined();
     const meta = auditRow!.metadata as { requiredLicenseLevel: number; skipped: Array<{ userId: string; effectiveLevel: number; requiredLevel: number; email: string }> };
-    expect(meta.requiredLicenseLevel).toBe(2);
+    expect(meta.requiredLicenseLevel).toBe(3);
     const skippedEntry = meta.skipped.find((s) => s.userId === under.id);
     expect(skippedEntry).toBeDefined();
-    expect(skippedEntry!.effectiveLevel).toBe(0);
-    expect(skippedEntry!.requiredLevel).toBe(2);
+    expect(skippedEntry!.effectiveLevel).toBe(2);
+    expect(skippedEntry!.requiredLevel).toBe(3);
     expect(skippedEntry!.email).toBe(underEmail);
 
     // …and an in-app notification to the admin (persisted by sendPushToUsers).

@@ -352,8 +352,8 @@ async function reconcileShiftRoster(shiftId: string, assignedOfficerEmails: stri
         const names = skippedDetail.map((s) => s.name).join(", ");
         const body =
           skippedDetail.length === 1
-            ? `${names} can't be rostered on ${title} — their licence level (${skippedDetail[0]!.effectiveLevel}) is below the required level ${requiredLicenseLevel}. Assign a qualified officer.`
-            : `${skippedDetail.length} officers can't be rostered on ${title} (below required licence level ${requiredLicenseLevel}): ${names}. Assign qualified officers.`;
+            ? `${names} can't be rostered on ${title} — they don't hold the required level ${requiredLicenseLevel} licence. Assign a qualified officer.`
+            : `${skippedDetail.length} officers can't be rostered on ${title} (don't hold the required level ${requiredLicenseLevel} licence): ${names}. Assign qualified officers.`;
         const { sendPushToUsers } = await import("../lib/push");
         await sendPushToUsers(adminIds, {
           title: "⚠️ Unqualified officer on schedule",

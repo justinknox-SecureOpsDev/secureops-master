@@ -1042,11 +1042,16 @@ router.post("/shifts/:id/claim", requireAuth, async (req, res): Promise<void> =>
 
   const myLevel = await getEffectiveLevel(userId);
   if (myLevel < shift.requiredLicenseLevel) {
+    // Unarmed work (level <= 2) is open to every employee, so this only fires
+    // for armed (3) or PPO (4) shifts. The effective level is floored at 2 and
+    // is NOT a held-licence figure, so we describe the requirement rather than
+    // asserting the officer's (non-existent) licence level.
+    const tier = shift.requiredLicenseLevel >= 4
+      ? "Level 4 / PPO"
+      : `Level ${shift.requiredLicenseLevel} (armed)`;
     res.status(403).json({
       error: "Forbidden",
-      message: shift.requiredLicenseLevel <= 1
-        ? `This is a support shift. Your account isn't cleared to claim it yet — ask your administrator to set you up as support staff.`
-        : `This shift requires Level ${shift.requiredLicenseLevel}${shift.requiredLicenseLevel === 4 ? "/PPO" : ""}. Your highest valid licence is ${myLevel === 0 ? "none" : `Level ${myLevel}`}.`,
+      message: `This shift requires a valid ${tier} licence, which your account doesn't currently hold.`,
     });
     return;
   }
@@ -1292,11 +1297,15 @@ router.post("/shifts/:id/assignments", requireSchedulingStaff, async (req, res):
         "license requirement overridden on manual shift assignment",
       );
     } else {
+      // Unarmed work (level <= 2) is open to every employee, so this only fires
+      // for armed (3) or PPO (4) shifts. Effective level is floored at 2 and is
+      // not a held-licence figure, so describe the requirement.
+      const tier = shift.requiredLicenseLevel >= 4
+        ? "Level 4 / PPO"
+        : `Level ${shift.requiredLicenseLevel} (armed)`;
       res.status(403).json({
         error: "Forbidden",
-        message: shift.requiredLicenseLevel <= 1
-          ? `This is a support shift. The selected employee isn't cleared for it — set their position to support staff or assign a licensed officer.`
-          : `Employee's highest valid licence (${empLevel === 0 ? "none" : `Level ${empLevel}`}) does not meet the shift requirement (Level ${shift.requiredLicenseLevel}${shift.requiredLicenseLevel === 4 ? "/PPO" : ""}).`,
+        message: `This shift requires a valid ${tier} licence, which the selected employee doesn't currently hold.`,
       });
       return;
     }

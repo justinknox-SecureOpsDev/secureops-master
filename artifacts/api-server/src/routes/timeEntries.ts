@@ -158,8 +158,9 @@ async function resolveOrAssignShiftForAdHocClockIn(
   // Only shifts the officer is actually eligible for: the auto-assign must
   // honour the same licence hierarchy the manual claim route enforces, so we
   // never create an assignment record asserting an under-licensed officer
-  // covered a higher-level (e.g. armed) shift. Effective level = MAX(highest
-  // unexpired licence, support-staff baseline); higher covers lower.
+  // covered a higher-level (e.g. armed) shift. Effective level is floored at
+  // 2 (unarmed work is open to all employees); armed (3) and PPO (4) still
+  // need the matching licence. Higher covers lower.
   const effectiveLevel = await getEffectiveLevel(employeeId);
   const candidates = await db
     .select({
