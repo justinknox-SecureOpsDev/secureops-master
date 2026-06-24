@@ -3421,7 +3421,7 @@ export const useDeleteShift = <
 };
 
 /**
- * Highly sensitive. Readable only by admins/dispatchers/site-managers and officers with an ACCEPTED assignment to this shift. Returns an empty package (null fields, empty arrays) when no package has been built yet.
+ * Highly sensitive. Readable only by admins and officers with an ACCEPTED assignment to this shift. No other role (dispatcher, site_manager, client) has access. Returns an empty package (null fields, empty arrays) when no package has been built yet.
  * @summary Get the executive-protection (PPO) package for a shift
  */
 export const getGetProtectionDetailUrl = (id: string) => {

@@ -22,14 +22,14 @@ import { signToken } from "../middlewares/auth";
  * The package carries the most sensitive PII in the system (principal/threat
  * demographics + photos, medical notes), so the read/write/photo-sign
  * boundaries are security-critical and pinned here:
- *   - READ (GET /shifts/:id/protection-detail): admin/dispatcher OR a
- *     `site_manager` ASSIGNED to the shift's site OR an `employee` with an
- *     ACCEPTED assignment to that shift. Everyone else (incl. a site manager
- *     who does NOT manage this site) gets 403.
+ *   - READ (GET /shifts/:id/protection-detail): admin OR an `employee` with an
+ *     ACCEPTED assignment to that shift. Every other role — dispatcher,
+ *     site_manager (even one managing this site), pending officer, unassigned
+ *     officer, external client — gets 403 (least-privilege on sensitive PII).
  *   - WRITE (PUT): admin only.
  *   - PHOTO SIGN (/me/storage/sign for a protection photo): mirrors the READ
- *     rule — accepted officer, staff reader, or assigned site manager may sign;
- *     others (incl. an unassigned site manager) 403.
+ *     rule — only an admin or an accepted-assignment officer may sign; everyone
+ *     else (dispatcher, site_manager, pending/unassigned officer, client) 403.
  */
 const TAG = `ppo-test-${randomUUID().slice(0, 8)}`;
 const passwordHash = bcrypt.hashSync("test-password", 4);
@@ -94,8 +94,8 @@ beforeAll(async () => {
   ctx.clientUserId = await makeUser("client", "client");
 
   // Site managers + officers are full employees. Admin/dispatcher/client
-  // intentionally have NO employee row — this also exercises that staff readers
-  // can sign protection photos via /me/storage/sign without an employee record.
+  // intentionally have NO employee row — this also exercises that an admin can
+  // sign protection photos via /me/storage/sign without an employee record.
   await makeEmployeeRow(ctx.siteManagerId);
   await makeEmployeeRow(ctx.otherSiteManagerId);
   await makeEmployeeRow(ctx.acceptedOfficerId);
@@ -300,14 +300,16 @@ describe("GET /shifts/:id/protection-detail — read authorization", () => {
     expect(res.body.shiftId).toBe(ctx.shiftId);
   });
 
-  it("lets a dispatcher read (200)", async () => {
+  it("forbids a dispatcher — no standing access to sensitive PII (403)", async () => {
     const res = await request(app).get(protUrl()).set(authed(ctx.dispatcherToken));
-    expect(res.status).toBe(200);
+    expect(res.status).toBe(403);
+    expect(res.body).not.toHaveProperty("principals");
   });
 
-  it("lets a site manager ASSIGNED to the shift's site read (200)", async () => {
+  it("forbids a site manager who manages this site — no standing access (403)", async () => {
     const res = await request(app).get(protUrl()).set(authed(ctx.siteManagerToken));
-    expect(res.status).toBe(200);
+    expect(res.status).toBe(403);
+    expect(res.body).not.toHaveProperty("principals");
   });
 
   it("forbids a site manager NOT assigned to this site (403)", async () => {
@@ -351,9 +353,9 @@ describe("GET /me/storage/sign — protection photo authorization", () => {
     expect(res.status).not.toBe(403);
   });
 
-  it("authorizes a staff reader without an employee row (dispatcher) (not 403)", async () => {
+  it("forbids a dispatcher from signing the protection photo (403)", async () => {
     const res = await request(app).get(signUrl).set(authed(ctx.dispatcherToken));
-    expect(res.status).not.toBe(403);
+    expect(res.status).toBe(403);
   });
 
   it("authorizes an admin without an employee row (not 403)", async () => {
@@ -361,9 +363,9 @@ describe("GET /me/storage/sign — protection photo authorization", () => {
     expect(res.status).not.toBe(403);
   });
 
-  it("authorizes a site manager ASSIGNED to the shift's site (not 403)", async () => {
+  it("forbids a site manager who manages this site (403)", async () => {
     const res = await request(app).get(signUrl).set(authed(ctx.siteManagerToken));
-    expect(res.status).not.toBe(403);
+    expect(res.status).toBe(403);
   });
 
   it("forbids a site manager NOT assigned to this site (403)", async () => {

@@ -14,13 +14,13 @@ import { AttachmentImage } from "@/components/AttachmentImage";
 /**
  * Read-only mobile view of a shift's executive-protection ("PPO Detail")
  * package. Rendered only when the shift is a PPO detail; the GET endpoint
- * itself enforces who may read it (admin/dispatcher/site-manager OR an officer with an
- * ACCEPTED assignment). On 403/other errors we render nothing so the brief
- * stays invisible to anyone not authorized.
+ * itself enforces who may read it (admin OR an officer with an ACCEPTED
+ * assignment — no other role). On 403/other errors we render nothing so the
+ * brief stays invisible to anyone not authorized.
  *
  * Photos resolve through /me/storage/sign (scope="me"), which the server
- * authorizes for every role allowed to read the package — so one scope works
- * for officers and staff alike. This data is highly sensitive PII and never
+ * authorizes for every caller allowed to read the package — so one scope works
+ * for admins and assigned officers alike. This data is highly sensitive PII and never
  * appears on public/share surfaces.
  */
 

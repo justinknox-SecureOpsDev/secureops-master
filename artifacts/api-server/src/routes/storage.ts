@@ -14,10 +14,8 @@ import {
   licenseRenewalRequestsTable,
   protectionPersonsTable,
   shiftAssignmentsTable,
-  shiftsTable,
 } from "@workspace/db";
 import { and, eq, inArray, sql } from "drizzle-orm";
-import { getManagedSiteIds } from "../lib/siteManagerAuth";
 
 /**
  * Maximum declared file size accepted for presigned upload URL requests.
@@ -93,13 +91,12 @@ const objectStorageService = new ObjectStorageService();
  * These photos are uploaded by admins and stored in
  * `protection_persons.photoKeys`, so they live outside the officer's own
  * upload prefix and are never in the caller's `owned` set. Access mirrors the
- * GET /shifts/:id/protection-detail read rule:
- *   - admin / dispatcher may sign any protection photo;
- *   - a `site_manager` may sign only photos belonging to a shift at a site they
- *     manage;
+ * GET /shifts/:id/protection-detail read rule (least-privilege on the most
+ * sensitive PII in the system):
+ *   - admin may sign any protection photo;
  *   - an `employee` may sign only photos belonging to a shift they have an
  *     ACCEPTED assignment to.
- * External `client` users (and any other role) are always refused.
+ * Every other role — dispatcher, site_manager, external `client` — is refused.
  *
  * Matching on the photo key is EXACT (jsonb array membership via
  * `jsonb_exists`), never a prefix — a partial path must not unlock a sibling.
@@ -109,10 +106,11 @@ async function canSignProtectionPhoto(
   userId: string,
   role: string,
 ): Promise<boolean> {
-  // Admin/dispatcher are global readers; site_manager is confined to managed
-  // sites; employee needs an accepted assignment. Anyone else: deny.
-  const isGlobalReader = role === "admin" || role === "dispatcher";
-  if (!isGlobalReader && role !== "employee" && role !== "site_manager") return false;
+  // Admin is the only standing reader; an `employee` needs an accepted
+  // assignment to a parent shift. Anyone else (dispatcher, site_manager,
+  // client, …): deny.
+  const isGlobalReader = role === "admin";
+  if (!isGlobalReader && role !== "employee") return false;
 
   const rows = await db
     .select({ shiftId: protectionPersonsTable.shiftId })
@@ -122,18 +120,6 @@ async function canSignProtectionPhoto(
   if (isGlobalReader) return true;
 
   const shiftIds = [...new Set(rows.map((r) => r.shiftId))];
-
-  if (role === "site_manager") {
-    // The photo must belong to a shift at a site this manager is assigned to.
-    const managed = await getManagedSiteIds(userId);
-    if (managed.length === 0) return false;
-    const [match] = await db
-      .select({ id: shiftsTable.id })
-      .from(shiftsTable)
-      .where(and(inArray(shiftsTable.id, shiftIds), inArray(shiftsTable.siteId, managed)))
-      .limit(1);
-    return Boolean(match);
-  }
 
   const [assignment] = await db
     .select({ id: shiftAssignmentsTable.id })
@@ -324,9 +310,9 @@ router.get("/me/storage/sign", requireAuth, async (req: Request, res: Response) 
       .from(employeesTable)
       .where(eq(employeesTable.userId, req.user!.userId));
 
-    // A missing employee row is NOT an early 403 here. Staff readers
-    // (admin/dispatcher/site-manager) typically have no employee record, yet may be
-    // authorized to sign protection-detail photos in the check further down.
+    // A missing employee row is NOT an early 403 here. An admin typically has
+    // no employee record, yet may be authorized to sign protection-detail
+    // photos in the check further down.
     // So we only build the "owned employee document" set when an employee row
     // exists and defer the final allow/deny to the combined owned/protection
     // authorization. Non-staff callers with no employee row simply end up with
@@ -348,10 +334,10 @@ router.get("/me/storage/sign", requireAuth, async (req: Request, res: Response) 
     // All of the "owned object" sources below — employee document keys, the
     // caller's own incident attachments, and their own license-renewal docs —
     // are employee-scoped, so we only consult them when an employee row exists.
-    // A staff reader (admin/dispatcher/site-manager) with no employee row therefore
-    // gets an empty `owned` set and can only reach a signed URL through the
-    // protection-photo rule below, keeping the newly-reachable callers after
-    // the removed early-return to exactly the authorized protection readers.
+    // An admin with no employee row therefore gets an empty `owned` set and can
+    // only reach a signed URL through the protection-photo rule below, keeping
+    // the newly-reachable callers after the removed early-return to exactly the
+    // authorized protection readers (admin or an accepted-assignment officer).
     if (emp) {
       for (const k of [emp.photoKey, emp.cvKey, emp.licenseDocKey, emp.passportDocKey, emp.rightToWorkDocKey, emp.payStubDocKey]) {
         if (k && k.startsWith(ownedPrefix)) owned.add(k);
@@ -391,10 +377,9 @@ router.get("/me/storage/sign", requireAuth, async (req: Request, res: Response) 
     }
 
     // Protection-detail photos are admin-uploaded, so they live outside the
-    // caller's own upload prefix and won't be in `owned`. An officer with an
-    // ACCEPTED assignment to the parent shift — or a staff reader
-    // (admin/dispatcher/site-manager) — may still sign them, mirroring the
-    // GET /shifts/:id/protection-detail read rule.
+    // caller's own upload prefix and won't be in `owned`. An admin — or an
+    // officer with an ACCEPTED assignment to the parent shift — may still sign
+    // them, mirroring the GET /shifts/:id/protection-detail read rule.
     let allowed = owned.has(path);
     if (!allowed) {
       allowed = await canSignProtectionPhoto(path, req.user!.userId, req.user!.role);

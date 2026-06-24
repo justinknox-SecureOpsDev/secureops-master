@@ -727,9 +727,9 @@ export default function ProtectionDetailPage() {
       <div className="rounded-lg border border-brand-gold/50 bg-brand-navy text-brand-cream px-4 py-3 flex items-start gap-2 text-sm">
         <Lock className="w-4 h-4 mt-0.5 shrink-0 text-brand-gold" />
         <span>
-          Highly sensitive. This package is visible only to admins, dispatchers, and site managers, and to
-          officers with an <strong>accepted</strong> assignment to this shift. It is never shown on
-          public or client share links. Every change is audited.
+          Highly sensitive. This package is visible only to admins and to officers with an{" "}
+          <strong>accepted</strong> assignment to this shift. It is never shown on public or client
+          share links. Every change is audited.
         </span>
       </div>
 
