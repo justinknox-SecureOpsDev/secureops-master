@@ -11,6 +11,7 @@ import {
   sitesTable,
   shiftsTable,
   shiftAssignmentsTable,
+  siteManagersTable,
 } from "@workspace/db";
 import app from "../app";
 import { signToken } from "../middlewares/auth";
@@ -21,11 +22,14 @@ import { signToken } from "../middlewares/auth";
  * The package carries the most sensitive PII in the system (principal/threat
  * demographics + photos, medical notes), so the read/write/photo-sign
  * boundaries are security-critical and pinned here:
- *   - READ (GET /shifts/:id/protection-detail): admin/dispatcher/lead OR an
- *     `employee` with an ACCEPTED assignment to that shift. Everyone else 403.
+ *   - READ (GET /shifts/:id/protection-detail): admin/dispatcher OR a
+ *     `site_manager` ASSIGNED to the shift's site OR an `employee` with an
+ *     ACCEPTED assignment to that shift. Everyone else (incl. a site manager
+ *     who does NOT manage this site) gets 403.
  *   - WRITE (PUT): admin only.
  *   - PHOTO SIGN (/me/storage/sign for a protection photo): mirrors the READ
- *     rule — accepted officer or staff reader may sign; others 403.
+ *     rule — accepted officer, staff reader, or assigned site manager may sign;
+ *     others (incl. an unassigned site manager) 403.
  */
 const TAG = `ppo-test-${randomUUID().slice(0, 8)}`;
 const passwordHash = bcrypt.hashSync("test-password", 4);
@@ -34,20 +38,23 @@ const PHOTO_KEY = `/objects/uploads/protection/${TAG}.jpg`;
 type Ctx = {
   adminId: string;
   dispatcherId: string;
-  leadId: string;
+  siteManagerId: string; // manages THIS shift's site -> may read
+  otherSiteManagerId: string; // manages a DIFFERENT site -> must be denied
   acceptedOfficerId: string;
   pendingOfficerId: string;
   unassignedOfficerId: string;
   clientUserId: string;
   adminToken: string;
   dispatcherToken: string;
-  leadToken: string;
+  siteManagerToken: string;
+  otherSiteManagerToken: string;
   acceptedToken: string;
   pendingToken: string;
   unassignedToken: string;
   clientToken: string;
   clientId: string;
   siteId: string;
+  otherSiteId: string;
   shiftId: string;
 };
 const ctx = {} as Ctx;
@@ -79,16 +86,18 @@ function tokenFor(id: string, role: string, suffix: string): string {
 beforeAll(async () => {
   ctx.adminId = await makeUser("admin", "admin");
   ctx.dispatcherId = await makeUser("dispatcher", "dispatch");
-  ctx.leadId = await makeUser("lead", "lead");
+  ctx.siteManagerId = await makeUser("site_manager", "manager");
+  ctx.otherSiteManagerId = await makeUser("site_manager", "othermgr");
   ctx.acceptedOfficerId = await makeUser("employee", "accepted");
   ctx.pendingOfficerId = await makeUser("employee", "pending");
   ctx.unassignedOfficerId = await makeUser("employee", "unassigned");
   ctx.clientUserId = await makeUser("client", "client");
 
-  // Lead + officers are full employees. Admin/dispatcher/client intentionally
-  // have NO employee row — this also exercises that staff readers can sign
-  // protection photos via /me/storage/sign without an employee record.
-  await makeEmployeeRow(ctx.leadId);
+  // Site managers + officers are full employees. Admin/dispatcher/client
+  // intentionally have NO employee row — this also exercises that staff readers
+  // can sign protection photos via /me/storage/sign without an employee record.
+  await makeEmployeeRow(ctx.siteManagerId);
+  await makeEmployeeRow(ctx.otherSiteManagerId);
   await makeEmployeeRow(ctx.acceptedOfficerId);
   await makeEmployeeRow(ctx.pendingOfficerId);
   await makeEmployeeRow(ctx.unassignedOfficerId);
@@ -104,6 +113,19 @@ beforeAll(async () => {
     .values({ clientId: ctx.clientId, name: `${TAG}-site`, address: "1 Test Way" })
     .returning({ id: sitesTable.id });
   ctx.siteId = site.id;
+
+  const [otherSite] = await db
+    .insert(sitesTable)
+    .values({ clientId: ctx.clientId, name: `${TAG}-other-site`, address: "2 Test Way" })
+    .returning({ id: sitesTable.id });
+  ctx.otherSiteId = otherSite.id;
+
+  // One manager is assigned to the shift's site (allowed to read); the other is
+  // assigned only to a DIFFERENT site (must be denied — per-site scoping).
+  await db.insert(siteManagersTable).values([
+    { siteId: ctx.siteId, userId: ctx.siteManagerId },
+    { siteId: ctx.otherSiteId, userId: ctx.otherSiteManagerId },
+  ]);
 
   const start = new Date(Date.now() + 6 * 60 * 60 * 1000);
   const end = new Date(start.getTime() + 4 * 60 * 60 * 1000);
@@ -131,7 +153,8 @@ beforeAll(async () => {
 
   ctx.adminToken = tokenFor(ctx.adminId, "admin", "admin");
   ctx.dispatcherToken = tokenFor(ctx.dispatcherId, "dispatcher", "dispatch");
-  ctx.leadToken = tokenFor(ctx.leadId, "lead", "lead");
+  ctx.siteManagerToken = tokenFor(ctx.siteManagerId, "site_manager", "manager");
+  ctx.otherSiteManagerToken = tokenFor(ctx.otherSiteManagerId, "site_manager", "othermgr");
   ctx.acceptedToken = tokenFor(ctx.acceptedOfficerId, "employee", "accepted");
   ctx.pendingToken = tokenFor(ctx.pendingOfficerId, "employee", "pending");
   ctx.unassignedToken = tokenFor(ctx.unassignedOfficerId, "employee", "unassigned");
@@ -144,6 +167,9 @@ afterAll(async () => {
   await db.execute(sql`DELETE FROM protection_destinations WHERE shift_id = ${ctx.shiftId}`);
   await db.execute(sql`DELETE FROM protection_details WHERE shift_id = ${ctx.shiftId}`);
   await db.execute(sql`DELETE FROM shifts WHERE title LIKE ${TAG + "%"}`);
+  await db.execute(sql`DELETE FROM site_managers WHERE site_id IN (
+    SELECT id FROM sites WHERE name LIKE ${TAG + "%"}
+  )`);
   await db.execute(sql`DELETE FROM sites WHERE name LIKE ${TAG + "%"}`);
   await db.execute(sql`DELETE FROM clients WHERE name LIKE ${TAG + "%"}`);
   await db.execute(sql`DELETE FROM employees WHERE user_id IN (
@@ -169,10 +195,10 @@ describe("PUT /shifts/:id/protection-detail — write authorization", () => {
     expect(res.status).toBe(403);
   });
 
-  it("forbids a lead from writing (403)", async () => {
+  it("forbids a site manager (even one assigned to the site) from writing (403)", async () => {
     const res = await request(app)
       .put(protUrl())
-      .set(authed(ctx.leadToken))
+      .set(authed(ctx.siteManagerToken))
       .send({ threatLevel: "high" });
     expect(res.status).toBe(403);
   });
@@ -279,9 +305,15 @@ describe("GET /shifts/:id/protection-detail — read authorization", () => {
     expect(res.status).toBe(200);
   });
 
-  it("lets a lead read (200)", async () => {
-    const res = await request(app).get(protUrl()).set(authed(ctx.leadToken));
+  it("lets a site manager ASSIGNED to the shift's site read (200)", async () => {
+    const res = await request(app).get(protUrl()).set(authed(ctx.siteManagerToken));
     expect(res.status).toBe(200);
+  });
+
+  it("forbids a site manager NOT assigned to this site (403)", async () => {
+    const res = await request(app).get(protUrl()).set(authed(ctx.otherSiteManagerToken));
+    expect(res.status).toBe(403);
+    expect(res.body).not.toHaveProperty("principals");
   });
 
   it("lets an officer with an ACCEPTED assignment read (200)", async () => {
@@ -327,6 +359,16 @@ describe("GET /me/storage/sign — protection photo authorization", () => {
   it("authorizes an admin without an employee row (not 403)", async () => {
     const res = await request(app).get(signUrl).set(authed(ctx.adminToken));
     expect(res.status).not.toBe(403);
+  });
+
+  it("authorizes a site manager ASSIGNED to the shift's site (not 403)", async () => {
+    const res = await request(app).get(signUrl).set(authed(ctx.siteManagerToken));
+    expect(res.status).not.toBe(403);
+  });
+
+  it("forbids a site manager NOT assigned to this site (403)", async () => {
+    const res = await request(app).get(signUrl).set(authed(ctx.otherSiteManagerToken));
+    expect(res.status).toBe(403);
   });
 
   it("forbids a pending (not accepted) officer (403)", async () => {

@@ -60,16 +60,23 @@ server.on("upgrade", (req, socket, head) => {
   }
 });
 
-// The `lead` -> `site_manager` role rename MUST complete before we accept
-// traffic: the renamed authz guards only recognise `site_manager`, so a
-// request served to a not-yet-migrated `lead` user would be mis-authorized.
-// It is a single idempotent UPDATE, so the added boot latency is negligible.
+// The `lead` -> `site_manager` role rename is run (awaited) before we accept
+// traffic: the renamed authz guards only recognise `site_manager`, so a request
+// served to a not-yet-migrated `lead` user would be mis-authorized. It is a
+// single idempotent UPDATE, so the added boot latency is negligible.
+//
+// Fail-open-to-deny by design: if the (extremely unlikely) UPDATE throws, we log
+// at error level and still start the server rather than crashing the whole API.
+// The blast radius is bounded — only legacy `lead` users would be mis-authorized
+// (every other role is unaffected) and the idempotent repair simply retries on
+// the next boot. Crashing on a transient DB blip would take the entire platform
+// down for everyone, which is the worse failure mode here.
 async function start(): Promise<void> {
   try {
     await migrateLeadRoleToSiteManager();
     logger.info("Lead -> site_manager role migration complete");
   } catch (err) {
-    logger.error({ err }, "Failed to migrate lead role to site_manager");
+    logger.error({ err }, "Failed to migrate lead role to site_manager — starting anyway; legacy 'lead' users may be mis-authorized until the next boot");
   }
 
   server.listen(port, () => {

@@ -399,7 +399,10 @@ router.post("/shifts", requireAdminOrSiteManager, async (req, res): Promise<void
     status: "upcoming",
     requiredLicenseLevel: lvl,
     headcount: hc,
-    siteRateId: siteRateId || null,
+    // siteRateId links a shift to a `site_rates` card (which carries pay/bill
+    // rates). Site managers must never set or influence rate metadata, so their
+    // value is ignored and the shift inherits the site default (resolved above).
+    siteRateId: isSiteManager ? null : (siteRateId || null),
     shiftType: shiftType === "ppo_detail" ? "ppo_detail" : "standard",
   }).returning();
 
@@ -912,6 +915,12 @@ router.put("/shifts/:id", requireAdminOrSiteManager, async (req, res): Promise<v
   // Per-site scoping: a site manager may only edit a shift at a site they
   // manage, and may only MOVE it to another site they also manage. Admins
   // bypass. Resolve the current site first (404 if the shift is gone).
+  // `siteManagerMovedSite` records a manager moving a shift across two managed
+  // sites so we can recompute finance from the destination site below.
+  let siteManagerMovedSite = false;
+  // Destination site rate defaults, captured when a site change is requested.
+  let destDefaultPay: string | null = null;
+  let destDefaultBill: string | null = null;
   {
     const [curForScope] = await db
       .select({ siteId: shiftsTable.siteId })
@@ -921,6 +930,7 @@ router.put("/shifts/:id", requireAdminOrSiteManager, async (req, res): Promise<v
     if (!(await assertCanManageSite(res, req.user!, curForScope.siteId))) return;
     if (siteId && siteId !== curForScope.siteId) {
       if (!(await assertCanManageSite(res, req.user!, siteId))) return;
+      if (isSiteManager) siteManagerMovedSite = true;
     }
   }
 
@@ -928,7 +938,7 @@ router.put("/shifts/:id", requireAdminOrSiteManager, async (req, res): Promise<v
   if (title) updates.title = title;
   if (siteId) {
     const [site] = await db
-      .select({ name: sitesTable.name, address: sitesTable.address, clientName: clientsTable.name })
+      .select({ name: sitesTable.name, address: sitesTable.address, clientName: clientsTable.name, defaultPayRate: sitesTable.defaultPayRate, defaultBillRate: sitesTable.defaultBillRate })
       .from(sitesTable)
       .leftJoin(clientsTable, eq(sitesTable.clientId, clientsTable.id))
       .where(eq(sitesTable.id, siteId));
@@ -936,6 +946,8 @@ router.put("/shifts/:id", requireAdminOrSiteManager, async (req, res): Promise<v
       updates.siteId = siteId;
       updates.clientName = site.clientName;
       updates.location = site.address ?? site.name;
+      destDefaultPay = site.defaultPayRate ?? null;
+      destDefaultBill = site.defaultBillRate ?? null;
     }
   }
   if (startTime) updates.startTime = new Date(startTime);
@@ -968,7 +980,27 @@ router.put("/shifts/:id", requireAdminOrSiteManager, async (req, res): Promise<v
   if (headcount !== undefined) updates.headcount = Math.max(1, Number(headcount) || 1);
   if (shiftType === "standard" || shiftType === "ppo_detail") updates.shiftType = shiftType;
   // Explicit null clears the FK (admin selected "Custom" rate); undefined leaves it alone.
-  if (siteRateId !== undefined) updates.siteRateId = siteRateId || null;
+  // siteRateId points at a `site_rates` card that carries pay/bill rates, so it is
+  // finance metadata — site managers must never set it (parity with the rate guard above).
+  if (!isSiteManager && siteRateId !== undefined) updates.siteRateId = siteRateId || null;
+  // A site manager moving a shift to a DIFFERENT managed site must not carry the
+  // previous site's admin-set finance onto the new site/client. Recompute pay/bill
+  // from the DESTINATION site defaults (mirrors the create path) and drop the
+  // rate-card FK; fail closed if the destination has no usable defaults so we never
+  // persist a stale or zero rate that would poison payroll/invoicing downstream.
+  if (siteManagerMovedSite) {
+    const payOk = destDefaultPay != null && Number.isFinite(Number(destDefaultPay)) && Number(destDefaultPay) > 0;
+    const billOk = destDefaultBill != null && Number.isFinite(Number(destDefaultBill)) && Number(destDefaultBill) > 0;
+    if (!payOk || !billOk) {
+      res.status(400).json({ error: "Bad Request", message: "This site has no default pay/bill rate configured. An admin must set the site's default rates before a shift can be moved here." });
+      return;
+    }
+    updates.payRate = String(Number(destDefaultPay));
+    updates.hourlyRate = String(Number(destDefaultPay));
+    updates.billRate = String(Number(destDefaultBill));
+    updates.billableRate = String(Number(destDefaultBill));
+    updates.siteRateId = null;
+  }
 
   // Always reset syncSource to 'local' on admin edits so that changes to
   // scheduler-origin records (syncSource='scheduler') get pushed back rather
