@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import QRCode from "qrcode";
 import { Link, useRoute, useLocation } from "wouter";
-import { ArrowLeft, MapPin, Pencil, Plus, Trash2, QrCode, AlertTriangle, Radius, RefreshCw, Printer, Loader2, CalendarPlus, Repeat } from "lucide-react";
+import { ArrowLeft, MapPin, Pencil, Plus, Trash2, QrCode, AlertTriangle, Radius, RefreshCw, Printer, Loader2, CalendarPlus, Repeat, UserCog } from "lucide-react";
+import type { SiteManagerUser } from "@workspace/api-client-react";
 import { Button } from "@/components/ui/button";
 import { api, fetchWithAuth } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
@@ -278,9 +279,9 @@ export function SiteDetailPage() {
   // (mirrors the mobile time-approval screen), and any action error.
   const { user } = useAuth();
   const isAdmin = user?.role === "admin";
-  // Single-shift create mirrors the server gate (POST /shifts = admin OR lead);
+  // Single-shift create mirrors the server gate (POST /shifts = admin OR site manager);
   // repeating series is admin-only (POST /shifts/repeat = requireAdmin → isAdmin).
-  const canCreateShift = user?.role === "admin" || user?.role === "lead";
+  const canCreateShift = user?.role === "admin" || user?.role === "site_manager";
   const [teActioningId, setTeActioningId] = useState<string | null>(null);
   const [teHoursEdits, setTeHoursEdits] = useState<Record<string, string>>({});
   const [teActionError, setTeActionError] = useState<string | null>(null);
@@ -318,6 +319,16 @@ export function SiteDetailPage() {
   // Declared here with the other hooks so it stays above all early returns.
   const shiftCreateInitial = useMemo(() => ({ siteId }), [siteId]);
 
+  // Site managers assigned to this site (admin-only, many-to-many). Managers get
+  // site-scoped scheduling/approval powers; finance always stays hidden from them.
+  const [managers, setManagers] = useState<SiteManagerUser[]>([]);
+  const [managerCandidates, setManagerCandidates] = useState<SiteManagerUser[]>([]);
+  const [selectedManagerIds, setSelectedManagerIds] = useState<Set<string>>(new Set());
+  const [managersLoading, setManagersLoading] = useState(false);
+  const [managersSaving, setManagersSaving] = useState(false);
+  const [managersMsg, setManagersMsg] = useState<string | null>(null);
+  const [managersError, setManagersError] = useState<string | null>(null);
+
   const loadSite = useCallback(async () => {
     if (!siteId) return;
     setLoading(true);
@@ -348,6 +359,67 @@ export function SiteDetailPage() {
       setScans(data.scans);
     } catch { setScans([]); } finally { setScansLoading(false); }
   }, [siteId]);
+
+  // Admin-only: load this site's assigned managers + the pool of assignable
+  // (active, role=site_manager) users. Dispatchers can't read this endpoint, so
+  // gate the whole section on isAdmin and skip the fetch for everyone else.
+  const loadManagers = useCallback(async () => {
+    if (!siteId || !isAdmin) return;
+    setManagersLoading(true);
+    setManagersError(null);
+    try {
+      const [assigned, candidates] = await Promise.all([
+        api<SiteManagerUser[]>(`/sites/${siteId}/managers`),
+        api<SiteManagerUser[]>(`/site-manager-candidates`),
+      ]);
+      setManagers(assigned);
+      setManagerCandidates(candidates);
+      setSelectedManagerIds(new Set(assigned.map((m) => m.id)));
+    } catch (e) {
+      setManagersError((e as Error).message);
+    } finally {
+      setManagersLoading(false);
+    }
+  }, [siteId, isAdmin]);
+
+  const saveManagers = useCallback(async () => {
+    if (!siteId) return;
+    setManagersSaving(true);
+    setManagersError(null);
+    setManagersMsg(null);
+    try {
+      const updated = await api<SiteManagerUser[]>(`/sites/${siteId}/managers`, {
+        method: "PUT",
+        body: { userIds: Array.from(selectedManagerIds) },
+      });
+      setManagers(updated);
+      setSelectedManagerIds(new Set(updated.map((m) => m.id)));
+      setManagersMsg("Site managers updated.");
+    } catch (e) {
+      setManagersError((e as Error).message);
+    } finally {
+      setManagersSaving(false);
+    }
+  }, [siteId, selectedManagerIds]);
+
+  // Show the union of assignable candidates and currently-assigned managers, so
+  // an already-assigned manager who has since gone inactive still renders (and
+  // can be unchecked) instead of silently vanishing from the list.
+  const managerOptions = useMemo(() => {
+    const byId = new Map<string, SiteManagerUser>();
+    for (const c of managerCandidates) byId.set(c.id, c);
+    for (const m of managers) if (!byId.has(m.id)) byId.set(m.id, m);
+    return Array.from(byId.values()).sort((a, b) =>
+      `${a.lastName} ${a.firstName}`.localeCompare(`${b.lastName} ${b.firstName}`),
+    );
+  }, [managerCandidates, managers]);
+
+  const managersDirty = useMemo(() => {
+    const current = new Set(managers.map((m) => m.id));
+    if (current.size !== selectedManagerIds.size) return true;
+    for (const id of selectedManagerIds) if (!current.has(id)) return true;
+    return false;
+  }, [managers, selectedManagerIds]);
 
   const loadTimeEntries = useCallback(async () => {
     if (!siteId) return;
@@ -581,7 +653,7 @@ export function SiteDetailPage() {
     URL.revokeObjectURL(url);
   }
 
-  useEffect(() => { loadSite(); loadCheckpoints(); loadScans(); }, [loadSite, loadCheckpoints, loadScans]);
+  useEffect(() => { loadSite(); loadCheckpoints(); loadScans(); loadManagers(); }, [loadSite, loadCheckpoints, loadScans, loadManagers]);
 
   useEffect(() => { void loadTimeEntries(); }, [loadTimeEntries]);
 
@@ -886,6 +958,79 @@ export function SiteDetailPage() {
       {site && (
         <div className="p-6 space-y-8">
           <SiteRateCard siteId={site.id} />
+
+          {isAdmin && (
+            <section>
+              <div className="flex items-center justify-between mb-3 gap-2 flex-wrap">
+                <h2 className="text-lg font-semibold inline-flex items-center gap-2">
+                  <UserCog className="w-4 h-4" /> Site managers
+                </h2>
+                {managersDirty && (
+                  <Button size="sm" onClick={saveManagers} disabled={managersSaving}>
+                    {managersSaving ? <Loader2 className="w-3.5 h-3.5 mr-1 animate-spin" /> : null}
+                    Save changes
+                  </Button>
+                )}
+              </div>
+              <p className="text-sm text-muted-foreground max-w-3xl mb-3">
+                Site managers can schedule shifts, approve officer claims, and approve time
+                entries for <span className="font-medium text-foreground">{site.name}</span> —
+                scoped to only the sites they manage. They never see pay/bill rates, payroll, or
+                invoices.
+              </p>
+              {managersError && (
+                <div className="mb-3 text-sm text-destructive border border-destructive/40 rounded px-3 py-2">
+                  {managersError}
+                </div>
+              )}
+              {managersMsg && (
+                <div className="mb-3 inline-flex items-center gap-2 text-sm text-emerald-800 bg-emerald-50 border border-emerald-200 rounded px-3 py-2">
+                  {managersMsg}
+                </div>
+              )}
+              {managersLoading ? (
+                <div className="text-sm text-muted-foreground border rounded p-4 inline-flex items-center gap-2">
+                  <Loader2 className="w-4 h-4 animate-spin" /> Loading managers…
+                </div>
+              ) : managerOptions.length === 0 ? (
+                <div className="text-sm text-muted-foreground border rounded p-4">
+                  No site manager accounts yet. Set a user's role to “Site Manager” in{" "}
+                  <Link href="/tables/users" className="underline font-medium">Users</Link> to
+                  assign one here.
+                </div>
+              ) : (
+                <div className="border rounded divide-y max-w-2xl">
+                  {managerOptions.map((c) => {
+                    const checked = selectedManagerIds.has(c.id);
+                    return (
+                      <label
+                        key={c.id}
+                        className="flex items-center gap-3 px-3 py-2 cursor-pointer hover:bg-muted/50"
+                      >
+                        <input
+                          type="checkbox"
+                          checked={checked}
+                          onChange={(e) => {
+                            const on = e.target.checked;
+                            setSelectedManagerIds((prev) => {
+                              const next = new Set(prev);
+                              if (on) next.add(c.id);
+                              else next.delete(c.id);
+                              return next;
+                            });
+                          }}
+                        />
+                        <span className="flex-1 text-sm">
+                          <span className="font-medium">{c.firstName} {c.lastName}</span>
+                          <span className="text-muted-foreground"> · {c.email}</span>
+                        </span>
+                      </label>
+                    );
+                  })}
+                </div>
+              )}
+            </section>
+          )}
 
           {canCreateShift && (
             <section>

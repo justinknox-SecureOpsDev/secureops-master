@@ -14,8 +14,10 @@ import {
   licenseRenewalRequestsTable,
   protectionPersonsTable,
   shiftAssignmentsTable,
+  shiftsTable,
 } from "@workspace/db";
 import { and, eq, inArray, sql } from "drizzle-orm";
+import { getManagedSiteIds } from "../lib/siteManagerAuth";
 
 /**
  * Maximum declared file size accepted for presigned upload URL requests.
@@ -92,7 +94,9 @@ const objectStorageService = new ObjectStorageService();
  * `protection_persons.photoKeys`, so they live outside the officer's own
  * upload prefix and are never in the caller's `owned` set. Access mirrors the
  * GET /shifts/:id/protection-detail read rule:
- *   - admin / dispatcher / lead may sign any protection photo;
+ *   - admin / dispatcher may sign any protection photo;
+ *   - a `site_manager` may sign only photos belonging to a shift at a site they
+ *     manage;
  *   - an `employee` may sign only photos belonging to a shift they have an
  *     ACCEPTED assignment to.
  * External `client` users (and any other role) are always refused.
@@ -105,17 +109,32 @@ async function canSignProtectionPhoto(
   userId: string,
   role: string,
 ): Promise<boolean> {
-  const isStaffReader = role === "admin" || role === "dispatcher" || role === "lead";
-  if (!isStaffReader && role !== "employee") return false;
+  // Admin/dispatcher are global readers; site_manager is confined to managed
+  // sites; employee needs an accepted assignment. Anyone else: deny.
+  const isGlobalReader = role === "admin" || role === "dispatcher";
+  if (!isGlobalReader && role !== "employee" && role !== "site_manager") return false;
 
   const rows = await db
     .select({ shiftId: protectionPersonsTable.shiftId })
     .from(protectionPersonsTable)
     .where(sql`jsonb_exists(${protectionPersonsTable.photoKeys}, ${path})`);
   if (rows.length === 0) return false;
-  if (isStaffReader) return true;
+  if (isGlobalReader) return true;
 
   const shiftIds = [...new Set(rows.map((r) => r.shiftId))];
+
+  if (role === "site_manager") {
+    // The photo must belong to a shift at a site this manager is assigned to.
+    const managed = await getManagedSiteIds(userId);
+    if (managed.length === 0) return false;
+    const [match] = await db
+      .select({ id: shiftsTable.id })
+      .from(shiftsTable)
+      .where(and(inArray(shiftsTable.id, shiftIds), inArray(shiftsTable.siteId, managed)))
+      .limit(1);
+    return Boolean(match);
+  }
+
   const [assignment] = await db
     .select({ id: shiftAssignmentsTable.id })
     .from(shiftAssignmentsTable)
@@ -306,7 +325,7 @@ router.get("/me/storage/sign", requireAuth, async (req: Request, res: Response) 
       .where(eq(employeesTable.userId, req.user!.userId));
 
     // A missing employee row is NOT an early 403 here. Staff readers
-    // (admin/dispatcher/lead) typically have no employee record, yet may be
+    // (admin/dispatcher/site-manager) typically have no employee record, yet may be
     // authorized to sign protection-detail photos in the check further down.
     // So we only build the "owned employee document" set when an employee row
     // exists and defer the final allow/deny to the combined owned/protection
@@ -329,7 +348,7 @@ router.get("/me/storage/sign", requireAuth, async (req: Request, res: Response) 
     // All of the "owned object" sources below — employee document keys, the
     // caller's own incident attachments, and their own license-renewal docs —
     // are employee-scoped, so we only consult them when an employee row exists.
-    // A staff reader (admin/dispatcher/lead) with no employee row therefore
+    // A staff reader (admin/dispatcher/site-manager) with no employee row therefore
     // gets an empty `owned` set and can only reach a signed URL through the
     // protection-photo rule below, keeping the newly-reachable callers after
     // the removed early-return to exactly the authorized protection readers.
@@ -374,7 +393,7 @@ router.get("/me/storage/sign", requireAuth, async (req: Request, res: Response) 
     // Protection-detail photos are admin-uploaded, so they live outside the
     // caller's own upload prefix and won't be in `owned`. An officer with an
     // ACCEPTED assignment to the parent shift — or a staff reader
-    // (admin/dispatcher/lead) — may still sign them, mirroring the
+    // (admin/dispatcher/site-manager) — may still sign them, mirroring the
     // GET /shifts/:id/protection-detail read rule.
     let allowed = owned.has(path);
     if (!allowed) {

@@ -247,9 +247,9 @@ export default function EmployeeProfileScreen() {
   const colors = useColors();
   const router = useRouter();
   const { logout, user } = useAuth();
-  // Leads keep the "no financial info" invariant inside the employee
+  // Site managers keep the "no financial info" invariant inside the employee
   // experience: hide their own pay rate, paystubs and W-2 doc.
-  const isLead = user?.role === "lead";
+  const isSiteManager = user?.role === "site_manager";
   const { open: openTour } = useTour();
   const { highContrast, setHighContrast } = useAccessibility();
   const topPad = useTopPad();
@@ -346,7 +346,7 @@ export default function EmployeeProfileScreen() {
           <View style={{ flex: 1, gap: 2 }}>
             <Text style={[styles.heroName, { color: colors.foreground }]}>{p?.firstName} {p?.lastName}</Text>
             <View style={[styles.roleBadge, { backgroundColor: colors.primary + "20", borderColor: colors.primary + "50" }]}>
-              <Text style={[styles.roleText, { color: colors.primary }]}>{isLead ? "SHIFT LEAD" : "SECURITY OFFICER"}</Text>
+              <Text style={[styles.roleText, { color: colors.primary }]}>{isSiteManager ? "SITE MANAGER" : "SECURITY OFFICER"}</Text>
             </View>
           </View>
         </View>

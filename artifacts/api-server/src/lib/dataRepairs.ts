@@ -1,5 +1,5 @@
 import { and, eq, isNull } from "drizzle-orm";
-import { db, shiftsTable, siteRatesTable } from "@workspace/db";
+import { db, shiftsTable, siteRatesTable, usersTable } from "@workspace/db";
 import { logger } from "./logger";
 
 // ── One-time, idempotent production data repair ─────────────────────────────
@@ -43,6 +43,25 @@ export async function backfillSiteRateLabels(): Promise<void> {
     .returning({ id: siteRatesTable.id });
   if (fixed.length > 0) {
     logger.info({ count: fixed.length }, "Backfilled site_rates.label = 'Standard' for legacy null-label rows");
+  }
+}
+
+// ── Role rename: lead -> site_manager ──────────────────────────────────────
+// The former "lead" role was renamed to "site_manager" (display "Site
+// Manager") when per-site scoping was introduced. `users.role` is plain TEXT
+// (no pg enum), so the rename is a single idempotent UPDATE — once converted,
+// subsequent boots match 0 rows. This MUST run (awaited) before the server
+// starts accepting traffic: the renamed authz guards only recognise
+// "site_manager", so a request served to a not-yet-migrated "lead" user would
+// be mis-authorized for the brief window before the repair completed.
+export async function migrateLeadRoleToSiteManager(): Promise<void> {
+  const fixed = await db
+    .update(usersTable)
+    .set({ role: "site_manager" })
+    .where(eq(usersTable.role, "lead"))
+    .returning({ id: usersTable.id });
+  if (fixed.length > 0) {
+    logger.info({ count: fixed.length }, "Migrated legacy 'lead' role users to 'site_manager'");
   }
 }
 

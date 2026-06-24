@@ -25,14 +25,18 @@ export default function AdminShiftsScreen() {
   const router = useRouter();
   const segments = useSegments();
   // These scheduling screens are mounted in BOTH shells: the admin Shifts tab
-  // (`(admin)/shifts`) and the lead's employee-shell Schedule tab
+  // (`(admin)/shifts`) and the site manager's employee-shell Schedule tab
   // (`(employee)/schedule`, which re-exports them). Resolve own-stack nav
-  // against the current group so a lead stays inside the employee shell.
+  // against the current group so a site manager stays inside the employee shell.
   const shiftBase = segments[0] === "(employee)" ? "/(employee)/schedule" : "/(admin)/shifts";
+  // The approval screens live at (admin) root for admins, but are re-exported
+  // under (employee)/schedule for site managers — resolve against the shell so
+  // a site manager's nav stays inside the employee shell.
+  const approvalsBase = segments[0] === "(employee)" ? "/(employee)/schedule" : "/(admin)";
   const { user, logout } = useAuth();
-  // Leads live entirely inside the Shifts tab (no profile tab to sign out from),
+  // Site managers live entirely inside the Shifts tab (no profile tab to sign out from),
   // so the sign-out control + the finance-bearing rate tag are handled here.
-  const isLead = user?.role === "lead";
+  const isSiteManager = user?.role === "site_manager";
   const [filter, setFilter] = useState<string>("upcoming");
   const [search, setSearch] = useState("");
   const topPad = useTopPad();
@@ -45,11 +49,14 @@ export default function AdminShiftsScreen() {
   // Self-claims awaiting approval, surfaced as a badge on the Approvals entry.
   // Always reads the upcoming list (React Query dedupes when the active filter
   // is already "upcoming") so the count stays accurate on any filter. Admins
-  // approve from a dedicated screen; the shell-aware guard keeps leads out.
+  // approve from the (admin) shell; site managers from the employee shell — the
+  // upcoming list is scoped server-side to a manager's sites, so the count and
+  // the approvals screen both stay confined to what they manage.
   const isAdminShell = segments[0] === "(admin)";
+  const showApprovals = isAdminShell || isSiteManager;
   const { data: upcomingForBadge } = useGetShifts(
     { status: "upcoming" as any },
-    { query: { queryKey: getGetShiftsQueryKey({ status: "upcoming" as any }), enabled: isAdminShell } },
+    { query: { queryKey: getGetShiftsQueryKey({ status: "upcoming" as any }), enabled: showApprovals } },
   );
   const pendingApprovalCount = useMemo(() => {
     let n = 0;
@@ -82,10 +89,10 @@ export default function AdminShiftsScreen() {
       <View style={[styles.topBar, { paddingTop: topPad + 12, borderBottomColor: colors.border }]}>
         <Text style={[styles.pageTitle, { color: colors.foreground }]}>Shifts</Text>
         <View style={styles.topBarActions}>
-          {isAdminShell && (
+          {showApprovals && (
             <TouchableOpacity
               style={[styles.approvalsBtn, { borderColor: pendingApprovalCount > 0 ? colors.accent : colors.border }]}
-              onPress={() => router.push("/(admin)/shift-approvals" as any)}
+              onPress={() => router.push(`${approvalsBase}/shift-approvals` as any)}
               accessibilityRole="button"
               accessibilityLabel={pendingApprovalCount > 0 ? `Shift approvals, ${pendingApprovalCount} pending` : "Shift approvals"}
             >
@@ -97,10 +104,20 @@ export default function AdminShiftsScreen() {
               )}
             </TouchableOpacity>
           )}
+          {isSiteManager && (
+            <TouchableOpacity
+              style={[styles.approvalsBtn, { borderColor: colors.border }]}
+              onPress={() => router.push(`${approvalsBase}/time-approval` as any)}
+              accessibilityRole="button"
+              accessibilityLabel="Time approvals"
+            >
+              <Feather name="check-square" size={18} color={colors.mutedForeground} />
+            </TouchableOpacity>
+          )}
           <TouchableOpacity style={[styles.addBtn, { backgroundColor: colors.primary }]} onPress={() => router.push(`${shiftBase}/create` as any)} accessibilityRole="button" accessibilityLabel="Create shift">
             <Feather name="plus" size={20} color="#fff" />
           </TouchableOpacity>
-          {isLead && (
+          {isSiteManager && (
             <TouchableOpacity style={[styles.signOutBtn, { borderColor: colors.border }]} onPress={() => logout()} accessibilityRole="button" accessibilityLabel="Sign out">
               <Feather name="log-out" size={18} color={colors.mutedForeground} />
             </TouchableOpacity>
@@ -205,7 +222,7 @@ export default function AdminShiftsScreen() {
                 </Text>
               </View>
               <View style={styles.bottomRow}>
-                {isLead ? (
+                {isSiteManager ? (
                   <View style={styles.rateTag} />
                 ) : (
                   <View style={styles.rateTag}>

@@ -11,6 +11,7 @@ import {
 import { UpdateProtectionDetailBody } from "@workspace/api-zod";
 import { requireAuth, requireAdmin } from "../middlewares/auth";
 import { geocodeOnelineAddress } from "../lib/geocode";
+import { managesSite } from "../lib/siteManagerAuth";
 
 /**
  * Executive / close-protection ("PPO Detail") package routes.
@@ -23,9 +24,9 @@ import { geocodeOnelineAddress } from "../lib/geocode";
  * raw body — see lib/auditLog.ts.
  *
  * Authorization:
- *   - GET: admin/dispatcher/lead (any shift) OR an `employee` with an
- *     ACCEPTED assignment to that shift. Everyone else (incl. external
- *     `client` portal users) gets 403.
+ *   - GET: admin/dispatcher (any shift); a `site_manager` ONLY for shifts at a
+ *     site they manage; OR an `employee` with an ACCEPTED assignment to that
+ *     shift. Everyone else (incl. external `client` portal users) gets 403.
  *   - PUT: admin only (`requireAdmin`), replace-all semantics.
  *
  * This data must NEVER be exposed on public/share surfaces.
@@ -34,8 +35,10 @@ import { geocodeOnelineAddress } from "../lib/geocode";
 const router: IRouter = Router();
 
 // Roles that may read ANY shift's protection package without a per-shift
-// assignment. Officers (`employee`) need an accepted assignment instead.
-const STAFF_READ_ROLES = new Set(["admin", "dispatcher", "lead"]);
+// assignment. Site managers are NOT here — they're confined to shifts at sites
+// they manage (checked per-shift below). Officers (`employee`) need an accepted
+// assignment instead.
+const STAFF_READ_ROLES = new Set(["admin", "dispatcher"]);
 
 type PersonRow = typeof protectionPersonsTable.$inferSelect;
 type DestRow = typeof protectionDestinationsTable.$inferSelect;
@@ -140,14 +143,14 @@ function mapPersonInput(
 /**
  * GET /shifts/:id/protection-detail
  *
- * Read the PPO package. Admin/dispatcher/lead may read any shift; an officer
+ * Read the PPO package. Admin/dispatcher/site-manager may read any shift; an officer
  * may read only a shift they have an ACCEPTED assignment to.
  */
 router.get("/shifts/:id/protection-detail", requireAuth, async (req: Request, res: Response) => {
   const shiftId = Array.isArray(req.params.id) ? req.params.id[0] : req.params.id;
   try {
     const [shift] = await db
-      .select({ id: shiftsTable.id })
+      .select({ id: shiftsTable.id, siteId: shiftsTable.siteId })
       .from(shiftsTable)
       .where(eq(shiftsTable.id, shiftId))
       .limit(1);
@@ -158,6 +161,11 @@ router.get("/shifts/:id/protection-detail", requireAuth, async (req: Request, re
 
     const role = req.user!.role;
     let authorized = STAFF_READ_ROLES.has(role);
+    if (!authorized && role === "site_manager") {
+      // Site managers may read PPO packages ONLY for shifts at a site they
+      // manage — never the whole estate.
+      authorized = await managesSite(req.user!.userId, shift.siteId);
+    }
     if (!authorized && role === "employee") {
       const [assignment] = await db
         .select({ id: shiftAssignmentsTable.id })

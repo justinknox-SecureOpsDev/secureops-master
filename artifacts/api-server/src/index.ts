@@ -8,7 +8,7 @@ import { seedDemoUsers, ensureAdminAccountHealth, ensureEmployeesRowsForAllUsers
 import { seedChatRooms } from "./lib/seedChatRooms";
 import { seedRadioChannels } from "./lib/seedRadioChannels";
 import { startScheduledJobs } from "./lib/scheduledJobs";
-import { backfillSiteRateLabels, repairInsoSocialShiftEndTime } from "./lib/dataRepairs";
+import { backfillSiteRateLabels, repairInsoSocialShiftEndTime, migrateLeadRoleToSiteManager } from "./lib/dataRepairs";
 
 const rawPort = process.env["PORT"];
 
@@ -60,8 +60,20 @@ server.on("upgrade", (req, socket, head) => {
   }
 });
 
-server.listen(port, () => {
-  logger.info({ port }, "Server listening");
+// The `lead` -> `site_manager` role rename MUST complete before we accept
+// traffic: the renamed authz guards only recognise `site_manager`, so a
+// request served to a not-yet-migrated `lead` user would be mis-authorized.
+// It is a single idempotent UPDATE, so the added boot latency is negligible.
+async function start(): Promise<void> {
+  try {
+    await migrateLeadRoleToSiteManager();
+    logger.info("Lead -> site_manager role migration complete");
+  } catch (err) {
+    logger.error({ err }, "Failed to migrate lead role to site_manager");
+  }
+
+  server.listen(port, () => {
+    logger.info({ port }, "Server listening");
   // Background maintenance — currently just expired-revoked-token cleanup.
   // Kept inside listen() so it only starts once the server is actually up.
   startScheduledJobs();
@@ -88,7 +100,9 @@ server.listen(port, () => {
       );
     }
   }
-});
+  });
+}
+void start();
 
 seedPolicies()
   .then(() => logger.info("Default policies ensured"))

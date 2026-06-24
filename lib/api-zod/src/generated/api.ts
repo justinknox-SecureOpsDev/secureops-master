@@ -266,6 +266,63 @@ export const DeleteSiteParams = zod.object({
 });
 
 /**
+ * @summary List the site managers assigned to a site (admin, or a manager of this site)
+ */
+export const GetSiteManagersParams = zod.object({
+  id: zod.coerce.string(),
+});
+
+export const GetSiteManagersResponseItem = zod
+  .object({
+    id: zod.string(),
+    firstName: zod.string(),
+    lastName: zod.string(),
+    email: zod.string(),
+  })
+  .describe("Minimal user shape for site-manager assignment lists\/pickers.");
+export const GetSiteManagersResponse = zod.array(GetSiteManagersResponseItem);
+
+/**
+ * @summary Replace the set of site managers assigned to a site (admin only)
+ */
+export const SetSiteManagersParams = zod.object({
+  id: zod.coerce.string(),
+});
+
+export const SetSiteManagersBody = zod
+  .object({
+    userIds: zod.array(zod.string()),
+  })
+  .describe(
+    "Replace the full set of managers for a site with this list of user IDs.",
+  );
+
+export const SetSiteManagersResponseItem = zod
+  .object({
+    id: zod.string(),
+    firstName: zod.string(),
+    lastName: zod.string(),
+    email: zod.string(),
+  })
+  .describe("Minimal user shape for site-manager assignment lists\/pickers.");
+export const SetSiteManagersResponse = zod.array(SetSiteManagersResponseItem);
+
+/**
+ * @summary List active site_manager-role users for assignment pickers (admin only)
+ */
+export const GetSiteManagerCandidatesResponseItem = zod
+  .object({
+    id: zod.string(),
+    firstName: zod.string(),
+    lastName: zod.string(),
+    email: zod.string(),
+  })
+  .describe("Minimal user shape for site-manager assignment lists\/pickers.");
+export const GetSiteManagerCandidatesResponse = zod.array(
+  GetSiteManagerCandidatesResponseItem,
+);
+
+/**
  * @summary Approve or reject a time entry (admin)
  */
 export const ApproveTimeEntryParams = zod.object({
@@ -346,7 +403,7 @@ export const LoginResponse = zod.object({
     email: zod.string(),
     firstName: zod.string(),
     lastName: zod.string(),
-    role: zod.enum(["admin", "employee", "lead"]),
+    role: zod.enum(["admin", "employee", "site_manager"]),
     status: zod.enum(["active", "inactive", "pending"]),
     mustChangePassword: zod
       .boolean()
@@ -388,7 +445,7 @@ export const ChangePasswordResponse = zod.object({
     email: zod.string(),
     firstName: zod.string(),
     lastName: zod.string(),
-    role: zod.enum(["admin", "employee", "lead"]),
+    role: zod.enum(["admin", "employee", "site_manager"]),
     status: zod.enum(["active", "inactive", "pending"]),
     mustChangePassword: zod
       .boolean()
@@ -468,7 +525,7 @@ export const UpdateMyEmployeeProfileResponse = zod
     firstName: zod.string(),
     lastName: zod.string(),
     phone: zod.string().optional(),
-    role: zod.enum(["admin", "employee", "lead"]),
+    role: zod.enum(["admin", "employee", "site_manager"]),
     status: zod.enum(["active", "inactive", "pending"]),
     address: zod.string().optional(),
     dateOfBirth: zod.coerce.date().nullish(),
@@ -602,7 +659,7 @@ export const ResetPasswordResponse = zod.object({
     email: zod.string(),
     firstName: zod.string(),
     lastName: zod.string(),
-    role: zod.enum(["admin", "employee", "lead"]),
+    role: zod.enum(["admin", "employee", "site_manager"]),
     status: zod.enum(["active", "inactive", "pending"]),
     mustChangePassword: zod
       .boolean()
@@ -628,7 +685,7 @@ export const GetMeResponse = zod.object({
   email: zod.string(),
   firstName: zod.string(),
   lastName: zod.string(),
-  role: zod.enum(["admin", "employee", "lead"]),
+  role: zod.enum(["admin", "employee", "site_manager"]),
   status: zod.enum(["active", "inactive", "pending"]),
   mustChangePassword: zod
     .boolean()
@@ -660,7 +717,7 @@ export const GetEmployeesResponseItem = zod.object({
   firstName: zod.string(),
   lastName: zod.string(),
   phone: zod.string().optional(),
-  role: zod.enum(["admin", "employee", "lead"]),
+  role: zod.enum(["admin", "employee", "site_manager"]),
   status: zod.enum(["active", "inactive", "pending"]),
   address: zod.string().optional(),
   dateOfBirth: zod.coerce.date().nullish(),
@@ -737,7 +794,7 @@ export const CreateEmployeeBody = zod.object({
   password: zod.string(),
   firstName: zod.string(),
   lastName: zod.string(),
-  role: zod.enum(["admin", "employee", "lead"]),
+  role: zod.enum(["admin", "employee", "site_manager"]),
   position: zod.enum(["officer", "support_staff"]).optional(),
   phone: zod.string().optional(),
   address: zod.string().optional(),
@@ -794,7 +851,7 @@ export const GetEmployeeResponse = zod.object({
   firstName: zod.string(),
   lastName: zod.string(),
   phone: zod.string().optional(),
-  role: zod.enum(["admin", "employee", "lead"]),
+  role: zod.enum(["admin", "employee", "site_manager"]),
   status: zod.enum(["active", "inactive", "pending"]),
   address: zod.string().optional(),
   dateOfBirth: zod.coerce.date().nullish(),
@@ -921,7 +978,7 @@ export const UpdateEmployeeResponse = zod.object({
   firstName: zod.string(),
   lastName: zod.string(),
   phone: zod.string().optional(),
-  role: zod.enum(["admin", "employee", "lead"]),
+  role: zod.enum(["admin", "employee", "site_manager"]),
   status: zod.enum(["active", "inactive", "pending"]),
   address: zod.string().optional(),
   dateOfBirth: zod.coerce.date().nullish(),
@@ -1305,7 +1362,7 @@ export const DeleteShiftParams = zod.object({
 });
 
 /**
- * Highly sensitive. Readable only by admins/dispatchers/leads and officers with an ACCEPTED assignment to this shift. Returns an empty package (null fields, empty arrays) when no package has been built yet.
+ * Highly sensitive. Readable only by admins/dispatchers/site-managers and officers with an ACCEPTED assignment to this shift. Returns an empty package (null fields, empty arrays) when no package has been built yet.
  * @summary Get the executive-protection (PPO) package for a shift
  */
 export const GetProtectionDetailParams = zod.object({
@@ -5059,7 +5116,7 @@ export const SubcontractorClockToggleResponse = zod.object({
 });
 
 /**
- * Authenticated internal users (officer/lead/employee/admin) report a pay
+ * Authenticated internal users (officer/site-manager/employee/admin) report a pay
 discrepancy (missed payment, underpayment, missing hours, etc.). On
 submit the report is emailed to the dedicated admin inbox and becomes
 visible in the Admin Portal. External client accounts are rejected.

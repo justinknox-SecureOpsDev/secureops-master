@@ -5,7 +5,7 @@ import { usersTable } from "./users";
 
 export const paymentDiscrepanciesTable = pgTable("payment_discrepancies", {
   id: uuid("id").primaryKey().defaultRandom(),
-  // The officer/lead/employee who reported the discrepancy.
+  // The officer/site-manager/employee who reported the discrepancy.
   employeeId: uuid("employee_id").notNull().references(() => usersTable.id, { onDelete: "cascade" }),
   // missed_payment | underpaid | missing_hours | incorrect_rate | other
   discrepancyType: text("discrepancy_type").notNull().default("other"),

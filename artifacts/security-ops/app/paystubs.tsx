@@ -62,7 +62,7 @@ export default function PaystubsScreen() {
   const colors = useColors();
   const router = useRouter();
   const topPad = useTopPad();
-  // Leads are full employees and see their OWN paystubs here, exactly like any
+  // Site managers are full employees and see their OWN paystubs here, exactly like any
   // officer. The privacy rule only hides OTHER people's finance, which this
   // screen never shows (it loads /me/payroll, pinned to the caller).
   const [data, setData] = useState<PaystubsResponse | null>(null);

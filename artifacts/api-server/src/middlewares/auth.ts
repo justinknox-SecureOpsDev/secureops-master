@@ -255,22 +255,25 @@ export function requireAdminOrDispatcher(req: Request, res: Response, next: Next
 }
 
 /**
- * Authorize shift/schedule management: admin OR lead.
+ * Authorize shift/schedule management: admin OR site manager.
  *
- * The `lead` role is a mobile-only scheduling supervisor. Leads create and
- * edit shifts (including recurring) and manage the roster across ALL sites,
- * but must never see financial data (pay/bill rates, payroll, invoices,
- * client billing terms). This guard deliberately EXCLUDES dispatcher so that
- * granting leads write access to shifts does not silently escalate the
- * narrower dispatcher role (which can assign to open shifts but not create
- * or delete them). Finance fields are stripped at the response layer for
- * leads on every surface gated here.
+ * The `site_manager` role is a scheduling supervisor scoped to specific sites
+ * (assignments live in `site_managers`; see lib/siteManagerAuth.ts). Site
+ * managers create and edit shifts (including recurring) and manage the roster,
+ * but ONLY for the sites they are assigned to, and must never see financial
+ * data (pay/bill rates, payroll, invoices, client billing terms). This guard
+ * is only the coarse ROLE gate — per-site scoping is enforced inside each
+ * route via assertCanManageSite. It deliberately EXCLUDES dispatcher so that
+ * granting site managers write access to shifts does not silently escalate the
+ * narrower dispatcher role (which can assign to open shifts but not create or
+ * delete them). Finance fields are stripped at the response layer for site
+ * managers on every surface gated here.
  */
-export function requireAdminOrLead(req: Request, res: Response, next: NextFunction): void {
+export function requireAdminOrSiteManager(req: Request, res: Response, next: NextFunction): void {
   requireAuth(req, res, () => {
     const role = req.user?.role;
-    if (role !== "admin" && role !== "lead") {
-      res.status(403).json({ error: "Forbidden", message: "Admin or lead access required" });
+    if (role !== "admin" && role !== "site_manager") {
+      res.status(403).json({ error: "Forbidden", message: "Admin or site manager access required" });
       return;
     }
     next();
@@ -279,16 +282,16 @@ export function requireAdminOrLead(req: Request, res: Response, next: NextFuncti
 
 /**
  * Authorize scheduling/staffing reads + officer assignment: admin OR
- * dispatcher OR lead. Used for the shared roster surfaces (sites list,
+ * dispatcher OR site manager. Used for the shared roster surfaces (sites list,
  * employee list, assigning an officer to a shift) that all three scheduling
- * roles need. Employee/PII rows are projected down for dispatcher/lead at the
- * response layer; finance is never included for leads.
+ * roles need. Employee/PII rows are projected down for dispatcher/site-manager
+ * at the response layer; finance is never included for site managers.
  */
 export function requireSchedulingStaff(req: Request, res: Response, next: NextFunction): void {
   requireAuth(req, res, () => {
     const role = req.user?.role;
-    if (role !== "admin" && role !== "dispatcher" && role !== "lead") {
-      res.status(403).json({ error: "Forbidden", message: "Admin, dispatcher, or lead access required" });
+    if (role !== "admin" && role !== "dispatcher" && role !== "site_manager") {
+      res.status(403).json({ error: "Forbidden", message: "Admin, dispatcher, or site manager access required" });
       return;
     }
     next();

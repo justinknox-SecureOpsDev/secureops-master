@@ -136,7 +136,7 @@ export type UserRole = (typeof UserRole)[keyof typeof UserRole];
 export const UserRole = {
   admin: "admin",
   employee: "employee",
-  lead: "lead",
+  site_manager: "site_manager",
 } as const;
 
 export type UserStatus = (typeof UserStatus)[keyof typeof UserStatus];
@@ -166,12 +166,29 @@ export interface AuthResponse {
   user: User;
 }
 
+/**
+ * Minimal user shape for site-manager assignment lists/pickers.
+ */
+export interface SiteManagerUser {
+  id: string;
+  firstName: string;
+  lastName: string;
+  email: string;
+}
+
+/**
+ * Replace the full set of managers for a site with this list of user IDs.
+ */
+export interface SetSiteManagersRequest {
+  userIds: string[];
+}
+
 export type EmployeeRole = (typeof EmployeeRole)[keyof typeof EmployeeRole];
 
 export const EmployeeRole = {
   admin: "admin",
   employee: "employee",
-  lead: "lead",
+  site_manager: "site_manager",
 } as const;
 
 export type EmployeeStatus =
@@ -276,7 +293,7 @@ export type CreateEmployeeRequestRole =
 export const CreateEmployeeRequestRole = {
   admin: "admin",
   employee: "employee",
-  lead: "lead",
+  site_manager: "site_manager",
 } as const;
 
 export type CreateEmployeeRequestPosition =

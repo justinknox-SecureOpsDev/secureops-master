@@ -10,7 +10,7 @@ import { shiftsTable } from "./shifts";
  * free-text operational plan an admin/dispatcher prepares ahead of a
  * protection detail; the assigned officer reads it on mobile. Every field is
  * optional — a half-filled package is valid. Highly sensitive: only readable
- * by admins/dispatchers/leads and officers with an ACCEPTED assignment to the
+ * by admins/dispatchers/site-managers and officers with an ACCEPTED assignment to the
  * shift, never on public/share surfaces.
  */
 export const protectionDetailsTable = pgTable("protection_details", {

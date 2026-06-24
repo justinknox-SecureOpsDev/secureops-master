@@ -6,6 +6,7 @@ import { useGetTimeEntries, getGetTimeEntriesQueryKey, useApproveTimeEntry } fro
 import { Feather } from "@expo/vector-icons";
 import { useRouter } from "expo-router";
 import { useQueryClient } from "@tanstack/react-query";
+import { useAuth } from "@/contexts/AuthContext";
 
 const FILTERS = ["pending", "approved", "rejected"] as const;
 
@@ -14,6 +15,11 @@ export default function TimeApprovalScreen() {
   const router = useRouter();
   const queryClient = useQueryClient();
   const topPad = useTopPad();
+  const { user } = useAuth();
+  // Site managers may approve hours but must NEVER see pay rates (finance
+  // invariant). The server already strips payRate from their responses; we also
+  // hide the rate badge so a stripped/undefined value can't render as "$0.00/h".
+  const isSiteManager = user?.role === "site_manager";
   const [filter, setFilter] = useState<typeof FILTERS[number]>("pending");
   const [edits, setEdits] = useState<Record<string, string>>({});
 
@@ -97,9 +103,11 @@ export default function TimeApprovalScreen() {
                       {item.siteName ?? "Site unknown"}
                     </Text>
                   </View>
-                  <View style={[styles.lvBadge, { backgroundColor: colors.primary + "20", borderColor: colors.primary }]}>
-                    <Text style={{ color: colors.primary, fontSize: 11, fontWeight: "700" }}>${parseFloat(item.payRate ?? "0").toFixed(2)}/h</Text>
-                  </View>
+                  {!isSiteManager && (
+                    <View style={[styles.lvBadge, { backgroundColor: colors.primary + "20", borderColor: colors.primary }]}>
+                      <Text style={{ color: colors.primary, fontSize: 11, fontWeight: "700" }}>${parseFloat(item.payRate ?? "0").toFixed(2)}/h</Text>
+                    </View>
+                  )}
                 </View>
 
                 <Text style={[styles.line, { color: colors.mutedForeground }]}>

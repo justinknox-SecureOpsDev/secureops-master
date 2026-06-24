@@ -1,7 +1,8 @@
 import { Router, type IRouter } from "express";
-import { eq, and, gte, lte, ne, isNull, inArray, sql } from "drizzle-orm";
+import { eq, and, or, gte, lte, ne, isNull, inArray, sql } from "drizzle-orm";
 import { db, timeEntriesTable, shiftsTable, usersTable, sitesTable, shiftAssignmentsTable, licensesTable } from "@workspace/db";
-import { requireAuth, requireAdmin, requireStaff } from "../middlewares/auth";
+import { requireAuth, requireAdmin, requireAdminOrSiteManager, requireStaff } from "../middlewares/auth";
+import { assertCanManageSite, getManagedSiteIds } from "../lib/siteManagerAuth";
 import { upsertWeeklyInvoiceForTimeEntry } from "../lib/invoiceSync";
 import { pushClockEvent } from "../lib/schedulerSync";
 import { getEffectiveLevel } from "../lib/eligibility";
@@ -411,10 +412,26 @@ router.get("/time-entries", requireAuth, async (req, res): Promise<void> => {
   const { employeeId, shiftId, siteId, approvalStatus, from, to } = req.query as Record<string, string | undefined>;
 
   const conditions = [];
-  if (req.user!.role !== "admin") {
+  const role = req.user!.role;
+  if (role === "admin") {
+    if (employeeId) conditions.push(eq(timeEntriesTable.employeeId, employeeId));
+  } else if (role === "site_manager") {
+    // Site managers see time entries at the sites they manage, plus their own.
+    // Scope joins through site_id (no IDOR). Empty managed-set => own entries
+    // only, so a manager with no sites can't read the whole table.
+    const managed = await getManagedSiteIds(req.user!.userId);
+    if (managed.length > 0) {
+      conditions.push(
+        or(
+          eq(timeEntriesTable.employeeId, req.user!.userId),
+          inArray(sql`coalesce(${timeEntriesTable.siteId}, ${shiftsTable.siteId})`, managed),
+        )!,
+      );
+    } else {
+      conditions.push(eq(timeEntriesTable.employeeId, req.user!.userId));
+    }
+  } else {
     conditions.push(eq(timeEntriesTable.employeeId, req.user!.userId));
-  } else if (employeeId) {
-    conditions.push(eq(timeEntriesTable.employeeId, employeeId));
   }
   if (shiftId) conditions.push(eq(timeEntriesTable.shiftId, shiftId));
   if (siteId) conditions.push(sql`coalesce(${timeEntriesTable.siteId}, ${shiftsTable.siteId}) = ${siteId}`);
@@ -431,10 +448,16 @@ router.get("/time-entries", requireAuth, async (req, res): Promise<void> => {
     .where(conditions.length > 0 ? and(...conditions) : undefined);
 
   // Bill rate (client markup) is admin-only. Officers may see their own pay
-  // rate but never what the client is charged.
-  const safeRows = req.user!.role === "admin"
-    ? rows
-    : rows.map(({ billRate, ...rest }) => rest);
+  // rate but never what the client is charged. Site managers must never see
+  // ANY finance — strip BOTH pay and bill rate for them.
+  let safeRows;
+  if (role === "admin") {
+    safeRows = rows;
+  } else if (role === "site_manager") {
+    safeRows = rows.map(({ billRate, payRate, ...rest }) => rest);
+  } else {
+    safeRows = rows.map(({ billRate, ...rest }) => rest);
+  }
   res.json(safeRows);
 });
 
@@ -779,7 +802,7 @@ router.get("/time-entries/active", requireAuth, async (req, res): Promise<void> 
   // after a clock-out instead of treating "no entry" as an error and keeping
   // the previous cached value.
   if (!entry) { res.json(null); return; }
-  // Bill rate (client markup) is admin-only; strip it for officers/leads.
+  // Bill rate (client markup) is admin-only; strip it for officers/site-managers.
   if (req.user!.role !== "admin") {
     const { billRate, ...rest } = entry;
     res.json(rest);
@@ -1061,8 +1084,9 @@ router.post("/time-entries/:id/dismiss-correction", requireAdmin, async (req, re
   });
 });
 
-// Admin approves/rejects a time entry. Approval is required before payroll/invoice picks it up.
-router.post("/time-entries/:id/approve", requireAdmin, async (req, res): Promise<void> => {
+// Admin (or a site manager, scoped to their sites) approves/rejects a time
+// entry. Approval is required before payroll/invoice picks it up.
+router.post("/time-entries/:id/approve", requireAdminOrSiteManager, async (req, res): Promise<void> => {
   const id = Array.isArray(req.params.id) ? req.params.id[0] : req.params.id;
   const { decision, hoursWorked, notes } = req.body;
   if (decision !== "approved" && decision !== "rejected") {
@@ -1071,6 +1095,19 @@ router.post("/time-entries/:id/approve", requireAdmin, async (req, res): Promise
   }
   const [existing] = await db.select().from(timeEntriesTable).where(eq(timeEntriesTable.id, id));
   if (!existing) { res.status(404).json({ error: "Not Found" }); return; }
+
+  // Per-site scoping: a site manager may only approve/reject entries for a site
+  // they manage. Resolve the entry's site (entry.siteId, else parent shift's
+  // site). Admins bypass.
+  {
+    let scopeSiteId: string | null = existing.siteId ?? null;
+    if (!scopeSiteId && existing.shiftId) {
+      const [sh] = await db.select({ siteId: shiftsTable.siteId }).from(shiftsTable).where(eq(shiftsTable.id, existing.shiftId));
+      scopeSiteId = sh?.siteId ?? null;
+    }
+    if (!(await assertCanManageSite(res, req.user!, scopeSiteId))) return;
+  }
+
   if (!existing.clockOutTime) {
     res.status(400).json({ error: "Bad Request", message: "Cannot approve a time entry that hasn't been clocked out" });
     return;
@@ -1102,11 +1139,17 @@ router.post("/time-entries/:id/approve", requireAdmin, async (req, res): Promise
     void upsertWeeklyInvoiceForTimeEntry(updated);
   }
 
-  res.json({
+  const responseBody: Record<string, unknown> = {
     ...updated,
     shiftTitle: shift?.title,
     employeeName: user ? `${user.firstName} ${user.lastName}` : null,
-  });
+  };
+  // Site managers approve hours but must never see pay data — strip the
+  // per-entry pay-rate override from their response. Admins keep it.
+  if (req.user!.role !== "admin") {
+    delete responseBody.payRateOverride;
+  }
+  res.json(responseBody);
 });
 
 // One-shot admin backfill: walk every time entry with no shiftId, try to

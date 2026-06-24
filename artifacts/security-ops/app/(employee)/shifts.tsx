@@ -25,10 +25,10 @@ const FILTERS = ["available", "upcoming", "active", "completed"] as const;
 export default function EmployeeShiftsScreen() {
   const colors = useColors();
   const router = useRouter();
-  // Leads keep the "no financial info" invariant even in the employee
+  // Site managers keep the "no financial info" invariant even in the employee
   // experience: hide per-shift pay/earnings on their own My Shifts list.
   const { user } = useAuth();
-  const isLead = user?.role === "lead";
+  const isSiteManager = user?.role === "site_manager";
   const queryClient = useQueryClient();
   const [filter, setFilter] = useState<typeof FILTERS[number]>("available");
   const [busyId, setBusyId] = useState<string | null>(null);
@@ -460,7 +460,7 @@ export default function EmployeeShiftsScreen() {
                   <Text style={[styles.detailText, { color: colors.mutedForeground }]} numberOfLines={1}>{item.location}</Text>
                 </View>
 
-                {!isLead && (
+                {!isSiteManager && (
                   <View style={styles.rateRow}>
                     <Text style={[styles.rateText, { color: colors.primary }]}>${parseFloat(item.payRate ?? item.hourlyRate ?? "0").toFixed(2)}/hr</Text>
                     <Text style={[styles.earnText, { color: colors.mutedForeground }]}>

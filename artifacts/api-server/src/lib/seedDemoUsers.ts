@@ -10,7 +10,7 @@ type DemoUser = {
   password: string;
   firstName: string;
   lastName: string;
-  role: "admin" | "employee" | "lead";
+  role: "admin" | "employee" | "site_manager";
 };
 
 const DEMO_USERS: DemoUser[] = [
@@ -31,9 +31,9 @@ const DEMO_USERS: DemoUser[] = [
   {
     email: brand.demoLeadEmail,
     password: brand.demoLeadPassword,
-    firstName: "Lead",
-    lastName: "Supervisor",
-    role: "lead",
+    firstName: "Site",
+    lastName: "Manager",
+    role: "site_manager",
   },
 ];
 

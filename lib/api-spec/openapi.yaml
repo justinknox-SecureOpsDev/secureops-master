@@ -208,6 +208,55 @@ paths:
       responses:
         "204": { description: Deleted }
 
+  /sites/{id}/managers:
+    get:
+      operationId: getSiteManagers
+      tags: [sites]
+      summary: List the site managers assigned to a site (admin, or a manager of this site)
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: "#/components/schemas/SiteManagerUser" }
+    put:
+      operationId: setSiteManagers
+      tags: [sites]
+      summary: Replace the set of site managers assigned to a site (admin only)
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/SetSiteManagersRequest" }
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: "#/components/schemas/SiteManagerUser" }
+
+  /site-manager-candidates:
+    get:
+      operationId: getSiteManagerCandidates
+      tags: [sites]
+      summary: List active site_manager-role users for assignment pickers (admin only)
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: "#/components/schemas/SiteManagerUser" }
+
   /time-entries/{id}/approve:
     post:
       operationId: approveTimeEntry
@@ -720,7 +769,7 @@ paths:
       tags: [shifts]
       summary: Get the executive-protection (PPO) package for a shift
       description: >-
-        Highly sensitive. Readable only by admins/dispatchers/leads and officers
+        Highly sensitive. Readable only by admins/dispatchers/site-managers and officers
         with an ACCEPTED assignment to this shift. Returns an empty package
         (null fields, empty arrays) when no package has been built yet.
       security:
@@ -2843,7 +2892,7 @@ paths:
       operationId: createPaymentDiscrepancy
       summary: Submit a payment discrepancy report (officer)
       description: |
-        Authenticated internal users (officer/lead/employee/admin) report a pay
+        Authenticated internal users (officer/site-manager/employee/admin) report a pay
         discrepancy (missed payment, underpayment, missing hours, etc.). On
         submit the report is emailed to the dedicated admin inbox and becomes
         visible in the Admin Portal. External client accounts are rejected.
@@ -3045,7 +3094,7 @@ components:
           type: string
         role:
           type: string
-          enum: [admin, employee, lead]
+          enum: [admin, employee, site_manager]
         status:
           type: string
           enum: [active, inactive, pending]
@@ -3067,6 +3116,30 @@ components:
         - status
         - createdAt
 
+    SiteManagerUser:
+      type: object
+      description: "Minimal user shape for site-manager assignment lists/pickers."
+      properties:
+        id: { type: string }
+        firstName: { type: string }
+        lastName: { type: string }
+        email: { type: string }
+      required:
+        - id
+        - firstName
+        - lastName
+        - email
+
+    SetSiteManagersRequest:
+      type: object
+      description: "Replace the full set of managers for a site with this list of user IDs."
+      properties:
+        userIds:
+          type: array
+          items: { type: string }
+      required:
+        - userIds
+
     Employee:
       type: object
       properties:
@@ -3084,7 +3157,7 @@ components:
           type: string
         role:
           type: string
-          enum: [admin, employee, lead]
+          enum: [admin, employee, site_manager]
         status:
           type: string
           enum: [active, inactive, pending]
@@ -3173,7 +3246,7 @@ components:
         lastName: { type: string }
         role:
           type: string
-          enum: [admin, employee, lead]
+          enum: [admin, employee, site_manager]
         position:
           type: string
           enum: [officer, support_staff]

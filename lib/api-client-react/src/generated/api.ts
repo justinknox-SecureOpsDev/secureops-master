@@ -129,12 +129,14 @@ import type {
   ResetPasswordRequest,
   ReviewApplicationRequest,
   SendChatMessageBody,
+  SetSiteManagersRequest,
   Shift,
   ShiftAssignment,
   ShiftRequest,
   SignMyObjectDownload200,
   SignMyObjectDownloadParams,
   Site,
+  SiteManagerUser,
   StripeCheckoutResponse,
   SubcontractorClockInfo,
   SubcontractorClockToggleBody,
@@ -1171,6 +1173,256 @@ export const useDeleteSite = <
 > => {
   return useMutation(getDeleteSiteMutationOptions(options));
 };
+
+/**
+ * @summary List the site managers assigned to a site (admin, or a manager of this site)
+ */
+export const getGetSiteManagersUrl = (id: string) => {
+  return `/api/sites/${id}/managers`;
+};
+
+export const getSiteManagers = async (
+  id: string,
+  options?: RequestInit,
+): Promise<SiteManagerUser[]> => {
+  return customFetch<SiteManagerUser[]>(getGetSiteManagersUrl(id), {
+    ...options,
+    method: "GET",
+  });
+};
+
+export const getGetSiteManagersQueryKey = (id: string) => {
+  return [`/api/sites/${id}/managers`] as const;
+};
+
+export const getGetSiteManagersQueryOptions = <
+  TData = Awaited<ReturnType<typeof getSiteManagers>>,
+  TError = ErrorType<unknown>,
+>(
+  id: string,
+  options?: {
+    query?: UseQueryOptions<
+      Awaited<ReturnType<typeof getSiteManagers>>,
+      TError,
+      TData
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+) => {
+  const { query: queryOptions, request: requestOptions } = options ?? {};
+
+  const queryKey = queryOptions?.queryKey ?? getGetSiteManagersQueryKey(id);
+
+  const queryFn: QueryFunction<Awaited<ReturnType<typeof getSiteManagers>>> = ({
+    signal,
+  }) => getSiteManagers(id, { signal, ...requestOptions });
+
+  return {
+    queryKey,
+    queryFn,
+    enabled: !!id,
+    ...queryOptions,
+  } as UseQueryOptions<
+    Awaited<ReturnType<typeof getSiteManagers>>,
+    TError,
+    TData
+  > & { queryKey: QueryKey };
+};
+
+export type GetSiteManagersQueryResult = NonNullable<
+  Awaited<ReturnType<typeof getSiteManagers>>
+>;
+export type GetSiteManagersQueryError = ErrorType<unknown>;
+
+/**
+ * @summary List the site managers assigned to a site (admin, or a manager of this site)
+ */
+
+export function useGetSiteManagers<
+  TData = Awaited<ReturnType<typeof getSiteManagers>>,
+  TError = ErrorType<unknown>,
+>(
+  id: string,
+  options?: {
+    query?: UseQueryOptions<
+      Awaited<ReturnType<typeof getSiteManagers>>,
+      TError,
+      TData
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+): UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+  const queryOptions = getGetSiteManagersQueryOptions(id, options);
+
+  const query = useQuery(queryOptions) as UseQueryResult<TData, TError> & {
+    queryKey: QueryKey;
+  };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
+
+/**
+ * @summary Replace the set of site managers assigned to a site (admin only)
+ */
+export const getSetSiteManagersUrl = (id: string) => {
+  return `/api/sites/${id}/managers`;
+};
+
+export const setSiteManagers = async (
+  id: string,
+  setSiteManagersRequest: SetSiteManagersRequest,
+  options?: RequestInit,
+): Promise<SiteManagerUser[]> => {
+  return customFetch<SiteManagerUser[]>(getSetSiteManagersUrl(id), {
+    ...options,
+    method: "PUT",
+    headers: { "Content-Type": "application/json", ...options?.headers },
+    body: JSON.stringify(setSiteManagersRequest),
+  });
+};
+
+export const getSetSiteManagersMutationOptions = <
+  TError = ErrorType<unknown>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof setSiteManagers>>,
+    TError,
+    { id: string; data: BodyType<SetSiteManagersRequest> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof setSiteManagers>>,
+  TError,
+  { id: string; data: BodyType<SetSiteManagersRequest> },
+  TContext
+> => {
+  const mutationKey = ["setSiteManagers"];
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof setSiteManagers>>,
+    { id: string; data: BodyType<SetSiteManagersRequest> }
+  > = (props) => {
+    const { id, data } = props ?? {};
+
+    return setSiteManagers(id, data, requestOptions);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type SetSiteManagersMutationResult = NonNullable<
+  Awaited<ReturnType<typeof setSiteManagers>>
+>;
+export type SetSiteManagersMutationBody = BodyType<SetSiteManagersRequest>;
+export type SetSiteManagersMutationError = ErrorType<unknown>;
+
+/**
+ * @summary Replace the set of site managers assigned to a site (admin only)
+ */
+export const useSetSiteManagers = <
+  TError = ErrorType<unknown>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof setSiteManagers>>,
+    TError,
+    { id: string; data: BodyType<SetSiteManagersRequest> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationResult<
+  Awaited<ReturnType<typeof setSiteManagers>>,
+  TError,
+  { id: string; data: BodyType<SetSiteManagersRequest> },
+  TContext
+> => {
+  return useMutation(getSetSiteManagersMutationOptions(options));
+};
+
+/**
+ * @summary List active site_manager-role users for assignment pickers (admin only)
+ */
+export const getGetSiteManagerCandidatesUrl = () => {
+  return `/api/site-manager-candidates`;
+};
+
+export const getSiteManagerCandidates = async (
+  options?: RequestInit,
+): Promise<SiteManagerUser[]> => {
+  return customFetch<SiteManagerUser[]>(getGetSiteManagerCandidatesUrl(), {
+    ...options,
+    method: "GET",
+  });
+};
+
+export const getGetSiteManagerCandidatesQueryKey = () => {
+  return [`/api/site-manager-candidates`] as const;
+};
+
+export const getGetSiteManagerCandidatesQueryOptions = <
+  TData = Awaited<ReturnType<typeof getSiteManagerCandidates>>,
+  TError = ErrorType<unknown>,
+>(options?: {
+  query?: UseQueryOptions<
+    Awaited<ReturnType<typeof getSiteManagerCandidates>>,
+    TError,
+    TData
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}) => {
+  const { query: queryOptions, request: requestOptions } = options ?? {};
+
+  const queryKey =
+    queryOptions?.queryKey ?? getGetSiteManagerCandidatesQueryKey();
+
+  const queryFn: QueryFunction<
+    Awaited<ReturnType<typeof getSiteManagerCandidates>>
+  > = ({ signal }) => getSiteManagerCandidates({ signal, ...requestOptions });
+
+  return { queryKey, queryFn, ...queryOptions } as UseQueryOptions<
+    Awaited<ReturnType<typeof getSiteManagerCandidates>>,
+    TError,
+    TData
+  > & { queryKey: QueryKey };
+};
+
+export type GetSiteManagerCandidatesQueryResult = NonNullable<
+  Awaited<ReturnType<typeof getSiteManagerCandidates>>
+>;
+export type GetSiteManagerCandidatesQueryError = ErrorType<unknown>;
+
+/**
+ * @summary List active site_manager-role users for assignment pickers (admin only)
+ */
+
+export function useGetSiteManagerCandidates<
+  TData = Awaited<ReturnType<typeof getSiteManagerCandidates>>,
+  TError = ErrorType<unknown>,
+>(options?: {
+  query?: UseQueryOptions<
+    Awaited<ReturnType<typeof getSiteManagerCandidates>>,
+    TError,
+    TData
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+  const queryOptions = getGetSiteManagerCandidatesQueryOptions(options);
+
+  const query = useQuery(queryOptions) as UseQueryResult<TData, TError> & {
+    queryKey: QueryKey;
+  };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
 
 /**
  * @summary Approve or reject a time entry (admin)
@@ -3169,7 +3421,7 @@ export const useDeleteShift = <
 };
 
 /**
- * Highly sensitive. Readable only by admins/dispatchers/leads and officers with an ACCEPTED assignment to this shift. Returns an empty package (null fields, empty arrays) when no package has been built yet.
+ * Highly sensitive. Readable only by admins/dispatchers/site-managers and officers with an ACCEPTED assignment to this shift. Returns an empty package (null fields, empty arrays) when no package has been built yet.
  * @summary Get the executive-protection (PPO) package for a shift
  */
 export const getGetProtectionDetailUrl = (id: string) => {
@@ -11869,7 +12121,7 @@ export const useSubcontractorClockToggle = <
 };
 
 /**
- * Authenticated internal users (officer/lead/employee/admin) report a pay
+ * Authenticated internal users (officer/site-manager/employee/admin) report a pay
 discrepancy (missed payment, underpayment, missing hours, etc.). On
 submit the report is emailed to the dedicated admin inbox and becomes
 visible in the Admin Portal. External client accounts are rejected.

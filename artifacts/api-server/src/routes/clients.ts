@@ -1,24 +1,24 @@
 import { Router, type IRouter } from "express";
 import { eq } from "drizzle-orm";
 import { db, clientsTable, sitesTable } from "@workspace/db";
-import { requireAdmin, requireAdminOrLead } from "../middlewares/auth";
+import { requireAdmin, requireAdminOrSiteManager } from "../middlewares/auth";
 import { geocodeOnelineAddress } from "../lib/geocode";
 import { clientDeletionBlockers, refuseIfBlocked } from "../lib/siteDeletion";
 
 const router: IRouter = Router();
 
-// Financial client fields a `lead` must never see (billing terms / address).
+// Financial client fields a `site_manager` must never see (billing terms / address).
 // Everything else (name + contacts) is needed to pick a client when scheduling.
 function projectClientForLead<T extends Record<string, unknown>>(row: T): Partial<T> {
   const { billingAddress, paymentTermsDays, ...rest } = row as Record<string, unknown>;
   return rest as Partial<T>;
 }
 
-// Leads need the client list to scope the site picker when creating shifts,
+// Site managers need the client list to scope the site picker when creating shifts,
 // but with billing/payment-terms stripped. Admins see the full row.
-router.get("/clients", requireAdminOrLead, async (req, res): Promise<void> => {
+router.get("/clients", requireAdminOrSiteManager, async (req, res): Promise<void> => {
   const rows = await db.select().from(clientsTable);
-  if (req.user!.role === "lead") {
+  if (req.user!.role === "site_manager") {
     res.json(rows.map((r) => projectClientForLead(r)));
     return;
   }

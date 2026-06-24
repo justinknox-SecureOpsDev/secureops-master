@@ -59,11 +59,11 @@ export default function RootLayoutNav() {
       return;
     }
 
-    // A lead is a full employee PLUS scheduling powers — they land in the
+    // A site manager is a full employee PLUS scheduling powers — they land in the
     // normal (employee) shell (Home / My Shifts / Clock / Incidents / Chat /
-    // Radio / Profile) and reach scheduling via the lead-only Schedule tab
+    // Radio / Profile) and reach scheduling via the site-manager-only Schedule tab
     // (app/(employee)/schedule, which re-exports the admin shift screens).
-    // No special redirect: leads are treated exactly like employees here.
+    // No special redirect: site managers are treated exactly like employees here.
 
     // Default landing.
     if (!inAuthGroup && !ALLOWED_TOP_SCREENS.has(top ?? "")) {

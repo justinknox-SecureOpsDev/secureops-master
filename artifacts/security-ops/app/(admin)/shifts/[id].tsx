@@ -30,15 +30,15 @@ export default function ShiftDetailScreen() {
   const colors = useColors();
   const router = useRouter();
   const segments = useSegments();
-  // Mounted in both the admin Shifts tab and the lead's employee-shell Schedule
+  // Mounted in both the admin Shifts tab and the site manager's employee-shell Schedule
   // tab — keep own-stack nav (edit) inside whichever group is hosting us.
   const shiftBase = segments[0] === "(employee)" ? "/(employee)/schedule" : "/(admin)/shifts";
   const queryClient = useQueryClient();
   const { id } = useLocalSearchParams<{ id: string }>();
   const { user } = useAuth();
-  // Leads see no finance (pay/bill) and can't open officer profiles (the
+  // Site managers see no finance (pay/bill) and can't open officer profiles (the
   // profile screen carries PII/finance they aren't entitled to).
-  const isLead = user?.role === "lead";
+  const isSiteManager = user?.role === "site_manager";
   const topPad = useTopPad();
   const navigation = useNavigation();
   useLayoutEffect(() => { (navigation as any).setOptions?.({ headerShown: false }); }, [navigation]);
@@ -170,14 +170,14 @@ export default function ShiftDetailScreen() {
             <Text style={[styles.statVal, { color: colors.foreground }]}>{duration}h</Text>
             <Text style={[styles.statLbl, { color: colors.mutedForeground }]}>Duration</Text>
           </View>
-          {!isLead && <>
+          {!isSiteManager && <>
             <View style={[styles.statDivider, { backgroundColor: colors.border }]} />
             <View style={styles.statItem}>
               <Text style={[styles.statVal, { color: colors.primary }]}>${parseFloat(((shift as any).payRate ?? (shift as any).hourlyRate ?? "0") as any).toFixed(2)}</Text>
               <Text style={[styles.statLbl, { color: colors.mutedForeground }]}>Pay Rate</Text>
             </View>
           </>}
-          {!isLead && (shift as any).billRate && <>
+          {!isSiteManager && (shift as any).billRate && <>
             <View style={[styles.statDivider, { backgroundColor: colors.border }]} />
             <View style={styles.statItem}>
               <Text style={[styles.statVal, { color: colors.accent }]}>${parseFloat((shift as any).billRate as any).toFixed(2)}</Text>
@@ -206,7 +206,7 @@ export default function ShiftDetailScreen() {
             <View style={[styles.avatar, { backgroundColor: colors.primary + "20" }]}>
               <Text style={[styles.avatarText, { color: colors.primary }]}>{(a.employeeName || "?")[0]}</Text>
             </View>
-            {isLead ? (
+            {isSiteManager ? (
               <View style={{ flex: 1 }} accessible accessibilityLabel={a.employeeName ?? "Assigned officer"}>
                 <Text style={[styles.personName, { color: colors.foreground }]}>{a.employeeName}</Text>
               </View>

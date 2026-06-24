@@ -73,7 +73,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const login = async (newUser: User, newToken: string) => {
     // Drop any cached query data from a previous session so one user can never
     // see another's data (e.g. an admin's cached payroll/invoices surfacing to
-    // a lead who signs in next on the same device).
+    // a site manager who signs in next on the same device).
     queryClient.clear();
     setUser(newUser);
     setTokenState(newToken);
