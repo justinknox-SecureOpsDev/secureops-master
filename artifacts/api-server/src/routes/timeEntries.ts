@@ -1,11 +1,11 @@
 import { Router, type IRouter } from "express";
 import { eq, and, or, gte, lte, ne, isNull, inArray, sql } from "drizzle-orm";
-import { db, timeEntriesTable, shiftsTable, usersTable, sitesTable, shiftAssignmentsTable, licensesTable } from "@workspace/db";
+import { db, timeEntriesTable, shiftsTable, usersTable, sitesTable, shiftAssignmentsTable } from "@workspace/db";
 import { requireAuth, requireAdmin, requireAdminOrSiteManager, requireStaff } from "../middlewares/auth";
 import { assertCanManageSite, getManagedSiteIds } from "../lib/siteManagerAuth";
 import { upsertWeeklyInvoiceForTimeEntry } from "../lib/invoiceSync";
 import { pushClockEvent } from "../lib/schedulerSync";
-import { getEffectiveLevel } from "../lib/eligibility";
+import { getEffectiveLevel, isWorkerRole } from "../lib/eligibility";
 import { buildTimeEntryAuditMetadata, timeEntrySnapshot } from "../lib/timeEntryAudit";
 
 const router: IRouter = Router();
@@ -111,6 +111,21 @@ function clockInWindowRejection(
   return null;
 }
 
+// 403 payload returned when a worker's effective capability level does not
+// cover a shift's requiredLicenseLevel. Only armed (3) / L4-PPO (4) shifts can
+// trip this — unarmed work (level <= 2) is open to every field worker,
+// licensed or not (see lib/eligibility.ts).
+function licenseLevelRejection(requiredLevel: number) {
+  return {
+    error: "Forbidden",
+    code: "license_required",
+    message:
+      requiredLevel >= 4
+        ? "This shift requires an L4/PPO licence you don't currently hold. Upload a current licence from Profile → My licenses before clocking in."
+        : "This shift requires an armed (Level 3) licence you don't currently hold. Upload a current licence from Profile → My licenses before clocking in.",
+  };
+}
+
 // Resolve which scheduled shift an ad-hoc geo clock-in should attach to,
 // auto-assigning the officer to an open shift when they aren't already
 // rostered. This is what makes a clocked-in officer surface on the Dispatch
@@ -128,19 +143,31 @@ function clockInWindowRejection(
 //   3. Nothing open / nothing matched → fall back to the billing-only
 //      attach (findMatchingScheduledShift) so per-shift billRate is still
 //      recovered for invoicing even when no slot could be claimed.
+type AdHocShiftResolution =
+  | { kind: "shift"; shiftId: string }
+  | { kind: "none" }
+  | { kind: "ineligible"; requiredLevel: number };
+
 async function resolveOrAssignShiftForAdHocClockIn(
   employeeId: string,
   siteId: string,
   whenAt: Date,
+  // The clocker's effective capability level (Infinity for admins, who are
+  // exempt). Gates the rostered-shift (step 1) and billing-only fallback
+  // (step 3) results so a GPS clock-in can never attach an under-licensed
+  // worker to — and activate — an armed/PPO shift. Step 2 (auto-assign) already
+  // filters on its own freshly-read worker level, so admins keep their prior
+  // no-auto-assign behaviour there.
+  clockerEffectiveLevel: number,
   log: { info: (obj: unknown, msg: string) => void; warn: (obj: unknown, msg: string) => void },
-): Promise<string | null> {
+): Promise<AdHocShiftResolution> {
   const lowerBound = new Date(whenAt.getTime() - SHIFT_MATCH_GRACE_MS);
   const upperBound = new Date(whenAt.getTime() + SHIFT_MATCH_GRACE_MS);
   const farFutureCutoff = new Date("2090-01-01T00:00:00Z");
 
   // 1. Already rostered on a shift at this site in the window.
   const assigned = await db
-    .select({ id: shiftsTable.id, startTime: shiftsTable.startTime })
+    .select({ id: shiftsTable.id, startTime: shiftsTable.startTime, requiredLicenseLevel: shiftsTable.requiredLicenseLevel })
     .from(shiftAssignmentsTable)
     .innerJoin(shiftsTable, eq(shiftAssignmentsTable.shiftId, shiftsTable.id))
     .where(and(
@@ -152,7 +179,15 @@ async function resolveOrAssignShiftForAdHocClockIn(
       lte(shiftsTable.startTime, farFutureCutoff),
     ));
   const ownShift = closestByStart(assigned, whenAt);
-  if (ownShift) return ownShift.id;
+  if (ownShift) {
+    // Even when admin-rostered, an under-licensed worker may not clock into (and
+    // thereby activate) an armed/PPO shift via GPS — mirror the explicit-shiftId
+    // path's 403 rather than silently attaching them to higher-level work.
+    if (ownShift.requiredLicenseLevel > clockerEffectiveLevel) {
+      return { kind: "ineligible", requiredLevel: ownShift.requiredLicenseLevel };
+    }
+    return { kind: "shift", shiftId: ownShift.id };
+  }
 
   // 2. Not rostered — look for an open shift at this site to auto-assign.
   // Only shifts the officer is actually eligible for: the auto-assign must
@@ -236,15 +271,32 @@ async function resolveOrAssignShiftForAdHocClockIn(
           { employeeId, siteId, shiftId: c.id },
           "[clock-in] auto-assigned ad-hoc clock-in to open shift at site",
         );
-        return c.id;
+        return { kind: "shift", shiftId: c.id };
       }
     } catch (err) {
       log.warn({ err, shiftId: c.id }, "[clock-in] auto-assign attempt failed, trying next open shift");
     }
   }
 
-  // 3. Nothing claimable — fall back to billing-only attach.
-  return findMatchingScheduledShift(employeeId, siteId, whenAt);
+  // 3. Nothing claimable — fall back to billing-only attach. The fallback is a
+  // pure billRate-recovery convenience (the worker isn't rostered here), so if
+  // the only matching scheduled shift is one they're not licensed for
+  // (armed/PPO), DON'T attach/activate it — clock them in as a site-only entry
+  // instead. Never a 403: they had no accepted assignment to be blocked from.
+  const fallbackId = await findMatchingScheduledShift(employeeId, siteId, whenAt);
+  if (!fallbackId) return { kind: "none" };
+  const [fallbackShift] = await db
+    .select({ requiredLicenseLevel: shiftsTable.requiredLicenseLevel })
+    .from(shiftsTable)
+    .where(eq(shiftsTable.id, fallbackId));
+  if (fallbackShift && fallbackShift.requiredLicenseLevel > clockerEffectiveLevel) {
+    log.info(
+      { employeeId, siteId, shiftId: fallbackId, requiredLevel: fallbackShift.requiredLicenseLevel },
+      "[clock-in] skipped billing-only attach to ineligible higher-level shift",
+    );
+    return { kind: "none" };
+  }
+  return { kind: "shift", shiftId: fallbackId };
 }
 
 // How long after a shift ends an officer may still self-clock-in to its site
@@ -262,11 +314,11 @@ const CLOCK_IN_PICK_END_GRACE_MS = 2 * 60 * 60 * 1000;
 async function officerRosteredShiftsForPicker(
   employeeId: string,
   whenAt: Date,
-): Promise<Array<{ shiftId: string; siteId: string | null; startTime: Date; endTime: Date }>> {
+): Promise<Array<{ shiftId: string; siteId: string | null; startTime: Date; endTime: Date; requiredLicenseLevel: number }>> {
   const endFloor = new Date(whenAt.getTime() - CLOCK_IN_PICK_END_GRACE_MS);
   const farFutureCutoff = new Date("2090-01-01T00:00:00Z");
   return db
-    .select({ shiftId: shiftsTable.id, siteId: shiftsTable.siteId, startTime: shiftsTable.startTime, endTime: shiftsTable.endTime })
+    .select({ shiftId: shiftsTable.id, siteId: shiftsTable.siteId, startTime: shiftsTable.startTime, endTime: shiftsTable.endTime, requiredLicenseLevel: shiftsTable.requiredLicenseLevel })
     .from(shiftAssignmentsTable)
     .innerJoin(shiftsTable, eq(shiftAssignmentsTable.shiftId, shiftsTable.id))
     .where(and(
@@ -483,28 +535,30 @@ router.post("/time-entries/clock-in", requireAuth, async (req, res): Promise<voi
     return;
   }
 
-  // License compliance: officers must hold at least one unexpired security
-  // license to clock in. Admins are exempt (they may be helping cover a
-  // shift or troubleshooting a stuck record on someone else's behalf).
-  // 403 with a precise message so the mobile UI can surface the exact
-  // reason — see the banner on the employee Home tab.
-  if (req.user!.role !== "admin") {
-    const [{ count: validLicenses }] = await db
-      .select({ count: sql<number>`count(*)::int` })
-      .from(licensesTable)
-      .where(and(
-        eq(licensesTable.employeeId, req.user!.userId),
-        gte(licensesTable.expiryDate, sql`current_date`),
-      ));
-    if (!validLicenses) {
-      res.status(403).json({
-        error: "Forbidden",
-        code: "license_expired",
-        message: "Your security license has expired or is missing. Upload a renewed license from Profile → My licenses before clocking in.",
-      });
-      return;
-    }
+  // Eligibility (see lib/eligibility.ts): a worker may clock into a shift only
+  // when their EFFECTIVE capability level covers that shift's
+  // requiredLicenseLevel. Effective level is floored at 2 for every worker, so
+  // unarmed work (level <= 2) is open to ALL field staff — including unlicensed
+  // and support_staff officers — while armed (3) and L4/PPO (4) shifts still
+  // require an unexpired licence at that level. The per-shift check is applied
+  // once the target shift is resolved on each path below; admins are exempt
+  // (covering a post / fixing a stuck record on someone's behalf).
+  //
+  // This REPLACES an older blanket "must hold any unexpired licence" gate that
+  // wrongly blocked unlicensed / support staff from unarmed shifts they are
+  // fully eligible to work.
+  const isAdmin = req.user!.role === "admin";
+  // Clock-in is a field-worker action (officer / site manager) or an admin
+  // acting on their behalf. Non-worker accounts (client / dispatcher) never
+  // clock in — this route is bare `requireAuth` (admits clients), so guard the
+  // worker boundary explicitly (the removed licence gate did this incidentally).
+  if (!isAdmin && !isWorkerRole(req.user!.role)) {
+    res.status(403).json({ error: "Forbidden", message: "Only field staff can clock in." });
+    return;
   }
+  const effectiveLevel = isAdmin
+    ? Number.POSITIVE_INFINITY
+    : await getEffectiveLevel(req.user!.userId);
 
   // Geo-resolve site if no shiftId provided.
   let resolvedSite: { id: string; name: string; distanceMiles: number } | null = null;
@@ -546,6 +600,14 @@ router.post("/time-entries/clock-in", requireAuth, async (req, res): Promise<voi
         return;
       }
 
+      // Eligibility: the officer's effective level must cover the shift's
+      // requiredLicenseLevel. Unarmed (<=2) is open to all; armed (3) / L4-PPO
+      // (4) still need the licence even if an admin rostered them on it.
+      if (shift.requiredLicenseLevel > effectiveLevel) {
+        res.status(403).json(licenseLevelRejection(shift.requiredLicenseLevel));
+        return;
+      }
+
       // Clock-in window guard — see clockInWindowRejection.
       const windowRej = clockInWindowRejection(shift, new Date());
       if (windowRej) {
@@ -577,6 +639,12 @@ router.post("/time-entries/clock-in", requireAuth, async (req, res): Promise<voi
           code: "not_rostered_here",
           message: "You don't have a shift at this site. Tap your reserved shift in the Shifts tab, or move closer so GPS can place you.",
         });
+        return;
+      }
+      // Eligibility: effective level must cover the rostered shift's required
+      // level (unarmed <=2 open to all; armed/PPO need the matching licence).
+      if (ownShift.requiredLicenseLevel > effectiveLevel) {
+        res.status(403).json(licenseLevelRejection(ownShift.requiredLicenseLevel));
         return;
       }
       // Same clock-in window applies on the GPS-less site-pick path — the
@@ -614,12 +682,22 @@ router.post("/time-entries/clock-in", requireAuth, async (req, res): Promise<voi
       // GPS-verified ad-hoc clock-in: the officer is physically within range of
       // the resolved site, so it's safe to auto-assign them to an open shift
       // there (so they surface as "on duty" on the Dispatch board).
-      autoAttachedShiftId = await resolveOrAssignShiftForAdHocClockIn(
+      const resolution = await resolveOrAssignShiftForAdHocClockIn(
         req.user!.userId,
         resolvedSite.id,
         new Date(),
+        effectiveLevel,
         req.log,
       );
+      // Block (not silently downgrade) a GPS clock-in onto an armed/PPO shift
+      // the worker is rostered for but not licensed for — same 403 as the
+      // explicit path. A billing-only fallback they're ineligible for resolves
+      // to "none" (site-only clock-in), never a 403.
+      if (resolution.kind === "ineligible") {
+        res.status(403).json(licenseLevelRejection(resolution.requiredLevel));
+        return;
+      }
+      autoAttachedShiftId = resolution.kind === "shift" ? resolution.shiftId : null;
     } else if (pickedSite) {
       // Manually-picked site carries NO location proof, so we NEVER auto-assign
       // it to an arbitrary open shift. Non-admins attach only to their own

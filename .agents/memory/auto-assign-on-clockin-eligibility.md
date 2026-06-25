@@ -19,6 +19,20 @@ sync `reconcileShiftRoster`) must apply the same licence-level eligibility gate 
 (higher covers lower; effective level = MAX(highest unexpired licence, support-staff
 baseline)).
 
+**Broader rule (the geo ad-hoc resolve has THREE shift-returning paths, not just auto-assign):**
+`resolveOrAssignShiftForAdHocClockIn` can bind a `shiftId` to the time entry — and flip that
+shift to `status='active'` — via (1) an already-accepted assignment at the resolved site,
+(2) auto-assign to an open shift, or (3) a billing-only `findMatchingScheduledShift` fallback.
+The licence-level gate must cover ALL THREE, not only the assignment-creating step (2).
+Step 1 (rostered but under-licensed — e.g. an admin mis-assigned them to an armed shift) must
+return 403 `license_required` exactly like the explicit `shiftId` path. Step 3 (not rostered)
+must SKIP the attach (clock in site-only, `shiftId` null) rather than 403 — there was no
+accepted assignment to block. Pass the caller's effective level in (Infinity for admins so
+they bypass; step 2 keeps its own freshly-read worker level so admin auto-assign behaviour is
+unchanged). Attaching OR activating a higher-level shift is just as much a false
+compliance/billing record as creating the assignment, so a `shiftId`-only/`status='active'`
+flip is NOT a safe shortcut around the gate.
+
 **Scheduler roster sync:** the external scheduler is NOT trusted to vet clearance, so
 `reconcileShiftRoster` SKIPS under-licensed officers in `assignedOfficerEmails` (logged
 warn), treating them exactly like an unlisted email — not added, and removed from the

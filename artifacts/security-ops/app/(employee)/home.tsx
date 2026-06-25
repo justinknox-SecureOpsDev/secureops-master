@@ -147,9 +147,9 @@ export default function EmployeeHomeScreen() {
           accessibilityRole="button"
           accessibilityLabel={
             licenseAlert.kind === "missing"
-              ? "No active license on file. Tap to start renewal."
+              ? "No license on file. You can work unarmed posts only until HR adds one. Tap to start renewal."
               : licenseAlert.kind === "expired"
-              ? "License expired, you cannot work. Tap to start renewal."
+              ? "License expired. You can work unarmed posts only until you renew. Tap to start renewal."
               : `Renew license, ${licenseAlert.daysRemaining} days left. Tap to start renewal.`
           }
           accessibilityHint="Opens the license renewal screen"
@@ -173,16 +173,16 @@ export default function EmployeeHomeScreen() {
               ]}
             >
               {licenseAlert.kind === "missing"
-                ? "NO ACTIVE LICENSE ON FILE"
+                ? "UNARMED POSTS ONLY — NO LICENSE ON FILE"
                 : licenseAlert.kind === "expired"
-                ? "LICENSE EXPIRED — CANNOT WORK"
+                ? "UNARMED POSTS ONLY — LICENSE EXPIRED"
                 : `RENEW LICENSE — ${licenseAlert.daysRemaining} DAYS LEFT`}
             </Text>
             <Text style={[styles.licenseBannerBody, { color: colors.foreground }]}>
               {licenseAlert.kind === "missing"
-                ? "You don't have a current security license on record. You can't clock in or claim shifts until HR has one on file."
+                ? "You can work unarmed (Level 2) posts now. Armed and PPO shifts need a current security license on file — add yours to unlock them."
                 : licenseAlert.kind === "expired"
-                ? "Your security license has expired. You can't clock in or claim shifts until you upload a renewed license."
+                ? "Your security license has expired. You can still work unarmed (Level 2) posts, but armed and PPO shifts need a current license — renew to restore them."
                 : `Texas DPS renewals are running long. Start your ${licenseAlert.type ?? "security"} license renewal now so it processes before the expiry date.`}
             </Text>
             <Text style={[styles.licenseBannerCta, { color: colors.primary }]}>Tap to start renewal →</Text>
