@@ -561,7 +561,14 @@ export function RowFormDialog({
               type="button"
               variant="outline"
               onClick={async () => {
-                const id = String((initial as { id?: unknown }).id ?? "");
+                // Personnel grid rows are keyed by employees.id, but the
+                // profile-PDF route resolves by users.id — prefer userId
+                // (fall back to id), matching the "Share with client" button.
+                const id = String(
+                  (initial as { userId?: unknown; id?: unknown }).userId ??
+                    (initial as { id?: unknown }).id ??
+                    "",
+                );
                 if (!id) return;
                 try {
                   const res = await fetchWithAuth(`/api/employees/${id}/profile/pdf`);

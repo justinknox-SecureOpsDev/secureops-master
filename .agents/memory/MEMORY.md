@@ -36,6 +36,7 @@
 - [admin-portal HTTP paths & 401 logout](admin-portal-http-paths.md) — admin-portal has TWO auth HTTP paths (api() + fetchWithAuth); cross-cutting behavior like 401 auto-logout must cover both, gated on token-was-sent.
 - [Clock-in paths & dispatch board](clockin-paths-and-dispatch-board.md) — 30min-before→end window must guard explicit-shift AND site-pick paths (GPS auto-attach already time-bounded); dispatch onDuty = all open entries, skip per (userId,shiftId).
 - [Two license surfaces](two-license-surfaces.md) — license data lives in BOTH licenses table (eligibility) and employees.sia*+licenseDocKey (what OfficerProfile/PDF render); any license change must write both.
+- [employees.id vs users.id](employees-id-vs-users-id.md) — admin grid rows key by employees.id but per-user routes (profile-PDF, share) resolve by users.id; send row.userId not row.id.
 - [Level-2 eligibility floor](level-2-eligibility-floor.md) — unarmed (≤2) shifts open to ALL employees via BASE_ELIGIBILITY_LEVEL in the 2 shared helpers; effective level ≠ held licence; chat uses MAX(licenses.level), not the helpers.
 - [Bill rate is admin-only](bill-rate-admin-only.md) — billRate/billableRate (client markup) never to non-admins; payRate (own pay) ok for officers; route shift responses through stripShiftFinanceForRole.
 - [Two phone fields must sync](two-phone-fields-sync.md) — employees.phone (HR file) vs users.phoneNumber (account + ONLY field SMS reads); every phone write must mirror+E.164-normalize across both.
