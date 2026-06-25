@@ -4,10 +4,11 @@ import { eq, and, gt, gte, lt, lte, ne, sql, or, isNull, inArray } from "drizzle
 import { db, shiftsTable, shiftAssignmentsTable, usersTable, licensesTable, sitesTable, clientsTable, trainingCertificationsTable, employeesTable } from "@workspace/db";
 import { requireAuth, requireAdmin, requireAdminOrDispatcher, requireAdminOrSiteManager, requireSchedulingStaff } from "../middlewares/auth";
 import { haversineMiles } from "../lib/geofence";
-import { getEffectiveLevel, effectiveLevelSql } from "../lib/eligibility";
+import { getEffectiveLevel, effectiveLevelSql, WORKER_ROLES } from "../lib/eligibility";
 import { pushShiftUpsert, pushShiftDelete, pushAssignmentEvent } from "../lib/schedulerSync";
 import { MAX_SHIFT_HOURS, validateShiftWindow } from "../lib/shiftWindow";
 import { assertCanManageSite, getManagedSiteIds, getManagerUserIdsForSite, managesSite } from "../lib/siteManagerAuth";
+import { notifyShiftCreated, fmtShiftWhen, shiftLevelLabel } from "../lib/shiftNotify";
 
 const router: IRouter = Router();
 
@@ -53,31 +54,6 @@ function localDateInTz(utcMs: number, tz: string): string {
   } catch {
     return new Date(utcMs).toISOString().slice(0, 10);
   }
-}
-
-/** Short label for a shift's required level used in push/SMS copy. */
-function shiftLevelLabel(lvl: number): string {
-  if (lvl <= 1) return "Support";
-  if (lvl === 4) return "L4/PPO";
-  return `L${lvl}+`;
-}
-
-// Company operating timezone (Central). Shift times are stored as UTC instants;
-// notification/SMS copy must render them in the officer's local zone, otherwise
-// the UTC clock reading is shown (e.g. a 5:30 PM Central start renders as
-// "10:30 PM", which reads like the shift's end time).
-export const COMPANY_TZ = "America/Chicago";
-
-/** Format a shift instant for human-facing push/SMS copy, in company time. */
-export function fmtShiftWhen(when: Date | string | number): string {
-  return new Date(when).toLocaleString("en-US", {
-    timeZone: COMPANY_TZ,
-    weekday: "short",
-    month: "short",
-    day: "numeric",
-    hour: "2-digit",
-    minute: "2-digit",
-  });
 }
 
 /**
@@ -412,58 +388,13 @@ router.post("/shifts", requireAdminOrSiteManager, async (req, res): Promise<void
     );
   }
 
-  // Broadcast push notification to all qualifying active employees
-  try {
-    const candidates = await db
-      .select({
-        userId: usersTable.id,
-        effLevel: effectiveLevelSql,
-      })
-      .from(usersTable)
-      .leftJoin(licensesTable, eq(licensesTable.employeeId, usersTable.id))
-      .leftJoin(employeesTable, eq(employeesTable.userId, usersTable.id))
-      .where(and(eq(usersTable.role, "employee"), eq(usersTable.status, "active")))
-      .groupBy(usersTable.id);
-
-    const eligibleIds = candidates
-      .filter((c) => c.effLevel >= lvl)
-      .map((c) => c.userId);
-
-    if (eligibleIds.length > 0) {
-      const { sendPushToUsers } = await import("../lib/push");
-      const start = fmtShiftWhen(shift.startTime);
-      const levelLabel = shiftLevelLabel(lvl);
-      await sendPushToUsers(eligibleIds, {
-        title: `🛡️ New ${levelLabel} Shift Available`,
-        body: `${shift.title} @ ${shift.clientName} — ${start}`,
-        data: { type: "shift_available", shiftId: shift.id },
-      });
-    }
-  } catch (err) {
-    req.log.warn({ err }, "Failed to broadcast new shift push");
-  }
-
-  // Notify the site's assigned managers that a new shift was posted at their
-  // site. Managers have role=site_manager, so they're never in the employee
-  // broadcast above — no double-send. Best-effort; never blocks the response.
-  if (shift.siteId) {
-    try {
-      const managerIds = await getManagerUserIdsForSite(shift.siteId);
-      if (managerIds.length > 0) {
-        const { sendPushToUsers } = await import("../lib/push");
-        const { sendSmsToUsers } = await import("../lib/sms");
-        const start = fmtShiftWhen(shift.startTime);
-        await sendPushToUsers(managerIds, {
-          title: "🗓️ New Shift At Your Site",
-          body: `${shift.title}${shift.clientName ? ` @ ${shift.clientName}` : ""} — ${start}`,
-          data: { type: "site_shift_created", shiftId: shift.id, siteId: shift.siteId },
-        });
-        void sendSmsToUsers(managerIds, `[WCSG] New shift at your site: ${shift.title} — ${start}.`);
-      }
-    } catch (err) {
-      req.log.warn({ err }, "Failed to notify site managers of new shift");
-    }
-  }
+  // Fan out new-shift notifications: a "shift available" push to eligible
+  // workers (employees AND site managers, minus this site's own managers) plus
+  // the site's managers' "at your site" push + SMS. Shared with the scheduler
+  // ingest path so a shift notifies the same people regardless of origin.
+  // Best-effort (never throws); runs before the response so the recipient set
+  // is computed against the just-inserted row.
+  await notifyShiftCreated(shift);
 
   // Outbound sync to scheduler (best-effort, after response)
   void pushShiftUpsert(shift);
@@ -1230,8 +1161,9 @@ router.post("/shifts/:id/notify-vacancy", requireAdminOrDispatcher, async (req, 
     return;
   }
 
-  // Find active employees whose highest unexpired licence covers the requirement
-  // and who aren't already assigned to this shift.
+  // Find active workers (employees AND site managers) whose highest unexpired
+  // licence covers the requirement and who aren't already assigned to this
+  // shift. Site managers are workers too, so they belong in the vacancy pool.
   const candidates = await db
     .select({
       userId: usersTable.id,
@@ -1240,7 +1172,7 @@ router.post("/shifts/:id/notify-vacancy", requireAdminOrDispatcher, async (req, 
     .from(usersTable)
     .leftJoin(licensesTable, eq(licensesTable.employeeId, usersTable.id))
     .leftJoin(employeesTable, eq(employeesTable.userId, usersTable.id))
-    .where(and(eq(usersTable.role, "employee"), eq(usersTable.status, "active")))
+    .where(and(inArray(usersTable.role, [...WORKER_ROLES]), eq(usersTable.status, "active")))
     .groupBy(usersTable.id);
 
   const assignedSet = new Set(assignedIds.filter(Boolean));

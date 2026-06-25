@@ -27,6 +27,7 @@ import {
   siteManagersTable,
 } from "@workspace/db";
 import app from "../app";
+import { processInboundShift } from "../routes/schedulerWebhook";
 import { signToken } from "../middlewares/auth";
 import { sendPushToUsers } from "../lib/push";
 import { sendSmsToUsers } from "../lib/sms";
@@ -40,6 +41,7 @@ const passwordHash = bcrypt.hashSync("test-password", 4);
 type Ctx = {
   adminId: string;
   managerAId: string;
+  managerBId: string;
   claimOfficerId: string;
   adminToken: string;
   claimOfficerToken: string;
@@ -68,10 +70,14 @@ async function makeUser(role: string, suffix: string): Promise<string> {
 beforeAll(async () => {
   ctx.adminId = await makeUser("admin", "admin");
   ctx.managerAId = await makeUser("site_manager", "managerA");
+  ctx.managerBId = await makeUser("site_manager", "managerB");
   ctx.claimOfficerId = await makeUser("employee", "officer");
 
   await db.insert(employeesTable).values([
     { userId: ctx.managerAId, position: "officer", skills: [] },
+    // managerB is a site_manager (a worker) NOT assigned to siteA — used to
+    // prove site managers receive the same worker broadcast as employees.
+    { userId: ctx.managerBId, position: "officer", skills: [] },
     // Support staff: effective level 1 with no licence, so they can claim the
     // level-1 fixture shift below.
     { userId: ctx.claimOfficerId, position: "support_staff", skills: [] },
@@ -193,5 +199,73 @@ describe("POST /shifts/:id/claim — approver notification dedupe", () => {
     expect(recipients).toContain(ctx.adminId);
     // Deduped: no recipient id appears twice.
     expect(recipients.length).toBe(new Set(recipients).size);
+  });
+});
+
+describe("POST /shifts — site managers receive the worker broadcast", () => {
+  it("pages site managers (incl. this site's own) in the worker broadcast, AND the manager notice", async () => {
+    const start = new Date(Date.now() + 96 * 60 * 60 * 1000);
+    const end = new Date(start.getTime() + 4 * 60 * 60 * 1000);
+    const res = await request(app)
+      .post("/api/shifts")
+      .set(authed(ctx.adminToken))
+      .send({
+        title: `${TAG}-worker-bcast`,
+        siteId: ctx.siteAId,
+        startTime: start.toISOString(),
+        endTime: end.toISOString(),
+        payRate: "30.00",
+        billRate: "55.00",
+        requiredLicenseLevel: 2,
+        headcount: 1,
+      });
+    expect(res.status).toBe(201);
+
+    const available = pushCallByType("shift_available");
+    expect(available).not.toBeNull();
+    // A site_manager who is a worker (and not THIS site's manager) is paged
+    // exactly like any employee — the "same employee notifications".
+    expect(available!.recipients).toContain(ctx.managerBId);
+    // This site's OWN manager ALSO receives the worker broadcast (the "same
+    // employee notifications as well") — no exclusion.
+    expect(available!.recipients).toContain(ctx.managerAId);
+
+    // ...and the same manager additionally gets the manager-specific notice, so
+    // they are notified BOTH ways for a shift at their site.
+    const sitePush = pushCallByType("site_shift_created");
+    expect(sitePush).not.toBeNull();
+    expect(sitePush!.recipients).toContain(ctx.managerAId);
+  });
+});
+
+describe("processInboundShift — scheduler-created shift notifications", () => {
+  it("notifies the site's managers AND broadcasts to eligible workers on create", async () => {
+    const start = new Date(Date.now() + 120 * 60 * 60 * 1000);
+    const end = new Date(start.getTime() + 4 * 60 * 60 * 1000);
+    const result = await processInboundShift({
+      id: `${TAG}-ext-create`,
+      title: `${TAG}-sched-create`,
+      siteName: `${TAG}-siteA`,
+      startTime: start.toISOString(),
+      endTime: end.toISOString(),
+      requiredLicenseLevel: 2,
+      headcount: 1,
+      updatedAt: new Date().toISOString(),
+    });
+    expect(result.action).toBe("created");
+
+    // The site's manager gets the manager-specific notice...
+    const sitePush = pushCallByType("site_shift_created");
+    expect(sitePush).not.toBeNull();
+    expect(sitePush!.recipients).toContain(ctx.managerAId);
+
+    // ...and eligible workers get the "shift available" broadcast — proving
+    // scheduler-sourced shifts notify the same people as the manual route. This
+    // includes an unrelated site_manager (managerB) AND this site's own manager
+    // (managerA), who therefore gets BOTH notifications.
+    const available = pushCallByType("shift_available");
+    expect(available).not.toBeNull();
+    expect(available!.recipients).toContain(ctx.managerBId);
+    expect(available!.recipients).toContain(ctx.managerAId);
   });
 });

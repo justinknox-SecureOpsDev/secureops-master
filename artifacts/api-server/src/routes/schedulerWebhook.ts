@@ -12,13 +12,14 @@
  */
 
 import { Router, type IRouter, type Request, type Response, type NextFunction } from "express";
-import { eq, and, sql, gte, lte, or, inArray, notInArray } from "drizzle-orm";
+import { eq, and, sql, gte, lte, or, inArray, notInArray, getTableColumns } from "drizzle-orm";
 import { z } from "zod/v4";
 import { db, shiftsTable, timeEntriesTable, usersTable, sitesTable, shiftAssignmentsTable, auditLogsTable } from "@workspace/db";
 import { verifySignature, SCHEDULER_SOURCE, type SchedulerShiftPayload, type SchedulerClockEventPayload } from "../lib/schedulerSync";
 import { getEffectiveLevel } from "../lib/eligibility";
 import { validateShiftWindow } from "../lib/shiftWindow";
 import { logger } from "../lib/logger";
+import { notifyShiftCreated, fmtShiftWhen } from "../lib/shiftNotify";
 import rateLimit, { MemoryStore } from "express-rate-limit";
 
 const router: IRouter = Router();
@@ -251,7 +252,6 @@ async function reconcileShiftRoster(shiftId: string, assignedOfficerEmails: stri
         .where(eq(shiftsTable.id, shiftId))
         .limit(1);
       const title = shiftRow?.title ?? "a shift";
-      const { fmtShiftWhen } = await import("./shifts");
       const when = shiftRow?.startTime ? fmtShiftWhen(shiftRow.startTime) : "the scheduled time";
       const { sendPushToUsers } = await import("../lib/push");
       const { sendSmsToUsers } = await import("../lib/sms");
@@ -571,7 +571,7 @@ export async function processInboundShift(payload: SchedulerShiftPayload): Promi
       syncSource: SCHEDULER_SOURCE,
     },
   })
-  .returning();
+  .returning({ ...getTableColumns(shiftsTable), wasInserted: sql<boolean>`(xmax::text::bigint = 0)` });
 
   // Reconcile the officer roster when the scheduler supplied one. An omitted
   // field means "no roster info in this payload" — leave assignments untouched.
@@ -579,7 +579,22 @@ export async function processInboundShift(payload: SchedulerShiftPayload): Promi
     await reconcileShiftRoster(created.id, payload.assignedOfficerEmails);
   }
 
-  return { action: "created", secureopsId: created.id };
+  // Alert eligible workers + the site's managers about the newly created shift,
+  // mirroring the manual POST /shifts route so scheduler-sourced shifts (the
+  // primary source in production) no longer reach nobody. Best-effort.
+  //
+  // Notify ONLY on a genuine INSERT. The webhook and the periodic reconcile pull
+  // can both process the same externalId concurrently; both may miss the SELECT
+  // above and reach this upsert. The unique (externalSource, externalId) index
+  // guarantees exactly one row is inserted — that returned row has xmax = 0. The
+  // loser takes the ON CONFLICT DO UPDATE branch (xmax != 0) and must NOT page
+  // anyone again, or managers/workers get two notifications for one new shift.
+  const wasInserted = created.wasInserted === true;
+  if (wasInserted) {
+    await notifyShiftCreated(created);
+  }
+
+  return { action: wasInserted ? "created" : "updated", secureopsId: created.id };
 }
 
 /**

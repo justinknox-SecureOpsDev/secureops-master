@@ -31,6 +31,7 @@ import { requireClient, requireAdmin } from "../middlewares/auth";
 import { buildIncidentReportPdf } from "../lib/incidentPdf";
 import { buildInvoicePdf } from "../lib/invoicePdf";
 import { sendEmail } from "../lib/email";
+import { getManagerUserIdsForSite } from "../lib/siteManagerAuth";
 
 const router: IRouter = Router();
 
@@ -1395,6 +1396,32 @@ router.post(
         return;
       }
       throw err;
+    }
+
+    // Notify the site's assigned managers about the newly created coverage
+    // shifts — one summary push + SMS, not one per occurrence (a date-range
+    // request can create many rows across multiple licence levels). Mirrors the
+    // POST /shifts/repeat summary. Best-effort: a notification failure must
+    // never fail the approval.
+    const createdCount = updated?.createdShiftIds?.length ?? 0;
+    if (createdCount > 0 && sr.siteId) {
+      try {
+        const managerIds = await getManagerUserIdsForSite(sr.siteId);
+        if (managerIds.length > 0) {
+          const { sendPushToUsers } = await import("../lib/push");
+          const { sendSmsToUsers } = await import("../lib/sms");
+          const siteLabel = site?.name ?? "your site";
+          const noun = `coverage shift${createdCount === 1 ? "" : "s"}`;
+          await sendPushToUsers(managerIds, {
+            title: "🗓️ New Shifts At Your Site",
+            body: `${createdCount} new ${noun} approved at ${siteLabel}.`,
+            data: { type: "site_shift_created", siteId: sr.siteId },
+          });
+          void sendSmsToUsers(managerIds, `[WCSG] ${createdCount} new ${noun} approved at ${siteLabel}.`);
+        }
+      } catch (err) {
+        req.log.warn({ err }, "Failed to notify site managers of approved coverage shifts");
+      }
     }
 
     res.json({ ...updated, createdShiftsCount: updated?.createdShiftIds?.length ?? 0 });

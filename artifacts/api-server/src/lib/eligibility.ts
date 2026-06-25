@@ -58,6 +58,15 @@ export function isWorkerRole(role: string | null | undefined): boolean {
 }
 
 /**
+ * The set of roles that represent actual shift workers, for use in `inArray`
+ * SQL filters when targeting the worker pool (e.g. shift-available / vacancy
+ * notification broadcasts). The SQL-level mirror of `isWorkerRole` — site
+ * managers are workers too, so they must be included anywhere employees are
+ * notified or listed as eligible.
+ */
+export const WORKER_ROLES = ["employee", "site_manager"] as const;
+
+/**
  * Highest effective capability level for a single user:
  * max(highest unexpired licence level, position baseline, BASE_ELIGIBILITY_LEVEL).
  * The BASE_ELIGIBILITY_LEVEL floor is applied ONLY when the user is a worker
