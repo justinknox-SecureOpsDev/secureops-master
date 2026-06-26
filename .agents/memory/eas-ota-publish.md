@@ -19,6 +19,8 @@ Publishing an EAS Update (OTA) for the Expo mobile app from inside the agent env
    `EAS_NO_VCS=1 ./node_modules/.bin/eas update --branch production --skip-bundler --input-dir dist --platform android --message "…" --non-interactive`
 3. Repeat for `ios` (re-export overwrites `dist`; warm cache makes it quick).
 
+**Cold-cache first export gets SIGKILLed (exit -1, NO output) — retry once.** Empirically the FIRST `expo export` of each platform on a cold Metro cache exceeds the 120 s foreground cap and is killed (exit code -1, no output — not a code error). Re-run the identical command immediately; the now-warm cache finishes well under 120 s. Switching platforms (ios→android) cools the cache enough that android's first attempt is ALSO killed — retry it too. Budget ~2 export attempts per platform.
+
 **The UPLOAD step (not just export) can also blow the 120 s cap** — `eas update` runs a
 "Computing project fingerprints" phase that sometimes hangs past the window (seen on the
 iOS upload; android usually squeaks through). Fix: add `EAS_SKIP_AUTO_FINGERPRINT=1` to the
