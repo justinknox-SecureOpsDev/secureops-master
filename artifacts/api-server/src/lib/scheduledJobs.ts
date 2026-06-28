@@ -40,7 +40,7 @@ const MIN_MS = 60 * 1000;
 // Auto clock-out: how long past a shift's scheduled end an officer can
 // stay clocked in before we close their entry (unless still inside the
 // geofence — see autoClockOutEndedShifts).
-const AUTO_CLOCKOUT_GRACE_MS = 10 * MIN_MS;
+const AUTO_CLOCKOUT_GRACE_MS = 30 * MIN_MS;
 
 /**
  * Background maintenance jobs:
@@ -1200,7 +1200,7 @@ export function startScheduledJobs(intervalMs: number = HOUR_MS): NodeJS.Timeout
   schedule("high-risk-digest", flushHighRiskSelfEditDigests, 5 * MIN_MS);
   // Forgot-to-clock-out — every 5 minutes; idempotent per active shift.
   schedule("forgot-clock-out", sendForgotClockOutReminders, 5 * MIN_MS);
-  // Auto clock-out officers >10m past shift end who aren't still on site
+  // Auto clock-out officers >30m past shift end who aren't still on site
   // — every 5 minutes; atomic claim makes it idempotent per entry.
   schedule("auto-clock-out", autoClockOutEndedShifts, 5 * MIN_MS);
   // Lock draft invoices whose week has ended (Mon 00:00 UTC). After
