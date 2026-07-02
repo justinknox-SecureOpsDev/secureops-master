@@ -28,7 +28,7 @@ describe("buildNavGroups", () => {
     ]);
   });
 
-  it("places HR items under Human Resources only", () => {
+  it("places HR items under Personnel Management only", () => {
     const hr = adminGroups.find((g) => g.key === "hr");
     expect(hr?.items.map((i) => i.href)).toEqual([
       "/hr/applications",
