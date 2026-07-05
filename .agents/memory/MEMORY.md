@@ -64,3 +64,4 @@
 - [api-server suite OOM](api-server-suite-oom.md) — full api-server vitest killed (-1, no output) under concurrent dev workflows = OOM not failure; run in ~6-file batches via explicit paths.
 - [Right-to-work self-edit](right-to-work-self-attested.md) — officers CAN self-edit rightToWorkStatus/DOB/SSN/etc (per "full access" directive); compliance fields are self-attested, fire the high-risk HR alert. Don't revert to admin-only.
 - [Drizzle push interactive prompt workaround](drizzle-push-interactive.md) — drizzle-kit push prompts interactively when adding a unique constraint to a table with rows; apply the SQL directly via executeSql (DROP old index, ALTER COLUMN, CREATE new index) then verify schema-drift passes.
+- [pnpm override crosses major version](pnpm-override-major-version-crossing.md) — unbounded override (no upper bound) can jump a transitive dep past its intended major, breaking peers (e.g. jsdom+undici); bound ranges & re-run tests, not just audit.
