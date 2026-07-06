@@ -36,9 +36,24 @@ export async function pickAndUploadImage(opts?: {
     if (!perm.granted) throw new Error("Photo library permission denied");
   }
 
+  // iPhones store photos as HEIC by default. With the default asset
+  // representation (`.current`) expo-image-picker hands back the raw HEIC
+  // bytes with `mimeType: image/heic`, which the API rejects (415) and which
+  // browsers (admin portal) can't render. `Compatible` makes iOS transcode to
+  // JPEG at pick time, so we always upload web-viewable JPEG with a correct
+  // content type. This is a runtime picker option (already compiled into the
+  // native binary) so it ships via OTA without an app rebuild.
+  const pickerOptions: ImagePicker.ImagePickerOptions = {
+    mediaTypes: ["images"],
+    quality,
+    allowsEditing: false,
+    preferredAssetRepresentationMode:
+      ImagePicker.UIImagePickerPreferredAssetRepresentationMode.Compatible,
+  };
+
   const result = source === "camera"
-    ? await ImagePicker.launchCameraAsync({ mediaTypes: ["images"], quality, allowsEditing: false })
-    : await ImagePicker.launchImageLibraryAsync({ mediaTypes: ["images"], quality, allowsEditing: false });
+    ? await ImagePicker.launchCameraAsync(pickerOptions)
+    : await ImagePicker.launchImageLibraryAsync(pickerOptions);
 
   if (result.canceled || !result.assets?.[0]) return null;
   const asset = result.assets[0];

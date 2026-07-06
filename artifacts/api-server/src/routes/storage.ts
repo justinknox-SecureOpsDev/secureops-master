@@ -42,6 +42,11 @@ const ALLOWED_CONTENT_TYPES = new Set([
   "image/png",
   "image/gif",
   "image/webp",
+  // Apple devices capture photos as HEIC/HEIF by default. Accepted so mobile
+  // uploads from iPhones don't hard-fail (415). Newer app builds transcode to
+  // JPEG on-device before upload, but older/installed clients still send these.
+  "image/heic",
+  "image/heif",
   "application/pdf",
   "application/msword",
   "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
@@ -67,6 +72,8 @@ const EXTENSION_CONTENT_TYPES: Record<string, string> = {
   png: "image/png",
   gif: "image/gif",
   webp: "image/webp",
+  heic: "image/heic",
+  heif: "image/heif",
   txt: "text/plain",
 };
 
