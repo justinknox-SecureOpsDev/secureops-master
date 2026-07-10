@@ -97,15 +97,22 @@ function stripShiftFinanceForRole<T extends Record<string, unknown>>(role: strin
 }
 
 router.get("/shifts", requireAuth, async (req, res): Promise<void> => {
-  const { status, employeeId, from, to } = req.query as { status?: string; employeeId?: string; from?: string; to?: string };
+  const { status, employeeId, from, to, view } = req.query as { status?: string; employeeId?: string; from?: string; to?: string; view?: string };
   // Admins and dispatchers get a full global read (they assign/notify/schedule
   // across every site). Site managers get a SCOPED read: shifts at the sites
   // they manage, PLUS any shift they're personally rostered on (their officer
   // view) — finance is stripped for them below. Employees stay scoped to their
   // own assigned + qualifying-open shifts.
+  //
+  // ?view=worker: ANY staff role can ask for the personal worker feed (their
+  // own assigned shifts + qualifying open shifts) instead of their default
+  // read. All internal staff work shifts, so admins/dispatchers/site managers
+  // use this for "my work" surfaces; the eligibility gate (real effective
+  // level + held trainings) is applied to them exactly like an employee.
   const role = req.user!.role;
-  const isGlobalReader = role === "admin" || role === "dispatcher";
-  const isSiteManager = role === "site_manager";
+  const workerView = view === "worker";
+  const isGlobalReader = !workerView && (role === "admin" || role === "dispatcher");
+  const isSiteManager = !workerView && role === "site_manager";
   const userId = req.user!.userId;
 
   const conditions = [];

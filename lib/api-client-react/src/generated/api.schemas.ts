@@ -2295,6 +2295,10 @@ export type GetShiftsParams = {
   employeeId?: string;
   from?: string;
   to?: string;
+  /**
+   * Set to `worker` to get the personal worker feed (own assigned shifts + qualifying open shifts) regardless of role. Admins and dispatchers use this for "my work" surfaces instead of their default global read.
+   */
+  view?: GetShiftsView;
 };
 
 export type GetShiftsStatus =
@@ -2305,6 +2309,12 @@ export const GetShiftsStatus = {
   active: "active",
   completed: "completed",
   cancelled: "cancelled",
+} as const;
+
+export type GetShiftsView = (typeof GetShiftsView)[keyof typeof GetShiftsView];
+
+export const GetShiftsView = {
+  worker: "worker",
 } as const;
 
 export type NotifyShiftVacancy200 = {

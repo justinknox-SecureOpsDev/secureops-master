@@ -65,10 +65,15 @@ export default function EmployeeShiftsScreen() {
   // even without a licence; licensed officers keep their licence level.
   const myEffectiveLevel = myMaxLevel ?? (isSupportStaff ? 1 : null);
 
+  // view=worker: always ask for the personal worker feed (own assigned +
+  // qualifying open shifts). For employees this matches the default; for
+  // admins / dispatchers / site managers it swaps their global/management
+  // read for the same personal feed — every staff role can pick up shifts.
   const statusParam = filter === "available" ? "upcoming" : filter;
+  const shiftsParams = { status: statusParam as any, view: "worker" as const };
   const { data: allShifts, isLoading, error, refetch } = useGetShifts(
-    { status: statusParam as any },
-    { query: { queryKey: getGetShiftsQueryKey({ status: statusParam as any }) } },
+    shiftsParams,
+    { query: { queryKey: getGetShiftsQueryKey(shiftsParams) } },
   );
 
   const updateAssignment = useUpdateShiftAssignment();

@@ -1,54 +1,49 @@
 ---
-name: Level-2 eligibility floor
-description: Unarmed (level ≤ 2) shifts are open to every employee; how the floor is implemented and what it must NOT touch.
+name: Level-2 eligibility floor & worker roles
+description: Unarmed (level ≤ 2) shifts are open to every internal staff role; how the floor and the WORKER_ROLES gate are implemented and what they must NOT touch.
 ---
 
-# Level-2 eligibility floor
+# Level-2 eligibility floor & worker roles
 
-`lib/eligibility.ts` (api-server) defines `BASE_ELIGIBILITY_LEVEL = 2`. The shared
-helpers floor at it, but the floor is EMPLOYEE-only (see role gate below):
-- `getEffectiveLevel(userId)` → `Math.max(licenceMax, positionBaseline, isWorkerRole(role) ? 2 : 0)` — floor ONLY for worker roles (employee / site_manager)
-- `effectiveLevelSql` → `greatest(licenceMax, supportBaseline, 2)` — floors unconditionally; safe only because every caller pre-filters `role='employee'`
+`lib/eligibility.ts` (api-server) defines `BASE_ELIGIBILITY_LEVEL = 2` and
+`WORKER_ROLES = [employee, site_manager, dispatcher, admin]` with `isWorkerRole`:
+- `getEffectiveLevel(userId)` → `Math.max(licenceMax, positionBaseline, isWorkerRole(role) ? 2 : 0)` — floor for ALL worker roles
+- `effectiveLevelSql` → `greatest(licenceMax, supportBaseline, 2)` — floors unconditionally; safe only because every caller pre-filters `inArray(role, WORKER_ROLES)`
 
-**Rule:** any active employee can SEE and ACCEPT (claim) level-1 and level-2
-unarmed shifts regardless of whether they hold a licence. Armed (3) and L4/PPO (4)
-still require the officer to actually hold an unexpired licence at that level.
+**Rule (July 2026):** EVERY internal staff role — admin, dispatcher, site_manager,
+employee — has employee-level worker permissions: see/claim/be-assigned shifts.
+Unarmed (level 1–2) work is open to all of them regardless of licence. Armed (3)
+and L4/PPO (4) still require an actually held unexpired licence at that level.
 
-**Why:** business decision — WCSG wants unarmed posts fillable by anyone on staff,
-not just licensed officers. Support-staff baseline (1) is now subsumed by the floor.
+**Why:** business decision — WCSG staff at every level work shifts; the earlier
+employee-only worker set was replaced. Support-staff baseline (1) is subsumed.
 
-**The floor is EMPLOYEE-only, gated on `users.role`.** `getEffectiveLevel` floors
-at 2 ONLY when the user's role is a worker role (`employee` / `site_manager`, via
-`isWorkerRole`); non-worker accounts (admin / dispatcher / client) stay at their
-real level (0). This matters because the claim route is bare `requireAuth` and
-manual/scheduler assignment takes an arbitrary user id — an unconditional floor
-would silently let a non-employee claim or be assigned to unarmed shifts. **Gate
-on role, NOT the presence of an `employees` row** — provisioning is not guaranteed
-to create an employees row (test fixtures and some data states have role=employee
-with no employees row), so an employees-row gate wrongly drops real employees to
-0. The SQL helper `effectiveLevelSql` and the inline dispatch `effLevel` floor
-unconditionally, but that is safe because every query using them is already scoped
-to `role='employee' AND status='active'`.
+**The ONLY excluded role is `client` (external client-portal users).** The floor
+is gated on `isWorkerRole`, and the client barrier is the WORKER_ROLES pre-filter
+plus an explicit `isWorkerRole` 403 on the claim route — an unconditional floor
+without those gates would let client accounts claim unarmed shifts. **Gate on
+role, NOT the presence of an `employees` row** — provisioning is not guaranteed
+to create an employees row (admins and test fixtures may lack one), so an
+employees-row gate wrongly drops real workers to 0.
 
 **How to apply:**
 - The two shared helpers are the single point of truth. Every shift-eligibility
-  surface (shifts list/claim/assign/broadcast, time-entry clock-in auto-assign,
-  shift swaps, availability, scheduler webhook) inherits the floor automatically —
-  do NOT re-implement an eligibility comparison anywhere else.
-- One surface does NOT use the helpers: `dispatch.ts /assign-nearest` computes its
-  own correlated-subquery `effLevel` (the aggregate-form `effectiveLevelSql` needs
-  a GROUP BY it doesn't have). It was given the same `GREATEST(..., 2)` floor — if
-  you touch eligibility, remember this second inline copy exists.
-- The effective level is an ELIGIBILITY figure, **not** a statement of a held
-  licence. A no-licence employee reads as effective 2 but holds nothing. Any
-  surface that reports a *held* licence (officer profile, PDFs, licence grid, and
-  the claim/assign 403 messages) must read the licence rows directly — never the
-  effective level. The 403 messages describe the *requirement* ("requires a valid
-  Level 3 (armed) licence …"), not the caller's level, for exactly this reason.
-- **Chat is NOT affected.** Chat license-level / site rooms compute membership from
-  `MAX(licenses.level)` directly in their own SQL, not from these helpers. Flooring
-  eligibility must never silently widen chat room access — keep chat reading the
-  real licence max.
-- Tests that prove the eligibility GATE still works must use an armed (level 3+)
-  shift for the "under-licensed officer is blocked/skipped" case; a level-2 shift
-  no longer exercises the gate because everyone clears it.
+  surface (shifts list/claim/assign/broadcast, clock-in auto-assign, swaps,
+  availability, scheduler) inherits floor + role set automatically — never
+  re-implement eligibility or a role list elsewhere.
+- `dispatch.ts /assign-nearest` keeps its own inline correlated-subquery
+  `effLevel` with the same `GREATEST(..., 2)` floor — second inline copy exists.
+- `GET /shifts?view=worker` gives admins/dispatchers/site-managers the PERSONAL
+  employee feed (real `getEffectiveLevel`, not global read); finance stripping
+  stays keyed on the RAW role, so site_manager loses all finance even there.
+- Effective level is an ELIGIBILITY figure, **not** a held licence. Surfaces
+  reporting a *held* licence (profile, PDFs, licence grid, 403 messages) must
+  read licence rows directly.
+- **Chat is NOT affected.** Chat rooms compute membership from
+  `MAX(licenses.level)` directly — the floor and widened WORKER_ROLES must never
+  silently widen chat access.
+- Gate tests must use an armed (level 3+) shift for "blocked" cases; level-2 no
+  longer exercises the gate. The claim-route client-exclusion test covers the
+  403 barrier.
+- Known side effect: admins/dispatchers now receive worker broadcast pushes on
+  shift creation (they're in the qualifying-worker set).

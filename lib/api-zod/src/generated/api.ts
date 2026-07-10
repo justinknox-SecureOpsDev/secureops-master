@@ -1096,6 +1096,12 @@ export const GetShiftsQueryParams = zod.object({
   employeeId: zod.coerce.string().optional(),
   from: zod.date().optional(),
   to: zod.date().optional(),
+  view: zod
+    .enum(["worker"])
+    .optional()
+    .describe(
+      'Set to `worker` to get the personal worker feed (own assigned shifts + qualifying open shifts) regardless of role. Admins and dispatchers use this for \"my work\" surfaces instead of their default global read.',
+    ),
 });
 
 export const GetShiftsResponseItem = zod.object({

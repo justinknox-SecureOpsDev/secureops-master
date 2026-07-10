@@ -681,6 +681,16 @@ paths:
           schema:
             type: string
             format: date
+        - name: view
+          in: query
+          description: >-
+            Set to `worker` to get the personal worker feed (own assigned
+            shifts + qualifying open shifts) regardless of role. Admins and
+            dispatchers use this for "my work" surfaces instead of their
+            default global read.
+          schema:
+            type: string
+            enum: [worker]
       responses:
         "200":
           description: List of shifts

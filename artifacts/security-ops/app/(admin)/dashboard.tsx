@@ -318,11 +318,16 @@ export default function AdminDashboardScreen() {
             { label: "Payroll", icon: "dollar-sign", route: "/(admin)/payroll" },
             { label: "Invoices", icon: "file-text", route: "/(admin)/invoices" },
             { label: "Licences", icon: "award", route: "/(admin)/licenses" },
-          ].map(({ label, icon, route }) => (
+            // Admins are shift workers too: "My Work" switches to the officer
+            // shell (Home / My Shifts / Clock / …) where they can claim and
+            // work shifts like any employee. replace() swaps tab navigators
+            // cleanly; the profile screen there offers "Switch to Admin" back.
+            { label: "My Work", icon: "user", route: "/(employee)/home", replace: true },
+          ].map(({ label, icon, route, replace }) => (
             <TouchableOpacity
               key={label}
               style={[styles.actionBtn, { backgroundColor: colors.card, borderColor: colors.border }]}
-              onPress={() => router.push(route as any)}
+              onPress={() => (replace ? router.replace(route as any) : router.push(route as any))}
               accessibilityRole="button"
               accessibilityLabel={label}
             >

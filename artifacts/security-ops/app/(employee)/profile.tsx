@@ -250,6 +250,9 @@ export default function EmployeeProfileScreen() {
   // Site managers keep the "no financial info" invariant inside the employee
   // experience: hide their own pay rate, paystubs and W-2 doc.
   const isSiteManager = user?.role === "site_manager";
+  // Admins can work shifts too — when they're in the officer shell ("My Work"
+  // from the admin dashboard), give them a way back to the admin tabs.
+  const isAdmin = user?.role === "admin";
   const { open: openTour } = useTour();
   const { highContrast, setHighContrast } = useAccessibility();
   const topPad = useTopPad();
@@ -320,6 +323,17 @@ export default function EmployeeProfileScreen() {
       <View style={[styles.topBar, { paddingTop: topPad + 12, borderBottomColor: colors.border }]}>
         <Text style={[styles.pageTitle, { color: colors.foreground }]} accessibilityRole="header">My Profile</Text>
         <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
+          {isAdmin && (
+            <TouchableOpacity
+              onPress={() => router.replace("/(admin)/dashboard" as any)}
+              style={[styles.editBtn, { backgroundColor: colors.secondary, borderWidth: 1, borderColor: colors.border }]}
+              accessibilityRole="button"
+              accessibilityLabel="Switch back to the admin dashboard"
+            >
+              <Feather name="shield" size={14} color={colors.accent} />
+              <Text style={[styles.editBtnText, { color: colors.accent }]}>Admin</Text>
+            </TouchableOpacity>
+          )}
           <TouchableOpacity
             onPress={() => router.push("/edit-profile" as any)}
             style={[styles.editBtn, { backgroundColor: colors.primary }]}
@@ -346,7 +360,7 @@ export default function EmployeeProfileScreen() {
           <View style={{ flex: 1, gap: 2 }}>
             <Text style={[styles.heroName, { color: colors.foreground }]}>{p?.firstName} {p?.lastName}</Text>
             <View style={[styles.roleBadge, { backgroundColor: colors.primary + "20", borderColor: colors.primary + "50" }]}>
-              <Text style={[styles.roleText, { color: colors.primary }]}>{isSiteManager ? "SITE MANAGER" : "SECURITY OFFICER"}</Text>
+              <Text style={[styles.roleText, { color: colors.primary }]}>{isAdmin ? "ADMINISTRATOR" : (user?.role as string) === "dispatcher" ? "DISPATCHER" : isSiteManager ? "SITE MANAGER" : "SECURITY OFFICER"}</Text>
             </View>
           </View>
         </View>
