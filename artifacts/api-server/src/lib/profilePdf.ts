@@ -1,6 +1,7 @@
 import PDFDocument from "pdfkit";
 import { Readable } from "node:stream";
-import { eq, and } from "drizzle-orm";
+import { eq, and, inArray } from "drizzle-orm";
+import { WORKER_ROLES } from "./eligibility";
 import {
   db,
   usersTable,
@@ -166,7 +167,7 @@ export async function buildEmployeeProfilePdf(
     })
     .from(usersTable)
     .leftJoin(employeesTable, eq(employeesTable.userId, usersTable.id))
-    .where(and(eq(usersTable.id, userId), eq(usersTable.role, "employee")));
+    .where(and(eq(usersTable.id, userId), inArray(usersTable.role, [...WORKER_ROLES])));
 
   if (!row) return null;
 

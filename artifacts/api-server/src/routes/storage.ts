@@ -16,6 +16,7 @@ import {
   shiftAssignmentsTable,
 } from "@workspace/db";
 import { and, eq, inArray, sql } from "drizzle-orm";
+import { isWorkerRole } from "../lib/eligibility";
 
 /**
  * Maximum declared file size accepted for presigned upload URL requests.
@@ -113,11 +114,11 @@ async function canSignProtectionPhoto(
   userId: string,
   role: string,
 ): Promise<boolean> {
-  // Admin is the only standing reader; an `employee` needs an accepted
-  // assignment to a parent shift. Anyone else (dispatcher, site_manager,
-  // client, …): deny.
+  // Admin is the only standing reader; any other WORKER role (employee /
+  // site_manager / dispatcher — all staff work shifts) needs an accepted
+  // assignment to a parent shift. External `client` accounts: deny.
   const isGlobalReader = role === "admin";
-  if (!isGlobalReader && role !== "employee") return false;
+  if (!isGlobalReader && !isWorkerRole(role)) return false;
 
   const rows = await db
     .select({ shiftId: protectionPersonsTable.shiftId })

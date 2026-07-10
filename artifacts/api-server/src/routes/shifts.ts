@@ -4,7 +4,7 @@ import { eq, and, gt, gte, lt, lte, ne, sql, or, isNull, inArray } from "drizzle
 import { db, shiftsTable, shiftAssignmentsTable, usersTable, licensesTable, sitesTable, clientsTable, trainingCertificationsTable, employeesTable } from "@workspace/db";
 import { requireAuth, requireAdmin, requireAdminOrDispatcher, requireAdminOrSiteManager, requireSchedulingStaff } from "../middlewares/auth";
 import { haversineMiles } from "../lib/geofence";
-import { getEffectiveLevel, effectiveLevelSql, WORKER_ROLES } from "../lib/eligibility";
+import { getEffectiveLevel, effectiveLevelSql, WORKER_ROLES, isWorkerRole } from "../lib/eligibility";
 import { pushShiftUpsert, pushShiftDelete, pushAssignmentEvent } from "../lib/schedulerSync";
 import { MAX_SHIFT_HOURS, validateShiftWindow } from "../lib/shiftWindow";
 import { assertCanManageSite, getManagedSiteIds, getManagerUserIdsForSite, managesSite } from "../lib/siteManagerAuth";
@@ -963,6 +963,15 @@ router.delete("/shifts/:id", requireAdminOrSiteManager, async (req, res): Promis
 router.post("/shifts/:id/claim", requireAuth, async (req, res): Promise<void> => {
   const shiftId = Array.isArray(req.params.id) ? req.params.id[0] : req.params.id;
   const userId = req.user!.userId;
+
+  // Workers only. Every internal staff role may claim shifts; external
+  // `client` accounts must never enter the claim path. Their effective level
+  // (0) would fail the licence gate below anyway, but this explicit guard is
+  // the defense-in-depth line (and gives an honest error message).
+  if (!isWorkerRole(req.user!.role)) {
+    res.status(403).json({ error: "Forbidden", message: "Only staff accounts can claim shifts" });
+    return;
+  }
 
   const [shift] = await db.select().from(shiftsTable).where(eq(shiftsTable.id, shiftId));
   if (!shift) { res.status(404).json({ error: "Not Found", message: "Shift not found" }); return; }

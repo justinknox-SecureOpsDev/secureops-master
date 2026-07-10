@@ -1,6 +1,7 @@
 import { Router, type IRouter } from "express";
 import { z } from "zod/v4";
 import { and, eq, gte, inArray, lte, or, sql } from "drizzle-orm";
+import { WORKER_ROLES } from "../lib/eligibility";
 import {
   db,
   trainingCertificationsTable,
@@ -310,7 +311,7 @@ router.get("/admin/compliance", requireAdmin, async (req, res): Promise<void> =>
       email: usersTable.email,
     })
     .from(usersTable)
-    .where(and(eq(usersTable.role, "employee"), eq(usersTable.status, "active")));
+    .where(and(inArray(usersTable.role, [...WORKER_ROLES]), eq(usersTable.status, "active")));
 
   if (officers.length === 0) {
     res.json({ siteId: parse.data.siteId ?? null, siteName, requiredTrainings, officers: [] });

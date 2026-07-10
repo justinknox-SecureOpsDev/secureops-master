@@ -1,5 +1,6 @@
 import { Router, type IRouter, type Request, type Response } from "express";
 import { and, asc, eq } from "drizzle-orm";
+import { isWorkerRole } from "../lib/eligibility";
 import {
   db,
   shiftsTable,
@@ -162,7 +163,7 @@ router.get("/shifts/:id/protection-detail", requireAuth, async (req: Request, re
 
     const role = req.user!.role;
     let authorized = STAFF_READ_ROLES.has(role);
-    if (!authorized && role === "employee") {
+    if (!authorized && isWorkerRole(role)) {
       const [assignment] = await db
         .select({ id: shiftAssignmentsTable.id })
         .from(shiftAssignmentsTable)

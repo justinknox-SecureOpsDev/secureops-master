@@ -18,14 +18,17 @@ import { db, licensesTable, employeesTable, usersTable } from "@workspace/db";
  * licence. Armed (3) and L4/PPO (4) shifts still require the officer to
  * actually hold an unexpired licence at that level or higher.
  *
- * The floor applies to EMPLOYEES only — users whose `role` is a worker role
- * (`employee` or `site_manager`). Non-worker accounts (`admin` / `dispatcher`
- * / `client`) are NOT shift-work candidates, so they get no floor and read as
- * effective 0 — otherwise the floor would silently let a non-employee claim or
- * be assigned to unarmed shifts (the claim route is bare `requireAuth`, and
- * manual/scheduler assignment takes an arbitrary user id). Role — not the
- * presence of an `employees` row — is the canonical worker signal here (it is
- * what every employee-scoped query, e.g. dispatch assign-nearest, filters on).
+ * The floor applies to WORKERS — users whose `role` is any internal staff
+ * role (`employee`, `site_manager`, `dispatcher`, `admin`). Every level of
+ * internal staff can work, claim, and be assigned shifts (company policy:
+ * admins and dispatchers pick up posts too). The ONLY excluded role is the
+ * external `client` (venue contact) account: clients are NOT shift-work
+ * candidates, get no floor, and read as effective 0 — otherwise the floor
+ * would silently let an outside client claim or be assigned to unarmed shifts
+ * (the claim route is bare `requireAuth`, and manual/scheduler assignment
+ * takes an arbitrary user id). Role — not the presence of an `employees`
+ * row — is the canonical worker signal here (it is what every worker-scoped
+ * query, e.g. dispatch assign-nearest, filters on).
  *
  * An employee's *effective* level is therefore:
  *   GREATEST(highest unexpired licence level, position baseline, BASE_ELIGIBILITY_LEVEL)
@@ -52,27 +55,33 @@ export function positionBaselineLevel(position: string | null | undefined): numb
   return position === "support_staff" ? 1 : 0;
 }
 
-/** Roles that represent actual shift workers (and so receive the level-2 floor). */
+/** Roles that represent shift workers (and so receive the level-2 floor). */
 export function isWorkerRole(role: string | null | undefined): boolean {
-  return role === "employee" || role === "site_manager";
+  return role === "employee" || role === "site_manager" || role === "dispatcher" || role === "admin";
 }
 
 /**
- * The set of roles that represent actual shift workers, for use in `inArray`
- * SQL filters when targeting the worker pool (e.g. shift-available / vacancy
- * notification broadcasts). The SQL-level mirror of `isWorkerRole` — site
- * managers are workers too, so they must be included anywhere employees are
- * notified or listed as eligible.
+ * The set of roles that represent shift workers, for use in `inArray` SQL
+ * filters when targeting the worker pool (e.g. shift-available / vacancy
+ * notification broadcasts). The SQL-level mirror of `isWorkerRole` — ALL
+ * internal staff (employee, site manager, dispatcher, admin) are workers and
+ * may work / claim / be assigned shifts.
+ *
+ * INVARIANT: this set must NEVER include `client`. `effectiveLevelSql` below
+ * applies the level-2 floor unconditionally (no role gate in the SQL), so the
+ * WORKER_ROLES pre-filter at every call site is the only thing keeping
+ * external client accounts out of the worker pool.
  */
-export const WORKER_ROLES = ["employee", "site_manager"] as const;
+export const WORKER_ROLES = ["employee", "site_manager", "dispatcher", "admin"] as const;
 
 /**
  * Highest effective capability level for a single user:
  * max(highest unexpired licence level, position baseline, BASE_ELIGIBILITY_LEVEL).
  * The BASE_ELIGIBILITY_LEVEL floor is applied ONLY when the user is a worker
- * (role `employee` / `site_manager`), so every employee is eligible for unarmed
- * (level <= 2) shifts while non-worker accounts (admin / dispatcher / client)
- * stay at their real level (0) and cannot claim / be assigned to unarmed shifts.
+ * (any internal staff role — employee / site_manager / dispatcher / admin), so
+ * every staff member is eligible for unarmed (level <= 2) shifts while external
+ * `client` accounts stay at their real level (0) and cannot claim / be
+ * assigned to unarmed shifts.
  */
 export async function getEffectiveLevel(userId: string): Promise<number> {
   const [licRows, empRows, userRows] = await Promise.all([
@@ -96,8 +105,8 @@ export async function getEffectiveLevel(userId: string): Promise<number> {
   ]);
   let max = 0;
   for (const r of licRows) if (r.level != null && r.level > max) max = r.level;
-  // The level-2 floor is an EMPLOYEE benefit. A non-worker account (admin /
-  // dispatcher / client) is not a shift candidate, so it gets no floor.
+  // The level-2 floor is a WORKER benefit (all internal staff). An external
+  // client account is not a shift candidate, so it gets no floor.
   const floor = isWorkerRole(userRows[0]?.role) ? BASE_ELIGIBILITY_LEVEL : 0;
   return Math.max(max, positionBaselineLevel(empRows[0]?.position), floor);
 }

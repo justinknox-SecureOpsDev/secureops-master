@@ -16,7 +16,7 @@ import {
 import { requireAdmin, requireAdminOrDispatcher } from "../middlewares/auth";
 import { getGeofenceRadiusMiles } from "../lib/geofence";
 import { businessDayWindow, businessTimeZone } from "../lib/businessTime";
-import { BASE_ELIGIBILITY_LEVEL } from "../lib/eligibility";
+import { BASE_ELIGIBILITY_LEVEL, WORKER_ROLES, isWorkerRole } from "../lib/eligibility";
 
 const router: IRouter = Router();
 
@@ -396,10 +396,11 @@ router.post("/dispatch/assign-nearest", requireAdminOrDispatcher, async (req, re
       )`,
       // Effective capability level: greater of highest unexpired licence level,
       // the position baseline (support_staff → 1), and the level-2 eligibility
-      // floor. The floor means EVERY employee surfaces as a candidate for
+      // floor. The floor means EVERY worker surfaces as a candidate for
       // unarmed (level <= 2) shifts even without a licence; armed (3) / PPO (4)
       // still need the real licence. Safe to floor unconditionally here because
-      // this query is already scoped to role='employee' AND status='active'.
+      // this query is already scoped to WORKER_ROLES (never `client`) AND
+      // status='active'.
       effLevel: sql<number>`GREATEST(
         COALESCE((
           SELECT MAX(${licensesTable.level})::int
@@ -433,7 +434,7 @@ router.post("/dispatch/assign-nearest", requireAdminOrDispatcher, async (req, re
     })
     .from(usersTable)
     .where(and(
-      eq(usersTable.role, "employee"),
+      inArray(usersTable.role, [...WORKER_ROLES]),
       eq(usersTable.status, "active"),
     ));
 
@@ -676,7 +677,7 @@ router.post("/dispatch/officers/:userId/clock-in", requireAdmin, async (req, res
   };
 
   const [officer] = await db.select().from(usersTable).where(eq(usersTable.id, userId)).limit(1);
-  if (!officer || officer.role !== "employee") {
+  if (!officer || !isWorkerRole(officer.role)) {
     res.status(404).json({ error: "Not Found", message: "Officer not found" });
     return;
   }

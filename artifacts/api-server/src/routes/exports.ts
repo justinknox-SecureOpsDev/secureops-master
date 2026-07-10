@@ -1,6 +1,7 @@
 import { Router, type IRouter } from "express";
 import { z } from "zod/v4";
-import { and, asc, desc, eq, gte, lte, sql, max, type SQL } from "drizzle-orm";
+import { and, asc, desc, eq, gte, inArray, lte, sql, max, type SQL } from "drizzle-orm";
+import { WORKER_ROLES } from "../lib/eligibility";
 import PDFDocument from "pdfkit";
 import {
   db,
@@ -550,7 +551,7 @@ const officersDataset: Dataset = {
 };
 
 function officersWhere(f: ExportFilters): SQL | undefined {
-  const conds: SQL[] = [eq(usersTable.role, "employee")];
+  const conds: SQL[] = [inArray(usersTable.role, [...WORKER_ROLES])];
   const from = parseDateBound(f.from, false);
   const to = parseDateBound(f.to, true);
   if (from) conds.push(gte(usersTable.createdAt, from));
