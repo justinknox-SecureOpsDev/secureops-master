@@ -7,8 +7,9 @@ import {
 import {
   DollarSign, TrendingUp, TrendingDown, Users, Clock,
   AlertTriangle, Calendar, ChevronDown, ChevronUp, Loader2,
-  Download, FileText,
+  UserCheck, Download, FileText,
 } from "lucide-react";
+import { Link } from "wouter";
 import { getGetAnalyticsSummaryQueryOptions, useGetClients } from "@workspace/api-client-react";
 import { fetchWithAuth } from "@/lib/api";
 import { Button } from "@/components/ui/button";
@@ -144,6 +145,7 @@ const SEVERITY_COLORS: Record<string, string> = {
 // ── Main component ────────────────────────────────────────────────────────────
 
 type SortCol = "siteName" | "revenue" | "laborCost" | "profit" | "hoursWorked" | "hoursScheduled" | "noShows" | "unfilledShifts" | "incidents";
+type OfficerSortCol = "name" | "shiftsAssigned" | "shiftsCompleted" | "noShows" | "attendanceRate" | "onTimeRate" | "avgMinutesLate" | "hoursWorked" | "hoursScheduled" | "rejectedEntries" | "rejectionRate" | "incidentTotal" | "reliabilityScore";
 
 export default function AnalyticsPage() {
   const [preset, setPreset] = useState<Preset>("last-30");
@@ -153,6 +155,8 @@ export default function AnalyticsPage() {
   const [showMissed, setShowMissed] = useState(false);
   const [sortCol, setSortCol] = useState<SortCol>("revenue");
   const [sortDir, setSortDir] = useState<"asc" | "desc">("desc");
+  const [officerSortCol, setOfficerSortCol] = useState<OfficerSortCol>("reliabilityScore");
+  const [officerSortDir, setOfficerSortDir] = useState<"asc" | "desc">("desc");
 
   const { start, end } = useMemo(() => {
     if (preset === "custom" && customStart && customEnd) {
@@ -225,6 +229,26 @@ export default function AnalyticsPage() {
     return arr;
   }, [data?.perSite, sortCol, sortDir]);
 
+  // Per-officer table sorting
+  const sortedOfficers = useMemo(() => {
+    if (!data?.perOfficer) return [];
+    const arr = [...data.perOfficer];
+    arr.sort((a, b) => {
+      let av: string | number;
+      let bv: string | number;
+      if (officerSortCol === "name") {
+        av = `${a.lastName} ${a.firstName}`;
+        bv = `${b.lastName} ${b.firstName}`;
+      } else {
+        av = a[officerSortCol] ?? 0;
+        bv = b[officerSortCol] ?? 0;
+      }
+      const cmp = typeof av === "string" ? av.localeCompare(bv as string) : (Number(av) - Number(bv));
+      return officerSortDir === "asc" ? cmp : -cmp;
+    });
+    return arr;
+  }, [data?.perOfficer, officerSortCol, officerSortDir]);
+
   const handleSort = (col: SortCol) => {
     if (col === sortCol) {
       setSortDir((d) => (d === "asc" ? "desc" : "asc"));
@@ -234,13 +258,30 @@ export default function AnalyticsPage() {
     }
   };
 
+  const handleOfficerSort = (col: OfficerSortCol) => {
+    if (col === officerSortCol) {
+      setOfficerSortDir((d) => (d === "asc" ? "desc" : "asc"));
+    } else {
+      setOfficerSortCol(col);
+      setOfficerSortDir("desc");
+    }
+  };
+
   const SortIcon = ({ col }: { col: SortCol }) => {
     if (col !== sortCol) return null;
     return sortDir === "asc" ? <ChevronUp className="w-3 h-3 inline ml-0.5" /> : <ChevronDown className="w-3 h-3 inline ml-0.5" />;
   };
 
+  const OfficerSortIcon = ({ col }: { col: OfficerSortCol }) => {
+    if (col !== officerSortCol) return null;
+    return officerSortDir === "asc" ? <ChevronUp className="w-3 h-3 inline ml-0.5" /> : <ChevronDown className="w-3 h-3 inline ml-0.5" />;
+  };
+
   const thCls = (col: SortCol) =>
     `cursor-pointer select-none hover:text-foreground transition-colors whitespace-nowrap ${col === sortCol ? "text-foreground font-semibold" : ""}`;
+
+  const officerThCls = (col: OfficerSortCol) =>
+    `cursor-pointer select-none hover:text-foreground transition-colors whitespace-nowrap ${col === officerSortCol ? "text-foreground font-semibold" : ""}`;
 
   return (
     <div className="flex flex-col gap-6 p-4 sm:p-6 max-w-[1400px] mx-auto w-full">
@@ -601,6 +642,7 @@ export default function AnalyticsPage() {
                       <TableHead className={`text-right ${thCls("profit")}`} onClick={() => handleSort("profit")}>
                         Profit <SortIcon col="profit" />
                       </TableHead>
+
                       <TableHead className={`text-right ${thCls("hoursWorked")}`} onClick={() => handleSort("hoursWorked")}>
                         Hrs Worked <SortIcon col="hoursWorked" />
                       </TableHead>
@@ -645,6 +687,186 @@ export default function AnalyticsPage() {
               </div>
             </section>
           )}
+
+          {/* ── Officer Performance ─────────────────────────────────── */}
+          <section aria-label="Officer performance">
+            <SectionHeader
+              title="Officer Performance"
+              sub={
+                sortedOfficers.length === 0
+                  ? "No officer activity in this period"
+                  : `${sortedOfficers.length} officer${sortedOfficers.length === 1 ? "" : "s"} active · click column headers to sort · reliability = 60% attendance + 40% punctuality`
+              }
+            />
+
+            {/* Summary strip */}
+            {data.officerSummary && sortedOfficers.length > 0 && (
+              <div className="grid grid-cols-3 gap-3 mb-3">
+                <MetricCard
+                  label="Total No-Shows"
+                  value={String(data.officerSummary.totalNoShows)}
+                  icon={AlertTriangle}
+                  colorClass={data.officerSummary.totalNoShows > 0 ? "text-amber-600" : "text-green-600"}
+                  sub="Accepted but never clocked in"
+                />
+                <MetricCard
+                  label="Avg Attendance Rate"
+                  value={fmtPct(data.officerSummary.avgAttendanceRate)}
+                  icon={UserCheck}
+                  colorClass={
+                    data.officerSummary.avgAttendanceRate >= 95
+                      ? "text-green-600"
+                      : data.officerSummary.avgAttendanceRate >= 80
+                        ? "text-amber-600"
+                        : "text-red-600"
+                  }
+                  sub="Across all active officers"
+                />
+                <MetricCard
+                  label="Avg On-Time Rate"
+                  value={fmtPct(data.officerSummary.avgOnTimeRate)}
+                  icon={Clock}
+                  colorClass={
+                    data.officerSummary.avgOnTimeRate >= 90
+                      ? "text-green-600"
+                      : data.officerSummary.avgOnTimeRate >= 70
+                        ? "text-amber-600"
+                        : "text-red-600"
+                  }
+                  sub="5-minute grace window"
+                />
+              </div>
+            )}
+
+            {sortedOfficers.length > 0 && (
+              <div className="border rounded-lg bg-card overflow-x-auto">
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead className={officerThCls("name")} onClick={() => handleOfficerSort("name")}>
+                        Officer <OfficerSortIcon col="name" />
+                      </TableHead>
+                      <TableHead className={`text-right ${officerThCls("reliabilityScore")}`} onClick={() => handleOfficerSort("reliabilityScore")}>
+                        Reliability <OfficerSortIcon col="reliabilityScore" />
+                      </TableHead>
+                      <TableHead className={`text-right ${officerThCls("shiftsAssigned")}`} onClick={() => handleOfficerSort("shiftsAssigned")}>
+                        Assigned <OfficerSortIcon col="shiftsAssigned" />
+                      </TableHead>
+                      <TableHead className={`text-right ${officerThCls("shiftsCompleted")}`} onClick={() => handleOfficerSort("shiftsCompleted")}>
+                        Completed <OfficerSortIcon col="shiftsCompleted" />
+                      </TableHead>
+                      <TableHead className={`text-right ${officerThCls("noShows")}`} onClick={() => handleOfficerSort("noShows")}>
+                        No-Shows <OfficerSortIcon col="noShows" />
+                      </TableHead>
+                      <TableHead className={`text-right ${officerThCls("attendanceRate")}`} onClick={() => handleOfficerSort("attendanceRate")}>
+                        Attendance <OfficerSortIcon col="attendanceRate" />
+                      </TableHead>
+                      <TableHead className={`text-right ${officerThCls("onTimeRate")}`} onClick={() => handleOfficerSort("onTimeRate")}>
+                        On-Time <OfficerSortIcon col="onTimeRate" />
+                      </TableHead>
+                      <TableHead className={`text-right ${officerThCls("avgMinutesLate")}`} onClick={() => handleOfficerSort("avgMinutesLate")}>
+                        Avg Late <OfficerSortIcon col="avgMinutesLate" />
+                      </TableHead>
+                      <TableHead className={`text-right ${officerThCls("hoursWorked")}`} onClick={() => handleOfficerSort("hoursWorked")}>
+                        Hrs Worked <OfficerSortIcon col="hoursWorked" />
+                      </TableHead>
+                      <TableHead className={`text-right ${officerThCls("hoursScheduled")}`} onClick={() => handleOfficerSort("hoursScheduled")}>
+                        Hrs Sched. <OfficerSortIcon col="hoursScheduled" />
+                      </TableHead>
+                      <TableHead className={`text-right ${officerThCls("rejectedEntries")}`} onClick={() => handleOfficerSort("rejectedEntries")}>
+                        Rejected <OfficerSortIcon col="rejectedEntries" />
+                      </TableHead>
+                      <TableHead className={`text-right ${officerThCls("incidentTotal")}`} onClick={() => handleOfficerSort("incidentTotal")}>
+                        Incidents <OfficerSortIcon col="incidentTotal" />
+                      </TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {sortedOfficers.map((o) => (
+                      <TableRow key={o.userId}>
+                        <TableCell className="font-medium">
+                          <Link
+                            href={`/personnel/${encodeURIComponent(o.userId)}`}
+                            className="text-foreground hover:underline"
+                          >
+                            {o.firstName} {o.lastName}
+                          </Link>
+                        </TableCell>
+                        <TableCell className="text-right">
+                          <span
+                            className={`font-semibold ${
+                              o.reliabilityScore >= 90
+                                ? "text-green-600"
+                                : o.reliabilityScore >= 70
+                                  ? "text-amber-600"
+                                  : "text-red-600"
+                            }`}
+                          >
+                            {o.reliabilityScore.toFixed(1)}
+                          </span>
+                        </TableCell>
+                        <TableCell className="text-right text-muted-foreground">{o.shiftsAssigned}</TableCell>
+                        <TableCell className="text-right">{o.shiftsCompleted}</TableCell>
+                        <TableCell className="text-right">
+                          {o.noShows > 0 ? (
+                            <Badge className="bg-amber-100 text-amber-800 hover:bg-amber-100">{o.noShows}</Badge>
+                          ) : (
+                            <span className="text-muted-foreground">0</span>
+                          )}
+                        </TableCell>
+                        <TableCell className={`text-right ${o.attendanceRate >= 95 ? "text-green-600" : o.attendanceRate >= 80 ? "text-amber-600" : "text-red-600"}`}>
+                          {fmtPct(o.attendanceRate)}
+                        </TableCell>
+                        <TableCell className={`text-right ${o.punctualityEligible === 0 ? "text-muted-foreground" : o.onTimeRate >= 90 ? "text-green-600" : o.onTimeRate >= 70 ? "text-amber-600" : "text-red-600"}`}>
+                          {o.punctualityEligible === 0 ? "—" : fmtPct(o.onTimeRate)}
+                        </TableCell>
+                        <TableCell className="text-right text-muted-foreground">
+                          {o.punctualityEligible === 0 ? "—" : `${o.avgMinutesLate.toFixed(1)} min`}
+                        </TableCell>
+                        <TableCell className="text-right">{fmtHours(o.hoursWorked)}</TableCell>
+                        <TableCell className="text-right text-muted-foreground">{fmtHours(o.hoursScheduled)}</TableCell>
+                        <TableCell className="text-right">
+                          {o.rejectedEntries > 0 ? (
+                            <span className="text-amber-600 font-semibold">
+                              {o.rejectedEntries}
+                              <span className="text-xs font-normal ml-1 text-muted-foreground">
+                                ({fmtPct(o.rejectionRate)})
+                              </span>
+                            </span>
+                          ) : (
+                            <span className="text-muted-foreground">0</span>
+                          )}
+                        </TableCell>
+                        <TableCell className="text-right">
+                          {o.incidentTotal > 0 ? (
+                            <span className="font-semibold">
+                              {o.incidentTotal}
+                              {(o.incidentHigh > 0 || o.incidentCritical > 0) && (
+                                <span className="ml-1 inline-flex gap-0.5">
+                                  {o.incidentCritical > 0 && (
+                                    <Badge className="bg-red-100 text-red-800 hover:bg-red-100 text-[10px] px-1 py-0">
+                                      {o.incidentCritical}C
+                                    </Badge>
+                                  )}
+                                  {o.incidentHigh > 0 && (
+                                    <Badge className="bg-orange-100 text-orange-800 hover:bg-orange-100 text-[10px] px-1 py-0">
+                                      {o.incidentHigh}H
+                                    </Badge>
+                                  )}
+                                </span>
+                              )}
+                            </span>
+                          ) : (
+                            <span className="text-muted-foreground">0</span>
+                          )}
+                        </TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+              </div>
+            )}
+          </section>
         </>
       )}
     </div>

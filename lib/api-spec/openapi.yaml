@@ -5428,6 +5428,61 @@ components:
         unfilledShifts: { type: integer }
         incidents: { type: integer }
 
+    AnalyticsOfficerRow:
+      type: object
+      required:
+        - userId
+        - firstName
+        - lastName
+        - email
+        - shiftsAssigned
+        - shiftsCompleted
+        - noShows
+        - attendanceRate
+        - punctualityEligible
+        - onTimeCount
+        - onTimeRate
+        - avgMinutesLate
+        - hoursWorked
+        - hoursScheduled
+        - rejectedEntries
+        - totalEntries
+        - rejectionRate
+        - incidentTotal
+        - incidentHigh
+        - incidentCritical
+        - reliabilityScore
+      properties:
+        userId: { type: string }
+        firstName: { type: string }
+        lastName: { type: string }
+        email: { type: string }
+        shiftsAssigned: { type: integer }
+        shiftsCompleted: { type: integer }
+        noShows: { type: integer }
+        attendanceRate: { type: number }
+        punctualityEligible: { type: integer }
+        onTimeCount: { type: integer }
+        onTimeRate: { type: number }
+        avgMinutesLate: { type: number }
+        hoursWorked: { type: number }
+        hoursScheduled: { type: number }
+        rejectedEntries: { type: integer }
+        totalEntries: { type: integer }
+        rejectionRate: { type: number }
+        incidentTotal: { type: integer }
+        incidentHigh: { type: integer }
+        incidentCritical: { type: integer }
+        reliabilityScore: { type: number }
+
+    AnalyticsOfficerSummary:
+      type: object
+      required: [totalNoShows, avgAttendanceRate, avgOnTimeRate]
+      properties:
+        totalNoShows: { type: integer }
+        avgAttendanceRate: { type: number }
+        avgOnTimeRate: { type: number }
+
     AnalyticsSummary:
       type: object
       required:
@@ -5448,6 +5503,8 @@ components:
         - hoursTrend
         - incidentTrend
         - perSite
+        - officerSummary
+        - perOfficer
       properties:
         revenue: { type: number }
         laborCost: { type: number }
@@ -5489,6 +5546,11 @@ components:
         perSite:
           type: array
           items: { $ref: "#/components/schemas/AnalyticsSiteRow" }
+        officerSummary:
+          $ref: "#/components/schemas/AnalyticsOfficerSummary"
+        perOfficer:
+          type: array
+          items: { $ref: "#/components/schemas/AnalyticsOfficerRow" }
 
     ClientInviteResponse:
       type: object

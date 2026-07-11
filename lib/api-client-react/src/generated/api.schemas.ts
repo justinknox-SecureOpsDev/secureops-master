@@ -2291,6 +2291,36 @@ export interface AnalyticsSiteRow {
   incidents: number;
 }
 
+export interface AnalyticsOfficerRow {
+  userId: string;
+  firstName: string;
+  lastName: string;
+  email: string;
+  shiftsAssigned: number;
+  shiftsCompleted: number;
+  noShows: number;
+  attendanceRate: number;
+  punctualityEligible: number;
+  onTimeCount: number;
+  onTimeRate: number;
+  avgMinutesLate: number;
+  hoursWorked: number;
+  hoursScheduled: number;
+  rejectedEntries: number;
+  totalEntries: number;
+  rejectionRate: number;
+  incidentTotal: number;
+  incidentHigh: number;
+  incidentCritical: number;
+  reliabilityScore: number;
+}
+
+export interface AnalyticsOfficerSummary {
+  totalNoShows: number;
+  avgAttendanceRate: number;
+  avgOnTimeRate: number;
+}
+
 export type AnalyticsSummaryIncidentsBySeverity = {
   low: number;
   medium: number;
@@ -2322,6 +2352,8 @@ export interface AnalyticsSummary {
   hoursTrend: AnalyticsHoursTrendPoint[];
   incidentTrend: AnalyticsIncidentTrendPoint[];
   perSite: AnalyticsSiteRow[];
+  officerSummary: AnalyticsOfficerSummary;
+  perOfficer: AnalyticsOfficerRow[];
 }
 
 export interface ClientInviteResponse {

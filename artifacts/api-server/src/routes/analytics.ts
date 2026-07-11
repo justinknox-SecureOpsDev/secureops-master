@@ -1,4 +1,4 @@
-import { Router, type IRouter } from "express";
+import { Router, type IRouter, type Request, type Response } from "express";
 import { sql, and, gte, lte, eq, lt, inArray, type SQL } from "drizzle-orm";
 import type { PgColumn } from "drizzle-orm/pg-core";
 import {
@@ -11,8 +11,9 @@ import {
   incidentsTable,
   sitesTable,
   clientsTable,
+  usersTable,
+  employeesTable,
 } from "@workspace/db";
-import type { Request, Response } from "express";
 import { requireAdmin } from "../middlewares/auth";
 import { businessTimeZone } from "../lib/businessTime";
 import { buildAnalyticsReportPdf } from "../lib/analyticsPdf";
@@ -647,6 +648,139 @@ export async function computeAnalyticsSummary(start: string, end: string, client
     };
   });
 
+  // ── 9. Per-officer performance ──────────────────────────────────────────
+  // Query A: shift completion + punctuality (from assignments → shifts → time entries)
+  // Only accepted assignments for shifts that ended in the period.
+  const officerShiftRows = await db
+    .select({
+      userId: usersTable.id,
+      firstName: usersTable.firstName,
+      lastName: usersTable.lastName,
+      shiftsAssigned: sql<number>`COUNT(DISTINCT ${shiftAssignmentsTable.shiftId})::int`,
+      shiftsCompleted: sql<number>`COUNT(DISTINCT CASE WHEN ${timeEntriesTable.id} IS NOT NULL THEN ${shiftAssignmentsTable.shiftId} END)::int`,
+      noShows: sql<number>`COUNT(DISTINCT CASE WHEN ${timeEntriesTable.id} IS NULL THEN ${shiftAssignmentsTable.shiftId} END)::int`,
+      hoursScheduled: sql<number>`COALESCE(SUM(DISTINCT EXTRACT(EPOCH FROM (${shiftsTable.endTime} - ${shiftsTable.startTime}))/3600), 0)::float`,
+      hoursWorked: sql<number>`COALESCE(SUM(EXTRACT(EPOCH FROM (COALESCE(${timeEntriesTable.clockOutTime}, NOW()) - ${timeEntriesTable.clockInTime}))/3600) FILTER (WHERE ${timeEntriesTable.id} IS NOT NULL), 0)::float`,
+      // Avg minutes late: if clocked in > shift start + 5 min grace
+      lateCount: sql<number>`COUNT(DISTINCT CASE WHEN ${timeEntriesTable.clockInTime} > ${shiftsTable.startTime} + INTERVAL '5 minutes' THEN ${shiftAssignmentsTable.shiftId} END)::int`,
+      totalLateMinutes: sql<number>`COALESCE(SUM(EXTRACT(EPOCH FROM (${timeEntriesTable.clockInTime} - ${shiftsTable.startTime}))/60) FILTER (WHERE ${timeEntriesTable.clockInTime} > ${shiftsTable.startTime} + INTERVAL '5 minutes'), 0)::float`,
+    })
+    .from(shiftAssignmentsTable)
+    .innerJoin(shiftsTable, eq(shiftAssignmentsTable.shiftId, shiftsTable.id))
+    .innerJoin(usersTable, eq(shiftAssignmentsTable.employeeId, usersTable.id))
+    .leftJoin(
+      timeEntriesTable,
+      and(
+        eq(timeEntriesTable.employeeId, shiftAssignmentsTable.employeeId),
+        eq(timeEntriesTable.shiftId, shiftAssignmentsTable.shiftId),
+      ),
+    )
+    .where(
+      and(
+        eq(shiftAssignmentsTable.status, "accepted"),
+        gte(shiftsTable.endTime, startUtc),
+        lte(shiftsTable.endTime, endExclusive),
+      ),
+    )
+    .groupBy(usersTable.id, usersTable.firstName, usersTable.lastName);
+
+  // Query B: rejected time-entry rate
+  const officerEntryRows = await db
+    .select({
+      employeeId: timeEntriesTable.employeeId,
+      totalEntries: sql<number>`COUNT(*)::int`,
+      rejectedEntries: sql<number>`COUNT(*) FILTER (WHERE ${timeEntriesTable.approvalStatus} = 'rejected')::int`,
+    })
+    .from(timeEntriesTable)
+    .where(
+      and(
+        gte(timeEntriesTable.clockInTime, startUtc),
+        lte(timeEntriesTable.clockInTime, endExclusive),
+      ),
+    )
+    .groupBy(timeEntriesTable.employeeId);
+
+  // Query C: incidents by severity per officer
+  const officerIncidentRows = await db
+    .select({
+      employeeId: incidentsTable.employeeId,
+      total: sql<number>`COUNT(*)::int`,
+      low: sql<number>`COUNT(*) FILTER (WHERE ${incidentsTable.severity} = 'low')::int`,
+      medium: sql<number>`COUNT(*) FILTER (WHERE ${incidentsTable.severity} = 'medium')::int`,
+      high: sql<number>`COUNT(*) FILTER (WHERE ${incidentsTable.severity} = 'high')::int`,
+      critical: sql<number>`COUNT(*) FILTER (WHERE ${incidentsTable.severity} = 'critical')::int`,
+    })
+    .from(incidentsTable)
+    .where(
+      and(
+        gte(incidentsTable.occurredAt, startUtc),
+        lte(incidentsTable.occurredAt, endExclusive),
+      ),
+    )
+    .groupBy(incidentsTable.employeeId);
+
+  // Build lookup maps
+  const entryMap = new Map(officerEntryRows.map((r) => [r.employeeId, r]));
+  const incidentMap = new Map(officerIncidentRows.map((r) => [r.employeeId, r]));
+
+  const perOfficer = officerShiftRows.map((r) => {
+    const entries = entryMap.get(r.userId);
+    const incidents = incidentMap.get(r.userId);
+
+    const attendanceRate =
+      r.shiftsAssigned > 0
+        ? Math.round((r.shiftsCompleted / r.shiftsAssigned) * 1000) / 10
+        : 100;
+    const onTimeRate =
+      r.shiftsCompleted > 0
+        ? Math.round(((r.shiftsCompleted - r.lateCount) / r.shiftsCompleted) * 1000) / 10
+        : 100;
+    const avgMinutesLate =
+      r.lateCount > 0 ? Math.round((r.totalLateMinutes / r.lateCount) * 10) / 10 : 0;
+    const rejectedEntryRate =
+      entries && entries.totalEntries > 0
+        ? Math.round((entries.rejectedEntries / entries.totalEntries) * 1000) / 10
+        : 0;
+    // Composite reliability: 60% attendance + 40% punctuality
+    const reliabilityScore = Math.round((0.6 * attendanceRate + 0.4 * onTimeRate) * 10) / 10;
+
+    return {
+      userId: r.userId,
+      firstName: r.firstName ?? "",
+      lastName: r.lastName ?? "",
+      shiftsAssigned: r.shiftsAssigned,
+      shiftsCompleted: r.shiftsCompleted,
+      noShows: r.noShows,
+      hoursScheduled: Math.round(r.hoursScheduled * 10) / 10,
+      hoursWorked: Math.round(r.hoursWorked * 10) / 10,
+      attendanceRate,
+      onTimeRate,
+      avgMinutesLate,
+      rejectedEntryRate,
+      incidentTotal: incidents?.total ?? 0,
+      incidentsBySeverity: {
+        low: incidents?.low ?? 0,
+        medium: incidents?.medium ?? 0,
+        high: incidents?.high ?? 0,
+        critical: incidents?.critical ?? 0,
+      },
+      reliabilityScore,
+    };
+  });
+
+  const officerSummary = {
+    totalOfficers: perOfficer.length,
+    totalNoShows: perOfficer.reduce((s, r) => s + r.noShows, 0),
+    avgAttendanceRate:
+      perOfficer.length > 0
+        ? Math.round((perOfficer.reduce((s, r) => s + r.attendanceRate, 0) / perOfficer.length) * 10) / 10
+        : 100,
+    avgOnTimeRate:
+      perOfficer.length > 0
+        ? Math.round((perOfficer.reduce((s, r) => s + r.onTimeRate, 0) / perOfficer.length) * 10) / 10
+        : 100,
+  };
+
   return {
     revenue,
     laborCost,
@@ -665,6 +799,8 @@ export async function computeAnalyticsSummary(start: string, end: string, client
     hoursTrend,
     incidentTrend,
     perSite,
+    officerSummary,
+    perOfficer,
   };
 }
 
@@ -797,3 +933,4 @@ router.get("/analytics/export.pdf", requireAdmin, async (req, res): Promise<void
 });
 
 export default router;
+

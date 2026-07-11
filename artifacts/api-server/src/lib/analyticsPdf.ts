@@ -2,38 +2,12 @@ import PDFDocument from "pdfkit";
 import type { Readable } from "node:stream";
 import { brand } from "./brandConfig";
 import { drawBrandHeader } from "./pdfHeader";
+import type { AnalyticsSummaryData } from "../routes/analytics";
 
 const NAVY = brand.colorNavy;
 const GOLD = brand.colorGold;
 const MUTED = "#666666";
 const TEXT = "#1a1a1a";
-
-export type AnalyticsReportInput = {
-  revenue: number;
-  laborCost: number;
-  profit: number;
-  marginPct: number;
-  hoursWorked: number;
-  hoursScheduled: number;
-  coveragePct: number;
-  noShowCount: number;
-  unfilledCount: number;
-  incidentTotal: number;
-  incidentsBySeverity: Record<string, number>;
-  incidentsByStatus: Record<string, number>;
-  perSite: Array<{
-    siteId: string;
-    siteName: string;
-    revenue: number;
-    laborCost: number;
-    profit: number;
-    hoursWorked: number;
-    hoursScheduled: number;
-    noShows: number;
-    unfilledShifts: number;
-    incidents: number;
-  }>;
-};
 
 export type AnalyticsPdfPayload = {
   filename: string;
@@ -59,13 +33,14 @@ function sectionHeader(doc: PDFKit.PDFDocument, label: string): void {
 
 /**
  * Render the branded analytics report PDF (summary KPIs, incident counts,
- * per-site breakdown table) for an inclusive [start, end] date range.
+ * per-site breakdown table, officer performance table) for an inclusive
+ * [start, end] date range.
  *
  * The caller is responsible for Content-Type / Content-Disposition headers
  * and piping the stream. Authorization is enforced at the route layer.
  */
 export function buildAnalyticsReportPdf(
-  data: AnalyticsReportInput,
+  data: AnalyticsSummaryData,
   start: string,
   end: string,
   clientName?: string,
@@ -227,6 +202,76 @@ export function buildAnalyticsReportPdf(
       x += c.w;
     });
     doc.y = totY + 16;
+  }
+
+  // ── Officer performance table ──────────────────────────────────────────
+  if (data.perOfficer.length > 0) {
+    if (doc.y > doc.page.height - 120) {
+      doc.addPage();
+      doc.y = 56;
+    }
+    doc.moveDown(0.5);
+    sectionHeader(doc, `Officer Performance — ${data.perOfficer.length} officers`);
+
+    // Summary strip
+    doc.fillColor(TEXT).font("Helvetica").fontSize(9).text(
+      `Avg attendance: ${data.officerSummary.avgAttendanceRate.toFixed(1)}%   ·   Avg on-time: ${data.officerSummary.avgOnTimeRate.toFixed(1)}%   ·   Total no-shows: ${data.officerSummary.totalNoShows}`,
+      56, doc.y,
+    );
+    doc.moveDown(0.8);
+
+    const oCols: Array<{ label: string; w: number; align: "left" | "right" }> = [
+      { label: "Officer", w: 120, align: "left" },
+      { label: "Assigned", w: 52, align: "right" },
+      { label: "Completed", w: 58, align: "right" },
+      { label: "Attendance", w: 60, align: "right" },
+      { label: "On-Time", w: 54, align: "right" },
+      { label: "Hrs Wkd", w: 50, align: "right" },
+      { label: "Incidents", w: 54, align: "right" },
+      { label: "Reliability", w: 60, align: "right" },
+    ];
+
+    const drawOfficerHeader = () => {
+      const th = doc.y;
+      doc.rect(56, th - 2, W - 112, 16).fill("#eef0f3");
+      doc.fillColor(MUTED).font("Helvetica-Bold").fontSize(7.5);
+      let x = 60;
+      for (const c of oCols) {
+        doc.text(c.label, x, th + 1, { width: c.w - 6, align: c.align, lineBreak: false });
+        x += c.w;
+      }
+      doc.y = th + 17;
+    };
+
+    const sortedOfficers = [...data.perOfficer].sort((a, b) => b.reliabilityScore - a.reliabilityScore);
+    drawOfficerHeader();
+    sortedOfficers.forEach((o, i) => {
+      if (doc.y > doc.page.height - 90) {
+        doc.addPage();
+        doc.y = 56;
+        drawOfficerHeader();
+      }
+      const rowY = doc.y;
+      if (i % 2 === 1) doc.rect(56, rowY - 1, W - 112, 15).fill("#fafafa");
+      const oCells: string[] = [
+        `${o.firstName} ${o.lastName}`,
+        String(o.shiftsAssigned),
+        String(o.shiftsCompleted),
+        `${o.attendanceRate.toFixed(1)}%`,
+        `${o.onTimeRate.toFixed(1)}%`,
+        o.hoursWorked.toFixed(1),
+        String(o.incidentTotal),
+        `${o.reliabilityScore.toFixed(1)}%`,
+      ];
+      let x = 60;
+      oCells.forEach((cell, ci) => {
+        const c = oCols[ci];
+        doc.fillColor(TEXT).font(ci === 0 ? "Helvetica-Bold" : "Helvetica").fontSize(8);
+        doc.text(cell, x, rowY + 1, { width: c.w - 6, align: c.align, lineBreak: false });
+        x += c.w;
+      });
+      doc.y = rowY + 15;
+    });
   }
 
   // ── Page footer ────────────────────────────────────────────────────────

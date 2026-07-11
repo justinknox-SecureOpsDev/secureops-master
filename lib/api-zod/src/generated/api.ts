@@ -2576,6 +2576,36 @@ export const GetAnalyticsSummaryResponse = zod.object({
       incidents: zod.number(),
     }),
   ),
+  officerSummary: zod.object({
+    totalNoShows: zod.number(),
+    avgAttendanceRate: zod.number(),
+    avgOnTimeRate: zod.number(),
+  }),
+  perOfficer: zod.array(
+    zod.object({
+      userId: zod.string(),
+      firstName: zod.string(),
+      lastName: zod.string(),
+      email: zod.string(),
+      shiftsAssigned: zod.number(),
+      shiftsCompleted: zod.number(),
+      noShows: zod.number(),
+      attendanceRate: zod.number(),
+      punctualityEligible: zod.number(),
+      onTimeCount: zod.number(),
+      onTimeRate: zod.number(),
+      avgMinutesLate: zod.number(),
+      hoursWorked: zod.number(),
+      hoursScheduled: zod.number(),
+      rejectedEntries: zod.number(),
+      totalEntries: zod.number(),
+      rejectionRate: zod.number(),
+      incidentTotal: zod.number(),
+      incidentHigh: zod.number(),
+      incidentCritical: zod.number(),
+      reliabilityScore: zod.number(),
+    }),
+  ),
 });
 
 /**
