@@ -103,11 +103,21 @@ export default function ChatPage() {
     },
   });
 
-  // Scroll to bottom when new messages land.
+  // Newest messages render at the top, so snap the list back to the top
+  // whenever new messages land.
   useEffect(() => {
     if (!listRef.current) return;
-    listRef.current.scrollTop = listRef.current.scrollHeight;
+    listRef.current.scrollTop = 0;
   }, [messages.data]);
+
+  // Display order: most recent first (newest at the top of the page).
+  const orderedMessages = useMemo(
+    () =>
+      [...(messages.data ?? [])].sort(
+        (a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime(),
+      ),
+    [messages.data],
+  );
 
   // Real-time WS subscription. Reuses the same /api/ws channel chat
   // already broadcasts on; we just refetch the active room when a
@@ -265,7 +275,7 @@ export default function ChatPage() {
               {messages.data && messages.data.length === 0 && (
                 <div className="opacity-60">No messages yet.</div>
               )}
-              {messages.data?.map((m) => (
+              {orderedMessages.map((m) => (
                 <div key={m.id} className="leading-snug">
                   <span className="font-medium">{m.userName ?? "—"}</span>
                   {m.userRole && (

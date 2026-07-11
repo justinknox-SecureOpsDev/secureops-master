@@ -60,7 +60,8 @@ export default function ChatRoomScreen({ roomId, roomName }: Props) {
           AccessibilityInfo.announceForAccessibility(`New message from ${msg.userName}: ${msg.content}`);
         }
       }
-      setTimeout(() => listRef.current?.scrollToEnd({ animated: true }), 100);
+      // Newest messages render at the top — snap back up so the new one is visible.
+      setTimeout(() => listRef.current?.scrollToOffset({ offset: 0, animated: true }), 100);
     });
     const unsubDel = subscribeToDeletes(roomId, (messageId) => {
       setMessages((prev) => prev.filter((m) => m.id !== messageId));
@@ -70,9 +71,14 @@ export default function ChatRoomScreen({ roomId, roomName }: Props) {
 
   useEffect(() => {
     if (!loading && messages.length > 0) {
-      setTimeout(() => listRef.current?.scrollToEnd({ animated: false }), 200);
+      setTimeout(() => listRef.current?.scrollToOffset({ offset: 0, animated: false }), 200);
     }
   }, [loading]);
+
+  // Display order: most recent first (newest at the top of the screen).
+  const displayMessages = [...messages].sort(
+    (a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime(),
+  );
 
   const handleSend = async () => {
     if (!text.trim() || sending) return;
@@ -185,7 +191,7 @@ export default function ChatRoomScreen({ roomId, roomName }: Props) {
       ) : (
         <FlatList
           ref={listRef}
-          data={messages}
+          data={displayMessages}
           keyExtractor={(m) => m.id}
           renderItem={renderMessage}
           contentContainerStyle={s.list}
@@ -241,7 +247,7 @@ const styles = (colors: ReturnType<typeof useColors>) => StyleSheet.create({
   },
   backBtn: { padding: 6, marginRight: 2 },
   roomTitle: { fontSize: 16, fontWeight: "700", flex: 1 },
-  list: { paddingHorizontal: 12, paddingVertical: 12, gap: 10, flexGrow: 1, justifyContent: "flex-end" },
+  list: { paddingHorizontal: 12, paddingVertical: 12, gap: 10, flexGrow: 1 },
   msgRow: { flexDirection: "row", alignItems: "flex-end", gap: 8 },
   msgRowMine: { flexDirection: "row-reverse" },
   avatar: { width: 32, height: 32, borderRadius: 16, alignItems: "center", justifyContent: "center" },
