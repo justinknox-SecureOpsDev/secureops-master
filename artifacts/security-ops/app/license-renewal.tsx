@@ -8,6 +8,7 @@ import { useColors } from "@/hooks/useColors";
 import { apiRequest } from "@/utils/api";
 import { notify } from "@/utils/confirm";
 import { pickAndUploadImage, type UploadedFile } from "@/utils/upload";
+import { formatDate } from "@/utils/time";
 import { useRouter } from "expo-router";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { Feather } from "@expo/vector-icons";
@@ -223,7 +224,7 @@ export default function LicenseRenewalScreen() {
                       #{r.licenseNumber} · expires {r.expiryDate}
                     </Text>
                     <Text style={[styles.histMeta, { color: colors.mutedForeground }]}>
-                      Submitted {new Date(r.createdAt).toLocaleDateString()}
+                      Submitted {formatDate(r.createdAt, { month: "short", day: "numeric", year: "numeric" })}
                     </Text>
                     {r.decisionNote && (
                       <Text style={[styles.histNote, { color: colors.foreground }]}>"{r.decisionNote}"</Text>

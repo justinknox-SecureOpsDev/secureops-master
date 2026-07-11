@@ -5,6 +5,8 @@
  * `/admin/tables/:table` endpoint registry in `artifacts/api-server/src/routes/admin.ts`.
  */
 
+import { BUSINESS_TIME_ZONE } from "./format";
+
 /** Singularize a plural label for "Add {X}" / "Edit {X}" buttons. */
 export function singularize(label: string): string {
   if (/ies$/i.test(label)) return label.replace(/ies$/i, "y");
@@ -367,6 +369,7 @@ export const TABLES: TableDescriptor[] = [
       const when = start.toLocaleString("en-US", {
         weekday: "short", month: "short", day: "numeric",
         hour: "numeric", minute: "2-digit",
+        timeZone: BUSINESS_TIME_ZONE,
       });
       return title ? `${title} — ${when}` : when;
     },

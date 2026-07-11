@@ -8,6 +8,7 @@ import { Feather } from "@expo/vector-icons";
 import { useColors } from "@/hooks/useColors";
 import { useTopPad } from "@/hooks/useTopPad";
 import { apiRequest } from "@/utils/api";
+import { formatDate } from "@/utils/time";
 
 type NotificationRow = {
   id: string;
@@ -49,7 +50,7 @@ function fmtWhen(iso: string): string {
   if (hr < 24) return `${hr}h ago`;
   const day = Math.floor(hr / 24);
   if (day < 7) return `${day}d ago`;
-  return d.toLocaleDateString();
+  return formatDate(d, { month: "short", day: "numeric", year: "numeric" });
 }
 
 export default function NotificationsScreen() {

@@ -277,7 +277,7 @@ export function buildAnalyticsReportPdf(
   // ── Page footer ────────────────────────────────────────────────────────
   const pfY = doc.page.height - 36;
   doc.fillColor(MUTED).font("Helvetica").fontSize(7.5).text(
-    `Generated ${new Date().toLocaleString("en-US")}  ·  ${brand.companyName}  ·  Analytics ${start} – ${end}`,
+    `Generated ${new Date().toLocaleString("en-US", { timeZone: "America/Chicago" })}  ·  ${brand.companyName}  ·  Analytics ${start} – ${end}`,
     56, pfY, { width: W - 112, align: "center", lineBreak: false },
   );
 

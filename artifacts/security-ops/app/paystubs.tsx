@@ -8,6 +8,7 @@ import { useRouter, Stack } from "expo-router";
 import { Feather } from "@expo/vector-icons";
 import { useColors } from "@/hooks/useColors";
 import { apiRequest } from "@/utils/api";
+import { formatDate } from "@/utils/time";
 
 type PaystubRow = {
   id: string;
@@ -51,10 +52,10 @@ function fmtUsd(n: string | number): string {
 }
 
 function fmtRange(a: string, b: string): string {
-  const d1 = new Date(a + "T00:00:00");
-  const d2 = new Date(b + "T00:00:00");
-  const opts: Intl.DateTimeFormatOptions = { month: "short", day: "numeric" };
-  const yr = d2.getFullYear();
+  const d1 = new Date(a + "T00:00:00Z");
+  const d2 = new Date(b + "T00:00:00Z");
+  const opts: Intl.DateTimeFormatOptions = { month: "short", day: "numeric", timeZone: "UTC" };
+  const yr = d2.getUTCFullYear();
   return `${d1.toLocaleDateString("en-US", opts)} – ${d2.toLocaleDateString("en-US", opts)}, ${yr}`;
 }
 
@@ -150,7 +151,7 @@ export default function PaystubsScreen() {
 
             {data.rows.map((row) => {
               const sc = statusColor(row.status, colors);
-              const stubA11y = `Paystub ${fmtRange(row.periodStart, row.periodEnd)}${row.siteName ? `, ${row.siteName}` : ""}. ${STATUS_LABEL[row.status]}. ${Number(row.totalHours).toFixed(2)} hours at ${fmtUsd(row.hourlyRate)} per hour. Gross ${fmtUsd(row.grossPay)}, net pay ${fmtUsd(row.netPay)}.${row.status === "paid" && row.paidAt ? ` Paid ${new Date(row.paidAt).toLocaleDateString()}.` : ""}`;
+              const stubA11y = `Paystub ${fmtRange(row.periodStart, row.periodEnd)}${row.siteName ? `, ${row.siteName}` : ""}. ${STATUS_LABEL[row.status]}. ${Number(row.totalHours).toFixed(2)} hours at ${fmtUsd(row.hourlyRate)} per hour. Gross ${fmtUsd(row.grossPay)}, net pay ${fmtUsd(row.netPay)}.${row.status === "paid" && row.paidAt ? ` Paid ${formatDate(row.paidAt, { month: "short", day: "numeric", year: "numeric" })}.` : ""}`;
               return (
                 <View
                   key={row.id}
@@ -196,7 +197,7 @@ export default function PaystubsScreen() {
                     <View style={styles.paidLine}>
                       <Feather name="check-circle" size={12} color="#22c55e" />
                       <Text style={[styles.paidText, { color: colors.mutedForeground }]}>
-                        Paid {row.paidAt ? new Date(row.paidAt).toLocaleDateString() : ""}
+                        Paid {row.paidAt ? formatDate(row.paidAt, { month: "short", day: "numeric", year: "numeric" }) : ""}
                         {row.paidMethod ? ` · ${row.paidMethod}` : ""}
                         {row.paymentReference ? ` · Ref ${row.paymentReference}` : ""}
                       </Text>

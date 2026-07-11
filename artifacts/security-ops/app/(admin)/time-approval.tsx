@@ -7,6 +7,7 @@ import { Feather } from "@expo/vector-icons";
 import { useRouter } from "expo-router";
 import { useQueryClient } from "@tanstack/react-query";
 import { useAuth } from "@/contexts/AuthContext";
+import { formatDateTime } from "@/utils/time";
 
 const FILTERS = ["pending", "approved", "rejected"] as const;
 
@@ -111,7 +112,7 @@ export default function TimeApprovalScreen() {
                 </View>
 
                 <Text style={[styles.line, { color: colors.mutedForeground }]}>
-                  {new Date(item.clockInTime).toLocaleString()} → {item.clockOutTime ? new Date(item.clockOutTime).toLocaleString() : "—"}
+                  {formatDateTime(item.clockInTime)} → {item.clockOutTime ? formatDateTime(item.clockOutTime) : "—"}
                 </Text>
 
                 {item.correctionRequested && (

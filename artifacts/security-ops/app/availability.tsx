@@ -6,6 +6,7 @@ import {
 import { useColors } from "@/hooks/useColors";
 import { apiRequest } from "@/utils/api";
 import { notify } from "@/utils/confirm";
+import { BUSINESS_TIME_ZONE, formatTime } from "@/utils/time";
 import { useRouter } from "expo-router";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { Feather } from "@expo/vector-icons";
@@ -36,6 +37,7 @@ function fmtDate(iso: string): string {
   return d.toLocaleString(undefined, {
     weekday: "short", month: "short", day: "numeric",
     hour: "numeric", minute: "2-digit",
+    timeZone: BUSINESS_TIME_ZONE,
   });
 }
 
@@ -283,7 +285,7 @@ export default function AvailabilityScreen() {
                 <Text style={{ color: colors.mutedForeground, fontSize: 12, marginTop: 2 }}>{s.siteName}</Text>
               ) : null}
               <Text style={{ color: colors.foreground, fontSize: 13, marginTop: 6 }}>
-                {fmtDate(s.startTime)} → {new Date(s.endTime).toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" })}
+                {fmtDate(s.startTime)} → {formatTime(s.endTime)}
               </Text>
               <View style={{ flexDirection: "row", justifyContent: "space-between", marginTop: 6 }}>
                 <Text style={{ color: colors.mutedForeground, fontSize: 12 }}>

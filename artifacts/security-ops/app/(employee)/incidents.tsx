@@ -9,6 +9,7 @@ import { KeyboardAwareScrollViewCompat } from "@/components/KeyboardAwareScrollV
 import { pickAndUploadImage, type UploadedFile } from "@/utils/upload";
 import { confirmAction, notify } from "@/utils/confirm";
 import { AttachmentImage } from "@/components/AttachmentImage";
+import { formatDateTime } from "@/utils/time";
 
 const SEVERITY_LEVELS = ["low", "medium", "high", "critical"] as const;
 
@@ -141,7 +142,7 @@ export default function EmployeeIncidentsScreen() {
             const c = SEVERITY_COLORS[item.severity] || colors.mutedForeground;
             const statusMap: Record<string, string> = { open: colors.destructive, under_review: colors.accent, resolved: colors.primary, closed: colors.mutedForeground };
             const sc = statusMap[item.status] || colors.mutedForeground;
-            const cardA11y = `${String(item.severity).toUpperCase()} severity, status ${String(item.status).replace("_", " ")}. ${item.title}. Occurred ${new Date(item.occurredAt).toLocaleString()}.`;
+            const cardA11y = `${String(item.severity).toUpperCase()} severity, status ${String(item.status).replace("_", " ")}. ${item.title}. Occurred ${formatDateTime(item.occurredAt)}.`;
             return (
               <View
                 style={[styles.card, { backgroundColor: colors.card, borderColor: colors.border, borderLeftColor: c, borderLeftWidth: 3 }]}
@@ -166,7 +167,7 @@ export default function EmployeeIncidentsScreen() {
                 )}
                 <View style={styles.metaRow}>
                   <Feather name="calendar" size={12} color={colors.mutedForeground} />
-                  <Text style={[styles.metaText, { color: colors.mutedForeground }]}>{new Date(item.occurredAt).toLocaleString()}</Text>
+                  <Text style={[styles.metaText, { color: colors.mutedForeground }]}>{formatDateTime(item.occurredAt)}</Text>
                 </View>
                 {Array.isArray((item as any).attachments) && (item as any).attachments.length > 0 && (
                   <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.thumbRow}>

@@ -16,7 +16,7 @@ import { Label } from "@/components/ui/label";
 import { Link } from "wouter";
 import { type TableDescriptor, type Field, singularize } from "@/lib/tables";
 import { api, fetchWithAuth, ApiError } from "@/lib/api";
-import { formatCell } from "@/lib/format";
+import { formatCell, formatDateTime } from "@/lib/format";
 import { useFkOptions } from "@/lib/fk";
 import { openSignedObject } from "@/lib/upload";
 import { RowFormDialog } from "./RowFormDialog";
@@ -848,7 +848,7 @@ export function DataGrid({
           </AlertDialogHeader>
           <div className="text-xs text-muted-foreground bg-muted/40 rounded p-2 border">
             {revokeTarget?.lastActiveAt
-              ? <>Last active: <b>{new Date(String(revokeTarget.lastActiveAt)).toLocaleString()}</b> — this account is currently signed in somewhere.</>
+              ? <>Last active: <b>{formatDateTime(String(revokeTarget.lastActiveAt))}</b> — this account is currently signed in somewhere.</>
               : <>This account has no recorded activity yet — they may not be signed in anywhere right now.</>}
           </div>
           {revokeError && (
@@ -881,7 +881,7 @@ export function DataGrid({
             <div className="text-sm space-y-2">
               <p>
                 All active sessions for <b>{revokeDone.email}</b> were invalidated at{" "}
-                {new Date(revokeDone.revokedAt).toLocaleString()}.
+                {formatDateTime(revokeDone.revokedAt)}.
               </p>
               <p className="text-muted-foreground">
                 Their next request from any device will return 401 and force a fresh sign-in.

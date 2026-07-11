@@ -39,11 +39,19 @@ function maskTail(v: string | null | undefined, keep = 4): string {
   return "•".repeat(Math.max(4, s.length - keep)) + s.slice(-keep);
 }
 
+// Date-only values (pg `date`, "YYYY-MM-DD") render the literal calendar day
+// via UTC; real timestamps render in Central time (WCSG business timezone).
+const DATE_ONLY_RE = /^\d{4}-\d{2}-\d{2}$/;
+
 function fmtDate(d: Date | string | null | undefined): string {
   if (!d) return "—";
-  const date = typeof d === "string" ? new Date(d) : d;
+  const isDateOnly = typeof d === "string" && DATE_ONLY_RE.test(d);
+  const date = typeof d === "string" ? new Date(isDateOnly ? `${d}T00:00:00Z` : d) : d;
   if (Number.isNaN(date.getTime())) return String(d);
-  return date.toLocaleDateString("en-US", { year: "numeric", month: "short", day: "numeric" });
+  return date.toLocaleDateString("en-US", {
+    year: "numeric", month: "short", day: "numeric",
+    timeZone: isDateOnly ? "UTC" : "America/Chicago",
+  });
 }
 
 /**
@@ -471,7 +479,7 @@ export async function buildEmployeeProfilePdf(
   // Footer on the final page.
   const footerY = doc.page.height - 36;
   doc.fillColor(MUTED).font("Helvetica").fontSize(8).text(
-    `Generated ${new Date().toLocaleString()} · ${brand.companyName} · Confidential — do not distribute`,
+    `Generated ${new Date().toLocaleString("en-US", { timeZone: "America/Chicago" })} · ${brand.companyName} · Confidential — do not distribute`,
     56, footerY,
     { width: doc.page.width - 112, align: "center", lineBreak: false },
   );

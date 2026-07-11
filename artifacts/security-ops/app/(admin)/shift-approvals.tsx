@@ -6,6 +6,7 @@ import { useGetShifts, getGetShiftsQueryKey, useUpdateShiftAssignment } from "@w
 import { Feather } from "@expo/vector-icons";
 import { useRouter } from "expo-router";
 import { useQueryClient } from "@tanstack/react-query";
+import { formatDateTime, formatTime } from "@/utils/time";
 
 type PendingClaim = {
   assignmentId: string;
@@ -93,7 +94,6 @@ export default function ShiftApprovalsScreen() {
           refreshing={false}
           onRefresh={refetch}
           renderItem={({ item }) => {
-            const start = new Date(item.startTime);
             return (
               <View style={[styles.card, { backgroundColor: colors.card, borderColor: colors.border }]}>
                 <View style={styles.cardHead}>
@@ -117,7 +117,7 @@ export default function ShiftApprovalsScreen() {
 
                 <Text style={[styles.line, { color: colors.mutedForeground }]}>
                   <Feather name="clock" size={11} color={colors.mutedForeground} />{" "}
-                  {start.toLocaleString()} – {new Date(item.endTime).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
+                  {formatDateTime(item.startTime)} – {formatTime(item.endTime)}
                 </Text>
 
                 <View style={{ flexDirection: "row", gap: 8 }}>

@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { api, getToken, fetchWithAuth } from "@/lib/api";
+import { formatDateTime } from "@/lib/format";
 import { useAuth } from "@/lib/auth";
 import { Button } from "@/components/ui/button";
 import { Radio as RadioIcon, Mic, MicOff, Volume2, VolumeX, Trash2, Archive, Plus, LogOut, LogIn, Play, Pause } from "lucide-react";
@@ -525,7 +526,7 @@ export default function RadioPage() {
                       <div className="min-w-0">
                         <div className="font-medium truncate">{t.speakerName ?? t.speakerUserId.slice(0, 8)}</div>
                         <div className="text-[11px] opacity-60">
-                          {new Date(t.startedAt).toLocaleString()}
+                          {formatDateTime(t.startedAt)}
                           {t.endedReason && ` · ${t.endedReason}`}
                           {!canPlay && t.endedAt && " · no recording"}
                         </div>

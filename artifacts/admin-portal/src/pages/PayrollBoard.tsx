@@ -8,6 +8,7 @@ import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription,
 } from "@/components/ui/dialog";
 import { api } from "@/lib/api";
+import { BUSINESS_TIME_ZONE } from "@/lib/format";
 
 type BoardBucket = {
   employeeId: string;
@@ -76,7 +77,7 @@ const fmtDateTime = (iso: string | null | undefined): string => {
   if (!iso) return "—";
   const d = new Date(iso);
   if (isNaN(d.getTime())) return iso;
-  return d.toLocaleString(undefined, { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" });
+  return d.toLocaleString(undefined, { month: "short", day: "numeric", hour: "numeric", minute: "2-digit", timeZone: BUSINESS_TIME_ZONE });
 };
 
 const fmtSnapshotValue = (value: string | null | undefined, isDate: boolean): string => {
@@ -88,10 +89,12 @@ const fmtUsd = (n: number) =>
   `$${Number(n).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 
 const fmtWeekRange = (periodStart: string, periodEnd: string) => {
-  const opts: Intl.DateTimeFormatOptions = { weekday: "short", month: "short", day: "numeric" };
-  const s = new Date(`${periodStart}T00:00:00`);
-  const e = new Date(`${periodEnd}T00:00:00`);
-  return `${s.toLocaleDateString("en-US", opts)} → ${e.toLocaleDateString("en-US", opts)}, ${e.getFullYear()}`;
+  // Date-only ("YYYY-MM-DD") values: parse as UTC midnight and format in UTC
+  // so the literal calendar date shows regardless of the viewer's timezone.
+  const opts: Intl.DateTimeFormatOptions = { weekday: "short", month: "short", day: "numeric", timeZone: "UTC" };
+  const s = new Date(`${periodStart}T00:00:00Z`);
+  const e = new Date(`${periodEnd}T00:00:00Z`);
+  return `${s.toLocaleDateString("en-US", opts)} → ${e.toLocaleDateString("en-US", opts)}, ${e.getUTCFullYear()}`;
 };
 
 const bucketKey = (b: { employeeId: string; siteId: string | null; periodStart: string }) =>
@@ -640,7 +643,7 @@ export default function PayrollBoardPage() {
                                   <table className="w-full text-xs">
                                     <thead className="text-[10px] uppercase tracking-wider text-muted-foreground">
                                       <tr>
-                                        <th className="px-2 py-1 text-left">Clock-in (UTC)</th>
+                                        <th className="px-2 py-1 text-left">Clock-in</th>
                                         <th className="px-2 py-1 text-right">Hours</th>
                                         <th className="px-2 py-1 text-right">Rate</th>
                                         <th className="px-2 py-1 text-right">Line gross</th>
@@ -652,7 +655,7 @@ export default function PayrollBoardPage() {
                                         <tr key={e.id} className={`border-t border-gray-200 ${!e.hasClockOut ? "bg-amber-50/60" : ""}`}>
                                           <td className="px-2 py-1">
                                             <div className="flex items-center gap-1.5">
-                                              <span>{new Date(e.clockInTime).toLocaleString()}</span>
+                                              <span>{fmtDateTime(e.clockInTime)}</span>
                                               {e.holiday && (
                                                 <span
                                                   className="inline-flex items-center rounded bg-amber-100 px-1.5 py-0.5 text-[10px] font-medium text-amber-900"
@@ -730,7 +733,7 @@ export default function PayrollBoardPage() {
             <DialogTitle>Set missing clock-out</DialogTitle>
             <DialogDescription>
               {fixEntry?.employeeName ?? "This officer"} clocked in at{" "}
-              {fixEntry && new Date(fixEntry.clockInTime).toLocaleString()} but never clocked out.
+              {fixEntry && fmtDateTime(fixEntry.clockInTime)} but never clocked out.
               Pick a clock-out time and we'll recompute their hours. This is recorded in the audit log.
             </DialogDescription>
           </DialogHeader>
@@ -749,7 +752,7 @@ export default function PayrollBoardPage() {
                 <div className="font-medium">Use scheduled shift end</div>
                 <div className="text-xs text-muted-foreground">
                   {fixEntry?.scheduledEnd
-                    ? new Date(fixEntry.scheduledEnd).toLocaleString()
+                    ? fmtDateTime(fixEntry.scheduledEnd)
                     : "No linked shift — pick a custom time instead."}
                 </div>
               </div>

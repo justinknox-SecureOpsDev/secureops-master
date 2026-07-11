@@ -704,7 +704,7 @@ function renderPdf(
     for (let i = 0; i < range.count; i++) {
       doc.switchToPage(range.start + i);
       doc.fillColor(MUTED).font("Helvetica").fontSize(8).text(
-        `Generated ${new Date().toLocaleString()} · ${_brand.companyName} · Confidential · page ${i + 1} of ${range.count}`,
+        `Generated ${new Date().toLocaleString("en-US", { timeZone: "America/Chicago" })} · ${_brand.companyName} · Confidential · page ${i + 1} of ${range.count}`,
         usableLeft, pageHeight - 24,
         { width: usableWidth, align: "center", lineBreak: false },
       );

@@ -10,6 +10,7 @@ import {
   type ProtectionDetail, type ProtectionPerson, type ProtectionDestination,
 } from "@workspace/api-client-react";
 import { AttachmentImage } from "@/components/AttachmentImage";
+import { formatDateTime } from "@/utils/time";
 
 /**
  * Read-only mobile view of a shift's executive-protection ("PPO Detail")
@@ -219,8 +220,8 @@ export function ProtectionPackageView({ shiftId }: { shiftId: string }) {
               {pkg.destinations.map((d, i) => {
                 const subtitle = [
                   d.address,
-                  d.arrivalTime ? `Arrive ${new Date(d.arrivalTime).toLocaleString()}` : null,
-                  d.departureTime ? `Depart ${new Date(d.departureTime).toLocaleString()}` : null,
+                  d.arrivalTime ? `Arrive ${formatDateTime(d.arrivalTime)}` : null,
+                  d.departureTime ? `Depart ${formatDateTime(d.departureTime)}` : null,
                 ].filter(Boolean).join(" · ");
                 const canMap = (d.lat != null && d.lng != null) || !!(d.address || d.label);
                 return (

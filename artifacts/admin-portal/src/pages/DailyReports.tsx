@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { ClipboardList, RefreshCw, X, Download } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { api, fetchWithAuth } from "@/lib/api";
+import { BUSINESS_TIME_ZONE } from "@/lib/format";
 
 type Row = {
   id: string;
@@ -40,7 +41,7 @@ type Detail = {
 };
 
 function fmtDate(iso: string) {
-  return new Date(iso).toLocaleString();
+  return new Date(iso).toLocaleString(undefined, { timeZone: BUSINESS_TIME_ZONE });
 }
 
 export function DailyReportsPage() {

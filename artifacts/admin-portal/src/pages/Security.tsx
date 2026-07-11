@@ -1,5 +1,6 @@
 import { useEffect, useState, useCallback } from "react";
 import { api } from "@/lib/api";
+import { formatDate } from "@/lib/format";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -161,7 +162,7 @@ export default function SecurityPage() {
             <ShieldCheck className="w-4 h-4 text-emerald-700" />
             <strong>Two-factor is ON</strong>
             <span className="text-xs text-muted-foreground">
-              · enabled {status.enrolledAt ? new Date(status.enrolledAt).toLocaleDateString() : ""}
+              · enabled {status.enrolledAt ? formatDate(status.enrolledAt) : ""}
               · {status.recoveryCodesRemaining} recovery codes remaining
             </span>
           </div>

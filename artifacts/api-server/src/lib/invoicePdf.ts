@@ -38,10 +38,19 @@ export type InvoicePdfPayload = {
   buffer: () => Promise<Buffer>;
 };
 
+// Date-only values (pg `date`, "YYYY-MM-DD": periodStart/periodEnd/dueDate)
+// render the literal calendar day via UTC; real timestamps (createdAt) render
+// in Central time (WCSG business timezone).
+const DATE_ONLY_RE = /^\d{4}-\d{2}-\d{2}$/;
+
 const fmtDate = (d: string | Date | null): string => {
   if (!d) return "—";
-  return new Date(d).toLocaleDateString("en-US", {
+  const isDateOnly = typeof d === "string" && DATE_ONLY_RE.test(d);
+  const date = new Date(isDateOnly ? `${d}T00:00:00Z` : d);
+  if (Number.isNaN(date.getTime())) return String(d);
+  return date.toLocaleDateString("en-US", {
     year: "numeric", month: "long", day: "numeric",
+    timeZone: isDateOnly ? "UTC" : "America/Chicago",
   });
 };
 
@@ -221,7 +230,7 @@ export function buildInvoicePdf(inv: InvoicePdfInput): InvoicePdfPayload {
   // Page footer
   const pfY = doc.page.height - 36;
   doc.fillColor(MUTED).font("Helvetica").fontSize(7.5).text(
-    `Generated ${new Date().toLocaleString()}  ·  ${brand.companyName}  ·  Invoice ${inv.invoiceNumber}`,
+    `Generated ${new Date().toLocaleString("en-US", { timeZone: "America/Chicago" })}  ·  ${brand.companyName}  ·  Invoice ${inv.invoiceNumber}`,
     56, pfY, { width: W - 112, align: "center", lineBreak: false },
   );
 

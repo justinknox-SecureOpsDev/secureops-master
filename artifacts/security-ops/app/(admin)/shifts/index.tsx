@@ -6,6 +6,7 @@ import { useGetShifts, getGetShiftsQueryKey } from "@workspace/api-client-react"
 import { Feather } from "@expo/vector-icons";
 import { useRouter, useSegments } from "expo-router";
 import { useAuth } from "@/contexts/AuthContext";
+import { formatDateTime, formatTime } from "@/utils/time";
 
 const STATUS_FILTERS = ["upcoming", "active", "completed", "cancelled"] as const;
 
@@ -190,7 +191,7 @@ export default function AdminShiftsScreen() {
               style={[styles.card, { backgroundColor: colors.card, borderColor: colors.border }]}
               onPress={() => router.push(`${shiftBase}/${item.id}` as any)}
               accessibilityRole="button"
-              accessibilityLabel={`${item.title} for ${item.clientName}, ${item.status}, ${new Date(item.startTime).toLocaleString()}, ${item.assignments?.length ?? 0} assigned`}
+              accessibilityLabel={`${item.title} for ${item.clientName}, ${item.status}, ${formatDateTime(item.startTime)}, ${item.assignments?.length ?? 0} assigned`}
               accessibilityHint="Opens shift details"
             >
               <View style={styles.cardHeader}>
@@ -218,7 +219,7 @@ export default function AdminShiftsScreen() {
               <View style={styles.timeRow}>
                 <Feather name="clock" size={13} color={colors.mutedForeground} />
                 <Text style={[styles.detailText, { color: colors.mutedForeground }]}>
-                  {new Date(item.startTime).toLocaleString()} – {new Date(item.endTime).toLocaleTimeString()}
+                  {formatDateTime(item.startTime)} – {formatTime(item.endTime)}
                 </Text>
               </View>
               <View style={styles.bottomRow}>

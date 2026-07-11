@@ -68,3 +68,4 @@
 - [pnpm override crosses major version](pnpm-override-major-version-crossing.md) — unbounded override (no upper bound) can jump a transitive dep past its intended major, breaking peers (e.g. jsdom+undici); bound ranges & re-run tests, not just audit.
 - [chatRoomAccess timeout flake](chatroomaccess-timeout-flake.md) — times out (~29s vs 30s cap) under the full parallel test gate but passes alone; not a regression unless chat code changed.
 - [Headless test login rate limit](headless-login-rate-limit.md) — repeated test logins trip the 10/15min limiter (silent login-page bounce); check /auth/login for 429 first; restart api-server to clear the in-memory store.
+- [Subagent sweep timeouts](subagent-sweep-timeouts.md) — big mechanical sweeps hit subagent StartToClose timeout; cap ~10 files each, partial edits persist, re-grep for remainder.

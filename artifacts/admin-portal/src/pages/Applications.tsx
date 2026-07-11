@@ -8,6 +8,7 @@ import {
 } from "@/components/ui/dialog";
 import { ClipboardList, Search, Loader2, Copy, ExternalLink, MailCheck, MailWarning, MailX, MessageSquare, MessageSquareWarning } from "lucide-react";
 import { openSignedObject } from "@/lib/upload";
+import { formatDate, formatDateTime } from "@/lib/format";
 import { AMENDMENT_FIELDS } from "@/lib/amendmentFields";
 import { useAuth } from "@/lib/auth";
 import { cn } from "@/lib/utils";
@@ -66,7 +67,7 @@ function deliveryBadge(a: Application): DeliveryBadge | null {
       className: "bg-emerald-100 text-emerald-900 border-emerald-300",
       Icon: MailCheck,
       tooltip: a.onboardingEmailSentAt
-        ? `SMTP accepted ${new Date(a.onboardingEmailSentAt).toLocaleString()}`
+        ? `SMTP accepted ${formatDateTime(a.onboardingEmailSentAt)}`
         : "SMTP accepted",
     };
   }
@@ -473,7 +474,7 @@ export function ApplicationsPage() {
             {
               id: "submitted",
               header: "Submitted",
-              cell: (a) => new Date(a.createdAt).toLocaleString(),
+              cell: (a) => formatDateTime(a.createdAt),
               tdClassName: "text-muted-foreground",
               mobileValueClassName: "text-muted-foreground",
             },
@@ -945,7 +946,7 @@ function RequestInfoResultDialog({ resp, onClose }: { resp: RequestInfoResp; onC
                 <div className="font-medium">Email sent to {resp.application.email}</div>
                 <div className="text-xs mt-0.5">
                   {fullName} has been asked to update {resp.fieldLabels.length} item{resp.fieldLabels.length === 1 ? "" : "s"}.
-                  The link expires {new Date(resp.expiresAt).toLocaleDateString()}.
+                  The link expires {formatDate(resp.expiresAt)}.
                 </div>
               </div>
             </div>
@@ -1139,10 +1140,10 @@ function DeliveryDetails({ app }: { app: Application }) {
       )}
       <dl className="grid grid-cols-[max-content_1fr] gap-x-3 gap-y-1 text-xs">
         {app.onboardingEmailAttemptedAt && (
-          <><dt className="opacity-70">Last attempt</dt><dd>{new Date(app.onboardingEmailAttemptedAt).toLocaleString()}</dd></>
+          <><dt className="opacity-70">Last attempt</dt><dd>{formatDateTime(app.onboardingEmailAttemptedAt)}</dd></>
         )}
         {app.onboardingEmailSentAt && (
-          <><dt className="opacity-70">Accepted at</dt><dd>{new Date(app.onboardingEmailSentAt).toLocaleString()}</dd></>
+          <><dt className="opacity-70">Accepted at</dt><dd>{formatDateTime(app.onboardingEmailSentAt)}</dd></>
         )}
         {app.onboardingEmailMessageId && (
           <><dt className="opacity-70">Message ID</dt><dd className="font-mono break-all">{app.onboardingEmailMessageId}</dd></>

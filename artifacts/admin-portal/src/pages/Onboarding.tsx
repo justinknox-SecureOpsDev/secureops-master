@@ -6,6 +6,7 @@ import {
   Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogFooter,
 } from "@/components/ui/dialog";
 import { UserPlus, Loader2, Copy, ExternalLink, Search, Trash2 } from "lucide-react";
+import { formatDateTime } from "@/lib/format";
 import { openSignedObject } from "@/lib/upload";
 import { ResponsiveTable } from "@/components/ResponsiveTable";
 
@@ -157,14 +158,14 @@ export function OnboardingPage() {
             {
               id: "tokenExpires",
               header: "Token expires",
-              cell: (i) => (i.tokenExpiresAt ? new Date(i.tokenExpiresAt).toLocaleString() : "—"),
+              cell: (i) => (i.tokenExpiresAt ? formatDateTime(i.tokenExpiresAt) : "—"),
               tdClassName: "text-muted-foreground",
               mobileValueClassName: "text-muted-foreground",
             },
             {
               id: "submitted",
               header: "Submitted",
-              cell: (i) => (i.submittedAt ? new Date(i.submittedAt).toLocaleString() : "—"),
+              cell: (i) => (i.submittedAt ? formatDateTime(i.submittedAt) : "—"),
               tdClassName: "text-muted-foreground",
               mobileValueClassName: "text-muted-foreground",
             },
@@ -325,7 +326,7 @@ function DetailDialog({
           <div className="space-y-4 text-sm">
             <div className="grid grid-cols-2 gap-4">
               <Info k="Email" v={d.email} />
-              <Info k="Token expires" v={d.tokenExpiresAt ? new Date(d.tokenExpiresAt).toLocaleString() : null} />
+              <Info k="Token expires" v={d.tokenExpiresAt ? formatDateTime(d.tokenExpiresAt) : null} />
             </div>
             {!d.submission && (
               <div className="text-sm bg-amber-50 border border-amber-200 text-amber-900 p-2 rounded">
@@ -373,7 +374,7 @@ function DetailDialog({
                     </li>
                     {d.submission.acknowledgements.map((a, i) => (
                       <li key={i}>
-                        {a.accepted ? "✓" : "✗"} <strong>{a.type}</strong> — “{a.signature}” at {new Date(a.timestamp).toLocaleString()}
+                        {a.accepted ? "✓" : "✗"} <strong>{a.type}</strong> — “{a.signature}” at {formatDateTime(a.timestamp)}
                       </li>
                     ))}
                   </ul>

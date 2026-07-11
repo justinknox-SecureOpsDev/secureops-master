@@ -10,6 +10,7 @@ import { useAccessibility } from "@/contexts/AccessibilityContext";
 import { Feather } from "@expo/vector-icons";
 import { isBiometricAvailable, isBiometricEnabled, setBiometricEnabled, promptBiometric } from "@/utils/biometric";
 import { apiRequest, API_BASE_URL } from "@/utils/api";
+import { formatDate } from "@/utils/time";
 import { storage } from "@/utils/storage";
 import { AUTH_TOKEN_KEY } from "@/contexts/AuthContext";
 import { useTour } from "@/contexts/TourContext";
@@ -209,7 +210,7 @@ function RecentUpdatesSection({ employeeUserId }: { employeeUserId?: string }) {
       if (h < 24) return `${h}h ago`;
       const days = Math.floor(h / 24);
       if (days < 7) return `${days}d ago`;
-      return d.toLocaleDateString();
+      return formatDate(d, { month: "short", day: "numeric", year: "numeric" });
     } catch { return iso; }
   };
   return (
@@ -539,7 +540,7 @@ export default function EmployeeProfileScreen() {
                 <Text style={[styles.infoValue, { color: colors.foreground }]}>{a?.type ?? "Acknowledgement"}</Text>
                 {a?.signature ? (
                   <Text style={[styles.infoLabel, { color: colors.mutedForeground }]}>
-                    Signed “{a.signature}”{a?.timestamp ? ` · ${new Date(a.timestamp).toLocaleDateString()}` : ""}
+                    Signed “{a.signature}”{a?.timestamp ? ` · ${formatDate(a.timestamp, { month: "short", day: "numeric", year: "numeric" })}` : ""}
                   </Text>
                 ) : null}
               </View>

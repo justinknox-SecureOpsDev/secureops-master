@@ -3,6 +3,7 @@ import { Radio } from "lucide-react";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { Link, useRoute, useLocation } from "wouter";
 import { api } from "@/lib/api";
+import { BUSINESS_TIME_ZONE } from "@/lib/format";
 import { openSignedObject } from "@/lib/upload";
 import { useAuth } from "@/lib/auth";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -279,7 +280,7 @@ function fmtDateTime(iso: string | null | undefined): string {
   if (!iso) return "—";
   return new Date(iso).toLocaleString(undefined, {
     weekday: "short", month: "short", day: "numeric",
-    hour: "numeric", minute: "2-digit",
+    hour: "numeric", minute: "2-digit", timeZone: BUSINESS_TIME_ZONE,
   });
 }
 
@@ -288,6 +289,7 @@ function fmtDateTime(iso: string | null | undefined): string {
 function fmtClock(t: number): string {
   return new Date(t).toLocaleString(undefined, {
     weekday: "short", hour: "numeric", minute: "2-digit", second: "2-digit",
+    timeZone: BUSINESS_TIME_ZONE,
   });
 }
 
@@ -301,9 +303,17 @@ function endOfToday(): Date {
 // ── Full-profile helpers (admin-only HR view) ───────────────────────────
 function fmtDate(iso: string | null | undefined): string | null {
   if (!iso) return null;
-  const d = new Date(iso);
+  // This helper receives both timestamps (createdAt / login times → Central)
+  // and date-only pg values (dateOfBirth / siaLicenseExpiry, "YYYY-MM-DD").
+  // Date-only values parse as UTC midnight and format in UTC so the literal
+  // calendar date shows regardless of the viewer's timezone.
+  const dateOnly = /^\d{4}-\d{2}-\d{2}$/.test(iso);
+  const d = new Date(dateOnly ? `${iso}T00:00:00Z` : iso);
   if (Number.isNaN(d.getTime())) return String(iso);
-  return d.toLocaleDateString(undefined, { year: "numeric", month: "short", day: "numeric" });
+  return d.toLocaleDateString(undefined, {
+    year: "numeric", month: "short", day: "numeric",
+    timeZone: dateOnly ? "UTC" : BUSINESS_TIME_ZONE,
+  });
 }
 
 function fmtRate(v: string | number | null | undefined): string | null {

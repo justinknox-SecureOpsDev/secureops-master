@@ -8,7 +8,7 @@ import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from "@/components/ui/select";
 import { useFkOptions, invalidateFk } from "@/lib/fk";
-import { toFormValue, fromFormValue } from "@/lib/format";
+import { toFormValue, fromFormValue, formatDateTime } from "@/lib/format";
 import { type Field, type TableDescriptor, singularize } from "@/lib/tables";
 import { api, ApiError, fetchWithAuth } from "@/lib/api";
 import { FileUploadField, MultiFileUploadField } from "./FileUploadField";
@@ -61,7 +61,7 @@ function RecentChangesPanel({ employeeUserId }: { employeeUserId: string }) {
             <li key={r.id} className="text-xs border border-border rounded p-2 bg-muted/30">
               <div className="flex items-center justify-between gap-2">
                 <span className="font-semibold brand-navy">{r.fieldLabel ?? r.field}</span>
-                <span className="text-muted-foreground">{new Date(r.changedAt).toLocaleString()}</span>
+                <span className="text-muted-foreground">{formatDateTime(r.changedAt)}</span>
               </div>
               <div className="mt-1 grid grid-cols-[auto_1fr] gap-x-2">
                 <span className="text-muted-foreground">From:</span>

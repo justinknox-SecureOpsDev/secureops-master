@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useLocation } from "wouter";
 import { api, getToken } from "@/lib/api";
+import { BUSINESS_TIME_ZONE } from "@/lib/format";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -282,7 +283,7 @@ export default function ChatPage() {
                     <span className="ml-1.5 text-[10px] uppercase opacity-60">{m.userRole}</span>
                   )}
                   <span className="opacity-50 text-xs ml-1.5">
-                    {new Date(m.createdAt).toLocaleString(undefined, { hour: "numeric", minute: "2-digit", month: "short", day: "numeric" })}
+                    {new Date(m.createdAt).toLocaleString(undefined, { hour: "numeric", minute: "2-digit", month: "short", day: "numeric", timeZone: BUSINESS_TIME_ZONE })}
                   </span>
                   <div className="opacity-90 whitespace-pre-wrap">{m.content ?? ""}</div>
                 </div>

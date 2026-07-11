@@ -47,10 +47,10 @@ const maskAccount = (s: string | null) => (s ? `••••${s.slice(-4)}` : "�
 
 // Week label "Mon Jan 6 → Sun Jan 12, 2025" from a YYYY-MM-DD start date.
 const fmtWeekRange = (periodStart: string, periodEnd: string) => {
-  const opts: Intl.DateTimeFormatOptions = { weekday: "short", month: "short", day: "numeric" };
-  const s = new Date(`${periodStart}T00:00:00`);
-  const e = new Date(`${periodEnd}T00:00:00`);
-  const yr = e.getFullYear();
+  const opts: Intl.DateTimeFormatOptions = { weekday: "short", month: "short", day: "numeric", timeZone: "UTC" };
+  const s = new Date(`${periodStart}T00:00:00Z`);
+  const e = new Date(`${periodEnd}T00:00:00Z`);
+  const yr = e.getUTCFullYear();
   return `${s.toLocaleDateString("en-US", opts)} → ${e.toLocaleDateString("en-US", opts)}, ${yr}`;
 };
 

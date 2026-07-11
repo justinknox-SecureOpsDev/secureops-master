@@ -7,6 +7,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { FileUploadField } from "@/components/FileUploadField";
 import { uploadFileAnon, type UploadedFile } from "@/lib/upload";
 import { api } from "@/lib/api";
+import { formatDate } from "@/lib/format";
 import { CheckCircle2, Loader2, ShieldAlert } from "lucide-react";
 
 type FieldType = "text" | "textarea" | "number" | "date" | "file";
@@ -141,7 +142,7 @@ export function AmendApplication() {
         <h1 ref={headingRef} tabIndex={-1} className="brand-wordmark text-2xl focus:outline-none">Hi {data.firstName},</h1>
         <p className="text-sm text-muted-foreground">
           We need a few more details to finish reviewing your application. Please complete the items below
-          and submit. This link expires {new Date(data.expiresAt).toLocaleDateString()}.
+          and submit. This link expires {formatDate(data.expiresAt)}.
         </p>
         {data.note && (
           <div className="bg-[#f6f1e1] border-l-4 border-[#c9a84c] p-3 rounded text-sm whitespace-pre-wrap">

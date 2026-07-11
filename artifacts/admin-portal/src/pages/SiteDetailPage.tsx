@@ -5,6 +5,7 @@ import { ArrowLeft, MapPin, Pencil, Plus, Trash2, QrCode, AlertTriangle, Radius,
 import type { SiteManagerUser } from "@workspace/api-client-react";
 import { Button } from "@/components/ui/button";
 import { api, fetchWithAuth } from "@/lib/api";
+import { formatDateTime } from "@/lib/format";
 import { useAuth } from "@/lib/auth";
 import { useFkOptions } from "@/lib/fk";
 import { getTable } from "@/lib/tables";
@@ -65,7 +66,7 @@ type SubEntryRow = {
 };
 
 function fmt(iso: string) {
-  return new Date(iso).toLocaleString();
+  return formatDateTime(iso);
 }
 
 // ISO timestamp -> value for a <input type="datetime-local"> in LOCAL time

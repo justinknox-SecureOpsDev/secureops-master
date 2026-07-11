@@ -11,6 +11,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { BUSINESS_TIME_ZONE } from "@/lib/format";
 
 const API = "/api";
 
@@ -38,7 +39,7 @@ function fmtDateTime(iso: string): string {
   if (isNaN(d.getTime())) return iso;
   return d.toLocaleString(undefined, {
     weekday: "short", month: "short", day: "numeric",
-    hour: "numeric", minute: "2-digit",
+    hour: "numeric", minute: "2-digit", timeZone: BUSINESS_TIME_ZONE,
   });
 }
 

@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useRoute, Link } from "wouter";
 import { api } from "@/lib/api";
+import { BUSINESS_TIME_ZONE } from "@/lib/format";
 import { uploadFile } from "@/lib/upload";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -702,6 +703,7 @@ export default function ProtectionDetailPage() {
   const whenLabel = shift?.startTime
     ? new Date(shift.startTime).toLocaleString(undefined, {
         weekday: "short", month: "short", day: "numeric", hour: "numeric", minute: "2-digit",
+        timeZone: BUSINESS_TIME_ZONE,
       })
     : null;
 
