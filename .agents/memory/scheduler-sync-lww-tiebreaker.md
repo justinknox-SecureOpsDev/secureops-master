@@ -30,6 +30,10 @@ skipped). Comparing scheduler-vs-scheduler on `externalUpdatedAt` removes that.
   Past/future-dating no longer matters for the scheduler branch — equality skips.
 - To exercise the **local-edit** branch, insert the row with `syncSource:'local'`;
   then a far-future payload applies and a far-past one is skipped (wall-clock).
+  **Never hardcode the payload `updatedAt` here** — the local row's `updated_at`
+  is wall-clock "now", so a fixed calendar date rots into "skipped" the moment
+  real time passes it (this bit the clock-event merge test in July 2026). Use
+  `new Date(Date.now() ± offset)` relative timestamps.
 - To exercise **clock-skew resistance**, insert `syncSource:'scheduler'` with
   `externalUpdatedAt` and `updatedAt` set to deliberately divergent times, then
   assert apply/skip follows `externalUpdatedAt`, not `updated_at`.

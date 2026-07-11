@@ -282,7 +282,10 @@ describe("inbound clock-event dedup within ±5 min", () => {
       employeeEmail: ctx.employeeEmail,
       siteName: ctx.siteName,
       clockInTime: new Date(clockIn.getTime() + 3 * 60 * 1000).toISOString(),
-      updatedAt: "2026-07-03T10:00:00.000Z",
+      // Must be NEWER than the local row's wall-clock updatedAt (set at
+      // insert time above) or LWW skips the merge. A hardcoded date here
+      // rots as the calendar passes it — keep it relative to now.
+      updatedAt: new Date(Date.now() + 60_000).toISOString(),
     });
 
     expect(result.action).toBe("updated");

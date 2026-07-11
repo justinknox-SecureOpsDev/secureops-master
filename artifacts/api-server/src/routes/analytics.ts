@@ -389,17 +389,34 @@ router.get("/analytics/summary", requireAdmin, async (req, res): Promise<void> =
     )
     .groupBy(timeEntriesTable.siteId);
 
-  // Hours scheduled + no-shows per site
-  const siteShiftRows = await db
+  // Hours scheduled per site — computed WITHOUT the assignments join below,
+  // because that join fans out one row per assignment and would multiply the
+  // summed shift hours by the assignment count.
+  const siteScheduledRows = await db
     .select({
       siteId: shiftsTable.siteId,
-      siteName: sitesTable.name,
       hoursScheduled: sql<number>`coalesce(
         sum(
           extract(epoch from ${shiftsTable.endTime} - ${shiftsTable.startTime}) / 3600.0
           * ${shiftsTable.headcount}
         ), 0
       )::float`,
+    })
+    .from(shiftsTable)
+    .where(
+      and(
+        gte(shiftsTable.endTime, startUtc),
+        lt(shiftsTable.endTime, endExclusive),
+        lt(shiftsTable.endTime, now),
+      ),
+    )
+    .groupBy(shiftsTable.siteId);
+
+  // No-shows + unfilled shifts per site
+  const siteShiftRows = await db
+    .select({
+      siteId: shiftsTable.siteId,
+      siteName: sitesTable.name,
       noShows: sql<number>`coalesce(
         count(${shiftAssignmentsTable.id}) filter (
           where ${shiftAssignmentsTable.status} = 'accepted'
@@ -465,7 +482,7 @@ router.get("/analytics/summary", requireAdmin, async (req, res): Promise<void> =
   const siteRevMap = new Map(siteRevenueRows.map((r) => [r.siteId ?? "__null", r.total]));
   const siteLaborMap = new Map(siteLaborRows.map((r) => [r.siteId ?? "__null", r.total]));
   const siteWorkedMap = new Map(siteWorkedRows.map((r) => [r.siteId ?? "__null", r.total]));
-  const siteScheduledMap = new Map(siteShiftRows.map((r) => [r.siteId ?? "__null", r.hoursScheduled]));
+  const siteScheduledMap = new Map(siteScheduledRows.map((r) => [r.siteId ?? "__null", r.hoursScheduled]));
   const siteNoShowMap = new Map(siteShiftRows.map((r) => [r.siteId ?? "__null", r.noShows]));
   const siteUnfilledMap = new Map(siteShiftRows.map((r) => [r.siteId ?? "__null", r.unfilledShifts]));
   const siteIncMap = new Map(siteIncidentRows.map((r) => [r.siteId ?? "__null", r.count]));
