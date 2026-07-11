@@ -13,6 +13,7 @@ import { Feather } from "@expo/vector-icons";
 import { useRouter } from "expo-router";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { confirmAction, notify } from "@/utils/confirm";
+import { formatTime, formatDateTime } from "@/utils/time";
 import { useQueryClient } from "@tanstack/react-query";
 
 function StatCard({ label, value, color, icon, onPress }: { label: string; value: number | string; color?: string; icon: string; onPress?: () => void }) {
@@ -213,7 +214,7 @@ export default function AdminDashboardScreen() {
                     </View>
                   </View>
                   <Text style={[styles.itemSub, { color: colors.mutedForeground }]} numberOfLines={1}>
-                    {claim.shiftTitle} · {start.toLocaleDateString([], { weekday: "short", day: "numeric", month: "short" })} {start.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
+                    {claim.shiftTitle} · {start.toLocaleDateString([], { weekday: "short", day: "numeric", month: "short" })} {formatTime(start)}
                   </Text>
                 </View>
                 <View style={{ flexDirection: "row", gap: 8 }}>
@@ -283,7 +284,7 @@ export default function AdminDashboardScreen() {
                     </View>
                   </View>
                   <Text style={[styles.itemSub, { color: colors.mutedForeground }]} numberOfLines={1}>
-                    {shift.clientName} · {start.toLocaleDateString([], { weekday: "short", day: "numeric", month: "short" })} {start.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })} · L{shift.requiredLicenseLevel}+
+                    {shift.clientName} · {start.toLocaleDateString([], { weekday: "short", day: "numeric", month: "short" })} {formatTime(start)} · L{shift.requiredLicenseLevel}+
                   </Text>
                 </TouchableOpacity>
                 <TouchableOpacity
@@ -376,11 +377,11 @@ export default function AdminDashboardScreen() {
               style={[styles.listItem, { backgroundColor: colors.card, borderColor: colors.border }]}
               onPress={() => router.push(`/(admin)/shifts/${shift.id}` as any)}
               accessibilityRole="button"
-              accessibilityLabel={`Upcoming shift: ${shift.title} for ${shift.clientName} on ${new Date(shift.startTime).toLocaleString()}`}
+              accessibilityLabel={`Upcoming shift: ${shift.title} for ${shift.clientName} on ${formatDateTime(shift.startTime)}`}
             >
               <Text style={[styles.itemTitle, { color: colors.foreground }]}>{shift.title}</Text>
               <Text style={[styles.itemSub, { color: colors.mutedForeground }]}>
-                {shift.clientName} · {new Date(shift.startTime).toLocaleString()}
+                {shift.clientName} · {formatDateTime(shift.startTime)}
               </Text>
             </TouchableOpacity>
           ))}

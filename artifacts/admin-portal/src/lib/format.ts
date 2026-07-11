@@ -1,12 +1,35 @@
 import type { Field } from "./tables";
 
+export function formatTime(date: Date | string): string {
+  const d = typeof date === "string" ? new Date(date) : date;
+  if (Number.isNaN(d.getTime())) return String(date);
+  return new Intl.DateTimeFormat("en-GB", {
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false,
+  }).format(d);
+}
+
+export function formatDateTime(date: Date | string): string {
+  const d = typeof date === "string" ? new Date(date) : date;
+  if (Number.isNaN(d.getTime())) return String(date);
+  return new Intl.DateTimeFormat("en-GB", {
+    weekday: "short",
+    month: "short",
+    day: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false,
+  }).format(d);
+}
+
 export function formatCell(value: unknown, field: Field): string {
   if (value === null || value === undefined || value === "") return "—";
   switch (field.type) {
     case "datetime": {
       const d = new Date(String(value));
       if (Number.isNaN(d.getTime())) return String(value);
-      return d.toLocaleString();
+      return formatDateTime(d);
     }
     case "date": {
       const d = new Date(String(value));

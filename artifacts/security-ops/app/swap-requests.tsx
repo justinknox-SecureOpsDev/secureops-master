@@ -11,6 +11,7 @@ import { confirmAction, notify } from "@/utils/confirm";
 import { useRouter } from "expo-router";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { Feather } from "@expo/vector-icons";
+import { formatTime, formatDateTime } from "@/utils/time";
 
 type SwapRow = {
   id: string;
@@ -126,8 +127,8 @@ export default function SwapRequestsScreen() {
         </Text>
         {start && (
           <Text style={[styles.meta, { color: colors.mutedForeground }]}>
-            {start.toLocaleString([], { weekday: "short", day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" })}
-            {end ? ` – ${end.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}` : ""}
+            {formatDateTime(start)}
+            {end ? ` – ${formatTime(end)}` : ""}
           </Text>
         )}
 

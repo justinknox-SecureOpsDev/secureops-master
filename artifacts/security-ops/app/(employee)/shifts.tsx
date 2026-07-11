@@ -13,6 +13,7 @@ import {
   getGetEmployeeDashboardSummaryQueryKey,
 } from "@workspace/api-client-react";
 import * as Location from "expo-location";
+import { formatTime } from "@/utils/time";
 import { useQueryClient } from "@tanstack/react-query";
 import { Feather } from "@expo/vector-icons";
 import { LicenseLevelBadge, levelLabel } from "@/components/LicenseLevelBadge";
@@ -456,7 +457,7 @@ export default function EmployeeShiftsScreen() {
                 <View style={styles.detailRow}>
                   <Feather name="calendar" size={13} color={colors.mutedForeground} />
                   <Text style={[styles.detailText, { color: colors.foreground, fontWeight: "600" }]} numberOfLines={1}>
-                    {start.toLocaleDateString([], { weekday: "short", day: "numeric", month: "short" })} · {start.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })} – {new Date(item.endTime).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
+                    {start.toLocaleDateString([], { weekday: "short", day: "numeric", month: "short" })} · {formatTime(start)} – {formatTime(item.endTime)}
                   </Text>
                 </View>
 

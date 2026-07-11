@@ -8,6 +8,7 @@ import { Feather } from "@expo/vector-icons";
 import { useRouter, useFocusEffect } from "expo-router";
 import EmergencyButton from "@/components/EmergencyButton";
 import { apiRequest } from "@/utils/api";
+import { formatTime, formatDateTime } from "@/utils/time";
 
 function SeverityBadge({ severity }: { severity: string }) {
   const colors = useColors();
@@ -216,7 +217,7 @@ export default function EmployeeHomeScreen() {
           <View style={{ flex: 1 }}>
             <Text style={[styles.clockedInTitle, { color: colors.success }]}>ON DUTY</Text>
             <Text style={[styles.clockedInTime, { color: colors.foreground }]}>
-              Clocked in {summary.activeTimeEntry.clockInTime ? new Date(summary.activeTimeEntry.clockInTime).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }) : ""}
+              Clocked in {summary.activeTimeEntry.clockInTime ? formatTime(summary.activeTimeEntry.clockInTime) : ""}
             </Text>
           </View>
           <TouchableOpacity
@@ -271,7 +272,7 @@ export default function EmployeeHomeScreen() {
             style={[styles.nextShiftCard, { backgroundColor: colors.card, borderColor: colors.primary + "50" }]}
             onPress={() => router.push("/(employee)/shifts")}
             accessibilityRole="button"
-            accessibilityLabel={`Next shift: ${summary.nextShift.title} at ${summary.nextShift.clientName}, ${summary.nextShift.location}, ${new Date(summary.nextShift.startTime).toLocaleString([], { weekday: "short", month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" })}`}
+            accessibilityLabel={`Next shift: ${summary.nextShift.title} at ${summary.nextShift.clientName}, ${summary.nextShift.location}, ${formatDateTime(summary.nextShift.startTime)}`}
             accessibilityHint="Opens your shifts"
           >
             <View style={[styles.shiftAccent, { backgroundColor: colors.primary }]} />
@@ -285,7 +286,7 @@ export default function EmployeeHomeScreen() {
               <View style={styles.shiftRow}>
                 <Feather name="clock" size={13} color={colors.mutedForeground} />
                 <Text style={[styles.shiftMeta, { color: colors.mutedForeground }]}>
-                  {new Date(summary.nextShift.startTime).toLocaleString([], { weekday: "short", month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" })}
+                  {formatDateTime(summary.nextShift.startTime)}
                 </Text>
               </View>
             </View>

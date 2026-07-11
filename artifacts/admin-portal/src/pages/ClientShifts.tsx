@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { Users, Clock, Shield, ChevronDown, ChevronUp } from "lucide-react";
 import { api } from "@/lib/api";
+import { formatTime, formatDateTime } from "@/lib/format";
 
 type Officer = { name: string; licenseLevel: number | null };
 type Shift = {
@@ -18,10 +19,7 @@ type Shift = {
 };
 
 function fmt(d: string) {
-  return new Date(d).toLocaleString("en-US", {
-    weekday: "short", month: "short", day: "numeric",
-    hour: "numeric", minute: "2-digit",
-  });
+  return formatDateTime(d);
 }
 function fmtDate(d: string) {
   return new Date(d).toLocaleDateString("en-US", {
@@ -29,7 +27,7 @@ function fmtDate(d: string) {
   });
 }
 function fmtTime(d: string) {
-  return new Date(d).toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" });
+  return formatTime(d);
 }
 function levelLabel(n: number | null) {
   if (!n) return "—";
