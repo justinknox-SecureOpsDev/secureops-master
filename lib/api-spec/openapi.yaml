@@ -534,6 +534,37 @@ paths:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
 
+  /me/ui-preferences:
+    put:
+      operationId: updateMyUiPreferences
+      tags: [auth]
+      summary: Update the caller's UI personalization preferences
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UiPreferences"
+      responses:
+        "200":
+          description: Updated preferences
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/UiPreferences"
+        "400":
+          description: Invalid payload
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
   /employees:
     get:
       operationId: getEmployees
@@ -3320,6 +3351,8 @@ components:
         createdAt:
           type: string
           format: date-time
+        uiPreferences:
+          $ref: "#/components/schemas/UiPreferences"
       required:
         - id
         - email
@@ -3328,6 +3361,18 @@ components:
         - role
         - status
         - createdAt
+
+    UiPreferences:
+      type: object
+      description: "Per-user UI personalization. Cosmetic only — never authorization."
+      properties:
+        navGroupOrder:
+          type: array
+          description: "Preferred order of portal nav group keys. Unknown keys are ignored; missing groups append in default order."
+          maxItems: 30
+          items:
+            type: string
+            maxLength: 40
 
     SiteManagerUser:
       type: object

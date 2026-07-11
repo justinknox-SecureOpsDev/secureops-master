@@ -7,12 +7,14 @@ import {
   Radio as RadioIcon, Radar, MessageCircle, Users as UsersIcon,
   Briefcase, Calculator, Shield, Settings, CalendarRange, Menu, X, Building2,
   ArrowLeftRight, GraduationCap, LifeBuoy, FormInput, BarChart3, LayoutDashboard,
+  SlidersHorizontal,
   type LucideIcon,
 } from "lucide-react";
 import { useAuth } from "@/lib/auth";
 import { fetchWithAuth } from "@/lib/api";
 import { Button } from "@/components/ui/button";
 import { useChatUnreadTotal } from "@/hooks/useChatUnreadTotal";
+import { CustomizeTabsDialog } from "@/components/CustomizeTabsDialog";
 
 type SystemStatus = {
   env: string;
@@ -271,6 +273,30 @@ export function buildNavGroups(isDispatcher: boolean): NavGroup[] {
 }
 
 /**
+ * Applies a user's saved nav-group order preference to the default group list.
+ * Saved keys come first (in saved order); unknown/stale keys are ignored; any
+ * groups missing from the preference are appended in default order, so newly
+ * shipped tabs always remain reachable. Pure so it can be unit-tested.
+ */
+export function applyNavOrder(groups: NavGroup[], order?: string[] | null): NavGroup[] {
+  if (!order || order.length === 0) return groups;
+  const byKey = new Map(groups.map((g) => [g.key, g]));
+  const seen = new Set<string>();
+  const out: NavGroup[] = [];
+  for (const key of order) {
+    const g = byKey.get(key);
+    if (g && !seen.has(key)) {
+      out.push(g);
+      seen.add(key);
+    }
+  }
+  for (const g of groups) {
+    if (!seen.has(g.key)) out.push(g);
+  }
+  return out;
+}
+
+/**
  * Resolves the current location to a nav group key. First match wins: an exact
  * item href (or a sub-path of one) takes precedence, then a small set of
  * fallback heuristics handle dynamic routes (e.g. `/sites/:id`, `/staffing/:id`)
@@ -322,7 +348,17 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   const [mobileOpen, setMobileOpen] = useState(false);
   useEffect(() => { setMobileOpen(false); }, [location]);
 
-  const groups = useMemo(() => buildNavGroups(isDispatcher), [isDispatcher]);
+  // Per-user tab order: role defaults, reordered by the account's saved
+  // preference. `navOrderOverride` reflects a save made this session without
+  // waiting for a /auth/me refetch.
+  const defaultGroups = useMemo(() => buildNavGroups(isDispatcher), [isDispatcher]);
+  const [navOrderOverride, setNavOrderOverride] = useState<string[] | null>(null);
+  const savedNavOrder = navOrderOverride ?? user?.uiPreferences?.navGroupOrder ?? null;
+  const groups = useMemo(
+    () => applyNavOrder(defaultGroups, savedNavOrder),
+    [defaultGroups, savedNavOrder],
+  );
+  const [customizeOpen, setCustomizeOpen] = useState(false);
 
   const groupForLocation = useMemo(
     () => resolveGroupKey(groups, location),
@@ -503,8 +539,25 @@ export function AppShell({ children }: { children: React.ReactNode }) {
               </button>
             );
           })}
+          <button
+            type="button"
+            onClick={() => setCustomizeOpen(true)}
+            title="Customize tab order"
+            aria-label="Customize tab order"
+            className="ml-auto flex items-center px-3 py-2 border-b-2 border-transparent opacity-60 hover:opacity-100 hover:bg-sidebar-accent/30 transition-all"
+          >
+            <SlidersHorizontal className="w-4 h-4" />
+          </button>
         </nav>
       </header>
+
+      <CustomizeTabsDialog
+        open={customizeOpen}
+        onOpenChange={setCustomizeOpen}
+        groups={groups.map((g) => ({ key: g.key, label: g.label, Icon: g.Icon }))}
+        defaultKeys={defaultGroups.map((g) => g.key)}
+        onSaved={(order) => setNavOrderOverride(order)}
+      />
 
       <SystemBanner status={systemStatus} />
 

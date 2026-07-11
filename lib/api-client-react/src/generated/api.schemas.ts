@@ -147,6 +147,17 @@ export const UserStatus = {
   pending: "pending",
 } as const;
 
+/**
+ * Per-user UI personalization. Cosmetic only — never authorization.
+ */
+export interface UiPreferences {
+  /**
+   * Preferred order of portal nav group keys. Unknown keys are ignored; missing groups append in default order.
+   * @maxItems 30
+   */
+  navGroupOrder?: string[];
+}
+
 export interface User {
   id: string;
   email: string;
@@ -159,6 +170,7 @@ export interface User {
   /** True after first password change until the user has reviewed/saved their profile. */
   mustCompleteProfile?: boolean;
   createdAt: string;
+  uiPreferences?: UiPreferences;
 }
 
 export interface AuthResponse {

@@ -23,6 +23,9 @@ export const usersTable = pgTable("users", {
   // self-logout-all-devices and admin "revoke all sessions" actions.
   tokensValidAfter: timestamp("tokens_valid_after", { withTimezone: true }).notNull().defaultNow(),
   expoPushToken: text("expo_push_token"),
+  // Per-user UI personalization (e.g. admin-portal nav group order).
+  // Cosmetic only — never used for authorization decisions.
+  uiPreferences: jsonb("ui_preferences").$type<{ navGroupOrder?: string[] }>(),
   // E.164 phone number for SMS notifications (e.g. "+15125550142"). Optional —
   // SMS only fires when this is set AND smsOptIn is true AND Twilio is connected.
   phoneNumber: text("phone_number"),

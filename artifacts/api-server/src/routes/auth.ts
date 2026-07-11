@@ -7,6 +7,7 @@ import { db, usersTable, employeesTable, passwordResetTokensTable, revokedTokens
 import { requireAuth, signToken, tokenTtlSeconds } from "../middlewares/auth";
 import { disconnectUser } from "../lib/wsManager";
 import { normalizePhoneToE164 } from "../lib/phone";
+import { UpdateMyUiPreferencesBody } from "@workspace/api-zod";
 import {
   forgotPasswordEmailLimiter,
   forgotPasswordIpLimiter,
@@ -134,6 +135,7 @@ function userPayload(user: typeof usersTable.$inferSelect) {
     mustChangePassword: user.mustChangePassword,
     mustCompleteProfile: user.mustCompleteProfile,
     createdAt: user.createdAt,
+    uiPreferences: user.uiPreferences ?? undefined,
   };
 }
 
@@ -260,6 +262,31 @@ router.post("/auth/push-token", requireAuth, async (req, res): Promise<void> => 
   if (!token) { res.status(400).json({ error: "Bad Request", message: "token required" }); return; }
   await db.update(usersTable).set({ expoPushToken: token }).where(eq(usersTable.id, req.user!.userId));
   res.json({ success: true });
+});
+
+// Per-user UI personalization (portal nav group order). Cosmetic only —
+// stored on the caller's own row, never used for authorization.
+router.put("/me/ui-preferences", requireAuth, async (req, res): Promise<void> => {
+  const parsed = UpdateMyUiPreferencesBody.safeParse(req.body);
+  if (!parsed.success) {
+    res.status(400).json({ error: "Bad Request", message: parsed.error.message });
+    return;
+  }
+  const [current] = await db
+    .select({ uiPreferences: usersTable.uiPreferences })
+    .from(usersTable)
+    .where(eq(usersTable.id, req.user!.userId));
+  if (!current) {
+    res.status(404).json({ error: "Not Found", message: "User not found" });
+    return;
+  }
+  const merged: { navGroupOrder?: string[] } = { ...(current.uiPreferences ?? {}) };
+  if (parsed.data.navGroupOrder !== undefined) {
+    // Dedupe while preserving first occurrence order.
+    merged.navGroupOrder = [...new Set(parsed.data.navGroupOrder)];
+  }
+  await db.update(usersTable).set({ uiPreferences: merged }).where(eq(usersTable.id, req.user!.userId));
+  res.json(merged);
 });
 
 router.get("/auth/me", requireAuth, async (req, res): Promise<void> => {

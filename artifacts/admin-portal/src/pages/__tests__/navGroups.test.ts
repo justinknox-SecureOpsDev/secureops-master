@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { buildNavGroups, resolveGroupKey } from "@/pages/AppShell";
+import { applyNavOrder, buildNavGroups, resolveGroupKey } from "@/pages/AppShell";
 
 /**
  * Locks in the role-aligned navigation IA and the route→group resolution that
@@ -117,6 +117,49 @@ describe("resolveGroupKey (admin)", () => {
       expect(key).not.toBeNull();
       expect(validKeys.has(key as string)).toBe(true);
     }
+  });
+});
+
+describe("applyNavOrder", () => {
+  const defaultKeys = adminGroups.map((g) => g.key);
+
+  it("returns the default order when no preference is saved", () => {
+    expect(applyNavOrder(adminGroups, null).map((g) => g.key)).toEqual(defaultKeys);
+    expect(applyNavOrder(adminGroups, undefined).map((g) => g.key)).toEqual(defaultKeys);
+    expect(applyNavOrder(adminGroups, []).map((g) => g.key)).toEqual(defaultKeys);
+  });
+
+  it("reorders groups to match the saved preference", () => {
+    const reversed = [...defaultKeys].reverse();
+    expect(applyNavOrder(adminGroups, reversed).map((g) => g.key)).toEqual(reversed);
+  });
+
+  it("ignores unknown/stale keys from the preference", () => {
+    const out = applyNavOrder(adminGroups, ["ghost-tab", "accounting", "overview"]);
+    expect(out.map((g) => g.key)).toEqual([
+      "accounting",
+      "overview",
+      ...defaultKeys.filter((k) => k !== "accounting" && k !== "overview"),
+    ]);
+  });
+
+  it("appends newly shipped groups missing from the preference in default order", () => {
+    const partial = ["settings", "dispatch"];
+    const out = applyNavOrder(adminGroups, partial).map((g) => g.key);
+    expect(out.slice(0, 2)).toEqual(partial);
+    expect(out).toHaveLength(defaultKeys.length);
+    expect(out.slice(2)).toEqual(defaultKeys.filter((k) => !partial.includes(k)));
+  });
+
+  it("drops duplicate keys, keeping the first occurrence", () => {
+    const out = applyNavOrder(adminGroups, ["accounting", "accounting", "overview"]);
+    expect(out.map((g) => g.key).filter((k) => k === "accounting")).toHaveLength(1);
+    expect(out).toHaveLength(defaultKeys.length);
+  });
+
+  it("never loses or invents a group", () => {
+    const out = applyNavOrder(adminGroups, ["hr", "nonsense", "hr", "settings"]);
+    expect([...out.map((g) => g.key)].sort()).toEqual([...defaultKeys].sort());
   });
 });
 

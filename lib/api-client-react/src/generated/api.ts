@@ -158,6 +158,7 @@ import type {
   TimeEntry,
   TriggerEmergency201,
   TriggerEmergencyBody,
+  UiPreferences,
   UpdateAdminTaskRequest,
   UpdateApplicationFieldRequest,
   UpdateApplicationQuestionRequest,
@@ -2521,6 +2522,92 @@ export function useGetMe<
 
   return { ...query, queryKey: queryOptions.queryKey };
 }
+
+/**
+ * @summary Update the caller's UI personalization preferences
+ */
+export const getUpdateMyUiPreferencesUrl = () => {
+  return `/api/me/ui-preferences`;
+};
+
+export const updateMyUiPreferences = async (
+  uiPreferences: UiPreferences,
+  options?: RequestInit,
+): Promise<UiPreferences> => {
+  return customFetch<UiPreferences>(getUpdateMyUiPreferencesUrl(), {
+    ...options,
+    method: "PUT",
+    headers: { "Content-Type": "application/json", ...options?.headers },
+    body: JSON.stringify(uiPreferences),
+  });
+};
+
+export const getUpdateMyUiPreferencesMutationOptions = <
+  TError = ErrorType<ErrorResponse>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof updateMyUiPreferences>>,
+    TError,
+    { data: BodyType<UiPreferences> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof updateMyUiPreferences>>,
+  TError,
+  { data: BodyType<UiPreferences> },
+  TContext
+> => {
+  const mutationKey = ["updateMyUiPreferences"];
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof updateMyUiPreferences>>,
+    { data: BodyType<UiPreferences> }
+  > = (props) => {
+    const { data } = props ?? {};
+
+    return updateMyUiPreferences(data, requestOptions);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type UpdateMyUiPreferencesMutationResult = NonNullable<
+  Awaited<ReturnType<typeof updateMyUiPreferences>>
+>;
+export type UpdateMyUiPreferencesMutationBody = BodyType<UiPreferences>;
+export type UpdateMyUiPreferencesMutationError = ErrorType<ErrorResponse>;
+
+/**
+ * @summary Update the caller's UI personalization preferences
+ */
+export const useUpdateMyUiPreferences = <
+  TError = ErrorType<ErrorResponse>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof updateMyUiPreferences>>,
+    TError,
+    { data: BodyType<UiPreferences> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationResult<
+  Awaited<ReturnType<typeof updateMyUiPreferences>>,
+  TError,
+  { data: BodyType<UiPreferences> },
+  TContext
+> => {
+  return useMutation(getUpdateMyUiPreferencesMutationOptions(options));
+};
 
 /**
  * @summary List all employees
