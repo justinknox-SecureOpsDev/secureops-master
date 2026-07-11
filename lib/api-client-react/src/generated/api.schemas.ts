@@ -2495,6 +2495,16 @@ export type GetAnalyticsSummaryParams = {
   end: string;
 };
 
+export type ExportAnalyticsCsvParams = {
+  start: string;
+  end: string;
+};
+
+export type ExportAnalyticsPdfParams = {
+  start: string;
+  end: string;
+};
+
 export type CreateChatRoomBody = {
   name: string;
   type?: string;

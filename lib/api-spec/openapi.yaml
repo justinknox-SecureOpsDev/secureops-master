@@ -1467,6 +1467,49 @@ paths:
             application/json:
               schema: { $ref: "#/components/schemas/ErrorResponse" }
 
+  /analytics/export.csv:
+    get:
+      operationId: exportAnalyticsCsv
+      tags: [dashboard]
+      summary: Download the analytics report (summary KPIs + per-site breakdown) as a CSV (admin only)
+      parameters:
+        - { name: start, in: query, required: true, schema: { type: string, format: date } }
+        - { name: end, in: query, required: true, schema: { type: string, format: date } }
+      responses:
+        "200":
+          description: CSV file
+          content:
+            text/csv:
+              schema:
+                type: string
+        "400":
+          description: Invalid parameters
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ErrorResponse" }
+
+  /analytics/export.pdf:
+    get:
+      operationId: exportAnalyticsPdf
+      tags: [dashboard]
+      summary: Download the analytics report as a branded PDF (admin only)
+      parameters:
+        - { name: start, in: query, required: true, schema: { type: string, format: date } }
+        - { name: end, in: query, required: true, schema: { type: string, format: date } }
+      responses:
+        "200":
+          description: PDF file
+          content:
+            application/pdf:
+              schema:
+                type: string
+                format: binary
+        "400":
+          description: Invalid parameters
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ErrorResponse" }
+
   /dashboard/admin-summary:
     get:
       operationId: getAdminDashboardSummary

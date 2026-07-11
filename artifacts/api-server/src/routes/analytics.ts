@@ -10,8 +10,11 @@ import {
   incidentsTable,
   sitesTable,
 } from "@workspace/db";
+import type { Request, Response } from "express";
 import { requireAdmin } from "../middlewares/auth";
 import { businessTimeZone } from "../lib/businessTime";
+import { buildAnalyticsReportPdf } from "../lib/analyticsPdf";
+import { brand } from "../lib/brandConfig";
 
 const router: IRouter = Router();
 
@@ -69,14 +72,28 @@ function isoWeek(monday: Date): number {
   return Math.round((monday.getTime() - startOfYear.getTime()) / (7 * 86400_000)) + 1;
 }
 
-router.get("/analytics/summary", requireAdmin, async (req, res): Promise<void> => {
+/**
+ * Validate the `start` / `end` query params shared by the summary and both
+ * export routes. Writes the 400 response itself and returns null on failure.
+ */
+function parseRange(req: Request, res: Response): { start: string; end: string } | null {
   const { start, end } = req.query as { start?: string; end?: string };
-
   if (!start || !end || !/^\d{4}-\d{2}-\d{2}$/.test(start) || !/^\d{4}-\d{2}-\d{2}$/.test(end)) {
     res.status(400).json({ error: "start and end are required in YYYY-MM-DD format" });
-    return;
+    return null;
   }
+  return { start, end };
+}
 
+export type AnalyticsSummaryData = Awaited<ReturnType<typeof computeAnalyticsSummary>>;
+
+/**
+ * Compute the full analytics summary (P&L, hours, missed shifts, incidents,
+ * trends, per-site breakdown) for an inclusive [start, end] date range.
+ * Shared by the JSON summary route and the CSV / PDF export routes so all
+ * three surfaces always agree on the numbers.
+ */
+export async function computeAnalyticsSummary(start: string, end: string) {
   const tz = businessTimeZone();
   const startUtc = dateToBusinessTzStart(start, tz);
   // End date is inclusive — use start of the *next* day
@@ -514,7 +531,7 @@ router.get("/analytics/summary", requireAdmin, async (req, res): Promise<void> =
     };
   });
 
-  res.json({
+  return {
     revenue,
     laborCost,
     profit,
@@ -532,7 +549,111 @@ router.get("/analytics/summary", requireAdmin, async (req, res): Promise<void> =
     hoursTrend,
     incidentTrend,
     perSite,
-  });
+  };
+}
+
+router.get("/analytics/summary", requireAdmin, async (req, res): Promise<void> => {
+  const range = parseRange(req, res);
+  if (!range) return;
+  res.json(await computeAnalyticsSummary(range.start, range.end));
+});
+
+/**
+ * CSV cell escaping — same contract as the Pay Run export:
+ *   - Wrap in quotes if the value contains `,`, `"`, newline, tab, or CR.
+ *   - Double up embedded quotes.
+ *   - Defang leading `=`, `+`, `-`, `@`, `|`, tab, CR by prefixing `'`
+ *     (Excel / Sheets treat these as formula starters).
+ */
+function csvEscape(v: unknown): string {
+  if (v === null || v === undefined) return "";
+  let s = typeof v === "string" ? v : String(v);
+  if (s.length > 0 && /^[=+\-@|\t\r]/.test(s)) {
+    s = "'" + s;
+  }
+  if (/[",\n\r\t]/.test(s)) {
+    s = '"' + s.replace(/"/g, '""') + '"';
+  }
+  return s;
+}
+
+function exportFilename(start: string, end: string, ext: "csv" | "pdf"): string {
+  const safeShort = brand.shortName.replace(/[^a-z0-9]/gi, "-").toLowerCase();
+  return `${safeShort}-analytics-${start}_${end}.${ext}`;
+}
+
+router.get("/analytics/export.csv", requireAdmin, async (req, res): Promise<void> => {
+  const range = parseRange(req, res);
+  if (!range) return;
+  const s = await computeAnalyticsSummary(range.start, range.end);
+
+  const lines: string[] = [];
+  const row = (...cells: unknown[]) => lines.push(cells.map(csvEscape).join(","));
+
+  // ── Summary KPI section ──
+  row("Metric", "Value");
+  row("Period start", range.start);
+  row("Period end", range.end);
+  row("Revenue (USD)", s.revenue.toFixed(2));
+  row("Labor cost (USD)", s.laborCost.toFixed(2));
+  row("Profit (USD)", s.profit.toFixed(2));
+  row("Margin (%)", s.marginPct.toFixed(1));
+  row("Hours worked", s.hoursWorked.toFixed(2));
+  row("Hours scheduled", s.hoursScheduled.toFixed(2));
+  row("Coverage (%)", s.coveragePct.toFixed(1));
+  row("No-shows", s.noShowCount);
+  row("Unfilled shifts", s.unfilledCount);
+  row("Incidents (total)", s.incidentTotal);
+  row("Incidents low", s.incidentsBySeverity.low ?? 0);
+  row("Incidents medium", s.incidentsBySeverity.medium ?? 0);
+  row("Incidents high", s.incidentsBySeverity.high ?? 0);
+  row("Incidents critical", s.incidentsBySeverity.critical ?? 0);
+  row("Incidents open", s.incidentsByStatus.open ?? 0);
+  row("Incidents investigating", s.incidentsByStatus.investigating ?? 0);
+  row("Incidents closed", s.incidentsByStatus.closed ?? 0);
+  lines.push("");
+
+  // ── Per-site breakdown section ──
+  row(
+    "Site", "Revenue (USD)", "Labor cost (USD)", "Profit (USD)",
+    "Hours worked", "Hours scheduled", "No-shows", "Unfilled shifts", "Incidents",
+  );
+  const sites = [...s.perSite].sort((a, b) => b.revenue - a.revenue);
+  for (const site of sites) {
+    row(
+      site.siteName,
+      site.revenue.toFixed(2),
+      site.laborCost.toFixed(2),
+      site.profit.toFixed(2),
+      site.hoursWorked.toFixed(2),
+      site.hoursScheduled.toFixed(2),
+      site.noShows,
+      site.unfilledShifts,
+      site.incidents,
+    );
+  }
+
+  // CRLF — Excel-friendliest line ending.
+  const csv = lines.join("\r\n") + "\r\n";
+  res.setHeader("Content-Type", "text/csv; charset=utf-8");
+  res.setHeader(
+    "Content-Disposition",
+    `attachment; filename="${exportFilename(range.start, range.end, "csv")}"`,
+  );
+  res.send(csv);
+});
+
+router.get("/analytics/export.pdf", requireAdmin, async (req, res): Promise<void> => {
+  const range = parseRange(req, res);
+  if (!range) return;
+  const s = await computeAnalyticsSummary(range.start, range.end);
+  const payload = buildAnalyticsReportPdf(s, range.start, range.end);
+  res.setHeader("Content-Type", "application/pdf");
+  res.setHeader(
+    "Content-Disposition",
+    `attachment; filename="${exportFilename(range.start, range.end, "pdf")}"`,
+  );
+  payload.stream.pipe(res);
 });
 
 export default router;

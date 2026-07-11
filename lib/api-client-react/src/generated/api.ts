@@ -72,6 +72,8 @@ import type {
   Employee,
   EmployeeDashboardSummary,
   ErrorResponse,
+  ExportAnalyticsCsvParams,
+  ExportAnalyticsPdfParams,
   ForgotPasswordRequest,
   ForgotPasswordResponse,
   GenerateInvoiceRequest,
@@ -5828,6 +5830,200 @@ export function useGetAnalyticsSummary<
   },
 ): UseQueryResult<TData, TError> & { queryKey: QueryKey } {
   const queryOptions = getGetAnalyticsSummaryQueryOptions(params, options);
+
+  const query = useQuery(queryOptions) as UseQueryResult<TData, TError> & {
+    queryKey: QueryKey;
+  };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
+
+/**
+ * @summary Download the analytics report (summary KPIs + per-site breakdown) as a CSV (admin only)
+ */
+export const getExportAnalyticsCsvUrl = (params: ExportAnalyticsCsvParams) => {
+  const normalizedParams = new URLSearchParams();
+
+  Object.entries(params || {}).forEach(([key, value]) => {
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? "null" : value.toString());
+    }
+  });
+
+  const stringifiedParams = normalizedParams.toString();
+
+  return stringifiedParams.length > 0
+    ? `/api/analytics/export.csv?${stringifiedParams}`
+    : `/api/analytics/export.csv`;
+};
+
+export const exportAnalyticsCsv = async (
+  params: ExportAnalyticsCsvParams,
+  options?: RequestInit,
+): Promise<string> => {
+  return customFetch<string>(getExportAnalyticsCsvUrl(params), {
+    ...options,
+    method: "GET",
+  });
+};
+
+export const getExportAnalyticsCsvQueryKey = (
+  params?: ExportAnalyticsCsvParams,
+) => {
+  return [`/api/analytics/export.csv`, ...(params ? [params] : [])] as const;
+};
+
+export const getExportAnalyticsCsvQueryOptions = <
+  TData = Awaited<ReturnType<typeof exportAnalyticsCsv>>,
+  TError = ErrorType<ErrorResponse>,
+>(
+  params: ExportAnalyticsCsvParams,
+  options?: {
+    query?: UseQueryOptions<
+      Awaited<ReturnType<typeof exportAnalyticsCsv>>,
+      TError,
+      TData
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+) => {
+  const { query: queryOptions, request: requestOptions } = options ?? {};
+
+  const queryKey =
+    queryOptions?.queryKey ?? getExportAnalyticsCsvQueryKey(params);
+
+  const queryFn: QueryFunction<
+    Awaited<ReturnType<typeof exportAnalyticsCsv>>
+  > = ({ signal }) => exportAnalyticsCsv(params, { signal, ...requestOptions });
+
+  return { queryKey, queryFn, ...queryOptions } as UseQueryOptions<
+    Awaited<ReturnType<typeof exportAnalyticsCsv>>,
+    TError,
+    TData
+  > & { queryKey: QueryKey };
+};
+
+export type ExportAnalyticsCsvQueryResult = NonNullable<
+  Awaited<ReturnType<typeof exportAnalyticsCsv>>
+>;
+export type ExportAnalyticsCsvQueryError = ErrorType<ErrorResponse>;
+
+/**
+ * @summary Download the analytics report (summary KPIs + per-site breakdown) as a CSV (admin only)
+ */
+
+export function useExportAnalyticsCsv<
+  TData = Awaited<ReturnType<typeof exportAnalyticsCsv>>,
+  TError = ErrorType<ErrorResponse>,
+>(
+  params: ExportAnalyticsCsvParams,
+  options?: {
+    query?: UseQueryOptions<
+      Awaited<ReturnType<typeof exportAnalyticsCsv>>,
+      TError,
+      TData
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+): UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+  const queryOptions = getExportAnalyticsCsvQueryOptions(params, options);
+
+  const query = useQuery(queryOptions) as UseQueryResult<TData, TError> & {
+    queryKey: QueryKey;
+  };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
+
+/**
+ * @summary Download the analytics report as a branded PDF (admin only)
+ */
+export const getExportAnalyticsPdfUrl = (params: ExportAnalyticsPdfParams) => {
+  const normalizedParams = new URLSearchParams();
+
+  Object.entries(params || {}).forEach(([key, value]) => {
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? "null" : value.toString());
+    }
+  });
+
+  const stringifiedParams = normalizedParams.toString();
+
+  return stringifiedParams.length > 0
+    ? `/api/analytics/export.pdf?${stringifiedParams}`
+    : `/api/analytics/export.pdf`;
+};
+
+export const exportAnalyticsPdf = async (
+  params: ExportAnalyticsPdfParams,
+  options?: RequestInit,
+): Promise<Blob> => {
+  return customFetch<Blob>(getExportAnalyticsPdfUrl(params), {
+    ...options,
+    method: "GET",
+  });
+};
+
+export const getExportAnalyticsPdfQueryKey = (
+  params?: ExportAnalyticsPdfParams,
+) => {
+  return [`/api/analytics/export.pdf`, ...(params ? [params] : [])] as const;
+};
+
+export const getExportAnalyticsPdfQueryOptions = <
+  TData = Awaited<ReturnType<typeof exportAnalyticsPdf>>,
+  TError = ErrorType<ErrorResponse>,
+>(
+  params: ExportAnalyticsPdfParams,
+  options?: {
+    query?: UseQueryOptions<
+      Awaited<ReturnType<typeof exportAnalyticsPdf>>,
+      TError,
+      TData
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+) => {
+  const { query: queryOptions, request: requestOptions } = options ?? {};
+
+  const queryKey =
+    queryOptions?.queryKey ?? getExportAnalyticsPdfQueryKey(params);
+
+  const queryFn: QueryFunction<
+    Awaited<ReturnType<typeof exportAnalyticsPdf>>
+  > = ({ signal }) => exportAnalyticsPdf(params, { signal, ...requestOptions });
+
+  return { queryKey, queryFn, ...queryOptions } as UseQueryOptions<
+    Awaited<ReturnType<typeof exportAnalyticsPdf>>,
+    TError,
+    TData
+  > & { queryKey: QueryKey };
+};
+
+export type ExportAnalyticsPdfQueryResult = NonNullable<
+  Awaited<ReturnType<typeof exportAnalyticsPdf>>
+>;
+export type ExportAnalyticsPdfQueryError = ErrorType<ErrorResponse>;
+
+/**
+ * @summary Download the analytics report as a branded PDF (admin only)
+ */
+
+export function useExportAnalyticsPdf<
+  TData = Awaited<ReturnType<typeof exportAnalyticsPdf>>,
+  TError = ErrorType<ErrorResponse>,
+>(
+  params: ExportAnalyticsPdfParams,
+  options?: {
+    query?: UseQueryOptions<
+      Awaited<ReturnType<typeof exportAnalyticsPdf>>,
+      TError,
+      TData
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+): UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+  const queryOptions = getExportAnalyticsPdfQueryOptions(params, options);
 
   const query = useQuery(queryOptions) as UseQueryResult<TData, TError> & {
     queryKey: QueryKey;

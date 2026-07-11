@@ -7,8 +7,10 @@ import {
 import {
   DollarSign, TrendingUp, TrendingDown, Users, Clock,
   AlertTriangle, Calendar, ChevronDown, ChevronUp, Loader2,
+  Download, FileText,
 } from "lucide-react";
 import { getGetAnalyticsSummaryQueryOptions } from "@workspace/api-client-react";
+import { fetchWithAuth } from "@/lib/api";
 import { Button } from "@/components/ui/button";
 import {
   Select, SelectTrigger, SelectValue, SelectContent, SelectItem,
@@ -156,6 +158,36 @@ export default function AnalyticsPage() {
     staleTime: 60_000,
   });
 
+  // ── Export (CSV / PDF) ──────────────────────────────────────────────
+  const [exporting, setExporting] = useState<"csv" | "pdf" | null>(null);
+  const [exportError, setExportError] = useState<string | null>(null);
+
+  const handleExport = async (kind: "csv" | "pdf") => {
+    if (!enabled || exporting) return;
+    setExporting(kind);
+    setExportError(null);
+    try {
+      const params = new URLSearchParams({ start, end });
+      const res = await fetchWithAuth(`/api/analytics/export.${kind}?${params}`);
+      if (!res.ok) {
+        throw new Error(`Export failed (${res.status})`);
+      }
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `wcsg-analytics-${start}_${end}.${kind}`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(url);
+    } catch (e) {
+      setExportError((e as Error).message || "Export failed. Please try again.");
+    } finally {
+      setExporting(null);
+    }
+  };
+
   // Per-site table sorting
   const sortedSites = useMemo(() => {
     if (!data?.perSite) return [];
@@ -239,8 +271,46 @@ export default function AnalyticsPage() {
               {start} → {end}
             </div>
           )}
+          <div className="flex items-end gap-2">
+            <Button
+              variant="outline"
+              size="sm"
+              className="h-8 text-xs"
+              disabled={!enabled || exporting !== null}
+              onClick={() => void handleExport("csv")}
+              aria-label="Export analytics report as CSV"
+            >
+              {exporting === "csv" ? (
+                <Loader2 className="w-3.5 h-3.5 mr-1.5 animate-spin" />
+              ) : (
+                <Download className="w-3.5 h-3.5 mr-1.5" />
+              )}
+              Export CSV
+            </Button>
+            <Button
+              variant="outline"
+              size="sm"
+              className="h-8 text-xs"
+              disabled={!enabled || exporting !== null}
+              onClick={() => void handleExport("pdf")}
+              aria-label="Export analytics report as PDF"
+            >
+              {exporting === "pdf" ? (
+                <Loader2 className="w-3.5 h-3.5 mr-1.5 animate-spin" />
+              ) : (
+                <FileText className="w-3.5 h-3.5 mr-1.5" />
+              )}
+              Export PDF
+            </Button>
+          </div>
         </div>
       </div>
+
+      {exportError && (
+        <div className="text-sm text-destructive" role="alert">
+          {exportError}
+        </div>
+      )}
 
       {/* Loading / error states */}
       {!enabled && (

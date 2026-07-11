@@ -2574,6 +2574,22 @@ export const GetAnalyticsSummaryResponse = zod.object({
 });
 
 /**
+ * @summary Download the analytics report (summary KPIs + per-site breakdown) as a CSV (admin only)
+ */
+export const ExportAnalyticsCsvQueryParams = zod.object({
+  start: zod.date(),
+  end: zod.date(),
+});
+
+/**
+ * @summary Download the analytics report as a branded PDF (admin only)
+ */
+export const ExportAnalyticsPdfQueryParams = zod.object({
+  start: zod.date(),
+  end: zod.date(),
+});
+
+/**
  * @summary Admin dashboard summary stats
  */
 export const GetAdminDashboardSummaryResponse = zod.object({
