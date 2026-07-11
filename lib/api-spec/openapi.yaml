@@ -1513,6 +1513,37 @@ paths:
             application/json:
               schema: { $ref: "#/components/schemas/ErrorResponse" }
 
+  /analytics/officer-history:
+    get:
+      operationId: getAnalyticsOfficerHistory
+      tags: [dashboard]
+      summary: Weekly-bucketed performance history for one officer (admin only)
+      description: >
+        Returns a per-ISO-week series of attendance / punctuality / reliability
+        metrics for a single officer over the last N weeks, so admins can see
+        whether an officer is improving or declining over time. Weeks with no
+        assigned shifts are included with null rates so charts can show gaps.
+      parameters:
+        - { name: userId, in: query, required: true, schema: { type: string, format: uuid }, description: "The officer's user id" }
+        - { name: weeks, in: query, required: false, schema: { type: integer, minimum: 4, maximum: 26, default: 12 }, description: "How many trailing ISO weeks to include (including the current week)" }
+      responses:
+        "200":
+          description: Weekly performance history
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AnalyticsOfficerHistory"
+        "400":
+          description: Invalid parameters
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ErrorResponse" }
+        "404":
+          description: User not found
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ErrorResponse" }
+
   /dashboard/admin-summary:
     get:
       operationId: getAdminDashboardSummary
@@ -5482,6 +5513,43 @@ components:
         totalNoShows: { type: integer }
         avgAttendanceRate: { type: number }
         avgOnTimeRate: { type: number }
+
+    AnalyticsOfficerHistoryPoint:
+      type: object
+      required:
+        - bucket
+        - weekStart
+        - shiftsAssigned
+        - shiftsCompleted
+        - noShows
+        - hoursWorked
+        - attendanceRate
+        - punctualityEligible
+        - onTimeRate
+        - reliabilityScore
+      properties:
+        bucket: { type: string, description: "ISO week label, e.g. 2026-W27" }
+        weekStart: { type: string, format: date, description: "Monday of the ISO week (business timezone calendar date)" }
+        shiftsAssigned: { type: integer }
+        shiftsCompleted: { type: integer }
+        noShows: { type: integer }
+        hoursWorked: { type: number }
+        attendanceRate: { type: number, nullable: true, description: "Null when no shifts were assigned that week" }
+        punctualityEligible: { type: integer, description: "Completed shifts that count toward punctuality" }
+        onTimeRate: { type: number, nullable: true, description: "Null when no completed shifts that week" }
+        reliabilityScore: { type: number, nullable: true, description: "60% attendance + 40% punctuality; null when no shifts assigned" }
+
+    AnalyticsOfficerHistory:
+      type: object
+      required: [userId, firstName, lastName, weeks, points]
+      properties:
+        userId: { type: string, format: uuid }
+        firstName: { type: string }
+        lastName: { type: string }
+        weeks: { type: integer }
+        points:
+          type: array
+          items: { $ref: "#/components/schemas/AnalyticsOfficerHistoryPoint" }
 
     AnalyticsSummary:
       type: object

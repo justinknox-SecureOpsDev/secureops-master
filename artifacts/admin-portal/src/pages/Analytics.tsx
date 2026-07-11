@@ -11,9 +11,16 @@ import {
   UserCheck, Download, FileText,
 } from "lucide-react";
 import { Link } from "wouter";
-import { getGetAnalyticsSummaryQueryOptions, useGetClients } from "@workspace/api-client-react";
+import {
+  getGetAnalyticsSummaryQueryOptions,
+  getGetAnalyticsOfficerHistoryQueryOptions,
+  useGetClients,
+} from "@workspace/api-client-react";
 import { fetchWithAuth } from "@/lib/api";
 import { Button } from "@/components/ui/button";
+import {
+  Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription,
+} from "@/components/ui/dialog";
 import {
   Select, SelectTrigger, SelectValue, SelectContent, SelectItem,
 } from "@/components/ui/select";
@@ -143,6 +150,119 @@ const SEVERITY_COLORS: Record<string, string> = {
   critical: "bg-red-100 text-red-800",
 };
 
+// ── Officer trends dialog ─────────────────────────────────────────────────────
+
+function OfficerTrendsDialog({
+  officer, onClose,
+}: {
+  officer: { userId: string; name: string } | null;
+  onClose: () => void;
+}) {
+  const [weeks, setWeeks] = useState("12");
+
+  const { data, isLoading, isError } = useQuery({
+    ...getGetAnalyticsOfficerHistoryQueryOptions({
+      userId: officer?.userId ?? "",
+      weeks: Number(weeks),
+    }),
+    enabled: Boolean(officer),
+    staleTime: 60_000,
+  });
+
+  const chartData = useMemo(
+    () =>
+      (data?.points ?? []).map((p) => ({
+        ...p,
+        // Recharts skips null values when connectNulls is off → visible gaps
+        // for weeks with no assigned shifts.
+        attendanceRate: p.attendanceRate ?? null,
+        reliabilityScore: p.reliabilityScore ?? null,
+      })),
+    [data?.points],
+  );
+
+  const activeWeeks = useMemo(
+    () => (data?.points ?? []).filter((p) => p.shiftsAssigned > 0).length,
+    [data?.points],
+  );
+
+  return (
+    <Dialog open={Boolean(officer)} onOpenChange={(open) => { if (!open) onClose(); }}>
+      <DialogContent className="sm:max-w-2xl">
+        <DialogHeader>
+          <DialogTitle>Performance trends — {officer?.name}</DialogTitle>
+          <DialogDescription>
+            Weekly attendance rate and reliability score. Gaps are weeks with no assigned shifts.
+          </DialogDescription>
+        </DialogHeader>
+
+        <div className="flex items-center justify-between gap-2">
+          <div className="text-xs text-muted-foreground">
+            {isLoading
+              ? "Loading…"
+              : activeWeeks === 0
+                ? "No shift activity in this window"
+                : `Active in ${activeWeeks} of the last ${weeks} weeks`}
+          </div>
+          <Select value={weeks} onValueChange={setWeeks}>
+            <SelectTrigger className="h-8 text-xs w-32" aria-label="Trend window in weeks">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="8">Last 8 weeks</SelectItem>
+              <SelectItem value="12">Last 12 weeks</SelectItem>
+              <SelectItem value="26">Last 26 weeks</SelectItem>
+            </SelectContent>
+          </Select>
+        </div>
+
+        {isError ? (
+          <div className="text-sm text-red-600 py-8 text-center">Failed to load trend data.</div>
+        ) : isLoading ? (
+          <div className="flex items-center justify-center py-16">
+            <Loader2 className="w-5 h-5 animate-spin text-muted-foreground" />
+          </div>
+        ) : (
+          <div className="h-64 w-full">
+            <ResponsiveContainer width="100%" height="100%">
+              <LineChart data={chartData} margin={{ top: 8, right: 8, bottom: 0, left: -16 }}>
+                <CartesianGrid strokeDasharray="3 3" className="stroke-muted" />
+                <XAxis dataKey="bucket" tick={{ fontSize: 10 }} interval="preserveStartEnd" />
+                <YAxis domain={[0, 100]} tick={{ fontSize: 10 }} />
+                <Tooltip
+                  formatter={(value, name) => [
+                    value === null || value === undefined ? "—" : `${Number(value).toFixed(1)}%`,
+                    name,
+                  ]}
+                />
+                <Legend wrapperStyle={{ fontSize: 12 }} />
+                <Line
+                  type="monotone"
+                  dataKey="attendanceRate"
+                  name="Attendance rate"
+                  stroke="#2563eb"
+                  strokeWidth={2}
+                  dot={{ r: 2.5 }}
+                  connectNulls={false}
+                />
+                <Line
+                  type="monotone"
+                  dataKey="reliabilityScore"
+                  name="Reliability score"
+                  stroke="#c9a84c"
+                  strokeWidth={2}
+                  dot={{ r: 2.5 }}
+                  connectNulls={false}
+                />
+              </LineChart>
+            </ResponsiveContainer>
+          </div>
+        )}
+      </DialogContent>
+    </Dialog>
+  );
+}
+
 // ── Main component ────────────────────────────────────────────────────────────
 
 type SortCol = "siteName" | "revenue" | "laborCost" | "profit" | "hoursWorked" | "hoursScheduled" | "noShows" | "unfilledShifts" | "incidents";
@@ -158,6 +278,7 @@ export default function AnalyticsPage() {
   const [sortDir, setSortDir] = useState<"asc" | "desc">("desc");
   const [officerSortCol, setOfficerSortCol] = useState<OfficerSortCol>("reliabilityScore");
   const [officerSortDir, setOfficerSortDir] = useState<"asc" | "desc">("desc");
+  const [trendOfficer, setTrendOfficer] = useState<{ userId: string; name: string } | null>(null);
 
   const { start, end } = useMemo(() => {
     if (preset === "custom" && customStart && customEnd) {
@@ -780,6 +901,7 @@ export default function AnalyticsPage() {
                       <TableHead className={`text-right ${officerThCls("incidentTotal")}`} onClick={() => handleOfficerSort("incidentTotal")}>
                         Incidents <OfficerSortIcon col="incidentTotal" />
                       </TableHead>
+                      <TableHead className="text-right whitespace-nowrap">Trends</TableHead>
                     </TableRow>
                   </TableHeader>
                   <TableBody>
@@ -861,12 +983,31 @@ export default function AnalyticsPage() {
                             <span className="text-muted-foreground">0</span>
                           )}
                         </TableCell>
+                        <TableCell className="text-right">
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            className="h-7 px-2 text-xs"
+                            aria-label={`View performance trends for ${o.firstName} ${o.lastName}`}
+                            onClick={() =>
+                              setTrendOfficer({
+                                userId: o.userId,
+                                name: `${o.firstName} ${o.lastName}`.trim(),
+                              })
+                            }
+                          >
+                            <TrendingUp className="w-3.5 h-3.5 mr-1" />
+                            View trends
+                          </Button>
+                        </TableCell>
                       </TableRow>
                     ))}
                   </TableBody>
                 </Table>
               </div>
             )}
+
+            <OfficerTrendsDialog officer={trendOfficer} onClose={() => setTrendOfficer(null)} />
           </section>
         </>
       )}

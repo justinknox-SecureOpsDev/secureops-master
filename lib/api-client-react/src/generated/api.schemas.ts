@@ -2321,6 +2321,33 @@ export interface AnalyticsOfficerSummary {
   avgOnTimeRate: number;
 }
 
+export interface AnalyticsOfficerHistoryPoint {
+  /** ISO week label, e.g. 2026-W27 */
+  bucket: string;
+  /** Monday of the ISO week (business timezone calendar date) */
+  weekStart: string;
+  shiftsAssigned: number;
+  shiftsCompleted: number;
+  noShows: number;
+  hoursWorked: number;
+  /** Null when no shifts were assigned that week */
+  attendanceRate: number | null;
+  /** Completed shifts that count toward punctuality */
+  punctualityEligible: number;
+  /** Null when no completed shifts that week */
+  onTimeRate: number | null;
+  /** 60% attendance + 40% punctuality; null when no shifts assigned */
+  reliabilityScore: number | null;
+}
+
+export interface AnalyticsOfficerHistory {
+  userId: string;
+  firstName: string;
+  lastName: string;
+  weeks: number;
+  points: AnalyticsOfficerHistoryPoint[];
+}
+
 export type AnalyticsSummaryIncidentsBySeverity = {
   low: number;
   medium: number;
@@ -2547,6 +2574,19 @@ export type ExportAnalyticsPdfParams = {
    * Restrict the report to sites belonging to this client
    */
   clientId?: string;
+};
+
+export type GetAnalyticsOfficerHistoryParams = {
+  /**
+   * The officer's user id
+   */
+  userId: string;
+  /**
+   * How many trailing ISO weeks to include (including the current week)
+   * @minimum 4
+   * @maximum 26
+   */
+  weeks?: number;
 };
 
 export type CreateChatRoomBody = {

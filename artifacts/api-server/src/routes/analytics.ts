@@ -804,6 +804,165 @@ export async function computeAnalyticsSummary(start: string, end: string, client
   };
 }
 
+/**
+ * Weekly-bucketed performance history for one officer over the trailing N
+ * ISO weeks (including the current week). Same admin-only analytics boundary
+ * and the same attendance / punctuality / reliability definitions as the
+ * per-officer summary table, but grouped by ISO week so trends are visible.
+ */
+router.get("/analytics/officer-history", requireAdmin, async (req, res): Promise<void> => {
+  const { userId, weeks: weeksRaw } = req.query as { userId?: string; weeks?: string };
+  if (!userId || !UUID_RE.test(userId)) {
+    res.status(400).json({ error: "userId must be a valid UUID" });
+    return;
+  }
+  let weeks = 12;
+  if (weeksRaw !== undefined && weeksRaw !== "") {
+    const n = Number(weeksRaw);
+    if (!Number.isInteger(n) || n < 4 || n > 26) {
+      res.status(400).json({ error: "weeks must be an integer between 4 and 26" });
+      return;
+    }
+    weeks = n;
+  }
+
+  const [user] = await db
+    .select({
+      id: usersTable.id,
+      firstName: usersTable.firstName,
+      lastName: usersTable.lastName,
+    })
+    .from(usersTable)
+    .where(eq(usersTable.id, userId));
+  if (!user) {
+    res.status(404).json({ error: "User not found" });
+    return;
+  }
+
+  const tz = businessTimeZone();
+  const now = new Date();
+
+  // Today's calendar date in the business timezone → Monday of the current
+  // ISO week → back up (weeks - 1) more weeks for the window start.
+  const parts = new Intl.DateTimeFormat("en-CA", {
+    timeZone: tz,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).formatToParts(now);
+  const pm: Record<string, string> = {};
+  for (const p of parts) if (p.type !== "literal") pm[p.type] = p.value;
+  const todayUtc = new Date(Date.UTC(Number(pm.year), Number(pm.month) - 1, Number(pm.day)));
+  const currentMonday = new Date(
+    todayUtc.getTime() - ((todayUtc.getUTCDay() + 6) % 7) * 86400_000,
+  );
+  const firstMonday = new Date(currentMonday.getTime() - (weeks - 1) * 7 * 86400_000);
+  const firstMondayStr = firstMonday.toISOString().slice(0, 10);
+  const startUtc = dateToBusinessTzStart(firstMondayStr, tz);
+
+  // One row per ISO week (business timezone) of shift end. Same joins and
+  // metric definitions as the per-officer block in computeAnalyticsSummary:
+  // accepted assignments on shifts that have already ended; completed = a
+  // time entry exists for (employee, shift); late = clock-in more than 5
+  // minutes after shift start.
+  const tzLit = sql.raw(`'${tz.replace(/'/g, "''")}'`);
+  const weekExpr = sql`date_trunc('week', ${shiftsTable.endTime} AT TIME ZONE ${tzLit})`;
+  const rows = await db
+    .select({
+      weekStart: sql<string>`${weekExpr}::text`,
+      shiftsAssigned: sql<number>`COUNT(DISTINCT ${shiftAssignmentsTable.shiftId})::int`,
+      shiftsCompleted: sql<number>`COUNT(DISTINCT CASE WHEN ${timeEntriesTable.id} IS NOT NULL THEN ${shiftAssignmentsTable.shiftId} END)::int`,
+      noShows: sql<number>`COUNT(DISTINCT CASE WHEN ${timeEntriesTable.id} IS NULL THEN ${shiftAssignmentsTable.shiftId} END)::int`,
+      hoursWorked: sql<number>`COALESCE(SUM(EXTRACT(EPOCH FROM (COALESCE(${timeEntriesTable.clockOutTime}, NOW()) - ${timeEntriesTable.clockInTime}))/3600) FILTER (WHERE ${timeEntriesTable.id} IS NOT NULL), 0)::float`,
+      lateCount: sql<number>`COUNT(DISTINCT CASE WHEN ${timeEntriesTable.clockInTime} > ${shiftsTable.startTime} + INTERVAL '5 minutes' THEN ${shiftAssignmentsTable.shiftId} END)::int`,
+    })
+    .from(shiftAssignmentsTable)
+    .innerJoin(shiftsTable, eq(shiftAssignmentsTable.shiftId, shiftsTable.id))
+    .leftJoin(
+      timeEntriesTable,
+      and(
+        eq(timeEntriesTable.employeeId, shiftAssignmentsTable.employeeId),
+        eq(timeEntriesTable.shiftId, shiftAssignmentsTable.shiftId),
+      ),
+    )
+    .where(
+      and(
+        eq(shiftAssignmentsTable.employeeId, userId),
+        eq(shiftAssignmentsTable.status, "accepted"),
+        gte(shiftsTable.endTime, startUtc),
+        lt(shiftsTable.endTime, now),
+      ),
+    )
+    .groupBy(weekExpr);
+
+  // Key rows by ISO week label (weekStart already tz-shifted → treat as UTC).
+  const byWeek = new Map<string, (typeof rows)[number]>();
+  for (const r of rows) {
+    const dt = new Date(r.weekStart.replace(" ", "T") + "Z");
+    byWeek.set(weekBucket(dt, "UTC"), r);
+  }
+
+  // Enumerate every week in the window so empty weeks appear as gaps.
+  const points = [];
+  for (let i = 0; i < weeks; i++) {
+    const monday = new Date(firstMonday.getTime() + i * 7 * 86400_000);
+    const bucket = weekBucket(monday, "UTC");
+    const r = byWeek.get(bucket);
+    if (!r) {
+      points.push({
+        bucket,
+        weekStart: monday.toISOString().slice(0, 10),
+        shiftsAssigned: 0,
+        shiftsCompleted: 0,
+        noShows: 0,
+        hoursWorked: 0,
+        attendanceRate: null,
+        punctualityEligible: 0,
+        onTimeRate: null,
+        reliabilityScore: null,
+      });
+      continue;
+    }
+    const attendanceRate =
+      r.shiftsAssigned > 0
+        ? Math.round((r.shiftsCompleted / r.shiftsAssigned) * 1000) / 10
+        : null;
+    const onTimeRate =
+      r.shiftsCompleted > 0
+        ? Math.round(((r.shiftsCompleted - r.lateCount) / r.shiftsCompleted) * 1000) / 10
+        : null;
+    // Composite reliability: 60% attendance + 40% punctuality — identical to
+    // the per-officer summary table, including its "no completed shifts →
+    // punctuality defaults to 100" convention, so the trend line for a week
+    // always matches what the summary would report for that same week.
+    // onTimeRate itself stays null in the payload to mark the missing signal.
+    const reliabilityScore =
+      attendanceRate === null
+        ? null
+        : Math.round((0.6 * attendanceRate + 0.4 * (onTimeRate ?? 100)) * 10) / 10;
+    points.push({
+      bucket,
+      weekStart: monday.toISOString().slice(0, 10),
+      shiftsAssigned: r.shiftsAssigned,
+      shiftsCompleted: r.shiftsCompleted,
+      noShows: r.noShows,
+      hoursWorked: Math.round(r.hoursWorked * 10) / 10,
+      attendanceRate,
+      punctualityEligible: r.shiftsCompleted,
+      onTimeRate,
+      reliabilityScore,
+    });
+  }
+
+  res.json({
+    userId: user.id,
+    firstName: user.firstName ?? "",
+    lastName: user.lastName ?? "",
+    weeks,
+    points,
+  });
+});
+
 router.get("/analytics/summary", requireAdmin, async (req, res): Promise<void> => {
   const range = parseRange(req, res);
   if (!range) return;

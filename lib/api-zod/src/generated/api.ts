@@ -2635,6 +2635,63 @@ export const ExportAnalyticsPdfQueryParams = zod.object({
 });
 
 /**
+ * Returns a per-ISO-week series of attendance / punctuality / reliability metrics for a single officer over the last N weeks, so admins can see whether an officer is improving or declining over time. Weeks with no assigned shifts are included with null rates so charts can show gaps.
+
+ * @summary Weekly-bucketed performance history for one officer (admin only)
+ */
+export const getAnalyticsOfficerHistoryQueryWeeksDefault = 12;
+export const getAnalyticsOfficerHistoryQueryWeeksMin = 4;
+export const getAnalyticsOfficerHistoryQueryWeeksMax = 26;
+
+export const GetAnalyticsOfficerHistoryQueryParams = zod.object({
+  userId: zod.coerce.string().uuid().describe("The officer's user id"),
+  weeks: zod.coerce
+    .number()
+    .min(getAnalyticsOfficerHistoryQueryWeeksMin)
+    .max(getAnalyticsOfficerHistoryQueryWeeksMax)
+    .default(getAnalyticsOfficerHistoryQueryWeeksDefault)
+    .describe(
+      "How many trailing ISO weeks to include (including the current week)",
+    ),
+});
+
+export const GetAnalyticsOfficerHistoryResponse = zod.object({
+  userId: zod.string().uuid(),
+  firstName: zod.string(),
+  lastName: zod.string(),
+  weeks: zod.number(),
+  points: zod.array(
+    zod.object({
+      bucket: zod.string().describe("ISO week label, e.g. 2026-W27"),
+      weekStart: zod.coerce
+        .date()
+        .describe("Monday of the ISO week (business timezone calendar date)"),
+      shiftsAssigned: zod.number(),
+      shiftsCompleted: zod.number(),
+      noShows: zod.number(),
+      hoursWorked: zod.number(),
+      attendanceRate: zod
+        .number()
+        .nullable()
+        .describe("Null when no shifts were assigned that week"),
+      punctualityEligible: zod
+        .number()
+        .describe("Completed shifts that count toward punctuality"),
+      onTimeRate: zod
+        .number()
+        .nullable()
+        .describe("Null when no completed shifts that week"),
+      reliabilityScore: zod
+        .number()
+        .nullable()
+        .describe(
+          "60% attendance + 40% punctuality; null when no shifts assigned",
+        ),
+    }),
+  ),
+});
+
+/**
  * @summary Admin dashboard summary stats
  */
 export const GetAdminDashboardSummaryResponse = zod.object({

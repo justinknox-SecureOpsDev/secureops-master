@@ -26,6 +26,7 @@ import type {
   AdminSignObjectDownload200,
   AdminSignObjectDownloadParams,
   AdminUpdateSubcontractorEntryBody,
+  AnalyticsOfficerHistory,
   AnalyticsSummary,
   Application,
   ApplicationFieldConfig,
@@ -81,6 +82,7 @@ import type {
   GenerateSubcontractorQrBody,
   GetAdminLicenseRenewalsParams,
   GetAdminShiftRequestsParams,
+  GetAnalyticsOfficerHistoryParams,
   GetAnalyticsSummaryParams,
   GetChatMessagesParams,
   GetClientDar200,
@@ -6024,6 +6026,117 @@ export function useExportAnalyticsPdf<
   },
 ): UseQueryResult<TData, TError> & { queryKey: QueryKey } {
   const queryOptions = getExportAnalyticsPdfQueryOptions(params, options);
+
+  const query = useQuery(queryOptions) as UseQueryResult<TData, TError> & {
+    queryKey: QueryKey;
+  };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
+
+/**
+ * Returns a per-ISO-week series of attendance / punctuality / reliability metrics for a single officer over the last N weeks, so admins can see whether an officer is improving or declining over time. Weeks with no assigned shifts are included with null rates so charts can show gaps.
+
+ * @summary Weekly-bucketed performance history for one officer (admin only)
+ */
+export const getGetAnalyticsOfficerHistoryUrl = (
+  params: GetAnalyticsOfficerHistoryParams,
+) => {
+  const normalizedParams = new URLSearchParams();
+
+  Object.entries(params || {}).forEach(([key, value]) => {
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? "null" : value.toString());
+    }
+  });
+
+  const stringifiedParams = normalizedParams.toString();
+
+  return stringifiedParams.length > 0
+    ? `/api/analytics/officer-history?${stringifiedParams}`
+    : `/api/analytics/officer-history`;
+};
+
+export const getAnalyticsOfficerHistory = async (
+  params: GetAnalyticsOfficerHistoryParams,
+  options?: RequestInit,
+): Promise<AnalyticsOfficerHistory> => {
+  return customFetch<AnalyticsOfficerHistory>(
+    getGetAnalyticsOfficerHistoryUrl(params),
+    {
+      ...options,
+      method: "GET",
+    },
+  );
+};
+
+export const getGetAnalyticsOfficerHistoryQueryKey = (
+  params?: GetAnalyticsOfficerHistoryParams,
+) => {
+  return [
+    `/api/analytics/officer-history`,
+    ...(params ? [params] : []),
+  ] as const;
+};
+
+export const getGetAnalyticsOfficerHistoryQueryOptions = <
+  TData = Awaited<ReturnType<typeof getAnalyticsOfficerHistory>>,
+  TError = ErrorType<ErrorResponse>,
+>(
+  params: GetAnalyticsOfficerHistoryParams,
+  options?: {
+    query?: UseQueryOptions<
+      Awaited<ReturnType<typeof getAnalyticsOfficerHistory>>,
+      TError,
+      TData
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+) => {
+  const { query: queryOptions, request: requestOptions } = options ?? {};
+
+  const queryKey =
+    queryOptions?.queryKey ?? getGetAnalyticsOfficerHistoryQueryKey(params);
+
+  const queryFn: QueryFunction<
+    Awaited<ReturnType<typeof getAnalyticsOfficerHistory>>
+  > = ({ signal }) =>
+    getAnalyticsOfficerHistory(params, { signal, ...requestOptions });
+
+  return { queryKey, queryFn, ...queryOptions } as UseQueryOptions<
+    Awaited<ReturnType<typeof getAnalyticsOfficerHistory>>,
+    TError,
+    TData
+  > & { queryKey: QueryKey };
+};
+
+export type GetAnalyticsOfficerHistoryQueryResult = NonNullable<
+  Awaited<ReturnType<typeof getAnalyticsOfficerHistory>>
+>;
+export type GetAnalyticsOfficerHistoryQueryError = ErrorType<ErrorResponse>;
+
+/**
+ * @summary Weekly-bucketed performance history for one officer (admin only)
+ */
+
+export function useGetAnalyticsOfficerHistory<
+  TData = Awaited<ReturnType<typeof getAnalyticsOfficerHistory>>,
+  TError = ErrorType<ErrorResponse>,
+>(
+  params: GetAnalyticsOfficerHistoryParams,
+  options?: {
+    query?: UseQueryOptions<
+      Awaited<ReturnType<typeof getAnalyticsOfficerHistory>>,
+      TError,
+      TData
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+): UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+  const queryOptions = getGetAnalyticsOfficerHistoryQueryOptions(
+    params,
+    options,
+  );
 
   const query = useQuery(queryOptions) as UseQueryResult<TData, TError> & {
     queryKey: QueryKey;
