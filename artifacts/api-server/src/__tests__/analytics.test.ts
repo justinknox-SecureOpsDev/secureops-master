@@ -29,6 +29,12 @@ const RANGE_END = "2009-03-08";
 // A different far-past range guaranteed to contain no rows at all.
 const EMPTY_START = "2003-01-05";
 const EMPTY_END = "2003-01-11";
+// Wide range covering client A's week (03-02..08) AND client B's week
+// (03-09..15) — used to prove the clientId filter separates the two.
+const WIDE_START = "2009-03-02";
+const WIDE_END = "2009-03-15";
+const B_WEEK_START = "2009-03-09";
+const B_WEEK_END = "2009-03-15";
 
 type Ctx = {
   adminId: string;
@@ -40,6 +46,9 @@ type Ctx = {
   clientId: string;
   siteId: string;
   shiftId: string;
+  clientBId: string;
+  siteBId: string;
+  clientCId: string;
 };
 const ctx = {} as Ctx;
 
@@ -169,6 +178,58 @@ beforeAll(async () => {
     status: "open",
     occurredAt: new Date("2009-03-04T16:30:00.000Z"),
   });
+
+  // ── Client B: separate client/site with data in the FOLLOWING week ──
+  // (keeps the original single-week assertions above untouched while
+  // letting the wide-range tests prove the clientId filter separates them)
+  const [clientB] = await db
+    .insert(clientsTable)
+    .values({ name: `${TAG}-client-b`, paymentTermsDays: 30 })
+    .returning({ id: clientsTable.id });
+  ctx.clientBId = clientB.id;
+
+  const [siteB] = await db
+    .insert(sitesTable)
+    .values({
+      clientId: ctx.clientBId,
+      name: `${TAG}-site-b`,
+      address: "200 Analytics Way",
+      defaultBillRate: "50.00",
+    })
+    .returning({ id: sitesTable.id });
+  ctx.siteBId = siteB.id;
+
+  await db.insert(invoicesTable).values({
+    invoiceNumber: `${TAG}-INV-B`,
+    clientId: ctx.clientBId,
+    siteId: ctx.siteBId,
+    clientName: `${TAG}-client-b`,
+    periodStart: B_WEEK_START,
+    periodEnd: B_WEEK_END,
+    subtotal: "400.00",
+    totalAmount: "400.00",
+    status: "draft",
+    dueDate: "2009-04-08",
+  });
+
+  await db.insert(payrollEntriesTable).values({
+    employeeId: ctx.officerBId,
+    siteId: ctx.siteBId,
+    periodStart: B_WEEK_START,
+    periodEnd: B_WEEK_END,
+    totalHours: "4.00",
+    hourlyRate: "25.00",
+    grossPay: "100.00",
+    netPay: "100.00",
+    status: "pending",
+  });
+
+  // ── Client C: a client with NO sites at all ──
+  const [clientC] = await db
+    .insert(clientsTable)
+    .values({ name: `${TAG}-client-c`, paymentTermsDays: 14 })
+    .returning({ id: clientsTable.id });
+  ctx.clientCId = clientC.id;
 });
 
 afterAll(async () => {
@@ -177,6 +238,7 @@ afterAll(async () => {
     sql`DELETE FROM time_entries WHERE shift_id IN (SELECT id FROM shifts WHERE title LIKE ${TAG + "%"})`,
   );
   await db.execute(sql`DELETE FROM payroll_entries WHERE site_id = ${ctx.siteId}::uuid`);
+  await db.execute(sql`DELETE FROM payroll_entries WHERE site_id = ${ctx.siteBId}::uuid`);
   await db.execute(sql`DELETE FROM invoices WHERE invoice_number LIKE ${TAG + "%"}`);
   await db.execute(sql`DELETE FROM shifts WHERE title LIKE ${TAG + "%"}`);
   await db.execute(sql`DELETE FROM sites WHERE name LIKE ${TAG + "%"}`);
@@ -238,6 +300,24 @@ describe("GET /analytics/summary — auth & validation", () => {
       .set(authed(ctx.adminToken))
       .query({ start: "2009-3-2", end: RANGE_END });
     expect(res.status).toBe(400);
+  });
+
+  it("400 on a malformed clientId", async () => {
+    const res = await request(app)
+      .get("/api/analytics/summary")
+      .set(authed(ctx.adminToken))
+      .query({ start: RANGE_START, end: RANGE_END, clientId: "not-a-uuid" });
+    expect(res.status).toBe(400);
+    expect(res.body.error).toMatch(/clientId/);
+  });
+
+  it("404 on an unknown clientId", async () => {
+    const res = await request(app)
+      .get("/api/analytics/summary")
+      .set(authed(ctx.adminToken))
+      .query({ start: RANGE_START, end: RANGE_END, clientId: randomUUID() });
+    expect(res.status).toBe(404);
+    expect(res.body.error).toMatch(/Client not found/);
   });
 });
 
@@ -362,5 +442,131 @@ describe("GET /analytics/summary — seeded week", () => {
     expect(res.body.hoursScheduled).toBe(0);
     expect(res.body.incidentTotal).toBe(0);
     expect(res.body.missedShifts).toEqual([]);
+  });
+});
+
+describe("GET /analytics/summary — clientId filter", () => {
+  it("wide range without a filter includes both clients", async () => {
+    const res = await request(app)
+      .get("/api/analytics/summary")
+      .set(authed(ctx.adminToken))
+      .query({ start: WIDE_START, end: WIDE_END });
+    expect(res.status).toBe(200);
+    expect(res.body.revenue).toBe(900); // 500 (A) + 400 (B)
+    expect(res.body.laborCost).toBe(400); // 300 (A) + 100 (B)
+    const siteIds = res.body.perSite.map((s: any) => s.siteId);
+    expect(siteIds).toContain(ctx.siteId);
+    expect(siteIds).toContain(ctx.siteBId);
+  });
+
+  it("filters every section to client A only", async () => {
+    const res = await request(app)
+      .get("/api/analytics/summary")
+      .set(authed(ctx.adminToken))
+      .query({ start: WIDE_START, end: WIDE_END, clientId: ctx.clientId });
+    expect(res.status).toBe(200);
+    const b = res.body;
+    expect(b.revenue).toBe(500);
+    expect(b.laborCost).toBe(300);
+    expect(b.profit).toBe(200);
+    expect(b.hoursWorked).toBe(8);
+    expect(b.hoursScheduled).toBe(24);
+    expect(b.noShowCount).toBe(1);
+    expect(b.unfilledCount).toBe(1);
+    expect(b.incidentTotal).toBe(1);
+    // Trend totals reconcile with the filtered aggregates
+    const trendRevenue = b.pnlTrend.reduce((s: number, r: any) => s + r.revenue, 0);
+    const trendLabor = b.pnlTrend.reduce((s: number, r: any) => s + r.laborCost, 0);
+    expect(trendRevenue).toBe(500);
+    expect(trendLabor).toBe(300);
+    // Per-site list contains ONLY client A's site
+    expect(b.perSite.map((s: any) => s.siteId)).toEqual([ctx.siteId]);
+    expect(b.missedShifts.every((m: any) => m.siteId === ctx.siteId)).toBe(true);
+  });
+
+  it("filters to client B only (no operational data, just financials)", async () => {
+    const res = await request(app)
+      .get("/api/analytics/summary")
+      .set(authed(ctx.adminToken))
+      .query({ start: WIDE_START, end: WIDE_END, clientId: ctx.clientBId });
+    expect(res.status).toBe(200);
+    const b = res.body;
+    expect(b.revenue).toBe(400);
+    expect(b.laborCost).toBe(100);
+    expect(b.hoursWorked).toBe(0);
+    expect(b.hoursScheduled).toBe(0);
+    expect(b.noShowCount).toBe(0);
+    expect(b.incidentTotal).toBe(0);
+    expect(b.perSite.map((s: any) => s.siteId)).toEqual([ctx.siteBId]);
+  });
+
+  it("a client with no sites yields an all-zero summary", async () => {
+    const res = await request(app)
+      .get("/api/analytics/summary")
+      .set(authed(ctx.adminToken))
+      .query({ start: WIDE_START, end: WIDE_END, clientId: ctx.clientCId });
+    expect(res.status).toBe(200);
+    expect(res.body.revenue).toBe(0);
+    expect(res.body.laborCost).toBe(0);
+    expect(res.body.hoursWorked).toBe(0);
+    expect(res.body.incidentTotal).toBe(0);
+    expect(res.body.perSite).toEqual([]);
+  });
+});
+
+describe("analytics exports — clientId filter", () => {
+  it("CSV export includes the client slug in the filename and a Client row", async () => {
+    const res = await request(app)
+      .get("/api/analytics/export.csv")
+      .set(authed(ctx.adminToken))
+      .query({ start: WIDE_START, end: WIDE_END, clientId: ctx.clientId });
+    expect(res.status).toBe(200);
+    const slug = `${TAG}-client`.toLowerCase().replace(/[^a-z0-9]+/g, "-").slice(0, 40);
+    expect(res.headers["content-disposition"]).toBe(
+      `attachment; filename="wcsg-analytics-${slug}-${WIDE_START}_${WIDE_END}.csv"`,
+    );
+    expect(res.text).toContain(`Client,${TAG}-client`);
+    expect(res.text).toContain("Revenue (USD),500.00");
+    expect(res.text).not.toContain(`${TAG}-site-b`);
+  });
+
+  it("CSV export without a client keeps the original filename", async () => {
+    const res = await request(app)
+      .get("/api/analytics/export.csv")
+      .set(authed(ctx.adminToken))
+      .query({ start: RANGE_START, end: RANGE_END });
+    expect(res.status).toBe(200);
+    expect(res.headers["content-disposition"]).toBe(
+      `attachment; filename="wcsg-analytics-${RANGE_START}_${RANGE_END}.csv"`,
+    );
+    expect(res.text).not.toContain("\r\nClient,");
+  });
+
+  it("CSV export 404s on an unknown clientId", async () => {
+    const res = await request(app)
+      .get("/api/analytics/export.csv")
+      .set(authed(ctx.adminToken))
+      .query({ start: RANGE_START, end: RANGE_END, clientId: randomUUID() });
+    expect(res.status).toBe(404);
+  });
+
+  it("PDF export includes the client slug in the filename", async () => {
+    const res = await request(app)
+      .get("/api/analytics/export.pdf")
+      .set(authed(ctx.adminToken))
+      .query({ start: WIDE_START, end: WIDE_END, clientId: ctx.clientBId })
+      .buffer(true)
+      .parse((r, cb) => {
+        const chunks: Buffer[] = [];
+        r.on("data", (c: Buffer) => chunks.push(c));
+        r.on("end", () => cb(null, Buffer.concat(chunks)));
+      });
+    expect(res.status).toBe(200);
+    expect(res.headers["content-type"]).toContain("application/pdf");
+    const slugB = `${TAG}-client-b`;
+    expect(res.headers["content-disposition"]).toBe(
+      `attachment; filename="wcsg-analytics-${slugB}-${WIDE_START}_${WIDE_END}.pdf"`,
+    );
+    expect((res.body as Buffer).subarray(0, 5).toString()).toBe("%PDF-");
   });
 });

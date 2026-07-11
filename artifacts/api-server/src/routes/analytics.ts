@@ -1,5 +1,6 @@
 import { Router, type IRouter } from "express";
-import { sql, and, gte, lte, eq, lt } from "drizzle-orm";
+import { sql, and, gte, lte, eq, lt, inArray, type SQL } from "drizzle-orm";
+import type { PgColumn } from "drizzle-orm/pg-core";
 import {
   db,
   invoicesTable,
@@ -9,6 +10,7 @@ import {
   shiftAssignmentsTable,
   incidentsTable,
   sitesTable,
+  clientsTable,
 } from "@workspace/db";
 import type { Request, Response } from "express";
 import { requireAdmin } from "../middlewares/auth";
@@ -72,6 +74,8 @@ function isoWeek(monday: Date): number {
   return Math.round((monday.getTime() - startOfYear.getTime()) / (7 * 86400_000)) + 1;
 }
 
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
 /**
  * ISO week label (YYYY-Www) for a plain calendar date string ("YYYY-MM-DD").
  * Invoice/payroll periodStart columns are date-only values already expressed in
@@ -90,16 +94,52 @@ function weekBucketForDateOnly(dateStr: string): string {
 }
 
 /**
- * Validate the `start` / `end` query params shared by the summary and both
- * export routes. Writes the 400 response itself and returns null on failure.
+ * Validate the `start` / `end` / optional `clientId` query params shared by
+ * the summary and both export routes. Writes the 400 response itself and
+ * returns null on failure.
  */
-function parseRange(req: Request, res: Response): { start: string; end: string } | null {
-  const { start, end } = req.query as { start?: string; end?: string };
+function parseRange(
+  req: Request,
+  res: Response,
+): { start: string; end: string; clientId?: string } | null {
+  const { start, end, clientId } = req.query as {
+    start?: string;
+    end?: string;
+    clientId?: string;
+  };
   if (!start || !end || !/^\d{4}-\d{2}-\d{2}$/.test(start) || !/^\d{4}-\d{2}-\d{2}$/.test(end)) {
     res.status(400).json({ error: "start and end are required in YYYY-MM-DD format" });
     return null;
   }
+  if (clientId !== undefined && clientId !== "") {
+    if (typeof clientId !== "string" || !UUID_RE.test(clientId)) {
+      res.status(400).json({ error: "clientId must be a valid UUID" });
+      return null;
+    }
+    return { start, end, clientId };
+  }
   return { start, end };
+}
+
+/**
+ * Resolve the client row for an optional clientId filter. Writes the 404
+ * response itself and returns undefined on failure; returns null when no
+ * filter was requested.
+ */
+async function resolveClientFilter(
+  clientId: string | undefined,
+  res: Response,
+): Promise<{ id: string; name: string } | null | undefined> {
+  if (!clientId) return null;
+  const [client] = await db
+    .select({ id: clientsTable.id, name: clientsTable.name })
+    .from(clientsTable)
+    .where(eq(clientsTable.id, clientId));
+  if (!client) {
+    res.status(404).json({ error: "Client not found" });
+    return undefined;
+  }
+  return client;
 }
 
 export type AnalyticsSummaryData = Awaited<ReturnType<typeof computeAnalyticsSummary>>;
@@ -109,8 +149,28 @@ export type AnalyticsSummaryData = Awaited<ReturnType<typeof computeAnalyticsSum
  * trends, per-site breakdown) for an inclusive [start, end] date range.
  * Shared by the JSON summary route and the CSV / PDF export routes so all
  * three surfaces always agree on the numbers.
+ *
+ * When `clientId` is provided, every metric is restricted to sites belonging
+ * to that client (a client with no sites yields an all-zero summary).
  */
-export async function computeAnalyticsSummary(start: string, end: string) {
+export async function computeAnalyticsSummary(start: string, end: string, clientId?: string) {
+  // Optional client scoping: resolve the client's site ids once, then apply
+  // the same site filter to every query below so all sections agree.
+  let clientSiteIds: string[] | null = null;
+  if (clientId) {
+    const siteRows = await db
+      .select({ id: sitesTable.id })
+      .from(sitesTable)
+      .where(eq(sitesTable.clientId, clientId));
+    clientSiteIds = siteRows.map((r) => r.id);
+  }
+  /** Site-scoping condition for a siteId column; undefined = no filter. */
+  const siteFilter = (col: PgColumn): SQL | undefined => {
+    if (clientSiteIds === null) return undefined;
+    if (clientSiteIds.length === 0) return sql`false`;
+    return inArray(col, clientSiteIds);
+  };
+
   const tz = businessTimeZone();
   const startUtc = dateToBusinessTzStart(start, tz);
   // End date is inclusive — use start of the *next* day
@@ -129,6 +189,7 @@ export async function computeAnalyticsSummary(start: string, end: string) {
       and(
         gte(invoicesTable.periodStart, start),
         lte(invoicesTable.periodStart, end),
+        siteFilter(invoicesTable.siteId),
       ),
     );
 
@@ -140,6 +201,7 @@ export async function computeAnalyticsSummary(start: string, end: string) {
       and(
         gte(payrollEntriesTable.periodStart, start),
         lte(payrollEntriesTable.periodStart, end),
+        siteFilter(payrollEntriesTable.siteId),
       ),
     );
 
@@ -157,6 +219,7 @@ export async function computeAnalyticsSummary(start: string, end: string) {
         eq(timeEntriesTable.approvalStatus, "approved"),
         gte(timeEntriesTable.clockInTime, startUtc),
         lt(timeEntriesTable.clockInTime, endExclusive),
+        siteFilter(timeEntriesTable.siteId),
       ),
     );
   const hoursWorked = workedRow?.total ?? 0;
@@ -178,6 +241,7 @@ export async function computeAnalyticsSummary(start: string, end: string) {
         gte(shiftsTable.endTime, startUtc),
         lt(shiftsTable.endTime, endExclusive),
         lt(shiftsTable.endTime, now),
+        siteFilter(shiftsTable.siteId),
       ),
     );
   const hoursScheduled = scheduledRow?.total ?? 0;
@@ -213,6 +277,7 @@ export async function computeAnalyticsSummary(start: string, end: string) {
         gte(shiftsTable.endTime, startUtc),
         lt(shiftsTable.endTime, endExclusive),
         lt(shiftsTable.endTime, now),
+        siteFilter(shiftsTable.siteId),
       ),
     )
     .groupBy(shiftsTable.id, sitesTable.name);
@@ -236,6 +301,10 @@ export async function computeAnalyticsSummary(start: string, end: string) {
     }));
 
   // ── 6. Incident metrics ──
+  // Incidents don't link to a site directly — when a client filter is on,
+  // scope through the incident's shift (left join keeps count parity when
+  // unfiltered; shiftless incidents are excluded by the filter, matching the
+  // per-site incident attribution below).
   const incidentRows = await db
     .select({
       severity: incidentsTable.severity,
@@ -244,10 +313,12 @@ export async function computeAnalyticsSummary(start: string, end: string) {
       siteId: sql<string | null>`null`, // incidents don't link to site directly
     })
     .from(incidentsTable)
+    .leftJoin(shiftsTable, eq(incidentsTable.shiftId, shiftsTable.id))
     .where(
       and(
         gte(incidentsTable.occurredAt, startUtc),
         lt(incidentsTable.occurredAt, endExclusive),
+        siteFilter(shiftsTable.siteId),
       ),
     );
 
@@ -269,7 +340,13 @@ export async function computeAnalyticsSummary(start: string, end: string) {
       total: sql<number>`coalesce(sum(${invoicesTable.totalAmount}::numeric), 0)::float`,
     })
     .from(invoicesTable)
-    .where(and(gte(invoicesTable.periodStart, start), lte(invoicesTable.periodStart, end)))
+    .where(
+      and(
+        gte(invoicesTable.periodStart, start),
+        lte(invoicesTable.periodStart, end),
+        siteFilter(invoicesTable.siteId),
+      ),
+    )
     .groupBy(invoicesTable.periodStart);
 
   // Labor trend: per payroll entry periodStart week
@@ -279,7 +356,13 @@ export async function computeAnalyticsSummary(start: string, end: string) {
       total: sql<number>`coalesce(sum(${payrollEntriesTable.grossPay}::numeric), 0)::float`,
     })
     .from(payrollEntriesTable)
-    .where(and(gte(payrollEntriesTable.periodStart, start), lte(payrollEntriesTable.periodStart, end)))
+    .where(
+      and(
+        gte(payrollEntriesTable.periodStart, start),
+        lte(payrollEntriesTable.periodStart, end),
+        siteFilter(payrollEntriesTable.siteId),
+      ),
+    )
     .groupBy(payrollEntriesTable.periodStart);
 
   // Build week-keyed maps
@@ -309,6 +392,7 @@ export async function computeAnalyticsSummary(start: string, end: string) {
         eq(timeEntriesTable.approvalStatus, "approved"),
         gte(timeEntriesTable.clockInTime, startUtc),
         lt(timeEntriesTable.clockInTime, endExclusive),
+        siteFilter(timeEntriesTable.siteId),
       ),
     )
     .groupBy(sql`date_trunc('week', ${timeEntriesTable.clockInTime} AT TIME ZONE ${tzLit})`);
@@ -330,6 +414,7 @@ export async function computeAnalyticsSummary(start: string, end: string) {
         gte(shiftsTable.endTime, startUtc),
         lt(shiftsTable.endTime, endExclusive),
         lt(shiftsTable.endTime, now),
+        siteFilter(shiftsTable.siteId),
       ),
     )
     .groupBy(sql`date_trunc('week', ${shiftsTable.endTime} AT TIME ZONE ${tzLit})`);
@@ -392,7 +477,13 @@ export async function computeAnalyticsSummary(start: string, end: string) {
       total: sql<number>`coalesce(sum(${invoicesTable.totalAmount}::numeric), 0)::float`,
     })
     .from(invoicesTable)
-    .where(and(gte(invoicesTable.periodStart, start), lte(invoicesTable.periodStart, end)))
+    .where(
+      and(
+        gte(invoicesTable.periodStart, start),
+        lte(invoicesTable.periodStart, end),
+        siteFilter(invoicesTable.siteId),
+      ),
+    )
     .groupBy(invoicesTable.siteId);
 
   // Labor per site from payroll entries
@@ -402,7 +493,13 @@ export async function computeAnalyticsSummary(start: string, end: string) {
       total: sql<number>`coalesce(sum(${payrollEntriesTable.grossPay}::numeric), 0)::float`,
     })
     .from(payrollEntriesTable)
-    .where(and(gte(payrollEntriesTable.periodStart, start), lte(payrollEntriesTable.periodStart, end)))
+    .where(
+      and(
+        gte(payrollEntriesTable.periodStart, start),
+        lte(payrollEntriesTable.periodStart, end),
+        siteFilter(payrollEntriesTable.siteId),
+      ),
+    )
     .groupBy(payrollEntriesTable.siteId);
 
   // Hours worked per site from time entries
@@ -417,6 +514,7 @@ export async function computeAnalyticsSummary(start: string, end: string) {
         eq(timeEntriesTable.approvalStatus, "approved"),
         gte(timeEntriesTable.clockInTime, startUtc),
         lt(timeEntriesTable.clockInTime, endExclusive),
+        siteFilter(timeEntriesTable.siteId),
       ),
     )
     .groupBy(timeEntriesTable.siteId);
@@ -440,6 +538,7 @@ export async function computeAnalyticsSummary(start: string, end: string) {
         gte(shiftsTable.endTime, startUtc),
         lt(shiftsTable.endTime, endExclusive),
         lt(shiftsTable.endTime, now),
+        siteFilter(shiftsTable.siteId),
       ),
     )
     .groupBy(shiftsTable.siteId);
@@ -476,6 +575,7 @@ export async function computeAnalyticsSummary(start: string, end: string) {
         gte(shiftsTable.endTime, startUtc),
         lt(shiftsTable.endTime, endExclusive),
         lt(shiftsTable.endTime, now),
+        siteFilter(shiftsTable.siteId),
       ),
     )
     .groupBy(shiftsTable.siteId, sitesTable.name);
@@ -493,6 +593,7 @@ export async function computeAnalyticsSummary(start: string, end: string) {
       and(
         gte(incidentsTable.occurredAt, startUtc),
         lt(incidentsTable.occurredAt, endExclusive),
+        siteFilter(shiftsTable.siteId),
       ),
     )
     .groupBy(shiftsTable.siteId);
@@ -570,7 +671,9 @@ export async function computeAnalyticsSummary(start: string, end: string) {
 router.get("/analytics/summary", requireAdmin, async (req, res): Promise<void> => {
   const range = parseRange(req, res);
   if (!range) return;
-  res.json(await computeAnalyticsSummary(range.start, range.end));
+  const client = await resolveClientFilter(range.clientId, res);
+  if (client === undefined) return;
+  res.json(await computeAnalyticsSummary(range.start, range.end, client?.id));
 });
 
 /**
@@ -592,15 +695,34 @@ function csvEscape(v: unknown): string {
   return s;
 }
 
-function exportFilename(start: string, end: string, ext: "csv" | "pdf"): string {
+/** Filesystem-safe slug for a client name (e.g. "Acme Corp." → "acme-corp"). */
+export function clientFileSlug(name: string): string {
+  return (
+    name
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, "-")
+      .replace(/^-+|-+$/g, "")
+      .slice(0, 40) || "client"
+  );
+}
+
+function exportFilename(
+  start: string,
+  end: string,
+  ext: "csv" | "pdf",
+  clientName?: string,
+): string {
   const safeShort = brand.shortName.replace(/[^a-z0-9]/gi, "-").toLowerCase();
-  return `${safeShort}-analytics-${start}_${end}.${ext}`;
+  const clientPart = clientName ? `-${clientFileSlug(clientName)}` : "";
+  return `${safeShort}-analytics${clientPart}-${start}_${end}.${ext}`;
 }
 
 router.get("/analytics/export.csv", requireAdmin, async (req, res): Promise<void> => {
   const range = parseRange(req, res);
   if (!range) return;
-  const s = await computeAnalyticsSummary(range.start, range.end);
+  const client = await resolveClientFilter(range.clientId, res);
+  if (client === undefined) return;
+  const s = await computeAnalyticsSummary(range.start, range.end, client?.id);
 
   const lines: string[] = [];
   const row = (...cells: unknown[]) => lines.push(cells.map(csvEscape).join(","));
@@ -609,6 +731,7 @@ router.get("/analytics/export.csv", requireAdmin, async (req, res): Promise<void
   row("Metric", "Value");
   row("Period start", range.start);
   row("Period end", range.end);
+  if (client) row("Client", client.name);
   row("Revenue (USD)", s.revenue.toFixed(2));
   row("Labor cost (USD)", s.laborCost.toFixed(2));
   row("Profit (USD)", s.profit.toFixed(2));
@@ -653,7 +776,7 @@ router.get("/analytics/export.csv", requireAdmin, async (req, res): Promise<void
   res.setHeader("Content-Type", "text/csv; charset=utf-8");
   res.setHeader(
     "Content-Disposition",
-    `attachment; filename="${exportFilename(range.start, range.end, "csv")}"`,
+    `attachment; filename="${exportFilename(range.start, range.end, "csv", client?.name)}"`,
   );
   res.send(csv);
 });
@@ -661,12 +784,14 @@ router.get("/analytics/export.csv", requireAdmin, async (req, res): Promise<void
 router.get("/analytics/export.pdf", requireAdmin, async (req, res): Promise<void> => {
   const range = parseRange(req, res);
   if (!range) return;
-  const s = await computeAnalyticsSummary(range.start, range.end);
-  const payload = buildAnalyticsReportPdf(s, range.start, range.end);
+  const client = await resolveClientFilter(range.clientId, res);
+  if (client === undefined) return;
+  const s = await computeAnalyticsSummary(range.start, range.end, client?.id);
+  const payload = buildAnalyticsReportPdf(s, range.start, range.end, client?.name);
   res.setHeader("Content-Type", "application/pdf");
   res.setHeader(
     "Content-Disposition",
-    `attachment; filename="${exportFilename(range.start, range.end, "pdf")}"`,
+    `attachment; filename="${exportFilename(range.start, range.end, "pdf", client?.name)}"`,
   );
   payload.stream.pipe(res);
 });

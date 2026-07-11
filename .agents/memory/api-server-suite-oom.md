@@ -14,6 +14,9 @@ with files run in parallel. `--no-file-parallelism` / single-worker flags did NO
 prevent the kill (and `--minWorkers` isn't a valid vitest 4 flag — use
 `--maxWorkers`).
 
+The same kill also hits the **admin-portal** vitest suite run whole (even with
+`--maxWorkers=1`); its 8 files pass fine in 2–3 batches of explicit paths.
+
 **How to apply:** run the suite in small batches of ~6 files via explicit paths,
 e.g. `pnpm --filter @workspace/api-server exec vitest run src/__tests__/a.test.ts
 src/__tests__/b.test.ts ...`. Payroll/invoice/chat files are the heaviest — keep

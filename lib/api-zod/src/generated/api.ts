@@ -2499,6 +2499,11 @@ export const RejectLicenseRenewalResponse = zod.object({
 export const GetAnalyticsSummaryQueryParams = zod.object({
   start: zod.date(),
   end: zod.date(),
+  clientId: zod.coerce
+    .string()
+    .uuid()
+    .optional()
+    .describe("Restrict all metrics to sites belonging to this client"),
 });
 
 export const GetAnalyticsSummaryResponse = zod.object({
@@ -2579,6 +2584,11 @@ export const GetAnalyticsSummaryResponse = zod.object({
 export const ExportAnalyticsCsvQueryParams = zod.object({
   start: zod.date(),
   end: zod.date(),
+  clientId: zod.coerce
+    .string()
+    .uuid()
+    .optional()
+    .describe("Restrict the report to sites belonging to this client"),
 });
 
 /**
@@ -2587,6 +2597,11 @@ export const ExportAnalyticsCsvQueryParams = zod.object({
 export const ExportAnalyticsPdfQueryParams = zod.object({
   start: zod.date(),
   end: zod.date(),
+  clientId: zod.coerce
+    .string()
+    .uuid()
+    .optional()
+    .describe("Restrict the report to sites belonging to this client"),
 });
 
 /**

@@ -1454,6 +1454,7 @@ paths:
       parameters:
         - { name: start, in: query, required: true, schema: { type: string, format: date } }
         - { name: end, in: query, required: true, schema: { type: string, format: date } }
+        - { name: clientId, in: query, required: false, schema: { type: string, format: uuid }, description: "Restrict all metrics to sites belonging to this client" }
       responses:
         "200":
           description: Analytics summary
@@ -1475,6 +1476,7 @@ paths:
       parameters:
         - { name: start, in: query, required: true, schema: { type: string, format: date } }
         - { name: end, in: query, required: true, schema: { type: string, format: date } }
+        - { name: clientId, in: query, required: false, schema: { type: string, format: uuid }, description: "Restrict the report to sites belonging to this client" }
       responses:
         "200":
           description: CSV file
@@ -1496,6 +1498,7 @@ paths:
       parameters:
         - { name: start, in: query, required: true, schema: { type: string, format: date } }
         - { name: end, in: query, required: true, schema: { type: string, format: date } }
+        - { name: clientId, in: query, required: false, schema: { type: string, format: uuid }, description: "Restrict the report to sites belonging to this client" }
       responses:
         "200":
           description: PDF file

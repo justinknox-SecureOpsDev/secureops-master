@@ -2493,16 +2493,28 @@ export const GetAdminLicenseRenewalsStatus = {
 export type GetAnalyticsSummaryParams = {
   start: string;
   end: string;
+  /**
+   * Restrict all metrics to sites belonging to this client
+   */
+  clientId?: string;
 };
 
 export type ExportAnalyticsCsvParams = {
   start: string;
   end: string;
+  /**
+   * Restrict the report to sites belonging to this client
+   */
+  clientId?: string;
 };
 
 export type ExportAnalyticsPdfParams = {
   start: string;
   end: string;
+  /**
+   * Restrict the report to sites belonging to this client
+   */
+  clientId?: string;
 };
 
 export type CreateChatRoomBody = {

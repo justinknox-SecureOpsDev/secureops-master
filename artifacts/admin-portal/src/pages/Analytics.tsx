@@ -9,7 +9,7 @@ import {
   AlertTriangle, Calendar, ChevronDown, ChevronUp, Loader2,
   Download, FileText,
 } from "lucide-react";
-import { getGetAnalyticsSummaryQueryOptions } from "@workspace/api-client-react";
+import { getGetAnalyticsSummaryQueryOptions, useGetClients } from "@workspace/api-client-react";
 import { fetchWithAuth } from "@/lib/api";
 import { Button } from "@/components/ui/button";
 import {
@@ -57,6 +57,17 @@ function endOfWeek(d: Date): Date {
 
 function startOfMonth(d: Date): Date {
   return new Date(d.getFullYear(), d.getMonth(), 1);
+}
+
+/** Filesystem-safe slug for a client name — mirrors the server's filename logic. */
+function clientFileSlug(name: string): string {
+  return (
+    name
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, "-")
+      .replace(/^-+|-+$/g, "")
+      .slice(0, 40) || "client"
+  );
 }
 
 // ── Date Presets ──────────────────────────────────────────────────────────────
@@ -138,6 +149,7 @@ export default function AnalyticsPage() {
   const [preset, setPreset] = useState<Preset>("last-30");
   const [customStart, setCustomStart] = useState("");
   const [customEnd, setCustomEnd] = useState("");
+  const [clientId, setClientId] = useState<string>("all");
   const [showMissed, setShowMissed] = useState(false);
   const [sortCol, setSortCol] = useState<SortCol>("revenue");
   const [sortDir, setSortDir] = useState<"asc" | "desc">("desc");
@@ -152,8 +164,18 @@ export default function AnalyticsPage() {
 
   const enabled = Boolean(start && end && start <= end);
 
+  const { data: clients } = useGetClients();
+  const selectedClient = useMemo(
+    () => (clientId === "all" ? null : clients?.find((c) => c.id === clientId) ?? null),
+    [clientId, clients],
+  );
+
   const { data, isLoading, isError } = useQuery({
-    ...getGetAnalyticsSummaryQueryOptions({ start, end }),
+    ...getGetAnalyticsSummaryQueryOptions({
+      start,
+      end,
+      ...(clientId !== "all" ? { clientId } : {}),
+    }),
     enabled,
     staleTime: 60_000,
   });
@@ -168,6 +190,7 @@ export default function AnalyticsPage() {
     setExportError(null);
     try {
       const params = new URLSearchParams({ start, end });
+      if (clientId !== "all") params.set("clientId", clientId);
       const res = await fetchWithAuth(`/api/analytics/export.${kind}?${params}`);
       if (!res.ok) {
         throw new Error(`Export failed (${res.status})`);
@@ -176,7 +199,8 @@ export default function AnalyticsPage() {
       const url = URL.createObjectURL(blob);
       const a = document.createElement("a");
       a.href = url;
-      a.download = `wcsg-analytics-${start}_${end}.${kind}`;
+      const clientPart = selectedClient ? `-${clientFileSlug(selectedClient.name)}` : "";
+      a.download = `wcsg-analytics${clientPart}-${start}_${end}.${kind}`;
       document.body.appendChild(a);
       a.click();
       a.remove();
@@ -229,6 +253,20 @@ export default function AnalyticsPage() {
 
         {/* Date range controls */}
         <div className="flex flex-wrap items-end gap-2">
+          <div>
+            <Label className="text-xs mb-1 block">Client</Label>
+            <Select value={clientId} onValueChange={setClientId}>
+              <SelectTrigger className="h-8 text-xs w-40" aria-label="Filter analytics by client">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">All clients</SelectItem>
+                {(clients ?? []).map((c) => (
+                  <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
           <div>
             <Label className="text-xs mb-1 block">Period</Label>
             <Select value={preset} onValueChange={(v) => setPreset(v as Preset)}>

@@ -68,6 +68,7 @@ export function buildAnalyticsReportPdf(
   data: AnalyticsReportInput,
   start: string,
   end: string,
+  clientName?: string,
 ): AnalyticsPdfPayload {
   const doc = new PDFDocument({
     size: "LETTER",
@@ -75,7 +76,9 @@ export function buildAnalyticsReportPdf(
     info: {
       Title: `Analytics Report ${start} – ${end}`,
       Author: brand.companyName,
-      Subject: `Operations analytics ${start} – ${end}`,
+      Subject: clientName
+        ? `Operations analytics ${start} – ${end} · ${clientName}`
+        : `Operations analytics ${start} – ${end}`,
       CreationDate: new Date(),
     },
   });
@@ -89,6 +92,10 @@ export function buildAnalyticsReportPdf(
     .text("REPORTING PERIOD", 56, doc.y, { characterSpacing: 0.8 });
   doc.fillColor(TEXT).font("Helvetica-Bold").fontSize(12)
     .text(`${fmtDate(start)} – ${fmtDate(end)}`, 56, doc.y + 2);
+  if (clientName) {
+    doc.fillColor(MUTED).font("Helvetica-Bold").fontSize(9)
+      .text(`Client: ${clientName}`, 56, doc.y + 2);
+  }
   doc.moveDown(1);
 
   // ── KPI cards (3 × 3 grid) ─────────────────────────────────────────────
