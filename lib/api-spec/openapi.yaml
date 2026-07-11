@@ -2254,6 +2254,21 @@ paths:
           content:
             application/json:
               schema: { $ref: "#/components/schemas/OnboardingDetail" }
+    delete:
+      tags: [onboarding]
+      operationId: adminDeleteOnboarding
+      summary: Delete a person still in onboarding (pending only)
+      description: >
+        Permanently removes a pending-onboarding employee: the user account and,
+        via cascade, their employee record, onboarding tokens, and any onboarding
+        submission. Refused (409) once the account is active or for non-employee
+        roles — deactivate or manage those via the Personnel tables instead.
+      parameters:
+        - { name: employeeId, in: path, required: true, schema: { type: string } }
+      responses:
+        "204": { description: Deleted }
+        "404": { description: Not found }
+        "409": { description: Not deletable (already active or not an onboarding-stage employee) }
 
   /admin/onboarding/{employeeId}/resend:
     post:

@@ -4463,6 +4463,15 @@ export const AdminGetOnboardingResponse = zod.object({
   applicationId: zod.string().nullish(),
 });
 
+/**
+ * Permanently removes a pending-onboarding employee: the user account and, via cascade, their employee record, onboarding tokens, and any onboarding submission. Refused (409) once the account is active or for non-employee roles — deactivate or manage those via the Personnel tables instead.
+
+ * @summary Delete a person still in onboarding (pending only)
+ */
+export const AdminDeleteOnboardingParams = zod.object({
+  employeeId: zod.coerce.string(),
+});
+
 export const AdminResendOnboardingLinkParams = zod.object({
   employeeId: zod.coerce.string(),
 });

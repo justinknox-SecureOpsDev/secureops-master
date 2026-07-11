@@ -9362,6 +9362,92 @@ export function useAdminGetOnboarding<
   return { ...query, queryKey: queryOptions.queryKey };
 }
 
+/**
+ * Permanently removes a pending-onboarding employee: the user account and, via cascade, their employee record, onboarding tokens, and any onboarding submission. Refused (409) once the account is active or for non-employee roles — deactivate or manage those via the Personnel tables instead.
+
+ * @summary Delete a person still in onboarding (pending only)
+ */
+export const getAdminDeleteOnboardingUrl = (employeeId: string) => {
+  return `/api/admin/onboarding/${employeeId}`;
+};
+
+export const adminDeleteOnboarding = async (
+  employeeId: string,
+  options?: RequestInit,
+): Promise<void> => {
+  return customFetch<void>(getAdminDeleteOnboardingUrl(employeeId), {
+    ...options,
+    method: "DELETE",
+  });
+};
+
+export const getAdminDeleteOnboardingMutationOptions = <
+  TError = ErrorType<void>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof adminDeleteOnboarding>>,
+    TError,
+    { employeeId: string },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof adminDeleteOnboarding>>,
+  TError,
+  { employeeId: string },
+  TContext
+> => {
+  const mutationKey = ["adminDeleteOnboarding"];
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof adminDeleteOnboarding>>,
+    { employeeId: string }
+  > = (props) => {
+    const { employeeId } = props ?? {};
+
+    return adminDeleteOnboarding(employeeId, requestOptions);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type AdminDeleteOnboardingMutationResult = NonNullable<
+  Awaited<ReturnType<typeof adminDeleteOnboarding>>
+>;
+
+export type AdminDeleteOnboardingMutationError = ErrorType<void>;
+
+/**
+ * @summary Delete a person still in onboarding (pending only)
+ */
+export const useAdminDeleteOnboarding = <
+  TError = ErrorType<void>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof adminDeleteOnboarding>>,
+    TError,
+    { employeeId: string },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationResult<
+  Awaited<ReturnType<typeof adminDeleteOnboarding>>,
+  TError,
+  { employeeId: string },
+  TContext
+> => {
+  return useMutation(getAdminDeleteOnboardingMutationOptions(options));
+};
+
 export const getAdminResendOnboardingLinkUrl = (employeeId: string) => {
   return `/api/admin/onboarding/${employeeId}/resend`;
 };
