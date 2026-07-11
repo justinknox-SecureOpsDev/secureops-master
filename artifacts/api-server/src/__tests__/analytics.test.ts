@@ -307,29 +307,16 @@ describe("GET /analytics/summary — seeded week", () => {
     expect(b.incidentsBySeverity).toEqual({ low: 0, medium: 0, high: 1, critical: 0 });
     expect(b.incidentsByStatus).toEqual({ open: 1, investigating: 0, closed: 0 });
 
-    // Trends: assert totals across buckets rather than exact bucket labels
-    // (bucketing is timezone-sensitive; totals must always reconcile).
-    expect(Array.isArray(b.pnlTrend)).toBe(true);
-    expect(b.pnlTrend.length).toBeGreaterThan(0);
-    const trendRevenue = b.pnlTrend.reduce((s: number, r: any) => s + r.revenue, 0);
-    const trendLabor = b.pnlTrend.reduce((s: number, r: any) => s + r.laborCost, 0);
-    const trendProfit = b.pnlTrend.reduce((s: number, r: any) => s + r.profit, 0);
-    expect(trendRevenue).toBe(500);
-    expect(trendLabor).toBe(300);
-    expect(trendProfit).toBe(200);
-    for (const row of b.pnlTrend) {
-      expect(row.profit).toBeCloseTo(row.revenue - row.laborCost, 5);
-      expect(typeof row.bucket).toBe("string");
-      expect(row.bucket).toMatch(/^\d{4}-W\d{2}$/);
-    }
-
-    const trendWorked = b.hoursTrend.reduce((s: number, r: any) => s + r.worked, 0);
-    const trendScheduled = b.hoursTrend.reduce((s: number, r: any) => s + r.scheduled, 0);
-    expect(trendWorked).toBe(8);
-    expect(trendScheduled).toBe(24);
-
-    const trendIncidents = b.incidentTrend.reduce((s: number, r: any) => s + r.count, 0);
-    expect(trendIncidents).toBe(1);
+    // Trends: everything seeded falls in the week of Mon 2009-03-02, which is
+    // ISO week 2009-W10. Revenue/labor (date-only periodStart), hours (SQL
+    // timezone-aware date_trunc) and incidents must all land in the SAME
+    // bucket — a mismatch here means periodStart dates are being re-interpreted
+    // through a timezone again.
+    expect(b.pnlTrend).toEqual([
+      { bucket: "2009-W10", revenue: 500, laborCost: 300, profit: 200 },
+    ]);
+    expect(b.hoursTrend).toEqual([{ bucket: "2009-W10", worked: 8, scheduled: 24 }]);
+    expect(b.incidentTrend).toEqual([{ bucket: "2009-W10", count: 1 }]);
 
     // Per-site breakdown
     expect(Array.isArray(b.perSite)).toBe(true);

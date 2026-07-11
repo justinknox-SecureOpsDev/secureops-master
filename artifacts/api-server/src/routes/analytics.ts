@@ -73,6 +73,23 @@ function isoWeek(monday: Date): number {
 }
 
 /**
+ * ISO week label (YYYY-Www) for a plain calendar date string ("YYYY-MM-DD").
+ * Invoice/payroll periodStart columns are date-only values already expressed in
+ * the business calendar — bucket them by that calendar date directly. Do NOT
+ * parse them as UTC midnight and re-render in the business timezone: UTC
+ * midnight Monday is Sunday evening in Central, which shifts the whole week's
+ * revenue/labor into the previous ISO week and misaligns it with the
+ * SQL-side (date_trunc AT TIME ZONE) hour buckets.
+ */
+function weekBucketForDateOnly(dateStr: string): string {
+  const [y, mo, da] = dateStr.split("-").map(Number);
+  const d = new Date(Date.UTC(y, mo - 1, da));
+  const dayOfWeek = (d.getUTCDay() + 6) % 7; // Mon=0 .. Sun=6
+  const monday = new Date(d.getTime() - dayOfWeek * 86400_000);
+  return `${monday.getUTCFullYear()}-W${String(isoWeek(monday)).padStart(2, "0")}`;
+}
+
+/**
  * Validate the `start` / `end` query params shared by the summary and both
  * export routes. Writes the 400 response itself and returns null on failure.
  */
@@ -268,14 +285,12 @@ export async function computeAnalyticsSummary(start: string, end: string) {
   // Build week-keyed maps
   const revByWeek = new Map<string, number>();
   for (const r of invoiceTrendRows) {
-    const d = new Date((r.periodStart as string) + "T00:00:00Z");
-    const wk = weekBucket(d, tz);
+    const wk = weekBucketForDateOnly(r.periodStart as string);
     revByWeek.set(wk, (revByWeek.get(wk) ?? 0) + r.total);
   }
   const laborByWeek = new Map<string, number>();
   for (const r of laborTrendRows) {
-    const d = new Date((r.periodStart as string) + "T00:00:00Z");
-    const wk = weekBucket(d, tz);
+    const wk = weekBucketForDateOnly(r.periodStart as string);
     laborByWeek.set(wk, (laborByWeek.get(wk) ?? 0) + r.total);
   }
 
