@@ -47,7 +47,7 @@ import { disconnectUser } from "../lib/wsManager";
 import { writeEmployeeFieldChanges } from "../lib/employeeChangeLog";
 import { preparePreUpdateBody as prepareSitePreUpdate, maybeAutoGeocode as maybeAutoGeocodeSite } from "../lib/siteGeocode";
 import { normalizePhoneToE164 } from "../lib/phone";
-import { adminEditBreaksAutoSync } from "../lib/invoiceSync";
+import { adminEditBreaksAutoSync, upsertWeeklyInvoiceForTimeEntry, weekStartIsoUtc } from "../lib/invoiceSync";
 import { buildTimeEntryAuditMetadata, timeEntrySnapshot } from "../lib/timeEntryAudit";
 
 /**
@@ -1041,7 +1041,13 @@ router.post("/admin/tables/:table", requireAdmin, async (req, res): Promise<void
   if (cfg.beforeInsert) values = await cfg.beforeInsert(values);
   try {
     const inserted = (await db.insert(cfg.table).values(values).returning()) as unknown[];
-    res.status(201).json(inserted[0]);
+    const insertedRow = inserted[0] as Record<string, unknown>;
+    res.status(201).json(insertedRow);
+    // Invoice auto-sync: a new time entry saved directly as approved must
+    // roll into the weekly client invoice (same as the approve route does).
+    if (tableName === "time_entries" && insertedRow?.approvalStatus === "approved") {
+      void upsertWeeklyInvoiceForTimeEntry(insertedRow as any);
+    }
   } catch (err: any) {
     req.log.warn({ err }, "admin insert failed");
     res.status(400).json({ error: "Insert failed", message: err?.message ?? "Insert failed" });
@@ -1212,6 +1218,42 @@ router.put("/admin/tables/:table/:id", requireAdmin, async (req, res): Promise<v
     }
 
     res.json(row);
+
+    // Invoice auto-sync for time-entry grid edits. Mirrors the dedicated
+    // approve/correct routes. Fire best-effort on the current (siteId, week)
+    // whenever the entry is approved OR was previously approved (a downgrade
+    // from approved→pending/rejected must also remove the hours from the
+    // draft, exactly as the dedicated approve route does on "rejected").
+    // When clock-in time, siteId, or shiftId changed the old week/site is
+    // also re-synced so stale hours don't linger on the wrong invoice.
+    if (tableName === "time_entries") {
+      const newRow = row as Record<string, unknown>;
+      const wasApproved = beforeRow?.approvalStatus === "approved";
+      const isApproved = newRow.approvalStatus === "approved";
+      // Sync current context if this entry is (or was) billable.
+      if (isApproved || wasApproved) {
+        void upsertWeeklyInvoiceForTimeEntry(newRow as any);
+      }
+      // Re-sync the prior week/site when the entry moved ISO week or site.
+      if (beforeRow && wasApproved) {
+        const oldClockIn = beforeRow.clockInTime ? new Date(beforeRow.clockInTime as string | Date) : null;
+        const newClockIn = newRow.clockInTime ? new Date(newRow.clockInTime as string | Date) : null;
+        const oldSiteId = (beforeRow.siteId ?? null) as string | null;
+        const newSiteId = (newRow.siteId ?? null) as string | null;
+        const oldShiftId = (beforeRow.shiftId ?? null) as string | null;
+        const newShiftId = (newRow.shiftId ?? null) as string | null;
+        const weekChanged = oldClockIn && newClockIn
+          && weekStartIsoUtc(oldClockIn) !== weekStartIsoUtc(newClockIn);
+        const siteChanged = oldSiteId !== newSiteId || oldShiftId !== newShiftId;
+        // oldSiteId may be null when the entry's site is anchored via
+        // shiftId only. upsertWeeklyInvoiceForTimeEntry already falls back
+        // to resolving siteId from the shift row, so passing beforeRow is
+        // sufficient — don't gate on oldSiteId here.
+        if ((weekChanged || siteChanged) && oldClockIn && (oldSiteId || oldShiftId)) {
+          void upsertWeeklyInvoiceForTimeEntry(beforeRow as any);
+        }
+      }
+    }
   } catch (err: any) {
     req.log.warn({ err }, "admin update failed");
     res.status(400).json({ error: "Update failed", message: err?.message ?? "Update failed" });
@@ -1234,6 +1276,16 @@ router.delete("/admin/tables/:table/:id", requireAdmin, async (req, res): Promis
   if (tableName === "clients") {
     if (refuseIfBlocked(res, await clientDeletionBlockers(id), "client")) return;
   }
+  // For time entries, snapshot the row before deletion so we can re-sync
+  // the weekly invoice after the entry is gone (approved hours removed).
+  let deletedTimeEntry: Record<string, unknown> | null = null;
+  if (tableName === "time_entries") {
+    const rows = (await db
+      .select()
+      .from(cfg.table)
+      .where(eq((cfg.table as any).id, id))) as Record<string, unknown>[];
+    deletedTimeEntry = rows[0] ?? null;
+  }
   try {
     const result = (await db.delete(cfg.table).where(eq((cfg.table as any).id, id)).returning()) as unknown[];
     if (result.length === 0) {
@@ -1241,6 +1293,13 @@ router.delete("/admin/tables/:table/:id", requireAdmin, async (req, res): Promis
       return;
     }
     res.sendStatus(204);
+    // Re-sync the weekly invoice to remove the deleted entry's hours.
+    // Only approved entries contributed to an invoice; pending/rejected ones
+    // were never billed. Locked / hand-edited invoices are left alone by
+    // upsertWeeklyInvoiceForTimeEntry per the existing mutability contract.
+    if (deletedTimeEntry && deletedTimeEntry.approvalStatus === "approved") {
+      void upsertWeeklyInvoiceForTimeEntry(deletedTimeEntry as any);
+    }
   } catch (err: any) {
     req.log.warn({ err }, "admin delete failed");
     res.status(400).json({ error: "Delete failed", message: err?.message ?? "Delete failed" });

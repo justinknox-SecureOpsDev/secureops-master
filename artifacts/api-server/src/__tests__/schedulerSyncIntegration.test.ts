@@ -276,6 +276,8 @@ describe("inbound clock-event dedup within ±5 min", () => {
       .returning({ id: timeEntriesTable.id });
 
     // Same officer + site, clock-in 3 minutes later (inside the ±5 min window).
+    // Use a future updatedAt so the LWW tiebreaker sees the inbound payload
+    // as newer than the local row's wall-clock updatedAt (which is ~now).
     const externalId = `${TAG}-clock-${randomUUID().slice(0, 8)}`;
     const result = await processInboundClockEvent({
       id: externalId,
