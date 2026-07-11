@@ -6,7 +6,7 @@ import {
   AlertTriangle, ShieldCheck, Repeat, KeyRound, IdCard, Link2, Download,
   Radio as RadioIcon, Radar, MessageCircle, Users as UsersIcon,
   Briefcase, Calculator, Shield, Settings, CalendarRange, Menu, X, Building2,
-  ArrowLeftRight, GraduationCap, LifeBuoy, FormInput, BarChart3,
+  ArrowLeftRight, GraduationCap, LifeBuoy, FormInput, BarChart3, LayoutDashboard,
   type LucideIcon,
 } from "lucide-react";
 import { useAuth } from "@/lib/auth";
@@ -107,6 +107,15 @@ type NavGroup = {
  * `resolveGroupKey` returns the first group whose item matches the location.
  */
 export function buildNavGroups(isDispatcher: boolean): NavGroup[] {
+  // Admin-only landing dashboard. Listed first so `/` resolves here (exact
+  // match — "/" only prefix-matches itself, so it never shadows other routes).
+  const overviewGroup: NavGroup = {
+    key: "overview",
+    label: "Dashboard",
+    Icon: LayoutDashboard,
+    items: [{ href: "/", label: "Dashboard", Icon: LayoutDashboard }],
+  };
+
   const dispatchGroup: NavGroup = {
     key: "dispatch",
     label: "Dispatch",
@@ -250,6 +259,7 @@ export function buildNavGroups(isDispatcher: boolean): NavGroup[] {
   }
 
   return [
+    overviewGroup,
     dispatchGroup,
     staffingGroup,
     hrGroup,

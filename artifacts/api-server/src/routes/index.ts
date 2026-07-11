@@ -42,6 +42,7 @@ import schedulerWebhookRouter from "./schedulerWebhook";
 import schedulerAdminRouter from "./schedulerAdmin";
 import paymentDiscrepanciesRouter from "./paymentDiscrepancies";
 import analyticsRouter from "./analytics";
+import adminTasksRouter from "./adminTasks";
 import { auditLogMiddleware } from "../lib/auditLog";
 
 const router: IRouter = Router();
@@ -67,6 +68,7 @@ router.use(invoicesRouter);
 router.use(incidentsRouter);
 router.use(licensesRouter);
 router.use(dashboardRouter);
+router.use(adminTasksRouter);
 router.use(chatRouter);
 router.use(liveOpsRouter);
 router.use(adminRouter);

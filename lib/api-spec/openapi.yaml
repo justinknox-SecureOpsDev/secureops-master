@@ -2506,6 +2506,95 @@ paths:
                 type: array
                 items: { $ref: "#/components/schemas/PolicyPublic" }
 
+  # ---- Admin tasks / reminders ----
+
+  /admin/tasks:
+    get:
+      tags: [adminTasks]
+      operationId: listAdminTasks
+      description: |
+        Shared admin to-do list (team-wide — every admin sees every task).
+        Open tasks first (due date ascending, undated last), then completed
+        tasks newest-first. Pass includeCompleted=false to omit finished tasks.
+      parameters:
+        - name: includeCompleted
+          in: query
+          required: false
+          schema: { type: boolean, default: true }
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: "#/components/schemas/AdminTask" }
+    post:
+      tags: [adminTasks]
+      operationId: createAdminTask
+      description: Add a task/reminder to the shared admin list.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/CreateAdminTaskRequest" }
+      responses:
+        "201":
+          description: Created
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/AdminTask" }
+        "400":
+          description: Validation error
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ErrorResponse" }
+
+  /admin/tasks/{id}:
+    patch:
+      tags: [adminTasks]
+      operationId: updateAdminTask
+      description: |
+        Edit a task and/or toggle completion. Setting completed=true stamps
+        completedAt now; completed=false reopens the task.
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/UpdateAdminTaskRequest" }
+      responses:
+        "200":
+          description: Updated
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/AdminTask" }
+        "400":
+          description: Validation error
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ErrorResponse" }
+        "404":
+          description: Not Found
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ErrorResponse" }
+    delete:
+      tags: [adminTasks]
+      operationId: deleteAdminTask
+      description: Remove a task from the shared admin list.
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        "204":
+          description: Deleted
+        "404":
+          description: Not Found
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ErrorResponse" }
+
   # ---- Client portal (role=client) ----
 
   /client/me:
@@ -4598,6 +4687,43 @@ components:
         - clockedInNow
         - recentIncidents
         - upcomingShiftsList
+
+    AdminTask:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        title: { type: string }
+        notes: { type: string, nullable: true }
+        dueAt: { type: string, format: date-time, nullable: true }
+        completedAt: { type: string, format: date-time, nullable: true }
+        createdBy: { type: string, format: uuid }
+        createdByName: { type: string, nullable: true }
+        createdAt: { type: string, format: date-time }
+      required:
+        - id
+        - title
+        - notes
+        - dueAt
+        - completedAt
+        - createdBy
+        - createdByName
+        - createdAt
+
+    CreateAdminTaskRequest:
+      type: object
+      properties:
+        title: { type: string, minLength: 1, maxLength: 200 }
+        notes: { type: string, maxLength: 2000, nullable: true }
+        dueAt: { type: string, format: date-time, nullable: true }
+      required: [title]
+
+    UpdateAdminTaskRequest:
+      type: object
+      properties:
+        title: { type: string, minLength: 1, maxLength: 200 }
+        notes: { type: string, maxLength: 2000, nullable: true }
+        dueAt: { type: string, format: date-time, nullable: true }
+        completed: { type: boolean }
 
     ChatRoom:
       type: object

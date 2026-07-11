@@ -4834,6 +4834,83 @@ export const ListActivePoliciesResponse = zod.array(
 );
 
 /**
+ * Shared admin to-do list (team-wide — every admin sees every task).
+Open tasks first (due date ascending, undated last), then completed
+tasks newest-first. Pass includeCompleted=false to omit finished tasks.
+
+ */
+export const listAdminTasksQueryIncludeCompletedDefault = true;
+
+export const ListAdminTasksQueryParams = zod.object({
+  includeCompleted: zod.coerce
+    .boolean()
+    .default(listAdminTasksQueryIncludeCompletedDefault),
+});
+
+export const ListAdminTasksResponseItem = zod.object({
+  id: zod.string().uuid(),
+  title: zod.string(),
+  notes: zod.string().nullable(),
+  dueAt: zod.coerce.date().nullable(),
+  completedAt: zod.coerce.date().nullable(),
+  createdBy: zod.string().uuid(),
+  createdByName: zod.string().nullable(),
+  createdAt: zod.coerce.date(),
+});
+export const ListAdminTasksResponse = zod.array(ListAdminTasksResponseItem);
+
+/**
+ * Add a task/reminder to the shared admin list.
+ */
+export const createAdminTaskBodyTitleMax = 200;
+
+export const createAdminTaskBodyNotesMax = 2000;
+
+export const CreateAdminTaskBody = zod.object({
+  title: zod.string().min(1).max(createAdminTaskBodyTitleMax),
+  notes: zod.string().max(createAdminTaskBodyNotesMax).nullish(),
+  dueAt: zod.coerce.date().nullish(),
+});
+
+/**
+ * Edit a task and/or toggle completion. Setting completed=true stamps
+completedAt now; completed=false reopens the task.
+
+ */
+export const UpdateAdminTaskParams = zod.object({
+  id: zod.coerce.string().uuid(),
+});
+
+export const updateAdminTaskBodyTitleMax = 200;
+
+export const updateAdminTaskBodyNotesMax = 2000;
+
+export const UpdateAdminTaskBody = zod.object({
+  title: zod.string().min(1).max(updateAdminTaskBodyTitleMax).optional(),
+  notes: zod.string().max(updateAdminTaskBodyNotesMax).nullish(),
+  dueAt: zod.coerce.date().nullish(),
+  completed: zod.boolean().optional(),
+});
+
+export const UpdateAdminTaskResponse = zod.object({
+  id: zod.string().uuid(),
+  title: zod.string(),
+  notes: zod.string().nullable(),
+  dueAt: zod.coerce.date().nullable(),
+  completedAt: zod.coerce.date().nullable(),
+  createdBy: zod.string().uuid(),
+  createdByName: zod.string().nullable(),
+  createdAt: zod.coerce.date(),
+});
+
+/**
+ * Remove a task from the shared admin list.
+ */
+export const DeleteAdminTaskParams = zod.object({
+  id: zod.coerce.string().uuid(),
+});
+
+/**
  * @summary Get client org info and site list
  */
 export const GetClientMeResponse = zod.object({

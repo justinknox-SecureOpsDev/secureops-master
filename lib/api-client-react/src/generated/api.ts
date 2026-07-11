@@ -25,6 +25,7 @@ import type {
   AdminListOnboardingParams,
   AdminSignObjectDownload200,
   AdminSignObjectDownloadParams,
+  AdminTask,
   AdminUpdateSubcontractorEntryBody,
   AnalyticsOfficerHistory,
   AnalyticsSummary,
@@ -53,6 +54,7 @@ import type {
   ClockInShift,
   ClockInSite,
   ClockOutRequest,
+  CreateAdminTaskRequest,
   CreateApplicationQuestionRequest,
   CreateChatRoomBody,
   CreateClientRequest,
@@ -110,6 +112,7 @@ import type {
   LicenseRenewal,
   LicenseRenewalDecisionRequest,
   LicenseRenewalRejectRequest,
+  ListAdminTasksParams,
   LoginRequest,
   MarkChatRoomRead200,
   NotifyShiftVacancy200,
@@ -155,6 +158,7 @@ import type {
   TimeEntry,
   TriggerEmergency201,
   TriggerEmergencyBody,
+  UpdateAdminTaskRequest,
   UpdateApplicationFieldRequest,
   UpdateApplicationQuestionRequest,
   UpdateAssignmentRequest,
@@ -10424,6 +10428,349 @@ export function useListActivePolicies<
 
   return { ...query, queryKey: queryOptions.queryKey };
 }
+
+/**
+ * Shared admin to-do list (team-wide — every admin sees every task).
+Open tasks first (due date ascending, undated last), then completed
+tasks newest-first. Pass includeCompleted=false to omit finished tasks.
+
+ */
+export const getListAdminTasksUrl = (params?: ListAdminTasksParams) => {
+  const normalizedParams = new URLSearchParams();
+
+  Object.entries(params || {}).forEach(([key, value]) => {
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? "null" : value.toString());
+    }
+  });
+
+  const stringifiedParams = normalizedParams.toString();
+
+  return stringifiedParams.length > 0
+    ? `/api/admin/tasks?${stringifiedParams}`
+    : `/api/admin/tasks`;
+};
+
+export const listAdminTasks = async (
+  params?: ListAdminTasksParams,
+  options?: RequestInit,
+): Promise<AdminTask[]> => {
+  return customFetch<AdminTask[]>(getListAdminTasksUrl(params), {
+    ...options,
+    method: "GET",
+  });
+};
+
+export const getListAdminTasksQueryKey = (params?: ListAdminTasksParams) => {
+  return [`/api/admin/tasks`, ...(params ? [params] : [])] as const;
+};
+
+export const getListAdminTasksQueryOptions = <
+  TData = Awaited<ReturnType<typeof listAdminTasks>>,
+  TError = ErrorType<unknown>,
+>(
+  params?: ListAdminTasksParams,
+  options?: {
+    query?: UseQueryOptions<
+      Awaited<ReturnType<typeof listAdminTasks>>,
+      TError,
+      TData
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+) => {
+  const { query: queryOptions, request: requestOptions } = options ?? {};
+
+  const queryKey = queryOptions?.queryKey ?? getListAdminTasksQueryKey(params);
+
+  const queryFn: QueryFunction<Awaited<ReturnType<typeof listAdminTasks>>> = ({
+    signal,
+  }) => listAdminTasks(params, { signal, ...requestOptions });
+
+  return { queryKey, queryFn, ...queryOptions } as UseQueryOptions<
+    Awaited<ReturnType<typeof listAdminTasks>>,
+    TError,
+    TData
+  > & { queryKey: QueryKey };
+};
+
+export type ListAdminTasksQueryResult = NonNullable<
+  Awaited<ReturnType<typeof listAdminTasks>>
+>;
+export type ListAdminTasksQueryError = ErrorType<unknown>;
+
+export function useListAdminTasks<
+  TData = Awaited<ReturnType<typeof listAdminTasks>>,
+  TError = ErrorType<unknown>,
+>(
+  params?: ListAdminTasksParams,
+  options?: {
+    query?: UseQueryOptions<
+      Awaited<ReturnType<typeof listAdminTasks>>,
+      TError,
+      TData
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+): UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+  const queryOptions = getListAdminTasksQueryOptions(params, options);
+
+  const query = useQuery(queryOptions) as UseQueryResult<TData, TError> & {
+    queryKey: QueryKey;
+  };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
+
+/**
+ * Add a task/reminder to the shared admin list.
+ */
+export const getCreateAdminTaskUrl = () => {
+  return `/api/admin/tasks`;
+};
+
+export const createAdminTask = async (
+  createAdminTaskRequest: CreateAdminTaskRequest,
+  options?: RequestInit,
+): Promise<AdminTask> => {
+  return customFetch<AdminTask>(getCreateAdminTaskUrl(), {
+    ...options,
+    method: "POST",
+    headers: { "Content-Type": "application/json", ...options?.headers },
+    body: JSON.stringify(createAdminTaskRequest),
+  });
+};
+
+export const getCreateAdminTaskMutationOptions = <
+  TError = ErrorType<ErrorResponse>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof createAdminTask>>,
+    TError,
+    { data: BodyType<CreateAdminTaskRequest> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof createAdminTask>>,
+  TError,
+  { data: BodyType<CreateAdminTaskRequest> },
+  TContext
+> => {
+  const mutationKey = ["createAdminTask"];
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof createAdminTask>>,
+    { data: BodyType<CreateAdminTaskRequest> }
+  > = (props) => {
+    const { data } = props ?? {};
+
+    return createAdminTask(data, requestOptions);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type CreateAdminTaskMutationResult = NonNullable<
+  Awaited<ReturnType<typeof createAdminTask>>
+>;
+export type CreateAdminTaskMutationBody = BodyType<CreateAdminTaskRequest>;
+export type CreateAdminTaskMutationError = ErrorType<ErrorResponse>;
+
+export const useCreateAdminTask = <
+  TError = ErrorType<ErrorResponse>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof createAdminTask>>,
+    TError,
+    { data: BodyType<CreateAdminTaskRequest> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationResult<
+  Awaited<ReturnType<typeof createAdminTask>>,
+  TError,
+  { data: BodyType<CreateAdminTaskRequest> },
+  TContext
+> => {
+  return useMutation(getCreateAdminTaskMutationOptions(options));
+};
+
+/**
+ * Edit a task and/or toggle completion. Setting completed=true stamps
+completedAt now; completed=false reopens the task.
+
+ */
+export const getUpdateAdminTaskUrl = (id: string) => {
+  return `/api/admin/tasks/${id}`;
+};
+
+export const updateAdminTask = async (
+  id: string,
+  updateAdminTaskRequest: UpdateAdminTaskRequest,
+  options?: RequestInit,
+): Promise<AdminTask> => {
+  return customFetch<AdminTask>(getUpdateAdminTaskUrl(id), {
+    ...options,
+    method: "PATCH",
+    headers: { "Content-Type": "application/json", ...options?.headers },
+    body: JSON.stringify(updateAdminTaskRequest),
+  });
+};
+
+export const getUpdateAdminTaskMutationOptions = <
+  TError = ErrorType<ErrorResponse>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof updateAdminTask>>,
+    TError,
+    { id: string; data: BodyType<UpdateAdminTaskRequest> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof updateAdminTask>>,
+  TError,
+  { id: string; data: BodyType<UpdateAdminTaskRequest> },
+  TContext
+> => {
+  const mutationKey = ["updateAdminTask"];
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof updateAdminTask>>,
+    { id: string; data: BodyType<UpdateAdminTaskRequest> }
+  > = (props) => {
+    const { id, data } = props ?? {};
+
+    return updateAdminTask(id, data, requestOptions);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type UpdateAdminTaskMutationResult = NonNullable<
+  Awaited<ReturnType<typeof updateAdminTask>>
+>;
+export type UpdateAdminTaskMutationBody = BodyType<UpdateAdminTaskRequest>;
+export type UpdateAdminTaskMutationError = ErrorType<ErrorResponse>;
+
+export const useUpdateAdminTask = <
+  TError = ErrorType<ErrorResponse>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof updateAdminTask>>,
+    TError,
+    { id: string; data: BodyType<UpdateAdminTaskRequest> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationResult<
+  Awaited<ReturnType<typeof updateAdminTask>>,
+  TError,
+  { id: string; data: BodyType<UpdateAdminTaskRequest> },
+  TContext
+> => {
+  return useMutation(getUpdateAdminTaskMutationOptions(options));
+};
+
+/**
+ * Remove a task from the shared admin list.
+ */
+export const getDeleteAdminTaskUrl = (id: string) => {
+  return `/api/admin/tasks/${id}`;
+};
+
+export const deleteAdminTask = async (
+  id: string,
+  options?: RequestInit,
+): Promise<void> => {
+  return customFetch<void>(getDeleteAdminTaskUrl(id), {
+    ...options,
+    method: "DELETE",
+  });
+};
+
+export const getDeleteAdminTaskMutationOptions = <
+  TError = ErrorType<ErrorResponse>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof deleteAdminTask>>,
+    TError,
+    { id: string },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof deleteAdminTask>>,
+  TError,
+  { id: string },
+  TContext
+> => {
+  const mutationKey = ["deleteAdminTask"];
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof deleteAdminTask>>,
+    { id: string }
+  > = (props) => {
+    const { id } = props ?? {};
+
+    return deleteAdminTask(id, requestOptions);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type DeleteAdminTaskMutationResult = NonNullable<
+  Awaited<ReturnType<typeof deleteAdminTask>>
+>;
+
+export type DeleteAdminTaskMutationError = ErrorType<ErrorResponse>;
+
+export const useDeleteAdminTask = <
+  TError = ErrorType<ErrorResponse>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof deleteAdminTask>>,
+    TError,
+    { id: string },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationResult<
+  Awaited<ReturnType<typeof deleteAdminTask>>,
+  TError,
+  { id: string },
+  TContext
+> => {
+  return useMutation(getDeleteAdminTaskMutationOptions(options));
+};
 
 /**
  * @summary Get client org info and site list

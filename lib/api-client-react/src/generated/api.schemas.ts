@@ -1415,6 +1415,40 @@ export interface AdminDashboardSummary {
   upcomingShiftsList: Shift[];
 }
 
+export interface AdminTask {
+  id: string;
+  title: string;
+  notes: string | null;
+  dueAt: string | null;
+  completedAt: string | null;
+  createdBy: string;
+  createdByName: string | null;
+  createdAt: string;
+}
+
+export interface CreateAdminTaskRequest {
+  /**
+   * @minLength 1
+   * @maxLength 200
+   */
+  title: string;
+  /** @maxLength 2000 */
+  notes?: string | null;
+  dueAt?: string | null;
+}
+
+export interface UpdateAdminTaskRequest {
+  /**
+   * @minLength 1
+   * @maxLength 200
+   */
+  title?: string;
+  /** @maxLength 2000 */
+  notes?: string | null;
+  dueAt?: string | null;
+  completed?: boolean;
+}
+
 export type ChatRoomLastMessage = {
   content?: string;
   createdAt?: string;
@@ -2695,6 +2729,10 @@ export const AdminListOnboardingStatus = {
   pending: "pending",
   completed: "completed",
 } as const;
+
+export type ListAdminTasksParams = {
+  includeCompleted?: boolean;
+};
 
 export type GetClientSites200Item = { [key: string]: unknown };
 

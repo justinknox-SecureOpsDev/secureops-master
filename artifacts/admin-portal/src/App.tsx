@@ -7,7 +7,8 @@ import { AuthProvider, useAuth } from "@/lib/auth";
 import { setToken } from "@/lib/api";
 import { LoginPage } from "@/pages/Login";
 import { AppShell } from "@/pages/AppShell";
-import { TablePage, HomeRedirect } from "@/pages/TablePage";
+import { TablePage } from "@/pages/TablePage";
+import DashboardPage from "@/pages/Dashboard";
 import { SiteDetailPage } from "@/pages/SiteDetailPage";
 import { ApplyPage } from "@/pages/Apply";
 import { OnboardPage } from "@/pages/Onboard";
@@ -146,7 +147,7 @@ function Routed() {
         </Switch>
       ) : (
         <Switch>
-          <Route path="/" component={HomeRedirect} />
+          <Route path="/" component={DashboardPage} />
           <Route path="/dispatch" component={DispatchPage} />
           <Route path="/chat" component={ChatPage} />
           <Route path="/personnel" component={PersonnelPage} />
