@@ -2494,6 +2494,86 @@ export const RejectLicenseRenewalResponse = zod.object({
 });
 
 /**
+ * @summary Admin analytics summary (P&L, hours, missed shifts, incidents) for a date range
+ */
+export const GetAnalyticsSummaryQueryParams = zod.object({
+  start: zod.date(),
+  end: zod.date(),
+});
+
+export const GetAnalyticsSummaryResponse = zod.object({
+  revenue: zod.number(),
+  laborCost: zod.number(),
+  profit: zod.number(),
+  marginPct: zod.number(),
+  hoursWorked: zod.number(),
+  hoursScheduled: zod.number(),
+  coveragePct: zod.number(),
+  noShowCount: zod.number(),
+  unfilledCount: zod.number(),
+  missedShifts: zod.array(
+    zod.object({
+      shiftId: zod.string(),
+      title: zod.string(),
+      startTime: zod.string(),
+      endTime: zod.string(),
+      siteId: zod.string().nullable(),
+      siteName: zod.string().nullable(),
+      headcount: zod.number(),
+      filled: zod.number(),
+      noShows: zod.number(),
+    }),
+  ),
+  incidentTotal: zod.number(),
+  incidentsBySeverity: zod.object({
+    low: zod.number(),
+    medium: zod.number(),
+    high: zod.number(),
+    critical: zod.number(),
+  }),
+  incidentsByStatus: zod.object({
+    open: zod.number(),
+    investigating: zod.number(),
+    closed: zod.number(),
+  }),
+  pnlTrend: zod.array(
+    zod.object({
+      bucket: zod.string(),
+      revenue: zod.number(),
+      laborCost: zod.number(),
+      profit: zod.number(),
+    }),
+  ),
+  hoursTrend: zod.array(
+    zod.object({
+      bucket: zod.string(),
+      worked: zod.number(),
+      scheduled: zod.number(),
+    }),
+  ),
+  incidentTrend: zod.array(
+    zod.object({
+      bucket: zod.string(),
+      count: zod.number(),
+    }),
+  ),
+  perSite: zod.array(
+    zod.object({
+      siteId: zod.string(),
+      siteName: zod.string(),
+      revenue: zod.number(),
+      laborCost: zod.number(),
+      profit: zod.number(),
+      hoursWorked: zod.number(),
+      hoursScheduled: zod.number(),
+      noShows: zod.number(),
+      unfilledShifts: zod.number(),
+      incidents: zod.number(),
+    }),
+  ),
+});
+
+/**
  * @summary Admin dashboard summary stats
  */
 export const GetAdminDashboardSummaryResponse = zod.object({

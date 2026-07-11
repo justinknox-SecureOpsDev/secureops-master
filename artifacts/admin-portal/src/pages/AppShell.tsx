@@ -6,7 +6,7 @@ import {
   AlertTriangle, ShieldCheck, Repeat, KeyRound, IdCard, Link2, Download,
   Radio as RadioIcon, Radar, MessageCircle, Users as UsersIcon,
   Briefcase, Calculator, Shield, Settings, CalendarRange, Menu, X, Building2,
-  ArrowLeftRight, GraduationCap, LifeBuoy, FormInput,
+  ArrowLeftRight, GraduationCap, LifeBuoy, FormInput, BarChart3,
   type LucideIcon,
 } from "lucide-react";
 import { useAuth } from "@/lib/auth";
@@ -186,6 +186,7 @@ export function buildNavGroups(isDispatcher: boolean): NavGroup[] {
     label: "Accounting",
     Icon: Calculator,
     items: [
+      { href: "/analytics", label: "Analytics", Icon: BarChart3 },
       { href: "/payroll/board", label: "Payroll Board", Icon: Wallet },
       { href: "/payroll/pay-run", label: "Pay Run", Icon: Banknote },
       { href: "/invoices/board", label: "Invoice Board", Icon: Receipt },

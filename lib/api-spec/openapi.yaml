@@ -1446,6 +1446,27 @@ paths:
               schema:
                 $ref: "#/components/schemas/LicenseRenewal"
 
+  /analytics/summary:
+    get:
+      operationId: getAnalyticsSummary
+      tags: [dashboard]
+      summary: Admin analytics summary (P&L, hours, missed shifts, incidents) for a date range
+      parameters:
+        - { name: start, in: query, required: true, schema: { type: string, format: date } }
+        - { name: end, in: query, required: true, schema: { type: string, format: date } }
+      responses:
+        "200":
+          description: Analytics summary
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AnalyticsSummary"
+        "400":
+          description: Invalid parameters
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ErrorResponse" }
+
   /dashboard/admin-summary:
     get:
       operationId: getAdminDashboardSummary
@@ -5307,6 +5328,121 @@ components:
       properties:
         url: { type: string }
         sessionId: { type: string }
+
+    AnalyticsTrendPoint:
+      type: object
+      required: [bucket, revenue, laborCost, profit]
+      properties:
+        bucket: { type: string }
+        revenue: { type: number }
+        laborCost: { type: number }
+        profit: { type: number }
+
+    AnalyticsHoursTrendPoint:
+      type: object
+      required: [bucket, worked, scheduled]
+      properties:
+        bucket: { type: string }
+        worked: { type: number }
+        scheduled: { type: number }
+
+    AnalyticsIncidentTrendPoint:
+      type: object
+      required: [bucket, count]
+      properties:
+        bucket: { type: string }
+        count: { type: integer }
+
+    AnalyticsMissedShift:
+      type: object
+      required: [shiftId, title, startTime, endTime, siteId, siteName, headcount, filled, noShows]
+      properties:
+        shiftId: { type: string }
+        title: { type: string }
+        startTime: { type: string }
+        endTime: { type: string }
+        siteId: { type: string, nullable: true }
+        siteName: { type: string, nullable: true }
+        headcount: { type: integer }
+        filled: { type: integer }
+        noShows: { type: integer }
+
+    AnalyticsSiteRow:
+      type: object
+      required: [siteId, siteName, revenue, laborCost, profit, hoursWorked, hoursScheduled, noShows, unfilledShifts, incidents]
+      properties:
+        siteId: { type: string }
+        siteName: { type: string }
+        revenue: { type: number }
+        laborCost: { type: number }
+        profit: { type: number }
+        hoursWorked: { type: number }
+        hoursScheduled: { type: number }
+        noShows: { type: integer }
+        unfilledShifts: { type: integer }
+        incidents: { type: integer }
+
+    AnalyticsSummary:
+      type: object
+      required:
+        - revenue
+        - laborCost
+        - profit
+        - marginPct
+        - hoursWorked
+        - hoursScheduled
+        - coveragePct
+        - noShowCount
+        - unfilledCount
+        - missedShifts
+        - incidentTotal
+        - incidentsBySeverity
+        - incidentsByStatus
+        - pnlTrend
+        - hoursTrend
+        - incidentTrend
+        - perSite
+      properties:
+        revenue: { type: number }
+        laborCost: { type: number }
+        profit: { type: number }
+        marginPct: { type: number }
+        hoursWorked: { type: number }
+        hoursScheduled: { type: number }
+        coveragePct: { type: number }
+        noShowCount: { type: integer }
+        unfilledCount: { type: integer }
+        missedShifts:
+          type: array
+          items: { $ref: "#/components/schemas/AnalyticsMissedShift" }
+        incidentTotal: { type: integer }
+        incidentsBySeverity:
+          type: object
+          properties:
+            low: { type: integer }
+            medium: { type: integer }
+            high: { type: integer }
+            critical: { type: integer }
+          required: [low, medium, high, critical]
+        incidentsByStatus:
+          type: object
+          properties:
+            open: { type: integer }
+            investigating: { type: integer }
+            closed: { type: integer }
+          required: [open, investigating, closed]
+        pnlTrend:
+          type: array
+          items: { $ref: "#/components/schemas/AnalyticsTrendPoint" }
+        hoursTrend:
+          type: array
+          items: { $ref: "#/components/schemas/AnalyticsHoursTrendPoint" }
+        incidentTrend:
+          type: array
+          items: { $ref: "#/components/schemas/AnalyticsIncidentTrendPoint" }
+        perSite:
+          type: array
+          items: { $ref: "#/components/schemas/AnalyticsSiteRow" }
 
     ClientInviteResponse:
       type: object

@@ -26,6 +26,7 @@ import type {
   AdminSignObjectDownload200,
   AdminSignObjectDownloadParams,
   AdminUpdateSubcontractorEntryBody,
+  AnalyticsSummary,
   Application,
   ApplicationFieldConfig,
   ApplicationQuestion,
@@ -78,6 +79,7 @@ import type {
   GenerateSubcontractorQrBody,
   GetAdminLicenseRenewalsParams,
   GetAdminShiftRequestsParams,
+  GetAnalyticsSummaryParams,
   GetChatMessagesParams,
   GetClientDar200,
   GetClientDarParams,
@@ -5733,6 +5735,106 @@ export const useRejectLicenseRenewal = <
 > => {
   return useMutation(getRejectLicenseRenewalMutationOptions(options));
 };
+
+/**
+ * @summary Admin analytics summary (P&L, hours, missed shifts, incidents) for a date range
+ */
+export const getGetAnalyticsSummaryUrl = (
+  params: GetAnalyticsSummaryParams,
+) => {
+  const normalizedParams = new URLSearchParams();
+
+  Object.entries(params || {}).forEach(([key, value]) => {
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? "null" : value.toString());
+    }
+  });
+
+  const stringifiedParams = normalizedParams.toString();
+
+  return stringifiedParams.length > 0
+    ? `/api/analytics/summary?${stringifiedParams}`
+    : `/api/analytics/summary`;
+};
+
+export const getAnalyticsSummary = async (
+  params: GetAnalyticsSummaryParams,
+  options?: RequestInit,
+): Promise<AnalyticsSummary> => {
+  return customFetch<AnalyticsSummary>(getGetAnalyticsSummaryUrl(params), {
+    ...options,
+    method: "GET",
+  });
+};
+
+export const getGetAnalyticsSummaryQueryKey = (
+  params?: GetAnalyticsSummaryParams,
+) => {
+  return [`/api/analytics/summary`, ...(params ? [params] : [])] as const;
+};
+
+export const getGetAnalyticsSummaryQueryOptions = <
+  TData = Awaited<ReturnType<typeof getAnalyticsSummary>>,
+  TError = ErrorType<ErrorResponse>,
+>(
+  params: GetAnalyticsSummaryParams,
+  options?: {
+    query?: UseQueryOptions<
+      Awaited<ReturnType<typeof getAnalyticsSummary>>,
+      TError,
+      TData
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+) => {
+  const { query: queryOptions, request: requestOptions } = options ?? {};
+
+  const queryKey =
+    queryOptions?.queryKey ?? getGetAnalyticsSummaryQueryKey(params);
+
+  const queryFn: QueryFunction<
+    Awaited<ReturnType<typeof getAnalyticsSummary>>
+  > = ({ signal }) =>
+    getAnalyticsSummary(params, { signal, ...requestOptions });
+
+  return { queryKey, queryFn, ...queryOptions } as UseQueryOptions<
+    Awaited<ReturnType<typeof getAnalyticsSummary>>,
+    TError,
+    TData
+  > & { queryKey: QueryKey };
+};
+
+export type GetAnalyticsSummaryQueryResult = NonNullable<
+  Awaited<ReturnType<typeof getAnalyticsSummary>>
+>;
+export type GetAnalyticsSummaryQueryError = ErrorType<ErrorResponse>;
+
+/**
+ * @summary Admin analytics summary (P&L, hours, missed shifts, incidents) for a date range
+ */
+
+export function useGetAnalyticsSummary<
+  TData = Awaited<ReturnType<typeof getAnalyticsSummary>>,
+  TError = ErrorType<ErrorResponse>,
+>(
+  params: GetAnalyticsSummaryParams,
+  options?: {
+    query?: UseQueryOptions<
+      Awaited<ReturnType<typeof getAnalyticsSummary>>,
+      TError,
+      TData
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+): UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+  const queryOptions = getGetAnalyticsSummaryQueryOptions(params, options);
+
+  const query = useQuery(queryOptions) as UseQueryResult<TData, TError> & {
+    queryKey: QueryKey;
+  };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
 
 /**
  * @summary Admin dashboard summary stats

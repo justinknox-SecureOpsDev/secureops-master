@@ -91,6 +91,7 @@ describe("resolveGroupKey (admin)", () => {
     ["/tables/clients", "administration"],
     ["/sites/abc", "administration"],
     ["/subcontractors/pay-run", "administration"],
+    ["/analytics", "accounting"],
     ["/payroll/board", "accounting"],
     ["/invoices/board", "accounting"],
     ["/tables/users", "settings"],

@@ -2248,6 +2248,82 @@ export interface StripeCheckoutResponse {
   sessionId?: string;
 }
 
+export interface AnalyticsTrendPoint {
+  bucket: string;
+  revenue: number;
+  laborCost: number;
+  profit: number;
+}
+
+export interface AnalyticsHoursTrendPoint {
+  bucket: string;
+  worked: number;
+  scheduled: number;
+}
+
+export interface AnalyticsIncidentTrendPoint {
+  bucket: string;
+  count: number;
+}
+
+export interface AnalyticsMissedShift {
+  shiftId: string;
+  title: string;
+  startTime: string;
+  endTime: string;
+  siteId: string | null;
+  siteName: string | null;
+  headcount: number;
+  filled: number;
+  noShows: number;
+}
+
+export interface AnalyticsSiteRow {
+  siteId: string;
+  siteName: string;
+  revenue: number;
+  laborCost: number;
+  profit: number;
+  hoursWorked: number;
+  hoursScheduled: number;
+  noShows: number;
+  unfilledShifts: number;
+  incidents: number;
+}
+
+export type AnalyticsSummaryIncidentsBySeverity = {
+  low: number;
+  medium: number;
+  high: number;
+  critical: number;
+};
+
+export type AnalyticsSummaryIncidentsByStatus = {
+  open: number;
+  investigating: number;
+  closed: number;
+};
+
+export interface AnalyticsSummary {
+  revenue: number;
+  laborCost: number;
+  profit: number;
+  marginPct: number;
+  hoursWorked: number;
+  hoursScheduled: number;
+  coveragePct: number;
+  noShowCount: number;
+  unfilledCount: number;
+  missedShifts: AnalyticsMissedShift[];
+  incidentTotal: number;
+  incidentsBySeverity: AnalyticsSummaryIncidentsBySeverity;
+  incidentsByStatus: AnalyticsSummaryIncidentsByStatus;
+  pnlTrend: AnalyticsTrendPoint[];
+  hoursTrend: AnalyticsHoursTrendPoint[];
+  incidentTrend: AnalyticsIncidentTrendPoint[];
+  perSite: AnalyticsSiteRow[];
+}
+
 export interface ClientInviteResponse {
   status: string;
   userId: string;
@@ -2413,6 +2489,11 @@ export const GetAdminLicenseRenewalsStatus = {
   approved: "approved",
   rejected: "rejected",
 } as const;
+
+export type GetAnalyticsSummaryParams = {
+  start: string;
+  end: string;
+};
 
 export type CreateChatRoomBody = {
   name: string;

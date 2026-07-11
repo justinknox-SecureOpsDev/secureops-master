@@ -41,6 +41,7 @@ import subcontractorRouter from "./subcontractor";
 import schedulerWebhookRouter from "./schedulerWebhook";
 import schedulerAdminRouter from "./schedulerAdmin";
 import paymentDiscrepanciesRouter from "./paymentDiscrepancies";
+import analyticsRouter from "./analytics";
 import { auditLogMiddleware } from "../lib/auditLog";
 
 const router: IRouter = Router();
@@ -94,5 +95,6 @@ router.use(subcontractorRouter);
 router.use(schedulerWebhookRouter);
 router.use(schedulerAdminRouter);
 router.use(paymentDiscrepanciesRouter);
+router.use(analyticsRouter);
 
 export default router;

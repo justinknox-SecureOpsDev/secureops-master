@@ -53,6 +53,7 @@ import { ClientShell } from "@/pages/ClientShell";
 import { MandatoryPasswordChange } from "@/pages/MandatoryPasswordChange";
 import ClientUsers from "@/pages/ClientUsers";
 import CoverageRequests from "@/pages/CoverageRequests";
+import AnalyticsPage from "@/pages/Analytics";
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -163,6 +164,7 @@ function Routed() {
           <Route path="/payroll/pay-run" component={PayRunPage} />
           <Route path="/subcontractors/pay-run" component={SubcontractorPayRunPage} />
           <Route path="/subcontractors/clock-in-entries" component={SubcontractorEntriesPage} />
+          <Route path="/analytics" component={AnalyticsPage} />
           <Route path="/audit-log" component={AuditLogPage} />
           <Route path="/recovery/shifts" component={ShiftRecoveryPage} />
           <Route path="/swap-requests" component={SwapRequestsPage} />
