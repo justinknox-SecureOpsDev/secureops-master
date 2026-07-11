@@ -1,5 +1,5 @@
 import { useState, useMemo } from "react";
-import { formatTime } from "@/lib/format";
+import { formatTime, formatDate } from "@/lib/format";
 import { useQuery } from "@tanstack/react-query";
 import {
   BarChart, Bar, AreaChart, Area, LineChart, Line,
@@ -674,7 +674,7 @@ export default function AnalyticsPage() {
                             <TableCell className="font-medium">{s.title}</TableCell>
                             <TableCell className="text-muted-foreground">{s.siteName ?? "—"}</TableCell>
                             <TableCell className="text-muted-foreground text-xs">
-                              {new Date(s.startTime).toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" })}
+                              {formatDate(s.startTime)}
                               {" "}
                               {formatTime(s.startTime)}
                             </TableCell>

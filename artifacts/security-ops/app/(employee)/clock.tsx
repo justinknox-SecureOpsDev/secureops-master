@@ -8,7 +8,7 @@ import { useClockIn, useClockOut, useGetActiveTimeEntry, getGetActiveTimeEntryQu
 import { Feather } from "@expo/vector-icons";
 import { useQueryClient } from "@tanstack/react-query";
 import * as Location from "expo-location";
-import { formatTime, formatWeekdayTime } from "@/utils/time";
+import { formatTime, formatWeekdayTime, formatDate } from "@/utils/time";
 
 function formatDuration(seconds: number) {
   const h = Math.floor(seconds / 3600);
@@ -442,7 +442,7 @@ export default function EmployeeClockScreen() {
               >
                 <View style={styles.entryHeader}>
                   <Text style={[styles.entryDate, { color: colors.foreground }]}>
-                    {new Date(entry.clockInTime).toLocaleDateString([], { weekday: "short", month: "short", day: "numeric" })}
+                    {formatDate(entry.clockInTime, { weekday: "short", month: "short", day: "numeric" })}
                   </Text>
                   {hrs && (
                     <View style={[styles.hrsBadge, { backgroundColor: colors.primary + "20", borderColor: colors.primary }]}>

@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { Users, Clock, Shield, ChevronDown, ChevronUp } from "lucide-react";
 import { api } from "@/lib/api";
-import { formatTime, formatDateTime } from "@/lib/format";
+import { formatTime, formatDateTime, formatDate } from "@/lib/format";
 
 type Officer = { name: string; licenseLevel: number | null };
 type Shift = {
@@ -22,9 +22,7 @@ function fmt(d: string) {
   return formatDateTime(d);
 }
 function fmtDate(d: string) {
-  return new Date(d).toLocaleDateString("en-US", {
-    weekday: "long", month: "long", day: "numeric",
-  });
+  return formatDate(d, { weekday: "long", month: "long", day: "numeric" });
 }
 function fmtTime(d: string) {
   return formatTime(d);

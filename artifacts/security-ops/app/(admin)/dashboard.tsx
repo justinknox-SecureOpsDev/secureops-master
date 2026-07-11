@@ -13,7 +13,7 @@ import { Feather } from "@expo/vector-icons";
 import { useRouter } from "expo-router";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { confirmAction, notify } from "@/utils/confirm";
-import { formatTime, formatDateTime } from "@/utils/time";
+import { formatTime, formatDateTime, formatDate } from "@/utils/time";
 import { useQueryClient } from "@tanstack/react-query";
 
 function StatCard({ label, value, color, icon, onPress }: { label: string; value: number | string; color?: string; icon: string; onPress?: () => void }) {
@@ -214,7 +214,7 @@ export default function AdminDashboardScreen() {
                     </View>
                   </View>
                   <Text style={[styles.itemSub, { color: colors.mutedForeground }]} numberOfLines={1}>
-                    {claim.shiftTitle} · {start.toLocaleDateString([], { weekday: "short", day: "numeric", month: "short" })} {formatTime(start)}
+                    {claim.shiftTitle} · {formatDate(start)} {formatTime(start)}
                   </Text>
                 </View>
                 <View style={{ flexDirection: "row", gap: 8 }}>
@@ -284,7 +284,7 @@ export default function AdminDashboardScreen() {
                     </View>
                   </View>
                   <Text style={[styles.itemSub, { color: colors.mutedForeground }]} numberOfLines={1}>
-                    {shift.clientName} · {start.toLocaleDateString([], { weekday: "short", day: "numeric", month: "short" })} {formatTime(start)} · L{shift.requiredLicenseLevel}+
+                    {shift.clientName} · {formatDate(start)} {formatTime(start)} · L{shift.requiredLicenseLevel}+
                   </Text>
                 </TouchableOpacity>
                 <TouchableOpacity
@@ -354,14 +354,14 @@ export default function AdminDashboardScreen() {
               style={[styles.listItem, { backgroundColor: colors.card, borderColor: colors.border }]}
               onPress={() => router.push("/(admin)/incidents")}
               accessibilityRole="button"
-              accessibilityLabel={`${incident.severity} severity incident: ${incident.title}. Reported by ${incident.employeeName} on ${new Date(incident.occurredAt).toLocaleDateString()}`}
+              accessibilityLabel={`${incident.severity} severity incident: ${incident.title}. Reported by ${incident.employeeName} on ${formatDate(incident.occurredAt, { day: "numeric", month: "short", year: "numeric" })}`}
             >
               <View style={styles.itemRow}>
                 <SeverityBadge severity={incident.severity} />
                 <Text style={[styles.itemTitle, { color: colors.foreground }]} numberOfLines={1}>{incident.title}</Text>
               </View>
               <Text style={[styles.itemSub, { color: colors.mutedForeground }]} numberOfLines={1}>
-                {incident.employeeName} · {new Date(incident.occurredAt).toLocaleDateString()}
+                {incident.employeeName} · {formatDate(incident.occurredAt, { day: "numeric", month: "short", year: "numeric" })}
               </Text>
             </TouchableOpacity>
           ))}

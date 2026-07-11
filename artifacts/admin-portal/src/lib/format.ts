@@ -1,16 +1,22 @@
 import type { Field } from "./tables";
 
-export function formatTime(date: Date | string): string {
+// WCSG operations run on Central time. All displayed dates/times use this
+// zone (matches the server's PAYROLL_TIMEZONE) so the schedule reads the
+// same regardless of where the viewer's browser is located.
+export const BUSINESS_TIME_ZONE = "America/Chicago";
+
+export function formatTime(date: Date | string, timeZone: string = BUSINESS_TIME_ZONE): string {
   const d = typeof date === "string" ? new Date(date) : date;
   if (Number.isNaN(d.getTime())) return String(date);
   return new Intl.DateTimeFormat("en-GB", {
     hour: "2-digit",
     minute: "2-digit",
     hour12: false,
+    timeZone,
   }).format(d);
 }
 
-export function formatDateTime(date: Date | string): string {
+export function formatDateTime(date: Date | string, timeZone: string = BUSINESS_TIME_ZONE): string {
   const d = typeof date === "string" ? new Date(date) : date;
   if (Number.isNaN(d.getTime())) return String(date);
   return new Intl.DateTimeFormat("en-GB", {
@@ -20,6 +26,29 @@ export function formatDateTime(date: Date | string): string {
     hour: "2-digit",
     minute: "2-digit",
     hour12: false,
+    timeZone,
+  }).format(d);
+}
+
+export function formatDate(
+  date: Date | string,
+  options: Intl.DateTimeFormatOptions = { month: "short", day: "numeric", year: "numeric" },
+  timeZone: string = BUSINESS_TIME_ZONE,
+): string {
+  const d = typeof date === "string" ? new Date(date) : date;
+  if (Number.isNaN(d.getTime())) return String(date);
+  return new Intl.DateTimeFormat("en-US", { ...options, timeZone }).format(d);
+}
+
+/** Calendar day ("YYYY-MM-DD") of an instant in the business timezone. */
+export function dateKey(date: Date | string, timeZone: string = BUSINESS_TIME_ZONE): string {
+  const d = typeof date === "string" ? new Date(date) : date;
+  if (Number.isNaN(d.getTime())) return String(date);
+  return new Intl.DateTimeFormat("en-CA", {
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    timeZone,
   }).format(d);
 }
 
@@ -34,7 +63,9 @@ export function formatCell(value: unknown, field: Field): string {
     case "date": {
       const d = new Date(String(value));
       if (Number.isNaN(d.getTime())) return String(value);
-      return d.toLocaleDateString();
+      // Date-only columns (e.g. "2026-07-11") parse as UTC midnight; format
+      // in UTC so the literal calendar date shows regardless of viewer tz.
+      return d.toLocaleDateString("en-US", { timeZone: "UTC" });
     }
     case "boolean":
       return value ? "Yes" : "No";

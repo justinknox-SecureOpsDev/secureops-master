@@ -13,7 +13,7 @@ import {
   getGetEmployeeDashboardSummaryQueryKey,
 } from "@workspace/api-client-react";
 import * as Location from "expo-location";
-import { formatTime } from "@/utils/time";
+import { formatTime, formatDate, dateKey, addDaysToKey } from "@/utils/time";
 import { useQueryClient } from "@tanstack/react-query";
 import { Feather } from "@expo/vector-icons";
 import { LicenseLevelBadge, levelLabel } from "@/components/LicenseLevelBadge";
@@ -121,19 +121,16 @@ export default function EmployeeShiftsScreen() {
       })
     : shiftsUnsorted;
 
-  const dayKey = (d: Date) => {
-    const y = d.getFullYear();
-    const m = String(d.getMonth() + 1).padStart(2, "0");
-    const day = String(d.getDate()).padStart(2, "0");
-    return `${y}-${m}-${day}`;
-  };
+  // Day grouping uses the business timezone (America/Chicago), matching the
+  // Central-time dates rendered on each shift row.
+  const dayKey = (d: Date) => dateKey(d);
   const dayLabel = (d: Date) => {
-    const today = new Date();
-    const tomorrow = new Date();
-    tomorrow.setDate(today.getDate() + 1);
-    if (dayKey(d) === dayKey(today)) return "Today";
-    if (dayKey(d) === dayKey(tomorrow)) return "Tomorrow";
-    return d.toLocaleDateString([], { weekday: "long", day: "numeric", month: "short" });
+    const todayKey = dateKey(new Date());
+    const tomorrowKey = addDaysToKey(todayKey, 1);
+    const k = dayKey(d);
+    if (k === todayKey) return "Today";
+    if (k === tomorrowKey) return "Tomorrow";
+    return formatDate(d, { weekday: "long", day: "numeric", month: "short" });
   };
 
   // Group shifts by day so the list reads as "Today / Tomorrow / <date>"
@@ -457,7 +454,7 @@ export default function EmployeeShiftsScreen() {
                 <View style={styles.detailRow}>
                   <Feather name="calendar" size={13} color={colors.mutedForeground} />
                   <Text style={[styles.detailText, { color: colors.foreground, fontWeight: "600" }]} numberOfLines={1}>
-                    {start.toLocaleDateString([], { weekday: "short", day: "numeric", month: "short" })} · {formatTime(start)} – {formatTime(item.endTime)}
+                    {formatDate(start)} · {formatTime(start)} – {formatTime(item.endTime)}
                   </Text>
                 </View>
 

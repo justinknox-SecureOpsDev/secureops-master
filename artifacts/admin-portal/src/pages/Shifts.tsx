@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { api } from "@/lib/api";
-import { formatTime, formatDateTime } from "@/lib/format";
+import { formatTime, formatDateTime, dateKey } from "@/lib/format";
 import { useDeepLinkFocus, useFirstQueryParam } from "@/hooks/useDeepLinkFocus";
 import { getTable } from "@/lib/tables";
 import { RowFormDialog } from "@/components/RowFormDialog";
@@ -893,7 +893,7 @@ function ShiftRow({
 }) {
   const lvl = levelBadge(shift.requiredLicenseLevel);
   const filled = (shift.assignments ?? []).filter((a) => a.status === "accepted").length;
-  const sameDay = new Date(shift.startTime).toDateString() === new Date(shift.endTime).toDateString();
+  const sameDay = dateKey(shift.startTime) === dateKey(shift.endTime);
   return (
     <div
       ref={focusRef as React.Ref<HTMLDivElement> | undefined}
