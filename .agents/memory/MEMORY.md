@@ -66,3 +66,4 @@
 - [Drizzle push interactive prompt workaround](drizzle-push-interactive.md) — drizzle-kit push prompts interactively when adding a unique constraint to a table with rows; apply the SQL directly via executeSql (DROP old index, ALTER COLUMN, CREATE new index) then verify schema-drift passes.
 - [iPhone HEIC photo upload 415](iphone-heic-photo-upload.md) — iOS library picks with quality<1 upload raw HEIC (415); fix = expo-image-picker `preferredAssetRepresentationMode: Compatible` (OTA-safe) + server accept image/heic|heif.
 - [pnpm override crosses major version](pnpm-override-major-version-crossing.md) — unbounded override (no upper bound) can jump a transitive dep past its intended major, breaking peers (e.g. jsdom+undici); bound ranges & re-run tests, not just audit.
+- [chatRoomAccess timeout flake](chatroomaccess-timeout-flake.md) — times out (~29s vs 30s cap) under the full parallel test gate but passes alone; not a regression unless chat code changed.
