@@ -55,6 +55,7 @@ import { MandatoryPasswordChange } from "@/pages/MandatoryPasswordChange";
 import ClientUsers from "@/pages/ClientUsers";
 import CoverageRequests from "@/pages/CoverageRequests";
 import AnalyticsPage from "@/pages/Analytics";
+import EmployeeCompletenessPage from "@/pages/EmployeeCompleteness";
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -160,6 +161,7 @@ function Routed() {
           <Route path="/hr/invitations" component={InvitationsPage} />
           <Route path="/hr/client-users" component={ClientUsers} />
           <Route path="/hr/coverage-requests" component={CoverageRequests} />
+          <Route path="/hr/reports" component={EmployeeCompletenessPage} />
           <Route path="/payroll/board" component={PayrollBoardPage} />
           <Route path="/invoices/board" component={InvoiceBoardPage} />
           <Route path="/payroll/pay-run" component={PayRunPage} />

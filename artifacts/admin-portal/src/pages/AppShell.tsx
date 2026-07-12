@@ -160,6 +160,7 @@ export function buildNavGroups(isDispatcher: boolean): NavGroup[] {
       { href: "/hr/invitations", label: "Invitations", Icon: MailPlus },
       { href: "/hr/policies", label: "Policies", Icon: FileText },
       { href: "/tables/employees", label: "Employees", Icon: UsersIcon },
+      { href: "/hr/reports", label: "Employee Reports", Icon: BarChart3 },
     ],
   };
 

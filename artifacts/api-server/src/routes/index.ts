@@ -43,6 +43,7 @@ import schedulerAdminRouter from "./schedulerAdmin";
 import paymentDiscrepanciesRouter from "./paymentDiscrepancies";
 import analyticsRouter from "./analytics";
 import adminTasksRouter from "./adminTasks";
+import employeeReportsRouter from "./employeeReports";
 import { auditLogMiddleware } from "../lib/auditLog";
 
 const router: IRouter = Router();
@@ -69,6 +70,7 @@ router.use(incidentsRouter);
 router.use(licensesRouter);
 router.use(dashboardRouter);
 router.use(adminTasksRouter);
+router.use(employeeReportsRouter);
 router.use(chatRouter);
 router.use(liveOpsRouter);
 router.use(adminRouter);

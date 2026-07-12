@@ -38,6 +38,7 @@ describe("buildNavGroups", () => {
       "/hr/invitations",
       "/hr/policies",
       "/tables/employees",
+      "/hr/reports",
     ]);
   });
 
