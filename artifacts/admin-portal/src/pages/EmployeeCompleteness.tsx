@@ -5,9 +5,22 @@ import { formatDate, formatDateTime } from "@/lib/format";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { useIsMobile } from "@/hooks/use-mobile";
+import { useToast } from "@/hooks/use-toast";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+  AlertDialogTrigger,
+} from "@/components/ui/alert-dialog";
 import {
   RefreshCw, Download, ExternalLink, CheckCircle2, XCircle, AlertCircle,
-  Users, CreditCard, FileCheck, LogIn, Camera, Phone, ShieldCheck, DollarSign, UserCheck,
+  Users, CreditCard, FileCheck, LogIn, Camera, Phone, ShieldCheck, DollarSign,
+  Trash2, Mail,
 } from "lucide-react";
 
 type CompletenessRow = {
@@ -42,14 +55,14 @@ type CheckKey =
   | "hasHourlyRate";
 
 const CHECKS: { key: CheckKey; label: string; shortLabel: string; Icon: React.ElementType }[] = [
-  { key: "hasDirectDeposit",        label: "Direct deposit",        shortLabel: "DD",        Icon: CreditCard },
-  { key: "hasPolicyAcknowledgements", label: "Policy ack.",         shortLabel: "Policies",  Icon: FileCheck },
-  { key: "hasEverLoggedIn",         label: "Ever logged in",        shortLabel: "Login",     Icon: LogIn },
-  { key: "hasPhoto",                label: "Profile photo",         shortLabel: "Photo",     Icon: Camera },
-  { key: "hasEmergencyContact",     label: "Emergency contact",     shortLabel: "Emerg.",    Icon: AlertCircle },
-  { key: "hasRightToWork",          label: "Right to work",         shortLabel: "RTW",       Icon: ShieldCheck },
-  { key: "hasPhone",                label: "Phone number",          shortLabel: "Phone",     Icon: Phone },
-  { key: "hasHourlyRate",           label: "Hourly rate",           shortLabel: "Rate",      Icon: DollarSign },
+  { key: "hasDirectDeposit",          label: "Direct deposit",      shortLabel: "DD",       Icon: CreditCard },
+  { key: "hasPolicyAcknowledgements", label: "Policy ack.",         shortLabel: "Policies", Icon: FileCheck },
+  { key: "hasEverLoggedIn",           label: "Ever logged in",      shortLabel: "Login",    Icon: LogIn },
+  { key: "hasPhoto",                  label: "Profile photo",       shortLabel: "Photo",    Icon: Camera },
+  { key: "hasEmergencyContact",       label: "Emergency contact",   shortLabel: "Emerg.",   Icon: AlertCircle },
+  { key: "hasRightToWork",            label: "Right to work",       shortLabel: "RTW",      Icon: ShieldCheck },
+  { key: "hasPhone",                  label: "Phone number",        shortLabel: "Phone",    Icon: Phone },
+  { key: "hasHourlyRate",             label: "Hourly rate",         shortLabel: "Rate",     Icon: DollarSign },
 ];
 
 function Tick({ ok }: { ok: boolean }) {
@@ -80,8 +93,11 @@ function escapeCsv(v: string): string {
   return v;
 }
 
+type RowBusy = { deleting?: boolean; notifying?: boolean };
+
 export default function EmployeeCompletenessPage() {
   const isMobile = useIsMobile();
+  const { toast } = useToast();
   const [rows, setRows] = useState<CompletenessRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -89,6 +105,7 @@ export default function EmployeeCompletenessPage() {
   const [statusFilter, setStatusFilter] = useState<"all" | "active" | "pending" | "inactive">("all");
   const [incompleteOnly, setIncompleteOnly] = useState(false);
   const [activeCheckFilter, setActiveCheckFilter] = useState<CheckKey | null>(null);
+  const [busy, setBusy] = useState<Record<string, RowBusy>>({});
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -122,16 +139,60 @@ export default function EmployeeCompletenessPage() {
     return out;
   }, [rows, statusFilter, search, incompleteOnly, activeCheckFilter]);
 
-  // Summary counts: how many employees are missing each check
   const summary = useMemo(
-    () =>
-      CHECKS.map((c) => ({
-        ...c,
-        missing: rows.filter((r) => !r[c.key]).length,
-        total: rows.length,
-      })),
+    () => CHECKS.map((c) => ({ ...c, missing: rows.filter((r) => !r[c.key]).length, total: rows.length })),
     [rows],
   );
+
+  // ---- Actions ----
+
+  async function handleDelete(r: CompletenessRow) {
+    setBusy((b) => ({ ...b, [r.userId]: { ...b[r.userId], deleting: true } }));
+    try {
+      await api(`/admin/tables/users/${r.userId}`, { method: "DELETE" });
+      setRows((prev) => prev.filter((x) => x.userId !== r.userId));
+      toast({ title: "Employee deleted", description: `${r.firstName ?? ""} ${r.lastName ?? ""} has been removed.` });
+    } catch (e) {
+      toast({ title: "Delete failed", description: (e as Error).message, variant: "destructive" });
+    } finally {
+      setBusy((b) => ({ ...b, [r.userId]: { ...b[r.userId], deleting: false } }));
+    }
+  }
+
+  async function handleNotify(r: CompletenessRow) {
+    setBusy((b) => ({ ...b, [r.userId]: { ...b[r.userId], notifying: true } }));
+    try {
+      const res = await api<{
+        emailSent: boolean;
+        missingFields: string[];
+        to: string;
+        loginUrl: string | null;
+        skipped?: boolean;
+        reason?: string;
+      }>(`/admin/reports/employee-completeness/${r.userId}/notify`, { method: "POST" });
+
+      if (res.skipped) {
+        toast({ title: "Profile already complete", description: `${r.firstName ?? r.email} has no missing fields.` });
+      } else if (res.emailSent) {
+        toast({
+          title: "Reminder sent",
+          description: `Email sent to ${res.to} listing ${res.missingFields.length} missing item${res.missingFields.length === 1 ? "" : "s"}.`,
+        });
+      } else {
+        // Dev — email suppressed; show what would have been sent
+        toast({
+          title: "Email not sent (dev mode)",
+          description: `Would have emailed ${res.to} about: ${res.missingFields.join(", ")}`,
+        });
+      }
+    } catch (e) {
+      toast({ title: "Could not send reminder", description: (e as Error).message, variant: "destructive" });
+    } finally {
+      setBusy((b) => ({ ...b, [r.userId]: { ...b[r.userId], notifying: false } }));
+    }
+  }
+
+  // ---- CSV export ----
 
   function downloadCsv() {
     const headers = [
@@ -167,6 +228,75 @@ export default function EmployeeCompletenessPage() {
     a.remove();
     setTimeout(() => URL.revokeObjectURL(url), 1000);
   }
+
+  // ---- Row action buttons ----
+
+  function RowActions({ r }: { r: CompletenessRow }) {
+    const rowBusy = busy[r.userId] ?? {};
+    const mc = missingCount(r);
+    return (
+      <div className="flex items-center gap-1">
+        <Link href={`/personnel/${r.userId}`}>
+          <Button variant="ghost" size="sm" title="Open officer profile" aria-label="Open officer profile">
+            <ExternalLink className="w-3.5 h-3.5" />
+          </Button>
+        </Link>
+        {/* Send reminder — only shown when there are missing fields */}
+        {mc > 0 && (
+          <Button
+            variant="ghost"
+            size="sm"
+            title={`Send profile reminder email to ${r.email}`}
+            aria-label="Send profile reminder email"
+            disabled={rowBusy.notifying}
+            onClick={() => void handleNotify(r)}
+          >
+            {rowBusy.notifying
+              ? <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+              : <Mail className="w-3.5 h-3.5 text-brand-gold" />}
+          </Button>
+        )}
+        {/* Delete with confirmation */}
+        <AlertDialog>
+          <AlertDialogTrigger asChild>
+            <Button
+              variant="ghost"
+              size="sm"
+              title="Delete employee"
+              aria-label="Delete employee"
+              disabled={rowBusy.deleting}
+              className="text-red-500 hover:text-red-600 hover:bg-red-50"
+            >
+              {rowBusy.deleting
+                ? <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                : <Trash2 className="w-3.5 h-3.5" />}
+            </Button>
+          </AlertDialogTrigger>
+          <AlertDialogContent>
+            <AlertDialogHeader>
+              <AlertDialogTitle>Delete employee?</AlertDialogTitle>
+              <AlertDialogDescription>
+                This will permanently remove{" "}
+                <strong>{r.firstName} {r.lastName}</strong> ({r.email}) and all associated data.
+                This action cannot be undone.
+              </AlertDialogDescription>
+            </AlertDialogHeader>
+            <AlertDialogFooter>
+              <AlertDialogCancel>Cancel</AlertDialogCancel>
+              <AlertDialogAction
+                className="bg-red-600 hover:bg-red-700 text-white"
+                onClick={() => void handleDelete(r)}
+              >
+                Delete permanently
+              </AlertDialogAction>
+            </AlertDialogFooter>
+          </AlertDialogContent>
+        </AlertDialog>
+      </div>
+    );
+  }
+
+  // ---- Render ----
 
   return (
     <div className="flex flex-col h-full">
@@ -315,30 +445,16 @@ export default function EmployeeCompletenessPage() {
           <table className="w-full text-sm">
             <thead className="sticky top-0 bg-card z-10 border-b">
               <tr>
-                <th className="text-left px-4 py-2.5 font-semibold text-xs uppercase tracking-wide brand-navy whitespace-nowrap">
-                  Employee
-                </th>
-                <th className="text-left px-2 py-2.5 font-semibold text-xs uppercase tracking-wide brand-navy whitespace-nowrap">
-                  Status
-                </th>
+                <th className="text-left px-4 py-2.5 font-semibold text-xs uppercase tracking-wide brand-navy whitespace-nowrap">Employee</th>
+                <th className="text-left px-2 py-2.5 font-semibold text-xs uppercase tracking-wide brand-navy whitespace-nowrap">Status</th>
                 {CHECKS.map((c) => (
-                  <th
-                    key={c.key}
-                    className="text-center px-2 py-2.5 font-semibold text-xs uppercase tracking-wide brand-navy whitespace-nowrap"
-                    title={c.label}
-                  >
+                  <th key={c.key} className="text-center px-2 py-2.5 font-semibold text-xs uppercase tracking-wide brand-navy whitespace-nowrap" title={c.label}>
                     {c.shortLabel}
                   </th>
                 ))}
-                <th className="text-left px-2 py-2.5 font-semibold text-xs uppercase tracking-wide brand-navy whitespace-nowrap">
-                  Last Login
-                </th>
-                <th className="text-center px-4 py-2.5 font-semibold text-xs uppercase tracking-wide brand-navy">
-                  Missing
-                </th>
-                <th className="text-right px-4 py-2.5 font-semibold text-xs uppercase tracking-wide brand-navy">
-                  Actions
-                </th>
+                <th className="text-left px-2 py-2.5 font-semibold text-xs uppercase tracking-wide brand-navy whitespace-nowrap">Last Login</th>
+                <th className="text-center px-4 py-2.5 font-semibold text-xs uppercase tracking-wide brand-navy">Missing</th>
+                <th className="text-right px-4 py-2.5 font-semibold text-xs uppercase tracking-wide brand-navy">Actions</th>
               </tr>
             </thead>
             <tbody>
@@ -347,40 +463,27 @@ export default function EmployeeCompletenessPage() {
                 return (
                   <tr key={r.userId} className="border-b hover:bg-accent/30">
                     <td className="px-4 py-2.5">
-                      <div className="font-medium text-foreground">
-                        {r.firstName} {r.lastName}
-                      </div>
+                      <div className="font-medium text-foreground">{r.firstName} {r.lastName}</div>
                       <div className="text-xs text-muted-foreground truncate max-w-[200px]">{r.email}</div>
                     </td>
-                    <td className="px-2 py-2.5 whitespace-nowrap">
-                      <StatusBadge status={r.status} />
-                    </td>
+                    <td className="px-2 py-2.5 whitespace-nowrap"><StatusBadge status={r.status} /></td>
                     {CHECKS.map((c) => (
                       <td key={c.key} className="px-2 py-2.5 text-center">
                         <Tick ok={r[c.key]} />
                       </td>
                     ))}
                     <td className="px-2 py-2.5 whitespace-nowrap text-xs text-muted-foreground">
-                      {r.lastLoginAt ? formatDate(r.lastLoginAt) : (
-                        <span className="text-red-600 font-medium">Never</span>
-                      )}
+                      {r.lastLoginAt ? formatDate(r.lastLoginAt) : <span className="text-red-600 font-medium">Never</span>}
                     </td>
                     <td className="px-4 py-2.5 text-center">
                       {mc === 0 ? (
                         <span className="text-xs text-emerald-700 font-medium">Complete</span>
                       ) : (
-                        <span className={`text-xs font-semibold ${mc >= 5 ? "text-red-600" : mc >= 3 ? "text-amber-700" : "text-amber-600"}`}>
-                          {mc}
-                        </span>
+                        <span className={`text-xs font-semibold ${mc >= 5 ? "text-red-600" : mc >= 3 ? "text-amber-700" : "text-amber-600"}`}>{mc}</span>
                       )}
                     </td>
-                    <td className="px-4 py-2.5 text-right">
-                      <Link href={`/personnel/${r.userId}`}>
-                        <Button variant="ghost" size="sm" title="Open officer profile">
-                          <ExternalLink className="w-3.5 h-3.5 mr-1" />
-                          Profile
-                        </Button>
-                      </Link>
+                    <td className="px-2 py-2.5 text-right">
+                      <RowActions r={r} />
                     </td>
                   </tr>
                 );
@@ -398,9 +501,7 @@ export default function EmployeeCompletenessPage() {
                 <div key={r.userId} className="rounded-lg border bg-card shadow-sm p-3">
                   <div className="flex items-start justify-between gap-2 mb-2">
                     <div className="min-w-0">
-                      <div className="font-semibold text-foreground truncate">
-                        {r.firstName} {r.lastName}
-                      </div>
+                      <div className="font-semibold text-foreground truncate">{r.firstName} {r.lastName}</div>
                       <div className="text-xs text-muted-foreground truncate">{r.email}</div>
                     </div>
                     <div className="flex flex-col items-end gap-1 shrink-0">
@@ -408,9 +509,7 @@ export default function EmployeeCompletenessPage() {
                       {mc === 0 ? (
                         <span className="text-[10px] text-emerald-700 font-medium">Complete</span>
                       ) : (
-                        <span className={`text-[10px] font-semibold ${mc >= 5 ? "text-red-600" : "text-amber-700"}`}>
-                          {mc} missing
-                        </span>
+                        <span className={`text-[10px] font-semibold ${mc >= 5 ? "text-red-600" : "text-amber-700"}`}>{mc} missing</span>
                       )}
                     </div>
                   </div>
@@ -425,13 +524,8 @@ export default function EmployeeCompletenessPage() {
                   <div className="text-xs text-muted-foreground mb-2">
                     Last login: {r.lastLoginAt ? formatDate(r.lastLoginAt) : <span className="text-red-600 font-medium">Never</span>}
                   </div>
-                  <div className="flex justify-end pt-1 border-t">
-                    <Link href={`/personnel/${r.userId}`}>
-                      <Button variant="ghost" size="sm">
-                        <ExternalLink className="w-3.5 h-3.5 mr-1" />
-                        Profile
-                      </Button>
-                    </Link>
+                  <div className="flex justify-end gap-1 pt-1 border-t">
+                    <RowActions r={r} />
                   </div>
                 </div>
               );
