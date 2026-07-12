@@ -85,8 +85,15 @@ export default function CreateShiftScreen() {
 
   const handleCreate = async () => {
     const ratesRequired = !isSiteManager;
-    if (!form.title || !form.siteId || !form.startTime || !form.endTime || (ratesRequired && (!form.payRate || !form.billRate))) {
-      Alert.alert("Missing Fields", ratesRequired ? "Title, site, times, pay rate and bill rate are required." : "Title, site and times are required.");
+    const missing: string[] = [];
+    if (!form.title.trim()) missing.push("Shift title");
+    if (!form.siteId) missing.push(form.clientId ? "Site" : "Client and site");
+    if (!form.startTime) missing.push("Start time");
+    if (!form.endTime) missing.push("End time");
+    if (ratesRequired && !form.payRate) missing.push("Officer pay rate");
+    if (ratesRequired && !form.billRate) missing.push("Client bill rate");
+    if (missing.length > 0) {
+      Alert.alert("Missing Fields", `Please fill in: ${missing.join(", ")}.`);
       return;
     }
     try {

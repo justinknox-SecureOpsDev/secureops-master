@@ -100,12 +100,18 @@ export default function ShiftDetailScreen() {
   const reqLevel = (shift as any)?.requiredLicenseLevel ?? 2;
   const headcount = (shift as any)?.headcount ?? 1;
   const unassignedAll = (allEmployees ?? []).filter((e) => !assignedIds.has(e.id));
-  // Effective clearance mirrors the server's eligibility helper: a licensed
-  // officer's level is their highest unexpired licence; support staff carry a
-  // baseline of 1 ("Support / no licence required"); higher levels cover lower.
-  // Filtering on raw maxLicenseLevel alone wrongly hid support / non-licensed
-  // staff from level-1 (Support) shifts.
-  const effLevel = (e: any) => Math.max(e.maxLicenseLevel ?? 0, e.position === "support_staff" ? 1 : 0);
+  // Mirror the server's eligibility helper exactly:
+  //   GREATEST(highest unexpired licence level, position baseline, BASE_ELIGIBILITY_LEVEL)
+  // BASE_ELIGIBILITY_LEVEL = 2: every worker-role employee is eligible for
+  // unarmed (≤ 2) shifts regardless of whether they hold a licence. Support
+  // staff also carry a position baseline of 1 (subsumed by the floor, but kept
+  // for parity). Armed (3) and L4/PPO (4) still require the actual licence.
+  const BASE_EFF_LEVEL = 2;
+  const effLevel = (e: any) => Math.max(
+    e.maxLicenseLevel ?? 0,
+    e.position === "support_staff" ? 1 : 0,
+    BASE_EFF_LEVEL,
+  );
   const eligibleAll = unassignedAll.filter((e: any) => effLevel(e) >= reqLevel);
   const ineligibleAll = unassignedAll.filter((e: any) => effLevel(e) < reqLevel);
 
