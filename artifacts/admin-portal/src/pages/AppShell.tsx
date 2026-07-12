@@ -439,7 +439,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   };
 
   return (
-    <div className="flex flex-col h-screen w-full overflow-hidden bg-background">
+    <div className="flex flex-col h-dvh w-full overflow-hidden bg-background">
       <header className="shrink-0 bg-sidebar text-sidebar-foreground border-b border-sidebar-border">
         <div className="flex items-center gap-2 px-3 sm:px-4 py-2 border-b border-sidebar-border/60">
           <Button
