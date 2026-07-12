@@ -1,5 +1,5 @@
 import { Router, type IRouter } from "express";
-import { desc, eq } from "drizzle-orm";
+import { and, desc, eq, ne } from "drizzle-orm";
 import { db, payrollEntriesTable, sitesTable } from "@workspace/db";
 import { requireAuth } from "../middlewares/auth";
 
@@ -37,7 +37,12 @@ router.get("/me/payroll", requireAuth, async (req, res): Promise<void> => {
     })
     .from(payrollEntriesTable)
     .leftJoin(sitesTable, eq(sitesTable.id, payrollEntriesTable.siteId))
-    .where(eq(payrollEntriesTable.employeeId, userId))
+    // Archived board buckets are an admin bookkeeping state, not pay —
+    // they must never appear as paystubs or count toward YTD/lifetime.
+    .where(and(
+      eq(payrollEntriesTable.employeeId, userId),
+      ne(payrollEntriesTable.status, "archived"),
+    ))
     .orderBy(desc(payrollEntriesTable.periodStart));
 
   // 1099 contractors — no tax is withheld; net always equals gross. Normalise on
