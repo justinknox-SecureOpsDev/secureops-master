@@ -396,22 +396,25 @@ export function RowFormDialog({
   const firstFocusableKey = visibleFields[0]?.key ?? null;
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-2xl max-h-[90dvh] overflow-y-auto">
-        <DialogHeader>
-          <DialogTitle>
-            {initial ? `Edit ${singularize(descriptor.label)}` : `Add ${singularize(descriptor.label)}`}
-          </DialogTitle>
-          <DialogDescription className="sr-only">
-            {initial
-              ? `Edit this ${singularize(descriptor.label).toLowerCase()}. Required fields are marked.`
-              : `Create a new ${singularize(descriptor.label).toLowerCase()}. Required fields are marked.`}
-          </DialogDescription>
-        </DialogHeader>
+      <DialogContent className="max-w-2xl flex flex-col p-0 gap-0 max-h-[90dvh]">
+        <div className="shrink-0 px-4 pt-4 pb-2 sm:px-6 sm:pt-6">
+          <DialogHeader>
+            <DialogTitle>
+              {initial ? `Edit ${singularize(descriptor.label)}` : `Add ${singularize(descriptor.label)}`}
+            </DialogTitle>
+            <DialogDescription className="sr-only">
+              {initial
+                ? `Edit this ${singularize(descriptor.label).toLowerCase()}. Required fields are marked.`
+                : `Create a new ${singularize(descriptor.label).toLowerCase()}. Required fields are marked.`}
+            </DialogDescription>
+          </DialogHeader>
+        </div>
         <form
           id={formId}
           className="contents"
           onSubmit={(e) => { e.preventDefault(); if (!saving) submit(); }}
         >
+        <div className="flex-1 min-h-0 overflow-y-auto overscroll-contain px-4 sm:px-6">
         <div className="space-y-5 py-2">
           {(() => {
             // Group fields into sections in declared order. A field's `section`
@@ -555,6 +558,8 @@ export function RowFormDialog({
         {descriptor.name === "employees" && initial && (initial as { userId?: string }).userId && (
           <RecentChangesPanel employeeUserId={String((initial as { userId: string }).userId)} />
         )}
+        </div>
+        <div className="shrink-0 px-4 pb-4 pt-2 sm:px-6 sm:pb-6">
         <DialogFooter>
           {initial && descriptor.name === "employees" && (
             <Button
@@ -628,6 +633,7 @@ export function RowFormDialog({
             {saving ? "Saving…" : initial ? "Save changes" : "Create"}
           </Button>
         </DialogFooter>
+        </div>
         </form>
       </DialogContent>
     </Dialog>

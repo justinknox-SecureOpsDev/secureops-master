@@ -188,14 +188,16 @@ export function ShiftDialog({ open, onOpenChange, initial, onSaved }: Props) {
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-2xl max-h-[90dvh] overflow-y-auto">
-        <DialogHeader>
-          <DialogTitle>{isEdit ? "Edit shift" : "New shift"}</DialogTitle>
-          <DialogDescription>
-            Pay and bill rates default to this site's rate card for the chosen license level. Override any field below for a one-off shift.
-          </DialogDescription>
-        </DialogHeader>
-
+      <DialogContent className="max-w-2xl flex flex-col p-0 gap-0 max-h-[90dvh]">
+        <div className="shrink-0 px-4 pt-4 pb-2 sm:px-6 sm:pt-6">
+          <DialogHeader>
+            <DialogTitle>{isEdit ? "Edit shift" : "New shift"}</DialogTitle>
+            <DialogDescription>
+              Pay and bill rates default to this site's rate card for the chosen license level. Override any field below for a one-off shift.
+            </DialogDescription>
+          </DialogHeader>
+        </div>
+        <div className="flex-1 min-h-0 overflow-y-auto overscroll-contain px-4 sm:px-6">
         <div className="space-y-4 py-2">
           <div>
             <Label htmlFor="shift-title">Title</Label>
@@ -396,13 +398,15 @@ export function ShiftDialog({ open, onOpenChange, initial, onSaved }: Props) {
             </div>
           )}
         </div>
-
-        <DialogFooter>
-          <Button variant="ghost" onClick={() => onOpenChange(false)} disabled={submitting}>Cancel</Button>
-          <Button onClick={submit} disabled={submitting}>
-            {submitting ? "Saving…" : isEdit ? "Save changes" : "Create shift"}
-          </Button>
-        </DialogFooter>
+        </div>
+        <div className="shrink-0 px-4 pb-4 pt-2 sm:px-6 sm:pb-6">
+          <DialogFooter>
+            <Button variant="ghost" onClick={() => onOpenChange(false)} disabled={submitting}>Cancel</Button>
+            <Button onClick={submit} disabled={submitting}>
+              {submitting ? "Saving…" : isEdit ? "Save changes" : "Create shift"}
+            </Button>
+          </DialogFooter>
+        </div>
       </DialogContent>
     </Dialog>
   );

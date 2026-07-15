@@ -186,17 +186,19 @@ export function RepeatingShiftDialog({
 
   return (
     <Dialog open={open} onOpenChange={(b) => { if (!submitting) onOpenChange(b); }}>
-      <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
-        <DialogHeader>
-          <DialogTitle className="flex items-center gap-2">
-            <Repeat className="w-5 h-5 text-brand-gold" />
-            Add Repeating Shift
-          </DialogTitle>
-          <DialogDescription>
-            Generate a series of shifts on selected days of the week between two dates.
-          </DialogDescription>
-        </DialogHeader>
-
+      <DialogContent className="max-w-2xl flex flex-col p-0 gap-0 max-h-[90dvh]">
+        <div className="shrink-0 px-4 pt-4 pb-2 sm:px-6 sm:pt-6">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <Repeat className="w-5 h-5 text-brand-gold" />
+              Add Repeating Shift
+            </DialogTitle>
+            <DialogDescription>
+              Generate a series of shifts on selected days of the week between two dates.
+            </DialogDescription>
+          </DialogHeader>
+        </div>
+        <div className="flex-1 min-h-0 overflow-y-auto overscroll-contain px-4 sm:px-6">
         <div className="space-y-5 py-2">
           <div className="grid grid-cols-2 gap-3">
             <div className="col-span-2">
@@ -370,17 +372,19 @@ export function RepeatingShiftDialog({
 
           {error && <div className="text-sm text-destructive">{error}</div>}
         </div>
-
-        <DialogFooter>
-          <Button variant="outline" onClick={() => onOpenChange(false)} disabled={submitting}>Cancel</Button>
-          <Button
-            onClick={handleSubmit}
-            disabled={submitting || occurrenceEstimate === 0}
-            className="bg-brand-navy text-white hover:opacity-90"
-          >
-            {submitting ? "Creating…" : `Create ${occurrenceEstimate} shift${occurrenceEstimate === 1 ? "" : "s"}`}
-          </Button>
-        </DialogFooter>
+        </div>
+        <div className="shrink-0 px-4 pb-4 pt-2 sm:px-6 sm:pb-6">
+          <DialogFooter>
+            <Button variant="outline" onClick={() => onOpenChange(false)} disabled={submitting}>Cancel</Button>
+            <Button
+              onClick={handleSubmit}
+              disabled={submitting || occurrenceEstimate === 0}
+              className="bg-brand-navy text-white hover:opacity-90"
+            >
+              {submitting ? "Creating…" : `Create ${occurrenceEstimate} shift${occurrenceEstimate === 1 ? "" : "s"}`}
+            </Button>
+          </DialogFooter>
+        </div>
       </DialogContent>
     </Dialog>
   );
