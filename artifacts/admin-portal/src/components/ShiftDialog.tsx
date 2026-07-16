@@ -188,7 +188,7 @@ export function ShiftDialog({ open, onOpenChange, initial, onSaved }: Props) {
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-2xl flex flex-col p-0 gap-0 max-h-[90dvh]">
+      <DialogContent className="max-w-2xl flex flex-col p-0 gap-0 max-h-[90dvh] overflow-hidden">
         <div className="shrink-0 px-4 pt-4 pb-2 sm:px-6 sm:pt-6">
           <DialogHeader>
             <DialogTitle>{isEdit ? "Edit shift" : "New shift"}</DialogTitle>
