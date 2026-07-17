@@ -44,6 +44,7 @@ import paymentDiscrepanciesRouter from "./paymentDiscrepancies";
 import analyticsRouter from "./analytics";
 import adminTasksRouter from "./adminTasks";
 import employeeReportsRouter from "./employeeReports";
+import controlPlaneRouter from "./controlPlane";
 import { auditLogMiddleware } from "../lib/auditLog";
 
 const router: IRouter = Router();
@@ -100,5 +101,6 @@ router.use(schedulerWebhookRouter);
 router.use(schedulerAdminRouter);
 router.use(paymentDiscrepanciesRouter);
 router.use(analyticsRouter);
+router.use(controlPlaneRouter);
 
 export default router;

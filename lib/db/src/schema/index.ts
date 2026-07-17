@@ -53,3 +53,5 @@ export * from "./subcontractorTimeEntries";
 export * from "./protectionDetails";
 export * from "./protectionPersons";
 export * from "./protectionDestinations";
+export * from "./platformBrandConfig";
+export * from "./featureFlags";

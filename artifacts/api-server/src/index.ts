@@ -9,6 +9,7 @@ import { seedChatRooms } from "./lib/seedChatRooms";
 import { seedRadioChannels } from "./lib/seedRadioChannels";
 import { startScheduledJobs } from "./lib/scheduledJobs";
 import { backfillSiteRateLabels, repairInsoSocialShiftEndTime, migrateLeadRoleToSiteManager } from "./lib/dataRepairs";
+import { loadBrandFromDb } from "./lib/brandConfig";
 
 const rawPort = process.env["PORT"];
 
@@ -77,6 +78,13 @@ async function start(): Promise<void> {
     logger.info("Lead -> site_manager role migration complete");
   } catch (err) {
     logger.error({ err }, "Failed to migrate lead role to site_manager — starting anyway; legacy 'lead' users may be mis-authorized until the next boot");
+  }
+
+  try {
+    await loadBrandFromDb();
+    logger.info("Platform brand config loaded from DB");
+  } catch (err) {
+    logger.error({ err }, "Failed to load brand config from DB — using env/defaults");
   }
 
   server.listen(port, () => {
