@@ -289,7 +289,7 @@ async function loadPerOfficer(range: AnalyticsRange): Promise<{
       shiftsCompleted: sql<number>`COUNT(DISTINCT CASE WHEN ${timeEntriesTable.id} IS NOT NULL THEN ${shiftAssignmentsTable.shiftId} END)::int`,
       noShows: sql<number>`COUNT(DISTINCT CASE WHEN ${timeEntriesTable.id} IS NULL THEN ${shiftAssignmentsTable.shiftId} END)::int`,
       hoursScheduled: sql<number>`COALESCE(SUM(DISTINCT EXTRACT(EPOCH FROM (${shiftsTable.endTime} - ${shiftsTable.startTime}))/3600), 0)::float`,
-      hoursWorked: sql<number>`COALESCE(SUM(EXTRACT(EPOCH FROM (COALESCE(${timeEntriesTable.clockOutTime}, NOW()) - ${timeEntriesTable.clockInTime}))/3600) FILTER (WHERE ${timeEntriesTable.id} IS NOT NULL), 0)::float`,
+      hoursWorked: sql<number>`COALESCE(SUM(EXTRACT(EPOCH FROM (COALESCE(${timeEntriesTable.clockOutTime}, LEAST(${shiftsTable.endTime}, NOW())) - ${timeEntriesTable.clockInTime}))/3600) FILTER (WHERE ${timeEntriesTable.id} IS NOT NULL), 0)::float`,
       // Avg minutes late: if clocked in > shift start + 5 min grace
       lateCount: sql<number>`COUNT(DISTINCT CASE WHEN ${timeEntriesTable.clockInTime} > ${shiftsTable.startTime} + INTERVAL '5 minutes' THEN ${shiftAssignmentsTable.shiftId} END)::int`,
       totalLateMinutes: sql<number>`COALESCE(SUM(EXTRACT(EPOCH FROM (${timeEntriesTable.clockInTime} - ${shiftsTable.startTime}))/60) FILTER (WHERE ${timeEntriesTable.clockInTime} > ${shiftsTable.startTime} + INTERVAL '5 minutes'), 0)::float`,

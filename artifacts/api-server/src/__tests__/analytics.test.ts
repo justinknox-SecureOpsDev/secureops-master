@@ -62,6 +62,7 @@ type Ctx = {
   officerC: string; // 06:50 next morning — late (ad-hoc, no assignment)
   officerD: string; // accepted assignment, never clocked in — no-show
   officerE: string; // exactly start+grace — punctual (boundary)
+  officerF: string; // clocked in but never clocked out — open entry on past shift
 };
 const ctx = {} as Ctx;
 
@@ -90,6 +91,7 @@ beforeAll(async () => {
   ctx.officerC = await mkUser("employee", "c", "Charlie");
   ctx.officerD = await mkUser("employee", "d", "Delta");
   ctx.officerE = await mkUser("employee", "e", "Echo");
+  ctx.officerF = await mkUser("employee", "f", "Foxtrot");
   ctx.adminToken = signToken({ userId: ctx.adminId, email: `${TAG}-admin@example.test`, role: "admin" });
   ctx.employeeToken = signToken({ userId: ctx.officerA, email: `${TAG}-a@example.test`, role: "employee" });
 
@@ -114,13 +116,13 @@ beforeAll(async () => {
       endTime: SHIFT_END,
       payRate: "20.00",
       billRate: "40.00",
-      headcount: 5, // 4 accepted below → 1 unfilled slot on an ended shift
+      headcount: 6, // 5 accepted below → 1 unfilled slot on an ended shift
     })
     .returning({ id: shiftsTable.id });
   ctx.shiftId = shift.id;
 
   await db.insert(shiftAssignmentsTable).values(
-    [ctx.officerA, ctx.officerB, ctx.officerD, ctx.officerE].map((employeeId) => ({
+    [ctx.officerA, ctx.officerB, ctx.officerD, ctx.officerE, ctx.officerF].map((employeeId) => ({
       shiftId: ctx.shiftId,
       employeeId,
       status: "accepted",
@@ -147,6 +149,18 @@ beforeAll(async () => {
     // Exactly start + grace → still punctual (boundary is inclusive).
     entry(ctx.officerE, new Date(SHIFT_START.getTime() + PUNCTUALITY_GRACE_MS).toISOString(), "2023-06-06T08:05:00.000Z", "4.00"),
   ]);
+
+  // officerF: open entry (no clockOut) on the already-ended shift — used by the
+  // forgotten-clock-out regression test.
+  await db.insert(timeEntriesTable).values({
+    shiftId: ctx.shiftId,
+    siteId: ctx.siteId,
+    employeeId: ctx.officerF,
+    clockInTime: SHIFT_START, // clocked in right at shift start
+    clockOutTime: null,       // forgot to clock out
+    hoursWorked: "0",         // stored value irrelevant — analytics recomputes from times
+    approvalStatus: "approved",
+  });
 
   await db.insert(incidentsTable).values({
     shiftId: ctx.shiftId,
@@ -185,19 +199,20 @@ describe("computeAnalyticsSummary", () => {
     const s = await computeAnalyticsSummary(range());
 
     // 8 + 7.5 + 0.25 + 4 = 19.75h @ bill 40 / pay 20.
+    // Foxtrot's open entry contributes 0 to the summary (stored hoursWorked="0").
     expect(s.hoursWorked).toBe(19.75);
     expect(s.revenue).toBe(790);
     expect(s.laborCost).toBe(395);
     expect(s.pnl).toBe(395);
     expect(s.marginPct).toBe(50);
 
-    // One 8h shift × headcount 5 = 40 scheduled hours.
-    expect(s.hoursScheduled).toBe(40);
-    expect(s.coveragePct).toBe(49.4); // 19.75 / 40
+    // One 8h shift × headcount 6 = 48 scheduled hours.
+    expect(s.hoursScheduled).toBe(48);
+    expect(s.coveragePct).toBe(41.1); // 19.75 / 48
 
     // Delta accepted but never produced a time entry on the ended shift.
     expect(s.noShows).toBe(1);
-    // 4 accepted < headcount 5 on an ended shift.
+    // 5 accepted < headcount 6 on an ended shift.
     expect(s.unfilledShifts).toBe(1);
 
     expect(s.incidents).toEqual({
@@ -226,7 +241,7 @@ describe("computeAnalyticsSummary", () => {
       siteName: `${TAG}-site`,
       revenue: 790,
       hoursWorked: 19.75,
-      coveragePct: 49.4,
+      coveragePct: 41.1,
     });
   });
 
@@ -257,8 +272,9 @@ describe("computeAnalyticsOfficers — overnight punctuality", () => {
 
   it("aggregates hours, completed shifts, incidents and weekly trend per officer", async () => {
     const rows = await computeAnalyticsOfficers(range());
-    // Sorted by hours desc.
-    expect(rows.map((r) => r.name.split(" ")[0])).toEqual(["Alpha", "Bravo", "Echo", "Charlie"]);
+    // Sorted by hours desc. Foxtrot's open entry has stored hoursWorked="0",
+    // so priceEntry returns 0h and Foxtrot sorts last.
+    expect(rows.map((r) => r.name.split(" ")[0])).toEqual(["Alpha", "Bravo", "Echo", "Charlie", "Foxtrot"]);
 
     const alpha = rows[0]!;
     expect(alpha.hoursWorked).toBe(8);
@@ -266,6 +282,22 @@ describe("computeAnalyticsOfficers — overnight punctuality", () => {
     expect(alpha.incidentsFiled).toBe(1);
     expect(alpha.trend).toHaveLength(1);
     expect(alpha.trend[0]).toEqual({ weekStart: "2023-06-05", hoursWorked: 8 });
+  });
+});
+
+describe("forgotten clock-out: hoursWorked bounded by shift endTime", () => {
+  it("open entry on a past shift is capped at shift endTime in the per-officer performance query", async () => {
+    // The per-officer performance SQL (loadPerOfficer, consumed by computeAnalyticsSummary)
+    // used to read COALESCE(clockOut, NOW()), so Foxtrot's forgotten clock-out on the
+    // 8h shift (ended 2023-06-06) would grow to ~(NOW - clockIn) >> 8h.
+    // After the fix (LEAST(shiftEnd, NOW())), it must be exactly 8h.
+    const s = await computeAnalyticsSummary(range());
+    const foxtrot = s.perOfficer.find((r) => r.firstName === "Foxtrot");
+
+    expect(foxtrot).toBeDefined();
+    // Without the fix this would be thousands of hours (NOW() keeps growing).
+    expect(foxtrot!.hoursWorked).toBeCloseTo(8, 1);
+    expect(foxtrot!.hoursWorked).toBeLessThanOrEqual(8);
   });
 });
 
