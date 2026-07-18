@@ -89,3 +89,9 @@ id = "VDbINOe48afc60rDzfEU3"
 uri = "file://docs/new-customer-setup-runbook.md"
 type = "text"
 title = "New Customer Setup Runbook"
+
+[[outputs]]
+id = "fzVgt9AWcrYT4wo4peRuR"
+uri = "file://docs/new-customer-setup-runbook.pdf"
+type = "pdf"
+title = "New Customer Setup Runbook (PDF)"
