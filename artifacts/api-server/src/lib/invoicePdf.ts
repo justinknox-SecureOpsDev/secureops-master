@@ -3,6 +3,9 @@ import type { Readable } from "node:stream";
 import { brand } from "./brandConfig";
 import { drawBrandHeader } from "./pdfHeader";
 
+const NAVY  = brand.colorNavy;
+const GOLD  = brand.colorGold;
+const CREAM = brand.colorCream;
 const MUTED = "#666666";
 const TEXT  = "#1a1a1a";
 const LIGHT = "#f7f7f7";
@@ -35,10 +38,19 @@ export type InvoicePdfPayload = {
   buffer: () => Promise<Buffer>;
 };
 
+// Date-only values (pg `date`, "YYYY-MM-DD": periodStart/periodEnd/dueDate)
+// render the literal calendar day via UTC; real timestamps (createdAt) render
+// in Central time (WCSG business timezone).
+const DATE_ONLY_RE = /^\d{4}-\d{2}-\d{2}$/;
+
 const fmtDate = (d: string | Date | null): string => {
   if (!d) return "—";
-  return new Date(d).toLocaleDateString("en-US", {
+  const isDateOnly = typeof d === "string" && DATE_ONLY_RE.test(d);
+  const date = new Date(isDateOnly ? `${d}T00:00:00Z` : d);
+  if (Number.isNaN(date.getTime())) return String(d);
+  return date.toLocaleDateString("en-US", {
     year: "numeric", month: "long", day: "numeric",
+    timeZone: isDateOnly ? "UTC" : "America/Chicago",
   });
 };
 
@@ -48,11 +60,11 @@ const fmtUsd = (n: string | number | null): string => {
 };
 
 function sectionHeader(doc: PDFKit.PDFDocument, label: string): void {
-  doc.fillColor(brand.colorNavy).font("Helvetica-Bold").fontSize(9)
+  doc.fillColor(NAVY).font("Helvetica-Bold").fontSize(9)
     .text(label.toUpperCase(), 56, doc.y, { characterSpacing: 0.5 });
   const lineY = doc.y + 2;
   doc.moveTo(56, lineY).lineTo(doc.page.width - 56, lineY)
-    .strokeColor(brand.colorGold).lineWidth(0.7).stroke();
+    .strokeColor(GOLD).lineWidth(0.7).stroke();
   doc.moveDown(0.6);
 }
 
@@ -108,7 +120,7 @@ export function buildInvoicePdf(inv: InvoicePdfInput): InvoicePdfPayload {
   const boxW = 200;
   const boxX = W - 56 - boxW;
   doc.rect(boxX, boxY, boxW, 96).fill(LIGHT);
-  doc.moveTo(boxX, boxY).lineTo(boxX + boxW, boxY).strokeColor(brand.colorGold).lineWidth(1.5).stroke();
+  doc.moveTo(boxX, boxY).lineTo(boxX + boxW, boxY).strokeColor(GOLD).lineWidth(1.5).stroke();
 
   const metaRows: Array<[string, string]> = [
     ["Invoice #",   inv.invoiceNumber],
@@ -168,10 +180,10 @@ export function buildInvoicePdf(inv: InvoicePdfInput): InvoicePdfPayload {
   const totX = W - 56 - 200;
   const addTotalRow = (label: string, value: string, bold = false) => {
     const ry = doc.y;
-    doc.fillColor(bold ? brand.colorNavy : MUTED)
+    doc.fillColor(bold ? NAVY : MUTED)
       .font(bold ? "Helvetica-Bold" : "Helvetica").fontSize(bold ? 10 : 9)
       .text(label, totX, ry, { width: 120, align: "right" });
-    doc.fillColor(bold ? brand.colorNavy : TEXT)
+    doc.fillColor(bold ? NAVY : TEXT)
       .font(bold ? "Helvetica-Bold" : "Helvetica").fontSize(bold ? 10 : 9)
       .text(value, totX + 124, ry, { width: 76, align: "right" });
     doc.y = ry + (bold ? 14 : 13);
@@ -185,11 +197,11 @@ export function buildInvoicePdf(inv: InvoicePdfInput): InvoicePdfPayload {
   if (tax > 0) addTotalRow("Tax", fmtUsd(tax));
   doc.moveDown(0.3);
   const totalBoxY = doc.y - 4;
-  doc.rect(totX - 10, totalBoxY, 210, 20).fill(brand.colorNavy);
+  doc.rect(totX - 10, totalBoxY, 210, 20).fill(NAVY);
   doc.y = totalBoxY + 4;
-  doc.fillColor(brand.colorCream).font("Helvetica-Bold").fontSize(9)
+  doc.fillColor(CREAM).font("Helvetica-Bold").fontSize(9)
     .text("TOTAL DUE", totX, doc.y, { width: 120, align: "right" });
-  doc.fillColor(brand.colorGold).font("Helvetica-Bold").fontSize(11)
+  doc.fillColor(GOLD).font("Helvetica-Bold").fontSize(11)
     .text(fmtUsd(total), totX + 124, totalBoxY + 4, { width: 76, align: "right" });
   doc.y = totalBoxY + 24;
 
@@ -204,9 +216,9 @@ export function buildInvoicePdf(inv: InvoicePdfInput): InvoicePdfPayload {
   // ── Payment footer ────────────────────────────────────────────────────────
   doc.moveDown(1.5);
   if (doc.y > doc.page.height - 90) doc.addPage();
-  doc.rect(56, doc.y, W - 112, 48).fill(brand.colorCream);
+  doc.rect(56, doc.y, W - 112, 48).fill(CREAM);
   const ftY = doc.y + 10;
-  doc.fillColor(brand.colorNavy).font("Helvetica-Bold").fontSize(9)
+  doc.fillColor(NAVY).font("Helvetica-Bold").fontSize(9)
     .text("Payment information", 66, ftY);
   doc.fillColor(MUTED).font("Helvetica").fontSize(8)
     .text(
@@ -218,7 +230,7 @@ export function buildInvoicePdf(inv: InvoicePdfInput): InvoicePdfPayload {
   // Page footer
   const pfY = doc.page.height - 36;
   doc.fillColor(MUTED).font("Helvetica").fontSize(7.5).text(
-    `Generated ${new Date().toLocaleString()}  ·  ${brand.companyName}  ·  Invoice ${inv.invoiceNumber}`,
+    `Generated ${new Date().toLocaleString("en-US", { timeZone: "America/Chicago" })}  ·  ${brand.companyName}  ·  Invoice ${inv.invoiceNumber}`,
     56, pfY, { width: W - 112, align: "center", lineBreak: false },
   );
 

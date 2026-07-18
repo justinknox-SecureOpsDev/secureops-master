@@ -406,16 +406,16 @@ export function DashboardPage() {
             />
             <StatCard
               label="Profit"
-              value={finLoading ? "—" : fmtUSD(fin?.pnl ?? 0)}
-              sub={fin && fin.marginPct !== null ? `${fmtPct(fin.marginPct)} margin` : undefined}
+              value={finLoading ? "—" : fmtUSD(fin?.profit ?? 0)}
+              sub={fin ? `${fmtPct(fin.marginPct)} margin` : undefined}
               icon={DollarSign}
               href="/analytics"
-              colorClass={fin && fin.pnl < 0 ? "text-red-600" : "text-emerald-600"}
+              colorClass={fin && fin.profit < 0 ? "text-red-600" : "text-emerald-600"}
             />
             <StatCard
               label="Hours worked"
               value={finLoading ? "—" : `${(fin?.hoursWorked ?? 0).toFixed(1)} h`}
-              sub={fin && fin.coveragePct !== null ? `${fmtPct(fin.coveragePct)} shift coverage` : undefined}
+              sub={fin ? `${fmtPct(fin.coveragePct)} shift coverage` : undefined}
               icon={Clock}
               href="/analytics"
             />

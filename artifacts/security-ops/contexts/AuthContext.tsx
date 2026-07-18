@@ -30,18 +30,6 @@ const AuthContext = createContext<AuthContextType | null>(null);
 export const AUTH_TOKEN_KEY = "auth_token";
 export const AUTH_USER_KEY = "auth_user";
 
-/**
- * Bridge so a provider that sits ABOVE AuthProvider (OrgProvider, which must
- * wrap it) can trigger a FULL auth teardown — including the in-memory React
- * state (user/token/awaitingBiometric) it can't reach through context. The
- * mounted AuthProvider registers its logout() here; runAuthLogout() is a no-op
- * if no provider is mounted (callers should still clear storage defensively).
- */
-let runtimeLogout: (() => Promise<void>) | null = null;
-export async function runAuthLogout(): Promise<void> {
-  if (runtimeLogout) await runtimeLogout();
-}
-
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<User | null>(null);
   const [token, setTokenState] = useState<string | null>(null);
@@ -143,13 +131,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setUnauthorizedHandler(() => {
       void logout();
     });
-    // Expose logout to providers above us (OrgProvider) so an org switch can
-    // run a full auth teardown — including the in-memory state below.
-    runtimeLogout = logout;
-    return () => {
-      setUnauthorizedHandler(null);
-      runtimeLogout = null;
-    };
+    return () => setUnauthorizedHandler(null);
     // logout only closes over stable state setters + storage; register once.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);

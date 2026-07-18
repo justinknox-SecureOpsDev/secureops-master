@@ -38,12 +38,9 @@ const HOUR_MS = 60 * 60 * 1000;
 const MIN_MS = 60 * 1000;
 
 // Auto clock-out: how long past a shift's scheduled end an officer can
-// stay clocked in before we close their entry (unless still on site).
-const AUTO_CLOCKOUT_GRACE_MS = 10 * MIN_MS;
-// How recent a location ping must be for an `inside` geofence reading to
-// count as "currently on site". A stale `inside` (phone stopped pinging)
-// must NOT veto auto clock-out — that's the case this job exists to fix.
-const GEOFENCE_FRESH_MS = 15 * MIN_MS;
+// stay clocked in before we close their entry (unless still inside the
+// geofence — see autoClockOutEndedShifts).
+const AUTO_CLOCKOUT_GRACE_MS = 30 * MIN_MS;
 
 /**
  * Background maintenance jobs:
@@ -1003,23 +1000,19 @@ export function startScheduledJobs(intervalMs: number = HOUR_MS): NodeJS.Timeout
   /**
    * Auto clock-out after shift end. For each officer still clocked in
    * more than AUTO_CLOCKOUT_GRACE_MS past their assigned shift's
-   * scheduled end, close the open time entry — UNLESS we can confirm
-   * they are still physically on site (inside the geofence).
+   * scheduled end, close the open time entry — but ONLY when we can
+   * confirm they have physically LEFT the site (geofence `outside`).
    *
-   * "Still within the geofence" = the time entry's `geofence_state` is
-   * `inside` AND the officer's last location ping is recent
-   * (`GEOFENCE_FRESH_MS`). We require freshness because a stale `inside`
-   * (phone stopped pinging an hour ago) is exactly the forgotten-clock-out
-   * case this job exists to clean up; trusting it would keep the officer
-   * clocked in forever. If we cannot confirm they are on site
-   * (`outside`, never evaluated, or a stale ping), we clock them out.
+   * Policy: auto clock-out fires iff the shift end has passed AND the
+   * officer is outside the geofence. If their last geofence reading is
+   * `inside` — even a stale one — or was never evaluated (GPS off /
+   * manual clock-in), we leave the entry open. Those officers instead
+   * receive the forgot-to-clock-out nudges and are closed out on a later
+   * tick once a location ping reports them `outside`.
    *
    * Clock-out time = the shift's scheduled end (not "now"), so payroll
    * reflects the shift the officer was actually scheduled for and the
-   * result is deterministic regardless of when the tick fires. Officers
-   * still inside the geofence are left alone and instead receive the
-   * forgot-to-clock-out nudges; this job re-checks them every tick and
-   * closes them out once they leave.
+   * result is deterministic regardless of when the tick fires.
    *
    * Idempotent + race-safe: the close is an atomic
    * UPDATE … WHERE clock_out_time IS NULL … RETURNING, so an entry can
@@ -1043,12 +1036,10 @@ export function startScheduledJobs(intervalMs: number = HOUR_MS): NodeJS.Timeout
           geofenceState: timeEntriesTable.geofenceState,
           shiftId: timeEntriesTable.shiftId,
           shiftEndTime: shiftsTable.endTime,
-          lastLocationAt: usersTable.lastLocationAt,
           siteName: sitesTable.name,
         })
         .from(timeEntriesTable)
         .innerJoin(shiftsTable, eq(shiftsTable.id, timeEntriesTable.shiftId))
-        .innerJoin(usersTable, eq(usersTable.id, timeEntriesTable.employeeId))
         .leftJoin(sitesTable, eq(sitesTable.id, shiftsTable.siteId))
         .where(and(
           isNull(timeEntriesTable.clockOutTime),
@@ -1057,11 +1048,12 @@ export function startScheduledJobs(intervalMs: number = HOUR_MS): NodeJS.Timeout
 
       let totalClosed = 0;
       for (const r of rows) {
-        // Skip officers we can confirm are still on site.
-        const pingFresh =
-          r.lastLocationAt != null &&
-          now - r.lastLocationAt.getTime() <= GEOFENCE_FRESH_MS;
-        if (r.geofenceState === "inside" && pingFresh) continue;
+        // Only auto clock-out officers we can confirm have LEFT the site.
+        // An explicit `outside` reading is required: `inside` (even stale)
+        // or a never-evaluated entry (GPS off / manual clock-in) is left
+        // alone, per policy. Those officers keep their open entry and get
+        // the forgot-to-clock-out nudges instead.
+        if (r.geofenceState !== "outside") continue;
 
         // Clock out at the scheduled end. Guard against negative hours
         // for odd entries clocked in after their shift's end (e.g. a
@@ -1208,7 +1200,7 @@ export function startScheduledJobs(intervalMs: number = HOUR_MS): NodeJS.Timeout
   schedule("high-risk-digest", flushHighRiskSelfEditDigests, 5 * MIN_MS);
   // Forgot-to-clock-out — every 5 minutes; idempotent per active shift.
   schedule("forgot-clock-out", sendForgotClockOutReminders, 5 * MIN_MS);
-  // Auto clock-out officers >10m past shift end who aren't still on site
+  // Auto clock-out officers >30m past shift end who aren't still on site
   // — every 5 minutes; atomic claim makes it idempotent per entry.
   schedule("auto-clock-out", autoClockOutEndedShifts, 5 * MIN_MS);
   // Lock draft invoices whose week has ended (Mon 00:00 UTC). After

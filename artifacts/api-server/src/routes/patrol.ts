@@ -1,6 +1,7 @@
 import { Router, type IRouter } from "express";
 import { z } from "zod/v4";
 import { and, eq, gte, lte, desc, isNull, sql } from "drizzle-orm";
+import { isWorkerRole } from "../lib/eligibility";
 import crypto from "crypto";
 import {
   db,
@@ -12,10 +13,8 @@ import {
   clientsTable,
 } from "@workspace/db";
 import { requireAuth, requireAdmin } from "../middlewares/auth";
-import { requireFeature } from "../lib/features";
 
 const router: IRouter = Router();
-router.use(["/admin/sites", "/admin/checkpoints", "/admin/patrol", "/patrol", "/me/patrol"], requireFeature("patrol"));
 
 // Generate a human-readable 10-char Crockford-base32 code, e.g. "X7Q3K2HR9F".
 // 0/O/1/I/L excluded for the same reasons as the invite-password generator.
@@ -168,10 +167,11 @@ router.get("/admin/patrol/scans", requireAuth, requireAdmin, async (req, res): P
 // ---------- Officer: scan ----------
 
 router.post("/patrol/scan", requireAuth, async (req, res): Promise<void> => {
-  // Patrol compliance logs must only contain officer activity — block other roles
-  // (incl. admins) so they can't pollute the audit trail.
-  if (req.user?.role !== "employee") {
-    res.status(403).json({ error: "Forbidden", message: "Only employees can log patrol scans" });
+  // Patrol compliance logs must only contain worker activity. All internal
+  // staff (employee / site_manager / dispatcher / admin) work shifts, so all
+  // of them may log scans; external `client` accounts are refused.
+  if (!isWorkerRole(req.user?.role)) {
+    res.status(403).json({ error: "Forbidden", message: "Only field staff can log patrol scans" });
     return;
   }
   const parsed = scanSchema.safeParse(req.body);

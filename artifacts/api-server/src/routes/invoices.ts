@@ -6,10 +6,8 @@ import { upsertWeeklyInvoice } from "../lib/invoiceSync";
 import { buildInvoicePdf } from "../lib/invoicePdf";
 import { sendEmailDetailed } from "../lib/email";
 import { brand } from "../lib/brandConfig";
-import { requireFeature } from "../lib/features";
 
 const router: IRouter = Router();
-router.use("/invoices", requireFeature("invoicing"));
 
 function generateInvoiceNumber(): string {
   const now = new Date();

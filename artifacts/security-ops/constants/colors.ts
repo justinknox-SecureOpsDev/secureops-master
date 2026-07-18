@@ -8,24 +8,24 @@
  * EXPO_PUBLIC_BRAND_CREAM  BG accent hex    (e.g. "#f5ead6")
  */
 
-const NAVY  = process.env.EXPO_PUBLIC_BRAND_NAVY  ?? "#0c0a08";
-const GOLD  = process.env.EXPO_PUBLIC_BRAND_GOLD  ?? "#c9a04a";
-const CREAM = process.env.EXPO_PUBLIC_BRAND_CREAM ?? "#f0e4c0";
+const NAVY  = process.env.EXPO_PUBLIC_BRAND_NAVY  ?? "#080c18";
+const GOLD  = process.env.EXPO_PUBLIC_BRAND_GOLD  ?? "#c9a84c";
+const CREAM = process.env.EXPO_PUBLIC_BRAND_CREAM ?? "#f0e6c8";
 
 const shared = {
   text:                CREAM,
   tint:                GOLD,
   background:          NAVY,
   foreground:          CREAM,
-  card:                "#1f1a15",
+  card:                "#0d1235",
   cardForeground:      CREAM,
   primary:             GOLD,
   primaryForeground:   NAVY,
-  secondary:           "#2a241d",
+  secondary:           "#141b3d",
   secondaryForeground: CREAM,
-  muted:               "#2a241d",
-  mutedForeground:     "#aca395",
-  accent:              "#f0d89a",
+  muted:               "#141b3d",
+  mutedForeground:     "#8a9bb8",
+  accent:              "#e2b95a",
   accentForeground:    NAVY,
   destructive:         "#c0392b",
   // Foreground for text/icons placed ON a solid `destructive` fill (buttons).
@@ -36,8 +36,8 @@ const shared = {
   // `successForeground` is the legible text/icon color to place on top.
   success:             "#22c55e",
   successForeground:   "#06250f",
-  border:              "#3a3229",
-  input:               "#2a241d",
+  border:              "#1c2550",
+  input:               "#141b3d",
 };
 
 /**

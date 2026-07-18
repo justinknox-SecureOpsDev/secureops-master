@@ -1,5 +1,6 @@
 import { useEffect, useState, useCallback } from "react";
 import { api } from "@/lib/api";
+import { formatDate } from "@/lib/format";
 import { Button } from "@/components/ui/button";
 import { Loader2, IdCard, Check, X, ExternalLink } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
@@ -152,7 +153,7 @@ export default function LicenseRenewalsPage() {
                     {r.issueDate && <div className="text-muted-foreground">issued {r.issueDate}</div>}
                   </td>
                   <td className="px-3 py-2 text-xs text-muted-foreground">
-                    {new Date(r.createdAt).toLocaleDateString()}
+                    {formatDate(r.createdAt)}
                   </td>
                   <td className="px-3 py-2 text-right">
                     <div className="flex justify-end gap-2 flex-wrap">

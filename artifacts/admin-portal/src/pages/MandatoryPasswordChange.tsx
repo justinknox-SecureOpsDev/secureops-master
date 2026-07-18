@@ -106,7 +106,7 @@ export function MandatoryPasswordChange() {
         className="absolute inset-0 opacity-[0.04] pointer-events-none"
         style={{
           backgroundImage:
-            "radial-gradient(circle at 25% 20%, #c9a04a 0, transparent 40%), radial-gradient(circle at 80% 80%, #c9a04a 0, transparent 35%)",
+            "radial-gradient(circle at 25% 20%, #c9a84c 0, transparent 40%), radial-gradient(circle at 80% 80%, #c9a84c 0, transparent 35%)",
         }}
       />
       <div className="w-full max-w-md bg-card rounded-xl shadow-2xl overflow-hidden relative">

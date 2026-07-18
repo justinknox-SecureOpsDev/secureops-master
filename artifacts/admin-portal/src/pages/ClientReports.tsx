@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { FileText, AlertTriangle, ClipboardList, Download, ChevronDown, ChevronUp } from "lucide-react";
 import { api, fetchWithAuth } from "@/lib/api";
+import { BUSINESS_TIME_ZONE } from "@/lib/format";
 import { Button } from "@/components/ui/button";
 
 type Incident = {
@@ -30,10 +31,12 @@ type DAR = {
 };
 
 function fmt(d: string) {
-  return new Date(d).toLocaleString("en-US", { month: "short", day: "numeric", year: "numeric", hour: "numeric", minute: "2-digit" });
+  // occurredAt / resolvedAt are timestamps → render in Central.
+  return new Date(d).toLocaleString("en-US", { month: "short", day: "numeric", year: "numeric", hour: "numeric", minute: "2-digit", timeZone: BUSINESS_TIME_ZONE });
 }
 function fmtDate(d: string) {
-  return new Date(d).toLocaleDateString("en-US", { weekday: "short", month: "short", day: "numeric", year: "numeric" });
+  // reportDate is a pg `date` (literal calendar date) → render in UTC.
+  return new Date(d + "T00:00:00Z").toLocaleDateString("en-US", { weekday: "short", month: "short", day: "numeric", year: "numeric", timeZone: "UTC" });
 }
 
 const SEVERITY_COLORS: Record<string, string> = {

@@ -8,6 +8,7 @@ import { Feather } from "@expo/vector-icons";
 import { useColors } from "@/hooks/useColors";
 import { useTopPad } from "@/hooks/useTopPad";
 import { apiRequest } from "@/utils/api";
+import { formatDate } from "@/utils/time";
 
 type NotificationRow = {
   id: string;
@@ -29,7 +30,7 @@ function iconFor(type: string): { name: any; color: string } {
     case "geofence": return { name: "navigation", color: "#f97316" };
     case "shift_assignment":
     case "shift_vacancy":
-    case "shift_reminder": return { name: "calendar", color: "#c9a04a" };
+    case "shift_reminder": return { name: "calendar", color: "#c9a84c" };
     case "license_expiry":
     case "license": return { name: "id-card", color: "#f59e0b" };
     case "shift_swap": return { name: "repeat", color: "#a855f7" };
@@ -49,7 +50,7 @@ function fmtWhen(iso: string): string {
   if (hr < 24) return `${hr}h ago`;
   const day = Math.floor(hr / 24);
   if (day < 7) return `${day}d ago`;
-  return d.toLocaleDateString();
+  return formatDate(d, { month: "short", day: "numeric", year: "numeric" });
 }
 
 export default function NotificationsScreen() {

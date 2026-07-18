@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle,
 } from "@/components/ui/dialog";
@@ -12,7 +12,7 @@ import {
 } from "@/components/ui/select";
 import { useFkOptions } from "@/lib/fk";
 import { api, ApiError } from "@/lib/api";
-import { Repeat } from "lucide-react";
+import { AlertTriangle, Repeat } from "lucide-react";
 
 const DAYS: { v: number; short: string; long: string }[] = [
   { v: 1, short: "Mon", long: "Monday" },
@@ -31,12 +31,21 @@ function plusDaysIso(days: number): string {
   return new Date(Date.now() + days * 86_400_000).toISOString().slice(0, 10);
 }
 
+function levelLabel(level: number, label: string): string {
+  const base = level <= 1 ? "Support (no licence)" : level === 4 ? "L4 / PPO" : level === 3 ? "L3 Armed" : "L2 Unarmed";
+  return label ? `${base} — ${label}` : base;
+}
+
 export function RepeatingShiftDialog({
-  open, onOpenChange, onCreated,
+  open, onOpenChange, onCreated, initialSiteId,
 }: {
   open: boolean;
   onOpenChange: (b: boolean) => void;
   onCreated: () => void;
+  // When launched from a specific site's detail page, prefill the series to
+  // that site so the admin doesn't have to re-pick it. Optional — the standalone
+  // Shifts page passes nothing and the admin chooses a site as before.
+  initialSiteId?: string | null;
 }) {
   const sites = useFkOptions("sites");
 
@@ -58,30 +67,55 @@ export function RepeatingShiftDialog({
   // rates and auto-apply the one matching the chosen level. Mirrors ShiftDialog
   // so a recurring series uses the contracted rate, not whatever was in the
   // default "0" inputs.
-  type SiteRate = { id: string; licenseLevel: number; payRate: string; billRate: string; label: string | null };
+  type SiteRate = { id: string; licenseLevel: number; payRate: string; billRate: string; label: string };
   const [siteRates, setSiteRates] = useState<SiteRate[]>([]);
   const [siteRateId, setSiteRateId] = useState<string | null>(null);
+  const [ratesLoading, setRatesLoading] = useState(false);
 
   useEffect(() => {
-    if (!open || !siteId) { setSiteRates([]); return; }
+    if (!open || !siteId) { setSiteRates([]); setRatesLoading(false); return; }
     let cancelled = false;
+    setRatesLoading(true);
     api<SiteRate[]>(`/admin/sites/${siteId}/rates`)
       .then((rows) => { if (!cancelled) setSiteRates(rows ?? []); })
-      .catch(() => { if (!cancelled) setSiteRates([]); });
+      .catch(() => { if (!cancelled) setSiteRates([]); })
+      .finally(() => { if (!cancelled) setRatesLoading(false); });
     return () => { cancelled = true; };
   }, [open, siteId]);
 
-  // Auto-apply the matching rate as soon as the rate card resolves, or when
-  // the admin changes the level. Only fires if no manual rate override is in
-  // play yet (siteRateId tracks the active card pick).
+  // Prefill the site when opened from a site's detail page (see initialSiteId).
+  // Also clear any prior rate-card selection so a stale siteRateId from a
+  // previously chosen site can't carry over into this site's series.
   useEffect(() => {
-    if (siteRates.length === 0) return;
-    const match = siteRates.find((r) => r.licenseLevel === Number(licenseLevel));
-    if (!match) return;
+    if (open && initialSiteId) { setSiteId(initialSiteId); setSiteRateId(null); }
+  }, [open, initialSiteId]);
+
+  // Auto-apply only when exactly one rate matches the chosen level (unambiguous).
+  // With multiple labeled rates per level, show the picker — the old first-match
+  // assumption silently picks the wrong rate when labels distinguish intent.
+  useEffect(() => {
+    if (siteRates.length === 0 || siteRateId) return;
+    const matches = siteRates.filter((r) => r.licenseLevel === Number(licenseLevel));
+    if (matches.length !== 1) return;
+    const [match] = matches;
     setPayRate(String(parseFloat(match.payRate)));
     setBillRate(String(parseFloat(match.billRate)));
     setSiteRateId(match.id);
-  }, [siteRates, licenseLevel]);
+  }, [siteRates, licenseLevel, siteRateId]);
+
+  const applySiteRate = useCallback((rate: SiteRate) => {
+    setPayRate(String(parseFloat(rate.payRate)));
+    setBillRate(String(parseFloat(rate.billRate)));
+    setSiteRateId(rate.id);
+    setLicenseLevel(String(rate.licenseLevel) as "1" | "2" | "3" | "4");
+  }, []);
+
+  const matchingRate = useMemo(
+    () => siteRates.find((r) => r.id === siteRateId) ?? null,
+    [siteRates, siteRateId],
+  );
+
+  const customRate = siteRateId == null && siteId !== "" && siteRates.length > 0;
 
   const toggleDay = (d: number) => {
     setDays((prev) => prev.includes(d) ? prev.filter((x) => x !== d) : [...prev, d].sort());
@@ -92,7 +126,7 @@ export function RepeatingShiftDialog({
     setDays([1, 2, 3, 4, 5]); setStartTime("09:00"); setEndTime("17:00");
     setPayRate("0"); setBillRate("0"); setLicenseLevel("2"); setHeadcount("1");
     setNotes(""); setError(null);
-    setSiteRates([]); setSiteRateId(null);
+    setSiteRates([]); setSiteRateId(null); setRatesLoading(false);
   };
 
   const handleSubmit = async () => {
@@ -152,17 +186,19 @@ export function RepeatingShiftDialog({
 
   return (
     <Dialog open={open} onOpenChange={(b) => { if (!submitting) onOpenChange(b); }}>
-      <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
-        <DialogHeader>
-          <DialogTitle className="flex items-center gap-2">
-            <Repeat className="w-5 h-5 text-brand-gold" />
-            Add Repeating Shift
-          </DialogTitle>
-          <DialogDescription>
-            Generate a series of shifts on selected days of the week between two dates.
-          </DialogDescription>
-        </DialogHeader>
-
+      <DialogContent className="max-w-2xl flex flex-col p-0 gap-0 max-h-[90dvh] overflow-y-hidden">
+        <div className="shrink-0 px-4 pt-4 pb-2 sm:px-6 sm:pt-6">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <Repeat className="w-5 h-5 text-brand-gold" />
+              Add Repeating Shift
+            </DialogTitle>
+            <DialogDescription>
+              Generate a series of shifts on selected days of the week between two dates.
+            </DialogDescription>
+          </DialogHeader>
+        </div>
+        <div className="flex-1 min-h-0 overflow-y-auto overscroll-contain px-4 sm:px-6">
         <div className="space-y-5 py-2">
           <div className="grid grid-cols-2 gap-3">
             <div className="col-span-2">
@@ -171,7 +207,7 @@ export function RepeatingShiftDialog({
             </div>
             <div className="col-span-2">
               <Label>Site <span className="text-destructive">*</span></Label>
-              <Select value={siteId} onValueChange={setSiteId}>
+              <Select value={siteId} onValueChange={(v) => { setSiteId(v); setSiteRateId(null); }}>
                 <SelectTrigger><SelectValue placeholder={sites.loading ? "Loading sites…" : "Pick a site"} /></SelectTrigger>
                 <SelectContent>
                   {sites.options.map((o) => (
@@ -181,6 +217,67 @@ export function RepeatingShiftDialog({
               </Select>
             </div>
           </div>
+
+          {/* Rate card picker — only meaningful with a site selected */}
+          {siteId && (
+            <div className="rounded-lg border border-brand-gold/40 bg-brand-cream/30 p-3">
+              <div className="flex items-center justify-between mb-2">
+                <div className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Site rate card</div>
+                {matchingRate && (
+                  <div className="text-xs text-emerald-700">
+                    Using: <strong>{levelLabel(matchingRate.licenseLevel, matchingRate.label)}</strong>
+                  </div>
+                )}
+              </div>
+              {ratesLoading ? (
+                <div className="text-xs text-muted-foreground">Loading rates…</div>
+              ) : siteRates.length === 0 ? (
+                <div className="text-xs text-muted-foreground">
+                  This site has no rate card configured. Set rates on the site detail page, or enter values manually below.
+                </div>
+              ) : (
+                <div className="flex flex-wrap gap-2">
+                  {siteRates.map((r) => {
+                    const selected = r.id === siteRateId;
+                    return (
+                      <button
+                        key={r.id}
+                        type="button"
+                        onClick={() => applySiteRate(r)}
+                        className={`text-left px-3 py-2 rounded border text-xs transition ${
+                          selected
+                            ? "bg-brand-navy text-white border-brand-navy"
+                            : "bg-white hover:bg-brand-cream/60 border-brand-gold/40"
+                        }`}
+                      >
+                        <div className="font-semibold">{levelLabel(r.licenseLevel, r.label)}</div>
+                        <div className={selected ? "text-white/85" : "text-muted-foreground"}>
+                          Pay ${parseFloat(r.payRate).toFixed(2)} · Bill ${parseFloat(r.billRate).toFixed(2)}
+                        </div>
+                      </button>
+                    );
+                  })}
+                  <button
+                    type="button"
+                    onClick={() => setSiteRateId(null)}
+                    className={`px-3 py-2 rounded border text-xs ${
+                      siteRateId == null
+                        ? "bg-amber-100 border-amber-400 text-amber-900"
+                        : "bg-white hover:bg-amber-50 border-dashed border-amber-300 text-amber-800"
+                    }`}
+                  >
+                    Custom (one-off)
+                  </button>
+                </div>
+              )}
+              {customRate && (
+                <div className="mt-2 text-xs text-amber-800 inline-flex items-center gap-1">
+                  <AlertTriangle className="w-3 h-3" />
+                  This series uses a custom rate not linked to the site's rate card.
+                </div>
+              )}
+            </div>
+          )}
 
           <div>
             <Label>Days of week <span className="text-destructive">*</span></Label>
@@ -275,17 +372,19 @@ export function RepeatingShiftDialog({
 
           {error && <div className="text-sm text-destructive">{error}</div>}
         </div>
-
-        <DialogFooter>
-          <Button variant="outline" onClick={() => onOpenChange(false)} disabled={submitting}>Cancel</Button>
-          <Button
-            onClick={handleSubmit}
-            disabled={submitting || occurrenceEstimate === 0}
-            className="bg-brand-navy text-white hover:opacity-90"
-          >
-            {submitting ? "Creating…" : `Create ${occurrenceEstimate} shift${occurrenceEstimate === 1 ? "" : "s"}`}
-          </Button>
-        </DialogFooter>
+        </div>
+        <div className="shrink-0 px-4 pb-4 pt-2 sm:px-6 sm:pb-6">
+          <DialogFooter>
+            <Button variant="outline" onClick={() => onOpenChange(false)} disabled={submitting}>Cancel</Button>
+            <Button
+              onClick={handleSubmit}
+              disabled={submitting || occurrenceEstimate === 0}
+              className="bg-brand-navy text-white hover:opacity-90"
+            >
+              {submitting ? "Creating…" : `Create ${occurrenceEstimate} shift${occurrenceEstimate === 1 ? "" : "s"}`}
+            </Button>
+          </DialogFooter>
+        </div>
       </DialogContent>
     </Dialog>
   );

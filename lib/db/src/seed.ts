@@ -92,33 +92,3 @@ export async function backfillEmployeeProfileFields(): Promise<void> {
     WHERE o.employee_id = e.user_id;
   `);
 }
-
-/**
- * One-time idempotent backfill: flag existing NON-ADMIN staff (officers /
- * site managers) who have never signed company policies so the mobile login
- * gate (users.must_sign_policies) catches them once. "Has signed" = a
- * non-empty acknowledgements array on their employee file (onboarding copies
- * acks there; the in-app POST /me/policies/acknowledge also writes there).
- *
- * Scope is employee + site_manager only — admins are never gated, and external
- * clients use the web portal (which ignores this flag), so neither is touched.
- * Only flips false -> true, so it's safe on every boot: once an officer signs
- * (acks recorded, flag cleared) they are never re-flagged. Also no-ops when
- * there are zero active policies — nothing to sign means nobody is gated, which
- * avoids a re-flag loop with the zero-policy "Continue" path on the sign screen.
- */
-export async function backfillMustSignPolicies(): Promise<void> {
-  await db.execute(sql`
-    UPDATE users u SET must_sign_policies = true
-    WHERE u.role IN ('employee', 'site_manager')
-      AND u.must_sign_policies = false
-      AND EXISTS (SELECT 1 FROM policies p WHERE p.is_active = true)
-      AND NOT EXISTS (
-        SELECT 1 FROM employees e
-        WHERE e.user_id = u.id
-          AND e.acknowledgements IS NOT NULL
-          AND jsonb_typeof(e.acknowledgements) = 'array'
-          AND jsonb_array_length(e.acknowledgements) > 0
-      );
-  `);
-}

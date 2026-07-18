@@ -4,7 +4,9 @@ import { View, Text, StyleSheet, FlatList, TouchableOpacity, ActivityIndicator, 
 import { useColors } from "@/hooks/useColors";
 import { useGetShifts, getGetShiftsQueryKey, useUpdateShiftAssignment } from "@workspace/api-client-react";
 import { Feather } from "@expo/vector-icons";
+import { useRouter } from "expo-router";
 import { useQueryClient } from "@tanstack/react-query";
+import { formatDateTime, formatTime } from "@/utils/time";
 
 type PendingClaim = {
   assignmentId: string;
@@ -20,6 +22,7 @@ type PendingClaim = {
 
 export default function ShiftApprovalsScreen() {
   const colors = useColors();
+  const router = useRouter();
   const queryClient = useQueryClient();
   const topPad = useTopPad();
 
@@ -68,6 +71,9 @@ export default function ShiftApprovalsScreen() {
   return (
     <View style={[styles.container, { backgroundColor: colors.background }]}>
       <View style={[styles.topBar, { paddingTop: topPad + 12, borderBottomColor: colors.border }]}>
+        <TouchableOpacity onPress={() => router.back()} style={[styles.backBtn, { borderColor: colors.border }]} accessibilityRole="button" accessibilityLabel="Go back">
+          <Feather name="arrow-left" size={18} color={colors.foreground} />
+        </TouchableOpacity>
         <Text style={[styles.pageTitle, { color: colors.foreground }]} accessibilityRole="header">Shift Approvals</Text>
       </View>
 
@@ -88,7 +94,6 @@ export default function ShiftApprovalsScreen() {
           refreshing={false}
           onRefresh={refetch}
           renderItem={({ item }) => {
-            const start = new Date(item.startTime);
             return (
               <View style={[styles.card, { backgroundColor: colors.card, borderColor: colors.border }]}>
                 <View style={styles.cardHead}>
@@ -112,7 +117,7 @@ export default function ShiftApprovalsScreen() {
 
                 <Text style={[styles.line, { color: colors.mutedForeground }]}>
                   <Feather name="clock" size={11} color={colors.mutedForeground} />{" "}
-                  {start.toLocaleString()} – {new Date(item.endTime).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
+                  {formatDateTime(item.startTime)} – {formatTime(item.endTime)}
                 </Text>
 
                 <View style={{ flexDirection: "row", gap: 8 }}>
@@ -152,6 +157,7 @@ const styles = StyleSheet.create({
   container: { flex: 1 },
   center: { padding: 40, alignItems: "center" },
   topBar: { flexDirection: "row", alignItems: "center", gap: 12, paddingHorizontal: 16, paddingBottom: 12, borderBottomWidth: 1 },
+  backBtn: { padding: 8, borderRadius: 8, borderWidth: 1 },
   pageTitle: { fontSize: 22, fontWeight: "700" },
   card: { borderRadius: 12, borderWidth: 1, padding: 14, gap: 10 },
   cardHead: { flexDirection: "row", alignItems: "flex-start", gap: 8 },

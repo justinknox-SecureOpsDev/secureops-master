@@ -5,8 +5,6 @@ dist
 tmp
 out-tsc
 .secheaders-build-*
-artifacts/api-server/frontdoor-build-*
-artifacts/api-server/.frontdoor-build-*
 *.tsbuildinfo
 .expo
 .expo-shared
@@ -50,7 +48,3 @@ Thumbs.db
 # Replit
 .cache/
 .local/
-
-# EAS local signing credentials (secrets - never commit)
-artifacts/security-ops/credentials.json
-artifacts/security-ops/credentials/

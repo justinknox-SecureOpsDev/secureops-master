@@ -2,10 +2,8 @@ import { Router, type IRouter } from "express";
 import { and, desc, eq, ne } from "drizzle-orm";
 import { db, payrollEntriesTable, sitesTable } from "@workspace/db";
 import { requireAuth } from "../middlewares/auth";
-import { requireFeature } from "../lib/features";
 
 const router: IRouter = Router();
-router.use("/me/payroll", requireFeature("payroll"));
 
 /**
  * GET /me/payroll

@@ -1,12 +1,13 @@
 import { Router, type IRouter } from "express";
 import { and, eq, inArray, isNull, or, sql } from "drizzle-orm";
 import { db, sitesTable, clientsTable, usersTable, siteManagersTable } from "@workspace/db";
+import { SetSiteManagersBody } from "@workspace/api-zod";
 import { requireAdmin, requireAdminOrDispatcher, requireSchedulingStaff } from "../middlewares/auth";
 import { geocodeOnelineAddress } from "../lib/geocode";
 import { preparePreUpdateBody, maybeAutoGeocode } from "../lib/siteGeocode";
 import { getGeofenceRadiusMiles } from "../lib/geofence";
 import { siteBlockersForOne, refuseIfBlocked } from "../lib/siteDeletion";
-import { canManageSite } from "../lib/siteManagerAuthz";
+import { getManagedSiteIds, managesSite } from "../lib/siteManagerAuth";
 
 // Resolve the effective geofence radius for a site row: per-site override
 // (when set and positive) wins, otherwise the global env default. Mirrors
@@ -117,6 +118,20 @@ router.post("/sites/geocode-missing", requireAdmin, async (req, res): Promise<vo
 
 router.get("/sites", requireSchedulingStaff, async (req, res): Promise<void> => {
   const { clientId } = req.query as { clientId?: string };
+
+  // Site managers are confined to ONLY the sites they're assigned to. Admins
+  // and dispatchers are global scheduling roles and see the full list. A
+  // manager with zero assigned sites sees an empty list — never the whole
+  // table (no IDOR via the unscoped roster surface).
+  let managedScope: string[] | null = null;
+  if (req.user!.role === "site_manager") {
+    managedScope = await getManagedSiteIds(req.user!.userId);
+    if (managedScope.length === 0) {
+      res.json([]);
+      return;
+    }
+  }
+
   const base = db
     .select({
       id: sitesTable.id,
@@ -132,7 +147,11 @@ router.get("/sites", requireSchedulingStaff, async (req, res): Promise<void> => 
     })
     .from(sitesTable)
     .leftJoin(clientsTable, eq(sitesTable.clientId, clientsTable.id));
-  const rows = clientId ? await base.where(eq(sitesTable.clientId, clientId)) : await base;
+  const filters = [
+    ...(clientId ? [eq(sitesTable.clientId, clientId)] : []),
+    ...(managedScope ? [inArray(sitesTable.id, managedScope)] : []),
+  ];
+  const rows = filters.length > 0 ? await base.where(and(...filters)) : await base;
   // Decorate every row with the resolved effective radius so the dispatch
   // map can draw the right circle per site without re-implementing the
   // override/global fallback rule client-side.
@@ -223,12 +242,6 @@ router.delete("/sites/:id", requireAdmin, async (req, res): Promise<void> => {
   res.sendStatus(204);
 });
 
-// ---------------------------------------------------------------------------
-// Site Managers (many-to-many). Admins assign one or more Site Managers to a
-// site here; the assignment is the single source of truth for the site-scoped
-// powers in lib/siteManagerAuthz.ts and for routing site-manager notifications.
-// ---------------------------------------------------------------------------
-
 // Minimal projection for site-manager assignment lists/pickers. We deliberately
 // expose ONLY id/name/email here — never phone, status, or employee/PII fields.
 const managerProjection = {
@@ -244,7 +257,7 @@ const managerProjection = {
 router.get("/sites/:id/managers", requireSchedulingStaff, async (req, res): Promise<void> => {
   const id = Array.isArray(req.params.id) ? req.params.id[0] : req.params.id;
   const role = req.user!.role;
-  if (role === "site_manager" && !(await canManageSite({ userId: req.user!.userId, role }, id))) {
+  if (role === "site_manager" && !(await managesSite(req.user!.userId, id))) {
     res.status(403).json({ error: "Forbidden", message: "Not a manager of this site" });
     return;
   }
@@ -267,18 +280,22 @@ router.get("/sites/:id/managers", requireSchedulingStaff, async (req, res): Prom
 // transaction (delete existing rows, insert the new set).
 router.put("/sites/:id/managers", requireAdmin, async (req, res): Promise<void> => {
   const id = Array.isArray(req.params.id) ? req.params.id[0] : req.params.id;
-  const [site] = await db.select({ id: sitesTable.id }).from(sitesTable).where(eq(sitesTable.id, id));
-  if (!site) { res.status(404).json({ error: "Not Found" }); return; }
-
-  const raw = (req.body?.userIds ?? []) as unknown;
-  if (!Array.isArray(raw) || raw.some((u) => typeof u !== "string")) {
-    res.status(400).json({ error: "Bad Request", message: "userIds must be an array of user IDs" });
+  const parsed = SetSiteManagersBody.safeParse(req.body);
+  if (!parsed.success) {
+    res.status(400).json({
+      error: "Bad Request",
+      message: "Invalid manager list",
+      details: parsed.error.flatten(),
+    });
     return;
   }
-  const userIds = Array.from(new Set(raw as string[]));
+  const [site] = await db.select({ id: sitesTable.id }).from(sitesTable).where(eq(sitesTable.id, id));
+  if (!site) {
+    res.status(404).json({ error: "Not Found", message: "Site not found" });
+    return;
+  }
 
-  // Every target must be an ACTIVE user holding the Site Manager role — we
-  // never grant site scope to a non-manager or a deactivated account.
+  const userIds = Array.from(new Set(parsed.data.userIds));
   if (userIds.length > 0) {
     const valid = await db
       .select({ id: usersTable.id })
@@ -302,7 +319,7 @@ router.put("/sites/:id/managers", requireAdmin, async (req, res): Promise<void> 
   await db.transaction(async (tx) => {
     await tx.delete(siteManagersTable).where(eq(siteManagersTable.siteId, id));
     if (userIds.length > 0) {
-      await tx.insert(siteManagersTable).values(userIds.map((userId) => ({ siteId: id, userId, assignedBy: req.user!.userId })));
+      await tx.insert(siteManagersTable).values(userIds.map((userId) => ({ siteId: id, userId })));
     }
   });
 

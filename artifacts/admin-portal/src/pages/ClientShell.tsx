@@ -50,20 +50,20 @@ export function ClientShell() {
   return (
     <div className="flex flex-col h-screen w-full overflow-hidden bg-background">
       {/* Top navigation */}
-      <header className="shrink-0 bg-[#0c0a08] text-white border-b border-[#c9a04a]/30 px-4 py-3 flex items-center justify-between gap-4">
+      <header className="shrink-0 bg-[#080c18] text-white border-b border-[#c9a84c]/30 px-4 py-3 flex items-center justify-between gap-4">
         <div className="flex items-center gap-3 min-w-0">
-          <Shield className="w-5 h-5 text-[#c9a04a] shrink-0" />
+          <Shield className="w-5 h-5 text-[#c9a84c] shrink-0" />
           <div className="min-w-0">
-            <div className="text-[#c9a04a] font-bold text-sm leading-none tracking-wide truncate">
+            <div className="text-[#c9a84c] font-bold text-sm leading-none tracking-wide truncate">
               {shortName}
             </div>
-            <div className="text-[#f0e4c0]/60 text-[10px] tracking-widest uppercase leading-none mt-0.5 truncate hidden sm:block">
+            <div className="text-[#f0e6c8]/60 text-[10px] tracking-widest uppercase leading-none mt-0.5 truncate hidden sm:block">
               {companyName}
             </div>
           </div>
           <div className="hidden md:flex items-center gap-1 ml-6">
-            <span className="text-[#f0e4c0]/40 text-xs">Client Portal</span>
-            <ChevronRight className="w-3 h-3 text-[#f0e4c0]/30" />
+            <span className="text-[#f0e6c8]/40 text-xs">Client Portal</span>
+            <ChevronRight className="w-3 h-3 text-[#f0e6c8]/30" />
           </div>
         </div>
 
@@ -75,8 +75,8 @@ export function ClientShell() {
               href={href}
               className={`flex items-center gap-1.5 px-3 py-1.5 rounded text-sm font-medium transition-colors ${
                 isActive(href, exact)
-                  ? "bg-[#c9a04a]/20 text-[#c9a04a]"
-                  : "text-[#f0e4c0]/70 hover:text-[#f0e4c0] hover:bg-white/5"
+                  ? "bg-[#c9a84c]/20 text-[#c9a84c]"
+                  : "text-[#f0e6c8]/70 hover:text-[#f0e6c8] hover:bg-white/5"
               }`}
             >
               <Icon className="w-4 h-4" />
@@ -87,10 +87,10 @@ export function ClientShell() {
 
         <div className="flex items-center gap-2 shrink-0">
           <div className="hidden sm:flex flex-col items-end mr-1">
-            <span className="text-[#f0e4c0] text-xs font-medium leading-none">
+            <span className="text-[#f0e6c8] text-xs font-medium leading-none">
               {user?.firstName} {user?.lastName}
             </span>
-            <span className="text-[#f0e4c0]/50 text-[10px] leading-none mt-0.5">
+            <span className="text-[#f0e6c8]/50 text-[10px] leading-none mt-0.5">
               {user?.email}
             </span>
           </div>
@@ -98,7 +98,7 @@ export function ClientShell() {
             variant="ghost"
             size="sm"
             onClick={logout}
-            className="text-[#f0e4c0]/60 hover:text-[#f0e4c0] hover:bg-white/10 h-8 px-2"
+            className="text-[#f0e6c8]/60 hover:text-[#f0e6c8] hover:bg-white/10 h-8 px-2"
             title="Sign out"
           >
             <LogOut className="w-4 h-4" />
@@ -106,7 +106,7 @@ export function ClientShell() {
           </Button>
           {/* Mobile hamburger */}
           <button
-            className="lg:hidden text-[#f0e4c0]/70 hover:text-[#f0e4c0] p-1"
+            className="lg:hidden text-[#f0e6c8]/70 hover:text-[#f0e6c8] p-1"
             onClick={() => setMobileOpen((o) => !o)}
           >
             {mobileOpen ? <X className="w-5 h-5" /> : <Menu className="w-5 h-5" />}
@@ -116,7 +116,7 @@ export function ClientShell() {
 
       {/* Mobile nav drawer */}
       {mobileOpen && (
-        <div className="lg:hidden bg-[#0c0a08] border-b border-[#c9a04a]/20 px-4 py-2 flex flex-col gap-1">
+        <div className="lg:hidden bg-[#080c18] border-b border-[#c9a84c]/20 px-4 py-2 flex flex-col gap-1">
           {NAV.map(({ href, label, Icon, exact }) => (
             <Link
               key={href}
@@ -124,8 +124,8 @@ export function ClientShell() {
               onClick={() => setMobileOpen(false)}
               className={`flex items-center gap-2 px-3 py-2 rounded text-sm font-medium transition-colors ${
                 isActive(href, exact)
-                  ? "bg-[#c9a04a]/20 text-[#c9a04a]"
-                  : "text-[#f0e4c0]/70 hover:text-[#f0e4c0] hover:bg-white/5"
+                  ? "bg-[#c9a84c]/20 text-[#c9a84c]"
+                  : "text-[#f0e6c8]/70 hover:text-[#f0e6c8] hover:bg-white/5"
               }`}
             >
               <Icon className="w-4 h-4" />

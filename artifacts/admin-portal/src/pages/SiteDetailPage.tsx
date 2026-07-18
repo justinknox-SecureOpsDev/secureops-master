@@ -1,13 +1,17 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import QRCode from "qrcode";
 import { Link, useRoute, useLocation } from "wouter";
-import { ArrowLeft, MapPin, Pencil, Plus, Trash2, QrCode, AlertTriangle, Radius, RefreshCw, Printer, Loader2 } from "lucide-react";
+import { ArrowLeft, MapPin, Pencil, Plus, Trash2, QrCode, AlertTriangle, Radius, RefreshCw, Printer, Loader2, CalendarPlus, Repeat, UserCog } from "lucide-react";
+import type { SiteManagerUser } from "@workspace/api-client-react";
 import { Button } from "@/components/ui/button";
 import { api, fetchWithAuth } from "@/lib/api";
+import { formatDateTime } from "@/lib/format";
 import { useAuth } from "@/lib/auth";
 import { useFkOptions } from "@/lib/fk";
 import { getTable } from "@/lib/tables";
 import { RowFormDialog } from "@/components/RowFormDialog";
+import { ShiftDialog } from "@/components/ShiftDialog";
+import { RepeatingShiftDialog } from "@/components/RepeatingShiftDialog";
 import { ResponsiveTable, type ResponsiveColumn } from "@/components/ResponsiveTable";
 
 type Site = {
@@ -62,7 +66,7 @@ type SubEntryRow = {
 };
 
 function fmt(iso: string) {
-  return new Date(iso).toLocaleString();
+  return formatDateTime(iso);
 }
 
 // ISO timestamp -> value for a <input type="datetime-local"> in LOCAL time
@@ -131,11 +135,11 @@ function buildSiteGeofenceHtml(
   return `<!doctype html><html><head><meta charset="utf-8"/>
 <meta name="viewport" content="width=device-width,initial-scale=1"/>
 <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
-<style>html,body,#m{margin:0;padding:0;height:100%;background:#0c0a08}
-.site-pin{display:flex;align-items:center;justify-content:center;width:28px;height:28px;border-radius:6px;background:#0c0a08;color:#c9a04a;border:2px solid #c9a04a;font:bold 13px -apple-system,system-ui,sans-serif;box-shadow:0 1px 4px rgba(0,0,0,.35);cursor:move}
-.edge-handle{width:14px;height:14px;border-radius:50%;background:#c9a04a;border:2px solid #0c0a08;box-shadow:0 1px 3px rgba(0,0,0,.55);cursor:ew-resize}
-.readout{position:absolute;left:8px;bottom:8px;z-index:500;background:rgba(12, 10, 8,.85);color:#f0e4c0;font:600 11px -apple-system,system-ui,sans-serif;padding:4px 8px;border:1px solid #c9a04a;border-radius:4px;pointer-events:none}
-.readout.saving{color:#c9a04a}
+<style>html,body,#m{margin:0;padding:0;height:100%;background:#080c18}
+.site-pin{display:flex;align-items:center;justify-content:center;width:28px;height:28px;border-radius:6px;background:#080c18;color:#c9a84c;border:2px solid #c9a84c;font:bold 13px -apple-system,system-ui,sans-serif;box-shadow:0 1px 4px rgba(0,0,0,.35);cursor:move}
+.edge-handle{width:14px;height:14px;border-radius:50%;background:#c9a84c;border:2px solid #080c18;box-shadow:0 1px 3px rgba(0,0,0,.55);cursor:ew-resize}
+.readout{position:absolute;left:8px;bottom:8px;z-index:500;background:rgba(8,12,24,.85);color:#f0e6c8;font:600 11px -apple-system,system-ui,sans-serif;padding:4px 8px;border:1px solid #c9a84c;border-radius:4px;pointer-events:none}
+.readout.saving{color:#c9a84c}
 .readout.error{color:#fca5a5;border-color:#fca5a5}</style>
 </head><body><div id="m"></div><div id="r" class="readout"></div>
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
@@ -159,10 +163,10 @@ let center = L.latLng(LAT, LNG);
 let radiusM = R_M;
 const circle = L.circle(center, {
   radius: radiusM,
-  color: '#c9a04a',
+  color: '#c9a84c',
   weight: 1,
   opacity: 0.45,
-  fillColor: '#c9a04a',
+  fillColor: '#c9a84c',
   fillOpacity: 0.08,
   interactive: false,
 }).addTo(map);
@@ -179,6 +183,7 @@ const b = document.createElement('b');
 b.appendChild(document.createTextNode(String(LABEL || '')));
 tipEl.appendChild(b);
 const siteMarker = L.marker(center, { icon: siteIcon, draggable: true, autoPan: true }).addTo(map);
+siteMarker.getElement()?.setAttribute('aria-label', 'Site location — drag to reposition');
 siteMarker.bindTooltip(tipEl, { direction: 'top', offset: [0, -6], opacity: 0.95 });
 function eastEdge(c, rm) {
   const cosLat = Math.cos(c.lat * Math.PI / 180);
@@ -186,6 +191,7 @@ function eastEdge(c, rm) {
   return L.latLng(c.lat, c.lng + dLng);
 }
 const handle = L.marker(eastEdge(center, radiusM), { icon: handleIcon, draggable: true, autoPan: true }).addTo(map);
+handle.getElement()?.setAttribute('aria-label', 'Geofence radius — drag to resize');
 const readout = document.getElementById('r');
 function paintReadout(state) {
   readout.className = 'readout' + (state ? ' ' + state : '');
@@ -274,6 +280,9 @@ export function SiteDetailPage() {
   // (mirrors the mobile time-approval screen), and any action error.
   const { user } = useAuth();
   const isAdmin = user?.role === "admin";
+  // Single-shift create mirrors the server gate (POST /shifts = admin OR site manager);
+  // repeating series is admin-only (POST /shifts/repeat = requireAdmin → isAdmin).
+  const canCreateShift = user?.role === "admin" || user?.role === "site_manager";
   const [teActioningId, setTeActioningId] = useState<string | null>(null);
   const [teHoursEdits, setTeHoursEdits] = useState<Record<string, string>>({});
   const [teActionError, setTeActionError] = useState<string | null>(null);
@@ -298,6 +307,28 @@ export function SiteDetailPage() {
   // the map visually rolls back to server-truth geometry even when the
   // freshly computed srcDoc string happens to be byte-identical.
   const [iframeVersion, setIframeVersion] = useState(0);
+
+  // Shift creation launched from this site's page — the dialogs are prefilled to
+  // the current site so an admin can post coverage without bouncing to the
+  // standalone Shifts page. shiftMsg is a transient post-create confirmation.
+  const [creatingShift, setCreatingShift] = useState(false);
+  const [repeatingShift, setRepeatingShift] = useState(false);
+  const [shiftMsg, setShiftMsg] = useState<string | null>(null);
+  // Stable `initial` for the single-shift create dialog. ShiftDialog resets its
+  // form whenever `open` or `initial` changes, so this must be memoised on the
+  // (stable) route siteId — an inline object would reset the form every render.
+  // Declared here with the other hooks so it stays above all early returns.
+  const shiftCreateInitial = useMemo(() => ({ siteId }), [siteId]);
+
+  // Site managers assigned to this site (admin-only, many-to-many). Managers get
+  // site-scoped scheduling/approval powers; finance always stays hidden from them.
+  const [managers, setManagers] = useState<SiteManagerUser[]>([]);
+  const [managerCandidates, setManagerCandidates] = useState<SiteManagerUser[]>([]);
+  const [selectedManagerIds, setSelectedManagerIds] = useState<Set<string>>(new Set());
+  const [managersLoading, setManagersLoading] = useState(false);
+  const [managersSaving, setManagersSaving] = useState(false);
+  const [managersMsg, setManagersMsg] = useState<string | null>(null);
+  const [managersError, setManagersError] = useState<string | null>(null);
 
   const loadSite = useCallback(async () => {
     if (!siteId) return;
@@ -329,6 +360,67 @@ export function SiteDetailPage() {
       setScans(data.scans);
     } catch { setScans([]); } finally { setScansLoading(false); }
   }, [siteId]);
+
+  // Admin-only: load this site's assigned managers + the pool of assignable
+  // (active, role=site_manager) users. Dispatchers can't read this endpoint, so
+  // gate the whole section on isAdmin and skip the fetch for everyone else.
+  const loadManagers = useCallback(async () => {
+    if (!siteId || !isAdmin) return;
+    setManagersLoading(true);
+    setManagersError(null);
+    try {
+      const [assigned, candidates] = await Promise.all([
+        api<SiteManagerUser[]>(`/sites/${siteId}/managers`),
+        api<SiteManagerUser[]>(`/site-manager-candidates`),
+      ]);
+      setManagers(assigned);
+      setManagerCandidates(candidates);
+      setSelectedManagerIds(new Set(assigned.map((m) => m.id)));
+    } catch (e) {
+      setManagersError((e as Error).message);
+    } finally {
+      setManagersLoading(false);
+    }
+  }, [siteId, isAdmin]);
+
+  const saveManagers = useCallback(async () => {
+    if (!siteId) return;
+    setManagersSaving(true);
+    setManagersError(null);
+    setManagersMsg(null);
+    try {
+      const updated = await api<SiteManagerUser[]>(`/sites/${siteId}/managers`, {
+        method: "PUT",
+        body: { userIds: Array.from(selectedManagerIds) },
+      });
+      setManagers(updated);
+      setSelectedManagerIds(new Set(updated.map((m) => m.id)));
+      setManagersMsg("Site managers updated.");
+    } catch (e) {
+      setManagersError((e as Error).message);
+    } finally {
+      setManagersSaving(false);
+    }
+  }, [siteId, selectedManagerIds]);
+
+  // Show the union of assignable candidates and currently-assigned managers, so
+  // an already-assigned manager who has since gone inactive still renders (and
+  // can be unchecked) instead of silently vanishing from the list.
+  const managerOptions = useMemo(() => {
+    const byId = new Map<string, SiteManagerUser>();
+    for (const c of managerCandidates) byId.set(c.id, c);
+    for (const m of managers) if (!byId.has(m.id)) byId.set(m.id, m);
+    return Array.from(byId.values()).sort((a, b) =>
+      `${a.lastName} ${a.firstName}`.localeCompare(`${b.lastName} ${b.firstName}`),
+    );
+  }, [managerCandidates, managers]);
+
+  const managersDirty = useMemo(() => {
+    const current = new Set(managers.map((m) => m.id));
+    if (current.size !== selectedManagerIds.size) return true;
+    for (const id of selectedManagerIds) if (!current.has(id)) return true;
+    return false;
+  }, [managers, selectedManagerIds]);
 
   const loadTimeEntries = useCallback(async () => {
     if (!siteId) return;
@@ -562,7 +654,7 @@ export function SiteDetailPage() {
     URL.revokeObjectURL(url);
   }
 
-  useEffect(() => { loadSite(); loadCheckpoints(); loadScans(); }, [loadSite, loadCheckpoints, loadScans]);
+  useEffect(() => { loadSite(); loadCheckpoints(); loadScans(); loadManagers(); }, [loadSite, loadCheckpoints, loadScans, loadManagers]);
 
   useEffect(() => { void loadTimeEntries(); }, [loadTimeEntries]);
 
@@ -868,7 +960,110 @@ export function SiteDetailPage() {
         <div className="p-6 space-y-8">
           <SiteRateCard siteId={site.id} />
 
-          {isAdmin && <SiteManagersCard siteId={site.id} />}
+          {isAdmin && (
+            <section>
+              <div className="flex items-center justify-between mb-3 gap-2 flex-wrap">
+                <h2 className="text-lg font-semibold inline-flex items-center gap-2">
+                  <UserCog className="w-4 h-4" /> Site managers
+                </h2>
+                {managersDirty && (
+                  <Button size="sm" onClick={saveManagers} disabled={managersSaving}>
+                    {managersSaving ? <Loader2 className="w-3.5 h-3.5 mr-1 animate-spin" /> : null}
+                    Save changes
+                  </Button>
+                )}
+              </div>
+              <p className="text-sm text-muted-foreground max-w-3xl mb-3">
+                Site managers can schedule shifts, approve officer claims, and approve time
+                entries for <span className="font-medium text-foreground">{site.name}</span> —
+                scoped to only the sites they manage. They never see pay/bill rates, payroll, or
+                invoices.
+              </p>
+              {managersError && (
+                <div className="mb-3 text-sm text-destructive border border-destructive/40 rounded px-3 py-2">
+                  {managersError}
+                </div>
+              )}
+              {managersMsg && (
+                <div className="mb-3 inline-flex items-center gap-2 text-sm text-emerald-800 bg-emerald-50 border border-emerald-200 rounded px-3 py-2">
+                  {managersMsg}
+                </div>
+              )}
+              {managersLoading ? (
+                <div className="text-sm text-muted-foreground border rounded p-4 inline-flex items-center gap-2">
+                  <Loader2 className="w-4 h-4 animate-spin" /> Loading managers…
+                </div>
+              ) : managerOptions.length === 0 ? (
+                <div className="text-sm text-muted-foreground border rounded p-4">
+                  No site manager accounts yet. Set a user's role to “Site Manager” in{" "}
+                  <Link href="/tables/users" className="underline font-medium">Users</Link> to
+                  assign one here.
+                </div>
+              ) : (
+                <div className="border rounded divide-y max-w-2xl">
+                  {managerOptions.map((c) => {
+                    const checked = selectedManagerIds.has(c.id);
+                    return (
+                      <label
+                        key={c.id}
+                        className="flex items-center gap-3 px-3 py-2 cursor-pointer hover:bg-muted/50"
+                      >
+                        <input
+                          type="checkbox"
+                          checked={checked}
+                          onChange={(e) => {
+                            const on = e.target.checked;
+                            setSelectedManagerIds((prev) => {
+                              const next = new Set(prev);
+                              if (on) next.add(c.id);
+                              else next.delete(c.id);
+                              return next;
+                            });
+                          }}
+                        />
+                        <span className="flex-1 text-sm">
+                          <span className="font-medium">{c.firstName} {c.lastName}</span>
+                          <span className="text-muted-foreground"> · {c.email}</span>
+                        </span>
+                      </label>
+                    );
+                  })}
+                </div>
+              )}
+            </section>
+          )}
+
+          {canCreateShift && (
+            <section>
+              <div className="flex items-center justify-between mb-3 gap-2 flex-wrap">
+                <h2 className="text-lg font-semibold inline-flex items-center gap-2">
+                  <CalendarPlus className="w-4 h-4" /> Shifts
+                </h2>
+                <div className="flex gap-2">
+                  <Button size="sm" onClick={() => { setShiftMsg(null); setCreatingShift(true); }}>
+                    <Plus className="w-3.5 h-3.5 mr-1" /> New shift
+                  </Button>
+                  {isAdmin && (
+                    <Button size="sm" variant="outline" onClick={() => { setShiftMsg(null); setRepeatingShift(true); }}>
+                      <Repeat className="w-3.5 h-3.5 mr-1" /> Repeating shifts
+                    </Button>
+                  )}
+                </div>
+              </div>
+              <p className="text-sm text-muted-foreground max-w-3xl">
+                Post a one-off shift{isAdmin ? " or a recurring series" : ""} for{" "}
+                <span className="font-medium text-foreground">{site.name}</span>. The site is
+                prefilled, and pay/bill rates default to this site's rate card for the chosen
+                license level — override any field per shift.
+              </p>
+              {shiftMsg && (
+                <div className="mt-3 inline-flex items-center gap-2 text-sm text-emerald-800 bg-emerald-50 border border-emerald-200 rounded px-3 py-2">
+                  <span>{shiftMsg}</span>
+                  <Link href="/tables/shifts" className="underline font-medium">View all shifts</Link>
+                </div>
+              )}
+            </section>
+          )}
 
           <SubcontractorQrCard siteId={site.id} siteName={site.name} />
 
@@ -1439,6 +1634,24 @@ export function SiteDetailPage() {
           }}
         />
       )}
+
+      {site && canCreateShift && (
+        <ShiftDialog
+          open={creatingShift}
+          onOpenChange={setCreatingShift}
+          initial={shiftCreateInitial}
+          onSaved={() => { setCreatingShift(false); setShiftMsg("New shift created for this site."); }}
+        />
+      )}
+
+      {site && isAdmin && (
+        <RepeatingShiftDialog
+          open={repeatingShift}
+          onOpenChange={setRepeatingShift}
+          initialSiteId={site.id}
+          onCreated={() => { setRepeatingShift(false); setShiftMsg("Repeating shifts created for this site."); }}
+        />
+      )}
     </div>
   );
 }
@@ -1456,7 +1669,7 @@ type SiteRateRow = {
   licenseLevel: number;
   payRate: string;
   billRate: string;
-  label: string | null;
+  label: string;
 };
 
 const LEVEL_OPTIONS: { value: number; name: string }[] = [
@@ -1464,139 +1677,6 @@ const LEVEL_OPTIONS: { value: number; name: string }[] = [
   { value: 3, name: "L3 Armed" },
   { value: 4, name: "L4 / PPO" },
 ];
-
-type SiteManagerUser = {
-  id: string;
-  firstName: string | null;
-  lastName: string | null;
-  email: string | null;
-};
-
-function managerLabel(u: SiteManagerUser): string {
-  const name = [u.firstName, u.lastName].filter(Boolean).join(" ").trim();
-  return name || u.email || u.id;
-}
-
-// Admin-only card on the Site Detail page: assign one or more Site Managers to
-// this site. Membership here is the single source of truth for a manager's
-// site-scoped powers (manage shifts, approve claims/time entries) and for
-// routing site-manager notifications. Managers see NO finance and operate from
-// the mobile app; admins do the assignment here on the web.
-function SiteManagersCard({ siteId }: { siteId: string }) {
-  const [assigned, setAssigned] = useState<SiteManagerUser[]>([]);
-  const [available, setAvailable] = useState<SiteManagerUser[]>([]);
-  const [selected, setSelected] = useState<Set<string>>(new Set());
-  const [loading, setLoading] = useState(true);
-  const [saving, setSaving] = useState(false);
-  const [err, setErr] = useState<string | null>(null);
-
-  const load = useCallback(async () => {
-    setLoading(true);
-    setErr(null);
-    try {
-      const [assignedRows, candidateRows] = await Promise.all([
-        api<SiteManagerUser[]>(`/sites/${siteId}/managers`),
-        api<SiteManagerUser[]>(`/site-manager-candidates`),
-      ]);
-      setAssigned(assignedRows ?? []);
-      setAvailable(candidateRows ?? []);
-      setSelected(new Set((assignedRows ?? []).map((m) => m.id)));
-    } catch (e) {
-      setErr((e as Error).message);
-    } finally {
-      setLoading(false);
-    }
-  }, [siteId]);
-
-  useEffect(() => { void load(); }, [load]);
-
-  const assignedSet = useMemo(() => new Set(assigned.map((m) => m.id)), [assigned]);
-  const dirty = useMemo(() => {
-    if (selected.size !== assignedSet.size) return true;
-    for (const id of selected) if (!assignedSet.has(id)) return true;
-    return false;
-  }, [selected, assignedSet]);
-
-  function toggle(userId: string) {
-    setSelected((prev) => {
-      const next = new Set(prev);
-      if (next.has(userId)) next.delete(userId); else next.add(userId);
-      return next;
-    });
-  }
-
-  async function save() {
-    setSaving(true);
-    setErr(null);
-    try {
-      await api(`/sites/${siteId}/managers`, {
-        method: "PUT",
-        body: JSON.stringify({ userIds: [...selected] }),
-      });
-      await load();
-    } catch (e) {
-      setErr((e as Error).message);
-    } finally {
-      setSaving(false);
-    }
-  }
-
-  return (
-    <section>
-      <div className="flex items-center justify-between mb-3">
-        <h2 className="text-lg font-semibold inline-flex items-center gap-2">
-          Site managers
-        </h2>
-        <div className="text-xs text-muted-foreground">
-          Assign Site Managers to oversee this site's shifts, claims, and time entries from the mobile app. Managers see no finance.
-        </div>
-      </div>
-
-      {err && (
-        <div className="mb-3 text-sm text-destructive border border-destructive/40 rounded px-3 py-2">{err}</div>
-      )}
-
-      {loading ? (
-        <div className="text-sm text-muted-foreground">Loading…</div>
-      ) : available.length === 0 ? (
-        <div className="text-sm text-muted-foreground border rounded p-4">
-          No Site Manager accounts exist yet. Promote a user to the Site Manager role to assign them here.
-        </div>
-      ) : (
-        <>
-          <div className="border rounded divide-y mb-3">
-            {available.map((m) => {
-              const checked = selected.has(m.id);
-              return (
-                <label key={m.id} className="flex items-center gap-3 px-3 py-2 cursor-pointer hover:bg-muted/40">
-                  <input
-                    type="checkbox"
-                    className="h-4 w-4"
-                    checked={checked}
-                    onChange={() => toggle(m.id)}
-                  />
-                  <span className="flex-1 min-w-0">
-                    <span className="block text-sm font-medium truncate">{managerLabel(m)}</span>
-                    {m.email && <span className="block text-xs text-muted-foreground truncate">{m.email}</span>}
-                  </span>
-                </label>
-              );
-            })}
-          </div>
-          <div className="flex items-center gap-3">
-            <Button size="sm" onClick={() => void save()} disabled={!dirty || saving}>
-              {saving ? <Loader2 className="w-3.5 h-3.5 mr-1 animate-spin" /> : null}
-              Save managers
-            </Button>
-            <span className="text-xs text-muted-foreground">
-              {selected.size} assigned
-            </span>
-          </div>
-        </>
-      )}
-    </section>
-  );
-}
 
 function SiteRateCard({ siteId }: { siteId: string }) {
   const [rows, setRows] = useState<SiteRateRow[]>([]);
@@ -1608,6 +1688,7 @@ function SiteRateCard({ siteId }: { siteId: string }) {
   const [draftPay, setDraftPay] = useState<string>("");
   const [draftBill, setDraftBill] = useState<string>("");
   const [draftLabel, setDraftLabel] = useState<string>("");
+  const [draftId, setDraftId] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
 
   const load = useCallback(async () => {
@@ -1625,22 +1706,11 @@ function SiteRateCard({ siteId }: { siteId: string }) {
 
   useEffect(() => { void load(); }, [load]);
 
-  // Configured levels — keep the picker honest about which slots are free vs
-  // already set (PUT upserts on conflict so re-using a level just edits it,
-  // but pre-selecting an unused level is a friendlier default).
-  const usedLevels = useMemo(() => new Set(rows.map((r) => r.licenseLevel)), [rows]);
-  useEffect(() => {
-    // When the row list changes, nudge the form to the first unused level so
-    // adding a second rate doesn't silently overwrite the first.
-    const firstFree = LEVEL_OPTIONS.find((o) => !usedLevels.has(o.value));
-    if (firstFree && !usedLevels.has(draftLevel) === false) {
-      setDraftLevel(firstFree.value);
-    }
-    // intentionally only depends on the rows snapshot
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [rows]);
-
   async function saveDraft() {
+    if (!draftLabel.trim()) {
+      setErr("Label is required — it identifies this rate in shift pickers");
+      return;
+    }
     const pay = Number(draftPay);
     const bill = Number(draftBill);
     if (!Number.isFinite(pay) || pay < 0 || !Number.isFinite(bill) || bill < 0) {
@@ -1653,15 +1723,17 @@ function SiteRateCard({ siteId }: { siteId: string }) {
       await api(`/admin/sites/${siteId}/rates`, {
         method: "PUT",
         body: JSON.stringify({
+          ...(draftId ? { id: draftId } : {}),
           licenseLevel: draftLevel,
           payRate: pay,
           billRate: bill,
-          label: draftLabel.trim() || null,
+          label: draftLabel.trim(),
         }),
       });
       setDraftPay("");
       setDraftBill("");
       setDraftLabel("");
+      setDraftId(null);
       await load();
     } catch (e) {
       setErr((e as Error).message);
@@ -1670,17 +1742,20 @@ function SiteRateCard({ siteId }: { siteId: string }) {
     }
   }
 
-  async function editExisting(row: SiteRateRow) {
-    // Populate the form with this row so the admin can adjust + re-save
-    // (PUT upserts on the (siteId, level) pair).
+  function editExisting(row: SiteRateRow) {
+    // Track the id so PUT can UPDATE in-place, supporting label renames without
+    // orphaning the old row or breaking shift.siteRateId back-references.
+    setDraftId(row.id);
     setDraftLevel(row.licenseLevel);
     setDraftPay(String(parseFloat(row.payRate)));
     setDraftBill(String(parseFloat(row.billRate)));
-    setDraftLabel(row.label ?? "");
+    setDraftLabel(row.label);
   }
 
   async function removeRow(row: SiteRateRow) {
-    if (!confirm(`Remove the ${LEVEL_OPTIONS.find((o) => o.value === row.licenseLevel)?.name ?? `L${row.licenseLevel}`} rate for this site?`)) return;
+    const levelName = LEVEL_OPTIONS.find((o) => o.value === row.licenseLevel)?.name ?? `L${row.licenseLevel}`;
+    const displayName = row.label ? `${levelName} — ${row.label}` : levelName;
+    if (!confirm(`Remove the "${displayName}" rate for this site? Existing shifts that referenced it will keep their snapshotted pay/bill amounts.`)) return;
     try {
       await api(`/admin/site-rates/${row.id}`, { method: "DELETE" });
       await load();
@@ -1727,8 +1802,8 @@ function SiteRateCard({ siteId }: { siteId: string }) {
               header: "Label",
               mobile: "meta",
               tdClassName: "text-muted-foreground",
-              cell: (r) => r.label ?? <span className="text-muted-foreground/60">—</span>,
-              mobileCell: (r) => <span className="text-sm text-muted-foreground text-right">{r.label ?? "—"}</span>,
+              cell: (r) => r.label,
+              mobileCell: (r) => <span className="text-sm text-muted-foreground text-right">{r.label}</span>,
             },
             {
               id: "pay",
@@ -1777,8 +1852,19 @@ function SiteRateCard({ siteId }: { siteId: string }) {
       )}
 
       <div className="border rounded p-3 bg-brand-cream/20">
-        <div className="text-xs font-semibold uppercase tracking-wide text-muted-foreground mb-2">
-          {usedLevels.has(draftLevel) ? "Update rate" : "Add rate"}
+        <div className="flex items-center justify-between mb-2">
+          <div className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+            {draftId ? "Edit rate" : "Add rate"}
+          </div>
+          {draftId && (
+            <button
+              type="button"
+              onClick={() => { setDraftId(null); setDraftPay(""); setDraftBill(""); setDraftLabel(""); }}
+              className="text-xs text-muted-foreground hover:text-foreground underline-offset-2 hover:underline"
+            >
+              Cancel edit
+            </button>
+          )}
         </div>
         <div className="grid grid-cols-1 md:grid-cols-5 gap-2 items-end">
           <div>
@@ -1791,13 +1877,13 @@ function SiteRateCard({ siteId }: { siteId: string }) {
             >
               {LEVEL_OPTIONS.map((o) => (
                 <option key={o.value} value={String(o.value)}>
-                  {o.name}{usedLevels.has(o.value) ? " (set)" : ""}
+                  {o.name}
                 </option>
               ))}
             </select>
           </div>
           <div>
-            <label className="text-xs text-muted-foreground">Label (optional)</label>
+            <label className="text-xs text-muted-foreground">Label <span className="text-destructive">*</span></label>
             <input
               value={draftLabel}
               onChange={(e) => setDraftLabel(e.target.value)}
@@ -1827,7 +1913,7 @@ function SiteRateCard({ siteId }: { siteId: string }) {
           </div>
           <Button onClick={saveDraft} disabled={saving || draftPay === "" || draftBill === ""}>
             <Plus className="w-3.5 h-3.5 mr-1" />
-            {saving ? "Saving…" : usedLevels.has(draftLevel) ? "Update" : "Add"}
+            {saving ? "Saving…" : draftId ? "Update" : "Add"}
           </Button>
         </div>
       </div>
@@ -1896,7 +1982,7 @@ function SubcontractorQrCard({ siteId, siteName }: { siteId: string; siteName: s
     QRCode.toCanvas(canvasRef.current, clockUrl, {
       width: 220,
       margin: 2,
-      color: { dark: "#0c0a08", light: "#f0e4c0" },
+      color: { dark: "#080c18", light: "#f0e6c8" },
     }).catch(() => {});
   }, [clockUrl]);
 
@@ -1907,7 +1993,7 @@ function SubcontractorQrCard({ siteId, siteName }: { siteId: string; siteName: s
     if (!win) return;
     win.document.write(`
       <html><head><title>Subcontractor QR — ${siteName}</title>
-      <style>body{font-family:sans-serif;text-align:center;padding:40px;background:#f0e4c0;color:#0c0a08}
+      <style>body{font-family:sans-serif;text-align:center;padding:40px;background:#f0e6c8;color:#080c18}
       h1{font-size:18px;margin-bottom:4px}p{font-size:13px;margin:4px 0;opacity:.7}
       .url{font-size:11px;word-break:break-all;margin-top:12px;background:#fff;padding:8px;border-radius:6px}
       </style></head><body>
@@ -1940,7 +2026,7 @@ function SubcontractorQrCard({ siteId, siteName }: { siteId: string; siteName: s
         <div className="text-sm text-muted-foreground">Loading…</div>
       ) : clockUrl ? (
         <div className="border rounded p-4 flex flex-col sm:flex-row gap-4 items-center sm:items-start">
-          <div className="flex justify-center p-3 rounded-lg shrink-0" style={{ background: "#f0e4c0" }}>
+          <div className="flex justify-center p-3 rounded-lg shrink-0" style={{ background: "#f0e6c8" }}>
             <canvas ref={canvasRef} />
           </div>
           <div className="flex-1 min-w-0 space-y-3">
@@ -1969,7 +2055,7 @@ function SubcontractorQrCard({ siteId, siteName }: { siteId: string; siteName: s
           </div>
           <Button
             size="sm"
-            style={{ background: "#0c0a08", color: "#f0e4c0" }}
+            style={{ background: "#080c18", color: "#f0e6c8" }}
             onClick={() => generate(false)}
             disabled={working}
           >

@@ -3,14 +3,13 @@ import { radioChannelsTable } from "./radioChannels";
 import { usersTable } from "./users";
 
 /**
- * One row per push-to-talk transmission — audit metadata only (who spoke,
- * on which channel, when, for how long, why it ended). Live audio rides a
- * LiveKit room encrypted end-to-end and is NEVER persisted, so no recording
- * is captured or stored.
- *
- * The `audioObjectKey` / `audioMime` / `audioBytes` columns are legacy from
- * the old WS-buffered-recording path. They are kept (nullable, always null)
- * to avoid a migration; nothing writes them anymore.
+ * One row per push-to-talk transmission. When the speaker releases
+ * (or auto-times-out / disconnects), the gateway also concatenates
+ * the buffered audio frames and uploads them to private object
+ * storage; the resulting `/objects/...` path is stored in
+ * `audioObjectKey` so admins can play back past transmissions.
+ * Recordings are skipped if the per-transmission buffer ever exceeds
+ * the gateway's safety cap (see RECORD_MAX_BYTES in radioGateway.ts).
  */
 export const radioTransmissionsTable = pgTable("radio_transmissions", {
   id: uuid("id").primaryKey().defaultRandom(),

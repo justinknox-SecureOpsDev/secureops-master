@@ -11,6 +11,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { BUSINESS_TIME_ZONE } from "@/lib/format";
 
 const API = "/api";
 
@@ -38,7 +39,7 @@ function fmtDateTime(iso: string): string {
   if (isNaN(d.getTime())) return iso;
   return d.toLocaleString(undefined, {
     weekday: "short", month: "short", day: "numeric",
-    hour: "numeric", minute: "2-digit",
+    hour: "numeric", minute: "2-digit", timeZone: BUSINESS_TIME_ZONE,
   });
 }
 
@@ -105,7 +106,7 @@ export default function SubcontractorClockInPage() {
 
   if (loading) {
     return (
-      <div className="min-h-screen flex items-center justify-center" style={{ background: "#0c0a08" }}>
+      <div className="min-h-screen flex items-center justify-center" style={{ background: "#080c18" }}>
         <Loader2 className="w-6 h-6 animate-spin text-white" />
       </div>
     );
@@ -113,10 +114,10 @@ export default function SubcontractorClockInPage() {
 
   if (error || !siteInfo) {
     return (
-      <div className="min-h-screen flex items-center justify-center p-6" style={{ background: "#0c0a08" }}>
+      <div className="min-h-screen flex items-center justify-center p-6" style={{ background: "#080c18" }}>
         <div className="max-w-md w-full bg-white rounded-xl p-6 text-center">
           <AlertTriangle className="w-8 h-8 mx-auto mb-3 text-amber-600" />
-          <div className="text-lg font-semibold mb-1" style={{ color: "#0c0a08" }}>QR Code Unavailable</div>
+          <div className="text-lg font-semibold mb-1" style={{ color: "#080c18" }}>QR Code Unavailable</div>
           <div className="text-sm text-muted-foreground">{error ?? "This QR code is no longer valid."}</div>
           <div className="text-xs text-muted-foreground mt-4">
             Please ask your site supervisor for an updated QR code.
@@ -127,10 +128,10 @@ export default function SubcontractorClockInPage() {
   }
 
   return (
-    <div className="min-h-screen" style={{ background: "#0c0a08" }}>
-      <div style={{ background: "#0c0a08", color: "#f0e4c0" }}>
+    <div className="min-h-screen" style={{ background: "#080c18" }}>
+      <div style={{ background: "#080c18", color: "#f0e6c8" }}>
         <div className="max-w-lg mx-auto px-6 py-5 flex items-center gap-3">
-          <QrCode className="w-5 h-5" style={{ color: "#c9a04a" }} />
+          <QrCode className="w-5 h-5" style={{ color: "#c9a84c" }} />
           <div>
             <div className="font-bold text-base">Williams Council Security Group</div>
             <div className="text-xs opacity-70">Subcontractor Clock-In / Clock-Out</div>
@@ -141,7 +142,7 @@ export default function SubcontractorClockInPage() {
       <div className="max-w-lg mx-auto p-6 space-y-4">
         {/* Site context */}
         <div className="bg-white rounded-xl p-5">
-          <div className="text-sm font-semibold mb-3" style={{ color: "#0c0a08" }}>Site</div>
+          <div className="text-sm font-semibold mb-3" style={{ color: "#080c18" }}>Site</div>
           <div className="flex items-center gap-2 text-sm">
             <MapPin className="w-4 h-4 shrink-0 text-muted-foreground" />
             <span className="font-medium text-foreground">{siteInfo.siteName}</span>
@@ -164,8 +165,8 @@ export default function SubcontractorClockInPage() {
               </>
             ) : (
               <>
-                <LogOut className="w-12 h-12 mx-auto" style={{ color: "#c9a04a" }} />
-                <div className="text-lg font-semibold" style={{ color: "#0c0a08" }}>You're clocked out</div>
+                <LogOut className="w-12 h-12 mx-auto" style={{ color: "#c9a84c" }} />
+                <div className="text-lg font-semibold" style={{ color: "#080c18" }}>You're clocked out</div>
                 <div className="text-sm text-muted-foreground">
                   {result.name} · {result.company}
                   <div className="mt-1">
@@ -187,7 +188,7 @@ export default function SubcontractorClockInPage() {
           </div>
         ) : (
           <div className="bg-white rounded-xl p-5 space-y-4">
-            <div className="text-sm font-semibold" style={{ color: "#0c0a08" }}>Enter your details</div>
+            <div className="text-sm font-semibold" style={{ color: "#080c18" }}>Enter your details</div>
             <p className="text-xs text-muted-foreground">
               First scan clocks you <strong>in</strong>. Scan again with the same name &amp; company to clock <strong>out</strong>.
             </p>
@@ -271,7 +272,7 @@ export default function SubcontractorClockInPage() {
             </div>
             <Button
               className="w-full"
-              style={{ background: "#0c0a08", color: "#f0e4c0" }}
+              style={{ background: "#080c18", color: "#f0e6c8" }}
               onClick={handleSubmit}
               disabled={submitting}
             >

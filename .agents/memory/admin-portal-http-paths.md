@@ -1,15 +1,22 @@
 ---
 name: admin-portal HTTP paths & 401 auto-logout
-description: Admin-portal has TWO authenticated HTTP paths; cross-cutting request behavior (e.g. 401 auto-logout) must be enforced on BOTH, not just api().
+description: Admin-portal has THREE authenticated HTTP paths (api(), fetchWithAuth, generated orval customFetch); cross-cutting request behavior (401 auto-logout, auth headers) must cover ALL of them.
 ---
 
-The admin-portal does NOT route all HTTP through one helper. There are two
-authenticated paths in `src/lib/api.ts`:
+The admin-portal does NOT route all HTTP through one helper. There are three
+authenticated paths:
 
-- `api()` — JSON-in/JSON-out; throws `ApiError`. Used by grids, dashboards, most CRUD.
-- `fetchWithAuth()` — returns the raw `Response`; used for blob/PDF/CSV downloads
+- `api()` (`src/lib/api.ts`) — JSON-in/JSON-out; throws `ApiError`. Used by grids, dashboards, most CRUD.
+- `fetchWithAuth()` (`src/lib/api.ts`) — returns the raw `Response`; used for blob/PDF/CSV downloads
   and callers needing custom status handling (PayRun, SubcontractorPayRun, Exports,
   DailyReports, Radio audio, AuditLog, DataGrid/RowFormDialog PDFs, Client*).
+- **Generated orval hooks** (`@workspace/api-client-react` → `custom-fetch.ts`) — used by
+  Dashboard, Analytics, SiteDetailPage. Auth is wired PER BUNDLE via a module-level
+  `setAuthTokenGetter(getToken)` (lives at top of `src/lib/api.ts`). **This wiring was
+  missing until July 2026** — every generated hook silently sent NO Authorization header
+  and 401'd in the browser ("failing to load data") while curl tests with explicit
+  headers passed. Any new web bundle consuming the generated client must call
+  `setAuthTokenGetter` before the first query.
 
 **Rule:** any cross-cutting authenticated-request behavior (401 auto-logout,
 ret/auth headers, tracing) must live in BOTH `api()` and `fetchWithAuth()`, or be

@@ -13,8 +13,9 @@ import { sitesTable } from "./sites";
  * canonical payRate / billRate reflect the site + license-level combo. Admins
  * can still override on the shift itself when a one-off rate is needed.
  *
- * One row per (siteId, licenseLevel) — upsert on conflict enforced by
- * unique("site_rates_site_level_uniq") below.
+ * Many rows per (siteId, licenseLevel) are now allowed — each is distinguished by a
+ * required label (e.g. "Day post", "Armed patrol"). The unique key is (siteId,
+ * licenseLevel, label) so two rates for the same level must have different labels.
  * licenseLevel mirrors the shift/license hierarchy: 2=L2 Unarmed, 3=L3 Armed, 4=L4/PPO.
  */
 export const siteRatesTable = pgTable("site_rates", {
@@ -23,9 +24,11 @@ export const siteRatesTable = pgTable("site_rates", {
   licenseLevel: integer("license_level").notNull(),
   payRate: numeric("pay_rate", { precision: 10, scale: 2 }).notNull(),
   billRate: numeric("bill_rate", { precision: 10, scale: 2 }).notNull(),
-  label: text("label"),
+  label: text("label").notNull(),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow().$onUpdate(() => new Date()),
-}, (t) => [unique("site_rates_site_level_uniq").on(t.siteId, t.licenseLevel)]);
+}, (t) => ({
+  siteLevelLabelUniq: unique("site_rates_site_level_label_uniq").on(t.siteId, t.licenseLevel, t.label),
+}));
 
 export type SiteRate = typeof siteRatesTable.$inferSelect;

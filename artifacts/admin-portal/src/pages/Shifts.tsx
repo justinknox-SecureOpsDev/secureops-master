@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { api } from "@/lib/api";
+import { formatTime, formatDateTime, dateKey } from "@/lib/format";
 import { useDeepLinkFocus, useFirstQueryParam } from "@/hooks/useDeepLinkFocus";
 import { getTable } from "@/lib/tables";
 import { RowFormDialog } from "@/components/RowFormDialog";
@@ -56,18 +57,11 @@ const ONE_WEEK_MS = 7 * 24 * 60 * 60 * 1000;
 const LOAD_MORE_PAGE = 50;
 
 function fmtDateTime(iso: string): string {
-  const d = new Date(iso);
-  if (Number.isNaN(d.getTime())) return iso;
-  return d.toLocaleString(undefined, {
-    weekday: "short", month: "short", day: "numeric",
-    hour: "numeric", minute: "2-digit",
-  });
+  return formatDateTime(iso);
 }
 
 function fmtTimeOfDay(iso: string): string {
-  const d = new Date(iso);
-  if (Number.isNaN(d.getTime())) return iso;
-  return d.toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" });
+  return formatTime(iso);
 }
 
 // "HH:MM" in the supplied IANA zone (24h) for an ISO instant. Used to
@@ -899,7 +893,7 @@ function ShiftRow({
 }) {
   const lvl = levelBadge(shift.requiredLicenseLevel);
   const filled = (shift.assignments ?? []).filter((a) => a.status === "accepted").length;
-  const sameDay = new Date(shift.startTime).toDateString() === new Date(shift.endTime).toDateString();
+  const sameDay = dateKey(shift.startTime) === dateKey(shift.endTime);
   return (
     <div
       ref={focusRef as React.Ref<HTMLDivElement> | undefined}

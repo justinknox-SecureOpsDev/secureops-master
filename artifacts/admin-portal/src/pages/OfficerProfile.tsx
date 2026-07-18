@@ -3,6 +3,7 @@ import { Radio } from "lucide-react";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { Link, useRoute, useLocation } from "wouter";
 import { api } from "@/lib/api";
+import { BUSINESS_TIME_ZONE } from "@/lib/format";
 import { openSignedObject } from "@/lib/upload";
 import { useAuth } from "@/lib/auth";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -168,9 +169,9 @@ function buildOfficerMapHtml(
   return `<!doctype html><html><head><meta charset="utf-8"/>
 <meta name="viewport" content="width=device-width,initial-scale=1"/>
 <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
-<style>html,body,#m{margin:0;padding:0;height:100%;background:#0c0a08}
-.popup{font:13px -apple-system,system-ui,sans-serif}.popup b{color:#0c0a08}
-.site-pin{display:flex;align-items:center;justify-content:center;width:24px;height:24px;border-radius:5px;background:#0c0a08;color:#c9a04a;border:2px solid #c9a04a;font:bold 11px -apple-system,system-ui,sans-serif;box-shadow:0 1px 4px rgba(0,0,0,.35)}</style>
+<style>html,body,#m{margin:0;padding:0;height:100%;background:#080c18}
+.popup{font:13px -apple-system,system-ui,sans-serif}.popup b{color:#080c18}
+.site-pin{display:flex;align-items:center;justify-content:center;width:24px;height:24px;border-radius:5px;background:#080c18;color:#c9a84c;border:2px solid #c9a84c;font:bold 11px -apple-system,system-ui,sans-serif;box-shadow:0 1px 4px rgba(0,0,0,.35)}</style>
 </head><body><div id="m"></div>
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 <script>
@@ -200,8 +201,8 @@ if (D.trail && D.trail.length >= 2) {
 }
 if (D.site) {
   L.circle([D.site.lat, D.site.lng], {
-    radius: D.radiusMeters, color:'#c9a04a', weight:1, opacity:0.5,
-    fillColor:'#c9a04a', fillOpacity:0.08, interactive:false,
+    radius: D.radiusMeters, color:'#c9a84c', weight:1, opacity:0.5,
+    fillColor:'#c9a84c', fillOpacity:0.08, interactive:false,
   }).addTo(group);
   const icon = L.divIcon({ className:'', html:'<div class="site-pin">S</div>',
     iconSize:[24,24], iconAnchor:[12,12] });
@@ -230,7 +231,7 @@ window.addEventListener('message', function(e){
       || !isFinite(m.lat) || !isFinite(m.lng)) return;
   if (!replayMarker){
     replayMarker = L.circleMarker([m.lat, m.lng], {
-      radius: 9, color:'#c9a04a', fillColor:'#c9a04a', fillOpacity:0.95,
+      radius: 9, color:'#c9a84c', fillColor:'#c9a84c', fillOpacity:0.95,
       weight:3,
     }).addTo(map);
     replayMarker.bindTooltip('', {
@@ -279,7 +280,7 @@ function fmtDateTime(iso: string | null | undefined): string {
   if (!iso) return "—";
   return new Date(iso).toLocaleString(undefined, {
     weekday: "short", month: "short", day: "numeric",
-    hour: "numeric", minute: "2-digit",
+    hour: "numeric", minute: "2-digit", timeZone: BUSINESS_TIME_ZONE,
   });
 }
 
@@ -288,6 +289,7 @@ function fmtDateTime(iso: string | null | undefined): string {
 function fmtClock(t: number): string {
   return new Date(t).toLocaleString(undefined, {
     weekday: "short", hour: "numeric", minute: "2-digit", second: "2-digit",
+    timeZone: BUSINESS_TIME_ZONE,
   });
 }
 
@@ -301,9 +303,17 @@ function endOfToday(): Date {
 // ── Full-profile helpers (admin-only HR view) ───────────────────────────
 function fmtDate(iso: string | null | undefined): string | null {
   if (!iso) return null;
-  const d = new Date(iso);
+  // This helper receives both timestamps (createdAt / login times → Central)
+  // and date-only pg values (dateOfBirth / siaLicenseExpiry, "YYYY-MM-DD").
+  // Date-only values parse as UTC midnight and format in UTC so the literal
+  // calendar date shows regardless of the viewer's timezone.
+  const dateOnly = /^\d{4}-\d{2}-\d{2}$/.test(iso);
+  const d = new Date(dateOnly ? `${iso}T00:00:00Z` : iso);
   if (Number.isNaN(d.getTime())) return String(iso);
-  return d.toLocaleDateString(undefined, { year: "numeric", month: "short", day: "numeric" });
+  return d.toLocaleDateString(undefined, {
+    year: "numeric", month: "short", day: "numeric",
+    timeZone: dateOnly ? "UTC" : BUSINESS_TIME_ZONE,
+  });
 }
 
 function fmtRate(v: string | number | null | undefined): string | null {
@@ -1164,7 +1174,7 @@ export default function OfficerProfilePage() {
                       setPlaying(false);
                       setScrubT(Number(e.target.value));
                     }}
-                    className="w-full accent-[#c9a04a]"
+                    className="w-full accent-[#c9a84c]"
                     aria-label="Trail replay time slider"
                     data-testid="officer-replay-slider"
                   />

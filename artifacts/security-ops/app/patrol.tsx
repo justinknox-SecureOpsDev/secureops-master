@@ -6,11 +6,11 @@ import {
 import { useColors } from "@/hooks/useColors";
 import { apiRequest } from "@/utils/api";
 import { notify } from "@/utils/confirm";
+import { BUSINESS_TIME_ZONE } from "@/utils/time";
 import { useRouter } from "expo-router";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { Feather } from "@expo/vector-icons";
 import * as Location from "expo-location";
-import { FeatureGate } from "@/components/FeatureGate";
 
 type Scan = {
   id: string;
@@ -23,18 +23,11 @@ function fmt(iso: string) {
   const d = new Date(iso);
   return d.toLocaleString(undefined, {
     month: "short", day: "numeric", hour: "numeric", minute: "2-digit",
+    timeZone: BUSINESS_TIME_ZONE,
   });
 }
 
 export default function PatrolScreen() {
-  return (
-    <FeatureGate feature="patrol">
-      <PatrolScreenInner />
-    </FeatureGate>
-  );
-}
-
-function PatrolScreenInner() {
   const colors = useColors();
   const router = useRouter();
 

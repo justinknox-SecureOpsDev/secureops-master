@@ -15,8 +15,8 @@ function Page({
   children: React.ReactNode;
 }) {
   return (
-    <div className="min-h-screen bg-[#f0e4c0] text-[#0c0a08]">
-      <header className="bg-[#0c0a08] text-white">
+    <div className="min-h-screen bg-[#f0e6c8] text-[#080c18]">
+      <header className="bg-[#080c18] text-white">
         <div className="max-w-3xl mx-auto px-6 py-6 flex items-center gap-3">
           <img
             src={`${import.meta.env.BASE_URL}logo-256.png`}
@@ -34,13 +34,12 @@ function Page({
         <p className="text-xs uppercase tracking-widest opacity-60 mb-8">
           Last updated {updated}
         </p>
-        <article className="prose prose-sm max-w-none [&_h2]:font-serif [&_h2]:text-xl [&_h2]:mt-8 [&_h2]:mb-3 [&_p]:my-3 [&_ul]:my-3 [&_ul]:list-disc [&_ul]:pl-5 [&_li]:my-1 [&_a]:text-[var(--brand-gold-ink)] [&_a]:underline">
+        <article className="prose prose-sm max-w-none [&_h2]:font-serif [&_h2]:text-xl [&_h2]:mt-8 [&_h2]:mb-3 [&_p]:my-3 [&_ul]:my-3 [&_ul]:list-disc [&_ul]:pl-5 [&_li]:my-1 [&_a]:text-[#c9a84c] [&_a]:underline">
           {children}
         </article>
-        <div className="mt-12 pt-6 border-t border-[#0c0a08]/20 flex flex-wrap items-center gap-4 text-xs">
+        <div className="mt-12 pt-6 border-t border-[#080c18]/20 flex flex-wrap items-center gap-4 text-xs">
           <Link href="/privacy" className="hover:underline">Privacy</Link>
           <Link href="/terms" className="hover:underline">Terms of Service</Link>
-          <Link href="/eula" className="hover:underline">EULA</Link>
           <Link href="/data-rights" className="hover:underline">Your Data Rights</Link>
           <span className="opacity-50 ml-auto">© {new Date().getFullYear()} {SHORT}</span>
         </div>
@@ -221,127 +220,6 @@ export function DataRightsPage() {
       </p>
 
       <h2>Contact</h2>
-      <p>
-        <a href={`mailto:${CONTACT_EMAIL}`}>{CONTACT_EMAIL}</a> · {POSTAL}.
-      </p>
-    </Page>
-  );
-}
-
-export function EulaPage() {
-  return (
-    <Page title="End User License Agreement" updated="July 2026">
-      <p>
-        This End User License Agreement ("EULA") is a legal agreement between you
-        and {COMPANY} ("{SHORT}", "we", "us") governing your use of the SecureOps
-        mobile application and admin portal (together, the "App"). By downloading,
-        installing, or using the App you agree to this EULA. If you do not agree,
-        do not use the App.
-      </p>
-
-      <h2>1. Licence</h2>
-      <p>
-        {SHORT} grants you a limited, non-exclusive, non-transferable, revocable
-        licence to use the App on devices you own or control, solely for your work
-        as authorised personnel of {SHORT} or its clients. The licence is tied to
-        your {SHORT}-issued account and ends when your authorisation or engagement
-        ends.
-      </p>
-
-      <h2>2. Restrictions</h2>
-      <ul>
-        <li>Do not copy, modify, reverse-engineer, or create derivative works of the App except as permitted by law.</li>
-        <li>Do not share your account, access data outside your role, or use the App for any unlawful purpose.</li>
-        <li>Do not misuse the emergency / panic feature, or falsify location, time, or incident data.</li>
-      </ul>
-
-      <h2>3. Location services and emergency features — important disclaimer</h2>
-      <p>
-        The App uses location-based APIs to support real-time security operations.
-        Specifically:
-      </p>
-      <ul>
-        <li>When you clock in, the App uses your device location to verify you are at your assigned site.</li>
-        <li>While you are on shift, the App periodically shares your live location with your organisation's dispatch and administrators so they can coordinate operations and respond if you leave your assigned site.</li>
-        <li>
-          When you activate the in-app <strong>emergency / panic</strong> feature,
-          the App creates a critical incident record identifying you and your
-          then-current device location, and attempts to notify your organisation's
-          administrators and dispatch of that alert and location through in-app
-          push notifications, SMS, and email (individual channels may be
-          unavailable). The App also presents a one-tap option to dial your
-          region's public emergency number (911 by default).
-        </li>
-      </ul>
-      <p>
-        <strong>
-          The App's emergency feature dispatches alerts to your organisation's own
-          dispatch and administrators. It is NOT a public emergency-response
-          service and is NOT a substitute for directly contacting official
-          emergency services (such as 911).
-        </strong>{" "}
-        In any life-threatening situation, call 911 (or your local emergency
-        number) directly.
-      </p>
-      <p>
-        Location data reported by mobile devices may be inaccurate, delayed,
-        incomplete, or unavailable because of GPS, network, device, permission, or
-        environmental conditions. Your use of the location and emergency features
-        is at your sole risk, and {SHORT} does not warrant that any alert or
-        location will be delivered, received, or acted upon within any particular
-        time.{" "}
-        <strong>
-          The App is not designed or intended for use in any situation where
-          inaccurate, delayed, or incomplete location data or alert delivery could
-          lead to death, personal injury, or severe physical or environmental
-          damage.
-        </strong>
-      </p>
-
-      <h2>4. Your responsibilities</h2>
-      <p>
-        For these features to function you must grant the location permissions the
-        App requests, keep the App updated, and keep your device charged and
-        connected. You remain responsible for exercising sound judgement and
-        following your organisation's safety procedures and applicable law; the App
-        supplements but does not replace those procedures or professional emergency
-        services.
-      </p>
-
-      <h2>5. Disclaimer of warranties</h2>
-      <p>
-        The App is provided "as is" and "as available" without warranties of any
-        kind, express or implied, including fitness for a particular purpose, to
-        the maximum extent permitted by law.
-      </p>
-
-      <h2>6. Limitation of liability</h2>
-      <p>
-        To the maximum extent permitted by law, {SHORT} is not liable for any
-        indirect, incidental, special, or consequential damages, or for any failure
-        or delay of alerts, notifications, or location data, arising from your use
-        of or inability to use the App. Nothing limits liability that cannot be
-        excluded by law.
-      </p>
-
-      <h2>7. Other terms</h2>
-      <p>
-        Your use of the App is also governed by our{" "}
-        <Link href="/privacy">Privacy Policy</Link> and{" "}
-        <Link href="/terms">Terms of Service</Link>. This EULA is governed by the
-        laws of the State of Texas, USA. If any provision is found unenforceable,
-        the remainder stays in effect.
-      </p>
-
-      <h2>8. Apple acknowledgement</h2>
-      <p>
-        You acknowledge that this EULA is between you and {SHORT} only, and not with
-        Apple, and that Apple is not responsible for the App or its content. Apple
-        and its subsidiaries are third-party beneficiaries of this EULA and may
-        enforce it against you.
-      </p>
-
-      <h2>9. Contact</h2>
       <p>
         <a href={`mailto:${CONTACT_EMAIL}`}>{CONTACT_EMAIL}</a> · {POSTAL}.
       </p>

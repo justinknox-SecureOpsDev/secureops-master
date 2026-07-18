@@ -109,6 +109,14 @@ function classifyAction(path: string): string | null {
   return null;
 }
 
+// Extract `{table, id}` from /admin/tables/:table[/:id] so the audit row
+// can be filtered by table + record. Returns nulls for non-matching paths.
+function parseAdminTablesPath(path: string): { table: string | null; id: string | null } {
+  const m = path.match(/^\/admin\/tables\/([^\/?]+)(?:\/([^\/?]+))?/);
+  if (!m) return { table: null, id: null };
+  return { table: m[1] ?? null, id: m[2] ?? null };
+}
+
 // The protection-detail (PPO) PUT body contains principal/threat PII, photos,
 // and medical notes. Its path is classified `shifts.write` by ACTION_RULES, so
 // without special handling the raw body would be persisted to the audit log.
@@ -140,14 +148,6 @@ function summarizeProtectionBody(body: unknown): unknown {
     destinations: count(b.destinations),
     preplanFieldsSet,
   };
-}
-
-// Extract `{table, id}` from /admin/tables/:table[/:id] so the audit row
-// can be filtered by table + record. Returns nulls for non-matching paths.
-function parseAdminTablesPath(path: string): { table: string | null; id: string | null } {
-  const m = path.match(/^\/admin\/tables\/([^\/?]+)(?:\/([^\/?]+))?/);
-  if (!m) return { table: null, id: null };
-  return { table: m[1] ?? null, id: m[2] ?? null };
 }
 
 /** Express middleware. Place after `requireAdmin` / `requireAuth`. */

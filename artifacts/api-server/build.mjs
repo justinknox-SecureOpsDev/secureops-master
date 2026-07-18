@@ -1,7 +1,6 @@
 import { createRequire } from "node:module";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { execSync } from "node:child_process";
 import { build as esbuild } from "esbuild";
 import esbuildPluginPino from "esbuild-plugin-pino";
 import { rm } from "node:fs/promises";
@@ -10,27 +9,6 @@ import { rm } from "node:fs/promises";
 globalThis.require = createRequire(import.meta.url);
 
 const artifactDir = path.dirname(fileURLToPath(import.meta.url));
-
-// Build identity injected into the bundle so the control plane (and uptime
-// monitors) can read which version each customer is running. Non-sensitive.
-// Resolution order: explicit env (CI may set BUILD_VERSION) → short git SHA →
-// "unknown" when git isn't available (e.g. a source tarball with no .git).
-function resolveBuildVersion() {
-  if (process.env.BUILD_VERSION) return process.env.BUILD_VERSION;
-  try {
-    return execSync("git rev-parse --short HEAD", {
-      cwd: artifactDir,
-      stdio: ["ignore", "pipe", "ignore"],
-    })
-      .toString()
-      .trim();
-  } catch {
-    return "unknown";
-  }
-}
-
-const BUILD_VERSION = resolveBuildVersion();
-const BUILD_TIME = process.env.BUILD_TIME || new Date().toISOString();
 
 async function buildAll() {
   // Allow callers (e.g. the security-headers gate) to build into an isolated
@@ -48,12 +26,6 @@ async function buildAll() {
     outdir: distDir,
     outExtension: { ".js": ".mjs" },
     logLevel: "info",
-    // Inject build identity (see src/lib/buildInfo.ts). Values must be JSON
-    // strings so esbuild substitutes them as string literals.
-    define: {
-      __BUILD_VERSION__: JSON.stringify(BUILD_VERSION),
-      __BUILD_TIME__: JSON.stringify(BUILD_TIME),
-    },
     // Some packages may not be bundleable, so we externalize them, we can add more here as needed.
     // Some of the packages below may not be imported or installed, but we're adding them in case they are in the future.
     // Examples of unbundleable packages:

@@ -47,7 +47,7 @@ export default function CreateShiftScreen() {
   const createShift = useCreateShift();
   const topPad = useTopPad();
   const { user } = useAuth();
-  // Site Managers never set rates — the server inherits them from the site default.
+  // Site managers never set rates — the server inherits them from the site default.
   const isSiteManager = user?.role === "site_manager";
   const navigation = useNavigation();
   useLayoutEffect(() => { (navigation as any).setOptions?.({ headerShown: false }); }, [navigation]);
@@ -85,8 +85,15 @@ export default function CreateShiftScreen() {
 
   const handleCreate = async () => {
     const ratesRequired = !isSiteManager;
-    if (!form.title || !form.siteId || !form.startTime || !form.endTime || (ratesRequired && (!form.payRate || !form.billRate))) {
-      Alert.alert("Missing Fields", ratesRequired ? "Title, site, times, pay rate and bill rate are required." : "Title, site and times are required.");
+    const missing: string[] = [];
+    if (!form.title.trim()) missing.push("Shift title");
+    if (!form.siteId) missing.push(form.clientId ? "Site" : "Client and site");
+    if (!form.startTime) missing.push("Start time");
+    if (!form.endTime) missing.push("End time");
+    if (ratesRequired && !form.payRate) missing.push("Officer pay rate");
+    if (ratesRequired && !form.billRate) missing.push("Client bill rate");
+    if (missing.length > 0) {
+      Alert.alert("Missing Fields", `Please fill in: ${missing.join(", ")}.`);
       return;
     }
     try {
@@ -97,7 +104,7 @@ export default function CreateShiftScreen() {
           notes: form.notes || undefined,
           startTime: new Date(form.startTime).toISOString(),
           endTime: new Date(form.endTime).toISOString(),
-          // Site Managers omit rates entirely; the server resolves them from the site default.
+          // Site managers omit rates entirely; the server resolves them from the site default.
           ...(isSiteManager ? {} : { payRate: parseFloat(form.payRate), billRate: parseFloat(form.billRate) }),
           isRepeat: form.isRepeat,
           repeatPattern: form.isRepeat ? (form.repeatPattern as any) || undefined : undefined,

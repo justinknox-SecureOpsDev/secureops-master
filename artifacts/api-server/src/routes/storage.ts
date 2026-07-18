@@ -7,7 +7,14 @@ import {
 import { ObjectStorageService, ObjectNotFoundError } from "../lib/objectStorage";
 import { requireAdmin, requireAuth } from "../middlewares/auth";
 import { uploadUrlLimiter, applicationUploadLimiter } from "../middlewares/rateLimit";
-import { db, employeesTable, incidentsTable, licenseRenewalRequestsTable, protectionPersonsTable, shiftAssignmentsTable } from "@workspace/db";
+import {
+  db,
+  employeesTable,
+  incidentsTable,
+  licenseRenewalRequestsTable,
+  protectionPersonsTable,
+  shiftAssignmentsTable,
+} from "@workspace/db";
 import { and, eq, inArray, sql } from "drizzle-orm";
 import { isWorkerRole } from "../lib/eligibility";
 
@@ -36,6 +43,11 @@ const ALLOWED_CONTENT_TYPES = new Set([
   "image/png",
   "image/gif",
   "image/webp",
+  // Apple devices capture photos as HEIC/HEIF by default. Accepted so mobile
+  // uploads from iPhones don't hard-fail (415). Newer app builds transcode to
+  // JPEG on-device before upload, but older/installed clients still send these.
+  "image/heic",
+  "image/heif",
   "application/pdf",
   "application/msword",
   "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
@@ -61,6 +73,8 @@ const EXTENSION_CONTENT_TYPES: Record<string, string> = {
   png: "image/png",
   gif: "image/gif",
   webp: "image/webp",
+  heic: "image/heic",
+  heif: "image/heif",
   txt: "text/plain",
 };
 
@@ -306,11 +320,12 @@ router.get("/me/storage/sign", requireAuth, async (req: Request, res: Response) 
 
     // A missing employee row is NOT an early 403 here. An admin typically has
     // no employee record, yet may be authorized to sign protection-detail
-    // photos in the check further down. So we only build the "owned employee
-    // document" set when an employee row exists and defer the final
-    // allow/deny to the combined owned/protection authorization. Non-staff
-    // callers with no employee row simply end up with an empty `owned` set
-    // and fall through to a 403 unless a protection rule grants access.
+    // photos in the check further down.
+    // So we only build the "owned employee document" set when an employee row
+    // exists and defer the final allow/deny to the combined owned/protection
+    // authorization. Non-staff callers with no employee row simply end up with
+    // an empty `owned` set and fall through to a 403 unless a protection rule
+    // grants access.
 
     // Only honour employee document keys that live under the caller's own
     // upload prefix. The authenticated upload endpoint mints paths at

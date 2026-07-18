@@ -26,17 +26,14 @@
       "channel": "production",
       "autoIncrement": true,
       "env": {
-        "EXPO_PUBLIC_API_BASE_URL": "https://secureops-command.replit.app/api",
-        "EXPO_PUBLIC_PORTAL_BASE_URL": "https://secureops-command.replit.app",
+        "EXPO_PUBLIC_API_BASE_URL": "https://wcsgisecureops.com/api",
+        "EXPO_PUBLIC_PORTAL_BASE_URL": "https://wcsgisecureops.com",
         "EXPO_PUBLIC_APP_NAME": "SecureOps",
-        "EXPO_PUBLIC_COMPANY_NAME": "SecureOps Command",
-        "EXPO_PUBLIC_COMPANY_SHORT_NAME": "SecureOps"
+        "EXPO_PUBLIC_COMPANY_NAME": "Williams Council Security Group",
+        "EXPO_PUBLIC_COMPANY_SHORT_NAME": "WCSG"
       },
       "android": {
         "buildType": "app-bundle"
-      },
-      "ios": {
-        "credentialsSource": "local"
       }
     }
   },
@@ -44,7 +41,7 @@
     "production": {
       "ios": {
         "appleId": "justin.knox@williamscouncil.com",
-        "ascAppId": "6789409652"
+        "ascAppId": "6773903231"
       },
       "android": {
         "serviceAccountKeyPath": "./google-play-service-account.json",

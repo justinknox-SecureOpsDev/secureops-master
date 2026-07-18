@@ -6,10 +6,10 @@ import {
 import { useColors } from "@/hooks/useColors";
 import { apiRequest } from "@/utils/api";
 import { notify } from "@/utils/confirm";
+import { BUSINESS_TIME_ZONE } from "@/utils/time";
 import { useRouter } from "expo-router";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { Feather } from "@expo/vector-icons";
-import { FeatureGate } from "@/components/FeatureGate";
 
 type Row = {
   id: string;
@@ -24,18 +24,11 @@ type Row = {
 function fmt(iso: string) {
   return new Date(iso).toLocaleString(undefined, {
     month: "short", day: "numeric", hour: "numeric", minute: "2-digit",
+    timeZone: BUSINESS_TIME_ZONE,
   });
 }
 
 export default function DarScreen() {
-  return (
-    <FeatureGate feature="dar">
-      <DarScreenInner />
-    </FeatureGate>
-  );
-}
-
-function DarScreenInner() {
   const colors = useColors();
   const router = useRouter();
 

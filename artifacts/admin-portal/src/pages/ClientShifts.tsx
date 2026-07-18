@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { Users, Clock, Shield, ChevronDown, ChevronUp } from "lucide-react";
 import { api } from "@/lib/api";
+import { formatTime, formatDateTime, formatDate } from "@/lib/format";
 
 type Officer = { name: string; licenseLevel: number | null };
 type Shift = {
@@ -18,18 +19,13 @@ type Shift = {
 };
 
 function fmt(d: string) {
-  return new Date(d).toLocaleString("en-US", {
-    weekday: "short", month: "short", day: "numeric",
-    hour: "numeric", minute: "2-digit",
-  });
+  return formatDateTime(d);
 }
 function fmtDate(d: string) {
-  return new Date(d).toLocaleDateString("en-US", {
-    weekday: "long", month: "long", day: "numeric",
-  });
+  return formatDate(d, { weekday: "long", month: "long", day: "numeric" });
 }
 function fmtTime(d: string) {
-  return new Date(d).toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" });
+  return formatTime(d);
 }
 function levelLabel(n: number | null) {
   if (!n) return "—";
@@ -109,7 +105,7 @@ function ShiftCard({ shift }: { shift: Shift }) {
             <ul className="space-y-2">
               {shift.officers.map((o, i) => (
                 <li key={i} className="flex items-center gap-2 text-sm">
-                  <div className="w-7 h-7 rounded-full bg-[#0c0a08] text-[#c9a04a] flex items-center justify-center text-xs font-bold">
+                  <div className="w-7 h-7 rounded-full bg-[#080c18] text-[#c9a84c] flex items-center justify-center text-xs font-bold">
                     {o.name[0] ?? "O"}
                   </div>
                   <span className="font-medium">{o.name}</span>

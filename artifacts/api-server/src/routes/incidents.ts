@@ -5,10 +5,8 @@ import { requireAuth, requireAdminOrDispatcher } from "../middlewares/auth";
 import { buildIncidentReportPdf } from "../lib/incidentPdf";
 import { broadcastToRoom } from "../lib/wsManager";
 import { sendPushToUsers } from "../lib/push";
-import { requireFeature } from "../lib/features";
 
 const router: IRouter = Router();
-router.use("/incidents", requireFeature("incidents"));
 
 /**
  * Push a lightweight "something changed in incidents" pulse to every

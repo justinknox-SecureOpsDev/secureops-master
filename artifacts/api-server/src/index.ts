@@ -3,13 +3,13 @@ import app from "./app";
 import { logger } from "./lib/logger";
 import { attachWebSocketServer, handleChatUpgrade, getWss } from "./lib/wsManager";
 import { attachRadioWebSocketServer, handleRadioUpgrade, getRadioWss } from "./lib/radioGateway";
-import { seedPolicies, backfillEmployeeProfileFields, backfillMustSignPolicies, pool } from "@workspace/db";
-import { seedDemoUsers, ensureAdminAccountHealth, ensureEmployeesRowsForAllUsers, backfillUserPhoneNumbersFromEmployees, migrateLeadRoleToSiteManager } from "./lib/seedDemoUsers";
+import { seedPolicies, backfillEmployeeProfileFields, pool } from "@workspace/db";
+import { seedDemoUsers, ensureAdminAccountHealth, ensureEmployeesRowsForAllUsers, backfillUserPhoneNumbersFromEmployees } from "./lib/seedDemoUsers";
 import { seedChatRooms } from "./lib/seedChatRooms";
 import { seedRadioChannels } from "./lib/seedRadioChannels";
 import { startScheduledJobs } from "./lib/scheduledJobs";
-import { loadFeatureOverridesFromDb } from "./lib/features";
-import { loadBrandOverridesFromDb } from "./lib/brandConfig";
+import { backfillSiteRateLabels, repairInsoSocialShiftEndTime, migrateLeadRoleToSiteManager } from "./lib/dataRepairs";
+import { loadBrandFromDb } from "./lib/brandConfig";
 
 const rawPort = process.env["PORT"];
 
@@ -61,8 +61,34 @@ server.on("upgrade", (req, socket, head) => {
   }
 });
 
-server.listen(port, () => {
-  logger.info({ port }, "Server listening");
+// The `lead` -> `site_manager` role rename is run (awaited) before we accept
+// traffic: the renamed authz guards only recognise `site_manager`, so a request
+// served to a not-yet-migrated `lead` user would be mis-authorized. It is a
+// single idempotent UPDATE, so the added boot latency is negligible.
+//
+// Fail-open-to-deny by design: if the (extremely unlikely) UPDATE throws, we log
+// at error level and still start the server rather than crashing the whole API.
+// The blast radius is bounded — only legacy `lead` users would be mis-authorized
+// (every other role is unaffected) and the idempotent repair simply retries on
+// the next boot. Crashing on a transient DB blip would take the entire platform
+// down for everyone, which is the worse failure mode here.
+async function start(): Promise<void> {
+  try {
+    await migrateLeadRoleToSiteManager();
+    logger.info("Lead -> site_manager role migration complete");
+  } catch (err) {
+    logger.error({ err }, "Failed to migrate lead role to site_manager — starting anyway; legacy 'lead' users may be mis-authorized until the next boot");
+  }
+
+  try {
+    await loadBrandFromDb();
+    logger.info("Platform brand config loaded from DB");
+  } catch (err) {
+    logger.error({ err }, "Failed to load brand config from DB — using env/defaults");
+  }
+
+  server.listen(port, () => {
+    logger.info({ port }, "Server listening");
   // Background maintenance — currently just expired-revoked-token cleanup.
   // Kept inside listen() so it only starts once the server is actually up.
   startScheduledJobs();
@@ -89,23 +115,9 @@ server.listen(port, () => {
       );
     }
   }
-});
-
-// Load super-admin feature-flag overrides into the in-memory cache so the
-// requireFeature() middleware and GET /api/brand reflect DB state from the
-// first request. Falls back silently to the DISABLED_FEATURES env baseline
-// if the table doesn't exist yet (pre-`db push`).
-loadFeatureOverridesFromDb()
-  .then(() => logger.info("Feature-flag overrides loaded"))
-  .catch((err) => logger.error({ err }, "Failed to load feature-flag overrides"));
-
-// Load super-admin brand overrides (company name, palette, logo, contact
-// emails) into the in-memory `brand` object so emails, PDFs, and GET /api/brand
-// reflect DB state from the first request. Falls back silently to the env
-// defaults if the table doesn't exist yet (pre-`db push`).
-loadBrandOverridesFromDb()
-  .then(() => logger.info("Brand overrides loaded"))
-  .catch((err) => logger.error({ err }, "Failed to load brand overrides"));
+  });
+}
+void start();
 
 seedPolicies()
   .then(() => logger.info("Default policies ensured"))
@@ -113,7 +125,7 @@ seedPolicies()
 
 // One-time backfill of applicant + onboarding fields onto employees rows.
 // Idempotent (COALESCE-only): safe to run on every boot.
-const employeeProfileBackfillDone = backfillEmployeeProfileFields()
+backfillEmployeeProfileFields()
   .then(() => logger.info("Employee profile backfill complete"))
   .catch((err) => logger.error({ err }, "Failed to backfill employee profile fields"));
 
@@ -124,37 +136,18 @@ ensureAdminAccountHealth()
   .then(() => logger.info("Admin account health ensured"))
   .catch((err) => logger.error({ err }, "Failed to ensure admin account health"));
 
-// One-time idempotent role migration: the legacy "lead" role was renamed to
-// "site_manager". Flip any historical rows so existing supervisors keep access
-// under the new role key. Once migrated this selects 0 rows and no-ops.
-migrateLeadRoleToSiteManager()
-  .then(() => logger.info("Legacy lead role migrated to site_manager"))
-  .catch((err) => logger.error({ err }, "Failed to migrate lead role to site_manager"));
-
 // Idempotently provision the documented demo accounts so `replit.md`
 // credentials always work. Disable with SEED_DEMO_USERS=false.
-const demoUsersSeeded = seedDemoUsers()
+seedDemoUsers()
   .then(() => logger.info("Demo users ensured"))
   .catch((err) => logger.error({ err }, "Failed to seed demo users"));
 
 // Backfill missing employees rows for every user (admin OR employee) so
 // Users / Personnel / Employees stay aligned. Idempotent — only inserts
 // rows the LEFT JOIN flags as missing.
-const employeesRowsBackfilled = ensureEmployeesRowsForAllUsers()
+ensureEmployeesRowsForAllUsers()
   .then(() => logger.info("Employees rows backfilled for all users"))
   .catch((err) => logger.error({ err }, "Failed to backfill employees rows"));
-
-// One-time idempotent backfill: flag existing non-admin staff who have never
-// signed company policies so the mobile login gate (users.mustSignPolicies)
-// catches them once. MUST run only after (a) every officer has an employees
-// row, (b) onboarding acknowledgements have been copied onto that row, and
-// (c) demo accounts are seeded — otherwise a legacy already-signed officer
-// whose acks haven't landed yet gets falsely flagged, or a freshly-seeded
-// non-admin slips past the gate. Never targets admins; safe on every boot.
-Promise.all([employeeProfileBackfillDone, employeesRowsBackfilled, demoUsersSeeded])
-  .then(() => backfillMustSignPolicies())
-  .then(() => logger.info("Must-sign-policies flag backfilled for unsigned staff"))
-  .catch((err) => logger.error({ err }, "Failed to backfill must-sign-policies flag"));
 
 // One-time idempotent repair: copy employees.phone -> users.phoneNumber for
 // historical rows so officers are SMS-reachable and their number shows on the
@@ -163,6 +156,22 @@ Promise.all([employeeProfileBackfillDone, employeesRowsBackfilled, demoUsersSeed
 backfillUserPhoneNumbersFromEmployees()
   .then(() => logger.info("User phone numbers backfilled from employee files"))
   .catch((err) => logger.error({ err }, "Failed to backfill user phone numbers"));
+
+// One-time idempotent data repair: correct a single shift whose end DATE was
+// typed a week out (174h instead of ~6h), which silently blocked overlapping
+// assignments + self clock-in for the two rostered officers. Guarded on the
+// exact bad value, so it no-ops once fixed and on any DB without that row.
+repairInsoSocialShiftEndTime()
+  .then(() => logger.info("Malformed shift end-time repair complete"))
+  .catch((err) => logger.error({ err }, "Failed to repair malformed shift end time"));
+
+// Idempotent backfill: assign label = 'Standard' to any site_rates rows that
+// still carry a NULL label (legacy rows from before the multi-rate-per-level
+// feature). Must run BEFORE `db push` applies the new (siteId, level, label)
+// unique constraint; after that push the WHERE IS NULL guard is always a no-op.
+backfillSiteRateLabels()
+  .then(() => logger.info("Site rate label backfill complete"))
+  .catch((err) => logger.error({ err }, "Failed to backfill site rate labels"));
 
 // Idempotently seed the canonical chat channel set (announcements,
 // per-license-level rooms, OPS, city rooms, elite, one-per-site).

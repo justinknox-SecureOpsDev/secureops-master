@@ -40,7 +40,7 @@ function rowToDto(r: PaymentDiscrepancy) {
   };
 }
 
-// Internal staff/officers (admin, dispatcher, employee, lead) only — external
+// Internal staff/officers (admin, dispatcher, employee, site_manager) only — external
 // `client` portal accounts are not paid by us and cannot file pay discrepancies.
 function rejectClient(req: { user?: { role: string } }): boolean {
   return req.user?.role === "client";

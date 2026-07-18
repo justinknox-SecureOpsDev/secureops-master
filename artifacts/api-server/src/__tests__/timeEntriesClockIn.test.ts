@@ -48,6 +48,15 @@ async function makeEmployee(suffix: string): Promise<string> {
 }
 
 beforeAll(async () => {
+  // Scrub orphan rows from any crashed previous run that share our TAG prefix.
+  // Deleting users cascades their licenses, shift_assignments, and time_entries.
+  // Shifts whose siteId references the orphan site are left in place (SET NULL FK)
+  // but are harmless; we then delete the orphan site + client.
+  await db.execute(sql`DELETE FROM users WHERE email LIKE 'clockin-test-%'`);
+  await db.execute(sql`DELETE FROM shifts WHERE site_id IN (SELECT id FROM sites WHERE name LIKE 'clockin-test-%')`);
+  await db.execute(sql`DELETE FROM sites WHERE name LIKE 'clockin-test-%'`);
+  await db.execute(sql`DELETE FROM clients WHERE name LIKE 'clockin-test-%'`);
+
   ctx.licensedEmployeeId = await makeEmployee("lic");
   ctx.unlicensedEmployeeId = await makeEmployee("nolic");
   ctx.licensedToken = signToken({
@@ -170,14 +179,190 @@ describe("POST /time-entries/clock-in geo-resolution", () => {
     expect(res.body.message).toMatch(/not within/i);
   });
 
-  it("blocks an employee with no unexpired license (403 license_expired)", async () => {
+  it("lets an unlicensed officer clock into an unarmed (level <= 2) shift they're assigned to", async () => {
+    // Unlicensed / support staff have an effective eligibility level of 2, so
+    // unarmed work is open to them. This is the bug being guarded against: they
+    // were previously blocked from ALL clock-ins by a blanket licence gate.
     await deleteOpenEntries(ctx.unlicensedEmployeeId);
+    await db.delete(shiftAssignmentsTable).where(eq(shiftAssignmentsTable.employeeId, ctx.unlicensedEmployeeId));
+    const start = new Date(Date.now() - 5 * 60_000);
+    const end = new Date(Date.now() + 6 * 3600_000);
+    const [shift] = await db
+      .insert(shiftsTable)
+      .values({
+        siteId: ctx.nearSiteId,
+        title: `${TAG}-unarmed`,
+        startTime: start,
+        endTime: end,
+        status: "upcoming",
+        headcount: 1,
+        requiredLicenseLevel: 2,
+      })
+      .returning({ id: shiftsTable.id });
+    await db.insert(shiftAssignmentsTable).values({
+      shiftId: shift.id,
+      employeeId: ctx.unlicensedEmployeeId,
+      status: "accepted",
+    });
+
     const res = await request(app)
       .post("/api/time-entries/clock-in")
       .set(authed(ctx.unlicensedToken))
-      .send({ lat: 32.7767, lng: -96.797 });
+      .send({ shiftId: shift.id });
+    expect(res.status).toBe(201);
+
+    await deleteOpenEntries(ctx.unlicensedEmployeeId);
+    await db.delete(shiftAssignmentsTable).where(eq(shiftAssignmentsTable.employeeId, ctx.unlicensedEmployeeId));
+    await db.delete(shiftsTable).where(eq(shiftsTable.id, shift.id));
+  });
+
+  it("blocks an unlicensed officer from clocking into an armed (level >= 3) shift (403 license_required)", async () => {
+    // Armed (3) and L4/PPO (4) shifts still require the matching unexpired
+    // licence even when the officer is rostered on them (an admin could have
+    // manually assigned them). The clock-in eligibility gate must catch this.
+    await deleteOpenEntries(ctx.unlicensedEmployeeId);
+    await db.delete(shiftAssignmentsTable).where(eq(shiftAssignmentsTable.employeeId, ctx.unlicensedEmployeeId));
+    const start = new Date(Date.now() - 5 * 60_000);
+    const end = new Date(Date.now() + 6 * 3600_000);
+    const [shift] = await db
+      .insert(shiftsTable)
+      .values({
+        siteId: ctx.nearSiteId,
+        title: `${TAG}-armed`,
+        startTime: start,
+        endTime: end,
+        status: "upcoming",
+        headcount: 1,
+        requiredLicenseLevel: 3,
+      })
+      .returning({ id: shiftsTable.id });
+    await db.insert(shiftAssignmentsTable).values({
+      shiftId: shift.id,
+      employeeId: ctx.unlicensedEmployeeId,
+      status: "accepted",
+    });
+
+    const res = await request(app)
+      .post("/api/time-entries/clock-in")
+      .set(authed(ctx.unlicensedToken))
+      .send({ shiftId: shift.id });
     expect(res.status).toBe(403);
-    expect(res.body.code).toBe("license_expired");
+    expect(res.body.code).toBe("license_required");
+
+    await deleteOpenEntries(ctx.unlicensedEmployeeId);
+    await db.delete(shiftAssignmentsTable).where(eq(shiftAssignmentsTable.employeeId, ctx.unlicensedEmployeeId));
+    await db.delete(shiftsTable).where(eq(shiftsTable.id, shift.id));
+  });
+
+  it("blocks a GPS (geo-resolved) clock-in for an unlicensed officer rostered on an armed shift (403 license_required)", async () => {
+    // Same armed-shift block as the explicit-shiftId path, but exercised via the
+    // GPS geo-resolution path: an admin-rostered, under-licensed officer who is
+    // physically at the site must NOT clock into — and activate — their armed
+    // assignment just because they sent coordinates instead of a shiftId.
+    // (resolveOrAssignShiftForAdHocClockIn step 1.)
+    await deleteOpenEntries(ctx.unlicensedEmployeeId);
+    await db.delete(shiftAssignmentsTable).where(eq(shiftAssignmentsTable.employeeId, ctx.unlicensedEmployeeId));
+    const start = new Date(Date.now() - 5 * 60_000);
+    const end = new Date(Date.now() + 6 * 3600_000);
+    const [shift] = await db
+      .insert(shiftsTable)
+      .values({
+        siteId: ctx.nearSiteId,
+        title: `${TAG}-geo-armed`,
+        startTime: start,
+        endTime: end,
+        status: "upcoming",
+        headcount: 1,
+        requiredLicenseLevel: 3,
+      })
+      .returning({ id: shiftsTable.id });
+    await db.insert(shiftAssignmentsTable).values({
+      shiftId: shift.id,
+      employeeId: ctx.unlicensedEmployeeId,
+      status: "accepted",
+    });
+
+    const res = await request(app)
+      .post("/api/time-entries/clock-in")
+      .set(authed(ctx.unlicensedToken))
+      .send({ lat: -54.123456, lng: -12.654321 });
+    expect(res.status).toBe(403);
+    expect(res.body.code).toBe("license_required");
+
+    // The armed shift must NOT have been activated, and no time entry created.
+    const [after] = await db
+      .select({ status: shiftsTable.status })
+      .from(shiftsTable)
+      .where(eq(shiftsTable.id, shift.id));
+    expect(after.status).toBe("upcoming");
+    const open = await db
+      .select({ id: timeEntriesTable.id })
+      .from(timeEntriesTable)
+      .where(and(eq(timeEntriesTable.employeeId, ctx.unlicensedEmployeeId), isNull(timeEntriesTable.clockOutTime)));
+    expect(open).toHaveLength(0);
+
+    await deleteOpenEntries(ctx.unlicensedEmployeeId);
+    await db.delete(shiftAssignmentsTable).where(eq(shiftAssignmentsTable.employeeId, ctx.unlicensedEmployeeId));
+    await db.delete(shiftsTable).where(eq(shiftsTable.id, shift.id));
+  });
+
+  it("clocks an unlicensed officer in WITHOUT attaching the billing-only fallback when the only matching shift is armed", async () => {
+    // The officer is NOT rostered, so step 2 can't auto-assign them to the L3
+    // shift (ineligible) and step 3's billing-only fallback would otherwise
+    // attach — and activate — the armed shift. The fix skips that attach: the
+    // officer still clocks in (site-only), but the entry is never bound to the
+    // higher-level shift and the shift stays upcoming.
+    // (resolveOrAssignShiftForAdHocClockIn step 3.)
+    await deleteOpenEntries(ctx.unlicensedEmployeeId);
+    await db.delete(shiftAssignmentsTable).where(eq(shiftAssignmentsTable.employeeId, ctx.unlicensedEmployeeId));
+    const start = new Date(Date.now() - 5 * 60_000);
+    const end = new Date(Date.now() + 6 * 3600_000);
+    const [shift] = await db
+      .insert(shiftsTable)
+      .values({
+        siteId: ctx.nearSiteId,
+        title: `${TAG}-geo-armed-fallback`,
+        startTime: start,
+        endTime: end,
+        status: "upcoming",
+        headcount: 1,
+        requiredLicenseLevel: 3,
+      })
+      .returning({ id: shiftsTable.id });
+
+    const res = await request(app)
+      .post("/api/time-entries/clock-in")
+      .set(authed(ctx.unlicensedToken))
+      .send({ lat: -54.123456, lng: -12.654321 });
+    expect(res.status).toBe(201);
+
+    // Time entry exists at the site but is NOT linked to the armed shift.
+    const [entry] = await db
+      .select({ shiftId: timeEntriesTable.shiftId, siteId: timeEntriesTable.siteId })
+      .from(timeEntriesTable)
+      .where(eq(timeEntriesTable.id, res.body.id));
+    expect(entry.shiftId).toBeNull();
+    expect(entry.siteId).toBe(ctx.nearSiteId);
+
+    // ...the armed shift must stay upcoming (never activated)...
+    const [after] = await db
+      .select({ status: shiftsTable.status })
+      .from(shiftsTable)
+      .where(eq(shiftsTable.id, shift.id));
+    expect(after.status).toBe("upcoming");
+
+    // ...and no assignment was created for the unlicensed officer.
+    const ours = await db
+      .select({ id: shiftAssignmentsTable.id })
+      .from(shiftAssignmentsTable)
+      .where(and(
+        eq(shiftAssignmentsTable.shiftId, shift.id),
+        eq(shiftAssignmentsTable.employeeId, ctx.unlicensedEmployeeId),
+      ));
+    expect(ours).toHaveLength(0);
+
+    await deleteOpenEntries(ctx.unlicensedEmployeeId);
+    await db.delete(shiftsTable).where(eq(shiftsTable.id, shift.id));
   });
 });
 

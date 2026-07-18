@@ -42,4 +42,4 @@ pool.on("error", (err) => {
 export const db = drizzle(pool, { schema });
 
 export * from "./schema";
-export { seedPolicies, DEFAULT_POLICY_SLUGS, backfillEmployeeProfileFields, backfillMustSignPolicies } from "./seed";
+export { seedPolicies, DEFAULT_POLICY_SLUGS, backfillEmployeeProfileFields } from "./seed";

@@ -1,15 +1,13 @@
 import { Router, type IRouter } from "express";
-import { eq, and, gte, lte, lt, sql, inArray, desc } from "drizzle-orm";
+import { eq, and, gte, lte, lt, ne, desc, sql, inArray } from "drizzle-orm";
 import { db, payrollEntriesTable, usersTable, employeesTable, timeEntriesTable, shiftsTable, sitesTable, auditLogsTable } from "@workspace/db";
 import { isNull } from "drizzle-orm";
 import { z } from "zod/v4";
 // (employeesTable + sitesTable + auditLogsTable used by board endpoint below)
 import { requireAdmin } from "../middlewares/auth";
 import { getFederalHolidayName, HOLIDAY_PAY_MULTIPLIER } from "../lib/holidays";
-import { requireFeature } from "../lib/features";
 
 const router: IRouter = Router();
-router.use("/payroll", requireFeature("payroll"));
 
 function addDays(d: Date, n: number): Date {
   const x = new Date(d);

@@ -4,10 +4,10 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Loader2, AlertCircle } from "lucide-react";
-import { SecureOpsLogo } from "@/components/SecureOpsLogo";
 
 export function LoginPage() {
   const { login, loginTotp } = useAuth();
+  const brandCfg = (window as any).__BRAND__ as { companyName: string; appName: string } | undefined;
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [busy, setBusy] = useState(false);
@@ -54,26 +54,18 @@ export function LoginPage() {
         className="absolute inset-0 opacity-[0.04] pointer-events-none"
         style={{
           backgroundImage:
-            "radial-gradient(circle at 25% 20%, #c9a04a 0, transparent 40%), radial-gradient(circle at 80% 80%, #c9a04a 0, transparent 35%)",
+            "radial-gradient(circle at 25% 20%, #c9a84c 0, transparent 40%), radial-gradient(circle at 80% 80%, #c9a84c 0, transparent 35%)",
         }}
       />
       <div className="w-full max-w-md bg-card rounded-xl shadow-2xl overflow-hidden relative">
-        <div className="bg-brand-navy text-white px-6 pt-8 pb-6 text-center border-b-4 border-brand-gold relative">
-          <SecureOpsLogo
-            size={88}
-            className="mx-auto mb-4 drop-shadow-[0_6px_18px_rgba(201, 160, 74,0.3)]"
+        <div className="bg-brand-navy text-white p-6 text-center border-b-4 border-brand-gold relative">
+          <img
+            src={`${import.meta.env.BASE_URL}logo-256.png`}
+            alt={brandCfg?.companyName ?? "Williams Council Security Group"}
+            className="w-24 h-24 mx-auto mb-3 object-contain drop-shadow-[0_4px_12px_rgba(201,168,76,0.35)]"
           />
-          <div className="brand-wordmark text-2xl leading-none">
-            <span className="text-white">SecureOps</span>{" "}
-            <span className="brand-gold">Command</span>
-          </div>
-          <div className="flex items-center justify-center gap-2.5 mt-2.5">
-            <span className="h-px w-6 bg-brand-gold/50" />
-            <span className="text-[10px] uppercase tracking-[0.25em] text-white/60">
-              Security Operations Platform
-            </span>
-            <span className="h-px w-6 bg-brand-gold/50" />
-          </div>
+          <div className="brand-wordmark text-xl">{brandCfg?.companyName ?? "Williams Council Security Group"}</div>
+          <div className="text-xs uppercase tracking-widest opacity-70 mt-1">Admin Portal</div>
         </div>
         {challengeToken ? (
           <form onSubmit={submitTotp} className="p-6 space-y-4">
@@ -137,19 +129,18 @@ export function LoginPage() {
             )}
           </Button>
           <p className="text-xs text-muted-foreground text-center pt-2">
-            Admin access only. Employees use the SecureOps Command mobile app.
+            Admin access only. Employees use the {brandCfg?.appName ?? "SecureOps"} mobile app.
           </p>
         </form>
         )}
         <div className="text-center text-[11px] text-white/50 mt-4 space-x-3">
           <a href={`${import.meta.env.BASE_URL}privacy`} className="hover:text-white/80 underline">Privacy</a>
           <a href={`${import.meta.env.BASE_URL}terms`} className="hover:text-white/80 underline">Terms</a>
-          <a href={`${import.meta.env.BASE_URL}eula`} className="hover:text-white/80 underline">EULA</a>
           <a href={`${import.meta.env.BASE_URL}data-rights`} className="hover:text-white/80 underline">Your data rights</a>
         </div>
       </div>
       <div className="absolute bottom-3 left-0 right-0 text-center text-[10px] text-white/40 select-none">
-        SecureOps Command · © {new Date().getFullYear()}
+        v1.0 · © {new Date().getFullYear()} {brandCfg?.companyName ?? "Williams Council Security Group"}
       </div>
     </div>
   );

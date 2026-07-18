@@ -1,6 +1,6 @@
 import React, { createContext, useContext, useEffect, useMemo, useRef, useState, useCallback } from "react";
 import { useAuth } from "./AuthContext";
-import { getApiBaseUrl } from "@/utils/api";
+import { API_BASE_URL } from "@/utils/api";
 
 export interface ChatMessage {
   id: string;
@@ -92,13 +92,11 @@ export function ChatProvider({ children }: { children: React.ReactNode }) {
 
   const connect = useCallback(() => {
     if (!token) return;
-    // Derive the WS scheme from the selected backend's protocol so it tracks
-    // the chosen org: wss for https (every production backend), ws for http
-    // (only ever a localhost/dev org — see utils/orgConfig normalizeOrigin).
-    // Resolved at connect() time so it follows an org switch with no re-wiring.
-    const base = getApiBaseUrl().replace(/\/api$/, "");
-    const wsUrl = base.replace(/^http(s?):\/\//, "ws$1://");
-    const ws = new WebSocket(`${wsUrl}/api/ws?token=${token}`);
+    // API_BASE_URL is always https://… (set in utils/api.ts). Strip the
+    // scheme and re-prepend the secure wss:// scheme literally so the
+    // resulting URL is always TLS-encrypted.
+    const host = API_BASE_URL.replace(/^https?:\/\//, "").replace(/\/api$/, "");
+    const ws = new WebSocket(`wss://${host}/api/ws?token=${token}`);
     wsRef.current = ws;
 
     ws.onopen = () => {
