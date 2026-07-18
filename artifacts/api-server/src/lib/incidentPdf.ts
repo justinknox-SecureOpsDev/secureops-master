@@ -16,6 +16,8 @@ import { drawBrandHeader } from "./pdfHeader";
 const objectStorage = new ObjectStorageService();
 
 // Brand colors read from env so each client deployment gets its own palette.
+const NAVY = brand.colorNavy;
+const GOLD = brand.colorGold;
 const MUTED = "#666666";
 const TEXT = "#1a1a1a";
 
@@ -244,8 +246,8 @@ export async function buildIncidentReportPdf(
 
 function sectionHeader(doc: PDFKit.PDFDocument, label: string): void {
   const y = doc.y;
-  doc.fillColor(brand.colorNavy).font("Helvetica-Bold").fontSize(11).text(label.toUpperCase(), 56, y);
+  doc.fillColor(NAVY).font("Helvetica-Bold").fontSize(11).text(label.toUpperCase(), 56, y);
   const lineY = doc.y + 2;
-  doc.moveTo(56, lineY).lineTo(doc.page.width - 56, lineY).strokeColor(brand.colorGold).lineWidth(0.7).stroke();
+  doc.moveTo(56, lineY).lineTo(doc.page.width - 56, lineY).strokeColor(GOLD).lineWidth(0.7).stroke();
   doc.moveDown(0.6);
 }

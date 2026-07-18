@@ -59,7 +59,7 @@ export default function CompliancePage() {
   return (
     <div className="p-6 space-y-5 max-w-7xl">
       <div className="flex items-center gap-3">
-        <ShieldCheck className="w-6 h-6" style={{ color: "#c9a04a" }} />
+        <ShieldCheck className="w-6 h-6" style={{ color: "#c9a84c" }} />
         <h1 className="text-2xl font-semibold">Compliance</h1>
       </div>
 
@@ -128,7 +128,7 @@ export default function CompliancePage() {
                 </td>
                 <td className="px-3 py-2">
                   {o.maxLicenseLevel ? (
-                    <span className="inline-block px-2 py-0.5 rounded text-xs font-semibold" style={{ background: "#0c0a08", color: "#c9a04a" }}>
+                    <span className="inline-block px-2 py-0.5 rounded text-xs font-semibold" style={{ background: "#080c18", color: "#c9a84c" }}>
                       L{o.maxLicenseLevel}
                     </span>
                   ) : <span className="text-xs text-muted-foreground">none</span>}

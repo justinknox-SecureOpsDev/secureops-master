@@ -1,15 +1,16 @@
 # Williams Council Security Group — SecureOps Platform
 
-Multi-org mobile + web security-ops platform: recruitment → onboarding → scheduling → live ops → payroll/invoicing → audit. ONE shared mobile build serves many customers; **this project is the canonical WCSG customer backend**.
+Mobile + web operations platform for WCSG: recruitment → onboarding → scheduling → live ops → payroll/invoicing → audit.
 
-**Stack:** pnpm workspaces · Node 24 · TypeScript 5.9 · Express 5 · ws · PostgreSQL + Drizzle · Zod v4 · Expo Router v6 · Orval (OpenAPI codegen) · esbuild.
+**Stack:** pnpm workspaces · Node 24 · TypeScript 5.9 · Express 5 · ws · PostgreSQL + Drizzle · Zod v4 + drizzle-zod · Expo Router v6 · Orval (OpenAPI codegen) · esbuild.
 
 ## User preferences
 
-- Brand: black `#0c0a08`, rich metallic gold `#c9a04a` (true gold, hue ~41°, matched to the WCSG eagle logo — deliberately NOT orange (<35°) and NOT muted/flat bronze; both were rejected), warm cream `#f0e4c0`. Marketing hero/CTAs: 3-stop metallic gradient `#f0d89a`→`#c9a04a`→`#aa8036` with inset top highlight. Deep black + bright gold contrast is intentional; card/glow darks are near-neutral warm charcoals. Token identifiers stay named navy/gold/cream in code (values only — no rename).
-- Company: Williams Council Security Group (WCSG). Currency: USD ($).
+- Brand: deep navy `#080c18`, rich gold `#c9a84c`, warm cream `#f0e6c8`
+- Company: Williams Council Security Group (WCSG)
+- Currency: USD ($)
 
-## Quick reference
+## Commands
 
 | Command | Purpose |
 | --- | --- |
@@ -18,66 +19,123 @@ Multi-org mobile + web security-ops platform: recruitment → onboarding → sch
 | `pnpm --filter @workspace/db run push` | Push DB schema (**re-run after every schema change**) |
 | `pnpm run typecheck` / `pnpm run build` | Workspace-wide TS check / build |
 
-- **Contract-first**: edit `lib/api-spec/openapi.yaml` (source of truth) → codegen React Query hooks (`lib/api-client-react`) + Zod (`lib/api-zod`) → server validates with the generated zod.
-- **Always `db push` after a schema change** — forgetting also trips the `schema-drift` release gate (the fix is push, not code).
-- **WS**: `wss://<domain>/api/ws?token=<jwt>` — chat delivery; JWT revocation-checked on upgrade.
-- Monorepo structure, TS project refs, dependency conventions: see the `pnpm-workspace` skill.
+## Where things live
 
-## Codebase map
+- **DB schema** — `lib/db/src/schema/` (users, employees, clients, sites, shifts, shiftAssignments, timeEntries, payrollEntries, invoices, incidents, licenses, chatRooms, chatMessages, applications, onboardingTokens, onboardingSubmissions, applicationAmendmentTokens, revokedTokens, auditLogs).
+- **API contract** — `lib/api-spec/openapi.yaml` (source of truth) → `lib/api-client-react/src/generated/` (React Query hooks) + `lib/api-zod/src/generated/api.ts` (Zod).
+- **API server** — `artifacts/api-server/src/`: `routes/` (auth, applications, chat, admin, storage, liveOps, payroll, shifts, incidents, audit, myPayroll, …); `lib/` (`wsManager` at `/api/ws`, `push`, `sms`, `geofence`, `objectStorage`+`objectAcl`, `email`, `auditLog`, `scheduledJobs`, `seedDemoUsers`, `incidentPdf`, `eligibility`, `invoiceSync`, `holidays`).
+- **Admin portal** — `artifacts/admin-portal/` (React+Vite, mounted at `/admin-portal/`). `lib/tables.ts` drives the generic CRUD UI; `components/{DataGrid,RowFormDialog,ImportWizard,FileUploadField,BrandHeader,RepeatingShiftDialog}.tsx`; `pages/` (Apply, Onboard, AmendApplication, Applications, Onboarding, Policies, PayRun, Invitations, Shifts, AuditLog, SiteDetailPage, OfficerProfile, ResetPassword, Legal).
+- **Mobile (Expo)** — `artifacts/security-ops/`: `contexts/ChatContext.tsx`, `hooks/useNotifications.ts`, `app/(employee)/` (5 tabs) + `app/(admin)/` (5 tabs), `app/paystubs.tsx`, `components/{EmergencyButton,LiveOfficerMap,chat/}`.
 
-- **DB schema** — `lib/db/src/schema/` (users, employees, clients, sites, shifts, shiftAssignments, timeEntries, payrollEntries, invoices, incidents, licenses, chat*, applications + tokens, revokedTokens, auditLogs, platformSettings).
-- **API server** — `artifacts/api-server/src/`: `routes/` + `lib/` (wsManager, push, sms, geofence, objectStorage, email, auditLog, scheduledJobs, eligibility, invoiceSync, holidays, brandConfig…).
-- **Admin portal** — `artifacts/admin-portal/` (React+Vite at `/admin-portal/`); `lib/tables.ts` drives the generic CRUD grids.
-- **Mobile (Expo)** — `artifacts/security-ops/`: `app/(employee)/` + `app/(admin)/` (5 tabs each).
-- **Marketing site** — `artifacts/home/`.
-- **Control plane** — `artifacts/control-plane/` (operator-only fleet console; separate deployment — see below).
+## Architecture
 
-## Domain rules
+- **Contract-first**: edit OpenAPI yaml → regen hooks + zod → server validates with zod.
+- **WebSocket** at `/api/ws?token=<jwt>` — chat broadcast; JWT revocation-checked on upgrade.
+- **Push**: `expo-server-sdk`; tokens in `users.expoPushToken`; web/sim degrade gracefully.
+- **SMS** (additive to push): fires only when Twilio connected AND `users.phoneNumber` (E.164) AND `users.smsOptIn=true`. **Emergency contacts are never texted** — `*.emergency_contact_phone` are call-only paper-trail fields; `sendSmsToUsers` reads `users` only, `sendSmsToPhoneNumber` refuses emergency-contact numbers (TCPA/privacy: no consent, no opt-out).
+- **Roles**: admin = 5 tabs (Dashboard, Personnel, Shifts, Incidents, Chat); employee = 5 tabs (Home, My Shifts, Clock, Incidents, Chat). `dispatcher` = global scheduling staff. **All internal roles are shift workers** (July 2026): `WORKER_ROLES = admin, dispatcher, site_manager, employee` (`lib/eligibility.ts`) — every one can see/claim/be-assigned/work shifts; the external `client` role is EXCLUDED everywhere (claim route has an explicit `isWorkerRole` 403). `GET /shifts?view=worker` gives admins/dispatchers/site-managers the personal employee feed (real eligibility, distance, held trainings) instead of the global read; finance stripping stays keyed on the raw role. Mobile: admin dashboard "My Work" quick action switches to the officer shell; employee Profile shows an admin-only "Admin" button back. Side effect: admins/dispatchers receive worker broadcast pushes on shift creation. `site_manager` (display "Site Manager", renamed from legacy `lead`) = employee + scheduling powers scoped to assigned sites only (see next bullet). Role is TEXT (no pg enum); legacy `lead` rows are migrated by an awaited boot data-repair (`lib/dataRepairs.ts`) before `listen()`.
+- **Site managers (per-site scoping)** (`lib/siteManagerAuth.ts`, `site_managers` join table): many-to-many manager↔site; admins assign on SiteDetailPage. A `site_manager` may list/read/create/edit/delete shifts, manage assignments, and approve/reject time-entries ONLY at assigned sites (`getManagedSiteIds` / `assertCanManageSite`; admin + dispatcher bypass; **fails closed** when site membership is unresolved). Notified (push + SMS) on shift create AND pending claim, scoped to their sites (deduped with admins). **Finance/PII boundary**: never see OTHER people's finance (pay/bill rate stripped) or other-site PII — `GET /clients` is scoped to clients owning a managed site with billing/contact stripped; `siteRateId` (rate-card link) is forced null on their shift create and ignored on edit, and a cross-site move recomputes pay/bill from the destination site's defaults (fail-closed) so no admin-set finance carries across sites (**response-strip ≠ write-block**). A site manager DOES see their OWN pay/paystubs like any employee.
+- **Audit log** (`lib/auditLog.ts`): records every 2xx write on privileged paths. Sensitive keys redacted, body capped 8 KB. Read via `/admin/audit-logs`.
+- **Scheduled jobs** (`lib/scheduledJobs.ts`): hourly revoked-token cleanup, license-expiry reminders (30/14/7d), `lockEndedWeekInvoices`; 5-min pre-shift reminders (~2h, ~30m). Each uses an in-process mutex + atomic UPDATE-RETURNING claim; failed deliveries roll back for retry.
 
-- **Client → Site → Shift**: clients have payment terms (Net X days); shifts carry `payRate` (officer), `billRate` (client; admin/dispatcher-only — sanitize before non-admin reads), `requiredLicenseLevel`, `headcount`.
-- **Licenses**: L2 unarmed → L3 armed → L4/PPO; higher covers lower. Effective level = `GREATEST(max unexpired license level, support_staff?1:0)` (`lib/eligibility.ts`).
-- **Shifts stay `status='upcoming'` forever** (never auto-advanced) — every "upcoming" query MUST add a time bound (`endTime >= now`) or past shifts leak.
-- **Shift claim is atomic** (tx + `FOR UPDATE` + headcount re-check); decline DELETES the assignment to free the slot. Any path creating an accepted assignment must apply the same license gate.
-- **Geo clock-in**: without `shiftId`, nearest site within 1 mile (haversine), else `422 No Site Nearby`. Live geofence checks each `/me/location` ping vs the active shift's site (`GEOFENCE_RADIUS_MILES`, default 0.25); exit → push + SMS to admins, resets on return.
-- **Emergency button**: 3s hold → `POST /emergency` → critical incident + push/SMS to admins; dials `EMERGENCY_CALL_NUMBER` or `911`.
-- **Chat**: type-driven channels (`announcements|ops|license_level|city|elite`); mobile's legacy `type:"general"` aliases to `announcements`; `joinPolicy` derived server-side. Template ships NO default channels; per-site channels auto-seed; seeding only retires legacy rooms (never promotes); retired rooms hidden everywhere.
-- **SMS** (additive to push): only when Twilio connected AND `users.phoneNumber` (E.164) AND `users.smsOptIn`. **Emergency contacts are NEVER texted** — `*.emergency_contact_phone` are call-only paper-trail fields (TCPA).
-- **Client incident share links**: sanitized public read-only view (NEVER adminNotes, officer email/phone, or full name — "F. Last" only); 32-byte token, 30d default, revocable; fails closed without a base URL.
-- **Audit log** records every 2xx write on privileged paths (sensitive keys redacted). **Scheduled jobs** (token cleanup, license-expiry reminders, invoice locking, pre-shift reminders) each use an in-process mutex + atomic UPDATE-RETURNING claim.
+## Product
 
-## Money
+- **Client → Site → Shift hierarchy**: clients have payment terms (Net X days); sites are physical locations; shifts post against a site with `payRate` (officer), `billRate` (client), `requiredLicenseLevel`, `headcount`.
+- **License hierarchy**: L2 unarmed → L3 armed (covers L2+L3) → L4/PPO (covers all). `maxLicenseLevel` = MAX(level) of unexpired licenses. **Unarmed work (level ≤ 2) is open to EVERY internal staff member** (eligibility floor over all WORKER_ROLES — see next bullet); armed (3) and L4/PPO (4) still require the matching unexpired licence.
+- **Eligibility / Support Staff** (`lib/eligibility.ts`): `employees.position` (`officer` | `support_staff`). Shifts may require level 1 (support, no licence). Effective level = `GREATEST(maxLicenseLevel, support_staff ? 1 : 0, BASE_ELIGIBILITY_LEVEL=2)`; higher covers lower. The **level-2 floor** means ANY active employee can both SEE and ACCEPT (claim) level-1 and level-2 unarmed shifts regardless of whether they hold a licence (support-staff baseline of 1 is now subsumed); armed (3) and L4/PPO (4) shifts still require the matching unexpired licence. **The effective level is an ELIGIBILITY figure, NOT a held licence** — a no-licence employee reads as effective 2 but holds nothing, so surfaces that report a *held* licence (officer profile, PDFs, licence grid, 403 messages) must read the licence rows directly. `effectiveLevelSql` needs `licensesTable` **and** `employeesTable` left-joined on `users.id`. Used by all SHIFT eligibility surfaces (list/claim/assign/broadcast, clock-in auto-assign, swaps, availability, scheduler). Chat license-level rooms compute membership from `MAX(licenses.level)` directly (NOT these helpers), so the floor does not widen chat access. Set position at `/admin-portal/tables/employees`.
+- **Shifts** stay `status='upcoming'` forever (never auto-advanced), so any "upcoming" query MUST add a time bound (convention: `endTime >= now`) or past shifts leak.
+- **Atomic shift claim** (`POST /shifts/:id/claim`): tx + `SELECT … FOR UPDATE` + headcount re-check before insert. One-tap Reserve creates `accepted`; Decline DELETES the assignment to free the slot.
+- **Repeating shifts** (`POST /shifts/repeat`): expand `{startDate, untilDate, daysOfWeek[0..6], startTime/endTime}` (cap 366; overnight wrap when end ≤ start). Idempotent per site + exact `startTime`.
+- **Geo clock-in** (`POST /time-entries/clock-in {lat,lng,shiftId?}`): without `shiftId`, resolves nearest site within 1 mile (haversine); `422 No Site Nearby` if outside.
+- **Live geofence**: each `/me/location` ping (~1/min while clocked in) checks officer vs active shift's site (`GEOFENCE_RADIUS_MILES`, default 0.25). First inside→outside → push + SMS to admins; resets on return.
+- **Open vacancies**: dashboard lists upcoming shifts where `filled<headcount`. `POST /shifts/:id/notify-vacancy` pushes qualifying officers.
+- **Live map**: admin tab, Leaflet/OSM (web) or list (native), 30s refresh; mobile pings `/me/location` every 60s. `GET /admin/active-officers`.
+- **Emergency button**: 3s hold on employee Home → `POST /emergency` → critical incident + push/SMS to admins; returns `callNumber` (`EMERGENCY_CALL_NUMBER` or `911`), dialed via `Linking.openURL("tel:…")`.
+- **Chat**: real-time named channels, persistent history, WS delivery.
+- **Notifications**: shift assignment, vacancy, geofence breach, emergency, license expiry (30/14/7), pre-shift (2h, 30m).
+- **Officer paystubs**: mobile Profile → My paystubs (`GET /me/payroll`), with YTD/lifetime totals.
+- **Client incident share links**: admin mints a no-login per-incident URL (`/admin-portal/incidents/share-links`); public view at `/admin-portal/share/incident/:token` is sanitized read-only (NEVER adminNotes, officer email/phone, or full name — reduced to "F. Last"; PDF mirrors via `{ redactForPublicShare: true }`). Token = 32 random bytes, 30d default, revocable, view-counted. Rate-limited; minting fails closed (503) without `APP_BASE_URL`/`REPLIT_DOMAINS`.
 
-- **All workers are 1099 — payroll NEVER withholds tax.** `tax=0`, `netPay=grossPay` at compute, read (incl. legacy normalization), and write. The DB/API `tax` field stays but is always `0`.
-- **Pay-rate priority**: `time_entries.pay_rate_override` → `shifts.payRate` → `employees.hourlyRate` → $0 (warning). Bill rate: `shifts.billRate` → `sites.defaultBillRate` → refuse (400).
-- **Invoicing is auto + idempotent**: each time-entry approval upserts a `draft` invoice keyed (`siteId`, ISO-week Monday 00:00 UTC), rebuilding line items from that week's approved entries; admin-grid time-entry CRUD fires the same sync (a moved entry also rebuilds its OLD bucket). Admin edit of billable fields flips `auto_synced=false`; ended weeks lock hourly; a late approval for a locked week opens a new adjustment draft. Due = today + client payment terms.
-- **Federal holidays 1.5×** (payroll AND billing): match the **actual** holiday date (a Sat July 4 stays July 4), qualify the whole entry by clock-in date in `PAYROLL_TIMEZONE` (default `America/Chicago`), round the premium rate to cents BEFORE × hours.
-- **Pay Run** (`/admin-portal/payroll/pay-run`): pending → processed (atomic on CSV export) → paid; rows missing bank details/name/DD consent or with zero/negative net are excluded. Stripe path 501 unless `STRIPE_CONNECT_ENABLED=true`. Bank cols keep UK names (`bankBsb` etc.) with US labels.
-- **Analytics** (`/admin-portal/analytics`, admin-only, ungated core): same money rules + CSV/PDF export. Known cosmetic divergence: analytics weekly buckets use business-TZ Mondays, invoices key UTC Mondays — Sunday-evening entries can chart in a different week than they invoice; range totals agree (not a bug).
+### Invoicing
 
-## HR pipeline
+- **Auto-populated + idempotent**: each time-entry approval fires `lib/invoiceSync.upsertWeeklyInvoiceForTimeEntry` — finds-or-creates a `draft` invoice keyed on (`siteId`, `periodStart`=Monday 00:00 UTC) and rebuilds line items from all approved entries that ISO week. Rejection re-syncs. Manual `POST /invoices/generate {siteId, weekStart}` uses the same upsert. Rate = `shifts.billRate` → `sites.defaultBillRate` → refuse (400). Due = today + `clients.paymentTermsDays`.
+- **Federal-holiday billing (1.5×)**: hours whose clock-in date (in `PAYROLL_TIMEZONE`) land on a US federal holiday bill at `billRate × 1.5` (rounded to cents) in their own line item. Calendar in `lib/holidays.ts`.
+- **Lifecycle**: syncable iff `status='draft' AND locked_at IS NULL AND auto_synced=true`. Admin edit of billable fields flips `auto_synced=false`. Hourly `lockEndedWeekInvoices` stamps `locked_at` once `period_end < today`; a late approval for a locked week opens a new adjustment draft (partial unique index `invoices_active_auto_draft_per_week_idx`). Race-safe on `23505`.
 
-- Public apply (`/admin-portal/apply`, no auth, rate-limited; files via presigned upload URLs) → admin review (`/admin-portal/hr/applications`) → **approve** creates pending `User` + `Employee` + `License` and mints a 14-day single-use onboarding token (re-provisions an existing user only if employee + pending/inactive; else 409) → public onboarding (`/admin-portal/onboard/:token`) collects bank/tax/docs/signature, copies bank+emergency contact to `employees`, activates the user, consumes the token.
-- **Request more info** mints a 14-day single-use amendment token (`/admin-portal/amend/:token`); amendment enforces the requested fields, applies atomically, bumps status to `under_review`.
-- **Invitations** (`/admin-portal/hr/invitations`): two-phase — generate bulk temp passwords (plaintext stored until sent, `must_change_password=true`) then send invite emails (clears plaintext). Only `/admin/users/invitations` returns temp passwords; generic users grid strips them. Admins are never targeted.
-- **UK→US naming**: some DB cols keep UK names (`sia_license_*`, `ni_number*`, `p45_doc_key`, `bankBsb`) — UI labels are TX/US.
+### Payroll
 
-## Platform & multi-tenancy
+- **All workers are 1099 contractors — payroll NEVER withholds tax.** `tax = 0` and `netPay = grossPay` everywhere, always — enforced at **compute** (`/payroll/generate` + board process), **read** (`/payroll` list, pay-run preview/export, officer `/me/payroll` incl. YTD/lifetime, admin CSV — all normalize legacy rows on read), and **write** (admin `payroll_entries` `coerceWrite` forces it; editable Tax field removed from the grid). The DB `tax` column + API `tax` field stay but are always `0`.
+- **Rate priority**: `time_entries.pay_rate_override` → `shifts.payRate` → `employees.hourlyRate` → $0 (warning). Backfill via Payroll Board "Apply pay rate" (`POST /payroll/board/apply-rate`, admin-only, audited; refuses processed/paid). Pay Run re-runs `computeBoardBuckets` at process time.
+- **Federal-holiday pay (1.5×)**: hours whose clock-in date (in `PAYROLL_TIMEZONE`) land on a US federal holiday pay at `baseRate × 1.5`. Whole-entry qualification by clock-in date (no midnight split). Board shows amber "Holiday 1.5×" badge. Policy in `lib/holidays.ts`.
+- **Board archive** (admin-only): `POST /payroll/board/archive {selections[], reason?}` snapshots an officer-week bucket to `payroll_entries` `status='archived'` (+`archivedAt/By/Reason`; skips processed/paid; advisory-lock discipline like process). Board `?statusFilter=archived` lists snapshots; `POST /payroll/board/unarchive {ids[]}` restores to `pending`. Archived rows are excluded from the working board, officer paystubs, and pay-run claims, and are immutable: `/payroll/generate` upsert + apply-rate + process all gate on non-archived (`setWhere status='pending'` on generate). Archiving pay does NOT affect client invoicing (invoices derive from time entries).
+- **Pay Run** (`/admin-portal/payroll/pay-run`): pending → processed (after CSV export) → paid.
+  - `/payroll/pay-run/preview {ids[]}` → rows + per-row warnings (missing bank/routing/name, no DD consent, zero/negative net); warnings + already-paid excluded from CSV.
+  - `/payroll/pay-run/export-csv {ids[], batchReference?}` → `wcsg-payroll-<batch>.csv`; atomically marks payable rows `processed`/`ach_csv`/`paymentReference`. Idempotent.
+  - `/payroll/pay-run/mark-paid {ids[], …}` → `paid` (default method `manual`).
+  - `/payroll/pay-run/stripe` → 501 unless `STRIPE_CONNECT_ENABLED=true` (needs flag + `STRIPE_SECRET_KEY` + employee `stripeAccountId` + `stripe.transfers.create()`).
+  - Bank source: `employees.bankAccountName / bankAccountNumber / bankBsb` (UK column names, US labels); `directDepositConsent` must be true.
 
-- **Branding (super-admin)**: Platform → Branding edits the `platform_brand_config` singleton live (no redeploy); `lib/brandConfig.ts` merges env defaults ← non-null DB overrides, patched in-process. Super-admin = `SUPER_ADMIN_EMAILS` CSV (falls back to seeded admin email). Overridable: company/short/app names, tagline, 3 brand colors, billing/hr/adminNotify emails, logo (`data:image/*` ≤~512 KB). Env-only: salesEmail, privacyEmail, demo credentials. Public `GET /api/brand` (`no-store`) serves text/colors/logo + feature flags; portal CSS vars and all 4 PDFs read it live. **Pre-auth login stays fixed "SecureOps Command"** (per-tenant brand only post-auth; defaults stay WCSG so the a11y gate holds).
-- **Multi-org**: ONE app-store build, many fully separate customer deployments (own API + DB + branding) — never one server routing many DBs. The app resolves a short org code via public `GET /api/org-directory/resolve?code=` to a backend ORIGIN (routing convenience, NOT auth; dev synthesizes unknown codes, prod 404s), persists it on-device, and routes all native traffic there (native ignores build-time `EXPO_PUBLIC_API_BASE_URL` — the runtime origin is OTA-safe). Web always talks to its own origin. `ORG_DIRECTORY` env (JSON array, memoized — redeploy to refresh) lives on the directory deployment; `ORG_CODE` on each customer backend powers its invite QR/link surface (`/connect?code=…`, validated against the directory, single-shot auto-resolve). Switch-org clears stored org + brand/feature cache + runtime origin.
-- **New-customer runbook**: (1) fresh Postgres + `db push`; (2) separate Reserved-VM publish; (3) env: `DATABASE_URL`, `SESSION_SECRET`, `ALLOWED_ORIGINS`, `APP_BASE_URL`, SMTP, `DEMO_ADMIN_EMAIL` + `DEMO_ADMIN_PASSWORD` secret, `SUPER_ADMIN_EMAILS` — **leave seeding ON for first boot** so the master admin is created, then optionally disable; (4) set branding in-app; (5) register the org code in `ORG_DIRECTORY` (+ set `ORG_CODE` on their backend) and redeploy the directory backend; (6) register in the control plane with a `mgmtSecret` = `CONTROL_PLANE_SHARED_SECRET` on their backend.
-- **Control plane**: operator-only fleet console with its own DB + secrets; registry tables created idempotently on boot (kept out of `@workspace/db` so schema-drift never sees them). Dev workflow runs on port 9999 with shared-DB fallbacks. **Deploys as its OWN separate Replit project** — a second `deploymentTarget="vm"` artifact here would crash-loop this deploy, so the artifact stays dev-only in this project. Prod boot fails fast without `CONTROL_PLANE_{DATABASE_URL, SESSION_SECRET, ENCRYPTION_KEY, OPERATOR_EMAIL, OPERATOR_PASSWORD|_HASH, ALLOWED_ORIGINS}`. Customer `mgmtSecret`s stored encrypted; a customer backend without its shared secret keeps `/api/control-plane/*` inert (503). Remote-change history pruned after `CONTROL_PLANE_REMOTE_CHANGE_RETENTION_DAYS` (default 180).
+## HR pipeline (recruitment → onboarding)
 
-## Security & operations
+- **Public application** (`/admin-portal/apply`) — multi-step; files via presigned URL (`POST /api/storage/uploads/request-url` → PUT to GCS); submits to `POST /api/applications` (no auth, rate-limited).
+- **Admin Applications** (`/admin-portal/hr/applications`) — filter/search, review, under-review/reject/approve, batch "Request more info".
+- **Approve** creates `User` (employee, status=`pending`, temp pw) + `Employee` + `License` (if TX info), mints 14-day single-use `OnboardingToken`. Re-provisions an existing user only if `role==='employee'` AND status `pending`/`inactive`; else 409.
+- **Public onboarding** (`/admin-portal/onboard/:token`) — prefilled; submits bank/tax/W-2/emergency contact/uniform/docs + signature + 4 acknowledgements. Copies bank+emergency to `employees`, sets user `active`, consumes token. (DB cols keep UK names — `sia_license_*`, `ni_number*`, `p45_doc_key` — UI labels are TX/US.)
+- **Admin Onboarding** (`/admin-portal/hr/onboarding`) — pending vs completed, detail dialog, resend link, delete (pending only). `DELETE /admin/onboarding/:employeeId` refuses (409) unless `role=employee AND status=pending` (active staff → Personnel); tx deletes the user (cascades employee row/tokens/submission) AND resets the originating application (`created_employee_id` has no FK — cleared + status back to `under_review` + both sign-offs and email state wiped) so it stays re-actionable; deleted identity in audit metadata.
+- **Request more info**: `POST /admin/applications/:id/request-info {fields[], note?}` mints 14-day single-use `application_amendment_tokens`, status → `info_requested`, emails `/admin-portal/amend/:token`. `POST /applications/amend/:token` enforces all requested fields, applies atomically, bumps to `under_review`. Batch parallel (cap 4).
 
-- **Baseline** (full detail in `threat_model.md`): CORS = `ALLOWED_ORIGINS ∪ REPLIT_DOMAINS` (no-Origin native/curl allowed); Helmet with cross-origin resource policy, CSP in production only; rate limiters on login, forgot-password, public application, token lookup, emergency, upload-URL; JWT revocation via `users.tokens_valid_after` watermark + `revoked_tokens(jti)`, checked in `requireAuth` AND the WS upgrade; `GET /admin/system/status` drives an amber degraded-config banner; public legal pages at `/admin-portal/{privacy,terms,data-rights,eula}`.
-- **Deployment: Reserved VM (always-on), NOT Autoscale** — the API is stateful (WS registry + job mutex). api-server must stay the ONLY `deploymentTarget="vm"` artifact. Required env: `DATABASE_URL`, `SESSION_SECRET` (≥16 chars; prod hard-fails). Optional: `ALLOWED_ORIGINS`, `APP_BASE_URL`, `SMTP_*`, `EMERGENCY_CALL_NUMBER`, `GEOFENCE_RADIUS_MILES`, `SEED_DEMO_USERS=false`, `STRIPE_CONNECT_ENABLED`, `GEOCODING_ENABLED`, `PAYROLL_TIMEZONE`, `EMAIL_DEV_SEND` (dev only), `ORG_CODE`.
-- **Outbound email only sends in production** (dev SMTP secrets ARE the prod mail account — dev sends would hit real inboxes); `EMAIL_DEV_SEND=true` forces a single real dev run.
-- **Validation gates** (any failure blocks release): `typecheck` · `test` (workspace Vitest) · `security-headers` · `schema-drift` (fix = `db push`) · `a11y` (axe + Playwright, admin portal) · `a11y-mobile` (screen-reader-label lint).
-- **Seeded accounts** (idempotent each boot via `seedDemoUsers()`; disable with `SEED_DEMO_USERS=false`): master admin = `DEMO_ADMIN_EMAIL` + `DEMO_ADMIN_PASSWORD` secret (this deployment: `justin.knox@williamscouncil.com`; also the super-admin) — point at the customer's own admin before a new copy's first boot. Demo staff: `officer@secureops.com`/`Employee123!`, `lead@secureops.com`/`Lead123!`, `guest@secureops.com`/`Demo123!` (mobile "Try Demo").
+## Invitations (bulk temp passwords + invite emails)
+
+- Page `/admin-portal/hr/invitations`. Two-phase; admins NEVER targeted.
+- **Generate** — `POST /admin/users/bulk-temp-passwords {scope, userIds?, force?}`: 10-char pw (avoids 0/O/1/I/l), bcrypt → `password_hash`, plaintext → `temp_password_plain`, `must_change_password=true`.
+- **Send** — `POST /admin/users/bulk-invite {userIds[]}`: emails sign-in URL + email + temp pw, clears `temp_password_plain`, stamps `invited_at`.
+- `GET /admin/users/invitations` returns `tempPasswordPlain` (admin-only). Generic `/admin/tables/users` strips `passwordHash` + `tempPasswordPlain`. Sign-in URL from `APP_BASE_URL` (preferred) or `REPLIT_DOMAINS`.
+
+## Security baseline
+
+- **CORS** locked to `ALLOWED_ORIGINS ∪ REPLIT_DOMAINS`; no-Origin (native/curl) allowed.
+- **Helmet** with `crossOriginResourcePolicy: cross-origin` (signed downloads embed). CSP in production only.
+- **Rate limiters** (`middlewares/rateLimit.ts`): login (10/15min), forgot-password (5/hr), public-application (5/hr), token-lookup (60/5min), emergency (5/min/user), upload-URL (per-IP cap).
+- **JWT revocation** (checked in `requireAuth` AND on `/api/ws` upgrade): (1) `users.tokens_valid_after` watermark — bumped by `/auth/logout-all` or admin `revoke-sessions`; (2) `revoked_tokens(jti)` — written by `/auth/logout`. Hourly cleanup.
+- **System status**: `GET /admin/system/status` (admin) → SMTP / SESSION_SECRET / base-URL / CORS booleans. Admin shell shows amber banner when degraded; boot logs `error` per missing prod requirement.
+- **Public legal pages**: `/admin-portal/{privacy,terms,data-rights}`, linked from Apply, admin Login, mobile login.
+- **DB indexes** on hot paths: `shifts(siteId,startTime)`, `shiftAssignments(shiftId,status)`, `timeEntries(employeeId,clockInTime)`, `chatMessages(roomId,createdAt)`, `incidents(employeeId,occurredAt)`, `revokedTokens(userId)`, `revokedTokens(expiresAt)`.
+
+## Deployment
+
+- **Target: Reserved VM (always-on), NOT Autoscale.** The API is stateful (in-process WS registry + scheduled jobs with a boot mutex); scale-to-zero / multi-replica causes uptime dips, dropped WS, and double-firing jobs. `artifacts/api-server/.replit-artifact/artifact.toml` declares `deploymentTarget = "vm"`; the top-level publish target must also be Reserved VM.
+- **Required env**: `DATABASE_URL`, `SESSION_SECRET` (≥16 chars; production hard-fails if missing/short).
+- **Optional env**: `ALLOWED_ORIGINS`, `APP_BASE_URL`, `SMTP_HOST/PORT/USER/PASS/FROM` (set all to enable outbound mail; without them endpoints return `emailSent:false` + a URL to share manually), `EMERGENCY_CALL_NUMBER`, `GEOFENCE_RADIUS_MILES`, `SEED_DEMO_USERS=false`, `STRIPE_CONNECT_ENABLED`, `GEOCODING_ENABLED` (US Census geocoding for the distance-from-site filter), `PAYROLL_TIMEZONE` (IANA tz for holiday-pay date resolution; default `America/Chicago`), `EMAIL_DEV_SEND=true` (dev/test only — force real email delivery; see below).
+- **Outbound email only sends in production.** `sendEmailDetailed` (the single mail chokepoint in `lib/email.ts`) suppresses all sends unless `NODE_ENV='production'`, logging an info line instead. This stops the dev workspace / test runner from flooding the real admin/HR inboxes on every restart, scheduled job, or exercised code path (the dev SMTP secrets ARE the production mail account). Set `EMAIL_DEV_SEND=true` for a single run to deliberately test the live pipeline in dev.
+
+### Validation gates (CI — any failure blocks release)
+
+- **`typecheck`** — `pnpm run typecheck`.
+- **`test`** — `pnpm -r --if-present run test` (api-server / admin-portal / security-ops Vitest). Self-contained: no workflow / DB / device.
+- **`security-headers`** — builds api-server, asserts helmet CSP / CORS / HSTS / COR-P.
+- **`schema-drift`** — `scripts/src/check-schema-drift.ts` introspects every table/enum exported from `@workspace/db/schema` and asserts the live DB matches on: missing table/column, type mismatch, nullability, missing named index, missing enum/value, default drift, FK drift (incl. `onDelete`). Normalises whitespace/casts so equivalent forms don't false-positive; ignores extra DB-only objects. Fails fast naming each object + the `db run push` remedy. Needs `DATABASE_URL`. **A forgotten `db push` after a schema change trips this (and later `test`/`security-headers`) — the fix is push, not code.**
+- **`a11y`** — axe-core + Playwright/Chromium over key Admin Portal surfaces; fails on any critical/serious WCAG 2.1 A/AA violation. Self-bootstrapping (spawns api-server + admin-portal, auto-seeds admin). Override via `A11Y_BASE_URL` / `A11Y_ADMIN_EMAIL` / `A11Y_ADMIN_PASSWORD`.
+- **`a11y-mobile`** — static screen-reader-label lint for Expo officer screens; fails if an interactive element has neither `accessibilityLabel` nor `accessibilityRole`. Escape hatches: `accessible={false}`, `accessibilityElementsHidden`, `importantForAccessibility`, `aria-hidden`.
+
+## Seeded accounts
+
+- Admin: `admin@secureops.com` / `Admin123!`
+- Employee: `john.smith@secureops.com` / `Employee123!`
+- Provisioned idempotently each boot by `seedDemoUsers()`. Disable with `SEED_DEMO_USERS=false`.
 
 ## Gotchas
 
-- Orval: list hooks take `(params, { query: { queryKey } })`; mutation hooks take `{id, data}`. Codegen post-step rewrites `lib/api-zod/src/index.ts` to re-export only `./generated/api`.
-- expo-notifications warns on web but doesn't crash — push registration skipped on web.
-- Admin grid derived "name" cells: `derived.linkRoute` opens a route; `derived.linkTo` filters a grid — never point `linkTo` at its own table (self-filters, looks like a no-op).
+- Run `pnpm --filter @workspace/db run push` after every schema change.
+- WS clients connect to `wss://<domain>/api/ws?token=<jwt>` — proxy routes correctly.
+- Orval: list hooks take `(params, { query: { queryKey } })`; mutation hooks take `{id, data}` (or nested). Codegen post-step rewrites `lib/api-zod/src/index.ts` to only re-export `./generated/api` (avoids TS2308).
+- expo-notifications on web warns but doesn't crash — push registration skipped on web.
+- Admin grid derived "name" cells: `derived.linkRoute` opens a route; `derived.linkTo` filters a grid. Don't point `linkTo` at its own table — it self-filters and looks like a no-op click.
+- **Per-user nav tab order**: admin-portal top nav groups are reorderable per account (`users.uiPreferences.navGroupOrder` jsonb, `PUT /me/ui-preferences`; cosmetic only, never authorization). `applyNavOrder` in `AppShell.tsx` filters unknown keys client-side; saving the exact default order stores `[]` so the user tracks future default changes.
+- **All displayed dates/times render in America/Chicago**, not the viewer's browser/device tz — via shared helpers (`admin-portal/src/lib/format.ts`, `security-ops/utils/time.ts`; each takes an optional `timeZone` param defaulting to `BUSINESS_TIME_ZONE`). Don't add raw `toLocaleDateString`/`toLocaleString` calls on timestamps; use `formatTime`/`formatDateTime`/`formatDate`. Date-only (pg `date`) values format with `timeZone: "UTC"` to show the literal calendar date.
+- Holiday pay matches **actual** federal-holiday dates, not the bank-observed substitute (a Sat July 4 stays July 4) — WCSG pays whoever works the real day. Qualification by clock-in date in `PAYROLL_TIMEZONE`; multiplier is a fixed 1.5×.
+
+## Pointers
+
+- See the `pnpm-workspace` skill for monorepo structure, TS project refs, and dependency conventions.
+</content>
+</invoke>

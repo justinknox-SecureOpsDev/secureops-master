@@ -64,6 +64,17 @@ type OpenShift = {
   payRate: string | null;
 };
 
+type PendingClaim = {
+  assignmentId: string;
+  shiftId: string;
+  employeeName: string;
+  shiftTitle: string;
+  siteName: string | null;
+  startTime: string;
+  endTime: string;
+  requiredLicenseLevel: number;
+};
+
 type Incident = {
   id: string;
   title: string;
@@ -103,32 +114,6 @@ type Site = {
 
 type ChatRoom = { id: string; name: string; type: string };
 type ChatMessage = { id: string; content: string | null; userName?: string | null; createdAt: string };
-
-// Shape of the rows returned by GET /shifts — each carries its assignments
-// inline (id/status/employeeName), so pending self-claims are derived
-// client-side without a dedicated endpoint (mirrors the Shifts page panel).
-type ShiftWithAssignments = {
-  id: string;
-  title: string | null;
-  clientName: string | null;
-  location: string | null;
-  startTime: string;
-  endTime: string;
-  requiredLicenseLevel: number;
-  assignments: { id: string; status: string; employeeName: string | null }[];
-};
-
-type PendingClaim = {
-  shiftId: string;
-  assignmentId: string;
-  employeeName: string | null;
-  shiftTitle: string | null;
-  clientName: string | null;
-  location: string | null;
-  startTime: string;
-  endTime: string;
-  requiredLicenseLevel: number;
-};
 
 
 // WCSG operates on Central Time. All board dates/times render in Central
@@ -278,6 +263,30 @@ export default function DispatchPage() {
     queryFn: () => api<OpenShift[]>("/dispatch/open-shifts?hours=72"),
     refetchInterval: 60_000,
   });
+  const pendingClaimsQuery = useQuery<PendingClaim[]>({
+    queryKey: ["dispatch", "pending-claims"],
+    queryFn: async () => {
+      const shifts = await api<any[]>("/shifts?status=upcoming");
+      const rows: PendingClaim[] = [];
+      for (const s of (shifts ?? [])) {
+        for (const a of (s.assignments ?? []) as any[]) {
+          if (a.status !== "pending_approval") continue;
+          rows.push({
+            assignmentId: a.id,
+            shiftId: s.id,
+            employeeName: a.employeeName ?? "Officer",
+            shiftTitle: s.title ?? "Shift",
+            siteName: s.siteName ?? s.location ?? null,
+            startTime: s.startTime,
+            endTime: s.endTime,
+            requiredLicenseLevel: s.requiredLicenseLevel ?? 0,
+          });
+        }
+      }
+      return rows.sort((a, b) => new Date(a.startTime).getTime() - new Date(b.startTime).getTime());
+    },
+    refetchInterval: 30_000,
+  });
   const incidents = useQuery<Incident[]>({
     queryKey: ["dispatch", "active-incidents"],
     queryFn: () => api<Incident[]>("/dispatch/active-incidents"),
@@ -297,35 +306,6 @@ export default function DispatchPage() {
     queryKey: ["dispatch", "broadcast-rooms"],
     queryFn: () => api<ChatRoom[]>("/dispatch/broadcast-rooms"),
   });
-  // Officer self-claims awaiting an approval decision. Derived from the
-  // upcoming-shifts list (each row carries its assignments inline) so no
-  // dedicated endpoint is needed — same source the Shifts page panel uses.
-  const claims = useQuery<ShiftWithAssignments[]>({
-    queryKey: ["dispatch", "shift-claims"],
-    queryFn: () => api<ShiftWithAssignments[]>("/shifts?status=upcoming"),
-    refetchInterval: 30_000,
-  });
-  const pendingClaims = useMemo<PendingClaim[]>(() => {
-    const out: PendingClaim[] = [];
-    for (const s of claims.data ?? []) {
-      for (const a of s.assignments ?? []) {
-        if (a.status !== "pending_approval") continue;
-        out.push({
-          shiftId: s.id,
-          assignmentId: a.id,
-          employeeName: a.employeeName,
-          shiftTitle: s.title,
-          clientName: s.clientName,
-          location: s.location,
-          startTime: s.startTime,
-          endTime: s.endTime,
-          requiredLicenseLevel: s.requiredLicenseLevel,
-        });
-      }
-    }
-    out.sort((a, b) => a.startTime.localeCompare(b.startTime));
-    return out;
-  }, [claims.data]);
 
   const refreshAll = () => {
     qc.invalidateQueries({ queryKey: ["dispatch"] });
@@ -393,13 +373,13 @@ export default function DispatchPage() {
               onChange={refreshAll}
             />
           </div>
-          <div data-tour="shift-claims">
-            <ShiftClaimsPanel
-              claims={pendingClaims}
-              loading={claims.isLoading}
-              error={claims.error}
-              updatedAt={claims.dataUpdatedAt}
-              onChange={() => qc.invalidateQueries({ queryKey: ["dispatch"] })}
+          <div data-tour="claim-approvals">
+            <PendingClaimsPanel
+              data={pendingClaimsQuery.data ?? []}
+              loading={pendingClaimsQuery.isLoading}
+              error={pendingClaimsQuery.error}
+              updatedAt={pendingClaimsQuery.dataUpdatedAt}
+              onChange={refreshAll}
             />
           </div>
           <div data-tour="open-shifts">
@@ -454,6 +434,11 @@ const TOUR_STEPS: TourStep[] = [
     selector: '[data-tour="status-board"]',
     title: "Clock-In Status Board",
     body: "Today's shifts grouped by state: on duty, late (≥10m), no-show, early-out, and upcoming. Use it to spot coverage gaps at a glance.",
+  },
+  {
+    selector: '[data-tour="claim-approvals"]',
+    title: "Shift Claim Approvals",
+    body: "Officer self-claims land here awaiting your decision. Approve confirms them on the roster and notifies them; Decline frees the slot and lets the officer know their request wasn't approved.",
   },
   {
     selector: '[data-tour="open-shifts"]',
@@ -1053,6 +1038,115 @@ function BucketTab({
   );
 }
 
+// =========================================================== PENDING CLAIMS
+
+function PendingClaimsPanel({
+  data, loading, error, updatedAt, onChange,
+}: {
+  data: PendingClaim[]; loading: boolean; error: unknown; updatedAt: number | undefined;
+  onChange: () => void;
+}) {
+  return (
+    <Card>
+      <CardHeader className="pb-3">
+        <CardTitle className="flex items-center gap-2 text-base">
+          <UserCheck className="w-5 h-5 brand-gold" />
+          Shift Claim Approvals
+          {data.length > 0 && (
+            <Badge className="bg-amber-500 text-black ml-1 text-[11px]">{data.length} pending</Badge>
+          )}
+          <span className="ml-auto flex items-center gap-2 text-xs opacity-60 font-normal">
+            <FreshnessLabel updatedAt={updatedAt} />
+          </span>
+        </CardTitle>
+      </CardHeader>
+      <CardContent className="space-y-2 max-h-[20rem] overflow-y-auto">
+        <InlineError error={error} />
+        {loading && <div className="text-sm opacity-60">Loading…</div>}
+        {!loading && !error && data.length === 0 && (
+          <div className="flex items-center gap-2 text-sm opacity-60">
+            <CheckCircle2 className="w-4 h-4 text-emerald-600" />
+            No shift claims awaiting approval.
+          </div>
+        )}
+        {data.map((claim) => (
+          <PendingClaimRow key={claim.assignmentId} claim={claim} onChange={onChange} />
+        ))}
+      </CardContent>
+    </Card>
+  );
+}
+
+function PendingClaimRow({ claim, onChange }: { claim: PendingClaim; onChange: () => void }) {
+  const approve = useMutation({
+    mutationFn: () =>
+      api(`/shifts/${claim.shiftId}/assignments/${claim.assignmentId}`, {
+        method: "PUT",
+        body: { status: "accepted" },
+      }),
+    onSuccess: onChange,
+  });
+  const decline = useMutation({
+    mutationFn: () =>
+      api(`/shifts/${claim.shiftId}/assignments/${claim.assignmentId}`, {
+        method: "PUT",
+        body: { status: "declined" },
+      }),
+    onSuccess: onChange,
+  });
+  const busy = approve.isPending || decline.isPending;
+
+  return (
+    <div className="rounded border bg-card p-3 space-y-2">
+      <div className="flex items-start gap-2">
+        <div className="flex-1 min-w-0">
+          <div className="font-medium text-sm">{claim.employeeName}</div>
+          <div className="text-xs opacity-70 truncate">
+            {claim.shiftTitle}{claim.siteName ? ` · ${claim.siteName}` : ""}
+          </div>
+          <div className="text-xs opacity-60 mt-0.5">
+            {fmtTime(claim.startTime)} – {fmtTime(claim.endTime)}
+          </div>
+        </div>
+        <Badge variant="outline" className="text-[10px] shrink-0">L{claim.requiredLicenseLevel}+</Badge>
+      </div>
+      {(approve.isError || decline.isError) && (
+        <div className="text-xs text-red-700">
+          {((approve.error ?? decline.error) instanceof Error
+            ? (approve.error ?? decline.error) as Error
+            : { message: "Could not update the request." }
+          ).message}
+        </div>
+      )}
+      <div className="flex gap-2">
+        <Button
+          size="sm"
+          className="h-7 text-xs flex-1 bg-emerald-600 hover:bg-emerald-700 text-white"
+          disabled={busy}
+          onClick={() => approve.mutate()}
+        >
+          {approve.isPending
+            ? <Loader2 className="w-3 h-3 animate-spin mr-1" />
+            : <CheckCircle2 className="w-3 h-3 mr-1" />}
+          Approve
+        </Button>
+        <Button
+          size="sm"
+          variant="outline"
+          className="h-7 text-xs flex-1 border-red-300 text-red-700 hover:bg-red-50 dark:hover:bg-red-950"
+          disabled={busy}
+          onClick={() => decline.mutate()}
+        >
+          {decline.isPending
+            ? <Loader2 className="w-3 h-3 animate-spin mr-1" />
+            : <X className="w-3 h-3 mr-1" />}
+          Decline
+        </Button>
+      </div>
+    </div>
+  );
+}
+
 // =========================================================== OPEN SHIFTS
 
 function OpenShiftsPanel({
@@ -1129,107 +1223,6 @@ function OpenShiftRow({ shift, onChange }: { shift: OpenShift; onChange: () => v
         onAssigned={onChange}
       />
     </div>
-  );
-}
-
-// =========================================================== SHIFT CLAIMS
-
-function claimLevelBadge(level: number): { label: string; cls: string } {
-  if (level >= 4) return { label: "L4 / PPO", cls: "bg-purple-100 text-purple-800 border-purple-300" };
-  if (level === 3) return { label: "L3 Armed", cls: "bg-amber-100 text-amber-800 border-amber-300" };
-  if (level <= 1) return { label: "L1", cls: "bg-slate-100 text-slate-700 border-slate-300" };
-  return { label: "L2", cls: "bg-slate-100 text-slate-700 border-slate-300" };
-}
-
-/**
- * Officer self-claims awaiting an approve/decline decision. Mirrors the Shifts
- * page Shift Claims panel — same `PUT /shifts/:id/assignments/:assignmentId`
- * call with `accepted` (confirm) / `declined` (free the slot). After a decision
- * we invalidate the dispatch queries so this panel and the status board refresh.
- */
-function ShiftClaimsPanel({
-  claims, loading, error, updatedAt, onChange,
-}: {
-  claims: PendingClaim[]; loading: boolean; error: unknown;
-  updatedAt: number | undefined; onChange: () => void;
-}) {
-  const [busyId, setBusyId] = useState<string | null>(null);
-  const [actionError, setActionError] = useState<string | null>(null);
-
-  const decide = useMutation({
-    mutationFn: ({ shiftId, assignmentId, decision }: { shiftId: string; assignmentId: string; decision: "accepted" | "declined" }) =>
-      api(`/shifts/${shiftId}/assignments/${assignmentId}`, { method: "PUT", body: { status: decision } }),
-    onMutate: ({ assignmentId }) => { setBusyId(assignmentId); setActionError(null); },
-    onSuccess: () => { onChange(); },
-    onError: (e: unknown) => {
-      setActionError(e instanceof Error ? e.message : "Could not update the claim.");
-    },
-    onSettled: () => { setBusyId(null); },
-  });
-
-  return (
-    <Card>
-      <CardHeader className="pb-3">
-        <CardTitle className="flex items-center gap-2 text-base">
-          <UserCheck className="w-5 h-5 brand-gold" />
-          Shift Claims — Awaiting Approval
-          <span className="ml-auto flex items-center gap-2 text-xs opacity-60 font-normal">
-            <span>{claims.length} pending</span>
-            <FreshnessLabel updatedAt={updatedAt} />
-          </span>
-        </CardTitle>
-      </CardHeader>
-      <CardContent className="space-y-2 max-h-[24rem] overflow-y-auto">
-        <InlineError error={error} />
-        {actionError && (
-          <div className="rounded border border-red-200 bg-red-50 text-red-900 text-xs px-3 py-2 flex items-center gap-2">
-            <AlertTriangle className="w-3.5 h-3.5 flex-shrink-0" />
-            <span className="truncate">{actionError}</span>
-          </div>
-        )}
-        {loading && <div className="text-sm opacity-60">Loading…</div>}
-        {!loading && !error && claims.length === 0 && (
-          <div className="text-sm opacity-60">No officer shift claims awaiting approval.</div>
-        )}
-        {claims.map((c) => {
-          const busy = busyId === c.assignmentId;
-          const lvl = claimLevelBadge(c.requiredLicenseLevel);
-          return (
-            <div key={c.assignmentId} className="rounded border bg-card p-3 flex flex-wrap items-center gap-3">
-              <div className="flex-1 min-w-0">
-                <div className="font-medium text-sm truncate">{c.employeeName ?? "Officer"}</div>
-                <div className="text-xs opacity-70 truncate">
-                  {c.shiftTitle ?? "Shift"}{c.clientName ? ` · ${c.clientName}` : ""}{c.location ? ` · ${c.location}` : ""}
-                </div>
-                <div className="text-xs opacity-70">
-                  {fmtDate(c.startTime)} · {fmtTime(c.startTime)} – {fmtTime(c.endTime)}
-                </div>
-              </div>
-              <span className={`text-xs px-2 py-0.5 rounded border ${lvl.cls}`}>{lvl.label}</span>
-              <div className="flex items-center gap-2 shrink-0">
-                <Button
-                  size="sm"
-                  disabled={busy}
-                  onClick={() => decide.mutate({ shiftId: c.shiftId, assignmentId: c.assignmentId, decision: "accepted" })}
-                >
-                  {busy ? <Loader2 className="w-3.5 h-3.5 mr-1 animate-spin" /> : <CheckCircle2 className="w-3.5 h-3.5 mr-1" />}
-                  Approve
-                </Button>
-                <Button
-                  size="sm"
-                  variant="outline"
-                  disabled={busy}
-                  className="border-red-300 text-red-700 hover:bg-red-50"
-                  onClick={() => decide.mutate({ shiftId: c.shiftId, assignmentId: c.assignmentId, decision: "declined" })}
-                >
-                  <X className="w-3.5 h-3.5 mr-1" /> Decline
-                </Button>
-              </div>
-            </div>
-          );
-        })}
-      </CardContent>
-    </Card>
   );
 }
 
@@ -1313,11 +1306,11 @@ function buildLeafletHtml(
   return `<!doctype html><html><head><meta charset="utf-8"/>
 <meta name="viewport" content="width=device-width,initial-scale=1"/>
 <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
-<style>html,body,#m{margin:0;padding:0;height:100%;background:#0c0a08}
-.popup{font:13px -apple-system,system-ui,sans-serif}.popup b{color:#0c0a08}
-.popup-btn{margin-top:6px;background:#0c0a08;color:#c9a04a;border:1px solid #c9a04a;border-radius:4px;padding:4px 8px;font-size:12px;font-weight:600;cursor:pointer;font-family:inherit}
-.popup-btn:hover{background:#c9a04a;color:#0c0a08}
-.site-pin{display:flex;align-items:center;justify-content:center;width:28px;height:28px;border-radius:6px;background:#0c0a08;color:#c9a04a;border:2px solid #c9a04a;font:bold 13px -apple-system,system-ui,sans-serif;box-shadow:0 1px 4px rgba(0,0,0,.35)}</style>
+<style>html,body,#m{margin:0;padding:0;height:100%;background:#080c18}
+.popup{font:13px -apple-system,system-ui,sans-serif}.popup b{color:#080c18}
+.popup-btn{margin-top:6px;background:#080c18;color:#c9a84c;border:1px solid #c9a84c;border-radius:4px;padding:4px 8px;font-size:12px;font-weight:600;cursor:pointer;font-family:inherit}
+.popup-btn:hover{background:#c9a84c;color:#080c18}
+.site-pin{display:flex;align-items:center;justify-content:center;width:28px;height:28px;border-radius:6px;background:#080c18;color:#c9a84c;border:2px solid #c9a84c;font:bold 13px -apple-system,system-ui,sans-serif;box-shadow:0 1px 4px rgba(0,0,0,.35)}</style>
 </head><body><div id="m"></div>
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 <script>
@@ -1398,10 +1391,10 @@ if(pts.length){
       // keeps it visually subordinate to the live pins.
       L.circle([p.lat,p.lng], {
         radius: resolveRadiusM(p),
-        color: '#c9a04a',
+        color: '#c9a84c',
         weight: 1,
         opacity: 0.45,
-        fillColor: '#c9a04a',
+        fillColor: '#c9a84c',
         fillOpacity: 0.08,
         interactive: false,
       }).addTo(group);
@@ -1412,7 +1405,7 @@ if(pts.length){
       m = L.marker([p.lat,p.lng], { icon });
     } else {
       const isInc = p.kind === 'incident';
-      const color = isInc ? (SEV[p.severity]||'#94a3b8') : '#c9a04a';
+      const color = isInc ? (SEV[p.severity]||'#94a3b8') : '#c9a84c';
       m = L.circleMarker([p.lat,p.lng], {
         radius: isInc ? 12 : 9,
         color, fillColor: color,

@@ -8,7 +8,7 @@ import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from "@/components/ui/select";
 import { useFkOptions, invalidateFk } from "@/lib/fk";
-import { toFormValue, fromFormValue } from "@/lib/format";
+import { toFormValue, fromFormValue, formatDateTime } from "@/lib/format";
 import { type Field, type TableDescriptor, singularize } from "@/lib/tables";
 import { api, ApiError, fetchWithAuth } from "@/lib/api";
 import { FileUploadField, MultiFileUploadField } from "./FileUploadField";
@@ -61,7 +61,7 @@ function RecentChangesPanel({ employeeUserId }: { employeeUserId: string }) {
             <li key={r.id} className="text-xs border border-border rounded p-2 bg-muted/30">
               <div className="flex items-center justify-between gap-2">
                 <span className="font-semibold brand-navy">{r.fieldLabel ?? r.field}</span>
-                <span className="text-muted-foreground">{new Date(r.changedAt).toLocaleString()}</span>
+                <span className="text-muted-foreground">{formatDateTime(r.changedAt)}</span>
               </div>
               <div className="mt-1 grid grid-cols-[auto_1fr] gap-x-2">
                 <span className="text-muted-foreground">From:</span>
@@ -396,22 +396,25 @@ export function RowFormDialog({
   const firstFocusableKey = visibleFields[0]?.key ?? null;
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
-        <DialogHeader>
-          <DialogTitle>
-            {initial ? `Edit ${singularize(descriptor.label)}` : `Add ${singularize(descriptor.label)}`}
-          </DialogTitle>
-          <DialogDescription className="sr-only">
-            {initial
-              ? `Edit this ${singularize(descriptor.label).toLowerCase()}. Required fields are marked.`
-              : `Create a new ${singularize(descriptor.label).toLowerCase()}. Required fields are marked.`}
-          </DialogDescription>
-        </DialogHeader>
+      <DialogContent className="max-w-2xl flex flex-col p-0 gap-0 max-h-[90dvh] overflow-y-hidden">
+        <div className="shrink-0 px-4 pt-4 pb-2 sm:px-6 sm:pt-6">
+          <DialogHeader>
+            <DialogTitle>
+              {initial ? `Edit ${singularize(descriptor.label)}` : `Add ${singularize(descriptor.label)}`}
+            </DialogTitle>
+            <DialogDescription className="sr-only">
+              {initial
+                ? `Edit this ${singularize(descriptor.label).toLowerCase()}. Required fields are marked.`
+                : `Create a new ${singularize(descriptor.label).toLowerCase()}. Required fields are marked.`}
+            </DialogDescription>
+          </DialogHeader>
+        </div>
         <form
           id={formId}
           className="contents"
           onSubmit={(e) => { e.preventDefault(); if (!saving) submit(); }}
         >
+        <div className="flex-1 min-h-0 overflow-y-auto overscroll-contain px-4 sm:px-6">
         <div className="space-y-5 py-2">
           {(() => {
             // Group fields into sections in declared order. A field's `section`
@@ -555,13 +558,22 @@ export function RowFormDialog({
         {descriptor.name === "employees" && initial && (initial as { userId?: string }).userId && (
           <RecentChangesPanel employeeUserId={String((initial as { userId: string }).userId)} />
         )}
+        </div>
+        <div className="shrink-0 px-4 pb-4 pt-2 sm:px-6 sm:pb-6">
         <DialogFooter>
           {initial && descriptor.name === "employees" && (
             <Button
               type="button"
               variant="outline"
               onClick={async () => {
-                const id = String((initial as { id?: unknown }).id ?? "");
+                // Personnel grid rows are keyed by employees.id, but the
+                // profile-PDF route resolves by users.id — prefer userId
+                // (fall back to id), matching the "Share with client" button.
+                const id = String(
+                  (initial as { userId?: unknown; id?: unknown }).userId ??
+                    (initial as { id?: unknown }).id ??
+                    "",
+                );
                 if (!id) return;
                 try {
                   const res = await fetchWithAuth(`/api/employees/${id}/profile/pdf`);
@@ -621,6 +633,7 @@ export function RowFormDialog({
             {saving ? "Saving…" : initial ? "Save changes" : "Create"}
           </Button>
         </DialogFooter>
+        </div>
         </form>
       </DialogContent>
     </Dialog>

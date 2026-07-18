@@ -10,11 +10,9 @@ import {
   sitesTable,
 } from "@workspace/db";
 import { requireAuth } from "../middlewares/auth";
-import { getEffectiveLevel } from "../lib/eligibility";
-import { requireFeature } from "../lib/features";
+import { getEffectiveLevel, isWorkerRole } from "../lib/eligibility";
 
 const router: IRouter = Router();
-router.use(["/me/availability", "/me/suggested-shifts"], requireFeature("availability"));
 
 // ---------- shared helpers ----------
 
@@ -73,12 +71,13 @@ function shiftSegments(start: Date, end: Date): { dow: number; startMin: number;
   ];
 }
 
-// Employee-role gate. The availability surface only makes sense for the
-// officer-facing app — admins / pending users have no business writing
-// employees rows or being suggested shifts.
+// Worker-role gate. The availability surface is for shift workers — which is
+// every internal staff role (employee / site_manager / dispatcher / admin),
+// since all staff can work, claim, and be assigned shifts. Only external
+// `client` accounts (and pending users) are refused.
 function requireEmployee(req: Request, res: Response, next: NextFunction): void {
-  if (req.user?.role !== "employee") {
-    res.status(403).json({ error: "Forbidden", message: "Employee role required" });
+  if (!isWorkerRole(req.user?.role)) {
+    res.status(403).json({ error: "Forbidden", message: "Worker role required" });
     return;
   }
   next();

@@ -2,9 +2,7 @@ modules = ["nodejs-24", "python-3.11", "postgresql-16"]
 
 [deployment]
 router = "application"
-deploymentTarget = "vm"
-run = ["node", "--enable-source-maps", "artifacts/api-server/dist/index.mjs"]
-build = ["pnpm", "run", "build:vm"]
+deploymentTarget = "cloudrun"
 
 [deployment.postBuild]
 args = ["pnpm", "store", "prune"]
@@ -45,18 +43,6 @@ args = "schema-drift"
 [[workflows.workflow.tasks]]
 task = "workflow.run"
 args = "schema-drift-test"
-
-[[workflows.workflow.tasks]]
-task = "workflow.run"
-args = "deps-install"
-
-[[workflows.workflow.tasks]]
-task = "workflow.run"
-args = "Control Plane"
-
-[[workflows.workflow.tasks]]
-task = "workflow.run"
-args = "front-door"
 
 [[workflows.workflow]]
 name = "a11y-mobile"
@@ -135,43 +121,10 @@ args = "pnpm --filter @workspace/scripts run test-schema-drift"
 [workflows.workflow.metadata]
 isValidation = true
 
-[[workflows.workflow]]
-name = "deps-install"
-author = "agent"
-
-[[workflows.workflow.tasks]]
-task = "shell.exec"
-args = "pnpm install --reporter=append-only"
-
-[workflows.workflow.metadata]
-outputType = "console"
-
-[[workflows.workflow]]
-name = "Control Plane"
-author = "agent"
-
-[[workflows.workflow.tasks]]
-task = "shell.exec"
-args = "pnpm --filter @workspace/control-plane run dev"
-
-[workflows.workflow.metadata]
-outputType = "console"
-
-[[workflows.workflow]]
-name = "front-door"
-author = "agent"
-
-[[workflows.workflow.tasks]]
-task = "shell.exec"
-args = "pnpm --filter @workspace/scripts run check-front-door"
-
-[workflows.workflow.metadata]
-isValidation = true
-
 [agent]
-stack = "BEST_EFFORT_FALLBACK"
+stack = "PNPM_WORKSPACE"
 expertMode = true
-integrations = ["github:1.0.0", "javascript_gemini_ai_integrations:2.0.0"]
+integrations = ["github:1.0.0"]
 
 [postMerge]
 path = "scripts/post-merge.sh"
@@ -212,18 +165,13 @@ packages = []
 [userenv]
 
 [userenv.production]
-PORT = "8080"
-NODE_ENV = "production"
-ALLOWED_ORIGINS = "https://wcsgisecureops.com"
+SEED_DEMO_USERS = "false"
 APP_BASE_URL = "https://wcsgisecureops.com"
+ALLOWED_ORIGINS = "https://wcsgisecureops.com,https://secureops.williamscouncilsg.com,https://security-operations-suite.replit.app"
 
 [userenv.shared]
 GEOCODING_ENABLED = "true"
 EMAIL_PROVIDER = "smtp"
-DEMO_ADMIN_EMAIL = "justin.knox@williamscouncil.com"
-SUPER_ADMIN_EMAILS = "justin.knox@williamscouncil.com"
-ORG_DIRECTORY = "[{\"code\":\"wcsgi\",\"name\":\"Williams Council Security Group\",\"apiBaseUrl\":\"https://secureops-command.replit.app\"},{\"code\":\"wcsg\",\"name\":\"Williams Council Security Group\",\"apiBaseUrl\":\"https://secureops-command.replit.app\"},{\"code\":\"rgp\",\"name\":\"RGP\",\"apiBaseUrl\":\"https://rgpsecureopscommand.com\"}]"
-ORG_CODE = "wcsgi"
 
 [objectStorage]
 defaultBucketID = "replit-objstore-932b0f1e-21e4-4a6f-a5f8-ab5a30523226"

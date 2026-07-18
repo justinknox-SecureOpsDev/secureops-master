@@ -1,8 +1,19 @@
+import {
+  setAuthTokenGetter,
+  setUnauthorizedHandler as setGeneratedUnauthorizedHandler,
+} from "@workspace/api-client-react";
+
 const TOKEN_KEY = "wcsg.adminToken";
 
 export function getToken(): string | null {
   return localStorage.getItem(TOKEN_KEY);
 }
+
+// Wire the generated API client (orval hooks → customFetch) to the same
+// localStorage-backed admin token used by api()/fetchWithAuth. Without this
+// every generated hook (Dashboard, Analytics, SiteDetailPage, …) sends NO
+// Authorization header and 401s. Module scope so it runs before any query.
+setAuthTokenGetter(getToken);
 export function setToken(t: string | null): void {
   if (t) localStorage.setItem(TOKEN_KEY, t);
   else localStorage.removeItem(TOKEN_KEY);
@@ -25,6 +36,9 @@ let _unauthorizedHandler: (() => void) | null = null;
  */
 export function setUnauthorizedHandler(handler: (() => void) | null): void {
   _unauthorizedHandler = handler;
+  // Keep the generated client (orval hooks) in lockstep: a 401 on an
+  // authenticated generated call must trigger the same logout-to-login flow.
+  setGeneratedUnauthorizedHandler(handler);
 }
 
 /**

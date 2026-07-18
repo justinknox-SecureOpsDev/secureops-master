@@ -15,5 +15,3 @@ SecureOps keeps officer license data in **two** places, and they are NOT automat
 **Why:** the license-renewal approve handler originally only updated the `licenses` table, so approved renewals never showed up on the officer profile (wrong level, missing/old card photo). Fix mirrors the renewal onto `employees` in the same transaction.
 
 **How to apply:** key the `employees` write on `eq(employeesTable.userId, <userId>)` — note `licenses.employeeId` is actually a `users.id`, same id space as `employees.userId`. Every user has an `employees` row (boot backfill ensures this), so the mirror UPDATE is safe.
-
-**Partial-import corollary:** any upsert that *partially* updates a license (AI/PDF import, bulk edits) must NOT clobber the existing `licenses.level` when the incoming payload omits a level — `level: incoming ?? null` silently downgrades eligibility. On the update branch set `level` only when it was actually provided; on insert, null is fine.

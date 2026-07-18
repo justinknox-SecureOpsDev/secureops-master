@@ -2,7 +2,7 @@ import React, { useEffect, useState } from "react";
 import {
   View, Text, TextInput, TouchableOpacity, StyleSheet,
   ActivityIndicator, ScrollView, Platform, Alert, Linking,
-  Image, Modal, Pressable, AccessibilityInfo, findNodeHandle,
+  Image, Modal, Pressable, AccessibilityInfo, findNodeHandle, Switch,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { Feather } from "@expo/vector-icons";
@@ -53,13 +53,15 @@ function useDocPreview(objectKey: string | null, localUri: string | null): strin
 }
 
 type Form = {
-  firstName: string;
-  lastName: string;
+  phone: string;
+  address: string;
   dateOfBirth: string;
   cityOfBirth: string;
   stateOfBirth: string;
-  phone: string;
-  address: string;
+  niNumber: string;
+  rightToWorkStatus: string;
+  taxCode: string;
+  directDepositConsent: boolean;
   emergencyContactName: string;
   emergencyContactRelationship: string;
   emergencyContactPhone: string;
@@ -78,17 +80,24 @@ type Form = {
   passportDocKey: string | null;
   /** Officers can append new certs and remove existing ones; staged locally until Save. */
   trainingCertificateKeys: string[] | null;
+  previousExperience: string;
+  yearsExperience: string;
+  references: Array<{ name: string; relationship: string; phone: string }>;
 };
 
 const empty: Form = {
-  firstName: "", lastName: "", dateOfBirth: "", cityOfBirth: "", stateOfBirth: "",
   phone: "", address: "",
+  dateOfBirth: "", cityOfBirth: "", stateOfBirth: "", niNumber: "", rightToWorkStatus: "", taxCode: "",
+  directDepositConsent: false,
   emergencyContactName: "", emergencyContactRelationship: "", emergencyContactPhone: "",
   uniformShirt: "", uniformTrousers: "", uniformJacket: "", uniformBoots: "",
   bankAccountName: "", bankAccountNumber: "", bankBsb: "",
   skills: "",
   photoKey: null, licenseDocKey: null, passportDocKey: null,
   trainingCertificateKeys: null,
+  previousExperience: "",
+  yearsExperience: "",
+  references: [],
 };
 
 export default function EditProfileScreen() {
@@ -113,13 +122,15 @@ export default function EditProfileScreen() {
   useEffect(() => {
     if (!profile) return;
     setForm({
-      firstName: profile.firstName ?? "",
-      lastName: profile.lastName ?? "",
+      phone: profile.phone ?? "",
+      address: profile.address ?? "",
       dateOfBirth: profile.dateOfBirth ?? "",
       cityOfBirth: profile.cityOfBirth ?? "",
       stateOfBirth: profile.stateOfBirth ?? "",
-      phone: profile.phone ?? "",
-      address: profile.address ?? "",
+      niNumber: profile.niNumber ?? "",
+      rightToWorkStatus: profile.rightToWorkStatus ?? "",
+      taxCode: profile.taxCode ?? "",
+      directDepositConsent: profile.directDepositConsent ?? false,
       emergencyContactName: profile.emergencyContactName ?? "",
       emergencyContactRelationship: profile.emergencyContactRelationship ?? "",
       emergencyContactPhone: profile.emergencyContactPhone ?? "",
@@ -131,6 +142,15 @@ export default function EditProfileScreen() {
       bankAccountNumber: profile.bankAccountNumber ?? "",
       bankBsb: profile.bankBsb ?? "",
       skills: (profile.skills ?? []).join(", "),
+      previousExperience: (profile as any).previousExperience ?? "",
+      yearsExperience: (profile as any).yearsExperience != null ? String((profile as any).yearsExperience) : "",
+      references: Array.isArray((profile as any).references)
+        ? (profile as any).references.map((r: any) => ({
+            name: String(r?.name ?? ""),
+            relationship: String(r?.relationship ?? ""),
+            phone: String(r?.phone ?? ""),
+          }))
+        : [],
       photoKey: profile.photoKey ?? null,
       licenseDocKey: profile.licenseDocKey ?? null,
       passportDocKey: profile.passportDocKey ?? null,
@@ -139,6 +159,7 @@ export default function EditProfileScreen() {
   }, [profile]);
 
   function set<K extends keyof Form>(k: K, v: string) { setForm((f) => ({ ...f, [k]: v })); }
+  function setBool<K extends keyof Form>(k: K, v: boolean) { setForm((f) => ({ ...f, [k]: v })); }
   function setDoc<K extends "photoKey" | "licenseDocKey" | "passportDocKey">(k: K, v: string | null) {
     setForm((f) => ({ ...f, [k]: v }));
   }
@@ -150,6 +171,19 @@ export default function EditProfileScreen() {
       const next = [...(f.trainingCertificateKeys ?? [])];
       next.splice(idx, 1);
       return { ...f, trainingCertificateKeys: next };
+    });
+  }
+  function addRef() {
+    setForm((f) => ({ ...f, references: [...f.references, { name: "", relationship: "", phone: "" }] }));
+  }
+  function removeRef(idx: number) {
+    setForm((f) => ({ ...f, references: f.references.filter((_, i) => i !== idx) }));
+  }
+  function updateRef(idx: number, field: "name" | "relationship" | "phone", value: string) {
+    setForm((f) => {
+      const refs = [...f.references];
+      refs[idx] = { ...refs[idx], [field]: value };
+      return { ...f, references: refs };
     });
   }
   function confirmRemoveCert(idx: number) {
@@ -228,24 +262,25 @@ export default function EditProfileScreen() {
       }
       return;
     }
-    const firstMissing = !trim(form.firstName);
-    const lastMissing = !trim(form.lastName);
-    if (firstMissing || lastMissing) {
-      const missing = [firstMissing && "first name", lastMissing && "last name"].filter(Boolean).join(" and ");
-      const msg = `Cannot save. Missing required ${missing}.`;
-      setError(msg);
-      AccessibilityInfo.announceForAccessibility(msg);
-      return;
-    }
     setInvalid({ emergencyContactName: false, emergencyContactPhone: false });
     const payload: Record<string, unknown> = {};
-    payload.firstName = trim(form.firstName);
-    payload.lastName = trim(form.lastName);
+    if (trim(form.phone)) payload.phone = trim(form.phone);
+    if (trim(form.address)) payload.address = trim(form.address);
+    // Personal details — always sent (empty → null clears) so the officer has
+    // full control over their own identity / tax fields. dateOfBirth goes as a
+    // bare YYYY-MM-DD string; the server validates it and clears on empty.
     payload.dateOfBirth = trim(form.dateOfBirth) || null;
     payload.cityOfBirth = trim(form.cityOfBirth) || null;
     payload.stateOfBirth = trim(form.stateOfBirth) || null;
-    if (trim(form.phone)) payload.phone = trim(form.phone);
-    if (trim(form.address)) payload.address = trim(form.address);
+    payload.niNumber = trim(form.niNumber) || null;
+    payload.rightToWorkStatus = trim(form.rightToWorkStatus) || null;
+    payload.taxCode = trim(form.taxCode) || null;
+    // Only send the consent toggle when it actually changed, so a first save by
+    // an officer whose consent was never set (null) doesn't register a
+    // null → false "change" and fire a spurious HR alert.
+    if (form.directDepositConsent !== (profile?.directDepositConsent ?? false)) {
+      payload.directDepositConsent = form.directDepositConsent;
+    }
     payload.emergencyContactName = trim(form.emergencyContactName);
     payload.emergencyContactRelationship = trim(form.emergencyContactRelationship) || null;
     payload.emergencyContactPhone = trim(form.emergencyContactPhone);
@@ -258,6 +293,13 @@ export default function EditProfileScreen() {
     payload.bankBsb = trim(form.bankBsb) || null;
     const skills = form.skills.split(",").map((s) => s.trim()).filter(Boolean);
     payload.skills = skills;
+    const yearsNum = form.yearsExperience.trim() ? parseInt(form.yearsExperience.trim(), 10) : null;
+    payload.yearsExperience = (yearsNum !== null && Number.isFinite(yearsNum)) ? yearsNum : null;
+    payload.previousExperience = form.previousExperience.trim() || null;
+    const validRefs = form.references.filter((r) => r.name.trim());
+    payload.references = validRefs.length > 0
+      ? validRefs.map((r) => ({ name: r.name.trim(), relationship: r.relationship.trim() || undefined, phone: r.phone.trim() || undefined }))
+      : null;
     // Only send doc keys that actually changed from what's on the profile.
     if (form.photoKey !== (profile?.photoKey ?? null)) payload.photoKey = form.photoKey;
     if (form.licenseDocKey !== (profile?.licenseDocKey ?? null)) payload.licenseDocKey = form.licenseDocKey;
@@ -274,7 +316,7 @@ export default function EditProfileScreen() {
       // looped in — quietly when it didn't fire (most saves), explicitly
       // when it did. Typed via the OpenAPI-generated UpdateMyEmployeeResponse.
       const resp = await mut.mutateAsync({ data: payload as any });
-      await updateUser({ mustCompleteProfile: false, firstName: trim(form.firstName), lastName: trim(form.lastName) } as any);
+      await updateUser({ mustCompleteProfile: false });
       qc.invalidateQueries({ queryKey: getGetEmployeeQueryKey(userId!) });
       const notified = resp?.hrNotified === true && (resp?.hrNotifiedFields?.length ?? 0) > 0;
       if (isFirstRun) {
@@ -297,6 +339,9 @@ export default function EditProfileScreen() {
     bankAccountName: "bank account name",
     bankAccountNumber: "bank account number",
     bankBsb: "routing / sort code",
+    niNumber: "SSN (last 4)",
+    rightToWorkStatus: "right to work",
+    directDepositConsent: "direct deposit consent",
     emergencyContactName: "emergency contact name",
     emergencyContactRelationship: "emergency contact relationship",
     emergencyContactPhone: "emergency contact phone",
@@ -333,6 +378,7 @@ export default function EditProfileScreen() {
 
         <Section title="Read-only">
           <ReadOnly label="Email" value={profile.email} />
+          <ReadOnly label="Name" value={`${profile.firstName} ${profile.lastName}`} />
           <ReadOnly label="Role" value={profile.role ?? "employee"} />
           {profile.hourlyRate != null && <ReadOnly label="Hourly rate" value={`$${parseFloat(profile.hourlyRate as any).toFixed(2)}`} />}
           {profile.siaLicenseNumber && <ReadOnly label="License" value={`L${profile.siaLicenseLevel ?? "?"} · ${profile.siaLicenseNumber}`} />}
@@ -364,27 +410,47 @@ export default function EditProfileScreen() {
           </TouchableOpacity>
         </Section>
 
-        <Section title="Personal details">
-          <Field label="First name" required>
-            <Input value={form.firstName} onChangeText={(v) => set("firstName", v)} accessibilityLabel="First name, required" />
-          </Field>
-          <Field label="Last name" required>
-            <Input value={form.lastName} onChangeText={(v) => set("lastName", v)} accessibilityLabel="Last name, required" />
-          </Field>
-          <Field label="Date of birth">
-            <Input value={form.dateOfBirth} onChangeText={(v) => set("dateOfBirth", v)} placeholder="YYYY-MM-DD" accessibilityLabel="Date of birth, format year month day" />
-          </Field>
-          <Field label="City of birth">
-            <Input value={form.cityOfBirth} onChangeText={(v) => set("cityOfBirth", v)} accessibilityLabel="City of birth" />
-          </Field>
-          <Field label="State of birth">
-            <Input value={form.stateOfBirth} onChangeText={(v) => set("stateOfBirth", v)} accessibilityLabel="State of birth" />
-          </Field>
-        </Section>
-
         <Section title="Contact">
           <Field label="Phone"><Input value={form.phone} onChangeText={(v) => set("phone", v)} accessibilityLabel="Phone" keyboardType="phone-pad" /></Field>
           <Field label="Address"><Input value={form.address} onChangeText={(v) => set("address", v)} multiline accessibilityLabel="Address" /></Field>
+        </Section>
+
+        <Section title="Personal details">
+          <Field label="Date of birth">
+            <Input
+              value={form.dateOfBirth}
+              onChangeText={(v) => set("dateOfBirth", v)}
+              placeholder="YYYY-MM-DD"
+              autoCapitalize="none"
+              autoCorrect={false}
+              accessibilityLabel="Date of birth, format year dash month dash day"
+            />
+          </Field>
+          <Field label="City of birth">
+            <Input value={form.cityOfBirth} onChangeText={(v) => set("cityOfBirth", v)} placeholder="e.g. Dallas" accessibilityLabel="City of birth" />
+          </Field>
+          <Field label="State of birth">
+            <Input value={form.stateOfBirth} onChangeText={(v) => set("stateOfBirth", v)} placeholder="e.g. TX" accessibilityLabel="State of birth" />
+          </Field>
+          <Field label="SSN (last 4)">
+            <Input
+              value={form.niNumber}
+              onChangeText={(v) => set("niNumber", v.replace(/[^0-9]/g, ""))}
+              keyboardType="number-pad"
+              maxLength={4}
+              placeholder="Last 4 digits"
+              accessibilityLabel="Social security number, last four digits"
+            />
+          </Field>
+          <Field label="Right to work">
+            <Input
+              value={form.rightToWorkStatus}
+              onChangeText={(v) => set("rightToWorkStatus", v)}
+              placeholder="e.g. US Citizen, Permanent Resident, Work Visa"
+              accessibilityLabel="Right to work status"
+            />
+          </Field>
+          <NotifiedNote />
         </Section>
 
         <Section title="Emergency contact">
@@ -424,10 +490,26 @@ export default function EditProfileScreen() {
           <Field label="Boots"><Input value={form.uniformBoots} onChangeText={(v) => set("uniformBoots", v)} accessibilityLabel="Boots size" /></Field>
         </Section>
 
-        <Section title="Bank details">
+        <Section title="Banking & tax">
           <Field label="Account name"><Input value={form.bankAccountName} onChangeText={(v) => set("bankAccountName", v)} accessibilityLabel="Bank account name" /></Field>
           <Field label="Account number"><Input value={form.bankAccountNumber} onChangeText={(v) => set("bankAccountNumber", v)} keyboardType="number-pad" accessibilityLabel="Bank account number" /></Field>
           <Field label="Routing / sort code"><Input value={form.bankBsb} onChangeText={(v) => set("bankBsb", v)} accessibilityLabel="Routing or sort code" /></Field>
+          <Field label="Tax code"><Input value={form.taxCode} onChangeText={(v) => set("taxCode", v)} autoCapitalize="characters" accessibilityLabel="Tax code" /></Field>
+          <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: 12 }}>
+            <View style={{ flex: 1 }}>
+              <Text style={[styles.label, { color: colors.foreground }]}>Direct deposit consent</Text>
+              <Text style={[styles.note, { color: colors.mutedForeground }]}>
+                Authorize WCSG to pay you by direct deposit to the account above.
+              </Text>
+            </View>
+            <Switch
+              value={form.directDepositConsent}
+              onValueChange={(v) => setBool("directDepositConsent", v)}
+              trackColor={{ true: colors.primary, false: colors.border }}
+              accessibilityLabel="Direct deposit consent"
+              accessibilityRole="switch"
+            />
+          </View>
           <NotifiedNote />
         </Section>
 
@@ -529,6 +611,91 @@ export default function EditProfileScreen() {
           <Field label="Comma-separated">
             <Input value={form.skills} onChangeText={(v) => set("skills", v)} placeholder="e.g. CPR, Crowd control, First aid" accessibilityLabel="Skills, comma-separated" />
           </Field>
+        </Section>
+
+        <Section title="Experience">
+          <Field label="Years in security">
+            <Input
+              value={form.yearsExperience}
+              onChangeText={(v) => set("yearsExperience", v.replace(/[^0-9]/g, ""))}
+              keyboardType="number-pad"
+              placeholder="e.g. 3"
+              accessibilityLabel="Years of experience in security"
+            />
+          </Field>
+          <Field label="Previous experience">
+            <Input
+              value={form.previousExperience}
+              onChangeText={(v) => set("previousExperience", v)}
+              multiline
+              numberOfLines={4}
+              placeholder="Briefly describe your previous security roles, employers, or relevant work…"
+              accessibilityLabel="Previous experience"
+              style={{ minHeight: 90, textAlignVertical: "top" }}
+            />
+          </Field>
+        </Section>
+
+        <Section title="References">
+          {form.references.map((r, i) => (
+            <View
+              key={i}
+              style={{ gap: 8, paddingBottom: 12, borderBottomWidth: i < form.references.length - 1 ? 1 : 0, borderBottomColor: "#e2e8f0" }}
+            >
+              <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center" }}>
+                <Text style={{ color: "#374151", fontWeight: "600" as const, fontSize: 13 }}>Reference {i + 1}</Text>
+                <TouchableOpacity
+                  onPress={() => removeRef(i)}
+                  accessibilityRole="button"
+                  accessibilityLabel={`Remove reference ${i + 1}`}
+                  style={{ padding: 4 }}
+                >
+                  <Feather name="x" size={16} color="#ef4444" />
+                </TouchableOpacity>
+              </View>
+              <Field label="Name *">
+                <Input
+                  value={r.name}
+                  onChangeText={(v) => updateRef(i, "name", v)}
+                  placeholder="Full name"
+                  accessibilityLabel={`Reference ${i + 1} name, required`}
+                />
+              </Field>
+              <Field label="Relationship">
+                <Input
+                  value={r.relationship}
+                  onChangeText={(v) => updateRef(i, "relationship", v)}
+                  placeholder="e.g. Former supervisor"
+                  accessibilityLabel={`Reference ${i + 1} relationship`}
+                />
+              </Field>
+              <Field label="Phone">
+                <Input
+                  value={r.phone}
+                  onChangeText={(v) => updateRef(i, "phone", v)}
+                  keyboardType="phone-pad"
+                  placeholder="Contact number"
+                  accessibilityLabel={`Reference ${i + 1} phone`}
+                />
+              </Field>
+            </View>
+          ))}
+          {form.references.length < 10 && (
+            <TouchableOpacity
+              onPress={addRef}
+              style={{ flexDirection: "row", alignItems: "center", gap: 8, paddingVertical: 6 }}
+              accessibilityRole="button"
+              accessibilityLabel="Add reference"
+            >
+              <Feather name="plus-circle" size={16} color="#c9a84c" />
+              <Text style={{ color: "#c9a84c", fontWeight: "600" as const, fontSize: 14 }}>Add reference</Text>
+            </TouchableOpacity>
+          )}
+          {form.references.length === 0 && (
+            <Text style={{ color: "#6b7280", fontSize: 12 }}>
+              No references added yet. Tap "Add reference" to add up to 10.
+            </Text>
+          )}
         </Section>
 
         {error && (

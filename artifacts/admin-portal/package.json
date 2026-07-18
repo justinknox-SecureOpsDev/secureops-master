@@ -52,7 +52,6 @@
     "@types/react-dom": "catalog:",
     "@vitejs/plugin-react": "catalog:",
     "@workspace/api-client-react": "workspace:*",
-    "@workspace/feature-keys": "workspace:*",
     "class-variance-authority": "catalog:",
     "clsx": "catalog:",
     "cmdk": "^1.1.1",
@@ -83,7 +82,6 @@
   "dependencies": {
     "@types/qrcode": "^1.5.6",
     "exceljs": "^4.4.0",
-    "livekit-client": "^2.15.4",
     "qrcode": "^1.5.4"
   }
 }

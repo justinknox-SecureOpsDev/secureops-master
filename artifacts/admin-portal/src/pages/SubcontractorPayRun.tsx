@@ -39,7 +39,7 @@ const fmtUsd = (n: number | string) =>
 
 const maskAccount = (s: string | null) => (s ? `••••${s.slice(-4)}` : "—");
 
-const fmtDate = (d: string | null) => (d ? new Date(`${d}T00:00:00`).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" }) : "—");
+const fmtDate = (d: string | null) => (d ? new Date(`${d}T00:00:00Z`).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric", timeZone: "UTC" }) : "—");
 
 type VendorGroup = {
   subcontractorId: string;

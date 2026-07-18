@@ -1,40 +1,35 @@
 {
   "expo": {
-    "name": "SecureOps Command",
-    "slug": "secureops-command",
+    "name": "SecureOps",
+    "slug": "secureops",
     "owner": "justin.knox",
-    "version": "1.0.0",
+    "version": "1.0.2",
     "orientation": "portrait",
     "icon": "./assets/images/icon.png",
-    "scheme": "secureopscommand",
+    "scheme": "secureops",
     "userInterfaceStyle": "dark",
     "newArchEnabled": true,
     "splash": {
       "image": "./assets/images/logo.png",
       "resizeMode": "contain",
-      "backgroundColor": "#0c0a08"
+      "backgroundColor": "#080c18"
     },
     "ios": {
       "supportsTablet": false,
-      "bundleIdentifier": "com.secureopscommand.mobile",
-      "buildNumber": "2",
+      "bundleIdentifier": "com.williamscouncil.secureops",
+      "buildNumber": "1",
       "infoPlist": {
         "NSLocationWhenInUseUsageDescription": "SecureOps uses your location to verify you are on-site when you clock in and to share your live position with dispatch while you are on shift.",
         "NSLocationAlwaysAndWhenInUseUsageDescription": "SecureOps uses your location in the background while you are clocked in so dispatch can be alerted if you leave your assigned site or trigger an emergency.",
-        "NSMicrophoneUsageDescription": "SecureOps uses your microphone for live push-to-talk radio so you can transmit to your team and dispatch while on shift.",
-        "UIBackgroundModes": [
-          "audio"
-        ],
         "ITSAppUsesNonExemptEncryption": false
-      },
-      "bitcode": false
+      }
     },
     "android": {
-      "package": "com.secureopscommand.app",
-      "versionCode": 2,
+      "package": "com.williamscouncilsg.secureops",
+      "versionCode": 1,
       "adaptiveIcon": {
         "foregroundImage": "./assets/images/icon.png",
-        "backgroundColor": "#0c0a08"
+        "backgroundColor": "#080c18"
       },
       "permissions": [
         "android.permission.ACCESS_COARSE_LOCATION",
@@ -46,14 +41,7 @@
         "android.permission.POST_NOTIFICATIONS",
         "android.permission.RECORD_AUDIO",
         "android.permission.FOREGROUND_SERVICE",
-        "android.permission.FOREGROUND_SERVICE_LOCATION",
-        "android.permission.FOREGROUND_SERVICE_MICROPHONE",
-        "android.permission.ACCESS_NETWORK_STATE",
-        "android.permission.INTERNET",
-        "android.permission.MODIFY_AUDIO_SETTINGS",
-        "android.permission.SYSTEM_ALERT_WINDOW",
-        "android.permission.WAKE_LOCK",
-        "android.permission.BLUETOOTH"
+        "android.permission.FOREGROUND_SERVICE_LOCATION"
       ]
     },
     "web": {
@@ -63,7 +51,7 @@
       [
         "expo-router",
         {
-          "origin": "https://secureops-command.replit.app/"
+          "origin": "https://secureops.williamscouncilsg.com/"
         }
       ],
       "expo-font",
@@ -72,7 +60,7 @@
         "expo-notifications",
         {
           "icon": "./assets/images/icon.png",
-          "color": "#c9a04a",
+          "color": "#c9a84c",
           "sounds": []
         }
       ],
@@ -84,30 +72,10 @@
         }
       ],
       [
-        "expo-camera",
-        {
-          "cameraPermission": "Allow SecureOps to use your camera so you can scan your organization's invite QR code to connect this device to your team."
-        }
-      ],
-      [
         "expo-location",
         {
           "locationAlwaysAndWhenInUsePermission": "SecureOps uses your location in the background while you are clocked in so dispatch can be alerted if you leave your assigned site or trigger an emergency.",
           "isAndroidBackgroundLocationEnabled": true
-        }
-      ],
-      [
-        "@livekit/react-native-expo-plugin",
-        {
-          "android": {
-            "audioType": "communication"
-          }
-        }
-      ],
-      [
-        "@config-plugins/react-native-webrtc",
-        {
-          "microphonePermission": "SecureOps uses your microphone for live push-to-talk radio so you can transmit to your team and dispatch while on shift."
         }
       ]
     ],
@@ -117,14 +85,14 @@
     },
     "extra": {
       "eas": {
-        "projectId": "e8bcd802-b11d-4c4d-bd20-5e61caf4817c"
+        "projectId": "452c8467-1a26-4e16-9b41-e5799d80023e"
       }
     },
     "runtimeVersion": {
       "policy": "appVersion"
     },
     "updates": {
-      "url": "https://u.expo.dev/e8bcd802-b11d-4c4d-bd20-5e61caf4817c"
+      "url": "https://u.expo.dev/452c8467-1a26-4e16-9b41-e5799d80023e"
     }
   }
 }

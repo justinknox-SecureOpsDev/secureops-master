@@ -5,7 +5,8 @@ import { Input } from "@/components/ui/input";
 import {
   Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogFooter,
 } from "@/components/ui/dialog";
-import { UserPlus, Loader2, Copy, ExternalLink, Search } from "lucide-react";
+import { UserPlus, Loader2, Copy, ExternalLink, Search, Trash2 } from "lucide-react";
+import { formatDateTime } from "@/lib/format";
 import { openSignedObject } from "@/lib/upload";
 import { ResponsiveTable } from "@/components/ResponsiveTable";
 
@@ -47,6 +48,21 @@ export function OnboardingPage() {
   const [search, setSearch] = useState("");
   const [openId, setOpenId] = useState<string | null>(null);
   const [resend, setResend] = useState<ResendResp | null>(null);
+  const [toDelete, setToDelete] = useState<Item | null>(null);
+  const [deleting, setDeleting] = useState(false);
+  const [deleteError, setDeleteError] = useState<string | null>(null);
+
+  async function confirmDelete() {
+    if (!toDelete) return;
+    setDeleting(true); setDeleteError(null);
+    try {
+      await api(`/admin/onboarding/${toDelete.employeeId}`, { method: "DELETE" });
+      setToDelete(null);
+      if (openId === toDelete.employeeId) setOpenId(null);
+      await refresh();
+    } catch (e) { setDeleteError((e as Error).message); }
+    finally { setDeleting(false); }
+  }
 
   async function refresh() {
     setLoading(true); setError(null);
@@ -142,14 +158,14 @@ export function OnboardingPage() {
             {
               id: "tokenExpires",
               header: "Token expires",
-              cell: (i) => (i.tokenExpiresAt ? new Date(i.tokenExpiresAt).toLocaleString() : "—"),
+              cell: (i) => (i.tokenExpiresAt ? formatDateTime(i.tokenExpiresAt) : "—"),
               tdClassName: "text-muted-foreground",
               mobileValueClassName: "text-muted-foreground",
             },
             {
               id: "submitted",
               header: "Submitted",
-              cell: (i) => (i.submittedAt ? new Date(i.submittedAt).toLocaleString() : "—"),
+              cell: (i) => (i.submittedAt ? formatDateTime(i.submittedAt) : "—"),
               tdClassName: "text-muted-foreground",
               mobileValueClassName: "text-muted-foreground",
             },
@@ -159,10 +175,35 @@ export function OnboardingPage() {
               align: "right",
               mobile: "actions",
               cell: (i) => (
-                <Button size="sm" variant="outline" onClick={() => setOpenId(i.employeeId)}>View</Button>
+                <div className="flex items-center justify-end gap-1.5">
+                  <Button size="sm" variant="outline" onClick={() => setOpenId(i.employeeId)}>View</Button>
+                  {i.status === "pending" && (
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      className="text-destructive hover:text-destructive"
+                      aria-label={`Delete ${i.firstName} ${i.lastName} from onboarding`}
+                      onClick={() => { setDeleteError(null); setToDelete(i); }}
+                    >
+                      <Trash2 className="w-4 h-4" />
+                    </Button>
+                  )}
+                </div>
               ),
               mobileCell: (i) => (
-                <Button size="sm" variant="outline" className="w-full" onClick={() => setOpenId(i.employeeId)}>View</Button>
+                <div className="flex w-full gap-2">
+                  <Button size="sm" variant="outline" className="flex-1" onClick={() => setOpenId(i.employeeId)}>View</Button>
+                  {i.status === "pending" && (
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      className="flex-1 text-destructive hover:text-destructive"
+                      onClick={() => { setDeleteError(null); setToDelete(i); }}
+                    >
+                      <Trash2 className="w-4 h-4 mr-1" /> Delete
+                    </Button>
+                  )}
+                </div>
               ),
             },
           ]}
@@ -175,6 +216,30 @@ export function OnboardingPage() {
           onClose={() => setOpenId(null)}
           onResent={(r) => setResend(r)}
         />
+      )}
+      {toDelete && (
+        <Dialog open onOpenChange={(o) => { if (!o && !deleting) setToDelete(null); }}>
+          <DialogContent className="max-w-md">
+            <DialogHeader>
+              <DialogTitle className="brand-wordmark text-xl">Delete from onboarding?</DialogTitle>
+              <DialogDescription>
+                This permanently removes <strong>{toDelete.firstName} {toDelete.lastName}</strong> ({toDelete.email})
+                — their account, onboarding link, and any submitted onboarding data. This cannot be undone.
+              </DialogDescription>
+            </DialogHeader>
+            {deleteError && (
+              <div role="alert" className="text-sm text-destructive bg-destructive/5 p-2 rounded border border-destructive/20">
+                {deleteError}
+              </div>
+            )}
+            <DialogFooter className="gap-2">
+              <Button variant="ghost" onClick={() => setToDelete(null)} disabled={deleting}>Cancel</Button>
+              <Button variant="destructive" onClick={confirmDelete} disabled={deleting}>
+                {deleting ? "Deleting…" : "Delete permanently"}
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
       )}
       {resend && (
         <Dialog open onOpenChange={(o) => { if (!o) setResend(null); }}>
@@ -261,7 +326,7 @@ function DetailDialog({
           <div className="space-y-4 text-sm">
             <div className="grid grid-cols-2 gap-4">
               <Info k="Email" v={d.email} />
-              <Info k="Token expires" v={d.tokenExpiresAt ? new Date(d.tokenExpiresAt).toLocaleString() : null} />
+              <Info k="Token expires" v={d.tokenExpiresAt ? formatDateTime(d.tokenExpiresAt) : null} />
             </div>
             {!d.submission && (
               <div className="text-sm bg-amber-50 border border-amber-200 text-amber-900 p-2 rounded">
@@ -309,7 +374,7 @@ function DetailDialog({
                     </li>
                     {d.submission.acknowledgements.map((a, i) => (
                       <li key={i}>
-                        {a.accepted ? "✓" : "✗"} <strong>{a.type}</strong> — “{a.signature}” at {new Date(a.timestamp).toLocaleString()}
+                        {a.accepted ? "✓" : "✗"} <strong>{a.type}</strong> — “{a.signature}” at {formatDateTime(a.timestamp)}
                       </li>
                     ))}
                   </ul>

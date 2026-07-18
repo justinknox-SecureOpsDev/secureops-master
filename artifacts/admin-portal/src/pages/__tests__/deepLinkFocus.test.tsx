@@ -153,7 +153,7 @@ describe("deep-link focus on a paginated admin table", () => {
 
     // A row that wasn't the target is not flashed.
     expect(rowFor("Widget 39").className).not.toContain("wcsg-deep-link-flash");
-  }, DEEP_LINK_TEST_TIMEOUT_MS);
+  });
 
   it("is a quiet no-op when the focus id doesn't exist", async () => {
     hoisted.rows = makeRows(60);
@@ -175,7 +175,7 @@ describe("deep-link focus on a paginated admin table", () => {
     // Nothing on the page is flashed.
     expect(document.querySelector(".wcsg-deep-link-flash")).toBeNull();
     expect(scrollSpy).not.toHaveBeenCalled();
-  }, DEEP_LINK_TEST_TIMEOUT_MS);
+  });
 
   it("flashes in place without advancing when the row is already on page 1", async () => {
     hoisted.rows = makeRows(60);
@@ -187,19 +187,15 @@ describe("deep-link focus on a paginated admin table", () => {
     expect(scrollSpy).toHaveBeenCalled();
     // The grid never advances past page 1 — the row was already there.
     expect(screen.getByText("Page 1 of 3")).toBeTruthy();
-  }, DEEP_LINK_TEST_TIMEOUT_MS);
+  });
 });
-
-// Under the full parallel `pnpm -r` workspace run, CPU contention can push
-// these tests past vitest's 5 s default per-test timeout even though they pass
-// comfortably in isolation. A generous per-test timeout removes the flake
-// without masking a real hang.
-const DEEP_LINK_TEST_TIMEOUT_MS = 20000;
 
 // This suite forces the responsive grid into its single-render mobile (card)
 // branch, which renders a full page of cards on top of the deep-link page
-// resolution. It is the heaviest test in the file and shares the same generous
-// timeout used by the desktop suite above.
+// resolution. It is the heaviest test in the file and, under the full parallel
+// `pnpm -r` workspace run, CPU contention can push it past vitest's 5s default
+// per-test timeout even though it passes comfortably in isolation. A generous
+// per-test timeout removes the flake without masking a real hang.
 const MOBILE_CARD_TEST_TIMEOUT_MS = 20000;
 
 describe("deep-link focus on the mobile card layout", () => {

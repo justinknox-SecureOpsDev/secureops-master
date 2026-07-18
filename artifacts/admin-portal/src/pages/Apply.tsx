@@ -134,39 +134,6 @@ const BASE_STEPS = ["Personal", "I-9 & Identity", "TX License & experience", "Re
 
 const I9_FORM_URL = "https://www.uscis.gov/sites/default/files/document/forms/i-9.pdf";
 
-// US states + DC as { code, name } for the State dropdown. A constrained
-// select (rather than a free-text input) guarantees a valid 2-letter code
-// reaches the server and removes the autofill / maxLength desync that let
-// applicants believe they'd filled the field while React state stayed empty.
-const US_STATES: ReadonlyArray<{ code: string; name: string }> = [
-  { code: "AL", name: "Alabama" }, { code: "AK", name: "Alaska" },
-  { code: "AZ", name: "Arizona" }, { code: "AR", name: "Arkansas" },
-  { code: "CA", name: "California" }, { code: "CO", name: "Colorado" },
-  { code: "CT", name: "Connecticut" }, { code: "DE", name: "Delaware" },
-  { code: "DC", name: "District of Columbia" }, { code: "FL", name: "Florida" },
-  { code: "GA", name: "Georgia" }, { code: "HI", name: "Hawaii" },
-  { code: "ID", name: "Idaho" }, { code: "IL", name: "Illinois" },
-  { code: "IN", name: "Indiana" }, { code: "IA", name: "Iowa" },
-  { code: "KS", name: "Kansas" }, { code: "KY", name: "Kentucky" },
-  { code: "LA", name: "Louisiana" }, { code: "ME", name: "Maine" },
-  { code: "MD", name: "Maryland" }, { code: "MA", name: "Massachusetts" },
-  { code: "MI", name: "Michigan" }, { code: "MN", name: "Minnesota" },
-  { code: "MS", name: "Mississippi" }, { code: "MO", name: "Missouri" },
-  { code: "MT", name: "Montana" }, { code: "NE", name: "Nebraska" },
-  { code: "NV", name: "Nevada" }, { code: "NH", name: "New Hampshire" },
-  { code: "NJ", name: "New Jersey" }, { code: "NM", name: "New Mexico" },
-  { code: "NY", name: "New York" }, { code: "NC", name: "North Carolina" },
-  { code: "ND", name: "North Dakota" }, { code: "OH", name: "Ohio" },
-  { code: "OK", name: "Oklahoma" }, { code: "OR", name: "Oregon" },
-  { code: "PA", name: "Pennsylvania" }, { code: "RI", name: "Rhode Island" },
-  { code: "SC", name: "South Carolina" }, { code: "SD", name: "South Dakota" },
-  { code: "TN", name: "Tennessee" }, { code: "TX", name: "Texas" },
-  { code: "UT", name: "Utah" }, { code: "VT", name: "Vermont" },
-  { code: "VA", name: "Virginia" }, { code: "WA", name: "Washington" },
-  { code: "WV", name: "West Virginia" }, { code: "WI", name: "Wisconsin" },
-  { code: "WY", name: "Wyoming" },
-];
-
 type FieldError = { field?: string; message: string };
 
 const FIELD_TO_STEP: Record<string, number> = {
@@ -463,6 +430,7 @@ export function ApplyPage() {
       if (isReq("address") && !form.address) return { field: "address", message: `${labelOf("address")} is required.` };
       if (isReq("city") && !form.city) return { field: "city", message: `${labelOf("city")} is required.` };
       if (isReq("state") && !form.state) return { field: "state", message: `${labelOf("state")} is required.` };
+      if (visibleField("state") && form.state && form.state.length !== 2) return { field: "state", message: `${labelOf("state")} must be a 2-letter abbreviation (e.g. TX).` };
       if (isReq("zip") && !form.zip) return { field: "zip", message: `${labelOf("zip")} is required.` };
       if (isReq("dateOfBirth") && !form.dateOfBirth) return { field: "dateOfBirth", message: `${labelOf("dateOfBirth")} is required.` };
       if (isReq("niNumber") && !form.niNumber.trim()) return { field: "niNumber", message: `${labelOf("niNumber")} is required.` };
@@ -737,21 +705,7 @@ export function ApplyPage() {
       case "city":
         return { width: "half", node: <Field label={label} help={help} required={req} name="city" error={fieldErrors}><Input autoComplete="address-level2" value={form.city} onChange={(e) => set("city", e.target.value)} /></Field> };
       case "state":
-        return { width: "half", node: (
-          <Field label={label} help={help} required={req} name="state" error={fieldErrors}>
-            <select
-              className="w-full border rounded h-10 px-3 bg-background focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
-              autoComplete="address-level1"
-              value={form.state}
-              onChange={(e) => set("state", e.target.value)}
-            >
-              <option value="">Select…</option>
-              {US_STATES.map((s) => (
-                <option key={s.code} value={s.code}>{s.name} ({s.code})</option>
-              ))}
-            </select>
-          </Field>
-        ) };
+        return { width: "half", node: <Field label={label} help={help} required={req} name="state" error={fieldErrors}><Input autoComplete="address-level1" value={form.state} onChange={(e) => set("state", e.target.value.replace(/[^a-zA-Z]/g, "").toUpperCase().slice(0, 2))} placeholder="TX" maxLength={2} /></Field> };
       case "zip":
         return { width: "half", node: <Field label={label} help={help} required={req} name="zip" error={fieldErrors}><Input autoComplete="postal-code" value={form.zip} onChange={(e) => set("zip", e.target.value)} placeholder="75001" /></Field> };
       case "dateOfBirth":

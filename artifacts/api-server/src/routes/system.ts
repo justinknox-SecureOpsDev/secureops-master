@@ -4,7 +4,6 @@ import { db, schedulerSyncCursorsTable } from "@workspace/db";
 import { requireAdmin } from "../middlewares/auth";
 import { getGeofenceRadiusMiles } from "../lib/geofence";
 import { isSchedulerConfigured } from "../lib/schedulerSync";
-import { isLiveKitConfigured } from "../lib/livekit";
 
 /**
  * The reconciliation safety-net job pulls from the scheduler every 15 minutes.
@@ -32,7 +31,6 @@ router.get("/admin/system/status", requireAdmin, async (_req, res): Promise<void
   const geofenceRadiusMiles = getGeofenceRadiusMiles();
   const geofenceRadiusTooTight = geofenceRadiusMiles > 0 && geofenceRadiusMiles < 0.05;
   const schedulerConfigured = isSchedulerConfigured();
-  const livekitConfigured = isLiveKitConfigured();
 
   // Scheduler sync health: only meaningful when configured. Unhealthy when the
   // last run recorded an error, or no successful sync has happened within the
@@ -60,7 +58,6 @@ router.get("/admin/system/status", requireAdmin, async (_req, res): Promise<void
     geofenceRadiusTooTight,
     schedulerConfigured,
     schedulerSyncHealthy,
-    livekitConfigured,
   });
 });
 

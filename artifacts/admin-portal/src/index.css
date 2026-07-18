@@ -45,44 +45,44 @@
 }
 
 /* Brand palette
-   Navy   #0c0a08  → 30 20% 4%
-   Gold   #c9a04a  → 41 54% 54%
-   Cream  #f0e4c0  → 45 61% 85%
+   Navy   #080c18  → 224 51% 6%
+   Gold   #c9a84c  → 43 53% 54%
+   Cream  #f0e6c8  → 44 60% 86%
 */
 :root {
   --background: 44 60% 96%;        /* warm cream tint */
-  --foreground: 30 21% 8%;
+  --foreground: 224 51% 8%;
   --card: 0 0% 100%;
-  --card-foreground: 30 21% 8%;
+  --card-foreground: 224 51% 8%;
   --popover: 0 0% 100%;
-  --popover-foreground: 30 21% 8%;
-  --primary: 30 20% 4%;           /* navy */
+  --popover-foreground: 224 51% 8%;
+  --primary: 224 51% 6%;           /* navy */
   --primary-foreground: 44 60% 96%;
-  --secondary: 41 54% 54%;         /* gold */
-  --secondary-foreground: 30 20% 4%;
+  --secondary: 43 53% 54%;         /* gold */
+  --secondary-foreground: 224 51% 6%;
   --muted: 44 30% 92%;
-  --muted-foreground: 30 14% 38%;
-  --accent: 30 55% 90%;
-  --accent-foreground: 30 21% 8%;
+  --muted-foreground: 224 18% 38%;
+  --accent: 43 53% 90%;
+  --accent-foreground: 224 51% 8%;
   --destructive: 0 72% 45%;
   --destructive-foreground: 0 0% 98%;
-  --border: 40 15% 86%;
-  --input: 40 15% 86%;
-  --ring: 41 54% 54%;
-  --chart-1: 41 54% 54%;
+  --border: 224 12% 86%;
+  --input: 224 12% 86%;
+  --ring: 43 53% 54%;
+  --chart-1: 43 53% 54%;
   --chart-2: 224 51% 30%;
   --chart-3: 24 70% 55%;
   --chart-4: 160 50% 40%;
   --chart-5: 280 40% 50%;
 
-  --sidebar: 30 20% 4%;
+  --sidebar: 224 51% 6%;
   --sidebar-foreground: 44 60% 90%;
-  --sidebar-border: 30 20% 12%;
-  --sidebar-primary: 41 54% 54%;
-  --sidebar-primary-foreground: 30 20% 4%;
-  --sidebar-accent: 30 20% 12%;
+  --sidebar-border: 224 30% 14%;
+  --sidebar-primary: 43 53% 54%;
+  --sidebar-primary-foreground: 224 51% 6%;
+  --sidebar-accent: 224 30% 14%;
   --sidebar-accent-foreground: 44 60% 90%;
-  --sidebar-ring: 41 54% 54%;
+  --sidebar-ring: 43 53% 54%;
 
   --app-font-sans: 'Inter', system-ui, sans-serif;
   --app-font-serif: Georgia, serif;
@@ -94,16 +94,6 @@
   --opaque-button-border-intensity: -8;
   --elevate-1: rgba(0,0,0,.03);
   --elevate-2: rgba(0,0,0,.08);
-
-  /* Brand palette used by the .brand-* / .bg-brand-* utility classes. These
-     are overridden at runtime by applyBrandColors() (lib/brand.ts) when a
-     super-admin sets custom colours; the values here are the WCSG defaults.
-     --brand-gold-ink is a darker gold for gold text on light backgrounds
-     (meets WCAG AA 4.5:1). */
-  --brand-navy: hsl(30 20% 4%);
-  --brand-gold: hsl(41 54% 54%);
-  --brand-gold-ink: hsl(41 54% 27%);
-  --brand-cream: hsl(45 61% 85%);
 }
 
 @layer base {
@@ -116,14 +106,14 @@
   font-weight: 700;
   letter-spacing: 0.02em;
 }
-.brand-gold { color: var(--brand-gold); }
+.brand-gold { color: hsl(43 53% 54%); }
 /* Darker gold for gold-colored text on light backgrounds (meets WCAG AA 4.5:1
    contrast on white/cream — the lighter .brand-gold is for dark backgrounds). */
-.brand-gold-ink { color: var(--brand-gold-ink); }
-.brand-navy { color: var(--brand-navy); }
-.bg-brand-navy { background-color: var(--brand-navy); }
-.bg-brand-gold { background-color: var(--brand-gold); }
-.bg-brand-cream { background-color: var(--brand-cream); }
+.brand-gold-ink { color: hsl(43 53% 34%); }
+.brand-navy { color: hsl(224 51% 6%); }
+.bg-brand-navy { background-color: hsl(224 51% 6%); }
+.bg-brand-gold { background-color: hsl(43 53% 54%); }
+.bg-brand-cream { background-color: hsl(44 60% 86%); }
 
 /* Deep-link highlight flash. Mirrors the mobile app's useHighlightFlash:
    when an admin opens an incident/shift/officer via a notification or share
@@ -131,8 +121,8 @@
    so the eye lands on the exact item instead of the top of the list. */
 @keyframes wcsg-deep-link-flash {
   0%, 55% {
-    background-color: hsl(41 54% 54% / 0.22);
-    box-shadow: inset 0 0 0 2px hsl(40 52% 42% / 0.9);
+    background-color: hsl(43 53% 54% / 0.22);
+    box-shadow: inset 0 0 0 2px hsl(43 53% 44% / 0.9);
   }
   100% {
     background-color: transparent;

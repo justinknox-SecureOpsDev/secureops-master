@@ -62,7 +62,7 @@ export async function registerForPushNotifications(
         name: "Default",
         importance: Notifications.AndroidImportance.MAX,
         vibrationPattern: [0, 250, 250, 250],
-        lightColor: "#c9a04a",
+        lightColor: "#c9a84c",
         sound: "default",
       });
       await Notifications.setNotificationChannelAsync("emergency", {

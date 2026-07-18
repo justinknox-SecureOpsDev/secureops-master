@@ -1,6 +1,7 @@
 import { Router, type IRouter } from "express";
 import { z } from "zod/v4";
 import { and, eq, gte, lte, desc, isNull, sql } from "drizzle-orm";
+import { isWorkerRole } from "../lib/eligibility";
 import {
   db,
   dailyActivityReportsTable,
@@ -13,10 +14,8 @@ import { requireAuth, requireAdmin } from "../middlewares/auth";
 import { darWriteLimiter, darPdfLimiter } from "../middlewares/rateLimit";
 import { buildDarPdf } from "../lib/darPdf";
 import { logger } from "../lib/logger";
-import { requireFeature } from "../lib/features";
 
 const router: IRouter = Router();
-router.use(["/me/dar", "/dar", "/admin/dar"], requireFeature("dar"));
 
 const submitSchema = z.object({
   // Caller may pin the report to a specific owned time_entry; site and
@@ -41,8 +40,8 @@ function todayIsoDate(): string {
 // ---------- Officer: submit ----------
 
 router.post("/me/dar", requireAuth, darWriteLimiter, async (req, res): Promise<void> => {
-  if (req.user?.role !== "employee") {
-    res.status(403).json({ error: "Forbidden", message: "Only employees can submit DARs" });
+  if (!isWorkerRole(req.user?.role)) {
+    res.status(403).json({ error: "Forbidden", message: "Only field staff can submit DARs" });
     return;
   }
   const parsed = submitSchema.safeParse(req.body);
@@ -107,8 +106,8 @@ router.post("/me/dar", requireAuth, darWriteLimiter, async (req, res): Promise<v
 // ---------- Officer: own list / detail ----------
 
 router.get("/me/dar", requireAuth, async (req, res): Promise<void> => {
-  if (req.user?.role !== "employee") {
-    res.status(403).json({ error: "Forbidden", message: "Only employees can read this" });
+  if (!isWorkerRole(req.user?.role)) {
+    res.status(403).json({ error: "Forbidden", message: "Only field staff can read this" });
     return;
   }
   const userId = req.user!.userId;
@@ -132,8 +131,8 @@ router.get("/me/dar", requireAuth, async (req, res): Promise<void> => {
 });
 
 router.get("/me/dar/:id", requireAuth, async (req, res): Promise<void> => {
-  if (req.user?.role !== "employee") {
-    res.status(403).json({ error: "Forbidden", message: "Only employees can read this" });
+  if (!isWorkerRole(req.user?.role)) {
+    res.status(403).json({ error: "Forbidden", message: "Only field staff can read this" });
     return;
   }
   const idParse = z.string().uuid().safeParse(req.params.id);

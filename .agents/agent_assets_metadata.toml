@@ -47,39 +47,3 @@ id = "7hoqt-snQR02u2Il-0MUR"
 uri = "file://exports/wcsg-admin-portal-guide.pdf"
 type = "pdf"
 title = "Admin Web Portal Guide"
-
-[[outputs]]
-id = "Qf3wN05Mvv5YzcxOJUyuL"
-uri = "file://docs/mobile-ota-and-add-org-runbook.md"
-type = "text"
-title = "Mobile OTA Update & Add-Org Runbook"
-
-[[outputs]]
-id = "ZDBBasHDTjR6Zn2r4ZDcB"
-uri = "file://legal/SecureOps-Command-Master-Subscription-Agreement.md"
-type = "text"
-title = "Master Subscription Agreement (SOBBU LLC ↔ Customer)"
-
-[[outputs]]
-id = "bUd2HfjIrVi57dUZxwoMJ"
-uri = "file://legal/SecureOps-Command-User-Agreement.md"
-type = "text"
-title = "User Agreement / Terms of Service (End Users)"
-
-[[outputs]]
-id = "C-AVj3R5TXmXBIgpzVrvV"
-uri = "file://legal/SecureOps-Command-Master-Subscription-Agreement.pdf"
-type = "pdf"
-title = "SecureOps Command — Master Subscription Agreement (PDF)"
-
-[[outputs]]
-id = "WI4Eweoy3IuBqaIoV9kLu"
-uri = "file://legal/SecureOps-Command-User-Agreement.pdf"
-type = "pdf"
-title = "SecureOps Command — User Agreement (PDF)"
-
-[[outputs]]
-id = "eokCWIfEEOZ0E7GJui8kj"
-uri = "file://.local/rgp-pdf-wizard-patch.txt"
-type = "text"
-title = "PDF Import Wizard — patch for RGP (apply with git apply)"

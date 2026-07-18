@@ -9,7 +9,7 @@ import { AttachmentImage } from "@/components/AttachmentImage";
 import { useRouter, useLocalSearchParams } from "expo-router";
 import { useHighlightFlash } from "@/hooks/useHighlightFlash";
 import { resolveDeepLinkFilter, findHighlightIndex, isHighlightedIncident } from "@/hooks/incidentDeepLink";
-import { FeatureGate } from "@/components/FeatureGate";
+import { formatDate } from "@/utils/time";
 
 const AnimatedTouchable = Animated.createAnimatedComponent(TouchableOpacity);
 
@@ -39,14 +39,6 @@ function StatusBadge({ status }: { status: string }) {
 }
 
 export default function AdminIncidentsScreen() {
-  return (
-    <FeatureGate feature="incidents">
-      <AdminIncidentsScreenInner />
-    </FeatureGate>
-  );
-}
-
-function AdminIncidentsScreenInner() {
   const colors = useColors();
   const queryClient = useQueryClient();
   const router = useRouter();
@@ -180,7 +172,7 @@ function AdminIncidentsScreenInner() {
               }]}
               onPress={() => { setSelectedIncident(item); setResolution((item as any).adminNotes || ""); }}
               accessibilityRole="button"
-              accessibilityLabel={`${item.severity} severity, ${item.status.replace("_", " ")}: ${item.title}. Reported by ${item.employeeName} on ${new Date(item.occurredAt).toLocaleDateString()}`}
+              accessibilityLabel={`${item.severity} severity, ${item.status.replace("_", " ")}: ${item.title}. Reported by ${item.employeeName} on ${formatDate(item.occurredAt, { month: "short", day: "numeric", year: "numeric" })}`}
               accessibilityHint="Opens incident details"
             >
               <View style={styles.cardHeader}>
@@ -193,7 +185,7 @@ function AdminIncidentsScreenInner() {
                 <Feather name="user" size={13} color={colors.mutedForeground} />
                 <Text style={[styles.metaText, { color: colors.mutedForeground }]}>{item.employeeName}</Text>
                 <Feather name="calendar" size={13} color={colors.mutedForeground} style={{ marginLeft: 8 }} />
-                <Text style={[styles.metaText, { color: colors.mutedForeground }]}>{new Date(item.occurredAt).toLocaleDateString()}</Text>
+                <Text style={[styles.metaText, { color: colors.mutedForeground }]}>{formatDate(item.occurredAt, { month: "short", day: "numeric", year: "numeric" })}</Text>
               </View>
               {(item as any).locationDescription && (
                 <View style={styles.metaRow}>

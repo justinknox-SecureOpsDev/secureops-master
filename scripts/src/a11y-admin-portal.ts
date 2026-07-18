@@ -62,20 +62,12 @@ import {
 const BASE_URL = (process.env.A11Y_BASE_URL ?? "http://localhost:80").replace(/\/$/, "");
 const PORTAL = `${BASE_URL}/admin-portal`;
 const API = `${BASE_URL}/api`;
-const ADMIN_EMAIL =
-  process.env.A11Y_ADMIN_EMAIL ?? process.env.DEMO_ADMIN_EMAIL ?? "admin@secureops.com";
-const ADMIN_PASSWORD =
-  process.env.A11Y_ADMIN_PASSWORD ?? process.env.DEMO_ADMIN_PASSWORD ?? "Admin123!";
+const ADMIN_EMAIL = process.env.A11Y_ADMIN_EMAIL ?? "admin@secureops.com";
+const ADMIN_PASSWORD = process.env.A11Y_ADMIN_PASSWORD ?? "Admin123!";
 // Only auto-provision the admin when the caller is relying on the default
-// documented credentials. If they passed their own — or set DEMO_ADMIN_* (the
-// real seeded master admin this deployment boots with) — we must not clobber
-// that account's password; we assume it already exists (via seedDemoUsers) and
-// is usable.
-const USING_DEFAULT_ADMIN =
-  !process.env.A11Y_ADMIN_EMAIL &&
-  !process.env.A11Y_ADMIN_PASSWORD &&
-  !process.env.DEMO_ADMIN_EMAIL &&
-  !process.env.DEMO_ADMIN_PASSWORD;
+// documented credentials. If they passed their own, we must not clobber a real
+// account's password — we assume it already exists and is usable.
+const USING_DEFAULT_ADMIN = !process.env.A11Y_ADMIN_EMAIL && !process.env.A11Y_ADMIN_PASSWORD;
 const TOKEN_KEY = "wcsg.adminToken";
 
 // Workspace root, resolved from this file (scripts/src/<file> -> ../../..).

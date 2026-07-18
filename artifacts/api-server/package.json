@@ -12,10 +12,8 @@
   },
   "dependencies": {
     "@google-cloud/storage": "^7.19.0",
-    "@google/genai": "^2.10.0",
     "@workspace/api-zod": "workspace:*",
     "@workspace/db": "workspace:*",
-    "@workspace/feature-keys": "workspace:*",
     "bcryptjs": "^3.0.3",
     "cookie-parser": "^1.4.7",
     "cors": "^2",
@@ -26,7 +24,6 @@
     "google-auth-library": "^10.6.2",
     "helmet": "^8.1.0",
     "jsonwebtoken": "^9.0.3",
-    "livekit-server-sdk": "^2.15.4",
     "nodemailer": "^8.0.7",
     "pdf-lib": "^1.17.1",
     "pdfkit": "^0.18.0",

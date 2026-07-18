@@ -1,33 +1,14 @@
 import { brand } from "./brandConfig";
 import { brandLogoPng } from "./brandLogo";
 
+const NAVY = brand.colorNavy;
+const GOLD = brand.colorGold;
+const CREAM = brand.colorCream;
+
 const LOGO_SIZE = 50;
 const LOGO_X = 56;
 const LOGO_Y = 14;
 const BAND_HEIGHT = 122;
-
-/**
- * Resolve the header logo bytes. Prefers a super-admin-set data URI
- * (`brand.logoDataUrl`, only `data:image/png|jpeg` are usable by PDFKit);
- * falls back to the bundled WCSG badge. Returns null only if the override is
- * present but undecodable, in which case the caller skips the badge.
- */
-function resolveLogo(): Buffer | null {
-  const dataUrl = brand.logoDataUrl;
-  if (dataUrl) {
-    const m = /^data:image\/(png|jpe?g);base64,(.+)$/i.exec(dataUrl);
-    if (m) {
-      try {
-        return Buffer.from(m[2], "base64");
-      } catch {
-        return brandLogoPng;
-      }
-    }
-    // SVG/other formats PDFKit can't embed → fall back to the bundled badge.
-    return brandLogoPng;
-  }
-  return brandLogoPng;
-}
 
 /**
  * Draw the standard branded PDF header band — navy background with the
@@ -45,21 +26,14 @@ export function drawBrandHeader(
   subtitle: string,
 ): number {
   const W = doc.page.width;
-  // Read brand colours live so super-admin overrides apply without a restart.
-  const NAVY = brand.colorNavy;
-  const GOLD = brand.colorGold;
-  const CREAM = brand.colorCream;
 
   doc.rect(0, 0, W, BAND_HEIGHT).fill(NAVY);
 
   // Logo badge above the company name.
-  const logo = resolveLogo();
-  if (logo) {
-    try {
-      doc.image(logo, LOGO_X, LOGO_Y, { fit: [LOGO_SIZE, LOGO_SIZE] });
-    } catch {
-      /* best-effort: never break the PDF over a logo */
-    }
+  try {
+    doc.image(brandLogoPng, LOGO_X, LOGO_Y, { fit: [LOGO_SIZE, LOGO_SIZE] });
+  } catch {
+    /* best-effort: never break the PDF over a logo */
   }
 
   const nameY = LOGO_Y + LOGO_SIZE + 6;

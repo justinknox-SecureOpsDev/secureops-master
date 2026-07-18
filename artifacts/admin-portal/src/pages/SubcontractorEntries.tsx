@@ -1,5 +1,6 @@
 import { useEffect, useState, useCallback } from "react";
 import { api } from "@/lib/api";
+import { BUSINESS_TIME_ZONE } from "@/lib/format";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -27,7 +28,7 @@ function fmtDateTime(iso: string | null | undefined): string {
   if (!iso) return "—";
   const d = new Date(iso);
   if (isNaN(d.getTime())) return iso;
-  return d.toLocaleString(undefined, { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" });
+  return d.toLocaleString(undefined, { month: "short", day: "numeric", hour: "numeric", minute: "2-digit", timeZone: BUSINESS_TIME_ZONE });
 }
 
 // Snapshot of the entry's editable fields, captured in the audit log
@@ -267,7 +268,7 @@ export default function SubcontractorEntriesPage() {
     <div className="p-6 space-y-6">
       <div className="flex items-center justify-between flex-wrap gap-3">
         <div>
-          <h1 className="text-xl font-bold" style={{ color: "#0c0a08" }}>Subcontractor Entries</h1>
+          <h1 className="text-xl font-bold" style={{ color: "#080c18" }}>Subcontractor Entries</h1>
           <p className="text-sm text-muted-foreground">QR clock-in records for non-system subcontractors</p>
         </div>
         <div className="flex gap-2">
@@ -493,7 +494,7 @@ export default function SubcontractorEntriesPage() {
               Cancel
             </Button>
             <Button
-              style={{ background: "#0c0a08", color: "#f0e4c0" }}
+              style={{ background: "#080c18", color: "#f0e6c8" }}
               onClick={handleEditSave}
               disabled={editBusy}
             >
@@ -612,7 +613,7 @@ export default function SubcontractorEntriesPage() {
               Cancel
             </Button>
             <Button
-              style={{ background: "#0c0a08", color: "#f0e4c0" }}
+              style={{ background: "#080c18", color: "#f0e6c8" }}
               onClick={handleForceClockOut}
               disabled={forceClockOutBusy}
             >

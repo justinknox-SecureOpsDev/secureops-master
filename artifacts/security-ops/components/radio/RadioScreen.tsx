@@ -1,17 +1,14 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import {
   View, Text, TouchableOpacity, ScrollView, StyleSheet,
-  ActivityIndicator, Pressable,
+  Platform, ActivityIndicator, Pressable,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { Feather } from "@expo/vector-icons";
 import { useColors } from "@/hooks/useColors";
-import { apiRequest, getApiBaseUrl } from "@/utils/api";
+import { apiRequest, API_BASE_URL } from "@/utils/api";
 import { storage } from "@/utils/storage";
 import { AUTH_TOKEN_KEY, useAuth } from "@/contexts/AuthContext";
-import { createRadioMedia } from "./radioMedia";
-import type { RadioMedia, RadioToken } from "./radioTypes";
-import { createTransmitController, type TransmitController } from "./radioTransmit";
 
 type Channel = {
   id: string; name: string;
@@ -21,57 +18,67 @@ type Channel = {
 };
 
 type Speaker = { userId: string; name: string } | null;
-type TalkState = "idle" | "requesting" | "connecting" | "live";
+
+// MediaRecorder + MediaSource only exist in the browser. On native Expo
+// the screen still works as a listener-status display, but capture and
+// playback are gated behind a "v1 web only" notice. (Adding native PTT
+// requires a custom dev-client with expo-audio + recording chunking;
+// scheduled for v1.1.)
+const IS_WEB = Platform.OS === "web";
 
 function buildRadioWsUrl(token: string): string {
   // On native Expo this hits the same Replit domain over wss as the REST API.
-  const baseHttp = getApiBaseUrl().replace(/^http/, "ws").replace(/\/api$/, "");
+  const baseHttp = API_BASE_URL.replace(/^http/, "ws").replace(/\/api$/, "");
   return `${baseHttp}/api/ws/radio?token=${encodeURIComponent(token)}`;
 }
 
-// Control-WS reconnect backoff. The LiveKit media room reconnects itself; this
-// is purely for the JSON control plane (presence + speaker lock).
-const RECONNECT_BASE_MS = 1000;
-const RECONNECT_MAX_MS = 15_000;
-function reconnectDelay(attempt: number): number {
-  const capped = Math.min(RECONNECT_MAX_MS, RECONNECT_BASE_MS * 2 ** attempt);
-  return capped / 2 + Math.random() * (capped / 2); // jitter: 50–100% of cap
-}
-
-/** Turn a server `denied` reason code into something an officer can act on. */
-function friendlyDeniedReason(reason: string | undefined): string {
-  switch (reason) {
-    case "busy": return "Someone else is already transmitting on this channel.";
-    case "preempted": return "An admin took over this channel.";
-    case "rate_limited": return "You're transmitting too quickly. Wait a moment and try again.";
-    case "forbidden": return "You're not allowed to transmit on this channel.";
-    case "not_joined": return "Join the channel before transmitting.";
-    default: return reason ? `Transmission denied (${reason}).` : "Transmission denied.";
+class WebChannelPlayer {
+  private contexts = new Map<string, { ms: MediaSource; sb: SourceBuffer | null; queue: ArrayBuffer[]; audio: HTMLAudioElement; ready: boolean }>();
+  private mime = 'audio/webm; codecs="opus"';
+  ensure(channelId: string): void {
+    if (this.contexts.has(channelId)) return;
+    const audio = new Audio(); audio.autoplay = true;
+    const ms = new MediaSource(); audio.src = URL.createObjectURL(ms);
+    const ctx = { ms, sb: null as SourceBuffer | null, queue: [] as ArrayBuffer[], audio, ready: false };
+    ms.addEventListener("sourceopen", () => {
+      try {
+        if (!MediaSource.isTypeSupported(this.mime)) return;
+        const sb = ms.addSourceBuffer(this.mime); sb.mode = "sequence";
+        sb.addEventListener("updateend", () => this.flush(channelId));
+        ctx.sb = sb; ctx.ready = true; this.flush(channelId);
+      } catch { /* unsupported */ }
+    });
+    this.contexts.set(channelId, ctx);
   }
-}
-
-/** A mic-permission rejection from createLocalAudioTrack / native WebRTC. */
-function isMicPermissionError(e: unknown): boolean {
-  const name = (e as { name?: string })?.name ?? "";
-  const msg = ((e as Error)?.message ?? "").toLowerCase();
-  return name === "NotAllowedError" || name === "SecurityError" || name === "PermissionDeniedError" || msg.includes("permission") || msg.includes("denied") || msg.includes("not allowed");
-}
-
-/**
- * POST a radio LiveKit token endpoint. Returns the parsed token, or null with
- * the HTTP status so callers can special-case 503 (LiveKit not configured on
- * this server) and 409 (someone else holds the speaker lock).
- */
-async function postRadioToken(
-  path: string,
-): Promise<{ status: number; data: RadioToken | null }> {
-  const token = await storage.get(AUTH_TOKEN_KEY);
-  const res = await fetch(`${getApiBaseUrl()}${path}`, {
-    method: "POST",
-    headers: token ? { Authorization: `Bearer ${token}` } : {},
-  });
-  if (!res.ok) return { status: res.status, data: null };
-  return { status: res.status, data: (await res.json()) as RadioToken };
+  push(channelId: string, chunk: ArrayBuffer): void {
+    this.ensure(channelId);
+    const ctx = this.contexts.get(channelId)!;
+    ctx.queue.push(chunk); this.flush(channelId);
+  }
+  setMuted(channelId: string, muted: boolean): void {
+    const ctx = this.contexts.get(channelId);
+    if (ctx) ctx.audio.muted = muted;
+  }
+  drop(channelId: string): void {
+    const ctx = this.contexts.get(channelId);
+    if (!ctx) return;
+    try { ctx.audio.pause(); } catch {}
+    try { URL.revokeObjectURL(ctx.audio.src); } catch {}
+    this.contexts.delete(channelId);
+  }
+  private flush(channelId: string): void {
+    const ctx = this.contexts.get(channelId);
+    if (!ctx || !ctx.ready || !ctx.sb || ctx.sb.updating) return;
+    const next = ctx.queue.shift(); if (!next) return;
+    try { ctx.sb.appendBuffer(next); } catch { /* drop */ }
+  }
+  teardown(): void {
+    for (const ctx of this.contexts.values()) {
+      try { ctx.audio.pause(); } catch {}
+      try { URL.revokeObjectURL(ctx.audio.src); } catch {}
+    }
+    this.contexts.clear();
+  }
 }
 
 export default function RadioScreen(): React.JSX.Element {
@@ -81,46 +88,21 @@ export default function RadioScreen(): React.JSX.Element {
   const [activeId, setActiveId] = useState<string | null>(null);
   const [speakers, setSpeakers] = useState<Record<string, Speaker>>({});
   const [wsReady, setWsReady] = useState(false);
-  const [reconnecting, setReconnecting] = useState(false);
-  const [talkState, setTalkState] = useState<TalkState>("idle");
-  const [publishingChannelId, setPublishingChannelId] = useState<string | null>(null);
-  const [audioAvailable, setAudioAvailable] = useState(true);
+  const [holding, setHolding] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
 
   const wsRef = useRef<WebSocket | null>(null);
-  const mediaRef = useRef<RadioMedia | null>(null);
+  const recRef = useRef<MediaRecorder | null>(null);
+  const streamRef = useRef<MediaStream | null>(null);
+  const playerRef = useRef<WebChannelPlayer | null>(null);
   const joinedRef = useRef<Set<string>>(new Set());
   const [leftChannels, setLeftChannels] = useState<Set<string>>(new Set());
   const [mutedChannels, setMutedChannels] = useState<Set<string>>(new Set());
 
-  const supportsAudio = mediaRef.current?.supportsAudio ?? createRadioMedia().supportsAudio;
-
   const activeChannel = useMemo(() => channels.find((c) => c.id === activeId) || null, [channels, activeId]);
   const isSpeakingHere = activeId ? speakers[activeId]?.userId === user?.id : false;
-  const otherSpeaker = activeId && speakers[activeId] && speakers[activeId]?.userId !== user?.id ? speakers[activeId] : null;
-  const isTransmitting = talkState === "live" || talkState === "requesting" || talkState === "connecting";
-
-  const userIdRef = useRef<string | undefined>(user?.id);
-  // Synchronous push-to-talk transmit-intent state machine. Owns the generation
-  // counter + the intent that's set the instant PTT is pressed and cleared the
-  // instant it's released, so a late 'speaking' echo arriving after release can
-  // NEVER start a publish (React state / ref mirrors lag by a tick; this does
-  // not). Unit-tested in __tests__/radioTransmit.test.ts. See the memory note
-  // ptt-transmit-intent-sync-ref.md.
-  const transmitRef = useRef<TransmitController | null>(null);
-  if (!transmitRef.current) {
-    transmitRef.current = createTransmitController({
-      send: (msg) => {
-        const ws = wsRef.current;
-        if (!ws || ws.readyState !== WebSocket.OPEN) return false;
-        ws.send(JSON.stringify(msg));
-        return true;
-      },
-      getUserId: () => userIdRef.current,
-    });
-  }
-  useEffect(() => { userIdRef.current = user?.id; }, [user?.id]);
+  const otherSpeaker = activeId && speakers[activeId]?.userId !== user?.id ? speakers[activeId] : null;
 
   useEffect(() => {
     apiRequest("/radio/channels")
@@ -132,94 +114,67 @@ export default function RadioScreen(): React.JSX.Element {
       .finally(() => setLoading(false));
   }, []);
 
-  // --- WS control plane (presence + speaker lock signalling) ---
-  // Auto-reconnects with capped exponential backoff + jitter so a dropped
-  // control socket (backgrounding, flaky cell signal) recovers silently. The
-  // join effect re-runs on each reopen (joinedRef cleared on close) and the
-  // LiveKit listen room reconnects itself. We deliberately do NOT re-claim the
-  // lock or re-publish on reconnect — a dropped speaker must press PTT again.
   useEffect(() => {
     let cancelled = false;
-    let attempt = 0;
-    let reconnectTimer: ReturnType<typeof setTimeout> | undefined;
-    mediaRef.current = createRadioMedia();
-
-    const cancelTransmit = (): void => {
-      transmitRef.current!.cancel(); // abort in-flight publish + drop intent (no 'end')
-      setTalkState("idle");
-      setPublishingChannelId(null);
-      void mediaRef.current?.stopPublish();
-    };
-
-    const scheduleReconnect = (): void => {
-      if (cancelled) return;
-      setReconnecting(true);
-      const delay = reconnectDelay(attempt);
-      attempt += 1;
-      reconnectTimer = setTimeout(() => { void connect(); }, delay);
-    };
-
-    async function connect(): Promise<void> {
-      if (cancelled) return;
+    (async () => {
       const token = await storage.get(AUTH_TOKEN_KEY);
       if (!token || cancelled) return;
+      if (IS_WEB) playerRef.current = new WebChannelPlayer();
       const ws = new WebSocket(buildRadioWsUrl(token));
+      ws.binaryType = "arraybuffer";
       wsRef.current = ws;
-
-      ws.onopen = () => {
-        if (cancelled || wsRef.current !== ws) return;
-        attempt = 0;
-        setWsReady(true);
-        setReconnecting(false);
-        setError(null);
+      const abortLocalCapture = (): void => {
+        if (recRef.current && recRef.current.state !== "inactive") {
+          try { recRef.current.stop(); } catch { /* ignore */ }
+        }
+        if (streamRef.current) {
+          streamRef.current.getTracks().forEach((t) => t.stop());
+          streamRef.current = null;
+        }
+        recRef.current = null;
+        setHolding(false);
       };
-      ws.onclose = () => {
-        if (wsRef.current !== ws) return; // a newer socket already took over
-        setWsReady(false);
-        joinedRef.current.clear();
-        cancelTransmit();
-        scheduleReconnect();
-      };
-      // Don't schedule from onerror — onclose always follows and owns retry.
-      ws.onerror = () => { if (wsRef.current === ws) cancelTransmit(); };
+      ws.onopen = () => setWsReady(true);
+      ws.onclose = () => { setWsReady(false); joinedRef.current.clear(); abortLocalCapture(); };
+      ws.onerror = () => { setError("Radio connection lost."); abortLocalCapture(); };
       ws.onmessage = (ev) => {
-        if (wsRef.current !== ws) return; // ignore stale socket events
-        if (typeof ev.data !== "string") return; // audio rides LiveKit, not this socket
-        try {
-          const m = JSON.parse(ev.data);
-          if (m.type === "speaking" && m.channelId) {
-            setSpeakers((s) => ({ ...s, [m.channelId]: { userId: m.speakerUserId, name: m.speakerName } }));
-            // The server confirmed WE hold the lock — mint a publish token and
-            // go live on that channel's LiveKit room. The controller gates on the
-            // synchronous transmit intent: if PTT was already released, intent is
-            // null and a late echo is ignored (no publish-after-release).
-            const intent = transmitRef.current!.handleSpeaking(m.channelId, m.speakerUserId);
-            if (intent) void beginPublish(intent.channelId, intent.gen);
-          } else if (m.type === "silent" && m.channelId) {
-            setSpeakers((s) => ({ ...s, [m.channelId]: null }));
-          } else if (m.type === "denied") {
-            setError(friendlyDeniedReason(m.reason));
-            cancelTransmit();
-          }
-        } catch { /* ignore */ }
+        if (typeof ev.data === "string") {
+          try {
+            const m = JSON.parse(ev.data);
+            if (m.type === "speaking" && m.channelId) {
+              setSpeakers((s) => ({ ...s, [m.channelId]: { userId: m.speakerUserId, name: m.speakerName } }));
+            } else if (m.type === "silent" && m.channelId) {
+              setSpeakers((s) => ({ ...s, [m.channelId]: null }));
+            } else if (m.type === "denied") {
+              setError(`Channel: ${m.reason}`);
+              // Server refused our claim — never let the UI think we're live.
+              abortLocalCapture();
+            }
+          } catch {}
+          return;
+        }
+        if (!IS_WEB) return; // native playback path: v1.1
+        const buf = ev.data as ArrayBuffer;
+        const view = new Uint8Array(buf);
+        if (view.length < 2) return;
+        const idLen = view[0];
+        const idBytes = view.slice(1, 1 + idLen);
+        const audio = buf.slice(1 + idLen);
+        const channelId = new TextDecoder().decode(idBytes);
+        playerRef.current?.push(channelId, audio);
       };
-    }
-
-    void connect();
-
+    })();
     return () => {
       cancelled = true;
-      if (reconnectTimer !== undefined) clearTimeout(reconnectTimer);
-      const ws = wsRef.current;
-      if (ws) { ws.onclose = null; try { ws.close(); } catch { /* ignore */ } }
+      try { wsRef.current?.close(); } catch {}
       wsRef.current = null;
-      void mediaRef.current?.teardown();
-      mediaRef.current = null;
+      playerRef.current?.teardown();
+      playerRef.current = null;
+      if (recRef.current && recRef.current.state !== "inactive") recRef.current.stop();
+      if (streamRef.current) streamRef.current.getTracks().forEach((t) => t.stop());
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // --- join all visible non-archived channels (control plane) once WS is up ---
   useEffect(() => {
     if (!wsReady) return;
     const ws = wsRef.current; if (!ws) return;
@@ -231,45 +186,10 @@ export default function RadioScreen(): React.JSX.Element {
     }
   }, [wsReady, channels, leftChannels]);
 
-  // --- reconcile the LiveKit listen room to the ACTIVE channel only ---
-  // Unlike the admin portal (which monitors many channels at once), an officer
-  // on a phone listens to the one channel they have selected — fewer media
-  // connections, clearer audio, less battery.
   useEffect(() => {
-    if (!wsReady || !audioAvailable) return;
-    const media = mediaRef.current;
-    if (!media || !media.supportsAudio) return;
-    let cancelled = false;
-    (async () => {
-      const wantActive =
-        !!activeId && !!activeChannel && !activeChannel.archivedAt &&
-        !leftChannels.has(activeId) && !mutedChannels.has(activeId) &&
-        activeId !== publishingChannelId;
-      const desired = wantActive && activeId ? [activeId] : [];
-      const desiredSet = new Set(desired);
-      for (const id of media.listenChannelIds()) {
-        if (!desiredSet.has(id)) await media.dropListen(id);
-      }
-      for (const id of desired) {
-        if (cancelled) return;
-        if (media.isListening(id)) continue;
-        try {
-          const { status, data } = await postRadioToken(`/radio/channels/${id}/livekit-token`);
-          if (!data) { if (status === 503) setAudioAvailable(false); continue; }
-          if (cancelled) return;
-          await media.ensureListen(id, data);
-          // If the active channel changed while we were connecting, this room is
-          // no longer desired — drop it so native stays active-channel-only.
-          if (cancelled) { await media.dropListen(id); return; }
-        } catch (e) {
-          // One channel failing to connect audio shouldn't break presence.
-          console.warn("[radio] listen connect failed", id, e);
-        }
-      }
-    })();
-    return () => { cancelled = true; };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [wsReady, audioAvailable, activeId, activeChannel, leftChannels, mutedChannels, publishingChannelId]);
+    const p = playerRef.current; if (!p) return;
+    for (const c of channels) p.setMuted(c.id, mutedChannels.has(c.id));
+  }, [mutedChannels, channels]);
 
   function leaveChannel(channelId: string): void {
     const ws = wsRef.current;
@@ -277,16 +197,11 @@ export default function RadioScreen(): React.JSX.Element {
       ws.send(JSON.stringify({ type: "leave", channelId }));
     }
     joinedRef.current.delete(channelId);
-    void mediaRef.current?.dropListen(channelId);
+    playerRef.current?.drop(channelId);
     setLeftChannels((s) => { const n = new Set(s); n.add(channelId); return n; });
   }
   function rejoinChannel(channelId: string): void {
     setLeftChannels((s) => { const n = new Set(s); n.delete(channelId); return n; });
-    const ws = wsRef.current;
-    if (ws && ws.readyState === WebSocket.OPEN && !joinedRef.current.has(channelId)) {
-      ws.send(JSON.stringify({ type: "join", channelId }));
-      joinedRef.current.add(channelId);
-    }
   }
   function toggleMute(channelId: string): void {
     setMutedChannels((s) => {
@@ -296,64 +211,43 @@ export default function RadioScreen(): React.JSX.Element {
     });
   }
 
-  async function beginPublish(channelId: string, gen: number): Promise<void> {
-    // `gen` is the transmit generation that owned the intent when the lock was
-    // requested. If it changes (PTT released, WS dropped) while we're fetching a
-    // token / connecting, bail out and tear down so we never transmit after the
-    // user let go.
-    const aborted = (): boolean => transmitRef.current!.currentGen() !== gen;
-    try {
-      // Lock confirmed; mic isn't live yet — surface "connecting" until it is.
-      setTalkState("connecting");
-      const { status, data } = await postRadioToken(`/radio/channels/${channelId}/livekit-publish-token`);
-      if (aborted()) return; // stopTalking already sent 'end' + cleaned up
-      if (!data) {
-        if (status === 503) setAudioAvailable(false);
-        throw new Error(status === 409 ? "Someone else is transmitting." : `publish token failed (${status})`);
-      }
-      setPublishingChannelId(channelId);
-      await mediaRef.current!.startPublish(channelId, data, aborted);
-      if (aborted()) { await mediaRef.current?.stopPublish(); setPublishingChannelId(null); return; }
-      setTalkState("live");
-    } catch (e) {
-      setError(isMicPermissionError(e)
-        ? "Microphone access is off. Enable it for SecureOps in your device Settings, then try again."
-        : `Could not start transmitting: ${(e as Error).message}`);
-      setTalkState("idle");
-      setPublishingChannelId(null);
-      wsRef.current?.send(JSON.stringify({ type: "end", channelId }));
-    }
-  }
-
-  function startTalking(): void {
-    if (!activeId || talkState !== "idle" || isSpeakingHere || otherSpeaker) return;
-    if (!supportsAudio) {
-      setError("Live radio audio is in the SecureOps app on your phone. This preview shows presence only.");
+  async function startTalking(): Promise<void> {
+    if (!activeId || !wsRef.current || otherSpeaker) return;
+    setError(null);
+    if (!IS_WEB) {
+      // Native v1: signal intent so admins see presence, but no audio capture.
+      setError("Transmission from native is coming in v1.1. Use the web app to talk for now.");
       return;
     }
-    if (!audioAvailable) { setError("Live radio audio is not configured on this server."); return; }
-    const ws = wsRef.current;
-    if (!ws || ws.readyState !== WebSocket.OPEN) return;
-    setError(null);
-    setTalkState("requesting");
-    // Records intent synchronously BEFORE sending 'start' (so the echo handler,
-    // which can fire before any React state settles, sees it), then claims the
-    // lock; we publish once the server echoes our 'speaking'.
-    transmitRef.current!.start(activeId);
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      streamRef.current = stream;
+      const mime = MediaRecorder.isTypeSupported("audio/webm;codecs=opus") ? "audio/webm;codecs=opus" : "audio/webm";
+      const rec = new MediaRecorder(stream, { mimeType: mime, audioBitsPerSecond: 24_000 });
+      recRef.current = rec;
+      rec.ondataavailable = async (ev) => {
+        if (!ev.data?.size) return;
+        const ws = wsRef.current;
+        if (!ws || ws.readyState !== WebSocket.OPEN) return;
+        ws.send(await ev.data.arrayBuffer());
+      };
+      rec.onstop = () => {
+        streamRef.current?.getTracks().forEach((t) => t.stop());
+        streamRef.current = null;
+        recRef.current = null;
+        wsRef.current?.send(JSON.stringify({ type: "end", channelId: activeId }));
+        setHolding(false);
+      };
+      wsRef.current.send(JSON.stringify({ type: "start", channelId: activeId }));
+      rec.start(250);
+      setHolding(true);
+    } catch (e) {
+      setError(`Microphone access denied: ${e instanceof Error ? e.message : String(e)}`);
+    }
   }
 
-  async function stopTalking(): Promise<void> {
-    // Gate on the SYNCHRONOUS intent, not React `talkState` — a fast
-    // press/release can run this from a render where `talkState` is still
-    // "idle", and gating on that would skip cleanup and leak a publish.
-    if (!transmitRef.current!.intent()) return; // nothing requested or active
-    // The controller bumps the generation + clears intent FIRST (so any in-flight
-    // beginPublish/startPublish aborts itself and a late 'speaking' echo can't
-    // start a new publish), then sends WS 'end' for the publishing/active channel.
-    transmitRef.current!.stop(publishingChannelId, activeId);
-    setTalkState("idle");
-    await mediaRef.current?.stopPublish();
-    setPublishingChannelId(null);
+  function stopTalking(): void {
+    if (recRef.current && recRef.current.state !== "inactive") recRef.current.stop();
   }
 
   const styles = makeStyles(colors);
@@ -366,27 +260,17 @@ export default function RadioScreen(): React.JSX.Element {
     );
   }
 
-  const pttDisabled = !!otherSpeaker || !wsReady || (activeChannel?.archivedAt ?? null) !== null || !supportsAudio || !audioAvailable;
-
   return (
     <SafeAreaView style={styles.container} edges={["top"]}>
       <View style={styles.header}>
         <Feather name="radio" size={22} color={colors.primary} />
         <Text style={styles.title}>Radio</Text>
-        <View style={[styles.pill, { backgroundColor: wsReady ? "#16a34a22" : reconnecting ? "#f59e0b22" : "#71717a22" }]}>
-          <Text style={{ color: wsReady ? "#16a34a" : reconnecting ? "#b45309" : colors.mutedForeground, fontSize: 11 }}>
-            {wsReady ? "Connected" : reconnecting ? "Reconnecting…" : "Connecting…"}
+        <View style={[styles.pill, { backgroundColor: wsReady ? "#16a34a22" : "#71717a22" }]}>
+          <Text style={{ color: wsReady ? "#16a34a" : colors.mutedForeground, fontSize: 11 }}>
+            {wsReady ? "Connected" : "Connecting…"}
           </Text>
         </View>
       </View>
-
-      {supportsAudio && !audioAvailable && (
-        <View style={styles.errorBox}>
-          <Text style={styles.errorText}>
-            Live audio is not configured on this server. Presence still works, but you can't hear or transmit yet.
-          </Text>
-        </View>
-      )}
 
       {error && (
         <View style={styles.errorBox}><Text style={styles.errorText}>{error}</Text></View>
@@ -423,20 +307,10 @@ export default function RadioScreen(): React.JSX.Element {
             </Text>
 
             <View style={styles.status}>
-              {isSpeakingHere || isTransmitting ? (
-                <View style={[styles.banner, { backgroundColor: "#16a34a1a" }]}>
-                  <View style={[styles.bannerDot, { backgroundColor: "#16a34a" }]} />
-                  <Text style={[styles.bannerText, { color: "#15803d" }]}>
-                    {talkState === "requesting" ? "Requesting the floor…"
-                      : talkState === "connecting" ? "Connecting your mic…"
-                      : "You are transmitting…"}
-                  </Text>
-                </View>
+              {isSpeakingHere ? (
+                <Text style={[styles.statusText, { color: "#16a34a" }]}>You are transmitting…</Text>
               ) : otherSpeaker ? (
-                <View style={[styles.banner, { backgroundColor: "#0284c71a" }]}>
-                  <Feather name="volume-2" size={16} color="#0284c7" />
-                  <Text style={[styles.bannerText, { color: "#0369a1" }]}>{otherSpeaker.name} is transmitting…</Text>
-                </View>
+                <Text style={[styles.statusText, { color: "#0284c7" }]}>{otherSpeaker.name} is transmitting…</Text>
               ) : (
                 <Text style={[styles.statusText, { color: colors.mutedForeground }]}>Channel idle</Text>
               )}
@@ -444,22 +318,22 @@ export default function RadioScreen(): React.JSX.Element {
 
             <Pressable
               onPressIn={startTalking}
-              onPressOut={() => { void stopTalking(); }}
-              disabled={pttDisabled}
+              onPressOut={stopTalking}
+              disabled={!!otherSpeaker || !wsReady || activeChannel.archivedAt !== null}
               accessibilityRole="button"
-              accessibilityLabel={isTransmitting ? "Release to stop transmitting" : otherSpeaker ? "Channel busy" : "Hold to talk"}
+              accessibilityLabel={holding ? "Release to stop transmitting" : otherSpeaker ? "Channel busy" : "Hold to talk"}
               accessibilityHint="Press and hold to transmit on this channel"
-              accessibilityState={{ disabled: pttDisabled, busy: isTransmitting }}
+              accessibilityState={{ disabled: !!otherSpeaker || !wsReady || activeChannel.archivedAt !== null, busy: holding }}
               style={({ pressed }) => [
                 styles.ptt,
                 {
-                  backgroundColor: isTransmitting ? "#16a34a" : pttDisabled ? colors.muted : "#dc2626",
-                  transform: [{ scale: pressed && !pttDisabled ? 0.97 : 1 }],
+                  backgroundColor: holding ? "#16a34a" : otherSpeaker ? colors.muted : "#dc2626",
+                  transform: [{ scale: pressed && !otherSpeaker ? 0.97 : 1 }],
                 },
               ]}
             >
-              <Feather name={isTransmitting ? "mic" : otherSpeaker ? "mic-off" : "mic"} size={48} color="#fff" />
-              <Text style={styles.pttLabel}>{isTransmitting ? "Release to stop" : otherSpeaker ? "Channel busy" : "Hold to talk"}</Text>
+              <Feather name={holding ? "mic" : otherSpeaker ? "mic-off" : "mic"} size={48} color="#fff" />
+              <Text style={styles.pttLabel}>{holding ? "Release to stop" : otherSpeaker ? "Channel busy" : "Hold to talk"}</Text>
             </Pressable>
 
             <View style={{ flexDirection: "row", gap: 10, marginTop: 18 }}>
@@ -485,9 +359,9 @@ export default function RadioScreen(): React.JSX.Element {
               )}
             </View>
 
-            {!supportsAudio && (
+            {!IS_WEB && (
               <Text style={[styles.muted, { textAlign: "center", marginTop: 20, paddingHorizontal: 24 }]}>
-                Presence only in this preview — you can see who's transmitting. Live audio (listen and talk) is end-to-end encrypted in the SecureOps app on your phone.
+                Presence only on this device — you can see who's transmitting, but live audio (listen and talk) is web-only in v1. Native streaming is coming in v1.1.
               </Text>
             )}
           </>
@@ -510,11 +384,8 @@ const makeStyles = (colors: ReturnType<typeof useColors>) => StyleSheet.create({
   body: { flex: 1, alignItems: "center", paddingTop: 24 },
   channelName: { fontSize: 20, fontWeight: "700", color: colors.foreground },
   muted: { color: colors.mutedForeground, fontSize: 13, marginTop: 4 },
-  status: { marginTop: 16, minHeight: 36, justifyContent: "center" },
+  status: { marginTop: 16, minHeight: 22 },
   statusText: { fontSize: 14, fontWeight: "600" },
-  banner: { flexDirection: "row", alignItems: "center", gap: 8, paddingHorizontal: 14, paddingVertical: 8, borderRadius: 20 },
-  bannerDot: { width: 8, height: 8, borderRadius: 4 },
-  bannerText: { fontSize: 14, fontWeight: "700" },
   ptt: { width: 200, height: 200, borderRadius: 100, justifyContent: "center", alignItems: "center", marginTop: 28, shadowColor: "#000", shadowOpacity: 0.18, shadowOffset: { width: 0, height: 6 }, shadowRadius: 14, elevation: 6 },
   pttLabel: { color: "#fff", fontWeight: "600", marginTop: 8 },
   smallBtn: { flexDirection: "row", alignItems: "center", gap: 6, paddingHorizontal: 12, paddingVertical: 8, borderRadius: 8, borderWidth: 1, borderColor: colors.border, backgroundColor: colors.card },

@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { buildNavGroups, resolveGroupKey } from "@/pages/AppShell";
+import { applyNavOrder, buildNavGroups, resolveGroupKey } from "@/pages/AppShell";
 
 /**
  * Locks in the role-aligned navigation IA and the route→group resolution that
@@ -29,7 +29,7 @@ describe("buildNavGroups", () => {
     ]);
   });
 
-  it("places HR items under Human Resources only", () => {
+  it("places HR items under Personnel Management only", () => {
     const hr = adminGroups.find((g) => g.key === "hr");
     expect(hr?.items.map((i) => i.href)).toEqual([
       "/hr/applications",
@@ -37,8 +37,8 @@ describe("buildNavGroups", () => {
       "/hr/onboarding",
       "/hr/invitations",
       "/hr/policies",
-      "/hr/reports",
       "/tables/employees",
+      "/hr/reports",
     ]);
   });
 
@@ -75,53 +75,9 @@ describe("buildNavGroups", () => {
   });
 });
 
-describe("buildNavGroups feature filtering", () => {
-  it("defaults to all-enabled so groups are unchanged when no predicate is passed", () => {
-    const withDefault = buildNavGroups(false);
-    const withAllEnabled = buildNavGroups(false, false, () => true);
-    expect(withDefault.map((g) => g.key)).toEqual(withAllEnabled.map((g) => g.key));
-    for (let i = 0; i < withDefault.length; i++) {
-      expect(withDefault[i].items.map((it) => it.href)).toEqual(
-        withAllEnabled[i].items.map((it) => it.href),
-      );
-    }
-  });
-
-  it("drops items whose feature flag is disabled", () => {
-    const enabled = buildNavGroups(false, false, () => true)
-      .flatMap((g) => g.items)
-      .map((it) => it.href);
-    const disabled = buildNavGroups(false, false, (key) => key !== "hr")
-      .flatMap((g) => g.items)
-      .map((it) => it.href);
-    const removed = enabled.filter((href) => !disabled.includes(href));
-    expect(removed).toContain("/hr/applications");
-    expect(removed).toContain("/hr/onboarding");
-    expect(removed).toContain("/hr/invitations");
-  });
-
-  it("drops a group entirely when every item is feature-gated off", () => {
-    // The dispatcher Dispatch tab is Live-Map-only, so gating off liveMap
-    // leaves the group empty and it must disappear.
-    const groups = buildNavGroups(true, false, (key) => key !== "liveMap");
-    expect(groups.find((g) => g.key === "dispatch")).toBeUndefined();
-  });
-
-  it("keeps the ungated Analytics item when payroll & invoicing are gated off", () => {
-    const groups = buildNavGroups(false, false, (key) => key !== "payroll" && key !== "invoicing");
-    const accounting = groups.find((g) => g.key === "accounting");
-    expect(accounting?.items.map((i) => i.href)).toEqual(["/analytics"]);
-  });
-
-  it("keeps ungated items even when other features are disabled", () => {
-    const groups = buildNavGroups(false, false, () => false);
-    const allHrefs = groups.flatMap((g) => g.items).map((it) => it.href);
-    expect(allHrefs).toContain("/tables/shifts");
-  });
-});
-
 describe("resolveGroupKey (admin)", () => {
   const cases: Array<[string, string]> = [
+    ["/", "overview"],
     ["/dispatch", "dispatch"],
     ["/chat", "dispatch"],
     ["/tables/incidents", "dispatch"],
@@ -138,11 +94,10 @@ describe("resolveGroupKey (admin)", () => {
     ["/tables/clients", "administration"],
     ["/sites/abc", "administration"],
     ["/subcontractors/pay-run", "administration"],
+    ["/analytics", "accounting"],
     ["/payroll/board", "accounting"],
     ["/invoices/board", "accounting"],
-    ["/analytics", "accounting"],
     ["/tables/users", "settings"],
-    ["/settings/invite", "settings"],
     ["/audit-log", "settings"],
     ["/exports", "settings"],
     ["/account/security", "settings"],
@@ -163,6 +118,49 @@ describe("resolveGroupKey (admin)", () => {
       expect(key).not.toBeNull();
       expect(validKeys.has(key as string)).toBe(true);
     }
+  });
+});
+
+describe("applyNavOrder", () => {
+  const defaultKeys = adminGroups.map((g) => g.key);
+
+  it("returns the default order when no preference is saved", () => {
+    expect(applyNavOrder(adminGroups, null).map((g) => g.key)).toEqual(defaultKeys);
+    expect(applyNavOrder(adminGroups, undefined).map((g) => g.key)).toEqual(defaultKeys);
+    expect(applyNavOrder(adminGroups, []).map((g) => g.key)).toEqual(defaultKeys);
+  });
+
+  it("reorders groups to match the saved preference", () => {
+    const reversed = [...defaultKeys].reverse();
+    expect(applyNavOrder(adminGroups, reversed).map((g) => g.key)).toEqual(reversed);
+  });
+
+  it("ignores unknown/stale keys from the preference", () => {
+    const out = applyNavOrder(adminGroups, ["ghost-tab", "accounting", "overview"]);
+    expect(out.map((g) => g.key)).toEqual([
+      "accounting",
+      "overview",
+      ...defaultKeys.filter((k) => k !== "accounting" && k !== "overview"),
+    ]);
+  });
+
+  it("appends newly shipped groups missing from the preference in default order", () => {
+    const partial = ["settings", "dispatch"];
+    const out = applyNavOrder(adminGroups, partial).map((g) => g.key);
+    expect(out.slice(0, 2)).toEqual(partial);
+    expect(out).toHaveLength(defaultKeys.length);
+    expect(out.slice(2)).toEqual(defaultKeys.filter((k) => !partial.includes(k)));
+  });
+
+  it("drops duplicate keys, keeping the first occurrence", () => {
+    const out = applyNavOrder(adminGroups, ["accounting", "accounting", "overview"]);
+    expect(out.map((g) => g.key).filter((k) => k === "accounting")).toHaveLength(1);
+    expect(out).toHaveLength(defaultKeys.length);
+  });
+
+  it("never loses or invents a group", () => {
+    const out = applyNavOrder(adminGroups, ["hr", "nonsense", "hr", "settings"]);
+    expect([...out.map((g) => g.key)].sort()).toEqual([...defaultKeys].sort());
   });
 });
 

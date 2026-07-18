@@ -16,7 +16,7 @@ import { Label } from "@/components/ui/label";
 import { Link } from "wouter";
 import { type TableDescriptor, type Field, singularize } from "@/lib/tables";
 import { api, fetchWithAuth, ApiError } from "@/lib/api";
-import { formatCell } from "@/lib/format";
+import { formatCell, formatDateTime } from "@/lib/format";
 import { useFkOptions } from "@/lib/fk";
 import { openSignedObject } from "@/lib/upload";
 import { RowFormDialog } from "./RowFormDialog";
@@ -190,14 +190,6 @@ export function DataGrid({
   const isIncidents = descriptor.name === "incidents";
   const isSites = descriptor.name === "sites";
   const isClients = descriptor.name === "clients";
-  const isSalesLeads = descriptor.name === "sales_leads";
-  const [convertTarget, setConvertTarget] = useState<Row | null>(null);
-  const [convertBusy, setConvertBusy] = useState(false);
-  const [convertError, setConvertError] = useState<string | null>(null);
-  const [convertResult, setConvertResult] = useState<{
-    client: { id: string; name: string };
-    lead: { id: string; companyName: string };
-  } | null>(null);
   const [inviteTarget, setInviteTarget] = useState<Row | null>(null);
   const [inviteForm, setInviteForm] = useState({ email: "", firstName: "", lastName: "" });
   const [inviteBusy, setInviteBusy] = useState(false);
@@ -340,28 +332,6 @@ export function DataGrid({
       setInviteError((e as Error).message);
     } finally {
       setInviteBusy(false);
-    }
-  }
-
-  async function confirmConvert() {
-    if (!convertTarget) return;
-    setConvertBusy(true);
-    setConvertError(null);
-    try {
-      const res = await api<{
-        client: { id: string; name: string };
-        lead: { id: string; companyName: string };
-      }>(`/admin/sales-leads/${String((convertTarget as any).id)}/convert`, {
-        method: "POST",
-        body: {},
-      });
-      setConvertResult(res);
-      setConvertTarget(null);
-      load();
-    } catch (e) {
-      setConvertError((e as Error).message);
-    } finally {
-      setConvertBusy(false);
     }
   }
 
@@ -592,34 +562,6 @@ export function DataGrid({
           <UserPlus className="w-3.5 h-3.5 mr-1" />
           Invite portal user
         </Button>
-      )}
-      {isSalesLeads && (
-        (r as any).convertedClientId ? (
-          <Link href={`/tables/clients?focus=${String((r as any).convertedClientId)}`}>
-            <Button
-              variant="outline"
-              size="sm"
-              className="mr-1 h-8"
-              title="View the client created from this lead"
-              aria-label="View converted client"
-            >
-              <ExternalLink className="w-3.5 h-3.5 mr-1" />
-              View client
-            </Button>
-          </Link>
-        ) : (r as any).status === "won" ? (
-          <Button
-            variant="outline"
-            size="sm"
-            className="mr-1 h-8"
-            onClick={() => { setConvertError(null); setConvertTarget(r); }}
-            title="Create a client account from this lead"
-            aria-label="Convert lead to client"
-          >
-            <UserPlus className="w-3.5 h-3.5 mr-1" />
-            Convert to client
-          </Button>
-        ) : null
       )}
       <Button variant="ghost" size="icon" onClick={() => setEditing(r)} title="Edit" aria-label={`Edit ${singularize(descriptor.label).toLowerCase()}`}>
         <Pencil className="w-4 h-4" />
@@ -906,7 +848,7 @@ export function DataGrid({
           </AlertDialogHeader>
           <div className="text-xs text-muted-foreground bg-muted/40 rounded p-2 border">
             {revokeTarget?.lastActiveAt
-              ? <>Last active: <b>{new Date(String(revokeTarget.lastActiveAt)).toLocaleString()}</b> — this account is currently signed in somewhere.</>
+              ? <>Last active: <b>{formatDateTime(String(revokeTarget.lastActiveAt))}</b> — this account is currently signed in somewhere.</>
               : <>This account has no recorded activity yet — they may not be signed in anywhere right now.</>}
           </div>
           {revokeError && (
@@ -939,7 +881,7 @@ export function DataGrid({
             <div className="text-sm space-y-2">
               <p>
                 All active sessions for <b>{revokeDone.email}</b> were invalidated at{" "}
-                {new Date(revokeDone.revokedAt).toLocaleString()}.
+                {formatDateTime(revokeDone.revokedAt)}.
               </p>
               <p className="text-muted-foreground">
                 Their next request from any device will return 401 and force a fresh sign-in.
@@ -1079,61 +1021,6 @@ export function DataGrid({
               )}
             </div>
             <DialogFooter><Button onClick={() => setInviteResult(null)}>Done</Button></DialogFooter>
-          </DialogContent>
-        </Dialog>
-      )}
-
-      <AlertDialog open={!!convertTarget} onOpenChange={(b) => { if (!b && !convertBusy) setConvertTarget(null); }}>
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>Convert lead to client?</AlertDialogTitle>
-            <AlertDialogDescription>
-              This creates a new client account for{" "}
-              <b>{String((convertTarget as any)?.companyName ?? "this lead")}</b>, carrying over the
-              contact name, email, phone{(convertTarget as any)?.tier ? <> and the <b>{String((convertTarget as any)?.tier)}</b> tier</> : null}.
-              The lead is marked <b>Converted</b> and linked to the new client.
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          {convertError && (
-            <div className="text-sm text-destructive bg-destructive/5 p-2 rounded border border-destructive/20">
-              {convertError}
-            </div>
-          )}
-          <AlertDialogFooter>
-            <AlertDialogCancel disabled={convertBusy}>Cancel</AlertDialogCancel>
-            <AlertDialogAction
-              disabled={convertBusy}
-              onClick={(e) => { e.preventDefault(); void confirmConvert(); }}
-              className="bg-brand-navy text-white hover:opacity-90"
-            >
-              {convertBusy ? "Converting…" : "Convert to client"}
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
-
-      {convertResult && (
-        <Dialog open onOpenChange={(o) => { if (!o) setConvertResult(null); }}>
-          <DialogContent>
-            <DialogHeader>
-              <DialogTitle className="brand-wordmark text-xl">Client created</DialogTitle>
-              <DialogDescription className="sr-only">
-                Details of the client created from the converted sales lead.
-              </DialogDescription>
-            </DialogHeader>
-            <div className="space-y-3 text-sm">
-              <div>
-                <b>{convertResult.lead.companyName}</b> is now a client.{" "}
-                <Link
-                  href={`/tables/clients?focus=${convertResult.client.id}`}
-                  className="text-blue-700 hover:underline"
-                  onClick={() => setConvertResult(null)}
-                >
-                  Open client record
-                </Link>
-              </div>
-            </div>
-            <DialogFooter><Button onClick={() => setConvertResult(null)}>Done</Button></DialogFooter>
           </DialogContent>
         </Dialog>
       )}

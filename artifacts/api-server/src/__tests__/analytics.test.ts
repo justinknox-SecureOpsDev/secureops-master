@@ -1,19 +1,3 @@
-/**
- * Analytics engine + endpoints.
- *
- * Correctness anchors:
- *   - Money mirrors invoicing/payroll (billRate→site default; payRateOverride
- *     → shift payRate → employee rate; both sides get the 1.5× holiday
- *     premium rounded to cents first).
- *   - Punctuality on an OVERNIGHT shift (23:00–07:00 local) is judged against
- *     the absolute shift-start instant + 5min grace: 22:55 punctual, 23:20
- *     late, 06:50 (next morning, before shift end!) still late.
- *   - No-shows / unfilled shifts are judged against the wall clock (injected
- *     `now`), never shift.status.
- *
- * All seeded data hangs off a TAG client and every compute call passes that
- * clientId, so parallel suites can't pollute these aggregates.
- */
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import request from "supertest";
 import { randomUUID } from "node:crypto";
@@ -27,71 +11,87 @@ import {
   shiftsTable,
   shiftAssignmentsTable,
   timeEntriesTable,
+  payrollEntriesTable,
+  invoicesTable,
   incidentsTable,
 } from "@workspace/db";
 import app from "../app";
 import { signToken } from "../middlewares/auth";
-import {
-  computeAnalyticsSummary,
-  computeAnalyticsOfficers,
-  PUNCTUALITY_GRACE_MS,
-} from "../lib/analytics";
-import { startOfBusinessWeek, businessDateIso, businessDateToUtc } from "../lib/businessTime";
 
 const TAG = `analytics-test-${randomUUID().slice(0, 8)}`;
 const passwordHash = bcrypt.hashSync("test-password", 4);
-const TZ = "America/Chicago";
 
-// Week of Mon 2023-06-05 (no US federal holiday). The shift runs 23:00 Jun 5
-// → 07:00 Jun 6 local (CDT, UTC-5): 04:00Z–12:00Z on Jun 6.
-const SHIFT_START = new Date("2023-06-06T04:00:00.000Z");
-const SHIFT_END = new Date("2023-06-06T12:00:00.000Z"); // 8h
-const RANGE_START = businessDateToUtc("2023-06-05", TZ);
-const RANGE_END = businessDateToUtc("2023-06-12", TZ); // exclusive
-const NOW = new Date("2023-06-20T00:00:00.000Z"); // shift long over
+// Fixed, far-past date range so aggregates are not polluted by demo data or
+// other test suites (which all seed around the current week). 2009-03-02 is
+// a Monday; the whole seeded week is 2009-03-02 .. 2009-03-08.
+const RANGE_START = "2009-03-02";
+const RANGE_END = "2009-03-08";
+// A different far-past range guaranteed to contain no rows at all.
+const EMPTY_START = "2003-01-05";
+const EMPTY_END = "2003-01-11";
+// Wide range covering client A's week (03-02..08) AND client B's week
+// (03-09..15) — used to prove the clientId filter separates the two.
+const WIDE_START = "2009-03-02";
+const WIDE_END = "2009-03-15";
+const B_WEEK_START = "2009-03-09";
+const B_WEEK_END = "2009-03-15";
 
 type Ctx = {
   adminId: string;
+  employeeId: string;
+  officerAId: string;
+  officerBId: string;
   adminToken: string;
   employeeToken: string;
   clientId: string;
   siteId: string;
   shiftId: string;
-  officerA: string; // 22:55 clock-in — punctual
-  officerB: string; // 23:20 clock-in — late
-  officerC: string; // 06:50 next morning — late (ad-hoc, no assignment)
-  officerD: string; // accepted assignment, never clocked in — no-show
-  officerE: string; // exactly start+grace — punctual (boundary)
+  clientBId: string;
+  siteBId: string;
+  clientCId: string;
 };
 const ctx = {} as Ctx;
 
-const authed = (token: string) => ({ Authorization: `Bearer ${token}` });
-const range = () => ({ start: RANGE_START, end: RANGE_END, clientId: ctx.clientId, now: NOW });
+async function makeUser(role: "admin" | "employee", suffix: string): Promise<string> {
+  const [row] = await db
+    .insert(usersTable)
+    .values({
+      email: `${TAG}-${suffix}@example.test`,
+      passwordHash,
+      firstName: suffix,
+      lastName: TAG,
+      role,
+      status: "active",
+      tokensValidAfter: new Date(0),
+    })
+    .returning({ id: usersTable.id });
+  return row.id;
+}
+
+function authed(token: string) {
+  return { Authorization: `Bearer ${token}` };
+}
+
+// Shift: 9am–5pm US Central on Wed 2009-03-04 (Central = UTC-6 in March
+// before DST switch on Mar 8). 15:00Z–23:00Z, 8 hours, headcount 3.
+const shiftStart = new Date("2009-03-04T15:00:00.000Z");
+const shiftEnd = new Date("2009-03-04T23:00:00.000Z");
 
 beforeAll(async () => {
-  const mkUser = async (role: "admin" | "employee", suffix: string, first: string) => {
-    const [row] = await db
-      .insert(usersTable)
-      .values({
-        email: `${TAG}-${suffix}@example.test`,
-        passwordHash,
-        firstName: first,
-        lastName: TAG,
-        role,
-        status: "active",
-        tokensValidAfter: new Date(0),
-      })
-      .returning({ id: usersTable.id });
-    return row.id;
-  };
-  ctx.adminId = await mkUser("admin", "admin", "Admin");
-  ctx.officerA = await mkUser("employee", "a", "Alpha");
-  ctx.officerB = await mkUser("employee", "b", "Bravo");
-  ctx.officerC = await mkUser("employee", "c", "Charlie");
-  ctx.officerD = await mkUser("employee", "d", "Delta");
-  ctx.officerE = await mkUser("employee", "e", "Echo");
-  ctx.adminToken = signToken({ userId: ctx.adminId, email: `${TAG}-admin@example.test`, role: "admin" });
-  ctx.employeeToken = signToken({ userId: ctx.officerA, email: `${TAG}-a@example.test`, role: "employee" });
+  ctx.adminId = await makeUser("admin", "admin");
+  ctx.employeeId = await makeUser("employee", "emp");
+  ctx.officerAId = await makeUser("employee", "officer-a");
+  ctx.officerBId = await makeUser("employee", "officer-b");
+  ctx.adminToken = signToken({
+    userId: ctx.adminId,
+    email: `${TAG}-admin@example.test`,
+    role: "admin",
+  });
+  ctx.employeeToken = signToken({
+    userId: ctx.employeeId,
+    email: `${TAG}-emp@example.test`,
+    role: "employee",
+  });
 
   const [client] = await db
     .insert(clientsTable)
@@ -101,246 +101,472 @@ beforeAll(async () => {
 
   const [site] = await db
     .insert(sitesTable)
-    .values({ clientId: ctx.clientId, name: `${TAG}-site`, address: "1 Analytics Way" })
+    .values({
+      clientId: ctx.clientId,
+      name: `${TAG}-site`,
+      address: "100 Analytics Way",
+      defaultBillRate: "40.00",
+    })
     .returning({ id: sitesTable.id });
   ctx.siteId = site.id;
 
+  // Past shift, headcount 3: officer A works it (approved time entry),
+  // officer B accepts but never clocks in (no-show), third slot never
+  // filled (unfilled shift).
   const [shift] = await db
     .insert(shiftsTable)
     .values({
+      title: `${TAG}-shift`,
       siteId: ctx.siteId,
-      title: `${TAG}-overnight`,
-      startTime: SHIFT_START,
-      endTime: SHIFT_END,
-      payRate: "20.00",
+      startTime: shiftStart,
+      endTime: shiftEnd,
+      requiredLicenseLevel: 2,
+      headcount: 3,
+      status: "upcoming",
+      payRate: "25.00",
       billRate: "40.00",
-      headcount: 5, // 4 accepted below → 1 unfilled slot on an ended shift
     })
     .returning({ id: shiftsTable.id });
   ctx.shiftId = shift.id;
 
-  await db.insert(shiftAssignmentsTable).values(
-    [ctx.officerA, ctx.officerB, ctx.officerD, ctx.officerE].map((employeeId) => ({
-      shiftId: ctx.shiftId,
-      employeeId,
-      status: "accepted",
-    })),
-  );
-
-  const entry = (employeeId: string, clockIn: string, clockOut: string, hours: string) => ({
-    shiftId: ctx.shiftId,
-    siteId: ctx.siteId,
-    employeeId,
-    clockInTime: new Date(clockIn),
-    clockOutTime: new Date(clockOut),
-    hoursWorked: hours,
-    approvalStatus: "approved" as const,
-  });
-  await db.insert(timeEntriesTable).values([
-    // 22:55 local — 5min early → punctual.
-    entry(ctx.officerA, "2023-06-06T03:55:00.000Z", "2023-06-06T12:00:00.000Z", "8.00"),
-    // 23:20 local — 20min late → late.
-    entry(ctx.officerB, "2023-06-06T04:20:00.000Z", "2023-06-06T12:00:00.000Z", "7.50"),
-    // 06:50 local NEXT morning — inside the shift window but 7h50m after
-    // start → late (overnight shifts judge against start, not the date).
-    entry(ctx.officerC, "2023-06-06T11:50:00.000Z", "2023-06-06T12:00:00.000Z", "0.25"),
-    // Exactly start + grace → still punctual (boundary is inclusive).
-    entry(ctx.officerE, new Date(SHIFT_START.getTime() + PUNCTUALITY_GRACE_MS).toISOString(), "2023-06-06T08:05:00.000Z", "4.00"),
+  await db.insert(shiftAssignmentsTable).values([
+    { shiftId: ctx.shiftId, employeeId: ctx.officerAId, status: "accepted" },
+    { shiftId: ctx.shiftId, employeeId: ctx.officerBId, status: "accepted" },
   ]);
+
+  await db.insert(timeEntriesTable).values({
+    shiftId: ctx.shiftId,
+    employeeId: ctx.officerAId,
+    siteId: ctx.siteId,
+    clockInTime: shiftStart,
+    clockOutTime: shiftEnd,
+    hoursWorked: "8.00",
+    approvalStatus: "approved",
+  });
+
+  await db.insert(invoicesTable).values({
+    invoiceNumber: `${TAG}-INV-1`,
+    clientId: ctx.clientId,
+    siteId: ctx.siteId,
+    clientName: `${TAG}-client`,
+    periodStart: RANGE_START,
+    periodEnd: RANGE_END,
+    subtotal: "500.00",
+    totalAmount: "500.00",
+    status: "draft",
+    dueDate: "2009-03-22",
+  });
+
+  await db.insert(payrollEntriesTable).values({
+    employeeId: ctx.officerAId,
+    siteId: ctx.siteId,
+    periodStart: RANGE_START,
+    periodEnd: RANGE_END,
+    totalHours: "8.00",
+    hourlyRate: "25.00",
+    grossPay: "300.00",
+    netPay: "300.00",
+    status: "pending",
+  });
 
   await db.insert(incidentsTable).values({
     shiftId: ctx.shiftId,
-    employeeId: ctx.officerA,
+    employeeId: ctx.officerAId,
     title: `${TAG}-incident`,
-    description: "Gate found unlocked",
+    description: "Test incident for analytics aggregation",
     severity: "high",
     status: "open",
-    occurredAt: new Date("2023-06-06T05:00:00.000Z"),
+    occurredAt: new Date("2009-03-04T16:30:00.000Z"),
   });
+
+  // ── Client B: separate client/site with data in the FOLLOWING week ──
+  // (keeps the original single-week assertions above untouched while
+  // letting the wide-range tests prove the clientId filter separates them)
+  const [clientB] = await db
+    .insert(clientsTable)
+    .values({ name: `${TAG}-client-b`, paymentTermsDays: 30 })
+    .returning({ id: clientsTable.id });
+  ctx.clientBId = clientB.id;
+
+  const [siteB] = await db
+    .insert(sitesTable)
+    .values({
+      clientId: ctx.clientBId,
+      name: `${TAG}-site-b`,
+      address: "200 Analytics Way",
+      defaultBillRate: "50.00",
+    })
+    .returning({ id: sitesTable.id });
+  ctx.siteBId = siteB.id;
+
+  await db.insert(invoicesTable).values({
+    invoiceNumber: `${TAG}-INV-B`,
+    clientId: ctx.clientBId,
+    siteId: ctx.siteBId,
+    clientName: `${TAG}-client-b`,
+    periodStart: B_WEEK_START,
+    periodEnd: B_WEEK_END,
+    subtotal: "400.00",
+    totalAmount: "400.00",
+    status: "draft",
+    dueDate: "2009-04-08",
+  });
+
+  await db.insert(payrollEntriesTable).values({
+    employeeId: ctx.officerBId,
+    siteId: ctx.siteBId,
+    periodStart: B_WEEK_START,
+    periodEnd: B_WEEK_END,
+    totalHours: "4.00",
+    hourlyRate: "25.00",
+    grossPay: "100.00",
+    netPay: "100.00",
+    status: "pending",
+  });
+
+  // ── Client C: a client with NO sites at all ──
+  const [clientC] = await db
+    .insert(clientsTable)
+    .values({ name: `${TAG}-client-c`, paymentTermsDays: 14 })
+    .returning({ id: clientsTable.id });
+  ctx.clientCId = clientC.id;
 });
 
 afterAll(async () => {
-  await db.execute(sql`DELETE FROM incidents WHERE title = ${`${TAG}-incident`}`);
-  await db.execute(sql`DELETE FROM time_entries WHERE site_id = ${ctx.siteId}::uuid`);
-  await db.execute(sql`DELETE FROM shift_assignments WHERE shift_id = ${ctx.shiftId}::uuid`);
-  await db.execute(sql`DELETE FROM shifts WHERE site_id = ${ctx.siteId}::uuid`);
-  await db.execute(sql`DELETE FROM sites WHERE id = ${ctx.siteId}::uuid`);
-  await db.execute(sql`DELETE FROM clients WHERE id = ${ctx.clientId}::uuid`);
+  await db.execute(sql`DELETE FROM incidents WHERE title LIKE ${TAG + "%"}`);
+  await db.execute(
+    sql`DELETE FROM time_entries WHERE shift_id IN (SELECT id FROM shifts WHERE title LIKE ${TAG + "%"})`,
+  );
+  await db.execute(sql`DELETE FROM payroll_entries WHERE site_id = ${ctx.siteId}::uuid`);
+  await db.execute(sql`DELETE FROM payroll_entries WHERE site_id = ${ctx.siteBId}::uuid`);
+  await db.execute(sql`DELETE FROM invoices WHERE invoice_number LIKE ${TAG + "%"}`);
+  await db.execute(sql`DELETE FROM shifts WHERE title LIKE ${TAG + "%"}`);
+  await db.execute(sql`DELETE FROM sites WHERE name LIKE ${TAG + "%"}`);
+  await db.execute(sql`DELETE FROM clients WHERE name LIKE ${TAG + "%"}`);
   await db.execute(sql`DELETE FROM users WHERE last_name = ${TAG}`);
 });
 
-describe("business-week helpers", () => {
-  it("startOfBusinessWeek walks back to Monday in the business timezone", () => {
-    // Wed Jun 7 2023 18:00 local → Monday Jun 5.
-    const wed = new Date("2023-06-07T23:00:00.000Z");
-    expect(businessDateIso(startOfBusinessWeek(wed, TZ), TZ)).toBe("2023-06-05");
-    // A Monday maps to itself.
-    const mon = new Date("2023-06-05T12:00:00.000Z");
-    expect(businessDateIso(startOfBusinessWeek(mon, TZ), TZ)).toBe("2023-06-05");
-  });
-});
-
-describe("computeAnalyticsSummary", () => {
-  it("prices hours like invoicing/payroll and aggregates staffing + incidents", async () => {
-    const s = await computeAnalyticsSummary(range());
-
-    // 8 + 7.5 + 0.25 + 4 = 19.75h @ bill 40 / pay 20.
-    expect(s.hoursWorked).toBe(19.75);
-    expect(s.revenue).toBe(790);
-    expect(s.laborCost).toBe(395);
-    expect(s.pnl).toBe(395);
-    expect(s.marginPct).toBe(50);
-
-    // One 8h shift × headcount 5 = 40 scheduled hours.
-    expect(s.hoursScheduled).toBe(40);
-    expect(s.coveragePct).toBe(49.4); // 19.75 / 40
-
-    // Delta accepted but never produced a time entry on the ended shift.
-    expect(s.noShows).toBe(1);
-    // 4 accepted < headcount 5 on an ended shift.
-    expect(s.unfilledShifts).toBe(1);
-
-    expect(s.incidents).toEqual({
-      total: 1,
-      low: 0,
-      medium: 0,
-      high: 1,
-      critical: 0,
-      open: 1,
-      resolved: 0,
-    });
-
-    expect(s.weeklyTrend).toHaveLength(1);
-    expect(s.weeklyTrend[0]).toMatchObject({
-      weekStart: "2023-06-05",
-      hoursWorked: 19.75,
-      revenue: 790,
-      laborCost: 395,
-      pnl: 395,
-      incidentCount: 1,
-    });
-
-    expect(s.sites).toHaveLength(1);
-    expect(s.sites[0]).toMatchObject({
-      siteId: ctx.siteId,
-      siteName: `${TAG}-site`,
-      revenue: 790,
-      hoursWorked: 19.75,
-      coveragePct: 49.4,
-    });
-  });
-
-  it("treats a still-running shift as neither unfilled nor a no-show", async () => {
-    // `now` BEFORE the shift ends: nothing has "ended", so no gaps yet.
-    const s = await computeAnalyticsSummary({ ...range(), now: new Date("2023-06-06T05:00:00.000Z") });
-    expect(s.noShows).toBe(0);
-    expect(s.unfilledShifts).toBe(0);
-  });
-});
-
-describe("computeAnalyticsOfficers — overnight punctuality", () => {
-  it("judges punctuality against absolute shift start + 5min grace", async () => {
-    const rows = await computeAnalyticsOfficers(range());
-    const byName = new Map(rows.map((r) => [r.name.split(" ")[0], r]));
-
-    // 22:55 clock-in (5min early) → punctual.
-    expect(byName.get("Alpha")?.punctualityPct).toBe(100);
-    // 23:20 clock-in (20min late) → late.
-    expect(byName.get("Bravo")?.punctualityPct).toBe(0);
-    // 06:50 next morning — before shift END but hours after start → late.
-    expect(byName.get("Charlie")?.punctualityPct).toBe(0);
-    // Exactly at start + grace → punctual (inclusive boundary).
-    expect(byName.get("Echo")?.punctualityPct).toBe(100);
-    // Never clocked in → no punctuality sample at all.
-    expect(byName.has("Delta")).toBe(false);
-  });
-
-  it("aggregates hours, completed shifts, incidents and weekly trend per officer", async () => {
-    const rows = await computeAnalyticsOfficers(range());
-    // Sorted by hours desc.
-    expect(rows.map((r) => r.name.split(" ")[0])).toEqual(["Alpha", "Bravo", "Echo", "Charlie"]);
-
-    const alpha = rows[0]!;
-    expect(alpha.hoursWorked).toBe(8);
-    expect(alpha.shiftsCompleted).toBe(1); // ended shift + closed entry
-    expect(alpha.incidentsFiled).toBe(1);
-    expect(alpha.trend).toHaveLength(1);
-    expect(alpha.trend[0]).toEqual({ weekStart: "2023-06-05", hoursWorked: 8 });
-  });
-});
-
-describe("analytics endpoints", () => {
-  const qs = `start=2023-06-05&end=2023-06-11&clientId=`;
-
-  it("GET /analytics/summary requires admin", async () => {
-    const anon = await request(app).get(`/api/analytics/summary?${qs}${ctx.clientId}`);
-    expect(anon.status).toBe(401);
-    const emp = await request(app)
-      .get(`/api/analytics/summary?${qs}${ctx.clientId}`)
-      .set(authed(ctx.employeeToken));
-    expect(emp.status).toBe(403);
-  });
-
-  it("GET /analytics/summary returns the aggregate for admins", async () => {
+describe("GET /analytics/summary — auth & validation", () => {
+  it("rejects unauthenticated requests (401)", async () => {
     const res = await request(app)
-      .get(`/api/analytics/summary?${qs}${ctx.clientId}`)
-      .set(authed(ctx.adminToken));
-    expect(res.status).toBe(200);
-    expect(res.body.revenue).toBe(790);
-    expect(res.body.weeklyTrend).toHaveLength(1);
+      .get("/api/analytics/summary")
+      .query({ start: RANGE_START, end: RANGE_END });
+    expect(res.status).toBe(401);
   });
 
-  it("GET /analytics/officers returns officer rows for admins", async () => {
+  it("rejects non-admin employees (403)", async () => {
     const res = await request(app)
-      .get(`/api/analytics/officers?${qs}${ctx.clientId}`)
-      .set(authed(ctx.adminToken));
-    expect(res.status).toBe(200);
-    expect(Array.isArray(res.body)).toBe(true);
-    expect(res.body[0].name).toContain("Alpha");
+      .get("/api/analytics/summary")
+      .set(authed(ctx.employeeToken))
+      .query({ start: RANGE_START, end: RANGE_END });
+    expect(res.status).toBe(403);
   });
 
-  it("rejects malformed or inverted or oversized ranges", async () => {
-    const bad = await request(app)
-      .get("/api/analytics/summary?start=06/05/2023&end=2023-06-11")
-      .set(authed(ctx.adminToken));
-    expect(bad.status).toBe(400);
-
-    const inverted = await request(app)
-      .get("/api/analytics/summary?start=2023-06-11&end=2023-06-05")
-      .set(authed(ctx.adminToken));
-    expect(inverted.status).toBe(400);
-
-    const oversized = await request(app)
-      .get("/api/analytics/summary?start=2020-01-01&end=2023-06-11")
-      .set(authed(ctx.adminToken));
-    expect(oversized.status).toBe(400);
-  });
-
-  it("POST /admin/analytics/export-csv streams an escaped CSV", async () => {
+  it("400 when start is missing", async () => {
     const res = await request(app)
-      .post("/api/admin/analytics/export-csv")
+      .get("/api/analytics/summary")
       .set(authed(ctx.adminToken))
-      .send({ start: "2023-06-05", end: "2023-06-11", clientId: ctx.clientId });
-    expect(res.status).toBe(200);
-    expect(res.headers["content-type"]).toContain("text/csv");
-    expect(res.text).toContain("Week of");
-    expect(res.text).toContain("790.00");
-    expect(res.text).toContain("Alpha");
+      .query({ end: RANGE_END });
+    expect(res.status).toBe(400);
+    expect(res.body.error).toMatch(/YYYY-MM-DD/);
   });
 
-  it("POST /admin/analytics/export-pdf streams a PDF", async () => {
+  it("400 when end is missing", async () => {
     const res = await request(app)
-      .post("/api/admin/analytics/export-pdf")
+      .get("/api/analytics/summary")
       .set(authed(ctx.adminToken))
+      .query({ start: RANGE_START });
+    expect(res.status).toBe(400);
+  });
+
+  it("400 when both params are missing", async () => {
+    const res = await request(app)
+      .get("/api/analytics/summary")
+      .set(authed(ctx.adminToken));
+    expect(res.status).toBe(400);
+  });
+
+  it("400 on malformed dates (US format)", async () => {
+    const res = await request(app)
+      .get("/api/analytics/summary")
+      .set(authed(ctx.adminToken))
+      .query({ start: "03/02/2009", end: "03/08/2009" });
+    expect(res.status).toBe(400);
+  });
+
+  it("400 on non-zero-padded dates", async () => {
+    const res = await request(app)
+      .get("/api/analytics/summary")
+      .set(authed(ctx.adminToken))
+      .query({ start: "2009-3-2", end: RANGE_END });
+    expect(res.status).toBe(400);
+  });
+
+  it("400 on a malformed clientId", async () => {
+    const res = await request(app)
+      .get("/api/analytics/summary")
+      .set(authed(ctx.adminToken))
+      .query({ start: RANGE_START, end: RANGE_END, clientId: "not-a-uuid" });
+    expect(res.status).toBe(400);
+    expect(res.body.error).toMatch(/clientId/);
+  });
+
+  it("404 on an unknown clientId", async () => {
+    const res = await request(app)
+      .get("/api/analytics/summary")
+      .set(authed(ctx.adminToken))
+      .query({ start: RANGE_START, end: RANGE_END, clientId: randomUUID() });
+    expect(res.status).toBe(404);
+    expect(res.body.error).toMatch(/Client not found/);
+  });
+});
+
+describe("GET /analytics/summary — empty range", () => {
+  it("returns zeros (not an error) when the range has no data", async () => {
+    const res = await request(app)
+      .get("/api/analytics/summary")
+      .set(authed(ctx.adminToken))
+      .query({ start: EMPTY_START, end: EMPTY_END });
+    expect(res.status).toBe(200);
+    expect(res.body.revenue).toBe(0);
+    expect(res.body.laborCost).toBe(0);
+    expect(res.body.profit).toBe(0);
+    expect(res.body.marginPct).toBe(0);
+    expect(res.body.hoursWorked).toBe(0);
+    expect(res.body.hoursScheduled).toBe(0);
+    expect(res.body.coveragePct).toBe(0);
+    expect(res.body.noShowCount).toBe(0);
+    expect(res.body.unfilledCount).toBe(0);
+    expect(res.body.missedShifts).toEqual([]);
+    expect(res.body.incidentTotal).toBe(0);
+    expect(res.body.incidentsBySeverity).toEqual({ low: 0, medium: 0, high: 0, critical: 0 });
+    expect(res.body.incidentsByStatus).toEqual({ open: 0, investigating: 0, closed: 0 });
+    expect(res.body.pnlTrend).toEqual([]);
+    expect(res.body.hoursTrend).toEqual([]);
+    expect(res.body.incidentTrend).toEqual([]);
+    expect(res.body.perSite).toEqual([]);
+  });
+});
+
+describe("GET /analytics/summary — seeded week", () => {
+  it("returns the full response shape with correct aggregates", async () => {
+    const res = await request(app)
+      .get("/api/analytics/summary")
+      .set(authed(ctx.adminToken))
+      .query({ start: RANGE_START, end: RANGE_END });
+    expect(res.status).toBe(200);
+    const b = res.body;
+
+    // P&L
+    expect(b.revenue).toBe(500);
+    expect(b.laborCost).toBe(300);
+    expect(b.profit).toBe(200);
+    expect(b.marginPct).toBeCloseTo(40, 5);
+
+    // Hours: 8h worked, 8h * headcount 3 = 24h scheduled
+    expect(b.hoursWorked).toBe(8);
+    expect(b.hoursScheduled).toBe(24);
+    expect(b.coveragePct).toBeCloseTo((8 / 24) * 100, 5);
+
+    // Missed-shift metrics: officer B no-showed, one headcount slot unfilled
+    expect(b.noShowCount).toBe(1);
+    expect(b.unfilledCount).toBe(1);
+    expect(b.missedShifts).toHaveLength(1);
+    const missed = b.missedShifts[0];
+    expect(missed.shiftId).toBe(ctx.shiftId);
+    expect(missed.siteId).toBe(ctx.siteId);
+    expect(missed.siteName).toBe(`${TAG}-site`);
+    expect(missed.headcount).toBe(3);
+    expect(missed.filled).toBe(2);
+    expect(missed.noShows).toBe(1);
+    expect(missed.startTime).toBe(shiftStart.toISOString());
+    expect(missed.endTime).toBe(shiftEnd.toISOString());
+
+    // Incidents
+    expect(b.incidentTotal).toBe(1);
+    expect(b.incidentsBySeverity).toEqual({ low: 0, medium: 0, high: 1, critical: 0 });
+    expect(b.incidentsByStatus).toEqual({ open: 1, investigating: 0, closed: 0 });
+
+    // Trends: everything seeded falls in the week of Mon 2009-03-02, which is
+    // ISO week 2009-W10. Revenue/labor (date-only periodStart), hours (SQL
+    // timezone-aware date_trunc) and incidents must all land in the SAME
+    // bucket — a mismatch here means periodStart dates are being re-interpreted
+    // through a timezone again.
+    expect(b.pnlTrend).toEqual([
+      { bucket: "2009-W10", revenue: 500, laborCost: 300, profit: 200 },
+    ]);
+    expect(b.hoursTrend).toEqual([{ bucket: "2009-W10", worked: 8, scheduled: 24 }]);
+    expect(b.incidentTrend).toEqual([{ bucket: "2009-W10", count: 1 }]);
+
+    // Per-site breakdown
+    expect(Array.isArray(b.perSite)).toBe(true);
+    const site = b.perSite.find((s: any) => s.siteId === ctx.siteId);
+    expect(site).toBeTruthy();
+    expect(site.siteName).toBe(`${TAG}-site`);
+    expect(site.revenue).toBe(500);
+    expect(site.laborCost).toBe(300);
+    expect(site.profit).toBe(200);
+    expect(site.hoursWorked).toBe(8);
+    expect(site.hoursScheduled).toBe(24);
+    expect(site.noShows).toBe(1);
+    expect(site.unfilledShifts).toBe(1);
+    expect(site.incidents).toBe(1);
+  });
+
+  it("handles a single-day range (start === end)", async () => {
+    // 2009-03-04: the shift, time entry, and incident all fall on this
+    // business day, but the invoice/payroll periodStart (Mon 03-02) do not.
+    const res = await request(app)
+      .get("/api/analytics/summary")
+      .set(authed(ctx.adminToken))
+      .query({ start: "2009-03-04", end: "2009-03-04" });
+    expect(res.status).toBe(200);
+    const b = res.body;
+    expect(b.revenue).toBe(0);
+    expect(b.laborCost).toBe(0);
+    expect(b.hoursWorked).toBe(8);
+    expect(b.hoursScheduled).toBe(24);
+    expect(b.incidentTotal).toBe(1);
+    expect(b.noShowCount).toBe(1);
+    expect(b.missedShifts).toHaveLength(1);
+  });
+
+  it("excludes data just outside the range boundary", async () => {
+    // Day before the shift: nothing operational should appear.
+    const res = await request(app)
+      .get("/api/analytics/summary")
+      .set(authed(ctx.adminToken))
+      .query({ start: "2009-03-03", end: "2009-03-03" });
+    expect(res.status).toBe(200);
+    expect(res.body.hoursWorked).toBe(0);
+    expect(res.body.hoursScheduled).toBe(0);
+    expect(res.body.incidentTotal).toBe(0);
+    expect(res.body.missedShifts).toEqual([]);
+  });
+});
+
+describe("GET /analytics/summary — clientId filter", () => {
+  it("wide range without a filter includes both clients", async () => {
+    const res = await request(app)
+      .get("/api/analytics/summary")
+      .set(authed(ctx.adminToken))
+      .query({ start: WIDE_START, end: WIDE_END });
+    expect(res.status).toBe(200);
+    expect(res.body.revenue).toBe(900); // 500 (A) + 400 (B)
+    expect(res.body.laborCost).toBe(400); // 300 (A) + 100 (B)
+    const siteIds = res.body.perSite.map((s: any) => s.siteId);
+    expect(siteIds).toContain(ctx.siteId);
+    expect(siteIds).toContain(ctx.siteBId);
+  });
+
+  it("filters every section to client A only", async () => {
+    const res = await request(app)
+      .get("/api/analytics/summary")
+      .set(authed(ctx.adminToken))
+      .query({ start: WIDE_START, end: WIDE_END, clientId: ctx.clientId });
+    expect(res.status).toBe(200);
+    const b = res.body;
+    expect(b.revenue).toBe(500);
+    expect(b.laborCost).toBe(300);
+    expect(b.profit).toBe(200);
+    expect(b.hoursWorked).toBe(8);
+    expect(b.hoursScheduled).toBe(24);
+    expect(b.noShowCount).toBe(1);
+    expect(b.unfilledCount).toBe(1);
+    expect(b.incidentTotal).toBe(1);
+    // Trend totals reconcile with the filtered aggregates
+    const trendRevenue = b.pnlTrend.reduce((s: number, r: any) => s + r.revenue, 0);
+    const trendLabor = b.pnlTrend.reduce((s: number, r: any) => s + r.laborCost, 0);
+    expect(trendRevenue).toBe(500);
+    expect(trendLabor).toBe(300);
+    // Per-site list contains ONLY client A's site
+    expect(b.perSite.map((s: any) => s.siteId)).toEqual([ctx.siteId]);
+    expect(b.missedShifts.every((m: any) => m.siteId === ctx.siteId)).toBe(true);
+  });
+
+  it("filters to client B only (no operational data, just financials)", async () => {
+    const res = await request(app)
+      .get("/api/analytics/summary")
+      .set(authed(ctx.adminToken))
+      .query({ start: WIDE_START, end: WIDE_END, clientId: ctx.clientBId });
+    expect(res.status).toBe(200);
+    const b = res.body;
+    expect(b.revenue).toBe(400);
+    expect(b.laborCost).toBe(100);
+    expect(b.hoursWorked).toBe(0);
+    expect(b.hoursScheduled).toBe(0);
+    expect(b.noShowCount).toBe(0);
+    expect(b.incidentTotal).toBe(0);
+    expect(b.perSite.map((s: any) => s.siteId)).toEqual([ctx.siteBId]);
+  });
+
+  it("a client with no sites yields an all-zero summary", async () => {
+    const res = await request(app)
+      .get("/api/analytics/summary")
+      .set(authed(ctx.adminToken))
+      .query({ start: WIDE_START, end: WIDE_END, clientId: ctx.clientCId });
+    expect(res.status).toBe(200);
+    expect(res.body.revenue).toBe(0);
+    expect(res.body.laborCost).toBe(0);
+    expect(res.body.hoursWorked).toBe(0);
+    expect(res.body.incidentTotal).toBe(0);
+    expect(res.body.perSite).toEqual([]);
+  });
+});
+
+describe("analytics exports — clientId filter", () => {
+  it("CSV export includes the client slug in the filename and a Client row", async () => {
+    const res = await request(app)
+      .get("/api/analytics/export.csv")
+      .set(authed(ctx.adminToken))
+      .query({ start: WIDE_START, end: WIDE_END, clientId: ctx.clientId });
+    expect(res.status).toBe(200);
+    const slug = `${TAG}-client`.toLowerCase().replace(/[^a-z0-9]+/g, "-").slice(0, 40);
+    expect(res.headers["content-disposition"]).toBe(
+      `attachment; filename="wcsg-analytics-${slug}-${WIDE_START}_${WIDE_END}.csv"`,
+    );
+    expect(res.text).toContain(`Client,${TAG}-client`);
+    expect(res.text).toContain("Revenue (USD),500.00");
+    expect(res.text).not.toContain(`${TAG}-site-b`);
+  });
+
+  it("CSV export without a client keeps the original filename", async () => {
+    const res = await request(app)
+      .get("/api/analytics/export.csv")
+      .set(authed(ctx.adminToken))
+      .query({ start: RANGE_START, end: RANGE_END });
+    expect(res.status).toBe(200);
+    expect(res.headers["content-disposition"]).toBe(
+      `attachment; filename="wcsg-analytics-${RANGE_START}_${RANGE_END}.csv"`,
+    );
+    expect(res.text).not.toContain("\r\nClient,");
+  });
+
+  it("CSV export 404s on an unknown clientId", async () => {
+    const res = await request(app)
+      .get("/api/analytics/export.csv")
+      .set(authed(ctx.adminToken))
+      .query({ start: RANGE_START, end: RANGE_END, clientId: randomUUID() });
+    expect(res.status).toBe(404);
+  });
+
+  it("PDF export includes the client slug in the filename", async () => {
+    const res = await request(app)
+      .get("/api/analytics/export.pdf")
+      .set(authed(ctx.adminToken))
+      .query({ start: WIDE_START, end: WIDE_END, clientId: ctx.clientBId })
       .buffer(true)
       .parse((r, cb) => {
         const chunks: Buffer[] = [];
         r.on("data", (c: Buffer) => chunks.push(c));
         r.on("end", () => cb(null, Buffer.concat(chunks)));
-      })
-      .send({ start: "2023-06-05", end: "2023-06-11", clientId: ctx.clientId });
+      });
     expect(res.status).toBe(200);
     expect(res.headers["content-type"]).toContain("application/pdf");
+    const slugB = `${TAG}-client-b`;
+    expect(res.headers["content-disposition"]).toBe(
+      `attachment; filename="wcsg-analytics-${slugB}-${WIDE_START}_${WIDE_END}.pdf"`,
+    );
     expect((res.body as Buffer).subarray(0, 5).toString()).toBe("%PDF-");
   });
 });

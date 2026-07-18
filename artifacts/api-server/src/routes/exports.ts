@@ -1,6 +1,7 @@
 import { Router, type IRouter } from "express";
 import { z } from "zod/v4";
-import { and, asc, desc, eq, gte, lte, sql, max, type SQL } from "drizzle-orm";
+import { and, asc, desc, eq, gte, inArray, lte, sql, max, type SQL } from "drizzle-orm";
+import { WORKER_ROLES } from "../lib/eligibility";
 import PDFDocument from "pdfkit";
 import {
   db,
@@ -19,10 +20,8 @@ import { requireAdmin } from "../middlewares/auth";
 import { exportLimiter } from "../middlewares/rateLimit";
 import { logger } from "../lib/logger";
 import { brand as _brand } from "../lib/brandConfig";
-import { isFeatureEnabled, requireFeature, type FeatureKey } from "../lib/features";
 
 const router: IRouter = Router();
-router.use("/admin/exports", requireFeature("exports"));
 
 // -----------------------------------------------------------------------
 // Exports center
@@ -552,7 +551,7 @@ const officersDataset: Dataset = {
 };
 
 function officersWhere(f: ExportFilters): SQL | undefined {
-  const conds: SQL[] = [eq(usersTable.role, "employee")];
+  const conds: SQL[] = [inArray(usersTable.role, [...WORKER_ROLES])];
   const from = parseDateBound(f.from, false);
   const to = parseDateBound(f.to, true);
   if (from) conds.push(gte(usersTable.createdAt, from));
@@ -642,42 +641,6 @@ const DATASETS: Record<DatasetId, Dataset> = {
   applications: applicationsDataset,
 };
 
-// Cross-domain feature gating. Some export datasets pull data straight out
-// of a feature-gated domain (payroll, incidents, HR). The dedicated routers
-// (payroll/invoices/incidents/applications) already 403 when their flag is
-// off, but the Exports center is its own `exports`-gated router — so without
-// this map an admin on a plan that disables payroll could still pull every
-// payroll row out via /admin/exports. Map each dataset to the feature whose
-// data it surfaces; `null` means it's core (shifts/time-entries/officers ship
-// in every tier). A disabled feature here returns the same feature-disabled
-// 403 the underlying router would, so the data never leaks through exports.
-const DATASET_FEATURE: Record<DatasetId, FeatureKey | null> = {
-  shifts: null,
-  time_entries: null,
-  payroll_entries: "payroll",
-  incidents: "incidents",
-  officers: null,
-  applications: "hr",
-};
-
-/**
- * If the requested dataset belongs to a disabled feature, write the
- * feature-disabled 403 (same shape as `requireFeature`) and return true so
- * the caller can short-circuit. Returns false when the dataset is allowed.
- */
-function blockedByFeature(ds: Dataset, res: import("express").Response): boolean {
-  const feature = DATASET_FEATURE[ds.id];
-  if (feature && !isFeatureEnabled(feature)) {
-    res.status(403).json({
-      error: "Forbidden",
-      message: `Feature '${feature}' is not enabled in this deployment.`,
-      feature,
-    });
-    return true;
-  }
-  return false;
-}
-
 // ---------- PDF render ----------------------------------------------
 
 const NAVY  = _brand.colorNavy;
@@ -741,7 +704,7 @@ function renderPdf(
     for (let i = 0; i < range.count; i++) {
       doc.switchToPage(range.start + i);
       doc.fillColor(MUTED).font("Helvetica").fontSize(8).text(
-        `Generated ${new Date().toLocaleString()} · ${_brand.companyName} · Confidential · page ${i + 1} of ${range.count}`,
+        `Generated ${new Date().toLocaleString("en-US", { timeZone: "America/Chicago" })} · ${_brand.companyName} · Confidential · page ${i + 1} of ${range.count}`,
         usableLeft, pageHeight - 24,
         { width: usableWidth, align: "center", lineBreak: false },
       );
@@ -853,7 +816,6 @@ router.post("/admin/exports/preview", requireAdmin, exportLimiter, async (req, r
     return;
   }
   const ds = DATASETS[parsed.data.dataset];
-  if (blockedByFeature(ds, res)) return;
   try {
     const [count, sample] = await Promise.all([
       ds.count(parsed.data.filters),
@@ -887,7 +849,6 @@ router.post("/admin/exports/csv", requireAdmin, exportLimiter, async (req, res):
     return;
   }
   const ds = DATASETS[parsed.data.dataset];
-  if (blockedByFeature(ds, res)) return;
   try {
     const count = await ds.count(parsed.data.filters);
     if (count > MAX_CSV_ROWS) {
@@ -923,7 +884,6 @@ router.post("/admin/exports/pdf", requireAdmin, exportLimiter, async (req, res):
     return;
   }
   const ds = DATASETS[parsed.data.dataset];
-  if (blockedByFeature(ds, res)) return;
   try {
     const count = await ds.count(parsed.data.filters);
     if (count > MAX_PDF_ROWS) {

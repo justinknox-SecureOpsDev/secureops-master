@@ -11,7 +11,7 @@ import {
 import { Feather } from "@expo/vector-icons";
 import { useRouter } from "expo-router";
 import { useQueryClient } from "@tanstack/react-query";
-import { FeatureGate } from "@/components/FeatureGate";
+import { formatDate } from "@/utils/time";
 
 function getISOWeekStart(d: Date): string {
   const day = d.getUTCDay();
@@ -23,14 +23,6 @@ function getISOWeekStart(d: Date): string {
 const FILTERS = ["draft", "sent", "paid", "overdue"] as const;
 
 export default function AdminInvoicesScreen() {
-  return (
-    <FeatureGate feature="invoicing">
-      <AdminInvoicesScreenInner />
-    </FeatureGate>
-  );
-}
-
-function AdminInvoicesScreenInner() {
   const colors = useColors();
   const router = useRouter();
   const queryClient = useQueryClient();
@@ -199,7 +191,7 @@ function AdminInvoicesScreenInner() {
                 <View style={styles.dateRow}>
                   <Feather name="calendar" size={12} color={colors.mutedForeground} />
                   <Text style={{ color: colors.mutedForeground, fontSize: 12 }}>
-                    Created {item.createdAt ? new Date(item.createdAt).toLocaleDateString() : "—"}
+                    Created {item.createdAt ? formatDate(item.createdAt, { month: "short", day: "numeric", year: "numeric" }) : "—"}
                   </Text>
                   <Feather name="clock" size={12} color={item.status === "overdue" ? colors.destructive : colors.mutedForeground} style={{ marginLeft: 8 }} />
                   <Text style={{ color: item.status === "overdue" ? colors.destructive : colors.mutedForeground, fontSize: 12 }}>

@@ -3,6 +3,7 @@ import { ChevronLeft, ChevronRight, RefreshCw, Filter, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { fetchWithAuth } from "@/lib/api";
+import { formatDateTime } from "@/lib/format";
 import { useIsMobile } from "@/hooks/use-mobile";
 
 type AuditLog = {
@@ -190,7 +191,7 @@ export default function AuditLogPage() {
                     </div>
                     <div className="grid grid-cols-3 gap-x-3 gap-y-1 text-sm">
                       <span className="text-muted-foreground text-xs">When</span>
-                      <span className="col-span-2 text-right text-xs text-muted-foreground">{new Date(r.createdAt).toLocaleString()}</span>
+                      <span className="col-span-2 text-right text-xs text-muted-foreground">{formatDateTime(r.createdAt)}</span>
                       <span className="text-muted-foreground text-xs">Actor</span>
                       <span className="col-span-2 text-right">
                         <span className="font-medium">{r.actorEmail ?? "(anonymous)"}</span>
@@ -268,7 +269,7 @@ export default function AuditLogPage() {
                       className="border-t border-border hover:bg-muted/30 cursor-pointer"
                     >
                       <td className="px-3 py-2 whitespace-nowrap text-xs text-muted-foreground">
-                        {new Date(r.createdAt).toLocaleString()}
+                        {formatDateTime(r.createdAt)}
                       </td>
                       <td className="px-3 py-2">
                         <div className="font-medium">{r.actorEmail ?? "(anonymous)"}</div>

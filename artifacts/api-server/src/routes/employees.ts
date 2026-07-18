@@ -224,7 +224,7 @@ function projectForDispatcher<T extends Record<string, unknown>>(row: T): Partia
 
 router.get("/employees", requireSchedulingStaff, async (req, res): Promise<void> => {
   const { status, search } = req.query as { status?: string; search?: string };
-  // Both dispatchers and leads get the PII/finance-stripped projection — they
+  // Both dispatchers and site managers get the PII/finance-stripped projection — they
   // need the roster to staff shifts but must not see bank/SSN/etc.
   const isDispatcherOnly = req.user!.role === "dispatcher" || req.user!.role === "site_manager";
 
@@ -348,11 +348,11 @@ router.post("/employees", requireAdmin, async (req, res): Promise<void> => {
 
 router.get("/employees/:id", requireAuth, async (req, res): Promise<void> => {
   const id = Array.isArray(req.params.id) ? req.params.id[0] : req.params.id;
-  // Admins and dispatchers may read any employee; site managers may read any
-  // employee too (they reach this from the scheduling roster) but only see the
+  // Admins and dispatchers may read any employee; site managers may read any employee
+  // too (they reach this from the scheduling roster) but only see the
   // operational-safe subset for OTHERS — finance/PII is stripped below. Plain
-  // employees may only read their own row. A site manager's self-read returns
-  // the full record (see the projection branch below).
+  // employees may only read their own row. Site-manager self-read returns the full
+  // record (see the projection branch below).
   if (
     req.user!.role !== "admin" &&
     req.user!.role !== "dispatcher" &&
@@ -388,12 +388,12 @@ router.get("/employees/:id", requireAuth, async (req, res): Promise<void> => {
     expiringLicenseCount: licenseCountsRaw[0]?.expiringSoon ?? 0,
     maxLicenseLevel: licenseCountsRaw[0]?.maxLevel ?? null,
   };
-  // Dispatcher AND site manager reading SOMEONE ELSE: only the operational-safe
-  // subset (no banking / tax / right-to-work / personal docs). Dispatchers
-  // deep-link here from the Dispatch panel; site managers reach it from the
-  // scheduling roster. A site manager is a full employee, so reading their OWN
-  // record returns the complete profile (own rate, banking, docs) exactly like
-  // a regular employee — only OTHER officers' PII/finance is stripped.
+  // Dispatcher AND site manager reading SOMEONE ELSE: only the operational-safe subset
+  // (no banking / tax / right-to-work / personal docs). Dispatchers deep-link
+  // here from the Dispatch panel; site managers reach it from the scheduling roster.
+  // A site manager is a full employee, so reading their OWN record returns the complete
+  // profile (own rate, banking, docs) exactly like a regular employee — only
+  // OTHER officers' PII/finance is stripped from a site manager.
   const isSiteManagerSelfRead = req.user!.role === "site_manager" && req.user!.userId === id;
   if ((req.user!.role === "dispatcher" || req.user!.role === "site_manager") && !isSiteManagerSelfRead) {
     res.json({

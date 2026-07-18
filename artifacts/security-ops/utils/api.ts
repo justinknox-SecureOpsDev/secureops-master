@@ -4,66 +4,33 @@ import { storage } from "@/utils/storage";
 import { AUTH_TOKEN_KEY } from "@/contexts/AuthContext";
 
 /**
- * Hardcoded production origin for the canonical SecureOps Command deployment
- * (which also hosts the central org directory). Used as:
- *   - the native fallback before an organization has been selected,
- *   - the base for resolving org codes via the central directory, and
- *   - the legacy default org for clients upgrading from a single-tenant build
- *     (see contexts/OrgContext legacy migration).
- *
- * Multi-org builds override this at runtime via setRuntimeApiOrigin() once the
- * user resolves their organization code through the central directory.
+ * Resolve the API origin in this priority:
+ *   1. EXPO_PUBLIC_API_BASE_URL — explicit override (already includes scheme,
+ *      e.g. "https://api.example.com" or "https://example.com/api").
+ *   2. EXPO_PUBLIC_DOMAIN — bare host injected by the Expo dev script
+ *      (= REPLIT_DEV_DOMAIN in dev). We add https:// and /api.
+ *   3. Hardcoded production fallback so a bundle that lost its env vars
+ *      (eg. an over-the-air JS update built without EXPO_PUBLIC_DOMAIN
+ *      set) still talks to the real API instead of "https://undefined/api".
  */
-export const DEFAULT_NATIVE_ORIGIN = "https://secureops-command.replit.app";
-
-/**
- * Native-only runtime override of the API base URL (full URL including the
- * trailing "/api"). Set once the selected organization is resolved. `null`
- * means "not yet selected" → fall back to DEFAULT_NATIVE_ORIGIN so a bundle
- * that lost its env vars still reaches a real API instead of "undefined".
- *
- * Web never uses this — it always talks to its own same origin.
- */
-let runtimeApiBaseUrl: string | null = null;
-
-function isReactNative(): boolean {
+function resolveApiBaseUrl(): string {
+  const HARDCODED_PROD = "https://security-operations-suite.replit.app/api";
+  // Web (browser) — use same origin so we are never cross-origin.
   // navigator.product === "ReactNative" tells us we are NOT in a real browser
-  // even when window/location are polyfilled by Expo on web.
-  return (
+  // even when window/location are polyfilled by Expo.
+  const isReactNative =
     typeof navigator !== "undefined" &&
-    (navigator as { product?: string }).product === "ReactNative"
-  );
-}
-
-/**
- * Point all subsequent native requests at a different backend.
- *
- * @param origin scheme + host only, NO path (e.g. "https://acme.example.app").
- *   Pass `null` to clear the override (falls back to DEFAULT_NATIVE_ORIGIN).
- *
- * Callers MUST pass an already-validated origin — see utils/orgConfig
- * `normalizeOrigin` (https-only in prod, origin-only, no path/query/fragment).
- */
-export function setRuntimeApiOrigin(origin: string | null): void {
-  runtimeApiBaseUrl = origin ? `${origin}/api` : null;
-}
-
-/**
- * Resolve the API base URL (including the trailing "/api") at CALL TIME.
- *
- *   - Web (real browser): same origin, so we are never cross-origin.
- *   - Native: the org-selected runtime origin, else the hardcoded WCSG prod
- *     origin (back-compat for the single-tenant build / OTA updates).
- *
- * Always resolved lazily so switching organizations takes effect immediately
- * across every consumer (REST, WS, PDF links, Orval client) with no re-wiring.
- */
-export function getApiBaseUrl(): string {
-  if (!isReactNative() && typeof window !== "undefined" && window.location?.origin) {
+    (navigator as any).product === "ReactNative";
+  if (!isReactNative && typeof window !== "undefined" && window.location?.origin) {
     return `${window.location.origin}/api`;
   }
-  return runtimeApiBaseUrl ?? `${DEFAULT_NATIVE_ORIGIN}/api`;
+  // Native — always return the hardcoded production URL. Env vars are
+  // intentionally ignored here because OTA updates have repeatedly shipped
+  // without EXPO_PUBLIC_* values inlined, breaking login.
+  return HARDCODED_PROD;
 }
+
+export const API_BASE_URL = resolveApiBaseUrl();
 
 export async function apiRequest(path: string, options: RequestInit = {}) {
   const token = await storage.get(AUTH_TOKEN_KEY);
@@ -74,7 +41,7 @@ export async function apiRequest(path: string, options: RequestInit = {}) {
   if (token) headers["Authorization"] = `Bearer ${token}`;
   let res: Response;
   try {
-    res = await fetch(`${getApiBaseUrl()}${path}`, { ...options, headers });
+    res = await fetch(`${API_BASE_URL}${path}`, { ...options, headers });
   } catch (e) {
     // React Native throws TypeError("Network request failed") for DNS failures,
     // bad URLs, and offline. Surface something the user can act on.
