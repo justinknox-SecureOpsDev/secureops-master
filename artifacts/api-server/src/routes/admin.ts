@@ -1822,13 +1822,13 @@ router.get("/admin/sites/:id/rates", requireAdmin, async (req, res): Promise<voi
 });
 
 // PUT /admin/sites/:id/rates — upsert a row by (siteId, licenseLevel).
-// Body: { licenseLevel: 2|3|4, payRate: number|string, billRate: number|string, label?: string }
+// Body: { licenseLevel: 1|2|3|4, payRate: number|string, billRate: number|string, label?: string }
 router.put("/admin/sites/:id/rates", requireAdmin, async (req, res): Promise<void> => {
   const siteId = req.params.id as string;
   const { licenseLevel, payRate, billRate, label } = req.body ?? {};
   const lvl = Number(licenseLevel);
-  if (![2, 3, 4].includes(lvl)) {
-    res.status(400).json({ error: "Bad Request", message: "licenseLevel must be 2, 3, or 4" });
+  if (![1, 2, 3, 4].includes(lvl)) {
+    res.status(400).json({ error: "Bad Request", message: "licenseLevel must be 1, 2, 3, or 4" });
     return;
   }
   const pay = Number(payRate);

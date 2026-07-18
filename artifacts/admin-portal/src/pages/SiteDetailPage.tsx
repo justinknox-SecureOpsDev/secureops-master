@@ -1460,6 +1460,7 @@ type SiteRateRow = {
 };
 
 const LEVEL_OPTIONS: { value: number; name: string }[] = [
+  { value: 1, name: "Support Staff" },
   { value: 2, name: "L2 Unarmed" },
   { value: 3, name: "L3 Armed" },
   { value: 4, name: "L4 / PPO" },
