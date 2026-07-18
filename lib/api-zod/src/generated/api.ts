@@ -409,6 +409,10 @@ export const LoginBody = zod.object({
   password: zod.string(),
 });
 
+export const loginResponseUserUiPreferencesNavGroupOrderItemMax = 40;
+
+export const loginResponseUserUiPreferencesNavGroupOrderMax = 30;
+
 export const LoginResponse = zod.object({
   token: zod.string(),
   user: zod.object({
@@ -437,6 +441,24 @@ export const LoginResponse = zod.object({
         "True when the user must sign\/acknowledge company policies before accessing the mobile app (non-admin staff only).",
       ),
     createdAt: zod.coerce.date(),
+    uiPreferences: zod
+      .object({
+        navGroupOrder: zod
+          .array(
+            zod
+              .string()
+              .max(loginResponseUserUiPreferencesNavGroupOrderItemMax),
+          )
+          .max(loginResponseUserUiPreferencesNavGroupOrderMax)
+          .optional()
+          .describe(
+            "Preferred order of portal nav group keys. Unknown keys are ignored; missing groups append in default order.",
+          ),
+      })
+      .optional()
+      .describe(
+        "Per-user UI personalization. Cosmetic only — never authorization.",
+      ),
   }),
 });
 
@@ -456,6 +478,10 @@ export const ChangePasswordBody = zod.object({
   currentPassword: zod.string(),
   newPassword: zod.string().min(changePasswordBodyNewPasswordMin),
 });
+
+export const changePasswordResponseUserUiPreferencesNavGroupOrderItemMax = 40;
+
+export const changePasswordResponseUserUiPreferencesNavGroupOrderMax = 30;
 
 export const ChangePasswordResponse = zod.object({
   token: zod.string(),
@@ -485,6 +511,24 @@ export const ChangePasswordResponse = zod.object({
         "True when the user must sign\/acknowledge company policies before accessing the mobile app (non-admin staff only).",
       ),
     createdAt: zod.coerce.date(),
+    uiPreferences: zod
+      .object({
+        navGroupOrder: zod
+          .array(
+            zod
+              .string()
+              .max(changePasswordResponseUserUiPreferencesNavGroupOrderItemMax),
+          )
+          .max(changePasswordResponseUserUiPreferencesNavGroupOrderMax)
+          .optional()
+          .describe(
+            "Preferred order of portal nav group keys. Unknown keys are ignored; missing groups append in default order.",
+          ),
+      })
+      .optional()
+      .describe(
+        "Per-user UI personalization. Cosmetic only — never authorization.",
+      ),
   }),
 });
 
@@ -657,6 +701,10 @@ export const ResetPasswordBody = zod.object({
   newPassword: zod.string().min(resetPasswordBodyNewPasswordMin),
 });
 
+export const resetPasswordResponseUserUiPreferencesNavGroupOrderItemMax = 40;
+
+export const resetPasswordResponseUserUiPreferencesNavGroupOrderMax = 30;
+
 export const ResetPasswordResponse = zod.object({
   token: zod.string(),
   user: zod.object({
@@ -685,12 +733,34 @@ export const ResetPasswordResponse = zod.object({
         "True when the user must sign\/acknowledge company policies before accessing the mobile app (non-admin staff only).",
       ),
     createdAt: zod.coerce.date(),
+    uiPreferences: zod
+      .object({
+        navGroupOrder: zod
+          .array(
+            zod
+              .string()
+              .max(resetPasswordResponseUserUiPreferencesNavGroupOrderItemMax),
+          )
+          .max(resetPasswordResponseUserUiPreferencesNavGroupOrderMax)
+          .optional()
+          .describe(
+            "Preferred order of portal nav group keys. Unknown keys are ignored; missing groups append in default order.",
+          ),
+      })
+      .optional()
+      .describe(
+        "Per-user UI personalization. Cosmetic only — never authorization.",
+      ),
   }),
 });
 
 /**
  * @summary Get current user
  */
+export const getMeResponseUiPreferencesNavGroupOrderItemMax = 40;
+
+export const getMeResponseUiPreferencesNavGroupOrderMax = 30;
+
 export const GetMeResponse = zod.object({
   id: zod.string(),
   email: zod.string(),
@@ -717,6 +787,20 @@ export const GetMeResponse = zod.object({
       "True when the user must sign\/acknowledge company policies before accessing the mobile app (non-admin staff only).",
     ),
   createdAt: zod.coerce.date(),
+  uiPreferences: zod
+    .object({
+      navGroupOrder: zod
+        .array(zod.string().max(getMeResponseUiPreferencesNavGroupOrderItemMax))
+        .max(getMeResponseUiPreferencesNavGroupOrderMax)
+        .optional()
+        .describe(
+          "Preferred order of portal nav group keys. Unknown keys are ignored; missing groups append in default order.",
+        ),
+    })
+    .optional()
+    .describe(
+      "Per-user UI personalization. Cosmetic only — never authorization.",
+    ),
 });
 
 /**
@@ -4857,6 +4941,10 @@ export const AcknowledgePoliciesBody = zod.object({
     ),
 });
 
+export const acknowledgePoliciesResponseUiPreferencesNavGroupOrderItemMax = 40;
+
+export const acknowledgePoliciesResponseUiPreferencesNavGroupOrderMax = 30;
+
 export const AcknowledgePoliciesResponse = zod.object({
   id: zod.string(),
   email: zod.string(),
@@ -4883,6 +4971,24 @@ export const AcknowledgePoliciesResponse = zod.object({
       "True when the user must sign\/acknowledge company policies before accessing the mobile app (non-admin staff only).",
     ),
   createdAt: zod.coerce.date(),
+  uiPreferences: zod
+    .object({
+      navGroupOrder: zod
+        .array(
+          zod
+            .string()
+            .max(acknowledgePoliciesResponseUiPreferencesNavGroupOrderItemMax),
+        )
+        .max(acknowledgePoliciesResponseUiPreferencesNavGroupOrderMax)
+        .optional()
+        .describe(
+          "Preferred order of portal nav group keys. Unknown keys are ignored; missing groups append in default order.",
+        ),
+    })
+    .optional()
+    .describe(
+      "Per-user UI personalization. Cosmetic only — never authorization.",
+    ),
 });
 
 /**

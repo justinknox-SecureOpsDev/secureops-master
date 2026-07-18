@@ -137,6 +137,9 @@ export function userPayload(user: typeof usersTable.$inferSelect) {
     mustCompleteProfile: user.mustCompleteProfile,
     mustSignPolicies: user.mustSignPolicies,
     createdAt: user.createdAt,
+    // Cosmetic per-user personalization (e.g. saved nav tab order). Must be
+    // returned here or saved preferences vanish on the next page load.
+    uiPreferences: user.uiPreferences ?? undefined,
   };
 }
 

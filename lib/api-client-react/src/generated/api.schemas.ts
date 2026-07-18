@@ -188,6 +188,17 @@ export const UserStatus = {
   pending: "pending",
 } as const;
 
+/**
+ * Per-user UI personalization. Cosmetic only — never authorization.
+ */
+export interface UiPreferences {
+  /**
+   * Preferred order of portal nav group keys. Unknown keys are ignored; missing groups append in default order.
+   * @maxItems 30
+   */
+  navGroupOrder?: string[];
+}
+
 export interface User {
   id: string;
   email: string;
@@ -202,6 +213,7 @@ export interface User {
   /** True when the user must sign/acknowledge company policies before accessing the mobile app (non-admin staff only). */
   mustSignPolicies?: boolean;
   createdAt: string;
+  uiPreferences?: UiPreferences;
 }
 
 export interface AuthResponse {
@@ -787,17 +799,6 @@ export const UpdateAssignmentRequestStatus = {
 
 export interface UpdateAssignmentRequest {
   status: UpdateAssignmentRequestStatus;
-}
-
-/**
- * Per-user UI personalization. Cosmetic only — never authorization.
- */
-export interface UiPreferences {
-  /**
-   * Preferred order of portal nav group keys. Unknown keys are ignored; missing groups append in default order.
-   * @maxItems 30
-   */
-  navGroupOrder?: string[];
 }
 
 export type ProtectionPersonKind =

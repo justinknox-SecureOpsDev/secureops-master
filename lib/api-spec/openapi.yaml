@@ -3379,6 +3379,8 @@ components:
         createdAt:
           type: string
           format: date-time
+        uiPreferences:
+          $ref: "#/components/schemas/UiPreferences"
       required:
         - id
         - email
