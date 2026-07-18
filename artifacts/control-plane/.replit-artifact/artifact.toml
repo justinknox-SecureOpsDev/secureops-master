@@ -1,0 +1,27 @@
+# NOTE: The control plane is INTENTIONALLY dev-only in THIS project — it has no
+# production deployment footprint here (no deploymentTarget, no [services.production]).
+# It must be published as its OWN separate Replit project (its own DB + secrets),
+# per replit.md "Control plane (fleet single pane of glass)".
+#
+# Why: a Replit project publishes ALL its artifacts together, and having a SECOND
+# deploymentTarget="vm" artifact alongside the api-server flips the deployment into
+# multi-artifact mode (every app is launched and ALL ports must open). The control
+# plane has no env in the customer deployment, so it crash-loops and takes the whole
+# customer site down. Keep api-server as the ONLY deploymentTarget="vm" artifact here.
+# Do NOT re-add a production service / deploymentTarget to this file.
+kind = "api"
+previewPath = "/__control-plane"
+title = "Control Plane"
+version = "1.0.0"
+id = "ctrlplane_wcsg_fleet_01"
+
+[[services]]
+localPort = 9999
+name = "Control Plane"
+paths = ["/__control-plane"]
+
+[services.development]
+run = "pnpm --filter @workspace/control-plane run dev"
+
+[services.development.env]
+PORT = "9999"

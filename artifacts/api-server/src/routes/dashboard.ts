@@ -2,6 +2,8 @@ import { Router, type IRouter } from "express";
 import { eq, and, isNull, gte, lte, sql, ne, inArray } from "drizzle-orm";
 import { db, usersTable, shiftsTable, incidentsTable, payrollEntriesTable, licensesTable, timeEntriesTable, shiftAssignmentsTable } from "@workspace/db";
 import { requireAuth, requireAdmin } from "../middlewares/auth";
+import { isFeatureEnabled } from "../lib/features";
+import { stripShiftFinanceForRole } from "../lib/financeVisibility";
 
 const router: IRouter = Router();
 
@@ -23,38 +25,53 @@ router.get("/dashboard/admin-summary", requireAdmin, async (req, res): Promise<v
     gte(shiftsTable.endTime, now),
     lte(shiftsTable.startTime, sevenDays),
   ));
-  const [openIncidents] = await db.select({ count: sql<number>`count(*)::int` }).from(incidentsTable).where(ne(incidentsTable.status, "closed"));
-  const [criticalIncidents] = await db.select({ count: sql<number>`count(*)::int` }).from(incidentsTable).where(and(eq(incidentsTable.severity, "critical"), ne(incidentsTable.status, "closed")));
-  const [pendingPayroll] = await db.select({ count: sql<number>`count(*)::int` }).from(payrollEntriesTable).where(eq(payrollEntriesTable.status, "pending"));
+  // Incidents + payroll are feature-gated domains. When a deployment disables
+  // them, their dedicated routers 403 — so the dashboard must not be a side
+  // door that surfaces the same roll-ups. Skip the queries entirely and report
+  // zeros / empty lists so the aggregate never leaks disabled-feature data.
+  const incidentsEnabled = isFeatureEnabled("incidents");
+  const payrollEnabled = isFeatureEnabled("payroll");
+
+  const [openIncidents] = incidentsEnabled
+    ? await db.select({ count: sql<number>`count(*)::int` }).from(incidentsTable).where(ne(incidentsTable.status, "closed"))
+    : [{ count: 0 }];
+  const [criticalIncidents] = incidentsEnabled
+    ? await db.select({ count: sql<number>`count(*)::int` }).from(incidentsTable).where(and(eq(incidentsTable.severity, "critical"), ne(incidentsTable.status, "closed")))
+    : [{ count: 0 }];
+  const [pendingPayroll] = payrollEnabled
+    ? await db.select({ count: sql<number>`count(*)::int` }).from(payrollEntriesTable).where(eq(payrollEntriesTable.status, "pending"))
+    : [{ count: 0 }];
   const [expiringLicenses] = await db.select({ count: sql<number>`count(*)::int` }).from(licensesTable).where(
     and(gte(licensesTable.expiryDate, sql`current_date`), lte(licensesTable.expiryDate, sql`current_date + interval '30 days'`))
   );
   const [clockedIn] = await db.select({ count: sql<number>`count(*)::int` }).from(timeEntriesTable).where(isNull(timeEntriesTable.clockOutTime));
 
-  const recentIncidents = await db
-    .select({
-      id: incidentsTable.id,
-      shiftId: incidentsTable.shiftId,
-      employeeId: incidentsTable.employeeId,
-      title: incidentsTable.title,
-      description: incidentsTable.description,
-      severity: incidentsTable.severity,
-      status: incidentsTable.status,
-      locationDescription: incidentsTable.locationDescription,
-      lat: incidentsTable.lat,
-      lng: incidentsTable.lng,
-      occurredAt: incidentsTable.occurredAt,
-      resolvedAt: incidentsTable.resolvedAt,
-      adminNotes: incidentsTable.adminNotes,
-      createdAt: incidentsTable.createdAt,
-      employeeName: sql<string>`${usersTable.firstName} || ' ' || ${usersTable.lastName}`,
-      shiftTitle: shiftsTable.title,
-    })
-    .from(incidentsTable)
-    .leftJoin(usersTable, eq(incidentsTable.employeeId, usersTable.id))
-    .leftJoin(shiftsTable, eq(incidentsTable.shiftId, shiftsTable.id))
-    .orderBy(sql`${incidentsTable.createdAt} desc`)
-    .limit(5);
+  const recentIncidents = incidentsEnabled
+    ? await db
+        .select({
+          id: incidentsTable.id,
+          shiftId: incidentsTable.shiftId,
+          employeeId: incidentsTable.employeeId,
+          title: incidentsTable.title,
+          description: incidentsTable.description,
+          severity: incidentsTable.severity,
+          status: incidentsTable.status,
+          locationDescription: incidentsTable.locationDescription,
+          lat: incidentsTable.lat,
+          lng: incidentsTable.lng,
+          occurredAt: incidentsTable.occurredAt,
+          resolvedAt: incidentsTable.resolvedAt,
+          adminNotes: incidentsTable.adminNotes,
+          createdAt: incidentsTable.createdAt,
+          employeeName: sql<string>`${usersTable.firstName} || ' ' || ${usersTable.lastName}`,
+          shiftTitle: shiftsTable.title,
+        })
+        .from(incidentsTable)
+        .leftJoin(usersTable, eq(incidentsTable.employeeId, usersTable.id))
+        .leftJoin(shiftsTable, eq(incidentsTable.shiftId, shiftsTable.id))
+        .orderBy(sql`${incidentsTable.createdAt} desc`)
+        .limit(5)
+    : [];
 
   const upcomingShiftsList = await db
     .select()
@@ -137,10 +154,14 @@ router.get("/dashboard/employee-summary", requireAuth, async (req, res): Promise
     .leftJoin(usersTable, eq(shiftAssignmentsTable.employeeId, usersTable.id))
     .where(and(eq(shiftAssignmentsTable.employeeId, userId), eq(shiftAssignmentsTable.status, "pending")));
 
-  const [openIncidents] = await db
-    .select({ count: sql<number>`count(*)::int` })
-    .from(incidentsTable)
-    .where(and(eq(incidentsTable.employeeId, userId), ne(incidentsTable.status, "closed")));
+  // Incidents is feature-gated; mirror the admin summary and report zero when
+  // the deployment has it disabled rather than leaking the count.
+  const [openIncidents] = isFeatureEnabled("incidents")
+    ? await db
+        .select({ count: sql<number>`count(*)::int` })
+        .from(incidentsTable)
+        .where(and(eq(incidentsTable.employeeId, userId), ne(incidentsTable.status, "closed")))
+    : [{ count: 0 }];
 
   const [expiringLicenses] = await db
     .select({ count: sql<number>`count(*)::int` })
@@ -153,14 +174,19 @@ router.get("/dashboard/employee-summary", requireAuth, async (req, res): Promise
       )
     );
 
-  const nextShift = upcomingShifts[0] ? { ...upcomingShifts[0], assignments: [] } : null;
+  // Bill rate (client charge) is admin-only — strip it (and pay/lead-hidden
+  // rates) before these shift rows reach an officer's mobile home summary.
+  const role = req.user!.role;
+  const nextShift = upcomingShifts[0]
+    ? stripShiftFinanceForRole(role, { ...upcomingShifts[0], assignments: [] })
+    : null;
 
   res.json({
     nextShift,
     activeTimeEntry: activeEntry || null,
     hoursThisWeek: hoursWeek.total,
     hoursThisMonth: hoursMonth.total,
-    upcomingShifts: upcomingShifts.map((s) => ({ ...s, assignments: [] })),
+    upcomingShifts: upcomingShifts.map((s) => stripShiftFinanceForRole(role, { ...s, assignments: [] })),
     pendingAssignments,
     myOpenIncidents: openIncidents.count,
     expiringLicenses: expiringLicenses.count,

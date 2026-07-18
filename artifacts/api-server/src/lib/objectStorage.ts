@@ -174,9 +174,21 @@ export class ObjectStorageService {
    */
   async downloadObjectBuffer(
     objectPath: string,
+    opts?: { maxBytes?: number },
   ): Promise<{ buffer: Buffer; contentType: string; filename: string; size: number }> {
     const file = await this.getObjectEntityFile(objectPath);
     const [metadata] = await file.getMetadata();
+    // Reject oversized objects from their stored metadata BEFORE pulling the
+    // whole body into memory (the AI-import path bounds this; a compromised
+    // admin path otherwise lets a large object cause memory pressure).
+    if (opts?.maxBytes) {
+      const declared = Number(metadata.size ?? 0);
+      if (Number.isFinite(declared) && declared > opts.maxBytes) {
+        throw Object.assign(new Error("Object exceeds the maximum allowed size."), {
+          __tooLarge: true,
+        });
+      }
+    }
     const [body] = await file.download();
     return {
       buffer: body,

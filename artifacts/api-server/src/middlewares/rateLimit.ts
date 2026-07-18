@@ -140,6 +140,29 @@ export const publicApplicationLimiter: RateLimitRequestHandler = rateLimit({
   keyGenerator: (req) => `pa:ip:${ipKeyGenerator(req.ip ?? "")}`,
 });
 
+// POST /leads — fully public sales/sign-up lead capture from the marketing
+// site. Sends a confirmation email per call, so we stack BOTH caps (mirrors
+// forgot-password / application-draft): per-IP stops one source spraying
+// leads, per-email stops a distributed attacker flooding one inbox with
+// confirmation mail. 5/hr is generous for a human filling in one form.
+const SALES_LEAD_PER_IP_MAX = envInt("SALES_LEAD_RATE_LIMIT_MAX", 5);
+const SALES_LEAD_PER_EMAIL_MAX = envInt("SALES_LEAD_PER_EMAIL_MAX", 5);
+
+export const salesLeadIpLimiter: RateLimitRequestHandler = rateLimit({
+  windowMs: HOUR_MS,
+  limit: SALES_LEAD_PER_IP_MAX,
+  standardHeaders: true,
+  legacyHeaders: false,
+  handler: tooMany,
+  keyGenerator: (req) => `sl:ip:${ipKeyGenerator(req.ip ?? "")}`,
+});
+
+export const salesLeadEmailLimiter: RateLimitRequestHandler = makeLimiter({
+  max: SALES_LEAD_PER_EMAIL_MAX,
+  keyBy: "email",
+  tag: "sl",
+});
+
 // GET / POST /onboarding/:token, GET / POST /applications/amend/:token —
 // public token-based endpoints. Cap per-IP to slow brute-force token
 // guessing while leaving plenty of headroom for legitimate retries.
@@ -153,6 +176,21 @@ export const tokenLookupLimiter: RateLimitRequestHandler = rateLimit({
   legacyHeaders: false,
   handler: tooMany,
   keyGenerator: (req) => `tk:ip:${ipKeyGenerator(req.ip ?? "")}`,
+});
+
+// GET /org-directory/resolve — public, unauthenticated org-code → backend
+// resolution for the multi-org mobile app. Codes are not secrets, but a per-IP
+// cap slows wholesale enumeration of the directory while leaving generous
+// headroom for a human typing/retrying a code on the connect screen.
+const ORG_DIRECTORY_PER_IP_MAX = envInt("ORG_DIRECTORY_RATE_LIMIT_MAX", 60);
+
+export const orgDirectoryLimiter: RateLimitRequestHandler = rateLimit({
+  windowMs: FIVE_MIN_MS,
+  limit: ORG_DIRECTORY_PER_IP_MAX,
+  standardHeaders: true,
+  legacyHeaders: false,
+  handler: tooMany,
+  keyGenerator: (req) => `od:ip:${ipKeyGenerator(req.ip ?? "")}`,
 });
 
 // POST /applications/draft — public "save and resume later" save action.

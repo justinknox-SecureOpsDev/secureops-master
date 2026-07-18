@@ -8,8 +8,10 @@ import {
   employeesTable,
 } from "@workspace/db";
 import { requireAuth, requireAdmin } from "../middlewares/auth";
+import { requireFeature } from "../lib/features";
 
 const router: IRouter = Router();
+router.use(["/me/license-renewals", "/admin/license-renewals"], requireFeature("licenseRenewals"));
 
 async function pushSafely(userIds: string[], title: string, body: string, data?: Record<string, unknown>) {
   try {

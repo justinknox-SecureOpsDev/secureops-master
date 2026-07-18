@@ -60,8 +60,7 @@ export default function ChatRoomScreen({ roomId, roomName }: Props) {
           AccessibilityInfo.announceForAccessibility(`New message from ${msg.userName}: ${msg.content}`);
         }
       }
-      // Newest messages render at the top — snap back up so the new one is visible.
-      setTimeout(() => listRef.current?.scrollToOffset({ offset: 0, animated: true }), 100);
+      setTimeout(() => listRef.current?.scrollToEnd({ animated: true }), 100);
     });
     const unsubDel = subscribeToDeletes(roomId, (messageId) => {
       setMessages((prev) => prev.filter((m) => m.id !== messageId));
@@ -71,14 +70,9 @@ export default function ChatRoomScreen({ roomId, roomName }: Props) {
 
   useEffect(() => {
     if (!loading && messages.length > 0) {
-      setTimeout(() => listRef.current?.scrollToOffset({ offset: 0, animated: false }), 200);
+      setTimeout(() => listRef.current?.scrollToEnd({ animated: false }), 200);
     }
   }, [loading]);
-
-  // Display order: most recent first (newest at the top of the screen).
-  const displayMessages = [...messages].sort(
-    (a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime(),
-  );
 
   const handleSend = async () => {
     if (!text.trim() || sending) return;
@@ -157,10 +151,10 @@ export default function ChatRoomScreen({ roomId, roomName }: Props) {
           {!mine && (
             <Text style={[s.senderName, { color: colors.primary }]}>{item.userName}</Text>
           )}
-          <Text style={[s.msgText, { color: mine ? "#080c18" : colors.foreground }]}>
+          <Text style={[s.msgText, { color: mine ? "#0c0a08" : colors.foreground }]}>
             {item.content}
           </Text>
-          <Text style={[s.msgTime, { color: mine ? "#080c18aa" : colors.mutedForeground }]}>
+          <Text style={[s.msgTime, { color: mine ? "#0c0a08aa" : colors.mutedForeground }]}>
             {formatDistanceToNow(new Date(item.createdAt), { addSuffix: true })}
           </Text>
         </View>
@@ -191,7 +185,7 @@ export default function ChatRoomScreen({ roomId, roomName }: Props) {
       ) : (
         <FlatList
           ref={listRef}
-          data={displayMessages}
+          data={messages}
           keyExtractor={(m) => m.id}
           renderItem={renderMessage}
           contentContainerStyle={s.list}
@@ -247,7 +241,7 @@ const styles = (colors: ReturnType<typeof useColors>) => StyleSheet.create({
   },
   backBtn: { padding: 6, marginRight: 2 },
   roomTitle: { fontSize: 16, fontWeight: "700", flex: 1 },
-  list: { paddingHorizontal: 12, paddingVertical: 12, gap: 10, flexGrow: 1 },
+  list: { paddingHorizontal: 12, paddingVertical: 12, gap: 10, flexGrow: 1, justifyContent: "flex-end" },
   msgRow: { flexDirection: "row", alignItems: "flex-end", gap: 8 },
   msgRowMine: { flexDirection: "row-reverse" },
   avatar: { width: 32, height: 32, borderRadius: 16, alignItems: "center", justifyContent: "center" },

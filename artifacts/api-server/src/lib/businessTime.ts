@@ -73,3 +73,36 @@ export function businessDayWindow(now: Date, tz: string): { startOfDay: Date; en
   const endOfDay = startOfBusinessDay(new Date(startOfDay.getTime() + 36 * 60 * MS_MIN), tz);
   return { startOfDay, endOfDay };
 }
+
+/**
+ * UTC instant of the local Monday 00:00 that starts the `tz` business week
+ * containing `now`. Composed from startOfBusinessDay and a walk back to
+ * Monday so DST transition weeks stay exact (never naive `- n*24h`).
+ */
+export function startOfBusinessWeek(now: Date, tz: string): Date {
+  let day = startOfBusinessDay(now, tz);
+  for (let i = 0; i < 7; i++) {
+    const weekday = new Intl.DateTimeFormat("en-US", { timeZone: tz, weekday: "short" }).format(day);
+    if (weekday === "Mon") return day;
+    // 12h before local midnight is safely inside the previous local day.
+    day = startOfBusinessDay(new Date(day.getTime() - 12 * 60 * MS_MIN), tz);
+  }
+  return day;
+}
+
+/** `YYYY-MM-DD` of the `tz` calendar day containing `instant`. */
+export function businessDateIso(instant: Date, tz: string): string {
+  return new Intl.DateTimeFormat("en-CA", {
+    timeZone: tz,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).format(instant);
+}
+
+/** UTC instant of local midnight on the given `YYYY-MM-DD` in `tz`. */
+export function businessDateToUtc(isoDate: string, tz: string): Date {
+  const [y, m, d] = isoDate.split("-").map(Number);
+  const utcGuess = Date.UTC(y ?? 1970, (m ?? 1) - 1, d ?? 1, 0, 0, 0);
+  return new Date(utcGuess - tzOffsetMs(new Date(utcGuess), tz));
+}

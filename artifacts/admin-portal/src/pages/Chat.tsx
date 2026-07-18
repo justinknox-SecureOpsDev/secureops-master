@@ -2,11 +2,18 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useLocation } from "wouter";
 import { api, getToken } from "@/lib/api";
-import { BUSINESS_TIME_ZONE } from "@/lib/format";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Send, Loader2, Wifi, WifiOff, MessageCircle, Trash2 } from "lucide-react";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import {
+  Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle,
+} from "@/components/ui/dialog";
+import {
+  Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
+} from "@/components/ui/select";
+import { Send, Loader2, Wifi, WifiOff, MessageCircle, Trash2, Plus } from "lucide-react";
 
 type Room = { id: string; name: string; type: string };
 type UnreadCount = { roomId: string; otherUserId: string; unreadCount: number };
@@ -42,6 +49,13 @@ export default function ChatPage() {
   const [roomId, setRoomId] = useState<string>(initialRoomId);
   const [text, setText] = useState("");
   const listRef = useRef<HTMLDivElement | null>(null);
+
+  // New-channel dialog state.
+  const [createOpen, setCreateOpen] = useState(false);
+  const [newName, setNewName] = useState("");
+  const [newType, setNewType] = useState("announcements");
+  const [newLevel, setNewLevel] = useState("2");
+  const [newCity, setNewCity] = useState("");
 
   const rooms = useQuery<Room[]>({
     queryKey: ["chat", "rooms"],
@@ -104,21 +118,31 @@ export default function ChatPage() {
     },
   });
 
-  // Newest messages render at the top, so snap the list back to the top
-  // whenever new messages land.
+  // Admin-only: create a new channel. License-level channels auto-add officers
+  // by their license; city channels are request-to-join; elite are invite-only.
+  const createRoom = useMutation({
+    mutationFn: () => {
+      const payload: Record<string, unknown> = { name: newName.trim(), type: newType };
+      if (newType === "license_level") payload.licenseLevel = Number(newLevel);
+      if (newType === "city" && newCity.trim()) payload.city = newCity.trim();
+      return api<Room>("/chat/rooms", { method: "POST", body: payload });
+    },
+    onSuccess: (room) => {
+      setCreateOpen(false);
+      setNewName("");
+      setNewType("announcements");
+      setNewLevel("2");
+      setNewCity("");
+      qc.invalidateQueries({ queryKey: ["chat", "rooms"] });
+      if (room && (room as Room).id) setRoomId((room as Room).id);
+    },
+  });
+
+  // Scroll to bottom when new messages land.
   useEffect(() => {
     if (!listRef.current) return;
-    listRef.current.scrollTop = 0;
+    listRef.current.scrollTop = listRef.current.scrollHeight;
   }, [messages.data]);
-
-  // Display order: most recent first (newest at the top of the page).
-  const orderedMessages = useMemo(
-    () =>
-      [...(messages.data ?? [])].sort(
-        (a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime(),
-      ),
-    [messages.data],
-  );
 
   // Real-time WS subscription. Reuses the same /api/ws channel chat
   // already broadcasts on; we just refetch the active room when a
@@ -198,6 +222,15 @@ export default function ChatPage() {
         </CardHeader>
         <CardContent className="flex-1 min-h-0 p-0 grid grid-cols-[14rem_1fr]">
           <aside className="border-r overflow-y-auto p-2 space-y-1">
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              className="w-full justify-start mb-1"
+              onClick={() => setCreateOpen(true)}
+            >
+              <Plus className="w-4 h-4 mr-2" /> New channel
+            </Button>
             {rooms.isLoading && <div className="text-xs opacity-60 p-2">Loading…</div>}
             {rooms.error && (
               <div className="text-xs text-red-700 p-2">
@@ -276,14 +309,14 @@ export default function ChatPage() {
               {messages.data && messages.data.length === 0 && (
                 <div className="opacity-60">No messages yet.</div>
               )}
-              {orderedMessages.map((m) => (
+              {messages.data?.map((m) => (
                 <div key={m.id} className="leading-snug">
                   <span className="font-medium">{m.userName ?? "—"}</span>
                   {m.userRole && (
                     <span className="ml-1.5 text-[10px] uppercase opacity-60">{m.userRole}</span>
                   )}
                   <span className="opacity-50 text-xs ml-1.5">
-                    {new Date(m.createdAt).toLocaleString(undefined, { hour: "numeric", minute: "2-digit", month: "short", day: "numeric", timeZone: BUSINESS_TIME_ZONE })}
+                    {new Date(m.createdAt).toLocaleString(undefined, { hour: "numeric", minute: "2-digit", month: "short", day: "numeric" })}
                   </span>
                   <div className="opacity-90 whitespace-pre-wrap">{m.content ?? ""}</div>
                 </div>
@@ -323,6 +356,77 @@ export default function ChatPage() {
           </section>
         </CardContent>
       </Card>
+
+      <Dialog open={createOpen} onOpenChange={(o) => { if (!createRoom.isPending) setCreateOpen(o); }}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>New channel</DialogTitle>
+            <DialogDescription>Create a chat channel for your team.</DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4">
+            <div className="space-y-1.5">
+              <Label htmlFor="ch-name">Name</Label>
+              <Input
+                id="ch-name"
+                value={newName}
+                onChange={(e) => setNewName(e.target.value)}
+                placeholder="e.g. Dispatch, Night Shift…"
+              />
+            </div>
+            <div className="space-y-1.5">
+              <Label htmlFor="ch-type">Type</Label>
+              <Select value={newType} onValueChange={setNewType}>
+                <SelectTrigger id="ch-type"><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="announcements">Announcements — everyone can read and post</SelectItem>
+                  <SelectItem value="ops">Ops — admins only</SelectItem>
+                  <SelectItem value="license_level">License level — auto by officer license</SelectItem>
+                  <SelectItem value="city">City / region — request to join</SelectItem>
+                  <SelectItem value="elite">Elite — invite only</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+            {newType === "license_level" && (
+              <div className="space-y-1.5">
+                <Label htmlFor="ch-level">Minimum license level</Label>
+                <Select value={newLevel} onValueChange={setNewLevel}>
+                  <SelectTrigger id="ch-level"><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="2">Level 2 — Unarmed and above</SelectItem>
+                    <SelectItem value="3">Level 3 — Armed and above</SelectItem>
+                    <SelectItem value="4">Level 4 — PPO</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+            )}
+            {newType === "city" && (
+              <div className="space-y-1.5">
+                <Label htmlFor="ch-city">City (optional)</Label>
+                <Input
+                  id="ch-city"
+                  value={newCity}
+                  onChange={(e) => setNewCity(e.target.value)}
+                  placeholder="e.g. Dallas"
+                />
+              </div>
+            )}
+            {createRoom.isError && (
+              <div className="text-xs text-red-700">
+                {createRoom.error instanceof Error ? createRoom.error.message : "Failed to create channel."}
+              </div>
+            )}
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setCreateOpen(false)} disabled={createRoom.isPending}>
+              Cancel
+            </Button>
+            <Button onClick={() => createRoom.mutate()} disabled={!newName.trim() || createRoom.isPending}>
+              {createRoom.isPending ? <Loader2 className="w-4 h-4 animate-spin mr-2" /> : null}
+              Create
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

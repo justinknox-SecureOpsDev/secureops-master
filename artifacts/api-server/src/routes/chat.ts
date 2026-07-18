@@ -14,8 +14,10 @@ import {
 import { requireAuth, requireAdmin } from "../middlewares/auth";
 import { broadcastToRoom } from "../lib/wsManager";
 import { sendPushToUsers } from "../lib/push";
+import { requireFeature } from "../lib/features";
 
 const router: IRouter = Router();
+router.use(["/chat", "/admin/chat"], requireFeature("chat"));
 
 /**
  * Strictly parse a sorted "userIdA:userIdB" directKey.
@@ -150,9 +152,14 @@ router.get("/chat/rooms", requireAuth, async (req, res): Promise<void> => {
   const candidates = await db
     .select()
     .from(chatRoomsTable)
-    .where(or(
-      ne(chatRoomsTable.type, "direct"),
-      sql`${chatRoomsTable.directKey} LIKE ${"%" + me + "%"}`,
+    // Retired legacy rooms (old general/shift) are hidden from everyone,
+    // admins included — they exist only to preserve message history.
+    .where(and(
+      ne(chatRoomsTable.type, "retired"),
+      or(
+        ne(chatRoomsTable.type, "direct"),
+        sql`${chatRoomsTable.directKey} LIKE ${"%" + me + "%"}`,
+      ),
     ))
     .orderBy(asc(chatRoomsTable.createdAt));
 
@@ -347,14 +354,77 @@ router.delete("/admin/chat/rooms/:id/members/:userId", requireAuth, requireAdmin
 // ============================================================ CHANNELS / DMs
 
 // POST /chat/rooms — admin-created custom channel
+// Channel types an admin may create from the UI. `direct` (DMs) and `site`
+// (auto-seeded per site) are intentionally excluded. The mobile "Create
+// channel" button posts the legacy type `general`, which is aliased to
+// `announcements` at create time (see the handler below).
+const CREATABLE_ROOM_TYPES = new Set([
+  "announcements",
+  "ops",
+  "license_level",
+  "city",
+  "elite",
+]);
+// Canonical membership model per channel type. Join policy is always derived
+// from this map server-side — never taken from the caller — so it can't drift
+// out of sync with how resolveRoomMembers actually grants access.
+const DEFAULT_JOIN_POLICY: Record<string, "auto" | "request" | "invite"> = {
+  announcements: "auto",
+  ops: "auto",
+  license_level: "auto",
+  city: "request",
+  elite: "invite",
+};
+
 router.post("/chat/rooms", requireAuth, requireAdmin, async (req, res): Promise<void> => {
-  const { name, type } = req.body as { name: string; type?: string };
+  const body = (req.body ?? {}) as {
+    name?: unknown;
+    type?: unknown;
+    licenseLevel?: unknown;
+    city?: unknown;
+  };
+
+  const name = typeof body.name === "string" ? body.name.trim() : "";
   if (!name) { res.status(400).json({ error: "Bad Request", message: "name required" }); return; }
+
+  // Mobile's lightweight creator posts type:"general"; alias it to an
+  // announcements channel (everyone reads + posts) so those rooms resolve to
+  // all staff instead of falling through to the admins-only legacy path.
+  let type = typeof body.type === "string" && body.type ? body.type : "announcements";
+  if (type === "general") type = "announcements";
+  if (!CREATABLE_ROOM_TYPES.has(type)) {
+    res.status(400).json({ error: "Bad Request", message: `Unsupported channel type: ${type}` });
+    return;
+  }
+
+  // license_level channels auto-add officers whose max unexpired license
+  // meets the threshold, so a valid level (2/3/4) is required.
+  let licenseLevel: number | null = null;
+  if (type === "license_level") {
+    const lvl = Number(body.licenseLevel);
+    if (![2, 3, 4].includes(lvl)) {
+      res.status(400).json({ error: "Bad Request", message: "licenseLevel must be 2, 3, or 4 for license-level channels" });
+      return;
+    }
+    licenseLevel = lvl;
+  }
+
+  const city = type === "city" && typeof body.city === "string" && body.city.trim()
+    ? body.city.trim()
+    : null;
+
+  // Always derive join policy from the type — never trust a caller-supplied
+  // value, which could misrepresent access since membership is type-driven.
+  const joinPolicy = DEFAULT_JOIN_POLICY[type] ?? "auto";
+
   const [room] = await db.insert(chatRoomsTable).values({
     name,
-    type: type || "announcements",
-    joinPolicy: "auto",
+    type,
+    licenseLevel,
+    city,
+    joinPolicy,
   }).returning();
+  req.log.info({ roomId: room.id, roomName: room.name, roomType: room.type }, "Chat room created");
   res.status(201).json(room);
 });
 

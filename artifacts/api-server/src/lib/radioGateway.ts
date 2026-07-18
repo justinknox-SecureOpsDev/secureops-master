@@ -16,14 +16,19 @@ import {
 } from "@workspace/db";
 import { verifyToken } from "../middlewares/auth";
 import { logger } from "./logger";
-import { ObjectStorageService } from "./objectStorage";
+import { removeRadioParticipant } from "./livekit";
 
 /**
  * Live push-to-talk radio gateway.
  *
  * One process-local WebSocketServer mounted at `/api/ws/radio?token=<jwt>`.
  *
- * Wire protocol (all control frames are JSON, audio is binary):
+ * This socket is the CONTROL PLANE only — membership, the single-speaker
+ * lock, presence and audit. Live audio does NOT travel on this socket; it
+ * rides a LiveKit room (one per channel), encrypted end-to-end. Binary
+ * frames on this socket are ignored.
+ *
+ * Wire protocol (all control frames are JSON):
  *
  *   client → server (JSON text frames):
  *     {type:"join",   channelId}            // subscribe to a channel
@@ -32,12 +37,6 @@ import { ObjectStorageService } from "./objectStorage";
  *     {type:"end",    channelId}            // release the speaker lock
  *     {type:"ping"}                         // keepalive
  *
- *   client → server (binary frames):
- *     Raw audio chunk for the channel the client currently holds the
- *     speaker lock on. Format is chosen by the client (e.g. opus-in-webm
- *     timeslices from MediaRecorder); the gateway treats payloads as
- *     opaque bytes and only fans them out.
- *
  *   server → client (JSON):
  *     {type:"joined",   channelId}
  *     {type:"left",     channelId}
@@ -45,12 +44,6 @@ import { ObjectStorageService } from "./objectStorage";
  *     {type:"silent",   channelId}
  *     {type:"denied",   channelId, reason}
  *     {type:"error",    message}
- *
- *   server → client (binary):
- *     Audio chunk. First byte is the length of a UTF-8 channelId
- *     prefix; the rest is the audio payload. This lets one socket
- *     multiplex audio from several joined channels without an extra
- *     control frame per chunk.
  *
  * Single-speaker lock per channel is in-memory; the server is the
  * single source of truth (`/start` either wins atomically or is denied).
@@ -62,13 +55,7 @@ import { ObjectStorageService } from "./objectStorage";
  */
 
 const MAX_TRANSMISSION_MS = 60_000;
-const MAX_FRAME_BYTES = 64 * 1024;
 const HEARTBEAT_MS = 30_000;
-// 5 MB per-transmission recording cap. 60s @ 24 kbps opus ≈ 180 KB,
-// so this leaves ~28x headroom for higher-bitrate clients while still
-// fencing off pathological / malicious senders.
-const RECORD_MAX_BYTES = 5 * 1024 * 1024;
-const RECORD_MIME = "audio/webm";
 
 // Per-user join rate-limit: window length and max joins in that window.
 // A reasonable human flips between maybe 4–5 channels in a minute; we
@@ -99,12 +86,6 @@ type SpeakerLock = {
   transmissionId: string;
   startedAt: Date;
   timeoutHandle: ReturnType<typeof setTimeout>;
-  // Recording buffer: every binary frame the speaker pushes is appended
-  // here so we can upload the concatenated clip on release. Set to null
-  // once the cap is exceeded — playback is best-effort and we'd rather
-  // skip a recording than blow up the process.
-  audioChunks: Buffer[] | null;
-  audioBytes: number;
 };
 
 // channelId → connected sockets that have joined it
@@ -214,6 +195,45 @@ export async function listChannelsForUser(
   return out;
 }
 
+/**
+ * True iff `userId` currently holds the in-memory speaker lock on
+ * `channelId`. Used by the LiveKit publish-token endpoint so a publish
+ * grant is only ever minted to the participant who actually won the lock
+ * over the control socket — the single-speaker guarantee stays server-side.
+ */
+export function userHoldsChannelLock(channelId: string, userId: string): boolean {
+  const lock = channelLocks.get(channelId);
+  return Boolean(lock && lock.speakerUserId === userId);
+}
+
+/**
+ * Admin "take over": force-clear whoever currently holds the speaker lock on
+ * `channelId`. We notify the ex-speaker's own socket with a `denied`
+ * (`reason:"preempted"`) frame so their client tears its publish down and
+ * resets the PTT UI, then run the normal `releaseLock` path (which broadcasts
+ * `silent`, closes the audit row with `endedReason:"preempted"`, and evicts the
+ * ex-speaker from the LiveKit room as defence in depth).
+ *
+ * This only CLEARS the floor — it never hands the admin the lock. The admin
+ * then presses push-to-talk like anyone else, so the single-speaker guarantee
+ * and "no audio without a deliberate press" invariant are preserved.
+ *
+ * Idempotent: a no-op (returns `{preempted:false}`) when nobody is speaking.
+ */
+export async function preemptChannelLock(
+  channelId: string,
+): Promise<{ preempted: boolean; speakerUserId?: string; speakerName?: string }> {
+  const lock = channelLocks.get(channelId);
+  if (!lock) return { preempted: false };
+  const { speakerUserId, speakerName } = lock;
+  // Tell the ex-speaker specifically (not the whole channel) that their floor
+  // was taken, so their client cancels transmit + stops publishing. The
+  // `silent` broadcast from releaseLock then clears presence for everyone.
+  sendJson(lock.socket, { type: "denied", channelId, reason: "preempted" });
+  await releaseLock(channelId, "preempted");
+  return { preempted: true, speakerUserId, speakerName };
+}
+
 function addSubscriber(channelId: string, socket: RadioSocket): void {
   let set = channelSubscribers.get(channelId);
   if (!set) { set = new Set(); channelSubscribers.set(channelId, set); }
@@ -244,26 +264,6 @@ function broadcastJson(channelId: string, payload: object, except?: RadioSocket)
     if (s === except) continue;
     if (s.readyState === WebSocket.OPEN) {
       try { s.send(msg); } catch { /* ignore */ }
-    }
-  }
-}
-
-/**
- * Fan out a binary audio chunk to every subscriber of `channelId`
- * except the speaker. The payload is wrapped with a 1-byte channelId
- * length + UTF-8 channelId prefix so clients receiving from multiple
- * channels can route the bytes correctly.
- */
-function broadcastAudio(channelId: string, payload: Buffer, except: RadioSocket): void {
-  const subs = channelSubscribers.get(channelId);
-  if (!subs) return;
-  const idBuf = Buffer.from(channelId, "utf8");
-  if (idBuf.length > 255) return; // defensive — channel UUIDs are ~36
-  const framed = Buffer.concat([Buffer.from([idBuf.length]), idBuf, payload]);
-  for (const s of subs) {
-    if (s === except) continue;
-    if (s.readyState === WebSocket.OPEN) {
-      try { s.send(framed, { binary: true }); } catch { /* ignore */ }
     }
   }
 }
@@ -308,34 +308,8 @@ async function releaseLock(channelId: string, reason: "released" | "timeout" | "
   const endedAt = new Date();
   const durationMs = endedAt.getTime() - lock.startedAt.getTime();
 
-  // Upload buffered audio to object storage (best-effort). We do this
-  // before the DB update so we can write the resulting object key in
-  // the same row. Empty buffers and over-cap transmissions are skipped.
-  let audioObjectKey: string | null = null;
-  let audioMime: string | null = null;
-  let audioBytes: number | null = null;
-  if (lock.audioChunks && lock.audioChunks.length > 0 && lock.audioBytes > 0) {
-    try {
-      const blob = Buffer.concat(lock.audioChunks, lock.audioBytes);
-      const storage = new ObjectStorageService();
-      audioObjectKey = await storage.saveObjectBuffer(
-        blob,
-        RECORD_MIME,
-        `radio-${channelId}`,
-      );
-      audioMime = RECORD_MIME;
-      audioBytes = blob.length;
-    } catch (err) {
-      logger.warn(
-        { err, channelId, transmissionId: lock.transmissionId },
-        "[radio] failed to upload transmission recording",
-      );
-    }
-  }
-  // Help the GC release the chunks promptly.
-  lock.audioChunks = null;
-  lock.audioBytes = 0;
-
+  // Audio is carried by LiveKit and never persisted — on release we only
+  // close out the transmission's audit row (no recording upload).
   try {
     await db
       .update(radioTransmissionsTable)
@@ -343,9 +317,6 @@ async function releaseLock(channelId: string, reason: "released" | "timeout" | "
         endedAt,
         durationMs,
         endedReason: reason,
-        audioObjectKey,
-        audioMime,
-        audioBytes,
       })
       .where(eq(radioTransmissionsTable.id, lock.transmissionId));
   } catch (err) {
@@ -362,6 +333,11 @@ async function releaseLock(channelId: string, reason: "released" | "timeout" | "
     transmissionId: lock.transmissionId,
     metadata: { durationMs, endedReason: reason },
   });
+
+  // Defence in depth: evict the ex-speaker from the LiveKit room so a still-
+  // valid (but now stale) publish token can't keep the floor after the lock
+  // is gone. Best-effort — never blocks the release.
+  void removeRadioParticipant(channelId, lock.speakerUserId);
 
   broadcastJson(channelId, { type: "silent", channelId });
 }
@@ -409,8 +385,6 @@ async function claimLock(channelId: string, socket: RadioSocket): Promise<void> 
     transmissionId: row.id,
     startedAt,
     timeoutHandle,
-    audioChunks: [],
-    audioBytes: 0,
   };
   channelLocks.set(channelId, lock);
 
@@ -495,35 +469,6 @@ async function handleControl(socket: RadioSocket, raw: string): Promise<void> {
   }
 }
 
-function handleBinary(socket: RadioSocket, data: Buffer): void {
-  if (data.byteLength === 0 || data.byteLength > MAX_FRAME_BYTES) return;
-  // Speaker can only push to whichever channel they currently hold a lock on.
-  for (const [channelId, lock] of channelLocks) {
-    if (lock.socket === socket && lock.speakerUserId === socket.userId) {
-      broadcastAudio(channelId, data, socket);
-      // Capture for playback. Once we've exceeded the cap we null the
-      // buffer out so subsequent frames are not retained — the live
-      // fan-out above still works, only the recording is dropped.
-      if (lock.audioChunks) {
-        if (lock.audioBytes + data.byteLength > RECORD_MAX_BYTES) {
-          logger.warn(
-            { channelId, transmissionId: lock.transmissionId, bytes: lock.audioBytes },
-            "[radio] recording cap exceeded; skipping playback for this transmission",
-          );
-          lock.audioChunks = null;
-          lock.audioBytes = 0;
-        } else {
-          lock.audioChunks.push(data);
-          lock.audioBytes += data.byteLength;
-        }
-      }
-      return;
-    }
-  }
-  // Not holding any lock → silently drop. Cheaper than echoing an error
-  // per frame in the (common) race where a frame lands after release.
-}
-
 function onSocketClose(socket: RadioSocket): void {
   const userId = socket.userId;
   if (!userId) return;
@@ -587,22 +532,20 @@ export function attachRadioWebSocketServer(server: Server): void {
 
     ws.on("pong", () => { ws.isAlive = true; });
     ws.on("message", (data, isBinary) => {
+      // Audio rides LiveKit, not this socket — binary frames are ignored.
+      if (isBinary) return;
       const buf = Buffer.isBuffer(data) ? data : Buffer.from(data as ArrayBuffer);
       if (!ws.authenticated) {
         // Cap buffered frames so a malicious pre-auth client can't
         // exhaust memory; 32 control messages is generous given a
         // typical reconnect sends 2–3 joins + maybe a start.
         if ((ws.pendingMessages?.length ?? 0) < 32) {
-          ws.pendingMessages!.push({ data: isBinary ? buf : buf.toString("utf8"), isBinary });
+          ws.pendingMessages!.push({ data: buf.toString("utf8"), isBinary: false });
         }
         return;
       }
-      if (isBinary) {
-        handleBinary(ws, buf);
-      } else {
-        const text = typeof data === "string" ? data : buf.toString("utf8");
-        void handleControl(ws, text);
-      }
+      const text = typeof data === "string" ? data : buf.toString("utf8");
+      void handleControl(ws, text);
     });
     ws.on("close", () => onSocketClose(ws));
     ws.on("error", (err) => logger.warn({ err, userId: payload.userId }, "[radio] WS error"));
@@ -652,8 +595,7 @@ export function attachRadioWebSocketServer(server: Server): void {
         const pending = ws.pendingMessages ?? [];
         ws.pendingMessages = [];
         for (const p of pending) {
-          if (p.isBinary) handleBinary(ws, p.data as Buffer);
-          else void handleControl(ws, p.data as string);
+          void handleControl(ws, p.data as string);
         }
 
         sendJson(ws, { type: "connected", userId: user.id });

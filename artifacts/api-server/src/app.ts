@@ -4,6 +4,7 @@ import helmet from "helmet";
 import pinoHttp from "pino-http";
 import router from "./routes";
 import { logger } from "./lib/logger";
+import { mountStaticFrontends } from "./lib/staticFrontends";
 
 const app: Express = express();
 
@@ -164,5 +165,11 @@ app.use(express.json({
 app.use(express.urlencoded({ extended: true, limit: "1mb" }));
 
 app.use("/api", router);
+
+// Single-port (Reserved VM) production builds also serve the pre-built web SPAs
+// (admin portal, home) from dist/static so the whole product runs on one port.
+// Mounted AFTER /api so it can never shadow an API route; no-ops in dev/test
+// where the static dir is absent (the SPAs run on their own Vite workflows).
+mountStaticFrontends(app);
 
 export default app;

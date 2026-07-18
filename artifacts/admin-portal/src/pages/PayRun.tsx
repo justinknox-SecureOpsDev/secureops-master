@@ -47,10 +47,10 @@ const maskAccount = (s: string | null) => (s ? `••••${s.slice(-4)}` : "�
 
 // Week label "Mon Jan 6 → Sun Jan 12, 2025" from a YYYY-MM-DD start date.
 const fmtWeekRange = (periodStart: string, periodEnd: string) => {
-  const opts: Intl.DateTimeFormatOptions = { weekday: "short", month: "short", day: "numeric", timeZone: "UTC" };
-  const s = new Date(`${periodStart}T00:00:00Z`);
-  const e = new Date(`${periodEnd}T00:00:00Z`);
-  const yr = e.getUTCFullYear();
+  const opts: Intl.DateTimeFormatOptions = { weekday: "short", month: "short", day: "numeric" };
+  const s = new Date(`${periodStart}T00:00:00`);
+  const e = new Date(`${periodEnd}T00:00:00`);
+  const yr = e.getFullYear();
   return `${s.toLocaleDateString("en-US", opts)} → ${e.toLocaleDateString("en-US", opts)}, ${yr}`;
 };
 
@@ -355,7 +355,7 @@ export default function PayRunPage() {
           <Label className="text-xs">Period end ≤</Label>
           <Input aria-label="Period end on or before" type="date" className="h-9" value={periodEnd} onChange={(e) => setPeriodEnd(e.target.value)} />
         </div>
-        <Button variant="outline" aria-label="Refresh" onClick={() => void reload()} disabled={loading}>
+        <Button variant="outline" onClick={() => void reload()} disabled={loading}>
           {loading ? <Loader2 className="w-4 h-4 animate-spin" /> : "Refresh"}
         </Button>
       </div>

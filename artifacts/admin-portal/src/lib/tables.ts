@@ -5,8 +5,6 @@
  * `/admin/tables/:table` endpoint registry in `artifacts/api-server/src/routes/admin.ts`.
  */
 
-import { BUSINESS_TIME_ZONE } from "./format";
-
 /** Singularize a plural label for "Add {X}" / "Edit {X}" buttons. */
 export function singularize(label: string): string {
   if (/ies$/i.test(label)) return label.replace(/ies$/i, "y");
@@ -138,6 +136,40 @@ export function getImportMatchByLabelFields(t: TableDescriptor): string[] {
 }
 
 export const TABLES: TableDescriptor[] = [
+  {
+    name: "sales_leads",
+    label: "Sales Leads",
+    plural: "sales leads",
+    importSupported: false,
+    primaryLabelField: "companyName",
+    fields: [
+      { key: "id", label: "ID", type: "text", readonly: true, hiddenInGrid: true },
+      { key: "companyName", label: "Company", type: "text", required: true },
+      { key: "contactName", label: "Contact", type: "text", required: true },
+      { key: "email", label: "Email", type: "email", required: true },
+      { key: "phone", label: "Phone", type: "text" },
+      { key: "tier", label: "Interested Tier", type: "text" },
+      { key: "officerCount", label: "Officer Count", type: "integer" },
+      {
+        key: "status", label: "Status", type: "select", required: true,
+        options: [
+          { label: "New", value: "new" },
+          { label: "Contacted", value: "contacted" },
+          { label: "Qualified", value: "qualified" },
+          { label: "Won", value: "won" },
+          { label: "Lost", value: "lost" },
+          { label: "Converted", value: "converted" },
+        ],
+      },
+      { key: "source", label: "Source", type: "text", hiddenInGrid: true },
+      { key: "message", label: "Message", type: "textarea", hiddenInGrid: true },
+      { key: "adminNotes", label: "Admin Notes", type: "textarea", hiddenInGrid: true },
+      { key: "convertedClientId", label: "Client", type: "fk", fkTable: "clients", fkLabel: "name", readonly: true, hiddenInGrid: true },
+      { key: "convertedAt", label: "Converted", type: "datetime", readonly: true },
+      { key: "createdAt", label: "Submitted", type: "datetime", readonly: true },
+      { key: "updatedAt", label: "Updated", type: "datetime", readonly: true, hiddenInGrid: true },
+    ],
+  },
   {
     name: "payment_discrepancies",
     label: "Payment Discrepancies",
@@ -369,7 +401,6 @@ export const TABLES: TableDescriptor[] = [
       const when = start.toLocaleString("en-US", {
         weekday: "short", month: "short", day: "numeric",
         hour: "numeric", minute: "2-digit",
-        timeZone: BUSINESS_TIME_ZONE,
       });
       return title ? `${title} — ${when}` : when;
     },

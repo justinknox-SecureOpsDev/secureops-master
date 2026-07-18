@@ -2,7 +2,6 @@ import { useEffect, useState } from "react";
 import { useRoute } from "wouter";
 import { Loader2, AlertTriangle, Download, MapPin, Calendar, User, ShieldAlert } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { formatDate, formatDateTime } from "@/lib/format";
 
 type PublicIncident = {
   id: string;
@@ -112,11 +111,11 @@ export default function PublicIncidentPage() {
 
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mt-5 text-sm">
             <Fact icon={<Calendar className="w-4 h-4" />} label="Occurred">
-              {formatDateTime(data.occurredAt)}
+              {new Date(data.occurredAt).toLocaleString()}
             </Fact>
             {data.resolvedAt && (
               <Fact icon={<Calendar className="w-4 h-4" />} label="Resolved">
-                {formatDateTime(data.resolvedAt)}
+                {new Date(data.resolvedAt).toLocaleString()}
               </Fact>
             )}
             {(data.siteName || data.shiftTitle) && (
@@ -164,7 +163,7 @@ export default function PublicIncidentPage() {
               </a>
             </Button>
             <div className="text-xs text-muted-foreground text-right">
-              Link expires {formatDate(data.share.expiresAt)}<br />
+              Link expires {new Date(data.share.expiresAt).toLocaleDateString()}<br />
               View #{data.share.viewCount}
             </div>
           </div>

@@ -16,9 +16,10 @@ import {
 import { requireAdmin, requireAdminOrDispatcher } from "../middlewares/auth";
 import { getGeofenceRadiusMiles } from "../lib/geofence";
 import { businessDayWindow, businessTimeZone } from "../lib/businessTime";
-import { BASE_ELIGIBILITY_LEVEL, WORKER_ROLES, isWorkerRole } from "../lib/eligibility";
+import { requireFeature } from "../lib/features";
 
 const router: IRouter = Router();
+router.use("/dispatch", requireFeature("liveMap"));
 
 /**
  * GET /dispatch/config
@@ -394,13 +395,9 @@ router.post("/dispatch/assign-nearest", requireAdminOrDispatcher, async (req, re
         WHERE ${licensesTable.employeeId} = "users"."id"
           AND ${licensesTable.expiryDate} >= current_date
       )`,
-      // Effective capability level: greater of highest unexpired licence level,
-      // the position baseline (support_staff → 1), and the level-2 eligibility
-      // floor. The floor means EVERY worker surfaces as a candidate for
-      // unarmed (level <= 2) shifts even without a licence; armed (3) / PPO (4)
-      // still need the real licence. Safe to floor unconditionally here because
-      // this query is already scoped to WORKER_ROLES (never `client`) AND
-      // status='active'.
+      // Effective capability level: greater of highest unexpired licence level
+      // and the position baseline (support_staff → 1). Drives eligibility so
+      // support staff surface for level-1 support shifts even without a licence.
       effLevel: sql<number>`GREATEST(
         COALESCE((
           SELECT MAX(${licensesTable.level})::int
@@ -412,8 +409,7 @@ router.post("/dispatch/assign-nearest", requireAdminOrDispatcher, async (req, re
           SELECT CASE WHEN ${employeesTable.position} = 'support_staff' THEN 1 ELSE 0 END
           FROM ${employeesTable}
           WHERE ${employeesTable.userId} = "users"."id"
-        ), 0),
-        ${sql.raw(String(BASE_ELIGIBILITY_LEVEL))}
+        ), 0)
       )`,
       alreadyAssigned: sql<boolean>`EXISTS (
         SELECT 1 FROM ${shiftAssignmentsTable}
@@ -434,7 +430,7 @@ router.post("/dispatch/assign-nearest", requireAdminOrDispatcher, async (req, re
     })
     .from(usersTable)
     .where(and(
-      inArray(usersTable.role, [...WORKER_ROLES]),
+      eq(usersTable.role, "employee"),
       eq(usersTable.status, "active"),
     ));
 
@@ -677,7 +673,7 @@ router.post("/dispatch/officers/:userId/clock-in", requireAdmin, async (req, res
   };
 
   const [officer] = await db.select().from(usersTable).where(eq(usersTable.id, userId)).limit(1);
-  if (!officer || !isWorkerRole(officer.role)) {
+  if (!officer || officer.role !== "employee") {
     res.status(404).json({ error: "Not Found", message: "Officer not found" });
     return;
   }

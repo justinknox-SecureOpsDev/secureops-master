@@ -21,3 +21,12 @@ process.env.APP_BASE_URL = process.env.APP_BASE_URL ?? "http://localhost:8080";
 // cap in the test env only.
 process.env.APPLICATION_SUBMIT_RATE_LIMIT_MAX =
   process.env.APPLICATION_SUBMIT_RATE_LIMIT_MAX ?? "1000";
+
+// The public GET /org-directory/resolve limiter defaults to 60/IP/5min. The
+// dedicated rate-limit test in orgDirectory.test.ts needs to drive the endpoint
+// PAST its cap deterministically without firing 60+ requests, so lower the cap
+// in the test env. The functional org-directory tests isolate their own per-IP
+// buckets (distinct X-Forwarded-For per request) so this low cap never trips
+// them.
+process.env.ORG_DIRECTORY_RATE_LIMIT_MAX =
+  process.env.ORG_DIRECTORY_RATE_LIMIT_MAX ?? "10";

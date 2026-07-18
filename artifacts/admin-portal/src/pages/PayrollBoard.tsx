@@ -1,6 +1,6 @@
 import { Fragment, useEffect, useMemo, useState } from "react";
 import { useLocation } from "wouter";
-import { Banknote, Loader2, ChevronRight, ChevronDown, ArrowRight, AlertTriangle, Clock, DollarSign, Pencil, Archive, ArchiveRestore } from "lucide-react";
+import { Banknote, Loader2, ChevronRight, ChevronDown, ArrowRight, AlertTriangle, Clock, DollarSign, Pencil } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -8,7 +8,6 @@ import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription,
 } from "@/components/ui/dialog";
 import { api } from "@/lib/api";
-import { BUSINESS_TIME_ZONE } from "@/lib/format";
 
 type BoardBucket = {
   employeeId: string;
@@ -25,10 +24,6 @@ type BoardBucket = {
   existingPayrollEntryId: string | null;
   existingStatus: string | null;
   warnings: string[];
-  // Present only in the Archived view (snapshot metadata).
-  archivedAt?: string | null;
-  archivedByEmail?: string | null;
-  archiveReason?: string | null;
 };
 
 type BoardGroup = {
@@ -37,13 +32,13 @@ type BoardGroup = {
   periodStart: string;
   periodEnd: string;
   buckets: BoardBucket[];
-  status: "ready" | "partial" | "processed" | "archived";
+  status: "ready" | "partial" | "processed";
   totalHours: number;
   grossPay: number;
   officerCount: number;
 };
 
-type StatusFilter = "ready" | "partial" | "processed" | "all" | "archived";
+type StatusFilter = "ready" | "partial" | "processed" | "all";
 
 // Snapshot of a time entry's editable fields, captured in the audit log
 // before/after each admin correction. Mirrors timeEntryAudit.ts on the server.
@@ -81,7 +76,7 @@ const fmtDateTime = (iso: string | null | undefined): string => {
   if (!iso) return "—";
   const d = new Date(iso);
   if (isNaN(d.getTime())) return iso;
-  return d.toLocaleString(undefined, { month: "short", day: "numeric", hour: "numeric", minute: "2-digit", timeZone: BUSINESS_TIME_ZONE });
+  return d.toLocaleString(undefined, { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" });
 };
 
 const fmtSnapshotValue = (value: string | null | undefined, isDate: boolean): string => {
@@ -93,12 +88,10 @@ const fmtUsd = (n: number) =>
   `$${Number(n).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 
 const fmtWeekRange = (periodStart: string, periodEnd: string) => {
-  // Date-only ("YYYY-MM-DD") values: parse as UTC midnight and format in UTC
-  // so the literal calendar date shows regardless of the viewer's timezone.
-  const opts: Intl.DateTimeFormatOptions = { weekday: "short", month: "short", day: "numeric", timeZone: "UTC" };
-  const s = new Date(`${periodStart}T00:00:00Z`);
-  const e = new Date(`${periodEnd}T00:00:00Z`);
-  return `${s.toLocaleDateString("en-US", opts)} → ${e.toLocaleDateString("en-US", opts)}, ${e.getUTCFullYear()}`;
+  const opts: Intl.DateTimeFormatOptions = { weekday: "short", month: "short", day: "numeric" };
+  const s = new Date(`${periodStart}T00:00:00`);
+  const e = new Date(`${periodEnd}T00:00:00`);
+  return `${s.toLocaleDateString("en-US", opts)} → ${e.toLocaleDateString("en-US", opts)}, ${e.getFullYear()}`;
 };
 
 const bucketKey = (b: { employeeId: string; siteId: string | null; periodStart: string }) =>
@@ -109,13 +102,8 @@ const statusPill = (status: BoardGroup["status"]) => {
     ready: "bg-green-100 text-green-800",
     partial: "bg-amber-100 text-amber-800",
     processed: "bg-blue-100 text-blue-800",
-    archived: "bg-gray-200 text-gray-700",
   };
-  const label =
-    status === "ready" ? "Ready" :
-    status === "partial" ? "Partially processed" :
-    status === "archived" ? "Archived" :
-    "Processed";
+  const label = status === "ready" ? "Ready" : status === "partial" ? "Partially processed" : "Processed";
   return <span className={`text-xs px-2 py-0.5 rounded ${map[status]}`}>{label}</span>;
 };
 
@@ -152,12 +140,6 @@ export default function PayrollBoardPage() {
   const [rateInput, setRateInput] = useState("");
   const [onlyZeroRate, setOnlyZeroRate] = useState(true);
   const [rateBusy, setRateBusy] = useState(false);
-  // Archive dialog state. Archiving moves selected buckets off the working
-  // board into the Archived view (reviewable + restorable later).
-  const [archiveDialogOpen, setArchiveDialogOpen] = useState(false);
-  const [archiveReason, setArchiveReason] = useState("");
-  const [archiveBusy, setArchiveBusy] = useState(false);
-  const [unarchiveBusy, setUnarchiveBusy] = useState(false);
   const [toast, setToast] = useState<{ kind: "ok" | "err"; msg: string } | null>(null);
   const [sites, setSites] = useState<Array<{ id: string; name: string }>>([]);
   // Per-entry correction history dialog state. Sourced from audit_logs filtered
@@ -342,65 +324,6 @@ export default function PayrollBoardPage() {
     }
   };
 
-  // Archive the selected buckets. Server snapshots the current totals into a
-  // payroll_entry with status='archived'; processed/paid weeks are skipped.
-  const submitArchive = async () => {
-    if (selectedBuckets.length === 0) return;
-    setArchiveBusy(true);
-    try {
-      const resp = await api<{ archivedCount: number; skipped: unknown[] }>(
-        "/payroll/board/archive",
-        {
-          method: "POST",
-          body: {
-            reason: archiveReason.trim() || undefined,
-            selections: selectedBuckets.map((b) => ({
-              employeeId: b.employeeId,
-              siteId: b.siteId,
-              periodStart: b.periodStart,
-            })),
-          },
-        },
-      );
-      setArchiveDialogOpen(false);
-      setArchiveReason("");
-      const parts = [`Archived ${resp.archivedCount} officer-week${resp.archivedCount === 1 ? "" : "s"}`];
-      if (resp.skipped.length > 0) parts.push(`${resp.skipped.length} skipped`);
-      parts.push('view them under the "Archived" status filter');
-      showToast("ok", parts.join(" · "));
-      await reload();
-    } catch (e) {
-      showToast("err", `Couldn't archive: ${(e as Error).message}`);
-    } finally {
-      setArchiveBusy(false);
-    }
-  };
-
-  // Restore selected archived rows back to the working board (status → pending).
-  const submitUnarchive = async () => {
-    const ids = Array.from(
-      new Set(
-        selectedBuckets
-          .map((b) => b.existingPayrollEntryId)
-          .filter((v): v is string => !!v),
-      ),
-    );
-    if (ids.length === 0) return;
-    setUnarchiveBusy(true);
-    try {
-      const resp = await api<{ restoredCount: number }>(
-        "/payroll/board/unarchive",
-        { method: "POST", body: { ids } },
-      );
-      showToast("ok", `Restored ${resp.restoredCount} officer-week${resp.restoredCount === 1 ? "" : "s"} to the board.`);
-      await reload();
-    } catch (e) {
-      showToast("err", `Couldn't restore: ${(e as Error).message}`);
-    } finally {
-      setUnarchiveBusy(false);
-    }
-  };
-
   const submitProcess = async () => {
     if (selectedBuckets.length === 0) return;
     setBusy(true);
@@ -462,7 +385,6 @@ export default function PayrollBoardPage() {
             <option value="partial">Partially processed</option>
             <option value="processed">Processed</option>
             <option value="all">All</option>
-            <option value="archived">Archived</option>
           </select>
         </div>
         <div>
@@ -548,49 +470,24 @@ export default function PayrollBoardPage() {
             <span className="ml-4 brand-gold">·  {fmtUsd(selGross)} gross</span>
           </div>
         </div>
-        {statusFilter === "archived" ? (
-          <Button
-            variant="outline"
-            className="bg-white/10 border-white/30 text-white hover:bg-white/20"
-            onClick={() => void submitUnarchive()}
-            disabled={selectedBuckets.length === 0 || unarchiveBusy}
-            title="Restore the selected archived weeks back to the working board"
-          >
-            {unarchiveBusy ? <Loader2 className="w-4 h-4 animate-spin mr-2" /> : <ArchiveRestore className="w-4 h-4 mr-2" />}
-            Restore to board
-          </Button>
-        ) : (
-          <>
-            <Button
-              variant="outline"
-              className="bg-white/10 border-white/30 text-white hover:bg-white/20"
-              onClick={() => { setRateInput(""); setOnlyZeroRate(true); setRateDialogOpen(true); }}
-              disabled={selectedBuckets.length === 0 || rateBusy}
-              title="Set a pay rate on all time entries inside the selected buckets"
-            >
-              {rateBusy ? <Loader2 className="w-4 h-4 animate-spin mr-2" /> : <DollarSign className="w-4 h-4 mr-2" />}
-              Apply pay rate
-            </Button>
-            <Button
-              variant="outline"
-              className="bg-white/10 border-white/30 text-white hover:bg-white/20"
-              onClick={() => { setArchiveReason(""); setArchiveDialogOpen(true); }}
-              disabled={selectedBuckets.length === 0 || archiveBusy}
-              title="Move the selected weeks off the board into the Archived view (restorable later)"
-            >
-              {archiveBusy ? <Loader2 className="w-4 h-4 animate-spin mr-2" /> : <Archive className="w-4 h-4 mr-2" />}
-              Archive
-            </Button>
-            <Button
-              className="bg-brand-gold text-brand-navy hover:bg-brand-gold/90"
-              onClick={() => setDialogOpen(true)}
-              disabled={selectedBuckets.length === 0 || busy}
-            >
-              {busy ? <Loader2 className="w-4 h-4 animate-spin mr-2" /> : <ArrowRight className="w-4 h-4 mr-2" />}
-              Process selected
-            </Button>
-          </>
-        )}
+        <Button
+          variant="outline"
+          className="bg-white/10 border-white/30 text-white hover:bg-white/20"
+          onClick={() => { setRateInput(""); setOnlyZeroRate(true); setRateDialogOpen(true); }}
+          disabled={selectedBuckets.length === 0 || rateBusy}
+          title="Set a pay rate on all time entries inside the selected buckets"
+        >
+          {rateBusy ? <Loader2 className="w-4 h-4 animate-spin mr-2" /> : <DollarSign className="w-4 h-4 mr-2" />}
+          Apply pay rate
+        </Button>
+        <Button
+          className="bg-brand-gold text-brand-navy hover:bg-brand-gold/90"
+          onClick={() => setDialogOpen(true)}
+          disabled={selectedBuckets.length === 0 || busy}
+        >
+          {busy ? <Loader2 className="w-4 h-4 animate-spin mr-2" /> : <ArrowRight className="w-4 h-4 mr-2" />}
+          Process selected
+        </Button>
       </div>
 
       {/* Groups */}
@@ -600,9 +497,7 @@ export default function PayrollBoardPage() {
         </div>
       ) : visibleGroups.length === 0 ? (
         <div className="bg-white border rounded-lg p-12 text-center text-muted-foreground">
-          {statusFilter === "archived"
-            ? "No archived payroll weeks match these filters."
-            : groups.length > 0 && hideWarnings
+          {groups.length > 0 && hideWarnings
             ? "All buckets have warnings — uncheck \"Hide buckets with warnings\" to see them."
             : "No approved time entries match these filters."}
         </div>
@@ -708,39 +603,26 @@ export default function PayrollBoardPage() {
                                     ))}
                                   </ul>
                                 )}
-                                {b.existingStatus === "archived" && b.archivedAt && (
-                                  <div className="mt-1 text-[11px] text-muted-foreground">
-                                    Archived {fmtDateTime(b.archivedAt)}
-                                    {b.archivedByEmail ? ` by ${b.archivedByEmail}` : ""}
-                                    {b.archiveReason ? <> — <span className="italic">“{b.archiveReason}”</span></> : null}
-                                  </div>
-                                )}
                               </td>
                               <td className="px-3 py-2 text-right">{b.totalHours.toFixed(2)}</td>
                               <td className="px-3 py-2 text-right">{fmtUsd(b.hourlyRate)}</td>
                               <td className="px-3 py-2 text-right font-semibold">{fmtUsd(b.grossPay)}</td>
                               <td className="px-3 py-2 text-xs text-muted-foreground">
-                                {b.existingStatus === "archived" ? (
-                                  <span title="Totals were snapshotted when this week was archived — restore it to the board to see live time entries">
-                                    snapshot
-                                  </span>
-                                ) : (
-                                  <button
-                                    type="button"
-                                    className="inline-flex items-center gap-1 hover:underline"
-                                    onClick={() => {
-                                      const next = new Set(openBuckets);
-                                      if (next.has(k)) next.delete(k); else next.add(k);
-                                      setOpenBuckets(next);
-                                    }}
-                                    title="Show underlying time entries"
-                                  >
-                                    {bucketOpen
-                                      ? <ChevronDown className="w-3 h-3" />
-                                      : <ChevronRight className="w-3 h-3" />}
-                                    {b.entries.length} entr{b.entries.length === 1 ? "y" : "ies"}
-                                  </button>
-                                )}
+                                <button
+                                  type="button"
+                                  className="inline-flex items-center gap-1 hover:underline"
+                                  onClick={() => {
+                                    const next = new Set(openBuckets);
+                                    if (next.has(k)) next.delete(k); else next.add(k);
+                                    setOpenBuckets(next);
+                                  }}
+                                  title="Show underlying time entries"
+                                >
+                                  {bucketOpen
+                                    ? <ChevronDown className="w-3 h-3" />
+                                    : <ChevronRight className="w-3 h-3" />}
+                                  {b.entries.length} entr{b.entries.length === 1 ? "y" : "ies"}
+                                </button>
                               </td>
                               <td className="px-3 py-2">
                                 {b.existingStatus
@@ -758,7 +640,7 @@ export default function PayrollBoardPage() {
                                   <table className="w-full text-xs">
                                     <thead className="text-[10px] uppercase tracking-wider text-muted-foreground">
                                       <tr>
-                                        <th className="px-2 py-1 text-left">Clock-in</th>
+                                        <th className="px-2 py-1 text-left">Clock-in (UTC)</th>
                                         <th className="px-2 py-1 text-right">Hours</th>
                                         <th className="px-2 py-1 text-right">Rate</th>
                                         <th className="px-2 py-1 text-right">Line gross</th>
@@ -770,7 +652,7 @@ export default function PayrollBoardPage() {
                                         <tr key={e.id} className={`border-t border-gray-200 ${!e.hasClockOut ? "bg-amber-50/60" : ""}`}>
                                           <td className="px-2 py-1">
                                             <div className="flex items-center gap-1.5">
-                                              <span>{fmtDateTime(e.clockInTime)}</span>
+                                              <span>{new Date(e.clockInTime).toLocaleString()}</span>
                                               {e.holiday && (
                                                 <span
                                                   className="inline-flex items-center rounded bg-amber-100 px-1.5 py-0.5 text-[10px] font-medium text-amber-900"
@@ -848,7 +730,7 @@ export default function PayrollBoardPage() {
             <DialogTitle>Set missing clock-out</DialogTitle>
             <DialogDescription>
               {fixEntry?.employeeName ?? "This officer"} clocked in at{" "}
-              {fixEntry && fmtDateTime(fixEntry.clockInTime)} but never clocked out.
+              {fixEntry && new Date(fixEntry.clockInTime).toLocaleString()} but never clocked out.
               Pick a clock-out time and we'll recompute their hours. This is recorded in the audit log.
             </DialogDescription>
           </DialogHeader>
@@ -867,7 +749,7 @@ export default function PayrollBoardPage() {
                 <div className="font-medium">Use scheduled shift end</div>
                 <div className="text-xs text-muted-foreground">
                   {fixEntry?.scheduledEnd
-                    ? fmtDateTime(fixEntry.scheduledEnd)
+                    ? new Date(fixEntry.scheduledEnd).toLocaleString()
                     : "No linked shift — pick a custom time instead."}
                 </div>
               </div>
@@ -948,41 +830,6 @@ export default function PayrollBoardPage() {
             <Button onClick={submitProcess} disabled={busy} className="bg-brand-navy text-white hover:opacity-90">
               {busy ? <Loader2 className="w-4 h-4 animate-spin mr-2" /> : null}
               Confirm
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
-
-      <Dialog open={archiveDialogOpen} onOpenChange={setArchiveDialogOpen}>
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle>Archive {selectedBuckets.length} officer-week{selectedBuckets.length === 1 ? "" : "s"}</DialogTitle>
-            <DialogDescription>
-              Archived weeks leave the working board and won't be processed or paid, but nothing is
-              deleted — find them any time under the "Archived" status filter, where you can restore
-              them to the board. Weeks already processed or paid are skipped.
-            </DialogDescription>
-          </DialogHeader>
-          <div className="space-y-3 py-2">
-            <div>
-              <Label className="text-xs">Reason (optional)</Label>
-              <textarea
-                className="mt-1 w-full border rounded p-2 text-sm min-h-[70px]"
-                maxLength={500}
-                placeholder="e.g. duplicate entries, disputed hours, wrong site…"
-                value={archiveReason}
-                onChange={(e) => setArchiveReason(e.target.value)}
-              />
-            </div>
-            <div className="text-xs text-muted-foreground border-t pt-2">
-              Total gross being archived: <strong>{fmtUsd(selGross)}</strong>
-            </div>
-          </div>
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setArchiveDialogOpen(false)} disabled={archiveBusy}>Cancel</Button>
-            <Button onClick={submitArchive} disabled={archiveBusy} className="bg-brand-navy text-white hover:opacity-90">
-              {archiveBusy ? <Loader2 className="w-4 h-4 animate-spin mr-2" /> : <Archive className="w-4 h-4 mr-2" />}
-              Archive
             </Button>
           </DialogFooter>
         </DialogContent>

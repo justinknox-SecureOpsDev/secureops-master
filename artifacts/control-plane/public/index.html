@@ -1,0 +1,144 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>WCSG Fleet — Control Plane</title>
+    <link rel="stylesheet" href="/styles.css" />
+  </head>
+  <body>
+    <div id="app">
+      <!-- Login view -->
+      <section id="login-view" class="view">
+        <div class="login-card">
+          <div class="brand">
+            <div class="brand-mark">CP</div>
+            <div>
+              <h1>Fleet Control Plane</h1>
+              <p class="muted">WCSG multi-tenant operations</p>
+            </div>
+          </div>
+          <form id="login-form">
+            <label>Operator email<input id="login-email" type="email" autocomplete="username" required /></label>
+            <label>Password<input id="login-password" type="password" autocomplete="current-password" required /></label>
+            <button type="submit" class="primary">Sign in</button>
+            <p id="login-error" class="error" hidden></p>
+          </form>
+        </div>
+      </section>
+
+      <!-- Dashboard view -->
+      <section id="dash-view" class="view" hidden>
+        <header class="topbar">
+          <div class="brand">
+            <div class="brand-mark">CP</div>
+            <div><strong>Fleet Control Plane</strong></div>
+          </div>
+          <div class="topbar-actions">
+            <label class="fleet-target">Fleet target version
+              <input id="fleet-target" type="text" placeholder="e.g. a1b2c3d" />
+            </label>
+            <button id="save-fleet-target" class="ghost">Save target</button>
+            <button id="poll-now" class="ghost">Poll now</button>
+            <button id="add-customer" class="primary">Add customer</button>
+            <button id="logout" class="ghost">Sign out</button>
+          </div>
+        </header>
+
+        <main>
+          <div id="summary" class="summary"></div>
+          <table class="fleet">
+            <thead>
+              <tr>
+                <th>Customer</th>
+                <th>Org code</th>
+                <th>Backend</th>
+                <th>Status</th>
+                <th>Version</th>
+                <th>Target</th>
+                <th>Last seen</th>
+                <th></th>
+              </tr>
+            </thead>
+            <tbody id="fleet-body"></tbody>
+          </table>
+          <p id="empty" class="muted" hidden>No customers registered yet. Add your first one.</p>
+
+          <section class="activity">
+            <div class="activity-head">
+              <h2>Recent activity</h2>
+              <div class="activity-head-actions">
+                <button id="download-activity" class="ghost small">Download CSV</button>
+                <button id="refresh-activity" class="ghost small">Refresh</button>
+              </div>
+            </div>
+            <div class="activity-filters">
+              <label class="small">Customer
+                <select id="filter-customer">
+                  <option value="">All customers</option>
+                </select>
+              </label>
+              <label class="small">Kind
+                <select id="filter-kind">
+                  <option value="">All kinds</option>
+                  <option value="brand">Brand</option>
+                  <option value="features">Features</option>
+                </select>
+              </label>
+              <label class="small">From<input id="filter-since" type="date" /></label>
+              <label class="small">To<input id="filter-until" type="date" /></label>
+              <button id="clear-filters" class="ghost small">Clear</button>
+            </div>
+            <div id="activity-body" class="activity-body"></div>
+          </section>
+        </main>
+      </section>
+    </div>
+
+    <!-- Customer editor modal -->
+    <div id="modal" class="modal" hidden>
+      <div class="modal-card">
+        <h2 id="modal-title">Add customer</h2>
+        <form id="customer-form">
+          <input type="hidden" id="c-id" />
+          <label>Name<input id="c-name" type="text" required /></label>
+          <label>Org code<input id="c-orgCode" type="text" placeholder="acme" required /></label>
+          <label>Backend origin<input id="c-apiBaseUrl" type="text" placeholder="https://acme.example.com" required /></label>
+          <div class="row">
+            <label>Contact name<input id="c-contactName" type="text" /></label>
+            <label>Contact email<input id="c-contactEmail" type="email" /></label>
+          </div>
+          <div class="row">
+            <label>Target version (override)<input id="c-targetVersion" type="text" placeholder="optional" /></label>
+            <label class="check"><input id="c-isActive" type="checkbox" checked /> Active</label>
+          </div>
+          <label>Management secret (HMAC)
+            <input id="c-mgmtSecret" type="password" placeholder="leave blank to keep existing" />
+          </label>
+          <p class="muted" id="secret-hint"></p>
+          <label>Notes<textarea id="c-notes" rows="2"></textarea></label>
+          <p id="modal-error" class="error" hidden></p>
+          <div class="modal-actions">
+            <button type="button" id="modal-cancel" class="ghost">Cancel</button>
+            <button type="submit" class="primary">Save</button>
+          </div>
+        </form>
+      </div>
+    </div>
+
+    <!-- Remote settings modal -->
+    <div id="settings-modal" class="modal" hidden>
+      <div class="modal-card wide">
+        <h2 id="settings-title">Remote settings</h2>
+        <div id="settings-body" class="settings-body">Loading…</div>
+        <div id="settings-history" class="settings-history"></div>
+        <div class="modal-actions">
+          <button type="button" id="settings-close" class="ghost">Close</button>
+        </div>
+      </div>
+    </div>
+
+    <div id="toast" class="toast" hidden></div>
+    <script src="/app.js"></script>
+  </body>
+</html>

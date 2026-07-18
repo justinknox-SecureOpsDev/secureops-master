@@ -4,7 +4,7 @@ import { db, clientsTable, sitesTable } from "@workspace/db";
 import { requireAdmin, requireAdminOrSiteManager } from "../middlewares/auth";
 import { geocodeOnelineAddress } from "../lib/geocode";
 import { clientDeletionBlockers, refuseIfBlocked } from "../lib/siteDeletion";
-import { getManagedSiteIds } from "../lib/siteManagerAuth";
+import { getManagedSiteIds } from "../lib/siteManagerAuthz";
 
 const router: IRouter = Router();
 
@@ -12,7 +12,7 @@ const router: IRouter = Router();
 // (the client `name`) when scheduling. Strip finance (billing address / payment
 // terms), contact PII (contact name/email/phone), and free-text notes — none of
 // which a site manager has a remit to see. Harmless ids/timestamps pass through.
-function projectClientForLead<T extends Record<string, unknown>>(row: T): Partial<T> {
+function projectClientForSiteManager<T extends Record<string, unknown>>(row: T): Partial<T> {
   const {
     billingAddress,
     paymentTermsDays,
@@ -27,9 +27,9 @@ function projectClientForLead<T extends Record<string, unknown>>(row: T): Partia
 
 // Site managers need the client list to render the client of the sites they
 // manage when scheduling — but ONLY for those clients, and with finance + contact
-// PII stripped (see projectClientForLead). Returning every client would leak
-// cross-site client PII for clients whose sites the manager has no remit over.
-// Admins see the full list.
+// PII stripped (see projectClientForSiteManager). Returning every client would
+// leak cross-site client PII for clients whose sites the manager has no remit
+// over. Admins see the full list.
 router.get("/clients", requireAdminOrSiteManager, async (req, res): Promise<void> => {
   if (req.user!.role === "site_manager") {
     const managedSiteIds = await getManagedSiteIds(req.user!.userId);
@@ -43,7 +43,7 @@ router.get("/clients", requireAdminOrSiteManager, async (req, res): Promise<void
     );
     if (clientIds.length === 0) { res.json([]); return; }
     const rows = await db.select().from(clientsTable).where(inArray(clientsTable.id, clientIds));
-    res.json(rows.map((r) => projectClientForLead(r)));
+    res.json(rows.map((r) => projectClientForSiteManager(r)));
     return;
   }
   const rows = await db.select().from(clientsTable);

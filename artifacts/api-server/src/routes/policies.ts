@@ -10,8 +10,10 @@ import {
 import { z } from "zod/v4";
 import { requireAdmin, requireAuth } from "../middlewares/auth";
 import { ObjectStorageService, ObjectNotFoundError } from "../lib/objectStorage";
+import { requireFeature } from "../lib/features";
 
 const router: IRouter = Router();
+router.use(["/admin/policies", "/policies"], requireFeature("policies"));
 const storage = new ObjectStorageService();
 
 const SLUG_RE = /^[a-z0-9_]+$/;

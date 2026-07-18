@@ -1,1016 +1,502 @@
-import { useState, useMemo } from "react";
-import { formatTime, formatDate } from "@/lib/format";
-import { useQuery } from "@tanstack/react-query";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import {
-  BarChart, Bar, AreaChart, Area, LineChart, Line,
-  XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer,
-} from "recharts";
-import {
-  DollarSign, TrendingUp, TrendingDown, Users, Clock,
-  AlertTriangle, Calendar, ChevronDown, ChevronUp, Loader2,
-  UserCheck, Download, FileText,
+  BarChart3, Download, FileText, Loader2, AlertTriangle,
+  TrendingUp, TrendingDown,
 } from "lucide-react";
-import { Link } from "wouter";
 import {
-  getGetAnalyticsSummaryQueryOptions,
-  getGetAnalyticsOfficerHistoryQueryOptions,
-  useGetClients,
-} from "@workspace/api-client-react";
-import { fetchWithAuth } from "@/lib/api";
+  Bar, BarChart, CartesianGrid, Line, LineChart, XAxis, YAxis,
+} from "recharts";
 import { Button } from "@/components/ui/button";
-import {
-  Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription,
-} from "@/components/ui/dialog";
-import {
-  Select, SelectTrigger, SelectValue, SelectContent, SelectItem,
-} from "@/components/ui/select";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Badge } from "@/components/ui/badge";
 import {
-  Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
-} from "@/components/ui/table";
+  Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
+} from "@/components/ui/select";
+import {
+  ChartContainer, ChartTooltip, ChartTooltipContent, type ChartConfig,
+} from "@/components/ui/chart";
+import { api, fetchWithAuth, ApiError } from "@/lib/api";
 
-// ── Utilities ────────────────────────────────────────────────────────────────
+// Response shapes mirror artifacts/api-server/src/lib/analytics.ts (contract
+// lives in lib/api-spec/openapi.yaml — GET /analytics/summary + /officers).
+type WeekBucket = {
+  weekStart: string; // business-TZ Monday, YYYY-MM-DD
+  revenue: number;
+  laborCost: number;
+  pnl: number;
+  hoursWorked: number;
+  incidentCount: number;
+};
 
-function fmtUSD(n: number): string {
-  return new Intl.NumberFormat("en-US", { style: "currency", currency: "USD", maximumFractionDigits: 0 }).format(n);
+type SiteRow = {
+  siteId: string;
+  siteName: string;
+  clientName: string | null;
+  revenue: number;
+  laborCost: number;
+  pnl: number;
+  hoursWorked: number;
+  coveragePct: number | null;
+};
+
+type Summary = {
+  revenue: number;
+  laborCost: number;
+  pnl: number;
+  marginPct: number | null;
+  hoursWorked: number;
+  hoursScheduled: number;
+  coveragePct: number | null;
+  noShows: number;
+  unfilledShifts: number;
+  incidents: {
+    total: number;
+    low: number;
+    medium: number;
+    high: number;
+    critical: number;
+    open: number;
+    resolved: number;
+  };
+  weeklyTrend: WeekBucket[];
+  sites: SiteRow[];
+};
+
+type OfficerRow = {
+  employeeId: string;
+  name: string;
+  hoursWorked: number;
+  shiftsCompleted: number;
+  incidentsFiled: number;
+  punctualityPct: number | null;
+  trend: { weekStart: string; hoursWorked: number }[];
+};
+
+type ClientOption = { id: string; name: string };
+
+const usd = new Intl.NumberFormat("en-US", {
+  style: "currency",
+  currency: "USD",
+  maximumFractionDigits: 0,
+});
+const usdCents = new Intl.NumberFormat("en-US", {
+  style: "currency",
+  currency: "USD",
+});
+
+const fmtMoney = (n: number) => (Math.abs(n) >= 1000 ? usd.format(n) : usdCents.format(n));
+const fmtPct = (n: number | null) => (n == null ? "—" : `${n.toFixed(1)}%`);
+const fmtHours = (n: number) =>
+  `${n.toLocaleString("en-US", { maximumFractionDigits: 1 })} h`;
+
+/** Local calendar date as YYYY-MM-DD (matches the server's business-TZ day semantics closely enough for defaults). */
+function localIso(d: Date): string {
+  return d.toLocaleDateString("en-CA");
 }
 
-function fmtPct(n: number): string {
-  return `${n.toFixed(1)}%`;
+/** "2025-06-02" -> "Jun 2" for chart axis ticks. */
+function weekLabel(iso: string): string {
+  const [y, m, d] = iso.split("-").map(Number);
+  return new Date(Date.UTC(y!, m! - 1, d!)).toLocaleDateString("en-US", {
+    month: "short",
+    day: "numeric",
+    timeZone: "UTC",
+  });
 }
 
-function fmtHours(n: number): string {
-  return `${n.toFixed(1)} h`;
-}
+const moneyChartConfig = {
+  revenue: { label: "Revenue", color: "hsl(var(--chart-1))" },
+  laborCost: { label: "Labor cost", color: "hsl(var(--chart-2))" },
+} satisfies ChartConfig;
 
-function toIsoDate(d: Date): string {
-  return d.toISOString().slice(0, 10);
-}
+const hoursChartConfig = {
+  hoursWorked: { label: "Hours worked", color: "hsl(var(--chart-3))" },
+} satisfies ChartConfig;
 
-function startOfWeek(d: Date): Date {
-  const dow = (d.getDay() + 6) % 7; // Mon=0
-  const mon = new Date(d);
-  mon.setDate(d.getDate() - dow);
-  mon.setHours(0, 0, 0, 0);
-  return mon;
-}
-
-function endOfWeek(d: Date): Date {
-  const sun = new Date(startOfWeek(d));
-  sun.setDate(sun.getDate() + 6);
-  sun.setHours(23, 59, 59, 999);
-  return sun;
-}
-
-function startOfMonth(d: Date): Date {
-  return new Date(d.getFullYear(), d.getMonth(), 1);
-}
-
-/** Filesystem-safe slug for a client name — mirrors the server's filename logic. */
-function clientFileSlug(name: string): string {
+function punctualityBadge(pct: number | null) {
+  if (pct == null) {
+    return <span className="text-muted-foreground">—</span>;
+  }
+  const cls =
+    pct >= 95
+      ? "bg-emerald-100 text-emerald-800"
+      : pct >= 85
+        ? "bg-amber-100 text-amber-800"
+        : "bg-red-100 text-red-800";
   return (
-    name
-      .toLowerCase()
-      .replace(/[^a-z0-9]+/g, "-")
-      .replace(/^-+|-+$/g, "")
-      .slice(0, 40) || "client"
+    <span className={`inline-block rounded-full px-2 py-0.5 text-xs font-medium ${cls}`}>
+      {pct.toFixed(1)}%
+    </span>
   );
 }
 
-// ── Date Presets ──────────────────────────────────────────────────────────────
-
-type Preset = "this-week" | "last-week" | "mtd" | "last-30" | "custom";
-
-function presetRange(p: Preset): { start: string; end: string } {
-  const today = new Date();
-  switch (p) {
-    case "this-week":
-      return { start: toIsoDate(startOfWeek(today)), end: toIsoDate(today) };
-    case "last-week": {
-      const thisMonday = startOfWeek(today);
-      const lastMonday = new Date(thisMonday);
-      lastMonday.setDate(thisMonday.getDate() - 7);
-      const lastSunday = endOfWeek(lastMonday);
-      return { start: toIsoDate(lastMonday), end: toIsoDate(lastSunday) };
-    }
-    case "mtd":
-      return { start: toIsoDate(startOfMonth(today)), end: toIsoDate(today) };
-    case "last-30": {
-      const ago = new Date(today);
-      ago.setDate(today.getDate() - 29);
-      return { start: toIsoDate(ago), end: toIsoDate(today) };
-    }
-    default:
-      return { start: toIsoDate(today), end: toIsoDate(today) };
-  }
-}
-
-// ── Metric card ───────────────────────────────────────────────────────────────
-
-function MetricCard({
-  label, value, sub, icon: Icon, colorClass = "text-foreground",
-}: {
+function KpiCard({ label, value, sub, tone }: {
   label: string;
   value: string;
   sub?: string;
-  icon: React.ComponentType<{ className?: string }>;
-  colorClass?: string;
+  tone?: "good" | "bad";
 }) {
   return (
-    <div className="border rounded-lg bg-card p-4 flex flex-col gap-1">
-      <div className="flex items-center justify-between">
-        <span className="text-xs text-muted-foreground font-medium uppercase tracking-wide">{label}</span>
-        <Icon className="w-4 h-4 text-muted-foreground" />
+    <div className="rounded-lg border bg-card p-4 shadow-sm">
+      <div className="text-xs font-medium uppercase tracking-wide text-muted-foreground">{label}</div>
+      <div className={`mt-1 flex items-center gap-1.5 text-2xl font-semibold ${
+        tone === "good" ? "text-emerald-700" : tone === "bad" ? "text-red-700" : "text-foreground"
+      }`}>
+        {tone === "good" && <TrendingUp className="h-5 w-5" aria-hidden="true" />}
+        {tone === "bad" && <TrendingDown className="h-5 w-5" aria-hidden="true" />}
+        {value}
       </div>
-      <div className={`text-2xl font-bold ${colorClass}`}>{value}</div>
-      {sub && <div className="text-xs text-muted-foreground">{sub}</div>}
+      {sub && <div className="mt-1 text-xs text-muted-foreground">{sub}</div>}
     </div>
   );
 }
-
-// ── Section header ────────────────────────────────────────────────────────────
-
-function SectionHeader({ title, sub }: { title: string; sub?: string }) {
-  return (
-    <div className="mb-3">
-      <h2 className="text-base font-semibold">{title}</h2>
-      {sub && <p className="text-xs text-muted-foreground">{sub}</p>}
-    </div>
-  );
-}
-
-// ── Severity badge ────────────────────────────────────────────────────────────
-
-const SEVERITY_COLORS: Record<string, string> = {
-  low: "bg-blue-100 text-blue-800",
-  medium: "bg-amber-100 text-amber-800",
-  high: "bg-orange-100 text-orange-800",
-  critical: "bg-red-100 text-red-800",
-};
-
-// ── Officer trends dialog ─────────────────────────────────────────────────────
-
-function OfficerTrendsDialog({
-  officer, onClose,
-}: {
-  officer: { userId: string; name: string } | null;
-  onClose: () => void;
-}) {
-  const [weeks, setWeeks] = useState("12");
-
-  const { data, isLoading, isError } = useQuery({
-    ...getGetAnalyticsOfficerHistoryQueryOptions({
-      userId: officer?.userId ?? "",
-      weeks: Number(weeks),
-    }),
-    enabled: Boolean(officer),
-    staleTime: 60_000,
-  });
-
-  const chartData = useMemo(
-    () =>
-      (data?.points ?? []).map((p) => ({
-        ...p,
-        // Recharts skips null values when connectNulls is off → visible gaps
-        // for weeks with no assigned shifts.
-        attendanceRate: p.attendanceRate ?? null,
-        reliabilityScore: p.reliabilityScore ?? null,
-      })),
-    [data?.points],
-  );
-
-  const activeWeeks = useMemo(
-    () => (data?.points ?? []).filter((p) => p.shiftsAssigned > 0).length,
-    [data?.points],
-  );
-
-  return (
-    <Dialog open={Boolean(officer)} onOpenChange={(open) => { if (!open) onClose(); }}>
-      <DialogContent className="sm:max-w-2xl">
-        <DialogHeader>
-          <DialogTitle>Performance trends — {officer?.name}</DialogTitle>
-          <DialogDescription>
-            Weekly attendance rate and reliability score. Gaps are weeks with no assigned shifts.
-          </DialogDescription>
-        </DialogHeader>
-
-        <div className="flex items-center justify-between gap-2">
-          <div className="text-xs text-muted-foreground">
-            {isLoading
-              ? "Loading…"
-              : activeWeeks === 0
-                ? "No shift activity in this window"
-                : `Active in ${activeWeeks} of the last ${weeks} weeks`}
-          </div>
-          <Select value={weeks} onValueChange={setWeeks}>
-            <SelectTrigger className="h-8 text-xs w-32" aria-label="Trend window in weeks">
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="8">Last 8 weeks</SelectItem>
-              <SelectItem value="12">Last 12 weeks</SelectItem>
-              <SelectItem value="26">Last 26 weeks</SelectItem>
-            </SelectContent>
-          </Select>
-        </div>
-
-        {isError ? (
-          <div className="text-sm text-red-600 py-8 text-center">Failed to load trend data.</div>
-        ) : isLoading ? (
-          <div className="flex items-center justify-center py-16">
-            <Loader2 className="w-5 h-5 animate-spin text-muted-foreground" />
-          </div>
-        ) : (
-          <div className="h-64 w-full">
-            <ResponsiveContainer width="100%" height="100%">
-              <LineChart data={chartData} margin={{ top: 8, right: 8, bottom: 0, left: -16 }}>
-                <CartesianGrid strokeDasharray="3 3" className="stroke-muted" />
-                <XAxis dataKey="bucket" tick={{ fontSize: 10 }} interval="preserveStartEnd" />
-                <YAxis domain={[0, 100]} tick={{ fontSize: 10 }} />
-                <Tooltip
-                  formatter={(value, name) => [
-                    value === null || value === undefined ? "—" : `${Number(value).toFixed(1)}%`,
-                    name,
-                  ]}
-                />
-                <Legend wrapperStyle={{ fontSize: 12 }} />
-                <Line
-                  type="monotone"
-                  dataKey="attendanceRate"
-                  name="Attendance rate"
-                  stroke="#2563eb"
-                  strokeWidth={2}
-                  dot={{ r: 2.5 }}
-                  connectNulls={false}
-                />
-                <Line
-                  type="monotone"
-                  dataKey="reliabilityScore"
-                  name="Reliability score"
-                  stroke="#c9a84c"
-                  strokeWidth={2}
-                  dot={{ r: 2.5 }}
-                  connectNulls={false}
-                />
-              </LineChart>
-            </ResponsiveContainer>
-          </div>
-        )}
-      </DialogContent>
-    </Dialog>
-  );
-}
-
-// ── Main component ────────────────────────────────────────────────────────────
-
-type SortCol = "siteName" | "revenue" | "laborCost" | "profit" | "hoursWorked" | "hoursScheduled" | "noShows" | "unfilledShifts" | "incidents";
-type OfficerSortCol = "name" | "shiftsAssigned" | "shiftsCompleted" | "noShows" | "attendanceRate" | "onTimeRate" | "avgMinutesLate" | "hoursWorked" | "hoursScheduled" | "rejectedEntries" | "rejectionRate" | "incidentTotal" | "reliabilityScore";
 
 export default function AnalyticsPage() {
-  const [preset, setPreset] = useState<Preset>("last-30");
-  const [customStart, setCustomStart] = useState("");
-  const [customEnd, setCustomEnd] = useState("");
+  const today = useMemo(() => new Date(), []);
+  const [start, setStart] = useState(() =>
+    localIso(new Date(today.getTime() - 55 * 86_400_000)));
+  const [end, setEnd] = useState(() => localIso(today));
   const [clientId, setClientId] = useState<string>("all");
-  const [showMissed, setShowMissed] = useState(false);
-  const [sortCol, setSortCol] = useState<SortCol>("revenue");
-  const [sortDir, setSortDir] = useState<"asc" | "desc">("desc");
-  const [officerSortCol, setOfficerSortCol] = useState<OfficerSortCol>("reliabilityScore");
-  const [officerSortDir, setOfficerSortDir] = useState<"asc" | "desc">("desc");
-  const [trendOfficer, setTrendOfficer] = useState<{ userId: string; name: string } | null>(null);
 
-  const { start, end } = useMemo(() => {
-    if (preset === "custom" && customStart && customEnd) {
-      return { start: customStart, end: customEnd };
-    }
-    if (preset === "custom") return { start: "", end: "" };
-    return presetRange(preset);
-  }, [preset, customStart, customEnd]);
+  const [clients, setClients] = useState<ClientOption[]>([]);
+  const [summary, setSummary] = useState<Summary | null>(null);
+  const [officers, setOfficers] = useState<OfficerRow[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [downloading, setDownloading] = useState<"csv" | "pdf" | null>(null);
 
-  const enabled = Boolean(start && end && start <= end);
+  useEffect(() => {
+    let cancelled = false;
+    api<Array<{ id: string; name: string }>>("/clients")
+      .then((rows) => {
+        if (!cancelled) setClients(rows.map((r) => ({ id: r.id, name: r.name })));
+      })
+      .catch(() => { /* filter dropdown is best-effort; page still works */ });
+    return () => { cancelled = true; };
+  }, []);
 
-  const { data: clients } = useGetClients();
-  const selectedClient = useMemo(
-    () => (clientId === "all" ? null : clients?.find((c) => c.id === clientId) ?? null),
-    [clientId, clients],
-  );
+  const rangeInvalid =
+    !/^\d{4}-\d{2}-\d{2}$/.test(start) ||
+    !/^\d{4}-\d{2}-\d{2}$/.test(end) ||
+    end < start;
 
-  const { data, isLoading, isError } = useQuery({
-    ...getGetAnalyticsSummaryQueryOptions({
-      start,
-      end,
-      ...(clientId !== "all" ? { clientId } : {}),
-    }),
-    enabled,
-    staleTime: 60_000,
-  });
+  const query = useMemo(() => {
+    const qs = new URLSearchParams({ start, end });
+    if (clientId !== "all") qs.set("clientId", clientId);
+    return qs.toString();
+  }, [start, end, clientId]);
 
-  // ── Export (CSV / PDF) ──────────────────────────────────────────────
-  const [exporting, setExporting] = useState<"csv" | "pdf" | null>(null);
-  const [exportError, setExportError] = useState<string | null>(null);
+  useEffect(() => {
+    if (rangeInvalid) return;
+    let cancelled = false;
+    setLoading(true);
+    setError(null);
+    Promise.all([
+      api<Summary>(`/analytics/summary?${query}`),
+      api<OfficerRow[]>(`/analytics/officers?${query}`),
+    ])
+      .then(([s, o]) => {
+        if (cancelled) return;
+        setSummary(s);
+        setOfficers(o);
+      })
+      .catch((e) => {
+        if (cancelled) return;
+        setError(e instanceof Error ? e.message : "Failed to load analytics.");
+      })
+      .finally(() => { if (!cancelled) setLoading(false); });
+    return () => { cancelled = true; };
+  }, [query, rangeInvalid]);
 
-  const handleExport = async (kind: "csv" | "pdf") => {
-    if (!enabled || exporting) return;
-    setExporting(kind);
-    setExportError(null);
+  const download = useCallback(async (format: "csv" | "pdf") => {
+    setError(null);
+    setDownloading(format);
     try {
-      const params = new URLSearchParams({ start, end });
-      if (clientId !== "all") params.set("clientId", clientId);
-      const res = await fetchWithAuth(`/api/analytics/export.${kind}?${params}`);
+      const body: Record<string, string> = { start, end };
+      if (clientId !== "all") body.clientId = clientId;
+      const res = await fetchWithAuth(`/api/admin/analytics/export-${format}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      });
       if (!res.ok) {
-        throw new Error(`Export failed (${res.status})`);
+        let msg = `Download failed (${res.status})`;
+        try {
+          const j = await res.json();
+          if (j?.message) msg = j.message;
+          else if (j?.error) msg = j.error;
+        } catch { /* not JSON */ }
+        throw new ApiError(res.status, msg);
       }
       const blob = await res.blob();
+      const disp = res.headers.get("Content-Disposition") ?? "";
+      const m = /filename="?([^";]+)"?/.exec(disp);
+      const filename = m?.[1] ?? `analytics-${start}-to-${end}.${format}`;
       const url = URL.createObjectURL(blob);
       const a = document.createElement("a");
       a.href = url;
-      const clientPart = selectedClient ? `-${clientFileSlug(selectedClient.name)}` : "";
-      a.download = `wcsg-analytics${clientPart}-${start}_${end}.${kind}`;
+      a.download = filename;
       document.body.appendChild(a);
       a.click();
       a.remove();
       URL.revokeObjectURL(url);
     } catch (e) {
-      setExportError((e as Error).message || "Export failed. Please try again.");
+      setError(e instanceof Error ? e.message : "Download failed.");
     } finally {
-      setExporting(null);
+      setDownloading(null);
     }
-  };
+  }, [start, end, clientId]);
 
-  // Per-site table sorting
-  const sortedSites = useMemo(() => {
-    if (!data?.perSite) return [];
-    const arr = [...data.perSite];
-    arr.sort((a, b) => {
-      const av = a[sortCol] ?? 0;
-      const bv = b[sortCol] ?? 0;
-      const cmp = typeof av === "string" ? av.localeCompare(bv as string) : (Number(av) - Number(bv));
-      return sortDir === "asc" ? cmp : -cmp;
-    });
-    return arr;
-  }, [data?.perSite, sortCol, sortDir]);
-
-  // Per-officer table sorting
-  const sortedOfficers = useMemo(() => {
-    if (!data?.perOfficer) return [];
-    const arr = [...data.perOfficer];
-    arr.sort((a, b) => {
-      let av: string | number;
-      let bv: string | number;
-      if (officerSortCol === "name") {
-        av = `${a.lastName} ${a.firstName}`;
-        bv = `${b.lastName} ${b.firstName}`;
-      } else {
-        av = a[officerSortCol] ?? 0;
-        bv = b[officerSortCol] ?? 0;
-      }
-      const cmp = typeof av === "string" ? av.localeCompare(bv as string) : (Number(av) - Number(bv));
-      return officerSortDir === "asc" ? cmp : -cmp;
-    });
-    return arr;
-  }, [data?.perOfficer, officerSortCol, officerSortDir]);
-
-  const handleSort = (col: SortCol) => {
-    if (col === sortCol) {
-      setSortDir((d) => (d === "asc" ? "desc" : "asc"));
-    } else {
-      setSortCol(col);
-      setSortDir("desc");
-    }
-  };
-
-  const handleOfficerSort = (col: OfficerSortCol) => {
-    if (col === officerSortCol) {
-      setOfficerSortDir((d) => (d === "asc" ? "desc" : "asc"));
-    } else {
-      setOfficerSortCol(col);
-      setOfficerSortDir("desc");
-    }
-  };
-
-  const SortIcon = ({ col }: { col: SortCol }) => {
-    if (col !== sortCol) return null;
-    return sortDir === "asc" ? <ChevronUp className="w-3 h-3 inline ml-0.5" /> : <ChevronDown className="w-3 h-3 inline ml-0.5" />;
-  };
-
-  const OfficerSortIcon = ({ col }: { col: OfficerSortCol }) => {
-    if (col !== officerSortCol) return null;
-    return officerSortDir === "asc" ? <ChevronUp className="w-3 h-3 inline ml-0.5" /> : <ChevronDown className="w-3 h-3 inline ml-0.5" />;
-  };
-
-  const thCls = (col: SortCol) =>
-    `cursor-pointer select-none hover:text-foreground transition-colors whitespace-nowrap ${col === sortCol ? "text-foreground font-semibold" : ""}`;
-
-  const officerThCls = (col: OfficerSortCol) =>
-    `cursor-pointer select-none hover:text-foreground transition-colors whitespace-nowrap ${col === officerSortCol ? "text-foreground font-semibold" : ""}`;
+  const moneyData = useMemo(
+    () => (summary?.weeklyTrend ?? []).map((w) => ({ ...w, week: weekLabel(w.weekStart) })),
+    [summary],
+  );
 
   return (
-    <div className="flex flex-col gap-6 p-4 sm:p-6 max-w-[1400px] mx-auto w-full">
-      {/* Page header */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+    <div className="space-y-6 p-6">
+      <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
-          <h1 className="text-xl font-bold">Analytics</h1>
-          <p className="text-sm text-muted-foreground">P&amp;L, hours, missed shifts &amp; incidents — admin only</p>
+          <h1 className="flex items-center gap-2 text-2xl font-semibold text-foreground">
+            <BarChart3 className="h-6 w-6 text-primary" aria-hidden="true" />
+            Analytics
+          </h1>
+          <p className="mt-1 text-sm text-muted-foreground">
+            Revenue, labor cost, coverage, and officer performance. Money figures follow
+            the same rules as invoicing and payroll, including the 1.5&times; federal-holiday premium.
+          </p>
         </div>
-
-        {/* Date range controls */}
-        <div className="flex flex-wrap items-end gap-2">
-          <div>
-            <Label className="text-xs mb-1 block">Client</Label>
-            <Select value={clientId} onValueChange={setClientId}>
-              <SelectTrigger className="h-8 text-xs w-40" aria-label="Filter analytics by client">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="all">All clients</SelectItem>
-                {(clients ?? []).map((c) => (
-                  <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </div>
-          <div>
-            <Label className="text-xs mb-1 block">Period</Label>
-            <Select value={preset} onValueChange={(v) => setPreset(v as Preset)}>
-              <SelectTrigger className="h-8 text-xs w-36">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="this-week">This week</SelectItem>
-                <SelectItem value="last-week">Last week</SelectItem>
-                <SelectItem value="mtd">Month to date</SelectItem>
-                <SelectItem value="last-30">Last 30 days</SelectItem>
-                <SelectItem value="custom">Custom range</SelectItem>
-              </SelectContent>
-            </Select>
-          </div>
-          {preset === "custom" && (
-            <>
-              <div>
-                <Label className="text-xs mb-1 block">From</Label>
-                <Input
-                  type="date"
-                  className="h-8 text-xs w-36"
-                  value={customStart}
-                  onChange={(e) => setCustomStart(e.target.value)}
-                />
-              </div>
-              <div>
-                <Label className="text-xs mb-1 block">To</Label>
-                <Input
-                  type="date"
-                  className="h-8 text-xs w-36"
-                  value={customEnd}
-                  onChange={(e) => setCustomEnd(e.target.value)}
-                />
-              </div>
-            </>
-          )}
-          {enabled && (
-            <div className="text-xs text-muted-foreground self-end pb-1.5">
-              {start} → {end}
-            </div>
-          )}
-          <div className="flex items-end gap-2">
-            <Button
-              variant="outline"
-              size="sm"
-              className="h-8 text-xs"
-              disabled={!enabled || exporting !== null}
-              onClick={() => void handleExport("csv")}
-              aria-label="Export analytics report as CSV"
-            >
-              {exporting === "csv" ? (
-                <Loader2 className="w-3.5 h-3.5 mr-1.5 animate-spin" />
-              ) : (
-                <Download className="w-3.5 h-3.5 mr-1.5" />
-              )}
-              Export CSV
-            </Button>
-            <Button
-              variant="outline"
-              size="sm"
-              className="h-8 text-xs"
-              disabled={!enabled || exporting !== null}
-              onClick={() => void handleExport("pdf")}
-              aria-label="Export analytics report as PDF"
-            >
-              {exporting === "pdf" ? (
-                <Loader2 className="w-3.5 h-3.5 mr-1.5 animate-spin" />
-              ) : (
-                <FileText className="w-3.5 h-3.5 mr-1.5" />
-              )}
-              Export PDF
-            </Button>
-          </div>
+        <div className="flex gap-2">
+          <Button
+            variant="outline"
+            onClick={() => download("csv")}
+            disabled={downloading !== null || rangeInvalid}
+          >
+            {downloading === "csv"
+              ? <Loader2 className="mr-2 h-4 w-4 animate-spin" aria-hidden="true" />
+              : <Download className="mr-2 h-4 w-4" aria-hidden="true" />}
+            Export CSV
+          </Button>
+          <Button
+            variant="outline"
+            onClick={() => download("pdf")}
+            disabled={downloading !== null || rangeInvalid}
+          >
+            {downloading === "pdf"
+              ? <Loader2 className="mr-2 h-4 w-4 animate-spin" aria-hidden="true" />
+              : <FileText className="mr-2 h-4 w-4" aria-hidden="true" />}
+            Export PDF
+          </Button>
         </div>
       </div>
 
-      {exportError && (
-        <div className="text-sm text-destructive" role="alert">
-          {exportError}
+      <div className="flex flex-wrap items-end gap-4 rounded-lg border bg-card p-4 shadow-sm">
+        <div className="grid gap-1.5">
+          <Label htmlFor="analytics-start">From</Label>
+          <Input
+            id="analytics-start"
+            type="date"
+            value={start}
+            onChange={(e) => setStart(e.target.value)}
+            className="w-40"
+          />
+        </div>
+        <div className="grid gap-1.5">
+          <Label htmlFor="analytics-end">To</Label>
+          <Input
+            id="analytics-end"
+            type="date"
+            value={end}
+            onChange={(e) => setEnd(e.target.value)}
+            className="w-40"
+          />
+        </div>
+        <div className="grid gap-1.5">
+          <Label htmlFor="analytics-client">Client</Label>
+          <Select value={clientId} onValueChange={setClientId}>
+            <SelectTrigger id="analytics-client" className="w-56">
+              <SelectValue placeholder="All clients" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">All clients</SelectItem>
+              {clients.map((c) => (
+                <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
+        {rangeInvalid && (
+          <p className="text-sm text-red-700" role="alert">
+            The end date must be on or after the start date.
+          </p>
+        )}
+      </div>
+
+      {error && (
+        <div className="flex items-center gap-2 rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-800" role="alert">
+          <AlertTriangle className="h-4 w-4 shrink-0" aria-hidden="true" />
+          {error}
         </div>
       )}
 
-      {/* Loading / error states */}
-      {!enabled && (
-        <div className="flex items-center justify-center h-40 text-muted-foreground text-sm">
-          Select a valid date range to load analytics.
-        </div>
-      )}
-
-      {enabled && isLoading && (
-        <div className="flex items-center justify-center h-40 gap-2 text-muted-foreground text-sm">
-          <Loader2 className="w-4 h-4 animate-spin" />
+      {loading && !summary ? (
+        <div className="flex items-center justify-center gap-2 py-16 text-muted-foreground">
+          <Loader2 className="h-5 w-5 animate-spin" aria-hidden="true" />
           Loading analytics…
         </div>
-      )}
-
-      {enabled && isError && (
-        <div className="flex items-center justify-center h-40 text-destructive text-sm">
-          Failed to load analytics. Please try again.
-        </div>
-      )}
-
-      {enabled && data && (
+      ) : summary ? (
         <>
-          {/* ── P&L cards ─────────────────────────────────────────── */}
-          <section aria-label="Profit and loss summary">
-            <SectionHeader title="Profit &amp; Loss" sub="Revenue from invoiced work vs. 1099 labor cost (no tax withheld)" />
-            <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-              <MetricCard label="Revenue" value={fmtUSD(data.revenue)} icon={DollarSign} />
-              <MetricCard label="Labor Cost" value={fmtUSD(data.laborCost)} icon={DollarSign} />
-              <MetricCard
-                label="Profit"
-                value={fmtUSD(data.profit)}
-                icon={data.profit >= 0 ? TrendingUp : TrendingDown}
-                colorClass={data.profit >= 0 ? "text-green-600" : "text-red-600"}
-              />
-              <MetricCard
-                label="Margin"
-                value={fmtPct(data.marginPct)}
-                sub={data.revenue > 0 ? undefined : "No revenue in period"}
-                icon={TrendingUp}
-                colorClass={data.marginPct >= 0 ? "text-green-600" : "text-red-600"}
-              />
-            </div>
-
-            {data.pnlTrend.length > 0 && (
-              <div className="border rounded-lg bg-card p-4 mt-3" style={{ height: 220 }}>
-                <p className="text-xs text-muted-foreground mb-2">Weekly P&amp;L trend</p>
-                <ResponsiveContainer width="100%" height="85%">
-                  <BarChart data={data.pnlTrend} margin={{ top: 4, right: 8, left: 8, bottom: 4 }}>
-                    <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" />
-                    <XAxis dataKey="bucket" tick={{ fontSize: 10 }} />
-                    <YAxis tick={{ fontSize: 10 }} tickFormatter={(v) => `$${Math.round(v / 1000)}k`} />
-                    <Tooltip
-                      formatter={(v: number) => fmtUSD(v)}
-                      labelStyle={{ fontWeight: 600 }}
-                    />
-                    <Legend wrapperStyle={{ fontSize: 11 }} />
-                    <Bar dataKey="revenue" name="Revenue" fill="#c9a84c" radius={[2, 2, 0, 0]} />
-                    <Bar dataKey="laborCost" name="Labor Cost" fill="#6b7280" radius={[2, 2, 0, 0]} />
-                    <Bar dataKey="profit" name="Profit" fill="#16a34a" radius={[2, 2, 0, 0]} />
-                  </BarChart>
-                </ResponsiveContainer>
-              </div>
-            )}
-          </section>
-
-          {/* ── Hours ──────────────────────────────────────────────── */}
-          <section aria-label="Hours summary">
-            <SectionHeader title="Hours Worked vs. Scheduled" />
-            <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
-              <MetricCard label="Hours Worked" value={fmtHours(data.hoursWorked)} icon={Clock} sub="Approved time entries" />
-              <MetricCard label="Hours Scheduled" value={fmtHours(data.hoursScheduled)} icon={Calendar} sub="Past shifts × headcount" />
-              <MetricCard
-                label="Coverage"
-                value={fmtPct(data.coveragePct)}
-                icon={Users}
-                colorClass={data.coveragePct >= 90 ? "text-green-600" : data.coveragePct >= 70 ? "text-amber-600" : "text-red-600"}
-                sub={data.hoursScheduled > 0 ? "Worked ÷ Scheduled" : "No shifts in period"}
-              />
-            </div>
-
-            {data.hoursTrend.length > 0 && (
-              <div className="border rounded-lg bg-card p-4 mt-3" style={{ height: 220 }}>
-                <p className="text-xs text-muted-foreground mb-2">Weekly hours trend</p>
-                <ResponsiveContainer width="100%" height="85%">
-                  <AreaChart data={data.hoursTrend} margin={{ top: 4, right: 8, left: 8, bottom: 4 }}>
-                    <defs>
-                      <linearGradient id="colorWorked" x1="0" y1="0" x2="0" y2="1">
-                        <stop offset="5%" stopColor="#c9a84c" stopOpacity={0.3} />
-                        <stop offset="95%" stopColor="#c9a84c" stopOpacity={0} />
-                      </linearGradient>
-                      <linearGradient id="colorSched" x1="0" y1="0" x2="0" y2="1">
-                        <stop offset="5%" stopColor="#6b7280" stopOpacity={0.2} />
-                        <stop offset="95%" stopColor="#6b7280" stopOpacity={0} />
-                      </linearGradient>
-                    </defs>
-                    <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" />
-                    <XAxis dataKey="bucket" tick={{ fontSize: 10 }} />
-                    <YAxis tick={{ fontSize: 10 }} tickFormatter={(v) => `${v}h`} />
-                    <Tooltip
-                      formatter={(v: number) => fmtHours(v)}
-                      labelStyle={{ fontWeight: 600 }}
-                    />
-                    <Legend wrapperStyle={{ fontSize: 11 }} />
-                    <Area dataKey="scheduled" name="Scheduled" stroke="#6b7280" fill="url(#colorSched)" strokeWidth={1.5} dot={false} />
-                    <Area dataKey="worked" name="Worked" stroke="#c9a84c" fill="url(#colorWorked)" strokeWidth={2} dot={false} />
-                  </AreaChart>
-                </ResponsiveContainer>
-              </div>
-            )}
-          </section>
-
-          {/* ── Missed shifts ──────────────────────────────────────── */}
-          <section aria-label="Missed shifts">
-            <SectionHeader title="Missed Shifts" sub="No-shows: assigned officer never clocked in. Unfilled: fewer assignees than headcount." />
-            <div className="grid grid-cols-2 gap-3">
-              <MetricCard
-                label="No-Shows"
-                value={String(data.noShowCount)}
-                icon={AlertTriangle}
-                colorClass={data.noShowCount > 0 ? "text-amber-600" : "text-green-600"}
-                sub="Accepted but never clocked in"
-              />
-              <MetricCard
-                label="Unfilled Shifts"
-                value={String(data.unfilledCount)}
-                icon={Users}
-                colorClass={data.unfilledCount > 0 ? "text-amber-600" : "text-green-600"}
-                sub="Ended with fewer than headcount"
-              />
-            </div>
-
-            {data.missedShifts.length > 0 && (
-              <div className="border rounded-lg bg-card mt-3">
-                <button
-                  type="button"
-                  onClick={() => setShowMissed((v) => !v)}
-                  className="w-full flex items-center justify-between px-4 py-3 text-sm font-medium hover:bg-muted/40 transition-colors rounded-lg"
-                  aria-expanded={showMissed}
-                >
-                  <span>View affected shifts ({data.missedShifts.length})</span>
-                  {showMissed ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
-                </button>
-                {showMissed && (
-                  <div className="px-4 pb-4 overflow-x-auto">
-                    <Table>
-                      <TableHeader>
-                        <TableRow>
-                          <TableHead>Shift</TableHead>
-                          <TableHead>Site</TableHead>
-                          <TableHead>Date</TableHead>
-                          <TableHead className="text-right">Headcount</TableHead>
-                          <TableHead className="text-right">Filled</TableHead>
-                          <TableHead className="text-right">No-Shows</TableHead>
-                        </TableRow>
-                      </TableHeader>
-                      <TableBody>
-                        {data.missedShifts.map((s) => (
-                          <TableRow key={s.shiftId}>
-                            <TableCell className="font-medium">{s.title}</TableCell>
-                            <TableCell className="text-muted-foreground">{s.siteName ?? "—"}</TableCell>
-                            <TableCell className="text-muted-foreground text-xs">
-                              {formatDate(s.startTime)}
-                              {" "}
-                              {formatTime(s.startTime)}
-                            </TableCell>
-                            <TableCell className="text-right">{s.headcount}</TableCell>
-                            <TableCell className="text-right">
-                              <span className={s.filled < s.headcount ? "text-amber-600 font-semibold" : "text-green-600"}>
-                                {s.filled}
-                              </span>
-                            </TableCell>
-                            <TableCell className="text-right">
-                              {s.noShows > 0 ? (
-                                <Badge className="bg-amber-100 text-amber-800 hover:bg-amber-100">{s.noShows}</Badge>
-                              ) : (
-                                <span className="text-muted-foreground">0</span>
-                              )}
-                            </TableCell>
-                          </TableRow>
-                        ))}
-                      </TableBody>
-                    </Table>
-                  </div>
-                )}
-              </div>
-            )}
-          </section>
-
-          {/* ── Incidents ──────────────────────────────────────────── */}
-          <section aria-label="Incident metrics">
-            <SectionHeader title="Incidents" sub={`${data.incidentTotal} incident${data.incidentTotal === 1 ? "" : "s"} in period`} />
-            <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-              {(["low", "medium", "high", "critical"] as const).map((sev) => (
-                <div key={sev} className="border rounded-lg bg-card p-3 flex flex-col gap-1">
-                  <span className="text-xs text-muted-foreground uppercase tracking-wide">{sev}</span>
-                  <div className="flex items-center gap-2">
-                    <span className="text-2xl font-bold">{data.incidentsBySeverity[sev]}</span>
-                    {data.incidentsBySeverity[sev] > 0 && (
-                      <span className={`text-[10px] px-1.5 py-0.5 rounded-full font-semibold ${SEVERITY_COLORS[sev]}`}>
-                        {sev}
-                      </span>
-                    )}
-                  </div>
-                </div>
-              ))}
-            </div>
-            <div className="grid grid-cols-3 gap-3 mt-3">
-              {(["open", "investigating", "closed"] as const).map((st) => (
-                <div key={st} className="border rounded-lg bg-card p-3">
-                  <div className="text-xs text-muted-foreground uppercase tracking-wide mb-1">{st}</div>
-                  <div className="text-xl font-bold">{data.incidentsByStatus[st]}</div>
-                </div>
-              ))}
-            </div>
-
-            {data.incidentTrend.length > 0 && (
-              <div className="border rounded-lg bg-card p-4 mt-3" style={{ height: 200 }}>
-                <p className="text-xs text-muted-foreground mb-2">Weekly incident trend</p>
-                <ResponsiveContainer width="100%" height="85%">
-                  <LineChart data={data.incidentTrend} margin={{ top: 4, right: 8, left: 8, bottom: 4 }}>
-                    <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" />
-                    <XAxis dataKey="bucket" tick={{ fontSize: 10 }} />
-                    <YAxis allowDecimals={false} tick={{ fontSize: 10 }} />
-                    <Tooltip labelStyle={{ fontWeight: 600 }} />
-                    <Line dataKey="count" name="Incidents" stroke="#dc2626" strokeWidth={2} dot={{ r: 3 }} activeDot={{ r: 5 }} />
-                  </LineChart>
-                </ResponsiveContainer>
-              </div>
-            )}
-          </section>
-
-          {/* ── Per-site breakdown ─────────────────────────────────── */}
-          {sortedSites.length > 0 && (
-            <section aria-label="Per-site breakdown">
-              <SectionHeader title="Per-Site Breakdown" sub="Click column headers to sort" />
-              <div className="border rounded-lg bg-card overflow-x-auto">
-                <Table>
-                  <TableHeader>
-                    <TableRow>
-                      <TableHead className={thCls("siteName")} onClick={() => handleSort("siteName")}>
-                        Site <SortIcon col="siteName" />
-                      </TableHead>
-                      <TableHead className={`text-right ${thCls("revenue")}`} onClick={() => handleSort("revenue")}>
-                        Revenue <SortIcon col="revenue" />
-                      </TableHead>
-                      <TableHead className={`text-right ${thCls("laborCost")}`} onClick={() => handleSort("laborCost")}>
-                        Labor Cost <SortIcon col="laborCost" />
-                      </TableHead>
-                      <TableHead className={`text-right ${thCls("profit")}`} onClick={() => handleSort("profit")}>
-                        Profit <SortIcon col="profit" />
-                      </TableHead>
-
-                      <TableHead className={`text-right ${thCls("hoursWorked")}`} onClick={() => handleSort("hoursWorked")}>
-                        Hrs Worked <SortIcon col="hoursWorked" />
-                      </TableHead>
-                      <TableHead className={`text-right ${thCls("hoursScheduled")}`} onClick={() => handleSort("hoursScheduled")}>
-                        Hrs Sched. <SortIcon col="hoursScheduled" />
-                      </TableHead>
-                      <TableHead className={`text-right ${thCls("noShows")}`} onClick={() => handleSort("noShows")}>
-                        No-Shows <SortIcon col="noShows" />
-                      </TableHead>
-                      <TableHead className={`text-right ${thCls("unfilledShifts")}`} onClick={() => handleSort("unfilledShifts")}>
-                        Unfilled <SortIcon col="unfilledShifts" />
-                      </TableHead>
-                      <TableHead className={`text-right ${thCls("incidents")}`} onClick={() => handleSort("incidents")}>
-                        Incidents <SortIcon col="incidents" />
-                      </TableHead>
-                    </TableRow>
-                  </TableHeader>
-                  <TableBody>
-                    {sortedSites.map((s) => (
-                      <TableRow key={s.siteId}>
-                        <TableCell className="font-medium">{s.siteName}</TableCell>
-                        <TableCell className="text-right">{fmtUSD(s.revenue)}</TableCell>
-                        <TableCell className="text-right">{fmtUSD(s.laborCost)}</TableCell>
-                        <TableCell className={`text-right font-semibold ${s.profit >= 0 ? "text-green-600" : "text-red-600"}`}>
-                          {fmtUSD(s.profit)}
-                        </TableCell>
-                        <TableCell className="text-right">{fmtHours(s.hoursWorked)}</TableCell>
-                        <TableCell className="text-right">{fmtHours(s.hoursScheduled)}</TableCell>
-                        <TableCell className={`text-right ${s.noShows > 0 ? "text-amber-600 font-semibold" : "text-muted-foreground"}`}>
-                          {s.noShows}
-                        </TableCell>
-                        <TableCell className={`text-right ${s.unfilledShifts > 0 ? "text-amber-600 font-semibold" : "text-muted-foreground"}`}>
-                          {s.unfilledShifts}
-                        </TableCell>
-                        <TableCell className={`text-right ${s.incidents > 0 ? "font-semibold" : "text-muted-foreground"}`}>
-                          {s.incidents}
-                        </TableCell>
-                      </TableRow>
-                    ))}
-                  </TableBody>
-                </Table>
-              </div>
-            </section>
-          )}
-
-          {/* ── Officer Performance ─────────────────────────────────── */}
-          <section aria-label="Officer performance">
-            <SectionHeader
-              title="Officer Performance"
-              sub={
-                sortedOfficers.length === 0
-                  ? "No officer activity in this period"
-                  : `${sortedOfficers.length} officer${sortedOfficers.length === 1 ? "" : "s"} active · click column headers to sort · reliability = 60% attendance + 40% punctuality`
-              }
+          <div className="grid grid-cols-2 gap-4 md:grid-cols-3 xl:grid-cols-5">
+            <KpiCard label="Revenue" value={fmtMoney(summary.revenue)} />
+            <KpiCard label="Labor cost" value={fmtMoney(summary.laborCost)} />
+            <KpiCard
+              label="Profit / loss"
+              value={fmtMoney(summary.pnl)}
+              sub={summary.marginPct == null ? undefined : `${summary.marginPct.toFixed(1)}% margin`}
+              tone={summary.pnl > 0 ? "good" : summary.pnl < 0 ? "bad" : undefined}
             />
+            <KpiCard
+              label="Hours worked"
+              value={fmtHours(summary.hoursWorked)}
+              sub={`${fmtHours(summary.hoursScheduled)} scheduled`}
+            />
+            <KpiCard label="Coverage" value={fmtPct(summary.coveragePct)} />
+            <KpiCard label="No-shows" value={String(summary.noShows)} tone={summary.noShows > 0 ? "bad" : undefined} />
+            <KpiCard label="Unfilled shifts" value={String(summary.unfilledShifts)} />
+            <KpiCard
+              label="Incidents"
+              value={String(summary.incidents.total)}
+              sub={`${summary.incidents.open} open · ${summary.incidents.critical} critical`}
+            />
+            <KpiCard
+              label="Incident severity"
+              value={`${summary.incidents.high + summary.incidents.critical} high+`}
+              sub={`${summary.incidents.low} low · ${summary.incidents.medium} medium`}
+            />
+            <KpiCard
+              label="Resolved incidents"
+              value={String(summary.incidents.resolved)}
+            />
+          </div>
 
-            {/* Summary strip */}
-            {data.officerSummary && sortedOfficers.length > 0 && (
-              <div className="grid grid-cols-3 gap-3 mb-3">
-                <MetricCard
-                  label="Total No-Shows"
-                  value={String(data.officerSummary.totalNoShows)}
-                  icon={AlertTriangle}
-                  colorClass={data.officerSummary.totalNoShows > 0 ? "text-amber-600" : "text-green-600"}
-                  sub="Accepted but never clocked in"
-                />
-                <MetricCard
-                  label="Avg Attendance Rate"
-                  value={fmtPct(data.officerSummary.avgAttendanceRate)}
-                  icon={UserCheck}
-                  colorClass={
-                    data.officerSummary.avgAttendanceRate >= 95
-                      ? "text-green-600"
-                      : data.officerSummary.avgAttendanceRate >= 80
-                        ? "text-amber-600"
-                        : "text-red-600"
-                  }
-                  sub="Across all active officers"
-                />
-                <MetricCard
-                  label="Avg On-Time Rate"
-                  value={fmtPct(data.officerSummary.avgOnTimeRate)}
-                  icon={Clock}
-                  colorClass={
-                    data.officerSummary.avgOnTimeRate >= 90
-                      ? "text-green-600"
-                      : data.officerSummary.avgOnTimeRate >= 70
-                        ? "text-amber-600"
-                        : "text-red-600"
-                  }
-                  sub="5-minute grace window"
-                />
-              </div>
-            )}
+          <div className="grid gap-6 lg:grid-cols-2">
+            <section className="rounded-lg border bg-card p-4 shadow-sm" aria-label="Weekly revenue and labor cost">
+              <h2 className="text-sm font-semibold text-foreground">Revenue vs labor cost, by week</h2>
+              {moneyData.length === 0 ? (
+                <p className="py-10 text-center text-sm text-muted-foreground">No activity in this range.</p>
+              ) : (
+                <ChartContainer config={moneyChartConfig} className="mt-3 h-64 w-full">
+                  <BarChart data={moneyData}>
+                    <CartesianGrid vertical={false} strokeDasharray="3 3" />
+                    <XAxis dataKey="week" tickLine={false} axisLine={false} fontSize={12} />
+                    <YAxis tickLine={false} axisLine={false} fontSize={12}
+                      tickFormatter={(v: number) => usd.format(v)} width={70} />
+                    <ChartTooltip content={<ChartTooltipContent />} />
+                    <Bar dataKey="revenue" fill="var(--color-revenue)" radius={[3, 3, 0, 0]} />
+                    <Bar dataKey="laborCost" fill="var(--color-laborCost)" radius={[3, 3, 0, 0]} />
+                  </BarChart>
+                </ChartContainer>
+              )}
+            </section>
 
-            {sortedOfficers.length > 0 && (
-              <div className="border rounded-lg bg-card overflow-x-auto">
-                <Table>
-                  <TableHeader>
-                    <TableRow>
-                      <TableHead className={officerThCls("name")} onClick={() => handleOfficerSort("name")}>
-                        Officer <OfficerSortIcon col="name" />
-                      </TableHead>
-                      <TableHead className={`text-right ${officerThCls("reliabilityScore")}`} onClick={() => handleOfficerSort("reliabilityScore")}>
-                        Reliability <OfficerSortIcon col="reliabilityScore" />
-                      </TableHead>
-                      <TableHead className={`text-right ${officerThCls("shiftsAssigned")}`} onClick={() => handleOfficerSort("shiftsAssigned")}>
-                        Assigned <OfficerSortIcon col="shiftsAssigned" />
-                      </TableHead>
-                      <TableHead className={`text-right ${officerThCls("shiftsCompleted")}`} onClick={() => handleOfficerSort("shiftsCompleted")}>
-                        Completed <OfficerSortIcon col="shiftsCompleted" />
-                      </TableHead>
-                      <TableHead className={`text-right ${officerThCls("noShows")}`} onClick={() => handleOfficerSort("noShows")}>
-                        No-Shows <OfficerSortIcon col="noShows" />
-                      </TableHead>
-                      <TableHead className={`text-right ${officerThCls("attendanceRate")}`} onClick={() => handleOfficerSort("attendanceRate")}>
-                        Attendance <OfficerSortIcon col="attendanceRate" />
-                      </TableHead>
-                      <TableHead className={`text-right ${officerThCls("onTimeRate")}`} onClick={() => handleOfficerSort("onTimeRate")}>
-                        On-Time <OfficerSortIcon col="onTimeRate" />
-                      </TableHead>
-                      <TableHead className={`text-right ${officerThCls("avgMinutesLate")}`} onClick={() => handleOfficerSort("avgMinutesLate")}>
-                        Avg Late <OfficerSortIcon col="avgMinutesLate" />
-                      </TableHead>
-                      <TableHead className={`text-right ${officerThCls("hoursWorked")}`} onClick={() => handleOfficerSort("hoursWorked")}>
-                        Hrs Worked <OfficerSortIcon col="hoursWorked" />
-                      </TableHead>
-                      <TableHead className={`text-right ${officerThCls("hoursScheduled")}`} onClick={() => handleOfficerSort("hoursScheduled")}>
-                        Hrs Sched. <OfficerSortIcon col="hoursScheduled" />
-                      </TableHead>
-                      <TableHead className={`text-right ${officerThCls("rejectedEntries")}`} onClick={() => handleOfficerSort("rejectedEntries")}>
-                        Rejected <OfficerSortIcon col="rejectedEntries" />
-                      </TableHead>
-                      <TableHead className={`text-right ${officerThCls("incidentTotal")}`} onClick={() => handleOfficerSort("incidentTotal")}>
-                        Incidents <OfficerSortIcon col="incidentTotal" />
-                      </TableHead>
-                      <TableHead className="text-right whitespace-nowrap">Trends</TableHead>
-                    </TableRow>
-                  </TableHeader>
-                  <TableBody>
-                    {sortedOfficers.map((o) => (
-                      <TableRow key={o.userId}>
-                        <TableCell className="font-medium">
-                          <Link
-                            href={`/personnel/${encodeURIComponent(o.userId)}`}
-                            className="text-foreground hover:underline"
-                          >
-                            {o.firstName} {o.lastName}
-                          </Link>
-                        </TableCell>
-                        <TableCell className="text-right">
-                          <span
-                            className={`font-semibold ${
-                              o.reliabilityScore >= 90
-                                ? "text-green-600"
-                                : o.reliabilityScore >= 70
-                                  ? "text-amber-600"
-                                  : "text-red-600"
-                            }`}
-                          >
-                            {o.reliabilityScore.toFixed(1)}
-                          </span>
-                        </TableCell>
-                        <TableCell className="text-right text-muted-foreground">{o.shiftsAssigned}</TableCell>
-                        <TableCell className="text-right">{o.shiftsCompleted}</TableCell>
-                        <TableCell className="text-right">
-                          {o.noShows > 0 ? (
-                            <Badge className="bg-amber-100 text-amber-800 hover:bg-amber-100">{o.noShows}</Badge>
-                          ) : (
-                            <span className="text-muted-foreground">0</span>
-                          )}
-                        </TableCell>
-                        <TableCell className={`text-right ${o.attendanceRate >= 95 ? "text-green-600" : o.attendanceRate >= 80 ? "text-amber-600" : "text-red-600"}`}>
-                          {fmtPct(o.attendanceRate)}
-                        </TableCell>
-                        <TableCell className={`text-right ${o.punctualityEligible === 0 ? "text-muted-foreground" : o.onTimeRate >= 90 ? "text-green-600" : o.onTimeRate >= 70 ? "text-amber-600" : "text-red-600"}`}>
-                          {o.punctualityEligible === 0 ? "—" : fmtPct(o.onTimeRate)}
-                        </TableCell>
-                        <TableCell className="text-right text-muted-foreground">
-                          {o.punctualityEligible === 0 ? "—" : `${o.avgMinutesLate.toFixed(1)} min`}
-                        </TableCell>
-                        <TableCell className="text-right">{fmtHours(o.hoursWorked)}</TableCell>
-                        <TableCell className="text-right text-muted-foreground">{fmtHours(o.hoursScheduled)}</TableCell>
-                        <TableCell className="text-right">
-                          {o.rejectedEntries > 0 ? (
-                            <span className="text-amber-600 font-semibold">
-                              {o.rejectedEntries}
-                              <span className="text-xs font-normal ml-1 text-muted-foreground">
-                                ({fmtPct(o.rejectionRate)})
-                              </span>
-                            </span>
-                          ) : (
-                            <span className="text-muted-foreground">0</span>
-                          )}
-                        </TableCell>
-                        <TableCell className="text-right">
-                          {o.incidentTotal > 0 ? (
-                            <span className="font-semibold">
-                              {o.incidentTotal}
-                              {(o.incidentHigh > 0 || o.incidentCritical > 0) && (
-                                <span className="ml-1 inline-flex gap-0.5">
-                                  {o.incidentCritical > 0 && (
-                                    <Badge className="bg-red-100 text-red-800 hover:bg-red-100 text-[10px] px-1 py-0">
-                                      {o.incidentCritical}C
-                                    </Badge>
-                                  )}
-                                  {o.incidentHigh > 0 && (
-                                    <Badge className="bg-orange-100 text-orange-800 hover:bg-orange-100 text-[10px] px-1 py-0">
-                                      {o.incidentHigh}H
-                                    </Badge>
-                                  )}
-                                </span>
-                              )}
-                            </span>
-                          ) : (
-                            <span className="text-muted-foreground">0</span>
-                          )}
-                        </TableCell>
-                        <TableCell className="text-right">
-                          <Button
-                            variant="ghost"
-                            size="sm"
-                            className="h-7 px-2 text-xs"
-                            aria-label={`View performance trends for ${o.firstName} ${o.lastName}`}
-                            onClick={() =>
-                              setTrendOfficer({
-                                userId: o.userId,
-                                name: `${o.firstName} ${o.lastName}`.trim(),
-                              })
-                            }
-                          >
-                            <TrendingUp className="w-3.5 h-3.5 mr-1" />
-                            View trends
-                          </Button>
-                        </TableCell>
-                      </TableRow>
+            <section className="rounded-lg border bg-card p-4 shadow-sm" aria-label="Weekly hours worked">
+              <h2 className="text-sm font-semibold text-foreground">Hours worked, by week</h2>
+              {moneyData.length === 0 ? (
+                <p className="py-10 text-center text-sm text-muted-foreground">No activity in this range.</p>
+              ) : (
+                <ChartContainer config={hoursChartConfig} className="mt-3 h-64 w-full">
+                  <LineChart data={moneyData}>
+                    <CartesianGrid vertical={false} strokeDasharray="3 3" />
+                    <XAxis dataKey="week" tickLine={false} axisLine={false} fontSize={12} />
+                    <YAxis tickLine={false} axisLine={false} fontSize={12} width={50} />
+                    <ChartTooltip content={<ChartTooltipContent />} />
+                    <Line
+                      type="monotone"
+                      dataKey="hoursWorked"
+                      stroke="var(--color-hoursWorked)"
+                      strokeWidth={2}
+                      dot={false}
+                    />
+                  </LineChart>
+                </ChartContainer>
+              )}
+            </section>
+          </div>
+
+          <section className="rounded-lg border bg-card shadow-sm" aria-label="Site performance">
+            <h2 className="border-b px-4 py-3 text-sm font-semibold text-foreground">Sites</h2>
+            {summary.sites.length === 0 ? (
+              <p className="p-6 text-center text-sm text-muted-foreground">No site activity in this range.</p>
+            ) : (
+              <div className="overflow-x-auto">
+                <table className="w-full text-sm">
+                  <thead>
+                    <tr className="border-b text-left text-xs uppercase tracking-wide text-muted-foreground">
+                      <th scope="col" className="px-4 py-2 font-medium">Site</th>
+                      <th scope="col" className="px-4 py-2 font-medium">Client</th>
+                      <th scope="col" className="px-4 py-2 text-right font-medium">Revenue</th>
+                      <th scope="col" className="px-4 py-2 text-right font-medium">Labor cost</th>
+                      <th scope="col" className="px-4 py-2 text-right font-medium">P&amp;L</th>
+                      <th scope="col" className="px-4 py-2 text-right font-medium">Hours</th>
+                      <th scope="col" className="px-4 py-2 text-right font-medium">Coverage</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {summary.sites.map((s) => (
+                      <tr key={s.siteId} className="border-b last:border-0 hover:bg-muted/40">
+                        <td className="px-4 py-2 font-medium text-foreground">{s.siteName}</td>
+                        <td className="px-4 py-2 text-muted-foreground">{s.clientName ?? "—"}</td>
+                        <td className="px-4 py-2 text-right">{fmtMoney(s.revenue)}</td>
+                        <td className="px-4 py-2 text-right">{fmtMoney(s.laborCost)}</td>
+                        <td className={`px-4 py-2 text-right font-medium ${
+                          s.pnl > 0 ? "text-emerald-700" : s.pnl < 0 ? "text-red-700" : ""
+                        }`}>{fmtMoney(s.pnl)}</td>
+                        <td className="px-4 py-2 text-right">{s.hoursWorked.toFixed(1)}</td>
+                        <td className="px-4 py-2 text-right">{fmtPct(s.coveragePct)}</td>
+                      </tr>
                     ))}
-                  </TableBody>
-                </Table>
+                  </tbody>
+                </table>
               </div>
             )}
+          </section>
 
-            <OfficerTrendsDialog officer={trendOfficer} onClose={() => setTrendOfficer(null)} />
+          <section className="rounded-lg border bg-card shadow-sm" aria-label="Officer performance">
+            <h2 className="border-b px-4 py-3 text-sm font-semibold text-foreground">Officer performance</h2>
+            {officers.length === 0 ? (
+              <p className="p-6 text-center text-sm text-muted-foreground">No officer activity in this range.</p>
+            ) : (
+              <div className="overflow-x-auto">
+                <table className="w-full text-sm">
+                  <thead>
+                    <tr className="border-b text-left text-xs uppercase tracking-wide text-muted-foreground">
+                      <th scope="col" className="px-4 py-2 font-medium">Officer</th>
+                      <th scope="col" className="px-4 py-2 text-right font-medium">Hours worked</th>
+                      <th scope="col" className="px-4 py-2 text-right font-medium">Shifts completed</th>
+                      <th scope="col" className="px-4 py-2 text-right font-medium">Incidents filed</th>
+                      <th scope="col" className="px-4 py-2 text-right font-medium">Punctuality</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {officers.map((o) => (
+                      <tr key={o.employeeId} className="border-b last:border-0 hover:bg-muted/40">
+                        <td className="px-4 py-2 font-medium text-foreground">{o.name}</td>
+                        <td className="px-4 py-2 text-right">{o.hoursWorked.toFixed(1)}</td>
+                        <td className="px-4 py-2 text-right">{o.shiftsCompleted}</td>
+                        <td className="px-4 py-2 text-right">{o.incidentsFiled}</td>
+                        <td className="px-4 py-2 text-right">{punctualityBadge(o.punctualityPct)}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+            <p className="border-t px-4 py-2 text-xs text-muted-foreground">
+              Punctuality counts a clock-in as on time when it is within 5 minutes after the
+              scheduled start. Officers with no scheduled shifts in the range show &mdash;.
+            </p>
           </section>
         </>
-      )}
+      ) : null}
     </div>
   );
 }

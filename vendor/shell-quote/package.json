@@ -1,0 +1,20 @@
+{
+  "name": "shell-quote",
+  "version": "1.8.3",
+  "description": "Local reimplementation of the shell-quote API (quote/parse), vendored because the upstream npm tarball is blocked by Replit's package firewall. Used only as a pnpm override to satisfy the dev-only react-devtools-core dependency; not used by the production web app.",
+  "license": "MIT",
+  "main": "index.js",
+  "exports": {
+    ".": "./index.js",
+    "./quote": "./quote.js",
+    "./parse": "./parse.js"
+  },
+  "files": [
+    "index.js",
+    "quote.js",
+    "parse.js"
+  ],
+  "scripts": {
+    "test": "node test.js"
+  }
+}

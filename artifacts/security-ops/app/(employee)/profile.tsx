@@ -9,11 +9,11 @@ import { useAuth } from "@/contexts/AuthContext";
 import { useAccessibility } from "@/contexts/AccessibilityContext";
 import { Feather } from "@expo/vector-icons";
 import { isBiometricAvailable, isBiometricEnabled, setBiometricEnabled, promptBiometric } from "@/utils/biometric";
-import { apiRequest, API_BASE_URL } from "@/utils/api";
-import { formatDate } from "@/utils/time";
+import { apiRequest, getApiBaseUrl } from "@/utils/api";
 import { storage } from "@/utils/storage";
 import { AUTH_TOKEN_KEY } from "@/contexts/AuthContext";
 import { useTour } from "@/contexts/TourContext";
+import { useFeatures, isEnabled, useBrand } from "@/hooks/useFeatures";
 
 function InfoRow({ label, value, icon }: { label: string; value?: string | number | null; icon: string }) {
   const colors = useColors();
@@ -122,7 +122,7 @@ function MyTrainingSection() {
   }, []);
   const statusColor = (s: TrainingCert["status"]) => {
     if (s === "expired") return "#a33";
-    if (s === "expiring_soon") return "#c9a84c";
+    if (s === "expiring_soon") return "#c9a04a";
     if (s === "no_expiry") return colors.mutedForeground;
     return "#3a8a3a";
   };
@@ -210,7 +210,7 @@ function RecentUpdatesSection({ employeeUserId }: { employeeUserId?: string }) {
       if (h < 24) return `${h}h ago`;
       const days = Math.floor(h / 24);
       if (days < 7) return `${days}d ago`;
-      return formatDate(d, { month: "short", day: "numeric", year: "numeric" });
+      return d.toLocaleDateString();
     } catch { return iso; }
   };
   return (
@@ -246,14 +246,13 @@ function RecentUpdatesSection({ employeeUserId }: { employeeUserId?: string }) {
 
 export default function EmployeeProfileScreen() {
   const colors = useColors();
+  const brand = useBrand();
   const router = useRouter();
   const { logout, user } = useAuth();
-  // Site managers keep the "no financial info" invariant inside the employee
+  // Site Managers keep the "no financial info" invariant inside the employee
   // experience: hide their own pay rate, paystubs and W-2 doc.
   const isSiteManager = user?.role === "site_manager";
-  // Admins can work shifts too — when they're in the officer shell ("My Work"
-  // from the admin dashboard), give them a way back to the admin tabs.
-  const isAdmin = user?.role === "admin";
+  const flags = useFeatures();
   const { open: openTour } = useTour();
   const { highContrast, setHighContrast } = useAccessibility();
   const topPad = useTopPad();
@@ -316,43 +315,22 @@ export default function EmployeeProfileScreen() {
   const availabilitySlots = Array.isArray(p?.availability)
     ? (p.availability as any[])
     : (p?.availability && typeof p.availability === "object" ? Object.entries(p.availability).map(([day, period]) => ({ day, period })) : []);
-  const hrEmail = process.env.EXPO_PUBLIC_HR_EMAIL ?? "hr@williamscouncilsecurity.com";
+  const hrEmail = process.env.EXPO_PUBLIC_HR_EMAIL ?? "hr@secureops.app";
   const mailtoCorrection = `mailto:${hrEmail}?subject=${encodeURIComponent("Profile correction request")}&body=${encodeURIComponent(`Hi HR,\n\nPlease update the following on my profile:\n\n[describe what needs to change]\n\nThanks,\n${p?.firstName ?? ""} ${p?.lastName ?? ""}`)}`;
 
   return (
     <ScrollView style={[styles.container, { backgroundColor: colors.background }]} contentContainerStyle={{ paddingBottom: 100 }}>
       <View style={[styles.topBar, { paddingTop: topPad + 12, borderBottomColor: colors.border }]}>
         <Text style={[styles.pageTitle, { color: colors.foreground }]} accessibilityRole="header">My Profile</Text>
-        <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
-          {isAdmin && (
-            <TouchableOpacity
-              onPress={() => router.replace("/(admin)/dashboard" as any)}
-              style={[styles.editBtn, { backgroundColor: colors.secondary, borderWidth: 1, borderColor: colors.border }]}
-              accessibilityRole="button"
-              accessibilityLabel="Switch back to the admin dashboard"
-            >
-              <Feather name="shield" size={14} color={colors.accent} />
-              <Text style={[styles.editBtnText, { color: colors.accent }]}>Admin</Text>
-            </TouchableOpacity>
-          )}
-          <TouchableOpacity
-            onPress={() => router.push("/edit-profile" as any)}
-            style={[styles.editBtn, { backgroundColor: colors.primary }]}
-            accessibilityRole="button"
-            accessibilityLabel="Edit your profile"
-          >
-            <Feather name="edit-3" size={14} color="#fff" />
-            <Text style={styles.editBtnText}>Edit</Text>
-          </TouchableOpacity>
-          <TouchableOpacity
-            onPress={logout}
-            style={[styles.logoutBtn, { borderColor: colors.destructive + "50" }]}
-            accessibilityRole="button"
-            accessibilityLabel="Sign out of your account"
-          >
-            <Feather name="log-out" size={16} color={colors.destructive} />
-          </TouchableOpacity>
-        </View>
+        <TouchableOpacity
+          onPress={logout}
+          style={[styles.logoutBtn, { borderColor: colors.destructive + "50" }]}
+          accessibilityRole="button"
+          accessibilityLabel="Sign out of your account"
+        >
+          <Feather name="log-out" size={16} color={colors.destructive} />
+          <Text style={[styles.logoutText, { color: colors.destructive }]}>Sign Out</Text>
+        </TouchableOpacity>
       </View>
 
       <View style={[styles.heroCard, { backgroundColor: colors.card, borderColor: colors.border }]}>
@@ -361,7 +339,7 @@ export default function EmployeeProfileScreen() {
           <View style={{ flex: 1, gap: 2 }}>
             <Text style={[styles.heroName, { color: colors.foreground }]}>{p?.firstName} {p?.lastName}</Text>
             <View style={[styles.roleBadge, { backgroundColor: colors.primary + "20", borderColor: colors.primary + "50" }]}>
-              <Text style={[styles.roleText, { color: colors.primary }]}>{isAdmin ? "ADMINISTRATOR" : (user?.role as string) === "dispatcher" ? "DISPATCHER" : isSiteManager ? "SITE MANAGER" : "SECURITY OFFICER"}</Text>
+              <Text style={[styles.roleText, { color: colors.primary }]}>{isSiteManager ? "SITE MANAGER" : "SECURITY OFFICER"}</Text>
             </View>
           </View>
         </View>
@@ -540,7 +518,7 @@ export default function EmployeeProfileScreen() {
                 <Text style={[styles.infoValue, { color: colors.foreground }]}>{a?.type ?? "Acknowledgement"}</Text>
                 {a?.signature ? (
                   <Text style={[styles.infoLabel, { color: colors.mutedForeground }]}>
-                    Signed “{a.signature}”{a?.timestamp ? ` · ${formatDate(a.timestamp, { month: "short", day: "numeric", year: "numeric" })}` : ""}
+                    Signed “{a.signature}”{a?.timestamp ? ` · ${new Date(a.timestamp).toLocaleDateString()}` : ""}
                   </Text>
                 ) : null}
               </View>
@@ -551,7 +529,7 @@ export default function EmployeeProfileScreen() {
 
       <RecentUpdatesSection employeeUserId={userId} />
 
-      <MyTrainingSection />
+      {isEnabled(flags, "trainings") && <MyTrainingSection />}
 
       <View style={[styles.section, { backgroundColor: colors.card, borderColor: colors.border }]}>
         <Text style={[styles.sectionTitle, { color: colors.accent }]}>MY LICENCES ({licenses?.length ?? 0})</Text>
@@ -646,7 +624,7 @@ export default function EmployeeProfileScreen() {
                 Alert.alert("Sign-in required", "Please sign in again before downloading your profile.");
                 return;
               }
-              const url = `${API_BASE_URL}/me/profile/pdf?token=${encodeURIComponent(token)}`;
+              const url = `${getApiBaseUrl()}/me/profile/pdf?token=${encodeURIComponent(token)}`;
               const can = await Linking.canOpenURL(url);
               if (can) await Linking.openURL(url);
               else Alert.alert("Cannot open file", "No app on this device can open the PDF.");
@@ -668,22 +646,24 @@ export default function EmployeeProfileScreen() {
           </View>
           <Feather name="chevron-right" size={16} color={colors.mutedForeground} />
         </TouchableOpacity>
-        <TouchableOpacity
-          onPress={() => router.push("/paystubs" as any)}
-          style={[styles.actionRow, { borderBottomColor: colors.border }]}
-          accessibilityRole="button"
-          accessibilityLabel="My paystubs"
-          accessibilityHint="View pay history and year-to-date totals"
-        >
-          <Feather name="dollar-sign" size={16} color={colors.accent} />
-          <View style={{ flex: 1 }}>
-            <Text style={{ color: colors.foreground, fontSize: 14, fontWeight: "600" }}>My paystubs</Text>
-            <Text style={{ color: colors.mutedForeground, fontSize: 12, marginTop: 2 }}>
-              View pay history and year-to-date totals
-            </Text>
-          </View>
-          <Feather name="chevron-right" size={16} color={colors.mutedForeground} />
-        </TouchableOpacity>
+        {isEnabled(flags, "payroll") && (
+          <TouchableOpacity
+            onPress={() => router.push("/paystubs" as any)}
+            style={[styles.actionRow, { borderBottomColor: colors.border }]}
+            accessibilityRole="button"
+            accessibilityLabel="My paystubs"
+            accessibilityHint="View pay history and year-to-date totals"
+          >
+            <Feather name="dollar-sign" size={16} color={colors.accent} />
+            <View style={{ flex: 1 }}>
+              <Text style={{ color: colors.foreground, fontSize: 14, fontWeight: "600" }}>My paystubs</Text>
+              <Text style={{ color: colors.mutedForeground, fontSize: 12, marginTop: 2 }}>
+                View pay history and year-to-date totals
+              </Text>
+            </View>
+            <Feather name="chevron-right" size={16} color={colors.mutedForeground} />
+          </TouchableOpacity>
+        )}
         <TouchableOpacity
           onPress={() => router.push("/payment-discrepancy" as any)}
           style={[styles.actionRow, { borderBottomColor: colors.border }]}
@@ -700,6 +680,7 @@ export default function EmployeeProfileScreen() {
           </View>
           <Feather name="chevron-right" size={16} color={colors.mutedForeground} />
         </TouchableOpacity>
+        {isEnabled(flags, "policies") && (
         <TouchableOpacity
           onPress={() => router.push("/policies" as any)}
           style={[styles.actionRow, { borderBottomColor: colors.border }]}
@@ -716,6 +697,8 @@ export default function EmployeeProfileScreen() {
           </View>
           <Feather name="chevron-right" size={16} color={colors.mutedForeground} />
         </TouchableOpacity>
+        )}
+        {isEnabled(flags, "swapRequests") && (
         <TouchableOpacity
           onPress={() => router.push("/swap-requests" as any)}
           style={[styles.actionRow, { borderBottomColor: colors.border }]}
@@ -732,6 +715,8 @@ export default function EmployeeProfileScreen() {
           </View>
           <Feather name="chevron-right" size={16} color={colors.mutedForeground} />
         </TouchableOpacity>
+        )}
+        {isEnabled(flags, "dar") && (
         <TouchableOpacity
           onPress={() => router.push("/dar" as any)}
           style={[styles.actionRow, { borderBottomColor: colors.border }]}
@@ -748,6 +733,8 @@ export default function EmployeeProfileScreen() {
           </View>
           <Feather name="chevron-right" size={16} color={colors.mutedForeground} />
         </TouchableOpacity>
+        )}
+        {isEnabled(flags, "patrol") && (
         <TouchableOpacity
           onPress={() => router.push("/patrol" as any)}
           style={[styles.actionRow, { borderBottomColor: colors.border }]}
@@ -764,6 +751,8 @@ export default function EmployeeProfileScreen() {
           </View>
           <Feather name="chevron-right" size={16} color={colors.mutedForeground} />
         </TouchableOpacity>
+        )}
+        {isEnabled(flags, "availability") && (
         <TouchableOpacity
           onPress={() => router.push("/availability" as any)}
           style={[styles.actionRow, { borderBottomColor: colors.border }]}
@@ -780,6 +769,8 @@ export default function EmployeeProfileScreen() {
           </View>
           <Feather name="chevron-right" size={16} color={colors.mutedForeground} />
         </TouchableOpacity>
+        )}
+        {isEnabled(flags, "licenseRenewals") && (
         <TouchableOpacity
           onPress={() => router.push("/license-renewal" as any)}
           style={[styles.actionRow, { borderBottomColor: colors.border }]}
@@ -796,6 +787,7 @@ export default function EmployeeProfileScreen() {
           </View>
           <Feather name="chevron-right" size={16} color={colors.mutedForeground} />
         </TouchableOpacity>
+        )}
         <TouchableOpacity
           onPress={openTour}
           style={[styles.actionRow, { borderBottomColor: colors.border }]}
@@ -845,14 +837,26 @@ export default function EmployeeProfileScreen() {
             />
           </View>
         )}
+        <TouchableOpacity
+          onPress={() => router.push("/delete-account" as any)}
+          style={[styles.actionRow, { borderBottomColor: "transparent" }]}
+          accessibilityRole="button"
+          accessibilityLabel="Delete account"
+        >
+          <Feather name="trash-2" size={16} color={colors.destructive} />
+          <Text style={{ color: colors.destructive, flex: 1, fontSize: 14, fontWeight: "600" }}>Delete account</Text>
+          <Feather name="chevron-right" size={16} color={colors.mutedForeground} />
+        </TouchableOpacity>
       </View>
 
       <View style={[styles.section, { backgroundColor: colors.card, borderColor: colors.border }]}>
-        <Text style={[styles.sectionTitle, { color: colors.accent }]}>WILLIAMS COUNCIL SECURITY GROUP</Text>
-        <View style={styles.companyRow}>
-          <Feather name="shield" size={14} color={colors.mutedForeground} />
-          <Text style={[styles.companyText, { color: colors.mutedForeground }]}>Protection With Passion</Text>
-        </View>
+        <Text style={[styles.sectionTitle, { color: colors.accent }]}>{brand.companyName.toUpperCase()}</Text>
+        {brand.tagline ? (
+          <View style={styles.companyRow}>
+            <Feather name="shield" size={14} color={colors.mutedForeground} />
+            <Text style={[styles.companyText, { color: colors.mutedForeground }]}>{brand.tagline}</Text>
+          </View>
+        ) : null}
       </View>
     </ScrollView>
   );
@@ -863,9 +867,8 @@ const styles = StyleSheet.create({
   center: { flex: 1, justifyContent: "center", alignItems: "center" },
   topBar: { flexDirection: "row", justifyContent: "space-between", alignItems: "center", paddingHorizontal: 16, paddingBottom: 12, borderBottomWidth: 1 },
   pageTitle: { fontSize: 22, fontWeight: "700" },
-  logoutBtn: { padding: 8, borderRadius: 8, borderWidth: 1 },
-  editBtn: { flexDirection: "row", alignItems: "center", gap: 5, paddingHorizontal: 14, paddingVertical: 8, borderRadius: 8 },
-  editBtnText: { color: "#fff", fontSize: 13, fontWeight: "700" },
+  logoutBtn: { flexDirection: "row", alignItems: "center", gap: 6, paddingHorizontal: 12, paddingVertical: 7, borderRadius: 8, borderWidth: 1 },
+  logoutText: { fontSize: 13, fontWeight: "600" },
   heroCard: { margin: 16, padding: 18, borderRadius: 14, borderWidth: 1, gap: 12 },
   heroRow: { flexDirection: "row", alignItems: "center", gap: 14 },
   brandLogo: { width: 60, height: 60, borderRadius: 30 },

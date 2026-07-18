@@ -67,7 +67,7 @@ export default function EditShiftScreen() {
   // so the rest of the screen is unchanged.
   const { shiftId: id } = useLocalSearchParams<{ shiftId: string }>();
   const { user } = useAuth();
-  // Site managers never see or edit rates; the server ignores any rate fields they send.
+  // Site Managers never see or edit rates; the server ignores any rate fields they send.
   const isSiteManager = user?.role === "site_manager";
   const topPad = useTopPad();
   const navigation = useNavigation();
@@ -157,7 +157,7 @@ export default function EditShiftScreen() {
           notes: form.notes || undefined,
           startTime: new Date(form.startTime).toISOString(),
           endTime: new Date(form.endTime).toISOString(),
-          // Site managers omit rates; server ignores them anyway.
+          // Site Managers omit rates; server ignores them anyway.
           ...(isSiteManager ? {} : { payRate: parseFloat(form.payRate), billRate: parseFloat(form.billRate) }),
           isRepeat: form.isRepeat,
           repeatPattern: form.isRepeat ? (form.repeatPattern as any) || undefined : undefined,

@@ -9,8 +9,17 @@ import { Feather } from "@expo/vector-icons";
 import { useColors } from "@/hooks/useColors";
 import { useListActivePolicies } from "@workspace/api-client-react";
 import type { PolicyPublic } from "@workspace/api-client-react";
+import { FeatureGate } from "@/components/FeatureGate";
 
 export default function PoliciesScreen() {
+  return (
+    <FeatureGate feature="policies">
+      <PoliciesScreenInner />
+    </FeatureGate>
+  );
+}
+
+function PoliciesScreenInner() {
   const colors = useColors();
   const router = useRouter();
   const topPad = useTopPad();

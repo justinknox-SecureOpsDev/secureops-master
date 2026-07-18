@@ -13,6 +13,14 @@ export const usersTable = pgTable("users", {
   status: text("status").notNull().default("pending"),
   mustChangePassword: boolean("must_change_password").notNull().default(false),
   mustCompleteProfile: boolean("must_complete_profile").notNull().default(false),
+  // Forces non-admin staff (officers / site managers) through the mobile
+  // policy-signing screen at login until they've acknowledged company
+  // policies. Sign-once: cleared by POST /me/policies/acknowledge and never
+  // re-set on a later policy version bump. Never set for admins.
+  mustSignPolicies: boolean("must_sign_policies").notNull().default(false),
+  // Per-user UI personalization (e.g. admin-portal nav group order).
+  // Cosmetic only — never used for authorization decisions.
+  uiPreferences: jsonb("ui_preferences").$type<{ navGroupOrder?: string[] }>(),
   // Temporary plaintext password set by admin "bulk generate" — visible only
   // to admins until the user is invited (then cleared). NEVER returned by
   // user-facing endpoints.
@@ -23,9 +31,6 @@ export const usersTable = pgTable("users", {
   // self-logout-all-devices and admin "revoke all sessions" actions.
   tokensValidAfter: timestamp("tokens_valid_after", { withTimezone: true }).notNull().defaultNow(),
   expoPushToken: text("expo_push_token"),
-  // Per-user UI personalization (e.g. admin-portal nav group order).
-  // Cosmetic only — never used for authorization decisions.
-  uiPreferences: jsonb("ui_preferences").$type<{ navGroupOrder?: string[] }>(),
   // E.164 phone number for SMS notifications (e.g. "+15125550142"). Optional —
   // SMS only fires when this is set AND smsOptIn is true AND Twilio is connected.
   phoneNumber: text("phone_number"),

@@ -31,7 +31,6 @@ import { requireClient, requireAdmin } from "../middlewares/auth";
 import { buildIncidentReportPdf } from "../lib/incidentPdf";
 import { buildInvoicePdf } from "../lib/invoicePdf";
 import { sendEmail } from "../lib/email";
-import { getManagerUserIdsForSite } from "../lib/siteManagerAuth";
 
 const router: IRouter = Router();
 
@@ -1398,32 +1397,6 @@ router.post(
       throw err;
     }
 
-    // Notify the site's assigned managers about the newly created coverage
-    // shifts — one summary push + SMS, not one per occurrence (a date-range
-    // request can create many rows across multiple licence levels). Mirrors the
-    // POST /shifts/repeat summary. Best-effort: a notification failure must
-    // never fail the approval.
-    const createdCount = updated?.createdShiftIds?.length ?? 0;
-    if (createdCount > 0 && sr.siteId) {
-      try {
-        const managerIds = await getManagerUserIdsForSite(sr.siteId);
-        if (managerIds.length > 0) {
-          const { sendPushToUsers } = await import("../lib/push");
-          const { sendSmsToUsers } = await import("../lib/sms");
-          const siteLabel = site?.name ?? "your site";
-          const noun = `coverage shift${createdCount === 1 ? "" : "s"}`;
-          await sendPushToUsers(managerIds, {
-            title: "🗓️ New Shifts At Your Site",
-            body: `${createdCount} new ${noun} approved at ${siteLabel}.`,
-            data: { type: "site_shift_created", siteId: sr.siteId },
-          });
-          void sendSmsToUsers(managerIds, `[WCSG] ${createdCount} new ${noun} approved at ${siteLabel}.`);
-        }
-      } catch (err) {
-        req.log.warn({ err }, "Failed to notify site managers of approved coverage shifts");
-      }
-    }
-
     res.json({ ...updated, createdShiftsCount: updated?.createdShiftIds?.length ?? 0 });
   },
 );
@@ -1515,22 +1488,22 @@ async function sendClientInviteEmail(opts: {
   ].join("\n");
 
   const html = `
-    <div style="font-family:Georgia,serif;max-width:560px;margin:0 auto;color:#080c18">
-      <div style="background:#080c18;padding:20px 24px;border-radius:4px 4px 0 0">
-        <h2 style="color:#c9a84c;margin:0;font-size:18px">Williams Council Security Group</h2>
-        <p style="color:#f0e6c8;margin:4px 0 0;font-size:12px;letter-spacing:0.05em">CLIENT PORTAL ACCESS</p>
+    <div style="font-family:Georgia,serif;max-width:560px;margin:0 auto;color:#0c0a08">
+      <div style="background:#0c0a08;padding:20px 24px;border-radius:4px 4px 0 0">
+        <h2 style="color:#c9a04a;margin:0;font-size:18px">Williams Council Security Group</h2>
+        <p style="color:#f0e4c0;margin:4px 0 0;font-size:12px;letter-spacing:0.05em">CLIENT PORTAL ACCESS</p>
       </div>
       <div style="border:1px solid #ddd;border-top:none;padding:24px;border-radius:0 0 4px 4px">
         <p>Hello ${user.firstName},</p>
         <p>You have been granted access to the <strong>${clientName}</strong> client portal on the SecureOps platform.</p>
-        <div style="background:#f6f1e1;padding:14px 16px;border-left:3px solid #c9a84c;margin:18px 0;border-radius:4px">
-          <div style="margin-bottom:6px"><strong>Sign-in URL:</strong> <a href="${loginUrl}" style="color:#080c18">${loginUrl}</a></div>
+        <div style="background:#f6f1e1;padding:14px 16px;border-left:3px solid #c9a04a;margin:18px 0;border-radius:4px">
+          <div style="margin-bottom:6px"><strong>Sign-in URL:</strong> <a href="${loginUrl}" style="color:#0c0a08">${loginUrl}</a></div>
           <div style="margin-bottom:6px"><strong>Email:</strong> ${user.email}</div>
           <div><strong>Temporary password:</strong> <code style="background:#fff;padding:2px 6px;border-radius:3px;border:1px solid #ccc">${tempPassword}</code></div>
         </div>
         <p style="color:#555;font-size:13px">You will be asked to set a new password when you first sign in. If you did not expect this invitation, please disregard this email.</p>
-        <hr style="border:none;border-top:2px solid #c9a84c;margin:20px 0"/>
-        <p style="color:#080c18;font-weight:bold;margin:0;font-size:13px">Williams Council Security Group</p>
+        <hr style="border:none;border-top:2px solid #c9a04a;margin:20px 0"/>
+        <p style="color:#0c0a08;font-weight:bold;margin:0;font-size:13px">Williams Council Security Group</p>
       </div>
     </div>
   `;

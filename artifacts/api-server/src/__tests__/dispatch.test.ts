@@ -347,7 +347,13 @@ describe("dispatch assign-nearest headcount race", () => {
   it("returns 409 when the shift is already full", async () => {
     // Non-race scenario kept for clarity: a follow-up call against an
     // already-full shift must 409 cleanly without inserting anything.
-    const start = new Date(Date.now() + 8 * 60 * 60 * 1000);
+    // Window starts at now+14h (past every earlier test's assignment:
+    // now+5h..+9h from the explicit-assign test and now+6h..+10h from the
+    // race test). Otherwise, depending on which shared employee wins the
+    // prior concurrent race, BOTH test employees can be `conflictingShift`
+    // for an overlapping window, leaving assign-nearest with no eligible
+    // candidate (200 instead of 201) — a ~50/50 flake.
+    const start = new Date(Date.now() + 14 * 60 * 60 * 1000);
     const end = new Date(start.getTime() + 4 * 60 * 60 * 1000);
     const [shift] = await db
       .insert(shiftsTable)

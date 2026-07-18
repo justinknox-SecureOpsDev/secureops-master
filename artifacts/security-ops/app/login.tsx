@@ -1,20 +1,23 @@
-import React, { useState } from "react";
+import React, { useState, useRef, useEffect } from "react";
 import {
   View, Text, TextInput, TouchableOpacity,
-  StyleSheet, ActivityIndicator, Image,
+  StyleSheet, ActivityIndicator, Platform,
 } from "react-native";
 import * as WebBrowser from "expo-web-browser";
-import { useRouter } from "expo-router";
+import { useRouter, useLocalSearchParams } from "expo-router";
 import { useAuth } from "@/contexts/AuthContext";
+import { useOrg } from "@/contexts/OrgContext";
 import { useColors } from "@/hooks/useColors";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { Feather } from "@expo/vector-icons";
-import { API_BASE_URL } from "@/utils/api";
+import { getApiBaseUrl } from "@/utils/api";
+import { runSwitchOrgFlow } from "@/utils/orgBootstrap";
+import { SecureOpsLogo } from "@/components/SecureOpsLogo";
 
 async function postJson<T>(path: string, body: unknown): Promise<T> {
   let res: Response;
   try {
-    res = await fetch(`${API_BASE_URL}${path}`, {
+    res = await fetch(`${getApiBaseUrl()}${path}`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(body),
@@ -30,17 +33,34 @@ async function postJson<T>(path: string, body: unknown): Promise<T> {
   return data as T;
 }
 
+const DEMO_EMAIL = "guest@secureops.com";
+const DEMO_PASSWORD = "Demo123!";
+
 export default function LoginScreen() {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [showPassword, setShowPassword] = useState(false);
   const [busy, setBusy] = useState(false);
+  const [demoLoading, setDemoLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [challengeToken, setChallengeToken] = useState<string | null>(null);
   const [code, setCode] = useState("");
-  const { login: setAuthContext } = useAuth();
+  const { login: setAuthContext, logout } = useAuth();
+  const { org, switchOrg } = useOrg();
   const colors = useColors();
   const router = useRouter();
+  const { demo } = useLocalSearchParams<{ demo?: string | string[] }>();
+  const demoParam = Array.isArray(demo) ? demo[0] : demo;
+
+  // Native-only: let an officer who connected to the wrong organization go
+  // back to the connect screen. Log out FIRST (so the request hits the CURRENT
+  // backend and clears the cached session) before forgetting the org + routing.
+  const handleSwitchOrg = () =>
+    runSwitchOrgFlow({
+      logout,
+      switchOrg,
+      navigateToConnect: () => router.replace("/connect" as any),
+    });
 
   const handleLogin = async () => {
     if (!email || !password) return;
@@ -80,6 +100,37 @@ export default function LoginScreen() {
     }
   };
 
+  const handleDemoLogin = async () => {
+    setDemoLoading(true); setError(null);
+    try {
+      const res = await postJson<{ token?: string; user?: any; needsTotp?: boolean; challengeToken?: string }>(
+        "/auth/login",
+        { email: DEMO_EMAIL, password: DEMO_PASSWORD },
+      );
+      if (res.token && res.user) {
+        await setAuthContext(res.user, res.token);
+      } else {
+        setError("Demo account unavailable — try again shortly.");
+      }
+    } catch (e: any) {
+      setError(e?.message || "Demo login failed. Try again.");
+    } finally {
+      setDemoLoading(false);
+    }
+  };
+
+  // Reviewer demo hand-off (Guideline 2.1): the connect screen's "Try demo"
+  // selects the default backend and routes here with `?demo=1`. Auto-run the
+  // demo sign-in exactly once so a fresh install reaches a working session in a
+  // single tap. Guarded by a ref so a re-render / param reuse never re-fires it.
+  const demoAutoRan = useRef(false);
+  useEffect(() => {
+    if (demoParam !== "1" || demoAutoRan.current) return;
+    demoAutoRan.current = true;
+    void handleDemoLogin();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [demoParam]);
+
   const cancelTotp = () => {
     setChallengeToken(null); setCode(""); setError(null);
   };
@@ -90,21 +141,23 @@ export default function LoginScreen() {
       <View style={styles.glow} />
 
       <View style={styles.content}>
-        {/* Logo */}
-        <View style={styles.logoWrap}>
-          <Image
-            source={require("@/assets/images/logo.png")}
-            style={styles.logo}
-            resizeMode="contain"
-          />
+        {/* Platform emblem */}
+        <View
+          style={styles.logoWrap}
+          accessible
+          accessibilityRole="image"
+          accessibilityLabel="SecureOps Command"
+        >
+          <SecureOpsLogo size={132} />
         </View>
 
-        {/* Brand text */}
+        {/* Platform brand — SecureOps Command (shared across all tenants) */}
         <View style={styles.brandBlock}>
-          <Text style={[styles.brandName, { color: colors.primary }]}>{(process.env.EXPO_PUBLIC_COMPANY_NAME ?? "Williams Council Security Group").toUpperCase()}</Text>
+          <Text style={[styles.brandName, { color: colors.foreground }]}>SecureOps</Text>
+          <Text style={[styles.brandSub, { color: colors.primary }]}>COMMAND</Text>
           <View style={styles.dividerRow}>
             <View style={[styles.dividerLine, { backgroundColor: colors.primary }]} />
-            <Text style={[styles.motto, { color: colors.mutedForeground }]}>PROTECTION WITH PASSION</Text>
+            <Text style={[styles.motto, { color: colors.mutedForeground }]}>SECURITY OPERATIONS PLATFORM</Text>
             <View style={[styles.dividerLine, { backgroundColor: colors.primary }]} />
           </View>
         </View>
@@ -114,13 +167,14 @@ export default function LoginScreen() {
           <Text style={[styles.cardTitle, { color: colors.foreground }]}>COMMAND ACCESS</Text>
           {/*
            * Visible "no public sign-up" disclosure for App Store Review
-           * (Guideline 5.1.1(v)). SecureOps is a workforce app — accounts
-           * are provisioned by WCSG HR after an approved application. The
-           * reviewer is given a demo admin account in App Review Notes.
+           * (Guideline 5.1.1(v)). SecureOps Command is a workforce platform —
+           * accounts are provisioned by each organization's HR after an
+           * approved application. The reviewer is given a demo admin account
+           * in App Review Notes.
            */}
           <Text style={[styles.cardSubtitle, { color: colors.mutedForeground }]}>
-            Authorized WCSG personnel only. Accounts are issued by HR after onboarding —
-            contact your supervisor for access.
+            Authorized personnel only. Accounts are issued by your organization's HR
+            after onboarding — contact your supervisor for access.
           </Text>
 
           {error && (
@@ -183,6 +237,30 @@ export default function LoginScreen() {
                   Forgot password?
                 </Text>
               </TouchableOpacity>
+
+              {/* Demo access divider */}
+              <View style={styles.demoDividerRow}>
+                <View style={[styles.demoDividerLine, { backgroundColor: colors.border }]} />
+                <Text style={[styles.demoDividerLabel, { color: colors.mutedForeground }]}>or</Text>
+                <View style={[styles.demoDividerLine, { backgroundColor: colors.border }]} />
+              </View>
+
+              <TouchableOpacity
+                style={[styles.demoButton, { borderColor: colors.primary, opacity: demoLoading ? 0.7 : 1 }]}
+                onPress={handleDemoLogin}
+                disabled={demoLoading || busy}
+                accessibilityLabel="Try demo"
+                accessibilityRole="button"
+              >
+                {demoLoading ? (
+                  <ActivityIndicator color={colors.primary} size="small" />
+                ) : (
+                  <>
+                    <Feather name="play-circle" size={15} color={colors.primary} />
+                    <Text style={[styles.demoButtonText, { color: colors.primary }]}>Try Demo</Text>
+                  </>
+                )}
+              </TouchableOpacity>
             </>
           ) : (
             <>
@@ -223,6 +301,21 @@ export default function LoginScreen() {
           )}
         </View>
 
+        {Platform.OS !== "web" && org && (
+          <TouchableOpacity
+            onPress={handleSwitchOrg}
+            style={styles.switchOrgRow}
+            accessibilityRole="button"
+            accessibilityLabel={`Connected to ${org.name}. Switch organization`}
+          >
+            <Feather name="briefcase" size={12} color={colors.mutedForeground} />
+            <Text style={[styles.switchOrgText, { color: colors.mutedForeground }]} numberOfLines={1}>
+              Connected to <Text style={{ color: colors.foreground, fontWeight: "600" }}>{org.name}</Text>
+            </Text>
+            <Text style={[styles.switchOrgText, { color: colors.primary, fontWeight: "700" }]}>· Switch</Text>
+          </TouchableOpacity>
+        )}
+
         <View style={styles.legalRow}>
           <TouchableOpacity onPress={() => WebBrowser.openBrowserAsync(legalUrl("privacy"))}>
             <Text style={[styles.legalLink, { color: colors.mutedForeground }]}>Privacy</Text>
@@ -232,28 +325,29 @@ export default function LoginScreen() {
             <Text style={[styles.legalLink, { color: colors.mutedForeground }]}>Terms</Text>
           </TouchableOpacity>
           <Text style={[styles.legalDot, { color: colors.mutedForeground }]}>·</Text>
+          <TouchableOpacity onPress={() => WebBrowser.openBrowserAsync(legalUrl("eula"))}>
+            <Text style={[styles.legalLink, { color: colors.mutedForeground }]}>EULA</Text>
+          </TouchableOpacity>
+          <Text style={[styles.legalDot, { color: colors.mutedForeground }]}>·</Text>
           <TouchableOpacity onPress={() => WebBrowser.openBrowserAsync(legalUrl("data-rights"))}>
             <Text style={[styles.legalLink, { color: colors.mutedForeground }]}>Your data rights</Text>
           </TouchableOpacity>
         </View>
 
         <Text style={[styles.footer, { color: colors.mutedForeground }]}>
-          © {process.env.EXPO_PUBLIC_COMPANY_NAME ?? "Williams Council Security Group"}
+          SecureOps Command · © {new Date().getFullYear()}
         </Text>
       </View>
     </SafeAreaView>
   );
 }
 
-function legalUrl(slug: "privacy" | "terms" | "data-rights"): string {
-  // Hosted on the admin-portal artifact under /admin-portal/<slug>.
-  // Resolve from EXPO_PUBLIC_API_BASE_URL when available; fall back to the
-  // production wcsg domain so the links work in built clients too.
-  const base =
-    (process.env.EXPO_PUBLIC_API_BASE_URL?.replace(/\/+$/, "")) ||
-    (process.env.EXPO_PUBLIC_PORTAL_BASE_URL ?? "https://secureops.williamscouncilsecurity.com");
-  // Strip trailing /api if the env var pointed at the API root.
-  const root = base.replace(/\/api$/, "");
+function legalUrl(slug: "privacy" | "terms" | "eula" | "data-rights"): string {
+  // Legal pages live under /admin-portal/<slug> on whichever backend is
+  // currently selected. Resolve from the live API origin (which already
+  // reflects the chosen organization on native, or same-origin on web), so
+  // each customer's app shows that customer's policies.
+  const root = getApiBaseUrl().replace(/\/api$/, "");
   return `${root}/admin-portal/${slug}`;
 }
 
@@ -266,7 +360,7 @@ const styles = StyleSheet.create({
     width: 300,
     height: 300,
     borderRadius: 150,
-    backgroundColor: "#c9a84c",
+    backgroundColor: "#c9a04a",
     opacity: 0.07,
     transform: [{ scaleX: 1.6 }],
   },
@@ -278,11 +372,6 @@ const styles = StyleSheet.create({
   },
   logoWrap: {
     alignItems: "center",
-  },
-  logo: {
-    width: 160,
-    height: 160,
-    borderRadius: 80,
   },
   brandBlock: {
     alignItems: "center",
@@ -379,6 +468,34 @@ const styles = StyleSheet.create({
     letterSpacing: 1,
     textDecorationLine: "underline",
   },
+  demoDividerRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+    marginTop: 2,
+  },
+  demoDividerLine: {
+    flex: 1,
+    height: 1,
+  },
+  demoDividerLabel: {
+    fontSize: 11,
+    letterSpacing: 1,
+  },
+  demoButton: {
+    height: 46,
+    justifyContent: "center",
+    alignItems: "center",
+    borderRadius: 8,
+    borderWidth: 1,
+    flexDirection: "row",
+    gap: 8,
+  },
+  demoButtonText: {
+    fontWeight: "700",
+    fontSize: 13,
+    letterSpacing: 2,
+  },
   footer: {
     textAlign: "center",
     fontSize: 11,
@@ -388,6 +505,7 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     justifyContent: "center",
     alignItems: "center",
+    flexWrap: "wrap",
     gap: 8,
     marginTop: 4,
   },
@@ -399,5 +517,16 @@ const styles = StyleSheet.create({
   legalDot: {
     fontSize: 11,
     opacity: 0.5,
+  },
+  switchOrgRow: {
+    flexDirection: "row",
+    justifyContent: "center",
+    alignItems: "center",
+    gap: 6,
+    marginTop: 4,
+  },
+  switchOrgText: {
+    fontSize: 12,
+    letterSpacing: 0.3,
   },
 });

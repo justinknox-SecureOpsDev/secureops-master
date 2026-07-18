@@ -9,6 +9,8 @@ import { LoginPage } from "@/pages/Login";
 import { AppShell } from "@/pages/AppShell";
 import { TablePage } from "@/pages/TablePage";
 import DashboardPage from "@/pages/Dashboard";
+import ProtectionDetailPage from "@/pages/ProtectionDetail";
+import EmployeeCompletenessPage from "@/pages/EmployeeCompleteness";
 import { SiteDetailPage } from "@/pages/SiteDetailPage";
 import { ApplyPage } from "@/pages/Apply";
 import { OnboardPage } from "@/pages/Onboard";
@@ -16,7 +18,7 @@ import { ResetPasswordPage } from "@/pages/ResetPassword";
 import { AmendApplication } from "@/pages/AmendApplication";
 import SubcontractorClockInPage from "@/pages/SubcontractorClockIn";
 import SubcontractorEntriesPage from "@/pages/SubcontractorEntries";
-import { PrivacyPage, TermsPage, DataRightsPage } from "@/pages/Legal";
+import { PrivacyPage, TermsPage, DataRightsPage, EulaPage } from "@/pages/Legal";
 import { ApplicationsPage } from "@/pages/Applications";
 import { ApplicationBuilderPage } from "@/pages/ApplicationBuilder";
 import { OnboardingPage } from "@/pages/Onboarding";
@@ -24,10 +26,10 @@ import { PoliciesPage } from "@/pages/Policies";
 import PayRunPage from "@/pages/PayRun";
 import SubcontractorPayRunPage from "@/pages/SubcontractorPayRun";
 import PayrollBoardPage from "@/pages/PayrollBoard";
+import AnalyticsPage from "@/pages/Analytics";
 import InvoiceBoardPage from "@/pages/InvoiceBoard";
 import { InvitationsPage } from "@/pages/Invitations";
 import ShiftsPage from "@/pages/Shifts";
-import ProtectionDetailPage from "@/pages/ProtectionDetail";
 import CalendarPage from "@/pages/Calendar";
 import AuditLogPage from "@/pages/AuditLog";
 import ShiftRecoveryPage from "@/pages/ShiftRecovery";
@@ -49,13 +51,15 @@ import OfficerProfilePage from "@/pages/OfficerProfile";
 import StaffingPage from "@/pages/Staffing";
 import StaffingEventPage from "@/pages/StaffingEvent";
 import SchedulerIntegrationPage from "@/pages/SchedulerIntegration";
+import OrgInvitePage from "@/pages/OrgInvite";
 import NotFound from "@/pages/not-found";
 import { ClientShell } from "@/pages/ClientShell";
 import { MandatoryPasswordChange } from "@/pages/MandatoryPasswordChange";
 import ClientUsers from "@/pages/ClientUsers";
 import CoverageRequests from "@/pages/CoverageRequests";
-import AnalyticsPage from "@/pages/Analytics";
-import EmployeeCompletenessPage from "@/pages/EmployeeCompleteness";
+import PlatformFeaturesPage from "@/pages/PlatformFeatures";
+import LegalAgreementsPage from "@/pages/LegalAgreements";
+import { FeatureGuard } from "@/components/FeatureGate";
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -83,6 +87,7 @@ function Routed() {
   if (location.startsWith("/amend/")) return <AmendApplication />;
   if (location === "/privacy") return <PrivacyPage />;
   if (location === "/terms") return <TermsPage />;
+  if (location === "/eula") return <EulaPage />;
   if (location === "/data-rights") return <DataRightsPage />;
   if (location.startsWith("/share/incident/")) return <PublicIncidentPage />;
   if (location.startsWith("/share/employee/")) return <PublicEmployeeProfilePage />;
@@ -149,36 +154,39 @@ function Routed() {
       ) : (
         <Switch>
           <Route path="/" component={DashboardPage} />
-          <Route path="/dispatch" component={DispatchPage} />
-          <Route path="/chat" component={ChatPage} />
+          <Route path="/dispatch">{() => <FeatureGuard feature="liveMap"><DispatchPage /></FeatureGuard>}</Route>
+          <Route path="/chat">{() => <FeatureGuard feature="chat"><ChatPage /></FeatureGuard>}</Route>
           <Route path="/personnel" component={PersonnelPage} />
-          <Route path="/personnel/share-links" component={EmployeeShareLinksPage} />
+          <Route path="/personnel/share-links">{() => <FeatureGuard feature="officerShares"><EmployeeShareLinksPage /></FeatureGuard>}</Route>
           <Route path="/personnel/:id" component={OfficerProfilePage} />
-          <Route path="/hr/applications" component={ApplicationsPage} />
-          <Route path="/hr/application-builder" component={ApplicationBuilderPage} />
-          <Route path="/hr/onboarding" component={OnboardingPage} />
-          <Route path="/hr/policies" component={PoliciesPage} />
-          <Route path="/hr/invitations" component={InvitationsPage} />
+          <Route path="/hr/applications">{() => <FeatureGuard feature="hr"><ApplicationsPage /></FeatureGuard>}</Route>
+          <Route path="/hr/application-builder">{() => <FeatureGuard feature="hr"><ApplicationBuilderPage /></FeatureGuard>}</Route>
+          <Route path="/hr/onboarding">{() => <FeatureGuard feature="hr"><OnboardingPage /></FeatureGuard>}</Route>
+          <Route path="/hr/policies">{() => <FeatureGuard feature="policies"><PoliciesPage /></FeatureGuard>}</Route>
+          <Route path="/hr/invitations">{() => <FeatureGuard feature="hr"><InvitationsPage /></FeatureGuard>}</Route>
           <Route path="/hr/client-users" component={ClientUsers} />
           <Route path="/hr/coverage-requests" component={CoverageRequests} />
-          <Route path="/hr/reports" component={EmployeeCompletenessPage} />
-          <Route path="/payroll/board" component={PayrollBoardPage} />
-          <Route path="/invoices/board" component={InvoiceBoardPage} />
-          <Route path="/payroll/pay-run" component={PayRunPage} />
+          <Route path="/hr/reports">{() => <FeatureGuard feature="hr"><EmployeeCompletenessPage /></FeatureGuard>}</Route>
+          <Route path="/analytics" component={AnalyticsPage} />
+          <Route path="/payroll/board">{() => <FeatureGuard feature="payroll"><PayrollBoardPage /></FeatureGuard>}</Route>
+          <Route path="/invoices/board">{() => <FeatureGuard feature="invoicing"><InvoiceBoardPage /></FeatureGuard>}</Route>
+          <Route path="/payroll/pay-run">{() => <FeatureGuard feature="payroll"><PayRunPage /></FeatureGuard>}</Route>
           <Route path="/subcontractors/pay-run" component={SubcontractorPayRunPage} />
           <Route path="/subcontractors/clock-in-entries" component={SubcontractorEntriesPage} />
-          <Route path="/analytics" component={AnalyticsPage} />
           <Route path="/audit-log" component={AuditLogPage} />
           <Route path="/recovery/shifts" component={ShiftRecoveryPage} />
-          <Route path="/swap-requests" component={SwapRequestsPage} />
-          <Route path="/hr/license-renewals" component={LicenseRenewalsPage} />
-          <Route path="/incidents/share-links" component={IncidentShareLinksPage} />
+          <Route path="/swap-requests">{() => <FeatureGuard feature="swapRequests"><SwapRequestsPage /></FeatureGuard>}</Route>
+          <Route path="/hr/license-renewals">{() => <FeatureGuard feature="licenseRenewals"><LicenseRenewalsPage /></FeatureGuard>}</Route>
+          <Route path="/incidents/share-links">{() => <FeatureGuard feature="incidents"><IncidentShareLinksPage /></FeatureGuard>}</Route>
           <Route path="/account/security" component={SecurityPage} />
           <Route path="/settings/scheduler-integration" component={SchedulerIntegrationPage} />
-          <Route path="/radio" component={RadioPage} />
-          <Route path="/dar" component={DailyReportsPage} />
+          <Route path="/settings/invite" component={OrgInvitePage} />
+          <Route path="/platform/features" component={PlatformFeaturesPage} />
+          <Route path="/legal/agreements" component={LegalAgreementsPage} />
+          <Route path="/radio">{() => <FeatureGuard feature="radio"><RadioPage /></FeatureGuard>}</Route>
+          <Route path="/dar">{() => <FeatureGuard feature="dar"><DailyReportsPage /></FeatureGuard>}</Route>
           <Route path="/compliance" component={CompliancePage} />
-          <Route path="/exports" component={ExportsPage} />
+          <Route path="/exports">{() => <FeatureGuard feature="exports"><ExportsPage /></FeatureGuard>}</Route>
           <Route path="/sites/:id" component={SiteDetailPage} />
           <Route path="/staffing" component={StaffingPage} />
           <Route path="/staffing/:id" component={StaffingEventPage} />
@@ -213,7 +221,7 @@ function OfficerAppRedirect({ email }: { email: string }) {
           Officer accounts ({email}) sign in through the SecureOps app, not the admin
           portal. Redirecting you now.
         </p>
-        <a href={appUrl} className="text-sm underline" style={{ color: "#c9a84c" }}>
+        <a href={appUrl} className="text-sm underline" style={{ color: "#c9a04a" }}>
           Continue now
         </a>
       </div>
@@ -241,7 +249,7 @@ function ClientPortalNotice({ email }: { email: string }) {
           <button
             onClick={logout}
             className="px-4 py-2 rounded font-semibold"
-            style={{ background: "#c9a84c", color: "#080c18" }}
+            style={{ background: "#c9a04a", color: "#0c0a08" }}
           >
             Sign out to sign in as the client
           </button>
