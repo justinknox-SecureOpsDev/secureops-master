@@ -4,7 +4,7 @@ import { logger } from "./lib/logger";
 import { attachWebSocketServer, handleChatUpgrade, getWss } from "./lib/wsManager";
 import { attachRadioWebSocketServer, handleRadioUpgrade, getRadioWss } from "./lib/radioGateway";
 import { seedPolicies, backfillEmployeeProfileFields, backfillMustSignPolicies, pool } from "@workspace/db";
-import { seedDemoUsers, ensureAdminAccountHealth, ensureEmployeesRowsForAllUsers, backfillUserPhoneNumbersFromEmployees, migrateLeadRoleToSiteManager, deduplicateSiteRatesAndEnsureUniqueConstraint } from "./lib/seedDemoUsers";
+import { seedDemoUsers, ensureAdminAccountHealth, ensureEmployeesRowsForAllUsers, backfillUserPhoneNumbersFromEmployees, migrateLeadRoleToSiteManager } from "./lib/seedDemoUsers";
 import { seedChatRooms } from "./lib/seedChatRooms";
 import { seedRadioChannels } from "./lib/seedRadioChannels";
 import { startScheduledJobs } from "./lib/scheduledJobs";
@@ -163,14 +163,6 @@ Promise.all([employeeProfileBackfillDone, employeesRowsBackfilled, demoUsersSeed
 backfillUserPhoneNumbersFromEmployees()
   .then(() => logger.info("User phone numbers backfilled from employee files"))
   .catch((err) => logger.error({ err }, "Failed to backfill user phone numbers"));
-
-// One-time idempotent repair: deduplicate site_rates rows (keep oldest per
-// site+level) then create the UNIQUE(site_id, license_level) pg_constraint
-// so the invariant is enforced even though the Drizzle schema temporarily
-// omits the .unique() to avoid a failing migration validator on deploy.
-deduplicateSiteRatesAndEnsureUniqueConstraint()
-  .then(() => logger.info("site_rates dedup and unique constraint backfill complete"))
-  .catch((err) => logger.error({ err }, "Failed site_rates dedup/constraint backfill"));
 
 // Idempotently seed the canonical chat channel set (announcements,
 // per-license-level rooms, OPS, city rooms, elite, one-per-site).
