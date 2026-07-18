@@ -77,3 +77,4 @@
 - [EAS iOS build+submit from Replit](eas-ios-build-submit.md) — ASC secrets swapped+newline-mangled (reconstruct PEM) + EXPO_APPLE_TEAM_ID/TYPE + EAS_NO_VCS=1; "malformed profile"=@expo/plist override; new bundle IDs need Push cap enabled before profile gen; --no-wait single-call build/submit, poll across turns.
 - [Bash bg procs don't persist](replit-bash-background-procs.md) — setsid/nohup/& die when the bash call returns; poll remote long-ops across turns, don't rely on a local daemon.
 - [pnpm overrides location](pnpm-overrides-location.md) — dependency overrides go in pnpm-workspace.yaml `overrides:`, NOT package.json#pnpm.overrides; pnpm 10 REPLACES not merges, silently dropping ~118 security pins.
+- [adminGridTimeEntryInvoiceSync flake](admin-grid-invoice-sync-flake.md) — full parallel test gate can 23505 this suite (invoice auto-sync race); passes alone; re-run gate, dont change code.
