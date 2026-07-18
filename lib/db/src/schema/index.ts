@@ -51,3 +51,8 @@ export * from "./subcontractorQrTokens";
 export * from "./subcontractorTimeEntries";
 export * from "./platformSettings";
 export * from "./salesLeads";
+export * from "./adminTasks";
+export * from "./protectionDetails";
+export * from "./protectionPersons";
+export * from "./protectionDestinations";
+export * from "./featureFlags";

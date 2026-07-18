@@ -585,6 +585,17 @@ export const ShiftStatus = {
 } as const;
 
 /**
+ * 'standard' guard shift or 'ppo_detail' executive/close-protection detail (unlocks the protection package)
+ */
+export type ShiftShiftType =
+  (typeof ShiftShiftType)[keyof typeof ShiftShiftType];
+
+export const ShiftShiftType = {
+  standard: "standard",
+  ppo_detail: "ppo_detail",
+} as const;
+
+/**
  * Minimum license level required (1=support/no licence, 2=unarmed, 3=armed, 4=PPO)
  */
 export type ShiftRequiredLicenseLevel =
@@ -651,6 +662,8 @@ export interface Shift {
   /** Legacy alias for billRate */
   billableRate?: number;
   status: ShiftStatus;
+  /** 'standard' guard shift or 'ppo_detail' executive/close-protection detail (unlocks the protection package) */
+  shiftType?: ShiftShiftType;
   /** Minimum license level required (1=support/no licence, 2=unarmed, 3=armed, 4=PPO) */
   requiredLicenseLevel: ShiftRequiredLicenseLevel;
   /** Total number of officers needed for this shift */
@@ -684,6 +697,17 @@ export const CreateShiftRequestRepeatPattern = {
   monthly: "monthly",
 } as const;
 
+/**
+ * 'ppo_detail' unlocks the executive-protection package; defaults to 'standard'
+ */
+export type CreateShiftRequestShiftType =
+  (typeof CreateShiftRequestShiftType)[keyof typeof CreateShiftRequestShiftType];
+
+export const CreateShiftRequestShiftType = {
+  standard: "standard",
+  ppo_detail: "ppo_detail",
+} as const;
+
 export interface CreateShiftRequest {
   title: string;
   /** Required — links shift to a site (and its client) */
@@ -699,6 +723,8 @@ export interface CreateShiftRequest {
   headcount?: number;
   isRepeat: boolean;
   repeatPattern?: CreateShiftRequestRepeatPattern;
+  /** 'ppo_detail' unlocks the executive-protection package; defaults to 'standard' */
+  shiftType?: CreateShiftRequestShiftType;
   notes?: string;
 }
 
@@ -722,6 +748,14 @@ export const UpdateShiftRequestRequiredLicenseLevel = {
   NUMBER_4: 4,
 } as const;
 
+export type UpdateShiftRequestShiftType =
+  (typeof UpdateShiftRequestShiftType)[keyof typeof UpdateShiftRequestShiftType];
+
+export const UpdateShiftRequestShiftType = {
+  standard: "standard",
+  ppo_detail: "ppo_detail",
+} as const;
+
 export interface UpdateShiftRequest {
   title?: string;
   siteId?: string;
@@ -733,6 +767,7 @@ export interface UpdateShiftRequest {
   requiredLicenseLevel?: UpdateShiftRequestRequiredLicenseLevel;
   /** @minimum 1 */
   headcount?: number;
+  shiftType?: UpdateShiftRequestShiftType;
   notes?: string;
 }
 
@@ -752,6 +787,150 @@ export const UpdateAssignmentRequestStatus = {
 
 export interface UpdateAssignmentRequest {
   status: UpdateAssignmentRequestStatus;
+}
+
+/**
+ * Per-user UI personalization. Cosmetic only — never authorization.
+ */
+export interface UiPreferences {
+  /**
+   * Preferred order of portal nav group keys. Unknown keys are ignored; missing groups append in default order.
+   * @maxItems 30
+   */
+  navGroupOrder?: string[];
+}
+
+export type ProtectionPersonKind =
+  (typeof ProtectionPersonKind)[keyof typeof ProtectionPersonKind];
+
+export const ProtectionPersonKind = {
+  principal: "principal",
+  threat: "threat",
+} as const;
+
+/**
+ * A principal (protectee) or threat/subject of interest on a protection detail.
+ */
+export interface ProtectionPerson {
+  id: string;
+  kind: ProtectionPersonKind;
+  seq: number;
+  name?: string | null;
+  relationship?: string | null;
+  sex?: string | null;
+  age?: string | null;
+  height?: string | null;
+  weight?: string | null;
+  hairColor?: string | null;
+  eyeColor?: string | null;
+  distinguishingFeatures?: string | null;
+  notes?: string | null;
+  photoKeys: string[];
+}
+
+/**
+ * An ordered, geocoded stop on a protection detail's itinerary.
+ */
+export interface ProtectionDestination {
+  id: string;
+  seq: number;
+  label?: string | null;
+  address?: string | null;
+  lat?: number | null;
+  lng?: number | null;
+  arrivalTime?: string | null;
+  departureTime?: string | null;
+  notes?: string | null;
+}
+
+/**
+ * Full executive-protection (PPO) package for a shift. Pre-plan fields plus principals, threats, and destinations. Empty/null when not yet built.
+ */
+export interface ProtectionDetail {
+  shiftId: string;
+  threatLevel?: string | null;
+  missionSummary?: string | null;
+  dressCode?: string | null;
+  armamentInstructions?: string | null;
+  communicationPlan?: string | null;
+  medicalNotes?: string | null;
+  emergencyRendezvous?: string | null;
+  vehicleDetails?: string | null;
+  specialInstructions?: string | null;
+  principals: ProtectionPerson[];
+  threats: ProtectionPerson[];
+  destinations: ProtectionDestination[];
+}
+
+/**
+ * Input shape for one principal or threat. `kind` is implied by which array it appears in.
+ */
+export interface ProtectionPersonInput {
+  /** @maxLength 200 */
+  name?: string;
+  /** @maxLength 200 */
+  relationship?: string;
+  /** @maxLength 100 */
+  sex?: string;
+  /** @maxLength 100 */
+  age?: string;
+  /** @maxLength 100 */
+  height?: string;
+  /** @maxLength 100 */
+  weight?: string;
+  /** @maxLength 100 */
+  hairColor?: string;
+  /** @maxLength 100 */
+  eyeColor?: string;
+  /** @maxLength 4000 */
+  distinguishingFeatures?: string;
+  /** @maxLength 4000 */
+  notes?: string;
+  /** @maxItems 12 */
+  photoKeys?: string[];
+}
+
+export interface ProtectionDestinationInput {
+  /** @maxLength 200 */
+  label?: string;
+  /** @maxLength 500 */
+  address?: string;
+  lat?: number;
+  lng?: number;
+  arrivalTime?: string;
+  departureTime?: string;
+  /** @maxLength 4000 */
+  notes?: string;
+}
+
+/**
+ * Replace-all body for a shift's PPO package. Every field optional; sending empty arrays clears the corresponding section.
+ */
+export interface ProtectionDetailRequest {
+  /** @maxLength 200 */
+  threatLevel?: string;
+  /** @maxLength 8000 */
+  missionSummary?: string;
+  /** @maxLength 4000 */
+  dressCode?: string;
+  /** @maxLength 4000 */
+  armamentInstructions?: string;
+  /** @maxLength 4000 */
+  communicationPlan?: string;
+  /** @maxLength 4000 */
+  medicalNotes?: string;
+  /** @maxLength 4000 */
+  emergencyRendezvous?: string;
+  /** @maxLength 4000 */
+  vehicleDetails?: string;
+  /** @maxLength 8000 */
+  specialInstructions?: string;
+  /** @maxItems 20 */
+  principals?: ProtectionPersonInput[];
+  /** @maxItems 50 */
+  threats?: ProtectionPersonInput[];
+  /** @maxItems 50 */
+  destinations?: ProtectionDestinationInput[];
 }
 
 export type TimeEntryApprovalStatus =
@@ -1342,6 +1521,40 @@ export interface AnalyticsOfficerRow {
   incidentsFiled: number;
   punctualityPct: number | null;
   trend: AnalyticsOfficerTrendPoint[];
+}
+
+export interface AdminTask {
+  id: string;
+  title: string;
+  notes: string | null;
+  dueAt: string | null;
+  completedAt: string | null;
+  createdBy: string;
+  createdByName: string | null;
+  createdAt: string;
+}
+
+export interface CreateAdminTaskRequest {
+  /**
+   * @minLength 1
+   * @maxLength 200
+   */
+  title: string;
+  /** @maxLength 2000 */
+  notes?: string | null;
+  dueAt?: string | null;
+}
+
+export interface UpdateAdminTaskRequest {
+  /**
+   * @minLength 1
+   * @maxLength 200
+   */
+  title?: string;
+  /** @maxLength 2000 */
+  notes?: string | null;
+  dueAt?: string | null;
+  completed?: boolean;
 }
 
 export type ChatRoomLastMessage = {
@@ -2395,6 +2608,10 @@ export type SendChatMessageBody = {
 
 export type MarkChatRoomRead200 = {
   ok: boolean;
+};
+
+export type ListAdminTasksParams = {
+  includeCompleted?: boolean;
 };
 
 export type GetRadioChannelTransmissionsParams = {

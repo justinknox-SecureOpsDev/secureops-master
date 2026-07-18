@@ -9,6 +9,7 @@ import {
   employeesTable,
   clientsTable,
   sitesTable,
+  siteManagersTable,
   shiftsTable,
   shiftAssignmentsTable,
   timeEntriesTable,
@@ -97,6 +98,11 @@ beforeAll(async () => {
     .values({ clientId: ctx.clientId, name: `${TAG}-site`, address: "1 Test Way" })
     .returning({ id: sitesTable.id });
   ctx.siteId = site.id;
+
+  // Register the site manager for the fixture site — the scoped GET /shifts
+  // read only returns shifts at managed sites (or personally rostered ones),
+  // so without this row the finance-stripping assertions would never see a shift.
+  await db.insert(siteManagersTable).values({ siteId: ctx.siteId, userId: ctx.siteManagerId });
 
   const start = new Date(Date.now() + 6 * 60 * 60 * 1000);
   const end = new Date(start.getTime() + 4 * 60 * 60 * 1000);

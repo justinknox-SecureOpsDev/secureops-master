@@ -1466,7 +1466,7 @@ const LEVEL_OPTIONS: { value: number; name: string }[] = [
 ];
 
 type SiteManagerUser = {
-  userId: string;
+  id: string;
   firstName: string | null;
   lastName: string | null;
   email: string | null;
@@ -1474,7 +1474,7 @@ type SiteManagerUser = {
 
 function managerLabel(u: SiteManagerUser): string {
   const name = [u.firstName, u.lastName].filter(Boolean).join(" ").trim();
-  return name || u.email || u.userId;
+  return name || u.email || u.id;
 }
 
 // Admin-only card on the Site Detail page: assign one or more Site Managers to
@@ -1494,10 +1494,13 @@ function SiteManagersCard({ siteId }: { siteId: string }) {
     setLoading(true);
     setErr(null);
     try {
-      const data = await api<{ assigned: SiteManagerUser[]; available: SiteManagerUser[] }>(`/sites/${siteId}/managers`);
-      setAssigned(data?.assigned ?? []);
-      setAvailable(data?.available ?? []);
-      setSelected(new Set((data?.assigned ?? []).map((m) => m.userId)));
+      const [assignedRows, candidateRows] = await Promise.all([
+        api<SiteManagerUser[]>(`/sites/${siteId}/managers`),
+        api<SiteManagerUser[]>(`/site-manager-candidates`),
+      ]);
+      setAssigned(assignedRows ?? []);
+      setAvailable(candidateRows ?? []);
+      setSelected(new Set((assignedRows ?? []).map((m) => m.id)));
     } catch (e) {
       setErr((e as Error).message);
     } finally {
@@ -1507,7 +1510,7 @@ function SiteManagersCard({ siteId }: { siteId: string }) {
 
   useEffect(() => { void load(); }, [load]);
 
-  const assignedSet = useMemo(() => new Set(assigned.map((m) => m.userId)), [assigned]);
+  const assignedSet = useMemo(() => new Set(assigned.map((m) => m.id)), [assigned]);
   const dirty = useMemo(() => {
     if (selected.size !== assignedSet.size) return true;
     for (const id of selected) if (!assignedSet.has(id)) return true;
@@ -1563,14 +1566,14 @@ function SiteManagersCard({ siteId }: { siteId: string }) {
         <>
           <div className="border rounded divide-y mb-3">
             {available.map((m) => {
-              const checked = selected.has(m.userId);
+              const checked = selected.has(m.id);
               return (
-                <label key={m.userId} className="flex items-center gap-3 px-3 py-2 cursor-pointer hover:bg-muted/40">
+                <label key={m.id} className="flex items-center gap-3 px-3 py-2 cursor-pointer hover:bg-muted/40">
                   <input
                     type="checkbox"
                     className="h-4 w-4"
                     checked={checked}
-                    onChange={() => toggle(m.userId)}
+                    onChange={() => toggle(m.id)}
                   />
                   <span className="flex-1 min-w-0">
                     <span className="block text-sm font-medium truncate">{managerLabel(m)}</span>

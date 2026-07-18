@@ -16,8 +16,9 @@ const keyOf = (groups: ReturnType<typeof buildNavGroups>, label: string) =>
   groups.find((g) => g.label === label)?.key;
 
 describe("buildNavGroups", () => {
-  it("gives admins the seven role-aligned groups in order", () => {
+  it("gives admins the eight role-aligned groups in order", () => {
     expect(adminGroups.map((g) => g.key)).toEqual([
+      "overview",
       "dispatch",
       "staffing",
       "hr",
@@ -36,6 +37,7 @@ describe("buildNavGroups", () => {
       "/hr/onboarding",
       "/hr/invitations",
       "/hr/policies",
+      "/hr/reports",
       "/tables/employees",
     ]);
   });

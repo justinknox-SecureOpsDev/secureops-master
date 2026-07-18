@@ -10,6 +10,7 @@ import { Feather } from "@expo/vector-icons";
 import { useLocalSearchParams, useRouter, useSegments } from "expo-router";
 import { useQueryClient } from "@tanstack/react-query";
 import { useAuth } from "@/contexts/AuthContext";
+import { ProtectionPackageView } from "@/components/ProtectionPackageView";
 
 function InfoRow({ label, value, icon }: { label: string; value?: string | null; icon: string }) {
   const colors = useColors();
@@ -192,6 +193,8 @@ export default function ShiftDetailScreen() {
         <InfoRow label="End Time" value={new Date(shift.endTime).toLocaleString()} icon="stop-circle" />
         <InfoRow label="Notes" value={shift.notes} icon="file-text" />
       </View>
+
+      {(shift as any).shiftType === "ppo_detail" && <ProtectionPackageView shiftId={id!} />}
 
       <View style={[styles.section, { backgroundColor: colors.card, borderColor: colors.border }]}>
         <Text style={[styles.sectionTitle, { color: colors.accent }]}>ASSIGNED PERSONNEL ({shift.assignments?.length ?? 0})</Text>

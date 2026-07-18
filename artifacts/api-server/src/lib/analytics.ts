@@ -15,7 +15,7 @@
  * All "which calendar day/week" decisions use the business timezone
  * (PAYROLL_TIMEZONE, default America/Chicago), never UTC.
  */
-import { and, eq, gte, lt, sql } from "drizzle-orm";
+import { and, eq, gte, lt, lte, sql } from "drizzle-orm";
 import {
   db,
   timeEntriesTable,
@@ -63,6 +63,31 @@ export interface AnalyticsSiteRow {
   coveragePct: number | null;
 }
 
+export interface AnalyticsPerOfficerRow {
+  userId: string;
+  firstName: string;
+  lastName: string;
+  shiftsAssigned: number;
+  shiftsCompleted: number;
+  noShows: number;
+  hoursScheduled: number;
+  hoursWorked: number;
+  attendanceRate: number;
+  onTimeRate: number;
+  avgMinutesLate: number;
+  rejectedEntryRate: number;
+  incidentTotal: number;
+  incidentsBySeverity: { low: number; medium: number; high: number; critical: number };
+  reliabilityScore: number;
+}
+
+export interface AnalyticsOfficerSummary {
+  totalOfficers: number;
+  totalNoShows: number;
+  avgAttendanceRate: number;
+  avgOnTimeRate: number;
+}
+
 export interface AnalyticsSummary {
   revenue: number;
   laborCost: number;
@@ -84,6 +109,8 @@ export interface AnalyticsSummary {
   };
   weeklyTrend: AnalyticsWeekBucket[];
   sites: AnalyticsSiteRow[];
+  officerSummary: AnalyticsOfficerSummary;
+  perOfficer: AnalyticsPerOfficerRow[];
 }
 
 export interface AnalyticsOfficerRow {
@@ -237,6 +264,154 @@ function priceEntry(e: EntryRow): { hours: number; revenue: number; laborCost: n
   return { hours, revenue, laborCost };
 }
 
+/**
+ * Per-officer performance table for the summary payload. Ported from the
+ * original analytics implementation so the response contract (and the admin
+ * portal's Officer Performance table) is unchanged:
+ *   - population = accepted assignments on shifts that END inside the range
+ *     (deliberately NOT client-filtered — officer reliability is a property of
+ *     the person, not of one client's sites);
+ *   - completed = a time entry exists for (employee, shift); late = clock-in
+ *     more than 5 minutes after shift start;
+ *   - reliability = 60% attendance + 40% punctuality.
+ */
+async function loadPerOfficer(range: AnalyticsRange): Promise<{
+  perOfficer: AnalyticsPerOfficerRow[];
+  officerSummary: AnalyticsOfficerSummary;
+}> {
+  // Query A: shift completion + punctuality (assignments → shifts → time entries)
+  const officerShiftRows = await db
+    .select({
+      userId: usersTable.id,
+      firstName: usersTable.firstName,
+      lastName: usersTable.lastName,
+      shiftsAssigned: sql<number>`COUNT(DISTINCT ${shiftAssignmentsTable.shiftId})::int`,
+      shiftsCompleted: sql<number>`COUNT(DISTINCT CASE WHEN ${timeEntriesTable.id} IS NOT NULL THEN ${shiftAssignmentsTable.shiftId} END)::int`,
+      noShows: sql<number>`COUNT(DISTINCT CASE WHEN ${timeEntriesTable.id} IS NULL THEN ${shiftAssignmentsTable.shiftId} END)::int`,
+      hoursScheduled: sql<number>`COALESCE(SUM(DISTINCT EXTRACT(EPOCH FROM (${shiftsTable.endTime} - ${shiftsTable.startTime}))/3600), 0)::float`,
+      hoursWorked: sql<number>`COALESCE(SUM(EXTRACT(EPOCH FROM (COALESCE(${timeEntriesTable.clockOutTime}, NOW()) - ${timeEntriesTable.clockInTime}))/3600) FILTER (WHERE ${timeEntriesTable.id} IS NOT NULL), 0)::float`,
+      // Avg minutes late: if clocked in > shift start + 5 min grace
+      lateCount: sql<number>`COUNT(DISTINCT CASE WHEN ${timeEntriesTable.clockInTime} > ${shiftsTable.startTime} + INTERVAL '5 minutes' THEN ${shiftAssignmentsTable.shiftId} END)::int`,
+      totalLateMinutes: sql<number>`COALESCE(SUM(EXTRACT(EPOCH FROM (${timeEntriesTable.clockInTime} - ${shiftsTable.startTime}))/60) FILTER (WHERE ${timeEntriesTable.clockInTime} > ${shiftsTable.startTime} + INTERVAL '5 minutes'), 0)::float`,
+    })
+    .from(shiftAssignmentsTable)
+    .innerJoin(shiftsTable, eq(shiftAssignmentsTable.shiftId, shiftsTable.id))
+    .innerJoin(usersTable, eq(shiftAssignmentsTable.employeeId, usersTable.id))
+    .leftJoin(
+      timeEntriesTable,
+      and(
+        eq(timeEntriesTable.employeeId, shiftAssignmentsTable.employeeId),
+        eq(timeEntriesTable.shiftId, shiftAssignmentsTable.shiftId),
+      ),
+    )
+    .where(
+      and(
+        eq(shiftAssignmentsTable.status, "accepted"),
+        gte(shiftsTable.endTime, range.start),
+        lte(shiftsTable.endTime, range.end),
+      ),
+    )
+    .groupBy(usersTable.id, usersTable.firstName, usersTable.lastName);
+
+  // Query B: rejected time-entry rate
+  const officerEntryRows = await db
+    .select({
+      employeeId: timeEntriesTable.employeeId,
+      totalEntries: sql<number>`COUNT(*)::int`,
+      rejectedEntries: sql<number>`COUNT(*) FILTER (WHERE ${timeEntriesTable.approvalStatus} = 'rejected')::int`,
+    })
+    .from(timeEntriesTable)
+    .where(
+      and(
+        gte(timeEntriesTable.clockInTime, range.start),
+        lte(timeEntriesTable.clockInTime, range.end),
+      ),
+    )
+    .groupBy(timeEntriesTable.employeeId);
+
+  // Query C: incidents by severity per officer
+  const officerIncidentRows = await db
+    .select({
+      employeeId: incidentsTable.employeeId,
+      total: sql<number>`COUNT(*)::int`,
+      low: sql<number>`COUNT(*) FILTER (WHERE ${incidentsTable.severity} = 'low')::int`,
+      medium: sql<number>`COUNT(*) FILTER (WHERE ${incidentsTable.severity} = 'medium')::int`,
+      high: sql<number>`COUNT(*) FILTER (WHERE ${incidentsTable.severity} = 'high')::int`,
+      critical: sql<number>`COUNT(*) FILTER (WHERE ${incidentsTable.severity} = 'critical')::int`,
+    })
+    .from(incidentsTable)
+    .where(
+      and(
+        gte(incidentsTable.occurredAt, range.start),
+        lte(incidentsTable.occurredAt, range.end),
+      ),
+    )
+    .groupBy(incidentsTable.employeeId);
+
+  const entryMap = new Map(officerEntryRows.map((r) => [r.employeeId, r]));
+  const incidentMap = new Map(officerIncidentRows.map((r) => [r.employeeId, r]));
+
+  const perOfficer: AnalyticsPerOfficerRow[] = officerShiftRows.map((r) => {
+    const officerEntries = entryMap.get(r.userId);
+    const officerIncidents = incidentMap.get(r.userId);
+
+    const attendanceRate =
+      r.shiftsAssigned > 0
+        ? Math.round((r.shiftsCompleted / r.shiftsAssigned) * 1000) / 10
+        : 100;
+    const onTimeRate =
+      r.shiftsCompleted > 0
+        ? Math.round(((r.shiftsCompleted - r.lateCount) / r.shiftsCompleted) * 1000) / 10
+        : 100;
+    const avgMinutesLate =
+      r.lateCount > 0 ? Math.round((r.totalLateMinutes / r.lateCount) * 10) / 10 : 0;
+    const rejectedEntryRate =
+      officerEntries && officerEntries.totalEntries > 0
+        ? Math.round((officerEntries.rejectedEntries / officerEntries.totalEntries) * 1000) / 10
+        : 0;
+    // Composite reliability: 60% attendance + 40% punctuality
+    const reliabilityScore = Math.round((0.6 * attendanceRate + 0.4 * onTimeRate) * 10) / 10;
+
+    return {
+      userId: r.userId,
+      firstName: r.firstName ?? "",
+      lastName: r.lastName ?? "",
+      shiftsAssigned: r.shiftsAssigned,
+      shiftsCompleted: r.shiftsCompleted,
+      noShows: r.noShows,
+      hoursScheduled: Math.round(r.hoursScheduled * 10) / 10,
+      hoursWorked: Math.round(r.hoursWorked * 10) / 10,
+      attendanceRate,
+      onTimeRate,
+      avgMinutesLate,
+      rejectedEntryRate,
+      incidentTotal: officerIncidents?.total ?? 0,
+      incidentsBySeverity: {
+        low: officerIncidents?.low ?? 0,
+        medium: officerIncidents?.medium ?? 0,
+        high: officerIncidents?.high ?? 0,
+        critical: officerIncidents?.critical ?? 0,
+      },
+      reliabilityScore,
+    };
+  });
+
+  const officerSummary: AnalyticsOfficerSummary = {
+    totalOfficers: perOfficer.length,
+    totalNoShows: perOfficer.reduce((s, r) => s + r.noShows, 0),
+    avgAttendanceRate:
+      perOfficer.length > 0
+        ? Math.round((perOfficer.reduce((s, r) => s + r.attendanceRate, 0) / perOfficer.length) * 10) / 10
+        : 100,
+    avgOnTimeRate:
+      perOfficer.length > 0
+        ? Math.round((perOfficer.reduce((s, r) => s + r.onTimeRate, 0) / perOfficer.length) * 10) / 10
+        : 100,
+  };
+
+  return { perOfficer, officerSummary };
+}
+
 export async function computeAnalyticsSummary(range: AnalyticsRange): Promise<AnalyticsSummary> {
   const tz = businessTimeZone();
   const now = range.now ?? new Date();
@@ -244,7 +419,7 @@ export async function computeAnalyticsSummary(range: AnalyticsRange): Promise<An
   const shiftWhere = [gte(shiftsTable.startTime, range.start), lt(shiftsTable.startTime, range.end)];
   const shiftClientWhere = range.clientId ? [eq(sitesTable.clientId, range.clientId)] : [];
 
-  const [entries, shifts, acceptedAssignments, entryPairs, incidents] = await Promise.all([
+  const [entries, shifts, acceptedAssignments, entryPairs, incidents, officerBlock] = await Promise.all([
     loadApprovedEntries(range),
     db
       .select({
@@ -275,6 +450,7 @@ export async function computeAnalyticsSummary(range: AnalyticsRange): Promise<An
       .innerJoin(shiftsTable, eq(timeEntriesTable.shiftId, shiftsTable.id))
       .where(and(...shiftWhere)),
     loadIncidents(range),
+    loadPerOfficer(range),
   ]);
 
   let revenue = 0;
@@ -435,6 +611,8 @@ export async function computeAnalyticsSummary(range: AnalyticsRange): Promise<An
     incidents: incidentCounts,
     weeklyTrend,
     sites,
+    officerSummary: officerBlock.officerSummary,
+    perOfficer: officerBlock.perOfficer,
   };
 }
 

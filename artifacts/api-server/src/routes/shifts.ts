@@ -7,7 +7,7 @@ import { haversineMiles } from "../lib/geofence";
 import { getEffectiveLevel, effectiveLevelSql } from "../lib/eligibility";
 import { pushShiftUpsert, pushShiftDelete, pushAssignmentEvent } from "../lib/schedulerSync";
 import { stripShiftFinanceForRole } from "../lib/financeVisibility";
-import { canManageSite, getSiteManagerUserIds } from "../lib/siteManagerAuthz";
+import { canManageSite, getManagedSiteIds, getSiteManagerUserIds } from "../lib/siteManagerAuthz";
 
 const router: IRouter = Router();
 
@@ -100,13 +100,22 @@ async function getEmployeeHeldTrainings(employeeId: string): Promise<Set<string>
 }
 
 router.get("/shifts", requireAuth, async (req, res): Promise<void> => {
-  const { status, employeeId, from, to } = req.query as { status?: string; employeeId?: string; from?: string; to?: string };
-  // Dispatchers and site managers get the same full read as admins (they need
-  // to see every shift to assign/notify/schedule). Employees stay scoped to
-  // their own assigned + qualifying-open shifts. Site managers have finance
-  // stripped below.
+  const { status, employeeId, from, to, view } = req.query as { status?: string; employeeId?: string; from?: string; to?: string; view?: string };
+  // Admins and dispatchers get a full global read (they assign/notify/schedule
+  // across every site). Site managers get a SCOPED read: shifts at the sites
+  // they manage, PLUS any shift they're personally rostered on (their officer
+  // view) — finance is stripped for them below. Employees stay scoped to their
+  // own assigned + qualifying-open shifts.
+  //
+  // ?view=worker: ANY staff role can ask for the personal worker feed (their
+  // own assigned shifts + qualifying open shifts) instead of their default
+  // read. All internal staff work shifts, so admins/dispatchers/site managers
+  // use this for "my work" surfaces; the eligibility gate (real effective
+  // level + held trainings) is applied to them exactly like an employee.
   const role = req.user!.role;
-  const isAdmin = role === "admin" || role === "dispatcher" || role === "site_manager";
+  const workerView = view === "worker";
+  const isAdmin = !workerView && (role === "admin" || role === "dispatcher");
+  const isSiteManager = !workerView && role === "site_manager";
   const userId = req.user!.userId;
 
   const conditions = [];
@@ -121,6 +130,23 @@ router.get("/shifts", requireAuth, async (req, res): Promise<void> => {
   // upcoming work.
   if (status === "upcoming") conditions.push(gte(shiftsTable.endTime, new Date()));
 
+  let shifts;
+  if (isSiteManager) {
+    // Site managers see a scoped management view: every shift at a site they
+    // manage (assigned or open) PLUS any shift they're personally rostered on.
+    // No qualifying-open filter — they're managing, not picking up work. Empty
+    // managed-set + no assignments => empty list (no IDOR across sites).
+    const managed = new Set(await getManagedSiteIds(userId));
+    const myAssignedRows = await db
+      .select({ shiftId: shiftAssignmentsTable.shiftId })
+      .from(shiftAssignmentsTable)
+      .where(eq(shiftAssignmentsTable.employeeId, userId));
+    const myAssigned = new Set(myAssignedRows.map((r) => r.shiftId));
+    const all = conditions.length > 0
+      ? await db.select().from(shiftsTable).where(and(...conditions))
+      : await db.select().from(shiftsTable);
+    shifts = all.filter((s) => (s.siteId != null && managed.has(s.siteId)) || myAssigned.has(s.id));
+  } else {
   // Non-admins are limited: only shifts they're assigned to OR open shifts they qualify for.
   let restrictToEmployee: string | undefined;
   if (!isAdmin) {
@@ -129,7 +155,6 @@ router.get("/shifts", requireAuth, async (req, res): Promise<void> => {
     restrictToEmployee = employeeId;
   }
 
-  let shifts;
   if (restrictToEmployee) {
     const myMaxLevel = !isAdmin ? await getEffectiveLevel(userId) : 4;
     const myHeldTrainings = !isAdmin ? await getEmployeeHeldTrainings(userId) : new Set<string>();
@@ -184,6 +209,7 @@ router.get("/shifts", requireAuth, async (req, res): Promise<void> => {
       ? await db.select().from(shiftsTable).where(and(...conditions))
       : await db.select().from(shiftsTable);
   }
+  }
 
   const shiftIds = shifts.map((s) => s.id);
   if (shiftIds.length === 0) { res.json(shifts.map((s) => ({ ...s, assignments: [] }))); return; }
@@ -215,7 +241,7 @@ router.get("/shifts", requireAuth, async (req, res): Promise<void> => {
   // canonical worksite location). Null when caller is admin, the employee
   // has no home coords, the shift has no siteId, or the site has no coords.
   let distanceMap: Map<string, number> | null = null;
-  if (!isAdmin) {
+  if (!isAdmin && !isSiteManager) {
     const [meEmp] = await db
       .select({ homeLat: employeesTable.homeLat, homeLng: employeesTable.homeLng })
       .from(employeesTable)
@@ -267,7 +293,7 @@ router.post("/shifts", requireAdminOrSiteManager, async (req, res): Promise<void
     startTime, endTime,
     payRate, billRate, hourlyRate, billableRate,
     isRepeat, repeatPattern, notes, employeeIds, requiredLicenseLevel, headcount,
-    siteRateId,
+    siteRateId, shiftType,
   } = req.body;
   // Site managers never see or set rates; ignore any client-supplied rate
   // fields and fall back to the site's configured defaults so payroll/invoicing
@@ -350,7 +376,14 @@ router.post("/shifts", requireAdminOrSiteManager, async (req, res): Promise<void
     status: "upcoming",
     requiredLicenseLevel: lvl,
     headcount: hc,
-    siteRateId: siteRateId || null,
+    // siteRateId links a shift to a `site_rates` card (which carries pay/bill
+    // rates) — site managers can't pick rate cards, so never persist a
+    // client-supplied one for them.
+    siteRateId: isSiteManager ? null : (siteRateId || null),
+    // PPO Detail shifts carry a protection package (protection_persons rows);
+    // anything else is a standard patrol/static shift. Server-side allowlist —
+    // never trust an arbitrary client string.
+    shiftType: shiftType === "ppo_detail" ? "ppo_detail" : "standard",
   }).returning();
 
   if (employeeIds && Array.isArray(employeeIds) && employeeIds.length > 0) {
@@ -828,6 +861,20 @@ router.get("/shifts/:id", requireAuth, async (req, res): Promise<void> => {
   const [shift] = await db.select().from(shiftsTable).where(eq(shiftsTable.id, id));
   if (!shift) { res.status(404).json({ error: "Not Found" }); return; }
 
+  // Site managers may only view shift detail for a site they manage, or a shift
+  // they're personally rostered on. Admins/dispatchers/officers are unaffected.
+  if (req.user!.role === "site_manager") {
+    const manages = await canManageSite({ userId: req.user!.userId, role: req.user!.role }, shift.siteId);
+    if (!manages) {
+      const [mine] = await db
+        .select({ id: shiftAssignmentsTable.id })
+        .from(shiftAssignmentsTable)
+        .where(and(eq(shiftAssignmentsTable.shiftId, id), eq(shiftAssignmentsTable.employeeId, req.user!.userId)))
+        .limit(1);
+      if (!mine) { res.status(403).json({ error: "Forbidden", message: "You can only view shifts at sites you manage." }); return; }
+    }
+  }
+
   const assignments = await db
     .select({
       id: shiftAssignmentsTable.id,
@@ -846,12 +893,15 @@ router.get("/shifts/:id", requireAuth, async (req, res): Promise<void> => {
 
 router.put("/shifts/:id", requireAdminOrSiteManager, async (req, res): Promise<void> => {
   const id = Array.isArray(req.params.id) ? req.params.id[0] : req.params.id;
-  const { title, siteId, startTime, endTime, payRate, billRate, hourlyRate, billableRate, status, notes, requiredLicenseLevel, headcount, siteRateId } = req.body;
+  const { title, siteId, startTime, endTime, payRate, billRate, hourlyRate, billableRate, status, notes, requiredLicenseLevel, headcount, siteRateId, shiftType } = req.body;
   // Site managers must not change rates — ignore any rate fields they submit.
   const isSiteManager = req.user!.role === "site_manager";
 
   // Site managers may only edit shifts at sites they manage (and may only move
   // a shift to another site they also manage). Admins are unrestricted.
+  // `siteManagerMovedSite` records a manager moving a shift across two managed
+  // sites so we can recompute finance from the destination site below.
+  let siteManagerMovedSite = false;
   if (isSiteManager) {
     const [current] = await db
       .select({ siteId: shiftsTable.siteId })
@@ -863,16 +913,22 @@ router.put("/shifts/:id", requireAdminOrSiteManager, async (req, res): Promise<v
       res.status(403).json({ error: "Forbidden", message: "You can only edit shifts at sites you manage." });
       return;
     }
-    if (siteId && siteId !== current.siteId && !(await canManageSite(actor, siteId))) {
-      res.status(403).json({ error: "Forbidden", message: "You can only move shifts to sites you manage." });
-      return;
+    if (siteId && siteId !== current.siteId) {
+      if (!(await canManageSite(actor, siteId))) {
+        res.status(403).json({ error: "Forbidden", message: "You can only move shifts to sites you manage." });
+        return;
+      }
+      siteManagerMovedSite = true;
     }
   }
   const updates: Record<string, unknown> = {};
   if (title) updates.title = title;
+  // Destination site rate defaults, captured when a site change is requested.
+  let destDefaultPay: string | null = null;
+  let destDefaultBill: string | null = null;
   if (siteId) {
     const [site] = await db
-      .select({ name: sitesTable.name, address: sitesTable.address, clientName: clientsTable.name })
+      .select({ name: sitesTable.name, address: sitesTable.address, clientName: clientsTable.name, defaultPayRate: sitesTable.defaultPayRate, defaultBillRate: sitesTable.defaultBillRate })
       .from(sitesTable)
       .leftJoin(clientsTable, eq(sitesTable.clientId, clientsTable.id))
       .where(eq(sitesTable.id, siteId));
@@ -880,6 +936,8 @@ router.put("/shifts/:id", requireAdminOrSiteManager, async (req, res): Promise<v
       updates.siteId = siteId;
       updates.clientName = site.clientName;
       updates.location = site.address ?? site.name;
+      destDefaultPay = site.defaultPayRate ?? null;
+      destDefaultBill = site.defaultBillRate ?? null;
     }
   }
   if (startTime) updates.startTime = new Date(startTime);
@@ -897,7 +955,30 @@ router.put("/shifts/:id", requireAdminOrSiteManager, async (req, res): Promise<v
   }
   if (headcount !== undefined) updates.headcount = Math.max(1, Number(headcount) || 1);
   // Explicit null clears the FK (admin selected "Custom" rate); undefined leaves it alone.
-  if (siteRateId !== undefined) updates.siteRateId = siteRateId || null;
+  // siteRateId points at a `site_rates` card that carries pay/bill rates, so it is
+  // finance metadata — site managers must never set it (parity with the rate guard above).
+  if (!isSiteManager && siteRateId !== undefined) updates.siteRateId = siteRateId || null;
+  // Allowlisted shift-type toggle (standard ↔ ppo_detail); anything else ignored.
+  if (shiftType === "standard" || shiftType === "ppo_detail") updates.shiftType = shiftType;
+
+  // A site manager moving a shift to a DIFFERENT managed site must not carry the
+  // previous site's admin-set finance onto the new site/client. Recompute pay/bill
+  // from the DESTINATION site defaults (mirrors the create path) and drop the
+  // rate-card FK; fail closed if the destination has no usable defaults so we never
+  // persist a stale or zero rate that would poison payroll/invoicing downstream.
+  if (siteManagerMovedSite) {
+    const payOk = destDefaultPay != null && Number.isFinite(Number(destDefaultPay)) && Number(destDefaultPay) > 0;
+    const billOk = destDefaultBill != null && Number.isFinite(Number(destDefaultBill)) && Number(destDefaultBill) > 0;
+    if (!payOk || !billOk) {
+      res.status(400).json({ error: "Bad Request", message: "This site has no default pay/bill rate configured. An admin must set the site's default rates before a shift can be moved here." });
+      return;
+    }
+    updates.payRate = String(Number(destDefaultPay));
+    updates.hourlyRate = String(Number(destDefaultPay));
+    updates.billRate = String(Number(destDefaultBill));
+    updates.billableRate = String(Number(destDefaultBill));
+    updates.siteRateId = null;
+  }
 
   // Always reset syncSource to 'local' on admin edits so that changes to
   // scheduler-origin records (syncSource='scheduler') get pushed back rather

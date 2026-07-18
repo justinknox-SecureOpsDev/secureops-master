@@ -154,6 +154,12 @@ const CORE_UNGATED_ROUTERS = new Set<string>([
   "clientsRouter",
   "sitesRouter",
   "shiftsRouter",
+  // Protection-detail (PPO) package rides the core shifts surface; its own
+  // route-level authz (admin or accepted-assignment officer) is the boundary.
+  "protectionRouter",
+  // Shared admin to-do list + HR completeness report: core admin surfaces.
+  "adminTasksRouter",
+  "employeeReportsRouter",
   "timeEntriesRouter",
   "licensesRouter",
   "dashboardRouter",

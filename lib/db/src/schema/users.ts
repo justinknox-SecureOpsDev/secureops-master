@@ -18,6 +18,9 @@ export const usersTable = pgTable("users", {
   // policies. Sign-once: cleared by POST /me/policies/acknowledge and never
   // re-set on a later policy version bump. Never set for admins.
   mustSignPolicies: boolean("must_sign_policies").notNull().default(false),
+  // Per-user UI personalization (e.g. admin-portal nav group order).
+  // Cosmetic only — never used for authorization decisions.
+  uiPreferences: jsonb("ui_preferences").$type<{ navGroupOrder?: string[] }>(),
   // Temporary plaintext password set by admin "bulk generate" — visible only
   // to admins until the user is invited (then cleared). NEVER returned by
   // user-facing endpoints.

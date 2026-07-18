@@ -14,6 +14,7 @@ import {
   loginIpLimiter,
   resetPasswordLimiter,
 } from "../middlewares/rateLimit";
+import { UpdateMyUiPreferencesBody } from "@workspace/api-zod";
 import { sendEmail, renderPasswordResetEmail, renderPasswordChangedEmail } from "../lib/email";
 import { brand } from "../lib/brandConfig";
 import { geocodeOnelineAddress } from "../lib/geocode";
@@ -330,6 +331,31 @@ router.post("/auth/push-token", requireAuth, async (req, res): Promise<void> => 
   res.json({ success: true });
 });
 
+// Per-user UI personalization (portal nav group order). Cosmetic only —
+// stored on the caller's own row, never used for authorization.
+router.put("/me/ui-preferences", requireAuth, async (req, res): Promise<void> => {
+  const parsed = UpdateMyUiPreferencesBody.safeParse(req.body);
+  if (!parsed.success) {
+    res.status(400).json({ error: "Bad Request", message: parsed.error.message });
+    return;
+  }
+  const [current] = await db
+    .select({ uiPreferences: usersTable.uiPreferences })
+    .from(usersTable)
+    .where(eq(usersTable.id, req.user!.userId));
+  if (!current) {
+    res.status(404).json({ error: "Not Found", message: "User not found" });
+    return;
+  }
+  const merged: { navGroupOrder?: string[] } = { ...(current.uiPreferences ?? {}) };
+  if (parsed.data.navGroupOrder !== undefined) {
+    // Dedupe while preserving first occurrence order.
+    merged.navGroupOrder = [...new Set(parsed.data.navGroupOrder)];
+  }
+  await db.update(usersTable).set({ uiPreferences: merged }).where(eq(usersTable.id, req.user!.userId));
+  res.json(merged);
+});
+
 router.get("/auth/me", requireAuth, async (req, res): Promise<void> => {
   const [user] = await db.select().from(usersTable).where(eq(usersTable.id, req.user!.userId));
   if (!user) {
@@ -544,9 +570,30 @@ const PatchMeEmployeeBody = z.object({
   // Email, role, status, pay rate, SSN and licence stay admin/HR-managed.
   firstName: z.string().trim().min(1).max(100).optional(),
   lastName: z.string().trim().min(1).max(100).optional(),
-  dateOfBirth: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Date of birth must be in YYYY-MM-DD format").nullable().optional(),
+  // dateOfBirth maps to a pg `date` column (ISO YYYY-MM-DD); "" is treated as
+  // an explicit clear in the handler below.
+  dateOfBirth: z.union([z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Date of birth must be in YYYY-MM-DD format"), z.literal("")]).nullable().optional(),
   cityOfBirth: z.string().max(120).nullable().optional(),
   stateOfBirth: z.string().max(120).nullable().optional(),
+  // niNumber (SSN last 4), rightToWorkStatus and directDepositConsent are
+  // compliance/financial-sensitive and fire a same-day HR alert on change
+  // (see HIGH_RISK_SELF_EDIT_FIELDS).
+  niNumber: z.string().max(64).nullable().optional(),
+  rightToWorkStatus: z.string().max(120).nullable().optional(),
+  taxCode: z.string().max(64).nullable().optional(),
+  directDepositConsent: z.boolean().nullable().optional(),
+  // Work history — editable by the officer so they can keep their profile
+  // current without an admin round-trip. Not high-risk (no financial / safety
+  // consequence) so no HR alert is triggered for these fields.
+  previousExperience: z.string().max(4000).nullable().optional(),
+  yearsExperience: z.number().int().min(0).max(99).nullable().optional(),
+  // References: max 10 entries, each with a required name. phone/relationship
+  // are optional so officers can add what they know without full details.
+  references: z.array(z.object({
+    name: z.string().min(1).max(200),
+    relationship: z.string().max(200).optional(),
+    phone: z.string().max(50).optional(),
+  })).max(10).nullable().optional(),
   phone: z.string().optional(),
   address: z.string().optional(),
   emergencyContactName: z.string().optional(),
@@ -615,6 +662,24 @@ router.patch("/me/employee", requireAuth, async (req, res): Promise<void> => {
       mutableUpdates.emergencyContactPhone = norm;
     } else {
       mutableUpdates.emergencyContactPhone = null;
+    }
+  }
+  // Normalize date of birth: an empty/whitespace value clears it (null), and any
+  // provided value must be a real calendar date in YYYY-MM-DD form. We round-trip
+  // through Date so impossible dates (e.g. 2026-02-30) are rejected with a 400
+  // instead of blowing up the pg `date` cast with a 500.
+  if (Object.hasOwn(updates, "dateOfBirth")) {
+    const raw = updates.dateOfBirth;
+    if (typeof raw === "string" && raw.trim()) {
+      const d = raw.trim();
+      const dt = new Date(`${d}T00:00:00Z`);
+      if (Number.isNaN(dt.getTime()) || dt.toISOString().slice(0, 10) !== d) {
+        res.status(400).json({ error: "Bad Request", message: "Date of birth must be a valid date in YYYY-MM-DD format." });
+        return;
+      }
+      mutableUpdates.dateOfBirth = d;
+    } else {
+      mutableUpdates.dateOfBirth = null;
     }
   }
   const userId = req.user!.userId;

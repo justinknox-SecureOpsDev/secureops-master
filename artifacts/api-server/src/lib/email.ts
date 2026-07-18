@@ -1051,6 +1051,52 @@ export function renderPaymentDiscrepancyEmail(opts: {
   return { subject, text, html };
 }
 
+export function renderProfileCompletenessEmail(opts: {
+  firstName: string;
+  missingFieldLabels: string[];
+  loginUrl: string;
+}): { subject: string; text: string; html: string } {
+  const subject = `Action required: complete your profile — ${brand.companyName}`;
+  const fieldsList = opts.missingFieldLabels.map((l) => `  • ${l}`).join("\n");
+  const text = [
+    `Hi ${opts.firstName},`,
+    "",
+    `Your ${brand.companyName} employee profile is missing the following items. Please log in to the SecureOps app and complete them at your earliest convenience:`,
+    "",
+    fieldsList,
+    "",
+    `Log in here: ${opts.loginUrl}`,
+    "",
+    `If you have questions about any of these items, reply to this email or contact your supervisor.`,
+    "",
+    `— ${brand.companyName}`,
+  ].join("\n");
+  const fieldsHtml = `<ul style="margin:8px 0 0 0;padding-left:20px">${
+    opts.missingFieldLabels.map((l) => `<li style="margin:4px 0">${escapeHtml(l)}</li>`).join("")
+  }</ul>`;
+  const html = `
+    <div style="font-family:Georgia,serif;max-width:560px;margin:0 auto;color:#080c18;background:#f0e6c8;padding:24px;border-radius:6px">
+      <h2 style="color:#080c18;margin-top:0">${escapeHtml(brand.companyName)}</h2>
+      <p>Hi ${escapeHtml(opts.firstName)},</p>
+      <p>Your employee profile is missing the following items. Please log in and complete them at your earliest convenience:</p>
+      ${fieldsHtml}
+      <p style="text-align:center;margin:24px 0">
+        <a href="${escapeAttr(opts.loginUrl)}"
+           style="display:inline-block;background:#080c18;color:#c9a84c;padding:12px 24px;text-decoration:none;border-radius:4px;font-weight:bold">
+          Complete my profile
+        </a>
+      </p>
+      <p style="color:#555;font-size:12px">If the button doesn't work, paste this URL into your browser:<br/>
+        <span style="word-break:break-all">${escapeHtml(opts.loginUrl)}</span>
+      </p>
+      <p style="color:#555;font-size:13px">If you have questions about any of these items, reply to this email or contact your supervisor.</p>
+      <hr style="border:none;border-top:2px solid #c9a84c;margin:24px 0"/>
+      <p style="color:#080c18;font-weight:bold;margin:0">${escapeHtml(brand.companyName)}</p>
+    </div>
+  `;
+  return { subject, text, html };
+}
+
 // Inbound sales / sign-up lead from the public marketing site — sent to the
 // sales inbox so the prospect gets followed up with the right tier in mind.
 export function renderSalesLeadAdminEmail(opts: {

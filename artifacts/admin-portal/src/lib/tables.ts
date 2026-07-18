@@ -432,6 +432,13 @@ export const TABLES: TableDescriptor[] = [
           { label: "Cancelled", value: "cancelled" },
         ],
       },
+      {
+        key: "shiftType", label: "Shift Type", type: "select",
+        options: [
+          { label: "Standard", value: "standard" },
+          { label: "PPO / Protection Detail", value: "ppo_detail" },
+        ],
+      },
       { key: "notes", label: "Notes", type: "textarea", hiddenInGrid: true },
       { key: "createdAt", label: "Created", type: "datetime", readonly: true },
     ],

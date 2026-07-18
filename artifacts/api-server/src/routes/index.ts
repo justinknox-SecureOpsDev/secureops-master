@@ -5,6 +5,7 @@ import employeesRouter from "./employees";
 import clientsRouter from "./clients";
 import sitesRouter from "./sites";
 import shiftsRouter from "./shifts";
+import protectionRouter from "./protection";
 import timeEntriesRouter from "./timeEntries";
 import payrollRouter from "./payroll";
 import invoicesRouter from "./invoices";
@@ -46,6 +47,8 @@ import platformRouter from "./platform";
 import leadsRouter from "./leads";
 import searchRouter from "./search";
 import analyticsRouter from "./analytics";
+import adminTasksRouter from "./adminTasks";
+import employeeReportsRouter from "./employeeReports";
 import { auditLogMiddleware } from "../lib/auditLog";
 
 const router: IRouter = Router();
@@ -68,6 +71,10 @@ router.use(employeesRouter);
 router.use(clientsRouter);
 router.use(sitesRouter);
 router.use(shiftsRouter);
+// Protection-detail (PPO) package routes share the /shifts prefix so the
+// audit middleware classifies the PUT as shifts.write (with counts-only
+// redaction — see lib/auditLog.ts).
+router.use(protectionRouter);
 router.use(timeEntriesRouter);
 // ─── Feature-gating convention ────────────────────────────────────────────────
 // Each router that covers a paid or optional product surface MUST apply its own
@@ -99,6 +106,8 @@ router.use(dashboardRouter);
 router.use(chatRouter);
 router.use(liveOpsRouter);
 router.use(adminRouter);
+router.use(adminTasksRouter);
+router.use(employeeReportsRouter);
 router.use(storageRouter);
 router.use(applicationsRouter);
 router.use(policiesRouter);

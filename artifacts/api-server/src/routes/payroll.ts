@@ -1,5 +1,5 @@
 import { Router, type IRouter } from "express";
-import { eq, and, gte, lte, lt, sql, inArray } from "drizzle-orm";
+import { eq, and, gte, lte, lt, sql, inArray, desc } from "drizzle-orm";
 import { db, payrollEntriesTable, usersTable, employeesTable, timeEntriesTable, shiftsTable, sitesTable, auditLogsTable } from "@workspace/db";
 import { isNull } from "drizzle-orm";
 import { z } from "zod/v4";
@@ -125,7 +125,11 @@ router.post("/payroll/generate", requireAdmin, async (req, res): Promise<void> =
     const net = gross;
     const avgRate = totalHours > 0 ? Math.round((gross / totalHours) * 100) / 100 : 0;
 
-    // Upsert by (employee, site, periodStart) — a re-generate replaces the totals.
+    // Upsert by (employee, site, periodStart) — a re-generate replaces the
+    // totals, but ONLY while the row is still 'pending'. Archived rows are
+    // point-in-time snapshots and processed/paid rows are financial records;
+    // rewriting either would silently corrupt them, so the conflict-update is
+    // gated on status and non-pending rows are skipped from the response.
     const [row] = await db.insert(payrollEntriesTable).values({
       employeeId,
       siteId,
@@ -147,7 +151,9 @@ router.post("/payroll/generate", requireAdmin, async (req, res): Promise<void> =
         netPay: String(net),
         updatedAt: new Date(),
       },
+      setWhere: eq(payrollEntriesTable.status, "pending"),
     }).returning();
+    if (!row) continue; // existing row is archived/processed/paid — left untouched
     const [user] = await db.select().from(usersTable).where(eq(usersTable.id, employeeId));
     const [site] = await db.select().from(sitesTable).where(eq(sitesTable.id, siteId));
     created.push({
@@ -713,6 +719,115 @@ async function computeBoardBuckets(filters: {
  */
 router.get("/payroll/board", requireAdmin, async (req, res): Promise<void> => {
   const { statusFilter = "ready", siteId, from, to } = req.query as Record<string, string | undefined>;
+
+  // Archived view: sourced directly from payroll_entries (status='archived'),
+  // NOT from computeBoardBuckets — archived weeks must stay reviewable even if
+  // their underlying time entries were later unapproved or deleted. The rows
+  // carry the totals snapshotted at archive time.
+  if (String(statusFilter) === "archived") {
+    const conditions = [eq(payrollEntriesTable.status, "archived")];
+    if (siteId) conditions.push(eq(payrollEntriesTable.siteId, siteId));
+    if (from && /^\d{4}-\d{2}-\d{2}$/.test(from)) conditions.push(gte(payrollEntriesTable.periodStart, from));
+    if (to && /^\d{4}-\d{2}-\d{2}$/.test(to)) conditions.push(lte(payrollEntriesTable.periodStart, to));
+    const rows = await db
+      .select({
+        id: payrollEntriesTable.id,
+        employeeId: payrollEntriesTable.employeeId,
+        siteId: payrollEntriesTable.siteId,
+        periodStart: payrollEntriesTable.periodStart,
+        periodEnd: payrollEntriesTable.periodEnd,
+        totalHours: payrollEntriesTable.totalHours,
+        hourlyRate: payrollEntriesTable.hourlyRate,
+        grossPay: payrollEntriesTable.grossPay,
+        archivedAt: payrollEntriesTable.archivedAt,
+        archivedBy: payrollEntriesTable.archivedBy,
+        archiveReason: payrollEntriesTable.archiveReason,
+        firstName: usersTable.firstName,
+        lastName: usersTable.lastName,
+        siteName: sitesTable.name,
+      })
+      .from(payrollEntriesTable)
+      .leftJoin(usersTable, eq(usersTable.id, payrollEntriesTable.employeeId))
+      .leftJoin(sitesTable, eq(sitesTable.id, payrollEntriesTable.siteId))
+      .where(and(...conditions))
+      .orderBy(desc(payrollEntriesTable.periodStart));
+
+    const archiverIds = Array.from(new Set(rows.map((r) => r.archivedBy).filter((v): v is string => !!v)));
+    const archivers = archiverIds.length === 0
+      ? []
+      : await db
+          .select({ id: usersTable.id, email: usersTable.email })
+          .from(usersTable)
+          .where(inArray(usersTable.id, archiverIds));
+    const archiverEmail = new Map(archivers.map((a) => [a.id, a.email]));
+
+    type ArchivedGroup = {
+      siteId: string | null;
+      siteName: string | null;
+      periodStart: string;
+      periodEnd: string;
+      buckets: unknown[];
+      status: "archived";
+      totalHours: number;
+      grossPay: number;
+      officerCount: number;
+    };
+    const archGroups = new Map<string, ArchivedGroup>();
+    for (const r of rows) {
+      const key = `${r.siteId ?? "__nosite__"}|${r.periodStart}`;
+      let g = archGroups.get(key);
+      if (!g) {
+        g = {
+          siteId: r.siteId,
+          siteName: r.siteName,
+          periodStart: r.periodStart,
+          periodEnd: r.periodEnd,
+          buckets: [],
+          status: "archived",
+          totalHours: 0,
+          grossPay: 0,
+          officerCount: 0,
+        };
+        archGroups.set(key, g);
+      }
+      const hours = Number(r.totalHours) || 0;
+      const gross = Number(r.grossPay) || 0;
+      g.buckets.push({
+        employeeId: r.employeeId,
+        employeeName: [r.firstName, r.lastName].filter(Boolean).join(" ") || null,
+        siteId: r.siteId,
+        siteName: r.siteName,
+        periodStart: r.periodStart,
+        periodEnd: r.periodEnd,
+        totalHours: Math.round(hours * 100) / 100,
+        hourlyRate: Math.round((Number(r.hourlyRate) || 0) * 100) / 100,
+        grossPay: Math.round(gross * 100) / 100,
+        timeEntryIds: [],
+        entries: [],
+        existingPayrollEntryId: r.id,
+        existingStatus: "archived",
+        warnings: [],
+        archivedAt: r.archivedAt ? r.archivedAt.toISOString() : null,
+        archivedByEmail: r.archivedBy ? archiverEmail.get(r.archivedBy) ?? null : null,
+        archiveReason: r.archiveReason ?? null,
+      });
+      g.totalHours += hours;
+      g.grossPay += gross;
+      g.officerCount += 1;
+    }
+    const archived = Array.from(archGroups.values()).map((g) => ({
+      ...g,
+      totalHours: Math.round(g.totalHours * 100) / 100,
+      grossPay: Math.round(g.grossPay * 100) / 100,
+    }));
+    archived.sort((a, b) =>
+      b.periodStart.localeCompare(a.periodStart) ||
+      (a.siteName ?? "").localeCompare(b.siteName ?? ""),
+    );
+    res.json({ groups: archived });
+    return;
+  }
+
   const filters: { siteId?: string; from?: Date; to?: Date } = {};
   if (siteId) filters.siteId = siteId;
   if (from) {
@@ -730,7 +845,11 @@ router.get("/payroll/board", requireAdmin, async (req, res): Promise<void> => {
     }
   }
 
-  const buckets = await computeBoardBuckets(filters);
+  // Archived buckets leave the working board entirely — they are only
+  // visible under statusFilter=archived (handled above).
+  const buckets = (await computeBoardBuckets(filters)).filter(
+    (b) => b.existingStatus !== "archived",
+  );
 
   // Group by site+week to compute group status and totals.
   type Group = {
@@ -910,15 +1029,16 @@ router.post("/payroll/board/process", requireAdmin, async (req, res): Promise<vo
   // double-pay. The explicit lookup-then-write path here handles both null and
   // non-null siteId identically, and never overwrites processed/paid rows.
   for (const b of matching) {
-    if (b.existingStatus === "processed" || b.existingStatus === "paid") {
+    if (b.existingStatus === "processed" || b.existingStatus === "paid" || b.existingStatus === "archived") {
       // Skipped buckets are NOT added to payrollEntryIds — Pay Run should
       // only preselect rows the admin can still act on. The existing id
-      // is captured in `skipped` metadata for traceability.
+      // is captured in `skipped` metadata for traceability. Archived
+      // buckets must be unarchived before they can be processed.
       skipped.push({
         employeeId: b.employeeId,
         siteId: b.siteId,
         periodStart: b.periodStart,
-        reason: `already ${b.existingStatus}`,
+        reason: b.existingStatus === "archived" ? "archived — unarchive it first" : `already ${b.existingStatus}`,
         payrollEntryId: b.existingPayrollEntryId ?? undefined,
       });
       continue;
@@ -952,13 +1072,14 @@ router.post("/payroll/board/process", requireAdmin, async (req, res): Promise<vo
 
       if (existing.length > 0) {
         const row = existing[0]!;
-        // Re-check inside the lock — another worker may have processed it.
-        if (row.status === "processed" || row.status === "paid") {
+        // Re-check inside the lock — another worker may have processed or
+        // archived it.
+        if (row.status === "processed" || row.status === "paid" || row.status === "archived") {
           skipped.push({
             employeeId: b.employeeId,
             siteId: b.siteId,
             periodStart: b.periodStart,
-            reason: `already ${row.status}`,
+            reason: row.status === "archived" ? "archived — unarchive it first" : `already ${row.status}`,
             payrollEntryId: row.id,
           });
           return null;
@@ -1054,6 +1175,295 @@ router.post("/payroll/board/process", requireAdmin, async (req, res): Promise<vo
 });
 
 /**
+ * POST /payroll/board/archive
+ *   body: { selections: [{employeeId, siteId|null, periodStart}], reason? }
+ *
+ * Admin-only. Archives officer-week buckets: upserts the bucket's
+ * payroll_entry with status='archived' plus a snapshot of the current
+ * totals, so the bucket leaves the working Payroll Board but remains
+ * reviewable (and restorable) under the board's Archived view.
+ *
+ * Guardrails:
+ *   - processed/paid rows are NEVER archived — those are financial records
+ *     that have already been exported/paid. Skipped with a reason.
+ *   - already-archived buckets are skipped (idempotent).
+ *   - archived rows are excluded from the working board, board process,
+ *     apply-rate, Pay Run export/mark-paid (status-gated), and officer
+ *     paystubs.
+ *   - Audit-logged as payroll.board_archive on every exit path.
+ */
+const boardArchiveSchema = z.object({
+  reason: z.string().trim().max(500, "reason must be 500 characters or fewer").optional(),
+  selections: z.array(
+    z.object({
+      employeeId: z.string().uuid(),
+      siteId: z.string().uuid().nullable(),
+      periodStart: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "periodStart must be YYYY-MM-DD"),
+    }),
+  ).min(1, "selections[] required"),
+});
+
+router.post("/payroll/board/archive", requireAdmin, async (req, res): Promise<void> => {
+  const parsed = boardArchiveSchema.safeParse(req.body);
+  if (!parsed.success) {
+    res.status(400).json({ error: "Bad Request", message: parsed.error.message, issues: parsed.error.issues });
+    return;
+  }
+  const { selections, reason } = parsed.data;
+
+  const writeAudit = async (statusCode: number, metadata: Record<string, unknown>) => {
+    try {
+      await db.insert(auditLogsTable).values({
+        actorUserId: req.user?.userId ?? null,
+        actorEmail: req.user?.email ?? null,
+        actorRole: req.user?.role ?? null,
+        action: "payroll.board_archive",
+        method: req.method,
+        path: req.originalUrl,
+        statusCode,
+        ip: req.ip ?? null,
+        userAgent: req.headers["user-agent"] ?? null,
+        metadata: { reason: reason ?? null, selectionCount: selections.length, ...metadata },
+      });
+    } catch (err) {
+      req.log?.error({ err }, "Failed to write payroll.board_archive audit row");
+    }
+  };
+
+  const all = await computeBoardBuckets({});
+  const wanted = new Set(
+    selections.map((s) => `${s.employeeId}|${s.siteId ?? "__nosite__"}|${s.periodStart}`),
+  );
+  const matchingKeys = new Set(
+    all.map((b) => `${b.employeeId}|${b.siteId ?? "__nosite__"}|${b.periodStart}`),
+  );
+  const matching = all.filter((b) =>
+    wanted.has(`${b.employeeId}|${b.siteId ?? "__nosite__"}|${b.periodStart}`),
+  );
+  const unmatched = selections.filter(
+    (s) => !matchingKeys.has(`${s.employeeId}|${s.siteId ?? "__nosite__"}|${s.periodStart}`),
+  );
+
+  if (matching.length === 0) {
+    await writeAudit(409, { matchedCount: 0, payrollEntryIds: [], skipped: [], unmatched, outcome: "vanished" });
+    res.status(409).json({
+      error: "Conflict",
+      message: "None of the selected payroll buckets are still on the board — they may have been unapproved or changed by another admin. Please reload the Payroll Board.",
+      unmatched,
+    });
+    return;
+  }
+
+  const archivedIds: string[] = [];
+  const skipped: Array<{
+    employeeId: string;
+    siteId: string | null;
+    periodStart: string;
+    reason: string;
+    payrollEntryId?: string;
+  }> = [];
+
+  for (const b of matching) {
+    // Pre-lock fast path: never touch financial records; re-archiving is a no-op.
+    if (b.existingStatus === "processed" || b.existingStatus === "paid" || b.existingStatus === "archived") {
+      skipped.push({
+        employeeId: b.employeeId,
+        siteId: b.siteId,
+        periodStart: b.periodStart,
+        reason: `already ${b.existingStatus}`,
+        payrollEntryId: b.existingPayrollEntryId ?? undefined,
+      });
+      continue;
+    }
+    const gross = b.grossPay;
+    // 1099 contractors — no tax is withheld; net always equals gross.
+    const tax = 0;
+    const net = gross;
+
+    const id = await db.transaction(async (tx) => {
+      // Same advisory-lock discipline as board process: NULL siteIds are
+      // distinct in the unique index, so serialize the lookup→write at the
+      // bucket key to avoid duplicate rows under concurrency.
+      const lockKey = `payroll-board:${b.employeeId}|${b.siteId ?? "__nosite__"}|${b.periodStart}`;
+      await tx.execute(sql`select pg_advisory_xact_lock(hashtextextended(${lockKey}, 0))`);
+
+      const siteCond = b.siteId === null
+        ? isNull(payrollEntriesTable.siteId)
+        : eq(payrollEntriesTable.siteId, b.siteId);
+      const existing = await tx
+        .select({ id: payrollEntriesTable.id, status: payrollEntriesTable.status })
+        .from(payrollEntriesTable)
+        .where(and(
+          eq(payrollEntriesTable.employeeId, b.employeeId),
+          siteCond,
+          eq(payrollEntriesTable.periodStart, b.periodStart),
+        ))
+        .for("update");
+
+      if (existing.length > 0) {
+        const row = existing[0]!;
+        // Re-check inside the lock — another admin may have processed,
+        // paid, or archived it since we computed the buckets.
+        if (row.status === "processed" || row.status === "paid" || row.status === "archived") {
+          skipped.push({
+            employeeId: b.employeeId,
+            siteId: b.siteId,
+            periodStart: b.periodStart,
+            reason: `already ${row.status}`,
+            payrollEntryId: row.id,
+          });
+          return null;
+        }
+        await tx
+          .update(payrollEntriesTable)
+          .set({
+            totalHours: String(b.totalHours),
+            hourlyRate: String(b.hourlyRate),
+            grossPay: String(gross),
+            tax: String(tax),
+            netPay: String(net),
+            status: "archived",
+            archivedAt: new Date(),
+            archivedBy: req.user?.userId ?? null,
+            archiveReason: reason ?? null,
+            updatedAt: new Date(),
+          })
+          .where(eq(payrollEntriesTable.id, row.id));
+        return row.id;
+      }
+
+      const [inserted] = await tx
+        .insert(payrollEntriesTable)
+        .values({
+          employeeId: b.employeeId,
+          siteId: b.siteId,
+          periodStart: b.periodStart,
+          periodEnd: b.periodEnd,
+          totalHours: String(b.totalHours),
+          hourlyRate: String(b.hourlyRate),
+          grossPay: String(gross),
+          tax: String(tax),
+          netPay: String(net),
+          status: "archived",
+          archivedAt: new Date(),
+          archivedBy: req.user?.userId ?? null,
+          archiveReason: reason ?? null,
+        })
+        .returning({ id: payrollEntriesTable.id });
+      return inserted?.id ?? null;
+    });
+    if (id) archivedIds.push(id);
+  }
+
+  const payrollEntryIds = Array.from(new Set(archivedIds));
+
+  if (payrollEntryIds.length === 0) {
+    await writeAudit(409, {
+      matchedCount: matching.length,
+      payrollEntryIds: [],
+      skipped,
+      unmatched,
+      outcome: "all_skipped",
+    });
+    res.status(409).json({
+      error: "Conflict",
+      message: "None of the selected buckets could be archived — they are already processed, paid, or archived. Reload the Payroll Board to see the latest state.",
+      skipped,
+      unmatched,
+    });
+    return;
+  }
+
+  await writeAudit(200, {
+    matchedCount: matching.length,
+    payrollEntryIds,
+    skipped,
+    unmatched,
+    outcome: "ok",
+    buckets: matching.map((b) => ({
+      employeeId: b.employeeId,
+      siteId: b.siteId,
+      periodStart: b.periodStart,
+      timeEntryIds: b.timeEntryIds,
+    })),
+  });
+
+  res.status(200).json({
+    payrollEntryIds,
+    archivedCount: payrollEntryIds.length,
+    skipped,
+    unmatched,
+  });
+});
+
+/**
+ * POST /payroll/board/unarchive
+ *   body: { ids: string[] }  — payroll_entry ids from the Archived view
+ *
+ * Admin-only. Restores archived rows to status='pending' (clearing the
+ * archive trail), which puts the officer-week back on the working board.
+ * Only rows currently in status='archived' are touched — a row that was
+ * meanwhile processed/paid through some other path is left alone.
+ * Audit-logged as payroll.board_unarchive.
+ */
+const boardUnarchiveSchema = z.object({
+  ids: z.array(z.string().uuid()).min(1, "ids[] required"),
+});
+
+router.post("/payroll/board/unarchive", requireAdmin, async (req, res): Promise<void> => {
+  const parsed = boardUnarchiveSchema.safeParse(req.body);
+  if (!parsed.success) {
+    res.status(400).json({ error: "Bad Request", message: parsed.error.message, issues: parsed.error.issues });
+    return;
+  }
+  const { ids } = parsed.data;
+
+  const restored = await db
+    .update(payrollEntriesTable)
+    .set({
+      status: "pending",
+      archivedAt: null,
+      archivedBy: null,
+      archiveReason: null,
+      updatedAt: new Date(),
+    })
+    .where(and(
+      inArray(payrollEntriesTable.id, ids),
+      eq(payrollEntriesTable.status, "archived"),
+    ))
+    .returning({ id: payrollEntriesTable.id });
+
+  const payrollEntryIds = restored.map((r) => r.id);
+
+  try {
+    await db.insert(auditLogsTable).values({
+      actorUserId: req.user?.userId ?? null,
+      actorEmail: req.user?.email ?? null,
+      actorRole: req.user?.role ?? null,
+      action: "payroll.board_unarchive",
+      method: req.method,
+      path: req.originalUrl,
+      statusCode: payrollEntryIds.length === 0 ? 409 : 200,
+      ip: req.ip ?? null,
+      userAgent: req.headers["user-agent"] ?? null,
+      metadata: { requestedIds: ids, payrollEntryIds, restoredCount: payrollEntryIds.length },
+    });
+  } catch (err) {
+    req.log?.error({ err }, "Failed to write payroll.board_unarchive audit row");
+  }
+
+  if (payrollEntryIds.length === 0) {
+    res.status(409).json({
+      error: "Conflict",
+      message: "None of the selected rows are archived anymore — reload the board to see the latest state.",
+    });
+    return;
+  }
+
+  res.status(200).json({ payrollEntryIds, restoredCount: payrollEntryIds.length });
+});
+
+/**
  * POST /payroll/board/apply-rate
  *   body: { timeEntryIds: string[], rate: number, onlyZeroRate?: boolean }
  *
@@ -1135,8 +1545,8 @@ router.post("/payroll/board/apply-rate", requireAdmin, async (req, res): Promise
   for (const r of rows) {
     const k = `${r.employeeId}|${r.siteId ?? "__nosite__"}|${isoDate(mondayOfWeekUTC(r.clockInTime))}`;
     const peStatus = peStatusByKey.get(k);
-    if (peStatus === "processed" || peStatus === "paid") {
-      skipped.push({ id: r.id, reason: `bucket already ${peStatus}` });
+    if (peStatus === "processed" || peStatus === "paid" || peStatus === "archived") {
+      skipped.push({ id: r.id, reason: peStatus === "archived" ? "bucket is archived" : `bucket already ${peStatus}` });
       continue;
     }
     if (onlyZeroRate) {

@@ -1135,6 +1135,12 @@ export const GetShiftsResponseItem = zod.object({
   hourlyRate: zod.number().optional().describe("Legacy alias for payRate"),
   billableRate: zod.number().optional().describe("Legacy alias for billRate"),
   status: zod.enum(["upcoming", "active", "completed", "cancelled"]),
+  shiftType: zod
+    .enum(["standard", "ppo_detail"])
+    .optional()
+    .describe(
+      "'standard' guard shift or 'ppo_detail' executive\/close-protection detail (unlocks the protection package)",
+    ),
   requiredLicenseLevel: zod
     .union([zod.literal(1), zod.literal(2), zod.literal(3), zod.literal(4)])
     .describe(
@@ -1198,6 +1204,12 @@ export const CreateShiftBody = zod.object({
   repeatPattern: zod
     .enum(["daily", "weekly", "fortnightly", "monthly"])
     .optional(),
+  shiftType: zod
+    .enum(["standard", "ppo_detail"])
+    .optional()
+    .describe(
+      "'ppo_detail' unlocks the executive-protection package; defaults to 'standard'",
+    ),
   notes: zod.string().optional(),
 });
 
@@ -1228,6 +1240,12 @@ export const GetShiftResponse = zod.object({
   hourlyRate: zod.number().optional().describe("Legacy alias for payRate"),
   billableRate: zod.number().optional().describe("Legacy alias for billRate"),
   status: zod.enum(["upcoming", "active", "completed", "cancelled"]),
+  shiftType: zod
+    .enum(["standard", "ppo_detail"])
+    .optional()
+    .describe(
+      "'standard' guard shift or 'ppo_detail' executive\/close-protection detail (unlocks the protection package)",
+    ),
   requiredLicenseLevel: zod
     .union([zod.literal(1), zod.literal(2), zod.literal(3), zod.literal(4)])
     .describe(
@@ -1285,6 +1303,7 @@ export const UpdateShiftBody = zod.object({
     .union([zod.literal(1), zod.literal(2), zod.literal(3), zod.literal(4)])
     .optional(),
   headcount: zod.number().min(1).optional(),
+  shiftType: zod.enum(["standard", "ppo_detail"]).optional(),
   notes: zod.string().optional(),
 });
 
@@ -1308,6 +1327,12 @@ export const UpdateShiftResponse = zod.object({
   hourlyRate: zod.number().optional().describe("Legacy alias for payRate"),
   billableRate: zod.number().optional().describe("Legacy alias for billRate"),
   status: zod.enum(["upcoming", "active", "completed", "cancelled"]),
+  shiftType: zod
+    .enum(["standard", "ppo_detail"])
+    .optional()
+    .describe(
+      "'standard' guard shift or 'ppo_detail' executive\/close-protection detail (unlocks the protection package)",
+    ),
   requiredLicenseLevel: zod
     .union([zod.literal(1), zod.literal(2), zod.literal(3), zod.literal(4)])
     .describe(
@@ -1352,6 +1377,446 @@ export const UpdateShiftResponse = zod.object({
 export const DeleteShiftParams = zod.object({
   id: zod.coerce.string(),
 });
+
+/**
+ * Highly sensitive. Readable only by admins and officers with an ACCEPTED assignment to this shift. No other role (dispatcher, site_manager, client) has access. Returns an empty package (null fields, empty arrays) when no package has been built yet.
+ * @summary Get the executive-protection (PPO) package for a shift
+ */
+export const GetProtectionDetailParams = zod.object({
+  id: zod.coerce.string(),
+});
+
+export const GetProtectionDetailResponse = zod
+  .object({
+    shiftId: zod.string(),
+    threatLevel: zod.string().nullish(),
+    missionSummary: zod.string().nullish(),
+    dressCode: zod.string().nullish(),
+    armamentInstructions: zod.string().nullish(),
+    communicationPlan: zod.string().nullish(),
+    medicalNotes: zod.string().nullish(),
+    emergencyRendezvous: zod.string().nullish(),
+    vehicleDetails: zod.string().nullish(),
+    specialInstructions: zod.string().nullish(),
+    principals: zod.array(
+      zod
+        .object({
+          id: zod.string(),
+          kind: zod.enum(["principal", "threat"]),
+          seq: zod.number(),
+          name: zod.string().nullish(),
+          relationship: zod.string().nullish(),
+          sex: zod.string().nullish(),
+          age: zod.string().nullish(),
+          height: zod.string().nullish(),
+          weight: zod.string().nullish(),
+          hairColor: zod.string().nullish(),
+          eyeColor: zod.string().nullish(),
+          distinguishingFeatures: zod.string().nullish(),
+          notes: zod.string().nullish(),
+          photoKeys: zod.array(zod.string()),
+        })
+        .describe(
+          "A principal (protectee) or threat\/subject of interest on a protection detail.",
+        ),
+    ),
+    threats: zod.array(
+      zod
+        .object({
+          id: zod.string(),
+          kind: zod.enum(["principal", "threat"]),
+          seq: zod.number(),
+          name: zod.string().nullish(),
+          relationship: zod.string().nullish(),
+          sex: zod.string().nullish(),
+          age: zod.string().nullish(),
+          height: zod.string().nullish(),
+          weight: zod.string().nullish(),
+          hairColor: zod.string().nullish(),
+          eyeColor: zod.string().nullish(),
+          distinguishingFeatures: zod.string().nullish(),
+          notes: zod.string().nullish(),
+          photoKeys: zod.array(zod.string()),
+        })
+        .describe(
+          "A principal (protectee) or threat\/subject of interest on a protection detail.",
+        ),
+    ),
+    destinations: zod.array(
+      zod
+        .object({
+          id: zod.string(),
+          seq: zod.number(),
+          label: zod.string().nullish(),
+          address: zod.string().nullish(),
+          lat: zod.number().nullish(),
+          lng: zod.number().nullish(),
+          arrivalTime: zod.coerce.date().nullish(),
+          departureTime: zod.coerce.date().nullish(),
+          notes: zod.string().nullish(),
+        })
+        .describe(
+          "An ordered, geocoded stop on a protection detail's itinerary.",
+        ),
+    ),
+  })
+  .describe(
+    "Full executive-protection (PPO) package for a shift. Pre-plan fields plus principals, threats, and destinations. Empty\/null when not yet built.",
+  );
+
+/**
+ * Admin-only. Replaces the entire package (pre-plan fields + principals + threats + destinations) in one transaction. Destinations are geocoded best-effort from their address. Audited — raw PII is redacted from the audit snapshot; only actor/path/shift/counts are recorded.
+ * @summary Create/replace the executive-protection (PPO) package for a shift
+ */
+export const UpdateProtectionDetailParams = zod.object({
+  id: zod.coerce.string(),
+});
+
+export const updateProtectionDetailBodyThreatLevelMax = 200;
+
+export const updateProtectionDetailBodyMissionSummaryMax = 8000;
+
+export const updateProtectionDetailBodyDressCodeMax = 4000;
+
+export const updateProtectionDetailBodyArmamentInstructionsMax = 4000;
+
+export const updateProtectionDetailBodyCommunicationPlanMax = 4000;
+
+export const updateProtectionDetailBodyMedicalNotesMax = 4000;
+
+export const updateProtectionDetailBodyEmergencyRendezvousMax = 4000;
+
+export const updateProtectionDetailBodyVehicleDetailsMax = 4000;
+
+export const updateProtectionDetailBodySpecialInstructionsMax = 8000;
+
+export const updateProtectionDetailBodyPrincipalsItemNameMax = 200;
+
+export const updateProtectionDetailBodyPrincipalsItemRelationshipMax = 200;
+
+export const updateProtectionDetailBodyPrincipalsItemSexMax = 100;
+
+export const updateProtectionDetailBodyPrincipalsItemAgeMax = 100;
+
+export const updateProtectionDetailBodyPrincipalsItemHeightMax = 100;
+
+export const updateProtectionDetailBodyPrincipalsItemWeightMax = 100;
+
+export const updateProtectionDetailBodyPrincipalsItemHairColorMax = 100;
+
+export const updateProtectionDetailBodyPrincipalsItemEyeColorMax = 100;
+
+export const updateProtectionDetailBodyPrincipalsItemDistinguishingFeaturesMax = 4000;
+
+export const updateProtectionDetailBodyPrincipalsItemNotesMax = 4000;
+
+export const updateProtectionDetailBodyPrincipalsItemPhotoKeysItemMax = 500;
+
+export const updateProtectionDetailBodyPrincipalsItemPhotoKeysMax = 12;
+
+export const updateProtectionDetailBodyPrincipalsMax = 20;
+
+export const updateProtectionDetailBodyThreatsItemNameMax = 200;
+
+export const updateProtectionDetailBodyThreatsItemRelationshipMax = 200;
+
+export const updateProtectionDetailBodyThreatsItemSexMax = 100;
+
+export const updateProtectionDetailBodyThreatsItemAgeMax = 100;
+
+export const updateProtectionDetailBodyThreatsItemHeightMax = 100;
+
+export const updateProtectionDetailBodyThreatsItemWeightMax = 100;
+
+export const updateProtectionDetailBodyThreatsItemHairColorMax = 100;
+
+export const updateProtectionDetailBodyThreatsItemEyeColorMax = 100;
+
+export const updateProtectionDetailBodyThreatsItemDistinguishingFeaturesMax = 4000;
+
+export const updateProtectionDetailBodyThreatsItemNotesMax = 4000;
+
+export const updateProtectionDetailBodyThreatsItemPhotoKeysItemMax = 500;
+
+export const updateProtectionDetailBodyThreatsItemPhotoKeysMax = 12;
+
+export const updateProtectionDetailBodyThreatsMax = 50;
+
+export const updateProtectionDetailBodyDestinationsItemLabelMax = 200;
+
+export const updateProtectionDetailBodyDestinationsItemAddressMax = 500;
+
+export const updateProtectionDetailBodyDestinationsItemNotesMax = 4000;
+
+export const updateProtectionDetailBodyDestinationsMax = 50;
+
+export const UpdateProtectionDetailBody = zod
+  .object({
+    threatLevel: zod
+      .string()
+      .max(updateProtectionDetailBodyThreatLevelMax)
+      .optional(),
+    missionSummary: zod
+      .string()
+      .max(updateProtectionDetailBodyMissionSummaryMax)
+      .optional(),
+    dressCode: zod
+      .string()
+      .max(updateProtectionDetailBodyDressCodeMax)
+      .optional(),
+    armamentInstructions: zod
+      .string()
+      .max(updateProtectionDetailBodyArmamentInstructionsMax)
+      .optional(),
+    communicationPlan: zod
+      .string()
+      .max(updateProtectionDetailBodyCommunicationPlanMax)
+      .optional(),
+    medicalNotes: zod
+      .string()
+      .max(updateProtectionDetailBodyMedicalNotesMax)
+      .optional(),
+    emergencyRendezvous: zod
+      .string()
+      .max(updateProtectionDetailBodyEmergencyRendezvousMax)
+      .optional(),
+    vehicleDetails: zod
+      .string()
+      .max(updateProtectionDetailBodyVehicleDetailsMax)
+      .optional(),
+    specialInstructions: zod
+      .string()
+      .max(updateProtectionDetailBodySpecialInstructionsMax)
+      .optional(),
+    principals: zod
+      .array(
+        zod
+          .object({
+            name: zod
+              .string()
+              .max(updateProtectionDetailBodyPrincipalsItemNameMax)
+              .optional(),
+            relationship: zod
+              .string()
+              .max(updateProtectionDetailBodyPrincipalsItemRelationshipMax)
+              .optional(),
+            sex: zod
+              .string()
+              .max(updateProtectionDetailBodyPrincipalsItemSexMax)
+              .optional(),
+            age: zod
+              .string()
+              .max(updateProtectionDetailBodyPrincipalsItemAgeMax)
+              .optional(),
+            height: zod
+              .string()
+              .max(updateProtectionDetailBodyPrincipalsItemHeightMax)
+              .optional(),
+            weight: zod
+              .string()
+              .max(updateProtectionDetailBodyPrincipalsItemWeightMax)
+              .optional(),
+            hairColor: zod
+              .string()
+              .max(updateProtectionDetailBodyPrincipalsItemHairColorMax)
+              .optional(),
+            eyeColor: zod
+              .string()
+              .max(updateProtectionDetailBodyPrincipalsItemEyeColorMax)
+              .optional(),
+            distinguishingFeatures: zod
+              .string()
+              .max(
+                updateProtectionDetailBodyPrincipalsItemDistinguishingFeaturesMax,
+              )
+              .optional(),
+            notes: zod
+              .string()
+              .max(updateProtectionDetailBodyPrincipalsItemNotesMax)
+              .optional(),
+            photoKeys: zod
+              .array(
+                zod
+                  .string()
+                  .max(
+                    updateProtectionDetailBodyPrincipalsItemPhotoKeysItemMax,
+                  ),
+              )
+              .max(updateProtectionDetailBodyPrincipalsItemPhotoKeysMax)
+              .optional(),
+          })
+          .describe(
+            "Input shape for one principal or threat. `kind` is implied by which array it appears in.",
+          ),
+      )
+      .max(updateProtectionDetailBodyPrincipalsMax)
+      .optional(),
+    threats: zod
+      .array(
+        zod
+          .object({
+            name: zod
+              .string()
+              .max(updateProtectionDetailBodyThreatsItemNameMax)
+              .optional(),
+            relationship: zod
+              .string()
+              .max(updateProtectionDetailBodyThreatsItemRelationshipMax)
+              .optional(),
+            sex: zod
+              .string()
+              .max(updateProtectionDetailBodyThreatsItemSexMax)
+              .optional(),
+            age: zod
+              .string()
+              .max(updateProtectionDetailBodyThreatsItemAgeMax)
+              .optional(),
+            height: zod
+              .string()
+              .max(updateProtectionDetailBodyThreatsItemHeightMax)
+              .optional(),
+            weight: zod
+              .string()
+              .max(updateProtectionDetailBodyThreatsItemWeightMax)
+              .optional(),
+            hairColor: zod
+              .string()
+              .max(updateProtectionDetailBodyThreatsItemHairColorMax)
+              .optional(),
+            eyeColor: zod
+              .string()
+              .max(updateProtectionDetailBodyThreatsItemEyeColorMax)
+              .optional(),
+            distinguishingFeatures: zod
+              .string()
+              .max(
+                updateProtectionDetailBodyThreatsItemDistinguishingFeaturesMax,
+              )
+              .optional(),
+            notes: zod
+              .string()
+              .max(updateProtectionDetailBodyThreatsItemNotesMax)
+              .optional(),
+            photoKeys: zod
+              .array(
+                zod
+                  .string()
+                  .max(updateProtectionDetailBodyThreatsItemPhotoKeysItemMax),
+              )
+              .max(updateProtectionDetailBodyThreatsItemPhotoKeysMax)
+              .optional(),
+          })
+          .describe(
+            "Input shape for one principal or threat. `kind` is implied by which array it appears in.",
+          ),
+      )
+      .max(updateProtectionDetailBodyThreatsMax)
+      .optional(),
+    destinations: zod
+      .array(
+        zod.object({
+          label: zod
+            .string()
+            .max(updateProtectionDetailBodyDestinationsItemLabelMax)
+            .optional(),
+          address: zod
+            .string()
+            .max(updateProtectionDetailBodyDestinationsItemAddressMax)
+            .optional(),
+          lat: zod.number().optional(),
+          lng: zod.number().optional(),
+          arrivalTime: zod.coerce.date().optional(),
+          departureTime: zod.coerce.date().optional(),
+          notes: zod
+            .string()
+            .max(updateProtectionDetailBodyDestinationsItemNotesMax)
+            .optional(),
+        }),
+      )
+      .max(updateProtectionDetailBodyDestinationsMax)
+      .optional(),
+  })
+  .describe(
+    "Replace-all body for a shift's PPO package. Every field optional; sending empty arrays clears the corresponding section.",
+  );
+
+export const UpdateProtectionDetailResponse = zod
+  .object({
+    shiftId: zod.string(),
+    threatLevel: zod.string().nullish(),
+    missionSummary: zod.string().nullish(),
+    dressCode: zod.string().nullish(),
+    armamentInstructions: zod.string().nullish(),
+    communicationPlan: zod.string().nullish(),
+    medicalNotes: zod.string().nullish(),
+    emergencyRendezvous: zod.string().nullish(),
+    vehicleDetails: zod.string().nullish(),
+    specialInstructions: zod.string().nullish(),
+    principals: zod.array(
+      zod
+        .object({
+          id: zod.string(),
+          kind: zod.enum(["principal", "threat"]),
+          seq: zod.number(),
+          name: zod.string().nullish(),
+          relationship: zod.string().nullish(),
+          sex: zod.string().nullish(),
+          age: zod.string().nullish(),
+          height: zod.string().nullish(),
+          weight: zod.string().nullish(),
+          hairColor: zod.string().nullish(),
+          eyeColor: zod.string().nullish(),
+          distinguishingFeatures: zod.string().nullish(),
+          notes: zod.string().nullish(),
+          photoKeys: zod.array(zod.string()),
+        })
+        .describe(
+          "A principal (protectee) or threat\/subject of interest on a protection detail.",
+        ),
+    ),
+    threats: zod.array(
+      zod
+        .object({
+          id: zod.string(),
+          kind: zod.enum(["principal", "threat"]),
+          seq: zod.number(),
+          name: zod.string().nullish(),
+          relationship: zod.string().nullish(),
+          sex: zod.string().nullish(),
+          age: zod.string().nullish(),
+          height: zod.string().nullish(),
+          weight: zod.string().nullish(),
+          hairColor: zod.string().nullish(),
+          eyeColor: zod.string().nullish(),
+          distinguishingFeatures: zod.string().nullish(),
+          notes: zod.string().nullish(),
+          photoKeys: zod.array(zod.string()),
+        })
+        .describe(
+          "A principal (protectee) or threat\/subject of interest on a protection detail.",
+        ),
+    ),
+    destinations: zod.array(
+      zod
+        .object({
+          id: zod.string(),
+          seq: zod.number(),
+          label: zod.string().nullish(),
+          address: zod.string().nullish(),
+          lat: zod.number().nullish(),
+          lng: zod.number().nullish(),
+          arrivalTime: zod.coerce.date().nullish(),
+          departureTime: zod.coerce.date().nullish(),
+          notes: zod.string().nullish(),
+        })
+        .describe(
+          "An ordered, geocoded stop on a protection detail's itinerary.",
+        ),
+    ),
+  })
+  .describe(
+    "Full executive-protection (PPO) package for a shift. Pre-plan fields plus principals, threats, and destinations. Empty\/null when not yet built.",
+  );
 
 /**
  * @summary Employee self-signs up for a shift (license-gated)
@@ -2106,6 +2571,12 @@ export const GetAdminDashboardSummaryResponse = zod.object({
         .optional()
         .describe("Legacy alias for billRate"),
       status: zod.enum(["upcoming", "active", "completed", "cancelled"]),
+      shiftType: zod
+        .enum(["standard", "ppo_detail"])
+        .optional()
+        .describe(
+          "'standard' guard shift or 'ppo_detail' executive\/close-protection detail (unlocks the protection package)",
+        ),
       requiredLicenseLevel: zod
         .union([zod.literal(1), zod.literal(2), zod.literal(3), zod.literal(4)])
         .describe(
@@ -2177,6 +2648,12 @@ export const GetEmployeeDashboardSummaryResponse = zod.object({
         .optional()
         .describe("Legacy alias for billRate"),
       status: zod.enum(["upcoming", "active", "completed", "cancelled"]),
+      shiftType: zod
+        .enum(["standard", "ppo_detail"])
+        .optional()
+        .describe(
+          "'standard' guard shift or 'ppo_detail' executive\/close-protection detail (unlocks the protection package)",
+        ),
       requiredLicenseLevel: zod
         .union([zod.literal(1), zod.literal(2), zod.literal(3), zod.literal(4)])
         .describe(
@@ -2272,6 +2749,12 @@ export const GetEmployeeDashboardSummaryResponse = zod.object({
         .optional()
         .describe("Legacy alias for billRate"),
       status: zod.enum(["upcoming", "active", "completed", "cancelled"]),
+      shiftType: zod
+        .enum(["standard", "ppo_detail"])
+        .optional()
+        .describe(
+          "'standard' guard shift or 'ppo_detail' executive\/close-protection detail (unlocks the protection package)",
+        ),
       requiredLicenseLevel: zod
         .union([zod.literal(1), zod.literal(2), zod.literal(3), zod.literal(4)])
         .describe(
@@ -2451,6 +2934,47 @@ export const DeleteChatRoomResponse = zod.object({
 });
 
 /**
+ * @summary Update the caller's UI personalization preferences
+ */
+export const updateMyUiPreferencesBodyNavGroupOrderItemMax = 40;
+
+export const updateMyUiPreferencesBodyNavGroupOrderMax = 30;
+
+export const UpdateMyUiPreferencesBody = zod
+  .object({
+    navGroupOrder: zod
+      .array(zod.string().max(updateMyUiPreferencesBodyNavGroupOrderItemMax))
+      .max(updateMyUiPreferencesBodyNavGroupOrderMax)
+      .optional()
+      .describe(
+        "Preferred order of portal nav group keys. Unknown keys are ignored; missing groups append in default order.",
+      ),
+  })
+  .describe(
+    "Per-user UI personalization. Cosmetic only — never authorization.",
+  );
+
+export const updateMyUiPreferencesResponseNavGroupOrderItemMax = 40;
+
+export const updateMyUiPreferencesResponseNavGroupOrderMax = 30;
+
+export const UpdateMyUiPreferencesResponse = zod
+  .object({
+    navGroupOrder: zod
+      .array(
+        zod.string().max(updateMyUiPreferencesResponseNavGroupOrderItemMax),
+      )
+      .max(updateMyUiPreferencesResponseNavGroupOrderMax)
+      .optional()
+      .describe(
+        "Preferred order of portal nav group keys. Unknown keys are ignored; missing groups append in default order.",
+      ),
+  })
+  .describe(
+    "Per-user UI personalization. Cosmetic only — never authorization.",
+  );
+
+/**
  * @summary Update authenticated user's last known location
  */
 export const UpdateMyLocationBody = zod.object({
@@ -2604,6 +3128,83 @@ export const GetRadioChannelsResponseItem = zod.object({
   createdAt: zod.coerce.date(),
 });
 export const GetRadioChannelsResponse = zod.array(GetRadioChannelsResponseItem);
+
+/**
+ * Shared admin to-do list (team-wide — every admin sees every task).
+Open tasks first (due date ascending, undated last), then completed
+tasks newest-first. Pass includeCompleted=false to omit finished tasks.
+
+ */
+export const listAdminTasksQueryIncludeCompletedDefault = true;
+
+export const ListAdminTasksQueryParams = zod.object({
+  includeCompleted: zod.coerce
+    .boolean()
+    .default(listAdminTasksQueryIncludeCompletedDefault),
+});
+
+export const ListAdminTasksResponseItem = zod.object({
+  id: zod.string().uuid(),
+  title: zod.string(),
+  notes: zod.string().nullable(),
+  dueAt: zod.coerce.date().nullable(),
+  completedAt: zod.coerce.date().nullable(),
+  createdBy: zod.string().uuid(),
+  createdByName: zod.string().nullable(),
+  createdAt: zod.coerce.date(),
+});
+export const ListAdminTasksResponse = zod.array(ListAdminTasksResponseItem);
+
+/**
+ * Add a task/reminder to the shared admin list.
+ */
+export const createAdminTaskBodyTitleMax = 200;
+
+export const createAdminTaskBodyNotesMax = 2000;
+
+export const CreateAdminTaskBody = zod.object({
+  title: zod.string().min(1).max(createAdminTaskBodyTitleMax),
+  notes: zod.string().max(createAdminTaskBodyNotesMax).nullish(),
+  dueAt: zod.coerce.date().nullish(),
+});
+
+/**
+ * Edit a task and/or toggle completion. Setting completed=true stamps
+completedAt now; completed=false reopens the task.
+
+ */
+export const UpdateAdminTaskParams = zod.object({
+  id: zod.coerce.string().uuid(),
+});
+
+export const updateAdminTaskBodyTitleMax = 200;
+
+export const updateAdminTaskBodyNotesMax = 2000;
+
+export const UpdateAdminTaskBody = zod.object({
+  title: zod.string().min(1).max(updateAdminTaskBodyTitleMax).optional(),
+  notes: zod.string().max(updateAdminTaskBodyNotesMax).nullish(),
+  dueAt: zod.coerce.date().nullish(),
+  completed: zod.boolean().optional(),
+});
+
+export const UpdateAdminTaskResponse = zod.object({
+  id: zod.string().uuid(),
+  title: zod.string(),
+  notes: zod.string().nullable(),
+  dueAt: zod.coerce.date().nullable(),
+  completedAt: zod.coerce.date().nullable(),
+  createdBy: zod.string().uuid(),
+  createdByName: zod.string().nullable(),
+  createdAt: zod.coerce.date(),
+});
+
+/**
+ * Remove a task from the shared admin list.
+ */
+export const DeleteAdminTaskParams = zod.object({
+  id: zod.coerce.string().uuid(),
+});
 
 /**
  * @summary List every radio channel (admin)

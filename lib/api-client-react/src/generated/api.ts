@@ -26,6 +26,7 @@ import type {
   AdminListOnboardingParams,
   AdminSignObjectDownload200,
   AdminSignObjectDownloadParams,
+  AdminTask,
   AdminUpdateSubcontractorEntryBody,
   AnalyticsOfficerRow,
   AnalyticsSummary,
@@ -55,6 +56,7 @@ import type {
   ClockInShift,
   ClockInSite,
   ClockOutRequest,
+  CreateAdminTaskRequest,
   CreateApplicationQuestionRequest,
   CreateChatRoomBody,
   CreateClientRequest,
@@ -110,6 +112,7 @@ import type {
   LicenseRenewal,
   LicenseRenewalDecisionRequest,
   LicenseRenewalRejectRequest,
+  ListAdminTasksParams,
   LoginRequest,
   MarkChatRoomRead200,
   NotifyShiftVacancy200,
@@ -124,6 +127,8 @@ import type {
   Policy,
   PolicyGroup,
   PolicyPublic,
+  ProtectionDetail,
+  ProtectionDetailRequest,
   RadioChannel,
   RadioTransmission,
   RegisterPushTokenBody,
@@ -152,6 +157,8 @@ import type {
   TimeEntry,
   TriggerEmergency201,
   TriggerEmergencyBody,
+  UiPreferences,
+  UpdateAdminTaskRequest,
   UpdateApplicationFieldRequest,
   UpdateApplicationQuestionRequest,
   UpdateAssignmentRequest,
@@ -3416,6 +3423,183 @@ export const useDeleteShift = <
 };
 
 /**
+ * Highly sensitive. Readable only by admins and officers with an ACCEPTED assignment to this shift. No other role (dispatcher, site_manager, client) has access. Returns an empty package (null fields, empty arrays) when no package has been built yet.
+ * @summary Get the executive-protection (PPO) package for a shift
+ */
+export const getGetProtectionDetailUrl = (id: string) => {
+  return `/api/shifts/${id}/protection-detail`;
+};
+
+export const getProtectionDetail = async (
+  id: string,
+  options?: RequestInit,
+): Promise<ProtectionDetail> => {
+  return customFetch<ProtectionDetail>(getGetProtectionDetailUrl(id), {
+    ...options,
+    method: "GET",
+  });
+};
+
+export const getGetProtectionDetailQueryKey = (id: string) => {
+  return [`/api/shifts/${id}/protection-detail`] as const;
+};
+
+export const getGetProtectionDetailQueryOptions = <
+  TData = Awaited<ReturnType<typeof getProtectionDetail>>,
+  TError = ErrorType<ErrorResponse>,
+>(
+  id: string,
+  options?: {
+    query?: UseQueryOptions<
+      Awaited<ReturnType<typeof getProtectionDetail>>,
+      TError,
+      TData
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+) => {
+  const { query: queryOptions, request: requestOptions } = options ?? {};
+
+  const queryKey = queryOptions?.queryKey ?? getGetProtectionDetailQueryKey(id);
+
+  const queryFn: QueryFunction<
+    Awaited<ReturnType<typeof getProtectionDetail>>
+  > = ({ signal }) => getProtectionDetail(id, { signal, ...requestOptions });
+
+  return {
+    queryKey,
+    queryFn,
+    enabled: !!id,
+    ...queryOptions,
+  } as UseQueryOptions<
+    Awaited<ReturnType<typeof getProtectionDetail>>,
+    TError,
+    TData
+  > & { queryKey: QueryKey };
+};
+
+export type GetProtectionDetailQueryResult = NonNullable<
+  Awaited<ReturnType<typeof getProtectionDetail>>
+>;
+export type GetProtectionDetailQueryError = ErrorType<ErrorResponse>;
+
+/**
+ * @summary Get the executive-protection (PPO) package for a shift
+ */
+
+export function useGetProtectionDetail<
+  TData = Awaited<ReturnType<typeof getProtectionDetail>>,
+  TError = ErrorType<ErrorResponse>,
+>(
+  id: string,
+  options?: {
+    query?: UseQueryOptions<
+      Awaited<ReturnType<typeof getProtectionDetail>>,
+      TError,
+      TData
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+): UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+  const queryOptions = getGetProtectionDetailQueryOptions(id, options);
+
+  const query = useQuery(queryOptions) as UseQueryResult<TData, TError> & {
+    queryKey: QueryKey;
+  };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
+
+/**
+ * Admin-only. Replaces the entire package (pre-plan fields + principals + threats + destinations) in one transaction. Destinations are geocoded best-effort from their address. Audited — raw PII is redacted from the audit snapshot; only actor/path/shift/counts are recorded.
+ * @summary Create/replace the executive-protection (PPO) package for a shift
+ */
+export const getUpdateProtectionDetailUrl = (id: string) => {
+  return `/api/shifts/${id}/protection-detail`;
+};
+
+export const updateProtectionDetail = async (
+  id: string,
+  protectionDetailRequest: ProtectionDetailRequest,
+  options?: RequestInit,
+): Promise<ProtectionDetail> => {
+  return customFetch<ProtectionDetail>(getUpdateProtectionDetailUrl(id), {
+    ...options,
+    method: "PUT",
+    headers: { "Content-Type": "application/json", ...options?.headers },
+    body: JSON.stringify(protectionDetailRequest),
+  });
+};
+
+export const getUpdateProtectionDetailMutationOptions = <
+  TError = ErrorType<ErrorResponse>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof updateProtectionDetail>>,
+    TError,
+    { id: string; data: BodyType<ProtectionDetailRequest> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof updateProtectionDetail>>,
+  TError,
+  { id: string; data: BodyType<ProtectionDetailRequest> },
+  TContext
+> => {
+  const mutationKey = ["updateProtectionDetail"];
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof updateProtectionDetail>>,
+    { id: string; data: BodyType<ProtectionDetailRequest> }
+  > = (props) => {
+    const { id, data } = props ?? {};
+
+    return updateProtectionDetail(id, data, requestOptions);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type UpdateProtectionDetailMutationResult = NonNullable<
+  Awaited<ReturnType<typeof updateProtectionDetail>>
+>;
+export type UpdateProtectionDetailMutationBody =
+  BodyType<ProtectionDetailRequest>;
+export type UpdateProtectionDetailMutationError = ErrorType<ErrorResponse>;
+
+/**
+ * @summary Create/replace the executive-protection (PPO) package for a shift
+ */
+export const useUpdateProtectionDetail = <
+  TError = ErrorType<ErrorResponse>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof updateProtectionDetail>>,
+    TError,
+    { id: string; data: BodyType<ProtectionDetailRequest> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationResult<
+  Awaited<ReturnType<typeof updateProtectionDetail>>,
+  TError,
+  { id: string; data: BodyType<ProtectionDetailRequest> },
+  TContext
+> => {
+  return useMutation(getUpdateProtectionDetailMutationOptions(options));
+};
+
+/**
  * @summary Employee self-signs up for a shift (license-gated)
  */
 export const getClaimShiftUrl = (id: string) => {
@@ -6157,6 +6341,92 @@ export const useDeleteChatRoom = <
 };
 
 /**
+ * @summary Update the caller's UI personalization preferences
+ */
+export const getUpdateMyUiPreferencesUrl = () => {
+  return `/api/me/ui-preferences`;
+};
+
+export const updateMyUiPreferences = async (
+  uiPreferences: UiPreferences,
+  options?: RequestInit,
+): Promise<UiPreferences> => {
+  return customFetch<UiPreferences>(getUpdateMyUiPreferencesUrl(), {
+    ...options,
+    method: "PUT",
+    headers: { "Content-Type": "application/json", ...options?.headers },
+    body: JSON.stringify(uiPreferences),
+  });
+};
+
+export const getUpdateMyUiPreferencesMutationOptions = <
+  TError = ErrorType<ErrorResponse>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof updateMyUiPreferences>>,
+    TError,
+    { data: BodyType<UiPreferences> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof updateMyUiPreferences>>,
+  TError,
+  { data: BodyType<UiPreferences> },
+  TContext
+> => {
+  const mutationKey = ["updateMyUiPreferences"];
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof updateMyUiPreferences>>,
+    { data: BodyType<UiPreferences> }
+  > = (props) => {
+    const { data } = props ?? {};
+
+    return updateMyUiPreferences(data, requestOptions);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type UpdateMyUiPreferencesMutationResult = NonNullable<
+  Awaited<ReturnType<typeof updateMyUiPreferences>>
+>;
+export type UpdateMyUiPreferencesMutationBody = BodyType<UiPreferences>;
+export type UpdateMyUiPreferencesMutationError = ErrorType<ErrorResponse>;
+
+/**
+ * @summary Update the caller's UI personalization preferences
+ */
+export const useUpdateMyUiPreferences = <
+  TError = ErrorType<ErrorResponse>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof updateMyUiPreferences>>,
+    TError,
+    { data: BodyType<UiPreferences> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationResult<
+  Awaited<ReturnType<typeof updateMyUiPreferences>>,
+  TError,
+  { data: BodyType<UiPreferences> },
+  TContext
+> => {
+  return useMutation(getUpdateMyUiPreferencesMutationOptions(options));
+};
+
+/**
  * @summary Update authenticated user's last known location
  */
 export const getUpdateMyLocationUrl = () => {
@@ -6996,6 +7266,349 @@ export function useGetRadioChannels<
 
   return { ...query, queryKey: queryOptions.queryKey };
 }
+
+/**
+ * Shared admin to-do list (team-wide — every admin sees every task).
+Open tasks first (due date ascending, undated last), then completed
+tasks newest-first. Pass includeCompleted=false to omit finished tasks.
+
+ */
+export const getListAdminTasksUrl = (params?: ListAdminTasksParams) => {
+  const normalizedParams = new URLSearchParams();
+
+  Object.entries(params || {}).forEach(([key, value]) => {
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? "null" : value.toString());
+    }
+  });
+
+  const stringifiedParams = normalizedParams.toString();
+
+  return stringifiedParams.length > 0
+    ? `/api/admin/tasks?${stringifiedParams}`
+    : `/api/admin/tasks`;
+};
+
+export const listAdminTasks = async (
+  params?: ListAdminTasksParams,
+  options?: RequestInit,
+): Promise<AdminTask[]> => {
+  return customFetch<AdminTask[]>(getListAdminTasksUrl(params), {
+    ...options,
+    method: "GET",
+  });
+};
+
+export const getListAdminTasksQueryKey = (params?: ListAdminTasksParams) => {
+  return [`/api/admin/tasks`, ...(params ? [params] : [])] as const;
+};
+
+export const getListAdminTasksQueryOptions = <
+  TData = Awaited<ReturnType<typeof listAdminTasks>>,
+  TError = ErrorType<unknown>,
+>(
+  params?: ListAdminTasksParams,
+  options?: {
+    query?: UseQueryOptions<
+      Awaited<ReturnType<typeof listAdminTasks>>,
+      TError,
+      TData
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+) => {
+  const { query: queryOptions, request: requestOptions } = options ?? {};
+
+  const queryKey = queryOptions?.queryKey ?? getListAdminTasksQueryKey(params);
+
+  const queryFn: QueryFunction<Awaited<ReturnType<typeof listAdminTasks>>> = ({
+    signal,
+  }) => listAdminTasks(params, { signal, ...requestOptions });
+
+  return { queryKey, queryFn, ...queryOptions } as UseQueryOptions<
+    Awaited<ReturnType<typeof listAdminTasks>>,
+    TError,
+    TData
+  > & { queryKey: QueryKey };
+};
+
+export type ListAdminTasksQueryResult = NonNullable<
+  Awaited<ReturnType<typeof listAdminTasks>>
+>;
+export type ListAdminTasksQueryError = ErrorType<unknown>;
+
+export function useListAdminTasks<
+  TData = Awaited<ReturnType<typeof listAdminTasks>>,
+  TError = ErrorType<unknown>,
+>(
+  params?: ListAdminTasksParams,
+  options?: {
+    query?: UseQueryOptions<
+      Awaited<ReturnType<typeof listAdminTasks>>,
+      TError,
+      TData
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+): UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+  const queryOptions = getListAdminTasksQueryOptions(params, options);
+
+  const query = useQuery(queryOptions) as UseQueryResult<TData, TError> & {
+    queryKey: QueryKey;
+  };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
+
+/**
+ * Add a task/reminder to the shared admin list.
+ */
+export const getCreateAdminTaskUrl = () => {
+  return `/api/admin/tasks`;
+};
+
+export const createAdminTask = async (
+  createAdminTaskRequest: CreateAdminTaskRequest,
+  options?: RequestInit,
+): Promise<AdminTask> => {
+  return customFetch<AdminTask>(getCreateAdminTaskUrl(), {
+    ...options,
+    method: "POST",
+    headers: { "Content-Type": "application/json", ...options?.headers },
+    body: JSON.stringify(createAdminTaskRequest),
+  });
+};
+
+export const getCreateAdminTaskMutationOptions = <
+  TError = ErrorType<ErrorResponse>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof createAdminTask>>,
+    TError,
+    { data: BodyType<CreateAdminTaskRequest> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof createAdminTask>>,
+  TError,
+  { data: BodyType<CreateAdminTaskRequest> },
+  TContext
+> => {
+  const mutationKey = ["createAdminTask"];
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof createAdminTask>>,
+    { data: BodyType<CreateAdminTaskRequest> }
+  > = (props) => {
+    const { data } = props ?? {};
+
+    return createAdminTask(data, requestOptions);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type CreateAdminTaskMutationResult = NonNullable<
+  Awaited<ReturnType<typeof createAdminTask>>
+>;
+export type CreateAdminTaskMutationBody = BodyType<CreateAdminTaskRequest>;
+export type CreateAdminTaskMutationError = ErrorType<ErrorResponse>;
+
+export const useCreateAdminTask = <
+  TError = ErrorType<ErrorResponse>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof createAdminTask>>,
+    TError,
+    { data: BodyType<CreateAdminTaskRequest> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationResult<
+  Awaited<ReturnType<typeof createAdminTask>>,
+  TError,
+  { data: BodyType<CreateAdminTaskRequest> },
+  TContext
+> => {
+  return useMutation(getCreateAdminTaskMutationOptions(options));
+};
+
+/**
+ * Edit a task and/or toggle completion. Setting completed=true stamps
+completedAt now; completed=false reopens the task.
+
+ */
+export const getUpdateAdminTaskUrl = (id: string) => {
+  return `/api/admin/tasks/${id}`;
+};
+
+export const updateAdminTask = async (
+  id: string,
+  updateAdminTaskRequest: UpdateAdminTaskRequest,
+  options?: RequestInit,
+): Promise<AdminTask> => {
+  return customFetch<AdminTask>(getUpdateAdminTaskUrl(id), {
+    ...options,
+    method: "PATCH",
+    headers: { "Content-Type": "application/json", ...options?.headers },
+    body: JSON.stringify(updateAdminTaskRequest),
+  });
+};
+
+export const getUpdateAdminTaskMutationOptions = <
+  TError = ErrorType<ErrorResponse>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof updateAdminTask>>,
+    TError,
+    { id: string; data: BodyType<UpdateAdminTaskRequest> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof updateAdminTask>>,
+  TError,
+  { id: string; data: BodyType<UpdateAdminTaskRequest> },
+  TContext
+> => {
+  const mutationKey = ["updateAdminTask"];
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof updateAdminTask>>,
+    { id: string; data: BodyType<UpdateAdminTaskRequest> }
+  > = (props) => {
+    const { id, data } = props ?? {};
+
+    return updateAdminTask(id, data, requestOptions);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type UpdateAdminTaskMutationResult = NonNullable<
+  Awaited<ReturnType<typeof updateAdminTask>>
+>;
+export type UpdateAdminTaskMutationBody = BodyType<UpdateAdminTaskRequest>;
+export type UpdateAdminTaskMutationError = ErrorType<ErrorResponse>;
+
+export const useUpdateAdminTask = <
+  TError = ErrorType<ErrorResponse>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof updateAdminTask>>,
+    TError,
+    { id: string; data: BodyType<UpdateAdminTaskRequest> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationResult<
+  Awaited<ReturnType<typeof updateAdminTask>>,
+  TError,
+  { id: string; data: BodyType<UpdateAdminTaskRequest> },
+  TContext
+> => {
+  return useMutation(getUpdateAdminTaskMutationOptions(options));
+};
+
+/**
+ * Remove a task from the shared admin list.
+ */
+export const getDeleteAdminTaskUrl = (id: string) => {
+  return `/api/admin/tasks/${id}`;
+};
+
+export const deleteAdminTask = async (
+  id: string,
+  options?: RequestInit,
+): Promise<void> => {
+  return customFetch<void>(getDeleteAdminTaskUrl(id), {
+    ...options,
+    method: "DELETE",
+  });
+};
+
+export const getDeleteAdminTaskMutationOptions = <
+  TError = ErrorType<ErrorResponse>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof deleteAdminTask>>,
+    TError,
+    { id: string },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof deleteAdminTask>>,
+  TError,
+  { id: string },
+  TContext
+> => {
+  const mutationKey = ["deleteAdminTask"];
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof deleteAdminTask>>,
+    { id: string }
+  > = (props) => {
+    const { id } = props ?? {};
+
+    return deleteAdminTask(id, requestOptions);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type DeleteAdminTaskMutationResult = NonNullable<
+  Awaited<ReturnType<typeof deleteAdminTask>>
+>;
+
+export type DeleteAdminTaskMutationError = ErrorType<ErrorResponse>;
+
+export const useDeleteAdminTask = <
+  TError = ErrorType<ErrorResponse>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof deleteAdminTask>>,
+    TError,
+    { id: string },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationResult<
+  Awaited<ReturnType<typeof deleteAdminTask>>,
+  TError,
+  { id: string },
+  TContext
+> => {
+  return useMutation(getDeleteAdminTaskMutationOptions(options));
+};
 
 /**
  * @summary List every radio channel (admin)

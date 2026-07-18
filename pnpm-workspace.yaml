@@ -13,8 +13,8 @@ catalog:
   '@tailwindcss/vite': ^4.1.14
   '@tanstack/react-query': ^5.90.21
   '@types/node': ^25.3.3
-  '@types/react': ^19.2.0
-  '@types/react-dom': ^19.2.0
+  '@types/react': ~19.1.10
+  '@types/react-dom': ~19.1.7
   '@vitejs/plugin-react': ^5.0.4
   class-variance-authority: ^0.7.1
   clsx: ^2.1.1
@@ -44,8 +44,11 @@ onlyBuiltDependencies:
 
 overrides:
   shell-quote: file:./vendor/shell-quote
-  '@types/react': ^19.2.0
-  '@types/react-dom': ^19.2.0
+  # @types/react 19.2.x breaks class-component JSX (recharts 2.x XAxis/Tooltip,
+  # expo BlurView/CameraView) under TS 5.9; runtime react is 19.1.0, so keep
+  # the type packages pinned to the matching 19.1.x line everywhere.
+  '@types/react': ~19.1.10
+  '@types/react-dom': ~19.1.7
   '@esbuild-kit/esm-loader': npm:tsx@^4.21.0
   eas-cli>@expo/plist: 0.4.8
   # eas-cli's plist parser calls DOMParser.parseFromString without a mimeType,

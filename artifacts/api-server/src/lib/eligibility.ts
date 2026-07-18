@@ -24,6 +24,23 @@ export function positionBaselineLevel(position: string | null | undefined): numb
   return position === "support_staff" ? 1 : 0;
 }
 
+/** Roles that represent shift workers (internal staff). */
+export function isWorkerRole(role: string | null | undefined): boolean {
+  return role === "employee" || role === "site_manager" || role === "dispatcher" || role === "admin";
+}
+
+/**
+ * The set of roles that represent shift workers, for use in `inArray` SQL
+ * filters when targeting the worker pool (e.g. profile-completeness reports,
+ * shift-available / vacancy notification broadcasts). The SQL-level mirror of
+ * `isWorkerRole` — ALL internal staff (employee, site manager, dispatcher,
+ * admin) are workers and may work / claim / be assigned shifts.
+ *
+ * INVARIANT: this set must NEVER include `client` — external client-portal
+ * accounts are not part of the worker pool.
+ */
+export const WORKER_ROLES = ["employee", "site_manager", "dispatcher", "admin"] as const;
+
 /**
  * Highest effective capability level for a single officer:
  * max(highest unexpired licence level, position baseline).

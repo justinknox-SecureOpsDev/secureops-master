@@ -18,9 +18,10 @@ import {
   AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
   AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
+import { Link } from "wouter";
 import {
   ChevronDown, ChevronRight, MapPin, Repeat, Pencil, Trash2,
-  Users, Plus, RefreshCw, CalendarRange, UserCheck, Check, X,
+  Users, Plus, RefreshCw, CalendarRange, UserCheck, Check, X, Shield,
 } from "lucide-react";
 
 type Shift = {
@@ -40,6 +41,7 @@ type Shift = {
   repeatPattern: string | null;
   seriesId: string | null;
   notes: string | null;
+  shiftType?: "standard" | "ppo_detail" | string | null;
   assignments: { id: string; status: string; employeeName: string | null }[];
 };
 
@@ -918,6 +920,19 @@ function ShiftRow({
         <Users className="w-3.5 h-3.5" />
         <span>{filled}/{shift.headcount}</span>
       </div>
+      {shift.shiftType === "ppo_detail" && (
+        <Link href={`/shifts/${shift.id}/protection`}>
+          <Button
+            variant="ghost"
+            size="icon"
+            title="Protection detail"
+            aria-label="Open protection detail"
+            className="text-brand-gold hover:text-brand-gold"
+          >
+            <Shield className="w-4 h-4" />
+          </Button>
+        </Link>
+      )}
       <Button variant="ghost" size="icon" onClick={onEdit} title="Edit"><Pencil className="w-4 h-4" /></Button>
       <Button variant="ghost" size="icon" onClick={onDelete} title="Delete"><Trash2 className="w-4 h-4 text-destructive" /></Button>
     </div>

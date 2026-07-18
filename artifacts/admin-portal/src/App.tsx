@@ -7,7 +7,10 @@ import { AuthProvider, useAuth } from "@/lib/auth";
 import { setToken } from "@/lib/api";
 import { LoginPage } from "@/pages/Login";
 import { AppShell } from "@/pages/AppShell";
-import { TablePage, HomeRedirect } from "@/pages/TablePage";
+import { TablePage } from "@/pages/TablePage";
+import DashboardPage from "@/pages/Dashboard";
+import ProtectionDetailPage from "@/pages/ProtectionDetail";
+import EmployeeCompletenessPage from "@/pages/EmployeeCompleteness";
 import { SiteDetailPage } from "@/pages/SiteDetailPage";
 import { ApplyPage } from "@/pages/Apply";
 import { OnboardPage } from "@/pages/Onboard";
@@ -150,7 +153,7 @@ function Routed() {
         </Switch>
       ) : (
         <Switch>
-          <Route path="/" component={HomeRedirect} />
+          <Route path="/" component={DashboardPage} />
           <Route path="/dispatch">{() => <FeatureGuard feature="liveMap"><DispatchPage /></FeatureGuard>}</Route>
           <Route path="/chat">{() => <FeatureGuard feature="chat"><ChatPage /></FeatureGuard>}</Route>
           <Route path="/personnel" component={PersonnelPage} />
@@ -163,6 +166,7 @@ function Routed() {
           <Route path="/hr/invitations">{() => <FeatureGuard feature="hr"><InvitationsPage /></FeatureGuard>}</Route>
           <Route path="/hr/client-users" component={ClientUsers} />
           <Route path="/hr/coverage-requests" component={CoverageRequests} />
+          <Route path="/hr/reports">{() => <FeatureGuard feature="hr"><EmployeeCompletenessPage /></FeatureGuard>}</Route>
           <Route path="/analytics" component={AnalyticsPage} />
           <Route path="/payroll/board">{() => <FeatureGuard feature="payroll"><PayrollBoardPage /></FeatureGuard>}</Route>
           <Route path="/invoices/board">{() => <FeatureGuard feature="invoicing"><InvoiceBoardPage /></FeatureGuard>}</Route>
@@ -187,6 +191,7 @@ function Routed() {
           <Route path="/staffing" component={StaffingPage} />
           <Route path="/staffing/:id" component={StaffingEventPage} />
           <Route path="/shifts/calendar" component={CalendarPage} />
+          <Route path="/shifts/:id/protection" component={ProtectionDetailPage} />
           <Route path="/tables/shifts" component={ShiftsPage} />
           <Route path="/tables/:table" component={TablePage} />
           <Route component={RootAwareNotFound} />

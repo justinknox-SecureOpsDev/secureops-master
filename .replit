@@ -202,10 +202,6 @@ localPort = 22707
 externalPort = 3003
 
 [[ports]]
-localPort = 22708
-externalPort = 5000
-
-[[ports]]
 localPort = 25580
 externalPort = 3001
 
@@ -218,6 +214,8 @@ packages = []
 [userenv.production]
 PORT = "8080"
 NODE_ENV = "production"
+ALLOWED_ORIGINS = "https://wcsgisecureops.com"
+APP_BASE_URL = "https://wcsgisecureops.com"
 
 [userenv.shared]
 GEOCODING_ENABLED = "true"

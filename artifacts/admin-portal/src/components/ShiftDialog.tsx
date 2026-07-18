@@ -34,6 +34,7 @@ type ShiftInitial = {
   headcount?: number;
   notes?: string | null;
   siteRateId?: string | null;
+  shiftType?: string | null;
 };
 
 type Props = {
@@ -70,6 +71,7 @@ export function ShiftDialog({ open, onOpenChange, initial, onSaved }: Props) {
   const [payRate, setPayRate] = useState<string>("0");
   const [billRate, setBillRate] = useState<string>("0");
   const [siteRateId, setSiteRateId] = useState<string | null>(null);
+  const [shiftType, setShiftType] = useState<string>("standard");
   const [notes, setNotes] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [err, setErr] = useState<string | null>(null);
@@ -89,6 +91,7 @@ export function ShiftDialog({ open, onOpenChange, initial, onSaved }: Props) {
     setPayRate(initial?.payRate != null ? String(initial.payRate) : "0");
     setBillRate(initial?.billRate != null ? String(initial.billRate) : "0");
     setSiteRateId(initial?.siteRateId ?? null);
+    setShiftType(initial?.shiftType ?? "standard");
     setNotes(initial?.notes ?? "");
     setErr(null);
   }, [open, initial]);
@@ -165,6 +168,7 @@ export function ShiftDialog({ open, onOpenChange, initial, onSaved }: Props) {
         headcount: Math.max(1, headcount | 0),
         notes: notes.trim() || null,
         siteRateId: siteRateId || null,
+        shiftType: shiftType === "ppo_detail" ? "ppo_detail" : "standard",
       };
       if (isEdit) {
         await api(`/shifts/${initial!.id}`, { method: "PUT", body: JSON.stringify(body) });
@@ -359,6 +363,23 @@ export function ShiftDialog({ open, onOpenChange, initial, onSaved }: Props) {
               value={headcount}
               onChange={(e) => setHeadcount(Math.max(1, Number(e.target.value) | 0))}
             />
+          </div>
+
+          <div>
+            <Label>Shift type</Label>
+            <Select value={shiftType} onValueChange={(v) => setShiftType(v)}>
+              <SelectTrigger><SelectValue /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value="standard">Standard</SelectItem>
+                <SelectItem value="ppo_detail">PPO / Protection Detail</SelectItem>
+              </SelectContent>
+            </Select>
+            {shiftType === "ppo_detail" && (
+              <p className="mt-1 text-xs text-muted-foreground">
+                Build the executive-protection package (principals, threats, destinations) from the
+                shield button on this shift after saving.
+              </p>
+            )}
           </div>
 
           <div>
