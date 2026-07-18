@@ -83,3 +83,9 @@ id = "eokCWIfEEOZ0E7GJui8kj"
 uri = "file://.local/rgp-pdf-wizard-patch.txt"
 type = "text"
 title = "PDF Import Wizard — patch for RGP (apply with git apply)"
+
+[[outputs]]
+id = "VDbINOe48afc60rDzfEU3"
+uri = "file://docs/new-customer-setup-runbook.md"
+type = "text"
+title = "New Customer Setup Runbook"
