@@ -4330,6 +4330,7 @@ components:
         locationLat: { type: number }
         locationLng: { type: number }
         notes: { type: string }
+        autoClockOutEnabled: { type: boolean, description: "When false, the auto-clock-out job skips officers at this site" }
         createdAt: { type: string, format: date-time }
       required: [id, clientId, name, createdAt]
 
@@ -4364,6 +4365,7 @@ components:
         locationLat: { type: number }
         locationLng: { type: number }
         notes: { type: string }
+        autoClockOutEnabled: { type: boolean }
       required: [name]
 
     UpdateSiteRequest:
@@ -4374,6 +4376,7 @@ components:
         locationLat: { type: number }
         locationLng: { type: number }
         notes: { type: string }
+        autoClockOutEnabled: { type: boolean }
 
     SiteManagerUser:
       type: object

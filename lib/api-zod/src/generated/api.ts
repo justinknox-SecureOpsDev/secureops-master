@@ -53,6 +53,12 @@ export const GetClientsResponseItem = zod.object({
         locationLat: zod.number().optional(),
         locationLng: zod.number().optional(),
         notes: zod.string().optional(),
+        autoClockOutEnabled: zod
+          .boolean()
+          .optional()
+          .describe(
+            "When false, the auto-clock-out job skips officers at this site",
+          ),
         createdAt: zod.coerce.date(),
       }),
     )
@@ -103,6 +109,12 @@ export const GetClientResponse = zod.object({
         locationLat: zod.number().optional(),
         locationLng: zod.number().optional(),
         notes: zod.string().optional(),
+        autoClockOutEnabled: zod
+          .boolean()
+          .optional()
+          .describe(
+            "When false, the auto-clock-out job skips officers at this site",
+          ),
         createdAt: zod.coerce.date(),
       }),
     )
@@ -152,6 +164,12 @@ export const UpdateClientResponse = zod.object({
         locationLat: zod.number().optional(),
         locationLng: zod.number().optional(),
         notes: zod.string().optional(),
+        autoClockOutEnabled: zod
+          .boolean()
+          .optional()
+          .describe(
+            "When false, the auto-clock-out job skips officers at this site",
+          ),
         createdAt: zod.coerce.date(),
       }),
     )
@@ -183,6 +201,7 @@ export const CreateClientSiteBody = zod.object({
   locationLat: zod.number().optional(),
   locationLng: zod.number().optional(),
   notes: zod.string().optional(),
+  autoClockOutEnabled: zod.boolean().optional(),
 });
 
 /**
@@ -201,6 +220,10 @@ export const GetSitesResponseItem = zod.object({
   locationLat: zod.number().optional(),
   locationLng: zod.number().optional(),
   notes: zod.string().optional(),
+  autoClockOutEnabled: zod
+    .boolean()
+    .optional()
+    .describe("When false, the auto-clock-out job skips officers at this site"),
   createdAt: zod.coerce.date(),
 });
 export const GetSitesResponse = zod.array(GetSitesResponseItem);
@@ -251,6 +274,10 @@ export const GetSiteResponse = zod.object({
   locationLat: zod.number().optional(),
   locationLng: zod.number().optional(),
   notes: zod.string().optional(),
+  autoClockOutEnabled: zod
+    .boolean()
+    .optional()
+    .describe("When false, the auto-clock-out job skips officers at this site"),
   createdAt: zod.coerce.date(),
 });
 
@@ -267,6 +294,7 @@ export const UpdateSiteBody = zod.object({
   locationLat: zod.number().optional(),
   locationLng: zod.number().optional(),
   notes: zod.string().optional(),
+  autoClockOutEnabled: zod.boolean().optional(),
 });
 
 export const UpdateSiteResponse = zod.object({
@@ -278,6 +306,10 @@ export const UpdateSiteResponse = zod.object({
   locationLat: zod.number().optional(),
   locationLng: zod.number().optional(),
   notes: zod.string().optional(),
+  autoClockOutEnabled: zod
+    .boolean()
+    .optional()
+    .describe("When false, the auto-clock-out job skips officers at this site"),
   createdAt: zod.coerce.date(),
 });
 

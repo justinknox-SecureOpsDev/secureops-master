@@ -1109,6 +1109,8 @@ export interface Site {
   locationLat?: number;
   locationLng?: number;
   notes?: string;
+  /** When false, the auto-clock-out job skips officers at this site */
+  autoClockOutEnabled?: boolean;
   createdAt: string;
 }
 
@@ -1174,6 +1176,7 @@ export interface CreateSiteRequest {
   locationLat?: number;
   locationLng?: number;
   notes?: string;
+  autoClockOutEnabled?: boolean;
 }
 
 export interface UpdateSiteRequest {
@@ -1182,6 +1185,7 @@ export interface UpdateSiteRequest {
   locationLat?: number;
   locationLng?: number;
   notes?: string;
+  autoClockOutEnabled?: boolean;
 }
 
 export interface SiteManagerUser {

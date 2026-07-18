@@ -1045,6 +1045,7 @@ export function startScheduledJobs(intervalMs: number = HOUR_MS): NodeJS.Timeout
           shiftEndTime: shiftsTable.endTime,
           lastLocationAt: usersTable.lastLocationAt,
           siteName: sitesTable.name,
+          autoClockOutEnabled: sitesTable.autoClockOutEnabled,
         })
         .from(timeEntriesTable)
         .innerJoin(shiftsTable, eq(shiftsTable.id, timeEntriesTable.shiftId))
@@ -1057,6 +1058,10 @@ export function startScheduledJobs(intervalMs: number = HOUR_MS): NodeJS.Timeout
 
       let totalClosed = 0;
       for (const r of rows) {
+        // Skip if auto-clock-out is disabled for this site (null = no site →
+        // treat as enabled so siteless shifts still auto-clock-out).
+        if (r.autoClockOutEnabled === false) continue;
+
         // Skip officers we can confirm are still on site.
         const pingFresh =
           r.lastLocationAt != null &&

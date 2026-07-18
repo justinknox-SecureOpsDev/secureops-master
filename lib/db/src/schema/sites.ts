@@ -1,4 +1,4 @@
-import { pgTable, text, uuid, timestamp, numeric, integer, jsonb, index } from "drizzle-orm/pg-core";
+import { pgTable, text, uuid, timestamp, numeric, integer, jsonb, boolean, index } from "drizzle-orm/pg-core";
 import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod/v4";
 import { clientsTable } from "./clients";
@@ -35,6 +35,11 @@ export const sitesTable = pgTable("sites", {
   // shift at this site must hold (unexpired). Empty/null = no extra
   // training requirements beyond the shift's `requiredLicenseLevel`.
   requiredTrainings: jsonb("required_trainings").$type<string[]>(),
+  // When false, the auto-clock-out scheduled job skips officers at this site.
+  // Useful for sites where officers routinely work past their scheduled end
+  // time (e.g. events, extended-duration details) and manual clock-out is
+  // preferred. Defaults to true (global behavior unchanged).
+  autoClockOutEnabled: boolean("auto_clock_out_enabled").notNull().default(true),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow().$onUpdate(() => new Date()),
 }, (t) => ({

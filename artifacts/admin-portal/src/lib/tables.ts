@@ -73,6 +73,8 @@ export type Field = {
    *  generic per-type sample when omitted. Ignored entirely for field
    *  types that aren't supported by Excel import (e.g. file uploads). */
   importExample?: string;
+  /** Descriptive text rendered below the field in the edit dialog. */
+  helpText?: string;
   /** Grid-only computed column. The field is automatically skipped by the
    *  row edit dialog, the import wizard (template + mapping + write paths)
    *  and never sent to the API. The grid renders it by resolving `fromField`
@@ -380,6 +382,13 @@ export const TABLES: TableDescriptor[] = [
         type: "number",
         hiddenInGrid: true,
         placeholder: "e.g. 0.5 for a sprawling industrial park",
+      },
+      {
+        key: "autoClockOutEnabled",
+        label: "Auto clock-out",
+        type: "boolean",
+        hiddenInGrid: true,
+        helpText: "When enabled, officers at this site are automatically clocked out after their shift ends and they leave the geofence. Disable for sites where officers routinely work past scheduled end times.",
       },
       { key: "notes", label: "Notes", type: "textarea", hiddenInGrid: true },
       { key: "createdAt", label: "Created", type: "datetime", readonly: true },

@@ -170,13 +170,16 @@ router.get("/sites/:id", requireAdminOrDispatcher, async (req, res): Promise<voi
 
 router.put("/sites/:id", requireAdmin, async (req, res): Promise<void> => {
   const id = Array.isArray(req.params.id) ? req.params.id[0] : req.params.id;
-  const { name, address, locationLat, locationLng, notes, geofenceRadiusMiles } = req.body;
+  const { name, address, locationLat, locationLng, notes, geofenceRadiusMiles, autoClockOutEnabled } = req.body;
   let updates: Record<string, unknown> = {};
   if (name !== undefined) updates.name = name;
   if (address !== undefined) updates.address = address;
   if (locationLat !== undefined) updates.locationLat = locationLat != null ? String(locationLat) : null;
   if (locationLng !== undefined) updates.locationLng = locationLng != null ? String(locationLng) : null;
   if (notes !== undefined) updates.notes = notes;
+  if (autoClockOutEnabled !== undefined) {
+    updates.autoClockOutEnabled = autoClockOutEnabled === true || autoClockOutEnabled === "true";
+  }
   if (geofenceRadiusMiles !== undefined) {
     // null / "" → clear override (use global default). Otherwise must be
     // a positive finite number; 0 and negatives are rejected with 400 so

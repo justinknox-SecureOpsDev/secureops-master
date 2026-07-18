@@ -499,6 +499,9 @@ export function RowFormDialog({
                     });
                   } : undefined}
                 />
+                      {f.helpText && (
+                        <p className="mt-1 text-xs text-muted-foreground">{f.helpText}</p>
+                      )}
                       </div>
                     </div>
                     );
