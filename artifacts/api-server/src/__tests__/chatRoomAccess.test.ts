@@ -208,24 +208,39 @@ async function postMessageStatus(token: string, roomId: string, content = "hi"):
 }
 
 describe("GET /chat/rooms — visibility by room type", () => {
-  it("announcements is visible to every authenticated user", async () => {
-    const id = await makeRoom({ name: `${TAG}-announcements`, type: "announcements" });
-    for (const token of [
-      ctx.adminToken,
-      ctx.officerL3Token,
-      ctx.officerL2Token,
-      ctx.officerNoneToken,
-    ]) {
-      expect(await listRoomIds(token)).toContain(id);
-    }
-  });
+  // The first two tests in this file absorb the suite's one-time costs (first
+  // /chat/rooms request triggers per-site channel seeding, plus several
+  // sequential list calls). They pass comfortably in isolation but can exceed
+  // the default 30s under the full parallel `pnpm -r run test` gate when every
+  // package's suite competes for CPU/DB, so they get an explicit 60s budget.
+  const FIRST_TESTS_TIMEOUT_MS = 60_000;
 
-  it("ops is visible to admins only", async () => {
-    const id = await makeRoom({ name: `${TAG}-ops`, type: "ops" });
-    expect(await listRoomIds(ctx.adminToken)).toContain(id);
-    expect(await listRoomIds(ctx.officerL3Token)).not.toContain(id);
-    expect(await listRoomIds(ctx.officerNoneToken)).not.toContain(id);
-  });
+  it(
+    "announcements is visible to every authenticated user",
+    async () => {
+      const id = await makeRoom({ name: `${TAG}-announcements`, type: "announcements" });
+      for (const token of [
+        ctx.adminToken,
+        ctx.officerL3Token,
+        ctx.officerL2Token,
+        ctx.officerNoneToken,
+      ]) {
+        expect(await listRoomIds(token)).toContain(id);
+      }
+    },
+    FIRST_TESTS_TIMEOUT_MS,
+  );
+
+  it(
+    "ops is visible to admins only",
+    async () => {
+      const id = await makeRoom({ name: `${TAG}-ops`, type: "ops" });
+      expect(await listRoomIds(ctx.adminToken)).toContain(id);
+      expect(await listRoomIds(ctx.officerL3Token)).not.toContain(id);
+      expect(await listRoomIds(ctx.officerNoneToken)).not.toContain(id);
+    },
+    FIRST_TESTS_TIMEOUT_MS,
+  );
 
   it("license_level room includes officers at/above the level and excludes under-qualified", async () => {
     const id = await makeRoom({ name: `${TAG}-license-l3`, type: "license_level", licenseLevel: 3 });
