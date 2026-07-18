@@ -17,6 +17,14 @@ import { useDeepLinkFocus } from "@/hooks/useDeepLinkFocus";
 
 type ApplicationStatus = "submitted" | "under_review" | "info_requested" | "awaiting_second_approval" | "approved" | "rejected";
 
+// Admin-facing labels for the I-9 Section 1 citizenship attestation.
+const I9_STATUS_LABELS: Record<string, string> = {
+  citizen: "U.S. citizen",
+  noncitizen_national: "Noncitizen national of the U.S.",
+  permanent_resident: "Lawful permanent resident",
+  authorized_alien: "Noncitizen authorized to work",
+};
+
 type Application = {
   id: string;
   status: ApplicationStatus;
@@ -27,6 +35,20 @@ type Application = {
   dateOfBirth: string | null; cityOfBirth: string | null; stateOfBirth: string | null;
   niNumber: string | null; rightToWorkStatus: string | null; rightToWorkDocKey: string | null;
   i9DocKey: string | null; ssnCardDocKey: string | null;
+  i9Data: {
+    otherLastNames: string | null;
+    citizenshipStatus: "citizen" | "noncitizen_national" | "permanent_resident" | "authorized_alien";
+    uscisANumber: string | null;
+    i94Number: string | null;
+    foreignPassportNumber: string | null;
+    foreignPassportCountry: string | null;
+    workAuthExpiration: string | null;
+    usedPreparer: boolean;
+    preparerName: string | null;
+    attestation: boolean;
+    signatureName: string | null;
+    signedDate: string | null;
+  } | null;
   idDocType: "drivers_license" | "passport" | null; idDocKey: string | null;
   siaLicenseNumber: string | null; siaLicenseLevel: number | null; siaLicenseExpiry: string | null;
   previousExperience: string | null; yearsExperience: number | null;
@@ -737,9 +759,38 @@ function ApplicationDialog({
             </ul>
           </Section>
         )}
+        {app.i9Data && (
+          <Section title="Form I-9 — Section 1 (completed in-app)">
+            <div className="grid grid-cols-2 gap-x-4 gap-y-1 text-sm">
+              <Info k="Citizenship / immigration status" v={I9_STATUS_LABELS[app.i9Data.citizenshipStatus] ?? app.i9Data.citizenshipStatus} />
+              <Info k="Other last names used" v={app.i9Data.otherLastNames} />
+              {app.i9Data.uscisANumber && <Info k="USCIS / A-Number" v={app.i9Data.uscisANumber} />}
+              {app.i9Data.i94Number && <Info k="Form I-94 admission #" v={app.i9Data.i94Number} />}
+              {app.i9Data.foreignPassportNumber && (
+                <Info
+                  k="Foreign passport"
+                  v={`${app.i9Data.foreignPassportNumber}${app.i9Data.foreignPassportCountry ? ` (${app.i9Data.foreignPassportCountry})` : ""}`}
+                />
+              )}
+              {app.i9Data.citizenshipStatus === "authorized_alien" && (
+                <Info k="Work authorization expires" v={app.i9Data.workAuthExpiration ?? "N/A (does not expire)"} />
+              )}
+              <Info
+                k="Preparer / translator"
+                v={app.i9Data.usedPreparer ? (app.i9Data.preparerName ?? "Yes") : "Not used"}
+              />
+              <Info
+                k="Signed"
+                v={app.i9Data.attestation
+                  ? `${app.i9Data.signatureName ?? "—"}${app.i9Data.signedDate ? ` on ${app.i9Data.signedDate}` : ""} (attested under penalty of perjury)`
+                  : null}
+              />
+            </div>
+          </Section>
+        )}
         <Section title="Documents">
           <ul className="text-sm space-y-1">
-            <FileLink k="Form I-9" path={app.i9DocKey} />
+            {app.i9DocKey && <FileLink k="Form I-9 (legacy upload)" path={app.i9DocKey} />}
             <FileLink k="SSN card" path={app.ssnCardDocKey} />
             <FileLink
               k={app.idDocType === "passport" ? "Passport" : app.idDocType === "drivers_license" ? "Driver's License" : "Photo ID"}

@@ -55,7 +55,11 @@ export const APPLICATION_FIELD_REGISTRY: ApplicationFieldDef[] = [
   { key: "cityOfBirth", section: 0, defaultLabel: "City of birth", defaultHelp: null, defaultRequired: true, locked: false },
   { key: "stateOfBirth", section: 0, defaultLabel: "State / county of birth", defaultHelp: null, defaultRequired: true, locked: false },
   // ---- Section 1: I-9 & Identity ----
-  { key: "i9Doc", section: 1, defaultLabel: "Completed Form I-9 (PDF or photos of all pages)", defaultHelp: null, defaultRequired: true, locked: false },
+  // "i9" (fillable in-app Form I-9 Section 1) replaced the old "i9Doc" upload
+  // field. Deliberately a NEW key: stale application_field_config rows for
+  // i9Doc (old label/required/hidden overrides) are silently ignored by the
+  // merge, so the fillable form always starts from clean defaults.
+  { key: "i9", section: 1, defaultLabel: "Form I-9 — Employment Eligibility (Section 1)", defaultHelp: null, defaultRequired: true, locked: false },
   { key: "ssnCardDoc", section: 1, defaultLabel: "Social Security card (photo of front)", defaultHelp: null, defaultRequired: true, locked: false },
   { key: "idDocType", section: 1, defaultLabel: "Photo ID type", defaultHelp: null, defaultRequired: true, locked: false },
   { key: "idDoc", section: 1, defaultLabel: "Photo ID", defaultHelp: null, defaultRequired: true, locked: false },

@@ -1835,6 +1835,72 @@ export type SubmitApplicationRequestCustomAnswersItem = {
   value: unknown;
 };
 
+/**
+ * Attested status: citizen of the U.S.; noncitizen national of the U.S.; lawful permanent resident; or noncitizen otherwise authorized to work.
+ */
+export type I9Section1CitizenshipStatus =
+  (typeof I9Section1CitizenshipStatus)[keyof typeof I9Section1CitizenshipStatus];
+
+export const I9Section1CitizenshipStatus = {
+  citizen: "citizen",
+  noncitizen_national: "noncitizen_national",
+  permanent_resident: "permanent_resident",
+  authorized_alien: "authorized_alien",
+} as const;
+
+/**
+ * Form I-9 (Employment Eligibility Verification) Section 1, completed in-app by the applicant instead of uploading a scanned form. The server appends signedDate (business-timezone calendar date) at submit time. Section 2 (employer examination of physical documents) remains a manual HR step after hire.
+ */
+export interface I9Section1 {
+  /**
+   * Other last names used, if any (e.g. maiden name). Omit when none.
+   * @maxLength 200
+   */
+  otherLastNames?: string;
+  /** Attested status: citizen of the U.S.; noncitizen national of the U.S.; lawful permanent resident; or noncitizen otherwise authorized to work. */
+  citizenshipStatus: I9Section1CitizenshipStatus;
+  /**
+   * USCIS / Alien Registration Number (A-Number). Required for permanent_resident; one of the acceptable identifiers for authorized_alien.
+   * @maxLength 20
+   */
+  uscisANumber?: string;
+  /**
+   * Form I-94 admission number (authorized_alien identifier option).
+   * @maxLength 20
+   */
+  i94Number?: string;
+  /**
+   * Foreign passport number (authorized_alien identifier option; requires foreignPassportCountry).
+   * @maxLength 40
+   */
+  foreignPassportNumber?: string;
+  /**
+   * Country of issuance for the foreign passport.
+   * @maxLength 60
+   */
+  foreignPassportCountry?: string;
+  /**
+   * Work-authorization expiration date (YYYY-MM-DD) for authorized_alien. Omit when the authorization does not expire (N/A).
+   * @maxLength 20
+   */
+  workAuthExpiration?: string;
+  /** True when a preparer and/or translator assisted the applicant in completing Section 1. */
+  usedPreparer?: boolean;
+  /**
+   * Preparer / translator full name (required when usedPreparer is true).
+   * @maxLength 200
+   */
+  preparerName?: string;
+  /** Must be true — the applicant attests, under penalty of perjury, that they selected the status above and that all information is true and correct. */
+  attestation: boolean;
+  /**
+   * Typed full legal name, recorded as the applicant's electronic signature.
+   * @minLength 1
+   * @maxLength 200
+   */
+  signatureName: string;
+}
+
 export interface SubmitApplicationRequest {
   firstName: string;
   lastName: string;
@@ -1865,8 +1931,13 @@ return 400.
    * @deprecated
    */
   rightToWorkDoc?: UploadedFile | null;
-  /** Completed Form I-9. */
+  /**
+   * Deprecated upload of a completed Form I-9 (replaced by the fillable `i9` object; still accepted so in-flight saved drafts don't break).
+   * @deprecated
+   */
   i9Doc?: UploadedFile;
+  /** Form I-9 Section 1, filled in-app. Server appends signedDate on submit. */
+  i9?: I9Section1 | null;
   /** Photo/scan of Social Security card. */
   ssnCardDoc?: UploadedFile;
   /** Which ID accompanies the SSN card. */
@@ -1898,6 +1969,11 @@ export const ApplicationStatus = {
   approved: "approved",
   rejected: "rejected",
 } as const;
+
+/**
+ * In-app Form I-9 Section 1 data as submitted (plus server-set signedDate). Null for legacy applications that uploaded a scanned form instead (see i9DocKey).
+ */
+export type ApplicationI9Data = { [key: string]: unknown } | null;
 
 export type ApplicationIdDocType =
   | (typeof ApplicationIdDocType)[keyof typeof ApplicationIdDocType]
@@ -1948,6 +2024,8 @@ export interface Application {
   rightToWorkStatus?: string | null;
   rightToWorkDocKey?: string | null;
   i9DocKey?: string | null;
+  /** In-app Form I-9 Section 1 data as submitted (plus server-set signedDate). Null for legacy applications that uploaded a scanned form instead (see i9DocKey). */
+  i9Data?: ApplicationI9Data;
   ssnCardDocKey?: string | null;
   idDocType?: ApplicationIdDocType;
   idDocKey?: string | null;

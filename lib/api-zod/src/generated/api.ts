@@ -3785,6 +3785,22 @@ export const AdminUpdateApplicationFieldResponse = zod.object({
 /**
  * @summary Submit a public job application
  */
+export const submitApplicationBodyI9OneOtherLastNamesMax = 200;
+
+export const submitApplicationBodyI9OneUscisANumberMax = 20;
+
+export const submitApplicationBodyI9OneI94NumberMax = 20;
+
+export const submitApplicationBodyI9OneForeignPassportNumberMax = 40;
+
+export const submitApplicationBodyI9OneForeignPassportCountryMax = 60;
+
+export const submitApplicationBodyI9OneWorkAuthExpirationMax = 20;
+
+export const submitApplicationBodyI9OnePreparerNameMax = 200;
+
+export const submitApplicationBodyI9OneSignatureNameMax = 200;
+
 export const SubmitApplicationBody = zod.object({
   firstName: zod.string(),
   lastName: zod.string(),
@@ -3827,7 +3843,94 @@ export const SubmitApplicationBody = zod.object({
       size: zod.number().optional(),
     })
     .optional()
-    .describe("Completed Form I-9."),
+    .describe(
+      "Deprecated upload of a completed Form I-9 (replaced by the fillable `i9` object; still accepted so in-flight saved drafts don't break).",
+    ),
+  i9: zod
+    .object({
+      otherLastNames: zod
+        .string()
+        .max(submitApplicationBodyI9OneOtherLastNamesMax)
+        .optional()
+        .describe(
+          "Other last names used, if any (e.g. maiden name). Omit when none.",
+        ),
+      citizenshipStatus: zod
+        .enum([
+          "citizen",
+          "noncitizen_national",
+          "permanent_resident",
+          "authorized_alien",
+        ])
+        .describe(
+          "Attested status: citizen of the U.S.; noncitizen national of the U.S.; lawful permanent resident; or noncitizen otherwise authorized to work.",
+        ),
+      uscisANumber: zod
+        .string()
+        .max(submitApplicationBodyI9OneUscisANumberMax)
+        .optional()
+        .describe(
+          "USCIS \/ Alien Registration Number (A-Number). Required for permanent_resident; one of the acceptable identifiers for authorized_alien.",
+        ),
+      i94Number: zod
+        .string()
+        .max(submitApplicationBodyI9OneI94NumberMax)
+        .optional()
+        .describe(
+          "Form I-94 admission number (authorized_alien identifier option).",
+        ),
+      foreignPassportNumber: zod
+        .string()
+        .max(submitApplicationBodyI9OneForeignPassportNumberMax)
+        .optional()
+        .describe(
+          "Foreign passport number (authorized_alien identifier option; requires foreignPassportCountry).",
+        ),
+      foreignPassportCountry: zod
+        .string()
+        .max(submitApplicationBodyI9OneForeignPassportCountryMax)
+        .optional()
+        .describe("Country of issuance for the foreign passport."),
+      workAuthExpiration: zod
+        .string()
+        .max(submitApplicationBodyI9OneWorkAuthExpirationMax)
+        .optional()
+        .describe(
+          "Work-authorization expiration date (YYYY-MM-DD) for authorized_alien. Omit when the authorization does not expire (N\/A).",
+        ),
+      usedPreparer: zod
+        .boolean()
+        .optional()
+        .describe(
+          "True when a preparer and\/or translator assisted the applicant in completing Section 1.",
+        ),
+      preparerName: zod
+        .string()
+        .max(submitApplicationBodyI9OnePreparerNameMax)
+        .optional()
+        .describe(
+          "Preparer \/ translator full name (required when usedPreparer is true).",
+        ),
+      attestation: zod
+        .boolean()
+        .describe(
+          "Must be true — the applicant attests, under penalty of perjury, that they selected the status above and that all information is true and correct.",
+        ),
+      signatureName: zod
+        .string()
+        .min(1)
+        .max(submitApplicationBodyI9OneSignatureNameMax)
+        .describe(
+          "Typed full legal name, recorded as the applicant's electronic signature.",
+        ),
+    })
+    .describe(
+      "Form I-9 (Employment Eligibility Verification) Section 1, completed in-app by the applicant instead of uploading a scanned form. The server appends signedDate (business-timezone calendar date) at submit time. Section 2 (employer examination of physical documents) remains a manual HR step after hire.",
+    )
+    .nullish()
+    .describe(
+      "Form I-9 Section 1, filled in-app. Server appends signedDate on submit.",
+    ),
   ssnCardDoc: zod
     .object({
       name: zod.string(),
@@ -3977,6 +4080,12 @@ export const AdminListApplicationsResponseItem = zod.object({
   rightToWorkStatus: zod.string().nullish(),
   rightToWorkDocKey: zod.string().nullish(),
   i9DocKey: zod.string().nullish(),
+  i9Data: zod
+    .record(zod.string(), zod.unknown())
+    .nullish()
+    .describe(
+      "In-app Form I-9 Section 1 data as submitted (plus server-set signedDate). Null for legacy applications that uploaded a scanned form instead (see i9DocKey).",
+    ),
   ssnCardDocKey: zod.string().nullish(),
   idDocType: zod.enum(["drivers_license", "passport"]).nullish(),
   idDocKey: zod.string().nullish(),
@@ -4095,6 +4204,12 @@ export const AdminGetApplicationResponse = zod.object({
   rightToWorkStatus: zod.string().nullish(),
   rightToWorkDocKey: zod.string().nullish(),
   i9DocKey: zod.string().nullish(),
+  i9Data: zod
+    .record(zod.string(), zod.unknown())
+    .nullish()
+    .describe(
+      "In-app Form I-9 Section 1 data as submitted (plus server-set signedDate). Null for legacy applications that uploaded a scanned form instead (see i9DocKey).",
+    ),
   ssnCardDocKey: zod.string().nullish(),
   idDocType: zod.enum(["drivers_license", "passport"]).nullish(),
   idDocKey: zod.string().nullish(),
@@ -4214,6 +4329,12 @@ export const AdminMarkApplicationUnderReviewResponse = zod.object({
   rightToWorkStatus: zod.string().nullish(),
   rightToWorkDocKey: zod.string().nullish(),
   i9DocKey: zod.string().nullish(),
+  i9Data: zod
+    .record(zod.string(), zod.unknown())
+    .nullish()
+    .describe(
+      "In-app Form I-9 Section 1 data as submitted (plus server-set signedDate). Null for legacy applications that uploaded a scanned form instead (see i9DocKey).",
+    ),
   ssnCardDocKey: zod.string().nullish(),
   idDocType: zod.enum(["drivers_license", "passport"]).nullish(),
   idDocKey: zod.string().nullish(),
@@ -4333,6 +4454,12 @@ export const AdminRejectApplicationResponse = zod.object({
   rightToWorkStatus: zod.string().nullish(),
   rightToWorkDocKey: zod.string().nullish(),
   i9DocKey: zod.string().nullish(),
+  i9Data: zod
+    .record(zod.string(), zod.unknown())
+    .nullish()
+    .describe(
+      "In-app Form I-9 Section 1 data as submitted (plus server-set signedDate). Null for legacy applications that uploaded a scanned form instead (see i9DocKey).",
+    ),
   ssnCardDocKey: zod.string().nullish(),
   idDocType: zod.enum(["drivers_license", "passport"]).nullish(),
   idDocKey: zod.string().nullish(),
@@ -4454,6 +4581,12 @@ export const AdminApproveApplicationResponse = zod
       rightToWorkStatus: zod.string().nullish(),
       rightToWorkDocKey: zod.string().nullish(),
       i9DocKey: zod.string().nullish(),
+      i9Data: zod
+        .record(zod.string(), zod.unknown())
+        .nullish()
+        .describe(
+          "In-app Form I-9 Section 1 data as submitted (plus server-set signedDate). Null for legacy applications that uploaded a scanned form instead (see i9DocKey).",
+        ),
       ssnCardDocKey: zod.string().nullish(),
       idDocType: zod.enum(["drivers_license", "passport"]).nullish(),
       idDocKey: zod.string().nullish(),

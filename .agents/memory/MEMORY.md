@@ -80,4 +80,5 @@
 - [pnpm overrides location](pnpm-overrides-location.md) — dependency overrides go in pnpm-workspace.yaml `overrides:`, NOT package.json#pnpm.overrides; pnpm 10 REPLACES not merges, silently dropping ~118 security pins.
 - [adminGridTimeEntryInvoiceSync flake](admin-grid-invoice-sync-flake.md) — full parallel test gate can 23505 this suite (invoice auto-sync race); passes alone; re-run gate, dont change code.
 - [site_rates unique migration pattern](site-rates-unique-migration-pattern.md) — two-deploy workaround when prod duplicates block Replit migration validator; use boot backfill + DO $$ ADD CONSTRAINT.
+- [zod v4 infer on generated schemas](zod-v4-infer-generated-classic.md) — v4 `z.infer` on orval's classic zod collapses to unknown; use `import type { z as zClassic }` + `zClassic.infer`.
 - [Generated client auth getter](orval-client-auth-getter.md) — each app bundle must register setAuthTokenGetter or ALL Orval-hook calls 401 while api() works; /api/version probes build identity.

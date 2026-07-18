@@ -66,7 +66,7 @@ function buildApplicationBody(suffix: string): Record<string, unknown> {
     cityOfBirth: "Dallas",
     stateOfBirth: "TX",
     niNumber: "123-45-6789",
-    i9Doc: { name: "i9.pdf", objectPath: `/objects/uploads/${randomUUID()}` },
+    i9: { citizenshipStatus: "citizen", usedPreparer: false, attestation: true, signatureName: `Jane ${TAG}` },
     ssnCardDoc: { name: "ssn.pdf", objectPath: `/objects/uploads/${randomUUID()}` },
     idDocType: "drivers_license",
     idDoc: { name: "id.pdf", objectPath: `/objects/uploads/${randomUUID()}` },
@@ -146,7 +146,7 @@ afterAll(async () => {
 describe("POST /applications — hidden built-in fields", () => {
   it("accepts a submission that omits hidden fields and nulls them server-side", async () => {
     const hiddenKeys = [
-      "idDocType", "idDoc", "i9Doc", "ssnCardDoc",
+      "idDocType", "idDoc", "i9", "ssnCardDoc",
       "siaLicenseLevel", "photo", "cv", "trainingCertificates",
     ];
     for (const k of hiddenKeys) await setFieldConfig(k, { hidden: true });
@@ -162,7 +162,7 @@ describe("POST /applications — hidden built-in fields", () => {
     // Hidden fields persisted as null even though the form no longer collects them.
     expect(row.idDocType).toBeNull();
     expect(row.idDocKey).toBeNull();
-    expect(row.i9DocKey).toBeNull();
+    expect(row.i9Data).toBeNull();
     expect(row.ssnCardDocKey).toBeNull();
     expect(row.siaLicenseLevel).toBeNull();
     expect(row.photoKey).toBeNull();
@@ -171,7 +171,7 @@ describe("POST /applications — hidden built-in fields", () => {
   });
 
   it("nulls hidden fields even when a stale client still submits values for them", async () => {
-    const hiddenKeys = ["idDocType", "siaLicenseLevel", "photo", "i9Doc"];
+    const hiddenKeys = ["idDocType", "siaLicenseLevel", "photo", "i9"];
     for (const k of hiddenKeys) await setFieldConfig(k, { hidden: true });
 
     // Full body — every value present — but the admin has hidden these fields.
@@ -185,7 +185,7 @@ describe("POST /applications — hidden built-in fields", () => {
     expect(row.idDocType).toBeNull();
     expect(row.siaLicenseLevel).toBeNull();
     expect(row.photoKey).toBeNull();
-    expect(row.i9DocKey).toBeNull();
+    expect(row.i9Data).toBeNull();
     // A non-hidden field with a value still persists.
     expect(row.cvKey).toBeTruthy();
   });
@@ -194,7 +194,7 @@ describe("POST /applications — hidden built-in fields", () => {
 describe("POST /applications — optional built-in fields", () => {
   it("accepts a submission omitting fields the admin marked optional", async () => {
     const optionalKeys = [
-      "idDocType", "idDoc", "i9Doc", "ssnCardDoc",
+      "idDocType", "idDoc", "i9", "ssnCardDoc",
       "siaLicenseLevel", "siaLicenseNumber", "siaLicenseExpiry",
       "photo", "cv", "trainingCertificates", "references",
       "yearsExperience", "previousExperience", "availability",

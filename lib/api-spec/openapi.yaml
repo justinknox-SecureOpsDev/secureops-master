@@ -5276,7 +5276,14 @@ components:
           nullable: true
           deprecated: true
           description: "Deprecated right-to-work document (kept for back-compat; I-9 + SSN + photo ID are the authoritative US set)."
-        i9Doc: { $ref: "#/components/schemas/UploadedFile", description: "Completed Form I-9." }
+        i9Doc:
+          allOf: [{ $ref: "#/components/schemas/UploadedFile" }]
+          deprecated: true
+          description: "Deprecated upload of a completed Form I-9 (replaced by the fillable `i9` object; still accepted so in-flight saved drafts don't break)."
+        i9:
+          allOf: [{ $ref: "#/components/schemas/I9Section1" }]
+          nullable: true
+          description: "Form I-9 Section 1, filled in-app. Server appends signedDate on submit."
         ssnCardDoc: { $ref: "#/components/schemas/UploadedFile", description: "Photo/scan of Social Security card." }
         idDocType: { type: string, enum: [drivers_license, passport], description: "Which ID accompanies the SSN card." }
         idDoc: { $ref: "#/components/schemas/UploadedFile", description: "Photo/scan of driver's license OR passport." }
@@ -5307,6 +5314,60 @@ components:
               questionId: { type: string }
               value: {}
 
+    I9Section1:
+      type: object
+      description: >-
+        Form I-9 (Employment Eligibility Verification) Section 1, completed
+        in-app by the applicant instead of uploading a scanned form. The server
+        appends signedDate (business-timezone calendar date) at submit time.
+        Section 2 (employer examination of physical documents) remains a manual
+        HR step after hire.
+      required: [citizenshipStatus, attestation, signatureName]
+      properties:
+        otherLastNames:
+          type: string
+          maxLength: 200
+          description: "Other last names used, if any (e.g. maiden name). Omit when none."
+        citizenshipStatus:
+          type: string
+          enum: [citizen, noncitizen_national, permanent_resident, authorized_alien]
+          description: "Attested status: citizen of the U.S.; noncitizen national of the U.S.; lawful permanent resident; or noncitizen otherwise authorized to work."
+        uscisANumber:
+          type: string
+          maxLength: 20
+          description: "USCIS / Alien Registration Number (A-Number). Required for permanent_resident; one of the acceptable identifiers for authorized_alien."
+        i94Number:
+          type: string
+          maxLength: 20
+          description: "Form I-94 admission number (authorized_alien identifier option)."
+        foreignPassportNumber:
+          type: string
+          maxLength: 40
+          description: "Foreign passport number (authorized_alien identifier option; requires foreignPassportCountry)."
+        foreignPassportCountry:
+          type: string
+          maxLength: 60
+          description: "Country of issuance for the foreign passport."
+        workAuthExpiration:
+          type: string
+          maxLength: 20
+          description: "Work-authorization expiration date (YYYY-MM-DD) for authorized_alien. Omit when the authorization does not expire (N/A)."
+        usedPreparer:
+          type: boolean
+          description: "True when a preparer and/or translator assisted the applicant in completing Section 1."
+        preparerName:
+          type: string
+          maxLength: 200
+          description: "Preparer / translator full name (required when usedPreparer is true)."
+        attestation:
+          type: boolean
+          description: "Must be true — the applicant attests, under penalty of perjury, that they selected the status above and that all information is true and correct."
+        signatureName:
+          type: string
+          minLength: 1
+          maxLength: 200
+          description: "Typed full legal name, recorded as the applicant's electronic signature."
+
     Application:
       type: object
       required: [id, status, firstName, lastName, email, phone, address, createdAt]
@@ -5331,6 +5392,11 @@ components:
         rightToWorkStatus: { type: string, nullable: true }
         rightToWorkDocKey: { type: string, nullable: true }
         i9DocKey: { type: string, nullable: true }
+        i9Data:
+          type: object
+          nullable: true
+          additionalProperties: true
+          description: "In-app Form I-9 Section 1 data as submitted (plus server-set signedDate). Null for legacy applications that uploaded a scanned form instead (see i9DocKey)."
         ssnCardDocKey: { type: string, nullable: true }
         idDocType: { type: string, nullable: true, enum: [drivers_license, passport] }
         idDocKey: { type: string, nullable: true }

@@ -36,6 +36,9 @@ import {
   AdminRejectApplicationBody,
 } from "@workspace/api-zod";
 import { z } from "zod/v4";
+// Type-only classic-zod import: the generated @workspace/api-zod schemas are
+// classic (v3-surface) zod, so v4's z.infer collapses them to `unknown`.
+import type { z as zClassic } from "zod";
 import { requireAdmin } from "../middlewares/auth";
 import { sendPushToUsers } from "../lib/push";
 import { sendEmail, sendEmailDetailed, renderOnboardingEmail, renderResendOnboardingEmail, renderRejectionEmail, renderApplicationReceivedEmail, renderRequestInfoEmail, renderApplicationDraftResumeEmail, renderNewApplicationAdminEmail, renderOnboardingCompletedAdminEmail } from "../lib/email";
@@ -43,6 +46,7 @@ import { brand } from "../lib/brandConfig";
 import { sendSmsToPhoneNumber } from "../lib/sms";
 import { normalizePhoneToE164 } from "../lib/phone";
 import { requireFeature } from "../lib/features";
+import { businessTimeZone, businessDateIso } from "../lib/businessTime";
 
 const router: IRouter = Router();
 router.use(
@@ -232,6 +236,7 @@ function rowToApplication(r: ApplicationRow, distanceMiles: number | null = null
     dateOfBirth: r.dateOfBirth ?? null,
     siaLicenseExpiry: r.siaLicenseExpiry ?? null,
     references: r.references ?? null,
+    i9Data: r.i9Data ?? null,
     customAnswers: r.customAnswers ?? null,
     trainingCertificateKeys: r.trainingCertificateKeys ?? null,
     availability: r.availability ?? null,
@@ -427,6 +432,7 @@ const APPLICATION_FIELD_LABELS: Record<string, string> = {
   stateOfBirth: "State of birth",
   niNumber: "SSN (last 4)",
   i9Doc: "Completed Form I-9",
+  i9: "Form I-9 (Section 1)",
   ssnCardDoc: "Social Security card",
   idDocType: "Photo ID type",
   idDoc: "Photo ID",
@@ -442,6 +448,80 @@ const APPLICATION_FIELD_LABELS: Record<string, string> = {
 };
 
 type ApplicationFieldError = { field: string; message: string };
+
+// ---- Fillable I-9 Section 1 ----------------------------------------------
+// The zod schema (generated from openapi) enforces shape/enums/lengths; these
+// helpers enforce the *conditional* Form I-9 rules and build the stored jsonb.
+// i9Data holds work-authorization identifiers (A-Number / I-94 / passport
+// number) — sensitive PII: admin-only read surfaces, never logged.
+
+type I9Section1Input = NonNullable<zClassic.infer<typeof SubmitApplicationBody>["i9"]>;
+
+const hasText = (v: string | null | undefined): boolean =>
+  typeof v === "string" && v.trim().length > 0;
+
+function validateI9Section1(i9: I9Section1Input): ApplicationFieldError | null {
+  if (i9.attestation !== true) {
+    return { field: "i9", message: "Please check the attestation box to sign Form I-9 Section 1." };
+  }
+  if (!hasText(i9.signatureName)) {
+    return { field: "i9", message: "Please type your full legal name to sign Form I-9 Section 1." };
+  }
+  if (i9.citizenshipStatus === "permanent_resident" && !hasText(i9.uscisANumber)) {
+    return { field: "i9", message: "Lawful permanent residents must provide a USCIS / Alien Registration Number (A-Number)." };
+  }
+  if (i9.citizenshipStatus === "authorized_alien") {
+    const idCount = [hasText(i9.uscisANumber), hasText(i9.i94Number), hasText(i9.foreignPassportNumber)].filter(Boolean).length;
+    if (idCount === 0) {
+      return { field: "i9", message: "Please provide one of: USCIS / A-Number, Form I-94 admission number, or foreign passport number." };
+    }
+    if (idCount > 1) {
+      return { field: "i9", message: "Please provide only ONE of: USCIS / A-Number, Form I-94 admission number, or foreign passport number." };
+    }
+    if (hasText(i9.foreignPassportNumber) && !hasText(i9.foreignPassportCountry)) {
+      return { field: "i9", message: "Please provide the country of issuance for your foreign passport." };
+    }
+    if (hasText(i9.workAuthExpiration)) {
+      const t = i9.workAuthExpiration!.trim();
+      // Shape check plus a UTC round-trip so impossible dates (e.g. 2026-99-99) are rejected.
+      const roundTrips = /^\d{4}-\d{2}-\d{2}$/.test(t) && new Date(`${t}T00:00:00Z`).toISOString().slice(0, 10) === t;
+      if (!roundTrips) {
+        return { field: "i9", message: "Work-authorization expiration date must be a valid date (YYYY-MM-DD)." };
+      }
+    }
+  }
+  if (i9.usedPreparer === true && !hasText(i9.preparerName)) {
+    return { field: "i9", message: "Please provide the name of the preparer or translator who assisted you." };
+  }
+  return null;
+}
+
+/**
+ * Normalize the validated I-9 Section 1 into the stored jsonb shape: trims
+ * strings, nulls out fields that don't apply to the attested status (so a
+ * status switch mid-form can't leak stale identifiers into storage), and
+ * stamps the server-side signedDate as the business-timezone calendar date.
+ */
+function buildStoredI9(i9: I9Section1Input): Record<string, unknown> {
+  const s = (v: string | null | undefined) => (hasText(v) ? v!.trim() : null);
+  const isLpr = i9.citizenshipStatus === "permanent_resident";
+  const isAlien = i9.citizenshipStatus === "authorized_alien";
+  const usedPreparer = i9.usedPreparer === true;
+  return {
+    otherLastNames: s(i9.otherLastNames),
+    citizenshipStatus: i9.citizenshipStatus,
+    uscisANumber: isLpr || isAlien ? s(i9.uscisANumber) : null,
+    i94Number: isAlien ? s(i9.i94Number) : null,
+    foreignPassportNumber: isAlien ? s(i9.foreignPassportNumber) : null,
+    foreignPassportCountry: isAlien ? s(i9.foreignPassportCountry) : null,
+    workAuthExpiration: isAlien ? s(i9.workAuthExpiration) : null,
+    usedPreparer,
+    preparerName: usedPreparer ? s(i9.preparerName) : null,
+    attestation: true,
+    signatureName: s(i9.signatureName),
+    signedDate: businessDateIso(new Date(), businessTimeZone()),
+  };
+}
 
 /**
  * Map a Zod issue path (e.g. ["references", 0, "phone"]) to the form field
@@ -575,7 +655,7 @@ router.post("/applications", publicApplicationLimiter, async (req, res): Promise
       case "cityOfBirth": return !!d.cityOfBirth?.trim();
       case "stateOfBirth": return !!d.stateOfBirth?.trim();
       case "niNumber": return !!d.niNumber?.trim();
-      case "i9Doc": return !!d.i9Doc?.objectPath;
+      case "i9": return !!d.i9;
       case "ssnCardDoc": return !!d.ssnCardDoc?.objectPath;
       case "idDocType": return !!d.idDocType;
       case "idDoc": return !!d.idDoc?.objectPath;
@@ -597,6 +677,17 @@ router.post("/applications", publicApplicationLimiter, async (req, res): Promise
     if (!fieldPresent(f.key)) {
       const message = `${f.label} is required.`;
       sendApplicationValidationError(res, [{ field: f.key, message }], message);
+      return;
+    }
+  }
+  // Conditional completeness for the fillable I-9 Section 1. Presence/
+  // required-ness is handled by the loop above; this enforces the per-status
+  // rules (LPR needs an A-Number; an authorized noncitizen needs exactly one
+  // work-authorization identifier) whenever an I-9 was actually supplied.
+  if (!isFieldHidden("i9") && d.i9) {
+    const i9Err = validateI9Section1(d.i9);
+    if (i9Err) {
+      sendApplicationValidationError(res, [i9Err], i9Err.message);
       return;
     }
   }
@@ -648,7 +739,10 @@ router.post("/applications", publicApplicationLimiter, async (req, res): Promise
       niNumber: isFieldHidden("niNumber") ? null : (d.niNumber ?? null),
       rightToWorkStatus: d.rightToWorkStatus ?? null,
       rightToWorkDocKey: d.rightToWorkDoc?.objectPath ?? null,
-      i9DocKey: isFieldHidden("i9Doc") ? null : (d.i9Doc?.objectPath ?? null),
+      // Legacy scanned-form upload — only reachable from stale clients /
+      // in-flight drafts now that the wizard renders the fillable Section 1.
+      i9DocKey: d.i9Doc?.objectPath ?? null,
+      i9Data: isFieldHidden("i9") ? null : (d.i9 ? buildStoredI9(d.i9) : null),
       ssnCardDocKey: isFieldHidden("ssnCardDoc") ? null : (d.ssnCardDoc?.objectPath ?? null),
       idDocType: isFieldHidden("idDocType") ? null : (d.idDocType ?? null),
       idDocKey: isFieldHidden("idDoc") ? null : (d.idDoc?.objectPath ?? null),

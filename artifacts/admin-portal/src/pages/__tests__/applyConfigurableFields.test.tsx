@@ -140,11 +140,11 @@ describe("Apply wizard — hidden field settings", () => {
     await fillCoreFields();
     clickContinue(); // -> step 1 (I-9 & Identity)
 
-    // Section 1 has no visible fields, so the I-9 explainer / download link
-    // must not render.
+    // Section 1 has no visible fields, so the fillable I-9 Section 1 form
+    // (attestation + signature) must not render.
     await waitFor(() => expect(screen.getByText(/I-9 Employment Eligibility/i)).toBeTruthy());
-    expect(screen.queryByText(/Download blank Form I-9/i)).toBeNull();
-    expect(screen.queryByLabelText(/Completed Form I-9/i)).toBeNull();
+    expect(screen.queryByText(/I attest, under penalty of perjury/i)).toBeNull();
+    expect(screen.queryByLabelText(/Signature — type your full legal name/i)).toBeNull();
   });
 });
 
@@ -194,7 +194,7 @@ describe("Apply wizard — submitted payload", () => {
     expect("dateOfBirth" in body).toBe(false);
     expect("idDocType" in body).toBe(false); // enum-like field
     expect("siaLicenseLevel" in body).toBe(false); // numeric field
-    expect("i9Doc" in body).toBe(false); // file field
+    expect("i9" in body).toBe(false); // structured object field
     expect("references" in body).toBe(false);
 
     // No custom questions configured -> empty custom answers list.

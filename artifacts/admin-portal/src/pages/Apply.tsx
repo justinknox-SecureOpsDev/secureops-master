@@ -35,11 +35,40 @@ type Day = (typeof DAYS)[number];
 type Period = (typeof PERIODS)[number];
 
 type Reference = { name: string; relationship: string; phone: string; email: string };
+
+// Fillable Form I-9 Section 1 (replaces the old download/print/upload flow).
+type I9Status = "citizen" | "noncitizen_national" | "permanent_resident" | "authorized_alien";
+type I9Form = {
+  otherLastNames: string;
+  citizenshipStatus: "" | I9Status;
+  uscisANumber: string;
+  i94Number: string;
+  foreignPassportNumber: string;
+  foreignPassportCountry: string;
+  workAuthExpiration: string;
+  usedPreparer: boolean;
+  preparerName: string;
+  attestation: boolean;
+  signatureName: string;
+};
+const EMPTY_I9: I9Form = {
+  otherLastNames: "", citizenshipStatus: "", uscisANumber: "", i94Number: "",
+  foreignPassportNumber: "", foreignPassportCountry: "", workAuthExpiration: "",
+  usedPreparer: false, preparerName: "", attestation: false, signatureName: "",
+};
+// Wording mirrors the checkboxes on the official Form I-9 (Rev. 08/01/23).
+const I9_STATUS_OPTIONS: ReadonlyArray<{ value: I9Status; label: string }> = [
+  { value: "citizen", label: "A citizen of the United States" },
+  { value: "noncitizen_national", label: "A noncitizen national of the United States" },
+  { value: "permanent_resident", label: "A lawful permanent resident" },
+  { value: "authorized_alien", label: "A noncitizen otherwise authorized to work" },
+];
+
 type Form = {
   firstName: string; lastName: string; email: string; phone: string;
   address: string; city: string; state: string; zip: string;
   dateOfBirth: string; cityOfBirth: string; stateOfBirth: string; niNumber: string;
-  i9Doc: UploadedFile | null;
+  i9: I9Form;
   ssnCardDoc: UploadedFile | null;
   idDocType: "" | "drivers_license" | "passport";
   idDoc: UploadedFile | null;
@@ -99,7 +128,7 @@ const CLIENT_FIELD_DEFS: Array<{ key: string; section: number; defaultLabel: str
   { key: "niNumber", section: 0, defaultLabel: "SSN (last 4)", defaultHelp: null, defaultRequired: true, locked: false },
   { key: "cityOfBirth", section: 0, defaultLabel: "City of birth", defaultHelp: null, defaultRequired: true, locked: false },
   { key: "stateOfBirth", section: 0, defaultLabel: "State / county of birth", defaultHelp: null, defaultRequired: true, locked: false },
-  { key: "i9Doc", section: 1, defaultLabel: "Completed Form I-9 (PDF or photos of all pages)", defaultHelp: null, defaultRequired: true, locked: false },
+  { key: "i9", section: 1, defaultLabel: "Form I-9 — Employment Eligibility (Section 1)", defaultHelp: null, defaultRequired: true, locked: false },
   { key: "ssnCardDoc", section: 1, defaultLabel: "Social Security card (photo of front)", defaultHelp: null, defaultRequired: true, locked: false },
   { key: "idDocType", section: 1, defaultLabel: "Photo ID type", defaultHelp: null, defaultRequired: true, locked: false },
   { key: "idDoc", section: 1, defaultLabel: "Photo ID", defaultHelp: null, defaultRequired: true, locked: false },
@@ -131,8 +160,6 @@ const CLIENT_DEFAULTS_BY_KEY = new Map(CLIENT_DEFAULT_FIELDS.map((f) => [f.key, 
 // Base wizard steps; an "Additional questions" step is spliced in before
 // "Review" at runtime when the admin has defined custom questions.
 const BASE_STEPS = ["Personal", "I-9 & Identity", "TX License & experience", "References & docs", "Availability"];
-
-const I9_FORM_URL = "https://www.uscis.gov/sites/default/files/document/forms/i-9.pdf";
 
 // US states + DC as { code, name } for the State dropdown. A constrained
 // select (rather than a free-text input) guarantees a valid 2-letter code
@@ -173,7 +200,7 @@ const FIELD_TO_STEP: Record<string, number> = {
   firstName: 0, lastName: 0, email: 0, phone: 0,
   address: 0, city: 0, state: 0, zip: 0,
   dateOfBirth: 0, cityOfBirth: 0, stateOfBirth: 0, niNumber: 0,
-  i9Doc: 1, ssnCardDoc: 1, idDocType: 1, idDoc: 1,
+  i9: 1, ssnCardDoc: 1, idDocType: 1, idDoc: 1,
   siaLicenseNumber: 2, siaLicenseLevel: 2, siaLicenseExpiry: 2,
   yearsExperience: 2, previousExperience: 2,
   photo: 3, cv: 3, trainingCertificates: 3,
@@ -194,7 +221,7 @@ const EMPTY_FORM: Form = {
   firstName: "", lastName: "", email: "", phone: "",
   address: "", city: "", state: "", zip: "",
   dateOfBirth: "", cityOfBirth: "", stateOfBirth: "", niNumber: "",
-  i9Doc: null, ssnCardDoc: null, idDocType: "", idDoc: null,
+  i9: { ...EMPTY_I9 }, ssnCardDoc: null, idDocType: "", idDoc: null,
   siaLicenseNumber: "", siaLicenseLevel: "", siaLicenseExpiry: "",
   previousExperience: "", yearsExperience: "",
   references: [
@@ -264,12 +291,34 @@ function hydrateForm(raw: unknown): Form {
     })
     .filter((x): x is { day: Day; period: Period } => x !== null);
   const idDocTypeRaw = str("idDocType");
+  // Fillable I-9 Section 1 — coerce each subfield; unknown status values
+  // (or the old i9Doc upload shape from a stale draft) fall back to empty.
+  const i9Raw = (d.i9 && typeof d.i9 === "object" && !Array.isArray(d.i9))
+    ? (d.i9 as Record<string, unknown>)
+    : {};
+  const i9Str = (k: string) => (typeof i9Raw[k] === "string" ? (i9Raw[k] as string) : "");
+  const i9StatusRaw = i9Str("citizenshipStatus");
+  const i9: I9Form = {
+    otherLastNames: i9Str("otherLastNames"),
+    citizenshipStatus: I9_STATUS_OPTIONS.some((o) => o.value === i9StatusRaw)
+      ? (i9StatusRaw as I9Status)
+      : "",
+    uscisANumber: i9Str("uscisANumber"),
+    i94Number: i9Str("i94Number"),
+    foreignPassportNumber: i9Str("foreignPassportNumber"),
+    foreignPassportCountry: i9Str("foreignPassportCountry"),
+    workAuthExpiration: i9Str("workAuthExpiration"),
+    usedPreparer: i9Raw.usedPreparer === true,
+    preparerName: i9Str("preparerName"),
+    attestation: i9Raw.attestation === true,
+    signatureName: i9Str("signatureName"),
+  };
   return {
     firstName: str("firstName"), lastName: str("lastName"), email: str("email"), phone: str("phone"),
     address: str("address"), city: str("city"), state: str("state"), zip: str("zip"),
     dateOfBirth: str("dateOfBirth"), cityOfBirth: str("cityOfBirth"), stateOfBirth: str("stateOfBirth"),
     niNumber: str("niNumber"),
-    i9Doc: file("i9Doc"), ssnCardDoc: file("ssnCardDoc"),
+    i9, ssnCardDoc: file("ssnCardDoc"),
     idDocType: (idDocTypeRaw === "drivers_license" || idDocTypeRaw === "passport") ? idDocTypeRaw : "",
     idDoc: file("idDoc"),
     siaLicenseNumber: str("siaLicenseNumber"),
@@ -426,6 +475,9 @@ export function ApplyPage() {
   function set<K extends keyof Form>(k: K, v: Form[K]) {
     setForm((f) => ({ ...f, [k]: v }));
   }
+  function setI9<K extends keyof I9Form>(k: K, v: I9Form[K]) {
+    setForm((f) => ({ ...f, i9: { ...f.i9, [k]: v } }));
+  }
   function setCustom(qid: string, v: unknown) {
     setForm((f) => ({ ...f, customAnswers: { ...f.customAnswers, [qid]: v } }));
   }
@@ -470,7 +522,35 @@ export function ApplyPage() {
       if (isReq("stateOfBirth") && !form.stateOfBirth.trim()) return { field: "stateOfBirth", message: `${labelOf("stateOfBirth")} is required.` };
     }
     if (stepIndex === 1) {
-      if (isReq("i9Doc") && !form.i9Doc) return { field: "i9Doc", message: "Please upload your completed Form I-9." };
+      if (visibleField("i9")) {
+        const i9 = form.i9;
+        // Validate when the field is required OR the applicant started
+        // filling it in (a partially completed optional I-9 is worse than none).
+        const touched = !!(
+          i9.citizenshipStatus || i9.attestation || i9.signatureName.trim() ||
+          i9.otherLastNames.trim() || i9.uscisANumber.trim() || i9.i94Number.trim() ||
+          i9.foreignPassportNumber.trim() || i9.usedPreparer
+        );
+        if (isReq("i9") || touched) {
+          if (!i9.citizenshipStatus) return { field: "i9", message: "Please select your citizenship or immigration status on the I-9." };
+          if (i9.citizenshipStatus === "permanent_resident" && !i9.uscisANumber.trim()) {
+            return { field: "i9", message: "Please enter your USCIS or Alien Registration Number (A-Number)." };
+          }
+          if (i9.citizenshipStatus === "authorized_alien") {
+            const ids = [i9.uscisANumber.trim(), i9.i94Number.trim(), i9.foreignPassportNumber.trim()].filter(Boolean).length;
+            if (ids === 0) return { field: "i9", message: "Please provide one of: USCIS / A-Number, Form I-94 admission number, or foreign passport number." };
+            if (ids > 1) return { field: "i9", message: "Please provide only ONE of: USCIS / A-Number, Form I-94 admission number, or foreign passport number." };
+            if (i9.foreignPassportNumber.trim() && !i9.foreignPassportCountry.trim()) {
+              return { field: "i9", message: "Please enter the country of issuance for your foreign passport." };
+            }
+          }
+          if (i9.usedPreparer && !i9.preparerName.trim()) {
+            return { field: "i9", message: "Please enter the name of the preparer or translator who assisted you." };
+          }
+          if (!i9.attestation) return { field: "i9", message: "Please check the attestation box to sign Form I-9 Section 1." };
+          if (!i9.signatureName.trim()) return { field: "i9", message: "Please type your full legal name as your electronic signature on the I-9." };
+        }
+      }
       if (isReq("ssnCardDoc") && !form.ssnCardDoc) return { field: "ssnCardDoc", message: "Please upload a photo of your Social Security card." };
       if (isReq("idDocType") && !form.idDocType) return { field: "idDocType", message: "Please select your photo ID type (driver's license or passport)." };
       if (isReq("idDoc") && !form.idDoc) return { field: "idDoc", message: "Please upload a photo of your driver's license or passport." };
@@ -609,7 +689,30 @@ export function ApplyPage() {
       putStr("cityOfBirth", form.cityOfBirth);
       putStr("stateOfBirth", form.stateOfBirth);
       putStr("niNumber", form.niNumber);
-      putFile("i9Doc", form.i9Doc);
+      // Fillable I-9 Section 1: only send a complete, attested form (validation
+      // above guarantees this when required). Blank optional subfields are
+      // omitted — the generated Zod shapes are optional(), not nullish().
+      if (visibleField("i9") && form.i9.attestation && form.i9.citizenshipStatus && form.i9.signatureName.trim()) {
+        const i9 = form.i9;
+        const isLpr = i9.citizenshipStatus === "permanent_resident";
+        const isAlien = i9.citizenshipStatus === "authorized_alien";
+        const i9Body: Record<string, unknown> = {
+          citizenshipStatus: i9.citizenshipStatus,
+          attestation: true,
+          signatureName: i9.signatureName.trim(),
+          usedPreparer: i9.usedPreparer,
+        };
+        if (i9.otherLastNames.trim()) i9Body.otherLastNames = i9.otherLastNames.trim();
+        if ((isLpr || isAlien) && i9.uscisANumber.trim()) i9Body.uscisANumber = i9.uscisANumber.trim();
+        if (isAlien && i9.i94Number.trim()) i9Body.i94Number = i9.i94Number.trim();
+        if (isAlien && i9.foreignPassportNumber.trim()) {
+          i9Body.foreignPassportNumber = i9.foreignPassportNumber.trim();
+          if (i9.foreignPassportCountry.trim()) i9Body.foreignPassportCountry = i9.foreignPassportCountry.trim();
+        }
+        if (isAlien && i9.workAuthExpiration.trim()) i9Body.workAuthExpiration = i9.workAuthExpiration.trim();
+        if (i9.usedPreparer && i9.preparerName.trim()) i9Body.preparerName = i9.preparerName.trim();
+        body.i9 = i9Body;
+      }
       putFile("ssnCardDoc", form.ssnCardDoc);
       if (visibleField("idDocType") && form.idDocType) body.idDocType = form.idDocType;
       putFile("idDoc", form.idDoc);
@@ -762,13 +865,153 @@ export function ApplyPage() {
         return { width: "half", node: <Field label={label} help={help} required={req} name="cityOfBirth" error={fieldErrors}><Input value={form.cityOfBirth} onChange={(e) => set("cityOfBirth", e.target.value)} /></Field> };
       case "stateOfBirth":
         return { width: "half", node: <Field label={label} help={help} required={req} name="stateOfBirth" error={fieldErrors}><Input value={form.stateOfBirth} onChange={(e) => set("stateOfBirth", e.target.value)} /></Field> };
-      case "i9Doc":
+      case "i9": {
+        const i9 = form.i9;
+        const i9Err = errOnStep("i9");
+        const isLpr = i9.citizenshipStatus === "permanent_resident";
+        const isAlien = i9.citizenshipStatus === "authorized_alien";
         return { width: "full", node: (
-          <div className="space-y-1">
-            <FileUploadField label={label} required={req} accept="image/*,.pdf" value={form.i9Doc} onChange={(v) => set("i9Doc", v)} uploadFn={uploadFileAnon} error={errOnStep("i9Doc")} />
-            {fileHelp("i9Doc")}
+          <div className="space-y-4 border rounded-lg p-4 bg-muted/20">
+            <div>
+              <h3 className="font-semibold text-sm">
+                {label}
+                {req && (
+                  <>
+                    <span className="text-destructive ml-0.5" aria-hidden="true">*</span>
+                    <span className="sr-only"> (required)</span>
+                  </>
+                )}
+              </h3>
+              <p className="text-xs text-muted-foreground mt-1">
+                {help?.trim()
+                  ? help.trim()
+                  : "Complete Section 1 of Form I-9 (Employment Eligibility Verification) below — no download or printing needed. Our HR team completes Section 2 with you on or before your first day of work."}
+              </p>
+            </div>
+            <Field label="Other last names used (if any)" name="i9-otherLastNames">
+              <Input value={i9.otherLastNames} onChange={(e) => setI9("otherLastNames", e.target.value)} autoComplete="off" maxLength={200} />
+            </Field>
+            <fieldset className="space-y-2">
+              <legend className="text-xs uppercase font-semibold text-foreground/80">
+                I attest, under penalty of perjury, that I am (check one)
+                {req && (
+                  <>
+                    <span className="text-destructive ml-0.5" aria-hidden="true">*</span>
+                    <span className="sr-only"> (required)</span>
+                  </>
+                )}
+              </legend>
+              {I9_STATUS_OPTIONS.map((opt) => (
+                <label key={opt.value} className="flex items-start gap-2 text-sm cursor-pointer">
+                  <input
+                    type="radio"
+                    name="i9-citizenshipStatus"
+                    className="mt-0.5"
+                    checked={i9.citizenshipStatus === opt.value}
+                    onChange={() => setI9("citizenshipStatus", opt.value)}
+                  />
+                  <span>{opt.label}</span>
+                </label>
+              ))}
+            </fieldset>
+            {isLpr && (
+              <Field label="USCIS or Alien Registration Number (A-Number)" required name="i9-uscisANumber">
+                <Input value={i9.uscisANumber} onChange={(e) => setI9("uscisANumber", e.target.value)} autoComplete="off" maxLength={20} />
+              </Field>
+            )}
+            {isAlien && (
+              <div className="space-y-3 border-l-2 border-border pl-3">
+                <p className="text-xs text-muted-foreground">
+                  Provide <strong>one</strong> of the following three identifiers.
+                </p>
+                <Two>
+                  <Field label="USCIS / A-Number" name="i9-uscisANumber">
+                    <Input value={i9.uscisANumber} onChange={(e) => setI9("uscisANumber", e.target.value)} autoComplete="off" maxLength={20} />
+                  </Field>
+                  <Field label="Form I-94 admission number" name="i9-i94Number">
+                    <Input value={i9.i94Number} onChange={(e) => setI9("i94Number", e.target.value)} autoComplete="off" maxLength={20} />
+                  </Field>
+                </Two>
+                <Two>
+                  <Field label="Foreign passport number" name="i9-foreignPassportNumber">
+                    <Input value={i9.foreignPassportNumber} onChange={(e) => setI9("foreignPassportNumber", e.target.value)} autoComplete="off" maxLength={40} />
+                  </Field>
+                  <Field label="Country of issuance" required={!!i9.foreignPassportNumber.trim()} name="i9-foreignPassportCountry">
+                    <Input value={i9.foreignPassportCountry} onChange={(e) => setI9("foreignPassportCountry", e.target.value)} autoComplete="off" maxLength={60} />
+                  </Field>
+                </Two>
+                <Field label="Work authorization expiration date" help="Leave blank if your authorization does not expire (N/A)." name="i9-workAuthExpiration">
+                  <Input type="date" value={i9.workAuthExpiration} onChange={(e) => setI9("workAuthExpiration", e.target.value)} />
+                </Field>
+              </div>
+            )}
+            <fieldset className="space-y-2">
+              <legend className="text-xs uppercase font-semibold text-foreground/80">
+                Preparer and/or translator
+              </legend>
+              <label className="flex items-start gap-2 text-sm cursor-pointer">
+                <input
+                  type="radio"
+                  name="i9-usedPreparer"
+                  className="mt-0.5"
+                  checked={!i9.usedPreparer}
+                  onChange={() => setI9("usedPreparer", false)}
+                />
+                <span>I did not use a preparer or translator</span>
+              </label>
+              <label className="flex items-start gap-2 text-sm cursor-pointer">
+                <input
+                  type="radio"
+                  name="i9-usedPreparer"
+                  className="mt-0.5"
+                  checked={i9.usedPreparer}
+                  onChange={() => setI9("usedPreparer", true)}
+                />
+                <span>A preparer and/or translator assisted me in completing Section 1</span>
+              </label>
+            </fieldset>
+            {i9.usedPreparer && (
+              <Field label="Preparer / translator full name" required name="i9-preparerName">
+                <Input value={i9.preparerName} onChange={(e) => setI9("preparerName", e.target.value)} autoComplete="off" maxLength={200} />
+              </Field>
+            )}
+            <div className="p-3 border rounded bg-amber-50 space-y-3">
+              <p className="text-xs text-amber-900">
+                I am aware that federal law provides for imprisonment and/or fines for false statements,
+                or the use of false documents, in connection with the completion of this form. I attest,
+                under penalty of perjury, that this information, including my selection of the box
+                attesting to my citizenship or immigration status, is true and correct.
+              </p>
+              <label className="flex items-start gap-2 text-sm font-medium text-amber-950 cursor-pointer">
+                <input
+                  type="checkbox"
+                  className="mt-0.5"
+                  checked={i9.attestation}
+                  onChange={(e) => setI9("attestation", e.target.checked)}
+                />
+                <span>
+                  I have read and agree to the attestation above
+                  {req && (
+                    <>
+                      <span className="text-destructive ml-0.5" aria-hidden="true">*</span>
+                      <span className="sr-only"> (required)</span>
+                    </>
+                  )}
+                </span>
+              </label>
+              <Field
+                label="Signature — type your full legal name"
+                required={req}
+                name="i9-signatureName"
+                help="Typing your name here acts as your electronic signature and is recorded with today's date."
+              >
+                <Input value={i9.signatureName} onChange={(e) => setI9("signatureName", e.target.value)} autoComplete="name" maxLength={200} />
+              </Field>
+            </div>
+            {i9Err && <div role="alert" className="text-xs text-destructive">{i9Err}</div>}
           </div>
         ) };
+      }
       case "ssnCardDoc":
         return { width: "full", node: (
           <div className="space-y-1">
@@ -975,23 +1218,10 @@ export function ApplyPage() {
                 <>
                   <p className="text-sm text-muted-foreground">
                     Federal law requires every new hire to complete a Form I-9 and present
-                    identity + work-authorization documents. Download the blank form, fill in
-                    Section 1, sign it, and upload it below — plus a photo of your Social
+                    identity + work-authorization documents. Fill in Section 1 right here —
+                    no download or printing needed — then add a photo of your Social
                     Security card and either your driver's license or passport.
                   </p>
-                  <div className="p-3 border rounded bg-amber-50 text-sm">
-                    <a
-                      href={I9_FORM_URL}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="font-semibold underline text-amber-900"
-                    >
-                      Download blank Form I-9 (USCIS, opens in a new tab)
-                    </a>
-                    <div className="text-xs text-amber-900/80 mt-1">
-                      Print, complete Section 1, sign and date, then scan or photograph all pages.
-                    </div>
-                  </div>
                 </>
               )}
               {renderSection(1)}
@@ -1045,7 +1275,7 @@ export function ApplyPage() {
                 <Sum k="Phone" v={form.phone} />
                 <Sum k="DOB" v={form.dateOfBirth || "—"} />
                 <Sum k="SSN (last 4)" v={form.niNumber || "—"} />
-                <Sum k="I-9 form" v={form.i9Doc ? form.i9Doc.name : "—"} />
+                <Sum k="I-9 Section 1" v={form.i9.attestation && form.i9.signatureName.trim() ? `Signed by ${form.i9.signatureName.trim()}` : "—"} />
                 <Sum k="SSN card" v={form.ssnCardDoc ? form.ssnCardDoc.name : "—"} />
                 <Sum k="Photo ID" v={form.idDoc ? `${form.idDocType === "passport" ? "Passport" : "DL"}: ${form.idDoc.name}` : "—"} />
                 <Sum k="TX license" v={form.siaLicenseNumber ? `${form.siaLicenseNumber} (L${form.siaLicenseLevel || "?"})` : "—"} />

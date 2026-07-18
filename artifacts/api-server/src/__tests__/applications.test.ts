@@ -68,7 +68,7 @@ function buildApplicationBody(suffix: string) {
     cityOfBirth: "Dallas",
     stateOfBirth: "TX",
     niNumber: "123-45-6789",
-    i9Doc: { name: "i9.pdf", objectPath: `/objects/uploads/${randomUUID()}` },
+    i9: { citizenshipStatus: "citizen" as const, usedPreparer: false, attestation: true, signatureName: `Jane ${TAG}` },
     ssnCardDoc: { name: "ssn.pdf", objectPath: `/objects/uploads/${randomUUID()}` },
     idDocType: "drivers_license" as const,
     idDoc: { name: "id.pdf", objectPath: `/objects/uploads/${randomUUID()}` },

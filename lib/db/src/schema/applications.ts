@@ -27,6 +27,13 @@ export const applicationsTable = pgTable("applications", {
   // idDocType  = "drivers_license" | "passport"
   // idDocKey   = photo / scan of the chosen ID
   i9DocKey: text("i9_doc_key"),
+  // In-app fillable Form I-9 Section 1 (replaces the i9DocKey upload for new
+  // applications): { otherLastNames?, citizenshipStatus, uscisANumber?,
+  // i94Number?, foreignPassportNumber?, foreignPassportCountry?,
+  // workAuthExpiration?, usedPreparer?, preparerName?, attestation,
+  // signatureName, signedDate }. Contains work-authorization identifiers
+  // (A-Number / I-94 / passport number) — sensitive PII, admin-only surfaces.
+  i9Data: jsonb("i9_data"),
   ssnCardDocKey: text("ssn_card_doc_key"),
   idDocType: text("id_doc_type"),
   idDocKey: text("id_doc_key"),
