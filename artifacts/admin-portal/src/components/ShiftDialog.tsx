@@ -19,7 +19,7 @@ type SiteRate = {
   licenseLevel: number;
   payRate: string;
   billRate: string;
-  label: string;
+  label: string | null;
 };
 
 type ShiftInitial = {
@@ -34,7 +34,6 @@ type ShiftInitial = {
   headcount?: number;
   notes?: string | null;
   siteRateId?: string | null;
-  shiftType?: string | null;
 };
 
 type Props = {
@@ -53,7 +52,7 @@ function toLocalInput(iso: string | undefined | null): string {
   return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
 }
 
-function levelLabel(level: number, customLabel: string): string {
+function levelLabel(level: number, customLabel: string | null): string {
   const base = level <= 1 ? "Support (no licence)" : level === 4 ? "L4 / PPO" : level === 3 ? "L3 Armed" : "L2 Unarmed";
   return customLabel ? `${base} — ${customLabel}` : base;
 }
@@ -72,7 +71,6 @@ export function ShiftDialog({ open, onOpenChange, initial, onSaved }: Props) {
   const [billRate, setBillRate] = useState<string>("0");
   const [siteRateId, setSiteRateId] = useState<string | null>(null);
   const [notes, setNotes] = useState("");
-  const [shiftType, setShiftType] = useState<string>("standard");
   const [submitting, setSubmitting] = useState(false);
   const [err, setErr] = useState<string | null>(null);
 
@@ -92,7 +90,6 @@ export function ShiftDialog({ open, onOpenChange, initial, onSaved }: Props) {
     setBillRate(initial?.billRate != null ? String(initial.billRate) : "0");
     setSiteRateId(initial?.siteRateId ?? null);
     setNotes(initial?.notes ?? "");
-    setShiftType(initial?.shiftType ?? "standard");
     setErr(null);
   }, [open, initial]);
 
@@ -123,19 +120,16 @@ export function ShiftDialog({ open, onOpenChange, initial, onSaved }: Props) {
   // Auto-suggest the rate matching the currently selected license level
   // whenever the site's rate card finishes loading or the level changes —
   // but only if the admin hasn't already picked a rate manually.
-  // Auto-apply only when exactly one rate matches (unambiguous); when
-  // multiple labeled rates exist for the same level, leave it for the admin
-  // to pick from the card rather than silently picking the wrong one.
   useEffect(() => {
     if (!open) return;
     if (siteRateId) return; // already chosen, don't overwrite
     if (siteRates.length === 0) return;
-    const matches = siteRates.filter((r) => r.licenseLevel === requiredLicenseLevel);
-    if (matches.length !== 1) return;
-    const [match] = matches;
-    setPayRate(String(match.payRate));
-    setBillRate(String(match.billRate));
-    setSiteRateId(match.id);
+    const match = siteRates.find((r) => r.licenseLevel === requiredLicenseLevel);
+    if (match) {
+      setPayRate(String(match.payRate));
+      setBillRate(String(match.billRate));
+      setSiteRateId(match.id);
+    }
   }, [siteRates, requiredLicenseLevel, siteRateId, open]);
 
   const matchingRate = useMemo(
@@ -171,7 +165,6 @@ export function ShiftDialog({ open, onOpenChange, initial, onSaved }: Props) {
         headcount: Math.max(1, headcount | 0),
         notes: notes.trim() || null,
         siteRateId: siteRateId || null,
-        shiftType: shiftType === "ppo_detail" ? "ppo_detail" : "standard",
       };
       if (isEdit) {
         await api(`/shifts/${initial!.id}`, { method: "PUT", body: JSON.stringify(body) });
@@ -188,23 +181,21 @@ export function ShiftDialog({ open, onOpenChange, initial, onSaved }: Props) {
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-2xl flex flex-col p-0 gap-0 max-h-[90dvh] overflow-y-hidden">
-        <div className="shrink-0 px-4 pt-4 pb-2 sm:px-6 sm:pt-6">
-          <DialogHeader>
-            <DialogTitle>{isEdit ? "Edit shift" : "New shift"}</DialogTitle>
-            <DialogDescription>
-              Pay and bill rates default to this site's rate card for the chosen license level. Override any field below for a one-off shift.
-            </DialogDescription>
-          </DialogHeader>
-        </div>
-        <div className="flex-1 min-h-0 overflow-y-auto overscroll-contain px-4 sm:px-6">
+      <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
+        <DialogHeader>
+          <DialogTitle>{isEdit ? "Edit shift" : "New shift"}</DialogTitle>
+          <DialogDescription>
+            Pay and bill rates default to this site's rate card for the chosen license level. Override any field below for a one-off shift.
+          </DialogDescription>
+        </DialogHeader>
+
         <div className="space-y-4 py-2">
           <div>
             <Label htmlFor="shift-title">Title</Label>
             <Input id="shift-title" value={title} onChange={(e) => setTitle(e.target.value)} placeholder="e.g. Front Lobby — Overnight" />
           </div>
 
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+          <div className="grid grid-cols-2 gap-3">
             <div>
               <Label>Site</Label>
               <Select
@@ -231,10 +222,10 @@ export function ShiftDialog({ open, onOpenChange, initial, onSaved }: Props) {
                 onValueChange={(v) => {
                   const lvl = Number(v);
                   setRequiredLicenseLevel(lvl);
-                  // Auto-apply only when unambiguous; if multiple labeled rates
-                  // exist for this level, clear selection so the admin picks.
-                  const matches = siteRates.filter((r) => r.licenseLevel === lvl);
-                  if (matches.length === 1) applySiteRate(matches[0]);
+                  // Switch the selected site rate to the one matching the
+                  // new level, if the site has one configured.
+                  const match = siteRates.find((r) => r.licenseLevel === lvl);
+                  if (match) applySiteRate(match);
                   else setSiteRateId(null);
                 }}
               >
@@ -249,7 +240,7 @@ export function ShiftDialog({ open, onOpenChange, initial, onSaved }: Props) {
             </div>
           </div>
 
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+          <div className="grid grid-cols-2 gap-3">
             <div>
               <Label htmlFor="shift-start">Start time</Label>
               <Input id="shift-start" type="datetime-local" value={startTime} onChange={(e) => setStartTime(e.target.value)} />
@@ -321,7 +312,7 @@ export function ShiftDialog({ open, onOpenChange, initial, onSaved }: Props) {
             </div>
           )}
 
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+          <div className="grid grid-cols-2 gap-3">
             <div>
               <Label htmlFor="shift-pay">Pay rate ($/hr)</Label>
               <Input
@@ -371,23 +362,6 @@ export function ShiftDialog({ open, onOpenChange, initial, onSaved }: Props) {
           </div>
 
           <div>
-            <Label>Shift type</Label>
-            <Select value={shiftType} onValueChange={(v) => setShiftType(v)}>
-              <SelectTrigger><SelectValue /></SelectTrigger>
-              <SelectContent>
-                <SelectItem value="standard">Standard</SelectItem>
-                <SelectItem value="ppo_detail">PPO / Protection Detail</SelectItem>
-              </SelectContent>
-            </Select>
-            {shiftType === "ppo_detail" && (
-              <p className="mt-1 text-xs text-muted-foreground">
-                Build the executive-protection package (principals, threats, destinations) from the
-                shield button on this shift after saving.
-              </p>
-            )}
-          </div>
-
-          <div>
             <Label htmlFor="shift-notes">Notes</Label>
             <Textarea id="shift-notes" rows={3} value={notes} onChange={(e) => setNotes(e.target.value)} />
           </div>
@@ -398,15 +372,13 @@ export function ShiftDialog({ open, onOpenChange, initial, onSaved }: Props) {
             </div>
           )}
         </div>
-        </div>
-        <div className="shrink-0 px-4 pb-4 pt-2 sm:px-6 sm:pb-6">
-          <DialogFooter>
-            <Button variant="ghost" onClick={() => onOpenChange(false)} disabled={submitting}>Cancel</Button>
-            <Button onClick={submit} disabled={submitting}>
-              {submitting ? "Saving…" : isEdit ? "Save changes" : "Create shift"}
-            </Button>
-          </DialogFooter>
-        </div>
+
+        <DialogFooter>
+          <Button variant="ghost" onClick={() => onOpenChange(false)} disabled={submitting}>Cancel</Button>
+          <Button onClick={submit} disabled={submitting}>
+            {submitting ? "Saving…" : isEdit ? "Save changes" : "Create shift"}
+          </Button>
+        </DialogFooter>
       </DialogContent>
     </Dialog>
   );

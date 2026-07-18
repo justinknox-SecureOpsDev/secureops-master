@@ -117,39 +117,6 @@ function parseAdminTablesPath(path: string): { table: string | null; id: string 
   return { table: m[1] ?? null, id: m[2] ?? null };
 }
 
-// The protection-detail (PPO) PUT body contains principal/threat PII, photos,
-// and medical notes. Its path is classified `shifts.write` by ACTION_RULES, so
-// without special handling the raw body would be persisted to the audit log.
-// We match the exact path and store a counts-only summary instead — preserving
-// change-tracking signal without ever leaking the package contents.
-const PROTECTION_DETAIL_RE = /^\/shifts\/[^/]+\/protection-detail$/;
-
-function summarizeProtectionBody(body: unknown): unknown {
-  const b = (body ?? {}) as Record<string, unknown>;
-  const count = (v: unknown): number => (Array.isArray(v) ? v.length : 0);
-  const preplanKeys = [
-    "threatLevel",
-    "missionSummary",
-    "dressCode",
-    "armamentInstructions",
-    "communicationPlan",
-    "medicalNotes",
-    "emergencyRendezvous",
-    "vehicleDetails",
-    "specialInstructions",
-  ];
-  const preplanFieldsSet = preplanKeys.filter(
-    (k) => typeof b[k] === "string" && (b[k] as string).trim().length > 0,
-  ).length;
-  return {
-    _redacted: "protection-detail package — sensitive PII omitted from audit snapshot",
-    principals: count(b.principals),
-    threats: count(b.threats),
-    destinations: count(b.destinations),
-    preplanFieldsSet,
-  };
-}
-
 /** Express middleware. Place after `requireAdmin` / `requireAuth`. */
 export function auditLogMiddleware(req: Request, res: Response, next: NextFunction): void {
   const writeMethods = new Set(["POST", "PUT", "PATCH", "DELETE"]);
@@ -176,12 +143,7 @@ export function auditLogMiddleware(req: Request, res: Response, next: NextFuncti
     return;
   }
   const { table, id } = parseAdminTablesPath(routerPath);
-  // Never persist the raw protection-detail PII to the audit log — replace it
-  // with a counts-only summary. The handler also sets res.locals.auditMetadata
-  // with the same counts for structured filtering.
-  const bodySnapshot = PROTECTION_DETAIL_RE.test(routerPath)
-    ? summarizeProtectionBody(req.body)
-    : safeJson(req.body);
+  const bodySnapshot = safeJson(req.body);
   const ip = req.ip ?? null;
   const userAgent = req.headers["user-agent"] ?? null;
 

@@ -1,5 +1,5 @@
 import { and, eq, gte, sql } from "drizzle-orm";
-import { db, licensesTable, employeesTable, usersTable } from "@workspace/db";
+import { db, licensesTable, employeesTable } from "@workspace/db";
 
 /**
  * Eligibility / capability-level model.
@@ -10,81 +10,27 @@ import { db, licensesTable, employeesTable, usersTable } from "@workspace/db";
  *   3 = L3 Armed
  *   4 = L4 / PPO
  * Higher levels cover lower ones (an L4 officer can work an L2 or a support
- * shift).
- *
- * Unarmed work (level <= 2) is open to EVERY employee. Level 2 is the
- * eligibility floor (`BASE_ELIGIBILITY_LEVEL`), so any employee can both SEE
- * and ACCEPT level-1 and level-2 shifts regardless of whether they hold a
- * licence. Armed (3) and L4/PPO (4) shifts still require the officer to
- * actually hold an unexpired licence at that level or higher.
- *
- * The floor applies to WORKERS — users whose `role` is any internal staff
- * role (`employee`, `site_manager`, `dispatcher`, `admin`). Every level of
- * internal staff can work, claim, and be assigned shifts (company policy:
- * admins and dispatchers pick up posts too). The ONLY excluded role is the
- * external `client` (venue contact) account: clients are NOT shift-work
- * candidates, get no floor, and read as effective 0 — otherwise the floor
- * would silently let an outside client claim or be assigned to unarmed shifts
- * (the claim route is bare `requireAuth`, and manual/scheduler assignment
- * takes an arbitrary user id). Role — not the presence of an `employees`
- * row — is the canonical worker signal here (it is what every worker-scoped
- * query, e.g. dispatch assign-nearest, filters on).
- *
- * An employee's *effective* level is therefore:
- *   GREATEST(highest unexpired licence level, position baseline, BASE_ELIGIBILITY_LEVEL)
- * The position baseline (support_staff -> 1) is now subsumed by the level-2
- * floor but kept for clarity / future tuning.
- *
- * IMPORTANT: the effective level is an ELIGIBILITY figure, NOT a statement of
- * which licence an officer holds. A no-licence employee has an effective level
- * of 2 (they may take unarmed work) yet holds no licence. Surfaces that report
- * a *held* licence (officer profile, PDFs, the licence grid) must read the
- * licence rows directly — never this value.
+ * shift). An officer's *effective* level is the GREATER of their highest
+ * unexpired licence level and a baseline derived from their `position`:
+ *   - position 'support_staff' → baseline 1 (can work level-1 support shifts
+ *     even though they hold no licence)
+ *   - everyone else            → baseline 0 (must hold a licence to work)
  *
  * Note: `licenses.employee_id` and `employees.user_id` both reference
  * `users.id`, so every helper here is keyed on the user id.
  */
 
-/**
- * Minimum effective eligibility level for any employee. Unarmed work
- * (level <= 2) is open to all, so the effective level never drops below this.
- */
-export const BASE_ELIGIBILITY_LEVEL = 2;
-
 export function positionBaselineLevel(position: string | null | undefined): number {
   return position === "support_staff" ? 1 : 0;
 }
 
-/** Roles that represent shift workers (and so receive the level-2 floor). */
-export function isWorkerRole(role: string | null | undefined): boolean {
-  return role === "employee" || role === "site_manager" || role === "dispatcher" || role === "admin";
-}
-
 /**
- * The set of roles that represent shift workers, for use in `inArray` SQL
- * filters when targeting the worker pool (e.g. shift-available / vacancy
- * notification broadcasts). The SQL-level mirror of `isWorkerRole` — ALL
- * internal staff (employee, site manager, dispatcher, admin) are workers and
- * may work / claim / be assigned shifts.
- *
- * INVARIANT: this set must NEVER include `client`. `effectiveLevelSql` below
- * applies the level-2 floor unconditionally (no role gate in the SQL), so the
- * WORKER_ROLES pre-filter at every call site is the only thing keeping
- * external client accounts out of the worker pool.
- */
-export const WORKER_ROLES = ["employee", "site_manager", "dispatcher", "admin"] as const;
-
-/**
- * Highest effective capability level for a single user:
- * max(highest unexpired licence level, position baseline, BASE_ELIGIBILITY_LEVEL).
- * The BASE_ELIGIBILITY_LEVEL floor is applied ONLY when the user is a worker
- * (any internal staff role — employee / site_manager / dispatcher / admin), so
- * every staff member is eligible for unarmed (level <= 2) shifts while external
- * `client` accounts stay at their real level (0) and cannot claim / be
- * assigned to unarmed shifts.
+ * Highest effective capability level for a single officer:
+ * max(highest unexpired licence level, position baseline).
+ * Returns 0 for an officer with no licence and no support baseline.
  */
 export async function getEffectiveLevel(userId: string): Promise<number> {
-  const [licRows, empRows, userRows] = await Promise.all([
+  const [licRows, empRows] = await Promise.all([
     db
       .select({ level: licensesTable.level })
       .from(licensesTable)
@@ -97,28 +43,18 @@ export async function getEffectiveLevel(userId: string): Promise<number> {
       .from(employeesTable)
       .where(eq(employeesTable.userId, userId))
       .limit(1),
-    db
-      .select({ role: usersTable.role })
-      .from(usersTable)
-      .where(eq(usersTable.id, userId))
-      .limit(1),
   ]);
   let max = 0;
   for (const r of licRows) if (r.level != null && r.level > max) max = r.level;
-  // The level-2 floor is a WORKER benefit (all internal staff). An external
-  // client account is not a shift candidate, so it gets no floor.
-  const floor = isWorkerRole(userRows[0]?.role) ? BASE_ELIGIBILITY_LEVEL : 0;
-  return Math.max(max, positionBaselineLevel(empRows[0]?.position), floor);
+  return Math.max(max, positionBaselineLevel(empRows[0]?.position));
 }
 
 /**
  * SQL fragment computing the effective level inside a query that is grouped
  * by `users.id` and has BOTH `licensesTable` and `employeesTable` left-joined
  * onto the user (licenses.employee_id = users.id, employees.user_id = users.id).
- * Floored at BASE_ELIGIBILITY_LEVEL so unarmed work is open to every employee.
  */
 export const effectiveLevelSql = sql<number>`greatest(
   coalesce(max(${licensesTable.level}) filter (where ${licensesTable.expiryDate} >= current_date), 0),
-  coalesce(max(case when ${employeesTable.position} = 'support_staff' then 1 else 0 end), 0),
-  ${sql.raw(String(BASE_ELIGIBILITY_LEVEL))}
+  coalesce(max(case when ${employeesTable.position} = 'support_staff' then 1 else 0 end), 0)
 )`;

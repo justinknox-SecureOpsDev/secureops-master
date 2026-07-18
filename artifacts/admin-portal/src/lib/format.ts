@@ -1,71 +1,17 @@
 import type { Field } from "./tables";
 
-// WCSG operations run on Central time. All displayed dates/times use this
-// zone (matches the server's PAYROLL_TIMEZONE) so the schedule reads the
-// same regardless of where the viewer's browser is located.
-export const BUSINESS_TIME_ZONE = "America/Chicago";
-
-export function formatTime(date: Date | string, timeZone: string = BUSINESS_TIME_ZONE): string {
-  const d = typeof date === "string" ? new Date(date) : date;
-  if (Number.isNaN(d.getTime())) return String(date);
-  return new Intl.DateTimeFormat("en-GB", {
-    hour: "2-digit",
-    minute: "2-digit",
-    hour12: false,
-    timeZone,
-  }).format(d);
-}
-
-export function formatDateTime(date: Date | string, timeZone: string = BUSINESS_TIME_ZONE): string {
-  const d = typeof date === "string" ? new Date(date) : date;
-  if (Number.isNaN(d.getTime())) return String(date);
-  return new Intl.DateTimeFormat("en-GB", {
-    weekday: "short",
-    month: "short",
-    day: "numeric",
-    hour: "2-digit",
-    minute: "2-digit",
-    hour12: false,
-    timeZone,
-  }).format(d);
-}
-
-export function formatDate(
-  date: Date | string,
-  options: Intl.DateTimeFormatOptions = { month: "short", day: "numeric", year: "numeric" },
-  timeZone: string = BUSINESS_TIME_ZONE,
-): string {
-  const d = typeof date === "string" ? new Date(date) : date;
-  if (Number.isNaN(d.getTime())) return String(date);
-  return new Intl.DateTimeFormat("en-US", { ...options, timeZone }).format(d);
-}
-
-/** Calendar day ("YYYY-MM-DD") of an instant in the business timezone. */
-export function dateKey(date: Date | string, timeZone: string = BUSINESS_TIME_ZONE): string {
-  const d = typeof date === "string" ? new Date(date) : date;
-  if (Number.isNaN(d.getTime())) return String(date);
-  return new Intl.DateTimeFormat("en-CA", {
-    year: "numeric",
-    month: "2-digit",
-    day: "2-digit",
-    timeZone,
-  }).format(d);
-}
-
 export function formatCell(value: unknown, field: Field): string {
   if (value === null || value === undefined || value === "") return "—";
   switch (field.type) {
     case "datetime": {
       const d = new Date(String(value));
       if (Number.isNaN(d.getTime())) return String(value);
-      return formatDateTime(d);
+      return d.toLocaleString();
     }
     case "date": {
       const d = new Date(String(value));
       if (Number.isNaN(d.getTime())) return String(value);
-      // Date-only columns (e.g. "2026-07-11") parse as UTC midnight; format
-      // in UTC so the literal calendar date shows regardless of viewer tz.
-      return d.toLocaleDateString("en-US", { timeZone: "UTC" });
+      return d.toLocaleDateString();
     }
     case "boolean":
       return value ? "Yes" : "No";

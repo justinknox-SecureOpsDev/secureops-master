@@ -13,7 +13,6 @@ import {
   getGetEmployeeDashboardSummaryQueryKey,
 } from "@workspace/api-client-react";
 import * as Location from "expo-location";
-import { formatTime, formatDate, dateKey, addDaysToKey } from "@/utils/time";
 import { useQueryClient } from "@tanstack/react-query";
 import { Feather } from "@expo/vector-icons";
 import { LicenseLevelBadge, levelLabel } from "@/components/LicenseLevelBadge";
@@ -26,7 +25,7 @@ const FILTERS = ["available", "upcoming", "active", "completed"] as const;
 export default function EmployeeShiftsScreen() {
   const colors = useColors();
   const router = useRouter();
-  // Site managers keep the "no financial info" invariant even in the employee
+  // Site Managers keep the "no financial info" invariant even in the employee
   // experience: hide per-shift pay/earnings on their own My Shifts list.
   const { user } = useAuth();
   const isSiteManager = user?.role === "site_manager";
@@ -66,15 +65,10 @@ export default function EmployeeShiftsScreen() {
   // even without a licence; licensed officers keep their licence level.
   const myEffectiveLevel = myMaxLevel ?? (isSupportStaff ? 1 : null);
 
-  // view=worker: always ask for the personal worker feed (own assigned +
-  // qualifying open shifts). For employees this matches the default; for
-  // admins / dispatchers / site managers it swaps their global/management
-  // read for the same personal feed — every staff role can pick up shifts.
   const statusParam = filter === "available" ? "upcoming" : filter;
-  const shiftsParams = { status: statusParam as any, view: "worker" as const };
   const { data: allShifts, isLoading, error, refetch } = useGetShifts(
-    shiftsParams,
-    { query: { queryKey: getGetShiftsQueryKey(shiftsParams) } },
+    { status: statusParam as any },
+    { query: { queryKey: getGetShiftsQueryKey({ status: statusParam as any }) } },
   );
 
   const updateAssignment = useUpdateShiftAssignment();
@@ -121,16 +115,19 @@ export default function EmployeeShiftsScreen() {
       })
     : shiftsUnsorted;
 
-  // Day grouping uses the business timezone (America/Chicago), matching the
-  // Central-time dates rendered on each shift row.
-  const dayKey = (d: Date) => dateKey(d);
+  const dayKey = (d: Date) => {
+    const y = d.getFullYear();
+    const m = String(d.getMonth() + 1).padStart(2, "0");
+    const day = String(d.getDate()).padStart(2, "0");
+    return `${y}-${m}-${day}`;
+  };
   const dayLabel = (d: Date) => {
-    const todayKey = dateKey(new Date());
-    const tomorrowKey = addDaysToKey(todayKey, 1);
-    const k = dayKey(d);
-    if (k === todayKey) return "Today";
-    if (k === tomorrowKey) return "Tomorrow";
-    return formatDate(d, { weekday: "long", day: "numeric", month: "short" });
+    const today = new Date();
+    const tomorrow = new Date();
+    tomorrow.setDate(today.getDate() + 1);
+    if (dayKey(d) === dayKey(today)) return "Today";
+    if (dayKey(d) === dayKey(tomorrow)) return "Tomorrow";
+    return d.toLocaleDateString([], { weekday: "long", day: "numeric", month: "short" });
   };
 
   // Group shifts by day so the list reads as "Today / Tomorrow / <date>"
@@ -454,7 +451,7 @@ export default function EmployeeShiftsScreen() {
                 <View style={styles.detailRow}>
                   <Feather name="calendar" size={13} color={colors.mutedForeground} />
                   <Text style={[styles.detailText, { color: colors.foreground, fontWeight: "600" }]} numberOfLines={1}>
-                    {formatDate(start)} · {formatTime(start)} – {formatTime(item.endTime)}
+                    {start.toLocaleDateString([], { weekday: "short", day: "numeric", month: "short" })} · {start.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })} – {new Date(item.endTime).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
                   </Text>
                 </View>
 
@@ -526,23 +523,6 @@ export default function EmployeeShiftsScreen() {
                       <Text style={[styles.declineText, { color: colors.destructive }]}>Decline</Text>
                     </TouchableOpacity>
                   </View>
-                )}
-
-                {isAccepted && item.shiftType === "ppo_detail" && (
-                  <TouchableOpacity
-                    style={[styles.opsPlanBtn, { borderColor: colors.accent, backgroundColor: colors.accent + "12" }]}
-                    onPress={() => router.push({
-                      pathname: "/(employee)/ops-plan/[id]",
-                      params: { id: item.id, title: item.title, client: item.clientName },
-                    })}
-                    accessibilityRole="button"
-                    accessibilityLabel={`View protection ops plan for ${item.title} at ${item.clientName}`}
-                    accessibilityHint="Opens the protection package: principals, threats, itinerary and instructions"
-                  >
-                    <Feather name="shield" size={16} color={colors.accent} />
-                    <Text style={[styles.opsPlanText, { color: colors.accent }]}>View Protection Ops Plan</Text>
-                    <Feather name="chevron-right" size={16} color={colors.accent} style={{ marginLeft: "auto" }} />
-                  </TouchableOpacity>
                 )}
 
                 {isAccepted && myAssign && (() => {
@@ -682,6 +662,4 @@ const styles = StyleSheet.create({
   acceptText: { fontSize: 14, fontWeight: "700" },
   declineBtn: { flex: 1, flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 6, paddingVertical: 12, borderRadius: 8, borderWidth: 1.5 },
   declineText: { fontSize: 14, fontWeight: "700" },
-  opsPlanBtn: { flexDirection: "row", alignItems: "center", gap: 8, paddingVertical: 11, paddingHorizontal: 12, borderRadius: 8, borderWidth: 1.5 },
-  opsPlanText: { fontSize: 14, fontWeight: "700" },
 });

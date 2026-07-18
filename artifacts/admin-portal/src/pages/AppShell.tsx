@@ -6,15 +6,15 @@ import {
   AlertTriangle, ShieldCheck, Repeat, KeyRound, IdCard, Link2, Download,
   Radio as RadioIcon, Radar, MessageCircle, Users as UsersIcon,
   Briefcase, Calculator, Shield, Settings, CalendarRange, Menu, X, Building2,
-  ArrowLeftRight, GraduationCap, LifeBuoy, FormInput, BarChart3, LayoutDashboard,
-  SlidersHorizontal,
+  ArrowLeftRight, GraduationCap, LifeBuoy, FormInput, BarChart3,
   type LucideIcon,
 } from "lucide-react";
 import { useAuth } from "@/lib/auth";
 import { fetchWithAuth } from "@/lib/api";
+import { isFeatureEnabled, type FeatureKey } from "@/lib/brand";
 import { Button } from "@/components/ui/button";
 import { useChatUnreadTotal } from "@/hooks/useChatUnreadTotal";
-import { CustomizeTabsDialog } from "@/components/CustomizeTabsDialog";
+import { GlobalSearch } from "@/components/GlobalSearch";
 
 type SystemStatus = {
   env: string;
@@ -42,6 +42,20 @@ function useSystemStatus(role: string | undefined) {
     return () => { cancelled = true; };
   }, [role]);
   return status;
+}
+
+function useIsSuperAdmin(role: string | undefined) {
+  const [isSuperAdmin, setIsSuperAdmin] = useState(false);
+  useEffect(() => {
+    if (role !== "admin") return;
+    let cancelled = false;
+    fetchWithAuth("/api/admin/platform/me")
+      .then((r) => (r.ok ? r.json() : null))
+      .then((data) => { if (!cancelled && data) setIsSuperAdmin(!!data.isSuperAdmin); })
+      .catch(() => {});
+    return () => { cancelled = true; };
+  }, [role]);
+  return isSuperAdmin;
 }
 
 function SystemBanner({ status }: { status: SystemStatus | null }) {
@@ -90,7 +104,7 @@ function UnreadBadge({ count, className = "" }: { count: number; className?: str
   );
 }
 
-type LinkItem = { href: string; label: string; Icon: LucideIcon; badge?: string };
+type LinkItem = { href: string; label: string; Icon: LucideIcon; badge?: string; feature?: FeatureKey };
 type NavGroup = {
   key: string;
   label: string;
@@ -108,29 +122,24 @@ type NavGroup = {
  * those routes and make the dispatcher Security tab non-authoritative, because
  * `resolveGroupKey` returns the first group whose item matches the location.
  */
-export function buildNavGroups(isDispatcher: boolean): NavGroup[] {
-  // Admin-only landing dashboard. Listed first so `/` resolves here (exact
-  // match — "/" only prefix-matches itself, so it never shadows other routes).
-  const overviewGroup: NavGroup = {
-    key: "overview",
-    label: "Dashboard",
-    Icon: LayoutDashboard,
-    items: [{ href: "/", label: "Dashboard", Icon: LayoutDashboard }],
-  };
-
+export function buildNavGroups(
+  isDispatcher: boolean,
+  isSuperAdmin = false,
+  featureEnabled: (key: FeatureKey) => boolean = () => true,
+): NavGroup[] {
   const dispatchGroup: NavGroup = {
     key: "dispatch",
     label: "Dispatch",
     Icon: Radar,
     items: [
-      { href: "/dispatch", label: "Live Map", Icon: Radar },
-      { href: "/chat", label: "Chat", Icon: MessageCircle },
-      { href: "/radio", label: "Radio", Icon: RadioIcon },
+      { href: "/dispatch", label: "Live Map", Icon: Radar, feature: "liveMap" },
+      { href: "/chat", label: "Chat", Icon: MessageCircle, feature: "chat" },
+      { href: "/radio", label: "Radio", Icon: RadioIcon, feature: "radio" },
       { href: "/personnel", label: "Personnel", Icon: UsersIcon },
-      { href: "/tables/incidents", label: "Incidents", Icon: AlertTriangle },
-      { href: "/dar", label: "Daily Reports", Icon: ClipboardList },
-      { href: "/incidents/share-links", label: "Incident shares", Icon: Link2 },
-      { href: "/personnel/share-links", label: "Officer shares", Icon: Link2 },
+      { href: "/tables/incidents", label: "Incidents", Icon: AlertTriangle, feature: "incidents" },
+      { href: "/dar", label: "Daily Reports", Icon: ClipboardList, feature: "dar" },
+      { href: "/incidents/share-links", label: "Incident shares", Icon: Link2, feature: "incidents" },
+      { href: "/personnel/share-links", label: "Officer shares", Icon: Link2, feature: "officerShares" },
     ],
   };
 
@@ -143,7 +152,7 @@ export function buildNavGroups(isDispatcher: boolean): NavGroup[] {
       { href: "/tables/shifts", label: "Shifts", Icon: Database },
       { href: "/tables/shift_assignments", label: "Shift Assignments", Icon: ClipboardList },
       { href: "/tables/time_entries", label: "Time Entries", Icon: Database },
-      { href: "/swap-requests", label: "Swap Requests", Icon: Repeat },
+      { href: "/swap-requests", label: "Swap Requests", Icon: Repeat, feature: "swapRequests" },
       { href: "/staffing", label: "Events", Icon: CalendarRange },
       { href: "/hr/coverage-requests", label: "Coverage Requests", Icon: ClipboardList },
     ],
@@ -151,16 +160,15 @@ export function buildNavGroups(isDispatcher: boolean): NavGroup[] {
 
   const hrGroup: NavGroup = {
     key: "hr",
-    label: "Personnel Management",
+    label: "Human Resources",
     Icon: Briefcase,
     items: [
-      { href: "/hr/applications", label: "Applications", Icon: ClipboardList },
-      { href: "/hr/application-builder", label: "Application Builder", Icon: FormInput },
-      { href: "/hr/onboarding", label: "Onboarding", Icon: UserPlus },
-      { href: "/hr/invitations", label: "Invitations", Icon: MailPlus },
-      { href: "/hr/policies", label: "Policies", Icon: FileText },
+      { href: "/hr/applications", label: "Applications", Icon: ClipboardList, feature: "hr" },
+      { href: "/hr/application-builder", label: "Application Builder", Icon: FormInput, feature: "hr" },
+      { href: "/hr/onboarding", label: "Onboarding", Icon: UserPlus, feature: "hr" },
+      { href: "/hr/invitations", label: "Invitations", Icon: MailPlus, feature: "hr" },
+      { href: "/hr/policies", label: "Policies", Icon: FileText, feature: "policies" },
       { href: "/tables/employees", label: "Employees", Icon: UsersIcon },
-      { href: "/hr/reports", label: "Employee Reports", Icon: BarChart3 },
     ],
   };
 
@@ -169,10 +177,10 @@ export function buildNavGroups(isDispatcher: boolean): NavGroup[] {
     label: "Compliance & Training",
     Icon: ShieldCheck,
     items: [
-      { href: "/hr/license-renewals", label: "License Renewals", Icon: IdCard },
+      { href: "/hr/license-renewals", label: "License Renewals", Icon: IdCard, feature: "licenseRenewals" },
       { href: "/compliance", label: "Compliance", Icon: ShieldCheck },
       { href: "/tables/licenses", label: "Licences", Icon: IdCard },
-      { href: "/tables/training-certifications", label: "Training", Icon: GraduationCap },
+      { href: "/tables/training-certifications", label: "Training", Icon: GraduationCap, feature: "trainings" },
     ],
   };
 
@@ -181,6 +189,7 @@ export function buildNavGroups(isDispatcher: boolean): NavGroup[] {
     label: "Administration",
     Icon: Building2,
     items: [
+      { href: "/tables/sales_leads", label: "Sales Leads", Icon: MailPlus },
       { href: "/tables/clients", label: "Clients", Icon: Briefcase },
       { href: "/tables/sites", label: "Sites", Icon: Building2 },
       { href: "/hr/client-users", label: "Client Users", Icon: UsersIcon },
@@ -199,12 +208,12 @@ export function buildNavGroups(isDispatcher: boolean): NavGroup[] {
     Icon: Calculator,
     items: [
       { href: "/analytics", label: "Analytics", Icon: BarChart3 },
-      { href: "/payroll/board", label: "Payroll Board", Icon: Wallet },
-      { href: "/payroll/pay-run", label: "Pay Run", Icon: Banknote },
-      { href: "/invoices/board", label: "Invoice Board", Icon: Receipt },
-      { href: "/tables/invoices", label: "Invoices (raw)", Icon: Receipt },
-      { href: "/tables/payroll_entries", label: "Payroll entries", Icon: Wallet },
-      { href: "/tables/payment_discrepancies", label: "Payment Discrepancies", Icon: AlertTriangle },
+      { href: "/payroll/board", label: "Payroll Board", Icon: Wallet, feature: "payroll" },
+      { href: "/payroll/pay-run", label: "Pay Run", Icon: Banknote, feature: "payroll" },
+      { href: "/invoices/board", label: "Invoice Board", Icon: Receipt, feature: "invoicing" },
+      { href: "/tables/invoices", label: "Invoices (raw)", Icon: Receipt, feature: "invoicing" },
+      { href: "/tables/payroll_entries", label: "Payroll entries", Icon: Wallet, feature: "payroll" },
+      { href: "/tables/payment_discrepancies", label: "Payment Discrepancies", Icon: AlertTriangle, feature: "payroll" },
     ],
   };
 
@@ -213,31 +222,44 @@ export function buildNavGroups(isDispatcher: boolean): NavGroup[] {
     label: "Settings",
     Icon: Settings,
     items: [
-      { href: "/account/security", label: "My 2FA", Icon: KeyRound },
+      { href: "/account/security", label: "My Account", Icon: KeyRound },
       { href: "/tables/users", label: "Users", Icon: UsersIcon },
+      { href: "/settings/invite", label: "App Invite", Icon: Smartphone },
       { href: "/audit-log", label: "Audit Log", Icon: ShieldCheck },
       { href: "/recovery/shifts", label: "Shift Recovery", Icon: LifeBuoy },
       { href: "/exports", label: "Exports", Icon: Download },
       { href: "/settings/scheduler-integration", label: "Scheduler Integration", Icon: ArrowLeftRight },
+      { href: "/legal/agreements", label: "Legal & Agreements", Icon: FileText },
     ],
   };
 
+  // Drop any nav item whose feature the active plan doesn't include, then drop
+  // any group left empty. Items with no `feature` are always-on (auth, CRUD,
+  // dashboard, etc.) and never filtered.
+  const applyFeatures = (groups: NavGroup[]): NavGroup[] =>
+    groups
+      .map((g) => ({
+        ...g,
+        items: g.items.filter((it) => !it.feature || featureEnabled(it.feature)),
+      }))
+      .filter((g) => g.items.length > 0);
+
   if (isDispatcher) {
-    return [
+    return applyFeatures([
       {
         key: "dispatch",
         label: "Dispatch",
         Icon: Radar,
-        items: [{ href: "/dispatch", label: "Live Map", Icon: Radar }],
+        items: [{ href: "/dispatch", label: "Live Map", Icon: Radar, feature: "liveMap" }],
       },
       {
         key: "security",
         label: "Security",
         Icon: Shield,
         items: [
-          { href: "/chat", label: "Chat", Icon: MessageCircle },
+          { href: "/chat", label: "Chat", Icon: MessageCircle, feature: "chat" },
           { href: "/personnel", label: "Personnel", Icon: UsersIcon },
-          { href: "/radio", label: "Radio", Icon: RadioIcon },
+          { href: "/radio", label: "Radio", Icon: RadioIcon, feature: "radio" },
         ],
       },
       {
@@ -254,15 +276,21 @@ export function buildNavGroups(isDispatcher: boolean): NavGroup[] {
         label: "Settings",
         Icon: Settings,
         items: [
-          { href: "/account/security", label: "My 2FA", Icon: KeyRound },
+          { href: "/account/security", label: "My Account", Icon: KeyRound },
           { href: "/settings/scheduler-integration", label: "Scheduler Integration", Icon: ArrowLeftRight },
         ],
       },
-    ];
+    ]);
   }
 
-  return [
-    overviewGroup,
+  // Platform owner surface (feature flags + pricing tiers). Only the
+  // dedicated super-admin sees it; regular admins never do. Lives in Settings
+  // so the role-aligned 7-group IA is unchanged.
+  if (isSuperAdmin) {
+    settingsGroup.items.push({ href: "/platform/features", label: "Platform & Pricing", Icon: Shield });
+  }
+
+  return applyFeatures([
     dispatchGroup,
     staffingGroup,
     hrGroup,
@@ -270,31 +298,7 @@ export function buildNavGroups(isDispatcher: boolean): NavGroup[] {
     administrationGroup,
     accountingGroup,
     settingsGroup,
-  ];
-}
-
-/**
- * Applies a user's saved nav-group order preference to the default group list.
- * Saved keys come first (in saved order); unknown/stale keys are ignored; any
- * groups missing from the preference are appended in default order, so newly
- * shipped tabs always remain reachable. Pure so it can be unit-tested.
- */
-export function applyNavOrder(groups: NavGroup[], order?: string[] | null): NavGroup[] {
-  if (!order || order.length === 0) return groups;
-  const byKey = new Map(groups.map((g) => [g.key, g]));
-  const seen = new Set<string>();
-  const out: NavGroup[] = [];
-  for (const key of order) {
-    const g = byKey.get(key);
-    if (g && !seen.has(key)) {
-      out.push(g);
-      seen.add(key);
-    }
-  }
-  for (const g of groups) {
-    if (!seen.has(g.key)) out.push(g);
-  }
-  return out;
+  ]);
 }
 
 /**
@@ -312,14 +316,14 @@ export function resolveGroupKey(groups: NavGroup[], location: string): string | 
   }
   // Dynamic sub-routes that aren't represented by their own nav item.
   if (startsWith("/sites") || startsWith("/subcontractors")) return "administration";
-  if (startsWith("/payroll") || startsWith("/invoices")) return "accounting";
+  if (startsWith("/payroll") || startsWith("/invoices") || startsWith("/analytics")) return "accounting";
   if (startsWith("/shifts") || startsWith("/staffing") || startsWith("/swap-requests")) return "staffing";
   if (startsWith("/compliance")) return "compliance";
   if (startsWith("/dispatch") || startsWith("/chat") || startsWith("/radio")
     || startsWith("/dar") || startsWith("/personnel") || startsWith("/incidents")) {
     return "dispatch";
   }
-  if (startsWith("/account") || startsWith("/settings")
+  if (startsWith("/account") || startsWith("/settings") || startsWith("/platform")
     || startsWith("/audit-log") || startsWith("/exports") || startsWith("/tables")) {
     return "settings";
   }
@@ -331,6 +335,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   const { user, logout } = useAuth();
   const [location, setLocation] = useLocation();
   const isDispatcher = user?.role === "dispatcher";
+  const isSuperAdmin = useIsSuperAdmin(user?.role);
   const systemStatus = useSystemStatus(user?.role);
   // Aggregate unread chat badge — enabled for any admin/dispatcher (the only
   // roles that reach the shell), surfaced on the Chat nav link and the group
@@ -349,17 +354,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   const [mobileOpen, setMobileOpen] = useState(false);
   useEffect(() => { setMobileOpen(false); }, [location]);
 
-  // Per-user tab order: role defaults, reordered by the account's saved
-  // preference. `navOrderOverride` reflects a save made this session without
-  // waiting for a /auth/me refetch.
-  const defaultGroups = useMemo(() => buildNavGroups(isDispatcher), [isDispatcher]);
-  const [navOrderOverride, setNavOrderOverride] = useState<string[] | null>(null);
-  const savedNavOrder = navOrderOverride ?? user?.uiPreferences?.navGroupOrder ?? null;
-  const groups = useMemo(
-    () => applyNavOrder(defaultGroups, savedNavOrder),
-    [defaultGroups, savedNavOrder],
-  );
-  const [customizeOpen, setCustomizeOpen] = useState(false);
+  const groups = useMemo(() => buildNavGroups(isDispatcher, isSuperAdmin, isFeatureEnabled), [isDispatcher, isSuperAdmin]);
 
   const groupForLocation = useMemo(
     () => resolveGroupKey(groups, location),
@@ -440,7 +435,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   };
 
   return (
-    <div className="flex flex-col h-dvh w-full overflow-hidden bg-background">
+    <div className="flex flex-col h-screen w-full overflow-hidden bg-background">
       <header className="shrink-0 bg-sidebar text-sidebar-foreground border-b border-sidebar-border">
         <div className="flex items-center gap-2 px-3 sm:px-4 py-2 border-b border-sidebar-border/60">
           <Button
@@ -457,7 +452,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
             alt={brandCfg?.shortName ?? "WCSG"}
             className="w-9 h-9 shrink-0 rounded-md object-contain"
           />
-          <div className="flex-1 min-w-0 text-center">
+          <div className="hidden md:block shrink-0 text-center">
             <div className="brand-wordmark text-base sm:text-xl leading-tight truncate">
               <span className="sm:hidden">{brandCfg?.shortName ?? "WCSG"}</span>
               <span className="hidden sm:inline">{brandCfg?.companyName ?? "Williams Council Security Group"}</span>
@@ -473,6 +468,11 @@ export function AppShell({ children }: { children: React.ReactNode }) {
                 </span>
               )}
             </div>
+          </div>
+          <div className="flex-1 flex items-center justify-center px-2 sm:px-4">
+            {isDispatcher
+              ? <GlobalSearch allowedDomainKeys={["employees", "shifts", "chatRooms"]} />
+              : <GlobalSearch />}
           </div>
           <div className="flex items-center gap-2 shrink-0">
             <div className="hidden md:block text-right leading-tight">
@@ -540,25 +540,8 @@ export function AppShell({ children }: { children: React.ReactNode }) {
               </button>
             );
           })}
-          <button
-            type="button"
-            onClick={() => setCustomizeOpen(true)}
-            title="Customize tab order"
-            aria-label="Customize tab order"
-            className="ml-auto flex items-center px-3 py-2 border-b-2 border-transparent opacity-60 hover:opacity-100 hover:bg-sidebar-accent/30 transition-all"
-          >
-            <SlidersHorizontal className="w-4 h-4" />
-          </button>
         </nav>
       </header>
-
-      <CustomizeTabsDialog
-        open={customizeOpen}
-        onOpenChange={setCustomizeOpen}
-        groups={groups.map((g) => ({ key: g.key, label: g.label, Icon: g.Icon }))}
-        defaultKeys={defaultGroups.map((g) => g.key)}
-        onSaved={(order) => setNavOrderOverride(order)}
-      />
 
       <SystemBanner status={systemStatus} />
 

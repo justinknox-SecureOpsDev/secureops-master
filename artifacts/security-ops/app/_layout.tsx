@@ -19,7 +19,8 @@ import { ErrorBoundary } from "@/components/ErrorBoundary";
 import { AccessibilityProvider } from "@/contexts/AccessibilityContext";
 import { AuthProvider } from "@/contexts/AuthContext";
 import { ChatProvider } from "@/contexts/ChatContext";
-import { API_BASE_URL } from "@/utils/api";
+import { OrgProvider } from "@/contexts/OrgContext";
+import { getApiBaseUrl } from "@/utils/api";
 import RootLayoutNav from "./RootLayoutNav";
 import { setBaseUrl, setAuthTokenGetter } from "@workspace/api-client-react";
 import { storage } from "@/utils/storage";
@@ -67,11 +68,11 @@ function onAppStateChange(status: AppStateStatus) {
   }
 }
 
-// Configure API Client. Use the same resolution as utils/api.ts so the
-// generated client and hand-written fetches always agree on the origin
-// (and so a bundle without EXPO_PUBLIC_DOMAIN still talks to the real
-// API instead of "https://undefined").
-setBaseUrl(API_BASE_URL.replace(/\/api$/, ""));
+// Configure API Client with a SAFE INITIAL default (web → same origin; native
+// → hardcoded prod fallback). On native, OrgProvider re-applies the selected
+// organization's origin via setBaseUrl() BEFORE any auth/chat/query side
+// effects run, so this initial value only matters until that barrier resolves.
+setBaseUrl(getApiBaseUrl().replace(/\/api$/, ""));
 setAuthTokenGetter(async () => {
   return await storage.get(AUTH_TOKEN_KEY);
 });
@@ -140,11 +141,13 @@ export default function RootLayout() {
           <GestureHandlerRootView>
             <KeyboardProvider>
               <AccessibilityProvider>
-                <AuthProvider>
-                  <ChatProvider>
-                    <RootLayoutNav />
-                  </ChatProvider>
-                </AuthProvider>
+                <OrgProvider>
+                  <AuthProvider>
+                    <ChatProvider>
+                      <RootLayoutNav />
+                    </ChatProvider>
+                  </AuthProvider>
+                </OrgProvider>
               </AccessibilityProvider>
             </KeyboardProvider>
           </GestureHandlerRootView>

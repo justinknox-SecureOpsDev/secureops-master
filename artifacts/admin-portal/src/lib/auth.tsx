@@ -8,8 +8,6 @@ type User = {
   lastName: string;
   role: string;
   mustChangePassword?: boolean;
-  /** Per-user UI personalization (e.g. portal nav group order). Cosmetic only. */
-  uiPreferences?: { navGroupOrder?: string[] };
 };
 type AuthCtx = {
   user: User | null;

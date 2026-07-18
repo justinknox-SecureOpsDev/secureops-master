@@ -7,8 +7,10 @@ import { sendPushToUsers } from "../lib/push";
 import { sendSmsToUsers } from "../lib/sms";
 import { sendEmail, renderEmergencyAlertEmail } from "../lib/email";
 import { evaluateGeofence, getGeofenceRadiusMiles } from "../lib/geofence";
+import { requireFeature } from "../lib/features";
 
 const router: IRouter = Router();
+router.use(["/me/location", "/admin/active-officers", "/admin/officers", "/emergency"], requireFeature("liveMap"));
 
 // POST /me/location — update authenticated user's last known location.
 // Called periodically by the mobile app while the officer is clocked in.

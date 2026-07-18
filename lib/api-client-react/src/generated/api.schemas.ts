@@ -5,6 +5,47 @@
  * SecureOps - Private Security Operations Platform API
  * OpenAPI spec version: 0.1.0
  */
+/**
+ * Identifier for an owner-controlled, optionally-paid feature. Single source of truth is lib/feature-keys/src/index.ts; this enum is kept in sync by the sync-feature-keys script.
+ */
+export type FeatureKey = (typeof FeatureKey)[keyof typeof FeatureKey];
+
+export const FeatureKey = {
+  chat: "chat",
+  radio: "radio",
+  incidents: "incidents",
+  payroll: "payroll",
+  invoicing: "invoicing",
+  hr: "hr",
+  liveMap: "liveMap",
+  policies: "policies",
+  swapRequests: "swapRequests",
+  licenseRenewals: "licenseRenewals",
+  dar: "dar",
+  exports: "exports",
+  trainings: "trainings",
+  patrol: "patrol",
+  availability: "availability",
+  officerShares: "officerShares",
+} as const;
+
+/**
+ * Map of FeatureKey → enabled flag. Absent keys default to enabled on the client. Property keys are FeatureKey values.
+ */
+export type BrandConfigFeatures = { [key: string]: boolean };
+
+export interface BrandConfig {
+  companyName: string;
+  shortName: string;
+  tagline: string;
+  appName: string;
+  colorNavy: string;
+  colorGold: string;
+  colorCream: string;
+  /** Map of FeatureKey → enabled flag. Absent keys default to enabled on the client. Property keys are FeatureKey values. */
+  features: BrandConfigFeatures;
+}
+
 export interface SubcontractorQrResponse {
   id: string;
   token: string;
@@ -147,17 +188,6 @@ export const UserStatus = {
   pending: "pending",
 } as const;
 
-/**
- * Per-user UI personalization. Cosmetic only — never authorization.
- */
-export interface UiPreferences {
-  /**
-   * Preferred order of portal nav group keys. Unknown keys are ignored; missing groups append in default order.
-   * @maxItems 30
-   */
-  navGroupOrder?: string[];
-}
-
 export interface User {
   id: string;
   email: string;
@@ -169,8 +199,9 @@ export interface User {
   mustChangePassword?: boolean;
   /** True after first password change until the user has reviewed/saved their profile. */
   mustCompleteProfile?: boolean;
+  /** True when the user must sign/acknowledge company policies before accessing the mobile app (non-admin staff only). */
+  mustSignPolicies?: boolean;
   createdAt: string;
-  uiPreferences?: UiPreferences;
 }
 
 export interface AuthResponse {
@@ -178,21 +209,13 @@ export interface AuthResponse {
   user: User;
 }
 
-/**
- * Minimal user shape for site-manager assignment lists/pickers.
- */
-export interface SiteManagerUser {
-  id: string;
-  firstName: string;
-  lastName: string;
-  email: string;
-}
-
-/**
- * Replace the full set of managers for a site with this list of user IDs.
- */
-export interface SetSiteManagersRequest {
-  userIds: string[];
+export interface AcknowledgePoliciesRequest {
+  /**
+   * The caller's typed full legal name, applied as their signature to every active policy.
+   * @minLength 2
+   * @maxLength 120
+   */
+  signature: string;
 }
 
 export type EmployeeRole = (typeof EmployeeRole)[keyof typeof EmployeeRole];
@@ -427,25 +450,17 @@ export type UpdateMyEmployeeResponse = Employee & {
   hrNotifiedFields?: string[];
 };
 
-export type UpdateMyEmployeeRequestReferencesItem = {
-  name: string;
-  relationship?: string;
-  phone?: string;
-};
-
 /**
  * Strict allow-list of fields the employee may edit on their own profile.
  */
 export interface UpdateMyEmployeeRequest {
-  phone?: string;
-  address?: string;
+  firstName?: string;
+  lastName?: string;
   dateOfBirth?: string | null;
   cityOfBirth?: string | null;
   stateOfBirth?: string | null;
-  niNumber?: string | null;
-  rightToWorkStatus?: string | null;
-  taxCode?: string | null;
-  directDepositConsent?: boolean | null;
+  phone?: string;
+  address?: string;
   emergencyContactName?: string;
   emergencyContactRelationship?: string | null;
   emergencyContactPhone?: string;
@@ -463,13 +478,6 @@ export interface UpdateMyEmployeeRequest {
   passportDocKey?: string | null;
   rightToWorkDocKey?: string | null;
   trainingCertificateKeys?: string[] | null;
-  previousExperience?: string | null;
-  /**
-   * @minimum 0
-   * @maximum 99
-   */
-  yearsExperience?: number | null;
-  references?: UpdateMyEmployeeRequestReferencesItem[] | null;
 }
 
 export type EmployeeChangeSource =
@@ -577,17 +585,6 @@ export const ShiftStatus = {
 } as const;
 
 /**
- * 'standard' guard shift or 'ppo_detail' executive/close-protection detail (unlocks the protection package)
- */
-export type ShiftShiftType =
-  (typeof ShiftShiftType)[keyof typeof ShiftShiftType];
-
-export const ShiftShiftType = {
-  standard: "standard",
-  ppo_detail: "ppo_detail",
-} as const;
-
-/**
  * Minimum license level required (1=support/no licence, 2=unarmed, 3=armed, 4=PPO)
  */
 export type ShiftRequiredLicenseLevel =
@@ -654,8 +651,6 @@ export interface Shift {
   /** Legacy alias for billRate */
   billableRate?: number;
   status: ShiftStatus;
-  /** 'standard' guard shift or 'ppo_detail' executive/close-protection detail (unlocks the protection package) */
-  shiftType?: ShiftShiftType;
   /** Minimum license level required (1=support/no licence, 2=unarmed, 3=armed, 4=PPO) */
   requiredLicenseLevel: ShiftRequiredLicenseLevel;
   /** Total number of officers needed for this shift */
@@ -689,17 +684,6 @@ export const CreateShiftRequestRepeatPattern = {
   monthly: "monthly",
 } as const;
 
-/**
- * 'ppo_detail' unlocks the executive-protection package; defaults to 'standard'
- */
-export type CreateShiftRequestShiftType =
-  (typeof CreateShiftRequestShiftType)[keyof typeof CreateShiftRequestShiftType];
-
-export const CreateShiftRequestShiftType = {
-  standard: "standard",
-  ppo_detail: "ppo_detail",
-} as const;
-
 export interface CreateShiftRequest {
   title: string;
   /** Required — links shift to a site (and its client) */
@@ -715,8 +699,6 @@ export interface CreateShiftRequest {
   headcount?: number;
   isRepeat: boolean;
   repeatPattern?: CreateShiftRequestRepeatPattern;
-  /** 'ppo_detail' unlocks the executive-protection package; defaults to 'standard' */
-  shiftType?: CreateShiftRequestShiftType;
   notes?: string;
 }
 
@@ -740,14 +722,6 @@ export const UpdateShiftRequestRequiredLicenseLevel = {
   NUMBER_4: 4,
 } as const;
 
-export type UpdateShiftRequestShiftType =
-  (typeof UpdateShiftRequestShiftType)[keyof typeof UpdateShiftRequestShiftType];
-
-export const UpdateShiftRequestShiftType = {
-  standard: "standard",
-  ppo_detail: "ppo_detail",
-} as const;
-
 export interface UpdateShiftRequest {
   title?: string;
   siteId?: string;
@@ -759,7 +733,6 @@ export interface UpdateShiftRequest {
   requiredLicenseLevel?: UpdateShiftRequestRequiredLicenseLevel;
   /** @minimum 1 */
   headcount?: number;
-  shiftType?: UpdateShiftRequestShiftType;
   notes?: string;
 }
 
@@ -779,139 +752,6 @@ export const UpdateAssignmentRequestStatus = {
 
 export interface UpdateAssignmentRequest {
   status: UpdateAssignmentRequestStatus;
-}
-
-export type ProtectionPersonKind =
-  (typeof ProtectionPersonKind)[keyof typeof ProtectionPersonKind];
-
-export const ProtectionPersonKind = {
-  principal: "principal",
-  threat: "threat",
-} as const;
-
-/**
- * A principal (protectee) or threat/subject of interest on a protection detail.
- */
-export interface ProtectionPerson {
-  id: string;
-  kind: ProtectionPersonKind;
-  seq: number;
-  name?: string | null;
-  relationship?: string | null;
-  sex?: string | null;
-  age?: string | null;
-  height?: string | null;
-  weight?: string | null;
-  hairColor?: string | null;
-  eyeColor?: string | null;
-  distinguishingFeatures?: string | null;
-  notes?: string | null;
-  photoKeys: string[];
-}
-
-/**
- * An ordered, geocoded stop on a protection detail's itinerary.
- */
-export interface ProtectionDestination {
-  id: string;
-  seq: number;
-  label?: string | null;
-  address?: string | null;
-  lat?: number | null;
-  lng?: number | null;
-  arrivalTime?: string | null;
-  departureTime?: string | null;
-  notes?: string | null;
-}
-
-/**
- * Full executive-protection (PPO) package for a shift. Pre-plan fields plus principals, threats, and destinations. Empty/null when not yet built.
- */
-export interface ProtectionDetail {
-  shiftId: string;
-  threatLevel?: string | null;
-  missionSummary?: string | null;
-  dressCode?: string | null;
-  armamentInstructions?: string | null;
-  communicationPlan?: string | null;
-  medicalNotes?: string | null;
-  emergencyRendezvous?: string | null;
-  vehicleDetails?: string | null;
-  specialInstructions?: string | null;
-  principals: ProtectionPerson[];
-  threats: ProtectionPerson[];
-  destinations: ProtectionDestination[];
-}
-
-/**
- * Input shape for one principal or threat. `kind` is implied by which array it appears in.
- */
-export interface ProtectionPersonInput {
-  /** @maxLength 200 */
-  name?: string;
-  /** @maxLength 200 */
-  relationship?: string;
-  /** @maxLength 100 */
-  sex?: string;
-  /** @maxLength 100 */
-  age?: string;
-  /** @maxLength 100 */
-  height?: string;
-  /** @maxLength 100 */
-  weight?: string;
-  /** @maxLength 100 */
-  hairColor?: string;
-  /** @maxLength 100 */
-  eyeColor?: string;
-  /** @maxLength 4000 */
-  distinguishingFeatures?: string;
-  /** @maxLength 4000 */
-  notes?: string;
-  /** @maxItems 12 */
-  photoKeys?: string[];
-}
-
-export interface ProtectionDestinationInput {
-  /** @maxLength 200 */
-  label?: string;
-  /** @maxLength 500 */
-  address?: string;
-  lat?: number;
-  lng?: number;
-  arrivalTime?: string;
-  departureTime?: string;
-  /** @maxLength 4000 */
-  notes?: string;
-}
-
-/**
- * Replace-all body for a shift's PPO package. Every field optional; sending empty arrays clears the corresponding section.
- */
-export interface ProtectionDetailRequest {
-  /** @maxLength 200 */
-  threatLevel?: string;
-  /** @maxLength 8000 */
-  missionSummary?: string;
-  /** @maxLength 4000 */
-  dressCode?: string;
-  /** @maxLength 4000 */
-  armamentInstructions?: string;
-  /** @maxLength 4000 */
-  communicationPlan?: string;
-  /** @maxLength 4000 */
-  medicalNotes?: string;
-  /** @maxLength 4000 */
-  emergencyRendezvous?: string;
-  /** @maxLength 4000 */
-  vehicleDetails?: string;
-  /** @maxLength 8000 */
-  specialInstructions?: string;
-  /** @maxItems 20 */
-  principals?: ProtectionPersonInput[];
-  /** @maxItems 50 */
-  threats?: ProtectionPersonInput[];
-  /** @maxItems 50 */
-  destinations?: ProtectionDestinationInput[];
 }
 
 export type TimeEntryApprovalStatus =
@@ -1160,6 +1000,23 @@ export interface UpdateSiteRequest {
   locationLat?: number;
   locationLng?: number;
   notes?: string;
+}
+
+export interface SiteManagerUser {
+  userId: string;
+  firstName?: string;
+  lastName?: string;
+  email?: string;
+}
+
+export interface SiteManagersResponse {
+  assigned: SiteManagerUser[];
+  available: SiteManagerUser[];
+}
+
+export interface UpdateSiteManagersRequest {
+  /** Full desired set of Site Manager user IDs for this site (replaces existing). */
+  userIds: string[];
 }
 
 export type ApproveTimeEntryRequestDecision =
@@ -1427,38 +1284,64 @@ export interface AdminDashboardSummary {
   upcomingShiftsList: Shift[];
 }
 
-export interface AdminTask {
-  id: string;
-  title: string;
-  notes: string | null;
-  dueAt: string | null;
-  completedAt: string | null;
-  createdBy: string;
-  createdByName: string | null;
-  createdAt: string;
+export interface AnalyticsWeekBucket {
+  weekStart: string;
+  revenue: number;
+  laborCost: number;
+  pnl: number;
+  hoursWorked: number;
+  incidentCount: number;
 }
 
-export interface CreateAdminTaskRequest {
-  /**
-   * @minLength 1
-   * @maxLength 200
-   */
-  title: string;
-  /** @maxLength 2000 */
-  notes?: string | null;
-  dueAt?: string | null;
+export interface AnalyticsSiteRow {
+  siteId: string;
+  siteName: string;
+  clientName: string | null;
+  revenue: number;
+  laborCost: number;
+  pnl: number;
+  hoursWorked: number;
+  coveragePct: number | null;
 }
 
-export interface UpdateAdminTaskRequest {
-  /**
-   * @minLength 1
-   * @maxLength 200
-   */
-  title?: string;
-  /** @maxLength 2000 */
-  notes?: string | null;
-  dueAt?: string | null;
-  completed?: boolean;
+export interface AnalyticsIncidentCounts {
+  total: number;
+  low: number;
+  medium: number;
+  high: number;
+  critical: number;
+  open: number;
+  resolved: number;
+}
+
+export interface AnalyticsSummary {
+  revenue: number;
+  laborCost: number;
+  pnl: number;
+  marginPct: number | null;
+  hoursWorked: number;
+  hoursScheduled: number;
+  coveragePct: number | null;
+  noShows: number;
+  unfilledShifts: number;
+  incidents: AnalyticsIncidentCounts;
+  weeklyTrend: AnalyticsWeekBucket[];
+  sites: AnalyticsSiteRow[];
+}
+
+export interface AnalyticsOfficerTrendPoint {
+  weekStart: string;
+  hoursWorked: number;
+}
+
+export interface AnalyticsOfficerRow {
+  employeeId: string;
+  name: string;
+  hoursWorked: number;
+  shiftsCompleted: number;
+  incidentsFiled: number;
+  punctualityPct: number | null;
+  trend: AnalyticsOfficerTrendPoint[];
 }
 
 export type ChatRoomLastMessage = {
@@ -2294,141 +2177,6 @@ export interface StripeCheckoutResponse {
   sessionId?: string;
 }
 
-export interface AnalyticsTrendPoint {
-  bucket: string;
-  revenue: number;
-  laborCost: number;
-  profit: number;
-}
-
-export interface AnalyticsHoursTrendPoint {
-  bucket: string;
-  worked: number;
-  scheduled: number;
-}
-
-export interface AnalyticsIncidentTrendPoint {
-  bucket: string;
-  count: number;
-}
-
-export interface AnalyticsMissedShift {
-  shiftId: string;
-  title: string;
-  startTime: string;
-  endTime: string;
-  siteId: string | null;
-  siteName: string | null;
-  headcount: number;
-  filled: number;
-  noShows: number;
-}
-
-export interface AnalyticsSiteRow {
-  siteId: string;
-  siteName: string;
-  revenue: number;
-  laborCost: number;
-  profit: number;
-  hoursWorked: number;
-  hoursScheduled: number;
-  noShows: number;
-  unfilledShifts: number;
-  incidents: number;
-}
-
-export interface AnalyticsOfficerRow {
-  userId: string;
-  firstName: string;
-  lastName: string;
-  email: string;
-  shiftsAssigned: number;
-  shiftsCompleted: number;
-  noShows: number;
-  attendanceRate: number;
-  punctualityEligible: number;
-  onTimeCount: number;
-  onTimeRate: number;
-  avgMinutesLate: number;
-  hoursWorked: number;
-  hoursScheduled: number;
-  rejectedEntries: number;
-  totalEntries: number;
-  rejectionRate: number;
-  incidentTotal: number;
-  incidentHigh: number;
-  incidentCritical: number;
-  reliabilityScore: number;
-}
-
-export interface AnalyticsOfficerSummary {
-  totalNoShows: number;
-  avgAttendanceRate: number;
-  avgOnTimeRate: number;
-}
-
-export interface AnalyticsOfficerHistoryPoint {
-  /** ISO week label, e.g. 2026-W27 */
-  bucket: string;
-  /** Monday of the ISO week (business timezone calendar date) */
-  weekStart: string;
-  shiftsAssigned: number;
-  shiftsCompleted: number;
-  noShows: number;
-  hoursWorked: number;
-  /** Null when no shifts were assigned that week */
-  attendanceRate: number | null;
-  /** Completed shifts that count toward punctuality */
-  punctualityEligible: number;
-  /** Null when no completed shifts that week */
-  onTimeRate: number | null;
-  /** 60% attendance + 40% punctuality; null when no shifts assigned */
-  reliabilityScore: number | null;
-}
-
-export interface AnalyticsOfficerHistory {
-  userId: string;
-  firstName: string;
-  lastName: string;
-  weeks: number;
-  points: AnalyticsOfficerHistoryPoint[];
-}
-
-export type AnalyticsSummaryIncidentsBySeverity = {
-  low: number;
-  medium: number;
-  high: number;
-  critical: number;
-};
-
-export type AnalyticsSummaryIncidentsByStatus = {
-  open: number;
-  investigating: number;
-  closed: number;
-};
-
-export interface AnalyticsSummary {
-  revenue: number;
-  laborCost: number;
-  profit: number;
-  marginPct: number;
-  hoursWorked: number;
-  hoursScheduled: number;
-  coveragePct: number;
-  noShowCount: number;
-  unfilledCount: number;
-  missedShifts: AnalyticsMissedShift[];
-  incidentTotal: number;
-  incidentsBySeverity: AnalyticsSummaryIncidentsBySeverity;
-  incidentsByStatus: AnalyticsSummaryIncidentsByStatus;
-  pnlTrend: AnalyticsTrendPoint[];
-  hoursTrend: AnalyticsHoursTrendPoint[];
-  incidentTrend: AnalyticsIncidentTrendPoint[];
-  perSite: AnalyticsSiteRow[];
-  officerSummary: AnalyticsOfficerSummary;
-  perOfficer: AnalyticsOfficerRow[];
-}
-
 export interface ClientInviteResponse {
   status: string;
   userId: string;
@@ -2439,6 +2187,10 @@ export interface ClientInviteResponse {
 
 export type GetSitesParams = {
   clientId?: string;
+};
+
+export type UpdateSiteManagers200 = {
+  assigned: SiteManagerUser[];
 };
 
 export type RegisterPushTokenBody = {
@@ -2476,10 +2228,6 @@ export type GetShiftsParams = {
   employeeId?: string;
   from?: string;
   to?: string;
-  /**
-   * Set to `worker` to get the personal worker feed (own assigned shifts + qualifying open shifts) regardless of role. Admins and dispatchers use this for "my work" surfaces instead of their default global read.
-   */
-  view?: GetShiftsView;
 };
 
 export type GetShiftsStatus =
@@ -2490,12 +2238,6 @@ export const GetShiftsStatus = {
   active: "active",
   completed: "completed",
   cancelled: "cancelled",
-} as const;
-
-export type GetShiftsView = (typeof GetShiftsView)[keyof typeof GetShiftsView];
-
-export const GetShiftsView = {
-  worker: "worker",
 } as const;
 
 export type NotifyShiftVacancy200 = {
@@ -2598,41 +2340,13 @@ export const GetAdminLicenseRenewalsStatus = {
 export type GetAnalyticsSummaryParams = {
   start: string;
   end: string;
-  /**
-   * Restrict all metrics to sites belonging to this client
-   */
   clientId?: string;
 };
 
-export type ExportAnalyticsCsvParams = {
+export type GetAnalyticsOfficersParams = {
   start: string;
   end: string;
-  /**
-   * Restrict the report to sites belonging to this client
-   */
   clientId?: string;
-};
-
-export type ExportAnalyticsPdfParams = {
-  start: string;
-  end: string;
-  /**
-   * Restrict the report to sites belonging to this client
-   */
-  clientId?: string;
-};
-
-export type GetAnalyticsOfficerHistoryParams = {
-  /**
-   * The officer's user id
-   */
-  userId: string;
-  /**
-   * How many trailing ISO weeks to include (including the current week)
-   * @minimum 4
-   * @maximum 26
-   */
-  weeks?: number;
 };
 
 export type CreateChatRoomBody = {
@@ -2741,10 +2455,6 @@ export const AdminListOnboardingStatus = {
   pending: "pending",
   completed: "completed",
 } as const;
-
-export type ListAdminTasksParams = {
-  includeCompleted?: boolean;
-};
 
 export type GetClientSites200Item = { [key: string]: unknown };
 

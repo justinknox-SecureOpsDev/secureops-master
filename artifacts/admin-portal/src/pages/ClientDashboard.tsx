@@ -11,7 +11,6 @@ import {
   AlertTriangle,
 } from "lucide-react";
 import { api } from "@/lib/api";
-import { BUSINESS_TIME_ZONE } from "@/lib/format";
 
 type ClientMe = {
   client: { id: string; name: string; contactName: string | null; paymentTermsDays: number | null };
@@ -70,12 +69,10 @@ function StatusBadge({ status }: { status: string }) {
 }
 
 function fmt(d: string) {
-  // startDate/endDate/dueDate are pg `date` columns → render literal date in UTC.
-  return new Date(d + "T00:00:00Z").toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric", timeZone: "UTC" });
+  return new Date(d).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
 }
 function fmtTime(d: string) {
-  // shift startTime is a timestamp → render in Central.
-  return new Date(d).toLocaleString("en-US", { month: "short", day: "numeric", hour: "numeric", minute: "2-digit", timeZone: BUSINESS_TIME_ZONE });
+  return new Date(d).toLocaleString("en-US", { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" });
 }
 function fmtUsd(n: string | null) {
   if (!n) return "—";

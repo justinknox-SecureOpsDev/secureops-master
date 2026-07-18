@@ -17,6 +17,7 @@ import type {
 } from "@tanstack/react-query";
 
 import type {
+  AcknowledgePoliciesRequest,
   ActiveOfficer,
   AdminClockOutSubcontractorEntryBody,
   AdminDashboardSummary,
@@ -25,9 +26,8 @@ import type {
   AdminListOnboardingParams,
   AdminSignObjectDownload200,
   AdminSignObjectDownloadParams,
-  AdminTask,
   AdminUpdateSubcontractorEntryBody,
-  AnalyticsOfficerHistory,
+  AnalyticsOfficerRow,
   AnalyticsSummary,
   Application,
   ApplicationFieldConfig,
@@ -38,6 +38,7 @@ import type {
   ApproveTimeEntryRequest,
   AssignShiftRequest,
   AuthResponse,
+  BrandConfig,
   ChangePasswordRequest,
   ChatMessage,
   ChatRoom,
@@ -54,7 +55,6 @@ import type {
   ClockInShift,
   ClockInSite,
   ClockOutRequest,
-  CreateAdminTaskRequest,
   CreateApplicationQuestionRequest,
   CreateChatRoomBody,
   CreateClientRequest,
@@ -75,8 +75,6 @@ import type {
   Employee,
   EmployeeDashboardSummary,
   ErrorResponse,
-  ExportAnalyticsCsvParams,
-  ExportAnalyticsPdfParams,
   ForgotPasswordRequest,
   ForgotPasswordResponse,
   GenerateInvoiceRequest,
@@ -84,7 +82,7 @@ import type {
   GenerateSubcontractorQrBody,
   GetAdminLicenseRenewalsParams,
   GetAdminShiftRequestsParams,
-  GetAnalyticsOfficerHistoryParams,
+  GetAnalyticsOfficersParams,
   GetAnalyticsSummaryParams,
   GetChatMessagesParams,
   GetClientDar200,
@@ -112,7 +110,6 @@ import type {
   LicenseRenewal,
   LicenseRenewalDecisionRequest,
   LicenseRenewalRejectRequest,
-  ListAdminTasksParams,
   LoginRequest,
   MarkChatRoomRead200,
   NotifyShiftVacancy200,
@@ -127,8 +124,6 @@ import type {
   Policy,
   PolicyGroup,
   PolicyPublic,
-  ProtectionDetail,
-  ProtectionDetailRequest,
   RadioChannel,
   RadioTransmission,
   RegisterPushTokenBody,
@@ -138,14 +133,13 @@ import type {
   ResetPasswordRequest,
   ReviewApplicationRequest,
   SendChatMessageBody,
-  SetSiteManagersRequest,
   Shift,
   ShiftAssignment,
   ShiftRequest,
   SignMyObjectDownload200,
   SignMyObjectDownloadParams,
   Site,
-  SiteManagerUser,
+  SiteManagersResponse,
   StripeCheckoutResponse,
   SubcontractorClockInfo,
   SubcontractorClockToggleBody,
@@ -158,8 +152,6 @@ import type {
   TimeEntry,
   TriggerEmergency201,
   TriggerEmergencyBody,
-  UiPreferences,
-  UpdateAdminTaskRequest,
   UpdateApplicationFieldRequest,
   UpdateApplicationQuestionRequest,
   UpdateAssignmentRequest,
@@ -176,6 +168,8 @@ import type {
   UpdatePolicyRequest,
   UpdateRadioChannelRequest,
   UpdateShiftRequest,
+  UpdateSiteManagers200,
+  UpdateSiteManagersRequest,
   UpdateSiteRequest,
   UploadUrlRequest,
   UploadUrlResponse,
@@ -190,6 +184,71 @@ type AwaitedInput<T> = PromiseLike<T> | T;
 type Awaited<O> = O extends AwaitedInput<infer T> ? T : never;
 
 type SecondParameter<T extends (...args: never) => unknown> = Parameters<T>[1];
+
+/**
+ * @summary Public brand configuration (company name, colours, feature flags)
+ */
+export const getGetBrandUrl = () => {
+  return `/api/brand`;
+};
+
+export const getBrand = async (options?: RequestInit): Promise<BrandConfig> => {
+  return customFetch<BrandConfig>(getGetBrandUrl(), {
+    ...options,
+    method: "GET",
+  });
+};
+
+export const getGetBrandQueryKey = () => {
+  return [`/api/brand`] as const;
+};
+
+export const getGetBrandQueryOptions = <
+  TData = Awaited<ReturnType<typeof getBrand>>,
+  TError = ErrorType<unknown>,
+>(options?: {
+  query?: UseQueryOptions<Awaited<ReturnType<typeof getBrand>>, TError, TData>;
+  request?: SecondParameter<typeof customFetch>;
+}) => {
+  const { query: queryOptions, request: requestOptions } = options ?? {};
+
+  const queryKey = queryOptions?.queryKey ?? getGetBrandQueryKey();
+
+  const queryFn: QueryFunction<Awaited<ReturnType<typeof getBrand>>> = ({
+    signal,
+  }) => getBrand({ signal, ...requestOptions });
+
+  return { queryKey, queryFn, ...queryOptions } as UseQueryOptions<
+    Awaited<ReturnType<typeof getBrand>>,
+    TError,
+    TData
+  > & { queryKey: QueryKey };
+};
+
+export type GetBrandQueryResult = NonNullable<
+  Awaited<ReturnType<typeof getBrand>>
+>;
+export type GetBrandQueryError = ErrorType<unknown>;
+
+/**
+ * @summary Public brand configuration (company name, colours, feature flags)
+ */
+
+export function useGetBrand<
+  TData = Awaited<ReturnType<typeof getBrand>>,
+  TError = ErrorType<unknown>,
+>(options?: {
+  query?: UseQueryOptions<Awaited<ReturnType<typeof getBrand>>, TError, TData>;
+  request?: SecondParameter<typeof customFetch>;
+}): UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+  const queryOptions = getGetBrandQueryOptions(options);
+
+  const query = useQuery(queryOptions) as UseQueryResult<TData, TError> & {
+    queryKey: QueryKey;
+  };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
 
 /**
  * @summary List clients
@@ -1186,7 +1245,7 @@ export const useDeleteSite = <
 };
 
 /**
- * @summary List the site managers assigned to a site (admin, or a manager of this site)
+ * @summary List the site's assigned managers plus all assignable managers (admin)
  */
 export const getGetSiteManagersUrl = (id: string) => {
   return `/api/sites/${id}/managers`;
@@ -1195,8 +1254,8 @@ export const getGetSiteManagersUrl = (id: string) => {
 export const getSiteManagers = async (
   id: string,
   options?: RequestInit,
-): Promise<SiteManagerUser[]> => {
-  return customFetch<SiteManagerUser[]>(getGetSiteManagersUrl(id), {
+): Promise<SiteManagersResponse> => {
+  return customFetch<SiteManagersResponse>(getGetSiteManagersUrl(id), {
     ...options,
     method: "GET",
   });
@@ -1246,7 +1305,7 @@ export type GetSiteManagersQueryResult = NonNullable<
 export type GetSiteManagersQueryError = ErrorType<unknown>;
 
 /**
- * @summary List the site managers assigned to a site (admin, or a manager of this site)
+ * @summary List the site's assigned managers plus all assignable managers (admin)
  */
 
 export function useGetSiteManagers<
@@ -1273,43 +1332,43 @@ export function useGetSiteManagers<
 }
 
 /**
- * @summary Replace the set of site managers assigned to a site (admin only)
+ * @summary Replace the full set of managers for a site (admin)
  */
-export const getSetSiteManagersUrl = (id: string) => {
+export const getUpdateSiteManagersUrl = (id: string) => {
   return `/api/sites/${id}/managers`;
 };
 
-export const setSiteManagers = async (
+export const updateSiteManagers = async (
   id: string,
-  setSiteManagersRequest: SetSiteManagersRequest,
+  updateSiteManagersRequest: UpdateSiteManagersRequest,
   options?: RequestInit,
-): Promise<SiteManagerUser[]> => {
-  return customFetch<SiteManagerUser[]>(getSetSiteManagersUrl(id), {
+): Promise<UpdateSiteManagers200> => {
+  return customFetch<UpdateSiteManagers200>(getUpdateSiteManagersUrl(id), {
     ...options,
     method: "PUT",
     headers: { "Content-Type": "application/json", ...options?.headers },
-    body: JSON.stringify(setSiteManagersRequest),
+    body: JSON.stringify(updateSiteManagersRequest),
   });
 };
 
-export const getSetSiteManagersMutationOptions = <
+export const getUpdateSiteManagersMutationOptions = <
   TError = ErrorType<unknown>,
   TContext = unknown,
 >(options?: {
   mutation?: UseMutationOptions<
-    Awaited<ReturnType<typeof setSiteManagers>>,
+    Awaited<ReturnType<typeof updateSiteManagers>>,
     TError,
-    { id: string; data: BodyType<SetSiteManagersRequest> },
+    { id: string; data: BodyType<UpdateSiteManagersRequest> },
     TContext
   >;
   request?: SecondParameter<typeof customFetch>;
 }): UseMutationOptions<
-  Awaited<ReturnType<typeof setSiteManagers>>,
+  Awaited<ReturnType<typeof updateSiteManagers>>,
   TError,
-  { id: string; data: BodyType<SetSiteManagersRequest> },
+  { id: string; data: BodyType<UpdateSiteManagersRequest> },
   TContext
 > => {
-  const mutationKey = ["setSiteManagers"];
+  const mutationKey = ["updateSiteManagers"];
   const { mutation: mutationOptions, request: requestOptions } = options
     ? options.mutation &&
       "mutationKey" in options.mutation &&
@@ -1319,121 +1378,46 @@ export const getSetSiteManagersMutationOptions = <
     : { mutation: { mutationKey }, request: undefined };
 
   const mutationFn: MutationFunction<
-    Awaited<ReturnType<typeof setSiteManagers>>,
-    { id: string; data: BodyType<SetSiteManagersRequest> }
+    Awaited<ReturnType<typeof updateSiteManagers>>,
+    { id: string; data: BodyType<UpdateSiteManagersRequest> }
   > = (props) => {
     const { id, data } = props ?? {};
 
-    return setSiteManagers(id, data, requestOptions);
+    return updateSiteManagers(id, data, requestOptions);
   };
 
   return { mutationFn, ...mutationOptions };
 };
 
-export type SetSiteManagersMutationResult = NonNullable<
-  Awaited<ReturnType<typeof setSiteManagers>>
+export type UpdateSiteManagersMutationResult = NonNullable<
+  Awaited<ReturnType<typeof updateSiteManagers>>
 >;
-export type SetSiteManagersMutationBody = BodyType<SetSiteManagersRequest>;
-export type SetSiteManagersMutationError = ErrorType<unknown>;
+export type UpdateSiteManagersMutationBody =
+  BodyType<UpdateSiteManagersRequest>;
+export type UpdateSiteManagersMutationError = ErrorType<unknown>;
 
 /**
- * @summary Replace the set of site managers assigned to a site (admin only)
+ * @summary Replace the full set of managers for a site (admin)
  */
-export const useSetSiteManagers = <
+export const useUpdateSiteManagers = <
   TError = ErrorType<unknown>,
   TContext = unknown,
 >(options?: {
   mutation?: UseMutationOptions<
-    Awaited<ReturnType<typeof setSiteManagers>>,
+    Awaited<ReturnType<typeof updateSiteManagers>>,
     TError,
-    { id: string; data: BodyType<SetSiteManagersRequest> },
+    { id: string; data: BodyType<UpdateSiteManagersRequest> },
     TContext
   >;
   request?: SecondParameter<typeof customFetch>;
 }): UseMutationResult<
-  Awaited<ReturnType<typeof setSiteManagers>>,
+  Awaited<ReturnType<typeof updateSiteManagers>>,
   TError,
-  { id: string; data: BodyType<SetSiteManagersRequest> },
+  { id: string; data: BodyType<UpdateSiteManagersRequest> },
   TContext
 > => {
-  return useMutation(getSetSiteManagersMutationOptions(options));
+  return useMutation(getUpdateSiteManagersMutationOptions(options));
 };
-
-/**
- * @summary List active site_manager-role users for assignment pickers (admin only)
- */
-export const getGetSiteManagerCandidatesUrl = () => {
-  return `/api/site-manager-candidates`;
-};
-
-export const getSiteManagerCandidates = async (
-  options?: RequestInit,
-): Promise<SiteManagerUser[]> => {
-  return customFetch<SiteManagerUser[]>(getGetSiteManagerCandidatesUrl(), {
-    ...options,
-    method: "GET",
-  });
-};
-
-export const getGetSiteManagerCandidatesQueryKey = () => {
-  return [`/api/site-manager-candidates`] as const;
-};
-
-export const getGetSiteManagerCandidatesQueryOptions = <
-  TData = Awaited<ReturnType<typeof getSiteManagerCandidates>>,
-  TError = ErrorType<unknown>,
->(options?: {
-  query?: UseQueryOptions<
-    Awaited<ReturnType<typeof getSiteManagerCandidates>>,
-    TError,
-    TData
-  >;
-  request?: SecondParameter<typeof customFetch>;
-}) => {
-  const { query: queryOptions, request: requestOptions } = options ?? {};
-
-  const queryKey =
-    queryOptions?.queryKey ?? getGetSiteManagerCandidatesQueryKey();
-
-  const queryFn: QueryFunction<
-    Awaited<ReturnType<typeof getSiteManagerCandidates>>
-  > = ({ signal }) => getSiteManagerCandidates({ signal, ...requestOptions });
-
-  return { queryKey, queryFn, ...queryOptions } as UseQueryOptions<
-    Awaited<ReturnType<typeof getSiteManagerCandidates>>,
-    TError,
-    TData
-  > & { queryKey: QueryKey };
-};
-
-export type GetSiteManagerCandidatesQueryResult = NonNullable<
-  Awaited<ReturnType<typeof getSiteManagerCandidates>>
->;
-export type GetSiteManagerCandidatesQueryError = ErrorType<unknown>;
-
-/**
- * @summary List active site_manager-role users for assignment pickers (admin only)
- */
-
-export function useGetSiteManagerCandidates<
-  TData = Awaited<ReturnType<typeof getSiteManagerCandidates>>,
-  TError = ErrorType<unknown>,
->(options?: {
-  query?: UseQueryOptions<
-    Awaited<ReturnType<typeof getSiteManagerCandidates>>,
-    TError,
-    TData
-  >;
-  request?: SecondParameter<typeof customFetch>;
-}): UseQueryResult<TData, TError> & { queryKey: QueryKey } {
-  const queryOptions = getGetSiteManagerCandidatesQueryOptions(options);
-
-  const query = useQuery(queryOptions) as UseQueryResult<TData, TError> & {
-    queryKey: QueryKey;
-  };
-
-  return { ...query, queryKey: queryOptions.queryKey };
-}
 
 /**
  * @summary Approve or reject a time entry (admin)
@@ -2524,92 +2508,6 @@ export function useGetMe<
 }
 
 /**
- * @summary Update the caller's UI personalization preferences
- */
-export const getUpdateMyUiPreferencesUrl = () => {
-  return `/api/me/ui-preferences`;
-};
-
-export const updateMyUiPreferences = async (
-  uiPreferences: UiPreferences,
-  options?: RequestInit,
-): Promise<UiPreferences> => {
-  return customFetch<UiPreferences>(getUpdateMyUiPreferencesUrl(), {
-    ...options,
-    method: "PUT",
-    headers: { "Content-Type": "application/json", ...options?.headers },
-    body: JSON.stringify(uiPreferences),
-  });
-};
-
-export const getUpdateMyUiPreferencesMutationOptions = <
-  TError = ErrorType<ErrorResponse>,
-  TContext = unknown,
->(options?: {
-  mutation?: UseMutationOptions<
-    Awaited<ReturnType<typeof updateMyUiPreferences>>,
-    TError,
-    { data: BodyType<UiPreferences> },
-    TContext
-  >;
-  request?: SecondParameter<typeof customFetch>;
-}): UseMutationOptions<
-  Awaited<ReturnType<typeof updateMyUiPreferences>>,
-  TError,
-  { data: BodyType<UiPreferences> },
-  TContext
-> => {
-  const mutationKey = ["updateMyUiPreferences"];
-  const { mutation: mutationOptions, request: requestOptions } = options
-    ? options.mutation &&
-      "mutationKey" in options.mutation &&
-      options.mutation.mutationKey
-      ? options
-      : { ...options, mutation: { ...options.mutation, mutationKey } }
-    : { mutation: { mutationKey }, request: undefined };
-
-  const mutationFn: MutationFunction<
-    Awaited<ReturnType<typeof updateMyUiPreferences>>,
-    { data: BodyType<UiPreferences> }
-  > = (props) => {
-    const { data } = props ?? {};
-
-    return updateMyUiPreferences(data, requestOptions);
-  };
-
-  return { mutationFn, ...mutationOptions };
-};
-
-export type UpdateMyUiPreferencesMutationResult = NonNullable<
-  Awaited<ReturnType<typeof updateMyUiPreferences>>
->;
-export type UpdateMyUiPreferencesMutationBody = BodyType<UiPreferences>;
-export type UpdateMyUiPreferencesMutationError = ErrorType<ErrorResponse>;
-
-/**
- * @summary Update the caller's UI personalization preferences
- */
-export const useUpdateMyUiPreferences = <
-  TError = ErrorType<ErrorResponse>,
-  TContext = unknown,
->(options?: {
-  mutation?: UseMutationOptions<
-    Awaited<ReturnType<typeof updateMyUiPreferences>>,
-    TError,
-    { data: BodyType<UiPreferences> },
-    TContext
-  >;
-  request?: SecondParameter<typeof customFetch>;
-}): UseMutationResult<
-  Awaited<ReturnType<typeof updateMyUiPreferences>>,
-  TError,
-  { data: BodyType<UiPreferences> },
-  TContext
-> => {
-  return useMutation(getUpdateMyUiPreferencesMutationOptions(options));
-};
-
-/**
  * @summary List all employees
  */
 export const getGetEmployeesUrl = (params?: GetEmployeesParams) => {
@@ -3515,183 +3413,6 @@ export const useDeleteShift = <
   TContext
 > => {
   return useMutation(getDeleteShiftMutationOptions(options));
-};
-
-/**
- * Highly sensitive. Readable only by admins and officers with an ACCEPTED assignment to this shift. No other role (dispatcher, site_manager, client) has access. Returns an empty package (null fields, empty arrays) when no package has been built yet.
- * @summary Get the executive-protection (PPO) package for a shift
- */
-export const getGetProtectionDetailUrl = (id: string) => {
-  return `/api/shifts/${id}/protection-detail`;
-};
-
-export const getProtectionDetail = async (
-  id: string,
-  options?: RequestInit,
-): Promise<ProtectionDetail> => {
-  return customFetch<ProtectionDetail>(getGetProtectionDetailUrl(id), {
-    ...options,
-    method: "GET",
-  });
-};
-
-export const getGetProtectionDetailQueryKey = (id: string) => {
-  return [`/api/shifts/${id}/protection-detail`] as const;
-};
-
-export const getGetProtectionDetailQueryOptions = <
-  TData = Awaited<ReturnType<typeof getProtectionDetail>>,
-  TError = ErrorType<ErrorResponse>,
->(
-  id: string,
-  options?: {
-    query?: UseQueryOptions<
-      Awaited<ReturnType<typeof getProtectionDetail>>,
-      TError,
-      TData
-    >;
-    request?: SecondParameter<typeof customFetch>;
-  },
-) => {
-  const { query: queryOptions, request: requestOptions } = options ?? {};
-
-  const queryKey = queryOptions?.queryKey ?? getGetProtectionDetailQueryKey(id);
-
-  const queryFn: QueryFunction<
-    Awaited<ReturnType<typeof getProtectionDetail>>
-  > = ({ signal }) => getProtectionDetail(id, { signal, ...requestOptions });
-
-  return {
-    queryKey,
-    queryFn,
-    enabled: !!id,
-    ...queryOptions,
-  } as UseQueryOptions<
-    Awaited<ReturnType<typeof getProtectionDetail>>,
-    TError,
-    TData
-  > & { queryKey: QueryKey };
-};
-
-export type GetProtectionDetailQueryResult = NonNullable<
-  Awaited<ReturnType<typeof getProtectionDetail>>
->;
-export type GetProtectionDetailQueryError = ErrorType<ErrorResponse>;
-
-/**
- * @summary Get the executive-protection (PPO) package for a shift
- */
-
-export function useGetProtectionDetail<
-  TData = Awaited<ReturnType<typeof getProtectionDetail>>,
-  TError = ErrorType<ErrorResponse>,
->(
-  id: string,
-  options?: {
-    query?: UseQueryOptions<
-      Awaited<ReturnType<typeof getProtectionDetail>>,
-      TError,
-      TData
-    >;
-    request?: SecondParameter<typeof customFetch>;
-  },
-): UseQueryResult<TData, TError> & { queryKey: QueryKey } {
-  const queryOptions = getGetProtectionDetailQueryOptions(id, options);
-
-  const query = useQuery(queryOptions) as UseQueryResult<TData, TError> & {
-    queryKey: QueryKey;
-  };
-
-  return { ...query, queryKey: queryOptions.queryKey };
-}
-
-/**
- * Admin-only. Replaces the entire package (pre-plan fields + principals + threats + destinations) in one transaction. Destinations are geocoded best-effort from their address. Audited — raw PII is redacted from the audit snapshot; only actor/path/shift/counts are recorded.
- * @summary Create/replace the executive-protection (PPO) package for a shift
- */
-export const getUpdateProtectionDetailUrl = (id: string) => {
-  return `/api/shifts/${id}/protection-detail`;
-};
-
-export const updateProtectionDetail = async (
-  id: string,
-  protectionDetailRequest: ProtectionDetailRequest,
-  options?: RequestInit,
-): Promise<ProtectionDetail> => {
-  return customFetch<ProtectionDetail>(getUpdateProtectionDetailUrl(id), {
-    ...options,
-    method: "PUT",
-    headers: { "Content-Type": "application/json", ...options?.headers },
-    body: JSON.stringify(protectionDetailRequest),
-  });
-};
-
-export const getUpdateProtectionDetailMutationOptions = <
-  TError = ErrorType<ErrorResponse>,
-  TContext = unknown,
->(options?: {
-  mutation?: UseMutationOptions<
-    Awaited<ReturnType<typeof updateProtectionDetail>>,
-    TError,
-    { id: string; data: BodyType<ProtectionDetailRequest> },
-    TContext
-  >;
-  request?: SecondParameter<typeof customFetch>;
-}): UseMutationOptions<
-  Awaited<ReturnType<typeof updateProtectionDetail>>,
-  TError,
-  { id: string; data: BodyType<ProtectionDetailRequest> },
-  TContext
-> => {
-  const mutationKey = ["updateProtectionDetail"];
-  const { mutation: mutationOptions, request: requestOptions } = options
-    ? options.mutation &&
-      "mutationKey" in options.mutation &&
-      options.mutation.mutationKey
-      ? options
-      : { ...options, mutation: { ...options.mutation, mutationKey } }
-    : { mutation: { mutationKey }, request: undefined };
-
-  const mutationFn: MutationFunction<
-    Awaited<ReturnType<typeof updateProtectionDetail>>,
-    { id: string; data: BodyType<ProtectionDetailRequest> }
-  > = (props) => {
-    const { id, data } = props ?? {};
-
-    return updateProtectionDetail(id, data, requestOptions);
-  };
-
-  return { mutationFn, ...mutationOptions };
-};
-
-export type UpdateProtectionDetailMutationResult = NonNullable<
-  Awaited<ReturnType<typeof updateProtectionDetail>>
->;
-export type UpdateProtectionDetailMutationBody =
-  BodyType<ProtectionDetailRequest>;
-export type UpdateProtectionDetailMutationError = ErrorType<ErrorResponse>;
-
-/**
- * @summary Create/replace the executive-protection (PPO) package for a shift
- */
-export const useUpdateProtectionDetail = <
-  TError = ErrorType<ErrorResponse>,
-  TContext = unknown,
->(options?: {
-  mutation?: UseMutationOptions<
-    Awaited<ReturnType<typeof updateProtectionDetail>>,
-    TError,
-    { id: string; data: BodyType<ProtectionDetailRequest> },
-    TContext
-  >;
-  request?: SecondParameter<typeof customFetch>;
-}): UseMutationResult<
-  Awaited<ReturnType<typeof updateProtectionDetail>>,
-  TError,
-  { id: string; data: BodyType<ProtectionDetailRequest> },
-  TContext
-> => {
-  return useMutation(getUpdateProtectionDetailMutationOptions(options));
 };
 
 /**
@@ -5832,411 +5553,6 @@ export const useRejectLicenseRenewal = <
 };
 
 /**
- * @summary Admin analytics summary (P&L, hours, missed shifts, incidents) for a date range
- */
-export const getGetAnalyticsSummaryUrl = (
-  params: GetAnalyticsSummaryParams,
-) => {
-  const normalizedParams = new URLSearchParams();
-
-  Object.entries(params || {}).forEach(([key, value]) => {
-    if (value !== undefined) {
-      normalizedParams.append(key, value === null ? "null" : value.toString());
-    }
-  });
-
-  const stringifiedParams = normalizedParams.toString();
-
-  return stringifiedParams.length > 0
-    ? `/api/analytics/summary?${stringifiedParams}`
-    : `/api/analytics/summary`;
-};
-
-export const getAnalyticsSummary = async (
-  params: GetAnalyticsSummaryParams,
-  options?: RequestInit,
-): Promise<AnalyticsSummary> => {
-  return customFetch<AnalyticsSummary>(getGetAnalyticsSummaryUrl(params), {
-    ...options,
-    method: "GET",
-  });
-};
-
-export const getGetAnalyticsSummaryQueryKey = (
-  params?: GetAnalyticsSummaryParams,
-) => {
-  return [`/api/analytics/summary`, ...(params ? [params] : [])] as const;
-};
-
-export const getGetAnalyticsSummaryQueryOptions = <
-  TData = Awaited<ReturnType<typeof getAnalyticsSummary>>,
-  TError = ErrorType<ErrorResponse>,
->(
-  params: GetAnalyticsSummaryParams,
-  options?: {
-    query?: UseQueryOptions<
-      Awaited<ReturnType<typeof getAnalyticsSummary>>,
-      TError,
-      TData
-    >;
-    request?: SecondParameter<typeof customFetch>;
-  },
-) => {
-  const { query: queryOptions, request: requestOptions } = options ?? {};
-
-  const queryKey =
-    queryOptions?.queryKey ?? getGetAnalyticsSummaryQueryKey(params);
-
-  const queryFn: QueryFunction<
-    Awaited<ReturnType<typeof getAnalyticsSummary>>
-  > = ({ signal }) =>
-    getAnalyticsSummary(params, { signal, ...requestOptions });
-
-  return { queryKey, queryFn, ...queryOptions } as UseQueryOptions<
-    Awaited<ReturnType<typeof getAnalyticsSummary>>,
-    TError,
-    TData
-  > & { queryKey: QueryKey };
-};
-
-export type GetAnalyticsSummaryQueryResult = NonNullable<
-  Awaited<ReturnType<typeof getAnalyticsSummary>>
->;
-export type GetAnalyticsSummaryQueryError = ErrorType<ErrorResponse>;
-
-/**
- * @summary Admin analytics summary (P&L, hours, missed shifts, incidents) for a date range
- */
-
-export function useGetAnalyticsSummary<
-  TData = Awaited<ReturnType<typeof getAnalyticsSummary>>,
-  TError = ErrorType<ErrorResponse>,
->(
-  params: GetAnalyticsSummaryParams,
-  options?: {
-    query?: UseQueryOptions<
-      Awaited<ReturnType<typeof getAnalyticsSummary>>,
-      TError,
-      TData
-    >;
-    request?: SecondParameter<typeof customFetch>;
-  },
-): UseQueryResult<TData, TError> & { queryKey: QueryKey } {
-  const queryOptions = getGetAnalyticsSummaryQueryOptions(params, options);
-
-  const query = useQuery(queryOptions) as UseQueryResult<TData, TError> & {
-    queryKey: QueryKey;
-  };
-
-  return { ...query, queryKey: queryOptions.queryKey };
-}
-
-/**
- * @summary Download the analytics report (summary KPIs + per-site breakdown) as a CSV (admin only)
- */
-export const getExportAnalyticsCsvUrl = (params: ExportAnalyticsCsvParams) => {
-  const normalizedParams = new URLSearchParams();
-
-  Object.entries(params || {}).forEach(([key, value]) => {
-    if (value !== undefined) {
-      normalizedParams.append(key, value === null ? "null" : value.toString());
-    }
-  });
-
-  const stringifiedParams = normalizedParams.toString();
-
-  return stringifiedParams.length > 0
-    ? `/api/analytics/export.csv?${stringifiedParams}`
-    : `/api/analytics/export.csv`;
-};
-
-export const exportAnalyticsCsv = async (
-  params: ExportAnalyticsCsvParams,
-  options?: RequestInit,
-): Promise<string> => {
-  return customFetch<string>(getExportAnalyticsCsvUrl(params), {
-    ...options,
-    method: "GET",
-  });
-};
-
-export const getExportAnalyticsCsvQueryKey = (
-  params?: ExportAnalyticsCsvParams,
-) => {
-  return [`/api/analytics/export.csv`, ...(params ? [params] : [])] as const;
-};
-
-export const getExportAnalyticsCsvQueryOptions = <
-  TData = Awaited<ReturnType<typeof exportAnalyticsCsv>>,
-  TError = ErrorType<ErrorResponse>,
->(
-  params: ExportAnalyticsCsvParams,
-  options?: {
-    query?: UseQueryOptions<
-      Awaited<ReturnType<typeof exportAnalyticsCsv>>,
-      TError,
-      TData
-    >;
-    request?: SecondParameter<typeof customFetch>;
-  },
-) => {
-  const { query: queryOptions, request: requestOptions } = options ?? {};
-
-  const queryKey =
-    queryOptions?.queryKey ?? getExportAnalyticsCsvQueryKey(params);
-
-  const queryFn: QueryFunction<
-    Awaited<ReturnType<typeof exportAnalyticsCsv>>
-  > = ({ signal }) => exportAnalyticsCsv(params, { signal, ...requestOptions });
-
-  return { queryKey, queryFn, ...queryOptions } as UseQueryOptions<
-    Awaited<ReturnType<typeof exportAnalyticsCsv>>,
-    TError,
-    TData
-  > & { queryKey: QueryKey };
-};
-
-export type ExportAnalyticsCsvQueryResult = NonNullable<
-  Awaited<ReturnType<typeof exportAnalyticsCsv>>
->;
-export type ExportAnalyticsCsvQueryError = ErrorType<ErrorResponse>;
-
-/**
- * @summary Download the analytics report (summary KPIs + per-site breakdown) as a CSV (admin only)
- */
-
-export function useExportAnalyticsCsv<
-  TData = Awaited<ReturnType<typeof exportAnalyticsCsv>>,
-  TError = ErrorType<ErrorResponse>,
->(
-  params: ExportAnalyticsCsvParams,
-  options?: {
-    query?: UseQueryOptions<
-      Awaited<ReturnType<typeof exportAnalyticsCsv>>,
-      TError,
-      TData
-    >;
-    request?: SecondParameter<typeof customFetch>;
-  },
-): UseQueryResult<TData, TError> & { queryKey: QueryKey } {
-  const queryOptions = getExportAnalyticsCsvQueryOptions(params, options);
-
-  const query = useQuery(queryOptions) as UseQueryResult<TData, TError> & {
-    queryKey: QueryKey;
-  };
-
-  return { ...query, queryKey: queryOptions.queryKey };
-}
-
-/**
- * @summary Download the analytics report as a branded PDF (admin only)
- */
-export const getExportAnalyticsPdfUrl = (params: ExportAnalyticsPdfParams) => {
-  const normalizedParams = new URLSearchParams();
-
-  Object.entries(params || {}).forEach(([key, value]) => {
-    if (value !== undefined) {
-      normalizedParams.append(key, value === null ? "null" : value.toString());
-    }
-  });
-
-  const stringifiedParams = normalizedParams.toString();
-
-  return stringifiedParams.length > 0
-    ? `/api/analytics/export.pdf?${stringifiedParams}`
-    : `/api/analytics/export.pdf`;
-};
-
-export const exportAnalyticsPdf = async (
-  params: ExportAnalyticsPdfParams,
-  options?: RequestInit,
-): Promise<Blob> => {
-  return customFetch<Blob>(getExportAnalyticsPdfUrl(params), {
-    ...options,
-    method: "GET",
-  });
-};
-
-export const getExportAnalyticsPdfQueryKey = (
-  params?: ExportAnalyticsPdfParams,
-) => {
-  return [`/api/analytics/export.pdf`, ...(params ? [params] : [])] as const;
-};
-
-export const getExportAnalyticsPdfQueryOptions = <
-  TData = Awaited<ReturnType<typeof exportAnalyticsPdf>>,
-  TError = ErrorType<ErrorResponse>,
->(
-  params: ExportAnalyticsPdfParams,
-  options?: {
-    query?: UseQueryOptions<
-      Awaited<ReturnType<typeof exportAnalyticsPdf>>,
-      TError,
-      TData
-    >;
-    request?: SecondParameter<typeof customFetch>;
-  },
-) => {
-  const { query: queryOptions, request: requestOptions } = options ?? {};
-
-  const queryKey =
-    queryOptions?.queryKey ?? getExportAnalyticsPdfQueryKey(params);
-
-  const queryFn: QueryFunction<
-    Awaited<ReturnType<typeof exportAnalyticsPdf>>
-  > = ({ signal }) => exportAnalyticsPdf(params, { signal, ...requestOptions });
-
-  return { queryKey, queryFn, ...queryOptions } as UseQueryOptions<
-    Awaited<ReturnType<typeof exportAnalyticsPdf>>,
-    TError,
-    TData
-  > & { queryKey: QueryKey };
-};
-
-export type ExportAnalyticsPdfQueryResult = NonNullable<
-  Awaited<ReturnType<typeof exportAnalyticsPdf>>
->;
-export type ExportAnalyticsPdfQueryError = ErrorType<ErrorResponse>;
-
-/**
- * @summary Download the analytics report as a branded PDF (admin only)
- */
-
-export function useExportAnalyticsPdf<
-  TData = Awaited<ReturnType<typeof exportAnalyticsPdf>>,
-  TError = ErrorType<ErrorResponse>,
->(
-  params: ExportAnalyticsPdfParams,
-  options?: {
-    query?: UseQueryOptions<
-      Awaited<ReturnType<typeof exportAnalyticsPdf>>,
-      TError,
-      TData
-    >;
-    request?: SecondParameter<typeof customFetch>;
-  },
-): UseQueryResult<TData, TError> & { queryKey: QueryKey } {
-  const queryOptions = getExportAnalyticsPdfQueryOptions(params, options);
-
-  const query = useQuery(queryOptions) as UseQueryResult<TData, TError> & {
-    queryKey: QueryKey;
-  };
-
-  return { ...query, queryKey: queryOptions.queryKey };
-}
-
-/**
- * Returns a per-ISO-week series of attendance / punctuality / reliability metrics for a single officer over the last N weeks, so admins can see whether an officer is improving or declining over time. Weeks with no assigned shifts are included with null rates so charts can show gaps.
-
- * @summary Weekly-bucketed performance history for one officer (admin only)
- */
-export const getGetAnalyticsOfficerHistoryUrl = (
-  params: GetAnalyticsOfficerHistoryParams,
-) => {
-  const normalizedParams = new URLSearchParams();
-
-  Object.entries(params || {}).forEach(([key, value]) => {
-    if (value !== undefined) {
-      normalizedParams.append(key, value === null ? "null" : value.toString());
-    }
-  });
-
-  const stringifiedParams = normalizedParams.toString();
-
-  return stringifiedParams.length > 0
-    ? `/api/analytics/officer-history?${stringifiedParams}`
-    : `/api/analytics/officer-history`;
-};
-
-export const getAnalyticsOfficerHistory = async (
-  params: GetAnalyticsOfficerHistoryParams,
-  options?: RequestInit,
-): Promise<AnalyticsOfficerHistory> => {
-  return customFetch<AnalyticsOfficerHistory>(
-    getGetAnalyticsOfficerHistoryUrl(params),
-    {
-      ...options,
-      method: "GET",
-    },
-  );
-};
-
-export const getGetAnalyticsOfficerHistoryQueryKey = (
-  params?: GetAnalyticsOfficerHistoryParams,
-) => {
-  return [
-    `/api/analytics/officer-history`,
-    ...(params ? [params] : []),
-  ] as const;
-};
-
-export const getGetAnalyticsOfficerHistoryQueryOptions = <
-  TData = Awaited<ReturnType<typeof getAnalyticsOfficerHistory>>,
-  TError = ErrorType<ErrorResponse>,
->(
-  params: GetAnalyticsOfficerHistoryParams,
-  options?: {
-    query?: UseQueryOptions<
-      Awaited<ReturnType<typeof getAnalyticsOfficerHistory>>,
-      TError,
-      TData
-    >;
-    request?: SecondParameter<typeof customFetch>;
-  },
-) => {
-  const { query: queryOptions, request: requestOptions } = options ?? {};
-
-  const queryKey =
-    queryOptions?.queryKey ?? getGetAnalyticsOfficerHistoryQueryKey(params);
-
-  const queryFn: QueryFunction<
-    Awaited<ReturnType<typeof getAnalyticsOfficerHistory>>
-  > = ({ signal }) =>
-    getAnalyticsOfficerHistory(params, { signal, ...requestOptions });
-
-  return { queryKey, queryFn, ...queryOptions } as UseQueryOptions<
-    Awaited<ReturnType<typeof getAnalyticsOfficerHistory>>,
-    TError,
-    TData
-  > & { queryKey: QueryKey };
-};
-
-export type GetAnalyticsOfficerHistoryQueryResult = NonNullable<
-  Awaited<ReturnType<typeof getAnalyticsOfficerHistory>>
->;
-export type GetAnalyticsOfficerHistoryQueryError = ErrorType<ErrorResponse>;
-
-/**
- * @summary Weekly-bucketed performance history for one officer (admin only)
- */
-
-export function useGetAnalyticsOfficerHistory<
-  TData = Awaited<ReturnType<typeof getAnalyticsOfficerHistory>>,
-  TError = ErrorType<ErrorResponse>,
->(
-  params: GetAnalyticsOfficerHistoryParams,
-  options?: {
-    query?: UseQueryOptions<
-      Awaited<ReturnType<typeof getAnalyticsOfficerHistory>>,
-      TError,
-      TData
-    >;
-    request?: SecondParameter<typeof customFetch>;
-  },
-): UseQueryResult<TData, TError> & { queryKey: QueryKey } {
-  const queryOptions = getGetAnalyticsOfficerHistoryQueryOptions(
-    params,
-    options,
-  );
-
-  const query = useQuery(queryOptions) as UseQueryResult<TData, TError> & {
-    queryKey: QueryKey;
-  };
-
-  return { ...query, queryKey: queryOptions.queryKey };
-}
-
-/**
  * @summary Admin dashboard summary stats
  */
 export const getGetAdminDashboardSummaryUrl = () => {
@@ -6384,6 +5700,209 @@ export function useGetEmployeeDashboardSummary<
   request?: SecondParameter<typeof customFetch>;
 }): UseQueryResult<TData, TError> & { queryKey: QueryKey } {
   const queryOptions = getGetEmployeeDashboardSummaryQueryOptions(options);
+
+  const query = useQuery(queryOptions) as UseQueryResult<TData, TError> & {
+    queryKey: QueryKey;
+  };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
+
+/**
+ * @summary Business analytics summary for a date range (admin-only)
+ */
+export const getGetAnalyticsSummaryUrl = (
+  params: GetAnalyticsSummaryParams,
+) => {
+  const normalizedParams = new URLSearchParams();
+
+  Object.entries(params || {}).forEach(([key, value]) => {
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? "null" : value.toString());
+    }
+  });
+
+  const stringifiedParams = normalizedParams.toString();
+
+  return stringifiedParams.length > 0
+    ? `/api/analytics/summary?${stringifiedParams}`
+    : `/api/analytics/summary`;
+};
+
+export const getAnalyticsSummary = async (
+  params: GetAnalyticsSummaryParams,
+  options?: RequestInit,
+): Promise<AnalyticsSummary> => {
+  return customFetch<AnalyticsSummary>(getGetAnalyticsSummaryUrl(params), {
+    ...options,
+    method: "GET",
+  });
+};
+
+export const getGetAnalyticsSummaryQueryKey = (
+  params?: GetAnalyticsSummaryParams,
+) => {
+  return [`/api/analytics/summary`, ...(params ? [params] : [])] as const;
+};
+
+export const getGetAnalyticsSummaryQueryOptions = <
+  TData = Awaited<ReturnType<typeof getAnalyticsSummary>>,
+  TError = ErrorType<unknown>,
+>(
+  params: GetAnalyticsSummaryParams,
+  options?: {
+    query?: UseQueryOptions<
+      Awaited<ReturnType<typeof getAnalyticsSummary>>,
+      TError,
+      TData
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+) => {
+  const { query: queryOptions, request: requestOptions } = options ?? {};
+
+  const queryKey =
+    queryOptions?.queryKey ?? getGetAnalyticsSummaryQueryKey(params);
+
+  const queryFn: QueryFunction<
+    Awaited<ReturnType<typeof getAnalyticsSummary>>
+  > = ({ signal }) =>
+    getAnalyticsSummary(params, { signal, ...requestOptions });
+
+  return { queryKey, queryFn, ...queryOptions } as UseQueryOptions<
+    Awaited<ReturnType<typeof getAnalyticsSummary>>,
+    TError,
+    TData
+  > & { queryKey: QueryKey };
+};
+
+export type GetAnalyticsSummaryQueryResult = NonNullable<
+  Awaited<ReturnType<typeof getAnalyticsSummary>>
+>;
+export type GetAnalyticsSummaryQueryError = ErrorType<unknown>;
+
+/**
+ * @summary Business analytics summary for a date range (admin-only)
+ */
+
+export function useGetAnalyticsSummary<
+  TData = Awaited<ReturnType<typeof getAnalyticsSummary>>,
+  TError = ErrorType<unknown>,
+>(
+  params: GetAnalyticsSummaryParams,
+  options?: {
+    query?: UseQueryOptions<
+      Awaited<ReturnType<typeof getAnalyticsSummary>>,
+      TError,
+      TData
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+): UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+  const queryOptions = getGetAnalyticsSummaryQueryOptions(params, options);
+
+  const query = useQuery(queryOptions) as UseQueryResult<TData, TError> & {
+    queryKey: QueryKey;
+  };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
+
+/**
+ * @summary Per-officer performance metrics for a date range (admin-only)
+ */
+export const getGetAnalyticsOfficersUrl = (
+  params: GetAnalyticsOfficersParams,
+) => {
+  const normalizedParams = new URLSearchParams();
+
+  Object.entries(params || {}).forEach(([key, value]) => {
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? "null" : value.toString());
+    }
+  });
+
+  const stringifiedParams = normalizedParams.toString();
+
+  return stringifiedParams.length > 0
+    ? `/api/analytics/officers?${stringifiedParams}`
+    : `/api/analytics/officers`;
+};
+
+export const getAnalyticsOfficers = async (
+  params: GetAnalyticsOfficersParams,
+  options?: RequestInit,
+): Promise<AnalyticsOfficerRow[]> => {
+  return customFetch<AnalyticsOfficerRow[]>(
+    getGetAnalyticsOfficersUrl(params),
+    {
+      ...options,
+      method: "GET",
+    },
+  );
+};
+
+export const getGetAnalyticsOfficersQueryKey = (
+  params?: GetAnalyticsOfficersParams,
+) => {
+  return [`/api/analytics/officers`, ...(params ? [params] : [])] as const;
+};
+
+export const getGetAnalyticsOfficersQueryOptions = <
+  TData = Awaited<ReturnType<typeof getAnalyticsOfficers>>,
+  TError = ErrorType<unknown>,
+>(
+  params: GetAnalyticsOfficersParams,
+  options?: {
+    query?: UseQueryOptions<
+      Awaited<ReturnType<typeof getAnalyticsOfficers>>,
+      TError,
+      TData
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+) => {
+  const { query: queryOptions, request: requestOptions } = options ?? {};
+
+  const queryKey =
+    queryOptions?.queryKey ?? getGetAnalyticsOfficersQueryKey(params);
+
+  const queryFn: QueryFunction<
+    Awaited<ReturnType<typeof getAnalyticsOfficers>>
+  > = ({ signal }) =>
+    getAnalyticsOfficers(params, { signal, ...requestOptions });
+
+  return { queryKey, queryFn, ...queryOptions } as UseQueryOptions<
+    Awaited<ReturnType<typeof getAnalyticsOfficers>>,
+    TError,
+    TData
+  > & { queryKey: QueryKey };
+};
+
+export type GetAnalyticsOfficersQueryResult = NonNullable<
+  Awaited<ReturnType<typeof getAnalyticsOfficers>>
+>;
+export type GetAnalyticsOfficersQueryError = ErrorType<unknown>;
+
+/**
+ * @summary Per-officer performance metrics for a date range (admin-only)
+ */
+
+export function useGetAnalyticsOfficers<
+  TData = Awaited<ReturnType<typeof getAnalyticsOfficers>>,
+  TError = ErrorType<unknown>,
+>(
+  params: GetAnalyticsOfficersParams,
+  options?: {
+    query?: UseQueryOptions<
+      Awaited<ReturnType<typeof getAnalyticsOfficers>>,
+      TError,
+      TData
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+): UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+  const queryOptions = getGetAnalyticsOfficersQueryOptions(params, options);
 
   const query = useQuery(queryOptions) as UseQueryResult<TData, TError> & {
     queryKey: QueryKey;
@@ -9864,92 +9383,6 @@ export function useAdminGetOnboarding<
   return { ...query, queryKey: queryOptions.queryKey };
 }
 
-/**
- * Permanently removes a pending-onboarding employee: the user account and, via cascade, their employee record, onboarding tokens, and any onboarding submission. Refused (409) once the account is active or for non-employee roles — deactivate or manage those via the Personnel tables instead.
-
- * @summary Delete a person still in onboarding (pending only)
- */
-export const getAdminDeleteOnboardingUrl = (employeeId: string) => {
-  return `/api/admin/onboarding/${employeeId}`;
-};
-
-export const adminDeleteOnboarding = async (
-  employeeId: string,
-  options?: RequestInit,
-): Promise<void> => {
-  return customFetch<void>(getAdminDeleteOnboardingUrl(employeeId), {
-    ...options,
-    method: "DELETE",
-  });
-};
-
-export const getAdminDeleteOnboardingMutationOptions = <
-  TError = ErrorType<void>,
-  TContext = unknown,
->(options?: {
-  mutation?: UseMutationOptions<
-    Awaited<ReturnType<typeof adminDeleteOnboarding>>,
-    TError,
-    { employeeId: string },
-    TContext
-  >;
-  request?: SecondParameter<typeof customFetch>;
-}): UseMutationOptions<
-  Awaited<ReturnType<typeof adminDeleteOnboarding>>,
-  TError,
-  { employeeId: string },
-  TContext
-> => {
-  const mutationKey = ["adminDeleteOnboarding"];
-  const { mutation: mutationOptions, request: requestOptions } = options
-    ? options.mutation &&
-      "mutationKey" in options.mutation &&
-      options.mutation.mutationKey
-      ? options
-      : { ...options, mutation: { ...options.mutation, mutationKey } }
-    : { mutation: { mutationKey }, request: undefined };
-
-  const mutationFn: MutationFunction<
-    Awaited<ReturnType<typeof adminDeleteOnboarding>>,
-    { employeeId: string }
-  > = (props) => {
-    const { employeeId } = props ?? {};
-
-    return adminDeleteOnboarding(employeeId, requestOptions);
-  };
-
-  return { mutationFn, ...mutationOptions };
-};
-
-export type AdminDeleteOnboardingMutationResult = NonNullable<
-  Awaited<ReturnType<typeof adminDeleteOnboarding>>
->;
-
-export type AdminDeleteOnboardingMutationError = ErrorType<void>;
-
-/**
- * @summary Delete a person still in onboarding (pending only)
- */
-export const useAdminDeleteOnboarding = <
-  TError = ErrorType<void>,
-  TContext = unknown,
->(options?: {
-  mutation?: UseMutationOptions<
-    Awaited<ReturnType<typeof adminDeleteOnboarding>>,
-    TError,
-    { employeeId: string },
-    TContext
-  >;
-  request?: SecondParameter<typeof customFetch>;
-}): UseMutationResult<
-  Awaited<ReturnType<typeof adminDeleteOnboarding>>,
-  TError,
-  { employeeId: string },
-  TContext
-> => {
-  return useMutation(getAdminDeleteOnboardingMutationOptions(options));
-};
-
 export const getAdminResendOnboardingLinkUrl = (employeeId: string) => {
   return `/api/admin/onboarding/${employeeId}/resend`;
 };
@@ -10517,135 +9950,49 @@ export function useListActivePolicies<
 }
 
 /**
- * Shared admin to-do list (team-wide — every admin sees every task).
-Open tasks first (due date ascending, undated last), then completed
-tasks newest-first. Pass includeCompleted=false to omit finished tasks.
+ * Authenticated self-service. Records the caller's typed signature against
+every currently-active policy on their employee file and clears the
+users.mustSignPolicies gate. Mounted under /me (not /policies) so it is
+never feature-gated — a flagged officer can always clear the gate even on
+a tenant where the policies feature is disabled (no lockout). Safe when
+there are zero active policies (the gate is still cleared).
 
+ * @summary Sign/acknowledge all active company policies and clear the must-sign gate
  */
-export const getListAdminTasksUrl = (params?: ListAdminTasksParams) => {
-  const normalizedParams = new URLSearchParams();
-
-  Object.entries(params || {}).forEach(([key, value]) => {
-    if (value !== undefined) {
-      normalizedParams.append(key, value === null ? "null" : value.toString());
-    }
-  });
-
-  const stringifiedParams = normalizedParams.toString();
-
-  return stringifiedParams.length > 0
-    ? `/api/admin/tasks?${stringifiedParams}`
-    : `/api/admin/tasks`;
+export const getAcknowledgePoliciesUrl = () => {
+  return `/api/me/policies/acknowledge`;
 };
 
-export const listAdminTasks = async (
-  params?: ListAdminTasksParams,
+export const acknowledgePolicies = async (
+  acknowledgePoliciesRequest: AcknowledgePoliciesRequest,
   options?: RequestInit,
-): Promise<AdminTask[]> => {
-  return customFetch<AdminTask[]>(getListAdminTasksUrl(params), {
-    ...options,
-    method: "GET",
-  });
-};
-
-export const getListAdminTasksQueryKey = (params?: ListAdminTasksParams) => {
-  return [`/api/admin/tasks`, ...(params ? [params] : [])] as const;
-};
-
-export const getListAdminTasksQueryOptions = <
-  TData = Awaited<ReturnType<typeof listAdminTasks>>,
-  TError = ErrorType<unknown>,
->(
-  params?: ListAdminTasksParams,
-  options?: {
-    query?: UseQueryOptions<
-      Awaited<ReturnType<typeof listAdminTasks>>,
-      TError,
-      TData
-    >;
-    request?: SecondParameter<typeof customFetch>;
-  },
-) => {
-  const { query: queryOptions, request: requestOptions } = options ?? {};
-
-  const queryKey = queryOptions?.queryKey ?? getListAdminTasksQueryKey(params);
-
-  const queryFn: QueryFunction<Awaited<ReturnType<typeof listAdminTasks>>> = ({
-    signal,
-  }) => listAdminTasks(params, { signal, ...requestOptions });
-
-  return { queryKey, queryFn, ...queryOptions } as UseQueryOptions<
-    Awaited<ReturnType<typeof listAdminTasks>>,
-    TError,
-    TData
-  > & { queryKey: QueryKey };
-};
-
-export type ListAdminTasksQueryResult = NonNullable<
-  Awaited<ReturnType<typeof listAdminTasks>>
->;
-export type ListAdminTasksQueryError = ErrorType<unknown>;
-
-export function useListAdminTasks<
-  TData = Awaited<ReturnType<typeof listAdminTasks>>,
-  TError = ErrorType<unknown>,
->(
-  params?: ListAdminTasksParams,
-  options?: {
-    query?: UseQueryOptions<
-      Awaited<ReturnType<typeof listAdminTasks>>,
-      TError,
-      TData
-    >;
-    request?: SecondParameter<typeof customFetch>;
-  },
-): UseQueryResult<TData, TError> & { queryKey: QueryKey } {
-  const queryOptions = getListAdminTasksQueryOptions(params, options);
-
-  const query = useQuery(queryOptions) as UseQueryResult<TData, TError> & {
-    queryKey: QueryKey;
-  };
-
-  return { ...query, queryKey: queryOptions.queryKey };
-}
-
-/**
- * Add a task/reminder to the shared admin list.
- */
-export const getCreateAdminTaskUrl = () => {
-  return `/api/admin/tasks`;
-};
-
-export const createAdminTask = async (
-  createAdminTaskRequest: CreateAdminTaskRequest,
-  options?: RequestInit,
-): Promise<AdminTask> => {
-  return customFetch<AdminTask>(getCreateAdminTaskUrl(), {
+): Promise<User> => {
+  return customFetch<User>(getAcknowledgePoliciesUrl(), {
     ...options,
     method: "POST",
     headers: { "Content-Type": "application/json", ...options?.headers },
-    body: JSON.stringify(createAdminTaskRequest),
+    body: JSON.stringify(acknowledgePoliciesRequest),
   });
 };
 
-export const getCreateAdminTaskMutationOptions = <
+export const getAcknowledgePoliciesMutationOptions = <
   TError = ErrorType<ErrorResponse>,
   TContext = unknown,
 >(options?: {
   mutation?: UseMutationOptions<
-    Awaited<ReturnType<typeof createAdminTask>>,
+    Awaited<ReturnType<typeof acknowledgePolicies>>,
     TError,
-    { data: BodyType<CreateAdminTaskRequest> },
+    { data: BodyType<AcknowledgePoliciesRequest> },
     TContext
   >;
   request?: SecondParameter<typeof customFetch>;
 }): UseMutationOptions<
-  Awaited<ReturnType<typeof createAdminTask>>,
+  Awaited<ReturnType<typeof acknowledgePolicies>>,
   TError,
-  { data: BodyType<CreateAdminTaskRequest> },
+  { data: BodyType<AcknowledgePoliciesRequest> },
   TContext
 > => {
-  const mutationKey = ["createAdminTask"];
+  const mutationKey = ["acknowledgePolicies"];
   const { mutation: mutationOptions, request: requestOptions } = options
     ? options.mutation &&
       "mutationKey" in options.mutation &&
@@ -10655,208 +10002,45 @@ export const getCreateAdminTaskMutationOptions = <
     : { mutation: { mutationKey }, request: undefined };
 
   const mutationFn: MutationFunction<
-    Awaited<ReturnType<typeof createAdminTask>>,
-    { data: BodyType<CreateAdminTaskRequest> }
+    Awaited<ReturnType<typeof acknowledgePolicies>>,
+    { data: BodyType<AcknowledgePoliciesRequest> }
   > = (props) => {
     const { data } = props ?? {};
 
-    return createAdminTask(data, requestOptions);
+    return acknowledgePolicies(data, requestOptions);
   };
 
   return { mutationFn, ...mutationOptions };
 };
 
-export type CreateAdminTaskMutationResult = NonNullable<
-  Awaited<ReturnType<typeof createAdminTask>>
+export type AcknowledgePoliciesMutationResult = NonNullable<
+  Awaited<ReturnType<typeof acknowledgePolicies>>
 >;
-export type CreateAdminTaskMutationBody = BodyType<CreateAdminTaskRequest>;
-export type CreateAdminTaskMutationError = ErrorType<ErrorResponse>;
-
-export const useCreateAdminTask = <
-  TError = ErrorType<ErrorResponse>,
-  TContext = unknown,
->(options?: {
-  mutation?: UseMutationOptions<
-    Awaited<ReturnType<typeof createAdminTask>>,
-    TError,
-    { data: BodyType<CreateAdminTaskRequest> },
-    TContext
-  >;
-  request?: SecondParameter<typeof customFetch>;
-}): UseMutationResult<
-  Awaited<ReturnType<typeof createAdminTask>>,
-  TError,
-  { data: BodyType<CreateAdminTaskRequest> },
-  TContext
-> => {
-  return useMutation(getCreateAdminTaskMutationOptions(options));
-};
+export type AcknowledgePoliciesMutationBody =
+  BodyType<AcknowledgePoliciesRequest>;
+export type AcknowledgePoliciesMutationError = ErrorType<ErrorResponse>;
 
 /**
- * Edit a task and/or toggle completion. Setting completed=true stamps
-completedAt now; completed=false reopens the task.
-
+ * @summary Sign/acknowledge all active company policies and clear the must-sign gate
  */
-export const getUpdateAdminTaskUrl = (id: string) => {
-  return `/api/admin/tasks/${id}`;
-};
-
-export const updateAdminTask = async (
-  id: string,
-  updateAdminTaskRequest: UpdateAdminTaskRequest,
-  options?: RequestInit,
-): Promise<AdminTask> => {
-  return customFetch<AdminTask>(getUpdateAdminTaskUrl(id), {
-    ...options,
-    method: "PATCH",
-    headers: { "Content-Type": "application/json", ...options?.headers },
-    body: JSON.stringify(updateAdminTaskRequest),
-  });
-};
-
-export const getUpdateAdminTaskMutationOptions = <
+export const useAcknowledgePolicies = <
   TError = ErrorType<ErrorResponse>,
   TContext = unknown,
 >(options?: {
   mutation?: UseMutationOptions<
-    Awaited<ReturnType<typeof updateAdminTask>>,
+    Awaited<ReturnType<typeof acknowledgePolicies>>,
     TError,
-    { id: string; data: BodyType<UpdateAdminTaskRequest> },
-    TContext
-  >;
-  request?: SecondParameter<typeof customFetch>;
-}): UseMutationOptions<
-  Awaited<ReturnType<typeof updateAdminTask>>,
-  TError,
-  { id: string; data: BodyType<UpdateAdminTaskRequest> },
-  TContext
-> => {
-  const mutationKey = ["updateAdminTask"];
-  const { mutation: mutationOptions, request: requestOptions } = options
-    ? options.mutation &&
-      "mutationKey" in options.mutation &&
-      options.mutation.mutationKey
-      ? options
-      : { ...options, mutation: { ...options.mutation, mutationKey } }
-    : { mutation: { mutationKey }, request: undefined };
-
-  const mutationFn: MutationFunction<
-    Awaited<ReturnType<typeof updateAdminTask>>,
-    { id: string; data: BodyType<UpdateAdminTaskRequest> }
-  > = (props) => {
-    const { id, data } = props ?? {};
-
-    return updateAdminTask(id, data, requestOptions);
-  };
-
-  return { mutationFn, ...mutationOptions };
-};
-
-export type UpdateAdminTaskMutationResult = NonNullable<
-  Awaited<ReturnType<typeof updateAdminTask>>
->;
-export type UpdateAdminTaskMutationBody = BodyType<UpdateAdminTaskRequest>;
-export type UpdateAdminTaskMutationError = ErrorType<ErrorResponse>;
-
-export const useUpdateAdminTask = <
-  TError = ErrorType<ErrorResponse>,
-  TContext = unknown,
->(options?: {
-  mutation?: UseMutationOptions<
-    Awaited<ReturnType<typeof updateAdminTask>>,
-    TError,
-    { id: string; data: BodyType<UpdateAdminTaskRequest> },
+    { data: BodyType<AcknowledgePoliciesRequest> },
     TContext
   >;
   request?: SecondParameter<typeof customFetch>;
 }): UseMutationResult<
-  Awaited<ReturnType<typeof updateAdminTask>>,
+  Awaited<ReturnType<typeof acknowledgePolicies>>,
   TError,
-  { id: string; data: BodyType<UpdateAdminTaskRequest> },
+  { data: BodyType<AcknowledgePoliciesRequest> },
   TContext
 > => {
-  return useMutation(getUpdateAdminTaskMutationOptions(options));
-};
-
-/**
- * Remove a task from the shared admin list.
- */
-export const getDeleteAdminTaskUrl = (id: string) => {
-  return `/api/admin/tasks/${id}`;
-};
-
-export const deleteAdminTask = async (
-  id: string,
-  options?: RequestInit,
-): Promise<void> => {
-  return customFetch<void>(getDeleteAdminTaskUrl(id), {
-    ...options,
-    method: "DELETE",
-  });
-};
-
-export const getDeleteAdminTaskMutationOptions = <
-  TError = ErrorType<ErrorResponse>,
-  TContext = unknown,
->(options?: {
-  mutation?: UseMutationOptions<
-    Awaited<ReturnType<typeof deleteAdminTask>>,
-    TError,
-    { id: string },
-    TContext
-  >;
-  request?: SecondParameter<typeof customFetch>;
-}): UseMutationOptions<
-  Awaited<ReturnType<typeof deleteAdminTask>>,
-  TError,
-  { id: string },
-  TContext
-> => {
-  const mutationKey = ["deleteAdminTask"];
-  const { mutation: mutationOptions, request: requestOptions } = options
-    ? options.mutation &&
-      "mutationKey" in options.mutation &&
-      options.mutation.mutationKey
-      ? options
-      : { ...options, mutation: { ...options.mutation, mutationKey } }
-    : { mutation: { mutationKey }, request: undefined };
-
-  const mutationFn: MutationFunction<
-    Awaited<ReturnType<typeof deleteAdminTask>>,
-    { id: string }
-  > = (props) => {
-    const { id } = props ?? {};
-
-    return deleteAdminTask(id, requestOptions);
-  };
-
-  return { mutationFn, ...mutationOptions };
-};
-
-export type DeleteAdminTaskMutationResult = NonNullable<
-  Awaited<ReturnType<typeof deleteAdminTask>>
->;
-
-export type DeleteAdminTaskMutationError = ErrorType<ErrorResponse>;
-
-export const useDeleteAdminTask = <
-  TError = ErrorType<ErrorResponse>,
-  TContext = unknown,
->(options?: {
-  mutation?: UseMutationOptions<
-    Awaited<ReturnType<typeof deleteAdminTask>>,
-    TError,
-    { id: string },
-    TContext
-  >;
-  request?: SecondParameter<typeof customFetch>;
-}): UseMutationResult<
-  Awaited<ReturnType<typeof deleteAdminTask>>,
-  TError,
-  { id: string },
-  TContext
-> => {
-  return useMutation(getDeleteAdminTaskMutationOptions(options));
+  return useMutation(getAcknowledgePoliciesMutationOptions(options));
 };
 
 /**
@@ -13052,7 +12236,7 @@ export const useSubcontractorClockToggle = <
 };
 
 /**
- * Authenticated internal users (officer/site-manager/employee/admin) report a pay
+ * Authenticated internal users (officer/site manager/employee/admin) report a pay
 discrepancy (missed payment, underpayment, missing hours, etc.). On
 submit the report is emailed to the dedicated admin inbox and becomes
 visible in the Admin Portal. External client accounts are rejected.

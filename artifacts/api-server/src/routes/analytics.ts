@@ -1,1095 +1,295 @@
-import { Router, type IRouter, type Request, type Response } from "express";
-import { sql, and, gte, lte, eq, lt, inArray, type SQL } from "drizzle-orm";
-import type { PgColumn } from "drizzle-orm/pg-core";
-import {
-  db,
-  invoicesTable,
-  payrollEntriesTable,
-  timeEntriesTable,
-  shiftsTable,
-  shiftAssignmentsTable,
-  incidentsTable,
-  sitesTable,
-  clientsTable,
-  usersTable,
-  employeesTable,
-} from "@workspace/db";
+/**
+ * Admin analytics endpoints.
+ *
+ *   GET  /analytics/summary   — contract-first (openapi.yaml), zod-validated
+ *   GET  /analytics/officers  — contract-first (openapi.yaml), zod-validated
+ *   POST /admin/analytics/export-csv — off-spec download (mirrors /admin/exports/csv)
+ *   POST /admin/analytics/export-pdf — off-spec download (mirrors /admin/exports/pdf)
+ *
+ * Date params are calendar dates interpreted in the business timezone
+ * (PAYROLL_TIMEZONE): the window is [local midnight of start, local midnight
+ * AFTER end) — i.e. both dates inclusive. Range is capped to bound DB work.
+ */
+import { Router, type IRouter } from "express";
+import { z } from "zod/v4";
+import PDFDocument from "pdfkit";
+import type { Response } from "express";
 import { requireAdmin } from "../middlewares/auth";
-import { businessTimeZone } from "../lib/businessTime";
-import { buildAnalyticsReportPdf } from "../lib/analyticsPdf";
+import { exportLimiter } from "../middlewares/rateLimit";
+import { logger } from "../lib/logger";
+import { drawBrandHeader } from "../lib/pdfHeader";
 import { brand } from "../lib/brandConfig";
+import {
+  computeAnalyticsSummary,
+  computeAnalyticsOfficers,
+  type AnalyticsRange,
+  type AnalyticsSummary,
+  type AnalyticsOfficerRow,
+} from "../lib/analytics";
+import { businessTimeZone, businessDateToUtc, businessDayWindow } from "../lib/businessTime";
 
 const router: IRouter = Router();
 
-/**
- * Converts an ISO date string (YYYY-MM-DD) into a UTC timestamp that
- * represents midnight in the business timezone on that date.
- */
-function dateToBusinessTzStart(dateStr: string, tz: string): Date {
-  // Parse the local date in the business TZ and convert to UTC instant.
-  const [year, month, day] = dateStr.split("-").map(Number);
-  // Build midnight in the target TZ using Intl reverse-offset trick.
-  const naive = new Date(Date.UTC(year, month - 1, day, 0, 0, 0));
-  const offset = getUtcOffsetMs(naive, tz);
-  return new Date(naive.getTime() - offset);
-}
+const MAX_RANGE_DAYS = 366;
 
-function getUtcOffsetMs(date: Date, tz: string): number {
-  const parts = new Intl.DateTimeFormat("en-US", {
-    timeZone: tz,
-    hour12: false,
-    year: "numeric",
-    month: "2-digit",
-    day: "2-digit",
-    hour: "2-digit",
-    minute: "2-digit",
-    second: "2-digit",
-  }).formatToParts(date);
-  const m: Record<string, number> = {};
-  for (const p of parts) if (p.type !== "literal") m[p.type] = Number(p.value);
-  const hour = m.hour === 24 ? 0 : m.hour;
-  const asUtc = Date.UTC(m.year, m.month - 1, m.day, hour, m.minute, m.second);
-  return asUtc - date.getTime();
-}
+const paramsSchema = z.object({
+  start: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Expected YYYY-MM-DD"),
+  end: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Expected YYYY-MM-DD"),
+  clientId: z.uuid().optional(),
+});
+type Params = z.infer<typeof paramsSchema>;
 
-/** Get the ISO week label (YYYY-Www) for a Date in the business timezone */
-function weekBucket(date: Date, tz: string): string {
-  const parts = new Intl.DateTimeFormat("en-CA", {
-    timeZone: tz,
-    year: "numeric",
-    month: "2-digit",
-    day: "2-digit",
-  }).formatToParts(date);
-  const m: Record<string, string> = {};
-  for (const p of parts) if (p.type !== "literal") m[p.type] = p.value;
-  const d = new Date(Date.UTC(Number(m.year), Number(m.month) - 1, Number(m.day)));
-  // ISO week: find Monday of the week
-  const dayOfWeek = (d.getUTCDay() + 6) % 7; // Mon=0 .. Sun=6
-  const monday = new Date(d.getTime() - dayOfWeek * 86400_000);
-  return `${monday.getUTCFullYear()}-W${String(isoWeek(monday)).padStart(2, "0")}`;
-}
-
-function isoWeek(monday: Date): number {
-  const jan4 = new Date(Date.UTC(monday.getUTCFullYear(), 0, 4));
-  const startOfYear = new Date(jan4.getTime() - ((jan4.getUTCDay() + 6) % 7) * 86400_000);
-  return Math.round((monday.getTime() - startOfYear.getTime()) / (7 * 86400_000)) + 1;
-}
-
-const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-
-/**
- * ISO week label (YYYY-Www) for a plain calendar date string ("YYYY-MM-DD").
- * Invoice/payroll periodStart columns are date-only values already expressed in
- * the business calendar — bucket them by that calendar date directly. Do NOT
- * parse them as UTC midnight and re-render in the business timezone: UTC
- * midnight Monday is Sunday evening in Central, which shifts the whole week's
- * revenue/labor into the previous ISO week and misaligns it with the
- * SQL-side (date_trunc AT TIME ZONE) hour buckets.
- */
-function weekBucketForDateOnly(dateStr: string): string {
-  const [y, mo, da] = dateStr.split("-").map(Number);
-  const d = new Date(Date.UTC(y, mo - 1, da));
-  const dayOfWeek = (d.getUTCDay() + 6) % 7; // Mon=0 .. Sun=6
-  const monday = new Date(d.getTime() - dayOfWeek * 86400_000);
-  return `${monday.getUTCFullYear()}-W${String(isoWeek(monday)).padStart(2, "0")}`;
-}
-
-/**
- * Validate the `start` / `end` / optional `clientId` query params shared by
- * the summary and both export routes. Writes the 400 response itself and
- * returns null on failure.
- */
-function parseRange(
-  req: Request,
-  res: Response,
-): { start: string; end: string; clientId?: string } | null {
-  const { start, end, clientId } = req.query as {
-    start?: string;
-    end?: string;
-    clientId?: string;
-  };
-  if (!start || !end || !/^\d{4}-\d{2}-\d{2}$/.test(start) || !/^\d{4}-\d{2}-\d{2}$/.test(end)) {
-    res.status(400).json({ error: "start and end are required in YYYY-MM-DD format" });
+/** Parse + bound the requested window; responds 400 itself when invalid. */
+function resolveRange(input: unknown, res: Response): AnalyticsRange | null {
+  const parsed = paramsSchema.safeParse(input);
+  if (!parsed.success) {
+    res.status(400).json({ error: "Bad Request", issues: parsed.error.issues });
     return null;
   }
-  if (clientId !== undefined && clientId !== "") {
-    if (typeof clientId !== "string" || !UUID_RE.test(clientId)) {
-      res.status(400).json({ error: "clientId must be a valid UUID" });
-      return null;
-    }
-    return { start, end, clientId };
-  }
-  return { start, end };
-}
-
-/**
- * Resolve the client row for an optional clientId filter. Writes the 404
- * response itself and returns undefined on failure; returns null when no
- * filter was requested.
- */
-async function resolveClientFilter(
-  clientId: string | undefined,
-  res: Response,
-): Promise<{ id: string; name: string } | null | undefined> {
-  if (!clientId) return null;
-  const [client] = await db
-    .select({ id: clientsTable.id, name: clientsTable.name })
-    .from(clientsTable)
-    .where(eq(clientsTable.id, clientId));
-  if (!client) {
-    res.status(404).json({ error: "Client not found" });
-    return undefined;
-  }
-  return client;
-}
-
-export type AnalyticsSummaryData = Awaited<ReturnType<typeof computeAnalyticsSummary>>;
-
-/**
- * Compute the full analytics summary (P&L, hours, missed shifts, incidents,
- * trends, per-site breakdown) for an inclusive [start, end] date range.
- * Shared by the JSON summary route and the CSV / PDF export routes so all
- * three surfaces always agree on the numbers.
- *
- * When `clientId` is provided, every metric is restricted to sites belonging
- * to that client (a client with no sites yields an all-zero summary).
- */
-export async function computeAnalyticsSummary(start: string, end: string, clientId?: string) {
-  // Optional client scoping: resolve the client's site ids once, then apply
-  // the same site filter to every query below so all sections agree.
-  let clientSiteIds: string[] | null = null;
-  if (clientId) {
-    const siteRows = await db
-      .select({ id: sitesTable.id })
-      .from(sitesTable)
-      .where(eq(sitesTable.clientId, clientId));
-    clientSiteIds = siteRows.map((r) => r.id);
-  }
-  /** Site-scoping condition for a siteId column; undefined = no filter. */
-  const siteFilter = (col: PgColumn): SQL | undefined => {
-    if (clientSiteIds === null) return undefined;
-    if (clientSiteIds.length === 0) return sql`false`;
-    return inArray(col, clientSiteIds);
-  };
-
+  const { start, end, clientId } = parsed.data as Params;
   const tz = businessTimeZone();
-  const startUtc = dateToBusinessTzStart(start, tz);
-  // End date is inclusive — use start of the *next* day
-  const [ey, em, ed] = end.split("-").map(Number);
-  const endExclusive = dateToBusinessTzStart(
-    `${ey}-${String(em).padStart(2, "0")}-${String(ed + 1).padStart(2, "0")}`,
-    tz,
-  );
-  const now = new Date();
-
-  // ── 1. Revenue: sum of invoice totalAmount for invoices with periodStart in range ──
-  const [rev] = await db
-    .select({ total: sql<number>`coalesce(sum(${invoicesTable.totalAmount}::numeric), 0)::float` })
-    .from(invoicesTable)
-    .where(
-      and(
-        gte(invoicesTable.periodStart, start),
-        lte(invoicesTable.periodStart, end),
-        siteFilter(invoicesTable.siteId),
-      ),
-    );
-
-  // ── 2. Labor cost: sum of grossPay for payroll entries with periodStart in range ──
-  const [labor] = await db
-    .select({ total: sql<number>`coalesce(sum(${payrollEntriesTable.grossPay}::numeric), 0)::float` })
-    .from(payrollEntriesTable)
-    .where(
-      and(
-        gte(payrollEntriesTable.periodStart, start),
-        lte(payrollEntriesTable.periodStart, end),
-        siteFilter(payrollEntriesTable.siteId),
-      ),
-    );
-
-  const revenue = rev?.total ?? 0;
-  const laborCost = labor?.total ?? 0;
-  const profit = revenue - laborCost;
-  const marginPct = revenue > 0 ? (profit / revenue) * 100 : 0;
-
-  // ── 3. Hours worked (approved time entries with clockInTime in range) ──
-  const [workedRow] = await db
-    .select({ total: sql<number>`coalesce(sum(${timeEntriesTable.hoursWorked}::numeric), 0)::float` })
-    .from(timeEntriesTable)
-    .where(
-      and(
-        eq(timeEntriesTable.approvalStatus, "approved"),
-        gte(timeEntriesTable.clockInTime, startUtc),
-        lt(timeEntriesTable.clockInTime, endExclusive),
-        siteFilter(timeEntriesTable.siteId),
-      ),
-    );
-  const hoursWorked = workedRow?.total ?? 0;
-
-  // ── 4. Hours scheduled (past shifts where endTime is in range) ──
-  // Hours scheduled = sum of (endTime - startTime) * headcount for each shift.
-  const [scheduledRow] = await db
-    .select({
-      total: sql<number>`coalesce(
-        sum(
-          extract(epoch from ${shiftsTable.endTime} - ${shiftsTable.startTime}) / 3600.0
-          * ${shiftsTable.headcount}
-        ), 0
-      )::float`,
-    })
-    .from(shiftsTable)
-    .where(
-      and(
-        gte(shiftsTable.endTime, startUtc),
-        lt(shiftsTable.endTime, endExclusive),
-        lt(shiftsTable.endTime, now),
-        siteFilter(shiftsTable.siteId),
-      ),
-    );
-  const hoursScheduled = scheduledRow?.total ?? 0;
-  const coveragePct = hoursScheduled > 0 ? Math.min(100, (hoursWorked / hoursScheduled) * 100) : 0;
-
-  // ── 5. Missed shifts: past shifts with accepted assignments that have no time entry ──
-  // We run two queries to avoid complex correlated subqueries:
-  // a) Past shifts with accepted assignment counts and time-entry counts per (shift, employee)
-  const pastShiftsRaw = await db
-    .select({
-      shiftId: shiftsTable.id,
-      title: shiftsTable.title,
-      startTime: shiftsTable.startTime,
-      endTime: shiftsTable.endTime,
-      siteId: shiftsTable.siteId,
-      siteName: sitesTable.name,
-      headcount: shiftsTable.headcount,
-      filled: sql<number>`count(${shiftAssignmentsTable.id}) filter (where ${shiftAssignmentsTable.status} = 'accepted')::int`,
-      noShows: sql<number>`count(${shiftAssignmentsTable.id}) filter (
-        where ${shiftAssignmentsTable.status} = 'accepted'
-        and not exists (
-          select 1 from time_entries te
-          where te.employee_id = ${shiftAssignmentsTable.employeeId}
-            and te.shift_id = ${shiftsTable.id}
-        )
-      )::int`,
-    })
-    .from(shiftsTable)
-    .leftJoin(sitesTable, eq(shiftsTable.siteId, sitesTable.id))
-    .leftJoin(shiftAssignmentsTable, eq(shiftAssignmentsTable.shiftId, shiftsTable.id))
-    .where(
-      and(
-        gte(shiftsTable.endTime, startUtc),
-        lt(shiftsTable.endTime, endExclusive),
-        lt(shiftsTable.endTime, now),
-        siteFilter(shiftsTable.siteId),
-      ),
-    )
-    .groupBy(shiftsTable.id, sitesTable.name);
-
-  const noShowCount = pastShiftsRaw.reduce((s, r) => s + (r.noShows ?? 0), 0);
-  const unfilledCount = pastShiftsRaw.filter((r) => (r.filled ?? 0) < r.headcount).length;
-
-  const missedShifts = pastShiftsRaw
-    .filter((r) => (r.noShows ?? 0) > 0 || (r.filled ?? 0) < r.headcount)
-    .slice(0, 100)
-    .map((r) => ({
-      shiftId: r.shiftId,
-      title: r.title,
-      startTime: r.startTime instanceof Date ? r.startTime.toISOString() : String(r.startTime),
-      endTime: r.endTime instanceof Date ? r.endTime.toISOString() : String(r.endTime),
-      siteId: r.siteId,
-      siteName: r.siteName ?? null,
-      headcount: r.headcount,
-      filled: r.filled ?? 0,
-      noShows: r.noShows ?? 0,
-    }));
-
-  // ── 6. Incident metrics ──
-  // Incidents don't link to a site directly — when a client filter is on,
-  // scope through the incident's shift (left join keeps count parity when
-  // unfiltered; shiftless incidents are excluded by the filter, matching the
-  // per-site incident attribution below).
-  const incidentRows = await db
-    .select({
-      severity: incidentsTable.severity,
-      status: incidentsTable.status,
-      occurredAt: incidentsTable.occurredAt,
-      siteId: sql<string | null>`null`, // incidents don't link to site directly
-    })
-    .from(incidentsTable)
-    .leftJoin(shiftsTable, eq(incidentsTable.shiftId, shiftsTable.id))
-    .where(
-      and(
-        gte(incidentsTable.occurredAt, startUtc),
-        lt(incidentsTable.occurredAt, endExclusive),
-        siteFilter(shiftsTable.siteId),
-      ),
-    );
-
-  const incidentTotal = incidentRows.length;
-  const incidentsBySeverity = { low: 0, medium: 0, high: 0, critical: 0 } as Record<string, number>;
-  const incidentsByStatus = { open: 0, investigating: 0, closed: 0 } as Record<string, number>;
-  for (const inc of incidentRows) {
-    const sev = inc.severity ?? "low";
-    if (sev in incidentsBySeverity) incidentsBySeverity[sev]++;
-    const st = inc.status ?? "open";
-    if (st in incidentsByStatus) incidentsByStatus[st]++;
+  const startUtc = businessDateToUtc(start, tz);
+  const endDayStart = businessDateToUtc(end, tz);
+  if (endDayStart.getTime() < startUtc.getTime()) {
+    res.status(400).json({ error: "Bad Request", message: "end must be on or after start" });
+    return null;
   }
-
-  // ── 7. Trend series (weekly buckets) ──
-  // Revenue trend: per invoice periodStart week
-  const invoiceTrendRows = await db
-    .select({
-      periodStart: invoicesTable.periodStart,
-      total: sql<number>`coalesce(sum(${invoicesTable.totalAmount}::numeric), 0)::float`,
-    })
-    .from(invoicesTable)
-    .where(
-      and(
-        gte(invoicesTable.periodStart, start),
-        lte(invoicesTable.periodStart, end),
-        siteFilter(invoicesTable.siteId),
-      ),
-    )
-    .groupBy(invoicesTable.periodStart);
-
-  // Labor trend: per payroll entry periodStart week
-  const laborTrendRows = await db
-    .select({
-      periodStart: payrollEntriesTable.periodStart,
-      total: sql<number>`coalesce(sum(${payrollEntriesTable.grossPay}::numeric), 0)::float`,
-    })
-    .from(payrollEntriesTable)
-    .where(
-      and(
-        gte(payrollEntriesTable.periodStart, start),
-        lte(payrollEntriesTable.periodStart, end),
-        siteFilter(payrollEntriesTable.siteId),
-      ),
-    )
-    .groupBy(payrollEntriesTable.periodStart);
-
-  // Build week-keyed maps
-  const revByWeek = new Map<string, number>();
-  for (const r of invoiceTrendRows) {
-    const wk = weekBucketForDateOnly(r.periodStart as string);
-    revByWeek.set(wk, (revByWeek.get(wk) ?? 0) + r.total);
-  }
-  const laborByWeek = new Map<string, number>();
-  for (const r of laborTrendRows) {
-    const wk = weekBucketForDateOnly(r.periodStart as string);
-    laborByWeek.set(wk, (laborByWeek.get(wk) ?? 0) + r.total);
-  }
-
-  // Hours trend: grouped by business-timezone week start.
-  // Inline tz as a SQL literal (not a parameter) so SELECT and GROUP BY produce
-  // the exact same expression text, which PostgreSQL requires for GROUP BY matching.
-  const tzLit = sql.raw(`'${tz.replace(/'/g, "''")}'`);
-  const hoursWorkedTrendRows = await db
-    .select({
-      weekStart: sql<string>`date_trunc('week', ${timeEntriesTable.clockInTime} AT TIME ZONE ${tzLit})::text`,
-      hours: sql<number>`coalesce(sum(${timeEntriesTable.hoursWorked}::numeric), 0)::float`,
-    })
-    .from(timeEntriesTable)
-    .where(
-      and(
-        eq(timeEntriesTable.approvalStatus, "approved"),
-        gte(timeEntriesTable.clockInTime, startUtc),
-        lt(timeEntriesTable.clockInTime, endExclusive),
-        siteFilter(timeEntriesTable.siteId),
-      ),
-    )
-    .groupBy(sql`date_trunc('week', ${timeEntriesTable.clockInTime} AT TIME ZONE ${tzLit})`);
-
-  // Hours scheduled trend: per shift endTime week
-  const hoursScheduledTrendRows = await db
-    .select({
-      weekStart: sql<string>`date_trunc('week', ${shiftsTable.endTime} AT TIME ZONE ${tzLit})::text`,
-      hours: sql<number>`coalesce(
-        sum(
-          extract(epoch from ${shiftsTable.endTime} - ${shiftsTable.startTime}) / 3600.0
-          * ${shiftsTable.headcount}
-        ), 0
-      )::float`,
-    })
-    .from(shiftsTable)
-    .where(
-      and(
-        gte(shiftsTable.endTime, startUtc),
-        lt(shiftsTable.endTime, endExclusive),
-        lt(shiftsTable.endTime, now),
-        siteFilter(shiftsTable.siteId),
-      ),
-    )
-    .groupBy(sql`date_trunc('week', ${shiftsTable.endTime} AT TIME ZONE ${tzLit})`);
-
-  const workedByWeek = new Map<string, number>();
-  for (const r of hoursWorkedTrendRows) {
-    // weekStart comes back as a local-time string like "2026-06-29 00:00:00";
-    // interpret it as UTC to build the ISO-week label (already tz-shifted, no second shift).
-    const dt = new Date(r.weekStart.replace(" ", "T") + "Z");
-    const wk = weekBucket(dt, "UTC");
-    workedByWeek.set(wk, (workedByWeek.get(wk) ?? 0) + r.hours);
-  }
-  const scheduledByWeek = new Map<string, number>();
-  for (const r of hoursScheduledTrendRows) {
-    const dt = new Date(r.weekStart.replace(" ", "T") + "Z");
-    const wk = weekBucket(dt, "UTC");
-    scheduledByWeek.set(wk, (scheduledByWeek.get(wk) ?? 0) + r.hours);
-  }
-
-  // Incident trend: per occurredAt week
-  const incByWeek = new Map<string, number>();
-  for (const inc of incidentRows) {
-    const dt = inc.occurredAt instanceof Date ? inc.occurredAt : new Date(inc.occurredAt as string);
-    const wk = weekBucket(dt, tz);
-    incByWeek.set(wk, (incByWeek.get(wk) ?? 0) + 1);
-  }
-
-  // Enumerate all week buckets in range so even empty weeks appear in the trend
-  const allWeeks = new Set<string>([
-    ...revByWeek.keys(),
-    ...laborByWeek.keys(),
-    ...workedByWeek.keys(),
-    ...scheduledByWeek.keys(),
-    ...incByWeek.keys(),
-  ]);
-  const sortedWeeks = [...allWeeks].sort();
-
-  const pnlTrend = sortedWeeks.map((wk) => {
-    const r = revByWeek.get(wk) ?? 0;
-    const l = laborByWeek.get(wk) ?? 0;
-    return { bucket: wk, revenue: r, laborCost: l, profit: r - l };
-  });
-
-  const hoursTrend = sortedWeeks.map((wk) => ({
-    bucket: wk,
-    worked: workedByWeek.get(wk) ?? 0,
-    scheduled: scheduledByWeek.get(wk) ?? 0,
-  }));
-
-  const incidentTrend = sortedWeeks.map((wk) => ({
-    bucket: wk,
-    count: incByWeek.get(wk) ?? 0,
-  }));
-
-  // ── 8. Per-site breakdown ──
-  // Revenue per site from invoices
-  const siteRevenueRows = await db
-    .select({
-      siteId: invoicesTable.siteId,
-      total: sql<number>`coalesce(sum(${invoicesTable.totalAmount}::numeric), 0)::float`,
-    })
-    .from(invoicesTable)
-    .where(
-      and(
-        gte(invoicesTable.periodStart, start),
-        lte(invoicesTable.periodStart, end),
-        siteFilter(invoicesTable.siteId),
-      ),
-    )
-    .groupBy(invoicesTable.siteId);
-
-  // Labor per site from payroll entries
-  const siteLaborRows = await db
-    .select({
-      siteId: payrollEntriesTable.siteId,
-      total: sql<number>`coalesce(sum(${payrollEntriesTable.grossPay}::numeric), 0)::float`,
-    })
-    .from(payrollEntriesTable)
-    .where(
-      and(
-        gte(payrollEntriesTable.periodStart, start),
-        lte(payrollEntriesTable.periodStart, end),
-        siteFilter(payrollEntriesTable.siteId),
-      ),
-    )
-    .groupBy(payrollEntriesTable.siteId);
-
-  // Hours worked per site from time entries
-  const siteWorkedRows = await db
-    .select({
-      siteId: timeEntriesTable.siteId,
-      total: sql<number>`coalesce(sum(${timeEntriesTable.hoursWorked}::numeric), 0)::float`,
-    })
-    .from(timeEntriesTable)
-    .where(
-      and(
-        eq(timeEntriesTable.approvalStatus, "approved"),
-        gte(timeEntriesTable.clockInTime, startUtc),
-        lt(timeEntriesTable.clockInTime, endExclusive),
-        siteFilter(timeEntriesTable.siteId),
-      ),
-    )
-    .groupBy(timeEntriesTable.siteId);
-
-  // Hours scheduled per site — computed WITHOUT the assignments join below,
-  // because that join fans out one row per assignment and would multiply the
-  // summed shift hours by the assignment count.
-  const siteScheduledRows = await db
-    .select({
-      siteId: shiftsTable.siteId,
-      hoursScheduled: sql<number>`coalesce(
-        sum(
-          extract(epoch from ${shiftsTable.endTime} - ${shiftsTable.startTime}) / 3600.0
-          * ${shiftsTable.headcount}
-        ), 0
-      )::float`,
-    })
-    .from(shiftsTable)
-    .where(
-      and(
-        gte(shiftsTable.endTime, startUtc),
-        lt(shiftsTable.endTime, endExclusive),
-        lt(shiftsTable.endTime, now),
-        siteFilter(shiftsTable.siteId),
-      ),
-    )
-    .groupBy(shiftsTable.siteId);
-
-  // No-shows + unfilled shifts per site
-  const siteShiftRows = await db
-    .select({
-      siteId: shiftsTable.siteId,
-      siteName: sitesTable.name,
-      noShows: sql<number>`coalesce(
-        count(${shiftAssignmentsTable.id}) filter (
-          where ${shiftAssignmentsTable.status} = 'accepted'
-          and not exists (
-            select 1 from time_entries te
-            where te.employee_id = ${shiftAssignmentsTable.employeeId}
-              and te.shift_id = ${shiftsTable.id}
-          )
-        ), 0
-      )::int`,
-      unfilledShifts: sql<number>`coalesce(
-        count(distinct ${shiftsTable.id}) filter (
-          where (
-            select count(*) from shift_assignments sa2
-            where sa2.shift_id = ${shiftsTable.id} and sa2.status = 'accepted'
-          ) < ${shiftsTable.headcount}
-        ), 0
-      )::int`,
-    })
-    .from(shiftsTable)
-    .leftJoin(sitesTable, eq(shiftsTable.siteId, sitesTable.id))
-    .leftJoin(shiftAssignmentsTable, eq(shiftAssignmentsTable.shiftId, shiftsTable.id))
-    .where(
-      and(
-        gte(shiftsTable.endTime, startUtc),
-        lt(shiftsTable.endTime, endExclusive),
-        lt(shiftsTable.endTime, now),
-        siteFilter(shiftsTable.siteId),
-      ),
-    )
-    .groupBy(shiftsTable.siteId, sitesTable.name);
-
-  // Incidents per site from shiftId -> shift -> siteId (best effort for now)
-  // Incidents don't have a direct siteId FK, so we join through shifts
-  const siteIncidentRows = await db
-    .select({
-      siteId: shiftsTable.siteId,
-      count: sql<number>`count(${incidentsTable.id})::int`,
-    })
-    .from(incidentsTable)
-    .innerJoin(shiftsTable, eq(incidentsTable.shiftId, shiftsTable.id))
-    .where(
-      and(
-        gte(incidentsTable.occurredAt, startUtc),
-        lt(incidentsTable.occurredAt, endExclusive),
-        siteFilter(shiftsTable.siteId),
-      ),
-    )
-    .groupBy(shiftsTable.siteId);
-
-  // Collect all site IDs
-  const allSiteIds = new Set<string>([
-    ...siteRevenueRows.map((r) => r.siteId).filter(Boolean) as string[],
-    ...siteLaborRows.map((r) => r.siteId).filter(Boolean) as string[],
-    ...siteWorkedRows.map((r) => r.siteId).filter(Boolean) as string[],
-    ...siteShiftRows.map((r) => r.siteId).filter(Boolean) as string[],
-  ]);
-
-  // Look up site names for sites without a name from the joins above
-  const sitesById = new Map<string, string>();
-  for (const r of siteShiftRows) {
-    if (r.siteId) sitesById.set(r.siteId, r.siteName ?? r.siteId);
-  }
-
-  const siteRevMap = new Map(siteRevenueRows.map((r) => [r.siteId ?? "__null", r.total]));
-  const siteLaborMap = new Map(siteLaborRows.map((r) => [r.siteId ?? "__null", r.total]));
-  const siteWorkedMap = new Map(siteWorkedRows.map((r) => [r.siteId ?? "__null", r.total]));
-  const siteScheduledMap = new Map(siteScheduledRows.map((r) => [r.siteId ?? "__null", r.hoursScheduled]));
-  const siteNoShowMap = new Map(siteShiftRows.map((r) => [r.siteId ?? "__null", r.noShows]));
-  const siteUnfilledMap = new Map(siteShiftRows.map((r) => [r.siteId ?? "__null", r.unfilledShifts]));
-  const siteIncMap = new Map(siteIncidentRows.map((r) => [r.siteId ?? "__null", r.count]));
-
-  // Fetch names for any site ids we don't have names for yet
-  const missingSiteIds = [...allSiteIds].filter((id) => !sitesById.has(id));
-  if (missingSiteIds.length > 0) {
-    const siteNameRows = await db
-      .select({ id: sitesTable.id, name: sitesTable.name })
-      .from(sitesTable)
-      .where(sql`${sitesTable.id} = ANY(ARRAY[${sql.join(missingSiteIds.map((id) => sql`${id}::uuid`), sql`, `)}])`);
-    for (const r of siteNameRows) sitesById.set(r.id, r.name);
-  }
-
-  const perSite = [...allSiteIds].map((siteId) => {
-    const r = siteRevMap.get(siteId) ?? 0;
-    const l = siteLaborMap.get(siteId) ?? 0;
-    return {
-      siteId,
-      siteName: sitesById.get(siteId) ?? siteId,
-      revenue: r,
-      laborCost: l,
-      profit: r - l,
-      hoursWorked: siteWorkedMap.get(siteId) ?? 0,
-      hoursScheduled: siteScheduledMap.get(siteId) ?? 0,
-      noShows: siteNoShowMap.get(siteId) ?? 0,
-      unfilledShifts: siteUnfilledMap.get(siteId) ?? 0,
-      incidents: siteIncMap.get(siteId) ?? 0,
-    };
-  });
-
-  // ── 9. Per-officer performance ──────────────────────────────────────────
-  // Query A: shift completion + punctuality (from assignments → shifts → time entries)
-  // Only accepted assignments for shifts that ended in the period.
-  const officerShiftRows = await db
-    .select({
-      userId: usersTable.id,
-      firstName: usersTable.firstName,
-      lastName: usersTable.lastName,
-      shiftsAssigned: sql<number>`COUNT(DISTINCT ${shiftAssignmentsTable.shiftId})::int`,
-      shiftsCompleted: sql<number>`COUNT(DISTINCT CASE WHEN ${timeEntriesTable.id} IS NOT NULL THEN ${shiftAssignmentsTable.shiftId} END)::int`,
-      noShows: sql<number>`COUNT(DISTINCT CASE WHEN ${timeEntriesTable.id} IS NULL THEN ${shiftAssignmentsTable.shiftId} END)::int`,
-      hoursScheduled: sql<number>`COALESCE(SUM(DISTINCT EXTRACT(EPOCH FROM (${shiftsTable.endTime} - ${shiftsTable.startTime}))/3600), 0)::float`,
-      hoursWorked: sql<number>`COALESCE(SUM(EXTRACT(EPOCH FROM (COALESCE(${timeEntriesTable.clockOutTime}, NOW()) - ${timeEntriesTable.clockInTime}))/3600) FILTER (WHERE ${timeEntriesTable.id} IS NOT NULL), 0)::float`,
-      // Avg minutes late: if clocked in > shift start + 5 min grace
-      lateCount: sql<number>`COUNT(DISTINCT CASE WHEN ${timeEntriesTable.clockInTime} > ${shiftsTable.startTime} + INTERVAL '5 minutes' THEN ${shiftAssignmentsTable.shiftId} END)::int`,
-      totalLateMinutes: sql<number>`COALESCE(SUM(EXTRACT(EPOCH FROM (${timeEntriesTable.clockInTime} - ${shiftsTable.startTime}))/60) FILTER (WHERE ${timeEntriesTable.clockInTime} > ${shiftsTable.startTime} + INTERVAL '5 minutes'), 0)::float`,
-    })
-    .from(shiftAssignmentsTable)
-    .innerJoin(shiftsTable, eq(shiftAssignmentsTable.shiftId, shiftsTable.id))
-    .innerJoin(usersTable, eq(shiftAssignmentsTable.employeeId, usersTable.id))
-    .leftJoin(
-      timeEntriesTable,
-      and(
-        eq(timeEntriesTable.employeeId, shiftAssignmentsTable.employeeId),
-        eq(timeEntriesTable.shiftId, shiftAssignmentsTable.shiftId),
-      ),
-    )
-    .where(
-      and(
-        eq(shiftAssignmentsTable.status, "accepted"),
-        gte(shiftsTable.endTime, startUtc),
-        lte(shiftsTable.endTime, endExclusive),
-      ),
-    )
-    .groupBy(usersTable.id, usersTable.firstName, usersTable.lastName);
-
-  // Query B: rejected time-entry rate
-  const officerEntryRows = await db
-    .select({
-      employeeId: timeEntriesTable.employeeId,
-      totalEntries: sql<number>`COUNT(*)::int`,
-      rejectedEntries: sql<number>`COUNT(*) FILTER (WHERE ${timeEntriesTable.approvalStatus} = 'rejected')::int`,
-    })
-    .from(timeEntriesTable)
-    .where(
-      and(
-        gte(timeEntriesTable.clockInTime, startUtc),
-        lte(timeEntriesTable.clockInTime, endExclusive),
-      ),
-    )
-    .groupBy(timeEntriesTable.employeeId);
-
-  // Query C: incidents by severity per officer
-  const officerIncidentRows = await db
-    .select({
-      employeeId: incidentsTable.employeeId,
-      total: sql<number>`COUNT(*)::int`,
-      low: sql<number>`COUNT(*) FILTER (WHERE ${incidentsTable.severity} = 'low')::int`,
-      medium: sql<number>`COUNT(*) FILTER (WHERE ${incidentsTable.severity} = 'medium')::int`,
-      high: sql<number>`COUNT(*) FILTER (WHERE ${incidentsTable.severity} = 'high')::int`,
-      critical: sql<number>`COUNT(*) FILTER (WHERE ${incidentsTable.severity} = 'critical')::int`,
-    })
-    .from(incidentsTable)
-    .where(
-      and(
-        gte(incidentsTable.occurredAt, startUtc),
-        lte(incidentsTable.occurredAt, endExclusive),
-      ),
-    )
-    .groupBy(incidentsTable.employeeId);
-
-  // Build lookup maps
-  const entryMap = new Map(officerEntryRows.map((r) => [r.employeeId, r]));
-  const incidentMap = new Map(officerIncidentRows.map((r) => [r.employeeId, r]));
-
-  const perOfficer = officerShiftRows.map((r) => {
-    const entries = entryMap.get(r.userId);
-    const incidents = incidentMap.get(r.userId);
-
-    const attendanceRate =
-      r.shiftsAssigned > 0
-        ? Math.round((r.shiftsCompleted / r.shiftsAssigned) * 1000) / 10
-        : 100;
-    const onTimeRate =
-      r.shiftsCompleted > 0
-        ? Math.round(((r.shiftsCompleted - r.lateCount) / r.shiftsCompleted) * 1000) / 10
-        : 100;
-    const avgMinutesLate =
-      r.lateCount > 0 ? Math.round((r.totalLateMinutes / r.lateCount) * 10) / 10 : 0;
-    const rejectedEntryRate =
-      entries && entries.totalEntries > 0
-        ? Math.round((entries.rejectedEntries / entries.totalEntries) * 1000) / 10
-        : 0;
-    // Composite reliability: 60% attendance + 40% punctuality
-    const reliabilityScore = Math.round((0.6 * attendanceRate + 0.4 * onTimeRate) * 10) / 10;
-
-    return {
-      userId: r.userId,
-      firstName: r.firstName ?? "",
-      lastName: r.lastName ?? "",
-      shiftsAssigned: r.shiftsAssigned,
-      shiftsCompleted: r.shiftsCompleted,
-      noShows: r.noShows,
-      hoursScheduled: Math.round(r.hoursScheduled * 10) / 10,
-      hoursWorked: Math.round(r.hoursWorked * 10) / 10,
-      attendanceRate,
-      onTimeRate,
-      avgMinutesLate,
-      rejectedEntryRate,
-      incidentTotal: incidents?.total ?? 0,
-      incidentsBySeverity: {
-        low: incidents?.low ?? 0,
-        medium: incidents?.medium ?? 0,
-        high: incidents?.high ?? 0,
-        critical: incidents?.critical ?? 0,
-      },
-      reliabilityScore,
-    };
-  });
-
-  const officerSummary = {
-    totalOfficers: perOfficer.length,
-    totalNoShows: perOfficer.reduce((s, r) => s + r.noShows, 0),
-    avgAttendanceRate:
-      perOfficer.length > 0
-        ? Math.round((perOfficer.reduce((s, r) => s + r.attendanceRate, 0) / perOfficer.length) * 10) / 10
-        : 100,
-    avgOnTimeRate:
-      perOfficer.length > 0
-        ? Math.round((perOfficer.reduce((s, r) => s + r.onTimeRate, 0) / perOfficer.length) * 10) / 10
-        : 100,
-  };
-
-  return {
-    revenue,
-    laborCost,
-    profit,
-    marginPct,
-    hoursWorked,
-    hoursScheduled,
-    coveragePct,
-    noShowCount,
-    unfilledCount,
-    missedShifts,
-    incidentTotal,
-    incidentsBySeverity,
-    incidentsByStatus,
-    pnlTrend,
-    hoursTrend,
-    incidentTrend,
-    perSite,
-    officerSummary,
-    perOfficer,
-  };
-}
-
-/**
- * Weekly-bucketed performance history for one officer over the trailing N
- * ISO weeks (including the current week). Same admin-only analytics boundary
- * and the same attendance / punctuality / reliability definitions as the
- * per-officer summary table, but grouped by ISO week so trends are visible.
- */
-router.get("/analytics/officer-history", requireAdmin, async (req, res): Promise<void> => {
-  const { userId, weeks: weeksRaw } = req.query as { userId?: string; weeks?: string };
-  if (!userId || !UUID_RE.test(userId)) {
-    res.status(400).json({ error: "userId must be a valid UUID" });
-    return;
-  }
-  let weeks = 12;
-  if (weeksRaw !== undefined && weeksRaw !== "") {
-    const n = Number(weeksRaw);
-    if (!Number.isInteger(n) || n < 4 || n > 26) {
-      res.status(400).json({ error: "weeks must be an integer between 4 and 26" });
-      return;
-    }
-    weeks = n;
-  }
-
-  const [user] = await db
-    .select({
-      id: usersTable.id,
-      firstName: usersTable.firstName,
-      lastName: usersTable.lastName,
-    })
-    .from(usersTable)
-    .where(eq(usersTable.id, userId));
-  if (!user) {
-    res.status(404).json({ error: "User not found" });
-    return;
-  }
-
-  const tz = businessTimeZone();
-  const now = new Date();
-
-  // Today's calendar date in the business timezone → Monday of the current
-  // ISO week → back up (weeks - 1) more weeks for the window start.
-  const parts = new Intl.DateTimeFormat("en-CA", {
-    timeZone: tz,
-    year: "numeric",
-    month: "2-digit",
-    day: "2-digit",
-  }).formatToParts(now);
-  const pm: Record<string, string> = {};
-  for (const p of parts) if (p.type !== "literal") pm[p.type] = p.value;
-  const todayUtc = new Date(Date.UTC(Number(pm.year), Number(pm.month) - 1, Number(pm.day)));
-  const currentMonday = new Date(
-    todayUtc.getTime() - ((todayUtc.getUTCDay() + 6) % 7) * 86400_000,
-  );
-  const firstMonday = new Date(currentMonday.getTime() - (weeks - 1) * 7 * 86400_000);
-  const firstMondayStr = firstMonday.toISOString().slice(0, 10);
-  const startUtc = dateToBusinessTzStart(firstMondayStr, tz);
-
-  // One row per ISO week (business timezone) of shift end. Same joins and
-  // metric definitions as the per-officer block in computeAnalyticsSummary:
-  // accepted assignments on shifts that have already ended; completed = a
-  // time entry exists for (employee, shift); late = clock-in more than 5
-  // minutes after shift start.
-  const tzLit = sql.raw(`'${tz.replace(/'/g, "''")}'`);
-  const weekExpr = sql`date_trunc('week', ${shiftsTable.endTime} AT TIME ZONE ${tzLit})`;
-  const rows = await db
-    .select({
-      weekStart: sql<string>`${weekExpr}::text`,
-      shiftsAssigned: sql<number>`COUNT(DISTINCT ${shiftAssignmentsTable.shiftId})::int`,
-      shiftsCompleted: sql<number>`COUNT(DISTINCT CASE WHEN ${timeEntriesTable.id} IS NOT NULL THEN ${shiftAssignmentsTable.shiftId} END)::int`,
-      noShows: sql<number>`COUNT(DISTINCT CASE WHEN ${timeEntriesTable.id} IS NULL THEN ${shiftAssignmentsTable.shiftId} END)::int`,
-      hoursWorked: sql<number>`COALESCE(SUM(EXTRACT(EPOCH FROM (COALESCE(${timeEntriesTable.clockOutTime}, NOW()) - ${timeEntriesTable.clockInTime}))/3600) FILTER (WHERE ${timeEntriesTable.id} IS NOT NULL), 0)::float`,
-      lateCount: sql<number>`COUNT(DISTINCT CASE WHEN ${timeEntriesTable.clockInTime} > ${shiftsTable.startTime} + INTERVAL '5 minutes' THEN ${shiftAssignmentsTable.shiftId} END)::int`,
-    })
-    .from(shiftAssignmentsTable)
-    .innerJoin(shiftsTable, eq(shiftAssignmentsTable.shiftId, shiftsTable.id))
-    .leftJoin(
-      timeEntriesTable,
-      and(
-        eq(timeEntriesTable.employeeId, shiftAssignmentsTable.employeeId),
-        eq(timeEntriesTable.shiftId, shiftAssignmentsTable.shiftId),
-      ),
-    )
-    .where(
-      and(
-        eq(shiftAssignmentsTable.employeeId, userId),
-        eq(shiftAssignmentsTable.status, "accepted"),
-        gte(shiftsTable.endTime, startUtc),
-        lt(shiftsTable.endTime, now),
-      ),
-    )
-    .groupBy(weekExpr);
-
-  // Key rows by ISO week label (weekStart already tz-shifted → treat as UTC).
-  const byWeek = new Map<string, (typeof rows)[number]>();
-  for (const r of rows) {
-    const dt = new Date(r.weekStart.replace(" ", "T") + "Z");
-    byWeek.set(weekBucket(dt, "UTC"), r);
-  }
-
-  // Enumerate every week in the window so empty weeks appear as gaps.
-  const points = [];
-  for (let i = 0; i < weeks; i++) {
-    const monday = new Date(firstMonday.getTime() + i * 7 * 86400_000);
-    const bucket = weekBucket(monday, "UTC");
-    const r = byWeek.get(bucket);
-    if (!r) {
-      points.push({
-        bucket,
-        weekStart: monday.toISOString().slice(0, 10),
-        shiftsAssigned: 0,
-        shiftsCompleted: 0,
-        noShows: 0,
-        hoursWorked: 0,
-        attendanceRate: null,
-        punctualityEligible: 0,
-        onTimeRate: null,
-        reliabilityScore: null,
-      });
-      continue;
-    }
-    const attendanceRate =
-      r.shiftsAssigned > 0
-        ? Math.round((r.shiftsCompleted / r.shiftsAssigned) * 1000) / 10
-        : null;
-    const onTimeRate =
-      r.shiftsCompleted > 0
-        ? Math.round(((r.shiftsCompleted - r.lateCount) / r.shiftsCompleted) * 1000) / 10
-        : null;
-    // Composite reliability: 60% attendance + 40% punctuality — identical to
-    // the per-officer summary table, including its "no completed shifts →
-    // punctuality defaults to 100" convention, so the trend line for a week
-    // always matches what the summary would report for that same week.
-    // onTimeRate itself stays null in the payload to mark the missing signal.
-    const reliabilityScore =
-      attendanceRate === null
-        ? null
-        : Math.round((0.6 * attendanceRate + 0.4 * (onTimeRate ?? 100)) * 10) / 10;
-    points.push({
-      bucket,
-      weekStart: monday.toISOString().slice(0, 10),
-      shiftsAssigned: r.shiftsAssigned,
-      shiftsCompleted: r.shiftsCompleted,
-      noShows: r.noShows,
-      hoursWorked: Math.round(r.hoursWorked * 10) / 10,
-      attendanceRate,
-      punctualityEligible: r.shiftsCompleted,
-      onTimeRate,
-      reliabilityScore,
+  if (endDayStart.getTime() - startUtc.getTime() > MAX_RANGE_DAYS * 86_400_000) {
+    res.status(400).json({
+      error: "Bad Request",
+      message: `Date range is capped at ${MAX_RANGE_DAYS} days — narrow the window.`,
     });
+    return null;
   }
-
-  res.json({
-    userId: user.id,
-    firstName: user.firstName ?? "",
-    lastName: user.lastName ?? "",
-    weeks,
-    points,
-  });
-});
+  // End-exclusive bound = the local midnight AFTER the end date (DST-safe).
+  const endUtc = businessDayWindow(new Date(endDayStart.getTime() + 12 * 3_600_000), tz).endOfDay;
+  return { start: startUtc, end: endUtc, clientId };
+}
 
 router.get("/analytics/summary", requireAdmin, async (req, res): Promise<void> => {
-  const range = parseRange(req, res);
+  const range = resolveRange(req.query, res);
   if (!range) return;
-  const client = await resolveClientFilter(range.clientId, res);
-  if (client === undefined) return;
-  res.json(await computeAnalyticsSummary(range.start, range.end, client?.id));
+  try {
+    res.json(await computeAnalyticsSummary(range));
+  } catch (err) {
+    logger.error({ err }, "[analytics] summary failed");
+    res.status(500).json({ error: "Internal Server Error", message: "Could not compute analytics." });
+  }
 });
 
-/**
- * CSV cell escaping — same contract as the Pay Run export:
- *   - Wrap in quotes if the value contains `,`, `"`, newline, tab, or CR.
- *   - Double up embedded quotes.
- *   - Defang leading `=`, `+`, `-`, `@`, `|`, tab, CR by prefixing `'`
- *     (Excel / Sheets treat these as formula starters).
- */
-function csvEscape(v: unknown): string {
-  if (v === null || v === undefined) return "";
-  let s = typeof v === "string" ? v : String(v);
-  if (s.length > 0 && /^[=+\-@|\t\r]/.test(s)) {
-    s = "'" + s;
+router.get("/analytics/officers", requireAdmin, async (req, res): Promise<void> => {
+  const range = resolveRange(req.query, res);
+  if (!range) return;
+  try {
+    res.json(await computeAnalyticsOfficers(range));
+  } catch (err) {
+    logger.error({ err }, "[analytics] officers failed");
+    res.status(500).json({ error: "Internal Server Error", message: "Could not compute analytics." });
   }
-  if (/[",\n\r\t]/.test(s)) {
-    s = '"' + s.replace(/"/g, '""') + '"';
-  }
+});
+
+// ---------- downloads -------------------------------------------------
+
+/** Same leading-character guard the Exports center / Pay Run CSV uses. */
+function csvCell(v: unknown): string {
+  let s = v == null ? "" : String(v);
+  if (/^[=+\-@\t\r|]/.test(s)) s = "'" + s;
+  if (/[",\n\r]/.test(s)) s = '"' + s.replace(/"/g, '""') + '"';
   return s;
 }
+const csvRow = (cells: unknown[]) => cells.map(csvCell).join(",");
 
-/** Filesystem-safe slug for a client name (e.g. "Acme Corp." → "acme-corp"). */
-export function clientFileSlug(name: string): string {
-  return (
-    name
-      .toLowerCase()
-      .replace(/[^a-z0-9]+/g, "-")
-      .replace(/^-+|-+$/g, "")
-      .slice(0, 40) || "client"
-  );
-}
+const money = (n: number) => n.toFixed(2);
+const pctOrDash = (n: number | null) => (n == null ? "—" : `${n.toFixed(1)}%`);
 
-function exportFilename(
-  start: string,
-  end: string,
-  ext: "csv" | "pdf",
-  clientName?: string,
-): string {
-  const safeShort = brand.shortName.replace(/[^a-z0-9]/gi, "-").toLowerCase();
-  const clientPart = clientName ? `-${clientFileSlug(clientName)}` : "";
-  return `${safeShort}-analytics${clientPart}-${start}_${end}.${ext}`;
-}
-
-router.get("/analytics/export.csv", requireAdmin, async (req, res): Promise<void> => {
-  const range = parseRange(req, res);
-  if (!range) return;
-  const client = await resolveClientFilter(range.clientId, res);
-  if (client === undefined) return;
-  const s = await computeAnalyticsSummary(range.start, range.end, client?.id);
-
+function buildCsv(params: Params, summary: AnalyticsSummary, officers: AnalyticsOfficerRow[]): string {
   const lines: string[] = [];
-  const row = (...cells: unknown[]) => lines.push(cells.map(csvEscape).join(","));
-
-  // ── Summary KPI section ──
-  row("Metric", "Value");
-  row("Period start", range.start);
-  row("Period end", range.end);
-  if (client) row("Client", client.name);
-  row("Revenue (USD)", s.revenue.toFixed(2));
-  row("Labor cost (USD)", s.laborCost.toFixed(2));
-  row("Profit (USD)", s.profit.toFixed(2));
-  row("Margin (%)", s.marginPct.toFixed(1));
-  row("Hours worked", s.hoursWorked.toFixed(2));
-  row("Hours scheduled", s.hoursScheduled.toFixed(2));
-  row("Coverage (%)", s.coveragePct.toFixed(1));
-  row("No-shows", s.noShowCount);
-  row("Unfilled shifts", s.unfilledCount);
-  row("Incidents (total)", s.incidentTotal);
-  row("Incidents low", s.incidentsBySeverity.low ?? 0);
-  row("Incidents medium", s.incidentsBySeverity.medium ?? 0);
-  row("Incidents high", s.incidentsBySeverity.high ?? 0);
-  row("Incidents critical", s.incidentsBySeverity.critical ?? 0);
-  row("Incidents open", s.incidentsByStatus.open ?? 0);
-  row("Incidents investigating", s.incidentsByStatus.investigating ?? 0);
-  row("Incidents closed", s.incidentsByStatus.closed ?? 0);
+  lines.push(csvRow([`${brand.companyName} — Analytics`]));
+  lines.push(csvRow(["Range", params.start, params.end]));
+  if (params.clientId) lines.push(csvRow(["Client filter", params.clientId]));
   lines.push("");
-
-  // ── Per-site breakdown section ──
-  row(
-    "Site", "Revenue (USD)", "Labor cost (USD)", "Profit (USD)",
-    "Hours worked", "Hours scheduled", "No-shows", "Unfilled shifts", "Incidents",
-  );
-  const sites = [...s.perSite].sort((a, b) => b.revenue - a.revenue);
-  for (const site of sites) {
-    row(
-      site.siteName,
-      site.revenue.toFixed(2),
-      site.laborCost.toFixed(2),
-      site.profit.toFixed(2),
-      site.hoursWorked.toFixed(2),
-      site.hoursScheduled.toFixed(2),
-      site.noShows,
-      site.unfilledShifts,
-      site.incidents,
-    );
+  lines.push(csvRow(["Summary metric", "Value"]));
+  lines.push(csvRow(["Revenue (USD)", money(summary.revenue)]));
+  lines.push(csvRow(["Labor cost (USD)", money(summary.laborCost)]));
+  lines.push(csvRow(["P&L (USD)", money(summary.pnl)]));
+  lines.push(csvRow(["Margin %", summary.marginPct == null ? "" : summary.marginPct.toFixed(1)]));
+  lines.push(csvRow(["Hours worked", summary.hoursWorked.toFixed(2)]));
+  lines.push(csvRow(["Hours scheduled", summary.hoursScheduled.toFixed(2)]));
+  lines.push(csvRow(["Coverage %", summary.coveragePct == null ? "" : summary.coveragePct.toFixed(1)]));
+  lines.push(csvRow(["No-shows", summary.noShows]));
+  lines.push(csvRow(["Unfilled shifts", summary.unfilledShifts]));
+  lines.push(csvRow(["Incidents (total)", summary.incidents.total]));
+  lines.push(csvRow(["Incidents low/medium/high/critical", `${summary.incidents.low}/${summary.incidents.medium}/${summary.incidents.high}/${summary.incidents.critical}`]));
+  lines.push(csvRow(["Incidents open/resolved", `${summary.incidents.open}/${summary.incidents.resolved}`]));
+  lines.push("");
+  lines.push(csvRow(["Week of", "Revenue", "Labor cost", "P&L", "Hours worked", "Incidents"]));
+  for (const w of summary.weeklyTrend) {
+    lines.push(csvRow([w.weekStart, money(w.revenue), money(w.laborCost), money(w.pnl), w.hoursWorked.toFixed(2), w.incidentCount]));
   }
+  lines.push("");
+  lines.push(csvRow(["Site", "Client", "Revenue", "Labor cost", "P&L", "Hours worked", "Coverage %"]));
+  for (const s of summary.sites) {
+    lines.push(csvRow([s.siteName, s.clientName ?? "", money(s.revenue), money(s.laborCost), money(s.pnl), s.hoursWorked.toFixed(2), s.coveragePct == null ? "" : s.coveragePct.toFixed(1)]));
+  }
+  lines.push("");
+  lines.push(csvRow(["Officer", "Hours worked", "Shifts completed", "Incidents filed", "Punctuality %"]));
+  for (const o of officers) {
+    lines.push(csvRow([o.name, o.hoursWorked.toFixed(2), o.shiftsCompleted, o.incidentsFiled, o.punctualityPct == null ? "" : o.punctualityPct.toFixed(1)]));
+  }
+  lines.push("");
+  lines.push(csvRow(["Note", "Revenue and labor cost match invoicing/payroll rules, including the 1.5x federal-holiday premium."]));
+  return lines.join("\r\n");
+}
 
-  // CRLF — Excel-friendliest line ending.
-  const csv = lines.join("\r\n") + "\r\n";
-  res.setHeader("Content-Type", "text/csv; charset=utf-8");
-  res.setHeader(
-    "Content-Disposition",
-    `attachment; filename="${exportFilename(range.start, range.end, "csv", client?.name)}"`,
+const PDF_MARGIN = 40;
+
+function pdfTable(
+  doc: PDFKit.PDFDocument,
+  title: string,
+  headers: string[],
+  widths: number[],
+  rows: string[][],
+): void {
+  const bottom = doc.page.height - PDF_MARGIN - 20;
+  if (doc.y + 60 > bottom) doc.addPage();
+  doc.moveDown(0.8);
+  doc.font("Helvetica-Bold").fontSize(12).fillColor("#111111").text(title, PDF_MARGIN);
+  doc.moveDown(0.3);
+  const drawRow = (cells: string[], bold: boolean, zebra: boolean) => {
+    if (doc.y + 16 > bottom) {
+      doc.addPage();
+      doc.y = PDF_MARGIN;
+    }
+    const y = doc.y;
+    if (zebra) {
+      doc.rect(PDF_MARGIN, y - 2, widths.reduce((a, b) => a + b, 0), 15).fill("#f4f1ea");
+    }
+    doc.font(bold ? "Helvetica-Bold" : "Helvetica").fontSize(8.5).fillColor("#222222");
+    let x = PDF_MARGIN;
+    for (let i = 0; i < cells.length; i++) {
+      doc.text(cells[i] ?? "", x + 2, y, { width: (widths[i] ?? 60) - 4, lineBreak: false });
+      x += widths[i] ?? 60;
+    }
+    doc.y = y + 15;
+  };
+  drawRow(headers, true, false);
+  let zebra = false;
+  for (const r of rows) {
+    drawRow(r, false, zebra);
+    zebra = !zebra;
+  }
+}
+
+function renderAnalyticsPdf(
+  res: Response,
+  params: Params,
+  summary: AnalyticsSummary,
+  officers: AnalyticsOfficerRow[],
+): void {
+  const doc = new PDFDocument({ size: "LETTER", margin: PDF_MARGIN });
+  const filename = `analytics-${params.start}-to-${params.end}.pdf`;
+  res.setHeader("Content-Type", "application/pdf");
+  res.setHeader("Content-Disposition", `attachment; filename="${filename}"`);
+  doc.pipe(res);
+
+  const belowHeader = drawBrandHeader(doc, `Analytics — ${params.start} to ${params.end}`);
+  doc.y = belowHeader + 16;
+
+  const kpis: [string, string][] = [
+    ["Revenue", `$${money(summary.revenue)}`],
+    ["Labor cost", `$${money(summary.laborCost)}`],
+    ["P&L", `$${money(summary.pnl)}`],
+    ["Margin", pctOrDash(summary.marginPct)],
+    ["Hours worked", summary.hoursWorked.toFixed(2)],
+    ["Hours scheduled", summary.hoursScheduled.toFixed(2)],
+    ["Coverage", pctOrDash(summary.coveragePct)],
+    ["No-shows", String(summary.noShows)],
+    ["Unfilled shifts", String(summary.unfilledShifts)],
+    ["Incidents", String(summary.incidents.total)],
+  ];
+  const colW = (doc.page.width - PDF_MARGIN * 2) / 5;
+  let x = PDF_MARGIN;
+  let rowY = doc.y;
+  kpis.forEach(([label, value], i) => {
+    if (i > 0 && i % 5 === 0) {
+      rowY += 40;
+      x = PDF_MARGIN;
+    }
+    doc.font("Helvetica").fontSize(8).fillColor("#666666").text(label, x, rowY, { width: colW - 6, lineBreak: false });
+    doc.font("Helvetica-Bold").fontSize(13).fillColor("#111111").text(value, x, rowY + 11, { width: colW - 6, lineBreak: false });
+    x += colW;
+  });
+  doc.y = rowY + 44;
+
+  pdfTable(
+    doc,
+    "Weekly trend",
+    ["Week of", "Revenue", "Labor cost", "P&L", "Hours", "Incidents"],
+    [90, 90, 90, 90, 80, 70],
+    summary.weeklyTrend.map((w) => [w.weekStart, `$${money(w.revenue)}`, `$${money(w.laborCost)}`, `$${money(w.pnl)}`, w.hoursWorked.toFixed(1), String(w.incidentCount)]),
   );
-  res.send(csv);
+  pdfTable(
+    doc,
+    "Sites",
+    ["Site", "Client", "Revenue", "P&L", "Hours", "Coverage"],
+    [130, 110, 80, 80, 60, 70],
+    summary.sites.map((s) => [s.siteName, s.clientName ?? "—", `$${money(s.revenue)}`, `$${money(s.pnl)}`, s.hoursWorked.toFixed(1), pctOrDash(s.coveragePct)]),
+  );
+  pdfTable(
+    doc,
+    "Officer performance",
+    ["Officer", "Hours", "Shifts completed", "Incidents filed", "Punctuality"],
+    [160, 80, 110, 100, 80],
+    officers.map((o) => [o.name, o.hoursWorked.toFixed(1), String(o.shiftsCompleted), String(o.incidentsFiled), pctOrDash(o.punctualityPct)]),
+  );
+
+  doc.moveDown(1);
+  doc.font("Helvetica-Oblique").fontSize(7.5).fillColor("#777777").text(
+    "Revenue and labor cost match invoicing/payroll rules, including the 1.5\u00d7 federal-holiday premium.",
+    PDF_MARGIN,
+  );
+  doc.end();
+}
+
+router.post("/admin/analytics/export-csv", requireAdmin, exportLimiter, async (req, res): Promise<void> => {
+  const range = resolveRange(req.body, res);
+  if (!range) return;
+  const params = paramsSchema.parse(req.body);
+  try {
+    const [summary, officers] = await Promise.all([
+      computeAnalyticsSummary(range),
+      computeAnalyticsOfficers(range),
+    ]);
+    const csv = buildCsv(params, summary, officers);
+    res.setHeader("Content-Type", "text/csv; charset=utf-8");
+    res.setHeader("Content-Disposition", `attachment; filename="analytics-${params.start}-to-${params.end}.csv"`);
+    res.locals["auditMetadata"] = { format: "csv", start: params.start, end: params.end, clientId: params.clientId ?? null };
+    res.status(200).send(csv);
+  } catch (err) {
+    logger.error({ err }, "[analytics] csv export failed");
+    res.status(500).json({ error: "Internal Server Error", message: "Could not build CSV." });
+  }
 });
 
-router.get("/analytics/export.pdf", requireAdmin, async (req, res): Promise<void> => {
-  const range = parseRange(req, res);
+router.post("/admin/analytics/export-pdf", requireAdmin, exportLimiter, async (req, res): Promise<void> => {
+  const range = resolveRange(req.body, res);
   if (!range) return;
-  const client = await resolveClientFilter(range.clientId, res);
-  if (client === undefined) return;
-  const s = await computeAnalyticsSummary(range.start, range.end, client?.id);
-  const payload = buildAnalyticsReportPdf(s, range.start, range.end, client?.name);
-  res.setHeader("Content-Type", "application/pdf");
-  res.setHeader(
-    "Content-Disposition",
-    `attachment; filename="${exportFilename(range.start, range.end, "pdf", client?.name)}"`,
-  );
-  payload.stream.pipe(res);
+  const params = paramsSchema.parse(req.body);
+  try {
+    const [summary, officers] = await Promise.all([
+      computeAnalyticsSummary(range),
+      computeAnalyticsOfficers(range),
+    ]);
+    res.locals["auditMetadata"] = { format: "pdf", start: params.start, end: params.end, clientId: params.clientId ?? null };
+    renderAnalyticsPdf(res, params, summary, officers);
+  } catch (err) {
+    logger.error({ err }, "[analytics] pdf export failed");
+    if (!res.headersSent) {
+      res.status(500).json({ error: "Internal Server Error", message: "Could not build PDF." });
+    } else {
+      res.end();
+    }
+  }
 });
 
 export default router;
-

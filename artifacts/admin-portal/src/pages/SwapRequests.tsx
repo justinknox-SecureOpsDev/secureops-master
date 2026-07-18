@@ -1,6 +1,5 @@
 import { useEffect, useState, useCallback } from "react";
 import { api } from "@/lib/api";
-import { formatDate, formatDateTime } from "@/lib/format";
 import { Button } from "@/components/ui/button";
 import { Loader2, Repeat, Check, X } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
@@ -102,7 +101,7 @@ export default function SwapRequestsPage() {
                   <td className="px-3 py-2 align-top">
                     <div className="font-medium">{r.site_name || "—"}</div>
                     <div className="text-xs text-muted-foreground">
-                      {r.start_time ? formatDateTime(r.start_time) : "—"}
+                      {r.start_time ? new Date(r.start_time).toLocaleString() : "—"}
                       {r.required_license_level && <span className="ml-2 brand-gold">[{r.required_license_level}]</span>}
                     </div>
                   </td>
@@ -114,7 +113,7 @@ export default function SwapRequestsPage() {
                     <div className="text-xs text-muted-foreground line-clamp-3">{r.reason || "—"}</div>
                   </td>
                   <td className="px-3 py-2 align-top text-xs text-muted-foreground">
-                    {formatDate(r.created_at)}
+                    {new Date(r.created_at).toLocaleDateString()}
                   </td>
                   <td className="px-3 py-2 align-top text-right">
                     {r.status === "accepted" && (

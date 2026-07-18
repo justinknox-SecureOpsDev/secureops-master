@@ -2,7 +2,6 @@ import { useEffect, useState } from "react";
 import { useLocation } from "wouter";
 import { Receipt, Download, CreditCard, CheckCircle2, AlertTriangle, ChevronDown, ChevronUp } from "lucide-react";
 import { api, fetchWithAuth } from "@/lib/api";
-import { formatDate } from "@/lib/format";
 import { Button } from "@/components/ui/button";
 import { useToast } from "@/hooks/use-toast";
 
@@ -31,13 +30,9 @@ function fmtUsd(n: string | number | null) {
   const v = parseFloat(String(n));
   return isNaN(v) ? "—" : v.toLocaleString("en-US", { style: "currency", currency: "USD" });
 }
-const DATE_ONLY_RE = /^\d{4}-\d{2}-\d{2}$/;
 function fmt(d: string | null) {
   if (!d) return "—";
-  const opts: Intl.DateTimeFormatOptions = { month: "short", day: "numeric", year: "numeric" };
-  // periodStart/periodEnd/dueDate are pg `date` columns (literal calendar
-  // dates → render in UTC); paidAt is a timestamp → render in Central.
-  return DATE_ONLY_RE.test(d) ? formatDate(d + "T00:00:00Z", opts, "UTC") : formatDate(d, opts);
+  return new Date(d).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
 }
 
 const STATUS_CFG: Record<string, { label: string; cls: string; icon: React.ReactNode }> = {

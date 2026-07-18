@@ -1,6 +1,5 @@
 import { useState, useCallback, useEffect } from "react";
 import { api } from "@/lib/api";
-import { BUSINESS_TIME_ZONE } from "@/lib/format";
 import { Button } from "@/components/ui/button";
 import { useToast } from "@/hooks/use-toast";
 import {
@@ -35,7 +34,7 @@ function fmtTs(ts: string | null | undefined): string {
   if (!ts) return "—";
   try {
     const d = new Date(ts);
-    return d.toLocaleString(undefined, { timeZone: BUSINESS_TIME_ZONE });
+    return d.toLocaleString();
   } catch {
     return ts;
   }

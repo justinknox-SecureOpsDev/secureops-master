@@ -6,7 +6,7 @@ export function BrandHeader({ subtitle }: { subtitle?: string }) {
     <header className="bg-brand-navy text-white border-b-4 border-brand-gold">
       <div className="max-w-3xl mx-auto px-6 py-6 flex items-center gap-4">
         <img
-          src={`${import.meta.env.BASE_URL}logo-256.png`}
+          src={b?.logoDataUrl || `${import.meta.env.BASE_URL}logo-256.png`}
           alt={b?.companyName ?? "Williams Council Security Group"}
           className="w-14 h-14 shrink-0 rounded-md object-contain"
         />

@@ -10,7 +10,6 @@ import {
   AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
 import { api } from "@/lib/api";
-import { formatDate } from "@/lib/format";
 
 type Row = {
   id: string;
@@ -301,12 +300,12 @@ export function InvitationsPage() {
                     )}
                   </td>
                   <td className="px-3 py-2 text-xs text-muted-foreground">
-                    {r.tempPasswordSetAt ? formatDate(r.tempPasswordSetAt) : "—"}
+                    {r.tempPasswordSetAt ? new Date(r.tempPasswordSetAt).toLocaleDateString() : "—"}
                   </td>
                   <td className="px-3 py-2">
                     {isInvited
                       ? <span className="inline-flex items-center gap-1 text-emerald-700 text-xs">
-                          <CheckCircle2 className="w-3.5 h-3.5" /> {formatDate(r.invitedAt!)}
+                          <CheckCircle2 className="w-3.5 h-3.5" /> {new Date(r.invitedAt!).toLocaleDateString()}
                         </span>
                       : <span className="text-xs text-muted-foreground">—</span>}
                   </td>

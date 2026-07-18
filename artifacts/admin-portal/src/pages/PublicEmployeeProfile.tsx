@@ -2,7 +2,6 @@ import { useEffect, useState } from "react";
 import { useRoute } from "wouter";
 import { Loader2, AlertTriangle, Download, ShieldCheck, BadgeCheck, Calendar, FileText } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { formatDate } from "@/lib/format";
 
 type VisibleSections = {
   license: boolean;
@@ -149,7 +148,7 @@ export default function PublicEmployeeProfilePage() {
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mt-6 text-sm">
             {data.licenseExpiry && (
               <Fact icon={<Calendar className="w-4 h-4" />} label="License expires">
-                {formatDate(data.licenseExpiry + "T00:00:00Z", undefined, "UTC")}
+                {new Date(data.licenseExpiry).toLocaleDateString()}
               </Fact>
             )}
             {data.yearsExperience != null && (
@@ -230,7 +229,7 @@ export default function PublicEmployeeProfilePage() {
               </a>
             </Button>
             <div className="text-xs text-muted-foreground text-right">
-              Link expires {formatDate(data.share.expiresAt)}<br />
+              Link expires {new Date(data.share.expiresAt).toLocaleDateString()}<br />
               View #{data.share.viewCount}
             </div>
           </div>

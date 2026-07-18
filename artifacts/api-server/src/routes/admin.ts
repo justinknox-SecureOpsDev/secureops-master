@@ -39,16 +39,27 @@ import {
   insertLicenseSchema,
   paymentDiscrepanciesTable,
   insertPaymentDiscrepancySchema,
+  salesLeadsTable,
+  insertSalesLeadSchema,
 } from "@workspace/db";
 import { requireAdmin } from "../middlewares/auth";
+import { resolveSelfOrgInvite, getSelfOrigin } from "./orgDirectory";
 import { siteBlockersForOne, clientDeletionBlockers, refuseIfBlocked } from "../lib/siteDeletion";
-import { sendEmail, renderPasswordResetEmail, renderInviteEmail } from "../lib/email";
+import { sendEmail, renderPasswordResetEmail, renderInviteEmail, type EmailAttachment } from "../lib/email";
+import QRCode from "qrcode";
 import { disconnectUser } from "../lib/wsManager";
 import { writeEmployeeFieldChanges } from "../lib/employeeChangeLog";
 import { preparePreUpdateBody as prepareSitePreUpdate, maybeAutoGeocode as maybeAutoGeocodeSite } from "../lib/siteGeocode";
 import { normalizePhoneToE164 } from "../lib/phone";
 import { adminEditBreaksAutoSync, upsertWeeklyInvoiceForTimeEntry, weekStartIsoUtc } from "../lib/invoiceSync";
+import type { TimeEntry } from "@workspace/db";
 import { buildTimeEntryAuditMetadata, timeEntrySnapshot } from "../lib/timeEntryAudit";
+import { ObjectStorageService, ObjectNotFoundError } from "../lib/objectStorage";
+import {
+  extractEmployeeFromPdf,
+  normalizeEmployeeDraft,
+  type EmployeeDraft,
+} from "../lib/pdfEmployeeExtract";
 
 /**
  * Coerce a free-text phone field on an admin CRUD payload into E.164 in place.
@@ -467,6 +478,21 @@ const tables: Record<string, TableConfig> = {
     importSupported: false,
     label: "Payment discrepancy",
   },
+  sales_leads: {
+    table: salesLeadsTable,
+    insertSchema: insertSalesLeadSchema as unknown as z.ZodSchema<any>,
+    searchColumns: [
+      salesLeadsTable.companyName,
+      salesLeadsTable.contactName,
+      salesLeadsTable.email,
+      salesLeadsTable.tier,
+      salesLeadsTable.status,
+    ],
+    orderBy: salesLeadsTable.createdAt,
+    coerceWrite: (v) => applyIntCoercion(v, ["officerCount"]),
+    importSupported: false,
+    label: "Sales lead",
+  },
 };
 
 function getConfig(name: string): TableConfig | null {
@@ -575,6 +601,7 @@ async function autoCreateEmployeeFromName(label: string): Promise<string> {
       role: "employee",
       status: "pending",
       mustCompleteProfile: true,
+      mustSignPolicies: true,
     }).returning()) as Array<{ id: string }>;
     await tx.insert(employeesTable).values({ userId: u.id });
     return u.id;
@@ -881,6 +908,27 @@ function buildListQueryParts(
   return { where, sortColumn, sortDir };
 }
 
+/**
+ * This deployment's own organization invite info, for the admin "Invite staff"
+ * surface. Returns the org code (resolved from config, never hardcoded), its
+ * display name, and this deployment's public origin so the portal can build a
+ * shareable invite deep link + QR code in the exact format the mobile app
+ * consumes (`<scheme>://connect?code=` / `<origin>/connect?code=`).
+ *
+ * `code` is null when it can't be resolved (no ORG_CODE and no matching
+ * ORG_DIRECTORY entry) — the UI then explains how to configure it. Admin-only:
+ * the org code is not a secret, but this is an internal operations surface.
+ */
+router.get("/admin/org-invite", requireAdmin, (_req, res): void => {
+  res.setHeader("Cache-Control", "no-store");
+  const self = resolveSelfOrgInvite();
+  res.json({
+    code: self?.code ?? null,
+    name: self?.name ?? null,
+    appBaseUrl: getSelfOrigin(),
+  });
+});
+
 router.get("/admin/tables", requireAdmin, (_req, res): void => {
   const list = Object.entries(tables).map(([name, cfg]) => ({
     name,
@@ -1041,13 +1089,17 @@ router.post("/admin/tables/:table", requireAdmin, async (req, res): Promise<void
   if (cfg.beforeInsert) values = await cfg.beforeInsert(values);
   try {
     const inserted = (await db.insert(cfg.table).values(values).returning()) as unknown[];
-    const insertedRow = inserted[0] as Record<string, unknown>;
-    res.status(201).json(insertedRow);
-    // Invoice auto-sync: a new time entry saved directly as approved must
-    // roll into the weekly client invoice (same as the approve route does).
-    if (tableName === "time_entries" && insertedRow?.approvalStatus === "approved") {
-      void upsertWeeklyInvoiceForTimeEntry(insertedRow as any);
+    // Grid-created time entries must hit the same invoice pipeline as the
+    // dedicated approval routes: an already-approved entry rolls straight
+    // into that site/week's draft invoice. Fire-and-forget — the helper
+    // never throws and the 201 must not block on billing.
+    if (tableName === "time_entries") {
+      const entry = inserted[0] as TimeEntry | undefined;
+      if (entry?.approvalStatus === "approved") {
+        void upsertWeeklyInvoiceForTimeEntry(entry);
+      }
     }
+    res.status(201).json(inserted[0]);
   } catch (err: any) {
     req.log.warn({ err }, "admin insert failed");
     res.status(400).json({ error: "Insert failed", message: err?.message ?? "Insert failed" });
@@ -1215,45 +1267,32 @@ router.put("/admin/tables/:table/:id", requireAdmin, async (req, res): Promise<v
         timeEntrySnapshot(beforeRow as Record<string, unknown>),
         timeEntrySnapshot(row as Record<string, unknown>),
       );
-    }
 
-    res.json(row);
-
-    // Invoice auto-sync for time-entry grid edits. Mirrors the dedicated
-    // approve/correct routes. Fire best-effort on the current (siteId, week)
-    // whenever the entry is approved OR was previously approved (a downgrade
-    // from approved→pending/rejected must also remove the hours from the
-    // draft, exactly as the dedicated approve route does on "rejected").
-    // When clock-in time, siteId, or shiftId changed the old week/site is
-    // also re-synced so stale hours don't linger on the wrong invoice.
-    if (tableName === "time_entries") {
-      const newRow = row as Record<string, unknown>;
-      const wasApproved = beforeRow?.approvalStatus === "approved";
-      const isApproved = newRow.approvalStatus === "approved";
-      // Sync current context if this entry is (or was) billable.
-      if (isApproved || wasApproved) {
-        void upsertWeeklyInvoiceForTimeEntry(newRow as any);
-      }
-      // Re-sync the prior week/site when the entry moved ISO week or site.
-      if (beforeRow && wasApproved) {
-        const oldClockIn = beforeRow.clockInTime ? new Date(beforeRow.clockInTime as string | Date) : null;
-        const newClockIn = newRow.clockInTime ? new Date(newRow.clockInTime as string | Date) : null;
-        const oldSiteId = (beforeRow.siteId ?? null) as string | null;
-        const newSiteId = (newRow.siteId ?? null) as string | null;
-        const oldShiftId = (beforeRow.shiftId ?? null) as string | null;
-        const newShiftId = (newRow.shiftId ?? null) as string | null;
-        const weekChanged = oldClockIn && newClockIn
-          && weekStartIsoUtc(oldClockIn) !== weekStartIsoUtc(newClockIn);
-        const siteChanged = oldSiteId !== newSiteId || oldShiftId !== newShiftId;
-        // oldSiteId may be null when the entry's site is anchored via
-        // shiftId only. upsertWeeklyInvoiceForTimeEntry already falls back
-        // to resolving siteId from the shift row, so passing beforeRow is
-        // sufficient — don't gate on oldSiteId here.
-        if ((weekChanged || siteChanged) && oldClockIn && (oldSiteId || oldShiftId)) {
-          void upsertWeeklyInvoiceForTimeEntry(beforeRow as any);
+      // Keep the weekly draft invoice in lockstep with grid edits (mirrors
+      // the dedicated approval/correction routes). Sync when the entry is
+      // approved now OR was approved before — the rebuild is what REMOVES
+      // hours when an admin downgrades approved → pending/rejected. If the
+      // entry also moved buckets (different site, shift, or ISO week), the
+      // OLD bucket must be rebuilt too or its stale hours linger. All
+      // fire-and-forget: the helper never throws and the 200 must not
+      // block on billing.
+      const before = beforeRow as unknown as TimeEntry;
+      const after = row as unknown as TimeEntry;
+      const wasApproved = before.approvalStatus === "approved";
+      const nowApproved = after.approvalStatus === "approved";
+      if (wasApproved || nowApproved) {
+        void upsertWeeklyInvoiceForTimeEntry(after);
+        const movedBucket =
+          before.siteId !== after.siteId ||
+          before.shiftId !== after.shiftId ||
+          weekStartIsoUtc(new Date(before.clockInTime)) !== weekStartIsoUtc(new Date(after.clockInTime));
+        if (wasApproved && movedBucket) {
+          void upsertWeeklyInvoiceForTimeEntry(before);
         }
       }
     }
+
+    res.json(row);
   } catch (err: any) {
     req.log.warn({ err }, "admin update failed");
     res.status(400).json({ error: "Update failed", message: err?.message ?? "Update failed" });
@@ -1276,29 +1315,25 @@ router.delete("/admin/tables/:table/:id", requireAdmin, async (req, res): Promis
   if (tableName === "clients") {
     if (refuseIfBlocked(res, await clientDeletionBlockers(id), "client")) return;
   }
-  // For time entries, snapshot the row before deletion so we can re-sync
-  // the weekly invoice after the entry is gone (approved hours removed).
-  let deletedTimeEntry: Record<string, unknown> | null = null;
-  if (tableName === "time_entries") {
-    const rows = (await db
-      .select()
-      .from(cfg.table)
-      .where(eq((cfg.table as any).id, id))) as Record<string, unknown>[];
-    deletedTimeEntry = rows[0] ?? null;
-  }
   try {
+    // Snapshot a time entry before deleting it: once the row is gone we can
+    // no longer resolve which (site, week) draft invoice held its hours.
+    let deletedTimeEntry: TimeEntry | null = null;
+    if (tableName === "time_entries") {
+      const rows = await db.select().from(timeEntriesTable).where(eq(timeEntriesTable.id, id));
+      deletedTimeEntry = rows[0] ?? null;
+    }
     const result = (await db.delete(cfg.table).where(eq((cfg.table as any).id, id)).returning()) as unknown[];
     if (result.length === 0) {
       res.status(404).json({ error: "Not Found", message: `${cfg.label} not found` });
       return;
     }
     res.sendStatus(204);
-    // Re-sync the weekly invoice to remove the deleted entry's hours.
-    // Only approved entries contributed to an invoice; pending/rejected ones
-    // were never billed. Locked / hand-edited invoices are left alone by
-    // upsertWeeklyInvoiceForTimeEntry per the existing mutability contract.
-    if (deletedTimeEntry && deletedTimeEntry.approvalStatus === "approved") {
-      void upsertWeeklyInvoiceForTimeEntry(deletedTimeEntry as any);
+    // After the 204: rebuilding the deleted entry's (site, week) bucket
+    // removes its hours from the draft invoice (and deletes an emptied
+    // draft). Fire-and-forget — the helper never throws.
+    if (deletedTimeEntry?.approvalStatus === "approved") {
+      void upsertWeeklyInvoiceForTimeEntry(deletedTimeEntry);
     }
   } catch (err: any) {
     req.log.warn({ err }, "admin delete failed");
@@ -1531,6 +1566,11 @@ router.post("/admin/users/:userId/password-reset", requireAdmin, async (req, res
 //
 // Admins (role='admin') are NEVER targeted by either endpoint.
 
+// Mobile app's custom URL scheme (see artifacts/security-ops/app.json "scheme"
+// and the admin portal's OrgInvite page). Used to build the deep-link form of
+// the org-connect URL when no https origin is configured for a tappable link.
+const ORG_CONNECT_APP_SCHEME = "secureopscommand";
+
 // Avoid ambiguous chars (0/O, 1/I/l) so admins reading temp passwords aloud
 // don't fumble.
 const TEMP_PW_ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnpqrstuvwxyz23456789";
@@ -1668,6 +1708,44 @@ router.post("/admin/users/bulk-invite", requireAdmin, async (req, res): Promise<
   const base = getAdminResetBaseUrl();
   const appUrl = base ? `${base}/` : null;
 
+  // One-tap org-connect link + QR so a new hire can connect the mobile app
+  // straight from their inbox, in the exact format the app consumes:
+  //   https origin  → <origin>/connect?code=<code>   (tappable + scannable)
+  //   deep link     → <scheme>://connect?code=<code> (fallback when no origin)
+  // Resolved once per request — same for every invitee. Falls back gracefully
+  // (no link, no QR) when the org code can't be resolved.
+  const orgInvite = resolveSelfOrgInvite();
+  const orgCode = orgInvite?.code ?? null;
+  let connectUrl: string | null = null;
+  let qrAttachment: EmailAttachment | undefined;
+  let qrCid: string | null = null;
+  if (orgCode) {
+    const encoded = encodeURIComponent(orgCode);
+    const origin = getSelfOrigin();
+    connectUrl = origin
+      ? `${origin}/connect?code=${encoded}`
+      : `${ORG_CONNECT_APP_SCHEME}://connect?code=${encoded}`;
+    try {
+      const qrPng = await QRCode.toBuffer(connectUrl, {
+        width: 512,
+        margin: 2,
+        errorCorrectionLevel: "M",
+      });
+      qrCid = "org-invite-qr";
+      qrAttachment = {
+        filename: `invite-${orgCode}.png`,
+        content: qrPng,
+        contentType: "image/png",
+        cid: qrCid,
+      };
+    } catch (e) {
+      // QR generation failed — still send the link, just without the image.
+      req.log.warn({ err: e }, "Invite QR generation failed; sending link only");
+      qrCid = null;
+      qrAttachment = undefined;
+    }
+  }
+
   const sent: { userId: string; email: string; emailSent: boolean }[] = [];
   const failed: { userId: string; email: string; reason: string }[] = [];
 
@@ -1681,10 +1759,19 @@ router.post("/admin/users/bulk-invite", requireAdmin, async (req, res): Promise<
       email: u.email,
       tempPassword: u.tempPasswordPlain,
       appUrl,
+      connectUrl,
+      orgCode,
+      qrCid,
     });
     let ok = false;
     try {
-      ok = await sendEmail({ to: u.email, subject: msg.subject, text: msg.text, html: msg.html });
+      ok = await sendEmail({
+        to: u.email,
+        subject: msg.subject,
+        text: msg.text,
+        html: msg.html,
+        ...(qrAttachment ? { attachments: [qrAttachment] } : {}),
+      });
     } catch (e) {
       req.log.error({ err: e, userId: u.id }, "Invite email threw");
       failed.push({ userId: u.id, email: u.email, reason: (e as Error).message });
@@ -1730,26 +1817,15 @@ router.get("/admin/sites/:id/rates", requireAdmin, async (req, res): Promise<voi
     .select()
     .from(siteRatesTable)
     .where(eq(siteRatesTable.siteId, siteId))
-    .orderBy(asc(siteRatesTable.licenseLevel), asc(siteRatesTable.label));
+    .orderBy(asc(siteRatesTable.licenseLevel));
   res.json(rows);
 });
 
-// PUT /admin/sites/:id/rates — upsert or edit-by-id a rate-card row.
-// Body: { licenseLevel: 2|3|4, payRate: number|string, billRate: number|string,
-//         label: string (required), id?: uuid }
-// • With `id`: UPDATE the specific row in-place (supports label rename without
-//   orphaning the old entry and its shift back-references).
-// • Without `id`: INSERT, or on conflict (siteId, licenseLevel, label) UPDATE rates.
-// Label is required so every row is unambiguously identifiable in shift pickers.
+// PUT /admin/sites/:id/rates — upsert a row by (siteId, licenseLevel).
+// Body: { licenseLevel: 2|3|4, payRate: number|string, billRate: number|string, label?: string }
 router.put("/admin/sites/:id/rates", requireAdmin, async (req, res): Promise<void> => {
   const siteId = req.params.id as string;
-  const { id: rateId, licenseLevel, payRate, billRate, label } = req.body ?? {};
-
-  const cleanLabel = typeof label === "string" ? label.trim().slice(0, 80) : "";
-  if (!cleanLabel) {
-    res.status(400).json({ error: "Bad Request", message: "label is required (max 80 chars) so shift pickers can tell rates apart" });
-    return;
-  }
+  const { licenseLevel, payRate, billRate, label } = req.body ?? {};
   const lvl = Number(licenseLevel);
   if (![2, 3, 4].includes(lvl)) {
     res.status(400).json({ error: "Bad Request", message: "licenseLevel must be 2, 3, or 4" });
@@ -1763,31 +1839,16 @@ router.put("/admin/sites/:id/rates", requireAdmin, async (req, res): Promise<voi
   }
   const [site] = await db.select({ id: sitesTable.id }).from(sitesTable).where(eq(sitesTable.id, siteId)).limit(1);
   if (!site) { res.status(404).json({ error: "Not Found", message: "Site not found" }); return; }
+  const cleanLabel = typeof label === "string" && label.trim() ? label.trim().slice(0, 80) : null;
 
-  let row;
-  if (typeof rateId === "string" && rateId) {
-    // Edit-by-id: the admin is renaming a label or adjusting rates on an existing row.
-    // UPDATE rather than re-insert so the row id (and any shift.siteRateId references)
-    // stay intact — the shift audit trail doesn't lose its link to the rate.
-    const [existing] = await db.select({ id: siteRatesTable.id })
-      .from(siteRatesTable).where(eq(siteRatesTable.id, rateId)).limit(1);
-    if (!existing) { res.status(404).json({ error: "Not Found", message: "Rate not found" }); return; }
-    [row] = await db.update(siteRatesTable)
-      .set({ licenseLevel: lvl, payRate: String(pay), billRate: String(bill), label: cleanLabel, updatedAt: new Date() })
-      .where(eq(siteRatesTable.id, rateId))
-      .returning();
-  } else {
-    // New row: INSERT; if the (siteId, level, label) triple already exists, just update
-    // pay+bill so re-saving the same named rate is idempotent.
-    [row] = await db
-      .insert(siteRatesTable)
-      .values({ siteId, licenseLevel: lvl, payRate: String(pay), billRate: String(bill), label: cleanLabel })
-      .onConflictDoUpdate({
-        target: [siteRatesTable.siteId, siteRatesTable.licenseLevel, siteRatesTable.label],
-        set: { payRate: String(pay), billRate: String(bill), updatedAt: new Date() },
-      })
-      .returning();
-  }
+  const [row] = await db
+    .insert(siteRatesTable)
+    .values({ siteId, licenseLevel: lvl, payRate: String(pay), billRate: String(bill), label: cleanLabel })
+    .onConflictDoUpdate({
+      target: [siteRatesTable.siteId, siteRatesTable.licenseLevel],
+      set: { payRate: String(pay), billRate: String(bill), label: cleanLabel, updatedAt: new Date() },
+    })
+    .returning();
   res.json(row);
 });
 
@@ -1948,6 +2009,423 @@ router.post("/admin/orphaned-shifts/reattach", requireAdmin, async (req, res): P
   }
 
   res.json({ reattached, assignmentsAffected, siteId, siteName: site.name });
+});
+
+// POST /admin/sales-leads/:id/convert — turn a won sales lead into a client.
+//
+// Carries the lead's company/contact/tier straight into a new `clients` row so
+// nobody re-types it by hand, then marks the lead `converted` and links it to
+// the created client. Idempotent: a lead that already has `convertedClientId`
+// is refused (409) so a double-click can't spawn duplicate clients. Runs in a
+// transaction so the client insert and the lead update either both land or
+// neither does.
+const convertLeadSchema = z.object({
+  // Optional admin overrides for the new client; default to the lead's values.
+  name: z.string().trim().min(1).optional(),
+  contactName: z.string().trim().min(1).optional(),
+  contactEmail: z.string().trim().email().optional(),
+  contactPhone: z.string().trim().optional(),
+  paymentTermsDays: z.number().int().min(0).max(365).optional(),
+});
+
+router.post("/admin/sales-leads/:id/convert", requireAdmin, async (req, res): Promise<void> => {
+  const parsed = convertLeadSchema.safeParse(req.body ?? {});
+  if (!parsed.success) {
+    res.status(400).json({ error: "Invalid request", details: parsed.error.flatten() });
+    return;
+  }
+  const overrides = parsed.data;
+  const leadId = String(req.params.id);
+
+  const [lead] = await db
+    .select()
+    .from(salesLeadsTable)
+    .where(eq(salesLeadsTable.id, leadId))
+    .limit(1);
+  if (!lead) {
+    res.status(404).json({ error: "Not Found", message: "Sales lead not found." });
+    return;
+  }
+  if (lead.convertedClientId) {
+    res.status(409).json({
+      error: "Conflict",
+      message: "This lead has already been converted to a client.",
+      clientId: lead.convertedClientId,
+    });
+    return;
+  }
+  // Only a won (closed) lead becomes a client — converting a new/contacted/
+  // qualified/lost lead would create a client for a deal that hasn't closed.
+  if (lead.status !== "won") {
+    res.status(422).json({
+      error: "Unprocessable",
+      message: 'Only a lead marked "Won" can be converted to a client.',
+    });
+    return;
+  }
+
+  // Preserve the chosen pricing tier on the client record. There is no plan
+  // column on `clients` yet (that's owned by the pricing-plan feature work), so
+  // we record the tier in `notes` where it's visible and survives the handoff.
+  const tier = (lead.tier ?? "").trim();
+  const tierNote = tier ? `Plan tier: ${tier} (converted from sales lead).` : "Converted from sales lead.";
+
+  try {
+    const result = await db.transaction(async (tx) => {
+      const [client] = await tx
+        .insert(clientsTable)
+        .values({
+          name: overrides.name ?? lead.companyName,
+          contactName: overrides.contactName ?? lead.contactName,
+          contactEmail: overrides.contactEmail ?? lead.email,
+          contactPhone: overrides.contactPhone ?? lead.phone ?? null,
+          ...(overrides.paymentTermsDays != null ? { paymentTermsDays: overrides.paymentTermsDays } : {}),
+          notes: tierNote,
+        })
+        .returning();
+
+      // Guard against a concurrent convert: only claim the lead if it's still
+      // unconverted. If a parallel request won the race, abort the whole tx.
+      const [updatedLead] = await tx
+        .update(salesLeadsTable)
+        .set({ status: "converted", convertedClientId: client.id, convertedAt: new Date() })
+        .where(and(eq(salesLeadsTable.id, lead.id), isNull(salesLeadsTable.convertedClientId)))
+        .returning();
+      if (!updatedLead) {
+        throw Object.assign(new Error("This lead has already been converted to a client."), { __conflict: true });
+      }
+
+      return { client, lead: updatedLead };
+    });
+
+    res.status(201).json(result);
+  } catch (e) {
+    if ((e as { __conflict?: boolean }).__conflict) {
+      res.status(409).json({ error: "Conflict", message: (e as Error).message });
+      return;
+    }
+    throw e;
+  }
+});
+
+/* ------------------------------------------------------------------ *
+ * PDF employee import (AI-assisted)
+ *
+ * Two-step wizard backing `PdfImportWizard.tsx`:
+ *   1. parse-pdf   — download a previously-uploaded PDF, run AI extraction,
+ *                    return an editable draft + any matching existing account.
+ *   2. commit-pdf  — create a brand-new employee OR update the matched one,
+ *                    from the admin-reviewed fields.
+ *
+ * Both routes sit under `/admin/import/` so the audit middleware records them
+ * as `table.import`. The model output is never trusted: parse re-validates via
+ * `normalizeEmployeeDraft`, and commit re-validates the admin-edited fields the
+ * exact same way before any write.
+ * ------------------------------------------------------------------ */
+
+const MAX_IMPORT_PDF_BYTES = 8 * 1024 * 1024;
+
+/** JS keys shared between `EmployeeDraft` and the `employees` table columns. */
+const IMPORT_EMPLOYEE_KEYS = [
+  "phone",
+  "address",
+  "dateOfBirth",
+  "cityOfBirth",
+  "stateOfBirth",
+  "emergencyContactName",
+  "emergencyContactRelationship",
+  "emergencyContactPhone",
+  "siaLicenseNumber",
+  "siaLicenseLevel",
+  "siaLicenseExpiry",
+  "previousExperience",
+  "yearsExperience",
+] as const;
+
+const parsePdfBody = z.object({ objectPath: z.string().min(1) });
+
+const commitPdfBody = z.object({
+  mode: z.enum(["create", "update"]),
+  userId: z.string().uuid().optional(),
+  objectPath: z.string().min(1).optional(),
+  fields: z.record(z.string(), z.unknown()).default({}),
+});
+
+/** Tagged HTTP error so the transaction body can bubble status codes out. */
+function importErr(status: number, message: string): Error & { __status: number } {
+  return Object.assign(new Error(message), { __status: status });
+}
+
+/**
+ * Normalize the two phone fields on a draft to E.164 in place, throwing a
+ * 400-tagged error if a provided value can't be parsed. Mirrors the rule the
+ * dedicated /employees handlers use so imported numbers can actually be texted.
+ */
+function normalizeDraftPhones(draft: EmployeeDraft): void {
+  for (const [key, label] of [
+    ["phone", "Phone number"],
+    ["emergencyContactPhone", "Emergency contact phone"],
+  ] as const) {
+    const raw = draft[key];
+    if (raw === undefined) continue;
+    const norm = normalizePhoneToE164(raw);
+    if (!norm) {
+      throw importErr(
+        400,
+        `${label} is invalid. Please enter a valid US phone number (e.g. (214) 555-1234) or include the country code (e.g. +44 20 1234 5678).`,
+      );
+    }
+    draft[key] = norm;
+  }
+}
+
+router.post("/admin/import/employees/parse-pdf", requireAdmin, async (req, res): Promise<void> => {
+  const parsed = parsePdfBody.safeParse(req.body);
+  if (!parsed.success) {
+    res.status(400).json({ error: "Bad Request", message: "objectPath is required" });
+    return;
+  }
+
+  let file: { buffer: Buffer; contentType: string; size: number };
+  try {
+    file = await new ObjectStorageService().downloadObjectBuffer(parsed.data.objectPath, {
+      maxBytes: MAX_IMPORT_PDF_BYTES,
+    });
+  } catch (err: any) {
+    if (err?.__tooLarge) {
+      res.status(413).json({ error: "Payload Too Large", message: "PDF must be 8 MB or smaller." });
+      return;
+    }
+    if (err instanceof ObjectNotFoundError) {
+      res.status(404).json({ error: "Not Found", message: "Uploaded file not found." });
+      return;
+    }
+    req.log.warn({ err }, "pdf import: download failed");
+    res.status(404).json({ error: "Not Found", message: "Uploaded file could not be read." });
+    return;
+  }
+
+  if (file.contentType !== "application/pdf") {
+    res.status(415).json({ error: "Unsupported Media Type", message: "Only PDF files can be imported." });
+    return;
+  }
+  // Defensive: metadata size can be absent/understated, so re-check the actual
+  // downloaded length too.
+  if ((file.size || file.buffer.length) > MAX_IMPORT_PDF_BYTES) {
+    res.status(413).json({ error: "Payload Too Large", message: "PDF must be 8 MB or smaller." });
+    return;
+  }
+
+  let result;
+  try {
+    result = await extractEmployeeFromPdf(file.buffer, req.log);
+  } catch (err: any) {
+    if (err?.__serviceUnavailable) {
+      res.status(503).json({ error: "Service Unavailable", message: err.message });
+      return;
+    }
+    req.log.error({ err }, "pdf import: extraction failed");
+    res.status(502).json({
+      error: "Extraction failed",
+      message: "Could not read this PDF. Try a clearer file or enter the details manually.",
+    });
+    return;
+  }
+
+  // Look up an existing account by case-insensitive email so the wizard can
+  // offer "update" instead of a guaranteed-to-409 "create".
+  let match: { userId: string; name: string; email: string; role: string } | null = null;
+  if (result.draft.email) {
+    const [row] = await db
+      .select({
+        id: usersTable.id,
+        email: usersTable.email,
+        firstName: usersTable.firstName,
+        lastName: usersTable.lastName,
+        role: usersTable.role,
+      })
+      .from(usersTable)
+      .where(eq(sql`lower(${usersTable.email})`, result.draft.email))
+      .limit(1);
+    if (row) {
+      match = {
+        userId: row.id,
+        name: [row.firstName, row.lastName].filter(Boolean).join(" ").trim(),
+        email: row.email,
+        role: row.role,
+      };
+    }
+  }
+
+  res.json({ draft: result.draft, warnings: result.warnings, match });
+});
+
+router.post("/admin/import/employees/commit-pdf", requireAdmin, async (req, res): Promise<void> => {
+  const parsed = commitPdfBody.safeParse(req.body);
+  if (!parsed.success) {
+    res.status(400).json({ error: "Bad Request", message: "Invalid import payload", issues: parsed.error.issues });
+    return;
+  }
+  const { mode, userId, objectPath } = parsed.data;
+
+  // Re-validate the admin-edited fields exactly like the AI output: any value
+  // that doesn't survive normalization (bad date/email/level) is a hard 400.
+  const { draft, warnings } = normalizeEmployeeDraft(parsed.data.fields);
+  if (warnings.length) {
+    res.status(400).json({ error: "Validation", message: warnings.join(" "), issues: warnings });
+    return;
+  }
+
+  try {
+    normalizeDraftPhones(draft);
+  } catch (err: any) {
+    if (err?.__status) {
+      res.status(err.__status).json({ error: "Bad Request", message: err.message });
+      return;
+    }
+    throw err;
+  }
+
+  // Build the partial employees payload — only keys the admin actually provided,
+  // so an update never clobbers existing data with blanks.
+  const empValues: Record<string, unknown> = {};
+  for (const k of IMPORT_EMPLOYEE_KEYS) {
+    if (draft[k] !== undefined) empValues[k] = draft[k];
+  }
+  if (objectPath) empValues.cvKey = objectPath;
+
+  try {
+    const outcome = await db.transaction(async (tx) => {
+      // Shared license upsert (employees.sia* is mirrored into a real licenses
+      // row for eligibility — see the "two license surfaces" invariant). Only
+      // when both the (notNull) number and (notNull) expiry are present.
+      const upsertLicense = async (ownerUserId: string): Promise<void> => {
+        const licenseNumber = draft.siaLicenseNumber;
+        const expiryDate = draft.siaLicenseExpiry;
+        if (!licenseNumber || !expiryDate) return;
+        const [existing] = await tx
+          .select({ id: licensesTable.id })
+          .from(licensesTable)
+          .where(and(eq(licensesTable.employeeId, ownerUserId), eq(licensesTable.licenseNumber, licenseNumber)))
+          .limit(1);
+        if (existing) {
+          // Partial-update: never clear an existing level when the import omits
+          // one (the licenses row is the authoritative eligibility surface).
+          const setValues: Record<string, unknown> = { type: "Texas Security License", expiryDate };
+          if (draft.siaLicenseLevel !== undefined) setValues.level = draft.siaLicenseLevel;
+          await tx.update(licensesTable).set(setValues).where(eq(licensesTable.id, existing.id));
+        } else {
+          await tx.insert(licensesTable).values({
+            employeeId: ownerUserId,
+            type: "Texas Security License",
+            level: draft.siaLicenseLevel ?? null,
+            licenseNumber,
+            expiryDate,
+          });
+        }
+      };
+
+      if (mode === "create") {
+        if (!draft.firstName || !draft.lastName || !draft.email) {
+          throw importErr(400, "First name, last name, and email are required to create an employee.");
+        }
+        const [clash] = await tx
+          .select({ id: usersTable.id })
+          .from(usersTable)
+          .where(eq(sql`lower(${usersTable.email})`, draft.email))
+          .limit(1);
+        if (clash) {
+          throw importErr(409, "An account with that email already exists. Switch to update to edit it.");
+        }
+        const passwordHash = await bcrypt.hash(randomBytes(24).toString("hex"), 10);
+        const [newUser] = await tx
+          .insert(usersTable)
+          .values({
+            email: draft.email,
+            passwordHash,
+            firstName: draft.firstName,
+            lastName: draft.lastName,
+            role: "employee",
+            status: "pending",
+            mustCompleteProfile: true,
+            mustSignPolicies: true,
+            phoneNumber: draft.phone ?? null,
+          })
+          .returning({ id: usersTable.id });
+        const newUserId = newUser!.id;
+        await tx.insert(employeesTable).values({ userId: newUserId, ...empValues });
+        await upsertLicense(newUserId);
+        return { userId: newUserId, created: true, before: null, after: null };
+      }
+
+      // update
+      if (!userId) throw importErr(400, "An employee must be selected to update.");
+      const [user] = await tx.select().from(usersTable).where(eq(usersTable.id, userId)).limit(1);
+      if (!user) throw importErr(404, "Employee account not found.");
+      if (user.role !== "employee") throw importErr(400, "This import can only update employee accounts.");
+      if (draft.email && draft.email !== user.email.toLowerCase()) {
+        throw importErr(409, "The email in the form doesn't match the selected employee. Clear it or use create.");
+      }
+
+      const userUpdate: Record<string, unknown> = {};
+      if (draft.firstName) userUpdate.firstName = draft.firstName;
+      if (draft.lastName) userUpdate.lastName = draft.lastName;
+      if (draft.phone !== undefined) userUpdate.phoneNumber = draft.phone ?? null;
+      if (Object.keys(userUpdate).length) {
+        await tx.update(usersTable).set(userUpdate).where(eq(usersTable.id, userId));
+      }
+
+      const [beforeEmp] = await tx.select().from(employeesTable).where(eq(employeesTable.userId, userId)).limit(1);
+      let afterEmp: Record<string, unknown> | null = beforeEmp ?? null;
+      if (beforeEmp) {
+        if (Object.keys(empValues).length) {
+          const [row] = await tx
+            .update(employeesTable)
+            .set(empValues)
+            .where(eq(employeesTable.userId, userId))
+            .returning();
+          afterEmp = (row as Record<string, unknown>) ?? beforeEmp;
+        }
+      } else {
+        const [row] = await tx.insert(employeesTable).values({ userId, ...empValues }).returning();
+        afterEmp = (row as Record<string, unknown>) ?? null;
+      }
+      await upsertLicense(userId);
+      return {
+        userId,
+        created: false,
+        before: (beforeEmp as Record<string, unknown> | undefined) ?? null,
+        after: afterEmp,
+      };
+    });
+
+    // Field-change history mirrors the dedicated /employees handlers. Run it
+    // after the tx commits (the writer uses its own connection) and only when
+    // we updated an existing profile.
+    if (!outcome.created && outcome.before && outcome.after) {
+      await writeEmployeeFieldChanges({
+        employeeUserId: outcome.userId,
+        keys: Object.keys(empValues),
+        before: outcome.before,
+        after: outcome.after,
+        actor: { userId: req.user!.userId, email: req.user!.email, role: req.user!.role },
+        log: req.log,
+      });
+    }
+
+    res.status(outcome.created ? 201 : 200).json({
+      userId: outcome.userId,
+      mode,
+      created: outcome.created,
+    });
+  } catch (err: any) {
+    if (err?.__status) {
+      res.status(err.__status).json({ error: "Import failed", message: err.message });
+      return;
+    }
+    req.log.warn({ err }, "pdf import: commit failed");
+    res.status(400).json({ error: "Import failed", message: err?.message ?? "Import failed" });
+  }
 });
 
 export default router;

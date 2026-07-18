@@ -8,18 +8,14 @@ import type { Logger } from "pino";
  * payroll mistake — admins need a push + email the same day, not a weekly
  * audit-log review.
  *
- * niNumber (SSN last 4), rightToWorkStatus and directDepositConsent are now
- * self-editable from the mobile profile, so a change to any of them must reach
- * admins the same day (work-authorization and direct-deposit changes warrant HR
- * re-verification). directDepositSignature stays admin-only but is listed
- * defensively so the alert path is already in place if it ever opens up.
+ * Includes admin-only fields (niNumber, directDepositSignature) defensively:
+ * if a future change opens them to self-edit, the alert path is already in
+ * place.
  */
 export const HIGH_RISK_SELF_EDIT_FIELDS = new Set<string>([
   "bankAccountName", "bankAccountNumber", "bankBsb",
   "emergencyContactName", "emergencyContactRelationship", "emergencyContactPhone",
   "niNumber",
-  "rightToWorkStatus",
-  "directDepositConsent",
   "directDepositSignature",
 ]);
 

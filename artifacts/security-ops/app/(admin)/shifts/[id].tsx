@@ -6,12 +6,10 @@ import { useColors } from "@/hooks/useColors";
 import { confirmAction, notify } from "@/utils/confirm";
 import { useGetShift, getGetShiftQueryKey, useGetEmployees, getGetEmployeesQueryKey, useAssignEmployeeToShift, useUpdateShiftAssignment, getGetShiftsQueryKey } from "@workspace/api-client-react";
 import { LicenseLevelBadge, levelLabel } from "@/components/LicenseLevelBadge";
-import { ProtectionPackageView } from "@/components/ProtectionPackageView";
 import { Feather } from "@expo/vector-icons";
 import { useLocalSearchParams, useRouter, useSegments } from "expo-router";
 import { useQueryClient } from "@tanstack/react-query";
 import { useAuth } from "@/contexts/AuthContext";
-import { formatDateTime } from "@/utils/time";
 
 function InfoRow({ label, value, icon }: { label: string; value?: string | null; icon: string }) {
   const colors = useColors();
@@ -37,7 +35,7 @@ export default function ShiftDetailScreen() {
   const queryClient = useQueryClient();
   const { id } = useLocalSearchParams<{ id: string }>();
   const { user } = useAuth();
-  // Site managers see no finance (pay/bill) and can't open officer profiles (the
+  // Site Managers see no finance (pay/bill) and can't open officer profiles (the
   // profile screen carries PII/finance they aren't entitled to).
   const isSiteManager = user?.role === "site_manager";
   const topPad = useTopPad();
@@ -100,18 +98,12 @@ export default function ShiftDetailScreen() {
   const reqLevel = (shift as any)?.requiredLicenseLevel ?? 2;
   const headcount = (shift as any)?.headcount ?? 1;
   const unassignedAll = (allEmployees ?? []).filter((e) => !assignedIds.has(e.id));
-  // Mirror the server's eligibility helper exactly:
-  //   GREATEST(highest unexpired licence level, position baseline, BASE_ELIGIBILITY_LEVEL)
-  // BASE_ELIGIBILITY_LEVEL = 2: every worker-role employee is eligible for
-  // unarmed (≤ 2) shifts regardless of whether they hold a licence. Support
-  // staff also carry a position baseline of 1 (subsumed by the floor, but kept
-  // for parity). Armed (3) and L4/PPO (4) still require the actual licence.
-  const BASE_EFF_LEVEL = 2;
-  const effLevel = (e: any) => Math.max(
-    e.maxLicenseLevel ?? 0,
-    e.position === "support_staff" ? 1 : 0,
-    BASE_EFF_LEVEL,
-  );
+  // Effective clearance mirrors the server's eligibility helper: a licensed
+  // officer's level is their highest unexpired licence; support staff carry a
+  // baseline of 1 ("Support / no licence required"); higher levels cover lower.
+  // Filtering on raw maxLicenseLevel alone wrongly hid support / non-licensed
+  // staff from level-1 (Support) shifts.
+  const effLevel = (e: any) => Math.max(e.maxLicenseLevel ?? 0, e.position === "support_staff" ? 1 : 0);
   const eligibleAll = unassignedAll.filter((e: any) => effLevel(e) >= reqLevel);
   const ineligibleAll = unassignedAll.filter((e: any) => effLevel(e) < reqLevel);
 
@@ -196,12 +188,10 @@ export default function ShiftDetailScreen() {
 
       <View style={[styles.section, { backgroundColor: colors.card, borderColor: colors.border }]}>
         <Text style={[styles.sectionTitle, { color: colors.accent }]}>SCHEDULE</Text>
-        <InfoRow label="Start Time" value={formatDateTime(shift.startTime)} icon="play-circle" />
-        <InfoRow label="End Time" value={formatDateTime(shift.endTime)} icon="stop-circle" />
+        <InfoRow label="Start Time" value={new Date(shift.startTime).toLocaleString()} icon="play-circle" />
+        <InfoRow label="End Time" value={new Date(shift.endTime).toLocaleString()} icon="stop-circle" />
         <InfoRow label="Notes" value={shift.notes} icon="file-text" />
       </View>
-
-      {(shift as any).shiftType === "ppo_detail" && <ProtectionPackageView shiftId={id!} />}
 
       <View style={[styles.section, { backgroundColor: colors.card, borderColor: colors.border }]}>
         <Text style={[styles.sectionTitle, { color: colors.accent }]}>ASSIGNED PERSONNEL ({shift.assignments?.length ?? 0})</Text>

@@ -1,6 +1,5 @@
 import { Router, type IRouter, type Request, type Response } from "express";
-import { eq, and, sql, desc, isNull, inArray } from "drizzle-orm";
-import { WORKER_ROLES } from "../lib/eligibility";
+import { eq, and, sql, desc, isNull } from "drizzle-orm";
 import { randomBytes } from "node:crypto";
 import { Readable } from "node:stream";
 import {
@@ -19,8 +18,10 @@ import {
   isWatermarkableImageContentType,
   type WatermarkInfo,
 } from "../lib/watermark";
+import { requireFeature } from "../lib/features";
 
 const router: IRouter = Router();
+router.use(["/admin/employees", "/admin/employee-shares", "/public/employee-shares"], requireFeature("officerShares"));
 const storage = new ObjectStorageService();
 
 function mintToken(): string {
@@ -106,14 +107,14 @@ router.post("/admin/employees/:id/share", requireAdmin, async (req, res): Promis
   const [direct] = await db
     .select({ id: usersTable.id })
     .from(usersTable)
-    .where(and(eq(usersTable.id, employeeUserId), inArray(usersTable.role, [...WORKER_ROLES])));
+    .where(and(eq(usersTable.id, employeeUserId), eq(usersTable.role, "employee")));
   let resolvedUserId: string | null = direct?.id ?? null;
   if (!resolvedUserId) {
     const [viaEmployee] = await db
       .select({ id: usersTable.id })
       .from(employeesTable)
       .leftJoin(usersTable, eq(usersTable.id, employeesTable.userId))
-      .where(and(eq(employeesTable.id, employeeUserId), inArray(usersTable.role, [...WORKER_ROLES])));
+      .where(and(eq(employeesTable.id, employeeUserId), eq(usersTable.role, "employee")));
     resolvedUserId = viaEmployee?.id ?? null;
   }
   if (!resolvedUserId) { res.status(404).json({ error: "Not Found", message: "Officer not found" }); return; }
@@ -312,7 +313,7 @@ router.get("/public/employee-shares/:token", tokenLookupLimiter, async (req, res
     })
     .from(usersTable)
     .leftJoin(employeesTable, eq(employeesTable.userId, usersTable.id))
-    .where(and(eq(usersTable.id, r.share.employeeUserId), inArray(usersTable.role, [...WORKER_ROLES])));
+    .where(and(eq(usersTable.id, r.share.employeeUserId), eq(usersTable.role, "employee")));
   if (!row) { res.status(404).json({ error: "Officer not found" }); return; }
 
   const sections = resolveSections(r.share.visibleSections);

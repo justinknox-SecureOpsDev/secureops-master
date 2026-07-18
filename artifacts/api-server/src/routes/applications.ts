@@ -42,8 +42,13 @@ import { sendEmail, sendEmailDetailed, renderOnboardingEmail, renderResendOnboar
 import { brand } from "../lib/brandConfig";
 import { sendSmsToPhoneNumber } from "../lib/sms";
 import { normalizePhoneToE164 } from "../lib/phone";
+import { requireFeature } from "../lib/features";
 
 const router: IRouter = Router();
+router.use(
+  ["/applications", "/application-template", "/admin/application-fields", "/admin/application-questions", "/admin/applications", "/admin/onboarding", "/onboarding"],
+  requireFeature("hr"),
+);
 const policyStorage = new ObjectStorageService();
 
 const ONBOARDING_TOKEN_TTL_DAYS = 14;
@@ -1410,6 +1415,7 @@ router.post("/admin/applications/:id/approve", requireAdmin, async (req, res): P
           status: "pending",
           mustChangePassword: true,
           mustCompleteProfile: true,
+          mustSignPolicies: true,
         }).where(eq(usersTable.id, userId));
       } else {
         const [u] = await tx.insert(usersTable).values({
@@ -1425,6 +1431,7 @@ router.post("/admin/applications/:id/approve", requireAdmin, async (req, res): P
           status: "pending",
           mustChangePassword: true,
           mustCompleteProfile: true,
+          mustSignPolicies: true,
         }).returning();
         userId = u.id;
       }
@@ -2291,75 +2298,6 @@ router.post("/admin/onboarding/:employeeId/resend", requireAdmin, async (req, re
     emailDeliveryStatus: deliveryStatus,
     emailDeliveryError: deliveryError,
   });
-});
-
-// Delete a person who is still in onboarding. Restricted to accounts that are
-// genuinely onboarding-stage: role must be `employee` and status must still be
-// `pending` (onboarding completion flips the user to `active`). Anything else
-// is refused with 409 — active staff must be deactivated/managed through the
-// Personnel tables, never silently erased from the onboarding list. The user
-// row is the cascade root: deleting it removes the employees row, onboarding
-// tokens, and any onboarding submission (all FK ON DELETE CASCADE); other
-// users-referencing tables are cascade or SET NULL, so the delete cannot
-// strand orphans.
-router.delete("/admin/onboarding/:employeeId", requireAdmin, async (req, res): Promise<void> => {
-  const employeeId = req.params.employeeId as string;
-  if (!z.string().uuid().safeParse(employeeId).success) {
-    res.status(404).json({ error: "Not Found", message: "Employee not found" });
-    return;
-  }
-  const [user] = await db.select().from(usersTable).where(eq(usersTable.id, employeeId)).limit(1);
-  if (!user) { res.status(404).json({ error: "Not Found", message: "Employee not found" }); return; }
-
-  if (user.role !== "employee") {
-    res.status(409).json({
-      error: "Conflict",
-      message: "Only onboarding-stage employee accounts can be deleted here. Manage other accounts from the Personnel tables.",
-    });
-    return;
-  }
-  if (user.status !== "pending") {
-    res.status(409).json({
-      error: "Conflict",
-      message: `This account is ${user.status}, not pending onboarding. Deactivate or manage it from the Personnel tables instead.`,
-    });
-    return;
-  }
-
-  // Leave a self-contained audit trail: once the row is gone, the URL's UUID
-  // alone would be meaningless.
-  res.locals["auditMetadata"] = {
-    deletedUser: { id: user.id, email: user.email, firstName: user.firstName, lastName: user.lastName, role: user.role, status: user.status },
-  };
-
-  await db.transaction(async (tx) => {
-    // Un-strand the originating application (applications.created_employee_id
-    // has no FK, so it would dangle): clear the employee link, both two-admin
-    // sign-offs, and the onboarding-email delivery state, and send the row
-    // back to `under_review` so HR can re-approve or reject it later instead
-    // of it being frozen as "approved" for a person who no longer exists.
-    const reset = await tx.update(applicationsTable).set({
-      status: "under_review",
-      createdEmployeeId: null,
-      firstApprovedBy: null,
-      firstApprovedAt: null,
-      secondApprovedBy: null,
-      secondApprovedAt: null,
-      onboardingEmailStatus: null,
-      onboardingEmailMessageId: null,
-      onboardingEmailResponse: null,
-      onboardingEmailError: null,
-      onboardingEmailSentAt: null,
-      onboardingEmailAttemptedAt: null,
-    }).where(eq(applicationsTable.createdEmployeeId, employeeId))
-      .returning({ id: applicationsTable.id });
-    if (reset.length > 0) {
-      (res.locals["auditMetadata"] as Record<string, unknown>)["resetApplicationIds"] = reset.map((r) => r.id);
-    }
-    await tx.delete(usersTable).where(eq(usersTable.id, employeeId));
-  });
-  req.log.info({ employeeId, email: user.email }, "Deleted pending-onboarding employee");
-  res.status(204).end();
 });
 
 export default router;

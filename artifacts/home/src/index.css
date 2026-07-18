@@ -1,0 +1,1076 @@
+@import "tailwindcss";
+
+:root {
+  --apex-navy: #0c0a08;
+  --apex-navy-2: #1b1712;
+  --apex-navy-3: #2a241d;
+  --apex-gold: #c9a04a;
+  --apex-gold-2: #f0d89a;
+  --apex-cream: #f0e4c0;
+  --apex-cream-dim: #cfc4a3;
+  --apex-line: rgba(201, 160, 74, 0.18);
+  --apex-line-strong: rgba(201, 160, 74, 0.42);
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  margin: 0;
+  padding: 0;
+  min-height: 100%;
+  background: var(--apex-navy);
+  color: var(--apex-cream);
+  font-family: "Inter", system-ui, -apple-system, "Segoe UI", sans-serif;
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+
+a {
+  color: inherit;
+  text-decoration: none;
+}
+
+code {
+  font-family: "JetBrains Mono", Menlo, Consolas, monospace;
+  font-size: 0.85em;
+  background: rgba(240, 228, 192, 0.08);
+  color: var(--apex-gold-2);
+  padding: 0.12em 0.42em;
+  border-radius: 4px;
+  border: 1px solid var(--apex-line);
+}
+
+/* ── shell ───────────────────────────────────────────────────────────── */
+.apex-shell {
+  position: relative;
+  min-height: 100vh;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  background:
+    radial-gradient(1100px 600px at 80% -10%, rgba(201, 160, 74, 0.10), transparent 60%),
+    radial-gradient(900px 500px at -10% 100%, rgba(42, 36, 29, 0.55), transparent 70%),
+    linear-gradient(180deg, var(--apex-navy) 0%, #070605 100%);
+}
+
+.apex-bg-grid {
+  position: absolute;
+  inset: 0;
+  background-image:
+    linear-gradient(to right, rgba(201, 160, 74, 0.05) 1px, transparent 1px),
+    linear-gradient(to bottom, rgba(201, 160, 74, 0.05) 1px, transparent 1px);
+  background-size: 56px 56px;
+  mask-image: radial-gradient(ellipse at 50% 30%, black 30%, transparent 80%);
+  pointer-events: none;
+}
+
+.apex-bg-glow {
+  position: absolute;
+  width: 520px;
+  height: 520px;
+  border-radius: 50%;
+  filter: blur(120px);
+  opacity: 0.5;
+  pointer-events: none;
+}
+.apex-bg-glow--gold {
+  background: var(--apex-gold);
+  top: -160px;
+  right: -120px;
+  opacity: 0.24;
+}
+.apex-bg-glow--navy {
+  background: #2f271d;
+  bottom: -220px;
+  left: -180px;
+  opacity: 0.3;
+}
+
+/* ── header ──────────────────────────────────────────────────────────── */
+.apex-header {
+  position: relative;
+  z-index: 5;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 24px 40px;
+  border-bottom: 1px solid var(--apex-line);
+}
+
+.apex-brand {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+}
+
+.apex-brand__mark {
+  width: 38px;
+  height: 38px;
+}
+
+.apex-brand__wordmark {
+  display: flex;
+  flex-direction: column;
+  line-height: 1;
+}
+
+.apex-brand__name {
+  font-weight: 700;
+  font-size: 18px;
+  letter-spacing: 0.01em;
+  color: var(--apex-cream);
+}
+
+.apex-brand__tag {
+  margin-top: 4px;
+  font-size: 11px;
+  letter-spacing: 0.18em;
+  color: var(--apex-gold);
+  text-transform: uppercase;
+}
+
+.apex-header__nav {
+  display: flex;
+  gap: 28px;
+}
+
+.apex-header__link {
+  font-size: 13px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--apex-cream-dim);
+  transition: color 0.15s ease;
+}
+
+.apex-header__link:hover {
+  color: var(--apex-gold);
+}
+
+/* ── main / hero ─────────────────────────────────────────────────────── */
+.apex-main {
+  position: relative;
+  z-index: 5;
+  flex: 1;
+  max-width: 1180px;
+  width: 100%;
+  margin: 0 auto;
+  padding: 72px 40px 80px;
+}
+
+.apex-hero {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+  max-width: 880px;
+  margin: 0 auto;
+}
+
+.apex-eyebrow {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 18px;
+  border: 1px solid var(--apex-line-strong);
+  border-radius: 999px;
+  font-size: 12px;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--apex-cream);
+  background: rgba(12, 10, 8, 0.5);
+  backdrop-filter: blur(8px);
+}
+
+.apex-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--apex-gold);
+  box-shadow: 0 0 0 4px rgba(201, 160, 74, 0.18);
+  animation: apex-pulse 2.2s ease-in-out infinite;
+}
+
+@keyframes apex-pulse {
+  0%, 100% { box-shadow: 0 0 0 4px rgba(201, 160, 74, 0.18); }
+  50% { box-shadow: 0 0 0 8px rgba(201, 160, 74, 0.05); }
+}
+
+.apex-hero__title {
+  margin: 28px 0 20px;
+  font-size: clamp(38px, 6vw, 62px);
+  line-height: 1.05;
+  letter-spacing: -0.02em;
+  font-weight: 700;
+  color: var(--apex-cream);
+}
+
+.apex-gold {
+  background: linear-gradient(180deg, var(--apex-gold-2) 0%, var(--apex-gold) 100%);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+}
+
+.apex-hero__sub {
+  margin: 0 0 44px;
+  font-size: clamp(15px, 1.6vw, 18px);
+  line-height: 1.6;
+  color: var(--apex-cream-dim);
+  max-width: 640px;
+}
+
+/* ── CTA cards ───────────────────────────────────────────────────────── */
+.apex-cta-row {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 20px;
+  width: 100%;
+  max-width: 720px;
+}
+
+.apex-cta {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 26px 28px;
+  border-radius: 14px;
+  border: 1px solid var(--apex-line-strong);
+  background: rgba(27, 23, 18, 0.55);
+  backdrop-filter: blur(10px);
+  text-align: left;
+  transition: transform 0.18s ease, border-color 0.18s ease, background 0.18s ease, box-shadow 0.18s ease;
+  cursor: pointer;
+}
+
+.apex-cta:hover {
+  transform: translateY(-3px);
+}
+
+.apex-cta__head {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.apex-cta__label {
+  font-size: 18px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+}
+
+.apex-cta__arrow {
+  font-size: 22px;
+  transition: transform 0.18s ease;
+}
+
+.apex-cta:hover .apex-cta__arrow {
+  transform: translateX(4px);
+}
+
+.apex-cta__desc {
+  font-size: 13.5px;
+  color: var(--apex-cream-dim);
+  line-height: 1.5;
+}
+
+.apex-cta--gold {
+  background: linear-gradient(160deg, var(--apex-gold-2) 0%, var(--apex-gold) 45%, #aa8036 100%);
+  color: var(--apex-navy);
+  border-color: var(--apex-gold-2);
+  box-shadow: inset 0 1px 0 rgba(255, 246, 224, 0.45), 0 12px 40px -12px rgba(201, 160, 74, 0.5);
+}
+.apex-cta--gold .apex-cta__desc {
+  color: rgba(12, 10, 8, 0.78);
+}
+.apex-cta--gold:hover {
+  box-shadow: 0 18px 48px -10px rgba(201, 160, 74, 0.65);
+}
+
+.apex-cta--outline:hover {
+  border-color: var(--apex-gold);
+  background: rgba(27, 23, 18, 0.85);
+  box-shadow: 0 12px 40px -16px rgba(201, 160, 74, 0.4);
+}
+
+.apex-cta-row--single {
+  grid-template-columns: 1fr;
+  max-width: none;
+}
+
+/* ── products (two side-by-side cards) ───────────────────────────────── */
+.apex-products {
+  margin-top: 64px;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 24px;
+}
+
+.apex-product {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  padding: 30px 30px 28px;
+  border-radius: 18px;
+  border: 1px solid var(--apex-line-strong);
+  background: rgba(27, 23, 18, 0.6);
+  backdrop-filter: blur(10px);
+  overflow: hidden;
+}
+
+.apex-product::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 3px;
+  background: linear-gradient(90deg, transparent, var(--apex-gold), transparent);
+}
+
+.apex-product--primary {
+  background:
+    radial-gradient(600px 240px at 100% 0%, rgba(201, 160, 74, 0.12), transparent 60%),
+    rgba(27, 23, 18, 0.7);
+}
+
+.apex-product__head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 18px;
+}
+
+.apex-product__title-row {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+}
+
+.apex-product__mark {
+  width: 42px;
+  height: 42px;
+  flex-shrink: 0;
+}
+
+.apex-product__mark--ess {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 10px;
+  background: linear-gradient(160deg, var(--apex-gold-2) 0%, var(--apex-gold) 45%, #aa8036 100%);
+  color: var(--apex-navy);
+  font-weight: 700;
+  font-size: 13px;
+  letter-spacing: 0.06em;
+}
+
+.apex-product__title {
+  margin: 0;
+  font-size: 22px;
+  font-weight: 700;
+  color: var(--apex-cream);
+  letter-spacing: -0.005em;
+}
+
+.apex-product__kicker {
+  margin: 2px 0 0;
+  font-size: 11.5px;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--apex-gold);
+}
+
+.apex-product__badge {
+  padding: 5px 11px;
+  border-radius: 999px;
+  font-size: 10.5px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  border: 1px solid var(--apex-gold);
+  color: var(--apex-gold);
+  background: rgba(201, 160, 74, 0.08);
+  white-space: nowrap;
+}
+
+.apex-product__badge--alt {
+  border-color: var(--apex-line-strong);
+  color: var(--apex-cream-dim);
+  background: rgba(240, 228, 192, 0.04);
+}
+
+.apex-product__desc {
+  margin: 0 0 18px;
+  font-size: 14.5px;
+  line-height: 1.6;
+  color: var(--apex-cream-dim);
+}
+
+.apex-product__bullets {
+  list-style: none;
+  margin: 0 0 22px;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.apex-product__bullets li {
+  position: relative;
+  padding-left: 22px;
+  font-size: 13.5px;
+  line-height: 1.5;
+  color: var(--apex-cream);
+}
+
+.apex-product__bullets li::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: 8px;
+  width: 8px;
+  height: 8px;
+  border-radius: 2px;
+  background: var(--apex-gold);
+  transform: rotate(45deg);
+}
+
+.apex-product__note {
+  margin: 18px 0 0;
+  font-size: 12px;
+  color: var(--apex-cream-dim);
+  letter-spacing: 0.02em;
+}
+
+.apex-product__link {
+  color: var(--apex-gold);
+  border-bottom: 1px dashed var(--apex-line-strong);
+  transition: color 0.15s ease;
+}
+
+.apex-product__link:hover {
+  color: var(--apex-gold-2);
+}
+
+/* ── footer ──────────────────────────────────────────────────────────── */
+.apex-footer {
+  position: relative;
+  z-index: 5;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-wrap: wrap;
+  gap: 14px;
+  padding: 24px 40px 32px;
+  border-top: 1px solid var(--apex-line);
+  font-size: 12px;
+  color: var(--apex-cream-dim);
+  letter-spacing: 0.04em;
+}
+
+.apex-footer__sep {
+  opacity: 0.6;
+}
+
+.apex-footer__link {
+  color: var(--apex-cream-dim);
+  transition: color 0.15s ease;
+}
+
+.apex-footer__link:hover {
+  color: var(--apex-gold);
+}
+
+/* ── feature pages ───────────────────────────────────────────────────── */
+.apex-header__link--gold {
+  color: var(--apex-gold);
+}
+
+.apex-main--feature {
+  padding-top: 56px;
+}
+
+.apex-hero--feature {
+  margin-bottom: 24px;
+}
+
+.apex-cta--inline {
+  display: inline-flex;
+  align-items: center;
+  width: auto;
+  flex-direction: row;
+  gap: 16px;
+  padding: 16px 24px;
+}
+
+.apex-cta--inline .apex-cta__head {
+  width: auto;
+  gap: 16px;
+}
+
+.apex-feature-stack {
+  margin-top: 64px;
+  display: flex;
+  flex-direction: column;
+  gap: 96px;
+}
+
+.apex-feature-row {
+  display: grid;
+  grid-template-columns: 1.15fr 1fr;
+  gap: 56px;
+  align-items: center;
+}
+
+.apex-feature-row--reverse {
+  grid-template-columns: 1fr 1.15fr;
+}
+.apex-feature-row--reverse .apex-feature-row__media {
+  order: 2;
+}
+
+.apex-feature-stack--phone .apex-feature-row {
+  grid-template-columns: 0.9fr 1fr;
+  gap: 64px;
+}
+.apex-feature-stack--phone .apex-feature-row--reverse {
+  grid-template-columns: 1fr 0.9fr;
+}
+
+.apex-feature-row__media {
+  display: flex;
+  justify-content: center;
+}
+
+.apex-feature-row__frame {
+  position: relative;
+  border-radius: 16px;
+  overflow: hidden;
+  border: 1px solid var(--apex-line-strong);
+  background: rgba(12, 10, 8, 0.7);
+  box-shadow:
+    0 30px 80px -30px rgba(0, 0, 0, 0.7),
+    0 0 0 1px rgba(201, 160, 74, 0.08),
+    0 8px 40px -16px rgba(201, 160, 74, 0.18);
+}
+
+.apex-feature-row__frame img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.apex-feature-row__frame--wide {
+  width: 100%;
+  max-width: 620px;
+  aspect-ratio: 16 / 9;
+}
+
+.apex-feature-row__frame--phone {
+  width: 100%;
+  max-width: 320px;
+  aspect-ratio: 390 / 844;
+}
+
+.apex-feature-row__body {
+  display: flex;
+  flex-direction: column;
+}
+
+.apex-feature-row__index {
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.24em;
+  color: var(--apex-gold);
+  margin-bottom: 10px;
+}
+
+.apex-feature-row__title {
+  margin: 0 0 14px;
+  font-size: clamp(22px, 2.4vw, 30px);
+  line-height: 1.18;
+  color: var(--apex-cream);
+  letter-spacing: -0.01em;
+}
+
+.apex-feature-row__desc {
+  margin: 0 0 22px;
+  font-size: 15px;
+  line-height: 1.65;
+  color: var(--apex-cream-dim);
+}
+
+.apex-feature-row__edge {
+  position: relative;
+  padding: 16px 18px;
+  border-radius: 10px;
+  background: rgba(201, 160, 74, 0.07);
+  border-left: 2px solid var(--apex-gold);
+}
+
+.apex-feature-row__edge-label {
+  display: block;
+  font-size: 10.5px;
+  font-weight: 700;
+  letter-spacing: 0.2em;
+  text-transform: uppercase;
+  color: var(--apex-gold);
+  margin-bottom: 6px;
+}
+
+.apex-feature-row__edge-text {
+  margin: 0;
+  font-size: 13.5px;
+  line-height: 1.55;
+  color: var(--apex-cream);
+}
+
+.apex-feature-final {
+  margin-top: 96px;
+  padding: 48px 40px;
+  border-radius: 18px;
+  border: 1px solid var(--apex-line-strong);
+  background:
+    radial-gradient(600px 200px at 50% 0%, rgba(201, 160, 74, 0.14), transparent 70%),
+    rgba(27, 23, 18, 0.7);
+  text-align: center;
+}
+
+.apex-feature-final__title {
+  margin: 0 0 12px;
+  font-size: clamp(24px, 3vw, 34px);
+  color: var(--apex-cream);
+  letter-spacing: -0.01em;
+}
+
+.apex-feature-final__sub {
+  margin: 0 0 28px;
+  font-size: 14.5px;
+  color: var(--apex-cream-dim);
+}
+
+/* ── pricing ─────────────────────────────────────────────────────────── */
+.apex-price-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 24px;
+  margin-top: 56px;
+}
+
+.apex-price-card {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  padding: 32px 28px;
+  border-radius: 16px;
+  border: 1px solid var(--apex-line);
+  background: rgba(27, 23, 18, 0.6);
+  transition: border-color 0.2s ease, transform 0.2s ease;
+}
+
+.apex-price-card:hover {
+  border-color: var(--apex-line-strong);
+  transform: translateY(-2px);
+}
+
+.apex-price-card--featured {
+  border-color: var(--apex-gold);
+  background:
+    radial-gradient(500px 220px at 50% 0%, rgba(201, 160, 74, 0.12), transparent 70%),
+    rgba(27, 23, 18, 0.85);
+  box-shadow: 0 20px 60px -20px rgba(201, 160, 74, 0.35);
+}
+
+.apex-price-card__badge {
+  position: absolute;
+  top: -12px;
+  left: 50%;
+  transform: translateX(-50%);
+  padding: 5px 14px;
+  border-radius: 999px;
+  background: var(--apex-gold);
+  color: var(--apex-navy);
+  font-size: 10.5px;
+  font-weight: 700;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+}
+
+.apex-price-card__head {
+  padding-bottom: 22px;
+  border-bottom: 1px solid var(--apex-line);
+  margin-bottom: 22px;
+}
+
+.apex-price-card__name {
+  margin: 0 0 6px;
+  font-size: 22px;
+  letter-spacing: -0.01em;
+  color: var(--apex-cream);
+}
+
+.apex-price-card__tag {
+  margin: 0 0 22px;
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--apex-cream-dim);
+  min-height: 38px;
+}
+
+.apex-price-card__price {
+  font-size: 44px;
+  font-weight: 700;
+  line-height: 1;
+  color: var(--apex-gold);
+  letter-spacing: -0.02em;
+}
+
+.apex-price__unit {
+  font-size: 16px;
+  font-weight: 500;
+  color: var(--apex-cream-dim);
+  margin-left: 4px;
+  letter-spacing: 0;
+}
+
+.apex-price__prefix {
+  display: block;
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--apex-cream-dim);
+  margin-bottom: 4px;
+}
+
+.apex-price-card__cadence {
+  margin: 10px 0 0;
+  font-size: 11.5px;
+  letter-spacing: 0.04em;
+  color: var(--apex-cream-dim);
+  text-transform: uppercase;
+}
+
+.apex-price-card__list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.apex-price-card__item {
+  display: flex;
+  gap: 10px;
+  font-size: 13.5px;
+  line-height: 1.5;
+}
+
+.apex-price-card__item--in {
+  color: var(--apex-cream);
+}
+
+.apex-price-card__item--out {
+  color: rgba(207, 196, 163, 0.5);
+}
+
+.apex-price-card__check {
+  flex-shrink: 0;
+  width: 18px;
+  font-weight: 700;
+  color: var(--apex-gold);
+}
+
+.apex-price-card__item--out .apex-price-card__check {
+  color: rgba(207, 196, 163, 0.4);
+}
+
+.apex-price-section {
+  margin-top: 80px;
+}
+
+.apex-price-section__head {
+  text-align: center;
+  margin-bottom: 32px;
+  max-width: 720px;
+  margin-left: auto;
+  margin-right: auto;
+}
+
+.apex-price-section__title {
+  margin: 0 0 10px;
+  font-size: clamp(22px, 2.6vw, 30px);
+  color: var(--apex-cream);
+  letter-spacing: -0.01em;
+}
+
+.apex-price-section__sub {
+  margin: 0;
+  font-size: 14.5px;
+  line-height: 1.6;
+  color: var(--apex-cream-dim);
+}
+
+.apex-price-table {
+  border-radius: 14px;
+  border: 1px solid var(--apex-line);
+  background: rgba(27, 23, 18, 0.55);
+  overflow: hidden;
+}
+
+.apex-price-row {
+  display: grid;
+  grid-template-columns: 1.4fr 0.8fr 2fr;
+  gap: 24px;
+  align-items: center;
+  padding: 18px 24px;
+  border-bottom: 1px solid var(--apex-line);
+}
+
+.apex-price-row:last-child {
+  border-bottom: none;
+}
+
+.apex-price-row--noprice {
+  grid-template-columns: 1.4fr 2fr;
+}
+
+.apex-price-row__name {
+  font-size: 14.5px;
+  font-weight: 600;
+  color: var(--apex-cream);
+}
+
+.apex-price-row__price {
+  font-size: 15px;
+  font-weight: 700;
+  color: var(--apex-gold);
+  font-variant-numeric: tabular-nums;
+}
+
+.apex-price-row__scope {
+  font-size: 13px;
+  line-height: 1.55;
+  color: var(--apex-cream-dim);
+}
+
+/* ── responsive ──────────────────────────────────────────────────────── */
+@media (max-width: 960px) {
+  .apex-header { padding: 20px 22px; }
+  .apex-header__nav { gap: 18px; }
+  .apex-brand__tag { display: none; }
+  .apex-main { padding: 56px 22px 64px; }
+  .apex-products {
+    grid-template-columns: 1fr;
+    margin-top: 48px;
+  }
+  .apex-product { padding: 26px 22px 24px; }
+}
+
+@media (max-width: 960px) {
+  .apex-feature-row,
+  .apex-feature-row--reverse,
+  .apex-feature-stack--phone .apex-feature-row,
+  .apex-feature-stack--phone .apex-feature-row--reverse {
+    grid-template-columns: 1fr;
+    gap: 32px;
+  }
+  .apex-feature-row--reverse .apex-feature-row__media { order: 0; }
+  .apex-feature-stack { gap: 72px; }
+  .apex-feature-final { padding: 36px 22px; }
+}
+
+@media (max-width: 960px) {
+  .apex-price-grid { grid-template-columns: 1fr; gap: 32px; }
+  .apex-price-row {
+    grid-template-columns: 1fr;
+    gap: 6px;
+    padding: 18px 20px;
+  }
+  .apex-price-row__price { font-size: 16px; }
+}
+
+@media (max-width: 560px) {
+  .apex-cta-row { grid-template-columns: 1fr; }
+  .apex-header { flex-wrap: wrap; gap: 12px; }
+  .apex-header__nav { display: none; }
+  .apex-product__head { flex-direction: column; }
+}
+
+/* ── hero CTA row (home) ─────────────────────────────────────────────── */
+.apex-hero__cta-row {
+  margin-top: 30px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 14px;
+}
+
+/* ── pricing card CTA ────────────────────────────────────────────────── */
+.apex-price-card__cta {
+  margin-top: 24px;
+  width: 100%;
+  justify-content: center;
+}
+.apex-price-card__cta .apex-cta__head {
+  width: 100%;
+  justify-content: center;
+}
+
+/* ── lead capture form (get started) ─────────────────────────────────── */
+.apex-leadform-wrap {
+  display: flex;
+  justify-content: center;
+  margin-top: 8px;
+}
+
+.apex-leadform {
+  width: 100%;
+  max-width: 640px;
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+  padding: 32px;
+  border-radius: 18px;
+  border: 1px solid var(--apex-line-strong);
+  background: rgba(27, 23, 18, 0.6);
+  backdrop-filter: blur(10px);
+  box-shadow: 0 24px 70px -30px rgba(0, 0, 0, 0.7);
+}
+
+.apex-field-row {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 18px;
+}
+
+.apex-field {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+}
+
+.apex-field__label {
+  font-size: 13.5px;
+  font-weight: 600;
+  letter-spacing: 0.01em;
+  color: var(--apex-cream);
+}
+
+.apex-field__req { color: var(--apex-gold); }
+.apex-field__opt { color: var(--apex-cream-dim); font-weight: 400; }
+
+.apex-field__input {
+  width: 100%;
+  padding: 12px 14px;
+  border-radius: 10px;
+  border: 1px solid var(--apex-line-strong);
+  background: rgba(12, 10, 8, 0.6);
+  color: var(--apex-cream);
+  font-family: inherit;
+  font-size: 15px;
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+}
+
+.apex-field__input::placeholder { color: rgba(207, 196, 163, 0.5); }
+
+.apex-field__input:focus {
+  outline: none;
+  border-color: var(--apex-gold);
+  box-shadow: 0 0 0 3px rgba(201, 160, 74, 0.18);
+}
+
+.apex-field__select {
+  appearance: none;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='8' viewBox='0 0 12 8'%3E%3Cpath fill='%23c9a04a' d='M1 1l5 5 5-5'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 14px center;
+  padding-right: 38px;
+}
+.apex-field__select option { color: #0c0a08; }
+
+.apex-field__textarea {
+  resize: vertical;
+  min-height: 96px;
+}
+
+.apex-field__error {
+  margin: 0;
+  color: #f0a3a3;
+  font-size: 13.5px;
+}
+
+.apex-leadform__submit {
+  margin-top: 6px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  padding: 15px 24px;
+  border-radius: 12px;
+  border: 1px solid var(--apex-gold-2);
+  background: linear-gradient(160deg, var(--apex-gold-2) 0%, var(--apex-gold) 45%, #aa8036 100%);
+  color: var(--apex-navy);
+  font-family: inherit;
+  font-size: 16px;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  cursor: pointer;
+  transition: transform 0.16s ease, box-shadow 0.16s ease, opacity 0.16s ease;
+  box-shadow: 0 12px 40px -12px rgba(201, 160, 74, 0.45);
+}
+.apex-leadform__submit:hover:not(:disabled) {
+  transform: translateY(-2px);
+  box-shadow: 0 18px 48px -10px rgba(201, 160, 74, 0.65);
+}
+.apex-leadform__submit:disabled { opacity: 0.65; cursor: progress; }
+
+.apex-leadform__fineprint {
+  margin: 0;
+  font-size: 12.5px;
+  color: var(--apex-cream-dim);
+  text-align: center;
+}
+.apex-leadform__fineprint .apex-footer__link { color: var(--apex-gold); }
+
+.apex-leadform--success {
+  align-items: center;
+  text-align: center;
+  gap: 14px;
+  padding: 48px 32px;
+}
+.apex-leadform__success-mark {
+  width: 64px;
+  height: 64px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 32px;
+  font-weight: 700;
+  color: var(--apex-navy);
+  background: linear-gradient(160deg, var(--apex-gold-2) 0%, var(--apex-gold) 100%);
+}
+.apex-leadform__success-title {
+  margin: 0;
+  font-size: 26px;
+  color: var(--apex-cream);
+}
+.apex-leadform__success-sub {
+  margin: 0;
+  max-width: 440px;
+  color: var(--apex-cream-dim);
+  line-height: 1.6;
+}
+
+@media (max-width: 720px) {
+  .apex-field-row { grid-template-columns: 1fr; }
+  .apex-leadform { padding: 24px 20px; }
+}

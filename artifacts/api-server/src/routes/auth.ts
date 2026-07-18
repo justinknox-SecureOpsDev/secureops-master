@@ -3,11 +3,10 @@ import bcrypt from "bcryptjs";
 import { randomBytes } from "crypto";
 import { and, eq, sql } from "drizzle-orm";
 import { z } from "zod/v4";
-import { db, usersTable, employeesTable, passwordResetTokensTable, revokedTokensTable } from "@workspace/db";
+import { db, usersTable, employeesTable, policiesTable, passwordResetTokensTable, revokedTokensTable } from "@workspace/db";
 import { requireAuth, signToken, tokenTtlSeconds } from "../middlewares/auth";
 import { disconnectUser } from "../lib/wsManager";
 import { normalizePhoneToE164 } from "../lib/phone";
-import { UpdateMyUiPreferencesBody } from "@workspace/api-zod";
 import {
   forgotPasswordEmailLimiter,
   forgotPasswordIpLimiter,
@@ -16,6 +15,7 @@ import {
   resetPasswordLimiter,
 } from "../middlewares/rateLimit";
 import { sendEmail, renderPasswordResetEmail, renderPasswordChangedEmail } from "../lib/email";
+import { brand } from "../lib/brandConfig";
 import { geocodeOnelineAddress } from "../lib/geocode";
 import { writeEmployeeFieldChanges } from "../lib/employeeChangeLog";
 import { diffHighRiskChanges, enqueueHighRiskSelfEdit } from "../lib/highRiskSelfEditAlert";
@@ -124,7 +124,7 @@ function buildResetUrl(token: string): string | null {
 
 const router: IRouter = Router();
 
-function userPayload(user: typeof usersTable.$inferSelect) {
+export function userPayload(user: typeof usersTable.$inferSelect) {
   return {
     id: user.id,
     email: user.email,
@@ -134,8 +134,8 @@ function userPayload(user: typeof usersTable.$inferSelect) {
     status: user.status,
     mustChangePassword: user.mustChangePassword,
     mustCompleteProfile: user.mustCompleteProfile,
+    mustSignPolicies: user.mustSignPolicies,
     createdAt: user.createdAt,
-    uiPreferences: user.uiPreferences ?? undefined,
   };
 }
 
@@ -257,36 +257,77 @@ router.post("/auth/logout-all", requireAuth, async (req, res): Promise<void> => 
   res.json({ success: true });
 });
 
+const DeleteAccountBody = z.object({
+  password: z.string().min(1),
+});
+
+// Self-service account deletion (App Store Guideline 5.1.1(v)). A signed-in
+// user can permanently close their own account from inside the app. We
+// DEACTIVATE rather than hard-delete because the company is legally required to
+// retain employment, payroll/1099-tax, incident and audit records for the
+// statutory period — but the account itself is disabled (status='inactive', so
+// login is refused) and every outstanding session is invalidated immediately,
+// so the person can never sign in again. HR performs the final records purge
+// per the retention policy. The mobile UI explains this before confirmation.
+router.post("/auth/delete-account", requireAuth, async (req, res): Promise<void> => {
+  const parsed = DeleteAccountBody.safeParse(req.body);
+  if (!parsed.success) {
+    res.status(400).json({ error: "Bad Request", message: "Enter your password to confirm account deletion." });
+    return;
+  }
+  const userId = req.user!.userId;
+  const [user] = await db.select().from(usersTable).where(eq(usersTable.id, userId)).limit(1);
+  if (!user) {
+    res.status(404).json({ error: "Not Found", message: "User not found" });
+    return;
+  }
+  const valid = await bcrypt.compare(parsed.data.password, user.passwordHash);
+  if (!valid) {
+    res.status(401).json({ error: "Unauthorized", message: "Incorrect password. Please try again." });
+    return;
+  }
+
+  // The shared demo/reviewer accounts are exercised by App Review testers and
+  // re-seeded every boot. Honour the request UX-wise (revoke the session so the
+  // app returns to sign-in) but never leave the demo account deactivated for
+  // the next reviewer, which would break Guideline-2.1 demo access.
+  const demoEmails = new Set(
+    [brand.demoAdminEmail, brand.demoEmployeeEmail, brand.demoLeadEmail, brand.demoGuestEmail].map((e) =>
+      e.toLowerCase(),
+    ),
+  );
+  const isDemo = demoEmails.has(user.email.toLowerCase());
+
+  // Invalidate every outstanding session at once: bump the tokens_valid_after
+  // watermark (rejects all existing JWTs), revoke the current jti, drop the push
+  // token, and force-close any live WebSocket. Floor to second precision for
+  // parity with JWT `iat` granularity (same pattern as logout-all).
+  const now = new Date(Math.floor(Date.now() / 1000) * 1000);
+  await db
+    .update(usersTable)
+    .set(
+      isDemo
+        ? { tokensValidAfter: now, expoPushToken: null }
+        : { status: "inactive", tokensValidAfter: now, expoPushToken: null },
+    )
+    .where(eq(usersTable.id, userId));
+
+  if (req.user!.jti) {
+    const expiresAt = new Date((req.user!.exp ?? Math.floor(Date.now() / 1000) + tokenTtlSeconds()) * 1000);
+    await db
+      .insert(revokedTokensTable)
+      .values({ jti: req.user!.jti, userId, reason: "account_deleted", expiresAt })
+      .onConflictDoNothing();
+  }
+  disconnectUser(userId);
+  res.json({ success: true });
+});
+
 router.post("/auth/push-token", requireAuth, async (req, res): Promise<void> => {
   const { token } = req.body as { token: string };
   if (!token) { res.status(400).json({ error: "Bad Request", message: "token required" }); return; }
   await db.update(usersTable).set({ expoPushToken: token }).where(eq(usersTable.id, req.user!.userId));
   res.json({ success: true });
-});
-
-// Per-user UI personalization (portal nav group order). Cosmetic only —
-// stored on the caller's own row, never used for authorization.
-router.put("/me/ui-preferences", requireAuth, async (req, res): Promise<void> => {
-  const parsed = UpdateMyUiPreferencesBody.safeParse(req.body);
-  if (!parsed.success) {
-    res.status(400).json({ error: "Bad Request", message: parsed.error.message });
-    return;
-  }
-  const [current] = await db
-    .select({ uiPreferences: usersTable.uiPreferences })
-    .from(usersTable)
-    .where(eq(usersTable.id, req.user!.userId));
-  if (!current) {
-    res.status(404).json({ error: "Not Found", message: "User not found" });
-    return;
-  }
-  const merged: { navGroupOrder?: string[] } = { ...(current.uiPreferences ?? {}) };
-  if (parsed.data.navGroupOrder !== undefined) {
-    // Dedupe while preserving first occurrence order.
-    merged.navGroupOrder = [...new Set(parsed.data.navGroupOrder)];
-  }
-  await db.update(usersTable).set({ uiPreferences: merged }).where(eq(usersTable.id, req.user!.userId));
-  res.json(merged);
 });
 
 router.get("/auth/me", requireAuth, async (req, res): Promise<void> => {
@@ -498,20 +539,16 @@ router.post("/auth/reset-password", resetPasswordLimiter, async (req, res): Prom
 // through admin / HR.
 const ObjectKey = z.string().min(1).max(512).startsWith("/objects/");
 const PatchMeEmployeeBody = z.object({
-  phone: z.string().optional(),
-  address: z.string().optional(),
-  // Personal details — employee-owned PII the officer may self-maintain.
-  // dateOfBirth maps to a pg `date` column (ISO YYYY-MM-DD); "" is treated as an
-  // explicit clear in the handler below. niNumber (SSN last 4), rightToWorkStatus
-  // and directDepositConsent are compliance/financial-sensitive and fire a
-  // same-day HR alert on change (see HIGH_RISK_SELF_EDIT_FIELDS).
-  dateOfBirth: z.union([z.string().regex(/^\d{4}-\d{2}-\d{2}$/), z.literal("")]).nullable().optional(),
+  // Personal identity. firstName/lastName live on the users row (split out of
+  // the employees write below); date/place of birth are employees columns.
+  // Email, role, status, pay rate, SSN and licence stay admin/HR-managed.
+  firstName: z.string().trim().min(1).max(100).optional(),
+  lastName: z.string().trim().min(1).max(100).optional(),
+  dateOfBirth: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Date of birth must be in YYYY-MM-DD format").nullable().optional(),
   cityOfBirth: z.string().max(120).nullable().optional(),
   stateOfBirth: z.string().max(120).nullable().optional(),
-  niNumber: z.string().max(64).nullable().optional(),
-  rightToWorkStatus: z.string().max(120).nullable().optional(),
-  taxCode: z.string().max(64).nullable().optional(),
-  directDepositConsent: z.boolean().nullable().optional(),
+  phone: z.string().optional(),
+  address: z.string().optional(),
   emergencyContactName: z.string().optional(),
   emergencyContactRelationship: z.string().nullable().optional(),
   emergencyContactPhone: z.string().optional(),
@@ -526,29 +563,15 @@ const PatchMeEmployeeBody = z.object({
   // Self-service document refresh (Task #31). Object paths look like
   // "/objects/<uuid>" — the value the presigned-upload flow returns.
   // We enforce that prefix so officers cannot persist arbitrary strings
-  // as document references. License number / level / expiry still require
-  // admin (compliance-verified eligibility inputs). Officers can only swap
-  // the *file* they previously uploaded. NOTE: right-to-work *status* IS now
-  // self-editable above (treated as self-attested, not HR-verified — it fires
-  // a same-day HR alert for re-verification via HIGH_RISK_SELF_EDIT_FIELDS).
+  // as document references. The license number / expiry / right-to-work
+  // *status* still require admin (those are compliance fields). Officers
+  // can only swap the *file* they previously uploaded.
   photoKey: ObjectKey.nullable().optional(),
   cvKey: ObjectKey.nullable().optional(),
   licenseDocKey: ObjectKey.nullable().optional(),
   passportDocKey: ObjectKey.nullable().optional(),
   rightToWorkDocKey: ObjectKey.nullable().optional(),
   trainingCertificateKeys: z.array(ObjectKey).max(50).nullable().optional(),
-  // Work history — editable by the officer so they can keep their profile
-  // current without an admin round-trip. Not high-risk (no financial / safety
-  // consequence) so no HR alert is triggered for these fields.
-  previousExperience: z.string().max(4000).nullable().optional(),
-  yearsExperience: z.number().int().min(0).max(99).nullable().optional(),
-  // References: max 10 entries, each with a required name. phone/relationship
-  // are optional so officers can add what they know without full details.
-  references: z.array(z.object({
-    name: z.string().min(1).max(200),
-    relationship: z.string().max(200).optional(),
-    phone: z.string().max(50).optional(),
-  })).max(10).nullable().optional(),
 }).strict();
 
 router.patch("/me/employee", requireAuth, async (req, res): Promise<void> => {
@@ -594,24 +617,6 @@ router.patch("/me/employee", requireAuth, async (req, res): Promise<void> => {
       mutableUpdates.emergencyContactPhone = null;
     }
   }
-  // Normalize date of birth: an empty/whitespace value clears it (null), and any
-  // provided value must be a real calendar date in YYYY-MM-DD form. We round-trip
-  // through Date so impossible dates (e.g. 2026-02-30) are rejected with a 400
-  // instead of blowing up the pg `date` cast with a 500.
-  if (Object.hasOwn(updates, "dateOfBirth")) {
-    const raw = updates.dateOfBirth;
-    if (typeof raw === "string" && raw.trim()) {
-      const d = raw.trim();
-      const dt = new Date(`${d}T00:00:00Z`);
-      if (Number.isNaN(dt.getTime()) || dt.toISOString().slice(0, 10) !== d) {
-        res.status(400).json({ error: "Bad Request", message: "Date of birth must be a valid date in YYYY-MM-DD format." });
-        return;
-      }
-      mutableUpdates.dateOfBirth = d;
-    } else {
-      mutableUpdates.dateOfBirth = null;
-    }
-  }
   const userId = req.user!.userId;
   // Make sure the user behind the JWT still exists. If not, surface a clear
   // 401 so the mobile app can prompt re-login instead of looping on the form.
@@ -649,11 +654,16 @@ router.patch("/me/employee", requireAuth, async (req, res): Promise<void> => {
   // have a row yet; the user is authenticated and the row is keyed by userId,
   // so an upsert is always safe and avoids confusing "profile not found"
   // errors when the user is clearly logged in.
+  // firstName/lastName live on the users row, not employees — split them out
+  // so the employees write never receives non-existent columns. The remaining
+  // keys (incl. dateOfBirth/cityOfBirth/stateOfBirth) are all employees cols.
+  const { firstName: newFirstName, lastName: newLastName, ...empUpdates } =
+    mutableUpdates as Record<string, unknown>;
   const [existing] = await db.select().from(employeesTable).where(eq(employeesTable.userId, userId)).limit(1);
   if (!existing) {
-    await db.insert(employeesTable).values({ userId, ...updates });
-  } else {
-    await db.update(employeesTable).set(updates).where(eq(employeesTable.userId, userId));
+    await db.insert(employeesTable).values({ userId, ...empUpdates });
+  } else if (Object.keys(empUpdates).length > 0) {
+    await db.update(employeesTable).set(empUpdates).where(eq(employeesTable.userId, userId));
   }
   // Clear must-complete-profile once they've saved their profile, and mirror
   // any phone edit onto the account record so `users.phoneNumber` (the SMS
@@ -662,6 +672,8 @@ router.patch("/me/employee", requireAuth, async (req, res): Promise<void> => {
   // by SMS.
   const userPatch: Record<string, unknown> = { mustCompleteProfile: false };
   if (Object.hasOwn(updates, "phone")) userPatch.phoneNumber = mutableUpdates.phone ?? null;
+  if (Object.hasOwn(updates, "firstName")) userPatch.firstName = newFirstName;
+  if (Object.hasOwn(updates, "lastName")) userPatch.lastName = newLastName;
   await db.update(usersTable).set(userPatch).where(eq(usersTable.id, userId));
   const [employee] = await db.select().from(employeesTable).where(eq(employeesTable.userId, userId)).limit(1);
 
@@ -705,18 +717,28 @@ router.patch("/me/employee", requireAuth, async (req, res): Promise<void> => {
   // the most important real-world trigger (an officer changing their bank
   // account from the field) would never reach admins.
   const changedKeys = Object.keys(updates);
+  // firstName/lastName live on the users row, so the employees-only before/after
+  // snapshots don't carry them. Augment both ends with the user-name values
+  // (old from the pre-write `user` read, new from the patch) so the change log
+  // correctly diffs a self-edited name instead of seeing undefined→undefined.
+  const beforeAug = { ...(existing ?? {}), firstName: user.firstName, lastName: user.lastName };
+  const afterAug = {
+    ...(employee ?? {}),
+    firstName: Object.hasOwn(updates, "firstName") ? newFirstName : user.firstName,
+    lastName: Object.hasOwn(updates, "lastName") ? newLastName : user.lastName,
+  };
   await writeEmployeeFieldChanges({
     employeeUserId: userId,
     keys: changedKeys,
-    before: existing as Record<string, unknown> | undefined,
-    after: employee as Record<string, unknown> | undefined,
+    before: beforeAug as Record<string, unknown>,
+    after: afterAug as Record<string, unknown>,
     actor: { userId, email: user.email, role: user.role },
     log: req.log,
   });
   const highRiskChanged = diffHighRiskChanges(
     changedKeys,
-    existing as Record<string, unknown> | null | undefined,
-    employee as Record<string, unknown> | null | undefined,
+    beforeAug as Record<string, unknown>,
+    afterAug as Record<string, unknown>,
   );
   if (highRiskChanged.length > 0) {
     void enqueueHighRiskSelfEdit({
@@ -730,6 +752,69 @@ router.patch("/me/employee", requireAuth, async (req, res): Promise<void> => {
   // post-save confirmation toast ("HR was notified of this change") only
   // when an alert actually fired, not on every profile save.
   res.json({ ...employee, hrNotified: highRiskChanged.length > 0, hrNotifiedFields: highRiskChanged });
+});
+
+// ---- Sign company policies (mobile first-login gate) -----------------------
+
+const AcknowledgePoliciesBody = z.object({
+  signature: z.string().trim().min(2, "Please type your full legal name").max(120),
+});
+
+/**
+ * Sign/acknowledge every currently-active policy in one action and clear the
+ * `users.mustSignPolicies` gate the mobile app enforces at login for non-admin
+ * staff.
+ *
+ * Lives in auth.ts (a core, un-feature-gated router) ON PURPOSE: a flagged
+ * officer must ALWAYS be able to clear the gate — even on a tenant where the
+ * "policies" product feature is disabled — or they would be permanently locked
+ * out of the app. requireAuth still applies. (It deliberately does NOT live in
+ * routes/policies.ts, whose routes are all behind requireFeature("policies").)
+ *
+ * Lockout-safe + idempotent: signatures are recorded against the caller's
+ * employee file (matching the enriched-ack shape onboarding writes), and the
+ * flag is cleared even when there are zero active policies (nothing to sign,
+ * but never a dead-end). Re-signing only appends policies not already on file.
+ */
+router.post("/me/policies/acknowledge", requireAuth, async (req, res): Promise<void> => {
+  const parsed = AcknowledgePoliciesBody.safeParse(req.body);
+  if (!parsed.success) { res.status(400).json({ error: "Bad Request", message: parsed.error.message }); return; }
+  const userId = req.user!.userId;
+  const signature = parsed.data.signature.trim();
+  const now = new Date().toISOString();
+
+  // Snapshot the active policy set the officer is agreeing to (may be empty).
+  const active = await db.select().from(policiesTable).where(eq(policiesTable.isActive, true));
+
+  await db.transaction(async (tx) => {
+    const [emp] = await tx.select().from(employeesTable).where(eq(employeesTable.userId, userId)).limit(1);
+    const existingAcks = Array.isArray(emp?.acknowledgements)
+      ? (emp!.acknowledgements as Array<Record<string, unknown>>)
+      : [];
+    const haveIds = new Set(existingAcks.map((a) => a?.policyId).filter(Boolean));
+    const newAcks = active
+      .filter((p) => !haveIds.has(p.id))
+      .map((p) => ({
+        type: p.slug,
+        accepted: true,
+        signature,
+        timestamp: now,
+        policyId: p.id,
+        policyVersion: p.version,
+      }));
+    const merged = [...existingAcks, ...newAcks];
+    // Non-admin staff always have an employees row, but upsert defensively so a
+    // legacy/missing row can never 500 the gate-clearing call.
+    if (!emp) {
+      await tx.insert(employeesTable).values({ userId, acknowledgements: merged });
+    } else {
+      await tx.update(employeesTable).set({ acknowledgements: merged }).where(eq(employeesTable.userId, userId));
+    }
+    await tx.update(usersTable).set({ mustSignPolicies: false }).where(eq(usersTable.id, userId));
+  });
+
+  const [updated] = await db.select().from(usersTable).where(eq(usersTable.id, userId)).limit(1);
+  res.json(userPayload(updated));
 });
 
 export default router;

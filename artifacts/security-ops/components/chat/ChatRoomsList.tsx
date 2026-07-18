@@ -6,6 +6,7 @@ import {
 import { SafeAreaView } from "react-native-safe-area-context";
 import { Feather } from "@expo/vector-icons";
 import { useColors } from "@/hooks/useColors";
+import { useBrand } from "@/hooks/useFeatures";
 import { apiRequest } from "@/utils/api";
 import { useAuth } from "@/contexts/AuthContext";
 import { useChat } from "@/contexts/ChatContext";
@@ -34,6 +35,7 @@ interface Props {
 
 export default function ChatRoomsList({ onSelectRoom }: Props) {
   const colors = useColors();
+  const brand = useBrand();
   const { user } = useAuth();
   const { unreadByRoom, markRoomRead, refreshUnread } = useChat();
   const [rooms, setRooms] = useState<ChatRoom[]>([]);
@@ -131,7 +133,7 @@ export default function ChatRoomsList({ onSelectRoom }: Props) {
       <View style={s.header}>
         <Text style={[s.title, { color: colors.foreground }]} accessibilityRole="header">Team Chat</Text>
         <Text style={[s.subtitle, { color: colors.mutedForeground }]}>
-          Williams Council Security Group
+          {brand.companyName}
         </Text>
       </View>
 
@@ -177,7 +179,7 @@ export default function ChatRoomsList({ onSelectRoom }: Props) {
           accessibilityRole="button"
           accessibilityLabel="Start a new direct message"
         >
-          <Feather name="edit" size={16} color="#080c18" />
+          <Feather name="edit" size={16} color="#0c0a08" />
           <Text style={s.newDmText}>New Direct Message</Text>
         </TouchableOpacity>
       )}
@@ -361,7 +363,7 @@ const styles = (colors: ReturnType<typeof useColors>) => StyleSheet.create({
     flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 8,
     marginHorizontal: 16, marginBottom: 12, paddingVertical: 12, borderRadius: 10,
   },
-  newDmText: { color: "#080c18", fontSize: 15, fontWeight: "700" },
+  newDmText: { color: "#0c0a08", fontSize: 15, fontWeight: "700" },
   list: { paddingHorizontal: 16, gap: 8, paddingBottom: 100, flexGrow: 1 },
   roomCard: {
     flexDirection: "row", alignItems: "center", padding: 14,
@@ -379,7 +381,7 @@ const styles = (colors: ReturnType<typeof useColors>) => StyleSheet.create({
     minWidth: 22, height: 22, borderRadius: 11, paddingHorizontal: 6,
     alignItems: "center", justifyContent: "center",
   },
-  unreadBadgeText: { color: "#080c18", fontSize: 12, fontWeight: "800" },
+  unreadBadgeText: { color: "#0c0a08", fontSize: 12, fontWeight: "800" },
   emptyText: { marginTop: 12, fontSize: 16 },
   modalBackdrop: { flex: 1, backgroundColor: "#00000088", justifyContent: "flex-end" },
   modalSheet: { maxHeight: "85%", minHeight: "60%", borderTopLeftRadius: 20, borderTopRightRadius: 20, overflow: "hidden" },

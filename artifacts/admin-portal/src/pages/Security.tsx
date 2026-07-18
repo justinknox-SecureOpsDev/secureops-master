@@ -1,10 +1,23 @@
 import { useEffect, useState, useCallback } from "react";
-import { api } from "@/lib/api";
-import { formatDate } from "@/lib/format";
+import { api, getToken } from "@/lib/api";
+import { useAuth } from "@/lib/auth";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Loader2, ShieldCheck, ShieldAlert, KeyRound, Copy, Check } from "lucide-react";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
+import {
+  Loader2, ShieldCheck, ShieldAlert, KeyRound, Copy, Check,
+  AlertTriangle, LogOut, BellOff, UserX, Trash2, AlertCircle,
+} from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 
 type Status = { enrolled: boolean; enrolledAt: string | null; recoveryCodesRemaining: number };
@@ -18,6 +31,55 @@ export default function SecurityPage() {
   const [disableCode, setDisableCode] = useState("");
   const [copied, setCopied] = useState(false);
   const { toast } = useToast();
+  const { logout } = useAuth();
+
+  // Account deletion (parity with the mobile app's in-app account closure).
+  const [deletePassword, setDeletePassword] = useState("");
+  const [deleteError, setDeleteError] = useState<string | null>(null);
+  const [deleteBusy, setDeleteBusy] = useState(false);
+  const [confirmOpen, setConfirmOpen] = useState(false);
+
+  async function deleteAccount() {
+    if (!deletePassword || deleteBusy) return;
+    setDeleteBusy(true);
+    setDeleteError(null);
+    try {
+      // Raw fetch (not the shared `api()` helper) so a wrong-password 401 shows
+      // an inline retry instead of tripping the global 401 auto-logout.
+      const token = getToken();
+      const res = await fetch("/api/auth/delete-account", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        },
+        body: JSON.stringify({ password: deletePassword }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        setDeleteError(
+          (data as { message?: string })?.message ||
+            "Could not delete your account. Please try again.",
+        );
+        return;
+      }
+      // Success: the server has revoked every session. Clear the local session,
+      // which routes the app back to the sign-in screen.
+      setConfirmOpen(false);
+      toast({
+        title: "Account deleted",
+        description: "Your account has been closed and you've been signed out.",
+      });
+      logout();
+    } catch (err) {
+      setDeleteError(
+        (err as Error)?.message ||
+          "Can't reach the server. Check your connection and try again.",
+      );
+    } finally {
+      setDeleteBusy(false);
+    }
+  }
 
   const refresh = useCallback(async () => {
     try {
@@ -162,7 +224,7 @@ export default function SecurityPage() {
             <ShieldCheck className="w-4 h-4 text-emerald-700" />
             <strong>Two-factor is ON</strong>
             <span className="text-xs text-muted-foreground">
-              · enabled {status.enrolledAt ? formatDate(status.enrolledAt) : ""}
+              · enabled {status.enrolledAt ? new Date(status.enrolledAt).toLocaleDateString() : ""}
               · {status.recoveryCodesRemaining} recovery codes remaining
             </span>
           </div>
@@ -181,6 +243,105 @@ export default function SecurityPage() {
           </div>
         </div>
       )}
+
+      <div className="mt-10 border-t pt-8">
+        <div className="flex items-center gap-3 mb-1">
+          <AlertTriangle className="w-5 h-5 text-destructive" />
+          <h2 className="text-lg font-semibold text-destructive">Delete account</h2>
+        </div>
+        <p className="text-sm text-muted-foreground mb-4">
+          Permanently close your account and sign out on every device. This
+          can't be undone from here — to return, HR must re-invite you.
+        </p>
+
+        <div className="border rounded-lg p-5 bg-white space-y-4">
+          <div>
+            <div className="text-xs font-semibold uppercase tracking-wide text-muted-foreground mb-2">
+              What happens
+            </div>
+            <ul className="space-y-2 text-sm">
+              <li className="flex items-start gap-2">
+                <LogOut className="w-4 h-4 mt-0.5 text-muted-foreground shrink-0" />
+                <span>You're signed out on every device and can no longer sign in.</span>
+              </li>
+              <li className="flex items-start gap-2">
+                <BellOff className="w-4 h-4 mt-0.5 text-muted-foreground shrink-0" />
+                <span>Notifications and live location sharing stop immediately.</span>
+              </li>
+              <li className="flex items-start gap-2">
+                <UserX className="w-4 h-4 mt-0.5 text-muted-foreground shrink-0" />
+                <span>Your account is deactivated. To return, HR must re-invite you.</span>
+              </li>
+            </ul>
+          </div>
+
+          <div className="border-t pt-4">
+            <div className="text-xs font-semibold uppercase tracking-wide text-muted-foreground mb-2">
+              What is retained
+            </div>
+            <p className="text-sm text-muted-foreground">
+              As your employer, the company is legally required to keep certain
+              records after your account is closed — such as employment,
+              timekeeping, payroll and 1099 tax records, filed incident reports,
+              and audit history — for the period required by law. These are
+              retained by HR under the company retention policy and are no longer
+              accessible to you here. To request a records review, contact HR.
+            </p>
+          </div>
+
+          <div className="border-t pt-4 space-y-2">
+            <Label htmlFor="delete-password" className="text-xs uppercase">
+              Enter your password to confirm
+            </Label>
+            <Input
+              id="delete-password"
+              type="password"
+              value={deletePassword}
+              onChange={(e) => { setDeletePassword(e.target.value); if (deleteError) setDeleteError(null); }}
+              placeholder="Password"
+              autoComplete="current-password"
+            />
+            {deleteError && (
+              <div className="flex items-center gap-2 text-sm text-destructive">
+                <AlertCircle className="w-4 h-4 shrink-0" />
+                <span>{deleteError}</span>
+              </div>
+            )}
+            <Button
+              variant="destructive"
+              disabled={deleteBusy || !deletePassword}
+              onClick={() => { setDeleteError(null); setConfirmOpen(true); }}
+            >
+              <Trash2 className="w-4 h-4 mr-2" />
+              Delete my account
+            </Button>
+          </div>
+        </div>
+      </div>
+
+      <AlertDialog open={confirmOpen} onOpenChange={(o) => { if (!deleteBusy) setConfirmOpen(o); }}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Delete your account?</AlertDialogTitle>
+            <AlertDialogDescription>
+              This permanently closes your account and signs you out on every
+              device. You won't be able to sign in again. This can't be undone
+              from here.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={deleteBusy}>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={(e) => { e.preventDefault(); void deleteAccount(); }}
+              disabled={deleteBusy}
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+            >
+              {deleteBusy ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : null}
+              Delete account
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }

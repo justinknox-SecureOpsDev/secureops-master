@@ -1,6 +1,5 @@
 import { useEffect, useState } from "react";
 import { api, ApiError } from "@/lib/api";
-import { formatDateTime } from "@/lib/format";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -271,7 +270,7 @@ export function PoliciesPage() {
                             <span className="font-mono px-1.5 py-0.5 rounded bg-accent/40">v{h.version}</span>
                             {h.isActive && <span className="px-1.5 py-0.5 rounded bg-emerald-100 text-emerald-800 border border-emerald-200">Active</span>}
                             {h.fileName && <span className="text-muted-foreground truncate">{h.fileName}</span>}
-                            {h.uploadedAt && <span className="text-muted-foreground">· {formatDateTime(h.uploadedAt)}</span>}
+                            {h.uploadedAt && <span className="text-muted-foreground">· {new Date(h.uploadedAt).toLocaleString()}</span>}
                           </li>
                         ))}
                       </ul>

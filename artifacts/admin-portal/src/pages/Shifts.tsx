@@ -1,6 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { api } from "@/lib/api";
-import { formatTime, formatDateTime, dateKey } from "@/lib/format";
 import { useDeepLinkFocus, useFirstQueryParam } from "@/hooks/useDeepLinkFocus";
 import { getTable } from "@/lib/tables";
 import { RowFormDialog } from "@/components/RowFormDialog";
@@ -19,10 +18,9 @@ import {
   AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
   AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
-import { Link } from "wouter";
 import {
   ChevronDown, ChevronRight, MapPin, Repeat, Pencil, Trash2,
-  Users, Plus, RefreshCw, CalendarRange, UserCheck, Check, X, Shield,
+  Users, Plus, RefreshCw, CalendarRange, UserCheck, Check, X,
 } from "lucide-react";
 
 type Shift = {
@@ -42,7 +40,6 @@ type Shift = {
   repeatPattern: string | null;
   seriesId: string | null;
   notes: string | null;
-  shiftType?: "standard" | "ppo_detail" | string | null;
   assignments: { id: string; status: string; employeeName: string | null }[];
 };
 
@@ -57,11 +54,18 @@ const ONE_WEEK_MS = 7 * 24 * 60 * 60 * 1000;
 const LOAD_MORE_PAGE = 50;
 
 function fmtDateTime(iso: string): string {
-  return formatDateTime(iso);
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return iso;
+  return d.toLocaleString(undefined, {
+    weekday: "short", month: "short", day: "numeric",
+    hour: "numeric", minute: "2-digit",
+  });
 }
 
 function fmtTimeOfDay(iso: string): string {
-  return formatTime(iso);
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return iso;
+  return d.toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" });
 }
 
 // "HH:MM" in the supplied IANA zone (24h) for an ISO instant. Used to
@@ -893,7 +897,7 @@ function ShiftRow({
 }) {
   const lvl = levelBadge(shift.requiredLicenseLevel);
   const filled = (shift.assignments ?? []).filter((a) => a.status === "accepted").length;
-  const sameDay = dateKey(shift.startTime) === dateKey(shift.endTime);
+  const sameDay = new Date(shift.startTime).toDateString() === new Date(shift.endTime).toDateString();
   return (
     <div
       ref={focusRef as React.Ref<HTMLDivElement> | undefined}
@@ -914,19 +918,6 @@ function ShiftRow({
         <Users className="w-3.5 h-3.5" />
         <span>{filled}/{shift.headcount}</span>
       </div>
-      {shift.shiftType === "ppo_detail" && (
-        <Link href={`/shifts/${shift.id}/protection`}>
-          <Button
-            variant="ghost"
-            size="icon"
-            title="Protection detail"
-            aria-label="Open protection detail"
-            className="text-brand-gold hover:text-brand-gold"
-          >
-            <Shield className="w-4 h-4" />
-          </Button>
-        </Link>
-      )}
       <Button variant="ghost" size="icon" onClick={onEdit} title="Edit"><Pencil className="w-4 h-4" /></Button>
       <Button variant="ghost" size="icon" onClick={onDelete} title="Delete"><Trash2 className="w-4 h-4 text-destructive" /></Button>
     </div>

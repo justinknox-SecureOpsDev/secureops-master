@@ -1,7 +1,6 @@
 import PDFDocument from "pdfkit";
 import { Readable } from "node:stream";
-import { eq, and, inArray } from "drizzle-orm";
-import { WORKER_ROLES } from "./eligibility";
+import { eq, and } from "drizzle-orm";
 import {
   db,
   usersTable,
@@ -17,8 +16,6 @@ import { drawBrandHeader } from "./pdfHeader";
 const objectStorage = new ObjectStorageService();
 
 // Brand tokens — driven by env vars so each client deployment has its own palette.
-const NAVY = brand.colorNavy;
-const GOLD = brand.colorGold;
 const MUTED = "#666666";
 const TEXT = "#1a1a1a";
 
@@ -39,19 +36,11 @@ function maskTail(v: string | null | undefined, keep = 4): string {
   return "•".repeat(Math.max(4, s.length - keep)) + s.slice(-keep);
 }
 
-// Date-only values (pg `date`, "YYYY-MM-DD") render the literal calendar day
-// via UTC; real timestamps render in Central time (WCSG business timezone).
-const DATE_ONLY_RE = /^\d{4}-\d{2}-\d{2}$/;
-
 function fmtDate(d: Date | string | null | undefined): string {
   if (!d) return "—";
-  const isDateOnly = typeof d === "string" && DATE_ONLY_RE.test(d);
-  const date = typeof d === "string" ? new Date(isDateOnly ? `${d}T00:00:00Z` : d) : d;
+  const date = typeof d === "string" ? new Date(d) : d;
   if (Number.isNaN(date.getTime())) return String(d);
-  return date.toLocaleDateString("en-US", {
-    year: "numeric", month: "short", day: "numeric",
-    timeZone: isDateOnly ? "UTC" : "America/Chicago",
-  });
+  return date.toLocaleDateString("en-US", { year: "numeric", month: "short", day: "numeric" });
 }
 
 /**
@@ -175,7 +164,7 @@ export async function buildEmployeeProfilePdf(
     })
     .from(usersTable)
     .leftJoin(employeesTable, eq(employeesTable.userId, usersTable.id))
-    .where(and(eq(usersTable.id, userId), inArray(usersTable.role, [...WORKER_ROLES])));
+    .where(and(eq(usersTable.id, userId), eq(usersTable.role, "employee")));
 
   if (!row) return null;
 
@@ -233,7 +222,7 @@ export async function buildEmployeeProfilePdf(
       doc.rect(photoX, photoY, 110, 130).clip();
       doc.image(photoBuf, photoX, photoY, { fit: [110, 130], align: "center", valign: "center" });
       doc.restore();
-      doc.rect(photoX, photoY, 110, 130).strokeColor(GOLD).lineWidth(1).stroke();
+      doc.rect(photoX, photoY, 110, 130).strokeColor(brand.colorGold).lineWidth(1).stroke();
     } catch (err) {
       logger.warn({ err }, "[profilePdf] photo embed failed");
     }
@@ -244,7 +233,7 @@ export async function buildEmployeeProfilePdf(
   doc.fillColor(MUTED).font("Helvetica").fontSize(11)
     .text("SECURITY OFFICER", 56, doc.y + 2);
   if (row.hourlyRate && !redactPublic) {
-    doc.fillColor(GOLD).font("Helvetica-Bold").fontSize(12)
+    doc.fillColor(brand.colorGold).font("Helvetica-Bold").fontSize(12)
       .text(`$${Number(row.hourlyRate).toFixed(2)} / hour`, 56, doc.y + 6);
   }
 
@@ -255,9 +244,9 @@ export async function buildEmployeeProfilePdf(
   const section = (label: string) => {
     doc.moveDown(0.6);
     if (doc.y > doc.page.height - 120) doc.addPage();
-    doc.fillColor(NAVY).font("Helvetica-Bold").fontSize(11).text(label.toUpperCase(), 56, doc.y);
+    doc.fillColor(brand.colorNavy).font("Helvetica-Bold").fontSize(11).text(label.toUpperCase(), 56, doc.y);
     const lineY = doc.y + 2;
-    doc.moveTo(56, lineY).lineTo(doc.page.width - 56, lineY).strokeColor(GOLD).lineWidth(0.7).stroke();
+    doc.moveTo(56, lineY).lineTo(doc.page.width - 56, lineY).strokeColor(brand.colorGold).lineWidth(0.7).stroke();
     doc.moveDown(0.5);
   };
   const rowGap = 14;
@@ -479,7 +468,7 @@ export async function buildEmployeeProfilePdf(
   // Footer on the final page.
   const footerY = doc.page.height - 36;
   doc.fillColor(MUTED).font("Helvetica").fontSize(8).text(
-    `Generated ${new Date().toLocaleString("en-US", { timeZone: "America/Chicago" })} · ${brand.companyName} · Confidential — do not distribute`,
+    `Generated ${new Date().toLocaleString()} · ${brand.companyName} · Confidential — do not distribute`,
     56, footerY,
     { width: doc.page.width - 112, align: "center", lineBreak: false },
   );

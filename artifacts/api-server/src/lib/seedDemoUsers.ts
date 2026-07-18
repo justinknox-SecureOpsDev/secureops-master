@@ -35,6 +35,13 @@ const DEMO_USERS: DemoUser[] = [
     lastName: "Manager",
     role: "site_manager",
   },
+  {
+    email: brand.demoGuestEmail,
+    password: brand.demoGuestPassword,
+    firstName: "Demo",
+    lastName: "Guest",
+    role: "employee",
+  },
 ];
 
 /**
@@ -63,6 +70,28 @@ export async function ensureAdminAccountHealth(): Promise<void> {
     logger.info(
       { emails: fixed.map((r) => r.email) },
       "Cleared stale mustChangePassword flag on active admin accounts",
+    );
+  }
+}
+
+/**
+ * One-time, idempotent role migration: the legacy "lead" role was renamed to
+ * "site_manager" (Site Manager). Flip any historical rows so existing
+ * supervisors keep their access under the new role key without a manual data
+ * migration. Safe to re-run on every boot — once migrated this selects 0 rows
+ * and no-ops, so dev and production converge automatically.
+ */
+export async function migrateLeadRoleToSiteManager(): Promise<void> {
+  const migrated = await db
+    .update(usersTable)
+    .set({ role: "site_manager" })
+    .where(eq(usersTable.role, "lead"))
+    .returning({ email: usersTable.email });
+
+  if (migrated.length > 0) {
+    logger.info(
+      { count: migrated.length, emails: migrated.map((r) => r.email) },
+      "Migrated legacy 'lead' role to 'site_manager'",
     );
   }
 }

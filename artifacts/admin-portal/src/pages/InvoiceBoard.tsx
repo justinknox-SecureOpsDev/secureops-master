@@ -65,10 +65,10 @@ const fmtUsd = (n: number) =>
   `$${Number(n).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 
 const fmtWeekRange = (periodStart: string, periodEnd: string) => {
-  const opts: Intl.DateTimeFormatOptions = { weekday: "short", month: "short", day: "numeric", timeZone: "UTC" };
-  const s = new Date(`${periodStart}T00:00:00Z`);
-  const e = new Date(`${periodEnd}T00:00:00Z`);
-  return `${s.toLocaleDateString("en-US", opts)} → ${e.toLocaleDateString("en-US", opts)}, ${e.getUTCFullYear()}`;
+  const opts: Intl.DateTimeFormatOptions = { weekday: "short", month: "short", day: "numeric" };
+  const s = new Date(`${periodStart}T00:00:00`);
+  const e = new Date(`${periodEnd}T00:00:00`);
+  return `${s.toLocaleDateString("en-US", opts)} → ${e.toLocaleDateString("en-US", opts)}, ${e.getFullYear()}`;
 };
 
 const num = (s: string | null) => parseFloat(String(s ?? "0")) || 0;
@@ -666,7 +666,7 @@ export default function InvoiceBoardPage() {
                               <td className="px-3 py-2 text-right font-semibold">{fmtUsd(num(r.totalAmount))}</td>
                               <td className="px-3 py-2 text-xs">
                                 {r.dueDate
-                                  ? new Date(`${r.dueDate}T00:00:00Z`).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric", timeZone: "UTC" })
+                                  ? new Date(`${r.dueDate}T00:00:00`).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })
                                   : "—"}
                               </td>
                               <td className="px-3 py-2">
