@@ -5,10 +5,19 @@ import { useRouter } from "expo-router";
 import { Feather } from "@expo/vector-icons";
 import { useColors } from "@/hooks/useColors";
 import { apiRequest } from "@/utils/api";
+import { FeatureGate } from "@/components/FeatureGate";
 
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 
 export default function AddTrainingScreen() {
+  return (
+    <FeatureGate feature="trainings">
+      <AddTrainingScreenInner />
+    </FeatureGate>
+  );
+}
+
+function AddTrainingScreenInner() {
   const colors = useColors();
   const router = useRouter();
   const topPad = useTopPad();

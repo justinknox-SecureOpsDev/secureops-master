@@ -8,7 +8,6 @@ import { useClockIn, useClockOut, useGetActiveTimeEntry, getGetActiveTimeEntryQu
 import { Feather } from "@expo/vector-icons";
 import { useQueryClient } from "@tanstack/react-query";
 import * as Location from "expo-location";
-import { formatTime, formatWeekdayTime, formatDate } from "@/utils/time";
 
 function formatDuration(seconds: number) {
   const h = Math.floor(seconds / 3600);
@@ -299,7 +298,7 @@ export default function EmployeeClockScreen() {
 
         {isClockedIn && currentEntry?.clockInTime && (
           <Text style={[styles.clockInTime, { color: colors.mutedForeground }]}>
-            Clocked in at {formatTime(currentEntry.clockInTime)}
+            Clocked in at {new Date(currentEntry.clockInTime).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
           </Text>
         )}
 
@@ -400,9 +399,9 @@ export default function EmployeeClockScreen() {
                 <Feather name="chevron-right" size={16} color={colors.mutedForeground} />
               </View>
               <Text style={{ color: colors.mutedForeground, fontSize: 12, marginTop: 4, marginLeft: 22 }}>
-                {formatWeekdayTime(s.startTime)}
+                {new Date(s.startTime).toLocaleString([], { weekday: "short", hour: "2-digit", minute: "2-digit" })}
                 {" – "}
-                {formatTime(s.endTime)}
+                {new Date(s.endTime).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
                 {s.siteName ? ` · ${s.siteName}` : ""}
               </Text>
             </TouchableOpacity>
@@ -442,7 +441,7 @@ export default function EmployeeClockScreen() {
               >
                 <View style={styles.entryHeader}>
                   <Text style={[styles.entryDate, { color: colors.foreground }]}>
-                    {formatDate(entry.clockInTime, { weekday: "short", month: "short", day: "numeric" })}
+                    {new Date(entry.clockInTime).toLocaleDateString([], { weekday: "short", month: "short", day: "numeric" })}
                   </Text>
                   {hrs && (
                     <View style={[styles.hrsBadge, { backgroundColor: colors.primary + "20", borderColor: colors.primary }]}>
@@ -453,13 +452,13 @@ export default function EmployeeClockScreen() {
                 <View style={styles.entryRow}>
                   <Feather name="play" size={13} color={colors.mutedForeground} />
                   <Text style={[styles.entryTime, { color: colors.mutedForeground }]}>
-                    {formatTime(entry.clockInTime)}
+                    {new Date(entry.clockInTime).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
                   </Text>
                   {entry.clockOutTime && <>
                     <Feather name="arrow-right" size={13} color={colors.mutedForeground} />
                     <Feather name="square" size={13} color={colors.mutedForeground} />
                     <Text style={[styles.entryTime, { color: colors.mutedForeground }]}>
-                      {formatTime(entry.clockOutTime)}
+                      {new Date(entry.clockOutTime).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
                     </Text>
                   </>}
                   {entry.clockInLat && (

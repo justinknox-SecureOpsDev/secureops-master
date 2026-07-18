@@ -8,6 +8,24 @@
 import * as zod from "zod";
 
 /**
+ * @summary Public brand configuration (company name, colours, feature flags)
+ */
+export const GetBrandResponse = zod.object({
+  companyName: zod.string(),
+  shortName: zod.string(),
+  tagline: zod.string(),
+  appName: zod.string(),
+  colorNavy: zod.string(),
+  colorGold: zod.string(),
+  colorCream: zod.string(),
+  features: zod
+    .record(zod.string(), zod.boolean())
+    .describe(
+      "Map of FeatureKey → enabled flag. Absent keys default to enabled on the client. Property keys are FeatureKey values.",
+    ),
+});
+
+/**
  * @summary List clients
  */
 export const GetClientsResponseItem = zod.object({
@@ -266,61 +284,56 @@ export const DeleteSiteParams = zod.object({
 });
 
 /**
- * @summary List the site managers assigned to a site (admin, or a manager of this site)
+ * @summary List the site's assigned managers plus all assignable managers (admin)
  */
 export const GetSiteManagersParams = zod.object({
   id: zod.coerce.string(),
 });
 
-export const GetSiteManagersResponseItem = zod
-  .object({
-    id: zod.string(),
-    firstName: zod.string(),
-    lastName: zod.string(),
-    email: zod.string(),
-  })
-  .describe("Minimal user shape for site-manager assignment lists\/pickers.");
-export const GetSiteManagersResponse = zod.array(GetSiteManagersResponseItem);
+export const GetSiteManagersResponse = zod.object({
+  assigned: zod.array(
+    zod.object({
+      userId: zod.string(),
+      firstName: zod.string().optional(),
+      lastName: zod.string().optional(),
+      email: zod.string().optional(),
+    }),
+  ),
+  available: zod.array(
+    zod.object({
+      userId: zod.string(),
+      firstName: zod.string().optional(),
+      lastName: zod.string().optional(),
+      email: zod.string().optional(),
+    }),
+  ),
+});
 
 /**
- * @summary Replace the set of site managers assigned to a site (admin only)
+ * @summary Replace the full set of managers for a site (admin)
  */
-export const SetSiteManagersParams = zod.object({
+export const UpdateSiteManagersParams = zod.object({
   id: zod.coerce.string(),
 });
 
-export const SetSiteManagersBody = zod
-  .object({
-    userIds: zod.array(zod.string()),
-  })
-  .describe(
-    "Replace the full set of managers for a site with this list of user IDs.",
-  );
+export const UpdateSiteManagersBody = zod.object({
+  userIds: zod
+    .array(zod.string())
+    .describe(
+      "Full desired set of Site Manager user IDs for this site (replaces existing).",
+    ),
+});
 
-export const SetSiteManagersResponseItem = zod
-  .object({
-    id: zod.string(),
-    firstName: zod.string(),
-    lastName: zod.string(),
-    email: zod.string(),
-  })
-  .describe("Minimal user shape for site-manager assignment lists\/pickers.");
-export const SetSiteManagersResponse = zod.array(SetSiteManagersResponseItem);
-
-/**
- * @summary List active site_manager-role users for assignment pickers (admin only)
- */
-export const GetSiteManagerCandidatesResponseItem = zod
-  .object({
-    id: zod.string(),
-    firstName: zod.string(),
-    lastName: zod.string(),
-    email: zod.string(),
-  })
-  .describe("Minimal user shape for site-manager assignment lists\/pickers.");
-export const GetSiteManagerCandidatesResponse = zod.array(
-  GetSiteManagerCandidatesResponseItem,
-);
+export const UpdateSiteManagersResponse = zod.object({
+  assigned: zod.array(
+    zod.object({
+      userId: zod.string(),
+      firstName: zod.string().optional(),
+      lastName: zod.string().optional(),
+      email: zod.string().optional(),
+    }),
+  ),
+});
 
 /**
  * @summary Approve or reject a time entry (admin)
@@ -396,10 +409,6 @@ export const LoginBody = zod.object({
   password: zod.string(),
 });
 
-export const loginResponseUserUiPreferencesNavGroupOrderItemMax = 40;
-
-export const loginResponseUserUiPreferencesNavGroupOrderMax = 30;
-
 export const LoginResponse = zod.object({
   token: zod.string(),
   user: zod.object({
@@ -421,25 +430,13 @@ export const LoginResponse = zod.object({
       .describe(
         "True after first password change until the user has reviewed\/saved their profile.",
       ),
-    createdAt: zod.coerce.date(),
-    uiPreferences: zod
-      .object({
-        navGroupOrder: zod
-          .array(
-            zod
-              .string()
-              .max(loginResponseUserUiPreferencesNavGroupOrderItemMax),
-          )
-          .max(loginResponseUserUiPreferencesNavGroupOrderMax)
-          .optional()
-          .describe(
-            "Preferred order of portal nav group keys. Unknown keys are ignored; missing groups append in default order.",
-          ),
-      })
+    mustSignPolicies: zod
+      .boolean()
       .optional()
       .describe(
-        "Per-user UI personalization. Cosmetic only — never authorization.",
+        "True when the user must sign\/acknowledge company policies before accessing the mobile app (non-admin staff only).",
       ),
+    createdAt: zod.coerce.date(),
   }),
 });
 
@@ -459,10 +456,6 @@ export const ChangePasswordBody = zod.object({
   currentPassword: zod.string(),
   newPassword: zod.string().min(changePasswordBodyNewPasswordMin),
 });
-
-export const changePasswordResponseUserUiPreferencesNavGroupOrderItemMax = 40;
-
-export const changePasswordResponseUserUiPreferencesNavGroupOrderMax = 30;
 
 export const ChangePasswordResponse = zod.object({
   token: zod.string(),
@@ -485,45 +478,28 @@ export const ChangePasswordResponse = zod.object({
       .describe(
         "True after first password change until the user has reviewed\/saved their profile.",
       ),
-    createdAt: zod.coerce.date(),
-    uiPreferences: zod
-      .object({
-        navGroupOrder: zod
-          .array(
-            zod
-              .string()
-              .max(changePasswordResponseUserUiPreferencesNavGroupOrderItemMax),
-          )
-          .max(changePasswordResponseUserUiPreferencesNavGroupOrderMax)
-          .optional()
-          .describe(
-            "Preferred order of portal nav group keys. Unknown keys are ignored; missing groups append in default order.",
-          ),
-      })
+    mustSignPolicies: zod
+      .boolean()
       .optional()
       .describe(
-        "Per-user UI personalization. Cosmetic only — never authorization.",
+        "True when the user must sign\/acknowledge company policies before accessing the mobile app (non-admin staff only).",
       ),
+    createdAt: zod.coerce.date(),
   }),
 });
 
 /**
  * @summary Self-service edit of allow-listed employee profile fields
  */
-export const updateMyEmployeeProfileBodyYearsExperienceMin = 0;
-export const updateMyEmployeeProfileBodyYearsExperienceMax = 99;
-
 export const UpdateMyEmployeeProfileBody = zod
   .object({
-    phone: zod.string().optional(),
-    address: zod.string().optional(),
+    firstName: zod.string().optional(),
+    lastName: zod.string().optional(),
     dateOfBirth: zod.string().nullish(),
     cityOfBirth: zod.string().nullish(),
     stateOfBirth: zod.string().nullish(),
-    niNumber: zod.string().nullish(),
-    rightToWorkStatus: zod.string().nullish(),
-    taxCode: zod.string().nullish(),
-    directDepositConsent: zod.boolean().nullish(),
+    phone: zod.string().optional(),
+    address: zod.string().optional(),
     emergencyContactName: zod.string().optional(),
     emergencyContactRelationship: zod.string().nullish(),
     emergencyContactPhone: zod.string().optional(),
@@ -541,21 +517,6 @@ export const UpdateMyEmployeeProfileBody = zod
     passportDocKey: zod.string().nullish(),
     rightToWorkDocKey: zod.string().nullish(),
     trainingCertificateKeys: zod.array(zod.string()).nullish(),
-    previousExperience: zod.string().nullish(),
-    yearsExperience: zod
-      .number()
-      .min(updateMyEmployeeProfileBodyYearsExperienceMin)
-      .max(updateMyEmployeeProfileBodyYearsExperienceMax)
-      .nullish(),
-    references: zod
-      .array(
-        zod.object({
-          name: zod.string(),
-          relationship: zod.string().optional(),
-          phone: zod.string().optional(),
-        }),
-      )
-      .nullish(),
   })
   .describe(
     "Strict allow-list of fields the employee may edit on their own profile.",
@@ -696,10 +657,6 @@ export const ResetPasswordBody = zod.object({
   newPassword: zod.string().min(resetPasswordBodyNewPasswordMin),
 });
 
-export const resetPasswordResponseUserUiPreferencesNavGroupOrderItemMax = 40;
-
-export const resetPasswordResponseUserUiPreferencesNavGroupOrderMax = 30;
-
 export const ResetPasswordResponse = zod.object({
   token: zod.string(),
   user: zod.object({
@@ -721,35 +678,19 @@ export const ResetPasswordResponse = zod.object({
       .describe(
         "True after first password change until the user has reviewed\/saved their profile.",
       ),
-    createdAt: zod.coerce.date(),
-    uiPreferences: zod
-      .object({
-        navGroupOrder: zod
-          .array(
-            zod
-              .string()
-              .max(resetPasswordResponseUserUiPreferencesNavGroupOrderItemMax),
-          )
-          .max(resetPasswordResponseUserUiPreferencesNavGroupOrderMax)
-          .optional()
-          .describe(
-            "Preferred order of portal nav group keys. Unknown keys are ignored; missing groups append in default order.",
-          ),
-      })
+    mustSignPolicies: zod
+      .boolean()
       .optional()
       .describe(
-        "Per-user UI personalization. Cosmetic only — never authorization.",
+        "True when the user must sign\/acknowledge company policies before accessing the mobile app (non-admin staff only).",
       ),
+    createdAt: zod.coerce.date(),
   }),
 });
 
 /**
  * @summary Get current user
  */
-export const getMeResponseUiPreferencesNavGroupOrderItemMax = 40;
-
-export const getMeResponseUiPreferencesNavGroupOrderMax = 30;
-
 export const GetMeResponse = zod.object({
   id: zod.string(),
   email: zod.string(),
@@ -769,63 +710,14 @@ export const GetMeResponse = zod.object({
     .describe(
       "True after first password change until the user has reviewed\/saved their profile.",
     ),
-  createdAt: zod.coerce.date(),
-  uiPreferences: zod
-    .object({
-      navGroupOrder: zod
-        .array(zod.string().max(getMeResponseUiPreferencesNavGroupOrderItemMax))
-        .max(getMeResponseUiPreferencesNavGroupOrderMax)
-        .optional()
-        .describe(
-          "Preferred order of portal nav group keys. Unknown keys are ignored; missing groups append in default order.",
-        ),
-    })
+  mustSignPolicies: zod
+    .boolean()
     .optional()
     .describe(
-      "Per-user UI personalization. Cosmetic only — never authorization.",
+      "True when the user must sign\/acknowledge company policies before accessing the mobile app (non-admin staff only).",
     ),
+  createdAt: zod.coerce.date(),
 });
-
-/**
- * @summary Update the caller's UI personalization preferences
- */
-export const updateMyUiPreferencesBodyNavGroupOrderItemMax = 40;
-
-export const updateMyUiPreferencesBodyNavGroupOrderMax = 30;
-
-export const UpdateMyUiPreferencesBody = zod
-  .object({
-    navGroupOrder: zod
-      .array(zod.string().max(updateMyUiPreferencesBodyNavGroupOrderItemMax))
-      .max(updateMyUiPreferencesBodyNavGroupOrderMax)
-      .optional()
-      .describe(
-        "Preferred order of portal nav group keys. Unknown keys are ignored; missing groups append in default order.",
-      ),
-  })
-  .describe(
-    "Per-user UI personalization. Cosmetic only — never authorization.",
-  );
-
-export const updateMyUiPreferencesResponseNavGroupOrderItemMax = 40;
-
-export const updateMyUiPreferencesResponseNavGroupOrderMax = 30;
-
-export const UpdateMyUiPreferencesResponse = zod
-  .object({
-    navGroupOrder: zod
-      .array(
-        zod.string().max(updateMyUiPreferencesResponseNavGroupOrderItemMax),
-      )
-      .max(updateMyUiPreferencesResponseNavGroupOrderMax)
-      .optional()
-      .describe(
-        "Preferred order of portal nav group keys. Unknown keys are ignored; missing groups append in default order.",
-      ),
-  })
-  .describe(
-    "Per-user UI personalization. Cosmetic only — never authorization.",
-  );
 
 /**
  * @summary List all employees
@@ -1221,12 +1113,6 @@ export const GetShiftsQueryParams = zod.object({
   employeeId: zod.coerce.string().optional(),
   from: zod.date().optional(),
   to: zod.date().optional(),
-  view: zod
-    .enum(["worker"])
-    .optional()
-    .describe(
-      'Set to `worker` to get the personal worker feed (own assigned shifts + qualifying open shifts) regardless of role. Admins and dispatchers use this for \"my work\" surfaces instead of their default global read.',
-    ),
 });
 
 export const GetShiftsResponseItem = zod.object({
@@ -2619,204 +2505,6 @@ export const RejectLicenseRenewalResponse = zod.object({
 });
 
 /**
- * @summary Admin analytics summary (P&L, hours, missed shifts, incidents) for a date range
- */
-export const GetAnalyticsSummaryQueryParams = zod.object({
-  start: zod.date(),
-  end: zod.date(),
-  clientId: zod.coerce
-    .string()
-    .uuid()
-    .optional()
-    .describe("Restrict all metrics to sites belonging to this client"),
-});
-
-export const GetAnalyticsSummaryResponse = zod.object({
-  revenue: zod.number(),
-  laborCost: zod.number(),
-  profit: zod.number(),
-  marginPct: zod.number(),
-  hoursWorked: zod.number(),
-  hoursScheduled: zod.number(),
-  coveragePct: zod.number(),
-  noShowCount: zod.number(),
-  unfilledCount: zod.number(),
-  missedShifts: zod.array(
-    zod.object({
-      shiftId: zod.string(),
-      title: zod.string(),
-      startTime: zod.string(),
-      endTime: zod.string(),
-      siteId: zod.string().nullable(),
-      siteName: zod.string().nullable(),
-      headcount: zod.number(),
-      filled: zod.number(),
-      noShows: zod.number(),
-    }),
-  ),
-  incidentTotal: zod.number(),
-  incidentsBySeverity: zod.object({
-    low: zod.number(),
-    medium: zod.number(),
-    high: zod.number(),
-    critical: zod.number(),
-  }),
-  incidentsByStatus: zod.object({
-    open: zod.number(),
-    investigating: zod.number(),
-    closed: zod.number(),
-  }),
-  pnlTrend: zod.array(
-    zod.object({
-      bucket: zod.string(),
-      revenue: zod.number(),
-      laborCost: zod.number(),
-      profit: zod.number(),
-    }),
-  ),
-  hoursTrend: zod.array(
-    zod.object({
-      bucket: zod.string(),
-      worked: zod.number(),
-      scheduled: zod.number(),
-    }),
-  ),
-  incidentTrend: zod.array(
-    zod.object({
-      bucket: zod.string(),
-      count: zod.number(),
-    }),
-  ),
-  perSite: zod.array(
-    zod.object({
-      siteId: zod.string(),
-      siteName: zod.string(),
-      revenue: zod.number(),
-      laborCost: zod.number(),
-      profit: zod.number(),
-      hoursWorked: zod.number(),
-      hoursScheduled: zod.number(),
-      noShows: zod.number(),
-      unfilledShifts: zod.number(),
-      incidents: zod.number(),
-    }),
-  ),
-  officerSummary: zod.object({
-    totalNoShows: zod.number(),
-    avgAttendanceRate: zod.number(),
-    avgOnTimeRate: zod.number(),
-  }),
-  perOfficer: zod.array(
-    zod.object({
-      userId: zod.string(),
-      firstName: zod.string(),
-      lastName: zod.string(),
-      email: zod.string(),
-      shiftsAssigned: zod.number(),
-      shiftsCompleted: zod.number(),
-      noShows: zod.number(),
-      attendanceRate: zod.number(),
-      punctualityEligible: zod.number(),
-      onTimeCount: zod.number(),
-      onTimeRate: zod.number(),
-      avgMinutesLate: zod.number(),
-      hoursWorked: zod.number(),
-      hoursScheduled: zod.number(),
-      rejectedEntries: zod.number(),
-      totalEntries: zod.number(),
-      rejectionRate: zod.number(),
-      incidentTotal: zod.number(),
-      incidentHigh: zod.number(),
-      incidentCritical: zod.number(),
-      reliabilityScore: zod.number(),
-    }),
-  ),
-});
-
-/**
- * @summary Download the analytics report (summary KPIs + per-site breakdown) as a CSV (admin only)
- */
-export const ExportAnalyticsCsvQueryParams = zod.object({
-  start: zod.date(),
-  end: zod.date(),
-  clientId: zod.coerce
-    .string()
-    .uuid()
-    .optional()
-    .describe("Restrict the report to sites belonging to this client"),
-});
-
-/**
- * @summary Download the analytics report as a branded PDF (admin only)
- */
-export const ExportAnalyticsPdfQueryParams = zod.object({
-  start: zod.date(),
-  end: zod.date(),
-  clientId: zod.coerce
-    .string()
-    .uuid()
-    .optional()
-    .describe("Restrict the report to sites belonging to this client"),
-});
-
-/**
- * Returns a per-ISO-week series of attendance / punctuality / reliability metrics for a single officer over the last N weeks, so admins can see whether an officer is improving or declining over time. Weeks with no assigned shifts are included with null rates so charts can show gaps.
-
- * @summary Weekly-bucketed performance history for one officer (admin only)
- */
-export const getAnalyticsOfficerHistoryQueryWeeksDefault = 12;
-export const getAnalyticsOfficerHistoryQueryWeeksMin = 4;
-export const getAnalyticsOfficerHistoryQueryWeeksMax = 26;
-
-export const GetAnalyticsOfficerHistoryQueryParams = zod.object({
-  userId: zod.coerce.string().uuid().describe("The officer's user id"),
-  weeks: zod.coerce
-    .number()
-    .min(getAnalyticsOfficerHistoryQueryWeeksMin)
-    .max(getAnalyticsOfficerHistoryQueryWeeksMax)
-    .default(getAnalyticsOfficerHistoryQueryWeeksDefault)
-    .describe(
-      "How many trailing ISO weeks to include (including the current week)",
-    ),
-});
-
-export const GetAnalyticsOfficerHistoryResponse = zod.object({
-  userId: zod.string().uuid(),
-  firstName: zod.string(),
-  lastName: zod.string(),
-  weeks: zod.number(),
-  points: zod.array(
-    zod.object({
-      bucket: zod.string().describe("ISO week label, e.g. 2026-W27"),
-      weekStart: zod.coerce
-        .date()
-        .describe("Monday of the ISO week (business timezone calendar date)"),
-      shiftsAssigned: zod.number(),
-      shiftsCompleted: zod.number(),
-      noShows: zod.number(),
-      hoursWorked: zod.number(),
-      attendanceRate: zod
-        .number()
-        .nullable()
-        .describe("Null when no shifts were assigned that week"),
-      punctualityEligible: zod
-        .number()
-        .describe("Completed shifts that count toward punctuality"),
-      onTimeRate: zod
-        .number()
-        .nullable()
-        .describe("Null when no completed shifts that week"),
-      reliabilityScore: zod
-        .number()
-        .nullable()
-        .describe(
-          "60% attendance + 40% punctuality; null when no shifts assigned",
-        ),
-    }),
-  ),
-});
-
-/**
  * @summary Admin dashboard summary stats
  */
 export const GetAdminDashboardSummaryResponse = zod.object({
@@ -3124,6 +2812,85 @@ export const GetEmployeeDashboardSummaryResponse = zod.object({
 });
 
 /**
+ * @summary Business analytics summary for a date range (admin-only)
+ */
+export const GetAnalyticsSummaryQueryParams = zod.object({
+  start: zod.date(),
+  end: zod.date(),
+  clientId: zod.coerce.string().optional(),
+});
+
+export const GetAnalyticsSummaryResponse = zod.object({
+  revenue: zod.number(),
+  laborCost: zod.number(),
+  pnl: zod.number(),
+  marginPct: zod.number().nullable(),
+  hoursWorked: zod.number(),
+  hoursScheduled: zod.number(),
+  coveragePct: zod.number().nullable(),
+  noShows: zod.number(),
+  unfilledShifts: zod.number(),
+  incidents: zod.object({
+    total: zod.number(),
+    low: zod.number(),
+    medium: zod.number(),
+    high: zod.number(),
+    critical: zod.number(),
+    open: zod.number(),
+    resolved: zod.number(),
+  }),
+  weeklyTrend: zod.array(
+    zod.object({
+      weekStart: zod.coerce.date(),
+      revenue: zod.number(),
+      laborCost: zod.number(),
+      pnl: zod.number(),
+      hoursWorked: zod.number(),
+      incidentCount: zod.number(),
+    }),
+  ),
+  sites: zod.array(
+    zod.object({
+      siteId: zod.string(),
+      siteName: zod.string(),
+      clientName: zod.string().nullable(),
+      revenue: zod.number(),
+      laborCost: zod.number(),
+      pnl: zod.number(),
+      hoursWorked: zod.number(),
+      coveragePct: zod.number().nullable(),
+    }),
+  ),
+});
+
+/**
+ * @summary Per-officer performance metrics for a date range (admin-only)
+ */
+export const GetAnalyticsOfficersQueryParams = zod.object({
+  start: zod.date(),
+  end: zod.date(),
+  clientId: zod.coerce.string().optional(),
+});
+
+export const GetAnalyticsOfficersResponseItem = zod.object({
+  employeeId: zod.string(),
+  name: zod.string(),
+  hoursWorked: zod.number(),
+  shiftsCompleted: zod.number(),
+  incidentsFiled: zod.number(),
+  punctualityPct: zod.number().nullable(),
+  trend: zod.array(
+    zod.object({
+      weekStart: zod.coerce.date(),
+      hoursWorked: zod.number(),
+    }),
+  ),
+});
+export const GetAnalyticsOfficersResponse = zod.array(
+  GetAnalyticsOfficersResponseItem,
+);
+
+/**
  * @summary List chat rooms
  */
 export const GetChatRoomsResponseItem = zod.object({
@@ -3165,6 +2932,47 @@ export const DeleteChatRoomParams = zod.object({
 export const DeleteChatRoomResponse = zod.object({
   ok: zod.boolean().optional(),
 });
+
+/**
+ * @summary Update the caller's UI personalization preferences
+ */
+export const updateMyUiPreferencesBodyNavGroupOrderItemMax = 40;
+
+export const updateMyUiPreferencesBodyNavGroupOrderMax = 30;
+
+export const UpdateMyUiPreferencesBody = zod
+  .object({
+    navGroupOrder: zod
+      .array(zod.string().max(updateMyUiPreferencesBodyNavGroupOrderItemMax))
+      .max(updateMyUiPreferencesBodyNavGroupOrderMax)
+      .optional()
+      .describe(
+        "Preferred order of portal nav group keys. Unknown keys are ignored; missing groups append in default order.",
+      ),
+  })
+  .describe(
+    "Per-user UI personalization. Cosmetic only — never authorization.",
+  );
+
+export const updateMyUiPreferencesResponseNavGroupOrderItemMax = 40;
+
+export const updateMyUiPreferencesResponseNavGroupOrderMax = 30;
+
+export const UpdateMyUiPreferencesResponse = zod
+  .object({
+    navGroupOrder: zod
+      .array(
+        zod.string().max(updateMyUiPreferencesResponseNavGroupOrderItemMax),
+      )
+      .max(updateMyUiPreferencesResponseNavGroupOrderMax)
+      .optional()
+      .describe(
+        "Preferred order of portal nav group keys. Unknown keys are ignored; missing groups append in default order.",
+      ),
+  })
+  .describe(
+    "Per-user UI personalization. Cosmetic only — never authorization.",
+  );
 
 /**
  * @summary Update authenticated user's last known location
@@ -3320,6 +3128,83 @@ export const GetRadioChannelsResponseItem = zod.object({
   createdAt: zod.coerce.date(),
 });
 export const GetRadioChannelsResponse = zod.array(GetRadioChannelsResponseItem);
+
+/**
+ * Shared admin to-do list (team-wide — every admin sees every task).
+Open tasks first (due date ascending, undated last), then completed
+tasks newest-first. Pass includeCompleted=false to omit finished tasks.
+
+ */
+export const listAdminTasksQueryIncludeCompletedDefault = true;
+
+export const ListAdminTasksQueryParams = zod.object({
+  includeCompleted: zod.coerce
+    .boolean()
+    .default(listAdminTasksQueryIncludeCompletedDefault),
+});
+
+export const ListAdminTasksResponseItem = zod.object({
+  id: zod.string().uuid(),
+  title: zod.string(),
+  notes: zod.string().nullable(),
+  dueAt: zod.coerce.date().nullable(),
+  completedAt: zod.coerce.date().nullable(),
+  createdBy: zod.string().uuid(),
+  createdByName: zod.string().nullable(),
+  createdAt: zod.coerce.date(),
+});
+export const ListAdminTasksResponse = zod.array(ListAdminTasksResponseItem);
+
+/**
+ * Add a task/reminder to the shared admin list.
+ */
+export const createAdminTaskBodyTitleMax = 200;
+
+export const createAdminTaskBodyNotesMax = 2000;
+
+export const CreateAdminTaskBody = zod.object({
+  title: zod.string().min(1).max(createAdminTaskBodyTitleMax),
+  notes: zod.string().max(createAdminTaskBodyNotesMax).nullish(),
+  dueAt: zod.coerce.date().nullish(),
+});
+
+/**
+ * Edit a task and/or toggle completion. Setting completed=true stamps
+completedAt now; completed=false reopens the task.
+
+ */
+export const UpdateAdminTaskParams = zod.object({
+  id: zod.coerce.string().uuid(),
+});
+
+export const updateAdminTaskBodyTitleMax = 200;
+
+export const updateAdminTaskBodyNotesMax = 2000;
+
+export const UpdateAdminTaskBody = zod.object({
+  title: zod.string().min(1).max(updateAdminTaskBodyTitleMax).optional(),
+  notes: zod.string().max(updateAdminTaskBodyNotesMax).nullish(),
+  dueAt: zod.coerce.date().nullish(),
+  completed: zod.boolean().optional(),
+});
+
+export const UpdateAdminTaskResponse = zod.object({
+  id: zod.string().uuid(),
+  title: zod.string(),
+  notes: zod.string().nullable(),
+  dueAt: zod.coerce.date().nullable(),
+  completedAt: zod.coerce.date().nullable(),
+  createdBy: zod.string().uuid(),
+  createdByName: zod.string().nullable(),
+  createdAt: zod.coerce.date(),
+});
+
+/**
+ * Remove a task from the shared admin list.
+ */
+export const DeleteAdminTaskParams = zod.object({
+  id: zod.coerce.string().uuid(),
+});
 
 /**
  * @summary List every radio channel (admin)
@@ -4786,15 +4671,6 @@ export const AdminGetOnboardingResponse = zod.object({
   applicationId: zod.string().nullish(),
 });
 
-/**
- * Permanently removes a pending-onboarding employee: the user account and, via cascade, their employee record, onboarding tokens, and any onboarding submission. Refused (409) once the account is active or for non-employee roles — deactivate or manage those via the Personnel tables instead.
-
- * @summary Delete a person still in onboarding (pending only)
- */
-export const AdminDeleteOnboardingParams = zod.object({
-  employeeId: zod.coerce.string(),
-});
-
 export const AdminResendOnboardingLinkParams = zod.object({
   employeeId: zod.coerce.string(),
 });
@@ -4959,80 +4835,54 @@ export const ListActivePoliciesResponse = zod.array(
 );
 
 /**
- * Shared admin to-do list (team-wide — every admin sees every task).
-Open tasks first (due date ascending, undated last), then completed
-tasks newest-first. Pass includeCompleted=false to omit finished tasks.
+ * Authenticated self-service. Records the caller's typed signature against
+every currently-active policy on their employee file and clears the
+users.mustSignPolicies gate. Mounted under /me (not /policies) so it is
+never feature-gated — a flagged officer can always clear the gate even on
+a tenant where the policies feature is disabled (no lockout). Safe when
+there are zero active policies (the gate is still cleared).
 
+ * @summary Sign/acknowledge all active company policies and clear the must-sign gate
  */
-export const listAdminTasksQueryIncludeCompletedDefault = true;
+export const acknowledgePoliciesBodySignatureMin = 2;
+export const acknowledgePoliciesBodySignatureMax = 120;
 
-export const ListAdminTasksQueryParams = zod.object({
-  includeCompleted: zod.coerce
+export const AcknowledgePoliciesBody = zod.object({
+  signature: zod
+    .string()
+    .min(acknowledgePoliciesBodySignatureMin)
+    .max(acknowledgePoliciesBodySignatureMax)
+    .describe(
+      "The caller's typed full legal name, applied as their signature to every active policy.",
+    ),
+});
+
+export const AcknowledgePoliciesResponse = zod.object({
+  id: zod.string(),
+  email: zod.string(),
+  firstName: zod.string(),
+  lastName: zod.string(),
+  role: zod.enum(["admin", "employee", "site_manager"]),
+  status: zod.enum(["active", "inactive", "pending"]),
+  mustChangePassword: zod
     .boolean()
-    .default(listAdminTasksQueryIncludeCompletedDefault),
-});
-
-export const ListAdminTasksResponseItem = zod.object({
-  id: zod.string().uuid(),
-  title: zod.string(),
-  notes: zod.string().nullable(),
-  dueAt: zod.coerce.date().nullable(),
-  completedAt: zod.coerce.date().nullable(),
-  createdBy: zod.string().uuid(),
-  createdByName: zod.string().nullable(),
+    .optional()
+    .describe(
+      "True when the user must change their password before accessing the app.",
+    ),
+  mustCompleteProfile: zod
+    .boolean()
+    .optional()
+    .describe(
+      "True after first password change until the user has reviewed\/saved their profile.",
+    ),
+  mustSignPolicies: zod
+    .boolean()
+    .optional()
+    .describe(
+      "True when the user must sign\/acknowledge company policies before accessing the mobile app (non-admin staff only).",
+    ),
   createdAt: zod.coerce.date(),
-});
-export const ListAdminTasksResponse = zod.array(ListAdminTasksResponseItem);
-
-/**
- * Add a task/reminder to the shared admin list.
- */
-export const createAdminTaskBodyTitleMax = 200;
-
-export const createAdminTaskBodyNotesMax = 2000;
-
-export const CreateAdminTaskBody = zod.object({
-  title: zod.string().min(1).max(createAdminTaskBodyTitleMax),
-  notes: zod.string().max(createAdminTaskBodyNotesMax).nullish(),
-  dueAt: zod.coerce.date().nullish(),
-});
-
-/**
- * Edit a task and/or toggle completion. Setting completed=true stamps
-completedAt now; completed=false reopens the task.
-
- */
-export const UpdateAdminTaskParams = zod.object({
-  id: zod.coerce.string().uuid(),
-});
-
-export const updateAdminTaskBodyTitleMax = 200;
-
-export const updateAdminTaskBodyNotesMax = 2000;
-
-export const UpdateAdminTaskBody = zod.object({
-  title: zod.string().min(1).max(updateAdminTaskBodyTitleMax).optional(),
-  notes: zod.string().max(updateAdminTaskBodyNotesMax).nullish(),
-  dueAt: zod.coerce.date().nullish(),
-  completed: zod.boolean().optional(),
-});
-
-export const UpdateAdminTaskResponse = zod.object({
-  id: zod.string().uuid(),
-  title: zod.string(),
-  notes: zod.string().nullable(),
-  dueAt: zod.coerce.date().nullable(),
-  completedAt: zod.coerce.date().nullable(),
-  createdBy: zod.string().uuid(),
-  createdByName: zod.string().nullable(),
-  createdAt: zod.coerce.date(),
-});
-
-/**
- * Remove a task from the shared admin list.
- */
-export const DeleteAdminTaskParams = zod.object({
-  id: zod.coerce.string().uuid(),
 });
 
 /**
@@ -5531,7 +5381,7 @@ export const SubcontractorClockToggleResponse = zod.object({
 });
 
 /**
- * Authenticated internal users (officer/site-manager/employee/admin) report a pay
+ * Authenticated internal users (officer/site manager/employee/admin) report a pay
 discrepancy (missed payment, underpayment, missing hours, etc.). On
 submit the report is emailed to the dedicated admin inbox and becomes
 visible in the Admin Portal. External client accounts are rejected.

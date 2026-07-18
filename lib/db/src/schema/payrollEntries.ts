@@ -17,14 +17,13 @@ export const payrollEntriesTable = pgTable("payroll_entries", {
   tax: numeric("tax", { precision: 10, scale: 2 }).notNull().default("0"),
   netPay: numeric("net_pay", { precision: 10, scale: 2 }).notNull().default("0"),
   status: text("status").notNull().default("pending"), // pending | processed | paid | failed | archived
-  paidAt: timestamp("paid_at", { withTimezone: true }),
   // Archive trail: admins can archive a board bucket (officer-week) so it
-  // leaves the working Payroll Board but stays reviewable under the board's
-  // "Archived" view. Archived rows are never payable and are excluded from
-  // officer paystubs. Cleared on unarchive.
+  // stops appearing in the active board while staying reviewable. Rows keep
+  // their totals snapshotted at archive time.
   archivedAt: timestamp("archived_at", { withTimezone: true }),
   archivedBy: uuid("archived_by").references(() => usersTable.id, { onDelete: "set null" }),
   archiveReason: text("archive_reason"),
+  paidAt: timestamp("paid_at", { withTimezone: true }),
   // Audit trail for "executed" payments.
   paidBy: uuid("paid_by").references(() => usersTable.id, { onDelete: "set null" }),
   paidMethod: text("paid_method"), // manual | ach_csv | stripe

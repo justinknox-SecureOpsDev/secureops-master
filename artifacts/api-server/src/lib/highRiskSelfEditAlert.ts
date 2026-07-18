@@ -8,7 +8,7 @@ import type { Logger } from "pino";
  * payroll mistake — admins need a push + email the same day, not a weekly
  * audit-log review.
  *
- * niNumber (SSN last 4), rightToWorkStatus and directDepositConsent are now
+ * niNumber (SSN last 4), rightToWorkStatus and directDepositConsent are
  * self-editable from the mobile profile, so a change to any of them must reach
  * admins the same day (work-authorization and direct-deposit changes warrant HR
  * re-verification). directDepositSignature stays admin-only but is listed

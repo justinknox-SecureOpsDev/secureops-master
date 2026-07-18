@@ -68,6 +68,12 @@ export interface EmailAttachment {
   filename: string;
   content: Buffer;
   contentType: string;
+  /**
+   * When set, the attachment is embedded inline and can be referenced from the
+   * HTML body via `cid:<cid>` (e.g. an inline QR image). Maps to nodemailer's
+   * `cid` and Resend's `contentId`. Omit for ordinary file attachments.
+   */
+  cid?: string;
 }
 
 export interface EmailMessage {
@@ -125,6 +131,7 @@ async function sendViaResend(msg: EmailMessage): Promise<EmailSendResult | null>
         filename: a.filename,
         content: a.content,
         contentType: a.contentType,
+        ...(a.cid ? { contentId: a.cid } : {}),
       })),
     });
     if (error) {
@@ -166,6 +173,7 @@ async function sendViaSmtp(msg: EmailMessage): Promise<EmailSendResult | null> {
         filename: a.filename,
         content: a.content,
         contentType: a.contentType,
+        ...(a.cid ? { cid: a.cid } : {}),
       })),
     });
     const rejected = Array.isArray(info.rejected) ? info.rejected.map(String) : [];
@@ -253,20 +261,20 @@ export function renderOnboardingEmail(opts: {
     `— ${brand.companyName}`,
   ].join("\n");
   const html = `
-    <div style="font-family:Georgia,serif;max-width:560px;margin:0 auto;color:#080c18">
-      <h2 style="color:#080c18">Welcome to ${brand.companyName}</h2>
+    <div style="font-family:Georgia,serif;max-width:560px;margin:0 auto;color:#0c0a08">
+      <h2 style="color:#0c0a08">Welcome to ${brand.companyName}</h2>
       <p>Hi ${escapeHtml(opts.firstName)},</p>
       <p>Your application has been approved. To finish onboarding, please complete the secure form below.</p>
       <p style="margin:24px 0">
         <a href="${escapeAttr(opts.onboardingUrl)}"
-           style="background:#c9a84c;color:#080c18;padding:12px 20px;text-decoration:none;font-weight:bold;border-radius:4px">
+           style="background:#c9a04a;color:#0c0a08;padding:12px 20px;text-decoration:none;font-weight:bold;border-radius:4px">
           Complete onboarding
         </a>
       </p>
       <p style="color:#555">This link is single use and expires in 14 days.</p>
       <hr style="border:none;border-top:1px solid #ddd;margin:24px 0"/>
       <p>After onboarding, sign in to the ${brand.appName} app with:</p>
-      <div style="background:#f6f1e1;padding:14px 16px;border-left:3px solid #c9a84c;margin:12px 0;border-radius:4px;font-family:ui-monospace,Menlo,Consolas,monospace;font-size:14px">
+      <div style="background:#f6f1e1;padding:14px 16px;border-left:3px solid #c9a04a;margin:12px 0;border-radius:4px;font-family:ui-monospace,Menlo,Consolas,monospace;font-size:14px">
         <div><strong>Email:</strong> ${escapeHtml(opts.email)}</div>
         <div><strong>Temporary password:</strong> ${escapeHtml(opts.tempPassword)}</div>
       </div>
@@ -291,13 +299,13 @@ export function renderResendOnboardingEmail(opts: {
     `— ${brand.companyName}`,
   ].join("\n");
   const html = `
-    <div style="font-family:Georgia,serif;max-width:560px;margin:0 auto;color:#080c18">
-      <h2 style="color:#080c18">${brand.companyName}</h2>
+    <div style="font-family:Georgia,serif;max-width:560px;margin:0 auto;color:#0c0a08">
+      <h2 style="color:#0c0a08">${brand.companyName}</h2>
       <p>Hi ${escapeHtml(opts.firstName)},</p>
       <p>Here is a fresh link to complete your onboarding.</p>
       <p style="margin:24px 0">
         <a href="${escapeAttr(opts.onboardingUrl)}"
-           style="background:#c9a84c;color:#080c18;padding:12px 20px;text-decoration:none;font-weight:bold;border-radius:4px">
+           style="background:#c9a04a;color:#0c0a08;padding:12px 20px;text-decoration:none;font-weight:bold;border-radius:4px">
           Complete onboarding
         </a>
       </p>
@@ -328,14 +336,14 @@ export function renderRejectionEmail(opts: {
     `— ${brand.companyName}`,
   ].join("\n");
   const notesHtml = opts.reviewerNotes && opts.reviewerNotes.trim().length > 0
-    ? `<div style="background:#f6f1e1;padding:12px;border-left:3px solid #c9a84c;margin:16px 0;border-radius:4px">
+    ? `<div style="background:#f6f1e1;padding:12px;border-left:3px solid #c9a04a;margin:16px 0;border-radius:4px">
          <div style="font-size:12px;text-transform:uppercase;letter-spacing:0.5px;color:#555;margin-bottom:6px">Notes from our team</div>
          <div style="white-space:pre-wrap">${escapeHtml(opts.reviewerNotes.trim())}</div>
        </div>`
     : "";
   const html = `
-    <div style="font-family:Georgia,serif;max-width:560px;margin:0 auto;color:#080c18">
-      <h2 style="color:#080c18">${brand.companyName}</h2>
+    <div style="font-family:Georgia,serif;max-width:560px;margin:0 auto;color:#0c0a08">
+      <h2 style="color:#0c0a08">${brand.companyName}</h2>
       <p>Hi ${escapeHtml(opts.firstName)},</p>
       <p>Thank you for taking the time to apply to ${brand.companyName}.</p>
       <p>After careful consideration, we won't be moving forward with your application at this time.
@@ -367,14 +375,14 @@ export function renderApplicationReceivedEmail(opts: {
     `— ${brand.companyName}`,
   ].join("\n");
   const html = `
-    <div style="font-family:Georgia,serif;max-width:560px;margin:0 auto;color:#080c18;background:#f0e6c8;padding:24px;border-radius:6px">
-      <h2 style="color:#080c18;margin-top:0">${brand.companyName}</h2>
+    <div style="font-family:Georgia,serif;max-width:560px;margin:0 auto;color:#0c0a08;background:#f0e4c0;padding:24px;border-radius:6px">
+      <h2 style="color:#0c0a08;margin-top:0">${brand.companyName}</h2>
       <p>Hi ${escapeHtml(opts.firstName)},</p>
       <p>Thanks for applying to ${brand.companyName}. This is a quick note to confirm we've received your application.</p>
       <p>Our recruitment team will review your submission within <strong>${days} business days</strong> and be in touch with next steps. If we need anything else from you in the meantime, we'll reach out by email or phone.</p>
       <p style="color:#555">There's no need to reply to this message.</p>
-      <hr style="border:none;border-top:2px solid #c9a84c;margin:24px 0"/>
-      <p style="color:#080c18;font-weight:bold;margin:0">${brand.companyName}</p>
+      <hr style="border:none;border-top:2px solid #c9a04a;margin:24px 0"/>
+      <p style="color:#0c0a08;font-weight:bold;margin:0">${brand.companyName}</p>
     </div>
   `;
   return { subject, text, html };
@@ -402,13 +410,13 @@ export function renderApplicationDraftResumeEmail(opts: {
     `— ${brand.companyName}`,
   ].join("\n");
   const html = `
-    <div style="font-family:Georgia,serif;max-width:560px;margin:0 auto;color:#080c18;background:#f0e6c8;padding:24px;border-radius:6px">
-      <h2 style="color:#080c18;margin-top:0">${brand.companyName}</h2>
+    <div style="font-family:Georgia,serif;max-width:560px;margin:0 auto;color:#0c0a08;background:#f0e4c0;padding:24px;border-radius:6px">
+      <h2 style="color:#0c0a08;margin-top:0">${brand.companyName}</h2>
       <p>${escapeHtml(hello)}</p>
       <p>Here's the secure link to resume your officer application. Your answers and uploaded documents are saved — you'll land right back on the step you were on.</p>
       <p style="text-align:center;margin:24px 0">
         <a href="${escapeAttr(opts.resumeUrl)}"
-           style="display:inline-block;background:#080c18;color:#c9a84c;padding:12px 24px;text-decoration:none;border-radius:4px;font-weight:bold">
+           style="display:inline-block;background:#0c0a08;color:#c9a04a;padding:12px 24px;text-decoration:none;border-radius:4px;font-weight:bold">
           Resume my application
         </a>
       </p>
@@ -416,8 +424,8 @@ export function renderApplicationDraftResumeEmail(opts: {
         <span style="word-break:break-all">${escapeHtml(opts.resumeUrl)}</span>
       </p>
       <p style="color:#555;font-size:12px">If you didn't start an application, you can safely ignore this email.</p>
-      <hr style="border:none;border-top:2px solid #c9a84c;margin:24px 0"/>
-      <p style="color:#080c18;font-weight:bold;margin:0">${brand.companyName}</p>
+      <hr style="border:none;border-top:2px solid #c9a04a;margin:24px 0"/>
+      <p style="color:#0c0a08;font-weight:bold;margin:0">${brand.companyName}</p>
     </div>
   `;
   return { subject, text, html };
@@ -451,29 +459,29 @@ export function renderRequestInfoEmail(opts: {
     opts.fieldLabels.map((l) => `<li style="margin:4px 0">${escapeHtml(l)}</li>`).join("")
   }</ul>`;
   const noteHtml = opts.note && opts.note.trim().length > 0
-    ? `<div style="background:#f6f1e1;padding:12px;border-left:3px solid #c9a84c;margin:16px 0;border-radius:4px">
+    ? `<div style="background:#f6f1e1;padding:12px;border-left:3px solid #c9a04a;margin:16px 0;border-radius:4px">
          <div style="font-size:12px;text-transform:uppercase;letter-spacing:0.5px;color:#555;margin-bottom:6px">Note from our team</div>
          <div style="white-space:pre-wrap">${escapeHtml(opts.note.trim())}</div>
        </div>`
     : "";
   const html = `
-    <div style="font-family:Georgia,serif;max-width:560px;margin:0 auto;color:#080c18;background:#f0e6c8;padding:24px;border-radius:6px">
-      <h2 style="color:#080c18;margin-top:0">${brand.companyName}</h2>
+    <div style="font-family:Georgia,serif;max-width:560px;margin:0 auto;color:#0c0a08;background:#f0e4c0;padding:24px;border-radius:6px">
+      <h2 style="color:#0c0a08;margin-top:0">${brand.companyName}</h2>
       <p>Hi ${escapeHtml(opts.firstName)},</p>
       <p>Thanks for applying. To finish reviewing your application, we need a few more details from you:</p>
       ${fieldsHtml}
       ${noteHtml}
       <p style="text-align:center;margin:24px 0">
         <a href="${escapeHtml(opts.amendUrl)}"
-           style="display:inline-block;background:#080c18;color:#c9a84c;padding:12px 24px;text-decoration:none;border-radius:4px;font-weight:bold">
+           style="display:inline-block;background:#0c0a08;color:#c9a04a;padding:12px 24px;text-decoration:none;border-radius:4px;font-weight:bold">
           Complete missing details
         </a>
       </p>
       <p style="color:#555;font-size:12px">This secure link expires in 14 days. If the button doesn't work, paste this URL into your browser:<br/>
         <span style="word-break:break-all">${escapeHtml(opts.amendUrl)}</span>
       </p>
-      <hr style="border:none;border-top:2px solid #c9a84c;margin:24px 0"/>
-      <p style="color:#080c18;font-weight:bold;margin:0">${brand.companyName}</p>
+      <hr style="border:none;border-top:2px solid #c9a04a;margin:24px 0"/>
+      <p style="color:#0c0a08;font-weight:bold;margin:0">${brand.companyName}</p>
     </div>
   `;
   return { subject, text, html };
@@ -498,13 +506,13 @@ export function renderPasswordResetEmail(opts: {
     `— ${brand.companyName}`,
   ].join("\n");
   const html = `
-    <div style="font-family:Georgia,serif;max-width:560px;margin:0 auto;color:#080c18">
-      <h2 style="color:#080c18">Reset your password</h2>
+    <div style="font-family:Georgia,serif;max-width:560px;margin:0 auto;color:#0c0a08">
+      <h2 style="color:#0c0a08">Reset your password</h2>
       <p>Hi ${escapeHtml(opts.firstName)},</p>
       <p>We received a request to reset the password on your ${brand.companyName} account.</p>
       <p style="margin:24px 0">
         <a href="${escapeAttr(opts.resetUrl)}"
-           style="background:#c9a84c;color:#080c18;padding:12px 20px;text-decoration:none;font-weight:bold;border-radius:4px">
+           style="background:#c9a04a;color:#0c0a08;padding:12px 20px;text-decoration:none;font-weight:bold;border-radius:4px">
           Choose a new password
         </a>
       </p>
@@ -543,11 +551,11 @@ export function renderPasswordChangedEmail(opts: {
     `— ${brand.companyName}`,
   ].filter((l) => l !== "").join("\n");
   const html = `
-    <div style="font-family:Georgia,serif;max-width:560px;margin:0 auto;color:#080c18">
-      <h2 style="color:#080c18">Your password was just ${action}</h2>
+    <div style="font-family:Georgia,serif;max-width:560px;margin:0 auto;color:#0c0a08">
+      <h2 style="color:#0c0a08">Your password was just ${action}</h2>
       <p>Hi ${escapeHtml(opts.firstName)},</p>
       <p>Your ${brand.companyName} password was just <strong>${action}</strong>.</p>
-      <div style="background:#f6f1e1;padding:12px;border-left:3px solid #c9a84c;margin:16px 0;border-radius:4px;font-size:14px">
+      <div style="background:#f6f1e1;padding:12px;border-left:3px solid #c9a04a;margin:16px 0;border-radius:4px;font-size:14px">
         <div><strong>Time:</strong> ${escapeHtml(opts.whenIso)}</div>
         <div><strong>Approximate location / IP:</strong> ${escapeHtml(opts.ip || "unknown")}</div>
         ${opts.userAgent ? `<div><strong>Device:</strong> ${escapeHtml(opts.userAgent)}</div>` : ""}
@@ -567,6 +575,23 @@ export function renderInviteEmail(opts: {
   email: string;
   tempPassword: string;
   appUrl?: string | null;
+  /**
+   * One-tap connect link in the form `<origin>/connect?code=<code>` (or the
+   * `<scheme>://connect?code=<code>` deep link when no https origin is
+   * configured). Lands the new hire on the org-connect screen with the
+   * organization code prefilled. Omitted when the org code can't be resolved.
+   */
+  connectUrl?: string | null;
+  /**
+   * The organization code itself, shown as a fallback so staff can type it on
+   * the Connect screen manually if the link / QR don't work.
+   */
+  orgCode?: string | null;
+  /**
+   * Content-ID of an inline QR image (attached separately) that encodes the
+   * connect link. Referenced as `cid:<qrCid>`. Omitted when there's no QR.
+   */
+  qrCid?: string | null;
 }): { subject: string; text: string; html: string } {
   const subject = `Welcome to ${brand.companyName} — your SecureOps login`;
   const text = [
@@ -574,7 +599,15 @@ export function renderInviteEmail(opts: {
     "",
     `Your ${brand.companyName} account is ready in the SecureOps app.`,
     "",
-    ...(opts.appUrl ? [`Open the SecureOps app: ${opts.appUrl}`, ""] : []),
+    ...(opts.connectUrl
+      ? [
+          `Connect the SecureOps app to your team: ${opts.connectUrl}`,
+          ...(opts.orgCode ? [`(Or enter organization code "${opts.orgCode}" on the Connect screen.)`] : []),
+          "",
+        ]
+      : opts.appUrl
+        ? [`Open the SecureOps app: ${opts.appUrl}`, ""]
+        : []),
     "Sign in with the credentials below — you'll set a new password on your first sign-in.",
     "",
     `Email:              ${opts.email}`,
@@ -583,26 +616,41 @@ export function renderInviteEmail(opts: {
     `— ${brand.companyName}`,
   ].join("\n");
   const html = `
-    <div style="font-family:Georgia,serif;max-width:560px;margin:0 auto;color:#080c18">
-      <h2 style="color:#080c18">Welcome to ${brand.companyName}</h2>
+    <div style="font-family:Georgia,serif;max-width:560px;margin:0 auto;color:#0c0a08">
+      <h2 style="color:#0c0a08">Welcome to ${brand.companyName}</h2>
       <p>Hi ${escapeHtml(opts.firstName)},</p>
       <p>Your account is ready in the <strong>SecureOps</strong> app. Open it and sign in with the credentials below — you'll set a new password on your first sign-in.</p>
-      <div style="background:#f6f1e1;padding:14px 16px;border-left:3px solid #c9a84c;margin:18px 0;border-radius:4px;font-family:ui-monospace,Menlo,Consolas,monospace;font-size:14px">
+      <div style="background:#f6f1e1;padding:14px 16px;border-left:3px solid #c9a04a;margin:18px 0;border-radius:4px;font-family:ui-monospace,Menlo,Consolas,monospace;font-size:14px">
         <div><strong>Email:</strong> ${escapeHtml(opts.email)}</div>
         <div><strong>Temporary password:</strong> ${escapeHtml(opts.tempPassword)}</div>
       </div>
-      ${opts.appUrl ? `
+      ${opts.connectUrl ? `
+      <p style="text-align:center;margin:24px 0 12px">
+        <a href="${escapeAttr(opts.connectUrl)}"
+           style="display:inline-block;background:#0c0a08;color:#c9a04a;padding:12px 24px;text-decoration:none;border-radius:4px;font-weight:bold">
+          Connect the SecureOps app
+        </a>
+      </p>
+      ${opts.qrCid ? `
+      <p style="text-align:center;margin:8px 0 4px">
+        <img src="cid:${escapeAttr(opts.qrCid)}" alt="Scan to connect the SecureOps app" width="180" height="180" style="width:180px;height:180px;border:1px solid #e6dcc0;border-radius:8px"/>
+      </p>
+      <p style="text-align:center;color:#555;font-size:12px;margin:0 0 8px">Scan this with your phone camera or in the SecureOps app to connect.</p>` : ""}
+      ${opts.orgCode ? `<p style="text-align:center;color:#555;font-size:12px;margin:0">Or enter organization code <strong style="color:#0c0a08">${escapeHtml(opts.orgCode)}</strong> on the Connect screen.</p>` : ""}
+      <p style="color:#555;font-size:12px">If the button doesn't work, paste this URL into your browser:<br/>
+        <span style="word-break:break-all">${escapeHtml(opts.connectUrl)}</span>
+      </p>` : opts.appUrl ? `
       <p style="text-align:center;margin:24px 0">
         <a href="${escapeAttr(opts.appUrl)}"
-           style="display:inline-block;background:#080c18;color:#c9a84c;padding:12px 24px;text-decoration:none;border-radius:4px;font-weight:bold">
+           style="display:inline-block;background:#0c0a08;color:#c9a04a;padding:12px 24px;text-decoration:none;border-radius:4px;font-weight:bold">
           Open the SecureOps app
         </a>
       </p>
       <p style="color:#555;font-size:12px">If the button doesn't work, paste this URL into your browser:<br/>
         <span style="word-break:break-all">${escapeHtml(opts.appUrl)}</span>
       </p>` : ""}
-      <hr style="border:none;border-top:2px solid #c9a84c;margin:24px 0"/>
-      <p style="color:#080c18;font-weight:bold;margin:0">${brand.companyName}</p>
+      <hr style="border:none;border-top:2px solid #c9a04a;margin:24px 0"/>
+      <p style="color:#0c0a08;font-weight:bold;margin:0">${brand.companyName}</p>
     </div>
   `;
   return { subject, text, html };
@@ -631,10 +679,10 @@ export function renderTrainingExpiryEmail(opts: {
     "",
     `— ${brand.companyName}`,
   ].join("\n");
-  const accent = opts.daysRemaining <= 7 ? "#a33" : "#c9a84c";
+  const accent = opts.daysRemaining <= 7 ? "#a33" : "#c9a04a";
   const html = `
-    <div style="font-family:Georgia,serif;max-width:560px;margin:0 auto;color:#080c18">
-      <h2 style="color:#080c18">${escapeHtml(urgency)}: training renewal needed</h2>
+    <div style="font-family:Georgia,serif;max-width:560px;margin:0 auto;color:#0c0a08">
+      <h2 style="color:#0c0a08">${escapeHtml(urgency)}: training renewal needed</h2>
       <p>Hi ${escapeHtml(opts.firstName)},</p>
       <p>This is a friendly reminder that your <strong>${escapeHtml(opts.trainingTitle)}</strong> certificate is due to expire soon.</p>
       <div style="background:#f6f1e1;padding:14px 16px;border-left:3px solid ${accent};margin:18px 0;border-radius:4px">
@@ -645,8 +693,8 @@ export function renderTrainingExpiryEmail(opts: {
       </div>
       <p>Please refresh before the expiry date. An expired certificate may make you ineligible for sites that require this training.</p>
       <p>Once renewed, please upload the new certificate from the mobile app (Profile → My training).</p>
-      <hr style="border:none;border-top:2px solid #c9a84c;margin:24px 0"/>
-      <p style="color:#080c18;font-weight:bold;margin:0">${brand.companyName}</p>
+      <hr style="border:none;border-top:2px solid #c9a04a;margin:24px 0"/>
+      <p style="color:#0c0a08;font-weight:bold;margin:0">${brand.companyName}</p>
     </div>
   `;
   return { subject, text, html };
@@ -681,10 +729,10 @@ export function renderLicenseExpiryEmail(opts: {
     "",
     `— ${brand.companyName}`,
   ].join("\n");
-  const accent = opts.daysRemaining <= 7 ? "#a33" : "#c9a84c";
+  const accent = opts.daysRemaining <= 7 ? "#a33" : "#c9a04a";
   const html = `
-    <div style="font-family:Georgia,serif;max-width:560px;margin:0 auto;color:#080c18">
-      <h2 style="color:#080c18">${escapeHtml(urgency)}: license renewal needed</h2>
+    <div style="font-family:Georgia,serif;max-width:560px;margin:0 auto;color:#0c0a08">
+      <h2 style="color:#0c0a08">${escapeHtml(urgency)}: license renewal needed</h2>
       <p>Hi ${escapeHtml(opts.firstName)},</p>
       <p>${escapeHtml(headline)}</p>
       <div style="background:#f6f1e1;padding:14px 16px;border-left:3px solid ${accent};margin:18px 0;border-radius:4px">
@@ -694,8 +742,8 @@ export function renderLicenseExpiryEmail(opts: {
       </div>
       <p>Please renew before the expiry date. An expired license means you cannot clock in or be assigned to qualifying shifts.</p>
       <p style="color:#555;font-size:13px">If you have already renewed, please send a copy of the new license to HR so we can update your record.</p>
-      <hr style="border:none;border-top:2px solid #c9a84c;margin:24px 0"/>
-      <p style="color:#080c18;font-weight:bold;margin:0">${brand.companyName}</p>
+      <hr style="border:none;border-top:2px solid #c9a04a;margin:24px 0"/>
+      <p style="color:#0c0a08;font-weight:bold;margin:0">${brand.companyName}</p>
     </div>
   `;
   return { subject, text, html };
@@ -731,10 +779,10 @@ export function renderCoiExpiryEmail(opts: {
     "",
     `— ${brand.companyName}`,
   ].join("\n");
-  const accent = opts.daysRemaining <= 7 ? "#a33" : "#c9a84c";
+  const accent = opts.daysRemaining <= 7 ? "#a33" : "#c9a04a";
   const html = `
-    <div style="font-family:Georgia,serif;max-width:560px;margin:0 auto;color:#080c18">
-      <h2 style="color:#080c18">${escapeHtml(urgency)}: subcontractor insurance expiring</h2>
+    <div style="font-family:Georgia,serif;max-width:560px;margin:0 auto;color:#0c0a08">
+      <h2 style="color:#0c0a08">${escapeHtml(urgency)}: subcontractor insurance expiring</h2>
       <p>Hi team,</p>
       <p>${escapeHtml(headline)}</p>
       <div style="background:#f6f1e1;padding:14px 16px;border-left:3px solid ${accent};margin:18px 0;border-radius:4px">
@@ -746,8 +794,8 @@ export function renderCoiExpiryEmail(opts: {
         <div><strong>Days remaining:</strong> ${opts.daysRemaining}</div>
       </div>
       <p>Request an updated certificate of insurance and upload it from the Subcontractors area in the admin portal.</p>
-      <hr style="border:none;border-top:2px solid #c9a84c;margin:24px 0"/>
-      <p style="color:#080c18;font-weight:bold;margin:0">${brand.companyName}</p>
+      <hr style="border:none;border-top:2px solid #c9a04a;margin:24px 0"/>
+      <p style="color:#0c0a08;font-weight:bold;margin:0">${brand.companyName}</p>
     </div>
   `;
   return { subject, text, html };
@@ -803,7 +851,7 @@ export function renderHighRiskProfileChangeEmail(opts: {
       .join("")
   }</ul>`;
   const reviewHtml = opts.reviewUrl
-    ? `<p style="margin:18px 0"><a href="${escapeAttr(opts.reviewUrl)}" style="background:#080c18;color:#c9a84c;padding:10px 18px;text-decoration:none;font-weight:bold;border-radius:4px">Open change log</a></p>`
+    ? `<p style="margin:18px 0"><a href="${escapeAttr(opts.reviewUrl)}" style="background:#0c0a08;color:#c9a04a;padding:10px 18px;text-decoration:none;font-weight:bold;border-radius:4px">Open change log</a></p>`
     : "";
   const windowHtml = opts.windowStartIso === opts.windowEndIso
     ? `<div><strong>When:</strong> ${escapeHtml(opts.windowStartIso)}</div>`
@@ -812,10 +860,10 @@ export function renderHighRiskProfileChangeEmail(opts: {
     ? `An officer just updated a high-risk profile field from the ${brand.appName} mobile app.`
     : `An officer updated ${labels.length} high-risk profile fields from the ${brand.appName} mobile app in the last few minutes (digest).`;
   const html = `
-    <div style="font-family:Georgia,serif;max-width:560px;margin:0 auto;color:#080c18">
-      <h2 style="color:#080c18;margin-top:0">Officer self-edit alert</h2>
+    <div style="font-family:Georgia,serif;max-width:560px;margin:0 auto;color:#0c0a08">
+      <h2 style="color:#0c0a08;margin-top:0">Officer self-edit alert</h2>
       <p>${intro}</p>
-      <div style="background:#f6f1e1;padding:14px 16px;border-left:3px solid #c9a84c;margin:18px 0;border-radius:4px;font-size:14px">
+      <div style="background:#f6f1e1;padding:14px 16px;border-left:3px solid #c9a04a;margin:18px 0;border-radius:4px;font-size:14px">
         <div><strong>Officer:</strong> ${escapeHtml(opts.officerName)} (${escapeHtml(opts.officerEmail)})</div>
         ${windowHtml}
         <div style="margin-top:8px"><strong>Fields updated:</strong></div>
@@ -861,7 +909,7 @@ export function renderEmergencyAlertEmail(opts: {
     ? `<p style="margin:18px 0"><a href="${escapeAttr(opts.reviewUrl)}" style="background:#a30000;color:#fff;padding:10px 18px;text-decoration:none;font-weight:bold;border-radius:4px">Open incident</a></p>`
     : "";
   const html = `
-    <div style="font-family:Georgia,serif;max-width:560px;margin:0 auto;color:#080c18">
+    <div style="font-family:Georgia,serif;max-width:560px;margin:0 auto;color:#0c0a08">
       <h2 style="color:#a30000;margin-top:0">🚨 Emergency panic alert</h2>
       <p>An officer just pressed the emergency panic button. Verify their safety immediately.</p>
       <div style="background:#fbeaea;padding:14px 16px;border-left:3px solid #a30000;margin:18px 0;border-radius:4px;font-size:14px">
@@ -900,13 +948,13 @@ export function renderNewApplicationAdminEmail(opts: {
     ? `<div><strong>Phone:</strong> ${escapeHtml(opts.applicantPhone)}</div>`
     : "";
   const reviewHtml = opts.reviewUrl
-    ? `<p style="margin:18px 0"><a href="${escapeAttr(opts.reviewUrl)}" style="background:#080c18;color:#c9a84c;padding:10px 18px;text-decoration:none;font-weight:bold;border-radius:4px">Review application</a></p>`
+    ? `<p style="margin:18px 0"><a href="${escapeAttr(opts.reviewUrl)}" style="background:#0c0a08;color:#c9a04a;padding:10px 18px;text-decoration:none;font-weight:bold;border-radius:4px">Review application</a></p>`
     : "";
   const html = `
-    <div style="font-family:Georgia,serif;max-width:560px;margin:0 auto;color:#080c18">
-      <h2 style="color:#080c18;margin-top:0">New application received</h2>
+    <div style="font-family:Georgia,serif;max-width:560px;margin:0 auto;color:#0c0a08">
+      <h2 style="color:#0c0a08;margin-top:0">New application received</h2>
       <p>A new employment application was just submitted.</p>
-      <div style="background:#f6f1e1;padding:14px 16px;border-left:3px solid #c9a84c;margin:18px 0;border-radius:4px;font-size:14px">
+      <div style="background:#f6f1e1;padding:14px 16px;border-left:3px solid #c9a04a;margin:18px 0;border-radius:4px;font-size:14px">
         <div><strong>Applicant:</strong> ${escapeHtml(opts.applicantName)}</div>
         <div><strong>Email:</strong> ${escapeHtml(opts.applicantEmail)}</div>
         ${phoneHtml}
@@ -931,11 +979,11 @@ export function renderOnboardingCompletedAdminEmail(opts: {
     `— ${brand.companyName} · ${brand.appName}`,
   ].filter((l) => l !== undefined).join("\n");
   const reviewHtml = opts.reviewUrl
-    ? `<p style="margin:18px 0"><a href="${escapeAttr(opts.reviewUrl)}" style="background:#080c18;color:#c9a84c;padding:10px 18px;text-decoration:none;font-weight:bold;border-radius:4px">Review onboarding</a></p>`
+    ? `<p style="margin:18px 0"><a href="${escapeAttr(opts.reviewUrl)}" style="background:#0c0a08;color:#c9a04a;padding:10px 18px;text-decoration:none;font-weight:bold;border-radius:4px">Review onboarding</a></p>`
     : "";
   const html = `
-    <div style="font-family:Georgia,serif;max-width:560px;margin:0 auto;color:#080c18">
-      <h2 style="color:#080c18;margin-top:0">Onboarding completed</h2>
+    <div style="font-family:Georgia,serif;max-width:560px;margin:0 auto;color:#0c0a08">
+      <h2 style="color:#0c0a08;margin-top:0">Onboarding completed</h2>
       <p><strong>${escapeHtml(opts.officerName)}</strong> just completed onboarding and is now active.</p>
       ${reviewHtml}
       <hr style="border:none;border-top:1px solid #ddd;margin:24px 0"/>
@@ -982,13 +1030,13 @@ export function renderPaymentDiscrepancyEmail(opts: {
     .map((r) => `<div><strong>${escapeHtml(r.label)}:</strong> ${escapeHtml(r.value!)}</div>`)
     .join("");
   const reviewHtml = opts.reviewUrl
-    ? `<p style="margin:18px 0"><a href="${escapeAttr(opts.reviewUrl)}" style="background:#080c18;color:#c9a84c;padding:10px 18px;text-decoration:none;font-weight:bold;border-radius:4px">Open in Admin Portal</a></p>`
+    ? `<p style="margin:18px 0"><a href="${escapeAttr(opts.reviewUrl)}" style="background:#0c0a08;color:#c9a04a;padding:10px 18px;text-decoration:none;font-weight:bold;border-radius:4px">Open in Admin Portal</a></p>`
     : "";
   const html = `
-    <div style="font-family:Georgia,serif;max-width:560px;margin:0 auto;color:#080c18">
-      <h2 style="color:#080c18;margin-top:0">Payment discrepancy reported</h2>
+    <div style="font-family:Georgia,serif;max-width:560px;margin:0 auto;color:#0c0a08">
+      <h2 style="color:#0c0a08;margin-top:0">Payment discrepancy reported</h2>
       <p>A payment discrepancy was just submitted by an officer.</p>
-      <div style="background:#f6f1e1;padding:14px 16px;border-left:3px solid #c9a84c;margin:18px 0;border-radius:4px;font-size:14px">
+      <div style="background:#f6f1e1;padding:14px 16px;border-left:3px solid #c9a04a;margin:18px 0;border-radius:4px;font-size:14px">
         ${rowsHtml}
       </div>
       <div style="margin:18px 0">
@@ -1044,6 +1092,100 @@ export function renderProfileCompletenessEmail(opts: {
       <p style="color:#555;font-size:13px">If you have questions about any of these items, reply to this email or contact your supervisor.</p>
       <hr style="border:none;border-top:2px solid #c9a84c;margin:24px 0"/>
       <p style="color:#080c18;font-weight:bold;margin:0">${escapeHtml(brand.companyName)}</p>
+    </div>
+  `;
+  return { subject, text, html };
+}
+
+// Inbound sales / sign-up lead from the public marketing site — sent to the
+// sales inbox so the prospect gets followed up with the right tier in mind.
+export function renderSalesLeadAdminEmail(opts: {
+  companyName: string;
+  contactName: string;
+  email: string;
+  phone?: string;
+  tier?: string;
+  officerCount?: number;
+  message?: string;
+  source?: string;
+  reviewUrl?: string;
+}): { subject: string; text: string; html: string } {
+  const tierLabel = opts.tier ? opts.tier.replace(/_/g, " ") : undefined;
+  const subject = `New sales lead: ${opts.companyName}${tierLabel ? ` (${tierLabel})` : ""}`;
+  const rows: { label: string; value: string | undefined }[] = [
+    { label: "Company", value: opts.companyName },
+    { label: "Contact", value: opts.contactName },
+    { label: "Email", value: opts.email },
+    { label: "Phone", value: opts.phone },
+    { label: "Interested tier", value: tierLabel },
+    { label: "Officer count", value: opts.officerCount != null ? String(opts.officerCount) : undefined },
+    { label: "Source", value: opts.source },
+  ].filter((r) => r.value !== undefined && r.value !== "");
+  const reviewLine = opts.reviewUrl ? `\nReview in the Admin Portal: ${opts.reviewUrl}\n` : "";
+  const messageBlock = opts.message ? ["", "Message:", opts.message] : [];
+  const text = [
+    `A new sales lead was just submitted from the marketing site.`,
+    "",
+    ...rows.map((r) => `${r.label}: ${r.value}`),
+    ...messageBlock,
+    reviewLine,
+    `— ${brand.companyName} · ${brand.appName}`,
+  ].join("\n");
+  const rowsHtml = rows
+    .map((r) => `<div><strong>${escapeHtml(r.label)}:</strong> ${escapeHtml(r.value!)}</div>`)
+    .join("");
+  const messageHtml = opts.message
+    ? `<div style="margin:18px 0"><strong>Message</strong><p style="white-space:pre-wrap;margin:6px 0 0">${escapeHtml(opts.message)}</p></div>`
+    : "";
+  const reviewHtml = opts.reviewUrl
+    ? `<p style="margin:18px 0"><a href="${escapeAttr(opts.reviewUrl)}" style="background:#0c0a08;color:#c9a04a;padding:10px 18px;text-decoration:none;font-weight:bold;border-radius:4px">Open in Admin Portal</a></p>`
+    : "";
+  const html = `
+    <div style="font-family:Georgia,serif;max-width:560px;margin:0 auto;color:#0c0a08">
+      <h2 style="color:#0c0a08;margin-top:0">New sales lead</h2>
+      <p>A prospect just requested access from the marketing site.</p>
+      <div style="background:#f6f1e1;padding:14px 16px;border-left:3px solid #c9a04a;margin:18px 0;border-radius:4px;font-size:14px">
+        ${rowsHtml}
+      </div>
+      ${messageHtml}
+      ${reviewHtml}
+      <hr style="border:none;border-top:1px solid #ddd;margin:24px 0"/>
+      <p style="color:#555;font-size:12px">— ${brand.companyName} · ${brand.appName}</p>
+    </div>
+  `;
+  return { subject, text, html };
+}
+
+// Confirmation sent to the prospect so they know the request landed.
+export function renderSalesLeadConfirmationEmail(opts: {
+  contactName: string;
+  tier?: string;
+}): { subject: string; text: string; html: string } {
+  const tierLabel = opts.tier ? opts.tier.replace(/_/g, " ") : undefined;
+  const firstName = opts.contactName.trim().split(/\s+/)[0] || opts.contactName;
+  const subject = `Thanks for your interest in ${brand.appName}`;
+  const tierLine = tierLabel
+    ? `We've noted you're interested in the ${tierLabel} plan and will tailor our reply accordingly.`
+    : "";
+  const text = [
+    `Hi ${firstName},`,
+    "",
+    `Thanks for reaching out about ${brand.appName}. We've received your request and a member of our team will get back to you within one business day.`,
+    ...(tierLine ? [tierLine] : []),
+    "",
+    `— ${brand.companyName} · ${brand.appName}`,
+  ].join("\n");
+  const tierHtml = tierLabel
+    ? `<p>We've noted you're interested in the <strong>${escapeHtml(tierLabel)}</strong> plan and will tailor our reply accordingly.</p>`
+    : "";
+  const html = `
+    <div style="font-family:Georgia,serif;max-width:560px;margin:0 auto;color:#0c0a08">
+      <h2 style="color:#0c0a08;margin-top:0">Thanks for reaching out</h2>
+      <p>Hi ${escapeHtml(firstName)},</p>
+      <p>Thanks for your interest in <strong>${escapeHtml(brand.appName)}</strong>. We've received your request and a member of our team will get back to you within one business day.</p>
+      ${tierHtml}
+      <hr style="border:none;border-top:1px solid #ddd;margin:24px 0"/>
+      <p style="color:#555;font-size:12px">— ${brand.companyName} · ${brand.appName}</p>
     </div>
   `;
   return { subject, text, html };

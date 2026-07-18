@@ -1,7 +1,6 @@
 import { useEffect, useState, useCallback } from "react";
 import { useRoute } from "wouter";
 import { api } from "@/lib/api";
-import { formatDate, formatDateTime } from "@/lib/format";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { useToast } from "@/hooks/use-toast";
@@ -148,7 +147,7 @@ export default function IncidentShareLinksPage() {
               <option value="">— pick an incident —</option>
               {incidents.map((i) => (
                 <option key={i.id} value={i.id}>
-                  {formatDate(i.occurredAt)} · {i.severity.toUpperCase()} · {i.title}
+                  {new Date(i.occurredAt).toLocaleDateString()} · {i.severity.toUpperCase()} · {i.title}
                 </option>
               ))}
             </select>
@@ -205,18 +204,18 @@ export default function IncidentShareLinksPage() {
                     <td className="px-3 py-2">
                       <div className="font-medium">{r.incidentTitle ?? "—"}</div>
                       <div className="text-xs text-muted-foreground">
-                        {r.incidentSeverity?.toUpperCase()} · {r.incidentOccurredAt ? formatDate(r.incidentOccurredAt) : "—"}
+                        {r.incidentSeverity?.toUpperCase()} · {r.incidentOccurredAt ? new Date(r.incidentOccurredAt).toLocaleDateString() : "—"}
                       </div>
                     </td>
                     <td className="px-3 py-2">
                       <div>{r.recipientLabel ?? <span className="text-muted-foreground italic">—</span>}</div>
                       <div className="text-xs text-muted-foreground">by {r.createdByName ?? "—"}</div>
                     </td>
-                    <td className="px-3 py-2 text-xs">{formatDate(r.expiresAt)}</td>
+                    <td className="px-3 py-2 text-xs">{new Date(r.expiresAt).toLocaleDateString()}</td>
                     <td className="px-3 py-2 text-xs">
                       {r.viewCount}
                       {r.lastViewedAt && (
-                        <div className="text-muted-foreground">last {formatDateTime(r.lastViewedAt)}</div>
+                        <div className="text-muted-foreground">last {new Date(r.lastViewedAt).toLocaleString()}</div>
                       )}
                     </td>
                     <td className="px-3 py-2 text-right">

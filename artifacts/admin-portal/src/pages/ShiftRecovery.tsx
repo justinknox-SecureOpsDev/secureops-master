@@ -9,7 +9,6 @@ import {
   AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
 import { api, ApiError } from "@/lib/api";
-import { BUSINESS_TIME_ZONE } from "@/lib/format";
 
 type OrphanGroup = {
   title: string;
@@ -46,7 +45,7 @@ function fmtDate(iso: string | null): string {
   if (!iso) return "—";
   const d = new Date(iso);
   if (Number.isNaN(d.getTime())) return "—";
-  return d.toLocaleDateString(undefined, { year: "numeric", month: "short", day: "numeric", timeZone: BUSINESS_TIME_ZONE });
+  return d.toLocaleDateString(undefined, { year: "numeric", month: "short", day: "numeric" });
 }
 
 // A group's stable identity is the (title, clientName) pair the server groups

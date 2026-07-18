@@ -1,4 +1,4 @@
-import { Fragment, type ReactNode } from "react";
+import { Fragment, type ReactNode, type Ref } from "react";
 import { cn } from "@/lib/utils";
 import { useIsMobile } from "@/hooks/use-mobile";
 
@@ -76,6 +76,13 @@ export interface ResponsiveTableProps<T> {
    * Omit it to keep the plain bordered/scroll wrapper used elsewhere.
    */
   scrollAriaLabel?: string;
+  /**
+   * Optional per-row ref callback. Return the ref to attach to the row's
+   * root element (desktop `<tr>` or mobile card `<div>`) for the given data
+   * item, or `undefined` / `null` to skip. Used by the deep-link focus system
+   * to scroll-to + flash a specific row without touching every other row.
+   */
+  getRowRef?: (row: T) => Ref<HTMLElement> | null | undefined;
 }
 
 function isRenderable(node: ReactNode): boolean {
@@ -93,6 +100,7 @@ export function ResponsiveTable<T>({
   className,
   theadClassName,
   scrollAriaLabel,
+  getRowRef,
 }: ResponsiveTableProps<T>) {
   const isMobile = useIsMobile();
 
@@ -109,6 +117,7 @@ export function ResponsiveTable<T>({
           return (
             <div
               key={getRowKey(row)}
+              ref={getRowRef?.(row) as Ref<HTMLDivElement> | undefined}
               className={cn(
                 "border rounded-lg p-3 space-y-2",
                 typeof cardClassName === "function" ? cardClassName(row) : cardClassName,
@@ -178,6 +187,7 @@ export function ResponsiveTable<T>({
         {data.map((row) => (
           <tr
             key={getRowKey(row)}
+            ref={getRowRef?.(row) as Ref<HTMLTableRowElement> | undefined}
             className={cn(
               "border-t",
               typeof rowClassName === "function" ? rowClassName(row) : rowClassName,

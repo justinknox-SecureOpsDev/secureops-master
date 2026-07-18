@@ -1,4 +1,5 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState, type Ref } from "react";
+import { useSearch } from "wouter";
 import { api } from "@/lib/api";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -8,11 +9,11 @@ import {
 } from "@/components/ui/dialog";
 import { ClipboardList, Search, Loader2, Copy, ExternalLink, MailCheck, MailWarning, MailX, MessageSquare, MessageSquareWarning } from "lucide-react";
 import { openSignedObject } from "@/lib/upload";
-import { formatDate, formatDateTime } from "@/lib/format";
 import { AMENDMENT_FIELDS } from "@/lib/amendmentFields";
 import { useAuth } from "@/lib/auth";
 import { cn } from "@/lib/utils";
 import { ResponsiveTable, type ResponsiveColumn } from "@/components/ResponsiveTable";
+import { useDeepLinkFocus } from "@/hooks/useDeepLinkFocus";
 
 type ApplicationStatus = "submitted" | "under_review" | "info_requested" | "awaiting_second_approval" | "approved" | "rejected";
 
@@ -67,7 +68,7 @@ function deliveryBadge(a: Application): DeliveryBadge | null {
       className: "bg-emerald-100 text-emerald-900 border-emerald-300",
       Icon: MailCheck,
       tooltip: a.onboardingEmailSentAt
-        ? `SMTP accepted ${formatDateTime(a.onboardingEmailSentAt)}`
+        ? `SMTP accepted ${new Date(a.onboardingEmailSentAt).toLocaleString()}`
         : "SMTP accepted",
     };
   }
@@ -169,6 +170,25 @@ export function ApplicationsPage() {
   const [batchResult, setBatchResult] = useState<BatchResult | null>(null);
   const [geoBackfillBusy, setGeoBackfillBusy] = useState(false);
   const [geoBackfillResult, setGeoBackfillResult] = useState<string | null>(null);
+
+  // Deep-link: ?focus=<id> from GlobalSearch. Scrolls to + flashes the
+  // matching row card (so the background context is visible), then opens the
+  // detail dialog. A ref guards against re-opening after the user closes it.
+  const urlSearch = useSearch();
+  const focusId = useMemo(() => new URLSearchParams(urlSearch).get("focus"), [urlSearch]);
+  const focusOpenedRef = useRef(false);
+  const focusPresent = !loading && items.some((a) => a.id === focusId);
+  const { ref: focusRowRef, flashing: focusFlashing } = useDeepLinkFocus(
+    focusPresent ? focusId : null,
+    focusPresent,
+  );
+  useEffect(() => {
+    if (!focusId || loading || focusOpenedRef.current) return;
+    const match = items.find((a) => a.id === focusId);
+    if (!match) return;
+    focusOpenedRef.current = true;
+    setOpenId(focusId);
+  }, [focusId, loading, items]);
 
   async function refresh() {
     setLoading(true); setError(null);
@@ -387,8 +407,17 @@ export function ApplicationsPage() {
           getRowKey={(a) => a.id}
           scrollAriaLabel="Applications table"
           theadClassName="text-xs uppercase tracking-wide"
-          cardClassName={(a) => cn("bg-card", (a.onboardingEmailStatus === "bounced" || a.onboardingEmailStatus === "failed") && "bg-rose-50/60")}
-          rowClassName={(a) => cn("hover:bg-accent/30", (a.onboardingEmailStatus === "bounced" || a.onboardingEmailStatus === "failed") && "bg-rose-50/60")}
+          getRowRef={(a) => a.id === focusId ? focusRowRef as Ref<HTMLElement> : undefined}
+          cardClassName={(a) => cn(
+            "bg-card",
+            (a.onboardingEmailStatus === "bounced" || a.onboardingEmailStatus === "failed") && "bg-rose-50/60",
+            a.id === focusId && focusFlashing && "wcsg-deep-link-flash",
+          )}
+          rowClassName={(a) => cn(
+            "hover:bg-accent/30",
+            (a.onboardingEmailStatus === "bounced" || a.onboardingEmailStatus === "failed") && "bg-rose-50/60",
+            a.id === focusId && focusFlashing && "wcsg-deep-link-flash",
+          )}
           columns={[
             {
               id: "select",
@@ -474,7 +503,7 @@ export function ApplicationsPage() {
             {
               id: "submitted",
               header: "Submitted",
-              cell: (a) => formatDateTime(a.createdAt),
+              cell: (a) => new Date(a.createdAt).toLocaleString(),
               tdClassName: "text-muted-foreground",
               mobileValueClassName: "text-muted-foreground",
             },
@@ -946,7 +975,7 @@ function RequestInfoResultDialog({ resp, onClose }: { resp: RequestInfoResp; onC
                 <div className="font-medium">Email sent to {resp.application.email}</div>
                 <div className="text-xs mt-0.5">
                   {fullName} has been asked to update {resp.fieldLabels.length} item{resp.fieldLabels.length === 1 ? "" : "s"}.
-                  The link expires {formatDate(resp.expiresAt)}.
+                  The link expires {new Date(resp.expiresAt).toLocaleDateString()}.
                 </div>
               </div>
             </div>
@@ -1140,10 +1169,10 @@ function DeliveryDetails({ app }: { app: Application }) {
       )}
       <dl className="grid grid-cols-[max-content_1fr] gap-x-3 gap-y-1 text-xs">
         {app.onboardingEmailAttemptedAt && (
-          <><dt className="opacity-70">Last attempt</dt><dd>{formatDateTime(app.onboardingEmailAttemptedAt)}</dd></>
+          <><dt className="opacity-70">Last attempt</dt><dd>{new Date(app.onboardingEmailAttemptedAt).toLocaleString()}</dd></>
         )}
         {app.onboardingEmailSentAt && (
-          <><dt className="opacity-70">Accepted at</dt><dd>{formatDateTime(app.onboardingEmailSentAt)}</dd></>
+          <><dt className="opacity-70">Accepted at</dt><dd>{new Date(app.onboardingEmailSentAt).toLocaleString()}</dd></>
         )}
         {app.onboardingEmailMessageId && (
           <><dt className="opacity-70">Message ID</dt><dd className="font-mono break-all">{app.onboardingEmailMessageId}</dd></>

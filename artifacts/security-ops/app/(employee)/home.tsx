@@ -8,7 +8,6 @@ import { Feather } from "@expo/vector-icons";
 import { useRouter, useFocusEffect } from "expo-router";
 import EmergencyButton from "@/components/EmergencyButton";
 import { apiRequest } from "@/utils/api";
-import { formatTime, formatDateTime } from "@/utils/time";
 
 function SeverityBadge({ severity }: { severity: string }) {
   const colors = useColors();
@@ -148,9 +147,9 @@ export default function EmployeeHomeScreen() {
           accessibilityRole="button"
           accessibilityLabel={
             licenseAlert.kind === "missing"
-              ? "No license on file. You can work unarmed posts only until HR adds one. Tap to start renewal."
+              ? "No active license on file. Tap to start renewal."
               : licenseAlert.kind === "expired"
-              ? "License expired. You can work unarmed posts only until you renew. Tap to start renewal."
+              ? "License expired, you cannot work. Tap to start renewal."
               : `Renew license, ${licenseAlert.daysRemaining} days left. Tap to start renewal.`
           }
           accessibilityHint="Opens the license renewal screen"
@@ -174,16 +173,16 @@ export default function EmployeeHomeScreen() {
               ]}
             >
               {licenseAlert.kind === "missing"
-                ? "UNARMED POSTS ONLY — NO LICENSE ON FILE"
+                ? "NO ACTIVE LICENSE ON FILE"
                 : licenseAlert.kind === "expired"
-                ? "UNARMED POSTS ONLY — LICENSE EXPIRED"
+                ? "LICENSE EXPIRED — CANNOT WORK"
                 : `RENEW LICENSE — ${licenseAlert.daysRemaining} DAYS LEFT`}
             </Text>
             <Text style={[styles.licenseBannerBody, { color: colors.foreground }]}>
               {licenseAlert.kind === "missing"
-                ? "You can work unarmed (Level 2) posts now. Armed and PPO shifts need a current security license on file — add yours to unlock them."
+                ? "You don't have a current security license on record. You can't clock in or claim shifts until HR has one on file."
                 : licenseAlert.kind === "expired"
-                ? "Your security license has expired. You can still work unarmed (Level 2) posts, but armed and PPO shifts need a current license — renew to restore them."
+                ? "Your security license has expired. You can't clock in or claim shifts until you upload a renewed license."
                 : `Texas DPS renewals are running long. Start your ${licenseAlert.type ?? "security"} license renewal now so it processes before the expiry date.`}
             </Text>
             <Text style={[styles.licenseBannerCta, { color: colors.primary }]}>Tap to start renewal →</Text>
@@ -217,7 +216,7 @@ export default function EmployeeHomeScreen() {
           <View style={{ flex: 1 }}>
             <Text style={[styles.clockedInTitle, { color: colors.success }]}>ON DUTY</Text>
             <Text style={[styles.clockedInTime, { color: colors.foreground }]}>
-              Clocked in {summary.activeTimeEntry.clockInTime ? formatTime(summary.activeTimeEntry.clockInTime) : ""}
+              Clocked in {summary.activeTimeEntry.clockInTime ? new Date(summary.activeTimeEntry.clockInTime).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }) : ""}
             </Text>
           </View>
           <TouchableOpacity
@@ -272,7 +271,7 @@ export default function EmployeeHomeScreen() {
             style={[styles.nextShiftCard, { backgroundColor: colors.card, borderColor: colors.primary + "50" }]}
             onPress={() => router.push("/(employee)/shifts")}
             accessibilityRole="button"
-            accessibilityLabel={`Next shift: ${summary.nextShift.title} at ${summary.nextShift.clientName}, ${summary.nextShift.location}, ${formatDateTime(summary.nextShift.startTime)}`}
+            accessibilityLabel={`Next shift: ${summary.nextShift.title} at ${summary.nextShift.clientName}, ${summary.nextShift.location}, ${new Date(summary.nextShift.startTime).toLocaleString([], { weekday: "short", month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" })}`}
             accessibilityHint="Opens your shifts"
           >
             <View style={[styles.shiftAccent, { backgroundColor: colors.primary }]} />
@@ -286,7 +285,7 @@ export default function EmployeeHomeScreen() {
               <View style={styles.shiftRow}>
                 <Feather name="clock" size={13} color={colors.mutedForeground} />
                 <Text style={[styles.shiftMeta, { color: colors.mutedForeground }]}>
-                  {formatDateTime(summary.nextShift.startTime)}
+                  {new Date(summary.nextShift.startTime).toLocaleString([], { weekday: "short", month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" })}
                 </Text>
               </View>
             </View>

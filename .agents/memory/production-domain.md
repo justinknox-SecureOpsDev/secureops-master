@@ -1,12 +1,14 @@
 ---
 name: Production custom domain
-description: Which domain is the real production URL and what drives links/CORS
+description: Which domain is the real production URL for THIS deployment and what drives links/CORS
 ---
 
-The verified, live production custom domain (per Replit deployment `primaryUrl`) is **https://wcsgisecureops.com**. The `*.replit.app` address (security-operations-suite.replit.app) is a secondary URL that Replit auto-redirects to the custom domain — no redirect code needed.
+**This project is the WCSG customer deployment. Its live production URL is https://wcsgisecureops.com.** APP_BASE_URL and ALLOWED_ORIGINS must equal it (user-confirmed 2026-07-18 during the master-build sync).
 
-**Gotcha:** `ALLOWED_ORIGINS` also lists `secureops.williamscouncilsg.com`, but that domain is NOT in the deployment's verified URL set — do not point email links at it (they may 404). Always use the deployment's `primaryUrl` (getDeploymentInfo) as the source of truth, not the CORS list.
+**https://secureopscommand.com** (alias `SecureOps-Command.replit.app`) is the SEPARATE master SecureOps project — it hosts the org directory (`ORG_DIRECTORY` env) that resolves mobile org codes to customer backends. The org code for this backend is `wcsgi` (`ORG_CODE` env). Changing the directory mapping requires editing/republishing THAT project, not this one.
 
-**APP_BASE_URL (production) must equal the custom domain** — it builds every link inside reset / onboarding / amendment / invite emails. If it points at the replit.app host, users get replit.app links instead of the company domain. Changing production env vars requires a republish to take effect.
+**Why:** this codebase is synced wholesale from the master repo (justinknox-SecureOpsDev/SecureOpsCommand); memory files imported with it may describe the master project's domains — for this project, always treat wcsgisecureops.com as production.
 
-**Dev preview privacy** is a platform toggle, NOT code: Developer tools → Networking → "Private development URL". There is no code-only way to restrict the .replit.dev preview to the owner without breaking the owner's own workspace preview.
+**APP_BASE_URL (production) must equal the current primary domain** — it builds every link inside reset / onboarding / amendment / invite emails. Changing production env vars requires a republish to take effect.
+
+**Dev preview privacy** is a platform toggle, NOT code: Developer tools → Networking → "Private development URL".

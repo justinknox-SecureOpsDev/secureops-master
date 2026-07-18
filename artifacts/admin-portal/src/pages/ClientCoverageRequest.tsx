@@ -1,7 +1,6 @@
 import { useEffect, useState } from "react";
 import { CalendarClock, Plus, CheckCircle2, XCircle, Clock3 } from "lucide-react";
 import { api } from "@/lib/api";
-import { formatDate } from "@/lib/format";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -27,12 +26,8 @@ type Request = {
   reviewedAt: string | null;
 };
 
-const DATE_ONLY_RE = /^\d{4}-\d{2}-\d{2}$/;
 function fmt(d: string) {
-  const opts: Intl.DateTimeFormatOptions = { month: "short", day: "numeric", year: "numeric" };
-  // startDate/endDate are pg `date` columns (UTC literal date); createdAt is
-  // a timestamp (Central).
-  return DATE_ONLY_RE.test(d) ? formatDate(d + "T00:00:00Z", opts, "UTC") : formatDate(d, opts);
+  return new Date(d).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
 }
 
 const STATUS_ICON: Record<string, React.ReactNode> = {

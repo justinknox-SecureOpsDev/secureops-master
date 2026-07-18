@@ -3,14 +3,21 @@ import { db, chatRoomsTable, sitesTable } from "@workspace/db";
 import { logger } from "./logger";
 
 /**
- * Canonical chat channels seeded on boot. Idempotent via the `slug`
- * column — re-running upserts name/type/metadata without duplicating
- * rooms. Site channels are seeded dynamically from the sites table
- * (one per site, slug `site:<siteId>`).
+ * Chat channel seeding for the master template.
  *
- * Old `general` rooms from prior deploys are migrated to the new
- * announcements channel by setting their slug + type the first time
- * this runs (preserves message history).
+ * This template intentionally ships with NO default chat channels — each
+ * customer creates their own channels in-app ("as they wish"). The former
+ * WCSG-specific defaults (regional city rooms + an elite PPO room) and the
+ * generic Announcements/Ops/license-level rooms have all been removed so
+ * copies of this template start with a clean slate. Re-populate `CANONICAL`
+ * below to ship built-in channels for a specific tenant.
+ *
+ * Site channels are still seeded dynamically from the sites table (one per
+ * site, slug `site:<siteId>`), so a client's channels appear as they add
+ * their own sites.
+ *
+ * Legacy `general`/`shift` rooms from prior deploys are still retired on
+ * boot so they stop showing up (message history preserved).
  */
 
 type Canonical = {
@@ -22,38 +29,19 @@ type Canonical = {
   joinPolicy: "auto" | "request" | "invite";
 };
 
-const CANONICAL: Canonical[] = [
-  { slug: "announcements", name: "General Announcements", type: "announcements", joinPolicy: "auto" },
-  { slug: "level-2", name: "Level 2 (Unarmed)", type: "license_level", licenseLevel: 2, joinPolicy: "auto" },
-  { slug: "level-3", name: "Level 3 (Armed)", type: "license_level", licenseLevel: 3, joinPolicy: "auto" },
-  { slug: "level-4", name: "Level 4 PPO", type: "license_level", licenseLevel: 4, joinPolicy: "auto" },
-  { slug: "ops", name: "OPS (Admin)", type: "ops", joinPolicy: "auto" },
-  { slug: "city-dfw", name: "DFW", type: "city", city: "Dallas", joinPolicy: "request" },
-  { slug: "city-houston", name: "Houston", type: "city", city: "Houston", joinPolicy: "request" },
-  { slug: "city-san-antonio", name: "San Antonio", type: "city", city: "San Antonio", joinPolicy: "request" },
-  { slug: "city-austin", name: "Austin", type: "city", city: "Austin", joinPolicy: "request" },
-  { slug: "elite-chiefs-ppo", name: "Chiefs Elite PPO", type: "elite", joinPolicy: "invite" },
-];
+// Intentionally empty for the master template — no default channels are
+// seeded. Add entries here to ship built-in channels for a specific tenant.
+const CANONICAL: Canonical[] = [];
 
 export async function seedChatRooms(): Promise<void> {
   try {
-    // Migrate the OLDEST legacy "general" room (type=general, slug=null) into
-    // the new announcements channel so its message history is preserved.
-    // Only one row is promoted to avoid colliding on the unique slug;
-    // any extra legacy `general` rooms (e.g. stray dev test rooms) keep
-    // their old type and just disappear from listings.
-    await db.execute(sql`
-      UPDATE chat_rooms
-      SET slug = 'announcements', type = 'announcements', name = 'General Announcements', join_policy = 'auto'
-      WHERE id = (
-        SELECT id FROM chat_rooms
-        WHERE type = 'general' AND slug IS NULL
-        ORDER BY created_at ASC
-        LIMIT 1
-      )
-      AND NOT EXISTS (SELECT 1 FROM chat_rooms WHERE slug = 'announcements')
-    `);
-    // Retire remaining legacy general rooms so they stop showing up.
+    // Retire legacy `general` rooms (type=general, slug=null) from older
+    // deploys so they stop showing up; history is preserved because the row
+    // stays put and resolveRoomMembers fails closed on the retired type.
+    // The template ships NO default channels, so we deliberately do NOT
+    // promote any of them into an Announcements room. Mobile-created channels
+    // are stored as `announcements` (the create route aliases the legacy
+    // `general` type), so this never touches them.
     await db.execute(sql`
       UPDATE chat_rooms SET type = 'retired'
       WHERE type = 'general' AND slug IS NULL

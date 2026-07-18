@@ -10,9 +10,11 @@ import {
   usersTable,
 } from "@workspace/db";
 import { requireAuth, requireAdmin } from "../middlewares/auth";
-import { getEffectiveLevel, isWorkerRole, WORKER_ROLES } from "../lib/eligibility";
+import { getEffectiveLevel } from "../lib/eligibility";
+import { requireFeature } from "../lib/features";
 
 const router = Router();
+router.use(["/shifts/swap-requests", "/me/swap-targets", "/me/swap-requests", "/admin/swap-requests"], requireFeature("swapRequests"));
 
 async function pushSafely(userIds: string[], title: string, body: string, data?: Record<string, unknown>) {
   try {
@@ -97,7 +99,7 @@ router.post("/shifts/swap-requests", requireAuth, async (req, res): Promise<void
     .select({ id: usersTable.id, status: usersTable.status, role: usersTable.role, firstName: usersTable.firstName, lastName: usersTable.lastName })
     .from(usersTable)
     .where(eq(usersTable.id, targetUserId));
-  if (!target || target.status !== "active" || !isWorkerRole(target.role)) {
+  if (!target || target.status !== "active" || target.role !== "employee") {
     res.status(400).json({ error: "Bad Request", message: "Target officer is not eligible" });
     return;
   }
@@ -184,7 +186,7 @@ router.get("/me/swap-targets/:assignmentId", requireAuth, async (req, res): Prom
   const employees = await db
     .select({ id: usersTable.id, firstName: usersTable.firstName, lastName: usersTable.lastName })
     .from(usersTable)
-    .where(and(inArray(usersTable.role, [...WORKER_ROLES]), eq(usersTable.status, "active")));
+    .where(and(eq(usersTable.role, "employee"), eq(usersTable.status, "active")));
 
   // Minimal fields only — no email — to limit directory exposure to peers.
   const eligible: Array<{ id: string; firstName: string; lastName: string }> = [];
@@ -379,7 +381,7 @@ router.post("/admin/swap-requests/:id/approve", requireAdmin, async (req, res): 
         .select({ status: usersTable.status, role: usersTable.role })
         .from(usersTable)
         .where(eq(usersTable.id, swap.targetUserId));
-      if (!targetUser || !isWorkerRole(targetUser.role) || targetUser.status !== "active")
+      if (!targetUser || targetUser.role !== "employee" || targetUser.status !== "active")
         return { code: 409 as const, body: { error: "Conflict", message: "Target officer is no longer eligible" } };
 
       const required = shiftRow.requiredLicenseLevel;

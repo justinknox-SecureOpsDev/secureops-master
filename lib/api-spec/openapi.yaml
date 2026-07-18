@@ -38,6 +38,17 @@ tags:
     description: Login-gated portal for external client users (role=client)
 
 paths:
+  /brand:
+    get:
+      operationId: getBrand
+      tags: [brand]
+      summary: Public brand configuration (company name, colours, feature flags)
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/BrandConfig" }
   /clients:
     get:
       operationId: getClients
@@ -212,7 +223,7 @@ paths:
     get:
       operationId: getSiteManagers
       tags: [sites]
-      summary: List the site managers assigned to a site (admin, or a manager of this site)
+      summary: List the site's assigned managers plus all assignable managers (admin)
       parameters:
         - { name: id, in: path, required: true, schema: { type: string } }
       responses:
@@ -220,42 +231,30 @@ paths:
           description: OK
           content:
             application/json:
-              schema:
-                type: array
-                items: { $ref: "#/components/schemas/SiteManagerUser" }
+              schema: { $ref: "#/components/schemas/SiteManagersResponse" }
     put:
-      operationId: setSiteManagers
+      operationId: updateSiteManagers
       tags: [sites]
-      summary: Replace the set of site managers assigned to a site (admin only)
+      summary: Replace the full set of managers for a site (admin)
       parameters:
         - { name: id, in: path, required: true, schema: { type: string } }
       requestBody:
         required: true
         content:
           application/json:
-            schema: { $ref: "#/components/schemas/SetSiteManagersRequest" }
+            schema: { $ref: "#/components/schemas/UpdateSiteManagersRequest" }
       responses:
         "200":
           description: OK
           content:
             application/json:
               schema:
-                type: array
-                items: { $ref: "#/components/schemas/SiteManagerUser" }
-
-  /site-manager-candidates:
-    get:
-      operationId: getSiteManagerCandidates
-      tags: [sites]
-      summary: List active site_manager-role users for assignment pickers (admin only)
-      responses:
-        "200":
-          description: OK
-          content:
-            application/json:
-              schema:
-                type: array
-                items: { $ref: "#/components/schemas/SiteManagerUser" }
+                type: object
+                properties:
+                  assigned:
+                    type: array
+                    items: { $ref: "#/components/schemas/SiteManagerUser" }
+                required: [assigned]
 
   /time-entries/{id}/approve:
     post:
@@ -534,37 +533,6 @@ paths:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
 
-  /me/ui-preferences:
-    put:
-      operationId: updateMyUiPreferences
-      tags: [auth]
-      summary: Update the caller's UI personalization preferences
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              $ref: "#/components/schemas/UiPreferences"
-      responses:
-        "200":
-          description: Updated preferences
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/UiPreferences"
-        "400":
-          description: Invalid payload
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/ErrorResponse"
-        "401":
-          description: Unauthorized
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/ErrorResponse"
-
   /employees:
     get:
       operationId: getEmployees
@@ -712,16 +680,6 @@ paths:
           schema:
             type: string
             format: date
-        - name: view
-          in: query
-          description: >-
-            Set to `worker` to get the personal worker feed (own assigned
-            shifts + qualifying open shifts) regardless of role. Admins and
-            dispatchers use this for "my work" surfaces instead of their
-            default global read.
-          schema:
-            type: string
-            enum: [worker]
       responses:
         "200":
           description: List of shifts
@@ -1477,104 +1435,6 @@ paths:
               schema:
                 $ref: "#/components/schemas/LicenseRenewal"
 
-  /analytics/summary:
-    get:
-      operationId: getAnalyticsSummary
-      tags: [dashboard]
-      summary: Admin analytics summary (P&L, hours, missed shifts, incidents) for a date range
-      parameters:
-        - { name: start, in: query, required: true, schema: { type: string, format: date } }
-        - { name: end, in: query, required: true, schema: { type: string, format: date } }
-        - { name: clientId, in: query, required: false, schema: { type: string, format: uuid }, description: "Restrict all metrics to sites belonging to this client" }
-      responses:
-        "200":
-          description: Analytics summary
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/AnalyticsSummary"
-        "400":
-          description: Invalid parameters
-          content:
-            application/json:
-              schema: { $ref: "#/components/schemas/ErrorResponse" }
-
-  /analytics/export.csv:
-    get:
-      operationId: exportAnalyticsCsv
-      tags: [dashboard]
-      summary: Download the analytics report (summary KPIs + per-site breakdown) as a CSV (admin only)
-      parameters:
-        - { name: start, in: query, required: true, schema: { type: string, format: date } }
-        - { name: end, in: query, required: true, schema: { type: string, format: date } }
-        - { name: clientId, in: query, required: false, schema: { type: string, format: uuid }, description: "Restrict the report to sites belonging to this client" }
-      responses:
-        "200":
-          description: CSV file
-          content:
-            text/csv:
-              schema:
-                type: string
-        "400":
-          description: Invalid parameters
-          content:
-            application/json:
-              schema: { $ref: "#/components/schemas/ErrorResponse" }
-
-  /analytics/export.pdf:
-    get:
-      operationId: exportAnalyticsPdf
-      tags: [dashboard]
-      summary: Download the analytics report as a branded PDF (admin only)
-      parameters:
-        - { name: start, in: query, required: true, schema: { type: string, format: date } }
-        - { name: end, in: query, required: true, schema: { type: string, format: date } }
-        - { name: clientId, in: query, required: false, schema: { type: string, format: uuid }, description: "Restrict the report to sites belonging to this client" }
-      responses:
-        "200":
-          description: PDF file
-          content:
-            application/pdf:
-              schema:
-                type: string
-                format: binary
-        "400":
-          description: Invalid parameters
-          content:
-            application/json:
-              schema: { $ref: "#/components/schemas/ErrorResponse" }
-
-  /analytics/officer-history:
-    get:
-      operationId: getAnalyticsOfficerHistory
-      tags: [dashboard]
-      summary: Weekly-bucketed performance history for one officer (admin only)
-      description: >
-        Returns a per-ISO-week series of attendance / punctuality / reliability
-        metrics for a single officer over the last N weeks, so admins can see
-        whether an officer is improving or declining over time. Weeks with no
-        assigned shifts are included with null rates so charts can show gaps.
-      parameters:
-        - { name: userId, in: query, required: true, schema: { type: string, format: uuid }, description: "The officer's user id" }
-        - { name: weeks, in: query, required: false, schema: { type: integer, minimum: 4, maximum: 26, default: 12 }, description: "How many trailing ISO weeks to include (including the current week)" }
-      responses:
-        "200":
-          description: Weekly performance history
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/AnalyticsOfficerHistory"
-        "400":
-          description: Invalid parameters
-          content:
-            application/json:
-              schema: { $ref: "#/components/schemas/ErrorResponse" }
-        "404":
-          description: User not found
-          content:
-            application/json:
-              schema: { $ref: "#/components/schemas/ErrorResponse" }
-
   /dashboard/admin-summary:
     get:
       operationId: getAdminDashboardSummary
@@ -1600,6 +1460,68 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/EmployeeDashboardSummary"
+
+  /analytics/summary:
+    get:
+      operationId: getAnalyticsSummary
+      tags: [analytics]
+      summary: Business analytics summary for a date range (admin-only)
+      parameters:
+        - name: start
+          in: query
+          required: true
+          schema:
+            type: string
+            format: date
+        - name: end
+          in: query
+          required: true
+          schema:
+            type: string
+            format: date
+        - name: clientId
+          in: query
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Analytics summary
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AnalyticsSummary"
+
+  /analytics/officers:
+    get:
+      operationId: getAnalyticsOfficers
+      tags: [analytics]
+      summary: Per-officer performance metrics for a date range (admin-only)
+      parameters:
+        - name: start
+          in: query
+          required: true
+          schema:
+            type: string
+            format: date
+        - name: end
+          in: query
+          required: true
+          schema:
+            type: string
+            format: date
+        - name: clientId
+          in: query
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Officer performance rows
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/AnalyticsOfficerRow"
 
   /chat/rooms:
     get:
@@ -1663,6 +1585,37 @@ paths:
                 type: object
                 properties:
                   ok: { type: boolean }
+
+  /me/ui-preferences:
+    put:
+      operationId: updateMyUiPreferences
+      tags: [auth]
+      summary: Update the caller's UI personalization preferences
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UiPreferences"
+      responses:
+        "200":
+          description: Updated preferences
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/UiPreferences"
+        "400":
+          description: Invalid payload
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
 
   /me/location:
     post:
@@ -1898,6 +1851,93 @@ paths:
               schema:
                 type: array
                 items: { $ref: "#/components/schemas/RadioChannel" }
+
+  /admin/tasks:
+    get:
+      tags: [adminTasks]
+      operationId: listAdminTasks
+      description: |
+        Shared admin to-do list (team-wide — every admin sees every task).
+        Open tasks first (due date ascending, undated last), then completed
+        tasks newest-first. Pass includeCompleted=false to omit finished tasks.
+      parameters:
+        - name: includeCompleted
+          in: query
+          required: false
+          schema: { type: boolean, default: true }
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: "#/components/schemas/AdminTask" }
+    post:
+      tags: [adminTasks]
+      operationId: createAdminTask
+      description: Add a task/reminder to the shared admin list.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/CreateAdminTaskRequest" }
+      responses:
+        "201":
+          description: Created
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/AdminTask" }
+        "400":
+          description: Validation error
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ErrorResponse" }
+
+  /admin/tasks/{id}:
+    patch:
+      tags: [adminTasks]
+      operationId: updateAdminTask
+      description: |
+        Edit a task and/or toggle completion. Setting completed=true stamps
+        completedAt now; completed=false reopens the task.
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/UpdateAdminTaskRequest" }
+      responses:
+        "200":
+          description: Updated
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/AdminTask" }
+        "400":
+          description: Validation error
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ErrorResponse" }
+        "404":
+          description: Not Found
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ErrorResponse" }
+    delete:
+      tags: [adminTasks]
+      operationId: deleteAdminTask
+      description: Remove a task from the shared admin list.
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        "204":
+          description: Deleted
+        "404":
+          description: Not Found
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ErrorResponse" }
 
   /admin/radio/channels:
     get:
@@ -2383,21 +2423,6 @@ paths:
           content:
             application/json:
               schema: { $ref: "#/components/schemas/OnboardingDetail" }
-    delete:
-      tags: [onboarding]
-      operationId: adminDeleteOnboarding
-      summary: Delete a person still in onboarding (pending only)
-      description: >
-        Permanently removes a pending-onboarding employee: the user account and,
-        via cascade, their employee record, onboarding tokens, and any onboarding
-        submission. Refused (409) once the account is active or for non-employee
-        roles — deactivate or manage those via the Personnel tables instead.
-      parameters:
-        - { name: employeeId, in: path, required: true, schema: { type: string } }
-      responses:
-        "204": { description: Deleted }
-        "404": { description: Not found }
-        "409": { description: Not deletable (already active or not an onboarding-stage employee) }
 
   /admin/onboarding/{employeeId}/resend:
     post:
@@ -2537,91 +2562,35 @@ paths:
                 type: array
                 items: { $ref: "#/components/schemas/PolicyPublic" }
 
-  # ---- Admin tasks / reminders ----
-
-  /admin/tasks:
-    get:
-      tags: [adminTasks]
-      operationId: listAdminTasks
+  /me/policies/acknowledge:
+    post:
+      operationId: acknowledgePolicies
+      tags: [policies]
+      summary: Sign/acknowledge all active company policies and clear the must-sign gate
       description: |
-        Shared admin to-do list (team-wide — every admin sees every task).
-        Open tasks first (due date ascending, undated last), then completed
-        tasks newest-first. Pass includeCompleted=false to omit finished tasks.
-      parameters:
-        - name: includeCompleted
-          in: query
-          required: false
-          schema: { type: boolean, default: true }
+        Authenticated self-service. Records the caller's typed signature against
+        every currently-active policy on their employee file and clears the
+        users.mustSignPolicies gate. Mounted under /me (not /policies) so it is
+        never feature-gated — a flagged officer can always clear the gate even on
+        a tenant where the policies feature is disabled (no lockout). Safe when
+        there are zero active policies (the gate is still cleared).
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AcknowledgePoliciesRequest"
       responses:
         "200":
-          description: OK
+          description: Policies acknowledged; updated user returned
           content:
             application/json:
               schema:
-                type: array
-                items: { $ref: "#/components/schemas/AdminTask" }
-    post:
-      tags: [adminTasks]
-      operationId: createAdminTask
-      description: Add a task/reminder to the shared admin list.
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema: { $ref: "#/components/schemas/CreateAdminTaskRequest" }
-      responses:
-        "201":
-          description: Created
-          content:
-            application/json:
-              schema: { $ref: "#/components/schemas/AdminTask" }
+                $ref: "#/components/schemas/User"
         "400":
-          description: Validation error
-          content:
-            application/json:
-              schema: { $ref: "#/components/schemas/ErrorResponse" }
-
-  /admin/tasks/{id}:
-    patch:
-      tags: [adminTasks]
-      operationId: updateAdminTask
-      description: |
-        Edit a task and/or toggle completion. Setting completed=true stamps
-        completedAt now; completed=false reopens the task.
-      parameters:
-        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema: { $ref: "#/components/schemas/UpdateAdminTaskRequest" }
-      responses:
-        "200":
-          description: Updated
-          content:
-            application/json:
-              schema: { $ref: "#/components/schemas/AdminTask" }
-        "400":
-          description: Validation error
-          content:
-            application/json:
-              schema: { $ref: "#/components/schemas/ErrorResponse" }
-        "404":
-          description: Not Found
-          content:
-            application/json:
-              schema: { $ref: "#/components/schemas/ErrorResponse" }
-    delete:
-      tags: [adminTasks]
-      operationId: deleteAdminTask
-      description: Remove a task from the shared admin list.
-      parameters:
-        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
-      responses:
-        "204":
-          description: Deleted
-        "404":
-          description: Not Found
+          description: Validation failed
           content:
             application/json:
               schema: { $ref: "#/components/schemas/ErrorResponse" }
@@ -3136,7 +3105,7 @@ paths:
       operationId: createPaymentDiscrepancy
       summary: Submit a payment discrepancy report (officer)
       description: |
-        Authenticated internal users (officer/site-manager/employee/admin) report a pay
+        Authenticated internal users (officer/site manager/employee/admin) report a pay
         discrepancy (missed payment, underpayment, missing hours, etc.). On
         submit the report is emailed to the dedicated admin inbox and becomes
         visible in the Admin Portal. External client accounts are rejected.
@@ -3180,6 +3149,62 @@ paths:
 
 components:
   schemas:
+    # >>> FEATURE_KEYS:START — auto-generated from lib/feature-keys/src/index.ts.
+    #     Do NOT edit the enum below by hand. Run
+    #     `pnpm --filter @workspace/scripts run sync-feature-keys`
+    #     (also runs automatically before `@workspace/api-spec` codegen). <<<
+    FeatureKey:
+      type: string
+      description: >-
+        Identifier for an owner-controlled, optionally-paid feature. Single
+        source of truth is lib/feature-keys/src/index.ts; this enum is kept in
+        sync by the sync-feature-keys script.
+      enum:
+        - chat
+        - radio
+        - incidents
+        - payroll
+        - invoicing
+        - hr
+        - liveMap
+        - policies
+        - swapRequests
+        - licenseRenewals
+        - dar
+        - exports
+        - trainings
+        - patrol
+        - availability
+        - officerShares
+    # >>> FEATURE_KEYS:END <<<
+
+    BrandConfig:
+      type: object
+      required:
+        - companyName
+        - shortName
+        - tagline
+        - appName
+        - colorNavy
+        - colorGold
+        - colorCream
+        - features
+      properties:
+        companyName: { type: string }
+        shortName: { type: string }
+        tagline: { type: string }
+        appName: { type: string }
+        colorNavy: { type: string }
+        colorGold: { type: string }
+        colorCream: { type: string }
+        features:
+          type: object
+          description: >-
+            Map of FeatureKey → enabled flag. Absent keys default to enabled on
+            the client. Property keys are FeatureKey values.
+          additionalProperties: { type: boolean }
+          propertyNames: { $ref: "#/components/schemas/FeatureKey" }
+
     SubcontractorQrResponse:
       type: object
       required: [id, token, clockUrl, siteName, createdAt]
@@ -3348,11 +3373,12 @@ components:
         mustCompleteProfile:
           type: boolean
           description: "True after first password change until the user has reviewed/saved their profile."
+        mustSignPolicies:
+          type: boolean
+          description: "True when the user must sign/acknowledge company policies before accessing the mobile app (non-admin staff only)."
         createdAt:
           type: string
           format: date-time
-        uiPreferences:
-          $ref: "#/components/schemas/UiPreferences"
       required:
         - id
         - email
@@ -3362,41 +3388,16 @@ components:
         - status
         - createdAt
 
-    UiPreferences:
+    AcknowledgePoliciesRequest:
       type: object
-      description: "Per-user UI personalization. Cosmetic only — never authorization."
       properties:
-        navGroupOrder:
-          type: array
-          description: "Preferred order of portal nav group keys. Unknown keys are ignored; missing groups append in default order."
-          maxItems: 30
-          items:
-            type: string
-            maxLength: 40
-
-    SiteManagerUser:
-      type: object
-      description: "Minimal user shape for site-manager assignment lists/pickers."
-      properties:
-        id: { type: string }
-        firstName: { type: string }
-        lastName: { type: string }
-        email: { type: string }
+        signature:
+          type: string
+          description: "The caller's typed full legal name, applied as their signature to every active policy."
+          minLength: 2
+          maxLength: 120
       required:
-        - id
-        - firstName
-        - lastName
-        - email
-
-    SetSiteManagersRequest:
-      type: object
-      description: "Replace the full set of managers for a site with this list of user IDs."
-      properties:
-        userIds:
-          type: array
-          items: { type: string }
-      required:
-        - userIds
+        - signature
 
     Employee:
       type: object
@@ -3614,19 +3615,13 @@ components:
       additionalProperties: false
       description: "Strict allow-list of fields the employee may edit on their own profile."
       properties:
-        phone: { type: string }
-        address: { type: string }
-        # Personal details — employee-owned identity / PII the officer can keep
-        # current themselves. dateOfBirth is an ISO YYYY-MM-DD date string ("" or
-        # null clears it). niNumber (SSN last 4) and rightToWorkStatus are
-        # compliance-sensitive: changing them fires a same-day HR alert.
+        firstName: { type: string }
+        lastName: { type: string }
         dateOfBirth: { type: string, nullable: true }
         cityOfBirth: { type: string, nullable: true }
         stateOfBirth: { type: string, nullable: true }
-        niNumber: { type: string, nullable: true }
-        rightToWorkStatus: { type: string, nullable: true }
-        taxCode: { type: string, nullable: true }
-        directDepositConsent: { type: boolean, nullable: true }
+        phone: { type: string }
+        address: { type: string }
         emergencyContactName: { type: string }
         emergencyContactRelationship: { type: string, nullable: true }
         emergencyContactPhone: { type: string }
@@ -3652,18 +3647,6 @@ components:
           type: array
           nullable: true
           items: { type: string }
-        previousExperience: { type: string, nullable: true }
-        yearsExperience: { type: integer, minimum: 0, maximum: 99, nullable: true }
-        references:
-          type: array
-          nullable: true
-          items:
-            type: object
-            required: [name]
-            properties:
-              name: { type: string }
-              relationship: { type: string }
-              phone: { type: string }
 
     EmployeeChange:
       type: object
@@ -3897,6 +3880,18 @@ components:
           enum: [accepted, declined]
       required:
         - status
+
+    UiPreferences:
+      type: object
+      description: "Per-user UI personalization. Cosmetic only — never authorization."
+      properties:
+        navGroupOrder:
+          type: array
+          description: "Preferred order of portal nav group keys. Unknown keys are ignored; missing groups append in default order."
+          maxItems: 30
+          items:
+            type: string
+            maxLength: 40
 
     ProtectionPerson:
       type: object
@@ -4372,6 +4367,35 @@ components:
         locationLng: { type: number }
         notes: { type: string }
 
+    SiteManagerUser:
+      type: object
+      properties:
+        userId: { type: string }
+        firstName: { type: string }
+        lastName: { type: string }
+        email: { type: string }
+      required: [userId]
+
+    SiteManagersResponse:
+      type: object
+      properties:
+        assigned:
+          type: array
+          items: { $ref: "#/components/schemas/SiteManagerUser" }
+        available:
+          type: array
+          items: { $ref: "#/components/schemas/SiteManagerUser" }
+      required: [assigned, available]
+
+    UpdateSiteManagersRequest:
+      type: object
+      properties:
+        userIds:
+          type: array
+          items: { type: string }
+          description: "Full desired set of Site Manager user IDs for this site (replaces existing)."
+      required: [userIds]
+
     ApproveTimeEntryRequest:
       type: object
       properties:
@@ -4732,6 +4756,175 @@ components:
         - clockedInNow
         - recentIncidents
         - upcomingShiftsList
+
+    AnalyticsWeekBucket:
+      type: object
+      properties:
+        weekStart:
+          type: string
+          format: date
+        revenue:
+          type: number
+        laborCost:
+          type: number
+        pnl:
+          type: number
+        hoursWorked:
+          type: number
+        incidentCount:
+          type: integer
+      required:
+        - weekStart
+        - revenue
+        - laborCost
+        - pnl
+        - hoursWorked
+        - incidentCount
+
+    AnalyticsSiteRow:
+      type: object
+      properties:
+        siteId:
+          type: string
+        siteName:
+          type: string
+        clientName:
+          type: string
+          nullable: true
+        revenue:
+          type: number
+        laborCost:
+          type: number
+        pnl:
+          type: number
+        hoursWorked:
+          type: number
+        coveragePct:
+          type: number
+          nullable: true
+      required:
+        - siteId
+        - siteName
+        - clientName
+        - revenue
+        - laborCost
+        - pnl
+        - hoursWorked
+        - coveragePct
+
+    AnalyticsIncidentCounts:
+      type: object
+      properties:
+        total:
+          type: integer
+        low:
+          type: integer
+        medium:
+          type: integer
+        high:
+          type: integer
+        critical:
+          type: integer
+        open:
+          type: integer
+        resolved:
+          type: integer
+      required:
+        - total
+        - low
+        - medium
+        - high
+        - critical
+        - open
+        - resolved
+
+    AnalyticsSummary:
+      type: object
+      properties:
+        revenue:
+          type: number
+        laborCost:
+          type: number
+        pnl:
+          type: number
+        marginPct:
+          type: number
+          nullable: true
+        hoursWorked:
+          type: number
+        hoursScheduled:
+          type: number
+        coveragePct:
+          type: number
+          nullable: true
+        noShows:
+          type: integer
+        unfilledShifts:
+          type: integer
+        incidents:
+          $ref: "#/components/schemas/AnalyticsIncidentCounts"
+        weeklyTrend:
+          type: array
+          items:
+            $ref: "#/components/schemas/AnalyticsWeekBucket"
+        sites:
+          type: array
+          items:
+            $ref: "#/components/schemas/AnalyticsSiteRow"
+      required:
+        - revenue
+        - laborCost
+        - pnl
+        - marginPct
+        - hoursWorked
+        - hoursScheduled
+        - coveragePct
+        - noShows
+        - unfilledShifts
+        - incidents
+        - weeklyTrend
+        - sites
+
+    AnalyticsOfficerTrendPoint:
+      type: object
+      properties:
+        weekStart:
+          type: string
+          format: date
+        hoursWorked:
+          type: number
+      required:
+        - weekStart
+        - hoursWorked
+
+    AnalyticsOfficerRow:
+      type: object
+      properties:
+        employeeId:
+          type: string
+        name:
+          type: string
+        hoursWorked:
+          type: number
+        shiftsCompleted:
+          type: integer
+        incidentsFiled:
+          type: integer
+        punctualityPct:
+          type: number
+          nullable: true
+        trend:
+          type: array
+          items:
+            $ref: "#/components/schemas/AnalyticsOfficerTrendPoint"
+      required:
+        - employeeId
+        - name
+        - hoursWorked
+        - shiftsCompleted
+        - incidentsFiled
+        - punctualityPct
+        - trend
 
     AdminTask:
       type: object
@@ -5576,220 +5769,6 @@ components:
       properties:
         url: { type: string }
         sessionId: { type: string }
-
-    AnalyticsTrendPoint:
-      type: object
-      required: [bucket, revenue, laborCost, profit]
-      properties:
-        bucket: { type: string }
-        revenue: { type: number }
-        laborCost: { type: number }
-        profit: { type: number }
-
-    AnalyticsHoursTrendPoint:
-      type: object
-      required: [bucket, worked, scheduled]
-      properties:
-        bucket: { type: string }
-        worked: { type: number }
-        scheduled: { type: number }
-
-    AnalyticsIncidentTrendPoint:
-      type: object
-      required: [bucket, count]
-      properties:
-        bucket: { type: string }
-        count: { type: integer }
-
-    AnalyticsMissedShift:
-      type: object
-      required: [shiftId, title, startTime, endTime, siteId, siteName, headcount, filled, noShows]
-      properties:
-        shiftId: { type: string }
-        title: { type: string }
-        startTime: { type: string }
-        endTime: { type: string }
-        siteId: { type: string, nullable: true }
-        siteName: { type: string, nullable: true }
-        headcount: { type: integer }
-        filled: { type: integer }
-        noShows: { type: integer }
-
-    AnalyticsSiteRow:
-      type: object
-      required: [siteId, siteName, revenue, laborCost, profit, hoursWorked, hoursScheduled, noShows, unfilledShifts, incidents]
-      properties:
-        siteId: { type: string }
-        siteName: { type: string }
-        revenue: { type: number }
-        laborCost: { type: number }
-        profit: { type: number }
-        hoursWorked: { type: number }
-        hoursScheduled: { type: number }
-        noShows: { type: integer }
-        unfilledShifts: { type: integer }
-        incidents: { type: integer }
-
-    AnalyticsOfficerRow:
-      type: object
-      required:
-        - userId
-        - firstName
-        - lastName
-        - email
-        - shiftsAssigned
-        - shiftsCompleted
-        - noShows
-        - attendanceRate
-        - punctualityEligible
-        - onTimeCount
-        - onTimeRate
-        - avgMinutesLate
-        - hoursWorked
-        - hoursScheduled
-        - rejectedEntries
-        - totalEntries
-        - rejectionRate
-        - incidentTotal
-        - incidentHigh
-        - incidentCritical
-        - reliabilityScore
-      properties:
-        userId: { type: string }
-        firstName: { type: string }
-        lastName: { type: string }
-        email: { type: string }
-        shiftsAssigned: { type: integer }
-        shiftsCompleted: { type: integer }
-        noShows: { type: integer }
-        attendanceRate: { type: number }
-        punctualityEligible: { type: integer }
-        onTimeCount: { type: integer }
-        onTimeRate: { type: number }
-        avgMinutesLate: { type: number }
-        hoursWorked: { type: number }
-        hoursScheduled: { type: number }
-        rejectedEntries: { type: integer }
-        totalEntries: { type: integer }
-        rejectionRate: { type: number }
-        incidentTotal: { type: integer }
-        incidentHigh: { type: integer }
-        incidentCritical: { type: integer }
-        reliabilityScore: { type: number }
-
-    AnalyticsOfficerSummary:
-      type: object
-      required: [totalNoShows, avgAttendanceRate, avgOnTimeRate]
-      properties:
-        totalNoShows: { type: integer }
-        avgAttendanceRate: { type: number }
-        avgOnTimeRate: { type: number }
-
-    AnalyticsOfficerHistoryPoint:
-      type: object
-      required:
-        - bucket
-        - weekStart
-        - shiftsAssigned
-        - shiftsCompleted
-        - noShows
-        - hoursWorked
-        - attendanceRate
-        - punctualityEligible
-        - onTimeRate
-        - reliabilityScore
-      properties:
-        bucket: { type: string, description: "ISO week label, e.g. 2026-W27" }
-        weekStart: { type: string, format: date, description: "Monday of the ISO week (business timezone calendar date)" }
-        shiftsAssigned: { type: integer }
-        shiftsCompleted: { type: integer }
-        noShows: { type: integer }
-        hoursWorked: { type: number }
-        attendanceRate: { type: number, nullable: true, description: "Null when no shifts were assigned that week" }
-        punctualityEligible: { type: integer, description: "Completed shifts that count toward punctuality" }
-        onTimeRate: { type: number, nullable: true, description: "Null when no completed shifts that week" }
-        reliabilityScore: { type: number, nullable: true, description: "60% attendance + 40% punctuality; null when no shifts assigned" }
-
-    AnalyticsOfficerHistory:
-      type: object
-      required: [userId, firstName, lastName, weeks, points]
-      properties:
-        userId: { type: string, format: uuid }
-        firstName: { type: string }
-        lastName: { type: string }
-        weeks: { type: integer }
-        points:
-          type: array
-          items: { $ref: "#/components/schemas/AnalyticsOfficerHistoryPoint" }
-
-    AnalyticsSummary:
-      type: object
-      required:
-        - revenue
-        - laborCost
-        - profit
-        - marginPct
-        - hoursWorked
-        - hoursScheduled
-        - coveragePct
-        - noShowCount
-        - unfilledCount
-        - missedShifts
-        - incidentTotal
-        - incidentsBySeverity
-        - incidentsByStatus
-        - pnlTrend
-        - hoursTrend
-        - incidentTrend
-        - perSite
-        - officerSummary
-        - perOfficer
-      properties:
-        revenue: { type: number }
-        laborCost: { type: number }
-        profit: { type: number }
-        marginPct: { type: number }
-        hoursWorked: { type: number }
-        hoursScheduled: { type: number }
-        coveragePct: { type: number }
-        noShowCount: { type: integer }
-        unfilledCount: { type: integer }
-        missedShifts:
-          type: array
-          items: { $ref: "#/components/schemas/AnalyticsMissedShift" }
-        incidentTotal: { type: integer }
-        incidentsBySeverity:
-          type: object
-          properties:
-            low: { type: integer }
-            medium: { type: integer }
-            high: { type: integer }
-            critical: { type: integer }
-          required: [low, medium, high, critical]
-        incidentsByStatus:
-          type: object
-          properties:
-            open: { type: integer }
-            investigating: { type: integer }
-            closed: { type: integer }
-          required: [open, investigating, closed]
-        pnlTrend:
-          type: array
-          items: { $ref: "#/components/schemas/AnalyticsTrendPoint" }
-        hoursTrend:
-          type: array
-          items: { $ref: "#/components/schemas/AnalyticsHoursTrendPoint" }
-        incidentTrend:
-          type: array
-          items: { $ref: "#/components/schemas/AnalyticsIncidentTrendPoint" }
-        perSite:
-          type: array
-          items: { $ref: "#/components/schemas/AnalyticsSiteRow" }
-        officerSummary:
-          $ref: "#/components/schemas/AnalyticsOfficerSummary"
-        perOfficer:
-          type: array
-          items: { $ref: "#/components/schemas/AnalyticsOfficerRow" }
 
     ClientInviteResponse:
       type: object

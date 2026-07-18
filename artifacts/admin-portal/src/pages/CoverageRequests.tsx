@@ -1,7 +1,6 @@
 import { useEffect, useState } from "react";
 import { CalendarClock, CheckCircle2, XCircle, Clock3, ChevronDown, ChevronUp } from "lucide-react";
 import { api } from "@/lib/api";
-import { formatDate, BUSINESS_TIME_ZONE } from "@/lib/format";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { useToast } from "@/hooks/use-toast";
@@ -27,18 +26,13 @@ type CoverageRequest = {
   createdShiftIds: string[] | null;
 };
 
-const DATE_ONLY_RE = /^\d{4}-\d{2}-\d{2}$/;
 function fmt(d: string | null) {
   if (!d) return "—";
-  const opts: Intl.DateTimeFormatOptions = { month: "short", day: "numeric", year: "numeric" };
-  // startDate/endDate are pg `date` columns (UTC literal date); createdAt is a
-  // timestamp (Central).
-  return DATE_ONLY_RE.test(d) ? formatDate(d + "T00:00:00Z", opts, "UTC") : formatDate(d, opts);
+  return new Date(d).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
 }
 function fmtTime(d: string | null) {
   if (!d) return "—";
-  // reviewedAt is a timestamp → render in Central.
-  return new Date(d).toLocaleString("en-US", { month: "short", day: "numeric", hour: "numeric", minute: "2-digit", timeZone: BUSINESS_TIME_ZONE });
+  return new Date(d).toLocaleString("en-US", { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" });
 }
 
 const STATUS_CFG: Record<string, { cls: string; icon: React.ReactNode; label: string }> = {

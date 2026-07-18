@@ -6,7 +6,6 @@ import { useGetShifts, getGetShiftsQueryKey } from "@workspace/api-client-react"
 import { Feather } from "@expo/vector-icons";
 import { useRouter, useSegments } from "expo-router";
 import { useAuth } from "@/contexts/AuthContext";
-import { formatDateTime, formatTime } from "@/utils/time";
 
 const STATUS_FILTERS = ["upcoming", "active", "completed", "cancelled"] as const;
 
@@ -30,12 +29,8 @@ export default function AdminShiftsScreen() {
   // (`(employee)/schedule`, which re-exports them). Resolve own-stack nav
   // against the current group so a site manager stays inside the employee shell.
   const shiftBase = segments[0] === "(employee)" ? "/(employee)/schedule" : "/(admin)/shifts";
-  // The approval screens live at (admin) root for admins, but are re-exported
-  // under (employee)/schedule for site managers — resolve against the shell so
-  // a site manager's nav stays inside the employee shell.
-  const approvalsBase = segments[0] === "(employee)" ? "/(employee)/schedule" : "/(admin)";
   const { user, logout } = useAuth();
-  // Site managers live entirely inside the Shifts tab (no profile tab to sign out from),
+  // Site Managers live entirely inside the Shifts tab (no profile tab to sign out from),
   // so the sign-out control + the finance-bearing rate tag are handled here.
   const isSiteManager = user?.role === "site_manager";
   const [filter, setFilter] = useState<string>("upcoming");
@@ -50,14 +45,11 @@ export default function AdminShiftsScreen() {
   // Self-claims awaiting approval, surfaced as a badge on the Approvals entry.
   // Always reads the upcoming list (React Query dedupes when the active filter
   // is already "upcoming") so the count stays accurate on any filter. Admins
-  // approve from the (admin) shell; site managers from the employee shell — the
-  // upcoming list is scoped server-side to a manager's sites, so the count and
-  // the approvals screen both stay confined to what they manage.
+  // approve from a dedicated screen; the shell-aware guard keeps site managers out.
   const isAdminShell = segments[0] === "(admin)";
-  const showApprovals = isAdminShell || isSiteManager;
   const { data: upcomingForBadge } = useGetShifts(
     { status: "upcoming" as any },
-    { query: { queryKey: getGetShiftsQueryKey({ status: "upcoming" as any }), enabled: showApprovals } },
+    { query: { queryKey: getGetShiftsQueryKey({ status: "upcoming" as any }), enabled: isAdminShell } },
   );
   const pendingApprovalCount = useMemo(() => {
     let n = 0;
@@ -90,10 +82,10 @@ export default function AdminShiftsScreen() {
       <View style={[styles.topBar, { paddingTop: topPad + 12, borderBottomColor: colors.border }]}>
         <Text style={[styles.pageTitle, { color: colors.foreground }]}>Shifts</Text>
         <View style={styles.topBarActions}>
-          {showApprovals && (
+          {isAdminShell && (
             <TouchableOpacity
               style={[styles.approvalsBtn, { borderColor: pendingApprovalCount > 0 ? colors.accent : colors.border }]}
-              onPress={() => router.push(`${approvalsBase}/shift-approvals` as any)}
+              onPress={() => router.push("/(admin)/shift-approvals" as any)}
               accessibilityRole="button"
               accessibilityLabel={pendingApprovalCount > 0 ? `Shift approvals, ${pendingApprovalCount} pending` : "Shift approvals"}
             >
@@ -103,16 +95,6 @@ export default function AdminShiftsScreen() {
                   <Text style={styles.approvalsBadgeText}>{pendingApprovalCount > 99 ? "99+" : pendingApprovalCount}</Text>
                 </View>
               )}
-            </TouchableOpacity>
-          )}
-          {isSiteManager && (
-            <TouchableOpacity
-              style={[styles.approvalsBtn, { borderColor: colors.border }]}
-              onPress={() => router.push(`${approvalsBase}/time-approval` as any)}
-              accessibilityRole="button"
-              accessibilityLabel="Time approvals"
-            >
-              <Feather name="check-square" size={18} color={colors.mutedForeground} />
             </TouchableOpacity>
           )}
           <TouchableOpacity style={[styles.addBtn, { backgroundColor: colors.primary }]} onPress={() => router.push(`${shiftBase}/create` as any)} accessibilityRole="button" accessibilityLabel="Create shift">
@@ -191,7 +173,7 @@ export default function AdminShiftsScreen() {
               style={[styles.card, { backgroundColor: colors.card, borderColor: colors.border }]}
               onPress={() => router.push(`${shiftBase}/${item.id}` as any)}
               accessibilityRole="button"
-              accessibilityLabel={`${item.title} for ${item.clientName}, ${item.status}, ${formatDateTime(item.startTime)}, ${item.assignments?.length ?? 0} assigned`}
+              accessibilityLabel={`${item.title} for ${item.clientName}, ${item.status}, ${new Date(item.startTime).toLocaleString()}, ${item.assignments?.length ?? 0} assigned`}
               accessibilityHint="Opens shift details"
             >
               <View style={styles.cardHeader}>
@@ -219,7 +201,7 @@ export default function AdminShiftsScreen() {
               <View style={styles.timeRow}>
                 <Feather name="clock" size={13} color={colors.mutedForeground} />
                 <Text style={[styles.detailText, { color: colors.mutedForeground }]}>
-                  {formatDateTime(item.startTime)} – {formatTime(item.endTime)}
+                  {new Date(item.startTime).toLocaleString()} – {new Date(item.endTime).toLocaleTimeString()}
                 </Text>
               </View>
               <View style={styles.bottomRow}>
@@ -252,7 +234,7 @@ const styles = StyleSheet.create({
   addBtn: { width: 36, height: 36, borderRadius: 10, justifyContent: "center", alignItems: "center" },
   approvalsBtn: { width: 36, height: 36, borderRadius: 10, borderWidth: 1, justifyContent: "center", alignItems: "center" },
   approvalsBadge: { position: "absolute", top: -4, right: -4, minWidth: 16, height: 16, borderRadius: 8, paddingHorizontal: 3, justifyContent: "center", alignItems: "center" },
-  approvalsBadgeText: { color: "#080c18", fontSize: 10, fontWeight: "700" },
+  approvalsBadgeText: { color: "#0c0a08", fontSize: 10, fontWeight: "700" },
   topBarActions: { flexDirection: "row", alignItems: "center", gap: 8 },
   signOutBtn: { width: 36, height: 36, borderRadius: 10, borderWidth: 1, justifyContent: "center", alignItems: "center" },
   filterScroll: { flexDirection: "row", gap: 8, paddingHorizontal: 16, paddingVertical: 12, flexWrap: "wrap" },

@@ -7,10 +7,19 @@ import LiveOfficerMap from "@/components/LiveOfficerMap";
 import { formatDistanceToNow } from "date-fns";
 import { useRouter, useLocalSearchParams } from "expo-router";
 import { useHighlightFlash } from "@/hooks/useHighlightFlash";
+import { FeatureGate } from "@/components/FeatureGate";
 
 const AnimatedTouchable = Animated.createAnimatedComponent(TouchableOpacity);
 
 export default function AdminLiveMapScreen() {
+  return (
+    <FeatureGate feature="liveMap">
+      <AdminLiveMapScreenInner />
+    </FeatureGate>
+  );
+}
+
+function AdminLiveMapScreenInner() {
   const colors = useColors();
   const router = useRouter();
   const topPad = Platform.OS === "web" ? 12 : 0;

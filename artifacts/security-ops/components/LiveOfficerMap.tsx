@@ -45,11 +45,11 @@ function buildLeafletHtml(
 <!-- focusKey:${String(focusKey ?? "")} -->
 <meta name="viewport" content="width=device-width, initial-scale=1"/>
 <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
-<style>html,body,#m{margin:0;padding:0;height:100%;background:#080c18}
-.popup b{color:#080c18}.popup{font-family:-apple-system,system-ui,sans-serif;font-size:13px}
-.popup button{margin-top:6px;background:#080c18;color:#c9a84c;border:1px solid #c9a84c;
+<style>html,body,#m{margin:0;padding:0;height:100%;background:#0c0a08}
+.popup b{color:#0c0a08}.popup{font-family:-apple-system,system-ui,sans-serif;font-size:13px}
+.popup button{margin-top:6px;background:#0c0a08;color:#c9a04a;border:1px solid #c9a04a;
 border-radius:4px;padding:4px 8px;font-size:12px;font-weight:600;cursor:pointer;font-family:inherit}
-.popup button:hover{background:#c9a84c;color:#080c18}</style></head>
+.popup button:hover{background:#c9a04a;color:#0c0a08}</style></head>
 <body><div id="m"></div>
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 <script>
@@ -90,8 +90,8 @@ if (pts.length) {
     const isFocus = focusId && String(p.userId) === String(focusId);
     const m = L.circleMarker([p.lat, p.lng], {
       radius: isFocus ? 14 : 10,
-      color: isFocus ? '#f0e6c8' : '#c9a84c',
-      fillColor: '#c9a84c', fillOpacity: 0.9, weight: isFocus ? 5 : 3,
+      color: isFocus ? '#f0e4c0' : '#c9a04a',
+      fillColor: '#c9a04a', fillOpacity: 0.9, weight: isFocus ? 5 : 3,
     });
     m.bindPopup(popupNode(p.label, p.sub, p.userId));
     m.addTo(group);
@@ -161,7 +161,7 @@ export default function LiveOfficerMap({ officers, height = 380, onSelectOfficer
   if (Platform.OS === "web") {
     const Iframe: any = "iframe";
     return (
-      <View style={[styles.wrap, { height, borderColor: colors.border, backgroundColor: "#080c18" }]}>
+      <View style={[styles.wrap, { height, borderColor: colors.border, backgroundColor: "#0c0a08" }]}>
         <Iframe
           srcDoc={html}
           sandbox="allow-scripts"
@@ -201,7 +201,7 @@ export default function LiveOfficerMap({ officers, height = 380, onSelectOfficer
             };
             const inner = (
               <>
-                <Feather name="map-pin" size={16} color="#c9a84c" />
+                <Feather name="map-pin" size={16} color="#c9a04a" />
                 <View style={{ flex: 1 }}>
                   <Text style={{ color: colors.foreground, fontWeight: "600" }}>{label}</Text>
                   <Text style={{ color: colors.mutedForeground, fontSize: 12 }}>{sub}</Text>

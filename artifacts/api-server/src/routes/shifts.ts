@@ -4,11 +4,10 @@ import { eq, and, gt, gte, lt, lte, ne, sql, or, isNull, inArray } from "drizzle
 import { db, shiftsTable, shiftAssignmentsTable, usersTable, licensesTable, sitesTable, clientsTable, trainingCertificationsTable, employeesTable } from "@workspace/db";
 import { requireAuth, requireAdmin, requireAdminOrDispatcher, requireAdminOrSiteManager, requireSchedulingStaff } from "../middlewares/auth";
 import { haversineMiles } from "../lib/geofence";
-import { getEffectiveLevel, effectiveLevelSql, WORKER_ROLES, isWorkerRole } from "../lib/eligibility";
+import { getEffectiveLevel, effectiveLevelSql } from "../lib/eligibility";
 import { pushShiftUpsert, pushShiftDelete, pushAssignmentEvent } from "../lib/schedulerSync";
-import { MAX_SHIFT_HOURS, validateShiftWindow } from "../lib/shiftWindow";
-import { assertCanManageSite, getManagedSiteIds, getManagerUserIdsForSite, managesSite } from "../lib/siteManagerAuth";
-import { notifyShiftCreated, fmtShiftWhen, shiftLevelLabel } from "../lib/shiftNotify";
+import { stripShiftFinanceForRole } from "../lib/financeVisibility";
+import { canManageSite, getManagedSiteIds, getSiteManagerUserIds } from "../lib/siteManagerAuthz";
 
 const router: IRouter = Router();
 
@@ -56,6 +55,31 @@ function localDateInTz(utcMs: number, tz: string): string {
   }
 }
 
+/** Short label for a shift's required level used in push/SMS copy. */
+function shiftLevelLabel(lvl: number): string {
+  if (lvl <= 1) return "Support";
+  if (lvl === 4) return "L4/PPO";
+  return `L${lvl}+`;
+}
+
+// Company operating timezone (Central). Shift times are stored as UTC instants;
+// notification/SMS copy must render them in the officer's local zone, otherwise
+// the UTC clock reading is shown (e.g. a 5:30 PM Central start renders as
+// "10:30 PM", which reads like the shift's end time).
+export const COMPANY_TZ = "America/Chicago";
+
+/** Format a shift instant for human-facing push/SMS copy, in company time. */
+export function fmtShiftWhen(when: Date | string | number): string {
+  return new Date(when).toLocaleString("en-US", {
+    timeZone: COMPANY_TZ,
+    weekday: "short",
+    month: "short",
+    day: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+}
+
 /**
  * Slugs of training-certification types the officer currently holds with
  * either no expiry (perpetual) or an unexpired expiry. Used to enforce
@@ -75,27 +99,6 @@ async function getEmployeeHeldTrainings(employeeId: string): Promise<Set<string>
   return new Set(rows.map((r) => r.type));
 }
 
-/**
- * Strip financial fields from a shift row based on the caller's role before
- * returning it. Bill rate (what the CLIENT is charged) is commercial data that
- * must never leave the admin boundary — no non-admin role may see it. Pay rate
- * is the officer's own compensation, so officers/dispatchers keep it; site managers see
- * NO finance at all (site-manager-no-finance invariant). Kept inline (not exported)
- * because shift finance has a fixed, small field set; centralising it here means
- * every reachable shift response strips the same keys.
- */
-function stripShiftFinanceForRole<T extends Record<string, unknown>>(role: string | undefined, shift: T): T {
-  if (role === "admin") return shift;
-  if (role === "site_manager") {
-    const { payRate, billRate, hourlyRate, billableRate, ...rest } = shift as Record<string, unknown>;
-    return rest as T;
-  }
-  // Officers, dispatchers, and any other non-admin: keep pay rate (their own
-  // compensation) but remove the client-facing bill rate / billable rate.
-  const { billRate, billableRate, ...rest } = shift as Record<string, unknown>;
-  return rest as T;
-}
-
 router.get("/shifts", requireAuth, async (req, res): Promise<void> => {
   const { status, employeeId, from, to, view } = req.query as { status?: string; employeeId?: string; from?: string; to?: string; view?: string };
   // Admins and dispatchers get a full global read (they assign/notify/schedule
@@ -111,7 +114,7 @@ router.get("/shifts", requireAuth, async (req, res): Promise<void> => {
   // level + held trainings) is applied to them exactly like an employee.
   const role = req.user!.role;
   const workerView = view === "worker";
-  const isGlobalReader = !workerView && (role === "admin" || role === "dispatcher");
+  const isAdmin = !workerView && (role === "admin" || role === "dispatcher");
   const isSiteManager = !workerView && role === "site_manager";
   const userId = req.user!.userId;
 
@@ -144,70 +147,68 @@ router.get("/shifts", requireAuth, async (req, res): Promise<void> => {
       : await db.select().from(shiftsTable);
     shifts = all.filter((s) => (s.siteId != null && managed.has(s.siteId)) || myAssigned.has(s.id));
   } else {
-    // Admins/dispatchers get a global read (optionally filtered to one employee
-    // via ?employeeId); employees are limited to their assigned + qualifying-open
-    // shifts.
-    let restrictToEmployee: string | undefined;
-    if (!isGlobalReader) {
-      restrictToEmployee = userId;
-    } else if (employeeId) {
-      restrictToEmployee = employeeId;
-    }
+  // Non-admins are limited: only shifts they're assigned to OR open shifts they qualify for.
+  let restrictToEmployee: string | undefined;
+  if (!isAdmin) {
+    restrictToEmployee = userId;
+  } else if (employeeId) {
+    restrictToEmployee = employeeId;
+  }
 
-    if (restrictToEmployee) {
-      const myMaxLevel = !isGlobalReader ? await getEffectiveLevel(userId) : 4;
-      const myHeldTrainings = !isGlobalReader ? await getEmployeeHeldTrainings(userId) : new Set<string>();
-      const assignedRows = await db
-        .select({ shiftId: shiftAssignmentsTable.shiftId })
-        .from(shiftAssignmentsTable)
-        .where(eq(shiftAssignmentsTable.employeeId, restrictToEmployee));
-      const assignedIds = assignedRows.map((r) => r.shiftId);
+  if (restrictToEmployee) {
+    const myMaxLevel = !isAdmin ? await getEffectiveLevel(userId) : 4;
+    const myHeldTrainings = !isAdmin ? await getEmployeeHeldTrainings(userId) : new Set<string>();
+    const assignedRows = await db
+      .select({ shiftId: shiftAssignmentsTable.shiftId })
+      .from(shiftAssignmentsTable)
+      .where(eq(shiftAssignmentsTable.employeeId, restrictToEmployee));
+    const assignedIds = assignedRows.map((r) => r.shiftId);
 
-      const all = conditions.length > 0
-        ? await db.select().from(shiftsTable).where(and(...conditions))
-        : await db.select().from(shiftsTable);
+    const all = conditions.length > 0
+      ? await db.select().from(shiftsTable).where(and(...conditions))
+      : await db.select().from(shiftsTable);
 
-      if (isGlobalReader) {
-        shifts = all.filter((s) => assignedIds.includes(s.id));
-      } else {
-        // Employee sees: assigned shifts + open shifts they qualify for (upcoming, not full).
-        // Training-compliance check: any site-required training the officer
-        // doesn't currently hold (unexpired) hides the shift from feeds.
-        // Assigned shifts are always visible so an officer keeps seeing
-        // shifts they've already committed to even if a cert lapsed.
-        const counts = await db
-          .select({ shiftId: shiftAssignmentsTable.shiftId, n: sql<number>`count(*)::int` })
-          .from(shiftAssignmentsTable)
-          .groupBy(shiftAssignmentsTable.shiftId);
-        const countMap = new Map(counts.map((c) => [c.shiftId, c.n]));
-        const siteIds = Array.from(new Set(all.map((s) => s.siteId).filter((id): id is string => !!id)));
-        const siteReqMap = new Map<string, string[]>();
-        if (siteIds.length > 0) {
-          const siteRows = await db
-            .select({ id: sitesTable.id, req: sitesTable.requiredTrainings })
-            .from(sitesTable)
-            .where(inArray(sitesTable.id, siteIds));
-          for (const s of siteRows) siteReqMap.set(s.id, Array.isArray(s.req) ? s.req : []);
-        }
-        const nowMs = Date.now();
-        shifts = all.filter((s) => {
-          if (assignedIds.includes(s.id)) return true;
-          if (s.status !== "upcoming") return false;
-          // Hide open shifts whose end time has already passed — they are no
-          // longer claimable and should not appear in the officer's feed.
-          if (new Date(s.endTime).getTime() < nowMs) return false;
-          if (myMaxLevel < s.requiredLicenseLevel) return false;
-          if ((countMap.get(s.id) ?? 0) >= s.headcount) return false;
-          const req = s.siteId ? (siteReqMap.get(s.siteId) ?? []) : [];
-          for (const t of req) if (!myHeldTrainings.has(t)) return false;
-          return true;
-        });
-      }
+    if (isAdmin) {
+      shifts = all.filter((s) => assignedIds.includes(s.id));
     } else {
-      shifts = conditions.length > 0
-        ? await db.select().from(shiftsTable).where(and(...conditions))
-        : await db.select().from(shiftsTable);
+      // Employee sees: assigned shifts + open shifts they qualify for (upcoming, not full).
+      // Training-compliance check: any site-required training the officer
+      // doesn't currently hold (unexpired) hides the shift from feeds.
+      // Assigned shifts are always visible so an officer keeps seeing
+      // shifts they've already committed to even if a cert lapsed.
+      const counts = await db
+        .select({ shiftId: shiftAssignmentsTable.shiftId, n: sql<number>`count(*)::int` })
+        .from(shiftAssignmentsTable)
+        .groupBy(shiftAssignmentsTable.shiftId);
+      const countMap = new Map(counts.map((c) => [c.shiftId, c.n]));
+      const siteIds = Array.from(new Set(all.map((s) => s.siteId).filter((id): id is string => !!id)));
+      const siteReqMap = new Map<string, string[]>();
+      if (siteIds.length > 0) {
+        const siteRows = await db
+          .select({ id: sitesTable.id, req: sitesTable.requiredTrainings })
+          .from(sitesTable)
+          .where(inArray(sitesTable.id, siteIds));
+        for (const s of siteRows) siteReqMap.set(s.id, Array.isArray(s.req) ? s.req : []);
+      }
+      const nowMs = Date.now();
+      shifts = all.filter((s) => {
+        if (assignedIds.includes(s.id)) return true;
+        if (s.status !== "upcoming") return false;
+        // Hide open shifts whose end time has already passed — they are no
+        // longer claimable and should not appear in the officer's feed.
+        if (new Date(s.endTime).getTime() < nowMs) return false;
+        if (myMaxLevel < s.requiredLicenseLevel) return false;
+        if ((countMap.get(s.id) ?? 0) >= s.headcount) return false;
+        const req = s.siteId ? (siteReqMap.get(s.siteId) ?? []) : [];
+        for (const t of req) if (!myHeldTrainings.has(t)) return false;
+        return true;
+      });
     }
+  } else {
+    shifts = conditions.length > 0
+      ? await db.select().from(shiftsTable).where(and(...conditions))
+      : await db.select().from(shiftsTable);
+  }
   }
 
   const shiftIds = shifts.map((s) => s.id);
@@ -240,7 +241,7 @@ router.get("/shifts", requireAuth, async (req, res): Promise<void> => {
   // canonical worksite location). Null when caller is admin, the employee
   // has no home coords, the shift has no siteId, or the site has no coords.
   let distanceMap: Map<string, number> | null = null;
-  if (!isGlobalReader && !isSiteManager) {
+  if (!isAdmin && !isSiteManager) {
     const [meEmp] = await db
       .select({ homeLat: employeesTable.homeLat, homeLng: employeesTable.homeLng })
       .from(employeesTable)
@@ -294,9 +295,10 @@ router.post("/shifts", requireAdminOrSiteManager, async (req, res): Promise<void
     isRepeat, repeatPattern, notes, employeeIds, requiredLicenseLevel, headcount,
     siteRateId, shiftType,
   } = req.body;
-  // Site managers never see or set rates; ignore any client-supplied rate fields and
-  // fall back to the site's configured defaults so payroll/invoicing still
-  // resolve a rate (never let a site manager post a 0 that would poison the chain).
+  // Site managers never see or set rates; ignore any client-supplied rate
+  // fields and fall back to the site's configured defaults so payroll/invoicing
+  // still resolve a rate (never let a manager post a 0 that would poison the
+  // chain).
   const isSiteManager = req.user!.role === "site_manager";
 
   // Resolve site to populate clientName/location automatically. Also pull the
@@ -323,21 +325,17 @@ router.post("/shifts", requireAdminOrSiteManager, async (req, res): Promise<void
     return;
   }
 
-  // Reject impossible / typo'd shift windows (NaN, end<=start, or >24h). A
-  // multi-day window almost always means a wrong end DATE; left unguarded it
-  // makes the rostered officers look on-duty for days, silently blocking every
-  // overlapping assignment + self clock-in. Shared validator across all writers.
-  {
-    const w = validateShiftWindow(new Date(startTime), new Date(endTime));
-    if (!w.ok) { res.status(400).json({ error: "Bad Request", message: w.message }); return; }
-  }
-
-  // Site managers inherit rates ONLY from the site default and must fail closed if the
-  // site has no usable defaults — never silently persist a 0 that would poison
-  // payroll/invoicing downstream.
+  // Site managers may only post against a site they manage, and inherit rates
+  // ONLY from the site default — failing closed if the site has no usable
+  // defaults so we never silently persist a 0 that would poison payroll/
+  // invoicing downstream.
   if (isSiteManager) {
     if (!siteId) {
-      res.status(400).json({ error: "Bad Request", message: "Select a site — site managers post shifts against a site." });
+      res.status(400).json({ error: "Bad Request", message: "Select a site — site managers post shifts against a site they manage." });
+      return;
+    }
+    if (!(await canManageSite({ userId: req.user!.userId, role: req.user!.role }, siteId))) {
+      res.status(403).json({ error: "Forbidden", message: "You can only post shifts to sites you manage." });
       return;
     }
     const payOk = siteDefaultPay != null && Number.isFinite(Number(siteDefaultPay)) && Number(siteDefaultPay) > 0;
@@ -347,10 +345,6 @@ router.post("/shifts", requireAdminOrSiteManager, async (req, res): Promise<void
       return;
     }
   }
-
-  // Per-site scoping: a site manager may only post shifts at a site they
-  // manage. Admins bypass (and may still post site-less ad-hoc shifts).
-  if (!(await assertCanManageSite(res, req.user!, siteId || null))) return;
 
   const lvl = [1, 2, 3, 4].includes(Number(requiredLicenseLevel)) ? Number(requiredLicenseLevel) : 2;
   const hc = Math.max(1, Number(headcount) || 1);
@@ -383,9 +377,12 @@ router.post("/shifts", requireAdminOrSiteManager, async (req, res): Promise<void
     requiredLicenseLevel: lvl,
     headcount: hc,
     // siteRateId links a shift to a `site_rates` card (which carries pay/bill
-    // rates). Site managers must never set or influence rate metadata, so their
-    // value is ignored and the shift inherits the site default (resolved above).
+    // rates) — site managers can't pick rate cards, so never persist a
+    // client-supplied one for them.
     siteRateId: isSiteManager ? null : (siteRateId || null),
+    // PPO Detail shifts carry a protection package (protection_persons rows);
+    // anything else is a standard patrol/static shift. Server-side allowlist —
+    // never trust an arbitrary client string.
     shiftType: shiftType === "ppo_detail" ? "ppo_detail" : "standard",
   }).returning();
 
@@ -395,13 +392,61 @@ router.post("/shifts", requireAdminOrSiteManager, async (req, res): Promise<void
     );
   }
 
-  // Fan out new-shift notifications: a "shift available" push to eligible
-  // workers (employees AND site managers, minus this site's own managers) plus
-  // the site's managers' "at your site" push + SMS. Shared with the scheduler
-  // ingest path so a shift notifies the same people regardless of origin.
-  // Best-effort (never throws); runs before the response so the recipient set
-  // is computed against the just-inserted row.
-  await notifyShiftCreated(shift);
+  // Broadcast push notification to all qualifying active employees
+  try {
+    const candidates = await db
+      .select({
+        userId: usersTable.id,
+        effLevel: effectiveLevelSql,
+      })
+      .from(usersTable)
+      .leftJoin(licensesTable, eq(licensesTable.employeeId, usersTable.id))
+      .leftJoin(employeesTable, eq(employeesTable.userId, usersTable.id))
+      .where(and(eq(usersTable.role, "employee"), eq(usersTable.status, "active")))
+      .groupBy(usersTable.id);
+
+    const eligibleIds = candidates
+      .filter((c) => c.effLevel >= lvl)
+      .map((c) => c.userId);
+
+    if (eligibleIds.length > 0) {
+      const { sendPushToUsers } = await import("../lib/push");
+      const start = fmtShiftWhen(shift.startTime);
+      const levelLabel = shiftLevelLabel(lvl);
+      await sendPushToUsers(eligibleIds, {
+        title: `🛡️ New ${levelLabel} Shift Available`,
+        body: `${shift.title} @ ${shift.clientName} — ${start}`,
+        data: { type: "shift_available", shiftId: shift.id },
+      });
+    }
+  } catch (err) {
+    req.log.warn({ err }, "Failed to broadcast new shift push");
+  }
+
+  // Notify the site's managers that a new shift was posted at their site
+  // (push + SMS), excluding whoever created it.
+  if (shift.siteId) {
+    try {
+      const managerIds = (await getSiteManagerUserIds(shift.siteId)).filter((mid) => mid !== req.user!.userId);
+      if (managerIds.length > 0) {
+        const { sendPushToUsers } = await import("../lib/push");
+        const { sendSmsToUsers } = await import("../lib/sms");
+        const start = fmtShiftWhen(shift.startTime);
+        const where = shift.clientName ?? resolvedLocation ?? "your site";
+        await sendPushToUsers(managerIds, {
+          title: "🗓️ New Shift at Your Site",
+          body: `${shift.title} @ ${where} — ${start}`,
+          data: { type: "site_shift_created", shiftId: shift.id, siteId: shift.siteId },
+        });
+        void sendSmsToUsers(
+          managerIds,
+          `WCSG: New shift posted at your site — ${shift.title} on ${start}. Open the SecureOps app to manage it.`,
+        );
+      }
+    } catch (err) {
+      req.log.warn({ err }, "Failed to notify site managers of new shift");
+    }
+  }
 
   // Outbound sync to scheduler (best-effort, after response)
   void pushShiftUpsert(shift);
@@ -431,7 +476,7 @@ router.post("/shifts", requireAdminOrSiteManager, async (req, res): Promise<void
  * is out of scope for this feature.) Existing shifts at the same site +
  * startTime are skipped to make re-runs idempotent.
  */
-router.post("/shifts/repeat", requireAdmin, async (req, res): Promise<void> => {
+router.post("/shifts/repeat", requireAdminOrSiteManager, async (req, res): Promise<void> => {
   const { base, recurrence } = req.body ?? {};
   if (!base || !recurrence) {
     res.status(400).json({ error: "Bad Request", message: "base and recurrence required" });
@@ -453,7 +498,7 @@ router.post("/shifts/repeat", requireAdmin, async (req, res): Promise<void> => {
   }
 
   const dateRe = /^\d{4}-\d{2}-\d{2}$/;
-  const timeRe = /^([01]\d|2[0-3]):[0-5]\d$/;
+  const timeRe = /^\d{2}:\d{2}$/;
   if (!dateRe.test(startDate) || !dateRe.test(untilDate)) {
     res.status(400).json({ error: "Bad Request", message: "dates must be YYYY-MM-DD" });
     return;
@@ -471,18 +516,41 @@ router.post("/shifts/repeat", requireAdmin, async (req, res): Promise<void> => {
     return;
   }
 
-  // Resolve site → clientName/location for back-compat columns.
+  // Resolve site → clientName/location for back-compat columns, plus default
+  // rates so a (rate-blind) site manager's series inherits them.
   const [site] = await db
-    .select({ id: sitesTable.id, name: sitesTable.name, address: sitesTable.address, lat: sitesTable.locationLat, lng: sitesTable.locationLng, clientName: clientsTable.name })
+    .select({ id: sitesTable.id, name: sitesTable.name, address: sitesTable.address, lat: sitesTable.locationLat, lng: sitesTable.locationLng, clientName: clientsTable.name, defaultPayRate: sitesTable.defaultPayRate, defaultBillRate: sitesTable.defaultBillRate })
     .from(sitesTable)
     .leftJoin(clientsTable, eq(sitesTable.clientId, clientsTable.id))
     .where(eq(sitesTable.id, siteId));
   if (!site) { res.status(400).json({ error: "Bad Request", message: "Site not found" }); return; }
 
+  // Site managers may only bulk-create against a site they manage.
+  const isSiteManager = req.user!.role === "site_manager";
+  if (isSiteManager && !(await canManageSite({ userId: req.user!.userId, role: req.user!.role }, siteId))) {
+    res.status(403).json({ error: "Forbidden", message: "You can only post shifts to sites you manage." });
+    return;
+  }
+
   const lvl = [1, 2, 3, 4].includes(Number(requiredLicenseLevel)) ? Number(requiredLicenseLevel) : 2;
   const hc = Math.max(1, Number(headcount) || 1);
-  const pay = Number(payRate) || 0;
-  const bill = Number(billRate) || 0;
+  // Site managers are rate-blind: inherit the site's configured defaults and
+  // fail closed if absent, exactly like single-shift creation.
+  let pay: number;
+  let bill: number;
+  if (isSiteManager) {
+    const payOk = site.defaultPayRate != null && Number.isFinite(Number(site.defaultPayRate)) && Number(site.defaultPayRate) > 0;
+    const billOk = site.defaultBillRate != null && Number.isFinite(Number(site.defaultBillRate)) && Number(site.defaultBillRate) > 0;
+    if (!payOk || !billOk) {
+      res.status(400).json({ error: "Bad Request", message: "This site has no default pay/bill rate configured. An admin must set the site's default rates before shifts can be posted here." });
+      return;
+    }
+    pay = Number(site.defaultPayRate);
+    bill = Number(site.defaultBillRate);
+  } else {
+    pay = Number(payRate) || 0;
+    bill = Number(billRate) || 0;
+  }
 
   // Cap series length to prevent runaway expansion (~1 year of daily shifts).
   const MAX_OCCURRENCES = 366;
@@ -496,18 +564,6 @@ router.post("/shifts/repeat", requireAdmin, async (req, res): Promise<void> => {
   const [sh, sm] = startTime.split(":").map(Number);
   const [eh, em] = endTime.split(":").map(Number);
   const wrapsOvernight = (eh * 60 + em) <= (sh * 60 + sm);
-
-  // Defense-in-depth: each occurrence is bounded to one day by construction
-  // (and the stricter HH:MM regex above already rejects out-of-range times like
-  // "25:00"), but verify the per-occurrence span so a recurring series can't
-  // seed multi-day shifts either.
-  const occurrenceMinutes = wrapsOvernight
-    ? (eh * 60 + em) + 1440 - (sh * 60 + sm)
-    : (eh * 60 + em) - (sh * 60 + sm);
-  if (occurrenceMinutes <= 0 || occurrenceMinutes > MAX_SHIFT_HOURS * 60) {
-    res.status(400).json({ error: "Bad Request", message: `Each shift in the series must be between 1 minute and ${MAX_SHIFT_HOURS} hours long — check the start/end times.` });
-    return;
-  }
 
   const repeatPattern = JSON.stringify({ daysOfWeek: validDays.sort(), startTime, endTime, startDate, untilDate });
   // Stable series identifier shared by every occurrence in this batch. Lets
@@ -575,24 +631,29 @@ router.post("/shifts/repeat", requireAdmin, async (req, res): Promise<void> => {
   // None of these are scheduler-sourced, so loop prevention doesn't apply.
   for (const s of inserted) void pushShiftUpsert(s);
 
-  // Notify the site's assigned managers about the new recurring series — one
-  // summary push, not one per occurrence. Best-effort.
+  // One BATCHED summary to the site's managers (excluding the actor) so a bulk
+  // series doesn't fan out one push per occurrence.
   if (inserted.length > 0) {
     try {
-      const managerIds = await getManagerUserIdsForSite(siteId);
+      const managerIds = (await getSiteManagerUserIds(siteId)).filter((mid) => mid !== req.user!.userId);
       if (managerIds.length > 0) {
         const { sendPushToUsers } = await import("../lib/push");
         const { sendSmsToUsers } = await import("../lib/sms");
-        const n = inserted.length;
+        const firstStart = fmtShiftWhen(inserted[0].startTime);
+        const where = site.clientName ?? site.name;
+        const plural = inserted.length === 1 ? "" : "s";
         await sendPushToUsers(managerIds, {
-          title: "🗓️ New Recurring Shifts At Your Site",
-          body: `${n} new "${title}" shift${n === 1 ? "" : "s"} scheduled at your site.`,
-          data: { type: "site_shift_created", siteId, seriesId },
+          title: "🗓️ New Shifts at Your Site",
+          body: `${inserted.length} new ${title} shift${plural} posted at ${where}, starting ${firstStart}.`,
+          data: { type: "site_shift_created", siteId, count: String(inserted.length) },
         });
-        void sendSmsToUsers(managerIds, `[WCSG] ${n} new "${title}" shift${n === 1 ? "" : "s"} scheduled at your site.`);
+        void sendSmsToUsers(
+          managerIds,
+          `WCSG: ${inserted.length} new shift${plural} posted at your site (${where}). Open the SecureOps app to manage them.`,
+        );
       }
     } catch (err) {
-      req.log.warn({ err }, "Failed to notify site managers of recurring shifts");
+      req.log.warn({ err }, "Failed to notify site managers of repeating shifts");
     }
   }
 
@@ -600,7 +661,7 @@ router.post("/shifts/repeat", requireAdmin, async (req, res): Promise<void> => {
     created: inserted.length,
     skippedExisting: occurrences.length - inserted.length,
     totalOccurrences: occurrences.length,
-    shifts: inserted,
+    shifts: inserted.map((s) => stripShiftFinanceForRole(req.user!.role, s)),
   });
 });
 
@@ -615,7 +676,7 @@ router.put("/shifts/bulk", requireAdmin, async (req, res): Promise<void> => {
     res.status(400).json({ error: "Bad Request", message: "changes object required" }); return;
   }
   const tz: string = typeof changes.tz === "string" && changes.tz ? changes.tz : "America/Chicago";
-  const timeRe = /^([01]\d|2[0-3]):[0-5]\d$/;
+  const timeRe = /^\d{2}:\d{2}$/;
   const newStart = typeof changes.startTime === "string" && timeRe.test(changes.startTime) ? changes.startTime : null;
   const newEnd = typeof changes.endTime === "string" && timeRe.test(changes.endTime) ? changes.endTime : null;
 
@@ -650,59 +711,45 @@ router.put("/shifts/bulk", requireAdmin, async (req, res): Promise<void> => {
   const rows = await db.select().from(shiftsTable).where(inArray(shiftsTable.id, ids as string[]));
   if (rows.length === 0) { res.status(404).json({ error: "Not Found", message: "no matching shifts" }); return; }
 
-  // Build every row's patch up front so one bad resulting window rejects the
-  // WHOLE batch — never partially apply a series edit (which would leave some
-  // occurrences valid and others poisoning the overlap guard). A time-only edit
-  // can still produce an invalid window per-row (e.g. moving only the start of
-  // an overnight shift past its end), so validate the EFFECTIVE window here too.
-  const patches: { id: string; patch: Record<string, unknown> }[] = [];
-  for (const r of rows) {
-    const patch: Record<string, unknown> = { ...setCommon };
-    if (newStart || newEnd) {
-      // Anchor on the existing start day as observed in `tz`.
-      const startDateLocal = localDateInTz(new Date(r.startTime).getTime(), tz);
-      const [y, mo, da] = startDateLocal.split("-").map(Number);
-      if (newStart) {
-        const [sh, sm] = newStart.split(":").map(Number);
-        patch.startTime = wallTimeToUtc(y, mo, da, sh, sm, tz);
-      }
-      if (newEnd) {
-        const [eh, eM] = newEnd.split(":").map(Number);
-        // Decide overnight: if the user supplied newStart, compare HH:MM
-        // pairs directly. Otherwise preserve the existing shift's
-        // overnight-ness by comparing the local dates of the existing
-        // start vs. end in `tz` (NOT raw UTC proximity, which breaks
-        // for normal multi-hour overnight shifts).
-        let wraps: boolean;
-        if (newStart) {
-          const [sh2, sm2] = newStart.split(":").map(Number);
-          wraps = (eh * 60 + eM) <= (sh2 * 60 + sm2);
-        } else {
-          const endDateLocal = localDateInTz(new Date(r.endTime).getTime(), tz);
-          wraps = endDateLocal !== startDateLocal;
-        }
-        let ey = y, em3 = mo, ed = da;
-        if (wraps) {
-          const next = new Date(Date.UTC(y, mo - 1, da) + 86400000);
-          ey = next.getUTCFullYear();
-          em3 = next.getUTCMonth() + 1;
-          ed = next.getUTCDate();
-        }
-        patch.endTime = wallTimeToUtc(ey, em3, ed, eh, eM, tz);
-      }
-      const effStart = (patch.startTime as Date | undefined) ?? new Date(r.startTime);
-      const effEnd = (patch.endTime as Date | undefined) ?? new Date(r.endTime);
-      const w = validateShiftWindow(effStart, effEnd);
-      if (!w.ok) { res.status(400).json({ error: "Bad Request", message: w.message }); return; }
-    }
-    if (Object.keys(patch).length === 0) continue;
-    patches.push({ id: r.id, patch });
-  }
-
   let updated = 0;
   await db.transaction(async (tx) => {
-    for (const p of patches) {
-      await tx.update(shiftsTable).set(p.patch).where(eq(shiftsTable.id, p.id));
+    for (const r of rows) {
+      const patch: Record<string, unknown> = { ...setCommon };
+      if (newStart || newEnd) {
+        // Anchor on the existing start day as observed in `tz`.
+        const startDateLocal = localDateInTz(new Date(r.startTime).getTime(), tz);
+        const [y, mo, da] = startDateLocal.split("-").map(Number);
+        if (newStart) {
+          const [sh, sm] = newStart.split(":").map(Number);
+          patch.startTime = wallTimeToUtc(y, mo, da, sh, sm, tz);
+        }
+        if (newEnd) {
+          const [eh, eM] = newEnd.split(":").map(Number);
+          // Decide overnight: if the user supplied newStart, compare HH:MM
+          // pairs directly. Otherwise preserve the existing shift's
+          // overnight-ness by comparing the local dates of the existing
+          // start vs. end in `tz` (NOT raw UTC proximity, which breaks
+          // for normal multi-hour overnight shifts).
+          let wraps: boolean;
+          if (newStart) {
+            const [sh2, sm2] = newStart.split(":").map(Number);
+            wraps = (eh * 60 + eM) <= (sh2 * 60 + sm2);
+          } else {
+            const endDateLocal = localDateInTz(new Date(r.endTime).getTime(), tz);
+            wraps = endDateLocal !== startDateLocal;
+          }
+          let ey = y, em3 = mo, ed = da;
+          if (wraps) {
+            const next = new Date(Date.UTC(y, mo - 1, da) + 86400000);
+            ey = next.getUTCFullYear();
+            em3 = next.getUTCMonth() + 1;
+            ed = next.getUTCDate();
+          }
+          patch.endTime = wallTimeToUtc(ey, em3, ed, eh, eM, tz);
+        }
+      }
+      if (Object.keys(patch).length === 0) continue;
+      await tx.update(shiftsTable).set(patch).where(eq(shiftsTable.id, r.id));
       updated++;
     }
   });
@@ -765,7 +812,7 @@ router.post("/shifts/series/fix-timezone", requireAdmin, async (req, res): Promi
   // keeps the operation idempotent regardless of which admin browser triggers
   // it. We deliberately ignore any client-supplied tz here.
   const tz = "America/Chicago";
-  const timeRe = /^([01]\d|2[0-3]):[0-5]\d$/;
+  const timeRe = /^\d{2}:\d{2}$/;
 
   const rows = await db.select().from(shiftsTable).where(inArray(shiftsTable.id, ids as string[]));
   if (rows.length === 0) {
@@ -817,7 +864,7 @@ router.get("/shifts/:id", requireAuth, async (req, res): Promise<void> => {
   // Site managers may only view shift detail for a site they manage, or a shift
   // they're personally rostered on. Admins/dispatchers/officers are unaffected.
   if (req.user!.role === "site_manager") {
-    const manages = shift.siteId ? await managesSite(req.user!.userId, shift.siteId) : false;
+    const manages = await canManageSite({ userId: req.user!.userId, role: req.user!.role }, shift.siteId);
     if (!manages) {
       const [mine] = await db
         .select({ id: shiftAssignmentsTable.id })
@@ -850,30 +897,35 @@ router.put("/shifts/:id", requireAdminOrSiteManager, async (req, res): Promise<v
   // Site managers must not change rates — ignore any rate fields they submit.
   const isSiteManager = req.user!.role === "site_manager";
 
-  // Per-site scoping: a site manager may only edit a shift at a site they
-  // manage, and may only MOVE it to another site they also manage. Admins
-  // bypass. Resolve the current site first (404 if the shift is gone).
+  // Site managers may only edit shifts at sites they manage (and may only move
+  // a shift to another site they also manage). Admins are unrestricted.
   // `siteManagerMovedSite` records a manager moving a shift across two managed
   // sites so we can recompute finance from the destination site below.
   let siteManagerMovedSite = false;
-  // Destination site rate defaults, captured when a site change is requested.
-  let destDefaultPay: string | null = null;
-  let destDefaultBill: string | null = null;
-  {
-    const [curForScope] = await db
+  if (isSiteManager) {
+    const [current] = await db
       .select({ siteId: shiftsTable.siteId })
       .from(shiftsTable)
       .where(eq(shiftsTable.id, id));
-    if (!curForScope) { res.status(404).json({ error: "Not Found" }); return; }
-    if (!(await assertCanManageSite(res, req.user!, curForScope.siteId))) return;
-    if (siteId && siteId !== curForScope.siteId) {
-      if (!(await assertCanManageSite(res, req.user!, siteId))) return;
-      if (isSiteManager) siteManagerMovedSite = true;
+    if (!current) { res.status(404).json({ error: "Not Found" }); return; }
+    const actor = { userId: req.user!.userId, role: req.user!.role };
+    if (!(await canManageSite(actor, current.siteId))) {
+      res.status(403).json({ error: "Forbidden", message: "You can only edit shifts at sites you manage." });
+      return;
+    }
+    if (siteId && siteId !== current.siteId) {
+      if (!(await canManageSite(actor, siteId))) {
+        res.status(403).json({ error: "Forbidden", message: "You can only move shifts to sites you manage." });
+        return;
+      }
+      siteManagerMovedSite = true;
     }
   }
-
   const updates: Record<string, unknown> = {};
   if (title) updates.title = title;
+  // Destination site rate defaults, captured when a site change is requested.
+  let destDefaultPay: string | null = null;
+  let destDefaultBill: string | null = null;
   if (siteId) {
     const [site] = await db
       .select({ name: sitesTable.name, address: sitesTable.address, clientName: clientsTable.name, defaultPayRate: sitesTable.defaultPayRate, defaultBillRate: sitesTable.defaultBillRate })
@@ -890,20 +942,6 @@ router.put("/shifts/:id", requireAdminOrSiteManager, async (req, res): Promise<v
   }
   if (startTime) updates.startTime = new Date(startTime);
   if (endTime) updates.endTime = new Date(endTime);
-  // Validate the EFFECTIVE [start,end) window whenever either bound changes, so
-  // an edit can't introduce a multi-day shift that poisons overlap checks.
-  // Falls back to the stored value for whichever bound isn't being changed.
-  if (startTime || endTime) {
-    const [cur] = await db
-      .select({ startTime: shiftsTable.startTime, endTime: shiftsTable.endTime })
-      .from(shiftsTable)
-      .where(eq(shiftsTable.id, id));
-    if (!cur) { res.status(404).json({ error: "Not Found" }); return; }
-    const effStart = (updates.startTime as Date | undefined) ?? cur.startTime;
-    const effEnd = (updates.endTime as Date | undefined) ?? cur.endTime;
-    const w = validateShiftWindow(effStart, effEnd);
-    if (!w.ok) { res.status(400).json({ error: "Bad Request", message: w.message }); return; }
-  }
   if (!isSiteManager) {
     if (payRate !== undefined) { updates.payRate = String(payRate); updates.hourlyRate = String(payRate); }
     if (billRate !== undefined) { updates.billRate = String(billRate); updates.billableRate = String(billRate); }
@@ -916,11 +954,13 @@ router.put("/shifts/:id", requireAdminOrSiteManager, async (req, res): Promise<v
     updates.requiredLicenseLevel = Number(requiredLicenseLevel);
   }
   if (headcount !== undefined) updates.headcount = Math.max(1, Number(headcount) || 1);
-  if (shiftType === "standard" || shiftType === "ppo_detail") updates.shiftType = shiftType;
   // Explicit null clears the FK (admin selected "Custom" rate); undefined leaves it alone.
   // siteRateId points at a `site_rates` card that carries pay/bill rates, so it is
   // finance metadata — site managers must never set it (parity with the rate guard above).
   if (!isSiteManager && siteRateId !== undefined) updates.siteRateId = siteRateId || null;
+  // Allowlisted shift-type toggle (standard ↔ ppo_detail); anything else ignored.
+  if (shiftType === "standard" || shiftType === "ppo_detail") updates.shiftType = shiftType;
+
   // A site manager moving a shift to a DIFFERENT managed site must not carry the
   // previous site's admin-set finance onto the new site/client. Recompute pay/bill
   // from the DESTINATION site defaults (mirrors the create path) and drop the
@@ -954,13 +994,13 @@ router.put("/shifts/:id", requireAdminOrSiteManager, async (req, res): Promise<v
 
 router.delete("/shifts/:id", requireAdminOrSiteManager, async (req, res): Promise<void> => {
   const id = Array.isArray(req.params.id) ? req.params.id[0] : req.params.id;
-  // Fetch the row before deletion so we can include externalId + syncSource in
-  // the push and resolve the shift's site for per-site scoping.
+  // Fetch the row before deletion so we can include externalId + syncSource in the push.
   const [toDelete] = await db.select({ id: shiftsTable.id, siteId: shiftsTable.siteId, externalId: shiftsTable.externalId, syncSource: shiftsTable.syncSource }).from(shiftsTable).where(eq(shiftsTable.id, id));
-  // Site managers may only delete shifts at a site they manage; admins bypass.
-  // A missing shift resolves to a null site, which denies non-admins (admins
-  // still get an idempotent 204).
-  if (!(await assertCanManageSite(res, req.user!, toDelete?.siteId ?? null))) return;
+  // Site managers may only delete shifts at sites they manage.
+  if (req.user!.role === "site_manager" && !(await canManageSite({ userId: req.user!.userId, role: req.user!.role }, toDelete?.siteId ?? null))) {
+    res.status(403).json({ error: "Forbidden", message: "You can only delete shifts at sites you manage." });
+    return;
+  }
   await db.delete(shiftsTable).where(eq(shiftsTable.id, id));
   // Outbound sync to scheduler (best-effort)
   if (toDelete) void pushShiftDelete(toDelete);
@@ -971,15 +1011,6 @@ router.post("/shifts/:id/claim", requireAuth, async (req, res): Promise<void> =>
   const shiftId = Array.isArray(req.params.id) ? req.params.id[0] : req.params.id;
   const userId = req.user!.userId;
 
-  // Workers only. Every internal staff role may claim shifts; external
-  // `client` accounts must never enter the claim path. Their effective level
-  // (0) would fail the licence gate below anyway, but this explicit guard is
-  // the defense-in-depth line (and gives an honest error message).
-  if (!isWorkerRole(req.user!.role)) {
-    res.status(403).json({ error: "Forbidden", message: "Only staff accounts can claim shifts" });
-    return;
-  }
-
   const [shift] = await db.select().from(shiftsTable).where(eq(shiftsTable.id, shiftId));
   if (!shift) { res.status(404).json({ error: "Not Found", message: "Shift not found" }); return; }
   if (shift.status !== "upcoming") {
@@ -989,16 +1020,11 @@ router.post("/shifts/:id/claim", requireAuth, async (req, res): Promise<void> =>
 
   const myLevel = await getEffectiveLevel(userId);
   if (myLevel < shift.requiredLicenseLevel) {
-    // Unarmed work (level <= 2) is open to every employee, so this only fires
-    // for armed (3) or PPO (4) shifts. The effective level is floored at 2 and
-    // is NOT a held-licence figure, so we describe the requirement rather than
-    // asserting the officer's (non-existent) licence level.
-    const tier = shift.requiredLicenseLevel >= 4
-      ? "Level 4 / PPO"
-      : `Level ${shift.requiredLicenseLevel} (armed)`;
     res.status(403).json({
       error: "Forbidden",
-      message: `This shift requires a valid ${tier} licence, which your account doesn't currently hold.`,
+      message: shift.requiredLicenseLevel <= 1
+        ? `This is a support shift. Your account isn't cleared to claim it yet — ask your administrator to set you up as support staff.`
+        : `This shift requires Level ${shift.requiredLicenseLevel}${shift.requiredLicenseLevel === 4 ? "/PPO" : ""}. Your highest valid licence is ${myLevel === 0 ? "none" : `Level ${myLevel}`}.`,
     });
     return;
   }
@@ -1115,16 +1141,17 @@ router.post("/shifts/:id/claim", requireAuth, async (req, res): Promise<void> =>
     req.log.warn({ err }, "Failed to send claim confirmation push");
   }
 
-  // Notify the approvers that an officer self-claimed and needs a decision.
-  // Recipients = all admins PLUS the managers assigned to this shift's site,
-  // deduped so a site manager who is also an admin isn't paged twice.
+  // Notify the approvers that an officer self-claimed and needs a decision:
+  // all admins PLUS the managers of this shift's site, de-duplicated and with
+  // the claiming officer removed (a site manager can be an officer too).
   try {
     const admins = await db
       .select({ id: usersTable.id })
       .from(usersTable)
       .where(eq(usersTable.role, "admin"));
-    const managerIds = shift.siteId ? await getManagerUserIdsForSite(shift.siteId) : [];
-    const recipientIds = Array.from(new Set([...admins.map((a) => a.id), ...managerIds]));
+    const adminIds = admins.map((a) => a.id);
+    const managerIds = shift.siteId ? await getSiteManagerUserIds(shift.siteId) : [];
+    const recipientIds = Array.from(new Set([...adminIds, ...managerIds])).filter((rid) => rid !== userId);
     if (recipientIds.length) {
       const officerName = user ? `${user.firstName} ${user.lastName}` : "An officer";
       const start = fmtShiftWhen(shift.startTime);
@@ -1177,9 +1204,8 @@ router.post("/shifts/:id/notify-vacancy", requireAdminOrDispatcher, async (req, 
     return;
   }
 
-  // Find active workers (employees AND site managers) whose highest unexpired
-  // licence covers the requirement and who aren't already assigned to this
-  // shift. Site managers are workers too, so they belong in the vacancy pool.
+  // Find active employees whose highest unexpired licence covers the requirement
+  // and who aren't already assigned to this shift.
   const candidates = await db
     .select({
       userId: usersTable.id,
@@ -1188,7 +1214,7 @@ router.post("/shifts/:id/notify-vacancy", requireAdminOrDispatcher, async (req, 
     .from(usersTable)
     .leftJoin(licensesTable, eq(licensesTable.employeeId, usersTable.id))
     .leftJoin(employeesTable, eq(employeesTable.userId, usersTable.id))
-    .where(and(inArray(usersTable.role, [...WORKER_ROLES]), eq(usersTable.status, "active")))
+    .where(and(eq(usersTable.role, "employee"), eq(usersTable.status, "active")))
     .groupBy(usersTable.id);
 
   const assignedSet = new Set(assignedIds.filter(Boolean));
@@ -1227,9 +1253,16 @@ router.post("/shifts/:id/assignments", requireSchedulingStaff, async (req, res):
   const [shift] = await db.select().from(shiftsTable).where(eq(shiftsTable.id, shiftId));
   if (!shift) { res.status(404).json({ error: "Not Found" }); return; }
 
-  // Per-site scoping: a site manager may only assign officers to shifts at a
-  // site they manage. Admins and dispatchers bypass.
-  if (!(await assertCanManageSite(res, req.user!, shift.siteId))) return;
+  // Site-scope gate: requireSchedulingStaff proves the caller holds a
+  // scheduling role, but a site manager may only assign officers to shifts at
+  // sites they manage. Admins/dispatchers are unscoped.
+  if (
+    req.user!.role === "site_manager" &&
+    !(await canManageSite({ userId: req.user!.userId, role: req.user!.role }, shift.siteId))
+  ) {
+    res.status(403).json({ error: "Forbidden", message: "You do not manage this site" });
+    return;
+  }
 
   // License-level gate. Admins and dispatchers may explicitly override it
   // (e.g. an officer whose renewal is in flight, or a judgement call for an
@@ -1238,22 +1271,22 @@ router.post("/shifts/:id/assignments", requireSchedulingStaff, async (req, res):
   // below still apply. The override is recorded in the audit log (this route
   // is under the audited `/shifts` prefix and the request body is captured).
   const empLevel = await getEffectiveLevel(employeeId);
+  // Only finance-bearing scheduling staff (admin/dispatcher) may override the
+  // licence gate; site managers must never bypass clearance requirements.
+  const canOverrideLicense =
+    overrideLicense === true && (req.user!.role === "admin" || req.user!.role === "dispatcher");
   if (empLevel < shift.requiredLicenseLevel) {
-    if (overrideLicense === true) {
+    if (canOverrideLicense) {
       req.log.warn(
         { shiftId, employeeId, empLevel, requiredLicenseLevel: shift.requiredLicenseLevel, actor: req.user?.userId },
         "license requirement overridden on manual shift assignment",
       );
     } else {
-      // Unarmed work (level <= 2) is open to every employee, so this only fires
-      // for armed (3) or PPO (4) shifts. Effective level is floored at 2 and is
-      // not a held-licence figure, so describe the requirement.
-      const tier = shift.requiredLicenseLevel >= 4
-        ? "Level 4 / PPO"
-        : `Level ${shift.requiredLicenseLevel} (armed)`;
       res.status(403).json({
         error: "Forbidden",
-        message: `This shift requires a valid ${tier} licence, which the selected employee doesn't currently hold.`,
+        message: shift.requiredLicenseLevel <= 1
+          ? `This is a support shift. The selected employee isn't cleared for it — set their position to support staff or assign a licensed officer.`
+          : `Employee's highest valid licence (${empLevel === 0 ? "none" : `Level ${empLevel}`}) does not meet the shift requirement (Level ${shift.requiredLicenseLevel}${shift.requiredLicenseLevel === 4 ? "/PPO" : ""}).`,
       });
       return;
     }
@@ -1379,21 +1412,21 @@ router.put("/shifts/:id/assignments/:assignmentId", requireAuth, async (req, res
   const [existing] = await db.select().from(shiftAssignmentsTable).where(eq(shiftAssignmentsTable.id, assignmentId));
   if (!existing) { res.status(404).json({ error: "Not Found" }); return; }
 
-  // Per-site scoping for ROSTER ops: when a site manager acts on someone else's
-  // assignment (approve/decline a claim, remove an officer) they must manage the
-  // parent shift's site. A site manager acting on their OWN assignment falls
-  // through to the officer self-service path below and isn't site-scoped here.
-  if (req.user!.role === "site_manager" && existing.employeeId !== req.user!.userId) {
+  // Admins manage any roster; site managers manage the roster only for shifts
+  // at sites they're assigned to (remove an officer to free a slot, or
+  // approve/decline a self-claim). Everyone else can only modify their own
+  // assignment.
+  let canManageRoster = req.user!.role === "admin";
+  if (req.user!.role === "site_manager") {
     const [parentForScope] = await db
       .select({ siteId: shiftsTable.siteId })
       .from(shiftsTable)
       .where(eq(shiftsTable.id, existing.shiftId));
-    if (!(await assertCanManageSite(res, req.user!, parentForScope?.siteId ?? null))) return;
+    canManageRoster = await canManageSite(
+      { userId: req.user!.userId, role: req.user!.role },
+      parentForScope?.siteId ?? null,
+    );
   }
-
-  // Admins and site managers manage the roster (e.g. remove an officer to free a
-  // slot); everyone else can only modify their own assignment.
-  const canManageRoster = req.user!.role === "admin" || req.user!.role === "site_manager";
   if (!canManageRoster && existing.employeeId !== req.user!.userId) {
     res.status(403).json({ error: "Forbidden", message: "You can only update your own assignments" });
     return;
@@ -1422,8 +1455,8 @@ router.put("/shifts/:id/assignments/:assignmentId", requireAuth, async (req, res
       });
     }
 
-    // If an admin/site-manager rejected an officer's pending self-claim, tell the officer
-    // their request wasn't approved and the slot is open again.
+    // If an admin/site manager rejected an officer's pending self-claim, tell the
+    // officer their request wasn't approved and the slot is open again.
     if (
       canManageRoster &&
       existing.status === "pending_approval" &&
@@ -1449,14 +1482,14 @@ router.put("/shifts/:id/assignments/:assignmentId", requireAuth, async (req, res
   // A non-manager (officer) may only ACCEPT an admin-issued invite
   // (existing.status === 'pending'). They must never be able to approve their
   // own self-claim (pending_approval -> accepted) or set any other status —
-  // approving a claim is an admin/site-manager-only decision. (Declining their own row
-  // is already handled above.)
+  // approving a claim is an admin/site-manager-only decision. (Declining their
+  // own row is already handled above.)
   if (!canManageRoster && !(status === "accepted" && existing.status === "pending")) {
-    res.status(403).json({ error: "Forbidden", message: "Only an admin can approve this request" });
+    res.status(403).json({ error: "Forbidden", message: "Only an admin or site manager can approve this request" });
     return;
   }
 
-  // Capture whether this is an admin/site-manager approving an officer's self-claim
+  // Capture whether this is an admin/site manager approving an officer's self-claim
   // BEFORE we overwrite the status, so we can confirm them on the roster and
   // notify them. (Officer-accepts-an-admin-invite — existing.status 'pending',
   // actor === employee — is intentionally excluded.)

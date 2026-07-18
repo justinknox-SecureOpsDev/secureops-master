@@ -4,7 +4,6 @@ import {
   Building2, AlertTriangle, Copy, Check,
 } from "lucide-react";
 import { api } from "@/lib/api";
-import { formatDate } from "@/lib/format";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -27,8 +26,7 @@ type ClientUser = {
 
 function fmt(d: string | null) {
   if (!d) return "Never";
-  // lastLoginAt / invitedAt are timestamps → render in Central.
-  return formatDate(d, { month: "short", day: "numeric", year: "numeric" });
+  return new Date(d).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
 }
 
 function StatusBadge({ status }: { status: string }) {

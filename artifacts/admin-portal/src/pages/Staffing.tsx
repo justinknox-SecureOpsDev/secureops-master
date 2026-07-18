@@ -15,8 +15,8 @@ import { shiftboard, publicShareUrl, SHIFTBOARD_BASE_URL, type ShiftboardEvent }
 function fmtDateRange(start: string | null, end: string | null): string {
   if (!start && !end) return "No dates set";
   const f = (s: string) => {
-    const d = new Date(s + "T00:00:00Z");
-    return d.toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric", timeZone: "UTC" });
+    const d = new Date(s + "T00:00:00");
+    return d.toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" });
   };
   if (start && end) return `${f(start)} → ${f(end)}`;
   return f((start || end)!);

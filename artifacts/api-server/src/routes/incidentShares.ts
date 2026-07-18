@@ -9,8 +9,10 @@ import { requireAdmin } from "../middlewares/auth";
 import { tokenLookupLimiter, publicShareExpensiveLimiter } from "../middlewares/rateLimit";
 import { ObjectStorageService, ObjectNotFoundError } from "../lib/objectStorage";
 import { buildIncidentReportPdf } from "../lib/incidentPdf";
+import { requireFeature } from "../lib/features";
 
 const router: IRouter = Router();
+router.use(["/admin/incidents", "/admin/incident-shares", "/public/incident-shares"], requireFeature("incidents"));
 const storage = new ObjectStorageService();
 
 function mintToken(): string {

@@ -2,10 +2,13 @@ import { useMemo, useState } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { Link, useLocation } from "wouter";
 import { api } from "@/lib/api";
+import { useAuth } from "@/lib/auth";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
-import { Users, Loader2, AlertTriangle, ArrowUpDown, MessageCircle } from "lucide-react";
+import { Button } from "@/components/ui/button";
+import { Users, Loader2, AlertTriangle, ArrowUpDown, MessageCircle, FileUp } from "lucide-react";
+import { PdfImportWizard } from "@/components/PdfImportWizard";
 
 type Employee = {
   id: string;
@@ -72,7 +75,10 @@ export default function PersonnelPage() {
   const [search, setSearch] = useState("");
   const [status, setStatus] = useState<string>("");
   const [sortKey, setSortKey] = useState<SortKey>("name");
+  const [importOpen, setImportOpen] = useState(false);
   const [, setLocation] = useLocation();
+  const { user } = useAuth();
+  const isAdmin = user?.role === "admin";
 
   // Open (or create) a 1:1 DM with an on-duty officer and jump to Chat.
   // The server upserts the direct room keyed on the participant pair, so
@@ -154,6 +160,18 @@ export default function PersonnelPage() {
             <Users className="w-5 h-5 brand-gold" />
             Personnel
             <span className="ml-auto text-xs opacity-60 font-normal">{sorted.length} officers</span>
+            {isAdmin && (
+              <Button
+                type="button"
+                size="sm"
+                variant="outline"
+                className="h-8 gap-1.5"
+                onClick={() => setImportOpen(true)}
+              >
+                <FileUp className="w-4 h-4" />
+                Import from PDF
+              </Button>
+            )}
           </CardTitle>
         </CardHeader>
         <CardContent className="space-y-3">
@@ -307,6 +325,9 @@ export default function PersonnelPage() {
           </div>
         </CardContent>
       </Card>
+      {isAdmin && (
+        <PdfImportWizard open={importOpen} onOpenChange={setImportOpen} />
+      )}
     </div>
   );
 }

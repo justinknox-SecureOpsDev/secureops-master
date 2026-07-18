@@ -42,8 +42,13 @@ import { sendEmail, sendEmailDetailed, renderOnboardingEmail, renderResendOnboar
 import { brand } from "../lib/brandConfig";
 import { sendSmsToPhoneNumber } from "../lib/sms";
 import { normalizePhoneToE164 } from "../lib/phone";
+import { requireFeature } from "../lib/features";
 
 const router: IRouter = Router();
+router.use(
+  ["/applications", "/application-template", "/admin/application-fields", "/admin/application-questions", "/admin/applications", "/admin/onboarding", "/onboarding"],
+  requireFeature("hr"),
+);
 const policyStorage = new ObjectStorageService();
 
 const ONBOARDING_TOKEN_TTL_DAYS = 14;
@@ -1410,6 +1415,7 @@ router.post("/admin/applications/:id/approve", requireAdmin, async (req, res): P
           status: "pending",
           mustChangePassword: true,
           mustCompleteProfile: true,
+          mustSignPolicies: true,
         }).where(eq(usersTable.id, userId));
       } else {
         const [u] = await tx.insert(usersTable).values({
@@ -1425,6 +1431,7 @@ router.post("/admin/applications/:id/approve", requireAdmin, async (req, res): P
           status: "pending",
           mustChangePassword: true,
           mustCompleteProfile: true,
+          mustSignPolicies: true,
         }).returning();
         userId = u.id;
       }
@@ -2293,15 +2300,11 @@ router.post("/admin/onboarding/:employeeId/resend", requireAdmin, async (req, re
   });
 });
 
-// Delete a person who is still in onboarding. Restricted to accounts that are
-// genuinely onboarding-stage: role must be `employee` and status must still be
-// `pending` (onboarding completion flips the user to `active`). Anything else
-// is refused with 409 — active staff must be deactivated/managed through the
-// Personnel tables, never silently erased from the onboarding list. The user
-// row is the cascade root: deleting it removes the employees row, onboarding
-// tokens, and any onboarding submission (all FK ON DELETE CASCADE); other
-// users-referencing tables are cascade or SET NULL, so the delete cannot
-// strand orphans.
+// Delete a pending-onboarding employee entirely (undo an accidental approval).
+// Guard-railed to onboarding-stage accounts only: role must be `employee` and
+// status must be `pending` — anything else (active/inactive staff, admins,
+// dispatchers) must be managed from the Personnel tables so this route can
+// never become a general-purpose account deleter.
 router.delete("/admin/onboarding/:employeeId", requireAdmin, async (req, res): Promise<void> => {
   const employeeId = req.params.employeeId as string;
   if (!z.string().uuid().safeParse(employeeId).success) {

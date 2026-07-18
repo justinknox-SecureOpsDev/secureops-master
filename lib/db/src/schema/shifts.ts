@@ -22,8 +22,8 @@ export const shiftsTable = pgTable("shifts", {
   hourlyRate: numeric("hourly_rate", { precision: 10, scale: 2 }).notNull().default("0"),
   billableRate: numeric("billable_rate", { precision: 10, scale: 2 }),
   status: text("status").notNull().default("upcoming"),
-  // 'standard' for ordinary guard shifts; 'ppo_detail' unlocks the executive /
-  // close-protection package (protection_details + protection_persons +
+  // 'standard' guard shift or 'ppo_detail' executive/close-protection detail
+  // (unlocks the protection package tables protection_details / protection_persons /
   // protection_destinations). Default keeps every existing shift standard.
   shiftType: text("shift_type").notNull().default("standard"),
   requiredLicenseLevel: integer("required_license_level").notNull().default(2),

@@ -1,160 +1,113 @@
 /**
- * External operator control-plane routes.
+ * Remote control-plane management surface (HMAC-authenticated).
  *
- * Authenticated via HMAC-SHA256 over the exact raw request body bytes
- * (or the empty string for body-less requests), using the
- * CONTROL_PLANE_SHARED_SECRET environment variable.  This mirrors the
- * scheduler-webhook HMAC pattern (same `verifySignature` helper,
- * same `req.rawBody` populated by the express.json `verify` callback in
- * app.ts).
+ * The master control plane manages this customer's white-label brand and
+ * feature flags WITHOUT an operator logging into the in-app super-admin UI.
+ * Every route here is gated by `requireControlPlaneHmac` (HMAC-SHA256 over the
+ * raw body, keyed on CONTROL_PLANE_SHARED_SECRET) and is INERT (503) until that
+ * secret is provisioned on this deployment.
  *
- * Routes:
- *   GET  /control-plane/settings   — deployment info, live brand, feature flags
- *   PUT  /control-plane/brand      — upsert the platform brand singleton + re-apply live
- *   PUT  /control-plane/features   — upsert / clear feature-flag overrides
+ * It deliberately writes through the SAME tables, SAME zod validation, and SAME
+ * in-memory `applyBrandOverrides()` patch as routes/platform.ts, so a remote
+ * change is indistinguishable from an in-app super-admin change and takes
+ * effect immediately (no restart).
  *
- * If CONTROL_PLANE_SHARED_SECRET is not set the whole surface returns 503.
- * A missing or invalid signature returns 401 via constant-time comparison.
+ * Mounted before the JWT auth middleware (it carries its own auth), alongside
+ * the other HMAC webhook surfaces.
  */
 
-import { Router, type IRouter, type Request, type Response, type NextFunction } from "express";
-import { eq } from "drizzle-orm";
-import { db, platformBrandConfigTable } from "@workspace/db";
-import { verifySignature } from "../lib/schedulerSync";
-import { brand, BrandUpdateSchema, applyBrandRow } from "../lib/brandConfig";
-import { getFlags, applyFlagsUpdate, FeatureFlagsUpdateSchema } from "../lib/featureFlags";
-import { logger } from "../lib/logger";
+import { Router } from "express";
+import { eq, sql } from "drizzle-orm";
+import { db, platformFeatureOverridesTable, platformBrandConfigTable } from "@workspace/db";
+import { applyBrandOverrides } from "../lib/brandConfig";
+import {
+  type FeatureKey,
+  getFeatureFlagDetails,
+  loadFeatureOverridesFromDb,
+  setOverrideInMemory,
+  clearOverrideInMemory,
+} from "../lib/features";
+import { featureUpdateBody, brandConfigSchema } from "../lib/platformSchemas";
+import { requireControlPlaneHmac } from "../lib/controlPlaneAuth";
+import { BUILD_VERSION, BUILD_TIME } from "../lib/buildInfo";
 
-const router: IRouter = Router();
+const router: Router = Router();
 
-/** Captured once at module load — used as a stable `builtAt` proxy. */
-const SERVER_STARTED_AT = new Date().toISOString();
-
-// ---------------------------------------------------------------------------
-// HMAC authentication middleware — shared by all three routes
-// ---------------------------------------------------------------------------
-function requireControlPlaneHmac(req: Request, res: Response, next: NextFunction): void {
-  const secret = (process.env.CONTROL_PLANE_SHARED_SECRET ?? "").trim();
-  if (!secret) {
-    res.status(503).json({
-      error: "Service Unavailable",
-      message: "Control-plane integration not configured (CONTROL_PLANE_SHARED_SECRET not set)",
-    });
-    return;
-  }
-  // For GET (body-less) requests, rawBody is an empty string "".
-  // For PUT requests, rawBody holds the exact bytes the client sent.
-  const rawBody: string = (req as any).rawBody ?? "";
-  const sig = req.headers["x-control-plane-signature"] as string | undefined;
-  if (!verifySignature(rawBody, sig, secret)) {
-    res.status(401).json({ error: "Unauthorized", message: "Invalid or missing HMAC signature" });
-    return;
-  }
-  next();
-}
-
+// Every route under /control-plane requires a valid HMAC signature.
 router.use("/control-plane", requireControlPlaneHmac);
 
-// ---------------------------------------------------------------------------
-// GET /control-plane/settings
-// ---------------------------------------------------------------------------
-router.get("/control-plane/settings", async (_req: Request, res: Response): Promise<void> => {
-  try {
-    const features = await getFlags();
-    res.json({
-      version:  process.env.npm_package_version ?? "0.0.0",
-      builtAt:  SERVER_STARTED_AT,
-      brand:    { ...brand },
-      features,
+async function readBrandRow() {
+  const [config] = await db
+    .select()
+    .from(platformBrandConfigTable)
+    .where(eq(platformBrandConfigTable.id, "singleton"))
+    .limit(1);
+  return config ?? null;
+}
+
+/** Read the current managed settings: brand override row + feature flags + build identity. */
+router.get("/control-plane/settings", async (_req, res) => {
+  const brandRow = await readBrandRow();
+  res.json({
+    version: BUILD_VERSION,
+    builtAt: BUILD_TIME,
+    brand: brandRow,
+    features: getFeatureFlagDetails(),
+  });
+});
+
+/** Upsert brand overrides remotely and patch the live brand in memory. */
+router.put("/control-plane/brand", async (req, res) => {
+  const parsed = brandConfigSchema.safeParse(req.body);
+  if (!parsed.success) {
+    res.status(400).json({ error: "Bad request", issues: parsed.error.issues });
+    return;
+  }
+  const editor = "control-plane";
+  const d = parsed.data;
+
+  await db
+    .insert(platformBrandConfigTable)
+    .values({ id: "singleton", ...d, updatedBy: editor })
+    .onConflictDoUpdate({
+      target: platformBrandConfigTable.id,
+      set: { ...d, updatedBy: editor, updatedAt: sql`now()` },
     });
-  } catch (err) {
-    logger.error({ err }, "[control-plane] GET /settings failed");
-    res.status(500).json({ error: "Internal Server Error" });
-  }
+
+  const config = await readBrandRow();
+  applyBrandOverrides(config);
+  res.json({ brand: config });
 });
 
-// ---------------------------------------------------------------------------
-// PUT /control-plane/brand
-// ---------------------------------------------------------------------------
-router.put("/control-plane/brand", async (req: Request, res: Response): Promise<void> => {
-  const parsed = BrandUpdateSchema.safeParse(req.body);
+/** Upsert / clear feature-flag overrides remotely. */
+router.put("/control-plane/features", async (req, res) => {
+  const parsed = featureUpdateBody.safeParse(req.body);
   if (!parsed.success) {
-    res.status(400).json({ error: "Bad Request", issues: parsed.error.issues });
+    res.status(400).json({ error: "Bad request", issues: parsed.error.issues });
     return;
   }
-  const data = parsed.data;
+  const editor = "control-plane";
 
-  try {
-    const row = {
-      id: "singleton" as const,
-      ...(data.companyName          != null && { companyName:          data.companyName }),
-      ...(data.shortName            != null && { shortName:            data.shortName }),
-      ...(data.tagline              != null && { tagline:              data.tagline }),
-      ...(data.appName              != null && { appName:              data.appName }),
-      ...(data.colorNavy            != null && { colorNavy:            data.colorNavy }),
-      ...(data.colorGold            != null && { colorGold:            data.colorGold }),
-      ...(data.colorCream           != null && { colorCream:           data.colorCream }),
-      ...(data.billingEmail         != null && { billingEmail:         data.billingEmail }),
-      ...(data.hrEmail              != null && { hrEmail:              data.hrEmail }),
-      ...(data.adminNotifyEmail     != null && { adminNotifyEmail:     data.adminNotifyEmail }),
-      ...(data.privacyEmail         != null && { privacyEmail:         data.privacyEmail }),
-      ...(data.demoAdminEmail       != null && { demoAdminEmail:       data.demoAdminEmail }),
-      ...(data.demoAdminPassword    != null && { demoAdminPassword:    data.demoAdminPassword }),
-      ...(data.demoEmployeeEmail    != null && { demoEmployeeEmail:    data.demoEmployeeEmail }),
-      ...(data.demoEmployeePassword != null && { demoEmployeePassword: data.demoEmployeePassword }),
-      ...(data.demoLeadEmail        != null && { demoLeadEmail:        data.demoLeadEmail }),
-      ...(data.demoLeadPassword     != null && { demoLeadPassword:     data.demoLeadPassword }),
-    };
-
-    await db
-      .insert(platformBrandConfigTable)
-      .values(row)
-      .onConflictDoUpdate({
-        target: platformBrandConfigTable.id,
-        set: { ...row, updatedAt: new Date() },
-      });
-
-    const [updated] = await db
-      .select()
-      .from(platformBrandConfigTable)
-      .where(eq(platformBrandConfigTable.id, "singleton"))
-      .limit(1);
-
-    if (updated) applyBrandRow(updated);
-
-    logger.info({ fields: Object.keys(data) }, "[control-plane] brand updated");
-    res.json({ ok: true, brand: { ...brand } });
-  } catch (err) {
-    logger.error({ err }, "[control-plane] PUT /brand failed");
-    res.status(500).json({ error: "Internal Server Error" });
+  for (const u of parsed.data.updates) {
+    const key = u.key as FeatureKey;
+    if (u.enabled === null) {
+      await db
+        .delete(platformFeatureOverridesTable)
+        .where(eq(platformFeatureOverridesTable.featureKey, key));
+      clearOverrideInMemory(key);
+    } else {
+      await db
+        .insert(platformFeatureOverridesTable)
+        .values({ featureKey: key, enabled: u.enabled, updatedBy: editor })
+        .onConflictDoUpdate({
+          target: platformFeatureOverridesTable.featureKey,
+          set: { enabled: u.enabled, updatedBy: editor, updatedAt: sql`now()` },
+        });
+      setOverrideInMemory(key, u.enabled);
+    }
   }
-});
-
-// ---------------------------------------------------------------------------
-// PUT /control-plane/features
-// ---------------------------------------------------------------------------
-router.put("/control-plane/features", async (req: Request, res: Response): Promise<void> => {
-  const parsed = FeatureFlagsUpdateSchema.safeParse(req.body);
-  if (!parsed.success) {
-    res.status(400).json({ error: "Bad Request", issues: parsed.error.issues });
-    return;
-  }
-
-  try {
-    await applyFlagsUpdate(parsed.data);
-    const features = await getFlags();
-    logger.info(
-      {
-        upserted: parsed.data.flags?.length ?? 0,
-        cleared:  parsed.data.clear?.length ?? 0,
-      },
-      "[control-plane] features updated",
-    );
-    res.json({ ok: true, features });
-  } catch (err) {
-    logger.error({ err }, "[control-plane] PUT /features failed");
-    res.status(500).json({ error: "Internal Server Error" });
-  }
+  await loadFeatureOverridesFromDb();
+  res.json({ features: getFeatureFlagDetails() });
 });
 
 export default router;
