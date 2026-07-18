@@ -1,5 +1,6 @@
 import { createContext, useContext, useEffect, useState, type ReactNode } from "react";
 import { api, getToken, setToken, setUnauthorizedHandler } from "./api";
+import { setUnauthorizedHandler as setGeneratedClientUnauthorizedHandler } from "@workspace/api-client-react";
 
 type User = {
   id: string;
@@ -73,10 +74,17 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   // When any authenticated API call comes back 401 (expired/revoked session),
   // clear the dead session so the router falls back to the login screen instead
-  // of every page (grids, dashboards) dead-ending on "failed".
+  // of every page (grids, dashboards) dead-ending on "failed". Registered for
+  // BOTH HTTP paths: the legacy api()/fetchWithAuth helper and the generated
+  // @workspace/api-client-react client (which only notifies when the request
+  // actually carried a token, matching api()'s token-was-sent gating).
   useEffect(() => {
     setUnauthorizedHandler(() => logout());
-    return () => setUnauthorizedHandler(null);
+    setGeneratedClientUnauthorizedHandler(() => logout());
+    return () => {
+      setUnauthorizedHandler(null);
+      setGeneratedClientUnauthorizedHandler(null);
+    };
   }, []);
 
   return <Ctx.Provider value={{ user, loading, login, loginTotp, logout, applySession }}>{children}</Ctx.Provider>;
