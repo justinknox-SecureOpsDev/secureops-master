@@ -171,7 +171,7 @@ export function buildNavGroups(
 
   const hrGroup: NavGroup = {
     key: "hr",
-    label: "Human Resources",
+    label: "Personnel Management",
     Icon: Briefcase,
     items: [
       { href: "/hr/applications", label: "Applications", Icon: ClipboardList, feature: "hr" },

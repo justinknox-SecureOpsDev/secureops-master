@@ -278,7 +278,7 @@ async function buildAdminPortalGuide() {
     "WILLIAMS COUNCIL SECURITY GROUP",
     "Admin Web Portal Guide",
     "The full command center \u2014 HR, dispatch, accounting, and compliance",
-    "The Admin Portal is the web command center for SecureOps. It uses a two-tier menu: top tabs group everything into Dispatch, Human Resources, Accounting, Security, Operations, and Settings; the sidebar then lists the pages inside the selected group. A banner at the top flags any critical configuration issues (such as missing email or an insecure session secret).",
+    "The Admin Portal is the web command center for SecureOps. It uses a two-tier menu: top tabs group everything into Dispatch, Personnel Management, Accounting, Security, Operations, and Settings; the sidebar then lists the pages inside the selected group. A banner at the top flags any critical configuration issues (such as missing email or an insecure session secret).",
   );
 
   g.sectionHeader(1, "Signing in and navigating");
