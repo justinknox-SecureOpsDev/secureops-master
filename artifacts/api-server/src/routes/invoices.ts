@@ -316,13 +316,14 @@ router.post("/invoices/:id/send", requireAdmin, async (req, res): Promise<void> 
       "",
       `Please reference the invoice number on your payment. For questions, contact ${brand.billingEmail}.`,
       "",
-      `— ${brand.companyName}`,
+      `— ${brand.companyName}${brand.companyLicense ? ` · ${brand.companyLicense}` : ""}`,
     ].join("\n"),
     html: `
       <div style="font-family:Georgia,serif;max-width:560px;margin:0 auto;color:${brand.colorNavy}">
         <div style="background:${brand.colorNavy};padding:20px 24px;border-radius:4px 4px 0 0">
           <h2 style="color:${brand.colorGold};margin:0;font-size:18px">${escHtml(brand.companyName)}</h2>
           <p style="color:${brand.colorCream};margin:4px 0 0;font-size:12px">${escHtml(brand.tagline)}</p>
+          ${brand.companyLicense ? `<p style="color:${brand.colorCream};margin:2px 0 0;font-size:11px">${escHtml(brand.companyLicense)}</p>` : ""}
         </div>
         <div style="border:1px solid #ddd;border-top:none;padding:24px;border-radius:0 0 4px 4px">
           <p>Dear ${escHtml(row.clientName ?? "Client")},</p>
@@ -334,7 +335,7 @@ router.post("/invoices/:id/send", requireAdmin, async (req, res): Promise<void> 
           </div>
           <p style="color:#555;font-size:13px">Please reference the invoice number on your payment. For questions, contact <a href="mailto:${escHtml(brand.billingEmail)}">${escHtml(brand.billingEmail)}</a>.</p>
           <hr style="border:none;border-top:2px solid ${brand.colorGold};margin:20px 0"/>
-          <p style="color:${brand.colorNavy};font-weight:bold;margin:0;font-size:13px">${escHtml(brand.companyName)}</p>
+          <p style="color:${brand.colorNavy};font-weight:bold;margin:0;font-size:13px">${escHtml(brand.companyName)}${brand.companyLicense ? ` · ${escHtml(brand.companyLicense)}` : ""}</p>
         </div>
       </div>
     `,

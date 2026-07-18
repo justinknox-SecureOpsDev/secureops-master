@@ -731,6 +731,12 @@ function renderPdf(
     if (firstPage) {
       doc.fillColor(CREAM).font("Helvetica").fontSize(9)
         .text(`Export — ${dataset.label}`, usableLeft, 42);
+      if (_brand.companyLicense) {
+        doc.fillColor(CREAM).font("Helvetica").fontSize(8)
+          .text(_brand.companyLicense, usableLeft, 20, {
+            width: usableWidth, align: "right", lineBreak: false,
+          });
+      }
     }
     doc.rect(0, firstPage ? 64 : 36, doc.page.width, 2).fill(GOLD);
     doc.restore();

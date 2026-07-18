@@ -14,6 +14,11 @@ export const GetBrandResponse = zod.object({
   companyName: zod.string(),
   shortName: zod.string(),
   tagline: zod.string(),
+  companyLicense: zod
+    .string()
+    .describe(
+      'Company\/state security license line (e.g. \"TX DPS Lic. #B12345\"). Empty string when not configured — clients hide it.',
+    ),
   appName: zod.string(),
   colorNavy: zod.string(),
   colorGold: zod.string(),

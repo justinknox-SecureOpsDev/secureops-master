@@ -3184,6 +3184,7 @@ components:
         - companyName
         - shortName
         - tagline
+        - companyLicense
         - appName
         - colorNavy
         - colorGold
@@ -3193,6 +3194,11 @@ components:
         companyName: { type: string }
         shortName: { type: string }
         tagline: { type: string }
+        companyLicense:
+          type: string
+          description: >-
+            Company/state security license line (e.g. "TX DPS Lic. #B12345").
+            Empty string when not configured — clients hide it.
         appName: { type: string }
         colorNavy: { type: string }
         colorGold: { type: string }

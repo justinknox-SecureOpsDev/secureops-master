@@ -381,6 +381,7 @@ function renderSettings(remote) {
   html += brandField("companyName", "Company name", brand.companyName);
   html += brandField("shortName", "Short name", brand.shortName);
   html += brandField("tagline", "Tagline", brand.tagline);
+  html += brandField("companyLicense", "Company license #", brand.companyLicense);
   html += brandField("appName", "App name", brand.appName);
   html += brandField("colorNavy", "Navy color", brand.colorNavy);
   html += brandField("colorGold", "Gold color", brand.colorGold);

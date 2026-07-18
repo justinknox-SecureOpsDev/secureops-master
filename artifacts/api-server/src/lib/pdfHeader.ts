@@ -68,6 +68,23 @@ export function drawBrandHeader(
   doc.fillColor(CREAM).font("Helvetica").fontSize(10)
     .text(subtitle, LOGO_X, doc.y + 2);
 
+  // Company license line (e.g. "TX DPS Lic. #B12345") — top-right of the band.
+  // Drawn last with saved/restored cursor so it never disturbs the text flow
+  // above, and inside the fixed band so BAND_HEIGHT (and every consumer's
+  // hard-coded Y offsets) stay unchanged.
+  if (brand.companyLicense) {
+    const savedX = doc.x;
+    const savedY = doc.y;
+    const licWidth = 220;
+    doc.fillColor(CREAM).font("Helvetica").fontSize(9)
+      .text(brand.companyLicense, W - LOGO_X - licWidth, LOGO_Y + 6, {
+        width: licWidth,
+        align: "right",
+      });
+    doc.x = savedX;
+    doc.y = savedY;
+  }
+
   doc.rect(0, BAND_HEIGHT, W, 3).fill(GOLD);
 
   return BAND_HEIGHT + 3;

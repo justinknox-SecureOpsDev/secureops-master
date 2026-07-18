@@ -17,6 +17,9 @@ export function BrandHeader({ subtitle }: { subtitle?: string }) {
               {subtitle}
             </div>
           )}
+          {b?.companyLicense && (
+            <div className="text-[11px] opacity-60 mt-0.5">{b.companyLicense}</div>
+          )}
         </div>
       </div>
     </header>

@@ -4,6 +4,14 @@ import { logger } from "./logger";
 import { brand } from "./brandConfig";
 
 /**
+ * Company signature line for email footers — appends the company license
+ * (e.g. "TX DPS Lic. #B12345") when configured so every outbound email
+ * carries the license number.
+ */
+const companySignature = () =>
+  brand.companyLicense ? `${brand.companyName} · ${brand.companyLicense}` : brand.companyName;
+
+/**
  * Env-gated email sender. Two transports — Resend and SMTP. Which one is tried
  * first is controlled by EMAIL_PROVIDER:
  *
@@ -258,7 +266,7 @@ export function renderOnboardingEmail(opts: {
     `  Temporary password: ${opts.tempPassword}`,
     "(You will be asked to set a new password on first login.)",
     "",
-    `— ${brand.companyName}`,
+    `— ${companySignature()}`,
   ].join("\n");
   const html = `
     <div style="font-family:Georgia,serif;max-width:560px;margin:0 auto;color:#0c0a08">
@@ -296,7 +304,7 @@ export function renderResendOnboardingEmail(opts: {
     "",
     opts.onboardingUrl,
     "",
-    `— ${brand.companyName}`,
+    `— ${companySignature()}`,
   ].join("\n");
   const html = `
     <div style="font-family:Georgia,serif;max-width:560px;margin:0 auto;color:#0c0a08">
@@ -333,7 +341,7 @@ export function renderRejectionEmail(opts: {
     notesBlock,
     "You're welcome to apply again in the future as new positions open up.",
     "",
-    `— ${brand.companyName}`,
+    `— ${companySignature()}`,
   ].join("\n");
   const notesHtml = opts.reviewerNotes && opts.reviewerNotes.trim().length > 0
     ? `<div style="background:#f6f1e1;padding:12px;border-left:3px solid #c9a04a;margin:16px 0;border-radius:4px">
@@ -351,7 +359,7 @@ export function renderRejectionEmail(opts: {
       ${notesHtml}
       <p style="color:#555">You're welcome to apply again in the future as new positions open up.</p>
       <hr style="border:none;border-top:1px solid #ddd;margin:24px 0"/>
-      <p style="color:#555;font-size:12px">— ${brand.companyName}</p>
+      <p style="color:#555;font-size:12px">— ${companySignature()}</p>
     </div>
   `;
   return { subject, text, html };
@@ -372,7 +380,7 @@ export function renderApplicationReceivedEmail(opts: {
     "",
     "There's no need to reply to this message.",
     "",
-    `— ${brand.companyName}`,
+    `— ${companySignature()}`,
   ].join("\n");
   const html = `
     <div style="font-family:Georgia,serif;max-width:560px;margin:0 auto;color:#0c0a08;background:#f0e4c0;padding:24px;border-radius:6px">
@@ -382,7 +390,7 @@ export function renderApplicationReceivedEmail(opts: {
       <p>Our recruitment team will review your submission within <strong>${days} business days</strong> and be in touch with next steps. If we need anything else from you in the meantime, we'll reach out by email or phone.</p>
       <p style="color:#555">There's no need to reply to this message.</p>
       <hr style="border:none;border-top:2px solid #c9a04a;margin:24px 0"/>
-      <p style="color:#0c0a08;font-weight:bold;margin:0">${brand.companyName}</p>
+      <p style="color:#0c0a08;font-weight:bold;margin:0">${companySignature()}</p>
     </div>
   `;
   return { subject, text, html };
@@ -407,7 +415,7 @@ export function renderApplicationDraftResumeEmail(opts: {
     "",
     "If you didn't start an application, you can safely ignore this email.",
     "",
-    `— ${brand.companyName}`,
+    `— ${companySignature()}`,
   ].join("\n");
   const html = `
     <div style="font-family:Georgia,serif;max-width:560px;margin:0 auto;color:#0c0a08;background:#f0e4c0;padding:24px;border-radius:6px">
@@ -425,7 +433,7 @@ export function renderApplicationDraftResumeEmail(opts: {
       </p>
       <p style="color:#555;font-size:12px">If you didn't start an application, you can safely ignore this email.</p>
       <hr style="border:none;border-top:2px solid #c9a04a;margin:24px 0"/>
-      <p style="color:#0c0a08;font-weight:bold;margin:0">${brand.companyName}</p>
+      <p style="color:#0c0a08;font-weight:bold;margin:0">${companySignature()}</p>
     </div>
   `;
   return { subject, text, html };
@@ -453,7 +461,7 @@ export function renderRequestInfoEmail(opts: {
     "",
     opts.amendUrl,
     "",
-    `— ${brand.companyName}`,
+    `— ${companySignature()}`,
   ].join("\n");
   const fieldsHtml = `<ul style="margin:8px 0 0 0;padding-left:20px">${
     opts.fieldLabels.map((l) => `<li style="margin:4px 0">${escapeHtml(l)}</li>`).join("")
@@ -481,7 +489,7 @@ export function renderRequestInfoEmail(opts: {
         <span style="word-break:break-all">${escapeHtml(opts.amendUrl)}</span>
       </p>
       <hr style="border:none;border-top:2px solid #c9a04a;margin:24px 0"/>
-      <p style="color:#0c0a08;font-weight:bold;margin:0">${brand.companyName}</p>
+      <p style="color:#0c0a08;font-weight:bold;margin:0">${companySignature()}</p>
     </div>
   `;
   return { subject, text, html };
@@ -503,7 +511,7 @@ export function renderPasswordResetEmail(opts: {
     "",
     "If you didn't request this, you can ignore this email — your password will stay the same.",
     "",
-    `— ${brand.companyName}`,
+    `— ${companySignature()}`,
   ].join("\n");
   const html = `
     <div style="font-family:Georgia,serif;max-width:560px;margin:0 auto;color:#0c0a08">
@@ -548,7 +556,7 @@ export function renderPasswordChangedEmail(opts: {
     `If this WAS you, no action is needed.`,
     `If this WASN'T you, contact HR immediately at ${hrContact} — your account may be compromised.`,
     "",
-    `— ${brand.companyName}`,
+    `— ${companySignature()}`,
   ].filter((l) => l !== "").join("\n");
   const html = `
     <div style="font-family:Georgia,serif;max-width:560px;margin:0 auto;color:#0c0a08">
@@ -564,7 +572,7 @@ export function renderPasswordChangedEmail(opts: {
       <p style="color:#a33">If this <strong>wasn't</strong> you, contact HR immediately at
         <a href="mailto:${escapeAttr(hrContact)}">${escapeHtml(hrContact)}</a> — your account may be compromised.</p>
       <hr style="border:none;border-top:1px solid #ddd;margin:24px 0"/>
-      <p style="color:#555;font-size:12px">— ${brand.companyName}</p>
+      <p style="color:#555;font-size:12px">— ${companySignature()}</p>
     </div>
   `;
   return { subject, text, html };
@@ -613,7 +621,7 @@ export function renderInviteEmail(opts: {
     `Email:              ${opts.email}`,
     `Temporary password: ${opts.tempPassword}`,
     "",
-    `— ${brand.companyName}`,
+    `— ${companySignature()}`,
   ].join("\n");
   const html = `
     <div style="font-family:Georgia,serif;max-width:560px;margin:0 auto;color:#0c0a08">
@@ -650,7 +658,7 @@ export function renderInviteEmail(opts: {
         <span style="word-break:break-all">${escapeHtml(opts.appUrl)}</span>
       </p>` : ""}
       <hr style="border:none;border-top:2px solid #c9a04a;margin:24px 0"/>
-      <p style="color:#0c0a08;font-weight:bold;margin:0">${brand.companyName}</p>
+      <p style="color:#0c0a08;font-weight:bold;margin:0">${companySignature()}</p>
     </div>
   `;
   return { subject, text, html };
@@ -677,7 +685,7 @@ export function renderTrainingExpiryEmail(opts: {
     "Please refresh before the expiry date. An expired certificate may make you ineligible for sites that require this training.",
     "Once renewed, please upload the new certificate from the mobile app (Profile → My training).",
     "",
-    `— ${brand.companyName}`,
+    `— ${companySignature()}`,
   ].join("\n");
   const accent = opts.daysRemaining <= 7 ? "#a33" : "#c9a04a";
   const html = `
@@ -694,7 +702,7 @@ export function renderTrainingExpiryEmail(opts: {
       <p>Please refresh before the expiry date. An expired certificate may make you ineligible for sites that require this training.</p>
       <p>Once renewed, please upload the new certificate from the mobile app (Profile → My training).</p>
       <hr style="border:none;border-top:2px solid #c9a04a;margin:24px 0"/>
-      <p style="color:#0c0a08;font-weight:bold;margin:0">${brand.companyName}</p>
+      <p style="color:#0c0a08;font-weight:bold;margin:0">${companySignature()}</p>
     </div>
   `;
   return { subject, text, html };
@@ -727,7 +735,7 @@ export function renderLicenseExpiryEmail(opts: {
     "Please renew before the expiry date. An expired license means you cannot clock in or be assigned to qualifying shifts.",
     "If you have already renewed, please send a copy of the new license to HR so we can update your record.",
     "",
-    `— ${brand.companyName}`,
+    `— ${companySignature()}`,
   ].join("\n");
   const accent = opts.daysRemaining <= 7 ? "#a33" : "#c9a04a";
   const html = `
@@ -743,7 +751,7 @@ export function renderLicenseExpiryEmail(opts: {
       <p>Please renew before the expiry date. An expired license means you cannot clock in or be assigned to qualifying shifts.</p>
       <p style="color:#555;font-size:13px">If you have already renewed, please send a copy of the new license to HR so we can update your record.</p>
       <hr style="border:none;border-top:2px solid #c9a04a;margin:24px 0"/>
-      <p style="color:#0c0a08;font-weight:bold;margin:0">${brand.companyName}</p>
+      <p style="color:#0c0a08;font-weight:bold;margin:0">${companySignature()}</p>
     </div>
   `;
   return { subject, text, html };
@@ -777,7 +785,7 @@ export function renderCoiExpiryEmail(opts: {
     "",
     "Request an updated certificate of insurance and upload it from the Subcontractors area in the admin portal.",
     "",
-    `— ${brand.companyName}`,
+    `— ${companySignature()}`,
   ].join("\n");
   const accent = opts.daysRemaining <= 7 ? "#a33" : "#c9a04a";
   const html = `
@@ -795,7 +803,7 @@ export function renderCoiExpiryEmail(opts: {
       </div>
       <p>Request an updated certificate of insurance and upload it from the Subcontractors area in the admin portal.</p>
       <hr style="border:none;border-top:2px solid #c9a04a;margin:24px 0"/>
-      <p style="color:#0c0a08;font-weight:bold;margin:0">${brand.companyName}</p>
+      <p style="color:#0c0a08;font-weight:bold;margin:0">${companySignature()}</p>
     </div>
   `;
   return { subject, text, html };
@@ -843,7 +851,7 @@ export function renderHighRiskProfileChangeEmail(opts: {
     reviewLine,
     `If this change wasn't expected (lost device, password sharing, payroll fraud, etc.), revoke the officer's sessions and confirm the update with them by phone before the next pay run.`,
     "",
-    `— ${brand.companyName} · ${brand.appName}`,
+    `— ${companySignature()} · ${brand.appName}`,
   ].filter((l) => l !== undefined).join("\n");
   const fieldsHtml = `<ul style="margin:8px 0 0 0;padding-left:20px">${
     opts.changes
@@ -872,7 +880,7 @@ export function renderHighRiskProfileChangeEmail(opts: {
       ${reviewHtml}
       <p style="color:#a33">If this change wasn't expected (lost device, payroll fraud, etc.), revoke the officer's sessions and confirm the update by phone before the next pay run.</p>
       <hr style="border:none;border-top:1px solid #ddd;margin:24px 0"/>
-      <p style="color:#555;font-size:12px">— ${brand.companyName} · ${brand.appName}</p>
+      <p style="color:#555;font-size:12px">— ${companySignature()} · ${brand.appName}</p>
     </div>
   `;
   return { subject, text, html };
@@ -897,7 +905,7 @@ export function renderEmergencyAlertEmail(opts: {
     locLine,
     msgLine,
     reviewLine,
-    `— ${brand.companyName} · ${brand.appName}`,
+    `— ${companySignature()} · ${brand.appName}`,
   ].filter((l) => l !== undefined).join("\n");
   const locHtml = opts.locationText
     ? `<div><strong>Location:</strong> ${escapeHtml(opts.locationText)}</div>`
@@ -920,7 +928,7 @@ export function renderEmergencyAlertEmail(opts: {
       </div>
       ${reviewHtml}
       <hr style="border:none;border-top:1px solid #ddd;margin:24px 0"/>
-      <p style="color:#555;font-size:12px">— ${brand.companyName} · ${brand.appName}</p>
+      <p style="color:#555;font-size:12px">— ${companySignature()} · ${brand.appName}</p>
     </div>
   `;
   return { subject, text, html };
@@ -942,7 +950,7 @@ export function renderNewApplicationAdminEmail(opts: {
     `Email:     ${opts.applicantEmail}`,
     phoneLine,
     reviewLine,
-    `— ${brand.companyName} · ${brand.appName}`,
+    `— ${companySignature()} · ${brand.appName}`,
   ].filter((l) => l !== undefined).join("\n");
   const phoneHtml = opts.applicantPhone
     ? `<div><strong>Phone:</strong> ${escapeHtml(opts.applicantPhone)}</div>`
@@ -961,7 +969,7 @@ export function renderNewApplicationAdminEmail(opts: {
       </div>
       ${reviewHtml}
       <hr style="border:none;border-top:1px solid #ddd;margin:24px 0"/>
-      <p style="color:#555;font-size:12px">— ${brand.companyName} · ${brand.appName}</p>
+      <p style="color:#555;font-size:12px">— ${companySignature()} · ${brand.appName}</p>
     </div>
   `;
   return { subject, text, html };
@@ -976,7 +984,7 @@ export function renderOnboardingCompletedAdminEmail(opts: {
   const text = [
     `${opts.officerName} just completed onboarding and is now active.`,
     reviewLine,
-    `— ${brand.companyName} · ${brand.appName}`,
+    `— ${companySignature()} · ${brand.appName}`,
   ].filter((l) => l !== undefined).join("\n");
   const reviewHtml = opts.reviewUrl
     ? `<p style="margin:18px 0"><a href="${escapeAttr(opts.reviewUrl)}" style="background:#0c0a08;color:#c9a04a;padding:10px 18px;text-decoration:none;font-weight:bold;border-radius:4px">Review onboarding</a></p>`
@@ -987,7 +995,7 @@ export function renderOnboardingCompletedAdminEmail(opts: {
       <p><strong>${escapeHtml(opts.officerName)}</strong> just completed onboarding and is now active.</p>
       ${reviewHtml}
       <hr style="border:none;border-top:1px solid #ddd;margin:24px 0"/>
-      <p style="color:#555;font-size:12px">— ${brand.companyName} · ${brand.appName}</p>
+      <p style="color:#555;font-size:12px">— ${companySignature()} · ${brand.appName}</p>
     </div>
   `;
   return { subject, text, html };
@@ -1024,7 +1032,7 @@ export function renderPaymentDiscrepancyEmail(opts: {
     `Details:`,
     opts.description,
     reviewLine,
-    `— ${brand.companyName} · ${brand.appName}`,
+    `— ${companySignature()} · ${brand.appName}`,
   ].join("\n");
   const rowsHtml = rows
     .map((r) => `<div><strong>${escapeHtml(r.label)}:</strong> ${escapeHtml(r.value!)}</div>`)
@@ -1045,7 +1053,7 @@ export function renderPaymentDiscrepancyEmail(opts: {
       </div>
       ${reviewHtml}
       <hr style="border:none;border-top:1px solid #ddd;margin:24px 0"/>
-      <p style="color:#555;font-size:12px">— ${brand.companyName} · ${brand.appName}</p>
+      <p style="color:#555;font-size:12px">— ${companySignature()} · ${brand.appName}</p>
     </div>
   `;
   return { subject, text, html };
@@ -1069,7 +1077,7 @@ export function renderProfileCompletenessEmail(opts: {
     "",
     `If you have questions about any of these items, reply to this email or contact your supervisor.`,
     "",
-    `— ${brand.companyName}`,
+    `— ${companySignature()}`,
   ].join("\n");
   const fieldsHtml = `<ul style="margin:8px 0 0 0;padding-left:20px">${
     opts.missingFieldLabels.map((l) => `<li style="margin:4px 0">${escapeHtml(l)}</li>`).join("")
@@ -1129,7 +1137,7 @@ export function renderSalesLeadAdminEmail(opts: {
     ...rows.map((r) => `${r.label}: ${r.value}`),
     ...messageBlock,
     reviewLine,
-    `— ${brand.companyName} · ${brand.appName}`,
+    `— ${companySignature()} · ${brand.appName}`,
   ].join("\n");
   const rowsHtml = rows
     .map((r) => `<div><strong>${escapeHtml(r.label)}:</strong> ${escapeHtml(r.value!)}</div>`)
@@ -1150,7 +1158,7 @@ export function renderSalesLeadAdminEmail(opts: {
       ${messageHtml}
       ${reviewHtml}
       <hr style="border:none;border-top:1px solid #ddd;margin:24px 0"/>
-      <p style="color:#555;font-size:12px">— ${brand.companyName} · ${brand.appName}</p>
+      <p style="color:#555;font-size:12px">— ${companySignature()} · ${brand.appName}</p>
     </div>
   `;
   return { subject, text, html };
@@ -1173,7 +1181,7 @@ export function renderSalesLeadConfirmationEmail(opts: {
     `Thanks for reaching out about ${brand.appName}. We've received your request and a member of our team will get back to you within one business day.`,
     ...(tierLine ? [tierLine] : []),
     "",
-    `— ${brand.companyName} · ${brand.appName}`,
+    `— ${companySignature()} · ${brand.appName}`,
   ].join("\n");
   const tierHtml = tierLabel
     ? `<p>We've noted you're interested in the <strong>${escapeHtml(tierLabel)}</strong> plan and will tailor our reply accordingly.</p>`
@@ -1185,7 +1193,7 @@ export function renderSalesLeadConfirmationEmail(opts: {
       <p>Thanks for your interest in <strong>${escapeHtml(brand.appName)}</strong>. We've received your request and a member of our team will get back to you within one business day.</p>
       ${tierHtml}
       <hr style="border:none;border-top:1px solid #ddd;margin:24px 0"/>
-      <p style="color:#555;font-size:12px">— ${brand.companyName} · ${brand.appName}</p>
+      <p style="color:#555;font-size:12px">— ${companySignature()} · ${brand.appName}</p>
     </div>
   `;
   return { subject, text, html };

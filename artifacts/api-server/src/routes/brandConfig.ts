@@ -21,6 +21,7 @@ router.get("/brand", (_req, res) => {
     companyName: brand.companyName,
     shortName:   brand.shortName,
     tagline:     brand.tagline,
+    companyLicense: brand.companyLicense,
     appName:     brand.appName,
     colorNavy:   brand.colorNavy,
     colorGold:   brand.colorGold,

@@ -12,6 +12,8 @@ export type BrandConfig = {
   companyName: string;
   shortName:   string;
   tagline:     string;
+  /** Company/state license line (e.g. "TX DPS Lic. #B12345"); empty = hidden. */
+  companyLicense: string;
   appName:     string;
   colorNavy:   string;
   colorGold:   string;
@@ -22,6 +24,7 @@ const DEFAULTS: BrandConfig = {
   companyName: "Williams Council Security Group",
   shortName:   "WCSG",
   tagline:     "Professional Security Services",
+  companyLicense: "",
   appName:     "SecureOps",
   colorNavy:   "#0c0a08",
   colorGold:   "#c9a04a",

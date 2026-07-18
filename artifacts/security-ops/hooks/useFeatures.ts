@@ -40,6 +40,8 @@ export type BrandText = {
   companyName: string;
   shortName: string;
   tagline: string;
+  /** Company/state license line (e.g. "TX DPS Lic. #B12345"); empty = hidden. */
+  companyLicense: string;
   appName: string;
 };
 
@@ -48,6 +50,7 @@ const ENV_BRAND: BrandText = {
   companyName: process.env.EXPO_PUBLIC_COMPANY_NAME ?? "SecureOps Command",
   shortName: process.env.EXPO_PUBLIC_COMPANY_SHORT_NAME ?? "SecureOps",
   tagline: process.env.EXPO_PUBLIC_TAGLINE ?? "",
+  companyLicense: "",
   appName: process.env.EXPO_PUBLIC_APP_NAME ?? "SecureOps",
 };
 
@@ -80,6 +83,7 @@ async function load(): Promise<BrandPayload> {
           companyName: data.companyName || ENV_BRAND.companyName,
           shortName: data.shortName || ENV_BRAND.shortName,
           tagline: data.tagline || ENV_BRAND.tagline,
+          companyLicense: data.companyLicense || "",
           appName: data.appName || ENV_BRAND.appName,
         },
       };

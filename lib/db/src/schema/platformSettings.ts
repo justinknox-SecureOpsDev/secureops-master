@@ -58,6 +58,7 @@ export const platformBrandConfigTable = pgTable("platform_brand_config", {
   companyName: text("company_name"),
   shortName: text("short_name"),
   tagline: text("tagline"),
+  companyLicense: text("company_license"),
   appName: text("app_name"),
   colorNavy: text("color_navy"),
   colorGold: text("color_gold"),

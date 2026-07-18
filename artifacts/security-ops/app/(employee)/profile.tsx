@@ -857,6 +857,12 @@ export default function EmployeeProfileScreen() {
             <Text style={[styles.companyText, { color: colors.mutedForeground }]}>{brand.tagline}</Text>
           </View>
         ) : null}
+        {brand.companyLicense ? (
+          <View style={styles.companyRow}>
+            <Feather name="award" size={14} color={colors.mutedForeground} />
+            <Text style={[styles.companyText, { color: colors.mutedForeground }]}>{brand.companyLicense}</Text>
+          </View>
+        ) : null}
       </View>
     </ScrollView>
   );

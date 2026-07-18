@@ -218,7 +218,7 @@ export function buildInvoicePdf(inv: InvoicePdfInput): InvoicePdfPayload {
   // Page footer
   const pfY = doc.page.height - 36;
   doc.fillColor(MUTED).font("Helvetica").fontSize(7.5).text(
-    `Generated ${new Date().toLocaleString()}  ·  ${brand.companyName}  ·  Invoice ${inv.invoiceNumber}`,
+    `Generated ${new Date().toLocaleString()}  ·  ${brand.companyName}${brand.companyLicense ? `  ·  ${brand.companyLicense}` : ""}  ·  Invoice ${inv.invoiceNumber}`,
     56, pfY, { width: W - 112, align: "center", lineBreak: false },
   );
 

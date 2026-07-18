@@ -135,6 +135,7 @@ type BrandCfg = {
   companyName: string | null;
   shortName: string | null;
   tagline: string | null;
+  companyLicense: string | null;
   appName: string | null;
   colorNavy: string | null;
   colorGold: string | null;
@@ -151,6 +152,7 @@ const EMPTY_BRAND: BrandCfg = {
   companyName: null,
   shortName: null,
   tagline: null,
+  companyLicense: null,
   appName: null,
   colorNavy: null,
   colorGold: null,
@@ -269,6 +271,7 @@ export default function PlatformFeaturesPage() {
         companyName: c.companyName,
         shortName: c.shortName,
         tagline: c.tagline,
+        companyLicense: c.companyLicense,
         appName: c.appName,
         colorNavy: c.colorNavy,
         colorGold: c.colorGold,
@@ -296,7 +299,7 @@ export default function PlatformFeaturesPage() {
 
   const brandDirty = (() => {
     const c = brandQ.data?.config;
-    const keys: (keyof BrandCfg)[] = ["companyName", "shortName", "tagline", "appName", "colorNavy", "colorGold", "colorCream", "billingEmail", "hrEmail", "adminNotifyEmail", "logoDataUrl"];
+    const keys: (keyof BrandCfg)[] = ["companyName", "shortName", "tagline", "companyLicense", "appName", "colorNavy", "colorGold", "colorCream", "billingEmail", "hrEmail", "adminNotifyEmail", "logoDataUrl"];
     return keys.some((k) => (brandDraft[k] ?? null) !== ((c?.[k] as string | null | undefined) ?? null));
   })();
 
@@ -444,6 +447,15 @@ export default function PlatformFeaturesPage() {
                 value={brandDraft.appName ?? ""}
                 onChange={(e) => setBrandDraft((p) => ({ ...p, appName: e.target.value || null }))}
               />
+            </div>
+            <div className="space-y-1 md:col-span-2">
+              <p className="text-xs font-semibold uppercase tracking-wide opacity-60">Company license #</p>
+              <Input
+                placeholder='e.g. TX DPS Lic. #B12345'
+                value={brandDraft.companyLicense ?? ""}
+                onChange={(e) => setBrandDraft((p) => ({ ...p, companyLicense: e.target.value || null }))}
+              />
+              <p className="text-xs opacity-50">Shown exactly as typed across the portal, mobile app, marketing site, emails, and every generated PDF. Leave blank to hide.</p>
             </div>
           </div>
 

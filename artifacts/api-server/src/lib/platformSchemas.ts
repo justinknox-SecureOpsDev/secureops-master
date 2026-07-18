@@ -41,6 +41,10 @@ export const brandConfigSchema = z.object({
   companyName: blankToNull(z.string().max(200).nullable()),
   shortName: blankToNull(z.string().max(60).nullable()),
   tagline: blankToNull(z.string().max(200).nullable()),
+  // .optional() so brand PUTs from not-yet-redeployed clients (older control
+  // plane / cached portal bundles) that omit the key still validate; an absent
+  // key means "leave unchanged" on update rather than a 400.
+  companyLicense: blankToNull(z.string().max(120).nullable().optional()),
   appName: blankToNull(z.string().max(80).nullable()),
   colorNavy: hexColor,
   colorGold: hexColor,

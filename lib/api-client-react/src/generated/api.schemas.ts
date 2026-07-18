@@ -38,6 +38,8 @@ export interface BrandConfig {
   companyName: string;
   shortName: string;
   tagline: string;
+  /** Company/state security license line (e.g. "TX DPS Lic. #B12345"). Empty string when not configured — clients hide it. */
+  companyLicense: string;
   appName: string;
   colorNavy: string;
   colorGold: string;

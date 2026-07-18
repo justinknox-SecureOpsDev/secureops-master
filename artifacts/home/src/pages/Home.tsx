@@ -171,7 +171,10 @@ export default function Home() {
       </main>
 
       <footer className="apex-footer">
-        <span>&copy; {year} {getBrand().companyName}. All rights reserved.</span>
+        <span>
+          &copy; {year} {getBrand().companyName}. All rights reserved.
+          {getBrand().companyLicense ? <> &middot; {getBrand().companyLicense}</> : null}
+        </span>
         <span className="apex-footer__sep" aria-hidden="true">&middot;</span>
         <Link className="apex-footer__link" href="/pricing">Pricing</Link>
         <a className="apex-footer__link" href="/admin-portal/privacy">Privacy</a>

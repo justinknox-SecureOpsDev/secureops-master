@@ -83,3 +83,4 @@
 - [zod v4 infer on generated schemas](zod-v4-infer-generated-classic.md) — v4 `z.infer` on orval's classic zod collapses to unknown; use `import type { z as zClassic }` + `zClassic.infer`.
 - [Generated client auth getter](orval-client-auth-getter.md) — each app bundle must register setAuthTokenGetter or ALL Orval-hook calls 401 while api() works; /api/version probes build identity.
 - [LiveKit E2EE passphrase interop](livekit-e2ee-passphrase-interop.md) — E2EE keys must be STRING passphrases on all platforms; raw bytes = HKDF(web) vs PBKDF2(native) → garbled cross-platform radio audio.
+- [Brand schema version skew](brand-schema-version-skew.md) — new brandConfigSchema fields must be .optional() or stale control-plane/portal clients 400 on brand saves; audit email SUBJECTs after signature replace_all.

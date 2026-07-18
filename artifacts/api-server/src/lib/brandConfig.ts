@@ -38,6 +38,8 @@ export type BrandConfig = {
   companyName: string;
   shortName: string;
   tagline: string;
+  /** Company/state license line shown on branded surfaces & PDFs (e.g. "TX DPS Lic. #B12345"). Empty = hidden. */
+  companyLicense: string;
   appName: string;
   colorNavy: string;
   colorGold: string;
@@ -63,6 +65,7 @@ const ENV_BRAND: BrandConfig = {
   companyName:       process.env.COMPANY_NAME        ?? "Williams Council Security Group",
   shortName:         process.env.COMPANY_SHORT_NAME  ?? "WCSG",
   tagline:           process.env.COMPANY_TAGLINE      ?? "Professional Security Services",
+  companyLicense:    process.env.COMPANY_LICENSE      ?? "",
   appName:           process.env.APP_NAME             ?? "SecureOps",
   colorNavy:         process.env.BRAND_COLOR_NAVY     ?? "#0c0a08",
   colorGold:         process.env.BRAND_COLOR_GOLD     ?? "#c9a04a",
@@ -100,6 +103,7 @@ const OVERRIDABLE_KEYS = [
   "companyName",
   "shortName",
   "tagline",
+  "companyLicense",
   "appName",
   "colorNavy",
   "colorGold",
