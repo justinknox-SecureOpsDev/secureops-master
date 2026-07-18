@@ -205,6 +205,16 @@ router.get("/chat/rooms", requireAuth, async (req, res): Promise<void> => {
     })
   );
 
+  // Sort newest-activity first: rooms with a recent message bubble to the top;
+  // rooms with no messages fall to the bottom ordered by creation date.
+  enriched.sort((a, b) => {
+    const aTime = a.lastMessage ? new Date(a.lastMessage.createdAt).getTime() : new Date(a.createdAt).getTime();
+    const bTime = b.lastMessage ? new Date(b.lastMessage.createdAt).getTime() : new Date(b.createdAt).getTime();
+    if (a.lastMessage && !b.lastMessage) return -1;
+    if (!a.lastMessage && b.lastMessage) return 1;
+    return bTime - aTime;
+  });
+
   res.json(enriched);
 });
 
