@@ -29,6 +29,7 @@
 - [Production custom domain](production-domain.md) — live primary is secureopscommand.com (+ SecureOps-Command.replit.app alias, the app's backend); wcsgisecureops.com is a SEPARATE/older deploy, not prod.
 - [App Store demo access 2.1](appstore-demo-access.md) — "can't sign in with demo" is usually server-side: republish backend (isDemo delete-guard + re-seed) + reply, not a new iOS build.
 - [Prod data backfills run in-app](prod-data-backfill-runs-in-app.md) — agent executeSql only writes dev (prod is read-only & a separate DB); repair prod DATA via an idempotent boot backfill + republish, not from the agent loop.
+- [Publish migration truncate wipe](replit-publish-migration-truncate.md) — publish diffs dev-DB vs prod-DB (not schema files); unique-constraint add on populated prod table + startup DDL two-writer wiped 4 tables via TRUNCATE CASCADE; never DDL at boot.
 - [Site/client hard-delete data loss](site-delete-cascade-data-loss.md) — deleting a site/client splits dependents (SET NULL survivors vs CASCADE deletes); all 4 delete paths must hit the shared blocker guard.
 - [Holiday rate cent-rounding](holiday-rate-cent-rounding.md) — round holiday premium rate to cents BEFORE × hours, identically in payroll + invoicing, or displayed-rate×hours drifts from gross.
 - [Payroll 1099 — no tax](payroll-1099-no-tax.md) — all WCSG workers are 1099; payroll NEVER withholds tax (net=gross), enforced at compute + read + write surfaces.
