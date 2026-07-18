@@ -97,8 +97,11 @@ export function radioRoomName(channelId: string): string {
  * Derive the per-channel E2EE key. Deterministic for a given
  * (SESSION_SECRET, channelId, version) so every authorised client on this
  * deployment derives the same key without it ever crossing the wire from
- * another participant. Returned base64-encoded (LiveKit's key provider
- * accepts raw bytes; the client decodes this).
+ * another participant. Returned base64-encoded, and clients MUST feed this
+ * string to LiveKit as a passphrase (string → PBKDF2 on every SDK). Never
+ * decode it to raw bytes first: the raw-bytes path uses HKDF on web but
+ * PBKDF2 on native, deriving different AES keys — cross-platform audio then
+ * plays as garbled noise.
  */
 export function deriveChannelE2eeKey(channelId: string, version: number = RADIO_E2EE_KEY_VERSION): string {
   const secret = process.env.SESSION_SECRET ?? "";

@@ -70,13 +70,6 @@ function isMicPermissionError(e: unknown): boolean {
   return name === "NotAllowedError" || name === "SecurityError" || name === "PermissionDeniedError" || msg.includes("permission") || msg.includes("denied");
 }
 
-function base64ToBytes(b64: string): Uint8Array {
-  const bin = atob(b64);
-  const out = new Uint8Array(bin.length);
-  for (let i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i);
-  return out;
-}
-
 /**
  * LiveKit media plane for the radio. Our `/api/ws/radio` socket stays the
  * control plane (membership, single-speaker lock, presence, audit); live
@@ -106,7 +99,11 @@ export class RadioMedia {
 
   private async makeRoom(token: RadioToken): Promise<Room> {
     const keyProvider = new ExternalE2EEKeyProvider();
-    await keyProvider.setKey(base64ToBytes(token.e2eeKey).buffer as ArrayBuffer);
+    // IMPORTANT: pass the key as a STRING passphrase (PBKDF2), never as raw
+    // bytes (HKDF) — the native mobile SDK derives with PBKDF2, so a bytes
+    // key here would yield a different AES key and cross-platform audio
+    // would decrypt to garbled noise.
+    await keyProvider.setKey(token.e2eeKey);
     const worker = new Worker(new URL("livekit-client/e2ee-worker", import.meta.url), { type: "module" });
     const room = new Room({ e2ee: { keyProvider, worker } });
     await room.setE2EEEnabled(true);

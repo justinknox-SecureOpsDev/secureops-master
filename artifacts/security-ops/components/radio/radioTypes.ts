@@ -47,30 +47,3 @@ export interface RadioMedia {
   stopPublish(): Promise<void>;
   teardown(): Promise<void>;
 }
-
-const B64_ALPHABET =
-  "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
-
-/**
- * Decode a base64 string to bytes WITHOUT relying on `atob` (web-only) or
- * `Buffer` (not guaranteed in either bundle). The per-channel E2EE key arrives
- * base64 and must be passed to the key provider as raw bytes on both platforms.
- */
-export function base64ToBytes(b64: string): Uint8Array {
-  const clean = b64.replace(/[^A-Za-z0-9+/]/g, "");
-  const len = clean.length;
-  const byteLen = Math.floor((len * 3) / 4);
-  const out = new Uint8Array(byteLen);
-  let p = 0;
-  for (let i = 0; i < len; i += 4) {
-    const c0 = B64_ALPHABET.indexOf(clean[i]);
-    const c1 = B64_ALPHABET.indexOf(clean[i + 1]);
-    const c2 = clean[i + 2] ? B64_ALPHABET.indexOf(clean[i + 2]) : 0;
-    const c3 = clean[i + 3] ? B64_ALPHABET.indexOf(clean[i + 3]) : 0;
-    const n = (c0 << 18) | (c1 << 12) | (c2 << 6) | c3;
-    if (p < byteLen) out[p++] = (n >> 16) & 255;
-    if (p < byteLen) out[p++] = (n >> 8) & 255;
-    if (p < byteLen) out[p++] = n & 255;
-  }
-  return out;
-}

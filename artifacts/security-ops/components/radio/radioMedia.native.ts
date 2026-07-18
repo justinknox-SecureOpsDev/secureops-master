@@ -35,7 +35,7 @@ import {
   type LocalAudioTrack,
 } from "livekit-client";
 
-import { base64ToBytes, type RadioMedia, type RadioToken } from "./radioTypes";
+import { type RadioMedia, type RadioToken } from "./radioTypes";
 
 // Patches the global WebRTC + media primitives that livekit-client expects.
 // Must run before any Room is created; importing this module does that once.
@@ -72,8 +72,14 @@ class NativeRadioMedia implements RadioMedia {
   }
 
   private async makeRoom(token: RadioToken): Promise<Room> {
-    const keyProvider = new RNKeyProvider({});
-    await keyProvider.setSharedKey(base64ToBytes(token.e2eeKey));
+    // IMPORTANT: the E2EE key must be fed to LiveKit as a STRING passphrase on
+    // every platform. A string routes through PBKDF2 on both web and native;
+    // raw bytes route through HKDF on web but PBKDF2 on native, yielding
+    // DIFFERENT AES keys from the same secret — cross-platform audio then
+    // decrypts to garbled noise. ratchetWindowSize/failureTolerance mirror
+    // the web ExternalE2EEKeyProvider defaults for a static shared key.
+    const keyProvider = new RNKeyProvider({ ratchetWindowSize: 0, failureTolerance: -1 });
+    await keyProvider.setSharedKey(token.e2eeKey);
     const e2eeManager = new RNE2EEManager(keyProvider, false);
     const room = new Room({ e2ee: { e2eeManager } });
     await room.setE2EEEnabled(true);
