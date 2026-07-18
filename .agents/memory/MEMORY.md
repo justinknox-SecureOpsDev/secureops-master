@@ -78,3 +78,4 @@
 - [Bash bg procs don't persist](replit-bash-background-procs.md) — setsid/nohup/& die when the bash call returns; poll remote long-ops across turns, don't rely on a local daemon.
 - [pnpm overrides location](pnpm-overrides-location.md) — dependency overrides go in pnpm-workspace.yaml `overrides:`, NOT package.json#pnpm.overrides; pnpm 10 REPLACES not merges, silently dropping ~118 security pins.
 - [adminGridTimeEntryInvoiceSync flake](admin-grid-invoice-sync-flake.md) — full parallel test gate can 23505 this suite (invoice auto-sync race); passes alone; re-run gate, dont change code.
+- [site_rates unique migration pattern](site-rates-unique-migration-pattern.md) — two-deploy workaround when prod duplicates block Replit migration validator; use boot backfill + DO $$ ADD CONSTRAINT.

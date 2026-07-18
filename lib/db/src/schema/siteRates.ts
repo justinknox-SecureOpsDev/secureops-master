@@ -1,4 +1,4 @@
-import { pgTable, text, uuid, timestamp, numeric, integer, unique } from "drizzle-orm/pg-core";
+import { pgTable, text, uuid, timestamp, numeric, integer } from "drizzle-orm/pg-core";
 import { sitesTable } from "./sites";
 
 /**
@@ -15,6 +15,15 @@ import { sitesTable } from "./sites";
  *
  * One row per (siteId, licenseLevel) — upsert on conflict.
  * licenseLevel mirrors the shift/license hierarchy: 2=L2 Unarmed, 3=L3 Armed, 4=L4/PPO.
+ *
+ * NOTE: The UNIQUE(site_id, license_level) constraint (named site_rates_site_level_uniq)
+ * is managed outside Drizzle via the boot backfill in seedDemoUsers.ts
+ * (deduplicateSiteRatesAndEnsureUniqueConstraint). It is intentionally absent here
+ * so Replit's migration validator does not try to apply it when the production DB
+ * has legacy duplicate rows. Once production boots and the backfill deduplicates the
+ * data and creates the pg_constraint, re-add the unique() call here and the schema
+ * can be restored to the canonical form via a second deploy (drizzle-kit push will
+ * see the constraint already exists and emit no SQL).
  */
 export const siteRatesTable = pgTable("site_rates", {
   id: uuid("id").primaryKey().defaultRandom(),
@@ -25,8 +34,6 @@ export const siteRatesTable = pgTable("site_rates", {
   label: text("label"),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow().$onUpdate(() => new Date()),
-}, (t) => ({
-  siteLevelUniq: unique("site_rates_site_level_uniq").on(t.siteId, t.licenseLevel),
-}));
+});
 
 export type SiteRate = typeof siteRatesTable.$inferSelect;

@@ -1,6 +1,6 @@
 import bcrypt from "bcryptjs";
 import { eq, and, ne, sql } from "drizzle-orm";
-import { db, usersTable, employeesTable } from "@workspace/db";
+import { db, usersTable, employeesTable, pool } from "@workspace/db";
 import { logger } from "./logger";
 import { brand } from "./brandConfig";
 import { normalizePhoneToE164 } from "./phone";
@@ -261,4 +261,67 @@ export async function backfillUserPhoneNumbersFromEmployees(): Promise<void> {
       "Backfilled users.phoneNumber from employees.phone so SMS can reach officers and the user profile shows their number",
     );
   }
+}
+
+/**
+ * One-time idempotent repair: deduplicate site_rates rows where a legacy race
+ * or bug created two rows for the same (site_id, license_level), then ensure
+ * the UNIQUE constraint exists as a proper pg_constraint.
+ *
+ * WHY this is managed here instead of the Drizzle schema:
+ *   Production accumulated duplicate (site_id, license_level) rows before the
+ *   unique constraint was added. Drizzle's migration validator tries to apply
+ *   `ALTER TABLE site_rates ADD CONSTRAINT ... UNIQUE` during deployment, which
+ *   fails if duplicates exist. To break the circular dependency (can't add the
+ *   constraint before cleaning up; can't clean up before the server starts), we:
+ *     1. Remove the .unique() from the Drizzle table definition so the deploy
+ *        migration is a no-op for this constraint.
+ *     2. This function runs on every boot, deduplicates first, then creates the
+ *        constraint via ALTER TABLE … ADD CONSTRAINT IF NOT EXISTS (DO block).
+ *     3. After production boots successfully with the constraint in place,
+ *        re-add the .unique() to siteRates.ts. Drizzle push will see the
+ *        pg_constraint already exists and emit no SQL.
+ *
+ * Strategy: keep the OLDEST row per (site_id, license_level) — the original
+ * business rate — and delete any newer duplicates.
+ */
+export async function deduplicateSiteRatesAndEnsureUniqueConstraint(): Promise<void> {
+  // Step 1: delete duplicate rows, keeping the oldest per (site_id, license_level).
+  const dedup = await pool.query<{ count: string }>(`
+    WITH ranked AS (
+      SELECT id,
+             ROW_NUMBER() OVER (
+               PARTITION BY site_id, license_level
+               ORDER BY created_at ASC, id ASC
+             ) AS rn
+      FROM site_rates
+    ),
+    to_delete AS (
+      DELETE FROM site_rates
+      WHERE id IN (SELECT id FROM ranked WHERE rn > 1)
+      RETURNING id
+    )
+    SELECT COUNT(*)::text AS count FROM to_delete
+  `);
+  const deleted = parseInt(dedup.rows[0]?.count ?? "0", 10);
+  if (deleted > 0) {
+    logger.info({ deleted }, "Removed duplicate site_rates rows (kept oldest per site+level)");
+  }
+
+  // Step 2: create the UNIQUE constraint as a proper pg_constraint so
+  // drizzle-kit can recognise it on the next db push and emit no SQL.
+  await pool.query(`
+    DO $$
+    BEGIN
+      IF NOT EXISTS (
+        SELECT 1 FROM pg_constraint
+        WHERE conname = 'site_rates_site_level_uniq'
+          AND conrelid = 'site_rates'::regclass
+      ) THEN
+        ALTER TABLE site_rates
+          ADD CONSTRAINT site_rates_site_level_uniq UNIQUE (site_id, license_level);
+      END IF;
+    END $$;
+  `);
+  logger.info("site_rates unique constraint ensured");
 }
