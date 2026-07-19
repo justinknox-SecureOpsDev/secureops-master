@@ -450,6 +450,42 @@ describe("GET /clients — site managers only see their managed-site clients", (
   });
 });
 
+describe("GET /sites — site managers only see their managed sites", () => {
+  it("returns only managed sites (the create-shift picker must never offer a 403 site)", async () => {
+    const res = await request(app).get("/api/sites").set(authed(ctx.managerAToken));
+    expect(res.status).toBe(200);
+    const ids = (res.body as Array<{ id: string }>).map((r) => r.id);
+    expect(ids).toEqual(expect.arrayContaining([ctx.siteAId, ctx.siteEId]));
+    expect(ids).not.toContain(ctx.siteBId); // otherMgr's site
+    expect(ids).not.toContain(ctx.siteDId); // other client's site
+  });
+
+  it("keeps the clientId filter AND the managed scope (intersection, not override)", async () => {
+    const res = await request(app)
+      .get("/api/sites")
+      .query({ clientId: ctx.clientId2 })
+      .set(authed(ctx.managerAToken));
+    expect(res.status).toBe(200);
+    // client2 owns only siteD, which managerA does not manage — intersection is empty.
+    expect(res.body).toEqual([]);
+  });
+
+  it("returns an empty list for a manager assigned to no sites", async () => {
+    const res = await request(app).get("/api/sites").set(authed(ctx.isolatedMgrToken));
+    expect(res.status).toBe(200);
+    expect(res.body).toEqual([]);
+  });
+
+  it("leaves admin and dispatcher lists global", async () => {
+    for (const token of [ctx.adminToken, ctx.dispatcherToken]) {
+      const res = await request(app).get("/api/sites").set(authed(token));
+      expect(res.status).toBe(200);
+      const ids = (res.body as Array<{ id: string }>).map((r) => r.id);
+      expect(ids).toEqual(expect.arrayContaining([ctx.siteAId, ctx.siteBId, ctx.siteDId]));
+    }
+  });
+});
+
 describe("POST /shifts — site manager cannot set rate-card linkage", () => {
   it("ignores a client-supplied siteRateId (persists null, never the supplied card)", async () => {
     const start = new Date(Date.now() + 72 * 60 * 60 * 1000);

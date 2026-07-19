@@ -6,7 +6,7 @@ import { geocodeOnelineAddress } from "../lib/geocode";
 import { preparePreUpdateBody, maybeAutoGeocode } from "../lib/siteGeocode";
 import { getGeofenceRadiusMiles } from "../lib/geofence";
 import { siteBlockersForOne, refuseIfBlocked } from "../lib/siteDeletion";
-import { canManageSite } from "../lib/siteManagerAuthz";
+import { canManageSite, getManagedSiteIds } from "../lib/siteManagerAuthz";
 
 // Resolve the effective geofence radius for a site row: per-site override
 // (when set and positive) wins, otherwise the global env default. Mirrors
@@ -117,6 +117,17 @@ router.post("/sites/geocode-missing", requireAdmin, async (req, res): Promise<vo
 
 router.get("/sites", requireSchedulingStaff, async (req, res): Promise<void> => {
   const { clientId } = req.query as { clientId?: string };
+  // Site managers only ever act on the sites they manage (shift create/edit
+  // pickers, approvals) — scope the list server-side so the UI can't offer a
+  // site that would just 403 on submit. Admin/dispatcher keep the full list.
+  let managedScope: string[] | null = null;
+  if (req.user!.role === "site_manager") {
+    managedScope = await getManagedSiteIds(req.user!.userId);
+    if (managedScope.length === 0) {
+      res.json([]);
+      return;
+    }
+  }
   const base = db
     .select({
       id: sitesTable.id,
@@ -132,7 +143,11 @@ router.get("/sites", requireSchedulingStaff, async (req, res): Promise<void> => 
     })
     .from(sitesTable)
     .leftJoin(clientsTable, eq(sitesTable.clientId, clientsTable.id));
-  const rows = clientId ? await base.where(eq(sitesTable.clientId, clientId)) : await base;
+  const conds = [
+    ...(clientId ? [eq(sitesTable.clientId, clientId)] : []),
+    ...(managedScope ? [inArray(sitesTable.id, managedScope)] : []),
+  ];
+  const rows = conds.length > 0 ? await base.where(and(...conds)) : await base;
   // Decorate every row with the resolved effective radius so the dispatch
   // map can draw the right circle per site without re-implementing the
   // override/global fallback rule client-side.

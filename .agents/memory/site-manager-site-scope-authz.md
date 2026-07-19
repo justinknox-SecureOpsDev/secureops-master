@@ -26,3 +26,10 @@ the licence override to admin/dispatcher only.
 `requireSchedulingStaff`, ask "does a site_manager hitting this touch a specific site, and
 do I verify they manage THAT site?" If not, it's a hole. List endpoints filter to
 `getManagedSiteIds` for site_manager.
+
+**READ endpoints matter too:** an unscoped list that feeds a picker (e.g. GET /sites →
+create-shift site picker) both dead-ends the UI (picker offers sites that 403 on submit —
+surfaced to users as "site managers can't create shifts") and leaks cross-client data
+(every site's name/address/coordinates/notes). Scope reads with the same
+`getManagedSiteIds` set; any query filter (e.g. `clientId`) must INTERSECT the managed
+scope, never replace it; empty scope returns `[]`, not everything.
