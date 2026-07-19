@@ -10,8 +10,6 @@ import { useAccessibility } from "@/contexts/AccessibilityContext";
 import { Feather } from "@expo/vector-icons";
 import { isBiometricAvailable, isBiometricEnabled, setBiometricEnabled, promptBiometric } from "@/utils/biometric";
 import { apiRequest, getApiBaseUrl } from "@/utils/api";
-import { storage } from "@/utils/storage";
-import { AUTH_TOKEN_KEY } from "@/contexts/AuthContext";
 import { useTour } from "@/contexts/TourContext";
 import { useFeatures, isEnabled, useBrand } from "@/hooks/useFeatures";
 
@@ -615,27 +613,17 @@ export default function EmployeeProfileScreen() {
         </TouchableOpacity>
         <TouchableOpacity
           onPress={async () => {
-            // The system browser cannot set Authorization headers, so we
-            // mint a short-lived (120 s) scoped download token first and
-            // embed that in the URL instead of the full session JWT.
-            // This prevents the session credential from appearing in
-            // browser history, MDM logs, or other URL-observing surfaces.
+            // Fetch a short-lived (60s), route-scoped download token first.
+            // This keeps the long-lived session JWT out of the URL, where it
+            // could be captured by device logs, MDM tooling, or other apps.
             try {
-              const sessionToken = await storage.get(AUTH_TOKEN_KEY);
-              if (!sessionToken) {
+              const res = await apiRequest("/me/profile/pdf/download-token", { method: "POST" });
+              const downloadToken: string = res?.token;
+              if (!downloadToken) {
                 Alert.alert("Sign-in required", "Please sign in again before downloading your profile.");
                 return;
               }
-              const resp = await fetch(`${getApiBaseUrl()}/me/profile/pdf/request-url`, {
-                method: "POST",
-                headers: { Authorization: `Bearer ${sessionToken}` },
-              });
-              if (!resp.ok) {
-                Alert.alert("Could not download", "Failed to prepare the download. Please try again.");
-                return;
-              }
-              const { token } = await resp.json() as { token: string };
-              const url = `${getApiBaseUrl()}/me/profile/pdf?token=${encodeURIComponent(token)}`;
+              const url = `${getApiBaseUrl()}/me/profile/pdf?token=${encodeURIComponent(downloadToken)}`;
               const can = await Linking.canOpenURL(url);
               if (can) await Linking.openURL(url);
               else Alert.alert("Cannot open file", "No app on this device can open the PDF.");

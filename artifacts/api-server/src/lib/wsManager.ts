@@ -4,7 +4,7 @@ import type { Server } from "http";
 import type { Duplex } from "stream";
 import { eq } from "drizzle-orm";
 import { db, usersTable, revokedTokensTable } from "@workspace/db";
-import { verifyToken } from "../middlewares/auth";
+import { verifyToken, type JwtPayload } from "../middlewares/auth";
 import { logger } from "./logger";
 
 interface AuthenticatedSocket extends WebSocket {
@@ -117,10 +117,14 @@ export function attachWebSocketServer(server: Server) {
 
     if (!token) { ws.close(1008, "Token required"); return; }
 
-    type WsTokenPayload = { userId: string; role: string; email: string; jti?: string; iat?: number; scope?: string };
-    let payload: WsTokenPayload;
+    let payload: JwtPayload | null = null;
     try {
-      payload = verifyToken(token) as WsTokenPayload;
+      const raw = verifyToken(token) as JwtPayload & { purpose?: string };
+      if (raw.purpose) {
+        ws.close(1008, "Invalid token");
+        return;
+      }
+      payload = raw;
     } catch {
       ws.close(1008, "Invalid token");
       return;

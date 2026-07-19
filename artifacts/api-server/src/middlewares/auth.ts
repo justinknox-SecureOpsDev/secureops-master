@@ -26,12 +26,21 @@ function resolveJwtSecret(): string {
 
 const JWT_SECRET = resolveJwtSecret();
 const TOKEN_TTL_DAYS = 7;
+const PDF_DOWNLOAD_TOKEN_TTL_SECONDS = 60;
 
 export interface JwtPayload {
   userId: string;
   email: string;
   role: string;
   jti?: string;
+  iat?: number;
+  exp?: number;
+  purpose?: string;
+}
+
+export interface PdfDownloadTokenPayload {
+  userId: string;
+  purpose: "pdf-download";
   iat?: number;
   exp?: number;
 }
@@ -65,6 +74,36 @@ export function verifyToken(token: string): JwtPayload {
 
 export function tokenTtlSeconds(): number {
   return TOKEN_TTL_DAYS * 24 * 60 * 60;
+}
+
+/**
+ * Mint a short-lived (60s), route-scoped download token for the profile PDF
+ * endpoints. This token carries a `purpose: "pdf-download"` claim so it is
+ * structurally distinct from a session JWT and cannot be replayed against any
+ * other API route. It intentionally omits email, role, and jti — callers must
+ * pass `requireAuth` (with a real session token) before they can obtain one.
+ */
+export function signPdfDownloadToken(userId: string): string {
+  return jwt.sign({ userId, purpose: "pdf-download" }, JWT_SECRET, {
+    expiresIn: PDF_DOWNLOAD_TOKEN_TTL_SECONDS,
+  });
+}
+
+/**
+ * Verify a PDF download token and return the userId. Throws if the token is
+ * invalid, expired, or does not carry `purpose: "pdf-download"` (i.e. a full
+ * session JWT is explicitly rejected here).
+ */
+export function verifyPdfDownloadToken(token: string): PdfDownloadTokenPayload {
+  const payload = jwt.verify(token, JWT_SECRET) as Record<string, unknown>;
+  if (payload.purpose !== "pdf-download" || typeof payload.userId !== "string") {
+    throw new Error("Not a PDF download token");
+  }
+  return payload as unknown as PdfDownloadTokenPayload;
+}
+
+export function pdfDownloadTokenTtlSeconds(): number {
+  return PDF_DOWNLOAD_TOKEN_TTL_SECONDS;
 }
 
 // Throttle map: userId → last DB-write timestamp (ms). We only update the
@@ -205,21 +244,18 @@ export async function requireAuth(req: Request, res: Response, next: NextFunctio
     return;
   }
   const token = authHeader.slice(7);
-  let payload: JwtPayload & { scope?: string };
+  let payload: JwtPayload;
   try {
-    payload = verifyToken(token) as JwtPayload & { scope?: string };
+    payload = verifyToken(token);
   } catch {
     res.status(401).json({ error: "Unauthorized", message: "Invalid or expired token" });
     return;
   }
 
-  // Reject scope-limited tokens (e.g. "pdf-download") at the standard bearer
-  // auth boundary. Scoped tokens are short-lived, purpose-specific credentials
-  // that must ONLY be accepted by the route that explicitly handles that scope
-  // (e.g. `requireAuthOrQueryToken` in routes/employees.ts). Allowing them
-  // through the general auth pipeline would widen their blast radius to the
-  // entire API for their ~120 s lifetime.
-  if (payload.scope) {
+  // Scoped tokens (e.g. PDF download tokens) carry a `purpose` claim to
+  // prevent reuse on arbitrary endpoints. Reject them here so they cannot
+  // be replayed as general-purpose session credentials.
+  if (payload.purpose) {
     res.status(401).json({ error: "Unauthorized", message: "Scoped tokens cannot be used for general API access" });
     return;
   }

@@ -406,6 +406,46 @@ router.get("/public/employee-shares/:token", tokenLookupLimiter, async (req, res
   });
 });
 
+// ---------- Public: photo proxy by share token ----------
+// Streams the employee profile photo on every request AFTER re-checking
+// that the share is still active. Unlike a signed storage URL, this
+// endpoint enforces revocation on each download — there is no grace
+// window where a revoked share can still be used to fetch the photo.
+router.get(
+  "/public/employee-shares/:token/photo",
+  tokenLookupLimiter,
+  async (req: Request, res: Response): Promise<void> => {
+    const token = String(req.params.token);
+    const r = await loadActiveShare(token);
+    if (r.status !== 200) { res.status(r.status).json({ error: r.error }); return; }
+
+    // Fetch the employee's photo key from the DB.
+    const [empRow] = await db
+      .select({ photoKey: employeesTable.photoKey })
+      .from(employeesTable)
+      .where(eq(employeesTable.userId, r.share.employeeUserId));
+    if (!empRow?.photoKey) { res.status(404).json({ error: "Photo not found" }); return; }
+
+    let source: { buffer: Buffer; contentType: string; filename: string; size: number };
+    try {
+      source = await storage.downloadObjectBuffer(empRow.photoKey);
+    } catch (err) {
+      if (err instanceof ObjectNotFoundError) {
+        res.status(404).json({ error: "Photo not found" });
+        return;
+      }
+      req.log.error({ err, key: empRow.photoKey }, "Could not fetch share photo");
+      res.status(502).json({ error: "Photo unavailable" });
+      return;
+    }
+
+    res.setHeader("Content-Type", source.contentType);
+    res.setHeader("Content-Length", String(source.size));
+    res.setHeader("Cache-Control", "private, no-store");
+    res.status(200).end(source.buffer);
+  },
+);
+
 // ---------- Public: stream the redacted profile PDF by token ----------
 // Uses the stricter expensive-share limiter on top of tokenLookupLimiter
 // because PDF rendering does DB joins + photo fetch + image embedding.

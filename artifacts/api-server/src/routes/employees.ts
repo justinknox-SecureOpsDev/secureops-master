@@ -2,7 +2,7 @@ import { Router, type IRouter } from "express";
 import bcrypt from "bcryptjs";
 import { eq, ilike, and, sql, desc } from "drizzle-orm";
 import { db, usersTable, employeesTable, licensesTable, employeeChangesTable } from "@workspace/db";
-import { requireAuth, requireAdmin, requireAdminOrDispatcher, requireSchedulingStaff, verifyToken, signDownloadToken, verifyAndAttachUser } from "../middlewares/auth";
+import { requireAuth, requireAdmin, requireAdminOrDispatcher, requireSchedulingStaff, signPdfDownloadToken, verifyPdfDownloadToken, pdfDownloadTokenTtlSeconds, type PdfDownloadTokenPayload } from "../middlewares/auth";
 import type { Request, Response, NextFunction } from "express";
 import { buildEmployeeProfilePdf } from "../lib/profilePdf";
 import { writeEmployeeFieldChanges, CHANGE_FIELD_LABELS } from "../lib/employeeChangeLog";
@@ -45,7 +45,7 @@ function normalizeEmployeePhoneFields(
 const router: IRouter = Router();
 
 /**
- * Lightweight auth shim for the profile-PDF download route only.
+ * Lightweight auth shim for the profile-PDF download routes only.
  *
  * The full `requireAuth` only accepts an `Authorization: Bearer …`
  * header, which works for `fetch()` in the admin portal but not for the
@@ -53,14 +53,19 @@ const router: IRouter = Router();
  * `Linking.openURL(...)` into the system browser — which can't set
  * custom headers.
  *
- * We therefore allow a short-lived, scope-limited download token (minted
- * by `POST /me/profile/pdf/request-url`) to come in via `?token=`.
- * Full session JWTs are explicitly rejected in the query string to prevent
- * long-lived credentials from being captured by browser history, MDM
- * tooling, or other apps that observe opened URLs. The scope check ensures
- * that only tokens produced by `signDownloadToken` are accepted here.
+ * To avoid exposing the long-lived session JWT in the URL (where it can
+ * be captured by MDM tooling, browser history, crash reporters, etc.),
+ * the `?token=` path only accepts a SHORT-LIVED, ROUTE-SCOPED download
+ * token minted by `POST /me/profile/pdf/download-token` or
+ * `POST /employees/:id/profile/pdf/download-token`. These tokens carry
+ * `purpose: "pdf-download"` and expire in 60 seconds; `requireAuth`
+ * explicitly rejects them so they cannot be replayed as session
+ * credentials on any other endpoint.
+ *
+ * Bearer auth (admin portal / direct fetch) still goes through the full
+ * `requireAuth` pipeline as before.
  */
-function requireAuthOrQueryToken(req: Request, res: Response, next: NextFunction): void {
+async function requireAuthOrQueryToken(req: Request, res: Response, next: NextFunction): Promise<void> {
   if (req.headers.authorization?.startsWith("Bearer ")) {
     requireAuth(req, res, next);
     return;
@@ -75,29 +80,53 @@ function requireAuthOrQueryToken(req: Request, res: Response, next: NextFunction
     res.status(401).json({ error: "Unauthorized", message: "No token provided" });
     return;
   }
-  let payload: ReturnType<typeof verifyToken> & { scope?: string };
+  // Only accept the scoped PDF download token here — not a full session JWT.
+  // Full session JWTs lack the `purpose` claim and verifyPdfDownloadToken
+  // will throw, keeping the general-purpose credential out of URL query strings.
+  let dlPayload: PdfDownloadTokenPayload;
   try {
-    payload = verifyToken(token) as ReturnType<typeof verifyToken> & { scope?: string };
+    dlPayload = verifyPdfDownloadToken(token);
   } catch {
-    res.status(401).json({ error: "Unauthorized", message: "Invalid or expired token" });
+    res.status(401).json({ error: "Unauthorized", message: "Invalid or expired download token" });
     return;
   }
-  // Only accept scoped download tokens in query strings. Full session JWTs
-  // carry no `scope` field — rejecting them here prevents a leaked URL from
-  // being replayed as a general-purpose API credential.
-  if (payload.scope !== "pdf-download") {
-    res.status(401).json({ error: "Unauthorized", message: "A scoped download token is required" });
-    return;
-  }
-  // Run the DB-side checks (user status, revocation, mustChangePassword,
-  // req.user attachment) directly, bypassing `requireAuth` which correctly
-  // rejects all scoped tokens when they appear as bearer credentials on
-  // unrelated API routes.
-  verifyAndAttachUser(payload, req, res).then((ok) => {
-    if (ok) next();
-  }).catch(() => {
+
+  // Look up the live user row — same checks as requireAuth, minus jti revocation
+  // (the 60s TTL makes single-use tracking unnecessary) and mustChangePassword
+  // (PDF access doesn't mutate data). We do however enforce tokensValidAfter
+  // to ensure that a global logout invalidates in-flight download tokens.
+  try {
+    const [user] = await db
+      .select({
+        id: usersTable.id,
+        email: usersTable.email,
+        role: usersTable.role,
+        status: usersTable.status,
+        tokensValidAfter: usersTable.tokensValidAfter,
+      })
+      .from(usersTable)
+      .where(eq(usersTable.id, dlPayload.userId))
+      .limit(1);
+
+    if (!user || user.status !== "active") {
+      res.status(401).json({ error: "Unauthorized", message: "Account is not active" });
+      return;
+    }
+
+    // Enforce the bulk session-revocation watermark: if all sessions were
+    // invalidated AFTER this download token was minted, reject it. This
+    // mirrors the same check in requireAuth for session JWTs.
+    const iatMs = (dlPayload.iat ?? 0) * 1000;
+    if (user.tokensValidAfter && iatMs < user.tokensValidAfter.getTime()) {
+      res.status(401).json({ error: "Unauthorized", message: "Session was revoked. Please sign in again." });
+      return;
+    }
+
+    req.user = { userId: user.id, email: user.email, role: user.role };
+    next();
+  } catch {
     res.status(500).json({ error: "Internal Server Error", message: "Authentication check failed" });
-  });
+  }
 }
 
 /**
@@ -421,31 +450,27 @@ router.get("/employees/:id", requireAuth, async (req, res): Promise<void> => {
 });
 
 /**
- * Mint a short-lived (120 s) scoped download token for the profile-PDF
- * download URL so the mobile app never puts a full session JWT in a URL.
- *
- * The mobile app calls this endpoint (with its normal Bearer token) to
- * obtain a `token` it can embed in `?token=` when opening the PDF URL
- * in the system browser.  The token is scope-limited to "pdf-download"
- * and expires in 120 seconds, so a captured URL cannot be replayed as a
- * general-purpose API credential.
+ * Mint a short-lived (60s) PDF download token for the authenticated user's
+ * own profile. The mobile app calls this first, then opens the PDF URL with
+ * `?token=<download-token>` - keeping the long-lived session JWT out of URLs.
  */
-router.post("/me/profile/pdf/request-url", requireAuth, (req, res): void => {
-  const u = req.user!;
-  const token = signDownloadToken({ userId: u.userId, email: u.email, role: u.role });
-  res.json({ token });
+router.post("/me/profile/pdf/download-token", requireAuth, (req, res): void => {
+  const token = signPdfDownloadToken(req.user!.userId);
+  res.json({ token, expiresIn: pdfDownloadTokenTtlSeconds() });
 });
 
-/** Admin/self variant — allows an admin to download any employee's PDF. */
-router.post("/employees/:id/profile/pdf/request-url", requireAuth, (req, res): void => {
+/**
+ * Mint a short-lived (60s) PDF download token for a specific employee.
+ * Admin-only — mirrors the admin-can-pull-any restriction on the PDF route.
+ */
+router.post("/employees/:id/profile/pdf/download-token", requireAuth, (req, res): void => {
   const id = Array.isArray(req.params.id) ? req.params.id[0] : req.params.id;
   if (req.user!.role !== "admin" && req.user!.userId !== id) {
     res.status(403).json({ error: "Forbidden" });
     return;
   }
-  const u = req.user!;
-  const token = signDownloadToken({ userId: u.userId, email: u.email, role: u.role });
-  res.json({ token });
+  const token = signPdfDownloadToken(id);
+  res.json({ token, expiresIn: pdfDownloadTokenTtlSeconds() });
 });
 
 /**
