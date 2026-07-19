@@ -1092,6 +1092,10 @@ router.post(
           tempPasswordSetAt: new Date(),
           mustChangePassword: true,
           status: "active",
+          // Rotate the session watermark when reactivating so any previously
+          // issued tokens for this user are immediately invalidated. The user
+          // must sign in fresh with their new temp password.
+          tokensValidAfter: new Date(),
         })
         .where(eq(usersTable.id, existing.id))
         .returning();

@@ -43,6 +43,7 @@ import {
   insertSalesLeadSchema,
 } from "@workspace/db";
 import { requireAdmin } from "../middlewares/auth";
+import { brand } from "../lib/brandConfig";
 import { resolveSelfOrgInvite, getSelfOrigin } from "./orgDirectory";
 import { siteBlockersForOne, clientDeletionBlockers, refuseIfBlocked } from "../lib/siteDeletion";
 import { sendEmail, renderPasswordResetEmail, renderInviteEmail, type EmailAttachment } from "../lib/email";
@@ -97,6 +98,19 @@ function normalizePhoneFieldInPlace(
 }
 
 const router: IRouter = Router();
+
+// Super-admin privilege check — mirrors platform.ts so admin.ts route guards
+// can apply the same boundary without a circular import. SUPER_ADMIN_EMAILS is
+// the authoritative set; falls back to the seeded brand admin on empty config.
+const _superAdminEmails = new Set(
+  (process.env["SUPER_ADMIN_EMAILS"] ?? brand.demoAdminEmail)
+    .split(",")
+    .map((s) => s.trim().toLowerCase())
+    .filter(Boolean),
+);
+function isSuperAdminEmail(email: string): boolean {
+  return _superAdminEmails.has(email.toLowerCase());
+}
 
 /**
  * Generic admin "spreadsheet" endpoints. Every supported table exposes:
@@ -207,7 +221,10 @@ const insertUserAdminSchema = z.object({
 
 const updateUserAdminSchema = z.object({
   email: z.string().email().optional(),
-  password: z.string().min(6).optional(),
+  // NOTE: password changes are intentionally excluded from the generic
+  // update schema. Use POST /admin/users/:id/password-reset instead.
+  // Allowing raw password writes here would let any admin overwrite
+  // another admin's credentials without the dedicated audit trail.
   firstName: z.string().min(1).optional(),
   lastName: z.string().min(1).optional(),
   role: z.enum(["admin", "dispatcher", "employee", "site_manager"]).optional(),
@@ -965,8 +982,10 @@ router.get("/admin/tables/:table", requireAdmin, async (req, res): Promise<void>
 
   // Redact sensitive columns for the users table — the dedicated invitation
   // endpoints expose temp passwords intentionally; the generic list shouldn't.
+  // TOTP secret + recovery codes are also excluded: even hashed/encoded, they
+  // are account-takeover material that ordinary admins must not be able to read.
   const safeRows = tableName === "users"
-    ? (rows as Record<string, unknown>[]).map(({ passwordHash: _ph, tempPasswordPlain: _tp, ...rest }) => rest)
+    ? (rows as Record<string, unknown>[]).map(({ passwordHash: _ph, tempPasswordPlain: _tp, totpSecret: _ts, totpRecoveryCodes: _trc, ...rest }) => rest)
     : rows;
 
   res.json({ rows: safeRows, total: totalRows[0]?.count ?? 0, limit, offset });
@@ -994,7 +1013,7 @@ router.get("/admin/tables/:table/:id", requireAdmin, async (req, res): Promise<v
   }
   const row = rows[0];
   if (tableName === "users") {
-    const { passwordHash: _ph, tempPasswordPlain: _tp, ...safe } = row;
+    const { passwordHash: _ph, tempPasswordPlain: _tp, totpSecret: _ts, totpRecoveryCodes: _trc, ...safe } = row;
     res.json(safe);
     return;
   }
@@ -1086,6 +1105,20 @@ router.post("/admin/tables/:table", requireAdmin, async (req, res): Promise<void
     return;
   }
   let values = parsed.data as Record<string, unknown>;
+
+  // Privilege boundary: only super-admins may create admin-role users.
+  // Allowing regular admins to create an admin row (especially with a
+  // super-admin email) would let them bypass the platform.ts email gate.
+  if (tableName === "users" && values.role === "admin") {
+    if (!isSuperAdminEmail(req.user!.email)) {
+      res.status(403).json({
+        error: "Forbidden",
+        message: "Only super-admins may create admin accounts.",
+      });
+      return;
+    }
+  }
+
   if (cfg.beforeInsert) values = await cfg.beforeInsert(values);
   try {
     const inserted = (await db.insert(cfg.table).values(values).returning()) as unknown[];
@@ -1118,15 +1151,40 @@ router.put("/admin/tables/:table/:id", requireAdmin, async (req, res): Promise<v
   // For update we use a relaxed validation: parse a partial schema.
   let body: Record<string, unknown> = req.body && typeof req.body === "object" ? { ...req.body } : {};
   if (tableName === "users") {
+    // Privilege boundary: fetch the target user before accepting the update so
+    // we can enforce cross-admin protection. A regular admin must not be able to
+    // edit another admin (or super-admin) account — that would allow credential
+    // replacement, email takeover, and privilege escalation. Super-admins may
+    // edit any user including other admins.
+    const [targetUser] = await db
+      .select({ id: usersTable.id, role: usersTable.role, email: usersTable.email })
+      .from(usersTable)
+      .where(eq(usersTable.id, id))
+      .limit(1);
+    if (!targetUser) {
+      res.status(404).json({ error: "Not Found", message: "User not found" });
+      return;
+    }
+    const requesterIsSuperAdmin = isSuperAdminEmail(req.user!.email);
+    if (targetUser.role === "admin" && !requesterIsSuperAdmin) {
+      res.status(403).json({
+        error: "Forbidden",
+        message: "Only super-admins may edit admin accounts.",
+      });
+      return;
+    }
+
     const parsed = updateUserAdminSchema.safeParse(body);
     if (!parsed.success) {
       res.status(400).json({ error: "Validation", message: "User validation failed", issues: parsed.error.issues });
       return;
     }
     body = { ...parsed.data };
-    if (body.password) {
-      body.passwordHash = await bcrypt.hash(String(body.password), 10);
-      delete body.password;
+    // Reactivating an account (status → active) must rotate the session
+    // watermark so any previously issued tokens become invalid. This ensures
+    // a suspended user must sign in again after their account is re-enabled.
+    if (body.status === "active") {
+      body.tokensValidAfter = new Date();
     }
     if (typeof body.email === "string") body.email = body.email.toLowerCase();
     // Normalize phoneNumber to E.164 (same rule the public flows use) so
@@ -1307,6 +1365,25 @@ router.delete("/admin/tables/:table/:id", requireAdmin, async (req, res): Promis
     res.status(404).json({ error: "Not Found", message: `Unknown table '${tableName}'` });
     return;
   }
+
+  // Privilege boundary: only super-admins may delete admin-role user rows.
+  // A regular admin deleting the super-admin row and recreating it with a
+  // super-admin email would fully bypass the email-based platform gate.
+  if (tableName === "users") {
+    const [targetUser] = await db
+      .select({ role: usersTable.role })
+      .from(usersTable)
+      .where(eq(usersTable.id, id))
+      .limit(1);
+    if (targetUser?.role === "admin" && !isSuperAdminEmail(req.user!.email)) {
+      res.status(403).json({
+        error: "Forbidden",
+        message: "Only super-admins may delete admin accounts.",
+      });
+      return;
+    }
+  }
+
   // Guard against silent operational-data loss when deleting a site (or a
   // client, which CASCADE-deletes its sites). See lib/siteDeletion.ts for why.
   if (tableName === "sites") {
@@ -1502,6 +1579,19 @@ router.post("/admin/users/:userId/password-reset", requireAdmin, async (req, res
   const [user] = await db.select().from(usersTable).where(eq(usersTable.id, userId)).limit(1);
   if (!user) {
     res.status(404).json({ error: "Not Found", message: "User not found" });
+    return;
+  }
+
+  // Privilege boundary: a regular admin must not issue a password-reset token
+  // for another admin or super-admin account. Such a token can be submitted to
+  // /auth/reset-password and returns a live bearer token for the target account,
+  // allowing full privilege escalation. Only super-admins may trigger a reset
+  // for an admin-role user.
+  if (user.role === "admin" && !isSuperAdminEmail(req.user!.email)) {
+    res.status(403).json({
+      error: "Forbidden",
+      message: "Only super-admins may issue password resets for admin accounts.",
+    });
     return;
   }
 
