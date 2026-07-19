@@ -8,6 +8,7 @@ import { useAuth } from "@/lib/auth";
 import { useFkOptions } from "@/lib/fk";
 import { getTable } from "@/lib/tables";
 import { RowFormDialog } from "@/components/RowFormDialog";
+import { ShiftDialog } from "@/components/ShiftDialog";
 import { ResponsiveTable, type ResponsiveColumn } from "@/components/ResponsiveTable";
 
 type Site = {
@@ -249,6 +250,8 @@ export function SiteDetailPage() {
   const [site, setSite] = useState<Site | null>(null);
   const [loading, setLoading] = useState(true);
   const [editing, setEditing] = useState(false);
+  const [shiftDialogOpen, setShiftDialogOpen] = useState(false);
+  const [shiftCreatedMsg, setShiftCreatedMsg] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const { options: clientOptions } = useFkOptions("clients");
 
@@ -743,6 +746,11 @@ export function SiteDetailPage() {
     };
   }, [siteId, loadSite]);
 
+  // Stable object identity — ShiftDialog's open-reset effect depends on
+  // `initial`, so a fresh literal each render would wipe the admin's
+  // in-progress form on every parent re-render.
+  const shiftInitial = useMemo(() => ({ siteId }), [siteId]);
+
   if (!sitesDescriptor) return null;
 
   const clientName = site ? clientOptions.find((o) => o.id === site.clientId)?.label ?? "—" : "";
@@ -852,7 +860,12 @@ export function SiteDetailPage() {
                 </div>
               )}
             </div>
-            <div className="flex gap-2">
+            <div className="flex flex-wrap justify-end gap-2">
+              {isAdmin && (
+                <Button size="sm" onClick={() => { setShiftCreatedMsg(false); setShiftDialogOpen(true); }}>
+                  <Plus className="w-3.5 h-3.5 mr-1" />New shift
+                </Button>
+              )}
               <Button variant="outline" size="sm" onClick={() => setEditing(true)}>
                 <Pencil className="w-3.5 h-3.5 mr-1" />Edit site
               </Button>
@@ -863,6 +876,22 @@ export function SiteDetailPage() {
           </div>
         )}
       </div>
+
+      {site && shiftCreatedMsg && (
+        <div className="mx-6 mt-4 flex flex-wrap items-center justify-between gap-2 rounded border border-emerald-300 bg-emerald-50 px-3 py-2 text-sm text-emerald-800" role="status">
+          <span>Shift created.</span>
+          <span className="flex items-center gap-2">
+            <Link href="/shifts" className="underline font-medium">View shifts</Link>
+            <button
+              type="button"
+              className="text-emerald-700 hover:text-emerald-900 text-xs underline"
+              onClick={() => setShiftCreatedMsg(false)}
+            >
+              Dismiss
+            </button>
+          </span>
+        </div>
+      )}
 
       {site && (
         <div className="p-6 space-y-8">
@@ -1422,6 +1451,18 @@ export function SiteDetailPage() {
             )}
           </section>
         </div>
+      )}
+
+      {site && (
+        <ShiftDialog
+          open={shiftDialogOpen}
+          onOpenChange={setShiftDialogOpen}
+          initial={shiftInitial}
+          onSaved={() => {
+            setShiftDialogOpen(false);
+            setShiftCreatedMsg(true);
+          }}
+        />
       )}
 
       {site && (

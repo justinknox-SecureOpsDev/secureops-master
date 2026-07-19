@@ -85,4 +85,4 @@
 - [LiveKit E2EE passphrase interop](livekit-e2ee-passphrase-interop.md) — E2EE keys must be STRING passphrases on all platforms; raw bytes = HKDF(web) vs PBKDF2(native) → garbled cross-platform radio audio.
 - [Brand schema version skew](brand-schema-version-skew.md) — new brandConfigSchema fields must be .optional() or stale control-plane/portal clients 400 on brand saves; audit email SUBJECTs after signature replace_all.
 - [Admin portal mobile overflow](admin-portal-mobile-overflow-pattern.md) — h-dvh shell, overflow-x-auto+focusable region on wide tables, no per-dialog max-h overrides, grid-cols-1 sm:grid-cols-2 form grids.
-- [Org origin self-heal refresh](org-refresh-stale-origin.md) — devices pin a stale backend origin; launch refresh must never gate/disconnect, re-check storage before persisting (switch-org race), save-first.
+- [Org origin self-heal refresh](org-refresh-stale-origin.md) — launch refresh of pinned org origin must never gate/disconnect; re-check storage before persisting (switch-org race).
