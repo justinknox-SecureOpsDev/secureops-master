@@ -36,6 +36,12 @@ export interface JwtPayload {
   iat?: number;
   exp?: number;
   purpose?: string;
+  /**
+   * Scope claim carried by short-lived, purpose-limited tokens (e.g.
+   * "pdf-download"). Full session JWTs never set this — consumers like the
+   * WS upgrade reject any token that carries a scope.
+   */
+  scope?: string;
 }
 
 export interface PdfDownloadTokenPayload {

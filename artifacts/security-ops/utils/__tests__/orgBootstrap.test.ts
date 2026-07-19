@@ -16,9 +16,11 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   bootstrapOrg,
   performSwitchOrg,
+  refreshSelectedOrg,
   runSwitchOrgFlow,
   runSwitchToCodeFlow,
   type OrgBootstrapDeps,
+  type OrgRefreshDeps,
   type OrgSwitchDeps,
 } from "../orgBootstrap";
 import type { SelectedOrg } from "../orgConfig";
@@ -99,6 +101,150 @@ describe("bootstrapOrg", () => {
     expect(result).toEqual(ACME);
     expect(applyOrgRouting).toHaveBeenCalledWith(ACME.apiBaseUrl);
     expect(saveSelectedOrg).not.toHaveBeenCalled();
+  });
+});
+
+describe("refreshSelectedOrg", () => {
+  // The stored org points at a RETIRED origin; the directory now reports the
+  // current one. This is the production incident the helper exists for:
+  // devices pinned to an old deployment domain silently stop reaching the
+  // real backend (e.g. password-reset emails "never arrive").
+  const STALE: SelectedOrg = {
+    code: "wcsg",
+    name: "Williams Council Security Group",
+    apiBaseUrl: "https://old-retired-domain.example.app",
+  };
+  const CURRENT: SelectedOrg = {
+    code: "wcsg",
+    name: "Williams Council Security Group",
+    apiBaseUrl: "https://current.example.app",
+  };
+
+  function buildRefreshDeps(
+    resolveImpl: () => Promise<SelectedOrg>,
+    // What storage holds by the time the directory answers (race guard input).
+    // Defaults to the STALE snapshot, i.e. "nothing changed mid-flight".
+    storedNow: SelectedOrg | null = STALE,
+  ) {
+    const saveSelectedOrg = vi.fn(async () => undefined);
+    const applyOrgRouting = vi.fn();
+    const onUpdated = vi.fn();
+    const resolveOrgCode = vi.fn(resolveImpl);
+    const loadSelectedOrg = vi.fn(async () => storedNow);
+    const deps: OrgRefreshDeps = {
+      resolveOrgCode,
+      loadSelectedOrg,
+      saveSelectedOrg,
+      applyOrgRouting,
+      onUpdated,
+    };
+    return { deps, resolveOrgCode, loadSelectedOrg, saveSelectedOrg, applyOrgRouting, onUpdated };
+  }
+
+  it("migrates a stale origin: persists, re-applies routing, and notifies", async () => {
+    const { deps, resolveOrgCode, saveSelectedOrg, applyOrgRouting, onUpdated } =
+      buildRefreshDeps(async () => CURRENT);
+
+    const result = await refreshSelectedOrg(STALE, deps);
+
+    expect(resolveOrgCode).toHaveBeenCalledWith("wcsg");
+    expect(result).toEqual(CURRENT);
+    expect(saveSelectedOrg).toHaveBeenCalledWith(CURRENT);
+    expect(applyOrgRouting).toHaveBeenCalledWith(CURRENT.apiBaseUrl);
+    expect(onUpdated).toHaveBeenCalledWith(CURRENT);
+  });
+
+  it("is a no-op when the directory reports the same origin (no churn)", async () => {
+    const { deps, saveSelectedOrg, applyOrgRouting, onUpdated } =
+      buildRefreshDeps(async () => CURRENT);
+
+    const result = await refreshSelectedOrg(CURRENT, deps);
+
+    expect(result).toBeNull();
+    expect(saveSelectedOrg).not.toHaveBeenCalled();
+    expect(applyOrgRouting).not.toHaveBeenCalled();
+    expect(onUpdated).not.toHaveBeenCalled();
+  });
+
+  it("keeps the stored org untouched when the directory is unreachable", async () => {
+    const { deps, saveSelectedOrg, applyOrgRouting, onUpdated } = buildRefreshDeps(
+      async () => {
+        throw new Error("Can't reach the directory (network down).");
+      },
+    );
+
+    // A flaky network at launch must NEVER disconnect a working app.
+    const result = await refreshSelectedOrg(STALE, deps);
+
+    expect(result).toBeNull();
+    expect(saveSelectedOrg).not.toHaveBeenCalled();
+    expect(applyOrgRouting).not.toHaveBeenCalled();
+    expect(onUpdated).not.toHaveBeenCalled();
+  });
+
+  it("does nothing when there is no stored org", async () => {
+    const { deps, resolveOrgCode } = buildRefreshDeps(async () => CURRENT);
+    const result = await refreshSelectedOrg(null, deps);
+    expect(result).toBeNull();
+    expect(resolveOrgCode).not.toHaveBeenCalled();
+  });
+
+  it("does nothing when the stored org has a blank code (nothing to re-resolve)", async () => {
+    const { deps, resolveOrgCode } = buildRefreshDeps(async () => CURRENT);
+    const result = await refreshSelectedOrg(
+      { code: "   ", name: "Legacy", apiBaseUrl: STALE.apiBaseUrl },
+      deps,
+    );
+    expect(result).toBeNull();
+    expect(resolveOrgCode).not.toHaveBeenCalled();
+  });
+
+  it("aborts when the user switched org mid-flight (stored org cleared) — no cross-tenant re-route", async () => {
+    // switchOrg cleared storage while the directory round-trip was in flight;
+    // the stale refresh must NOT resurrect the old tenant's routing.
+    const { deps, saveSelectedOrg, applyOrgRouting, onUpdated } = buildRefreshDeps(
+      async () => CURRENT,
+      null,
+    );
+
+    const result = await refreshSelectedOrg(STALE, deps);
+
+    expect(result).toBeNull();
+    expect(saveSelectedOrg).not.toHaveBeenCalled();
+    expect(applyOrgRouting).not.toHaveBeenCalled();
+    expect(onUpdated).not.toHaveBeenCalled();
+  });
+
+  it("aborts when a DIFFERENT org was selected mid-flight — no cross-tenant re-route", async () => {
+    const OTHER_TENANT: SelectedOrg = {
+      code: "acme",
+      name: "Acme Security",
+      apiBaseUrl: "https://acme.example.app",
+    };
+    const { deps, saveSelectedOrg, applyOrgRouting, onUpdated } = buildRefreshDeps(
+      async () => CURRENT,
+      OTHER_TENANT,
+    );
+
+    const result = await refreshSelectedOrg(STALE, deps);
+
+    expect(result).toBeNull();
+    expect(saveSelectedOrg).not.toHaveBeenCalled();
+    expect(applyOrgRouting).not.toHaveBeenCalled();
+    expect(onUpdated).not.toHaveBeenCalled();
+  });
+
+  it("does not re-route when persisting the new org fails (storage and routing never disagree)", async () => {
+    const { deps, saveSelectedOrg, applyOrgRouting, onUpdated } =
+      buildRefreshDeps(async () => CURRENT);
+    (saveSelectedOrg as ReturnType<typeof vi.fn>).mockRejectedValueOnce(
+      new Error("disk full"),
+    );
+
+    await expect(refreshSelectedOrg(STALE, deps)).rejects.toThrow("disk full");
+
+    expect(applyOrgRouting).not.toHaveBeenCalled();
+    expect(onUpdated).not.toHaveBeenCalled();
   });
 });
 

@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { Link } from "wouter";
 import { useAuth } from "@/lib/auth";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -113,7 +114,15 @@ export function LoginPage() {
             />
           </div>
           <div>
-            <Label htmlFor="password" className="text-xs uppercase font-semibold brand-navy">Password</Label>
+            <div className="flex items-center justify-between">
+              <Label htmlFor="password" className="text-xs uppercase font-semibold brand-navy">Password</Label>
+              <Link
+                href="/forgot-password"
+                className="text-xs text-muted-foreground hover:underline hover:text-foreground"
+              >
+                Forgot password?
+              </Link>
+            </div>
             <Input
               id="password" type="password" autoComplete="current-password" required
               value={password} onChange={(e) => setPassword(e.target.value)}

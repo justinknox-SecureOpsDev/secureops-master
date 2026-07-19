@@ -15,6 +15,7 @@ import { SiteDetailPage } from "@/pages/SiteDetailPage";
 import { ApplyPage } from "@/pages/Apply";
 import { OnboardPage } from "@/pages/Onboard";
 import { ResetPasswordPage } from "@/pages/ResetPassword";
+import { ForgotPasswordPage } from "@/pages/ForgotPassword";
 import { AmendApplication } from "@/pages/AmendApplication";
 import SubcontractorClockInPage from "@/pages/SubcontractorClockIn";
 import SubcontractorEntriesPage from "@/pages/SubcontractorEntries";
@@ -84,6 +85,7 @@ function Routed() {
   if (location === "/apply" || location.startsWith("/apply/")) return <ApplyPage />;
   if (location.startsWith("/onboard/")) return <OnboardPage />;
   if (location.startsWith("/reset-password/")) return <ResetPasswordPage />;
+  if (location === "/forgot-password") return <ForgotPasswordPage />;
   if (location.startsWith("/amend/")) return <AmendApplication />;
   if (location === "/privacy") return <PrivacyPage />;
   if (location === "/terms") return <TermsPage />;

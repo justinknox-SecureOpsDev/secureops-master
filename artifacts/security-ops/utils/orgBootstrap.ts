@@ -46,6 +46,70 @@ export async function bootstrapOrg(deps: OrgBootstrapDeps): Promise<SelectedOrg 
   return selected;
 }
 
+export type OrgRefreshDeps = {
+  /** Resolve a code via the central directory. Throws on any failure. */
+  resolveOrgCode: (code: string) => Promise<SelectedOrg>;
+  /** Re-read what is CURRENTLY persisted (race guard — see below). */
+  loadSelectedOrg: () => Promise<SelectedOrg | null>;
+  saveSelectedOrg: (org: SelectedOrg) => Promise<void>;
+  /** Side-effect: point every backend consumer at this origin. */
+  applyOrgRouting: (origin: string) => void;
+  /** Notified only when the stored org actually changed (e.g. update React state). */
+  onUpdated?: (org: SelectedOrg) => void;
+};
+
+/**
+ * Background self-heal for stale backend origins.
+ *
+ * Devices persist the org's backend ORIGIN at connect time; if a customer's
+ * deployment later moves to a new domain, those devices keep talking to the
+ * old origin forever (observed in production: password-reset requests from
+ * mobile never reached the current backend). On every launch we quietly
+ * re-resolve the STORED code against the directory and, only when the
+ * directory reports a different origin, persist + apply the new one.
+ *
+ * Failure policy is strictly conservative:
+ *   - no stored org or blank code → no-op (nothing to refresh);
+ *   - directory unreachable / unknown code / bad response → keep the stored
+ *     value untouched (a flaky network must never disconnect a working app);
+ *   - same origin → no-op (no churn, no state updates).
+ *
+ * Returns the updated org when a change was applied, else null. Callers run
+ * this fire-and-forget AFTER bootstrapOrg — it must never gate the UI.
+ */
+export async function refreshSelectedOrg(
+  current: SelectedOrg | null,
+  deps: OrgRefreshDeps,
+): Promise<SelectedOrg | null> {
+  if (!current || !current.code.trim()) return null;
+  let resolved: SelectedOrg;
+  try {
+    resolved = await deps.resolveOrgCode(current.code);
+  } catch {
+    return null;
+  }
+  if (resolved.apiBaseUrl === current.apiBaseUrl) return null;
+  // RACE GUARD: the directory round-trip can be slow; the user may have run
+  // switchOrg (stored org cleared) or selectOrg (different org persisted) in
+  // the meantime. Re-read storage and abort unless it still holds EXACTLY the
+  // snapshot we started from — otherwise a stale refresh would silently route
+  // the app back to the previous tenant's backend (cross-tenant invariant).
+  const stillStored = await deps.loadSelectedOrg();
+  if (
+    !stillStored ||
+    stillStored.code !== current.code ||
+    stillStored.apiBaseUrl !== current.apiBaseUrl
+  ) {
+    return null;
+  }
+  // Persist FIRST: if the save fails we leave routing on the stored origin so
+  // storage and live routing can never disagree; the next launch retries.
+  await deps.saveSelectedOrg(resolved);
+  deps.applyOrgRouting(resolved.apiBaseUrl);
+  deps.onUpdated?.(resolved);
+  return resolved;
+}
+
 export type OrgSwitchDeps = {
   clearSelectedOrg: () => Promise<void>;
   /** Side-effect: drop the runtime origin + cached feature flags. */

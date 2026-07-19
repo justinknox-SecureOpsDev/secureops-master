@@ -22,7 +22,7 @@ import {
 import { resetFeatureFlagsCache } from "@/hooks/useFeatures";
 import { storage } from "@/utils/storage";
 import { AUTH_TOKEN_KEY, AUTH_USER_KEY, runAuthLogout } from "@/contexts/AuthContext";
-import { bootstrapOrg, performSwitchOrg } from "@/utils/orgBootstrap";
+import { bootstrapOrg, performSwitchOrg, refreshSelectedOrg } from "@/utils/orgBootstrap";
 
 /**
  * Multi-org routing context.
@@ -116,6 +116,22 @@ export function OrgProvider({ children }: { children: ReactNode }) {
         if (!cancelled) {
           setOrg(selected);
           setIsLoadingOrg(false);
+          // Fire-and-forget self-heal: re-resolve the STORED org code against
+          // the directory so devices pinned to a retired backend origin (old
+          // domain) quietly migrate to the current one. Never gates the UI;
+          // directory failures keep the stored org untouched. See
+          // refreshSelectedOrg in utils/orgBootstrap.
+          if (selected) {
+            void refreshSelectedOrg(selected, {
+              resolveOrgCode,
+              loadSelectedOrg,
+              saveSelectedOrg,
+              applyOrgRouting,
+              onUpdated: (updated) => {
+                if (!cancelled) setOrg(updated);
+              },
+            }).catch(() => {});
+          }
         }
       } catch {
         if (!cancelled) setIsLoadingOrg(false);
