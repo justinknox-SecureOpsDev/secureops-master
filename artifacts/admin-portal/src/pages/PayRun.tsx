@@ -355,7 +355,7 @@ export default function PayRunPage() {
           <Label className="text-xs">Period end ≤</Label>
           <Input aria-label="Period end on or before" type="date" className="h-9" value={periodEnd} onChange={(e) => setPeriodEnd(e.target.value)} />
         </div>
-        <Button variant="outline" onClick={() => void reload()} disabled={loading}>
+        <Button variant="outline" aria-label="Refresh" onClick={() => void reload()} disabled={loading}>
           {loading ? <Loader2 className="w-4 h-4 animate-spin" /> : "Refresh"}
         </Button>
       </div>

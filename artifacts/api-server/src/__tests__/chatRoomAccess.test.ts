@@ -210,10 +210,12 @@ async function postMessageStatus(token: string, roomId: string, content = "hi"):
 describe("GET /chat/rooms — visibility by room type", () => {
   // The first two tests in this file absorb the suite's one-time costs (first
   // /chat/rooms request triggers per-site channel seeding, plus several
-  // sequential list calls). They pass comfortably in isolation but can exceed
-  // the default 30s under the full parallel `pnpm -r run test` gate when every
-  // package's suite competes for CPU/DB, so they get an explicit 60s budget.
-  const FIRST_TESTS_TIMEOUT_MS = 60_000;
+  // sequential list calls). They pass comfortably in isolation but can time
+  // out under the full parallel `pnpm -r run test` gate when every package's
+  // suite competes for CPU/DB — and the release-validation harness runs the
+  // test gate concurrently with a11y/typecheck/front-door, which starved even
+  // a 60s budget. Generous timeout, purely contention headroom.
+  const FIRST_TESTS_TIMEOUT_MS = 180_000;
 
   it(
     "announcements is visible to every authenticated user",

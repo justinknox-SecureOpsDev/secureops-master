@@ -246,7 +246,7 @@ export default function SubcontractorPayRunPage() {
             <option value="all">All</option>
           </select>
         </div>
-        <Button variant="outline" onClick={() => void reload()} disabled={loading}>
+        <Button variant="outline" aria-label="Refresh" onClick={() => void reload()} disabled={loading}>
           {loading ? <Loader2 className="w-4 h-4 animate-spin" /> : "Refresh"}
         </Button>
       </div>
