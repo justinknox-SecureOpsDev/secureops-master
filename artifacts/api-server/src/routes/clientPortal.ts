@@ -1083,6 +1083,10 @@ router.post(
       }
       const tempPassword = generateTempPassword();
       const passwordHash = await bcrypt.hash(tempPassword, 10);
+      // Bump tokensValidAfter so any JWT the user held before their account
+      // was deactivated cannot silently resume being valid on re-invite.
+      // The user must log in with the newly issued credentials.
+      const reactivatedAt = new Date(Math.floor(Date.now() / 1000) * 1000);
       const [updated] = await db
         .update(usersTable)
         .set({

@@ -1013,6 +1013,7 @@ router.get("/admin/tables/:table/:id", requireAdmin, async (req, res): Promise<v
   }
   const row = rows[0];
   if (tableName === "users") {
+    // Strip sensitive auth material — same set as the list endpoint above.
     const { passwordHash: _ph, tempPasswordPlain: _tp, totpSecret: _ts, totpRecoveryCodes: _trc, ...safe } = row;
     res.json(safe);
     return;
@@ -1118,6 +1119,16 @@ router.post("/admin/tables/:table", requireAdmin, async (req, res): Promise<void
       return;
     }
   }
+  // Also block inserting any user whose email matches a super-admin identity,
+  // regardless of role — prevents delete+recreate identity takeover.
+  if (tableName === "users" && typeof values.email === "string" && isSuperAdminEmail(values.email) && !isSuperAdminEmail(req.user!.email)) {
+    res.status(403).json({
+      error: "Forbidden",
+      message: "A super-admin email address cannot be assigned to a new account.",
+    });
+    return;
+  }
+
 
   if (cfg.beforeInsert) values = await cfg.beforeInsert(values);
   try {
@@ -1157,10 +1168,10 @@ router.put("/admin/tables/:table/:id", requireAdmin, async (req, res): Promise<v
     // replacement, email takeover, and privilege escalation. Super-admins may
     // edit any user including other admins.
     const [targetUser] = await db
-      .select({ id: usersTable.id, role: usersTable.role, email: usersTable.email })
+      .select({ id: usersTable.id, role: usersTable.role, email: usersTable.email, status: usersTable.status })
       .from(usersTable)
       .where(eq(usersTable.id, id))
-      .limit(1);
+      .limit(1) as { id: string; role: string; email: string; status: string }[];
     if (!targetUser) {
       res.status(404).json({ error: "Not Found", message: "User not found" });
       return;
@@ -1182,11 +1193,21 @@ router.put("/admin/tables/:table/:id", requireAdmin, async (req, res): Promise<v
     body = { ...parsed.data };
     // Reactivating an account (status → active) must rotate the session
     // watermark so any previously issued tokens become invalid. This ensures
-    // a suspended user must sign in again after their account is re-enabled.
-    if (body.status === "active") {
-      body.tokensValidAfter = new Date();
+    // a suspended user cannot resume on a stale JWT — they must sign in again.
+    if (parsed.data.status === "active" && targetUser.status !== "active") {
+      body.tokensValidAfter = new Date(Math.floor(Date.now() / 1000) * 1000);
     }
     if (typeof body.email === "string") body.email = body.email.toLowerCase();
+    // Block changing any account's email to a reserved super-admin address.
+    // Without this guard an ordinary admin could rename a regular account to
+    // a super-admin email and then log in to pass requireSuperAdmin.
+    if (typeof body.email === "string" && isSuperAdminEmail(body.email)) {
+      res.status(403).json({
+        error: "Forbidden",
+        message: "A super-admin email address cannot be assigned to any account.",
+      });
+      return;
+    }
     // Normalize phoneNumber to E.164 (same rule the public flows use) so
     // admin edits don't silently break SMS dispatch for that user.
     const phoneErr = normalizePhoneFieldInPlace(body, "phoneNumber", "Phone number");
@@ -1371,10 +1392,10 @@ router.delete("/admin/tables/:table/:id", requireAdmin, async (req, res): Promis
   // super-admin email would fully bypass the email-based platform gate.
   if (tableName === "users") {
     const [targetUser] = await db
-      .select({ role: usersTable.role })
+      .select({ role: usersTable.role, email: usersTable.email })
       .from(usersTable)
       .where(eq(usersTable.id, id))
-      .limit(1);
+      .limit(1) as { role: string; email: string }[];
     if (targetUser?.role === "admin" && !isSuperAdminEmail(req.user!.email)) {
       res.status(403).json({
         error: "Forbidden",
@@ -1383,6 +1404,7 @@ router.delete("/admin/tables/:table/:id", requireAdmin, async (req, res): Promis
       return;
     }
   }
+
 
   // Guard against silent operational-data loss when deleting a site (or a
   // client, which CASCADE-deletes its sites). See lib/siteDeletion.ts for why.
@@ -1481,6 +1503,12 @@ router.post("/admin/import/:table", requireAdmin, async (req, res): Promise<void
       continue;
     }
     let values = parsed.data as Record<string, unknown>;
+    // Reject any imported user row whose email is a super-admin address to
+    // prevent bypassing the single-insert guard via the bulk import route.
+    if (tableName === "users" && typeof values.email === "string" && isSuperAdminEmail(values.email)) {
+      results.push({ index: i, ok: false, error: "A super-admin email address cannot be used for a new account." });
+      continue;
+    }
     if (cfg.beforeInsert) values = await cfg.beforeInsert(values);
     validated.push({ index: i, values });
   }
@@ -1560,6 +1588,16 @@ router.post("/admin/users/:userId/revoke-sessions", requireAdmin, async (req, re
     .limit(1);
   if (!user) {
     res.status(404).json({ error: "Not Found", message: "User not found" });
+    return;
+  }
+  // Super-admin sessions may not be revoked by ordinary admins. This closes
+  // the operational-risk gap where an admin could lock the platform owner out
+  // of their own deployment by bumping their tokensValidAfter watermark.
+  if (isSuperAdminEmail(user.email)) {
+    res.status(403).json({
+      error: "Forbidden",
+      message: "Super-admin sessions cannot be revoked through the admin panel.",
+    });
     return;
   }
   // Floor to second precision for consistency with JWT iat granularity.
