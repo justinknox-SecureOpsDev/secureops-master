@@ -52,10 +52,6 @@ args = "deps-install"
 
 [[workflows.workflow.tasks]]
 task = "workflow.run"
-args = "Control Plane"
-
-[[workflows.workflow.tasks]]
-task = "workflow.run"
 args = "front-door"
 
 [[workflows.workflow]]
@@ -142,17 +138,6 @@ author = "agent"
 [[workflows.workflow.tasks]]
 task = "shell.exec"
 args = "pnpm install --reporter=append-only"
-
-[workflows.workflow.metadata]
-outputType = "console"
-
-[[workflows.workflow]]
-name = "Control Plane"
-author = "agent"
-
-[[workflows.workflow.tasks]]
-task = "shell.exec"
-args = "pnpm --filter @workspace/control-plane run dev"
 
 [workflows.workflow.metadata]
 outputType = "console"
