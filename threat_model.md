@@ -19,6 +19,7 @@ Production scope for this scan is the API server plus the admin portal and mobil
 
 - **Public client to API** — unauthenticated users can reach login, password reset, public application submission, token-based onboarding/amendment flows, and upload-URL issuance. All client input is untrusted.
 - **Authenticated employee to API** — employees can access shifts, chat, incidents, profile, location updates, and self-serve storage signing. Employee permissions must stay scoped to their own data and allowed shared spaces.
+- **Authenticated client to API** — client-portal accounts are external customer users, not internal staff. They may access only the client-portal data scoped to their own `clientId`/sites and must never inherit staff-only chat, radio, live-ops, or broader user-directory access simply because they are authenticated.
 - **Admin to API** — admins can access generic CRUD, HR approval/onboarding tools, payroll/invoicing, storage signing, and live officer views. Admin-only boundaries are high impact because they expose global data sets.
 - **API to PostgreSQL** — the API has broad read/write access to sensitive relational data. Broken authorization or unsafe query construction here exposes full business and personnel records.
 - **API to object storage** — the API mints signed URLs and proxies downloads for private files. Ownership checks and upload constraints must be enforced server-side.
@@ -38,7 +39,7 @@ Production scope for this scan is the API server plus the admin portal and mobil
 
 ### Spoofing
 
-The system depends on bearer JWTs for both REST and WebSocket access. Every protected route and socket upgrade must require a valid token, and privileged flows must not issue usable credentials that are predictable from applicant data. Password-reset, onboarding, and amendment links must be high-entropy, single-use, and delivered through trusted origins only.
+The system depends on bearer JWTs for both REST and WebSocket access. Every protected route and socket upgrade must require a valid token, and privileged flows must not issue usable credentials that are predictable from applicant data. Password-reset, onboarding, and amendment links must be high-entropy, single-use, and delivered through trusted origins only. Full-session JWTs should not be transported in query strings or other channels that are likely to be logged or retained outside the app's control.
 
 ### Tampering
 
@@ -46,7 +47,7 @@ Clients can submit shift claims, incidents, HR data, payroll actions, uploads, a
 
 ### Information Disclosure
 
-This project stores unusually sensitive HR, banking, incident, and live-location data. API responses, WebSocket broadcasts, document-signing endpoints, admin grids, and error/logging behavior must not expose another employee's records, private documents, direct messages, or reset/onboarding secrets.
+This project stores unusually sensitive HR, banking, incident, and live-location data. API responses, WebSocket broadcasts, document-signing endpoints, admin grids, and error/logging behavior must not expose another employee's records, private documents, direct messages, MFA material, or reset/onboarding secrets. Any signed storage URL derived from a revocable share link should preserve the share's revocation semantics rather than remaining independently usable after the share is withdrawn.
 
 ### Denial of Service
 
@@ -54,7 +55,7 @@ Public application and upload flows can be triggered without authentication, and
 
 ### Elevation of Privilege
 
-Role separation between admin and employee is central to the product. Missing membership checks on chat/direct-message routes, broken ownership checks on documents, or allowing pending/untrusted accounts to act like active employees would let attackers reach data and operations beyond their intended role. Generic admin CRUD and token-scoped onboarding flows are especially sensitive and must enforce server-side authorization on every request.
+Role separation between admin and employee is central to the product. Missing membership checks on chat/direct-message routes, broken ownership checks on documents, or allowing pending/untrusted accounts to act like active employees would let attackers reach data and operations beyond their intended role. Generic admin CRUD and token-scoped onboarding flows are especially sensitive and must enforce server-side authorization on every request. The super-admin platform surface is an even stricter boundary: ordinary admins must not be able to reset, modify, or read enough authentication state to impersonate a super-admin account.
 
 ## Recent Hardening (May 2026 launch pack)
 
