@@ -11,7 +11,7 @@ import {
   sitesTable,
   type ChatRoom,
 } from "@workspace/db";
-import { requireAuth, requireAdmin } from "../middlewares/auth";
+import { requireAuth, requireAdmin, requireStaff } from "../middlewares/auth";
 import { broadcastToRoom } from "../lib/wsManager";
 import { sendPushToUsers } from "../lib/push";
 import { requireFeature } from "../lib/features";
@@ -125,12 +125,17 @@ async function resolveRoomMembers(room: ChatRoom): Promise<Set<string> | null> {
 /**
  * Per-user "can this user read/post" view of resolveRoomMembers.
  * Admins always pass (except DMs).
+ *
+ * External `client` role users are never authorized for any room —
+ * the entire chat system is internal-staff-only.
  */
 async function isAuthorizedForRoom(
   userId: string,
   userRole: string | undefined,
   room: ChatRoom,
 ): Promise<boolean> {
+  // External client-portal users are never permitted in any chat room.
+  if (userRole === "client") return false;
   if (room.type === "direct") {
     const parts = parseDirectKey(room.directKey);
     if (!parts) return false;
@@ -138,6 +143,8 @@ async function isAuthorizedForRoom(
   }
   if (userRole === "admin" || userRole === "dispatcher") return true;
   const members = await resolveRoomMembers(room);
+  // members === null means "all authenticated staff" (announcements channel).
+  // We already blocked client role above, so returning true here is safe.
   if (members === null) return true;
   return members.has(userId);
 }
@@ -145,7 +152,7 @@ async function isAuthorizedForRoom(
 // ============================================================ ROOM LISTING
 
 // GET /chat/rooms — rooms the current user is in (or DMs they're part of)
-router.get("/chat/rooms", requireAuth, async (req, res): Promise<void> => {
+router.get("/chat/rooms", requireStaff, async (req, res): Promise<void> => {
   const me = req.user!.userId;
   const myRole = req.user!.role;
 
@@ -221,7 +228,7 @@ router.get("/chat/rooms", requireAuth, async (req, res): Promise<void> => {
 // GET /chat/rooms/discoverable — city/elite rooms the user can request to
 // join (or has a pending request to). Returned alongside membership status
 // so the mobile UI can render "Request to join" / "Request pending" badges.
-router.get("/chat/rooms/discoverable", requireAuth, async (req, res): Promise<void> => {
+router.get("/chat/rooms/discoverable", requireStaff, async (req, res): Promise<void> => {
   const me = req.user!.userId;
 
   // Only city rooms are discoverable to non-members. Elite is invite-only
@@ -251,7 +258,7 @@ router.get("/chat/rooms/discoverable", requireAuth, async (req, res): Promise<vo
 });
 
 // POST /chat/rooms/:id/join-request — request to join a city room
-router.post("/chat/rooms/:id/join-request", requireAuth, async (req, res): Promise<void> => {
+router.post("/chat/rooms/:id/join-request", requireStaff, async (req, res): Promise<void> => {
   const me = req.user!.userId;
   const id = req.params.id as string;
   const [room] = await db.select().from(chatRoomsTable).where(eq(chatRoomsTable.id, id)).limit(1);
@@ -335,6 +342,15 @@ router.post("/admin/chat/rooms/:id/invite", requireAuth, requireAdmin, async (re
   if (!room) { res.status(404).json({ error: "Not Found", message: "Room not found" }); return; }
   if (room.type !== "elite" && room.type !== "city") {
     res.status(400).json({ error: "Bad Request", message: "This room does not accept invites" });
+    return;
+  }
+  // Resolve target users and reject any client-role accounts — chat is staff-only.
+  const targetUsers = await db.select({ id: usersTable.id, role: usersTable.role })
+    .from(usersTable)
+    .where(inArray(usersTable.id, userIds));
+  const clientTargets = targetUsers.filter((u) => u.role === "client").map((u) => u.id);
+  if (clientTargets.length > 0) {
+    res.status(400).json({ error: "Bad Request", message: "Cannot invite client accounts to internal chat channels" });
     return;
   }
   const inserted: { id: string }[] = [];
@@ -455,7 +471,7 @@ router.delete("/chat/rooms/:id", requireAuth, requireAdmin, async (req, res): Pr
 });
 
 // GET /chat/users — DM picker
-router.get("/chat/users", requireAuth, async (req, res): Promise<void> => {
+router.get("/chat/users", requireStaff, async (req, res): Promise<void> => {
   const me = req.user!.userId;
   const rows = await db
     .select({ id: usersTable.id, firstName: usersTable.firstName, lastName: usersTable.lastName, role: usersTable.role })
@@ -466,7 +482,7 @@ router.get("/chat/users", requireAuth, async (req, res): Promise<void> => {
 });
 
 // POST /chat/direct — get or create a 1:1 DM
-router.post("/chat/direct", requireAuth, async (req, res): Promise<void> => {
+router.post("/chat/direct", requireStaff, async (req, res): Promise<void> => {
   const me = req.user!.userId;
   const { otherUserId } = req.body as { otherUserId: string };
   if (!otherUserId || otherUserId === me) {
@@ -475,6 +491,11 @@ router.post("/chat/direct", requireAuth, async (req, res): Promise<void> => {
   }
   const [other] = await db.select().from(usersTable).where(eq(usersTable.id, otherUserId)).limit(1);
   if (!other) { res.status(404).json({ error: "Not Found", message: "User not found" }); return; }
+  // Reject DMs with external client-portal users — chat is staff-only.
+  if (other.role === "client") {
+    res.status(403).json({ error: "Forbidden", message: "Cannot open a direct message with a client account" });
+    return;
+  }
 
   const key = directKeyFor(me, otherUserId);
   const [existing] = await db.select().from(chatRoomsTable).where(eq(chatRoomsTable.directKey, key)).limit(1);
@@ -502,7 +523,7 @@ router.post("/chat/direct", requireAuth, async (req, res): Promise<void> => {
 // about DMs). Pass `?scope=all` to also include every non-direct room the
 // caller can access — used by the Chat sidebar, which badges every room. The
 // `scope=all` path enforces the same per-room ACL as `/chat/rooms`.
-router.get("/chat/unread-counts", requireAuth, async (req, res): Promise<void> => {
+router.get("/chat/unread-counts", requireStaff, async (req, res): Promise<void> => {
   const me = req.user!.userId;
   const myRole = req.user!.role;
   const scopeAll = req.query["scope"] === "all";
@@ -557,7 +578,7 @@ router.get("/chat/unread-counts", requireAuth, async (req, res): Promise<void> =
 // POST /chat/rooms/:id/read — bump the caller's last-read watermark to now.
 // Idempotent upsert keyed on (room, user). Enforces the same room ACL as
 // reading messages so a caller can't mark rooms they can't access.
-router.post("/chat/rooms/:id/read", requireAuth, async (req, res): Promise<void> => {
+router.post("/chat/rooms/:id/read", requireStaff, async (req, res): Promise<void> => {
   const id = req.params.id as string;
   const me = req.user!.userId;
   const [room] = await db.select().from(chatRoomsTable).where(eq(chatRoomsTable.id, id)).limit(1);
@@ -580,7 +601,7 @@ router.post("/chat/rooms/:id/read", requireAuth, async (req, res): Promise<void>
 // ============================================================ MESSAGES
 
 // GET /chat/rooms/:id/messages
-router.get("/chat/rooms/:id/messages", requireAuth, async (req, res): Promise<void> => {
+router.get("/chat/rooms/:id/messages", requireStaff, async (req, res): Promise<void> => {
   const id = req.params.id as string;
   const limit = parseInt(req.query["limit"] as string || "50", 10);
   const before = req.query["before"] as string | undefined;
@@ -615,7 +636,7 @@ router.get("/chat/rooms/:id/messages", requireAuth, async (req, res): Promise<vo
 });
 
 // POST /chat/rooms/:id/messages
-router.post("/chat/rooms/:id/messages", requireAuth, async (req, res): Promise<void> => {
+router.post("/chat/rooms/:id/messages", requireStaff, async (req, res): Promise<void> => {
   const id = req.params.id as string;
   const { content } = req.body as { content: string };
   if (!content?.trim()) { res.status(400).json({ error: "Bad Request", message: "content required" }); return; }
@@ -652,7 +673,11 @@ router.post("/chat/rooms/:id/messages", requireAuth, async (req, res): Promise<v
   };
 
   const members = await resolveRoomMembers(room);
-  broadcastToRoom(id, broadcastPayload, members === null ? {} : { allowedUserIds: members });
+  // Always set staffOnly:true on chat broadcasts so client-portal WebSocket
+  // connections never receive internal message traffic, regardless of whether
+  // a client ID appears in a membership set (e.g. a legacy directKey row) or
+  // the room is an announcement channel (members === null = "all staff").
+  broadcastToRoom(id, broadcastPayload, members === null ? { staffOnly: true } : { staffOnly: true, allowedUserIds: members });
 
   // Push notification to members who are not currently connected via WS.
   // Skip announcements (members=null means broadcast to all — too broad for push).
@@ -682,7 +707,7 @@ router.post("/chat/rooms/:id/messages", requireAuth, async (req, res): Promise<v
 // DELETE /chat/messages/:id — admins delete anything; users delete only
 // their own messages. Broadcasts a `chat_message_deleted` event to every
 // authorized member so each open chat view can drop the bubble in real time.
-router.delete("/chat/messages/:id", requireAuth, async (req, res): Promise<void> => {
+router.delete("/chat/messages/:id", requireStaff, async (req, res): Promise<void> => {
   const id = req.params.id as string;
   const [message] = await db
     .select()
@@ -714,7 +739,7 @@ router.delete("/chat/messages/:id", requireAuth, async (req, res): Promise<void>
     broadcastToRoom(
       room.id,
       { type: "chat_message_deleted", messageId: id, roomId: room.id },
-      members === null ? {} : { allowedUserIds: members },
+      members === null ? { staffOnly: true } : { staffOnly: true, allowedUserIds: members },
     );
   }
 

@@ -130,6 +130,9 @@ export async function canAccessChannel(
   channel: RadioChannel,
 ): Promise<boolean> {
   if (channel.archivedAt) return false;
+  // External client-portal users are never permitted on the radio system.
+  // All radio channels (global, all_officers, site, admins) are internal-only.
+  if (userRole === "client") return false;
   if (channel.adminOnly && userRole !== "admin") return false;
   if (userRole === "admin") return true; // admins see everything non-archived
 
@@ -579,6 +582,13 @@ export function attachRadioWebSocketServer(server: Server): void {
         if (revokedRows.length > 0) { ws.close(1008, "Session was revoked"); return; }
         if (user.mustChangePassword) { ws.close(1008, "Password change required"); return; }
         if (ws.readyState !== WebSocket.OPEN) return;
+
+        // Radio is for internal staff only. Close client-portal connections
+        // immediately — they must never subscribe to or transmit on radio channels.
+        if (user.role === "client") {
+          ws.close(1008, "Staff access required");
+          return;
+        }
 
         ws.userId = user.id;
         ws.userRole = user.role;

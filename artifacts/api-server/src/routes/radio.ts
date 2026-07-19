@@ -7,7 +7,7 @@ import {
   sitesTable,
   usersTable,
 } from "@workspace/db";
-import { requireAuth, requireAdmin } from "../middlewares/auth";
+import { requireAdmin, requireStaff } from "../middlewares/auth";
 import {
   listChannelsForUser,
   canAccessChannel,
@@ -38,7 +38,7 @@ async function resolveDisplayName(userId: string): Promise<string> {
 }
 
 // GET /radio/channels — channels the caller is authorised to see.
-router.get("/radio/channels", requireAuth, async (req, res): Promise<void> => {
+router.get("/radio/channels", requireStaff, async (req, res): Promise<void> => {
   const rows = await listChannelsForUser(req.user!.userId, req.user!.role);
   res.json(rows.filter((r) => !r.archivedAt));
 });
@@ -46,7 +46,7 @@ router.get("/radio/channels", requireAuth, async (req, res): Promise<void> => {
 // POST /radio/channels/:id/livekit-token — listen-only (subscribe) LiveKit
 // token for an authorised channel member. Audio rides a LiveKit room; this
 // reuses the same canAccessChannel gate as the WS control plane.
-router.post("/radio/channels/:id/livekit-token", requireAuth, async (req, res): Promise<void> => {
+router.post("/radio/channels/:id/livekit-token", requireStaff, async (req, res): Promise<void> => {
   if (!isLiveKitConfigured()) {
     res.status(503).json({ error: "Service Unavailable", message: "Live radio audio is not configured" });
     return;
@@ -67,7 +67,7 @@ router.post("/radio/channels/:id/livekit-token", requireAuth, async (req, res): 
 // minted ONLY after the caller has won the in-memory speaker lock (claimed
 // over the /api/ws/radio control socket). This keeps the single-speaker
 // guarantee server-side: a client can never publish audio without the lock.
-router.post("/radio/channels/:id/livekit-publish-token", requireAuth, async (req, res): Promise<void> => {
+router.post("/radio/channels/:id/livekit-publish-token", requireStaff, async (req, res): Promise<void> => {
   if (!isLiveKitConfigured()) {
     res.status(503).json({ error: "Service Unavailable", message: "Live radio audio is not configured" });
     return;

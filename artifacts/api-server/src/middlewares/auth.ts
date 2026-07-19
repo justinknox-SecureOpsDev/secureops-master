@@ -330,16 +330,16 @@ export function requireClient(req: Request, res: Response, next: NextFunction): 
 }
 
 /**
- * Gate routes to internal staff (admin, dispatcher, employee) — i.e. any
- * authenticated user EXCEPT external `client` portal contacts. Use for
- * endpoints that expose internal operational data (e.g. the officer
- * clock-in site picker) which clients must never see, but where finer
- * employee-vs-admin scoping isn't required.
+ * Gate routes to internal staff (admin, dispatcher, employee, site_manager) —
+ * i.e. any authenticated user EXCEPT external `client` portal contacts. Use
+ * for endpoints that expose internal operational data (e.g. the officer
+ * clock-in site picker, internal chat, radio) which clients must never see,
+ * but where finer employee-vs-admin scoping isn't required.
  */
 export function requireStaff(req: Request, res: Response, next: NextFunction): void {
   requireAuth(req, res, () => {
     const role = req.user?.role;
-    if (role !== "admin" && role !== "dispatcher" && role !== "employee") {
+    if (role !== "admin" && role !== "dispatcher" && role !== "employee" && role !== "site_manager") {
       res.status(403).json({ error: "Forbidden", message: "Staff access required" });
       return;
     }
