@@ -12,8 +12,9 @@
 import { Router, type RequestHandler } from "express";
 import { z } from "zod/v4";
 import { eq, sql } from "drizzle-orm";
-import { db, platformFeatureOverridesTable, platformCustomerConfigTable, platformBrandConfigTable } from "@workspace/db";
-import { requireAuth } from "../middlewares/auth";
+import { db, platformFeatureOverridesTable, platformCustomerConfigTable, platformBrandConfigTable, platformAgreementDocsTable } from "@workspace/db";
+import { requireAuth, requireAdmin } from "../middlewares/auth";
+import { ObjectStorageService, ObjectNotFoundError } from "../lib/objectStorage";
 import { brand, applyBrandOverrides } from "../lib/brandConfig";
 import {
   type FeatureKey,
@@ -169,6 +170,138 @@ router.put("/admin/platform/brand", requireAuth, requireSuperAdmin, async (req, 
   // immediately without a restart.
   applyBrandOverrides(config ?? null);
   res.json({ config });
+});
+
+// ---- Platform agreement documents (Legal & Agreements page) ----------------
+//
+// Each "slot" is one of the bundled platform agreements (MSA, User Agreement).
+// A super-admin can upload the *actual* signed/finalized PDF for a slot; the
+// portal then serves that document instead of the bundled template. Deleting
+// the slot's row reverts to the template. Regular admins can read status and
+// download the uploaded document; only the super-admin can change it.
+
+const storage = new ObjectStorageService();
+
+const AGREEMENT_SLOTS = ["msa", "user_agreement"] as const;
+type AgreementSlot = (typeof AGREEMENT_SLOTS)[number];
+const MAX_AGREEMENT_PDF_BYTES = 15 * 1024 * 1024; // 15 MB
+
+function parseAgreementSlot(raw: string | string[] | undefined): AgreementSlot | null {
+  if (typeof raw !== "string") return null;
+  return AGREEMENT_SLOTS.includes(raw as AgreementSlot) ? (raw as AgreementSlot) : null;
+}
+
+type AgreementSlotDto = {
+  slot: AgreementSlot;
+  custom: {
+    fileName: string;
+    fileSize: number | null;
+    uploadedAt: string | null;
+    uploadedBy: string | null;
+  } | null;
+};
+
+function agreementRowToDto(slot: AgreementSlot, row: typeof platformAgreementDocsTable.$inferSelect | undefined): AgreementSlotDto {
+  return {
+    slot,
+    custom: row
+      ? {
+          fileName: row.fileName,
+          fileSize: row.fileSize,
+          uploadedAt: row.uploadedAt ? row.uploadedAt.toISOString() : null,
+          uploadedBy: row.uploadedBy,
+        }
+      : null,
+  };
+}
+
+/** Per-slot status: has an actual document been uploaded, or is the template in effect? */
+router.get("/admin/platform/agreements", requireAdmin, async (_req, res) => {
+  const rows = await db.select().from(platformAgreementDocsTable);
+  const bySlot = new Map(rows.map((r) => [r.slot, r]));
+  res.json({ agreements: AGREEMENT_SLOTS.map((slot) => agreementRowToDto(slot, bySlot.get(slot))) });
+});
+
+/** Short-lived signed URL for viewing/downloading the uploaded document of a slot. */
+router.get("/admin/platform/agreements/:slot/url", requireAdmin, async (req, res) => {
+  const slot = parseAgreementSlot(req.params["slot"]);
+  if (!slot) { res.status(404).json({ error: "Not Found", message: "Unknown agreement slot" }); return; }
+  const [row] = await db.select().from(platformAgreementDocsTable).where(eq(platformAgreementDocsTable.slot, slot)).limit(1);
+  if (!row) { res.status(404).json({ error: "Not Found", message: "No uploaded document for this agreement" }); return; }
+  try {
+    const url = await storage.getSignedDownloadURL(row.fileKey);
+    res.json({ url, fileName: row.fileName });
+  } catch (err) {
+    if (err instanceof ObjectNotFoundError) {
+      res.status(404).json({ error: "Not Found", message: "The uploaded document is missing from storage" });
+      return;
+    }
+    throw err;
+  }
+});
+
+const agreementUploadBody = z.object({
+  fileKey: z.string().min(1),
+  fileName: z.string().min(1).max(300),
+});
+
+/**
+ * Register an uploaded PDF (via the standard presigned-upload flow) as the
+ * actual document for a slot. The server re-downloads the object to verify it
+ * exists, is a real PDF (magic bytes), and is within the size cap — the
+ * client-declared metadata on the presigned PUT is not trusted.
+ */
+router.put("/admin/platform/agreements/:slot", requireAuth, requireSuperAdmin, async (req, res) => {
+  const slot = parseAgreementSlot(req.params["slot"]);
+  if (!slot) { res.status(404).json({ error: "Not Found", message: "Unknown agreement slot" }); return; }
+  const parsed = agreementUploadBody.safeParse(req.body);
+  if (!parsed.success) {
+    res.status(400).json({ error: "Bad request", issues: parsed.error.issues });
+    return;
+  }
+
+  const normalized = storage.normalizeObjectEntityPath(parsed.data.fileKey);
+  let size: number;
+  let head: Buffer;
+  try {
+    const dl = await storage.downloadObjectBuffer(normalized, { maxBytes: MAX_AGREEMENT_PDF_BYTES });
+    size = dl.size;
+    head = dl.buffer.subarray(0, 5);
+  } catch (err) {
+    if (err instanceof ObjectNotFoundError) {
+      res.status(400).json({ error: "Bad request", message: "Uploaded file not found in storage" });
+      return;
+    }
+    if ((err as { __tooLarge?: boolean }).__tooLarge) {
+      res.status(400).json({ error: "Bad request", message: "PDF exceeds the 15 MB limit" });
+      return;
+    }
+    throw err;
+  }
+  if (head.toString("latin1") !== "%PDF-") {
+    res.status(400).json({ error: "Bad request", message: "File is not a PDF" });
+    return;
+  }
+
+  const editor = req.user?.email ?? "unknown";
+  await db
+    .insert(platformAgreementDocsTable)
+    .values({ slot, fileKey: normalized, fileName: parsed.data.fileName, fileSize: size, uploadedBy: editor })
+    .onConflictDoUpdate({
+      target: platformAgreementDocsTable.slot,
+      set: { fileKey: normalized, fileName: parsed.data.fileName, fileSize: size, uploadedBy: editor, uploadedAt: sql`now()` },
+    });
+
+  const [row] = await db.select().from(platformAgreementDocsTable).where(eq(platformAgreementDocsTable.slot, slot)).limit(1);
+  res.json(agreementRowToDto(slot, row));
+});
+
+/** Revert a slot to the bundled template (removes the uploaded-document record). */
+router.delete("/admin/platform/agreements/:slot", requireAuth, requireSuperAdmin, async (req, res) => {
+  const slot = parseAgreementSlot(req.params["slot"]);
+  if (!slot) { res.status(404).json({ error: "Not Found", message: "Unknown agreement slot" }); return; }
+  await db.delete(platformAgreementDocsTable).where(eq(platformAgreementDocsTable.slot, slot));
+  res.json(agreementRowToDto(slot, undefined));
 });
 
 export default router;

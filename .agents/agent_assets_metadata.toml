@@ -95,3 +95,15 @@ id = "fzVgt9AWcrYT4wo4peRuR"
 uri = "file://docs/new-customer-setup-runbook.pdf"
 type = "pdf"
 title = "New Customer Setup Runbook (PDF)"
+
+[[outputs]]
+id = "RzYReqRLg3vouifyyRKFH"
+uri = "file://.local/tasks/rgp-handoff.md"
+type = "text"
+title = "RGP handoff — WCSG source files bundle"
+
+[[outputs]]
+id = "-7DS0rRViR1uk3YzxSLW3"
+uri = "file://lib/api-spec/openapi.yaml"
+type = "unspecified"
+title = "WCSG OpenAPI spec (for diffing against RGP)"

@@ -86,3 +86,4 @@
 - [Brand schema version skew](brand-schema-version-skew.md) — new brandConfigSchema fields must be .optional() or stale control-plane/portal clients 400 on brand saves; audit email SUBJECTs after signature replace_all.
 - [Admin portal mobile overflow](admin-portal-mobile-overflow-pattern.md) — h-dvh shell, overflow-x-auto+focusable region on wide tables, no per-dialog max-h overrides, grid-cols-1 sm:grid-cols-2 form grids.
 - [Org origin self-heal refresh](org-refresh-stale-origin.md) — launch refresh of pinned org origin must never gate/disconnect; re-check storage before persisting (switch-org race).
+- [Signed URL browser CORS](signed-url-browser-cors.md) — signed storage URLs send ACAO:*; browser fetch→blob download works and is the only way to keep the real filename (no Content-Disposition).

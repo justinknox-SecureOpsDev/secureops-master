@@ -72,3 +72,21 @@ export const platformBrandConfigTable = pgTable("platform_brand_config", {
 });
 
 export type PlatformBrandConfig = typeof platformBrandConfigTable.$inferSelect;
+
+/**
+ * Uploaded "actual" platform agreement documents. One row per slot
+ * (`msa` | `user_agreement`). When a row exists, the admin portal's
+ * Legal & Agreements page serves this uploaded PDF instead of the
+ * bundled template; deleting the row reverts to the template. Managed
+ * exclusively by the platform super-admin via /admin/platform/agreements.
+ */
+export const platformAgreementDocsTable = pgTable("platform_agreement_docs", {
+  slot: text("slot").primaryKey(), // "msa" | "user_agreement"
+  fileKey: text("file_key").notNull(), // canonical /objects/... path
+  fileName: text("file_name").notNull(),
+  fileSize: integer("file_size"),
+  uploadedAt: timestamp("uploaded_at", { withTimezone: true }).notNull().defaultNow(),
+  uploadedBy: text("uploaded_by"),
+});
+
+export type PlatformAgreementDoc = typeof platformAgreementDocsTable.$inferSelect;
