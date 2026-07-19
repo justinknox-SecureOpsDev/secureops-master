@@ -39,6 +39,21 @@ Reserved VM -> Networking pane. There is no agent tool for port mapping.
 deploy-time `NODE_ENV=production` will still install vite/esbuild for the build.
 (npm behaves differently — it omits devDeps under NODE_ENV=production.)
 
+**Serving the Expo app's WEB export at a sub-path:** an Expo SPA can join the
+single-port layout (e.g. at `/app/`) by running `expo export --platform web`
+with the base path injected via a dynamic `app.config.js` that sets
+`experiments.baseUrl` ONLY when an env var (e.g. `EXPO_WEB_BASE_URL`) is set —
+this keeps dev `expo start`, EAS native builds, and OTA updates untouched
+because those runs never set the var (build-script `run()` must pass extraEnv
+per-child, never mutate `process.env`). Mount it exactly like the other SPAs
+(bare→302, `express.static index:false`, HTML history fallback) but ADD an
+asset-like guard (dot in final path segment → 404): script requests send
+`Accept: */*`, which `req.accepts("html")` treats as HTML, so a stale hashed
+bundle after a redeploy would otherwise get the HTML shell served as JS.
+Expo's exported HTML satisfies a `script-src 'self'` CSP (one external script,
+inline style only). Cover the new surface in the front-door gate with a FRESH
+export — reusing a stale `web-dist` would mask a baseUrl regression.
+
 **The real single-vs-multi-artifact switch is the COUNT of `deploymentTarget = "vm"`
 artifacts, NOT `[deployment] router = "application"`.** A working single-port VM
 publish kept `router = "application"` and the full `[[ports]]` list untouched the

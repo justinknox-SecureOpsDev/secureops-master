@@ -26,6 +26,8 @@ function escapeForRegExp(value: string): string {
  *
  * Layout served on one port:
  *   - The admin portal lives under `/admin-portal/` (its own base path).
+ *   - The Expo mobile app's WEB export lives under `/app/` (exported with
+ *     `experiments.baseUrl = "/app"` so its assets + router basename match).
  *   - The marketing site (`home`) is the FRONT DOOR at the bare root `/` — its
  *     assets are emitted with absolute `/assets/...` URLs, so it owns the root.
  *
@@ -41,8 +43,10 @@ function escapeForRegExp(value: string): string {
 export function mountStaticFrontends(app: Express): void {
   const adminDir = path.join(STATIC_ROOT, "admin-portal");
   const homeDir = path.join(STATIC_ROOT, "home");
+  const appDir = path.join(STATIC_ROOT, "app");
   const hasAdmin = fs.existsSync(path.join(adminDir, "index.html"));
   const hasHome = fs.existsSync(path.join(homeDir, "index.html"));
+  const hasApp = fs.existsSync(path.join(appDir, "index.html"));
 
   if (!hasAdmin) {
     logger.warn(
@@ -56,8 +60,14 @@ export function mountStaticFrontends(app: Express): void {
       "Static frontend not found — skipping marketing site (expected in dev/test; built only for single-VM production)",
     );
   }
+  if (!hasApp) {
+    logger.warn(
+      { dir: appDir },
+      "Static frontend not found — skipping mobile web app (expected in dev/test; built only for single-VM production)",
+    );
+  }
 
-  if (!hasAdmin && !hasHome) {
+  if (!hasAdmin && !hasHome && !hasApp) {
     return;
   }
 
@@ -89,6 +99,36 @@ export function mountStaticFrontends(app: Express): void {
     });
   }
 
+  // --- Mobile web app under /app ------------------------------------------
+  // The Expo web export is a single-page app (client-side Expo Router). Its
+  // index.html + hashed /app/_expo/static assets are emitted with the /app
+  // baseUrl, so serving mirrors the admin portal exactly: bare-mount redirect,
+  // real files first, then an HTML history fallback for client-side routes.
+  if (hasApp) {
+    const appIndex = path.join(appDir, "index.html");
+    const escaped = escapeForRegExp("/app");
+
+    // Bare mount without trailing slash -> redirect (anchored with `$` so it
+    // never matches "/app/" and loops — same reasoning as /admin-portal).
+    app.get(new RegExp(`^${escaped}$`), (_req: Request, res: Response) => {
+      res.redirect("/app/");
+    });
+
+    app.use("/app", express.static(appDir, { index: false, fallthrough: true }));
+
+    // SPA history fallback: any GET under /app/ that wants HTML and isn't a
+    // real asset -> the Expo web shell (Expo Router resolves the route).
+    // Asset-like paths (a dot in the final segment, e.g. a stale hashed
+    // bundle after a redeploy) must 404, not get HTML served as JS — script
+    // requests send `Accept: */*`, which req.accepts("html") treats as HTML.
+    app.get(new RegExp(`^${escaped}/`), (req: Request, res: Response, next: NextFunction) => {
+      if (!req.accepts("html")) return next();
+      const lastSegment = req.path.slice(req.path.lastIndexOf("/") + 1);
+      if (lastSegment.includes(".")) return next();
+      res.sendFile(appIndex);
+    });
+  }
+
   // --- Marketing site at the bare root / ---------------------------------
   if (hasHome) {
     const homeIndex = path.join(homeDir, "index.html");
@@ -107,6 +147,11 @@ export function mountStaticFrontends(app: Express): void {
       const p = req.path;
       if (p === "/api" || p.startsWith("/api/")) return next();
       if (p === "/admin-portal" || p.startsWith("/admin-portal/")) return next();
+      // Only reserved when the mobile web build is actually present — if it
+      // ever goes missing (defensive; the single-VM build fails fast on a
+      // missing export), /app falls back to the marketing shell instead of a
+      // bare 404 so a stale bookmark still lands somewhere navigable.
+      if (hasApp && (p === "/app" || p.startsWith("/app/"))) return next();
       // Don't hand the SPA shell to asset-like requests (a dot in the final
       // path segment, e.g. /missing.js). express.static already served real
       // files above; anything left that looks like a file should 404, not
@@ -117,7 +162,13 @@ export function mountStaticFrontends(app: Express): void {
     });
 
     logger.info(
-      { mounted: hasAdmin ? ["/", "/admin-portal"] : ["/"] },
+      {
+        mounted: [
+          "/",
+          ...(hasAdmin ? ["/admin-portal"] : []),
+          ...(hasApp ? ["/app"] : []),
+        ],
+      },
       "Static frontends mounted (single-VM mode) — marketing site at root",
     );
     return;

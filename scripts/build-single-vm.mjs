@@ -1,9 +1,10 @@
 // Single-port production build for Reserved VM deployment.
 //
 // Builds the web SPAs (admin portal + home) with their production base paths,
-// builds the API server bundle, then copies the SPA build outputs into the API
-// server's dist/static so the deployed server is self-contained and serves the
-// whole product on ONE port. This is what `deployConfig`'s build command runs.
+// exports the Expo mobile app for the web (served at /app), builds the API
+// server bundle, then copies all build outputs into the API server's
+// dist/static so the deployed server is self-contained and serves the whole
+// product on ONE port. This is what `deployConfig`'s build command runs.
 //
 // Dev is unaffected: each artifact keeps running on its own Vite/Node workflow.
 import { execSync } from "node:child_process";
@@ -35,6 +36,16 @@ run("pnpm --filter @workspace/home run build", {
   BASE_PATH: "/",
 });
 
+// 1b. Export the Expo mobile app for the WEB, rooted at /app, so officers can
+//     use the app from a phone browser without installing the native app.
+//     EXPO_WEB_BASE_URL is read by artifacts/security-ops/app.config.js and
+//     becomes `experiments.baseUrl`, prefixing every emitted asset URL and the
+//     Expo Router basename with /app. Dev and native/OTA builds never set it.
+run("pnpm --filter @workspace/security-ops run build", {
+  NODE_ENV: "production",
+  EXPO_WEB_BASE_URL: "/app",
+});
+
 // 2. Build the API server (esbuild single bundle -> artifacts/api-server/dist).
 run("pnpm --filter @workspace/api-server run build", { NODE_ENV: "production" });
 
@@ -47,6 +58,7 @@ mkdirSync(staticRoot, { recursive: true });
 const copies = [
   { from: "artifacts/admin-portal/dist/public", to: "admin-portal" },
   { from: "artifacts/home/dist/public", to: "home" },
+  { from: "artifacts/security-ops/web-dist", to: "app" },
 ];
 for (const c of copies) {
   const fromAbs = path.join(root, c.from);
@@ -57,7 +69,9 @@ for (const c of copies) {
   console.log(`Copied ${c.from} -> artifacts/api-server/dist/static/${c.to}`);
 }
 
-console.log("\n\u2705 Single-VM build complete: API + admin-portal + home bundled on one port.");
+console.log(
+  "\n\u2705 Single-VM build complete: API + admin-portal + home + mobile web (/app) bundled on one port.",
+);
 
 // 4. Optional OTA publish on deploy. When this build runs with an EXPO_TOKEN
 //    available (add it as a Replit secret so the deploy builder can see it),

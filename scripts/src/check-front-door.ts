@@ -6,9 +6,10 @@
  * Usage:
  *   pnpm --filter @workspace/scripts run check-front-door
  *
- * The single deployed process serves THREE things on ONE port:
+ * The single deployed process serves FOUR things on ONE port:
  *   - the marketing site ("home") at the bare root `/`,
  *   - the admin portal under `/admin-portal/`,
+ *   - the Expo mobile app's web export under `/app/`,
  *   - the JSON API under `/api`.
  *
  * The wiring that keeps these from colliding lives in
@@ -234,6 +235,14 @@ async function main(): Promise<void> {
     PORT: "8082",
     BASE_PATH: "/",
   });
+  // Export the Expo mobile app for the web exactly as build-single-vm.mjs
+  // does. EXPO_WEB_BASE_URL drives `experiments.baseUrl` via app.config.js —
+  // a FRESH export is required here (never reuse a stale web-dist) because
+  // the /app asset-URL assertions below are what catch a baseUrl regression.
+  run("pnpm --filter @workspace/security-ops run build", {
+    NODE_ENV: "production",
+    EXPO_WEB_BASE_URL: "/app",
+  });
 
   // 2. Build the api-server into a private, isolated dir so we never race the
   //    api-server dev workflow rebuilding (and momentarily clearing) the shared
@@ -264,6 +273,7 @@ async function main(): Promise<void> {
     const copies = [
       { from: "artifacts/admin-portal/dist/public", to: "admin-portal" },
       { from: "artifacts/home/dist/public", to: "home" },
+      { from: "artifacts/security-ops/web-dist", to: "app" },
     ];
     for (const c of copies) {
       const fromAbs = path.join(ROOT, c.from);
@@ -359,6 +369,61 @@ async function main(): Promise<void> {
         name: "GET /admin-portal redirects to the trailing slash",
         ok: (adminBare.status === 301 || adminBare.status === 302) && loc.endsWith("/admin-portal/"),
         detail: `status ${adminBare.status} location ${loc || "(none)"}`,
+      });
+
+      // --- Mobile web app owns /app/ -------------------------------------
+      const appShell = await request(port, "/app/");
+      const appRefsExpo = /["']\/app\/_expo\//.test(appShell.body);
+      checks.push({ name: "GET /app/ -> 200", ok: appShell.status === 200, detail: `status ${appShell.status}` });
+      checks.push({
+        name: "GET /app/ is the mobile web shell (references /app/_expo/...)",
+        ok: appRefsExpo,
+      });
+
+      const appBare = await request(port, "/app");
+      const appLoc = header(appBare.headers, "location");
+      checks.push({
+        name: "GET /app redirects to the trailing slash",
+        ok: (appBare.status === 301 || appBare.status === 302) && appLoc.endsWith("/app/"),
+        detail: `status ${appBare.status} location ${appLoc || "(none)"}`,
+      });
+
+      // Deep link into the mobile SPA survives a refresh (Expo Router route).
+      const appDeep = await request(port, "/app/login");
+      checks.push({
+        name: "GET /app/login (deep link) returns the same mobile web shell",
+        ok: appDeep.status === 200 && appDeep.body === appShell.body,
+        detail: `status ${appDeep.status}`,
+      });
+
+      // The hashed Expo bundle referenced by the shell is served as real JS.
+      const appIndexHtml = readFileSync(path.join(staticRoot, "app", "index.html"), "utf8");
+      const appAssetMatch = appIndexHtml.match(/["'](\/app\/_expo\/[^"']+?\.js)["']/);
+      if (!appAssetMatch) {
+        checks.push({
+          name: "mobile index.html references a hashed /app/_expo/*.js bundle",
+          ok: false,
+          detail: "no <script src=/app/_expo/*.js> found (baseUrl regression?)",
+        });
+      } else {
+        const appAsset = await request(port, appAssetMatch[1]);
+        const appAssetType = header(appAsset.headers, "content-type");
+        checks.push({
+          name: `GET ${appAssetMatch[1].slice(0, 60)}… -> 200 with a JS content-type`,
+          ok: appAsset.status === 200 && /javascript/.test(appAssetType),
+          detail: `status ${appAsset.status} type ${appAssetType}`,
+        });
+      }
+
+      // An asset-like miss (e.g. a stale hashed bundle after a redeploy) must
+      // 404, never come back as the HTML shell — even with a browser Accept.
+      const appStale = await request(port, "/app/_expo/static/js/web/stale-bundle-does-not-exist.js", {
+        accept: "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+      });
+      checks.push({
+        name: "GET /app/<missing .js> -> 404 (asset-like paths never get the HTML shell)",
+        ok: appStale.status === 404,
+        detail: `status ${appStale.status}`,
       });
 
       // --- API is never shadowed by the root fallback -------------------
