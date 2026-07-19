@@ -49,6 +49,16 @@ export function signToken(payload: { userId: string; email: string; role: string
   return jwt.sign({ ...payload, jti }, JWT_SECRET, { expiresIn: `${TOKEN_TTL_DAYS}d` });
 }
 
+/**
+ * Mint a short-lived (120 s) scope-limited token for one-shot URL-based
+ * PDF downloads.  The scope claim ensures that full session JWTs cannot
+ * be used in a `?token=` query string — only tokens produced here will
+ * pass the `requireAuthOrQueryToken` guard in routes/employees.ts.
+ */
+export function signDownloadToken(payload: { userId: string; email: string; role: string }): string {
+  return jwt.sign({ ...payload, scope: "pdf-download" }, JWT_SECRET, { expiresIn: "120s" });
+}
+
 export function verifyToken(token: string): JwtPayload {
   return jwt.verify(token, JWT_SECRET) as JwtPayload;
 }
@@ -108,6 +118,86 @@ async function stampLastActive(userId: string): Promise<void> {
   }
 }
 
+/**
+ * Run the live-DB half of the auth pipeline (user status, revocation
+ * watermark, per-jti revocation, req.user attachment, last-active stamp,
+ * mustChangePassword gate) for a pre-verified JWT payload.
+ *
+ * Returns true and populates req.user on success.
+ * Returns false and has already sent a 401/403 response on failure.
+ *
+ * Used by `requireAuthOrQueryToken` in routes/employees.ts so that the
+ * scoped-download-token path can run the full DB checks without going
+ * through `requireAuth` (which correctly blocks scoped tokens as bearer
+ * credentials on other API routes).
+ */
+export async function verifyAndAttachUser(
+  payload: JwtPayload,
+  req: Request,
+  res: Response,
+): Promise<boolean> {
+  const [user] = await db
+    .select({
+      id: usersTable.id,
+      email: usersTable.email,
+      role: usersTable.role,
+      status: usersTable.status,
+      mustChangePassword: usersTable.mustChangePassword,
+      tokensValidAfter: usersTable.tokensValidAfter,
+    })
+    .from(usersTable)
+    .where(eq(usersTable.id, payload.userId))
+    .limit(1);
+
+  if (!user || user.status !== "active") {
+    res.status(401).json({ error: "Unauthorized", message: "Account is not active" });
+    return false;
+  }
+
+  const iatMs = (payload.iat ?? 0) * 1000;
+  if (iatMs < user.tokensValidAfter.getTime()) {
+    res.status(401).json({ error: "Unauthorized", message: "Session was revoked. Please sign in again." });
+    return false;
+  }
+
+  if (payload.jti) {
+    const [revoked] = await db
+      .select({ jti: revokedTokensTable.jti })
+      .from(revokedTokensTable)
+      .where(eq(revokedTokensTable.jti, payload.jti))
+      .limit(1);
+    if (revoked) {
+      res.status(401).json({ error: "Unauthorized", message: "Session was revoked. Please sign in again." });
+      return false;
+    }
+  }
+
+  req.user = {
+    userId: user.id,
+    email: user.email,
+    role: user.role,
+    jti: payload.jti,
+    iat: payload.iat,
+    exp: payload.exp,
+  };
+
+  void stampLastActive(user.id);
+
+  if (user.mustChangePassword) {
+    const allowed = req.path.startsWith("/auth/");
+    if (!allowed) {
+      res.status(403).json({
+        error: "Forbidden",
+        message: "You must change your password before accessing this resource",
+        mustChangePassword: true,
+      });
+      return false;
+    }
+  }
+
+  return true;
+}
+
 export async function requireAuth(req: Request, res: Response, next: NextFunction): Promise<void> {
   const authHeader = req.headers.authorization;
   if (!authHeader || !authHeader.startsWith("Bearer ")) {
@@ -115,11 +205,22 @@ export async function requireAuth(req: Request, res: Response, next: NextFunctio
     return;
   }
   const token = authHeader.slice(7);
-  let payload: JwtPayload;
+  let payload: JwtPayload & { scope?: string };
   try {
-    payload = verifyToken(token);
+    payload = verifyToken(token) as JwtPayload & { scope?: string };
   } catch {
     res.status(401).json({ error: "Unauthorized", message: "Invalid or expired token" });
+    return;
+  }
+
+  // Reject scope-limited tokens (e.g. "pdf-download") at the standard bearer
+  // auth boundary. Scoped tokens are short-lived, purpose-specific credentials
+  // that must ONLY be accepted by the route that explicitly handles that scope
+  // (e.g. `requireAuthOrQueryToken` in routes/employees.ts). Allowing them
+  // through the general auth pipeline would widen their blast radius to the
+  // entire API for their ~120 s lifetime.
+  if (payload.scope) {
+    res.status(401).json({ error: "Unauthorized", message: "Scoped tokens cannot be used for general API access" });
     return;
   }
 

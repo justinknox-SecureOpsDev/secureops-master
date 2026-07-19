@@ -59,6 +59,19 @@ function buildWatermarkUrl(token: string, slot: string): string | null {
     : null;
 }
 
+/**
+ * Build an absolute URL pointing at the revocation-aware photo proxy
+ * for this share. Returns null when no trusted origin is configured.
+ * We never hand out a raw signed object-storage URL for the photo
+ * because those persist beyond revocation.
+ */
+function buildPhotoUrl(token: string): string | null {
+  const origin = trustedPublicOrigin();
+  return origin
+    ? `${origin}/api/public/employee-shares/${encodeURIComponent(token)}/photo`
+    : null;
+}
+
 /** First 8 chars of the share token — short enough to skim, long enough to disambiguate in audits. */
 function shortIdOf(token: string): string {
   return token.slice(0, 8);
@@ -327,11 +340,11 @@ router.get("/public/employee-shares/:token", tokenLookupLimiter, async (req, res
     return;
   }
 
-  let photoUrl: string | null = null;
-  if (row.photoKey) {
-    try { photoUrl = await storage.getSignedDownloadURL(row.photoKey, 300); }
-    catch (err) { req.log.warn({ err, key: row.photoKey }, "Could not sign photo"); }
-  }
+  // Route the photo through the revocation-aware proxy endpoint instead
+  // of a direct signed storage URL.  Signed URLs persist for their TTL
+  // even after the share is revoked; the proxy endpoint re-checks
+  // revocation on every request so access terminates immediately.
+  const photoUrl: string | null = row.photoKey ? buildPhotoUrl(token) : null;
 
   // Sanitized payload — explicitly no email, no phone, no address, no
   // DOB, no SSN (even masked), no banking, no emergency contact, no
@@ -465,6 +478,51 @@ router.get(
     res.setHeader("Cache-Control", "private, no-store");
     payload.stream.pipe(res);
     void Readable;
+  },
+);
+
+// ---------- Public: photo proxy ----------
+// Re-checks share revocation on every access so that revoking a share
+// immediately prevents further photo downloads — direct signed storage
+// URLs would remain usable for up to 5 minutes after revocation.
+router.get(
+  "/public/employee-shares/:token/photo",
+  tokenLookupLimiter,
+  async (req: Request, res: Response): Promise<void> => {
+    const token = String(req.params.token);
+
+    // Re-check on every access — revocation takes effect immediately.
+    const r = await loadActiveShare(token);
+    if (r.status !== 200) { res.status(r.status).json({ error: r.error }); return; }
+
+    const [empRow] = await db
+      .select({ photoKey: employeesTable.photoKey })
+      .from(employeesTable)
+      .where(eq(employeesTable.userId, r.share.employeeUserId));
+
+    if (!empRow?.photoKey) { res.status(404).json({ error: "Photo not found" }); return; }
+
+    let source: { buffer: Buffer; contentType: string; filename: string };
+    try {
+      source = await storage.downloadObjectBuffer(empRow.photoKey);
+    } catch (err) {
+      if (err instanceof ObjectNotFoundError) {
+        res.status(404).json({ error: "Photo not found" });
+        return;
+      }
+      req.log.error({ err, key: empRow.photoKey }, "Could not fetch share photo");
+      res.status(502).json({ error: "Photo unavailable" });
+      return;
+    }
+
+    res.setHeader("Content-Type", source.contentType);
+    res.setHeader("Content-Length", String(source.buffer.length));
+    res.setHeader("Cache-Control", "private, no-store");
+    res.setHeader(
+      "Content-Disposition",
+      `inline; filename="${source.filename.replace(/[\r\n"\\]/g, "_")}"`,
+    );
+    res.status(200).end(source.buffer);
   },
 );
 

@@ -117,11 +117,19 @@ export function attachWebSocketServer(server: Server) {
 
     if (!token) { ws.close(1008, "Token required"); return; }
 
-    let payload: { userId: string; role: string; email: string; jti?: string; iat?: number } | null = null;
+    type WsTokenPayload = { userId: string; role: string; email: string; jti?: string; iat?: number; scope?: string };
+    let payload: WsTokenPayload;
     try {
-      payload = verifyToken(token);
+      payload = verifyToken(token) as WsTokenPayload;
     } catch {
       ws.close(1008, "Invalid token");
+      return;
+    }
+
+    // Reject scope-limited tokens (e.g. "pdf-download"). Only full session
+    // JWTs — which carry no `scope` field — may open a WebSocket session.
+    if (payload.scope) {
+      ws.close(1008, "Scoped tokens cannot open a WebSocket session");
       return;
     }
 

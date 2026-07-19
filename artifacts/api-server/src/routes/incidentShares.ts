@@ -39,6 +39,19 @@ function buildShareUrl(token: string): string | null {
   return origin ? `${origin}/admin-portal/share/incident/${token}` : null;
 }
 
+/**
+ * Build an absolute URL pointing at the revocation-aware attachment proxy
+ * for one attachment on this share. Returns null when no trusted origin is
+ * configured — callers should omit the link so recipients cannot reach a
+ * raw signed object-storage URL that bypasses revocation checks.
+ */
+function buildAttachmentUrl(token: string, index: number): string | null {
+  const origin = trustedPublicOrigin();
+  return origin
+    ? `${origin}/api/public/incident-shares/${encodeURIComponent(token)}/attachment/${index}`
+    : null;
+}
+
 // ---------- Admin: mint a share link ----------
 router.post("/admin/incidents/:id/share", requireAdmin, async (req, res): Promise<void> => {
   const adminId = req.user!.userId;
@@ -209,17 +222,18 @@ router.get("/public/incident-shares/:token", tokenLookupLimiter, async (req, res
     return;
   }
 
-  // Sign each attachment for direct GCS download. Short TTL since these
-  // are returned over the public link surface.
-  const signedAttachments: { key: string; url: string }[] = [];
-  for (const key of row.attachments ?? []) {
+  // Route each attachment through the revocation-aware proxy endpoint
+  // instead of minting direct signed storage URLs. Signed URLs remain
+  // valid for their TTL even after the share is revoked; proxy URLs are
+  // checked against the share record on every request so revocation takes
+  // effect immediately.
+  const attachmentKeys = (row.attachments ?? []) as unknown[];
+  const proxyAttachments: { key: string; url: string }[] = [];
+  for (let i = 0; i < attachmentKeys.length; i++) {
+    const key = attachmentKeys[i];
     if (typeof key !== "string" || !key.startsWith("/objects/")) continue;
-    try {
-      const url = await storage.getSignedDownloadURL(key, 300);
-      signedAttachments.push({ key, url });
-    } catch (err) {
-      if (!(err instanceof ObjectNotFoundError)) req.log.warn({ err, key }, "Could not sign attachment");
-    }
+    const url = buildAttachmentUrl(token, i);
+    if (url) proxyAttachments.push({ key, url });
   }
 
   // Sanitized payload — explicitly no internal admin notes, no employee
@@ -245,13 +259,69 @@ router.get("/public/incident-shares/:token", tokenLookupLimiter, async (req, res
     responderName,
     siteName: row.siteName,
     shiftTitle: row.shiftTitle,
-    attachments: signedAttachments,
+    attachments: proxyAttachments,
     share: {
       expiresAt: r.share.expiresAt,
       viewCount: r.share.viewCount + 1,
     },
   });
 });
+
+// ---------- Public: proxy attachment by token + index ----------
+// Re-checks share revocation on every access so that revoking a share
+// immediately prevents further downloads — signed URLs returned in the
+// JSON body would remain usable for up to 5 minutes after revocation.
+router.get(
+  "/public/incident-shares/:token/attachment/:index",
+  tokenLookupLimiter,
+  async (req: Request, res: Response): Promise<void> => {
+    const token = String(req.params.token);
+    const index = Number(req.params.index);
+    if (!Number.isInteger(index) || index < 0) {
+      res.status(400).json({ error: "Bad Request", message: "Invalid attachment index" });
+      return;
+    }
+
+    // Re-check on every access — revocation takes effect immediately.
+    const r = await loadActiveShare(token);
+    if (r.status !== 200) { res.status(r.status).json({ error: r.error }); return; }
+
+    const [incRow] = await db
+      .select({ attachments: incidentsTable.attachments })
+      .from(incidentsTable)
+      .where(eq(incidentsTable.id, r.share.incidentId));
+    if (!incRow) { res.status(404).json({ error: "Attachment not found" }); return; }
+
+    const attachments = (incRow.attachments ?? []) as unknown[];
+    const key = typeof attachments[index] === "string" ? (attachments[index] as string) : null;
+    if (!key || !key.startsWith("/objects/")) {
+      res.status(404).json({ error: "Attachment not found" });
+      return;
+    }
+
+    let source: { buffer: Buffer; contentType: string; filename: string };
+    try {
+      source = await storage.downloadObjectBuffer(key);
+    } catch (err) {
+      if (err instanceof ObjectNotFoundError) {
+        res.status(404).json({ error: "Attachment not found" });
+        return;
+      }
+      req.log.error({ err, key }, "Could not fetch share attachment");
+      res.status(502).json({ error: "Attachment unavailable" });
+      return;
+    }
+
+    res.setHeader("Content-Type", source.contentType);
+    res.setHeader("Content-Length", String(source.buffer.length));
+    res.setHeader("Cache-Control", "private, no-store");
+    res.setHeader(
+      "Content-Disposition",
+      `attachment; filename="${source.filename.replace(/[\r\n"\\]/g, "_")}"`,
+    );
+    res.status(200).end(source.buffer);
+  },
+);
 
 // ---------- Public: stream the incident PDF by token ----------
 // Uses the stricter expensive-share limiter on top of tokenLookupLimiter

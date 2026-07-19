@@ -615,15 +615,26 @@ export default function EmployeeProfileScreen() {
         </TouchableOpacity>
         <TouchableOpacity
           onPress={async () => {
-            // Token-in-query mirrors the server's `requireAuthOrQueryToken`
-            // shim — system browser can't set Authorization headers, so we
-            // hand it the same JWT we'd otherwise send as a Bearer header.
+            // The system browser cannot set Authorization headers, so we
+            // mint a short-lived (120 s) scoped download token first and
+            // embed that in the URL instead of the full session JWT.
+            // This prevents the session credential from appearing in
+            // browser history, MDM logs, or other URL-observing surfaces.
             try {
-              const token = await storage.get(AUTH_TOKEN_KEY);
-              if (!token) {
+              const sessionToken = await storage.get(AUTH_TOKEN_KEY);
+              if (!sessionToken) {
                 Alert.alert("Sign-in required", "Please sign in again before downloading your profile.");
                 return;
               }
+              const resp = await fetch(`${getApiBaseUrl()}/me/profile/pdf/request-url`, {
+                method: "POST",
+                headers: { Authorization: `Bearer ${sessionToken}` },
+              });
+              if (!resp.ok) {
+                Alert.alert("Could not download", "Failed to prepare the download. Please try again.");
+                return;
+              }
+              const { token } = await resp.json() as { token: string };
               const url = `${getApiBaseUrl()}/me/profile/pdf?token=${encodeURIComponent(token)}`;
               const can = await Linking.canOpenURL(url);
               if (can) await Linking.openURL(url);

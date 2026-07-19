@@ -2,7 +2,7 @@ import { Router, type IRouter } from "express";
 import bcrypt from "bcryptjs";
 import { eq, ilike, and, sql, desc } from "drizzle-orm";
 import { db, usersTable, employeesTable, licensesTable, employeeChangesTable } from "@workspace/db";
-import { requireAuth, requireAdmin, requireAdminOrDispatcher, requireSchedulingStaff, verifyToken } from "../middlewares/auth";
+import { requireAuth, requireAdmin, requireAdminOrDispatcher, requireSchedulingStaff, verifyToken, signDownloadToken, verifyAndAttachUser } from "../middlewares/auth";
 import type { Request, Response, NextFunction } from "express";
 import { buildEmployeeProfilePdf } from "../lib/profilePdf";
 import { writeEmployeeFieldChanges, CHANGE_FIELD_LABELS } from "../lib/employeeChangeLog";
@@ -53,12 +53,12 @@ const router: IRouter = Router();
  * `Linking.openURL(...)` into the system browser — which can't set
  * custom headers.
  *
- * We therefore allow the same JWT to come in via `?token=` as a fallback,
- * mirroring the WebSocket upgrade in `lib/wsManager.ts` (which has the
- * same constraint). All the production hardening still applies: tokens
- * are signed JWTs with TTL, the live user row is re-read (revocation
- * check happens in the route handler below via `req.user`), and the
- * route is otherwise a read-only download.
+ * We therefore allow a short-lived, scope-limited download token (minted
+ * by `POST /me/profile/pdf/request-url`) to come in via `?token=`.
+ * Full session JWTs are explicitly rejected in the query string to prevent
+ * long-lived credentials from being captured by browser history, MDM
+ * tooling, or other apps that observe opened URLs. The scope check ensures
+ * that only tokens produced by `signDownloadToken` are accepted here.
  */
 function requireAuthOrQueryToken(req: Request, res: Response, next: NextFunction): void {
   if (req.headers.authorization?.startsWith("Bearer ")) {
@@ -75,16 +75,29 @@ function requireAuthOrQueryToken(req: Request, res: Response, next: NextFunction
     res.status(401).json({ error: "Unauthorized", message: "No token provided" });
     return;
   }
+  let payload: ReturnType<typeof verifyToken> & { scope?: string };
   try {
-    verifyToken(token);
+    payload = verifyToken(token) as ReturnType<typeof verifyToken> & { scope?: string };
   } catch {
     res.status(401).json({ error: "Unauthorized", message: "Invalid or expired token" });
     return;
   }
-  // Re-use the canonical auth pipeline (status/revocation/mustChangePassword)
-  // by synthesizing the standard Authorization header and delegating.
-  req.headers.authorization = `Bearer ${token}`;
-  requireAuth(req, res, next);
+  // Only accept scoped download tokens in query strings. Full session JWTs
+  // carry no `scope` field — rejecting them here prevents a leaked URL from
+  // being replayed as a general-purpose API credential.
+  if (payload.scope !== "pdf-download") {
+    res.status(401).json({ error: "Unauthorized", message: "A scoped download token is required" });
+    return;
+  }
+  // Run the DB-side checks (user status, revocation, mustChangePassword,
+  // req.user attachment) directly, bypassing `requireAuth` which correctly
+  // rejects all scoped tokens when they appear as bearer credentials on
+  // unrelated API routes.
+  verifyAndAttachUser(payload, req, res).then((ok) => {
+    if (ok) next();
+  }).catch(() => {
+    res.status(500).json({ error: "Internal Server Error", message: "Authentication check failed" });
+  });
 }
 
 /**
@@ -405,6 +418,34 @@ router.get("/employees/:id", requireAuth, async (req, res): Promise<void> => {
     return;
   }
   res.json(enriched);
+});
+
+/**
+ * Mint a short-lived (120 s) scoped download token for the profile-PDF
+ * download URL so the mobile app never puts a full session JWT in a URL.
+ *
+ * The mobile app calls this endpoint (with its normal Bearer token) to
+ * obtain a `token` it can embed in `?token=` when opening the PDF URL
+ * in the system browser.  The token is scope-limited to "pdf-download"
+ * and expires in 120 seconds, so a captured URL cannot be replayed as a
+ * general-purpose API credential.
+ */
+router.post("/me/profile/pdf/request-url", requireAuth, (req, res): void => {
+  const u = req.user!;
+  const token = signDownloadToken({ userId: u.userId, email: u.email, role: u.role });
+  res.json({ token });
+});
+
+/** Admin/self variant — allows an admin to download any employee's PDF. */
+router.post("/employees/:id/profile/pdf/request-url", requireAuth, (req, res): void => {
+  const id = Array.isArray(req.params.id) ? req.params.id[0] : req.params.id;
+  if (req.user!.role !== "admin" && req.user!.userId !== id) {
+    res.status(403).json({ error: "Forbidden" });
+    return;
+  }
+  const u = req.user!;
+  const token = signDownloadToken({ userId: u.userId, email: u.email, role: u.role });
+  res.json({ token });
 });
 
 /**
