@@ -152,7 +152,7 @@ export function RepeatingShiftDialog({
 
   return (
     <Dialog open={open} onOpenChange={(b) => { if (!submitting) onOpenChange(b); }}>
-      <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
+      <DialogContent className="max-w-2xl">
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
             <Repeat className="w-5 h-5 text-brand-gold" />
@@ -206,7 +206,7 @@ export function RepeatingShiftDialog({
             </div>
           </div>
 
-          <div className="grid grid-cols-2 gap-3">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <div>
               <Label>From date <span className="text-destructive">*</span></Label>
               <Input type="date" value={startDate} onChange={(e) => setStartDate(e.target.value)} />
@@ -228,7 +228,7 @@ export function RepeatingShiftDialog({
             </div>
           </div>
 
-          <div className="grid grid-cols-2 gap-3">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <div>
               <Label>Pay rate ($/hr)</Label>
               <Input

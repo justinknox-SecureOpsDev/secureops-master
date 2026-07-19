@@ -87,7 +87,7 @@ export function BulkEditSeriesDialog({
 
   return (
     <Dialog open={open} onOpenChange={(b) => { if (!submitting) onOpenChange(b); }}>
-      <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
+      <DialogContent className="max-w-2xl">
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
             <Repeat className="w-5 h-5 text-brand-gold" />
@@ -100,7 +100,7 @@ export function BulkEditSeriesDialog({
         </DialogHeader>
 
         <div className="space-y-5 py-2">
-          <div className="grid grid-cols-2 gap-3">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <div>
               <Label>Start time</Label>
               <Input type="time" value={startTime} onChange={(e) => setStartTime(e.target.value)} />
@@ -114,7 +114,7 @@ export function BulkEditSeriesDialog({
             </div>
           </div>
 
-          <div className="grid grid-cols-2 gap-3">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <div>
               <Label>Pay rate ($/hr)</Label>
               <Input type="number" step="0.01" placeholder="unchanged" value={payRate} onChange={(e) => setPayRate(e.target.value)} />

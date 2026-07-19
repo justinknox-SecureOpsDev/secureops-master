@@ -135,7 +135,7 @@ export default function EmployeeShareLinksPage() {
       ) : rows.length === 0 ? (
         <div className="text-sm text-muted-foreground">No share links yet.</div>
       ) : (
-        <div className="border rounded-lg overflow-hidden bg-white">
+        <div className="border rounded-lg overflow-x-auto bg-white" tabIndex={0} role="region" aria-label="Employee share links table">
           <table className="w-full text-sm">
             <thead className="bg-muted/40 text-xs uppercase tracking-wider text-muted-foreground">
               <tr>

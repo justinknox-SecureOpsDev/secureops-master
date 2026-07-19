@@ -360,6 +360,7 @@ export default function SubcontractorPayRunPage() {
                     <div className="brand-gold text-lg font-semibold">{fmtUsd(vendor.total)}</div>
                   </div>
                 </div>
+                <div className="overflow-x-auto" tabIndex={0} role="region" aria-label="Subcontractor pay run table">
                 <table className="w-full text-sm">
                   <thead className="text-left text-[10px] uppercase tracking-wider text-muted-foreground">
                     <tr>
@@ -409,6 +410,7 @@ export default function SubcontractorPayRunPage() {
                     })}
                   </tbody>
                 </table>
+                </div>
               </div>
             );
           })}

@@ -575,6 +575,7 @@ export default function InvoiceBoardPage() {
                 </div>
 
                 {expanded && (
+                  <div className="overflow-x-auto" tabIndex={0} role="region" aria-label="Invoice line items table">
                   <table className="w-full text-sm">
                     <thead className="text-left text-[10px] uppercase tracking-wider text-muted-foreground">
                       <tr>
@@ -757,6 +758,7 @@ export default function InvoiceBoardPage() {
                       })}
                     </tbody>
                   </table>
+                  </div>
                 )}
               </div>
             );

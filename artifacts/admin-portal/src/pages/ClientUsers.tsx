@@ -225,7 +225,7 @@ export default function ClientUsers() {
           </Button>
         </div>
       ) : (
-        <div className="border rounded-lg overflow-hidden">
+        <div className="border rounded-lg overflow-x-auto" tabIndex={0} role="region" aria-label="Client users table">
           <table className="w-full text-sm">
             <thead>
               <tr className="bg-muted/40 border-b text-left">

@@ -554,6 +554,7 @@ export default function PayrollBoardPage() {
                 </div>
 
                 {expanded && (
+                  <div className="overflow-x-auto" tabIndex={0} role="region" aria-label="Payroll entries table">
                   <table className="w-full text-sm">
                     <thead className="text-left text-[10px] uppercase tracking-wider text-muted-foreground">
                       <tr>
@@ -717,6 +718,7 @@ export default function PayrollBoardPage() {
                       })}
                     </tbody>
                   </table>
+                  </div>
                 )}
               </div>
             );
@@ -934,6 +936,7 @@ export default function PayrollBoardPage() {
                       {changes.length === 0 ? (
                         <p className="text-xs text-muted-foreground">No field-level changes recorded.</p>
                       ) : (
+                        <div className="overflow-x-auto" tabIndex={0} role="region" aria-label="Change history table">
                         <table className="w-full text-xs">
                           <thead>
                             <tr className="text-left text-muted-foreground">
@@ -956,6 +959,7 @@ export default function PayrollBoardPage() {
                             ))}
                           </tbody>
                         </table>
+                        </div>
                       )}
                     </div>
                   );

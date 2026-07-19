@@ -84,3 +84,4 @@
 - [Generated client auth getter](orval-client-auth-getter.md) — each app bundle must register setAuthTokenGetter or ALL Orval-hook calls 401 while api() works; /api/version probes build identity.
 - [LiveKit E2EE passphrase interop](livekit-e2ee-passphrase-interop.md) — E2EE keys must be STRING passphrases on all platforms; raw bytes = HKDF(web) vs PBKDF2(native) → garbled cross-platform radio audio.
 - [Brand schema version skew](brand-schema-version-skew.md) — new brandConfigSchema fields must be .optional() or stale control-plane/portal clients 400 on brand saves; audit email SUBJECTs after signature replace_all.
+- [Admin portal mobile overflow](admin-portal-mobile-overflow-pattern.md) — h-dvh shell, overflow-x-auto+focusable region on wide tables, no per-dialog max-h overrides, grid-cols-1 sm:grid-cols-2 form grids.

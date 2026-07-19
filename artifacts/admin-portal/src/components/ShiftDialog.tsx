@@ -185,7 +185,7 @@ export function ShiftDialog({ open, onOpenChange, initial, onSaved }: Props) {
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
+      <DialogContent className="max-w-2xl">
         <DialogHeader>
           <DialogTitle>{isEdit ? "Edit shift" : "New shift"}</DialogTitle>
           <DialogDescription>
@@ -199,7 +199,7 @@ export function ShiftDialog({ open, onOpenChange, initial, onSaved }: Props) {
             <Input id="shift-title" value={title} onChange={(e) => setTitle(e.target.value)} placeholder="e.g. Front Lobby — Overnight" />
           </div>
 
-          <div className="grid grid-cols-2 gap-3">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <div>
               <Label>Site</Label>
               <Select
@@ -244,7 +244,7 @@ export function ShiftDialog({ open, onOpenChange, initial, onSaved }: Props) {
             </div>
           </div>
 
-          <div className="grid grid-cols-2 gap-3">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <div>
               <Label htmlFor="shift-start">Start time</Label>
               <Input id="shift-start" type="datetime-local" value={startTime} onChange={(e) => setStartTime(e.target.value)} />
@@ -316,7 +316,7 @@ export function ShiftDialog({ open, onOpenChange, initial, onSaved }: Props) {
             </div>
           )}
 
-          <div className="grid grid-cols-2 gap-3">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <div>
               <Label htmlFor="shift-pay">Pay rate ($/hr)</Label>
               <Input
