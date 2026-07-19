@@ -1,4 +1,4 @@
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import request from "supertest";
 import { randomUUID } from "node:crypto";
 import bcrypt from "bcryptjs";
@@ -27,6 +27,14 @@ import { signToken } from "../middlewares/auth";
 // data, mirroring chatUnreadCounts.test.ts.
 const TAG = `chat-acl-test-${randomUUID().slice(0, 8)}`;
 const passwordHash = bcrypt.hashSync("test-password", 4);
+
+// Every test here makes several sequential /chat/rooms list calls (and the
+// first one also triggers per-site channel seeding). Each finishes in <1s in
+// isolation, but under the full parallel `pnpm -r run test` gate — and the
+// release-validation harness, which runs that gate concurrently with
+// a11y/typecheck/front-door — any of them can be starved past the default
+// 30s. File-wide contention headroom, not a sign any single test is slow.
+vi.setConfig({ testTimeout: 180_000 });
 
 type Ctx = {
   adminId: string;
@@ -208,41 +216,24 @@ async function postMessageStatus(token: string, roomId: string, content = "hi"):
 }
 
 describe("GET /chat/rooms — visibility by room type", () => {
-  // The first two tests in this file absorb the suite's one-time costs (first
-  // /chat/rooms request triggers per-site channel seeding, plus several
-  // sequential list calls). They pass comfortably in isolation but can time
-  // out under the full parallel `pnpm -r run test` gate when every package's
-  // suite competes for CPU/DB — and the release-validation harness runs the
-  // test gate concurrently with a11y/typecheck/front-door, which starved even
-  // a 60s budget. Generous timeout, purely contention headroom.
-  const FIRST_TESTS_TIMEOUT_MS = 180_000;
+  it("announcements is visible to every authenticated user", async () => {
+    const id = await makeRoom({ name: `${TAG}-announcements`, type: "announcements" });
+    for (const token of [
+      ctx.adminToken,
+      ctx.officerL3Token,
+      ctx.officerL2Token,
+      ctx.officerNoneToken,
+    ]) {
+      expect(await listRoomIds(token)).toContain(id);
+    }
+  });
 
-  it(
-    "announcements is visible to every authenticated user",
-    async () => {
-      const id = await makeRoom({ name: `${TAG}-announcements`, type: "announcements" });
-      for (const token of [
-        ctx.adminToken,
-        ctx.officerL3Token,
-        ctx.officerL2Token,
-        ctx.officerNoneToken,
-      ]) {
-        expect(await listRoomIds(token)).toContain(id);
-      }
-    },
-    FIRST_TESTS_TIMEOUT_MS,
-  );
-
-  it(
-    "ops is visible to admins only",
-    async () => {
-      const id = await makeRoom({ name: `${TAG}-ops`, type: "ops" });
-      expect(await listRoomIds(ctx.adminToken)).toContain(id);
-      expect(await listRoomIds(ctx.officerL3Token)).not.toContain(id);
-      expect(await listRoomIds(ctx.officerNoneToken)).not.toContain(id);
-    },
-    FIRST_TESTS_TIMEOUT_MS,
-  );
+  it("ops is visible to admins only", async () => {
+    const id = await makeRoom({ name: `${TAG}-ops`, type: "ops" });
+    expect(await listRoomIds(ctx.adminToken)).toContain(id);
+    expect(await listRoomIds(ctx.officerL3Token)).not.toContain(id);
+    expect(await listRoomIds(ctx.officerNoneToken)).not.toContain(id);
+  });
 
   it("license_level room includes officers at/above the level and excludes under-qualified", async () => {
     const id = await makeRoom({ name: `${TAG}-license-l3`, type: "license_level", licenseLevel: 3 });
