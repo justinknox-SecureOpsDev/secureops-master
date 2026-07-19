@@ -136,6 +136,9 @@ export async function canAccessChannel(
   if (channel.adminOnly && userRole !== "admin") return false;
   if (userRole === "admin") return true; // admins see everything non-archived
 
+  // Client accounts are external contacts — never internal radio participants.
+  if (userRole === "client") return false;
+
   switch (channel.scope) {
     case "global":
       return true;

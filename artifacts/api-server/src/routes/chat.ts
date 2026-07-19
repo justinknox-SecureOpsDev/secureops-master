@@ -228,6 +228,7 @@ router.get("/chat/rooms", requireStaff, async (req, res): Promise<void> => {
 // GET /chat/rooms/discoverable — city/elite rooms the user can request to
 // join (or has a pending request to). Returned alongside membership status
 // so the mobile UI can render "Request to join" / "Request pending" badges.
+// Staff-only: clients are external contacts and cannot browse internal rooms.
 router.get("/chat/rooms/discoverable", requireStaff, async (req, res): Promise<void> => {
   const me = req.user!.userId;
 
@@ -257,7 +258,7 @@ router.get("/chat/rooms/discoverable", requireStaff, async (req, res): Promise<v
   })));
 });
 
-// POST /chat/rooms/:id/join-request — request to join a city room
+// POST /chat/rooms/:id/join-request — request to join a city room (staff only)
 router.post("/chat/rooms/:id/join-request", requireStaff, async (req, res): Promise<void> => {
   const me = req.user!.userId;
   const id = req.params.id as string;
@@ -470,7 +471,7 @@ router.delete("/chat/rooms/:id", requireAuth, requireAdmin, async (req, res): Pr
   res.json({ ok: true });
 });
 
-// GET /chat/users — DM picker
+// GET /chat/users — DM picker (internal staff only; clients are external contacts)
 router.get("/chat/users", requireStaff, async (req, res): Promise<void> => {
   const me = req.user!.userId;
   const rows = await db
@@ -481,7 +482,7 @@ router.get("/chat/users", requireStaff, async (req, res): Promise<void> => {
   res.json(rows);
 });
 
-// POST /chat/direct — get or create a 1:1 DM
+// POST /chat/direct — get or create a 1:1 DM (internal staff only)
 router.post("/chat/direct", requireStaff, async (req, res): Promise<void> => {
   const me = req.user!.userId;
   const { otherUserId } = req.body as { otherUserId: string };
