@@ -1,23 +1,28 @@
 ---
-name: Shared platform login brand (SecureOps Command)
-description: The pre-auth login screens are platform-branded, NOT per-tenant; one shared SVG emblem renders on both web and mobile.
+name: Platform vs tenant login brand
+description: Web portal pre-auth login stays fixed "SecureOps Command"; mobile login is tenant-branded once an org is connected (org code = tenant identity pre-login).
 ---
 
-# Shared platform login brand
+# Platform vs tenant login brand
 
-After the white-label work, every tenant company signs in through the SAME
-pre-authentication login screen, branded **"SecureOps Command"** (the platform).
-Per-company branding only takes over AFTER login.
+**Web portal:** every tenant signs in through the SAME pre-authentication login
+screen, branded **"SecureOps Command"** (`admin-portal/src/pages/Login.tsx`).
+Do NOT pull tenant brand into it (no `window.__BRAND__` there).
 
-**Rule:** the login screens (web `admin-portal/src/pages/Login.tsx` + mobile
-`security-ops/app/login.tsx`) must show the FIXED platform brand. Do NOT pull
-tenant brand into them — not `window.__BRAND__` on web, not
-`EXPO_PUBLIC_COMPANY_NAME` on mobile. Both were removed from the login copy,
-emblem, wordmark, and footer.
+**Mobile (July 2026 change):** `security-ops/app/login.tsx` IS tenant-branded —
+once an org code is connected the app knows the tenant pre-login, so the login
+screen shows that org's logo/name/tagline and the whole app derives its palette
+from that backend's `GET /api/brand` (see `constants/colors.ts derivePalette`).
+The platform "SecureOps Command" lockup is only the fallback (no org / no brand
+fetched), and the CONNECT screen stays neutral platform brand. WCSG default
+colors short-circuit to the hand-tuned palette exactly; high-contrast palette
+never follows tenant brand. Brand is persisted per-org on-device (hydrated
+inside the org init barrier → no WCSG flash on relaunch) and cleared on org
+switch.
 
-**Why:** all tenants share one login surface; leaking a tenant's company name /
-appName there breaks the "shared platform entry" model and confuses users who
-haven't authenticated yet (the system doesn't know the tenant pre-login anyway).
+**Why:** on web the server can't know the tenant pre-login; on mobile the
+stored org code identifies the tenant before login, and customers expect their
+own brand on the sign-in screen.
 
 **The emblem ("Command Shield"):** one vector mark (shield + north star +
 double command chevron, gold-on-navy) authored TWICE with identical geometry:

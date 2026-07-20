@@ -3,6 +3,7 @@ import {
   View, Text, TextInput, TouchableOpacity,
   StyleSheet, ActivityIndicator, Platform,
 } from "react-native";
+import { LinearGradient } from "expo-linear-gradient";
 import * as WebBrowser from "expo-web-browser";
 import { useRouter, useLocalSearchParams } from "expo-router";
 import { useAuth } from "@/contexts/AuthContext";
@@ -12,7 +13,8 @@ import { SafeAreaView } from "react-native-safe-area-context";
 import { Feather } from "@expo/vector-icons";
 import { getApiBaseUrl } from "@/utils/api";
 import { runSwitchOrgFlow } from "@/utils/orgBootstrap";
-import { SecureOpsLogo } from "@/components/SecureOpsLogo";
+import { BrandLogo } from "@/components/BrandLogo";
+import { useBrand } from "@/hooks/useFeatures";
 
 async function postJson<T>(path: string, body: unknown): Promise<T> {
   let res: Response;
@@ -48,7 +50,11 @@ export default function LoginScreen() {
   const { login: setAuthContext, logout } = useAuth();
   const { org, switchOrg } = useOrg();
   const colors = useColors();
+  const brand = useBrand();
   const router = useRouter();
+  // Platform fallback (no tenant brand fetched yet / neutral deployment) keeps
+  // the fixed "SecureOps / COMMAND" lockup; a connected org shows ITS name.
+  const isPlatformBrand = brand.companyName === "SecureOps Command";
   const { demo } = useLocalSearchParams<{ demo?: string | string[] }>();
   const demoParam = Array.isArray(demo) ? demo[0] : demo;
 
@@ -135,35 +141,76 @@ export default function LoginScreen() {
     setChallengeToken(null); setCode(""); setError(null);
   };
 
+  // Derive a warm, slightly lighter mid-tone from the background for the
+  // vertical gradient — shifts ~15% brighter toward the brand primary.
+  const bgMid = colors.card;
+
   return (
-    <SafeAreaView style={[styles.container, { backgroundColor: colors.background }]}>
-      {/* Gold radial glow behind logo */}
-      <View style={styles.glow} />
+    <SafeAreaView style={styles.container}>
+      {/* Vertical depth gradient: dark → warm centre → dark */}
+      <LinearGradient
+        colors={[colors.background, bgMid, colors.background]}
+        locations={[0, 0.45, 1]}
+        style={StyleSheet.absoluteFill}
+      />
+
+      {/* Large soft gold glow behind the logo area */}
+      <View style={[styles.glowLarge, { backgroundColor: colors.primary }]} />
+      {/* Tighter bright core glow */}
+      <View style={[styles.glowCore, { backgroundColor: colors.primary }]} />
 
       <View style={styles.content}>
-        {/* Platform emblem */}
+        {/* Connected org's logo (falls back to the platform emblem) */}
         <View
           style={styles.logoWrap}
           accessible
           accessibilityRole="image"
-          accessibilityLabel="SecureOps Command"
+          accessibilityLabel={brand.companyName}
         >
-          <SecureOpsLogo size={132} />
+          <BrandLogo size={132} />
         </View>
 
-        {/* Platform brand — SecureOps Command (shared across all tenants) */}
+        {/* Connected org's brand (platform lockup until an org brand loads) */}
         <View style={styles.brandBlock}>
-          <Text style={[styles.brandName, { color: colors.foreground }]}>SecureOps</Text>
-          <Text style={[styles.brandSub, { color: colors.primary }]}>COMMAND</Text>
+          {isPlatformBrand ? (
+            <>
+              <Text style={[styles.brandName, { color: colors.foreground }]}>SecureOps</Text>
+              <Text style={[styles.brandSub, { color: colors.primary }]}>COMMAND</Text>
+            </>
+          ) : (
+            <Text style={[styles.brandName, { color: colors.foreground }]} numberOfLines={2}>
+              {brand.companyName.toUpperCase()}
+            </Text>
+          )}
           <View style={styles.dividerRow}>
-            <View style={[styles.dividerLine, { backgroundColor: colors.primary }]} />
-            <Text style={[styles.motto, { color: colors.mutedForeground }]}>SECURITY OPERATIONS PLATFORM</Text>
-            <View style={[styles.dividerLine, { backgroundColor: colors.primary }]} />
+            <LinearGradient
+              colors={["transparent", colors.primary]}
+              start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }}
+              style={styles.dividerLine}
+            />
+            <Text style={[styles.motto, { color: colors.mutedForeground }]}>
+              {(brand.tagline || "SECURITY OPERATIONS PLATFORM").toUpperCase()}
+            </Text>
+            <LinearGradient
+              colors={[colors.primary, "transparent"]}
+              start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }}
+              style={styles.dividerLine}
+            />
           </View>
+          {!!brand.companyLicense && (
+            <Text style={[styles.licenseNumber, { color: colors.mutedForeground }]}>
+              LIC # {brand.companyLicense}
+            </Text>
+          )}
         </View>
 
-        {/* Login card */}
-        <View style={[styles.card, { backgroundColor: colors.card, borderColor: colors.border }]}>
+        {/* Login card — gradient top-edge highlight gives depth */}
+        <LinearGradient
+          colors={[colors.primary + "55", colors.primary + "18", "transparent"]}
+          start={{ x: 0, y: 0 }} end={{ x: 0, y: 1 }}
+          style={[styles.cardShell, { borderRadius: 15 }]}
+        >
+        <View style={[styles.card, { backgroundColor: colors.card }]}>
           <Text style={[styles.cardTitle, { color: colors.foreground }]}>COMMAND ACCESS</Text>
           {/*
            * Visible "no public sign-up" disclosure for App Store Review
@@ -215,18 +262,24 @@ export default function LoginScreen() {
               </View>
 
               <TouchableOpacity
-                style={[styles.button, { backgroundColor: colors.primary, opacity: busy ? 0.8 : 1 }]}
+                style={{ borderRadius: 8, overflow: "hidden", opacity: busy ? 0.8 : 1 }}
                 onPress={handleLogin}
                 disabled={busy}
               >
-                {busy ? (
-                  <ActivityIndicator color={colors.primaryForeground} />
-                ) : (
-                  <>
-                    <Feather name="shield" size={16} color={colors.primaryForeground} />
-                    <Text style={[styles.buttonText, { color: colors.primaryForeground }]}>ACCESS SYSTEM</Text>
-                  </>
-                )}
+                <LinearGradient
+                  colors={["#f0d89a", colors.primary, "#8a6020"]}
+                  start={{ x: 0, y: 0 }} end={{ x: 0, y: 1 }}
+                  style={styles.button}
+                >
+                  {busy ? (
+                    <ActivityIndicator color={colors.primaryForeground} />
+                  ) : (
+                    <>
+                      <Feather name="shield" size={16} color={colors.primaryForeground} />
+                      <Text style={[styles.buttonText, { color: colors.primaryForeground }]}>ACCESS SYSTEM</Text>
+                    </>
+                  )}
+                </LinearGradient>
               </TouchableOpacity>
 
               <TouchableOpacity
@@ -281,18 +334,24 @@ export default function LoginScreen() {
                 />
               </View>
               <TouchableOpacity
-                style={[styles.button, { backgroundColor: colors.primary, opacity: busy || !code ? 0.7 : 1 }]}
+                style={{ borderRadius: 8, overflow: "hidden", opacity: busy || !code ? 0.7 : 1 }}
                 onPress={handleVerifyTotp}
                 disabled={busy || !code}
               >
-                {busy ? (
-                  <ActivityIndicator color={colors.primaryForeground} />
-                ) : (
-                  <>
-                    <Feather name="shield" size={16} color={colors.primaryForeground} />
-                    <Text style={[styles.buttonText, { color: colors.primaryForeground }]}>VERIFY</Text>
-                  </>
-                )}
+                <LinearGradient
+                  colors={["#f0d89a", colors.primary, "#8a6020"]}
+                  start={{ x: 0, y: 0 }} end={{ x: 0, y: 1 }}
+                  style={styles.button}
+                >
+                  {busy ? (
+                    <ActivityIndicator color={colors.primaryForeground} />
+                  ) : (
+                    <>
+                      <Feather name="shield" size={16} color={colors.primaryForeground} />
+                      <Text style={[styles.buttonText, { color: colors.primaryForeground }]}>VERIFY</Text>
+                    </>
+                  )}
+                </LinearGradient>
               </TouchableOpacity>
               <TouchableOpacity onPress={cancelTotp} style={styles.forgotRow}>
                 <Text style={[styles.forgotText, { color: colors.mutedForeground }]}>Use a different account</Text>
@@ -300,6 +359,7 @@ export default function LoginScreen() {
             </>
           )}
         </View>
+        </LinearGradient>
 
         {Platform.OS !== "web" && org && (
           <TouchableOpacity
@@ -335,7 +395,7 @@ export default function LoginScreen() {
         </View>
 
         <Text style={[styles.footer, { color: colors.mutedForeground }]}>
-          SecureOps Command · © {new Date().getFullYear()}
+          {brand.companyName} · © {new Date().getFullYear()}
         </Text>
       </View>
     </SafeAreaView>
@@ -353,16 +413,31 @@ function legalUrl(slug: "privacy" | "terms" | "eula" | "data-rights"): string {
 
 const styles = StyleSheet.create({
   container: { flex: 1 },
-  glow: {
+  /* Large, very diffuse glow — warmth across the whole logo zone */
+  glowLarge: {
     position: "absolute",
-    top: "20%",
+    top: "10%",
     alignSelf: "center",
-    width: 300,
-    height: 300,
-    borderRadius: 150,
-    backgroundColor: "#c9a04a",
-    opacity: 0.07,
+    width: 420,
+    height: 420,
+    borderRadius: 210,
+    opacity: 0.09,
     transform: [{ scaleX: 1.6 }],
+  },
+  /* Bright tight core right behind the emblem */
+  glowCore: {
+    position: "absolute",
+    top: "17%",
+    alignSelf: "center",
+    width: 180,
+    height: 180,
+    borderRadius: 90,
+    opacity: 0.18,
+    transform: [{ scaleX: 1.3 }],
+  },
+  /* Gradient border shell that wraps the card */
+  cardShell: {
+    padding: 1,
   },
   content: {
     flex: 1,
@@ -381,6 +456,7 @@ const styles = StyleSheet.create({
     fontSize: 24,
     fontWeight: "800",
     letterSpacing: 4,
+    textAlign: "center",
   },
   brandSub: {
     fontSize: 15,
@@ -403,10 +479,17 @@ const styles = StyleSheet.create({
     letterSpacing: 2,
     fontWeight: "600",
   },
+  licenseNumber: {
+    fontSize: 9,
+    letterSpacing: 1,
+    fontWeight: "500",
+    textAlign: "center",
+    opacity: 0.7,
+    marginTop: 2,
+  },
   card: {
     padding: 22,
     borderRadius: 14,
-    borderWidth: 1,
     gap: 14,
   },
   cardTitle: {

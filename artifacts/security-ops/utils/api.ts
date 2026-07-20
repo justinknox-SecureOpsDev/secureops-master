@@ -26,7 +26,7 @@ export const DEFAULT_NATIVE_ORIGIN = "https://secureops-command.replit.app";
  */
 let runtimeApiBaseUrl: string | null = null;
 
-function isReactNative(): boolean {
+export function isReactNative(): boolean {
   // navigator.product === "ReactNative" tells us we are NOT in a real browser
   // even when window/location are polyfilled by Expo on web.
   return (
@@ -46,6 +46,11 @@ function isReactNative(): boolean {
  */
 export function setRuntimeApiOrigin(origin: string | null): void {
   runtimeApiBaseUrl = origin ? `${origin}/api` : null;
+}
+
+/** True when an org backend has been applied on native (org connected). */
+export function hasRuntimeApiOrigin(): boolean {
+  return runtimeApiBaseUrl !== null;
 }
 
 /**

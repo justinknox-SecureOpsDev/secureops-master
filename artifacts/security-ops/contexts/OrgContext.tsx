@@ -19,7 +19,11 @@ import {
   clearSelectedOrg,
   resolveOrgCode,
 } from "@/utils/orgConfig";
-import { resetFeatureFlagsCache } from "@/hooks/useFeatures";
+import {
+  resetFeatureFlagsCache,
+  hydrateBrandFromStorage,
+  clearPersistedBrand,
+} from "@/hooks/useFeatures";
 import { storage } from "@/utils/storage";
 import { AUTH_TOKEN_KEY, AUTH_USER_KEY, runAuthLogout } from "@/contexts/AuthContext";
 import { bootstrapOrg, performSwitchOrg, refreshSelectedOrg } from "@/utils/orgBootstrap";
@@ -113,6 +117,11 @@ export function OrgProvider({ children }: { children: ReactNode }) {
           legacyDefaultOrg: LEGACY_DEFAULT_ORG,
           applyOrgRouting,
         });
+        // Hydrate the persisted per-org brand (colors/logo/text) INSIDE the
+        // init barrier so a relaunch renders the connected org's branding
+        // immediately — no flash of the default WCSG look. A live refresh
+        // still runs in the background on first use (see hooks/useFeatures).
+        if (selected) await hydrateBrandFromStorage();
         if (!cancelled) {
           setOrg(selected);
           setIsLoadingOrg(false);
@@ -173,6 +182,10 @@ export function OrgProvider({ children }: { children: ReactNode }) {
     await storage.remove(AUTH_TOKEN_KEY);
     await storage.remove(AUTH_USER_KEY);
     queryClient.clear();
+    // Drop the persisted brand for the CURRENT backend while its origin is
+    // still applied (the cache key is origin-scoped), so the old tenant's
+    // colors/logo can never resurface after a switch.
+    await clearPersistedBrand();
     await performSwitchOrg({ clearSelectedOrg, resetOrgRouting });
     setOrg(null);
   }, [queryClient]);
