@@ -1,4 +1,4 @@
-import React, { useState, useRef, useEffect } from "react";
+import React, { useState } from "react";
 import {
   View, Text, TextInput, TouchableOpacity,
   StyleSheet, ActivityIndicator, Platform,
@@ -6,7 +6,7 @@ import {
 import MaskedView from "@react-native-masked-view/masked-view";
 import { LinearGradient } from "expo-linear-gradient";
 import * as WebBrowser from "expo-web-browser";
-import { useRouter, useLocalSearchParams } from "expo-router";
+import { useRouter } from "expo-router";
 import { useAuth } from "@/contexts/AuthContext";
 import { useOrg } from "@/contexts/OrgContext";
 import { useColors } from "@/hooks/useColors";
@@ -36,9 +36,6 @@ async function postJson<T>(path: string, body: unknown): Promise<T> {
   return data as T;
 }
 
-const DEMO_EMAIL = "guest@secureops.com";
-const DEMO_PASSWORD = "Demo123!";
-
 const GOLD_GRADIENT: [string, string, string] = ["#f0d89a", "#c9a04a", "#8a6020"];
 
 /**
@@ -67,7 +64,6 @@ export default function LoginScreen() {
   const [password, setPassword] = useState("");
   const [showPassword, setShowPassword] = useState(false);
   const [busy, setBusy] = useState(false);
-  const [demoLoading, setDemoLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [challengeToken, setChallengeToken] = useState<string | null>(null);
   const [code, setCode] = useState("");
@@ -79,8 +75,6 @@ export default function LoginScreen() {
   // Platform fallback (no tenant brand fetched yet / neutral deployment) keeps
   // the fixed "SecureOps / COMMAND" lockup; a connected org shows ITS name.
   const isPlatformBrand = brand.companyName === "SecureOps Command";
-  const { demo } = useLocalSearchParams<{ demo?: string | string[] }>();
-  const demoParam = Array.isArray(demo) ? demo[0] : demo;
 
   // Native-only: let an officer who connected to the wrong organization go
   // back to the connect screen. Log out FIRST (so the request hits the CURRENT
@@ -129,37 +123,6 @@ export default function LoginScreen() {
       setBusy(false);
     }
   };
-
-  const handleDemoLogin = async () => {
-    setDemoLoading(true); setError(null);
-    try {
-      const res = await postJson<{ token?: string; user?: any; needsTotp?: boolean; challengeToken?: string }>(
-        "/auth/login",
-        { email: DEMO_EMAIL, password: DEMO_PASSWORD },
-      );
-      if (res.token && res.user) {
-        await setAuthContext(res.user, res.token);
-      } else {
-        setError("Demo account unavailable — try again shortly.");
-      }
-    } catch (e: any) {
-      setError(e?.message || "Demo login failed. Try again.");
-    } finally {
-      setDemoLoading(false);
-    }
-  };
-
-  // Reviewer demo hand-off (Guideline 2.1): the connect screen's "Try demo"
-  // selects the default backend and routes here with `?demo=1`. Auto-run the
-  // demo sign-in exactly once so a fresh install reaches a working session in a
-  // single tap. Guarded by a ref so a re-render / param reuse never re-fires it.
-  const demoAutoRan = useRef(false);
-  useEffect(() => {
-    if (demoParam !== "1" || demoAutoRan.current) return;
-    demoAutoRan.current = true;
-    void handleDemoLogin();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [demoParam]);
 
   const cancelTotp = () => {
     setChallengeToken(null); setCode(""); setError(null);
@@ -323,30 +286,6 @@ export default function LoginScreen() {
                 <Text style={[styles.forgotText, { color: colors.mutedForeground }]}>
                   Forgot password?
                 </Text>
-              </TouchableOpacity>
-
-              {/* Demo access divider */}
-              <View style={styles.demoDividerRow}>
-                <View style={[styles.demoDividerLine, { backgroundColor: colors.border }]} />
-                <Text style={[styles.demoDividerLabel, { color: colors.mutedForeground }]}>or</Text>
-                <View style={[styles.demoDividerLine, { backgroundColor: colors.border }]} />
-              </View>
-
-              <TouchableOpacity
-                style={[styles.demoButton, { borderColor: colors.primary, opacity: demoLoading ? 0.7 : 1 }]}
-                onPress={handleDemoLogin}
-                disabled={demoLoading || busy}
-                accessibilityLabel="Try demo"
-                accessibilityRole="button"
-              >
-                {demoLoading ? (
-                  <ActivityIndicator color={colors.primary} size="small" />
-                ) : (
-                  <>
-                    <Feather name="play-circle" size={15} color={colors.primary} />
-                    <Text style={[styles.demoButtonText, { color: colors.primary }]}>Try Demo</Text>
-                  </>
-                )}
               </TouchableOpacity>
             </>
           ) : (
@@ -607,34 +546,6 @@ const styles = StyleSheet.create({
     fontSize: 12,
     letterSpacing: 1,
     textDecorationLine: "underline",
-  },
-  demoDividerRow: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 8,
-    marginTop: 2,
-  },
-  demoDividerLine: {
-    flex: 1,
-    height: 1,
-  },
-  demoDividerLabel: {
-    fontSize: 11,
-    letterSpacing: 1,
-  },
-  demoButton: {
-    height: 46,
-    justifyContent: "center",
-    alignItems: "center",
-    borderRadius: 8,
-    borderWidth: 1,
-    flexDirection: "row",
-    gap: 8,
-  },
-  demoButtonText: {
-    fontWeight: "700",
-    fontSize: 13,
-    letterSpacing: 2,
   },
   footer: {
     textAlign: "center",

@@ -25,7 +25,7 @@ export default function ConnectScreen() {
   const params = useLocalSearchParams<{ code?: string | string[] }>();
   const colors = useColors();
   const router = useRouter();
-  const { org, selectOrg, selectDefaultOrg, switchOrg } = useOrg();
+  const { org, selectOrg, switchOrg } = useOrg();
   const { user } = useAuth();
 
   // A `?code=` deep-link / QR param prefills the field so the user doesn't type.
@@ -157,23 +157,6 @@ export default function ConnectScreen() {
     [connectOrSwitch, goToLanding],
   );
 
-  // App Review / reviewer demo path (Guideline 2.1): select the built-in
-  // default backend (no org code needed) and hand off to the login screen,
-  // which auto-signs-in with the demo account when it sees `?demo=1`.
-  const handleTryDemo = useCallback(async () => {
-    if (busy) return;
-    setBusy(true);
-    setError(null);
-    try {
-      await selectDefaultOrg();
-      router.replace({ pathname: "/login", params: { demo: "1" } });
-    } catch {
-      setError("Couldn't start the demo. Check your connection and try again.");
-    } finally {
-      setBusy(false);
-    }
-  }, [busy, selectDefaultOrg, router]);
-
   return (
     <SafeAreaView style={[styles.container, { backgroundColor: colors.background }]}>
       <View style={styles.glow} />
@@ -266,20 +249,6 @@ export default function ConnectScreen() {
                 <Feather name="maximize" size={16} color={colors.primary} />
                 <Text style={[styles.scanButtonText, { color: colors.primary }]}>SCAN INVITE QR</Text>
               </TouchableOpacity>
-
-              <TouchableOpacity
-                style={[styles.demoButton, { opacity: busy ? 0.7 : 1 }]}
-                onPress={handleTryDemo}
-                disabled={busy}
-                accessibilityRole="button"
-                accessibilityLabel="Try the demo"
-                accessibilityHint="Connects to a sample organization and signs you in with a demo account, no code required"
-              >
-                <Feather name="play-circle" size={15} color={colors.mutedForeground} />
-                <Text style={[styles.demoButtonText, { color: colors.mutedForeground }]}>
-                  No code? Try the demo
-                </Text>
-              </TouchableOpacity>
             </>
           )}
         </View>
@@ -335,7 +304,5 @@ const styles = StyleSheet.create({
   orText: { fontSize: 10, fontWeight: "700", letterSpacing: 2 },
   scanButton: { height: 50, justifyContent: "center", alignItems: "center", borderRadius: 8, flexDirection: "row", gap: 10, borderWidth: 1 },
   scanButtonText: { fontWeight: "800", fontSize: 14, letterSpacing: 2 },
-  demoButton: { height: 40, justifyContent: "center", alignItems: "center", flexDirection: "row", gap: 8 },
-  demoButtonText: { fontWeight: "600", fontSize: 13, letterSpacing: 0.5, textDecorationLine: "underline" },
   footer: { textAlign: "center", fontSize: 11, letterSpacing: 1 },
 });
