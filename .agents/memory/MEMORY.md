@@ -26,7 +26,7 @@
 - [Admin grid derived-name links](admin-grid-derived-name-links.md) — derived cell linkTo back to its own table self-filters (feels like a no-op click); use linkRoute for profile navigation.
 - [Scheduler sync LWW tiebreaker](scheduler-sync-lww-tiebreaker.md) — inbound upsert tiebreaks incoming updatedAt vs the LOCAL row's wall-clock updatedAt; tests expecting "skipped" must past-date the payload.
 - [Email provider fallback](email-provider-fallback.md) — EMAIL_PROVIDER selects Resend/SMTP; only true recipient rejections are "bounced" (stops fallback), quota/auth/domain errors must stay "failed".
-- [Production custom domain](production-domain.md) — live primary is secureopscommand.com (+ SecureOps-Command.replit.app alias, the app's backend); wcsgisecureops.com is a SEPARATE/older deploy, not prod.
+- [Production custom domain](production-domain.md) — THIS project's prod = wcsgisecureops.com (org code wcsgi); secureopscommand.com/SecureOps-Command.replit.app = SEPARATE master project (org directory + demo, own older code).
 - [App Store demo access 2.1](appstore-demo-access.md) — "can't sign in with demo" is usually server-side: republish backend (isDemo delete-guard + re-seed) + reply, not a new iOS build.
 - [Prod data backfills run in-app](prod-data-backfill-runs-in-app.md) — agent executeSql only writes dev (prod is read-only & a separate DB); repair prod DATA via an idempotent boot backfill + republish, not from the agent loop.
 - [Publish migration truncate wipe](replit-publish-migration-truncate.md) — publish diffs dev-DB vs prod-DB (not schema files); unique-constraint add on populated prod table + startup DDL two-writer wiped 4 tables via TRUNCATE CASCADE; never DDL at boot.
