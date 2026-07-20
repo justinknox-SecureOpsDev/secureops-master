@@ -378,7 +378,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   // roles that reach the shell), surfaced on the Chat nav link and the group
   // tab that hosts it so unread messages are visible from anywhere.
   const chatUnread = useChatUnreadTotal(!!user);
-  const brandCfg = (window as any).__BRAND__ as { companyName: string; shortName: string; appName: string } | undefined;
+  const brandCfg = (window as any).__BRAND__ as { companyName: string; shortName: string; appName: string; logoDataUrl?: string | null } | undefined;
 
   const [collapsed, setCollapsed] = useState<boolean>(() => {
     try { return localStorage.getItem(COLLAPSE_KEY) === "1"; } catch { return false; }
@@ -498,7 +498,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
             {mobileOpen ? <X className="w-5 h-5" /> : <Menu className="w-5 h-5" />}
           </Button>
           <img
-            src={`${import.meta.env.BASE_URL}logo-256.png`}
+            src={brandCfg?.logoDataUrl || `${import.meta.env.BASE_URL}logo-256.png`}
             alt={brandCfg?.shortName ?? "WCSG"}
             className="w-9 h-9 shrink-0 rounded-md object-contain"
           />

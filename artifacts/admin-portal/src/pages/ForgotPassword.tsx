@@ -42,7 +42,7 @@ export function ForgotPasswordPage() {
       <div className="w-full max-w-md bg-card rounded-xl shadow-2xl overflow-hidden">
         <div className="bg-brand-navy text-white p-6 text-center border-b-4 border-brand-gold">
           <img
-            src={`${import.meta.env.BASE_URL}logo-256.png`}
+            src={(window as any).__BRAND__?.logoDataUrl || `${import.meta.env.BASE_URL}logo-256.png`}
             alt={(window as any).__BRAND__?.companyName ?? "Williams Council Security Group"}
             className="w-20 h-20 mx-auto mb-3 object-contain"
           />

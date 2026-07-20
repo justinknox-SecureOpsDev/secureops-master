@@ -19,7 +19,7 @@ function Page({
       <header className="bg-[#0c0a08] text-white">
         <div className="max-w-3xl mx-auto px-6 py-6 flex items-center gap-3">
           <img
-            src={`${import.meta.env.BASE_URL}logo-256.png`}
+            src={(window as any).__BRAND__?.logoDataUrl || `${import.meta.env.BASE_URL}logo-256.png`}
             alt={SHORT}
             className="w-10 h-10 rounded-md object-contain"
           />
