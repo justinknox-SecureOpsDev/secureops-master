@@ -466,11 +466,22 @@ router.post("/time-entries/clock-in", requireAuth, async (req, res): Promise<voi
   }
 
   // License compliance: officers must hold at least one unexpired security
-  // license to clock in. Admins are exempt (they may be helping cover a
-  // shift or troubleshooting a stuck record on someone else's behalf).
+  // license to clock in AD-HOC (GPS-resolved, no shift/site chosen). Admins
+  // are exempt (they may be helping cover a shift or troubleshooting a stuck
+  // record on someone else's behalf).
+  //
+  // The check deliberately does NOT apply to the shiftId and siteId paths:
+  // both require the officer to hold an ACCEPTED assignment (validated
+  // below), and that assignment is the authorization — an admin/dispatcher
+  // may have explicitly overridden the license requirement when rostering
+  // them (POST /shifts/:id/assignments `overrideLicense`), so re-checking
+  // licenses here would silently veto the override and strand the officer
+  // at their post. The ad-hoc geo path keeps the gate because it has no
+  // assignment backing it (and its auto-assign step separately enforces the
+  // effective-license-level eligibility filter).
   // 403 with a precise message so the mobile UI can surface the exact
   // reason — see the banner on the employee Home tab.
-  if (req.user!.role !== "admin") {
+  if (req.user!.role !== "admin" && !shiftId && !bodySiteId) {
     const [{ count: validLicenses }] = await db
       .select({ count: sql<number>`count(*)::int` })
       .from(licensesTable)

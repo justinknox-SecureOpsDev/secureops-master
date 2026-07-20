@@ -590,6 +590,144 @@ describe("POST /time-entries/clock-in by explicit siteId (GPS-less manual pick)"
   });
 });
 
+describe("clock-in honours an accepted assignment even without a valid license (admin override)", () => {
+  // Scenario from the field: an admin/dispatcher rostered the officer with
+  // `overrideLicense: true` (renewal in flight / judgement call). The
+  // accepted assignment IS the authorization — the clock-in route must not
+  // re-check licenses on assignment-backed paths and veto the override.
+  async function makeAssignedShift(siteId: string, employeeId: string, level = 3): Promise<string> {
+    const start = new Date(Date.now() - 5 * 60_000);
+    const end = new Date(Date.now() + 6 * 3600_000);
+    const [shift] = await db
+      .insert(shiftsTable)
+      .values({
+        siteId,
+        title: `${TAG}-override-shift`,
+        startTime: start,
+        endTime: end,
+        status: "upcoming",
+        headcount: 2,
+        requiredLicenseLevel: level,
+      })
+      .returning({ id: shiftsTable.id });
+    await db.insert(shiftAssignmentsTable).values({ shiftId: shift.id, employeeId, status: "accepted" });
+    return shift.id;
+  }
+
+  it("allows an unlicensed officer to clock in to a shift they hold an accepted assignment for (shiftId path)", async () => {
+    await deleteOpenEntries(ctx.unlicensedEmployeeId);
+    await db.delete(shiftAssignmentsTable).where(eq(shiftAssignmentsTable.employeeId, ctx.unlicensedEmployeeId));
+    const shiftId = await makeAssignedShift(ctx.nearSiteId, ctx.unlicensedEmployeeId);
+
+    const res = await request(app)
+      .post("/api/time-entries/clock-in")
+      .set(authed(ctx.unlicensedToken))
+      .send({ shiftId });
+    expect(res.status).toBe(201);
+
+    const [entry] = await db
+      .select({ shiftId: timeEntriesTable.shiftId })
+      .from(timeEntriesTable)
+      .where(eq(timeEntriesTable.id, res.body.id));
+    expect(entry.shiftId).toBe(shiftId);
+
+    await deleteOpenEntries(ctx.unlicensedEmployeeId);
+    await db.delete(shiftAssignmentsTable).where(eq(shiftAssignmentsTable.shiftId, shiftId));
+    await db.delete(shiftsTable).where(eq(shiftsTable.id, shiftId));
+  });
+
+  it("allows an unlicensed officer to clock in via the site picker when rostered there (siteId path)", async () => {
+    await deleteOpenEntries(ctx.unlicensedEmployeeId);
+    await db.delete(shiftAssignmentsTable).where(eq(shiftAssignmentsTable.employeeId, ctx.unlicensedEmployeeId));
+    const [site] = await db
+      .insert(sitesTable)
+      .values({ clientId: ctx.clientId, name: `${TAG}-override-site`, address: "5 Override Way" })
+      .returning({ id: sitesTable.id });
+    const shiftId = await makeAssignedShift(site.id, ctx.unlicensedEmployeeId);
+
+    const res = await request(app)
+      .post("/api/time-entries/clock-in")
+      .set(authed(ctx.unlicensedToken))
+      .send({ siteId: site.id });
+    expect(res.status).toBe(201);
+
+    const [entry] = await db
+      .select({ shiftId: timeEntriesTable.shiftId, siteId: timeEntriesTable.siteId })
+      .from(timeEntriesTable)
+      .where(eq(timeEntriesTable.id, res.body.id));
+    expect(entry.shiftId).toBe(shiftId);
+    expect(entry.siteId).toBe(site.id);
+
+    await deleteOpenEntries(ctx.unlicensedEmployeeId);
+    await db.delete(shiftAssignmentsTable).where(eq(shiftAssignmentsTable.shiftId, shiftId));
+    await db.delete(shiftsTable).where(eq(shiftsTable.id, shiftId));
+    await db.delete(sitesTable).where(eq(sitesTable.id, site.id));
+  });
+
+  it("still rejects an unlicensed officer whose assignment is only pending_approval (self-claim not yet approved)", async () => {
+    await deleteOpenEntries(ctx.unlicensedEmployeeId);
+    await db.delete(shiftAssignmentsTable).where(eq(shiftAssignmentsTable.employeeId, ctx.unlicensedEmployeeId));
+    const start = new Date(Date.now() - 5 * 60_000);
+    const end = new Date(Date.now() + 6 * 3600_000);
+    const [shift] = await db
+      .insert(shiftsTable)
+      .values({
+        siteId: ctx.nearSiteId,
+        title: `${TAG}-pending-shift`,
+        startTime: start,
+        endTime: end,
+        status: "upcoming",
+        headcount: 2,
+        requiredLicenseLevel: 2,
+      })
+      .returning({ id: shiftsTable.id });
+    // Self-claimed slot held but NOT yet admin-approved — must not authorize.
+    await db.insert(shiftAssignmentsTable).values({
+      shiftId: shift.id,
+      employeeId: ctx.unlicensedEmployeeId,
+      status: "pending_approval",
+    });
+
+    const res = await request(app)
+      .post("/api/time-entries/clock-in")
+      .set(authed(ctx.unlicensedToken))
+      .send({ shiftId: shift.id });
+    expect(res.status).toBe(403);
+
+    await db.delete(shiftAssignmentsTable).where(eq(shiftAssignmentsTable.shiftId, shift.id));
+    await db.delete(shiftsTable).where(eq(shiftsTable.id, shift.id));
+  });
+
+  it("still rejects an unlicensed officer on the shiftId path when they have NO accepted assignment", async () => {
+    await deleteOpenEntries(ctx.unlicensedEmployeeId);
+    await db.delete(shiftAssignmentsTable).where(eq(shiftAssignmentsTable.employeeId, ctx.unlicensedEmployeeId));
+    // Shift exists but the officer is not on it.
+    const start = new Date(Date.now() - 5 * 60_000);
+    const end = new Date(Date.now() + 6 * 3600_000);
+    const [shift] = await db
+      .insert(shiftsTable)
+      .values({
+        siteId: ctx.nearSiteId,
+        title: `${TAG}-unassigned-shift`,
+        startTime: start,
+        endTime: end,
+        status: "upcoming",
+        headcount: 2,
+        requiredLicenseLevel: 2,
+      })
+      .returning({ id: shiftsTable.id });
+
+    const res = await request(app)
+      .post("/api/time-entries/clock-in")
+      .set(authed(ctx.unlicensedToken))
+      .send({ shiftId: shift.id });
+    expect(res.status).toBe(403);
+    expect(res.body.message).toMatch(/not assigned/i);
+
+    await db.delete(shiftsTable).where(eq(shiftsTable.id, shift.id));
+  });
+});
+
 describe("GET /me/clock-in-sites picker visibility", () => {
   it("returns only the sites the officer is rostered at", async () => {
     await deleteOpenEntries(ctx.licensedEmployeeId);
