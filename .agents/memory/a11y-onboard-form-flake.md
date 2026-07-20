@@ -1,16 +1,18 @@
 ---
-name: a11y gate public-form load flake
-description: The a11y workflow can fail on public form surfaces (Onboard/Apply) for environmental load reasons unrelated to your change; also the spinner-only-button state-dependent axe trap.
+name: a11y gate render-timeout load flake
+description: The a11y workflow can fail on ANY surface (public forms, Import wizard, Pay Run…) with render timeouts under environmental load unrelated to your change; also the spinner-only-button state-dependent axe trap.
 ---
 
-The `a11y` validation gate (`scripts/src/a11y-admin-portal.ts`) scans public
-form surfaces (`/admin-portal/onboard/:token`, `/admin-portal/apply`). Any of
-them can intermittently fail with `locator.waitFor: Timeout 20000ms exceeded`
+The `a11y` validation gate (`scripts/src/a11y-admin-portal.ts`) can
+intermittently fail with `locator.waitFor: Timeout 20000ms exceeded`
 ("could not render for scanning") — the page never finishes rendering for the
-scanner. Observed on the Onboard form repeatedly, and on the Apply form when
-the release-validation harness runs a11y concurrently with the test/typecheck/
-front-door gates (heavy CPU/DB contention slows first paint past the 20s
-waitFor). Flips between surfaces across reruns; independent of unrelated edits.
+scanner. Observed repeatedly on the public forms (Onboard/Apply/Amend), and —
+when the release-validation harness runs a11y concurrently with the
+test/typecheck/front-door gates — on authenticated surfaces too (Import wizard
+dialog, Pay Run page; 4 surfaces at once in one run). Heavy CPU/DB contention
+slows first paint past the 20s waitFor. Flips between surfaces across reruns;
+independent of unrelated edits. Fix = re-run the gate ALONE on a quiet
+machine; an isolated all-✅ pass is the authoritative result.
 
 **Why:** these surfaces depend on live bootstrap (token mint, seeded state,
 API responses) before their heading/button appears; under load or slow
