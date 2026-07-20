@@ -106,3 +106,38 @@ export function businessDateToUtc(isoDate: string, tz: string): Date {
   const utcGuess = Date.UTC(y ?? 1970, (m ?? 1) - 1, d ?? 1, 0, 0, 0);
   return new Date(utcGuess - tzOffsetMs(new Date(utcGuess), tz));
 }
+
+/**
+ * Pure calendar-date arithmetic on a `YYYY-MM-DD` string. No timezone
+ * involvement at all — "+7 days" is always the same weekday next week,
+ * even across DST transitions (never add n*24h to a UTC instant for this).
+ */
+export function addIsoDays(isoDate: string, n: number): string {
+  const [y, m, d] = isoDate.split("-").map(Number);
+  const t = new Date(Date.UTC(y ?? 1970, (m ?? 1) - 1, (d ?? 1) + n));
+  return t.toISOString().slice(0, 10);
+}
+
+/**
+ * Canonical pay/invoice week key: `YYYY-MM-DD` of the local Monday that
+ * starts the `tz` business week containing `instant`. Weeks run Monday
+ * 00:00 → Sunday 23:59 in the business timezone — a Sunday-evening
+ * clock-in in Chicago belongs to THAT (ending) week even though it is
+ * already Monday in UTC.
+ */
+export function businessWeekKey(instant: Date, tz: string): string {
+  return businessDateIso(startOfBusinessWeek(instant, tz), tz);
+}
+
+/**
+ * `[start, end)` UTC instants bounding the business week labelled by
+ * `weekKey` (a local-Monday `YYYY-MM-DD`). `end` is the NEXT local
+ * Monday 00:00 computed by calendar math + local-midnight resolution,
+ * so DST weeks (167h/169h long) are still bounded exactly.
+ */
+export function businessWeekWindowUtc(weekKey: string, tz: string): { start: Date; end: Date } {
+  return {
+    start: businessDateToUtc(weekKey, tz),
+    end: businessDateToUtc(addIsoDays(weekKey, 7), tz),
+  };
+}

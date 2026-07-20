@@ -15,7 +15,7 @@ import {
 } from "@workspace/db";
 import app from "../app";
 import { signToken } from "../middlewares/auth";
-import { weekStartIsoUtc } from "../lib/invoiceSync";
+import { businessWeekStartIso } from "../lib/invoiceSync";
 
 const TAG = `tecorrect-test-${randomUUID().slice(0, 8)}`;
 const passwordHash = bcrypt.hashSync("test-password", 4);
@@ -297,7 +297,7 @@ describe("PATCH /time-entries/:id/times — admin timestamp correction", () => {
     it("re-syncs the weekly client invoice for an approved entry after correction", async () => {
       // Approved entry, 4h @ shift billRate 40 => invoice subtotal 160.
       const id = await insertEntry({ approvalStatus: "approved" });
-      const weekStart = weekStartIsoUtc(BASE_CLOCK_IN);
+      const weekStart = businessWeekStartIso(BASE_CLOCK_IN);
 
       const res = await request(app)
         .patch(`/api/time-entries/${id}/times`)
@@ -328,7 +328,7 @@ describe("PATCH /time-entries/:id/times — admin timestamp correction", () => {
 
     it("does NOT create an invoice when correcting a pending (unapproved) entry", async () => {
       const id = await insertEntry({ approvalStatus: "pending" });
-      const weekStart = weekStartIsoUtc(BASE_CLOCK_IN);
+      const weekStart = businessWeekStartIso(BASE_CLOCK_IN);
 
       const res = await request(app)
         .patch(`/api/time-entries/${id}/times`)

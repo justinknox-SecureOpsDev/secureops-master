@@ -25,7 +25,7 @@ import {
 } from "@workspace/db";
 import app from "../app";
 import { signToken } from "../middlewares/auth";
-import { weekStartIsoUtc } from "../lib/invoiceSync";
+import { businessWeekStartIso } from "../lib/invoiceSync";
 
 const TAG = `gridinv-test-${randomUUID().slice(0, 8)}`;
 const passwordHash = bcrypt.hashSync("test-password", 4);
@@ -149,8 +149,8 @@ function entryBody(overrides: Record<string, unknown> = {}) {
 }
 
 describe("admin grid time-entry CRUD → weekly invoice sync", () => {
-  const week1 = weekStartIsoUtc(WEEK1_IN);
-  const week2 = weekStartIsoUtc(WEEK2_IN);
+  const week1 = businessWeekStartIso(WEEK1_IN);
+  const week2 = businessWeekStartIso(WEEK2_IN);
 
   it("POST of an approved entry creates the weekly draft invoice", async () => {
     const res = await request(app)

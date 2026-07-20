@@ -15,7 +15,7 @@ import {
 } from "@workspace/db";
 import app from "../app";
 import { signToken } from "../middlewares/auth";
-import { weekStartIsoUtc } from "../lib/invoiceSync";
+import { businessWeekStartIso } from "../lib/invoiceSync";
 
 const TAG = `teclockout-test-${randomUUID().slice(0, 8)}`;
 const passwordHash = bcrypt.hashSync("test-password", 4);
@@ -389,7 +389,7 @@ describe("PATCH /time-entries/:id/clock-out — admin fill missing clock-out", (
 
     it("does NOT create an invoice when filling a clock-out on a pending entry", async () => {
       const id = await insertOpenEntry({ approvalStatus: "pending" });
-      const weekStart = weekStartIsoUtc(BASE_CLOCK_IN);
+      const weekStart = businessWeekStartIso(BASE_CLOCK_IN);
 
       const res = await request(app)
         .patch(`/api/time-entries/${id}/clock-out`)
@@ -410,7 +410,7 @@ describe("PATCH /time-entries/:id/clock-out — admin fill missing clock-out", (
       // An admin force-approved this entry while it was still open (possible via
       // the generic CRUD grid). Filling the clock-out should bill the hours.
       const id = await insertOpenEntry({ approvalStatus: "approved" });
-      const weekStart = weekStartIsoUtc(BASE_CLOCK_IN);
+      const weekStart = businessWeekStartIso(BASE_CLOCK_IN);
 
       const res = await request(app)
         .patch(`/api/time-entries/${id}/clock-out`)
