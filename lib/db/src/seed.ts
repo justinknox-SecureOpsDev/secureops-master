@@ -118,7 +118,7 @@ export async function backfillMustSignPolicies(): Promise<void> {
         WHERE e.user_id = u.id
           AND e.acknowledgements IS NOT NULL
           AND jsonb_typeof(e.acknowledgements) = 'array'
-          AND jsonb_array_length(e.acknowledgements) > 0
+          AND e.acknowledgements != '[]'::jsonb
       );
   `);
 }

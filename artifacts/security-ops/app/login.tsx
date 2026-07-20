@@ -2,8 +2,8 @@ import React, { useState } from "react";
 import {
   View, Text, TextInput, TouchableOpacity,
   StyleSheet, ActivityIndicator, Platform,
+  type StyleProp, type TextStyle,
 } from "react-native";
-import MaskedView from "@react-native-masked-view/masked-view";
 import { LinearGradient } from "expo-linear-gradient";
 import * as WebBrowser from "expo-web-browser";
 import { useRouter } from "expo-router";
@@ -36,27 +36,16 @@ async function postJson<T>(path: string, body: unknown): Promise<T> {
   return data as T;
 }
 
-const GOLD_GRADIENT: [string, string, string] = ["#f0d89a", "#c9a04a", "#8a6020"];
-
 /**
- * Metallic gold gradient text — same finish as the ACCESS SYSTEM button.
+ * Gold-coloured brand text.
  *
- * Native (iOS/Android): MaskedView + LinearGradient clips the gradient to the
- * text shape exactly. Web: plain #f0d89a (lightest gold stop) — gradient text
- * via MaskedView on web triggers a React-duplication "Invalid hook call" in
- * the Expo web bundle; the native login is the primary target.
+ * MaskedView-based gradient text was removed because
+ * @react-native-masked-view/masked-view is not linked in the App Store binary
+ * — shipping it via OTA crashes the JS bridge. A solid gold colour achieves
+ * the same visual hierarchy without any native-module dependency.
  */
-function GradientText({ style, children }: { style: object; children: React.ReactNode }) {
-  if (Platform.OS === "web") {
-    return <Text style={[style, { color: "#f0d89a" }]}>{children}</Text>;
-  }
-  return (
-    <MaskedView maskElement={<Text style={style}>{children}</Text>}>
-      <LinearGradient colors={GOLD_GRADIENT} start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }}>
-        <Text style={[style, { opacity: 0 }]}>{children}</Text>
-      </LinearGradient>
-    </MaskedView>
-  );
+function GoldText({ style, children }: { style: StyleProp<TextStyle>; children: React.ReactNode }) {
+  return <Text style={[style, { color: "#c9a04a" }]}>{children}</Text>;
 }
 
 export default function LoginScreen() {
@@ -156,13 +145,13 @@ export default function LoginScreen() {
         <View style={styles.brandBlock}>
           {isPlatformBrand ? (
             <>
-              <GradientText style={styles.brandName}>SecureOps</GradientText>
-              <GradientText style={styles.brandSub}>COMMAND</GradientText>
+              <GoldText style={styles.brandName}>SecureOps</GoldText>
+              <GoldText style={styles.brandSub}>COMMAND</GoldText>
             </>
           ) : (
-            <GradientText style={[styles.brandName, { textAlign: "center" }]}>
+            <GoldText style={[styles.brandName, { textAlign: "center" }]}>
               {brand.companyName.toUpperCase()}
-            </GradientText>
+            </GoldText>
           )}
           <View style={styles.dividerRow}>
             <LinearGradient
