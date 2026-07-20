@@ -6,6 +6,7 @@ import { useColors } from "@/hooks/useColors";
 import { BlurView } from "expo-blur";
 import { useChat } from "@/contexts/ChatContext";
 import { useFeatures, isEnabled } from "@/hooks/useFeatures";
+import { TourProvider } from "@/contexts/TourContext";
 
 export default function AdminLayout() {
   const colors = useColors();
@@ -17,6 +18,11 @@ export default function AdminLayout() {
   const flags = useFeatures();
 
   return (
+    // TourProvider is required because the shared profile screen (re-exported
+    // from the employee shell) calls useTour(). The welcome tour never
+    // auto-opens for admins (role gate inside the provider) and the replay
+    // affordance is hidden for admins on the profile screen itself.
+    <TourProvider>
     <Tabs
       screenOptions={{
         tabBarActiveTintColor: colors.primary,
@@ -130,6 +136,28 @@ export default function AdminLayout() {
           tabBarIcon: ({ color }) => <Feather name="radio" size={22} color={color} />,
         }}
       />
+      <Tabs.Screen
+        name="clock"
+        options={{
+          title: "Clock",
+          // The screen renders its own in-screen header/title, so suppress the
+          // tab navigator's native header to avoid doubling up.
+          headerShown: false,
+          tabBarAccessibilityLabel: "Time clock tab",
+          tabBarIcon: ({ color }) => <Feather name="clock" size={22} color={color} />,
+        }}
+      />
+      <Tabs.Screen
+        name="profile"
+        options={{
+          title: "Profile",
+          // The screen renders its own in-screen header/title, so suppress the
+          // tab navigator's native header to avoid doubling up.
+          headerShown: false,
+          tabBarAccessibilityLabel: "My profile tab",
+          tabBarIcon: ({ color }) => <Feather name="user" size={22} color={color} />,
+        }}
+      />
 
       {/* Hidden screens — accessible via router.push but not shown in tab bar */}
       <Tabs.Screen name="payroll" options={{ href: null, headerTitle: "Payroll" }} />
@@ -147,5 +175,6 @@ export default function AdminLayout() {
           an extra tab into the bar). */}
       <Tabs.Screen name="chat/[id]" options={{ href: null, headerShown: false }} />
     </Tabs>
+    </TourProvider>
   );
 }

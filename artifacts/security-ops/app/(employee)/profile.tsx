@@ -250,6 +250,10 @@ export default function EmployeeProfileScreen() {
   // Site Managers keep the "no financial info" invariant inside the employee
   // experience: hide their own pay rate, paystubs and W-2 doc.
   const isSiteManager = user?.role === "site_manager";
+  // This screen is also re-exported into the admin shell (app/(admin)/profile)
+  // so admins get a "My Profile" tab. The officer welcome tour describes
+  // employee tabs, so its replay affordance is hidden for admins.
+  const isAdmin = user?.role === "admin";
   const flags = useFeatures();
   const { open: openTour } = useTour();
   const { highContrast, setHighContrast } = useAccessibility();
@@ -337,7 +341,7 @@ export default function EmployeeProfileScreen() {
           <View style={{ flex: 1, gap: 2 }}>
             <Text style={[styles.heroName, { color: colors.foreground }]}>{p?.firstName} {p?.lastName}</Text>
             <View style={[styles.roleBadge, { backgroundColor: colors.primary + "20", borderColor: colors.primary + "50" }]}>
-              <Text style={[styles.roleText, { color: colors.primary }]}>{isSiteManager ? "SITE MANAGER" : "SECURITY OFFICER"}</Text>
+              <Text style={[styles.roleText, { color: colors.primary }]}>{isAdmin ? "ADMINISTRATOR" : isSiteManager ? "SITE MANAGER" : "SECURITY OFFICER"}</Text>
             </View>
           </View>
         </View>
@@ -787,6 +791,7 @@ export default function EmployeeProfileScreen() {
           <Feather name="chevron-right" size={16} color={colors.mutedForeground} />
         </TouchableOpacity>
         )}
+        {!isAdmin && (
         <TouchableOpacity
           onPress={openTour}
           style={[styles.actionRow, { borderBottomColor: colors.border }]}
@@ -804,6 +809,7 @@ export default function EmployeeProfileScreen() {
           </View>
           <Feather name="chevron-right" size={16} color={colors.mutedForeground} />
         </TouchableOpacity>
+        )}
         <TouchableOpacity
           onPress={() => router.push({ pathname: "/change-password" as any, params: { mode: "self" } })}
           style={[styles.actionRow, { borderBottomColor: colors.border }]}
