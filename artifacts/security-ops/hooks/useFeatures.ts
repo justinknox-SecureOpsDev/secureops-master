@@ -143,6 +143,25 @@ function buildPayload(data: unknown): BrandPayload {
 }
 
 /**
+ * Eagerly fetch + persist the connected org's brand immediately after an org
+ * is selected (selectOrg / selectDefaultOrg), so the login screen renders in
+ * tenant colors with no flash of the default WCSG look.
+ *
+ * Re-uses the existing in-flight promise when one is already running. Never
+ * throws — fetchFresh catches errors internally and falls back to envPayload.
+ * Callers should still `.catch(() => {})` defensively.
+ */
+export async function prefetchBrand(): Promise<void> {
+  if (!brandActive()) return;
+  if (!inFlight) {
+    inFlight = fetchFresh().finally(() => {
+      inFlight = null;
+    });
+  }
+  await inFlight;
+}
+
+/**
  * Drop the cached flags + brand so the next read re-fetches from the CURRENT
  * backend. MUST be called when the selected organization changes (see
  * OrgContext) — otherwise the previous org's flags/brand leak into the new one.

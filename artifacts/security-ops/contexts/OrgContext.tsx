@@ -23,6 +23,7 @@ import {
   resetFeatureFlagsCache,
   hydrateBrandFromStorage,
   clearPersistedBrand,
+  prefetchBrand,
 } from "@/hooks/useFeatures";
 import { storage } from "@/utils/storage";
 import { AUTH_TOKEN_KEY, AUTH_USER_KEY, runAuthLogout } from "@/contexts/AuthContext";
@@ -155,6 +156,10 @@ export function OrgProvider({ children }: { children: ReactNode }) {
     const resolved = await resolveOrgCode(code);
     await saveSelectedOrg(resolved);
     applyOrgRouting(resolved.apiBaseUrl);
+    // Eagerly fetch + cache the org's brand before navigating to login so the
+    // login screen renders in tenant colors immediately. Failure is silently
+    // swallowed — a brand fetch error must never block connecting.
+    await prefetchBrand().catch(() => {});
     setOrg(resolved);
     return resolved;
   }, []);
@@ -165,6 +170,8 @@ export function OrgProvider({ children }: { children: ReactNode }) {
     // Review tester on a fresh install reaches a working demo without a code.
     await saveSelectedOrg(LEGACY_DEFAULT_ORG);
     applyOrgRouting(LEGACY_DEFAULT_ORG.apiBaseUrl);
+    // Eagerly fetch brand so the demo login screen is already tenant-branded.
+    await prefetchBrand().catch(() => {});
     setOrg(LEGACY_DEFAULT_ORG);
     return LEGACY_DEFAULT_ORG;
   }, []);
