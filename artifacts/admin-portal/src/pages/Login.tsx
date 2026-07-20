@@ -49,7 +49,7 @@ export function LoginPage() {
   }
 
   return (
-    <div className="min-h-screen w-full flex items-center justify-center bg-brand-navy p-4 relative overflow-hidden">
+    <div className="min-h-screen w-full flex items-center justify-center bg-black p-4 relative overflow-hidden">
       <div
         aria-hidden
         className="absolute inset-0 opacity-[0.04] pointer-events-none"
