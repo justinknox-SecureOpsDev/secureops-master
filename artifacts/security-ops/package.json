@@ -69,6 +69,7 @@
     "@livekit/react-native": "2.11.0",
     "@livekit/react-native-webrtc": "144.1.0",
     "@react-native-community/netinfo": "~11.4.1",
+    "@react-native-masked-view/masked-view": "~0.3.2",
     "date-fns": "^3.6.0",
     "expo-camera": "~17.0.10",
     "expo-local-authentication": "~17.0.8",

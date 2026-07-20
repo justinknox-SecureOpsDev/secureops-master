@@ -3,6 +3,7 @@ import {
   View, Text, TextInput, TouchableOpacity,
   StyleSheet, ActivityIndicator, Platform,
 } from "react-native";
+import MaskedView from "@react-native-masked-view/masked-view";
 import { LinearGradient } from "expo-linear-gradient";
 import * as WebBrowser from "expo-web-browser";
 import { useRouter, useLocalSearchParams } from "expo-router";
@@ -37,6 +38,29 @@ async function postJson<T>(path: string, body: unknown): Promise<T> {
 
 const DEMO_EMAIL = "guest@secureops.com";
 const DEMO_PASSWORD = "Demo123!";
+
+const GOLD_GRADIENT: [string, string, string] = ["#f0d89a", "#c9a04a", "#8a6020"];
+
+/**
+ * Metallic gold gradient text — same finish as the ACCESS SYSTEM button.
+ *
+ * Native (iOS/Android): MaskedView + LinearGradient clips the gradient to the
+ * text shape exactly. Web: plain #f0d89a (lightest gold stop) — gradient text
+ * via MaskedView on web triggers a React-duplication "Invalid hook call" in
+ * the Expo web bundle; the native login is the primary target.
+ */
+function GradientText({ style, children }: { style: object; children: React.ReactNode }) {
+  if (Platform.OS === "web") {
+    return <Text style={[style, { color: "#f0d89a" }]}>{children}</Text>;
+  }
+  return (
+    <MaskedView maskElement={<Text style={style}>{children}</Text>}>
+      <LinearGradient colors={GOLD_GRADIENT} start={{ x: 0, y: 0 }} end={{ x: 1, y: 0 }}>
+        <Text style={[style, { opacity: 0 }]}>{children}</Text>
+      </LinearGradient>
+    </MaskedView>
+  );
+}
 
 export default function LoginScreen() {
   const [email, setEmail] = useState("");
@@ -160,27 +184,37 @@ export default function LoginScreen() {
       <View style={[styles.glowCore, { backgroundColor: colors.primary }]} />
 
       <View style={styles.content}>
-        {/* Connected org's logo (falls back to the platform emblem) */}
+        {/* Connected org's logo — 3D: shadow, perspective tilt, shine overlay */}
         <View
-          style={styles.logoWrap}
           accessible
           accessibilityRole="image"
           accessibilityLabel={brand.companyName}
+          style={styles.logoWrap}
         >
-          <BrandLogo size={132} />
+          <View style={styles.logo3dShell}>
+            <BrandLogo size={132} />
+            {/* Diagonal shine — light hits top-left, fades to transparent */}
+            <LinearGradient
+              colors={["rgba(255,248,220,0.28)", "rgba(255,248,220,0.06)", "transparent"]}
+              start={{ x: 0.1, y: 0 }}
+              end={{ x: 0.6, y: 0.55 }}
+              style={StyleSheet.absoluteFill}
+              pointerEvents="none"
+            />
+          </View>
         </View>
 
         {/* Connected org's brand (platform lockup until an org brand loads) */}
         <View style={styles.brandBlock}>
           {isPlatformBrand ? (
             <>
-              <Text style={[styles.brandName, { color: colors.foreground }]}>SecureOps</Text>
-              <Text style={[styles.brandSub, { color: colors.primary }]}>COMMAND</Text>
+              <GradientText style={styles.brandName}>SecureOps</GradientText>
+              <GradientText style={styles.brandSub}>COMMAND</GradientText>
             </>
           ) : (
-            <Text style={[styles.brandName, { color: colors.foreground }]} numberOfLines={2}>
+            <GradientText style={[styles.brandName, { textAlign: "center" }]}>
               {brand.companyName.toUpperCase()}
-            </Text>
+            </GradientText>
           )}
           <View style={styles.dividerRow}>
             <LinearGradient
@@ -447,6 +481,29 @@ const styles = StyleSheet.create({
   },
   logoWrap: {
     alignItems: "center",
+  },
+  logo3dShell: {
+    width: 132,
+    height: 132,
+    /* 3-D depth: perspective tilt + gold shadow */
+    ...Platform.select({
+      native: {
+        shadowColor: "#c9a04a",
+        shadowOffset: { width: 0, height: 14 },
+        shadowOpacity: 0.55,
+        shadowRadius: 22,
+        elevation: 24,
+      },
+      web: {
+        boxShadow: "0px 14px 22px 0px rgba(201,160,74,0.55)",
+      },
+    }),
+    transform: [
+      { perspective: 900 },
+      { rotateX: "-7deg" },
+    ],
+    overflow: "hidden",
+    borderRadius: 8,
   },
   brandBlock: {
     alignItems: "center",
