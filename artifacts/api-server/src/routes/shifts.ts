@@ -338,23 +338,18 @@ router.post("/shifts", requireAdminOrSiteManager, async (req, res): Promise<void
       res.status(403).json({ error: "Forbidden", message: "You can only post shifts to sites you manage." });
       return;
     }
-    const payOk = siteDefaultPay != null && Number.isFinite(Number(siteDefaultPay)) && Number(siteDefaultPay) > 0;
-    const billOk = siteDefaultBill != null && Number.isFinite(Number(siteDefaultBill)) && Number(siteDefaultBill) > 0;
-    if (!payOk || !billOk) {
-      res.status(400).json({ error: "Bad Request", message: "This site has no default pay/bill rate configured. An admin must set the site's default rates before a shift can be posted here." });
-      return;
-    }
   }
 
   const lvl = [1, 2, 3, 4].includes(Number(requiredLicenseLevel)) ? Number(requiredLicenseLevel) : 2;
   const hc = Math.max(1, Number(headcount) || 1);
   // payRate/billRate are the canonical fields; legacy hourlyRate/billableRate fall back when not set.
-  // Site managers: rates come only from the site default (validated non-zero above).
+  // Site managers: rates come from the site default when available, otherwise 0 (an admin can
+  // set the rate afterwards — blocking creation outright is worse than a $0 placeholder).
   const finalPay = isSiteManager
-    ? Number(siteDefaultPay)
+    ? (Number(siteDefaultPay) || 0)
     : (payRate != null ? Number(payRate) : (hourlyRate != null ? Number(hourlyRate) : 0));
   const finalBill = isSiteManager
-    ? Number(siteDefaultBill)
+    ? (Number(siteDefaultBill) || 0)
     : (billRate != null ? Number(billRate) : (billableRate != null ? Number(billableRate) : 0));
 
   const [shift] = await db.insert(shiftsTable).values({
@@ -534,19 +529,13 @@ router.post("/shifts/repeat", requireAdminOrSiteManager, async (req, res): Promi
 
   const lvl = [1, 2, 3, 4].includes(Number(requiredLicenseLevel)) ? Number(requiredLicenseLevel) : 2;
   const hc = Math.max(1, Number(headcount) || 1);
-  // Site managers are rate-blind: inherit the site's configured defaults and
-  // fail closed if absent, exactly like single-shift creation.
+  // Site managers are rate-blind: inherit the site's configured defaults when
+  // available, otherwise fall through to 0 so creation is never blocked.
   let pay: number;
   let bill: number;
   if (isSiteManager) {
-    const payOk = site.defaultPayRate != null && Number.isFinite(Number(site.defaultPayRate)) && Number(site.defaultPayRate) > 0;
-    const billOk = site.defaultBillRate != null && Number.isFinite(Number(site.defaultBillRate)) && Number(site.defaultBillRate) > 0;
-    if (!payOk || !billOk) {
-      res.status(400).json({ error: "Bad Request", message: "This site has no default pay/bill rate configured. An admin must set the site's default rates before shifts can be posted here." });
-      return;
-    }
-    pay = Number(site.defaultPayRate);
-    bill = Number(site.defaultBillRate);
+    pay = Number(site.defaultPayRate) || 0;
+    bill = Number(site.defaultBillRate) || 0;
   } else {
     pay = Number(payRate) || 0;
     bill = Number(billRate) || 0;
@@ -963,20 +952,13 @@ router.put("/shifts/:id", requireAdminOrSiteManager, async (req, res): Promise<v
 
   // A site manager moving a shift to a DIFFERENT managed site must not carry the
   // previous site's admin-set finance onto the new site/client. Recompute pay/bill
-  // from the DESTINATION site defaults (mirrors the create path) and drop the
-  // rate-card FK; fail closed if the destination has no usable defaults so we never
-  // persist a stale or zero rate that would poison payroll/invoicing downstream.
+  // from the DESTINATION site defaults when available, otherwise 0 — an admin can
+  // correct the rate afterwards; blocking the move entirely is worse.
   if (siteManagerMovedSite) {
-    const payOk = destDefaultPay != null && Number.isFinite(Number(destDefaultPay)) && Number(destDefaultPay) > 0;
-    const billOk = destDefaultBill != null && Number.isFinite(Number(destDefaultBill)) && Number(destDefaultBill) > 0;
-    if (!payOk || !billOk) {
-      res.status(400).json({ error: "Bad Request", message: "This site has no default pay/bill rate configured. An admin must set the site's default rates before a shift can be moved here." });
-      return;
-    }
-    updates.payRate = String(Number(destDefaultPay));
-    updates.hourlyRate = String(Number(destDefaultPay));
-    updates.billRate = String(Number(destDefaultBill));
-    updates.billableRate = String(Number(destDefaultBill));
+    updates.payRate = String(Number(destDefaultPay) || 0);
+    updates.hourlyRate = String(Number(destDefaultPay) || 0);
+    updates.billRate = String(Number(destDefaultBill) || 0);
+    updates.billableRate = String(Number(destDefaultBill) || 0);
     updates.siteRateId = null;
   }
 
