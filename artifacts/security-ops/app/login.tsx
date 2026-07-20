@@ -128,23 +128,8 @@ export default function LoginScreen() {
     setChallengeToken(null); setCode(""); setError(null);
   };
 
-  // Derive a warm, slightly lighter mid-tone from the background for the
-  // vertical gradient — shifts ~15% brighter toward the brand primary.
-  const bgMid = colors.card;
-
   return (
-    <SafeAreaView style={styles.container}>
-      {/* Vertical depth gradient: dark → warm centre → dark */}
-      <LinearGradient
-        colors={[colors.background, bgMid, colors.background]}
-        locations={[0, 0.45, 1]}
-        style={StyleSheet.absoluteFill}
-      />
-
-      {/* Large soft gold glow behind the logo area */}
-      <View style={[styles.glowLarge, { backgroundColor: colors.primary }]} />
-      {/* Tighter bright core glow */}
-      <View style={[styles.glowCore, { backgroundColor: colors.primary }]} />
+    <SafeAreaView style={[styles.container, { backgroundColor: colors.background }]}>
 
       <View style={styles.content}>
         {/* Connected org's logo — 3D: shadow, perspective tilt, shine overlay */}
@@ -386,28 +371,6 @@ function legalUrl(slug: "privacy" | "terms" | "eula" | "data-rights"): string {
 
 const styles = StyleSheet.create({
   container: { flex: 1 },
-  /* Large, very diffuse glow — warmth across the whole logo zone */
-  glowLarge: {
-    position: "absolute",
-    top: "10%",
-    alignSelf: "center",
-    width: 420,
-    height: 420,
-    borderRadius: 210,
-    opacity: 0.09,
-    transform: [{ scaleX: 1.6 }],
-  },
-  /* Bright tight core right behind the emblem */
-  glowCore: {
-    position: "absolute",
-    top: "17%",
-    alignSelf: "center",
-    width: 180,
-    height: 180,
-    borderRadius: 90,
-    opacity: 0.18,
-    transform: [{ scaleX: 1.3 }],
-  },
   /* Gradient border shell that wraps the card */
   cardShell: {
     padding: 1,
