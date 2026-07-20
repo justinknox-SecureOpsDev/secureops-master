@@ -7,16 +7,19 @@ import { z } from "zod/v4";
 import { requireAdmin } from "../middlewares/auth";
 import { getFederalHolidayName, HOLIDAY_PAY_MULTIPLIER } from "../lib/holidays";
 import { requireFeature } from "../lib/features";
-import {
-  addIsoDays,
-  businessDateToUtc,
-  businessTimeZone,
-  businessWeekKey,
-  businessWeekWindowUtc,
-} from "../lib/businessTime";
 
 const router: IRouter = Router();
 router.use("/payroll", requireFeature("payroll"));
+
+function addDays(d: Date, n: number): Date {
+  const x = new Date(d);
+  x.setUTCDate(x.getUTCDate() + n);
+  return x;
+}
+
+function isoDate(d: Date): string {
+  return d.toISOString().slice(0, 10);
+}
 
 router.get("/payroll", requireAdmin, async (req, res): Promise<void> => {
   const { employeeId, siteId, status, periodStart, periodEnd } = req.query as Record<string, string | undefined>;
@@ -65,16 +68,9 @@ router.post("/payroll/generate", requireAdmin, async (req, res): Promise<void> =
     res.status(400).json({ error: "Bad Request", message: "siteId and weekStart required" });
     return;
   }
-  if (
-    !/^\d{4}-\d{2}-\d{2}$/.test(String(weekStart)) ||
-    Number.isNaN(new Date(`${weekStart}T00:00:00.000Z`).getTime())
-  ) { res.status(400).json({ error: "Bad Request", message: "weekStart must be YYYY-MM-DD" }); return; }
-  // Snap the requested date to its business-week Monday and bound the week
-  // in PAYROLL_TIMEZONE (Mon 00:00 → Sun 23:59 local) so payroll buckets the
-  // exact same entries as the weekly invoice for the same key.
-  const tz = businessTimeZone();
-  const weekKey = businessWeekKey(businessDateToUtc(String(weekStart), tz), tz);
-  const { start, end } = businessWeekWindowUtc(weekKey, tz);
+  const start = new Date(`${weekStart}T00:00:00.000Z`);
+  if (Number.isNaN(start.getTime())) { res.status(400).json({ error: "Bad Request", message: "weekStart must be YYYY-MM-DD" }); return; }
+  const end = addDays(start, 7);
 
   // Pull approved time entries at this site for the week.
   const entries = await db
@@ -117,8 +113,8 @@ router.post("/payroll/generate", requireAdmin, async (req, res): Promise<void> =
     return;
   }
 
-  const periodStart = weekKey;
-  const periodEnd = addIsoDays(weekKey, 6);
+  const periodStart = isoDate(start);
+  const periodEnd = isoDate(addDays(start, 6));
   const created: any[] = [];
 
   for (const [employeeId, agg] of perEmployee) {
@@ -429,12 +425,14 @@ router.post("/payroll/pay-run/stripe", requireAdmin, async (req, res): Promise<v
 // processed/paid), then the existing Pay Run page takes over.
 // =============================================================================
 
-// YYYY-MM-DD Monday key of the business week containing d — Mon 00:00 →
-// Sun 23:59 in PAYROLL_TIMEZONE, identical to the invoice week key so the
-// Payroll Board, Pay Run, and weekly invoices all agree on which week a
-// Sunday-evening clock-in belongs to.
-function weekKeyOf(d: Date): string {
-  return businessWeekKey(d, businessTimeZone());
+// Monday 00:00:00 UTC of the week containing d.
+function mondayOfWeekUTC(d: Date): Date {
+  const x = new Date(d);
+  const day = x.getUTCDay();            // 0=Sun … 6=Sat
+  const diff = day === 0 ? -6 : 1 - day; // back up to Monday
+  x.setUTCDate(x.getUTCDate() + diff);
+  x.setUTCHours(0, 0, 0, 0);
+  return x;
 }
 
 type BoardBucket = {
@@ -538,8 +536,9 @@ async function computeBoardBuckets(filters: {
   };
   const buckets = new Map<string, Agg>();
   for (const r of rows) {
-    const periodStart = weekKeyOf(r.clockInTime);
-    const periodEnd = addIsoDays(periodStart, 6);
+    const monday = mondayOfWeekUTC(r.clockInTime);
+    const periodStart = isoDate(monday);
+    const periodEnd = isoDate(addDays(monday, 6));
     const siteKey = r.siteId ?? "__nosite__";
     const key = `${r.employeeId}|${siteKey}|${periodStart}`;
     const hours = parseFloat(String(r.hoursWorked || "0"));
@@ -1523,7 +1522,7 @@ router.post("/payroll/board/apply-rate", requireAdmin, async (req, res): Promise
     id: r.id,
     employeeId: r.employeeId,
     siteId: r.siteId,
-    periodStart: weekKeyOf(r.clockInTime),
+    periodStart: isoDate(mondayOfWeekUTC(r.clockInTime)),
   }));
   const employeeIds = Array.from(new Set(peKeys.map((p) => p.employeeId)));
   const existing = employeeIds.length === 0 ? [] : await db
@@ -1544,7 +1543,7 @@ router.post("/payroll/board/apply-rate", requireAdmin, async (req, res): Promise
   const toUpdate: string[] = [];
   const skipped: Array<{ id: string; reason: string }> = [];
   for (const r of rows) {
-    const k = `${r.employeeId}|${r.siteId ?? "__nosite__"}|${weekKeyOf(r.clockInTime)}`;
+    const k = `${r.employeeId}|${r.siteId ?? "__nosite__"}|${isoDate(mondayOfWeekUTC(r.clockInTime))}`;
     const peStatus = peStatusByKey.get(k);
     if (peStatus === "processed" || peStatus === "paid" || peStatus === "archived") {
       skipped.push({ id: r.id, reason: peStatus === "archived" ? "bucket is archived" : `bucket already ${peStatus}` });

@@ -10,7 +10,6 @@ import { seedRadioChannels } from "./lib/seedRadioChannels";
 import { startScheduledJobs } from "./lib/scheduledJobs";
 import { loadFeatureOverridesFromDb } from "./lib/features";
 import { loadBrandOverridesFromDb } from "./lib/brandConfig";
-import { resyncDraftInvoicesForWeekRule } from "./lib/invoiceSync";
 
 const rawPort = process.env["PORT"];
 
@@ -164,14 +163,6 @@ Promise.all([employeeProfileBackfillDone, employeesRowsBackfilled, demoUsersSeed
 backfillUserPhoneNumbersFromEmployees()
   .then(() => logger.info("User phone numbers backfilled from employee files"))
   .catch((err) => logger.error({ err }, "Failed to backfill user phone numbers"));
-
-// Idempotent resync: invoice weeks now key on business-timezone Mondays
-// (PAYROLL_TIMEZONE) instead of UTC Mondays. Rebuild every open auto-synced
-// draft (plus its previous week) so Sunday-evening entries that the old UTC
-// rule pushed into the wrong week land back where they belong. Locked,
-// sent, and hand-edited invoices are never touched; no-ops once converged.
-resyncDraftInvoicesForWeekRule()
-  .catch((err) => logger.error({ err }, "Failed to resync draft invoices for week rule"));
 
 // Idempotently seed the canonical chat channel set (announcements,
 // per-license-level rooms, OPS, city rooms, elite, one-per-site).

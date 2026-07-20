@@ -13,14 +13,6 @@ import {
 } from "@workspace/db";
 import { logger } from "./logger";
 import { getFederalHolidayName, HOLIDAY_PAY_MULTIPLIER } from "./holidays";
-import {
-  addIsoDays,
-  businessDateIso,
-  businessDateToUtc,
-  businessTimeZone,
-  businessWeekKey,
-  businessWeekWindowUtc,
-} from "./businessTime";
 
 /**
  * Auto-population of weekly client invoices (May 2026).
@@ -35,15 +27,10 @@ import {
  *      approvals for the same week skip this row (and start the next
  *      week's invoice if their week differs). Prevents the system from
  *      clobbering a hand-tuned bill.
- *   3. Week ends (Mon 00:00 in the business timezone) → scheduledJobs.ts
- *      calls lockEndedWeekInvoices() which stamps locked_at on every
- *      draft whose period has ended. Locked rows are never re-synced;
- *      the next approval rolls into a fresh draft for the new week.
- *
- * Week definition: Monday 00:00 → Sunday 23:59 in PAYROLL_TIMEZONE
- * (lib/businessTime.ts), matching payroll and analytics. Buckets used
- * to key on UTC Mondays, which pushed Sunday-evening Central entries
- * into the NEXT week's invoice.
+ *   3. Week ends (Mon 00:00 UTC) → scheduledJobs.ts calls
+ *      lockEndedWeekInvoices() which stamps locked_at on every draft
+ *      whose period has ended. Locked rows are never re-synced; the
+ *      next approval rolls into a fresh draft for the new week.
  *
  * Mutability contract (used by both the dedicated PUT /invoices/:id
  * handler and the generic /admin/tables/invoices PUT): an invoice is
@@ -75,12 +62,23 @@ export function adminEditBreaksAutoSync(body: Record<string, unknown>): boolean 
   return false;
 }
 
-/**
- * Canonical pay/invoice week key for an instant: `YYYY-MM-DD` of the
- * business-timezone Monday starting the week that contains `d`.
- */
-export function businessWeekStartIso(d: Date): string {
-  return businessWeekKey(d, businessTimeZone());
+/** Monday 00:00 UTC of the week containing `d`, as YYYY-MM-DD. */
+export function weekStartIsoUtc(d: Date): string {
+  const day = d.getUTCDay(); // 0=Sun .. 6=Sat
+  const offset = day === 0 ? 6 : day - 1;
+  const m = new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate()));
+  m.setUTCDate(m.getUTCDate() - offset);
+  return m.toISOString().slice(0, 10);
+}
+
+function addDaysUtc(d: Date, n: number): Date {
+  const x = new Date(d);
+  x.setUTCDate(x.getUTCDate() + n);
+  return x;
+}
+
+function isoDate(d: Date): string {
+  return d.toISOString().slice(0, 10);
 }
 
 function generateInvoiceNumber(): string {
@@ -115,18 +113,11 @@ export async function upsertWeeklyInvoice(
   siteId: string,
   weekStartIso: string,
 ): Promise<UpsertResult> {
-  if (
-    !/^\d{4}-\d{2}-\d{2}$/.test(weekStartIso) ||
-    Number.isNaN(new Date(`${weekStartIso}T00:00:00.000Z`).getTime())
-  ) {
+  const start = new Date(`${weekStartIso}T00:00:00.000Z`);
+  if (Number.isNaN(start.getTime())) {
     return { status: "skipped", reason: "invalid weekStart" };
   }
-  const tz = businessTimeZone();
-  // Snap whatever date the caller sent to its business-week Monday so every
-  // path (approval hook, manual generate routes, boot resync) keys the same
-  // bucket. Entry membership is the UTC window of that local Mon–Sun week.
-  const weekKey = businessWeekKey(businessDateToUtc(weekStartIso, tz), tz);
-  const { start, end } = businessWeekWindowUtc(weekKey, tz);
+  const end = addDaysUtc(start, 7);
 
   const [site] = await db
     .select({
@@ -159,7 +150,7 @@ export async function upsertWeeklyInvoice(
     .where(
       and(
         eq(invoicesTable.siteId, siteId),
-        eq(invoicesTable.periodStart, weekKey),
+        eq(invoicesTable.periodStart, weekStartIso),
         eq(invoicesTable.status, SYNCABLE_STATUS),
         isNull(invoicesTable.lockedAt),
         eq(invoicesTable.autoSynced, false),
@@ -168,7 +159,7 @@ export async function upsertWeeklyInvoice(
     .limit(1);
   if (manualDraft) {
     logger.warn(
-      { siteId, weekStartIso: weekKey, invoiceId: manualDraft.id },
+      { siteId, weekStartIso, invoiceId: manualDraft.id },
       "[invoice-sync] skipping manually-edited draft; late-approved entries for this week must be added by hand",
     );
     return { status: "skipped", reason: "manually edited", invoiceId: manualDraft.id };
@@ -183,7 +174,7 @@ export async function upsertWeeklyInvoice(
     .where(
       and(
         eq(invoicesTable.siteId, siteId),
-        eq(invoicesTable.periodStart, weekKey),
+        eq(invoicesTable.periodStart, weekStartIso),
         eq(invoicesTable.status, SYNCABLE_STATUS),
         isNull(invoicesTable.lockedAt),
         eq(invoicesTable.autoSynced, true),
@@ -303,7 +294,7 @@ export async function upsertWeeklyInvoice(
   const taxAmount = existing ? parseFloat(String(existing.taxAmount ?? "0")) : 0;
   const total = Math.round((subtotal + taxAmount) * 100) / 100;
 
-  const periodEnd = addIsoDays(weekKey, 6);
+  const periodEnd = isoDate(addDaysUtc(start, 6));
 
   if (existing) {
     const [updated] = await db
@@ -328,7 +319,7 @@ export async function upsertWeeklyInvoice(
     };
   }
 
-  const dueDate = addIsoDays(businessDateIso(new Date(), tz), client.paymentTermsDays ?? 30);
+  const dueDate = isoDate(addDaysUtc(new Date(), client.paymentTermsDays ?? 30));
   try {
     const [created] = await db
       .insert(invoicesTable)
@@ -336,7 +327,7 @@ export async function upsertWeeklyInvoice(
         invoiceNumber: generateInvoiceNumber(),
         clientId: client.id,
         siteId: site.id,
-        periodStart: weekKey,
+        periodStart: weekStartIso,
         periodEnd,
         clientName: client.name,
         clientEmail: client.contactEmail,
@@ -347,7 +338,7 @@ export async function upsertWeeklyInvoice(
         totalAmount: String(total),
         status: "draft",
         dueDate,
-        notes: `${site.name} — week of ${weekKey}`,
+        notes: `${site.name} — week of ${weekStartIso}`,
         autoSynced: true,
       })
       .returning();
@@ -370,7 +361,7 @@ export async function upsertWeeklyInvoice(
       .where(
         and(
           eq(invoicesTable.siteId, siteId),
-          eq(invoicesTable.periodStart, weekKey),
+          eq(invoicesTable.periodStart, weekStartIso),
           eq(invoicesTable.status, SYNCABLE_STATUS),
           isNull(invoicesTable.lockedAt),
           eq(invoicesTable.autoSynced, true),
@@ -378,7 +369,7 @@ export async function upsertWeeklyInvoice(
       )
       .limit(1);
     if (!raceWinner) {
-      logger.error({ siteId, weekStartIso: weekKey }, "[invoice-sync] unique violation but no race-winner row found");
+      logger.error({ siteId, weekStartIso }, "[invoice-sync] unique violation but no race-winner row found");
       return { status: "skipped", reason: "concurrent insert lost race" };
     }
     const rwTax = parseFloat(String(raceWinner.taxAmount ?? "0"));
@@ -422,7 +413,7 @@ export async function upsertWeeklyInvoiceForTimeEntry(entry: TimeEntry): Promise
     if (!siteId) return null;
     const clockIn = entry.clockInTime ? new Date(entry.clockInTime) : null;
     if (!clockIn || Number.isNaN(clockIn.getTime())) return null;
-    const weekStart = businessWeekStartIso(clockIn);
+    const weekStart = weekStartIsoUtc(clockIn);
     const result = await upsertWeeklyInvoice(siteId, weekStart);
     if (result.status === "created" || result.status === "updated") {
       logger.info(
@@ -451,7 +442,7 @@ export async function upsertWeeklyInvoiceForSubcontractorEntry(
     if (!entry.siteId) return null;
     const clockIn = entry.clockInAt ? new Date(entry.clockInAt) : null;
     if (!clockIn || Number.isNaN(clockIn.getTime())) return null;
-    const weekStart = businessWeekStartIso(clockIn);
+    const weekStart = weekStartIsoUtc(clockIn);
     const result = await upsertWeeklyInvoice(entry.siteId, weekStart);
     if (result.status === "created" || result.status === "updated") {
       logger.info(
@@ -474,11 +465,7 @@ export async function upsertWeeklyInvoiceForSubcontractorEntry(
  */
 export async function lockEndedWeekInvoices(): Promise<void> {
   try {
-    // "Week has ended" is judged on the business-timezone calendar: a draft
-    // for Mon..Sun locks once the local date reaches the NEXT Monday. The
-    // old UTC compare locked Central-time weeks 5-6 hours early on Sunday
-    // evening, freezing out the final Sunday-night shifts.
-    const today = businessDateIso(new Date(), businessTimeZone());
+    const today = isoDate(new Date());
     const locked = await db
       .update(invoicesTable)
       .set({ lockedAt: new Date() })
@@ -495,59 +482,5 @@ export async function lockEndedWeekInvoices(): Promise<void> {
     }
   } catch (err) {
     logger.error({ err }, "[invoice-sync] lockEndedWeekInvoices failed");
-  }
-}
-
-/**
- * One-shot idempotent boot resync (week-rule change, July 2026).
- *
- * Invoices used to bucket entries by UTC Mondays; they now bucket by
- * business-timezone Mondays. Entries clocked in Sunday evening local
- * (already Monday UTC) therefore move from next week's bucket into the
- * correct (previous) week. Existing open drafts were built under the
- * old rule, so rebuild them: for every unlocked auto-synced draft,
- * re-run the upsert for its own week AND the adjacent previous week so
- * displaced Sunday entries land in the right bucket (possibly creating
- * a fresh adjustment draft if that week's invoice is already locked).
- *
- * Never touches locked, hand-edited, or non-draft invoices — the upsert
- * itself enforces that contract. Safe to run on every boot: once the
- * buckets agree with the new rule the rebuilds are no-ops.
- */
-export async function resyncDraftInvoicesForWeekRule(): Promise<void> {
-  try {
-    const drafts = await db
-      .select({ siteId: invoicesTable.siteId, periodStart: invoicesTable.periodStart })
-      .from(invoicesTable)
-      .where(
-        and(
-          eq(invoicesTable.status, SYNCABLE_STATUS),
-          isNull(invoicesTable.lockedAt),
-          eq(invoicesTable.autoSynced, true),
-        ),
-      );
-    const keys = new Set<string>();
-    for (const d of drafts) {
-      if (!d.siteId || !d.periodStart) continue;
-      keys.add(`${d.siteId}|${d.periodStart}`);
-      keys.add(`${d.siteId}|${addIsoDays(d.periodStart, -7)}`);
-    }
-    let touched = 0;
-    for (const key of keys) {
-      const [siteId, weekStart] = key.split("|");
-      if (!siteId || !weekStart) continue;
-      const result = await upsertWeeklyInvoice(siteId, weekStart);
-      if (result.status === "created" || result.status === "updated" || result.status === "deleted") {
-        touched += 1;
-      }
-    }
-    if (touched > 0) {
-      logger.info(
-        { drafts: drafts.length, rebuilt: touched },
-        "[invoice-sync] boot resync rebuilt draft invoices under business-week rule",
-      );
-    }
-  } catch (err) {
-    logger.error({ err }, "[invoice-sync] boot resync of draft invoices failed");
   }
 }

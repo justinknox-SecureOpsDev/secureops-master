@@ -206,7 +206,7 @@ APP_BASE_URL = "https://wcsgisecureops.com"
 GEOCODING_ENABLED = "true"
 EMAIL_PROVIDER = "smtp"
 DEMO_ADMIN_EMAIL = "justin.knox@williamscouncil.com"
-SUPER_ADMIN_EMAILS = "jknox@secureopscommand.com"
+SUPER_ADMIN_EMAILS = "justin.knox@williamscouncil.com"
 ORG_DIRECTORY = "[{\"code\":\"wcsgi\",\"name\":\"Williams Council Security Group\",\"apiBaseUrl\":\"https://secureops-command.replit.app\"},{\"code\":\"wcsg\",\"name\":\"Williams Council Security Group\",\"apiBaseUrl\":\"https://secureops-command.replit.app\"},{\"code\":\"rgp\",\"name\":\"RGP\",\"apiBaseUrl\":\"https://rgpsecureopscommand.com\"}]"
 ORG_CODE = "wcsgi"
 

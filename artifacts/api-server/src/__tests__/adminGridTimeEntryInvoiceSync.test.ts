@@ -14,7 +14,7 @@ import {
 } from "@workspace/db";
 import app from "../app";
 import { signToken } from "../middlewares/auth";
-import { businessWeekStartIso } from "../lib/invoiceSync";
+import { weekStartIsoUtc } from "../lib/invoiceSync";
 
 const TAG = `gridteinvsync-${randomUUID().slice(0, 8)}`;
 const passwordHash = bcrypt.hashSync("test-password", 4);
@@ -32,7 +32,7 @@ const ctx = {} as Ctx;
 // A fixed instant well in the past — stable ISO week, no collision with live data.
 const BASE_CLOCK_IN = new Date("2025-04-08T14:00:00.000Z"); // Tuesday
 const BASE_CLOCK_OUT = new Date("2025-04-08T18:00:00.000Z"); // +4h
-const WEEK_START = businessWeekStartIso(BASE_CLOCK_IN);
+const WEEK_START = weekStartIsoUtc(BASE_CLOCK_IN);
 
 // A second week for cross-week move tests.
 const NEXT_CLOCK_IN = new Date("2025-04-15T14:00:00.000Z"); // following Tuesday
@@ -360,7 +360,7 @@ describe("admin grid PUT /admin/tables/time_entries/:id — invoice sync on upda
   it("re-syncs old invoice when siteId is null and site is derived from shiftId on a week move", async () => {
     // Entry with siteId=null, site resolved from shiftId (the shift has siteId set).
     const PREV_CLOCK_IN = new Date("2025-04-01T14:00:00.000Z"); // week before BASE_CLOCK_IN
-    const PREV_WEEK_START = businessWeekStartIso(PREV_CLOCK_IN);
+    const PREV_WEEK_START = weekStartIsoUtc(PREV_CLOCK_IN);
     const [entry] = await db
       .insert(timeEntriesTable)
       .values({

@@ -450,22 +450,21 @@ export default function InvoiceBoardPage() {
                 type="button"
                 className="px-2 py-1 text-xs border rounded hover:bg-accent"
                 onClick={() => {
-                  // periodStart is keyed to business-timezone Mondays
-                  // (Mon 00:00 → Sun 23:59 in PAYROLL_TIMEZONE), so anchor
-                  // "Monday of this week" to the admin's local calendar —
-                  // admins work in the business timezone, and the old UTC
-                  // anchoring flipped the preset a day early on Sunday
-                  // evenings.
+                  // periodStart is stored as a UTC ISO date, so anchor the
+                  // "Monday of this week" calculation in UTC to avoid an
+                  // off-by-one day for admins whose local clock is on the
+                  // other side of midnight UTC.
                   const now = new Date();
-                  const dow = now.getDay(); // 0=Sun … 6=Sat, local
-                  const monday = new Date(now.getFullYear(), now.getMonth(), now.getDate());
-                  monday.setDate(monday.getDate() - ((dow + 6) % 7));
+                  const utcDow = now.getUTCDay();
+                  const monday = new Date(Date.UTC(
+                    now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate(),
+                  ));
+                  monday.setUTCDate(monday.getUTCDate() - ((utcDow + 6) % 7));
                   const start = new Date(monday);
-                  start.setDate(monday.getDate() + days);
+                  start.setUTCDate(monday.getUTCDate() + days);
                   const end = new Date(monday);
-                  end.setDate(monday.getDate() + 6);
-                  const iso = (d: Date) =>
-                    `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+                  end.setUTCDate(monday.getUTCDate() + 6);
+                  const iso = (d: Date) => d.toISOString().slice(0, 10);
                   setFrom(iso(start));
                   setTo(iso(end));
                 }}
