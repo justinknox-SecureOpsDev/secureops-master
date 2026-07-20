@@ -110,6 +110,40 @@ export async function refreshSelectedOrg(
   return resolved;
 }
 
+export type SelectOrgDeps = {
+  saveSelectedOrg: (org: SelectedOrg) => Promise<void>;
+  /** Side-effect: point every backend consumer at this origin. */
+  applyOrgRouting: (origin: string) => void;
+  /**
+   * Eagerly fetch + cache the org's brand (see hooks/useFeatures). MUST be
+   * awaited before this flow resolves so the login screen the caller navigates
+   * to renders in tenant colors immediately — no flash of the default look.
+   * Failures are swallowed here: a brand fetch error must never block connect.
+   */
+  prefetchBrand: () => Promise<void>;
+};
+
+/**
+ * Apply an ALREADY-RESOLVED org: persist it, route every backend consumer at
+ * it, and eagerly warm the brand cache BEFORE resolving. Shared by
+ * OrgContext.selectOrg (directory-resolved code) and selectDefaultOrg (the
+ * App-Review "Try Demo" path, which bypasses the directory).
+ *
+ * Ordering is the invariant under test in selectOrgBrandPrefetch.test.ts:
+ * routing must be applied BEFORE prefetchBrand (so the fetch hits the new
+ * backend), and prefetchBrand must be AWAITED before this returns (so brand is
+ * cached before the caller navigates to login).
+ */
+export async function applySelectedOrg(
+  org: SelectedOrg,
+  deps: SelectOrgDeps,
+): Promise<SelectedOrg> {
+  await deps.saveSelectedOrg(org);
+  deps.applyOrgRouting(org.apiBaseUrl);
+  await deps.prefetchBrand().catch(() => {});
+  return org;
+}
+
 export type OrgSwitchDeps = {
   clearSelectedOrg: () => Promise<void>;
   /** Side-effect: drop the runtime origin + cached feature flags. */

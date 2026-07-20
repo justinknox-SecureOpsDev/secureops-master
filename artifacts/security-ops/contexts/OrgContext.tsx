@@ -27,7 +27,12 @@ import {
 } from "@/hooks/useFeatures";
 import { storage } from "@/utils/storage";
 import { AUTH_TOKEN_KEY, AUTH_USER_KEY, runAuthLogout } from "@/contexts/AuthContext";
-import { bootstrapOrg, performSwitchOrg, refreshSelectedOrg } from "@/utils/orgBootstrap";
+import {
+  applySelectedOrg,
+  bootstrapOrg,
+  performSwitchOrg,
+  refreshSelectedOrg,
+} from "@/utils/orgBootstrap";
 
 /**
  * Multi-org routing context.
@@ -152,14 +157,17 @@ export function OrgProvider({ children }: { children: ReactNode }) {
     };
   }, []);
 
+  // Both select paths share applySelectedOrg (utils/orgBootstrap): persist →
+  // apply routing → AWAIT prefetchBrand, so the login screen renders in tenant
+  // colors immediately (no flash of the default look). The ordering invariant
+  // is covered by utils/__tests__/selectOrgBrandPrefetch.test.ts.
   const selectOrg = useCallback(async (code: string) => {
     const resolved = await resolveOrgCode(code);
-    await saveSelectedOrg(resolved);
-    applyOrgRouting(resolved.apiBaseUrl);
-    // Eagerly fetch + cache the org's brand before navigating to login so the
-    // login screen renders in tenant colors immediately. Failure is silently
-    // swallowed — a brand fetch error must never block connecting.
-    await prefetchBrand().catch(() => {});
+    await applySelectedOrg(resolved, {
+      saveSelectedOrg,
+      applyOrgRouting,
+      prefetchBrand,
+    });
     setOrg(resolved);
     return resolved;
   }, []);
@@ -168,10 +176,11 @@ export function OrgProvider({ children }: { children: ReactNode }) {
     // Bypass the directory entirely: LEGACY_DEFAULT_ORG points at the canonical
     // backend (DEFAULT_NATIVE_ORIGIN) that hosts the demo account, so an App
     // Review tester on a fresh install reaches a working demo without a code.
-    await saveSelectedOrg(LEGACY_DEFAULT_ORG);
-    applyOrgRouting(LEGACY_DEFAULT_ORG.apiBaseUrl);
-    // Eagerly fetch brand so the demo login screen is already tenant-branded.
-    await prefetchBrand().catch(() => {});
+    await applySelectedOrg(LEGACY_DEFAULT_ORG, {
+      saveSelectedOrg,
+      applyOrgRouting,
+      prefetchBrand,
+    });
     setOrg(LEGACY_DEFAULT_ORG);
     return LEGACY_DEFAULT_ORG;
   }, []);

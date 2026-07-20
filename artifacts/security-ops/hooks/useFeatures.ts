@@ -162,6 +162,16 @@ export async function prefetchBrand(): Promise<void> {
 }
 
 /**
+ * Read-only view of the in-memory brand cache (null before any hydrate/fetch).
+ * Exists so tests can assert the "no flash" invariant: after selectOrg awaits
+ * prefetchBrand, this MUST already hold the tenant's brand before the login
+ * screen mounts. Not for rendering — use the hooks, which subscribe to updates.
+ */
+export function getCachedBrandSnapshot(): Readonly<BrandPayload> | null {
+  return cached;
+}
+
+/**
  * Drop the cached flags + brand so the next read re-fetches from the CURRENT
  * backend. MUST be called when the selected organization changes (see
  * OrgContext) — otherwise the previous org's flags/brand leak into the new one.
