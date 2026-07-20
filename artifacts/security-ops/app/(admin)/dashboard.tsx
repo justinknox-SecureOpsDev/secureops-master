@@ -8,6 +8,7 @@ import {
   useNotifyShiftVacancy,
 } from "@workspace/api-client-react";
 import { useAuth } from "@/contexts/AuthContext";
+import { BrandLogo } from "@/components/BrandLogo";
 import { useFeatures, isEnabled, type FeatureKey } from "@/hooks/useFeatures";
 import { Feather } from "@expo/vector-icons";
 import { useRouter } from "expo-router";
@@ -122,7 +123,8 @@ export default function AdminDashboardScreen() {
   return (
     <ScrollView style={[styles.container, { backgroundColor: colors.background }]} contentContainerStyle={{ paddingBottom: 100 }}>
       <View style={[styles.header, { paddingTop: topPad + 16, borderBottomColor: colors.border }]}>
-        <View>
+        <BrandLogo size={36} />
+        <View style={{ flex: 1 }} accessible accessibilityRole="header">
           <Text style={[styles.greeting, { color: colors.mutedForeground }]}>Welcome back,</Text>
           <Text style={[styles.name, { color: colors.foreground }]}>{user?.firstName} {user?.lastName}</Text>
         </View>
@@ -297,7 +299,7 @@ const styles = StyleSheet.create({
   container: { flex: 1 },
   center: { flex: 1, justifyContent: "center", alignItems: "center" },
   header: {
-    flexDirection: "row", justifyContent: "space-between", alignItems: "center",
+    flexDirection: "row", alignItems: "center", gap: 10,
     paddingHorizontal: 16, paddingBottom: 16, borderBottomWidth: 1,
   },
   greeting: { fontSize: 13, letterSpacing: 1 },

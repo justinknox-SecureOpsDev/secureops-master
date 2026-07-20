@@ -1,6 +1,7 @@
 import React from "react";
 import { useTopPad } from "@/hooks/useTopPad";
-import { View, Text, StyleSheet, ScrollView, TouchableOpacity, ActivityIndicator, Platform, Image } from "react-native";
+import { View, Text, StyleSheet, ScrollView, TouchableOpacity, ActivityIndicator, Platform } from "react-native";
+import { BrandLogo } from "@/components/BrandLogo";
 import { useColors } from "@/hooks/useColors";
 import { useGetEmployeeDashboardSummary, getGetEmployeeDashboardSummaryQueryKey, useGetLicenses, getGetLicensesQueryKey, useGetEmployee, getGetEmployeeQueryKey } from "@workspace/api-client-react";
 import { useAuth } from "@/contexts/AuthContext";
@@ -109,7 +110,7 @@ export default function EmployeeHomeScreen() {
   return (
     <ScrollView style={[styles.container, { backgroundColor: colors.background }]} contentContainerStyle={{ paddingBottom: 100 }}>
       <View style={[styles.header, { paddingTop: topPad + 16, borderBottomColor: colors.border }]}>
-        <Image source={require("@/assets/images/logo.png")} style={styles.logoSmall} resizeMode="contain" />
+        <BrandLogo size={36} />
         <View style={{ flex: 1 }} accessible accessibilityRole="header">
           <Text style={[styles.greeting, { color: colors.mutedForeground }]}>Good day,</Text>
           <Text style={[styles.name, { color: colors.foreground }]}>{user?.firstName} {user?.lastName}</Text>
@@ -333,7 +334,6 @@ const styles = StyleSheet.create({
   container: { flex: 1 },
   center: { flex: 1, justifyContent: "center", alignItems: "center" },
   header: { flexDirection: "row", alignItems: "center", gap: 10, paddingHorizontal: 16, paddingBottom: 16, borderBottomWidth: 1 },
-  logoSmall: { width: 36, height: 36, borderRadius: 18 },
   greeting: { fontSize: 12, letterSpacing: 1 },
   name: { fontSize: 17, fontWeight: "700" },
   logoutBtn: { padding: 8, borderRadius: 8, borderWidth: 1 },
