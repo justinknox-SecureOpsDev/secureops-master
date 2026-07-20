@@ -88,3 +88,4 @@
 - [Admin portal mobile overflow](admin-portal-mobile-overflow-pattern.md) — h-dvh shell, overflow-x-auto+focusable region on wide tables, no per-dialog max-h overrides, grid-cols-1 sm:grid-cols-2 form grids.
 - [Org origin self-heal refresh](org-refresh-stale-origin.md) — launch refresh of pinned org origin must never gate/disconnect; re-check storage before persisting (switch-org race).
 - [Signed URL browser CORS](signed-url-browser-cors.md) — signed storage URLs send ACAO:*; browser fetch→blob download works and is the only way to keep the real filename (no Content-Disposition).
+- [Brand logo — no heuristic plate](brand-logo-no-heuristic-plate.md) — never plate uploaded logos from a bg-color heuristic (WCSG eagle has baked dark bg → white edges); decide from image pixels at upload time.
