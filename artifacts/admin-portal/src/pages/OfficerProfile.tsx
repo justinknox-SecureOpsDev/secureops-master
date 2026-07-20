@@ -12,7 +12,7 @@ import {
   ArrowLeft, User, Mail, Phone, ShieldCheck, AlertTriangle, Loader2,
   ExternalLink, MessageCircle, PhoneCall, Calendar, ShieldAlert, MapPin,
   Play, Pause, FileText, Shirt, ClipboardList, Briefcase, Banknote,
-  BadgeCheck,
+  BadgeCheck, Download,
 } from "lucide-react";
 
 type Officer = {
@@ -670,6 +670,50 @@ export default function OfficerProfilePage() {
       .slice(0, 5);
   }, [recentIncidents.data]);
 
+  const [pdfBusy, setPdfBusy] = useState<"view" | "download" | null>(null);
+  const [pdfError, setPdfError] = useState<string | null>(null);
+
+  async function openProfilePdf(mode: "view" | "download") {
+    if (!id || pdfBusy) return;
+    setPdfBusy(mode);
+    setPdfError(null);
+    try {
+      const { token } = await api<{ token: string }>(
+        `/employees/${encodeURIComponent(id)}/profile/pdf/download-token`,
+        { method: "POST" },
+      );
+      const res = await fetch(
+        `/api/employees/${encodeURIComponent(id)}/profile/pdf?token=${encodeURIComponent(token)}`,
+      );
+      if (!res.ok) {
+        let msg = `Could not generate PDF (${res.status})`;
+        try { const j = await res.json(); if (j?.message) msg = j.message; } catch { /* not JSON */ }
+        throw new Error(msg);
+      }
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      if (mode === "view") {
+        window.open(url, "_blank", "noopener");
+        setTimeout(() => URL.revokeObjectURL(url), 60_000);
+      } else {
+        const disp = res.headers.get("Content-Disposition") ?? "";
+        const m = /filename="?([^";]+)"?/.exec(disp);
+        const filename = m?.[1] ?? `profile-${id}.pdf`;
+        const a = document.createElement("a");
+        a.href = url;
+        a.download = filename;
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
+        URL.revokeObjectURL(url);
+      }
+    } catch (e) {
+      setPdfError(e instanceof Error ? e.message : "PDF generation failed.");
+    } finally {
+      setPdfBusy(null);
+    }
+  }
+
   return (
     <div className="p-4 lg:p-6 max-w-[1000px] mx-auto space-y-3">
       <div className="flex items-center gap-2">
@@ -745,10 +789,48 @@ export default function OfficerProfilePage() {
                     No phone on file
                   </Button>
                 )}
+                {isAdmin && (
+                  <>
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      onClick={() => void openProfilePdf("view")}
+                      disabled={!!pdfBusy}
+                      title="Open profile PDF in a new tab"
+                    >
+                      {pdfBusy === "view" ? (
+                        <Loader2 className="w-4 h-4 mr-1 animate-spin" />
+                      ) : (
+                        <FileText className="w-4 h-4 mr-1" />
+                      )}
+                      View PDF
+                    </Button>
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      onClick={() => void openProfilePdf("download")}
+                      disabled={!!pdfBusy}
+                      title="Download profile PDF"
+                    >
+                      {pdfBusy === "download" ? (
+                        <Loader2 className="w-4 h-4 mr-1 animate-spin" />
+                      ) : (
+                        <Download className="w-4 h-4 mr-1" />
+                      )}
+                      Download PDF
+                    </Button>
+                  </>
+                )}
               </div>
               {openDm.error && (
                 <div className="text-xs text-red-700">
                   Could not open chat: {openDm.error.message}
+                </div>
+              )}
+              {pdfError && (
+                <div className="flex items-center gap-1.5 text-xs text-red-700">
+                  <AlertTriangle className="w-3.5 h-3.5 shrink-0" />
+                  {pdfError}
                 </div>
               )}
 
