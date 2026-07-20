@@ -140,7 +140,7 @@ export default function LoginScreen() {
           style={styles.logoWrap}
         >
           <View style={styles.logo3dShell}>
-            <BrandLogo size={132} />
+            <BrandLogo size={180} />
             {/* Diagonal shine — light hits top-left, fades to transparent */}
             <LinearGradient
               colors={["rgba(255,248,220,0.28)", "rgba(255,248,220,0.06)", "transparent"]}
@@ -385,8 +385,8 @@ const styles = StyleSheet.create({
     alignItems: "center",
   },
   logo3dShell: {
-    width: 132,
-    height: 132,
+    width: 180,
+    height: 180,
     /* 3-D depth: perspective tilt + gold shadow */
     ...Platform.select({
       native: {
