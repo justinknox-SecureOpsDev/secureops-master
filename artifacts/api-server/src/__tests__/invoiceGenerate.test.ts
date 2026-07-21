@@ -278,6 +278,78 @@ describe("POST /invoices/generate", () => {
     expect(res.body.overlappingInvoiceIds).toEqual([]);
   });
 
+  it("weekly path warns when a custom-period invoice covers the same site+week", async () => {
+    // Fresh site so the invoices created by earlier tests can't interfere.
+    const [site] = await db
+      .insert(sitesTable)
+      .values({
+        clientId: ctx.clientId,
+        name: `${TAG}-weekly-overlap-site`,
+        address: "300 Overlap Way",
+        defaultBillRate: "50.00",
+      })
+      .returning({ id: sitesTable.id });
+
+    const weekStart = previousMondayISO();
+    const start = new Date(`${weekStart}T00:00:00.000Z`);
+    const entryIn = new Date(start.getTime() + 86400_000 + 9 * 3600_000);
+    const entryOut = new Date(entryIn.getTime() + 8 * 3600_000);
+    await db.insert(timeEntriesTable).values({
+      employeeId: ctx.officerId,
+      siteId: site.id,
+      clockInTime: entryIn,
+      clockOutTime: entryOut,
+      hoursWorked: "8.00",
+      approvalStatus: "approved",
+    });
+
+    // 1) Weekly generate with NO existing custom invoice — no warning.
+    const clean = await request(app)
+      .post("/api/invoices/generate")
+      .set(authed(ctx.adminToken))
+      .send({ siteId: site.id, weekStart });
+    expect(clean.status).toBe(201);
+    expect(clean.body.overlappingInvoiceIds).toEqual([]);
+
+    // 2) Create a custom-period invoice overlapping the same week. Its
+    //    periodStart is offset from the Monday — a custom invoice whose
+    //    periodStart equals the week key would instead trip the weekly
+    //    upsert's manually-edited-draft skip (separate, pre-existing guard).
+    const periodStart = new Date(start);
+    periodStart.setUTCDate(periodStart.getUTCDate() + 1);
+    const periodEnd = new Date(start);
+    periodEnd.setUTCDate(periodEnd.getUTCDate() + 3);
+    const custom = await request(app)
+      .post("/api/invoices/generate")
+      .set(authed(ctx.adminToken))
+      .send({
+        siteId: site.id,
+        periodStart: periodStart.toISOString().slice(0, 10),
+        periodEnd: periodEnd.toISOString().slice(0, 10),
+      });
+    expect(custom.status).toBe(201);
+
+    // 3) Weekly generate again — must flag the custom invoice, must NOT
+    //    flag itself (weekly-keyed rows for the same week are excluded).
+    const flagged = await request(app)
+      .post("/api/invoices/generate")
+      .set(authed(ctx.adminToken))
+      .send({ siteId: site.id, weekStart });
+    expect(flagged.status).toBe(201);
+    expect(flagged.body.overlappingInvoiceIds).toContain(custom.body.id);
+    expect(flagged.body.overlappingInvoiceIds).not.toContain(flagged.body.id);
+    expect(flagged.body.overlappingInvoiceIds).not.toContain(clean.body.id);
+
+    // 4) Void the custom invoice — the warning must clear.
+    await db.execute(sql`UPDATE invoices SET status = 'void' WHERE id = ${custom.body.id}::uuid`);
+    const cleared = await request(app)
+      .post("/api/invoices/generate")
+      .set(authed(ctx.adminToken))
+      .send({ siteId: site.id, weekStart });
+    expect(cleared.status).toBe(201);
+    expect(cleared.body.overlappingInvoiceIds).toEqual([]);
+  });
+
   it("blocks non-admin employees (403)", async () => {
     const res = await request(app)
       .post("/api/invoices/generate")

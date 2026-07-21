@@ -1,4 +1,4 @@
-import { and, eq, gte, isNull, isNotNull, lt, or, sql } from "drizzle-orm";
+import { and, eq, gte, isNull, isNotNull, lt, lte, ne, not, or, sql } from "drizzle-orm";
 import {
   db,
   invoicesTable,
@@ -90,9 +90,44 @@ function generateInvoiceNumber(): string {
 
 export type UpsertResult =
   | { status: "skipped"; reason: string; invoiceId?: string }
-  | { status: "created"; invoiceId: string; totalAmount: number; lineCount: number }
-  | { status: "updated"; invoiceId: string; totalAmount: number; lineCount: number }
+  | { status: "created"; invoiceId: string; totalAmount: number; lineCount: number; overlappingInvoiceIds?: string[] }
+  | { status: "updated"; invoiceId: string; totalAmount: number; lineCount: number; overlappingInvoiceIds?: string[] }
   | { status: "deleted"; invoiceId: string; reason: string };
+
+/**
+ * Double-billing guard for the WEEKLY path: find existing non-void invoices
+ * for this site whose period overlaps [weekStartIso, weekEndIso] but that are
+ * NOT keyed to this exact week. Weekly-keyed rows (periodStart = weekStart AND
+ * periodEnd = weekEnd) are excluded because locked prior weekly invoices +
+ * adjustment drafts for the same week are a supported workflow — the risk this
+ * flags is a CUSTOM-period invoice silently covering the same site+week.
+ * Overlap = existing.start <= weekEnd AND existing.end >= weekStart
+ * (inclusive dates), mirroring the custom-period path's guard.
+ */
+export async function findWeeklyOverlapInvoiceIds(
+  siteId: string,
+  weekStartIso: string,
+  weekEndIso: string,
+): Promise<string[]> {
+  const rows = await db
+    .select({ id: invoicesTable.id })
+    .from(invoicesTable)
+    .where(
+      and(
+        eq(invoicesTable.siteId, siteId),
+        ne(invoicesTable.status, "void"),
+        lte(invoicesTable.periodStart, weekEndIso),
+        gte(invoicesTable.periodEnd, weekStartIso),
+        not(
+          and(
+            eq(invoicesTable.periodStart, weekStartIso),
+            eq(invoicesTable.periodEnd, weekEndIso),
+          )!,
+        ),
+      ),
+    );
+  return rows.map((r) => r.id);
+}
 
 /**
  * Build/refresh the draft invoice for (siteId, weekStartIso).
@@ -306,6 +341,19 @@ export async function upsertWeeklyInvoice(
 
   const periodEnd = isoDate(addDaysUtc(start, 6));
 
+  // Double-billing guard (mirrors the custom-period path): warn when a
+  // custom-period (non-weekly-keyed) invoice already covers this site+week.
+  // We still upsert the weekly draft — the ids are returned so the route
+  // can surface a warning, and logged so the auto-sync (approval) path
+  // leaves a trace even though it has no UI.
+  const overlappingInvoiceIds = await findWeeklyOverlapInvoiceIds(siteId, weekStartIso, periodEnd);
+  if (overlappingInvoiceIds.length > 0) {
+    logger.warn(
+      { siteId, weekStartIso, overlappingInvoiceIds },
+      "[invoice-sync] weekly invoice overlaps existing custom-period invoice(s) — possible double-billing",
+    );
+  }
+
   if (existing) {
     const [updated] = await db
       .update(invoicesTable)
@@ -326,6 +374,7 @@ export async function upsertWeeklyInvoice(
       invoiceId: updated.id,
       totalAmount: total,
       lineCount: lineItems.length,
+      overlappingInvoiceIds,
     };
   }
 
@@ -357,6 +406,7 @@ export async function upsertWeeklyInvoice(
       invoiceId: created.id,
       totalAmount: total,
       lineCount: lineItems.length,
+      overlappingInvoiceIds,
     };
   } catch (err) {
     // Concurrent approval beat us to the insert. The partial unique
@@ -402,6 +452,7 @@ export async function upsertWeeklyInvoice(
       invoiceId: raceWinner.id,
       totalAmount: rwTotal,
       lineCount: lineItems.length,
+      overlappingInvoiceIds,
     };
   }
 }

@@ -265,7 +265,14 @@ router.post("/invoices/generate", requireAdmin, async (req, res): Promise<void> 
     .from(invoicesTable)
     .leftJoin(sitesTable, eq(invoicesTable.siteId, sitesTable.id))
     .where(eq(invoicesTable.id, result.invoiceId));
-  res.status(201).json({ ...withSite?.invoices, siteName: withSite?.sites?.name });
+  res.status(201).json({
+    ...withSite?.invoices,
+    siteName: withSite?.sites?.name,
+    overlappingInvoiceIds:
+      (result.status === "created" || result.status === "updated"
+        ? result.overlappingInvoiceIds
+        : undefined) ?? [],
+  });
 });
 
 // Stream a branded PDF for a single invoice — used by the admin portal's

@@ -2566,7 +2566,7 @@ export type GetPncPaymentStatusParams = {
 export type GetPncPaymentStatus200 = { [key: string]: unknown };
 
 export type GenerateInvoice201 = Invoice & {
-  /** Custom-period path only: ids of existing non-void invoices for the same site whose period overlaps the requested range. Non-empty means potential double-billing — surface a warning. */
+  /** Ids of existing non-void invoices for the same site whose period overlaps the generated invoice's range. On the weekly path, invoices keyed to the exact same week (prior locked weekly invoices / adjustment drafts) are excluded — only custom-period collisions are flagged. Non-empty means potential double-billing — surface a warning. */
   overlappingInvoiceIds?: string[];
 };
 
