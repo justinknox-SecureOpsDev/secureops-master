@@ -308,6 +308,40 @@ describe("POST /payroll/pay-run/pnc", () => {
     }
   });
 
+  it("rolls rows back to pending when submitMultipayment throws (network outage)", async () => {
+    const entryId = await makePendingEntry(ctx.bankedEmployeeId);
+    submitMock.mockImplementationOnce(async () => {
+      throw new Error("ECONNRESET: network outage");
+    });
+
+    const res = await request(app)
+      .post("/api/payroll/pay-run/pnc")
+      .set(authed())
+      .send({ ids: [entryId] });
+    expect(res.status).toBe(502);
+    expect(res.body.message).toContain("ECONNRESET");
+
+    // Claimed rows rolled from 'processing' back to 'pending' with payment
+    // bookkeeping cleared — never stranded in 'processing'.
+    const [row] = await fetchEntries([entryId]);
+    expect(row.status).toBe("pending");
+    expect(row.paidMethod).toBeNull();
+    expect(row.paymentReference).toBeNull();
+    expect(row.paidBy).toBeNull();
+
+    // After the outage clears, a retry succeeds.
+    const retry = await request(app)
+      .post("/api/payroll/pay-run/pnc")
+      .set(authed())
+      .send({ ids: [entryId] });
+    expect(retry.status).toBe(200);
+    expect(retry.body.processed).toBe(1);
+    expect(submitMock).toHaveBeenCalledTimes(2);
+    const [after] = await fetchEntries([entryId]);
+    expect(after.status).toBe("processed");
+    expect(after.paidMethod).toBe("pnc_api");
+  });
+
   it("rolls rows back to pending when PNC rejects the batch", async () => {
     const entryId = await makePendingEntry(ctx.bankedEmployeeId);
     submitMock.mockImplementationOnce(async () => ({
