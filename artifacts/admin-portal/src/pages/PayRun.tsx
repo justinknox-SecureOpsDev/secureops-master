@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Link } from "wouter";
-import { Banknote, Download, CheckCircle2, AlertTriangle, Loader2, Zap, Building2, X, UserRoundCog } from "lucide-react";
+import { Banknote, Download, CheckCircle2, AlertTriangle, Loader2, Zap, Building2, X, UserRoundCog, RefreshCw } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -177,6 +177,8 @@ export default function PayRunPage() {
   const pncIdemKeyRef = useRef<string | null>(null);
   // PNC pre-submit readiness confirmation dialog
   const [pncPreflight, setPncPreflight] = useState<PncPreflight | null>(null);
+  // References currently being re-checked individually (per-badge action).
+  const [pncRechecking, setPncRechecking] = useState<Set<string>>(new Set());
 
   const exportBtnRef = useRef<HTMLButtonElement | null>(null);
   const markPaidBtnRef = useRef<HTMLButtonElement | null>(null);
@@ -238,6 +240,33 @@ export default function PayRunPage() {
       if (generation === pncFetchGeneration.current) setPncStatuses(Object.fromEntries(results));
     } finally {
       if (generation === pncFetchGeneration.current) setPncStatusesLoading(false);
+    }
+  };
+
+  // Re-check a single payment reference on demand (badge/modal action).
+  // Fetches only that reference and updates the badge (and open modal) in place.
+  const recheckPncStatus = async (ref: string) => {
+    if (pncRechecking.has(ref)) return;
+    setPncRechecking((prev) => new Set(prev).add(ref));
+    try {
+      let entry: { settlement: PncSettlement; data: unknown };
+      try {
+        const res = await fetchWithAuth(`/api/payroll/pay-run/pnc-status?customerReference=${encodeURIComponent(ref)}`);
+        const data: unknown = await res.json();
+        entry = res.ok
+          ? { settlement: derivePncSettlement(data), data }
+          : { settlement: "error" as PncSettlement, data };
+      } catch (e) {
+        entry = { settlement: "error" as PncSettlement, data: { message: (e as Error).message } };
+      }
+      setPncStatuses((prev) => ({ ...prev, [ref]: entry }));
+      setPncStatusModal((prev) => (prev && prev.customerReference === ref ? { ...prev, data: entry.data } : prev));
+    } finally {
+      setPncRechecking((prev) => {
+        const next = new Set(prev);
+        next.delete(ref);
+        return next;
+      });
     }
   };
 
@@ -452,6 +481,14 @@ export default function PayRunPage() {
   // full raw-response modal (data already cached from the batch fetch).
   const renderPncBadge = (paymentReference: string) => {
     const entry = pncStatuses[paymentReference];
+    const rechecking = pncRechecking.has(paymentReference);
+    if (rechecking) {
+      return (
+        <span className="text-xs px-1.5 py-0.5 rounded border bg-gray-50 text-gray-500 border-gray-200">
+          PNC: Checking…
+        </span>
+      );
+    }
     if (!entry) {
       return (
         <span className="text-xs px-1.5 py-0.5 rounded border bg-gray-50 text-gray-500 border-gray-200">
@@ -975,14 +1012,26 @@ export default function PayRunPage() {
           >
             <div className="flex items-center justify-between p-4 border-b">
               <h2 className="font-semibold text-brand-navy">PNC Payment Status</h2>
-              <button
-                type="button"
-                aria-label="Close PNC status modal"
-                onClick={() => setPncStatusModal(null)}
-                className="opacity-60 hover:opacity-100"
-              >
-                <X className="w-5 h-5" />
-              </button>
+              <div className="flex items-center gap-3">
+                <button
+                  type="button"
+                  aria-label="Re-check this payment's PNC status now"
+                  onClick={() => void recheckPncStatus(pncStatusModal.customerReference)}
+                  disabled={pncRechecking.has(pncStatusModal.customerReference)}
+                  className="inline-flex items-center gap-1.5 text-xs px-2 py-1 rounded border border-gray-300 text-gray-700 hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  <RefreshCw className={`w-3.5 h-3.5 ${pncRechecking.has(pncStatusModal.customerReference) ? "animate-spin" : ""}`} />
+                  {pncRechecking.has(pncStatusModal.customerReference) ? "Checking…" : "Re-check now"}
+                </button>
+                <button
+                  type="button"
+                  aria-label="Close PNC status modal"
+                  onClick={() => setPncStatusModal(null)}
+                  className="opacity-60 hover:opacity-100"
+                >
+                  <X className="w-5 h-5" />
+                </button>
+              </div>
             </div>
             <div className="p-4">
               <p className="text-xs text-muted-foreground mb-2">Customer reference: <code className="font-mono">{pncStatusModal.customerReference}</code></p>
