@@ -1,0 +1,112 @@
+{
+    "multipaymentId": "uuid1234563532343",
+    "mode": "sync",
+    "instructions": [
+        {
+            "instructionId": "djk3422klb",
+            "instructor": {
+                "name": "DEY company",
+                "id": "324678454",
+                "idType": "bdc id"
+            },
+            "operator": {
+                "name": "Admin One",
+                "phone": 4123456789
+            },
+            "instructorAccount": {
+                "accountNumber": "123456789",
+                "accountType": "SACC",
+                "currency": "USD"
+            },
+            "instructorAgent": {
+                "routingNumber": "043000096"
+            },
+            "instructorAddress": {
+                "street": "2815 ABC",
+                "addressLine2": "Suite 500",
+                "addressLine3": "Marketing Dept.",
+                "city": "Allison Park",
+                "state": "PA",
+                "country": "US",
+                "zip": "15101"
+            },
+            "payments": [
+                {
+                    "customerReference": "CUSTREF123",
+                    "preferredPaymentType": "RTP",
+                    "accountingEntry": "CREDIT",
+                    "requestedExecutionDate": "2020-04-28",
+                    "instructee": {
+                        "name": "ABC Org OF COLORADO",
+                        "id": "9238",
+                        "idType": "abc id"
+                    },
+                    "instructeeAccount": {
+                        "accountNumber": "123456789",
+                        "accountType": "SACC",
+                        "currency": "USD"
+                    },
+                    "instructeeAgent": {
+                        "routingNumber": "043000096"
+                    },
+                    "instructeeAddress": {
+                        "street": "550 15TH ST",
+                        "addressLine2": "Suite 500",
+                        "addressLine3": "Sales Dept.",
+                        "city": "DENVER",
+                        "state": "CO",
+                        "country": "US",
+                        "zip": "80202"
+                    },
+                    "transferAmount": {
+                        "amount": "3201.25",
+                        "currency": "USD"
+                    },
+                    "discountAppliedAmount": {
+                        "discountAmount": {
+                            "amount": "100.25",
+                            "currency": "USD"
+                        },
+                        "fullAmount": {
+                            "amount": "200.25",
+                            "currency": "USD"
+                        }
+                    },
+                    "ultimateParty": {
+                        "debtor": {
+                            "name": "Jane Doe",
+                            "accountNumber": "123456789",
+                            "postalAddress": {
+                                "street": "2815 ABC",
+                                "addressLine2": "Suite 500",
+                                "addressLine3": "Marketing Dept.",
+                                "city": "Allison Park",
+                                "state": "PA",
+                                "country": "US",
+                                "zip": "15101"
+                            }
+                        },
+                        "creditor": {
+                            "name": "Jin Dow",
+                            "accountNumber": "123456789",
+                            "postalAddress": {
+                                "street": "2815 ABC",
+                                "addressLine2": "Suite 500",
+                                "addressLine3": "Marketing Dept.",
+                                "city": "Allison Park",
+                                "state": "PA",
+                                "country": "US",
+                                "zip": "15101"
+                            }
+                        }
+                    },
+                    "remittanceMethod": "EMAL",
+                    "remittanceDetails": "var@pnc.com",
+                    "remittanceInformation": [
+                        "This is for additional info"
+                    ]
+                }
+            ]
+        }
+    ]
+}
