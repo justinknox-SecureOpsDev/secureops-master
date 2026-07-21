@@ -446,6 +446,32 @@ export const ApproveTimeEntryResponse = zod.object({
 });
 
 /**
+ * @summary Submit a batch of pending payroll rows directly to PNC Bank via their multipayment API
+ */
+export const SubmitPayRunViaPncBody = zod.object({
+  ids: zod.array(zod.string()),
+});
+
+export const SubmitPayRunViaPncResponse = zod.object({
+  ok: zod.boolean(),
+  multipaymentId: zod.string(),
+  processed: zod.number(),
+  skipped: zod.number(),
+});
+
+/**
+ * @summary Proxy a live PNC payment status check by customerReference
+ */
+export const GetPncPaymentStatusQueryParams = zod.object({
+  customerReference: zod.coerce.string(),
+});
+
+export const GetPncPaymentStatusResponse = zod.record(
+  zod.string(),
+  zod.unknown(),
+);
+
+/**
  * @summary Generate weekly payroll for a site from approved time entries
  */
 export const GeneratePayrollBody = zod.object({

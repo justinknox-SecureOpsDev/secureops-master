@@ -1030,6 +1030,13 @@ export interface PayrollEntry {
   createdAt: string;
 }
 
+export interface PncSubmitResponse {
+  ok: boolean;
+  multipaymentId: string;
+  processed: number;
+  skipped: number;
+}
+
 export interface CreatePayrollRequest {
   employeeId: string;
   periodStart: string;
@@ -2514,6 +2521,16 @@ export type GetSitesParams = {
 export type UpdateSiteManagers200 = {
   assigned: SiteManagerUser[];
 };
+
+export type SubmitPayRunViaPncBody = {
+  ids: string[];
+};
+
+export type GetPncPaymentStatusParams = {
+  customerReference: string;
+};
+
+export type GetPncPaymentStatus200 = { [key: string]: unknown };
 
 export type GenerateInvoice201 = Invoice & {
   /** Custom-period path only: ids of existing non-void invoices for the same site whose period overlaps the requested range. Non-empty means potential double-billing — surface a warning. */

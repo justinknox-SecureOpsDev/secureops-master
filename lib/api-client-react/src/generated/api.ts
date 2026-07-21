@@ -100,6 +100,8 @@ import type {
   GetInvoicesParams,
   GetLicensesParams,
   GetPayrollEntriesParams,
+  GetPncPaymentStatus200,
+  GetPncPaymentStatusParams,
   GetRadioChannelTransmissionsParams,
   GetShiftsParams,
   GetSitesParams,
@@ -125,6 +127,7 @@ import type {
   PasswordResetTokenInfo,
   PaymentDiscrepancy,
   PayrollEntry,
+  PncSubmitResponse,
   Policy,
   PolicyGroup,
   PolicyPublic,
@@ -155,6 +158,7 @@ import type {
   SubcontractorTimeEntry,
   SubmitApplicationRequest,
   SubmitOnboardingRequest,
+  SubmitPayRunViaPncBody,
   TimeEntry,
   TriggerEmergency201,
   TriggerEmergencyBody,
@@ -1513,6 +1517,198 @@ export const useApproveTimeEntry = <
 > => {
   return useMutation(getApproveTimeEntryMutationOptions(options));
 };
+
+/**
+ * @summary Submit a batch of pending payroll rows directly to PNC Bank via their multipayment API
+ */
+export const getSubmitPayRunViaPncUrl = () => {
+  return `/api/payroll/pay-run/pnc`;
+};
+
+export const submitPayRunViaPnc = async (
+  submitPayRunViaPncBody: SubmitPayRunViaPncBody,
+  options?: RequestInit,
+): Promise<PncSubmitResponse> => {
+  return customFetch<PncSubmitResponse>(getSubmitPayRunViaPncUrl(), {
+    ...options,
+    method: "POST",
+    headers: { "Content-Type": "application/json", ...options?.headers },
+    body: JSON.stringify(submitPayRunViaPncBody),
+  });
+};
+
+export const getSubmitPayRunViaPncMutationOptions = <
+  TError = ErrorType<ErrorResponse>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof submitPayRunViaPnc>>,
+    TError,
+    { data: BodyType<SubmitPayRunViaPncBody> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof submitPayRunViaPnc>>,
+  TError,
+  { data: BodyType<SubmitPayRunViaPncBody> },
+  TContext
+> => {
+  const mutationKey = ["submitPayRunViaPnc"];
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof submitPayRunViaPnc>>,
+    { data: BodyType<SubmitPayRunViaPncBody> }
+  > = (props) => {
+    const { data } = props ?? {};
+
+    return submitPayRunViaPnc(data, requestOptions);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type SubmitPayRunViaPncMutationResult = NonNullable<
+  Awaited<ReturnType<typeof submitPayRunViaPnc>>
+>;
+export type SubmitPayRunViaPncMutationBody = BodyType<SubmitPayRunViaPncBody>;
+export type SubmitPayRunViaPncMutationError = ErrorType<ErrorResponse>;
+
+/**
+ * @summary Submit a batch of pending payroll rows directly to PNC Bank via their multipayment API
+ */
+export const useSubmitPayRunViaPnc = <
+  TError = ErrorType<ErrorResponse>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof submitPayRunViaPnc>>,
+    TError,
+    { data: BodyType<SubmitPayRunViaPncBody> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationResult<
+  Awaited<ReturnType<typeof submitPayRunViaPnc>>,
+  TError,
+  { data: BodyType<SubmitPayRunViaPncBody> },
+  TContext
+> => {
+  return useMutation(getSubmitPayRunViaPncMutationOptions(options));
+};
+
+/**
+ * @summary Proxy a live PNC payment status check by customerReference
+ */
+export const getGetPncPaymentStatusUrl = (
+  params: GetPncPaymentStatusParams,
+) => {
+  const normalizedParams = new URLSearchParams();
+
+  Object.entries(params || {}).forEach(([key, value]) => {
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? "null" : value.toString());
+    }
+  });
+
+  const stringifiedParams = normalizedParams.toString();
+
+  return stringifiedParams.length > 0
+    ? `/api/payroll/pay-run/pnc-status?${stringifiedParams}`
+    : `/api/payroll/pay-run/pnc-status`;
+};
+
+export const getPncPaymentStatus = async (
+  params: GetPncPaymentStatusParams,
+  options?: RequestInit,
+): Promise<GetPncPaymentStatus200> => {
+  return customFetch<GetPncPaymentStatus200>(
+    getGetPncPaymentStatusUrl(params),
+    {
+      ...options,
+      method: "GET",
+    },
+  );
+};
+
+export const getGetPncPaymentStatusQueryKey = (
+  params?: GetPncPaymentStatusParams,
+) => {
+  return [
+    `/api/payroll/pay-run/pnc-status`,
+    ...(params ? [params] : []),
+  ] as const;
+};
+
+export const getGetPncPaymentStatusQueryOptions = <
+  TData = Awaited<ReturnType<typeof getPncPaymentStatus>>,
+  TError = ErrorType<ErrorResponse>,
+>(
+  params: GetPncPaymentStatusParams,
+  options?: {
+    query?: UseQueryOptions<
+      Awaited<ReturnType<typeof getPncPaymentStatus>>,
+      TError,
+      TData
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+) => {
+  const { query: queryOptions, request: requestOptions } = options ?? {};
+
+  const queryKey =
+    queryOptions?.queryKey ?? getGetPncPaymentStatusQueryKey(params);
+
+  const queryFn: QueryFunction<
+    Awaited<ReturnType<typeof getPncPaymentStatus>>
+  > = ({ signal }) =>
+    getPncPaymentStatus(params, { signal, ...requestOptions });
+
+  return { queryKey, queryFn, ...queryOptions } as UseQueryOptions<
+    Awaited<ReturnType<typeof getPncPaymentStatus>>,
+    TError,
+    TData
+  > & { queryKey: QueryKey };
+};
+
+export type GetPncPaymentStatusQueryResult = NonNullable<
+  Awaited<ReturnType<typeof getPncPaymentStatus>>
+>;
+export type GetPncPaymentStatusQueryError = ErrorType<ErrorResponse>;
+
+/**
+ * @summary Proxy a live PNC payment status check by customerReference
+ */
+
+export function useGetPncPaymentStatus<
+  TData = Awaited<ReturnType<typeof getPncPaymentStatus>>,
+  TError = ErrorType<ErrorResponse>,
+>(
+  params: GetPncPaymentStatusParams,
+  options?: {
+    query?: UseQueryOptions<
+      Awaited<ReturnType<typeof getPncPaymentStatus>>,
+      TError,
+      TData
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+): UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+  const queryOptions = getGetPncPaymentStatusQueryOptions(params, options);
+
+  const query = useQuery(queryOptions) as UseQueryResult<TData, TError> & {
+    queryKey: QueryKey;
+  };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
 
 /**
  * @summary Generate weekly payroll for a site from approved time entries

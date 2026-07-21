@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Banknote, Download, CheckCircle2, AlertTriangle, Loader2, Zap } from "lucide-react";
+import { Banknote, Download, CheckCircle2, AlertTriangle, Loader2, Zap, Building2, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -21,12 +21,12 @@ type PayrollRow = {
   netPay: string;
   status: string;
   paidAt: string | null;
+  paidMethod: string | null;
+  paymentReference: string | null;
 };
 
 type PreviewRow = PayrollRow & {
   employeeEmail: string | null;
-  paidMethod: string | null;
-  paymentReference: string | null;
   bankAccountName: string | null;
   bankAccountNumber: string | null;
   bankBsb: string | null;
@@ -38,6 +38,10 @@ type Preview = {
   rows: PreviewRow[];
   counts: { total: number; payable: number; withWarnings: number; alreadyPaid: number };
   totals: { gross: number; tax: number; net: number };
+};
+
+type SystemStatus = {
+  pncConfigured?: boolean;
 };
 
 const fmtUsd = (n: number | string) =>
@@ -117,8 +121,6 @@ export default function PayRunPage() {
   const isMobile = useIsMobile();
   const [rows, setRows] = useState<PayrollRow[]>([]);
   const [loading, setLoading] = useState(true);
-  // When a board handoff arrives we widen the filter so the preselected rows
-  // are guaranteed to show up regardless of their current status.
   const [statusFilter, setStatusFilter] = useState<"pending" | "processed" | "all">(
     initialPreselect.ids.length > 0 ? "all" : "pending",
   );
@@ -134,16 +136,19 @@ export default function PayRunPage() {
       ? { count: initialPreselect.ids.length, mode: initialPreselect.mode }
       : null,
   );
-  // When the Payroll Board hands off a batch with a chosen mode, we actually
-  // preset the corresponding action: scroll its button into view, focus it
-  // (or the bank-reference input for manual), and ring it for visual emphasis.
+  const [systemStatus, setSystemStatus] = useState<SystemStatus>({});
+  // PNC error alert — persists until dismissed (more prominent than a toast).
+  const [pncError, setPncError] = useState<{ message: string; detail?: unknown } | null>(null);
+  // PNC status modal
+  const [pncStatusModal, setPncStatusModal] = useState<{ customerReference: string; data: unknown } | null>(null);
+  const [pncStatusLoading, setPncStatusLoading] = useState(false);
+
   const exportBtnRef = useRef<HTMLButtonElement | null>(null);
   const markPaidBtnRef = useRef<HTMLButtonElement | null>(null);
   const paidRefInputRef = useRef<HTMLInputElement | null>(null);
   const presetMode = initialPreselect.mode;
   useEffect(() => {
     if (!presetMode || loading || rows.length === 0) return;
-    // Run once when rows first arrive after a handoff.
     if (presetMode === "ach_csv") {
       exportBtnRef.current?.scrollIntoView({ behavior: "smooth", block: "center" });
       exportBtnRef.current?.focus();
@@ -159,6 +164,14 @@ export default function PayRunPage() {
     [],
   );
 
+  // Fetch system status once on mount to know if PNC is configured.
+  useEffect(() => {
+    fetchWithAuth("/api/admin/system/status")
+      .then((r) => r.json())
+      .then((d) => setSystemStatus(d as SystemStatus))
+      .catch(() => {});
+  }, []);
+
   const reload = async () => {
     setLoading(true);
     try {
@@ -170,9 +183,6 @@ export default function PayRunPage() {
       const data = await res.json();
       const list: PayrollRow[] = Array.isArray(data) ? data : [];
       setRows(list);
-      // Preserve a preselection that arrived via ?ids=… on first load, but
-      // narrow it to ids actually present in the current result set so the
-      // selected count never lies.
       setSelected((prev) => {
         const ids = new Set(list.map((r) => r.id));
         const kept = new Set(Array.from(prev).filter((id) => ids.has(id)));
@@ -195,7 +205,6 @@ export default function PayRunPage() {
     if (selected.size === rows.length) setSelected(new Set());
     else setSelected(new Set(rows.map((r) => r.id)));
   };
-  // Bulk-toggle a group of ids: if every id is selected, deselect all; otherwise select all.
   const toggleMany = (ids: string[]) => {
     const allSelected = ids.length > 0 && ids.every((id) => selected.has(id));
     const next = new Set(selected);
@@ -297,6 +306,51 @@ export default function PayRunPage() {
     }
   };
 
+  const sendViaPnc = async () => {
+    if (selected.size === 0) return;
+    setPncError(null);
+    setBusy("pnc");
+    try {
+      const res = await fetchWithAuth("/api/payroll/pay-run/pnc", {
+        method: "POST",
+        headers: authHeaders,
+        body: JSON.stringify({ ids: Array.from(selected) }),
+      });
+      const j = await res.json();
+      if (!res.ok) {
+        setPncError({
+          message: j.message || `PNC submission failed (HTTP ${res.status})`,
+          detail: j.pncErrors ?? j.skipped ?? undefined,
+        });
+        return;
+      }
+      showToast("ok", `Sent to PNC — batch ${j.multipaymentId} · ${j.processed} row(s) processed.`);
+      await reload();
+    } catch (e) {
+      setPncError({ message: `Network error: ${(e as Error).message}` });
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  const checkPncStatus = async (customerReference: string) => {
+    setPncStatusLoading(true);
+    try {
+      const res = await fetchWithAuth(`/api/payroll/pay-run/pnc-status?customerReference=${encodeURIComponent(customerReference)}`);
+      const data = await res.json();
+      if (!res.ok) {
+        showToast("err", (data as { message?: string }).message || "PNC status check failed");
+        return;
+      }
+      setPncStatusModal({ customerReference, data });
+    } catch (e) {
+      showToast("err", `PNC status check failed: ${(e as Error).message}`);
+    } finally {
+      setPncStatusLoading(false);
+    }
+  };
+
+  const pncConfigured = systemStatus.pncConfigured ?? false;
   const selectedRows = rows.filter((r) => selected.has(r.id));
   const selTotal = selectedRows.reduce((a, r) => a + Number(r.netPay), 0);
 
@@ -307,12 +361,39 @@ export default function PayRunPage() {
         <h1 className="text-2xl font-semibold text-brand-navy">Pay Run</h1>
       </div>
       <p className="text-sm text-muted-foreground mb-6">
-        Select payroll entries → preview → export an ACH/CSV file for your bank, then mark as paid once funds settle.
+        Select payroll entries → preview → export an ACH/CSV file for your bank or send directly via PNC, then mark as paid once funds settle.
       </p>
 
       {toast && (
         <div className={`mb-4 px-4 py-3 rounded border ${toast.kind === "ok" ? "bg-green-50 border-green-300 text-green-900" : "bg-red-50 border-red-300 text-red-900"}`}>
           {toast.msg}
+        </div>
+      )}
+
+      {/* PNC error alert — persists until dismissed */}
+      {pncError && (
+        <div className="mb-4 px-4 py-3 rounded border border-red-400 bg-red-50 text-red-900">
+          <div className="flex items-start justify-between gap-3">
+            <div className="flex-1">
+              <div className="font-semibold flex items-center gap-2 mb-1">
+                <AlertTriangle className="w-4 h-4" /> PNC submission failed
+              </div>
+              <div className="text-sm">{pncError.message}</div>
+              {pncError.detail !== undefined && (
+                <pre className="mt-2 text-xs bg-red-100 rounded p-2 overflow-x-auto whitespace-pre-wrap break-all">
+                  {JSON.stringify(pncError.detail, null, 2)}
+                </pre>
+              )}
+            </div>
+            <button
+              type="button"
+              aria-label="Dismiss PNC error"
+              onClick={() => setPncError(null)}
+              className="shrink-0 opacity-60 hover:opacity-100"
+            >
+              <X className="w-4 h-4" />
+            </button>
+          </div>
         </div>
       )}
 
@@ -382,6 +463,20 @@ export default function PayRunPage() {
           {busy === "csv" ? <Loader2 className="w-4 h-4 animate-spin mr-2" /> : <Download className="w-4 h-4 mr-2" />}
           Export ACH CSV
         </Button>
+
+        {/* PNC button */}
+        <div title={pncConfigured ? undefined : "PNC not configured — add API credentials in Settings"}>
+          <Button
+            className="bg-blue-700 text-white hover:bg-blue-800 disabled:opacity-50"
+            onClick={sendViaPnc}
+            disabled={selected.size === 0 || busy !== null || !pncConfigured}
+            aria-label="Send selected payroll entries via PNC Bank"
+          >
+            {busy === "pnc" ? <Loader2 className="w-4 h-4 animate-spin mr-2" /> : <Building2 className="w-4 h-4 mr-2" />}
+            Send via PNC
+          </Button>
+        </div>
+
         <div className={`flex gap-2 items-center ${presetMode === "manual" ? "ring-2 ring-offset-2 ring-offset-brand-navy ring-brand-gold rounded p-1" : ""}`}>
           <Input
             ref={paidRefInputRef}
@@ -428,7 +523,7 @@ export default function PayRunPage() {
           {preview.rows.some((r) => r.warnings.length > 0) && (
             <div className="text-sm">
               <div className="font-medium text-amber-800 flex items-center gap-1 mb-1">
-                <AlertTriangle className="w-4 h-4" /> Rows with warnings (excluded from CSV)
+                <AlertTriangle className="w-4 h-4" /> Rows with warnings (excluded from CSV/PNC)
               </div>
               <ul className="text-xs space-y-0.5">
                 {preview.rows.filter((r) => r.warnings.length > 0).map((r) => (
@@ -511,6 +606,7 @@ export default function PayRunPage() {
                           {weekRows.map((r) => {
                             const pv = preview?.rows.find((p) => p.id === r.id);
                             const hasWarn = pv && pv.warnings.length > 0;
+                            const isPncRow = r.paidMethod === "pnc_api" && r.paymentReference;
                             return (
                               <div key={r.id} className={`p-3 space-y-2 ${hasWarn ? "bg-amber-50/40" : ""}`}>
                                 <div className="flex items-start gap-3">
@@ -518,11 +614,16 @@ export default function PayRunPage() {
                                   <div className="flex-1 min-w-0">
                                     <div className="flex items-start justify-between gap-2">
                                       <span className="font-medium">{r.employeeName ?? r.employeeId.slice(0, 8)}</span>
-                                      <span className={`text-xs px-2 py-0.5 rounded shrink-0 ${
-                                        r.status === "paid" ? "bg-green-100 text-green-800" :
-                                        r.status === "processed" ? "bg-blue-100 text-blue-800" :
-                                        "bg-gray-100 text-gray-700"
-                                      }`}>{r.status}</span>
+                                      <div className="flex items-center gap-1 shrink-0">
+                                        <span className={`text-xs px-2 py-0.5 rounded ${
+                                          r.status === "paid" ? "bg-green-100 text-green-800" :
+                                          r.status === "processed" ? "bg-blue-100 text-blue-800" :
+                                          "bg-gray-100 text-gray-700"
+                                        }`}>{r.status}</span>
+                                        {isPncRow && (
+                                          <span className="text-xs px-1.5 py-0.5 rounded bg-blue-50 text-blue-700 border border-blue-200">PNC</span>
+                                        )}
+                                      </div>
                                     </div>
                                     {pv && (
                                       <div className="text-xs text-muted-foreground mt-0.5 break-words">
@@ -531,6 +632,17 @@ export default function PayRunPage() {
                                           <span className="ml-2 text-amber-700">⚠ {pv.warnings[0]}{pv.warnings.length > 1 ? ` (+${pv.warnings.length - 1})` : ""}</span>
                                         )}
                                       </div>
+                                    )}
+                                    {isPncRow && r.paymentReference && (
+                                      <button
+                                        type="button"
+                                        aria-label="Check live PNC payment status"
+                                        onClick={() => void checkPncStatus(r.paymentReference!)}
+                                        disabled={pncStatusLoading}
+                                        className="text-xs text-blue-700 underline mt-0.5"
+                                      >
+                                        {pncStatusLoading ? "Checking…" : "Check PNC Status"}
+                                      </button>
                                     )}
                                   </div>
                                 </div>
@@ -574,6 +686,7 @@ export default function PayRunPage() {
                           {weekRows.map((r) => {
                             const pv = preview?.rows.find((p) => p.id === r.id);
                             const hasWarn = pv && pv.warnings.length > 0;
+                            const isPncRow = r.paidMethod === "pnc_api" && r.paymentReference;
                             return (
                               <tr key={r.id} className={`border-t hover:bg-gray-50 ${hasWarn ? "bg-amber-50/40" : ""}`}>
                                 <td className="px-3 py-2">
@@ -589,17 +702,33 @@ export default function PayRunPage() {
                                       )}
                                     </div>
                                   )}
+                                  {isPncRow && r.paymentReference && (
+                                    <button
+                                      type="button"
+                                      aria-label="Check live PNC payment status"
+                                      onClick={() => void checkPncStatus(r.paymentReference!)}
+                                      disabled={pncStatusLoading}
+                                      className="text-xs text-blue-700 underline"
+                                    >
+                                      {pncStatusLoading ? "Checking…" : "Check PNC Status"}
+                                    </button>
+                                  )}
                                 </td>
                                 <td className="px-3 py-2 text-right">{Number(r.totalHours).toFixed(2)}</td>
                                 <td className="px-3 py-2 text-right">{fmtUsd(r.hourlyRate)}</td>
                                 <td className="px-3 py-2 text-right">{fmtUsd(r.grossPay)}</td>
                                 <td className="px-3 py-2 text-right font-semibold">{fmtUsd(r.netPay)}</td>
                                 <td className="px-3 py-2">
-                                  <span className={`text-xs px-2 py-0.5 rounded ${
-                                    r.status === "paid" ? "bg-green-100 text-green-800" :
-                                    r.status === "processed" ? "bg-blue-100 text-blue-800" :
-                                    "bg-gray-100 text-gray-700"
-                                  }`}>{r.status}</span>
+                                  <div className="flex items-center gap-1">
+                                    <span className={`text-xs px-2 py-0.5 rounded ${
+                                      r.status === "paid" ? "bg-green-100 text-green-800" :
+                                      r.status === "processed" ? "bg-blue-100 text-blue-800" :
+                                      "bg-gray-100 text-gray-700"
+                                    }`}>{r.status}</span>
+                                    {isPncRow && (
+                                      <span className="text-xs px-1.5 py-0.5 rounded bg-blue-50 text-blue-700 border border-blue-200">PNC</span>
+                                    )}
+                                  </div>
                                 </td>
                               </tr>
                             );
@@ -625,9 +754,44 @@ export default function PayRunPage() {
       )}
 
       <p className="text-xs text-muted-foreground mt-4">
-        Workflow: <strong>pending</strong> → exporting the CSV marks rows <strong>processed</strong> (file batch ID stored as reference) → after your bank confirms settlement, click <strong>Mark Paid</strong> with the bank reference number.
+        Workflow: <strong>pending</strong> → export CSV or send via PNC marks rows <strong>processed</strong> → after your bank confirms settlement, click <strong>Mark Paid</strong> with the bank reference number.
         Stripe Connect transfers are scaffolded behind the <code>STRIPE_CONNECT_ENABLED</code> environment flag.
+        PNC direct deposit is enabled when <code>PNC_CLIENT_ID</code>, <code>PNC_CLIENT_SECRET</code>, <code>PNC_INSTRUCTOR_ACCOUNT_NUMBER</code>, and <code>PNC_INSTRUCTOR_ROUTING_NUMBER</code> are set.
       </p>
+
+      {/* PNC Status modal */}
+      {pncStatusModal && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/50"
+          role="dialog"
+          aria-modal="true"
+          aria-label="PNC Payment Status"
+          onClick={() => setPncStatusModal(null)}
+        >
+          <div
+            className="bg-white rounded-lg shadow-xl max-w-lg w-full mx-4 max-h-[80vh] overflow-auto"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-center justify-between p-4 border-b">
+              <h2 className="font-semibold text-brand-navy">PNC Payment Status</h2>
+              <button
+                type="button"
+                aria-label="Close PNC status modal"
+                onClick={() => setPncStatusModal(null)}
+                className="opacity-60 hover:opacity-100"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+            <div className="p-4">
+              <p className="text-xs text-muted-foreground mb-2">Customer reference: <code className="font-mono">{pncStatusModal.customerReference}</code></p>
+              <pre className="text-xs bg-gray-50 rounded p-3 overflow-x-auto whitespace-pre-wrap break-all border">
+                {JSON.stringify(pncStatusModal.data, null, 2)}
+              </pre>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

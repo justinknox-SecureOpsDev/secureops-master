@@ -275,6 +275,87 @@ paths:
             application/json:
               schema: { $ref: "#/components/schemas/TimeEntry" }
 
+  /payroll/pay-run/pnc:
+    post:
+      operationId: submitPayRunViaPnc
+      tags: [payroll]
+      summary: Submit a batch of pending payroll rows directly to PNC Bank via their multipayment API
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                ids:
+                  type: array
+                  items: { type: string }
+              required: [ids]
+      responses:
+        "200":
+          description: Batch submitted successfully
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/PncSubmitResponse" }
+        "400":
+          description: No payable rows
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ErrorResponse" }
+        "422":
+          description: Rows missing bank data
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ErrorResponse" }
+        "502":
+          description: PNC rejected the batch
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ErrorResponse" }
+        "503":
+          description: PNC API not configured
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ErrorResponse" }
+
+  /payroll/pay-run/pnc-status:
+    get:
+      operationId: getPncPaymentStatus
+      tags: [payroll]
+      summary: Proxy a live PNC payment status check by customerReference
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: customerReference
+          in: query
+          required: true
+          schema: { type: string }
+      responses:
+        "200":
+          description: PNC status payload (raw PNC response)
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: true
+        "400":
+          description: Missing customerReference
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ErrorResponse" }
+        "502":
+          description: PNC status check failed
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ErrorResponse" }
+        "503":
+          description: PNC API not configured
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ErrorResponse" }
+
   /payroll/generate:
     post:
       operationId: generatePayroll
@@ -4186,6 +4267,15 @@ components:
         - netPay
         - status
         - createdAt
+
+    PncSubmitResponse:
+      type: object
+      properties:
+        ok: { type: boolean }
+        multipaymentId: { type: string }
+        processed: { type: integer }
+        skipped: { type: integer }
+      required: [ok, multipaymentId, processed, skipped]
 
     CreatePayrollRequest:
       type: object

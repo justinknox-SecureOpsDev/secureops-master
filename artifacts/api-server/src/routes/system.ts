@@ -5,6 +5,7 @@ import { requireAdmin } from "../middlewares/auth";
 import { getGeofenceRadiusMiles } from "../lib/geofence";
 import { isSchedulerConfigured } from "../lib/schedulerSync";
 import { isLiveKitConfigured } from "../lib/livekit";
+import { isPncConfigured } from "../lib/pncPayments";
 
 /**
  * The reconciliation safety-net job pulls from the scheduler every 15 minutes.
@@ -50,6 +51,8 @@ router.get("/admin/system/status", requireAdmin, async (_req, res): Promise<void
     schedulerSyncHealthy = lastSyncError === null && !overdue;
   }
 
+  const pncConfigured = isPncConfigured();
+
   res.json({
     env,
     smtpConfigured,
@@ -61,6 +64,7 @@ router.get("/admin/system/status", requireAdmin, async (_req, res): Promise<void
     schedulerConfigured,
     schedulerSyncHealthy,
     livekitConfigured,
+    pncConfigured,
   });
 });
 
