@@ -49,6 +49,46 @@ const fmtUsd = (n: number | string) =>
 
 const maskAccount = (s: string | null) => (s ? `••••${s.slice(-4)}` : "—");
 
+// Settlement label derived from a raw PNC status response. PNC's exact schema
+// varies by API version, so we scan the payload for status-like string fields
+// and bucket them: rejected > settled > accepted > pending (most-specific wins).
+type PncSettlement = "pending" | "accepted" | "settled" | "rejected" | "error";
+
+const derivePncSettlement = (data: unknown): PncSettlement => {
+  const statuses: string[] = [];
+  const walk = (v: unknown): void => {
+    if (v == null) return;
+    if (Array.isArray(v)) { v.forEach(walk); return; }
+    if (typeof v === "object") {
+      for (const [k, val] of Object.entries(v as Record<string, unknown>)) {
+        if (typeof val === "string" && /status|state/i.test(k)) statuses.push(val.toLowerCase());
+        else walk(val);
+      }
+    }
+  };
+  walk(data);
+  if (statuses.some((s) => /reject|fail|return|error|cancel/.test(s))) return "rejected";
+  if (statuses.some((s) => /settl|complet|paid|success/.test(s))) return "settled";
+  if (statuses.some((s) => /accept|approv|process|submit/.test(s))) return "accepted";
+  return "pending";
+};
+
+const PNC_BADGE_STYLES: Record<PncSettlement, string> = {
+  pending: "bg-gray-100 text-gray-700 border-gray-300",
+  accepted: "bg-yellow-100 text-yellow-800 border-yellow-300",
+  settled: "bg-green-100 text-green-800 border-green-300",
+  rejected: "bg-red-100 text-red-800 border-red-300",
+  error: "bg-gray-100 text-gray-500 border-gray-300",
+};
+
+const PNC_BADGE_LABELS: Record<PncSettlement, string> = {
+  pending: "PNC: Pending",
+  accepted: "PNC: Accepted",
+  settled: "PNC: Settled",
+  rejected: "PNC: Rejected",
+  error: "PNC: Unavailable",
+};
+
 // Week label "Mon Jan 6 → Sun Jan 12, 2025" from a YYYY-MM-DD start date.
 const fmtWeekRange = (periodStart: string, periodEnd: string) => {
   const opts: Intl.DateTimeFormatOptions = { weekday: "short", month: "short", day: "numeric" };
@@ -139,9 +179,12 @@ export default function PayRunPage() {
   const [systemStatus, setSystemStatus] = useState<SystemStatus>({});
   // PNC error alert — persists until dismissed (more prominent than a toast).
   const [pncError, setPncError] = useState<{ message: string; detail?: unknown } | null>(null);
-  // PNC status modal
+  // PNC status modal — shows the full raw PNC response for one reference.
   const [pncStatusModal, setPncStatusModal] = useState<{ customerReference: string; data: unknown } | null>(null);
-  const [pncStatusLoading, setPncStatusLoading] = useState(false);
+  // Inline settlement badges: paymentReference → derived status + raw payload.
+  // Fetched once per reload (page load / manual Refresh), never on a timer.
+  const [pncStatuses, setPncStatuses] = useState<Record<string, { settlement: PncSettlement; data: unknown }>>({});
+  const [pncStatusesLoading, setPncStatusesLoading] = useState(false);
 
   const exportBtnRef = useRef<HTMLButtonElement | null>(null);
   const markPaidBtnRef = useRef<HTMLButtonElement | null>(null);
@@ -172,6 +215,40 @@ export default function PayRunPage() {
       .catch(() => {});
   }, []);
 
+  // Fetch live PNC settlement status for every unique paymentReference among
+  // processed pnc_api rows. One request per unique reference, only on explicit
+  // reloads (mount, filter change, Refresh click) — never on a timer.
+  const pncFetchGeneration = useRef(0);
+  const fetchPncStatuses = async (list: PayrollRow[]) => {
+    const generation = ++pncFetchGeneration.current;
+    const refs = Array.from(new Set(
+      list
+        .filter((r) => r.status === "processed" && r.paidMethod === "pnc_api" && r.paymentReference)
+        .map((r) => r.paymentReference as string),
+    ));
+    if (refs.length === 0) {
+      if (generation === pncFetchGeneration.current) setPncStatuses({});
+      return;
+    }
+    setPncStatusesLoading(true);
+    try {
+      const results = await Promise.all(refs.map(async (ref) => {
+        try {
+          const res = await fetchWithAuth(`/api/payroll/pay-run/pnc-status?customerReference=${encodeURIComponent(ref)}`);
+          const data: unknown = await res.json();
+          if (!res.ok) return [ref, { settlement: "error" as PncSettlement, data }] as const;
+          return [ref, { settlement: derivePncSettlement(data), data }] as const;
+        } catch (e) {
+          return [ref, { settlement: "error" as PncSettlement, data: { message: (e as Error).message } }] as const;
+        }
+      }));
+      // Drop stale results if a newer reload has started since this fetch began.
+      if (generation === pncFetchGeneration.current) setPncStatuses(Object.fromEntries(results));
+    } finally {
+      if (generation === pncFetchGeneration.current) setPncStatusesLoading(false);
+    }
+  };
+
   const reload = async () => {
     setLoading(true);
     try {
@@ -189,6 +266,7 @@ export default function PayRunPage() {
         return kept;
       });
       setPreview(null);
+      void fetchPncStatuses(list);
     } finally {
       setLoading(false);
     }
@@ -333,21 +411,28 @@ export default function PayRunPage() {
     }
   };
 
-  const checkPncStatus = async (customerReference: string) => {
-    setPncStatusLoading(true);
-    try {
-      const res = await fetchWithAuth(`/api/payroll/pay-run/pnc-status?customerReference=${encodeURIComponent(customerReference)}`);
-      const data = await res.json();
-      if (!res.ok) {
-        showToast("err", (data as { message?: string }).message || "PNC status check failed");
-        return;
-      }
-      setPncStatusModal({ customerReference, data });
-    } catch (e) {
-      showToast("err", `PNC status check failed: ${(e as Error).message}`);
-    } finally {
-      setPncStatusLoading(false);
+  // Inline settlement badge for a processed PNC row. Clicking it opens the
+  // full raw-response modal (data already cached from the batch fetch).
+  const renderPncBadge = (paymentReference: string) => {
+    const entry = pncStatuses[paymentReference];
+    if (!entry) {
+      return (
+        <span className="text-xs px-1.5 py-0.5 rounded border bg-gray-50 text-gray-500 border-gray-200">
+          {pncStatusesLoading ? "PNC: Checking…" : "PNC"}
+        </span>
+      );
     }
+    return (
+      <button
+        type="button"
+        aria-label={`${PNC_BADGE_LABELS[entry.settlement]} — view full PNC response`}
+        title="View full PNC response"
+        onClick={() => setPncStatusModal({ customerReference: paymentReference, data: entry.data })}
+        className={`text-xs px-1.5 py-0.5 rounded border cursor-pointer hover:opacity-80 ${PNC_BADGE_STYLES[entry.settlement]}`}
+      >
+        {PNC_BADGE_LABELS[entry.settlement]}
+      </button>
+    );
   };
 
   const pncConfigured = systemStatus.pncConfigured ?? false;
@@ -606,7 +691,7 @@ export default function PayRunPage() {
                           {weekRows.map((r) => {
                             const pv = preview?.rows.find((p) => p.id === r.id);
                             const hasWarn = pv && pv.warnings.length > 0;
-                            const isPncRow = r.paidMethod === "pnc_api" && r.paymentReference;
+                            const isPncRow = r.status === "processed" && r.paidMethod === "pnc_api" && r.paymentReference;
                             return (
                               <div key={r.id} className={`p-3 space-y-2 ${hasWarn ? "bg-amber-50/40" : ""}`}>
                                 <div className="flex items-start gap-3">
@@ -620,9 +705,7 @@ export default function PayRunPage() {
                                           r.status === "processed" ? "bg-blue-100 text-blue-800" :
                                           "bg-gray-100 text-gray-700"
                                         }`}>{r.status}</span>
-                                        {isPncRow && (
-                                          <span className="text-xs px-1.5 py-0.5 rounded bg-blue-50 text-blue-700 border border-blue-200">PNC</span>
-                                        )}
+                                        {isPncRow && r.paymentReference && renderPncBadge(r.paymentReference)}
                                       </div>
                                     </div>
                                     {pv && (
@@ -632,17 +715,6 @@ export default function PayRunPage() {
                                           <span className="ml-2 text-amber-700">⚠ {pv.warnings[0]}{pv.warnings.length > 1 ? ` (+${pv.warnings.length - 1})` : ""}</span>
                                         )}
                                       </div>
-                                    )}
-                                    {isPncRow && r.paymentReference && (
-                                      <button
-                                        type="button"
-                                        aria-label="Check live PNC payment status"
-                                        onClick={() => void checkPncStatus(r.paymentReference!)}
-                                        disabled={pncStatusLoading}
-                                        className="text-xs text-blue-700 underline mt-0.5"
-                                      >
-                                        {pncStatusLoading ? "Checking…" : "Check PNC Status"}
-                                      </button>
                                     )}
                                   </div>
                                 </div>
@@ -686,7 +758,7 @@ export default function PayRunPage() {
                           {weekRows.map((r) => {
                             const pv = preview?.rows.find((p) => p.id === r.id);
                             const hasWarn = pv && pv.warnings.length > 0;
-                            const isPncRow = r.paidMethod === "pnc_api" && r.paymentReference;
+                            const isPncRow = r.status === "processed" && r.paidMethod === "pnc_api" && r.paymentReference;
                             return (
                               <tr key={r.id} className={`border-t hover:bg-gray-50 ${hasWarn ? "bg-amber-50/40" : ""}`}>
                                 <td className="px-3 py-2">
@@ -702,17 +774,6 @@ export default function PayRunPage() {
                                       )}
                                     </div>
                                   )}
-                                  {isPncRow && r.paymentReference && (
-                                    <button
-                                      type="button"
-                                      aria-label="Check live PNC payment status"
-                                      onClick={() => void checkPncStatus(r.paymentReference!)}
-                                      disabled={pncStatusLoading}
-                                      className="text-xs text-blue-700 underline"
-                                    >
-                                      {pncStatusLoading ? "Checking…" : "Check PNC Status"}
-                                    </button>
-                                  )}
                                 </td>
                                 <td className="px-3 py-2 text-right">{Number(r.totalHours).toFixed(2)}</td>
                                 <td className="px-3 py-2 text-right">{fmtUsd(r.hourlyRate)}</td>
@@ -725,9 +786,7 @@ export default function PayRunPage() {
                                       r.status === "processed" ? "bg-blue-100 text-blue-800" :
                                       "bg-gray-100 text-gray-700"
                                     }`}>{r.status}</span>
-                                    {isPncRow && (
-                                      <span className="text-xs px-1.5 py-0.5 rounded bg-blue-50 text-blue-700 border border-blue-200">PNC</span>
-                                    )}
+                                    {isPncRow && r.paymentReference && renderPncBadge(r.paymentReference)}
                                   </div>
                                 </td>
                               </tr>

@@ -103,7 +103,7 @@ The integration uses the **OAuth2 client-credentials** flow:
 5. The batch is submitted to `POST /api/mlp/v1/payments` in `sync` mode. The `multipaymentId` is the batch identifier; it appears only in audit log metadata.
 6. On PNC success: rows advance `processing` → `processed` with `paidMethod = 'pnc_api'`. The `paymentReference` column already holds the per-row `customerReference`.
 7. On PNC rejection or transport error: rows are rolled back to `pending` (paymentReference cleared) so the admin can correct and retry.
-8. Live status for any processed row can be checked via the **Check PNC Status** button, which calls `GET /api/mlp/v1/payments?customerReference=…` using the stored per-row `customerReference` and displays the raw PNC response.
+8. Live status for processed rows is shown as an inline color-coded settlement badge (gray = pending, yellow = accepted, green = settled, red = rejected) on the Pay Run page. Statuses are fetched once per page load (and on manual Refresh) via `GET /api/mlp/v1/payments?customerReference=…` using each row's stored `customerReference`; clicking a badge opens the full raw PNC response.
 
 ---
 
