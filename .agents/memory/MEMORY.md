@@ -89,3 +89,4 @@
 - [Org origin self-heal refresh](org-refresh-stale-origin.md) — launch refresh of pinned org origin must never gate/disconnect; re-check storage before persisting (switch-org race).
 - [Signed URL browser CORS](signed-url-browser-cors.md) — signed storage URLs send ACAO:*; browser fetch→blob download works and is the only way to keep the real filename (no Content-Disposition).
 - [Brand logo — no heuristic plate](brand-logo-no-heuristic-plate.md) — never plate uploaded logos from a bg-color heuristic (WCSG eagle has baked dark bg → white edges); decide from image pixels at upload time.
+- [Rollback drops UI, keeps server](rollback-drops-ui-keeps-server.md) — "worked before, gone now" = check "Restored to" commits; port lost UI from git history, don't rebuild.
