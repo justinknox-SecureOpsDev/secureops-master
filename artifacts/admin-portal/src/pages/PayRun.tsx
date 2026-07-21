@@ -947,7 +947,7 @@ export default function PayRunPage() {
                           <span className="text-amber-900"> — {r.reasons.join("; ")}</span>
                         </div>
                         <Link
-                          href={`/personnel/${r.employeeId}`}
+                          href={`/personnel/${r.employeeId}?payrun=${encodeURIComponent(Array.from(selected).join(","))}`}
                           className="shrink-0 inline-flex items-center gap-1 text-xs text-blue-700 underline whitespace-nowrap"
                           aria-label={`Open profile for ${r.employeeName ?? "employee"} to fix bank details`}
                         >

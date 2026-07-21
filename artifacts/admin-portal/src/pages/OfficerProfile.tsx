@@ -454,6 +454,19 @@ export default function OfficerProfilePage() {
   const [, params] = useRoute<{ id: string }>("/personnel/:id");
   const [, navigate] = useLocation();
   const id = params?.id ?? "";
+  // Pay Run handoff: the PNC readiness dialog links here with
+  // `?payrun=<csv of payroll entry ids>` so the admin can fix bank details and
+  // hop straight back to the same selected batch. Parsed once at mount —
+  // wouter navigation within the page doesn't rewrite the search string.
+  const payrunReturnIds = useMemo(() => {
+    if (typeof window === "undefined") return "";
+    const raw = new URLSearchParams(window.location.search).get("payrun") ?? "";
+    return raw
+      .split(",")
+      .map((s) => s.trim())
+      .filter(Boolean)
+      .join(",");
+  }, []);
   // Full HR profile is admin-only. Dispatchers reach this same route from the
   // Live Map but the server already strips sensitive fields for them; this
   // gate keeps the full-profile block from rendering even if that changes.
@@ -728,6 +741,27 @@ export default function OfficerProfilePage() {
           </Button>
         </Link>
       </div>
+
+      {payrunReturnIds && (
+        <div className="rounded border border-blue-300 bg-blue-50 px-3 py-2 flex flex-wrap items-center justify-between gap-2 text-sm text-blue-900">
+          <span>
+            You came here from a Pay Run batch. After saving the fix, head back
+            and re-run the readiness check.
+          </span>
+          <Link
+            href={`/payroll/pay-run?ids=${encodeURIComponent(payrunReturnIds)}`}
+            className="shrink-0"
+          >
+            <Button
+              size="sm"
+              className="bg-blue-700 text-white hover:bg-blue-800"
+              data-testid="back-to-pay-run"
+            >
+              <Banknote className="w-4 h-4 mr-1" /> Back to Pay Run batch
+            </Button>
+          </Link>
+        </div>
+      )}
 
       <Card>
         <CardHeader className="pb-3">
