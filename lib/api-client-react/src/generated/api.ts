@@ -79,6 +79,7 @@ import type {
   ErrorResponse,
   ForgotPasswordRequest,
   ForgotPasswordResponse,
+  GenerateInvoice201,
   GenerateInvoiceRequest,
   GeneratePayrollRequest,
   GenerateSubcontractorQrBody,
@@ -1609,8 +1610,8 @@ export const getGenerateInvoiceUrl = () => {
 export const generateInvoice = async (
   generateInvoiceRequest: GenerateInvoiceRequest,
   options?: RequestInit,
-): Promise<Invoice> => {
-  return customFetch<Invoice>(getGenerateInvoiceUrl(), {
+): Promise<GenerateInvoice201> => {
+  return customFetch<GenerateInvoice201>(getGenerateInvoiceUrl(), {
     ...options,
     method: "POST",
     headers: { "Content-Type": "application/json", ...options?.headers },

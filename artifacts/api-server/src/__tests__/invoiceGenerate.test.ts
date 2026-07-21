@@ -208,6 +208,76 @@ describe("POST /invoices/generate", () => {
     expect(res.body.message).toMatch(/site's default bill rate/i);
   });
 
+  it("custom-period path warns about overlapping existing invoices", async () => {
+    const weekStart = previousMondayISO();
+    const periodEnd = new Date(`${weekStart}T00:00:00.000Z`);
+    periodEnd.setUTCDate(periodEnd.getUTCDate() + 6);
+    const periodEndIso = periodEnd.toISOString().slice(0, 10);
+
+    // First custom-period invoice — the weekly draft created by the earlier
+    // test already covers this range, so it should be flagged.
+    const first = await request(app)
+      .post("/api/invoices/generate")
+      .set(authed(ctx.adminToken))
+      .send({ siteId: ctx.ratedSiteId, periodStart: weekStart, periodEnd: periodEndIso });
+    expect(first.status).toBe(201);
+    expect(Array.isArray(first.body.overlappingInvoiceIds)).toBe(true);
+    expect(first.body.overlappingInvoiceIds).not.toContain(first.body.id);
+
+    // Second custom-period invoice for the same range must flag the first.
+    const second = await request(app)
+      .post("/api/invoices/generate")
+      .set(authed(ctx.adminToken))
+      .send({ siteId: ctx.ratedSiteId, periodStart: weekStart, periodEnd: periodEndIso });
+    expect(second.status).toBe(201);
+    expect(second.body.overlappingInvoiceIds).toContain(first.body.id);
+    expect(second.body.overlappingInvoiceIds).not.toContain(second.body.id);
+
+    // Void the first invoice — a third generate must no longer flag it.
+    await db
+      .execute(sql`UPDATE invoices SET status = 'void' WHERE id = ${first.body.id}::uuid`);
+    const third = await request(app)
+      .post("/api/invoices/generate")
+      .set(authed(ctx.adminToken))
+      .send({ siteId: ctx.ratedSiteId, periodStart: weekStart, periodEnd: periodEndIso });
+    expect(third.status).toBe(201);
+    expect(third.body.overlappingInvoiceIds).not.toContain(first.body.id);
+    expect(third.body.overlappingInvoiceIds).toContain(second.body.id);
+  });
+
+  it("custom-period path does not warn for a non-overlapping range", async () => {
+    const weekStart = previousMondayISO();
+    // Range two weeks BEFORE all existing invoices: disjoint from every
+    // period created above. Seed an approved entry there so generation
+    // succeeds, then assert no overlap warning is returned.
+    const start = new Date(`${weekStart}T00:00:00.000Z`);
+    start.setUTCDate(start.getUTCDate() - 14);
+    const end = new Date(start);
+    end.setUTCDate(end.getUTCDate() + 6);
+    const entryIn = new Date(start.getTime() + 9 * 3600_000);
+    const entryOut = new Date(entryIn.getTime() + 8 * 3600_000);
+    await db.insert(timeEntriesTable).values({
+      shiftId: ctx.ratedShiftId,
+      employeeId: ctx.officerId,
+      siteId: ctx.ratedSiteId,
+      clockInTime: entryIn,
+      clockOutTime: entryOut,
+      hoursWorked: "8.00",
+      approvalStatus: "approved",
+    });
+
+    const res = await request(app)
+      .post("/api/invoices/generate")
+      .set(authed(ctx.adminToken))
+      .send({
+        siteId: ctx.ratedSiteId,
+        periodStart: start.toISOString().slice(0, 10),
+        periodEnd: end.toISOString().slice(0, 10),
+      });
+    expect(res.status).toBe(201);
+    expect(res.body.overlappingInvoiceIds).toEqual([]);
+  });
+
   it("blocks non-admin employees (403)", async () => {
     const res = await request(app)
       .post("/api/invoices/generate")

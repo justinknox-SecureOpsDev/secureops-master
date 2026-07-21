@@ -309,7 +309,15 @@ paths:
           description: Generated
           content:
             application/json:
-              schema: { $ref: "#/components/schemas/Invoice" }
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/Invoice"
+                  - type: object
+                    properties:
+                      overlappingInvoiceIds:
+                        type: array
+                        items: { type: string }
+                        description: "Custom-period path only: ids of existing non-void invoices for the same site whose period overlaps the requested range. Non-empty means potential double-billing — surface a warning."
 
   /healthz:
     get:

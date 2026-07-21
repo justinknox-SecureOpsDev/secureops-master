@@ -2515,6 +2515,11 @@ export type UpdateSiteManagers200 = {
   assigned: SiteManagerUser[];
 };
 
+export type GenerateInvoice201 = Invoice & {
+  /** Custom-period path only: ids of existing non-void invoices for the same site whose period overlaps the requested range. Non-empty means potential double-billing — surface a warning. */
+  overlappingInvoiceIds?: string[];
+};
+
 export type RegisterPushTokenBody = {
   token: string;
 };

@@ -1,5 +1,5 @@
 import { Router, type IRouter } from "express";
-import { eq, and, ilike } from "drizzle-orm";
+import { eq, and, ilike, ne, lte, gte } from "drizzle-orm";
 import { db, invoicesTable, sitesTable } from "@workspace/db";
 import { requireAdmin } from "../middlewares/auth";
 import { upsertWeeklyInvoice, upsertCustomPeriodInvoice } from "../lib/invoiceSync";
@@ -133,6 +133,23 @@ router.post("/invoices/generate", requireAdmin, async (req, res): Promise<void> 
       return;
     }
 
+    // Double-billing guard: find existing non-void invoices for this site
+    // whose period overlaps the requested range. Overlap = existing.start <=
+    // requested.end AND existing.end >= requested.start (inclusive dates).
+    // We still create the new draft (adjustment drafts are a supported
+    // workflow) but return the conflicting ids so the UI can warn the admin.
+    const overlapping = await db
+      .select({ id: invoicesTable.id })
+      .from(invoicesTable)
+      .where(
+        and(
+          eq(invoicesTable.siteId, String(siteId)),
+          ne(invoicesTable.status, "void"),
+          lte(invoicesTable.periodStart, String(periodEnd)),
+          gte(invoicesTable.periodEnd, String(periodStart)),
+        ),
+      );
+
     const result = await upsertCustomPeriodInvoice(String(siteId), String(periodStart), String(periodEnd));
 
     if (result.status === "skipped") {
@@ -160,7 +177,11 @@ router.post("/invoices/generate", requireAdmin, async (req, res): Promise<void> 
       .from(invoicesTable)
       .leftJoin(sitesTable, eq(invoicesTable.siteId, sitesTable.id))
       .where(eq(invoicesTable.id, result.invoiceId));
-    res.status(201).json({ ...withSite?.invoices, siteName: withSite?.sites?.name });
+    res.status(201).json({
+      ...withSite?.invoices,
+      siteName: withSite?.sites?.name,
+      overlappingInvoiceIds: overlapping.map((o) => o.id),
+    });
     return;
   }
 

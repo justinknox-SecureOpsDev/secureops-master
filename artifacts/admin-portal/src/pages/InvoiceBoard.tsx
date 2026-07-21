@@ -213,6 +213,9 @@ export default function InvoiceBoardPage() {
   const [niPeriodEnd, setNiPeriodEnd] = useState("");
   const [niSubmitting, setNiSubmitting] = useState(false);
   const [niError, setNiError] = useState("");
+  // Ids of pre-existing non-void invoices whose period overlaps the invoice
+  // just created via the New Invoice dialog — possible double-billing.
+  const [overlapWarningIds, setOverlapWarningIds] = useState<string[]>([]);
 
   const openNewInvoiceDialog = () => {
     setNiClientId("");
@@ -257,11 +260,12 @@ export default function InvoiceBoardPage() {
     setNiSubmitting(true);
     setNiError("");
     try {
-      await api("/invoices/generate", {
+      const created = await api<InvoiceRow & { overlappingInvoiceIds?: string[] }>("/invoices/generate", {
         method: "POST",
         body: { siteId: niSiteId, periodStart: niPeriodStart, periodEnd: niPeriodEnd },
       });
       closeNewInvoiceDialog();
+      setOverlapWarningIds(created.overlappingInvoiceIds ?? []);
       showToast("ok", "Draft invoice created successfully.");
       await reload();
     } catch (e) {
@@ -415,6 +419,17 @@ export default function InvoiceBoardPage() {
     setOpenInvoices(next);
   };
 
+  // From the double-billing warning banner: expand the conflicting invoice's
+  // period group and scroll its row into view.
+  const jumpToInvoice = (id: string) => {
+    const inv = rows.find((r) => r.id === id);
+    if (!inv) return;
+    setOpenWeeks((prev) => new Set(prev).add(`${inv.periodStart}::${inv.periodEnd}`));
+    setTimeout(() => {
+      document.getElementById(`invoice-row-${id}`)?.scrollIntoView({ behavior: "smooth", block: "center" });
+    }, 60);
+  };
+
   const openSendDialog = (r: InvoiceRow) => {
     setSendTarget({
       id: r.id,
@@ -530,6 +545,45 @@ export default function InvoiceBoardPage() {
       {toast && (
         <div className={`mb-4 px-4 py-3 rounded border ${toast.kind === "ok" ? "bg-green-50 border-green-300 text-green-900" : "bg-red-50 border-red-300 text-red-900"}`}>
           {toast.msg}
+        </div>
+      )}
+
+      {overlapWarningIds.length > 0 && (
+        <div className="mb-4 px-4 py-3 rounded border bg-amber-50 border-amber-300 text-amber-900 flex items-start gap-3">
+          <AlertTriangle className="w-5 h-5 shrink-0 mt-0.5" />
+          <div className="flex-1">
+            <div className="font-semibold">Possible double-billing</div>
+            <div className="text-sm mt-0.5">
+              {overlapWarningIds.length === 1
+                ? "1 existing invoice already covers"
+                : `${overlapWarningIds.length} existing invoices already cover`}{" "}
+              this site and overlapping dates. Review before sending — you may want to void one.
+            </div>
+            <div className="flex flex-wrap gap-2 mt-2">
+              {overlapWarningIds.map((id) => {
+                const inv = rows.find((r) => r.id === id);
+                return (
+                  <button
+                    key={id}
+                    type="button"
+                    className="text-xs font-mono px-2 py-1 rounded border border-amber-400 bg-white hover:bg-amber-100 underline"
+                    onClick={() => jumpToInvoice(id)}
+                    title={inv ? `View invoice ${inv.invoiceNumber}` : "This invoice is hidden by the current filters — clear filters to see it"}
+                  >
+                    {inv ? `${inv.invoiceNumber} (${fmtDateRange(inv.periodStart, inv.periodEnd)})` : `Invoice ${id.slice(0, 8)}… (hidden by filters)`}
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+          <button
+            type="button"
+            onClick={() => setOverlapWarningIds([])}
+            aria-label="Dismiss double-billing warning"
+            className="p-1 rounded hover:bg-amber-100"
+          >
+            <X className="w-4 h-4" />
+          </button>
         </div>
       )}
 
@@ -756,7 +810,7 @@ export default function InvoiceBoardPage() {
                           : original.id === r.id ? "original" : "adjustment";
                         return (
                           <Fragment key={r.id}>
-                            <tr className={`border-t ${selectable ? "hover:bg-gray-50" : "bg-gray-50/60 opacity-70"}`}>
+                            <tr id={`invoice-row-${r.id}`} className={`border-t ${selectable ? "hover:bg-gray-50" : "bg-gray-50/60 opacity-70"}`}>
                               <td className="px-3 py-2">
                                 <input
                                   type="checkbox"
