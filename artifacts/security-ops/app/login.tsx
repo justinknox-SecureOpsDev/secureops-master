@@ -5,6 +5,12 @@ import {
   type StyleProp, type TextStyle,
 } from "react-native";
 import { LinearGradient } from "expo-linear-gradient";
+import Svg, {
+  Defs,
+  LinearGradient as SvgLinearGradient,
+  Stop,
+  Text as SvgText,
+} from "react-native-svg";
 import * as WebBrowser from "expo-web-browser";
 import { useRouter } from "expo-router";
 import { useAuth } from "@/contexts/AuthContext";
@@ -36,16 +42,94 @@ async function postJson<T>(path: string, body: unknown): Promise<T> {
   return data as T;
 }
 
+/** Metallic gradient stops matching the ACCESS SYSTEM button (see replit.md brand). */
+const GOLD_STOPS = ["#f0d89a", "#c9a04a", "#aa8036"] as const;
+
 /**
- * Gold-coloured brand text.
+ * Gold metallic gradient brand text.
  *
  * MaskedView-based gradient text was removed because
  * @react-native-masked-view/masked-view is not linked in the App Store binary
- * — shipping it via OTA crashes the JS bridge. A solid gold colour achieves
- * the same visual hierarchy without any native-module dependency.
+ * — shipping it via OTA crashes the JS bridge.
+ *
+ * This variant uses react-native-svg (already linked in the binary — used by
+ * LiveOfficerMap) on native: a plain RN <Text> sizes the layout, and an
+ * absolutely-positioned <Svg> paints the same string with a left-to-right
+ * gradient fill once measured. Until measurement completes (and on any
+ * fallback path) the solid-gold text stays visible, so nothing can blank out
+ * or crash. On web it's pure CSS background-clip gradient text.
  */
 function GoldText({ style, children }: { style: StyleProp<TextStyle>; children: React.ReactNode }) {
-  return <Text style={[style, { color: "#c9a04a" }]}>{children}</Text>;
+  const flat = StyleSheet.flatten(style) || {};
+  const [size, setSize] = useState<{ w: number; h: number } | null>(null);
+
+  if (Platform.OS === "web") {
+    return (
+      <Text
+        style={[
+          style,
+          { color: GOLD_STOPS[1] },
+          {
+            backgroundImage: `linear-gradient(90deg, ${GOLD_STOPS[0]}, ${GOLD_STOPS[1]}, ${GOLD_STOPS[2]})`,
+            backgroundClip: "text",
+            WebkitBackgroundClip: "text",
+            WebkitTextFillColor: "transparent",
+            color: "transparent",
+          } as unknown as TextStyle,
+        ]}
+      >
+        {children}
+      </Text>
+    );
+  }
+
+  const gradientReady = size != null && size.w > 0 && size.h > 0 && typeof children === "string";
+  const gradId = "goldTextGrad";
+  const fontSize = typeof flat.fontSize === "number" ? flat.fontSize : 16;
+
+  return (
+    <View style={{ position: "relative" }}>
+      <Text
+        style={[style, { color: GOLD_STOPS[1], opacity: gradientReady ? 0 : 1 }]}
+        onLayout={(e) => {
+          const { width, height } = e.nativeEvent.layout;
+          setSize({ w: width, h: height });
+        }}
+      >
+        {children}
+      </Text>
+      {gradientReady ? (
+        <Svg
+          width={size.w}
+          height={size.h}
+          style={StyleSheet.absoluteFill}
+          pointerEvents="none"
+          accessible={false}
+          importantForAccessibility="no-hide-descendants"
+        >
+          <Defs>
+            <SvgLinearGradient id={gradId} x1="0" y1="0" x2="1" y2="0">
+              <Stop offset="0" stopColor={GOLD_STOPS[0]} />
+              <Stop offset="0.5" stopColor={GOLD_STOPS[1]} />
+              <Stop offset="1" stopColor={GOLD_STOPS[2]} />
+            </SvgLinearGradient>
+          </Defs>
+          <SvgText
+            fill={`url(#${gradId})`}
+            x={size.w / 2}
+            y={size.h / 2}
+            textAnchor="middle"
+            alignmentBaseline="central"
+            fontSize={fontSize}
+            fontWeight={typeof flat.fontWeight === "string" || typeof flat.fontWeight === "number" ? String(flat.fontWeight) : undefined}
+            letterSpacing={typeof flat.letterSpacing === "number" ? flat.letterSpacing : undefined}
+          >
+            {children}
+          </SvgText>
+        </Svg>
+      ) : null}
+    </View>
+  );
 }
 
 export default function LoginScreen() {
