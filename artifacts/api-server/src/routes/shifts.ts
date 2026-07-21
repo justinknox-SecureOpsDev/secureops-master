@@ -1252,7 +1252,23 @@ router.post("/shifts/:id/assignments", requireSchedulingStaff, async (req, res):
   // this clearance check — the double-book conflict guard and headcount cap
   // below still apply. The override is recorded in the audit log (this route
   // is under the audited `/shifts` prefix and the request body is captured).
-  const empLevel = await getEffectiveLevel(employeeId);
+  //
+  // Worker-role staff (admin, dispatcher, site_manager) are always treated as
+  // level 4 — they are management staff who can work any shift, identical to
+  // how the shift-list route computes myMaxLevel for the authenticated user.
+  const [assigneeUser] = await db
+    .select({ role: usersTable.role })
+    .from(usersTable)
+    .where(eq(usersTable.id, employeeId))
+    .limit(1);
+  if (!assigneeUser) {
+    res.status(404).json({ error: "Not Found", message: "Employee not found" });
+    return;
+  }
+  const MGMT_ROLES = ["admin", "dispatcher", "site_manager"] as const;
+  const empLevel = MGMT_ROLES.includes(assigneeUser.role as (typeof MGMT_ROLES)[number])
+    ? 4
+    : await getEffectiveLevel(employeeId);
   // Only finance-bearing scheduling staff (admin/dispatcher) may override the
   // licence gate; site managers must never bypass clearance requirements.
   const canOverrideLicense =

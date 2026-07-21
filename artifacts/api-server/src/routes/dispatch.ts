@@ -430,7 +430,7 @@ router.post("/dispatch/assign-nearest", requireAdminOrDispatcher, async (req, re
     })
     .from(usersTable)
     .where(and(
-      eq(usersTable.role, "employee"),
+      inArray(usersTable.role, ["employee", "site_manager", "dispatcher", "admin"]),
       eq(usersTable.status, "active"),
     ));
 

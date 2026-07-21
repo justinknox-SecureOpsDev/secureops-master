@@ -104,7 +104,12 @@ export default function ShiftDetailScreen() {
   // baseline of 1 ("Support / no licence required"); higher levels cover lower.
   // Filtering on raw maxLicenseLevel alone wrongly hid support / non-licensed
   // staff from level-1 (Support) shifts.
-  const effLevel = (e: any) => Math.max(e.maxLicenseLevel ?? 0, e.position === "support_staff" ? 1 : 0);
+  // Worker-role staff (admin, dispatcher, site_manager) are always level 4 —
+  // they can work any shift regardless of their own licence records.
+  const effLevel = (e: any) => {
+    if (e.role === "admin" || e.role === "dispatcher" || e.role === "site_manager") return 4;
+    return Math.max(e.maxLicenseLevel ?? 0, e.position === "support_staff" ? 1 : 0);
+  };
   const eligibleAll = unassignedAll.filter((e: any) => effLevel(e) >= reqLevel);
   const ineligibleAll = unassignedAll.filter((e: any) => effLevel(e) < reqLevel);
 
