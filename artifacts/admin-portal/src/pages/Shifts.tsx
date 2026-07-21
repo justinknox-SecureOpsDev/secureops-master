@@ -252,7 +252,8 @@ export default function ShiftsPage() {
     return shifts.filter((s) =>
       s.title.toLowerCase().includes(q) ||
       (s.location ?? "").toLowerCase().includes(q) ||
-      (s.clientName ?? "").toLowerCase().includes(q),
+      (s.clientName ?? "").toLowerCase().includes(q) ||
+      (s.assignments ?? []).some((a) => (a.employeeName ?? "").toLowerCase().includes(q)),
     );
   }, [shifts, search]);
 
@@ -472,7 +473,7 @@ export default function ShiftsPage() {
           <Input
             value={search}
             onChange={(e) => setSearch(e.target.value)}
-            placeholder="Search title, location, client…"
+            placeholder="Search title, location, client, officer…"
             className="w-64"
           />
           <Select value={statusFilter} onValueChange={(v) => setStatusFilter(v as StatusFilter)}>
