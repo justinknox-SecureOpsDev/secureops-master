@@ -3085,6 +3085,11 @@ export const GetAnalyticsOfficersResponseItem = zod.object({
   shiftsCompleted: zod.number(),
   incidentsFiled: zod.number(),
   punctualityPct: zod.number().nullable(),
+  status: zod
+    .string()
+    .describe(
+      "Current account status of the officer's user record (active | inactive | pending)",
+    ),
   trend: zod.array(
     zod.object({
       weekStart: zod.coerce.date(),

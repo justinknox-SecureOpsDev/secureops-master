@@ -1558,6 +1558,8 @@ export interface AnalyticsOfficerRow {
   shiftsCompleted: number;
   incidentsFiled: number;
   punctualityPct: number | null;
+  /** Current account status of the officer's user record (active | inactive | pending) */
+  status: string;
   trend: AnalyticsOfficerTrendPoint[];
 }
 

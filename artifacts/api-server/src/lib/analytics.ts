@@ -15,7 +15,7 @@
  * All "which calendar day/week" decisions use the business timezone
  * (PAYROLL_TIMEZONE, default America/Chicago), never UTC.
  */
-import { and, eq, gte, lt, lte, sql } from "drizzle-orm";
+import { and, eq, gte, inArray, lt, lte, sql } from "drizzle-orm";
 import {
   db,
   timeEntriesTable,
@@ -120,6 +120,7 @@ export interface AnalyticsOfficerRow {
   shiftsCompleted: number;
   incidentsFiled: number;
   punctualityPct: number | null;
+  status: string;
   trend: { weekStart: string; hoursWorked: number }[];
 }
 
@@ -682,6 +683,19 @@ export async function computeAnalyticsOfficers(range: AnalyticsRange): Promise<A
     o.incidentsFiled++;
   }
 
+  // Attach each officer's CURRENT account status so the portal can surface
+  // archived (inactive) officers in-range and offer reactivation without
+  // leaving the analytics context.
+  const officerIds = [...officers.keys()];
+  const statusById = new Map<string, string>();
+  if (officerIds.length > 0) {
+    const statusRows = await db
+      .select({ id: usersTable.id, status: usersTable.status })
+      .from(usersTable)
+      .where(inArray(usersTable.id, officerIds));
+    for (const r of statusRows) statusById.set(r.id, r.status);
+  }
+
   return [...officers.values()]
     .map((o) => ({
       employeeId: o.employeeId,
@@ -690,6 +704,7 @@ export async function computeAnalyticsOfficers(range: AnalyticsRange): Promise<A
       shiftsCompleted: o.completedShiftIds.size,
       incidentsFiled: o.incidentsFiled,
       punctualityPct: o.punctualTotal > 0 ? pct1((o.punctualOnTime / o.punctualTotal) * 100) : null,
+      status: statusById.get(o.employeeId) ?? "active",
       trend: weekKeys.map((k) => ({ weekStart: k, hoursWorked: r2(o.weekHours.get(k) ?? 0) })),
     }))
     .sort((a, b) => b.hoursWorked - a.hoursWorked);

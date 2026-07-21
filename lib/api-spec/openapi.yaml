@@ -5051,6 +5051,9 @@ components:
         punctualityPct:
           type: number
           nullable: true
+        status:
+          type: string
+          description: Current account status of the officer's user record (active | inactive | pending)
         trend:
           type: array
           items:
@@ -5062,6 +5065,7 @@ components:
         - shiftsCompleted
         - incidentsFiled
         - punctualityPct
+        - status
         - trend
 
     AdminTask:
