@@ -1037,6 +1037,27 @@ export interface PncSubmitResponse {
   skipped: number;
 }
 
+export interface PncPreflightRow {
+  id: string;
+  employeeId: string;
+  employeeName: string | null;
+  netPay: string;
+  reasons: string[];
+}
+
+export type PncPreflightResponseCounts = {
+  total: number;
+  ready: number;
+  excluded: number;
+};
+
+export interface PncPreflightResponse {
+  ready: PncPreflightRow[];
+  excluded: PncPreflightRow[];
+  counts: PncPreflightResponseCounts;
+  readyNetTotal: string;
+}
+
 export interface CreatePayrollRequest {
   employeeId: string;
   periodStart: string;
@@ -2532,6 +2553,10 @@ export type SubmitPayRunViaPncBody = {
    * @maxLength 128
    */
   idempotencyKey?: string;
+};
+
+export type PreflightPayRunPncBody = {
+  ids: string[];
 };
 
 export type GetPncPaymentStatusParams = {

@@ -127,10 +127,12 @@ import type {
   PasswordResetTokenInfo,
   PaymentDiscrepancy,
   PayrollEntry,
+  PncPreflightResponse,
   PncSubmitResponse,
   Policy,
   PolicyGroup,
   PolicyPublic,
+  PreflightPayRunPncBody,
   ProtectionDetail,
   ProtectionDetailRequest,
   RadioChannel,
@@ -1602,6 +1604,92 @@ export const useSubmitPayRunViaPnc = <
   TContext
 > => {
   return useMutation(getSubmitPayRunViaPncMutationOptions(options));
+};
+
+/**
+ * @summary Dry-run PNC readiness check — reports which selected rows would be accepted vs rejected, without touching the DB
+ */
+export const getPreflightPayRunPncUrl = () => {
+  return `/api/payroll/pay-run/pnc-preflight`;
+};
+
+export const preflightPayRunPnc = async (
+  preflightPayRunPncBody: PreflightPayRunPncBody,
+  options?: RequestInit,
+): Promise<PncPreflightResponse> => {
+  return customFetch<PncPreflightResponse>(getPreflightPayRunPncUrl(), {
+    ...options,
+    method: "POST",
+    headers: { "Content-Type": "application/json", ...options?.headers },
+    body: JSON.stringify(preflightPayRunPncBody),
+  });
+};
+
+export const getPreflightPayRunPncMutationOptions = <
+  TError = ErrorType<ErrorResponse>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof preflightPayRunPnc>>,
+    TError,
+    { data: BodyType<PreflightPayRunPncBody> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof preflightPayRunPnc>>,
+  TError,
+  { data: BodyType<PreflightPayRunPncBody> },
+  TContext
+> => {
+  const mutationKey = ["preflightPayRunPnc"];
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof preflightPayRunPnc>>,
+    { data: BodyType<PreflightPayRunPncBody> }
+  > = (props) => {
+    const { data } = props ?? {};
+
+    return preflightPayRunPnc(data, requestOptions);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type PreflightPayRunPncMutationResult = NonNullable<
+  Awaited<ReturnType<typeof preflightPayRunPnc>>
+>;
+export type PreflightPayRunPncMutationBody = BodyType<PreflightPayRunPncBody>;
+export type PreflightPayRunPncMutationError = ErrorType<ErrorResponse>;
+
+/**
+ * @summary Dry-run PNC readiness check — reports which selected rows would be accepted vs rejected, without touching the DB
+ */
+export const usePreflightPayRunPnc = <
+  TError = ErrorType<ErrorResponse>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof preflightPayRunPnc>>,
+    TError,
+    { data: BodyType<PreflightPayRunPncBody> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationResult<
+  Awaited<ReturnType<typeof preflightPayRunPnc>>,
+  TError,
+  { data: BodyType<PreflightPayRunPncBody> },
+  TContext
+> => {
+  return useMutation(getPreflightPayRunPncMutationOptions(options));
 };
 
 /**

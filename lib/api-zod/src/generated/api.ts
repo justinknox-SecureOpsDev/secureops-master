@@ -471,6 +471,40 @@ export const SubmitPayRunViaPncResponse = zod.object({
 });
 
 /**
+ * @summary Dry-run PNC readiness check — reports which selected rows would be accepted vs rejected, without touching the DB
+ */
+export const PreflightPayRunPncBody = zod.object({
+  ids: zod.array(zod.string()),
+});
+
+export const PreflightPayRunPncResponse = zod.object({
+  ready: zod.array(
+    zod.object({
+      id: zod.string(),
+      employeeId: zod.string(),
+      employeeName: zod.string().nullable(),
+      netPay: zod.string(),
+      reasons: zod.array(zod.string()),
+    }),
+  ),
+  excluded: zod.array(
+    zod.object({
+      id: zod.string(),
+      employeeId: zod.string(),
+      employeeName: zod.string().nullable(),
+      netPay: zod.string(),
+      reasons: zod.array(zod.string()),
+    }),
+  ),
+  counts: zod.object({
+    total: zod.number(),
+    ready: zod.number(),
+    excluded: zod.number(),
+  }),
+  readyNetTotal: zod.string(),
+});
+
+/**
  * @summary Proxy a live PNC payment status check by customerReference
  */
 export const GetPncPaymentStatusQueryParams = zod.object({

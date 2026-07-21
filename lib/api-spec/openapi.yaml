@@ -325,6 +325,41 @@ paths:
             application/json:
               schema: { $ref: "#/components/schemas/ErrorResponse" }
 
+  /payroll/pay-run/pnc-preflight:
+    post:
+      operationId: preflightPayRunPnc
+      tags: [payroll]
+      summary: Dry-run PNC readiness check — reports which selected rows would be accepted vs rejected, without touching the DB
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                ids:
+                  type: array
+                  items: { type: string }
+              required: [ids]
+      responses:
+        "200":
+          description: Readiness report
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/PncPreflightResponse" }
+        "400":
+          description: ids[] required
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ErrorResponse" }
+        "503":
+          description: PNC API not configured
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ErrorResponse" }
+
   /payroll/pay-run/pnc-status:
     get:
       operationId: getPncPaymentStatus
@@ -4299,6 +4334,37 @@ components:
         processed: { type: integer }
         skipped: { type: integer }
       required: [ok, multipaymentId, processed, skipped]
+
+    PncPreflightRow:
+      type: object
+      properties:
+        id: { type: string }
+        employeeId: { type: string }
+        employeeName: { type: string, nullable: true }
+        netPay: { type: string }
+        reasons:
+          type: array
+          items: { type: string }
+      required: [id, employeeId, employeeName, netPay, reasons]
+
+    PncPreflightResponse:
+      type: object
+      properties:
+        ready:
+          type: array
+          items: { $ref: "#/components/schemas/PncPreflightRow" }
+        excluded:
+          type: array
+          items: { $ref: "#/components/schemas/PncPreflightRow" }
+        counts:
+          type: object
+          properties:
+            total: { type: integer }
+            ready: { type: integer }
+            excluded: { type: integer }
+          required: [total, ready, excluded]
+        readyNetTotal: { type: string }
+      required: [ready, excluded, counts, readyNetTotal]
 
     CreatePayrollRequest:
       type: object

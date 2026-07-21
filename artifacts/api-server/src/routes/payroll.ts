@@ -420,6 +420,72 @@ router.post("/payroll/pay-run/stripe", requireAdmin, async (req, res): Promise<v
   res.status(501).json({ error: "Not Implemented", message: "Stripe Connect transfer logic not wired yet — set up connected accounts first." });
 });
 
+// POST /payroll/pay-run/pnc-preflight — Dry-run readiness check for the PNC
+// route. Runs the exact same per-row validation as /payroll/pay-run/pnc
+// (mapRowToInstruction) but performs NO claims and NO outbound calls, so the
+// admin portal can show a confirmation dialog listing which rows would be
+// accepted vs rejected before anything is submitted.
+router.post("/payroll/pay-run/pnc-preflight", requireAdmin, async (req, res): Promise<void> => {
+  if (!isPncConfigured()) {
+    res.status(503).json({
+      error: "Service Unavailable",
+      message: "PNC API credentials are not configured.",
+      configured: false,
+    });
+    return;
+  }
+
+  const bodyParsed = z.object({ ids: z.array(z.string()).min(1) }).safeParse(req.body ?? {});
+  if (!bodyParsed.success) {
+    res.status(400).json({ error: "Bad Request", message: "ids[] required" });
+    return;
+  }
+
+  const rows = await loadPayRunRows(bodyParsed.data.ids);
+  type PreflightRow = { id: string; employeeId: string; employeeName: string | null; netPay: string; reasons: string[] };
+  const ready: PreflightRow[] = [];
+  const excluded: PreflightRow[] = [];
+
+  for (const row of rows) {
+    const base = { id: row.id, employeeId: row.employeeId, employeeName: row.employeeName, netPay: row.netPay };
+    if (row.status !== "pending") {
+      excluded.push({ ...base, reasons: [`Not pending (status: ${row.status})`] });
+      continue;
+    }
+    // Same gate the real PNC route applies — mapRowToInstruction returns the
+    // FIRST missing field only, so collect all gaps here for a complete list.
+    const reasons: string[] = [];
+    if (!row.bankBsb?.trim()) reasons.push("Missing routing number");
+    if (!row.bankAccountNumber?.trim()) reasons.push("Missing bank account number");
+    if (!row.bankAccountName?.trim()) reasons.push("Missing bank account name");
+    // Sanity: keep in lockstep with mapRowToInstruction's verdict.
+    const mapped = mapRowToInstruction({
+      id: row.id,
+      employeeId: row.employeeId,
+      employeeName: row.employeeName,
+      bankAccountName: row.bankAccountName,
+      bankAccountNumber: row.bankAccountNumber,
+      bankBsb: row.bankBsb,
+      netPay: row.netPay,
+      periodStart: row.periodStart,
+    });
+    if (mapped.ok && reasons.length === 0) {
+      ready.push({ ...base, reasons: [] });
+    } else {
+      if (reasons.length === 0 && !mapped.ok) reasons.push(mapped.reason);
+      excluded.push({ ...base, reasons });
+    }
+  }
+
+  const readyNetTotal = ready.reduce((a, r) => a + Number(r.netPay), 0);
+  res.json({
+    ready,
+    excluded,
+    counts: { total: rows.length, ready: ready.length, excluded: excluded.length },
+    readyNetTotal: readyNetTotal.toFixed(2),
+  });
+});
+
 // POST /payroll/pay-run/pnc — Submit a batch of pending payroll entries directly
 // to PNC Bank via their multipayment API. Mirrors export-csv but sends to PNC
 // instead of downloading a file.

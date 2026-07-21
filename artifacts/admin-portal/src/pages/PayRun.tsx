@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Banknote, Download, CheckCircle2, AlertTriangle, Loader2, Zap, Building2, X } from "lucide-react";
+import { Link } from "wouter";
+import { Banknote, Download, CheckCircle2, AlertTriangle, Loader2, Zap, Building2, X, UserRoundCog } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -42,6 +43,21 @@ type Preview = {
 
 type SystemStatus = {
   pncConfigured?: boolean;
+};
+
+type PncPreflightRow = {
+  id: string;
+  employeeId: string;
+  employeeName: string | null;
+  netPay: string;
+  reasons: string[];
+};
+
+type PncPreflight = {
+  ready: PncPreflightRow[];
+  excluded: PncPreflightRow[];
+  counts: { total: number; ready: number; excluded: number };
+  readyNetTotal: string;
 };
 
 const fmtUsd = (n: number | string) =>
@@ -193,6 +209,8 @@ export default function PayRunPage() {
   // the attempt fully settles (request done + cooldown elapsed). The server
   // replays the original response for duplicate keys instead of re-submitting.
   const pncIdemKeyRef = useRef<string | null>(null);
+  // PNC pre-submit readiness confirmation dialog
+  const [pncPreflight, setPncPreflight] = useState<PncPreflight | null>(null);
 
   const exportBtnRef = useRef<HTMLButtonElement | null>(null);
   const markPaidBtnRef = useRef<HTMLButtonElement | null>(null);
@@ -392,12 +410,39 @@ export default function PayRunPage() {
     }
   };
 
-  const sendViaPnc = async () => {
+  // Step 1: dry-run readiness check — opens the confirmation dialog instead of
+  // submitting straight away. Nothing is sent to PNC here.
+  const checkPncReadiness = async () => {
     if (selected.size === 0 || pncCooldown) return;
+    setPncError(null);
+    setBusy("pnc");
+    try {
+      const res = await fetchWithAuth("/api/payroll/pay-run/pnc-preflight", {
+        method: "POST",
+        headers: authHeaders,
+        body: JSON.stringify({ ids: Array.from(selected) }),
+      });
+      const j = await res.json();
+      if (!res.ok) {
+        setPncError({ message: j.message || `PNC readiness check failed (HTTP ${res.status})` });
+        return;
+      }
+      setPncPreflight(j as PncPreflight);
+    } catch (e) {
+      setPncError({ message: `Network error: ${(e as Error).message}` });
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  // Step 2: actual submission — only the rows the preflight marked ready.
+  const sendViaPnc = async (readyIds: string[]) => {
+    if (readyIds.length === 0 || pncCooldown) return;
     // Reuse the in-flight attempt's key if a duplicate click slips through;
     // only mint a new key when starting a fresh attempt.
     if (!pncIdemKeyRef.current) pncIdemKeyRef.current = crypto.randomUUID();
     const idempotencyKey = pncIdemKeyRef.current;
+    setPncPreflight(null);
     setPncError(null);
     setBusy("pnc");
     try {
@@ -406,7 +451,7 @@ export default function PayRunPage() {
         headers: authHeaders,
         // idempotencyKey: server dedupes duplicate submissions of this exact
         // request within a 5-minute window (double-click / retry protection).
-        body: JSON.stringify({ ids: Array.from(selected), idempotencyKey }),
+        body: JSON.stringify({ ids: readyIds, idempotencyKey }),
       });
       const j = await res.json();
       if (!res.ok) {
@@ -579,7 +624,7 @@ export default function PayRunPage() {
         <div title={pncConfigured ? undefined : "PNC not configured — add API credentials in Settings"}>
           <Button
             className="bg-blue-700 text-white hover:bg-blue-800 disabled:opacity-50"
-            onClick={sendViaPnc}
+            onClick={checkPncReadiness}
             disabled={selected.size === 0 || busy !== null || pncCooldown || !pncConfigured}
             aria-label="Send selected payroll entries via PNC Bank"
           >
@@ -843,6 +888,111 @@ export default function PayRunPage() {
         Stripe Connect transfers are scaffolded behind the <code>STRIPE_CONNECT_ENABLED</code> environment flag.
         PNC direct deposit is enabled when <code>PNC_CLIENT_ID</code>, <code>PNC_CLIENT_SECRET</code>, <code>PNC_INSTRUCTOR_ACCOUNT_NUMBER</code>, and <code>PNC_INSTRUCTOR_ROUTING_NUMBER</code> are set.
       </p>
+
+      {/* PNC readiness confirmation dialog */}
+      {pncPreflight && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/50"
+          role="dialog"
+          aria-modal="true"
+          aria-label="Confirm PNC submission"
+          onClick={() => setPncPreflight(null)}
+        >
+          <div
+            className="bg-white rounded-lg shadow-xl max-w-xl w-full mx-4 max-h-[85vh] overflow-auto"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-center justify-between p-4 border-b">
+              <h2 className="font-semibold text-brand-navy flex items-center gap-2">
+                <Building2 className="w-5 h-5 text-blue-700" /> Confirm PNC submission
+              </h2>
+              <button
+                type="button"
+                aria-label="Close PNC confirmation dialog"
+                onClick={() => setPncPreflight(null)}
+                className="opacity-60 hover:opacity-100"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+            <div className="p-4 space-y-4">
+              <div className="grid grid-cols-3 gap-3 text-sm">
+                <div className="rounded border p-2 text-center">
+                  <div className="text-xs text-muted-foreground">Selected</div>
+                  <div className="text-lg font-semibold">{pncPreflight.counts.total}</div>
+                </div>
+                <div className="rounded border border-green-300 bg-green-50 p-2 text-center">
+                  <div className="text-xs text-green-800">Ready to pay</div>
+                  <div className="text-lg font-semibold text-green-800">{pncPreflight.counts.ready}</div>
+                </div>
+                <div className="rounded border border-amber-300 bg-amber-50 p-2 text-center">
+                  <div className="text-xs text-amber-800">Excluded</div>
+                  <div className="text-lg font-semibold text-amber-800">{pncPreflight.counts.excluded}</div>
+                </div>
+              </div>
+
+              {pncPreflight.excluded.length > 0 && (
+                <div className="rounded border border-amber-300 bg-amber-50 p-3">
+                  <div className="font-medium text-amber-900 flex items-center gap-1 mb-2 text-sm">
+                    <AlertTriangle className="w-4 h-4" /> These employees will NOT be paid in this batch
+                  </div>
+                  <ul className="space-y-1.5 text-sm">
+                    {pncPreflight.excluded.map((r) => (
+                      <li key={r.id} className="flex items-start justify-between gap-2">
+                        <div>
+                          <strong>{r.employeeName ?? "(Unknown employee)"}</strong>
+                          <span className="text-amber-900"> — {r.reasons.join("; ")}</span>
+                        </div>
+                        <Link
+                          href={`/personnel/${r.employeeId}`}
+                          className="shrink-0 inline-flex items-center gap-1 text-xs text-blue-700 underline whitespace-nowrap"
+                          aria-label={`Open profile for ${r.employeeName ?? "employee"} to fix bank details`}
+                        >
+                          <UserRoundCog className="w-3.5 h-3.5" /> Fix profile
+                        </Link>
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              )}
+
+              {pncPreflight.ready.length > 0 ? (
+                <div className="text-sm">
+                  <div className="font-medium text-brand-navy mb-1">
+                    {pncPreflight.counts.ready} employee{pncPreflight.counts.ready === 1 ? "" : "s"} will be paid — total {fmtUsd(pncPreflight.readyNetTotal)}
+                  </div>
+                  <ul className="text-xs text-muted-foreground max-h-40 overflow-auto space-y-0.5">
+                    {pncPreflight.ready.map((r) => (
+                      <li key={r.id} className="flex justify-between gap-2">
+                        <span>{r.employeeName ?? "(Unknown employee)"}</span>
+                        <span className="font-medium text-brand-navy">{fmtUsd(r.netPay)}</span>
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              ) : (
+                <div className="text-sm text-red-800 bg-red-50 border border-red-300 rounded p-3">
+                  No rows are ready for PNC. Fix the missing bank details above, then try again.
+                </div>
+              )}
+
+              <div className="flex justify-end gap-2 pt-2 border-t">
+                <Button variant="outline" onClick={() => setPncPreflight(null)}>
+                  Cancel
+                </Button>
+                <Button
+                  className="bg-blue-700 text-white hover:bg-blue-800 disabled:opacity-50"
+                  disabled={pncPreflight.ready.length === 0 || busy !== null}
+                  onClick={() => void sendViaPnc(pncPreflight.ready.map((r) => r.id))}
+                >
+                  {busy === "pnc" ? <Loader2 className="w-4 h-4 animate-spin mr-2" /> : <Building2 className="w-4 h-4 mr-2" />}
+                  Send {pncPreflight.counts.ready} payment{pncPreflight.counts.ready === 1 ? "" : "s"} via PNC
+                </Button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* PNC Status modal */}
       {pncStatusModal && (
