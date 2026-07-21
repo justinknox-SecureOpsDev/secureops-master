@@ -1,4 +1,4 @@
-import { Router, type IRouter } from "express";
+import { Router, type IRouter, type Request } from "express";
 import { eq, and, gte, lte, lt, sql, inArray, desc } from "drizzle-orm";
 import { db, payrollEntriesTable, usersTable, employeesTable, timeEntriesTable, shiftsTable, sitesTable, auditLogsTable } from "@workspace/db";
 import { isNull } from "drizzle-orm";
@@ -428,29 +428,22 @@ router.post("/payroll/pay-run/stripe", requireAdmin, async (req, res): Promise<v
 // the outbound PNC call. Concurrent requests see those rows as non-pending and
 // skip them, preventing duplicate bank submissions. On PNC success rows advance
 // to 'processed'; on any failure they are rolled back to 'pending'.
-router.post("/payroll/pay-run/pnc", requireAdmin, async (req, res): Promise<void> => {
-  if (!isPncConfigured()) {
-    res.status(503).json({
-      error: "Service Unavailable",
-      message: "PNC API credentials are not configured. Add PNC_CLIENT_ID, PNC_CLIENT_SECRET, PNC_INSTRUCTOR_ACCOUNT_NUMBER, and PNC_INSTRUCTOR_ROUTING_NUMBER to enable.",
-      configured: false,
-    });
-    return;
-  }
+//
+// Idempotency: the client may send an `idempotencyKey` (UUID). Requests carrying
+// a key already seen within the last 5 minutes (scoped per admin user) do NOT
+// re-run the submission — they await/replay the original response, so a
+// double-click can never produce a second PNC API call (not even an empty one).
+// Failed outcomes are evicted from the cache so a deliberate retry still works.
+type PncSubmitResult = { status: number; body: Record<string, unknown> };
+const PNC_IDEMPOTENCY_TTL_MS = 5 * 60 * 1000;
+const pncIdempotencyCache = new Map<string, { expiresAt: number; promise: Promise<PncSubmitResult> }>();
 
-  const bodyParsed = z.object({ ids: z.array(z.string()).min(1) }).safeParse(req.body ?? {});
-  if (!bodyParsed.success) {
-    res.status(400).json({ error: "Bad Request", message: "ids[] required" });
-    return;
-  }
-  const { ids } = bodyParsed.data;
-
+async function processPncPayRun(req: Request, ids: string[]): Promise<PncSubmitResult> {
   const rows = await loadPayRunRows(ids);
   const pending = rows.filter((r) => r.status === "pending");
 
   if (pending.length === 0) {
-    res.status(400).json({ error: "Bad Request", message: "No pending rows found in the selection." });
-    return;
+    return { status: 400, body: { error: "Bad Request", message: "No pending rows found in the selection." } };
   }
 
   // Map rows to PNC instructions BEFORE claiming. Reject the whole batch if any
@@ -483,21 +476,25 @@ router.post("/payroll/pay-run/pnc", requireAdmin, async (req, res): Promise<void
   }
 
   if (mapped.length === 0) {
-    res.status(422).json({
-      error: "Unprocessable Entity",
-      message: "All selected rows are missing required bank data.",
-      skipped,
-    });
-    return;
+    return {
+      status: 422,
+      body: {
+        error: "Unprocessable Entity",
+        message: "All selected rows are missing required bank data.",
+        skipped,
+      },
+    };
   }
 
   if (skipped.length > 0) {
-    res.status(422).json({
-      error: "Unprocessable Entity",
-      message: `${skipped.length} row(s) are missing bank data. Fix them or deselect before retrying.`,
-      skipped,
-    });
-    return;
+    return {
+      status: 422,
+      body: {
+        error: "Unprocessable Entity",
+        message: `${skipped.length} row(s) are missing bank data. Fix them or deselect before retrying.`,
+        skipped,
+      },
+    };
   }
 
   // ── Atomic claim: pending → processing ───────────────────────────────────────
@@ -536,11 +533,13 @@ router.post("/payroll/pay-run/pnc", requireAdmin, async (req, res): Promise<void
 
   if (claimed.length === 0) {
     // Another concurrent request already claimed all these rows.
-    res.status(409).json({
-      error: "Conflict",
-      message: "All selected rows are already being processed by another request. Refresh and try again.",
-    });
-    return;
+    return {
+      status: 409,
+      body: {
+        error: "Conflict",
+        message: "All selected rows are already being processed by another request. Refresh and try again.",
+      },
+    };
   }
 
   const claimedSet = new Set(claimed.map((r) => r.id));
@@ -574,8 +573,7 @@ router.post("/payroll/pay-run/pnc", requireAdmin, async (req, res): Promise<void
       ip: req.ip ?? null,
       userAgent: req.headers["user-agent"] ?? null,
     }).catch(() => {});
-    res.status(502).json({ error: "Bad Gateway", message: `PNC API error: ${msg}` });
-    return;
+    return { status: 502, body: { error: "Bad Gateway", message: `PNC API error: ${msg}` } };
   }
 
   if (!pncResult.ok) {
@@ -599,13 +597,15 @@ router.post("/payroll/pay-run/pnc", requireAdmin, async (req, res): Promise<void
       ip: req.ip ?? null,
       userAgent: req.headers["user-agent"] ?? null,
     }).catch(() => {});
-    res.status(502).json({
-      error: "Bad Gateway",
-      message: "PNC rejected the payment batch. Rows rolled back to pending.",
-      pncErrors: pncResult.errors,
-      multipaymentId,
-    });
-    return;
+    return {
+      status: 502,
+      body: {
+        error: "Bad Gateway",
+        message: "PNC rejected the payment batch. Rows rolled back to pending.",
+        pncErrors: pncResult.errors,
+        multipaymentId,
+      },
+    };
   }
 
   // ── Advance processing → processed ───────────────────────────────────────────
@@ -638,12 +638,79 @@ router.post("/payroll/pay-run/pnc", requireAdmin, async (req, res): Promise<void
     userAgent: req.headers["user-agent"] ?? null,
   }).catch(() => {});
 
-  res.json({
-    ok: true,
-    multipaymentId,
-    processed: finalised.length,
-    skipped: claimed.length - finalised.length,
-  });
+  return {
+    status: 200,
+    body: {
+      ok: true,
+      multipaymentId,
+      processed: finalised.length,
+      skipped: claimed.length - finalised.length,
+    },
+  };
+}
+
+router.post("/payroll/pay-run/pnc", requireAdmin, async (req, res): Promise<void> => {
+  if (!isPncConfigured()) {
+    res.status(503).json({
+      error: "Service Unavailable",
+      message: "PNC API credentials are not configured. Add PNC_CLIENT_ID, PNC_CLIENT_SECRET, PNC_INSTRUCTOR_ACCOUNT_NUMBER, and PNC_INSTRUCTOR_ROUTING_NUMBER to enable.",
+      configured: false,
+    });
+    return;
+  }
+
+  const bodyParsed = z
+    .object({
+      ids: z.array(z.string()).min(1),
+      idempotencyKey: z.string().min(8).max(128).optional(),
+    })
+    .safeParse(req.body ?? {});
+  if (!bodyParsed.success) {
+    res.status(400).json({ error: "Bad Request", message: "ids[] required" });
+    return;
+  }
+  const { ids, idempotencyKey } = bodyParsed.data;
+
+  if (!idempotencyKey) {
+    const result = await processPncPayRun(req, ids);
+    res.status(result.status).json(result.body);
+    return;
+  }
+
+  // Scope keys per admin user so one admin's key cannot replay another's response.
+  const cacheKey = `${req.user!.userId}:${idempotencyKey}`;
+  const now = Date.now();
+  for (const [k, v] of pncIdempotencyCache) {
+    if (v.expiresAt <= now) pncIdempotencyCache.delete(k);
+  }
+
+  const existing = pncIdempotencyCache.get(cacheKey);
+  if (existing) {
+    // Duplicate within the window — replay (or await) the original outcome.
+    // No second PNC call happens.
+    const result = await existing.promise;
+    res.status(result.status).json({ ...result.body, idempotentReplay: true });
+    return;
+  }
+
+  const promise = processPncPayRun(req, ids);
+  pncIdempotencyCache.set(cacheKey, { expiresAt: now + PNC_IDEMPOTENCY_TTL_MS, promise });
+
+  let result: PncSubmitResult;
+  try {
+    result = await promise;
+  } catch (err) {
+    // Unexpected throw — evict so a retry is possible, then rethrow to the
+    // default error handler.
+    pncIdempotencyCache.delete(cacheKey);
+    throw err;
+  }
+  if (result.status >= 400) {
+    // Don't pin failures for 5 minutes — the admin should be able to fix the
+    // problem and deliberately retry with a fresh submission.
+    pncIdempotencyCache.delete(cacheKey);
+  }
+  res.status(result.status).json(result.body);
 });
 
 // GET /payroll/pay-run/pnc-status — Proxy a live PNC status check for a batch

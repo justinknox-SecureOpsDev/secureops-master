@@ -292,6 +292,11 @@ paths:
                 ids:
                   type: array
                   items: { type: string }
+                idempotencyKey:
+                  type: string
+                  minLength: 8
+                  maxLength: 128
+                  description: Optional client-generated key; duplicate submissions with the same key within 5 minutes replay the original response without a second PNC call.
               required: [ids]
       responses:
         "200":

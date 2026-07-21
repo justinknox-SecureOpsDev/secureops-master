@@ -185,6 +185,14 @@ export default function PayRunPage() {
   // Fetched once per reload (page load / manual Refresh), never on a timer.
   const [pncStatuses, setPncStatuses] = useState<Record<string, { settlement: PncSettlement; data: unknown }>>({});
   const [pncStatusesLoading, setPncStatusesLoading] = useState(false);
+  // Post-success cooldown on the "Send via PNC" button (~2s) to absorb
+  // accidental double-clicks on slow networks.
+  const [pncCooldown, setPncCooldown] = useState(false);
+  // Per-attempt idempotency key: generated once when a submission attempt
+  // starts and reused for any rapid duplicate invocation (double-click) until
+  // the attempt fully settles (request done + cooldown elapsed). The server
+  // replays the original response for duplicate keys instead of re-submitting.
+  const pncIdemKeyRef = useRef<string | null>(null);
 
   const exportBtnRef = useRef<HTMLButtonElement | null>(null);
   const markPaidBtnRef = useRef<HTMLButtonElement | null>(null);
@@ -385,17 +393,25 @@ export default function PayRunPage() {
   };
 
   const sendViaPnc = async () => {
-    if (selected.size === 0) return;
+    if (selected.size === 0 || pncCooldown) return;
+    // Reuse the in-flight attempt's key if a duplicate click slips through;
+    // only mint a new key when starting a fresh attempt.
+    if (!pncIdemKeyRef.current) pncIdemKeyRef.current = crypto.randomUUID();
+    const idempotencyKey = pncIdemKeyRef.current;
     setPncError(null);
     setBusy("pnc");
     try {
       const res = await fetchWithAuth("/api/payroll/pay-run/pnc", {
         method: "POST",
         headers: authHeaders,
-        body: JSON.stringify({ ids: Array.from(selected) }),
+        // idempotencyKey: server dedupes duplicate submissions of this exact
+        // request within a 5-minute window (double-click / retry protection).
+        body: JSON.stringify({ ids: Array.from(selected), idempotencyKey }),
       });
       const j = await res.json();
       if (!res.ok) {
+        // Rotate the key so a deliberate retry is a fresh submission.
+        pncIdemKeyRef.current = null;
         setPncError({
           message: j.message || `PNC submission failed (HTTP ${res.status})`,
           detail: j.pncErrors ?? j.skipped ?? undefined,
@@ -403,8 +419,18 @@ export default function PayRunPage() {
         return;
       }
       showToast("ok", `Sent to PNC — batch ${j.multipaymentId} · ${j.processed} row(s) processed.`);
+      // Keep the button disabled briefly after success so a lagging second
+      // click on a slow network can't fire another submission. The key is
+      // held through the cooldown (duplicates replay), then rotated so the
+      // next intentional submission is fresh.
+      setPncCooldown(true);
+      window.setTimeout(() => {
+        setPncCooldown(false);
+        pncIdemKeyRef.current = null;
+      }, 2000);
       await reload();
     } catch (e) {
+      pncIdemKeyRef.current = null;
       setPncError({ message: `Network error: ${(e as Error).message}` });
     } finally {
       setBusy(null);
@@ -554,7 +580,7 @@ export default function PayRunPage() {
           <Button
             className="bg-blue-700 text-white hover:bg-blue-800 disabled:opacity-50"
             onClick={sendViaPnc}
-            disabled={selected.size === 0 || busy !== null || !pncConfigured}
+            disabled={selected.size === 0 || busy !== null || pncCooldown || !pncConfigured}
             aria-label="Send selected payroll entries via PNC Bank"
           >
             {busy === "pnc" ? <Loader2 className="w-4 h-4 animate-spin mr-2" /> : <Building2 className="w-4 h-4 mr-2" />}

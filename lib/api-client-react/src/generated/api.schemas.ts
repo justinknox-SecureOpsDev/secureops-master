@@ -2526,6 +2526,12 @@ export type UpdateSiteManagers200 = {
 
 export type SubmitPayRunViaPncBody = {
   ids: string[];
+  /**
+   * Optional client-generated key; duplicate submissions with the same key within 5 minutes replay the original response without a second PNC call.
+   * @minLength 8
+   * @maxLength 128
+   */
+  idempotencyKey?: string;
 };
 
 export type GetPncPaymentStatusParams = {

@@ -448,8 +448,19 @@ export const ApproveTimeEntryResponse = zod.object({
 /**
  * @summary Submit a batch of pending payroll rows directly to PNC Bank via their multipayment API
  */
+export const submitPayRunViaPncBodyIdempotencyKeyMin = 8;
+export const submitPayRunViaPncBodyIdempotencyKeyMax = 128;
+
 export const SubmitPayRunViaPncBody = zod.object({
   ids: zod.array(zod.string()),
+  idempotencyKey: zod
+    .string()
+    .min(submitPayRunViaPncBodyIdempotencyKeyMin)
+    .max(submitPayRunViaPncBodyIdempotencyKeyMax)
+    .optional()
+    .describe(
+      "Optional client-generated key; duplicate submissions with the same key within 5 minutes replay the original response without a second PNC call.",
+    ),
 });
 
 export const SubmitPayRunViaPncResponse = zod.object({
