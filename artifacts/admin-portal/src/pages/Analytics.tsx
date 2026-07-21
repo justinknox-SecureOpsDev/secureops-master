@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   BarChart3, Download, FileText, Loader2, AlertTriangle,
-  TrendingUp, TrendingDown,
+  TrendingUp, TrendingDown, Archive,
 } from "lucide-react";
 import {
   Bar, BarChart, CartesianGrid, Line, LineChart, XAxis, YAxis,
@@ -15,7 +15,19 @@ import {
 import {
   ChartContainer, ChartTooltip, ChartTooltipContent, type ChartConfig,
 } from "@/components/ui/chart";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
+import { Checkbox } from "@/components/ui/checkbox";
 import { api, fetchWithAuth, ApiError } from "@/lib/api";
+import { useToast } from "@/hooks/use-toast";
 
 // Response shapes mirror artifacts/api-server/src/lib/analytics.ts (contract
 // lives in lib/api-spec/openapi.yaml — GET /analytics/summary + /officers).
@@ -62,6 +74,8 @@ type Summary = {
   sites: SiteRow[];
 };
 
+// employeeId here is users.id (the FK used by time_entries.employee_id →
+// users.id), so it can be passed directly to PUT /admin/tables/users/:id.
 type OfficerRow = {
   employeeId: string;
   name: string;
@@ -165,6 +179,13 @@ export default function AnalyticsPage() {
   const [error, setError] = useState<string | null>(null);
   const [downloading, setDownloading] = useState<"csv" | "pdf" | null>(null);
 
+  // --- archive state ---
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const [archivedIds, setArchivedIds] = useState<Set<string>>(new Set());
+  const [archiveDialog, setArchiveDialog] = useState<OfficerRow[] | null>(null);
+  const [archiving, setArchiving] = useState(false);
+  const { toast } = useToast();
+
   useEffect(() => {
     let cancelled = false;
     api<Array<{ id: string; name: string }>>("/clients")
@@ -199,6 +220,7 @@ export default function AnalyticsPage() {
         if (cancelled) return;
         setSummary(s);
         setOfficers(o);
+        setSelectedIds(new Set());
       })
       .catch((e) => {
         if (cancelled) return;
@@ -247,10 +269,119 @@ export default function AnalyticsPage() {
     }
   }, [start, end, clientId]);
 
+  // --- archive helpers ---
+
+  /** Call PUT /admin/tables/users/:id with status=inactive for each target. */
+  async function archiveOfficers(targets: OfficerRow[]) {
+    setArchiving(true);
+    const results = await Promise.allSettled(
+      targets.map((o) =>
+        fetchWithAuth(`/api/admin/tables/users/${o.employeeId}`, {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ status: "inactive" }),
+        }).then(async (res) => {
+          if (!res.ok) {
+            let msg = `Failed (${res.status})`;
+            try {
+              const j = await res.json();
+              if (j?.message) msg = j.message;
+              else if (j?.error) msg = j.error;
+            } catch { /* not JSON */ }
+            throw new Error(msg);
+          }
+          return o.employeeId;
+        }),
+      ),
+    );
+
+    const succeeded: string[] = [];
+    const failed: { name: string; reason: string }[] = [];
+
+    results.forEach((r, i) => {
+      if (r.status === "fulfilled") {
+        succeeded.push(r.value);
+      } else {
+        failed.push({
+          name: targets[i]!.name,
+          reason: r.reason instanceof Error ? r.reason.message : String(r.reason),
+        });
+      }
+    });
+
+    if (succeeded.length > 0) {
+      setArchivedIds((prev) => {
+        const next = new Set(prev);
+        succeeded.forEach((id) => next.add(id));
+        return next;
+      });
+    }
+
+    // Always clear the full selection after the operation so the user starts
+    // fresh — even if some requests failed (the task spec: "clear selection
+    // state after the operation").
+    setSelectedIds(new Set());
+    setArchiving(false);
+    setArchiveDialog(null);
+
+    if (failed.length === 0) {
+      toast({
+        title: succeeded.length === 1
+          ? `${targets[0]!.name} archived`
+          : `${succeeded.length} officers archived`,
+        description: "Their accounts have been set to inactive.",
+      });
+    } else if (succeeded.length > 0) {
+      toast({
+        variant: "destructive",
+        title: "Some archives failed",
+        description: failed.map((f) => `${f.name}: ${f.reason}`).join(" · "),
+      });
+    } else {
+      toast({
+        variant: "destructive",
+        title: "Archive failed",
+        description: failed.map((f) => `${f.name}: ${f.reason}`).join(" · "),
+      });
+    }
+  }
+
+  const visibleOfficers = officers.filter((o) => !archivedIds.has(o.employeeId));
+  const allPageIds = visibleOfficers.map((o) => o.employeeId);
+  const allSelected =
+    allPageIds.length > 0 && allPageIds.every((id) => selectedIds.has(id));
+  const someSelected = allPageIds.some((id) => selectedIds.has(id));
+
+  function toggleAll(checked: boolean) {
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      if (checked) {
+        allPageIds.forEach((id) => next.add(id));
+      } else {
+        allPageIds.forEach((id) => next.delete(id));
+      }
+      return next;
+    });
+  }
+
+  function toggleOne(id: string, checked: boolean) {
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      if (checked) next.add(id);
+      else next.delete(id);
+      return next;
+    });
+  }
+
+  const selectedCount = allPageIds.filter((id) => selectedIds.has(id)).length;
+
   const moneyData = useMemo(
     () => (summary?.weeklyTrend ?? []).map((w) => ({ ...w, week: weekLabel(w.weekStart) })),
     [summary],
   );
+
+  // Officers selected on this page (for bulk dialog)
+  const selectedOfficers = visibleOfficers.filter((o) => selectedIds.has(o.employeeId));
 
   return (
     <div className="space-y-6 p-6">
@@ -461,31 +592,79 @@ export default function AnalyticsPage() {
           </section>
 
           <section className="rounded-lg border bg-card shadow-sm" aria-label="Officer performance">
-            <h2 className="border-b px-4 py-3 text-sm font-semibold text-foreground">Officer performance</h2>
-            {officers.length === 0 ? (
+            <div className="flex items-center justify-between border-b px-4 py-3">
+              <h2 className="text-sm font-semibold text-foreground">Officer performance</h2>
+              {selectedCount > 0 && (
+                <Button
+                  size="sm"
+                  variant="destructive"
+                  onClick={() => setArchiveDialog(selectedOfficers)}
+                  disabled={archiving}
+                >
+                  <Archive className="mr-1.5 h-3.5 w-3.5" aria-hidden="true" />
+                  Archive selected ({selectedCount})
+                </Button>
+              )}
+            </div>
+            {visibleOfficers.length === 0 && officers.length === 0 ? (
               <p className="p-6 text-center text-sm text-muted-foreground">No officer activity in this range.</p>
+            ) : visibleOfficers.length === 0 ? (
+              <p className="p-6 text-center text-sm text-muted-foreground">All officers in this range have been archived.</p>
             ) : (
               <div className="overflow-x-auto">
                 <table className="w-full text-sm">
                   <thead>
                     <tr className="border-b text-left text-xs uppercase tracking-wide text-muted-foreground">
+                      <th scope="col" className="w-10 px-4 py-2">
+                        <Checkbox
+                          checked={someSelected && !allSelected ? "indeterminate" : allSelected}
+                          onCheckedChange={(v) => toggleAll(v === true)}
+                          aria-label="Select all officers"
+                        />
+                      </th>
                       <th scope="col" className="px-4 py-2 font-medium">Officer</th>
                       <th scope="col" className="px-4 py-2 text-right font-medium">Hours worked</th>
                       <th scope="col" className="px-4 py-2 text-right font-medium">Shifts completed</th>
                       <th scope="col" className="px-4 py-2 text-right font-medium">Incidents filed</th>
                       <th scope="col" className="px-4 py-2 text-right font-medium">Punctuality</th>
+                      <th scope="col" className="w-16 px-4 py-2" aria-label="Actions" />
                     </tr>
                   </thead>
                   <tbody>
-                    {officers.map((o) => (
-                      <tr key={o.employeeId} className="border-b last:border-0 hover:bg-muted/40">
-                        <td className="px-4 py-2 font-medium text-foreground">{o.name}</td>
-                        <td className="px-4 py-2 text-right">{o.hoursWorked.toFixed(1)}</td>
-                        <td className="px-4 py-2 text-right">{o.shiftsCompleted}</td>
-                        <td className="px-4 py-2 text-right">{o.incidentsFiled}</td>
-                        <td className="px-4 py-2 text-right">{punctualityBadge(o.punctualityPct)}</td>
-                      </tr>
-                    ))}
+                    {visibleOfficers.map((o) => {
+                      const isSelected = selectedIds.has(o.employeeId);
+                      return (
+                        <tr
+                          key={o.employeeId}
+                          className={`border-b last:border-0 hover:bg-muted/40 ${isSelected ? "bg-muted/20" : ""}`}
+                        >
+                          <td className="px-4 py-2">
+                            <Checkbox
+                              checked={isSelected}
+                              onCheckedChange={(v) => toggleOne(o.employeeId, !!v)}
+                              aria-label={`Select ${o.name}`}
+                            />
+                          </td>
+                          <td className="px-4 py-2 font-medium text-foreground">{o.name}</td>
+                          <td className="px-4 py-2 text-right">{o.hoursWorked.toFixed(1)}</td>
+                          <td className="px-4 py-2 text-right">{o.shiftsCompleted}</td>
+                          <td className="px-4 py-2 text-right">{o.incidentsFiled}</td>
+                          <td className="px-4 py-2 text-right">{punctualityBadge(o.punctualityPct)}</td>
+                          <td className="px-4 py-2 text-right">
+                            <Button
+                              size="sm"
+                              variant="ghost"
+                              className="h-7 w-7 p-0 text-muted-foreground hover:text-destructive"
+                              onClick={() => setArchiveDialog([o])}
+                              disabled={archiving}
+                              aria-label={`Archive ${o.name}`}
+                            >
+                              <Archive className="h-3.5 w-3.5" aria-hidden="true" />
+                            </Button>
+                          </td>
+                        </tr>
+                      );
+                    })}
                   </tbody>
                 </table>
               </div>
@@ -497,6 +676,61 @@ export default function AnalyticsPage() {
           </section>
         </>
       ) : null}
+
+      {/* Archive confirmation dialog */}
+      <AlertDialog open={archiveDialog !== null} onOpenChange={(open) => { if (!open && !archiving) setArchiveDialog(null); }}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>
+              {archiveDialog?.length === 1
+                ? `Archive ${archiveDialog[0]!.name}?`
+                : `Archive ${archiveDialog?.length ?? 0} officers?`}
+            </AlertDialogTitle>
+            <AlertDialogDescription asChild>
+              <div>
+                {archiveDialog && archiveDialog.length === 1 ? (
+                  <p>
+                    This will set <strong>{archiveDialog[0]!.name}</strong>'s account to inactive.
+                    They will no longer be able to sign in. You can reactivate them from the Personnel grid.
+                  </p>
+                ) : (
+                  <>
+                    <p className="mb-2">
+                      This will set the following officers' accounts to inactive.
+                      They will no longer be able to sign in.
+                    </p>
+                    <ul className="max-h-40 overflow-y-auto rounded border bg-muted/50 px-3 py-2 text-sm">
+                      {archiveDialog?.map((o) => (
+                        <li key={o.employeeId} className="py-0.5">{o.name}</li>
+                      ))}
+                    </ul>
+                    <p className="mt-2 text-xs text-muted-foreground">
+                      You can reactivate them from the Personnel grid.
+                    </p>
+                  </>
+                )}
+              </div>
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={archiving}>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={(e) => {
+                e.preventDefault();
+                if (archiveDialog) archiveOfficers(archiveDialog);
+              }}
+              disabled={archiving}
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+            >
+              {archiving ? (
+                <><Loader2 className="mr-2 h-4 w-4 animate-spin" aria-hidden="true" />Archiving…</>
+              ) : (
+                "Archive"
+              )}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }
