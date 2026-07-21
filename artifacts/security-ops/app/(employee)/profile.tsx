@@ -778,14 +778,14 @@ export default function EmployeeProfileScreen() {
           onPress={() => router.push("/license-renewal" as any)}
           style={[styles.actionRow, { borderBottomColor: colors.border }]}
           accessibilityRole="button"
-          accessibilityLabel="License renewals"
-          accessibilityHint="Submit a renewed license for admin approval"
+          accessibilityLabel="License upload"
+          accessibilityHint="Upload a license for admin approval"
         >
           <Feather name="credit-card" size={16} color={colors.accent} />
           <View style={{ flex: 1 }}>
-            <Text style={{ color: colors.foreground, fontSize: 14, fontWeight: "600" }}>License renewals</Text>
+            <Text style={{ color: colors.foreground, fontSize: 14, fontWeight: "600" }}>License upload</Text>
             <Text style={{ color: colors.mutedForeground, fontSize: 12, marginTop: 2 }}>
-              Submit a renewed license for admin approval
+              Upload a license for admin approval
             </Text>
           </View>
           <Feather name="chevron-right" size={16} color={colors.mutedForeground} />
