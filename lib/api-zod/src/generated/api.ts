@@ -41,6 +41,12 @@ export const GetClientsResponseItem = zod.object({
   contactPhone: zod.string().optional(),
   billingAddress: zod.string().optional(),
   paymentTermsDays: zod.number().describe("Net X days for invoices"),
+  billingCycle: zod
+    .enum(["weekly", "biweekly", "semi_monthly", "monthly", "custom"])
+    .optional()
+    .describe(
+      "Invoice cadence for this client. 'weekly' uses the automatic ISO-week sync; all others require manual generation via POST \/invoices\/generate.",
+    ),
   notes: zod.string().optional(),
   sites: zod
     .array(
@@ -79,6 +85,12 @@ export const CreateClientBody = zod.object({
   contactPhone: zod.string().optional(),
   billingAddress: zod.string().optional(),
   paymentTermsDays: zod.number().min(createClientBodyPaymentTermsDaysMin),
+  billingCycle: zod
+    .enum(["weekly", "biweekly", "semi_monthly", "monthly", "custom"])
+    .optional()
+    .describe(
+      "Invoice cadence for this client. 'weekly' uses the automatic ISO-week sync; all others require manual generation via POST \/invoices\/generate.",
+    ),
   notes: zod.string().optional(),
 });
 
@@ -97,6 +109,12 @@ export const GetClientResponse = zod.object({
   contactPhone: zod.string().optional(),
   billingAddress: zod.string().optional(),
   paymentTermsDays: zod.number().describe("Net X days for invoices"),
+  billingCycle: zod
+    .enum(["weekly", "biweekly", "semi_monthly", "monthly", "custom"])
+    .optional()
+    .describe(
+      "Invoice cadence for this client. 'weekly' uses the automatic ISO-week sync; all others require manual generation via POST \/invoices\/generate.",
+    ),
   notes: zod.string().optional(),
   sites: zod
     .array(
@@ -141,6 +159,12 @@ export const UpdateClientBody = zod.object({
     .number()
     .min(updateClientBodyPaymentTermsDaysMin)
     .optional(),
+  billingCycle: zod
+    .enum(["weekly", "biweekly", "semi_monthly", "monthly", "custom"])
+    .optional()
+    .describe(
+      "Invoice cadence for this client. 'weekly' uses the automatic ISO-week sync; all others require manual generation via POST \/invoices\/generate.",
+    ),
   notes: zod.string().optional(),
 });
 
@@ -152,6 +176,12 @@ export const UpdateClientResponse = zod.object({
   contactPhone: zod.string().optional(),
   billingAddress: zod.string().optional(),
   paymentTermsDays: zod.number().describe("Net X days for invoices"),
+  billingCycle: zod
+    .enum(["weekly", "biweekly", "semi_monthly", "monthly", "custom"])
+    .optional()
+    .describe(
+      "Invoice cadence for this client. 'weekly' uses the automatic ISO-week sync; all others require manual generation via POST \/invoices\/generate.",
+    ),
   notes: zod.string().optional(),
   sites: zod
     .array(
@@ -426,10 +456,31 @@ export const GeneratePayrollBody = zod.object({
 /**
  * @summary Generate weekly invoice for a site from approved time entries
  */
-export const GenerateInvoiceBody = zod.object({
-  siteId: zod.string(),
-  weekStart: zod.coerce.date(),
-});
+export const GenerateInvoiceBody = zod
+  .object({
+    siteId: zod.string(),
+    weekStart: zod.coerce
+      .date()
+      .optional()
+      .describe(
+        "Monday of the ISO week (YYYY-MM-DD). Weekly path — auto-synced invoice.",
+      ),
+    periodStart: zod.coerce
+      .date()
+      .optional()
+      .describe(
+        "Start date for a custom-period invoice (YYYY-MM-DD, inclusive). Must be paired with periodEnd.",
+      ),
+    periodEnd: zod.coerce
+      .date()
+      .optional()
+      .describe(
+        "End date for a custom-period invoice (YYYY-MM-DD, inclusive). Must be paired with periodStart.",
+      ),
+  })
+  .describe(
+    "Either weekStart (weekly path) or both periodStart + periodEnd (custom-period path) must be provided.",
+  );
 
 /**
  * @summary Health check

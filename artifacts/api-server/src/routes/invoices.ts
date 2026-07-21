@@ -2,7 +2,7 @@ import { Router, type IRouter } from "express";
 import { eq, and, ilike } from "drizzle-orm";
 import { db, invoicesTable, sitesTable } from "@workspace/db";
 import { requireAdmin } from "../middlewares/auth";
-import { upsertWeeklyInvoice } from "../lib/invoiceSync";
+import { upsertWeeklyInvoice, upsertCustomPeriodInvoice } from "../lib/invoiceSync";
 import { buildInvoicePdf } from "../lib/invoicePdf";
 import { sendEmailDetailed } from "../lib/email";
 import { brand } from "../lib/brandConfig";
@@ -101,15 +101,72 @@ router.post("/invoices", requireAdmin, async (req, res): Promise<void> => {
   res.status(201).json(invoice);
 });
 
-// Generate (or refresh) the weekly invoice for a site from APPROVED time
-// entries. Delegates to the same upsert the time-entry approval hook uses
-// so manual + auto behave identically: re-running for the same (siteId,
-// weekStart) updates the existing draft instead of creating duplicates,
-// and once an admin hand-edits the draft this becomes a no-op.
+// Generate (or refresh) an invoice for a site from APPROVED time entries.
+//
+// Two modes:
+//   Weekly path:  { siteId, weekStart }        → upsertWeeklyInvoice (idempotent, auto-synced)
+//   Custom path:  { siteId, periodStart, periodEnd } → upsertCustomPeriodInvoice (new draft each call, autoSynced=false)
+//
+// The weekly path delegates to the same upsert the time-entry approval hook
+// uses so manual + auto behave identically. The custom path is for non-weekly
+// billing cycles and always produces a fresh draft.
 router.post("/invoices/generate", requireAdmin, async (req, res): Promise<void> => {
-  const { siteId, weekStart } = req.body;
-  if (!siteId || !weekStart) {
-    res.status(400).json({ error: "Bad Request", message: "siteId and weekStart required" });
+  const { siteId, weekStart, periodStart, periodEnd } = req.body;
+  if (!siteId) {
+    res.status(400).json({ error: "Bad Request", message: "siteId is required" });
+    return;
+  }
+
+  // --- Custom period path ---
+  if (periodStart || periodEnd) {
+    if (!periodStart || !periodEnd) {
+      res.status(400).json({ error: "Bad Request", message: "periodStart and periodEnd must both be provided together" });
+      return;
+    }
+    const isoDateRe = /^\d{4}-\d{2}-\d{2}$/;
+    if (!isoDateRe.test(String(periodStart)) || !isoDateRe.test(String(periodEnd))) {
+      res.status(400).json({ error: "Bad Request", message: "periodStart and periodEnd must be YYYY-MM-DD" });
+      return;
+    }
+    if (String(periodEnd) < String(periodStart)) {
+      res.status(400).json({ error: "Bad Request", message: "periodEnd must be on or after periodStart" });
+      return;
+    }
+
+    const result = await upsertCustomPeriodInvoice(String(siteId), String(periodStart), String(periodEnd));
+
+    if (result.status === "skipped") {
+      if (result.reason === "site not found") {
+        res.status(404).json({ error: "Not Found", message: "Site not found" });
+        return;
+      }
+      if (result.reason === "site has no client" || result.reason === "client not found") {
+        res.status(400).json({ error: "Bad Request", message: "Site has no linked client" });
+        return;
+      }
+      if (result.reason === "no priced entries") {
+        res.status(400).json({
+          error: "Bad Request",
+          message: "Cannot generate invoice: no approved time entries with a bill rate in this period. Ensure approved entries exist and the site has a default bill rate.",
+        });
+        return;
+      }
+      res.status(400).json({ error: "Bad Request", message: result.reason });
+      return;
+    }
+
+    const [withSite] = await db
+      .select()
+      .from(invoicesTable)
+      .leftJoin(sitesTable, eq(invoicesTable.siteId, sitesTable.id))
+      .where(eq(invoicesTable.id, result.invoiceId));
+    res.status(201).json({ ...withSite?.invoices, siteName: withSite?.sites?.name });
+    return;
+  }
+
+  // --- Weekly path (existing behaviour) ---
+  if (!weekStart) {
+    res.status(400).json({ error: "Bad Request", message: "siteId and weekStart required (or siteId + periodStart + periodEnd for a custom period)" });
     return;
   }
   if (!/^\d{4}-\d{2}-\d{2}$/.test(String(weekStart))) {
@@ -140,6 +197,13 @@ router.post("/invoices/generate", requireAdmin, async (req, res): Promise<void> 
     }
     if (result.reason === "invalid weekStart") {
       res.status(400).json({ error: "Bad Request", message: "weekStart must be YYYY-MM-DD" });
+      return;
+    }
+    if (result.reason === "non_weekly_billing_cycle") {
+      res.status(400).json({
+        error: "Bad Request",
+        message: "This client uses a non-weekly billing cycle. Use periodStart + periodEnd to generate a custom-period invoice instead.",
+      });
       return;
     }
     res.status(400).json({ error: "Bad Request", message: result.reason });

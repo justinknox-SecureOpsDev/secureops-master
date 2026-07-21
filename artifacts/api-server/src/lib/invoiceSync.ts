@@ -137,6 +137,16 @@ export async function upsertWeeklyInvoice(
     .where(eq(clientsTable.id, site.clientId));
   if (!client) return { status: "skipped", reason: "client not found" };
 
+  // Non-weekly clients: suppress auto-sync so stray weekly drafts don't pile up.
+  // The admin generates invoices manually via POST /invoices/generate with a custom period.
+  if (client.billingCycle && client.billingCycle !== "weekly") {
+    logger.debug(
+      { siteId, weekStartIso, billingCycle: client.billingCycle },
+      "[invoice-sync] skipping weekly auto-sync for non-weekly billing cycle",
+    );
+    return { status: "skipped", reason: "non_weekly_billing_cycle" };
+  }
+
   const siteBillRate = parseFloat(String(site.defaultBillRate ?? "0"));
 
   // Look for a hand-edited draft FIRST. Per product spec, once an admin
@@ -455,6 +465,177 @@ export async function upsertWeeklyInvoiceForSubcontractorEntry(
     logger.warn({ err, subEntryId: entry.id }, "[invoice-sync] upsert from subcontractor clock-out failed");
     return null;
   }
+}
+
+/**
+ * Generate a custom-period invoice for (siteId, periodStart, periodEnd).
+ *
+ * Unlike the weekly path this function:
+ *  - Does NOT check billingCycle — it's the admin's explicit override.
+ *  - Always creates a NEW draft (never updates an existing one) so the
+ *    admin can re-run for the same period if they want an adjustment draft.
+ *  - Sets autoSynced = false so the scheduler never touches this row.
+ *  - Does NOT handle concurrent-insert races — autoSynced=false rows are
+ *    excluded from the partial unique index so there's no constraint to hit.
+ */
+export async function upsertCustomPeriodInvoice(
+  siteId: string,
+  periodStartIso: string,
+  periodEndIso: string,
+): Promise<UpsertResult> {
+  const start = new Date(`${periodStartIso}T00:00:00.000Z`);
+  // Exclusive upper bound: entries with clockIn on periodEnd are included.
+  const end = new Date(`${periodEndIso}T00:00:00.000Z`);
+  end.setUTCDate(end.getUTCDate() + 1);
+
+  if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime())) {
+    return { status: "skipped", reason: "invalid periodStart or periodEnd" };
+  }
+  if (end <= start) {
+    return { status: "skipped", reason: "periodEnd must be after periodStart" };
+  }
+
+  const [site] = await db
+    .select({
+      id: sitesTable.id,
+      name: sitesTable.name,
+      clientId: sitesTable.clientId,
+      defaultBillRate: sitesTable.defaultBillRate,
+    })
+    .from(sitesTable)
+    .where(eq(sitesTable.id, siteId));
+  if (!site) return { status: "skipped", reason: "site not found" };
+  if (!site.clientId) return { status: "skipped", reason: "site has no client" };
+
+  const [client] = await db
+    .select()
+    .from(clientsTable)
+    .where(eq(clientsTable.id, site.clientId));
+  if (!client) return { status: "skipped", reason: "client not found" };
+
+  const siteBillRate = parseFloat(String(site.defaultBillRate ?? "0"));
+
+  // Pull every approved entry for this site+period, grouped by officer+rate.
+  const entries = await db
+    .select({
+      hoursWorked: timeEntriesTable.hoursWorked,
+      clockInTime: timeEntriesTable.clockInTime,
+      shiftBillRate: shiftsTable.billRate,
+      employeeFirst: usersTable.firstName,
+      employeeLast: usersTable.lastName,
+    })
+    .from(timeEntriesTable)
+    .leftJoin(shiftsTable, eq(timeEntriesTable.shiftId, shiftsTable.id))
+    .leftJoin(usersTable, eq(timeEntriesTable.employeeId, usersTable.id))
+    .where(
+      and(
+        or(eq(shiftsTable.siteId, siteId), eq(timeEntriesTable.siteId, siteId)),
+        eq(timeEntriesTable.approvalStatus, "approved"),
+        gte(timeEntriesTable.clockInTime, start),
+        lt(timeEntriesTable.clockInTime, end),
+      ),
+    );
+
+  type Group = { description: string; hours: number; rate: number; amount: number };
+  const groups = new Map<string, Group>();
+  for (const e of entries) {
+    const hours = parseFloat(String(e.hoursWorked ?? "0"));
+    if (!isFinite(hours) || hours <= 0) continue;
+    const shiftBill = parseFloat(String(e.shiftBillRate ?? "0"));
+    const baseRate = shiftBill > 0 ? shiftBill : siteBillRate;
+    if (baseRate <= 0) continue;
+    const officerName =
+      [e.employeeFirst, e.employeeLast].filter(Boolean).join(" ") || "Unassigned officer";
+    const holidayName = getFederalHolidayName(e.clockInTime);
+    const rate = holidayName ? Math.round(baseRate * HOLIDAY_PAY_MULTIPLIER * 100) / 100 : baseRate;
+    const description = holidayName
+      ? `${officerName} — Holiday (${holidayName}, ${HOLIDAY_PAY_MULTIPLIER}×)`
+      : officerName;
+    const key = `${officerName}__${rate}__${holidayName ?? ""}`;
+    const cur = groups.get(key) ?? { description, hours: 0, rate, amount: 0 };
+    cur.hours += hours;
+    cur.amount += hours * rate;
+    groups.set(key, cur);
+  }
+
+  // Subcontractor hours for this period.
+  const subEntries = await db
+    .select({
+      hoursWorked: subcontractorTimeEntriesTable.hoursWorked,
+      clockInAt: subcontractorTimeEntriesTable.clockInAt,
+      name: subcontractorTimeEntriesTable.name,
+      company: subcontractorTimeEntriesTable.company,
+    })
+    .from(subcontractorTimeEntriesTable)
+    .where(
+      and(
+        eq(subcontractorTimeEntriesTable.siteId, siteId),
+        isNotNull(subcontractorTimeEntriesTable.clockOutAt),
+        gte(subcontractorTimeEntriesTable.clockInAt, start),
+        lt(subcontractorTimeEntriesTable.clockInAt, end),
+      ),
+    );
+  for (const e of subEntries) {
+    const hours = parseFloat(String(e.hoursWorked ?? "0"));
+    if (!isFinite(hours) || hours <= 0) continue;
+    if (siteBillRate <= 0) continue;
+    const holidayName = getFederalHolidayName(e.clockInAt);
+    const rate = holidayName ? Math.round(siteBillRate * HOLIDAY_PAY_MULTIPLIER * 100) / 100 : siteBillRate;
+    const label = holidayName
+      ? `${e.name} (${e.company}) — subcontractor, Holiday (${holidayName}, ${HOLIDAY_PAY_MULTIPLIER}×)`
+      : `${e.name} (${e.company}) — subcontractor`;
+    const key = `sub__${label}__${rate}`;
+    const cur = groups.get(key) ?? { description: label, hours: 0, rate, amount: 0 };
+    cur.hours += hours;
+    cur.amount += hours * rate;
+    groups.set(key, cur);
+  }
+
+  const lineItems = Array.from(groups.values())
+    .sort((a, b) => a.description.localeCompare(b.description))
+    .map((g) => ({
+      description: g.description,
+      hours: Math.round(g.hours * 100) / 100,
+      rate: g.rate,
+      amount: Math.round(g.amount * 100) / 100,
+    }));
+
+  if (lineItems.length === 0) {
+    return { status: "skipped", reason: "no priced entries" };
+  }
+
+  const subtotal = Math.round(lineItems.reduce((s, l) => s + l.amount, 0) * 100) / 100;
+  const total = Math.round(subtotal * 100) / 100;
+  const dueDate = isoDate(addDaysUtc(new Date(), client.paymentTermsDays ?? 30));
+
+  const [created] = await db
+    .insert(invoicesTable)
+    .values({
+      invoiceNumber: generateInvoiceNumber(),
+      clientId: client.id,
+      siteId: site.id,
+      periodStart: periodStartIso,
+      periodEnd: periodEndIso,
+      clientName: client.name,
+      clientEmail: client.contactEmail,
+      clientAddress: client.billingAddress,
+      lineItems,
+      subtotal: String(subtotal),
+      taxAmount: "0",
+      totalAmount: String(total),
+      status: "draft",
+      dueDate,
+      notes: `${site.name} — ${periodStartIso} to ${periodEndIso}`,
+      autoSynced: false,
+    })
+    .returning();
+
+  return {
+    status: "created",
+    invoiceId: created.id,
+    totalAmount: total,
+    lineCount: lineItems.length,
+  };
 }
 
 /**

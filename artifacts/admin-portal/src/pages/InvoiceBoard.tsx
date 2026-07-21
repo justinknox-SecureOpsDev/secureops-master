@@ -2,7 +2,7 @@ import { Fragment, useEffect, useMemo, useRef, useState } from "react";
 import {
   Receipt, Loader2, ChevronRight, ChevronDown, AlertTriangle,
   Lock, Pencil, RefreshCw, Send, CheckCircle2, FileText,
-  Download, Mail, X,
+  Download, Mail, X, PlusCircle, Calendar,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -22,8 +22,8 @@ type InvoiceRow = {
   clientId: string | null;
   siteId: string | null;
   siteName: string | null;
-  periodStart: string; // YYYY-MM-DD (Monday UTC)
-  periodEnd: string;   // YYYY-MM-DD (Sunday UTC)
+  periodStart: string;
+  periodEnd: string;
   clientName: string | null;
   clientEmail: string | null;
   lineItems: LineItem[] | null;
@@ -39,11 +39,19 @@ type InvoiceRow = {
 };
 
 type WeekGroup = {
+  key: string;
   periodStart: string;
   periodEnd: string;
+  isCustomPeriod: boolean;
   invoices: InvoiceRow[];
   totalAmount: number;
   invoiceCount: number;
+};
+
+type ClientOption = {
+  id: string;
+  name: string;
+  billingCycle: string;
 };
 
 // Computed per-row state. Mirrors the lifecycle in invoiceSync.ts so the
@@ -64,7 +72,7 @@ type StatusFilter = "active" | "draft" | "sent" | "paid" | "all";
 const fmtUsd = (n: number) =>
   `$${Number(n).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 
-const fmtWeekRange = (periodStart: string, periodEnd: string) => {
+const fmtDateRange = (periodStart: string, periodEnd: string) => {
   const opts: Intl.DateTimeFormatOptions = { weekday: "short", month: "short", day: "numeric" };
   const s = new Date(`${periodStart}T00:00:00`);
   const e = new Date(`${periodEnd}T00:00:00`);
@@ -72,6 +80,16 @@ const fmtWeekRange = (periodStart: string, periodEnd: string) => {
 };
 
 const num = (s: string | null) => parseFloat(String(s ?? "0")) || 0;
+
+/** True when this row is a custom (non-ISO-week) period. */
+function isCustomPeriodRow(row: InvoiceRow): boolean {
+  if (!row.periodStart || !row.periodEnd) return false;
+  const startDate = new Date(`${row.periodStart}T00:00:00Z`);
+  const endDate = new Date(`${row.periodEnd}T00:00:00Z`);
+  const spanDays = Math.round((endDate.getTime() - startDate.getTime()) / 86_400_000);
+  // Weekly = starts on a Monday AND spans exactly 6 days (Mon–Sun).
+  return startDate.getUTCDay() !== 1 || spanDays !== 6;
+}
 
 const computeSyncState = (row: InvoiceRow): SyncState => {
   if (row.status === "paid") return "paid";
@@ -119,6 +137,55 @@ type SendTarget = {
   email: string;
 };
 
+/** Compute a sensible default date range for the "+ New Invoice" dialog based on the client's billing cycle. */
+function defaultPeriodForCycle(cycle: string): { start: string; end: string } {
+  const now = new Date();
+  const iso = (d: Date) => d.toISOString().slice(0, 10);
+
+  if (cycle === "weekly" || cycle === "biweekly") {
+    const dow = now.getUTCDay();
+    const lastMon = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() - ((dow + 6) % 7) - 7));
+    const spanWeeks = cycle === "biweekly" ? 2 : 1;
+    const rangeStart = new Date(lastMon);
+    rangeStart.setUTCDate(lastMon.getUTCDate() - (spanWeeks - 1) * 7);
+    const rangeEnd = new Date(lastMon);
+    rangeEnd.setUTCDate(lastMon.getUTCDate() + 6);
+    return { start: iso(rangeStart), end: iso(rangeEnd) };
+  }
+
+  if (cycle === "monthly") {
+    const firstOfLastMonth = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() - 1, 1));
+    const lastOfLastMonth = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 0));
+    return { start: iso(firstOfLastMonth), end: iso(lastOfLastMonth) };
+  }
+
+  if (cycle === "semi_monthly") {
+    const d = now.getUTCDate();
+    const m = now.getUTCMonth();
+    const y = now.getUTCFullYear();
+    if (d < 16) {
+      // We're in the first half; last period = 16th–end of previous month.
+      const prevY = m === 0 ? y - 1 : y;
+      const prevM = m === 0 ? 11 : m - 1;
+      const lastOfPrev = new Date(Date.UTC(y, m, 0));
+      return {
+        start: `${prevY}-${String(prevM + 1).padStart(2, "0")}-16`,
+        end: iso(lastOfPrev),
+      };
+    } else {
+      // We're in the second half; last period = 1st–15th of current month.
+      const mm = String(m + 1).padStart(2, "0");
+      return { start: `${y}-${mm}-01`, end: `${y}-${mm}-15` };
+    }
+  }
+
+  // custom / fallback: last 30 days
+  const end = new Date(now);
+  const start = new Date(now);
+  start.setUTCDate(start.getUTCDate() - 30);
+  return { start: iso(start), end: iso(end) };
+}
+
 export default function InvoiceBoardPage() {
   const [rows, setRows] = useState<InvoiceRow[]>([]);
   const [loading, setLoading] = useState(true);
@@ -132,16 +199,93 @@ export default function InvoiceBoardPage() {
   const [busy, setBusy] = useState(false);
   const [rowBusy, setRowBusy] = useState<Set<string>>(new Set());
   const [toast, setToast] = useState<{ kind: "ok" | "err"; msg: string } | null>(null);
-  const [sites, setSites] = useState<Array<{ id: string; name: string }>>([]);
+  const [sites, setSites] = useState<Array<{ id: string; name: string; clientId?: string | null }>>([]);
+  const [clients, setClients] = useState<ClientOption[]>([]);
   const [sendTarget, setSendTarget] = useState<SendTarget | null>(null);
   const [sendEmailInput, setSendEmailInput] = useState("");
   const sendInputRef = useRef<HTMLInputElement>(null);
 
+  // New Invoice dialog state
+  const [showNewInvoice, setShowNewInvoice] = useState(false);
+  const [niClientId, setNiClientId] = useState("");
+  const [niSiteId, setNiSiteId] = useState("");
+  const [niPeriodStart, setNiPeriodStart] = useState("");
+  const [niPeriodEnd, setNiPeriodEnd] = useState("");
+  const [niSubmitting, setNiSubmitting] = useState(false);
+  const [niError, setNiError] = useState("");
+
+  const openNewInvoiceDialog = () => {
+    setNiClientId("");
+    setNiSiteId("");
+    setNiPeriodStart("");
+    setNiPeriodEnd("");
+    setNiError("");
+    setNiSubmitting(false);
+    setShowNewInvoice(true);
+  };
+
+  const closeNewInvoiceDialog = () => {
+    setShowNewInvoice(false);
+    setNiError("");
+  };
+
+  // When the client changes, auto-fill a sensible period and clear the site.
+  const handleNiClientChange = (cid: string) => {
+    setNiClientId(cid);
+    setNiSiteId("");
+    setNiError("");
+    if (!cid) {
+      setNiPeriodStart("");
+      setNiPeriodEnd("");
+      return;
+    }
+    const c = clients.find((x) => x.id === cid);
+    const { start, end } = defaultPeriodForCycle(c?.billingCycle ?? "custom");
+    setNiPeriodStart(start);
+    setNiPeriodEnd(end);
+  };
+
+  const handleNiSubmit = async () => {
+    if (!niClientId || !niSiteId || !niPeriodStart || !niPeriodEnd) {
+      setNiError("All fields are required.");
+      return;
+    }
+    if (niPeriodEnd < niPeriodStart) {
+      setNiError("End date must be on or after the start date.");
+      return;
+    }
+    setNiSubmitting(true);
+    setNiError("");
+    try {
+      await api("/invoices/generate", {
+        method: "POST",
+        body: { siteId: niSiteId, periodStart: niPeriodStart, periodEnd: niPeriodEnd },
+      });
+      closeNewInvoiceDialog();
+      showToast("ok", "Draft invoice created successfully.");
+      await reload();
+    } catch (e) {
+      setNiError((e as Error).message || "Failed to generate invoice.");
+    } finally {
+      setNiSubmitting(false);
+    }
+  };
+
+  // Sites in the new-invoice dialog — filtered to the selected client.
+  const niSites = useMemo(
+    () => (niClientId ? sites.filter((s) => s.clientId === niClientId) : []),
+    [niClientId, sites],
+  );
+
   useEffect(() => {
     void (async () => {
       try {
-        const list = await api<Array<{ id: string; name: string }>>("/sites");
-        setSites(list);
+        const [siteList, clientList] = await Promise.all([
+          api<Array<{ id: string; name: string; clientId?: string | null }>>("/sites"),
+          api<ClientOption[]>("/clients"),
+        ]);
+        setSites(siteList);
+        setClients(clientList);
       } catch { /* non-critical */ }
     })();
   }, []);
@@ -151,13 +295,10 @@ export default function InvoiceBoardPage() {
     try {
       const params = new URLSearchParams();
       if (siteId) params.set("siteId", siteId);
-      // status filter is applied server-side only when it maps 1:1 to the
-      // DB column; "active" is a UI-level grouping (draft|sent|overdue).
       if (statusFilter === "draft" || statusFilter === "sent" || statusFilter === "paid") {
         params.set("status", statusFilter);
       }
       const data = await api<InvoiceRow[]>(`/invoices${params.toString() ? `?${params}` : ""}`);
-      // Apply date range + "active" filter client-side so toggling is fast.
       const filtered = data.filter((r) => {
         if (statusFilter === "active" && (r.status === "paid" || r.status === "void")) return false;
         if (from && r.periodStart < from) return false;
@@ -166,9 +307,9 @@ export default function InvoiceBoardPage() {
       });
       setRows(filtered);
       setSelected(new Set());
-      // Auto-expand if a small number of weeks so admins see everything immediately.
-      const weeks = new Set(filtered.map((r) => r.periodStart));
-      if (weeks.size <= 4) setOpenWeeks(weeks);
+      // Auto-expand if a small number of groups so admins see everything immediately.
+      const keys = new Set(filtered.map((r) => `${r.periodStart}::${r.periodEnd}`));
+      if (keys.size <= 4) setOpenWeeks(keys);
     } catch (e) {
       showToast("err", `Load failed: ${(e as Error).message}`);
     } finally {
@@ -183,10 +324,6 @@ export default function InvoiceBoardPage() {
     setTimeout(() => setToast(null), 5000);
   };
 
-  // Invoice PDF download. The admin portal authenticates with a bearer token
-  // (not a cookie), so a plain <a href="/api/.../pdf"> opens an unauthenticated
-  // request and the server replies 401 "No token provided". We fetch the PDF
-  // with the token attached, then trigger a client-side blob download.
   const [pdfBusy, setPdfBusy] = useState<Set<string>>(new Set());
   const downloadPdf = async (id: string, invoiceNumber: string) => {
     setPdfBusy((s) => new Set(s).add(id));
@@ -210,26 +347,30 @@ export default function InvoiceBoardPage() {
     }
   };
 
-  // Group invoices by ISO week (periodStart). Newest week first.
+  // Group invoices by compound key (periodStart::periodEnd) so custom-period
+  // invoices with a different end date never collapse into an existing weekly group.
   const weeks = useMemo<WeekGroup[]>(() => {
-    const byWeek = new Map<string, InvoiceRow[]>();
+    const byKey = new Map<string, InvoiceRow[]>();
     for (const r of rows) {
-      const list = byWeek.get(r.periodStart) ?? [];
+      const k = `${r.periodStart}::${r.periodEnd}`;
+      const list = byKey.get(k) ?? [];
       list.push(r);
-      byWeek.set(r.periodStart, list);
+      byKey.set(k, list);
     }
     const groups: WeekGroup[] = [];
-    for (const [periodStart, invoices] of byWeek.entries()) {
-      // Sort invoices within a week by site, then by createdAt (older first).
+    for (const [key, invoices] of byKey.entries()) {
       invoices.sort((a, b) => {
         const s = (a.siteName ?? "").localeCompare(b.siteName ?? "");
         if (s !== 0) return s;
         return a.createdAt.localeCompare(b.createdAt);
       });
       const totalAmount = invoices.reduce((s, r) => s + num(r.totalAmount), 0);
+      const custom = isCustomPeriodRow(invoices[0]);
       groups.push({
-        periodStart,
+        key,
+        periodStart: invoices[0].periodStart,
         periodEnd: invoices[0].periodEnd,
+        isCustomPeriod: custom,
         invoices,
         totalAmount,
         invoiceCount: invoices.length,
@@ -262,9 +403,9 @@ export default function InvoiceBoardPage() {
     setSelected(next);
   };
 
-  const toggleWeekExpanded = (periodStart: string) => {
+  const toggleWeekExpanded = (key: string) => {
     const next = new Set(openWeeks);
-    if (next.has(periodStart)) next.delete(periodStart); else next.add(periodStart);
+    if (next.has(key)) next.delete(key); else next.add(key);
     setOpenWeeks(next);
   };
 
@@ -274,7 +415,6 @@ export default function InvoiceBoardPage() {
     setOpenInvoices(next);
   };
 
-  // Open send dialog. If the invoice already has a clientEmail pre-fill it.
   const openSendDialog = (r: InvoiceRow) => {
     setSendTarget({
       id: r.id,
@@ -288,7 +428,6 @@ export default function InvoiceBoardPage() {
 
   const closeSendDialog = () => { setSendTarget(null); setSendEmailInput(""); };
 
-  // Send a single invoice. Optionally pass an email override.
   const sendInvoice = async (id: string, emailOverride?: string) => {
     setRowBusy((s) => new Set(s).add(id));
     try {
@@ -322,7 +461,6 @@ export default function InvoiceBoardPage() {
     await sendInvoice(sendTarget.id, sendEmailInput || undefined);
   };
 
-  // Bulk send: email all selected that have a clientEmail, mark all sent.
   const bulkSendToClients = async () => {
     if (selectedInvoices.length === 0) return;
     const todo = selectedInvoices.filter((r) => r.status !== "paid" && r.status !== "void");
@@ -348,12 +486,8 @@ export default function InvoiceBoardPage() {
     await reload();
   };
 
-  // Bulk status transition. Iterates selected rows and PUTs new status.
-  // Server-side, PUT /invoices/:id with status !== 'draft' also flips
-  // auto_synced=false so the row stops resyncing once admin sends/pays it.
   const bulkSetStatus = async (status: "sent" | "paid") => {
     if (selectedInvoices.length === 0) return;
-    // Don't try to send/pay invoices that are already past that state.
     const todo = selectedInvoices.filter((r) => {
       if (status === "sent") return r.status === "draft";
       if (status === "paid") return r.status === "draft" || r.status === "sent" || r.status === "overdue";
@@ -389,8 +523,8 @@ export default function InvoiceBoardPage() {
         <h1 className="text-2xl font-semibold text-brand-navy">Invoice Board</h1>
       </div>
       <p className="text-sm text-muted-foreground mb-6">
-        Client invoices grouped by site and week. Drafts auto-populate as time entries are approved.
-        At week-end each draft is locked and ready to send; late-approved hours roll into an adjustment draft.
+        Client invoices grouped by billing period. Weekly-cycle clients auto-populate as time entries are approved;
+        non-weekly clients use the <strong>+ New Invoice</strong> button to generate custom-period drafts.
       </p>
 
       {toast && (
@@ -429,11 +563,11 @@ export default function InvoiceBoardPage() {
           </select>
         </div>
         <div>
-          <Label className="text-xs">Week from</Label>
+          <Label className="text-xs">Period from</Label>
           <Input type="date" className="h-9" value={from} onChange={(e) => setFrom(e.target.value)} />
         </div>
         <div>
-          <Label className="text-xs">Week to</Label>
+          <Label className="text-xs">Period to</Label>
           <Input type="date" className="h-9" value={to} onChange={(e) => setTo(e.target.value)} />
         </div>
         <div>
@@ -450,10 +584,6 @@ export default function InvoiceBoardPage() {
                 type="button"
                 className="px-2 py-1 text-xs border rounded hover:bg-accent"
                 onClick={() => {
-                  // periodStart is stored as a UTC ISO date, so anchor the
-                  // "Monday of this week" calculation in UTC to avoid an
-                  // off-by-one day for admins whose local clock is on the
-                  // other side of midnight UTC.
                   const now = new Date();
                   const utcDow = now.getUTCDay();
                   const monday = new Date(Date.UTC(
@@ -481,9 +611,18 @@ export default function InvoiceBoardPage() {
             </button>
           </div>
         </div>
-        <Button variant="outline" onClick={() => void reload()} disabled={loading}>
-          {loading ? <Loader2 className="w-4 h-4 animate-spin" /> : "Refresh"}
-        </Button>
+        <div className="flex gap-2">
+          <Button variant="outline" onClick={() => void reload()} disabled={loading}>
+            {loading ? <Loader2 className="w-4 h-4 animate-spin" /> : "Refresh"}
+          </Button>
+          <Button
+            className="bg-brand-gold text-brand-navy hover:bg-brand-gold/90"
+            onClick={openNewInvoiceDialog}
+          >
+            <PlusCircle className="w-4 h-4 mr-2" />
+            New Invoice
+          </Button>
+        </div>
       </div>
 
       {/* Sticky selection toolbar */}
@@ -526,15 +665,15 @@ export default function InvoiceBoardPage() {
         </Button>
       </div>
 
-      {/* Week groups */}
+      {/* Period groups */}
       {loading ? (
         <div className="bg-white border rounded-lg p-12 text-center text-muted-foreground">
           <Loader2 className="w-6 h-6 animate-spin inline" />
         </div>
       ) : weeks.length === 0 ? (
         <div className="bg-white border rounded-lg p-12 text-center text-muted-foreground">
-          No invoices match these filters. Drafts appear here automatically when time entries are approved
-          for a site with a default bill rate set.
+          No invoices match these filters. Weekly-cycle drafts appear automatically when time entries are approved
+          for a site with a default bill rate. For other billing cycles, use <strong>+ New Invoice</strong>.
         </div>
       ) : (
         <div className="space-y-3">
@@ -542,10 +681,10 @@ export default function InvoiceBoardPage() {
             const selectableIds = w.invoices.filter(isSelectable).map((r) => r.id);
             const allSelected = selectableIds.length > 0 && selectableIds.every((id) => selected.has(id));
             const someSelected = selectableIds.some((id) => selected.has(id));
-            const expanded = openWeeks.has(w.periodStart);
+            const expanded = openWeeks.has(w.key);
             return (
-              <div key={w.periodStart} className="bg-white border rounded-lg overflow-hidden">
-                <div className="flex items-center gap-3 px-4 py-3 bg-brand-navy text-white">
+              <div key={w.key} className="bg-white border rounded-lg overflow-hidden">
+                <div className={`flex items-center gap-3 px-4 py-3 text-white ${w.isCustomPeriod ? "bg-brand-navy/85" : "bg-brand-navy"}`}>
                   <input
                     type="checkbox"
                     checked={allSelected}
@@ -553,16 +692,24 @@ export default function InvoiceBoardPage() {
                     onChange={() => toggleWeek(w)}
                     className="w-4 h-4"
                     disabled={selectableIds.length === 0}
-                    title={selectableIds.length === 0 ? "All invoices in this week are paid or void" : "Toggle all selectable invoices in this week"}
+                    title={selectableIds.length === 0 ? "All invoices in this period are paid or void" : "Toggle all selectable invoices in this period"}
                   />
                   <button
                     type="button"
-                    onClick={() => toggleWeekExpanded(w.periodStart)}
+                    onClick={() => toggleWeekExpanded(w.key)}
                     className="flex items-center gap-2 flex-1 text-left"
                   >
                     {expanded ? <ChevronDown className="w-4 h-4" /> : <ChevronRight className="w-4 h-4" />}
                     <div>
-                      <div className="font-semibold">{fmtWeekRange(w.periodStart, w.periodEnd)}</div>
+                      <div className="font-semibold flex items-center gap-2">
+                        {w.isCustomPeriod && (
+                          <span className="inline-flex items-center gap-1 text-[10px] px-1.5 py-0.5 rounded bg-brand-gold/20 text-brand-gold border border-brand-gold/30 font-medium uppercase tracking-wider">
+                            <Calendar className="w-3 h-3" />
+                            Custom Period
+                          </span>
+                        )}
+                        {fmtDateRange(w.periodStart, w.periodEnd)}
+                      </div>
                       <div className="text-xs opacity-70">
                         {w.invoiceCount} invoice{w.invoiceCount === 1 ? "" : "s"}
                       </div>
@@ -598,16 +745,8 @@ export default function InvoiceBoardPage() {
                         const { label, cls, Icon: StIcon } = stateLabel(state);
                         const lineCount = r.lineItems?.length ?? 0;
                         const open = openInvoices.has(r.id);
-                        // When a week has >1 invoice for the same site, one is
-                        // the original (locked at week-end) and the other(s)
-                        // are adjustment drafts created by late-approved hours.
-                        // Distinguish them so admins know which row is still
-                        // accumulating vs. which has shipped to the client.
                         const siblings = w.invoices.filter((x) => x.siteId === r.siteId && r.siteId !== null);
                         const isSplit = siblings.length > 1;
-                        // The "original" is whichever sibling locked first (or
-                        // failing that, the oldest createdAt). Everything else
-                        // in the group is an adjustment.
                         const lockedSiblings = siblings.filter((x) => x.lockedAt);
                         const original = lockedSiblings.length > 0
                           ? lockedSiblings.sort((a, b) => (a.lockedAt ?? "").localeCompare(b.lockedAt ?? ""))[0]
@@ -633,7 +772,7 @@ export default function InvoiceBoardPage() {
                                   {splitRole === "original" && (
                                     <span
                                       className="text-[10px] px-1.5 py-0.5 rounded bg-gray-100 text-gray-800 border border-gray-300"
-                                      title="Original invoice for this site/week. Another invoice exists as an adjustment for late-approved hours."
+                                      title="Original invoice for this site/period. Another invoice exists as an adjustment for late-approved hours."
                                     >
                                       orig
                                     </span>
@@ -765,6 +904,7 @@ export default function InvoiceBoardPage() {
           })}
         </div>
       )}
+
       {/* Send email confirmation dialog */}
       {sendTarget && (
         <div
@@ -822,6 +962,118 @@ export default function InvoiceBoardPage() {
                 >
                   <Mail className="w-3.5 h-3.5 mr-1.5" />
                   Send PDF
+                </Button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* New Invoice dialog */}
+      {showNewInvoice && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm"
+          onClick={(e) => { if (e.target === e.currentTarget) closeNewInvoiceDialog(); }}
+        >
+          <div className="bg-white rounded-xl shadow-2xl w-full max-w-lg mx-4 overflow-hidden">
+            <div className="bg-brand-navy px-5 py-4 flex items-center justify-between">
+              <div className="flex items-center gap-2 text-white">
+                <PlusCircle className="w-4 h-4 text-brand-gold" />
+                <span className="font-semibold text-sm">New Invoice</span>
+              </div>
+              <button type="button" onClick={closeNewInvoiceDialog} className="text-white/60 hover:text-white">
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+            <div className="px-5 py-5 space-y-4">
+              <p className="text-xs text-muted-foreground">
+                Generate a draft invoice from approved time entries for any date range. The line items are
+                built using the same logic as auto-synced weekly invoices.
+              </p>
+
+              {/* Client */}
+              <div className="space-y-1">
+                <Label className="text-xs font-medium">Client <span className="text-red-500">*</span></Label>
+                <select
+                  className="w-full border rounded h-9 px-2 text-sm"
+                  value={niClientId}
+                  onChange={(e) => handleNiClientChange(e.target.value)}
+                >
+                  <option value="">Select client…</option>
+                  {clients.map((c) => (
+                    <option key={c.id} value={c.id}>{c.name}</option>
+                  ))}
+                </select>
+              </div>
+
+              {/* Site */}
+              <div className="space-y-1">
+                <Label className="text-xs font-medium">Site <span className="text-red-500">*</span></Label>
+                <select
+                  className="w-full border rounded h-9 px-2 text-sm"
+                  value={niSiteId}
+                  onChange={(e) => { setNiSiteId(e.target.value); setNiError(""); }}
+                  disabled={!niClientId}
+                >
+                  <option value="">
+                    {niClientId
+                      ? (niSites.length === 0 ? "No sites for this client" : "Select site…")
+                      : "Select a client first"}
+                  </option>
+                  {niSites.map((s) => (
+                    <option key={s.id} value={s.id}>{s.name}</option>
+                  ))}
+                </select>
+              </div>
+
+              {/* Period dates */}
+              <div className="grid grid-cols-2 gap-3">
+                <div className="space-y-1">
+                  <Label className="text-xs font-medium">Period start <span className="text-red-500">*</span></Label>
+                  <Input
+                    type="date"
+                    className="h-9 text-sm"
+                    value={niPeriodStart}
+                    onChange={(e) => { setNiPeriodStart(e.target.value); setNiError(""); }}
+                  />
+                </div>
+                <div className="space-y-1">
+                  <Label className="text-xs font-medium">Period end <span className="text-red-500">*</span></Label>
+                  <Input
+                    type="date"
+                    className="h-9 text-sm"
+                    value={niPeriodEnd}
+                    min={niPeriodStart || undefined}
+                    onChange={(e) => { setNiPeriodEnd(e.target.value); setNiError(""); }}
+                  />
+                </div>
+              </div>
+
+              {niClientId && clients.find((c) => c.id === niClientId)?.billingCycle !== "weekly" && (
+                <p className="text-xs text-blue-700 bg-blue-50 border border-blue-200 rounded px-3 py-2">
+                  This client uses a <strong>{clients.find((c) => c.id === niClientId)?.billingCycle?.replace(/_/g, "-")}</strong> billing
+                  cycle. The date range above was pre-filled based on their cycle — adjust as needed.
+                </p>
+              )}
+
+              {niError && (
+                <p className="text-xs text-red-600 bg-red-50 border border-red-200 rounded px-3 py-2">
+                  {niError}
+                </p>
+              )}
+
+              <div className="flex justify-end gap-2 pt-1">
+                <Button variant="outline" size="sm" onClick={closeNewInvoiceDialog} disabled={niSubmitting}>
+                  Cancel
+                </Button>
+                <Button
+                  size="sm"
+                  className="bg-brand-navy text-white hover:bg-brand-navy/90"
+                  onClick={() => void handleNiSubmit()}
+                  disabled={niSubmitting || !niClientId || !niSiteId || !niPeriodStart || !niPeriodEnd}
+                >
+                  {niSubmitting ? <Loader2 className="w-3.5 h-3.5 animate-spin mr-1.5" /> : <PlusCircle className="w-3.5 h-3.5 mr-1.5" />}
+                  Generate draft
                 </Button>
               </div>
             </div>

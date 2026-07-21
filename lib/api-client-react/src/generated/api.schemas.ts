@@ -1100,6 +1100,19 @@ export interface CreateInvoiceRequest {
   notes?: string;
 }
 
+/**
+ * Invoice cadence for this client. 'weekly' uses the automatic ISO-week sync; all others require manual generation via POST /invoices/generate.
+ */
+export type BillingCycle = (typeof BillingCycle)[keyof typeof BillingCycle];
+
+export const BillingCycle = {
+  weekly: "weekly",
+  biweekly: "biweekly",
+  semi_monthly: "semi_monthly",
+  monthly: "monthly",
+  custom: "custom",
+} as const;
+
 export interface Site {
   id: string;
   clientId: string;
@@ -1123,6 +1136,7 @@ export interface Client {
   billingAddress?: string;
   /** Net X days for invoices */
   paymentTermsDays: number;
+  billingCycle?: BillingCycle;
   notes?: string;
   sites?: Site[];
   createdAt: string;
@@ -1136,6 +1150,7 @@ export interface CreateClientRequest {
   billingAddress?: string;
   /** @minimum 0 */
   paymentTermsDays: number;
+  billingCycle?: BillingCycle;
   notes?: string;
 }
 
@@ -1147,6 +1162,7 @@ export interface UpdateClientRequest {
   billingAddress?: string;
   /** @minimum 0 */
   paymentTermsDays?: number;
+  billingCycle?: BillingCycle;
   notes?: string;
 }
 
@@ -1226,9 +1242,17 @@ export interface GeneratePayrollRequest {
   weekStart: string;
 }
 
+/**
+ * Either weekStart (weekly path) or both periodStart + periodEnd (custom-period path) must be provided.
+ */
 export interface GenerateInvoiceRequest {
   siteId: string;
-  weekStart: string;
+  /** Monday of the ISO week (YYYY-MM-DD). Weekly path — auto-synced invoice. */
+  weekStart?: string;
+  /** Start date for a custom-period invoice (YYYY-MM-DD, inclusive). Must be paired with periodEnd. */
+  periodStart?: string;
+  /** End date for a custom-period invoice (YYYY-MM-DD, inclusive). Must be paired with periodStart. */
+  periodEnd?: string;
 }
 
 export type UpdateInvoiceRequestStatus =

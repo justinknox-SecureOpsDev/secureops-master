@@ -358,6 +358,17 @@ export const TABLES: TableDescriptor[] = [
       { key: "contactPhone", label: "Contact Phone", type: "text" },
       { key: "billingAddress", label: "Billing Address", type: "textarea" },
       { key: "paymentTermsDays", label: "Payment Terms (days)", type: "integer", required: true },
+      {
+        key: "billingCycle", label: "Billing Cycle", type: "select",
+        options: [
+          { label: "Weekly (auto-sync)", value: "weekly" },
+          { label: "Bi-weekly", value: "biweekly" },
+          { label: "Semi-monthly (1st–15th / 16th–end)", value: "semi_monthly" },
+          { label: "Monthly", value: "monthly" },
+          { label: "Custom", value: "custom" },
+        ],
+        helpText: "Weekly clients have invoices auto-generated each ISO week. All other cycles require manual generation via '+ New Invoice' on the Invoice Board.",
+      },
       { key: "notes", label: "Notes", type: "textarea", hiddenInGrid: true },
       { key: "createdAt", label: "Created", type: "datetime", readonly: true },
     ],

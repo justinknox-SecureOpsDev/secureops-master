@@ -4279,6 +4279,11 @@ components:
         - lineItems
         - dueDate
 
+    BillingCycle:
+      type: string
+      enum: [weekly, biweekly, semi_monthly, monthly, custom]
+      description: "Invoice cadence for this client. 'weekly' uses the automatic ISO-week sync; all others require manual generation via POST /invoices/generate."
+
     Client:
       type: object
       properties:
@@ -4289,6 +4294,7 @@ components:
         contactPhone: { type: string }
         billingAddress: { type: string }
         paymentTermsDays: { type: integer, description: "Net X days for invoices" }
+        billingCycle: { $ref: "#/components/schemas/BillingCycle" }
         notes: { type: string }
         sites:
           type: array
@@ -4305,6 +4311,7 @@ components:
         contactPhone: { type: string }
         billingAddress: { type: string }
         paymentTermsDays: { type: integer, minimum: 0 }
+        billingCycle: { $ref: "#/components/schemas/BillingCycle" }
         notes: { type: string }
       required: [name, paymentTermsDays]
 
@@ -4317,6 +4324,7 @@ components:
         contactPhone: { type: string }
         billingAddress: { type: string }
         paymentTermsDays: { type: integer, minimum: 0 }
+        billingCycle: { $ref: "#/components/schemas/BillingCycle" }
         notes: { type: string }
 
     Site:
@@ -4426,10 +4434,13 @@ components:
 
     GenerateInvoiceRequest:
       type: object
+      description: "Either weekStart (weekly path) or both periodStart + periodEnd (custom-period path) must be provided."
       properties:
         siteId: { type: string }
-        weekStart: { type: string, format: date }
-      required: [siteId, weekStart]
+        weekStart: { type: string, format: date, description: "Monday of the ISO week (YYYY-MM-DD). Weekly path — auto-synced invoice." }
+        periodStart: { type: string, format: date, description: "Start date for a custom-period invoice (YYYY-MM-DD, inclusive). Must be paired with periodEnd." }
+        periodEnd: { type: string, format: date, description: "End date for a custom-period invoice (YYYY-MM-DD, inclusive). Must be paired with periodStart." }
+      required: [siteId]
 
     UpdateInvoiceRequest:
       type: object
