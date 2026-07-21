@@ -15,7 +15,7 @@ import {
 } from "@workspace/db";
 import app from "../app";
 import { signToken } from "../middlewares/auth";
-import { upsertWeeklyInvoice, weekStartIsoUtc } from "../lib/invoiceSync";
+import { lockEndedWeekInvoices, upsertWeeklyInvoice, weekStartIsoUtc } from "../lib/invoiceSync";
 
 const TAG = `customperiodinv-${randomUUID().slice(0, 8)}`;
 const passwordHash = bcrypt.hashSync("test-password", 4);
@@ -407,5 +407,122 @@ describe("billingCycle suppression on the weekly path", () => {
     // Shift billRate 45 × 4h = 180.
     expect(parseFloat(String(res.body.subtotal))).toBe(180);
     expect(res.body.autoSynced).toBe(false);
+  });
+});
+
+describe("edited custom drafts vs re-generation (no silent tax double-charge)", () => {
+  it("keeps the hand-edited draft (with its tax) intact and the re-generated draft at tax 0; neither is scheduler-syncable", async () => {
+    await addApprovedEntry(ENTRY_A_IN, ENTRY_A_OUT, "4.00");
+
+    // 1. Generate the custom draft. Always taxAmount 0, total = subtotal.
+    const first = await request(app)
+      .post("/api/invoices/generate")
+      .set(authed())
+      .send({ siteId: ctx.siteId, periodStart: PERIOD_START, periodEnd: PERIOD_END });
+    expect(first.status).toBe(201);
+    expect(parseFloat(String(first.body.taxAmount))).toBe(0);
+    expect(parseFloat(String(first.body.totalAmount))).toBe(160);
+
+    // 2. Admin hand-edits tax AND line items on that draft — bump the
+    //    single line's amount 160 → 200 and rename it.
+    const editedLines = (first.body.lineItems as LineItem[]).map((l) => ({
+      ...l,
+      description: `${l.description} (adjusted)`,
+      amount: 200,
+    }));
+    const edit = await request(app)
+      .put(`/api/invoices/${first.body.id}`)
+      .set(authed())
+      .send({ lineItems: editedLines, taxAmount: 25 });
+    expect(edit.status).toBe(200);
+    expect(parseFloat(String(edit.body.subtotal))).toBe(200);
+    expect(parseFloat(String(edit.body.taxAmount))).toBe(25);
+    expect(parseFloat(String(edit.body.totalAmount))).toBe(225);
+    expect(edit.body.autoSynced).toBe(false);
+
+    // 3. Re-generate the same site+period. Must create a SECOND draft —
+    //    never update the edited one — and the new draft's tax is 0.
+    const second = await request(app)
+      .post("/api/invoices/generate")
+      .set(authed())
+      .send({ siteId: ctx.siteId, periodStart: PERIOD_START, periodEnd: PERIOD_END });
+    expect(second.status).toBe(201);
+    expect(second.body.id).not.toBe(first.body.id);
+    expect(parseFloat(String(second.body.taxAmount))).toBe(0);
+    // total = subtotal exactly — the edited draft's tax must NOT leak in.
+    expect(parseFloat(String(second.body.totalAmount))).toBe(160);
+    expect(second.body.autoSynced).toBe(false);
+
+    // 4. Both drafts persist, both opted out of auto-sync.
+    const rows = await db
+      .select()
+      .from(invoicesTable)
+      .where(and(eq(invoicesTable.siteId, ctx.siteId), eq(invoicesTable.periodStart, PERIOD_START)));
+    expect(rows).toHaveLength(2);
+    for (const row of rows) expect(row.autoSynced).toBe(false);
+
+    // 5. The approval-driven weekly sync never touches either draft
+    //    (monthly billing cycle short-circuits; autoSynced=false rows are
+    //    skipped regardless). Values must be byte-identical afterwards.
+    const weekStart = weekStartIsoUtc(ENTRY_A_IN);
+    const syncResult = await upsertWeeklyInvoice(ctx.siteId, weekStart);
+    expect(syncResult.status).toBe("skipped");
+    expect(syncResult.status === "skipped" && syncResult.reason).toBe("non_weekly_billing_cycle");
+
+    const after = await db
+      .select()
+      .from(invoicesTable)
+      .where(and(eq(invoicesTable.siteId, ctx.siteId), eq(invoicesTable.periodStart, PERIOD_START)));
+    expect(after).toHaveLength(2);
+    const editedAfter = after.find((r) => r.id === first.body.id)!;
+    const freshAfter = after.find((r) => r.id === second.body.id)!;
+    expect(parseFloat(String(editedAfter.taxAmount))).toBe(25);
+    expect(parseFloat(String(editedAfter.totalAmount))).toBe(225);
+    expect((editedAfter.lineItems as LineItem[])[0].description).toContain("(adjusted)");
+    expect(parseFloat(String(freshAfter.taxAmount))).toBe(0);
+    expect(parseFloat(String(freshAfter.totalAmount))).toBe(160);
+  });
+
+  it("lockEndedWeekInvoices stamps lockedAt on ended custom-period drafts without breaking re-generation", async () => {
+    await addApprovedEntry(ENTRY_A_IN, ENTRY_A_OUT, "4.00");
+
+    const first = await request(app)
+      .post("/api/invoices/generate")
+      .set(authed())
+      .send({ siteId: ctx.siteId, periodStart: PERIOD_START, periodEnd: PERIOD_END });
+    expect(first.status).toBe(201);
+
+    // Period ended in 2025 → the hourly lock job must stamp lockedAt.
+    await lockEndedWeekInvoices();
+    const [lockedRow] = await db
+      .select({ lockedAt: invoicesTable.lockedAt })
+      .from(invoicesTable)
+      .where(eq(invoicesTable.id, first.body.id));
+    expect(lockedRow.lockedAt).not.toBeNull();
+
+    // Locking must not block re-generating the same period — an
+    // adjustment draft is still allowed and starts unlocked with tax 0.
+    const second = await request(app)
+      .post("/api/invoices/generate")
+      .set(authed())
+      .send({ siteId: ctx.siteId, periodStart: PERIOD_START, periodEnd: PERIOD_END });
+    expect(second.status).toBe(201);
+    expect(second.body.id).not.toBe(first.body.id);
+    expect(parseFloat(String(second.body.taxAmount))).toBe(0);
+    const [freshRow] = await db
+      .select({ lockedAt: invoicesTable.lockedAt })
+      .from(invoicesTable)
+      .where(eq(invoicesTable.id, second.body.id));
+    expect(freshRow.lockedAt).toBeNull();
+
+    // Idempotent: running the job again locks the new ended draft too
+    // and leaves the first stamp in place.
+    await lockEndedWeekInvoices();
+    const rows = await db
+      .select({ id: invoicesTable.id, lockedAt: invoicesTable.lockedAt })
+      .from(invoicesTable)
+      .where(and(eq(invoicesTable.siteId, ctx.siteId), eq(invoicesTable.periodStart, PERIOD_START)));
+    expect(rows).toHaveLength(2);
+    for (const row of rows) expect(row.lockedAt).not.toBeNull();
   });
 });
