@@ -38,12 +38,26 @@ function isoDate(d: Date): string {
 }
 
 router.get("/invoices", requireAdmin, async (req, res): Promise<void> => {
-  const { status, clientName, siteId, clientId } = req.query as Record<string, string | undefined>;
+  const { status, clientName, siteId, clientId, overlapStart, overlapEnd } = req.query as Record<string, string | undefined>;
   const conditions = [];
   if (status) conditions.push(eq(invoicesTable.status, status));
   if (clientName) conditions.push(ilike(invoicesTable.clientName, `%${clientName}%`));
   if (siteId) conditions.push(eq(invoicesTable.siteId, siteId));
   if (clientId) conditions.push(eq(invoicesTable.clientId, clientId));
+
+  // Double-billing pre-check: filter to non-void invoices whose period
+  // overlaps [overlapStart, overlapEnd] (inclusive dates). Both params must
+  // be provided together and be valid ISO dates.
+  if (overlapStart || overlapEnd) {
+    const isoDateRe = /^\d{4}-\d{2}-\d{2}$/;
+    if (!overlapStart || !overlapEnd || !isoDateRe.test(overlapStart) || !isoDateRe.test(overlapEnd)) {
+      res.status(400).json({ error: "Bad Request", message: "overlapStart and overlapEnd must both be provided as YYYY-MM-DD" });
+      return;
+    }
+    conditions.push(ne(invoicesTable.status, "void"));
+    conditions.push(lte(invoicesTable.periodStart, overlapEnd));
+    conditions.push(gte(invoicesTable.periodEnd, overlapStart));
+  }
 
   const rows = await db
     .select({

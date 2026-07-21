@@ -1235,6 +1235,24 @@ paths:
           in: query
           schema:
             type: string
+        - name: siteId
+          in: query
+          schema:
+            type: string
+        - name: overlapStart
+          in: query
+          description: >-
+            With overlapEnd (and typically siteId), filters to non-void invoices
+            whose period overlaps [overlapStart, overlapEnd] inclusive. Used as a
+            double-billing pre-check before creating a new invoice.
+          schema:
+            type: string
+            format: date
+        - name: overlapEnd
+          in: query
+          schema:
+            type: string
+            format: date
       responses:
         "200":
           description: List of invoices

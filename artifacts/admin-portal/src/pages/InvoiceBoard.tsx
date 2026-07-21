@@ -216,6 +216,11 @@ export default function InvoiceBoardPage() {
   // Ids of pre-existing non-void invoices whose period overlaps the invoice
   // just created via the New Invoice dialog — possible double-billing.
   const [overlapWarningIds, setOverlapWarningIds] = useState<string[]>([]);
+  // Live pre-check inside the New Invoice dialog: existing non-void invoices
+  // that already cover the chosen site + date range, surfaced BEFORE the
+  // admin submits so they can cancel instead of voiding a duplicate.
+  const [niOverlaps, setNiOverlaps] = useState<Array<{ id: string; invoiceNumber: string; periodStart: string; periodEnd: string; status: string }>>([]);
+  const [niOverlapChecking, setNiOverlapChecking] = useState(false);
 
   const openNewInvoiceDialog = () => {
     setNiClientId("");
@@ -224,13 +229,55 @@ export default function InvoiceBoardPage() {
     setNiPeriodEnd("");
     setNiError("");
     setNiSubmitting(false);
+    setNiOverlaps([]);
+    setNiOverlapChecking(false);
     setShowNewInvoice(true);
   };
 
   const closeNewInvoiceDialog = () => {
     setShowNewInvoice(false);
     setNiError("");
+    setNiOverlaps([]);
+    setNiOverlapChecking(false);
   };
+
+  // Pre-submission double-billing check: as soon as site + a valid date range
+  // are chosen, ask the server for existing non-void invoices overlapping
+  // that range. Debounced; stale responses are ignored via a cancel flag.
+  useEffect(() => {
+    if (!showNewInvoice) return;
+    if (!niSiteId || !niPeriodStart || !niPeriodEnd || niPeriodEnd < niPeriodStart) {
+      setNiOverlaps([]);
+      setNiOverlapChecking(false);
+      return;
+    }
+    let cancelled = false;
+    // Clear previous results immediately so a stale warning from an earlier
+    // site/range doesn't linger while the new check is in flight.
+    setNiOverlaps([]);
+    setNiOverlapChecking(true);
+    const t = setTimeout(() => {
+      void (async () => {
+        try {
+          const params = new URLSearchParams({
+            siteId: niSiteId,
+            overlapStart: niPeriodStart,
+            overlapEnd: niPeriodEnd,
+          });
+          const found = await api<Array<{ id: string; invoiceNumber: string; periodStart: string; periodEnd: string; status: string }>>(
+            `/invoices?${params}`,
+          );
+          if (!cancelled) setNiOverlaps(found);
+        } catch {
+          // Pre-check is advisory only — the post-create banner remains the backstop.
+          if (!cancelled) setNiOverlaps([]);
+        } finally {
+          if (!cancelled) setNiOverlapChecking(false);
+        }
+      })();
+    }, 350);
+    return () => { cancelled = true; clearTimeout(t); };
+  }, [showNewInvoice, niSiteId, niPeriodStart, niPeriodEnd]);
 
   // When the client changes, auto-fill a sensible period and clear the site.
   const handleNiClientChange = (cid: string) => {
@@ -1107,6 +1154,34 @@ export default function InvoiceBoardPage() {
                 <p className="text-xs text-blue-700 bg-blue-50 border border-blue-200 rounded px-3 py-2">
                   This client uses a <strong>{clients.find((c) => c.id === niClientId)?.billingCycle?.replace(/_/g, "-")}</strong> billing
                   cycle. The date range above was pre-filled based on their cycle — adjust as needed.
+                </p>
+              )}
+
+              {niSiteId && niPeriodStart && niPeriodEnd && niOverlaps.length > 0 && (
+                <div className="text-xs text-amber-800 bg-amber-50 border border-amber-300 rounded px-3 py-2 space-y-1" role="alert">
+                  <p className="font-semibold flex items-center gap-1.5">
+                    <AlertTriangle className="w-3.5 h-3.5 shrink-0" />
+                    {niOverlaps.length === 1
+                      ? "An invoice already covers these dates"
+                      : `${niOverlaps.length} invoices already cover these dates`}
+                  </p>
+                  <ul className="list-disc pl-4 space-y-0.5">
+                    {niOverlaps.slice(0, 5).map((inv) => (
+                      <li key={inv.id}>
+                        {inv.invoiceNumber} · {inv.periodStart} → {inv.periodEnd} · {inv.status}
+                      </li>
+                    ))}
+                    {niOverlaps.length > 5 && <li>…and {niOverlaps.length - 5} more</li>}
+                  </ul>
+                  <p>
+                    Generating another draft may double-bill this client. You can still proceed if this is
+                    an intentional adjustment.
+                  </p>
+                </div>
+              )}
+              {niOverlapChecking && niOverlaps.length === 0 && (
+                <p className="text-xs text-muted-foreground flex items-center gap-1.5">
+                  <Loader2 className="w-3 h-3 animate-spin" /> Checking for existing invoices…
                 </p>
               )}
 

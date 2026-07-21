@@ -2615,6 +2615,12 @@ export const GetPayrollEntriesStatus = {
 export type GetInvoicesParams = {
   status?: GetInvoicesStatus;
   clientName?: string;
+  siteId?: string;
+  /**
+   * With overlapEnd (and typically siteId), filters to non-void invoices whose period overlaps [overlapStart, overlapEnd] inclusive. Used as a double-billing pre-check before creating a new invoice.
+   */
+  overlapStart?: string;
+  overlapEnd?: string;
 };
 
 export type GetInvoicesStatus =

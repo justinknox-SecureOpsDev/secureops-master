@@ -2290,6 +2290,14 @@ export const UpdatePayrollEntryResponse = zod.object({
 export const GetInvoicesQueryParams = zod.object({
   status: zod.enum(["draft", "sent", "paid", "overdue"]).optional(),
   clientName: zod.coerce.string().optional(),
+  siteId: zod.coerce.string().optional(),
+  overlapStart: zod
+    .date()
+    .optional()
+    .describe(
+      "With overlapEnd (and typically siteId), filters to non-void invoices whose period overlaps [overlapStart, overlapEnd] inclusive. Used as a double-billing pre-check before creating a new invoice.",
+    ),
+  overlapEnd: zod.date().optional(),
 });
 
 export const GetInvoicesResponseItem = zod.object({
