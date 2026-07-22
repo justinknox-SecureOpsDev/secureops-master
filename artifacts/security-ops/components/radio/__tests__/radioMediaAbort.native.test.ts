@@ -26,6 +26,8 @@ const h = vi.hoisted(() => {
 
   class MockTrack {
     stop = vi.fn();
+    mute = vi.fn(async () => {});
+    unmute = vi.fn(async () => {});
   }
 
   class MockRoom {
@@ -60,9 +62,19 @@ vi.mock("@livekit/react-native", () => ({
   },
   RNKeyProvider: class {
     setSharedKey = vi.fn(async () => {});
+    // RadioKeyProvider disposes the base provider and swaps in its own.
+    rtcKeyProvider = { dispose: vi.fn() };
   },
   RNE2EEManager: class {},
   AndroidAudioTypePresets: { communication: {} },
+}));
+
+// Mocked so radioKeyProvider.ts (vendored RadioKeyProvider) never pulls the
+// real react-native module chain (Flow syntax vitest cannot parse).
+vi.mock("@livekit/react-native-webrtc", () => ({
+  RTCFrameCryptorFactory: {
+    createDefaultKeyProvider: vi.fn(() => ({ dispose: vi.fn() })),
+  },
 }));
 
 vi.mock("livekit-client", () => ({

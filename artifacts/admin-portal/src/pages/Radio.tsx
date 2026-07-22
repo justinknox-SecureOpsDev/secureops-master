@@ -78,13 +78,34 @@ function isMicPermissionError(e: unknown): boolean {
  *  - Listening: a SUBSCRIBE-only room per audible (joined + unmuted) channel.
  *    Remote audio tracks are attached to hidden <audio> elements.
  *  - Talking: once the server grants the speaker lock (signalled over the WS),
- *    we mint a short-lived PUBLISH token, reconnect that one channel's room
- *    with it (same identity, so the listen connection is replaced), and publish
- *    the mic. On release we tear the publish room down and resume listening.
+ *    we mint a short-lived PUBLISH token (distinct `userId#pub` identity, so
+ *    it never collides with the listen connection), connect a fresh room with
+ *    it, and publish the mic. On release we tear the publish room down and
+ *    resume listening.
  *
  * E2EE keys are derived per-channel server-side and delivered (base64) only to
  * authorised members; the SFU only ever relays ciphertext.
  */
+
+// How long a freshly-published (still muted) track waits before unmuting so
+// listeners' receiver cryptors are created and keyed before the first audible
+// frame. Bounded and abort-aware — PTT release mid-settle tears down cleanly.
+const PUBLISH_SETTLE_MS = 300;
+
+/**
+ * Abort-aware bounded wait. Returns false (without waiting out the full
+ * duration) as soon as `aborted()` reports true.
+ */
+async function settleDelay(ms: number, aborted: () => boolean): Promise<boolean> {
+  const step = 50;
+  for (let waited = 0; waited < ms; waited += step) {
+    if (aborted()) return false;
+    await new Promise((resolve) => setTimeout(resolve, step));
+  }
+  return !aborted();
+}
+
+/** LiveKit media plane (see module comment above). */
 export class RadioMedia {
   private listenRooms = new Map<string, Room>();
   private attachedEls = new Map<string, HTMLMediaElement[]>();
@@ -92,10 +113,12 @@ export class RadioMedia {
   private publishRoom: Room | null = null;
   private publishChannelId: string | null = null;
   private publishTrack: LocalAudioTrack | null = null;
+  private onListenLost: ((channelId: string) => void) | null = null;
 
   listenChannelIds(): string[] { return [...this.listenRooms.keys()]; }
   isListening(channelId: string): boolean { return this.listenRooms.has(channelId); }
   publishingChannelId(): string | null { return this.publishChannelId; }
+  setOnListenLost(cb: ((channelId: string) => void) | null): void { this.onListenLost = cb; }
 
   private async makeRoom(token: RadioToken): Promise<Room> {
     const keyProvider = new ExternalE2EEKeyProvider();
@@ -130,6 +153,19 @@ export class RadioMedia {
       room.on(RoomEvent.TrackUnsubscribed, (track: RemoteTrack) => {
         track.detach().forEach((el) => { try { el.remove(); } catch { /* ignore */ } });
       });
+      room.on(RoomEvent.Disconnected, () => {
+        // dropListen() removes the room from the map BEFORE disconnecting, so
+        // if it's still registered here the disconnect was UNEXPECTED (server
+        // eviction, network drop, SFU restart). Clean up and notify the page
+        // so its reconcile effect reconnects — otherwise this channel stays
+        // silently dead until some unrelated dependency changes.
+        if (this.listenRooms.get(channelId) !== room) return;
+        this.listenRooms.delete(channelId);
+        const els = this.attachedEls.get(channelId);
+        if (els) { els.forEach((el) => { try { el.remove(); } catch { /* ignore */ } }); this.attachedEls.delete(channelId); }
+        console.warn("[radio] listen room lost unexpectedly", channelId);
+        this.onListenLost?.(channelId);
+      });
       await room.connect(token.url, token.token);
       this.listenRooms.set(channelId, room);
     } finally {
@@ -146,8 +182,9 @@ export class RadioMedia {
   }
 
   async startPublish(channelId: string, token: RadioToken, shouldAbort?: () => boolean): Promise<void> {
-    // Same identity in the same room — drop the listen connection first or the
-    // server would kick one of them.
+    // The publish token uses a distinct `userId#pub` identity, so it can't
+    // evict the listen connection — but we still drop the listen room first
+    // so the speaker doesn't hear their own transmission echoed back.
     await this.dropListen(channelId);
     // Connecting a LiveKit room + creating a mic track is several awaits long.
     // If PTT is released mid-connect, stopPublish() runs and clears publishRoom/
@@ -165,7 +202,18 @@ export class RadioMedia {
       if (aborted()) throw new Error("aborted");
       track = await createLocalAudioTrack({ echoCancellation: true, noiseSuppression: true });
       if (aborted()) throw new Error("aborted");
+      // Publish MUTED, let the publication settle, then unmute. Every press
+      // publishes a fresh track, so each listener builds a brand-new receiver
+      // cryptor when it arrives (created + keyed asynchronously); frames sent
+      // in that window are undecryptable — audible as start-of-transmission
+      // garble. There is no cross-platform "encryption ready" event to await,
+      // so a short bounded, abort-aware delay is the pragmatic gate.
+      await track.mute();
+      if (aborted()) throw new Error("aborted");
       await room.localParticipant.publishTrack(track);
+      if (aborted()) throw new Error("aborted");
+      if (!(await settleDelay(PUBLISH_SETTLE_MS, aborted))) throw new Error("aborted");
+      await track.unmute();
       if (aborted()) throw new Error("aborted");
       this.publishRoom = room;
       this.publishChannelId = channelId;
@@ -222,6 +270,11 @@ export default function RadioPage() {
   const wsRef = useRef<WebSocket | null>(null);
   const mediaRef = useRef<RadioMedia | null>(null);
   const joinedRef = useRef<Set<string>>(new Set());
+  // Bumped when a listen room dies UNEXPECTEDLY (server eviction, network
+  // drop) so the listen-reconcile effect re-runs and reconnects — otherwise
+  // none of its deps change and that channel stays silently dead.
+  const [listenEpoch, setListenEpoch] = useState(0);
+  const listenLossRef = useRef({ count: 0, lastAt: 0 });
 
   // Mirror for use inside the WS message handler (which closes over initial state).
   const userIdRef = useRef<string | undefined>(user?.id);
@@ -318,6 +371,24 @@ export default function RadioPage() {
     let cancelled = false;
     let attempt = 0;
     let reconnectTimer: number | undefined;
+    let listenLossTimer: number | undefined;
+    // Self-heal listening: when a listen room dies unexpectedly, bump
+    // listenEpoch (after a small backoff that grows if losses repeat within
+    // 30s — so a flapping SFU can't drive a tight reconnect loop) to re-run
+    // the reconcile effect, which refetches a token and reconnects.
+    mediaRef.current.setOnListenLost(() => {
+      if (cancelled) return;
+      const now = Date.now();
+      const s = listenLossRef.current;
+      if (now - s.lastAt > 30_000) s.count = 0;
+      s.lastAt = now;
+      const delay = Math.min(500 * 2 ** s.count, 15_000);
+      s.count += 1;
+      if (listenLossTimer !== undefined) window.clearTimeout(listenLossTimer);
+      listenLossTimer = window.setTimeout(() => {
+        if (!cancelled) setListenEpoch((e) => e + 1);
+      }, delay);
+    });
 
     const cancelTransmit = (): void => {
       transmitRef.current!.cancel(); // abort in-flight publish + drop intent (no 'end')
@@ -383,9 +454,11 @@ export default function RadioPage() {
     return () => {
       cancelled = true;
       if (reconnectTimer !== undefined) window.clearTimeout(reconnectTimer);
+      if (listenLossTimer !== undefined) window.clearTimeout(listenLossTimer);
       const ws = wsRef.current;
       if (ws) { ws.onclose = null; try { ws.close(); } catch { /* ignore */ } }
       wsRef.current = null;
+      mediaRef.current?.setOnListenLost(null);
       void mediaRef.current?.teardown();
       mediaRef.current = null;
     };
@@ -435,8 +508,10 @@ export default function RadioPage() {
       }
     })();
     return () => { cancelled = true; };
+    // listenEpoch: bumped by setOnListenLost when a listen room dies
+    // unexpectedly — forces this effect to re-run and reconnect.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [wsReady, audioAvailable, channels, leftChannels, mutedChannels, publishingChannelId]);
+  }, [wsReady, audioAvailable, channels, leftChannels, mutedChannels, publishingChannelId, listenEpoch]);
 
   function leaveChannel(channelId: string): void {
     const ws = wsRef.current;

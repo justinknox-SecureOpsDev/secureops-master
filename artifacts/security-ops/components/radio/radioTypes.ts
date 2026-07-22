@@ -31,6 +31,14 @@ export interface RadioMedia {
   listenChannelIds(): string[];
   isListening(channelId: string): boolean;
   publishingChannelId(): string | null;
+  /**
+   * Register a callback fired when a LISTEN room disconnects UNEXPECTEDLY
+   * (server eviction, network drop, SFU restart) — i.e. not via dropListen/
+   * teardown. The screen uses it to re-run its listen-reconcile effect, which
+   * otherwise has no dependency that changes when a room silently dies (the
+   * user would stay deaf on the channel until they switch channels or PTT).
+   */
+  setOnListenLost(cb: ((channelId: string) => void) | null): void;
   ensureListen(channelId: string, token: RadioToken): Promise<void>;
   dropListen(channelId: string): Promise<void>;
   /**

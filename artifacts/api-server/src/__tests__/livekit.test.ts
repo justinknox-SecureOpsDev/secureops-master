@@ -98,13 +98,17 @@ describe("token minting", () => {
     expect(claims.video?.canPublish).toBe(false);
   });
 
-  it("mints a short-lived publish token (canPublish true)", async () => {
+  it("mints a short-lived publish token (canPublish true) under the #pub identity", async () => {
     const result = await mintPublishToken({ channelId: "c1", userId: "u1", displayName: "Jane Doe" });
 
     expect(result.canPublish).toBe(true);
     expect(result.ttlSeconds).toBe(90);
+    // Publish connections use a distinct identity so post-release eviction
+    // can never kick the same user's listen room (same-identity race).
+    expect(result.identity).toBe("u1#pub");
 
     const claims = await verifier.verify(result.token);
+    expect(claims.sub).toBe("u1#pub");
     expect(claims.video?.canPublish).toBe(true);
     expect(claims.video?.room).toBe("radio-c1");
   });

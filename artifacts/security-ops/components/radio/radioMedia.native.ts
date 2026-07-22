@@ -8,9 +8,10 @@
  *    audio plays automatically through the device once the AudioSession is up —
  *    there is no per-track `attach()` (that is the web path).
  *  - Talking: once the server grants the speaker lock (signalled over the WS),
- *    we mint a short-lived PUBLISH token, reconnect that channel's room with it
- *    (same identity, so the listen connection is replaced), and publish the mic.
- *    On release we tear the publish room down and resume listening.
+ *    we mint a short-lived PUBLISH token (distinct `userId#pub` identity, so
+ *    it never collides with the listen connection), connect a fresh room with
+ *    it, and publish the mic. On release we tear the publish room down and
+ *    resume listening.
  *
  * E2EE keys are derived per-channel server-side and delivered (base64) only to
  * authorised members; the SFU only ever relays ciphertext. The UIBackgroundModes
@@ -24,22 +25,41 @@
 import {
   registerGlobals,
   AudioSession,
-  RNKeyProvider,
   RNE2EEManager,
   AndroidAudioTypePresets,
 } from "@livekit/react-native";
 import {
   Room,
   RoomEvent,
+  DisconnectReason,
   createLocalAudioTrack,
   type LocalAudioTrack,
 } from "livekit-client";
 
+import { RadioKeyProvider } from "./radioKeyProvider";
 import { type RadioMedia, type RadioToken } from "./radioTypes";
 
 // Patches the global WebRTC + media primitives that livekit-client expects.
 // Must run before any Room is created; importing this module does that once.
 registerGlobals();
+
+// How long a freshly-published (still muted) track waits before unmuting so
+// listeners' receiver cryptors are created and keyed before the first audible
+// frame. Bounded and abort-aware — PTT release mid-settle tears down cleanly.
+const PUBLISH_SETTLE_MS = 300;
+
+/**
+ * Abort-aware bounded wait. Returns false (without waiting out the full
+ * duration) as soon as `aborted()` reports true.
+ */
+async function settleDelay(ms: number, aborted: () => boolean): Promise<boolean> {
+  const step = 50;
+  for (let waited = 0; waited < ms; waited += step) {
+    if (aborted()) return false;
+    await new Promise((resolve) => setTimeout(resolve, step));
+  }
+  return !aborted();
+}
 
 class NativeRadioMedia implements RadioMedia {
   readonly supportsAudio = true;
@@ -50,6 +70,7 @@ class NativeRadioMedia implements RadioMedia {
   private publishChannelId: string | null = null;
   private publishTrack: LocalAudioTrack | null = null;
   private sessionStarted = false;
+  private onListenLost: ((channelId: string) => void) | null = null;
 
   listenChannelIds(): string[] {
     return [...this.listenRooms.keys()];
@@ -59,6 +80,9 @@ class NativeRadioMedia implements RadioMedia {
   }
   publishingChannelId(): string | null {
     return this.publishChannelId;
+  }
+  setOnListenLost(cb: ((channelId: string) => void) | null): void {
+    this.onListenLost = cb;
   }
 
   private async ensureSession(): Promise<void> {
@@ -76,9 +100,11 @@ class NativeRadioMedia implements RadioMedia {
     // every platform. A string routes through PBKDF2 on both web and native;
     // raw bytes route through HKDF on web but PBKDF2 on native, yielding
     // DIFFERENT AES keys from the same secret — cross-platform audio then
-    // decrypts to garbled noise. ratchetWindowSize/failureTolerance mirror
-    // the web ExternalE2EEKeyProvider defaults for a static shared key.
-    const keyProvider = new RNKeyProvider({ ratchetWindowSize: 0, failureTolerance: -1 });
+    // decrypts to garbled noise. RadioKeyProvider wraps RNKeyProvider with
+    // discardFrameWhenCryptorNotReady=true so frames that arrive before a
+    // fresh receiver cryptor is keyed are DROPPED (brief silence) instead of
+    // being fed to Opus as ciphertext (loud static) — see radioKeyProvider.ts.
+    const keyProvider = new RadioKeyProvider();
     await keyProvider.setSharedKey(token.e2eeKey);
     const e2eeManager = new RNE2EEManager(keyProvider, false);
     const room = new Room({ e2ee: { e2eeManager } });
@@ -95,8 +121,16 @@ class NativeRadioMedia implements RadioMedia {
       const room = await this.makeRoom(token);
       // Audio auto-plays on native; nothing to attach. We just keep the
       // connection so the speaker's track is subscribed and routed to output.
-      room.on(RoomEvent.Disconnected, () => {
+      room.on(RoomEvent.Disconnected, (reason?: DisconnectReason) => {
+        // dropListen() removes the room from the map BEFORE disconnecting, so
+        // if it's still registered here the disconnect was UNEXPECTED (server
+        // eviction, network drop, SFU restart). Without a signal the screen's
+        // reconcile effect never re-runs and the user is silently deaf on the
+        // channel — notify so it can reconnect.
+        if (this.listenRooms.get(channelId) !== room) return;
         this.listenRooms.delete(channelId);
+        console.warn("[radio] listen room lost unexpectedly", channelId, reason);
+        this.onListenLost?.(channelId);
       });
       await room.connect(token.url, token.token);
       this.listenRooms.set(channelId, room);
@@ -123,8 +157,9 @@ class NativeRadioMedia implements RadioMedia {
     shouldAbort?: () => boolean,
   ): Promise<void> {
     const aborted = (): boolean => shouldAbort?.() ?? false;
-    // Same identity in the same room — drop the listen connection first or the
-    // server would kick one of them.
+    // The publish token uses a distinct `userId#pub` identity, so it can't
+    // evict the listen connection — but we still drop the listen room first
+    // so the speaker doesn't hear their own transmission echoed back.
     await this.dropListen(channelId);
     if (aborted()) return;
     await this.ensureSession();
@@ -151,7 +186,22 @@ class NativeRadioMedia implements RadioMedia {
       });
       this.publishTrack = track;
       if (aborted()) return await this.abortPublish(room, track);
+      // Publish MUTED, let the publication settle, then unmute. Every press
+      // publishes a fresh track, so each listener builds a brand-new receiver
+      // cryptor when it arrives (created + keyed asynchronously). Frames sent
+      // in that window are undecryptable — audible as start-of-transmission
+      // garble (static) or, with the discard flag, dropped words. Muting
+      // until the publication has settled means the cryptors exist BEFORE the
+      // first audible frame. There is no cross-platform "encryption ready"
+      // event to await, so a short bounded delay is the pragmatic gate.
+      await track.mute();
+      if (aborted()) return await this.abortPublish(room, track);
       await room.localParticipant.publishTrack(track);
+      if (aborted()) return await this.abortPublish(room, track);
+      if (!(await settleDelay(PUBLISH_SETTLE_MS, aborted))) {
+        return await this.abortPublish(room, track);
+      }
+      await track.unmute();
       if (aborted()) return await this.abortPublish(room, track);
     } catch (e) {
       await this.abortPublish(room, track);

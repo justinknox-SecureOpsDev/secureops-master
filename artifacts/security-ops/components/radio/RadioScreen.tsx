@@ -93,6 +93,11 @@ export default function RadioScreen(): React.JSX.Element {
   const joinedRef = useRef<Set<string>>(new Set());
   const [leftChannels, setLeftChannels] = useState<Set<string>>(new Set());
   const [mutedChannels, setMutedChannels] = useState<Set<string>>(new Set());
+  // Bumped when a listen room dies UNEXPECTEDLY (server eviction, network
+  // drop) so the listen-reconcile effect re-runs and reconnects — otherwise
+  // none of its deps change and the user stays silently deaf on the channel.
+  const [listenEpoch, setListenEpoch] = useState(0);
+  const listenLossRef = useRef({ count: 0, lastAt: 0 });
 
   const supportsAudio = mediaRef.current?.supportsAudio ?? createRadioMedia().supportsAudio;
 
@@ -142,7 +147,25 @@ export default function RadioScreen(): React.JSX.Element {
     let cancelled = false;
     let attempt = 0;
     let reconnectTimer: ReturnType<typeof setTimeout> | undefined;
+    let listenLossTimer: ReturnType<typeof setTimeout> | undefined;
     mediaRef.current = createRadioMedia();
+    // Self-heal listening: when a listen room dies unexpectedly, bump
+    // listenEpoch (after a small backoff that grows if losses repeat within
+    // 30s — so a flapping SFU can't drive a tight reconnect loop) to re-run
+    // the reconcile effect, which refetches a token and reconnects.
+    mediaRef.current.setOnListenLost(() => {
+      if (cancelled) return;
+      const now = Date.now();
+      const s = listenLossRef.current;
+      if (now - s.lastAt > 30_000) s.count = 0;
+      s.lastAt = now;
+      const delay = Math.min(500 * 2 ** s.count, 15_000);
+      s.count += 1;
+      if (listenLossTimer !== undefined) clearTimeout(listenLossTimer);
+      listenLossTimer = setTimeout(() => {
+        if (!cancelled) setListenEpoch((e) => e + 1);
+      }, delay);
+    });
 
     const cancelTransmit = (): void => {
       transmitRef.current!.cancel(); // abort in-flight publish + drop intent (no 'end')
@@ -210,9 +233,11 @@ export default function RadioScreen(): React.JSX.Element {
     return () => {
       cancelled = true;
       if (reconnectTimer !== undefined) clearTimeout(reconnectTimer);
+      if (listenLossTimer !== undefined) clearTimeout(listenLossTimer);
       const ws = wsRef.current;
       if (ws) { ws.onclose = null; try { ws.close(); } catch { /* ignore */ } }
       wsRef.current = null;
+      mediaRef.current?.setOnListenLost(null);
       void mediaRef.current?.teardown();
       mediaRef.current = null;
     };
@@ -268,8 +293,10 @@ export default function RadioScreen(): React.JSX.Element {
       }
     })();
     return () => { cancelled = true; };
+    // listenEpoch: bumped by setOnListenLost when a listen room dies
+    // unexpectedly — forces this effect to re-run and reconnect.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [wsReady, audioAvailable, activeId, activeChannel, leftChannels, mutedChannels, publishingChannelId]);
+  }, [wsReady, audioAvailable, activeId, activeChannel, leftChannels, mutedChannels, publishingChannelId, listenEpoch]);
 
   function leaveChannel(channelId: string): void {
     const ws = wsRef.current;

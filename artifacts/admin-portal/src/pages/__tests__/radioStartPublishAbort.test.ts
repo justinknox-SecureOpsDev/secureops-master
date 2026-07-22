@@ -22,6 +22,8 @@ const h = vi.hoisted(() => {
 
   class MockTrack {
     stop = vi.fn();
+    mute = vi.fn(async () => {});
+    unmute = vi.fn(async () => {});
   }
 
   class MockRoom {

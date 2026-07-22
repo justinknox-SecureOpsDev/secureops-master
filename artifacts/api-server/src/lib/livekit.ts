@@ -71,17 +71,31 @@ function livekitHttpUrl(): string {
 }
 
 /**
- * Force-remove a participant from a channel's LiveKit room. Called by the
- * radio gateway when a speaker's lock is released, times out, disconnects,
- * or is preempted — so a still-valid (but now stale) publish token cannot
- * keep transmitting after the floor has moved on. Best-effort: failures are
- * logged, never thrown, and it no-ops when LiveKit isn't configured.
+ * LiveKit identity used for PUBLISH connections. Distinct from the plain
+ * `userId` identity used for listen connections so that post-release
+ * eviction (below) can never race — and kick — the ex-speaker's re-created
+ * LISTEN room, which previously left them silently deaf on the channel.
+ * Presence/names ride our own WS control plane, so this suffix is never
+ * user-visible.
+ */
+export function radioPublishIdentity(userId: string): string {
+  return `${userId}#pub`;
+}
+
+/**
+ * Force-remove a speaker's PUBLISH connection from a channel's LiveKit room.
+ * Called by the radio gateway when a speaker's lock is released, times out,
+ * disconnects, or is preempted — so a still-valid (but now stale) publish
+ * token cannot keep transmitting after the floor has moved on. Targets only
+ * the `#pub` identity, so a listen connection can never be collateral.
+ * Best-effort: failures are logged, never thrown, and it no-ops when LiveKit
+ * isn't configured.
  */
 export async function removeRadioParticipant(channelId: string, userId: string): Promise<void> {
   if (!isLiveKitConfigured()) return;
   try {
     const svc = new RoomServiceClient(livekitHttpUrl(), livekitApiKey(), livekitApiSecret());
-    await svc.removeParticipant(radioRoomName(channelId), userId);
+    await svc.removeParticipant(radioRoomName(channelId), radioPublishIdentity(userId));
   } catch (err) {
     // A 404 (participant already gone) is the common, harmless case.
     logger.debug({ err, channelId, userId }, "[radio] removeRadioParticipant failed (likely already disconnected)");
@@ -143,8 +157,11 @@ interface MintParams {
 async function mintToken(params: MintParams): Promise<RadioTokenResult> {
   if (!isLiveKitConfigured()) throw new LiveKitNotConfiguredError();
   const room = radioRoomName(params.channelId);
+  // Publish connections carry a distinct `#pub` identity so post-release
+  // eviction targets only the transmit connection, never a listen room.
+  const identity = params.canPublish ? radioPublishIdentity(params.userId) : params.userId;
   const at = new AccessToken(livekitApiKey(), livekitApiSecret(), {
-    identity: params.userId,
+    identity,
     name: params.displayName,
     ttl: params.ttlSeconds,
   });
@@ -162,7 +179,7 @@ async function mintToken(params: MintParams): Promise<RadioTokenResult> {
     token,
     url: livekitUrl(),
     room,
-    identity: params.userId,
+    identity,
     e2eeKey: deriveChannelE2eeKey(params.channelId),
     e2eeKeyVersion: RADIO_E2EE_KEY_VERSION,
     canPublish: params.canPublish,

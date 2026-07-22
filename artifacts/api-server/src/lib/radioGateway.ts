@@ -212,6 +212,27 @@ export function userHoldsChannelLock(channelId: string, userId: string): boolean
   return Boolean(lock && lock.speakerUserId === userId);
 }
 
+// How long to wait after a lock release before evicting the ex-speaker's
+// LiveKit publish connection. Long enough for a legitimate rapid re-press to
+// have re-claimed the lock (so we can detect it and skip), short enough that
+// a hostile client abusing a stale publish token is silenced quickly.
+const SPEAKER_EVICTION_DELAY_MS = 750;
+
+/**
+ * Best-effort deferred eviction of the ex-speaker's `#pub` LiveKit
+ * connection. Skipped if the same user has legitimately re-claimed the
+ * channel lock by the time the timer fires (their new publish connection is
+ * lock-backed and must not be kicked). `.unref()` so pending evictions never
+ * hold the process (or the test runner) open.
+ */
+function scheduleSpeakerEviction(channelId: string, userId: string): void {
+  const timer = setTimeout(() => {
+    if (userHoldsChannelLock(channelId, userId)) return;
+    void removeRadioParticipant(channelId, userId);
+  }, SPEAKER_EVICTION_DELAY_MS);
+  timer.unref?.();
+}
+
 /**
  * Admin "take over": force-clear whoever currently holds the speaker lock on
  * `channelId`. We notify the ex-speaker's own socket with a `denied`
@@ -340,10 +361,16 @@ async function releaseLock(channelId: string, reason: "released" | "timeout" | "
     metadata: { durationMs, endedReason: reason },
   });
 
-  // Defence in depth: evict the ex-speaker from the LiveKit room so a still-
-  // valid (but now stale) publish token can't keep the floor after the lock
-  // is gone. Best-effort — never blocks the release.
-  void removeRadioParticipant(channelId, lock.speakerUserId);
+  // Defence in depth: evict the ex-speaker's PUBLISH connection from the
+  // LiveKit room so a still-valid (but now stale) publish token can't keep
+  // the floor after the lock is gone. Best-effort — never blocks the release.
+  // Deferred with a lock re-check: a rapid re-press can legitimately re-claim
+  // the lock and connect a NEW publish room (same `#pub` identity) before a
+  // fire-and-forget eviction lands, which would kick the new, authorised
+  // transmission. If the same user holds the lock again at eviction time we
+  // skip — their live publish is lock-backed; a hostile client that sent
+  // `end` without re-claiming still gets evicted ~750ms later.
+  scheduleSpeakerEviction(channelId, lock.speakerUserId);
 
   broadcastJson(channelId, { type: "silent", channelId });
 }
