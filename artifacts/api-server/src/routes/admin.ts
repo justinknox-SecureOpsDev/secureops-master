@@ -897,15 +897,22 @@ function buildListQueryParts(
   const ownColumnClauses = search && cfg.searchColumns.length > 0
     ? cfg.searchColumns.map((c) => ilike(sql`${c}::text`, `%${search}%`))
     : [];
-  // For the employees table, names + email live on the joined users row,
-  // so a plain column-match against employees returns nothing for the
-  // most common admin search ("type the officer's name"). Extend the
-  // search to include the linked user via a correlated EXISTS.
-  if (search && tableName === "employees") {
+  // For tables whose rows belong to a person (employees, shift assignments,
+  // time entries), names + email live on the linked users row, so a plain
+  // column-match returns nothing for the most common admin search ("type the
+  // officer's name"). Extend the search to include the linked user via a
+  // correlated EXISTS on that table's user-id column.
+  const userLinkColumns: Record<string, AnyColumn> = {
+    employees: employeesTable.userId,
+    shift_assignments: shiftAssignmentsTable.employeeId,
+    time_entries: timeEntriesTable.employeeId,
+  };
+  const userLinkColumn = userLinkColumns[tableName];
+  if (search && userLinkColumn) {
     const like = `%${search}%`;
     ownColumnClauses.push(sql`EXISTS (
       SELECT 1 FROM users u
-      WHERE u.id = ${employeesTable.userId}
+      WHERE u.id = ${userLinkColumn}
         AND (
           u.first_name ILIKE ${like}
           OR u.last_name ILIKE ${like}
