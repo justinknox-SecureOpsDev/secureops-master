@@ -90,3 +90,4 @@
 - [Signed URL browser CORS](signed-url-browser-cors.md) — signed storage URLs send ACAO:*; browser fetch→blob download works and is the only way to keep the real filename (no Content-Disposition).
 - [Brand logo — no heuristic plate](brand-logo-no-heuristic-plate.md) — never plate uploaded logos from a bg-color heuristic (WCSG eagle has baked dark bg → white edges); decide from image pixels at upload time.
 - [Rollback drops UI, keeps server](rollback-drops-ui-keeps-server.md) — "worked before, gone now" = check "Restored to" commits; port lost UI from git history, don't rebuild.
+- [Tailwind v4 bare-var brackets](tailwind-v4-bare-var-brackets.md) — `max-h-[--radix-…]` v3 shorthand silently no-ops on Tailwind v4 (unscrollable dropdowns); convert to `(--var)`, keep `[var(--x)]`.
