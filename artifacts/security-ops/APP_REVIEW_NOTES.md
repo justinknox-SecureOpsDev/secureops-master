@@ -57,13 +57,26 @@ is always available for review.
 The app declares the `audio` background mode (`UIBackgroundModes`) because it
 includes a **push-to-talk (PTT) team radio** used by security officers on shift.
 PTT uses LiveKit real-time audio; officers must continue to **hear dispatch and
-teammates while the app is backgrounded** during an active shift (e.g. phone in
-pocket while patrolling). This is a genuine, user-initiated, continuous audio
-feature — not background download or silent audio. Audio only flows while the
-user has joined a radio channel during a shift.
+teammates while the app is backgrounded or the phone is locked** during an
+active shift (e.g. phone in pocket while patrolling). This is a genuine,
+user-initiated, continuous audio-monitoring feature — the radio channel is an
+open live audio session the officer deliberately joins, comparable to a
+walkie-talkie left on.
 
-To exercise it: sign in, join the team radio / chat channel, and use the
-push-to-talk control.
+Implementation note (in the interest of full transparency): between
+transmissions the channel is silent, so while the user is **actively joined to
+a radio channel** the app keeps the shared audio session rendering (a silent
+keep-alive loop) purely so iOS does not suspend the app and cause the officer
+to miss the next incoming transmission — missing a dispatch call is a safety
+issue for lone security officers. This keep-alive runs **only** while a live
+radio connection is actually up (the officer is listening to or transmitting on
+a channel), and stops as soon as they mute or leave the channel, leave the
+radio, or sign out. It is never used for location tracking, downloads, or any
+other background work.
+
+To exercise it: sign in, open the Radio tab (a channel is joined automatically),
+lock the phone for a few minutes, then have a second session transmit — the
+locked device keeps receiving the transmission.
 
 ---
 

@@ -25,9 +25,13 @@ ios+android) exceeds the cap and gets killed. Split it:
   name is rejected until ~6 are deleted.
 
 **Targeting facts:** OTA reaches installed builds by EAS project + channel +
-runtime version, NOT bundle/ASC ids directly — but the production channel's
-finished builds ARE `com.secureopscommand.mobile` / ASC app 6789409652
-(runtime `1.0.0`, policy `appVersion`, so never bump `expo.version` for an
-OTA-only release). `artifacts/security-ops/OTA_RELEASE_RUNBOOK.md` is STALE
-(references the retired EAS project `452c8467…` and version 1.0.2); trust
-`app.json` (`e8bcd802…`, 1.0.0) instead.
+runtime version, NOT bundle/ASC ids directly — the production channel's
+builds are `com.secureopscommand.mobile` / ASC app 6789409652, policy
+`appVersion` (so never bump `expo.version` for an OTA-only release; an OTA
+must target the runtime the installed base actually runs). July 2026: repo
+`app.json` is `1.0.1` (radio keep-alive binary — new native module expo-audio);
+installed base stays runtime `1.0.0` until Apple releases that build, so an
+OTA for existing installs targets `1.0.0` until then.
+`artifacts/security-ops/OTA_RELEASE_RUNBOOK.md` is STALE (retired EAS project
+`452c8467…`, wrong versions); `RADIO_NATIVE_RELEASE_RUNBOOK.md` was corrected
+to the real identity. Trust `app.json` (`e8bcd802…`) over either.

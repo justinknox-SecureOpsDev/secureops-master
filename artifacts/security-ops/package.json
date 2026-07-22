@@ -70,6 +70,7 @@
     "@livekit/react-native-webrtc": "144.1.0",
     "@react-native-community/netinfo": "~11.4.1",
     "date-fns": "^3.6.0",
+    "expo-audio": "~1.1.1",
     "expo-camera": "~17.0.10",
     "expo-local-authentication": "~17.0.8",
     "expo-notifications": "~0.32.17",

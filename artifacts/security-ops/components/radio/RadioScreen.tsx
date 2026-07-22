@@ -1,7 +1,7 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import {
   View, Text, TouchableOpacity, ScrollView, StyleSheet,
-  ActivityIndicator, Pressable,
+  ActivityIndicator, Pressable, AppState,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { Feather } from "@expo/vector-icons";
@@ -242,6 +242,29 @@ export default function RadioScreen(): React.JSX.Element {
       mediaRef.current = null;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // --- resume re-reconcile after unlock/foreground ---
+  // While the app is suspended (locked phone without the audio keep-alive, or
+  // iOS reclaiming resources) all JS timers freeze, so the listen self-heal
+  // backoff and the WS reconnect timer may never have fired. On return to
+  // "active": bump listenEpoch so the reconcile effect re-checks the listen
+  // room (no-op when healthy), nudge the control WS with a protocol ping —
+  // a socket the OS silently killed will fail the send / surface onclose,
+  // which owns reconnection — and replay the native silent keep-alive player
+  // (an AVAudioSession interruption like a phone call pauses it and nothing
+  // resumes it automatically).
+  useEffect(() => {
+    const sub = AppState.addEventListener("change", (status) => {
+      if (status !== "active") return;
+      setListenEpoch((e) => e + 1);
+      mediaRef.current?.resumeKeepAlive?.();
+      const ws = wsRef.current;
+      if (ws && ws.readyState === WebSocket.OPEN) {
+        try { ws.send(JSON.stringify({ type: "ping" })); } catch { /* onclose handles it */ }
+      }
+    });
+    return () => sub.remove();
   }, []);
 
   // --- join all visible non-archived channels (control plane) once WS is up ---

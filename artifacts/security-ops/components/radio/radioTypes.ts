@@ -53,5 +53,14 @@ export interface RadioMedia {
     shouldAbort?: () => boolean,
   ): Promise<void>;
   stopPublish(): Promise<void>;
+  /**
+   * Optional (native-only) recovery nudge, called from the screen's AppState
+   * "active" handler. Native keeps a looping silent keep-alive player running
+   * while there is radio demand so iOS doesn't suspend the app on a quiet
+   * channel; an AVAudioSession interruption (phone call, Siri) pauses that
+   * player and nothing resumes it automatically — this replays/restarts it.
+   * No-op (absent) on the web stub.
+   */
+  resumeKeepAlive?(): void;
   teardown(): Promise<void>;
 }

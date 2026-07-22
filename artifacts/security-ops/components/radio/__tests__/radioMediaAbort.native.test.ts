@@ -77,6 +77,20 @@ vi.mock("@livekit/react-native-webrtc", () => ({
   },
 }));
 
+// Silent keep-alive player (background-survival) — mocked so ensureSession's
+// setAudioModeAsync/createAudioPlayer calls are inert under Node. The wav
+// asset require() inside startKeepAlive still throws under vitest (no metro
+// asset transform), which the production try/catch swallows by design.
+vi.mock("expo-audio", () => ({
+  setAudioModeAsync: vi.fn(async () => {}),
+  createAudioPlayer: vi.fn(() => ({
+    loop: false,
+    play: vi.fn(),
+    pause: vi.fn(),
+    remove: vi.fn(),
+  })),
+}));
+
 vi.mock("livekit-client", () => ({
   Room: h.MockRoom,
   RoomEvent: { Disconnected: "disconnected" },

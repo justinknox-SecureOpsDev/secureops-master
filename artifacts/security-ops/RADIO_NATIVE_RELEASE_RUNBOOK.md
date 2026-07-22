@@ -9,19 +9,32 @@ app. Unlike the multi-org change (see `OTA_RELEASE_RUNBOOK.md`), this feature
 Live radio adds **new native modules** to the binary:
 
 - `@livekit/react-native` + `@livekit/react-native-webrtc` (the WebRTC media stack)
+- `expo-audio` (the silent keep-alive player that stops iOS from suspending the
+  app on a quiet channel when the phone locks — see "Locked-phone survival" below)
 - iOS `UIBackgroundModes: ["audio"]` + `NSMicrophoneUsageDescription`
 - Android `FOREGROUND_SERVICE_MICROPHONE` + the LiveKit/WebRTC config plugins
 
 `expo-updates` (OTA) can only swap the **JavaScript bundle** — it cannot add
-native code or new OS permissions. The installed `1.0.2` binary has no WebRTC
-framework and no microphone/background-audio entitlements, so an OTA bundle that
-calls into LiveKit would crash at runtime on those installs.
+native code or new OS permissions. The installed `1.0.0` binary (build 2) has
+none of these native modules, so an OTA bundle that calls into LiveKit or
+expo-audio would crash at runtime on those installs.
 
 **Therefore: bump the version, build a fresh binary, and submit to the App
 Store.** The runtime-version policy is `appVersion`, so bumping `expo.version`
-to `1.0.3` gives the new binary runtime `1.0.3` — which correctly isolates it
-from the `1.0.2` OTA channel (so a radio JS bundle can never reach a WebRTC-less
-`1.0.2` install).
+to `1.0.1` gives the new binary runtime `1.0.1` — which correctly isolates it
+from the `1.0.0` OTA channel (so a radio JS bundle can never reach an install
+missing the native modules).
+
+### Locked-phone survival (why the silent keep-alive exists)
+
+`UIBackgroundModes: audio` only prevents iOS suspension while the audio unit is
+**actually rendering**. On a quiet PTT channel there are zero remote tracks
+(each transmission is a short-lived publisher room), so iOS suspends the app
+~30 seconds after the screen locks and the officer silently misses every later
+transmission. `radioMedia.native.ts` therefore loops a silent wav
+(`assets/audio/silence.wav`) via `expo-audio` for exactly as long as the radio
+session is up (user has joined a channel), and `RadioScreen.tsx` re-reconciles
+the listen room + control WebSocket on return to foreground.
 
 ---
 
@@ -50,7 +63,7 @@ production **before** submitting the build, or reviewers/first users will see
 
 ## 1. Bump the version
 
-In `app.json`, change `expo.version` `1.0.2` → `1.0.3`. Leave
+In `app.json`, change `expo.version` `1.0.0` → `1.0.1` (already done in-repo). Leave
 `runtimeVersion.policy` as `appVersion`. The iOS `buildNumber` / Android
 `versionCode` are managed by EAS (`eas.json` → `appVersionSource: "remote"` +
 `production.autoIncrement: true`), so you do not edit those by hand.
@@ -85,7 +98,20 @@ Smoke test (two devices on the same channel):
 4. A releases → audio stops, lock frees, B can now transmit.
 5. Background device A's app mid-transmission → audio keeps flowing (background
    audio entitlement).
-6. Point the app at a server **without** LiveKit env → app stays usable,
+6. **Locked-phone keep-alive:** device B joins a channel, locks the phone, and
+   stays idle for **2+ minutes** (longer than the ~30s suspension window). Then
+   device A transmits — B **must hear it** with the screen still locked. Repeat
+   after B has been locked ~10 minutes for extra confidence.
+7. **Interruption recovery:** with B locked and joined, call B's phone; end the
+   call, unlock B briefly (foreground the app), re-lock, wait 2+ minutes, then
+   A transmits — B must still hear it (the foreground pass restarts the
+   keep-alive player that the call interrupted).
+8. **Keep-alive stops with demand:** on B, mute or leave the active channel
+   (or sign out) → the silent keep-alive stops with the last radio connection;
+   lock B for 2+ minutes and confirm the app suspends normally (no
+   audio-session indicator, transmissions from A are NOT heard until B
+   rejoins). This matches the App Review disclosure in `APP_REVIEW_NOTES.md` §3.
+9. Point the app at a server **without** LiveKit env → app stays usable,
    presence works, PTT shows the "not configured" notice (503 path).
 
 ## 3. Production build
@@ -98,7 +124,7 @@ eas build --profile production --platform ios
 
 The `production` profile is on the `production` channel, so once this binary is
 released, future **JS-only** radio fixes can ship OTA to it (same
-`OTA_RELEASE_RUNBOOK.md` flow, but against runtime `1.0.3`).
+`OTA_RELEASE_RUNBOOK.md` flow, but against runtime `1.0.1`).
 
 ## 4. Submit to the App Store
 
@@ -112,10 +138,10 @@ Submission targets (from `eas.json` → `submit.production.ios`):
 
 | Field | Value |
 | --- | --- |
-| Bundle identifier | `com.secureopsmobilecommand.app` |
+| Bundle identifier | `com.secureopscommand.mobile` |
 | Apple ID | `justin.knox@williamscouncil.com` |
-| App Store Connect app id (`ascAppId`) | `6773903231` |
-| EAS project id | `452c8467-1a26-4e16-9b41-e5799d80023e` |
+| App Store Connect app id (`ascAppId`) | `6789409652` |
+| EAS project id | `e8bcd802-b11d-4c4d-bd20-5e61caf4817c` |
 
 ### App Review notes to include
 
@@ -131,8 +157,9 @@ Submission targets (from `eas.json` → `submit.production.ios`):
 
 ## 5. After Apple's final release
 
-Verify on a released-build device: install/update to `1.0.3`, grant the mic
-prompt, and run the two-device smoke test from step 2 against the production API.
+Verify on a released-build device: install/update to `1.0.1`, grant the mic
+prompt, and run the two-device smoke test from step 2 (including the
+locked-phone keep-alive step) against the production API.
 
 ---
 
