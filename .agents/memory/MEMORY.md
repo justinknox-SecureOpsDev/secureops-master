@@ -77,6 +77,7 @@
 - [App Store 5.1.1(iv) permission priming](appstore-permission-priming.md) — custom pre-permission screen buttons must be neutral ("Continue"/"Next"), never "Allow/Enable/Grant X", or Apple rejects.
 - [OTA update from sandbox](ota-update-from-sandbox.md) — deploy auto-publishes OTA when builder has EXPO_TOKEN; manual push = capped `expo export` then `eas update --skip-bundler`; workflow-limit + detached-spawn dead ends.
 - [EAS iOS build+submit from Replit](eas-ios-build-submit.md) — ASC secrets swapped+newline-mangled (reconstruct PEM) + EXPO_APPLE_TEAM_ID/TYPE + EAS_NO_VCS=1; "malformed profile"=@expo/plist override; new bundle IDs need Push cap enabled before profile gen; --no-wait single-call build/submit, poll across turns.
+- [Expo push after bundle-ID change](expo-push-bundle-migration.md) — new bundle needs its own EAS iosAppCredentials+pushKey or push dies with InvalidCredentials; fix via GraphQL, then quiet-wait ~10min (miss cache).
 - [Bash bg procs don't persist](replit-bash-background-procs.md) — setsid/nohup/& die when the bash call returns; poll remote long-ops across turns, don't rely on a local daemon.
 - [pnpm overrides location](pnpm-overrides-location.md) — dependency overrides go in pnpm-workspace.yaml `overrides:`, NOT package.json#pnpm.overrides; pnpm 10 REPLACES not merges, silently dropping ~118 security pins.
 - [adminGridTimeEntryInvoiceSync flake](admin-grid-invoice-sync-flake.md) — full parallel test gate can 23505 this suite (invoice auto-sync race); passes alone; re-run gate, dont change code.
