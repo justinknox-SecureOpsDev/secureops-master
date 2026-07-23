@@ -68,6 +68,14 @@ function getTransport(): Transporter | null {
     port: Number(SMTP_PORT),
     secure: Number(SMTP_PORT) === 465,
     auth: { user: SMTP_USER, pass: SMTP_PASS },
+    // Without these, nodemailer's defaults let a slow/unreachable SMTP host
+    // hang for minutes (2 min connect, 10 min socket) — and because invite /
+    // password-reset endpoints await the send before responding, the admin's
+    // request (and their UI) freezes with it. Fail fast instead; the caller
+    // falls back to the other provider or surfaces credentials manually.
+    connectionTimeout: 10_000,
+    greetingTimeout: 10_000,
+    socketTimeout: 30_000,
   });
   return cachedSmtp;
 }
@@ -227,7 +235,15 @@ export async function sendEmailDetailed(msg: EmailMessage): Promise<EmailSendRes
 
   let lastFailure: EmailSendResult | null = null;
   for (const provider of order) {
-    const result = provider === "smtp" ? await sendViaSmtp(msg) : await sendViaResend(msg);
+    // Hard watchdog on top of the transport-level timeouts: a hung provider
+    // (e.g. a stalled TLS handshake or a fetch that never resolves) must count
+    // as a plain "failed" so we fall through to the other provider and the
+    // calling request can respond instead of freezing the admin's UI.
+    const result = await withSendTimeout(
+      provider === "smtp" ? sendViaSmtp(msg) : sendViaResend(msg),
+      provider,
+      msg.to,
+    );
     if (result === null) continue; // provider not configured — try the next one
     // Success, or a hard bounce (retrying a rejected recipient elsewhere would
     // just bounce again) — return immediately.
@@ -245,6 +261,50 @@ export async function sendEmailDetailed(msg: EmailMessage): Promise<EmailSendRes
 export async function sendEmail(msg: EmailMessage): Promise<boolean> {
   const r = await sendEmailDetailed(msg);
   return r.ok;
+}
+
+/**
+ * Upper bound on a single provider attempt. Transport-level timeouts (see
+ * `getTransport`) should fire first; this is the belt-and-braces cap so no
+ * code path awaiting an email send can hang a request indefinitely.
+ */
+const EMAIL_ATTEMPT_TIMEOUT_MS = (() => {
+  const v = Number(process.env.EMAIL_SEND_TIMEOUT_MS);
+  return Number.isFinite(v) && v >= 1000 ? v : 45_000;
+})();
+
+async function withSendTimeout(
+  attempt: Promise<EmailSendResult | null>,
+  provider: "smtp" | "resend",
+  to: string,
+): Promise<EmailSendResult | null> {
+  let timer: NodeJS.Timeout | null = null;
+  try {
+    return await Promise.race([
+      attempt,
+      new Promise<EmailSendResult>((resolve) => {
+        timer = setTimeout(() => {
+          logger.error(
+            { provider, to, timeoutMs: EMAIL_ATTEMPT_TIMEOUT_MS },
+            "Email send attempt timed out — treating as failed",
+          );
+          resolve({
+            status: "failed",
+            ok: false,
+            messageId: null,
+            response: null,
+            rejected: [],
+            error: `timeout: ${provider} send exceeded ${EMAIL_ATTEMPT_TIMEOUT_MS}ms`,
+          });
+        }, EMAIL_ATTEMPT_TIMEOUT_MS);
+      }),
+    ]);
+  } finally {
+    if (timer) clearTimeout(timer);
+    // If the abandoned attempt settles later, swallow it so a late rejection
+    // can't surface as an unhandled promise rejection.
+    void attempt.catch(() => {});
+  }
 }
 
 export function renderOnboardingEmail(opts: {

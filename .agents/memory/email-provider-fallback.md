@@ -11,4 +11,6 @@ The api-server email sender supports two transports (Resend + SMTP/Gmail) select
 
 **How to apply:** when touching provider error parsing, only mark *recipient-specific* rejections (`invalid recipient/to/email`, `address not exist`) as `bounced`. Everything else (quota, auth, domain/sender verification, network) stays `failed`.
 
+**Sends must be time-bounded (July 2026):** many request paths (client invite, password reset, HR invites) await the send inline before responding — an unbounded provider hang freezes the admin's HTTP request and UI (nodemailer defaults: 2min connect / 10min socket; Resend SDK fetch has NO timeout at all). The transport carries explicit connect/greeting/socket timeouts AND every provider attempt runs under a watchdog (`EMAIL_SEND_TIMEOUT_MS`, default 45s) that synthesizes `"failed"` so fallback + tempPassword-in-response semantics still work. Any new provider added to the loop must stay under that watchdog.
+
 **Prod reality (June 2026):** both providers are configured. Resend free tier silently dies at ~100/day (`daily_quota_exceeded`). Production runs `EMAIL_PROVIDER=smtp` → Gmail/Workspace (admin@williamscouncil.com, App Password) primary, Resend fallback. Gmail SMTP needs an App Password (16 chars) + 2-Step Verification, host smtp.gmail.com:587.
