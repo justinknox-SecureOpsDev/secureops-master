@@ -17,10 +17,19 @@ type SiteRate = {
   id: string;
   siteId: string;
   licenseLevel: number;
+  rateTier: number;
   payRate: string;
   billRate: string;
   label: string | null;
 };
+
+// Lowest-tier rate for a license level (Rate 1 before Rate 2 before Rate 3) —
+// the default pick when the admin hasn't chosen a specific tier yet.
+function defaultRateForLevel(rates: SiteRate[], level: number): SiteRate | null {
+  const forLevel = rates.filter((r) => r.licenseLevel === level);
+  if (forLevel.length === 0) return null;
+  return forLevel.reduce((best, r) => ((r.rateTier ?? 1) < (best.rateTier ?? 1) ? r : best));
+}
 
 type ShiftInitial = {
   id?: string;
@@ -53,9 +62,10 @@ function toLocalInput(iso: string | undefined | null): string {
   return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
 }
 
-function levelLabel(level: number, customLabel: string | null): string {
+function levelLabel(level: number, customLabel: string | null, rateTier?: number): string {
   const base = level <= 1 ? "Support (no licence)" : level === 4 ? "L4 / PPO" : level === 3 ? "L3 Armed" : "L2 Unarmed";
-  return customLabel ? `${base} — ${customLabel}` : base;
+  const withTier = rateTier != null ? `${base} · Rate ${rateTier}` : base;
+  return customLabel ? `${withTier} — ${customLabel}` : withTier;
 }
 
 export function ShiftDialog({ open, onOpenChange, initial, onSaved }: Props) {
@@ -127,7 +137,7 @@ export function ShiftDialog({ open, onOpenChange, initial, onSaved }: Props) {
     if (!open) return;
     if (siteRateId) return; // already chosen, don't overwrite
     if (siteRates.length === 0) return;
-    const match = siteRates.find((r) => r.licenseLevel === requiredLicenseLevel);
+    const match = defaultRateForLevel(siteRates, requiredLicenseLevel);
     if (match) {
       setPayRate(String(match.payRate));
       setBillRate(String(match.billRate));
@@ -226,9 +236,9 @@ export function ShiftDialog({ open, onOpenChange, initial, onSaved }: Props) {
                 onValueChange={(v) => {
                   const lvl = Number(v);
                   setRequiredLicenseLevel(lvl);
-                  // Switch the selected site rate to the one matching the
-                  // new level, if the site has one configured.
-                  const match = siteRates.find((r) => r.licenseLevel === lvl);
+                  // Switch the selected site rate to the new level's default
+                  // tier (Rate 1 first), if the site has one configured.
+                  const match = defaultRateForLevel(siteRates, lvl);
                   if (match) applySiteRate(match);
                   else setSiteRateId(null);
                 }}
@@ -262,7 +272,7 @@ export function ShiftDialog({ open, onOpenChange, initial, onSaved }: Props) {
                 <div className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Site rate card</div>
                 {matchingRate && (
                   <div className="text-xs text-emerald-700">
-                    Using: <strong>{levelLabel(matchingRate.licenseLevel, matchingRate.label)}</strong>
+                    Using: <strong>{levelLabel(matchingRate.licenseLevel, matchingRate.label, matchingRate.rateTier)}</strong>
                   </div>
                 )}
               </div>
@@ -287,7 +297,7 @@ export function ShiftDialog({ open, onOpenChange, initial, onSaved }: Props) {
                             : "bg-white hover:bg-brand-cream/60 border-brand-gold/40"
                         }`}
                       >
-                        <div className="font-semibold">{levelLabel(r.licenseLevel, r.label)}</div>
+                        <div className="font-semibold">{levelLabel(r.licenseLevel, r.label, r.rateTier)}</div>
                         <div className={selected ? "text-white/85" : "text-muted-foreground"}>
                           Pay ${parseFloat(r.payRate).toFixed(2)} · Bill ${parseFloat(r.billRate).toFixed(2)}
                         </div>

@@ -1940,10 +1940,11 @@ router.post("/admin/users/bulk-invite", requireAdmin, async (req, res): Promise<
 // ============================================================ SITE RATE CARDS
 //
 // Per-site pay+bill rate card keyed by license level (L2 unarmed / L3 armed /
-// L4 PPO). Shift create/edit pulls these into the form so each shift's pay
-// and bill amounts reflect the site + position combo, with per-shift override
-// still available. Admin-only — these are commercial rates and exposing them
-// to officers would leak each site's margin.
+// L4 PPO) + rate tier (Rate 1 / Rate 2 / Rate 3 within each level). Shift
+// create/edit pulls these into the form so each shift's pay and bill amounts
+// reflect the site + position + tier combo, with per-shift override still
+// available. Admin-only — these are commercial rates and exposing them to
+// officers would leak each site's margin.
 
 // GET /admin/sites/:id/rates — list rate card rows for a site
 router.get("/admin/sites/:id/rates", requireAdmin, async (req, res): Promise<void> => {
@@ -1952,18 +1953,26 @@ router.get("/admin/sites/:id/rates", requireAdmin, async (req, res): Promise<voi
     .select()
     .from(siteRatesTable)
     .where(eq(siteRatesTable.siteId, siteId))
-    .orderBy(asc(siteRatesTable.licenseLevel));
+    .orderBy(asc(siteRatesTable.licenseLevel), asc(siteRatesTable.rateTier));
   res.json(rows);
 });
 
-// PUT /admin/sites/:id/rates — upsert a row by (siteId, licenseLevel).
-// Body: { licenseLevel: 1|2|3|4, payRate: number|string, billRate: number|string, label?: string }
+// PUT /admin/sites/:id/rates — upsert a row by (siteId, licenseLevel, rateTier).
+// Body: { licenseLevel: 1|2|3|4, rateTier?: 1|2|3 (default 1),
+//         payRate: number|string, billRate: number|string, label?: string }
 router.put("/admin/sites/:id/rates", requireAdmin, async (req, res): Promise<void> => {
   const siteId = req.params.id as string;
-  const { licenseLevel, payRate, billRate, label } = req.body ?? {};
+  const { licenseLevel, rateTier, payRate, billRate, label } = req.body ?? {};
   const lvl = Number(licenseLevel);
   if (![1, 2, 3, 4].includes(lvl)) {
     res.status(400).json({ error: "Bad Request", message: "licenseLevel must be 1, 2, 3, or 4" });
+    return;
+  }
+  // rateTier is optional for backwards compatibility — older clients that
+  // don't send it keep upserting the level's Rate 1 row.
+  const tier = rateTier === undefined || rateTier === null ? 1 : Number(rateTier);
+  if (![1, 2, 3].includes(tier)) {
+    res.status(400).json({ error: "Bad Request", message: "rateTier must be 1, 2, or 3" });
     return;
   }
   const pay = Number(payRate);
@@ -1978,9 +1987,9 @@ router.put("/admin/sites/:id/rates", requireAdmin, async (req, res): Promise<voi
 
   const [row] = await db
     .insert(siteRatesTable)
-    .values({ siteId, licenseLevel: lvl, payRate: String(pay), billRate: String(bill), label: cleanLabel })
+    .values({ siteId, licenseLevel: lvl, rateTier: tier, payRate: String(pay), billRate: String(bill), label: cleanLabel })
     .onConflictDoUpdate({
-      target: [siteRatesTable.siteId, siteRatesTable.licenseLevel],
+      target: [siteRatesTable.siteId, siteRatesTable.licenseLevel, siteRatesTable.rateTier],
       set: { payRate: String(pay), billRate: String(bill), label: cleanLabel, updatedAt: new Date() },
     })
     .returning();

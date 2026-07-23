@@ -1495,10 +1495,13 @@ type SiteRateRow = {
   id: string;
   siteId: string;
   licenseLevel: number;
+  rateTier: number;
   payRate: string;
   billRate: string;
   label: string | null;
 };
+
+const TIER_OPTIONS = [1, 2, 3] as const;
 
 const LEVEL_OPTIONS: { value: number; name: string }[] = [
   { value: 1, name: "Support Staff" },
@@ -1647,6 +1650,7 @@ function SiteRateCard({ siteId }: { siteId: string }) {
 
   // Draft form state for "add new rate" / "edit existing rate".
   const [draftLevel, setDraftLevel] = useState<number>(2);
+  const [draftTier, setDraftTier] = useState<number>(1);
   const [draftPay, setDraftPay] = useState<string>("");
   const [draftBill, setDraftBill] = useState<string>("");
   const [draftLabel, setDraftLabel] = useState<string>("");
@@ -1667,16 +1671,27 @@ function SiteRateCard({ siteId }: { siteId: string }) {
 
   useEffect(() => { void load(); }, [load]);
 
-  // Configured levels — keep the picker honest about which slots are free vs
-  // already set (PUT upserts on conflict so re-using a level just edits it,
-  // but pre-selecting an unused level is a friendlier default).
-  const usedLevels = useMemo(() => new Set(rows.map((r) => r.licenseLevel)), [rows]);
+  // Configured (level, tier) slots — keep the picker honest about which slots
+  // are free vs already set (PUT upserts on conflict so re-using a slot just
+  // edits it, but pre-selecting an unused slot is a friendlier default).
+  const usedSlots = useMemo(
+    () => new Set(rows.map((r) => `${r.licenseLevel}:${r.rateTier}`)),
+    [rows],
+  );
+  const draftSlotUsed = usedSlots.has(`${draftLevel}:${draftTier}`);
   useEffect(() => {
-    // When the row list changes, nudge the form to the first unused level so
-    // adding a second rate doesn't silently overwrite the first.
-    const firstFree = LEVEL_OPTIONS.find((o) => !usedLevels.has(o.value));
-    if (firstFree && !usedLevels.has(draftLevel) === false) {
-      setDraftLevel(firstFree.value);
+    // When the row list changes, nudge the form to the first unused
+    // (level, tier) slot so adding a second rate doesn't silently overwrite
+    // the first. Scan tiers within a level before moving to the next level.
+    if (!usedSlots.has(`${draftLevel}:${draftTier}`)) return;
+    for (const o of LEVEL_OPTIONS) {
+      for (const t of TIER_OPTIONS) {
+        if (!usedSlots.has(`${o.value}:${t}`)) {
+          setDraftLevel(o.value);
+          setDraftTier(t);
+          return;
+        }
+      }
     }
     // intentionally only depends on the rows snapshot
   // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -1696,6 +1711,7 @@ function SiteRateCard({ siteId }: { siteId: string }) {
         method: "PUT",
         body: JSON.stringify({
           licenseLevel: draftLevel,
+          rateTier: draftTier,
           payRate: pay,
           billRate: bill,
           label: draftLabel.trim() || null,
@@ -1714,15 +1730,17 @@ function SiteRateCard({ siteId }: { siteId: string }) {
 
   async function editExisting(row: SiteRateRow) {
     // Populate the form with this row so the admin can adjust + re-save
-    // (PUT upserts on the (siteId, level) pair).
+    // (PUT upserts on the (siteId, level, tier) slot).
     setDraftLevel(row.licenseLevel);
+    setDraftTier(row.rateTier ?? 1);
     setDraftPay(String(parseFloat(row.payRate)));
     setDraftBill(String(parseFloat(row.billRate)));
     setDraftLabel(row.label ?? "");
   }
 
   async function removeRow(row: SiteRateRow) {
-    if (!confirm(`Remove the ${LEVEL_OPTIONS.find((o) => o.value === row.licenseLevel)?.name ?? `L${row.licenseLevel}`} rate for this site?`)) return;
+    const levelName = LEVEL_OPTIONS.find((o) => o.value === row.licenseLevel)?.name ?? `L${row.licenseLevel}`;
+    if (!confirm(`Remove the ${levelName} — Rate ${row.rateTier ?? 1} rate for this site?`)) return;
     try {
       await api(`/admin/site-rates/${row.id}`, { method: "DELETE" });
       await load();
@@ -1763,6 +1781,13 @@ function SiteRateCard({ siteId }: { siteId: string }) {
               header: "License level",
               mobile: "title",
               cell: (r) => LEVEL_OPTIONS.find((o) => o.value === r.licenseLevel)?.name ?? `L${r.licenseLevel}`,
+            },
+            {
+              id: "tier",
+              header: "Rate level",
+              mobile: "meta",
+              cell: (r) => `Rate ${r.rateTier ?? 1}`,
+              mobileCell: (r) => <span className="text-sm text-muted-foreground text-right">Rate {r.rateTier ?? 1}</span>,
             },
             {
               id: "label",
@@ -1820,9 +1845,9 @@ function SiteRateCard({ siteId }: { siteId: string }) {
 
       <div className="border rounded p-3 bg-brand-cream/20">
         <div className="text-xs font-semibold uppercase tracking-wide text-muted-foreground mb-2">
-          {usedLevels.has(draftLevel) ? "Update rate" : "Add rate"}
+          {draftSlotUsed ? "Update rate" : "Add rate"}
         </div>
-        <div className="grid grid-cols-1 md:grid-cols-5 gap-2 items-end">
+        <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-6 gap-2 items-end">
           <div>
             <label className="text-xs text-muted-foreground">License level</label>
             <select
@@ -1833,7 +1858,22 @@ function SiteRateCard({ siteId }: { siteId: string }) {
             >
               {LEVEL_OPTIONS.map((o) => (
                 <option key={o.value} value={String(o.value)}>
-                  {o.name}{usedLevels.has(o.value) ? " (set)" : ""}
+                  {o.name}
+                </option>
+              ))}
+            </select>
+          </div>
+          <div>
+            <label className="text-xs text-muted-foreground">Rate level</label>
+            <select
+              aria-label="Rate level"
+              value={String(draftTier)}
+              onChange={(e) => setDraftTier(Number(e.target.value))}
+              className="w-full border rounded px-2 py-2 text-sm bg-background"
+            >
+              {TIER_OPTIONS.map((t) => (
+                <option key={t} value={String(t)}>
+                  Rate {t}{usedSlots.has(`${draftLevel}:${t}`) ? " (set)" : ""}
                 </option>
               ))}
             </select>
@@ -1869,7 +1909,7 @@ function SiteRateCard({ siteId }: { siteId: string }) {
           </div>
           <Button onClick={saveDraft} disabled={saving || draftPay === "" || draftBill === ""}>
             <Plus className="w-3.5 h-3.5 mr-1" />
-            {saving ? "Saving…" : usedLevels.has(draftLevel) ? "Update" : "Add"}
+            {saving ? "Saving…" : draftSlotUsed ? "Update" : "Add"}
           </Button>
         </div>
       </div>

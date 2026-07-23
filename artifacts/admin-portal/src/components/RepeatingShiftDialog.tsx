@@ -58,7 +58,7 @@ export function RepeatingShiftDialog({
   // rates and auto-apply the one matching the chosen level. Mirrors ShiftDialog
   // so a recurring series uses the contracted rate, not whatever was in the
   // default "0" inputs.
-  type SiteRate = { id: string; licenseLevel: number; payRate: string; billRate: string; label: string | null };
+  type SiteRate = { id: string; licenseLevel: number; rateTier: number; payRate: string; billRate: string; label: string | null };
   const [siteRates, setSiteRates] = useState<SiteRate[]>([]);
   const [siteRateId, setSiteRateId] = useState<string | null>(null);
 
@@ -76,8 +76,10 @@ export function RepeatingShiftDialog({
   // play yet (siteRateId tracks the active card pick).
   useEffect(() => {
     if (siteRates.length === 0) return;
-    const match = siteRates.find((r) => r.licenseLevel === Number(licenseLevel));
-    if (!match) return;
+    // Default to the level's lowest tier (Rate 1 before Rate 2 before Rate 3).
+    const forLevel = siteRates.filter((r) => r.licenseLevel === Number(licenseLevel));
+    if (forLevel.length === 0) return;
+    const match = forLevel.reduce((best, r) => ((r.rateTier ?? 1) < (best.rateTier ?? 1) ? r : best));
     setPayRate(String(parseFloat(match.payRate)));
     setBillRate(String(parseFloat(match.billRate)));
     setSiteRateId(match.id);
