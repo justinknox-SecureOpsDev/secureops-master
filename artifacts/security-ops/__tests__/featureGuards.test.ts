@@ -42,7 +42,7 @@ const FEATURE_KEYS: string[] = [...FEATURE_KEY_REGISTRY];
  */
 const MOBILE_SURFACES: Record<string, string[] | "absent"> = {
   chat: ["app/(employee)/chat.tsx", "app/(admin)/chat.tsx"],
-  radio: ["app/(employee)/chat.tsx", "app/(employee)/radio.tsx", "app/(admin)/radio.tsx"],
+  radio: ["app/(admin)/radio.tsx", "app/(employee)/chat.tsx", "app/(employee)/radio.tsx"],
   incidents: ["app/(employee)/incidents.tsx", "app/(admin)/incidents.tsx"],
   liveMap: ["app/(admin)/live-map.tsx"],
   payroll: ["app/(admin)/payroll.tsx", "app/paystubs.tsx"],
@@ -186,6 +186,122 @@ describe("mobile UI feature-gate coverage", () => {
         ).toBe(true);
       }
     }
+  });
+
+  it("Quick Jump grid shows 6 tiles when payroll + invoicing are on", () => {
+    const src = read("app/(admin)/dashboard.tsx");
+    // Extract every { label: "...", ..., feature: "..." } item in the quickGrid array.
+    // Items without a feature key are always shown; feature-gated items are conditional.
+    const itemRe = /\{[^}]*label:\s*"([^"]+)"[^}]*(?:feature:\s*"([^"]+)")?[^}]*\}/g;
+
+    // Locate the quickGrid block — everything between the quickGrid JSX comment
+    // markers. We use the known constant items as anchors instead of a fragile
+    // block-extraction regex; the critical assertion is the filter logic below.
+    const allLabels = ["Payroll", "Invoices", "Licences", "Lic. Approvals", "Clients", "Time Approval"];
+    for (const label of allLabels) {
+      expect(src, `Quick Jump item "${label}" not found in dashboard source`).toContain(`"${label}"`);
+    }
+
+    // The filter pattern `.filter((a) => !a.feature || isEnabled(flags, a.feature))` must exist.
+    expect(src).toMatch(/\.filter\(\s*\([^)]*\)\s*=>/);
+
+    // Simulate both flag states by extracting items with their optional feature key.
+    const quickJumpBlock = src.slice(
+      src.indexOf('"Payroll"') - 50,
+      src.indexOf('"Time Approval"') + 200,
+    );
+
+    // Parse label + feature pairs from the dashboard's data array.
+    // Match each `{ ... }` object literal then extract label and optional feature.
+    type Item = { label: string; feature?: string };
+    const items: Item[] = [];
+    const objRe = /\{[^{}]+\}/g;
+    let m: RegExpExecArray | null;
+    while ((m = objRe.exec(quickJumpBlock)) !== null) {
+      const text = m[0];
+      const labelM = text.match(/label:\s*"([^"]+)"/);
+      const featureM = text.match(/feature:\s*"([^"]+)"/);
+      if (labelM) {
+        items.push({ label: labelM[1], feature: featureM?.[1] });
+      }
+    }
+
+    // All 6 items must be present in the source block.
+    expect(items.map((i) => i.label)).toEqual(allLabels);
+
+    // With payroll + invoicing ON: all 6 tiles visible.
+    const allOn: Record<string, boolean> = { payroll: true, invoicing: true };
+    const visibleAllOn = items.filter((i) => !i.feature || allOn[i.feature]);
+    expect(visibleAllOn).toHaveLength(6);
+
+    // With payroll + invoicing OFF: 4 tiles visible (Licences, Lic. Approvals, Clients, Time Approval).
+    const allOff: Record<string, boolean> = { payroll: false, invoicing: false };
+    const visibleAllOff = items.filter((i) => !i.feature || allOff[i.feature]);
+    expect(visibleAllOff).toHaveLength(4);
+    expect(visibleAllOff.map((i) => i.label)).toEqual([
+      "Licences",
+      "Lic. Approvals",
+      "Clients",
+      "Time Approval",
+    ]);
+  });
+
+  it("Quick Jump grid: ungated tiles always visible regardless of flag state", () => {
+    const src = read("app/(admin)/dashboard.tsx");
+    const ALWAYS_VISIBLE = ["Licences", "Lic. Approvals", "Clients", "Time Approval"];
+    const GATED = ["Payroll", "Invoices"];
+
+    // Ungated items have no `feature:` key next to their label.
+    for (const label of ALWAYS_VISIBLE) {
+      // Find the object containing this label; it must NOT have a feature key.
+      const objRe = new RegExp(
+        `\\{[^{}]*label:\\s*"${label}"[^{}]*\\}`,
+        "g",
+      );
+      const obj = objRe.exec(src)?.[0];
+      expect(obj, `Could not locate Quick Jump item object for "${label}"`).toBeTruthy();
+      expect(
+        obj,
+        `"${label}" should be ungated but has a feature: key`,
+      ).not.toMatch(/feature:/);
+    }
+
+    // Gated items must carry a feature key.
+    for (const label of GATED) {
+      const objRe = new RegExp(
+        `\\{[^{}]*label:\\s*"${label}"[^{}]*\\}`,
+        "g",
+      );
+      const obj = objRe.exec(src)?.[0];
+      expect(obj, `Could not locate Quick Jump item object for "${label}"`).toBeTruthy();
+      expect(
+        obj,
+        `"${label}" must be gated by a feature: key`,
+      ).toMatch(/feature:/);
+    }
+  });
+
+  it("Quick Jump 3-column wrap layout handles 4-tile state without empty-cell misalignment", () => {
+    // The quickGrid uses flexWrap + width:"30%" (3 cols). With 4 tiles, the
+    // last row has 1 tile; flexGrow:1 expands it to fill. There must be NO
+    // fixed-column count (e.g. numColumns on a FlatList) that would leave a
+    // broken empty cell. This test confirms the layout is flexWrap, not grid.
+    const src = read("app/(admin)/dashboard.tsx");
+
+    // The grid container must use flexWrap (not numColumns).
+    expect(src).toMatch(/flexWrap:\s*["']wrap["']/);
+    expect(src, "Quick Jump must not use numColumns (would leave empty cells)").not.toMatch(
+      /numColumns/,
+    );
+
+    // Each tile uses width: "30%" + flexGrow: 1 so the final partial row expands.
+    // Confirm both properties exist in the quickTile style.
+    const quickTileStyleBlock = src.slice(
+      src.indexOf("quickTile:"),
+      src.indexOf("quickTile:") + 300,
+    );
+    expect(quickTileStyleBlock).toMatch(/["']30%["']/);
+    expect(quickTileStyleBlock).toMatch(/flexGrow:\s*1/);
   });
 
   it("every tab hidden by isEnabled(flags, ...) has a FeatureGate-wrapped screen", () => {
