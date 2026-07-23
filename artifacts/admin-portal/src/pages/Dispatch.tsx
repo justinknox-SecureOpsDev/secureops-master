@@ -19,7 +19,7 @@ import {
 } from "lucide-react";
 import { useAuth } from "@/lib/auth";
 import { useFirstQueryParam } from "@/hooks/useDeepLinkFocus";
-import { AssignNearestDialog } from "@/components/AssignNearestDialog";
+import { AssignNearestDialog, candidateBlockReason, type Candidate, type AssignNearestResult } from "@/components/AssignNearestDialog";
 
 type StatusRow = {
   assignmentId: string;
@@ -1053,82 +1053,357 @@ function BucketTab({
   );
 }
 
-// =========================================================== OPEN SHIFTS
+// =========================================================== OPEN SHIFTS — STAFFING BOARD
 
+/**
+ * Two-column drag-and-drop staffing board.
+ *   LEFT  — open shift cards act as drop targets (click to select, drag an officer onto)
+ *   RIGHT — eligible officer roster for the selected shift, site-veteran-first then
+ *           nearest; each card is draggable onto any open shift
+ *
+ * Drop path validates eligibility client-side (no conflict, meets license) before
+ * POSTing to /shifts/:id/assignments; server re-validates. License overrides still
+ * go through the "Assign" dialog (which passes overrideLicense to the server).
+ */
 function OpenShiftsPanel({
   data, loading, error, updatedAt, onChange,
 }: {
   data: OpenShift[]; loading: boolean; error: unknown; updatedAt: number | undefined;
   onChange: () => void;
 }) {
+  const qc = useQueryClient();
+  const [selectedShiftId, setSelectedShiftId] = useState<string | null>(null);
+  const [pickerShiftId, setPickerShiftId] = useState<string | null>(null);
+  const [pickerOpen, setPickerOpen] = useState(false);
+  const [dragOverShiftId, setDragOverShiftId] = useState<string | null>(null);
+  const [assigningShiftId, setAssigningShiftId] = useState<string | null>(null);
+  const [dropError, setDropError] = useState<string | null>(null);
+
+  // Deselect if the currently-selected shift gets fully staffed and leaves the list.
+  useEffect(() => {
+    if (selectedShiftId && !data.find((s) => s.id === selectedShiftId)) {
+      setSelectedShiftId(null);
+    }
+  }, [data, selectedShiftId]);
+
+  // Dry-run candidate fetch for the selected shift (site-veteran-first from server).
+  const candidatesQuery = useQuery<AssignNearestResult>({
+    queryKey: ["dispatch", "assign-nearest", selectedShiftId],
+    queryFn: () =>
+      api<AssignNearestResult>("/dispatch/assign-nearest", {
+        method: "POST",
+        body: { shiftId: selectedShiftId!, dryRun: true },
+      }),
+    enabled: !!selectedShiftId,
+    staleTime: 30_000,
+  });
+
+  const assignMutation = useMutation({
+    mutationFn: ({ shiftId, employeeId }: { shiftId: string; employeeId: string }) =>
+      api(`/shifts/${shiftId}/assignments`, { method: "POST", body: { employeeId, status: "accepted" } }),
+    onSuccess: () => {
+      onChange();
+      // Refresh the officer roster so the just-assigned officer disappears.
+      qc.invalidateQueries({ queryKey: ["dispatch", "assign-nearest", selectedShiftId] });
+    },
+    onError: (e) => setDropError(e instanceof Error ? e.message : "Could not assign officer."),
+    onSettled: () => setAssigningShiftId(null),
+  });
+
+  const handleDragStart = (e: React.DragEvent, c: Candidate) => {
+    e.dataTransfer.setData("application/wcsg-officer", JSON.stringify({
+      userId: c.userId,
+      name: c.name,
+      meetsLicense: c.meetsLicense,
+      conflictingShift: c.conflictingShift ?? false,
+      alreadyAssigned: c.alreadyAssigned,
+    }));
+    e.dataTransfer.effectAllowed = "move";
+  };
+
+  const handleDragOverShift = (e: React.DragEvent, shiftId: string) => {
+    e.preventDefault();
+    e.dataTransfer.dropEffect = "move";
+    if (dragOverShiftId !== shiftId) setDragOverShiftId(shiftId);
+  };
+
+  const handleDragLeaveShift = (e: React.DragEvent) => {
+    if (!e.currentTarget.contains(e.relatedTarget as Node | null)) {
+      setDragOverShiftId(null);
+    }
+  };
+
+  const handleDropOnShift = (e: React.DragEvent, shiftId: string) => {
+    e.preventDefault();
+    setDragOverShiftId(null);
+    setDropError(null);
+    const raw = e.dataTransfer.getData("application/wcsg-officer");
+    if (!raw) return;
+    try {
+      const officer = JSON.parse(raw) as {
+        userId: string; name: string;
+        meetsLicense?: boolean; conflictingShift?: boolean; alreadyAssigned?: boolean;
+      };
+      if (officer.alreadyAssigned) {
+        setDropError(`${officer.name} is already assigned to this shift.`);
+        return;
+      }
+      if (officer.conflictingShift) {
+        setDropError(`${officer.name} has a conflicting shift during this window.`);
+        return;
+      }
+      if (officer.meetsLicense === false) {
+        setDropError(`${officer.name} doesn't meet the license requirement. Use "Assign" to override.`);
+        return;
+      }
+      setAssigningShiftId(shiftId);
+      assignMutation.mutate({ shiftId, employeeId: officer.userId });
+    } catch {
+      setDropError("Could not read drag data — try again.");
+    }
+  };
+
+  const selectedShift = data.find((s) => s.id === selectedShiftId) ?? null;
+  const allCandidates = candidatesQuery.data?.candidates ?? [];
+  const siteHasCoords = candidatesQuery.data?.siteHasCoords ?? true;
+  const eligibleCandidates = allCandidates.filter(
+    (c) => !c.alreadyAssigned && !c.conflictingShift && c.meetsLicense !== false,
+  );
+  const blockedCandidates = allCandidates.filter(
+    (c) => c.alreadyAssigned || c.conflictingShift || c.meetsLicense === false,
+  );
+
   return (
     <Card>
       <CardHeader className="pb-3">
         <CardTitle className="flex items-center gap-2 text-base">
           <Clock className="w-5 h-5 brand-gold" />
-          Open Shifts — Next 72 Hours
+          Open Shifts — Staffing Board
           <span className="ml-auto flex items-center gap-2 text-xs opacity-60 font-normal">
             <span>{data.length} open</span>
             <FreshnessLabel updatedAt={updatedAt} />
           </span>
         </CardTitle>
       </CardHeader>
-      <CardContent className="space-y-2 max-h-[24rem] overflow-y-auto">
+      <CardContent>
         <InlineError error={error} />
+        {dropError && (
+          <div className="mb-3 rounded border border-amber-200 bg-amber-50 text-amber-900 text-xs px-3 py-2 flex items-center gap-2">
+            <AlertTriangle className="w-3.5 h-3.5 shrink-0" />
+            <span className="flex-1">{dropError}</span>
+            <button
+              onClick={() => setDropError(null)}
+              aria-label="Dismiss"
+              className="opacity-60 hover:opacity-100 text-lg leading-none"
+            >×</button>
+          </div>
+        )}
         {loading && <div className="text-sm opacity-60">Loading…</div>}
-        {!loading && !error && data.length === 0 && <div className="text-sm opacity-60">All shifts in the next 72h are filled.</div>}
-        {data.map((s) => <OpenShiftRow key={s.id} shift={s} onChange={onChange} />)}
+        {!loading && !error && data.length === 0 && (
+          <div className="text-sm opacity-60">All shifts in the next 72h are filled.</div>
+        )}
+        {data.length > 0 && (
+          <div className="grid grid-cols-1 md:grid-cols-5 gap-3">
+            {/* LEFT — open shift drop targets */}
+            <div className="md:col-span-3 space-y-2 max-h-[28rem] overflow-y-auto pr-1">
+              {data.map((shift) => {
+                const isSelected = shift.id === selectedShiftId;
+                const isDragOver = shift.id === dragOverShiftId;
+                const isAssigning = shift.id === assigningShiftId;
+                return (
+                  <div
+                    key={shift.id}
+                    role="button"
+                    tabIndex={0}
+                    aria-pressed={isSelected}
+                    aria-label={`Select shift: ${shift.title ?? shift.siteName ?? "Shift"} — click to view officers, or drop an officer onto this card to assign`}
+                    onClick={() => {
+                      setSelectedShiftId(shift.id === selectedShiftId ? null : shift.id);
+                      setDropError(null);
+                    }}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter" || e.key === " ") {
+                        e.preventDefault();
+                        setSelectedShiftId(shift.id === selectedShiftId ? null : shift.id);
+                        setDropError(null);
+                      }
+                    }}
+                    onDragOver={(e) => handleDragOverShift(e, shift.id)}
+                    onDragLeave={handleDragLeaveShift}
+                    onDrop={(e) => handleDropOnShift(e, shift.id)}
+                    className={[
+                      "rounded border bg-card p-3 cursor-pointer transition-all select-none outline-none",
+                      "focus-visible:ring-2 focus-visible:ring-brand-gold",
+                      isSelected ? "border-brand-gold ring-1 ring-brand-gold" : "hover:border-brand-gold/50",
+                      isDragOver ? "border-brand-gold ring-2 ring-brand-gold bg-brand-gold/10" : "",
+                    ].join(" ")}
+                  >
+                    <div className="flex items-start gap-2">
+                      <div className="flex-1 min-w-0">
+                        <div className="font-medium text-sm">{shift.title ?? shift.siteName ?? "Shift"}</div>
+                        <div className="text-xs opacity-70">
+                          <span className="font-medium">{fmtDate(shift.startTime)}</span>
+                          {" · "}{shift.siteName ?? "—"}
+                          {" · "}{fmtTime(shift.startTime)} – {fmtTime(shift.endTime)}
+                        </div>
+                        <div className="text-xs opacity-60 mt-1 flex flex-wrap gap-2">
+                          {shift.filled > 0 && shift.filled < shift.headcount ? (
+                            <span className="font-medium text-amber-700">
+                              {shift.headcount - shift.filled} of {shift.headcount} slot{shift.headcount - shift.filled === 1 ? "" : "s"} still open ({shift.filled} assigned)
+                            </span>
+                          ) : (
+                            <span>{shift.filled} / {shift.headcount} filled</span>
+                          )}
+                          <span>· L{shift.requiredLicenseLevel}+</span>
+                          {shift.payRate && <span>· ${shift.payRate}/hr</span>}
+                        </div>
+                        {isDragOver && (
+                          <div className="text-xs text-brand-gold font-semibold mt-1 animate-pulse">
+                            ↓ Drop to assign
+                          </div>
+                        )}
+                        {isAssigning && (
+                          <div className="text-xs text-brand-gold font-medium mt-1">
+                            <Loader2 className="w-3 h-3 inline animate-spin mr-1" />Assigning…
+                          </div>
+                        )}
+                      </div>
+                      {/* Stop click propagation so buttons don't toggle the selection */}
+                      <div
+                        className="flex flex-col gap-1 shrink-0"
+                        onClick={(e) => e.stopPropagation()}
+                        onKeyDown={(e) => e.stopPropagation()}
+                      >
+                        <Button
+                          size="sm"
+                          onClick={() => { setPickerShiftId(shift.id); setPickerOpen(true); }}
+                        >
+                          <Users className="w-3.5 h-3.5 mr-1" /> Assign
+                        </Button>
+                        <ShiftNotifyButton shiftId={shift.id} />
+                      </div>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+
+            {/* RIGHT — draggable officer roster for the selected shift */}
+            <div className="md:col-span-2">
+              {!selectedShiftId ? (
+                <div className="h-full min-h-[120px] flex items-center justify-center rounded-lg border-2 border-dashed text-xs opacity-40 text-center p-4">
+                  <div>
+                    <Users className="w-6 h-6 mx-auto mb-2 opacity-60" />
+                    Click a shift to see<br />available officers
+                  </div>
+                </div>
+              ) : (
+                <div className="space-y-2">
+                  <div className="text-xs font-semibold opacity-70 flex items-center gap-1 flex-wrap">
+                    <span>
+                      {selectedShift?.siteName
+                        ? `Officers for ${selectedShift.siteName}`
+                        : "Available Officers"}
+                    </span>
+                    <span className="font-normal opacity-60">— drag to assign</span>
+                  </div>
+                  {!siteHasCoords && (
+                    <div className="text-[11px] bg-amber-50 border border-amber-200 text-amber-800 rounded px-2 py-1">
+                      No site coordinates — ordering by recent ping.
+                    </div>
+                  )}
+                  {candidatesQuery.isLoading && (
+                    <div className="text-xs opacity-50 flex items-center gap-1.5 py-2">
+                      <Loader2 className="w-3.5 h-3.5 animate-spin" /> Ranking officers…
+                    </div>
+                  )}
+                  {candidatesQuery.isError && (
+                    <div className="text-xs text-red-700 py-1">Could not load officers.</div>
+                  )}
+                  <div className="space-y-1 max-h-[24rem] overflow-y-auto">
+                    {!candidatesQuery.isLoading && eligibleCandidates.length === 0 && blockedCandidates.length === 0 && (
+                      <div className="text-xs opacity-40 text-center py-4">No eligible officers available.</div>
+                    )}
+                    {eligibleCandidates.map((c) => (
+                      <div
+                        key={c.userId}
+                        draggable
+                        onDragStart={(e) => handleDragStart(e, c)}
+                        className="flex items-center gap-1.5 rounded border bg-card px-2 py-1.5 text-xs cursor-grab active:cursor-grabbing hover:border-brand-gold/70 hover:bg-brand-gold/5 transition-colors select-none"
+                        title={`Drag ${c.name} onto a shift to assign`}
+                      >
+                        {c.workedSiteBefore && (
+                          <span
+                            className="text-amber-500 shrink-0 text-sm leading-none"
+                            title="Has worked this site before"
+                          >★</span>
+                        )}
+                        <span className="flex-1 min-w-0 truncate font-medium">{c.name}</span>
+                        <span className="text-[11px] opacity-55 shrink-0 whitespace-nowrap">
+                          {c.distanceMiles != null ? `${c.distanceMiles.toFixed(1)} mi` : "no GPS"}
+                        </span>
+                      </div>
+                    ))}
+                    {blockedCandidates.length > 0 && (
+                      <>
+                        {eligibleCandidates.length > 0 && (
+                          <div className="text-[11px] opacity-40 pt-1.5 pb-0.5 border-t">Unavailable</div>
+                        )}
+                        {blockedCandidates.map((c) => {
+                          const reason = candidateBlockReason(c);
+                          return (
+                            <div
+                              key={c.userId}
+                              className="flex items-center gap-1.5 rounded border bg-card px-2 py-1.5 text-xs opacity-40 cursor-not-allowed select-none"
+                            >
+                              <div className="flex-1 min-w-0">
+                                <div className="truncate">{c.name}</div>
+                                {reason && <div className="text-[11px]">{reason}</div>}
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </>
+                    )}
+                  </div>
+                </div>
+              )}
+            </div>
+          </div>
+        )}
+
+        {pickerShiftId && (
+          <AssignNearestDialog
+            shiftId={pickerShiftId}
+            open={pickerOpen}
+            onOpenChange={(v) => { setPickerOpen(v); if (!v) setPickerShiftId(null); }}
+            onAssigned={() => {
+              onChange();
+              qc.invalidateQueries({ queryKey: ["dispatch", "assign-nearest", selectedShiftId] });
+            }}
+          />
+        )}
       </CardContent>
     </Card>
   );
 }
 
-function OpenShiftRow({ shift, onChange }: { shift: OpenShift; onChange: () => void }) {
-  const [pickerOpen, setPickerOpen] = useState(false);
+function ShiftNotifyButton({ shiftId }: { shiftId: string }) {
   const notify = useMutation({
-    mutationFn: () => api(`/shifts/${shift.id}/notify-vacancy`, { method: "POST" }),
+    mutationFn: () => api(`/shifts/${shiftId}/notify-vacancy`, { method: "POST" }),
   });
-
   return (
-    <div className="rounded border bg-card p-3">
-      <div className="flex items-start gap-3">
-        <div className="flex-1 min-w-0">
-          <div className="font-medium text-sm">{shift.title ?? shift.siteName ?? "Shift"}</div>
-          <div className="text-xs opacity-70">
-            <span className="font-medium">{fmtDate(shift.startTime)}</span> · {shift.siteName ?? "—"} · {fmtTime(shift.startTime)} – {fmtTime(shift.endTime)}
-          </div>
-          <div className="text-xs opacity-60 mt-1 flex flex-wrap gap-2">
-            {shift.filled > 0 && shift.filled < shift.headcount ? (
-              <span className="font-medium text-amber-700">
-                {shift.headcount - shift.filled} of {shift.headcount} slot{shift.headcount - shift.filled === 1 ? "" : "s"} still open ({shift.filled} assigned)
-              </span>
-            ) : (
-              <span>{shift.filled} / {shift.headcount} filled</span>
-            )}
-            <span>· L{shift.requiredLicenseLevel}+</span>
-            {shift.payRate && <span>· ${shift.payRate}/hr</span>}
-          </div>
-        </div>
-        <div className="flex flex-col gap-1.5">
-          <Button size="sm" onClick={() => setPickerOpen(true)}>
-            <Users className="w-3.5 h-3.5 mr-1" /> Assign nearest
-          </Button>
-          <Button
-            size="sm" variant="outline"
-            onClick={() => notify.mutate()} disabled={notify.isPending}
-          >
-            {notify.isPending ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Megaphone className="w-3.5 h-3.5 mr-1" />}
-            Notify
-          </Button>
-        </div>
-      </div>
-      <AssignNearestDialog
-        shiftId={shift.id}
-        open={pickerOpen}
-        onOpenChange={setPickerOpen}
-        onAssigned={onChange}
-      />
-    </div>
+    <Button
+      size="sm"
+      variant="outline"
+      onClick={() => notify.mutate()}
+      disabled={notify.isPending}
+    >
+      {notify.isPending
+        ? <Loader2 className="w-3.5 h-3.5 animate-spin" />
+        : <Megaphone className="w-3.5 h-3.5 mr-1" />}
+      Notify
+    </Button>
   );
 }
 

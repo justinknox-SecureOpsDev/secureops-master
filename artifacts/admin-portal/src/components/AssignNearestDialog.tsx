@@ -16,6 +16,8 @@ export type Candidate = {
   availabilityCovers?: boolean;
   meetsLicense?: boolean;
   effectiveLevel?: number;
+  workedSiteBefore?: boolean;
+  siteShiftCount?: number;
 };
 
 export type AssignNearestResult = {
@@ -144,7 +146,12 @@ export function AssignNearestDialog({
                   <div className="flex items-center gap-2 min-w-0">
                     <span className="text-xs opacity-50 w-5">{rank}.</span>
                     <div className="min-w-0">
-                      <div className="truncate">{c.name}</div>
+                      <div className="flex items-center gap-1 truncate">
+                        {c.workedSiteBefore && (
+                          <span className="text-amber-500 shrink-0 text-sm leading-none" title="Has worked this site before">★</span>
+                        )}
+                        <span className="truncate">{c.name}</span>
+                      </div>
                       {underLicensed && (
                         <div className="text-[11px] text-amber-700 truncate">
                           ⚠ under required license{c.effectiveLevel != null ? ` (L${c.effectiveLevel})` : ""}

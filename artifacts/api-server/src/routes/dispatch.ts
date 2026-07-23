@@ -1,5 +1,5 @@
 import { Router, type IRouter } from "express";
-import { and, asc, desc, eq, gte, inArray, isNull, lt, lte, ne, or, sql } from "drizzle-orm";
+import { and, asc, desc, eq, gte, inArray, isNotNull, isNull, lt, lte, ne, or, sql } from "drizzle-orm";
 import {
   db,
   usersTable,
@@ -446,6 +446,28 @@ router.post("/dispatch/assign-nearest", requireAdminOrDispatcher, async (req, re
   const startHHMM = `${String(shiftStart.getUTCHours()).padStart(2, "0")}:${String(shiftStart.getUTCMinutes()).padStart(2, "0")}`;
   const endHHMM = `${String(shiftEnd.getUTCHours()).padStart(2, "0")}:${String(shiftEnd.getUTCMinutes()).padStart(2, "0")}`;
   const qualifiedIds = qualified.map((q) => q.userId);
+
+  // Site work history: count completed time entries per officer at this site.
+  // Officers who have worked here before sort first in the candidate roster.
+  const siteWorkCounts = new Map<string, number>();
+  if (shift.siteId && qualifiedIds.length > 0) {
+    const siteCounts = await db
+      .select({
+        employeeId: timeEntriesTable.employeeId,
+        cnt: sql<number>`COUNT(*)::int`,
+      })
+      .from(timeEntriesTable)
+      .where(and(
+        eq(timeEntriesTable.siteId, shift.siteId),
+        isNotNull(timeEntriesTable.clockOutTime),
+        inArray(timeEntriesTable.employeeId, qualifiedIds),
+      ))
+      .groupBy(timeEntriesTable.employeeId);
+    for (const row of siteCounts) {
+      siteWorkCounts.set(row.employeeId, row.cnt);
+    }
+  }
+
   const availabilityByUser = new Map<string, { hasAny: boolean; covers: boolean }>();
   if (qualifiedIds.length > 0) {
     const windows = await db
@@ -479,6 +501,8 @@ router.post("/dispatch/assign-nearest", requireAdminOrDispatcher, async (req, re
     conflictingShift: boolean;
     availabilityKnown: boolean;
     availabilityCovers: boolean;
+    workedSiteBefore: boolean;
+    siteShiftCount: number;
   };
   // Normally only officers whose effective level meets the requirement are
   // ranked. With overrideLicense (admin/dispatcher judgement call) we include
@@ -506,6 +530,8 @@ router.post("/dispatch/assign-nearest", requireAdminOrDispatcher, async (req, re
         conflictingShift: q.conflictingShift,
         availabilityKnown: a?.hasAny ?? false,
         availabilityCovers: a?.covers ?? false,
+        siteShiftCount: siteWorkCounts.get(q.userId) ?? 0,
+        workedSiteBefore: (siteWorkCounts.get(q.userId) ?? 0) > 0,
       };
     })
     .sort((a, b) => {
@@ -516,6 +542,10 @@ router.post("/dispatch/assign-nearest", requireAdminOrDispatcher, async (req, re
       const aBad = a.alreadyAssigned || a.conflictingShift || (a.availabilityKnown && !a.availabilityCovers) || !a.meetsLicense;
       const bBad = b.alreadyAssigned || b.conflictingShift || (b.availabilityKnown && !b.availabilityCovers) || !b.meetsLicense;
       if (aBad !== bBad) return aBad ? 1 : -1;
+      // Within each eligibility group, site veterans sort first.
+      const aVet = a.workedSiteBefore ? 0 : 1;
+      const bVet = b.workedSiteBefore ? 0 : 1;
+      if (aVet !== bVet) return aVet - bVet;
       const da = a.distanceMiles ?? Number.POSITIVE_INFINITY;
       const db_ = b.distanceMiles ?? Number.POSITIVE_INFINITY;
       if (da !== db_) return da - db_;
