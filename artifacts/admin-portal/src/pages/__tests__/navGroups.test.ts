@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { buildNavGroups, resolveGroupKey } from "@/pages/AppShell";
+import { buildNavGroups, resolveGroupKey, applyNavOrder } from "@/pages/AppShell";
 
 /**
  * Locks in the role-aligned navigation IA and the route→group resolution that
@@ -230,5 +230,65 @@ describe("resolveGroupKey (dispatcher)", () => {
 
   it("routes account to the Account tab", () => {
     expect(resolveGroupKey(dispatcherGroups, "/account/security")).toBe("account");
+  });
+});
+
+describe("applyNavOrder — stale key migration", () => {
+  it("silently drops retired keys and appends new tabs in default order", () => {
+    // A user who saved their order before the nav restructure will have the
+    // three retired keys: "administration", "security", "settings".
+    // applyNavOrder must drop them and append the five new tabs that were not
+    // in the saved preference at all.
+    const staleOrder = [
+      "overview",
+      "dispatch",
+      "staffing",
+      "administration", // retired
+      "security",       // retired
+      "settings",       // retired
+    ];
+
+    const result = applyNavOrder(adminGroups, staleOrder);
+    const keys = result.map((g) => g.key);
+
+    // Retired keys must not appear
+    expect(keys).not.toContain("administration");
+    expect(keys).not.toContain("security");
+    expect(keys).not.toContain("settings");
+
+    // The saved valid keys appear first, in saved order
+    expect(keys.indexOf("overview")).toBeLessThan(keys.indexOf("dispatch"));
+    expect(keys.indexOf("dispatch")).toBeLessThan(keys.indexOf("staffing"));
+
+    // Every current group must still be reachable — no tab dropped
+    const defaultKeys = adminGroups.map((g) => g.key);
+    for (const key of defaultKeys) {
+      expect(keys).toContain(key);
+    }
+
+    // New tabs not present in the stale order are appended in default order
+    const newTabs = ["hr", "compliance", "clients_sites", "contracts", "accounting", "account", "platform"];
+    const appendedPositions = newTabs.map((k) => keys.indexOf(k));
+    // All new tabs come after the last known saved key ("staffing")
+    const staffingIdx = keys.indexOf("staffing");
+    for (const pos of appendedPositions) {
+      expect(pos).toBeGreaterThan(staffingIdx);
+    }
+    // New tabs appear in the same relative order as the default group list
+    for (let i = 0; i < appendedPositions.length - 1; i++) {
+      expect(appendedPositions[i]).toBeLessThan(appendedPositions[i + 1]);
+    }
+  });
+
+  it("returns all groups intact when saved order is null or empty", () => {
+    expect(applyNavOrder(adminGroups, null)).toEqual(adminGroups);
+    expect(applyNavOrder(adminGroups, [])).toEqual(adminGroups);
+  });
+
+  it("handles a saved order that is entirely stale keys", () => {
+    const allStale = ["administration", "security", "settings"];
+    const result = applyNavOrder(adminGroups, allStale);
+    // All current groups appended in default order
+    expect(result.map((g) => g.key)).toEqual(adminGroups.map((g) => g.key));
   });
 });
