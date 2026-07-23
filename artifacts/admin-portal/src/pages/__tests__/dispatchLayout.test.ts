@@ -507,6 +507,54 @@ describe("buildColumnWithPlaceholder — placeholder absent after drop (insert r
   });
 });
 
+// ---------------------------------------------------------------------------
+// Drag cancel / drag-end — placeholder must not linger after a mid-flight cancel
+//
+// When a dispatcher presses Escape or releases the mouse outside a valid drop
+// zone, the drag state resets: dragInsert → null and/or dragSrcRef → null.
+// buildColumnWithPlaceholder must return the original visible array (same
+// reference, no DRAG_PLACEHOLDER) in both cancel paths.
+// ---------------------------------------------------------------------------
+
+describe("buildColumnWithPlaceholder — drag cancel / drag-end clears placeholder", () => {
+  it("returns the original visible array (same reference) when insert is reset to null after an active drag", () => {
+    const visible: PanelId[] = ["incidents", "statusBoard", "shiftClaims", "openShifts"];
+
+    const duringSlotsWithPlaceholder = buildColumnWithPlaceholder(
+      visible,
+      "openShifts",
+      { overId: "statusBoard", position: "before" },
+      LEFT_COLUMN,
+    );
+    expect(duringSlotsWithPlaceholder.includes(DRAG_PLACEHOLDER)).toBe(true);
+
+    const afterCancelSlots = buildColumnWithPlaceholder(visible, "openShifts", null, LEFT_COLUMN);
+    expect(afterCancelSlots).toBe(visible);
+    expect(afterCancelSlots.includes(DRAG_PLACEHOLDER)).toBe(false);
+  });
+
+  it("returns the original visible array (same reference) when srcId is reset to null (dragend fired without a drop)", () => {
+    const visible: PanelId[] = ["incidents", "statusBoard", "shiftClaims", "openShifts"];
+
+    const duringSlotsWithPlaceholder = buildColumnWithPlaceholder(
+      visible,
+      "openShifts",
+      { overId: "shiftClaims", position: "after" },
+      LEFT_COLUMN,
+    );
+    expect(duringSlotsWithPlaceholder.includes(DRAG_PLACEHOLDER)).toBe(true);
+
+    const afterDragEndSlots = buildColumnWithPlaceholder(
+      visible,
+      null,
+      { overId: "shiftClaims", position: "after" },
+      LEFT_COLUMN,
+    );
+    expect(afterDragEndSlots).toBe(visible);
+    expect(afterDragEndSlots.includes(DRAG_PLACEHOLDER)).toBe(false);
+  });
+});
+
 describe("buildColumnWithPlaceholder — right column", () => {
   it("works correctly for the right column panels", () => {
     const visible: PanelId[] = ["liveMap", "broadcast"];
