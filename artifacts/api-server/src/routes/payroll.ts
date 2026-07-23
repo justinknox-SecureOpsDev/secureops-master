@@ -620,11 +620,16 @@ async function processPncPayRun(req: Request, ids: string[]): Promise<PncSubmitR
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
     // Transport-level failure — roll back to pending so the admin can retry.
+    // If the rollback itself fails (DB hiccup at the same moment), log loudly
+    // with the affected ids — the stuck-processing sweep is the safety net.
     await db
       .update(payrollEntriesTable)
       .set({ status: "pending", paidMethod: null, paymentReference: null, paidBy: null, updatedAt: new Date() })
       .where(and(inArray(payrollEntriesTable.id, Array.from(claimedSet)), eq(payrollEntriesTable.status, "processing")))
-      .catch(() => {});
+      .catch((rbErr) => req.log.error(
+        { err: rbErr, ids: Array.from(claimedSet), multipaymentId },
+        "[payroll-pnc] failed to roll back rows to pending after transport error — rows left in 'processing'; stuck-processing sweep will recover them",
+      ));
     await db.insert(auditLogsTable).values({
       actorUserId: req.user!.userId,
       actorEmail: req.user!.email ?? null,
@@ -644,11 +649,16 @@ async function processPncPayRun(req: Request, ids: string[]): Promise<PncSubmitR
 
   if (!pncResult.ok) {
     // PNC rejected — roll back to pending so the admin can correct and retry.
+    // A failed rollback must not be swallowed: log with the affected ids so
+    // the stuck-processing sweep (or an admin) can recover them.
     await db
       .update(payrollEntriesTable)
       .set({ status: "pending", paidMethod: null, paymentReference: null, paidBy: null, updatedAt: new Date() })
       .where(and(inArray(payrollEntriesTable.id, Array.from(claimedSet)), eq(payrollEntriesTable.status, "processing")))
-      .catch(() => {});
+      .catch((rbErr) => req.log.error(
+        { err: rbErr, ids: Array.from(claimedSet), multipaymentId },
+        "[payroll-pnc] failed to roll back rows to pending after PNC rejection — rows left in 'processing'; stuck-processing sweep will recover them",
+      ));
     await db.insert(auditLogsTable).values({
       actorUserId: req.user!.userId,
       actorEmail: req.user!.email ?? null,

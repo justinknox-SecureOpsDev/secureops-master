@@ -30,6 +30,7 @@ vi.mock("../lib/pncPayments", async (importOriginal) => {
 import app from "../app";
 import { signToken } from "../middlewares/auth";
 import { submitMultipayment } from "../lib/pncPayments";
+import { recoverStuckProcessingPayrollRows } from "../lib/scheduledJobs";
 
 const submitMock = vi.mocked(submitMultipayment);
 
@@ -340,6 +341,38 @@ describe("POST /payroll/pay-run/pnc", () => {
     const [after] = await fetchEntries([entryId]);
     expect(after.status).toBe("processed");
     expect(after.paidMethod).toBe("pnc_api");
+  });
+
+  it("stuck-processing sweep recovers rows left in 'processing' when a rollback failed", async () => {
+    const stuckId = await makePendingEntry(ctx.bankedEmployeeId);
+    const freshId = await makePendingEntry(ctx.bankedEmployeeId);
+
+    // Simulate the failure the task guards against: rows stranded in
+    // 'processing' with stale bookkeeping. `stuckId` was claimed >15m ago
+    // (rollback failed); `freshId` is a legitimate in-flight submission
+    // claimed just now and must NOT be swept.
+    const stale = new Date(Date.now() - 20 * 60 * 1000);
+    await db
+      .update(payrollEntriesTable)
+      .set({ status: "processing", paidMethod: "pnc_api", paymentReference: "WCSG-stuck", paidBy: ctx.adminId, updatedAt: stale })
+      .where(eq(payrollEntriesTable.id, stuckId));
+    await db
+      .update(payrollEntriesTable)
+      .set({ status: "processing", paidMethod: "pnc_api", paymentReference: "WCSG-fresh", paidBy: ctx.adminId, updatedAt: new Date() })
+      .where(eq(payrollEntriesTable.id, freshId));
+
+    await recoverStuckProcessingPayrollRows();
+
+    const [stuck] = await fetchEntries([stuckId]);
+    expect(stuck.status).toBe("pending");
+    expect(stuck.paidMethod).toBeNull();
+    expect(stuck.paymentReference).toBeNull();
+    expect(stuck.paidBy).toBeNull();
+
+    // The recently-claimed row is untouched — the age threshold protects it.
+    const [fresh] = await fetchEntries([freshId]);
+    expect(fresh.status).toBe("processing");
+    expect(fresh.paymentReference).toBe("WCSG-fresh");
   });
 
   it("rolls rows back to pending when PNC rejects the batch", async () => {

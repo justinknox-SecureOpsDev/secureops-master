@@ -10,6 +10,7 @@ import {
   shiftAssignmentsTable,
   sitesTable,
   timeEntriesTable,
+  payrollEntriesTable,
   patrolScansTable,
   highRiskChangeQueueTable,
   locationPingsTable,
@@ -470,6 +471,54 @@ export async function sendPreShiftReminders(): Promise<void> {
     }
   } catch (err) {
     logger.error({ err }, "[shift-reminder] job failed");
+  }
+}
+
+/**
+ * Self-healing sweep for payroll rows stranded in `status='processing'`.
+ *
+ * The PNC pay-run route atomically claims rows to `processing` before the
+ * outbound bank call and rolls them back to `pending` on failure. If that
+ * rollback UPDATE itself fails (DB hiccup during a PNC outage), the rows
+ * would otherwise stay stuck in `processing` forever — never payable, never
+ * retryable. This sweep flips any row that has sat in `processing` longer
+ * than STUCK_PROCESSING_THRESHOLD_MS back to `pending` and clears the payment
+ * bookkeeping, mirroring the route's rollback.
+ *
+ * Safe by design: a healthy pay-run occupies `processing` only for the
+ * duration of one PNC call (seconds), so a 15-minute threshold cannot race a
+ * legitimate in-flight submission. Idempotent + race-safe via the WHERE clause
+ * (status still processing AND old enough) so overlapping ticks / instances
+ * never fight.
+ */
+const STUCK_PROCESSING_THRESHOLD_MS = 15 * MIN_MS;
+
+export async function recoverStuckProcessingPayrollRows(): Promise<void> {
+  try {
+    const cutoff = new Date(Date.now() - STUCK_PROCESSING_THRESHOLD_MS);
+    const recovered = await db
+      .update(payrollEntriesTable)
+      .set({
+        status: "pending",
+        paidMethod: null,
+        paymentReference: null,
+        paidBy: null,
+        updatedAt: new Date(),
+      })
+      .where(and(
+        eq(payrollEntriesTable.status, "processing"),
+        lt(payrollEntriesTable.updatedAt, cutoff),
+      ))
+      .returning({ id: payrollEntriesTable.id });
+
+    if (recovered.length > 0) {
+      logger.error(
+        { ids: recovered.map((r) => r.id), count: recovered.length },
+        "[payroll-stuck-sweep] recovered payroll rows stranded in 'processing' back to 'pending' — a PNC rollback likely failed; admin can retry",
+      );
+    }
+  } catch (err) {
+    logger.error({ err }, "[payroll-stuck-sweep] job failed");
   }
 }
 
@@ -1216,6 +1265,10 @@ export function startScheduledJobs(intervalMs: number = HOUR_MS): NodeJS.Timeout
   // Auto clock-out officers >10m past shift end who aren't still on site
   // — every 5 minutes; atomic claim makes it idempotent per entry.
   schedule("auto-clock-out", autoClockOutEndedShifts, 5 * MIN_MS);
+  // Recover payroll rows stuck in 'processing' (a PNC rollback that itself
+  // failed) — every 5 minutes; the 15-min age threshold cannot race a
+  // legitimate in-flight submission.
+  schedule("payroll-stuck-sweep", recoverStuckProcessingPayrollRows, 5 * MIN_MS);
   // Lock draft invoices whose week has ended (Mon 00:00 UTC). After
   // locking, new approvals for that site roll into a fresh draft for
   // the following week. Hourly is enough — the boundary check is purely
