@@ -5,7 +5,7 @@ import { buildNavGroups, resolveGroupKey } from "@/pages/AppShell";
  * Locks in the role-aligned navigation IA and the route→group resolution that
  * drives the active top-level tab. This is the logic a recent reorg regressed:
  * the dispatcher Dispatch tab must stay Live-Map-only so chat/radio/personnel
- * resolve to the dedicated Security tab (first-match-wins on item href), and
+ * resolve to the dedicated Comms tab (first-match-wins on item href), and
  * every admin table/page route must land in exactly one real group.
  */
 
@@ -16,16 +16,18 @@ const keyOf = (groups: ReturnType<typeof buildNavGroups>, label: string) =>
   groups.find((g) => g.label === label)?.key;
 
 describe("buildNavGroups", () => {
-  it("gives admins the eight role-aligned groups in order", () => {
+  it("gives admins the ten role-aligned groups in order", () => {
     expect(adminGroups.map((g) => g.key)).toEqual([
       "overview",
       "dispatch",
       "staffing",
       "hr",
       "compliance",
-      "administration",
+      "clients_sites",
+      "contracts",
       "accounting",
-      "settings",
+      "account",
+      "platform",
     ]);
   });
 
@@ -50,6 +52,41 @@ describe("buildNavGroups", () => {
     expect(compliance?.items.map((i) => i.href)).toContain("/tables/licenses");
   });
 
+  it("Clients & Sites tab holds sales leads, clients, sites, and client users", () => {
+    const cs = adminGroups.find((g) => g.key === "clients_sites");
+    expect(cs?.items.map((i) => i.href)).toEqual([
+      "/tables/sales_leads",
+      "/tables/clients",
+      "/tables/sites",
+      "/hr/client-users",
+    ]);
+  });
+
+  it("Contracts tab holds subcontractor items only", () => {
+    const contracts = adminGroups.find((g) => g.key === "contracts");
+    expect(contracts?.items.map((i) => i.href)).toEqual([
+      "/tables/subcontractors",
+      "/tables/subcontractor_cois",
+      "/tables/subcontractor_contracts",
+      "/tables/subcontractor_invoices",
+      "/subcontractors/pay-run",
+      "/subcontractors/clock-in-entries",
+    ]);
+  });
+
+  it("Account tab holds only My Account and is visible to admins", () => {
+    const account = adminGroups.find((g) => g.key === "account");
+    expect(account?.items.map((i) => i.href)).toEqual(["/account/security"]);
+  });
+
+  it("Platform tab holds system/admin items", () => {
+    const platform = adminGroups.find((g) => g.key === "platform");
+    expect(platform?.items.map((i) => i.href)).toContain("/tables/users");
+    expect(platform?.items.map((i) => i.href)).toContain("/audit-log");
+    expect(platform?.items.map((i) => i.href)).toContain("/exports");
+    expect(platform?.items.map((i) => i.href)).not.toContain("/account/security");
+  });
+
   it("never lists the same route in two admin groups", () => {
     const seen = new Set<string>();
     for (const g of adminGroups) {
@@ -65,13 +102,25 @@ describe("buildNavGroups", () => {
     expect(dispatch?.items.map((i) => i.href)).toEqual(["/dispatch"]);
   });
 
-  it("gives dispatchers a Security tab that owns chat/radio/personnel", () => {
-    const security = dispatcherGroups.find((g) => g.key === "security");
-    expect(security?.items.map((i) => i.href)).toEqual([
+  it("gives dispatchers a Comms tab (not Security) that owns chat/radio/personnel", () => {
+    expect(dispatcherGroups.find((g) => g.key === "security")).toBeUndefined();
+    const comms = dispatcherGroups.find((g) => g.key === "comms");
+    expect(comms?.label).toBe("Comms");
+    expect(comms?.items.map((i) => i.href)).toEqual([
       "/chat",
       "/personnel",
       "/radio",
     ]);
+  });
+
+  it("gives dispatchers an Account tab instead of Settings", () => {
+    expect(dispatcherGroups.find((g) => g.key === "settings")).toBeUndefined();
+    const account = dispatcherGroups.find((g) => g.key === "account");
+    expect(account?.items.map((i) => i.href)).toEqual(["/account/security"]);
+  });
+
+  it("dispatchers do not see a Platform tab", () => {
+    expect(dispatcherGroups.find((g) => g.key === "platform")).toBeUndefined();
   });
 });
 
@@ -135,17 +184,19 @@ describe("resolveGroupKey (admin)", () => {
     ["/compliance", "compliance"],
     ["/tables/licenses", "compliance"],
     ["/tables/training-certifications", "compliance"],
-    ["/tables/clients", "administration"],
-    ["/sites/abc", "administration"],
-    ["/subcontractors/pay-run", "administration"],
+    ["/tables/clients", "clients_sites"],
+    ["/sites/abc", "clients_sites"],
+    ["/tables/sales_leads", "clients_sites"],
+    ["/subcontractors/pay-run", "contracts"],
+    ["/tables/subcontractors", "contracts"],
     ["/payroll/board", "accounting"],
     ["/invoices/board", "accounting"],
     ["/analytics", "accounting"],
-    ["/tables/users", "settings"],
-    ["/settings/invite", "settings"],
-    ["/audit-log", "settings"],
-    ["/exports", "settings"],
-    ["/account/security", "settings"],
+    ["/account/security", "account"],
+    ["/tables/users", "platform"],
+    ["/settings/invite", "platform"],
+    ["/audit-log", "platform"],
+    ["/exports", "platform"],
   ];
 
   it.each(cases)("resolves %s -> %s", (location, expected) => {
@@ -167,13 +218,17 @@ describe("resolveGroupKey (admin)", () => {
 });
 
 describe("resolveGroupKey (dispatcher)", () => {
-  it("routes chat/radio/personnel to the Security tab, not Dispatch", () => {
-    expect(resolveGroupKey(dispatcherGroups, "/chat")).toBe("security");
-    expect(resolveGroupKey(dispatcherGroups, "/radio")).toBe("security");
-    expect(resolveGroupKey(dispatcherGroups, "/personnel")).toBe("security");
+  it("routes chat/radio/personnel to the Comms tab, not Dispatch", () => {
+    expect(resolveGroupKey(dispatcherGroups, "/chat")).toBe("comms");
+    expect(resolveGroupKey(dispatcherGroups, "/radio")).toBe("comms");
+    expect(resolveGroupKey(dispatcherGroups, "/personnel")).toBe("comms");
   });
 
   it("routes the live map to Dispatch", () => {
     expect(resolveGroupKey(dispatcherGroups, "/dispatch")).toBe("dispatch");
+  });
+
+  it("routes account to the Account tab", () => {
+    expect(resolveGroupKey(dispatcherGroups, "/account/security")).toBe("account");
   });
 });

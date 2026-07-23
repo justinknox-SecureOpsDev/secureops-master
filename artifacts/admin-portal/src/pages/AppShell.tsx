@@ -196,15 +196,23 @@ export function buildNavGroups(
     ],
   };
 
-  const administrationGroup: NavGroup = {
-    key: "administration",
-    label: "Administration",
+  const clientsSitesGroup: NavGroup = {
+    key: "clients_sites",
+    label: "Clients & Sites",
     Icon: Building2,
     items: [
       { href: "/tables/sales_leads", label: "Sales Leads", Icon: MailPlus },
       { href: "/tables/clients", label: "Clients", Icon: Briefcase },
       { href: "/tables/sites", label: "Sites", Icon: Building2 },
       { href: "/hr/client-users", label: "Client Users", Icon: UsersIcon },
+    ],
+  };
+
+  const contractsGroup: NavGroup = {
+    key: "contracts",
+    label: "Contracts",
+    Icon: FileText,
+    items: [
       { href: "/tables/subcontractors", label: "Subcontractors", Icon: Building2 },
       { href: "/tables/subcontractor_cois", label: "Certificates of Insurance", Icon: ShieldCheck },
       { href: "/tables/subcontractor_contracts", label: "Contracts", Icon: FileText },
@@ -229,12 +237,20 @@ export function buildNavGroups(
     ],
   };
 
-  const settingsGroup: NavGroup = {
-    key: "settings",
-    label: "Settings",
-    Icon: Settings,
+  const accountGroup: NavGroup = {
+    key: "account",
+    label: "Account",
+    Icon: KeyRound,
     items: [
       { href: "/account/security", label: "My Account", Icon: KeyRound },
+    ],
+  };
+
+  const platformGroup: NavGroup = {
+    key: "platform",
+    label: "Platform",
+    Icon: Settings,
+    items: [
       { href: "/tables/users", label: "Users", Icon: UsersIcon },
       { href: "/settings/invite", label: "App Invite", Icon: Smartphone },
       { href: "/audit-log", label: "Audit Log", Icon: ShieldCheck },
@@ -265,9 +281,9 @@ export function buildNavGroups(
         items: [{ href: "/dispatch", label: "Live Map", Icon: Radar, feature: "liveMap" }],
       },
       {
-        key: "security",
-        label: "Security",
-        Icon: Shield,
+        key: "comms",
+        label: "Comms",
+        Icon: MessageCircle,
         items: [
           { href: "/chat", label: "Chat", Icon: MessageCircle, feature: "chat" },
           { href: "/personnel", label: "Personnel", Icon: UsersIcon },
@@ -283,23 +299,14 @@ export function buildNavGroups(
           { href: "/tables/shifts", label: "Shifts", Icon: Database },
         ],
       },
-      {
-        key: "settings",
-        label: "Settings",
-        Icon: Settings,
-        items: [
-          { href: "/account/security", label: "My Account", Icon: KeyRound },
-          { href: "/settings/scheduler-integration", label: "Scheduler Integration", Icon: ArrowLeftRight },
-        ],
-      },
+      accountGroup,
     ]);
   }
 
   // Platform owner surface (feature flags + pricing tiers). Only the
-  // dedicated super-admin sees it; regular admins never do. Lives in Settings
-  // so the role-aligned 7-group IA is unchanged.
+  // dedicated super-admin sees it; regular admins never do.
   if (isSuperAdmin) {
-    settingsGroup.items.push({ href: "/platform/features", label: "Platform & Pricing", Icon: Shield });
+    platformGroup.items.push({ href: "/platform/features", label: "Platform & Pricing", Icon: Shield });
   }
 
   return applyFeatures([
@@ -308,9 +315,11 @@ export function buildNavGroups(
     staffingGroup,
     hrGroup,
     complianceGroup,
-    administrationGroup,
+    clientsSitesGroup,
+    contractsGroup,
     accountingGroup,
-    settingsGroup,
+    accountGroup,
+    platformGroup,
   ]);
 }
 
@@ -352,7 +361,8 @@ export function resolveGroupKey(groups: NavGroup[], location: string): string | 
     }
   }
   // Dynamic sub-routes that aren't represented by their own nav item.
-  if (startsWith("/sites") || startsWith("/subcontractors")) return "administration";
+  if (startsWith("/sites")) return "clients_sites";
+  if (startsWith("/subcontractors")) return "contracts";
   if (startsWith("/payroll") || startsWith("/invoices") || startsWith("/analytics")) return "accounting";
   if (startsWith("/shifts") || startsWith("/staffing") || startsWith("/swap-requests")) return "staffing";
   if (startsWith("/compliance")) return "compliance";
@@ -360,9 +370,10 @@ export function resolveGroupKey(groups: NavGroup[], location: string): string | 
     || startsWith("/dar") || startsWith("/personnel") || startsWith("/incidents")) {
     return "dispatch";
   }
-  if (startsWith("/account") || startsWith("/settings") || startsWith("/platform")
-    || startsWith("/audit-log") || startsWith("/exports") || startsWith("/tables")) {
-    return "settings";
+  if (startsWith("/account")) return "account";
+  if (startsWith("/settings") || startsWith("/platform") || startsWith("/audit-log")
+    || startsWith("/exports") || startsWith("/recovery") || startsWith("/tables")) {
+    return "platform";
   }
   if (startsWith("/hr")) return "hr";
   return null;
