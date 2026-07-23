@@ -1025,6 +1025,112 @@ describe("applyColumnBoundaryDrop — moves srcId to beginning of right column",
   });
 });
 
+// ---------------------------------------------------------------------------
+// applyColumnBoundaryDrop — 3-column boundary drops (targetVisibleIndex=2)
+// ---------------------------------------------------------------------------
+
+describe("applyColumnBoundaryDrop — 3-column col-start-3 drop (targetVisibleIndex=2)", () => {
+  const allVisible: Record<PanelId, boolean> = {
+    incidents: true,
+    statusBoard: true,
+    shiftClaims: true,
+    openShifts: true,
+    liveMap: true,
+    broadcast: true,
+  };
+
+  const fullOrder: PanelId[] = [
+    "incidents",
+    "statusBoard",
+    "shiftClaims",
+    "openShifts",
+    "liveMap",
+    "broadcast",
+  ];
+
+  it("places srcId at visible position 2 (first col-3 slot) when 3+ others are visible", () => {
+    const result = applyColumnBoundaryDrop(fullOrder, allVisible, "broadcast", 2);
+    const visible = result.filter((id) => allVisible[id]);
+    expect(visible[2]).toBe("broadcast");
+  });
+
+  it("all panels (including hidden) remain in the output — none dropped or duplicated", () => {
+    const result = applyColumnBoundaryDrop(fullOrder, allVisible, "liveMap", 2);
+    expect(result).toHaveLength(fullOrder.length);
+    expect([...result].sort()).toEqual([...fullOrder].sort());
+  });
+
+  it("does not mutate the original panelOrder array", () => {
+    const original = [...fullOrder];
+    applyColumnBoundaryDrop(fullOrder, allVisible, "broadcast", 2);
+    expect(fullOrder).toEqual(original);
+  });
+
+  it("srcId ends up at visible index 2 regardless of its starting position", () => {
+    const result = applyColumnBoundaryDrop(fullOrder, allVisible, "incidents", 2);
+    const visible = result.filter((id) => allVisible[id]);
+    expect(visible[2]).toBe("incidents");
+  });
+
+  it("with only 2 other visible panels, clamps srcId to after the last one", () => {
+    const twoOthers: Record<PanelId, boolean> = {
+      incidents: true,
+      statusBoard: true,
+      shiftClaims: false,
+      openShifts: false,
+      liveMap: false,
+      broadcast: true,
+    };
+    // Only incidents + statusBoard visible besides broadcast; targetVisibleIndex=2 is out of range
+    const result = applyColumnBoundaryDrop(fullOrder, twoOthers, "broadcast", 2);
+    const visible = result.filter((id) => twoOthers[id]);
+    // broadcast appended after the last of the two other visible panels
+    expect(visible[visible.length - 1]).toBe("broadcast");
+  });
+
+  it("with only 1 other visible panel, still appends after it (same clamping as index=1 case)", () => {
+    const oneOther: Record<PanelId, boolean> = {
+      incidents: true,
+      statusBoard: false,
+      shiftClaims: false,
+      openShifts: false,
+      liveMap: false,
+      broadcast: true,
+    };
+    const result = applyColumnBoundaryDrop(fullOrder, oneOther, "broadcast", 2);
+    const visible = result.filter((id) => oneOther[id]);
+    expect(visible[0]).toBe("incidents");
+    expect(visible[1]).toBe("broadcast");
+  });
+
+  it("hidden panels stay in relative positions after a col-3 drop", () => {
+    const someHidden: Record<PanelId, boolean> = {
+      incidents: true,
+      statusBoard: false,
+      shiftClaims: true,
+      openShifts: false,
+      liveMap: true,
+      broadcast: true,
+    };
+    const result = applyColumnBoundaryDrop(fullOrder, someHidden, "broadcast", 2);
+    expect(result).toContain("statusBoard" as PanelId);
+    expect(result).toContain("openShifts" as PanelId);
+    expect(result).toHaveLength(fullOrder.length);
+    const visible = result.filter((id) => someHidden[id]);
+    expect(visible[2]).toBe("broadcast");
+  });
+
+  it("col-start-2 drop (targetVisibleIndex=1) and col-start-3 drop (targetVisibleIndex=2) produce different results", () => {
+    const resultCol2 = applyColumnBoundaryDrop(fullOrder, allVisible, "broadcast", 1);
+    const resultCol3 = applyColumnBoundaryDrop(fullOrder, allVisible, "broadcast", 2);
+    expect(resultCol2).not.toEqual(resultCol3);
+    const visibleCol2 = resultCol2.filter((id) => allVisible[id]);
+    const visibleCol3 = resultCol3.filter((id) => allVisible[id]);
+    expect(visibleCol2[1]).toBe("broadcast");
+    expect(visibleCol3[2]).toBe("broadcast");
+  });
+});
+
 describe("useDispatchLayout — user isolation (org switch)", () => {
   it("loads the correct layout for each user ID independently", () => {
     const layoutA: DispatchLayout = {

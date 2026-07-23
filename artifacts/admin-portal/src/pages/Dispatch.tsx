@@ -357,8 +357,9 @@ export default function DispatchPage() {
   // Ref mirror so handlePanelDrop can read the latest position without a
   // stale-closure dependency on the dragInsert state value.
   const dragInsertRef = useRef<DragInsert>(null);
-  // Whether the cursor is currently over the inter-column boundary drop zone.
-  const [dragOverBoundary, setDragOverBoundary] = useState(false);
+  // Which inter-column boundary drop zone the cursor is currently over
+  // (1 = col-start-2, 2 = col-start-3), or null when not hovering any zone.
+  const [dragOverBoundary, setDragOverBoundary] = useState<number | null>(null);
 
   // Reset drag state whenever panel visibility changes. If a dispatcher hides
   // a panel while a drag is in progress (via the Customize popover or a
@@ -381,20 +382,21 @@ export default function DispatchPage() {
     dragSrcRef.current = null;
     dragInsertRef.current = null;
     setDragInsert(null);
-    setDragOverBoundary(false);
+    setDragOverBoundary(null);
   }, []);
 
   const handleBoundaryDragOver = useCallback((e: React.DragEvent) => {
     e.preventDefault();
     if (!dragSrcRef.current) return;
-    setDragOverBoundary(true);
+    const col = Number((e.currentTarget as HTMLElement).dataset.boundaryCol ?? 1);
+    setDragOverBoundary(col);
     // Clear any panel-level insert indicator while hovering the boundary.
     dragInsertRef.current = null;
     setDragInsert(null);
   }, []);
 
   const handleBoundaryDragLeave = useCallback(() => {
-    setDragOverBoundary(false);
+    setDragOverBoundary(null);
   }, []);
 
   const handleBoundaryDrop = useCallback(
@@ -402,14 +404,22 @@ export default function DispatchPage() {
       e.preventDefault();
       const srcId = dragSrcRef.current;
       if (!srcId) return;
+      const targetVisibleIndex = Number(
+        (e.currentTarget as HTMLElement).dataset.boundaryCol ?? 1,
+      );
       setLayout((prev) => ({
         ...prev,
-        panelOrder: applyColumnBoundaryDrop(prev.panelOrder, prev.panels, srcId),
+        panelOrder: applyColumnBoundaryDrop(
+          prev.panelOrder,
+          prev.panels,
+          srcId,
+          targetVisibleIndex,
+        ),
       }));
       dragSrcRef.current = null;
       dragInsertRef.current = null;
       setDragInsert(null);
-      setDragOverBoundary(false);
+      setDragOverBoundary(null);
     },
     [setLayout],
   );
@@ -695,40 +705,71 @@ export default function DispatchPage() {
               ? "grid-cols-1 md:grid-cols-2 xl:grid-cols-3"
               : "grid-cols-1 lg:grid-cols-2";
 
-        // Show the column-boundary drop zone whenever a drag is active and the
-        // layout has 2+ columns. On lg+ the zone is pinned to the first row of
-        // column 2 via explicit grid placement so it's always reachable, even
+        // Show column-boundary drop zones whenever a drag is active and the
+        // layout has 2+ columns. Each zone is pinned to row 1 of its target
+        // column via explicit grid placement so it's always reachable, even
         // when every visible panel has been reordered into the left column.
+        // 2-col mode: one zone at col-start-2.
+        // 3-col mode: two zones — col-start-2 and col-start-3.
         const showBoundary = srcId !== null && layout.columns >= 2;
+
+        const makeBoundaryZone = (
+          col: 1 | 2,
+          colClass2: string,
+          label: string,
+        ) => {
+          const isOver = dragOverBoundary === col;
+          return (
+            <div
+              key={`${COLUMN_BOUNDARY}-${col}`}
+              data-testid={`column-boundary-drop-${col}`}
+              data-boundary-col={col}
+              aria-label={`Drop here to move panel to the start of column ${col + 1}`}
+              onDragOver={handleBoundaryDragOver}
+              onDragLeave={handleBoundaryDragLeave}
+              onDrop={handleBoundaryDrop}
+              className={[
+                "flex items-center justify-center",
+                "min-h-20 rounded-lg border-2 border-dashed transition-colors",
+                colClass2,
+                isOver
+                  ? "border-brand-gold bg-brand-gold/10 scale-[1.01]"
+                  : "border-brand-gold/30 bg-brand-gold/5",
+              ].join(" ")}
+            >
+              <span
+                className={[
+                  "text-xs font-medium transition-colors select-none",
+                  isOver ? "text-brand-gold" : "text-brand-gold/40",
+                ].join(" ")}
+              >
+                {isOver ? `Move "${PANEL_LABELS[srcId!]}" here` : label}
+              </span>
+            </div>
+          );
+        };
 
         return (
           <div className={`grid gap-4 items-start ${colClass}`}>
-            {showBoundary && (
-              <div
-                key={COLUMN_BOUNDARY}
-                data-testid="column-boundary-drop"
-                aria-label="Drop here to move panel to the start of the right column"
-                onDragOver={handleBoundaryDragOver}
-                onDragLeave={handleBoundaryDragLeave}
-                onDrop={handleBoundaryDrop}
-                className={[
-                  "hidden lg:flex items-center justify-center",
-                  "min-h-20 rounded-lg border-2 border-dashed transition-colors",
-                  "lg:col-start-2 lg:row-start-1",
-                  dragOverBoundary
-                    ? "border-brand-gold bg-brand-gold/10 scale-[1.01]"
-                    : "border-brand-gold/30 bg-brand-gold/5",
-                ].join(" ")}
-              >
-                <span
-                  className={[
-                    "text-xs font-medium transition-colors select-none",
-                    dragOverBoundary ? "text-brand-gold" : "text-brand-gold/40",
-                  ].join(" ")}
-                >
-                  {dragOverBoundary ? `Move "${PANEL_LABELS[srcId]}" here` : "Drop to move to right column"}
-                </span>
-              </div>
+            {showBoundary && layout.columns === 2 &&
+              makeBoundaryZone(
+                1,
+                "hidden lg:flex lg:col-start-2 lg:row-start-1",
+                "Drop to move to right column",
+              )}
+            {showBoundary && layout.columns === 3 && (
+              <>
+                {makeBoundaryZone(
+                  1,
+                  "hidden md:flex md:col-start-2 md:row-start-1",
+                  "Drop to move to column 2",
+                )}
+                {makeBoundaryZone(
+                  2,
+                  "hidden xl:flex xl:col-start-3 xl:row-start-1",
+                  "Drop to move to column 3",
+                )}
+              </>
             )}
             {slots.map((slot) =>
               slot === DRAG_PLACEHOLDER ? (
