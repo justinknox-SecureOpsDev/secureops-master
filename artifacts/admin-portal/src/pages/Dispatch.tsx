@@ -660,8 +660,12 @@ export default function DispatchPage() {
                 <div
                   key="__drag-placeholder"
                   aria-hidden="true"
-                  className="h-14 rounded-lg border-2 border-dashed border-brand-gold/50 bg-brand-gold/5 animate-in fade-in duration-100"
-                />
+                  className="h-14 rounded-lg border-2 border-dashed border-brand-gold/50 bg-brand-gold/5 animate-in fade-in duration-100 flex items-center justify-center"
+                >
+                  <span className="text-sm italic text-brand-gold/50">
+                    {PANEL_LABELS[srcId]}
+                  </span>
+                </div>
               );
             }
             nodes.push(wrapPanel(id));
@@ -670,8 +674,12 @@ export default function DispatchPage() {
                 <div
                   key="__drag-placeholder"
                   aria-hidden="true"
-                  className="h-14 rounded-lg border-2 border-dashed border-brand-gold/50 bg-brand-gold/5 animate-in fade-in duration-100"
-                />
+                  className="h-14 rounded-lg border-2 border-dashed border-brand-gold/50 bg-brand-gold/5 animate-in fade-in duration-100 flex items-center justify-center"
+                >
+                  <span className="text-sm italic text-brand-gold/50">
+                    {PANEL_LABELS[srcId]}
+                  </span>
+                </div>
               );
             }
           }
