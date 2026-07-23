@@ -311,6 +311,30 @@ code {
   gap: 24px;
 }
 
+.apex-products--single {
+  grid-template-columns: 1fr;
+}
+
+/* ── also-from section ───────────────────────────────────────────────── */
+.apex-also-from {
+  margin-top: 72px;
+  padding-top: 48px;
+  border-top: 1px solid var(--apex-line);
+}
+
+.apex-also-from__heading {
+  margin: 0 0 0;
+  font-size: 11px;
+  letter-spacing: 0.2em;
+  text-transform: uppercase;
+  color: var(--apex-cream-dim);
+}
+
+.apex-also-from .apex-products {
+  margin-top: 24px;
+  grid-template-columns: 1fr;
+}
+
 .apex-product {
   position: relative;
   display: flex;

@@ -26,10 +26,9 @@ export default function Home() {
           </div>
         </Link>
         <nav className="apex-header__nav">
-          <a className="apex-header__link" href="#products">Products</a>
           <Link className="apex-header__link" href="/pricing">Pricing</Link>
-          <Link className="apex-header__link" href="/admin-portal">Admin</Link>
-          <Link className="apex-header__link" href="/officer-app">Officer</Link>
+          <Link className="apex-header__link" href="/admin-portal">Admin Portal</Link>
+          <Link className="apex-header__link" href="/officer-app">Officer App</Link>
         </nav>
       </header>
 
@@ -42,9 +41,8 @@ export default function Home() {
             Built for the people who staff the <span className="apex-gold">front line</span>.
           </h1>
           <p className="apex-hero__sub">
-            SecureOps runs your everyday security operation &mdash; recruitment, scheduling,
-            live ops, payroll, and invoicing. EventStaffScheduler handles the spikes &mdash;
-            large-format events, festivals, and one-off deployments. Pick where you want to go.
+            The end-to-end platform built for private security companies &mdash; recruitment,
+            scheduling, live ops, payroll, and client invoicing, all in one place.
           </p>
           <div className="apex-hero__cta-row">
             <Link className="apex-cta apex-cta--gold apex-cta--inline" href="/get-started?source=hero">
@@ -62,7 +60,7 @@ export default function Home() {
           </div>
         </section>
 
-        <section id="products" className="apex-products">
+        <section className="apex-products apex-products--single">
           <article className="apex-product apex-product--primary">
             <header className="apex-product__head">
               <div className="apex-product__title-row">
@@ -109,64 +107,68 @@ export default function Home() {
                 </span>
               </Link>
             </div>
-
           </article>
+        </section>
 
-          <article className="apex-product apex-product--secondary">
-            <header className="apex-product__head">
-              <div className="apex-product__title-row">
-                <div className="apex-product__mark apex-product__mark--ess" aria-hidden="true">
-                  <span>ESS</span>
+        <section className="apex-also-from">
+          <h2 className="apex-also-from__heading">Also from WCSG</h2>
+          <div className="apex-products">
+            <article className="apex-product apex-product--secondary">
+              <header className="apex-product__head">
+                <div className="apex-product__title-row">
+                  <div className="apex-product__mark apex-product__mark--ess" aria-hidden="true">
+                    <span>ESS</span>
+                  </div>
+                  <div>
+                    <h2 className="apex-product__title">EventStaffScheduler</h2>
+                    <p className="apex-product__kicker">Event &amp; Crowd Staffing</p>
+                  </div>
                 </div>
-                <div>
-                  <h2 className="apex-product__title">EventStaffScheduler</h2>
-                  <p className="apex-product__kicker">Event &amp; Crowd Staffing</p>
-                </div>
+                <span className="apex-product__badge apex-product__badge--alt">Sister product</span>
+              </header>
+
+              <p className="apex-product__desc">
+                Purpose-built for event security and crowd staffing. Spin up a deployment for a
+                single show or a 30-day festival, post calls for hundreds of officers, and
+                coordinate check-in, post assignments, and payouts the same day.
+              </p>
+
+              <ul className="apex-product__bullets">
+                <li>Event-by-event posting with role &amp; post counts</li>
+                <li>Bulk officer call-outs, RSVP and waitlist management</li>
+                <li>On-site check-in, post assignment &amp; head-count</li>
+                <li>Same-day payouts &amp; per-event client invoicing</li>
+              </ul>
+
+              <div className="apex-cta-row apex-cta-row--single">
+                <a
+                  className="apex-cta apex-cta--outline"
+                  href={EVENT_SCHEDULER_URL}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                >
+                  <div className="apex-cta__head">
+                    <span className="apex-cta__label">Visit EventStaffScheduler.net</span>
+                    <span className="apex-cta__arrow" aria-hidden="true">&rarr;</span>
+                  </div>
+                  <span className="apex-cta__desc">
+                    Opens the EventStaffScheduler site in a new tab.
+                  </span>
+                </a>
               </div>
-              <span className="apex-product__badge apex-product__badge--alt">Sister product</span>
-            </header>
 
-            <p className="apex-product__desc">
-              Purpose-built for event security and crowd staffing. Spin up a deployment for a
-              single show or a 30-day festival, post calls for hundreds of officers, and
-              coordinate check-in, post assignments, and payouts the same day.
-            </p>
-
-            <ul className="apex-product__bullets">
-              <li>Event-by-event posting with role &amp; post counts</li>
-              <li>Bulk officer call-outs, RSVP and waitlist management</li>
-              <li>On-site check-in, post assignment &amp; head-count</li>
-              <li>Same-day payouts &amp; per-event client invoicing</li>
-            </ul>
-
-            <div className="apex-cta-row apex-cta-row--single">
-              <a
-                className="apex-cta apex-cta--gold"
-                href={EVENT_SCHEDULER_URL}
-                target="_blank"
-                rel="noopener noreferrer"
-              >
-                <div className="apex-cta__head">
-                  <span className="apex-cta__label">Visit EventStaffScheduler.net</span>
-                  <span className="apex-cta__arrow" aria-hidden="true">&rarr;</span>
-                </div>
-                <span className="apex-cta__desc">
-                  Opens the EventStaffScheduler site in a new tab.
-                </span>
-              </a>
-            </div>
-
-            <p className="apex-product__note">
-              <a
-                className="apex-product__link"
-                href={EVENT_SCHEDULER_URL}
-                target="_blank"
-                rel="noopener noreferrer"
-              >
-                eventstaffscheduler.net &rarr;
-              </a>
-            </p>
-          </article>
+              <p className="apex-product__note">
+                <a
+                  className="apex-product__link"
+                  href={EVENT_SCHEDULER_URL}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                >
+                  eventstaffscheduler.net &rarr;
+                </a>
+              </p>
+            </article>
+          </div>
         </section>
       </main>
 
