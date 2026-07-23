@@ -356,6 +356,19 @@ export default function DispatchPage() {
   // stale-closure dependency on the dragInsert state value.
   const dragInsertRef = useRef<DragInsert>(null);
 
+  // Reset drag state whenever panel visibility changes. If a dispatcher hides
+  // a panel while a drag is in progress (via the Customize popover or a
+  // concurrent tab), the insert state may still reference that panel's ID.
+  // buildWithPlaceholder silently produces no placeholder in that case, but the
+  // drag state is never cleared — leaving the UI in limbo until the next drag
+  // event. Clearing on every panels change ensures the stale state is always
+  // flushed before the next render.
+  useEffect(() => {
+    dragSrcRef.current = null;
+    dragInsertRef.current = null;
+    setDragInsert(null);
+  }, [layout.panels]);
+
   const handlePanelDragStart = useCallback((id: PanelId) => {
     dragSrcRef.current = id;
   }, []);

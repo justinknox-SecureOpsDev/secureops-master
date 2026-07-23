@@ -809,6 +809,71 @@ describe("applyPanelReorder — full panelOrder preserved when some panels are h
   });
 });
 
+// ---------------------------------------------------------------------------
+// Stale drag state after panel is hidden mid-drag
+//
+// If a dispatcher hides a panel while a drag is in progress (e.g. via the
+// Customize popover or a concurrent tab action), `dragInsert.overId` may still
+// reference the now-hidden panel's ID. The component resets `dragInsert` and
+// `dragSrcRef` on every `layout.panels` change, so the next render always sees
+// null drag state. This section tests the underlying pure-function guarantee:
+// `buildWithPlaceholder` must produce no placeholder (same reference, no
+// DRAG_PLACEHOLDER) when `overId` is not present in `visible`.
+// ---------------------------------------------------------------------------
+
+describe("buildWithPlaceholder — stale drag state after panel is hidden mid-drag", () => {
+  it("produces no placeholder when the dragged-over panel is toggled off while a drag is active", () => {
+    // Drag is active: srcId='incidents', cursor last hovered 'liveMap'
+    // Dispatcher hides 'liveMap' → visible no longer contains it
+    const visibleAfterHide: PanelId[] = [
+      "incidents",
+      "statusBoard",
+      "shiftClaims",
+      "openShifts",
+      "broadcast",
+    ];
+    const staleInsert = { overId: "liveMap" as PanelId, position: "before" as const };
+
+    // buildWithPlaceholder must silently return the same array reference (no placeholder)
+    const result = buildWithPlaceholder(visibleAfterHide, "incidents", staleInsert);
+    expect(result).toBe(visibleAfterHide);
+    expect(result.includes(DRAG_PLACEHOLDER)).toBe(false);
+  });
+
+  it("produces no placeholder when the dragging panel itself is toggled off mid-drag", () => {
+    // Edge case: the panel being dragged (srcId) is hidden while the drag is
+    // still in progress (e.g. toggled off via keyboard shortcut).
+    // The overId is still visible, but srcId is now gone from visible.
+    // buildWithPlaceholder does NOT require srcId to be in visible —
+    // it only requires overId to be present — so a placeholder would normally
+    // appear.  After the component resets drag state on panels change the
+    // caller will pass srcId=null, which must suppress the placeholder.
+    const visibleAfterSrcHidden: PanelId[] = [
+      "statusBoard",
+      "shiftClaims",
+      "openShifts",
+      "liveMap",
+      "broadcast",
+    ];
+    // Simulate post-reset call (both srcId and insert cleared by the useEffect)
+    const result = buildWithPlaceholder(visibleAfterSrcHidden, null, null);
+    expect(result).toBe(visibleAfterSrcHidden);
+    expect(result.includes(DRAG_PLACEHOLDER)).toBe(false);
+  });
+
+  it("produces no placeholder when both srcId and overId reference now-hidden panels", () => {
+    // Extreme case: two panels hidden simultaneously (e.g. columns reduced).
+    // The stale insert points at a panel that is no longer in visible.
+    const visible: PanelId[] = ["statusBoard", "openShifts", "broadcast"];
+    const staleInsert = { overId: "incidents" as PanelId, position: "after" as const };
+
+    const result = buildWithPlaceholder(visible, "liveMap" as PanelId, staleInsert);
+    // overId not in visible → no placeholder emitted
+    expect(result).toBe(visible);
+    expect(result.includes(DRAG_PLACEHOLDER)).toBe(false);
+  });
+});
+
 describe("useDispatchLayout — user isolation (org switch)", () => {
   it("loads the correct layout for each user ID independently", () => {
     const layoutA: DispatchLayout = {
