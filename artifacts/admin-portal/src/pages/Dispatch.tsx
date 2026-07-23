@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link, useLocation } from "wouter";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { api, getToken } from "@/lib/api";
@@ -12,10 +12,13 @@ import { Textarea } from "@/components/ui/textarea";
 import {
   Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogFooter,
 } from "@/components/ui/dialog";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import { Switch } from "@/components/ui/switch";
+import { ResizablePanelGroup, ResizablePanel, ResizableHandle } from "@/components/ui/resizable";
 import {
   AlertTriangle, CheckCircle2, Clock, MapPin, MessageCircle, Radio, Send,
   ShieldAlert, UserCheck, Users, Megaphone, Loader2, RefreshCw, Wifi, WifiOff,
-  HelpCircle, X,
+  HelpCircle, X, Settings2, Maximize2, Minimize2,
 } from "lucide-react";
 import { useAuth } from "@/lib/auth";
 import { useFirstQueryParam } from "@/hooks/useDeepLinkFocus";
@@ -175,6 +178,137 @@ const SEV_STYLES: Record<Incident["severity"], string> = {
   low: "bg-slate-400 text-white border-slate-500",
 };
 
+// =========================================================== LAYOUT STATE
+
+const PANEL_IDS = ["incidents", "statusBoard", "shiftClaims", "openShifts", "liveMap", "broadcast"] as const;
+type PanelId = typeof PANEL_IDS[number];
+
+const PANEL_LABELS: Record<PanelId, string> = {
+  incidents: "Active Incidents",
+  statusBoard: "Status Board",
+  shiftClaims: "Shift Claims",
+  openShifts: "Open Shifts",
+  liveMap: "Live Map",
+  broadcast: "Broadcast",
+};
+
+interface DispatchLayout {
+  panels: Record<PanelId, boolean>;
+  columnSplit: number;
+  mapExpanded: boolean;
+  mapTileLayer: "street" | "satellite";
+}
+
+const DEFAULT_LAYOUT: DispatchLayout = {
+  panels: {
+    incidents: true, statusBoard: true, shiftClaims: true,
+    openShifts: true, liveMap: true, broadcast: true,
+  },
+  columnSplit: 67,
+  mapExpanded: false,
+  mapTileLayer: "street",
+};
+
+function useDispatchLayout(userId: string | undefined) {
+  const storageKey = userId ? `wcsg.dispatch.layout.${userId}` : null;
+
+  const [layout, setLayoutRaw] = useState<DispatchLayout>(() => {
+    if (!storageKey) return DEFAULT_LAYOUT;
+    try {
+      const raw = localStorage.getItem(storageKey);
+      if (!raw) return DEFAULT_LAYOUT;
+      const parsed = JSON.parse(raw) as Partial<DispatchLayout> & { panels?: Partial<Record<PanelId, boolean>> };
+      return {
+        panels: { ...DEFAULT_LAYOUT.panels, ...parsed.panels },
+        columnSplit:
+          typeof parsed.columnSplit === "number"
+            ? Math.max(20, Math.min(80, parsed.columnSplit))
+            : DEFAULT_LAYOUT.columnSplit,
+        mapExpanded:
+          typeof parsed.mapExpanded === "boolean"
+            ? parsed.mapExpanded
+            : DEFAULT_LAYOUT.mapExpanded,
+        mapTileLayer: parsed.mapTileLayer === "satellite" ? "satellite" : "street",
+      };
+    } catch {
+      return DEFAULT_LAYOUT;
+    }
+  });
+
+  const setLayout = useCallback(
+    (updater: (prev: DispatchLayout) => DispatchLayout) => {
+      setLayoutRaw((prev) => {
+        const next = updater(prev);
+        if (storageKey) {
+          try { localStorage.setItem(storageKey, JSON.stringify(next)); } catch { /* private mode */ }
+        }
+        return next;
+      });
+    },
+    [storageKey],
+  );
+
+  return [layout, setLayout] as const;
+}
+
+function useIsLargeScreen(): boolean {
+  const [isLarge, setIsLarge] = useState(() => typeof window !== "undefined" && window.innerWidth >= 1024);
+  useEffect(() => {
+    const handler = () => setIsLarge(window.innerWidth >= 1024);
+    window.addEventListener("resize", handler);
+    return () => window.removeEventListener("resize", handler);
+  }, []);
+  return isLarge;
+}
+
+// =========================================================== CUSTOMIZE POPOVER
+
+function CustomizePopover({
+  layout,
+  onTogglePanel,
+}: {
+  layout: DispatchLayout;
+  onTogglePanel: (id: PanelId) => void;
+}) {
+  return (
+    <Popover>
+      <PopoverTrigger asChild>
+        <Button variant="outline" size="sm" aria-label="Customize layout">
+          <Settings2 className="w-4 h-4 mr-2" /> Customize
+        </Button>
+      </PopoverTrigger>
+      <PopoverContent align="end" className="w-64 p-3">
+        <div className="text-xs font-semibold uppercase tracking-wide opacity-60 mb-3">
+          Show / hide panels
+        </div>
+        <div className="space-y-2">
+          {PANEL_IDS.map((id) => {
+            const visible = layout.panels[id];
+            return (
+              <div
+                key={id}
+                className={`flex items-center justify-between rounded px-2 py-1.5 transition-colors ${
+                  visible ? "" : "opacity-40"
+                }`}
+              >
+                <span className="text-sm">{PANEL_LABELS[id]}</span>
+                <Switch
+                  checked={visible}
+                  onCheckedChange={() => onTogglePanel(id)}
+                  aria-label={`${visible ? "Hide" : "Show"} ${PANEL_LABELS[id]}`}
+                />
+              </div>
+            );
+          })}
+        </div>
+        <p className="text-[11px] opacity-50 mt-3 leading-snug">
+          Layout is saved per user and survives page refresh.
+        </p>
+      </PopoverContent>
+    </Popover>
+  );
+}
+
 /**
  * Subscribe to the shared `/api/ws` channel so brand-new incidents (and
  * status edits) flush into the page without waiting on the 30s poll.
@@ -233,6 +367,25 @@ export default function DispatchPage() {
   const qc = useQueryClient();
   const { user } = useAuth();
   const [tourOpen, setTourOpen] = useState(false);
+  const isLargeScreen = useIsLargeScreen();
+  const [layout, setLayout] = useDispatchLayout(user?.id);
+  const splitSaveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const togglePanel = useCallback((id: PanelId) => {
+    setLayout((prev) => ({
+      ...prev,
+      panels: { ...prev.panels, [id]: !prev.panels[id] },
+    }));
+  }, [setLayout]);
+
+  const handleColumnResize = useCallback((sizes: number[]) => {
+    const leftSize = sizes[0];
+    if (typeof leftSize !== "number") return;
+    if (splitSaveTimer.current) clearTimeout(splitSaveTimer.current);
+    splitSaveTimer.current = setTimeout(() => {
+      setLayout((prev) => ({ ...prev, columnSplit: Math.round(leftSize) }));
+    }, 300);
+  }, [setLayout]);
   // Incident id that the Live Map asked to open. Lifted to the page so
   // the map (right column) can hand off to the IncidentsPanel (left
   // column) without either component leaving the Dispatch page — this
@@ -354,7 +507,8 @@ export default function DispatchPage() {
             )}
           </p>
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-2 flex-wrap">
+          <CustomizePopover layout={layout} onTogglePanel={togglePanel} />
           <Button
             variant="ghost" size="sm"
             onClick={() => setTourOpen(true)}
@@ -369,67 +523,132 @@ export default function DispatchPage() {
         </div>
       </header>
 
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
-        <div className="lg:col-span-2 space-y-4">
-          <div data-tour="incidents">
-            <IncidentsPanel
-              data={incidents.data ?? []}
-              loading={incidents.isLoading}
-              error={incidents.error}
-              updatedAt={incidents.dataUpdatedAt}
-              onChange={refreshAll}
-              wsState={wsState}
-              focusedIncidentId={focusedIncidentId}
-              onFocusConsumed={() => setFocusedIncidentId(null)}
-            />
+      {/* ---- layout: resizable columns on desktop, stacked on mobile ---- */}
+      {(() => {
+        const leftPanels = (
+          <div className="space-y-4 min-w-0">
+            {layout.panels.incidents && (
+              <div data-tour="incidents">
+                <IncidentsPanel
+                  data={incidents.data ?? []}
+                  loading={incidents.isLoading}
+                  error={incidents.error}
+                  updatedAt={incidents.dataUpdatedAt}
+                  onChange={refreshAll}
+                  wsState={wsState}
+                  focusedIncidentId={focusedIncidentId}
+                  onFocusConsumed={() => setFocusedIncidentId(null)}
+                />
+              </div>
+            )}
+            {layout.panels.statusBoard && (
+              <div data-tour="status-board">
+                <StatusBoardPanel
+                  data={board.data}
+                  loading={board.isLoading}
+                  error={board.error}
+                  updatedAt={board.dataUpdatedAt}
+                  isAdmin={user?.role === "admin"}
+                  onChange={refreshAll}
+                />
+              </div>
+            )}
+            {layout.panels.shiftClaims && (
+              <div data-tour="shift-claims">
+                <ShiftClaimsPanel
+                  claims={pendingClaims}
+                  loading={claims.isLoading}
+                  error={claims.error}
+                  updatedAt={claims.dataUpdatedAt}
+                  onChange={() => qc.invalidateQueries({ queryKey: ["dispatch"] })}
+                />
+              </div>
+            )}
+            {layout.panels.openShifts && (
+              <div data-tour="open-shifts">
+                <OpenShiftsPanel
+                  data={openShifts.data ?? []}
+                  loading={openShifts.isLoading}
+                  error={openShifts.error}
+                  updatedAt={openShifts.dataUpdatedAt}
+                  onChange={refreshAll}
+                />
+              </div>
+            )}
           </div>
-          <div data-tour="status-board">
-            <StatusBoardPanel
-              data={board.data}
-              loading={board.isLoading}
-              error={board.error}
-              updatedAt={board.dataUpdatedAt}
-              isAdmin={user?.role === "admin"}
-              onChange={refreshAll}
-            />
-          </div>
-          <div data-tour="shift-claims">
-            <ShiftClaimsPanel
-              claims={pendingClaims}
-              loading={claims.isLoading}
-              error={claims.error}
-              updatedAt={claims.dataUpdatedAt}
-              onChange={() => qc.invalidateQueries({ queryKey: ["dispatch"] })}
-            />
-          </div>
-          <div data-tour="open-shifts">
-            <OpenShiftsPanel
-              data={openShifts.data ?? []}
-              loading={openShifts.isLoading}
-              error={openShifts.error}
-              updatedAt={openShifts.dataUpdatedAt}
-              onChange={refreshAll}
-            />
-          </div>
-        </div>
+        );
 
-        <div className="space-y-4">
-          <LiveMapPanel
-            officers={officers.data ?? []}
-            sites={sites.data ?? []}
-            loading={officers.isLoading}
-            error={officers.error}
-            updatedAt={officers.dataUpdatedAt}
-            incidents={incidents.data ?? []}
-            onFocusIncident={setFocusedIncidentId}
-            focusUserId={deepLinkUserId}
-            focusSiteId={deepLinkSiteId}
-          />
-          <div data-tour="broadcast">
-            <BroadcastPanel rooms={rooms.data ?? []} />
+        const rightPanels = (
+          <div className="space-y-4 min-w-0">
+            {layout.panels.liveMap && (
+              <LiveMapPanel
+                officers={officers.data ?? []}
+                sites={sites.data ?? []}
+                loading={officers.isLoading}
+                error={officers.error}
+                updatedAt={officers.dataUpdatedAt}
+                incidents={incidents.data ?? []}
+                onFocusIncident={setFocusedIncidentId}
+                focusUserId={deepLinkUserId}
+                focusSiteId={deepLinkSiteId}
+                mapExpanded={layout.mapExpanded}
+                onToggleExpand={() =>
+                  setLayout((prev) => ({ ...prev, mapExpanded: !prev.mapExpanded }))
+                }
+                mapTileLayer={layout.mapTileLayer}
+                onTileLayerChange={(layer) =>
+                  setLayout((prev) => ({ ...prev, mapTileLayer: layer }))
+                }
+              />
+            )}
+            {layout.panels.broadcast && (
+              <div data-tour="broadcast">
+                <BroadcastPanel rooms={rooms.data ?? []} />
+              </div>
+            )}
           </div>
-        </div>
-      </div>
+        );
+
+        const leftVisible =
+          layout.panels.incidents || layout.panels.statusBoard ||
+          layout.panels.shiftClaims || layout.panels.openShifts;
+        const rightVisible = layout.panels.liveMap || layout.panels.broadcast;
+
+        if (!isLargeScreen) {
+          return (
+            <div className="space-y-4">
+              {leftVisible && leftPanels}
+              {rightVisible && rightPanels}
+            </div>
+          );
+        }
+
+        if (!leftVisible) {
+          return <div className="w-full">{rightPanels}</div>;
+        }
+        if (!rightVisible) {
+          return <div className="w-full">{leftPanels}</div>;
+        }
+
+        return (
+          <ResizablePanelGroup
+            direction="horizontal"
+            className="gap-4"
+            onLayout={handleColumnResize}
+          >
+            <ResizablePanel defaultSize={layout.columnSplit} minSize={25} maxSize={80}>
+              {leftPanels}
+            </ResizablePanel>
+            <ResizableHandle
+              withHandle
+              className="mx-1 bg-border hover:bg-brand-gold/50 transition-colors [&>div]:border-brand-gold/60 [&>div]:bg-background"
+            />
+            <ResizablePanel defaultSize={100 - layout.columnSplit} minSize={20} maxSize={75}>
+              {rightPanels}
+            </ResizablePanel>
+          </ResizablePanelGroup>
+        );
+      })()}
 
       {tourOpen && <DispatchTour onClose={closeTour} />}
     </div>
@@ -1566,6 +1785,7 @@ function buildLeafletHtml(
   points: MapPoint[],
   defaultGeofenceRadiusMiles: number,
   focusCenter?: { lat: number; lng: number },
+  initialTileLayer: "street" | "satellite" = "street",
 ): string {
   // Coordinates are validated numbers; labels are JSON-encoded then
   // injected into the DOM via createTextNode, never innerHTML.
@@ -1656,9 +1876,32 @@ const map = L.map('m',{zoomControl:true});
 // this, adding a circle throws "Cannot read properties of undefined
 // (reading 'layerPointToLatLng')". fitBounds below replaces this view.
 map.setView([39.8283,-98.5795],4);
-L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',{
+var STREET_LAYER = L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',{
   attribution:'&copy; OpenStreetMap', maxZoom:19
-}).addTo(map);
+});
+var SATELLITE_LAYER = L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',{
+  attribution:'Imagery &copy; Esri', maxZoom:19
+});
+var currentTileLayer = '${initialTileLayer}' === 'satellite' ? SATELLITE_LAYER : STREET_LAYER;
+currentTileLayer.addTo(map);
+// Tile-layer toggle button
+(function(){
+  var btn=document.createElement('button');
+  btn.id='tile-toggle';
+  btn.title='Toggle Street / Satellite';
+  btn.style.cssText='position:absolute;top:10px;right:10px;z-index:1000;background:#0c0a08;color:#c9a04a;border:1.5px solid #c9a04a;border-radius:5px;padding:5px 10px;font:bold 11px -apple-system,system-ui,sans-serif;cursor:pointer;box-shadow:0 1px 4px rgba(0,0,0,.5);letter-spacing:.03em;';
+  var isSat = '${initialTileLayer}' === 'satellite';
+  btn.textContent = isSat ? 'Street' : 'Satellite';
+  btn.addEventListener('click',function(){
+    map.removeLayer(currentTileLayer);
+    isSat = !isSat;
+    currentTileLayer = isSat ? SATELLITE_LAYER : STREET_LAYER;
+    currentTileLayer.addTo(map);
+    btn.textContent = isSat ? 'Street' : 'Satellite';
+    try{ parent.postMessage({type:'wcsg:mapTileLayer',layer:isSat?'satellite':'street'},'*'); }catch(e){}
+  });
+  document.getElementById('m').appendChild(btn);
+})();
 if(pts.length){
   const group = L.featureGroup().addTo(map);
   pts.forEach(p=>{
@@ -1728,13 +1971,17 @@ ${focusCenter ? `try { map.setView([${focusCenter.lat}, ${focusCenter.lng}], 15)
 
 function LiveMapPanel({
   officers, sites, loading, error, updatedAt, incidents, onFocusIncident,
-  focusUserId, focusSiteId,
+  focusUserId, focusSiteId, mapExpanded, onToggleExpand, mapTileLayer, onTileLayerChange,
 }: {
   officers: ActiveOfficer[]; sites: Site[]; loading: boolean; error: unknown;
   updatedAt: number | undefined; incidents: Incident[];
   onFocusIncident: (incidentId: string) => void;
   focusUserId?: string | null;
   focusSiteId?: string | null;
+  mapExpanded?: boolean;
+  onToggleExpand?: () => void;
+  mapTileLayer?: "street" | "satellite";
+  onTileLayerChange?: (layer: "street" | "satellite") => void;
 }) {
   const [, navigate] = useLocation();
 
@@ -1762,11 +2009,16 @@ function LiveMapPanel({
         if (typeof iid === "string" && iid.length > 0 && iid.length < 100) {
           onFocusIncident(iid);
         }
+      } else if (type === "wcsg:mapTileLayer") {
+        const layer = (data as { layer?: unknown }).layer;
+        if (layer === "street" || layer === "satellite") {
+          onTileLayerChange?.(layer);
+        }
       }
     };
     window.addEventListener("message", handler);
     return () => window.removeEventListener("message", handler);
-  }, [navigate, onFocusIncident]);
+  }, [navigate, onFocusIncident, onTileLayerChange]);
 
   const points = useMemo<MapPoint[]>(() => {
     const pts: MapPoint[] = [];
@@ -1846,8 +2098,9 @@ function LiveMapPanel({
   // MAP_BUILD_ID re-evaluates on every HMR reload so dev-time edits to
   // buildLeafletHtml actually take effect without a hard refresh.
   const html = useMemo(
-    () => buildLeafletHtml(points, geofenceRadiusMiles, focusCenter),
-    [points, geofenceRadiusMiles, focusCenter, MAP_BUILD_ID],
+    () => buildLeafletHtml(points, geofenceRadiusMiles, focusCenter, mapTileLayer ?? "street"),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [points, geofenceRadiusMiles, focusCenter, mapTileLayer, MAP_BUILD_ID],
   );
   const withCoords = points.filter((p) => p.kind === "officer").length;
   const withoutCoords = officers.length - withCoords;
@@ -1865,6 +2118,16 @@ function LiveMapPanel({
               {withoutCoords > 0 && ` · ${withoutCoords} no GPS`}
             </span>
             <FreshnessLabel updatedAt={updatedAt} />
+            <button
+              onClick={onToggleExpand}
+              className="opacity-60 hover:opacity-100 transition-opacity ml-1"
+              aria-label={mapExpanded ? "Collapse map" : "Expand map"}
+              title={mapExpanded ? "Collapse map" : "Expand map"}
+            >
+              {mapExpanded
+                ? <Minimize2 className="w-3.5 h-3.5" />
+                : <Maximize2 className="w-3.5 h-3.5" />}
+            </button>
           </span>
         </CardTitle>
       </CardHeader>
@@ -1874,10 +2137,10 @@ function LiveMapPanel({
           <div className="text-sm opacity-60 p-4">Loading…</div>
         ) : (
           <iframe
-            key={`dispatch-map-${MAP_BUILD_ID}`}
+            key={`dispatch-map-${MAP_BUILD_ID}-${mapTileLayer ?? "street"}`}
             title="Live officer map"
             srcDoc={html}
-            className="w-full h-[24rem] border-0"
+            className={`w-full border-0 transition-all duration-300 ${mapExpanded ? "h-[50rem]" : "h-[24rem]"}`}
             sandbox="allow-scripts"
           />
         )}
