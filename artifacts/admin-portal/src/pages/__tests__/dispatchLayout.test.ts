@@ -680,6 +680,115 @@ describe("applyPanelReorder — cross-column drop does not mutate panelOrder", (
   });
 });
 
+// ---------------------------------------------------------------------------
+// Hidden-panel visibility — visible is a strict subset of columnSet
+//
+// When some panels are toggled off, `visible` is a subset of `columnSet`.
+// `buildColumnWithPlaceholder` must insert the placeholder only among the
+// visible slots and must never emit hidden panel IDs or silently skip a drop
+// because the hovered panel is absent from the rendered column.
+// ---------------------------------------------------------------------------
+
+describe("buildColumnWithPlaceholder — visible is a strict subset of columnSet (panels hidden)", () => {
+  it("inserts placeholder before a visible panel even when other left-column panels are hidden", () => {
+    // statusBoard and openShifts are hidden; only incidents and shiftClaims are visible
+    const visible: PanelId[] = ["incidents", "shiftClaims"];
+    const slots = buildColumnWithPlaceholder(
+      visible,
+      "shiftClaims",
+      { overId: "incidents", position: "before" },
+      LEFT_COLUMN,
+    );
+    expect(slots).toEqual([DRAG_PLACEHOLDER, "incidents", "shiftClaims"]);
+    // Hidden panel IDs must never appear in the output
+    expect(slots).not.toContain("statusBoard" as PanelId);
+    expect(slots).not.toContain("openShifts" as PanelId);
+  });
+
+  it("inserts placeholder after a visible panel even when a hidden panel exists in the column", () => {
+    // openShifts is hidden; incidents, statusBoard, shiftClaims are visible
+    const visible: PanelId[] = ["incidents", "statusBoard", "shiftClaims"];
+    const slots = buildColumnWithPlaceholder(
+      visible,
+      "incidents",
+      { overId: "shiftClaims", position: "after" },
+      LEFT_COLUMN,
+    );
+    expect(slots).toEqual(["incidents", "statusBoard", "shiftClaims", DRAG_PLACEHOLDER]);
+    expect(slots).not.toContain("openShifts" as PanelId);
+  });
+
+  it("produces no placeholder when overId is a hidden panel (not present in visible)", () => {
+    // statusBoard is hidden — hovering its position would emit no visible overId,
+    // but if a stale overId arrived for a hidden panel the result must be placeholder-free
+    const visible: PanelId[] = ["incidents", "shiftClaims", "openShifts"];
+    const slots = buildColumnWithPlaceholder(
+      visible,
+      "incidents",
+      { overId: "statusBoard", position: "after" },
+      LEFT_COLUMN,
+    );
+    expect(slots.includes(DRAG_PLACEHOLDER)).toBe(false);
+    // The visible panels are still rendered in their original order
+    const panelSlots = slots.filter((s) => s !== DRAG_PLACEHOLDER);
+    expect(panelSlots).toEqual(visible);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// applyPanelReorder with hidden panels in full panelOrder
+//
+// Hidden panels stay in `panelOrder` even when they are off.  Reordering
+// among visible panels must never drop or duplicate hidden panel IDs — when
+// a panel is re-enabled it must appear in the correct relative position.
+// ---------------------------------------------------------------------------
+
+describe("applyPanelReorder — full panelOrder preserved when some panels are hidden", () => {
+  it("all panels (including hidden) remain after a visible-panel reorder — no panels lost or duplicated", () => {
+    // statusBoard and openShifts are "hidden" but still part of panelOrder
+    const fullOrder: PanelId[] = [
+      "incidents",
+      "statusBoard",
+      "shiftClaims",
+      "openShifts",
+      "liveMap",
+      "broadcast",
+    ];
+    // Drag visible panel "shiftClaims" before visible panel "incidents"
+    const result = applyPanelReorder(fullOrder, "shiftClaims", "incidents", "before");
+    // Result is a permutation of all 6 panels — no panel lost, none duplicated
+    expect(result).toHaveLength(6);
+    expect([...result].sort()).toEqual([...fullOrder].sort());
+    // Hidden panels explicitly present
+    expect(result).toContain("statusBoard" as PanelId);
+    expect(result).toContain("openShifts" as PanelId);
+  });
+
+  it("re-enabling a hidden panel after a reorder places it directly adjacent to its updated neighbour", () => {
+    // Initial full order: incidents, statusBoard (hidden), shiftClaims, openShifts, liveMap, broadcast
+    const fullOrder: PanelId[] = [
+      "incidents",
+      "statusBoard",
+      "shiftClaims",
+      "openShifts",
+      "liveMap",
+      "broadcast",
+    ];
+    // Among visible left panels, drag "shiftClaims" before "incidents"
+    // Expected result: [shiftClaims, incidents, statusBoard, openShifts, liveMap, broadcast]
+    const reordered = applyPanelReorder(fullOrder, "shiftClaims", "incidents", "before");
+    expect(reordered[0]).toBe("shiftClaims");
+    expect(reordered[1]).toBe("incidents");
+    // statusBoard was between incidents and shiftClaims in the original order; after the
+    // reorder it lands at index 2, directly adjacent to incidents at index 1.
+    // Enforcing strict adjacency (not just "somewhere after") confirms re-enabling it
+    // shows it immediately after incidents, not floating elsewhere.
+    const incidentsIdx = reordered.indexOf("incidents");
+    const statusBoardIdx = reordered.indexOf("statusBoard");
+    expect(statusBoardIdx).toBe(incidentsIdx + 1);
+  });
+});
+
 describe("useDispatchLayout — user isolation (org switch)", () => {
   it("loads the correct layout for each user ID independently", () => {
     const layoutA: DispatchLayout = {
