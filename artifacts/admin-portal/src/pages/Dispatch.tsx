@@ -595,7 +595,7 @@ export default function DispatchPage() {
         );
       })()}
 
-      {tourOpen && <DispatchTour onClose={closeTour} />}
+      {tourOpen && <DispatchTour onClose={closeTour} panels={layout.panels} />}
     </div>
   );
 }
@@ -603,7 +603,10 @@ export default function DispatchPage() {
 // =========================================================== COACH-MARK TOUR
 
 type TourStep = {
+  /** data-tour selector to spotlight */
   selector: string;
+  /** Panel that must be visible for this step to appear */
+  panelKey: PanelId;
   title: string;
   body: string;
 };
@@ -611,37 +614,57 @@ type TourStep = {
 const TOUR_STEPS: TourStep[] = [
   {
     selector: '[data-tour="incidents"]',
+    panelKey: "incidents",
     title: "Active Incidents",
     body: "Every open incident lands here in real time. Critical ones flash red — click any row to update status and add dispatcher notes.",
   },
   {
     selector: '[data-tour="status-board"]',
+    panelKey: "statusBoard",
     title: "Clock-In Status Board",
     body: "Today's shifts grouped by state: on duty, late (≥10m), no-show, early-out, and upcoming. Use it to spot coverage gaps at a glance.",
   },
   {
     selector: '[data-tour="open-shifts"]',
+    panelKey: "openShifts",
     title: "Open Shifts & Assign Nearest",
     body: "Unfilled shifts in the next 72 hours. Hit \"Assign nearest\" to rank qualified officers by distance and one-tap fill the slot, or \"Notify\" to push the vacancy to everyone who qualifies.",
   },
   {
     selector: '[data-tour="broadcast"]',
+    panelKey: "broadcast",
     title: "Broadcast Composer",
     body: "Pick a channel (📣 announcements goes org-wide), preview the thread if you want context, then send. Officers see it instantly in chat and push.",
   },
 ];
 
-function DispatchTour({ onClose }: { onClose: () => void }) {
+function DispatchTour({
+  onClose,
+  panels,
+}: {
+  onClose: () => void;
+  panels: Record<PanelId, boolean>;
+}) {
+  // Filter to only the steps whose panel is currently visible.
+  const visibleSteps = useMemo(
+    () => TOUR_STEPS.filter((s) => panels[s.panelKey]),
+    [panels],
+  );
+  const noVisiblePanels = visibleSteps.length === 0;
+
   const [idx, setIdx] = useState(0);
+  // If the user hid panels while the tour was open, clamp the index.
+  const safeIdx = Math.min(idx, Math.max(0, visibleSteps.length - 1));
+  const step = visibleSteps[safeIdx];
   const [rect, setRect] = useState<DOMRect | null>(null);
-  const step = TOUR_STEPS[idx];
   const tooltipRef = useRef<HTMLDivElement | null>(null);
   const titleId = "dispatch-tour-title";
   const bodyId = "dispatch-tour-body";
-  const stepDescId = `dispatch-tour-step-${idx}`;
+  const stepDescId = `dispatch-tour-step-${safeIdx}`;
 
   // Attach aria-describedby to the spotlight target so SR users get context.
   useEffect(() => {
+    if (!step) return;
     const el = document.querySelector(step.selector) as HTMLElement | null;
     if (!el) return;
     const prev = el.getAttribute("aria-describedby");
@@ -654,9 +677,10 @@ function DispatchTour({ onClose }: { onClose: () => void }) {
       if (cleaned) el.setAttribute("aria-describedby", cleaned);
       else el.removeAttribute("aria-describedby");
     };
-  }, [step.selector, stepDescId]);
+  }, [step?.selector, stepDescId]);
 
   useEffect(() => {
+    if (!step) { setRect(null); return; }
     const measure = () => {
       const el = document.querySelector(step.selector) as HTMLElement | null;
       if (!el) { setRect(null); return; }
@@ -677,9 +701,10 @@ function DispatchTour({ onClose }: { onClose: () => void }) {
       window.removeEventListener("resize", onResize);
       window.removeEventListener("scroll", onResize, true);
     };
-  }, [step.selector]);
+  }, [step?.selector]);
 
   // Position the tooltip below the target when there's room, otherwise above.
+  // When there is no spotlight (no panel / all panels hidden), centre it.
   const tooltipStyle = useMemo<React.CSSProperties>(() => {
     if (!rect) {
       return { top: "50%", left: "50%", transform: "translate(-50%, -50%)" };
@@ -700,10 +725,10 @@ function DispatchTour({ onClose }: { onClose: () => void }) {
   }, [rect]);
 
   const next = () => {
-    if (idx < TOUR_STEPS.length - 1) setIdx(idx + 1);
+    if (safeIdx < visibleSteps.length - 1) setIdx(safeIdx + 1);
     else onClose();
   };
-  const prev = () => { if (idx > 0) setIdx(idx - 1); };
+  const prev = () => { if (safeIdx > 0) setIdx(safeIdx - 1); };
 
   // Restore focus to the trigger when the tour closes.
   useEffect(() => {
@@ -725,7 +750,7 @@ function DispatchTour({ onClose }: { onClose: () => void }) {
     const first = focusables[0];
     if (first) first.focus();
     else root.focus();
-  }, [idx]);
+  }, [safeIdx, noVisiblePanels]);
 
   // Keyboard handling: Esc closes, Arrow/Enter navigate, Tab is trapped.
   useEffect(() => {
@@ -780,7 +805,55 @@ function DispatchTour({ onClose }: { onClose: () => void }) {
     };
     document.addEventListener("keydown", onKey, true);
     return () => document.removeEventListener("keydown", onKey, true);
-  }, [idx, onClose]);
+  }, [safeIdx, noVisiblePanels, onClose]);
+
+  // "All panels hidden" — show a single centred message prompting the user
+  // to restore panels via the Customize button, then close.
+  if (noVisiblePanels) {
+    return (
+      <div className="fixed inset-0 z-[1000]">
+        <div
+          className="absolute inset-0 bg-black/50"
+          onClick={onClose}
+          data-testid="dispatch-tour-overlay"
+        />
+        <div
+          ref={tooltipRef}
+          className="absolute bg-card text-card-foreground rounded-lg shadow-xl border p-4 space-y-3 focus:outline-none"
+          style={{ top: "50%", left: "50%", transform: "translate(-50%, -50%)", width: 360 }}
+          onClick={(e) => e.stopPropagation()}
+          data-testid="dispatch-tour-tooltip"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby={titleId}
+          aria-describedby={bodyId}
+          tabIndex={-1}
+        >
+          <div className="flex items-start justify-between gap-2">
+            <div id={titleId} className="font-semibold text-sm">No panels to tour</div>
+            <button
+              onClick={onClose}
+              className="opacity-60 hover:opacity-100"
+              aria-label="Close walkthrough"
+              data-testid="dispatch-tour-close"
+            >
+              <X className="w-4 h-4" />
+            </button>
+          </div>
+          <p id={bodyId} className="text-sm opacity-85 leading-snug">
+            All walkthrough panels are currently hidden. Use the{" "}
+            <strong>Customize</strong> button in the header to restore them, then
+            re-open the tour.
+          </p>
+          <div className="flex justify-end pt-1">
+            <Button size="sm" onClick={onClose} data-testid="dispatch-tour-next">
+              Got it
+            </Button>
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="fixed inset-0 z-[1000]">
@@ -817,7 +890,7 @@ function DispatchTour({ onClose }: { onClose: () => void }) {
         <div className="flex items-start justify-between gap-2">
           <div>
             <div className="text-[11px] uppercase opacity-60 tracking-wide">
-              Step {idx + 1} of {TOUR_STEPS.length}
+              Step {safeIdx + 1} of {visibleSteps.length}
             </div>
             <div id={titleId} className="font-semibold text-sm mt-0.5">{step.title}</div>
           </div>
@@ -837,15 +910,15 @@ function DispatchTour({ onClose }: { onClose: () => void }) {
         </span>
         <div className="flex items-center justify-between pt-1">
           <div className="flex gap-1">
-            {TOUR_STEPS.map((_, i) => (
+            {visibleSteps.map((_, i) => (
               <span
                 key={i}
-                className={`h-1.5 w-5 rounded-full ${i === idx ? "bg-brand-gold" : "bg-muted"}`}
+                className={`h-1.5 w-5 rounded-full ${i === safeIdx ? "bg-brand-gold" : "bg-muted"}`}
               />
             ))}
           </div>
           <div className="flex items-center gap-2">
-            {idx > 0 && (
+            {safeIdx > 0 && (
               <Button size="sm" variant="ghost" onClick={prev}>Back</Button>
             )}
             <Button
@@ -853,7 +926,7 @@ function DispatchTour({ onClose }: { onClose: () => void }) {
               onClick={next}
               data-testid="dispatch-tour-next"
             >
-              {idx < TOUR_STEPS.length - 1 ? "Next" : "Got it"}
+              {safeIdx < visibleSteps.length - 1 ? "Next" : "Got it"}
             </Button>
           </div>
         </div>
