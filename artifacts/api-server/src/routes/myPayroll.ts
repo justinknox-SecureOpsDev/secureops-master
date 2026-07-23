@@ -1,7 +1,7 @@
 import { Router, type IRouter } from "express";
 import { and, desc, eq, ne } from "drizzle-orm";
 import { db, payrollEntriesTable, sitesTable } from "@workspace/db";
-import { requireAuth } from "../middlewares/auth";
+import { requireStaff } from "../middlewares/auth";
 import { requireFeature } from "../lib/features";
 
 const router: IRouter = Router();
@@ -16,7 +16,7 @@ router.use("/me/payroll", requireFeature("payroll"));
  * always pinned to `req.user.userId`, so this endpoint is safe even
  * if the JWT carries a non-admin role.
  */
-router.get("/me/payroll", requireAuth, async (req, res): Promise<void> => {
+router.get("/me/payroll", requireStaff, async (req, res): Promise<void> => {
   const userId = req.user!.userId;
 
   const rows = await db

@@ -25,7 +25,11 @@ export function stripShiftFinanceForRole<T extends Record<string, unknown>>(
   shift: T,
 ): T {
   if (role === "admin" || role === "dispatcher") return shift;
-  if (role === "site_manager") {
+  // Site managers and external client-portal contacts must never see ANY
+  // rate. Clients shouldn't normally reach shift rows at all (staff routes
+  // are requireStaff-gated), but if a shared read ever hands them one this
+  // keeps every rate out as defense in depth.
+  if (role === "site_manager" || role === "client") {
     const { payRate, billRate, hourlyRate, billableRate, ...rest } = shift as Record<string, unknown>;
     return rest as T;
   }
@@ -47,7 +51,8 @@ export function stripTimeEntryBillRateForRole<T extends Record<string, unknown>>
   row: T,
 ): T {
   if (role === "admin" || role === "dispatcher") return row;
-  if (role === "site_manager") {
+  // Site managers and clients: strip every rate (see stripShiftFinanceForRole).
+  if (role === "site_manager" || role === "client") {
     const { payRate, billRate, ...rest } = row as Record<string, unknown>;
     return rest as T;
   }

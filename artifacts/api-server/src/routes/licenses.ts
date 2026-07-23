@@ -1,7 +1,7 @@
 import { Router, type IRouter } from "express";
 import { eq, and, sql, lte, gte } from "drizzle-orm";
 import { db, licensesTable, usersTable } from "@workspace/db";
-import { requireAuth, requireAdmin } from "../middlewares/auth";
+import { requireStaff, requireAdmin } from "../middlewares/auth";
 
 const router: IRouter = Router();
 
@@ -14,7 +14,7 @@ function getLicenseStatus(expiryDate: string): string {
   return "valid";
 }
 
-router.get("/licenses", requireAuth, async (req, res): Promise<void> => {
+router.get("/licenses", requireStaff, async (req, res): Promise<void> => {
   const { employeeId, status } = req.query as { employeeId?: string; status?: string };
   const conditions = [];
   if (req.user!.role !== "admin") {
@@ -53,7 +53,7 @@ router.get("/licenses", requireAuth, async (req, res): Promise<void> => {
   res.json(rows.map((r) => ({ ...r, status: getLicenseStatus(r.expiryDate) })));
 });
 
-router.post("/licenses", requireAuth, async (req, res): Promise<void> => {
+router.post("/licenses", requireStaff, async (req, res): Promise<void> => {
   const { employeeId, type, level, licenseNumber, issuingAuthority, issueDate, expiryDate, notes } = req.body;
   if (!employeeId || !type || !licenseNumber || !expiryDate) {
     res.status(400).json({ error: "Bad Request", message: "employeeId, type, licenseNumber, expiryDate required" });
@@ -82,7 +82,7 @@ router.post("/licenses", requireAuth, async (req, res): Promise<void> => {
   });
 });
 
-router.put("/licenses/:id", requireAuth, async (req, res): Promise<void> => {
+router.put("/licenses/:id", requireStaff, async (req, res): Promise<void> => {
   const id = Array.isArray(req.params.id) ? req.params.id[0] : req.params.id;
   const { type, level, licenseNumber, issuingAuthority, issueDate, expiryDate, notes } = req.body;
   const updates: Record<string, unknown> = {};

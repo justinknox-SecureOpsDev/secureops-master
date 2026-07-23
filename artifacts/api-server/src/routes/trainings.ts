@@ -8,7 +8,7 @@ import {
   sitesTable,
   licensesTable,
 } from "@workspace/db";
-import { requireAuth, requireAdmin } from "../middlewares/auth";
+import { requireStaff, requireAdmin } from "../middlewares/auth";
 import { requireFeature } from "../lib/features";
 
 const router: IRouter = Router();
@@ -52,7 +52,7 @@ function shape(row: typeof trainingCertificationsTable.$inferSelect) {
 
 // ---------- Officer self-serve ----------
 
-router.get("/me/trainings", requireAuth, async (req, res): Promise<void> => {
+router.get("/me/trainings", requireStaff, async (req, res): Promise<void> => {
   const rows = await db
     .select()
     .from(trainingCertificationsTable)
@@ -60,7 +60,7 @@ router.get("/me/trainings", requireAuth, async (req, res): Promise<void> => {
   res.json(rows.map(shape));
 });
 
-router.post("/me/trainings", requireAuth, async (req, res): Promise<void> => {
+router.post("/me/trainings", requireStaff, async (req, res): Promise<void> => {
   const parsed = writeSchema.safeParse(req.body);
   if (!parsed.success) { res.status(400).json({ error: "Bad Request", issues: parsed.error.issues }); return; }
   const data = parsed.data;
@@ -83,7 +83,7 @@ router.post("/me/trainings", requireAuth, async (req, res): Promise<void> => {
   res.status(201).json(shape(row));
 });
 
-router.put("/me/trainings/:id", requireAuth, async (req, res): Promise<void> => {
+router.put("/me/trainings/:id", requireStaff, async (req, res): Promise<void> => {
   const idParse = z.string().uuid().safeParse(req.params.id);
   if (!idParse.success) { res.status(400).json({ error: "Bad Request", message: "Invalid id" }); return; }
   const parsed = patchSchema.safeParse(req.body);
@@ -128,7 +128,7 @@ router.put("/me/trainings/:id", requireAuth, async (req, res): Promise<void> => 
   res.json(shape(row));
 });
 
-router.delete("/me/trainings/:id", requireAuth, async (req, res): Promise<void> => {
+router.delete("/me/trainings/:id", requireStaff, async (req, res): Promise<void> => {
   const idParse = z.string().uuid().safeParse(req.params.id);
   if (!idParse.success) { res.status(400).json({ error: "Bad Request", message: "Invalid id" }); return; }
   // Scope the delete by ownership so a guessed UUID can't nuke another
@@ -268,7 +268,7 @@ async function computeOfficerCompliance(employeeId: string, requiredTrainings: s
   return { maxLicenseLevel: maxLevel, heldTrainings: [...heldTypes], missingTrainings: missing, expiringSoon };
 }
 
-router.get("/me/compliance", requireAuth, async (req, res): Promise<void> => {
+router.get("/me/compliance", requireStaff, async (req, res): Promise<void> => {
   const siteParse = z.object({ siteId: z.string().uuid().optional() }).safeParse(req.query);
   if (!siteParse.success) { res.status(400).json({ error: "Bad Request", issues: siteParse.error.issues }); return; }
   let requiredTrainings: string[] = [];

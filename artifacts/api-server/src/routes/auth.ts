@@ -4,7 +4,7 @@ import { randomBytes } from "crypto";
 import { and, eq, sql } from "drizzle-orm";
 import { z } from "zod/v4";
 import { db, usersTable, employeesTable, policiesTable, passwordResetTokensTable, revokedTokensTable } from "@workspace/db";
-import { requireAuth, signToken, tokenTtlSeconds } from "../middlewares/auth";
+import { requireAuth, requireStaff, signToken, tokenTtlSeconds } from "../middlewares/auth";
 import { disconnectUser } from "../lib/wsManager";
 import { normalizePhoneToE164 } from "../lib/phone";
 import {
@@ -624,7 +624,7 @@ const PatchMeEmployeeBody = z.object({
   trainingCertificateKeys: z.array(ObjectKey).max(50).nullable().optional(),
 }).strict();
 
-router.patch("/me/employee", requireAuth, async (req, res): Promise<void> => {
+router.patch("/me/employee", requireStaff, async (req, res): Promise<void> => {
   const parsed = PatchMeEmployeeBody.safeParse(req.body);
   if (!parsed.success) {
     res.status(400).json({ error: "Bad Request", message: parsed.error.message });

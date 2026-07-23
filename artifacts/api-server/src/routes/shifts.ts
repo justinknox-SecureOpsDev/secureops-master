@@ -2,7 +2,7 @@ import { Router, type IRouter } from "express";
 import { randomUUID } from "node:crypto";
 import { eq, and, gt, gte, lt, lte, ne, sql, or, isNull, inArray } from "drizzle-orm";
 import { db, shiftsTable, shiftAssignmentsTable, usersTable, licensesTable, sitesTable, clientsTable, trainingCertificationsTable, employeesTable } from "@workspace/db";
-import { requireAuth, requireAdmin, requireAdminOrDispatcher, requireAdminOrSiteManager, requireSchedulingStaff } from "../middlewares/auth";
+import { requireStaff, requireAdmin, requireAdminOrDispatcher, requireAdminOrSiteManager, requireSchedulingStaff } from "../middlewares/auth";
 import { haversineMiles } from "../lib/geofence";
 import { getEffectiveLevel, effectiveLevelSql } from "../lib/eligibility";
 import { pushShiftUpsert, pushShiftDelete, pushAssignmentEvent } from "../lib/schedulerSync";
@@ -99,7 +99,7 @@ async function getEmployeeHeldTrainings(employeeId: string): Promise<Set<string>
   return new Set(rows.map((r) => r.type));
 }
 
-router.get("/shifts", requireAuth, async (req, res): Promise<void> => {
+router.get("/shifts", requireStaff, async (req, res): Promise<void> => {
   const { status, employeeId, from, to, view } = req.query as { status?: string; employeeId?: string; from?: string; to?: string; view?: string };
   // Admins and dispatchers get a full global read (they assign/notify/schedule
   // across every site). Site managers get a SCOPED read: shifts at the sites
@@ -845,7 +845,7 @@ router.post("/shifts/series/fix-timezone", requireAdmin, async (req, res): Promi
   res.json({ fixed, alreadyCorrect, skipped, total: rows.length });
 });
 
-router.get("/shifts/:id", requireAuth, async (req, res): Promise<void> => {
+router.get("/shifts/:id", requireStaff, async (req, res): Promise<void> => {
   const id = Array.isArray(req.params.id) ? req.params.id[0] : req.params.id;
   const [shift] = await db.select().from(shiftsTable).where(eq(shiftsTable.id, id));
   if (!shift) { res.status(404).json({ error: "Not Found" }); return; }
@@ -989,7 +989,7 @@ router.delete("/shifts/:id", requireAdminOrSiteManager, async (req, res): Promis
   res.sendStatus(204);
 });
 
-router.post("/shifts/:id/claim", requireAuth, async (req, res): Promise<void> => {
+router.post("/shifts/:id/claim", requireStaff, async (req, res): Promise<void> => {
   const shiftId = Array.isArray(req.params.id) ? req.params.id[0] : req.params.id;
   const userId = req.user!.userId;
 
@@ -1402,7 +1402,7 @@ router.post("/shifts/:id/assignments", requireSchedulingStaff, async (req, res):
   res.status(201).json({ ...assignment, employeeName: user ? `${user.firstName} ${user.lastName}` : null });
 });
 
-router.put("/shifts/:id/assignments/:assignmentId", requireAuth, async (req, res): Promise<void> => {
+router.put("/shifts/:id/assignments/:assignmentId", requireStaff, async (req, res): Promise<void> => {
   const assignmentId = Array.isArray(req.params.assignmentId) ? req.params.assignmentId[0] : req.params.assignmentId;
   const { status } = req.body;
   if (!status) { res.status(400).json({ error: "Bad Request", message: "status required" }); return; }

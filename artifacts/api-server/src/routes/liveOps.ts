@@ -1,7 +1,7 @@
 import { Router, type IRouter } from "express";
 import { eq, isNull, and, sql, desc, gte, asc } from "drizzle-orm";
 import { db, usersTable, timeEntriesTable, shiftsTable, sitesTable, incidentsTable, locationPingsTable } from "@workspace/db";
-import { requireAuth, requireAdminOrDispatcher } from "../middlewares/auth";
+import { requireStaff, requireAdminOrDispatcher } from "../middlewares/auth";
 import { emergencyLimiter, locationLimiter } from "../middlewares/rateLimit";
 import { sendPushToUsers } from "../lib/push";
 import { sendSmsToUsers } from "../lib/sms";
@@ -21,7 +21,7 @@ function validCoord(lat: unknown, lng: unknown): { lat: number; lng: number } | 
   return { lat, lng };
 }
 
-router.post("/me/location", requireAuth, locationLimiter, async (req, res): Promise<void> => {
+router.post("/me/location", requireStaff, locationLimiter, async (req, res): Promise<void> => {
   const { lat, lng } = (req.body ?? {}) as { lat?: number; lng?: number };
   const coord = validCoord(lat, lng);
   if (!coord) {
@@ -211,7 +211,7 @@ router.get("/admin/officers/:id/live", requireAdminOrDispatcher, async (req, res
 
 // POST /emergency — officer triggers panic alert. Creates a critical incident
 // and pushes to every admin. Returns the incident + the recommended phone number.
-router.post("/emergency", requireAuth, emergencyLimiter, async (req, res): Promise<void> => {
+router.post("/emergency", requireStaff, emergencyLimiter, async (req, res): Promise<void> => {
   const me = req.user!.userId;
   const { lat, lng, message } = (req.body ?? {}) as { lat?: number; lng?: number; message?: string };
 

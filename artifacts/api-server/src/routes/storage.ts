@@ -5,7 +5,7 @@ import {
   RequestUploadUrlResponse,
 } from "@workspace/api-zod";
 import { ObjectStorageService, ObjectNotFoundError } from "../lib/objectStorage";
-import { requireAdmin, requireAuth } from "../middlewares/auth";
+import { requireAdmin, requireStaff } from "../middlewares/auth";
 import { uploadUrlLimiter, applicationUploadLimiter } from "../middlewares/rateLimit";
 import { db, employeesTable, incidentsTable, licenseRenewalRequestsTable, protectionPersonsTable, shiftAssignmentsTable } from "@workspace/db";
 import { and, eq, inArray, sql } from "drizzle-orm";
@@ -211,7 +211,7 @@ async function handleUploadUrlRequest(
 router.post(
   "/storage/uploads/request-url",
   uploadUrlLimiter,
-  requireAuth,
+  requireStaff,
   (req: Request, res: Response) =>
     handleUploadUrlRequest(req, res, {
       maxBytes: MAX_UPLOAD_BYTES,
@@ -284,7 +284,7 @@ router.post(
  * Self-serve signed download URL for the authenticated employee. Only signs
  * paths that match one of the caller's own employee document keys.
  */
-router.get("/me/storage/sign", requireAuth, async (req: Request, res: Response) => {
+router.get("/me/storage/sign", requireStaff, async (req: Request, res: Response) => {
   const path = (req.query.path as string | undefined)?.trim();
   if (!path || !path.startsWith("/objects/")) {
     res.status(400).json({ error: "Bad Request", message: "path query param required" });

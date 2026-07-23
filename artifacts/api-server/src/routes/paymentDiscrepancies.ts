@@ -2,7 +2,7 @@ import { Router, type IRouter } from "express";
 import { eq, desc } from "drizzle-orm";
 import { db, paymentDiscrepanciesTable, usersTable, type PaymentDiscrepancy } from "@workspace/db";
 import { CreatePaymentDiscrepancyBody } from "@workspace/api-zod";
-import { requireAuth } from "../middlewares/auth";
+import { requireStaff } from "../middlewares/auth";
 import { sendEmail, renderPaymentDiscrepancyEmail } from "../lib/email";
 import { brand } from "../lib/brandConfig";
 
@@ -46,7 +46,7 @@ function rejectClient(req: { user?: { role: string } }): boolean {
   return req.user?.role === "client";
 }
 
-router.post("/payment-discrepancies", requireAuth, async (req, res): Promise<void> => {
+router.post("/payment-discrepancies", requireStaff, async (req, res): Promise<void> => {
   if (rejectClient(req)) {
     res.status(403).json({ error: "Forbidden", message: "Not available for client accounts" });
     return;
@@ -108,7 +108,7 @@ router.post("/payment-discrepancies", requireAuth, async (req, res): Promise<voi
   res.status(201).json(rowToDto(row!));
 });
 
-router.get("/me/payment-discrepancies", requireAuth, async (req, res): Promise<void> => {
+router.get("/me/payment-discrepancies", requireStaff, async (req, res): Promise<void> => {
   if (rejectClient(req)) {
     res.status(403).json({ error: "Forbidden", message: "Not available for client accounts" });
     return;

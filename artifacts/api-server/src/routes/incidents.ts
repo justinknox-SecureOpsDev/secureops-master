@@ -1,7 +1,7 @@
 import { Router, type IRouter } from "express";
 import { eq, and, or, sql } from "drizzle-orm";
 import { db, incidentsTable, usersTable, shiftsTable } from "@workspace/db";
-import { requireAuth, requireAdminOrDispatcher } from "../middlewares/auth";
+import { requireStaff, requireAdminOrDispatcher } from "../middlewares/auth";
 import { buildIncidentReportPdf } from "../lib/incidentPdf";
 import { broadcastToRoom } from "../lib/wsManager";
 import { sendPushToUsers } from "../lib/push";
@@ -26,7 +26,7 @@ async function broadcastIncidentChange(payload: { type: "incident:changed"; inci
   broadcastToRoom("incidents", payload, { allowedUserIds: ids });
 }
 
-router.get("/incidents", requireAuth, async (req, res): Promise<void> => {
+router.get("/incidents", requireStaff, async (req, res): Promise<void> => {
   const { employeeId, shiftId, severity, status } = req.query as Record<string, string | undefined>;
   const conditions = [];
   const isPrivileged = req.user!.role === "admin" || req.user!.role === "dispatcher";
@@ -67,7 +67,7 @@ router.get("/incidents", requireAuth, async (req, res): Promise<void> => {
   res.json(rows);
 });
 
-router.post("/incidents", requireAuth, async (req, res): Promise<void> => {
+router.post("/incidents", requireStaff, async (req, res): Promise<void> => {
   const { shiftId, title, description, severity, locationDescription, lat, lng, occurredAt, attachments } = req.body;
   if (!title || !description || !severity || !occurredAt) {
     res.status(400).json({ error: "Bad Request", message: "title, description, severity, occurredAt required" });
@@ -118,7 +118,7 @@ router.post("/incidents", requireAuth, async (req, res): Promise<void> => {
   });
 });
 
-router.get("/incidents/:id", requireAuth, async (req, res): Promise<void> => {
+router.get("/incidents/:id", requireStaff, async (req, res): Promise<void> => {
   const id = Array.isArray(req.params.id) ? req.params.id[0] : req.params.id;
   const [row] = await db
     .select({
@@ -152,7 +152,7 @@ router.get("/incidents/:id", requireAuth, async (req, res): Promise<void> => {
   res.json(row);
 });
 
-router.get("/incidents/:id/pdf", requireAuth, async (req, res): Promise<void> => {
+router.get("/incidents/:id/pdf", requireStaff, async (req, res): Promise<void> => {
   const id = Array.isArray(req.params.id) ? req.params.id[0] : req.params.id;
   // Same authorization model as GET /incidents/:id: admin reads anything,
   // employees only their own.

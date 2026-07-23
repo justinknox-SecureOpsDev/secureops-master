@@ -2,7 +2,7 @@ import { Router, type IRouter } from "express";
 import bcrypt from "bcryptjs";
 import { eq, ilike, and, sql, desc } from "drizzle-orm";
 import { db, usersTable, employeesTable, licensesTable, employeeChangesTable } from "@workspace/db";
-import { requireAuth, requireAdmin, requireAdminOrDispatcher, requireSchedulingStaff, signPdfDownloadToken, verifyPdfDownloadToken, pdfDownloadTokenTtlSeconds, type PdfDownloadTokenPayload } from "../middlewares/auth";
+import { requireAuth, requireStaff, requireAdmin, requireAdminOrDispatcher, requireSchedulingStaff, signPdfDownloadToken, verifyPdfDownloadToken, pdfDownloadTokenTtlSeconds, type PdfDownloadTokenPayload } from "../middlewares/auth";
 import type { Request, Response, NextFunction } from "express";
 import { buildEmployeeProfilePdf } from "../lib/profilePdf";
 import { writeEmployeeFieldChanges, CHANGE_FIELD_LABELS } from "../lib/employeeChangeLog";
@@ -388,7 +388,7 @@ router.post("/employees", requireAdmin, async (req, res): Promise<void> => {
   });
 });
 
-router.get("/employees/:id", requireAuth, async (req, res): Promise<void> => {
+router.get("/employees/:id", requireStaff, async (req, res): Promise<void> => {
   const id = Array.isArray(req.params.id) ? req.params.id[0] : req.params.id;
   // Admins and dispatchers may read any employee; site managers may read any
   // employee too (they reach this from the scheduling roster) but only see the
@@ -454,7 +454,7 @@ router.get("/employees/:id", requireAuth, async (req, res): Promise<void> => {
  * own profile. The mobile app calls this first, then opens the PDF URL with
  * `?token=<download-token>` - keeping the long-lived session JWT out of URLs.
  */
-router.post("/me/profile/pdf/download-token", requireAuth, (req, res): void => {
+router.post("/me/profile/pdf/download-token", requireStaff, (req, res): void => {
   const token = signPdfDownloadToken(req.user!.userId);
   res.json({ token, expiresIn: pdfDownloadTokenTtlSeconds() });
 });
@@ -463,7 +463,7 @@ router.post("/me/profile/pdf/download-token", requireAuth, (req, res): void => {
  * Mint a short-lived (60s) PDF download token for a specific employee.
  * Admin-only — mirrors the admin-can-pull-any restriction on the PDF route.
  */
-router.post("/employees/:id/profile/pdf/download-token", requireAuth, (req, res): void => {
+router.post("/employees/:id/profile/pdf/download-token", requireStaff, (req, res): void => {
   const id = Array.isArray(req.params.id) ? req.params.id[0] : req.params.id;
   if (req.user!.role !== "admin" && req.user!.userId !== id) {
     res.status(403).json({ error: "Forbidden" });
@@ -504,7 +504,7 @@ router.get("/me/profile/pdf", requireAuthOrQueryToken, async (req, res): Promise
   payload.stream.pipe(res);
 });
 
-router.put("/employees/:id", requireAuth, async (req, res): Promise<void> => {
+router.put("/employees/:id", requireStaff, async (req, res): Promise<void> => {
   const id = Array.isArray(req.params.id) ? req.params.id[0] : req.params.id;
   if (req.user!.role !== "admin" && req.user!.userId !== id) {
     res.status(403).json({ error: "Forbidden" });
@@ -633,7 +633,7 @@ router.put("/employees/:id", requireAuth, async (req, res): Promise<void> => {
  * employee's log; non-admin callers may only read their own. Defaults to
  * the most recent 20 rows; `limit` capped at 100.
  */
-router.get("/employees/:id/changes", requireAuth, async (req, res): Promise<void> => {
+router.get("/employees/:id/changes", requireStaff, async (req, res): Promise<void> => {
   const id = Array.isArray(req.params.id) ? req.params.id[0] : req.params.id;
   if (req.user!.role !== "admin" && req.user!.userId !== id) {
     res.status(403).json({ error: "Forbidden" });

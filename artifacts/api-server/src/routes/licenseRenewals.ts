@@ -7,7 +7,7 @@ import {
   usersTable,
   employeesTable,
 } from "@workspace/db";
-import { requireAuth, requireAdmin } from "../middlewares/auth";
+import { requireStaff, requireAdmin } from "../middlewares/auth";
 import { requireFeature } from "../lib/features";
 
 const router: IRouter = Router();
@@ -31,7 +31,7 @@ function isIsoDate(v: unknown): v is string {
 }
 
 // ---------- Officer: submit a renewal ----------
-router.post("/me/license-renewals", requireAuth, async (req, res): Promise<void> => {
+router.post("/me/license-renewals", requireStaff, async (req, res): Promise<void> => {
   const me = req.user!.userId;
   const {
     licenseId, licenseType, licenseLevel, licenseNumber,
@@ -134,7 +134,7 @@ router.post("/me/license-renewals", requireAuth, async (req, res): Promise<void>
 });
 
 // ---------- Officer: my renewal history ----------
-router.get("/me/license-renewals", requireAuth, async (req, res): Promise<void> => {
+router.get("/me/license-renewals", requireStaff, async (req, res): Promise<void> => {
   const rows = await db
     .select()
     .from(licenseRenewalRequestsTable)

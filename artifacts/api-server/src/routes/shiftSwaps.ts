@@ -9,7 +9,7 @@ import {
   sitesTable,
   usersTable,
 } from "@workspace/db";
-import { requireAuth, requireAdmin } from "../middlewares/auth";
+import { requireStaff, requireAdmin } from "../middlewares/auth";
 import { getEffectiveLevel } from "../lib/eligibility";
 import { requireFeature } from "../lib/features";
 
@@ -40,7 +40,7 @@ const createSchema = z.object({
   reason: z.string().max(500).optional(),
 });
 
-router.post("/shifts/swap-requests", requireAuth, async (req, res): Promise<void> => {
+router.post("/shifts/swap-requests", requireStaff, async (req, res): Promise<void> => {
   const parsed = createSchema.safeParse(req.body);
   if (!parsed.success) {
     res.status(400).json({ error: "Bad Request", message: "Invalid body", issues: parsed.error.issues });
@@ -153,7 +153,7 @@ router.post("/shifts/swap-requests", requireAuth, async (req, res): Promise<void
 });
 
 // ---------- Officer: list eligible swap targets for one of my assignments ----------
-router.get("/me/swap-targets/:assignmentId", requireAuth, async (req, res): Promise<void> => {
+router.get("/me/swap-targets/:assignmentId", requireStaff, async (req, res): Promise<void> => {
   const me = req.user!.userId;
   const [assignment] = await db
     .select({ employeeId: shiftAssignmentsTable.employeeId, shiftId: shiftAssignmentsTable.shiftId, status: shiftAssignmentsTable.status })
@@ -199,7 +199,7 @@ router.get("/me/swap-targets/:assignmentId", requireAuth, async (req, res): Prom
 });
 
 // ---------- Officer: list my swap requests ----------
-router.get("/me/swap-requests", requireAuth, async (req, res): Promise<void> => {
+router.get("/me/swap-requests", requireStaff, async (req, res): Promise<void> => {
   const me = req.user!.userId;
   const rows = await db
     .select({
@@ -231,7 +231,7 @@ router.get("/me/swap-requests", requireAuth, async (req, res): Promise<void> => 
 // ---------- Officer (target): respond accept / decline ----------
 const respondSchema = z.object({ status: z.enum(["accepted", "declined"]) });
 
-router.put("/shifts/swap-requests/:id/respond", requireAuth, async (req, res): Promise<void> => {
+router.put("/shifts/swap-requests/:id/respond", requireStaff, async (req, res): Promise<void> => {
   const parsed = respondSchema.safeParse(req.body);
   if (!parsed.success) {
     res.status(400).json({ error: "Bad Request", message: "status must be accepted or declined" });
@@ -283,7 +283,7 @@ router.put("/shifts/swap-requests/:id/respond", requireAuth, async (req, res): P
 });
 
 // ---------- Officer (requester): cancel ----------
-router.post("/shifts/swap-requests/:id/cancel", requireAuth, async (req, res): Promise<void> => {
+router.post("/shifts/swap-requests/:id/cancel", requireStaff, async (req, res): Promise<void> => {
   const me = req.user!.userId;
   const [swap] = await db
     .select()

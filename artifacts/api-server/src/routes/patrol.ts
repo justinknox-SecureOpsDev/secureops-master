@@ -11,7 +11,7 @@ import {
   timeEntriesTable,
   clientsTable,
 } from "@workspace/db";
-import { requireAuth, requireAdmin } from "../middlewares/auth";
+import { requireAuth, requireStaff, requireAdmin } from "../middlewares/auth";
 import { requireFeature } from "../lib/features";
 
 const router: IRouter = Router();
@@ -167,7 +167,7 @@ router.get("/admin/patrol/scans", requireAuth, requireAdmin, async (req, res): P
 
 // ---------- Officer: scan ----------
 
-router.post("/patrol/scan", requireAuth, async (req, res): Promise<void> => {
+router.post("/patrol/scan", requireStaff, async (req, res): Promise<void> => {
   // Patrol compliance logs must only contain officer activity — block other roles
   // (incl. admins) so they can't pollute the audit trail.
   if (req.user?.role !== "employee") {
@@ -234,7 +234,7 @@ router.post("/patrol/scan", requireAuth, async (req, res): Promise<void> => {
 
 // ---------- Officer: own recent scans ----------
 
-router.get("/me/patrol/recent", requireAuth, async (req, res): Promise<void> => {
+router.get("/me/patrol/recent", requireStaff, async (req, res): Promise<void> => {
   const userId = req.user!.userId;
   const rows = await db
     .select({

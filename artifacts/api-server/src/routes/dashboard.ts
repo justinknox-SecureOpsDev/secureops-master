@@ -1,7 +1,7 @@
 import { Router, type IRouter } from "express";
 import { eq, and, isNull, gte, lte, sql, ne, inArray } from "drizzle-orm";
 import { db, usersTable, shiftsTable, incidentsTable, payrollEntriesTable, licensesTable, timeEntriesTable, shiftAssignmentsTable } from "@workspace/db";
-import { requireAuth, requireAdmin } from "../middlewares/auth";
+import { requireAuth, requireStaff, requireAdmin } from "../middlewares/auth";
 import { isFeatureEnabled } from "../lib/features";
 import { stripShiftFinanceForRole } from "../lib/financeVisibility";
 
@@ -99,7 +99,7 @@ router.get("/dashboard/admin-summary", requireAdmin, async (req, res): Promise<v
   });
 });
 
-router.get("/dashboard/employee-summary", requireAuth, async (req, res): Promise<void> => {
+router.get("/dashboard/employee-summary", requireStaff, async (req, res): Promise<void> => {
   const userId = req.user!.userId;
   const now = new Date();
   const weekStart = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);

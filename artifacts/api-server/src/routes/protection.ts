@@ -10,7 +10,7 @@ import {
   protectionDestinationsTable,
 } from "@workspace/db";
 import { UpdateProtectionDetailBody } from "@workspace/api-zod";
-import { requireAuth, requireAdmin } from "../middlewares/auth";
+import { requireStaff, requireAdmin } from "../middlewares/auth";
 import { geocodeOnelineAddress } from "../lib/geocode";
 
 /**
@@ -148,7 +148,7 @@ function mapPersonInput(
  * Read the PPO package. Only an admin may read any shift; an officer may read
  * only a shift they have an ACCEPTED assignment to. No other role qualifies.
  */
-router.get("/shifts/:id/protection-detail", requireAuth, async (req: Request, res: Response) => {
+router.get("/shifts/:id/protection-detail", requireStaff, async (req: Request, res: Response) => {
   const shiftId = Array.isArray(req.params.id) ? req.params.id[0] : req.params.id;
   try {
     const [shift] = await db

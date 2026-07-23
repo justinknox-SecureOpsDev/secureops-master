@@ -409,7 +409,7 @@ router.get("/me/clock-in-shifts", requireStaff, async (req, res): Promise<void> 
   res.json(rows);
 });
 
-router.get("/time-entries", requireAuth, async (req, res): Promise<void> => {
+router.get("/time-entries", requireStaff, async (req, res): Promise<void> => {
   const { employeeId, shiftId, siteId, approvalStatus, from, to } = req.query as Record<string, string | undefined>;
 
   const conditions = [];
@@ -444,7 +444,7 @@ router.get("/time-entries", requireAuth, async (req, res): Promise<void> => {
   res.json(rows.map((r) => stripTimeEntryBillRateForRole(req.user!.role, r)));
 });
 
-router.post("/time-entries/clock-in", requireAuth, async (req, res): Promise<void> => {
+router.post("/time-entries/clock-in", requireStaff, async (req, res): Promise<void> => {
   const { shiftId, siteId: bodySiteId, lat, lng, notes } = req.body;
   const hasCoords = lat != null && lng != null;
   // Coordinates are only mandatory for the geo-resolve path. When the officer
@@ -688,7 +688,7 @@ router.post("/time-entries/clock-in", requireAuth, async (req, res): Promise<voi
   });
 });
 
-router.post("/time-entries/clock-out", requireAuth, async (req, res): Promise<void> => {
+router.post("/time-entries/clock-out", requireStaff, async (req, res): Promise<void> => {
   const { timeEntryId, lat, lng, notes, correctionNote } = req.body;
   if (!timeEntryId || lat == null || lng == null) {
     res.status(400).json({ error: "Bad Request", message: "timeEntryId, lat, lng required" });
@@ -771,7 +771,7 @@ router.post("/time-entries/clock-out", requireAuth, async (req, res): Promise<vo
   });
 });
 
-router.get("/time-entries/active", requireAuth, async (req, res): Promise<void> => {
+router.get("/time-entries/active", requireStaff, async (req, res): Promise<void> => {
   const [entry] = await db
     .select(baseSelect)
     .from(timeEntriesTable)

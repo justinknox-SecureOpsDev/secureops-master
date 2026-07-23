@@ -9,7 +9,7 @@ import {
   timeEntriesTable,
   usersTable,
 } from "@workspace/db";
-import { requireAuth, requireAdmin } from "../middlewares/auth";
+import { requireAuth, requireStaff, requireAdmin } from "../middlewares/auth";
 import { darWriteLimiter, darPdfLimiter } from "../middlewares/rateLimit";
 import { buildDarPdf } from "../lib/darPdf";
 import { logger } from "../lib/logger";
@@ -40,7 +40,7 @@ function todayIsoDate(): string {
 
 // ---------- Officer: submit ----------
 
-router.post("/me/dar", requireAuth, darWriteLimiter, async (req, res): Promise<void> => {
+router.post("/me/dar", requireStaff, darWriteLimiter, async (req, res): Promise<void> => {
   if (req.user?.role !== "employee") {
     res.status(403).json({ error: "Forbidden", message: "Only employees can submit DARs" });
     return;
@@ -106,7 +106,7 @@ router.post("/me/dar", requireAuth, darWriteLimiter, async (req, res): Promise<v
 
 // ---------- Officer: own list / detail ----------
 
-router.get("/me/dar", requireAuth, async (req, res): Promise<void> => {
+router.get("/me/dar", requireStaff, async (req, res): Promise<void> => {
   if (req.user?.role !== "employee") {
     res.status(403).json({ error: "Forbidden", message: "Only employees can read this" });
     return;
@@ -131,7 +131,7 @@ router.get("/me/dar", requireAuth, async (req, res): Promise<void> => {
   res.json({ reports: rows });
 });
 
-router.get("/me/dar/:id", requireAuth, async (req, res): Promise<void> => {
+router.get("/me/dar/:id", requireStaff, async (req, res): Promise<void> => {
   if (req.user?.role !== "employee") {
     res.status(403).json({ error: "Forbidden", message: "Only employees can read this" });
     return;
@@ -153,7 +153,7 @@ router.get("/me/dar/:id", requireAuth, async (req, res): Promise<void> => {
 
 // ---------- PDF (officer own, admin any) ----------
 
-router.get("/dar/:id/pdf", requireAuth, darPdfLimiter, async (req, res): Promise<void> => {
+router.get("/dar/:id/pdf", requireStaff, darPdfLimiter, async (req, res): Promise<void> => {
   const idParse = z.string().uuid().safeParse(req.params.id);
   if (!idParse.success) { res.status(400).json({ error: "Bad Request", message: "Invalid id" }); return; }
   const [owner] = await db
