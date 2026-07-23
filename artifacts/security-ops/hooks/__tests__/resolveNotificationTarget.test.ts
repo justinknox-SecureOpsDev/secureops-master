@@ -140,6 +140,81 @@ describe("resolveNotificationTarget", () => {
     });
   });
 
+  describe("shift_claim_request — admin and site_manager routing", () => {
+    it("routes admins to the admin shift-approvals screen", () => {
+      expect(resolveNotificationTarget({ type: "shift_claim_request" }, "admin")).toEqual({
+        pathname: "/(admin)/shift-approvals",
+      });
+    });
+
+    it("routes site managers to the employee shift-approvals screen (skips More)", () => {
+      expect(
+        resolveNotificationTarget({ type: "shift_claim_request" }, "site_manager"),
+      ).toEqual({ pathname: "/(employee)/shift-approvals" });
+    });
+
+    it("returns null for plain employees (they never receive this notification)", () => {
+      expect(resolveNotificationTarget({ type: "shift_claim_request" }, "employee")).toBeNull();
+      expect(resolveNotificationTarget({ type: "shift_claim_request" }, undefined)).toBeNull();
+    });
+  });
+
+  describe("time_entry_submitted — site_manager routing", () => {
+    it("routes site managers to the employee time-approval screen (skips More)", () => {
+      expect(
+        resolveNotificationTarget({ type: "time_entry_submitted" }, "site_manager"),
+      ).toEqual({ pathname: "/(employee)/time-approval" });
+    });
+
+    it("routes admins to the admin time-approval screen", () => {
+      expect(resolveNotificationTarget({ type: "time_entry_submitted" }, "admin")).toEqual({
+        pathname: "/(admin)/time-approval",
+      });
+    });
+
+    it("returns null for plain employees", () => {
+      expect(resolveNotificationTarget({ type: "time_entry_submitted" }, "employee")).toBeNull();
+      expect(resolveNotificationTarget({ type: "time_entry_submitted" }, undefined)).toBeNull();
+    });
+  });
+
+  describe("site_shift_created — site_manager schedule routing", () => {
+    it("routes site managers to the schedule screen", () => {
+      expect(
+        resolveNotificationTarget({ type: "site_shift_created" }, "site_manager"),
+      ).toEqual({ pathname: "/(employee)/schedule" });
+    });
+
+    it("carries shiftId and siteId params when present", () => {
+      expect(
+        resolveNotificationTarget(
+          { type: "site_shift_created", shiftId: 42, siteId: "abc" },
+          "site_manager",
+        ),
+      ).toEqual({
+        pathname: "/(employee)/schedule",
+        params: { shiftId: "42", siteId: "abc" },
+      });
+    });
+
+    it("carries only siteId when shiftId is absent", () => {
+      expect(
+        resolveNotificationTarget(
+          { type: "site_shift_created", siteId: "abc" },
+          "site_manager",
+        ),
+      ).toEqual({
+        pathname: "/(employee)/schedule",
+        params: { siteId: "abc" },
+      });
+    });
+
+    it("returns null for non-site-manager roles (they use different flows)", () => {
+      expect(resolveNotificationTarget({ type: "site_shift_created" }, "admin")).toBeNull();
+      expect(resolveNotificationTarget({ type: "site_shift_created" }, "employee")).toBeNull();
+    });
+  });
+
   describe("admin-only alerts", () => {
     it("routes emergency to admin incidents for admins, null otherwise", () => {
       expect(resolveNotificationTarget({ type: "emergency" }, "admin")).toEqual({

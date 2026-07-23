@@ -121,10 +121,37 @@ export function resolveNotificationTarget(
         : { pathname: "/(admin)/employees" };
     }
 
-    // An officer self-claimed a shift and needs an approval decision. Admin-only.
+    // An officer self-claimed a shift and needs an approval decision. Admins land
+    // on the admin approvals screen; site managers land on the employee-tab
+    // approvals screen (reachable via More, but push taps skip that).
     case "shift_claim_request": {
-      if (role !== "admin") return null;
-      return { pathname: "/(admin)/shift-approvals" };
+      if (role === "admin") return { pathname: "/(admin)/shift-approvals" };
+      if (role === "site_manager") return { pathname: "/(employee)/shift-approvals" };
+      return null;
+    }
+
+    // A time entry was submitted and is waiting for approval. Site managers
+    // land on the employee-tab time-approval screen (via More); admins use
+    // their own tab group.
+    case "time_entry_submitted": {
+      if (role === "admin") return { pathname: "/(admin)/time-approval" };
+      if (role === "site_manager") return { pathname: "/(employee)/time-approval" };
+      return null;
+    }
+
+    // A new shift was posted at a site the manager covers — deep-link them
+    // straight to the schedule screen so they can review/adjust.
+    case "site_shift_created": {
+      if (role !== "site_manager") return null;
+      const shiftId = str(d.shiftId);
+      const siteId = str(d.siteId);
+      const params: Record<string, string> = {};
+      if (shiftId) params.shiftId = shiftId;
+      if (siteId) params.siteId = siteId;
+      return {
+        pathname: "/(employee)/schedule",
+        params: Object.keys(params).length ? params : undefined,
+      };
     }
 
     // The scheduler tried to roster an under-licensed officer; the slot may be

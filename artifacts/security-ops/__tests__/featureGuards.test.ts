@@ -42,7 +42,7 @@ const FEATURE_KEYS: string[] = [...FEATURE_KEY_REGISTRY];
  */
 const MOBILE_SURFACES: Record<string, string[] | "absent"> = {
   chat: ["app/(employee)/chat.tsx", "app/(admin)/chat.tsx"],
-  radio: ["app/(employee)/radio.tsx", "app/(admin)/radio.tsx"],
+  radio: ["app/(employee)/chat.tsx", "app/(employee)/radio.tsx", "app/(admin)/radio.tsx"],
   incidents: ["app/(employee)/incidents.tsx", "app/(admin)/incidents.tsx"],
   liveMap: ["app/(admin)/live-map.tsx"],
   payroll: ["app/(admin)/payroll.tsx", "app/paystubs.tsx"],
