@@ -791,7 +791,7 @@ const TOUR_STEPS: TourStep[] = [
     selector: '[data-tour="broadcast"]',
     panelKey: "broadcast",
     title: "Broadcast Composer",
-    body: "Pick a channel (📣 announcements goes org-wide), preview the thread if you want context, then send. Officers see it instantly in chat and push.",
+    body: "Pick a channel (📣 announcements goes org-wide), preview the thread if you want context, then send. Officers see it instantly in the Comms tab's chat and via push notification.",
   },
 ];
 

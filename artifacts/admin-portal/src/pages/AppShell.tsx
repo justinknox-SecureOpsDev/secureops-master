@@ -121,7 +121,7 @@ type NavGroup = {
  * Admins get the full set of operational tabs; dispatchers get a leaner IA.
  * The dispatcher Dispatch tab is intentionally Live-Map-only — reusing the
  * admin Dispatch group (which also owns chat/radio/personnel) would duplicate
- * those routes and make the dispatcher Security tab non-authoritative, because
+ * those routes and make the dispatcher Comms tab non-authoritative, because
  * `resolveGroupKey` returns the first group whose item matches the location.
  */
 export function buildNavGroups(
