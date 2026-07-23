@@ -2,6 +2,7 @@ import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { renderHook, act } from "@testing-library/react";
 import {
   DEFAULT_LAYOUT,
+  DEFAULT_PANEL_ORDER,
   PANEL_IDS,
   dispatchLayoutKey,
   parseStoredLayout,
@@ -224,6 +225,7 @@ describe("useDispatchLayout — writes / round-trip", () => {
       columnSplit: 33,
       mapExpanded: true,
       mapTileLayer: "satellite",
+      panelOrder: DEFAULT_PANEL_ORDER,
     };
 
     act(() => {

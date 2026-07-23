@@ -337,7 +337,13 @@ export default function DispatchPage() {
 
   // ---- drag-to-reorder state ----
   const dragSrcRef = useRef<PanelId | null>(null);
-  const [dragOverId, setDragOverId] = useState<PanelId | null>(null);
+  // Track which panel the cursor is over AND whether the drop would land
+  // before or after that panel (computed from cursor Y vs element midpoint).
+  type DragInsert = { overId: PanelId; position: "before" | "after" } | null;
+  const [dragInsert, setDragInsert] = useState<DragInsert>(null);
+  // Ref mirror so handlePanelDrop can read the latest position without a
+  // stale-closure dependency on the dragInsert state value.
+  const dragInsertRef = useRef<DragInsert>(null);
 
   const handlePanelDragStart = useCallback((id: PanelId) => {
     dragSrcRef.current = id;
@@ -345,32 +351,42 @@ export default function DispatchPage() {
 
   const handlePanelDragEnd = useCallback(() => {
     dragSrcRef.current = null;
-    setDragOverId(null);
+    dragInsertRef.current = null;
+    setDragInsert(null);
   }, []);
 
   const handlePanelDragOver = useCallback((e: React.DragEvent, id: PanelId) => {
     e.preventDefault();
-    if (dragSrcRef.current && dragSrcRef.current !== id) setDragOverId(id);
+    if (!dragSrcRef.current || dragSrcRef.current === id) return;
+    const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
+    const position: "before" | "after" = e.clientY < rect.top + rect.height / 2 ? "before" : "after";
+    const next: DragInsert = { overId: id, position };
+    dragInsertRef.current = next;
+    setDragInsert(next);
   }, []);
 
   const handlePanelDrop = useCallback((e: React.DragEvent, targetId: PanelId) => {
     e.preventDefault();
     const srcId = dragSrcRef.current;
-    if (!srcId || srcId === targetId) { setDragOverId(null); return; }
+    if (!srcId || srcId === targetId) { dragInsertRef.current = null; setDragInsert(null); return; }
     // Only allow reorder within the same column.
     const srcIsLeft = LEFT_PANELS.includes(srcId);
     const tgtIsLeft = LEFT_PANELS.includes(targetId);
-    if (srcIsLeft !== tgtIsLeft) { setDragOverId(null); return; }
+    if (srcIsLeft !== tgtIsLeft) { dragInsertRef.current = null; setDragInsert(null); return; }
+    const position = dragInsertRef.current?.position ?? "before";
     setLayout((prev) => {
       const order = [...prev.panelOrder];
       const fromIdx = order.indexOf(srcId);
-      const toIdx = order.indexOf(targetId);
-      if (fromIdx === -1 || toIdx === -1) return prev;
+      if (fromIdx === -1) return prev;
       order.splice(fromIdx, 1);
-      order.splice(toIdx, 0, srcId);
+      // Re-find target index after removal, then insert before or after.
+      const toIdx = order.indexOf(targetId);
+      if (toIdx === -1) return prev;
+      order.splice(position === "after" ? toIdx + 1 : toIdx, 0, srcId);
       return { ...prev, panelOrder: order };
     });
-    setDragOverId(null);
+    dragInsertRef.current = null;
+    setDragInsert(null);
     dragSrcRef.current = null;
   }, [setLayout]);
 
@@ -602,7 +618,6 @@ export default function DispatchPage() {
         // Wrap a panel with its drag-handle and drop-target styling.
         const wrapPanel = (id: PanelId) => {
           const tourAttr = PANEL_TOUR[id];
-          const isOver = dragOverId === id;
           return (
             <div
               key={id}
@@ -612,9 +627,7 @@ export default function DispatchPage() {
               onDragOver={(e) => handlePanelDragOver(e, id)}
               onDrop={(e) => handlePanelDrop(e, id)}
               {...(tourAttr ? { "data-tour": tourAttr } : {})}
-              className={`relative group transition-[box-shadow] rounded-lg ${
-                isOver ? "ring-2 ring-brand-gold/70 shadow-md" : ""
-              }`}
+              className="relative group rounded-lg"
             >
               {/* Drag handle — visible on hover, anchored top-right of the wrapper */}
               <div
@@ -629,15 +642,51 @@ export default function DispatchPage() {
           );
         };
 
+        // Build a column's panel list, splicing in a ghost placeholder at the
+        // current drag-insertion point so the final resting position is obvious.
+        const renderColumnPanels = (orderedIds: PanelId[], columnSet: PanelId[]) => {
+          const srcId = dragSrcRef.current;
+          const visible = orderedIds.filter((id) => layout.panels[id]);
+
+          if (!dragInsert || !srcId || !columnSet.includes(dragInsert.overId) || !columnSet.includes(srcId)) {
+            return visible.map(wrapPanel);
+          }
+
+          const { overId, position } = dragInsert;
+          const nodes: React.ReactNode[] = [];
+          for (const id of visible) {
+            if (id === overId && position === "before") {
+              nodes.push(
+                <div
+                  key="__drag-placeholder"
+                  aria-hidden="true"
+                  className="h-14 rounded-lg border-2 border-dashed border-brand-gold/50 bg-brand-gold/5 animate-in fade-in duration-100"
+                />
+              );
+            }
+            nodes.push(wrapPanel(id));
+            if (id === overId && position === "after") {
+              nodes.push(
+                <div
+                  key="__drag-placeholder"
+                  aria-hidden="true"
+                  className="h-14 rounded-lg border-2 border-dashed border-brand-gold/50 bg-brand-gold/5 animate-in fade-in duration-100"
+                />
+              );
+            }
+          }
+          return nodes;
+        };
+
         const leftPanels = (
           <div className="space-y-4 min-w-0">
-            {orderedLeft.filter((id) => layout.panels[id]).map(wrapPanel)}
+            {renderColumnPanels(orderedLeft, LEFT_PANELS)}
           </div>
         );
 
         const rightPanels = (
           <div className="space-y-4 min-w-0">
-            {orderedRight.filter((id) => layout.panels[id]).map(wrapPanel)}
+            {renderColumnPanels(orderedRight, RIGHT_PANELS)}
           </div>
         );
 
