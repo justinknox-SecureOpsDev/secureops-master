@@ -20,6 +20,18 @@ export const DEFAULT_PANEL_ORDER: PanelId[] = [
   "broadcast",
 ];
 
+export const LEFT_PANELS: readonly PanelId[] = [
+  "incidents",
+  "statusBoard",
+  "shiftClaims",
+  "openShifts",
+] as const;
+
+export const RIGHT_PANELS: readonly PanelId[] = [
+  "liveMap",
+  "broadcast",
+] as const;
+
 export interface DispatchLayout {
   panels: Record<PanelId, boolean>;
   /** Number of grid columns the dispatcher chose (1, 2, or 3). Default: 2. */

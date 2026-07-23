@@ -4,6 +4,8 @@ import {
   DEFAULT_LAYOUT,
   DEFAULT_PANEL_ORDER,
   PANEL_IDS,
+  LEFT_PANELS,
+  RIGHT_PANELS,
   DRAG_PLACEHOLDER,
   COLUMN_BOUNDARY,
   dispatchLayoutKey,
@@ -595,6 +597,35 @@ describe("PANEL_IDS structural integrity", () => {
 
   it("DEFAULT_LAYOUT.columns is a valid column count (1, 2, or 3)", () => {
     expect([1, 2, 3]).toContain(DEFAULT_LAYOUT.columns);
+  });
+
+  it("LEFT_PANELS contains exactly incidents, statusBoard, shiftClaims, openShifts", () => {
+    expect([...LEFT_PANELS].sort()).toEqual(
+      ["incidents", "openShifts", "shiftClaims", "statusBoard"],
+    );
+  });
+
+  it("RIGHT_PANELS contains exactly liveMap, broadcast", () => {
+    expect([...RIGHT_PANELS].sort()).toEqual(["broadcast", "liveMap"]);
+  });
+
+  it("every PANEL_IDS entry is in exactly one of LEFT_PANELS or RIGHT_PANELS", () => {
+    for (const id of PANEL_IDS) {
+      const inLeft = LEFT_PANELS.includes(id);
+      const inRight = RIGHT_PANELS.includes(id);
+      expect(
+        inLeft !== inRight,
+        `"${id}" must be in exactly one column list (inLeft=${inLeft}, inRight=${inRight})`,
+      ).toBe(true);
+    }
+  });
+
+  it("LEFT_PANELS and RIGHT_PANELS together cover every PANEL_IDS entry", () => {
+    const combined = new Set([...LEFT_PANELS, ...RIGHT_PANELS]);
+    for (const id of PANEL_IDS) {
+      expect(combined.has(id), `"${id}" is missing from both LEFT_PANELS and RIGHT_PANELS`).toBe(true);
+    }
+    expect(combined.size).toBe(PANEL_IDS.length);
   });
 });
 
