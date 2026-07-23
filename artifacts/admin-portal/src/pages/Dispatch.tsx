@@ -23,6 +23,13 @@ import {
 import { useAuth } from "@/lib/auth";
 import { useFirstQueryParam } from "@/hooks/useDeepLinkFocus";
 import { AssignNearestDialog, candidateBlockReason, type Candidate, type AssignNearestResult } from "@/components/AssignNearestDialog";
+import {
+  PANEL_IDS,
+  DEFAULT_LAYOUT,
+  useDispatchLayout,
+  type PanelId,
+  type DispatchLayout,
+} from "./dispatchLayout";
 
 type StatusRow = {
   assignmentId: string;
@@ -180,9 +187,6 @@ const SEV_STYLES: Record<Incident["severity"], string> = {
 
 // =========================================================== LAYOUT STATE
 
-const PANEL_IDS = ["incidents", "statusBoard", "shiftClaims", "openShifts", "liveMap", "broadcast"] as const;
-type PanelId = typeof PANEL_IDS[number];
-
 const PANEL_LABELS: Record<PanelId, string> = {
   incidents: "Active Incidents",
   statusBoard: "Status Board",
@@ -191,65 +195,6 @@ const PANEL_LABELS: Record<PanelId, string> = {
   liveMap: "Live Map",
   broadcast: "Broadcast",
 };
-
-interface DispatchLayout {
-  panels: Record<PanelId, boolean>;
-  columnSplit: number;
-  mapExpanded: boolean;
-  mapTileLayer: "street" | "satellite";
-}
-
-const DEFAULT_LAYOUT: DispatchLayout = {
-  panels: {
-    incidents: true, statusBoard: true, shiftClaims: true,
-    openShifts: true, liveMap: true, broadcast: true,
-  },
-  columnSplit: 67,
-  mapExpanded: false,
-  mapTileLayer: "street",
-};
-
-function useDispatchLayout(userId: string | undefined) {
-  const storageKey = userId ? `wcsg.dispatch.layout.${userId}` : null;
-
-  const [layout, setLayoutRaw] = useState<DispatchLayout>(() => {
-    if (!storageKey) return DEFAULT_LAYOUT;
-    try {
-      const raw = localStorage.getItem(storageKey);
-      if (!raw) return DEFAULT_LAYOUT;
-      const parsed = JSON.parse(raw) as Partial<DispatchLayout> & { panels?: Partial<Record<PanelId, boolean>> };
-      return {
-        panels: { ...DEFAULT_LAYOUT.panels, ...parsed.panels },
-        columnSplit:
-          typeof parsed.columnSplit === "number"
-            ? Math.max(20, Math.min(80, parsed.columnSplit))
-            : DEFAULT_LAYOUT.columnSplit,
-        mapExpanded:
-          typeof parsed.mapExpanded === "boolean"
-            ? parsed.mapExpanded
-            : DEFAULT_LAYOUT.mapExpanded,
-        mapTileLayer: parsed.mapTileLayer === "satellite" ? "satellite" : "street",
-      };
-    } catch {
-      return DEFAULT_LAYOUT;
-    }
-  });
-
-  const setLayout = useCallback(
-    (updater: (prev: DispatchLayout) => DispatchLayout) => {
-      setLayoutRaw((prev) => {
-        const next = updater(prev);
-        if (storageKey) {
-          try { localStorage.setItem(storageKey, JSON.stringify(next)); } catch { /* private mode */ }
-        }
-        return next;
-      });
-    },
-    [storageKey],
-  );
-
-  return [layout, setLayout] as const;
-}
 
 function useIsLargeScreen(): boolean {
   const [isLarge, setIsLarge] = useState(() => typeof window !== "undefined" && window.innerWidth >= 1024);
