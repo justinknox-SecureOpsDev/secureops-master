@@ -250,21 +250,6 @@ export default function EmployeeHomeScreen() {
         </View>
       </View>
 
-      {!summary?.activeTimeEntry && (
-        <View style={styles.section}>
-          <TouchableOpacity
-            style={[styles.bigClockBtn, { backgroundColor: colors.primary }]}
-            onPress={() => router.push("/(employee)/clock")}
-            accessibilityRole="button"
-            accessibilityLabel="Clock in"
-            accessibilityHint="Opens the clock screen to start your shift"
-          >
-            <Feather name="clock" size={24} color={colors.primaryForeground} />
-            <Text style={[styles.bigClockText, { color: colors.primaryForeground }]}>Clock In</Text>
-          </TouchableOpacity>
-        </View>
-      )}
-
       {(summary?.nextShift) && (
         <View style={styles.section}>
           <Text style={[styles.sectionTitle, { color: colors.accent }]}>NEXT SHIFT</Text>

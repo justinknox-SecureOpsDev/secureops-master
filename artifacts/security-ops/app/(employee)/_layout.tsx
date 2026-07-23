@@ -38,11 +38,10 @@ function EmployeeTabs({ colors, isIOS, isWeb }: { colors: ReturnType<typeof useC
   const { totalUnread } = useChat();
   const { user } = useAuth();
   const flags = useFeatures();
-  // Site Managers get the full employee experience PLUS scheduling and approval
-  // tabs. Schedule hosts a nested Stack (app/(employee)/schedule) re-exporting
-  // the admin shift screens; the shift-approvals and time-approval tabs
-  // re-export the admin approval screens. href:null keeps all three off the tab
-  // bar for regular employees. The server enforces per-site scope for managers.
+  // Site managers see a "More" tab instead of flat management tabs in the bar.
+  // The management screens (Schedule, Approvals, Time) are hidden from the bar
+  // for everyone and reached through the More screen for site managers, or via
+  // router.push for any deep-link that needs them.
   const isSiteManager = user?.role === "site_manager";
   return (
     <Tabs
@@ -66,6 +65,7 @@ function EmployeeTabs({ colors, isIOS, isWeb }: { colors: ReturnType<typeof useC
           ),
       }}
     >
+      {/* ── Core tabs (visible for all employees) ──────────────────────── */}
       <Tabs.Screen
         name="home"
         options={{
@@ -75,47 +75,11 @@ function EmployeeTabs({ colors, isIOS, isWeb }: { colors: ReturnType<typeof useC
         }}
       />
       <Tabs.Screen
-        name="shifts"
+        name="my-work"
         options={{
-          title: "My Shifts",
-          tabBarAccessibilityLabel: "My shifts tab",
-          tabBarIcon: ({ color }) => <Feather name="calendar" size={22} color={color} />,
-        }}
-      />
-      <Tabs.Screen
-        name="schedule"
-        options={{
-          title: "Schedule",
-          headerShown: false,
-          href: isSiteManager ? undefined : null,
-          tabBarAccessibilityLabel: "Schedule shifts tab",
-          tabBarIcon: ({ color }) => <Feather name="clipboard" size={22} color={color} />,
-        }}
-      />
-      <Tabs.Screen
-        name="shift-approvals"
-        options={{
-          title: "Approvals",
-          href: isSiteManager ? undefined : null,
-          tabBarAccessibilityLabel: "Shift claim approvals tab",
-          tabBarIcon: ({ color }) => <Feather name="user-check" size={22} color={color} />,
-        }}
-      />
-      <Tabs.Screen
-        name="time-approval"
-        options={{
-          title: "Time",
-          href: isSiteManager ? undefined : null,
-          tabBarAccessibilityLabel: "Time entry approvals tab",
-          tabBarIcon: ({ color }) => <Feather name="check-square" size={22} color={color} />,
-        }}
-      />
-      <Tabs.Screen
-        name="clock"
-        options={{
-          title: "Clock",
-          tabBarAccessibilityLabel: "Time clock tab",
-          tabBarIcon: ({ color }) => <Feather name="clock" size={22} color={color} />,
+          title: "My Work",
+          tabBarAccessibilityLabel: "My shifts and clock-in tab",
+          tabBarIcon: ({ color }) => <Feather name="briefcase" size={22} color={color} />,
         }}
       />
       <Tabs.Screen
@@ -142,15 +106,6 @@ function EmployeeTabs({ colors, isIOS, isWeb }: { colors: ReturnType<typeof useC
         }}
       />
       <Tabs.Screen
-        name="radio"
-        options={{
-          title: "Radio",
-          href: isEnabled(flags, "radio") ? undefined : null,
-          tabBarAccessibilityLabel: "Push to talk radio tab",
-          tabBarIcon: ({ color }) => <Feather name="radio" size={22} color={color} />,
-        }}
-      />
-      <Tabs.Screen
         name="profile"
         options={{
           title: "Profile",
@@ -158,6 +113,29 @@ function EmployeeTabs({ colors, isIOS, isWeb }: { colors: ReturnType<typeof useC
           tabBarIcon: ({ color }) => <Feather name="user" size={22} color={color} />,
         }}
       />
+
+      {/* ── Site manager overflow tab (visible only for site managers) ──── */}
+      <Tabs.Screen
+        name="more"
+        options={{
+          title: "More",
+          href: isSiteManager ? undefined : null,
+          tabBarAccessibilityLabel: "More management tools tab",
+          tabBarIcon: ({ color }) => <Feather name="grid" size={22} color={color} />,
+        }}
+      />
+
+      {/* ── Hidden screens — reachable via router.push, not in tab bar ──── */}
+      {/* shifts and clock are embedded inside My Work; kept here so deep-links
+          (notifications, home screen shortcuts, etc.) still resolve correctly. */}
+      <Tabs.Screen name="shifts" options={{ href: null }} />
+      <Tabs.Screen name="clock" options={{ href: null }} />
+      {/* radio is embedded in chat as a sub-tab when the feature is on */}
+      <Tabs.Screen name="radio" options={{ href: null }} />
+      {/* management screens — site managers reach these via the More tab */}
+      <Tabs.Screen name="schedule" options={{ href: null, headerShown: false }} />
+      <Tabs.Screen name="shift-approvals" options={{ href: null }} />
+      <Tabs.Screen name="time-approval" options={{ href: null }} />
       <Tabs.Screen name="chat/[id]" options={{ href: null, headerShown: false }} />
       <Tabs.Screen name="ops-plan" options={{ href: null, headerShown: false }} />
     </Tabs>

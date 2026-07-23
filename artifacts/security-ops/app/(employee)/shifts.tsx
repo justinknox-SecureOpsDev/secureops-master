@@ -22,7 +22,7 @@ import { useAuth } from "@/contexts/AuthContext";
 
 const FILTERS = ["available", "upcoming", "active", "completed"] as const;
 
-export default function EmployeeShiftsScreen() {
+export default function EmployeeShiftsScreen({ hideTopPad }: { hideTopPad?: boolean } = {}) {
   const colors = useColors();
   const router = useRouter();
   // Site Managers keep the "no financial info" invariant even in the employee
@@ -279,7 +279,7 @@ export default function EmployeeShiftsScreen() {
 
   return (
     <View style={[styles.container, { backgroundColor: colors.background }]}>
-      <View style={[styles.topBar, { paddingTop: topPad + 12, borderBottomColor: colors.border }]}>
+      <View style={[styles.topBar, { paddingTop: hideTopPad ? 12 : topPad + 12, borderBottomColor: colors.border }]}>
         <View style={{ flex: 1 }}>
           <Text style={[styles.pageTitle, { color: colors.foreground }]} accessibilityRole="header">Shifts</Text>
           <View style={{ flexDirection: "row", alignItems: "center", gap: 6, marginTop: 4 }}>

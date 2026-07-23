@@ -216,26 +216,29 @@ export default function AdminDashboardScreen() {
       )}
 
       <View style={styles.section}>
-        <Text style={[styles.sectionTitle, { color: colors.accent }]}>ADMIN ACTIONS</Text>
-        <View style={styles.actionRow}>
+        <Text style={[styles.sectionTitle, { color: colors.accent }]}>QUICK JUMP</Text>
+        <View style={styles.quickGrid}>
           {([
-            { label: "Clients", icon: "briefcase", route: "/(admin)/clients" },
-            { label: "Time Approval", icon: "check-square", route: "/(admin)/time-approval" },
             { label: "Payroll", icon: "dollar-sign", route: "/(admin)/payroll", feature: "payroll" },
             { label: "Invoices", icon: "file-text", route: "/(admin)/invoices", feature: "invoicing" },
             { label: "Licences", icon: "award", route: "/(admin)/licenses" },
+            { label: "Lic. Approvals", icon: "user-check", route: "/(admin)/license-approvals" },
+            { label: "Clients", icon: "briefcase", route: "/(admin)/clients" },
+            { label: "Time Approval", icon: "check-square", route: "/(admin)/time-approval" },
           ] as { label: string; icon: string; route: string; feature?: FeatureKey }[])
             .filter((a) => !a.feature || isEnabled(flags, a.feature))
             .map(({ label, icon, route }) => (
             <TouchableOpacity
               key={label}
-              style={[styles.actionBtn, { backgroundColor: colors.card, borderColor: colors.border }]}
+              style={[styles.quickTile, { backgroundColor: colors.card, borderColor: colors.border }]}
               onPress={() => router.push(route as any)}
               accessibilityRole="button"
               accessibilityLabel={label}
             >
-              <Feather name={icon as any} size={22} color={colors.primary} />
-              <Text style={[styles.actionLabel, { color: colors.foreground }]}>{label}</Text>
+              <View style={[styles.quickIconBox, { backgroundColor: colors.primary + "18", borderColor: colors.primary + "40" }]}>
+                <Feather name={icon as any} size={22} color={colors.primary} />
+              </View>
+              <Text style={[styles.quickTileLabel, { color: colors.foreground }]}>{label}</Text>
             </TouchableOpacity>
           ))}
         </View>
@@ -314,12 +317,17 @@ const styles = StyleSheet.create({
   },
   statValue: { fontSize: 28, fontWeight: "700" },
   statLabel: { fontSize: 11, textAlign: "center", letterSpacing: 0.5 },
-  actionRow: { flexDirection: "row", gap: 8, marginBottom: 10 },
-  actionBtn: {
-    flex: 1, padding: 16, borderRadius: 10, borderWidth: 1,
+  quickGrid: { flexDirection: "row", flexWrap: "wrap", gap: 10, marginBottom: 10 },
+  quickTile: {
+    width: "30%", flexGrow: 1,
+    padding: 14, borderRadius: 12, borderWidth: 1,
     alignItems: "center", gap: 8,
   },
-  actionLabel: { fontSize: 12, fontWeight: "600" },
+  quickIconBox: {
+    width: 44, height: 44, borderRadius: 10, borderWidth: 1,
+    justifyContent: "center", alignItems: "center",
+  },
+  quickTileLabel: { fontSize: 12, fontWeight: "600", textAlign: "center" },
   pendingBanner: {
     flexDirection: "row", alignItems: "center", gap: 10,
     padding: 14, borderRadius: 10, borderWidth: 1,

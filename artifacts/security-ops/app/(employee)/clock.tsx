@@ -16,7 +16,7 @@ function formatDuration(seconds: number) {
   return `${String(h).padStart(2, "0")}:${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}`;
 }
 
-export default function EmployeeClockScreen() {
+export default function EmployeeClockScreen({ hideTopPad }: { hideTopPad?: boolean } = {}) {
   const colors = useColors();
   const queryClient = useQueryClient();
   const topPad = useTopPad();
@@ -265,7 +265,7 @@ export default function EmployeeClockScreen() {
 
   return (
     <ScrollView ref={scrollRef} style={[styles.container, { backgroundColor: colors.background }]} contentContainerStyle={{ paddingBottom: 100 }}>
-      <View style={[styles.topBar, { paddingTop: topPad + 12, borderBottomColor: colors.border }]}>
+      <View style={[styles.topBar, { paddingTop: hideTopPad ? 12 : topPad + 12, borderBottomColor: colors.border }]}>
         <Text style={[styles.pageTitle, { color: colors.foreground }]} accessibilityRole="header">Time Clock</Text>
         <TouchableOpacity
           onPress={getLocation}
