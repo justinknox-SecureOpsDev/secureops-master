@@ -14,7 +14,6 @@ import {
 } from "@/components/ui/dialog";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Switch } from "@/components/ui/switch";
-import { ResizablePanelGroup, ResizablePanel, ResizableHandle } from "@/components/ui/resizable";
 import {
   AlertTriangle, CheckCircle2, Clock, MapPin, MessageCircle, Radio, Send,
   ShieldAlert, UserCheck, Users, Megaphone, Loader2, RefreshCw, Wifi, WifiOff,
@@ -26,11 +25,9 @@ import { AssignNearestDialog, candidateBlockReason, type Candidate, type AssignN
 import {
   PANEL_IDS,
   DEFAULT_LAYOUT,
-  LEFT_PANELS,
-  RIGHT_PANELS,
   useDispatchLayout,
   applyPanelReorder,
-  buildColumnWithPlaceholder,
+  buildWithPlaceholder,
   DRAG_PLACEHOLDER,
   type PanelId,
   type DispatchLayout,
@@ -201,8 +198,6 @@ const PANEL_LABELS: Record<PanelId, string> = {
   broadcast: "Broadcast",
 };
 
-// Fixed column membership — imported from dispatchLayout (LEFT_PANELS, RIGHT_PANELS).
-
 // data-tour anchor values for panels that participate in the coach-mark tour.
 const PANEL_TOUR: Partial<Record<PanelId, string>> = {
   incidents: "incidents",
@@ -211,24 +206,16 @@ const PANEL_TOUR: Partial<Record<PanelId, string>> = {
   openShifts: "open-shifts",
   broadcast: "broadcast",
 };
-function useIsLargeScreen(): boolean {
-  const [isLarge, setIsLarge] = useState(() => typeof window !== "undefined" && window.innerWidth >= 1024);
-  useEffect(() => {
-    const handler = () => setIsLarge(window.innerWidth >= 1024);
-    window.addEventListener("resize", handler);
-    return () => window.removeEventListener("resize", handler);
-  }, []);
-  return isLarge;
-}
-
 // =========================================================== CUSTOMIZE POPOVER
 
 function CustomizePopover({
   layout,
   onTogglePanel,
+  onSetColumns,
 }: {
   layout: DispatchLayout;
   onTogglePanel: (id: PanelId) => void;
+  onSetColumns: (n: 1 | 2 | 3) => void;
 }) {
   return (
     <Popover>
@@ -238,7 +225,30 @@ function CustomizePopover({
         </Button>
       </PopoverTrigger>
       <PopoverContent align="end" className="w-64 p-3">
-        <div className="text-xs font-semibold uppercase tracking-wide opacity-60 mb-3">
+        {/* Column count */}
+        <div className="text-xs font-semibold uppercase tracking-wide opacity-60 mb-2">
+          Columns
+        </div>
+        <div className="flex gap-1.5 mb-4">
+          {([1, 2, 3] as const).map((n) => (
+            <button
+              key={n}
+              onClick={() => onSetColumns(n)}
+              aria-pressed={layout.columns === n}
+              className={[
+                "flex-1 h-8 rounded text-sm font-medium border transition-colors",
+                layout.columns === n
+                  ? "bg-brand-gold text-white border-brand-gold"
+                  : "border-border hover:border-brand-gold/60",
+              ].join(" ")}
+            >
+              {n}
+            </button>
+          ))}
+        </div>
+
+        {/* Panel visibility */}
+        <div className="text-xs font-semibold uppercase tracking-wide opacity-60 mb-2">
           Show / hide panels
         </div>
         <div className="space-y-2">
@@ -262,7 +272,7 @@ function CustomizePopover({
           })}
         </div>
         <p className="text-[11px] opacity-50 mt-3 leading-snug">
-          Layout is saved per user and survives page refresh.
+          Drag panels to reorder. Layout is saved per user.
         </p>
       </PopoverContent>
     </Popover>
@@ -327,9 +337,7 @@ export default function DispatchPage() {
   const qc = useQueryClient();
   const { user } = useAuth();
   const [tourOpen, setTourOpen] = useState(false);
-  const isLargeScreen = useIsLargeScreen();
   const [layout, setLayout] = useDispatchLayout(user?.id);
-  const splitSaveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const togglePanel = useCallback((id: PanelId) => {
     setLayout((prev) => ({
@@ -372,10 +380,6 @@ export default function DispatchPage() {
     e.preventDefault();
     const srcId = dragSrcRef.current;
     if (!srcId || srcId === targetId) { dragInsertRef.current = null; setDragInsert(null); return; }
-    // Only allow reorder within the same column.
-    const srcIsLeft = LEFT_PANELS.includes(srcId);
-    const tgtIsLeft = LEFT_PANELS.includes(targetId);
-    if (srcIsLeft !== tgtIsLeft) { dragInsertRef.current = null; setDragInsert(null); return; }
     const position = dragInsertRef.current?.position ?? "before";
     setLayout((prev) => ({
       ...prev,
@@ -384,15 +388,6 @@ export default function DispatchPage() {
     dragInsertRef.current = null;
     setDragInsert(null);
     dragSrcRef.current = null;
-  }, [setLayout]);
-
-  const handleColumnResize = useCallback((sizes: number[]) => {
-    const leftSize = sizes[0];
-    if (typeof leftSize !== "number") return;
-    if (splitSaveTimer.current) clearTimeout(splitSaveTimer.current);
-    splitSaveTimer.current = setTimeout(() => {
-      setLayout((prev) => ({ ...prev, columnSplit: Math.round(leftSize) }));
-    }, 300);
   }, [setLayout]);
   // Incident id that the Live Map asked to open. Lifted to the page so
   // the map (right column) can hand off to the IncidentsPanel (left
@@ -516,7 +511,11 @@ export default function DispatchPage() {
           </p>
         </div>
         <div className="flex items-center gap-2 flex-wrap">
-          <CustomizePopover layout={layout} onTogglePanel={togglePanel} />
+          <CustomizePopover
+            layout={layout}
+            onTogglePanel={togglePanel}
+            onSetColumns={(n) => setLayout((prev) => ({ ...prev, columns: n }))}
+          />
           <Button
             variant="ghost" size="sm"
             onClick={() => setTourOpen(true)}
@@ -531,11 +530,9 @@ export default function DispatchPage() {
         </div>
       </header>
 
-      {/* ---- layout: resizable columns on desktop, stacked on mobile ---- */}
+      {/* ---- free-form configurable grid (1 / 2 / 3 columns) ---- */}
       {(() => {
-        // Ordered panel ids per column (respects user-dragged order).
-        const orderedLeft = layout.panelOrder.filter((id) => LEFT_PANELS.includes(id));
-        const orderedRight = layout.panelOrder.filter((id) => RIGHT_PANELS.includes(id));
+        const srcId = dragSrcRef.current;
 
         // Render a single panel's content by id.
         const renderPanelContent = (id: PanelId) => {
@@ -623,7 +620,7 @@ export default function DispatchPage() {
               onDragOver={(e) => handlePanelDragOver(e, id)}
               onDrop={(e) => handlePanelDrop(e, id)}
               {...(tourAttr ? { "data-tour": tourAttr } : {})}
-              className="relative group rounded-lg"
+              className="relative group rounded-lg min-w-0"
             >
               {/* Drag handle — visible on hover, anchored top-right of the wrapper */}
               <div
@@ -638,80 +635,39 @@ export default function DispatchPage() {
           );
         };
 
-        // Build a column's panel list, splicing in a ghost placeholder at the
-        // current drag-insertion point so the final resting position is obvious.
-        const renderColumnPanels = (orderedIds: PanelId[], columnSet: PanelId[]) => {
-          const srcId = dragSrcRef.current;
-          const visible = orderedIds.filter((id) => layout.panels[id]);
-          const slots = buildColumnWithPlaceholder(visible, srcId, dragInsert, columnSet);
-          return slots.map((slot) =>
-            slot === DRAG_PLACEHOLDER ? (
-              <div
-                key={DRAG_PLACEHOLDER}
-                data-testid="drag-placeholder"
-                aria-hidden="true"
-                className="h-14 rounded-lg border-2 border-dashed border-brand-gold/50 bg-brand-gold/5 animate-in fade-in duration-100 flex items-center justify-center"
-              >
-                {srcId && (
-                  <span className="text-sm italic text-brand-gold/50">
-                    {PANEL_LABELS[srcId]}
-                  </span>
-                )}
-              </div>
-            ) : (
-              wrapPanel(slot)
-            ),
-          );
-        };
+        // All visible panels in user-chosen order, with a ghost placeholder
+        // at the current drag-insertion point.
+        const visible = layout.panelOrder.filter((id) => layout.panels[id]);
+        const slots = buildWithPlaceholder(visible, srcId, dragInsert);
 
-        const leftPanels = (
-          <div className="space-y-4 min-w-0">
-            {renderColumnPanels(orderedLeft, LEFT_PANELS)}
-          </div>
-        );
-
-        const rightPanels = (
-          <div className="space-y-4 min-w-0">
-            {renderColumnPanels(orderedRight, RIGHT_PANELS)}
-          </div>
-        );
-
-        const leftVisible = LEFT_PANELS.some((id) => layout.panels[id]);
-        const rightVisible = RIGHT_PANELS.some((id) => layout.panels[id]);
-
-        if (!isLargeScreen) {
-          return (
-            <div className="space-y-4">
-              {leftVisible && leftPanels}
-              {rightVisible && rightPanels}
-            </div>
-          );
-        }
-
-        if (!leftVisible) {
-          return <div className="w-full">{rightPanels}</div>;
-        }
-        if (!rightVisible) {
-          return <div className="w-full">{leftPanels}</div>;
-        }
+        const colClass =
+          layout.columns === 1
+            ? "grid-cols-1"
+            : layout.columns === 3
+              ? "grid-cols-1 md:grid-cols-2 xl:grid-cols-3"
+              : "grid-cols-1 lg:grid-cols-2";
 
         return (
-          <ResizablePanelGroup
-            direction="horizontal"
-            className="gap-4"
-            onLayout={handleColumnResize}
-          >
-            <ResizablePanel defaultSize={layout.columnSplit} minSize={25} maxSize={80}>
-              {leftPanels}
-            </ResizablePanel>
-            <ResizableHandle
-              withHandle
-              className="mx-1 bg-border hover:bg-brand-gold/50 transition-colors [&>div]:border-brand-gold/60 [&>div]:bg-background"
-            />
-            <ResizablePanel defaultSize={100 - layout.columnSplit} minSize={20} maxSize={75}>
-              {rightPanels}
-            </ResizablePanel>
-          </ResizablePanelGroup>
+          <div className={`grid gap-4 items-start ${colClass}`}>
+            {slots.map((slot) =>
+              slot === DRAG_PLACEHOLDER ? (
+                <div
+                  key={DRAG_PLACEHOLDER}
+                  data-testid="drag-placeholder"
+                  aria-hidden="true"
+                  className="min-h-14 rounded-lg border-2 border-dashed border-brand-gold/50 bg-brand-gold/5 animate-in fade-in duration-100 flex items-center justify-center"
+                >
+                  {srcId && (
+                    <span className="text-sm italic text-brand-gold/50">
+                      {PANEL_LABELS[srcId]}
+                    </span>
+                  )}
+                </div>
+              ) : (
+                wrapPanel(slot)
+              ),
+            )}
+          </div>
         );
       })()}
 

@@ -4,13 +4,12 @@ import {
   DEFAULT_LAYOUT,
   DEFAULT_PANEL_ORDER,
   PANEL_IDS,
-  LEFT_PANELS,
-  RIGHT_PANELS,
   DRAG_PLACEHOLDER,
   dispatchLayoutKey,
   parseStoredLayout,
   useDispatchLayout,
   applyPanelReorder,
+  buildWithPlaceholder,
   buildColumnWithPlaceholder,
   type DispatchLayout,
   type PanelId,
@@ -55,24 +54,24 @@ describe("parseStoredLayout", () => {
     expect(result.panels.liveMap).toBe(DEFAULT_LAYOUT.panels.liveMap);
   });
 
-  it("clamps columnSplit below 20 up to 20", () => {
-    const raw = JSON.stringify({ columnSplit: 5 });
-    expect(parseStoredLayout(raw).columnSplit).toBe(20);
+  it("accepts columns=1", () => {
+    const raw = JSON.stringify({ columns: 1 });
+    expect(parseStoredLayout(raw).columns).toBe(1);
   });
 
-  it("clamps columnSplit above 80 down to 80", () => {
-    const raw = JSON.stringify({ columnSplit: 95 });
-    expect(parseStoredLayout(raw).columnSplit).toBe(80);
+  it("accepts columns=3", () => {
+    const raw = JSON.stringify({ columns: 3 });
+    expect(parseStoredLayout(raw).columns).toBe(3);
   });
 
-  it("accepts a valid columnSplit within [20, 80] unchanged", () => {
-    const raw = JSON.stringify({ columnSplit: 50 });
-    expect(parseStoredLayout(raw).columnSplit).toBe(50);
+  it("accepts columns=2 (default value)", () => {
+    const raw = JSON.stringify({ columns: 2 });
+    expect(parseStoredLayout(raw).columns).toBe(2);
   });
 
-  it("falls back to default columnSplit when the stored value is not a number", () => {
-    const raw = JSON.stringify({ columnSplit: "wide" });
-    expect(parseStoredLayout(raw).columnSplit).toBe(DEFAULT_LAYOUT.columnSplit);
+  it("falls back to default columns when the stored value is unrecognized", () => {
+    const raw = JSON.stringify({ columns: "wide" });
+    expect(parseStoredLayout(raw).columns).toBe(DEFAULT_LAYOUT.columns);
   });
 
   it("reads mapExpanded correctly", () => {
@@ -133,9 +132,10 @@ describe("useDispatchLayout — hydration from localStorage", () => {
         liveMap: false,
         broadcast: true,
       },
-      columnSplit: 55,
+      columns: 3,
       mapExpanded: true,
       mapTileLayer: "satellite",
+      panelOrder: DEFAULT_PANEL_ORDER,
     };
     localStorage.setItem(dispatchLayoutKey("user-reload"), JSON.stringify(stored));
 
@@ -144,7 +144,7 @@ describe("useDispatchLayout — hydration from localStorage", () => {
 
     expect(layout.panels.incidents).toBe(false);
     expect(layout.panels.shiftClaims).toBe(false);
-    expect(layout.columnSplit).toBe(55);
+    expect(layout.columns).toBe(3);
     expect(layout.mapExpanded).toBe(true);
     expect(layout.mapTileLayer).toBe("satellite");
   });
@@ -162,22 +162,22 @@ describe("useDispatchLayout — hydration from localStorage", () => {
     expect(layout.panels.liveMap).toBe(true);
   });
 
-  it("clamps a stored columnSplit of 10 to 20 on load", () => {
+  it("loads columns=1 from storage", () => {
     localStorage.setItem(
-      dispatchLayoutKey("user-clamp-lo"),
-      JSON.stringify({ columnSplit: 10 }),
+      dispatchLayoutKey("user-col-1"),
+      JSON.stringify({ columns: 1 }),
     );
-    const { result } = renderHook(() => useDispatchLayout("user-clamp-lo"));
-    expect(result.current[0].columnSplit).toBe(20);
+    const { result } = renderHook(() => useDispatchLayout("user-col-1"));
+    expect(result.current[0].columns).toBe(1);
   });
 
-  it("clamps a stored columnSplit of 90 to 80 on load", () => {
+  it("loads columns=3 from storage", () => {
     localStorage.setItem(
-      dispatchLayoutKey("user-clamp-hi"),
-      JSON.stringify({ columnSplit: 90 }),
+      dispatchLayoutKey("user-col-3"),
+      JSON.stringify({ columns: 3 }),
     );
-    const { result } = renderHook(() => useDispatchLayout("user-clamp-hi"));
-    expect(result.current[0].columnSplit).toBe(80);
+    const { result } = renderHook(() => useDispatchLayout("user-col-3"));
+    expect(result.current[0].columns).toBe(3);
   });
 
   it("returns DEFAULT_LAYOUT when the stored JSON is malformed", () => {
@@ -204,15 +204,15 @@ describe("useDispatchLayout — writes / round-trip", () => {
     expect(stored.panels.incidents).toBe(false);
   });
 
-  it("persists columnSplit to localStorage", () => {
+  it("persists columns to localStorage", () => {
     const { result } = renderHook(() => useDispatchLayout("user-split"));
 
     act(() => {
-      result.current[1]((prev) => ({ ...prev, columnSplit: 40 }));
+      result.current[1]((prev) => ({ ...prev, columns: 3 }));
     });
 
     const stored = JSON.parse(localStorage.getItem(dispatchLayoutKey("user-split"))!);
-    expect(stored.columnSplit).toBe(40);
+    expect(stored.columns).toBe(3);
   });
 
   it("round-trips the full layout without data loss", () => {
@@ -228,7 +228,7 @@ describe("useDispatchLayout — writes / round-trip", () => {
         liveMap: false,
         broadcast: true,
       },
-      columnSplit: 33,
+      columns: 3,
       mapExpanded: true,
       mapTileLayer: "satellite",
       panelOrder: DEFAULT_PANEL_ORDER,
@@ -378,7 +378,8 @@ describe("buildColumnWithPlaceholder — no placeholder cases", () => {
     expect(result).toBe(visible);
   });
 
-  it("returns visible unchanged when the hovered panel is in a different column (cross-column drag)", () => {
+  it("returns visible unchanged when overId is not present in visible (hidden panel hover)", () => {
+    // liveMap is not in visible — overId not found, so no placeholder is emitted
     const visible: PanelId[] = ["incidents", "statusBoard"];
     const result = buildColumnWithPlaceholder(
       visible,
@@ -389,15 +390,19 @@ describe("buildColumnWithPlaceholder — no placeholder cases", () => {
     expect(result).toBe(visible);
   });
 
-  it("returns visible unchanged when the source panel is in a different column (cross-column drag)", () => {
+  it("shows a placeholder when srcId is not in visible but overId is (free drag across positions)", () => {
+    // Any non-null srcId + valid overId triggers a placeholder — column membership is irrelevant
     const visible: PanelId[] = ["incidents", "statusBoard"];
-    const result = buildColumnWithPlaceholder(
+    const slots = buildColumnWithPlaceholder(
       visible,
       "liveMap",
       { overId: "statusBoard", position: "before" },
       LEFT_COLUMN,
     );
-    expect(result).toBe(visible);
+    expect(slots.includes(DRAG_PLACEHOLDER)).toBe(true);
+    const phIdx = slots.indexOf(DRAG_PLACEHOLDER);
+    const sbIdx = slots.indexOf("statusBoard");
+    expect(phIdx).toBe(sbIdx - 1);
   });
 
   it("does not include the placeholder sentinel when no drag is active", () => {
@@ -574,20 +579,6 @@ describe("buildColumnWithPlaceholder — right column", () => {
 // ---------------------------------------------------------------------------
 
 describe("PANEL_IDS structural integrity", () => {
-  it("every PANEL_IDS entry appears exactly once across LEFT_PANELS and RIGHT_PANELS", () => {
-    const allColumnPanels = [...LEFT_PANELS, ...RIGHT_PANELS];
-
-    for (const id of PANEL_IDS) {
-      const count = allColumnPanels.filter((p) => p === id).length;
-      expect(count, `"${id}" must appear exactly once across LEFT_PANELS + RIGHT_PANELS, found ${count}`).toBe(1);
-    }
-
-    expect(
-      allColumnPanels.length,
-      "LEFT_PANELS + RIGHT_PANELS must contain no extra entries beyond PANEL_IDS",
-    ).toBe(PANEL_IDS.length);
-  });
-
   it("DEFAULT_PANEL_ORDER contains every PANEL_IDS entry exactly once", () => {
     for (const id of PANEL_IDS) {
       const count = DEFAULT_PANEL_ORDER.filter((p) => p === id).length;
@@ -599,76 +590,76 @@ describe("PANEL_IDS structural integrity", () => {
       "DEFAULT_PANEL_ORDER must contain no extra entries beyond PANEL_IDS",
     ).toBe(PANEL_IDS.length);
   });
-});
 
-// ---------------------------------------------------------------------------
-// Cross-column drag guard — neither column should show a placeholder
-// ---------------------------------------------------------------------------
-
-describe("buildColumnWithPlaceholder — cross-column drag produces no placeholder in either column", () => {
-  it("left column shows no placeholder when a left panel is dragged over a right panel", () => {
-    const leftVisible: PanelId[] = ["incidents", "statusBoard", "shiftClaims", "openShifts"];
-    // src is "incidents" (left), overId is "liveMap" (right) — left column must be unchanged
-    const leftSlots = buildColumnWithPlaceholder(
-      leftVisible,
-      "incidents",
-      { overId: "liveMap", position: "before" },
-      LEFT_COLUMN,
-    );
-    expect(leftSlots).toBe(leftVisible);
-    expect(leftSlots.includes(DRAG_PLACEHOLDER)).toBe(false);
-  });
-
-  it("right column shows no placeholder when a left panel is dragged over a right panel", () => {
-    const rightVisible: PanelId[] = ["liveMap", "broadcast"];
-    // src is "incidents" (left), overId is "liveMap" (right) — right column must also be unchanged
-    const rightSlots = buildColumnWithPlaceholder(
-      rightVisible,
-      "incidents",
-      { overId: "liveMap", position: "before" },
-      RIGHT_COLUMN,
-    );
-    expect(rightSlots).toBe(rightVisible);
-    expect(rightSlots.includes(DRAG_PLACEHOLDER)).toBe(false);
-  });
-
-  it("left column shows no placeholder when a right panel is dragged over a left panel", () => {
-    const leftVisible: PanelId[] = ["incidents", "statusBoard", "shiftClaims", "openShifts"];
-    // src is "liveMap" (right), overId is "statusBoard" (left) — left column must be unchanged
-    const leftSlots = buildColumnWithPlaceholder(
-      leftVisible,
-      "liveMap",
-      { overId: "statusBoard", position: "after" },
-      LEFT_COLUMN,
-    );
-    expect(leftSlots).toBe(leftVisible);
-    expect(leftSlots.includes(DRAG_PLACEHOLDER)).toBe(false);
-  });
-
-  it("right column shows no placeholder when a right panel is dragged over a left panel", () => {
-    const rightVisible: PanelId[] = ["liveMap", "broadcast"];
-    // src is "liveMap" (right), overId is "statusBoard" (left) — right column must also be unchanged
-    const rightSlots = buildColumnWithPlaceholder(
-      rightVisible,
-      "liveMap",
-      { overId: "statusBoard", position: "after" },
-      RIGHT_COLUMN,
-    );
-    expect(rightSlots).toBe(rightVisible);
-    expect(rightSlots.includes(DRAG_PLACEHOLDER)).toBe(false);
+  it("DEFAULT_LAYOUT.columns is a valid column count (1, 2, or 3)", () => {
+    expect([1, 2, 3]).toContain(DEFAULT_LAYOUT.columns);
   });
 });
 
 // ---------------------------------------------------------------------------
-// Cross-column drop guard — panelOrder must not change
+// Free drag — any panel can be dragged over any other panel
 //
-// handlePanelDrop guards: if srcIsLeft !== tgtIsLeft it returns early and
-// never calls applyPanelReorder.  These tests encode that invariant at the
-// pure-function level: when the two panels belong to different columns the
-// full panelOrder array is returned unchanged (same reference).
+// There is no column-membership guard.  buildWithPlaceholder shows a
+// placeholder whenever srcId is set and overId is present in visible,
+// regardless of where the two panels happened to appear on screen.
 // ---------------------------------------------------------------------------
 
-describe("applyPanelReorder — cross-column drop does not mutate panelOrder", () => {
+describe("buildWithPlaceholder — any panel can be dragged over any other panel", () => {
+  it("shows placeholder before 'liveMap' when 'incidents' is dragged over it", () => {
+    const visible: PanelId[] = ["incidents", "statusBoard", "liveMap", "broadcast"];
+    const slots = buildWithPlaceholder(
+      visible,
+      "incidents",
+      { overId: "liveMap", position: "before" },
+    );
+    expect(slots.includes(DRAG_PLACEHOLDER)).toBe(true);
+    const phIdx = slots.indexOf(DRAG_PLACEHOLDER);
+    const mapIdx = slots.indexOf("liveMap");
+    expect(phIdx).toBe(mapIdx - 1);
+  });
+
+  it("shows placeholder after 'statusBoard' when 'broadcast' is dragged over it", () => {
+    const visible: PanelId[] = ["incidents", "statusBoard", "liveMap", "broadcast"];
+    const slots = buildWithPlaceholder(
+      visible,
+      "broadcast",
+      { overId: "statusBoard", position: "after" },
+    );
+    expect(slots.includes(DRAG_PLACEHOLDER)).toBe(true);
+    const phIdx = slots.indexOf(DRAG_PLACEHOLDER);
+    const sbIdx = slots.indexOf("statusBoard");
+    expect(phIdx).toBe(sbIdx + 1);
+  });
+
+  it("shows placeholder before 'incidents' when 'liveMap' is dragged over it", () => {
+    const visible: PanelId[] = ["incidents", "shiftClaims", "openShifts", "liveMap"];
+    const slots = buildWithPlaceholder(
+      visible,
+      "liveMap",
+      { overId: "incidents", position: "before" },
+    );
+    expect(slots[0]).toBe(DRAG_PLACEHOLDER);
+    expect(slots[1]).toBe("incidents");
+  });
+
+  it("contains exactly one placeholder regardless of which pair of panels is involved", () => {
+    const visible: PanelId[] = ["incidents", "statusBoard", "shiftClaims", "openShifts", "liveMap", "broadcast"];
+    const slots = buildWithPlaceholder(
+      visible,
+      "broadcast",
+      { overId: "incidents", position: "after" },
+    );
+    expect(slots.filter((s) => s === DRAG_PLACEHOLDER).length).toBe(1);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Free drop — applyPanelReorder works across all panel pairs
+//
+// With no column-membership guard, any src+target combination is valid.
+// ---------------------------------------------------------------------------
+
+describe("applyPanelReorder — any panel can be reordered to any position", () => {
   const fullOrder: PanelId[] = [
     "incidents",
     "statusBoard",
@@ -678,53 +669,34 @@ describe("applyPanelReorder — cross-column drop does not mutate panelOrder", (
     "broadcast",
   ];
 
-  it("left-to-right: dropping a left panel onto a right panel target returns original array unchanged", () => {
-    // "incidents" is left-column; "liveMap" is right-column.
-    // applyPanelReorder finds both IDs in fullOrder and would succeed, so the
-    // guard in handlePanelDrop (srcIsLeft !== tgtIsLeft) must be the firewall.
-    // We verify the guard by confirming we can detect the column mismatch:
-    const srcIsLeft = LEFT_COLUMN.includes("incidents");
-    const tgtIsLeft = LEFT_COLUMN.includes("liveMap");
-    expect(srcIsLeft).toBe(true);
-    expect(tgtIsLeft).toBe(false);
-    // When the guard fires, panelOrder is NOT passed to applyPanelReorder.
-    // Simulate this: if columns differ, keep original.
-    const result = srcIsLeft !== tgtIsLeft ? fullOrder : applyPanelReorder(fullOrder, "incidents", "liveMap", "before");
-    expect(result).toBe(fullOrder);
-  });
-
-  it("right-to-left: dropping a right panel onto a left panel target returns original array unchanged", () => {
-    const srcIsLeft = LEFT_COLUMN.includes("broadcast");
-    const tgtIsLeft = LEFT_COLUMN.includes("shiftClaims");
-    expect(srcIsLeft).toBe(false);
-    expect(tgtIsLeft).toBe(true);
-    const result = srcIsLeft !== tgtIsLeft ? fullOrder : applyPanelReorder(fullOrder, "broadcast", "shiftClaims", "after");
-    expect(result).toBe(fullOrder);
-  });
-
-  it("same-column left-to-left: applyPanelReorder IS called and does change order", () => {
-    const srcIsLeft = LEFT_COLUMN.includes("openShifts");
-    const tgtIsLeft = LEFT_COLUMN.includes("incidents");
-    expect(srcIsLeft).toBe(true);
-    expect(tgtIsLeft).toBe(true);
-    // Guard does NOT fire — reorder proceeds
-    const result = srcIsLeft !== tgtIsLeft ? fullOrder : applyPanelReorder(fullOrder, "openShifts", "incidents", "before");
+  it("moves 'incidents' before 'liveMap' (first to middle-right position)", () => {
+    const result = applyPanelReorder(fullOrder, "incidents", "liveMap", "before");
     expect(result).not.toBe(fullOrder);
+    const liveIdx = result.indexOf("liveMap");
+    expect(result[liveIdx - 1]).toBe("incidents");
+  });
+
+  it("moves 'broadcast' before 'shiftClaims' (last to early position)", () => {
+    const result = applyPanelReorder(fullOrder, "broadcast", "shiftClaims", "before");
+    expect(result).not.toBe(fullOrder);
+    const scIdx = result.indexOf("shiftClaims");
+    expect(result[scIdx - 1]).toBe("broadcast");
+  });
+
+  it("moves 'liveMap' after 'incidents' (right-side panel to first position)", () => {
+    const result = applyPanelReorder(fullOrder, "liveMap", "incidents", "after");
+    expect(result).not.toBe(fullOrder);
+    expect(result[0]).toBe("incidents");
+    expect(result[1]).toBe("liveMap");
+  });
+
+  it("moves 'openShifts' before 'incidents' (reorder across what were previously columns)", () => {
+    const result = applyPanelReorder(fullOrder, "openShifts", "incidents", "before");
     expect(result[0]).toBe("openShifts");
     expect(result[1]).toBe("incidents");
-  });
-
-  it("same-column right-to-right: applyPanelReorder IS called and does change order", () => {
-    const srcIsLeft = LEFT_COLUMN.includes("broadcast");
-    const tgtIsLeft = LEFT_COLUMN.includes("liveMap");
-    expect(srcIsLeft).toBe(false);
-    expect(tgtIsLeft).toBe(false);
-    // Guard does NOT fire — reorder proceeds
-    const result = srcIsLeft !== tgtIsLeft ? fullOrder : applyPanelReorder(fullOrder, "broadcast", "liveMap", "before");
-    expect(result).not.toBe(fullOrder);
-    const liveMapIdx = result.indexOf("liveMap");
-    const broadcastIdx = result.indexOf("broadcast");
-    expect(broadcastIdx).toBe(liveMapIdx - 1);
+    // All 6 panels still present
+    expect(result).toHaveLength(6);
+    expect([...result].sort()).toEqual([...fullOrder].sort());
   });
 });
 
@@ -841,12 +813,12 @@ describe("useDispatchLayout — user isolation (org switch)", () => {
   it("loads the correct layout for each user ID independently", () => {
     const layoutA: DispatchLayout = {
       ...DEFAULT_LAYOUT,
-      columnSplit: 30,
+      columns: 1,
       mapExpanded: true,
     };
     const layoutB: DispatchLayout = {
       ...DEFAULT_LAYOUT,
-      columnSplit: 70,
+      columns: 3,
       mapExpanded: false,
     };
 
@@ -856,10 +828,10 @@ describe("useDispatchLayout — user isolation (org switch)", () => {
     const { result: resultA } = renderHook(() => useDispatchLayout("user-a"));
     const { result: resultB } = renderHook(() => useDispatchLayout("user-b"));
 
-    expect(resultA.current[0].columnSplit).toBe(30);
+    expect(resultA.current[0].columns).toBe(1);
     expect(resultA.current[0].mapExpanded).toBe(true);
 
-    expect(resultB.current[0].columnSplit).toBe(70);
+    expect(resultB.current[0].columns).toBe(3);
     expect(resultB.current[0].mapExpanded).toBe(false);
   });
 
@@ -867,7 +839,7 @@ describe("useDispatchLayout — user isolation (org switch)", () => {
     const { result: resultA } = renderHook(() => useDispatchLayout("user-a"));
 
     act(() => {
-      resultA.current[1]((prev) => ({ ...prev, columnSplit: 25 }));
+      resultA.current[1]((prev) => ({ ...prev, columns: 1 }));
     });
 
     expect(localStorage.getItem(dispatchLayoutKey("user-b"))).toBeNull();
@@ -876,7 +848,7 @@ describe("useDispatchLayout — user isolation (org switch)", () => {
   it("switching from user-a to user-b (remount with new id) loads user-b's own stored layout", () => {
     const layoutB: DispatchLayout = {
       ...DEFAULT_LAYOUT,
-      columnSplit: 60,
+      columns: 3,
       panels: { ...DEFAULT_LAYOUT.panels, broadcast: false },
     };
     localStorage.setItem(dispatchLayoutKey("user-b"), JSON.stringify(layoutB));
@@ -886,7 +858,7 @@ describe("useDispatchLayout — user isolation (org switch)", () => {
     unmountA();
 
     const { result: resultB } = renderHook(() => useDispatchLayout("user-b"));
-    expect(resultB.current[0].columnSplit).toBe(60);
+    expect(resultB.current[0].columns).toBe(3);
     expect(resultB.current[0].panels.broadcast).toBe(false);
   });
 });
