@@ -11,11 +11,21 @@ export const PANEL_IDS = [
 
 export type PanelId = (typeof PANEL_IDS)[number];
 
+export const DEFAULT_PANEL_ORDER: PanelId[] = [
+  "incidents",
+  "statusBoard",
+  "shiftClaims",
+  "openShifts",
+  "liveMap",
+  "broadcast",
+];
+
 export interface DispatchLayout {
   panels: Record<PanelId, boolean>;
   columnSplit: number;
   mapExpanded: boolean;
   mapTileLayer: "street" | "satellite";
+  panelOrder: PanelId[];
 }
 
 export const DEFAULT_LAYOUT: DispatchLayout = {
@@ -30,6 +40,7 @@ export const DEFAULT_LAYOUT: DispatchLayout = {
   columnSplit: 67,
   mapExpanded: false,
   mapTileLayer: "street",
+  panelOrder: DEFAULT_PANEL_ORDER,
 };
 
 export function dispatchLayoutKey(userId: string): string {
@@ -40,6 +51,22 @@ export function parseStoredLayout(raw: string): DispatchLayout {
   const parsed = JSON.parse(raw) as Partial<DispatchLayout> & {
     panels?: Partial<Record<PanelId, boolean>>;
   };
+
+  // Reconstruct panelOrder: keep only valid stored ids (in stored order),
+  // then append any ids that were missing (e.g. newly-added panels).
+  const storedOrder = Array.isArray(parsed.panelOrder)
+    ? (parsed.panelOrder as unknown[])
+    : [];
+  const validStored = storedOrder.filter(
+    (id): id is PanelId =>
+      typeof id === "string" &&
+      (PANEL_IDS as readonly string[]).includes(id),
+  );
+  const panelOrder: PanelId[] = [
+    ...validStored,
+    ...DEFAULT_PANEL_ORDER.filter((id) => !validStored.includes(id)),
+  ];
+
   return {
     panels: { ...DEFAULT_LAYOUT.panels, ...parsed.panels },
     columnSplit:
@@ -51,6 +78,7 @@ export function parseStoredLayout(raw: string): DispatchLayout {
         ? parsed.mapExpanded
         : DEFAULT_LAYOUT.mapExpanded,
     mapTileLayer: parsed.mapTileLayer === "satellite" ? "satellite" : "street",
+    panelOrder,
   };
 }
 

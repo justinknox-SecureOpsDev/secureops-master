@@ -18,7 +18,7 @@ import { ResizablePanelGroup, ResizablePanel, ResizableHandle } from "@/componen
 import {
   AlertTriangle, CheckCircle2, Clock, MapPin, MessageCircle, Radio, Send,
   ShieldAlert, UserCheck, Users, Megaphone, Loader2, RefreshCw, Wifi, WifiOff,
-  HelpCircle, X, Settings2, Maximize2, Minimize2,
+  HelpCircle, X, Settings2, Maximize2, Minimize2, GripVertical,
 } from "lucide-react";
 import { useAuth } from "@/lib/auth";
 import { useFirstQueryParam } from "@/hooks/useDeepLinkFocus";
@@ -196,6 +196,18 @@ const PANEL_LABELS: Record<PanelId, string> = {
   broadcast: "Broadcast",
 };
 
+// Fixed column membership — panels can be reordered within a column but not moved across.
+const LEFT_PANELS: PanelId[] = ["incidents", "statusBoard", "shiftClaims", "openShifts"];
+const RIGHT_PANELS: PanelId[] = ["liveMap", "broadcast"];
+
+// data-tour anchor values for panels that participate in the coach-mark tour.
+const PANEL_TOUR: Partial<Record<PanelId, string>> = {
+  incidents: "incidents",
+  statusBoard: "status-board",
+  shiftClaims: "shift-claims",
+  openShifts: "open-shifts",
+  broadcast: "broadcast",
+};
 function useIsLargeScreen(): boolean {
   const [isLarge, setIsLarge] = useState(() => typeof window !== "undefined" && window.innerWidth >= 1024);
   useEffect(() => {
@@ -321,6 +333,45 @@ export default function DispatchPage() {
       ...prev,
       panels: { ...prev.panels, [id]: !prev.panels[id] },
     }));
+  }, [setLayout]);
+
+  // ---- drag-to-reorder state ----
+  const dragSrcRef = useRef<PanelId | null>(null);
+  const [dragOverId, setDragOverId] = useState<PanelId | null>(null);
+
+  const handlePanelDragStart = useCallback((id: PanelId) => {
+    dragSrcRef.current = id;
+  }, []);
+
+  const handlePanelDragEnd = useCallback(() => {
+    dragSrcRef.current = null;
+    setDragOverId(null);
+  }, []);
+
+  const handlePanelDragOver = useCallback((e: React.DragEvent, id: PanelId) => {
+    e.preventDefault();
+    if (dragSrcRef.current && dragSrcRef.current !== id) setDragOverId(id);
+  }, []);
+
+  const handlePanelDrop = useCallback((e: React.DragEvent, targetId: PanelId) => {
+    e.preventDefault();
+    const srcId = dragSrcRef.current;
+    if (!srcId || srcId === targetId) { setDragOverId(null); return; }
+    // Only allow reorder within the same column.
+    const srcIsLeft = LEFT_PANELS.includes(srcId);
+    const tgtIsLeft = LEFT_PANELS.includes(targetId);
+    if (srcIsLeft !== tgtIsLeft) { setDragOverId(null); return; }
+    setLayout((prev) => {
+      const order = [...prev.panelOrder];
+      const fromIdx = order.indexOf(srcId);
+      const toIdx = order.indexOf(targetId);
+      if (fromIdx === -1 || toIdx === -1) return prev;
+      order.splice(fromIdx, 1);
+      order.splice(toIdx, 0, srcId);
+      return { ...prev, panelOrder: order };
+    });
+    setDragOverId(null);
+    dragSrcRef.current = null;
   }, [setLayout]);
 
   const handleColumnResize = useCallback((sizes: number[]) => {
@@ -470,10 +521,15 @@ export default function DispatchPage() {
 
       {/* ---- layout: resizable columns on desktop, stacked on mobile ---- */}
       {(() => {
-        const leftPanels = (
-          <div className="space-y-4 min-w-0">
-            {layout.panels.incidents && (
-              <div data-tour="incidents">
+        // Ordered panel ids per column (respects user-dragged order).
+        const orderedLeft = layout.panelOrder.filter((id) => LEFT_PANELS.includes(id));
+        const orderedRight = layout.panelOrder.filter((id) => RIGHT_PANELS.includes(id));
+
+        // Render a single panel's content by id.
+        const renderPanelContent = (id: PanelId) => {
+          switch (id) {
+            case "incidents":
+              return (
                 <IncidentsPanel
                   data={incidents.data ?? []}
                   loading={incidents.isLoading}
@@ -484,10 +540,9 @@ export default function DispatchPage() {
                   focusedIncidentId={focusedIncidentId}
                   onFocusConsumed={() => setFocusedIncidentId(null)}
                 />
-              </div>
-            )}
-            {layout.panels.statusBoard && (
-              <div data-tour="status-board">
+              );
+            case "statusBoard":
+              return (
                 <StatusBoardPanel
                   data={board.data}
                   loading={board.isLoading}
@@ -496,10 +551,9 @@ export default function DispatchPage() {
                   isAdmin={user?.role === "admin"}
                   onChange={refreshAll}
                 />
-              </div>
-            )}
-            {layout.panels.shiftClaims && (
-              <div data-tour="shift-claims">
+              );
+            case "shiftClaims":
+              return (
                 <ShiftClaimsPanel
                   claims={pendingClaims}
                   loading={claims.isLoading}
@@ -507,10 +561,9 @@ export default function DispatchPage() {
                   updatedAt={claims.dataUpdatedAt}
                   onChange={() => qc.invalidateQueries({ queryKey: ["dispatch"] })}
                 />
-              </div>
-            )}
-            {layout.panels.openShifts && (
-              <div data-tour="open-shifts">
+              );
+            case "openShifts":
+              return (
                 <OpenShiftsPanel
                   data={openShifts.data ?? []}
                   loading={openShifts.isLoading}
@@ -518,46 +571,78 @@ export default function DispatchPage() {
                   updatedAt={openShifts.dataUpdatedAt}
                   onChange={refreshAll}
                 />
+              );
+            case "liveMap":
+              return (
+                <LiveMapPanel
+                  officers={officers.data ?? []}
+                  sites={sites.data ?? []}
+                  loading={officers.isLoading}
+                  error={officers.error}
+                  updatedAt={officers.dataUpdatedAt}
+                  incidents={incidents.data ?? []}
+                  onFocusIncident={setFocusedIncidentId}
+                  focusUserId={deepLinkUserId}
+                  focusSiteId={deepLinkSiteId}
+                  mapExpanded={layout.mapExpanded}
+                  onToggleExpand={() =>
+                    setLayout((prev) => ({ ...prev, mapExpanded: !prev.mapExpanded }))
+                  }
+                  mapTileLayer={layout.mapTileLayer}
+                  onTileLayerChange={(layer) =>
+                    setLayout((prev) => ({ ...prev, mapTileLayer: layer }))
+                  }
+                />
+              );
+            case "broadcast":
+              return <BroadcastPanel rooms={rooms.data ?? []} />;
+          }
+        };
+
+        // Wrap a panel with its drag-handle and drop-target styling.
+        const wrapPanel = (id: PanelId) => {
+          const tourAttr = PANEL_TOUR[id];
+          const isOver = dragOverId === id;
+          return (
+            <div
+              key={id}
+              draggable
+              onDragStart={() => handlePanelDragStart(id)}
+              onDragEnd={handlePanelDragEnd}
+              onDragOver={(e) => handlePanelDragOver(e, id)}
+              onDrop={(e) => handlePanelDrop(e, id)}
+              {...(tourAttr ? { "data-tour": tourAttr } : {})}
+              className={`relative group transition-[box-shadow] rounded-lg ${
+                isOver ? "ring-2 ring-brand-gold/70 shadow-md" : ""
+              }`}
+            >
+              {/* Drag handle — visible on hover, anchored top-right of the wrapper */}
+              <div
+                className="absolute top-3 right-3 z-10 opacity-0 group-hover:opacity-100 transition-opacity cursor-grab active:cursor-grabbing text-muted-foreground/50 hover:text-muted-foreground"
+                aria-hidden="true"
+                title="Drag to reorder"
+              >
+                <GripVertical className="w-4 h-4" />
               </div>
-            )}
+              {renderPanelContent(id)}
+            </div>
+          );
+        };
+
+        const leftPanels = (
+          <div className="space-y-4 min-w-0">
+            {orderedLeft.filter((id) => layout.panels[id]).map(wrapPanel)}
           </div>
         );
 
         const rightPanels = (
           <div className="space-y-4 min-w-0">
-            {layout.panels.liveMap && (
-              <LiveMapPanel
-                officers={officers.data ?? []}
-                sites={sites.data ?? []}
-                loading={officers.isLoading}
-                error={officers.error}
-                updatedAt={officers.dataUpdatedAt}
-                incidents={incidents.data ?? []}
-                onFocusIncident={setFocusedIncidentId}
-                focusUserId={deepLinkUserId}
-                focusSiteId={deepLinkSiteId}
-                mapExpanded={layout.mapExpanded}
-                onToggleExpand={() =>
-                  setLayout((prev) => ({ ...prev, mapExpanded: !prev.mapExpanded }))
-                }
-                mapTileLayer={layout.mapTileLayer}
-                onTileLayerChange={(layer) =>
-                  setLayout((prev) => ({ ...prev, mapTileLayer: layer }))
-                }
-              />
-            )}
-            {layout.panels.broadcast && (
-              <div data-tour="broadcast">
-                <BroadcastPanel rooms={rooms.data ?? []} />
-              </div>
-            )}
+            {orderedRight.filter((id) => layout.panels[id]).map(wrapPanel)}
           </div>
         );
 
-        const leftVisible =
-          layout.panels.incidents || layout.panels.statusBoard ||
-          layout.panels.shiftClaims || layout.panels.openShifts;
-        const rightVisible = layout.panels.liveMap || layout.panels.broadcast;
+        const leftVisible = LEFT_PANELS.some((id) => layout.panels[id]);
+        const rightVisible = RIGHT_PANELS.some((id) => layout.panels[id]);
 
         if (!isLargeScreen) {
           return (
