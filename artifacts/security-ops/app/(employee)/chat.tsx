@@ -65,9 +65,7 @@ export default function EmployeeChatScreen() {
         {messages}
       </View>
       <View style={{ flex: 1, display: activeTab === "radio" ? "flex" : "none" }}>
-        <FeatureGate feature="radio">
-          <RadioScreen />
-        </FeatureGate>
+        <RadioScreen />
       </View>
     </View>
   );

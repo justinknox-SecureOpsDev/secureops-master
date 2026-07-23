@@ -221,7 +221,7 @@ export default function EmployeeShiftsScreen({ hideTopPad }: { hideTopPad?: bool
 
   const handleClockInToShift = async (shift: any) => {
     if (isClockedInElsewhere) {
-      notify("Already Clocked In", "You're already clocked in. Clock out first from the Clock tab.");
+      notify("Already Clocked In", "You're already clocked in. Clock out first from the My Work tab.");
       return;
     }
     const ok = await confirmAction({
@@ -249,7 +249,7 @@ export default function EmployeeShiftsScreen({ hideTopPad }: { hideTopPad?: bool
         queryClient.invalidateQueries({ queryKey: getGetShiftsQueryKey() }),
         queryClient.invalidateQueries({ queryKey: getGetEmployeeDashboardSummaryQueryKey() }),
       ]);
-      notify("Clocked In", `You're on duty for ${shift.title}. Open the Clock tab to clock out when finished.`);
+      notify("Clocked In", `You're on duty for ${shift.title}. Open the My Work tab to clock out when finished.`);
     } catch (e: any) {
       const msg = e?.response?.data?.message || e?.message || "Could not clock in.";
       notify("Clock-In Failed", msg);
@@ -568,7 +568,7 @@ export default function EmployeeShiftsScreen({ hideTopPad }: { hideTopPad?: bool
                       {clockedInToThisShift && (
                         <View style={[styles.statusBanner, { backgroundColor: colors.success + "20", borderColor: colors.success, flex: 1 }]}>
                           <Feather name="clock" size={14} color={colors.success} />
-                          <Text style={[styles.statusBannerText, { color: colors.success }]}>On duty — clock out from the Clock tab</Text>
+                          <Text style={[styles.statusBannerText, { color: colors.success }]}>On duty — clock out from the My Work tab</Text>
                         </View>
                       )}
                       {canClockIn && !clockedInToThisShift && (
