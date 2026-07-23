@@ -28,6 +28,7 @@ import {
 import { Checkbox } from "@/components/ui/checkbox";
 import { api, fetchWithAuth, ApiError } from "@/lib/api";
 import { useToast } from "@/hooks/use-toast";
+import { ToastAction } from "@/components/ui/toast";
 
 // Response shapes mirror artifacts/api-server/src/lib/analytics.ts (contract
 // lives in lib/api-spec/openapi.yaml — GET /analytics/summary + /officers).
@@ -328,11 +329,20 @@ export default function AnalyticsPage() {
     setArchiveDialog(null);
 
     if (failed.length === 0) {
+      const justArchived = targets.filter((o) => succeeded.includes(o.employeeId));
       toast({
         title: succeeded.length === 1
           ? `${targets[0]!.name} archived`
           : `${succeeded.length} officers archived`,
         description: "Their accounts have been set to inactive.",
+        action: (
+          <ToastAction
+            altText="Undo archive"
+            onClick={() => { void reactivateOfficers(justArchived); }}
+          >
+            Undo
+          </ToastAction>
+        ),
       });
     } else if (succeeded.length > 0) {
       toast({
@@ -353,43 +363,95 @@ export default function AnalyticsPage() {
   async function reactivateOfficer(target: OfficerRow) {
     setReactivatingId(target.employeeId);
     try {
-      const res = await fetchWithAuth(`/api/admin/tables/users/${target.employeeId}`, {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ status: "active" }),
-      });
-      if (!res.ok) {
-        let msg = `Failed (${res.status})`;
-        try {
-          const j = await res.json();
-          if (j?.message) msg = j.message;
-          else if (j?.error) msg = j.error;
-        } catch { /* not JSON */ }
-        throw new Error(msg);
+      const succeeded = await reactivateOfficers([target], { silent: true });
+      if (succeeded.includes(target.employeeId)) {
+        toast({
+          title: `${target.name} reactivated`,
+          description: "Their account has been set back to active.",
+        });
       }
-      setArchivedIds((prev) => {
-        const next = new Set(prev);
-        next.delete(target.employeeId);
-        return next;
-      });
-      setOfficers((prev) =>
-        prev.map((o) =>
-          o.employeeId === target.employeeId ? { ...o, status: "active" } : o,
-        ),
-      );
-      toast({
-        title: `${target.name} reactivated`,
-        description: "Their account has been set back to active.",
-      });
-    } catch (e) {
-      toast({
-        variant: "destructive",
-        title: "Reactivate failed",
-        description: e instanceof Error ? e.message : String(e),
-      });
     } finally {
       setReactivatingId(null);
     }
+  }
+
+  /**
+   * Reactivate many archived officers (PUT status=active each), un-gray the
+   * rows that succeeded, and report partial failures like the archive path.
+   * Used by the per-row Reactivate button and the bulk-archive Undo action.
+   * Returns the ids that were successfully reactivated.
+   */
+  async function reactivateOfficers(
+    targets: OfficerRow[],
+    opts: { silent?: boolean } = {},
+  ): Promise<string[]> {
+    if (targets.length === 0) return [];
+    const results = await Promise.allSettled(
+      targets.map((o) =>
+        fetchWithAuth(`/api/admin/tables/users/${o.employeeId}`, {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ status: "active" }),
+        }).then(async (res) => {
+          if (!res.ok) {
+            let msg = `Failed (${res.status})`;
+            try {
+              const j = await res.json();
+              if (j?.message) msg = j.message;
+              else if (j?.error) msg = j.error;
+            } catch { /* not JSON */ }
+            throw new Error(msg);
+          }
+          return o.employeeId;
+        }),
+      ),
+    );
+
+    const succeeded: string[] = [];
+    const failed: { name: string; reason: string }[] = [];
+    results.forEach((r, i) => {
+      if (r.status === "fulfilled") {
+        succeeded.push(r.value);
+      } else {
+        failed.push({
+          name: targets[i]!.name,
+          reason: r.reason instanceof Error ? r.reason.message : String(r.reason),
+        });
+      }
+    });
+
+    if (succeeded.length > 0) {
+      setArchivedIds((prev) => {
+        const next = new Set(prev);
+        succeeded.forEach((id) => next.delete(id));
+        return next;
+      });
+      const succeededSet = new Set(succeeded);
+      setOfficers((prev) =>
+        prev.map((o) =>
+          succeededSet.has(o.employeeId) ? { ...o, status: "active" } : o,
+        ),
+      );
+    }
+
+    // The caller handles the single-officer success toast itself; only surface
+    // toasts here for the multi/undo path and for any failures.
+    if (!opts.silent && failed.length === 0 && succeeded.length > 0) {
+      toast({
+        title: succeeded.length === 1
+          ? `${targets[0]!.name} reactivated`
+          : `${succeeded.length} officers reactivated`,
+        description: "Their accounts have been set back to active.",
+      });
+    } else if (failed.length > 0) {
+      toast({
+        variant: "destructive",
+        title: succeeded.length > 0 ? "Some reactivations failed" : "Reactivate failed",
+        description: failed.map((f) => `${f.name}: ${f.reason}`).join(" · "),
+      });
+    }
+
+    return succeeded;
   }
 
   // An officer is "archived" if we archived them this session OR the server
