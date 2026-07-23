@@ -711,8 +711,10 @@ export const UpdateMyEmployeeProfileBody = zod
     uniformJacket: zod.string().nullish(),
     uniformBoots: zod.string().nullish(),
     bankAccountName: zod.string().nullish(),
+    bankAccountType: zod.enum(["Checking", "Savings"]).nullish(),
     bankAccountNumber: zod.string().nullish(),
     bankBsb: zod.string().nullish(),
+    directDepositConsent: zod.boolean().nullish(),
     skills: zod.array(zod.string()).optional(),
     photoKey: zod.string().nullish(),
     cvKey: zod.string().nullish(),
@@ -769,6 +771,7 @@ export const UpdateMyEmployeeProfileResponse = zod
     bankAccountName: zod.string().optional(),
     bankAccountNumber: zod.string().optional(),
     bankBsb: zod.string().optional().describe("Routing \/ sort code"),
+    bankAccountType: zod.string().nullish().describe("Checking or Savings"),
     taxCode: zod.string().nullish(),
     payStubDocKey: zod
       .string()
@@ -1013,6 +1016,7 @@ export const GetEmployeesResponseItem = zod.object({
   bankAccountName: zod.string().optional(),
   bankAccountNumber: zod.string().optional(),
   bankBsb: zod.string().optional().describe("Routing \/ sort code"),
+  bankAccountType: zod.string().nullish().describe("Checking or Savings"),
   taxCode: zod.string().nullish(),
   payStubDocKey: zod
     .string()
@@ -1082,6 +1086,7 @@ export const CreateEmployeeBody = zod.object({
   emergencyContactPhone: zod.string().optional(),
   hourlyRate: zod.number().optional(),
   bankAccountName: zod.string().optional(),
+  bankAccountType: zod.enum(["Checking", "Savings"]).nullish(),
   bankAccountNumber: zod.string().optional(),
   bankBsb: zod.string().optional(),
   taxCode: zod.string().nullish(),
@@ -1147,6 +1152,7 @@ export const GetEmployeeResponse = zod.object({
   bankAccountName: zod.string().optional(),
   bankAccountNumber: zod.string().optional(),
   bankBsb: zod.string().optional().describe("Routing \/ sort code"),
+  bankAccountType: zod.string().nullish().describe("Checking or Savings"),
   taxCode: zod.string().nullish(),
   payStubDocKey: zod
     .string()
@@ -1216,6 +1222,7 @@ export const UpdateEmployeeBody = zod.object({
   emergencyContactPhone: zod.string().optional(),
   hourlyRate: zod.number().optional(),
   bankAccountName: zod.string().optional(),
+  bankAccountType: zod.enum(["Checking", "Savings"]).nullish(),
   bankAccountNumber: zod.string().optional(),
   bankBsb: zod.string().optional(),
   taxCode: zod.string().nullish(),
@@ -1274,6 +1281,7 @@ export const UpdateEmployeeResponse = zod.object({
   bankAccountName: zod.string().optional(),
   bankAccountNumber: zod.string().optional(),
   bankBsb: zod.string().optional().describe("Routing \/ sort code"),
+  bankAccountType: zod.string().nullish().describe("Checking or Savings"),
   taxCode: zod.string().nullish(),
   payStubDocKey: zod
     .string()

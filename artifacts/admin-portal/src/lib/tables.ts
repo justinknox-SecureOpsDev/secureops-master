@@ -710,6 +710,7 @@ export const TABLES: TableDescriptor[] = [
       { key: "paymentTermsDays", label: "Payment Terms (days)", type: "integer", section: "Tax & Terms", importExample: "30" },
       { key: "w9DocKey", label: "W-9 Document", type: "fileKey", hiddenInGrid: true, section: "Tax & Terms" },
       { key: "bankAccountName", label: "Bank Account Name", type: "text", hiddenInGrid: true, section: "Banking (for ACH payment)" },
+      { key: "bankAccountType", label: "Account Type", type: "select", options: [{ label: "Checking", value: "Checking" }, { label: "Savings", value: "Savings" }], hiddenInGrid: true, section: "Banking (for ACH payment)" },
       { key: "bankRoutingNumber", label: "Routing Number", type: "text", hiddenInGrid: true, section: "Banking (for ACH payment)" },
       { key: "bankAccountNumber", label: "Account Number", type: "text", hiddenInGrid: true, section: "Banking (for ACH payment)" },
       { key: "directDepositConsent", label: "Direct Deposit Consent", type: "boolean", hiddenInGrid: true, section: "Banking (for ACH payment)" },

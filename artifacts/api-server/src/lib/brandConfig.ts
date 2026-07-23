@@ -70,7 +70,7 @@ const ENV_BRAND: BrandConfig = {
   colorNavy:         process.env.BRAND_COLOR_NAVY     ?? "#0c0a08",
   colorGold:         process.env.BRAND_COLOR_GOLD     ?? "#c9a04a",
   colorCream:        process.env.BRAND_COLOR_CREAM    ?? "#f0e4c0",
-  billingEmail:      process.env.BILLING_EMAIL        ?? "billing@williamscouncilsecurity.com",
+  billingEmail:      process.env.BILLING_EMAIL        ?? "pay@williamscouncil.com",
   hrEmail:           process.env.HR_EMAIL             ?? "hr@williamscouncilsecurity.com",
   adminNotifyEmail:  process.env.ADMIN_NOTIFY_EMAIL   ?? "admin@williamscouncil.com",
   // Inbox that receives inbound sales / sign-up leads from the marketing site.

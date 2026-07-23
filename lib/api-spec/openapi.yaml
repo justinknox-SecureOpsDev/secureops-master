@@ -3608,6 +3608,7 @@ components:
         bankAccountName: { type: string }
         bankAccountNumber: { type: string }
         bankBsb: { type: string, description: "Routing / sort code" }
+        bankAccountType: { type: string, nullable: true, description: "Checking or Savings" }
         taxCode: { type: string, nullable: true }
         payStubDocKey: { type: string, nullable: true, description: "W-2 / pay stub object-storage path" }
         # --- Uniform sizes (mirrored from onboarding) ---
@@ -3688,6 +3689,7 @@ components:
         emergencyContactPhone: { type: string }
         hourlyRate: { type: number }
         bankAccountName: { type: string }
+        bankAccountType: { type: string, nullable: true, enum: [Checking, Savings] }
         bankAccountNumber: { type: string }
         bankBsb: { type: string }
         taxCode: { type: string, nullable: true }
@@ -3785,8 +3787,10 @@ components:
         uniformJacket: { type: string, nullable: true }
         uniformBoots: { type: string, nullable: true }
         bankAccountName: { type: string, nullable: true }
+        bankAccountType: { type: string, nullable: true, enum: [Checking, Savings] }
         bankAccountNumber: { type: string, nullable: true }
         bankBsb: { type: string, nullable: true }
+        directDepositConsent: { type: boolean, nullable: true }
         skills:
           type: array
           items: { type: string }
@@ -3852,6 +3856,7 @@ components:
         emergencyContactPhone: { type: string }
         hourlyRate: { type: number }
         bankAccountName: { type: string }
+        bankAccountType: { type: string, nullable: true, enum: [Checking, Savings] }
         bankAccountNumber: { type: string }
         bankBsb: { type: string }
         taxCode: { type: string, nullable: true }

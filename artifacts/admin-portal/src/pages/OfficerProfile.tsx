@@ -58,6 +58,7 @@ type Officer = {
   emergencyContactPhone?: string | null;
   hourlyRate?: string | null;
   bankAccountName?: string | null;
+  bankAccountType?: string | null;
   bankAccountNumber?: string | null;
   bankBsb?: string | null;
   taxCode?: string | null;
@@ -1024,6 +1025,7 @@ export default function OfficerProfilePage() {
               <div className="grid grid-cols-2 sm:grid-cols-3 gap-x-4 gap-y-3">
                 <Field label="Hourly rate" value={fmtRate(officer.data.hourlyRate)} />
                 <Field label="Account name" value={officer.data.bankAccountName} />
+                <Field label="Account type" value={officer.data.bankAccountType} />
                 <Field label="Account number" value={maskTail(officer.data.bankAccountNumber)} />
                 <Field label="Routing / BSB" value={officer.data.bankBsb} />
                 <Field label="Tax code" value={officer.data.taxCode} />

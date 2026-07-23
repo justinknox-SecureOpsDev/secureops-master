@@ -314,6 +314,8 @@ export interface Employee {
   bankAccountNumber?: string;
   /** Routing / sort code */
   bankBsb?: string;
+  /** Checking or Savings */
+  bankAccountType?: string | null;
   taxCode?: string | null;
   /** W-2 / pay stub object-storage path */
   payStubDocKey?: string | null;
@@ -367,6 +369,15 @@ export type CreateEmployeeRequestAvailability = {
   [key: string]: unknown;
 } | null;
 
+export type CreateEmployeeRequestBankAccountType =
+  | (typeof CreateEmployeeRequestBankAccountType)[keyof typeof CreateEmployeeRequestBankAccountType]
+  | null;
+
+export const CreateEmployeeRequestBankAccountType = {
+  Checking: "Checking",
+  Savings: "Savings",
+} as const;
+
 export type CreateEmployeeRequestReferencesItem = { [key: string]: unknown };
 
 export type CreateEmployeeRequestAcknowledgements = {
@@ -404,6 +415,7 @@ export interface CreateEmployeeRequest {
   emergencyContactPhone?: string;
   hourlyRate?: number;
   bankAccountName?: string;
+  bankAccountType?: CreateEmployeeRequestBankAccountType;
   bankAccountNumber?: string;
   bankBsb?: string;
   taxCode?: string | null;
@@ -464,6 +476,15 @@ export type UpdateMyEmployeeResponse = Employee & {
   hrNotifiedFields?: string[];
 };
 
+export type UpdateMyEmployeeRequestBankAccountType =
+  | (typeof UpdateMyEmployeeRequestBankAccountType)[keyof typeof UpdateMyEmployeeRequestBankAccountType]
+  | null;
+
+export const UpdateMyEmployeeRequestBankAccountType = {
+  Checking: "Checking",
+  Savings: "Savings",
+} as const;
+
 /**
  * Strict allow-list of fields the employee may edit on their own profile.
  */
@@ -483,8 +504,10 @@ export interface UpdateMyEmployeeRequest {
   uniformJacket?: string | null;
   uniformBoots?: string | null;
   bankAccountName?: string | null;
+  bankAccountType?: UpdateMyEmployeeRequestBankAccountType;
   bankAccountNumber?: string | null;
   bankBsb?: string | null;
+  directDepositConsent?: boolean | null;
   skills?: string[];
   photoKey?: string | null;
   cvKey?: string | null;
@@ -540,6 +563,15 @@ export type UpdateEmployeeRequestAvailability = {
   [key: string]: unknown;
 } | null;
 
+export type UpdateEmployeeRequestBankAccountType =
+  | (typeof UpdateEmployeeRequestBankAccountType)[keyof typeof UpdateEmployeeRequestBankAccountType]
+  | null;
+
+export const UpdateEmployeeRequestBankAccountType = {
+  Checking: "Checking",
+  Savings: "Savings",
+} as const;
+
 export type UpdateEmployeeRequestReferencesItem = { [key: string]: unknown };
 
 export type UpdateEmployeeRequestAcknowledgements = {
@@ -574,6 +606,7 @@ export interface UpdateEmployeeRequest {
   emergencyContactPhone?: string;
   hourlyRate?: number;
   bankAccountName?: string;
+  bankAccountType?: UpdateEmployeeRequestBankAccountType;
   bankAccountNumber?: string;
   bankBsb?: string;
   taxCode?: string | null;

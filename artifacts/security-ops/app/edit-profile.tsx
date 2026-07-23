@@ -67,9 +67,10 @@ type Form = {
   uniformTrousers: string;
   uniformJacket: string;
   uniformBoots: string;
-  bankAccountName: string;
+  bankAccountType: string;
   bankAccountNumber: string;
   bankBsb: string;
+  directDepositConsent: boolean;
   skills: string;
   // Document keys (object paths) the officer may swap. null = no change
   // pending; new "/objects/<uuid>" string = file uploaded this session.
@@ -85,7 +86,8 @@ const empty: Form = {
   phone: "", address: "",
   emergencyContactName: "", emergencyContactRelationship: "", emergencyContactPhone: "",
   uniformShirt: "", uniformTrousers: "", uniformJacket: "", uniformBoots: "",
-  bankAccountName: "", bankAccountNumber: "", bankBsb: "",
+  bankAccountType: "", bankAccountNumber: "", bankBsb: "",
+  directDepositConsent: false,
   skills: "",
   photoKey: null, licenseDocKey: null, passportDocKey: null,
   trainingCertificateKeys: null,
@@ -127,9 +129,10 @@ export default function EditProfileScreen() {
       uniformTrousers: profile.uniformTrousers ?? "",
       uniformJacket: profile.uniformJacket ?? "",
       uniformBoots: profile.uniformBoots ?? "",
-      bankAccountName: profile.bankAccountName ?? "",
+      bankAccountType: profile.bankAccountType ?? "",
       bankAccountNumber: profile.bankAccountNumber ?? "",
       bankBsb: profile.bankBsb ?? "",
+      directDepositConsent: profile.directDepositConsent === true,
       skills: (profile.skills ?? []).join(", "),
       photoKey: profile.photoKey ?? null,
       licenseDocKey: profile.licenseDocKey ?? null,
@@ -253,9 +256,10 @@ export default function EditProfileScreen() {
     payload.uniformTrousers = trim(form.uniformTrousers) || null;
     payload.uniformJacket = trim(form.uniformJacket) || null;
     payload.uniformBoots = trim(form.uniformBoots) || null;
-    payload.bankAccountName = trim(form.bankAccountName) || null;
+    payload.bankAccountType = form.bankAccountType || null;
     payload.bankAccountNumber = trim(form.bankAccountNumber) || null;
     payload.bankBsb = trim(form.bankBsb) || null;
+    payload.directDepositConsent = form.directDepositConsent;
     const skills = form.skills.split(",").map((s) => s.trim()).filter(Boolean);
     payload.skills = skills;
     // Only send doc keys that actually changed from what's on the profile.
@@ -425,9 +429,44 @@ export default function EditProfileScreen() {
         </Section>
 
         <Section title="Bank details">
-          <Field label="Account name"><Input value={form.bankAccountName} onChangeText={(v) => set("bankAccountName", v)} accessibilityLabel="Bank account name" /></Field>
+          <Field label="Account type">
+            <View style={styles.segmented}>
+              {(["Checking", "Savings"] as const).map((opt) => {
+                const selected = form.bankAccountType === opt;
+                return (
+                  <TouchableOpacity
+                    key={opt}
+                    onPress={() => set("bankAccountType", selected ? "" : opt)}
+                    style={[
+                      styles.segment,
+                      { borderColor: colors.border, backgroundColor: selected ? colors.primary : colors.card },
+                    ]}
+                    accessibilityRole="radio"
+                    accessibilityState={{ selected }}
+                    accessibilityLabel={`Account type ${opt}`}
+                  >
+                    <Text style={{ color: selected ? colors.primaryForeground : colors.foreground, fontWeight: "600" }}>{opt}</Text>
+                  </TouchableOpacity>
+                );
+              })}
+            </View>
+          </Field>
           <Field label="Account number"><Input value={form.bankAccountNumber} onChangeText={(v) => set("bankAccountNumber", v)} keyboardType="number-pad" accessibilityLabel="Bank account number" /></Field>
           <Field label="Routing / sort code"><Input value={form.bankBsb} onChangeText={(v) => set("bankBsb", v)} accessibilityLabel="Routing or sort code" /></Field>
+          <TouchableOpacity
+            style={styles.consentRow}
+            onPress={() => setForm((f) => ({ ...f, directDepositConsent: !f.directDepositConsent }))}
+            accessibilityRole="checkbox"
+            accessibilityState={{ checked: form.directDepositConsent }}
+            accessibilityLabel="I authorize direct deposit of my pay to this bank account"
+          >
+            <View style={[styles.checkbox, { borderColor: colors.border, backgroundColor: form.directDepositConsent ? colors.primary : "transparent" }]}>
+              {form.directDepositConsent && <Feather name="check" size={14} color={colors.primaryForeground} />}
+            </View>
+            <Text style={[styles.consentText, { color: colors.foreground }]}>
+              I authorize direct deposit of my pay to this bank account.
+            </Text>
+          </TouchableOpacity>
           <NotifiedNote />
         </Section>
 
@@ -824,4 +863,9 @@ const styles = StyleSheet.create({
   errorBox: { flexDirection: "row", alignItems: "center", gap: 8, padding: 12, borderRadius: 8, borderWidth: 1 },
   button: { height: 50, borderRadius: 8, alignItems: "center", justifyContent: "center" },
   buttonText: { fontSize: 15, fontWeight: "700", letterSpacing: 1 },
+  segmented: { flexDirection: "row", gap: 8 },
+  segment: { flex: 1, height: 44, borderRadius: 8, borderWidth: 1, alignItems: "center", justifyContent: "center" },
+  consentRow: { flexDirection: "row", alignItems: "center", gap: 10, paddingVertical: 4 },
+  checkbox: { width: 22, height: 22, borderRadius: 5, borderWidth: 1, alignItems: "center", justifyContent: "center" },
+  consentText: { flex: 1, fontSize: 13 },
 });

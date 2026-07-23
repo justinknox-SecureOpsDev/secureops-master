@@ -39,6 +39,7 @@ export const employeesTable = pgTable("employees", {
   bankAccountName: text("bank_account_name"),
   bankAccountNumber: text("bank_account_number"),
   bankBsb: text("bank_bsb"),
+  bankAccountType: text("bank_account_type"),
   taxCode: text("tax_code"),
   payStubDocKey: text("pay_stub_doc_key"),
   uniformShirt: text("uniform_shirt"),

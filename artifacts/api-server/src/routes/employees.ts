@@ -186,6 +186,7 @@ const employeeSelect = {
   bankAccountName: employeesTable.bankAccountName,
   bankAccountNumber: employeesTable.bankAccountNumber,
   bankBsb: employeesTable.bankBsb,
+  bankAccountType: employeesTable.bankAccountType,
   taxCode: employeesTable.taxCode,
   payStubDocKey: employeesTable.payStubDocKey,
   // Uniform
@@ -229,7 +230,7 @@ const ADMIN_ONLY_EMP_KEYS = [
   "siaLicenseNumber", "siaLicenseLevel", "siaLicenseExpiry", "licenseDocKey", "passportDocKey",
   "previousExperience", "yearsExperience", "references",
   "photoKey", "cvKey", "trainingCertificateKeys", "availability",
-  "bankAccountName", "bankAccountNumber", "bankBsb", "taxCode", "payStubDocKey",
+  "bankAccountName", "bankAccountNumber", "bankBsb", "bankAccountType", "taxCode", "payStubDocKey",
   "directDepositConsent", "directDepositSignature", "acknowledgements",
   "skills",
 ] as const;

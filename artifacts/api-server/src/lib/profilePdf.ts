@@ -153,6 +153,7 @@ export async function buildEmployeeProfilePdf(
       bankAccountName: employeesTable.bankAccountName,
       bankAccountNumber: employeesTable.bankAccountNumber,
       bankBsb: employeesTable.bankBsb,
+      bankAccountType: employeesTable.bankAccountType,
       taxCode: employeesTable.taxCode,
       uniformShirt: employeesTable.uniformShirt,
       uniformTrousers: employeesTable.uniformTrousers,
@@ -324,6 +325,7 @@ export async function buildEmployeeProfilePdf(
     section("Banking & tax (masked)");
     writeRows([
       ["Account name", row.bankAccountName],
+      ["Account type", row.bankAccountType],
       ["Account number", maskTail(row.bankAccountNumber)],
       ["Routing / sort code", maskTail(row.bankBsb)],
       ["Tax code", row.taxCode],

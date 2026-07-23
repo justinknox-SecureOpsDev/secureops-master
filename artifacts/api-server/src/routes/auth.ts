@@ -609,6 +609,7 @@ const PatchMeEmployeeBody = z.object({
   bankAccountName: z.string().nullable().optional(),
   bankAccountNumber: z.string().nullable().optional(),
   bankBsb: z.string().nullable().optional(),
+  bankAccountType: z.enum(["Checking", "Savings"]).nullable().optional(),
   skills: z.array(z.string()).optional(),
   // Self-service document refresh (Task #31). Object paths look like
   // "/objects/<uuid>" — the value the presigned-upload flow returns.

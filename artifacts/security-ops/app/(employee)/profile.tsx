@@ -422,6 +422,7 @@ export default function EmployeeProfileScreen() {
       <View style={[styles.section, { backgroundColor: colors.card, borderColor: colors.border }]}>
         <Text style={[styles.sectionTitle, { color: colors.accent }]}>BANKING & TAX</Text>
         <InfoRow label="Account name" value={p?.bankAccountName} icon="user" />
+        <InfoRow label="Account type" value={p?.bankAccountType} icon="credit-card" />
         <InfoRow label="Account number" value={p?.bankAccountNumber ? `••••${String(p.bankAccountNumber).slice(-4)}` : null} icon="credit-card" />
         <InfoRow label="Routing / sort code" value={p?.bankBsb} icon="hash" />
         <InfoRow label="Tax code" value={p?.taxCode} icon="file-text" />
