@@ -2578,6 +2578,25 @@ export type UpdateSiteManagers200 = {
   assigned: SiteManagerUser[];
 };
 
+export type MarkPayRunPaidBody = {
+  ids: string[];
+  paymentReference?: string | null;
+  method?: string;
+  /**
+   * Optional client-generated key; duplicate submissions with the same key within 5 minutes replay the original response without re-running the update.
+   * @minLength 8
+   * @maxLength 128
+   */
+  idempotencyKey?: string;
+};
+
+export type MarkPayRunPaid200 = {
+  marked: number;
+  skipped: number;
+  ids: string[];
+  idempotentReplay?: boolean;
+};
+
 export type SubmitPayRunViaPncBody = {
   ids: string[];
   /**

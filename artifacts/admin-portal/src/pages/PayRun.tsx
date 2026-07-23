@@ -175,6 +175,10 @@ export default function PayRunPage() {
   // the attempt fully settles (request done + cooldown elapsed). The server
   // replays the original response for duplicate keys instead of re-submitting.
   const pncIdemKeyRef = useRef<string | null>(null);
+  // Same double-click protection for the "Mark Paid" button: ~2s post-success
+  // cooldown + a per-attempt idempotency key the server dedupes on.
+  const [markPaidCooldown, setMarkPaidCooldown] = useState(false);
+  const markPaidIdemKeyRef = useRef<string | null>(null);
   // PNC pre-submit readiness confirmation dialog
   const [pncPreflight, setPncPreflight] = useState<PncPreflight | null>(null);
   // References currently being re-checked individually (per-badge action).
@@ -370,20 +374,33 @@ export default function PayRunPage() {
   };
 
   const markPaid = async () => {
-    if (selected.size === 0) return;
+    if (selected.size === 0 || markPaidCooldown) return;
+    // Per-attempt idempotency key: reused for any rapid duplicate invocation
+    // (double-click) until the attempt fully settles; the server replays the
+    // original response for duplicate keys instead of re-running the UPDATE.
+    if (!markPaidIdemKeyRef.current) markPaidIdemKeyRef.current = crypto.randomUUID();
+    const idempotencyKey = markPaidIdemKeyRef.current;
     setBusy("paid");
     try {
       const res = await fetchWithAuth("/api/payroll/pay-run/mark-paid", {
         method: "POST",
         headers: authHeaders,
-        body: JSON.stringify({ ids: Array.from(selected), paymentReference: paidRef || null, method: "manual" }),
+        body: JSON.stringify({ ids: Array.from(selected), paymentReference: paidRef || null, method: "manual", idempotencyKey }),
       });
       if (!res.ok) throw new Error(await res.text());
       const j = await res.json();
       showToast("ok", `Marked ${j.marked} as paid.`);
       setPaidRef("");
+      // Post-success cooldown (~2s): the key is held through the cooldown
+      // (duplicates replay), then rotated so a fresh action can start.
+      setMarkPaidCooldown(true);
+      window.setTimeout(() => {
+        setMarkPaidCooldown(false);
+        markPaidIdemKeyRef.current = null;
+      }, 2000);
       await reload();
     } catch (e) {
+      markPaidIdemKeyRef.current = null;
       showToast("err", `Mark paid failed: ${(e as Error).message}`);
     } finally {
       setBusy(null);
@@ -649,7 +666,7 @@ export default function PayRunPage() {
             variant="outline"
             className="text-brand-navy"
             onClick={markPaid}
-            disabled={selected.size === 0 || busy !== null}
+            disabled={selected.size === 0 || busy !== null || markPaidCooldown}
           >
             {busy === "paid" ? <Loader2 className="w-4 h-4 animate-spin mr-2" /> : <CheckCircle2 className="w-4 h-4 mr-2" />}
             Mark Paid

@@ -375,13 +375,21 @@ router.post("/payroll/pay-run/export-csv", requireAdmin, async (req, res): Promi
   res.status(200).send(csv);
 });
 
-router.post("/payroll/pay-run/mark-paid", requireAdmin, async (req, res): Promise<void> => {
-  const { ids, paymentReference, method } = req.body ?? {};
-  if (!Array.isArray(ids) || ids.length === 0) {
-    res.status(400).json({ error: "Bad Request", message: "ids[] required" });
-    return;
-  }
-  const safeMethod = ["manual", "ach_csv", "stripe"].includes(method) ? method : "manual";
+// Idempotency for mark-paid mirrors the PNC submit pattern: the client may send
+// an `idempotencyKey`. Requests carrying a key already seen within the last 5
+// minutes (scoped per admin user) do NOT re-run the UPDATE — they await/replay
+// the original response, so a double-click on a slow network can never produce a
+// confusing "no rows" second result. Failures are evicted so a retry still works.
+type MarkPaidResult = { status: number; body: Record<string, unknown> };
+const markPaidIdempotencyCache = new Map<string, { expiresAt: number; promise: Promise<MarkPaidResult> }>();
+
+async function processMarkPaid(
+  req: Request,
+  ids: string[],
+  paymentReference: unknown,
+  method: unknown,
+): Promise<MarkPaidResult> {
+  const safeMethod = ["manual", "ach_csv", "stripe"].includes(method as string) ? (method as string) : "manual";
   // Only rows that have reached a payable state can be confirmed paid:
   //   - "processed": the normal path (ACH CSV exported, awaiting bank confirm)
   //   - "pending":   direct manual payment without exporting a CSV
@@ -402,7 +410,61 @@ router.post("/payroll/pay-run/mark-paid", requireAdmin, async (req, res): Promis
       inArray(payrollEntriesTable.status, ["pending", "processed"]),
     ))
     .returning({ id: payrollEntriesTable.id });
-  res.json({ marked: updated.length, skipped: ids.length - updated.length, ids: updated.map((r) => r.id) });
+  return {
+    status: 200,
+    body: { marked: updated.length, skipped: ids.length - updated.length, ids: updated.map((r) => r.id) },
+  };
+}
+
+router.post("/payroll/pay-run/mark-paid", requireAdmin, async (req, res): Promise<void> => {
+  const bodyParsed = z
+    .object({
+      ids: z.array(z.string()).min(1),
+      paymentReference: z.union([z.string(), z.null()]).optional(),
+      method: z.string().optional(),
+      idempotencyKey: z.string().min(8).max(128).optional(),
+    })
+    .safeParse(req.body ?? {});
+  if (!bodyParsed.success) {
+    res.status(400).json({ error: "Bad Request", message: "ids[] required" });
+    return;
+  }
+  const { ids, paymentReference, method, idempotencyKey } = bodyParsed.data;
+
+  if (!idempotencyKey) {
+    const result = await processMarkPaid(req, ids, paymentReference, method);
+    res.status(result.status).json(result.body);
+    return;
+  }
+
+  // Scope keys per admin user so one admin's key cannot replay another's response.
+  const cacheKey = `${req.user!.userId}:${idempotencyKey}`;
+  const now = Date.now();
+  for (const [k, v] of markPaidIdempotencyCache) {
+    if (v.expiresAt <= now) markPaidIdempotencyCache.delete(k);
+  }
+
+  const existing = markPaidIdempotencyCache.get(cacheKey);
+  if (existing) {
+    const result = await existing.promise;
+    res.status(result.status).json({ ...result.body, idempotentReplay: true });
+    return;
+  }
+
+  const promise = processMarkPaid(req, ids, paymentReference, method);
+  markPaidIdempotencyCache.set(cacheKey, { expiresAt: now + PNC_IDEMPOTENCY_TTL_MS, promise });
+
+  let result: MarkPaidResult;
+  try {
+    result = await promise;
+  } catch (err) {
+    markPaidIdempotencyCache.delete(cacheKey);
+    throw err;
+  }
+  if (result.status >= 400) {
+    markPaidIdempotencyCache.delete(cacheKey);
+  }
+  res.status(result.status).json(result.body);
 });
 
 router.post("/payroll/pay-run/stripe", requireAdmin, async (req, res): Promise<void> => {

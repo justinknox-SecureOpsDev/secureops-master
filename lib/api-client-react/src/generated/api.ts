@@ -118,6 +118,8 @@ import type {
   ListAdminTasksParams,
   LoginRequest,
   MarkChatRoomRead200,
+  MarkPayRunPaid200,
+  MarkPayRunPaidBody,
   NotifyShiftVacancy200,
   OnboardingDetail,
   OnboardingLinkResponse,
@@ -1518,6 +1520,92 @@ export const useApproveTimeEntry = <
   TContext
 > => {
   return useMutation(getApproveTimeEntryMutationOptions(options));
+};
+
+/**
+ * @summary Confirm a batch of pending/processed payroll rows as paid
+ */
+export const getMarkPayRunPaidUrl = () => {
+  return `/api/payroll/pay-run/mark-paid`;
+};
+
+export const markPayRunPaid = async (
+  markPayRunPaidBody: MarkPayRunPaidBody,
+  options?: RequestInit,
+): Promise<MarkPayRunPaid200> => {
+  return customFetch<MarkPayRunPaid200>(getMarkPayRunPaidUrl(), {
+    ...options,
+    method: "POST",
+    headers: { "Content-Type": "application/json", ...options?.headers },
+    body: JSON.stringify(markPayRunPaidBody),
+  });
+};
+
+export const getMarkPayRunPaidMutationOptions = <
+  TError = ErrorType<ErrorResponse>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof markPayRunPaid>>,
+    TError,
+    { data: BodyType<MarkPayRunPaidBody> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof markPayRunPaid>>,
+  TError,
+  { data: BodyType<MarkPayRunPaidBody> },
+  TContext
+> => {
+  const mutationKey = ["markPayRunPaid"];
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof markPayRunPaid>>,
+    { data: BodyType<MarkPayRunPaidBody> }
+  > = (props) => {
+    const { data } = props ?? {};
+
+    return markPayRunPaid(data, requestOptions);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type MarkPayRunPaidMutationResult = NonNullable<
+  Awaited<ReturnType<typeof markPayRunPaid>>
+>;
+export type MarkPayRunPaidMutationBody = BodyType<MarkPayRunPaidBody>;
+export type MarkPayRunPaidMutationError = ErrorType<ErrorResponse>;
+
+/**
+ * @summary Confirm a batch of pending/processed payroll rows as paid
+ */
+export const useMarkPayRunPaid = <
+  TError = ErrorType<ErrorResponse>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof markPayRunPaid>>,
+    TError,
+    { data: BodyType<MarkPayRunPaidBody> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationResult<
+  Awaited<ReturnType<typeof markPayRunPaid>>,
+  TError,
+  { data: BodyType<MarkPayRunPaidBody> },
+  TContext
+> => {
+  return useMutation(getMarkPayRunPaidMutationOptions(options));
 };
 
 /**

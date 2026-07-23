@@ -446,6 +446,33 @@ export const ApproveTimeEntryResponse = zod.object({
 });
 
 /**
+ * @summary Confirm a batch of pending/processed payroll rows as paid
+ */
+export const markPayRunPaidBodyIdempotencyKeyMin = 8;
+export const markPayRunPaidBodyIdempotencyKeyMax = 128;
+
+export const MarkPayRunPaidBody = zod.object({
+  ids: zod.array(zod.string()),
+  paymentReference: zod.string().nullish(),
+  method: zod.string().optional(),
+  idempotencyKey: zod
+    .string()
+    .min(markPayRunPaidBodyIdempotencyKeyMin)
+    .max(markPayRunPaidBodyIdempotencyKeyMax)
+    .optional()
+    .describe(
+      "Optional client-generated key; duplicate submissions with the same key within 5 minutes replay the original response without re-running the update.",
+    ),
+});
+
+export const MarkPayRunPaidResponse = zod.object({
+  marked: zod.number(),
+  skipped: zod.number(),
+  ids: zod.array(zod.string()),
+  idempotentReplay: zod.boolean().optional(),
+});
+
+/**
  * @summary Submit a batch of pending payroll rows directly to PNC Bank via their multipayment API
  */
 export const submitPayRunViaPncBodyIdempotencyKeyMin = 8;

@@ -275,6 +275,55 @@ paths:
             application/json:
               schema: { $ref: "#/components/schemas/TimeEntry" }
 
+  /payroll/pay-run/mark-paid:
+    post:
+      operationId: markPayRunPaid
+      tags: [payroll]
+      summary: Confirm a batch of pending/processed payroll rows as paid
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                ids:
+                  type: array
+                  items: { type: string }
+                paymentReference:
+                  type: string
+                  nullable: true
+                method:
+                  type: string
+                idempotencyKey:
+                  type: string
+                  minLength: 8
+                  maxLength: 128
+                  description: Optional client-generated key; duplicate submissions with the same key within 5 minutes replay the original response without re-running the update.
+              required: [ids]
+      responses:
+        "200":
+          description: Rows marked paid
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  marked: { type: integer }
+                  skipped: { type: integer }
+                  ids:
+                    type: array
+                    items: { type: string }
+                  idempotentReplay: { type: boolean }
+                required: [marked, skipped, ids]
+        "400":
+          description: ids[] required
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ErrorResponse" }
+
   /payroll/pay-run/pnc:
     post:
       operationId: submitPayRunViaPnc
