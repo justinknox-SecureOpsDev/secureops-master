@@ -115,6 +115,46 @@ export const DRAG_PLACEHOLDER = "__drag-placeholder" as const;
 export type ColumnSlot = PanelId | typeof DRAG_PLACEHOLDER;
 
 /**
+ * Sentinel that identifies the inter-column drop zone rendered between the
+ * two columns so dispatchers can move a panel into an empty right column.
+ */
+export const COLUMN_BOUNDARY = "__column-boundary" as const;
+
+/**
+ * Pure function: move `srcId` to the beginning of the right column.
+ *
+ * "Beginning of the right column" in a 2-column auto-flow grid is visible
+ * position 1 (0-indexed). The function:
+ *   1. Builds the ordered list of visible panels (excluding srcId).
+ *   2. Finds the panel currently at visible position 1 and inserts srcId
+ *      before it (so srcId becomes position 1 = right-column first slot).
+ *   3. If fewer than 2 other visible panels exist, appends srcId immediately
+ *      after the single remaining visible panel (or at the front if none).
+ *
+ * Works on the full `panelOrder` array (hidden panels included), using
+ * `visiblePanels` to identify which ids are currently shown.
+ */
+export function applyColumnBoundaryDrop(
+  panelOrder: PanelId[],
+  visiblePanels: Record<PanelId, boolean>,
+  srcId: PanelId,
+): PanelId[] {
+  const visibleWithout = panelOrder.filter(
+    (id) => id !== srcId && visiblePanels[id],
+  );
+
+  if (visibleWithout.length === 0) {
+    return panelOrder;
+  }
+
+  if (visibleWithout.length === 1) {
+    return applyPanelReorder(panelOrder, srcId, visibleWithout[0], "after");
+  }
+
+  return applyPanelReorder(panelOrder, srcId, visibleWithout[1], "before");
+}
+
+/**
  * Pure function: given the visible ordered panel IDs and the current drag
  * state, returns an array of slots that should be rendered — panel IDs plus
  * an optional `DRAG_PLACEHOLDER` sentinel at the correct insertion point.

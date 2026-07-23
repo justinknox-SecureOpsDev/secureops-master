@@ -5,10 +5,12 @@ import {
   DEFAULT_PANEL_ORDER,
   PANEL_IDS,
   DRAG_PLACEHOLDER,
+  COLUMN_BOUNDARY,
   dispatchLayoutKey,
   parseStoredLayout,
   useDispatchLayout,
   applyPanelReorder,
+  applyColumnBoundaryDrop,
   buildWithPlaceholder,
   buildColumnWithPlaceholder,
   type DispatchLayout,
@@ -871,6 +873,124 @@ describe("buildWithPlaceholder — stale drag state after panel is hidden mid-dr
     // overId not in visible → no placeholder emitted
     expect(result).toBe(visible);
     expect(result.includes(DRAG_PLACEHOLDER)).toBe(false);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// COLUMN_BOUNDARY — sentinel export
+// ---------------------------------------------------------------------------
+
+describe("COLUMN_BOUNDARY sentinel", () => {
+  it("is a non-empty string distinct from DRAG_PLACEHOLDER", () => {
+    expect(typeof COLUMN_BOUNDARY).toBe("string");
+    expect(COLUMN_BOUNDARY.length).toBeGreaterThan(0);
+    expect(COLUMN_BOUNDARY).not.toBe(DRAG_PLACEHOLDER);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// applyColumnBoundaryDrop — column boundary drop helper
+// ---------------------------------------------------------------------------
+
+describe("applyColumnBoundaryDrop — moves srcId to beginning of right column", () => {
+  const allVisible: Record<PanelId, boolean> = {
+    incidents: true,
+    statusBoard: true,
+    shiftClaims: true,
+    openShifts: true,
+    liveMap: true,
+    broadcast: true,
+  };
+
+  const fullOrder: PanelId[] = [
+    "incidents",
+    "statusBoard",
+    "shiftClaims",
+    "openShifts",
+    "liveMap",
+    "broadcast",
+  ];
+
+  it("places srcId at visible position 1 (first right-column slot) when 2+ others are visible", () => {
+    // Drag "broadcast" (currently at position 5) to right-column start
+    const result = applyColumnBoundaryDrop(fullOrder, allVisible, "broadcast");
+    const visible = result.filter((id) => allVisible[id]);
+    expect(visible[1]).toBe("broadcast");
+  });
+
+  it("all panels (including hidden) remain in the output — none dropped or duplicated", () => {
+    const result = applyColumnBoundaryDrop(fullOrder, allVisible, "liveMap");
+    expect(result).toHaveLength(fullOrder.length);
+    expect([...result].sort()).toEqual([...fullOrder].sort());
+  });
+
+  it("does not mutate the original panelOrder array", () => {
+    const original = [...fullOrder];
+    applyColumnBoundaryDrop(fullOrder, allVisible, "broadcast");
+    expect(fullOrder).toEqual(original);
+  });
+
+  it("srcId ends up at visible index 1 regardless of whether it was the first panel", () => {
+    // Drag "incidents" (position 0 / left-column) to right-column start
+    const result = applyColumnBoundaryDrop(fullOrder, allVisible, "incidents");
+    const visible = result.filter((id) => allVisible[id]);
+    expect(visible[1]).toBe("incidents");
+  });
+
+  it("with only 1 other visible panel, places srcId after it (result: 2 visible panels total)", () => {
+    const onlyTwo: Record<PanelId, boolean> = {
+      incidents: true,
+      statusBoard: false,
+      shiftClaims: false,
+      openShifts: false,
+      liveMap: false,
+      broadcast: true,
+    };
+    // Drag "broadcast" with only "incidents" also visible
+    const result = applyColumnBoundaryDrop(fullOrder, onlyTwo, "broadcast");
+    const visible = result.filter((id) => onlyTwo[id]);
+    // "incidents" should be first, "broadcast" right after (right-column start)
+    expect(visible[0]).toBe("incidents");
+    expect(visible[1]).toBe("broadcast");
+  });
+
+  it("returns panelOrder unchanged when no other visible panels exist", () => {
+    const oneVisible: Record<PanelId, boolean> = {
+      incidents: false,
+      statusBoard: false,
+      shiftClaims: false,
+      openShifts: false,
+      liveMap: false,
+      broadcast: true,
+    };
+    const result = applyColumnBoundaryDrop(fullOrder, oneVisible, "broadcast");
+    expect(result).toBe(fullOrder);
+  });
+
+  it("hidden panels stay in their relative positions after the drop", () => {
+    const someHidden: Record<PanelId, boolean> = {
+      incidents: true,
+      statusBoard: false, // hidden
+      shiftClaims: true,
+      openShifts: false, // hidden
+      liveMap: true,
+      broadcast: true,
+    };
+    const result = applyColumnBoundaryDrop(fullOrder, someHidden, "broadcast");
+    // hidden panels must still appear in the result
+    expect(result).toContain("statusBoard" as PanelId);
+    expect(result).toContain("openShifts" as PanelId);
+    expect(result).toHaveLength(fullOrder.length);
+    // visible order: srcId at position 1
+    const visible = result.filter((id) => someHidden[id]);
+    expect(visible[1]).toBe("broadcast");
+  });
+
+  it("works when srcId is already the second visible panel (no-op effective position)", () => {
+    // "statusBoard" is already at visible index 1; dropping it to boundary keeps it there
+    const result = applyColumnBoundaryDrop(fullOrder, allVisible, "statusBoard");
+    const visible = result.filter((id) => allVisible[id]);
+    expect(visible[1]).toBe("statusBoard");
   });
 });
 

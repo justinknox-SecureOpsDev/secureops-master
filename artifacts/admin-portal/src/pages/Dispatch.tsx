@@ -27,8 +27,10 @@ import {
   DEFAULT_LAYOUT,
   useDispatchLayout,
   applyPanelReorder,
+  applyColumnBoundaryDrop,
   buildWithPlaceholder,
   DRAG_PLACEHOLDER,
+  COLUMN_BOUNDARY,
   type PanelId,
   type DispatchLayout,
 } from "./dispatchLayout";
@@ -355,6 +357,8 @@ export default function DispatchPage() {
   // Ref mirror so handlePanelDrop can read the latest position without a
   // stale-closure dependency on the dragInsert state value.
   const dragInsertRef = useRef<DragInsert>(null);
+  // Whether the cursor is currently over the inter-column boundary drop zone.
+  const [dragOverBoundary, setDragOverBoundary] = useState(false);
 
   // Reset drag state whenever panel visibility changes. If a dispatcher hides
   // a panel while a drag is in progress (via the Customize popover or a
@@ -377,7 +381,38 @@ export default function DispatchPage() {
     dragSrcRef.current = null;
     dragInsertRef.current = null;
     setDragInsert(null);
+    setDragOverBoundary(false);
   }, []);
+
+  const handleBoundaryDragOver = useCallback((e: React.DragEvent) => {
+    e.preventDefault();
+    if (!dragSrcRef.current) return;
+    setDragOverBoundary(true);
+    // Clear any panel-level insert indicator while hovering the boundary.
+    dragInsertRef.current = null;
+    setDragInsert(null);
+  }, []);
+
+  const handleBoundaryDragLeave = useCallback(() => {
+    setDragOverBoundary(false);
+  }, []);
+
+  const handleBoundaryDrop = useCallback(
+    (e: React.DragEvent) => {
+      e.preventDefault();
+      const srcId = dragSrcRef.current;
+      if (!srcId) return;
+      setLayout((prev) => ({
+        ...prev,
+        panelOrder: applyColumnBoundaryDrop(prev.panelOrder, prev.panels, srcId),
+      }));
+      dragSrcRef.current = null;
+      dragInsertRef.current = null;
+      setDragInsert(null);
+      setDragOverBoundary(false);
+    },
+    [setLayout],
+  );
 
   const handlePanelDragOver = useCallback((e: React.DragEvent, id: PanelId) => {
     e.preventDefault();
@@ -660,8 +695,41 @@ export default function DispatchPage() {
               ? "grid-cols-1 md:grid-cols-2 xl:grid-cols-3"
               : "grid-cols-1 lg:grid-cols-2";
 
+        // Show the column-boundary drop zone whenever a drag is active and the
+        // layout has 2+ columns. On lg+ the zone is pinned to the first row of
+        // column 2 via explicit grid placement so it's always reachable, even
+        // when every visible panel has been reordered into the left column.
+        const showBoundary = srcId !== null && layout.columns >= 2;
+
         return (
           <div className={`grid gap-4 items-start ${colClass}`}>
+            {showBoundary && (
+              <div
+                key={COLUMN_BOUNDARY}
+                data-testid="column-boundary-drop"
+                aria-label="Drop here to move panel to the start of the right column"
+                onDragOver={handleBoundaryDragOver}
+                onDragLeave={handleBoundaryDragLeave}
+                onDrop={handleBoundaryDrop}
+                className={[
+                  "hidden lg:flex items-center justify-center",
+                  "min-h-20 rounded-lg border-2 border-dashed transition-colors",
+                  "lg:col-start-2 lg:row-start-1",
+                  dragOverBoundary
+                    ? "border-brand-gold bg-brand-gold/10 scale-[1.01]"
+                    : "border-brand-gold/30 bg-brand-gold/5",
+                ].join(" ")}
+              >
+                <span
+                  className={[
+                    "text-xs font-medium transition-colors select-none",
+                    dragOverBoundary ? "text-brand-gold" : "text-brand-gold/40",
+                  ].join(" ")}
+                >
+                  {dragOverBoundary ? `Move "${PANEL_LABELS[srcId]}" here` : "Drop to move to right column"}
+                </span>
+              </div>
+            )}
             {slots.map((slot) =>
               slot === DRAG_PLACEHOLDER ? (
                 <div
