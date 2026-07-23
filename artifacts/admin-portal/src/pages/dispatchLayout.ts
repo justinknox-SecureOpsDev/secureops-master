@@ -82,6 +82,68 @@ export function parseStoredLayout(raw: string): DispatchLayout {
   };
 }
 
+/**
+ * Pure function: apply a drag-to-reorder operation on `panelOrder`.
+ *
+ * Removes `srcId` from its current position and re-inserts it immediately
+ * before or after `targetId`. Returns the original array unchanged if either
+ * id is missing (defensive – callers should guard cross-column drops before
+ * calling this).
+ */
+export function applyPanelReorder(
+  panelOrder: PanelId[],
+  srcId: PanelId,
+  targetId: PanelId,
+  position: "before" | "after",
+): PanelId[] {
+  const order = [...panelOrder];
+  const fromIdx = order.indexOf(srcId);
+  if (fromIdx === -1) return panelOrder;
+  order.splice(fromIdx, 1);
+  const toIdx = order.indexOf(targetId);
+  if (toIdx === -1) return panelOrder;
+  order.splice(position === "after" ? toIdx + 1 : toIdx, 0, srcId);
+  return order;
+}
+
+/**
+ * Sentinel value used in `buildColumnWithPlaceholder` output to mark where
+ * the drop placeholder should be rendered.
+ */
+export const DRAG_PLACEHOLDER = "__drag-placeholder" as const;
+export type ColumnSlot = PanelId | typeof DRAG_PLACEHOLDER;
+
+/**
+ * Pure function: given the visible ordered panel IDs for one column and the
+ * current drag state, returns an array of slots that should be rendered —
+ * panel IDs plus an optional `DRAG_PLACEHOLDER` sentinel at the correct
+ * insertion point.
+ *
+ * Returns `visible` unchanged (no placeholder) when:
+ *   - there is no active drag insert
+ *   - `srcId` is null (no drag in progress)
+ *   - `insert.overId` is not in `columnSet` (cross-column hover)
+ *   - `srcId` is not in `columnSet` (source is a different column)
+ */
+export function buildColumnWithPlaceholder(
+  visible: PanelId[],
+  srcId: PanelId | null,
+  insert: { overId: PanelId; position: "before" | "after" } | null,
+  columnSet: PanelId[],
+): ColumnSlot[] {
+  if (!insert || !srcId || !columnSet.includes(insert.overId) || !columnSet.includes(srcId)) {
+    return visible;
+  }
+  const { overId, position } = insert;
+  const slots: ColumnSlot[] = [];
+  for (const id of visible) {
+    if (id === overId && position === "before") slots.push(DRAG_PLACEHOLDER);
+    slots.push(id);
+    if (id === overId && position === "after") slots.push(DRAG_PLACEHOLDER);
+  }
+  return slots;
+}
+
 export function useDispatchLayout(userId: string | undefined) {
   const storageKey = userId ? dispatchLayoutKey(userId) : null;
 

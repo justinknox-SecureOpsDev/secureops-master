@@ -27,6 +27,9 @@ import {
   PANEL_IDS,
   DEFAULT_LAYOUT,
   useDispatchLayout,
+  applyPanelReorder,
+  buildColumnWithPlaceholder,
+  DRAG_PLACEHOLDER,
   type PanelId,
   type DispatchLayout,
 } from "./dispatchLayout";
@@ -374,17 +377,10 @@ export default function DispatchPage() {
     const tgtIsLeft = LEFT_PANELS.includes(targetId);
     if (srcIsLeft !== tgtIsLeft) { dragInsertRef.current = null; setDragInsert(null); return; }
     const position = dragInsertRef.current?.position ?? "before";
-    setLayout((prev) => {
-      const order = [...prev.panelOrder];
-      const fromIdx = order.indexOf(srcId);
-      if (fromIdx === -1) return prev;
-      order.splice(fromIdx, 1);
-      // Re-find target index after removal, then insert before or after.
-      const toIdx = order.indexOf(targetId);
-      if (toIdx === -1) return prev;
-      order.splice(position === "after" ? toIdx + 1 : toIdx, 0, srcId);
-      return { ...prev, panelOrder: order };
-    });
+    setLayout((prev) => ({
+      ...prev,
+      panelOrder: applyPanelReorder(prev.panelOrder, srcId, targetId, position),
+    }));
     dragInsertRef.current = null;
     setDragInsert(null);
     dragSrcRef.current = null;
@@ -647,43 +643,25 @@ export default function DispatchPage() {
         const renderColumnPanels = (orderedIds: PanelId[], columnSet: PanelId[]) => {
           const srcId = dragSrcRef.current;
           const visible = orderedIds.filter((id) => layout.panels[id]);
-
-          if (!dragInsert || !srcId || !columnSet.includes(dragInsert.overId) || !columnSet.includes(srcId)) {
-            return visible.map(wrapPanel);
-          }
-
-          const { overId, position } = dragInsert;
-          const nodes: React.ReactNode[] = [];
-          for (const id of visible) {
-            if (id === overId && position === "before") {
-              nodes.push(
-                <div
-                  key="__drag-placeholder"
-                  aria-hidden="true"
-                  className="h-14 rounded-lg border-2 border-dashed border-brand-gold/50 bg-brand-gold/5 animate-in fade-in duration-100 flex items-center justify-center"
-                >
+          const slots = buildColumnWithPlaceholder(visible, srcId, dragInsert, columnSet);
+          return slots.map((slot) =>
+            slot === DRAG_PLACEHOLDER ? (
+              <div
+                key={DRAG_PLACEHOLDER}
+                data-testid="drag-placeholder"
+                aria-hidden="true"
+                className="h-14 rounded-lg border-2 border-dashed border-brand-gold/50 bg-brand-gold/5 animate-in fade-in duration-100 flex items-center justify-center"
+              >
+                {srcId && (
                   <span className="text-sm italic text-brand-gold/50">
                     {PANEL_LABELS[srcId]}
                   </span>
-                </div>
-              );
-            }
-            nodes.push(wrapPanel(id));
-            if (id === overId && position === "after") {
-              nodes.push(
-                <div
-                  key="__drag-placeholder"
-                  aria-hidden="true"
-                  className="h-14 rounded-lg border-2 border-dashed border-brand-gold/50 bg-brand-gold/5 animate-in fade-in duration-100 flex items-center justify-center"
-                >
-                  <span className="text-sm italic text-brand-gold/50">
-                    {PANEL_LABELS[srcId]}
-                  </span>
-                </div>
-              );
-            }
-          }
-          return nodes;
+                )}
+              </div>
+            ) : (
+              wrapPanel(slot)
+            ),
+          );
         };
 
         const leftPanels = (

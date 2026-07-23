@@ -4,10 +4,14 @@ import {
   DEFAULT_LAYOUT,
   DEFAULT_PANEL_ORDER,
   PANEL_IDS,
+  DRAG_PLACEHOLDER,
   dispatchLayoutKey,
   parseStoredLayout,
   useDispatchLayout,
+  applyPanelReorder,
+  buildColumnWithPlaceholder,
   type DispatchLayout,
+  type PanelId,
 } from "../dispatchLayout";
 
 /**
@@ -247,6 +251,270 @@ describe("useDispatchLayout — writes / round-trip", () => {
     });
 
     expect(localStorage.length).toBe(before);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// applyPanelReorder — pure drag-drop reorder helper
+// ---------------------------------------------------------------------------
+
+describe("applyPanelReorder — before position", () => {
+  const order: PanelId[] = ["incidents", "statusBoard", "shiftClaims", "openShifts"];
+
+  it("moves a panel before the target (last → before second)", () => {
+    const result = applyPanelReorder(order, "openShifts", "statusBoard", "before");
+    expect(result).toEqual(["incidents", "openShifts", "statusBoard", "shiftClaims"]);
+  });
+
+  it("moves the first panel before the third", () => {
+    const result = applyPanelReorder(order, "incidents", "shiftClaims", "before");
+    expect(result).toEqual(["statusBoard", "incidents", "shiftClaims", "openShifts"]);
+  });
+
+  it("moves a middle panel before the first panel", () => {
+    const result = applyPanelReorder(order, "shiftClaims", "incidents", "before");
+    expect(result).toEqual(["shiftClaims", "incidents", "statusBoard", "openShifts"]);
+  });
+});
+
+describe("applyPanelReorder — after position", () => {
+  const order: PanelId[] = ["incidents", "statusBoard", "shiftClaims", "openShifts"];
+
+  it("moves a panel after the target (first → after third)", () => {
+    const result = applyPanelReorder(order, "incidents", "shiftClaims", "after");
+    expect(result).toEqual(["statusBoard", "shiftClaims", "incidents", "openShifts"]);
+  });
+
+  it("moves the last panel after the first", () => {
+    const result = applyPanelReorder(order, "openShifts", "incidents", "after");
+    expect(result).toEqual(["incidents", "openShifts", "statusBoard", "shiftClaims"]);
+  });
+
+  it("moves a middle panel after the last panel", () => {
+    const result = applyPanelReorder(order, "statusBoard", "openShifts", "after");
+    expect(result).toEqual(["incidents", "shiftClaims", "openShifts", "statusBoard"]);
+  });
+});
+
+describe("applyPanelReorder — edge cases", () => {
+  const order: PanelId[] = ["incidents", "statusBoard", "shiftClaims", "openShifts"];
+
+  it("returns original array when srcId is not found", () => {
+    const result = applyPanelReorder(order, "liveMap", "incidents", "before");
+    expect(result).toBe(order);
+  });
+
+  it("returns original array when targetId is not found after removal", () => {
+    const result = applyPanelReorder(order, "incidents", "broadcast", "before");
+    expect(result).toBe(order);
+  });
+
+  it("does not mutate the original array", () => {
+    const original = [...order];
+    applyPanelReorder(order, "openShifts", "incidents", "before");
+    expect(order).toEqual(original);
+  });
+
+  it("two-panel array: move first before second is a no-op result when position=before", () => {
+    const two: PanelId[] = ["incidents", "statusBoard"];
+    const result = applyPanelReorder(two, "incidents", "statusBoard", "before");
+    expect(result).toEqual(["incidents", "statusBoard"]);
+  });
+
+  it("two-panel array: swap with after", () => {
+    const two: PanelId[] = ["incidents", "statusBoard"];
+    const result = applyPanelReorder(two, "incidents", "statusBoard", "after");
+    expect(result).toEqual(["statusBoard", "incidents"]);
+  });
+});
+
+describe("applyPanelReorder — panelOrder round-trips through useDispatchLayout", () => {
+  it("a reorder applied via setLayout persists to localStorage and reloads correctly", () => {
+    const userId = "user-reorder-rt";
+    const { result, unmount } = renderHook(() => useDispatchLayout(userId));
+
+    act(() => {
+      result.current[1]((prev) => ({
+        ...prev,
+        panelOrder: applyPanelReorder(prev.panelOrder, "openShifts", "incidents", "before"),
+      }));
+    });
+
+    expect(result.current[0].panelOrder[0]).toBe("openShifts");
+    expect(result.current[0].panelOrder[1]).toBe("incidents");
+
+    unmount();
+
+    const { result: result2 } = renderHook(() => useDispatchLayout(userId));
+    expect(result2.current[0].panelOrder[0]).toBe("openShifts");
+    expect(result2.current[0].panelOrder[1]).toBe("incidents");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// buildColumnWithPlaceholder — placeholder slot helper
+// ---------------------------------------------------------------------------
+
+const LEFT_COLUMN: PanelId[] = ["incidents", "statusBoard", "shiftClaims", "openShifts"];
+const RIGHT_COLUMN: PanelId[] = ["liveMap", "broadcast"];
+
+describe("buildColumnWithPlaceholder — no placeholder cases", () => {
+  it("returns visible unchanged when insert is null (no drag in progress)", () => {
+    const visible: PanelId[] = ["incidents", "statusBoard", "shiftClaims"];
+    const result = buildColumnWithPlaceholder(visible, null, null, LEFT_COLUMN);
+    expect(result).toBe(visible);
+  });
+
+  it("returns visible unchanged when srcId is null", () => {
+    const visible: PanelId[] = ["incidents", "statusBoard"];
+    const result = buildColumnWithPlaceholder(
+      visible,
+      null,
+      { overId: "statusBoard", position: "before" },
+      LEFT_COLUMN,
+    );
+    expect(result).toBe(visible);
+  });
+
+  it("returns visible unchanged when the hovered panel is in a different column (cross-column drag)", () => {
+    const visible: PanelId[] = ["incidents", "statusBoard"];
+    const result = buildColumnWithPlaceholder(
+      visible,
+      "incidents",
+      { overId: "liveMap", position: "before" },
+      LEFT_COLUMN,
+    );
+    expect(result).toBe(visible);
+  });
+
+  it("returns visible unchanged when the source panel is in a different column (cross-column drag)", () => {
+    const visible: PanelId[] = ["incidents", "statusBoard"];
+    const result = buildColumnWithPlaceholder(
+      visible,
+      "liveMap",
+      { overId: "statusBoard", position: "before" },
+      LEFT_COLUMN,
+    );
+    expect(result).toBe(visible);
+  });
+
+  it("does not include the placeholder sentinel when no drag is active", () => {
+    const visible: PanelId[] = ["incidents", "statusBoard", "shiftClaims"];
+    const slots = buildColumnWithPlaceholder(visible, null, null, LEFT_COLUMN);
+    expect(slots.includes(DRAG_PLACEHOLDER)).toBe(false);
+  });
+});
+
+describe("buildColumnWithPlaceholder — before position", () => {
+  it("inserts placeholder before the hovered panel", () => {
+    const visible: PanelId[] = ["incidents", "statusBoard", "shiftClaims"];
+    const slots = buildColumnWithPlaceholder(
+      visible,
+      "shiftClaims",
+      { overId: "statusBoard", position: "before" },
+      LEFT_COLUMN,
+    );
+    expect(slots).toEqual([
+      "incidents",
+      DRAG_PLACEHOLDER,
+      "statusBoard",
+      "shiftClaims",
+    ]);
+  });
+
+  it("inserts placeholder before the first panel", () => {
+    const visible: PanelId[] = ["incidents", "statusBoard", "shiftClaims"];
+    const slots = buildColumnWithPlaceholder(
+      visible,
+      "shiftClaims",
+      { overId: "incidents", position: "before" },
+      LEFT_COLUMN,
+    );
+    expect(slots[0]).toBe(DRAG_PLACEHOLDER);
+    expect(slots[1]).toBe("incidents");
+  });
+
+  it("contains exactly one placeholder in the output", () => {
+    const visible: PanelId[] = ["incidents", "statusBoard", "shiftClaims", "openShifts"];
+    const slots = buildColumnWithPlaceholder(
+      visible,
+      "openShifts",
+      { overId: "shiftClaims", position: "before" },
+      LEFT_COLUMN,
+    );
+    expect(slots.filter((s) => s === DRAG_PLACEHOLDER).length).toBe(1);
+  });
+});
+
+describe("buildColumnWithPlaceholder — after position", () => {
+  it("inserts placeholder after the hovered panel", () => {
+    const visible: PanelId[] = ["incidents", "statusBoard", "shiftClaims"];
+    const slots = buildColumnWithPlaceholder(
+      visible,
+      "incidents",
+      { overId: "statusBoard", position: "after" },
+      LEFT_COLUMN,
+    );
+    expect(slots).toEqual([
+      "incidents",
+      "statusBoard",
+      DRAG_PLACEHOLDER,
+      "shiftClaims",
+    ]);
+  });
+
+  it("inserts placeholder after the last panel", () => {
+    const visible: PanelId[] = ["incidents", "statusBoard", "shiftClaims"];
+    const slots = buildColumnWithPlaceholder(
+      visible,
+      "incidents",
+      { overId: "shiftClaims", position: "after" },
+      LEFT_COLUMN,
+    );
+    expect(slots[slots.length - 1]).toBe(DRAG_PLACEHOLDER);
+  });
+
+  it("all non-placeholder slots are the original visible panel IDs in order", () => {
+    const visible: PanelId[] = ["incidents", "statusBoard", "shiftClaims"];
+    const slots = buildColumnWithPlaceholder(
+      visible,
+      "shiftClaims",
+      { overId: "incidents", position: "after" },
+      LEFT_COLUMN,
+    );
+    const panels = slots.filter((s) => s !== DRAG_PLACEHOLDER);
+    expect(panels).toEqual(visible);
+  });
+});
+
+describe("buildColumnWithPlaceholder — placeholder absent after drop (insert reset to null)", () => {
+  it("returns panel IDs only (no placeholder) once insert is cleared", () => {
+    const visible: PanelId[] = ["incidents", "statusBoard", "shiftClaims"];
+
+    const duringSlotsWithPlaceholder = buildColumnWithPlaceholder(
+      visible,
+      "shiftClaims",
+      { overId: "statusBoard", position: "before" },
+      LEFT_COLUMN,
+    );
+    expect(duringSlotsWithPlaceholder.includes(DRAG_PLACEHOLDER)).toBe(true);
+
+    const afterDropSlots = buildColumnWithPlaceholder(visible, null, null, LEFT_COLUMN);
+    expect(afterDropSlots.includes(DRAG_PLACEHOLDER)).toBe(false);
+    expect(afterDropSlots).toBe(visible);
+  });
+});
+
+describe("buildColumnWithPlaceholder — right column", () => {
+  it("works correctly for the right column panels", () => {
+    const visible: PanelId[] = ["liveMap", "broadcast"];
+    const slots = buildColumnWithPlaceholder(
+      visible,
+      "broadcast",
+      { overId: "liveMap", position: "before" },
+      RIGHT_COLUMN,
+    );
+    expect(slots).toEqual([DRAG_PLACEHOLDER, "liveMap", "broadcast"]);
   });
 });
 
