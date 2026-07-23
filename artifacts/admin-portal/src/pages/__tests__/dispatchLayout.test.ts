@@ -4,6 +4,8 @@ import {
   DEFAULT_LAYOUT,
   DEFAULT_PANEL_ORDER,
   PANEL_IDS,
+  LEFT_PANELS,
+  RIGHT_PANELS,
   DRAG_PLACEHOLDER,
   dispatchLayoutKey,
   parseStoredLayout,
@@ -515,6 +517,39 @@ describe("buildColumnWithPlaceholder — right column", () => {
       RIGHT_COLUMN,
     );
     expect(slots).toEqual([DRAG_PLACEHOLDER, "liveMap", "broadcast"]);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Structural integrity — guards against a new PanelId being added without
+// updating DEFAULT_PANEL_ORDER or column membership lists.
+// ---------------------------------------------------------------------------
+
+describe("PANEL_IDS structural integrity", () => {
+  it("every PANEL_IDS entry appears exactly once across LEFT_PANELS and RIGHT_PANELS", () => {
+    const allColumnPanels = [...LEFT_PANELS, ...RIGHT_PANELS];
+
+    for (const id of PANEL_IDS) {
+      const count = allColumnPanels.filter((p) => p === id).length;
+      expect(count, `"${id}" must appear exactly once across LEFT_PANELS + RIGHT_PANELS, found ${count}`).toBe(1);
+    }
+
+    expect(
+      allColumnPanels.length,
+      "LEFT_PANELS + RIGHT_PANELS must contain no extra entries beyond PANEL_IDS",
+    ).toBe(PANEL_IDS.length);
+  });
+
+  it("DEFAULT_PANEL_ORDER contains every PANEL_IDS entry exactly once", () => {
+    for (const id of PANEL_IDS) {
+      const count = DEFAULT_PANEL_ORDER.filter((p) => p === id).length;
+      expect(count, `"${id}" must appear exactly once in DEFAULT_PANEL_ORDER, found ${count}`).toBe(1);
+    }
+
+    expect(
+      DEFAULT_PANEL_ORDER.length,
+      "DEFAULT_PANEL_ORDER must contain no extra entries beyond PANEL_IDS",
+    ).toBe(PANEL_IDS.length);
   });
 });
 

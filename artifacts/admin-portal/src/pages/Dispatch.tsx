@@ -26,6 +26,8 @@ import { AssignNearestDialog, candidateBlockReason, type Candidate, type AssignN
 import {
   PANEL_IDS,
   DEFAULT_LAYOUT,
+  LEFT_PANELS,
+  RIGHT_PANELS,
   useDispatchLayout,
   applyPanelReorder,
   buildColumnWithPlaceholder,
@@ -199,9 +201,7 @@ const PANEL_LABELS: Record<PanelId, string> = {
   broadcast: "Broadcast",
 };
 
-// Fixed column membership — panels can be reordered within a column but not moved across.
-const LEFT_PANELS: PanelId[] = ["incidents", "statusBoard", "shiftClaims", "openShifts"];
-const RIGHT_PANELS: PanelId[] = ["liveMap", "broadcast"];
+// Fixed column membership — imported from dispatchLayout (LEFT_PANELS, RIGHT_PANELS).
 
 // data-tour anchor values for panels that participate in the coach-mark tour.
 const PANEL_TOUR: Partial<Record<PanelId, string>> = {

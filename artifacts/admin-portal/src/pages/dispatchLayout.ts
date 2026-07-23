@@ -11,6 +11,15 @@ export const PANEL_IDS = [
 
 export type PanelId = (typeof PANEL_IDS)[number];
 
+export const LEFT_PANELS: PanelId[] = [
+  "incidents",
+  "statusBoard",
+  "shiftClaims",
+  "openShifts",
+];
+
+export const RIGHT_PANELS: PanelId[] = ["liveMap", "broadcast"];
+
 export const DEFAULT_PANEL_ORDER: PanelId[] = [
   "incidents",
   "statusBoard",
