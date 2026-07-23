@@ -848,13 +848,29 @@ export default function InvoiceBoardPage() {
                         const open = openInvoices.has(r.id);
                         const siblings = w.invoices.filter((x) => x.siteId === r.siteId && r.siteId !== null);
                         const isSplit = siblings.length > 1;
-                        const lockedSiblings = siblings.filter((x) => x.lockedAt);
-                        const original = lockedSiblings.length > 0
-                          ? lockedSiblings.sort((a, b) => (a.lockedAt ?? "").localeCompare(b.lockedAt ?? ""))[0]
-                          : siblings.slice().sort((a, b) => a.createdAt.localeCompare(b.createdAt))[0];
-                        const splitRole: "original" | "adjustment" | null = !isSplit
-                          ? null
-                          : original.id === r.id ? "original" : "adjustment";
+                        // Custom-period regeneration intentionally creates a NEW draft each
+                        // time, superseding the earlier (possibly hand-edited) one — the
+                        // newest draft is the one to send. Weekly split is different: a locked
+                        // original plus a late-hours adjustment draft, both meant to ship.
+                        let splitRole:
+                          | "original" | "adjustment" | "current" | "superseded" | null = null;
+                        if (isSplit) {
+                          if (w.isCustomPeriod) {
+                            const draftSiblings = siblings.filter((x) => x.status === "draft");
+                            if (draftSiblings.length > 1 && r.status === "draft") {
+                              const current = draftSiblings
+                                .slice()
+                                .sort((a, b) => b.createdAt.localeCompare(a.createdAt))[0];
+                              splitRole = current.id === r.id ? "current" : "superseded";
+                            }
+                          } else {
+                            const lockedSiblings = siblings.filter((x) => x.lockedAt);
+                            const original = lockedSiblings.length > 0
+                              ? lockedSiblings.sort((a, b) => (a.lockedAt ?? "").localeCompare(b.lockedAt ?? ""))[0]
+                              : siblings.slice().sort((a, b) => a.createdAt.localeCompare(b.createdAt))[0];
+                            splitRole = original.id === r.id ? "original" : "adjustment";
+                          }
+                        }
                         return (
                           <Fragment key={r.id}>
                             <tr id={`invoice-row-${r.id}`} className={`border-t ${selectable ? "hover:bg-gray-50" : "bg-gray-50/60 opacity-70"}`}>
@@ -884,6 +900,22 @@ export default function InvoiceBoardPage() {
                                       title="Adjustment draft: late-approved hours that arrived after the original invoice was locked. Send alongside the original."
                                     >
                                       adj
+                                    </span>
+                                  )}
+                                  {splitRole === "current" && (
+                                    <span
+                                      className="text-[10px] px-1.5 py-0.5 rounded bg-emerald-100 text-emerald-900 border border-emerald-300 font-medium uppercase tracking-wider"
+                                      title="Current draft: the most recently generated invoice for this site & period. This is the one to send — earlier drafts are superseded."
+                                    >
+                                      Current
+                                    </span>
+                                  )}
+                                  {splitRole === "superseded" && (
+                                    <span
+                                      className="text-[10px] px-1.5 py-0.5 rounded bg-amber-100 text-amber-900 border border-amber-300 font-medium uppercase tracking-wider"
+                                      title="Superseded: a newer draft was generated for this same site & period. Don't send this one — void it or send the current draft instead."
+                                    >
+                                      Superseded
                                     </span>
                                   )}
                                 </div>
