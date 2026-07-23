@@ -28,10 +28,8 @@ type Ctx = {
   adminId: string;
   bankedUserId: string;
   unbankedUserId: string;
-  noConsentUserId: string;
   bankedEntryId: string;
   unbankedEntryId: string;
-  noConsentEntryId: string;
   paidEntryId: string;
 };
 const ctx = {} as Ctx;
@@ -81,7 +79,6 @@ beforeAll(async () => {
   ctx.adminId = await makeUser("admin", "admin");
   ctx.bankedUserId = await makeUser("employee", "banked");
   ctx.unbankedUserId = await makeUser("employee", "unbanked");
-  ctx.noConsentUserId = await makeUser("employee", "noconsent");
   ctx.adminToken = signToken({
     userId: ctx.adminId,
     email: `${TAG}-admin@example.test`,
@@ -103,20 +100,9 @@ beforeAll(async () => {
     directDepositConsent: false,
     hourlyRate: "25.00",
   });
-  // Fully banked but NO direct-deposit consent — must be READY (warn-only),
-  // carrying a non-blocking consent warning.
-  await db.insert(employeesTable).values({
-    userId: ctx.noConsentUserId,
-    bankAccountName: "No Consent Officer",
-    bankAccountNumber: "9876543210",
-    bankBsb: "021000021",
-    directDepositConsent: false,
-    hourlyRate: "25.00",
-  });
 
   ctx.bankedEntryId = await makeEntry(ctx.bankedUserId, "pending");
   ctx.unbankedEntryId = await makeEntry(ctx.unbankedUserId, "pending");
-  ctx.noConsentEntryId = await makeEntry(ctx.noConsentUserId, "pending");
   ctx.paidEntryId = await makeEntry(ctx.bankedUserId, "paid");
 });
 
@@ -139,24 +125,14 @@ describe("POST /payroll/pay-run/pnc-preflight", () => {
     const res = await request(app)
       .post("/api/payroll/pay-run/pnc-preflight")
       .set(authed())
-      .send({ ids: [ctx.bankedEntryId, ctx.unbankedEntryId, ctx.noConsentEntryId, ctx.paidEntryId] });
+      .send({ ids: [ctx.bankedEntryId, ctx.unbankedEntryId, ctx.paidEntryId] });
 
     expect(res.status).toBe(200);
-    expect(res.body.counts).toEqual({ total: 4, ready: 2, excluded: 2 });
+    expect(res.body.counts).toEqual({ total: 3, ready: 1, excluded: 2 });
 
-    const readyById = new Map<string, { warnings: string[] }>(
-      res.body.ready.map((r: { id: string; warnings: string[] }) => [r.id, r]),
-    );
-    expect(readyById.has(ctx.bankedEntryId)).toBe(true);
-    expect(readyById.has(ctx.noConsentEntryId)).toBe(true);
-    expect(res.body.readyNetTotal).toBe("400.00");
-
-    // Fully banked + consented → ready with no warnings.
-    expect(readyById.get(ctx.bankedEntryId)!.warnings).toEqual([]);
-    // Fully banked but no consent → warn-only, still ready (not excluded).
-    expect(readyById.get(ctx.noConsentEntryId)!.warnings).toEqual([
-      "Direct-deposit consent not on file",
-    ]);
+    const readyIds = res.body.ready.map((r: { id: string }) => r.id);
+    expect(readyIds).toEqual([ctx.bankedEntryId]);
+    expect(res.body.readyNetTotal).toBe("200.00");
 
     const byId = new Map<string, { reasons: string[]; employeeName: string | null }>(
       res.body.excluded.map((r: { id: string; reasons: string[]; employeeName: string | null }) => [r.id, r]),

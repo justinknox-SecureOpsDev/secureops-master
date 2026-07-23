@@ -504,14 +504,14 @@ router.post("/payroll/pay-run/pnc-preflight", requireAdmin, async (req, res): Pr
   }
 
   const rows = await loadPayRunRows(bodyParsed.data.ids);
-  type PreflightRow = { id: string; employeeId: string; employeeName: string | null; netPay: string; reasons: string[]; warnings: string[] };
+  type PreflightRow = { id: string; employeeId: string; employeeName: string | null; netPay: string; reasons: string[] };
   const ready: PreflightRow[] = [];
   const excluded: PreflightRow[] = [];
 
   for (const row of rows) {
     const base = { id: row.id, employeeId: row.employeeId, employeeName: row.employeeName, netPay: row.netPay };
     if (row.status !== "pending") {
-      excluded.push({ ...base, reasons: [`Not pending (status: ${row.status})`], warnings: [] });
+      excluded.push({ ...base, reasons: [`Not pending (status: ${row.status})`] });
       continue;
     }
     // Same gate the real PNC route applies — mapRowToInstruction returns the
@@ -531,16 +531,11 @@ router.post("/payroll/pay-run/pnc-preflight", requireAdmin, async (req, res): Pr
       netPay: row.netPay,
       periodStart: row.periodStart,
     });
-    // Non-blocking warnings: surfaced in the dialog but do NOT exclude the row
-    // from the batch. Missing direct-deposit consent is a warning here (unlike
-    // the CSV export, which excludes such rows) — admins may still proceed.
-    const warnings: string[] = [];
-    if (row.directDepositConsent !== true) warnings.push("Direct-deposit consent not on file");
     if (mapped.ok && reasons.length === 0) {
-      ready.push({ ...base, reasons: [], warnings });
+      ready.push({ ...base, reasons: [] });
     } else {
       if (reasons.length === 0 && !mapped.ok) reasons.push(mapped.reason);
-      excluded.push({ ...base, reasons, warnings });
+      excluded.push({ ...base, reasons });
     }
   }
 

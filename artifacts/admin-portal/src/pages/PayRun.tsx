@@ -57,7 +57,6 @@ type PncPreflightRow = {
   employeeName: string | null;
   netPay: string;
   reasons: string[];
-  warnings: string[];
 };
 
 type PncPreflight = {
@@ -982,26 +981,14 @@ export default function PayRunPage() {
                   <div className="font-medium text-brand-navy mb-1">
                     {pncPreflight.counts.ready} employee{pncPreflight.counts.ready === 1 ? "" : "s"} will be paid — total {fmtUsd(pncPreflight.readyNetTotal)}
                   </div>
-                  <ul className="text-xs text-muted-foreground max-h-40 overflow-auto space-y-1">
+                  <ul className="text-xs text-muted-foreground max-h-40 overflow-auto space-y-0.5">
                     {pncPreflight.ready.map((r) => (
-                      <li key={r.id} className="flex flex-col gap-0.5">
-                        <div className="flex justify-between gap-2">
-                          <span>{r.employeeName ?? "(Unknown employee)"}</span>
-                          <span className="font-medium text-brand-navy">{fmtUsd(r.netPay)}</span>
-                        </div>
-                        {r.warnings.length > 0 && (
-                          <span className="flex items-center gap-1 text-amber-700">
-                            <AlertTriangle className="w-3 h-3 shrink-0" /> {r.warnings.join("; ")}
-                          </span>
-                        )}
+                      <li key={r.id} className="flex justify-between gap-2">
+                        <span>{r.employeeName ?? "(Unknown employee)"}</span>
+                        <span className="font-medium text-brand-navy">{fmtUsd(r.netPay)}</span>
                       </li>
                     ))}
                   </ul>
-                  {pncPreflight.ready.some((r) => r.warnings.length > 0) && (
-                    <div className="mt-2 text-xs text-amber-800">
-                      Some employees will be paid despite a warning above. Review before sending.
-                    </div>
-                  )}
                 </div>
               ) : (
                 <div className="text-sm text-red-800 bg-red-50 border border-red-300 rounded p-3">
