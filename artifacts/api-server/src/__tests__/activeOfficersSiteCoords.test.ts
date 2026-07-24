@@ -48,6 +48,9 @@ type Ctx = {
   globalChOfficerId: string;
   globalChShiftId: string;
   globalChTimeEntryId: string;
+  // ad-hoc clock-in: open time entry with no shiftId
+  adHocOfficerId: string;
+  adHocTimeEntryId: string;
 };
 const ctx = {} as Ctx;
 
@@ -273,11 +276,26 @@ beforeAll(async () => {
     })
     .returning({ id: timeEntriesTable.id });
   ctx.globalChTimeEntryId = gcEntry.id;
+
+  // --- Ad-hoc clock-in: open time entry with NO shiftId ---
+  // This simulates an officer who clocked in via the GPS path without being
+  // rostered to a shift. All shift/site fields must be null in the response
+  // and the officer must still appear in the active-officers list.
+  ctx.adHocOfficerId = await makeUser("employee", "adhoc-officer");
+  const [adHocEntry] = await db
+    .insert(timeEntriesTable)
+    .values({
+      employeeId: ctx.adHocOfficerId,
+      shiftId: null,
+      clockInTime: new Date(Date.now() - 30 * 60 * 1000),
+    })
+    .returning({ id: timeEntriesTable.id });
+  ctx.adHocTimeEntryId = adHocEntry.id;
 });
 
 afterAll(async () => {
   // Delete open time entries first (no clock-out), then shift/site/client rows.
-  await db.execute(sql`DELETE FROM time_entries WHERE employee_id IN (${sql.raw(`'${ctx.geoOfficerId}','${ctx.nocoordOfficerId}','${ctx.archivedOfficerId}','${ctx.globalChOfficerId}'`)})`);
+  await db.execute(sql`DELETE FROM time_entries WHERE employee_id IN (${sql.raw(`'${ctx.geoOfficerId}','${ctx.nocoordOfficerId}','${ctx.archivedOfficerId}','${ctx.globalChOfficerId}','${ctx.adHocOfficerId}'`)})`);
   await db.execute(sql`DELETE FROM radio_channels WHERE name LIKE ${TAG + "%"}`);
   await db.execute(sql`DELETE FROM shifts WHERE title LIKE ${TAG + "%"}`);
   await db.execute(sql`DELETE FROM sites WHERE name LIKE ${TAG + "%"}`);
@@ -343,6 +361,34 @@ describe("GET /admin/active-officers — site coords and channel fields", () => 
     expect(officer!.siteLat).not.toBeNull();
     expect(officer!.siteLng).not.toBeNull();
     // global-scoped channel must not be returned — only scope='site' channels qualify
+    expect(officer!.siteChannelId).toBeNull();
+  });
+
+  it("includes an ad-hoc clocked-in officer (no shiftId) with all shift/site fields null — no 500", async () => {
+    const res = await request(app)
+      .get("/api/admin/active-officers")
+      .set(authed(ctx.adminToken));
+
+    expect(res.status).toBe(200);
+    type OfficerRow = {
+      userId: string;
+      shiftId: unknown;
+      shiftTitle: unknown;
+      siteName: unknown;
+      siteAddress: unknown;
+      siteLat: unknown;
+      siteLng: unknown;
+      siteChannelId: unknown;
+    };
+    const officer = (res.body as OfficerRow[]).find((r) => r.userId === ctx.adHocOfficerId);
+    expect(officer, "ad-hoc officer should appear in the active-officers list").toBeDefined();
+    // No shift was attached, so every shift/site/channel field must be null.
+    expect(officer!.shiftId).toBeNull();
+    expect(officer!.shiftTitle).toBeNull();
+    expect(officer!.siteName).toBeNull();
+    expect(officer!.siteAddress).toBeNull();
+    expect(officer!.siteLat).toBeNull();
+    expect(officer!.siteLng).toBeNull();
     expect(officer!.siteChannelId).toBeNull();
   });
 });
