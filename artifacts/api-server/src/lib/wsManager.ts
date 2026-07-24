@@ -77,6 +77,17 @@ export function broadcastToRoom(
   }
 }
 
+/**
+ * Notify live-map viewers that an officer's time entry was closed so the
+ * marker can be removed immediately instead of waiting for the next poll.
+ *
+ * Payload carries only the departing user's id — no location or PII — and is
+ * fanned out staffOnly so external client-portal sockets never receive it.
+ */
+export function broadcastOfficerLeft(userId: string): void {
+  broadcastToRoom("live-ops", { type: "liveOps:officerLeft", userId }, { staffOnly: true });
+}
+
 export function getConnectedUserIds(): ReadonlySet<string> {
   return new Set(connections.keys());
 }

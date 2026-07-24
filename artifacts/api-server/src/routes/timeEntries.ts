@@ -8,6 +8,7 @@ import { getEffectiveLevel } from "../lib/eligibility";
 import { buildTimeEntryAuditMetadata, timeEntrySnapshot } from "../lib/timeEntryAudit";
 import { stripTimeEntryBillRateForRole } from "../lib/financeVisibility";
 import { canManageSite, getManagedSiteIds } from "../lib/siteManagerAuthz";
+import { broadcastOfficerLeft } from "../lib/wsManager";
 
 const router: IRouter = Router();
 
@@ -726,6 +727,10 @@ router.post("/time-entries/clock-out", requireStaff, async (req, res): Promise<v
     syncSource: "local",
   }).where(eq(timeEntriesTable.id, timeEntryId)).returning();
 
+  // Tell any open live-map screens this officer just clocked out so the
+  // marker is removed immediately instead of lingering until the next poll.
+  broadcastOfficerLeft(updated.employeeId);
+
   // If this entry was tied to a shift, mark the shift completed — but ONLY
   // when no other officer still has an open time entry on it. The NOT EXISTS
   // predicate runs inside the same UPDATE so we close the TOCTOU window
@@ -866,6 +871,10 @@ router.patch("/time-entries/:id/clock-out", requireAdmin, async (req, res): Prom
     lastEditedAt: new Date(),
   }).where(eq(timeEntriesTable.id, id)).returning();
 
+  // The entry was open (guarded above) and is now closed — remove the
+  // officer's marker from any open live-map screens immediately.
+  broadcastOfficerLeft(updated.employeeId);
+
   // Record a before/after change-history entry, keyed by entry id, so the
   // Payroll Board can surface the full correction provenance. The global
   // auditLogMiddleware persists res.locals.auditMetadata into audit_logs.
@@ -980,6 +989,13 @@ router.patch("/time-entries/:id/times", requireAdmin, async (req, res): Promise<
   }
 
   const [updated] = await db.update(timeEntriesTable).set(updates).where(eq(timeEntriesTable.id, id)).returning();
+
+  // If this correction closed a previously OPEN entry, remove the officer's
+  // marker from any open live-map screens immediately. (Corrections that only
+  // adjust timestamps on an already-closed entry don't change on-duty state.)
+  if (!existing.clockOutTime && updated.clockOutTime) {
+    broadcastOfficerLeft(updated.employeeId);
+  }
 
   // Record a before/after change-history entry, keyed by entry id, so the
   // Payroll Board can surface the full correction provenance. The global

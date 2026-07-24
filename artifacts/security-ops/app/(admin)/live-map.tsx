@@ -2,6 +2,8 @@ import React, { useRef, useEffect, useState, useCallback, useMemo } from "react"
 import { View, Text, StyleSheet, ScrollView, Platform, ActivityIndicator, TouchableOpacity, Linking, Animated, Pressable } from "react-native";
 import { useColors } from "@/hooks/useColors";
 import { useGetActiveOfficers, getGetActiveOfficersQueryKey } from "@workspace/api-client-react";
+import { useQueryClient } from "@tanstack/react-query";
+import { handleMapMessage } from "@/components/liveOfficerMapHelpers";
 import { Feather } from "@expo/vector-icons";
 import LiveOfficerMap from "@/components/LiveOfficerMap";
 import { formatDistanceToNow } from "date-fns";
@@ -403,6 +405,53 @@ function AdminLiveMapScreenInner() {
   });
 
   const officers = (data ?? []) as any[];
+
+  const queryClient = useQueryClient();
+
+  // Listen on the main app WebSocket for liveOps:officerLeft pushes so a
+  // just-clocked-out officer's marker disappears immediately instead of
+  // lingering until the next 30s poll. Removal is done by filtering the
+  // active-officers query cache in place; the next poll re-syncs with the
+  // server as the source of truth.
+  useEffect(() => {
+    let cancelled = false;
+    let ws: WebSocket | null = null;
+    let reconnectTimer: ReturnType<typeof setTimeout> | undefined;
+
+    const removeOfficer = (userId: string) => {
+      queryClient.setQueryData(getGetActiveOfficersQueryKey(), (prev: unknown) =>
+        Array.isArray(prev) ? prev.filter((o: any) => o?.userId !== userId) : prev,
+      );
+    };
+
+    async function connect(): Promise<void> {
+      const token = await storage.get(AUTH_TOKEN_KEY);
+      if (!token || cancelled) return;
+      const base = getApiBaseUrl().replace(/\/api$/, "").replace(/^http(s?):\/\//, "ws$1://");
+      const socket = new WebSocket(`${base}/api/ws?token=${encodeURIComponent(token)}`);
+      ws = socket;
+      socket.onmessage = (ev) => {
+        if (ws !== socket || typeof ev.data !== "string") return;
+        try {
+          handleMapMessage(JSON.parse(ev.data), { onOfficerLeft: removeOfficer });
+        } catch { /* ignore malformed frames */ }
+      };
+      socket.onclose = () => {
+        if (cancelled || ws !== socket) return;
+        reconnectTimer = setTimeout(() => { void connect(); }, 5000);
+      };
+      socket.onerror = () => { try { socket.close(); } catch { /* ignore */ } };
+    }
+
+    void connect();
+    return () => {
+      cancelled = true;
+      if (reconnectTimer !== undefined) clearTimeout(reconnectTimer);
+      const socket = ws;
+      ws = null;
+      if (socket) { socket.onclose = null; try { socket.close(); } catch { /* ignore */ } }
+    };
+  }, [queryClient]);
 
   const { userId: focusUserParam, timeEntryId: focusTeParam, _hlTs } =
     useLocalSearchParams<{ userId?: string; timeEntryId?: string; _hlTs?: string }>();

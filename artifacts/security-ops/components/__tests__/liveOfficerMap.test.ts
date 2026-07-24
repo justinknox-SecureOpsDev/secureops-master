@@ -221,6 +221,54 @@ describe("handleMapMessage — wcsg:openSiteRadio", () => {
 });
 
 // ---------------------------------------------------------------------------
+// handleMapMessage — liveOps:officerLeft (WS clock-out push)
+// ---------------------------------------------------------------------------
+
+describe("handleMapMessage — liveOps:officerLeft", () => {
+  it("routes a valid liveOps:officerLeft message to onOfficerLeft", () => {
+    const onOfficerLeft = vi.fn();
+    handleMapMessage({ type: "liveOps:officerLeft", userId: "user-7" }, { onOfficerLeft });
+    expect(onOfficerLeft).toHaveBeenCalledOnce();
+    expect(onOfficerLeft).toHaveBeenCalledWith("user-7");
+  });
+
+  it("ignores liveOps:officerLeft when userId is empty string", () => {
+    const onOfficerLeft = vi.fn();
+    handleMapMessage({ type: "liveOps:officerLeft", userId: "" }, { onOfficerLeft });
+    expect(onOfficerLeft).not.toHaveBeenCalled();
+  });
+
+  it("ignores liveOps:officerLeft when userId is not a string", () => {
+    const onOfficerLeft = vi.fn();
+    handleMapMessage({ type: "liveOps:officerLeft", userId: 42 }, { onOfficerLeft });
+    expect(onOfficerLeft).not.toHaveBeenCalled();
+  });
+
+  it("ignores liveOps:officerLeft when userId is missing", () => {
+    const onOfficerLeft = vi.fn();
+    handleMapMessage({ type: "liveOps:officerLeft" }, { onOfficerLeft });
+    expect(onOfficerLeft).not.toHaveBeenCalled();
+  });
+
+  it("does not call onSelectOfficer or onOpenSiteRadio for an officerLeft message", () => {
+    const onSelectOfficer = vi.fn();
+    const onOpenSiteRadio = vi.fn();
+    handleMapMessage(
+      { type: "liveOps:officerLeft", userId: "user-7" },
+      { onSelectOfficer, onOpenSiteRadio },
+    );
+    expect(onSelectOfficer).not.toHaveBeenCalled();
+    expect(onOpenSiteRadio).not.toHaveBeenCalled();
+  });
+
+  it("does not call onOfficerLeft for wcsg:openOfficer messages", () => {
+    const onOfficerLeft = vi.fn();
+    handleMapMessage({ type: "wcsg:openOfficer", userId: "user-7" }, { onOfficerLeft });
+    expect(onOfficerLeft).not.toHaveBeenCalled();
+  });
+});
+
+// ---------------------------------------------------------------------------
 // handleMapMessage — unknown / malformed messages
 // ---------------------------------------------------------------------------
 

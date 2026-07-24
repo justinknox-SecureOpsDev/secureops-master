@@ -53,6 +53,7 @@ export function handleMapMessage(
   callbacks: {
     onSelectOfficer?: (userId: string) => void;
     onOpenSiteRadio?: (channelId: string, siteName: string) => void;
+    onOfficerLeft?: (userId: string) => void;
   },
 ): void {
   if (!data || typeof data !== "object") return;
@@ -60,6 +61,12 @@ export function handleMapMessage(
   if (msg.type === "wcsg:openOfficer") {
     const uid = msg.userId;
     if (typeof uid === "string" && uid.length > 0) callbacks.onSelectOfficer?.(uid);
+  } else if (msg.type === "liveOps:officerLeft") {
+    // Server-pushed WS event: an officer just clocked out. Routed through
+    // this same pure handler so the live-map screen can remove the marker
+    // immediately without waiting for the next active-officers poll.
+    const uid = msg.userId;
+    if (typeof uid === "string" && uid.length > 0) callbacks.onOfficerLeft?.(uid);
   } else if (msg.type === "wcsg:openSiteRadio") {
     const channelId = msg.channelId;
     const siteName = msg.siteName;
