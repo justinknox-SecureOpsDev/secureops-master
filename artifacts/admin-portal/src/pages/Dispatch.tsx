@@ -542,8 +542,8 @@ export default function DispatchPage() {
   });
 
   return (
-    <div className="p-4 lg:p-6 space-y-4 max-w-[1600px] mx-auto">
-      <header className="flex items-center justify-between flex-wrap gap-3">
+    <div className="py-4 lg:py-6 space-y-4">
+      <header className="px-4 lg:px-6 flex items-center justify-between flex-wrap gap-3 max-w-[1600px] mx-auto">
         <div>
           <h1 className="brand-wordmark text-2xl text-brand-navy">Dispatch Command Center</h1>
           <p className="text-sm opacity-70 flex items-center gap-2">
