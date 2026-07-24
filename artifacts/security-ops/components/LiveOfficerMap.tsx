@@ -2,6 +2,15 @@ import React, { useEffect, useMemo } from "react";
 import { View, Text, Platform, StyleSheet, ScrollView, TouchableOpacity } from "react-native";
 import { Feather } from "@expo/vector-icons";
 import { useColors } from "@/hooks/useColors";
+import {
+  buildLeafletHtml,
+  deriveSitePoints,
+  handleMapMessage,
+  type SitePoint,
+} from "./liveOfficerMapHelpers";
+
+export type { SitePoint };
+export { buildLeafletHtml, deriveSitePoints, handleMapMessage };
 
 export interface ActiveOfficer {
   userId: string;
@@ -16,6 +25,9 @@ export interface ActiveOfficer {
   siteId?: string | null;
   siteName?: string | null;
   siteAddress?: string | null;
+  siteLat?: string | null;
+  siteLng?: string | null;
+  siteChannelId?: string | null;
 }
 
 function pickPos(o: ActiveOfficer): { lat: number; lng: number } | null {
@@ -28,133 +40,16 @@ function pickPos(o: ActiveOfficer): { lat: number; lng: number } | null {
   return { lat, lng };
 }
 
-function buildLeafletHtml(
-  points: Array<{ lat: number; lng: number; label: string; sub: string; userId: string }>,
-  focusUserId?: string,
-  focusKey?: string,
-): string {
-  // Coordinates are numbers (validated upstream); labels and userIds are user-controlled
-  // strings. Pass them as JSON, then build popup DOM via createTextNode + a button whose
-  // click postMessages the userId to the parent — admin-side XSS is impossible even if
-  // an officer sets their name to "<img onerror=...>".
-  const data = JSON.stringify(points);
-  const focus = JSON.stringify(focusUserId ?? null);
-  // focusKey is embedded as an HTML comment so that repeated alert taps for the
-  // same officer change the srcDoc string and force the iframe to re-render +
-  // re-center, even though the points payload is identical.
-  return `<!doctype html><html><head><meta charset="utf-8"/>
-<!-- focusKey:${String(focusKey ?? "")} -->
-<meta name="viewport" content="width=device-width, initial-scale=1"/>
-<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
-<style>html,body,#m{margin:0;padding:0;height:100%;background:#0c0a08}
-.popup b{color:#0c0a08}.popup{font-family:-apple-system,system-ui,sans-serif;font-size:13px}
-.popup button{margin-top:6px;background:#0c0a08;color:#c9a04a;border:1px solid #c9a04a;
-border-radius:4px;padding:4px 8px;font-size:12px;font-weight:600;cursor:pointer;font-family:inherit}
-.popup button:hover{background:#c9a04a;color:#0c0a08}</style></head>
-<body><div id="m"></div>
-<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
-<script>
-const pts = ${data};
-function popupNode(label, sub, userId) {
-  const wrap = document.createElement('div');
-  wrap.className = 'popup';
-  const b = document.createElement('b');
-  b.appendChild(document.createTextNode(String(label || '')));
-  wrap.appendChild(b);
-  wrap.appendChild(document.createElement('br'));
-  wrap.appendChild(document.createTextNode(String(sub || '')));
-  if (userId) {
-    wrap.appendChild(document.createElement('br'));
-    const btn = document.createElement('button');
-    btn.appendChild(document.createTextNode('View profile'));
-    btn.addEventListener('click', function () {
-      try { parent.postMessage({ type: 'wcsg:openOfficer', userId: String(userId) }, '*'); } catch (e) {}
-    });
-    wrap.appendChild(btn);
-  }
-  return wrap;
-}
-const map = L.map('m', { zoomControl: true });
-// Leaflet needs a view (center + zoom) BEFORE any layer that projects on add.
-// Without this, adding circles/markers can throw "Cannot read properties of
-// undefined (reading 'layerPointToLatLng')". fitBounds below replaces the view
-// when we have points; the no-points branch just keeps this default.
-map.setView(pts.length ? [pts[0].lat, pts[0].lng] : [39.8283, -98.5795], pts.length ? 12 : 4);
-L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-  attribution: '&copy; OpenStreetMap', maxZoom: 19,
-}).addTo(map);
-// Legend — bottom-left, built entirely via DOM API (no innerHTML) to stay
-// consistent with the XSS-safe pattern used for popups above.
-const LegendControl = L.Control.extend({
-  onAdd: function() {
-    const div = document.createElement('div');
-    div.style.cssText = 'background:rgba(12,10,8,0.88);border:1px solid #c9a04a;border-radius:6px;padding:8px 12px;font-family:-apple-system,system-ui,sans-serif;font-size:12px;color:#f0e4c0;display:flex;flex-direction:column;gap:6px;pointer-events:none;line-height:1;';
-    // Officer row — green circle
-    const officerRow = document.createElement('div');
-    officerRow.style.cssText = 'display:flex;align-items:center;gap:8px;';
-    const officerDot = document.createElement('span');
-    officerDot.style.cssText = 'display:inline-block;width:12px;height:12px;border-radius:50%;background:#22c55e;border:2px solid #16a34a;flex-shrink:0;';
-    const officerLabel = document.createElement('span');
-    officerLabel.appendChild(document.createTextNode('Officer'));
-    officerRow.appendChild(officerDot);
-    officerRow.appendChild(officerLabel);
-    // Site row — gold diamond (rotated square)
-    const siteRow = document.createElement('div');
-    siteRow.style.cssText = 'display:flex;align-items:center;gap:8px;';
-    const siteDiamond = document.createElement('span');
-    siteDiamond.style.cssText = 'display:inline-block;width:10px;height:10px;background:#c9a04a;transform:rotate(45deg);flex-shrink:0;border:1px solid #f0e4c0;';
-    const siteLabel = document.createElement('span');
-    siteLabel.appendChild(document.createTextNode('Site'));
-    siteRow.appendChild(siteDiamond);
-    siteRow.appendChild(siteLabel);
-    div.appendChild(officerRow);
-    div.appendChild(siteRow);
-    return div;
-  },
-});
-new LegendControl({ position: 'bottomleft' }).addTo(map);
-const focusId = ${focus};
-if (pts.length) {
-  const group = L.featureGroup().addTo(map);
-  const markers = {};
-  pts.forEach(p => {
-    const isFocus = focusId && String(p.userId) === String(focusId);
-    const m = L.circleMarker([p.lat, p.lng], {
-      radius: isFocus ? 14 : 10,
-      color: isFocus ? '#f0e4c0' : '#16a34a',
-      fillColor: '#22c55e', fillOpacity: 0.9, weight: isFocus ? 5 : 3,
-    });
-    m.bindPopup(popupNode(p.label, p.sub, p.userId));
-    m.addTo(group);
-    markers[String(p.userId)] = { marker: m, lat: p.lat, lng: p.lng };
-  });
-  // Manual bounds — avoid group.getBounds() / Circle.getBounds() paths that
-  // have intermittently hit "Cannot read properties of undefined" in
-  // sandboxed iframes even when layers are correctly added.
-  const _bb = L.latLngBounds([]);
-  pts.forEach(p => _bb.extend([p.lat, p.lng]));
-  if (_bb.isValid()) map.fitBounds(_bb.pad(0.3), { maxZoom: 15 });
-  // When an alert deep-links to a specific officer, recenter on them and open
-  // their popup so the admin sees exactly who triggered the alert.
-  const focused = focusId ? markers[String(focusId)] : null;
-  if (focused) {
-    map.setView([focused.lat, focused.lng], 15);
-    try { focused.marker.openPopup(); } catch (e) {}
-  }
-}
-</script></body></html>`;
-}
-
 interface Props {
   officers: ActiveOfficer[];
   height?: number;
   onSelectOfficer?: (userId: string) => void;
-  onSelectSite?: (siteId: string, siteName: string) => void;
+  onOpenSiteRadio?: (channelId: string, siteName: string) => void;
   focusUserId?: string | null;
   focusKey?: string | null;
 }
 
-export default function LiveOfficerMap({ officers, height = 380, onSelectOfficer, onSelectSite, focusUserId, focusKey }: Props) {
+export default function LiveOfficerMap({ officers, height = 380, onSelectOfficer, onOpenSiteRadio, focusUserId, focusKey }: Props) {
   const colors = useColors();
 
   const points = useMemo(
@@ -171,33 +66,24 @@ export default function LiveOfficerMap({ officers, height = 380, onSelectOfficer
     [officers],
   );
 
+  const sites = useMemo(() => deriveSitePoints(officers), [officers]);
+
   const html = useMemo(
-    () => buildLeafletHtml(points, focusUserId ?? undefined, focusKey ?? undefined),
-    [points, focusUserId, focusKey],
+    () => buildLeafletHtml(points, sites, focusUserId ?? undefined, focusKey ?? undefined),
+    [points, sites, focusUserId, focusKey],
   );
 
   // Listen for postMessages from inside the leaflet iframe (web only).
   // Handles both "View profile" officer clicks and "Open Radio" site clicks.
   useEffect(() => {
     if (Platform.OS !== "web") return;
+    if (!onSelectOfficer && !onOpenSiteRadio) return;
     const handler = (ev: MessageEvent) => {
-      const data = ev.data;
-      if (!data || typeof data !== "object") return;
-      const msg = data as any;
-      if (msg.type === "wcsg:openOfficer" && onSelectOfficer) {
-        const uid = msg.userId;
-        if (typeof uid === "string" && uid.length > 0) onSelectOfficer(uid);
-      } else if (msg.type === "wcsg:openSiteRadio" && onSelectSite) {
-        const siteId = msg.siteId;
-        const siteName = msg.siteName;
-        if (typeof siteId === "string" && siteId.length > 0) {
-          onSelectSite(siteId, typeof siteName === "string" ? siteName : siteId);
-        }
-      }
+      handleMapMessage(ev.data, { onSelectOfficer, onOpenSiteRadio });
     };
     window.addEventListener("message", handler);
     return () => window.removeEventListener("message", handler);
-  }, [onSelectOfficer, onSelectSite]);
+  }, [onSelectOfficer, onOpenSiteRadio]);
 
   if (Platform.OS === "web") {
     const Iframe: any = "iframe";
@@ -213,9 +99,6 @@ export default function LiveOfficerMap({ officers, height = 380, onSelectOfficer
     );
   }
 
-  // Native fallback: clean text list with coordinates so the feature still works
-  // on iOS/Android even without react-native-webview installed. Each row taps
-  // through to the officer profile when onSelectOfficer is supplied.
   const officersWithPos = officers
     .map((o) => ({ officer: o, pos: pickPos(o) }))
     .filter((x) => x.pos !== null) as Array<{ officer: ActiveOfficer; pos: { lat: number; lng: number } }>;

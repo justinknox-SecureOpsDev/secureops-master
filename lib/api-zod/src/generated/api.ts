@@ -3341,6 +3341,9 @@ export const GetActiveOfficersResponseItem = zod.object({
   shiftTitle: zod.string().nullish(),
   siteName: zod.string().nullish(),
   siteAddress: zod.string().nullish(),
+  siteLat: zod.string().nullish(),
+  siteLng: zod.string().nullish(),
+  siteChannelId: zod.string().nullish(),
 });
 export const GetActiveOfficersResponse = zod.array(
   GetActiveOfficersResponseItem,

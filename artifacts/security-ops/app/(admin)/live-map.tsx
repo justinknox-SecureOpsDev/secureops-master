@@ -53,7 +53,7 @@ function isMicPermissionError(e: unknown): boolean {
   return name === "NotAllowedError" || name === "SecurityError" || name === "PermissionDeniedError" || msg.includes("permission") || msg.includes("denied") || msg.includes("not allowed");
 }
 
-type SiteRadioState = { siteId: string; siteName: string } | null;
+type SiteRadioState = { channelId: string; siteName: string } | null;
 
 // ---------------------------------------------------------------------------
 // SiteRadioPanel — a focused PTT panel for a single site radio channel.
@@ -61,11 +61,11 @@ type SiteRadioState = { siteId: string; siteName: string } | null;
 // everything down on unmount (dismiss OR screen-blur via useFocusEffect above).
 // ---------------------------------------------------------------------------
 function SiteRadioPanel({
-  siteId,
+  channelId,
   siteName,
   onDismiss,
 }: {
-  siteId: string;
+  channelId: string;
   siteName: string;
   onDismiss: () => void;
 }) {
@@ -101,27 +101,28 @@ function SiteRadioPanel({
     });
   }
 
-  // Fetch the site's radio channel once on mount.
+  // Fetch the channel record once on mount (to get its display name).
+  // Since we already have the channelId from the map, we look it up by id directly.
   useEffect(() => {
     let cancelled = false;
     apiRequest("/radio/channels")
       .then((rows: SiteChannel[]) => {
         if (cancelled) return;
-        const found = rows.find((c) => c.siteId === siteId && c.scope === "site" && !c.archivedAt);
+        const found = rows.find((c) => c.id === channelId && !c.archivedAt);
         if (found) {
           setChannel(found);
         } else {
-          setLoadError("No active radio channel for this site.");
+          setLoadError("No active radio channel found.");
         }
       })
       .catch((e: Error) => { if (!cancelled) setLoadError(e.message); });
     return () => { cancelled = true; };
-  }, [siteId]);
+  }, [channelId]);
 
   // Open WS once the channel is known. Tears down completely on unmount.
   useEffect(() => {
     if (!channel) return;
-    const channelId = channel.id;
+    const chId = channel.id;
     let cancelled = false;
     let attempt = 0;
     let reconnectTimer: ReturnType<typeof setTimeout> | undefined;
@@ -157,7 +158,7 @@ function SiteRadioPanel({
         setReconnecting(false);
         setError(null);
         if (!joinedRef.current) {
-          ws.send(JSON.stringify({ type: "join", channelId }));
+          ws.send(JSON.stringify({ type: "join", channelId: chId }));
           joinedRef.current = true;
         }
       };
@@ -174,11 +175,11 @@ function SiteRadioPanel({
         if (typeof ev.data !== "string") return;
         try {
           const m = JSON.parse(ev.data);
-          if (m.type === "speaking" && m.channelId === channelId) {
+          if (m.type === "speaking" && m.channelId === chId) {
             setSpeaker({ userId: m.speakerUserId, name: m.speakerName });
             const intent = transmitRef.current!.handleSpeaking(m.channelId, m.speakerUserId);
             if (intent) void beginPublish(intent.channelId, intent.gen);
-          } else if (m.type === "silent" && m.channelId === channelId) {
+          } else if (m.type === "silent" && m.channelId === chId) {
             setSpeaker(null);
           } else if (m.type === "denied") {
             const reason = m.reason;
@@ -204,7 +205,7 @@ function SiteRadioPanel({
       // Send leave before closing so the server cleans up membership.
       const ws = wsRef.current;
       if (ws && ws.readyState === WebSocket.OPEN) {
-        try { ws.send(JSON.stringify({ type: "leave", channelId })); } catch { /* ignore */ }
+        try { ws.send(JSON.stringify({ type: "leave", channelId: chId })); } catch { /* ignore */ }
       }
       if (ws) { ws.onclose = null; try { ws.close(); } catch { /* ignore */ } }
       wsRef.current = null;
@@ -216,18 +217,18 @@ function SiteRadioPanel({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [channel]);
 
-  async function beginPublish(channelId: string, gen: number): Promise<void> {
+  async function beginPublish(chId: string, gen: number): Promise<void> {
     const aborted = (): boolean => transmitRef.current!.currentGen() !== gen;
     try {
       setTalkState("connecting");
-      const { status, data } = await postRadioToken(`/radio/channels/${channelId}/livekit-publish-token`);
+      const { status, data } = await postRadioToken(`/radio/channels/${chId}/livekit-publish-token`);
       if (aborted()) return;
       if (!data) {
         if (status === 503) setAudioAvailable(false);
         throw new Error(status === 409 ? "Someone else is transmitting." : `Publish token failed (${status})`);
       }
-      setPublishingChannelId(channelId);
-      await mediaRef.current!.startPublish(channelId, data, aborted);
+      setPublishingChannelId(chId);
+      await mediaRef.current!.startPublish(chId, data, aborted);
       if (aborted()) { await mediaRef.current?.stopPublish(); setPublishingChannelId(null); return; }
       setTalkState("live");
     } catch (e) {
@@ -236,7 +237,7 @@ function SiteRadioPanel({
         : `Could not start transmitting: ${(e as Error).message}`);
       setTalkState("idle");
       setPublishingChannelId(null);
-      wsRef.current?.send(JSON.stringify({ type: "end", channelId }));
+      wsRef.current?.send(JSON.stringify({ type: "end", channelId: chId }));
     }
   }
 
@@ -403,9 +404,6 @@ function AdminLiveMapScreenInner() {
 
   const officers = (data ?? []) as any[];
 
-  // Deep-link focus: geofence-breach / emergency alerts pass userId (the
-  // officer) and missed-checkpoint passes timeEntryId. Resolve both to a userId
-  // so we can recenter the map + flash the matching list row. Stale ids no-op.
   const { userId: focusUserParam, timeEntryId: focusTeParam, _hlTs } =
     useLocalSearchParams<{ userId?: string; timeEntryId?: string; _hlTs?: string }>();
   const focusUserId =
@@ -417,6 +415,14 @@ function AdminLiveMapScreenInner() {
   const rowOffsets = useRef<Record<string, number>>({});
   const flashAnim = useHighlightFlash(focusUserId ? `${focusUserId}:${_hlTs ?? ""}` : null);
 
+  // Site PTT panel state — null when closed, set when a site radio is opened
+  // from the map (e.g. via a site marker's Radio button).
+  const [siteRadio, setSiteRadio] = useState<SiteRadioState>(null);
+
+  const handleOpenSiteRadio = useCallback((channelId: string, siteName: string) => {
+    setSiteRadio({ channelId, siteName });
+  }, []);
+
   useEffect(() => {
     if (!focusUserId) return;
     const t = setTimeout(() => {
@@ -426,10 +432,6 @@ function AdminLiveMapScreenInner() {
     }, 400);
     return () => clearTimeout(t);
   }, [focusUserId, _hlTs, officers]);
-
-  // Site PTT panel state — null when closed, set when a site radio is opened
-  // from the map (e.g. via a site marker's Radio button).
-  const [siteRadio, setSiteRadio] = useState<SiteRadioState>(null);
 
   // Auto-dismiss the panel when the user navigates away from this tab so the
   // panel's WS connection is torn down (via the panel's unmount cleanup) and
@@ -471,7 +473,7 @@ function AdminLiveMapScreenInner() {
             officers={officers}
             height={380}
             onSelectOfficer={openOfficer}
-            onSelectSite={(siteId, siteName) => setSiteRadio({ siteId, siteName })}
+            onOpenSiteRadio={handleOpenSiteRadio}
             focusUserId={focusUserId}
             focusKey={_hlTs}
           />
@@ -481,8 +483,8 @@ function AdminLiveMapScreenInner() {
               above clears siteRadio, triggering unmount and WS teardown). */}
           {siteRadio && (
             <SiteRadioPanel
-              key={siteRadio.siteId}
-              siteId={siteRadio.siteId}
+              key={siteRadio.channelId}
+              channelId={siteRadio.channelId}
               siteName={siteRadio.siteName}
               onDismiss={() => setSiteRadio(null)}
             />

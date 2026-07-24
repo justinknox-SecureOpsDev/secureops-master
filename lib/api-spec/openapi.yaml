@@ -5331,6 +5331,9 @@ components:
         shiftTitle: { type: string, nullable: true }
         siteName: { type: string, nullable: true }
         siteAddress: { type: string, nullable: true }
+        siteLat: { type: string, nullable: true }
+        siteLng: { type: string, nullable: true }
+        siteChannelId: { type: string, nullable: true }
       required: [userId, firstName, lastName, timeEntryId, clockInTime]
 
     ChatUser:

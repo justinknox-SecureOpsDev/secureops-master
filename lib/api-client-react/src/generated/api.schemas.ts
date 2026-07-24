@@ -1691,6 +1691,9 @@ export interface ActiveOfficer {
   shiftTitle?: string | null;
   siteName?: string | null;
   siteAddress?: string | null;
+  siteLat?: string | null;
+  siteLng?: string | null;
+  siteChannelId?: string | null;
 }
 
 export interface ChatUser {
