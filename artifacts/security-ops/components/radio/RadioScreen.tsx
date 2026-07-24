@@ -1,9 +1,10 @@
-import React, { useEffect, useMemo, useRef, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   View, Text, TouchableOpacity, ScrollView, StyleSheet,
   ActivityIndicator, Pressable, AppState,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
+import { useFocusEffect } from "expo-router";
 import { Feather } from "@expo/vector-icons";
 import { useColors } from "@/hooks/useColors";
 import { apiRequest, getApiBaseUrl } from "@/utils/api";
@@ -13,12 +14,7 @@ import { createRadioMedia } from "./radioMedia";
 import type { RadioMedia, RadioToken } from "./radioTypes";
 import { createTransmitController, type TransmitController } from "./radioTransmit";
 
-type Channel = {
-  id: string; name: string;
-  scope: "global" | "all_officers" | "admins" | "site";
-  siteId: string | null; siteName?: string | null;
-  adminOnly: boolean; archivedAt: string | null;
-};
+import { selectSiteChannels, reconcileActiveId, type RadioChannel as Channel } from "./radioChannels";
 
 type Speaker = { userId: string; name: string } | null;
 type TalkState = "idle" | "requesting" | "connecting" | "live";
@@ -105,13 +101,7 @@ export default function RadioScreen(): React.JSX.Element {
   // Site radio channels get their own labelled section so a dispatcher can jump
   // straight to any site's channel without hunting through the chip row (or
   // opening the live map). Sorted by site name for scanability.
-  const siteChannels = useMemo(
-    () =>
-      channels
-        .filter((c) => c.scope === "site" && !c.archivedAt)
-        .sort((a, b) => (a.siteName ?? a.name).localeCompare(b.siteName ?? b.name)),
-    [channels],
-  );
+  const siteChannels = useMemo(() => selectSiteChannels(channels), [channels]);
   const isSpeakingHere = activeId ? speakers[activeId]?.userId === user?.id : false;
   const otherSpeaker = activeId && speakers[activeId] && speakers[activeId]?.userId !== user?.id ? speakers[activeId] : null;
   const isTransmitting = talkState === "live" || talkState === "requesting" || talkState === "connecting";
@@ -137,15 +127,33 @@ export default function RadioScreen(): React.JSX.Element {
   }
   useEffect(() => { userIdRef.current = user?.id; }, [user?.id]);
 
-  useEffect(() => {
-    apiRequest("/radio/channels")
-      .then((rows: Channel[]) => {
-        setChannels(rows);
-        if (rows[0]) setActiveId(rows[0].id);
-      })
-      .catch((e: Error) => setError(e.message))
-      .finally(() => setLoading(false));
-  }, []);
+  // Fetch the channel roster on every screen focus (not just mount) so a site
+  // channel an admin just created or archived shows up / disappears the next
+  // time a dispatcher opens the Radio tab — no app restart needed. Silent on
+  // refetch: the spinner only gates the very first load, and a transient
+  // refetch failure keeps the last-known list rather than surfacing an error.
+  const firstLoadDoneRef = useRef(false);
+  useFocusEffect(
+    useCallback(() => {
+      let cancelled = false;
+      apiRequest("/radio/channels")
+        .then((rows: Channel[]) => {
+          if (cancelled) return;
+          setChannels(rows);
+          setActiveId((cur) => reconcileActiveId(rows, cur));
+          setError(null); // clear a stale first-load error once a refetch succeeds
+        })
+        .catch((e: Error) => {
+          if (!cancelled && !firstLoadDoneRef.current) setError(e.message);
+        })
+        .finally(() => {
+          if (cancelled) return;
+          firstLoadDoneRef.current = true;
+          setLoading(false);
+        });
+      return () => { cancelled = true; };
+    }, []),
+  );
 
   // --- WS control plane (presence + speaker lock signalling) ---
   // Auto-reconnects with capped exponential backoff + jitter so a dropped
