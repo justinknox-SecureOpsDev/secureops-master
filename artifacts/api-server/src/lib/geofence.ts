@@ -22,7 +22,7 @@ import { brand } from "./brandConfig";
  */
 import { db, timeEntriesTable, sitesTable, usersTable, shiftsTable } from "@workspace/db";
 import { and, eq, isNull } from "drizzle-orm";
-import { sendPushToUsers } from "./push";
+import { sendPushToUsers, SMS_GEOFENCE_MAP_PROMPT } from "./push";
 import { sendSmsToUsers } from "./sms";
 import { logger } from "./logger";
 
@@ -175,7 +175,7 @@ export async function evaluateGeofence(userId: string, lat: number, lng: number)
 
     sendSmsToUsers(
       adminIds,
-      `[${brand.shortName}] ${name} drifted ${distanceTxt} from ${site.name}. Check Live Map.`,
+      `[${brand.shortName}] ${name} drifted ${distanceTxt} from ${site.name}. ${SMS_GEOFENCE_MAP_PROMPT}`,
     ).catch((err: unknown) => logger.warn({ err, userId, siteId: site.id }, "[geofence] SMS dispatch failed"));
   } catch (err) {
     logger.warn({ err, userId }, "[geofence] failed to dispatch admin alerts");

@@ -5,6 +5,31 @@ import { logger } from "./logger";
 
 const expo = new Expo();
 
+/**
+ * Admin mobile tab names referenced in push-notification and SMS body strings.
+ *
+ * These mirror the TAB_ADMIN_* constants in
+ * artifacts/security-ops/constants/tabNames.ts. They are redefined here
+ * because the API server cannot import from the security-ops package.
+ *
+ * The tabNames Vitest suite reads this file and validates every "X tab"
+ * phrase against KNOWN_TAB_PREFIXES, so any drift from the mobile layout is
+ * caught before it ships.
+ *
+ * To rename an admin tab: update the constant in tabNames.ts (security-ops),
+ * update the matching constant below, and update the admin layout title prop —
+ * the test will fail until all three agree.
+ */
+export const ADMIN_TAB_LIVE_MAP = "Live Map" as const;
+
+/**
+ * SMS suffix appended to geofence-breach alerts, directing admins to open
+ * the Live Map tab in the admin mobile app to track the officer's position.
+ * Canonical wording is also exported from security-ops/constants/userCopy.ts
+ * as COPY_GEOFENCE_SMS_MAP_CHECK for the mobile-side test coverage.
+ */
+export const SMS_GEOFENCE_MAP_PROMPT = `Check ${ADMIN_TAB_LIVE_MAP}.` as const;
+
 export async function sendPushToUsers(
   userIds: string[],
   notification: { title: string; body: string; data?: Record<string, unknown> },

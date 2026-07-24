@@ -7,6 +7,18 @@ import { BlurView } from "expo-blur";
 import { useChat } from "@/contexts/ChatContext";
 import { useFeatures, isEnabled } from "@/hooks/useFeatures";
 import { TourProvider } from "@/contexts/TourContext";
+import {
+  TAB_ADMIN_OVERVIEW,
+  TAB_ADMIN_PERSONNEL,
+  TAB_ADMIN_SHIFTS,
+  TAB_ADMIN_APPROVALS,
+  TAB_ADMIN_LIVE_MAP,
+  TAB_ADMIN_INCIDENTS,
+  TAB_ADMIN_CHAT,
+  TAB_ADMIN_RADIO,
+  TAB_ADMIN_CLOCK,
+  TAB_ADMIN_PROFILE,
+} from "@/constants/tabNames";
 
 export default function AdminLayout() {
   const colors = useColors();
@@ -56,7 +68,7 @@ export default function AdminLayout() {
       <Tabs.Screen
         name="dashboard"
         options={{
-          title: "Overview",
+          title: TAB_ADMIN_OVERVIEW,
           headerTitle: `${process.env.EXPO_PUBLIC_COMPANY_SHORT_NAME ?? "SecureOps"} — Operations`,
           tabBarAccessibilityLabel: "Overview tab",
           tabBarIcon: ({ color }) => <Feather name="home" size={22} color={color} />,
@@ -65,7 +77,7 @@ export default function AdminLayout() {
       <Tabs.Screen
         name="employees"
         options={{
-          title: "Personnel",
+          title: TAB_ADMIN_PERSONNEL,
           tabBarAccessibilityLabel: "Personnel tab",
           tabBarIcon: ({ color }) => <Feather name="users" size={22} color={color} />,
         }}
@@ -73,7 +85,7 @@ export default function AdminLayout() {
       <Tabs.Screen
         name="shifts"
         options={{
-          title: "Shifts",
+          title: TAB_ADMIN_SHIFTS,
           // The Shifts tab hosts a nested Stack whose screens render their own
           // in-screen headers — suppress the tab navigator's native header so
           // we don't double up.
@@ -85,7 +97,7 @@ export default function AdminLayout() {
       <Tabs.Screen
         name="shift-approvals"
         options={{
-          title: "Approvals",
+          title: TAB_ADMIN_APPROVALS,
           // The screen renders its own in-screen header/title, so suppress the
           // tab navigator's native header to avoid doubling up.
           headerShown: false,
@@ -96,7 +108,7 @@ export default function AdminLayout() {
       <Tabs.Screen
         name="live-map"
         options={{
-          title: "Live Map",
+          title: TAB_ADMIN_LIVE_MAP,
           href: isEnabled(flags, "liveMap") ? undefined : null,
           tabBarAccessibilityLabel: "Live officer map tab",
           tabBarIcon: ({ color }) => <Feather name="map" size={22} color={color} />,
@@ -105,7 +117,7 @@ export default function AdminLayout() {
       <Tabs.Screen
         name="incidents"
         options={{
-          title: "Incidents",
+          title: TAB_ADMIN_INCIDENTS,
           href: isEnabled(flags, "incidents") ? undefined : null,
           tabBarAccessibilityLabel: "Incidents tab",
           tabBarIcon: ({ color }) => <Feather name="alert-triangle" size={22} color={color} />,
@@ -114,7 +126,7 @@ export default function AdminLayout() {
       <Tabs.Screen
         name="chat"
         options={{
-          title: "Chat",
+          title: TAB_ADMIN_CHAT,
           headerTitle: "Team Chat",
           href: isEnabled(flags, "chat") ? undefined : null,
           tabBarAccessibilityLabel:
@@ -129,7 +141,7 @@ export default function AdminLayout() {
       <Tabs.Screen
         name="radio"
         options={{
-          title: "Radio",
+          title: TAB_ADMIN_RADIO,
           headerTitle: "Radio",
           href: isEnabled(flags, "radio") ? undefined : null,
           tabBarAccessibilityLabel: "Push to talk radio tab",
@@ -139,7 +151,7 @@ export default function AdminLayout() {
       <Tabs.Screen
         name="clock"
         options={{
-          title: "Clock",
+          title: TAB_ADMIN_CLOCK,
           // The screen renders its own in-screen header/title, so suppress the
           // tab navigator's native header to avoid doubling up.
           headerShown: false,
@@ -150,7 +162,7 @@ export default function AdminLayout() {
       <Tabs.Screen
         name="profile"
         options={{
-          title: "Profile",
+          title: TAB_ADMIN_PROFILE,
           // The screen renders its own in-screen header/title, so suppress the
           // tab navigator's native header to avoid doubling up.
           headerShown: false,

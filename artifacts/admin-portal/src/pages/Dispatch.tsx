@@ -809,6 +809,14 @@ export default function DispatchPage() {
 
 // =========================================================== COACH-MARK TOUR
 
+/**
+ * Mobile employee Chat tab name, referenced in the broadcast tour step body.
+ * Must stay in sync with TAB_CHAT in security-ops/constants/tabNames.ts.
+ * The tabNames test suite reads this file and validates the "X tab" phrase
+ * against KNOWN_TAB_PREFIXES to catch stale references before they ship.
+ */
+const MOBILE_EMPLOYEE_CHAT_TAB = "Chat" as const;
+
 type TourStep = {
   /** data-tour selector to spotlight */
   selector: string;
@@ -841,7 +849,7 @@ const TOUR_STEPS: TourStep[] = [
     selector: '[data-tour="broadcast"]',
     panelKey: "broadcast",
     title: "Broadcast Composer",
-    body: "Pick a channel (📣 announcements goes org-wide), preview the thread if you want context, then send. Officers see it instantly in the Comms tab's chat and via push notification.",
+    body: `Pick a channel (📣 announcements goes org-wide), preview the thread if you want context, then send. Officers see it instantly in the ${MOBILE_EMPLOYEE_CHAT_TAB} tab and via push notification.`,
   },
 ];
 
