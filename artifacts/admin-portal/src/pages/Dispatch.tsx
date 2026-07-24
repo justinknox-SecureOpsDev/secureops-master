@@ -350,6 +350,12 @@ export default function DispatchPage() {
 
   // ---- drag-to-reorder state ----
   const dragSrcRef = useRef<PanelId | null>(null);
+  // State mirror of dragSrcRef used during render so that showBoundary is
+  // always up-to-date even when the other drag-state variables have already
+  // been cleared (e.g. dragLeave clears dragOverBoundary, then dragEnd fires
+  // with no further state changes — without this mirror, React bails out of
+  // the re-render and the boundary zone lingers in the DOM).
+  const [dragSrcId, setDragSrcId] = useState<PanelId | null>(null);
   // Track which panel the cursor is over AND whether the drop would land
   // before or after that panel (computed from cursor Y vs element midpoint).
   type DragInsert = { overId: PanelId; position: "before" | "after" } | null;
@@ -371,16 +377,19 @@ export default function DispatchPage() {
   useEffect(() => {
     dragSrcRef.current = null;
     dragInsertRef.current = null;
+    setDragSrcId(null);
     setDragInsert(null);
   }, [layout.panels]);
 
   const handlePanelDragStart = useCallback((id: PanelId) => {
     dragSrcRef.current = id;
+    setDragSrcId(id);
   }, []);
 
   const handlePanelDragEnd = useCallback(() => {
     dragSrcRef.current = null;
     dragInsertRef.current = null;
+    setDragSrcId(null);
     setDragInsert(null);
     setDragOverBoundary(null);
   }, []);
@@ -590,7 +599,7 @@ export default function DispatchPage() {
 
       {/* ---- free-form configurable grid (1 / 2 / 3 columns) ---- */}
       {(() => {
-        const srcId = dragSrcRef.current;
+        const srcId = dragSrcId;
 
         // Render a single panel's content by id.
         const renderPanelContent = (id: PanelId) => {
