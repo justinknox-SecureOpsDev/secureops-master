@@ -8,7 +8,7 @@ import {
 } from "@/components/ui/dialog";
 import {
   ChevronLeft, ChevronRight, CalendarDays, Clock, MapPin, Users, Megaphone,
-  Loader2, UserPlus, CheckCircle2, AlertTriangle,
+  Loader2, UserPlus, CheckCircle2, AlertTriangle, MousePointerClick,
 } from "lucide-react";
 import { AssignNearestDialog } from "@/components/AssignNearestDialog";
 
@@ -143,6 +143,21 @@ function fmtRangeLabel(dates: Date[]): string {
   return `${f} – ${l}, ${last.getFullYear()}`;
 }
 
+function StaffingBar({ filled, headcount, open }: { filled: number; headcount: number; open: boolean }) {
+  const pct = headcount > 0 ? Math.min(100, (filled / headcount) * 100) : 0;
+  return (
+    <div className="flex items-center gap-1.5 mt-1">
+      <div className="flex-1 h-1.5 rounded-full bg-black/[0.08] overflow-hidden">
+        <div
+          className={`h-full rounded-full transition-all ${open ? "bg-amber-500" : "bg-emerald-500"}`}
+          style={{ width: `${pct}%` }}
+        />
+      </div>
+      <span className="text-[10px] opacity-60 shrink-0 tabular-nums">{filled}/{headcount}</span>
+    </div>
+  );
+}
+
 export default function Calendar() {
   const qc = useQueryClient();
   const [anchor, setAnchor] = useState(() => startOfDay(new Date()));
@@ -238,6 +253,13 @@ export default function Calendar() {
       if (view === "week") return addDays(prev, dir * 7);
       return addDays(prev, dir * 3);
     });
+  }
+
+  function switchView(v: View, date?: Date) {
+    setView(v);
+    setRosterShiftId(null);
+    setDropError(null);
+    if (date) setAnchor(startOfDay(date));
   }
 
   const candidatesQuery = useQuery<AssignNearestResult>({
@@ -342,115 +364,110 @@ export default function Calendar() {
   return (
     <div className="flex flex-col h-full">
       {/* ── Header ── */}
-      <div className="shrink-0 border-b bg-card px-4 py-3 flex flex-wrap items-center gap-3">
-        <div className="flex items-center gap-2">
-          <CalendarDays className="w-5 h-5 brand-gold" />
-          <h1 className="text-lg font-semibold">Shift Calendar</h1>
-        </div>
+      <div className="shrink-0 border-b bg-card px-4 py-3">
+        <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
+          {/* Title */}
+          <div className="flex items-center gap-2 mr-1">
+            <CalendarDays className="w-5 h-5 brand-gold" />
+            <h1 className="text-lg font-semibold">Shift Calendar</h1>
+          </div>
 
-        {/* View switcher */}
-        <div className="flex items-center rounded-md border overflow-hidden text-sm">
-          {(["month", "week", "3day"] as View[]).map((v) => (
-            <button
-              key={v}
+          {/* View switcher */}
+          <div className="flex items-center rounded-md border overflow-hidden text-sm">
+            {(["month", "week", "3day"] as View[]).map((v) => (
+              <button
+                key={v}
+                onClick={() => switchView(v)}
+                className={`px-3 py-1.5 font-medium transition-colors border-r last:border-r-0 ${
+                  view === v
+                    ? "bg-brand-gold text-sidebar"
+                    : "hover:bg-muted"
+                }`}
+              >
+                {v === "month" ? "Month" : v === "week" ? "Week" : "3 Day"}
+              </button>
+            ))}
+          </div>
+
+          {/* Navigation */}
+          <div className="flex items-center gap-1">
+            <Button variant="outline" size="icon" aria-label="Previous" onClick={() => navigate(-1)}>
+              <ChevronLeft className="w-4 h-4" />
+            </Button>
+            <div className="min-w-[11rem] text-center font-medium text-sm">{viewLabel}</div>
+            <Button variant="outline" size="icon" aria-label="Next" onClick={() => navigate(1)}>
+              <ChevronRight className="w-4 h-4" />
+            </Button>
+            <Button
+              variant="default"
+              size="sm"
+              className="ml-1 bg-brand-gold hover:bg-brand-gold/90 text-sidebar font-semibold"
               onClick={() => {
-                setView(v);
+                setAnchor(startOfDay(new Date()));
                 setRosterShiftId(null);
                 setDropError(null);
               }}
-              className={`px-3 py-1.5 font-medium transition-colors border-r last:border-r-0 ${
-                view === v
-                  ? "bg-brand-gold text-sidebar"
-                  : "hover:bg-muted"
-              }`}
             >
-              {v === "month" ? "Month" : v === "week" ? "Week" : "3 Day"}
-            </button>
-          ))}
-        </div>
-
-        {/* Navigation */}
-        <div className="flex items-center gap-1">
-          <Button
-            variant="outline"
-            size="icon"
-            aria-label="Previous"
-            onClick={() => navigate(-1)}
-          >
-            <ChevronLeft className="w-4 h-4" />
-          </Button>
-          <div className="min-w-[12rem] text-center font-medium text-sm">{viewLabel}</div>
-          <Button
-            variant="outline"
-            size="icon"
-            aria-label="Next"
-            onClick={() => navigate(1)}
-          >
-            <ChevronRight className="w-4 h-4" />
-          </Button>
-          <Button
-            variant="ghost"
-            size="sm"
-            onClick={() => {
-              setAnchor(startOfDay(new Date()));
-              setRosterShiftId(null);
-              setDropError(null);
-            }}
-          >
-            Today
-          </Button>
-        </div>
-
-        {/* Filter */}
-        <div className="ml-auto flex items-center gap-1">
-          {(["all", "open", "filled"] as const).map((f) => (
-            <Button
-              key={f}
-              size="sm"
-              variant={filter === f ? "default" : "outline"}
-              onClick={() => setFilter(f)}
-            >
-              {f === "all" ? "All" : f === "open" ? "Open" : "Filled"}
+              Today
             </Button>
-          ))}
+          </div>
+
+          {/* Filter — right side */}
+          <div className="ml-auto flex items-center gap-1">
+            <span className="text-xs opacity-50 mr-1 hidden sm:inline">Show:</span>
+            {(["all", "open", "filled"] as const).map((f) => (
+              <Button
+                key={f}
+                size="sm"
+                variant={filter === f ? "default" : "ghost"}
+                className={filter === f ? "bg-brand-navy text-white hover:bg-brand-navy/90" : ""}
+                onClick={() => setFilter(f)}
+              >
+                {f === "all" ? "All" : f === "open" ? "Open" : "Filled"}
+              </Button>
+            ))}
+          </div>
+
+          {/* Loading indicator */}
+          {shifts.isFetching && (
+            <span className="flex items-center gap-1 text-xs opacity-50">
+              <Loader2 className="w-3 h-3 animate-spin" /> Refreshing…
+            </span>
+          )}
+        </div>
+
+        {/* Legend row */}
+        <div className="flex flex-wrap items-center gap-4 text-xs opacity-60 mt-2">
+          <span className="flex items-center gap-1.5">
+            <span className="inline-block w-3 h-3 rounded-sm bg-amber-400" /> Open shift
+          </span>
+          <span className="flex items-center gap-1.5">
+            <span className="inline-block w-3 h-3 rounded-sm bg-emerald-500" /> Fully staffed
+          </span>
+          {view !== "month" && (
+            <span className="flex items-center gap-1.5 text-brand-gold/80 opacity-100">
+              <MousePointerClick className="w-3 h-3" /> Click a shift to see available officers
+            </span>
+          )}
         </div>
       </div>
 
-      {/* ── Legend ── */}
-      <div className="shrink-0 px-4 pt-2 pb-1 flex flex-wrap items-center gap-4 text-xs opacity-70">
-        <span className="flex items-center gap-1">
-          <span className="inline-block w-3 h-3 rounded-sm bg-amber-400" /> Open (needs officers)
-        </span>
-        <span className="flex items-center gap-1">
-          <span className="inline-block w-3 h-3 rounded-sm bg-emerald-500" /> Filled
-        </span>
-        {view !== "month" && (
-          <span className="flex items-center gap-1 text-brand-gold/80 opacity-100">
-            Click a shift → drag an officer to assign
-          </span>
-        )}
-        {shifts.isFetching && (
-          <span className="flex items-center gap-1">
-            <Loader2 className="w-3 h-3 animate-spin" /> Refreshing…
-          </span>
-        )}
-      </div>
+      {/* ── Error banner ── */}
+      {shifts.isError && (
+        <div className="shrink-0 mx-4 mt-3 text-sm text-red-700 rounded border border-red-200 bg-red-50 px-3 py-2">
+          {shifts.error instanceof Error ? shifts.error.message : "Could not load shifts."}
+        </div>
+      )}
 
       {/* ── Main content ── */}
       <div className="flex-1 overflow-auto p-4">
-        {shifts.isError && (
-          <div className="text-sm text-red-700 mb-2">
-            {shifts.error instanceof Error ? shifts.error.message : "Could not load shifts."}
-          </div>
-        )}
-
         {view === "month" ? (
           /* ═══════════════════════ MONTH VIEW ═══════════════════════ */
           <div className="grid grid-cols-7 gap-px bg-border rounded-lg overflow-hidden min-w-[40rem]">
             {WEEKDAYS.map((d) => (
               <div
                 key={d}
-                className="bg-muted px-2 py-1.5 text-xs font-medium text-center uppercase tracking-wide opacity-70"
+                className="bg-muted px-2 py-1.5 text-xs font-semibold text-center uppercase tracking-wider opacity-60"
               >
                 {d}
               </div>
@@ -464,25 +481,28 @@ export default function Calendar() {
               return (
                 <div
                   key={key}
-                  className={`bg-card min-h-[7rem] p-1.5 flex flex-col gap-1 transition-opacity ${
-                    isPast
-                      ? "opacity-25 pointer-events-none"
-                      : inMonth
-                        ? ""
-                        : "opacity-40"
+                  className={`bg-card min-h-[7.5rem] p-1.5 flex flex-col gap-1 ${
+                    isPast ? "opacity-40" : inMonth ? "" : "opacity-50"
                   }`}
                 >
-                  <div
-                    className={`text-xs font-medium px-1 ${isToday ? "brand-gold" : "opacity-60"}`}
+                  {/* Day number — click to drill into 3-day view */}
+                  <button
+                    type="button"
+                    onClick={() => switchView("3day", cell)}
+                    className={`self-start text-xs font-semibold px-1 rounded hover:bg-accent transition-colors ${
+                      isToday ? "brand-gold" : "opacity-60"
+                    }`}
+                    title={`View ${cell.toLocaleString("en-US", { weekday: "long", month: "long", day: "numeric" })}`}
                   >
                     {isToday ? (
-                      <span className="inline-flex items-center justify-center w-5 h-5 rounded-full bg-brand-gold text-sidebar font-semibold">
+                      <span className="inline-flex items-center justify-center w-6 h-6 rounded-full bg-brand-gold text-sidebar font-bold">
                         {cell.getDate()}
                       </span>
                     ) : (
                       cell.getDate()
                     )}
-                  </div>
+                  </button>
+
                   <div className="flex flex-col gap-1 overflow-hidden">
                     {dayShifts.slice(0, 4).map((s) => {
                       const filled = filledCount(s);
@@ -499,12 +519,10 @@ export default function Calendar() {
                           }`}
                           title={`${s.title} · ${siteName(s.siteId)}`}
                         >
-                          <div className="font-medium truncate">
-                            {fmtTime(s.startTime)} {s.title}
+                          <div className="font-semibold truncate">
+                            {fmtTime(s.startTime)} · {s.title}
                           </div>
-                          <div className="opacity-80 truncate">
-                            {siteName(s.siteId)} · {filled}/{s.headcount}
-                          </div>
+                          <StaffingBar filled={filled} headcount={s.headcount} open={open} />
                         </button>
                       );
                     })}
@@ -512,10 +530,13 @@ export default function Calendar() {
                       <button
                         type="button"
                         onClick={() => setDayView({ key, shifts: dayShifts })}
-                        className="text-[10px] opacity-70 hover:opacity-100 hover:underline px-1 text-left"
+                        className="text-[10px] font-medium opacity-60 hover:opacity-100 hover:underline px-1 text-left"
                       >
                         +{dayShifts.length - 4} more
                       </button>
+                    )}
+                    {dayShifts.length === 0 && inMonth && !isPast && (
+                      <div className="text-[10px] opacity-20 text-center pt-2">No shifts</div>
                     )}
                   </div>
                 </div>
@@ -524,262 +545,287 @@ export default function Calendar() {
           </div>
         ) : (
           /* ═══════════════════════ WEEK / 3-DAY VIEW ═══════════════════════ */
-          <div className="flex flex-col gap-4">
-            <div
-              className={`grid gap-px bg-border rounded-lg overflow-hidden ${
-                view === "week" ? "grid-cols-7" : "grid-cols-3"
-              } min-w-[28rem]`}
-            >
-              {/* Column headers */}
-              {viewDates.map((cell) => {
-                const key = localDayKey(cell);
-                const isToday = key === todayKey;
-                const isPast = key < todayKey;
-                const wd = WEEKDAYS_LONG[cell.getDay()];
-                const dayLabel = view === "week" ? wd.slice(0, 3) : wd;
-                return (
-                  <div
-                    key={`hdr-${key}`}
-                    className={`bg-muted px-2 py-2 text-center transition-opacity ${isPast ? "opacity-40" : ""}`}
-                  >
-                    <div className="text-[11px] font-semibold uppercase tracking-wider opacity-60">
-                      {dayLabel}
-                    </div>
-                    <div className="mt-1 flex justify-center">
-                      {isToday ? (
-                        <span className="inline-flex items-center justify-center w-8 h-8 rounded-full bg-brand-gold text-sidebar font-bold text-sm">
-                          {cell.getDate()}
-                        </span>
-                      ) : (
-                        <span className={`text-xl font-semibold ${isPast ? "opacity-50" : ""}`}>
-                          {cell.getDate()}
-                        </span>
-                      )}
-                    </div>
-                    <div className="text-[10px] opacity-40 mt-0.5">
-                      {cell.toLocaleString("en-US", { month: "short" })}
-                    </div>
-                  </div>
-                );
-              })}
+          <div className="flex gap-4 items-start">
 
-              {/* Day cells (shift cards) */}
-              {viewDates.map((cell) => {
-                const key = localDayKey(cell);
-                const isPast = key < todayKey;
-                const dayShifts = byDay.get(key) ?? [];
-                return (
-                  <div
-                    key={`body-${key}`}
-                    className={`bg-card p-2 min-h-[10rem] flex flex-col gap-1.5 transition-opacity ${
-                      isPast ? "opacity-30 pointer-events-none" : ""
-                    }`}
-                  >
-                    {dayShifts.length === 0 && (
-                      <div className="text-[11px] opacity-30 text-center pt-6">No shifts</div>
-                    )}
-                    {dayShifts.map((s) => {
-                      const filled = filledCount(s);
-                      const open = filled < s.headcount;
-                      const isRosterSelected = s.id === rosterShiftId;
-                      const isDragOver = s.id === dragOverShiftId;
-                      const isAssigning = s.id === assigningShiftId;
-                      return (
-                        <div
-                          key={s.id}
-                          role="button"
-                          tabIndex={0}
-                          aria-pressed={isRosterSelected}
-                          onClick={() => {
-                            setRosterShiftId(s.id === rosterShiftId ? null : s.id);
-                            setDropError(null);
-                          }}
-                          onKeyDown={(e) => {
-                            if (e.key === "Enter" || e.key === " ") {
-                              e.preventDefault();
-                              setRosterShiftId(s.id === rosterShiftId ? null : s.id);
-                              setDropError(null);
-                            }
-                          }}
-                          onDragOver={(e) => handleDragOverShift(e, s.id)}
-                          onDragLeave={handleDragLeaveShift}
-                          onDrop={(e) => handleDropOnShift(e, s.id)}
-                          className={[
-                            "rounded border p-2 text-[11px] leading-tight cursor-pointer transition-all select-none outline-none",
-                            "focus-visible:ring-2 focus-visible:ring-brand-gold",
-                            open
-                              ? "bg-amber-50 border-amber-200 text-amber-900"
-                              : "bg-emerald-50 border-emerald-200 text-emerald-900",
-                            isRosterSelected ? "ring-2 ring-brand-gold border-brand-gold" : "",
-                            isDragOver
-                              ? "ring-2 ring-brand-gold bg-brand-gold/10 border-brand-gold"
-                              : "",
-                          ]
-                            .filter(Boolean)
-                            .join(" ")}
-                        >
-                          <div className="font-semibold">{fmtTime(s.startTime)}</div>
-                          <div className="font-medium truncate">{s.title}</div>
-                          <div className="opacity-60 truncate">{siteName(s.siteId)}</div>
-                          <div className="flex items-center gap-1 mt-0.5 opacity-80">
-                            <Users className="w-3 h-3 shrink-0" />
-                            <span>
-                              {filled}/{s.headcount} filled
-                            </span>
+            {/* Left: grid + error */}
+            <div className="flex-1 min-w-0 flex flex-col gap-3">
+              <div
+                className={`grid gap-px bg-border rounded-lg overflow-hidden ${
+                  view === "week" ? "grid-cols-7" : "grid-cols-3"
+                } min-w-[22rem]`}
+              >
+                {/* Column headers */}
+                {viewDates.map((cell) => {
+                  const key = localDayKey(cell);
+                  const isToday = key === todayKey;
+                  const isPast = key < todayKey;
+                  const wd = WEEKDAYS_LONG[cell.getDay()];
+                  const dayLabel = view === "week" ? wd.slice(0, 3) : wd;
+                  return (
+                    <div
+                      key={`hdr-${key}`}
+                      className={`bg-muted px-2 py-2 text-center ${isPast ? "opacity-40" : ""}`}
+                    >
+                      <div className="text-[10px] font-semibold uppercase tracking-wider opacity-60">
+                        {dayLabel}
+                      </div>
+                      <div className="mt-1 flex justify-center">
+                        {isToday ? (
+                          <span className="inline-flex items-center justify-center w-8 h-8 rounded-full bg-brand-gold text-sidebar font-bold text-sm">
+                            {cell.getDate()}
+                          </span>
+                        ) : (
+                          <span className={`text-xl font-semibold ${isPast ? "opacity-40" : ""}`}>
+                            {cell.getDate()}
+                          </span>
+                        )}
+                      </div>
+                      <div className="text-[10px] opacity-40 mt-0.5">
+                        {cell.toLocaleString("en-US", { month: "short" })}
+                      </div>
+                    </div>
+                  );
+                })}
+
+                {/* Day cells */}
+                {viewDates.map((cell) => {
+                  const key = localDayKey(cell);
+                  const isPast = key < todayKey;
+                  const dayShifts = byDay.get(key) ?? [];
+                  return (
+                    <div
+                      key={`body-${key}`}
+                      className={`bg-card p-2 min-h-[11rem] flex flex-col gap-2 ${
+                        isPast ? "opacity-45" : ""
+                      }`}
+                    >
+                      {dayShifts.length === 0 && (
+                        <div className="text-[11px] opacity-25 text-center pt-8">No shifts</div>
+                      )}
+                      {dayShifts.map((s) => {
+                        const filled = filledCount(s);
+                        const open = filled < s.headcount;
+                        const isRosterSelected = s.id === rosterShiftId;
+                        const isDragOver = s.id === dragOverShiftId;
+                        const isAssigning = s.id === assigningShiftId;
+                        return (
+                          <div
+                            key={s.id}
+                            role="button"
+                            tabIndex={0}
+                            aria-pressed={isRosterSelected}
+                            onClick={() => {
+                              if (!isPast) {
+                                setRosterShiftId(s.id === rosterShiftId ? null : s.id);
+                                setDropError(null);
+                              } else {
+                                setSelected(s);
+                              }
+                            }}
+                            onKeyDown={(e) => {
+                              if (e.key === "Enter" || e.key === " ") {
+                                e.preventDefault();
+                                if (!isPast) {
+                                  setRosterShiftId(s.id === rosterShiftId ? null : s.id);
+                                  setDropError(null);
+                                } else {
+                                  setSelected(s);
+                                }
+                              }
+                            }}
+                            onDragOver={(e) => !isPast && handleDragOverShift(e, s.id)}
+                            onDragLeave={handleDragLeaveShift}
+                            onDrop={(e) => !isPast && handleDropOnShift(e, s.id)}
+                            className={[
+                              "rounded border p-2.5 text-xs leading-tight cursor-pointer transition-all select-none outline-none",
+                              "focus-visible:ring-2 focus-visible:ring-brand-gold",
+                              open
+                                ? "bg-amber-50 border-amber-200 text-amber-900"
+                                : "bg-emerald-50 border-emerald-200 text-emerald-900",
+                              isRosterSelected
+                                ? "ring-2 ring-brand-gold border-brand-gold shadow-sm"
+                                : "",
+                              isDragOver
+                                ? "ring-2 ring-brand-gold bg-brand-gold/10 border-brand-gold"
+                                : "",
+                            ]
+                              .filter(Boolean)
+                              .join(" ")}
+                          >
+                            <div className="font-semibold text-[11px] opacity-70">
+                              {fmtTime(s.startTime)} – {fmtTime(s.endTime)}
+                            </div>
+                            <div className="font-semibold mt-0.5 truncate">{s.title}</div>
+                            <div className="opacity-60 truncate text-[10px] mt-0.5">
+                              {siteName(s.siteId)}
+                            </div>
+                            <StaffingBar filled={filled} headcount={s.headcount} open={open} />
                             {isAssigning && (
-                              <Loader2 className="w-3 h-3 animate-spin ml-auto" />
+                              <div className="flex items-center gap-1 mt-1 text-[10px] opacity-60">
+                                <Loader2 className="w-3 h-3 animate-spin" /> Assigning…
+                              </div>
                             )}
                           </div>
-                        </div>
-                      );
-                    })}
-                  </div>
-                );
-              })}
+                        );
+                      })}
+                    </div>
+                  );
+                })}
+              </div>
+
+              {/* Drop error */}
+              {dropError && (
+                <div className="rounded border border-amber-200 bg-amber-50 text-amber-900 text-xs px-3 py-2 flex items-center gap-2">
+                  <AlertTriangle className="w-3.5 h-3.5 shrink-0" />
+                  <span className="flex-1">{dropError}</span>
+                  <button
+                    onClick={() => setDropError(null)}
+                    aria-label="Dismiss"
+                    className="opacity-60 hover:opacity-100 text-lg leading-none ml-2"
+                  >
+                    ×
+                  </button>
+                </div>
+              )}
             </div>
 
-            {/* Drop error banner */}
-            {dropError && (
-              <div className="rounded border border-amber-200 bg-amber-50 text-amber-900 text-xs px-3 py-2 flex items-center gap-2">
-                <AlertTriangle className="w-3.5 h-3.5 shrink-0" />
-                <span className="flex-1">{dropError}</span>
-                <button
-                  onClick={() => setDropError(null)}
-                  aria-label="Dismiss"
-                  className="opacity-60 hover:opacity-100 text-lg leading-none ml-2"
-                >
-                  ×
-                </button>
-              </div>
-            )}
+            {/* Right: sticky Officer Roster panel */}
+            <div className="w-72 shrink-0">
+              <div className="sticky top-4 rounded-lg border bg-card overflow-hidden">
+                {/* Roster header */}
+                <div className="px-3 py-2.5 border-b bg-muted/50 flex items-center gap-2">
+                  <Users className="w-4 h-4 brand-gold shrink-0" />
+                  <span className="font-semibold text-sm">Officer Roster</span>
+                  {rosterShiftId && (
+                    <button
+                      onClick={() => {
+                        setRosterShiftId(null);
+                        setDropError(null);
+                      }}
+                      className="ml-auto text-xs opacity-50 hover:opacity-100 hover:underline"
+                      aria-label="Clear shift selection"
+                    >
+                      Clear
+                    </button>
+                  )}
+                </div>
 
-            {/* ── Officer Roster Panel ── */}
-            <div className="rounded-lg border bg-card">
-              <div className="px-4 py-2.5 border-b flex flex-wrap items-center gap-2">
-                <Users className="w-4 h-4 brand-gold shrink-0" />
-                <span className="font-medium text-sm">Officer Roster</span>
-                {rosterShift ? (
-                  <span className="text-xs opacity-60">
-                    — {fmtTime(rosterShift.startTime)} · {rosterShift.title}
-                    &nbsp;·&nbsp; drag a name onto a shift to assign
-                  </span>
-                ) : (
-                  <span className="text-xs opacity-50">
-                    — click any shift above to load ranked officers
-                  </span>
+                {/* Selected shift context */}
+                {rosterShift && (
+                  <div className={`px-3 py-2 text-xs border-b ${
+                    filledCount(rosterShift) < rosterShift.headcount
+                      ? "bg-amber-50 text-amber-800"
+                      : "bg-emerald-50 text-emerald-800"
+                  }`}>
+                    <div className="font-semibold truncate">{rosterShift.title}</div>
+                    <div className="opacity-70 mt-0.5">
+                      {fmtTime(rosterShift.startTime)} – {fmtTime(rosterShift.endTime)}
+                    </div>
+                  </div>
                 )}
-                {rosterShiftId && (
-                  <button
-                    onClick={() => {
-                      setRosterShiftId(null);
-                      setDropError(null);
-                    }}
-                    className="ml-auto text-xs opacity-50 hover:opacity-100 underline"
-                    aria-label="Clear shift selection"
-                  >
-                    Clear
-                  </button>
-                )}
-              </div>
 
-              <div className="p-3 min-h-[5rem]">
-                {!rosterShiftId ? (
-                  <div className="flex flex-col items-center justify-center gap-2 py-6 opacity-35">
-                    <Users className="w-8 h-8" />
-                    <span className="text-sm">Select a shift above to see available officers</span>
-                  </div>
-                ) : candidatesQuery.isLoading ? (
-                  <div className="flex items-center justify-center gap-2 py-6 text-sm opacity-60">
-                    <Loader2 className="w-4 h-4 animate-spin" /> Ranking officers…
-                  </div>
-                ) : candidatesQuery.isError ? (
-                  <div className="text-sm text-red-700 py-2">Could not load officers.</div>
-                ) : (
-                  <div className="flex flex-col gap-2">
-                    {!siteHasCoords && (
-                      <div className="text-[11px] bg-amber-50 border border-amber-200 text-amber-800 rounded px-2 py-1">
-                        No site coordinates — ordering by recent ping.
-                      </div>
-                    )}
-                    {eligibleCandidates.length === 0 && blockedCandidates.length === 0 && (
-                      <div className="text-sm opacity-40 text-center py-2">
-                        No eligible officers available.
-                      </div>
-                    )}
-                    {/* Draggable eligible officers */}
-                    {eligibleCandidates.length > 0 && (
-                      <div>
-                        <div className="text-[10px] font-semibold uppercase tracking-wider opacity-50 mb-1.5">
-                          Available — drag onto a shift
+                <div className="p-3 min-h-[8rem]">
+                  {!rosterShiftId ? (
+                    <div className="flex flex-col items-center justify-center gap-2 py-8 opacity-30 text-center">
+                      <MousePointerClick className="w-8 h-8" />
+                      <span className="text-xs">Click any shift to see available officers</span>
+                    </div>
+                  ) : candidatesQuery.isLoading ? (
+                    <div className="flex items-center justify-center gap-2 py-6 text-sm opacity-60">
+                      <Loader2 className="w-4 h-4 animate-spin" /> Ranking officers…
+                    </div>
+                  ) : candidatesQuery.isError ? (
+                    <div className="text-sm text-red-700 py-2">Could not load officers.</div>
+                  ) : (
+                    <div className="flex flex-col gap-3">
+                      {!siteHasCoords && (
+                        <div className="text-[11px] bg-amber-50 border border-amber-200 text-amber-800 rounded px-2 py-1">
+                          No site coordinates — ordering by recent ping.
                         </div>
-                        <div className="flex flex-wrap gap-2">
-                          {eligibleCandidates.map((c) => (
-                            <div
-                              key={c.userId}
-                              draggable
-                              onDragStart={(e) => handleDragStart(e, c)}
-                              className="flex items-center gap-1.5 rounded border bg-background px-3 py-1.5 text-xs cursor-grab active:cursor-grabbing hover:border-brand-gold/70 hover:bg-brand-gold/5 transition-colors select-none"
-                              title={`Drag ${c.name} onto a shift to assign`}
-                            >
-                              {c.workedSiteBefore && (
-                                <span
-                                  className="text-amber-500 text-sm leading-none shrink-0"
-                                  title="Has worked this site before"
-                                >
-                                  ★
-                                </span>
-                              )}
-                              <span className="font-medium">{c.name}</span>
-                              {c.distanceMiles != null && (
-                                <span className="opacity-50 text-[11px]">
-                                  {c.distanceMiles.toFixed(1)} mi
-                                </span>
-                              )}
-                            </div>
-                          ))}
+                      )}
+                      {eligibleCandidates.length === 0 && blockedCandidates.length === 0 && (
+                        <div className="text-sm opacity-40 text-center py-2">
+                          No eligible officers available.
                         </div>
-                      </div>
-                    )}
-                    {/* Blocked officers */}
-                    {blockedCandidates.length > 0 && (
-                      <div>
-                        <div className="text-[10px] font-semibold uppercase tracking-wider opacity-40 mb-1.5 mt-1">
-                          Unavailable
-                        </div>
-                        <div className="flex flex-wrap gap-2">
-                          {blockedCandidates.map((c) => {
-                            const reason = c.alreadyAssigned
-                              ? "already assigned"
-                              : c.conflictingShift
-                                ? "conflicting shift"
-                                : "license mismatch";
-                            return (
+                      )}
+
+                      {/* Draggable eligible officers */}
+                      {eligibleCandidates.length > 0 && (
+                        <div>
+                          <div className="text-[10px] font-semibold uppercase tracking-wider opacity-50 mb-2">
+                            Available — drag onto shift to assign
+                          </div>
+                          <div className="flex flex-col gap-1.5">
+                            {eligibleCandidates.map((c) => (
                               <div
                                 key={c.userId}
-                                className="flex items-center gap-1.5 rounded border bg-background px-3 py-1.5 text-xs opacity-35 cursor-not-allowed select-none"
-                                title={reason}
+                                draggable
+                                onDragStart={(e) => handleDragStart(e, c)}
+                                className="flex items-center gap-2 rounded border bg-background px-2.5 py-2 text-xs cursor-grab active:cursor-grabbing hover:border-brand-gold/70 hover:bg-brand-gold/5 transition-colors select-none"
+                                title={`Drag ${c.name} onto a shift to assign`}
                               >
-                                <span>{c.name}</span>
-                                <span className="opacity-60">({reason})</span>
+                                {c.workedSiteBefore && (
+                                  <span
+                                    className="text-amber-500 text-sm leading-none shrink-0"
+                                    title="Has worked this site before"
+                                  >
+                                    ★
+                                  </span>
+                                )}
+                                <span className="font-medium flex-1 truncate">{c.name}</span>
+                                {c.distanceMiles != null && (
+                                  <span className="opacity-40 text-[10px] shrink-0">
+                                    {c.distanceMiles.toFixed(1)} mi
+                                  </span>
+                                )}
                               </div>
-                            );
-                          })}
+                            ))}
+                          </div>
                         </div>
-                      </div>
-                    )}
-                    {/* Also allow full dialog assignment */}
-                    {rosterShift && filledCount(rosterShift) < rosterShift.headcount && (
-                      <div className="pt-1 border-t">
-                        <button
-                          onClick={() => setSelected(rosterShift)}
-                          className="text-[11px] opacity-60 hover:opacity-100 underline"
-                        >
-                          Open full assign dialog (license override available)
-                        </button>
-                      </div>
-                    )}
-                  </div>
-                )}
+                      )}
+
+                      {/* Blocked officers */}
+                      {blockedCandidates.length > 0 && (
+                        <div>
+                          <div className="text-[10px] font-semibold uppercase tracking-wider opacity-40 mb-2">
+                            Unavailable
+                          </div>
+                          <div className="flex flex-col gap-1.5">
+                            {blockedCandidates.map((c) => {
+                              const reason = c.alreadyAssigned
+                                ? "already assigned"
+                                : c.conflictingShift
+                                  ? "conflicting shift"
+                                  : "license mismatch";
+                              return (
+                                <div
+                                  key={c.userId}
+                                  className="flex items-center gap-2 rounded border bg-background px-2.5 py-2 text-xs opacity-35 cursor-not-allowed select-none"
+                                  title={reason}
+                                >
+                                  <span className="flex-1 truncate">{c.name}</span>
+                                  <span className="opacity-60 text-[10px] shrink-0">{reason}</span>
+                                </div>
+                              );
+                            })}
+                          </div>
+                        </div>
+                      )}
+
+                      {/* Full assign dialog link */}
+                      {rosterShift && filledCount(rosterShift) < rosterShift.headcount && (
+                        <div className="pt-1 border-t">
+                          <button
+                            onClick={() => setSelected(rosterShift)}
+                            className="text-[11px] opacity-60 hover:opacity-100 hover:underline"
+                          >
+                            Open full assign dialog (license override available)
+                          </button>
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </div>
               </div>
             </div>
           </div>
@@ -848,7 +894,7 @@ function DayShiftsDialog({
             Shifts scheduled on this day.
           </DialogDescription>
         </DialogHeader>
-        <div className="space-y-1.5 max-h-[60vh] overflow-y-auto">
+        <div className="space-y-2 max-h-[60vh] overflow-y-auto">
           {shifts.map((s) => {
             const filled = filledCount(s);
             const open = filled < s.headcount;
@@ -857,19 +903,20 @@ function DayShiftsDialog({
                 key={s.id}
                 type="button"
                 onClick={() => onPick(s)}
-                className={`w-full text-left rounded px-2 py-1.5 text-sm transition-colors ${
+                className={`w-full text-left rounded-lg px-3 py-2.5 text-sm transition-colors ${
                   open
-                    ? "bg-amber-100 hover:bg-amber-200 text-amber-900"
-                    : "bg-emerald-100 hover:bg-emerald-200 text-emerald-900"
+                    ? "bg-amber-50 hover:bg-amber-100 text-amber-900 border border-amber-200"
+                    : "bg-emerald-50 hover:bg-emerald-100 text-emerald-900 border border-emerald-200"
                 }`}
               >
-                <div className="font-medium truncate">
-                  {fmtTime(s.startTime)} – {fmtTime(s.endTime)} · {s.title}
+                <div className="font-semibold">
+                  {fmtTime(s.startTime)} – {fmtTime(s.endTime)}
                 </div>
-                <div className="text-xs opacity-80 truncate">
-                  {siteName(s.siteId)} · {filled}/{s.headcount} filled · L
-                  {s.requiredLicenseLevel}+
+                <div className="font-medium truncate mt-0.5">{s.title}</div>
+                <div className="text-xs opacity-70 mt-0.5 truncate">
+                  {siteName(s.siteId)} · L{s.requiredLicenseLevel}+
                 </div>
+                <StaffingBar filled={filled} headcount={s.headcount} open={open} />
               </button>
             );
           })}
@@ -925,7 +972,7 @@ function ShiftDetailDialog({
             </DialogDescription>
           </DialogHeader>
 
-          <div className="space-y-2 text-sm">
+          <div className="space-y-2.5 text-sm">
             <div className="flex items-center gap-2 opacity-80">
               <Clock className="w-4 h-4 shrink-0" />
               <span>{fmtDateLong(shift.startTime)}</span>
@@ -940,22 +987,30 @@ function ShiftDetailDialog({
               <MapPin className="w-4 h-4 shrink-0" />
               <span>{siteName}</span>
             </div>
-            <div className="flex flex-wrap items-center gap-2 text-xs opacity-70">
-              <span className="flex items-center gap-1">
-                <Users className="w-3.5 h-3.5" /> {filled} / {shift.headcount} filled
-              </span>
-              <span>· L{shift.requiredLicenseLevel}+</span>
-              {shift.payRate && <span>· ${shift.payRate}/hr</span>}
+
+            {/* Staffing summary */}
+            <div className="rounded-lg border bg-muted/30 px-3 py-2.5">
+              <div className="flex items-center justify-between text-xs opacity-70 mb-1.5">
+                <span className="flex items-center gap-1">
+                  <Users className="w-3.5 h-3.5" /> Staffing
+                </span>
+                <span className="font-medium">{filled} / {shift.headcount} officers</span>
+              </div>
+              <StaffingBar filled={filled} headcount={shift.headcount} open={isOpen} />
+              <div className="flex items-center gap-3 mt-1.5 text-xs opacity-60">
+                <span>L{shift.requiredLicenseLevel}+ required</span>
+                {shift.payRate && <span>${shift.payRate}/hr</span>}
+              </div>
             </div>
 
-            <div className="pt-2">
-              <div className="text-xs font-medium uppercase tracking-wide opacity-60 mb-1">
+            <div className="pt-1">
+              <div className="text-xs font-semibold uppercase tracking-wide opacity-50 mb-1.5">
                 Assigned officers
               </div>
               {accepted.length === 0 && pending.length === 0 && (
-                <div className="text-xs opacity-60">No officers assigned yet.</div>
+                <div className="text-xs opacity-50">No officers assigned yet.</div>
               )}
-              <div className="space-y-1">
+              <div className="space-y-1.5">
                 {accepted.map((a) => (
                   <div key={a.id} className="flex items-center gap-2 text-sm">
                     <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
