@@ -95,7 +95,11 @@ export default function RadioScreen({ refreshEpoch = 0 }: { refreshEpoch?: numbe
   const [listenEpoch, setListenEpoch] = useState(0);
   const listenLossRef = useRef({ count: 0, lastAt: 0 });
 
-  const supportsAudio = mediaRef.current?.supportsAudio ?? createRadioMedia().supportsAudio;
+  const mediaProbe = mediaRef.current ?? createRadioMedia();
+  const supportsAudio = mediaProbe.supportsAudio;
+  // A native binary that predates the LiveKit native modules got this bundle
+  // over OTA — presence still works, but live audio needs a store update.
+  const missingNatives = mediaProbe.degradedReason === "missing_natives";
 
   const activeChannel = useMemo(() => channels.find((c) => c.id === activeId) || null, [channels, activeId]);
   // Site radio channels get their own labelled section so a dispatcher can jump
@@ -420,7 +424,9 @@ export default function RadioScreen({ refreshEpoch = 0 }: { refreshEpoch?: numbe
   function startTalking(): void {
     if (!activeId || talkState !== "idle" || isSpeakingHere || otherSpeaker) return;
     if (!supportsAudio) {
-      setError("Live radio audio is in the SecureOps app on your phone. This preview shows presence only.");
+      setError(missingNatives
+        ? "Live audio requires the latest app version from the App Store. Presence and channels still work."
+        : "Live radio audio is in the SecureOps app on your phone. This preview shows presence only.");
       return;
     }
     if (!audioAvailable) { setError("Live radio audio is not configured on this server."); return; }
@@ -471,6 +477,14 @@ export default function RadioScreen({ refreshEpoch = 0 }: { refreshEpoch?: numbe
           </Text>
         </View>
       </View>
+
+      {missingNatives && (
+        <View style={styles.errorBox}>
+          <Text style={styles.errorText}>
+            Live audio requires the latest app version from the App Store. You can still see channels and who's transmitting.
+          </Text>
+        </View>
+      )}
 
       {supportsAudio && !audioAvailable && (
         <View style={styles.errorBox}>

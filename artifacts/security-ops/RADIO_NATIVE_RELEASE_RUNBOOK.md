@@ -79,6 +79,39 @@ edit those by hand.
 > (`getExpoAudio()`), so a `1.0.0`-runtime OTA bundle is safe on binaries built
 > before expo-audio existed — the silent keep-alive is simply disabled there.
 > Locked-phone survival (steps 6–8 below) still requires the new binary.
+>
+> The **LiveKit natives get the same guard**: builds ≤ 9 of runtime `1.0.0`
+> have no `@livekit/react-native` / `@livekit/react-native-webrtc` at all, and
+> an earlier OTA that imported them at module top level crashed those installs
+> the moment Radio/Chat opened. `radioMedia.native.ts` (`getLiveKitNative()`)
+> and `radioKeyProvider.ts` (`createRadioKeyProvider()`) now require them
+> lazily; when absent, the radio degrades to presence-only with an "update the
+> app from the App Store" notice. Any NEW native dependency the radio JS
+> touches must get the same guard before it ships in a `1.0.0` OTA.
+
+### Binary-gated native packages (enforced by a test)
+
+The list of native packages that are missing from some served binaries lives
+in `components/radio/nativeModules.ts` → `BINARY_GATED_NATIVE_PACKAGES`,
+together with the only files allowed to `require()` each of them:
+
+| Package | Present in | Guarded loader |
+| --- | --- | --- |
+| `@livekit/react-native` | build ≥ 10 only | `components/radio/nativeModules.ts` (`getLiveKitNative()`) |
+| `@livekit/react-native-webrtc` | build ≥ 10 only | `components/radio/nativeModules.ts` (`getLiveKitWebRTC()`) |
+| `expo-audio` | NO current store build | `components/radio/radioMedia.native.ts` (`getExpoAudio()`) |
+
+`__tests__/binaryGatedNativeImports.test.ts` scans every bundled source file
+and **fails the workspace test gate** if one of these packages is statically
+value-imported, value re-exported, or `require()`/`import()`ed outside its
+approved loader (type-only imports are fine — they're erased at compile time).
+
+**When you add a new native dependency** that OTA-updatable code touches:
+either add it to `BINARY_GATED_NATIVE_PACKAGES` with a guarded lazy loader
+that degrades gracefully, or bump `expo.version` (a real runtime bump, §1) so
+old binaries never receive bundles that reference it. Once ALL served binaries
+contain a package (after a forced-update cycle), it can be removed from the
+list and imported normally.
 
 ## 2. Build + test a dev client (recommended before the store build)
 

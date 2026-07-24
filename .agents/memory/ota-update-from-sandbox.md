@@ -36,10 +36,18 @@ project + channel + runtime version, NOT bundle/ASC ids directly. Policy is
 - Repo `app.json` is back at `1.0.0` so auto-OTAs-on-deploy reach real devices
   again; bump to `1.0.1` only WHEN the new native binary is actually built
   (see RADIO_NATIVE_RELEASE_RUNBOOK.md §1).
-- Native-compat guard: build 10 has LiveKit natives but NOT expo-audio, so
-  `radioMedia.native.ts` loads expo-audio via guarded lazy require
-  (`getExpoAudio()`); keep-alive silently off on old binaries. Any NEW native
-  dep must get the same guard (or a real runtime bump) before 1.0.0 OTAs.
+- Native-compat guard: build 10 has LiveKit natives but NOT expo-audio; builds
+  ≤9 have NEITHER. All native deps newer than the oldest served binary must be
+  loaded via guarded lazy require — expo-audio via `getExpoAudio()`, LiveKit
+  via `components/radio/nativeModules.ts` (`getLiveKitNative()` /
+  `getLiveKitWebRTC()`; radio degrades to presence-only with an "update the
+  app" notice). Any NEW native dep must get the same guard (or a real runtime
+  bump) before 1.0.0 OTAs. The gated list (`BINARY_GATED_NATIVE_PACKAGES` in
+  nativeModules.ts) is ENFORCED by `__tests__/binaryGatedNativeImports.test.ts`
+  — static value imports outside the approved loader fail the test gate; add
+  new binary-gated deps to that list. Test note: vitest `vi.mock` does NOT
+  intercept bare CJS `require()` — use the `__setNativeRequireForTest()` seam
+  in nativeModules.ts.
 - Never bump `expo.version` for an OTA-only release; it silently orphans the OTA.
 - Verify what devices are served: `curl https://u.expo.dev/<projectId>` with
   headers expo-platform / expo-runtime-version / expo-channel-name:production /

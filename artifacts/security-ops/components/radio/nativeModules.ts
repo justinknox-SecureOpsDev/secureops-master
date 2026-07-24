@@ -1,0 +1,116 @@
+/**
+ * Guarded lazy loaders for the LiveKit NATIVE packages.
+ *
+ * OTA-COMPAT GUARD: App Store builds ≤ 9 of the 1.0.0 runtime do NOT contain
+ * `@livekit/react-native` / `@livekit/react-native-webrtc` — only build 10
+ * does. runtimeVersion policy is `appVersion`, so a 1.0.0 OTA bundle lands on
+ * ALL of those binaries; a top-level import of either package would throw at
+ * module evaluation and crash the app the moment the Radio screen (or the
+ * Chat screen that embeds it) loads. Same pattern as `getExpoAudio()` in
+ * radioMedia.native.ts.
+ *
+ * On first successful load of `@livekit/react-native` this also runs
+ * `registerGlobals()`, which patches in the WebRTC/media primitives that the
+ * pure-JS `livekit-client` expects — it must run before any Room is created.
+ *
+ * `__setNativeRequireForTest` exists ONLY because vitest cannot intercept a
+ * bare CJS `require()` with `vi.mock` (the real react-native chain would load
+ * and fail to parse); production code never calls it.
+ */
+
+export type LiveKitNativeModule = typeof import("@livekit/react-native");
+export type LiveKitWebRTCModule = typeof import("@livekit/react-native-webrtc");
+
+/**
+ * Native packages that are NOT present in every binary this runtime's OTA
+ * bundles are served to (see RADIO_NATIVE_RELEASE_RUNBOOK.md — "Which binaries
+ * have which natives"). Each may only be loaded through its guarded lazy
+ * loader; a static value import anywhere else in app code would crash older
+ * installs at module evaluation. Enforced by
+ * `__tests__/binaryGatedNativeImports.test.ts`.
+ *
+ * When a NEW native dependency is added to the binary, either add it here
+ * with a guarded loader, or bump the runtime version so old binaries never
+ * receive bundles that reference it.
+ */
+export const BINARY_GATED_NATIVE_PACKAGES: ReadonlyArray<{
+  /** npm package name (subpaths are gated too). */
+  package: string;
+  /** Files (relative to the app root) allowed to `require()` it. */
+  allowedLoaderFiles: readonly string[];
+}> = [
+  {
+    package: "@livekit/react-native",
+    allowedLoaderFiles: ["components/radio/nativeModules.ts"],
+  },
+  {
+    package: "@livekit/react-native-webrtc",
+    allowedLoaderFiles: ["components/radio/nativeModules.ts"],
+  },
+  {
+    package: "expo-audio",
+    allowedLoaderFiles: ["components/radio/radioMedia.native.ts"],
+  },
+];
+
+/** Test-only require override; when null, the real (Metro) require is used. */
+let overrideRequire: ((name: string) => unknown) | null = null;
+
+let liveKitModule: LiveKitNativeModule | null | undefined;
+let webRTCModule: LiveKitWebRTCModule | null | undefined;
+
+/** Test-only: replace the require used for native modules and reset caches. */
+export function __setNativeRequireForTest(
+  fn: ((name: string) => unknown) | null,
+): void {
+  overrideRequire = fn;
+  liveKitModule = undefined;
+  webRTCModule = undefined;
+}
+
+/**
+ * `@livekit/react-native`, or null on a binary without the natives.
+ * Runs registerGlobals() once on first successful load.
+ */
+export function getLiveKitNative(): LiveKitNativeModule | null {
+  if (liveKitModule === undefined) {
+    try {
+      const mod = (
+        overrideRequire
+          ? overrideRequire("@livekit/react-native")
+          : // eslint-disable-next-line @typescript-eslint/no-require-imports
+            require("@livekit/react-native")
+      ) as LiveKitNativeModule;
+      mod.registerGlobals();
+      liveKitModule = mod;
+    } catch (e) {
+      console.warn(
+        "[radio] LiveKit native modules unavailable — live audio disabled (update the app)",
+        e,
+      );
+      liveKitModule = null;
+    }
+  }
+  return liveKitModule;
+}
+
+/** `@livekit/react-native-webrtc`, or null on a binary without the natives. */
+export function getLiveKitWebRTC(): LiveKitWebRTCModule | null {
+  if (webRTCModule === undefined) {
+    try {
+      webRTCModule = (
+        overrideRequire
+          ? overrideRequire("@livekit/react-native-webrtc")
+          : // eslint-disable-next-line @typescript-eslint/no-require-imports
+            require("@livekit/react-native-webrtc")
+      ) as LiveKitWebRTCModule;
+    } catch (e) {
+      console.warn(
+        "[radio] LiveKit WebRTC native module unavailable — live audio disabled (update the app)",
+        e,
+      );
+      webRTCModule = null;
+    }
+  }
+  return webRTCModule;
+}

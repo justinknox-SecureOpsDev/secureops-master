@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, vi } from "vitest";
+import { afterAll, describe, it, expect, beforeEach, vi } from "vitest";
 
 /**
  * Regression coverage for the release-during-connect safety of the NATIVE radio
@@ -101,7 +101,27 @@ vi.mock("livekit-client", () => ({
   }),
 }));
 
+// The native modules are loaded through nativeModules.ts with a bare CJS
+// `require()`, which vitest's vi.mock registry does NOT intercept — inject the
+// mock modules via the test seam so the loader returns them instead of trying
+// (and failing) to parse the real react-native chain under Node.
+import * as liveKitMock from "@livekit/react-native";
+import * as webRTCMock from "@livekit/react-native-webrtc";
+
+import { __setNativeRequireForTest } from "../nativeModules";
 import { createRadioMedia } from "../radioMedia.native";
+
+__setNativeRequireForTest((name) => {
+  if (name === "@livekit/react-native") return liveKitMock;
+  if (name === "@livekit/react-native-webrtc") return webRTCMock;
+  throw new Error(`unexpected native require: ${name}`);
+});
+
+afterAll(() => {
+  // Reset the seam (and its module caches) so this suite can't leak mocked
+  // natives into any other test file in the same worker.
+  __setNativeRequireForTest(null);
+});
 
 const TOKEN = {
   token: "t",

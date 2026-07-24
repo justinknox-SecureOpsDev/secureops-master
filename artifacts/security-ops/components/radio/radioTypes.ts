@@ -28,6 +28,14 @@ export interface RadioMedia {
    * so the screen degrades to presence-only without trying to fetch tokens.
    */
   readonly supportsAudio: boolean;
+  /**
+   * WHY audio is unsupported, when it is. `"missing_natives"` = a native
+   * binary that predates the LiveKit native modules (App Store builds ≤ 9)
+   * received this JS bundle over OTA — the screen tells the user to update
+   * the app from the App Store. Absent/undefined on the Expo-web stub (which
+   * points at the native app / admin portal instead) and on full native.
+   */
+  readonly degradedReason?: "missing_natives";
   listenChannelIds(): string[];
   isListening(channelId: string): boolean;
   publishingChannelId(): string | null;

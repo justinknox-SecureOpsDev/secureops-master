@@ -31,15 +31,10 @@
  * (APP_REVIEW_NOTES.md §3) — keep code and disclosure in lockstep.
  *
  * This module is Metro-resolved ONLY on native (web gets `radioMedia.ts`), so
- * importing the native-only WebRTC stack and calling registerGlobals() here is
- * safe — it never reaches the web bundle.
+ * loading the native-only WebRTC stack here is safe for the web bundle — but
+ * the natives are still required LAZILY (see the OTA-COMPAT guards below)
+ * because older App Store binaries don't contain them.
  */
-import {
-  registerGlobals,
-  AudioSession,
-  RNE2EEManager,
-  AndroidAudioTypePresets,
-} from "@livekit/react-native";
 import type { AudioPlayer } from "expo-audio";
 import {
   Room,
@@ -49,12 +44,25 @@ import {
   type LocalAudioTrack,
 } from "livekit-client";
 
-import { RadioKeyProvider } from "./radioKeyProvider";
+import { getLiveKitNative, type LiveKitNativeModule } from "./nativeModules";
+import { createRadioKeyProvider } from "./radioKeyProvider";
 import { type RadioMedia, type RadioToken } from "./radioTypes";
 
-// Patches the global WebRTC + media primitives that livekit-client expects.
-// Must run before any Room is created; importing this module does that once.
-registerGlobals();
+/**
+ * OTA-COMPAT GUARD (LiveKit): App Store builds ≤ 9 of the 1.0.0 runtime do NOT
+ * contain the LiveKit native modules — only build 10 does. runtimeVersion
+ * policy is `appVersion`, so a 1.0.0 OTA bundle lands on ALL of those
+ * binaries; a top-level `import … from "@livekit/react-native"` (and a
+ * module-eval `registerGlobals()` call) would throw and crash the app the
+ * moment the Radio screen — or the Chat screen that embeds it — loads. So the
+ * natives load lazily via `getLiveKitNative()` (see ./nativeModules.ts, same
+ * pattern as `getExpoAudio()` below); when unavailable, `createRadioMedia()`
+ * returns a presence-only stub with `supportsAudio = false` and
+ * `degradedReason = "missing_natives"` so the screen tells the user to update
+ * the app instead of crashing. `livekit-client` is pure JS and safe to import
+ * statically — a Room is only ever constructed after the natives (which
+ * registerGlobals patches in) are confirmed present.
+ */
 
 /**
  * OTA-COMPAT GUARD: expo-audio was added to the binary AFTER the 1.0.0 App
@@ -105,6 +113,8 @@ async function settleDelay(ms: number, aborted: () => boolean): Promise<boolean>
 class NativeRadioMedia implements RadioMedia {
   readonly supportsAudio = true;
 
+  constructor(private readonly lk: LiveKitNativeModule) {}
+
   private listenRooms = new Map<string, Room>();
   private connecting = new Set<string>();
   private publishRoom: Room | null = null;
@@ -148,11 +158,11 @@ class NativeRadioMedia implements RadioMedia {
       // Keep-alive is best-effort; the radio itself must still work.
       console.warn("[radio] setAudioModeAsync failed", e);
     }
-    await AudioSession.configureAudio({
-      android: { audioTypeOptions: AndroidAudioTypePresets.communication },
+    await this.lk.AudioSession.configureAudio({
+      android: { audioTypeOptions: this.lk.AndroidAudioTypePresets.communication },
       ios: { defaultOutput: "speaker" },
     });
-    await AudioSession.startAudioSession();
+    await this.lk.AudioSession.startAudioSession();
     this.sessionStarted = true;
   }
 
@@ -241,9 +251,9 @@ class NativeRadioMedia implements RadioMedia {
     // discardFrameWhenCryptorNotReady=true so frames that arrive before a
     // fresh receiver cryptor is keyed are DROPPED (brief silence) instead of
     // being fed to Opus as ciphertext (loud static) — see radioKeyProvider.ts.
-    const keyProvider = new RadioKeyProvider();
+    const keyProvider = createRadioKeyProvider();
     await keyProvider.setSharedKey(token.e2eeKey);
-    const e2eeManager = new RNE2EEManager(keyProvider, false);
+    const e2eeManager = new this.lk.RNE2EEManager(keyProvider, false);
     const room = new Room({ e2ee: { e2eeManager } });
     await room.setE2EEEnabled(true);
     return room;
@@ -434,7 +444,7 @@ class NativeRadioMedia implements RadioMedia {
     for (const id of this.listenChannelIds()) await this.dropListen(id);
     if (this.sessionStarted) {
       try {
-        await AudioSession.stopAudioSession();
+        await this.lk.AudioSession.stopAudioSession();
       } catch {
         /* ignore */
       }
@@ -443,6 +453,49 @@ class NativeRadioMedia implements RadioMedia {
   }
 }
 
+/**
+ * Presence-only fallback for binaries WITHOUT the LiveKit natives (App Store
+ * builds ≤ 9). The Radio screen keeps its channel list + presence working and
+ * shows an "update the app" notice instead of live-audio controls.
+ */
+class MissingNativesRadioMediaStub implements RadioMedia {
+  readonly supportsAudio = false;
+  readonly degradedReason = "missing_natives" as const;
+  listenChannelIds(): string[] {
+    return [];
+  }
+  isListening(): boolean {
+    return false;
+  }
+  publishingChannelId(): string | null {
+    return null;
+  }
+  setOnListenLost(_cb: ((channelId: string) => void) | null): void {
+    /* no audio without the LiveKit natives — listen rooms never exist */
+  }
+  async ensureListen(_channelId: string, _token: RadioToken): Promise<void> {
+    /* no audio without the LiveKit natives */
+  }
+  async dropListen(_channelId: string): Promise<void> {
+    /* no audio without the LiveKit natives */
+  }
+  async startPublish(
+    _channelId: string,
+    _token: RadioToken,
+    _shouldAbort?: () => boolean,
+  ): Promise<void> {
+    /* no audio without the LiveKit natives */
+  }
+  async stopPublish(): Promise<void> {
+    /* no audio without the LiveKit natives */
+  }
+  async teardown(): Promise<void> {
+    /* no audio without the LiveKit natives */
+  }
+}
+
 export function createRadioMedia(): RadioMedia {
-  return new NativeRadioMedia();
+  const lk = getLiveKitNative();
+  if (!lk) return new MissingNativesRadioMediaStub();
+  return new NativeRadioMedia(lk);
 }
