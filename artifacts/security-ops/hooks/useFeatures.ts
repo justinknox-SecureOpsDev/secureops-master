@@ -217,8 +217,10 @@ export async function hydrateBrandFromStorage(): Promise<void> {
 }
 
 async function fetchFresh(): Promise<void> {
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), 8_000);
   try {
-    const res = await fetch(`${getApiBaseUrl()}/brand`);
+    const res = await fetch(`${getApiBaseUrl()}/brand`, { signal: controller.signal });
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     const data = (await res.json()) as unknown;
     cached = buildPayload(data);
@@ -230,6 +232,8 @@ async function fetchFresh(): Promise<void> {
       cached = envPayload();
       notify();
     }
+  } finally {
+    clearTimeout(timeoutId);
   }
 }
 

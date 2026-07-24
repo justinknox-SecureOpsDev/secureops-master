@@ -117,7 +117,10 @@ describe("applySelectedOrg brand prefetch (no-flash invariant)", () => {
     // Let microtasks run: save + routing done, brand fetch in flight.
     await Promise.resolve();
     await Promise.resolve();
-    expect(fetchMock).toHaveBeenCalledWith("https://acme.example.app/api/brand");
+    expect(fetchMock).toHaveBeenCalledWith(
+      "https://acme.example.app/api/brand",
+      expect.objectContaining({ signal: expect.any(AbortSignal) }),
+    );
     // The flow must still be pending — the eager fetch is being awaited.
     expect(settled).toBe(false);
     expect(getCachedBrandSnapshot()).toBeNull();
