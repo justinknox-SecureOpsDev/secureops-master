@@ -48,3 +48,11 @@ call lose the LWW, returning `"skipped"` instead of `"updated"`.
 `expected 'skipped' to be 'updated'` (or vice versa) with no related code
 change, check whether the test's hardcoded `updatedAt` has been overtaken
 by real time — the fix is now rel()-based helpers, already in place.
+
+**Broader audit (July 2026):** a full sweep of all 68 api-server test
+files confirmed this is the ONLY occurrence of the time-bomb pattern. All
+other hardcoded 202x dates fall into safe categories: invoice/payroll
+bucket keys (pure date arithmetic), calendar algorithm inputs (permanent
+facts), stored data fields (equality-checked verbatim), historical
+anchors, or deliberately-invalid validation inputs. No further fixes
+needed in other files.
