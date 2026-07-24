@@ -294,10 +294,10 @@ export default function EmployeeProfileScreen() {
   const p = profile as any;
   const maxLevel = p?.maxLicenseLevel as number | null | undefined;
 
-  const { data: licenses } = useGetLicenses({
-    params: { employeeId: userId },
-    query: { queryKey: getGetLicensesQueryKey({ employeeId: userId }), enabled: !!userId },
-  } as any);
+  const { data: licenses } = useGetLicenses(
+    { employeeId: userId },
+    { query: { queryKey: getGetLicensesQueryKey({ employeeId: userId }), enabled: !!userId } },
+  );
 
   const getLicenseStatus = (expiryDate: string) => {
     const expiry = new Date(expiryDate);
