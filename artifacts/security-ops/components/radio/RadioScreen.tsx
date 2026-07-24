@@ -129,11 +129,18 @@ export default function RadioScreen({ refreshEpoch = 0 }: { refreshEpoch?: numbe
 
   // Fetch the channel roster on every screen focus (not just mount) so a site
   // channel an admin just created or archived shows up / disappears the next
-  // time a dispatcher opens the Radio tab — no app restart needed. Silent on
-  // refetch: the spinner only gates the very first load, and a transient
-  // refetch failure keeps the last-known list rather than surfacing an error.
+  // time a dispatcher opens the Radio tab — no app restart needed.
   const firstLoadDoneRef = useRef(false);
-  const fetchChannels = useCallback(() => {
+  // Shared roster refetch: used by the focus effect, the refreshEpoch
+  // sub-tab nudge, AND the live `channels_changed` WS nudge, so a channel an
+  // admin creates/archives while the Radio tab stays open appears/disappears
+  // in place. Silent on refetch: the spinner only gates the very first load,
+  // and a transient refetch failure keeps the last-known list rather than
+  // surfacing an error. Archiving the ACTIVE channel is handled by
+  // reconcileActiveId (selection moves to the first live channel); the
+  // listen-reconcile effect then drops the dead room because
+  // activeId/activeChannel changed.
+  const refetchChannels = useCallback((): (() => void) => {
     let cancelled = false;
     apiRequest("/radio/channels")
       .then((rows: Channel[]) => {
@@ -152,7 +159,10 @@ export default function RadioScreen({ refreshEpoch = 0 }: { refreshEpoch?: numbe
       });
     return () => { cancelled = true; };
   }, []);
-  useFocusEffect(fetchChannels);
+  const refetchChannelsRef = useRef(refetchChannels);
+  useEffect(() => { refetchChannelsRef.current = refetchChannels; }, [refetchChannels]);
+
+  useFocusEffect(useCallback(() => refetchChannels(), [refetchChannels]));
   // When RadioScreen is embedded as a hidden sub-tab (employee Chat screen),
   // expo-router focus fires for the PARENT tab, not the sub-tab flip. The host
   // bumps refreshEpoch each time the Radio sub-tab becomes visible so the
@@ -160,8 +170,8 @@ export default function RadioScreen({ refreshEpoch = 0 }: { refreshEpoch?: numbe
   // already covers the first load, so skip it to avoid a duplicate request.
   useEffect(() => {
     if (refreshEpoch === 0) return;
-    return fetchChannels();
-  }, [refreshEpoch, fetchChannels]);
+    return refetchChannels();
+  }, [refreshEpoch, refetchChannels]);
 
   // --- WS control plane (presence + speaker lock signalling) ---
   // Auto-reconnects with capped exponential backoff + jitter so a dropped
@@ -246,6 +256,12 @@ export default function RadioScreen({ refreshEpoch = 0 }: { refreshEpoch?: numbe
             if (intent) void beginPublish(intent.channelId, intent.gen);
           } else if (m.type === "silent" && m.channelId) {
             setSpeakers((s) => ({ ...s, [m.channelId]: null }));
+          } else if (m.type === "channels_changed") {
+            // Admin created/archived/retargeted a channel — refetch the roster
+            // in place so the Site Channels section updates without leaving
+            // the tab. Server sends a nudge only; the refetch re-applies the
+            // per-user visibility filter server-side.
+            refetchChannelsRef.current();
           } else if (m.type === "denied") {
             setError(friendlyDeniedReason(m.reason));
             cancelTransmit();

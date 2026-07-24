@@ -261,6 +261,23 @@ export async function preemptChannelLock(
   return { preempted: true, speakerUserId, speakerName };
 }
 
+/**
+ * Tell every connected radio client that the channel roster changed
+ * (admin created/archived/retargeted/deleted a channel). Lightweight
+ * nudge only — clients refetch GET /radio/channels themselves, so the
+ * per-user visibility filter still runs server-side on the refetch.
+ */
+export function broadcastChannelsChanged(): void {
+  if (!radioWss) return;
+  const msg = JSON.stringify({ type: "channels_changed" });
+  radioWss.clients.forEach((ws) => {
+    const sock = ws as RadioSocket;
+    if (sock.authenticated && sock.readyState === WebSocket.OPEN) {
+      try { sock.send(msg); } catch { /* ignore */ }
+    }
+  });
+}
+
 function addSubscriber(channelId: string, socket: RadioSocket): void {
   let set = channelSubscribers.get(channelId);
   if (!set) { set = new Set(); channelSubscribers.set(channelId, set); }

@@ -13,6 +13,7 @@ import {
   canAccessChannel,
   userHoldsChannelLock,
   preemptChannelLock,
+  broadcastChannelsChanged,
 } from "../lib/radioGateway";
 import {
   isLiveKitConfigured,
@@ -138,6 +139,7 @@ router.post("/admin/radio/channels", requireAdmin, async (req, res): Promise<voi
       adminOnly: scope === "admins",
     })
     .returning();
+  broadcastChannelsChanged();
   res.status(201).json(row);
 });
 
@@ -180,6 +182,7 @@ router.patch("/admin/radio/channels/:id", requireAdmin, async (req, res): Promis
     .where(eq(radioChannelsTable.id, id))
     .returning();
   if (!row) { res.status(404).json({ error: "Not Found", message: "channel not found" }); return; }
+  broadcastChannelsChanged();
   res.json(row);
 });
 
@@ -203,6 +206,7 @@ router.delete("/admin/radio/channels/:id", requireAdmin, async (req, res): Promi
   const id = String(req.params.id);
   const rows = await db.delete(radioChannelsTable).where(eq(radioChannelsTable.id, id)).returning({ id: radioChannelsTable.id });
   if (rows.length === 0) { res.status(404).json({ error: "Not Found", message: "channel not found" }); return; }
+  broadcastChannelsChanged();
   res.status(204).end();
 });
 

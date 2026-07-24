@@ -463,4 +463,42 @@ describe("radio 'take over' clears + notifies the previous speaker (WS end-to-en
       }
     }
   });
+
+  // Live roster nudge: an admin creating/archiving a channel over the REST
+  // admin routes must push {type:"channels_changed"} to every connected radio
+  // socket so a dispatcher who keeps the Radio tab open sees the new/removed
+  // site channel without navigating away (the client refetches on the nudge).
+  it("broadcasts channels_changed to connected sockets on admin create/archive/delete", async () => {
+    const officerWs = await connectRadio(officerToken);
+    const officer = collectFrames(officerWs);
+    try {
+      // CREATE
+      const created = await request(app)
+        .post("/api/admin/radio/channels")
+        .set(authed(adminToken))
+        .send({ name: "Nudge Test Channel", scope: "global" });
+      expect(created.status).toBe(201);
+      await waitForFrame(officer.frames, (m) => m.type === "channels_changed");
+
+      // ARCHIVE (PATCH)
+      officer.frames.length = 0;
+      const archived = await request(app)
+        .patch(`/api/admin/radio/channels/${created.body.id}`)
+        .set(authed(adminToken))
+        .send({ archived: true });
+      expect(archived.status).toBe(200);
+      await waitForFrame(officer.frames, (m) => m.type === "channels_changed");
+
+      // DELETE
+      officer.frames.length = 0;
+      const deleted = await request(app)
+        .delete(`/api/admin/radio/channels/${created.body.id}`)
+        .set(authed(adminToken));
+      expect(deleted.status).toBe(204);
+      await waitForFrame(officer.frames, (m) => m.type === "channels_changed");
+    } finally {
+      officer.stop();
+      try { officerWs.terminate(); } catch { /* ignore */ }
+    }
+  });
 });
