@@ -64,7 +64,7 @@ router.post("/me/license-renewals", requireStaff, async (req, res): Promise<void
     res.status(400).json({ error: "Bad Request", message: "docKey must be your own uploaded object" });
     return;
   }
-  const lvl = licenseLevel != null && [2, 3, 4].includes(Number(licenseLevel)) ? Number(licenseLevel) : null;
+  const lvl = licenseLevel != null && [1, 2, 3, 4].includes(Number(licenseLevel)) ? Number(licenseLevel) : null;
 
   // If renewing an existing license, it must belong to the caller.
   if (licenseId) {

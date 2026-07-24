@@ -3679,7 +3679,7 @@ components:
         rightToWorkDocKey: { type: string, nullable: true, description: "Object-storage path for right-to-work doc" }
         # --- TX security license (mirrored from application) ---
         siaLicenseNumber: { type: string, nullable: true }
-        siaLicenseLevel: { type: integer, nullable: true, enum: [2, 3, 4] }
+        siaLicenseLevel: { type: integer, nullable: true, enum: [1, 2, 3, 4] }
         siaLicenseExpiry: { type: string, format: date, nullable: true }
         licenseDocKey: { type: string, nullable: true }
         passportDocKey: { type: string, nullable: true }
@@ -3731,7 +3731,7 @@ components:
         maxLicenseLevel:
           type: integer
           nullable: true
-          description: "Highest valid (non-expired) license level: 2, 3, or 4. Null if no valid license. Note: this reflects licences only — a support_staff officer with no licence is still null here."
+          description: "Highest valid (non-expired) license level: 1, 2, 3, or 4 (1=Support Staff). Null if no valid license. Note: this reflects licences only — a support_staff officer with no licence is still null here."
         createdAt:
           type: string
           format: date-time
@@ -3767,7 +3767,7 @@ components:
         rightToWorkStatus: { type: string, nullable: true }
         rightToWorkDocKey: { type: string, nullable: true }
         siaLicenseNumber: { type: string, nullable: true }
-        siaLicenseLevel: { type: integer, nullable: true, enum: [2, 3, 4] }
+        siaLicenseLevel: { type: integer, nullable: true, enum: [1, 2, 3, 4] }
         siaLicenseExpiry: { type: string, format: date, nullable: true }
         licenseDocKey: { type: string, nullable: true }
         passportDocKey: { type: string, nullable: true }
@@ -3934,7 +3934,7 @@ components:
         rightToWorkStatus: { type: string, nullable: true }
         rightToWorkDocKey: { type: string, nullable: true }
         siaLicenseNumber: { type: string, nullable: true }
-        siaLicenseLevel: { type: integer, nullable: true, enum: [2, 3, 4] }
+        siaLicenseLevel: { type: integer, nullable: true, enum: [1, 2, 3, 4] }
         siaLicenseExpiry: { type: string, format: date, nullable: true }
         licenseDocKey: { type: string, nullable: true }
         passportDocKey: { type: string, nullable: true }
@@ -4865,9 +4865,9 @@ components:
           type: string
         level:
           type: integer
-          enum: [2, 3, 4]
+          enum: [1, 2, 3, 4]
           nullable: true
-          description: "License level (2=unarmed, 3=armed, 4=PPO)"
+          description: "License level (1=Support Staff, 2=unarmed, 3=armed, 4=PPO)"
         licenseNumber:
           type: string
         issuingAuthority:
@@ -4904,7 +4904,7 @@ components:
           type: string
         level:
           type: integer
-          enum: [2, 3, 4]
+          enum: [1, 2, 3, 4]
         licenseNumber:
           type: string
         issuingAuthority:
@@ -4930,7 +4930,7 @@ components:
           type: string
         level:
           type: integer
-          enum: [2, 3, 4]
+          enum: [1, 2, 3, 4]
         licenseNumber:
           type: string
         issuingAuthority:
@@ -4958,7 +4958,7 @@ components:
           type: string
         licenseLevel:
           type: integer
-          enum: [2, 3, 4]
+          enum: [1, 2, 3, 4]
           nullable: true
         licenseNumber:
           type: string
@@ -5609,7 +5609,7 @@ components:
         idDocType: { type: string, enum: [drivers_license, passport], description: "Which ID accompanies the SSN card." }
         idDoc: { $ref: "#/components/schemas/UploadedFile", description: "Photo/scan of driver's license OR passport." }
         siaLicenseNumber: { type: string }
-        siaLicenseLevel: { type: integer, enum: [2, 3, 4] }
+        siaLicenseLevel: { type: integer, enum: [1, 2, 3, 4] }
         siaLicenseExpiry: { type: string }
         previousExperience: { type: string }
         yearsExperience: { type: integer }

@@ -80,7 +80,7 @@ const AMENDABLE_FIELDS: Record<string, { column: string; type: AmendmentFieldTyp
   idDocType:           { column: "idDocType",            type: "text",     label: "Photo ID type (drivers_license or passport)" },
   idDoc:               { column: "idDocKey",             type: "file",     label: "Photo ID (DL or passport)" },
   siaLicenseNumber:    { column: "siaLicenseNumber",     type: "text",     label: "TX security license number" },
-  siaLicenseLevel:     { column: "siaLicenseLevel",      type: "number",   label: "License level (2, 3, or 4)" },
+  siaLicenseLevel:     { column: "siaLicenseLevel",      type: "number",   label: "License level (1=Support Staff, 2, 3, or 4)" },
   siaLicenseExpiry:    { column: "siaLicenseExpiry",     type: "date",     label: "License expiry date" },
   previousExperience:  { column: "previousExperience",   type: "textarea", label: "Previous security experience" },
   yearsExperience:     { column: "yearsExperience",      type: "number",   label: "Years of experience" },

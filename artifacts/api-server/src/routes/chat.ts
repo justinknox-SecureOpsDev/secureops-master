@@ -9,6 +9,7 @@ import {
   usersTable,
   licensesTable,
   sitesTable,
+  employeesTable,
   type ChatRoom,
 } from "@workspace/db";
 import { requireAuth, requireAdmin, requireStaff } from "../middlewares/auth";
@@ -33,6 +34,19 @@ function parseDirectKey(directKey: string | null | undefined): readonly [string,
 
 function directKeyFor(a: string, b: string): string {
   return [a, b].sort().join(":");
+}
+
+/**
+ * User ids whose position baseline is level 1 (support_staff) — they can
+ * work level-1 shifts with no licence row, so level-1 channels include them.
+ * Mirrors positionBaselineLevel in lib/eligibility.ts.
+ */
+async function supportBaselineUserIds(): Promise<string[]> {
+  const rows = await db
+    .select({ userId: employeesTable.userId })
+    .from(employeesTable)
+    .where(eq(employeesTable.position, "support_staff"));
+  return rows.map((r) => r.userId).filter((id): id is string => !!id);
 }
 
 /**
@@ -76,6 +90,12 @@ async function resolveRoomMembers(room: ChatRoom): Promise<Set<string> | null> {
     for (const r of rows) {
       if ((r.maxLevel ?? 0) >= room.licenseLevel) ids.add(r.userId);
     }
+    // Level-1 (Support Staff) channels must also reach support_staff-position
+    // workers who hold no licence row — their position baseline is level 1
+    // (mirrors positionBaselineLevel in lib/eligibility.ts).
+    if (room.licenseLevel <= 1) {
+      for (const id of await supportBaselineUserIds()) ids.add(id);
+    }
     return ids;
   }
 
@@ -101,6 +121,11 @@ async function resolveRoomMembers(room: ChatRoom): Promise<Set<string> | null> {
       .groupBy(licensesTable.employeeId);
     for (const r of rows) {
       if ((r.maxLevel ?? 0) >= (minLevel ?? 2)) ids.add(r.userId);
+    }
+    // A site whose lowest shift level is 1 (support) is workable by
+    // support_staff-position workers with no licence row too.
+    if ((minLevel ?? 2) <= 1) {
+      for (const id of await supportBaselineUserIds()) ids.add(id);
     }
     return ids;
   }
@@ -427,12 +452,14 @@ router.post("/chat/rooms", requireAuth, requireAdmin, async (req, res): Promise<
   }
 
   // license_level channels auto-add officers whose max unexpired license
-  // meets the threshold, so a valid level (2/3/4) is required.
+  // meets the threshold, so a valid level (1/2/3/4) is required.
+  // Level 1 = Support Staff — a "Support Staff and above" channel reaches
+  // everyone holding any licence level (or the support baseline).
   let licenseLevel: number | null = null;
   if (type === "license_level") {
     const lvl = Number(body.licenseLevel);
-    if (![2, 3, 4].includes(lvl)) {
-      res.status(400).json({ error: "Bad Request", message: "licenseLevel must be 2, 3, or 4 for license-level channels" });
+    if (![1, 2, 3, 4].includes(lvl)) {
+      res.status(400).json({ error: "Bad Request", message: "licenseLevel must be 1, 2, 3, or 4 for license-level channels" });
       return;
     }
     licenseLevel = lvl;

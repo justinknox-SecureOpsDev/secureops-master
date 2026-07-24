@@ -254,6 +254,7 @@ export type EmployeeSiaLicenseLevel =
   | null;
 
 export const EmployeeSiaLicenseLevel = {
+  NUMBER_1: 1,
   NUMBER_2: 2,
   NUMBER_3: 3,
   NUMBER_4: 4,
@@ -333,7 +334,7 @@ export interface Employee {
   expiringLicenseCount?: number;
   /** Job position. 'officer' work licensed security shifts; 'support_staff' are non-licensed and may work level-1 (support / no licence required) shifts. */
   position?: EmployeePosition;
-  /** Highest valid (non-expired) license level: 2, 3, or 4. Null if no valid license. Note: this reflects licences only — a support_staff officer with no licence is still null here. */
+  /** Highest valid (non-expired) license level: 1, 2, 3, or 4 (1=Support Staff). Null if no valid license. Note: this reflects licences only — a support_staff officer with no licence is still null here. */
   maxLicenseLevel?: number | null;
   createdAt: string;
 }
@@ -360,6 +361,7 @@ export type CreateEmployeeRequestSiaLicenseLevel =
   | null;
 
 export const CreateEmployeeRequestSiaLicenseLevel = {
+  NUMBER_1: 1,
   NUMBER_2: 2,
   NUMBER_3: 3,
   NUMBER_4: 4,
@@ -554,6 +556,7 @@ export type UpdateEmployeeRequestSiaLicenseLevel =
   | null;
 
 export const UpdateEmployeeRequestSiaLicenseLevel = {
+  NUMBER_1: 1,
   NUMBER_2: 2,
   NUMBER_3: 3,
   NUMBER_4: 4,
@@ -1442,13 +1445,14 @@ export interface UpdateIncidentRequest {
 }
 
 /**
- * License level (2=unarmed, 3=armed, 4=PPO)
+ * License level (1=Support Staff, 2=unarmed, 3=armed, 4=PPO)
  */
 export type LicenseLevel =
   | (typeof LicenseLevel)[keyof typeof LicenseLevel]
   | null;
 
 export const LicenseLevel = {
+  NUMBER_1: 1,
   NUMBER_2: 2,
   NUMBER_3: 3,
   NUMBER_4: 4,
@@ -1467,7 +1471,7 @@ export interface License {
   employeeId: string;
   employeeName?: string;
   type: string;
-  /** License level (2=unarmed, 3=armed, 4=PPO) */
+  /** License level (1=Support Staff, 2=unarmed, 3=armed, 4=PPO) */
   level?: LicenseLevel;
   licenseNumber: string;
   issuingAuthority?: string;
@@ -1482,6 +1486,7 @@ export type CreateLicenseRequestLevel =
   (typeof CreateLicenseRequestLevel)[keyof typeof CreateLicenseRequestLevel];
 
 export const CreateLicenseRequestLevel = {
+  NUMBER_1: 1,
   NUMBER_2: 2,
   NUMBER_3: 3,
   NUMBER_4: 4,
@@ -1502,6 +1507,7 @@ export type UpdateLicenseRequestLevel =
   (typeof UpdateLicenseRequestLevel)[keyof typeof UpdateLicenseRequestLevel];
 
 export const UpdateLicenseRequestLevel = {
+  NUMBER_1: 1,
   NUMBER_2: 2,
   NUMBER_3: 3,
   NUMBER_4: 4,
@@ -1522,6 +1528,7 @@ export type LicenseRenewalLicenseLevel =
   | null;
 
 export const LicenseRenewalLicenseLevel = {
+  NUMBER_1: 1,
   NUMBER_2: 2,
   NUMBER_3: 3,
   NUMBER_4: 4,
@@ -1948,6 +1955,7 @@ export type SubmitApplicationRequestSiaLicenseLevel =
   (typeof SubmitApplicationRequestSiaLicenseLevel)[keyof typeof SubmitApplicationRequestSiaLicenseLevel];
 
 export const SubmitApplicationRequestSiaLicenseLevel = {
+  NUMBER_1: 1,
   NUMBER_2: 2,
   NUMBER_3: 3,
   NUMBER_4: 4,

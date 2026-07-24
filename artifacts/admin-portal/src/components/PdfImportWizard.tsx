@@ -311,6 +311,7 @@ export function PdfImportWizard({
                     onChange={(e) => set("siaLicenseLevel", e.target.value)}
                   >
                     <option value="">None</option>
+                    <option value="1">L1 — Support Staff</option>
                     <option value="2">L2 — Unarmed</option>
                     <option value="3">L3 — Armed</option>
                     <option value="4">L4 — PPO / Manager</option>

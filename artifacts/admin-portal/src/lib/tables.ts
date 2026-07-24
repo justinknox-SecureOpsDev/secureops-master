@@ -300,6 +300,7 @@ export const TABLES: TableDescriptor[] = [
       {
         key: "siaLicenseLevel", label: "Licence Level", type: "select",
         options: [
+          { label: "Level 1 (Support Staff)", value: "1" },
           { label: "Level 2 (unarmed)", value: "2" },
           { label: "Level 3 (armed)", value: "3" },
           { label: "Level 4 (PPO)", value: "4" },
@@ -664,6 +665,7 @@ export const TABLES: TableDescriptor[] = [
       {
         key: "level", label: "Level", type: "select",
         options: [
+          { label: "Level 1 (Support Staff)", value: "1" },
           { label: "Level 2 (unarmed)", value: "2" },
           { label: "Level 3 (armed)", value: "3" },
           { label: "Level 4 (PPO)", value: "4" },

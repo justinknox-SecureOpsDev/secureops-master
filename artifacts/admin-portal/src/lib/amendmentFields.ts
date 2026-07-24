@@ -18,7 +18,7 @@ export const AMENDMENT_FIELDS: AmendmentFieldDef[] = [
   { key: "rightToWorkStatus", label: "Right-to-work status", type: "text" },
   { key: "rightToWorkDoc", label: "Right-to-work document", type: "file", accept: "image/*,.pdf", dbKey: "rightToWorkDocKey" },
   { key: "siaLicenseNumber", label: "TX security license number", type: "text" },
-  { key: "siaLicenseLevel", label: "License level (2, 3, or 4)", type: "number" },
+  { key: "siaLicenseLevel", label: "License level (1=Support Staff, 2, 3, or 4)", type: "number" },
   { key: "siaLicenseExpiry", label: "License expiry date", type: "date" },
   { key: "previousExperience", label: "Previous security experience", type: "textarea" },
   { key: "yearsExperience", label: "Years of experience", type: "number" },

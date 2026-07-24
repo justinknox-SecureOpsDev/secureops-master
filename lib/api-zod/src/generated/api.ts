@@ -836,7 +836,7 @@ export const UpdateMyEmployeeProfileResponse = zod
       .describe("Object-storage path for right-to-work doc"),
     siaLicenseNumber: zod.string().nullish(),
     siaLicenseLevel: zod
-      .union([zod.literal(2), zod.literal(3), zod.literal(4)])
+      .union([zod.literal(1), zod.literal(2), zod.literal(3), zod.literal(4)])
       .nullish(),
     siaLicenseExpiry: zod.coerce.date().nullish(),
     licenseDocKey: zod.string().nullish(),
@@ -883,7 +883,7 @@ export const UpdateMyEmployeeProfileResponse = zod
       .number()
       .nullish()
       .describe(
-        "Highest valid (non-expired) license level: 2, 3, or 4. Null if no valid license. Note: this reflects licences only — a support_staff officer with no licence is still null here.",
+        "Highest valid (non-expired) license level: 1, 2, 3, or 4 (1=Support Staff). Null if no valid license. Note: this reflects licences only — a support_staff officer with no licence is still null here.",
       ),
     createdAt: zod.coerce.date(),
   })
@@ -1081,7 +1081,7 @@ export const GetEmployeesResponseItem = zod.object({
     .describe("Object-storage path for right-to-work doc"),
   siaLicenseNumber: zod.string().nullish(),
   siaLicenseLevel: zod
-    .union([zod.literal(2), zod.literal(3), zod.literal(4)])
+    .union([zod.literal(1), zod.literal(2), zod.literal(3), zod.literal(4)])
     .nullish(),
   siaLicenseExpiry: zod.coerce.date().nullish(),
   licenseDocKey: zod.string().nullish(),
@@ -1128,7 +1128,7 @@ export const GetEmployeesResponseItem = zod.object({
     .number()
     .nullish()
     .describe(
-      "Highest valid (non-expired) license level: 2, 3, or 4. Null if no valid license. Note: this reflects licences only — a support_staff officer with no licence is still null here.",
+      "Highest valid (non-expired) license level: 1, 2, 3, or 4 (1=Support Staff). Null if no valid license. Note: this reflects licences only — a support_staff officer with no licence is still null here.",
     ),
   createdAt: zod.coerce.date(),
 });
@@ -1154,7 +1154,7 @@ export const CreateEmployeeBody = zod.object({
   rightToWorkDocKey: zod.string().nullish(),
   siaLicenseNumber: zod.string().nullish(),
   siaLicenseLevel: zod
-    .union([zod.literal(2), zod.literal(3), zod.literal(4)])
+    .union([zod.literal(1), zod.literal(2), zod.literal(3), zod.literal(4)])
     .nullish(),
   siaLicenseExpiry: zod.coerce.date().nullish(),
   licenseDocKey: zod.string().nullish(),
@@ -1217,7 +1217,7 @@ export const GetEmployeeResponse = zod.object({
     .describe("Object-storage path for right-to-work doc"),
   siaLicenseNumber: zod.string().nullish(),
   siaLicenseLevel: zod
-    .union([zod.literal(2), zod.literal(3), zod.literal(4)])
+    .union([zod.literal(1), zod.literal(2), zod.literal(3), zod.literal(4)])
     .nullish(),
   siaLicenseExpiry: zod.coerce.date().nullish(),
   licenseDocKey: zod.string().nullish(),
@@ -1264,7 +1264,7 @@ export const GetEmployeeResponse = zod.object({
     .number()
     .nullish()
     .describe(
-      "Highest valid (non-expired) license level: 2, 3, or 4. Null if no valid license. Note: this reflects licences only — a support_staff officer with no licence is still null here.",
+      "Highest valid (non-expired) license level: 1, 2, 3, or 4 (1=Support Staff). Null if no valid license. Note: this reflects licences only — a support_staff officer with no licence is still null here.",
     ),
   createdAt: zod.coerce.date(),
 });
@@ -1290,7 +1290,7 @@ export const UpdateEmployeeBody = zod.object({
   rightToWorkDocKey: zod.string().nullish(),
   siaLicenseNumber: zod.string().nullish(),
   siaLicenseLevel: zod
-    .union([zod.literal(2), zod.literal(3), zod.literal(4)])
+    .union([zod.literal(1), zod.literal(2), zod.literal(3), zod.literal(4)])
     .nullish(),
   siaLicenseExpiry: zod.coerce.date().nullish(),
   licenseDocKey: zod.string().nullish(),
@@ -1346,7 +1346,7 @@ export const UpdateEmployeeResponse = zod.object({
     .describe("Object-storage path for right-to-work doc"),
   siaLicenseNumber: zod.string().nullish(),
   siaLicenseLevel: zod
-    .union([zod.literal(2), zod.literal(3), zod.literal(4)])
+    .union([zod.literal(1), zod.literal(2), zod.literal(3), zod.literal(4)])
     .nullish(),
   siaLicenseExpiry: zod.coerce.date().nullish(),
   licenseDocKey: zod.string().nullish(),
@@ -1393,7 +1393,7 @@ export const UpdateEmployeeResponse = zod.object({
     .number()
     .nullish()
     .describe(
-      "Highest valid (non-expired) license level: 2, 3, or 4. Null if no valid license. Note: this reflects licences only — a support_staff officer with no licence is still null here.",
+      "Highest valid (non-expired) license level: 1, 2, 3, or 4 (1=Support Staff). Null if no valid license. Note: this reflects licences only — a support_staff officer with no licence is still null here.",
     ),
   createdAt: zod.coerce.date(),
 });
@@ -2684,9 +2684,9 @@ export const GetLicensesResponseItem = zod.object({
   employeeName: zod.string().optional(),
   type: zod.string(),
   level: zod
-    .union([zod.literal(2), zod.literal(3), zod.literal(4)])
+    .union([zod.literal(1), zod.literal(2), zod.literal(3), zod.literal(4)])
     .nullish()
-    .describe("License level (2=unarmed, 3=armed, 4=PPO)"),
+    .describe("License level (1=Support Staff, 2=unarmed, 3=armed, 4=PPO)"),
   licenseNumber: zod.string(),
   issuingAuthority: zod.string().optional(),
   issueDate: zod.coerce.date().optional(),
@@ -2703,7 +2703,9 @@ export const GetLicensesResponse = zod.array(GetLicensesResponseItem);
 export const CreateLicenseBody = zod.object({
   employeeId: zod.string(),
   type: zod.string(),
-  level: zod.union([zod.literal(2), zod.literal(3), zod.literal(4)]).optional(),
+  level: zod
+    .union([zod.literal(1), zod.literal(2), zod.literal(3), zod.literal(4)])
+    .optional(),
   licenseNumber: zod.string(),
   issuingAuthority: zod.string().optional(),
   issueDate: zod.coerce.date().optional(),
@@ -2720,7 +2722,9 @@ export const UpdateLicenseParams = zod.object({
 
 export const UpdateLicenseBody = zod.object({
   type: zod.string().optional(),
-  level: zod.union([zod.literal(2), zod.literal(3), zod.literal(4)]).optional(),
+  level: zod
+    .union([zod.literal(1), zod.literal(2), zod.literal(3), zod.literal(4)])
+    .optional(),
   licenseNumber: zod.string().optional(),
   issuingAuthority: zod.string().optional(),
   issueDate: zod.coerce.date().optional(),
@@ -2734,9 +2738,9 @@ export const UpdateLicenseResponse = zod.object({
   employeeName: zod.string().optional(),
   type: zod.string(),
   level: zod
-    .union([zod.literal(2), zod.literal(3), zod.literal(4)])
+    .union([zod.literal(1), zod.literal(2), zod.literal(3), zod.literal(4)])
     .nullish()
-    .describe("License level (2=unarmed, 3=armed, 4=PPO)"),
+    .describe("License level (1=Support Staff, 2=unarmed, 3=armed, 4=PPO)"),
   licenseNumber: zod.string(),
   issuingAuthority: zod.string().optional(),
   issueDate: zod.coerce.date().optional(),
@@ -2759,7 +2763,7 @@ export const GetAdminLicenseRenewalsResponseItem = zod.object({
   licenseId: zod.string().nullish(),
   licenseType: zod.string(),
   licenseLevel: zod
-    .union([zod.literal(2), zod.literal(3), zod.literal(4)])
+    .union([zod.literal(1), zod.literal(2), zod.literal(3), zod.literal(4)])
     .nullish(),
   licenseNumber: zod.string(),
   issuingAuthority: zod.string().nullish(),
@@ -2796,7 +2800,7 @@ export const ApproveLicenseRenewalResponse = zod.object({
   licenseId: zod.string().nullish(),
   licenseType: zod.string(),
   licenseLevel: zod
-    .union([zod.literal(2), zod.literal(3), zod.literal(4)])
+    .union([zod.literal(1), zod.literal(2), zod.literal(3), zod.literal(4)])
     .nullish(),
   licenseNumber: zod.string(),
   issuingAuthority: zod.string().nullish(),
@@ -2830,7 +2834,7 @@ export const RejectLicenseRenewalResponse = zod.object({
   licenseId: zod.string().nullish(),
   licenseType: zod.string(),
   licenseLevel: zod
-    .union([zod.literal(2), zod.literal(3), zod.literal(4)])
+    .union([zod.literal(1), zod.literal(2), zod.literal(3), zod.literal(4)])
     .nullish(),
   licenseNumber: zod.string(),
   issuingAuthority: zod.string().nullish(),
@@ -4254,7 +4258,7 @@ export const SubmitApplicationBody = zod.object({
     .describe("Photo\/scan of driver's license OR passport."),
   siaLicenseNumber: zod.string().optional(),
   siaLicenseLevel: zod
-    .union([zod.literal(2), zod.literal(3), zod.literal(4)])
+    .union([zod.literal(1), zod.literal(2), zod.literal(3), zod.literal(4)])
     .optional(),
   siaLicenseExpiry: zod.string().optional(),
   previousExperience: zod.string().optional(),

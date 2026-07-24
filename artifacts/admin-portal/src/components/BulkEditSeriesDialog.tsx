@@ -30,7 +30,7 @@ export function BulkEditSeriesDialog({
   const [endTime, setEndTime] = useState("");
   const [payRate, setPayRate] = useState("");
   const [billRate, setBillRate] = useState("");
-  const [licenseLevel, setLicenseLevel] = useState<"" | "2" | "3" | "4">("");
+  const [licenseLevel, setLicenseLevel] = useState<"" | "1" | "2" | "3" | "4">("");
   const [headcount, setHeadcount] = useState("");
   const [notes, setNotes] = useState("");
   const [includeNotes, setIncludeNotes] = useState(false);
@@ -125,9 +125,10 @@ export function BulkEditSeriesDialog({
             </div>
             <div>
               <Label>Min licence</Label>
-              <Select value={licenseLevel} onValueChange={(v) => setLicenseLevel(v as "" | "2" | "3" | "4")}>
+              <Select value={licenseLevel} onValueChange={(v) => setLicenseLevel(v as "" | "1" | "2" | "3" | "4")}>
                 <SelectTrigger><SelectValue placeholder="unchanged" /></SelectTrigger>
                 <SelectContent>
+                  <SelectItem value="1">Support (no licence)</SelectItem>
                   <SelectItem value="2">Level 2 (unarmed)</SelectItem>
                   <SelectItem value="3">Level 3 (armed)</SelectItem>
                   <SelectItem value="4">Level 4 (PPO)</SelectItem>

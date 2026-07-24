@@ -392,6 +392,7 @@ export default function ChatPage() {
                 <Select value={newLevel} onValueChange={setNewLevel}>
                   <SelectTrigger id="ch-level"><SelectValue /></SelectTrigger>
                   <SelectContent>
+                    <SelectItem value="1">Level 1 — Support Staff and above</SelectItem>
                     <SelectItem value="2">Level 2 — Unarmed and above</SelectItem>
                     <SelectItem value="3">Level 3 — Armed and above</SelectItem>
                     <SelectItem value="4">Level 4 — PPO</SelectItem>

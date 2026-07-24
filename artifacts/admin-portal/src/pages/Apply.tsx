@@ -1058,6 +1058,7 @@ export function ApplyPage() {
             <select className="w-full border rounded h-10 px-3 bg-background focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
               value={form.siaLicenseLevel} onChange={(e) => set("siaLicenseLevel", e.target.value)}>
               <option value="">Select…</option>
+              <option value="1">L1 — Support Staff</option>
               <option value="2">L2 — Unarmed</option>
               <option value="3">L3 — Armed</option>
               <option value="4">L4 — PPO</option>

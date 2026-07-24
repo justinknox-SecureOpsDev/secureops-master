@@ -185,7 +185,7 @@ export default function AdminLicensesScreen() {
                 </View>
                 <Text style={[styles.fieldLabel, { color: colors.mutedForeground }]}>Licence Level *</Text>
                 <View style={{ flexDirection: "row", gap: 8, marginBottom: 14 }}>
-                  {([2, 3, 4] as const).map((lv) => (
+                  {([1, 2, 3, 4] as const).map((lv) => (
                     <TouchableOpacity
                       key={lv}
                       style={[styles.lvlChip, {
@@ -195,10 +195,10 @@ export default function AdminLicensesScreen() {
                       onPress={() => set("level")(lv)}
                       accessibilityRole="button"
                       accessibilityState={{ selected: form.level === lv }}
-                      accessibilityLabel={lv === 4 ? "Level 4 PPO" : `Level ${lv}`}
+                      accessibilityLabel={lv === 1 ? "Level 1 Support Staff" : lv === 4 ? "Level 4 PPO" : `Level ${lv}`}
                     >
                       <Text style={{ color: form.level === lv ? colors.primary : colors.foreground, fontWeight: "700", fontSize: 13 }}>
-                        {lv === 4 ? "L4 / PPO" : `Level ${lv}`}
+                        {lv === 1 ? "L1 Support" : lv === 4 ? "L4 / PPO" : `Level ${lv}`}
                       </Text>
                     </TouchableOpacity>
                   ))}

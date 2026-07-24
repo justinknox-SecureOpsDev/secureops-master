@@ -33,7 +33,7 @@ function fmtTime(d: string) {
 }
 function levelLabel(n: number | null) {
   if (!n) return "—";
-  const map: Record<number, string> = { 2: "L2 Unarmed", 3: "L3 Armed", 4: "L4/PPO" };
+  const map: Record<number, string> = { 1: "Support Staff", 2: "L2 Unarmed", 3: "L3 Armed", 4: "L4/PPO" };
   return map[n] ?? `L${n}`;
 }
 function statusColors(s: string) {

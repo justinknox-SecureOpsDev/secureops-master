@@ -183,8 +183,8 @@ const PROMPT = [
   "- email: the applicant's own email address (lowercase).",
   "- phone / emergencyContactPhone: keep the digits as written; include country code if shown.",
   "- dateOfBirth, siaLicenseExpiry: format as YYYY-MM-DD.",
-  "- siaLicenseLevel: integer 1-4 for the Texas security license (2=unarmed, 3=armed,",
-  "  4=PPO/manager). Use null if no security license is mentioned.",
+  "- siaLicenseLevel: integer 1-4 for the Texas security license (1=support staff,",
+  "  2=unarmed, 3=armed, 4=PPO/manager). Use null if no security license is mentioned.",
   "- yearsExperience: whole number of years of security/relevant experience.",
   "- previousExperience: a short free-text summary of prior roles.",
 ].join("\n");

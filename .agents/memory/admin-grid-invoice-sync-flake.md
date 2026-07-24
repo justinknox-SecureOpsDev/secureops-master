@@ -1,12 +1,19 @@
 ---
-name: adminGridTimeEntryInvoiceSync parallel flake (FIXED)
-description: Was a DB race under concurrent file execution; fixed by fileParallelism:false in vitest config.
+name: api-server tests must not run files in parallel
+description: vitest fileParallelism must stay false for api-server — shared single DB makes concurrent file execution race (23505 flakes).
 ---
 
-`artifacts/api-server/src/__tests__/adminGridTimeEntryInvoiceSync.test.ts` used to fail with `duplicate key value violates unique constraint` (23505) when running under the full `pnpm -r test` gate.
+api-server test files share ONE real Postgres instance. vitest's
+`fileParallelism` defaults to `true` even with `singleFork: true`, which
+let files run concurrently and race DB writes (e.g. a manual draft-invoice
+insert vs the auto invoice-sync upsert on the same `(siteId, ISO-week)`
+bucket → `23505 duplicate key`).
 
-**Root cause:** vitest's `fileParallelism` defaults to `true` even when `singleFork: true` is set, so test files ran concurrently within the single fork. The test's manual draft-invoice insert raced the auto invoice-sync upsert against the same `(siteId, ISO-week)` bucket.
+**Why:** there is no per-file DB isolation; any suite mutating shared
+state (invoice buckets, singleton config rows, global counters) can
+collide with another file's writes.
 
-**Fix:** added `fileParallelism: false` to `artifacts/api-server/vitest.config.ts`. All test files now run strictly sequentially inside the single fork, eliminating the concurrent-DB-write race. Also raised `testTimeout`/`hookTimeout` from 30 s to 60 s to give heavier suites (chatMembershipLifecycle, dispatch) enough headroom.
-
-**How to apply:** if a new suite mutates global/shared DB state (single-row config tables, global counters), `fileParallelism: false` already protects it. Do NOT revert to concurrent execution to speed up CI — the DB on this project is a single shared instance and concurrent writes cause 23505 flakes.
+**How to apply:** `fileParallelism: false` is set in
+`artifacts/api-server/vitest.config.ts` — do NOT revert it to speed up CI.
+If a 23505-style flake appears under the full gate but passes alone,
+suspect concurrent-write pollution, not the code under test.

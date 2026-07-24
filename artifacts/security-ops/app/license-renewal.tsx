@@ -36,6 +36,7 @@ type Renewal = {
 };
 
 const LEVEL_OPTIONS = [
+  { value: 1, label: "L1 (Support Staff)" },
   { value: 2, label: "L2 (unarmed)" },
   { value: 3, label: "L3 (armed)" },
   { value: 4, label: "L4 (PPO)" },

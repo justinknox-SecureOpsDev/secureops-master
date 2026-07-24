@@ -62,7 +62,7 @@ router.post("/licenses", requireStaff, async (req, res): Promise<void> => {
   if (req.user!.role !== "admin" && req.user!.userId !== employeeId) {
     res.status(403).json({ error: "Forbidden" }); return;
   }
-  const lvl = level != null && [2, 3, 4].includes(Number(level)) ? Number(level) : null;
+  const lvl = level != null && [1, 2, 3, 4].includes(Number(level)) ? Number(level) : null;
   const [license] = await db.insert(licensesTable).values({
     employeeId,
     type,
@@ -87,7 +87,7 @@ router.put("/licenses/:id", requireStaff, async (req, res): Promise<void> => {
   const { type, level, licenseNumber, issuingAuthority, issueDate, expiryDate, notes } = req.body;
   const updates: Record<string, unknown> = {};
   if (type) updates.type = type;
-  if (level !== undefined) updates.level = level == null ? null : ([2, 3, 4].includes(Number(level)) ? Number(level) : null);
+  if (level !== undefined) updates.level = level == null ? null : ([1, 2, 3, 4].includes(Number(level)) ? Number(level) : null);
   if (licenseNumber) updates.licenseNumber = licenseNumber;
   if (issuingAuthority !== undefined) updates.issuingAuthority = issuingAuthority;
   if (issueDate !== undefined) updates.issueDate = issueDate;
