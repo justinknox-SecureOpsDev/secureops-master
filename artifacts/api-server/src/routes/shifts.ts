@@ -309,11 +309,15 @@ router.post("/shifts", requireAdminOrSiteManager, async (req, res): Promise<void
   let siteDefaultBill: string | null = null;
   if (siteId) {
     const [site] = await db
-      .select({ id: sitesTable.id, name: sitesTable.name, address: sitesTable.address, lat: sitesTable.locationLat, lng: sitesTable.locationLng, clientName: clientsTable.name, defaultPayRate: sitesTable.defaultPayRate, defaultBillRate: sitesTable.defaultBillRate })
+      .select({ id: sitesTable.id, name: sitesTable.name, status: sitesTable.status, address: sitesTable.address, lat: sitesTable.locationLat, lng: sitesTable.locationLng, clientName: clientsTable.name, defaultPayRate: sitesTable.defaultPayRate, defaultBillRate: sitesTable.defaultBillRate })
       .from(sitesTable)
       .leftJoin(clientsTable, eq(sitesTable.clientId, clientsTable.id))
       .where(eq(sitesTable.id, siteId));
     if (!site) { res.status(400).json({ error: "Bad Request", message: "Site not found" }); return; }
+    if (site.status !== "active") {
+      res.status(400).json({ error: "Bad Request", message: "This site is inactive — reactivate it before posting new shifts." });
+      return;
+    }
     resolvedClientName = site.clientName ?? resolvedClientName ?? null;
     resolvedLocation = site.address ?? resolvedLocation ?? site.name;
     siteDefaultPay = site.defaultPayRate ?? null;
@@ -514,11 +518,15 @@ router.post("/shifts/repeat", requireAdminOrSiteManager, async (req, res): Promi
   // Resolve site → clientName/location for back-compat columns, plus default
   // rates so a (rate-blind) site manager's series inherits them.
   const [site] = await db
-    .select({ id: sitesTable.id, name: sitesTable.name, address: sitesTable.address, lat: sitesTable.locationLat, lng: sitesTable.locationLng, clientName: clientsTable.name, defaultPayRate: sitesTable.defaultPayRate, defaultBillRate: sitesTable.defaultBillRate })
+    .select({ id: sitesTable.id, name: sitesTable.name, status: sitesTable.status, address: sitesTable.address, lat: sitesTable.locationLat, lng: sitesTable.locationLng, clientName: clientsTable.name, defaultPayRate: sitesTable.defaultPayRate, defaultBillRate: sitesTable.defaultBillRate })
     .from(sitesTable)
     .leftJoin(clientsTable, eq(sitesTable.clientId, clientsTable.id))
     .where(eq(sitesTable.id, siteId));
   if (!site) { res.status(400).json({ error: "Bad Request", message: "Site not found" }); return; }
+  if (site.status !== "active") {
+    res.status(400).json({ error: "Bad Request", message: "This site is inactive — reactivate it before posting new shifts." });
+    return;
+  }
 
   // Site managers may only bulk-create against a site they manage.
   const isSiteManager = req.user!.role === "site_manager";

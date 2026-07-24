@@ -76,10 +76,15 @@ export async function seedChatRooms(): Promise<void> {
         });
     }
 
-    // One channel per site, slug "site:<siteId>". Dropped sites leave
-    // their rooms behind (history preserved); they just become unreachable
-    // via the auto-membership query (no shifts → admins only).
-    const sites = await db.select({ id: sitesTable.id, name: sitesTable.name }).from(sitesTable);
+    // One channel per site, slug "site:<siteId>". Dropped/inactive sites
+    // leave their rooms behind (history preserved); they just become
+    // unreachable via the auto-membership query (no shifts → admins only).
+    // Only ACTIVE sites are (re)seeded so deactivating a site stops its
+    // channel from being recreated/renamed on the next boot.
+    const sites = await db
+      .select({ id: sitesTable.id, name: sitesTable.name })
+      .from(sitesTable)
+      .where(eq(sitesTable.status, "active"));
     for (const s of sites) {
       const slug = `site:${s.id}`;
       await db

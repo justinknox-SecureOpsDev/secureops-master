@@ -68,8 +68,8 @@ export async function clientDeletionBlockers(clientId: string): Promise<Deletion
 
 const SITE_MESSAGE =
   "Deleting this site would remove or unlink its shifts, QR code, patrol, " +
-  "invoice and payroll history. Reassign or remove these first, or keep the " +
-  "site so its records stay intact.";
+  "invoice and payroll history. Set the site's status to Inactive instead to " +
+  "retire it while keeping its records intact.";
 
 const CLIENT_MESSAGE =
   "Deleting this client would also delete its sites, which still have shifts, " +

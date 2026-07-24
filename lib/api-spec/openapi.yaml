@@ -140,9 +140,10 @@ paths:
     get:
       operationId: getSites
       tags: [sites]
-      summary: List sites (optionally filter by clientId)
+      summary: List sites (optionally filter by clientId; inactive sites excluded unless includeInactive=true)
       parameters:
         - { name: clientId, in: query, schema: { type: string } }
+        - { name: includeInactive, in: query, schema: { type: string, enum: ["true", "false"] }, description: "Pass 'true' to include inactive sites (admin management views)" }
       responses:
         "200":
           description: OK
@@ -4620,6 +4621,7 @@ components:
         clientId: { type: string }
         clientName: { type: string }
         name: { type: string }
+        status: { type: string, enum: [active, inactive], description: "Inactive sites keep their history but are hidden from operational pickers and block new shifts" }
         address: { type: string }
         locationLat: { type: number }
         locationLng: { type: number }
@@ -4666,6 +4668,7 @@ components:
       type: object
       properties:
         name: { type: string }
+        status: { type: string, enum: [active, inactive] }
         address: { type: string }
         locationLat: { type: number }
         locationLng: { type: number }

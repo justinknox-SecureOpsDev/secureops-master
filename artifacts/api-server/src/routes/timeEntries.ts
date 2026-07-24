@@ -327,6 +327,7 @@ async function resolveNearestSite(lat: number, lng: number): Promise<{ id: strin
     .select({ id: sitesTable.id, name: sitesTable.name, lat: sitesTable.locationLat, lng: sitesTable.locationLng })
     .from(sitesTable)
     .where(and(
+      eq(sitesTable.status, "active"),
       sql`${sitesTable.locationLat} IS NOT NULL`,
       sql`${sitesTable.locationLng} IS NOT NULL`,
     ));
@@ -367,7 +368,11 @@ router.get("/me/clock-in-sites", requireStaff, async (req, res): Promise<void> =
       locationLng: sitesTable.locationLng,
     })
     .from(sitesTable)
-    .where(allowedSiteIds ? inArray(sitesTable.id, allowedSiteIds) : undefined)
+    .where(
+      allowedSiteIds
+        ? and(eq(sitesTable.status, "active"), inArray(sitesTable.id, allowedSiteIds))
+        : eq(sitesTable.status, "active"),
+    )
     .orderBy(sitesTable.name);
   res.json(rows);
 });

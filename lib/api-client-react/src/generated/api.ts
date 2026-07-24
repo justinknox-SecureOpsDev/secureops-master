@@ -770,7 +770,7 @@ export const useCreateClientSite = <
 };
 
 /**
- * @summary List sites (optionally filter by clientId)
+ * @summary List sites (optionally filter by clientId; inactive sites excluded unless includeInactive=true)
  */
 export const getGetSitesUrl = (params?: GetSitesParams) => {
   const normalizedParams = new URLSearchParams();
@@ -837,7 +837,7 @@ export type GetSitesQueryResult = NonNullable<
 export type GetSitesQueryError = ErrorType<unknown>;
 
 /**
- * @summary List sites (optionally filter by clientId)
+ * @summary List sites (optionally filter by clientId; inactive sites excluded unless includeInactive=true)
  */
 
 export function useGetSites<

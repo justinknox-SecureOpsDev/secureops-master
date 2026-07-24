@@ -1174,11 +1174,23 @@ export const BillingCycle = {
   custom: "custom",
 } as const;
 
+/**
+ * Inactive sites keep their history but are hidden from operational pickers and block new shifts
+ */
+export type SiteStatus = (typeof SiteStatus)[keyof typeof SiteStatus];
+
+export const SiteStatus = {
+  active: "active",
+  inactive: "inactive",
+} as const;
+
 export interface Site {
   id: string;
   clientId: string;
   clientName?: string;
   name: string;
+  /** Inactive sites keep their history but are hidden from operational pickers and block new shifts */
+  status?: SiteStatus;
   address?: string;
   locationLat?: number;
   locationLng?: number;
@@ -1260,8 +1272,17 @@ export interface CreateSiteRequest {
   autoClockOutEnabled?: boolean;
 }
 
+export type UpdateSiteRequestStatus =
+  (typeof UpdateSiteRequestStatus)[keyof typeof UpdateSiteRequestStatus];
+
+export const UpdateSiteRequestStatus = {
+  active: "active",
+  inactive: "inactive",
+} as const;
+
 export interface UpdateSiteRequest {
   name?: string;
+  status?: UpdateSiteRequestStatus;
   address?: string;
   locationLat?: number;
   locationLng?: number;
@@ -2581,7 +2602,19 @@ export interface ClientInviteResponse {
 
 export type GetSitesParams = {
   clientId?: string;
+  /**
+   * Pass 'true' to include inactive sites (admin management views)
+   */
+  includeInactive?: GetSitesIncludeInactive;
 };
+
+export type GetSitesIncludeInactive =
+  (typeof GetSitesIncludeInactive)[keyof typeof GetSitesIncludeInactive];
+
+export const GetSitesIncludeInactive = {
+  true: "true",
+  false: "false",
+} as const;
 
 export type UpdateSiteManagers200 = {
   assigned: SiteManagerUser[];

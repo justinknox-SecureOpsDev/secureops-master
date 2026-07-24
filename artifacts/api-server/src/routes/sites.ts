@@ -116,7 +116,7 @@ router.post("/sites/geocode-missing", requireAdmin, async (req, res): Promise<vo
 });
 
 router.get("/sites", requireSchedulingStaff, async (req, res): Promise<void> => {
-  const { clientId } = req.query as { clientId?: string };
+  const { clientId, includeInactive } = req.query as { clientId?: string; includeInactive?: string };
   // Site managers only ever act on the sites they manage (shift create/edit
   // pickers, approvals) — scope the list server-side so the UI can't offer a
   // site that would just 403 on submit. Admin/dispatcher keep the full list.
@@ -134,6 +134,7 @@ router.get("/sites", requireSchedulingStaff, async (req, res): Promise<void> => 
       clientId: sitesTable.clientId,
       clientName: clientsTable.name,
       name: sitesTable.name,
+      status: sitesTable.status,
       address: sitesTable.address,
       locationLat: sitesTable.locationLat,
       locationLng: sitesTable.locationLng,
@@ -143,7 +144,11 @@ router.get("/sites", requireSchedulingStaff, async (req, res): Promise<void> => 
     })
     .from(sitesTable)
     .leftJoin(clientsTable, eq(sitesTable.clientId, clientsTable.id));
+  // Inactive (retired) sites are hidden from every operational picker by
+  // default — shift dialogs, dispatch map, invoice generation. Management
+  // views that need the full list (e.g. to reactivate) pass includeInactive=true.
   const conds = [
+    ...(includeInactive === "true" ? [] : [eq(sitesTable.status, "active")]),
     ...(clientId ? [eq(sitesTable.clientId, clientId)] : []),
     ...(managedScope ? [inArray(sitesTable.id, managedScope)] : []),
   ];
@@ -166,6 +171,7 @@ router.get("/sites/:id", requireAdminOrDispatcher, async (req, res): Promise<voi
       clientId: sitesTable.clientId,
       clientName: clientsTable.name,
       name: sitesTable.name,
+      status: sitesTable.status,
       address: sitesTable.address,
       locationLat: sitesTable.locationLat,
       locationLng: sitesTable.locationLng,
@@ -185,9 +191,16 @@ router.get("/sites/:id", requireAdminOrDispatcher, async (req, res): Promise<voi
 
 router.put("/sites/:id", requireAdmin, async (req, res): Promise<void> => {
   const id = Array.isArray(req.params.id) ? req.params.id[0] : req.params.id;
-  const { name, address, locationLat, locationLng, notes, geofenceRadiusMiles, autoClockOutEnabled } = req.body;
+  const { name, status, address, locationLat, locationLng, notes, geofenceRadiusMiles, autoClockOutEnabled } = req.body;
   let updates: Record<string, unknown> = {};
   if (name !== undefined) updates.name = name;
+  if (status !== undefined) {
+    if (status !== "active" && status !== "inactive") {
+      res.status(400).json({ error: "Bad Request", message: "status must be 'active' or 'inactive'" });
+      return;
+    }
+    updates.status = status;
+  }
   if (address !== undefined) updates.address = address;
   if (locationLat !== undefined) updates.locationLat = locationLat != null ? String(locationLat) : null;
   if (locationLng !== undefined) updates.locationLng = locationLng != null ? String(locationLng) : null;

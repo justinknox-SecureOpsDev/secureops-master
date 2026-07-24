@@ -384,6 +384,14 @@ export const TABLES: TableDescriptor[] = [
       { key: "id", label: "ID", type: "text", readonly: true, hiddenInGrid: true },
       { key: "clientId", label: "Client", type: "fk", fkTable: "clients", fkLabel: "name", required: true },
       { key: "name", label: "Name", type: "text", required: true },
+      {
+        key: "status", label: "Status", type: "select",
+        options: [
+          { label: "Active", value: "active" },
+          { label: "Inactive", value: "inactive" },
+        ],
+        helpText: "Inactive retires the site: it disappears from shift/clock-in pickers and blocks new shifts, but all history (shifts, invoices, payroll, patrol) stays intact. Use instead of delete.",
+      },
       { key: "address", label: "Address", type: "textarea" },
       { key: "defaultBillRate", label: "Bill Rate ($/hr)", type: "number" },
       { key: "locationLat", label: "Lat", type: "number", hiddenInGrid: true },

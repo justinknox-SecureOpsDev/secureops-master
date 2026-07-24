@@ -7,6 +7,14 @@ export const sitesTable = pgTable("sites", {
   id: uuid("id").primaryKey().defaultRandom(),
   clientId: uuid("client_id").notNull().references(() => clientsTable.id, { onDelete: "cascade" }),
   name: text("name").notNull(),
+  // Lifecycle: 'active' (default) or 'inactive'. Inactive = retired/contract
+  // ended but history (shifts, invoices, payroll, patrol scans) must stay
+  // intact — the alternative to a hard delete, which is 409-blocked while
+  // dependents exist (lib/siteDeletion.ts). Inactive sites are hidden from
+  // operational surfaces (site pickers, geo clock-in resolution, new shift
+  // creation, chat-channel seeding) but remain fully visible/editable in the
+  // admin Sites grid so they can be reactivated.
+  status: text("status").notNull().default("active"),
   address: text("address"),
   locationLat: numeric("location_lat", { precision: 10, scale: 6 }),
   locationLng: numeric("location_lng", { precision: 10, scale: 6 }),

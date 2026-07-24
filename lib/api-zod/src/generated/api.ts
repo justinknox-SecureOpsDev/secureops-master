@@ -59,6 +59,12 @@ export const GetClientsResponseItem = zod.object({
         clientId: zod.string(),
         clientName: zod.string().optional(),
         name: zod.string(),
+        status: zod
+          .enum(["active", "inactive"])
+          .optional()
+          .describe(
+            "Inactive sites keep their history but are hidden from operational pickers and block new shifts",
+          ),
         address: zod.string().optional(),
         locationLat: zod.number().optional(),
         locationLng: zod.number().optional(),
@@ -131,6 +137,12 @@ export const GetClientResponse = zod.object({
         clientId: zod.string(),
         clientName: zod.string().optional(),
         name: zod.string(),
+        status: zod
+          .enum(["active", "inactive"])
+          .optional()
+          .describe(
+            "Inactive sites keep their history but are hidden from operational pickers and block new shifts",
+          ),
         address: zod.string().optional(),
         locationLat: zod.number().optional(),
         locationLng: zod.number().optional(),
@@ -206,6 +218,12 @@ export const UpdateClientResponse = zod.object({
         clientId: zod.string(),
         clientName: zod.string().optional(),
         name: zod.string(),
+        status: zod
+          .enum(["active", "inactive"])
+          .optional()
+          .describe(
+            "Inactive sites keep their history but are hidden from operational pickers and block new shifts",
+          ),
         address: zod.string().optional(),
         locationLat: zod.number().optional(),
         locationLng: zod.number().optional(),
@@ -251,10 +269,14 @@ export const CreateClientSiteBody = zod.object({
 });
 
 /**
- * @summary List sites (optionally filter by clientId)
+ * @summary List sites (optionally filter by clientId; inactive sites excluded unless includeInactive=true)
  */
 export const GetSitesQueryParams = zod.object({
   clientId: zod.coerce.string().optional(),
+  includeInactive: zod
+    .enum(["true", "false"])
+    .optional()
+    .describe("Pass 'true' to include inactive sites (admin management views)"),
 });
 
 export const GetSitesResponseItem = zod.object({
@@ -262,6 +284,12 @@ export const GetSitesResponseItem = zod.object({
   clientId: zod.string(),
   clientName: zod.string().optional(),
   name: zod.string(),
+  status: zod
+    .enum(["active", "inactive"])
+    .optional()
+    .describe(
+      "Inactive sites keep their history but are hidden from operational pickers and block new shifts",
+    ),
   address: zod.string().optional(),
   locationLat: zod.number().optional(),
   locationLng: zod.number().optional(),
@@ -316,6 +344,12 @@ export const GetSiteResponse = zod.object({
   clientId: zod.string(),
   clientName: zod.string().optional(),
   name: zod.string(),
+  status: zod
+    .enum(["active", "inactive"])
+    .optional()
+    .describe(
+      "Inactive sites keep their history but are hidden from operational pickers and block new shifts",
+    ),
   address: zod.string().optional(),
   locationLat: zod.number().optional(),
   locationLng: zod.number().optional(),
@@ -336,6 +370,7 @@ export const UpdateSiteParams = zod.object({
 
 export const UpdateSiteBody = zod.object({
   name: zod.string().optional(),
+  status: zod.enum(["active", "inactive"]).optional(),
   address: zod.string().optional(),
   locationLat: zod.number().optional(),
   locationLng: zod.number().optional(),
@@ -348,6 +383,12 @@ export const UpdateSiteResponse = zod.object({
   clientId: zod.string(),
   clientName: zod.string().optional(),
   name: zod.string(),
+  status: zod
+    .enum(["active", "inactive"])
+    .optional()
+    .describe(
+      "Inactive sites keep their history but are hidden from operational pickers and block new shifts",
+    ),
   address: zod.string().optional(),
   locationLat: zod.number().optional(),
   locationLng: zod.number().optional(),
