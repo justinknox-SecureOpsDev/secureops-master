@@ -83,20 +83,24 @@ router.get("/admin/active-officers", requireAdminOrDispatcher, async (req, res):
       siteAddress: sitesTable.address,
       siteLat: sitesTable.locationLat,
       siteLng: sitesTable.locationLng,
-      siteChannelId: radioChannelsTable.id,
+      // Deterministic channel pick: a site can have MULTIPLE active
+      // site-scoped channels; a plain left join would duplicate the officer
+      // row once per channel. Correlated scalar subquery picks exactly one —
+      // the oldest active channel (created_at, id tiebreak) — so each
+      // officer appears exactly once and the button target is stable.
+      siteChannelId: sql<string | null>`(
+        SELECT rc.id FROM radio_channels rc
+        WHERE rc.site_id = ${sitesTable.id}
+          AND rc.scope = 'site'
+          AND rc.archived_at IS NULL
+        ORDER BY rc.created_at ASC, rc.id ASC
+        LIMIT 1
+      )`.as("site_channel_id"),
     })
     .from(timeEntriesTable)
     .innerJoin(usersTable, eq(timeEntriesTable.employeeId, usersTable.id))
     .leftJoin(shiftsTable, eq(timeEntriesTable.shiftId, shiftsTable.id))
     .leftJoin(sitesTable, eq(shiftsTable.siteId, sitesTable.id))
-    .leftJoin(
-      radioChannelsTable,
-      and(
-        eq(radioChannelsTable.siteId, sitesTable.id),
-        eq(radioChannelsTable.scope, "site"),
-        isNull(radioChannelsTable.archivedAt),
-      ),
-    )
     .where(isNull(timeEntriesTable.clockOutTime))
     .orderBy(desc(timeEntriesTable.clockInTime));
 

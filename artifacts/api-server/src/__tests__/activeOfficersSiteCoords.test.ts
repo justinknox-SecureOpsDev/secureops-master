@@ -51,6 +51,13 @@ type Ctx = {
   // ad-hoc clock-in: open time entry with no shiftId
   adHocOfficerId: string;
   adHocTimeEntryId: string;
+  // multi-channel site: TWO active site-scoped channels
+  multiChSiteId: string;
+  multiChOlderChannelId: string;
+  multiChNewerChannelId: string;
+  multiChShiftId: string;
+  multiChOfficerId: string;
+  multiChTimeEntryId: string;
 };
 const ctx = {} as Ctx;
 
@@ -291,11 +298,76 @@ beforeAll(async () => {
     })
     .returning({ id: timeEntriesTable.id });
   ctx.adHocTimeEntryId = adHocEntry.id;
+
+  // --- Geocoded site with TWO active site-scoped channels ---
+  // The route must return the officer exactly once (no join fan-out) and
+  // deterministically pick the OLDEST channel (created_at, id tiebreak).
+  const [multiChSite] = await db
+    .insert(sitesTable)
+    .values({
+      clientId: ctx.clientId,
+      name: `${TAG}-multich-site`,
+      address: "500 Multi Way",
+      locationLat: "31.500000",
+      locationLng: "-97.100000",
+    })
+    .returning({ id: sitesTable.id });
+  ctx.multiChSiteId = multiChSite.id;
+
+  const [olderCh] = await db
+    .insert(radioChannelsTable)
+    .values({
+      name: `${TAG}-multich-older`,
+      scope: "site",
+      siteId: ctx.multiChSiteId,
+      adminOnly: false,
+      createdAt: new Date(Date.now() - 48 * 60 * 60 * 1000),
+    })
+    .returning({ id: radioChannelsTable.id });
+  ctx.multiChOlderChannelId = olderCh.id;
+
+  const [newerCh] = await db
+    .insert(radioChannelsTable)
+    .values({
+      name: `${TAG}-multich-newer`,
+      scope: "site",
+      siteId: ctx.multiChSiteId,
+      adminOnly: false,
+      createdAt: new Date(Date.now() - 60 * 60 * 1000),
+    })
+    .returning({ id: radioChannelsTable.id });
+  ctx.multiChNewerChannelId = newerCh.id;
+
+  const { start: mcStart, end: mcEnd } = makeDates();
+  const [mcShift] = await db
+    .insert(shiftsTable)
+    .values({
+      title: `${TAG}-multich-shift`,
+      siteId: ctx.multiChSiteId,
+      startTime: mcStart,
+      endTime: mcEnd,
+      requiredLicenseLevel: 1,
+      headcount: 1,
+      status: "upcoming",
+    })
+    .returning({ id: shiftsTable.id });
+  ctx.multiChShiftId = mcShift.id;
+
+  ctx.multiChOfficerId = await makeUser("employee", "multich-officer");
+  const [mcEntry] = await db
+    .insert(timeEntriesTable)
+    .values({
+      employeeId: ctx.multiChOfficerId,
+      shiftId: ctx.multiChShiftId,
+      clockInTime: mcStart,
+    })
+    .returning({ id: timeEntriesTable.id });
+  ctx.multiChTimeEntryId = mcEntry.id;
 });
 
 afterAll(async () => {
   // Delete open time entries first (no clock-out), then shift/site/client rows.
-  await db.execute(sql`DELETE FROM time_entries WHERE employee_id IN (${sql.raw(`'${ctx.geoOfficerId}','${ctx.nocoordOfficerId}','${ctx.archivedOfficerId}','${ctx.globalChOfficerId}','${ctx.adHocOfficerId}'`)})`);
+  await db.execute(sql`DELETE FROM time_entries WHERE employee_id IN (${sql.raw(`'${ctx.geoOfficerId}','${ctx.nocoordOfficerId}','${ctx.archivedOfficerId}','${ctx.globalChOfficerId}','${ctx.adHocOfficerId}','${ctx.multiChOfficerId}'`)})`);
   await db.execute(sql`DELETE FROM radio_channels WHERE name LIKE ${TAG + "%"}`);
   await db.execute(sql`DELETE FROM shifts WHERE title LIKE ${TAG + "%"}`);
   await db.execute(sql`DELETE FROM sites WHERE name LIKE ${TAG + "%"}`);
@@ -390,5 +462,21 @@ describe("GET /admin/active-officers — site coords and channel fields", () => 
     expect(officer!.siteLat).toBeNull();
     expect(officer!.siteLng).toBeNull();
     expect(officer!.siteChannelId).toBeNull();
+  });
+
+  it("returns the officer exactly once and picks the oldest active channel when a site has two active site-scoped channels", async () => {
+    const res = await request(app)
+      .get("/api/admin/active-officers")
+      .set(authed(ctx.adminToken));
+
+    expect(res.status).toBe(200);
+    const rows = (res.body as Array<{ userId: string; siteChannelId: unknown }>)
+      .filter((r) => r.userId === ctx.multiChOfficerId);
+    // A plain left join against radio_channels would fan out one row per
+    // active channel — this must never happen.
+    expect(rows, "officer must appear exactly once despite two active site channels").toHaveLength(1);
+    // Deterministic pick: oldest created_at wins.
+    expect(rows[0].siteChannelId).toBe(ctx.multiChOlderChannelId);
+    expect(rows[0].siteChannelId).not.toBe(ctx.multiChNewerChannelId);
   });
 });
