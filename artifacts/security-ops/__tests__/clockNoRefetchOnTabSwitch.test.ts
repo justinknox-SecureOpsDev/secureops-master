@@ -117,7 +117,13 @@ describe("EmployeeClockScreen — no redundant fetches on sub-tab switch", () =>
     // derive a key dynamically on every call, which can break deduplication.
     const hasActiveEntryKey = /getGetActiveTimeEntryQueryKey\(\)/.test(src);
     const hasTimeEntriesKey = /getGetTimeEntriesQueryKey\(/.test(src);
-    const hasClockInShiftsKey = /getGetMyClockInShiftsQueryKey\(\)/.test(src);
+    // Tighter than a bare getGetMyClockInShiftsQueryKey() presence check: the key
+    // also appears in queryClient.invalidateQueries calls (which use `queryKey:`
+    // directly, without the `query:` wrapper). Matching the Orval hook shape
+    // `query: { queryKey: getGetMyClockInShiftsQueryKey() }` ensures the key is
+    // actually wired into the hook invocation, not just a cache-invalidation call.
+    const hasClockInShiftsKey =
+      /query\s*:\s*\{\s*queryKey\s*:\s*getGetMyClockInShiftsQueryKey\s*\(\s*\)/.test(src);
 
     expect(
       hasActiveEntryKey,
@@ -134,9 +140,12 @@ describe("EmployeeClockScreen — no redundant fetches on sub-tab switch", () =>
 
     expect(
       hasClockInShiftsKey,
-      "clock.tsx must pass an explicit queryKey (getGetMyClockInShiftsQueryKey()) " +
-        "to useGetMyClockInShifts so the cached shift-picker list is reused across " +
-        "renders and is not silently refetched on every sub-tab switch.",
+      "clock.tsx must pass getGetMyClockInShiftsQueryKey() as `query: { queryKey: ... }` " +
+        "directly inside the useGetMyClockInShifts hook call. A bare presence check " +
+        "is insufficient because the key also appears in queryClient.invalidateQueries " +
+        "calls — a future refactor that drops the hook-level key while keeping the " +
+        "invalidation call would silently pass the weaker regex while leaving the " +
+        "shift-picker query uncovered.",
     ).toBe(true);
   });
 });
