@@ -19,8 +19,23 @@ const expo = new Expo();
  * To rename an admin tab: update the constant in tabNames.ts (security-ops),
  * update the matching constant below, and update the admin layout title prop —
  * the test will fail until all three agree.
+ *
+ * ── Category 1: live-ops / location tabs ─────────────────────────────────────
+ * Tabs used in geofence, emergency, and location-context notifications.
  */
 export const ADMIN_TAB_LIVE_MAP = "Live Map" as const;
+
+/**
+ * ── Category 2: action / approval tabs ───────────────────────────────────────
+ * Tabs for workflow actions admins may be directed to by future notifications
+ * (e.g. "Tap to review in the Approvals tab", "Check the Clock tab").
+ * Adding constants here gives future notification authors a type-safe
+ * reference and keeps the cross-package tabNames test coverage complete.
+ */
+export const ADMIN_TAB_APPROVALS = "Approvals" as const;
+export const ADMIN_TAB_CLOCK = "Clock" as const;
+export const ADMIN_TAB_SHIFTS = "Shifts" as const;
+export const ADMIN_TAB_INCIDENTS = "Incidents" as const;
 
 /**
  * SMS suffix appended to geofence-breach alerts, directing admins to open

@@ -25,7 +25,7 @@
  *      the canonical tabNames.ts values.
  */
 
-import { readFileSync } from "node:fs";
+import { readFileSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 import { describe, it, expect } from "vitest";
 
@@ -415,6 +415,90 @@ describe("cross-package tab-name audit", () => {
             `known mobile tab name. Update SMS_GEOFENCE_MAP_PROMPT in push.ts ` +
             `and ADMIN_TAB_LIVE_MAP to match the current admin layout title.`,
         ).toBe(true);
+      }
+    }
+  });
+
+  it("all api-server source files contain no unknown tab-name phrases in push/SMS body strings", () => {
+    // Recursively collect all .ts source files in api-server/src, skipping
+    // test directories and files that already have dedicated tests above.
+    const srcDir = join(WORKSPACE_ROOT, "artifacts/api-server/src");
+    const DEDICATED_TESTS = new Set([
+      join(srcDir, "lib/push.ts"),
+      join(srcDir, "lib/geofence.ts"),
+    ]);
+
+    function collectTsFiles(dir: string): string[] {
+      const entries = readdirSync(dir, { withFileTypes: true });
+      const result: string[] = [];
+      for (const entry of entries) {
+        const fullPath = join(dir, entry.name);
+        if (entry.isDirectory()) {
+          // Skip test directories entirely — test bodies have
+          // intentional inline strings that are not production copy.
+          if (entry.name === "__tests__") continue;
+          result.push(...collectTsFiles(fullPath));
+        } else if (
+          entry.isFile() &&
+          entry.name.endsWith(".ts") &&
+          !entry.name.endsWith(".test.ts") &&
+          !DEDICATED_TESTS.has(fullPath)
+        ) {
+          result.push(fullPath);
+        }
+      }
+      return result;
+    }
+
+    const tsFiles = collectTsFiles(srcDir);
+    expect(
+      tsFiles.length,
+      "Expected to find at least one api-server source file to audit",
+    ).toBeGreaterThan(0);
+
+    for (const filePath of tsFiles) {
+      const source = readFileSync(filePath, "utf8");
+
+      // Strip single-line and block comments so we don't flag comment
+      // examples or TODO strings that mention tab names inline.
+      const withoutComments = source
+        .replace(/\/\/[^\n]*/g, "")
+        .replace(/\/\*[\s\S]*?\*\//g, "");
+
+      // ── Push notification body: strings ────────────────────────────────
+      // Match `body: "..."`, `body: '...'`, or `body: \`...\`` patterns.
+      // This is the canonical push-notification body field; any inline tab
+      // name here (e.g. "Check the Approvals tab") must come from a
+      // ADMIN_TAB_* or employee TAB_* constant so the tabNames test catches
+      // future renames.
+      //
+      // Template literals may contain ${} interpolations — strip them before
+      // phrase-matching so variable names don't pollute the text (e.g.
+      // "from ${site.name}." should not accidentally form a tab phrase).
+      //
+      // Deliberately NOT scanning all quoted strings or all template literals
+      // in a file — that would falsely flag `message:` API response strings
+      // (e.g. timeEntries.ts: "…in the Shifts tab") and comment examples
+      // that use tab names for documentation purposes.
+      const BODY_RE =
+        /\bbody:\s*(?:"((?:[^"\\]|\\.)*)"|'((?:[^'\\]|\\.)*)'|`((?:[^`\\]|\\.)*)`)/g;
+      let m: RegExpExecArray | null;
+      const relPath = filePath.replace(WORKSPACE_ROOT, "");
+      while ((m = BODY_RE.exec(withoutComments)) !== null) {
+        const rawBody = m[1] ?? m[2] ?? m[3] ?? "";
+        // Replace ${...} interpolations with a space so consecutive words
+        // around a substitution don't accidentally merge into a tab phrase.
+        const plainBody = rawBody.replace(/\$\{[^}]*\}/g, " ");
+        const phrases = extractTabPhrases(plainBody);
+        for (const phrase of phrases) {
+          expect(
+            isKnownTabPhrase(phrase),
+            `${relPath}: push body "${plainBody.trim()}" contains ` +
+              `"${phrase} tab" which is not a known tab or sub-tab name. ` +
+              `Known names: ${[...KNOWN_TAB_PREFIXES].join(", ")}. ` +
+              `Use an ADMIN_TAB_* or employee TAB_* constant from push.ts / tabNames.ts.`,
+          ).toBe(true);
+        }
       }
     }
   });
