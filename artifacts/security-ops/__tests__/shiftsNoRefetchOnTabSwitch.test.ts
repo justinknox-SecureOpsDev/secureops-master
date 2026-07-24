@@ -152,5 +152,27 @@ describe("EmployeeShiftsScreen — no redundant fetches on sub-tab switch", () =
         "would pass even if the key only appeared in an invalidateQueries call — " +
         "which shifts.tsx has several of — and was never wired into the hook itself.",
     ).toBe(true);
+
+    // useGetActiveTimeEntry drives the clock-in button state: when an officer
+    // already has an open time entry, the button shows "Already Clocked In"
+    // instead of the claim/clock-in action. This value must come from the React
+    // Query cache, not a fresh network request, so the button stays stable while
+    // the officer browses shifts. Without a stable queryKey wired into the hook
+    // invocation (not just into invalidateQueries calls), RQ cannot deduplicate
+    // the request against the identical fetch issued by the Clock pane — the two
+    // panes would each trigger their own network round-trip, and the button could
+    // flicker between "Clocked In" and an empty state as the responses race.
+    const hasActiveTimeEntryKey =
+      /query\s*:\s*\{[^}]*queryKey\s*:\s*getGetActiveTimeEntryQueryKey\(\)/.test(src);
+
+    expect(
+      hasActiveTimeEntryKey,
+      "shifts.tsx must pass an explicit queryKey (getGetActiveTimeEntryQueryKey()) " +
+        "directly inside useGetActiveTimeEntry's `query: { queryKey: ... }` option " +
+        "so the clock-in button state is served from the shared cache rather than " +
+        "triggering a fresh network request. A bare presence check would pass even " +
+        "if the key only appeared in an invalidateQueries call and was never wired " +
+        "into the hook invocation itself.",
+    ).toBe(true);
   });
 });
