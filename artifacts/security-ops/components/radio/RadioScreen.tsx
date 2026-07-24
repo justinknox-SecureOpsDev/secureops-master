@@ -102,6 +102,16 @@ export default function RadioScreen(): React.JSX.Element {
   const supportsAudio = mediaRef.current?.supportsAudio ?? createRadioMedia().supportsAudio;
 
   const activeChannel = useMemo(() => channels.find((c) => c.id === activeId) || null, [channels, activeId]);
+  // Site radio channels get their own labelled section so a dispatcher can jump
+  // straight to any site's channel without hunting through the chip row (or
+  // opening the live map). Sorted by site name for scanability.
+  const siteChannels = useMemo(
+    () =>
+      channels
+        .filter((c) => c.scope === "site" && !c.archivedAt)
+        .sort((a, b) => (a.siteName ?? a.name).localeCompare(b.siteName ?? b.name)),
+    [channels],
+  );
   const isSpeakingHere = activeId ? speakers[activeId]?.userId === user?.id : false;
   const otherSpeaker = activeId && speakers[activeId] && speakers[activeId]?.userId !== user?.id ? speakers[activeId] : null;
   const isTransmitting = talkState === "live" || talkState === "requesting" || talkState === "connecting";
@@ -462,6 +472,38 @@ export default function RadioScreen(): React.JSX.Element {
         })}
       </ScrollView>
 
+      {siteChannels.length > 0 && (
+        <View style={styles.siteSection}>
+          <Text style={styles.siteSectionTitle}>Site Channels</Text>
+          <ScrollView style={styles.siteList} showsVerticalScrollIndicator={false}>
+            {siteChannels.map((c) => {
+              const active = c.id === activeId;
+              const sp = speakers[c.id];
+              const label = c.siteName ?? c.name;
+              return (
+                <TouchableOpacity
+                  key={c.id}
+                  onPress={() => setActiveId(c.id)}
+                  style={[styles.siteRow, active && { borderColor: colors.primary, backgroundColor: colors.card }]}
+                  accessibilityRole="button"
+                  accessibilityState={{ selected: active }}
+                  accessibilityLabel={`Site channel ${label}${sp ? `, ${sp.name} transmitting` : ""}`}
+                >
+                  <Feather name="map-pin" size={14} color={active ? colors.primary : colors.mutedForeground} />
+                  <View style={{ flex: 1 }}>
+                    <Text style={[styles.siteRowName, active && { color: colors.primary }]} numberOfLines={1}>{label}</Text>
+                    {c.siteName && c.name !== c.siteName && (
+                      <Text style={styles.siteRowSub} numberOfLines={1}>{c.name}</Text>
+                    )}
+                  </View>
+                  {sp && <Feather name="volume-2" size={14} color="#16a34a" />}
+                </TouchableOpacity>
+              );
+            })}
+          </ScrollView>
+        </View>
+      )}
+
       <View style={styles.body}>
         {!activeChannel ? (
           <Text style={styles.muted}>No channels available.</Text>
@@ -557,6 +599,12 @@ const makeStyles = (colors: ReturnType<typeof useColors>) => StyleSheet.create({
   chipRow: { maxHeight: 48, flexGrow: 0 },
   chip: { flexDirection: "row", alignItems: "center", paddingHorizontal: 12, paddingVertical: 6, borderRadius: 16, backgroundColor: colors.card, borderWidth: 1, borderColor: colors.border },
   chipText: { color: colors.foreground, fontSize: 13 },
+  siteSection: { paddingHorizontal: 16, paddingTop: 12 },
+  siteSectionTitle: { fontSize: 12, fontWeight: "700", color: colors.mutedForeground, textTransform: "uppercase", letterSpacing: 0.5, marginBottom: 6 },
+  siteList: { maxHeight: 168, flexGrow: 0 },
+  siteRow: { flexDirection: "row", alignItems: "center", gap: 10, paddingHorizontal: 12, paddingVertical: 9, borderRadius: 10, borderWidth: 1, borderColor: colors.border, backgroundColor: colors.background, marginBottom: 6 },
+  siteRowName: { color: colors.foreground, fontSize: 14, fontWeight: "600" },
+  siteRowSub: { color: colors.mutedForeground, fontSize: 11, marginTop: 1 },
   body: { flex: 1, alignItems: "center", paddingTop: 24 },
   channelName: { fontSize: 20, fontWeight: "700", color: colors.foreground },
   muted: { color: colors.mutedForeground, fontSize: 13, marginTop: 4 },
