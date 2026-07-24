@@ -115,7 +115,20 @@ describe("EmployeeClockScreen — no redundant fetches on sub-tab switch", () =>
     // reuse the cached response on subsequent renders without an additional
     // network round-trip. Without an explicit key, some Orval-generated hooks
     // derive a key dynamically on every call, which can break deduplication.
-    const hasActiveEntryKey = /getGetActiveTimeEntryQueryKey\(\)/.test(src);
+    //
+    // WHY THE STRICTER REGEX FOR activeTimeEntry:
+    // A bare `/getGetActiveTimeEntryQueryKey\(\)/.test(src)` would pass even if
+    // the key only appears in queryClient.invalidateQueries or setQueryData calls —
+    // which clock.tsx has several of — and is never wired into the hook invocation
+    // itself. The tighter pattern matches the Orval hook shape
+    //   `query: { queryKey: getGetActiveTimeEntryQueryKey() }`
+    // so the assertion only passes when the key is inside the hook's own `query`
+    // option, confirming that the Clock pane and the Shifts pane share the same
+    // cache entry for the active time entry (no duplicate network requests, no
+    // button-state flicker as two independent fetches race each other).
+    // This mirrors the same tightening applied in shiftsNoRefetchOnTabSwitch.test.ts.
+    const hasActiveEntryKey =
+      /query\s*:\s*\{[^}]*queryKey\s*:\s*getGetActiveTimeEntryQueryKey\s*\(\s*\)/.test(src);
     const hasTimeEntriesKey = /getGetTimeEntriesQueryKey\(/.test(src);
     // Tighter than a bare getGetMyClockInShiftsQueryKey() presence check: the key
     // also appears in queryClient.invalidateQueries calls (which use `queryKey:`
@@ -127,9 +140,12 @@ describe("EmployeeClockScreen — no redundant fetches on sub-tab switch", () =>
 
     expect(
       hasActiveEntryKey,
-      "clock.tsx must pass an explicit queryKey (getGetActiveTimeEntryQueryKey()) " +
-        "to useGetActiveTimeEntry so React Query can match and serve the cached " +
-        "response without re-fetching on every sub-tab switch.",
+      "clock.tsx must pass getGetActiveTimeEntryQueryKey() directly inside " +
+        "useGetActiveTimeEntry's `query: { queryKey: ... }` option so the Clock " +
+        "pane shares the same React Query cache entry as the Shifts pane. A bare " +
+        "presence check would pass even if the key only appeared in an " +
+        "invalidateQueries or setQueryData call, leaving the hook invocation " +
+        "uncovered and causing the two panes to issue separate network requests.",
     ).toBe(true);
 
     expect(
