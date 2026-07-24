@@ -157,7 +157,7 @@ async function buildOfficerGuide() {
 
   g.sectionHeader(2, "Your Home screen");
   g.step(1, "Check your status at a glance", "Home shows your week: hours worked, monthly hours, upcoming shifts, and any shifts waiting for you to accept.");
-  g.step(2, "See if you're on duty", "If you're clocked in, a green \"ON DUTY\" banner appears with a shortcut to the Clock tab. If not, you'll see a Clock In button.");
+  g.step(2, "See if you're on duty", "If you're clocked in, a green \"ON DUTY\" banner appears with a shortcut to the Clock In/Out screen. If not, you'll see a Clock In button.");
   g.step(3, "Watch for alerts", "Red banners warn you about expired or missing licenses and open incidents that need your attention. Quick-action shortcuts let you jump straight to Report Incident, My Shifts, or My Profile.");
 
   g.sectionHeader(3, "Finding and managing shifts");
@@ -168,7 +168,7 @@ async function buildOfficerGuide() {
 
   g.sectionHeader(4, "Clocking in and out");
   g.step(1, "Enable location", "Make sure GPS/location is on \u2014 the app uses it to confirm you're at the right site.");
-  g.step(2, "Clock in", "On the Clock tab, tap the large green CLOCK IN button. The app finds your site from your GPS location; confirm the prompt. A timer starts and a green \"ON DUTY\" ring appears.");
+  g.step(2, "Clock in", "On My Work \u2192 Clock In/Out, tap the large green CLOCK IN button. The app finds your site from your GPS location; confirm the prompt. A timer starts and a green \"ON DUTY\" ring appears.");
   g.step(3, "Stay tracked while on duty", "While clocked in, the app quietly updates your location about once a minute so dispatch can see you on the live map. If you drift outside the site perimeter, your admins are alerted.");
   g.step(4, "Clock out", "When your shift ends, tap the red CLOCK OUT button and confirm. Your hours are then sent to an admin for approval.");
 
@@ -220,6 +220,7 @@ async function buildAdminMobileGuide() {
   );
 
   g.sectionHeader(1, "Dashboard \u2014 your operations hub");
+  g.note("Finding your way around", "The tab bar has Home, My Work, Incidents, Chat, Profile, and More. Management tools \u2014 Personnel, Shifts, Live Map, Radio, approvals, payroll, invoices, clients, and licenses \u2014 all live under More \u2192 Management.");
   g.step(1, "Read the operational status", "The dashboard shows live counts: active shifts, officers clocked in, open incidents, upcoming shifts, total staff, and expiring licenses. Tap any card to jump to that area.");
   g.step(2, "Fill open vacancies", "A list shows upcoming shifts that still need officers. Tap \"Notify\" to push a request to every qualified officer, or tap a vacancy to open the shift and assign someone by hand.");
   g.step(3, "Scan recent incidents", "A feed of the latest incidents is color-coded by severity so critical items stand out. Quick actions link to Clients, Time Approval, Payroll, Invoices, and Licenses.");

@@ -55,7 +55,13 @@ export const MY_WORK_SUBTAB_CLOCK = "Clock In/Out" as const;
 // These appear in app/(admin)/_layout.tsx and are used by push notification
 // body strings and admin-portal copy that direct admins to a specific tab.
 
-export const TAB_ADMIN_OVERVIEW = "Overview" as const;
+// The admin shell mirrors the employee/site-manager shell: six visible tabs
+// (Home, My Work, Incidents, Chat, Profile, More) with all management tools
+// reached through the More → Management screen. The management screens keep
+// their own titles below — they still render as native headers and are
+// referenced by push-notification copy — but they are no longer nav-bar tabs.
+export const TAB_ADMIN_HOME = "Home" as const;
+export const TAB_ADMIN_MY_WORK = "My Work" as const;
 export const TAB_ADMIN_PERSONNEL = "Personnel" as const;
 export const TAB_ADMIN_SHIFTS = "Shifts" as const;
 export const TAB_ADMIN_APPROVALS = "Approvals" as const;
@@ -63,8 +69,8 @@ export const TAB_ADMIN_LIVE_MAP = "Live Map" as const;
 export const TAB_ADMIN_INCIDENTS = "Incidents" as const;
 export const TAB_ADMIN_CHAT = "Chat" as const;
 export const TAB_ADMIN_RADIO = "Radio" as const;
-export const TAB_ADMIN_CLOCK = "Clock" as const;
 export const TAB_ADMIN_PROFILE = "Profile" as const;
+export const TAB_ADMIN_MORE = "More" as const;
 
 /**
  * All nav-bar tab titles for the admin shell. Kept in sync with the
@@ -75,7 +81,8 @@ export const TAB_ADMIN_PROFILE = "Profile" as const;
  * will fail until both sides agree.
  */
 export const ALL_ADMIN_NAV_TAB_TITLES: ReadonlySet<string> = new Set([
-  TAB_ADMIN_OVERVIEW,
+  TAB_ADMIN_HOME,
+  TAB_ADMIN_MY_WORK,
   TAB_ADMIN_PERSONNEL,
   TAB_ADMIN_SHIFTS,
   TAB_ADMIN_APPROVALS,
@@ -83,8 +90,8 @@ export const ALL_ADMIN_NAV_TAB_TITLES: ReadonlySet<string> = new Set([
   TAB_ADMIN_INCIDENTS,
   TAB_ADMIN_CHAT,
   TAB_ADMIN_RADIO,
-  TAB_ADMIN_CLOCK,
   TAB_ADMIN_PROFILE,
+  TAB_ADMIN_MORE,
 ]);
 
 /**

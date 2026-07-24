@@ -597,26 +597,26 @@ describe("rename-detection proof — section 1 and pushScreenNames catch renamed
   });
 
   it("step 3a (admin): a renamed admin value → derived const name not in admin layout imports → section 2 fails", () => {
-    // Simulate: TAB_ADMIN_CLOCK is renamed from "Clock" to "Time".
-    // ALL_ADMIN_NAV_TAB_TITLES now contains "Time". Section 2 derives:
-    const derivedForTime = deriveAdminConstName("Time");
-    expect(derivedForTime).toBe("TAB_ADMIN_TIME");
+    // Simulate: TAB_ADMIN_SHIFTS is renamed from "Shifts" to "Roster".
+    // ALL_ADMIN_NAV_TAB_TITLES now contains "Roster". Section 2 derives:
+    const derivedForRoster = deriveAdminConstName("Roster");
+    expect(derivedForRoster).toBe("TAB_ADMIN_ROSTER");
 
-    // The admin layout still imports TAB_ADMIN_CLOCK.
-    // Section 2 would look for TAB_ADMIN_TIME and not find it → assertion failure.
-    expect(adminImportedNames.has("TAB_ADMIN_TIME")).toBe(false);
+    // The admin layout still imports TAB_ADMIN_SHIFTS.
+    // Section 2 would look for TAB_ADMIN_ROSTER and not find it → assertion failure.
+    expect(adminImportedNames.has("TAB_ADMIN_ROSTER")).toBe(false);
 
     // The real constant IS imported, confirming the current test passes:
-    expect(adminImportedNames.has(deriveAdminConstName("Clock"))).toBe(true);
-    expect(adminImportedNames.has("TAB_ADMIN_CLOCK")).toBe(true);
+    expect(adminImportedNames.has(deriveAdminConstName("Shifts"))).toBe(true);
+    expect(adminImportedNames.has("TAB_ADMIN_SHIFTS")).toBe(true);
   });
 
   it("step 3b (admin): a renamed admin value → old name removed from ALLOWED_PUSH_SCREEN_NAMES → push test fails", () => {
-    // "Clock" (the current TAB_ADMIN_CLOCK value) IS valid.
-    expect(ALLOWED_PUSH_SCREEN_NAMES.has("Clock")).toBe(true);
+    // "Shifts" (the current TAB_ADMIN_SHIFTS value) IS valid.
+    expect(ALLOWED_PUSH_SCREEN_NAMES.has("Shifts")).toBe(true);
 
-    // The hypothetical replacement "Time" is NOT, so push test would catch it.
-    expect(ALLOWED_PUSH_SCREEN_NAMES.has("Time")).toBe(false);
+    // The hypothetical replacement "Roster" is NOT, so push test would catch it.
+    expect(ALLOWED_PUSH_SCREEN_NAMES.has("Roster")).toBe(false);
   });
 
   it("all current employee tab titles produce a derivable constant name that IS imported by the layout", () => {

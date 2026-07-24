@@ -8,7 +8,8 @@ import { useChat } from "@/contexts/ChatContext";
 import { useFeatures, isEnabled } from "@/hooks/useFeatures";
 import { TourProvider } from "@/contexts/TourContext";
 import {
-  TAB_ADMIN_OVERVIEW,
+  TAB_ADMIN_HOME,
+  TAB_ADMIN_MY_WORK,
   TAB_ADMIN_PERSONNEL,
   TAB_ADMIN_SHIFTS,
   TAB_ADMIN_APPROVALS,
@@ -16,8 +17,8 @@ import {
   TAB_ADMIN_INCIDENTS,
   TAB_ADMIN_CHAT,
   TAB_ADMIN_RADIO,
-  TAB_ADMIN_CLOCK,
   TAB_ADMIN_PROFILE,
+  TAB_ADMIN_MORE,
 } from "@/constants/tabNames";
 
 export default function AdminLayout() {
@@ -65,53 +66,28 @@ export default function AdminLayout() {
           ),
       }}
     >
+      {/* ── Core tabs — mirrors the employee/site-manager shell ─────────────
+          Home, My Work, Incidents, Chat, Profile, More. All management tools
+          are reached through the More → Management screen, matching the site
+          manager experience. */}
       <Tabs.Screen
         name="dashboard"
         options={{
-          title: TAB_ADMIN_OVERVIEW,
+          title: TAB_ADMIN_HOME,
           headerTitle: `${process.env.EXPO_PUBLIC_COMPANY_SHORT_NAME ?? "SecureOps"} — Operations`,
-          tabBarAccessibilityLabel: "Overview tab",
+          tabBarAccessibilityLabel: "Home tab",
           tabBarIcon: ({ color }) => <Feather name="home" size={22} color={color} />,
         }}
       />
       <Tabs.Screen
-        name="employees"
+        name="clock"
         options={{
-          title: TAB_ADMIN_PERSONNEL,
-          tabBarAccessibilityLabel: "Personnel tab",
-          tabBarIcon: ({ color }) => <Feather name="users" size={22} color={color} />,
-        }}
-      />
-      <Tabs.Screen
-        name="shifts"
-        options={{
-          title: TAB_ADMIN_SHIFTS,
-          // The Shifts tab hosts a nested Stack whose screens render their own
-          // in-screen headers — suppress the tab navigator's native header so
-          // we don't double up.
-          headerShown: false,
-          tabBarAccessibilityLabel: "Shifts tab",
-          tabBarIcon: ({ color }) => <Feather name="calendar" size={22} color={color} />,
-        }}
-      />
-      <Tabs.Screen
-        name="shift-approvals"
-        options={{
-          title: TAB_ADMIN_APPROVALS,
+          title: TAB_ADMIN_MY_WORK,
           // The screen renders its own in-screen header/title, so suppress the
           // tab navigator's native header to avoid doubling up.
           headerShown: false,
-          tabBarAccessibilityLabel: "Shift approvals tab",
-          tabBarIcon: ({ color }) => <Feather name="user-check" size={22} color={color} />,
-        }}
-      />
-      <Tabs.Screen
-        name="live-map"
-        options={{
-          title: TAB_ADMIN_LIVE_MAP,
-          href: isEnabled(flags, "liveMap") ? undefined : null,
-          tabBarAccessibilityLabel: "Live officer map tab",
-          tabBarIcon: ({ color }) => <Feather name="map" size={22} color={color} />,
+          tabBarAccessibilityLabel: "My work time clock tab",
+          tabBarIcon: ({ color }) => <Feather name="briefcase" size={22} color={color} />,
         }}
       />
       <Tabs.Screen
@@ -139,27 +115,6 @@ export default function AdminLayout() {
         }}
       />
       <Tabs.Screen
-        name="radio"
-        options={{
-          title: TAB_ADMIN_RADIO,
-          headerTitle: "Radio",
-          href: isEnabled(flags, "radio") ? undefined : null,
-          tabBarAccessibilityLabel: "Push to talk radio tab",
-          tabBarIcon: ({ color }) => <Feather name="radio" size={22} color={color} />,
-        }}
-      />
-      <Tabs.Screen
-        name="clock"
-        options={{
-          title: TAB_ADMIN_CLOCK,
-          // The screen renders its own in-screen header/title, so suppress the
-          // tab navigator's native header to avoid doubling up.
-          headerShown: false,
-          tabBarAccessibilityLabel: "Time clock tab",
-          tabBarIcon: ({ color }) => <Feather name="clock" size={22} color={color} />,
-        }}
-      />
-      <Tabs.Screen
         name="profile"
         options={{
           title: TAB_ADMIN_PROFILE,
@@ -169,6 +124,52 @@ export default function AdminLayout() {
           tabBarAccessibilityLabel: "My profile tab",
           tabBarIcon: ({ color }) => <Feather name="user" size={22} color={color} />,
         }}
+      />
+      <Tabs.Screen
+        name="more"
+        options={{
+          title: TAB_ADMIN_MORE,
+          // The screen renders its own in-screen "Management" header.
+          headerShown: false,
+          tabBarAccessibilityLabel: "More management tools tab",
+          tabBarIcon: ({ color }) => <Feather name="grid" size={22} color={color} />,
+        }}
+      />
+
+      {/* ── Management screens — reached via the More tab, hidden from the bar.
+          They keep their title props (rendered as native headers, and kept in
+          sync with push-notification copy via the tabNames test suite). ──── */}
+      <Tabs.Screen
+        name="employees"
+        options={{ href: null, title: TAB_ADMIN_PERSONNEL }}
+      />
+      <Tabs.Screen
+        name="shifts"
+        options={{
+          href: null,
+          title: TAB_ADMIN_SHIFTS,
+          // The Shifts screens host a nested Stack whose screens render their
+          // own in-screen headers — suppress the tab navigator's native header
+          // so we don't double up.
+          headerShown: false,
+        }}
+      />
+      <Tabs.Screen
+        name="shift-approvals"
+        options={{
+          href: null,
+          title: TAB_ADMIN_APPROVALS,
+          // The screen renders its own in-screen header/title.
+          headerShown: false,
+        }}
+      />
+      <Tabs.Screen
+        name="live-map"
+        options={{ href: null, title: TAB_ADMIN_LIVE_MAP }}
+      />
+      <Tabs.Screen
+        name="radio"
+        options={{ href: null, title: TAB_ADMIN_RADIO, headerTitle: "Radio" }}
       />
 
       {/* Hidden screens — accessible via router.push but not shown in tab bar */}
