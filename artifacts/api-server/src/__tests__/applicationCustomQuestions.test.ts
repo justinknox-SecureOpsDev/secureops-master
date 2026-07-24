@@ -26,8 +26,8 @@ import { signToken } from "../middlewares/auth";
  * `application_questions` is a single global table (no per-row tenancy), so each
  * test starts from a clean slate (afterEach wipes it) and the suite snapshots +
  * restores any pre-existing rows around the whole run. The api-server vitest
- * config runs files serially (singleFork), so this global mutation can't race
- * other suites.
+ * config runs files serially (fileParallelism: false), so this global mutation
+ * can't race other suites.
  */
 
 const TAG = `customq-test-${randomUUID().slice(0, 8)}`;

@@ -1,10 +1,12 @@
 ---
-name: adminGridTimeEntryInvoiceSync parallel flake
-description: Full `pnpm -r` test gate can fail this suite with a 23505 duplicate-invoice unique violation; passes in isolation.
+name: adminGridTimeEntryInvoiceSync parallel flake (FIXED)
+description: Was a DB race under concurrent file execution; fixed by fileParallelism:false in vitest config.
 ---
 
-Under the full parallel `test` gate, `artifacts/api-server/src/__tests__/adminGridTimeEntryInvoiceSync.test.ts` can fail with `duplicate key value violates unique constraint` (23505) when manually inserting a draft invoice for a (site, week) bucket the auto invoice-sync also upserts concurrently.
+`artifacts/api-server/src/__tests__/adminGridTimeEntryInvoiceSync.test.ts` used to fail with `duplicate key value violates unique constraint` (23505) when running under the full `pnpm -r test` gate.
 
-**Why:** the invoice auto-sync keyed on (siteId, ISO-week) races the test's manual insert under load; timing-dependent, not a code regression.
+**Root cause:** vitest's `fileParallelism` defaults to `true` even when `singleFork: true` is set, so test files ran concurrently within the single fork. The test's manual draft-invoice insert raced the auto invoice-sync upsert against the same `(siteId, ISO-week)` bucket.
 
-**How to apply:** if this is the ONLY failure in a full gate run and no invoice-sync code changed, re-run the file in isolation (`vitest run src/__tests__/adminGridTimeEntryInvoiceSync.test.ts`); if it passes, restart the `test` workflow rather than changing code. Note: single-file runs can also exit -1 with no output (OOM) under concurrent dev workflows — just retry.
+**Fix:** added `fileParallelism: false` to `artifacts/api-server/vitest.config.ts`. All test files now run strictly sequentially inside the single fork, eliminating the concurrent-DB-write race. Also raised `testTimeout`/`hookTimeout` from 30 s to 60 s to give heavier suites (chatMembershipLifecycle, dispatch) enough headroom.
+
+**How to apply:** if a new suite mutates global/shared DB state (single-row config tables, global counters), `fileParallelism: false` already protects it. Do NOT revert to concurrent execution to speed up CI — the DB on this project is a single shared instance and concurrent writes cause 23505 flakes.
