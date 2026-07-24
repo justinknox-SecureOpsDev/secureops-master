@@ -25,6 +25,7 @@ import { AssignNearestDialog, candidateBlockReason, type Candidate, type AssignN
 import {
   PANEL_IDS,
   DEFAULT_LAYOUT,
+  LEFT_PANELS,
   useDispatchLayout,
   applyPanelReorder,
   applyColumnBoundaryDrop,
@@ -690,6 +691,8 @@ export default function DispatchPage() {
           return (
             <div
               key={id}
+              data-panel-id={id}
+              data-column={LEFT_PANELS.includes(id) ? "left" : "right"}
               draggable
               onDragStart={() => handlePanelDragStart(id)}
               onDragEnd={handlePanelDragEnd}
