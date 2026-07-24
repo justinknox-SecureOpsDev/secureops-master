@@ -148,15 +148,6 @@ export default function AdminDashboardScreen() {
         </View>
       </View>
 
-      <View style={styles.section}>
-        <Text style={[styles.sectionTitle, { color: colors.accent }]}>PERSONNEL</Text>
-        <View style={styles.statsGrid}>
-          <StatCard label="Total Staff" value={summary?.totalEmployees ?? 0} icon="users" onPress={() => router.push({ pathname: "/(admin)/employees", params: { status: "all" } } as any)} />
-          <StatCard label="Active" value={summary?.activeEmployees ?? 0} icon="user-check" color="#22c55e" onPress={() => router.push({ pathname: "/(admin)/employees", params: { status: "active" } } as any)} />
-          <StatCard label="Pending" value={summary?.pendingEmployees ?? 0} icon="user-plus" color={colors.accent} onPress={() => router.push({ pathname: "/(admin)/employees", params: { status: "pending" } } as any)} />
-          <StatCard label="Expiring Licences" value={summary?.expiringLicenses ?? 0} icon="file-text" color={summary?.expiringLicenses ? colors.destructive : colors.mutedForeground} onPress={() => router.push("/(admin)/licenses" as any)} />
-        </View>
-      </View>
 
       {openVacancies.length > 0 && (
         <View style={styles.section}>
