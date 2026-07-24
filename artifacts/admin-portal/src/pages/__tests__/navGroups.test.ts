@@ -292,6 +292,13 @@ describe("applyNavOrder — stale key migration", () => {
     expect(result.map((g) => g.key)).toEqual(adminGroups.map((g) => g.key));
   });
 
+  it("fully-stale dispatcher saved order (only retired keys) yields the complete tab list", () => {
+    // Saved order contains ONLY the two retired dispatcher keys — no valid key at all.
+    // applyNavOrder must return all dispatcher groups in default order.
+    const result = applyNavOrder(dispatcherGroups, ["security", "settings"]);
+    expect(result).toEqual(dispatcherGroups);
+  });
+
   it("drops dispatcher's retired 'security'/'settings' keys and appends comms + account in default order", () => {
     // A dispatcher who saved their tab order before the restructure would have
     // "security" (now "comms") and "settings" (now "account") in their saved preference.
