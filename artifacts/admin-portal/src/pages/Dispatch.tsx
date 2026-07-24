@@ -367,19 +367,28 @@ export default function DispatchPage() {
   // (1 = col-start-2, 2 = col-start-3), or null when not hovering any zone.
   const [dragOverBoundary, setDragOverBoundary] = useState<number | null>(null);
 
-  // Reset drag state whenever panel visibility changes. If a dispatcher hides
-  // a panel while a drag is in progress (via the Customize popover or a
-  // concurrent tab), the insert state may still reference that panel's ID.
-  // buildWithPlaceholder silently produces no placeholder in that case, but the
-  // drag state is never cleared — leaving the UI in limbo until the next drag
-  // event. Clearing on every panels change ensures the stale state is always
-  // flushed before the next render.
+  // Reset drag state whenever panel visibility or column count changes.
+  //
+  // Panel toggle: if a dispatcher hides a panel while a drag is in progress
+  // (via the Customize popover or a concurrent tab), the insert state may still
+  // reference that panel's ID.  buildWithPlaceholder silently produces no
+  // placeholder in that case, but the drag state is never cleared — leaving
+  // the UI in limbo until the next drag event.
+  //
+  // Column change: changing layout.columns does NOT alter layout.panels, so
+  // the panels dependency alone would not fire.  A column-count change while
+  // dragging (e.g. 3→1) can leave dragSrcId and dragInsert referencing a
+  // position that no longer exists in the new layout, causing a ghost
+  // placeholder or a stale boundary zone on the next render.
+  //
+  // Including layout.columns as a dependency ensures the stale state is always
+  // flushed before the next render regardless of which layout dimension changed.
   useEffect(() => {
     dragSrcRef.current = null;
     dragInsertRef.current = null;
     setDragSrcId(null);
     setDragInsert(null);
-  }, [layout.panels]);
+  }, [layout.panels, layout.columns]);
 
   const handlePanelDragStart = useCallback((id: PanelId) => {
     dragSrcRef.current = id;

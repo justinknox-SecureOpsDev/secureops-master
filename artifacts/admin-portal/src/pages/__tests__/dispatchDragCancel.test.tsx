@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { render, screen, fireEvent, waitFor } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { Router } from "wouter";
@@ -135,9 +135,73 @@ async function waitForDraggablePanels(): Promise<[HTMLElement, HTMLElement]> {
 // Tests
 // ---------------------------------------------------------------------------
 
+describe("dispatch grid — drag state clears on column count change mid-drag", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    localStorage.clear();
+  });
+
+  afterEach(() => {
+    localStorage.clear();
+  });
+
+  it("boundary zones do not appear after a column-count change mid-drag (2→3 columns)", async () => {
+    // Start with the default 2-column layout.  Drag a panel so the boundary
+    // zone for column 1→2 enters the DOM, then change the column count to 3
+    // while the drag is still in progress.  The useEffect that depends on
+    // layout.columns must reset dragSrcId to null so that showBoundary
+    // (= dragSrcId !== null && columns >= 2) evaluates to false and neither
+    // of the two 3-column boundary zones appear in the DOM.
+    //
+    // Without the layout.columns dependency, dragSrcId remains set after the
+    // column change and both boundary zones would appear as ghost elements.
+    renderDispatch();
+
+    const [src] = await waitForDraggablePanels();
+
+    // Activate drag — boundary zone for the 2-column layout enters the DOM.
+    fireEvent.dragStart(src);
+
+    await waitFor(() => {
+      expect(
+        screen.getByTestId("column-boundary-drop-1"),
+        "boundary zone must be present while a drag is active (2-column layout)",
+      ).toBeTruthy();
+    });
+
+    // Open the Customize popover and switch to 3 columns while drag is live.
+    const customizeBtn = screen.getByRole("button", { name: /customize layout/i });
+    fireEvent.click(customizeBtn);
+
+    // The column buttons render as <button> elements with aria-pressed.
+    // "3" is the button that changes the layout to 3 columns.
+    const threeColBtn = await screen.findByRole("button", { name: "3" });
+    fireEvent.click(threeColBtn);
+
+    // After the layout.columns change the useEffect must have cleared
+    // dragSrcId → null.  showBoundary = false, so neither boundary zone
+    // (column-boundary-drop-1 or column-boundary-drop-2) should be in the DOM.
+    await waitFor(() => {
+      expect(
+        screen.queryByTestId("column-boundary-drop-1"),
+        "column-boundary-drop-1 must not appear: dragSrcId should be null after column change",
+      ).toBeNull();
+      expect(
+        screen.queryByTestId("column-boundary-drop-2"),
+        "column-boundary-drop-2 must not appear: dragSrcId should be null after column change",
+      ).toBeNull();
+    });
+  });
+});
+
 describe("dispatch grid — column boundary drop zone on drag cancel", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    localStorage.clear();
+  });
+
+  afterEach(() => {
+    localStorage.clear();
   });
 
   it("boundary zone disappears from the DOM when dragend fires mid-flight (drag cancelled without dropping)", async () => {
