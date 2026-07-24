@@ -8,7 +8,7 @@ description: Which admin-notification events go to ALL admins vs the single dedi
 WCSG splits admin-facing notifications into two audiences by event type:
 
 - **Safety / operational events → ALL admins.**
-  - SOS / emergency panic (`liveOps.ts` POST `/emergency`): in-app push **+ SMS + email**, all three to every admin.
+  - SOS / emergency panic (`liveOps.ts` POST `/emergency`): in-app push **+ SMS + email**, all three to every admin. ALSO broadcasts push+SMS ("EMERGENCY NEARBY") to every non-admin officer clocked into the same site (entry siteId OR its shift's site), excluding the SOS officer and admins (no double-notify).
   - Incident reports (`incidents.ts` POST `/incidents`): in-app push to every admin (plus the existing WS pulse to connected admins/dispatchers).
 - **HR / administrative events → ONE dedicated inbox** (`brand.adminNotifyEmail`, env `ADMIN_NOTIFY_EMAIL`, default `admin@williamscouncil.com`):
   - Officer self-edit / high-risk profile-change digest (`scheduledJobs.ts`): EMAIL goes only to the dedicated inbox; in-app push still fans out to all admins.

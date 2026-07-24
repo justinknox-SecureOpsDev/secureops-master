@@ -95,6 +95,10 @@ type Incident = {
   createdAt: string;
   adminNotes: string | null;
   employeeName: string | null;
+  /** Officer contact info (staff-only payload from /dispatch/active-incidents).
+   *  Rendered on the SOS map popup so a dispatcher can call/email in one tap. */
+  employeePhone?: string | null;
+  employeeEmail?: string | null;
 };
 
 type ActiveOfficer = {
@@ -1944,6 +1948,11 @@ type MapPoint = {
   // (covered by the dedicated /sites/:id route from the personnel grid).
   officerId?: string;
   incidentId?: string;
+  /** SOS contact info — set only on critical incident pins (staff-only
+   *  surface). The popup renders Call/Email actions that postMessage up
+   *  to the parent shell, which validates and opens tel:/mailto:. */
+  phone?: string;
+  email?: string;
   /** Per-site effective geofence radius (miles). Set on `kind:"site"`
    *  points so the map draws each site's circle at its own size — sites
    *  with a per-site override (`sites.geofence_radius_miles`) draw at
@@ -1987,7 +1996,17 @@ function buildLeafletHtml(
 .popup{font:13px -apple-system,system-ui,sans-serif}.popup b{color:#0c0a08}
 .popup-btn{margin-top:6px;background:#0c0a08;color:#c9a04a;border:1px solid #c9a04a;border-radius:4px;padding:4px 8px;font-size:12px;font-weight:600;cursor:pointer;font-family:inherit}
 .popup-btn:hover{background:#c9a04a;color:#0c0a08}
-.site-pin{display:flex;align-items:center;justify-content:center;width:28px;height:28px;border-radius:6px;background:#0c0a08;color:#c9a04a;border:2px solid #c9a04a;font:bold 13px -apple-system,system-ui,sans-serif;box-shadow:0 1px 4px rgba(0,0,0,.35)}</style>
+.site-pin{display:flex;align-items:center;justify-content:center;width:28px;height:28px;border-radius:6px;background:#0c0a08;color:#c9a04a;border:2px solid #c9a04a;font:bold 13px -apple-system,system-ui,sans-serif;box-shadow:0 1px 4px rgba(0,0,0,.35)}
+.officer-pin{filter:drop-shadow(0 1px 3px rgba(0,0,0,.55))}
+.sos-pin{position:relative;width:34px;height:34px}
+.sos-ring{position:absolute;left:0;top:0;width:34px;height:34px;border-radius:50%;background:rgba(220,38,38,.55);animation:sosring 1.2s ease-out infinite}
+.sos-core{position:absolute;left:4px;top:4px;width:26px;height:26px;border-radius:50%;background:#dc2626;border:2px solid #fff;color:#fff;display:flex;align-items:center;justify-content:center;font:800 9px -apple-system,system-ui,sans-serif;box-shadow:0 0 10px rgba(220,38,38,.9);animation:sosblink 1.2s step-start infinite;box-sizing:border-box}
+@keyframes sosring{0%{transform:scale(.55);opacity:.9}100%{transform:scale(2.3);opacity:0}}
+@keyframes sosblink{0%,100%{background:#dc2626}50%{background:#8f1d1d}}
+@media (prefers-reduced-motion:reduce){.sos-ring{animation:none;transform:scale(1.35);opacity:.3}.sos-core{animation:none}}
+.popup-contact{margin-top:6px;font-size:12px}
+.popup-btn-sos{background:#dc2626;color:#fff;border-color:#dc2626}
+.popup-btn-sos:hover{background:#b91c1c;color:#fff}</style>
 </head><body><div id="m"></div>
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 <script>
@@ -2003,25 +2022,61 @@ function resolveRadiusM(p){
   return Math.max(10, Math.min(miles * 1609.344, 50000));
 }
 const SEV = { critical:'#dc2626', high:'#ea580c', medium:'#eab308', low:'#94a3b8' };
-function popup(label, sub, officerId, incidentId){
+// Static icon markup (no user input ever interpolated here).
+const OFFICER_SVG='<svg width="24" height="26" viewBox="0 0 24 26" aria-hidden="true"><path d="M12 1l10 3.5v7c0 6.5-4.3 11.4-10 13.5C6.3 22.9 2 18 2 11.5v-7L12 1z" fill="#c9a04a" stroke="#0c0a08" stroke-width="1.6"/><path d="M12 6.5l1.7 3.4 3.7.6-2.7 2.6.7 3.7-3.4-1.8-3.4 1.8.7-3.7-2.7-2.6 3.7-.6L12 6.5z" fill="#0c0a08"/></svg>';
+const SITE_SVG='<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#c9a04a" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 22V4a1 1 0 0 1 1-1h10a1 1 0 0 1 1 1v18"/><path d="M2 22h20"/><path d="M9 7h1"/><path d="M14 7h1"/><path d="M9 11h1"/><path d="M14 11h1"/><path d="M9 15h1"/><path d="M14 15h1"/></svg>';
+function popup(p){
   const w=document.createElement('div');w.className='popup';
-  const b=document.createElement('b');b.appendChild(document.createTextNode(String(label||'')));
+  const b=document.createElement('b');b.appendChild(document.createTextNode(String(p.label||'')));
   w.appendChild(b);w.appendChild(document.createElement('br'));
-  w.appendChild(document.createTextNode(String(sub||'')));
+  w.appendChild(document.createTextNode(String(p.sub||'')));
+  // SOS pins carry the officer's contact info so a dispatcher can reach
+  // them in one tap. Values render via createTextNode and are handed to
+  // the parent shell as strings in a structured postMessage — the parent
+  // validates the format before opening tel:/mailto: (this sandboxed
+  // iframe cannot navigate on its own).
+  if (p.phone) {
+    const row=document.createElement('div');row.className='popup-contact';
+    row.appendChild(document.createTextNode('Phone: '+String(p.phone)));
+    w.appendChild(row);
+  }
+  if (p.phone || p.email) {
+    const btns=document.createElement('div');
+    if (p.phone) {
+      const call=document.createElement('button');
+      call.className='popup-btn popup-btn-sos';
+      call.appendChild(document.createTextNode('Call officer'));
+      call.addEventListener('click', function(){
+        try { parent.postMessage({ type:'wcsg:call', phone:String(p.phone) }, '*'); } catch(e) {}
+      });
+      btns.appendChild(call);
+    }
+    if (p.email) {
+      const mail=document.createElement('button');
+      mail.className='popup-btn';
+      if (p.phone) mail.style.marginLeft='6px';
+      mail.appendChild(document.createTextNode('Email'));
+      mail.addEventListener('click', function(){
+        try { parent.postMessage({ type:'wcsg:email', email:String(p.email) }, '*'); } catch(e) {}
+      });
+      btns.appendChild(mail);
+    }
+    w.appendChild(btns);
+  }
   // Render a deep-link button on officer/incident pins. Built via
   // createElement + addEventListener (never innerHTML) so any officer-
   // controlled label/id can never break out into script context. The
   // id itself is sent as a string in a structured postMessage; the
   // parent admin shell validates and dispatches to the correct route.
-  if (officerId || incidentId) {
+  if (p.officerId || p.incidentId) {
     w.appendChild(document.createElement('br'));
     const btn=document.createElement('button');
     btn.className='popup-btn';
-    btn.appendChild(document.createTextNode(officerId ? 'View profile' : 'View incident'));
+    btn.appendChild(document.createTextNode(p.officerId ? 'View profile' : 'View incident'));
     btn.addEventListener('click', function(){
       try {
-        if (officerId) parent.postMessage({ type:'wcsg:openOfficer', userId:String(officerId) }, '*');
-        else if (incidentId) parent.postMessage({ type:'wcsg:openIncident', incidentId:String(incidentId) }, '*');
+        if (p.officerId) parent.postMessage({ type:'wcsg:openOfficer', userId:String(p.officerId) }, '*');
+        else if (p.incidentId) parent.postMessage({ type:'wcsg:openIncident', incidentId:String(p.incidentId) }, '*');
       } catch(e) {}
     });
     w.appendChild(btn);
@@ -2099,21 +2154,34 @@ if(pts.length){
         interactive: false,
       }).addTo(group);
       const icon = L.divIcon({
-        className:'', html:'<div class="site-pin">S</div>',
+        className:'', html:'<div class="site-pin">'+SITE_SVG+'</div>',
         iconSize:[28,28], iconAnchor:[14,14]
       });
       m = L.marker([p.lat,p.lng], { icon });
+    } else if (p.kind === 'officer') {
+      // Clocked-in officers render as a gold badge/shield so they read
+      // instantly as personnel vs. buildings and incident pins.
+      const icon = L.divIcon({
+        className:'officer-pin', html:OFFICER_SVG,
+        iconSize:[24,26], iconAnchor:[12,13]
+      });
+      m = L.marker([p.lat,p.lng], { icon, zIndexOffset:200 });
+    } else if (p.severity === 'critical') {
+      // SOS / critical incidents: flashing red beacon pinned above every
+      // other marker. The CSS animation is suppressed for users with
+      // prefers-reduced-motion (static red halo instead).
+      const icon = L.divIcon({
+        className:'', html:'<div class="sos-pin"><div class="sos-ring"></div><div class="sos-core">SOS</div></div>',
+        iconSize:[34,34], iconAnchor:[17,17]
+      });
+      m = L.marker([p.lat,p.lng], { icon, zIndexOffset:1000 });
     } else {
-      const isInc = p.kind === 'incident';
-      const color = isInc ? (SEV[p.severity]||'#94a3b8') : '#c9a04a';
+      const color = SEV[p.severity]||'#94a3b8';
       m = L.circleMarker([p.lat,p.lng], {
-        radius: isInc ? 12 : 9,
-        color, fillColor: color,
-        fillOpacity: isInc ? 0.95 : 0.85,
-        weight: isInc ? 4 : 3,
+        radius: 12, color, fillColor: color, fillOpacity: 0.95, weight: 4,
       });
     }
-    m.bindPopup(popup(p.label, p.sub, p.officerId, p.incidentId));
+    m.bindPopup(popup(p));
     // Hover tooltip surfaces the name instantly without a click, which is
     // what dispatchers want when scanning bunching/gaps. Content is built
     // via createTextNode (see tip()), never as a raw string — Leaflet
@@ -2160,15 +2228,18 @@ function LiveMapPanel({
 }) {
   const [, navigate] = useLocation();
 
-  // Listen for popup deep-link clicks from inside the sandboxed leaflet
-  // iframe. We accept only our two known message shapes and validate the
-  // id is a plain string — every other message is ignored. The iframe is
+  // Listen for popup clicks from inside the sandboxed leaflet iframe. We
+  // accept only our known message shapes and validate every payload field
+  // — every other message is ignored. The iframe is
   // sandbox="allow-scripts" (no allow-same-origin), so its origin is
   // "null" by design; filtering on shape + a `wcsg:` type prefix is the
   // right contract here. Officer pins navigate to the role-shared
   // /personnel/:id profile page; incident pins hand off to the
   // Dispatch page's IncidentsPanel which opens the existing edit dialog
   // — dispatcher-safe (no /incidents/share-links dependency).
+  // SOS popups additionally request tel:/mailto: opens — the sandboxed
+  // iframe can't navigate, so the parent validates the phone/email format
+  // strictly before touching window.location.
   useEffect(() => {
     const handler = (ev: MessageEvent) => {
       const data = ev.data;
@@ -2183,6 +2254,25 @@ function LiveMapPanel({
         const iid = (data as { incidentId?: unknown }).incidentId;
         if (typeof iid === "string" && iid.length > 0 && iid.length < 100) {
           onFocusIncident(iid);
+        }
+      } else if (type === "wcsg:call") {
+        const phone = (data as { phone?: unknown }).phone;
+        // Allow-list of dial characters only, then strip to +digits for the
+        // tel: URI so nothing else can ride along into the navigation.
+        if (typeof phone === "string" && /^[+()\d\s.-]{7,24}$/.test(phone)) {
+          const cleaned = phone.replace(/[^+\d]/g, "");
+          if (cleaned.replace(/\D/g, "").length >= 7) {
+            window.location.href = `tel:${cleaned}`;
+          }
+        }
+      } else if (type === "wcsg:email") {
+        const email = (data as { email?: unknown }).email;
+        if (
+          typeof email === "string" &&
+          email.length <= 200 &&
+          /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)
+        ) {
+          window.location.href = `mailto:${encodeURIComponent(email)}`;
         }
       } else if (type === "wcsg:mapTileLayer") {
         const layer = (data as { layer?: unknown }).layer;
@@ -2236,12 +2326,18 @@ function LiveMapPanel({
       if (!i.lat || !i.lng) continue;
       const lat = parseFloat(i.lat); const lng = parseFloat(i.lng);
       if (!isFinite(lat) || !isFinite(lng)) continue;
+      // Critical (SOS) pins carry the officer's contact info so the popup
+      // can offer one-tap call/email. Staff-only data — this page is
+      // admin/dispatcher-gated and the fields never reach client portals.
+      const sos = i.severity === "critical";
       pts.push({
         kind: "incident", lat, lng,
         severity: i.severity,
         label: `[${i.severity.toUpperCase()}] ${i.title}`,
-        sub: i.employeeName ?? i.locationDescription ?? i.status,
+        sub: `${i.employeeName ?? i.locationDescription ?? i.status} · ${fmtAgo(i.createdAt)}`,
         incidentId: i.id,
+        phone: sos ? (i.employeePhone ?? undefined) : undefined,
+        email: sos ? (i.employeeEmail ?? undefined) : undefined,
       });
     }
     return pts;

@@ -1,5 +1,5 @@
 import { Router, type IRouter } from "express";
-import { eq, isNull, and, sql, desc, gte, asc } from "drizzle-orm";
+import { eq, isNull, and, or, ne, sql, desc, gte, asc } from "drizzle-orm";
 import { db, usersTable, timeEntriesTable, shiftsTable, sitesTable, radioChannelsTable, incidentsTable, locationPingsTable } from "@workspace/db";
 import { requireStaff, requireAdminOrDispatcher } from "../middlewares/auth";
 import { emergencyLimiter, locationLimiter } from "../middlewares/rateLimit";
@@ -225,7 +225,10 @@ router.get("/admin/officers/:id/live", requireAdminOrDispatcher, async (req, res
 });
 
 // POST /emergency — officer triggers panic alert. Creates a critical incident
-// and pushes to every admin. Returns the incident + the recommended phone number.
+// and pushes to every admin. If the officer is clocked in at a site, every
+// OTHER officer currently clocked into that same site also gets the alert
+// (push + SMS) so nearby colleagues can respond first.
+// Returns the incident + the recommended phone number.
 router.post("/emergency", requireStaff, emergencyLimiter, async (req, res): Promise<void> => {
   const me = req.user!.userId;
   const { lat, lng, message } = (req.body ?? {}) as { lat?: number; lng?: number; message?: string };
@@ -289,6 +292,69 @@ router.post("/emergency", requireStaff, emergencyLimiter, async (req, res): Prom
     adminIds,
     `[WCSG EMERGENCY] ${user.firstName} ${user.lastName} pressed the panic button${locTxt}. Open the app immediately.`,
   ).catch((err: unknown) => req.log.warn({ err, incidentId: incident.id }, "emergency SMS dispatch failed"));
+
+  // Site-wide broadcast: if the SOS officer is clocked in, alert every
+  // OTHER officer currently clocked into the same site (push + SMS) so
+  // nearby colleagues can respond first. Site resolves from the active
+  // entry's own siteId (GPS / ad-hoc clock-ins) or its shift's site.
+  // Fire-and-forget like the admin channels — never blocks the response.
+  const sosSiteId =
+    active?.siteId ??
+    (active?.shiftId
+      ? ((await db
+          .select({ siteId: shiftsTable.siteId })
+          .from(shiftsTable)
+          .where(eq(shiftsTable.id, active.shiftId))
+          .limit(1))[0]?.siteId ?? null)
+      : null);
+  if (sosSiteId) {
+    (async () => {
+      const [site] = await db
+        .select({ name: sitesTable.name })
+        .from(sitesTable)
+        .where(eq(sitesTable.id, sosSiteId))
+        .limit(1);
+      const rows = await db
+        .selectDistinct({ employeeId: timeEntriesTable.employeeId })
+        .from(timeEntriesTable)
+        .leftJoin(shiftsTable, eq(timeEntriesTable.shiftId, shiftsTable.id))
+        .where(
+          and(
+            isNull(timeEntriesTable.clockOutTime),
+            ne(timeEntriesTable.employeeId, me),
+            or(eq(timeEntriesTable.siteId, sosSiteId), eq(shiftsTable.siteId, sosSiteId)),
+          ),
+        );
+      // Admins already got the alert above — don't double-notify one who
+      // happens to be clocked in at the same site.
+      const already = new Set<string>(adminIds);
+      const coworkerIds = rows.map((r) => r.employeeId).filter((id) => !already.has(id));
+      if (coworkerIds.length === 0) return;
+      const siteTxt = site?.name ? ` at ${site.name}` : " at your site";
+      const results = await Promise.allSettled([
+        sendPushToUsers(coworkerIds, {
+          title: "🚨 EMERGENCY NEARBY",
+          body: `${user.firstName} ${user.lastName} triggered a panic alert${siteTxt}. Check on them now.`,
+          data: { type: "emergency", incidentId: incident.id, lat: useLat, lng: useLng },
+        }),
+        sendSmsToUsers(
+          coworkerIds,
+          `[WCSG EMERGENCY] ${user.firstName} ${user.lastName} pressed the panic button${siteTxt}${locTxt}. Check on them now and open the app.`,
+        ),
+      ]);
+      for (const r of results) {
+        if (r.status === "rejected") {
+          req.log.warn({ err: r.reason, incidentId: incident.id }, "emergency co-worker dispatch failed");
+        }
+      }
+      req.log.info(
+        { incidentId: incident.id, siteId: sosSiteId, coworkerCount: coworkerIds.length },
+        "emergency broadcast to clocked-in co-workers",
+      );
+    })().catch((err: unknown) =>
+      req.log.warn({ err, incidentId: incident.id }, "emergency co-worker broadcast failed"),
+    );
+  }
 
   // Email to all admins — third channel alongside in-app push + SMS so the
   // alert lands even for admins who only watch their inbox. No-op when SMTP

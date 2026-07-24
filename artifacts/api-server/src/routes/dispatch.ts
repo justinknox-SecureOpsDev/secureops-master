@@ -643,9 +643,15 @@ router.get("/dispatch/active-incidents", requireAdminOrDispatcher, async (_req, 
       adminNotes: incidentsTable.adminNotes,
       employeeId: incidentsTable.employeeId,
       employeeName: sql<string>`${usersTable.firstName} || ' ' || ${usersTable.lastName}`,
+      // Contact info for the SOS map popup. Staff-only surface (this route
+      // is requireAdminOrDispatcher); account phone wins, HR-file phone is
+      // the fallback. NEVER copy these fields onto any client-portal read.
+      employeePhone: sql<string | null>`COALESCE(${usersTable.phoneNumber}, ${employeesTable.phone})`,
+      employeeEmail: usersTable.email,
     })
     .from(incidentsTable)
     .leftJoin(usersTable, eq(incidentsTable.employeeId, usersTable.id))
+    .leftJoin(employeesTable, eq(employeesTable.userId, usersTable.id))
     .where(and(ne(incidentsTable.status, "closed"), gte(incidentsTable.createdAt, since)))
     .orderBy(
       // critical=0,high=1,medium=2,low=3 — keeps critical pinned at the top.
