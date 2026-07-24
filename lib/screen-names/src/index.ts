@@ -86,3 +86,16 @@ export const ALL_ADMIN_NAV_TAB_TITLES: ReadonlySet<string> = new Set([
   TAB_ADMIN_CLOCK,
   TAB_ADMIN_PROFILE,
 ]);
+
+/**
+ * The union of all screen/tab names that may appear in push notification body
+ * strings. Combines every employee tab, admin tab, and My Work sub-tab so the
+ * API server test suite can import this directly instead of constructing it
+ * locally — ensuring a tab rename causes a compile error in the mobile app AND
+ * a failing test in the API server without any manual synchronisation.
+ */
+export const ALLOWED_PUSH_SCREEN_NAMES: ReadonlySet<string> = new Set([
+  ...ALL_NAV_TAB_TITLES,
+  ...ALL_ADMIN_NAV_TAB_TITLES,
+  MY_WORK_SUBTAB_SHIFTS,
+]);

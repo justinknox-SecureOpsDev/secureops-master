@@ -16,23 +16,14 @@ import { describe, it, expect } from "vitest";
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 
-import {
-  ALL_NAV_TAB_TITLES,
-  ALL_ADMIN_NAV_TAB_TITLES,
-  MY_WORK_SUBTAB_SHIFTS,
-} from "@workspace/screen-names";
+import { ALLOWED_PUSH_SCREEN_NAMES } from "@workspace/screen-names";
 
 // ---------------------------------------------------------------------------
-// Allowed names: every title-cased word (or word pair) that may appear
-// immediately before "tab" or "screen" in a push notification body string.
-// Derived from the canonical @workspace/screen-names exports so a rename
-// propagates automatically (covers both employee and admin shells).
+// Allowed names: imported directly from @workspace/screen-names so a tab
+// rename in lib/screen-names/src/index.ts propagates to this check
+// automatically — no manual synchronisation needed.
 // ---------------------------------------------------------------------------
-const ALLOWED_SCREEN_NAMES: ReadonlySet<string> = new Set([
-  ...ALL_NAV_TAB_TITLES,
-  ...ALL_ADMIN_NAV_TAB_TITLES,
-  MY_WORK_SUBTAB_SHIFTS,
-]);
+const ALLOWED_SCREEN_NAMES = ALLOWED_PUSH_SCREEN_NAMES;
 
 // ---------------------------------------------------------------------------
 // Files that produce push notification body text (they call sendPushToUsers
