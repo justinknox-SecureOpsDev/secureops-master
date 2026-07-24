@@ -1,7 +1,7 @@
 import React, { useEffect, useState, useCallback } from "react";
 import {
   View, Text, FlatList, TouchableOpacity, StyleSheet,
-  ActivityIndicator, RefreshControl, TextInput, Modal, Platform,
+  ActivityIndicator, RefreshControl, TextInput, Modal, Platform, Alert,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { Feather } from "@expo/vector-icons";
@@ -16,6 +16,8 @@ interface ChatRoom {
   id: string;
   name: string;
   type: string;
+  siteId?: string | null;
+  pinned: boolean;
   messageCount: number;
   otherUserId?: string | null;
   otherUserName?: string | null;
@@ -73,7 +75,7 @@ export default function ChatRoomsList({ onSelectRoom }: Props) {
     if (!newRoom.trim()) return;
     setCreating(true);
     try {
-      await apiRequest("/chat/rooms", { method: "POST", body: JSON.stringify({ name: newRoom.trim(), type: "general" }) });
+      await apiRequest("/chat/rooms", { method: "POST", body: JSON.stringify({ name: newRoom.trim(), type: "announcements" }) });
       setNewRoom("");
       fetchRooms();
     } finally {
@@ -104,6 +106,57 @@ export default function ChatRoomsList({ onSelectRoom }: Props) {
     } catch (e) {
       console.error("Failed to start DM", e);
     }
+  };
+
+  const togglePin = async (room: ChatRoom) => {
+    try {
+      await apiRequest(`/chat/rooms/${room.id}/pin`, { method: "PATCH" });
+      fetchRooms();
+    } catch (e) {
+      console.error("Failed to toggle pin", e);
+    }
+  };
+
+  const deleteRoom = (room: ChatRoom) => {
+    Alert.alert(
+      "Delete channel",
+      `Are you sure you want to delete #${room.name}? All messages will be permanently removed.`,
+      [
+        { text: "Cancel", style: "cancel" },
+        {
+          text: "Delete",
+          style: "destructive",
+          onPress: async () => {
+            try {
+              await apiRequest(`/chat/rooms/${room.id}`, { method: "DELETE" });
+              fetchRooms();
+            } catch (e) {
+              console.error("Failed to delete room", e);
+            }
+          },
+        },
+      ],
+    );
+  };
+
+  const showAdminActions = (room: ChatRoom) => {
+    if (!isAdmin || room.type === "direct") return;
+    Alert.alert(
+      `#${room.name}`,
+      "Admin actions",
+      [
+        {
+          text: room.pinned ? "Unpin channel" : "Pin to top",
+          onPress: () => togglePin(room),
+        },
+        {
+          text: "Delete channel",
+          style: "destructive",
+          onPress: () => deleteRoom(room),
+        },
+        { text: "Cancel", style: "cancel" },
+      ],
+    );
   };
 
   const channels = rooms.filter((r) => r.type !== "direct");
@@ -191,6 +244,7 @@ export default function ChatRoomsList({ onSelectRoom }: Props) {
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => { setRefreshing(true); fetchRooms(); }} tintColor={colors.primary} />}
         renderItem={({ item }) => {
           const isDirect = item.type === "direct";
+          const isSiteChannel = item.type === "site";
           const displayName = isDirect ? (item.otherUserName || "Direct") : `#${item.name}`;
           const initials = isDirect && item.otherUserName
             ? item.otherUserName.split(" ").map((n) => n[0]).join("").slice(0, 2).toUpperCase()
@@ -203,6 +257,7 @@ export default function ChatRoomsList({ onSelectRoom }: Props) {
             : "No unread messages";
           const a11yPieces = [
             isDirect ? `Direct message with ${displayName}` : `Channel ${displayName}`,
+            item.pinned ? "Pinned" : null,
             unreadLabel,
             item.lastMessage
               ? `Last message from ${item.lastMessage.userName}: ${item.lastMessage.content}, ${formatDistanceToNow(new Date(item.lastMessage.createdAt), { addSuffix: true })}`
@@ -211,28 +266,42 @@ export default function ChatRoomsList({ onSelectRoom }: Props) {
           ].filter(Boolean).join(". ");
           return (
             <TouchableOpacity
-              style={[s.roomCard, { backgroundColor: colors.card, borderColor: colors.border }]}
+              style={[
+                s.roomCard,
+                { backgroundColor: colors.card, borderColor: item.pinned ? colors.primary + "55" : colors.border },
+              ]}
               onPress={() => handleSelectRoom(item.id, displayName)}
+              onLongPress={() => showAdminActions(item)}
               activeOpacity={0.75}
               accessibilityRole="button"
               accessibilityLabel={a11yPieces}
-              accessibilityHint="Opens the conversation"
+              accessibilityHint={isAdmin && !isDirect ? "Press to open. Long press for admin actions." : "Opens the conversation"}
             >
               <View style={[s.roomIcon, { backgroundColor: colors.primary + "22" }]}>
                 {isDirect && initials ? (
                   <Text style={{ color: colors.primary, fontWeight: "700", fontSize: 13 }}>{initials}</Text>
                 ) : (
-                  <Feather name={item.type === "shift" ? "briefcase" : "hash"} size={18} color={colors.primary} />
+                  <Feather name={isSiteChannel ? "map-pin" : "hash"} size={18} color={colors.primary} />
                 )}
               </View>
               <View style={s.roomInfo}>
                 <View style={s.roomTopRow}>
-                  <Text
-                    style={[s.roomName, { color: colors.foreground }, hasUnread && s.roomNameUnread]}
-                    numberOfLines={1}
-                  >
-                    {displayName}
-                  </Text>
+                  <View style={s.roomNameRow}>
+                    <Text
+                      style={[s.roomName, { color: colors.foreground }, hasUnread && s.roomNameUnread]}
+                      numberOfLines={1}
+                    >
+                      {displayName}
+                    </Text>
+                    {item.pinned && (
+                      <Feather name="bookmark" size={12} color={colors.primary} style={{ marginLeft: 4 }} />
+                    )}
+                    {isSiteChannel && (
+                      <View style={[s.siteChip, { backgroundColor: colors.primary + "22" }]}>
+                        <Text style={[s.siteChipText, { color: colors.primary }]}>Site</Text>
+                      </View>
+                    )}
+                  </View>
                   {item.lastMessage && (
                     <Text style={[s.time, { color: hasUnread ? colors.primary : colors.mutedForeground }]}>
                       {formatDistanceToNow(new Date(item.lastMessage.createdAt), { addSuffix: true })}
@@ -372,8 +441,14 @@ const styles = (colors: ReturnType<typeof useColors>) => StyleSheet.create({
   roomIcon: { width: 40, height: 40, borderRadius: 20, alignItems: "center", justifyContent: "center" },
   roomInfo: { flex: 1 },
   roomTopRow: { flexDirection: "row", justifyContent: "space-between", alignItems: "center", gap: 8 },
-  roomName: { fontSize: 15, fontWeight: "600", flex: 1 },
+  roomNameRow: { flexDirection: "row", alignItems: "center", flex: 1 },
+  roomName: { fontSize: 15, fontWeight: "600", flexShrink: 1 },
   roomNameUnread: { fontWeight: "800" },
+  siteChip: {
+    marginLeft: 6, paddingHorizontal: 6, paddingVertical: 1,
+    borderRadius: 4,
+  },
+  siteChipText: { fontSize: 10, fontWeight: "700" },
   time: { fontSize: 12 },
   lastMsg: { fontSize: 13, marginTop: 2 },
   lastMsgUnread: { fontWeight: "600" },

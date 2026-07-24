@@ -212,9 +212,11 @@ router.get("/chat/rooms", requireStaff, async (req, res): Promise<void> => {
     })
   );
 
-  // Sort newest-activity first: rooms with a recent message bubble to the top;
-  // rooms with no messages fall to the bottom ordered by creation date.
+  // Sort: pinned rooms always float to the top, then newest-activity first.
+  // Rooms with no messages fall to the bottom ordered by creation date.
   enriched.sort((a, b) => {
+    if (a.pinned && !b.pinned) return -1;
+    if (!a.pinned && b.pinned) return 1;
     const aTime = a.lastMessage ? new Date(a.lastMessage.createdAt).getTime() : new Date(a.createdAt).getTime();
     const bTime = b.lastMessage ? new Date(b.lastMessage.createdAt).getTime() : new Date(b.createdAt).getTime();
     if (a.lastMessage && !b.lastMessage) return -1;
@@ -453,6 +455,26 @@ router.post("/chat/rooms", requireAuth, requireAdmin, async (req, res): Promise<
   }).returning();
   req.log.info({ roomId: room.id, roomName: room.name, roomType: room.type }, "Chat room created");
   res.status(201).json(room);
+});
+
+// PATCH /chat/rooms/:id/pin — admin toggles the pinned flag on a group channel.
+// Pinned rooms float to the top of GET /chat/rooms for every member.
+// Direct messages cannot be pinned.
+router.patch("/chat/rooms/:id/pin", requireAuth, requireAdmin, async (req, res): Promise<void> => {
+  const id = Array.isArray(req.params.id) ? req.params.id[0] : req.params.id;
+  const [room] = await db.select().from(chatRoomsTable).where(eq(chatRoomsTable.id, id)).limit(1);
+  if (!room) { res.status(404).json({ error: "Not Found", message: "Room not found" }); return; }
+  if (room.type === "direct") {
+    res.status(400).json({ error: "Bad Request", message: "Direct messages cannot be pinned" });
+    return;
+  }
+  const [updated] = await db
+    .update(chatRoomsTable)
+    .set({ pinned: !room.pinned })
+    .where(eq(chatRoomsTable.id, id))
+    .returning();
+  req.log.info({ roomId: id, pinned: updated!.pinned }, "Chat room pin toggled");
+  res.json(updated);
 });
 
 // DELETE /chat/rooms/:id — admin deletes a group channel. Direct messages

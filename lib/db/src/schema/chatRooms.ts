@@ -1,4 +1,4 @@
-import { pgTable, text, uuid, timestamp, integer, uniqueIndex, index } from "drizzle-orm/pg-core";
+import { pgTable, text, uuid, timestamp, integer, boolean, uniqueIndex, index } from "drizzle-orm/pg-core";
 
 /**
  * Chat rooms.
@@ -46,6 +46,8 @@ export const chatRoomsTable = pgTable("chat_rooms", {
   // semantic identity rather than fragile name matching. Only set on
   // canonical rooms; null on direct rooms and admin-created channels.
   slug: text("slug"),
+  // Admins can pin rooms to always float to the top of every member's list.
+  pinned: boolean("pinned").notNull().default(false),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
 }, (t) => ({
   directKeyUnique: uniqueIndex("chat_rooms_direct_key_unique").on(t.directKey),

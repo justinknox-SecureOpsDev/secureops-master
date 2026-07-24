@@ -1782,6 +1782,23 @@ paths:
                 properties:
                   ok: { type: boolean }
 
+  /chat/rooms/{id}/pin:
+    patch:
+      operationId: toggleChatRoomPin
+      tags: [chat]
+      summary: Toggle the pinned flag on a group channel (admin only). Pinned rooms float to the top of every member's list.
+      security:
+        - bearerAuth: []
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string } }
+      responses:
+        "200":
+          description: Updated room
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ChatRoom"
+
   /me/ui-preferences:
     put:
       operationId: updateMyUiPreferences
@@ -5239,12 +5256,17 @@ components:
           type: string
         type:
           type: string
+        siteId:
+          type: string
+          nullable: true
         shiftId:
           type: string
           nullable: true
         directKey:
           type: string
           nullable: true
+        pinned:
+          type: boolean
         otherUserId:
           type: string
           nullable: true
@@ -5265,7 +5287,7 @@ components:
               type: string
         messageCount:
           type: integer
-      required: [id, name, type, createdAt, messageCount]
+      required: [id, name, type, pinned, createdAt, messageCount]
 
     ActiveOfficer:
       type: object
