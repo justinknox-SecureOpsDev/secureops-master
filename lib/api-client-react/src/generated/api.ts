@@ -88,6 +88,7 @@ import type {
   GetAnalyticsOfficersParams,
   GetAnalyticsSummaryParams,
   GetChatMessagesParams,
+  GetClientContractUrl200,
   GetClientDar200,
   GetClientDarParams,
   GetClientIncidentsParams,
@@ -6714,6 +6715,90 @@ export const useDeleteChatRoom = <
 };
 
 /**
+ * @summary Toggle the pinned flag on a group channel (admin only). Pinned rooms float to the top of every member's list.
+ */
+export const getToggleChatRoomPinUrl = (id: string) => {
+  return `/api/chat/rooms/${id}/pin`;
+};
+
+export const toggleChatRoomPin = async (
+  id: string,
+  options?: RequestInit,
+): Promise<ChatRoom> => {
+  return customFetch<ChatRoom>(getToggleChatRoomPinUrl(id), {
+    ...options,
+    method: "PATCH",
+  });
+};
+
+export const getToggleChatRoomPinMutationOptions = <
+  TError = ErrorType<unknown>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof toggleChatRoomPin>>,
+    TError,
+    { id: string },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof toggleChatRoomPin>>,
+  TError,
+  { id: string },
+  TContext
+> => {
+  const mutationKey = ["toggleChatRoomPin"];
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof toggleChatRoomPin>>,
+    { id: string }
+  > = (props) => {
+    const { id } = props ?? {};
+
+    return toggleChatRoomPin(id, requestOptions);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type ToggleChatRoomPinMutationResult = NonNullable<
+  Awaited<ReturnType<typeof toggleChatRoomPin>>
+>;
+
+export type ToggleChatRoomPinMutationError = ErrorType<unknown>;
+
+/**
+ * @summary Toggle the pinned flag on a group channel (admin only). Pinned rooms float to the top of every member's list.
+ */
+export const useToggleChatRoomPin = <
+  TError = ErrorType<unknown>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof toggleChatRoomPin>>,
+    TError,
+    { id: string },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationResult<
+  Awaited<ReturnType<typeof toggleChatRoomPin>>,
+  TError,
+  { id: string },
+  TContext
+> => {
+  return useMutation(getToggleChatRoomPinMutationOptions(options));
+};
+
+/**
  * @summary Update the caller's UI personalization preferences
  */
 export const getUpdateMyUiPreferencesUrl = () => {
@@ -11028,6 +11113,81 @@ export const useAcknowledgePolicies = <
 > => {
   return useMutation(getAcknowledgePoliciesMutationOptions(options));
 };
+
+/**
+ * @summary Get a short-lived signed download URL for this client's contract document
+ */
+export const getGetClientContractUrlUrl = () => {
+  return `/api/client/contract`;
+};
+
+export const getClientContractUrl = async (
+  options?: RequestInit,
+): Promise<GetClientContractUrl200> => {
+  return customFetch<GetClientContractUrl200>(getGetClientContractUrlUrl(), {
+    ...options,
+    method: "GET",
+  });
+};
+
+export const getGetClientContractUrlQueryKey = () => {
+  return [`/api/client/contract`] as const;
+};
+
+export const getGetClientContractUrlQueryOptions = <
+  TData = Awaited<ReturnType<typeof getClientContractUrl>>,
+  TError = ErrorType<ErrorResponse>,
+>(options?: {
+  query?: UseQueryOptions<
+    Awaited<ReturnType<typeof getClientContractUrl>>,
+    TError,
+    TData
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}) => {
+  const { query: queryOptions, request: requestOptions } = options ?? {};
+
+  const queryKey = queryOptions?.queryKey ?? getGetClientContractUrlQueryKey();
+
+  const queryFn: QueryFunction<
+    Awaited<ReturnType<typeof getClientContractUrl>>
+  > = ({ signal }) => getClientContractUrl({ signal, ...requestOptions });
+
+  return { queryKey, queryFn, ...queryOptions } as UseQueryOptions<
+    Awaited<ReturnType<typeof getClientContractUrl>>,
+    TError,
+    TData
+  > & { queryKey: QueryKey };
+};
+
+export type GetClientContractUrlQueryResult = NonNullable<
+  Awaited<ReturnType<typeof getClientContractUrl>>
+>;
+export type GetClientContractUrlQueryError = ErrorType<ErrorResponse>;
+
+/**
+ * @summary Get a short-lived signed download URL for this client's contract document
+ */
+
+export function useGetClientContractUrl<
+  TData = Awaited<ReturnType<typeof getClientContractUrl>>,
+  TError = ErrorType<ErrorResponse>,
+>(options?: {
+  query?: UseQueryOptions<
+    Awaited<ReturnType<typeof getClientContractUrl>>,
+    TError,
+    TData
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+  const queryOptions = getGetClientContractUrlQueryOptions(options);
+
+  const query = useQuery(queryOptions) as UseQueryResult<TData, TError> & {
+    queryKey: QueryKey;
+  };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
 
 /**
  * @summary Get client org info and site list

@@ -9,6 +9,8 @@ import {
   CheckCircle2,
   Clock,
   AlertTriangle,
+  Download,
+  Loader2,
 } from "lucide-react";
 import { api } from "@/lib/api";
 
@@ -25,6 +27,8 @@ function useClientData() {
   const [shifts, setShifts] = useState<Shift[]>([]);
   const [requests, setRequests] = useState<CoverageRequest[]>([]);
   const [invoices, setInvoices] = useState<Invoice[]>([]);
+  const [hasContract, setHasContract] = useState<boolean | null>(null);
+  const [contractLoading, setContractLoading] = useState(false);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
@@ -44,10 +48,29 @@ function useClientData() {
       })
       .catch(() => {})
       .finally(() => { if (active) setLoading(false); });
+
+    // Probe for a contract (404 = none on file; 200 = one exists)
+    api<{ url: string }>("/client/contract")
+      .then(() => { if (active) setHasContract(true); })
+      .catch(() => { if (active) setHasContract(false); });
+
     return () => { active = false; };
   }, []);
 
-  return { me, shifts, requests, invoices, loading };
+  async function openContract() {
+    setContractLoading(true);
+    try {
+      const win = window.open("", "_blank");
+      const { url } = await api<{ url: string }>("/client/contract");
+      if (win) win.location.href = url;
+      else window.open(url, "_blank");
+    } catch {
+    } finally {
+      setContractLoading(false);
+    }
+  }
+
+  return { me, shifts, requests, invoices, hasContract, contractLoading, openContract, loading };
 }
 
 function StatusBadge({ status }: { status: string }) {
@@ -80,7 +103,7 @@ function fmtUsd(n: string | null) {
 }
 
 export default function ClientDashboard() {
-  const { me, shifts, requests, invoices, loading } = useClientData();
+  const { me, shifts, requests, invoices, hasContract, contractLoading, openContract, loading } = useClientData();
 
   if (loading) {
     return (
@@ -246,6 +269,40 @@ export default function ClientDashboard() {
           <div>
             You have {pendingInvoices.length} outstanding invoice{pendingInvoices.length !== 1 ? "s" : ""}.{" "}
             <Link href="/client/invoices" className="font-semibold hover:underline">Pay now →</Link>
+          </div>
+        </div>
+      )}
+
+      {/* Contract — only rendered once we know whether one is on file */}
+      {hasContract !== null && (
+        <div className="border rounded-lg overflow-hidden">
+          <div className="flex items-center gap-2 px-4 py-3 bg-muted/40 border-b">
+            <FileText className="w-4 h-4" />
+            <span className="text-sm font-semibold">Contract</span>
+          </div>
+          <div className="px-4 py-4 flex items-center gap-3">
+            {hasContract ? (
+              <>
+                <button
+                  type="button"
+                  onClick={openContract}
+                  disabled={contractLoading}
+                  className="inline-flex items-center gap-2 px-4 py-2 rounded-md border border-input bg-background text-sm font-medium shadow-sm hover:bg-accent hover:text-accent-foreground disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                >
+                  {contractLoading
+                    ? <Loader2 className="w-4 h-4 animate-spin" aria-hidden="true" />
+                    : <Download className="w-4 h-4" aria-hidden="true" />}
+                  {contractLoading ? "Opening…" : "View / Download Contract"}
+                </button>
+                <span className="text-xs text-muted-foreground">
+                  Opens the signed contract for this account in a new tab.
+                </span>
+              </>
+            ) : (
+              <p className="text-sm text-muted-foreground">
+                No contract on file yet. Contact your account manager if you need a copy.
+              </p>
+            )}
           </div>
         </div>
       )}

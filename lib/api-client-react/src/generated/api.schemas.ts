@@ -1199,6 +1199,8 @@ export interface Client {
   paymentTermsDays: number;
   billingCycle?: BillingCycle;
   notes?: string;
+  /** Object-storage path of the signed contract PDF (admin-only) */
+  contractDocKey?: string | null;
   sites?: Site[];
   createdAt: string;
 }
@@ -1225,6 +1227,8 @@ export interface UpdateClientRequest {
   paymentTermsDays?: number;
   billingCycle?: BillingCycle;
   notes?: string;
+  /** Object-storage path of the signed contract PDF */
+  contractDocKey?: string | null;
 }
 
 export interface ClockInSite {
@@ -1661,8 +1665,10 @@ export interface ChatRoom {
   id: string;
   name: string;
   type: string;
+  siteId?: string | null;
   shiftId?: string | null;
   directKey?: string | null;
+  pinned: boolean;
   otherUserId?: string | null;
   otherUserName?: string | null;
   createdAt: string;
@@ -2894,6 +2900,11 @@ export const AdminListOnboardingStatus = {
   pending: "pending",
   completed: "completed",
 } as const;
+
+export type GetClientContractUrl200 = {
+  url: string;
+  name?: string;
+};
 
 export type GetClientSites200Item = { [key: string]: unknown };
 

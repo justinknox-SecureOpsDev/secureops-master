@@ -370,6 +370,7 @@ export const TABLES: TableDescriptor[] = [
         helpText: "Weekly clients have invoices auto-generated each ISO week. All other cycles require manual generation via '+ New Invoice' on the Invoice Board.",
       },
       { key: "notes", label: "Notes", type: "textarea", hiddenInGrid: true },
+      { key: "contractDocKey", label: "Contract", type: "fileKey", hiddenInGrid: true, helpText: "Signed contract PDF or document for this client." },
       { key: "createdAt", label: "Created", type: "datetime", readonly: true },
     ],
   },

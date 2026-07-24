@@ -28,9 +28,12 @@ import {
   licensesTable,
 } from "@workspace/db";
 import { requireClient, requireAdmin } from "../middlewares/auth";
+import { ObjectStorageService, ObjectNotFoundError } from "../lib/objectStorage";
 import { buildIncidentReportPdf } from "../lib/incidentPdf";
 import { buildInvoicePdf } from "../lib/invoicePdf";
 import { sendEmail } from "../lib/email";
+
+const objectStorageService = new ObjectStorageService();
 
 const router: IRouter = Router();
 
@@ -139,6 +142,30 @@ router.get("/client/me", requireClient, async (req, res): Promise<void> => {
   } catch (err) {
     if (handleScopeError(err, res)) return;
     req.log.error({ err }, "[client/me] error");
+    res.status(500).json({ error: "Internal Server Error" });
+  }
+});
+
+// GET /client/contract
+// Returns a short-lived signed download URL for the client's contract document.
+// The contractDocKey is stored on the client record (admin-managed); we resolve
+// it here so client-portal users can view/download without admin storage access.
+router.get("/client/contract", requireClient, async (req, res): Promise<void> => {
+  try {
+    const { client } = await getClientSiteIds(req.user!.userId);
+    if (!client.contractDocKey) {
+      res.status(404).json({ error: "Not Found", message: "No contract on file for this client." });
+      return;
+    }
+    const url = await objectStorageService.getSignedDownloadURL(client.contractDocKey);
+    res.json({ url });
+  } catch (err) {
+    if (handleScopeError(err, res)) return;
+    if (err instanceof ObjectNotFoundError) {
+      res.status(404).json({ error: "Not Found", message: "Contract file not found." });
+      return;
+    }
+    req.log.error({ err }, "[client/contract] error");
     res.status(500).json({ error: "Internal Server Error" });
   }
 });

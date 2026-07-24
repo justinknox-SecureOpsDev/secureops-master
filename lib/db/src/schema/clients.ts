@@ -15,6 +15,7 @@ export const clientsTable = pgTable("clients", {
   paymentTermsDays: integer("payment_terms_days").notNull().default(30),
   billingCycle: text("billing_cycle").notNull().default("weekly"),
   notes: text("notes"),
+  contractDocKey: text("contract_doc_key"),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow().$onUpdate(() => new Date()),
 }, (t) => ({

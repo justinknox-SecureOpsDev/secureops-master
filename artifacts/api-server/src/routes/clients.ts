@@ -20,6 +20,7 @@ function projectClientForSiteManager<T extends Record<string, unknown>>(row: T):
     contactEmail,
     contactPhone,
     notes,
+    contractDocKey,
     ...rest
   } = row as Record<string, unknown>;
   return rest as Partial<T>;
@@ -78,7 +79,7 @@ router.post("/clients", requireAdmin, async (req, res): Promise<void> => {
 
 router.put("/clients/:id", requireAdmin, async (req, res): Promise<void> => {
   const id = Array.isArray(req.params.id) ? req.params.id[0] : req.params.id;
-  const { name, contactName, contactEmail, contactPhone, billingAddress, paymentTermsDays, notes } = req.body;
+  const { name, contactName, contactEmail, contactPhone, billingAddress, paymentTermsDays, notes, contractDocKey } = req.body;
   const updates: Record<string, unknown> = {};
   if (name !== undefined) updates.name = name;
   if (contactName !== undefined) updates.contactName = contactName;
@@ -87,6 +88,7 @@ router.put("/clients/:id", requireAdmin, async (req, res): Promise<void> => {
   if (billingAddress !== undefined) updates.billingAddress = billingAddress;
   if (paymentTermsDays !== undefined) updates.paymentTermsDays = Number(paymentTermsDays);
   if (notes !== undefined) updates.notes = notes;
+  if (contractDocKey !== undefined) updates.contractDocKey = contractDocKey || null;
 
   const [client] = await db.update(clientsTable).set(updates).where(eq(clientsTable.id, id)).returning();
   if (!client) { res.status(404).json({ error: "Not Found" }); return; }

@@ -2810,6 +2810,29 @@ paths:
 
   # ---- Client portal (role=client) ----
 
+  /client/contract:
+    get:
+      operationId: getClientContractUrl
+      tags: [clientPortal]
+      summary: Get a short-lived signed download URL for this client's contract document
+      security: [{ bearerAuth: [] }]
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  url: { type: string }
+                  name: { type: string }
+                required: [url]
+        "404":
+          description: No contract on file
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ErrorResponse" }
+
   /client/me:
     get:
       operationId: getClientMe
@@ -4554,6 +4577,7 @@ components:
         paymentTermsDays: { type: integer, description: "Net X days for invoices" }
         billingCycle: { $ref: "#/components/schemas/BillingCycle" }
         notes: { type: string }
+        contractDocKey: { type: string, nullable: true, description: "Object-storage path of the signed contract PDF (admin-only)" }
         sites:
           type: array
           items: { $ref: "#/components/schemas/Site" }
@@ -4584,6 +4608,7 @@ components:
         paymentTermsDays: { type: integer, minimum: 0 }
         billingCycle: { $ref: "#/components/schemas/BillingCycle" }
         notes: { type: string }
+        contractDocKey: { type: string, nullable: true, description: "Object-storage path of the signed contract PDF" }
 
     Site:
       type: object

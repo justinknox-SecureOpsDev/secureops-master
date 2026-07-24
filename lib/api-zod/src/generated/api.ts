@@ -48,6 +48,10 @@ export const GetClientsResponseItem = zod.object({
       "Invoice cadence for this client. 'weekly' uses the automatic ISO-week sync; all others require manual generation via POST \/invoices\/generate.",
     ),
   notes: zod.string().optional(),
+  contractDocKey: zod
+    .string()
+    .nullish()
+    .describe("Object-storage path of the signed contract PDF (admin-only)"),
   sites: zod
     .array(
       zod.object({
@@ -116,6 +120,10 @@ export const GetClientResponse = zod.object({
       "Invoice cadence for this client. 'weekly' uses the automatic ISO-week sync; all others require manual generation via POST \/invoices\/generate.",
     ),
   notes: zod.string().optional(),
+  contractDocKey: zod
+    .string()
+    .nullish()
+    .describe("Object-storage path of the signed contract PDF (admin-only)"),
   sites: zod
     .array(
       zod.object({
@@ -166,6 +174,10 @@ export const UpdateClientBody = zod.object({
       "Invoice cadence for this client. 'weekly' uses the automatic ISO-week sync; all others require manual generation via POST \/invoices\/generate.",
     ),
   notes: zod.string().optional(),
+  contractDocKey: zod
+    .string()
+    .nullish()
+    .describe("Object-storage path of the signed contract PDF"),
 });
 
 export const UpdateClientResponse = zod.object({
@@ -183,6 +195,10 @@ export const UpdateClientResponse = zod.object({
       "Invoice cadence for this client. 'weekly' uses the automatic ISO-week sync; all others require manual generation via POST \/invoices\/generate.",
     ),
   notes: zod.string().optional(),
+  contractDocKey: zod
+    .string()
+    .nullish()
+    .describe("Object-storage path of the signed contract PDF (admin-only)"),
   sites: zod
     .array(
       zod.object({
@@ -3188,8 +3204,10 @@ export const GetChatRoomsResponseItem = zod.object({
   id: zod.string(),
   name: zod.string(),
   type: zod.string(),
+  siteId: zod.string().nullish(),
   shiftId: zod.string().nullish(),
   directKey: zod.string().nullish(),
+  pinned: zod.boolean(),
   otherUserId: zod.string().nullish(),
   otherUserName: zod.string().nullish(),
   createdAt: zod.string(),
@@ -3222,6 +3240,34 @@ export const DeleteChatRoomParams = zod.object({
 
 export const DeleteChatRoomResponse = zod.object({
   ok: zod.boolean().optional(),
+});
+
+/**
+ * @summary Toggle the pinned flag on a group channel (admin only). Pinned rooms float to the top of every member's list.
+ */
+export const ToggleChatRoomPinParams = zod.object({
+  id: zod.coerce.string(),
+});
+
+export const ToggleChatRoomPinResponse = zod.object({
+  id: zod.string(),
+  name: zod.string(),
+  type: zod.string(),
+  siteId: zod.string().nullish(),
+  shiftId: zod.string().nullish(),
+  directKey: zod.string().nullish(),
+  pinned: zod.boolean(),
+  otherUserId: zod.string().nullish(),
+  otherUserName: zod.string().nullish(),
+  createdAt: zod.string(),
+  lastMessage: zod
+    .object({
+      content: zod.string().optional(),
+      createdAt: zod.string().optional(),
+      userName: zod.string().optional(),
+    })
+    .nullish(),
+  messageCount: zod.number(),
 });
 
 /**
@@ -3331,8 +3377,10 @@ export const CreateDirectChatResponse = zod.object({
   id: zod.string(),
   name: zod.string(),
   type: zod.string(),
+  siteId: zod.string().nullish(),
   shiftId: zod.string().nullish(),
   directKey: zod.string().nullish(),
+  pinned: zod.boolean(),
   otherUserId: zod.string().nullish(),
   otherUserName: zod.string().nullish(),
   createdAt: zod.string(),
@@ -5329,6 +5377,14 @@ export const AcknowledgePoliciesResponse = zod.object({
     .describe(
       "Per-user UI personalization. Cosmetic only — never authorization.",
     ),
+});
+
+/**
+ * @summary Get a short-lived signed download URL for this client's contract document
+ */
+export const GetClientContractUrlResponse = zod.object({
+  url: zod.string(),
+  name: zod.string().optional(),
 });
 
 /**
