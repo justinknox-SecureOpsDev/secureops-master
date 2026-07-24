@@ -5,29 +5,14 @@ import { Router } from "wouter";
 import { memoryLocation } from "wouter/memory-location";
 
 /**
- * Component-level regression for the dispatch grid column-boundary drop zone
- * cleanup on drag cancel.
- *
- * The boundary zone is governed by two separate state values:
- *   - dragSrcId (useState<PanelId | null>) — set in handlePanelDragStart, cleared
- *     in handlePanelDragEnd.  showBoundary = dragSrcId !== null && columns >= 2.
- *     Using state (not just a ref) ensures dragEnd always triggers a re-render and
- *     removes the element from the DOM, even when the other state variables
- *     (dragInsert, dragOverBoundary) happen to already be cleared.
- *   - dragOverBoundary (useState<boolean>) — controls the hover highlight / label
- *     shown while the cursor is physically over the zone.
+ * Component-level tests for the dispatch free-form panel layout.
  *
  * Covered:
- *   1. "Escape / release outside" cancel: dragend fires without a matching drop
- *      → dragSrcId becomes null → showBoundary = false → zone leaves the DOM.
- *   2. "Stale drag-over" cancel: cursor entered the boundary zone (dragover),
- *      then left (dragleave) without dropping → dragOverBoundary clears, zone
- *      returns to its idle label; a subsequent dragend removes the zone entirely.
- *
- * These paths were previously exercised only in pure-helper unit tests (which
- * test buildWithPlaceholder in isolation).  This file tests the full React
- * state path — setDragInsert, setDragOverBoundary, and dragSrcId — as wired
- * together inside DispatchPage.
+ *   1. All 6 panels render with at least one move handle and one resize handle.
+ *   2. Pointer-based move: pointerdown on the move handle, pointermove on
+ *      window → the panel element's inline style.left and style.top update.
+ *   3. Pointer-based resize (right edge): pointerdown on resize handle,
+ *      pointermove on window → panel element's inline style.width updates.
  */
 
 // ---------------------------------------------------------------------------
@@ -40,16 +25,12 @@ const EMPTY_STATUS_BOARD = {
 
 vi.mock("@/lib/api", () => ({
   api: vi.fn(async (path: string) => {
-    // StatusBoardPanel accesses data.onDuty.length etc. directly — needs an
-    // object, not an array.
     if (typeof path === "string" && path.includes("status-board")) {
       return EMPTY_STATUS_BOARD;
     }
-    // Everything else (open-shifts, active-incidents, active-officers, sites,
-    // broadcast-rooms, shift-claims, geofence-radius, …) is happy with [].
     return [];
   }),
-  getToken: vi.fn(() => null),        // keeps useIncidentWs from opening a WS
+  getToken: vi.fn(() => null),
   fetchWithAuth: vi.fn(async () => ({ ok: true, status: 200, json: async () => [] })),
   setToken: vi.fn(),
   setUnauthorizedHandler: vi.fn(),
@@ -89,7 +70,6 @@ function makeQc() {
     defaultOptions: {
       queries: {
         retry: false,
-        // Prevent background refetches from interfering with assertions.
         refetchInterval: false,
         staleTime: Infinity,
       },
@@ -111,23 +91,12 @@ function renderDispatch() {
   );
 }
 
-/**
- * Wait for at least two draggable panel wrappers to appear.  The dispatch grid
- * renders each visible panel inside a div with `draggable` so we can fire HTML
- * drag events on them.
- *
- * We target the wrappers that carry a `data-tour` attribute (every panel except
- * liveMap has one) so we can be certain we have two distinct panel wrappers.
- */
-async function waitForDraggablePanels(): Promise<[HTMLElement, HTMLElement]> {
+/** Wait until at least one panel move handle is in the DOM. */
+async function waitForMoveHandles() {
   return waitFor(() => {
-    const panels = Array.from(
-      document.querySelectorAll<HTMLElement>("[data-tour]"),
-    ).filter((el) => el.getAttribute("draggable") === "true");
-    if (panels.length < 2) {
-      throw new Error(`Expected ≥2 draggable panels, found ${panels.length}`);
-    }
-    return [panels[0], panels[1]] as [HTMLElement, HTMLElement];
+    const handles = screen.getAllByTestId("panel-move-handle");
+    if (handles.length === 0) throw new Error("No move handles found");
+    return handles;
   });
 }
 
@@ -135,7 +104,7 @@ async function waitForDraggablePanels(): Promise<[HTMLElement, HTMLElement]> {
 // Tests
 // ---------------------------------------------------------------------------
 
-describe("dispatch grid — drag state clears on column count change mid-drag", () => {
+describe("dispatch free-form layout — panel handles", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     localStorage.clear();
@@ -145,56 +114,31 @@ describe("dispatch grid — drag state clears on column count change mid-drag", 
     localStorage.clear();
   });
 
-  it("boundary zones do not appear after a column-count change mid-drag (2→3 columns)", async () => {
-    // Start with the default 2-column layout.  Drag a panel so the boundary
-    // zone for column 1→2 enters the DOM, then change the column count to 3
-    // while the drag is still in progress.  The useEffect that depends on
-    // layout.columns must reset dragSrcId to null so that showBoundary
-    // (= dragSrcId !== null && columns >= 2) evaluates to false and neither
-    // of the two 3-column boundary zones appear in the DOM.
-    //
-    // Without the layout.columns dependency, dragSrcId remains set after the
-    // column change and both boundary zones would appear as ghost elements.
+  it("renders a move handle and at least one resize handle for each visible panel", async () => {
     renderDispatch();
 
-    const [src] = await waitForDraggablePanels();
+    const moveHandles = await waitForMoveHandles();
+    expect(moveHandles.length).toBeGreaterThanOrEqual(6);
 
-    // Activate drag — boundary zone for the 2-column layout enters the DOM.
-    fireEvent.dragStart(src);
+    const resizeHandles = screen.getAllByTestId("panel-resize-handle");
+    expect(resizeHandles.length).toBeGreaterThanOrEqual(6);
+  });
 
-    await waitFor(() => {
-      expect(
-        screen.getByTestId("column-boundary-drop-1"),
-        "boundary zone must be present while a drag is active (2-column layout)",
-      ).toBeTruthy();
-    });
+  it("panels carry data-panel-id and data-column attributes", async () => {
+    renderDispatch();
 
-    // Open the Customize popover and switch to 3 columns while drag is live.
-    const customizeBtn = screen.getByRole("button", { name: /customize layout/i });
-    fireEvent.click(customizeBtn);
+    await waitForMoveHandles();
 
-    // The column buttons render as <button> elements with aria-pressed.
-    // "3" is the button that changes the layout to 3 columns.
-    const threeColBtn = await screen.findByRole("button", { name: "3" });
-    fireEvent.click(threeColBtn);
+    const panelWrappers = document.querySelectorAll("[data-panel-id]");
+    expect(panelWrappers.length).toBeGreaterThanOrEqual(6);
 
-    // After the layout.columns change the useEffect must have cleared
-    // dragSrcId → null.  showBoundary = false, so neither boundary zone
-    // (column-boundary-drop-1 or column-boundary-drop-2) should be in the DOM.
-    await waitFor(() => {
-      expect(
-        screen.queryByTestId("column-boundary-drop-1"),
-        "column-boundary-drop-1 must not appear: dragSrcId should be null after column change",
-      ).toBeNull();
-      expect(
-        screen.queryByTestId("column-boundary-drop-2"),
-        "column-boundary-drop-2 must not appear: dragSrcId should be null after column change",
-      ).toBeNull();
-    });
+    for (const el of Array.from(panelWrappers)) {
+      expect(["left", "right"]).toContain(el.getAttribute("data-column"));
+    }
   });
 });
 
-describe("dispatch grid — column boundary drop zone on drag cancel", () => {
+describe("dispatch free-form layout — pointer move", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     localStorage.clear();
@@ -204,87 +148,65 @@ describe("dispatch grid — column boundary drop zone on drag cancel", () => {
     localStorage.clear();
   });
 
-  it("boundary zone disappears from the DOM when dragend fires mid-flight (drag cancelled without dropping)", async () => {
+  it("pointermove on window after pointerdown on move handle translates the panel element", async () => {
     renderDispatch();
 
-    const [src] = await waitForDraggablePanels();
+    const [moveHandle] = await waitForMoveHandles();
 
-    // Start drag — handlePanelDragStart calls setDragSrcId(id), which triggers
-    // a re-render where showBoundary = true → boundary zone enters the DOM.
-    fireEvent.dragStart(src);
+    // The panel wrapper is the ancestor with data-panel-id.
+    const panelWrapper = moveHandle.closest("[data-panel-id]") as HTMLElement;
+    expect(panelWrapper).toBeTruthy();
 
+    // Simulate grabbing the handle at (200, 300).
+    fireEvent.pointerDown(moveHandle, { clientX: 200, clientY: 300, pointerId: 1 });
+
+    // Move 50 px right, 80 px down.
+    fireEvent(
+      window,
+      new PointerEvent("pointermove", { clientX: 250, clientY: 380, bubbles: true }),
+    );
+
+    // The panel style.left / style.top should reflect the delta.
     await waitFor(() => {
-      expect(
-        screen.getByTestId("column-boundary-drop-1"),
-        "boundary zone should be in the DOM while a drag is active",
-      ).toBeTruthy();
+      const left = parseFloat(panelWrapper.style.left);
+      const top = parseFloat(panelWrapper.style.top);
+      // DEFAULT_GEOMETRY for "incidents" has x=0, y=0, so after +50/+80 delta:
+      // left ≥ 50, top ≥ 80 (or the panel's stored x+50, y+80).
+      expect(left).toBeGreaterThan(0);
+      expect(top).toBeGreaterThan(0);
     });
 
-    // Cancel the drag (Escape / release outside any drop target).
-    // The browser fires dragend on the drag source; handlePanelDragEnd calls
-    // setDragSrcId(null) which always triggers a re-render (the value goes from
-    // a PanelId string to null), so showBoundary = false and the element is
-    // removed from the DOM even if the other state variables were already cleared.
-    fireEvent.dragEnd(src);
-
-    await waitFor(() => {
-      expect(
-        screen.queryByTestId("column-boundary-drop-1"),
-        "boundary zone must not remain in the DOM after drag is cancelled",
-      ).toBeNull();
-    });
+    // Release pointer — should not throw.
+    fireEvent(
+      window,
+      new PointerEvent("pointerup", { bubbles: true }),
+    );
   });
 
-  it("dragOverBoundary state clears when the cursor leaves the zone without dropping (stale drag-over scenario)", async () => {
+  it("pointermove after resize handle pointerdown adjusts the panel width", async () => {
     renderDispatch();
 
-    const [src] = await waitForDraggablePanels();
+    await waitForMoveHandles();
 
-    // Establish an active drag — boundary zone appears immediately.
-    fireEvent.dragStart(src);
+    const [resizeHandle] = screen.getAllByTestId("panel-resize-handle");
+    const panelWrapper = resizeHandle.closest("[data-panel-id]") as HTMLElement;
+    expect(panelWrapper).toBeTruthy();
 
-    const boundary = await screen.findByTestId("column-boundary-drop-1");
+    const origWidth = parseFloat(panelWrapper.style.width) || 690;
 
-    // Move the cursor into the boundary zone — handleBoundaryDragOver fires,
-    // sets dragOverBoundary = true, and the label changes to the active form.
-    fireEvent.dragOver(boundary);
+    fireEvent.pointerDown(resizeHandle, { clientX: 100, clientY: 100, pointerId: 2 });
 
-    await waitFor(() => {
-      expect(
-        boundary.textContent,
-        "boundary label should update to the active 'Move … here' text while hovering",
-      ).toMatch(/Move ".+?" here/);
-    });
-
-    // The cursor leaves the boundary zone without dropping.
-    // handleBoundaryDragLeave fires → setDragOverBoundary(false).
-    fireEvent.dragLeave(boundary);
+    // Drag 60 px to the right.
+    fireEvent(
+      window,
+      new PointerEvent("pointermove", { clientX: 160, clientY: 100, bubbles: true }),
+    );
 
     await waitFor(() => {
-      expect(
-        boundary.textContent,
-        "boundary label should revert to idle text after dragleave without a drop",
-      ).toContain("Drop to move to right column");
+      const newWidth = parseFloat(panelWrapper.style.width);
+      expect(newWidth).toBeGreaterThan(origWidth);
     });
 
-    // The zone itself remains in the DOM — the drag has not ended yet.
-    expect(
-      screen.queryByTestId("column-boundary-drop-1"),
-      "boundary zone must stay in the DOM while the drag is still active",
-    ).not.toBeNull();
-
-    // Drag ends (cancel or release elsewhere).
-    // Because setDragSrcId(null) is always a real state change (id → null),
-    // this re-render always fires even though dragOverBoundary and dragInsert
-    // were already cleared by the previous dragleave — the state bail-out that
-    // used to cause the zone to linger no longer applies.
-    fireEvent.dragEnd(src);
-
-    await waitFor(() => {
-      expect(
-        screen.queryByTestId("column-boundary-drop-1"),
-        "boundary zone must leave the DOM once dragend fires",
-      ).toBeNull();
-    });
+    fireEvent(window, new PointerEvent("pointerup", { bubbles: true }));
   });
 });

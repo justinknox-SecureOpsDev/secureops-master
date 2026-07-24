@@ -25,6 +25,7 @@ import { AssignNearestDialog, candidateBlockReason, type Candidate, type AssignN
 import {
   PANEL_IDS,
   DEFAULT_LAYOUT,
+  DEFAULT_GEOMETRY,
   LEFT_PANELS,
   useDispatchLayout,
   applyPanelReorder,
@@ -34,6 +35,7 @@ import {
   COLUMN_BOUNDARY,
   type PanelId,
   type DispatchLayout,
+  type PanelGeometry,
 } from "./dispatchLayout";
 
 type StatusRow = {
@@ -214,11 +216,11 @@ const PANEL_TOUR: Partial<Record<PanelId, string>> = {
 function CustomizePopover({
   layout,
   onTogglePanel,
-  onSetColumns,
+  onResetLayout,
 }: {
   layout: DispatchLayout;
   onTogglePanel: (id: PanelId) => void;
-  onSetColumns: (n: 1 | 2 | 3) => void;
+  onResetLayout: () => void;
 }) {
   return (
     <Popover>
@@ -228,28 +230,6 @@ function CustomizePopover({
         </Button>
       </PopoverTrigger>
       <PopoverContent align="end" className="w-64 p-3">
-        {/* Column count */}
-        <div className="text-xs font-semibold uppercase tracking-wide opacity-60 mb-2">
-          Columns
-        </div>
-        <div className="flex gap-1.5 mb-4">
-          {([1, 2, 3] as const).map((n) => (
-            <button
-              key={n}
-              onClick={() => onSetColumns(n)}
-              aria-pressed={layout.columns === n}
-              className={[
-                "flex-1 h-8 rounded text-sm font-medium border transition-colors",
-                layout.columns === n
-                  ? "bg-brand-gold text-white border-brand-gold"
-                  : "border-border hover:border-brand-gold/60",
-              ].join(" ")}
-            >
-              {n}
-            </button>
-          ))}
-        </div>
-
         {/* Panel visibility */}
         <div className="text-xs font-semibold uppercase tracking-wide opacity-60 mb-2">
           Show / hide panels
@@ -274,8 +254,17 @@ function CustomizePopover({
             );
           })}
         </div>
-        <p className="text-[11px] opacity-50 mt-3 leading-snug">
-          Drag panels to reorder. Layout is saved per user.
+        <div className="mt-3 pt-3 border-t">
+          <button
+            onClick={onResetLayout}
+            className="w-full text-xs text-muted-foreground hover:text-foreground transition-colors text-left"
+            aria-label="Reset panel positions to default"
+          >
+            Reset panel layout
+          </button>
+        </div>
+        <p className="text-[11px] opacity-50 mt-2 leading-snug">
+          Drag the grip handle to move panels. Drag edges or corner to resize.
         </p>
       </PopoverContent>
     </Popover>
@@ -349,122 +338,105 @@ export default function DispatchPage() {
     }));
   }, [setLayout]);
 
-  // ---- drag-to-reorder state ----
-  const dragSrcRef = useRef<PanelId | null>(null);
-  // State mirror of dragSrcRef used during render so that showBoundary is
-  // always up-to-date even when the other drag-state variables have already
-  // been cleared (e.g. dragLeave clears dragOverBoundary, then dragEnd fires
-  // with no further state changes — without this mirror, React bails out of
-  // the re-render and the boundary zone lingers in the DOM).
-  const [dragSrcId, setDragSrcId] = useState<PanelId | null>(null);
-  // Track which panel the cursor is over AND whether the drop would land
-  // before or after that panel (computed from cursor Y vs element midpoint).
-  type DragInsert = { overId: PanelId; position: "before" | "after" } | null;
-  const [dragInsert, setDragInsert] = useState<DragInsert>(null);
-  // Ref mirror so handlePanelDrop can read the latest position without a
-  // stale-closure dependency on the dragInsert state value.
-  const dragInsertRef = useRef<DragInsert>(null);
-  // Which inter-column boundary drop zone the cursor is currently over
-  // (1 = col-start-2, 2 = col-start-3), or null when not hovering any zone.
-  const [dragOverBoundary, setDragOverBoundary] = useState<number | null>(null);
+  // ---- free-form move / resize ----
+  type ActiveOp =
+    | { kind: "move"; id: PanelId; startX: number; startY: number; origX: number; origY: number }
+    | { kind: "resize"; id: PanelId; dir: "e" | "s" | "se"; startX: number; startY: number; origW: number; origH: number };
 
-  // Reset drag state whenever panel visibility or column count changes.
-  //
-  // Panel toggle: if a dispatcher hides a panel while a drag is in progress
-  // (via the Customize popover or a concurrent tab), the insert state may still
-  // reference that panel's ID.  buildWithPlaceholder silently produces no
-  // placeholder in that case, but the drag state is never cleared — leaving
-  // the UI in limbo until the next drag event.
-  //
-  // Column change: changing layout.columns does NOT alter layout.panels, so
-  // the panels dependency alone would not fire.  A column-count change while
-  // dragging (e.g. 3→1) can leave dragSrcId and dragInsert referencing a
-  // position that no longer exists in the new layout, causing a ghost
-  // placeholder or a stale boundary zone on the next render.
-  //
-  // Including layout.columns as a dependency ensures the stale state is always
-  // flushed before the next render regardless of which layout dimension changed.
-  useEffect(() => {
-    dragSrcRef.current = null;
-    dragInsertRef.current = null;
-    setDragSrcId(null);
-    setDragInsert(null);
-  }, [layout.panels, layout.columns]);
+  const activeOpRef = useRef<ActiveOp | null>(null);
+  const panelRefs = useRef<Map<PanelId, HTMLDivElement>>(new Map());
 
-  const handlePanelDragStart = useCallback((id: PanelId) => {
-    dragSrcRef.current = id;
-    setDragSrcId(id);
-  }, []);
+  const getGeo = useCallback(
+    (id: PanelId): PanelGeometry => layout.panelGeometry[id] ?? DEFAULT_GEOMETRY[id],
+    [layout.panelGeometry],
+  );
 
-  const handlePanelDragEnd = useCallback(() => {
-    dragSrcRef.current = null;
-    dragInsertRef.current = null;
-    setDragSrcId(null);
-    setDragInsert(null);
-    setDragOverBoundary(null);
-  }, []);
-
-  const handleBoundaryDragOver = useCallback((e: React.DragEvent) => {
-    e.preventDefault();
-    if (!dragSrcRef.current) return;
-    const col = Number((e.currentTarget as HTMLElement).dataset.boundaryCol ?? 1);
-    setDragOverBoundary(col);
-    // Clear any panel-level insert indicator while hovering the boundary.
-    dragInsertRef.current = null;
-    setDragInsert(null);
-  }, []);
-
-  const handleBoundaryDragLeave = useCallback(() => {
-    setDragOverBoundary(null);
-  }, []);
-
-  const handleBoundaryDrop = useCallback(
-    (e: React.DragEvent) => {
-      e.preventDefault();
-      const srcId = dragSrcRef.current;
-      if (!srcId) return;
-      const targetVisibleIndex = Number(
-        (e.currentTarget as HTMLElement).dataset.boundaryCol ?? 1,
-      );
-      setLayout((prev) => ({
-        ...prev,
-        panelOrder: applyColumnBoundaryDrop(
-          prev.panelOrder,
-          prev.panels,
-          srcId,
-          targetVisibleIndex,
-        ),
-      }));
-      dragSrcRef.current = null;
-      dragInsertRef.current = null;
-      setDragInsert(null);
-      setDragOverBoundary(null);
+  const bringToFront = useCallback(
+    (id: PanelId) => {
+      setLayout((prev) => {
+        if (prev.panelOrder[prev.panelOrder.length - 1] === id) return prev;
+        const order = prev.panelOrder.filter((p) => p !== id);
+        return { ...prev, panelOrder: [...order, id] };
+      });
     },
     [setLayout],
   );
 
-  const handlePanelDragOver = useCallback((e: React.DragEvent, id: PanelId) => {
-    e.preventDefault();
-    if (!dragSrcRef.current || dragSrcRef.current === id) return;
-    const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
-    const position: "before" | "after" = e.clientY < rect.top + rect.height / 2 ? "before" : "after";
-    const next: DragInsert = { overId: id, position };
-    dragInsertRef.current = next;
-    setDragInsert(next);
-  }, []);
+  const handleMoveStart = useCallback(
+    (id: PanelId, e: React.PointerEvent) => {
+      e.preventDefault();
+      e.stopPropagation();
+      try { (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId); } catch { /* jsdom */ }
+      const geo = getGeo(id);
+      activeOpRef.current = { kind: "move", id, startX: e.clientX, startY: e.clientY, origX: geo.x, origY: geo.y };
+      bringToFront(id);
+    },
+    [getGeo, bringToFront],
+  );
 
-  const handlePanelDrop = useCallback((e: React.DragEvent, targetId: PanelId) => {
-    e.preventDefault();
-    const srcId = dragSrcRef.current;
-    if (!srcId || srcId === targetId) { dragInsertRef.current = null; setDragInsert(null); return; }
-    const position = dragInsertRef.current?.position ?? "before";
-    setLayout((prev) => ({
-      ...prev,
-      panelOrder: applyPanelReorder(prev.panelOrder, srcId, targetId, position),
-    }));
-    dragInsertRef.current = null;
-    setDragInsert(null);
-    dragSrcRef.current = null;
+  const handleResizeStart = useCallback(
+    (id: PanelId, e: React.PointerEvent, dir: "e" | "s" | "se") => {
+      e.preventDefault();
+      e.stopPropagation();
+      try { (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId); } catch { /* jsdom */ }
+      const geo = getGeo(id);
+      activeOpRef.current = { kind: "resize", id, dir, startX: e.clientX, startY: e.clientY, origW: geo.w, origH: geo.h };
+      bringToFront(id);
+    },
+    [getGeo, bringToFront],
+  );
+
+  // Global pointer listeners drive live DOM updates (bypassing React state for
+  // smooth dragging), then commit the final geometry on pointerup.
+  useEffect(() => {
+    const MIN_W = 280;
+    const MIN_H = 160;
+
+    const onMove = (e: PointerEvent) => {
+      const op = activeOpRef.current;
+      if (!op) return;
+      const dx = e.clientX - op.startX;
+      const dy = e.clientY - op.startY;
+      const el = panelRefs.current.get(op.id);
+      if (!el) return;
+      if (op.kind === "move") {
+        el.style.left = `${Math.max(0, op.origX + dx)}px`;
+        el.style.top = `${Math.max(0, op.origY + dy)}px`;
+      } else {
+        if (op.dir === "e" || op.dir === "se") {
+          el.style.width = `${Math.max(MIN_W, op.origW + dx)}px`;
+        }
+        if (op.dir === "s" || op.dir === "se") {
+          el.style.height = `${Math.max(MIN_H, op.origH + dy)}px`;
+        }
+      }
+    };
+
+    const onUp = () => {
+      const op = activeOpRef.current;
+      if (!op) return;
+      const el = panelRefs.current.get(op.id);
+      if (el) {
+        const newGeo: PanelGeometry = {
+          x: parseFloat(el.style.left) || 0,
+          y: parseFloat(el.style.top) || 0,
+          w: parseFloat(el.style.width) || DEFAULT_GEOMETRY[op.id].w,
+          h: parseFloat(el.style.height) || DEFAULT_GEOMETRY[op.id].h,
+        };
+        setLayout((prev) => ({
+          ...prev,
+          panelGeometry: { ...prev.panelGeometry, [op.id]: newGeo },
+        }));
+      }
+      activeOpRef.current = null;
+    };
+
+    window.addEventListener("pointermove", onMove);
+    window.addEventListener("pointerup", onUp);
+    return () => {
+      window.removeEventListener("pointermove", onMove);
+      window.removeEventListener("pointerup", onUp);
+    };
   }, [setLayout]);
   // Incident id that the Live Map asked to open. Lifted to the page so
   // the map (right column) can hand off to the IncidentsPanel (left
@@ -591,7 +563,9 @@ export default function DispatchPage() {
           <CustomizePopover
             layout={layout}
             onTogglePanel={togglePanel}
-            onSetColumns={(n) => setLayout((prev) => ({ ...prev, columns: n }))}
+            onResetLayout={() =>
+              setLayout((prev) => ({ ...prev, panelGeometry: DEFAULT_GEOMETRY }))
+            }
           />
           <Button
             variant="ghost" size="sm"
@@ -607,11 +581,18 @@ export default function DispatchPage() {
         </div>
       </header>
 
-      {/* ---- free-form configurable grid (1 / 2 / 3 columns) ---- */}
+      {/* ---- free-form canvas: panels are absolutely positioned ---- */}
       {(() => {
-        const srcId = dragSrcId;
+        const visible = layout.panelOrder.filter((id) => layout.panels[id]);
 
-        // Render a single panel's content by id.
+        // Canvas height: tall enough to contain all visible panels with a
+        // comfortable bottom margin. Minimum 600 px.
+        let canvasH = 600;
+        for (const id of visible) {
+          const geo = layout.panelGeometry[id] ?? DEFAULT_GEOMETRY[id];
+          canvasH = Math.max(canvasH, geo.y + geo.h + 32);
+        }
+
         const renderPanelContent = (id: PanelId) => {
           switch (id) {
             case "incidents":
@@ -685,131 +666,75 @@ export default function DispatchPage() {
           }
         };
 
-        // Wrap a panel with its drag-handle and drop-target styling.
-        const wrapPanel = (id: PanelId) => {
-          const tourAttr = PANEL_TOUR[id];
-          return (
-            <div
-              key={id}
-              data-panel-id={id}
-              data-column={LEFT_PANELS.includes(id) ? "left" : "right"}
-              draggable
-              onDragStart={() => handlePanelDragStart(id)}
-              onDragEnd={handlePanelDragEnd}
-              onDragOver={(e) => handlePanelDragOver(e, id)}
-              onDrop={(e) => handlePanelDrop(e, id)}
-              {...(tourAttr ? { "data-tour": tourAttr } : {})}
-              className="relative group rounded-lg min-w-0"
-            >
-              {/* Drag handle — visible on hover, anchored top-right of the wrapper */}
-              <div
-                className="absolute top-3 right-3 z-10 opacity-0 group-hover:opacity-100 transition-opacity cursor-grab active:cursor-grabbing text-muted-foreground/50 hover:text-muted-foreground"
-                aria-hidden="true"
-                title="Drag to reorder"
-              >
-                <GripVertical className="w-4 h-4" />
-              </div>
-              {renderPanelContent(id)}
-            </div>
-          );
-        };
-
-        // All visible panels in user-chosen order, with a ghost placeholder
-        // at the current drag-insertion point.
-        const visible = layout.panelOrder.filter((id) => layout.panels[id]);
-        const slots = buildWithPlaceholder(visible, srcId, dragInsert);
-
-        const colClass =
-          layout.columns === 1
-            ? "grid-cols-1"
-            : layout.columns === 3
-              ? "grid-cols-1 md:grid-cols-2 xl:grid-cols-3"
-              : "grid-cols-1 lg:grid-cols-2";
-
-        // Show column-boundary drop zones whenever a drag is active and the
-        // layout has 2+ columns. Each zone is pinned to row 1 of its target
-        // column via explicit grid placement so it's always reachable, even
-        // when every visible panel has been reordered into the left column.
-        // 2-col mode: one zone at col-start-2.
-        // 3-col mode: two zones — col-start-2 and col-start-3.
-        const showBoundary = srcId !== null && layout.columns >= 2;
-
-        const makeBoundaryZone = (
-          col: 1 | 2,
-          colClass2: string,
-          label: string,
-        ) => {
-          const isOver = dragOverBoundary === col;
-          return (
-            <div
-              key={`${COLUMN_BOUNDARY}-${col}`}
-              data-testid={`column-boundary-drop-${col}`}
-              data-boundary-col={col}
-              aria-label={`Drop here to move panel to the start of column ${col + 1}`}
-              onDragOver={handleBoundaryDragOver}
-              onDragLeave={handleBoundaryDragLeave}
-              onDrop={handleBoundaryDrop}
-              className={[
-                "flex items-center justify-center",
-                "min-h-20 rounded-lg border-2 border-dashed transition-colors",
-                colClass2,
-                isOver
-                  ? "border-brand-gold bg-brand-gold/10 scale-[1.01]"
-                  : "border-brand-gold/30 bg-brand-gold/5",
-              ].join(" ")}
-            >
-              <span
-                className={[
-                  "text-xs font-medium transition-colors select-none",
-                  isOver ? "text-brand-gold" : "text-brand-gold/40",
-                ].join(" ")}
-              >
-                {isOver ? `Move "${PANEL_LABELS[srcId!]}" here` : label}
-              </span>
-            </div>
-          );
-        };
-
         return (
-          <div className={`grid gap-4 items-start ${colClass}`}>
-            {showBoundary && layout.columns === 2 &&
-              makeBoundaryZone(
-                1,
-                "hidden lg:flex lg:col-start-2 lg:row-start-1",
-                "Drop to move to right column",
-              )}
-            {showBoundary && layout.columns === 3 && (
-              <>
-                {makeBoundaryZone(
-                  1,
-                  "hidden md:flex md:col-start-2 md:row-start-1",
-                  "Drop to move to column 2",
-                )}
-                {makeBoundaryZone(
-                  2,
-                  "hidden xl:flex xl:col-start-3 xl:row-start-1",
-                  "Drop to move to column 3",
-                )}
-              </>
-            )}
-            {slots.map((slot) =>
-              slot === DRAG_PLACEHOLDER ? (
+          <div className="relative w-full" style={{ height: canvasH }}>
+            {visible.map((id, orderIdx) => {
+              const geo = layout.panelGeometry[id] ?? DEFAULT_GEOMETRY[id];
+              const zIdx = orderIdx + 1;
+              const tourAttr = PANEL_TOUR[id];
+              return (
                 <div
-                  key={DRAG_PLACEHOLDER}
-                  data-testid="drag-placeholder"
-                  aria-hidden="true"
-                  className="min-h-14 rounded-lg border-2 border-dashed border-brand-gold/50 bg-brand-gold/5 animate-in fade-in duration-100 flex items-center justify-center"
+                  key={id}
+                  ref={(el) => {
+                    if (el) panelRefs.current.set(id, el);
+                    else panelRefs.current.delete(id);
+                  }}
+                  data-panel-id={id}
+                  data-column={LEFT_PANELS.includes(id) ? "left" : "right"}
+                  {...(tourAttr ? { "data-tour": tourAttr } : {})}
+                  onPointerDown={() => bringToFront(id)}
+                  className="absolute group rounded-lg min-w-0 overflow-visible"
+                  style={{
+                    left: geo.x,
+                    top: geo.y,
+                    width: geo.w,
+                    height: geo.h,
+                    zIndex: zIdx,
+                  }}
                 >
-                  {srcId && (
-                    <span className="text-sm italic text-brand-gold/50">
-                      {PANEL_LABELS[srcId]}
-                    </span>
-                  )}
+                  {/* ---- move handle (grip icon, top-right) ---- */}
+                  <div
+                    data-testid="panel-move-handle"
+                    onPointerDown={(e) => handleMoveStart(id, e)}
+                    className="absolute top-2 right-2 z-10 opacity-0 group-hover:opacity-100 transition-opacity cursor-grab active:cursor-grabbing text-muted-foreground/50 hover:text-muted-foreground touch-none"
+                    aria-label={`Move ${PANEL_LABELS[id]} panel`}
+                    title="Drag to move"
+                  >
+                    <GripVertical className="w-4 h-4" />
+                  </div>
+
+                  {/* ---- resize handles ---- */}
+                  {/* Right edge */}
+                  <div
+                    data-testid="panel-resize-handle"
+                    onPointerDown={(e) => handleResizeStart(id, e, "e")}
+                    className="absolute top-0 right-0 w-2 h-full cursor-ew-resize touch-none opacity-0 group-hover:opacity-100 z-10"
+                    aria-label={`Resize ${PANEL_LABELS[id]} panel width`}
+                  />
+                  {/* Bottom edge */}
+                  <div
+                    onPointerDown={(e) => handleResizeStart(id, e, "s")}
+                    className="absolute bottom-0 left-0 h-2 w-full cursor-ns-resize touch-none opacity-0 group-hover:opacity-100 z-10"
+                    aria-label={`Resize ${PANEL_LABELS[id]} panel height`}
+                  />
+                  {/* Bottom-right corner */}
+                  <div
+                    onPointerDown={(e) => handleResizeStart(id, e, "se")}
+                    className="absolute bottom-0 right-0 w-4 h-4 cursor-se-resize touch-none opacity-0 group-hover:opacity-100 z-20 flex items-end justify-end p-0.5"
+                    aria-label={`Resize ${PANEL_LABELS[id]} panel`}
+                  >
+                    <svg width="8" height="8" viewBox="0 0 8 8" className="text-muted-foreground/40 group-hover:text-muted-foreground/70">
+                      <path d="M1 7L7 1M4 7L7 4M7 7L7 7" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
+                    </svg>
+                  </div>
+
+                  {/* Panel content fills the wrapper */}
+                  <div className="w-full h-full overflow-auto">
+                    {renderPanelContent(id)}
+                  </div>
                 </div>
-              ) : (
-                wrapPanel(slot)
-              ),
-            )}
+              );
+            })}
           </div>
         );
       })()}

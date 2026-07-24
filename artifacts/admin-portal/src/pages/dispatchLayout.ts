@@ -11,6 +11,14 @@ export const PANEL_IDS = [
 
 export type PanelId = (typeof PANEL_IDS)[number];
 
+/** Position and size for a single panel in the free-form canvas. */
+export interface PanelGeometry {
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+}
+
 export const DEFAULT_PANEL_ORDER: PanelId[] = [
   "incidents",
   "statusBoard",
@@ -32,13 +40,26 @@ export const RIGHT_PANELS: readonly PanelId[] = [
   "broadcast",
 ] as const;
 
+/**
+ * Default free-form geometry approximating the historic 2-column layout at
+ * ~1400 px container width (each column ~690 px, 16 px gap).
+ */
+export const DEFAULT_GEOMETRY: Record<PanelId, PanelGeometry> = {
+  incidents:   { x: 0,   y: 0,    w: 690, h: 380 },
+  statusBoard: { x: 0,   y: 396,  w: 690, h: 460 },
+  shiftClaims: { x: 0,   y: 872,  w: 690, h: 340 },
+  openShifts:  { x: 0,   y: 1228, w: 690, h: 360 },
+  liveMap:     { x: 706, y: 0,    w: 690, h: 480 },
+  broadcast:   { x: 706, y: 496,  w: 690, h: 280 },
+};
+
 export interface DispatchLayout {
   panels: Record<PanelId, boolean>;
-  /** Number of grid columns the dispatcher chose (1, 2, or 3). Default: 2. */
-  columns: 1 | 2 | 3;
   mapExpanded: boolean;
   mapTileLayer: "street" | "satellite";
   panelOrder: PanelId[];
+  /** Free-form geometry (position + size) for each panel. */
+  panelGeometry: Record<PanelId, PanelGeometry>;
 }
 
 export const DEFAULT_LAYOUT: DispatchLayout = {
@@ -50,25 +71,21 @@ export const DEFAULT_LAYOUT: DispatchLayout = {
     liveMap: true,
     broadcast: true,
   },
-  columns: 2,
   mapExpanded: false,
   mapTileLayer: "street",
   panelOrder: DEFAULT_PANEL_ORDER,
+  panelGeometry: DEFAULT_GEOMETRY,
 };
 
 export function dispatchLayoutKey(userId: string): string {
   return `wcsg.dispatch.layout.${userId}`;
 }
 
-function parseColumns(raw: unknown): 1 | 2 | 3 {
-  if (raw === 1 || raw === 2 || raw === 3) return raw;
-  return DEFAULT_LAYOUT.columns;
-}
-
 export function parseStoredLayout(raw: string): DispatchLayout {
   const parsed = JSON.parse(raw) as Partial<DispatchLayout> & {
     panels?: Partial<Record<PanelId, boolean>>;
     columnSplit?: unknown;
+    columns?: unknown;
   };
 
   const storedOrder = Array.isArray(parsed.panelOrder)
@@ -84,15 +101,36 @@ export function parseStoredLayout(raw: string): DispatchLayout {
     ...DEFAULT_PANEL_ORDER.filter((id) => !validStored.includes(id)),
   ];
 
+  const storedGeo = (
+    parsed.panelGeometry && typeof parsed.panelGeometry === "object"
+      ? parsed.panelGeometry
+      : {}
+  ) as Partial<Record<string, unknown>>;
+
+  const panelGeometry: Record<PanelId, PanelGeometry> = { ...DEFAULT_GEOMETRY };
+  for (const id of PANEL_IDS) {
+    const g = storedGeo[id];
+    if (
+      g &&
+      typeof g === "object" &&
+      typeof (g as Record<string, unknown>).x === "number" &&
+      typeof (g as Record<string, unknown>).y === "number" &&
+      typeof (g as Record<string, unknown>).w === "number" &&
+      typeof (g as Record<string, unknown>).h === "number"
+    ) {
+      panelGeometry[id] = g as PanelGeometry;
+    }
+  }
+
   return {
     panels: { ...DEFAULT_LAYOUT.panels, ...parsed.panels },
-    columns: parseColumns(parsed.columns),
     mapExpanded:
       typeof parsed.mapExpanded === "boolean"
         ? parsed.mapExpanded
         : DEFAULT_LAYOUT.mapExpanded,
     mapTileLayer: parsed.mapTileLayer === "satellite" ? "satellite" : "street",
     panelOrder,
+    panelGeometry,
   };
 }
 

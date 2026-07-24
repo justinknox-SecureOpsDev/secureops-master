@@ -58,24 +58,12 @@ describe("parseStoredLayout", () => {
     expect(result.panels.liveMap).toBe(DEFAULT_LAYOUT.panels.liveMap);
   });
 
-  it("accepts columns=1", () => {
-    const raw = JSON.stringify({ columns: 1 });
-    expect(parseStoredLayout(raw).columns).toBe(1);
-  });
-
-  it("accepts columns=3", () => {
+  it("ignores a legacy 'columns' field in stored JSON (backward compat)", () => {
     const raw = JSON.stringify({ columns: 3 });
-    expect(parseStoredLayout(raw).columns).toBe(3);
-  });
-
-  it("accepts columns=2 (default value)", () => {
-    const raw = JSON.stringify({ columns: 2 });
-    expect(parseStoredLayout(raw).columns).toBe(2);
-  });
-
-  it("falls back to default columns when the stored value is unrecognized", () => {
-    const raw = JSON.stringify({ columns: "wide" });
-    expect(parseStoredLayout(raw).columns).toBe(DEFAULT_LAYOUT.columns);
+    const result = parseStoredLayout(raw);
+    // columns is no longer part of DispatchLayout — the field is silently dropped
+    expect(result).not.toHaveProperty("columns");
+    expect(result.panelGeometry).toBeDefined();
   });
 
   it("reads mapExpanded correctly", () => {
@@ -136,10 +124,10 @@ describe("useDispatchLayout — hydration from localStorage", () => {
         liveMap: false,
         broadcast: true,
       },
-      columns: 3,
       mapExpanded: true,
       mapTileLayer: "satellite",
       panelOrder: DEFAULT_PANEL_ORDER,
+      panelGeometry: DEFAULT_LAYOUT.panelGeometry,
     };
     localStorage.setItem(dispatchLayoutKey("user-reload"), JSON.stringify(stored));
 
@@ -148,7 +136,6 @@ describe("useDispatchLayout — hydration from localStorage", () => {
 
     expect(layout.panels.incidents).toBe(false);
     expect(layout.panels.shiftClaims).toBe(false);
-    expect(layout.columns).toBe(3);
     expect(layout.mapExpanded).toBe(true);
     expect(layout.mapTileLayer).toBe("satellite");
   });
@@ -166,22 +153,25 @@ describe("useDispatchLayout — hydration from localStorage", () => {
     expect(layout.panels.liveMap).toBe(true);
   });
 
-  it("loads columns=1 from storage", () => {
+  it("loads panelGeometry from storage", () => {
+    const geo = { incidents: { x: 100, y: 200, w: 500, h: 300 } };
     localStorage.setItem(
-      dispatchLayoutKey("user-col-1"),
-      JSON.stringify({ columns: 1 }),
+      dispatchLayoutKey("user-geo"),
+      JSON.stringify({ panelGeometry: geo }),
     );
-    const { result } = renderHook(() => useDispatchLayout("user-col-1"));
-    expect(result.current[0].columns).toBe(1);
+    const { result } = renderHook(() => useDispatchLayout("user-geo"));
+    expect(result.current[0].panelGeometry.incidents).toEqual(geo.incidents);
   });
 
-  it("loads columns=3 from storage", () => {
+  it("falls back to DEFAULT_GEOMETRY for a panel missing from stored panelGeometry", () => {
     localStorage.setItem(
-      dispatchLayoutKey("user-col-3"),
-      JSON.stringify({ columns: 3 }),
+      dispatchLayoutKey("user-geo-partial"),
+      JSON.stringify({ panelGeometry: {} }),
     );
-    const { result } = renderHook(() => useDispatchLayout("user-col-3"));
-    expect(result.current[0].columns).toBe(3);
+    const { result } = renderHook(() => useDispatchLayout("user-geo-partial"));
+    expect(result.current[0].panelGeometry.liveMap).toEqual(
+      DEFAULT_LAYOUT.panelGeometry.liveMap,
+    );
   });
 
   it("returns DEFAULT_LAYOUT when the stored JSON is malformed", () => {
@@ -208,15 +198,19 @@ describe("useDispatchLayout — writes / round-trip", () => {
     expect(stored.panels.incidents).toBe(false);
   });
 
-  it("persists columns to localStorage", () => {
-    const { result } = renderHook(() => useDispatchLayout("user-split"));
+  it("persists panelGeometry to localStorage", () => {
+    const { result } = renderHook(() => useDispatchLayout("user-geo-write"));
 
+    const newGeo = { incidents: { x: 50, y: 60, w: 400, h: 250 } };
     act(() => {
-      result.current[1]((prev) => ({ ...prev, columns: 3 }));
+      result.current[1]((prev) => ({
+        ...prev,
+        panelGeometry: { ...prev.panelGeometry, ...newGeo },
+      }));
     });
 
-    const stored = JSON.parse(localStorage.getItem(dispatchLayoutKey("user-split"))!);
-    expect(stored.columns).toBe(3);
+    const stored = JSON.parse(localStorage.getItem(dispatchLayoutKey("user-geo-write"))!);
+    expect(stored.panelGeometry.incidents).toEqual(newGeo.incidents);
   });
 
   it("round-trips the full layout without data loss", () => {
@@ -232,10 +226,10 @@ describe("useDispatchLayout — writes / round-trip", () => {
         liveMap: false,
         broadcast: true,
       },
-      columns: 3,
       mapExpanded: true,
       mapTileLayer: "satellite",
       panelOrder: DEFAULT_PANEL_ORDER,
+      panelGeometry: DEFAULT_LAYOUT.panelGeometry,
     };
 
     act(() => {
@@ -595,8 +589,15 @@ describe("PANEL_IDS structural integrity", () => {
     ).toBe(PANEL_IDS.length);
   });
 
-  it("DEFAULT_LAYOUT.columns is a valid column count (1, 2, or 3)", () => {
-    expect([1, 2, 3]).toContain(DEFAULT_LAYOUT.columns);
+  it("DEFAULT_LAYOUT.panelGeometry contains an entry for every PANEL_ID", () => {
+    for (const id of PANEL_IDS) {
+      expect(DEFAULT_LAYOUT.panelGeometry[id]).toBeDefined();
+      const g = DEFAULT_LAYOUT.panelGeometry[id];
+      expect(typeof g.x).toBe("number");
+      expect(typeof g.y).toBe("number");
+      expect(g.w).toBeGreaterThan(0);
+      expect(g.h).toBeGreaterThan(0);
+    }
   });
 
   it("LEFT_PANELS contains exactly incidents, statusBoard, shiftClaims, openShifts", () => {
@@ -1135,13 +1136,13 @@ describe("useDispatchLayout — user isolation (org switch)", () => {
   it("loads the correct layout for each user ID independently", () => {
     const layoutA: DispatchLayout = {
       ...DEFAULT_LAYOUT,
-      columns: 1,
       mapExpanded: true,
+      mapTileLayer: "street",
     };
     const layoutB: DispatchLayout = {
       ...DEFAULT_LAYOUT,
-      columns: 3,
       mapExpanded: false,
+      mapTileLayer: "satellite",
     };
 
     localStorage.setItem(dispatchLayoutKey("user-a"), JSON.stringify(layoutA));
@@ -1150,18 +1151,18 @@ describe("useDispatchLayout — user isolation (org switch)", () => {
     const { result: resultA } = renderHook(() => useDispatchLayout("user-a"));
     const { result: resultB } = renderHook(() => useDispatchLayout("user-b"));
 
-    expect(resultA.current[0].columns).toBe(1);
     expect(resultA.current[0].mapExpanded).toBe(true);
+    expect(resultA.current[0].mapTileLayer).toBe("street");
 
-    expect(resultB.current[0].columns).toBe(3);
     expect(resultB.current[0].mapExpanded).toBe(false);
+    expect(resultB.current[0].mapTileLayer).toBe("satellite");
   });
 
   it("a write for user-a does not affect user-b's storage key", () => {
     const { result: resultA } = renderHook(() => useDispatchLayout("user-a"));
 
     act(() => {
-      resultA.current[1]((prev) => ({ ...prev, columns: 1 }));
+      resultA.current[1]((prev) => ({ ...prev, mapExpanded: true }));
     });
 
     expect(localStorage.getItem(dispatchLayoutKey("user-b"))).toBeNull();
@@ -1170,7 +1171,6 @@ describe("useDispatchLayout — user isolation (org switch)", () => {
   it("switching from user-a to user-b (remount with new id) loads user-b's own stored layout", () => {
     const layoutB: DispatchLayout = {
       ...DEFAULT_LAYOUT,
-      columns: 3,
       panels: { ...DEFAULT_LAYOUT.panels, broadcast: false },
     };
     localStorage.setItem(dispatchLayoutKey("user-b"), JSON.stringify(layoutB));
@@ -1180,7 +1180,6 @@ describe("useDispatchLayout — user isolation (org switch)", () => {
     unmountA();
 
     const { result: resultB } = renderHook(() => useDispatchLayout("user-b"));
-    expect(resultB.current[0].columns).toBe(3);
     expect(resultB.current[0].panels.broadcast).toBe(false);
   });
 });
