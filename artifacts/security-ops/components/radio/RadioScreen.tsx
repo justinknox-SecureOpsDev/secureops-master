@@ -70,7 +70,7 @@ async function postRadioToken(
   return { status: res.status, data: (await res.json()) as RadioToken };
 }
 
-export default function RadioScreen(): React.JSX.Element {
+export default function RadioScreen({ refreshEpoch = 0 }: { refreshEpoch?: number } = {}): React.JSX.Element {
   const colors = useColors();
   const { user } = useAuth();
   const [channels, setChannels] = useState<Channel[]>([]);
@@ -133,27 +133,35 @@ export default function RadioScreen(): React.JSX.Element {
   // refetch: the spinner only gates the very first load, and a transient
   // refetch failure keeps the last-known list rather than surfacing an error.
   const firstLoadDoneRef = useRef(false);
-  useFocusEffect(
-    useCallback(() => {
-      let cancelled = false;
-      apiRequest("/radio/channels")
-        .then((rows: Channel[]) => {
-          if (cancelled) return;
-          setChannels(rows);
-          setActiveId((cur) => reconcileActiveId(rows, cur));
-          setError(null); // clear a stale first-load error once a refetch succeeds
-        })
-        .catch((e: Error) => {
-          if (!cancelled && !firstLoadDoneRef.current) setError(e.message);
-        })
-        .finally(() => {
-          if (cancelled) return;
-          firstLoadDoneRef.current = true;
-          setLoading(false);
-        });
-      return () => { cancelled = true; };
-    }, []),
-  );
+  const fetchChannels = useCallback(() => {
+    let cancelled = false;
+    apiRequest("/radio/channels")
+      .then((rows: Channel[]) => {
+        if (cancelled) return;
+        setChannels(rows);
+        setActiveId((cur) => reconcileActiveId(rows, cur));
+        setError(null); // clear a stale first-load error once a refetch succeeds
+      })
+      .catch((e: Error) => {
+        if (!cancelled && !firstLoadDoneRef.current) setError(e.message);
+      })
+      .finally(() => {
+        if (cancelled) return;
+        firstLoadDoneRef.current = true;
+        setLoading(false);
+      });
+    return () => { cancelled = true; };
+  }, []);
+  useFocusEffect(fetchChannels);
+  // When RadioScreen is embedded as a hidden sub-tab (employee Chat screen),
+  // expo-router focus fires for the PARENT tab, not the sub-tab flip. The host
+  // bumps refreshEpoch each time the Radio sub-tab becomes visible so the
+  // roster refetches then too. Epoch 0 is the mount value — the focus effect
+  // already covers the first load, so skip it to avoid a duplicate request.
+  useEffect(() => {
+    if (refreshEpoch === 0) return;
+    return fetchChannels();
+  }, [refreshEpoch, fetchChannels]);
 
   // --- WS control plane (presence + speaker lock signalling) ---
   // Auto-reconnects with capped exponential backoff + jitter so a dropped

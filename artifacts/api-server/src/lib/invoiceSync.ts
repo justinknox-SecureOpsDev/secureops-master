@@ -252,12 +252,17 @@ export async function upsertWeeklyInvoice(
 
   type Group = { description: string; hours: number; rate: number; amount: number };
   const groups = new Map<string, Group>();
+  // Approved hours we could NOT price (no shift bill rate AND no site default
+  // bill rate). Mirrors the custom-period path: these must be surfaced to the
+  // admin — silently dropping them produces an invoice that under-bills with
+  // no visible sign anything is wrong.
+  let unpricedHours = 0;
   for (const e of entries) {
     const hours = parseFloat(String(e.hoursWorked ?? "0"));
     if (!isFinite(hours) || hours <= 0) continue;
     const shiftBill = parseFloat(String(e.shiftBillRate ?? "0"));
     const baseRate = shiftBill > 0 ? shiftBill : siteBillRate;
-    if (baseRate <= 0) continue;
+    if (baseRate <= 0) { unpricedHours += hours; continue; }
     const officerName =
       [e.employeeFirst, e.employeeLast].filter(Boolean).join(" ") || "Unassigned officer";
     // Federal-holiday premium (1.5×): hours worked on a US federal holiday
@@ -301,7 +306,7 @@ export async function upsertWeeklyInvoice(
   for (const e of subEntries) {
     const hours = parseFloat(String(e.hoursWorked ?? "0"));
     if (!isFinite(hours) || hours <= 0) continue;
-    if (siteBillRate <= 0) continue;
+    if (siteBillRate <= 0) { unpricedHours += hours; continue; }
     // Subcontractor hours worked on a federal holiday are billed to the
     // client at the same 1.5× premium as officer hours, split into a
     // dedicated line item.
@@ -325,6 +330,17 @@ export async function upsertWeeklyInvoice(
       rate: g.rate,
       amount: Math.round(g.amount * 100) / 100,
     }));
+
+  // Round once, reuse in every return path. Computed BEFORE the empty-week
+  // early-return so an all-unpriced week still leaves a log trace — the
+  // approval auto-sync hook has no UI, so this warn is its only signal.
+  const unpriced = unpricedHours > 0 ? Math.round(unpricedHours * 100) / 100 : 0;
+  if (unpriced > 0) {
+    logger.warn(
+      { siteId, weekStartIso, unpricedHours: unpriced },
+      "[invoice-sync] weekly invoice is missing approved hours with no bill rate — set the site's default bill rate",
+    );
+  }
 
   if (lineItems.length === 0) {
     // No billable hours left this week. If an empty draft exists from a
@@ -382,6 +398,7 @@ export async function upsertWeeklyInvoice(
       totalAmount: total,
       lineCount: lineItems.length,
       overlappingInvoiceIds,
+      ...(unpriced > 0 ? { unpricedHours: unpriced } : {}),
     };
   }
 
@@ -416,6 +433,7 @@ export async function upsertWeeklyInvoice(
       totalAmount: total,
       lineCount: lineItems.length,
       overlappingInvoiceIds,
+      ...(unpriced > 0 ? { unpricedHours: unpriced } : {}),
     };
   } catch (err) {
     // Concurrent approval beat us to the insert. The partial unique
@@ -467,6 +485,7 @@ export async function upsertWeeklyInvoice(
       totalAmount: rwTotal,
       lineCount: lineItems.length,
       overlappingInvoiceIds,
+      ...(unpriced > 0 ? { unpricedHours: unpriced } : {}),
     };
   }
 }

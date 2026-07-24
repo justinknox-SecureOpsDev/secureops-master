@@ -290,6 +290,9 @@ router.post("/invoices/generate", requireAdmin, async (req, res): Promise<void> 
       (result.status === "created" || result.status === "updated"
         ? result.overlappingInvoiceIds
         : undefined) ?? [],
+    ...((result.status === "created" || result.status === "updated") && result.unpricedHours
+      ? { unpricedHours: result.unpricedHours }
+      : {}),
   });
 });
 

@@ -350,6 +350,113 @@ describe("POST /invoices/generate", () => {
     expect(cleared.body.overlappingInvoiceIds).toEqual([]);
   });
 
+  it("weekly path surfaces unpricedHours when ad-hoc entries can't be priced (site has no default bill rate)", async () => {
+    // Site with NO defaultBillRate. One entry rides a shift that carries its
+    // own billRate (priced); one is an ad-hoc clock-in with no shift (unpriced).
+    // The draft must bill the priced hours AND report the dropped ones —
+    // silently under-billing is exactly the bug this guards against.
+    const [site] = await db
+      .insert(sitesTable)
+      .values({
+        clientId: ctx.clientId,
+        name: `${TAG}-weekly-unpriced-site`,
+        address: "400 Unpriced Way",
+        // defaultBillRate intentionally NULL
+      })
+      .returning({ id: sitesTable.id });
+
+    const weekStart = previousMondayISO();
+    const start = new Date(`${weekStart}T00:00:00.000Z`);
+    const shiftIn = new Date(start.getTime() + 86400_000 + 9 * 3600_000);
+    const shiftOut = new Date(shiftIn.getTime() + 8 * 3600_000);
+    const [shift] = await db
+      .insert(shiftsTable)
+      .values({
+        title: `${TAG}-weekly-unpriced-shift`,
+        siteId: site.id,
+        startTime: shiftIn,
+        endTime: shiftOut,
+        requiredLicenseLevel: 2,
+        headcount: 1,
+        status: "completed",
+        payRate: "25.00",
+        billRate: "30.00",
+      })
+      .returning({ id: shiftsTable.id });
+
+    // Priced: rides the shift's own $30 bill rate.
+    await db.insert(timeEntriesTable).values({
+      shiftId: shift.id,
+      employeeId: ctx.officerId,
+      siteId: site.id,
+      clockInTime: shiftIn,
+      clockOutTime: shiftOut,
+      hoursWorked: "8.00",
+      approvalStatus: "approved",
+    });
+    // Unpriced: ad-hoc clock-in, no shift, and the site has no default rate.
+    const adhocIn = new Date(start.getTime() + 2 * 86400_000 + 9 * 3600_000);
+    await db.insert(timeEntriesTable).values({
+      employeeId: ctx.officerId,
+      siteId: site.id,
+      clockInTime: adhocIn,
+      clockOutTime: new Date(adhocIn.getTime() + 3.5 * 3600_000),
+      hoursWorked: "3.50",
+      approvalStatus: "approved",
+    });
+
+    const res = await request(app)
+      .post("/api/invoices/generate")
+      .set(authed(ctx.adminToken))
+      .send({ siteId: site.id, weekStart });
+    expect(res.status).toBe(201);
+    // Only the priced 8h billed: 8 × $30 = $240.
+    expect(parseFloat(res.body.totalAmount)).toBe(240);
+    // The dropped 3.5h are reported, not silently swallowed.
+    expect(res.body.unpricedHours).toBe(3.5);
+
+    // Re-running (update path) reports them too.
+    const rerun = await request(app)
+      .post("/api/invoices/generate")
+      .set(authed(ctx.adminToken))
+      .send({ siteId: site.id, weekStart });
+    expect(rerun.status).toBe(201);
+    expect(rerun.body.unpricedHours).toBe(3.5);
+  });
+
+  it("weekly path omits unpricedHours when everything is priced", async () => {
+    // Fresh site with a default bill rate so invoices from earlier tests
+    // (some keyed to this exact week) can't interfere with the weekly upsert.
+    const [site] = await db
+      .insert(sitesTable)
+      .values({
+        clientId: ctx.clientId,
+        name: `${TAG}-weekly-priced-site`,
+        address: "500 Priced Way",
+        defaultBillRate: "35.00",
+      })
+      .returning({ id: sitesTable.id });
+
+    const weekStart = previousMondayISO();
+    const start = new Date(`${weekStart}T00:00:00.000Z`);
+    const entryIn = new Date(start.getTime() + 86400_000 + 9 * 3600_000);
+    await db.insert(timeEntriesTable).values({
+      employeeId: ctx.officerId,
+      siteId: site.id,
+      clockInTime: entryIn,
+      clockOutTime: new Date(entryIn.getTime() + 8 * 3600_000),
+      hoursWorked: "8.00",
+      approvalStatus: "approved",
+    });
+
+    const res = await request(app)
+      .post("/api/invoices/generate")
+      .set(authed(ctx.adminToken))
+      .send({ siteId: site.id, weekStart });
+    expect(res.status).toBe(201);
+    expect(res.body.unpricedHours).toBeUndefined();
+  });
+
   it("blocks non-admin employees (403)", async () => {
     const res = await request(app)
       .post("/api/invoices/generate")

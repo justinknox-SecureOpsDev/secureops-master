@@ -2629,6 +2629,8 @@ export type GetPncPaymentStatus200 = { [key: string]: unknown };
 export type GenerateInvoice201 = Invoice & {
   /** Ids of existing non-void invoices for the same site whose period overlaps the generated invoice's range. On the weekly path, invoices keyed to the exact same week (prior locked weekly invoices / adjustment drafts) are excluded — only custom-period collisions are flagged. Non-empty means potential double-billing — surface a warning. */
   overlappingInvoiceIds?: string[];
+  /** Approved hours in the period that could NOT be billed because no bill rate resolved (entry has no shift bill rate and the site has no default bill rate). Present only when > 0 — the invoice under-bills by these hours. Surface a prominent warning: set the site's default bill rate, then regenerate. */
+  unpricedHours?: number;
 };
 
 export type RegisterPushTokenBody = {

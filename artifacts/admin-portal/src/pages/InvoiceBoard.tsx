@@ -216,6 +216,10 @@ export default function InvoiceBoardPage() {
   // Ids of pre-existing non-void invoices whose period overlaps the invoice
   // just created via the New Invoice dialog — possible double-billing.
   const [overlapWarningIds, setOverlapWarningIds] = useState<string[]>([]);
+  // Approved hours the server could not price (no bill rate) on the last
+  // generate — persistent banner, not a transient toast: this means the
+  // draft under-bills and the admin must fix the site's rate + regenerate.
+  const [unpricedWarningHours, setUnpricedWarningHours] = useState<number>(0);
   // Live pre-check inside the New Invoice dialog: existing non-void invoices
   // that already cover the chosen site + date range, surfaced BEFORE the
   // admin submits so they can cancel instead of voiding a duplicate.
@@ -313,12 +317,8 @@ export default function InvoiceBoardPage() {
       });
       closeNewInvoiceDialog();
       setOverlapWarningIds(created.overlappingInvoiceIds ?? []);
-      if (created.unpricedHours && created.unpricedHours > 0) {
-        showToast(
-          "err",
-          `Draft created, but ${created.unpricedHours} approved hour${created.unpricedHours === 1 ? "" : "s"} in this period could not be billed — no bill rate. Set the site's default bill rate, then regenerate.`,
-        );
-      } else {
+      setUnpricedWarningHours(created.unpricedHours && created.unpricedHours > 0 ? created.unpricedHours : 0);
+      if (!created.unpricedHours) {
         showToast("ok", "Draft invoice created successfully.");
       }
       await reload();
@@ -599,6 +599,29 @@ export default function InvoiceBoardPage() {
       {toast && (
         <div className={`mb-4 px-4 py-3 rounded border ${toast.kind === "ok" ? "bg-green-50 border-green-300 text-green-900" : "bg-red-50 border-red-300 text-red-900"}`}>
           {toast.msg}
+        </div>
+      )}
+
+      {unpricedWarningHours > 0 && (
+        <div className="mb-4 px-4 py-3 rounded border bg-red-50 border-red-300 text-red-900 flex items-start gap-3">
+          <AlertTriangle className="w-5 h-5 shrink-0 mt-0.5" />
+          <div className="flex-1">
+            <div className="font-semibold">Draft created, but it under-bills</div>
+            <div className="text-sm mt-0.5">
+              {unpricedWarningHours} approved hour{unpricedWarningHours === 1 ? "" : "s"} in this period could not
+              be billed because no bill rate applied — the entries have no shift bill rate and the site has no
+              default bill rate. Set the site&apos;s default bill rate (Sites page), then regenerate this invoice
+              and delete the short draft.
+            </div>
+          </div>
+          <button
+            type="button"
+            onClick={() => setUnpricedWarningHours(0)}
+            aria-label="Dismiss unbilled-hours warning"
+            className="p-1 rounded hover:bg-red-100"
+          >
+            <X className="w-4 h-4" />
+          </button>
         </div>
       )}
 

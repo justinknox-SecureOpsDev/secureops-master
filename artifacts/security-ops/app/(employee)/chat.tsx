@@ -15,6 +15,18 @@ export default function EmployeeChatScreen() {
   const colors = useColors();
   const radioEnabled = isEnabled(flags, "radio");
   const [activeTab, setActiveTab] = useState<ChatTab>("messages");
+  // RadioScreen stays mounted behind display:none, so expo-router focus never
+  // fires when the user flips to the Radio sub-tab. Bump this epoch on each
+  // switch to Radio so RadioScreen refetches its channel roster (fresh
+  // site-channel list) — see the refreshEpoch prop on RadioScreen.
+  const [radioEpoch, setRadioEpoch] = useState(0);
+
+  const selectTab = (t: ChatTab) => {
+    setActiveTab((prev) => {
+      if (t === "radio" && prev !== "radio") setRadioEpoch((e) => e + 1);
+      return t;
+    });
+  };
 
   const messages = (
     <FeatureGate feature="chat">
@@ -43,7 +55,7 @@ export default function EmployeeChatScreen() {
             <TouchableOpacity
               key={t}
               style={[styles.tab, active && { borderBottomColor: colors.primary, borderBottomWidth: 2 }]}
-              onPress={() => setActiveTab(t)}
+              onPress={() => selectTab(t)}
               accessibilityRole="tab"
               accessibilityLabel={label}
               accessibilityState={{ selected: active }}
@@ -65,7 +77,7 @@ export default function EmployeeChatScreen() {
         {messages}
       </View>
       <View style={{ flex: 1, display: activeTab === "radio" ? "flex" : "none" }}>
-        <RadioScreen />
+        <RadioScreen refreshEpoch={radioEpoch} />
       </View>
     </View>
   );
