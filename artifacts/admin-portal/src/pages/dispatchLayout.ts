@@ -7,6 +7,7 @@ export const PANEL_IDS = [
   "openShifts",
   "liveMap",
   "broadcast",
+  "radio",
 ] as const;
 
 export type PanelId = (typeof PANEL_IDS)[number];
@@ -26,6 +27,7 @@ export const DEFAULT_PANEL_ORDER: PanelId[] = [
   "openShifts",
   "liveMap",
   "broadcast",
+  "radio",
 ];
 
 export const LEFT_PANELS: readonly PanelId[] = [
@@ -38,6 +40,7 @@ export const LEFT_PANELS: readonly PanelId[] = [
 export const RIGHT_PANELS: readonly PanelId[] = [
   "liveMap",
   "broadcast",
+  "radio",
 ] as const;
 
 /**
@@ -51,6 +54,7 @@ export const DEFAULT_GEOMETRY: Record<PanelId, PanelGeometry> = {
   openShifts:  { x: 0,   y: 1228, w: 690, h: 360 },
   liveMap:     { x: 706, y: 0,    w: 690, h: 480 },
   broadcast:   { x: 706, y: 496,  w: 690, h: 280 },
+  radio:       { x: 706, y: 792,  w: 690, h: 420 },
 };
 
 export interface DispatchLayout {
@@ -70,6 +74,7 @@ export const DEFAULT_LAYOUT: DispatchLayout = {
     openShifts: true,
     liveMap: true,
     broadcast: true,
+    radio: true,
   },
   mapExpanded: false,
   mapTileLayer: "street",

@@ -22,6 +22,7 @@ import {
 import { useAuth } from "@/lib/auth";
 import { useFirstQueryParam } from "@/hooks/useDeepLinkFocus";
 import { AssignNearestDialog, candidateBlockReason, type Candidate, type AssignNearestResult } from "@/components/AssignNearestDialog";
+import { RadioPanel } from "@/components/RadioPanel";
 import {
   PANEL_IDS,
   DEFAULT_LAYOUT,
@@ -201,6 +202,7 @@ const PANEL_LABELS: Record<PanelId, string> = {
   openShifts: "Open Shifts",
   liveMap: "Live Map",
   broadcast: "Broadcast",
+  radio: "Radio",
 };
 
 // data-tour anchor values for panels that participate in the coach-mark tour.
@@ -210,6 +212,7 @@ const PANEL_TOUR: Partial<Record<PanelId, string>> = {
   shiftClaims: "shift-claims",
   openShifts: "open-shifts",
   broadcast: "broadcast",
+  radio: "radio",
 };
 // =========================================================== CUSTOMIZE POPOVER
 
@@ -663,6 +666,8 @@ export default function DispatchPage() {
               );
             case "broadcast":
               return <BroadcastPanel rooms={rooms.data ?? []} />;
+            case "radio":
+              return <RadioPanel />;
           }
         };
 

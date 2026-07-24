@@ -225,6 +225,7 @@ describe("useDispatchLayout — writes / round-trip", () => {
         openShifts: true,
         liveMap: false,
         broadcast: true,
+        radio: true,
       },
       mapExpanded: true,
       mapTileLayer: "satellite",
@@ -356,7 +357,7 @@ describe("applyPanelReorder — panelOrder round-trips through useDispatchLayout
 // ---------------------------------------------------------------------------
 
 const LEFT_COLUMN: PanelId[] = ["incidents", "statusBoard", "shiftClaims", "openShifts"];
-const RIGHT_COLUMN: PanelId[] = ["liveMap", "broadcast"];
+const RIGHT_COLUMN: PanelId[] = ["liveMap", "broadcast", "radio"];
 
 describe("buildColumnWithPlaceholder — no placeholder cases", () => {
   it("returns visible unchanged when insert is null (no drag in progress)", () => {
@@ -606,8 +607,8 @@ describe("PANEL_IDS structural integrity", () => {
     );
   });
 
-  it("RIGHT_PANELS contains exactly liveMap, broadcast", () => {
-    expect([...RIGHT_PANELS].sort()).toEqual(["broadcast", "liveMap"]);
+  it("RIGHT_PANELS contains exactly liveMap, broadcast, radio", () => {
+    expect([...RIGHT_PANELS].sort()).toEqual(["broadcast", "liveMap", "radio"]);
   });
 
   it("every PANEL_IDS entry is in exactly one of LEFT_PANELS or RIGHT_PANELS", () => {

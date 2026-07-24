@@ -105,7 +105,7 @@ function renderDispatch() {
 }
 
 /**
- * Wait until all six panels have been mounted.
+ * Wait until all seven panels have been mounted.
  * Returns an array of { panelId, column } objects extracted from
  * [data-panel-id] / [data-column] attributes in DOM order.
  */
@@ -114,8 +114,8 @@ async function waitForAllPanels(): Promise<{ panelId: string; column: string | n
     const els = Array.from(
       document.querySelectorAll<HTMLElement>("[data-panel-id]"),
     );
-    if (els.length < 6) {
-      throw new Error(`Expected 6 panel wrappers, found ${els.length}`);
+    if (els.length < 7) {
+      throw new Error(`Expected 7 panel wrappers, found ${els.length}`);
     }
     return els.map((el) => ({
       panelId: el.getAttribute("data-panel-id") ?? "",
@@ -140,10 +140,10 @@ describe("dispatch page — column panel placement", () => {
     keysToRemove.forEach((k) => localStorage.removeItem(k));
   });
 
-  it("renders all six panels in the DOM under the default layout", async () => {
+  it("renders all seven panels in the DOM under the default layout", async () => {
     renderDispatch();
     const panels = await waitForAllPanels();
-    expect(panels).toHaveLength(6);
+    expect(panels).toHaveLength(7);
   });
 
   it("every LEFT_PANELS id is rendered with data-column=\"left\"", async () => {
