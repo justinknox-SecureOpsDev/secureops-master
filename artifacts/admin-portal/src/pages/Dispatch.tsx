@@ -110,6 +110,7 @@ type ActiveOfficer = {
   lastLocationAt: string | null;
   shiftId: string | null;
   shiftTitle: string | null;
+  siteId: string | null;
   siteName: string | null;
 };
 
@@ -2287,8 +2288,16 @@ function LiveMapPanel({
 
   const points = useMemo<MapPoint[]>(() => {
     const pts: MapPoint[] = [];
+    // Only sites with someone currently clocked in get a marker — the map
+    // is a live-ops view, not a site directory. A deep-linked site stays
+    // visible so alert links still land on a pin.
+    const staffedSiteIds = new Set<string>();
+    for (const o of officers) {
+      if (o.siteId) staffedSiteIds.add(o.siteId);
+    }
     // Sites first so they sit underneath live circles when they overlap.
     for (const s of sites) {
+      if (!staffedSiteIds.has(s.id) && s.id !== focusSiteId) continue;
       if (!s.locationLat || !s.locationLng) continue;
       const lat = parseFloat(s.locationLat); const lng = parseFloat(s.locationLng);
       if (!isFinite(lat) || !isFinite(lng)) continue;
@@ -2341,7 +2350,7 @@ function LiveMapPanel({
       });
     }
     return pts;
-  }, [officers, sites, incidents]);
+  }, [officers, sites, incidents, focusSiteId]);
 
   const geofenceRadiusMiles = useGeofenceRadiusMiles();
 

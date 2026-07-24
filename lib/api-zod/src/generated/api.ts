@@ -3384,6 +3384,7 @@ export const GetActiveOfficersResponseItem = zod.object({
   clockInLng: zod.string().nullish(),
   shiftId: zod.string().nullish(),
   shiftTitle: zod.string().nullish(),
+  siteId: zod.string().nullish(),
   siteName: zod.string().nullish(),
   siteAddress: zod.string().nullish(),
   siteLat: zod.string().nullish(),

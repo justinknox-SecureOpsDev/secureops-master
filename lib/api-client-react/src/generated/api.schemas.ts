@@ -1717,6 +1717,7 @@ export interface ActiveOfficer {
   clockInLng?: string | null;
   shiftId?: string | null;
   shiftTitle?: string | null;
+  siteId?: string | null;
   siteName?: string | null;
   siteAddress?: string | null;
   siteLat?: string | null;

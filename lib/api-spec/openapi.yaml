@@ -5335,6 +5335,7 @@ components:
         clockInLng: { type: string, nullable: true }
         shiftId: { type: string, nullable: true }
         shiftTitle: { type: string, nullable: true }
+        siteId: { type: string, nullable: true }
         siteName: { type: string, nullable: true }
         siteAddress: { type: string, nullable: true }
         siteLat: { type: string, nullable: true }

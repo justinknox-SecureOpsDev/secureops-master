@@ -79,6 +79,7 @@ router.get("/admin/active-officers", requireAdminOrDispatcher, async (req, res):
       clockInLng: timeEntriesTable.clockInLng,
       shiftId: shiftsTable.id,
       shiftTitle: shiftsTable.title,
+      siteId: sitesTable.id,
       siteName: sitesTable.name,
       siteAddress: sitesTable.address,
       siteLat: sitesTable.locationLat,
@@ -100,7 +101,10 @@ router.get("/admin/active-officers", requireAdminOrDispatcher, async (req, res):
     .from(timeEntriesTable)
     .innerJoin(usersTable, eq(timeEntriesTable.employeeId, usersTable.id))
     .leftJoin(shiftsTable, eq(timeEntriesTable.shiftId, shiftsTable.id))
-    .leftJoin(sitesTable, eq(shiftsTable.siteId, sitesTable.id))
+    // Resolve the officer's site from the time entry itself first (GPS /
+    // ad-hoc clock-ins carry their own siteId with no shift), then fall
+    // back to the shift's site — same precedence the clock-in flow uses.
+    .leftJoin(sitesTable, eq(sitesTable.id, sql`COALESCE(${timeEntriesTable.siteId}, ${shiftsTable.siteId})`))
     .where(isNull(timeEntriesTable.clockOutTime))
     .orderBy(desc(timeEntriesTable.clockInTime));
 
