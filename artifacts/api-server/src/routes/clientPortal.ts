@@ -178,6 +178,9 @@ router.get("/client/sites", requireClient, async (req, res): Promise<void> => {
       res.json([]);
       return;
     }
+    // Active sites only: this list feeds the coverage-request site picker, so
+    // retired (inactive) sites must not be offered. Historical surfaces
+    // (invoices, DARs, shifts) join site names directly and are unaffected.
     const sites = await db
       .select({
         id: sitesTable.id,
@@ -185,7 +188,7 @@ router.get("/client/sites", requireClient, async (req, res): Promise<void> => {
         address: sitesTable.address,
       })
       .from(sitesTable)
-      .where(inArray(sitesTable.id, siteIds));
+      .where(and(inArray(sitesTable.id, siteIds), eq(sitesTable.status, "active")));
     res.json(sites);
   } catch (err) {
     if (handleScopeError(err, res)) return;
@@ -936,6 +939,18 @@ router.post(
         });
         return;
       }
+      // Retired sites can't take new coverage — mirrors the POST /shifts guard.
+      const [requestedSite] = await db
+        .select({ status: sitesTable.status })
+        .from(sitesTable)
+        .where(eq(sitesTable.id, body.siteId));
+      if (requestedSite?.status !== "active") {
+        res.status(400).json({
+          error: "Bad Request",
+          message: "This site is inactive — coverage requests can only be submitted for active sites.",
+        });
+        return;
+      }
       if (body.l2Count + body.l3Count + body.l4Count === 0) {
         res.status(400).json({
           error: "Bad Request",
@@ -1307,6 +1322,17 @@ router.post(
       res.status(409).json({
         error: "Conflict",
         message: `Request is already ${sr.status}.`,
+      });
+      return;
+    }
+
+    // Approval inserts shifts directly (bypasses POST /shifts), so the
+    // inactive-site guard must be re-applied here: a site retired after the
+    // request was submitted must not receive new shifts.
+    if (site && site.status !== "active") {
+      res.status(400).json({
+        error: "Bad Request",
+        message: "This site is inactive — reactivate it before approving coverage for it.",
       });
       return;
     }

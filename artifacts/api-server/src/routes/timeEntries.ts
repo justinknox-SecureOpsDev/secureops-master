@@ -550,7 +550,10 @@ router.post("/time-entries/clock-in", requireStaff, async (req, res): Promise<vo
     // otherwise it would let anyone fabricate presence at an arbitrary remote
     // site and even auto-attach to its open shifts. Admins are trusted (covering
     // a post / fixing a stuck record). The geo-radius check is still skipped:
-    // the accepted-assignment is the authorization instead.
+    // the accepted-assignment is the authorization instead. Inactive sites are
+    // deliberately allowed here (and in the dispatch clock-in): these are
+    // trusted-admin recovery paths, and existing operations at a just-retired
+    // site must remain fixable — only NEW shifts/coverage are blocked.
     const [site] = await db.select().from(sitesTable).where(eq(sitesTable.id, bodySiteId));
     if (!site) {
       res.status(404).json({ error: "Not Found", message: "Site not found" });

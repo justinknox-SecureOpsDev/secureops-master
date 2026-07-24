@@ -95,3 +95,4 @@
 - [Tailwind v4 bare-var brackets](tailwind-v4-bare-var-brackets.md) — `max-h-[--radix-…]` v3 shorthand silently no-ops on Tailwind v4 (unscrollable dropdowns); convert to `(--var)`, keep `[var(--x)]`.
 - [Invoice PDF three data paths](invoice-pdf-three-paths.md) — invoice PDFs build from 3 separate selects (admin /pdf, client portal, send-email); new money columns must hit ALL three, optional PdfInput fields keep typecheck green.
 - [Invoice unpriced-hours under-billing](invoice-unpriced-hours.md) — shift_id NULL + no site default bill rate = hours silently dropped; every generate path must surface unpricedHours; fix = set site rate, regenerate, void short draft.
+- [Inactive-site lifecycle](site-inactive-lifecycle.md) — status=inactive blocks NEW intake only; every direct insert(shiftsTable) path (incl. client coverage approval) needs its own guard; payroll/webhook/clock-in stay open.

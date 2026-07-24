@@ -3,7 +3,7 @@ import request from "supertest";
 import { randomUUID } from "node:crypto";
 import bcrypt from "bcryptjs";
 import { sql } from "drizzle-orm";
-import { db, usersTable, clientsTable, sitesTable } from "@workspace/db";
+import { db, usersTable, clientsTable, sitesTable, shiftRequestsTable } from "@workspace/db";
 import app from "../app";
 import { signToken } from "../middlewares/auth";
 
@@ -17,6 +17,7 @@ const passwordHash = bcrypt.hashSync("test-password", 4);
 
 type Ctx = {
   adminToken: string;
+  clientToken: string;
   clientId: string;
   activeSiteId: string;
   inactiveSiteId: string;
@@ -57,9 +58,25 @@ beforeAll(async () => {
     .values({ clientId: ctx.clientId, name: `${TAG}-inactive`, address: "2 Retired Rd", status: "inactive" })
     .returning({ id: sitesTable.id });
   ctx.inactiveSiteId = inactive.id;
+
+  const [clientUser] = await db
+    .insert(usersTable)
+    .values({
+      email: `${TAG}-client@example.test`,
+      passwordHash,
+      firstName: "Client",
+      lastName: TAG,
+      role: "client",
+      status: "active",
+      clientId: ctx.clientId,
+      tokensValidAfter: new Date(0),
+    })
+    .returning({ id: usersTable.id });
+  ctx.clientToken = signToken({ userId: clientUser.id, email: `${TAG}-client@example.test`, role: "client" });
 });
 
 afterAll(async () => {
+  await db.execute(sql`DELETE FROM shift_requests WHERE site_id IN (SELECT id FROM sites WHERE name LIKE ${TAG + "%"})`);
   await db.execute(sql`DELETE FROM shifts WHERE title LIKE ${TAG + "%"}`);
   await db.execute(sql`DELETE FROM sites WHERE name LIKE ${TAG + "%"}`);
   await db.execute(sql`DELETE FROM clients WHERE name LIKE ${TAG + "%"}`);
@@ -130,6 +147,68 @@ describe("inactive sites", () => {
       });
     expect(res.status).toBe(400);
     expect(res.body.message).toMatch(/inactive/i);
+  });
+
+  it("client portal site picker excludes inactive sites", async () => {
+    const res = await request(app)
+      .get("/api/client/sites")
+      .set({ Authorization: `Bearer ${ctx.clientToken}` });
+    expect(res.status).toBe(200);
+    const ids = res.body.map((s: { id: string }) => s.id);
+    expect(ids).toContain(ctx.activeSiteId);
+    expect(ids).not.toContain(ctx.inactiveSiteId);
+  });
+
+  it("client coverage request for an inactive site is refused", async () => {
+    const res = await request(app)
+      .post("/api/client/shift-requests")
+      .set({ Authorization: `Bearer ${ctx.clientToken}` })
+      .send({
+        siteId: ctx.inactiveSiteId,
+        startDate: "2030-02-04",
+        endDate: "2030-02-05",
+        startTime: "08:00",
+        endTime: "16:00",
+        l2Count: 1,
+        l3Count: 0,
+        l4Count: 0,
+      });
+    expect(res.status).toBe(400);
+    expect(res.body.message).toMatch(/inactive/i);
+  });
+
+  it("approving a pending coverage request is refused once the site is inactive", async () => {
+    // Simulate a request submitted while the site was still active, then retired.
+    const [sr] = await db
+      .insert(shiftRequestsTable)
+      .values({
+        clientId: ctx.clientId,
+        siteId: ctx.inactiveSiteId,
+        startDate: "2030-03-04",
+        endDate: "2030-03-04",
+        startTime: "08:00",
+        endTime: "16:00",
+        l2Count: 1,
+        l3Count: 0,
+        l4Count: 0,
+        status: "pending",
+      })
+      .returning({ id: shiftRequestsTable.id });
+
+    const res = await request(app)
+      .post(`/api/admin/shift-requests/${sr.id}/approve`)
+      .set(authed())
+      .send({});
+    expect(res.status).toBe(400);
+    expect(res.body.message).toMatch(/inactive/i);
+
+    // No shifts were created for it.
+    const [row] = await db
+      .select({ status: shiftRequestsTable.status, createdShiftIds: shiftRequestsTable.createdShiftIds })
+      .from(shiftRequestsTable)
+      .where(sql`${shiftRequestsTable.id} = ${sr.id}`);
+    expect(row.status).toBe("pending");
+    expect(row.createdShiftIds ?? []).toHaveLength(0);
   });
 
   it("PUT /sites/:id rejects an invalid status value", async () => {
