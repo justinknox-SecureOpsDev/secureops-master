@@ -113,26 +113,44 @@ describe("EmployeeShiftsScreen — no redundant fetches on sub-tab switch", () =
     // reuse the cached response on subsequent renders without an additional
     // network round-trip. Without an explicit key, some Orval-generated hooks
     // derive a key dynamically on every call, which can break deduplication.
-    const hasMeKey = /getGetMeQueryKey\(\)/.test(src);
-    const hasEmployeeKey = /getGetEmployeeQueryKey\(/.test(src);
-    const hasShiftsKey = /getGetShiftsQueryKey\(/.test(src);
+    //
+    // WHY THE STRICTER REGEX:
+    // A bare `/getGetShiftsQueryKey\(/.test(src)` would pass even if the key
+    // is only used in `queryClient.invalidateQueries({ queryKey: getGetShiftsQueryKey() })`
+    // calls — which shifts.tsx has several of — and never wired into the hook
+    // invocation at all. The stricter pattern matches the Orval hook shape
+    //   `query: { queryKey: getGet*QueryKey(...) }`
+    // so the assertion only passes when the key is inside the hook's own
+    // `query` option, confirming deduplication is actually active, not just
+    // that the key function is imported somewhere in the file.
+    // This mirrors the same tightening applied to the clock-pane test.
+    const hasMeKey = /query\s*:\s*\{[^}]*queryKey\s*:\s*getGetMeQueryKey\(\)/.test(src);
+    const hasEmployeeKey = /query\s*:\s*\{[^}]*queryKey\s*:\s*getGetEmployeeQueryKey\(/.test(src);
+    const hasShiftsKey = /query\s*:\s*\{[^}]*queryKey\s*:\s*getGetShiftsQueryKey\(/.test(src);
 
     expect(
       hasMeKey,
-      "shifts.tsx must pass an explicit queryKey (getGetMeQueryKey()) to useGetMe " +
-        "so React Query can match and serve the cached response without re-fetching.",
+      "shifts.tsx must pass an explicit queryKey (getGetMeQueryKey()) directly " +
+        "inside the hook's `query: { queryKey: ... }` option so React Query can " +
+        "match and serve the cached response without re-fetching. A bare presence " +
+        "check would pass even if the key only appeared in an invalidateQueries call.",
     ).toBe(true);
 
     expect(
       hasEmployeeKey,
-      "shifts.tsx must pass an explicit queryKey (getGetEmployeeQueryKey(...)) to " +
-        "useGetEmployee so the cached employee record is reused across renders.",
+      "shifts.tsx must pass an explicit queryKey (getGetEmployeeQueryKey(...)) " +
+        "directly inside useGetEmployee's `query: { queryKey: ... }` option so the " +
+        "cached employee record is reused across renders. A bare presence check " +
+        "would pass even if the key only appeared in an invalidateQueries call.",
     ).toBe(true);
 
     expect(
       hasShiftsKey,
-      "shifts.tsx must pass an explicit queryKey (getGetShiftsQueryKey(...)) to " +
-        "useGetShifts so the cache can be keyed by the status filter and reused.",
+      "shifts.tsx must pass an explicit queryKey (getGetShiftsQueryKey(...)) " +
+        "directly inside useGetShifts's `query: { queryKey: ... }` option so the " +
+        "cache can be keyed by the status filter and reused. A bare presence check " +
+        "would pass even if the key only appeared in an invalidateQueries call — " +
+        "which shifts.tsx has several of — and was never wired into the hook itself.",
     ).toBe(true);
   });
 });
