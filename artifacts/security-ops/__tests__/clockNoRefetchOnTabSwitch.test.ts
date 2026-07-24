@@ -129,7 +129,12 @@ describe("EmployeeClockScreen — no redundant fetches on sub-tab switch", () =>
     // This mirrors the same tightening applied in shiftsNoRefetchOnTabSwitch.test.ts.
     const hasActiveEntryKey =
       /query\s*:\s*\{[^}]*queryKey\s*:\s*getGetActiveTimeEntryQueryKey\s*\(\s*\)/.test(src);
-    const hasTimeEntriesKey = /getGetTimeEntriesQueryKey\(/.test(src);
+    // Same tightening as the other two keys: match the Orval hook shape
+    // `query: { queryKey: getGetTimeEntriesQueryKey({...}) }` so the assertion
+    // only passes when the key is wired into the hook invocation itself, not
+    // merely present in an invalidateQueries/setQueryData call elsewhere.
+    const hasTimeEntriesKey =
+      /query\s*:\s*\{[^}]*queryKey\s*:\s*getGetTimeEntriesQueryKey\s*\(/.test(src);
     // Tighter than a bare getGetMyClockInShiftsQueryKey() presence check: the key
     // also appears in queryClient.invalidateQueries calls (which use `queryKey:`
     // directly, without the `query:` wrapper). Matching the Orval hook shape
