@@ -45,7 +45,9 @@ const passwordHash = bcrypt.hashSync("test-password", 4);
 // strings where they appear — they are deliberately far from any realistic date
 // and are already permanent. Clock-skew sentinel values (2030-01-0x,
 // 2020-01-0x) are also kept literal: they form apples-to-apples scheduler
-// clock pairs and never compare against wall-clock time.
+// clock pairs and never compare against wall-clock time. Reconcile-job cursor
+// sentinels (CURSOR_C1, CURSOR_C2) use rel() so they stay in the past without
+// drifting to a confusingly distant date.
 // ---------------------------------------------------------------------------
 const T0 = Date.now();
 const MS_DAY = 86_400_000;
@@ -1163,8 +1165,10 @@ describe("delete over the HTTP webhook routes (signed payloads)", () => {
 // ---------------------------------------------------------------------------
 
 describe("scheduler reconciliation job", () => {
-  const CURSOR_C1 = "2026-07-10T00:00:00.000Z";
-  const CURSOR_C2 = "2026-07-11T00:00:00.000Z";
+  // Relative cursor sentinels — two distinct past timestamps that stay in the
+  // past indefinitely and never tie a test result to a specific calendar date.
+  const CURSOR_C1 = rel(-14);
+  const CURSOR_C2 = rel(-13);
 
   beforeEach(async () => {
     process.env.SCHEDULER_BASE_URL = "https://scheduler.example.com";
