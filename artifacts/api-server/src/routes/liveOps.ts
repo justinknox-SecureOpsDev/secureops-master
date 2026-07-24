@@ -1,6 +1,6 @@
 import { Router, type IRouter } from "express";
 import { eq, isNull, and, sql, desc, gte, asc } from "drizzle-orm";
-import { db, usersTable, timeEntriesTable, shiftsTable, sitesTable, incidentsTable, locationPingsTable } from "@workspace/db";
+import { db, usersTable, timeEntriesTable, shiftsTable, sitesTable, radioChannelsTable, incidentsTable, locationPingsTable } from "@workspace/db";
 import { requireStaff, requireAdminOrDispatcher } from "../middlewares/auth";
 import { emergencyLimiter, locationLimiter } from "../middlewares/rateLimit";
 import { sendPushToUsers } from "../lib/push";
@@ -81,11 +81,22 @@ router.get("/admin/active-officers", requireAdminOrDispatcher, async (req, res):
       shiftTitle: shiftsTable.title,
       siteName: sitesTable.name,
       siteAddress: sitesTable.address,
+      siteLat: sitesTable.locationLat,
+      siteLng: sitesTable.locationLng,
+      siteChannelId: radioChannelsTable.id,
     })
     .from(timeEntriesTable)
     .innerJoin(usersTable, eq(timeEntriesTable.employeeId, usersTable.id))
     .leftJoin(shiftsTable, eq(timeEntriesTable.shiftId, shiftsTable.id))
     .leftJoin(sitesTable, eq(shiftsTable.siteId, sitesTable.id))
+    .leftJoin(
+      radioChannelsTable,
+      and(
+        eq(radioChannelsTable.siteId, sitesTable.id),
+        eq(radioChannelsTable.scope, "site"),
+        isNull(radioChannelsTable.archivedAt),
+      ),
+    )
     .where(isNull(timeEntriesTable.clockOutTime))
     .orderBy(desc(timeEntriesTable.clockInTime));
 
