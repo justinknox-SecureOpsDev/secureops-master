@@ -82,6 +82,36 @@ map.setView(pts.length ? [pts[0].lat, pts[0].lng] : [39.8283, -98.5795], pts.len
 L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
   attribution: '&copy; OpenStreetMap', maxZoom: 19,
 }).addTo(map);
+// Legend — bottom-left, built entirely via DOM API (no innerHTML) to stay
+// consistent with the XSS-safe pattern used for popups above.
+const LegendControl = L.Control.extend({
+  onAdd: function() {
+    const div = document.createElement('div');
+    div.style.cssText = 'background:rgba(12,10,8,0.88);border:1px solid #c9a04a;border-radius:6px;padding:8px 12px;font-family:-apple-system,system-ui,sans-serif;font-size:12px;color:#f0e4c0;display:flex;flex-direction:column;gap:6px;pointer-events:none;line-height:1;';
+    // Officer row — green circle
+    const officerRow = document.createElement('div');
+    officerRow.style.cssText = 'display:flex;align-items:center;gap:8px;';
+    const officerDot = document.createElement('span');
+    officerDot.style.cssText = 'display:inline-block;width:12px;height:12px;border-radius:50%;background:#22c55e;border:2px solid #16a34a;flex-shrink:0;';
+    const officerLabel = document.createElement('span');
+    officerLabel.appendChild(document.createTextNode('Officer'));
+    officerRow.appendChild(officerDot);
+    officerRow.appendChild(officerLabel);
+    // Site row — gold diamond (rotated square)
+    const siteRow = document.createElement('div');
+    siteRow.style.cssText = 'display:flex;align-items:center;gap:8px;';
+    const siteDiamond = document.createElement('span');
+    siteDiamond.style.cssText = 'display:inline-block;width:10px;height:10px;background:#c9a04a;transform:rotate(45deg);flex-shrink:0;border:1px solid #f0e4c0;';
+    const siteLabel = document.createElement('span');
+    siteLabel.appendChild(document.createTextNode('Site'));
+    siteRow.appendChild(siteDiamond);
+    siteRow.appendChild(siteLabel);
+    div.appendChild(officerRow);
+    div.appendChild(siteRow);
+    return div;
+  },
+});
+new LegendControl({ position: 'bottomleft' }).addTo(map);
 const focusId = ${focus};
 if (pts.length) {
   const group = L.featureGroup().addTo(map);
@@ -90,8 +120,8 @@ if (pts.length) {
     const isFocus = focusId && String(p.userId) === String(focusId);
     const m = L.circleMarker([p.lat, p.lng], {
       radius: isFocus ? 14 : 10,
-      color: isFocus ? '#f0e4c0' : '#c9a04a',
-      fillColor: '#c9a04a', fillOpacity: 0.9, weight: isFocus ? 5 : 3,
+      color: isFocus ? '#f0e4c0' : '#16a34a',
+      fillColor: '#22c55e', fillOpacity: 0.9, weight: isFocus ? 5 : 3,
     });
     m.bindPopup(popupNode(p.label, p.sub, p.userId));
     m.addTo(group);
