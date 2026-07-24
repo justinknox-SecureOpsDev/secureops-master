@@ -291,4 +291,41 @@ describe("applyNavOrder — stale key migration", () => {
     // All current groups appended in default order
     expect(result.map((g) => g.key)).toEqual(adminGroups.map((g) => g.key));
   });
+
+  it("drops dispatcher's retired 'security'/'settings' keys and appends comms + account in default order", () => {
+    // A dispatcher who saved their tab order before the restructure would have
+    // "security" (now "comms") and "settings" (now "account") in their saved preference.
+    // applyNavOrder must drop both retired keys and append the current dispatcher
+    // groups that were absent from the saved preference in their default order.
+    const staleOrder = [
+      "dispatch",
+      "security",   // retired — now "comms"
+      "settings",   // retired — now "account"
+    ];
+
+    const result = applyNavOrder(dispatcherGroups, staleOrder);
+    const keys = result.map((g) => g.key);
+
+    // Retired keys must not appear
+    expect(keys).not.toContain("security");
+    expect(keys).not.toContain("settings");
+
+    // The one valid saved key appears first
+    expect(keys[0]).toBe("dispatch");
+
+    // All current dispatcher groups must be present
+    const defaultKeys = dispatcherGroups.map((g) => g.key);
+    for (const key of defaultKeys) {
+      expect(keys).toContain(key);
+    }
+
+    // comms and account are appended after dispatch (in default group order)
+    const dispatchIdx = keys.indexOf("dispatch");
+    const commsIdx = keys.indexOf("comms");
+    const accountIdx = keys.indexOf("account");
+    expect(commsIdx).toBeGreaterThan(dispatchIdx);
+    expect(accountIdx).toBeGreaterThan(dispatchIdx);
+    // comms appears before account (matching dispatcher default group order)
+    expect(commsIdx).toBeLessThan(accountIdx);
+  });
 });
