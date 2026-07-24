@@ -13,6 +13,7 @@ export interface ActiveOfficer {
   clockInLat?: string | null;
   clockInLng?: string | null;
   shiftTitle?: string | null;
+  siteId?: string | null;
   siteName?: string | null;
   siteAddress?: string | null;
 }
@@ -148,11 +149,12 @@ interface Props {
   officers: ActiveOfficer[];
   height?: number;
   onSelectOfficer?: (userId: string) => void;
+  onSelectSite?: (siteId: string, siteName: string) => void;
   focusUserId?: string | null;
   focusKey?: string | null;
 }
 
-export default function LiveOfficerMap({ officers, height = 380, onSelectOfficer, focusUserId, focusKey }: Props) {
+export default function LiveOfficerMap({ officers, height = 380, onSelectOfficer, onSelectSite, focusUserId, focusKey }: Props) {
   const colors = useColors();
 
   const points = useMemo(
@@ -174,19 +176,28 @@ export default function LiveOfficerMap({ officers, height = 380, onSelectOfficer
     [points, focusUserId, focusKey],
   );
 
-  // Listen for "View profile" clicks from inside the leaflet iframe (web only).
+  // Listen for postMessages from inside the leaflet iframe (web only).
+  // Handles both "View profile" officer clicks and "Open Radio" site clicks.
   useEffect(() => {
-    if (Platform.OS !== "web" || !onSelectOfficer) return;
+    if (Platform.OS !== "web") return;
     const handler = (ev: MessageEvent) => {
       const data = ev.data;
-      if (data && typeof data === "object" && (data as any).type === "wcsg:openOfficer") {
-        const uid = (data as any).userId;
+      if (!data || typeof data !== "object") return;
+      const msg = data as any;
+      if (msg.type === "wcsg:openOfficer" && onSelectOfficer) {
+        const uid = msg.userId;
         if (typeof uid === "string" && uid.length > 0) onSelectOfficer(uid);
+      } else if (msg.type === "wcsg:openSiteRadio" && onSelectSite) {
+        const siteId = msg.siteId;
+        const siteName = msg.siteName;
+        if (typeof siteId === "string" && siteId.length > 0) {
+          onSelectSite(siteId, typeof siteName === "string" ? siteName : siteId);
+        }
       }
     };
     window.addEventListener("message", handler);
     return () => window.removeEventListener("message", handler);
-  }, [onSelectOfficer]);
+  }, [onSelectOfficer, onSelectSite]);
 
   if (Platform.OS === "web") {
     const Iframe: any = "iframe";

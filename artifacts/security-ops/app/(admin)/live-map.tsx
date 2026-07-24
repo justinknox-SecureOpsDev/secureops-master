@@ -1,15 +1,384 @@
-import React, { useRef, useEffect } from "react";
-import { View, Text, StyleSheet, ScrollView, Platform, ActivityIndicator, TouchableOpacity, Linking, Animated } from "react-native";
+import React, { useRef, useEffect, useState, useCallback, useMemo } from "react";
+import { View, Text, StyleSheet, ScrollView, Platform, ActivityIndicator, TouchableOpacity, Linking, Animated, Pressable } from "react-native";
 import { useColors } from "@/hooks/useColors";
 import { useGetActiveOfficers, getGetActiveOfficersQueryKey } from "@workspace/api-client-react";
 import { Feather } from "@expo/vector-icons";
 import LiveOfficerMap from "@/components/LiveOfficerMap";
 import { formatDistanceToNow } from "date-fns";
-import { useRouter, useLocalSearchParams } from "expo-router";
+import { useRouter, useLocalSearchParams, useFocusEffect } from "expo-router";
 import { useHighlightFlash } from "@/hooks/useHighlightFlash";
 import { FeatureGate } from "@/components/FeatureGate";
+import { AUTH_TOKEN_KEY, useAuth } from "@/contexts/AuthContext";
+import { storage } from "@/utils/storage";
+import { apiRequest, getApiBaseUrl } from "@/utils/api";
+import { createRadioMedia } from "@/components/radio/radioMedia";
+import { createTransmitController, type TransmitController } from "@/components/radio/radioTransmit";
+import type { RadioMedia, RadioToken } from "@/components/radio/radioTypes";
 
 const AnimatedTouchable = Animated.createAnimatedComponent(TouchableOpacity);
+
+type SiteChannel = {
+  id: string;
+  name: string;
+  scope: string;
+  siteId: string | null;
+  siteName?: string | null;
+  adminOnly: boolean;
+  archivedAt: string | null;
+};
+
+type Speaker = { userId: string; name: string } | null;
+type TalkState = "idle" | "requesting" | "connecting" | "live";
+
+function buildRadioWsUrl(token: string): string {
+  const baseHttp = getApiBaseUrl().replace(/^http/, "ws").replace(/\/api$/, "");
+  return `${baseHttp}/api/ws/radio?token=${encodeURIComponent(token)}`;
+}
+
+async function postRadioToken(
+  path: string,
+): Promise<{ status: number; data: RadioToken | null }> {
+  const token = await storage.get(AUTH_TOKEN_KEY);
+  const res = await fetch(`${getApiBaseUrl()}${path}`, {
+    method: "POST",
+    headers: token ? { Authorization: `Bearer ${token}` } : {},
+  });
+  if (!res.ok) return { status: res.status, data: null };
+  return { status: res.status, data: (await res.json()) as RadioToken };
+}
+
+function isMicPermissionError(e: unknown): boolean {
+  const name = (e as { name?: string })?.name ?? "";
+  const msg = ((e as Error)?.message ?? "").toLowerCase();
+  return name === "NotAllowedError" || name === "SecurityError" || name === "PermissionDeniedError" || msg.includes("permission") || msg.includes("denied") || msg.includes("not allowed");
+}
+
+type SiteRadioState = { siteId: string; siteName: string } | null;
+
+// ---------------------------------------------------------------------------
+// SiteRadioPanel — a focused PTT panel for a single site radio channel.
+// Opens a WS control-plane connection, joins the site's channel, and tears
+// everything down on unmount (dismiss OR screen-blur via useFocusEffect above).
+// ---------------------------------------------------------------------------
+function SiteRadioPanel({
+  siteId,
+  siteName,
+  onDismiss,
+}: {
+  siteId: string;
+  siteName: string;
+  onDismiss: () => void;
+}) {
+  const colors = useColors();
+  const { user } = useAuth();
+
+  const [channel, setChannel] = useState<SiteChannel | null>(null);
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const [wsReady, setWsReady] = useState(false);
+  const [reconnecting, setReconnecting] = useState(false);
+  const [speaker, setSpeaker] = useState<Speaker>(null);
+  const [talkState, setTalkState] = useState<TalkState>("idle");
+  const [publishingChannelId, setPublishingChannelId] = useState<string | null>(null);
+  const [audioAvailable, setAudioAvailable] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+
+  const wsRef = useRef<WebSocket | null>(null);
+  const mediaRef = useRef<RadioMedia | null>(null);
+  const joinedRef = useRef(false);
+  const transmitRef = useRef<TransmitController | null>(null);
+  const userIdRef = useRef<string | undefined>(user?.id);
+  useEffect(() => { userIdRef.current = user?.id; }, [user?.id]);
+
+  if (!transmitRef.current) {
+    transmitRef.current = createTransmitController({
+      send: (msg) => {
+        const ws = wsRef.current;
+        if (!ws || ws.readyState !== WebSocket.OPEN) return false;
+        ws.send(JSON.stringify(msg));
+        return true;
+      },
+      getUserId: () => userIdRef.current,
+    });
+  }
+
+  // Fetch the site's radio channel once on mount.
+  useEffect(() => {
+    let cancelled = false;
+    apiRequest("/radio/channels")
+      .then((rows: SiteChannel[]) => {
+        if (cancelled) return;
+        const found = rows.find((c) => c.siteId === siteId && c.scope === "site" && !c.archivedAt);
+        if (found) {
+          setChannel(found);
+        } else {
+          setLoadError("No active radio channel for this site.");
+        }
+      })
+      .catch((e: Error) => { if (!cancelled) setLoadError(e.message); });
+    return () => { cancelled = true; };
+  }, [siteId]);
+
+  // Open WS once the channel is known. Tears down completely on unmount.
+  useEffect(() => {
+    if (!channel) return;
+    const channelId = channel.id;
+    let cancelled = false;
+    let attempt = 0;
+    let reconnectTimer: ReturnType<typeof setTimeout> | undefined;
+    mediaRef.current = createRadioMedia();
+
+    const cancelTransmit = (): void => {
+      transmitRef.current!.cancel();
+      setTalkState("idle");
+      setPublishingChannelId(null);
+      void mediaRef.current?.stopPublish();
+    };
+
+    const scheduleReconnect = (): void => {
+      if (cancelled) return;
+      setReconnecting(true);
+      const base = Math.min(15_000, 1_000 * 2 ** attempt);
+      const delay = base / 2 + Math.random() * (base / 2);
+      attempt += 1;
+      reconnectTimer = setTimeout(() => { void connect(); }, delay);
+    };
+
+    async function connect(): Promise<void> {
+      if (cancelled) return;
+      const token = await storage.get(AUTH_TOKEN_KEY);
+      if (!token || cancelled) return;
+      const ws = new WebSocket(buildRadioWsUrl(token));
+      wsRef.current = ws;
+
+      ws.onopen = () => {
+        if (cancelled || wsRef.current !== ws) return;
+        attempt = 0;
+        setWsReady(true);
+        setReconnecting(false);
+        setError(null);
+        if (!joinedRef.current) {
+          ws.send(JSON.stringify({ type: "join", channelId }));
+          joinedRef.current = true;
+        }
+      };
+      ws.onclose = () => {
+        if (wsRef.current !== ws) return;
+        setWsReady(false);
+        joinedRef.current = false;
+        cancelTransmit();
+        scheduleReconnect();
+      };
+      ws.onerror = () => { if (wsRef.current === ws) cancelTransmit(); };
+      ws.onmessage = (ev) => {
+        if (wsRef.current !== ws) return;
+        if (typeof ev.data !== "string") return;
+        try {
+          const m = JSON.parse(ev.data);
+          if (m.type === "speaking" && m.channelId === channelId) {
+            setSpeaker({ userId: m.speakerUserId, name: m.speakerName });
+            const intent = transmitRef.current!.handleSpeaking(m.channelId, m.speakerUserId);
+            if (intent) void beginPublish(intent.channelId, intent.gen);
+          } else if (m.type === "silent" && m.channelId === channelId) {
+            setSpeaker(null);
+          } else if (m.type === "denied") {
+            const reason = m.reason;
+            setError(
+              reason === "busy" ? "Someone else is already transmitting." :
+              reason === "preempted" ? "An admin took over the channel." :
+              reason === "rate_limited" ? "Transmitting too quickly. Wait a moment." :
+              reason === "forbidden" ? "Not allowed to transmit on this channel." :
+              reason === "not_joined" ? "Not yet joined to channel." :
+              `Transmission denied${reason ? ` (${reason})` : ""}.`,
+            );
+            cancelTransmit();
+          }
+        } catch { /* ignore */ }
+      };
+    }
+
+    void connect();
+
+    return () => {
+      cancelled = true;
+      if (reconnectTimer !== undefined) clearTimeout(reconnectTimer);
+      // Send leave before closing so the server cleans up membership.
+      const ws = wsRef.current;
+      if (ws && ws.readyState === WebSocket.OPEN) {
+        try { ws.send(JSON.stringify({ type: "leave", channelId })); } catch { /* ignore */ }
+      }
+      if (ws) { ws.onclose = null; try { ws.close(); } catch { /* ignore */ } }
+      wsRef.current = null;
+      joinedRef.current = false;
+      mediaRef.current?.setOnListenLost(null);
+      void mediaRef.current?.teardown();
+      mediaRef.current = null;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [channel]);
+
+  async function beginPublish(channelId: string, gen: number): Promise<void> {
+    const aborted = (): boolean => transmitRef.current!.currentGen() !== gen;
+    try {
+      setTalkState("connecting");
+      const { status, data } = await postRadioToken(`/radio/channels/${channelId}/livekit-publish-token`);
+      if (aborted()) return;
+      if (!data) {
+        if (status === 503) setAudioAvailable(false);
+        throw new Error(status === 409 ? "Someone else is transmitting." : `Publish token failed (${status})`);
+      }
+      setPublishingChannelId(channelId);
+      await mediaRef.current!.startPublish(channelId, data, aborted);
+      if (aborted()) { await mediaRef.current?.stopPublish(); setPublishingChannelId(null); return; }
+      setTalkState("live");
+    } catch (e) {
+      setError(isMicPermissionError(e)
+        ? "Microphone access is off. Enable it for SecureOps in your device Settings, then try again."
+        : `Could not start transmitting: ${(e as Error).message}`);
+      setTalkState("idle");
+      setPublishingChannelId(null);
+      wsRef.current?.send(JSON.stringify({ type: "end", channelId }));
+    }
+  }
+
+  function startTalking(): void {
+    if (!channel || talkState !== "idle") return;
+    const supportsAudio = mediaRef.current?.supportsAudio ?? false;
+    if (!supportsAudio) {
+      setError("Live radio audio is in the SecureOps app on your phone.");
+      return;
+    }
+    if (!audioAvailable) { setError("Live radio audio is not configured on this server."); return; }
+    const ws = wsRef.current;
+    if (!ws || ws.readyState !== WebSocket.OPEN) return;
+    setError(null);
+    setTalkState("requesting");
+    transmitRef.current!.start(channel.id);
+  }
+
+  async function stopTalking(): Promise<void> {
+    if (!transmitRef.current!.intent()) return;
+    transmitRef.current!.stop(publishingChannelId, channel?.id ?? null);
+    setTalkState("idle");
+    await mediaRef.current?.stopPublish();
+    setPublishingChannelId(null);
+  }
+
+  const myUserId = user?.id;
+  const isSpeakingMe = !!speaker && speaker.userId === myUserId;
+  const otherSpeaker = speaker && speaker.userId !== myUserId ? speaker : null;
+  const isTransmitting = talkState === "live" || talkState === "requesting" || talkState === "connecting";
+  const supportsAudio = mediaRef.current?.supportsAudio ?? false;
+  const pttDisabled = !!otherSpeaker || !wsReady || !channel || !supportsAudio || !audioAvailable;
+
+  return (
+    <View style={[panelStyles.container, { backgroundColor: colors.card, borderColor: colors.border }]}>
+      {/* Header */}
+      <View style={panelStyles.header}>
+        <Feather name="radio" size={16} color={colors.primary} />
+        <Text style={[panelStyles.title, { color: colors.foreground }]} numberOfLines={1}>
+          {channel?.name ?? siteName}
+        </Text>
+        <View style={[panelStyles.pill, { backgroundColor: wsReady ? "#16a34a22" : reconnecting ? "#f59e0b22" : "#71717a22" }]}>
+          <Text style={{ color: wsReady ? "#16a34a" : reconnecting ? "#b45309" : colors.mutedForeground, fontSize: 10 }}>
+            {wsReady ? "Live" : reconnecting ? "Reconnecting…" : "Connecting…"}
+          </Text>
+        </View>
+        <TouchableOpacity
+          onPress={onDismiss}
+          hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+          accessibilityRole="button"
+          accessibilityLabel="Close site radio panel"
+        >
+          <Feather name="x" size={18} color={colors.mutedForeground} />
+        </TouchableOpacity>
+      </View>
+
+      {loadError ? (
+        <Text style={[panelStyles.errorText, { color: colors.destructive }]}>{loadError}</Text>
+      ) : !channel ? (
+        <ActivityIndicator size="small" color={colors.primary} style={{ marginVertical: 8 }} />
+      ) : (
+        <>
+          {error && (
+            <Text style={[panelStyles.errorText, { color: colors.destructive }]}>{error}</Text>
+          )}
+
+          {/* Speaker status */}
+          <View style={panelStyles.status}>
+            {isSpeakingMe || isTransmitting ? (
+              <View style={[panelStyles.banner, { backgroundColor: "#16a34a1a" }]}>
+                <View style={[panelStyles.dot, { backgroundColor: "#16a34a" }]} />
+                <Text style={{ color: "#15803d", fontSize: 12, fontWeight: "600" }}>
+                  {talkState === "requesting" ? "Requesting floor…" : talkState === "connecting" ? "Connecting mic…" : "You are transmitting…"}
+                </Text>
+              </View>
+            ) : otherSpeaker ? (
+              <View style={[panelStyles.banner, { backgroundColor: "#0284c71a" }]}>
+                <Feather name="volume-2" size={14} color="#0284c7" />
+                <Text style={{ color: "#0369a1", fontSize: 12, fontWeight: "600" }}>{otherSpeaker.name} is transmitting…</Text>
+              </View>
+            ) : (
+              <Text style={{ color: colors.mutedForeground, fontSize: 12 }}>Channel idle</Text>
+            )}
+          </View>
+
+          {/* PTT button */}
+          <Pressable
+            onPressIn={startTalking}
+            onPressOut={() => { void stopTalking(); }}
+            disabled={pttDisabled}
+            accessibilityRole="button"
+            accessibilityLabel={isTransmitting ? "Release to stop transmitting" : otherSpeaker ? "Channel busy" : "Hold to talk"}
+            accessibilityHint="Press and hold to transmit on this channel"
+            accessibilityState={{ disabled: pttDisabled, busy: isTransmitting }}
+            style={({ pressed }) => [
+              panelStyles.ptt,
+              {
+                backgroundColor: isTransmitting ? "#16a34a" : pttDisabled ? colors.muted : "#dc2626",
+                opacity: (!isTransmitting && !pressed && pttDisabled) ? 0.45 : 1,
+                transform: [{ scale: pressed && !pttDisabled ? 0.95 : 1 }],
+              },
+            ]}
+          >
+            <Feather
+              name={isTransmitting ? "mic" : "mic-off"}
+              size={20}
+              color="#fff"
+            />
+            <Text style={panelStyles.pttLabel}>
+              {isTransmitting ? "Transmitting…" : pttDisabled ? (otherSpeaker ? "Channel busy" : "Unavailable") : "Hold to Talk"}
+            </Text>
+          </Pressable>
+        </>
+      )}
+    </View>
+  );
+}
+
+const panelStyles = StyleSheet.create({
+  container: {
+    marginHorizontal: 16,
+    marginTop: 12,
+    borderRadius: 12,
+    borderWidth: 1,
+    padding: 14,
+    gap: 10,
+  },
+  header: { flexDirection: "row", alignItems: "center", gap: 8 },
+  title: { flex: 1, fontSize: 14, fontWeight: "600" },
+  pill: { paddingHorizontal: 8, paddingVertical: 2, borderRadius: 10 },
+  errorText: { fontSize: 12 },
+  status: { minHeight: 28, justifyContent: "center" },
+  banner: { flexDirection: "row", alignItems: "center", gap: 6, paddingHorizontal: 10, paddingVertical: 6, borderRadius: 8 },
+  dot: { width: 8, height: 8, borderRadius: 4 },
+  ptt: {
+    flexDirection: "row", alignItems: "center", justifyContent: "center",
+    gap: 8, paddingVertical: 12, borderRadius: 10,
+  },
+  pttLabel: { color: "#fff", fontWeight: "700", fontSize: 14 },
+});
+
+// ---------------------------------------------------------------------------
 
 export default function AdminLiveMapScreen() {
   return (
@@ -28,7 +397,7 @@ function AdminLiveMapScreenInner() {
   const { data, isLoading, refetch, isFetching } = useGetActiveOfficers({
     query: {
       queryKey: getGetActiveOfficersQueryKey(),
-      refetchInterval: 30_000, // refresh every 30s while screen is open
+      refetchInterval: 30_000,
     },
   });
 
@@ -52,11 +421,27 @@ function AdminLiveMapScreenInner() {
     if (!focusUserId) return;
     const t = setTimeout(() => {
       const rel = rowOffsets.current[focusUserId];
-      if (rel == null) return; // officer not in the active list — leave scroll alone
+      if (rel == null) return;
       scrollRef.current?.scrollTo({ y: Math.max(0, listY.current + rel - 24), animated: true });
     }, 400);
     return () => clearTimeout(t);
   }, [focusUserId, _hlTs, officers]);
+
+  // Site PTT panel state — null when closed, set when a site radio is opened
+  // from the map (e.g. via a site marker's Radio button).
+  const [siteRadio, setSiteRadio] = useState<SiteRadioState>(null);
+
+  // Auto-dismiss the panel when the user navigates away from this tab so the
+  // panel's WS connection is torn down (via the panel's unmount cleanup) and
+  // the radio join is released. The panel's own onDismiss X-button also clears
+  // this state via the same setter, keeping both paths consistent.
+  useFocusEffect(
+    useCallback(() => {
+      return () => {
+        setSiteRadio(null);
+      };
+    }, []),
+  );
 
   return (
     <ScrollView ref={scrollRef} style={[styles.container, { backgroundColor: colors.background }]} contentContainerStyle={{ paddingBottom: 120, paddingTop: topPad }}>
@@ -86,9 +471,22 @@ function AdminLiveMapScreenInner() {
             officers={officers}
             height={380}
             onSelectOfficer={openOfficer}
+            onSelectSite={(siteId, siteName) => setSiteRadio({ siteId, siteName })}
             focusUserId={focusUserId}
             focusKey={_hlTs}
           />
+
+          {/* Site PTT panel — rendered when a site is selected from the map.
+              Unmounts on dismiss OR when the screen loses focus (useFocusEffect
+              above clears siteRadio, triggering unmount and WS teardown). */}
+          {siteRadio && (
+            <SiteRadioPanel
+              key={siteRadio.siteId}
+              siteId={siteRadio.siteId}
+              siteName={siteRadio.siteName}
+              onDismiss={() => setSiteRadio(null)}
+            />
+          )}
 
           <View
             style={styles.list}
