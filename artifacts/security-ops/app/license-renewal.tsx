@@ -12,6 +12,7 @@ import { useRouter } from "expo-router";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { Feather } from "@expo/vector-icons";
 import { FeatureGate } from "@/components/FeatureGate";
+import { useAuth } from "@/contexts/AuthContext";
 
 type License = {
   id: string;
@@ -59,6 +60,9 @@ function LicenseRenewalScreenInner() {
   const topPad = useTopPad();
   const router = useRouter();
 
+  const { user } = useAuth();
+  const myId = user?.id;
+
   const [licenses, setLicenses] = useState<License[] | null>(null);
   const [renewals, setRenewals] = useState<Renewal[] | null>(null);
   const [loading, setLoading] = useState(true);
@@ -78,8 +82,12 @@ function LicenseRenewalScreenInner() {
 
   const load = useCallback(async () => {
     try {
+      // This is a SELF-service upload surface: always scope the license list
+      // to the signed-in user. The server self-scopes non-admins already, but
+      // an unfiltered /licenses call returns EVERY license in the system when
+      // an admin opens this screen — so pass employeeId explicitly.
       const [lic, ren] = await Promise.all([
-        apiRequest("/licenses"),
+        apiRequest(myId ? `/licenses?employeeId=${encodeURIComponent(myId)}` : "/licenses"),
         apiRequest("/me/license-renewals"),
       ]);
       setLicenses(Array.isArray(lic) ? lic : []);
@@ -90,7 +98,7 @@ function LicenseRenewalScreenInner() {
       setLoading(false);
       setRefreshing(false);
     }
-  }, []);
+  }, [myId]);
 
   useEffect(() => { load(); }, [load]);
 
