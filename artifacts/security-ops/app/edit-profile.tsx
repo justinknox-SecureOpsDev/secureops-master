@@ -64,9 +64,6 @@ type Form = {
   emergencyContactRelationship: string;
   emergencyContactPhone: string;
   uniformShirt: string;
-  uniformTrousers: string;
-  uniformJacket: string;
-  uniformBoots: string;
   bankAccountType: string;
   bankAccountNumber: string;
   bankBsb: string;
@@ -85,7 +82,7 @@ const empty: Form = {
   firstName: "", lastName: "", dateOfBirth: "", cityOfBirth: "", stateOfBirth: "",
   phone: "", address: "",
   emergencyContactName: "", emergencyContactRelationship: "", emergencyContactPhone: "",
-  uniformShirt: "", uniformTrousers: "", uniformJacket: "", uniformBoots: "",
+  uniformShirt: "",
   bankAccountType: "", bankAccountNumber: "", bankBsb: "",
   directDepositConsent: false,
   skills: "",
@@ -126,9 +123,6 @@ export default function EditProfileScreen() {
       emergencyContactRelationship: profile.emergencyContactRelationship ?? "",
       emergencyContactPhone: profile.emergencyContactPhone ?? "",
       uniformShirt: profile.uniformShirt ?? "",
-      uniformTrousers: profile.uniformTrousers ?? "",
-      uniformJacket: profile.uniformJacket ?? "",
-      uniformBoots: profile.uniformBoots ?? "",
       bankAccountType: profile.bankAccountType ?? "",
       bankAccountNumber: profile.bankAccountNumber ?? "",
       bankBsb: profile.bankBsb ?? "",
@@ -253,9 +247,6 @@ export default function EditProfileScreen() {
     payload.emergencyContactRelationship = trim(form.emergencyContactRelationship) || null;
     payload.emergencyContactPhone = trim(form.emergencyContactPhone);
     payload.uniformShirt = trim(form.uniformShirt) || null;
-    payload.uniformTrousers = trim(form.uniformTrousers) || null;
-    payload.uniformJacket = trim(form.uniformJacket) || null;
-    payload.uniformBoots = trim(form.uniformBoots) || null;
     payload.bankAccountType = form.bankAccountType || null;
     payload.bankAccountNumber = trim(form.bankAccountNumber) || null;
     payload.bankBsb = trim(form.bankBsb) || null;
@@ -423,9 +414,6 @@ export default function EditProfileScreen() {
 
         <Section title="Uniform sizes">
           <Field label="Shirt"><Input value={form.uniformShirt} onChangeText={(v) => set("uniformShirt", v)} accessibilityLabel="Shirt size" /></Field>
-          <Field label="Trousers"><Input value={form.uniformTrousers} onChangeText={(v) => set("uniformTrousers", v)} accessibilityLabel="Trousers size" /></Field>
-          <Field label="Jacket"><Input value={form.uniformJacket} onChangeText={(v) => set("uniformJacket", v)} accessibilityLabel="Jacket size" /></Field>
-          <Field label="Boots"><Input value={form.uniformBoots} onChangeText={(v) => set("uniformBoots", v)} accessibilityLabel="Boots size" /></Field>
         </Section>
 
         <Section title="Bank details">
