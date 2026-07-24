@@ -8,6 +8,8 @@
 
 import { POLL_INTERVAL_MS, POLL_TIMEOUT_MS } from "./config";
 import { pool, type CustomerRow } from "./db";
+import { decryptSecret } from "./crypto";
+import { callCustomerControlPlane } from "./hmacClient";
 import { logger } from "./logger";
 
 export interface ProbeResult {
@@ -98,10 +100,56 @@ export async function probeBackend(apiBaseUrl: string): Promise<ProbeResult> {
   }
 }
 
-async function pollOne(row: Pick<CustomerRow, "id" | "api_base_url">): Promise<void> {
+/**
+ * Fetch the tenant's agreement signed-status via the HMAC-gated management
+ * surface. Returns the JSON string to store, or `undefined` to keep whatever
+ * snapshot we already have (backend unreachable / transient error), or `null`
+ * to clear it (no secret configured — status unknowable).
+ */
+export async function fetchAgreementsSnapshot(
+  apiBaseUrl: string,
+  secret: string | null,
+): Promise<string | null | undefined> {
+  if (!secret) return null;
+  try {
+    const result = await callCustomerControlPlane(
+      apiBaseUrl,
+      "/api/control-plane/agreements",
+      "GET",
+      secret,
+    );
+    if (result.ok && result.body && typeof result.body === "object") {
+      const agreements = (result.body as { agreements?: unknown }).agreements;
+      if (agreements && typeof agreements === "object") {
+        return JSON.stringify({ fetchedAt: new Date().toISOString(), slots: agreements });
+      }
+    }
+    if (result.status === 404) {
+      // Legacy backend without the agreements surface — status unknowable.
+      return null;
+    }
+    return undefined; // 401/503/5xx etc — keep the last known snapshot
+  } catch {
+    return undefined; // network failure — keep the last known snapshot
+  }
+}
+
+type PollRow = Pick<CustomerRow, "id" | "api_base_url" | "mgmt_secret_enc">;
+
+async function pollOne(row: PollRow): Promise<void> {
   const { status, latency, version, builtAt, lastError, seen } = await probeBackend(
     row.api_base_url,
   );
+
+  let secret: string | null = null;
+  if (row.mgmt_secret_enc) {
+    try {
+      secret = decryptSecret(row.mgmt_secret_enc);
+    } catch (err) {
+      logger.error({ err: String(err), id: row.id }, "[poller] secret decrypt failed");
+    }
+  }
+  const agreements = seen ? await fetchAgreementsSnapshot(row.api_base_url, secret) : undefined;
 
   await pool.query(
     `UPDATE control_plane_customers
@@ -111,15 +159,26 @@ async function pollOne(row: Pick<CustomerRow, "id" | "api_base_url">): Promise<v
            reported_version = COALESCE($5, reported_version),
            reported_built_at = COALESCE($6, reported_built_at),
            last_seen_at = CASE WHEN $7 THEN now() ELSE last_seen_at END,
+           agreements_json = CASE WHEN $8 THEN $9 ELSE agreements_json END,
            updated_at = now()
      WHERE id = $1`,
-    [row.id, status, latency, lastError, version, builtAt, seen],
+    [
+      row.id,
+      status,
+      latency,
+      lastError,
+      version,
+      builtAt,
+      seen,
+      agreements !== undefined,
+      agreements ?? null,
+    ],
   );
 }
 
 export async function pollAllOnce(): Promise<void> {
-  const { rows } = await pool.query<Pick<CustomerRow, "id" | "api_base_url">>(
-    `SELECT id, api_base_url FROM control_plane_customers WHERE is_active = TRUE`,
+  const { rows } = await pool.query<PollRow>(
+    `SELECT id, api_base_url, mgmt_secret_enc FROM control_plane_customers WHERE is_active = TRUE`,
   );
   await Promise.allSettled(rows.map((r) => pollOne(r)));
 }

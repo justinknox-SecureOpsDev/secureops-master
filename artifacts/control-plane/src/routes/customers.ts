@@ -52,6 +52,25 @@ async function fleetTargetVersion(): Promise<string | null> {
   return rows[0]?.target_version ?? null;
 }
 
+/** Parse the stored agreements snapshot; malformed/missing JSON → null. */
+export function parseAgreements(
+  raw: string | null,
+): { fetchedAt: string | null; slots: Record<string, unknown> } | null {
+  if (!raw) return null;
+  try {
+    const parsed = JSON.parse(raw) as { fetchedAt?: unknown; slots?: unknown };
+    if (!parsed || typeof parsed !== "object") return null;
+    const slots = parsed.slots;
+    if (!slots || typeof slots !== "object" || Array.isArray(slots)) return null;
+    return {
+      fetchedAt: typeof parsed.fetchedAt === "string" ? parsed.fetchedAt : null,
+      slots: slots as Record<string, unknown>,
+    };
+  } catch {
+    return null;
+  }
+}
+
 function serialize(row: CustomerRow, fleetTarget: string | null) {
   const effectiveTarget = row.target_version ?? fleetTarget;
   const needsUpdate = Boolean(
@@ -75,6 +94,7 @@ function serialize(row: CustomerRow, fleetTarget: string | null) {
     lastError: row.last_error,
     isActive: row.is_active,
     hasMgmtSecret: Boolean(row.mgmt_secret_enc),
+    agreements: parseAgreements(row.agreements_json),
     needsUpdate,
     createdAt: row.created_at,
     updatedAt: row.updated_at,

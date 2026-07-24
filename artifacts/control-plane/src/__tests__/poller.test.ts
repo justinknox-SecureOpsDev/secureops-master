@@ -10,7 +10,7 @@
  */
 
 import { afterEach, describe, expect, it } from "vitest";
-import { probeBackend } from "../poller";
+import { fetchAgreementsSnapshot, probeBackend } from "../poller";
 
 const realFetch = globalThis.fetch;
 afterEach(() => {
@@ -82,5 +82,53 @@ describe("probeBackend", () => {
     expect(r.status).toBe("offline");
     expect(r.lastError).toBe("fetch failed");
     expect(r.seen).toBe(false);
+  });
+});
+
+/**
+ * Agreement snapshot fetch semantics (drives the fleet "Agreements" column):
+ *   - stored JSON string on success;
+ *   - `null` (clear) when no secret or the backend predates the surface (404);
+ *   - `undefined` (keep last snapshot) on transient errors / network failure.
+ */
+describe("fetchAgreementsSnapshot", () => {
+  function agreementsRoute(target: Response | Error) {
+    globalThis.fetch = (async (url: string) => {
+      if (!url.endsWith("/api/control-plane/agreements")) throw new Error(`unexpected url ${url}`);
+      if (target instanceof Error) throw target;
+      return target;
+    }) as unknown as typeof fetch;
+  }
+
+  it("returns null (status unknowable) without a management secret", async () => {
+    expect(await fetchAgreementsSnapshot("http://customer.test", null)).toBeNull();
+  });
+
+  it("stores a snapshot with fetchedAt + slots on success", async () => {
+    const slots = {
+      msa: { signed: true, guarantyExecuted: true },
+      user_agreement: { signed: false, guarantyExecuted: null },
+    };
+    agreementsRoute(res(200, { agreements: slots }));
+    const raw = await fetchAgreementsSnapshot("http://customer.test", "secret");
+    expect(typeof raw).toBe("string");
+    const parsed = JSON.parse(raw as string);
+    expect(typeof parsed.fetchedAt).toBe("string");
+    expect(parsed.slots).toEqual(slots);
+  });
+
+  it("clears the snapshot (null) for a legacy backend without the surface (404)", async () => {
+    agreementsRoute(res(404, { message: "not found" }));
+    expect(await fetchAgreementsSnapshot("http://legacy.test", "secret")).toBeNull();
+  });
+
+  it("keeps the last snapshot (undefined) on transient server errors", async () => {
+    agreementsRoute(res(503, { error: "inert" }));
+    expect(await fetchAgreementsSnapshot("http://busy.test", "secret")).toBeUndefined();
+  });
+
+  it("keeps the last snapshot (undefined) on network failure", async () => {
+    agreementsRoute(new Error("fetch failed"));
+    expect(await fetchAgreementsSnapshot("http://unreachable.test", "secret")).toBeUndefined();
   });
 });

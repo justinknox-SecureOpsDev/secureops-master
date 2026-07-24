@@ -12,7 +12,12 @@
 import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
 import request from "supertest";
 import { eq } from "drizzle-orm";
-import { db, platformBrandConfigTable, platformFeatureOverridesTable } from "@workspace/db";
+import {
+  db,
+  platformBrandConfigTable,
+  platformFeatureOverridesTable,
+  platformAgreementSignaturesTable,
+} from "@workspace/db";
 import app from "../app";
 import { signControlPlanePayload, CONTROL_PLANE_SIGNATURE_HEADER } from "../lib/controlPlaneAuth";
 
@@ -134,5 +139,55 @@ describe("/api/control-plane (HMAC)", () => {
     const chat = res.body.features.find((f: { key: string }) => f.key === "chat");
     expect(chat).toBeTruthy();
     expect(chat.enabled).toBe(false);
+  });
+
+  describe("GET /api/control-plane/agreements", () => {
+    const SIGNER = "cp-agreements-test-signer@example.test";
+
+    afterAll(async () => {
+      await db
+        .delete(platformAgreementSignaturesTable)
+        .where(eq(platformAgreementSignaturesTable.signerEmail, SIGNER));
+    });
+
+    it("requires a valid signature (401 without)", async () => {
+      process.env.CONTROL_PLANE_SHARED_SECRET = SECRET;
+      const res = await request(app).get("/api/control-plane/agreements");
+      expect(res.status).toBe(401);
+    });
+
+    it("reports signed status per slot, never document contents", async () => {
+      process.env.CONTROL_PLANE_SHARED_SECRET = SECRET;
+      await db.insert(platformAgreementSignaturesTable).values({
+        slot: "msa",
+        documentTitle: "Master Subscription Agreement",
+        documentMarkdown: "SECRET DOCUMENT BODY",
+        documentSha256: "a".repeat(64),
+        fieldsJson: "{}",
+        consentText: "consent",
+        signerName: "Test Signer",
+        signerTitle: "CEO",
+        signerEmail: SIGNER,
+        signatureText: "Test Signer",
+        guarantorName: null,
+      });
+
+      const sig = signControlPlanePayload("", SECRET);
+      const res = await request(app)
+        .get("/api/control-plane/agreements")
+        .set(CONTROL_PLANE_SIGNATURE_HEADER, sig);
+      expect(res.status).toBe(200);
+      const { agreements } = res.body;
+      expect(agreements).toHaveProperty("msa");
+      expect(agreements).toHaveProperty("user_agreement");
+      expect(agreements.msa.signed).toBe(true);
+      expect(agreements.msa.signerName).toBe("Test Signer");
+      expect(agreements.msa.documentSha256).toBe("a".repeat(64));
+      expect(agreements.msa.guarantyExecuted).toBe(false);
+      expect(typeof agreements.user_agreement.signed).toBe("boolean");
+      expect(agreements.user_agreement.guarantyExecuted).toBeNull();
+      // Status metadata only — never the agreement text or fill values.
+      expect(JSON.stringify(res.body)).not.toContain("SECRET DOCUMENT BODY");
+    });
   });
 });

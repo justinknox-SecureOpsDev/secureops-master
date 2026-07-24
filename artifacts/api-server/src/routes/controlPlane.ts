@@ -17,8 +17,14 @@
  */
 
 import { Router } from "express";
-import { eq, sql } from "drizzle-orm";
-import { db, platformFeatureOverridesTable, platformBrandConfigTable } from "@workspace/db";
+import { desc, eq, sql } from "drizzle-orm";
+import {
+  db,
+  platformFeatureOverridesTable,
+  platformBrandConfigTable,
+  platformAgreementSignaturesTable,
+} from "@workspace/db";
+import { AGREEMENT_SLOTS, AGREEMENT_TITLES } from "@workspace/legal-docs";
 import { applyBrandOverrides } from "../lib/brandConfig";
 import {
   type FeatureKey,
@@ -54,6 +60,39 @@ router.get("/control-plane/settings", async (_req, res) => {
     brand: brandRow,
     features: getFeatureFlagDetails(),
   });
+});
+
+/**
+ * Read-only signed-status of this customer's platform agreements (MSA + User
+ * Agreement). The fleet operator uses this to see which tenants have executed
+ * their agreements — and whether the personal guaranty was signed — before
+ * enabling paid service. Deliberately returns ONLY status metadata, never the
+ * agreement document text or fill values.
+ */
+router.get("/control-plane/agreements", async (_req, res) => {
+  const agreements: Record<string, unknown> = {};
+  for (const slot of AGREEMENT_SLOTS) {
+    const [row] = await db
+      .select()
+      .from(platformAgreementSignaturesTable)
+      .where(eq(platformAgreementSignaturesTable.slot, slot))
+      .orderBy(
+        desc(platformAgreementSignaturesTable.signedAt),
+        desc(platformAgreementSignaturesTable.id),
+      )
+      .limit(1);
+    agreements[slot] = {
+      title: AGREEMENT_TITLES[slot],
+      signed: Boolean(row),
+      signedAt: row?.signedAt ?? null,
+      signerName: row?.signerName ?? null,
+      signerTitle: row?.signerTitle ?? null,
+      signerEmail: row?.signerEmail ?? null,
+      documentSha256: row?.documentSha256 ?? null,
+      guarantyExecuted: slot === "msa" ? Boolean(row?.guarantorName) : null,
+    };
+  }
+  res.json({ agreements });
 });
 
 /** Upsert brand overrides remotely and patch the live brand in memory. */

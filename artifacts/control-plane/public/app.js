@@ -74,6 +74,50 @@ function statusBadge(c) {
   return '<span class="badge ' + (c.isActive ? cls : "warn") + '">' + label + "</span>";
 }
 
+function agreementsCell(c) {
+  if (!c.hasMgmtSecret) {
+    return "<span class='muted small'>no secret</span>";
+  }
+  if (!c.agreements || !c.agreements.slots) {
+    return "<span class='badge warn' title='Agreement status not yet fetched from this backend'>unknown</span>";
+  }
+  var slots = c.agreements.slots;
+  var parts = [];
+  [["msa", "MSA"], ["user_agreement", "UA"]].forEach(function (pair) {
+    var key = pair[0];
+    var label = pair[1];
+    var slot = slots[key];
+    if (!slot) return;
+    if (slot.signed) {
+      var tip = label + " signed";
+      if (slot.signerName) tip += " by " + slot.signerName;
+      if (slot.signedAt) tip += " on " + fmtDate(slot.signedAt);
+      if (slot.documentSha256) tip += " · SHA-256 " + String(slot.documentSha256).slice(0, 12) + "…";
+      parts.push("<span class='badge ok' title='" + esc(tip) + "'>" + esc(label) + " ✓</span>");
+      if (key === "msa" && slot.guarantyExecuted === false) {
+        parts.push("<span class='badge warn' title='MSA signed but the personal guaranty was NOT executed'>no guaranty</span>");
+      }
+    } else {
+      parts.push("<span class='badge bad' title='" + esc(label) + " not signed'>" + esc(label) + " ✗</span>");
+    }
+  });
+  if (parts.length === 0) {
+    return "<span class='badge warn'>unknown</span>";
+  }
+  return parts.join(" ");
+}
+
+function agreementsIncomplete(c) {
+  if (!c.hasMgmtSecret) return false; // status unknowable without a secret — never count as unsigned
+  if (!c.agreements || !c.agreements.slots) return false; // unknown ≠ unsigned
+  var slots = c.agreements.slots;
+  var msa = slots.msa;
+  var ua = slots.user_agreement;
+  if (msa && (!msa.signed || msa.guarantyExecuted === false)) return true;
+  if (ua && !ua.signed) return true;
+  return false;
+}
+
 function renderSummary() {
   const total = customers.length;
   const online = customers.filter(function (c) {
@@ -82,10 +126,12 @@ function renderSummary() {
   const needs = customers.filter(function (c) {
     return c.needsUpdate;
   }).length;
+  const unsigned = customers.filter(agreementsIncomplete).length;
   $("summary").innerHTML =
     '<div class="stat"><span class="num">' + total + '</span><span class="lbl">Customers</span></div>' +
     '<div class="stat"><span class="num">' + online + '</span><span class="lbl">Online</span></div>' +
-    '<div class="stat ' + (needs ? "alert" : "") + '"><span class="num">' + needs + '</span><span class="lbl">Needs update</span></div>';
+    '<div class="stat ' + (needs ? "alert" : "") + '"><span class="num">' + needs + '</span><span class="lbl">Needs update</span></div>' +
+    '<div class="stat ' + (unsigned ? "alert" : "") + '"><span class="num">' + unsigned + '</span><span class="lbl">Agreements incomplete</span></div>';
 }
 
 function renderFleet() {
@@ -102,6 +148,7 @@ function renderFleet() {
       "<td><code>" + esc(c.orgCode) + "</code></td>" +
       "<td class='small'><a href='" + esc(c.apiBaseUrl) + "' target='_blank' rel='noopener'>" + esc(c.apiBaseUrl) + "</a></td>" +
       "<td>" + statusBadge(c) + "</td>" +
+      "<td class='small'>" + agreementsCell(c) + "</td>" +
       "<td class='small'>" + versionCell + "</td>" +
       "<td class='small'>" + esc(c.effectiveTargetVersion || "—") + "</td>" +
       "<td class='small'>" + fmtDate(c.lastSeenAt) + "</td>" +

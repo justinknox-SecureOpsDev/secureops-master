@@ -60,6 +60,12 @@ export async function ensureSchema(): Promise<void> {
     `CREATE INDEX IF NOT EXISTS idx_cp_customers_org_code ON control_plane_customers (org_code);`,
   );
 
+  // Per-tenant agreement signed-status snapshot (JSON), refreshed by the poller
+  // via the HMAC-gated /api/control-plane/agreements surface.
+  await pool.query(
+    `ALTER TABLE control_plane_customers ADD COLUMN IF NOT EXISTS agreements_json TEXT;`,
+  );
+
   // Audit trail of remote brand/feature changes pushed to customer backends.
   await pool.query(`
     CREATE TABLE IF NOT EXISTS control_plane_remote_changes (
@@ -90,6 +96,7 @@ export interface CustomerRow {
   contact_email: string | null;
   notes: string | null;
   mgmt_secret_enc: string | null;
+  agreements_json: string | null;
   target_version: string | null;
   reported_version: string | null;
   reported_built_at: string | null;
