@@ -108,7 +108,7 @@ describe("EmployeeClockScreen — no redundant fetches on sub-tab switch", () =>
     ).toBe(false);
   });
 
-  it("the two primary data queries in clock.tsx each pass an explicit queryKey", () => {
+  it("the three data queries in clock.tsx each pass an explicit queryKey", () => {
     const src = read(CLOCK);
 
     // Passing an explicit stable queryKey ensures React Query can find and
@@ -117,6 +117,7 @@ describe("EmployeeClockScreen — no redundant fetches on sub-tab switch", () =>
     // derive a key dynamically on every call, which can break deduplication.
     const hasActiveEntryKey = /getGetActiveTimeEntryQueryKey\(\)/.test(src);
     const hasTimeEntriesKey = /getGetTimeEntriesQueryKey\(/.test(src);
+    const hasClockInShiftsKey = /getGetMyClockInShiftsQueryKey\(\)/.test(src);
 
     expect(
       hasActiveEntryKey,
@@ -129,6 +130,13 @@ describe("EmployeeClockScreen — no redundant fetches on sub-tab switch", () =>
       hasTimeEntriesKey,
       "clock.tsx must pass an explicit queryKey (getGetTimeEntriesQueryKey(...)) " +
         "to useGetTimeEntries so the cached recent-entries list is reused across renders.",
+    ).toBe(true);
+
+    expect(
+      hasClockInShiftsKey,
+      "clock.tsx must pass an explicit queryKey (getGetMyClockInShiftsQueryKey()) " +
+        "to useGetMyClockInShifts so the cached shift-picker list is reused across " +
+        "renders and is not silently refetched on every sub-tab switch.",
     ).toBe(true);
   });
 });
