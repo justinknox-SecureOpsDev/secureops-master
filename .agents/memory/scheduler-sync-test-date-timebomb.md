@@ -1,6 +1,6 @@
 ---
 name: Scheduler sync test hardcoded-date time bomb
-description: schedulerSyncIntegration.test.ts uses hardcoded calendar dates as stand-ins for "past"/"future"; they expire as real time catches up.
+description: schedulerSyncIntegration.test.ts used hardcoded calendar dates as stand-ins for "past"/"future"; this has been fixed with Date.now()-relative helpers.
 ---
 
 `processInboundClockEvent`'s dedup/merge test ("merges into the existing
@@ -18,10 +18,33 @@ unambiguous "clearly newer"/"clearly older" payload, but a few older
 tests in the same file predate that convention and hardcode nearby
 same-year dates instead.
 
+**Fix applied:** replaced all "nearby year" hardcoded dates throughout the
+file with a relative helper block near the top:
+
+```ts
+const T0 = Date.now();
+const MS_DAY = 86_400_000;
+const MS_HOUR = 3_600_000;
+function rel(days = 0, hours = 0): string {
+  return new Date(T0 + days * MS_DAY + hours * MS_HOUR).toISOString();
+}
+function relD(days = 0, hours = 0): Date {
+  return new Date(T0 + days * MS_DAY + hours * MS_HOUR);
+}
+```
+
+**Intentionally left as stable sentinels (not changed):**
+- `FAR_PAST = "2000-01-01..."` / `FAR_FUTURE = "2999-01-01..."` — unambiguous extremes
+- `"2020-01-01"` / `"2020-01-02"` in LAGS clock-skew tests — compare two old dates against each other, never against wall clock
+- `CURSOR_C1 / CURSOR_C2` (`"2026-07-10..."` / `"2026-07-11..."`) — opaque cursor strings, never compared against now
+
+**LWW ordering pitfall:** when a test has multiple sequential upserts that
+must each win the LWW tiebreak over the previous one, use strictly
+increasing rel() offsets. Example: `rel(-5)` → `rel(-3)` → `rel(-1)`.
+Using decreasing values (e.g. `rel(-2)` then `rel(-3)`) makes the later
+call lose the LWW, returning `"skipped"` instead of `"updated"`.
+
 **How to apply:** if a scheduler-sync test starts failing with
 `expected 'skipped' to be 'updated'` (or vice versa) with no related code
 change, check whether the test's hardcoded `updatedAt` has been overtaken
-by real time — fix by switching it to the file's `FAR_FUTURE`/`FAR_PAST`
-constants (or an equivalently far date) rather than debugging the merge
-logic itself. Worth sweeping the rest of the file's hardcoded 2026 dates
-proactively since more will expire day by day.
+by real time — the fix is now rel()-based helpers, already in place.

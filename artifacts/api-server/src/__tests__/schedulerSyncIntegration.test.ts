@@ -36,6 +36,27 @@ const TAG = `sched-sync-it-${randomUUID().slice(0, 8)}`;
 const SECRET = "integration-test-shared-secret";
 const passwordHash = bcrypt.hashSync("test-password", 4);
 
+// ---------------------------------------------------------------------------
+// Relative timestamps — computed once per test run so the suite never date-bombs.
+// Calendar dates used as "future/past" stand-ins expire as real time passes;
+// Date.now()-relative offsets keep LWW tiebreak semantics correct indefinitely.
+//
+// NOTE: Keep FAR_PAST ("2000-01-01") and FAR_FUTURE ("2999-01-01") as literal
+// strings where they appear — they are deliberately far from any realistic date
+// and are already permanent. Clock-skew sentinel values (2030-01-0x,
+// 2020-01-0x) are also kept literal: they form apples-to-apples scheduler
+// clock pairs and never compare against wall-clock time.
+// ---------------------------------------------------------------------------
+const T0 = Date.now();
+const MS_DAY = 86_400_000;
+const MS_HOUR = 3_600_000;
+/** ISO timestamp offset by `days` days from now (positive = future, negative = past). */
+const rel = (days: number, hours = 0) =>
+  new Date(T0 + days * MS_DAY + hours * MS_HOUR).toISOString();
+/** Date object offset by `days` days from now. */
+const relD = (days: number, hours = 0) =>
+  new Date(T0 + days * MS_DAY + hours * MS_HOUR);
+
 const ctx = {
   clientId: "",
   siteId: "",
@@ -153,14 +174,14 @@ describe("inbound shift webhook: upsert creates a row and never echoes back out"
       action: "upsert" as const,
       title: `${TAG} Morning Patrol`,
       siteName: ctx.siteName,
-      startTime: "2026-07-01T08:00:00.000Z",
-      endTime: "2026-07-01T16:00:00.000Z",
+      startTime: rel(14, 8),
+      endTime: rel(14, 16),
       payRate: "22",
       billRate: "30",
       requiredLicenseLevel: 2,
       headcount: 2,
       status: "upcoming",
-      updatedAt: "2026-06-30T00:00:00.000Z",
+      updatedAt: rel(-2),
     };
 
     const bodyStr = JSON.stringify(payload);
@@ -206,8 +227,8 @@ describe("inbound shift webhook: upsert creates a row and never echoes back out"
       action: "upsert" as const,
       title: `${TAG} Idempotent`,
       siteName: ctx.siteName,
-      startTime: "2026-07-02T08:00:00.000Z",
-      endTime: "2026-07-02T16:00:00.000Z",
+      startTime: rel(15, 8),
+      endTime: rel(15, 16),
       requiredLicenseLevel: 2,
       headcount: 1,
       status: "upcoming",
@@ -215,7 +236,7 @@ describe("inbound shift webhook: upsert creates a row and never echoes back out"
       // externalUpdatedAt = this timestamp. The second pull carries the SAME
       // updatedAt, so the scheduler-vs-scheduler comparison ("strictly newer
       // than externalUpdatedAt") is not satisfied and the re-pull is skipped.
-      updatedAt: "2025-01-01T00:00:00.000Z",
+      updatedAt: rel(-30),
     };
 
     async function post(body: object) {
@@ -260,7 +281,7 @@ describe("inbound clock-event dedup within ±5 min", () => {
   });
 
   it("merges into the existing local entry rather than creating a duplicate", async () => {
-    const clockIn = new Date("2026-07-03T09:00:00.000Z");
+    const clockIn = relD(-7, 9);
 
     // A pre-existing local clock-in (e.g. the officer clocked in via the app).
     const [local] = await db
@@ -301,7 +322,7 @@ describe("inbound clock-event dedup within ±5 min", () => {
   });
 
   it("creates a separate row when the clock-in is outside the ±5 min window", async () => {
-    const clockIn = new Date("2026-07-04T09:00:00.000Z");
+    const clockIn = relD(-6, 9);
 
     await db.insert(timeEntriesTable).values({
       employeeId: ctx.employeeId,
@@ -319,7 +340,7 @@ describe("inbound clock-event dedup within ±5 min", () => {
       employeeEmail: ctx.employeeEmail,
       siteName: ctx.siteName,
       clockInTime: new Date(clockIn.getTime() + 20 * 60 * 1000).toISOString(),
-      updatedAt: "2026-07-04T10:00:00.000Z",
+      updatedAt: rel(-5),
     });
 
     expect(result.action).toBe("created");
@@ -332,7 +353,7 @@ describe("inbound clock-event dedup within ±5 min", () => {
   });
 
   it("skips the merge when the local entry is newer than the inbound scheduler event", async () => {
-    const clockIn = new Date("2026-07-05T09:00:00.000Z");
+    const clockIn = relD(-5, 9);
     const localClockOut = new Date(clockIn.getTime() + 4 * 3600 * 1000);
 
     // A pre-existing local clock-in the officer has already clocked out of
@@ -416,8 +437,8 @@ describe("last-write-wins: newer scheduler update applies, older one is ignored"
       .values({
         title: `${TAG} Local Title`,
         siteId: ctx.siteId,
-        startTime: new Date("2026-08-01T08:00:00.000Z"),
-        endTime: new Date("2026-08-01T16:00:00.000Z"),
+        startTime: relD(30, 8),
+        endTime: relD(30, 16),
         payRate: "10",
         billRate: "20",
         headcount: 1,
@@ -434,8 +455,8 @@ describe("last-write-wins: newer scheduler update applies, older one is ignored"
       id: externalId,
       title: `${TAG} Scheduler Title`,
       siteName: ctx.siteName,
-      startTime: "2026-08-01T09:00:00.000Z",
-      endTime: "2026-08-01T17:00:00.000Z",
+      startTime: rel(30, 9),
+      endTime: rel(30, 17),
       payRate: "25",
       billRate: "35",
       requiredLicenseLevel: 3,
@@ -468,8 +489,8 @@ describe("last-write-wins: newer scheduler update applies, older one is ignored"
       .values({
         title: `${TAG} Local Wins Title`,
         siteId: ctx.siteId,
-        startTime: new Date("2026-08-02T08:00:00.000Z"),
-        endTime: new Date("2026-08-02T16:00:00.000Z"),
+        startTime: relD(31, 8),
+        endTime: relD(31, 16),
         payRate: "15",
         billRate: "22",
         headcount: 2,
@@ -486,8 +507,8 @@ describe("last-write-wins: newer scheduler update applies, older one is ignored"
       id: externalId,
       title: `${TAG} Stale Scheduler Title`,
       siteName: ctx.siteName,
-      startTime: "2026-08-02T09:00:00.000Z",
-      endTime: "2026-08-02T17:00:00.000Z",
+      startTime: rel(31, 9),
+      endTime: rel(31, 17),
       payRate: "99",
       billRate: "99",
       requiredLicenseLevel: 4,
@@ -516,7 +537,7 @@ describe("last-write-wins: newer scheduler update applies, older one is ignored"
 
   it("processInboundClockEvent: a newer scheduler update overwrites the local row", async () => {
     const externalId = `${TAG}-lww-clock-new-${randomUUID().slice(0, 8)}`;
-    const clockIn = new Date("2026-08-03T09:00:00.000Z");
+    const clockIn = relD(32, 9);
 
     // Matched by externalId (not the ±5 min dedup path), so the tiebreaker runs.
     const [local] = await db
@@ -560,7 +581,7 @@ describe("last-write-wins: newer scheduler update applies, older one is ignored"
 
   it("processInboundClockEvent: an older scheduler update is skipped (local edits preserved)", async () => {
     const externalId = `${TAG}-lww-clock-old-${randomUUID().slice(0, 8)}`;
-    const clockIn = new Date("2026-08-04T09:00:00.000Z");
+    const clockIn = relD(33, 9);
     const localClockOut = new Date(clockIn.getTime() + 4 * 3600 * 1000);
 
     const [local] = await db
@@ -628,8 +649,8 @@ describe("delete path: removes the matching row, no-ops on unknown externalId", 
       .values({
         title: `${TAG} Doomed Shift`,
         siteId: ctx.siteId,
-        startTime: new Date("2026-09-01T08:00:00.000Z"),
-        endTime: new Date("2026-09-01T16:00:00.000Z"),
+        startTime: relD(40, 8),
+        endTime: relD(40, 16),
         payRate: "20",
         billRate: "30",
         headcount: 1,
@@ -643,7 +664,7 @@ describe("delete path: removes the matching row, no-ops on unknown externalId", 
 
     const result = await processInboundShift({
       id: externalId,
-      updatedAt: "2026-09-02T00:00:00.000Z",
+      updatedAt: rel(-1),
       deleted: true,
     });
 
@@ -666,8 +687,8 @@ describe("delete path: removes the matching row, no-ops on unknown externalId", 
       .values({
         title: `${TAG} Survivor Shift`,
         siteId: ctx.siteId,
-        startTime: new Date("2026-09-03T08:00:00.000Z"),
-        endTime: new Date("2026-09-03T16:00:00.000Z"),
+        startTime: relD(42, 8),
+        endTime: relD(42, 16),
         payRate: "20",
         billRate: "30",
         headcount: 1,
@@ -681,7 +702,7 @@ describe("delete path: removes the matching row, no-ops on unknown externalId", 
 
     const result = await processInboundShift({
       id: `${TAG}-del-shift-nonexistent-${randomUUID().slice(0, 8)}`,
-      updatedAt: "2026-09-04T00:00:00.000Z",
+      updatedAt: rel(-1),
       deleted: true,
     });
 
@@ -707,7 +728,7 @@ describe("delete path: removes the matching row, no-ops on unknown externalId", 
       .values({
         employeeId: ctx.employeeId,
         siteId: ctx.siteId,
-        clockInTime: new Date("2026-09-05T09:00:00.000Z"),
+        clockInTime: relD(-4, 9),
         approvalStatus: "pending",
         isVerified: false,
         externalId,
@@ -721,7 +742,7 @@ describe("delete path: removes the matching row, no-ops on unknown externalId", 
       action: "delete",
       employeeEmail: "",
       clockInTime: "",
-      updatedAt: "2026-09-06T00:00:00.000Z",
+      updatedAt: rel(-3),
     });
 
     expect(result.action).toBe("deleted");
@@ -743,7 +764,7 @@ describe("delete path: removes the matching row, no-ops on unknown externalId", 
       .values({
         employeeId: ctx.employeeId,
         siteId: ctx.siteId,
-        clockInTime: new Date("2026-09-07T09:00:00.000Z"),
+        clockInTime: relD(-3, 9),
         approvalStatus: "pending",
         isVerified: false,
         externalId: survivorExternalId,
@@ -757,7 +778,7 @@ describe("delete path: removes the matching row, no-ops on unknown externalId", 
       action: "delete",
       employeeEmail: "",
       clockInTime: "",
-      updatedAt: "2026-09-08T00:00:00.000Z",
+      updatedAt: rel(-2),
     });
 
     expect(result.action).toBe("skipped");
@@ -806,8 +827,8 @@ describe("conflict resolution is resistant to clock skew between SecureOps and t
       .values({
         title: `${TAG} Last Scheduler Write`,
         siteId: ctx.siteId,
-        startTime: new Date("2026-09-01T08:00:00.000Z"),
-        endTime: new Date("2026-09-01T16:00:00.000Z"),
+        startTime: relD(45, 8),
+        endTime: relD(45, 16),
         payRate: "20",
         billRate: "30",
         headcount: 2,
@@ -816,7 +837,7 @@ describe("conflict resolution is resistant to clock skew between SecureOps and t
         externalId,
         externalSource: SCHEDULER_SOURCE,
         externalUpdatedAt: new Date("2030-01-02T00:00:00.000Z"),
-        updatedAt: new Date("2026-09-01T00:00:00.000Z"),
+        updatedAt: relD(-1),
         syncSource: SCHEDULER_SOURCE,
       })
       .returning({ id: shiftsTable.id });
@@ -825,8 +846,8 @@ describe("conflict resolution is resistant to clock skew between SecureOps and t
       id: externalId,
       title: `${TAG} Stale Reorder`,
       siteName: ctx.siteName,
-      startTime: "2026-09-01T09:00:00.000Z",
-      endTime: "2026-09-01T17:00:00.000Z",
+      startTime: rel(45, 9),
+      endTime: rel(45, 17),
       payRate: "99",
       billRate: "99",
       requiredLicenseLevel: 4,
@@ -861,8 +882,8 @@ describe("conflict resolution is resistant to clock skew between SecureOps and t
       .values({
         title: `${TAG} Old Scheduler Write`,
         siteId: ctx.siteId,
-        startTime: new Date("2026-09-02T08:00:00.000Z"),
-        endTime: new Date("2026-09-02T16:00:00.000Z"),
+        startTime: relD(46, 8),
+        endTime: relD(46, 16),
         payRate: "20",
         billRate: "30",
         headcount: 1,
@@ -871,7 +892,7 @@ describe("conflict resolution is resistant to clock skew between SecureOps and t
         externalId,
         externalSource: SCHEDULER_SOURCE,
         externalUpdatedAt: new Date("2020-01-01T00:00:00.000Z"),
-        updatedAt: new Date("2026-09-02T00:00:00.000Z"),
+        updatedAt: relD(-1),
         syncSource: SCHEDULER_SOURCE,
       })
       .returning({ id: shiftsTable.id });
@@ -880,8 +901,8 @@ describe("conflict resolution is resistant to clock skew between SecureOps and t
       id: externalId,
       title: `${TAG} Fresh Update`,
       siteName: ctx.siteName,
-      startTime: "2026-09-02T09:00:00.000Z",
-      endTime: "2026-09-02T17:00:00.000Z",
+      startTime: rel(46, 9),
+      endTime: rel(46, 17),
       payRate: "27",
       billRate: "37",
       requiredLicenseLevel: 3,
@@ -907,7 +928,7 @@ describe("conflict resolution is resistant to clock skew between SecureOps and t
 
   it("processInboundClockEvent: rejects a stale scheduler update when the scheduler clock runs AHEAD", async () => {
     const externalId = `${TAG}-skew-clock-${randomUUID().slice(0, 8)}`;
-    const clockIn = new Date("2026-09-03T09:00:00.000Z");
+    const clockIn = relD(-9, 9);
     const localClockOut = new Date(clockIn.getTime() + 4 * 3600 * 1000);
 
     const [local] = await db
@@ -923,7 +944,7 @@ describe("conflict resolution is resistant to clock skew between SecureOps and t
         externalId,
         externalSource: SCHEDULER_SOURCE,
         externalUpdatedAt: new Date("2030-01-02T00:00:00.000Z"),
-        updatedAt: new Date("2026-09-03T00:00:00.000Z"),
+        updatedAt: relD(-1),
         syncSource: SCHEDULER_SOURCE,
       })
       .returning({ id: timeEntriesTable.id });
@@ -952,7 +973,7 @@ describe("conflict resolution is resistant to clock skew between SecureOps and t
 
   it("processInboundClockEvent: applies a fresh scheduler update when the scheduler clock LAGS", async () => {
     const externalId = `${TAG}-skew-clock-lag-${randomUUID().slice(0, 8)}`;
-    const clockIn = new Date("2026-09-05T09:00:00.000Z");
+    const clockIn = relD(-8, 9);
 
     const [local] = await db
       .insert(timeEntriesTable)
@@ -967,7 +988,7 @@ describe("conflict resolution is resistant to clock skew between SecureOps and t
         externalId,
         externalSource: SCHEDULER_SOURCE,
         externalUpdatedAt: new Date("2020-01-01T00:00:00.000Z"),
-        updatedAt: new Date("2026-09-05T00:00:00.000Z"),
+        updatedAt: relD(-1),
         syncSource: SCHEDULER_SOURCE,
       })
       .returning({ id: timeEntriesTable.id });
@@ -1045,8 +1066,8 @@ describe("delete over the HTTP webhook routes (signed payloads)", () => {
       .values({
         title: `${TAG} HTTP Doomed Shift`,
         siteId: ctx.siteId,
-        startTime: new Date("2026-10-01T08:00:00.000Z"),
-        endTime: new Date("2026-10-01T16:00:00.000Z"),
+        startTime: relD(50, 8),
+        endTime: relD(50, 16),
         payRate: "20",
         billRate: "30",
         headcount: 1,
@@ -1063,7 +1084,7 @@ describe("delete over the HTTP webhook routes (signed payloads)", () => {
     const res = await postShift({
       id: externalId,
       action: "delete",
-      updatedAt: "2026-10-02T00:00:00.000Z",
+      updatedAt: rel(-1),
     });
 
     expect(res.status).toBe(200);
@@ -1081,7 +1102,7 @@ describe("delete over the HTTP webhook routes (signed payloads)", () => {
     const res = await postShift({
       id: `${TAG}-http-del-shift-nonexistent-${randomUUID().slice(0, 8)}`,
       action: "delete",
-      updatedAt: "2026-10-03T00:00:00.000Z",
+      updatedAt: rel(-1),
     });
 
     expect(res.status).toBe(200);
@@ -1096,7 +1117,7 @@ describe("delete over the HTTP webhook routes (signed payloads)", () => {
       .values({
         employeeId: ctx.employeeId,
         siteId: ctx.siteId,
-        clockInTime: new Date("2026-10-04T09:00:00.000Z"),
+        clockInTime: relD(-10, 9),
         approvalStatus: "pending",
         isVerified: false,
         externalId,
@@ -1110,7 +1131,7 @@ describe("delete over the HTTP webhook routes (signed payloads)", () => {
     const res = await postClockEvent({
       id: externalId,
       action: "delete",
-      updatedAt: "2026-10-05T00:00:00.000Z",
+      updatedAt: rel(-9),
     });
 
     expect(res.status).toBe(200);
@@ -1128,7 +1149,7 @@ describe("delete over the HTTP webhook routes (signed payloads)", () => {
     const res = await postClockEvent({
       id: `${TAG}-http-del-clock-nonexistent-${randomUUID().slice(0, 8)}`,
       action: "delete",
-      updatedAt: "2026-10-06T00:00:00.000Z",
+      updatedAt: rel(-8),
     });
 
     expect(res.status).toBe(200);
@@ -1168,8 +1189,8 @@ describe("scheduler reconciliation job", () => {
       id: externalId,
       title: `${TAG} Reconciled Shift`,
       siteName: ctx.siteName,
-      startTime: "2026-07-15T08:00:00.000Z",
-      endTime: "2026-07-15T16:00:00.000Z",
+      startTime: rel(20, 8),
+      endTime: rel(20, 16),
       payRate: "21",
       billRate: "29",
       requiredLicenseLevel: 2,
@@ -1179,7 +1200,7 @@ describe("scheduler reconciliation job", () => {
       // externalUpdatedAt = this timestamp; the second tick carries the same
       // updatedAt, so the scheduler-vs-scheduler tiebreaker skips it (see the
       // webhook idempotency test).
-      updatedAt: "2025-01-01T00:00:00.000Z",
+      updatedAt: rel(-30),
     };
 
     // The delta endpoint returns the SAME shift each call; nextCursor advances
@@ -1291,7 +1312,7 @@ describe("scheduler reconciliation job", () => {
     // The delta pull carries a FULL roster in `assignedOfficerEmails`, exactly
     // like the webhook payload. The reconcile job must apply it the same way.
     let roster: string[] = [ctx.employeeEmail];
-    let updatedAt = "2026-08-01T00:00:00.000Z";
+    let updatedAt = rel(-20);
     vi.spyOn(globalThis, "fetch").mockImplementation(async (_url, opts) => {
       const sent = JSON.parse((opts?.body as string) ?? "{}") as { since?: string };
       return new Response(
@@ -1300,8 +1321,8 @@ describe("scheduler reconciliation job", () => {
             id: externalId,
             title: `${TAG} Recon Roster Shift`,
             siteName: ctx.siteName,
-            startTime: "2026-08-15T08:00:00.000Z",
-            endTime: "2026-08-15T16:00:00.000Z",
+            startTime: rel(22, 8),
+            endTime: rel(22, 16),
             payRate: "20",
             billRate: "28",
             requiredLicenseLevel: 2,
@@ -1340,7 +1361,7 @@ describe("scheduler reconciliation job", () => {
     // --- Second tick: scheduler drops officer #1 and adds officer #2, with a
     //     strictly-newer updatedAt so the shift update wins the tiebreaker.
     roster = [otherEmail];
-    updatedAt = "2026-08-02T00:00:00.000Z";
+    updatedAt = rel(-19);
     await runSchedulerReconciliation();
 
     const afterUpdate = await db
@@ -1389,9 +1410,9 @@ describe("scheduler webhook rejects unsigned and malformed requests", () => {
       action: "upsert",
       title: `${TAG} No Env`,
       siteName: ctx.siteName,
-      startTime: "2026-11-01T08:00:00.000Z",
-      endTime: "2026-11-01T16:00:00.000Z",
-      updatedAt: "2026-10-31T00:00:00.000Z",
+      startTime: rel(60, 8),
+      endTime: rel(60, 16),
+      updatedAt: rel(-1),
     });
 
     const res = await request(app)
@@ -1412,8 +1433,8 @@ describe("scheduler webhook rejects unsigned and malformed requests", () => {
       id: `${TAG}-noenv-clock-${randomUUID().slice(0, 8)}`,
       action: "upsert",
       employeeEmail: ctx.employeeEmail,
-      clockInTime: "2026-11-01T09:00:00.000Z",
-      updatedAt: "2026-10-31T00:00:00.000Z",
+      clockInTime: rel(60, 9),
+      updatedAt: rel(-1),
     });
 
     const res = await request(app)
@@ -1434,9 +1455,9 @@ describe("scheduler webhook rejects unsigned and malformed requests", () => {
       action: "upsert",
       title: `${TAG} Unsigned`,
       siteName: ctx.siteName,
-      startTime: "2026-11-02T08:00:00.000Z",
-      endTime: "2026-11-02T16:00:00.000Z",
-      updatedAt: "2026-11-01T00:00:00.000Z",
+      startTime: rel(61, 8),
+      endTime: rel(61, 16),
+      updatedAt: rel(-1),
     });
 
     const res = await request(app)
@@ -1461,9 +1482,9 @@ describe("scheduler webhook rejects unsigned and malformed requests", () => {
       action: "upsert",
       title: `${TAG} Wrong Sig`,
       siteName: ctx.siteName,
-      startTime: "2026-11-03T08:00:00.000Z",
-      endTime: "2026-11-03T16:00:00.000Z",
-      updatedAt: "2026-11-02T00:00:00.000Z",
+      startTime: rel(62, 8),
+      endTime: rel(62, 16),
+      updatedAt: rel(-1),
     });
 
     const res = await request(app)
@@ -1488,8 +1509,8 @@ describe("scheduler webhook rejects unsigned and malformed requests", () => {
       id: `${TAG}-unsigned-clock-${randomUUID().slice(0, 8)}`,
       action: "upsert",
       employeeEmail: ctx.employeeEmail,
-      clockInTime: "2026-11-03T09:00:00.000Z",
-      updatedAt: "2026-11-02T00:00:00.000Z",
+      clockInTime: rel(62, 9),
+      updatedAt: rel(-1),
     });
 
     const res = await request(app)
@@ -1529,8 +1550,8 @@ describe("scheduler webhook rejects unsigned and malformed requests", () => {
       action: "upsert",
       title: `${TAG} Bad`,
       siteName: ctx.siteName,
-      startTime: "2026-11-04T08:00:00.000Z",
-      endTime: "2026-11-04T16:00:00.000Z",
+      startTime: rel(63, 8),
+      endTime: rel(63, 16),
       // updatedAt intentionally omitted
     });
 
@@ -1545,9 +1566,9 @@ describe("scheduler webhook rejects unsigned and malformed requests", () => {
       action: "upsert",
       title: `${TAG} Bad No Id`,
       siteName: ctx.siteName,
-      startTime: "2026-11-05T08:00:00.000Z",
-      endTime: "2026-11-05T16:00:00.000Z",
-      updatedAt: "2026-11-04T00:00:00.000Z",
+      startTime: rel(64, 8),
+      endTime: rel(64, 16),
+      updatedAt: rel(-1),
       // id intentionally omitted
     });
 
@@ -1562,9 +1583,9 @@ describe("scheduler webhook rejects unsigned and malformed requests", () => {
       action: "frobnicate",
       title: `${TAG} Bad Action`,
       siteName: ctx.siteName,
-      startTime: "2026-11-06T08:00:00.000Z",
-      endTime: "2026-11-06T16:00:00.000Z",
-      updatedAt: "2026-11-05T00:00:00.000Z",
+      startTime: rel(65, 8),
+      endTime: rel(65, 16),
+      updatedAt: rel(-1),
     });
 
     expect(res.status).toBe(400);
@@ -1577,7 +1598,7 @@ describe("scheduler webhook rejects unsigned and malformed requests", () => {
       id: `${TAG}-bad-clock-noupdated-${randomUUID().slice(0, 8)}`,
       action: "upsert",
       employeeEmail: ctx.employeeEmail,
-      clockInTime: "2026-11-06T09:00:00.000Z",
+      clockInTime: rel(65, 9),
       // updatedAt intentionally omitted
     });
 
@@ -1595,15 +1616,15 @@ describe("scheduler webhook rejects unsigned and malformed requests", () => {
       action: "upsert",
       title: `${TAG} Assigned Shift`,
       siteName: ctx.siteName,
-      startTime: "2026-11-07T08:00:00.000Z",
-      endTime: "2026-11-07T16:00:00.000Z",
+      startTime: rel(66, 8),
+      endTime: rel(66, 16),
       payRate: "22",
       billRate: "30",
       requiredLicenseLevel: 2,
       headcount: 2,
       status: "upcoming",
       assignedOfficerEmails: [ctx.employeeEmail],
-      updatedAt: "2026-11-06T00:00:00.000Z",
+      updatedAt: rel(-1),
     });
 
     expect(res.status).toBe(200);
@@ -1628,13 +1649,13 @@ describe("scheduler webhook rejects unsigned and malformed requests", () => {
       action: "upsert",
       title: `${TAG} Assigned Unknown`,
       siteName: ctx.siteName,
-      startTime: "2026-11-08T08:00:00.000Z",
-      endTime: "2026-11-08T16:00:00.000Z",
+      startTime: rel(67, 8),
+      endTime: rel(67, 16),
       requiredLicenseLevel: 2,
       headcount: 1,
       status: "upcoming",
       assignedOfficerEmails: [`${TAG}-nobody-${randomUUID().slice(0, 8)}@example.test`],
-      updatedAt: "2026-11-07T00:00:00.000Z",
+      updatedAt: rel(-1),
     });
 
     expect(res.status).toBe(200);
@@ -1671,15 +1692,15 @@ describe("scheduler webhook rejects unsigned and malformed requests", () => {
       action: "upsert",
       title: `${TAG} Armed Post`,
       siteName: ctx.siteName,
-      startTime: "2026-11-08T20:00:00.000Z",
-      endTime: "2026-11-09T04:00:00.000Z",
+      startTime: rel(67, 20),
+      endTime: rel(68, 4),
       // Level-2 shift; the under-licensed officer (level 0) must be skipped while
       // the shared, Level-3-licensed officer is rostered as normal.
       requiredLicenseLevel: 2,
       headcount: 2,
       status: "upcoming",
       assignedOfficerEmails: [ctx.employeeEmail, underEmail],
-      updatedAt: "2026-11-07T12:00:00.000Z",
+      updatedAt: rel(-1),
     });
 
     expect(res.status).toBe(200);
@@ -1737,13 +1758,13 @@ describe("scheduler webhook rejects unsigned and malformed requests", () => {
       action: "upsert",
       title: `${TAG} Raise Shift`,
       siteName: ctx.siteName,
-      startTime: "2026-11-10T08:00:00.000Z",
-      endTime: "2026-11-10T16:00:00.000Z",
+      startTime: rel(69, 8),
+      endTime: rel(69, 16),
       requiredLicenseLevel: 3,
       headcount: 1,
       status: "upcoming",
       assignedOfficerEmails: [ctx.employeeEmail],
-      updatedAt: "2026-11-09T00:00:00.000Z",
+      updatedAt: rel(-2),
     });
     expect(created.body).toMatchObject({ ok: true, action: "created" });
     const shiftId = created.body.secureopsId as string;
@@ -1762,13 +1783,13 @@ describe("scheduler webhook rejects unsigned and malformed requests", () => {
       action: "upsert",
       title: `${TAG} Raise Shift`,
       siteName: ctx.siteName,
-      startTime: "2026-11-10T08:00:00.000Z",
-      endTime: "2026-11-10T16:00:00.000Z",
+      startTime: rel(69, 8),
+      endTime: rel(69, 16),
       requiredLicenseLevel: 4,
       headcount: 1,
       status: "upcoming",
       assignedOfficerEmails: [ctx.employeeEmail],
-      updatedAt: "2026-11-09T12:00:00.000Z",
+      updatedAt: rel(-1),
     });
     expect(raised.body).toMatchObject({ ok: true, action: "updated" });
 
@@ -1810,13 +1831,13 @@ describe("scheduler webhook rejects unsigned and malformed requests", () => {
       action: "upsert",
       title: `${TAG} Roster Shift`,
       siteName: ctx.siteName,
-      startTime: "2026-11-09T08:00:00.000Z",
-      endTime: "2026-11-09T16:00:00.000Z",
+      startTime: rel(68, 8),
+      endTime: rel(68, 16),
       requiredLicenseLevel: 2,
       headcount: 2,
       status: "upcoming",
       assignedOfficerEmails: [ctx.employeeEmail],
-      updatedAt: "2026-11-08T00:00:00.000Z",
+      updatedAt: rel(-3),
     });
     expect(created.body).toMatchObject({ ok: true, action: "created" });
     const shiftId = created.body.secureopsId as string;
@@ -1834,13 +1855,13 @@ describe("scheduler webhook rejects unsigned and malformed requests", () => {
       action: "upsert",
       title: `${TAG} Roster Shift`,
       siteName: ctx.siteName,
-      startTime: "2026-11-09T08:00:00.000Z",
-      endTime: "2026-11-09T16:00:00.000Z",
+      startTime: rel(68, 8),
+      endTime: rel(68, 16),
       requiredLicenseLevel: 2,
       headcount: 2,
       status: "upcoming",
       assignedOfficerEmails: [otherEmail],
-      updatedAt: "2026-11-08T12:00:00.000Z",
+      updatedAt: rel(-2),
     });
     expect(updated.body).toMatchObject({ ok: true, action: "updated" });
 
@@ -1859,13 +1880,13 @@ describe("scheduler webhook rejects unsigned and malformed requests", () => {
       action: "upsert",
       title: `${TAG} Roster Shift`,
       siteName: ctx.siteName,
-      startTime: "2026-11-09T08:00:00.000Z",
-      endTime: "2026-11-09T16:00:00.000Z",
+      startTime: rel(68, 8),
+      endTime: rel(68, 16),
       requiredLicenseLevel: 2,
       headcount: 2,
       status: "upcoming",
       assignedOfficerEmails: [ctx.employeeEmail],
-      updatedAt: "2026-11-07T00:00:00.000Z",
+      updatedAt: rel(-5),
     });
     expect(stale.body).toMatchObject({ ok: true, action: "skipped" });
 
@@ -1907,13 +1928,13 @@ describe("scheduler webhook rejects unsigned and malformed requests", () => {
       action: "upsert",
       title: `${TAG} Notify Shift`,
       siteName: ctx.siteName,
-      startTime: "2026-11-10T08:00:00.000Z",
-      endTime: "2026-11-10T16:00:00.000Z",
+      startTime: rel(70, 8),
+      endTime: rel(70, 16),
       requiredLicenseLevel: 2,
       headcount: 2,
       status: "upcoming",
       assignedOfficerEmails: [ctx.employeeEmail],
-      updatedAt: "2026-11-09T00:00:00.000Z",
+      updatedAt: rel(-5),
     });
     expect(created.body).toMatchObject({ ok: true, action: "created" });
     const shiftId = created.body.secureopsId as string;
@@ -1934,13 +1955,13 @@ describe("scheduler webhook rejects unsigned and malformed requests", () => {
       action: "upsert",
       title: `${TAG} Notify Shift`,
       siteName: ctx.siteName,
-      startTime: "2026-11-10T08:00:00.000Z",
-      endTime: "2026-11-10T16:00:00.000Z",
+      startTime: rel(70, 8),
+      endTime: rel(70, 16),
       requiredLicenseLevel: 2,
       headcount: 2,
       status: "upcoming",
       assignedOfficerEmails: [otherEmail],
-      updatedAt: "2026-11-09T12:00:00.000Z",
+      updatedAt: rel(-3),
     });
     expect(updated.body).toMatchObject({ ok: true, action: "updated" });
 
@@ -1972,13 +1993,13 @@ describe("scheduler webhook rejects unsigned and malformed requests", () => {
       action: "upsert",
       title: `${TAG} Notify Shift`,
       siteName: ctx.siteName,
-      startTime: "2026-11-10T08:00:00.000Z",
-      endTime: "2026-11-10T16:00:00.000Z",
+      startTime: rel(70, 8),
+      endTime: rel(70, 16),
       requiredLicenseLevel: 2,
       headcount: 2,
       status: "upcoming",
       assignedOfficerEmails: [otherEmail],
-      updatedAt: "2026-11-09T18:00:00.000Z",
+      updatedAt: rel(-1),
     });
     expect(noop.body).toMatchObject({ ok: true, action: "updated" });
 
@@ -2356,7 +2377,7 @@ describe("scheduler webhook rate limiter blocks request floods", () => {
     const body = JSON.stringify({
       id: `${TAG}-flood-${randomUUID().slice(0, 8)}`,
       action: "delete",
-      updatedAt: "2027-01-01T00:00:00.000Z",
+      updatedAt: rel(-1),
     });
     return request(app)
       .post("/api/scheduler-webhook/shifts")
@@ -2369,7 +2390,7 @@ describe("scheduler webhook rate limiter blocks request floods", () => {
     const body = JSON.stringify({
       id: `${TAG}-flood-clock-${randomUUID().slice(0, 8)}`,
       action: "delete",
-      updatedAt: "2027-01-01T00:00:00.000Z",
+      updatedAt: rel(-1),
     });
     return request(app)
       .post("/api/scheduler-webhook/clock-events")
