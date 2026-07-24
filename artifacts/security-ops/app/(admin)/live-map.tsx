@@ -424,6 +424,13 @@ function AdminLiveMapScreenInner() {
       );
     };
 
+    // A just-clocked-in officer: refetch the list rather than constructing
+    // the row client-side — the server response carries site coords, shift
+    // title, etc. that the WS event deliberately omits.
+    const addOfficer = (_userId: string) => {
+      void queryClient.invalidateQueries({ queryKey: getGetActiveOfficersQueryKey() });
+    };
+
     async function connect(): Promise<void> {
       const token = await storage.get(AUTH_TOKEN_KEY);
       if (!token || cancelled) return;
@@ -433,7 +440,10 @@ function AdminLiveMapScreenInner() {
       socket.onmessage = (ev) => {
         if (ws !== socket || typeof ev.data !== "string") return;
         try {
-          handleMapMessage(JSON.parse(ev.data), { onOfficerLeft: removeOfficer });
+          handleMapMessage(JSON.parse(ev.data), {
+            onOfficerLeft: removeOfficer,
+            onOfficerJoined: addOfficer,
+          });
         } catch { /* ignore malformed frames */ }
       };
       socket.onclose = () => {

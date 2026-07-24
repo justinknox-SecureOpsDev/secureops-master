@@ -88,6 +88,19 @@ export function broadcastOfficerLeft(userId: string): void {
   broadcastToRoom("live-ops", { type: "liveOps:officerLeft", userId }, { staffOnly: true });
 }
 
+/**
+ * Notify live-map viewers that an officer just opened a time entry so the
+ * marker can appear immediately instead of waiting for the next poll.
+ *
+ * Payload carries only the joining user's id — no location or PII — and is
+ * fanned out staffOnly so external client-portal sockets never receive it.
+ * Clients are expected to refetch the active-officers list on receipt rather
+ * than constructing the officer row from the event.
+ */
+export function broadcastOfficerJoined(userId: string): void {
+  broadcastToRoom("live-ops", { type: "liveOps:officerJoined", userId }, { staffOnly: true });
+}
+
 export function getConnectedUserIds(): ReadonlySet<string> {
   return new Set(connections.keys());
 }

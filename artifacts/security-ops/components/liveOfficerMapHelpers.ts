@@ -54,6 +54,7 @@ export function handleMapMessage(
     onSelectOfficer?: (userId: string) => void;
     onOpenSiteRadio?: (channelId: string, siteName: string) => void;
     onOfficerLeft?: (userId: string) => void;
+    onOfficerJoined?: (userId: string) => void;
   },
 ): void {
   if (!data || typeof data !== "object") return;
@@ -67,6 +68,12 @@ export function handleMapMessage(
     // immediately without waiting for the next active-officers poll.
     const uid = msg.userId;
     if (typeof uid === "string" && uid.length > 0) callbacks.onOfficerLeft?.(uid);
+  } else if (msg.type === "liveOps:officerJoined") {
+    // Server-pushed WS event: an officer just clocked in. The screen refetches
+    // the active-officers query (server is the source of truth for the row)
+    // so the new marker appears without waiting for the next 30s poll.
+    const uid = msg.userId;
+    if (typeof uid === "string" && uid.length > 0) callbacks.onOfficerJoined?.(uid);
   } else if (msg.type === "wcsg:openSiteRadio") {
     const channelId = msg.channelId;
     const siteName = msg.siteName;

@@ -269,6 +269,56 @@ describe("handleMapMessage — liveOps:officerLeft", () => {
 });
 
 // ---------------------------------------------------------------------------
+// handleMapMessage — liveOps:officerJoined (WS clock-in push)
+// ---------------------------------------------------------------------------
+
+describe("handleMapMessage — liveOps:officerJoined", () => {
+  it("routes a valid liveOps:officerJoined message to onOfficerJoined", () => {
+    const onOfficerJoined = vi.fn();
+    handleMapMessage({ type: "liveOps:officerJoined", userId: "user-9" }, { onOfficerJoined });
+    expect(onOfficerJoined).toHaveBeenCalledOnce();
+    expect(onOfficerJoined).toHaveBeenCalledWith("user-9");
+  });
+
+  it("ignores liveOps:officerJoined when userId is empty string", () => {
+    const onOfficerJoined = vi.fn();
+    handleMapMessage({ type: "liveOps:officerJoined", userId: "" }, { onOfficerJoined });
+    expect(onOfficerJoined).not.toHaveBeenCalled();
+  });
+
+  it("ignores liveOps:officerJoined when userId is not a string", () => {
+    const onOfficerJoined = vi.fn();
+    handleMapMessage({ type: "liveOps:officerJoined", userId: 42 }, { onOfficerJoined });
+    expect(onOfficerJoined).not.toHaveBeenCalled();
+  });
+
+  it("ignores liveOps:officerJoined when userId is missing", () => {
+    const onOfficerJoined = vi.fn();
+    handleMapMessage({ type: "liveOps:officerJoined" }, { onOfficerJoined });
+    expect(onOfficerJoined).not.toHaveBeenCalled();
+  });
+
+  it("does not call other callbacks for an officerJoined message", () => {
+    const onSelectOfficer = vi.fn();
+    const onOpenSiteRadio = vi.fn();
+    const onOfficerLeft = vi.fn();
+    handleMapMessage(
+      { type: "liveOps:officerJoined", userId: "user-9" },
+      { onSelectOfficer, onOpenSiteRadio, onOfficerLeft },
+    );
+    expect(onSelectOfficer).not.toHaveBeenCalled();
+    expect(onOpenSiteRadio).not.toHaveBeenCalled();
+    expect(onOfficerLeft).not.toHaveBeenCalled();
+  });
+
+  it("does not call onOfficerJoined for liveOps:officerLeft messages", () => {
+    const onOfficerJoined = vi.fn();
+    handleMapMessage({ type: "liveOps:officerLeft", userId: "user-9" }, { onOfficerJoined });
+    expect(onOfficerJoined).not.toHaveBeenCalled();
+  });
+});
+
+// ---------------------------------------------------------------------------
 // handleMapMessage — unknown / malformed messages
 // ---------------------------------------------------------------------------
 

@@ -8,7 +8,7 @@ import { getEffectiveLevel } from "../lib/eligibility";
 import { buildTimeEntryAuditMetadata, timeEntrySnapshot } from "../lib/timeEntryAudit";
 import { stripTimeEntryBillRateForRole } from "../lib/financeVisibility";
 import { canManageSite, getManagedSiteIds } from "../lib/siteManagerAuthz";
-import { broadcastOfficerLeft } from "../lib/wsManager";
+import { broadcastOfficerLeft, broadcastOfficerJoined } from "../lib/wsManager";
 
 const router: IRouter = Router();
 
@@ -627,6 +627,11 @@ router.post("/time-entries/clock-in", requireStaff, async (req, res): Promise<vo
     isVerified: false,
     approvalStatus: "pending",
   }).returning();
+
+  // Real-time push: tell live-map viewers a new time entry just opened so the
+  // officer marker appears immediately instead of waiting for the next 30s
+  // poll. Clients invalidate/refetch the active-officers query on receipt.
+  broadcastOfficerJoined(req.user!.userId);
 
   // Seed users.lastLat/Lng from the clock-in coords so the officer pops up
   // on the Dispatch Live Map immediately — without this, they only appear

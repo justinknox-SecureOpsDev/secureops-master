@@ -17,6 +17,7 @@ import { requireAdmin, requireAdminOrDispatcher } from "../middlewares/auth";
 import { getGeofenceRadiusMiles } from "../lib/geofence";
 import { businessDayWindow, businessTimeZone } from "../lib/businessTime";
 import { requireFeature } from "../lib/features";
+import { broadcastOfficerJoined } from "../lib/wsManager";
 
 const router: IRouter = Router();
 router.use("/dispatch", requireFeature("liveMap"));
@@ -771,6 +772,10 @@ router.post("/dispatch/officers/:userId/clock-in", requireAdmin, async (req, res
     res.status(409).json({ error: "Conflict", message: "Officer is already clocked in." });
     return;
   }
+
+  // Real-time push: surface the just-clocked-in officer on the live map
+  // immediately instead of waiting for the next 30s active-officers poll.
+  broadcastOfficerJoined(userId);
 
   req.log.info({ officerId: userId, shiftId, siteId: resolvedSiteId, actor: req.user?.userId }, "dispatch on-behalf clock-in");
   res.status(201).json({
