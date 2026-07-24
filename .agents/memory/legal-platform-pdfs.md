@@ -1,14 +1,17 @@
 ---
 name: Legal platform PDFs
-description: How the SOBBU platform legal PDFs are produced and where they live
+description: How the SOBBU platform legal PDFs/templates are produced and where they live
 ---
 
-The two SOBBU-platform legal documents (Master Subscription Agreement, User Agreement) have human-editable markdown sources in `legal/*.md`. The committed `.pdf` files are GENERATED artifacts, not hand-authored.
+The two SOBBU-platform legal documents (Master Subscription Agreement, User Agreement) have human-editable markdown sources in `legal/*.md`. The committed `.pdf` files AND the embedded templates in `lib/legal-docs/src/templates.generated.ts` are GENERATED artifacts, not hand-authored.
 
-**Rule:** there is no committed generator script. The PDFs are rendered from the markdown via `pdfkit` + `markdown-it` (a custom markdown-token → pdfkit renderer). After editing a markdown source, regenerate the PDF and write it to BOTH locations in lockstep:
+**Rule:** after editing a markdown source, run `pnpm --filter @workspace/scripts run generate-legal-pdfs`. It regenerates in lockstep:
 - `legal/<base>.pdf` — the downloadable deliverable copy
 - `artifacts/admin-portal/public/legal/<base>.pdf` — the copy served by the admin portal (Settings → "Legal & Agreements", linked as `${import.meta.env.BASE_URL}legal/<base>.pdf`)
+- `lib/legal-docs/src/templates.generated.ts` — embedded template strings used by the in-app fill/sign flow (server + portal)
 
-**Why:** the portal page links directly to the served copy; updating only the deliverable copy makes the admin portal silently serve a stale PDF.
+A staleness-guard test (`scripts/src/legalTemplates.test.ts`) fails the test gate if templates.generated.ts drifts from `legal/*.md`.
 
-**How to apply:** in the code_execution sandbox, import pdfkit via its explicit store entry (`node_modules/.pnpm/pdfkit@<v>/node_modules/pdfkit/js/pdfkit.js`) and markdown-it via `node_modules/.pnpm/markdown-it@<v>/node_modules/markdown-it/index.mjs` — bare specifiers / directory imports fail in that sandbox. These are SOBBU (vendor) docs, so the PDF header is neutral SOBBU branding, NOT the per-tenant customer brand/logo.
+**Why:** the portal page links directly to the served copy and the signing flow renders from the embedded template; updating only one copy makes the others silently stale.
+
+**How to apply:** edit only `legal/*.md`, run the generator, commit all outputs together. These are SOBBU (vendor) docs, so the PDF header is neutral SOBBU branding, NOT the per-tenant customer brand/logo. Fillable tokens in the markdown are bracketed `[ALL-CAPS]` strings (e.g. `[CUSTOMER LEGAL NAME]`) declared in `lib/legal-docs/src/fields.ts`; adding a token requires a matching field definition or fill/sign validation fails. Also: any new api-server router must be registered on a featureGating.test.ts allow-list (core vs self-gated) or the ungated-router guard fails the test gate.

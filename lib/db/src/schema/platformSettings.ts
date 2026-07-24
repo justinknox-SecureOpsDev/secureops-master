@@ -1,4 +1,4 @@
-import { pgTable, text, boolean, timestamp, integer, date } from "drizzle-orm/pg-core";
+import { pgTable, text, boolean, timestamp, integer, date, uuid } from "drizzle-orm/pg-core";
 
 /**
  * Super-admin-controlled platform settings.
@@ -95,3 +95,41 @@ export const platformAgreementDocsTable = pgTable("platform_agreement_docs", {
 });
 
 export type PlatformAgreementDoc = typeof platformAgreementDocsTable.$inferSelect;
+
+/**
+ * In-app electronic signatures for the SOBBU platform agreements
+ * (`msa` | `user_agreement`). Append-only: each signing inserts a new row and
+ * the latest row per slot is the current signed version — earlier rows are
+ * retained as an audit trail and are never updated or deleted.
+ *
+ * `documentMarkdown` is the FULL filled agreement text exactly as presented
+ * at signing (immutable snapshot — later template edits cannot alter what
+ * was signed), `documentSha256` is its hash, `fieldsJson` the fill values,
+ * and `consentText` the verbatim consent language shown to the signer.
+ * Guarantor columns are populated only when the optional MSA Exhibit C
+ * personal guaranty was executed.
+ */
+export const platformAgreementSignaturesTable = pgTable("platform_agreement_signatures", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  slot: text("slot").notNull(), // "msa" | "user_agreement"
+  documentTitle: text("document_title").notNull(),
+  documentMarkdown: text("document_markdown").notNull(),
+  documentSha256: text("document_sha256").notNull(),
+  fieldsJson: text("fields_json").notNull(),
+  consentText: text("consent_text").notNull(),
+  signerUserId: uuid("signer_user_id"),
+  signerName: text("signer_name").notNull(),
+  signerTitle: text("signer_title").notNull(),
+  signerEmail: text("signer_email").notNull(),
+  signatureText: text("signature_text").notNull(),
+  guarantorName: text("guarantor_name"),
+  guarantorTitle: text("guarantor_title"),
+  guarantorAddress: text("guarantor_address"),
+  guarantorSignature: text("guarantor_signature"),
+  guarantyConsentText: text("guaranty_consent_text"),
+  signedAt: timestamp("signed_at", { withTimezone: true }).notNull().defaultNow(),
+  ipAddress: text("ip_address"),
+  userAgent: text("user_agent"),
+});
+
+export type PlatformAgreementSignature = typeof platformAgreementSignaturesTable.$inferSelect;

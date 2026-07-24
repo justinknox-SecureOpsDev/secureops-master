@@ -60,6 +60,7 @@ import ClientUsers from "@/pages/ClientUsers";
 import CoverageRequests from "@/pages/CoverageRequests";
 import PlatformFeaturesPage from "@/pages/PlatformFeatures";
 import LegalAgreementsPage from "@/pages/LegalAgreements";
+import AgreementSignPage from "@/pages/AgreementSign";
 import { FeatureGuard } from "@/components/FeatureGate";
 
 const queryClient = new QueryClient({
@@ -185,6 +186,7 @@ function Routed() {
           <Route path="/settings/invite" component={OrgInvitePage} />
           <Route path="/platform/features" component={PlatformFeaturesPage} />
           <Route path="/legal/agreements" component={LegalAgreementsPage} />
+          <Route path="/legal/agreements/sign/:slot" component={AgreementSignPage} />
           <Route path="/radio">{() => <FeatureGuard feature="radio"><RadioPage /></FeatureGuard>}</Route>
           <Route path="/dar">{() => <FeatureGuard feature="dar"><DailyReportsPage /></FeatureGuard>}</Route>
           <Route path="/compliance" component={CompliancePage} />

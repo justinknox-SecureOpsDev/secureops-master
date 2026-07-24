@@ -10,6 +10,7 @@
     "check-front-door": "tsx ./src/check-front-door.ts",
     "check-schema-drift": "tsx ./src/check-schema-drift.ts",
     "sync-feature-keys": "tsx ./src/sync-feature-keys.ts",
+    "generate-legal-pdfs": "tsx ./src/generate-legal-pdfs.ts",
     "test": "vitest run",
     "test-schema-drift": "tsx --test ./src/test-schema-drift.ts",
     "test-dispatcher-authz": "tsx --test ./src/test-dispatcher-authz.ts",
@@ -20,6 +21,7 @@
   "dependencies": {
     "@workspace/db": "workspace:*",
     "@workspace/feature-keys": "workspace:*",
+    "@workspace/legal-docs": "workspace:*",
     "bcryptjs": "^3.0.3",
     "drizzle-orm": "catalog:",
     "pg": "^8.20.0"

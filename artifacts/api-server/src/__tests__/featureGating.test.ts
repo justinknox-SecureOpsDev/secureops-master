@@ -188,6 +188,10 @@ const CORE_UNGATED_ROUTERS = new Set<string>([
   // payroll/invoicing-derived money figures; ships in every tier (the nav item
   // in the admin portal is likewise ungated). See routes/analytics.ts.
   "analyticsRouter",
+  // Platform legal-agreement signing (MSA / User Agreement): super-admin-gated
+  // vendor paperwork surface, not a per-tier paid feature — every deployment
+  // must be able to execute its agreements. See routes/agreementSignatures.ts.
+  "agreementSignaturesRouter",
 ]);
 
 /**

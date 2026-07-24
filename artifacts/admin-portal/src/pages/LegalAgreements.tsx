@@ -10,9 +10,11 @@ import {
   Undo2,
   Loader2,
   BadgeCheck,
+  PenLine,
 } from "lucide-react";
 import { api } from "@/lib/api";
 import { uploadFile } from "@/lib/upload";
+import { downloadSignedPdf } from "@/pages/AgreementSign";
 import { Button } from "@/components/ui/button";
 import {
   Card,
@@ -46,6 +48,18 @@ type SlotStatus = {
     uploadedAt: string | null;
     uploadedBy: string | null;
   } | null;
+};
+
+type SignatureDto = {
+  id: string;
+  slot: AgreementSlot;
+  signerName: string;
+  signerTitle: string;
+  signerEmail: string;
+  signedAt: string;
+  documentSha256: string;
+  guarantyExecuted: boolean;
+  guarantorName: string | null;
 };
 
 // Platform-level legal documents authored by SOBBU LLC (the company that owns,
@@ -87,6 +101,9 @@ const CUSTOMER_LEGAL = [
 export default function LegalAgreementsPage() {
   // null = status unknown (load failed / not permitted) → render templates only.
   const [statuses, setStatuses] = useState<Record<AgreementSlot, SlotStatus["custom"]> | null>(null);
+  const [signatures, setSignatures] = useState<Record<AgreementSlot, SignatureDto | null> | null>(
+    null,
+  );
   const [isSuperAdmin, setIsSuperAdmin] = useState(false);
   const [busySlot, setBusySlot] = useState<AgreementSlot | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -105,6 +122,11 @@ export default function LegalAgreementsPage() {
 
   useEffect(() => {
     void loadStatus();
+    api<{ signatures: Record<AgreementSlot, SignatureDto | null> }>(
+      "/admin/platform/agreements/signatures",
+    )
+      .then((r) => setSignatures(r.signatures))
+      .catch(() => setSignatures(null));
     api<{ isSuperAdmin: boolean }>("/admin/platform/me")
       .then((r) => setIsSuperAdmin(r.isSuperAdmin))
       .catch(() => setIsSuperAdmin(false));
@@ -217,6 +239,7 @@ export default function LegalAgreementsPage() {
       <div className="grid gap-4 sm:grid-cols-2">
         {AGREEMENTS.map((doc) => {
           const custom = statuses?.[doc.slot] ?? null;
+          const signed = signatures?.[doc.slot] ?? null;
           const templateUrl = `${BASE}legal/${doc.file}`;
           const busy = busySlot === doc.slot;
           return (
@@ -226,17 +249,25 @@ export default function LegalAgreementsPage() {
                   <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-muted">
                     <doc.Icon className="h-5 w-5 text-foreground" />
                   </div>
-                  {statuses !== null &&
-                    (custom ? (
-                      <span className="inline-flex items-center gap-1 rounded-full border border-emerald-300 bg-emerald-50 px-2 py-0.5 text-xs font-medium text-emerald-700">
-                        <BadgeCheck className="h-3.5 w-3.5" />
-                        Uploaded document
+                  <div className="flex flex-wrap justify-end gap-1.5">
+                    {signed && (
+                      <span className="inline-flex items-center gap-1 rounded-full border border-sky-300 bg-sky-50 px-2 py-0.5 text-xs font-medium text-sky-700">
+                        <PenLine className="h-3.5 w-3.5" />
+                        Signed
                       </span>
-                    ) : (
-                      <span className="inline-flex items-center rounded-full border border-border bg-muted px-2 py-0.5 text-xs font-medium text-muted-foreground">
-                        Template
-                      </span>
-                    ))}
+                    )}
+                    {statuses !== null &&
+                      (custom ? (
+                        <span className="inline-flex items-center gap-1 rounded-full border border-emerald-300 bg-emerald-50 px-2 py-0.5 text-xs font-medium text-emerald-700">
+                          <BadgeCheck className="h-3.5 w-3.5" />
+                          Uploaded document
+                        </span>
+                      ) : (
+                        <span className="inline-flex items-center rounded-full border border-border bg-muted px-2 py-0.5 text-xs font-medium text-muted-foreground">
+                          Template
+                        </span>
+                      ))}
+                  </div>
                 </div>
                 <CardTitle className="text-base">{doc.title}</CardTitle>
                 <CardDescription>{doc.audience}</CardDescription>
@@ -251,11 +282,39 @@ export default function LegalAgreementsPage() {
                     )}
                   </p>
                 )}
+                {signed && (
+                  <p className="mt-3 text-xs text-muted-foreground">
+                    Signed by {signed.signerName} ({signed.signerTitle}) on{" "}
+                    {new Date(signed.signedAt).toLocaleDateString()}
+                    {signed.guarantyExecuted && <> · personal guaranty executed</>}
+                  </p>
+                )}
               </CardContent>
               <CardFooter className="flex flex-wrap gap-2">
+                <Button asChild size="sm" variant={signed ? "outline" : "default"}>
+                  <Link href={`/legal/agreements/sign/${doc.slot}`}>
+                    <PenLine className="mr-1.5 h-4 w-4" />
+                    {signed ? "Review & re-sign" : "Review & sign"}
+                  </Link>
+                </Button>
+                {signed && (
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    onClick={() => {
+                      setError(null);
+                      void downloadSignedPdf(doc.slot).catch((e) =>
+                        setError(`Failed to download signed PDF: ${(e as Error).message}`),
+                      );
+                    }}
+                  >
+                    <Download className="mr-1.5 h-4 w-4" />
+                    Signed PDF
+                  </Button>
+                )}
                 {custom ? (
                   <>
-                    <Button size="sm" disabled={busy} onClick={() => void viewCustom(doc.slot)}>
+                    <Button size="sm" variant="outline" disabled={busy} onClick={() => void viewCustom(doc.slot)}>
                       <ExternalLink className="mr-1.5 h-4 w-4" />
                       View PDF
                     </Button>
@@ -271,7 +330,7 @@ export default function LegalAgreementsPage() {
                   </>
                 ) : (
                   <>
-                    <Button asChild size="sm">
+                    <Button asChild size="sm" variant="outline">
                       <a href={templateUrl} target="_blank" rel="noopener noreferrer">
                         <ExternalLink className="mr-1.5 h-4 w-4" />
                         View PDF
