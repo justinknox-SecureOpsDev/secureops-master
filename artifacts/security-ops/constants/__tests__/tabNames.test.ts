@@ -34,6 +34,7 @@ import {
   ALL_ADMIN_NAV_TAB_TITLES,
   MY_WORK_SUBTAB_SHIFTS,
   MY_WORK_SUBTAB_CLOCK,
+  ALLOWED_PUSH_SCREEN_NAMES,
 } from "../tabNames";
 
 import {
@@ -500,6 +501,164 @@ describe("cross-package tab-name audit", () => {
           ).toBe(true);
         }
       }
+    }
+  });
+});
+
+// ── 5. Rename-detection proof ─────────────────────────────────────────────────
+//
+// Explicitly demonstrates and validates the three-step detection chain that
+// fires when a constant value is changed in lib/screen-names/src/index.ts:
+//
+//   Step 1 — Tab title value changes.
+//             e.g. TAB_CHAT = "Comms"  (was "Chat")
+//
+//   Step 2 — ALL_NAV_TAB_TITLES automatically reflects the new value
+//             because it is built from the constants, not from string literals.
+//             The set now contains "Comms".
+//
+//   Step 3a — Section 1 / 2 of THIS test derives the expected constant name
+//              from the set value ("Comms" → "TAB_COMMS") and checks whether
+//              the layout imports it. The layout still imports TAB_CHAT, so
+//              the assertion fails → caught at CI time, not at runtime.
+//
+//   Step 3b — ALLOWED_PUSH_SCREEN_NAMES now contains "Comms" instead of
+//              "Chat". Push notification bodies that still say "Chat tab"
+//              are flagged by pushScreenNames.test.ts.
+//
+// These tests do not mutate any modules. They prove the detection logic by
+// running the same derivation and lookup steps on a simulated rename input,
+// showing that the existing assertions WOULD fail for a renamed constant.
+
+/** Derives the expected TAB_* constant name for an employee tab title. */
+function deriveEmployeeConstName(title: string): string {
+  return "TAB_" + title.toUpperCase().replace(/[^A-Z0-9]+/g, "_").replace(/^_|_$/g, "");
+}
+
+/** Derives the expected TAB_ADMIN_* constant name for an admin tab title. */
+function deriveAdminConstName(title: string): string {
+  return "TAB_ADMIN_" + title.toUpperCase().replace(/[^A-Z0-9]+/g, "_").replace(/^_|_$/g, "");
+}
+
+describe("rename-detection proof — section 1 and pushScreenNames catch renamed constants", () => {
+  const employeeLayoutSource = readFileSync(
+    join(__dirname, "../../app/(employee)/_layout.tsx"),
+    "utf8",
+  );
+  const adminLayoutSource = readFileSync(
+    join(__dirname, "../../app/(admin)/_layout.tsx"),
+    "utf8",
+  );
+
+  const employeeImportMatch = employeeLayoutSource.match(
+    /import\s*\{([^}]+)\}\s*from\s*["']@\/constants\/tabNames["']/,
+  );
+  const employeeImportedNames = new Set(
+    (employeeImportMatch?.[1] ?? "")
+      .split(",")
+      .map((s) => s.trim())
+      .filter(Boolean),
+  );
+
+  const adminImportMatch = adminLayoutSource.match(
+    /import\s*\{([^}]+)\}\s*from\s*["']@\/constants\/tabNames["']/,
+  );
+  const adminImportedNames = new Set(
+    (adminImportMatch?.[1] ?? "")
+      .split(",")
+      .map((s) => s.trim())
+      .filter(Boolean),
+  );
+
+  it("step 3a (employee): a renamed value → derived const name not in layout imports → section 1 fails", () => {
+    // Simulate: TAB_CHAT is renamed from "Chat" to "Comms".
+    // ALL_NAV_TAB_TITLES now contains "Comms". Section 1 derives:
+    const derivedForComms = deriveEmployeeConstName("Comms");
+    expect(derivedForComms).toBe("TAB_COMMS");
+
+    // The layout still imports TAB_CHAT (the old constant name).
+    // Section 1 would look for TAB_COMMS and not find it → assertion failure.
+    expect(employeeImportedNames.has("TAB_COMMS")).toBe(false);
+
+    // Conversely, the current name IS in the imports, so the real test passes:
+    expect(employeeImportedNames.has(deriveEmployeeConstName("Chat"))).toBe(true);
+    expect(employeeImportedNames.has("TAB_CHAT")).toBe(true);
+  });
+
+  it("step 3b (employee): a renamed value → 'Chat' removed from ALLOWED_PUSH_SCREEN_NAMES → push test fails", () => {
+    // The current value "Chat" IS in ALLOWED_PUSH_SCREEN_NAMES.
+    // After renaming TAB_CHAT to "Comms" this would become false, so push
+    // notification bodies still saying "Chat tab" would be caught.
+    expect(ALLOWED_PUSH_SCREEN_NAMES.has("Chat")).toBe(true);
+
+    // The renamed value "Comms" is NOT currently a valid screen name,
+    // confirming the guard would fire on any push body with the old name.
+    expect(ALLOWED_PUSH_SCREEN_NAMES.has("Comms")).toBe(false);
+  });
+
+  it("step 3a (admin): a renamed admin value → derived const name not in admin layout imports → section 2 fails", () => {
+    // Simulate: TAB_ADMIN_CLOCK is renamed from "Clock" to "Time".
+    // ALL_ADMIN_NAV_TAB_TITLES now contains "Time". Section 2 derives:
+    const derivedForTime = deriveAdminConstName("Time");
+    expect(derivedForTime).toBe("TAB_ADMIN_TIME");
+
+    // The admin layout still imports TAB_ADMIN_CLOCK.
+    // Section 2 would look for TAB_ADMIN_TIME and not find it → assertion failure.
+    expect(adminImportedNames.has("TAB_ADMIN_TIME")).toBe(false);
+
+    // The real constant IS imported, confirming the current test passes:
+    expect(adminImportedNames.has(deriveAdminConstName("Clock"))).toBe(true);
+    expect(adminImportedNames.has("TAB_ADMIN_CLOCK")).toBe(true);
+  });
+
+  it("step 3b (admin): a renamed admin value → old name removed from ALLOWED_PUSH_SCREEN_NAMES → push test fails", () => {
+    // "Clock" (the current TAB_ADMIN_CLOCK value) IS valid.
+    expect(ALLOWED_PUSH_SCREEN_NAMES.has("Clock")).toBe(true);
+
+    // The hypothetical replacement "Time" is NOT, so push test would catch it.
+    expect(ALLOWED_PUSH_SCREEN_NAMES.has("Time")).toBe(false);
+  });
+
+  it("all current employee tab titles produce a derivable constant name that IS imported by the layout", () => {
+    // Proves the detection chain is fully wired for every employee tab right now.
+    // If this fails, section 1 above would also fail — keeping the two in sync.
+    for (const title of ALL_NAV_TAB_TITLES) {
+      const constName = deriveEmployeeConstName(title);
+      expect(
+        employeeImportedNames.has(constName),
+        `"${title}" → expected import "${constName}" — not found in employee layout. ` +
+          `Rename-detection is broken for this tab.`,
+      ).toBe(true);
+    }
+  });
+
+  it("all current admin tab titles produce a derivable constant name that IS imported by the admin layout", () => {
+    // Proves the detection chain is fully wired for every admin tab right now.
+    for (const title of ALL_ADMIN_NAV_TAB_TITLES) {
+      const constName = deriveAdminConstName(title);
+      expect(
+        adminImportedNames.has(constName),
+        `"${title}" → expected import "${constName}" — not found in admin layout. ` +
+          `Rename-detection is broken for this tab.`,
+      ).toBe(true);
+    }
+  });
+
+  it("all current tab titles are present in ALLOWED_PUSH_SCREEN_NAMES", () => {
+    // Proves the push-notification guard covers every current tab name.
+    for (const title of ALL_NAV_TAB_TITLES) {
+      expect(
+        ALLOWED_PUSH_SCREEN_NAMES.has(title),
+        `Employee tab "${title}" is missing from ALLOWED_PUSH_SCREEN_NAMES. ` +
+          `Push bodies referencing it would not be caught.`,
+      ).toBe(true);
+    }
+    for (const title of ALL_ADMIN_NAV_TAB_TITLES) {
+      expect(
+        ALLOWED_PUSH_SCREEN_NAMES.has(title),
+        `Admin tab "${title}" is missing from ALLOWED_PUSH_SCREEN_NAMES. ` +
+          `Push bodies referencing it would not be caught.`,
+      ).toBe(true);
     }
   });
 });

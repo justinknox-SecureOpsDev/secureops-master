@@ -42,4 +42,5 @@ export {
   TAB_ADMIN_CLOCK,
   TAB_ADMIN_PROFILE,
   ALL_ADMIN_NAV_TAB_TITLES,
+  ALLOWED_PUSH_SCREEN_NAMES,
 } from "@workspace/screen-names";
