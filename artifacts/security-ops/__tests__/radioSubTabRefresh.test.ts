@@ -103,13 +103,15 @@ describe("Radio sub-tab inside Chat — refresh on switch", () => {
     // Both the focus effect and the epoch effect must funnel through the same
     // shared fetch callback so behavior (silent refetch, first-load spinner,
     // stale-error clearing, cancellation) never diverges between the two paths.
+    // (The callback was renamed fetchChannels -> refetchChannels when the
+    // live-created-channel refresh landed; the invariant is unchanged.)
     const sharedFetch =
-      /useFocusEffect\(\s*fetchChannels\s*\)/.test(src) &&
-      /return\s+fetchChannels\(\)/.test(src) &&
-      /\[\s*refreshEpoch\s*,\s*fetchChannels\s*\]/.test(src);
+      /useFocusEffect\(\s*useCallback\(\s*\(\)\s*=>\s*refetchChannels\(\)/.test(src) &&
+      /return\s+refetchChannels\(\)/.test(src) &&
+      /\[\s*refreshEpoch\s*,\s*refetchChannels\s*\]/.test(src);
     expect(
       sharedFetch,
-      "RadioScreen must reuse one fetchChannels callback for both " +
+      "RadioScreen must reuse one refetchChannels callback for both " +
         "useFocusEffect and the refreshEpoch effect (with refreshEpoch in the " +
         "effect deps and the cancellation cleanup returned), so the two refresh " +
         "paths cannot drift apart.",
