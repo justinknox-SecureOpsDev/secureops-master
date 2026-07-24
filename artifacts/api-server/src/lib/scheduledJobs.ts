@@ -22,9 +22,12 @@ import { logger } from "./logger";
 import { sendEmail, renderLicenseExpiryEmail, renderTrainingExpiryEmail, renderHighRiskProfileChangeEmail, renderCoiExpiryEmail } from "./email";
 import { brand } from "./brandConfig";
 import { sendPushToUsers } from "./push";
+import { sendSmsToUsers } from "./sms";
 import { CHANGE_FIELD_LABELS } from "./employeeChangeLog";
-import { lockEndedWeekInvoices } from "./invoiceSync";
+import { lockEndedWeekInvoices, weekStartIsoUtc } from "./invoiceSync";
 import { isSchedulerConfigured, fetchSchedulerDelta } from "./schedulerSync";
+import { getSiteManagerUserIds } from "./siteManagerAuthz";
+import { businessTimeZone } from "./businessTime";
 
 /**
  * Coalescing window for the high-risk self-edit digest. Edits inside this
@@ -519,6 +522,248 @@ export async function recoverStuckProcessingPayrollRows(): Promise<void> {
     }
   } catch (err) {
     logger.error({ err }, "[payroll-stuck-sweep] job failed");
+  }
+}
+
+/**
+ * Pending shift-claim approval reminder. Runs hourly.
+ *
+ * When a shift claim has been sitting in `pending_approval` for more than
+ * 2 hours without a decision, push + SMS every active site manager assigned
+ * to that shift's site so they know to approve or decline it. Fires once per
+ * claim — the atomic UPDATE…RETURNING stamp on `claimReminderSentAt` ensures
+ * no double-send even under concurrent ticks or multiple instances.
+ */
+export async function sendPendingClaimReminders(): Promise<void> {
+  try {
+    const cutoff = new Date(Date.now() - 2 * HOUR_MS);
+
+    // Find claims that have been pending_approval for more than 2 hours
+    // and have not yet received a reminder.
+    const staleClaims = await db
+      .select({
+        assignmentId: shiftAssignmentsTable.id,
+        employeeId: shiftAssignmentsTable.employeeId,
+        siteId: shiftsTable.siteId,
+        shiftTitle: shiftsTable.title,
+        officerFirstName: usersTable.firstName,
+        officerLastName: usersTable.lastName,
+      })
+      .from(shiftAssignmentsTable)
+      .innerJoin(shiftsTable, eq(shiftsTable.id, shiftAssignmentsTable.shiftId))
+      .innerJoin(usersTable, eq(usersTable.id, shiftAssignmentsTable.employeeId))
+      .where(
+        and(
+          eq(shiftAssignmentsTable.status, "pending_approval"),
+          lt(shiftAssignmentsTable.createdAt, cutoff),
+          isNull(shiftAssignmentsTable.claimReminderSentAt),
+        ),
+      );
+
+    if (staleClaims.length === 0) return;
+
+    let totalSent = 0;
+    for (const claim of staleClaims) {
+      if (!claim.siteId) continue;
+
+      // Atomically claim this assignment so two overlapping ticks / instances
+      // can never double-send the reminder for the same claim.
+      const claimed = await db
+        .update(shiftAssignmentsTable)
+        .set({ claimReminderSentAt: new Date() })
+        .where(
+          and(
+            eq(shiftAssignmentsTable.id, claim.assignmentId),
+            eq(shiftAssignmentsTable.status, "pending_approval"),
+            isNull(shiftAssignmentsTable.claimReminderSentAt),
+          ),
+        )
+        .returning({ id: shiftAssignmentsTable.id });
+      if (claimed.length === 0) continue; // another tick/instance got it
+
+      const managerIds = await getSiteManagerUserIds(claim.siteId);
+      // Exclude the officer who made the claim in case they somehow also hold
+      // a site_manager role (structural guard; getSiteManagerUserIds already
+      // filters to role=site_manager so overlap is unlikely but possible).
+      const recipientIds = managerIds.filter((id) => id !== claim.employeeId);
+      if (recipientIds.length === 0) continue;
+
+      const officerName =
+        [claim.officerFirstName, claim.officerLastName].filter(Boolean).join(" ") || "An officer";
+      const pushBody = `${officerName} is waiting on your approval for ${claim.shiftTitle} — tap to review.`;
+      const smsBody = `SecureOps: Pending Claim — ${officerName} is waiting for approval on shift "${claim.shiftTitle}". Please log in to review.`;
+
+      let pushOk = false;
+      try {
+        await sendPushToUsers(recipientIds, {
+          title: "⏳ Pending Claim",
+          body: pushBody,
+          data: { type: "pending_claim_reminder", assignmentId: claim.assignmentId },
+        });
+        pushOk = true;
+      } catch (err) {
+        logger.warn({ err, assignmentId: claim.assignmentId }, "[pending-claim-reminder] push send failed");
+      }
+
+      try {
+        await sendSmsToUsers(recipientIds, smsBody);
+      } catch (err) {
+        logger.warn({ err, assignmentId: claim.assignmentId }, "[pending-claim-reminder] sms send failed");
+      }
+
+      if (!pushOk) {
+        // Roll back the stamp so the next tick retries (SMS-only is still a
+        // partial delivery, but push is the primary channel; roll back to
+        // preserve retry semantics).
+        await db
+          .update(shiftAssignmentsTable)
+          .set({ claimReminderSentAt: null })
+          .where(eq(shiftAssignmentsTable.id, claim.assignmentId))
+          .catch(() => {/* swallow */});
+        continue;
+      }
+      totalSent += 1;
+    }
+
+    if (totalSent > 0) {
+      logger.info({ totalSent }, "Sent pending shift-claim approval reminders");
+    }
+  } catch (err) {
+    logger.error({ err }, "[pending-claim-reminder] job failed");
+  }
+}
+
+/**
+ * Weekly time-entry approval reminder. Runs hourly but self-gates: only
+ * fires on Fridays between 17:00 and 19:00 in the business timezone.
+ *
+ * For each site that has unapproved (pending) time entries for the current
+ * Mon–Sun UTC pay week and has not yet received a reminder this week, push +
+ * SMS every active site manager at that site. The `sites.te_approval_reminder_week`
+ * column stores the UTC-Monday ISO date of the last week a reminder was sent;
+ * the job skips sites whose stored key matches the current week, making the
+ * reminder idempotent across multiple Friday ticks.
+ */
+export async function sendWeeklyTimeEntryApprovalReminders(): Promise<void> {
+  try {
+    const tz = businessTimeZone();
+    const now = new Date();
+
+    // Self-gate: only run on Fridays between 17:00 and 19:00 business time.
+    const tzParts = new Intl.DateTimeFormat("en-US", {
+      timeZone: tz,
+      weekday: "short",
+      hour: "numeric",
+      hour12: false,
+    }).formatToParts(now);
+    const weekdayPart = tzParts.find((p) => p.type === "weekday")?.value;
+    const hourPart = tzParts.find((p) => p.type === "hour")?.value;
+    const hourNum = hourPart !== undefined ? Number(hourPart) : -1;
+    if (weekdayPart !== "Fri" || hourNum < 17 || hourNum >= 19) return;
+
+    // Current pay week: Mon 00:00 UTC that starts this week.
+    const weekKey = weekStartIsoUtc(now); // "YYYY-MM-DD" of the Monday
+
+    const weekStart = new Date(weekKey + "T00:00:00Z");
+    const weekEnd = new Date(weekStart.getTime() + 7 * 24 * HOUR_MS);
+
+    // Find distinct siteIds that have pending time entries this week and
+    // have not yet received a reminder for this week.
+    const pendingSites = await db
+      .selectDistinct({ siteId: timeEntriesTable.siteId })
+      .from(timeEntriesTable)
+      .innerJoin(sitesTable, eq(sitesTable.id, timeEntriesTable.siteId))
+      .where(
+        and(
+          eq(timeEntriesTable.approvalStatus, "pending"),
+          gte(timeEntriesTable.clockInTime, weekStart),
+          lt(timeEntriesTable.clockInTime, weekEnd),
+          sql`${sitesTable.teApprovalReminderWeek} IS DISTINCT FROM ${weekKey}`,
+        ),
+      );
+
+    if (pendingSites.length === 0) return;
+
+    let totalSent = 0;
+    for (const { siteId } of pendingSites) {
+      if (!siteId) continue;
+
+      // Count how many entries are pending for this site this week.
+      const countRows = await db
+        .select({ count: sql<number>`COUNT(*)::int` })
+        .from(timeEntriesTable)
+        .where(
+          and(
+            eq(timeEntriesTable.siteId, siteId),
+            eq(timeEntriesTable.approvalStatus, "pending"),
+            gte(timeEntriesTable.clockInTime, weekStart),
+            lt(timeEntriesTable.clockInTime, weekEnd),
+          ),
+        );
+      const pendingCount = countRows[0]?.count ?? 0;
+      if (pendingCount === 0) continue;
+
+      // Atomically stamp the site so concurrent ticks never double-send.
+      const stamped = await db
+        .update(sitesTable)
+        .set({ teApprovalReminderWeek: weekKey })
+        .where(
+          and(
+            eq(sitesTable.id, siteId),
+            sql`${sitesTable.teApprovalReminderWeek} IS DISTINCT FROM ${weekKey}`,
+          ),
+        )
+        .returning({ id: sitesTable.id });
+      if (stamped.length === 0) continue; // another tick/instance got it
+
+      const managerIds = await getSiteManagerUserIds(siteId);
+      if (managerIds.length === 0) {
+        // No active managers — leave stamp in place so we don't spam on
+        // every future tick. When a manager is assigned mid-week they'll
+        // see the entries in-app.
+        continue;
+      }
+
+      const pushBody =
+        `${pendingCount} time ${pendingCount === 1 ? "entry" : "entries"} need your approval before this week's payroll locks — please review today.`;
+      const smsBody =
+        `SecureOps: ${pendingCount} time ${pendingCount === 1 ? "entry" : "entries"} at your site need approval before this week's payroll locks. Please log in to review.`;
+
+      let pushOk = false;
+      try {
+        await sendPushToUsers(managerIds, {
+          title: "📋 Time Entries Need Approval",
+          body: pushBody,
+          data: { type: "te_approval_reminder", siteId, weekKey, pendingCount },
+        });
+        pushOk = true;
+      } catch (err) {
+        logger.warn({ err, siteId }, "[weekly-te-approval] push send failed");
+      }
+
+      try {
+        await sendSmsToUsers(managerIds, smsBody);
+      } catch (err) {
+        logger.warn({ err, siteId }, "[weekly-te-approval] sms send failed");
+      }
+
+      if (!pushOk) {
+        // Roll back the stamp so the next tick retries.
+        await db
+          .update(sitesTable)
+          .set({ teApprovalReminderWeek: null })
+          .where(eq(sitesTable.id, siteId))
+          .catch(() => {/* swallow */});
+        continue;
+      }
+      totalSent += 1;
+    }
+
+    if (totalSent > 0) {
+      logger.info({ totalSent, weekKey }, "Sent weekly time-entry approval reminders");
+    }
+  } catch (err) {
+    logger.error({ err }, "[weekly-te-approval] job failed");
   }
 }
 
@@ -1278,6 +1523,17 @@ export function startScheduledJobs(intervalMs: number = HOUR_MS): NodeJS.Timeout
   // shifts/clock-events the scheduler published while SecureOps was down or
   // mid-restart. Skips silently when the integration is not configured.
   schedule("scheduler-reconcile", runSchedulerReconciliation, 15 * MIN_MS);
+  // Pending shift-claim approval reminders — hourly. Nudges site managers
+  // when a claim has been waiting in pending_approval for more than 2 hours.
+  // Idempotent via shift_assignments.claim_reminder_sent_at.
+  logger.info("Scheduled job: pending-claim-reminders (hourly)");
+  schedule("pending-claim-reminders", sendPendingClaimReminders, intervalMs);
+  // Weekly time-entry approval reminders — hourly tick, self-gates to
+  // Fridays 17:00–19:00 business timezone. Nudges site managers who have
+  // unapproved time entries for the current pay week.
+  // Idempotent via sites.te_approval_reminder_week.
+  logger.info("Scheduled job: weekly-te-approval-reminders (hourly, Friday gate)");
+  schedule("weekly-te-approval-reminders", sendWeeklyTimeEntryApprovalReminders, intervalMs);
   // Suppress lint about unused sql import.
   void sql;
 

@@ -40,6 +40,12 @@ export const sitesTable = pgTable("sites", {
   // time (e.g. events, extended-duration details) and manual clock-out is
   // preferred. Defaults to true (global behavior unchanged).
   autoClockOutEnabled: boolean("auto_clock_out_enabled").notNull().default(true),
+  // Idempotency key for the weekly time-entry approval reminder. Stores the
+  // UTC-Monday ISO date (e.g. "2026-07-21") of the last pay week for which a
+  // reminder was sent to this site's managers. The job skips any site whose
+  // stored key matches the current week's Monday so the reminder fires at most
+  // once per site per pay week even if the job ticks multiple times on Friday.
+  teApprovalReminderWeek: text("te_approval_reminder_week"),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow().$onUpdate(() => new Date()),
 }, (t) => ({

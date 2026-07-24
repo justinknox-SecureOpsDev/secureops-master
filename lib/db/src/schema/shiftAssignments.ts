@@ -14,6 +14,11 @@ export const shiftAssignmentsTable = pgTable("shift_assignments", {
   // the same officer is never reminded twice for the same shift.
   reminder2hSentAt: timestamp("reminder_2h_sent_at", { withTimezone: true }),
   reminder30mSentAt: timestamp("reminder_30m_sent_at", { withTimezone: true }),
+  // Idempotency flag for the pending-claim approval reminder. The scheduled
+  // job stamps this when it notifies site managers that a claim has been
+  // sitting in `pending_approval` for more than 2 hours without action.
+  // NULL = not yet reminded; once set, the job never re-sends for this claim.
+  claimReminderSentAt: timestamp("claim_reminder_sent_at", { withTimezone: true }),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow().$onUpdate(() => new Date()),
 }, (t) => ({
