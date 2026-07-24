@@ -41,6 +41,10 @@ export const invoicesTable = pgTable("invoices", {
   //                         instead of touching this row.
   autoSynced: boolean("auto_synced").notNull().default(true),
   lockedAt: timestamp("locked_at", { withTimezone: true }),
+  // Processing fee snapshot — captured at invoice creation/sync time.
+  // Null when the fee was disabled at the time the invoice was generated.
+  processingFeeRate: numeric("processing_fee_rate", { precision: 5, scale: 2 }),
+  processingFeeAmount: numeric("processing_fee_amount", { precision: 10, scale: 2 }),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow().$onUpdate(() => new Date()),
 }, (table) => ({

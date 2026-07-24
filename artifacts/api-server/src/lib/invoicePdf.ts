@@ -27,6 +27,8 @@ export type InvoicePdfInput = {
   taxAmount: string | null;
   totalAmount: string | null;
   notes: string | null;
+  processingFeeRate?: string | number | null;
+  processingFeeAmount?: string | number | null;
 };
 
 export type InvoicePdfPayload = {
@@ -181,8 +183,12 @@ export function buildInvoicePdf(inv: InvoicePdfInput): InvoicePdfPayload {
   const tax = parseFloat(String(inv.taxAmount ?? "0")) || 0;
   const total = parseFloat(String(inv.totalAmount ?? "0")) || 0;
 
+  const fee = parseFloat(String(inv.processingFeeAmount ?? "0")) || 0;
+  const feeRateVal = parseFloat(String(inv.processingFeeRate ?? "0")) || 0;
+
   addTotalRow("Subtotal", fmtUsd(subtotal));
   if (tax > 0) addTotalRow("Tax", fmtUsd(tax));
+  if (fee > 0) addTotalRow(`Processing fee (${feeRateVal.toFixed(2)}%)`, fmtUsd(fee));
   doc.moveDown(0.3);
   const totalBoxY = doc.y - 4;
   doc.rect(totX - 10, totalBoxY, 210, 20).fill(brand.colorNavy);

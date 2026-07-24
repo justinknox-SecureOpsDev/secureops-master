@@ -101,6 +101,8 @@ type CustomerConfig = {
   officerCount: number | null;
   billingNotes: string | null;
   planStartDate: string | null;
+  processingFeeEnabled: boolean | null;
+  processingFeeRate: string | null;
   updatedAt?: string | null;
   updatedBy?: string | null;
 };
@@ -129,6 +131,8 @@ const EMPTY_CONFIG: CustomerConfig = {
   officerCount: null,
   billingNotes: null,
   planStartDate: null,
+  processingFeeEnabled: null,
+  processingFeeRate: null,
 };
 
 type BrandCfg = {
@@ -226,6 +230,8 @@ export default function PlatformFeaturesPage() {
         officerCount: c.officerCount,
         billingNotes: c.billingNotes,
         planStartDate: c.planStartDate,
+        processingFeeEnabled: c.processingFeeEnabled ?? null,
+        processingFeeRate: c.processingFeeRate ?? null,
       } : EMPTY_CONFIG);
     }
   }, [configQ.data]);
@@ -251,7 +257,9 @@ export default function PlatformFeaturesPage() {
       configDraft.monthlyPriceCents !== (c.monthlyPriceCents ?? null) ||
       configDraft.officerCount !== (c.officerCount ?? null) ||
       configDraft.billingNotes !== (c.billingNotes ?? null) ||
-      configDraft.planStartDate !== (c.planStartDate ?? null)
+      configDraft.planStartDate !== (c.planStartDate ?? null) ||
+      configDraft.processingFeeEnabled !== (c.processingFeeEnabled ?? null) ||
+      configDraft.processingFeeRate !== (c.processingFeeRate ?? null)
     );
   })();
 
@@ -645,6 +653,42 @@ export default function PlatformFeaturesPage() {
                 onChange={(e) => setConfigDraft((p) => ({ ...p, planStartDate: e.target.value || null }))}
               />
             </div>
+          </div>
+          <div className="space-y-2 border rounded-lg p-4">
+            <div className="flex items-center justify-between gap-4 flex-wrap">
+              <div>
+                <p className="text-sm font-semibold">Invoice processing fee</p>
+                <p className="text-xs opacity-60">
+                  Adds a percentage fee on top of the subtotal of every newly generated client invoice.
+                  Existing invoices are not changed.
+                </p>
+              </div>
+              <label className="flex items-center gap-2 text-sm cursor-pointer">
+                <input
+                  type="checkbox"
+                  className="w-4 h-4 accent-brand-gold"
+                  checked={configDraft.processingFeeEnabled === true}
+                  onChange={(e) => setConfigDraft((p) => ({ ...p, processingFeeEnabled: e.target.checked }))}
+                />
+                {configDraft.processingFeeEnabled ? "Enabled" : "Disabled"}
+              </label>
+            </div>
+            {configDraft.processingFeeEnabled === true && (
+              <div className="flex items-center gap-2 pt-1">
+                <p className="text-xs font-semibold uppercase tracking-wide opacity-60 whitespace-nowrap">Fee rate</p>
+                <Input
+                  type="number"
+                  min={0}
+                  max={100}
+                  step={0.01}
+                  className="w-28"
+                  placeholder="8.25"
+                  value={configDraft.processingFeeRate ?? ""}
+                  onChange={(e) => setConfigDraft((p) => ({ ...p, processingFeeRate: e.target.value || null }))}
+                />
+                <span className="text-sm opacity-60">% (blank = default 8.25%)</span>
+              </div>
+            )}
           </div>
           <div className="space-y-1">
             <p className="text-xs font-semibold uppercase tracking-wide opacity-60">Billing notes</p>

@@ -307,13 +307,20 @@ export default function InvoiceBoardPage() {
     setNiSubmitting(true);
     setNiError("");
     try {
-      const created = await api<InvoiceRow & { overlappingInvoiceIds?: string[] }>("/invoices/generate", {
+      const created = await api<InvoiceRow & { overlappingInvoiceIds?: string[]; unpricedHours?: number }>("/invoices/generate", {
         method: "POST",
         body: { siteId: niSiteId, periodStart: niPeriodStart, periodEnd: niPeriodEnd },
       });
       closeNewInvoiceDialog();
       setOverlapWarningIds(created.overlappingInvoiceIds ?? []);
-      showToast("ok", "Draft invoice created successfully.");
+      if (created.unpricedHours && created.unpricedHours > 0) {
+        showToast(
+          "err",
+          `Draft created, but ${created.unpricedHours} approved hour${created.unpricedHours === 1 ? "" : "s"} in this period could not be billed — no bill rate. Set the site's default bill rate, then regenerate.`,
+        );
+      } else {
+        showToast("ok", "Draft invoice created successfully.");
+      }
       await reload();
     } catch (e) {
       setNiError((e as Error).message || "Failed to generate invoice.");

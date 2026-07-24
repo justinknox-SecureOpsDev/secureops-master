@@ -35,6 +35,11 @@ export const platformCustomerConfigTable = pgTable("platform_customer_config", {
   officerCount: integer("officer_count"),
   billingNotes: text("billing_notes"),
   planStartDate: date("plan_start_date"),
+  // Processing fee — applied to auto-synced and manually generated invoices.
+  // processingFeeEnabled: whether the fee is active for this deployment.
+  // processingFeeRate: percentage string, e.g. "8.25" (= 8.25%).
+  processingFeeEnabled: boolean("processing_fee_enabled"),
+  processingFeeRate: text("processing_fee_rate"),
   updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow(),
   updatedBy: text("updated_by"),
 });

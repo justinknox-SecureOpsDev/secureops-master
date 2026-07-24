@@ -13,6 +13,8 @@ import {
 } from "@workspace/db";
 import { logger } from "./logger";
 import { getFederalHolidayName, HOLIDAY_PAY_MULTIPLIER } from "./holidays";
+import { isProcessingFeeEnabled, getProcessingFeeRate } from "./processingFeeConfig";
+import { businessTimeZone, businessDateToUtc } from "./businessTime";
 
 /**
  * Auto-population of weekly client invoices (May 2026).
@@ -90,8 +92,8 @@ function generateInvoiceNumber(): string {
 
 export type UpsertResult =
   | { status: "skipped"; reason: string; invoiceId?: string }
-  | { status: "created"; invoiceId: string; totalAmount: number; lineCount: number; overlappingInvoiceIds?: string[] }
-  | { status: "updated"; invoiceId: string; totalAmount: number; lineCount: number; overlappingInvoiceIds?: string[] }
+  | { status: "created"; invoiceId: string; totalAmount: number; lineCount: number; overlappingInvoiceIds?: string[]; unpricedHours?: number }
+  | { status: "updated"; invoiceId: string; totalAmount: number; lineCount: number; overlappingInvoiceIds?: string[]; unpricedHours?: number }
   | { status: "deleted"; invoiceId: string; reason: string };
 
 /**
@@ -337,7 +339,10 @@ export async function upsertWeeklyInvoice(
   const subtotal =
     Math.round(lineItems.reduce((s, l) => s + l.amount, 0) * 100) / 100;
   const taxAmount = existing ? parseFloat(String(existing.taxAmount ?? "0")) : 0;
-  const total = Math.round((subtotal + taxAmount) * 100) / 100;
+  const feeEnabled = isProcessingFeeEnabled();
+  const feeRate = feeEnabled ? getProcessingFeeRate() : 0;
+  const feeAmount = feeEnabled ? Math.round(subtotal * feeRate / 100 * 100) / 100 : 0;
+  const total = Math.round((subtotal + taxAmount + feeAmount) * 100) / 100;
 
   const periodEnd = isoDate(addDaysUtc(start, 6));
 
@@ -366,6 +371,8 @@ export async function upsertWeeklyInvoice(
         lineItems,
         subtotal: String(subtotal),
         totalAmount: String(total),
+        processingFeeRate: feeEnabled ? String(feeRate) : null,
+        processingFeeAmount: feeEnabled ? String(feeAmount) : null,
       })
       .where(eq(invoicesTable.id, existing.id))
       .returning();
@@ -395,6 +402,8 @@ export async function upsertWeeklyInvoice(
         subtotal: String(subtotal),
         taxAmount: String(taxAmount),
         totalAmount: String(total),
+        processingFeeRate: feeEnabled ? String(feeRate) : null,
+        processingFeeAmount: feeEnabled ? String(feeAmount) : null,
         status: "draft",
         dueDate,
         notes: `${site.name} — week of ${weekStartIso}`,
@@ -433,7 +442,10 @@ export async function upsertWeeklyInvoice(
       return { status: "skipped", reason: "concurrent insert lost race" };
     }
     const rwTax = parseFloat(String(raceWinner.taxAmount ?? "0"));
-    const rwTotal = Math.round((subtotal + rwTax) * 100) / 100;
+    const rwFeeEnabled = isProcessingFeeEnabled();
+    const rwFeeRate = rwFeeEnabled ? getProcessingFeeRate() : 0;
+    const rwFeeAmount = rwFeeEnabled ? Math.round(subtotal * rwFeeRate / 100 * 100) / 100 : 0;
+    const rwTotal = Math.round((subtotal + rwTax + rwFeeAmount) * 100) / 100;
     await db
       .update(invoicesTable)
       .set({
@@ -445,6 +457,8 @@ export async function upsertWeeklyInvoice(
         lineItems,
         subtotal: String(subtotal),
         totalAmount: String(rwTotal),
+        processingFeeRate: rwFeeEnabled ? String(rwFeeRate) : null,
+        processingFeeAmount: rwFeeEnabled ? String(rwFeeAmount) : null,
       })
       .where(eq(invoicesTable.id, raceWinner.id));
     return {
@@ -534,14 +548,19 @@ export async function upsertCustomPeriodInvoice(
   periodStartIso: string,
   periodEndIso: string,
 ): Promise<UpsertResult> {
-  const start = new Date(`${periodStartIso}T00:00:00.000Z`);
-  // Exclusive upper bound: entries with clockIn on periodEnd are included.
-  const end = new Date(`${periodEndIso}T00:00:00.000Z`);
-  end.setUTCDate(end.getUTCDate() + 1);
-
-  if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime())) {
+  // Interpret both boundaries as BUSINESS-TIMEZONE calendar days (PAYROLL_TIMEZONE,
+  // default America/Chicago) — not UTC midnight. Admins pick calendar dates and see
+  // entries rendered in business time everywhere else; UTC-midnight boundaries would
+  // misfile evening entries (after ~7pm Central) into the neighbouring day.
+  const rawStart = new Date(`${periodStartIso}T00:00:00.000Z`);
+  const rawEnd = new Date(`${periodEndIso}T00:00:00.000Z`);
+  if (Number.isNaN(rawStart.getTime()) || Number.isNaN(rawEnd.getTime())) {
     return { status: "skipped", reason: "invalid periodStart or periodEnd" };
   }
+  const tz = businessTimeZone();
+  const start = businessDateToUtc(periodStartIso, tz);
+  // Exclusive upper bound: entries with clockIn on periodEnd are included.
+  const end = businessDateToUtc(isoDate(addDaysUtc(rawEnd, 1)), tz);
   if (end <= start) {
     return { status: "skipped", reason: "periodEnd must be after periodStart" };
   }
@@ -589,12 +608,16 @@ export async function upsertCustomPeriodInvoice(
 
   type Group = { description: string; hours: number; rate: number; amount: number };
   const groups = new Map<string, Group>();
+  // Approved hours we could NOT price (no shift bill rate AND no site default
+  // bill rate). These must be surfaced to the admin — silently dropping them
+  // produces an invoice that under-bills with no visible sign anything is wrong.
+  let unpricedHours = 0;
   for (const e of entries) {
     const hours = parseFloat(String(e.hoursWorked ?? "0"));
     if (!isFinite(hours) || hours <= 0) continue;
     const shiftBill = parseFloat(String(e.shiftBillRate ?? "0"));
     const baseRate = shiftBill > 0 ? shiftBill : siteBillRate;
-    if (baseRate <= 0) continue;
+    if (baseRate <= 0) { unpricedHours += hours; continue; }
     const officerName =
       [e.employeeFirst, e.employeeLast].filter(Boolean).join(" ") || "Unassigned officer";
     const holidayName = getFederalHolidayName(e.clockInTime);
@@ -629,7 +652,7 @@ export async function upsertCustomPeriodInvoice(
   for (const e of subEntries) {
     const hours = parseFloat(String(e.hoursWorked ?? "0"));
     if (!isFinite(hours) || hours <= 0) continue;
-    if (siteBillRate <= 0) continue;
+    if (siteBillRate <= 0) { unpricedHours += hours; continue; }
     const holidayName = getFederalHolidayName(e.clockInAt);
     const rate = holidayName ? Math.round(siteBillRate * HOLIDAY_PAY_MULTIPLIER * 100) / 100 : siteBillRate;
     const label = holidayName
@@ -656,7 +679,10 @@ export async function upsertCustomPeriodInvoice(
   }
 
   const subtotal = Math.round(lineItems.reduce((s, l) => s + l.amount, 0) * 100) / 100;
-  const total = Math.round(subtotal * 100) / 100;
+  const cpFeeEnabled = isProcessingFeeEnabled();
+  const cpFeeRate = cpFeeEnabled ? getProcessingFeeRate() : 0;
+  const cpFeeAmount = cpFeeEnabled ? Math.round(subtotal * cpFeeRate / 100 * 100) / 100 : 0;
+  const total = Math.round((subtotal + cpFeeAmount) * 100) / 100;
   const dueDate = isoDate(addDaysUtc(new Date(), client.paymentTermsDays ?? 30));
 
   const [created] = await db
@@ -674,6 +700,8 @@ export async function upsertCustomPeriodInvoice(
       subtotal: String(subtotal),
       taxAmount: "0",
       totalAmount: String(total),
+      processingFeeRate: cpFeeEnabled ? String(cpFeeRate) : null,
+      processingFeeAmount: cpFeeEnabled ? String(cpFeeAmount) : null,
       status: "draft",
       dueDate,
       notes: `${site.name} — ${periodStartIso} to ${periodEndIso}`,
@@ -686,6 +714,7 @@ export async function upsertCustomPeriodInvoice(
     invoiceId: created.id,
     totalAmount: total,
     lineCount: lineItems.length,
+    ...(unpricedHours > 0 ? { unpricedHours: Math.round(unpricedHours * 100) / 100 } : {}),
   };
 }
 

@@ -7,6 +7,7 @@ import { buildInvoicePdf } from "../lib/invoicePdf";
 import { sendEmailDetailed } from "../lib/email";
 import { brand } from "../lib/brandConfig";
 import { requireFeature } from "../lib/features";
+import { isProcessingFeeEnabled, getProcessingFeeRate } from "../lib/processingFeeConfig";
 
 const router: IRouter = Router();
 router.use("/invoices", requireFeature("invoicing"));
@@ -19,12 +20,22 @@ function generateInvoiceNumber(): string {
 }
 
 function calcTotals(lineItems: Array<{ description: string; hours?: number; rate?: number; amount: number }>, taxAmount: number) {
-  const subtotal = lineItems.reduce((s, item) => {
-    const amount = item.amount ?? (item.hours && item.rate ? item.hours * item.rate : 0);
-    return s + amount;
-  }, 0);
-  const total = subtotal + (taxAmount || 0);
-  return { subtotal: Math.round(subtotal * 100) / 100, total: Math.round(total * 100) / 100 };
+  const subtotal = Math.round(
+    lineItems.reduce((s, item) => {
+      const amount = item.amount ?? (item.hours && item.rate ? item.hours * item.rate : 0);
+      return s + amount;
+    }, 0) * 100,
+  ) / 100;
+  const feeEnabled = isProcessingFeeEnabled();
+  const feeRate = feeEnabled ? getProcessingFeeRate() : 0;
+  const feeAmount = feeEnabled ? Math.round(subtotal * feeRate / 100 * 100) / 100 : 0;
+  const total = Math.round((subtotal + (taxAmount || 0) + feeAmount) * 100) / 100;
+  return {
+    subtotal,
+    total,
+    processingFeeRate: feeEnabled ? feeRate : null,
+    processingFeeAmount: feeEnabled ? feeAmount : null,
+  };
 }
 
 function addDays(d: Date, n: number): Date {
@@ -81,6 +92,8 @@ router.get("/invoices", requireAdmin, async (req, res): Promise<void> => {
       notes: invoicesTable.notes,
       autoSynced: invoicesTable.autoSynced,
       lockedAt: invoicesTable.lockedAt,
+      processingFeeRate: invoicesTable.processingFeeRate,
+      processingFeeAmount: invoicesTable.processingFeeAmount,
       createdAt: invoicesTable.createdAt,
     })
     .from(invoicesTable)
@@ -96,7 +109,7 @@ router.post("/invoices", requireAdmin, async (req, res): Promise<void> => {
     res.status(400).json({ error: "Bad Request", message: "clientName, lineItems, dueDate required" });
     return;
   }
-  const { subtotal, total } = calcTotals(lineItems, taxAmount || 0);
+  const { subtotal, total, processingFeeRate, processingFeeAmount } = calcTotals(lineItems, taxAmount || 0);
   const [invoice] = await db.insert(invoicesTable).values({
     invoiceNumber: generateInvoiceNumber(),
     clientId: clientId || null,
@@ -108,6 +121,8 @@ router.post("/invoices", requireAdmin, async (req, res): Promise<void> => {
     subtotal: String(subtotal),
     taxAmount: String(taxAmount || 0),
     totalAmount: String(total),
+    processingFeeRate: processingFeeRate !== null ? String(processingFeeRate) : null,
+    processingFeeAmount: processingFeeAmount !== null ? String(processingFeeAmount) : null,
     status: "draft",
     dueDate,
     notes: notes || null,
@@ -195,6 +210,9 @@ router.post("/invoices/generate", requireAdmin, async (req, res): Promise<void> 
       ...withSite?.invoices,
       siteName: withSite?.sites?.name,
       overlappingInvoiceIds: overlapping.map((o) => o.id),
+      ...(result.status === "created" && result.unpricedHours
+        ? { unpricedHours: result.unpricedHours }
+        : {}),
     });
     return;
   }
@@ -296,6 +314,8 @@ router.get("/invoices/:id/pdf", requireAdmin, async (req, res): Promise<void> =>
       subtotal: invoicesTable.subtotal,
       taxAmount: invoicesTable.taxAmount,
       totalAmount: invoicesTable.totalAmount,
+      processingFeeRate: invoicesTable.processingFeeRate,
+      processingFeeAmount: invoicesTable.processingFeeAmount,
       notes: invoicesTable.notes,
     })
     .from(invoicesTable)
@@ -346,6 +366,8 @@ router.post("/invoices/:id/send", requireAdmin, async (req, res): Promise<void> 
       subtotal: invoicesTable.subtotal,
       taxAmount: invoicesTable.taxAmount,
       totalAmount: invoicesTable.totalAmount,
+      processingFeeRate: invoicesTable.processingFeeRate,
+      processingFeeAmount: invoicesTable.processingFeeAmount,
       notes: invoicesTable.notes,
     })
     .from(invoicesTable)
@@ -409,6 +431,12 @@ router.post("/invoices/:id/send", requireAdmin, async (req, res): Promise<void> 
     style: "currency", currency: "USD",
   });
   const period = `${row.periodStart} to ${row.periodEnd}`;
+  const feeAmt = parseFloat(String(row.processingFeeAmount ?? "0"));
+  const feeRt = parseFloat(String(row.processingFeeRate ?? "0"));
+  const feeDisplay = feeAmt > 0
+    ? feeAmt.toLocaleString("en-US", { style: "currency", currency: "USD" })
+    : null;
+  const feeLabel = `Processing fee${feeRt > 0 ? ` (${feeRt}%)` : ""}`;
 
   const emailResult = await sendEmailDetailed({
     to: recipient,
@@ -418,7 +446,7 @@ router.post("/invoices/:id/send", requireAdmin, async (req, res): Promise<void> 
       "",
       `Please find attached invoice ${row.invoiceNumber} for security services provided during ${period}.`,
       "",
-      `Invoice total: ${totalDisplay}${row.dueDate ? `\nDue date:      ${row.dueDate}` : ""}`,
+      `${feeDisplay ? `${feeLabel}: ${feeDisplay}\n` : ""}Invoice total: ${totalDisplay}${row.dueDate ? `\nDue date:      ${row.dueDate}` : ""}`,
       "",
       `Please reference the invoice number on your payment. For questions, contact ${brand.billingEmail}.`,
       "",
@@ -435,6 +463,7 @@ router.post("/invoices/:id/send", requireAdmin, async (req, res): Promise<void> 
           <p>Dear ${escHtml(row.clientName ?? "Client")},</p>
           <p>Please find attached invoice <strong>${escHtml(row.invoiceNumber)}</strong> for security services provided during <strong>${escHtml(period)}</strong>.</p>
           <div style="background:#f6f1e1;padding:14px 16px;border-left:3px solid ${brand.colorGold};margin:18px 0;border-radius:4px">
+            ${feeDisplay ? `<div><strong>${escHtml(feeLabel)}:</strong> ${escHtml(feeDisplay)}</div>` : ""}
             <div><strong>Invoice total:</strong> ${escHtml(totalDisplay)}</div>
             ${row.dueDate ? `<div><strong>Due date:</strong> ${escHtml(row.dueDate)}</div>` : ""}
             <div><strong>Invoice #:</strong> ${escHtml(row.invoiceNumber)}</div>
@@ -481,11 +510,13 @@ router.put("/invoices/:id", requireAdmin, async (req, res): Promise<void> => {
   if (clientEmail !== undefined) updates.clientEmail = clientEmail;
   if (clientAddress !== undefined) updates.clientAddress = clientAddress;
   if (lineItems) {
-    const { subtotal, total } = calcTotals(lineItems, taxAmount ?? 0);
+    const { subtotal, total, processingFeeRate, processingFeeAmount } = calcTotals(lineItems, taxAmount ?? 0);
     updates.lineItems = lineItems;
     updates.subtotal = String(subtotal);
     updates.taxAmount = String(taxAmount ?? 0);
     updates.totalAmount = String(total);
+    updates.processingFeeRate = processingFeeRate !== null ? String(processingFeeRate) : null;
+    updates.processingFeeAmount = processingFeeAmount !== null ? String(processingFeeAmount) : null;
     // Admin hand-edited the billable totals — opt this row out of
     // future auto-sync so the next time-entry approval can't clobber
     // their numbers. The weekly lock job will still freeze it.

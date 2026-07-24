@@ -10,6 +10,7 @@ import { seedRadioChannels } from "./lib/seedRadioChannels";
 import { startScheduledJobs } from "./lib/scheduledJobs";
 import { loadFeatureOverridesFromDb } from "./lib/features";
 import { loadBrandOverridesFromDb } from "./lib/brandConfig";
+import { loadProcessingFeeConfigFromDb } from "./lib/processingFeeConfig";
 
 const rawPort = process.env["PORT"];
 
@@ -106,6 +107,10 @@ loadFeatureOverridesFromDb()
 loadBrandOverridesFromDb()
   .then(() => logger.info("Brand overrides loaded"))
   .catch((err) => logger.error({ err }, "Failed to load brand overrides"));
+
+loadProcessingFeeConfigFromDb()
+  .then(() => logger.info("Processing-fee config loaded"))
+  .catch((err) => logger.error({ err }, "Failed to load processing-fee config"));
 
 seedPolicies()
   .then(() => logger.info("Default policies ensured"))

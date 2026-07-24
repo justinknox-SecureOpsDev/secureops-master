@@ -16,6 +16,7 @@ import { db, platformFeatureOverridesTable, platformCustomerConfigTable, platfor
 import { requireAuth, requireAdmin } from "../middlewares/auth";
 import { ObjectStorageService, ObjectNotFoundError } from "../lib/objectStorage";
 import { brand, applyBrandOverrides } from "../lib/brandConfig";
+import { applyProcessingFeeConfig } from "../lib/processingFeeConfig";
 import {
   type FeatureKey,
   getFeatureFlagDetails,
@@ -104,6 +105,16 @@ const customerConfigSchema = z.object({
   officerCount: z.number().int().min(1).nullable(),
   billingNotes: z.string().max(2000).nullable(),
   planStartDate: z.string().nullable(),
+  processingFeeEnabled: z.boolean().nullable(),
+  processingFeeRate: z
+    .string()
+    .max(20)
+    .regex(/^\d{1,3}(\.\d{1,4})?$/, "processingFeeRate must be a numeric percentage")
+    .refine((v) => {
+      const n = parseFloat(v);
+      return n > 0 && n <= 100;
+    }, "processingFeeRate must be between 0 (exclusive) and 100")
+    .nullable(),
 });
 
 /** Upserts the customer plan / commercial config for this deployment. */
@@ -114,14 +125,14 @@ router.put("/admin/platform/customer-config", requireAuth, requireSuperAdmin, as
     return;
   }
   const editor = req.user?.email ?? "unknown";
-  const { customerName, planTier, monthlyPriceCents, officerCount, billingNotes, planStartDate } = parsed.data;
+  const { customerName, planTier, monthlyPriceCents, officerCount, billingNotes, planStartDate, processingFeeEnabled, processingFeeRate } = parsed.data;
 
   await db
     .insert(platformCustomerConfigTable)
-    .values({ id: "singleton", customerName, planTier, monthlyPriceCents, officerCount, billingNotes, planStartDate, updatedBy: editor })
+    .values({ id: "singleton", customerName, planTier, monthlyPriceCents, officerCount, billingNotes, planStartDate, processingFeeEnabled, processingFeeRate, updatedBy: editor })
     .onConflictDoUpdate({
       target: platformCustomerConfigTable.id,
-      set: { customerName, planTier, monthlyPriceCents, officerCount, billingNotes, planStartDate, updatedBy: editor, updatedAt: sql`now()` },
+      set: { customerName, planTier, monthlyPriceCents, officerCount, billingNotes, planStartDate, processingFeeEnabled, processingFeeRate, updatedBy: editor, updatedAt: sql`now()` },
     });
 
   const [config] = await db
@@ -129,6 +140,7 @@ router.put("/admin/platform/customer-config", requireAuth, requireSuperAdmin, as
     .from(platformCustomerConfigTable)
     .where(eq(platformCustomerConfigTable.id, "singleton"))
     .limit(1);
+  applyProcessingFeeConfig(config ?? null);
   res.json({ config });
 });
 

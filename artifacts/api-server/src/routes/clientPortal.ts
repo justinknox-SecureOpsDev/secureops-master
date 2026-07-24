@@ -593,6 +593,8 @@ router.get(
           subtotal: invoicesTable.subtotal,
           taxAmount: invoicesTable.taxAmount,
           totalAmount: invoicesTable.totalAmount,
+          processingFeeRate: invoicesTable.processingFeeRate,
+          processingFeeAmount: invoicesTable.processingFeeAmount,
           notes: invoicesTable.notes,
         })
         .from(invoicesTable)
@@ -642,6 +644,8 @@ router.get(
         subtotal: row.subtotal,
         taxAmount: row.taxAmount,
         totalAmount: row.totalAmount,
+        processingFeeRate: row.processingFeeRate,
+        processingFeeAmount: row.processingFeeAmount,
         notes: row.notes,
       });
 

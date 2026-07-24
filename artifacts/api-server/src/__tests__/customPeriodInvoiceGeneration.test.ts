@@ -526,3 +526,99 @@ describe("edited custom drafts vs re-generation (no silent tax double-charge)", 
     for (const row of rows) expect(row.lockedAt).not.toBeNull();
   });
 });
+
+describe("custom period — unpriced hours & business-timezone boundaries", () => {
+  it("surfaces unpricedHours for ad-hoc entries at a site with no default bill rate (instead of silently dropping them)", async () => {
+    // Dedicated site WITHOUT a default bill rate — the Treasure Island scenario.
+    const [nrSite] = await db
+      .insert(sitesTable)
+      .values({
+        clientId: ctx.clientId,
+        name: `${TAG}-norate-site`,
+        address: "3 Custom Period Ave",
+        defaultBillRate: null,
+      })
+      .returning({ id: sitesTable.id });
+    const [nrShift] = await db
+      .insert(shiftsTable)
+      .values({
+        siteId: nrSite.id,
+        title: `${TAG}-norate-shift`,
+        startTime: ENTRY_A_IN,
+        endTime: ENTRY_A_OUT,
+        payRate: "20.00",
+        billRate: "40.00",
+        headcount: 1,
+      })
+      .returning({ id: shiftsTable.id });
+
+    try {
+      // Shift-linked entry (priced via shift billRate 40) + ad-hoc entry (no rate anywhere).
+      await addApprovedEntry(ENTRY_A_IN, ENTRY_A_OUT, "4.00", { shiftId: nrShift.id, siteId: nrSite.id });
+      await addApprovedEntry(
+        new Date("2025-06-10T14:00:00.000Z"),
+        new Date("2025-06-10T17:30:00.000Z"),
+        "3.50",
+        { shiftId: null, siteId: nrSite.id },
+      );
+
+      const res = await request(app)
+        .post("/api/invoices/generate")
+        .set(authed())
+        .send({ siteId: nrSite.id, periodStart: PERIOD_START, periodEnd: PERIOD_END });
+      expect(res.status).toBe(201);
+      // The priced entry billed; the unpriced hours are reported, not silently dropped.
+      expect(parseFloat(String(res.body.subtotal))).toBe(160);
+      expect(res.body.unpricedHours).toBe(3.5);
+
+      const [invoice] = await db.select().from(invoicesTable).where(eq(invoicesTable.id, res.body.id));
+      const lines = invoice.lineItems as LineItem[];
+      expect(lines).toHaveLength(1);
+      expect(lines[0].rate).toBe(40);
+    } finally {
+      await db.execute(sql`DELETE FROM invoices WHERE site_id = ${nrSite.id}::uuid`);
+      await db.execute(sql`DELETE FROM time_entries WHERE site_id = ${nrSite.id}::uuid`);
+      await db.execute(sql`DELETE FROM shifts WHERE site_id = ${nrSite.id}::uuid`);
+      await db.execute(sql`DELETE FROM sites WHERE id = ${nrSite.id}::uuid`);
+    }
+  });
+
+  it("does not report unpricedHours when everything is priced", async () => {
+    await addApprovedEntry(ENTRY_A_IN, ENTRY_A_OUT, "4.00");
+    const res = await request(app)
+      .post("/api/invoices/generate")
+      .set(authed())
+      .send({ siteId: ctx.siteId, periodStart: PERIOD_START, periodEnd: PERIOD_END });
+    expect(res.status).toBe(201);
+    expect(res.body.unpricedHours).toBeUndefined();
+  });
+
+  it("interprets periodStart/periodEnd in the business timezone, not UTC (evening entries stay in the right period)", async () => {
+    // 2025-06-30 20:00 America/Chicago = 2025-07-01T01:00:00Z. UTC bounds would
+    // wrongly exclude it; business-TZ bounds must include it (clock-in day = Jun 30).
+    await addApprovedEntry(
+      new Date("2025-07-01T01:00:00.000Z"),
+      new Date("2025-07-01T05:00:00.000Z"),
+      "4.00",
+    );
+    // 2025-05-31 22:00 America/Chicago = 2025-06-01T03:00:00Z. UTC bounds would
+    // wrongly include it; business-TZ bounds must exclude it (clock-in day = May 31).
+    await addApprovedEntry(
+      new Date("2025-06-01T03:00:00.000Z"),
+      new Date("2025-06-01T07:00:00.000Z"),
+      "4.00",
+    );
+
+    const res = await request(app)
+      .post("/api/invoices/generate")
+      .set(authed())
+      .send({ siteId: ctx.siteId, periodStart: PERIOD_START, periodEnd: PERIOD_END });
+    expect(res.status).toBe(201);
+    // Only the June 30 (business day) evening entry bills: 4h × $40 = $160.
+    expect(parseFloat(String(res.body.subtotal))).toBe(160);
+    const [invoice] = await db.select().from(invoicesTable).where(eq(invoicesTable.id, res.body.id));
+    const lines = invoice.lineItems as LineItem[];
+    expect(lines).toHaveLength(1);
+    expect(lines[0].hours).toBe(4);
+  });
+});

@@ -93,3 +93,4 @@
 - [Brand logo — no heuristic plate](brand-logo-no-heuristic-plate.md) — never plate uploaded logos from a bg-color heuristic (WCSG eagle has baked dark bg → white edges); decide from image pixels at upload time.
 - [Rollback drops UI, keeps server](rollback-drops-ui-keeps-server.md) — "worked before, gone now" = check "Restored to" commits; port lost UI from git history, don't rebuild.
 - [Tailwind v4 bare-var brackets](tailwind-v4-bare-var-brackets.md) — `max-h-[--radix-…]` v3 shorthand silently no-ops on Tailwind v4 (unscrollable dropdowns); convert to `(--var)`, keep `[var(--x)]`.
+- [Invoice PDF three data paths](invoice-pdf-three-paths.md) — invoice PDFs build from 3 separate selects (admin /pdf, client portal, send-email); new money columns must hit ALL three, optional PdfInput fields keep typecheck green.
