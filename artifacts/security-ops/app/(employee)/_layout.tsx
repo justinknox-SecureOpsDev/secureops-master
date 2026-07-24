@@ -10,6 +10,7 @@ import { useChat } from "@/contexts/ChatContext";
 import { useAuth } from "@/contexts/AuthContext";
 import { useFeatures, isEnabled } from "@/hooks/useFeatures";
 import { DemoBanner } from "@/components/DemoBanner";
+import { TAB_HOME, TAB_MY_WORK, TAB_INCIDENTS, TAB_CHAT, TAB_PROFILE, TAB_MORE } from "@/constants/tabNames";
 
 export default function EmployeeLayout() {
   const colors = useColors();
@@ -69,7 +70,7 @@ function EmployeeTabs({ colors, isIOS, isWeb }: { colors: ReturnType<typeof useC
       <Tabs.Screen
         name="home"
         options={{
-          title: "Home",
+          title: TAB_HOME,
           tabBarAccessibilityLabel: "Home tab",
           tabBarIcon: ({ color }) => <Feather name="home" size={22} color={color} />,
         }}
@@ -77,7 +78,7 @@ function EmployeeTabs({ colors, isIOS, isWeb }: { colors: ReturnType<typeof useC
       <Tabs.Screen
         name="my-work"
         options={{
-          title: "My Work",
+          title: TAB_MY_WORK,
           tabBarAccessibilityLabel: "My shifts and clock-in tab",
           tabBarIcon: ({ color }) => <Feather name="briefcase" size={22} color={color} />,
         }}
@@ -85,7 +86,7 @@ function EmployeeTabs({ colors, isIOS, isWeb }: { colors: ReturnType<typeof useC
       <Tabs.Screen
         name="incidents"
         options={{
-          title: "Incidents",
+          title: TAB_INCIDENTS,
           href: isEnabled(flags, "incidents") ? undefined : null,
           tabBarAccessibilityLabel: "Incidents tab",
           tabBarIcon: ({ color }) => <Feather name="alert-triangle" size={22} color={color} />,
@@ -94,7 +95,7 @@ function EmployeeTabs({ colors, isIOS, isWeb }: { colors: ReturnType<typeof useC
       <Tabs.Screen
         name="chat"
         options={{
-          title: "Chat",
+          title: TAB_CHAT,
           href: isEnabled(flags, "chat") ? undefined : null,
           tabBarAccessibilityLabel:
             totalUnread > 0
@@ -108,7 +109,7 @@ function EmployeeTabs({ colors, isIOS, isWeb }: { colors: ReturnType<typeof useC
       <Tabs.Screen
         name="profile"
         options={{
-          title: "Profile",
+          title: TAB_PROFILE,
           tabBarAccessibilityLabel: "My profile tab",
           tabBarIcon: ({ color }) => <Feather name="user" size={22} color={color} />,
         }}
@@ -118,7 +119,7 @@ function EmployeeTabs({ colors, isIOS, isWeb }: { colors: ReturnType<typeof useC
       <Tabs.Screen
         name="more"
         options={{
-          title: "More",
+          title: TAB_MORE,
           href: isSiteManager ? undefined : null,
           tabBarAccessibilityLabel: "More management tools tab",
           tabBarIcon: ({ color }) => <Feather name="grid" size={22} color={color} />,

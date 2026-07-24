@@ -408,7 +408,7 @@ export default function EmployeeClockScreen({ hideTopPad }: { hideTopPad?: boole
           ))}
           {((shiftsList as any[]) ?? []).length === 0 && (
             <Text style={{ color: colors.mutedForeground, fontSize: 12, textAlign: "center", padding: 20 }}>
-              No shifts to clock into right now. You can clock in from 30 minutes before a reserved shift starts — reserve shifts in the Shifts tab.
+              No shifts to clock into right now. You can clock in from 30 minutes before a reserved shift starts — reserve shifts in the My Shifts sub-tab.
             </Text>
           )}
         </View>
