@@ -28,12 +28,22 @@ ios+android) exceeds the cap and gets killed. Split it:
 project + channel + runtime version, NOT bundle/ASC ids directly. Policy is
 `appVersion` so runtimeVersion = `expo.version` at export time.
 
-- App Store installed base (July 2026): **version "1.0" build 9** → runtimeVersion **"1.0"**
-- Repo `app.json` is `1.0.1` (radio keep-alive binary, new native expo-audio module) → auto-OTAs since that bump target "1.0.1" and reach **zero** installed users.
-- For a manual OTA targeting real users: temporarily set `app.json` version to
-  `"1.0"`, re-export (so metadata.json gets runtimeVersion "1.0"), push with
-  `--skip-bundler`, then restore to `"1.0.1"`.
+- App Store installed base (verified July 24 2026 via `eas build:list`): ALL
+  store builds (1–10, incl. live build 10) are **runtime "1.0.0"** — an earlier
+  note here claiming "1.0 build 9" was WRONG ("1.0" ≠ "1.0.0"; exact string
+  match), and an update pushed at "1.0" reached zero devices. Always confirm
+  the runtime with `eas build:list` / `eas build:view`, never from memory.
+- Repo `app.json` is back at `1.0.0` so auto-OTAs-on-deploy reach real devices
+  again; bump to `1.0.1` only WHEN the new native binary is actually built
+  (see RADIO_NATIVE_RELEASE_RUNBOOK.md §1).
+- Native-compat guard: build 10 has LiveKit natives but NOT expo-audio, so
+  `radioMedia.native.ts` loads expo-audio via guarded lazy require
+  (`getExpoAudio()`); keep-alive silently off on old binaries. Any NEW native
+  dep must get the same guard (or a real runtime bump) before 1.0.0 OTAs.
 - Never bump `expo.version` for an OTA-only release; it silently orphans the OTA.
+- Verify what devices are served: `curl https://u.expo.dev/<projectId>` with
+  headers expo-platform / expo-runtime-version / expo-channel-name:production /
+  expo-protocol-version:1 → check `expo-update-id` response header.
 
 `artifacts/security-ops/OTA_RELEASE_RUNBOOK.md` is STALE (retired EAS project
 `452c8467…`, wrong versions); `RADIO_NATIVE_RELEASE_RUNBOOK.md` was corrected

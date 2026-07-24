@@ -40,11 +40,7 @@ import {
   RNE2EEManager,
   AndroidAudioTypePresets,
 } from "@livekit/react-native";
-import {
-  createAudioPlayer,
-  setAudioModeAsync,
-  type AudioPlayer,
-} from "expo-audio";
+import type { AudioPlayer } from "expo-audio";
 import {
   Room,
   RoomEvent,
@@ -59,6 +55,34 @@ import { type RadioMedia, type RadioToken } from "./radioTypes";
 // Patches the global WebRTC + media primitives that livekit-client expects.
 // Must run before any Room is created; importing this module does that once.
 registerGlobals();
+
+/**
+ * OTA-COMPAT GUARD: expo-audio was added to the binary AFTER the 1.0.0 App
+ * Store builds shipped (it arrived with the keep-alive work). runtimeVersion
+ * policy is `appVersion`, so an OTA bundle published for runtime "1.0.0" CAN
+ * land on binaries whose native image has no ExpoAudio module — a top-level
+ * `import { … } from "expo-audio"` would then throw during module evaluation
+ * and crash the whole app at launch. Load it lazily and tolerate absence:
+ * on older binaries the silent keep-alive is simply disabled (the radio still
+ * works in the foreground; locked-phone survival needs the newer binary).
+ */
+type ExpoAudioModule = typeof import("expo-audio");
+let expoAudioModule: ExpoAudioModule | null | undefined;
+function getExpoAudio(): ExpoAudioModule | null {
+  if (expoAudioModule === undefined) {
+    try {
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      expoAudioModule = require("expo-audio") as ExpoAudioModule;
+    } catch (e) {
+      console.warn(
+        "[radio] expo-audio native module unavailable — silent keep-alive disabled",
+        e,
+      );
+      expoAudioModule = null;
+    }
+  }
+  return expoAudioModule;
+}
 
 // How long a freshly-published (still muted) track waits before unmuting so
 // listeners' receiver cryptors are created and keyed before the first audible
@@ -111,12 +135,15 @@ class NativeRadioMedia implements RadioMedia {
     // grants background playback + silent-switch playback for the keep-alive
     // loop; allowsRecording keeps the category compatible with PTT capture.
     try {
-      await setAudioModeAsync({
-        playsInSilentMode: true,
-        shouldPlayInBackground: true,
-        interruptionMode: "mixWithOthers",
-        allowsRecording: true,
-      });
+      const expoAudio = getExpoAudio();
+      if (expoAudio) {
+        await expoAudio.setAudioModeAsync({
+          playsInSilentMode: true,
+          shouldPlayInBackground: true,
+          interruptionMode: "mixWithOthers",
+          allowsRecording: true,
+        });
+      }
     } catch (e) {
       // Keep-alive is best-effort; the radio itself must still work.
       console.warn("[radio] setAudioModeAsync failed", e);
@@ -158,9 +185,12 @@ class NativeRadioMedia implements RadioMedia {
 
   private startKeepAlive(): void {
     if (this.keepAlive) return;
+    const expoAudio = getExpoAudio();
+    // Older 1.0.0 binaries have no ExpoAudio native module — skip silently.
+    if (!expoAudio) return;
     try {
       // eslint-disable-next-line @typescript-eslint/no-require-imports
-      const player = createAudioPlayer(require("../../assets/audio/silence.wav"));
+      const player = expoAudio.createAudioPlayer(require("../../assets/audio/silence.wav"));
       player.loop = true;
       player.play();
       this.keepAlive = player;

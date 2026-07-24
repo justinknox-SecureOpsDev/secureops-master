@@ -15,15 +15,17 @@ Live radio adds **new native modules** to the binary:
 - Android `FOREGROUND_SERVICE_MICROPHONE` + the LiveKit/WebRTC config plugins
 
 `expo-updates` (OTA) can only swap the **JavaScript bundle** — it cannot add
-native code or new OS permissions. The installed `1.0.0` binary (build 2) has
-none of these native modules, so an OTA bundle that calls into LiveKit or
-expo-audio would crash at runtime on those installs.
+native code or new OS permissions. Older `1.0.0` binaries (builds ≤ 9) have
+none of these native modules; build 10 (the live store build as of July 2026)
+has the LiveKit natives but **not** `expo-audio`. That is why
+`radioMedia.native.ts` loads `expo-audio` through the guarded lazy
+`getExpoAudio()` require — a `1.0.0` OTA bundle must run on build 10.
 
-**Therefore: bump the version, build a fresh binary, and submit to the App
-Store.** The runtime-version policy is `appVersion`, so bumping `expo.version`
-to `1.0.1` gives the new binary runtime `1.0.1` — which correctly isolates it
-from the `1.0.0` OTA channel (so a radio JS bundle can never reach an install
-missing the native modules).
+**Therefore: build a fresh binary and submit to the App Store, bumping the
+version in the same change (see §1).** The runtime-version policy is
+`appVersion`, so bumping `expo.version` to `1.0.1` at build time gives the new
+binary runtime `1.0.1`, isolating it from the `1.0.0` OTA channel. Do NOT bump
+the version ahead of the build — see the warning in §1.
 
 ### Locked-phone survival (why the silent keep-alive exists)
 
@@ -61,12 +63,22 @@ production **before** submitting the build, or reviewers/first users will see
 
 ---
 
-## 1. Bump the version
+## 1. Bump the version — ONLY when you actually cut the new binary
 
-In `app.json`, change `expo.version` `1.0.0` → `1.0.1` (already done in-repo). Leave
-`runtimeVersion.policy` as `appVersion`. The iOS `buildNumber` / Android
-`versionCode` are managed by EAS (`eas.json` → `appVersionSource: "remote"` +
-`production.autoIncrement: true`), so you do not edit those by hand.
+In `app.json`, change `expo.version` `1.0.0` → `1.0.1` **as part of building the
+new binary, not before**. Leave `runtimeVersion.policy` as `appVersion`. The iOS
+`buildNumber` / Android `versionCode` are managed by EAS (`eas.json` →
+`appVersionSource: "remote"` + `production.autoIncrement: true`), so you do not
+edit those by hand.
+
+> ⚠️ **July 2026 lesson:** the repo sat at `1.0.1` for days while every live
+> store build was runtime `1.0.0` — so every auto-OTA-on-deploy published to a
+> runtime nobody had, and NO installed device received updates. The version has
+> been returned to `1.0.0` until the new binary actually ships. Additionally,
+> `radioMedia.native.ts` now loads `expo-audio` through a guarded lazy require
+> (`getExpoAudio()`), so a `1.0.0`-runtime OTA bundle is safe on binaries built
+> before expo-audio existed — the silent keep-alive is simply disabled there.
+> Locked-phone survival (steps 6–8 below) still requires the new binary.
 
 ## 2. Build + test a dev client (recommended before the store build)
 

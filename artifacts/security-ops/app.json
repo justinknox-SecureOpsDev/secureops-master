@@ -3,7 +3,7 @@
     "name": "SecureOps Command",
     "slug": "secureops-command",
     "owner": "justin.knox",
-    "version": "1.0.1",
+    "version": "1.0.0",
     "orientation": "portrait",
     "icon": "./assets/images/icon.png",
     "scheme": "secureopscommand",
