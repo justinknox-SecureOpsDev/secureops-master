@@ -197,6 +197,61 @@ export const EMPTY_FILTERS: ShiftFilters = {
   search: "", siteId: "", client: "", status: "upcoming", staffing: "all",
 };
 
+export type ShiftsViewMode = "calendar" | "list";
+
+// Persisted last-used view + filters so returning to /shifts restores the
+// admin's working context instead of resetting to defaults every visit.
+export const SHIFTS_VIEW_STORAGE_KEY = "wcsg.shifts.view";
+export const SHIFTS_FILTERS_STORAGE_KEY = "wcsg.shifts.filters";
+
+type PersistedFilterState = { filters: ShiftFilters; jumpDate: string | null };
+
+export function loadStoredView(): ShiftsViewMode | null {
+  try {
+    const v = localStorage.getItem(SHIFTS_VIEW_STORAGE_KEY);
+    return v === "calendar" || v === "list" ? v : null;
+  } catch { return null; }
+}
+
+export function saveStoredView(v: ShiftsViewMode): void {
+  try { localStorage.setItem(SHIFTS_VIEW_STORAGE_KEY, v); } catch { /* ignore */ }
+}
+
+export function loadStoredFilterState(): PersistedFilterState {
+  try {
+    const raw = localStorage.getItem(SHIFTS_FILTERS_STORAGE_KEY);
+    if (!raw) return { filters: EMPTY_FILTERS, jumpDate: null };
+    const parsed = JSON.parse(raw) as Partial<PersistedFilterState>;
+    const f: Partial<ShiftFilters> = parsed.filters ?? {};
+    return {
+      filters: {
+        search: typeof f.search === "string" ? f.search : EMPTY_FILTERS.search,
+        siteId: typeof f.siteId === "string" ? f.siteId : EMPTY_FILTERS.siteId,
+        client: typeof f.client === "string" ? f.client : EMPTY_FILTERS.client,
+        status: STATUS_OPTIONS.includes(f.status as StatusFilter) ? (f.status as StatusFilter) : EMPTY_FILTERS.status,
+        staffing: (["all", "open", "filled"] as StaffingFilter[]).includes(f.staffing as StaffingFilter)
+          ? (f.staffing as StaffingFilter) : EMPTY_FILTERS.staffing,
+      },
+      jumpDate: typeof parsed.jumpDate === "string" ? parsed.jumpDate : null,
+    };
+  } catch { return { filters: EMPTY_FILTERS, jumpDate: null }; }
+}
+
+export function saveStoredFilterState(state: PersistedFilterState): void {
+  try { localStorage.setItem(SHIFTS_FILTERS_STORAGE_KEY, JSON.stringify(state)); } catch { /* ignore */ }
+}
+
+export function filtersAreDefault(f: ShiftFilters, jumpDate: string | null): boolean {
+  return (
+    f.search === EMPTY_FILTERS.search &&
+    f.siteId === EMPTY_FILTERS.siteId &&
+    f.client === EMPTY_FILTERS.client &&
+    f.status === EMPTY_FILTERS.status &&
+    f.staffing === EMPTY_FILTERS.staffing &&
+    jumpDate === null
+  );
+}
+
 /**
  * Client-side filter pass shared by both views. `siteIndex` resolves live
  * site/client names so renames flow through (denormalized shift snapshots

@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useLocation, useSearch } from "wouter";
 import { api } from "@/lib/api";
@@ -12,6 +12,7 @@ import { ShiftsListView } from "@/components/shifts/ShiftsListView";
 import {
   Shift, SiteRow, PendingClaim, ShiftFilters, EMPTY_FILTERS, STATUS_OPTIONS,
   StatusFilter, StaffingFilter, fmtDateTime, fmtTimeOfDay, levelBadge, seriesKeyFor,
+  loadStoredView, saveStoredView, loadStoredFilterState, saveStoredFilterState, filtersAreDefault,
 } from "@/components/shifts/shared";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -40,20 +41,29 @@ export default function ShiftsAreaPage() {
   // landing because it can scroll to + flash the exact row.
   const params = useMemo(() => new URLSearchParams(searchStr), [searchStr]);
   const explicitView = params.get("view");
+  // ?view= wins; then a deep link (?focus=) lands on the list; otherwise fall
+  // back to the last-used view persisted on-device, defaulting to calendar.
   const view: ViewMode =
     explicitView === "list" ? "list"
     : explicitView === "calendar" ? "calendar"
     : focusShiftId ? "list"
-    : "calendar";
+    : loadStoredView() ?? "calendar";
 
   const setView = (v: ViewMode) => {
+    saveStoredView(v);
     const next = new URLSearchParams(searchStr);
     next.set("view", v);
     navigate(`/shifts?${next.toString()}`, { replace: true });
   };
 
-  const [filters, setFilters] = useState<ShiftFilters>(EMPTY_FILTERS);
-  const [jumpDate, setJumpDate] = useState<string | null>(null);
+  const [{ filters: initialFilters, jumpDate: initialJumpDate }] = useState(loadStoredFilterState);
+  const [filters, setFilters] = useState<ShiftFilters>(initialFilters);
+  const [jumpDate, setJumpDate] = useState<string | null>(initialJumpDate);
+
+  // Persist filters + date jump so returning to /shifts restores the view.
+  useEffect(() => {
+    saveStoredFilterState({ filters, jumpDate });
+  }, [filters, jumpDate]);
 
   const [creating, setCreating] = useState(false);
   const [createInitial, setCreateInitial] = useState<{ startTime: string; endTime: string } | null>(null);
@@ -263,6 +273,16 @@ export default function ShiftsAreaPage() {
             </Button>
           )}
         </div>
+        {!filtersAreDefault(filters, jumpDate) && (
+          <Button
+            variant="ghost"
+            size="sm"
+            className="text-muted-foreground"
+            onClick={() => { setFilters(EMPTY_FILTERS); setJumpDate(null); }}
+          >
+            <X className="w-4 h-4 mr-1" /> Clear filters
+          </Button>
+        )}
       </div>
 
       {claimToast && (
