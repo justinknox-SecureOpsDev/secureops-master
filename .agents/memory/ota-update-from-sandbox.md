@@ -10,12 +10,21 @@ deploy builder has `EXPO_TOKEN` (see `scripts/build-single-vm.mjs`, best-effort
 `eas update:list --branch production` before assuming a manual push is needed.
 
 **Manual push under the 120s bash cap:** a plain `eas update` (Metro export of
-ios+android) exceeds the cap and gets killed. Split it:
-1. `cd artifacts/security-ops && CI=1 timeout 113 npx expo export --platform ios --platform android --output-dir dist`
-   — Metro's on-disk cache persists across killed attempts, so retries converge;
-   with a warm cache the whole export fits in one call.
-2. `EAS_NO_VCS=1 eas update --branch production --skip-bundler --non-interactive --message "..."`
-   — upload-only, finishes in well under 110s.
+ios+android) exceeds the cap and gets killed. Split it — and export ONE
+platform at a time:
+1. `cd artifacts/security-ops && CI=1 timeout 118 npx expo export --platform ios --output-dir dist`
+   then separately `--platform android`. Metro's *transform* cache persists
+   across killed attempts (bundling drops from ~76s cold to ~18s warm), BUT the
+   post-bundle tail (Hermes .hbc compile + asset write) does NOT persist and a
+   two-platform export's tail alone still blows the cap → `dist` ends EMPTY.
+   A single-platform export finishes in one call (~9 MB .hbc each). The old
+   note "with a warm cache the whole two-platform export fits in one call" was
+   WRONG (verified July 25 2026).
+2. Push per platform (each single-platform `dist` overwrites metadata.json, so
+   you can't accumulate both in one dir):
+   `EAS_NO_VCS=1 npx eas update --branch production --skip-bundler --non-interactive --platform ios --message "..."`
+   then again with `--platform android`. Two update groups, one per platform —
+   fine, each device is served its own platform's bundle. Upload-only, <60s each.
 
 **Dead ends (don't retry):**
 - Detached `spawn` from the code_execution notebook does NOT survive — the
@@ -33,9 +42,18 @@ project + channel + runtime version, NOT bundle/ASC ids directly. Policy is
   note here claiming "1.0 build 9" was WRONG ("1.0" ≠ "1.0.0"; exact string
   match), and an update pushed at "1.0" reached zero devices. Always confirm
   the runtime with `eas build:list` / `eas build:view`, never from memory.
-- Repo `app.json` is back at `1.0.0` so auto-OTAs-on-deploy reach real devices
-  again; bump to `1.0.1` only WHEN the new native binary is actually built
-  (see RADIO_NATIVE_RELEASE_RUNBOOK.md §1).
+- As of July 25 2026 the `1.0.1` native binary EXISTS: iOS store build 14
+  (runtime "1.0.1", build number 14) finished that morning, so repo `app.json`
+  is now correctly at `1.0.1` and auto-OTA-on-deploy targets runtime 1.0.1.
+  CONSEQUENCE: the large 1.0.0 installed base (store builds ≤10) no longer
+  receives auto-deploy OTAs — until build 14 rolls out to every user via the
+  App Store, that base must be updated with MANUAL OTAs at runtime 1.0.0.
+- To push an OTA at a runtime that differs from the current repo version
+  (appVersion policy → runtimeVersion = `expo.version`): temporarily edit
+  `app.json` `expo.version` to the target ("1.0.0"), run the export + `eas
+  update` per platform, then RESTORE it to "1.0.1". Never commit the temp
+  change; both HEAD and build 14 are the July-22 reverted radio engine so HEAD
+  is OTA-safe on BOTH 1.0.0 (builds ≤10) and 1.0.1 (build 14).
 - Auto-OTA-on-deploy exports from the DEPLOY SNAPSHOT's app.json, not HEAD —
   a version fix committed after the deployed commit doesn't take effect until
   the next republish, so deploys kept publishing phantom-runtime updates.
