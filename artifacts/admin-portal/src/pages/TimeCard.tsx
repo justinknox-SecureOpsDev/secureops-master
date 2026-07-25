@@ -1,8 +1,8 @@
 import { useEffect, useMemo, useState } from "react";
 import { useSearch, useLocation } from "wouter";
-import { Clock, ChevronLeft, ChevronRight, Loader2, CalendarDays } from "lucide-react";
+import { Clock, ChevronLeft, ChevronRight, Loader2, CalendarDays, FileDown, FileSpreadsheet } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { api } from "@/lib/api";
+import { api, fetchWithAuth } from "@/lib/api";
 
 type CardEntry = {
   id: string;
@@ -69,6 +69,42 @@ export default function TimeCardPage() {
   const [card, setCard] = useState<TimeCard | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [downloading, setDownloading] = useState<"pdf" | "csv" | null>(null);
+
+  const download = async (format: "pdf" | "csv") => {
+    if (!card) return;
+    setError(null);
+    setDownloading(format);
+    try {
+      const qs = new URLSearchParams({ employeeId: card.employeeId, weekStart: card.weekStart, format });
+      const res = await fetchWithAuth(`/api/time-entries/time-card/export?${qs.toString()}`);
+      if (!res.ok) {
+        let msg = `Download failed (${res.status})`;
+        try {
+          const j = await res.json();
+          if (j?.message) msg = j.message;
+          else if (j?.error) msg = j.error;
+        } catch { /* not JSON */ }
+        throw new Error(msg);
+      }
+      const blob = await res.blob();
+      const disp = res.headers.get("Content-Disposition") ?? "";
+      const m = /filename="?([^";]+)"?/.exec(disp);
+      const filename = m?.[1] ?? `time-card-${card.weekStart}.${format}`;
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = filename;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(url);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Download failed.");
+    } finally {
+      setDownloading(null);
+    }
+  };
 
   useEffect(() => {
     api<{ rows: UserRow[] }>("/admin/tables/users?limit=1000")
@@ -166,6 +202,33 @@ export default function TimeCardPage() {
             aria-label="Next week"
           >
             <ChevronRight className="h-4 w-4" aria-hidden="true" />
+          </Button>
+        </div>
+
+        <div className="flex items-center gap-2 sm:ml-auto">
+          <Button
+            variant="outline"
+            size="sm"
+            disabled={!card || loading || downloading !== null}
+            onClick={() => download("pdf")}
+            aria-label="Download PDF time card"
+          >
+            {downloading === "pdf"
+              ? <Loader2 className="h-4 w-4 animate-spin mr-1.5" aria-hidden="true" />
+              : <FileDown className="h-4 w-4 mr-1.5" aria-hidden="true" />}
+            PDF
+          </Button>
+          <Button
+            variant="outline"
+            size="sm"
+            disabled={!card || loading || downloading !== null}
+            onClick={() => download("csv")}
+            aria-label="Download CSV time card"
+          >
+            {downloading === "csv"
+              ? <Loader2 className="h-4 w-4 animate-spin mr-1.5" aria-hidden="true" />
+              : <FileSpreadsheet className="h-4 w-4 mr-1.5" aria-hidden="true" />}
+            CSV
           </Button>
         </div>
       </div>

@@ -10,6 +10,7 @@ import { stripTimeEntryBillRateForRole } from "../lib/financeVisibility";
 import { canManageSite, getManagedSiteIds } from "../lib/siteManagerAuthz";
 import { broadcastOfficerLeft, broadcastOfficerJoined } from "../lib/wsManager";
 import { businessTimeZone, businessDateIso, businessDateToUtc, businessDayWindow, startOfBusinessWeek } from "../lib/businessTime";
+import { renderTimeCardPdf, buildTimeCardCsv } from "../lib/timeCardPdf";
 
 const router: IRouter = Router();
 
@@ -848,27 +849,48 @@ router.get("/time-entries/active", requireStaff, async (req, res): Promise<void>
 // card; everyone else (employees, site managers) is forced to their own card.
 // requireStaff already excludes client-portal users. No finance fields are
 // returned — this surface is hours-only by design.
-router.get("/time-entries/time-card", requireStaff, async (req, res): Promise<void> => {
-  const role = req.user!.role;
-  const { employeeId: qEmployeeId, weekStart: qWeekStart } = req.query as Record<string, string | undefined>;
+// Shared time-card builder — used by the JSON route AND the PDF/CSV export
+// routes so exported totals always match the on-screen card exactly (same
+// bucketing, same payroll rounding). Returns null when the employee doesn't
+// exist; throws TimeCardBadRequest on a malformed weekStart.
+export class TimeCardBadRequest extends Error {}
 
-  let targetEmployeeId = req.user!.userId;
-  if (qEmployeeId && qEmployeeId !== req.user!.userId) {
-    if (role !== "admin" && role !== "dispatcher") {
-      res.status(403).json({ error: "Forbidden", message: "You can only view your own time card." });
-      return;
-    }
-    targetEmployeeId = qEmployeeId;
-  }
+export type TimeCardEntry = {
+  id: string;
+  clockInTime: Date;
+  clockOutTime: Date | null;
+  hoursWorked: number | null;
+  approvalStatus: string;
+  siteName: string | null;
+  shiftTitle: string | null;
+  open: boolean;
+};
 
+export type TimeCardData = {
+  employeeId: string;
+  employeeName: string;
+  timezone: string;
+  weekStart: string;
+  weekEnd: string;
+  prevWeekStart: string;
+  nextWeekStart: string;
+  days: { date: string; entries: TimeCardEntry[]; totalHours: number }[];
+  totalHours: number;
+  approvedHours: number;
+  pendingHours: number;
+};
+
+export async function buildTimeCard(
+  targetEmployeeId: string,
+  qWeekStart: string | undefined,
+): Promise<TimeCardData | null> {
   const tz = businessTimeZone();
   // Anchor instant: noon UTC on the requested date lands safely inside that
   // business day for any US timezone; default is "now".
   let anchor = new Date();
   if (qWeekStart) {
     if (!/^\d{4}-\d{2}-\d{2}$/.test(qWeekStart)) {
-      res.status(400).json({ error: "Bad Request", message: "weekStart must be YYYY-MM-DD" });
-      return;
+      throw new TimeCardBadRequest("weekStart must be YYYY-MM-DD");
     }
     anchor = new Date(businessDateToUtc(qWeekStart, tz).getTime() + 12 * 3600_000);
   }
@@ -889,10 +911,7 @@ router.get("/time-entries/time-card", requireStaff, async (req, res): Promise<vo
     .select({ firstName: usersTable.firstName, lastName: usersTable.lastName })
     .from(usersTable)
     .where(eq(usersTable.id, targetEmployeeId));
-  if (!targetUser) {
-    res.status(404).json({ error: "Not Found", message: "Employee not found" });
-    return;
-  }
+  if (!targetUser) return null;
 
   const rows = await db
     .select({
@@ -914,17 +933,7 @@ router.get("/time-entries/time-card", requireStaff, async (req, res): Promise<vo
     ))
     .orderBy(timeEntriesTable.clockInTime);
 
-  type CardEntry = {
-    id: string;
-    clockInTime: Date;
-    clockOutTime: Date | null;
-    hoursWorked: number | null;
-    approvalStatus: string;
-    siteName: string | null;
-    shiftTitle: string | null;
-    open: boolean;
-  };
-  const byDay = new Map<string, { entries: CardEntry[]; rawTotal: number }>();
+  const byDay = new Map<string, { entries: TimeCardEntry[]; rawTotal: number }>();
   for (const d of dayDates) byDay.set(d, { entries: [], rawTotal: 0 });
 
   let rawTotal = 0;
@@ -955,7 +964,7 @@ router.get("/time-entries/time-card", requireStaff, async (req, res): Promise<vo
   }
 
   const round2 = (n: number) => Math.round(n * 100) / 100;
-  res.json({
+  return {
     employeeId: targetEmployeeId,
     employeeName: `${targetUser.firstName} ${targetUser.lastName}`,
     timezone: tz,
@@ -970,7 +979,85 @@ router.get("/time-entries/time-card", requireStaff, async (req, res): Promise<vo
     totalHours: round2(rawTotal),
     approvedHours: round2(rawApproved),
     pendingHours: round2(rawPending),
-  });
+  };
+}
+
+// Resolve which employee's card the caller may see. Admins and dispatchers
+// may pass ?employeeId to view anyone; everyone else is forced to self.
+// Returns null after writing a 403 when the caller isn't allowed.
+function resolveTimeCardTarget(
+  req: { user?: { userId: string; role: string } },
+  res: { status: (n: number) => { json: (b: unknown) => unknown } },
+  qEmployeeId: string | undefined,
+): string | null {
+  const role = req.user!.role;
+  if (qEmployeeId && qEmployeeId !== req.user!.userId) {
+    if (role !== "admin" && role !== "dispatcher") {
+      res.status(403).json({ error: "Forbidden", message: "You can only view your own time card." });
+      return null;
+    }
+    return qEmployeeId;
+  }
+  return req.user!.userId;
+}
+
+router.get("/time-entries/time-card", requireStaff, async (req, res): Promise<void> => {
+  const { employeeId: qEmployeeId, weekStart: qWeekStart } = req.query as Record<string, string | undefined>;
+  const targetEmployeeId = resolveTimeCardTarget(req, res, qEmployeeId);
+  if (!targetEmployeeId) return;
+  try {
+    const card = await buildTimeCard(targetEmployeeId, qWeekStart);
+    if (!card) {
+      res.status(404).json({ error: "Not Found", message: "Employee not found" });
+      return;
+    }
+    res.json(card);
+  } catch (err) {
+    if (err instanceof TimeCardBadRequest) {
+      res.status(400).json({ error: "Bad Request", message: err.message });
+      return;
+    }
+    throw err;
+  }
+});
+
+// PDF / CSV export of the weekly time card — same authz and same shared
+// builder as the JSON route, so exported totals always match the screen.
+router.get("/time-entries/time-card/export", requireStaff, async (req, res): Promise<void> => {
+  const { employeeId: qEmployeeId, weekStart: qWeekStart, format } = req.query as Record<string, string | undefined>;
+  if (format !== "pdf" && format !== "csv") {
+    res.status(400).json({ error: "Bad Request", message: "format must be pdf or csv" });
+    return;
+  }
+  const targetEmployeeId = resolveTimeCardTarget(req, res, qEmployeeId);
+  if (!targetEmployeeId) return;
+
+  let card: TimeCardData | null;
+  try {
+    card = await buildTimeCard(targetEmployeeId, qWeekStart);
+  } catch (err) {
+    if (err instanceof TimeCardBadRequest) {
+      res.status(400).json({ error: "Bad Request", message: err.message });
+      return;
+    }
+    throw err;
+  }
+  if (!card) {
+    res.status(404).json({ error: "Not Found", message: "Employee not found" });
+    return;
+  }
+
+  const safeName = card.employeeName.trim().replace(/[^A-Za-z0-9._-]+/g, "-").replace(/^-+|-+$/g, "") || "employee";
+  const base = `time-card-${safeName}-${card.weekStart}`;
+  if (format === "csv") {
+    res.setHeader("Content-Type", "text/csv; charset=utf-8");
+    res.setHeader("Content-Disposition", `attachment; filename="${base}.csv"`);
+    res.status(200).send(buildTimeCardCsv(card));
+    return;
+  }
+  res.setHeader("Content-Type", "application/pdf");
+  res.setHeader("Content-Disposition", `attachment; filename="${base}.pdf"`);
+  renderTimeCardPdf(res, card);
 });
 
 // Admin patches a missing clock-out on an existing time entry.
