@@ -111,6 +111,8 @@ import * as webRTCMock from "@livekit/react-native-webrtc";
 // evaluation needs registerGlobals()' polyfills (DOMException, …) on Hermes,
 // so production code may only require it via getLiveKitClient().
 import * as liveKitClientMock from "livekit-client";
+// expo-audio (silent keep-alive) also loads through the seam (getExpoAudio).
+import * as expoAudioMock from "expo-audio";
 
 import { __setNativeRequireForTest } from "../nativeModules";
 import { createRadioMedia } from "../radioMedia.native";
@@ -119,6 +121,7 @@ __setNativeRequireForTest((name) => {
   if (name === "@livekit/react-native") return liveKitMock;
   if (name === "@livekit/react-native-webrtc") return webRTCMock;
   if (name === "livekit-client") return liveKitClientMock;
+  if (name === "expo-audio") return expoAudioMock;
   throw new Error(`unexpected native require: ${name}`);
 });
 

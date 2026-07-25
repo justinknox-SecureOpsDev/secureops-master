@@ -99,7 +99,7 @@ together with the only files allowed to `require()` each of them:
 | --- | --- | --- |
 | `@livekit/react-native` | build ≥ 10 only | `components/radio/nativeModules.ts` (`getLiveKitNative()`) |
 | `@livekit/react-native-webrtc` | build ≥ 10 only | `components/radio/nativeModules.ts` (`getLiveKitWebRTC()`) |
-| `expo-audio` | NO current store build | `components/radio/radioMedia.native.ts` (`getExpoAudio()`) |
+| `expo-audio` | NO current store build | `components/radio/nativeModules.ts` (`getExpoAudio()`) |
 | `livekit-client` | every binary (JS-only) — but see below | `components/radio/nativeModules.ts` (`getLiveKitClient()`) |
 
 > **Why `livekit-client` is gated even though it ships in every bundle:** it is
