@@ -93,10 +93,8 @@ beforeEach(() => {
   hoisted.claims = [];
   hoisted.putCalls = [];
   hoisted.putShouldFail = false;
-  // The view toggle persists the last-used view to localStorage; without a
-  // reset, a test that switches to the list view leaks that default into
-  // later tests that expect the calendar view, breaking them under a full run.
-  localStorage.clear();
+  // localStorage/sessionStorage are reset globally in vitest.setup.ts before
+  // each test, so persisted view/filter state can't leak between tests here.
   vi.clearAllMocks();
 });
 

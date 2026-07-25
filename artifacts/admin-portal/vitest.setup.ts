@@ -1,4 +1,4 @@
-import { afterEach } from "vitest";
+import { afterEach, beforeEach } from "vitest";
 import { cleanup } from "@testing-library/react";
 
 // jsdom doesn't implement scrollIntoView; the deep-link focus hook calls it.
@@ -20,6 +20,14 @@ if (!window.matchMedia) {
     dispatchEvent: () => false,
   });
 }
+
+// Reset persisted browser state before each test so no test depends on
+// another's leftover UI preferences (view mode, filters, jump date, etc.)
+// that components read from localStorage/sessionStorage on mount.
+beforeEach(() => {
+  localStorage.clear();
+  sessionStorage.clear();
+});
 
 afterEach(() => {
   cleanup();
