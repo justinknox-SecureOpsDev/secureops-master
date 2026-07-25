@@ -7,10 +7,12 @@ import {
   usersTable,
   licensesTable,
   revokedTokensTable,
+  timeEntriesTable,
 } from "@workspace/db";
 import {
   sendLicenseExpiryReminders,
   cleanupExpiredRevokedTokens,
+  sendUnconfirmedEntryReminders,
 } from "../lib/scheduledJobs";
 
 // Tag everything so cleanup can scope precisely and never trample
@@ -167,6 +169,85 @@ describe("sendLicenseExpiryReminders — tier bookkeeping is idempotent", () => 
     expect(after.lastReminderTier).toBeNull();
     expect(after.lastReminderForExpiry).toBeNull();
     expect(after.lastReminderSentAt).toBeNull();
+  });
+});
+
+describe("sendUnconfirmedEntryReminders", () => {
+  async function insertEntry(opts: {
+    employeeId: string;
+    clockOutAgoMs: number | null;
+    confirmationStatus?: string | null;
+    reminderSentAt?: Date | null;
+  }): Promise<string> {
+    const now = Date.now();
+    const clockOut =
+      opts.clockOutAgoMs === null ? null : new Date(now - opts.clockOutAgoMs);
+    const clockIn = new Date(now - (opts.clockOutAgoMs ?? 0) - 8 * 60 * 60 * 1000);
+    const [row] = await db
+      .insert(timeEntriesTable)
+      .values({
+        employeeId: opts.employeeId,
+        clockInTime: clockIn,
+        clockOutTime: clockOut,
+        confirmationStatus:
+          opts.confirmationStatus === undefined
+            ? "awaiting_confirmation"
+            : opts.confirmationStatus,
+        confirmationReminderSentAt: opts.reminderSentAt ?? null,
+        notes: TAG,
+      })
+      .returning({ id: timeEntriesTable.id });
+    return row.id;
+  }
+
+  async function readReminderStamp(id: string): Promise<Date | null> {
+    const [row] = await db
+      .select({ stamp: timeEntriesTable.confirmationReminderSentAt })
+      .from(timeEntriesTable)
+      .where(eq(timeEntriesTable.id, id))
+      .limit(1);
+    return row.stamp;
+  }
+
+  afterAll(async () => {
+    await db.execute(sql`DELETE FROM time_entries WHERE notes = ${TAG}`);
+  });
+
+  it("stamps an entry awaiting confirmation for over an hour, exactly once", async () => {
+    const empId = await makeActiveEmployee("uc-a");
+    const staleId = await insertEntry({ employeeId: empId, clockOutAgoMs: 2 * 60 * 60 * 1000 });
+
+    await sendUnconfirmedEntryReminders();
+    const first = await readReminderStamp(staleId);
+    expect(first).not.toBeNull();
+
+    // Second tick must not move the stamp (one reminder per entry, ever).
+    await sendUnconfirmedEntryReminders();
+    const second = await readReminderStamp(staleId);
+    expect(second?.getTime()).toBe(first?.getTime());
+  });
+
+  it("skips recent, confirmed, non-applicable, and still-open entries", async () => {
+    const empId = await makeActiveEmployee("uc-b");
+    const recentId = await insertEntry({ employeeId: empId, clockOutAgoMs: 10 * 60 * 1000 });
+    const confirmedId = await insertEntry({
+      employeeId: empId,
+      clockOutAgoMs: 2 * 60 * 60 * 1000,
+      confirmationStatus: "confirmed",
+    });
+    const legacyId = await insertEntry({
+      employeeId: empId,
+      clockOutAgoMs: 2 * 60 * 60 * 1000,
+      confirmationStatus: null,
+    });
+    const openId = await insertEntry({ employeeId: empId, clockOutAgoMs: null });
+
+    await sendUnconfirmedEntryReminders();
+
+    expect(await readReminderStamp(recentId)).toBeNull();
+    expect(await readReminderStamp(confirmedId)).toBeNull();
+    expect(await readReminderStamp(legacyId)).toBeNull();
+    expect(await readReminderStamp(openId)).toBeNull();
   });
 });
 

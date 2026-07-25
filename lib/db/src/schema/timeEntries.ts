@@ -83,6 +83,11 @@ export const timeEntriesTable = pgTable("time_entries", {
   // and keeping them around preserves the audit trail.
   clockOutReminder1SentAt: timestamp("clock_out_reminder1_sent_at", { withTimezone: true }),
   clockOutReminder2SentAt: timestamp("clock_out_reminder2_sent_at", { withTimezone: true }),
+  // Confirm-your-shift reminder: stamped once when the officer has left an
+  // entry in 'awaiting_confirmation' for over an hour after clock-out and we
+  // nudged them by push (+ SMS if opted in). One reminder per entry, ever —
+  // the job only selects rows where this is NULL.
+  confirmationReminderSentAt: timestamp("confirmation_reminder_sent_at", { withTimezone: true }),
   // External-sync fields for Event Staff Scheduler integration.
   // externalId = the scheduler's clock-event ID; used for idempotent upsert.
   // externalSource = 'scheduler' (only known external source).

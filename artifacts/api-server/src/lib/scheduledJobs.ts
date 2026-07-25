@@ -634,6 +634,106 @@ export async function sendPendingClaimReminders(): Promise<void> {
 }
 
 /**
+ * Unconfirmed time-entry reminder. Officers must review + confirm their
+ * recorded times after clock-out before an entry enters the admin approval
+ * queue. If they close the app without confirming, the entry sits in
+ * `awaiting_confirmation` until the next Clock-tab visit — this job nudges
+ * them by push (+ SMS if opted in) once the entry has been awaiting for
+ * more than an hour.
+ *
+ * One reminder per entry, ever: the atomic UPDATE…RETURNING stamp on
+ * `confirmationReminderSentAt` debounces overlapping ticks and multiple
+ * instances. Entries confirmed (or force-cleared by an admin) before the
+ * tick are excluded by the `confirmation_status='awaiting_confirmation'`
+ * filter; the same predicate in the claim WHERE clause means a confirm
+ * racing the tick also suppresses the reminder.
+ */
+const CONFIRMATION_REMINDER_DELAY_MS = HOUR_MS;
+
+export async function sendUnconfirmedEntryReminders(): Promise<void> {
+  try {
+    const cutoff = new Date(Date.now() - CONFIRMATION_REMINDER_DELAY_MS);
+
+    const stale = await db
+      .select({
+        entryId: timeEntriesTable.id,
+        employeeId: timeEntriesTable.employeeId,
+        clockOutTime: timeEntriesTable.clockOutTime,
+        siteName: sitesTable.name,
+      })
+      .from(timeEntriesTable)
+      .leftJoin(sitesTable, eq(sitesTable.id, timeEntriesTable.siteId))
+      .where(
+        and(
+          eq(timeEntriesTable.confirmationStatus, "awaiting_confirmation"),
+          lt(timeEntriesTable.clockOutTime, cutoff),
+          isNull(timeEntriesTable.confirmationReminderSentAt),
+        ),
+      );
+
+    if (stale.length === 0) return;
+
+    let totalSent = 0;
+    for (const entry of stale) {
+      // Atomically claim this entry so overlapping ticks / a second instance
+      // can never double-send, and a confirm racing the tick suppresses it.
+      const claimed = await db
+        .update(timeEntriesTable)
+        .set({ confirmationReminderSentAt: new Date() })
+        .where(
+          and(
+            eq(timeEntriesTable.id, entry.entryId),
+            eq(timeEntriesTable.confirmationStatus, "awaiting_confirmation"),
+            isNull(timeEntriesTable.confirmationReminderSentAt),
+          ),
+        )
+        .returning({ id: timeEntriesTable.id });
+      if (claimed.length === 0) continue;
+
+      const where = entry.siteName ? ` at ${entry.siteName}` : "";
+      const pushBody = `Your shift${where} is waiting on your time confirmation. Open the My Work tab to review and confirm your hours.`;
+      const smsBody = `SecureOps: Please confirm your recorded hours for your recent shift${where}. Open the app's My Work tab to review and confirm.`;
+
+      let pushOk = false;
+      try {
+        await sendPushToUsers([entry.employeeId], {
+          title: "⏱️ Confirm your shift times",
+          body: pushBody,
+          data: { type: "confirm_time_entry_reminder", timeEntryId: entry.entryId },
+        });
+        pushOk = true;
+      } catch (err) {
+        logger.warn({ err, timeEntryId: entry.entryId }, "[confirm-entry-reminder] push send failed");
+      }
+
+      try {
+        await sendSmsToUsers([entry.employeeId], smsBody);
+      } catch (err) {
+        logger.warn({ err, timeEntryId: entry.entryId }, "[confirm-entry-reminder] sms send failed");
+      }
+
+      if (!pushOk) {
+        // Roll back the stamp so the next tick retries (push is the primary
+        // channel; SMS-only delivery still rolls back to preserve retries).
+        await db
+          .update(timeEntriesTable)
+          .set({ confirmationReminderSentAt: null })
+          .where(eq(timeEntriesTable.id, entry.entryId))
+          .catch(() => {/* swallow */});
+        continue;
+      }
+      totalSent += 1;
+    }
+
+    if (totalSent > 0) {
+      logger.info({ totalSent }, "Sent unconfirmed time-entry reminders");
+    }
+  } catch (err) {
+    logger.error({ err }, "[confirm-entry-reminder] job failed");
+  }
+}
+
+/**
  * Weekly time-entry approval reminder. Runs hourly but self-gates: only
  * fires on Fridays between 17:00 and 19:00 in the business timezone.
  *
@@ -1528,6 +1628,10 @@ export function startScheduledJobs(intervalMs: number = HOUR_MS): NodeJS.Timeout
   // Idempotent via shift_assignments.claim_reminder_sent_at.
   logger.info("Scheduled job: pending-claim-reminders (hourly)");
   schedule("pending-claim-reminders", sendPendingClaimReminders, intervalMs);
+  // Unconfirmed time-entry reminders — every 5 minutes so an officer is
+  // nudged close to the 1-hour mark after clock-out. One reminder per
+  // entry, ever (atomic claim on confirmation_reminder_sent_at).
+  schedule("confirm-entry-reminders", sendUnconfirmedEntryReminders, 5 * MIN_MS);
   // Weekly time-entry approval reminders — hourly tick, self-gates to
   // Fridays 17:00–19:00 business timezone. Nudges site managers who have
   // unapproved time entries for the current pay week.
