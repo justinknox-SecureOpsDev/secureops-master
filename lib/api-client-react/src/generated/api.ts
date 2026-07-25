@@ -107,6 +107,7 @@ import type {
   GetShiftsParams,
   GetSitesParams,
   GetSubcontractorEntriesParams,
+  GetTimeCardParams,
   GetTimeEntriesParams,
   HealthStatus,
   Incident,
@@ -164,6 +165,7 @@ import type {
   SubmitApplicationRequest,
   SubmitOnboardingRequest,
   SubmitPayRunViaPncBody,
+  TimeCard,
   TimeEntry,
   TriggerEmergency201,
   TriggerEmergencyBody,
@@ -4668,6 +4670,106 @@ export function useGetActiveTimeEntry<
   request?: SecondParameter<typeof customFetch>;
 }): UseQueryResult<TData, TError> & { queryKey: QueryKey } {
   const queryOptions = getGetActiveTimeEntryQueryOptions(options);
+
+  const query = useQuery(queryOptions) as UseQueryResult<TData, TError> & {
+    queryKey: QueryKey;
+  };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
+
+/**
+ * Human-readable weekly time card. Week boundaries follow the business
+timezone (PAYROLL_TIMEZONE, Monday-start weeks); entries are bucketed
+into the day containing their clock-in, matching payroll conventions.
+Employees and site managers see their own card only; admins and
+dispatchers may pass employeeId to view any employee's card.
+
+ * @summary Weekly time card (per-day entries, daily totals, weekly total)
+ */
+export const getGetTimeCardUrl = (params?: GetTimeCardParams) => {
+  const normalizedParams = new URLSearchParams();
+
+  Object.entries(params || {}).forEach(([key, value]) => {
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? "null" : value.toString());
+    }
+  });
+
+  const stringifiedParams = normalizedParams.toString();
+
+  return stringifiedParams.length > 0
+    ? `/api/time-entries/time-card?${stringifiedParams}`
+    : `/api/time-entries/time-card`;
+};
+
+export const getTimeCard = async (
+  params?: GetTimeCardParams,
+  options?: RequestInit,
+): Promise<TimeCard> => {
+  return customFetch<TimeCard>(getGetTimeCardUrl(params), {
+    ...options,
+    method: "GET",
+  });
+};
+
+export const getGetTimeCardQueryKey = (params?: GetTimeCardParams) => {
+  return [`/api/time-entries/time-card`, ...(params ? [params] : [])] as const;
+};
+
+export const getGetTimeCardQueryOptions = <
+  TData = Awaited<ReturnType<typeof getTimeCard>>,
+  TError = ErrorType<unknown>,
+>(
+  params?: GetTimeCardParams,
+  options?: {
+    query?: UseQueryOptions<
+      Awaited<ReturnType<typeof getTimeCard>>,
+      TError,
+      TData
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+) => {
+  const { query: queryOptions, request: requestOptions } = options ?? {};
+
+  const queryKey = queryOptions?.queryKey ?? getGetTimeCardQueryKey(params);
+
+  const queryFn: QueryFunction<Awaited<ReturnType<typeof getTimeCard>>> = ({
+    signal,
+  }) => getTimeCard(params, { signal, ...requestOptions });
+
+  return { queryKey, queryFn, ...queryOptions } as UseQueryOptions<
+    Awaited<ReturnType<typeof getTimeCard>>,
+    TError,
+    TData
+  > & { queryKey: QueryKey };
+};
+
+export type GetTimeCardQueryResult = NonNullable<
+  Awaited<ReturnType<typeof getTimeCard>>
+>;
+export type GetTimeCardQueryError = ErrorType<unknown>;
+
+/**
+ * @summary Weekly time card (per-day entries, daily totals, weekly total)
+ */
+
+export function useGetTimeCard<
+  TData = Awaited<ReturnType<typeof getTimeCard>>,
+  TError = ErrorType<unknown>,
+>(
+  params?: GetTimeCardParams,
+  options?: {
+    query?: UseQueryOptions<
+      Awaited<ReturnType<typeof getTimeCard>>,
+      TError,
+      TData
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+): UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+  const queryOptions = getGetTimeCardQueryOptions(params, options);
 
   const query = useQuery(queryOptions) as UseQueryResult<TData, TError> & {
     queryKey: QueryKey;

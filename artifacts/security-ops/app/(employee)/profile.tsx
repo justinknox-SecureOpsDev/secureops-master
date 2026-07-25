@@ -650,6 +650,22 @@ export default function EmployeeProfileScreen() {
           </View>
           <Feather name="chevron-right" size={16} color={colors.mutedForeground} />
         </TouchableOpacity>
+        <TouchableOpacity
+          onPress={() => router.push("/time-card" as any)}
+          style={[styles.actionRow, { borderBottomColor: colors.border }]}
+          accessibilityRole="button"
+          accessibilityLabel="My time card"
+          accessibilityHint="View your weekly hours worked day by day"
+        >
+          <Feather name="clock" size={16} color={colors.accent} />
+          <View style={{ flex: 1 }}>
+            <Text style={{ color: colors.foreground, fontSize: 14, fontWeight: "600" }}>My time card</Text>
+            <Text style={{ color: colors.mutedForeground, fontSize: 12, marginTop: 2 }}>
+              Weekly hours worked, day by day, with approval status
+            </Text>
+          </View>
+          <Feather name="chevron-right" size={16} color={colors.mutedForeground} />
+        </TouchableOpacity>
         {isEnabled(flags, "payroll") && (
           <TouchableOpacity
             onPress={() => router.push("/paystubs" as any)}

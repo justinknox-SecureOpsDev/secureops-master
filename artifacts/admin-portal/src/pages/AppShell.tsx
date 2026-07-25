@@ -7,7 +7,7 @@ import {
   Radio as RadioIcon, Radar, MessageCircle, Users as UsersIcon,
   Briefcase, Calculator, Shield, Settings, CalendarRange, Menu, X, Building2,
   ArrowLeftRight, GraduationCap, LifeBuoy, FormInput, BarChart3, LayoutDashboard,
-  SlidersHorizontal,
+  SlidersHorizontal, Clock,
   type LucideIcon,
 } from "lucide-react";
 import { useAuth } from "@/lib/auth";
@@ -230,6 +230,7 @@ export function buildNavGroups(
       { href: "/analytics", label: "Analytics", Icon: BarChart3 },
       { href: "/payroll/board", label: "Payroll Board", Icon: Wallet, feature: "payroll" },
       { href: "/payroll/pay-run", label: "Pay Run", Icon: Banknote, feature: "payroll" },
+      { href: "/payroll/time-card", label: "Time Cards", Icon: Clock },
       { href: "/invoices/board", label: "Invoice Board", Icon: Receipt, feature: "invoicing" },
       { href: "/tables/invoices", label: "Invoices (raw)", Icon: Receipt, feature: "invoicing" },
       { href: "/tables/payroll_entries", label: "Payroll entries", Icon: Wallet, feature: "payroll" },

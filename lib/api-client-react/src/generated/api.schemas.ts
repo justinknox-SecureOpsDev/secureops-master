@@ -1008,6 +1008,49 @@ export interface TimeEntry {
   createdAt: string;
 }
 
+export type TimeCardEntryApprovalStatus =
+  (typeof TimeCardEntryApprovalStatus)[keyof typeof TimeCardEntryApprovalStatus];
+
+export const TimeCardEntryApprovalStatus = {
+  pending: "pending",
+  approved: "approved",
+  rejected: "rejected",
+} as const;
+
+export interface TimeCardEntry {
+  id: string;
+  clockInTime: string;
+  clockOutTime?: string | null;
+  hoursWorked?: number | null;
+  approvalStatus: TimeCardEntryApprovalStatus;
+  siteName?: string | null;
+  shiftTitle?: string | null;
+  /** True while the entry has no clock-out yet (hours not counted). */
+  open: boolean;
+}
+
+export interface TimeCardDay {
+  date: string;
+  entries: TimeCardEntry[];
+  totalHours: number;
+}
+
+export interface TimeCard {
+  employeeId: string;
+  employeeName?: string;
+  timezone: string;
+  /** Monday of the week (business timezone). */
+  weekStart: string;
+  /** Sunday of the week (business timezone, inclusive). */
+  weekEnd: string;
+  prevWeekStart: string;
+  nextWeekStart: string;
+  days: TimeCardDay[];
+  totalHours: number;
+  approvedHours: number;
+  pendingHours: number;
+}
+
 /**
  * Clock in. Resolution priority: (1) if shiftId is provided, the entry is linked to
 that shift (no geo check); (2) else if siteId is provided, the entry is linked to
@@ -2732,6 +2775,17 @@ export type GetTimeEntriesParams = {
   shiftId?: string;
   from?: string;
   to?: string;
+};
+
+export type GetTimeCardParams = {
+  /**
+   * Target employee (admin/dispatcher only; defaults to the caller).
+   */
+  employeeId?: string;
+  /**
+   * Any date (YYYY-MM-DD) inside the desired week; snapped to that week's Monday. Defaults to the current week.
+   */
+  weekStart?: string;
 };
 
 export type GetPayrollEntriesParams = {

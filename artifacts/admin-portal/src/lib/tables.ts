@@ -530,6 +530,14 @@ export const TABLES: TableDescriptor[] = [
           linkTo: { table: "employees", filterField: "userId" },
         },
       },
+      {
+        key: "__timeCard", label: "Time Card", type: "text", readonly: true,
+        derived: {
+          fromField: "employeeId",
+          render: (u) => (u ? "View time card" : ""),
+          linkRoute: (employeeId) => `/payroll/time-card?employeeId=${encodeURIComponent(employeeId)}`,
+        },
+      },
       // shiftId is nullable in the DB (geo clock-in entries have no scheduled shift). Optional on import.
       { key: "shiftId", label: "Shift", type: "fk", fkTable: "shifts", fkLabel: "title", importResolveByLabel: true, importExample: "Leave blank if importing ad-hoc hours" },
       // siteId — handy when the spreadsheet has a "Location"/"Site" column instead of a shift.

@@ -9,6 +9,7 @@ import { buildTimeEntryAuditMetadata, timeEntrySnapshot } from "../lib/timeEntry
 import { stripTimeEntryBillRateForRole } from "../lib/financeVisibility";
 import { canManageSite, getManagedSiteIds } from "../lib/siteManagerAuthz";
 import { broadcastOfficerLeft, broadcastOfficerJoined } from "../lib/wsManager";
+import { businessTimeZone, businessDateIso, businessDateToUtc, businessDayWindow, startOfBusinessWeek } from "../lib/businessTime";
 
 const router: IRouter = Router();
 
@@ -810,6 +811,144 @@ router.get("/time-entries/active", requireStaff, async (req, res): Promise<void>
   // the previous cached value.
   if (!entry) { res.json(null); return; }
   res.json(stripTimeEntryBillRateForRole(req.user!.role, entry));
+});
+
+// Weekly time card — a human-readable per-week view of one employee's hours.
+//
+// Week boundaries follow the business timezone (PAYROLL_TIMEZONE, Monday-start
+// weeks via startOfBusinessWeek) and entries are bucketed into the business
+// day containing their clock-in — the same convention payroll uses to qualify
+// entries, so the time card never disagrees with payroll totals. Hours math
+// mirrors /payroll/generate exactly: per-entry stored hoursWorked are summed
+// raw, then the total is rounded to 2dp at the end.
+//
+// Authz: admins and dispatchers may pass ?employeeId to view any employee's
+// card; everyone else (employees, site managers) is forced to their own card.
+// requireStaff already excludes client-portal users. No finance fields are
+// returned — this surface is hours-only by design.
+router.get("/time-entries/time-card", requireStaff, async (req, res): Promise<void> => {
+  const role = req.user!.role;
+  const { employeeId: qEmployeeId, weekStart: qWeekStart } = req.query as Record<string, string | undefined>;
+
+  let targetEmployeeId = req.user!.userId;
+  if (qEmployeeId && qEmployeeId !== req.user!.userId) {
+    if (role !== "admin" && role !== "dispatcher") {
+      res.status(403).json({ error: "Forbidden", message: "You can only view your own time card." });
+      return;
+    }
+    targetEmployeeId = qEmployeeId;
+  }
+
+  const tz = businessTimeZone();
+  // Anchor instant: noon UTC on the requested date lands safely inside that
+  // business day for any US timezone; default is "now".
+  let anchor = new Date();
+  if (qWeekStart) {
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(qWeekStart)) {
+      res.status(400).json({ error: "Bad Request", message: "weekStart must be YYYY-MM-DD" });
+      return;
+    }
+    anchor = new Date(businessDateToUtc(qWeekStart, tz).getTime() + 12 * 3600_000);
+  }
+  const weekStartUtc = startOfBusinessWeek(anchor, tz);
+  // Next Monday: jump 8.5 days in (well past any DST-shortened week), snap back.
+  const nextWeekStartUtc = startOfBusinessWeek(new Date(weekStartUtc.getTime() + 8.5 * 24 * 3600_000), tz);
+  const prevWeekStartUtc = startOfBusinessWeek(new Date(weekStartUtc.getTime() - 3.5 * 24 * 3600_000), tz);
+
+  // The 7 business dates of the week (walk day-by-day, DST-safe).
+  const dayDates: string[] = [];
+  let cursor = weekStartUtc;
+  for (let i = 0; i < 7; i++) {
+    dayDates.push(businessDateIso(cursor, tz));
+    cursor = businessDayWindow(cursor, tz).endOfDay;
+  }
+
+  const [targetUser] = await db
+    .select({ firstName: usersTable.firstName, lastName: usersTable.lastName })
+    .from(usersTable)
+    .where(eq(usersTable.id, targetEmployeeId));
+  if (!targetUser) {
+    res.status(404).json({ error: "Not Found", message: "Employee not found" });
+    return;
+  }
+
+  const rows = await db
+    .select({
+      id: timeEntriesTable.id,
+      clockInTime: timeEntriesTable.clockInTime,
+      clockOutTime: timeEntriesTable.clockOutTime,
+      hoursWorked: timeEntriesTable.hoursWorked,
+      approvalStatus: timeEntriesTable.approvalStatus,
+      shiftTitle: shiftsTable.title,
+      siteName: sitesTable.name,
+    })
+    .from(timeEntriesTable)
+    .leftJoin(shiftsTable, eq(timeEntriesTable.shiftId, shiftsTable.id))
+    .leftJoin(sitesTable, sql`${sitesTable.id} = coalesce(${timeEntriesTable.siteId}, ${shiftsTable.siteId})`)
+    .where(and(
+      eq(timeEntriesTable.employeeId, targetEmployeeId),
+      gte(timeEntriesTable.clockInTime, weekStartUtc),
+      sql`${timeEntriesTable.clockInTime} < ${nextWeekStartUtc}`,
+    ))
+    .orderBy(timeEntriesTable.clockInTime);
+
+  type CardEntry = {
+    id: string;
+    clockInTime: Date;
+    clockOutTime: Date | null;
+    hoursWorked: number | null;
+    approvalStatus: string;
+    siteName: string | null;
+    shiftTitle: string | null;
+    open: boolean;
+  };
+  const byDay = new Map<string, { entries: CardEntry[]; rawTotal: number }>();
+  for (const d of dayDates) byDay.set(d, { entries: [], rawTotal: 0 });
+
+  let rawTotal = 0;
+  let rawApproved = 0;
+  let rawPending = 0;
+  for (const r of rows) {
+    const dayIso = businessDateIso(r.clockInTime, tz);
+    const bucket = byDay.get(dayIso);
+    if (!bucket) continue; // clock-in outside the 7 business days (shouldn't happen)
+    const open = r.clockOutTime == null;
+    const hours = open ? null : parseFloat(String(r.hoursWorked || "0"));
+    bucket.entries.push({
+      id: r.id,
+      clockInTime: r.clockInTime,
+      clockOutTime: r.clockOutTime,
+      hoursWorked: hours,
+      approvalStatus: r.approvalStatus,
+      siteName: r.siteName,
+      shiftTitle: r.shiftTitle,
+      open,
+    });
+    if (hours != null && r.approvalStatus !== "rejected") {
+      bucket.rawTotal += hours;
+      rawTotal += hours;
+      if (r.approvalStatus === "approved") rawApproved += hours;
+      else rawPending += hours;
+    }
+  }
+
+  const round2 = (n: number) => Math.round(n * 100) / 100;
+  res.json({
+    employeeId: targetEmployeeId,
+    employeeName: `${targetUser.firstName} ${targetUser.lastName}`,
+    timezone: tz,
+    weekStart: dayDates[0],
+    weekEnd: dayDates[6],
+    prevWeekStart: businessDateIso(prevWeekStartUtc, tz),
+    nextWeekStart: businessDateIso(nextWeekStartUtc, tz),
+    days: dayDates.map((d) => {
+      const bucket = byDay.get(d)!;
+      return { date: d, entries: bucket.entries, totalHours: round2(bucket.rawTotal) };
+    }),
+    totalHours: round2(rawTotal),
+    approvedHours: round2(rawApproved),
+    pendingHours: round2(rawPending),
+  });
 });
 
 // Admin patches a missing clock-out on an existing time entry.

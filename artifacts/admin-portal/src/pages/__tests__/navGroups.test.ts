@@ -159,7 +159,7 @@ describe("buildNavGroups feature filtering", () => {
   it("keeps the ungated Analytics item when payroll & invoicing are gated off", () => {
     const groups = buildNavGroups(false, false, (key) => key !== "payroll" && key !== "invoicing");
     const accounting = groups.find((g) => g.key === "accounting");
-    expect(accounting?.items.map((i) => i.href)).toEqual(["/analytics"]);
+    expect(accounting?.items.map((i) => i.href)).toEqual(["/analytics", "/payroll/time-card"]);
   });
 
   it("keeps ungated items even when other features are disabled", () => {

@@ -2349,6 +2349,69 @@ export const GetActiveTimeEntryResponse = zod.union([
 ]);
 
 /**
+ * Human-readable weekly time card. Week boundaries follow the business
+timezone (PAYROLL_TIMEZONE, Monday-start weeks); entries are bucketed
+into the day containing their clock-in, matching payroll conventions.
+Employees and site managers see their own card only; admins and
+dispatchers may pass employeeId to view any employee's card.
+
+ * @summary Weekly time card (per-day entries, daily totals, weekly total)
+ */
+export const GetTimeCardQueryParams = zod.object({
+  employeeId: zod.coerce
+    .string()
+    .optional()
+    .describe(
+      "Target employee (admin\/dispatcher only; defaults to the caller).",
+    ),
+  weekStart: zod
+    .date()
+    .optional()
+    .describe(
+      "Any date (YYYY-MM-DD) inside the desired week; snapped to that week's Monday. Defaults to the current week.",
+    ),
+});
+
+export const GetTimeCardResponse = zod.object({
+  employeeId: zod.string(),
+  employeeName: zod.string().optional(),
+  timezone: zod.string(),
+  weekStart: zod.coerce
+    .date()
+    .describe("Monday of the week (business timezone)."),
+  weekEnd: zod.coerce
+    .date()
+    .describe("Sunday of the week (business timezone, inclusive)."),
+  prevWeekStart: zod.coerce.date(),
+  nextWeekStart: zod.coerce.date(),
+  days: zod.array(
+    zod.object({
+      date: zod.coerce.date(),
+      entries: zod.array(
+        zod.object({
+          id: zod.string(),
+          clockInTime: zod.coerce.date(),
+          clockOutTime: zod.coerce.date().nullish(),
+          hoursWorked: zod.number().nullish(),
+          approvalStatus: zod.enum(["pending", "approved", "rejected"]),
+          siteName: zod.string().nullish(),
+          shiftTitle: zod.string().nullish(),
+          open: zod
+            .boolean()
+            .describe(
+              "True while the entry has no clock-out yet (hours not counted).",
+            ),
+        }),
+      ),
+      totalHours: zod.number(),
+    }),
+  ),
+  totalHours: zod.number(),
+  approvedHours: zod.number(),
+  pendingHours: zod.number(),
+});
+
+/**
  * @summary Get payroll entries
  */
 export const GetPayrollEntriesQueryParams = zod.object({

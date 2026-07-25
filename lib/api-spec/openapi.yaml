@@ -1236,6 +1236,37 @@ paths:
                   - $ref: "#/components/schemas/TimeEntry"
                   - type: "null"
 
+  /time-entries/time-card:
+    get:
+      operationId: getTimeCard
+      tags: [timeEntries]
+      summary: Weekly time card (per-day entries, daily totals, weekly total)
+      description: |
+        Human-readable weekly time card. Week boundaries follow the business
+        timezone (PAYROLL_TIMEZONE, Monday-start weeks); entries are bucketed
+        into the day containing their clock-in, matching payroll conventions.
+        Employees and site managers see their own card only; admins and
+        dispatchers may pass employeeId to view any employee's card.
+      parameters:
+        - name: employeeId
+          in: query
+          description: Target employee (admin/dispatcher only; defaults to the caller).
+          schema:
+            type: string
+        - name: weekStart
+          in: query
+          description: Any date (YYYY-MM-DD) inside the desired week; snapped to that week's Monday. Defaults to the current week.
+          schema:
+            type: string
+            format: date
+      responses:
+        "200":
+          description: Weekly time card
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TimeCard"
+
   /payroll:
     get:
       operationId: getPayrollEntries
@@ -4344,6 +4375,101 @@ components:
         - isVerified
         - approvalStatus
         - createdAt
+
+    TimeCardEntry:
+      type: object
+      properties:
+        id:
+          type: string
+        clockInTime:
+          type: string
+          format: date-time
+        clockOutTime:
+          type: string
+          format: date-time
+          nullable: true
+        hoursWorked:
+          type: number
+          nullable: true
+        approvalStatus:
+          type: string
+          enum: [pending, approved, rejected]
+        siteName:
+          type: string
+          nullable: true
+        shiftTitle:
+          type: string
+          nullable: true
+        open:
+          type: boolean
+          description: True while the entry has no clock-out yet (hours not counted).
+      required:
+        - id
+        - clockInTime
+        - approvalStatus
+        - open
+
+    TimeCardDay:
+      type: object
+      properties:
+        date:
+          type: string
+          format: date
+        entries:
+          type: array
+          items:
+            $ref: "#/components/schemas/TimeCardEntry"
+        totalHours:
+          type: number
+      required:
+        - date
+        - entries
+        - totalHours
+
+    TimeCard:
+      type: object
+      properties:
+        employeeId:
+          type: string
+        employeeName:
+          type: string
+        timezone:
+          type: string
+        weekStart:
+          type: string
+          format: date
+          description: Monday of the week (business timezone).
+        weekEnd:
+          type: string
+          format: date
+          description: Sunday of the week (business timezone, inclusive).
+        prevWeekStart:
+          type: string
+          format: date
+        nextWeekStart:
+          type: string
+          format: date
+        days:
+          type: array
+          items:
+            $ref: "#/components/schemas/TimeCardDay"
+        totalHours:
+          type: number
+        approvedHours:
+          type: number
+        pendingHours:
+          type: number
+      required:
+        - employeeId
+        - timezone
+        - weekStart
+        - weekEnd
+        - prevWeekStart
+        - nextWeekStart
+        - days
+        - totalHours
+        - approvedHours
+        - pendingHours
 
     ClockInRequest:
       type: object

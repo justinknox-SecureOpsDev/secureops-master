@@ -25,6 +25,7 @@ import { ApplicationBuilderPage } from "@/pages/ApplicationBuilder";
 import { OnboardingPage } from "@/pages/Onboarding";
 import { PoliciesPage } from "@/pages/Policies";
 import PayRunPage from "@/pages/PayRun";
+import TimeCardPage from "@/pages/TimeCard";
 import SubcontractorPayRunPage from "@/pages/SubcontractorPayRun";
 import PayrollBoardPage from "@/pages/PayrollBoard";
 import AnalyticsPage from "@/pages/Analytics";
@@ -174,6 +175,7 @@ function Routed() {
           <Route path="/payroll/board">{() => <FeatureGuard feature="payroll"><PayrollBoardPage /></FeatureGuard>}</Route>
           <Route path="/invoices/board">{() => <FeatureGuard feature="invoicing"><InvoiceBoardPage /></FeatureGuard>}</Route>
           <Route path="/payroll/pay-run">{() => <FeatureGuard feature="payroll"><PayRunPage /></FeatureGuard>}</Route>
+          <Route path="/payroll/time-card" component={TimeCardPage} />
           <Route path="/subcontractors/pay-run" component={SubcontractorPayRunPage} />
           <Route path="/subcontractors/clock-in-entries" component={SubcontractorEntriesPage} />
           <Route path="/audit-log" component={AuditLogPage} />
