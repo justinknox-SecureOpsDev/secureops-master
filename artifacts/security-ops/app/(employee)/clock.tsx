@@ -624,6 +624,9 @@ export default function EmployeeClockScreen({ hideTopPad }: { hideTopPad?: boole
               </TouchableOpacity>
             ) : (
               <View style={{ gap: 8, marginTop: 8 }}>
+                <Text style={{ color: colors.mutedForeground, fontSize: 12 }}>
+                  Small corrections only — times can be adjusted up to a couple of hours from what was recorded. For bigger changes, confirm as-is and contact an admin.
+                </Text>
                 <Text style={{ color: colors.mutedForeground, fontSize: 12 }}>Clock-in (YYYY-MM-DD HH:MM)</Text>
                 <TextInput
                   style={[styles.reviewInput, { color: colors.foreground, borderColor: colors.border, backgroundColor: colors.background }]}

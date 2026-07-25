@@ -87,6 +87,29 @@ function closestByStart<T extends { startTime: Date }>(rows: T[], whenAt: Date):
 // the current time is inside the allowed window.
 const CLOCK_IN_EARLY_GRACE_MS = 30 * 60_000;
 
+// Max hours an officer may move their own clock-in/out from the recorded time
+// during post-shift confirmation. Configurable per deployment via
+// TIME_CONFIRM_EDIT_WINDOW_HOURS; falls back to 2h on unset/invalid values.
+// Read at request time (not module load) so tests can vary it per case.
+const DEFAULT_CONFIRM_EDIT_WINDOW_HOURS = 2;
+
+export function getConfirmEditWindowHours(): number {
+  const raw = process.env.TIME_CONFIRM_EDIT_WINDOW_HOURS?.trim();
+  if (!raw) return DEFAULT_CONFIRM_EDIT_WINDOW_HOURS;
+  const parsed = Number(raw);
+  if (!Number.isFinite(parsed) || parsed <= 0) return DEFAULT_CONFIRM_EDIT_WINDOW_HOURS;
+  return parsed;
+}
+
+function formatHoursLabel(hours: number): string {
+  if (hours < 1) {
+    const mins = Math.round(hours * 60);
+    return `${mins} minute${mins === 1 ? "" : "s"}`;
+  }
+  const rounded = Number.isInteger(hours) ? hours : Math.round(hours * 100) / 100;
+  return `${rounded} hour${rounded === 1 ? "" : "s"}`;
+}
+
 function clockInWindowRejection(
   shift: { startTime: Date; endTime: Date },
   now: Date,
@@ -1375,6 +1398,23 @@ router.post("/time-entries/:id/confirm", requireStaff, async (req, res): Promise
   const futureCutoff = Date.now() + 2 * 60_000;
   if (targetClockIn.getTime() > futureCutoff || targetClockOut.getTime() > futureCutoff) {
     res.status(400).json({ error: "Bad Request", message: "Times can't be in the future." });
+    return;
+  }
+
+  // Cap how far an officer can move their own times from the recorded values.
+  // Configurable via TIME_CONFIRM_EDIT_WINDOW_HOURS (default 2h); admins remain
+  // unbounded via their own edit routes. Bounds abuse while keeping honest
+  // corrections (missed clock-out by a few minutes, etc.) frictionless.
+  const maxDeviationMs = getConfirmEditWindowHours() * 3_600_000;
+  const inDeviation = Math.abs(targetClockIn.getTime() - existing.clockInTime.getTime());
+  const outDeviation = Math.abs(targetClockOut.getTime() - existing.clockOutTime.getTime());
+  if (inDeviation > maxDeviationMs || outDeviation > maxDeviationMs) {
+    const limitLabel = formatHoursLabel(getConfirmEditWindowHours());
+    res.status(400).json({
+      error: "Bad Request",
+      message: `Adjustments are limited to ${limitLabel} from your recorded times. For a larger correction, confirm your recorded times and ask an admin to adjust the entry.`,
+      maxEditWindowHours: getConfirmEditWindowHours(),
+    });
     return;
   }
 

@@ -311,6 +311,101 @@ describe("POST /time-entries/:id/confirm", () => {
     expect(row.syncSource).toBe("local");
   });
 
+  it("rejects a clock-out moved beyond the default 2h window (400 with limit)", async () => {
+    const id = await insertAwaitingEntry();
+    const res = await request(app)
+      .post(`/api/time-entries/${id}/confirm`)
+      .set(authed(ctx.officerToken))
+      .send({
+        clockOutTime: new Date(BASE_CLOCK_OUT.getTime() + 2 * 3_600_000 + 60_000).toISOString(),
+        editReason: "way late",
+      });
+    expect(res.status).toBe(400);
+    expect(res.body.maxEditWindowHours).toBe(2);
+    expect(res.body.message).toContain("2 hours");
+    const row = await getEntry(id);
+    expect(row.confirmationStatus).toBe("awaiting_confirmation");
+    expect(row.employeeEdited).toBe(false);
+  });
+
+  it("rejects a clock-in moved beyond the window even when clock-out is fine (400)", async () => {
+    const id = await insertAwaitingEntry();
+    const res = await request(app)
+      .post(`/api/time-entries/${id}/confirm`)
+      .set(authed(ctx.officerToken))
+      .send({
+        clockInTime: new Date(BASE_CLOCK_IN.getTime() - 3 * 3_600_000).toISOString(),
+        editReason: "started way earlier",
+      });
+    expect(res.status).toBe(400);
+    expect(res.body.maxEditWindowHours).toBe(2);
+  });
+
+  it("allows an edit exactly at the window boundary (2h)", async () => {
+    const id = await insertAwaitingEntry();
+    const newOut = new Date(BASE_CLOCK_OUT.getTime() + 2 * 3_600_000);
+    const res = await request(app)
+      .post(`/api/time-entries/${id}/confirm`)
+      .set(authed(ctx.officerToken))
+      .send({ clockOutTime: newOut.toISOString(), editReason: "relieved 2h late" });
+    expect(res.status).toBe(200);
+    const row = await getEntry(id);
+    expect(row.clockOutTime!.getTime()).toBe(newOut.getTime());
+    expect(row.employeeEdited).toBe(true);
+  });
+
+  it("honors TIME_CONFIRM_EDIT_WINDOW_HOURS override", async () => {
+    const prev = process.env.TIME_CONFIRM_EDIT_WINDOW_HOURS;
+    process.env.TIME_CONFIRM_EDIT_WINDOW_HOURS = "0.5";
+    try {
+      // 45 min move: fine under the 2h default, rejected under a 0.5h cap.
+      const id = await insertAwaitingEntry();
+      const res = await request(app)
+        .post(`/api/time-entries/${id}/confirm`)
+        .set(authed(ctx.officerToken))
+        .send({
+          clockOutTime: new Date(BASE_CLOCK_OUT.getTime() + 45 * 60_000).toISOString(),
+          editReason: "left late",
+        });
+      expect(res.status).toBe(400);
+      expect(res.body.maxEditWindowHours).toBe(0.5);
+      expect(res.body.message).toContain("30 minutes");
+
+      // 20 min move passes under the tightened cap.
+      const id2 = await insertAwaitingEntry();
+      const res2 = await request(app)
+        .post(`/api/time-entries/${id2}/confirm`)
+        .set(authed(ctx.officerToken))
+        .send({
+          clockOutTime: new Date(BASE_CLOCK_OUT.getTime() + 20 * 60_000).toISOString(),
+          editReason: "left a bit late",
+        });
+      expect(res2.status).toBe(200);
+    } finally {
+      if (prev === undefined) delete process.env.TIME_CONFIRM_EDIT_WINDOW_HOURS;
+      else process.env.TIME_CONFIRM_EDIT_WINDOW_HOURS = prev;
+    }
+  });
+
+  it("falls back to the 2h default on an invalid override value", async () => {
+    const prev = process.env.TIME_CONFIRM_EDIT_WINDOW_HOURS;
+    process.env.TIME_CONFIRM_EDIT_WINDOW_HOURS = "banana";
+    try {
+      const id = await insertAwaitingEntry();
+      const res = await request(app)
+        .post(`/api/time-entries/${id}/confirm`)
+        .set(authed(ctx.officerToken))
+        .send({
+          clockOutTime: new Date(BASE_CLOCK_OUT.getTime() + 90 * 60_000).toISOString(),
+          editReason: "late",
+        });
+      expect(res.status).toBe(200); // 1.5h is inside the 2h default
+    } finally {
+      if (prev === undefined) delete process.env.TIME_CONFIRM_EDIT_WINDOW_HOURS;
+      else process.env.TIME_CONFIRM_EDIT_WINDOW_HOURS = prev;
+    }
+  });
+
   it("second confirm attempt 409s (already confirmed)", async () => {
     const id = await insertAwaitingEntry();
     await request(app).post(`/api/time-entries/${id}/confirm`).set(authed(ctx.officerToken)).send({});

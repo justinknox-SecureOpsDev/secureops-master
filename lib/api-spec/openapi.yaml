@@ -1275,8 +1275,11 @@ paths:
       description: |
         Owner-only. Only valid while the entry is awaiting confirmation.
         Confirms the recorded times as-is, or applies officer-edited times
-        (reason required); hours are recomputed server-side. Moves the entry
-        into the normal pending-approval queue.
+        (reason required); hours are recomputed server-side. Officer edits are
+        capped to a configured window around the recorded times
+        (TIME_CONFIRM_EDIT_WINDOW_HOURS, default 2h) — edits beyond it are
+        rejected with a 400 whose body includes `maxEditWindowHours`. Moves
+        the entry into the normal pending-approval queue.
       parameters:
         - name: id
           in: path
