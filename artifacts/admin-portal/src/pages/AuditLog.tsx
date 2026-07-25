@@ -48,6 +48,27 @@ const ACTION_PRESETS = [
   "scheduler.eligibility_skip",
 ];
 
+function formatHours(v: unknown): string {
+  if (v === null || v === undefined || v === "") return "unset";
+  const n = typeof v === "number" ? v : parseFloat(String(v));
+  if (!Number.isFinite(n)) return String(v);
+  return `${n}h`;
+}
+
+/**
+ * Extracts a human-readable summary of a time-edit-limit change from an audit
+ * row's metadata. Returns null when the row isn't a time-edit-limit change.
+ */
+function timeEditLimitSummary(metadata: unknown): string | null {
+  if (!metadata || typeof metadata !== "object") return null;
+  const m = metadata as Record<string, unknown>;
+  if (m["change"] !== "time_confirm_edit_window_hours") return null;
+  const win = m["timeConfirmEditWindowHours"];
+  if (!win || typeof win !== "object") return null;
+  const { old: oldValue, new: newValue } = win as { old?: unknown; new?: unknown };
+  return `Time-edit limit changed from ${formatHours(oldValue)} to ${formatHours(newValue)}`;
+}
+
 function methodColor(m: string): string {
   switch (m) {
     case "POST":   return "bg-emerald-100 text-emerald-800 border-emerald-300";
@@ -215,6 +236,11 @@ export default function AuditLogPage() {
                   </button>
                   {isOpen && (
                     <div className="border-t border-border bg-muted/20 px-3 py-3 space-y-3 text-xs">
+                      {timeEditLimitSummary(r.metadata) && (
+                        <div className="bg-amber-50 border border-amber-200 text-amber-900 rounded p-2 text-[11px]">
+                          {timeEditLimitSummary(r.metadata)} by {r.actorEmail ?? "(anonymous)"}
+                        </div>
+                      )}
                       <div>
                         <div className="font-semibold mb-1">Request body (after)</div>
                         <pre className="bg-background border border-border rounded p-2 overflow-auto max-h-64 text-[11px]">
@@ -296,6 +322,11 @@ export default function AuditLogPage() {
                     {isOpen && (
                       <tr key={r.id + "-detail"} className="border-t border-border bg-muted/20">
                         <td colSpan={7} className="px-4 py-3">
+                          {timeEditLimitSummary(r.metadata) && (
+                            <div className="bg-amber-50 border border-amber-200 text-amber-900 rounded p-2 text-xs mb-4">
+                              {timeEditLimitSummary(r.metadata)} by {r.actorEmail ?? "(anonymous)"}
+                            </div>
+                          )}
                           <div className="grid grid-cols-2 gap-4 text-xs">
                             <div>
                               <div className="font-semibold mb-1">Request body (after)</div>
