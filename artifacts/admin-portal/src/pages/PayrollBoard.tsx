@@ -20,7 +20,7 @@ type BoardBucket = {
   hourlyRate: number;
   grossPay: number;
   timeEntryIds: string[];
-  entries: Array<{ id: string; clockInTime: string; hoursWorked: number; rate: number; holiday: string | null; hasClockOut: boolean; scheduledEnd: string | null; lastEditedByEmail: string | null; lastEditedAt: string | null }>;
+  entries: Array<{ id: string; clockInTime: string; hoursWorked: number; rate: number; holiday: string | null; hasClockOut: boolean; scheduledEnd: string | null; lastEditedByEmail: string | null; lastEditedAt: string | null; clockOutTime: string | null; employeeEdited: boolean; employeeEditReason: string | null; originalClockInTime: string | null; originalClockOutTime: string | null; confirmationStatus: string | null }>;
   existingPayrollEntryId: string | null;
   existingStatus: string | null;
   warnings: string[];
@@ -798,6 +798,20 @@ export default function PayrollBoardPage() {
                                                   <Pencil className="w-2.5 h-2.5" />
                                                   Edited
                                                 </button>
+                                              )}
+                                              {e.employeeEdited && (
+                                                <span
+                                                  className="inline-flex items-center rounded-full bg-violet-100 text-violet-800 border border-violet-300 px-1.5 py-0.5 text-[10px] font-medium leading-none font-sans normal-case"
+                                                  title={[
+                                                    e.originalClockInTime || e.originalClockOutTime
+                                                      ? `Recorded: ${e.originalClockInTime ? new Date(e.originalClockInTime).toLocaleString() : "—"} → ${e.originalClockOutTime ? new Date(e.originalClockOutTime).toLocaleString() : "—"}`
+                                                      : null,
+                                                    `Submitted: ${new Date(e.clockInTime).toLocaleString()} → ${e.clockOutTime ? new Date(e.clockOutTime).toLocaleString() : "—"}`,
+                                                    e.employeeEditReason ? `Reason: ${e.employeeEditReason}` : null,
+                                                  ].filter(Boolean).join("\n") || "Officer edited their times before submitting."}
+                                                >
+                                                  Edited by officer
+                                                </span>
                                               )}
                                               {!e.hasClockOut && (
                                                 <Button

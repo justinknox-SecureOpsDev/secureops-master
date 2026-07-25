@@ -50,7 +50,27 @@ type TimeEntryRow = {
   approvalStatus: string | null;
   correctionRequested?: boolean | null;
   correctionNote?: string | null;
+  employeeEdited?: boolean | null;
+  employeeEditReason?: string | null;
+  originalClockInTime?: string | null;
+  originalClockOutTime?: string | null;
+  confirmationStatus?: string | null;
 };
+
+// Tooltip for the "Edited by officer" badge: original recorded times vs the
+// officer-submitted times, plus their stated reason.
+function officerEditTitle(t: TimeEntryRow): string {
+  const parts: string[] = [];
+  if (t.originalClockInTime || t.originalClockOutTime) {
+    const orig = [t.originalClockInTime, t.originalClockOutTime]
+      .map((v) => (v ? fmt(v) : "—")).join(" → ");
+    const submitted = [t.clockInTime, t.clockOutTime]
+      .map((v) => (v ? fmt(v) : "—")).join(" → ");
+    parts.push(`Recorded: ${orig}`, `Submitted: ${submitted}`);
+  }
+  if (t.employeeEditReason) parts.push(`Reason: ${t.employeeEditReason}`);
+  return parts.join("\n") || "Officer edited their times before submitting.";
+}
 
 type SubEntryRow = {
   id: string;
@@ -1217,6 +1237,22 @@ export function SiteDetailPage() {
                             <AlertTriangle className="w-3 h-3" /> Correction
                           </span>
                         )}
+                        {t.confirmationStatus === "awaiting_confirmation" && (
+                          <span
+                            className="ml-2 inline-flex items-center gap-1 text-xs text-sky-700"
+                            title="The officer hasn't confirmed this entry yet. You can still approve or correct it."
+                          >
+                            Unconfirmed
+                          </span>
+                        )}
+                        {t.employeeEdited && (
+                          <span
+                            className="ml-2 inline-flex items-center rounded-full bg-violet-100 text-violet-800 border border-violet-300 px-1.5 py-0.5 text-[10px] font-medium leading-none whitespace-pre-line"
+                            title={officerEditTitle(t)}
+                          >
+                            Edited by officer
+                          </span>
+                        )}
                         {isAdmin && t.correctionRequested && (
                           <Button
                             variant="ghost"
@@ -1247,6 +1283,22 @@ export function SiteDetailPage() {
                             title={t.correctionNote || "Officer requested a time correction."}
                           >
                             <AlertTriangle className="w-3 h-3" /> Correction
+                          </span>
+                        )}
+                        {t.confirmationStatus === "awaiting_confirmation" && (
+                          <span
+                            className="inline-flex items-center gap-1 text-xs text-sky-700"
+                            title="The officer hasn't confirmed this entry yet. You can still approve or correct it."
+                          >
+                            Unconfirmed
+                          </span>
+                        )}
+                        {t.employeeEdited && (
+                          <span
+                            className="inline-flex items-center rounded-full bg-violet-100 text-violet-800 border border-violet-300 px-1.5 py-0.5 text-[10px] font-medium leading-none"
+                            title={officerEditTitle(t)}
+                          >
+                            Edited by officer
                           </span>
                         )}
                         {isAdmin && t.correctionRequested && (

@@ -499,6 +499,32 @@ export const ApproveTimeEntryResponse = zod.object({
   notes: zod.string().optional(),
   correctionRequested: zod.boolean().optional(),
   correctionNote: zod.string().optional(),
+  confirmationStatus: zod
+    .enum(["awaiting_confirmation", "confirmed"])
+    .nullish()
+    .describe(
+      "Officer post-clock-out confirmation state. `awaiting_confirmation`\nmeans the officer must review\/confirm their times before the entry\nenters the normal pending-approval queue. `confirmed` means the\nofficer submitted (or an admin acted on the entry, force-clearing\nit). Null = confirmation not applicable (admin-created, imported,\nor legacy entries).\n",
+    ),
+  originalClockInTime: zod.coerce
+    .date()
+    .nullish()
+    .describe(
+      "GPS\/clock-recorded clock-in captured at clock-out, before any officer edit.",
+    ),
+  originalClockOutTime: zod.coerce
+    .date()
+    .nullish()
+    .describe(
+      "GPS\/clock-recorded clock-out captured at clock-out, before any officer edit.",
+    ),
+  employeeEdited: zod
+    .boolean()
+    .optional()
+    .describe(
+      "True when the officer changed the recorded times during confirmation.",
+    ),
+  employeeEditReason: zod.string().nullish(),
+  confirmedAt: zod.coerce.date().nullish(),
   createdAt: zod.coerce.date(),
 });
 
@@ -2248,6 +2274,32 @@ export const GetTimeEntriesResponseItem = zod.object({
   notes: zod.string().optional(),
   correctionRequested: zod.boolean().optional(),
   correctionNote: zod.string().optional(),
+  confirmationStatus: zod
+    .enum(["awaiting_confirmation", "confirmed"])
+    .nullish()
+    .describe(
+      "Officer post-clock-out confirmation state. `awaiting_confirmation`\nmeans the officer must review\/confirm their times before the entry\nenters the normal pending-approval queue. `confirmed` means the\nofficer submitted (or an admin acted on the entry, force-clearing\nit). Null = confirmation not applicable (admin-created, imported,\nor legacy entries).\n",
+    ),
+  originalClockInTime: zod.coerce
+    .date()
+    .nullish()
+    .describe(
+      "GPS\/clock-recorded clock-in captured at clock-out, before any officer edit.",
+    ),
+  originalClockOutTime: zod.coerce
+    .date()
+    .nullish()
+    .describe(
+      "GPS\/clock-recorded clock-out captured at clock-out, before any officer edit.",
+    ),
+  employeeEdited: zod
+    .boolean()
+    .optional()
+    .describe(
+      "True when the officer changed the recorded times during confirmation.",
+    ),
+  employeeEditReason: zod.string().nullish(),
+  confirmedAt: zod.coerce.date().nullish(),
   createdAt: zod.coerce.date(),
 });
 export const GetTimeEntriesResponse = zod.array(GetTimeEntriesResponseItem);
@@ -2312,6 +2364,32 @@ export const ClockOutResponse = zod.object({
   notes: zod.string().optional(),
   correctionRequested: zod.boolean().optional(),
   correctionNote: zod.string().optional(),
+  confirmationStatus: zod
+    .enum(["awaiting_confirmation", "confirmed"])
+    .nullish()
+    .describe(
+      "Officer post-clock-out confirmation state. `awaiting_confirmation`\nmeans the officer must review\/confirm their times before the entry\nenters the normal pending-approval queue. `confirmed` means the\nofficer submitted (or an admin acted on the entry, force-clearing\nit). Null = confirmation not applicable (admin-created, imported,\nor legacy entries).\n",
+    ),
+  originalClockInTime: zod.coerce
+    .date()
+    .nullish()
+    .describe(
+      "GPS\/clock-recorded clock-in captured at clock-out, before any officer edit.",
+    ),
+  originalClockOutTime: zod.coerce
+    .date()
+    .nullish()
+    .describe(
+      "GPS\/clock-recorded clock-out captured at clock-out, before any officer edit.",
+    ),
+  employeeEdited: zod
+    .boolean()
+    .optional()
+    .describe(
+      "True when the officer changed the recorded times during confirmation.",
+    ),
+  employeeEditReason: zod.string().nullish(),
+  confirmedAt: zod.coerce.date().nullish(),
   createdAt: zod.coerce.date(),
 });
 
@@ -2343,6 +2421,32 @@ export const GetActiveTimeEntryResponse = zod.union([
     notes: zod.string().optional(),
     correctionRequested: zod.boolean().optional(),
     correctionNote: zod.string().optional(),
+    confirmationStatus: zod
+      .enum(["awaiting_confirmation", "confirmed"])
+      .nullish()
+      .describe(
+        "Officer post-clock-out confirmation state. `awaiting_confirmation`\nmeans the officer must review\/confirm their times before the entry\nenters the normal pending-approval queue. `confirmed` means the\nofficer submitted (or an admin acted on the entry, force-clearing\nit). Null = confirmation not applicable (admin-created, imported,\nor legacy entries).\n",
+      ),
+    originalClockInTime: zod.coerce
+      .date()
+      .nullish()
+      .describe(
+        "GPS\/clock-recorded clock-in captured at clock-out, before any officer edit.",
+      ),
+    originalClockOutTime: zod.coerce
+      .date()
+      .nullish()
+      .describe(
+        "GPS\/clock-recorded clock-out captured at clock-out, before any officer edit.",
+      ),
+    employeeEdited: zod
+      .boolean()
+      .optional()
+      .describe(
+        "True when the officer changed the recorded times during confirmation.",
+      ),
+    employeeEditReason: zod.string().nullish(),
+    confirmedAt: zod.coerce.date().nullish(),
     createdAt: zod.coerce.date(),
   }),
   zod.null(),
@@ -2409,6 +2513,87 @@ export const GetTimeCardResponse = zod.object({
   totalHours: zod.number(),
   approvedHours: zod.number(),
   pendingHours: zod.number(),
+});
+
+/**
+ * Owner-only. Only valid while the entry is awaiting confirmation.
+Confirms the recorded times as-is, or applies officer-edited times
+(reason required); hours are recomputed server-side. Moves the entry
+into the normal pending-approval queue.
+
+ * @summary Officer confirms (optionally edits) their clocked-out time entry
+ */
+export const ConfirmTimeEntryParams = zod.object({
+  id: zod.coerce.string(),
+});
+
+export const confirmTimeEntryBodyEditReasonMax = 1000;
+
+export const ConfirmTimeEntryBody = zod
+  .object({
+    clockInTime: zod.coerce.date().optional(),
+    clockOutTime: zod.coerce.date().optional(),
+    editReason: zod
+      .string()
+      .max(confirmTimeEntryBodyEditReasonMax)
+      .optional()
+      .describe("Required when either time is changed. Shown to approvers."),
+  })
+  .describe(
+    "Officer confirmation of a clocked-out time entry. Omit both times to\nconfirm the recorded values as-is. Provide clockInTime and\/or\nclockOutTime to submit corrected times — editReason is then required.\n",
+  );
+
+export const ConfirmTimeEntryResponse = zod.object({
+  id: zod.string(),
+  shiftId: zod.string(),
+  shiftTitle: zod.string().optional(),
+  employeeId: zod.string(),
+  employeeName: zod.string().optional(),
+  clockInTime: zod.coerce.date(),
+  clockInLat: zod.number().optional(),
+  clockInLng: zod.number().optional(),
+  clockOutTime: zod.coerce.date().optional(),
+  clockOutLat: zod.number().optional(),
+  clockOutLng: zod.number().optional(),
+  hoursWorked: zod.number().optional(),
+  isVerified: zod.boolean(),
+  approvalStatus: zod.enum(["pending", "approved", "rejected"]),
+  approvedAt: zod.coerce.date().optional(),
+  approvedBy: zod.string().optional(),
+  siteId: zod.string().optional(),
+  siteName: zod.string().optional(),
+  payRate: zod.number().optional(),
+  billRate: zod.number().optional(),
+  notes: zod.string().optional(),
+  correctionRequested: zod.boolean().optional(),
+  correctionNote: zod.string().optional(),
+  confirmationStatus: zod
+    .enum(["awaiting_confirmation", "confirmed"])
+    .nullish()
+    .describe(
+      "Officer post-clock-out confirmation state. `awaiting_confirmation`\nmeans the officer must review\/confirm their times before the entry\nenters the normal pending-approval queue. `confirmed` means the\nofficer submitted (or an admin acted on the entry, force-clearing\nit). Null = confirmation not applicable (admin-created, imported,\nor legacy entries).\n",
+    ),
+  originalClockInTime: zod.coerce
+    .date()
+    .nullish()
+    .describe(
+      "GPS\/clock-recorded clock-in captured at clock-out, before any officer edit.",
+    ),
+  originalClockOutTime: zod.coerce
+    .date()
+    .nullish()
+    .describe(
+      "GPS\/clock-recorded clock-out captured at clock-out, before any officer edit.",
+    ),
+  employeeEdited: zod
+    .boolean()
+    .optional()
+    .describe(
+      "True when the officer changed the recorded times during confirmation.",
+    ),
+  employeeEditReason: zod.string().nullish(),
+  confirmedAt: zod.coerce.date().nullish(),
+  createdAt: zod.coerce.date(),
 });
 
 /**
@@ -3127,6 +3312,32 @@ export const GetEmployeeDashboardSummaryResponse = zod.object({
       notes: zod.string().optional(),
       correctionRequested: zod.boolean().optional(),
       correctionNote: zod.string().optional(),
+      confirmationStatus: zod
+        .enum(["awaiting_confirmation", "confirmed"])
+        .nullish()
+        .describe(
+          "Officer post-clock-out confirmation state. `awaiting_confirmation`\nmeans the officer must review\/confirm their times before the entry\nenters the normal pending-approval queue. `confirmed` means the\nofficer submitted (or an admin acted on the entry, force-clearing\nit). Null = confirmation not applicable (admin-created, imported,\nor legacy entries).\n",
+        ),
+      originalClockInTime: zod.coerce
+        .date()
+        .nullish()
+        .describe(
+          "GPS\/clock-recorded clock-in captured at clock-out, before any officer edit.",
+        ),
+      originalClockOutTime: zod.coerce
+        .date()
+        .nullish()
+        .describe(
+          "GPS\/clock-recorded clock-out captured at clock-out, before any officer edit.",
+        ),
+      employeeEdited: zod
+        .boolean()
+        .optional()
+        .describe(
+          "True when the officer changed the recorded times during confirmation.",
+        ),
+      employeeEditReason: zod.string().nullish(),
+      confirmedAt: zod.coerce.date().nullish(),
       createdAt: zod.coerce.date(),
     })
     .optional(),

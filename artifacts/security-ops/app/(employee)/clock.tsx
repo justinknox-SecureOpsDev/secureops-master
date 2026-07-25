@@ -4,10 +4,28 @@ import { View, Text, StyleSheet, TouchableOpacity, ActivityIndicator, ScrollView
 import { useColors } from "@/hooks/useColors";
 import { useHighlightFlash } from "@/hooks/useHighlightFlash";
 import { useLocalSearchParams } from "expo-router";
-import { useClockIn, useClockOut, useGetActiveTimeEntry, getGetActiveTimeEntryQueryKey, useGetTimeEntries, getGetTimeEntriesQueryKey, updateMyLocation, useGetMyClockInShifts, getGetMyClockInShiftsQueryKey, getGetEmployeeDashboardSummaryQueryKey, getGetShiftsQueryKey } from "@workspace/api-client-react";
+import { useClockIn, useClockOut, useConfirmTimeEntry, useGetActiveTimeEntry, getGetActiveTimeEntryQueryKey, useGetTimeEntries, getGetTimeEntriesQueryKey, updateMyLocation, useGetMyClockInShifts, getGetMyClockInShiftsQueryKey, getGetEmployeeDashboardSummaryQueryKey, getGetShiftsQueryKey } from "@workspace/api-client-react";
 import { Feather } from "@expo/vector-icons";
 import { useQueryClient } from "@tanstack/react-query";
 import * as Location from "expo-location";
+
+// ISO timestamp -> editable local "YYYY-MM-DD HH:MM" string for the
+// confirmation screen's time inputs (RN has no datetime-local input).
+function toLocalEditable(iso: string | null | undefined): string {
+  if (!iso) return "";
+  const d = new Date(iso);
+  if (isNaN(d.getTime())) return "";
+  const pad = (n: number) => String(n).padStart(2, "0");
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
+}
+
+// Parse the editable local string back to a Date (null when malformed).
+function fromLocalEditable(v: string): Date | null {
+  const m = v.trim().match(/^(\d{4})-(\d{2})-(\d{2})[ T](\d{1,2}):(\d{2})$/);
+  if (!m) return null;
+  const d = new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3]), Number(m[4]), Number(m[5]));
+  return isNaN(d.getTime()) ? null : d;
+}
 
 function formatDuration(seconds: number) {
   const h = Math.floor(seconds / 3600);
@@ -88,6 +106,84 @@ export default function EmployeeClockScreen({ hideTopPad }: { hideTopPad?: boole
   });
 
   const isClockedIn = !!currentEntry?.id;
+
+  // --- Post-shift confirmation -------------------------------------------
+  // After clock-out the entry sits in `awaiting_confirmation` until the
+  // officer confirms (or edits) it. recentEntries is the officer's OWN list,
+  // so the first awaiting entry is theirs. This survives relaunch/web reload
+  // because it's derived from server state, not local state.
+  const awaitingEntry = ((recentEntries ?? []) as any[]).find(
+    (e) => e.confirmationStatus === "awaiting_confirmation",
+  );
+  const confirmMutation = useConfirmTimeEntry({ mutation: { networkMode: "always" } });
+  const [reviewOpen, setReviewOpen] = useState(false);
+  const [editTimes, setEditTimes] = useState(false);
+  const [editIn, setEditIn] = useState("");
+  const [editOut, setEditOut] = useState("");
+  const [editReason, setEditReason] = useState("");
+  const [reviewError, setReviewError] = useState<string | null>(null);
+
+  // Auto-open the review modal right after an owner clock-out so confirming
+  // is the default next step (the persistent card still covers late returns).
+  const autoReviewRef = useRef(false);
+  useEffect(() => {
+    if (autoReviewRef.current && awaitingEntry) {
+      autoReviewRef.current = false;
+      openReview();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [awaitingEntry?.id]);
+
+  const openReview = () => {
+    if (!awaitingEntry) return;
+    setEditTimes(false);
+    setEditIn(toLocalEditable(awaitingEntry.clockInTime));
+    setEditOut(toLocalEditable(awaitingEntry.clockOutTime));
+    setEditReason("");
+    setReviewError(null);
+    setReviewOpen(true);
+  };
+
+  const submitConfirmation = async () => {
+    if (!awaitingEntry) return;
+    setReviewError(null);
+    let payload: any = {};
+    if (editTimes) {
+      const inD = fromLocalEditable(editIn);
+      const outD = fromLocalEditable(editOut);
+      if (!inD || !outD) {
+        setReviewError("Enter times as YYYY-MM-DD HH:MM.");
+        return;
+      }
+      if (outD.getTime() <= inD.getTime()) {
+        setReviewError("Clock-out must be after clock-in.");
+        return;
+      }
+      const changed =
+        inD.getTime() !== new Date(awaitingEntry.clockInTime).getTime() ||
+        outD.getTime() !== new Date(awaitingEntry.clockOutTime).getTime();
+      if (changed && !editReason.trim()) {
+        setReviewError("Please add a short reason for the time change.");
+        return;
+      }
+      if (changed) {
+        payload = {
+          clockInTime: inD.toISOString(),
+          clockOutTime: outD.toISOString(),
+          editReason: editReason.trim(),
+        };
+      }
+    }
+    try {
+      await confirmMutation.mutateAsync({ id: awaitingEntry.id, data: payload });
+      setReviewOpen(false);
+      AccessibilityInfo.announceForAccessibility("Time entry submitted for approval.");
+      setStatusMsg({ kind: "info", text: "Time entry submitted for approval." });
+      await queryClient.invalidateQueries({ queryKey: getGetTimeEntriesQueryKey() });
+    } catch (e: any) {
+      setReviewError(e?.response?.data?.message || e?.message || "Could not submit. Try again.");
+    }
+  };
 
   useEffect(() => {
     if (!isClockedIn || !currentEntry?.clockInTime) { setElapsed(0); return; }
@@ -232,7 +328,8 @@ export default function EmployeeClockScreen({ hideTopPad }: { hideTopPad?: boole
       // flips to OFF DUTY without waiting for the refetch round-trip.
       queryClient.setQueryData(getGetActiveTimeEntryQueryKey(), null);
       setElapsed(0);
-      setStatusMsg({ kind: "info", text: "Clocked out. You are now off duty." });
+      setStatusMsg({ kind: "info", text: "Clocked out. Please confirm your shift times below so they can be approved." });
+      autoReviewRef.current = true;
       await Promise.all([
         queryClient.invalidateQueries({ queryKey: getGetActiveTimeEntryQueryKey() }),
         queryClient.invalidateQueries({ queryKey: getGetTimeEntriesQueryKey() }),
@@ -367,6 +464,32 @@ export default function EmployeeClockScreen({ hideTopPad }: { hideTopPad?: boole
         )}
       </View>
 
+      {awaitingEntry && (
+        <View style={[styles.confirmCard, { backgroundColor: colors.card, borderColor: colors.primary }]}>
+          <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
+            <Feather name="alert-circle" size={18} color={colors.primary} />
+            <Text style={{ color: colors.foreground, fontWeight: "700", fontSize: 14, flex: 1 }}>
+              Confirm your last shift
+            </Text>
+          </View>
+          <Text style={{ color: colors.mutedForeground, fontSize: 12, lineHeight: 17 }}>
+            {new Date(awaitingEntry.clockInTime).toLocaleString([], { weekday: "short", month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" })}
+            {" → "}
+            {awaitingEntry.clockOutTime ? new Date(awaitingEntry.clockOutTime).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }) : "—"}
+            {". Review your times and submit them for approval."}
+          </Text>
+          <TouchableOpacity
+            onPress={openReview}
+            style={[styles.confirmBtn, { backgroundColor: colors.primary }]}
+            accessibilityRole="button"
+            accessibilityLabel="Review and confirm your last shift times"
+          >
+            <Feather name="check-square" size={15} color={colors.primaryForeground ?? "#0c0a08"} />
+            <Text style={{ color: colors.primaryForeground ?? "#0c0a08", fontWeight: "700", fontSize: 13 }}>Review & confirm</Text>
+          </TouchableOpacity>
+        </View>
+      )}
+
       {showShiftPicker && (
         <View style={[styles.section, { backgroundColor: colors.card, borderColor: colors.border, marginHorizontal: 16, borderRadius: 12, borderWidth: 1, padding: 16 }]}>
           <View style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
@@ -476,6 +599,92 @@ export default function EmployeeClockScreen({ hideTopPad }: { hideTopPad?: boole
       )}
 
       <Modal
+        visible={reviewOpen}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setReviewOpen(false)}
+      >
+        <View style={styles.modalOverlay}>
+          <View style={[styles.modalCard, { backgroundColor: colors.card, borderColor: colors.border }]}>
+            <Text style={[styles.modalTitle, { color: colors.foreground }]}>Confirm your shift times</Text>
+            <Text style={[styles.modalMessage, { color: colors.mutedForeground }]}>
+              {awaitingEntry ? (
+                `${new Date(awaitingEntry.clockInTime).toLocaleString()} → ${awaitingEntry.clockOutTime ? new Date(awaitingEntry.clockOutTime).toLocaleString() : "—"}`
+              ) : ""}
+            </Text>
+            {!editTimes ? (
+              <TouchableOpacity
+                onPress={() => setEditTimes(true)}
+                accessibilityRole="button"
+                accessibilityLabel="Adjust my clock-in or clock-out times"
+              >
+                <Text style={{ color: colors.primary, fontSize: 13, textDecorationLine: "underline", marginTop: 4 }}>
+                  These times are wrong — adjust them
+                </Text>
+              </TouchableOpacity>
+            ) : (
+              <View style={{ gap: 8, marginTop: 8 }}>
+                <Text style={{ color: colors.mutedForeground, fontSize: 12 }}>Clock-in (YYYY-MM-DD HH:MM)</Text>
+                <TextInput
+                  style={[styles.reviewInput, { color: colors.foreground, borderColor: colors.border, backgroundColor: colors.background }]}
+                  value={editIn}
+                  onChangeText={setEditIn}
+                  autoCapitalize="none"
+                  autoCorrect={false}
+                  accessibilityLabel="Edited clock-in time"
+                />
+                <Text style={{ color: colors.mutedForeground, fontSize: 12 }}>Clock-out (YYYY-MM-DD HH:MM)</Text>
+                <TextInput
+                  style={[styles.reviewInput, { color: colors.foreground, borderColor: colors.border, backgroundColor: colors.background }]}
+                  value={editOut}
+                  onChangeText={setEditOut}
+                  autoCapitalize="none"
+                  autoCorrect={false}
+                  accessibilityLabel="Edited clock-out time"
+                />
+                <Text style={{ color: colors.mutedForeground, fontSize: 12 }}>Reason for the change (required)</Text>
+                <TextInput
+                  style={[styles.correctionInput, { marginTop: 0, color: colors.foreground, borderColor: colors.border, backgroundColor: colors.background }]}
+                  value={editReason}
+                  onChangeText={setEditReason}
+                  placeholder="e.g. Forgot to clock out when relieved"
+                  placeholderTextColor={colors.mutedForeground}
+                  multiline
+                  numberOfLines={2}
+                  accessibilityLabel="Reason for the time change"
+                />
+              </View>
+            )}
+            {reviewError && (
+              <Text accessibilityLiveRegion="polite" style={{ color: colors.destructive, fontSize: 13, marginTop: 6 }}>{reviewError}</Text>
+            )}
+            <View style={styles.modalActions}>
+              <TouchableOpacity
+                style={[styles.modalBtn, { borderColor: colors.border, borderWidth: 1 }]}
+                onPress={() => setReviewOpen(false)}
+                accessibilityRole="button"
+                accessibilityLabel="Close without confirming"
+              >
+                <Text style={[styles.modalBtnText, { color: colors.foreground }]}>Not now</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={[styles.modalBtn, { backgroundColor: colors.success, opacity: confirmMutation.isPending ? 0.7 : 1 }]}
+                onPress={submitConfirmation}
+                disabled={confirmMutation.isPending}
+                accessibilityRole="button"
+                accessibilityLabel={editTimes ? "Submit edited times for approval" : "Confirm times and submit for approval"}
+                accessibilityState={{ disabled: confirmMutation.isPending, busy: confirmMutation.isPending }}
+              >
+                {confirmMutation.isPending
+                  ? <ActivityIndicator size="small" color={colors.successForeground} />
+                  : <Text style={[styles.modalBtnText, { color: colors.successForeground }]}>{editTimes ? "Submit edits" : "Confirm"}</Text>}
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
+
+      <Modal
         visible={!!confirmModal}
         transparent
         animationType="fade"
@@ -546,6 +755,9 @@ const styles = StyleSheet.create({
   modalActions: { flexDirection: "row", justifyContent: "flex-end", gap: 10, marginTop: 16 },
   modalBtn: { paddingHorizontal: 18, paddingVertical: 10, borderRadius: 10, minWidth: 96, alignItems: "center" },
   modalBtnText: { fontSize: 14, fontWeight: "700" },
+  confirmCard: { marginHorizontal: 16, marginTop: 4, padding: 14, borderRadius: 12, borderWidth: 2, gap: 8 },
+  confirmBtn: { flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 6, paddingVertical: 10, borderRadius: 8, marginTop: 2 },
+  reviewInput: { borderWidth: 1, borderRadius: 8, paddingHorizontal: 10, paddingVertical: 8, fontSize: 14 },
   section: { paddingHorizontal: 16, paddingTop: 20 },
   sectionTitle: { fontSize: 11, fontWeight: "700", letterSpacing: 2, marginBottom: 12 },
   entryCard: { borderRadius: 10, borderWidth: 1, padding: 12, marginBottom: 8, gap: 6 },

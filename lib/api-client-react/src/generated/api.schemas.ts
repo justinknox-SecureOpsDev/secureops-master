@@ -981,6 +981,24 @@ export const TimeEntryApprovalStatus = {
   rejected: "rejected",
 } as const;
 
+/**
+ * Officer post-clock-out confirmation state. `awaiting_confirmation`
+means the officer must review/confirm their times before the entry
+enters the normal pending-approval queue. `confirmed` means the
+officer submitted (or an admin acted on the entry, force-clearing
+it). Null = confirmation not applicable (admin-created, imported,
+or legacy entries).
+
+ */
+export type TimeEntryConfirmationStatus =
+  | (typeof TimeEntryConfirmationStatus)[keyof typeof TimeEntryConfirmationStatus]
+  | null;
+
+export const TimeEntryConfirmationStatus = {
+  awaiting_confirmation: "awaiting_confirmation",
+  confirmed: "confirmed",
+} as const;
+
 export interface TimeEntry {
   id: string;
   shiftId: string;
@@ -1005,6 +1023,22 @@ export interface TimeEntry {
   notes?: string;
   correctionRequested?: boolean;
   correctionNote?: string;
+  /** Officer post-clock-out confirmation state. `awaiting_confirmation`
+means the officer must review/confirm their times before the entry
+enters the normal pending-approval queue. `confirmed` means the
+officer submitted (or an admin acted on the entry, force-clearing
+it). Null = confirmation not applicable (admin-created, imported,
+or legacy entries).
+ */
+  confirmationStatus?: TimeEntryConfirmationStatus;
+  /** GPS/clock-recorded clock-in captured at clock-out, before any officer edit. */
+  originalClockInTime?: string | null;
+  /** GPS/clock-recorded clock-out captured at clock-out, before any officer edit. */
+  originalClockOutTime?: string | null;
+  /** True when the officer changed the recorded times during confirmation. */
+  employeeEdited?: boolean;
+  employeeEditReason?: string | null;
+  confirmedAt?: string | null;
   createdAt: string;
 }
 
@@ -1067,6 +1101,22 @@ export interface ClockInRequest {
   lat?: number;
   lng?: number;
   notes?: string;
+}
+
+/**
+ * Officer confirmation of a clocked-out time entry. Omit both times to
+confirm the recorded values as-is. Provide clockInTime and/or
+clockOutTime to submit corrected times — editReason is then required.
+
+ */
+export interface ConfirmTimeEntryRequest {
+  clockInTime?: string;
+  clockOutTime?: string;
+  /**
+   * Required when either time is changed. Shown to approvers.
+   * @maxLength 1000
+   */
+  editReason?: string;
 }
 
 export interface ClockOutRequest {

@@ -1267,6 +1267,36 @@ paths:
               schema:
                 $ref: "#/components/schemas/TimeCard"
 
+  /time-entries/{id}/confirm:
+    post:
+      operationId: confirmTimeEntry
+      tags: [timeEntries]
+      summary: Officer confirms (optionally edits) their clocked-out time entry
+      description: |
+        Owner-only. Only valid while the entry is awaiting confirmation.
+        Confirms the recorded times as-is, or applies officer-edited times
+        (reason required); hours are recomputed server-side. Moves the entry
+        into the normal pending-approval queue.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ConfirmTimeEntryRequest"
+      responses:
+        "200":
+          description: Confirmed time entry
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TimeEntry"
+
   /payroll:
     get:
       operationId: getPayrollEntries
@@ -4364,6 +4394,37 @@ components:
           type: boolean
         correctionNote:
           type: string
+        confirmationStatus:
+          type: string
+          nullable: true
+          enum: [awaiting_confirmation, confirmed]
+          description: |
+            Officer post-clock-out confirmation state. `awaiting_confirmation`
+            means the officer must review/confirm their times before the entry
+            enters the normal pending-approval queue. `confirmed` means the
+            officer submitted (or an admin acted on the entry, force-clearing
+            it). Null = confirmation not applicable (admin-created, imported,
+            or legacy entries).
+        originalClockInTime:
+          type: string
+          format: date-time
+          nullable: true
+          description: GPS/clock-recorded clock-in captured at clock-out, before any officer edit.
+        originalClockOutTime:
+          type: string
+          format: date-time
+          nullable: true
+          description: GPS/clock-recorded clock-out captured at clock-out, before any officer edit.
+        employeeEdited:
+          type: boolean
+          description: True when the officer changed the recorded times during confirmation.
+        employeeEditReason:
+          type: string
+          nullable: true
+        confirmedAt:
+          type: string
+          format: date-time
+          nullable: true
         createdAt:
           type: string
           format: date-time
@@ -4494,6 +4555,24 @@ components:
           type: number
         notes:
           type: string
+
+    ConfirmTimeEntryRequest:
+      type: object
+      description: |
+        Officer confirmation of a clocked-out time entry. Omit both times to
+        confirm the recorded values as-is. Provide clockInTime and/or
+        clockOutTime to submit corrected times — editReason is then required.
+      properties:
+        clockInTime:
+          type: string
+          format: date-time
+        clockOutTime:
+          type: string
+          format: date-time
+        editReason:
+          type: string
+          maxLength: 1000
+          description: Required when either time is changed. Shown to approvers.
 
     ClockOutRequest:
       type: object

@@ -302,6 +302,12 @@ const baseSelect = {
   notes: timeEntriesTable.notes,
   correctionRequested: timeEntriesTable.correctionRequested,
   correctionNote: timeEntriesTable.correctionNote,
+  confirmationStatus: timeEntriesTable.confirmationStatus,
+  originalClockInTime: timeEntriesTable.originalClockInTime,
+  originalClockOutTime: timeEntriesTable.originalClockOutTime,
+  employeeEdited: timeEntriesTable.employeeEdited,
+  employeeEditReason: timeEntriesTable.employeeEditReason,
+  confirmedAt: timeEntriesTable.confirmedAt,
   createdAt: timeEntriesTable.createdAt,
   shiftTitle: shiftsTable.title,
   siteId: sql<string | null>`coalesce(${timeEntriesTable.siteId}, ${shiftsTable.siteId})`,
@@ -735,6 +741,14 @@ router.post("/time-entries/clock-out", requireStaff, async (req, res): Promise<v
   const trimmedCorrection = typeof correctionNote === "string" ? correctionNote.trim().slice(0, 1000) : "";
   const hasCorrection = trimmedCorrection.length > 0;
 
+  // Officer confirmation workflow: when the OWNER clocks themselves out, the
+  // entry enters 'awaiting_confirmation' — the officer must review/confirm
+  // (or edit) the recorded times before it joins the pending-approval queue.
+  // We snapshot the GPS/clock-recorded times here, BEFORE any officer edit,
+  // so approvers always see original → submitted. Admin clock-outs on behalf
+  // of someone else skip confirmation (behave as today).
+  const ownerInitiated = entry.employeeId === req.user!.userId;
+
   // Reset syncSource to 'local' so clock-outs of scheduler-origin entries
   // are pushed back rather than suppressed by the loop-prevention guard.
   const [updated] = await db.update(timeEntriesTable).set({
@@ -744,6 +758,14 @@ router.post("/time-entries/clock-out", requireStaff, async (req, res): Promise<v
     hoursWorked: String(hours),
     notes: notes || entry.notes,
     ...(hasCorrection ? { correctionRequested: true, correctionNote: trimmedCorrection } : {}),
+    ...(ownerInitiated ? {
+      confirmationStatus: "awaiting_confirmation",
+      originalClockInTime: entry.clockInTime,
+      originalClockOutTime: clockOut,
+      employeeEdited: false,
+      employeeEditReason: null,
+      confirmedAt: null,
+    } : {}),
     syncSource: "local",
   }).where(eq(timeEntriesTable.id, timeEntryId)).returning();
 
@@ -1145,6 +1167,11 @@ router.patch("/time-entries/:id/times", requireAdmin, async (req, res): Promise<
     updates.clockOutTime = targetClockOut;
     updates.hoursWorked = String(calcHours(targetClockIn, targetClockOut));
   }
+  // An admin correction on an unconfirmed entry also clears the awaiting
+  // state — the admin has reviewed the times, so officer confirmation is moot.
+  if (existing.confirmationStatus === "awaiting_confirmation") {
+    updates.confirmationStatus = "confirmed";
+  }
 
   const [updated] = await db.update(timeEntriesTable).set(updates).where(eq(timeEntriesTable.id, id)).returning();
 
@@ -1186,6 +1213,117 @@ router.patch("/time-entries/:id/times", requireAdmin, async (req, res): Promise<
             AND ${timeEntriesTable.clockOutTime} IS NULL
         )`,
       ));
+  }
+
+  const [shift] = updated.shiftId
+    ? await db.select().from(shiftsTable).where(eq(shiftsTable.id, updated.shiftId))
+    : [undefined];
+  const [user] = await db.select().from(usersTable).where(eq(usersTable.id, updated.employeeId));
+
+  res.json({
+    ...updated,
+    shiftTitle: shift?.title,
+    employeeName: user ? `${user.firstName} ${user.lastName}` : null,
+  });
+});
+
+// Officer confirms (optionally edits) their own clocked-out time entry.
+//
+// Owner-only, and only while the entry is 'awaiting_confirmation' (set by the
+// officer-initiated clock-out). Confirming with no body accepts the recorded
+// times as-is. Providing clockInTime and/or clockOutTime applies an officer
+// edit — a reason note is then required, the entry is flagged employeeEdited,
+// and the standard last-edited provenance + before/after audit metadata are
+// stamped so the per-entry change history shows the officer's change.
+// Hours are always recomputed server-side. Does NOT fire invoice sync — the
+// entry is still pending approval; only approval bills the client.
+router.post("/time-entries/:id/confirm", requireStaff, async (req, res): Promise<void> => {
+  const id = Array.isArray(req.params.id) ? req.params.id[0] : req.params.id;
+  const { clockInTime, clockOutTime, editReason } = req.body ?? {};
+
+  const [existing] = await db.select().from(timeEntriesTable).where(eq(timeEntriesTable.id, id));
+  if (!existing) { res.status(404).json({ error: "Not Found" }); return; }
+  if (existing.employeeId !== req.user!.userId) {
+    res.status(403).json({ error: "Forbidden", message: "You can only confirm your own time entries." });
+    return;
+  }
+  if (existing.confirmationStatus !== "awaiting_confirmation") {
+    res.status(409).json({ error: "Conflict", message: "This time entry is not awaiting confirmation." });
+    return;
+  }
+  if (!existing.clockOutTime) {
+    // Defensive: awaiting entries are always clocked out, but never trust state.
+    res.status(409).json({ error: "Conflict", message: "This time entry has no clock-out to confirm." });
+    return;
+  }
+
+  let targetClockIn = existing.clockInTime;
+  if (clockInTime !== undefined && clockInTime !== null) {
+    const parsed = new Date(clockInTime);
+    if (isNaN(parsed.getTime())) {
+      res.status(400).json({ error: "Bad Request", message: "clockInTime must be a valid ISO timestamp." });
+      return;
+    }
+    targetClockIn = parsed;
+  }
+  let targetClockOut = existing.clockOutTime;
+  if (clockOutTime !== undefined && clockOutTime !== null) {
+    const parsed = new Date(clockOutTime);
+    if (isNaN(parsed.getTime())) {
+      res.status(400).json({ error: "Bad Request", message: "clockOutTime must be a valid ISO timestamp." });
+      return;
+    }
+    targetClockOut = parsed;
+  }
+
+  const timesChanged =
+    targetClockIn.getTime() !== existing.clockInTime.getTime() ||
+    targetClockOut.getTime() !== existing.clockOutTime.getTime();
+
+  if (targetClockOut.getTime() <= targetClockIn.getTime()) {
+    res.status(400).json({ error: "Bad Request", message: "Clock-out must be after clock-in." });
+    return;
+  }
+  // Small skew allowance so "now"-ish submissions from slightly fast clocks pass.
+  const futureCutoff = Date.now() + 2 * 60_000;
+  if (targetClockIn.getTime() > futureCutoff || targetClockOut.getTime() > futureCutoff) {
+    res.status(400).json({ error: "Bad Request", message: "Times can't be in the future." });
+    return;
+  }
+
+  const trimmedReason = typeof editReason === "string" ? editReason.trim().slice(0, 1000) : "";
+  if (timesChanged && trimmedReason.length === 0) {
+    res.status(400).json({ error: "Bad Request", message: "Please add a short reason for changing your times." });
+    return;
+  }
+
+  const updates: Record<string, unknown> = {
+    confirmationStatus: "confirmed",
+    confirmedAt: new Date(),
+  };
+  if (timesChanged) {
+    updates.clockInTime = targetClockIn;
+    updates.clockOutTime = targetClockOut;
+    updates.hoursWorked = String(calcHours(targetClockIn, targetClockOut));
+    updates.employeeEdited = true;
+    updates.employeeEditReason = trimmedReason;
+    // Officer-edited times must propagate to the scheduler like any local edit.
+    updates.syncSource = "local";
+    // Standard edit provenance so the "Edited" indicator + per-entry change
+    // history (audit_logs filtered by entryId) cover officer edits too.
+    updates.lastEditedByUserId = req.user!.userId;
+    updates.lastEditedByEmail = req.user!.email;
+    updates.lastEditedAt = new Date();
+  }
+
+  const [updated] = await db.update(timeEntriesTable).set(updates).where(eq(timeEntriesTable.id, id)).returning();
+
+  if (timesChanged) {
+    res.locals["auditMetadata"] = buildTimeEntryAuditMetadata(
+      id,
+      timeEntrySnapshot(existing),
+      timeEntrySnapshot(updated),
+    );
   }
 
   const [shift] = updated.shiftId
@@ -1273,6 +1411,12 @@ router.post("/time-entries/:id/approve", requireAdminOrSiteManager, async (req, 
   };
   if (hoursWorked !== undefined) updates.hoursWorked = String(hoursWorked);
   if (notes !== undefined) updates.notes = notes;
+  // Admin action on an unconfirmed entry force-clears the awaiting state —
+  // an officer who never confirms cannot block payroll. Original recorded
+  // times stay preserved on the row.
+  if (existing.confirmationStatus === "awaiting_confirmation") {
+    updates.confirmationStatus = "confirmed";
+  }
 
   const [updated] = await db.update(timeEntriesTable).set(updates).where(eq(timeEntriesTable.id, id)).returning();
   const [shift] = updated.shiftId

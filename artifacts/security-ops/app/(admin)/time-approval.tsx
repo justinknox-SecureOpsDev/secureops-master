@@ -7,7 +7,12 @@ import { Feather } from "@expo/vector-icons";
 import { useRouter } from "expo-router";
 import { useQueryClient } from "@tanstack/react-query";
 
-const FILTERS = ["pending", "approved", "rejected"] as const;
+// "unconfirmed" = clocked-out entries the officer hasn't confirmed yet
+// (confirmationStatus === 'awaiting_confirmation'). They're kept out of the
+// Pending tab so the approval queue only shows officer-submitted entries, but
+// admins can still approve/correct them from the Unconfirmed tab (approval
+// force-clears the awaiting state server-side).
+const FILTERS = ["pending", "unconfirmed", "approved", "rejected"] as const;
 
 export default function TimeApprovalScreen() {
   const colors = useColors();
@@ -26,7 +31,12 @@ export default function TimeApprovalScreen() {
   const visible = useMemo(() => {
     return ((entries ?? []) as any[])
       .filter((e) => e.clockOutTime)
-      .filter((e) => (e.approvalStatus || "pending") === filter)
+      .filter((e) => {
+        const awaiting = e.confirmationStatus === "awaiting_confirmation";
+        if (filter === "unconfirmed") return awaiting && (e.approvalStatus || "pending") === "pending";
+        if (filter === "pending") return !awaiting && (e.approvalStatus || "pending") === "pending";
+        return (e.approvalStatus || "pending") === filter;
+      })
       .sort((a, b) => new Date(b.clockInTime).getTime() - new Date(a.clockInTime).getTime());
   }, [entries, filter]);
 
@@ -106,6 +116,35 @@ export default function TimeApprovalScreen() {
                   {new Date(item.clockInTime).toLocaleString()} → {item.clockOutTime ? new Date(item.clockOutTime).toLocaleString() : "—"}
                 </Text>
 
+                {item.confirmationStatus === "awaiting_confirmation" && (
+                  <View style={[styles.correctionBox, { backgroundColor: colors.primary + "12", borderColor: colors.primary }]}>
+                    <View style={styles.correctionHead}>
+                      <Feather name="clock" size={12} color={colors.primary} />
+                      <Text style={[styles.correctionTitle, { color: colors.primary }]}>Awaiting officer confirmation</Text>
+                    </View>
+                    <Text style={[styles.correctionNote, { color: colors.mutedForeground }]}>
+                      The officer hasn't reviewed this entry yet. You can still approve or correct it.
+                    </Text>
+                  </View>
+                )}
+
+                {item.employeeEdited && (
+                  <View style={[styles.correctionBox, { backgroundColor: "#8b5cf615", borderColor: "#8b5cf6" }]}>
+                    <View style={styles.correctionHead}>
+                      <Feather name="edit-2" size={12} color="#8b5cf6" />
+                      <Text style={[styles.correctionTitle, { color: "#8b5cf6" }]}>Edited by officer</Text>
+                    </View>
+                    {(item.originalClockInTime || item.originalClockOutTime) ? (
+                      <Text style={[styles.correctionNote, { color: colors.mutedForeground }]}>
+                        Recorded: {item.originalClockInTime ? new Date(item.originalClockInTime).toLocaleString() : "—"} → {item.originalClockOutTime ? new Date(item.originalClockOutTime).toLocaleString() : "—"}
+                      </Text>
+                    ) : null}
+                    {item.employeeEditReason ? (
+                      <Text style={[styles.correctionNote, { color: colors.foreground }]}>{item.employeeEditReason}</Text>
+                    ) : null}
+                  </View>
+                )}
+
                 {item.correctionRequested && (
                   <View style={[styles.correctionBox, { backgroundColor: colors.destructive + "15", borderColor: colors.destructive }]}>
                     <View style={styles.correctionHead}>
@@ -118,7 +157,7 @@ export default function TimeApprovalScreen() {
                   </View>
                 )}
 
-                {filter === "pending" ? (
+                {filter === "pending" || filter === "unconfirmed" ? (
                   <View style={[styles.editRow, { borderColor: colors.border }]}>
                     <Text style={{ color: colors.mutedForeground, fontSize: 12 }}>Approve hours:</Text>
                     <TextInput
@@ -136,7 +175,7 @@ export default function TimeApprovalScreen() {
                   </Text>
                 )}
 
-                {filter === "pending" && (
+                {(filter === "pending" || filter === "unconfirmed") && (
                   <View style={{ flexDirection: "row", gap: 8 }}>
                     <TouchableOpacity onPress={() => handle(item.id, "approved", logged)}
                       style={[styles.actBtn, { backgroundColor: "#22c55e" }]}

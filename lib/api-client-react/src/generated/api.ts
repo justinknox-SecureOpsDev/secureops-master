@@ -56,6 +56,7 @@ import type {
   ClockInShift,
   ClockInSite,
   ClockOutRequest,
+  ConfirmTimeEntryRequest,
   CreateAdminTaskRequest,
   CreateApplicationQuestionRequest,
   CreateChatRoomBody,
@@ -4777,6 +4778,98 @@ export function useGetTimeCard<
 
   return { ...query, queryKey: queryOptions.queryKey };
 }
+
+/**
+ * Owner-only. Only valid while the entry is awaiting confirmation.
+Confirms the recorded times as-is, or applies officer-edited times
+(reason required); hours are recomputed server-side. Moves the entry
+into the normal pending-approval queue.
+
+ * @summary Officer confirms (optionally edits) their clocked-out time entry
+ */
+export const getConfirmTimeEntryUrl = (id: string) => {
+  return `/api/time-entries/${id}/confirm`;
+};
+
+export const confirmTimeEntry = async (
+  id: string,
+  confirmTimeEntryRequest?: ConfirmTimeEntryRequest,
+  options?: RequestInit,
+): Promise<TimeEntry> => {
+  return customFetch<TimeEntry>(getConfirmTimeEntryUrl(id), {
+    ...options,
+    method: "POST",
+    headers: { "Content-Type": "application/json", ...options?.headers },
+    body: JSON.stringify(confirmTimeEntryRequest),
+  });
+};
+
+export const getConfirmTimeEntryMutationOptions = <
+  TError = ErrorType<unknown>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof confirmTimeEntry>>,
+    TError,
+    { id: string; data: BodyType<ConfirmTimeEntryRequest> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof confirmTimeEntry>>,
+  TError,
+  { id: string; data: BodyType<ConfirmTimeEntryRequest> },
+  TContext
+> => {
+  const mutationKey = ["confirmTimeEntry"];
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof confirmTimeEntry>>,
+    { id: string; data: BodyType<ConfirmTimeEntryRequest> }
+  > = (props) => {
+    const { id, data } = props ?? {};
+
+    return confirmTimeEntry(id, data, requestOptions);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type ConfirmTimeEntryMutationResult = NonNullable<
+  Awaited<ReturnType<typeof confirmTimeEntry>>
+>;
+export type ConfirmTimeEntryMutationBody = BodyType<ConfirmTimeEntryRequest>;
+export type ConfirmTimeEntryMutationError = ErrorType<unknown>;
+
+/**
+ * @summary Officer confirms (optionally edits) their clocked-out time entry
+ */
+export const useConfirmTimeEntry = <
+  TError = ErrorType<unknown>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof confirmTimeEntry>>,
+    TError,
+    { id: string; data: BodyType<ConfirmTimeEntryRequest> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationResult<
+  Awaited<ReturnType<typeof confirmTimeEntry>>,
+  TError,
+  { id: string; data: BodyType<ConfirmTimeEntryRequest> },
+  TContext
+> => {
+  return useMutation(getConfirmTimeEntryMutationOptions(options));
+};
 
 /**
  * @summary Get payroll entries

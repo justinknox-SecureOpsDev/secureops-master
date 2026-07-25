@@ -47,6 +47,24 @@ export const timeEntriesTable = pgTable("time_entries", {
   // `correctionNote` is the officer's explanation of what needs fixing.
   correctionRequested: boolean("correction_requested").notNull().default(false),
   correctionNote: text("correction_note"),
+  // Officer post-clock-out confirmation workflow. Officer-initiated clock-outs
+  // put the entry into 'awaiting_confirmation': the officer must review the
+  // recorded times (confirm as-is, or edit with a reason) before it enters the
+  // normal pending-approval queue. NULL = confirmation not applicable
+  // (admin-created rows, scheduler imports, legacy entries) — those behave as
+  // before. Admin approve/correct on an awaiting entry force-clears it to
+  // 'confirmed' so an officer who never confirms can't block payroll.
+  confirmationStatus: text("confirmation_status"), // 'awaiting_confirmation' | 'confirmed' | null
+  // Immutable snapshot of the GPS/clock-recorded times taken at clock-out,
+  // BEFORE any officer edit. Drives the "Edited by officer" original→submitted
+  // display on approval surfaces.
+  originalClockInTime: timestamp("original_clock_in_time", { withTimezone: true }),
+  originalClockOutTime: timestamp("original_clock_out_time", { withTimezone: true }),
+  // True when the officer changed their times during confirmation; the reason
+  // note is required in that case and shown to approvers.
+  employeeEdited: boolean("employee_edited").notNull().default(false),
+  employeeEditReason: text("employee_edit_reason"),
+  confirmedAt: timestamp("confirmed_at", { withTimezone: true }),
   // Live geofence state for THIS active shift. `inside` while the officer's
   // last location ping is within GEOFENCE_RADIUS_MILES of the shift's site,
   // `outside` if they've drifted out (admins are pushed once on the

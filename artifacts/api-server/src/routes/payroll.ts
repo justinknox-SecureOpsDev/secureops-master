@@ -907,7 +907,7 @@ type BoardBucket = {
   timeEntryIds: string[];
   // Lightweight per-entry detail so the admin UI can expand a bucket row and
   // verify the underlying approved shifts without a second round-trip.
-  entries: Array<{ id: string; clockInTime: string; hoursWorked: number; rate: number; holiday: string | null; hasClockOut: boolean; scheduledEnd: string | null; lastEditedByEmail: string | null; lastEditedAt: string | null }>;
+  entries: Array<{ id: string; clockInTime: string; hoursWorked: number; rate: number; holiday: string | null; hasClockOut: boolean; scheduledEnd: string | null; lastEditedByEmail: string | null; lastEditedAt: string | null; clockOutTime: string | null; employeeEdited: boolean; employeeEditReason: string | null; originalClockInTime: string | null; originalClockOutTime: string | null; confirmationStatus: string | null }>;
   existingPayrollEntryId: string | null;
   existingStatus: string | null; // pending | processed | paid | null (none)
   // Per-bucket warnings surfaced on the Payroll Board so admins notice
@@ -965,6 +965,14 @@ async function computeBoardBuckets(filters: {
       // history dialog on the Payroll Board's per-entry detail rows.
       lastEditedByEmail: timeEntriesTable.lastEditedByEmail,
       lastEditedAt: timeEntriesTable.lastEditedAt,
+      // Officer-confirmation provenance — drives the "Edited by officer"
+      // badge (original vs submitted times + reason) on the Payroll Board.
+      clockOutTime: timeEntriesTable.clockOutTime,
+      employeeEdited: timeEntriesTable.employeeEdited,
+      employeeEditReason: timeEntriesTable.employeeEditReason,
+      originalClockInTime: timeEntriesTable.originalClockInTime,
+      originalClockOutTime: timeEntriesTable.originalClockOutTime,
+      confirmationStatus: timeEntriesTable.confirmationStatus,
     })
     .from(timeEntriesTable)
     .leftJoin(shiftsTable, eq(timeEntriesTable.shiftId, shiftsTable.id))
@@ -984,7 +992,7 @@ async function computeBoardBuckets(filters: {
     hours: number;
     gross: number;
     timeEntryIds: string[];
-    entries: Array<{ id: string; clockInTime: string; hoursWorked: number; rate: number; holiday: string | null; hasClockOut: boolean; scheduledEnd: string | null; lastEditedByEmail: string | null; lastEditedAt: string | null }>;
+    entries: Array<{ id: string; clockInTime: string; hoursWorked: number; rate: number; holiday: string | null; hasClockOut: boolean; scheduledEnd: string | null; lastEditedByEmail: string | null; lastEditedAt: string | null; clockOutTime: string | null; employeeEdited: boolean; employeeEditReason: string | null; originalClockInTime: string | null; originalClockOutTime: string | null; confirmationStatus: string | null }>;
     zeroRateEntries: number;
     missingClockOutEntries: number;
     zeroHoursEntries: number;
@@ -1059,6 +1067,12 @@ async function computeBoardBuckets(filters: {
       scheduledEnd: r.shiftEndTime ? r.shiftEndTime.toISOString() : null,
       lastEditedByEmail: r.lastEditedByEmail ?? null,
       lastEditedAt: r.lastEditedAt ? r.lastEditedAt.toISOString() : null,
+      clockOutTime: r.clockOutTime ? r.clockOutTime.toISOString() : null,
+      employeeEdited: !!r.employeeEdited,
+      employeeEditReason: r.employeeEditReason ?? null,
+      originalClockInTime: r.originalClockInTime ? r.originalClockInTime.toISOString() : null,
+      originalClockOutTime: r.originalClockOutTime ? r.originalClockOutTime.toISOString() : null,
+      confirmationStatus: r.confirmationStatus ?? null,
     });
   }
 
