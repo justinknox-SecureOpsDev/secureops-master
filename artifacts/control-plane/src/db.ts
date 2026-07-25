@@ -66,6 +66,14 @@ export async function ensureSchema(): Promise<void> {
     `ALTER TABLE control_plane_customers ADD COLUMN IF NOT EXISTS agreements_json TEXT;`,
   );
 
+  // Per-tenant commercial-config snapshot (JSON: plan tier + monthly price etc),
+  // refreshed by the poller via the HMAC-gated /api/control-plane/settings surface.
+  // Drives the fleet-wide plan/MRR overview so an operator sees who's on which
+  // plan without opening each customer's Remote Settings modal.
+  await pool.query(
+    `ALTER TABLE control_plane_customers ADD COLUMN IF NOT EXISTS customer_config_json TEXT;`,
+  );
+
   // Audit trail of remote brand/feature changes pushed to customer backends.
   await pool.query(`
     CREATE TABLE IF NOT EXISTS control_plane_remote_changes (
@@ -97,6 +105,7 @@ export interface CustomerRow {
   notes: string | null;
   mgmt_secret_enc: string | null;
   agreements_json: string | null;
+  customer_config_json: string | null;
   target_version: string | null;
   reported_version: string | null;
   reported_built_at: string | null;

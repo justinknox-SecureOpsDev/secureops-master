@@ -82,6 +82,42 @@ function kindBadgeClass(kind) {
   return "ok";
 }
 
+// Human label for a plan tier token; unknown/empty tiers fall back to the raw
+// value so a control plane that predates a new tier still shows something.
+function tierLabel(tier) {
+  if (tier === "starter") return "Starter";
+  if (tier === "professional") return "Professional";
+  if (tier === "enterprise") return "Enterprise";
+  if (tier === "custom") return "Custom";
+  return String(tier == null ? "" : tier);
+}
+
+// "$899/mo" style price from cents; null/unknown → "—".
+function fmtMonthlyPrice(cents) {
+  if (cents == null || isNaN(Number(cents))) return "—";
+  return "$" + Number(Number(cents) / 100).toLocaleString(undefined, { maximumFractionDigits: 0 }) + "/mo";
+}
+
+// Fleet plan cell: tier badge + monthly price. Degrades to "unknown" when the
+// plan snapshot was never fetched (no secret / unreachable backend), and to
+// "not set" when the backend was reached but no commercial config is saved.
+function planCell(c) {
+  var plan = c.plan;
+  if (!plan) {
+    var why = c.hasMgmtSecret
+      ? "Plan not yet fetched from this backend"
+      : "No management secret — plan unknowable";
+    return "<span class='badge warn' title='" + esc(why) + "'>unknown</span>";
+  }
+  if (!plan.tier && plan.monthlyPriceCents == null) {
+    return "<span class='muted small' title='Backend reached, but no plan/price is configured'>not set</span>";
+  }
+  var tier = plan.tier
+    ? "<span class='badge plan'>" + esc(tierLabel(plan.tier)) + "</span>"
+    : "<span class='muted small'>no tier</span>";
+  return tier + " <span class='small'>" + esc(fmtMonthlyPrice(plan.monthlyPriceCents)) + "</span>";
+}
+
 function statusBadge(c) {
   const cls = c.lastStatus === "online" ? "ok" : c.lastStatus === "offline" ? "bad" : "warn";
   const label = c.isActive ? c.lastStatus : "paused";
@@ -141,11 +177,43 @@ function renderSummary() {
     return c.needsUpdate;
   }).length;
   const unsigned = customers.filter(agreementsIncomplete).length;
+
+  // Fleet-wide monthly recurring revenue = sum of known monthly prices, plus a
+  // count of customers whose price we couldn't read (so the MRR isn't silently
+  // understated). A per-tier breakdown answers "who's on which plan?" at a glance.
+  var mrrCents = 0;
+  var priced = 0;
+  var unknownPrice = 0;
+  var tierCounts = { starter: 0, professional: 0, enterprise: 0, custom: 0, other: 0 };
+  customers.forEach(function (c) {
+    var plan = c.plan;
+    if (plan && plan.monthlyPriceCents != null) {
+      mrrCents += Number(plan.monthlyPriceCents);
+      priced += 1;
+    } else {
+      unknownPrice += 1;
+    }
+    if (plan && plan.tier) {
+      if (Object.prototype.hasOwnProperty.call(tierCounts, plan.tier)) tierCounts[plan.tier] += 1;
+      else tierCounts.other += 1;
+    }
+  });
+  var mrrLabel = "$" + Number(mrrCents / 100).toLocaleString(undefined, { maximumFractionDigits: 0 }) + "/mo";
+  var mrrSub = priced + " of " + total + " priced" + (unknownPrice ? " · " + unknownPrice + " unknown" : "");
+  var tierParts = [];
+  [["starter", "Starter"], ["professional", "Professional"], ["enterprise", "Enterprise"], ["custom", "Custom"]].forEach(function (pair) {
+    if (tierCounts[pair[0]]) tierParts.push(esc(pair[1]) + " " + tierCounts[pair[0]]);
+  });
+  if (tierCounts.other) tierParts.push("Other " + tierCounts.other);
+  var tierSub = tierParts.length ? tierParts.join(" · ") : "no plans set";
+
   $("summary").innerHTML =
     '<div class="stat"><span class="num">' + total + '</span><span class="lbl">Customers</span></div>' +
     '<div class="stat"><span class="num">' + online + '</span><span class="lbl">Online</span></div>' +
     '<div class="stat ' + (needs ? "alert" : "") + '"><span class="num">' + needs + '</span><span class="lbl">Needs update</span></div>' +
-    '<div class="stat ' + (unsigned ? "alert" : "") + '"><span class="num">' + unsigned + '</span><span class="lbl">Agreements incomplete</span></div>';
+    '<div class="stat ' + (unsigned ? "alert" : "") + '"><span class="num">' + unsigned + '</span><span class="lbl">Agreements incomplete</span></div>' +
+    '<div class="stat"><span class="num">' + mrrLabel + '</span><span class="lbl">MRR · ' + esc(mrrSub) + '</span></div>' +
+    '<div class="stat"><span class="num small-num">' + esc(tierSub) + '</span><span class="lbl">Plan tiers</span></div>';
 }
 
 function renderFleet() {
@@ -163,6 +231,7 @@ function renderFleet() {
       "<td class='small'><a href='" + esc(c.apiBaseUrl) + "' target='_blank' rel='noopener'>" + esc(c.apiBaseUrl) + "</a></td>" +
       "<td>" + statusBadge(c) + "</td>" +
       "<td class='small'>" + agreementsCell(c) + "</td>" +
+      "<td class='small'>" + planCell(c) + "</td>" +
       "<td class='small'>" + versionCell + "</td>" +
       "<td class='small'>" + esc(c.effectiveTargetVersion || "—") + "</td>" +
       "<td class='small'>" + fmtDate(c.lastSeenAt) + "</td>" +

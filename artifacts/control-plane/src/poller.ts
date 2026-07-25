@@ -134,6 +134,44 @@ export async function fetchAgreementsSnapshot(
   }
 }
 
+/**
+ * Fetch the tenant's commercial config (plan tier + monthly price etc) via the
+ * HMAC-gated management surface. Returns the JSON string to store, or `undefined`
+ * to keep whatever snapshot we already have (backend unreachable / transient
+ * error), or `null` to clear it (no secret configured, or a legacy backend that
+ * predates the surface — plan unknowable).
+ *
+ * We snapshot the WHOLE `customerConfig` object (not just tier/price) so the
+ * fleet overview can grow without another schema/poller change; a missing
+ * `customerConfig` (backend reachable but no config saved) still stores a
+ * snapshot with `config: null` so the UI shows "not set" rather than staling.
+ */
+export async function fetchCustomerConfigSnapshot(
+  apiBaseUrl: string,
+  secret: string | null,
+): Promise<string | null | undefined> {
+  if (!secret) return null;
+  try {
+    const result = await callCustomerControlPlane(
+      apiBaseUrl,
+      "/api/control-plane/settings",
+      "GET",
+      secret,
+    );
+    if (result.ok && result.body && typeof result.body === "object") {
+      const config = (result.body as { customerConfig?: unknown }).customerConfig ?? null;
+      return JSON.stringify({ fetchedAt: new Date().toISOString(), config });
+    }
+    if (result.status === 404) {
+      // Legacy backend without the settings surface — plan unknowable.
+      return null;
+    }
+    return undefined; // 401/503/5xx etc — keep the last known snapshot
+  } catch {
+    return undefined; // network failure — keep the last known snapshot
+  }
+}
+
 type PollRow = Pick<CustomerRow, "id" | "api_base_url" | "mgmt_secret_enc">;
 
 async function pollOne(row: PollRow): Promise<void> {
@@ -150,6 +188,9 @@ async function pollOne(row: PollRow): Promise<void> {
     }
   }
   const agreements = seen ? await fetchAgreementsSnapshot(row.api_base_url, secret) : undefined;
+  const customerConfig = seen
+    ? await fetchCustomerConfigSnapshot(row.api_base_url, secret)
+    : undefined;
 
   await pool.query(
     `UPDATE control_plane_customers
@@ -160,6 +201,7 @@ async function pollOne(row: PollRow): Promise<void> {
            reported_built_at = COALESCE($6, reported_built_at),
            last_seen_at = CASE WHEN $7 THEN now() ELSE last_seen_at END,
            agreements_json = CASE WHEN $8 THEN $9 ELSE agreements_json END,
+           customer_config_json = CASE WHEN $10 THEN $11 ELSE customer_config_json END,
            updated_at = now()
      WHERE id = $1`,
     [
@@ -172,6 +214,8 @@ async function pollOne(row: PollRow): Promise<void> {
       seen,
       agreements !== undefined,
       agreements ?? null,
+      customerConfig !== undefined,
+      customerConfig ?? null,
     ],
   );
 }

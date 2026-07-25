@@ -81,6 +81,7 @@ main { padding: 22px; max-width: 1200px; margin: 0 auto; }
   padding: 14px 20px; min-width: 120px;
 }
 .stat .num { font-size: 26px; font-weight: 800; display: block; }
+.stat .num.small-num { font-size: 15px; font-weight: 700; line-height: 1.5; }
 .stat .lbl { color: var(--muted); font-size: 12px; }
 .stat.alert .num { color: var(--bad); }
 

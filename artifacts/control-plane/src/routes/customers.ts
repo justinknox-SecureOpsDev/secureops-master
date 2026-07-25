@@ -71,6 +71,36 @@ export function parseAgreements(
   }
 }
 
+/**
+ * Parse the stored commercial-config snapshot into the at-a-glance plan fields
+ * the fleet overview needs. Malformed/missing JSON → null (renders as "unknown");
+ * a snapshot present but with no config saved → { tier: null, monthlyPriceCents:
+ * null } so the UI can distinguish "not set" from "never fetched".
+ */
+export function parseCustomerPlan(
+  raw: string | null,
+): { fetchedAt: string | null; tier: string | null; monthlyPriceCents: number | null } | null {
+  if (!raw) return null;
+  try {
+    const parsed = JSON.parse(raw) as { fetchedAt?: unknown; config?: unknown };
+    if (!parsed || typeof parsed !== "object") return null;
+    const config =
+      parsed.config && typeof parsed.config === "object" && !Array.isArray(parsed.config)
+        ? (parsed.config as Record<string, unknown>)
+        : null;
+    const tier = config && typeof config.planTier === "string" ? config.planTier : null;
+    const monthlyPriceCents =
+      config && typeof config.monthlyPriceCents === "number" ? config.monthlyPriceCents : null;
+    return {
+      fetchedAt: typeof parsed.fetchedAt === "string" ? parsed.fetchedAt : null,
+      tier,
+      monthlyPriceCents,
+    };
+  } catch {
+    return null;
+  }
+}
+
 function serialize(row: CustomerRow, fleetTarget: string | null) {
   const effectiveTarget = row.target_version ?? fleetTarget;
   const needsUpdate = Boolean(
@@ -95,6 +125,7 @@ function serialize(row: CustomerRow, fleetTarget: string | null) {
     isActive: row.is_active,
     hasMgmtSecret: Boolean(row.mgmt_secret_enc),
     agreements: parseAgreements(row.agreements_json),
+    plan: parseCustomerPlan(row.customer_config_json),
     needsUpdate,
     createdAt: row.created_at,
     updatedAt: row.updated_at,

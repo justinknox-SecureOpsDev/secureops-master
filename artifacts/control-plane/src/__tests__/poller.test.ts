@@ -10,7 +10,7 @@
  */
 
 import { afterEach, describe, expect, it } from "vitest";
-import { fetchAgreementsSnapshot, probeBackend } from "../poller";
+import { fetchAgreementsSnapshot, fetchCustomerConfigSnapshot, probeBackend } from "../poller";
 
 const realFetch = globalThis.fetch;
 afterEach(() => {
@@ -130,5 +130,59 @@ describe("fetchAgreementsSnapshot", () => {
   it("keeps the last snapshot (undefined) on network failure", async () => {
     agreementsRoute(new Error("fetch failed"));
     expect(await fetchAgreementsSnapshot("http://unreachable.test", "secret")).toBeUndefined();
+  });
+});
+
+/**
+ * Commercial-config snapshot fetch semantics (drives the fleet "Plan" column +
+ * MRR/tier overview):
+ *   - stored JSON string ({ fetchedAt, config }) on success;
+ *   - a snapshot with config:null when the backend is reached but has no config;
+ *   - `null` (clear) when no secret or the backend predates the surface (404);
+ *   - `undefined` (keep last snapshot) on transient errors / network failure.
+ */
+describe("fetchCustomerConfigSnapshot", () => {
+  function settingsRoute(target: Response | Error) {
+    globalThis.fetch = (async (url: string) => {
+      if (!url.endsWith("/api/control-plane/settings")) throw new Error(`unexpected url ${url}`);
+      if (target instanceof Error) throw target;
+      return target;
+    }) as unknown as typeof fetch;
+  }
+
+  it("returns null (plan unknowable) without a management secret", async () => {
+    expect(await fetchCustomerConfigSnapshot("http://customer.test", null)).toBeNull();
+  });
+
+  it("stores a snapshot with fetchedAt + config on success", async () => {
+    const config = { planTier: "professional", monthlyPriceCents: 89900 };
+    settingsRoute(res(200, { customerConfig: config }));
+    const raw = await fetchCustomerConfigSnapshot("http://customer.test", "secret");
+    expect(typeof raw).toBe("string");
+    const parsed = JSON.parse(raw as string);
+    expect(typeof parsed.fetchedAt).toBe("string");
+    expect(parsed.config).toEqual(config);
+  });
+
+  it("stores a snapshot with config:null when the backend has no config saved", async () => {
+    settingsRoute(res(200, { customerConfig: null }));
+    const raw = await fetchCustomerConfigSnapshot("http://customer.test", "secret");
+    expect(typeof raw).toBe("string");
+    expect(JSON.parse(raw as string).config).toBeNull();
+  });
+
+  it("clears the snapshot (null) for a legacy backend without the surface (404)", async () => {
+    settingsRoute(res(404, { message: "not found" }));
+    expect(await fetchCustomerConfigSnapshot("http://legacy.test", "secret")).toBeNull();
+  });
+
+  it("keeps the last snapshot (undefined) on transient server errors", async () => {
+    settingsRoute(res(503, { error: "inert" }));
+    expect(await fetchCustomerConfigSnapshot("http://busy.test", "secret")).toBeUndefined();
+  });
+
+  it("keeps the last snapshot (undefined) on network failure", async () => {
+    settingsRoute(new Error("fetch failed"));
+    expect(await fetchCustomerConfigSnapshot("http://unreachable.test", "secret")).toBeUndefined();
   });
 });
