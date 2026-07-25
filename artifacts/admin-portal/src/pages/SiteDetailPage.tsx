@@ -10,6 +10,7 @@ import { getTable } from "@/lib/tables";
 import { RowFormDialog } from "@/components/RowFormDialog";
 import { ShiftDialog } from "@/components/ShiftDialog";
 import { ResponsiveTable, type ResponsiveColumn } from "@/components/ResponsiveTable";
+import { OfficerEditReviewDialog } from "@/components/OfficerEditReviewDialog";
 
 type Site = {
   id: string;
@@ -300,6 +301,9 @@ export function SiteDetailPage() {
   const [teActioningId, setTeActioningId] = useState<string | null>(null);
   const [teHoursEdits, setTeHoursEdits] = useState<Record<string, string>>({});
   const [teActionError, setTeActionError] = useState<string | null>(null);
+  // Officer-edit review dialog (shared with the Payroll Board): approve/reject
+  // on an officer-edited entry opens the recorded-vs-submitted diff first.
+  const [teReviewEntry, setTeReviewEntry] = useState<TimeEntryRow | null>(null);
   // Inline timestamp correction: which row's clock-in/out times are being
   // edited, the draft datetime-local values, and whether a save is in flight.
   const [teTimeEditingId, setTeTimeEditingId] = useState<string | null>(null);
@@ -454,10 +458,12 @@ export function SiteDetailPage() {
   // POST /time-entries/:id/approve. On approve we may pass an edited
   // hours override (mirrors the mobile time-approval screen); on reject
   // we leave hours untouched. The list re-fetches so the new status shows.
-  async function decideTimeEntry(t: TimeEntryRow, decision: "approved" | "rejected") {
+  // Returns true when the decision was actually applied (so callers like the
+  // officer-edit review dialog can close only on success).
+  async function decideTimeEntry(t: TimeEntryRow, decision: "approved" | "rejected"): Promise<boolean> {
     if (!t.clockOutTime) {
       setTeActionError("This entry is still in progress — wait until the officer clocks out before approving or rejecting it.");
-      return;
+      return false;
     }
     setTeActionError(null);
     setTeActioningId(t.id);
@@ -469,18 +475,31 @@ export function SiteDetailPage() {
         if (!Number.isFinite(hours) || hours <= 0) {
           setTeActionError("Enter a positive number of hours before approving.");
           setTeActioningId(null);
-          return;
+          return false;
         }
         body.hoursWorked = hours;
       }
       await api(`/time-entries/${t.id}/approve`, { method: "POST", body });
       setTeHoursEdits((e) => { const n = { ...e }; delete n[t.id]; return n; });
       await loadTimeEntries();
+      return true;
     } catch (e) {
       setTeActionError((e as Error).message);
+      return false;
     } finally {
       setTeActioningId(null);
     }
+  }
+
+  // Approve/reject entry point for the inline buttons: officer-edited entries
+  // open the recorded-vs-submitted review dialog first; everything else
+  // decides immediately.
+  function requestDecision(t: TimeEntryRow, decision: "approved" | "rejected") {
+    if (t.employeeEdited) {
+      setTeReviewEntry(t);
+      return;
+    }
+    void decideTimeEntry(t, decision);
   }
 
   // Open the inline timestamp editor for a row, prefilling the draft from the
@@ -1246,12 +1265,14 @@ export function SiteDetailPage() {
                           </span>
                         )}
                         {t.employeeEdited && (
-                          <span
-                            className="ml-2 inline-flex items-center rounded-full bg-violet-100 text-violet-800 border border-violet-300 px-1.5 py-0.5 text-[10px] font-medium leading-none whitespace-pre-line"
+                          <button
+                            type="button"
+                            onClick={() => setTeReviewEntry(t)}
+                            className="ml-2 inline-flex items-center rounded-full bg-violet-100 text-violet-800 border border-violet-300 px-1.5 py-0.5 text-[10px] font-medium leading-none hover:bg-violet-200 focus:outline-none focus:ring-2 focus:ring-violet-400 cursor-pointer"
                             title={officerEditTitle(t)}
                           >
                             Edited by officer
-                          </span>
+                          </button>
                         )}
                         {isAdmin && t.correctionRequested && (
                           <Button
@@ -1294,12 +1315,14 @@ export function SiteDetailPage() {
                           </span>
                         )}
                         {t.employeeEdited && (
-                          <span
-                            className="inline-flex items-center rounded-full bg-violet-100 text-violet-800 border border-violet-300 px-1.5 py-0.5 text-[10px] font-medium leading-none"
+                          <button
+                            type="button"
+                            onClick={() => setTeReviewEntry(t)}
+                            className="inline-flex items-center rounded-full bg-violet-100 text-violet-800 border border-violet-300 px-1.5 py-0.5 text-[10px] font-medium leading-none hover:bg-violet-200 focus:outline-none focus:ring-2 focus:ring-violet-400 cursor-pointer"
                             title={officerEditTitle(t)}
                           >
                             Edited by officer
-                          </span>
+                          </button>
                         )}
                         {isAdmin && t.correctionRequested && (
                           <Button
@@ -1350,10 +1373,10 @@ export function SiteDetailPage() {
                                 disabled={busy}
                                 className="w-20 border rounded px-2 py-1 text-sm text-right tabular-nums bg-background text-foreground"
                               />
-                              <Button size="sm" onClick={() => decideTimeEntry(t, "approved")} disabled={busy}>
+                              <Button size="sm" onClick={() => requestDecision(t, "approved")} disabled={busy}>
                                 {busy ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : "Approve"}
                               </Button>
-                              <Button variant="outline" size="sm" onClick={() => decideTimeEntry(t, "rejected")} disabled={busy}>
+                              <Button variant="outline" size="sm" onClick={() => requestDecision(t, "rejected")} disabled={busy}>
                                 Reject
                               </Button>
                               <Button variant="ghost" size="sm" onClick={() => startEditTimes(t)} disabled={busy}>
@@ -1395,7 +1418,7 @@ export function SiteDetailPage() {
                               <Button
                                 size="sm"
                                 className="flex-1 min-w-[5rem]"
-                                onClick={() => decideTimeEntry(t, "approved")}
+                                onClick={() => requestDecision(t, "approved")}
                                 disabled={busy}
                               >
                                 {busy ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : "Approve"}
@@ -1404,7 +1427,7 @@ export function SiteDetailPage() {
                                 variant="outline"
                                 size="sm"
                                 className="flex-1 min-w-[5rem]"
-                                onClick={() => decideTimeEntry(t, "rejected")}
+                                onClick={() => requestDecision(t, "rejected")}
                                 disabled={busy}
                               >
                                 Reject
@@ -1504,6 +1527,27 @@ export function SiteDetailPage() {
           </section>
         </div>
       )}
+
+      <OfficerEditReviewDialog
+        entry={teReviewEntry}
+        onClose={() => setTeReviewEntry(null)}
+        busy={!!teReviewEntry && teActioningId === teReviewEntry.id}
+        {...(isAdmin &&
+        teReviewEntry &&
+        (teReviewEntry.approvalStatus ?? "pending").toLowerCase() === "pending" &&
+        teReviewEntry.clockOutTime
+          ? {
+              onApprove: async () => {
+                const ok = await decideTimeEntry(teReviewEntry, "approved");
+                if (ok) setTeReviewEntry(null);
+              },
+              onReject: async () => {
+                const ok = await decideTimeEntry(teReviewEntry, "rejected");
+                if (ok) setTeReviewEntry(null);
+              },
+            }
+          : {})}
+      />
 
       {site && (
         <ShiftDialog

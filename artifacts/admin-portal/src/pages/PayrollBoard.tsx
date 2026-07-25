@@ -8,6 +8,7 @@ import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription,
 } from "@/components/ui/dialog";
 import { api } from "@/lib/api";
+import { OfficerEditReviewDialog, type OfficerEditEntry } from "@/components/OfficerEditReviewDialog";
 
 type BoardBucket = {
   employeeId: string;
@@ -163,6 +164,9 @@ export default function PayrollBoardPage() {
   const [historyRows, setHistoryRows] = useState<AuditRow[]>([]);
   const [historyLoading, setHistoryLoading] = useState(false);
   const [historyError, setHistoryError] = useState<string | null>(null);
+  // Officer-edit review dialog: side-by-side recorded-vs-submitted diff for an
+  // entry the officer edited before submitting (shared with Site detail).
+  const [officerEditEntry, setOfficerEditEntry] = useState<OfficerEditEntry | null>(null);
 
   const openHistory = (e: HistoryEntry) => {
     setHistoryTarget(e);
@@ -800,18 +804,22 @@ export default function PayrollBoardPage() {
                                                 </button>
                                               )}
                                               {e.employeeEdited && (
-                                                <span
-                                                  className="inline-flex items-center rounded-full bg-violet-100 text-violet-800 border border-violet-300 px-1.5 py-0.5 text-[10px] font-medium leading-none font-sans normal-case"
-                                                  title={[
-                                                    e.originalClockInTime || e.originalClockOutTime
-                                                      ? `Recorded: ${e.originalClockInTime ? new Date(e.originalClockInTime).toLocaleString() : "—"} → ${e.originalClockOutTime ? new Date(e.originalClockOutTime).toLocaleString() : "—"}`
-                                                      : null,
-                                                    `Submitted: ${new Date(e.clockInTime).toLocaleString()} → ${e.clockOutTime ? new Date(e.clockOutTime).toLocaleString() : "—"}`,
-                                                    e.employeeEditReason ? `Reason: ${e.employeeEditReason}` : null,
-                                                  ].filter(Boolean).join("\n") || "Officer edited their times before submitting."}
+                                                <button
+                                                  type="button"
+                                                  onClick={() => setOfficerEditEntry({
+                                                    id: e.id,
+                                                    employeeName: b.employeeName,
+                                                    clockInTime: e.clockInTime,
+                                                    clockOutTime: e.clockOutTime,
+                                                    originalClockInTime: e.originalClockInTime,
+                                                    originalClockOutTime: e.originalClockOutTime,
+                                                    employeeEditReason: e.employeeEditReason,
+                                                  })}
+                                                  className="inline-flex items-center rounded-full bg-violet-100 text-violet-800 border border-violet-300 px-1.5 py-0.5 text-[10px] font-medium leading-none font-sans normal-case hover:bg-violet-200 focus:outline-none focus:ring-2 focus:ring-violet-400 cursor-pointer"
+                                                  title="Officer edited their times before submitting — review the change"
                                                 >
                                                   Edited by officer
-                                                </span>
+                                                </button>
                                               )}
                                               {!e.hasClockOut && (
                                                 <Button
@@ -855,6 +863,11 @@ export default function PayrollBoardPage() {
           })}
         </div>
       )}
+
+      <OfficerEditReviewDialog
+        entry={officerEditEntry}
+        onClose={() => setOfficerEditEntry(null)}
+      />
 
       <Dialog open={!!fixEntry} onOpenChange={(o) => { if (!o) setFixEntry(null); }}>
         <DialogContent>
