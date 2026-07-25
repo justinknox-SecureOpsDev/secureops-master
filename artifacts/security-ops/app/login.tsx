@@ -59,13 +59,27 @@ const GOLD_STOPS = ["#f0d89a", "#c9a04a", "#aa8036"] as const;
  * fallback path) the solid-gold text stays visible, so nothing can blank out
  * or crash. On web it's pure CSS background-clip gradient text.
  */
-function GoldText({ style, children }: { style: StyleProp<TextStyle>; children: React.ReactNode }) {
+function GoldText({
+  style,
+  children,
+  numberOfLines,
+  adjustsFontSizeToFit,
+  minimumFontScale,
+}: {
+  style: StyleProp<TextStyle>;
+  children: React.ReactNode;
+  /** Let long, variable-length tenant names wrap/shrink instead of clipping. */
+  numberOfLines?: number;
+  adjustsFontSizeToFit?: boolean;
+  minimumFontScale?: number;
+}) {
   const flat = StyleSheet.flatten(style) || {};
   const [size, setSize] = useState<{ w: number; h: number } | null>(null);
 
   if (Platform.OS === "web") {
     return (
       <Text
+        numberOfLines={numberOfLines}
         style={[
           style,
           { color: GOLD_STOPS[1] },
@@ -77,6 +91,23 @@ function GoldText({ style, children }: { style: StyleProp<TextStyle>; children: 
             color: "transparent",
           } as unknown as TextStyle,
         ]}
+      >
+        {children}
+      </Text>
+    );
+  }
+
+  // The native gradient below paints ONE non-wrapping SVG line. When the caller
+  // asks the text to wrap or auto-shrink (long tenant company names), that path
+  // clips, so render the solid-gold Text instead — it wraps/shrinks to fit and
+  // stays on-brand (same gold used as the pre-measure fallback).
+  if (numberOfLines != null || adjustsFontSizeToFit) {
+    return (
+      <Text
+        numberOfLines={numberOfLines}
+        adjustsFontSizeToFit={adjustsFontSizeToFit}
+        minimumFontScale={minimumFontScale}
+        style={[style, { color: GOLD_STOPS[1] }]}
       >
         {children}
       </Text>
@@ -233,7 +264,12 @@ export default function LoginScreen() {
               <GoldText style={styles.brandSub}>COMMAND</GoldText>
             </>
           ) : (
-            <GoldText style={[styles.brandName, { textAlign: "center" }]}>
+            <GoldText
+              style={[styles.brandName, styles.brandNameCompany]}
+              numberOfLines={2}
+              adjustsFontSizeToFit
+              minimumFontScale={0.7}
+            >
               {brand.companyName.toUpperCase()}
             </GoldText>
           )}
@@ -489,6 +525,13 @@ const styles = StyleSheet.create({
     fontWeight: "800",
     letterSpacing: 4,
     textAlign: "center",
+  },
+  brandNameCompany: {
+    // Long, variable-length tenant names: full width + tighter tracking so they
+    // wrap to two centered lines (and shrink if needed) instead of clipping.
+    alignSelf: "stretch",
+    textAlign: "center",
+    letterSpacing: 2,
   },
   brandSub: {
     fontSize: 15,

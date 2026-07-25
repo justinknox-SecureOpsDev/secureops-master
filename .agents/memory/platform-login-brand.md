@@ -34,3 +34,13 @@ double command chevron, gold-on-navy) authored TWICE with identical geometry:
 keep web/mobile parity. The emblem is intentionally hard-coded to the platform
 gold/navy palette (`#c9a84c` / `#080c18`), independent of tenant tokens and of
 the mobile high-contrast palette.
+
+**GoldText renders a SINGLE non-wrapping line (mobile):** the login's gold
+gradient text (`security-ops/app/login.tsx` `GoldText`) paints native strings as
+one `react-native-svg` `<SvgText>` sized to the measured text — it CANNOT wrap or
+auto-shrink, so long tenant company names ("WILLIAMS COUNCIL SECURITY GROUP")
+clip on both edges on phones. Any long/variable brand string MUST pass
+`numberOfLines`/`adjustsFontSizeToFit`, which switches GoldText to a plain
+solid-gold `<Text>` (wraps/shrinks, drops the gradient). The short platform
+lockup keeps the gradient. Re-check whenever a NEW brand string goes through
+GoldText.

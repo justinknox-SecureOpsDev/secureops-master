@@ -42,18 +42,21 @@ project + channel + runtime version, NOT bundle/ASC ids directly. Policy is
   note here claiming "1.0 build 9" was WRONG ("1.0" ≠ "1.0.0"; exact string
   match), and an update pushed at "1.0" reached zero devices. Always confirm
   the runtime with `eas build:list` / `eas build:view`, never from memory.
-- As of July 25 2026 the `1.0.1` native binary EXISTS: iOS store build 14
-  (runtime "1.0.1", build number 14) finished that morning, so repo `app.json`
-  is now correctly at `1.0.1` and auto-OTA-on-deploy targets runtime 1.0.1.
-  CONSEQUENCE: the large 1.0.0 installed base (store builds ≤10) no longer
-  receives auto-deploy OTAs — until build 14 rolls out to every user via the
-  App Store, that base must be updated with MANUAL OTAs at runtime 1.0.0.
-- To push an OTA at a runtime that differs from the current repo version
-  (appVersion policy → runtimeVersion = `expo.version`): temporarily edit
-  `app.json` `expo.version` to the target ("1.0.0"), run the export + `eas
-  update` per platform, then RESTORE it to "1.0.1". Never commit the temp
-  change; both HEAD and build 14 are the July-22 reverted radio engine so HEAD
-  is OTA-safe on BOTH 1.0.0 (builds ≤10) and 1.0.1 (build 14).
+- The `1.0.1` native binary EXISTS (iOS store build 14, runtime "1.0.1"). BUT
+  build 14 was cut AFTER the bad radio commits (expo-audio keep-alive +
+  Bluetooth AVAudioSession rewrite), so it EMBEDS the broken radio — do NOT
+  treat 1.0.1 as the July-22 reverted engine, and roll-back-to-embedded is NOT
+  safe on 1.0.1.
+- POLICY (set by owner justin.knox 2026-07-25, "until further notice"): runtime
+  **1.0.0 is the ONLY runtime that receives OTAs**. `app.json` `expo.version` is
+  therefore intentionally PINNED to "1.0.0" (NOT 1.0.1) so BOTH manual pushes and
+  auto-OTA-on-deploy target the officer installed base (store builds ≤10).
+  1.0.1/build 14 deliberately gets no OTAs. Do NOT "restore" app.json to 1.0.1.
+- RELEASE-BUILD GUARD: while app.json is pinned to 1.0.0, do NOT cut a production
+  native build — it would build as version 1.0.0 and collide with the existing
+  1.0.1/build-14 App Store train. A future native build MUST first bump
+  `expo.version` PAST 1.0.1; that new runtime (not 1.0.0) then becomes the OTA
+  target and this pin/policy should be revisited with the owner.
 - Auto-OTA-on-deploy exports from the DEPLOY SNAPSHOT's app.json, not HEAD —
   a version fix committed after the deployed commit doesn't take effect until
   the next republish, so deploys kept publishing phantom-runtime updates.
