@@ -1331,7 +1331,7 @@ export default function OfficerProfilePage() {
                 </div>
               )}
               <div className="pt-1">
-                <Link href={`/admin/tables/shifts?focus=${encodeURIComponent(todaysShift.id)}`}>
+                <Link href={`/shifts?focus=${encodeURIComponent(todaysShift.id)}`}>
                   <Button variant="link" size="sm" className="text-xs h-auto p-0">
                     Open shift <ExternalLink className="w-3 h-3 ml-1" />
                   </Button>

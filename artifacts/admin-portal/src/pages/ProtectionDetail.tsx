@@ -710,7 +710,7 @@ export default function ProtectionDetailPage() {
   return (
     <div className="max-w-4xl mx-auto px-4 py-6 space-y-6">
       <div>
-        <Link href="/tables/shifts" className="inline-flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground">
+        <Link href="/shifts" className="inline-flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground">
           <ArrowLeft className="w-4 h-4" /> Back to shifts
         </Link>
         <div className="mt-2 flex items-start gap-3">

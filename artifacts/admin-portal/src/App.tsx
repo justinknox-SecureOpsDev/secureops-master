@@ -31,8 +31,7 @@ import PayrollBoardPage from "@/pages/PayrollBoard";
 import AnalyticsPage from "@/pages/Analytics";
 import InvoiceBoardPage from "@/pages/InvoiceBoard";
 import { InvitationsPage } from "@/pages/Invitations";
-import ShiftsPage from "@/pages/Shifts";
-import CalendarPage from "@/pages/Calendar";
+import ShiftsAreaPage from "@/pages/ShiftsArea";
 import AuditLogPage from "@/pages/AuditLog";
 import ShiftRecoveryPage from "@/pages/ShiftRecovery";
 import SwapRequestsPage from "@/pages/SwapRequests";
@@ -149,8 +148,9 @@ function Routed() {
           <Route path="/chat" component={ChatPage} />
           <Route path="/personnel" component={PersonnelPage} />
           <Route path="/personnel/:id" component={OfficerProfilePage} />
-          <Route path="/shifts/calendar" component={CalendarPage} />
-          <Route path="/tables/shifts" component={ShiftsPage} />
+          <Route path="/shifts/calendar" component={LegacyShiftsRedirect} />
+          <Route path="/shifts" component={ShiftsAreaPage} />
+          <Route path="/tables/shifts" component={LegacyShiftsRedirect} />
           <Route path="/account/security" component={SecurityPage} />
           <Route path="/radio" component={RadioPage} />
           <Route component={RootAwareNotFound} />
@@ -196,15 +196,22 @@ function Routed() {
           <Route path="/sites/:id" component={SiteDetailPage} />
           <Route path="/staffing" component={StaffingPage} />
           <Route path="/staffing/:id" component={StaffingEventPage} />
-          <Route path="/shifts/calendar" component={CalendarPage} />
+          <Route path="/shifts/calendar" component={LegacyShiftsRedirect} />
           <Route path="/shifts/:id/protection" component={ProtectionDetailPage} />
-          <Route path="/tables/shifts" component={ShiftsPage} />
+          <Route path="/shifts" component={ShiftsAreaPage} />
+          <Route path="/tables/shifts" component={LegacyShiftsRedirect} />
           <Route path="/tables/:table" component={TablePage} />
           <Route component={RootAwareNotFound} />
         </Switch>
       )}
     </AppShell>
   );
+}
+
+// Old bookmarks / deep links (/shifts/calendar, /tables/shifts) land on the
+// unified Shifts area, preserving any query string (?focus=, ?shiftId=).
+function LegacyShiftsRedirect() {
+  return <Redirect to={`/shifts${window.location.search}`} replace />;
 }
 
 function OfficerAppRedirect({ email }: { email: string }) {

@@ -165,7 +165,7 @@ describe("buildNavGroups feature filtering", () => {
   it("keeps ungated items even when other features are disabled", () => {
     const groups = buildNavGroups(false, false, () => false);
     const allHrefs = groups.flatMap((g) => g.items).map((it) => it.href);
-    expect(allHrefs).toContain("/tables/shifts");
+    expect(allHrefs).toContain("/shifts");
   });
 });
 
@@ -175,8 +175,8 @@ describe("resolveGroupKey (admin)", () => {
     ["/chat", "dispatch"],
     ["/tables/incidents", "dispatch"],
     ["/dar/123", "dispatch"],
-    ["/tables/shifts", "staffing"],
-    ["/shifts/calendar", "staffing"],
+    ["/shifts", "staffing"],
+    ["/shifts/abc/protection", "staffing"],
     ["/swap-requests", "staffing"],
     ["/staffing/42", "staffing"],
     ["/hr/applications", "hr"],

@@ -159,8 +159,7 @@ export function buildNavGroups(
     label: "Staffing",
     Icon: CalendarRange,
     items: [
-      { href: "/shifts/calendar", label: "Shift Calendar", Icon: CalendarRange },
-      { href: "/tables/shifts", label: "Shifts", Icon: Database },
+      { href: "/shifts", label: "Shifts", Icon: CalendarRange },
       { href: "/tables/shift_assignments", label: "Shift Assignments", Icon: ClipboardList },
       { href: "/tables/time_entries", label: "Time Entries", Icon: Database },
       { href: "/swap-requests", label: "Swap Requests", Icon: Repeat, feature: "swapRequests" },
@@ -296,8 +295,7 @@ export function buildNavGroups(
         label: "Operations",
         Icon: Database,
         items: [
-          { href: "/shifts/calendar", label: "Shift Calendar", Icon: CalendarRange },
-          { href: "/tables/shifts", label: "Shifts", Icon: Database },
+          { href: "/shifts", label: "Shifts", Icon: CalendarRange },
         ],
       },
       accountGroup,

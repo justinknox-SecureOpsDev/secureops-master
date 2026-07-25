@@ -352,7 +352,7 @@ export function DashboardPage() {
             value={isLoading ? "—" : summary?.upcomingShifts ?? 0}
             sub="Next 7 days"
             icon={Calendar}
-            href="/tables/shifts"
+            href="/shifts"
           />
           <StatCard
             label="Open incidents"
@@ -456,7 +456,7 @@ export function DashboardPage() {
           </div>
 
           <div className="border rounded-lg bg-card p-4">
-            <SectionHeader title="Next shifts" linkTo="/tables/shifts" />
+            <SectionHeader title="Next shifts" linkTo="/shifts" />
             {isLoading ? (
               <div className="flex items-center gap-2 text-sm text-muted-foreground py-2">
                 <Loader2 className="w-4 h-4 animate-spin" /> Loading…

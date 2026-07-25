@@ -57,7 +57,7 @@ const DOMAINS: DomainConfig[] = [
     Icon: Calendar,
     // ShiftsPage — pass ?focus so the URL is record-specific; ShiftsPage will
     // gain focus-open support in a follow-up task.
-    toRoute: (id) => `/tables/shifts?focus=${id}`,
+    toRoute: (id) => `/shifts?focus=${id}`,
   },
   {
     key: "incidents",
