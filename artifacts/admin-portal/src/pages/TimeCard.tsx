@@ -92,6 +92,9 @@ const fmtRange = (a: string, b: string) => {
   return `${s.toLocaleDateString("en-US", opts)} – ${e.toLocaleDateString("en-US", opts)}, ${e.getFullYear()}`;
 };
 
+const userLabel = (u: { firstName: string | null; lastName: string | null; email: string }) =>
+  `${u.firstName ?? ""} ${u.lastName ?? ""}`.trim() || u.email;
+
 // ISO timestamp -> value for <input type="datetime-local"> in the browser's
 // local time (YYYY-MM-DDTHH:mm). "" for null/invalid so the input stays empty.
 function toLocalInput(iso: string | null | undefined): string {
@@ -253,23 +256,20 @@ export default function TimeCardPage() {
     setLocation(`/payroll/time-card${qs.toString() ? `?${qs.toString()}` : ""}`);
   };
 
-  const userLabel = (u: { firstName: string | null; lastName: string | null; email: string }) =>
-    `${u.firstName ?? ""} ${u.lastName ?? ""}`.trim() || u.email;
-
-  // Officer options: all staff, or (site picked) officers with entries there.
-  const officerOptions: Array<{ id: string; label: string }> = useMemo(() => {
-    if (siteId && siteOfficers) {
-      const opts = siteOfficers.map((o) => ({ id: o.id, label: userLabel(o) }));
-      // Deep links can reference an officer outside the filtered list — keep
-      // the current selection visible so the select doesn't silently blank.
-      if (employeeId && !opts.some((o) => o.id === employeeId)) {
-        const u = users.find((x) => x.id === employeeId);
-        if (u) opts.push({ id: u.id, label: `${userLabel(u)} (no entries at this site)` });
-      }
-      return opts;
-    }
-    return users.map((u) => ({ id: u.id, label: userLabel(u) }));
-  }, [siteId, siteOfficers, users, employeeId]);
+  // Officer options. Admins can ALWAYS pick any staff officer so they can
+  // create a missing time card — even for someone with no entries yet. When a
+  // site is picked we surface officers who actually worked there first (a
+  // convenience group), then list everyone else under "All officers"; without a
+  // site filter it's a single flat list of all staff.
+  const officerGroups: Array<{ label: string | null; options: Array<{ id: string; label: string }> }> = useMemo(() => {
+    const all = users.map((u) => ({ id: u.id, label: userLabel(u) }));
+    if (!siteId) return [{ label: null, options: all }];
+    const withEntries = new Set((siteOfficers ?? []).map((o) => o.id));
+    return [
+      { label: "Worked at this site", options: all.filter((o) => withEntries.has(o.id)) },
+      { label: "All officers", options: all.filter((o) => !withEntries.has(o.id)) },
+    ];
+  }, [siteId, siteOfficers, users]);
 
   const todayIso = card
     ? new Date().toLocaleDateString("en-CA", { timeZone: card.timezone })
@@ -419,9 +419,19 @@ export default function TimeCardPage() {
             <option value="">
               {officersLoading ? "Loading officers…" : "Select an employee…"}
             </option>
-            {officerOptions.map((u) => (
-              <option key={u.id} value={u.id}>{u.label}</option>
-            ))}
+            {officerGroups.map((g) =>
+              g.label === null
+                ? g.options.map((u) => (
+                    <option key={u.id} value={u.id}>{u.label}</option>
+                  ))
+                : g.options.length > 0 && (
+                    <optgroup key={g.label} label={g.label}>
+                      {g.options.map((u) => (
+                        <option key={u.id} value={u.id}>{u.label}</option>
+                      ))}
+                    </optgroup>
+                  ),
+            )}
           </select>
         </label>
 
@@ -493,9 +503,9 @@ export default function TimeCardPage() {
         <div className="border rounded-lg p-10 text-center text-muted-foreground">
           <CalendarDays className="h-8 w-8 mx-auto mb-3" aria-hidden="true" />
           {siteId && siteOfficers && siteOfficers.length === 0 && !officersLoading ? (
-            <p className="text-sm">No officers have time entries at this site yet. Pick another site, or choose “All sites”.</p>
+            <p className="text-sm">No officers have time entries at this site yet — pick any officer under “All officers” to start a new time card.</p>
           ) : siteId ? (
-            <p className="text-sm">Pick an officer who worked at this site to see their weekly time card.</p>
+            <p className="text-sm">Pick an officer to see their weekly time card. Officers who worked at this site are listed first, but you can select anyone.</p>
           ) : (
             <p className="text-sm">Pick an employee to see their weekly time card — or pick a site first to narrow the list.</p>
           )}
