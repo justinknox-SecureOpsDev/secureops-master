@@ -1,7 +1,7 @@
 import { Router, type IRouter } from "express";
 import { eq, and, gte, lte, ne, isNull, inArray, sql } from "drizzle-orm";
 import { db, timeEntriesTable, shiftsTable, usersTable, sitesTable, shiftAssignmentsTable, licensesTable } from "@workspace/db";
-import { requireAuth, requireAdmin, requireAdminOrSiteManager, requireStaff } from "../middlewares/auth";
+import { requireAuth, requireAdmin, requireAdminOrDispatcher, requireAdminOrSiteManager, requireStaff } from "../middlewares/auth";
 import { upsertWeeklyInvoiceForTimeEntry } from "../lib/invoiceSync";
 import { pushClockEvent } from "../lib/schedulerSync";
 import { getEffectiveLevel } from "../lib/eligibility";
@@ -1081,6 +1081,37 @@ router.get("/time-entries/time-card/export", requireStaff, async (req, res): Pro
   res.setHeader("Content-Type", "application/pdf");
   res.setHeader("Content-Disposition", `attachment; filename="${base}.pdf"`);
   renderTimeCardPdf(res, card);
+});
+
+// Site-first time-card lookup: which officers have hours at this site?
+// Admin/dispatcher-only (it's a cross-employee directory of who worked
+// where). Powers the time-card screen's Site → Officer picker; officers
+// with the most recent activity at the site sort first.
+router.get("/time-entries/time-card/site-officers", requireAdminOrDispatcher, async (req, res): Promise<void> => {
+  const siteId = typeof req.query.siteId === "string" ? req.query.siteId.trim() : "";
+  if (!siteId) {
+    res.status(400).json({ error: "Bad Request", message: "siteId is required" });
+    return;
+  }
+  const officers = await db
+    .select({
+      id: usersTable.id,
+      firstName: usersTable.firstName,
+      lastName: usersTable.lastName,
+      email: usersTable.email,
+      entryCount: sql<number>`count(*)::int`,
+      lastClockInTime: sql<string>`max(${timeEntriesTable.clockInTime})`,
+    })
+    .from(timeEntriesTable)
+    .innerJoin(usersTable, eq(usersTable.id, timeEntriesTable.employeeId))
+    .where(eq(timeEntriesTable.siteId, siteId))
+    .groupBy(usersTable.id, usersTable.firstName, usersTable.lastName, usersTable.email)
+    .orderBy(sql`max(${timeEntriesTable.clockInTime}) desc`);
+  // max() over a raw sql`` comes back as pg text ("2026-07-22 20:56:34+00"),
+  // not RFC3339 — normalize so the response honors the spec's date-time format.
+  res.json({
+    officers: officers.map((o) => ({ ...o, lastClockInTime: new Date(o.lastClockInTime).toISOString() })),
+  });
 });
 
 // Admin patches a missing clock-out on an existing time entry.

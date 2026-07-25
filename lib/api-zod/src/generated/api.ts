@@ -2516,10 +2516,47 @@ export const GetTimeCardResponse = zod.object({
 });
 
 /**
+ * Admin/dispatcher-only helper for the time-card screen's site-first
+lookup. Returns the distinct officers that have at least one time
+entry recorded at the given site, most recently active first, so an
+admin can pick a site and then choose from the officers who actually
+worked there.
+
+ * @summary Officers who have time entries at a site (time-card lookup)
+ */
+export const GetTimeCardSiteOfficersQueryParams = zod.object({
+  siteId: zod.coerce.string(),
+});
+
+export const GetTimeCardSiteOfficersResponse = zod.object({
+  officers: zod.array(
+    zod
+      .object({
+        id: zod.string(),
+        firstName: zod.string().nullish(),
+        lastName: zod.string().nullish(),
+        email: zod.string(),
+        entryCount: zod
+          .number()
+          .describe("Number of time entries this officer has at the site."),
+        lastClockInTime: zod.coerce
+          .date()
+          .describe("Most recent clock-in this officer recorded at the site."),
+      })
+      .describe(
+        "An officer with at least one time entry at the requested site.",
+      ),
+  ),
+});
+
+/**
  * Owner-only. Only valid while the entry is awaiting confirmation.
 Confirms the recorded times as-is, or applies officer-edited times
-(reason required); hours are recomputed server-side. Moves the entry
-into the normal pending-approval queue.
+(reason required); hours are recomputed server-side. Officer edits are
+capped to a configured window around the recorded times
+(TIME_CONFIRM_EDIT_WINDOW_HOURS, default 2h) — edits beyond it are
+rejected with a 400 whose body includes `maxEditWindowHours`. Moves
+the entry into the normal pending-approval queue.
 
  * @summary Officer confirms (optionally edits) their clocked-out time entry
  */

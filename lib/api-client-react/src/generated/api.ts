@@ -109,6 +109,8 @@ import type {
   GetSitesParams,
   GetSubcontractorEntriesParams,
   GetTimeCardParams,
+  GetTimeCardSiteOfficers200,
+  GetTimeCardSiteOfficersParams,
   GetTimeEntriesParams,
   HealthStatus,
   Incident,
@@ -4780,10 +4782,125 @@ export function useGetTimeCard<
 }
 
 /**
+ * Admin/dispatcher-only helper for the time-card screen's site-first
+lookup. Returns the distinct officers that have at least one time
+entry recorded at the given site, most recently active first, so an
+admin can pick a site and then choose from the officers who actually
+worked there.
+
+ * @summary Officers who have time entries at a site (time-card lookup)
+ */
+export const getGetTimeCardSiteOfficersUrl = (
+  params: GetTimeCardSiteOfficersParams,
+) => {
+  const normalizedParams = new URLSearchParams();
+
+  Object.entries(params || {}).forEach(([key, value]) => {
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? "null" : value.toString());
+    }
+  });
+
+  const stringifiedParams = normalizedParams.toString();
+
+  return stringifiedParams.length > 0
+    ? `/api/time-entries/time-card/site-officers?${stringifiedParams}`
+    : `/api/time-entries/time-card/site-officers`;
+};
+
+export const getTimeCardSiteOfficers = async (
+  params: GetTimeCardSiteOfficersParams,
+  options?: RequestInit,
+): Promise<GetTimeCardSiteOfficers200> => {
+  return customFetch<GetTimeCardSiteOfficers200>(
+    getGetTimeCardSiteOfficersUrl(params),
+    {
+      ...options,
+      method: "GET",
+    },
+  );
+};
+
+export const getGetTimeCardSiteOfficersQueryKey = (
+  params?: GetTimeCardSiteOfficersParams,
+) => {
+  return [
+    `/api/time-entries/time-card/site-officers`,
+    ...(params ? [params] : []),
+  ] as const;
+};
+
+export const getGetTimeCardSiteOfficersQueryOptions = <
+  TData = Awaited<ReturnType<typeof getTimeCardSiteOfficers>>,
+  TError = ErrorType<unknown>,
+>(
+  params: GetTimeCardSiteOfficersParams,
+  options?: {
+    query?: UseQueryOptions<
+      Awaited<ReturnType<typeof getTimeCardSiteOfficers>>,
+      TError,
+      TData
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+) => {
+  const { query: queryOptions, request: requestOptions } = options ?? {};
+
+  const queryKey =
+    queryOptions?.queryKey ?? getGetTimeCardSiteOfficersQueryKey(params);
+
+  const queryFn: QueryFunction<
+    Awaited<ReturnType<typeof getTimeCardSiteOfficers>>
+  > = ({ signal }) =>
+    getTimeCardSiteOfficers(params, { signal, ...requestOptions });
+
+  return { queryKey, queryFn, ...queryOptions } as UseQueryOptions<
+    Awaited<ReturnType<typeof getTimeCardSiteOfficers>>,
+    TError,
+    TData
+  > & { queryKey: QueryKey };
+};
+
+export type GetTimeCardSiteOfficersQueryResult = NonNullable<
+  Awaited<ReturnType<typeof getTimeCardSiteOfficers>>
+>;
+export type GetTimeCardSiteOfficersQueryError = ErrorType<unknown>;
+
+/**
+ * @summary Officers who have time entries at a site (time-card lookup)
+ */
+
+export function useGetTimeCardSiteOfficers<
+  TData = Awaited<ReturnType<typeof getTimeCardSiteOfficers>>,
+  TError = ErrorType<unknown>,
+>(
+  params: GetTimeCardSiteOfficersParams,
+  options?: {
+    query?: UseQueryOptions<
+      Awaited<ReturnType<typeof getTimeCardSiteOfficers>>,
+      TError,
+      TData
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+): UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+  const queryOptions = getGetTimeCardSiteOfficersQueryOptions(params, options);
+
+  const query = useQuery(queryOptions) as UseQueryResult<TData, TError> & {
+    queryKey: QueryKey;
+  };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
+
+/**
  * Owner-only. Only valid while the entry is awaiting confirmation.
 Confirms the recorded times as-is, or applies officer-edited times
-(reason required); hours are recomputed server-side. Moves the entry
-into the normal pending-approval queue.
+(reason required); hours are recomputed server-side. Officer edits are
+capped to a configured window around the recorded times
+(TIME_CONFIRM_EDIT_WINDOW_HOURS, default 2h) — edits beyond it are
+rejected with a 400 whose body includes `maxEditWindowHours`. Moves
+the entry into the normal pending-approval queue.
 
  * @summary Officer confirms (optionally edits) their clocked-out time entry
  */

@@ -1267,6 +1267,37 @@ paths:
               schema:
                 $ref: "#/components/schemas/TimeCard"
 
+  /time-entries/time-card/site-officers:
+    get:
+      operationId: getTimeCardSiteOfficers
+      tags: [timeEntries]
+      summary: Officers who have time entries at a site (time-card lookup)
+      description: |
+        Admin/dispatcher-only helper for the time-card screen's site-first
+        lookup. Returns the distinct officers that have at least one time
+        entry recorded at the given site, most recently active first, so an
+        admin can pick a site and then choose from the officers who actually
+        worked there.
+      parameters:
+        - name: siteId
+          in: query
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Officers with time entries at the site
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [officers]
+                properties:
+                  officers:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/TimeCardSiteOfficer"
+
   /time-entries/{id}/confirm:
     post:
       operationId: confirmTimeEntry
@@ -4534,6 +4565,33 @@ components:
         - totalHours
         - approvedHours
         - pendingHours
+
+    TimeCardSiteOfficer:
+      type: object
+      description: An officer with at least one time entry at the requested site.
+      properties:
+        id:
+          type: string
+        firstName:
+          type: string
+          nullable: true
+        lastName:
+          type: string
+          nullable: true
+        email:
+          type: string
+        entryCount:
+          type: integer
+          description: Number of time entries this officer has at the site.
+        lastClockInTime:
+          type: string
+          format: date-time
+          description: Most recent clock-in this officer recorded at the site.
+      required:
+        - id
+        - email
+        - entryCount
+        - lastClockInTime
 
     ClockInRequest:
       type: object

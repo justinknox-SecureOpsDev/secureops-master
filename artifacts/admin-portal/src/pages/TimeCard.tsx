@@ -1,8 +1,19 @@
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { useSearch, useLocation } from "wouter";
-import { Clock, ChevronLeft, ChevronRight, Loader2, CalendarDays, FileDown, FileSpreadsheet } from "lucide-react";
+import {
+  Clock, ChevronLeft, ChevronRight, Loader2, CalendarDays, FileDown, FileSpreadsheet,
+  Plus, Pencil, Trash2,
+} from "lucide-react";
 import { Button } from "@/components/ui/button";
+import {
+  Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle,
+} from "@/components/ui/dialog";
+import {
+  AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription,
+  AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 import { api, fetchWithAuth } from "@/lib/api";
+import { useAuth } from "@/lib/auth";
 
 type CardEntry = {
   id: string;
@@ -40,6 +51,29 @@ type UserRow = {
   status?: string | null;
 };
 
+type SiteRow = { id: string; name: string };
+
+type SiteOfficer = {
+  id: string;
+  firstName: string | null;
+  lastName: string | null;
+  email: string;
+  entryCount: number;
+  lastClockInTime: string;
+};
+
+/** Full time-entry row from the admin tables API (fields the editor needs). */
+type EntryRow = {
+  id: string;
+  employeeId: string;
+  siteId: string | null;
+  shiftId: string | null;
+  clockInTime: string;
+  clockOutTime: string | null;
+  approvalStatus: "pending" | "approved" | "rejected";
+  notes: string | null;
+};
+
 const APPROVAL_PILL: Record<CardEntry["approvalStatus"], string> = {
   pending: "bg-amber-100 text-amber-800",
   approved: "bg-green-100 text-green-800",
@@ -58,18 +92,70 @@ const fmtRange = (a: string, b: string) => {
   return `${s.toLocaleDateString("en-US", opts)} – ${e.toLocaleDateString("en-US", opts)}, ${e.getFullYear()}`;
 };
 
+// ISO timestamp -> value for <input type="datetime-local"> in the browser's
+// local time (YYYY-MM-DDTHH:mm). "" for null/invalid so the input stays empty.
+function toLocalInput(iso: string | null | undefined): string {
+  if (!iso) return "";
+  const d = new Date(iso);
+  if (isNaN(d.getTime())) return "";
+  const pad = (n: number) => String(n).padStart(2, "0");
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+}
+
+// datetime-local value -> ISO string (browser-local interpretation), or null.
+function fromLocalInput(v: string): string | null {
+  if (!v) return null;
+  const d = new Date(v);
+  if (isNaN(d.getTime())) return null;
+  return d.toISOString();
+}
+
+type EditorState =
+  | { mode: "create"; date: string }
+  | { mode: "edit"; entryId: string };
+
+type EditorForm = {
+  siteId: string;
+  clockIn: string;   // datetime-local value
+  clockOut: string;  // datetime-local value ("" = still clocked in / unknown)
+  approvalStatus: "pending" | "approved" | "rejected";
+  notes: string;
+};
+
+const EMPTY_FORM: EditorForm = { siteId: "", clockIn: "", clockOut: "", approvalStatus: "pending", notes: "" };
+
 export default function TimeCardPage() {
   const search = useSearch();
   const [, setLocation] = useLocation();
+  const { user } = useAuth();
+  const isAdmin = user?.role === "admin";
   const params = useMemo(() => new URLSearchParams(search), [search]);
   const employeeId = params.get("employeeId") ?? "";
   const week = params.get("week") ?? "";
+  const siteId = params.get("siteId") ?? "";
 
   const [users, setUsers] = useState<UserRow[]>([]);
+  const [sites, setSites] = useState<SiteRow[]>([]);
+  const [siteOfficers, setSiteOfficers] = useState<SiteOfficer[] | null>(null);
+  const [officersLoading, setOfficersLoading] = useState(false);
+  const [officersError, setOfficersError] = useState<string | null>(null);
   const [card, setCard] = useState<TimeCard | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [downloading, setDownloading] = useState<"pdf" | "csv" | null>(null);
+  const [refreshTick, setRefreshTick] = useState(0);
+
+  // --- Entry editor (admin add/edit) ---
+  const [editor, setEditor] = useState<EditorState | null>(null);
+  const [form, setForm] = useState<EditorForm>(EMPTY_FORM);
+  const [editorLoading, setEditorLoading] = useState(false);
+  const [editorError, setEditorError] = useState<string | null>(null);
+  const [saving, setSaving] = useState(false);
+
+  // --- Delete confirmation ---
+  const [deleteTarget, setDeleteTarget] = useState<CardEntry | null>(null);
+  const [deleting, setDeleting] = useState(false);
+  const [deleteError, setDeleteError] = useState<string | null>(null);
 
   const download = async (format: "pdf" | "csv") => {
     if (!card) return;
@@ -116,7 +202,29 @@ export default function TimeCardPage() {
         setUsers(staff);
       })
       .catch(() => setUsers([]));
+    api<{ rows: SiteRow[] }>("/admin/tables/sites?limit=500&sort=name&dir=asc")
+      .then((r) => setSites(r.rows ?? []))
+      .catch(() => setSites([]));
   }, []);
+
+  // Site-first lookup: when a site is picked, the officer dropdown narrows to
+  // officers who actually have time entries at that site.
+  useEffect(() => {
+    if (!siteId) { setSiteOfficers(null); setOfficersError(null); return; }
+    let cancelled = false;
+    setOfficersLoading(true);
+    setOfficersError(null);
+    api<{ officers: SiteOfficer[] }>(`/time-entries/time-card/site-officers?siteId=${encodeURIComponent(siteId)}`)
+      .then((r) => { if (!cancelled) setSiteOfficers(r.officers ?? []); })
+      .catch((e) => {
+        if (!cancelled) {
+          setSiteOfficers([]);
+          setOfficersError((e as Error).message ?? "Could not load officers for this site");
+        }
+      })
+      .finally(() => { if (!cancelled) setOfficersLoading(false); });
+    return () => { cancelled = true; };
+  }, [siteId]);
 
   useEffect(() => {
     if (!employeeId) { setCard(null); return; }
@@ -130,21 +238,145 @@ export default function TimeCardPage() {
       .catch((e) => { if (!cancelled) { setCard(null); setError((e as Error).message ?? "Could not load time card"); } })
       .finally(() => { if (!cancelled) setLoading(false); });
     return () => { cancelled = true; };
-  }, [employeeId, week]);
+  }, [employeeId, week, refreshTick]);
 
-  const navigate = (nextEmployeeId: string, nextWeek: string) => {
+  const refreshCard = useCallback(() => setRefreshTick((t) => t + 1), []);
+
+  const navigate = (next: { siteId?: string; employeeId?: string; week?: string }) => {
     const qs = new URLSearchParams();
-    if (nextEmployeeId) qs.set("employeeId", nextEmployeeId);
-    if (nextWeek) qs.set("week", nextWeek);
+    const s = next.siteId ?? siteId;
+    const e = next.employeeId ?? employeeId;
+    const w = next.week ?? week;
+    if (s) qs.set("siteId", s);
+    if (e) qs.set("employeeId", e);
+    if (w) qs.set("week", w);
     setLocation(`/payroll/time-card${qs.toString() ? `?${qs.toString()}` : ""}`);
   };
 
-  const userLabel = (u: UserRow) =>
+  const userLabel = (u: { firstName: string | null; lastName: string | null; email: string }) =>
     `${u.firstName ?? ""} ${u.lastName ?? ""}`.trim() || u.email;
+
+  // Officer options: all staff, or (site picked) officers with entries there.
+  const officerOptions: Array<{ id: string; label: string }> = useMemo(() => {
+    if (siteId && siteOfficers) {
+      const opts = siteOfficers.map((o) => ({ id: o.id, label: userLabel(o) }));
+      // Deep links can reference an officer outside the filtered list — keep
+      // the current selection visible so the select doesn't silently blank.
+      if (employeeId && !opts.some((o) => o.id === employeeId)) {
+        const u = users.find((x) => x.id === employeeId);
+        if (u) opts.push({ id: u.id, label: `${userLabel(u)} (no entries at this site)` });
+      }
+      return opts;
+    }
+    return users.map((u) => ({ id: u.id, label: userLabel(u) }));
+  }, [siteId, siteOfficers, users, employeeId]);
 
   const todayIso = card
     ? new Date().toLocaleDateString("en-CA", { timeZone: card.timezone })
     : null;
+
+  // ---- Editor helpers -------------------------------------------------------
+
+  const openCreate = (date: string) => {
+    setForm({ ...EMPTY_FORM, siteId, clockIn: `${date}T09:00` });
+    setEditorError(null);
+    setEditor({ mode: "create", date });
+  };
+
+  const openEdit = async (entry: CardEntry) => {
+    setEditorError(null);
+    setEditor({ mode: "edit", entryId: entry.id });
+    setEditorLoading(true);
+    try {
+      const row = await api<EntryRow>(`/admin/tables/time_entries/${entry.id}`);
+      setForm({
+        siteId: row.siteId ?? "",
+        clockIn: toLocalInput(row.clockInTime),
+        clockOut: toLocalInput(row.clockOutTime),
+        approvalStatus: row.approvalStatus ?? "pending",
+        notes: row.notes ?? "",
+      });
+    } catch (e) {
+      setEditorError((e as Error).message ?? "Could not load the entry.");
+    } finally {
+      setEditorLoading(false);
+    }
+  };
+
+  const closeEditor = () => {
+    if (saving) return;
+    setEditor(null);
+    setForm(EMPTY_FORM);
+    setEditorError(null);
+  };
+
+  const computedHours: number | null = useMemo(() => {
+    const cin = fromLocalInput(form.clockIn);
+    const cout = fromLocalInput(form.clockOut);
+    if (!cin || !cout) return null;
+    const h = (new Date(cout).getTime() - new Date(cin).getTime()) / 3600000;
+    if (!isFinite(h) || h <= 0) return null;
+    return Math.round(h * 100) / 100;
+  }, [form.clockIn, form.clockOut]);
+
+  const saveEntry = async () => {
+    if (!editor || !card) return;
+    const clockInTime = fromLocalInput(form.clockIn);
+    const clockOutTime = fromLocalInput(form.clockOut);
+    if (!clockInTime) { setEditorError("Clock-in time is required."); return; }
+    if (form.clockOut && !clockOutTime) { setEditorError("Clock-out time is invalid."); return; }
+    if (clockOutTime && new Date(clockOutTime) <= new Date(clockInTime)) {
+      setEditorError("Clock-out must be after clock-in.");
+      return;
+    }
+    setSaving(true);
+    setEditorError(null);
+    const body = {
+      siteId: form.siteId || null,
+      clockInTime,
+      clockOutTime,
+      hoursWorked: clockOutTime ? computedHours : null,
+      approvalStatus: form.approvalStatus,
+      notes: form.notes.trim() ? form.notes.trim() : null,
+    };
+    try {
+      if (editor.mode === "create") {
+        await api(`/admin/tables/time_entries`, {
+          method: "POST",
+          body: { ...body, employeeId: card.employeeId },
+        });
+      } else {
+        await api(`/admin/tables/time_entries/${editor.entryId}`, { method: "PUT", body });
+      }
+      setEditor(null);
+      setForm(EMPTY_FORM);
+      refreshCard();
+    } catch (e) {
+      setEditorError((e as Error).message ?? "Save failed.");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const confirmDelete = async () => {
+    if (!deleteTarget) return;
+    setDeleting(true);
+    setDeleteError(null);
+    try {
+      await api(`/admin/tables/time_entries/${deleteTarget.id}`, { method: "DELETE" });
+      setDeleteTarget(null);
+      refreshCard();
+    } catch (e) {
+      setDeleteError((e as Error).message ?? "Delete failed.");
+    } finally {
+      setDeleting(false);
+    }
+  };
+
+  const fmtEntryTime = (iso: string) =>
+    card
+      ? new Date(iso).toLocaleTimeString("en-US", { timeZone: card.timezone, hour: "numeric", minute: "2-digit" })
+      : new Date(iso).toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" });
 
   return (
     <div className="p-4 sm:p-6 max-w-4xl mx-auto">
@@ -159,18 +391,36 @@ export default function TimeCardPage() {
       </div>
 
       {/* Controls */}
-      <div className="flex flex-col sm:flex-row sm:items-center gap-3 mb-4">
+      <div className="flex flex-col sm:flex-row sm:flex-wrap sm:items-center gap-3 mb-4">
+        <label className="flex items-center gap-2 text-sm">
+          <span className="text-muted-foreground shrink-0">Site</span>
+          <select
+            className="border rounded-md px-3 py-2 text-sm bg-background min-w-[180px]"
+            value={siteId}
+            onChange={(e) => navigate({ siteId: e.target.value, employeeId: "" })}
+            aria-label="Filter officers by site"
+          >
+            <option value="">All sites</option>
+            {sites.map((s) => (
+              <option key={s.id} value={s.id}>{s.name}</option>
+            ))}
+          </select>
+        </label>
+
         <label className="flex items-center gap-2 text-sm">
           <span className="text-muted-foreground shrink-0">Employee</span>
           <select
             className="border rounded-md px-3 py-2 text-sm bg-background min-w-[220px]"
             value={employeeId}
-            onChange={(e) => navigate(e.target.value, week)}
+            onChange={(e) => navigate({ employeeId: e.target.value })}
+            disabled={officersLoading}
             aria-label="Select employee"
           >
-            <option value="">Select an employee…</option>
-            {users.map((u) => (
-              <option key={u.id} value={u.id}>{userLabel(u)}</option>
+            <option value="">
+              {officersLoading ? "Loading officers…" : "Select an employee…"}
+            </option>
+            {officerOptions.map((u) => (
+              <option key={u.id} value={u.id}>{u.label}</option>
             ))}
           </select>
         </label>
@@ -180,7 +430,7 @@ export default function TimeCardPage() {
             variant="outline"
             size="sm"
             disabled={!card || loading}
-            onClick={() => card && navigate(employeeId, card.prevWeekStart)}
+            onClick={() => card && navigate({ week: card.prevWeekStart })}
             aria-label="Previous week"
           >
             <ChevronLeft className="h-4 w-4" aria-hidden="true" />
@@ -188,7 +438,7 @@ export default function TimeCardPage() {
           <button
             type="button"
             className="text-sm font-medium min-w-[190px] text-center hover:underline"
-            onClick={() => navigate(employeeId, "")}
+            onClick={() => navigate({ week: "" })}
             title="Jump to the current week"
             aria-label={card ? `Week of ${fmtRange(card.weekStart, card.weekEnd)}. Jump to the current week.` : "Current week"}
           >
@@ -198,7 +448,7 @@ export default function TimeCardPage() {
             variant="outline"
             size="sm"
             disabled={!card || loading}
-            onClick={() => card && navigate(employeeId, card.nextWeekStart)}
+            onClick={() => card && navigate({ week: card.nextWeekStart })}
             aria-label="Next week"
           >
             <ChevronRight className="h-4 w-4" aria-hidden="true" />
@@ -233,10 +483,22 @@ export default function TimeCardPage() {
         </div>
       </div>
 
+      {officersError && (
+        <div className="border border-amber-200 bg-amber-50 text-amber-800 rounded-lg p-3 text-sm mb-4">
+          {officersError}
+        </div>
+      )}
+
       {!employeeId ? (
         <div className="border rounded-lg p-10 text-center text-muted-foreground">
           <CalendarDays className="h-8 w-8 mx-auto mb-3" aria-hidden="true" />
-          <p className="text-sm">Pick an employee to see their weekly time card.</p>
+          {siteId && siteOfficers && siteOfficers.length === 0 && !officersLoading ? (
+            <p className="text-sm">No officers have time entries at this site yet. Pick another site, or choose “All sites”.</p>
+          ) : siteId ? (
+            <p className="text-sm">Pick an officer who worked at this site to see their weekly time card.</p>
+          ) : (
+            <p className="text-sm">Pick an employee to see their weekly time card — or pick a site first to narrow the list.</p>
+          )}
         </div>
       ) : loading ? (
         <div className="flex items-center justify-center p-10 text-muted-foreground">
@@ -273,38 +535,69 @@ export default function TimeCardPage() {
                       {fmtDay(day.date)}
                       {isToday && <span className="ml-2 text-xs font-medium text-primary">Today</span>}
                     </div>
-                    <div className={`text-sm font-semibold ${day.totalHours > 0 ? "" : "text-muted-foreground"}`}>
-                      {fmtHours(day.totalHours)}
+                    <div className="flex items-center gap-2">
+                      <div className={`text-sm font-semibold ${day.totalHours > 0 ? "" : "text-muted-foreground"}`}>
+                        {fmtHours(day.totalHours)}
+                      </div>
+                      {isAdmin && (
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          className="h-7 px-2"
+                          onClick={() => openCreate(day.date)}
+                          aria-label={`Add time entry on ${fmtDay(day.date)}`}
+                        >
+                          <Plus className="h-4 w-4" aria-hidden="true" />
+                        </Button>
+                      )}
                     </div>
                   </div>
                   {day.entries.length === 0 ? (
                     <div className="px-4 py-3 text-sm text-muted-foreground">No entries</div>
                   ) : (
                     <ul className="divide-y">
-                      {day.entries.map((e) => {
-                        const fmtT = (iso: string) =>
-                          new Date(iso).toLocaleTimeString("en-US", { timeZone: card.timezone, hour: "numeric", minute: "2-digit" });
-                        return (
-                          <li key={e.id} className="flex items-center justify-between gap-3 px-4 py-2.5">
-                            <div className="min-w-0">
-                              <div className="text-sm font-medium">
-                                {fmtT(e.clockInTime)} → {e.open ? "now" : e.clockOutTime ? fmtT(e.clockOutTime) : "—"}
-                              </div>
-                              {(e.siteName || e.shiftTitle) && (
-                                <div className="text-xs text-muted-foreground truncate">{e.siteName ?? e.shiftTitle}</div>
-                              )}
+                      {day.entries.map((e) => (
+                        <li key={e.id} className="flex items-center justify-between gap-3 px-4 py-2.5">
+                          <div className="min-w-0">
+                            <div className="text-sm font-medium">
+                              {fmtEntryTime(e.clockInTime)} → {e.open ? "now" : e.clockOutTime ? fmtEntryTime(e.clockOutTime) : "—"}
                             </div>
-                            <div className="flex items-center gap-3 shrink-0">
-                              <span className="text-sm font-semibold">
-                                {e.open ? "In progress" : fmtHours(e.hoursWorked ?? 0)}
+                            {(e.siteName || e.shiftTitle) && (
+                              <div className="text-xs text-muted-foreground truncate">{e.siteName ?? e.shiftTitle}</div>
+                            )}
+                          </div>
+                          <div className="flex items-center gap-3 shrink-0">
+                            <span className="text-sm font-semibold">
+                              {e.open ? "In progress" : fmtHours(e.hoursWorked ?? 0)}
+                            </span>
+                            <span className={`text-xs px-2 py-0.5 rounded ${APPROVAL_PILL[e.approvalStatus]}`}>
+                              {e.approvalStatus.charAt(0).toUpperCase() + e.approvalStatus.slice(1)}
+                            </span>
+                            {isAdmin && (
+                              <span className="flex items-center gap-1">
+                                <Button
+                                  variant="ghost"
+                                  size="sm"
+                                  className="h-7 px-2"
+                                  onClick={() => void openEdit(e)}
+                                  aria-label={`Edit entry starting ${fmtEntryTime(e.clockInTime)}`}
+                                >
+                                  <Pencil className="h-4 w-4" aria-hidden="true" />
+                                </Button>
+                                <Button
+                                  variant="ghost"
+                                  size="sm"
+                                  className="h-7 px-2 text-red-600 hover:text-red-700"
+                                  onClick={() => { setDeleteError(null); setDeleteTarget(e); }}
+                                  aria-label={`Delete entry starting ${fmtEntryTime(e.clockInTime)}`}
+                                >
+                                  <Trash2 className="h-4 w-4" aria-hidden="true" />
+                                </Button>
                               </span>
-                              <span className={`text-xs px-2 py-0.5 rounded ${APPROVAL_PILL[e.approvalStatus]}`}>
-                                {e.approvalStatus.charAt(0).toUpperCase() + e.approvalStatus.slice(1)}
-                              </span>
-                            </div>
-                          </li>
-                        );
-                      })}
+                            )}
+                          </div>
+                        </li>
+                      ))}
                     </ul>
                   )}
                 </div>
@@ -318,6 +611,134 @@ export default function TimeCardPage() {
           </p>
         </>
       ) : null}
+
+      {/* Add / edit entry dialog */}
+      <Dialog open={editor !== null} onOpenChange={(open) => { if (!open) closeEditor(); }}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>{editor?.mode === "create" ? "Add time entry" : "Edit time entry"}</DialogTitle>
+            <DialogDescription>
+              {card ? `For ${card.employeeName?.trim() || "this employee"}. ` : ""}
+              Times are entered in your local timezone. Approved hours flow into the week&apos;s draft invoice automatically.
+            </DialogDescription>
+          </DialogHeader>
+          {editorLoading ? (
+            <div className="flex items-center justify-center py-8 text-muted-foreground">
+              <Loader2 className="h-5 w-5 animate-spin" aria-label="Loading entry" />
+            </div>
+          ) : (
+            <div className="space-y-3">
+              <div className="space-y-1">
+                <label htmlFor="te-site" className="text-sm font-medium">Site</label>
+                <select
+                  id="te-site"
+                  className="w-full border rounded-md px-3 py-2 text-sm bg-background"
+                  value={form.siteId}
+                  onChange={(e) => setForm((f) => ({ ...f, siteId: e.target.value }))}
+                  disabled={saving}
+                >
+                  <option value="">No site</option>
+                  {sites.map((s) => (
+                    <option key={s.id} value={s.id}>{s.name}</option>
+                  ))}
+                </select>
+              </div>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div className="space-y-1">
+                  <label htmlFor="te-clock-in" className="text-sm font-medium">Clock in</label>
+                  <input
+                    id="te-clock-in"
+                    type="datetime-local"
+                    className="w-full border rounded-md px-3 py-2 text-sm bg-background"
+                    value={form.clockIn}
+                    onChange={(e) => setForm((f) => ({ ...f, clockIn: e.target.value }))}
+                    disabled={saving}
+                  />
+                </div>
+                <div className="space-y-1">
+                  <label htmlFor="te-clock-out" className="text-sm font-medium">Clock out</label>
+                  <input
+                    id="te-clock-out"
+                    type="datetime-local"
+                    className="w-full border rounded-md px-3 py-2 text-sm bg-background"
+                    value={form.clockOut}
+                    onChange={(e) => setForm((f) => ({ ...f, clockOut: e.target.value }))}
+                    disabled={saving}
+                  />
+                  <p className="text-xs text-muted-foreground">Leave empty for an in-progress entry.</p>
+                </div>
+              </div>
+              <div className="space-y-1">
+                <label htmlFor="te-status" className="text-sm font-medium">Approval</label>
+                <select
+                  id="te-status"
+                  className="w-full border rounded-md px-3 py-2 text-sm bg-background"
+                  value={form.approvalStatus}
+                  onChange={(e) => setForm((f) => ({ ...f, approvalStatus: e.target.value as EditorForm["approvalStatus"] }))}
+                  disabled={saving}
+                >
+                  <option value="pending">Pending</option>
+                  <option value="approved">Approved</option>
+                  <option value="rejected">Rejected</option>
+                </select>
+              </div>
+              <div className="space-y-1">
+                <label htmlFor="te-notes" className="text-sm font-medium">Notes</label>
+                <textarea
+                  id="te-notes"
+                  className="w-full border rounded-md px-3 py-2 text-sm bg-background min-h-[64px]"
+                  value={form.notes}
+                  onChange={(e) => setForm((f) => ({ ...f, notes: e.target.value }))}
+                  disabled={saving}
+                />
+              </div>
+              <p className="text-sm text-muted-foreground">
+                Hours: <span className="font-medium text-foreground">{computedHours != null ? fmtHours(computedHours) : "—"}</span>
+                {form.clockOut && computedHours == null ? " (clock-out must be after clock-in)" : ""}
+              </p>
+              {editorError && (
+                <div className="border border-red-200 bg-red-50 text-red-800 rounded-md p-2.5 text-sm">{editorError}</div>
+              )}
+            </div>
+          )}
+          <DialogFooter>
+            <Button variant="outline" onClick={closeEditor} disabled={saving}>Cancel</Button>
+            <Button onClick={() => void saveEntry()} disabled={saving || editorLoading}>
+              {saving && <Loader2 className="h-4 w-4 animate-spin mr-1.5" aria-hidden="true" />}
+              {editor?.mode === "create" ? "Add entry" : "Save changes"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Delete confirmation */}
+      <AlertDialog open={deleteTarget !== null} onOpenChange={(open) => { if (!open && !deleting) setDeleteTarget(null); }}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Delete this time entry?</AlertDialogTitle>
+            <AlertDialogDescription>
+              {deleteTarget
+                ? `${fmtEntryTime(deleteTarget.clockInTime)} → ${deleteTarget.open ? "now" : deleteTarget.clockOutTime ? fmtEntryTime(deleteTarget.clockOutTime) : "—"}${deleteTarget.siteName ? ` at ${deleteTarget.siteName}` : ""}. `
+                : ""}
+              This can&apos;t be undone. If the entry was approved, its hours are also removed from that week&apos;s draft invoice.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          {deleteError && (
+            <div className="border border-red-200 bg-red-50 text-red-800 rounded-md p-2.5 text-sm">{deleteError}</div>
+          )}
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={deleting}>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={(e) => { e.preventDefault(); void confirmDelete(); }}
+              disabled={deleting}
+              className="bg-red-600 hover:bg-red-700 text-white"
+            >
+              {deleting && <Loader2 className="h-4 w-4 animate-spin mr-1.5" aria-hidden="true" />}
+              Delete entry
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }

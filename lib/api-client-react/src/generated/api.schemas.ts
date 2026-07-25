@@ -1086,6 +1086,20 @@ export interface TimeCard {
 }
 
 /**
+ * An officer with at least one time entry at the requested site.
+ */
+export interface TimeCardSiteOfficer {
+  id: string;
+  firstName?: string | null;
+  lastName?: string | null;
+  email: string;
+  /** Number of time entries this officer has at the site. */
+  entryCount: number;
+  /** Most recent clock-in this officer recorded at the site. */
+  lastClockInTime: string;
+}
+
+/**
  * Clock in. Resolution priority: (1) if shiftId is provided, the entry is linked to
 that shift (no geo check); (2) else if siteId is provided, the entry is linked to
 that explicitly-picked site (no geo check — used when GPS is unavailable or the site
@@ -2836,6 +2850,14 @@ export type GetTimeCardParams = {
    * Any date (YYYY-MM-DD) inside the desired week; snapped to that week's Monday. Defaults to the current week.
    */
   weekStart?: string;
+};
+
+export type GetTimeCardSiteOfficersParams = {
+  siteId: string;
+};
+
+export type GetTimeCardSiteOfficers200 = {
+  officers: TimeCardSiteOfficer[];
 };
 
 export type GetPayrollEntriesParams = {
