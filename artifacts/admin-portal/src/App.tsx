@@ -210,7 +210,7 @@ function Routed() {
 
 // Old bookmarks / deep links (/shifts/calendar, /tables/shifts) land on the
 // unified Shifts area, preserving any query string (?focus=, ?shiftId=).
-function LegacyShiftsRedirect() {
+export function LegacyShiftsRedirect() {
   return <Redirect to={`/shifts${window.location.search}`} replace />;
 }
 
