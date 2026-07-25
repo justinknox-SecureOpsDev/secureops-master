@@ -1,6 +1,6 @@
 import React, { useState, useMemo } from "react";
 import { useTopPad } from "@/hooks/useTopPad";
-import { View, Text, StyleSheet, FlatList, TouchableOpacity, ActivityIndicator, TextInput, Alert, Platform } from "react-native";
+import { View, Text, StyleSheet, FlatList, TouchableOpacity, ActivityIndicator, TextInput, Alert, Platform, Modal, ScrollView } from "react-native";
 import { useColors } from "@/hooks/useColors";
 import { useGetTimeEntries, getGetTimeEntriesQueryKey, useApproveTimeEntry } from "@workspace/api-client-react";
 import { Feather } from "@expo/vector-icons";
@@ -14,6 +14,24 @@ import { useQueryClient } from "@tanstack/react-query";
 // force-clears the awaiting state server-side).
 const FILTERS = ["pending", "unconfirmed", "approved", "rejected"] as const;
 
+const EDIT_PURPLE = "#8b5cf6";
+
+function fmtDelta(origIso: string | null, submittedIso: string | null): string | null {
+  if (!origIso || !submittedIso) return null;
+  const diffMin = Math.round((new Date(submittedIso).getTime() - new Date(origIso).getTime()) / 60000);
+  if (diffMin === 0) return "no change";
+  return `${diffMin > 0 ? "+" : "−"}${Math.abs(diffMin)} min`;
+}
+
+type ReviewEntry = {
+  employeeName: string | null;
+  clockInTime: string;
+  clockOutTime: string | null;
+  originalClockInTime: string | null;
+  originalClockOutTime: string | null;
+  employeeEditReason: string | null;
+};
+
 export default function TimeApprovalScreen() {
   const colors = useColors();
   const router = useRouter();
@@ -21,6 +39,7 @@ export default function TimeApprovalScreen() {
   const topPad = useTopPad();
   const [filter, setFilter] = useState<typeof FILTERS[number]>("pending");
   const [edits, setEdits] = useState<Record<string, string>>({});
+  const [review, setReview] = useState<ReviewEntry | null>(null);
 
   const { data: entries, isLoading, refetch } = useGetTimeEntries({}, {
     query: { queryKey: getGetTimeEntriesQueryKey({}) },
@@ -129,20 +148,34 @@ export default function TimeApprovalScreen() {
                 )}
 
                 {item.employeeEdited && (
-                  <View style={[styles.correctionBox, { backgroundColor: "#8b5cf615", borderColor: "#8b5cf6" }]}>
-                    <View style={styles.correctionHead}>
-                      <Feather name="edit-2" size={12} color="#8b5cf6" />
-                      <Text style={[styles.correctionTitle, { color: "#8b5cf6" }]}>Edited by officer</Text>
+                  <TouchableOpacity
+                    onPress={() => setReview({
+                      employeeName: item.employeeName ?? null,
+                      clockInTime: item.clockInTime,
+                      clockOutTime: item.clockOutTime ?? null,
+                      originalClockInTime: item.originalClockInTime ?? null,
+                      originalClockOutTime: item.originalClockOutTime ?? null,
+                      employeeEditReason: item.employeeEditReason ?? null,
+                    })}
+                    style={[styles.correctionBox, { backgroundColor: EDIT_PURPLE + "15", borderColor: EDIT_PURPLE }]}
+                    accessibilityRole="button"
+                    accessibilityLabel={`Review officer time edit for ${item.employeeName ?? "this entry"}`}
+                    accessibilityHint="Shows recorded versus submitted times and the officer's reason"
+                  >
+                    <View style={[styles.correctionHead, { justifyContent: "space-between" }]}>
+                      <View style={styles.correctionHead}>
+                        <Feather name="edit-2" size={12} color={EDIT_PURPLE} />
+                        <Text style={[styles.correctionTitle, { color: EDIT_PURPLE }]}>Edited by officer</Text>
+                      </View>
+                      <View style={styles.correctionHead}>
+                        <Text style={{ color: EDIT_PURPLE, fontSize: 11, fontWeight: "600" }}>Review</Text>
+                        <Feather name="chevron-right" size={13} color={EDIT_PURPLE} />
+                      </View>
                     </View>
-                    {(item.originalClockInTime || item.originalClockOutTime) ? (
-                      <Text style={[styles.correctionNote, { color: colors.mutedForeground }]}>
-                        Recorded: {item.originalClockInTime ? new Date(item.originalClockInTime).toLocaleString() : "—"} → {item.originalClockOutTime ? new Date(item.originalClockOutTime).toLocaleString() : "—"}
-                      </Text>
-                    ) : null}
                     {item.employeeEditReason ? (
-                      <Text style={[styles.correctionNote, { color: colors.foreground }]}>{item.employeeEditReason}</Text>
+                      <Text style={[styles.correctionNote, { color: colors.foreground }]} numberOfLines={2}>{item.employeeEditReason}</Text>
                     ) : null}
-                  </View>
+                  </TouchableOpacity>
                 )}
 
                 {item.correctionRequested && (
@@ -198,6 +231,79 @@ export default function TimeApprovalScreen() {
           }}
         />
       )}
+
+      <Modal visible={!!review} transparent animationType="fade" onRequestClose={() => setReview(null)}>
+        <View style={styles.modalBackdrop}>
+          <View style={[styles.modalCard, { backgroundColor: colors.card, borderColor: colors.border }]}>
+            <View style={[styles.correctionHead, { justifyContent: "space-between" }]}>
+              <View style={styles.correctionHead}>
+                <Feather name="edit-2" size={14} color={EDIT_PURPLE} />
+                <Text style={[styles.modalTitle, { color: colors.foreground }]}>Officer time edit</Text>
+              </View>
+              <TouchableOpacity onPress={() => setReview(null)} accessibilityRole="button" accessibilityLabel="Close review" style={{ padding: 4 }}>
+                <Feather name="x" size={18} color={colors.mutedForeground} />
+              </TouchableOpacity>
+            </View>
+            {review && (
+              <ScrollView style={{ maxHeight: 420 }} contentContainerStyle={{ gap: 12, paddingTop: 10 }}>
+                {review.employeeName ? (
+                  <Text style={{ color: colors.mutedForeground, fontSize: 12 }}>
+                    {review.employeeName} changed their times before submitting. Review the difference before approving.
+                  </Text>
+                ) : (
+                  <Text style={{ color: colors.mutedForeground, fontSize: 12 }}>
+                    The officer changed their times before submitting. Review the difference before approving.
+                  </Text>
+                )}
+
+                {([
+                  { label: "Clock-in", orig: review.originalClockInTime, submitted: review.clockInTime },
+                  { label: "Clock-out", orig: review.originalClockOutTime, submitted: review.clockOutTime },
+                ] as const).map(({ label, orig, submitted }) => {
+                  const delta = fmtDelta(orig, submitted);
+                  return (
+                    <View key={label} style={[styles.diffBlock, { borderColor: colors.border }]}>
+                      <View style={[styles.correctionHead, { justifyContent: "space-between" }]}>
+                        <Text style={{ color: colors.foreground, fontSize: 12, fontWeight: "700" }}>{label}</Text>
+                        {delta ? (
+                          <View style={[styles.deltaBadge, { backgroundColor: EDIT_PURPLE + "20", borderColor: EDIT_PURPLE }]}>
+                            <Text style={{ color: EDIT_PURPLE, fontSize: 11, fontWeight: "700" }}>{delta}</Text>
+                          </View>
+                        ) : null}
+                      </View>
+                      <View style={styles.diffRow}>
+                        <Text style={[styles.diffLabel, { color: colors.mutedForeground }]}>Recorded</Text>
+                        <Text style={{ color: colors.mutedForeground, fontSize: 13, flex: 1 }}>
+                          {orig ? new Date(orig).toLocaleString() : "—"}
+                        </Text>
+                      </View>
+                      <View style={styles.diffRow}>
+                        <Text style={[styles.diffLabel, { color: colors.mutedForeground }]}>Submitted</Text>
+                        <Text style={{ color: colors.foreground, fontSize: 13, fontWeight: "600", flex: 1 }}>
+                          {submitted ? new Date(submitted).toLocaleString() : "—"}
+                        </Text>
+                      </View>
+                    </View>
+                  );
+                })}
+
+                <View style={[styles.diffBlock, { borderColor: colors.border }]}>
+                  <Text style={{ color: colors.foreground, fontSize: 12, fontWeight: "700" }}>Officer's reason</Text>
+                  <Text style={{ color: review.employeeEditReason ? colors.foreground : colors.mutedForeground, fontSize: 13, lineHeight: 18 }}>
+                    {review.employeeEditReason || "No reason provided."}
+                  </Text>
+                </View>
+              </ScrollView>
+            )}
+            <TouchableOpacity
+              onPress={() => setReview(null)}
+              style={[styles.actBtn, { backgroundColor: colors.primary, marginTop: 12 }]}
+              accessibilityRole="button" accessibilityLabel="Done reviewing officer time edit">
+              <Text style={[styles.actText, { color: colors.primaryForeground ?? "#fff" }]}>Done</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      </Modal>
     </View>
   );
 }
@@ -225,4 +331,11 @@ const styles = StyleSheet.create({
   input: { width: 80, height: 36, borderWidth: 1, borderRadius: 6, paddingHorizontal: 10, fontSize: 14, textAlign: "center" },
   actBtn: { flex: 1, flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 6, padding: 10, borderRadius: 8 },
   actText: { fontWeight: "700", fontSize: 13 },
+  modalBackdrop: { flex: 1, backgroundColor: "rgba(0,0,0,0.55)", justifyContent: "center", padding: 20 },
+  modalCard: { borderRadius: 14, borderWidth: 1, padding: 16 },
+  modalTitle: { fontSize: 16, fontWeight: "700" },
+  diffBlock: { borderWidth: 1, borderRadius: 10, padding: 10, gap: 6 },
+  diffRow: { flexDirection: "row", alignItems: "flex-start", gap: 8 },
+  diffLabel: { fontSize: 11, fontWeight: "600", width: 68, marginTop: 1 },
+  deltaBadge: { paddingHorizontal: 8, paddingVertical: 2, borderRadius: 10, borderWidth: 1 },
 });
