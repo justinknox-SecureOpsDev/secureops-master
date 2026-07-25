@@ -210,6 +210,7 @@ export default function AdminDashboardScreen() {
         <Text style={[styles.sectionTitle, { color: colors.accent }]}>QUICK JUMP</Text>
         <View style={styles.quickGrid}>
           {([
+            { label: "Radio", icon: "radio", route: "/(admin)/radio", feature: "radio" },
             { label: "Payroll", icon: "dollar-sign", route: "/(admin)/payroll", feature: "payroll" },
             { label: "Invoices", icon: "file-text", route: "/(admin)/invoices", feature: "invoicing" },
             { label: "Licences", icon: "award", route: "/(admin)/licenses" },

@@ -36,6 +36,11 @@ project + channel + runtime version, NOT bundle/ASC ids directly. Policy is
 - Repo `app.json` is back at `1.0.0` so auto-OTAs-on-deploy reach real devices
   again; bump to `1.0.1` only WHEN the new native binary is actually built
   (see RADIO_NATIVE_RELEASE_RUNBOOK.md §1).
+- Auto-OTA-on-deploy exports from the DEPLOY SNAPSHOT's app.json, not HEAD —
+  a version fix committed after the deployed commit doesn't take effect until
+  the next republish, so deploys kept publishing phantom-runtime updates.
+  After any deploy, sanity-check `eas update:list --branch production` runtime
+  against `eas build:list`; if they diverge, push a manual OTA from HEAD.
 - Native-compat guard: build 10 has LiveKit natives but NOT expo-audio; builds
   ≤9 have NEITHER. All native deps newer than the oldest served binary must be
   loaded via guarded lazy require — expo-audio via `getExpoAudio()`, LiveKit
