@@ -55,18 +55,88 @@ function formatHours(v: unknown): string {
   return `${n}h`;
 }
 
+type SettingChange = {
+  field: string;
+  label: string;
+  kind: string;
+  old: unknown;
+  new: unknown;
+};
+
+const SETTINGS_GROUP_LABEL: Record<string, string> = {
+  customer_config: "Plan / commercial config",
+  brand: "Branding",
+  features: "Feature flags",
+};
+
+/** Formats a single old/new value according to its `kind` hint. */
+function formatSettingValue(kind: string, v: unknown): string {
+  if (v === null || v === undefined || v === "") {
+    return kind === "bool" || kind === "feature" ? "off" : "unset";
+  }
+  switch (kind) {
+    case "hours":
+      return formatHours(v);
+    case "money_cents": {
+      const n = typeof v === "number" ? v : parseFloat(String(v));
+      if (!Number.isFinite(n)) return String(v);
+      return `$${(n / 100).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+    }
+    case "percent":
+      return `${v}%`;
+    case "bool":
+    case "feature":
+      return v === true ? "on" : v === false ? "off" : String(v);
+    case "image":
+      return v === true ? "set" : "removed";
+    case "color":
+    case "text":
+    case "number":
+    default:
+      return String(v);
+  }
+}
+
 /**
- * Extracts a human-readable summary of a time-edit-limit change from an audit
- * row's metadata. Returns null when the row isn't a time-edit-limit change.
+ * Extracts human-readable before/after summary lines from a settings-change
+ * audit row's metadata. Handles the generic `{ settingsChange, changes: [...] }`
+ * shape emitted by the platform settings routes, plus the legacy
+ * time-edit-limit-only shape on older audit rows. Returns null when the row
+ * carries no recognized settings-change metadata.
  */
-function timeEditLimitSummary(metadata: unknown): string | null {
+function settingsChangeSummary(
+  metadata: unknown,
+): { groupLabel: string; lines: string[] } | null {
   if (!metadata || typeof metadata !== "object") return null;
   const m = metadata as Record<string, unknown>;
-  if (m["change"] !== "time_confirm_edit_window_hours") return null;
-  const win = m["timeConfirmEditWindowHours"];
-  if (!win || typeof win !== "object") return null;
-  const { old: oldValue, new: newValue } = win as { old?: unknown; new?: unknown };
-  return `Time-edit limit changed from ${formatHours(oldValue)} to ${formatHours(newValue)}`;
+
+  // Generic shape emitted for customer-config, brand, and feature changes.
+  if (Array.isArray(m["changes"]) && typeof m["settingsChange"] === "string") {
+    const changes = m["changes"] as SettingChange[];
+    const lines = changes.map(
+      (c) =>
+        `${c.label} changed from ${formatSettingValue(c.kind, c.old)} to ${formatSettingValue(c.kind, c.new)}`,
+    );
+    if (lines.length === 0) return null;
+    return {
+      groupLabel: SETTINGS_GROUP_LABEL[m["settingsChange"] as string] ?? "Settings",
+      lines,
+    };
+  }
+
+  // Legacy shape: time-edit-limit-only rows written before generalization.
+  if (m["change"] === "time_confirm_edit_window_hours") {
+    const win = m["timeConfirmEditWindowHours"];
+    if (win && typeof win === "object") {
+      const { old: oldValue, new: newValue } = win as { old?: unknown; new?: unknown };
+      return {
+        groupLabel: SETTINGS_GROUP_LABEL["customer_config"]!,
+        lines: [`Time-edit limit changed from ${formatHours(oldValue)} to ${formatHours(newValue)}`],
+      };
+    }
+  }
+
+  return null;
 }
 
 function methodColor(m: string): string {
@@ -236,11 +306,18 @@ export default function AuditLogPage() {
                   </button>
                   {isOpen && (
                     <div className="border-t border-border bg-muted/20 px-3 py-3 space-y-3 text-xs">
-                      {timeEditLimitSummary(r.metadata) && (
-                        <div className="bg-amber-50 border border-amber-200 text-amber-900 rounded p-2 text-[11px]">
-                          {timeEditLimitSummary(r.metadata)} by {r.actorEmail ?? "(anonymous)"}
-                        </div>
-                      )}
+                      {(() => {
+                        const s = settingsChangeSummary(r.metadata);
+                        if (!s) return null;
+                        return (
+                          <div className="bg-amber-50 border border-amber-200 text-amber-900 rounded p-2 text-[11px] space-y-1">
+                            <div className="font-semibold">{s.groupLabel} updated by {r.actorEmail ?? "(anonymous)"}</div>
+                            <ul className="list-disc pl-4 space-y-0.5">
+                              {s.lines.map((l, i) => <li key={i}>{l}</li>)}
+                            </ul>
+                          </div>
+                        );
+                      })()}
                       <div>
                         <div className="font-semibold mb-1">Request body (after)</div>
                         <pre className="bg-background border border-border rounded p-2 overflow-auto max-h-64 text-[11px]">
@@ -322,11 +399,18 @@ export default function AuditLogPage() {
                     {isOpen && (
                       <tr key={r.id + "-detail"} className="border-t border-border bg-muted/20">
                         <td colSpan={7} className="px-4 py-3">
-                          {timeEditLimitSummary(r.metadata) && (
-                            <div className="bg-amber-50 border border-amber-200 text-amber-900 rounded p-2 text-xs mb-4">
-                              {timeEditLimitSummary(r.metadata)} by {r.actorEmail ?? "(anonymous)"}
-                            </div>
-                          )}
+                          {(() => {
+                            const s = settingsChangeSummary(r.metadata);
+                            if (!s) return null;
+                            return (
+                              <div className="bg-amber-50 border border-amber-200 text-amber-900 rounded p-2 text-xs mb-4 space-y-1">
+                                <div className="font-semibold">{s.groupLabel} updated by {r.actorEmail ?? "(anonymous)"}</div>
+                                <ul className="list-disc pl-4 space-y-0.5">
+                                  {s.lines.map((l, i) => <li key={i}>{l}</li>)}
+                                </ul>
+                              </div>
+                            );
+                          })()}
                           <div className="grid grid-cols-2 gap-4 text-xs">
                             <div>
                               <div className="font-semibold mb-1">Request body (after)</div>

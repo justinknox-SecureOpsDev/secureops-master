@@ -26,6 +26,7 @@ import {
   clearOverrideInMemory,
 } from "../lib/features";
 import { featureUpdateBody, brandConfigSchema } from "../lib/platformSchemas";
+import { buildCustomerConfigChanges, buildBrandChanges, buildFeatureChanges } from "../lib/settingsAudit";
 
 const router: Router = Router();
 
@@ -61,6 +62,10 @@ router.put("/admin/platform/features", requireAuth, requireSuperAdmin, async (re
   }
   const editor = req.user?.email ?? "unknown";
 
+  // Snapshot the effective enabled state per key BEFORE applying so we can
+  // record a clear old→new paper trail for each toggled flag.
+  const beforeEnabled = new Map(getFeatureFlagDetails().map((f) => [f.key as string, f.enabled]));
+
   for (const u of parsed.data.updates) {
     const key = u.key as FeatureKey;
     if (u.enabled === null) {
@@ -80,7 +85,17 @@ router.put("/admin/platform/features", requireAuth, requireSuperAdmin, async (re
   }
   // Reload from DB to stay consistent if another instance also wrote.
   await loadFeatureOverridesFromDb();
-  res.json({ features: getFeatureFlagDetails() });
+  const afterDetails = getFeatureFlagDetails();
+  const afterEnabled = new Map(afterDetails.map((f) => [f.key as string, f.enabled]));
+  const auditMeta = buildFeatureChanges(
+    parsed.data.updates.map((u) => ({
+      key: u.key,
+      old: beforeEnabled.get(u.key) ?? false,
+      new: afterEnabled.get(u.key) ?? false,
+    })),
+  );
+  if (auditMeta) res.locals["auditMetadata"] = auditMeta;
+  res.json({ features: afterDetails });
 });
 
 /** Tells the admin portal whether the current user can see the platform tab. */
@@ -144,13 +159,13 @@ router.put("/admin/platform/customer-config", requireAuth, requireSuperAdmin, as
   // Absent key (older client) → leave the stored value unchanged.
   const timeConfirmEditWindowHours = parsed.data.timeConfirmEditWindowHours;
 
-  // Snapshot the current time-edit limit BEFORE the upsert so we can record a
-  // clear old→new paper trail for this payroll-affecting control. The generic
-  // auditLogMiddleware records this PUT as `admin.action`; stashing the change
-  // on res.locals.auditMetadata gives reviewers the specific before/after
-  // values (who loosened or tightened officer self-edits, and when).
+  // Snapshot the FULL config BEFORE the upsert so we can record a clear old→new
+  // paper trail for every changed field. The generic auditLogMiddleware records
+  // this PUT as `admin.action`; stashing the changes on res.locals.auditMetadata
+  // gives reviewers the specific before/after values (who changed plan, pricing,
+  // processing fees, the officer self-edit window, and when).
   const [priorConfig] = await db
-    .select({ timeConfirmEditWindowHours: platformCustomerConfigTable.timeConfirmEditWindowHours })
+    .select()
     .from(platformCustomerConfigTable)
     .where(eq(platformCustomerConfigTable.id, "singleton"))
     .limit(1);
@@ -178,20 +193,23 @@ router.put("/admin/platform/customer-config", requireAuth, requireSuperAdmin, as
   applyProcessingFeeConfig(config ?? null);
   applyConfirmEditWindowConfig(config ?? null);
 
-  // Record the old→new time-edit limit for the audit log when it actually
-  // changed. The values are plain numeric strings / null (no sensitive data),
-  // so no redaction is required; the middleware persists this into
-  // audit_logs.metadata.
+  // Record the old→new values for every changed field in the audit log. The
+  // values are plain scalars (no sensitive data), so no redaction is required;
+  // the middleware persists this into audit_logs.metadata. Only fields present
+  // in the parsed payload are compared, so an older client that omits a key
+  // never triggers a spurious "changed" entry.
+  const afterConfig: Record<string, unknown> = {
+    customerName, planTier, monthlyPriceCents, officerCount, billingNotes,
+    planStartDate, processingFeeEnabled, processingFeeRate,
+  };
   if (timeConfirmEditWindowHours !== undefined) {
-    const oldValue = priorConfig?.timeConfirmEditWindowHours ?? null;
-    const newValue = config?.timeConfirmEditWindowHours ?? null;
-    if (oldValue !== newValue) {
-      res.locals["auditMetadata"] = {
-        change: "time_confirm_edit_window_hours",
-        timeConfirmEditWindowHours: { old: oldValue, new: newValue },
-      };
-    }
+    afterConfig["timeConfirmEditWindowHours"] = config?.timeConfirmEditWindowHours ?? null;
   }
+  const auditMeta = buildCustomerConfigChanges(
+    (priorConfig ?? {}) as Record<string, unknown>,
+    afterConfig,
+  );
+  if (auditMeta) res.locals["auditMetadata"] = auditMeta;
 
   res.json({ config });
 });
@@ -216,6 +234,14 @@ router.put("/admin/platform/brand", requireAuth, requireSuperAdmin, async (req, 
   const editor = req.user?.email ?? "unknown";
   const d = parsed.data;
 
+  // Snapshot the prior brand row so we can record a clear old→new paper trail
+  // for every changed field in the audit log.
+  const [priorConfig] = await db
+    .select()
+    .from(platformBrandConfigTable)
+    .where(eq(platformBrandConfigTable.id, "singleton"))
+    .limit(1);
+
   await db
     .insert(platformBrandConfigTable)
     .values({ id: "singleton", ...d, updatedBy: editor })
@@ -233,6 +259,15 @@ router.put("/admin/platform/brand", requireAuth, requireSuperAdmin, async (req, 
   // Patch the live brand so emails, PDFs, and /api/brand reflect the change
   // immediately without a restart.
   applyBrandOverrides(config ?? null);
+
+  // Record the old→new values for every changed brand field. The logo blob is
+  // never persisted — the helper records only a set/unset flag for it.
+  const auditMeta = buildBrandChanges(
+    (priorConfig ?? {}) as Record<string, unknown>,
+    d as Record<string, unknown>,
+  );
+  if (auditMeta) res.locals["auditMetadata"] = auditMeta;
+
   res.json({ config });
 });
 

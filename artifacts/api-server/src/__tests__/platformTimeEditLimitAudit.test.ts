@@ -136,8 +136,12 @@ describe("time-edit limit change audit trail", () => {
     expect(audit.actorEmail).toBe(superEmail);
     const meta = audit.metadata as Record<string, unknown> | null;
     expect(meta).toBeTruthy();
-    expect(meta?.["change"]).toBe("time_confirm_edit_window_hours");
-    expect(meta?.["timeConfirmEditWindowHours"]).toEqual({ old: "2", new: "4" });
+    expect(meta?.["settingsChange"]).toBe("customer_config");
+    const changes = meta?.["changes"] as Array<Record<string, unknown>>;
+    const limitChange = changes.find((c) => c["field"] === "timeConfirmEditWindowHours");
+    expect(limitChange).toBeTruthy();
+    expect(limitChange?.["old"]).toBe("2");
+    expect(limitChange?.["new"]).toBe("4");
   });
 
   it("does not attach the change metadata when the limit is unchanged", async () => {
@@ -151,7 +155,9 @@ describe("time-edit limit change audit trail", () => {
 
     const audit = await waitForAuditRow();
     const meta = audit.metadata as Record<string, unknown> | null;
-    // Either no metadata, or metadata without the time-edit-limit change marker.
-    expect(meta?.["change"]).not.toBe("time_confirm_edit_window_hours");
+    // Either no metadata, or a generic settings-change payload that contains no
+    // timeConfirmEditWindowHours entry (the limit did not change).
+    const changes = (meta?.["changes"] as Array<Record<string, unknown>> | undefined) ?? [];
+    expect(changes.some((c) => c["field"] === "timeConfirmEditWindowHours")).toBe(false);
   });
 });
