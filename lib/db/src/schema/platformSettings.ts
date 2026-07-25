@@ -40,6 +40,11 @@ export const platformCustomerConfigTable = pgTable("platform_customer_config", {
   // processingFeeRate: percentage string, e.g. "8.25" (= 8.25%).
   processingFeeEnabled: boolean("processing_fee_enabled"),
   processingFeeRate: text("processing_fee_rate"),
+  // Max hours an officer may move their own clock-in/out at post-shift
+  // confirmation. Numeric string (e.g. "2" or "0.5"). Null → fall back to the
+  // TIME_CONFIRM_EDIT_WINDOW_HOURS env var, then a 2h default. See
+  // artifacts/api-server/src/lib/confirmEditWindowConfig.ts.
+  timeConfirmEditWindowHours: text("time_confirm_edit_window_hours"),
   updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow(),
   updatedBy: text("updated_by"),
 });

@@ -103,6 +103,7 @@ type CustomerConfig = {
   planStartDate: string | null;
   processingFeeEnabled: boolean | null;
   processingFeeRate: string | null;
+  timeConfirmEditWindowHours: string | null;
   updatedAt?: string | null;
   updatedBy?: string | null;
 };
@@ -133,6 +134,7 @@ const EMPTY_CONFIG: CustomerConfig = {
   planStartDate: null,
   processingFeeEnabled: null,
   processingFeeRate: null,
+  timeConfirmEditWindowHours: null,
 };
 
 type BrandCfg = {
@@ -232,6 +234,7 @@ export default function PlatformFeaturesPage() {
         planStartDate: c.planStartDate,
         processingFeeEnabled: c.processingFeeEnabled ?? null,
         processingFeeRate: c.processingFeeRate ?? null,
+        timeConfirmEditWindowHours: c.timeConfirmEditWindowHours ?? null,
       } : EMPTY_CONFIG);
     }
   }, [configQ.data]);
@@ -259,7 +262,8 @@ export default function PlatformFeaturesPage() {
       configDraft.billingNotes !== (c.billingNotes ?? null) ||
       configDraft.planStartDate !== (c.planStartDate ?? null) ||
       configDraft.processingFeeEnabled !== (c.processingFeeEnabled ?? null) ||
-      configDraft.processingFeeRate !== (c.processingFeeRate ?? null)
+      configDraft.processingFeeRate !== (c.processingFeeRate ?? null) ||
+      configDraft.timeConfirmEditWindowHours !== (c.timeConfirmEditWindowHours ?? null)
     );
   })();
 
@@ -689,6 +693,28 @@ export default function PlatformFeaturesPage() {
                 <span className="text-sm opacity-60">% (blank = default 8.25%)</span>
               </div>
             )}
+          </div>
+          <div className="space-y-2 border rounded-lg p-4">
+            <div>
+              <p className="text-sm font-semibold">Officer time-edit limit</p>
+              <p className="text-xs opacity-60">
+                How far an officer may move their own clock-in / clock-out from the recorded time
+                when confirming a shift. Larger corrections are blocked and must be handled by an admin.
+              </p>
+            </div>
+            <div className="flex items-center gap-2 pt-1">
+              <p className="text-xs font-semibold uppercase tracking-wide opacity-60 whitespace-nowrap">Limit</p>
+              <Input
+                type="number"
+                min={0}
+                step={0.25}
+                className="w-28"
+                placeholder="2"
+                value={configDraft.timeConfirmEditWindowHours ?? ""}
+                onChange={(e) => setConfigDraft((p) => ({ ...p, timeConfirmEditWindowHours: e.target.value || null }))}
+              />
+              <span className="text-sm opacity-60">hours (blank = default 2h)</span>
+            </div>
           </div>
           <div className="space-y-1">
             <p className="text-xs font-semibold uppercase tracking-wide opacity-60">Billing notes</p>

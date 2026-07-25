@@ -17,6 +17,7 @@ import { requireAuth, requireAdmin } from "../middlewares/auth";
 import { ObjectStorageService, ObjectNotFoundError } from "../lib/objectStorage";
 import { brand, applyBrandOverrides } from "../lib/brandConfig";
 import { applyProcessingFeeConfig } from "../lib/processingFeeConfig";
+import { applyConfirmEditWindowConfig } from "../lib/confirmEditWindowConfig";
 import {
   type FeatureKey,
   getFeatureFlagDetails,
@@ -115,6 +116,20 @@ const customerConfigSchema = z.object({
       return n > 0 && n <= 100;
     }, "processingFeeRate must be between 0 (exclusive) and 100")
     .nullable(),
+  // Officer post-shift self-edit window, in hours. Numeric string; positive.
+  // "" / null → clear the override (fall back to env / 2h default). .optional()
+  // so not-yet-redeployed clients that omit the key still validate.
+  timeConfirmEditWindowHours: z
+    .preprocess(
+      (v) => (v === "" ? null : v),
+      z
+        .string()
+        .max(20)
+        .regex(/^\d{1,3}(\.\d{1,4})?$/, "timeConfirmEditWindowHours must be a positive number of hours")
+        .refine((v) => parseFloat(v) > 0, "timeConfirmEditWindowHours must be greater than 0")
+        .nullable(),
+    )
+    .optional(),
 });
 
 /** Upserts the customer plan / commercial config for this deployment. */
@@ -126,13 +141,22 @@ router.put("/admin/platform/customer-config", requireAuth, requireSuperAdmin, as
   }
   const editor = req.user?.email ?? "unknown";
   const { customerName, planTier, monthlyPriceCents, officerCount, billingNotes, planStartDate, processingFeeEnabled, processingFeeRate } = parsed.data;
+  // Absent key (older client) → leave the stored value unchanged.
+  const timeConfirmEditWindowHours = parsed.data.timeConfirmEditWindowHours;
+
+  const insertValues = { id: "singleton", customerName, planTier, monthlyPriceCents, officerCount, billingNotes, planStartDate, processingFeeEnabled, processingFeeRate, updatedBy: editor };
+  const updateValues: Record<string, unknown> = { customerName, planTier, monthlyPriceCents, officerCount, billingNotes, planStartDate, processingFeeEnabled, processingFeeRate, updatedBy: editor, updatedAt: sql`now()` };
+  if (timeConfirmEditWindowHours !== undefined) {
+    (insertValues as Record<string, unknown>).timeConfirmEditWindowHours = timeConfirmEditWindowHours;
+    updateValues.timeConfirmEditWindowHours = timeConfirmEditWindowHours;
+  }
 
   await db
     .insert(platformCustomerConfigTable)
-    .values({ id: "singleton", customerName, planTier, monthlyPriceCents, officerCount, billingNotes, planStartDate, processingFeeEnabled, processingFeeRate, updatedBy: editor })
+    .values(insertValues)
     .onConflictDoUpdate({
       target: platformCustomerConfigTable.id,
-      set: { customerName, planTier, monthlyPriceCents, officerCount, billingNotes, planStartDate, processingFeeEnabled, processingFeeRate, updatedBy: editor, updatedAt: sql`now()` },
+      set: updateValues,
     });
 
   const [config] = await db
@@ -141,6 +165,7 @@ router.put("/admin/platform/customer-config", requireAuth, requireSuperAdmin, as
     .where(eq(platformCustomerConfigTable.id, "singleton"))
     .limit(1);
   applyProcessingFeeConfig(config ?? null);
+  applyConfirmEditWindowConfig(config ?? null);
   res.json({ config });
 });
 

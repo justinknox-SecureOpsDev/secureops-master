@@ -387,6 +387,80 @@ describe("POST /time-entries/:id/confirm", () => {
     }
   });
 
+  it("honors the platform DB override (customer-config) over the 2h default", async () => {
+    const { applyConfirmEditWindowConfig } = await import("../lib/confirmEditWindowConfig");
+    // Simulate a super-admin saving a 0.5h limit in the Platform page.
+    applyConfirmEditWindowConfig({ timeConfirmEditWindowHours: "0.5" });
+    try {
+      // 45 min move: fine under the 2h default, rejected under the 0.5h override.
+      const id = await insertAwaitingEntry();
+      const res = await request(app)
+        .post(`/api/time-entries/${id}/confirm`)
+        .set(authed(ctx.officerToken))
+        .send({
+          clockOutTime: new Date(BASE_CLOCK_OUT.getTime() + 45 * 60_000).toISOString(),
+          editReason: "left late",
+        });
+      expect(res.status).toBe(400);
+      expect(res.body.maxEditWindowHours).toBe(0.5);
+      expect(res.body.message).toContain("30 minutes");
+
+      // A move inside the tightened cap passes.
+      const id2 = await insertAwaitingEntry();
+      const res2 = await request(app)
+        .post(`/api/time-entries/${id2}/confirm`)
+        .set(authed(ctx.officerToken))
+        .send({
+          clockOutTime: new Date(BASE_CLOCK_OUT.getTime() + 20 * 60_000).toISOString(),
+          editReason: "left a bit late",
+        });
+      expect(res2.status).toBe(200);
+    } finally {
+      applyConfirmEditWindowConfig(null); // clear override → back to env/default
+    }
+  });
+
+  it("DB override takes precedence over the env var", async () => {
+    const { applyConfirmEditWindowConfig } = await import("../lib/confirmEditWindowConfig");
+    const prev = process.env.TIME_CONFIRM_EDIT_WINDOW_HOURS;
+    process.env.TIME_CONFIRM_EDIT_WINDOW_HOURS = "6"; // generous env cap
+    applyConfirmEditWindowConfig({ timeConfirmEditWindowHours: "1" }); // stricter DB override wins
+    try {
+      const id = await insertAwaitingEntry();
+      const res = await request(app)
+        .post(`/api/time-entries/${id}/confirm`)
+        .set(authed(ctx.officerToken))
+        .send({
+          clockOutTime: new Date(BASE_CLOCK_OUT.getTime() + 2 * 3_600_000).toISOString(),
+          editReason: "2h late",
+        });
+      expect(res.status).toBe(400);
+      expect(res.body.maxEditWindowHours).toBe(1);
+    } finally {
+      applyConfirmEditWindowConfig(null);
+      if (prev === undefined) delete process.env.TIME_CONFIRM_EDIT_WINDOW_HOURS;
+      else process.env.TIME_CONFIRM_EDIT_WINDOW_HOURS = prev;
+    }
+  });
+
+  it("clears the DB override on an invalid value (falls back to env/default)", async () => {
+    const { applyConfirmEditWindowConfig } = await import("../lib/confirmEditWindowConfig");
+    applyConfirmEditWindowConfig({ timeConfirmEditWindowHours: "banana" });
+    try {
+      const id = await insertAwaitingEntry();
+      const res = await request(app)
+        .post(`/api/time-entries/${id}/confirm`)
+        .set(authed(ctx.officerToken))
+        .send({
+          clockOutTime: new Date(BASE_CLOCK_OUT.getTime() + 90 * 60_000).toISOString(),
+          editReason: "late",
+        });
+      expect(res.status).toBe(200); // 1.5h is inside the 2h default
+    } finally {
+      applyConfirmEditWindowConfig(null);
+    }
+  });
+
   it("falls back to the 2h default on an invalid override value", async () => {
     const prev = process.env.TIME_CONFIRM_EDIT_WINDOW_HOURS;
     process.env.TIME_CONFIRM_EDIT_WINDOW_HOURS = "banana";

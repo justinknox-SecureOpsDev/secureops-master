@@ -7,6 +7,7 @@ import { pushClockEvent } from "../lib/schedulerSync";
 import { getEffectiveLevel } from "../lib/eligibility";
 import { buildTimeEntryAuditMetadata, timeEntrySnapshot } from "../lib/timeEntryAudit";
 import { stripTimeEntryBillRateForRole } from "../lib/financeVisibility";
+import { getConfirmEditWindowOverride } from "../lib/confirmEditWindowConfig";
 import { canManageSite, getManagedSiteIds } from "../lib/siteManagerAuthz";
 import { broadcastOfficerLeft, broadcastOfficerJoined } from "../lib/wsManager";
 import { businessTimeZone, businessDateIso, businessDateToUtc, businessDayWindow, startOfBusinessWeek } from "../lib/businessTime";
@@ -94,6 +95,10 @@ const CLOCK_IN_EARLY_GRACE_MS = 30 * 60_000;
 const DEFAULT_CONFIRM_EDIT_WINDOW_HOURS = 2;
 
 export function getConfirmEditWindowHours(): number {
+  // 1. Super-admin DB override (platform_customer_config), editable live.
+  const override = getConfirmEditWindowOverride();
+  if (override !== null) return override;
+  // 2. Env var. 3. 2h default.
   const raw = process.env.TIME_CONFIRM_EDIT_WINDOW_HOURS?.trim();
   if (!raw) return DEFAULT_CONFIRM_EDIT_WINDOW_HOURS;
   const parsed = Number(raw);

@@ -11,6 +11,7 @@ import { startScheduledJobs } from "./lib/scheduledJobs";
 import { loadFeatureOverridesFromDb } from "./lib/features";
 import { loadBrandOverridesFromDb } from "./lib/brandConfig";
 import { loadProcessingFeeConfigFromDb } from "./lib/processingFeeConfig";
+import { loadConfirmEditWindowConfigFromDb } from "./lib/confirmEditWindowConfig";
 
 const rawPort = process.env["PORT"];
 
@@ -111,6 +112,10 @@ loadBrandOverridesFromDb()
 loadProcessingFeeConfigFromDb()
   .then(() => logger.info("Processing-fee config loaded"))
   .catch((err) => logger.error({ err }, "Failed to load processing-fee config"));
+
+loadConfirmEditWindowConfigFromDb()
+  .then(() => logger.info("Confirm edit-window config loaded"))
+  .catch((err) => logger.error({ err }, "Failed to load confirm edit-window config"));
 
 seedPolicies()
   .then(() => logger.info("Default policies ensured"))
