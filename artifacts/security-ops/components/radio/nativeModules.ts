@@ -20,7 +20,6 @@
 export type LiveKitNativeModule = typeof import("@livekit/react-native");
 export type LiveKitWebRTCModule = typeof import("@livekit/react-native-webrtc");
 export type LiveKitClientModule = typeof import("livekit-client");
-export type ExpoAudioModule = typeof import("expo-audio");
 
 /**
  * Native packages that are NOT present in every binary this runtime's OTA
@@ -49,12 +48,12 @@ export const BINARY_GATED_NATIVE_PACKAGES: ReadonlyArray<{
     allowedLoaderFiles: ["components/radio/nativeModules.ts"],
   },
   {
-    // Powers the silent locked-screen keep-alive player (see
-    // radioMedia.native.ts). Absent from ALL store builds ≤ 10 — only loaded
-    // through getExpoAudio(); when unavailable the keep-alive is disabled and
-    // the radio otherwise works (foreground/backgrounded-unlocked audio).
+    // Not currently loaded anywhere (the expo-audio silent keep-alive was
+    // reverted with the July-22 radio rollback), but the package is still
+    // absent from App Store builds ≤ 9 — keep it gated with NO approved
+    // loader so any future use must add a guarded lazy loader first.
     package: "expo-audio",
-    allowedLoaderFiles: ["components/radio/nativeModules.ts"],
+    allowedLoaderFiles: [],
   },
   {
     // livekit-client is pure JS, but its MODULE EVALUATION touches browser
@@ -76,7 +75,6 @@ let overrideRequire: ((name: string) => unknown) | null = null;
 let liveKitModule: LiveKitNativeModule | null | undefined;
 let webRTCModule: LiveKitWebRTCModule | null | undefined;
 let liveKitClientModule: LiveKitClientModule | null | undefined;
-let expoAudioModule: ExpoAudioModule | null | undefined;
 
 /** Test-only: replace the require used for native modules and reset caches. */
 export function __setNativeRequireForTest(
@@ -86,7 +84,6 @@ export function __setNativeRequireForTest(
   liveKitModule = undefined;
   webRTCModule = undefined;
   liveKitClientModule = undefined;
-  expoAudioModule = undefined;
 }
 
 /**
@@ -147,32 +144,6 @@ export function getLiveKitClient(): LiveKitClientModule | null {
     }
   }
   return liveKitClientModule;
-}
-
-/**
- * `expo-audio`, or null on a binary without it (ALL store builds ≤ 10).
- * Powers the silent keep-alive player that stops iOS suspending the app on a
- * quiet radio channel when the phone locks. When absent the keep-alive is
- * simply disabled — live radio still works while the app is awake.
- */
-export function getExpoAudio(): ExpoAudioModule | null {
-  if (expoAudioModule === undefined) {
-    try {
-      expoAudioModule = (
-        overrideRequire
-          ? overrideRequire("expo-audio")
-          : // eslint-disable-next-line @typescript-eslint/no-require-imports
-            require("expo-audio")
-      ) as ExpoAudioModule;
-    } catch (e) {
-      console.warn(
-        "[radio] expo-audio unavailable — locked-screen keep-alive disabled (update the app)",
-        e,
-      );
-      expoAudioModule = null;
-    }
-  }
-  return expoAudioModule;
 }
 
 /** `@livekit/react-native-webrtc`, or null on a binary without the natives. */
