@@ -49,9 +49,11 @@ export function resolveNotificationTarget(
       };
     }
 
-    // Clock — forgot-to-clock-out nudge. Highlight the open entry on the clock
-    // tab's recent-entries list.
-    case "forgot_clock_out": {
+    // Clock — forgot-to-clock-out nudge, and the confirm-your-hours reminder.
+    // Both live on the clock tab; highlight the referenced entry on the recent-
+    // entries / awaiting-confirmation list.
+    case "forgot_clock_out":
+    case "confirm_time_entry_reminder": {
       const timeEntryId = str(d.timeEntryId);
       return {
         pathname: "/(employee)/clock",

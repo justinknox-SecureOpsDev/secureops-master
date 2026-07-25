@@ -123,6 +123,18 @@ describe("setupNotificationDeepLinking", () => {
       expect(typeof arg.params._hlTs).toBe("string");
     });
 
+    it("routes a confirm_time_entry_reminder to the employee clock tab", async () => {
+      const { deps, h } = buildDeps({ role: "employee" });
+      setupNotificationDeepLinking(deps);
+      await h.flush();
+
+      h.fireWarmTap({ type: "confirm_time_entry_reminder", timeEntryId: 55 });
+      expect(h.push).toHaveBeenCalledTimes(1);
+      const arg = h.push.mock.calls[0][0];
+      expect(arg.pathname).toBe("/(employee)/clock");
+      expect(arg.params.timeEntryId).toBe("55");
+    });
+
     it("routes an admin shift_claim_request to the approvals screen", async () => {
       const { deps, h } = buildDeps({ role: "admin" });
       setupNotificationDeepLinking(deps);
