@@ -47,7 +47,14 @@ project + channel + runtime version, NOT bundle/ASC ids directly. Policy is
   via `components/radio/nativeModules.ts` (`getLiveKitNative()` /
   `getLiveKitWebRTC()`; radio degrades to presence-only with an "update the
   app" notice). Any NEW native dep must get the same guard (or a real runtime
-  bump) before 1.0.0 OTAs. The gated list (`BINARY_GATED_NATIVE_PACKAGES` in
+  bump) before 1.0.0 OTAs.
+- **`livekit-client` (pure JS!) is ALSO gated**: its module eval touches
+  `DOMException` etc., which exist on Hermes only after registerGlobals() —
+  a static value import crashes EVERY native binary at route registration
+  (release builds die to springboard). Load only via `getLiveKitClient()`
+  (which forces getLiveKitNative() first); `import type` is the only safe
+  top-level form. Rule of thumb: "ships in the bundle" ≠ "eval-safe on
+  Hermes" — any browser-targeting JS lib can hide the same trap. The gated list (`BINARY_GATED_NATIVE_PACKAGES` in
   nativeModules.ts) is ENFORCED by `__tests__/binaryGatedNativeImports.test.ts`
   — static value imports outside the approved loader fail the test gate; add
   new binary-gated deps to that list. Test note: vitest `vi.mock` does NOT

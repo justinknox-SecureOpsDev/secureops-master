@@ -107,6 +107,10 @@ vi.mock("livekit-client", () => ({
 // (and failing) to parse the real react-native chain under Node.
 import * as liveKitMock from "@livekit/react-native";
 import * as webRTCMock from "@livekit/react-native-webrtc";
+// livekit-client is also loaded through the guarded seam now — its module
+// evaluation needs registerGlobals()' polyfills (DOMException, …) on Hermes,
+// so production code may only require it via getLiveKitClient().
+import * as liveKitClientMock from "livekit-client";
 
 import { __setNativeRequireForTest } from "../nativeModules";
 import { createRadioMedia } from "../radioMedia.native";
@@ -114,6 +118,7 @@ import { createRadioMedia } from "../radioMedia.native";
 __setNativeRequireForTest((name) => {
   if (name === "@livekit/react-native") return liveKitMock;
   if (name === "@livekit/react-native-webrtc") return webRTCMock;
+  if (name === "livekit-client") return liveKitClientMock;
   throw new Error(`unexpected native require: ${name}`);
 });
 

@@ -100,6 +100,19 @@ together with the only files allowed to `require()` each of them:
 | `@livekit/react-native` | build ≥ 10 only | `components/radio/nativeModules.ts` (`getLiveKitNative()`) |
 | `@livekit/react-native-webrtc` | build ≥ 10 only | `components/radio/nativeModules.ts` (`getLiveKitWebRTC()`) |
 | `expo-audio` | NO current store build | `components/radio/radioMedia.native.ts` (`getExpoAudio()`) |
+| `livekit-client` | every binary (JS-only) — but see below | `components/radio/nativeModules.ts` (`getLiveKitClient()`) |
+
+> **Why `livekit-client` is gated even though it ships in every bundle:** it is
+> pure JS, but its MODULE EVALUATION references browser globals (`DOMException`,
+> …) that Hermes only has after `@livekit/react-native`'s `registerGlobals()`
+> has run. A static value import therefore threw
+> `ReferenceError: Property 'DOMException' doesn't exist` on EVERY native
+> binary (and Expo Go) before any runtime guard could execute, killing module
+> registration for the Radio/Chat/Live-Map routes — release builds crashed to
+> the springboard, dev bounced back to the home screen. `getLiveKitClient()`
+> forces `getLiveKitNative()` (and its `registerGlobals()`) first and returns
+> `null` when the natives are absent. Only `import type` from `livekit-client`
+> is safe at the top level of OTA-updatable code.
 
 `__tests__/binaryGatedNativeImports.test.ts` scans every bundled source file
 and **fails the workspace test gate** if one of these packages is statically

@@ -20,6 +20,7 @@
 
 export type LiveKitNativeModule = typeof import("@livekit/react-native");
 export type LiveKitWebRTCModule = typeof import("@livekit/react-native-webrtc");
+export type LiveKitClientModule = typeof import("livekit-client");
 
 /**
  * Native packages that are NOT present in every binary this runtime's OTA
@@ -51,6 +52,18 @@ export const BINARY_GATED_NATIVE_PACKAGES: ReadonlyArray<{
     package: "expo-audio",
     allowedLoaderFiles: ["components/radio/radioMedia.native.ts"],
   },
+  {
+    // livekit-client is pure JS, but its MODULE EVALUATION touches browser
+    // globals (DOMException, …) that Hermes only has after
+    // @livekit/react-native's registerGlobals() has run. A static value
+    // import evaluates before any polyfill and throws
+    // "ReferenceError: Property 'DOMException' doesn't exist" on EVERY
+    // native binary (and Expo Go), killing module eval for every route that
+    // transitively imports it — the Radio/Chat/Live-Map screens then fail to
+    // register and the app crashes (release) or bounces home (dev).
+    package: "livekit-client",
+    allowedLoaderFiles: ["components/radio/nativeModules.ts"],
+  },
 ];
 
 /** Test-only require override; when null, the real (Metro) require is used. */
@@ -58,6 +71,7 @@ let overrideRequire: ((name: string) => unknown) | null = null;
 
 let liveKitModule: LiveKitNativeModule | null | undefined;
 let webRTCModule: LiveKitWebRTCModule | null | undefined;
+let liveKitClientModule: LiveKitClientModule | null | undefined;
 
 /** Test-only: replace the require used for native modules and reset caches. */
 export function __setNativeRequireForTest(
@@ -66,6 +80,7 @@ export function __setNativeRequireForTest(
   overrideRequire = fn;
   liveKitModule = undefined;
   webRTCModule = undefined;
+  liveKitClientModule = undefined;
 }
 
 /**
@@ -92,6 +107,40 @@ export function getLiveKitNative(): LiveKitNativeModule | null {
     }
   }
   return liveKitModule;
+}
+
+/**
+ * The pure-JS `livekit-client`, or null when it cannot be safely evaluated.
+ *
+ * Evaluating livekit-client on Hermes REQUIRES the polyfills that
+ * `@livekit/react-native`'s registerGlobals() installs (DOMException et al.),
+ * so this loader forces `getLiveKitNative()` first and refuses to load the
+ * client when the natives are absent — on such binaries there is no WebRTC
+ * anyway, so callers degrade to the presence-only stub exactly as they do
+ * for missing natives.
+ */
+export function getLiveKitClient(): LiveKitClientModule | null {
+  if (liveKitClientModule === undefined) {
+    if (!getLiveKitNative()) {
+      liveKitClientModule = null;
+      return null;
+    }
+    try {
+      liveKitClientModule = (
+        overrideRequire
+          ? overrideRequire("livekit-client")
+          : // eslint-disable-next-line @typescript-eslint/no-require-imports
+            require("livekit-client")
+      ) as LiveKitClientModule;
+    } catch (e) {
+      console.warn(
+        "[radio] livekit-client failed to load — live audio disabled",
+        e,
+      );
+      liveKitClientModule = null;
+    }
+  }
+  return liveKitClientModule;
 }
 
 /** `@livekit/react-native-webrtc`, or null on a binary without the natives. */

@@ -36,15 +36,18 @@
  * because older App Store binaries don't contain them.
  */
 import type { AudioPlayer } from "expo-audio";
-import {
+import type {
   Room,
-  RoomEvent,
   DisconnectReason,
-  createLocalAudioTrack,
-  type LocalAudioTrack,
+  LocalAudioTrack,
 } from "livekit-client";
 
-import { getLiveKitNative, type LiveKitNativeModule } from "./nativeModules";
+import {
+  getLiveKitNative,
+  getLiveKitClient,
+  type LiveKitNativeModule,
+  type LiveKitClientModule,
+} from "./nativeModules";
 import { createRadioKeyProvider } from "./radioKeyProvider";
 import { type RadioMedia, type RadioToken } from "./radioTypes";
 
@@ -59,9 +62,14 @@ import { type RadioMedia, type RadioToken } from "./radioTypes";
  * pattern as `getExpoAudio()` below); when unavailable, `createRadioMedia()`
  * returns a presence-only stub with `supportsAudio = false` and
  * `degradedReason = "missing_natives"` so the screen tells the user to update
- * the app instead of crashing. `livekit-client` is pure JS and safe to import
- * statically — a Room is only ever constructed after the natives (which
- * registerGlobals patches in) are confirmed present.
+ * the app instead of crashing.
+ *
+ * `livekit-client` must be loaded the SAME lazy way (`getLiveKitClient()`):
+ * although it is pure JS, its module evaluation references browser globals
+ * (DOMException, …) that Hermes only has after registerGlobals() has run — a
+ * static value import here crashed EVERY binary and Expo Go with
+ * "ReferenceError: Property 'DOMException' doesn't exist" before any guard
+ * could execute. Only `import type` from livekit-client is safe at top level.
  */
 
 /**
@@ -113,7 +121,10 @@ async function settleDelay(ms: number, aborted: () => boolean): Promise<boolean>
 class NativeRadioMedia implements RadioMedia {
   readonly supportsAudio = true;
 
-  constructor(private readonly lk: LiveKitNativeModule) {}
+  constructor(
+    private readonly lk: LiveKitNativeModule,
+    private readonly lkc: LiveKitClientModule,
+  ) {}
 
   private listenRooms = new Map<string, Room>();
   private connecting = new Set<string>();
@@ -254,7 +265,7 @@ class NativeRadioMedia implements RadioMedia {
     const keyProvider = createRadioKeyProvider();
     await keyProvider.setSharedKey(token.e2eeKey);
     const e2eeManager = new this.lk.RNE2EEManager(keyProvider, false);
-    const room = new Room({ e2ee: { e2eeManager } });
+    const room = new this.lkc.Room({ e2ee: { e2eeManager } });
     await room.setE2EEEnabled(true);
     return room;
   }
@@ -269,7 +280,7 @@ class NativeRadioMedia implements RadioMedia {
       const room = await this.makeRoom(token);
       // Audio auto-plays on native; nothing to attach. We just keep the
       // connection so the speaker's track is subscribed and routed to output.
-      room.on(RoomEvent.Disconnected, (reason?: DisconnectReason) => {
+      room.on(this.lkc.RoomEvent.Disconnected, (reason?: DisconnectReason) => {
         // dropListen() removes the room from the map BEFORE disconnecting, so
         // if it's still registered here the disconnect was UNEXPECTED (server
         // eviction, network drop, SFU restart). Without a signal the screen's
@@ -346,7 +357,7 @@ class NativeRadioMedia implements RadioMedia {
     try {
       await room.connect(token.url, token.token);
       if (aborted()) return await this.abortPublish(room, track);
-      track = await createLocalAudioTrack({
+      track = await this.lkc.createLocalAudioTrack({
         echoCancellation: true,
         noiseSuppression: true,
       });
@@ -496,6 +507,7 @@ class MissingNativesRadioMediaStub implements RadioMedia {
 
 export function createRadioMedia(): RadioMedia {
   const lk = getLiveKitNative();
-  if (!lk) return new MissingNativesRadioMediaStub();
-  return new NativeRadioMedia(lk);
+  const lkc = lk ? getLiveKitClient() : null;
+  if (!lk || !lkc) return new MissingNativesRadioMediaStub();
+  return new NativeRadioMedia(lk, lkc);
 }
