@@ -1,6 +1,6 @@
 import { Expo, type ExpoPushMessage } from "expo-server-sdk";
 import { db, usersTable, notificationsTable } from "@workspace/db";
-import { inArray } from "drizzle-orm";
+import { eq, inArray } from "drizzle-orm";
 import { logger } from "./logger";
 
 const expo = new Expo();
@@ -90,15 +90,67 @@ export async function sendPushToUsers(
 
   const chunks = expo.chunkPushNotifications(messages);
   for (const chunk of chunks) {
-    try {
-      const receipts = await expo.sendPushNotificationsAsync(chunk);
-      for (const receipt of receipts) {
-        if (receipt.status === "error") {
-          logger.error({ receipt }, "Push notification error");
+    await dispatchChunk(chunk, true);
+  }
+}
+
+/** Shape of the error expo-server-sdk throws for a rejected batch. */
+type ExpoSendError = { code?: string; details?: Record<string, string[]> };
+
+/**
+ * Send one chunk of push messages, with two recovery behaviors:
+ *
+ * 1. PUSH_TOO_MANY_EXPERIENCE_IDS — the users table can hold tokens minted by
+ *    more than one Expo project at once (devices still running the retired
+ *    legacy app alongside current-app installs). Expo rejects a mixed batch
+ *    OUTRIGHT, which silently killed every push from this deployment. The
+ *    error's `details` field maps each project to its tokens, so we split the
+ *    chunk by project and resend each group separately — every device still
+ *    gets its notification, whichever app it runs.
+ *
+ * 2. DeviceNotRegistered tickets — Expo tells us the token is permanently
+ *    dead (app uninstalled / token rotated). We null it out so the row
+ *    self-heals instead of polluting future batches forever.
+ */
+async function dispatchChunk(chunk: ExpoPushMessage[], allowSplit: boolean): Promise<void> {
+  try {
+    const tickets = await expo.sendPushNotificationsAsync(chunk);
+    for (let i = 0; i < tickets.length; i++) {
+      const ticket = tickets[i];
+      if (ticket.status === "error") {
+        logger.error({ receipt: ticket }, "Push notification error");
+        const to = chunk[i]?.to;
+        if (ticket.details?.error === "DeviceNotRegistered" && typeof to === "string") {
+          await clearDeadPushToken(to);
         }
       }
-    } catch (err) {
-      logger.error({ err }, "Failed to send push chunk");
     }
+  } catch (err) {
+    const e = err as ExpoSendError;
+    if (allowSplit && e.code === "PUSH_TOO_MANY_EXPERIENCE_IDS" && e.details) {
+      logger.warn(
+        { projects: Object.keys(e.details) },
+        "Push chunk mixed tokens from multiple Expo projects; splitting and resending per project",
+      );
+      for (const tokens of Object.values(e.details)) {
+        const tokenSet = new Set(tokens);
+        const sub = chunk.filter((m) => typeof m.to === "string" && tokenSet.has(m.to));
+        if (sub.length) await dispatchChunk(sub, false);
+      }
+      return;
+    }
+    logger.error({ err }, "Failed to send push chunk");
+  }
+}
+
+async function clearDeadPushToken(token: string): Promise<void> {
+  try {
+    await db
+      .update(usersTable)
+      .set({ expoPushToken: null })
+      .where(eq(usersTable.expoPushToken, token));
+    logger.info("Cleared dead push token (DeviceNotRegistered)");
+  } catch (err) {
+    logger.error({ err }, "Failed to clear dead push token");
   }
 }

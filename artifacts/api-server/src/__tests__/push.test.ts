@@ -163,3 +163,72 @@ describe("sendPushToUsers — delivery + opt-out", () => {
     expect(sendSpy).not.toHaveBeenCalled();
   });
 });
+
+describe("sendPushToUsers — mixed-project batches + dead tokens", () => {
+  const OLD_APP_TOKEN = "ExponentPushToken[oldproject_yyyyyyyyyyy]";
+
+  it("splits a PUSH_TOO_MANY_EXPERIENCE_IDS rejection by project and resends each group", async () => {
+    const oldAppUser = await makeUser("oldapp", OLD_APP_TOKEN);
+    try {
+      const mixedError = Object.assign(
+        new Error(
+          "All push notification messages in the same request must be for the same project",
+        ),
+        {
+          code: "PUSH_TOO_MANY_EXPERIENCE_IDS",
+          details: {
+            "@justin.knox/secureops-command": [VALID_EXPO_TOKEN],
+            "@justin.knox/secureops": [OLD_APP_TOKEN],
+          },
+        },
+      );
+
+      const sendSpy = vi
+        .spyOn(Expo.prototype, "sendPushNotificationsAsync")
+        .mockRejectedValueOnce(mixedError)
+        .mockResolvedValue([]);
+
+      await sendPushToUsers([ctx.withToken.id, oldAppUser.id], {
+        title: "Mixed projects",
+        body: "Split me",
+        data: { type: "chat_message" },
+      });
+
+      // 1 rejected mixed call + 2 per-project resends.
+      expect(sendSpy).toHaveBeenCalledTimes(3);
+      const retryTokenGroups = [sendSpy.mock.calls[1][0], sendSpy.mock.calls[2][0]].map(
+        (msgs) => msgs.map((m) => m.to),
+      );
+      // Each resend carries exactly one project's tokens; together they cover both.
+      expect(retryTokenGroups.flat().sort()).toEqual([VALID_EXPO_TOKEN, OLD_APP_TOKEN].sort());
+      for (const group of retryTokenGroups) expect(group).toHaveLength(1);
+    } finally {
+      await db.execute(sql`DELETE FROM notifications WHERE user_id = ${oldAppUser.id}`);
+      await db.execute(sql`DELETE FROM users WHERE id = ${oldAppUser.id}`);
+    }
+  });
+
+  it("clears a token Expo reports as DeviceNotRegistered so it never pollutes future sends", async () => {
+    const deadUser = await makeUser("deaddevice", "ExponentPushToken[dead_zzzzzzzzzzzzzzzz]");
+    try {
+      vi.spyOn(Expo.prototype, "sendPushNotificationsAsync").mockResolvedValue([
+        {
+          status: "error",
+          message: "device not registered",
+          details: { error: "DeviceNotRegistered" },
+        },
+      ]);
+
+      await sendPushToUsers([deadUser.id], { title: "Gone", body: "Device uninstalled" });
+
+      const [row] = await db
+        .select({ expoPushToken: usersTable.expoPushToken })
+        .from(usersTable)
+        .where(eq(usersTable.id, deadUser.id));
+      expect(row.expoPushToken).toBeNull();
+    } finally {
+      await db.execute(sql`DELETE FROM notifications WHERE user_id = ${deadUser.id}`);
+      await db.execute(sql`DELETE FROM users WHERE id = ${deadUser.id}`);
+    }
+  });
+});
