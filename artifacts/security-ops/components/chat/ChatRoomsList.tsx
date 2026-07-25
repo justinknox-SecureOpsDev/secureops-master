@@ -33,9 +33,17 @@ interface ChatUser {
 
 interface Props {
   onSelectRoom: (id: string, name: string) => void;
+  /**
+   * Bumped by the parent each time this pane becomes visible again after being
+   * hidden behind a display toggle (see app/(employee)/chat.tsx). The list is
+   * permanently mounted there, so this is the only signal that the user
+   * switched back and the room list may be stale. Defaults to 0 so standalone
+   * usages keep working unchanged.
+   */
+  refreshEpoch?: number;
 }
 
-export default function ChatRoomsList({ onSelectRoom }: Props) {
+export default function ChatRoomsList({ onSelectRoom, refreshEpoch = 0 }: Props) {
   const colors = useColors();
   const brand = useBrand();
   const { user } = useAuth();
@@ -70,6 +78,14 @@ export default function ChatRoomsList({ onSelectRoom }: Props) {
   }, []);
 
   useEffect(() => { fetchRooms(); void refreshUnread(); }, [fetchRooms, refreshUnread]);
+
+  // Silent refetch when the parent flips back to the Messages sub-tab.
+  // Skip the mount value (0) — the mount effect above already fetched.
+  useEffect(() => {
+    if (refreshEpoch === 0) return;
+    void fetchRooms();
+    void refreshUnread();
+  }, [refreshEpoch, fetchRooms, refreshUnread]);
 
   const createRoom = async () => {
     if (!newRoom.trim()) return;

@@ -20,10 +20,16 @@ export default function EmployeeChatScreen() {
   // switch to Radio so RadioScreen refetches its channel roster (fresh
   // site-channel list) — see the refreshEpoch prop on RadioScreen.
   const [radioEpoch, setRadioEpoch] = useState(0);
+  // Mirror-image epoch for the Messages pane: ChatRoomsList is also kept
+  // permanently mounted, so flipping Radio → Messages would otherwise never
+  // refetch the room list (a room created while the user sat on Radio would
+  // stay invisible until the whole Chat tab regained focus).
+  const [messagesEpoch, setMessagesEpoch] = useState(0);
 
   const selectTab = (t: ChatTab) => {
     setActiveTab((prev) => {
       if (t === "radio" && prev !== "radio") setRadioEpoch((e) => e + 1);
+      if (t === "messages" && prev !== "messages") setMessagesEpoch((e) => e + 1);
       return t;
     });
   };
@@ -31,6 +37,7 @@ export default function EmployeeChatScreen() {
   const messages = (
     <FeatureGate feature="chat">
       <ChatRoomsList
+        refreshEpoch={messagesEpoch}
         onSelectRoom={(id, name) =>
           router.push({ pathname: "/(employee)/chat/[id]", params: { id, name } })
         }
