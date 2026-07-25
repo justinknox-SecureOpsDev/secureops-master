@@ -22,6 +22,7 @@ import {
   db,
   platformFeatureOverridesTable,
   platformBrandConfigTable,
+  platformCustomerConfigTable,
   platformAgreementSignaturesTable,
 } from "@workspace/db";
 import { AGREEMENT_SLOTS, AGREEMENT_TITLES } from "@workspace/legal-docs";
@@ -33,7 +34,14 @@ import {
   setOverrideInMemory,
   clearOverrideInMemory,
 } from "../lib/features";
-import { featureUpdateBody, brandConfigSchema } from "../lib/platformSchemas";
+import {
+  featureUpdateBody,
+  brandConfigSchema,
+  customerConfigSchema,
+  pickCustomerConfigColumns,
+} from "../lib/platformSchemas";
+import { applyProcessingFeeConfig } from "../lib/processingFeeConfig";
+import { applyConfirmEditWindowConfig } from "../lib/confirmEditWindowConfig";
 import { requireControlPlaneHmac } from "../lib/controlPlaneAuth";
 import { BUILD_VERSION, BUILD_TIME } from "../lib/buildInfo";
 
@@ -51,14 +59,30 @@ async function readBrandRow() {
   return config ?? null;
 }
 
-/** Read the current managed settings: brand override row + feature flags + build identity. */
+async function readCustomerConfigRow() {
+  const [config] = await db
+    .select()
+    .from(platformCustomerConfigTable)
+    .where(eq(platformCustomerConfigTable.id, "singleton"))
+    .limit(1);
+  return config ?? null;
+}
+
+/**
+ * Read the current managed settings: brand override row + feature flags +
+ * customer/commercial config + build identity. The control plane opens this
+ * when an operator views a customer's Remote Settings, so `customerConfig`
+ * prefills the "Plan & Billing" panel.
+ */
 router.get("/control-plane/settings", async (_req, res) => {
   const brandRow = await readBrandRow();
+  const customerConfig = await readCustomerConfigRow();
   res.json({
     version: BUILD_VERSION,
     builtAt: BUILD_TIME,
     brand: brandRow,
     features: getFeatureFlagDetails(),
+    customerConfig,
   });
 });
 
@@ -147,6 +171,44 @@ router.put("/control-plane/features", async (req, res) => {
   }
   await loadFeatureOverridesFromDb();
   res.json({ features: getFeatureFlagDetails() });
+});
+
+/**
+ * Upsert the customer / commercial config remotely and apply the live hooks.
+ *
+ * Reuses the SAME zod schema as the in-app super-admin route so validation is
+ * identical on both paths, and the SAME applyProcessingFeeConfig /
+ * applyConfirmEditWindowConfig hooks so the invoice processing fee and the
+ * officer time-edit window take effect immediately — no customer restart. Only
+ * the keys present in the payload are written; an absent key is left unchanged,
+ * so a version-skewed control plane never clobbers a field it doesn't know.
+ */
+router.put("/control-plane/customer-config", async (req, res) => {
+  const parsed = customerConfigSchema.safeParse(req.body);
+  if (!parsed.success) {
+    res.status(400).json({ error: "Bad request", issues: parsed.error.issues });
+    return;
+  }
+  const editor = "control-plane";
+  const cols = pickCustomerConfigColumns(parsed.data);
+  const insertValues = {
+    id: "singleton",
+    updatedBy: editor,
+    ...cols,
+  } as typeof platformCustomerConfigTable.$inferInsert;
+
+  await db
+    .insert(platformCustomerConfigTable)
+    .values(insertValues)
+    .onConflictDoUpdate({
+      target: platformCustomerConfigTable.id,
+      set: { ...cols, updatedBy: editor, updatedAt: sql`now()` },
+    });
+
+  const config = await readCustomerConfigRow();
+  applyProcessingFeeConfig(config);
+  applyConfirmEditWindowConfig(config);
+  res.json({ customerConfig: config });
 });
 
 export default router;

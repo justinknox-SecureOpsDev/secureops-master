@@ -41,10 +41,50 @@ export function summarizeFeatures(body: unknown): string {
   return parts.length > 0 ? "Updated features: " + parts.join(", ") : "Updated feature flags";
 }
 
+/**
+ * Build a concise human-readable summary of a plan/billing PUT body. The control
+ * plane is a conduit and doesn't hold the customer's prior values, so this
+ * describes the SUBMITTED commercial config (what the operator saved) rather
+ * than a diff — mirroring how the brand/feature summaries work.
+ */
+export function summarizePlanBilling(body: unknown): string {
+  if (!body || typeof body !== "object") return "Updated plan & billing";
+  const b = body as Record<string, unknown>;
+  const has = (k: string) => Object.prototype.hasOwnProperty.call(b, k) && b[k] !== undefined;
+  const parts: string[] = [];
+  if (has("planTier")) parts.push("plan " + (b.planTier ? String(b.planTier) : "unset"));
+  if (has("monthlyPriceCents")) {
+    parts.push(
+      b.monthlyPriceCents == null
+        ? "price unset"
+        : "$" + (Number(b.monthlyPriceCents) / 100).toFixed(0) + "/mo",
+    );
+  }
+  if (has("officerCount")) {
+    parts.push(b.officerCount == null ? "officers unset" : String(b.officerCount) + " officers");
+  }
+  if (has("processingFeeEnabled")) {
+    if (b.processingFeeEnabled) {
+      const rate = has("processingFeeRate") && b.processingFeeRate ? " " + String(b.processingFeeRate) + "%" : "";
+      parts.push("fee on" + rate);
+    } else {
+      parts.push("fee off");
+    }
+  }
+  if (has("timeConfirmEditWindowHours")) {
+    const w = b.timeConfirmEditWindowHours;
+    parts.push(w ? "time-edit " + String(w) + "h" : "time-edit default");
+  }
+  if (has("planStartDate") && b.planStartDate) parts.push("start " + String(b.planStartDate));
+  if (has("customerName") && b.customerName) parts.push("name " + String(b.customerName));
+  if (has("billingNotes") && b.billingNotes) parts.push("notes updated");
+  return parts.length ? "Updated plan & billing: " + parts.join(", ") : "Updated plan & billing";
+}
+
 async function recordChange(
   customerId: string,
   operator: string,
-  kind: "brand" | "features",
+  kind: "brand" | "features" | "plan_billing",
   summary: string,
   status: number | null,
 ): Promise<void> {
@@ -146,6 +186,19 @@ remoteSettingsRouter.put("/customers/:id/remote-settings/features", async (req, 
   }
 });
 
+remoteSettingsRouter.put("/customers/:id/remote-settings/plan-billing", async (req, res) => {
+  const row = await loadCustomer(req.params.id);
+  if (!row) {
+    res.status(404).json({ error: "Customer not found" });
+    return;
+  }
+  const status = await proxy(res, row, "PUT", "/api/control-plane/customer-config", req.body ?? {});
+  if (status === 200) {
+    const operator = (res.locals.operator as string) || "operator";
+    await recordChange(row.id, operator, "plan_billing", summarizePlanBilling(req.body), status);
+  }
+});
+
 remoteSettingsRouter.get("/customers/:id/remote-settings/history", async (req, res) => {
   const row = await loadCustomer(req.params.id);
   if (!row) {
@@ -168,7 +221,7 @@ remoteSettingsRouter.get("/customers/:id/remote-settings/history", async (req, r
  *
  * Supported filters (all optional):
  *   - customerId — exact customer match
- *   - kind       — "brand" | "features" (anything else is ignored)
+ *   - kind       — "brand" | "features" | "plan_billing" (anything else ignored)
  *   - since      — only changes at/after this instant (>=)
  *   - until      — only changes at/before this instant; a date-only value
  *                  ("YYYY-MM-DD") is treated as inclusive of that whole day
@@ -190,7 +243,7 @@ export function buildRemoteChangesFilter(query: Record<string, unknown>): {
   }
 
   const kind = typeof query.kind === "string" ? query.kind.trim() : "";
-  if (kind === "brand" || kind === "features") {
+  if (kind === "brand" || kind === "features" || kind === "plan_billing") {
     params.push(kind);
     clauses.push(`rc.kind = $${params.length}`);
   }

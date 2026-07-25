@@ -25,7 +25,12 @@ import {
   setOverrideInMemory,
   clearOverrideInMemory,
 } from "../lib/features";
-import { featureUpdateBody, brandConfigSchema } from "../lib/platformSchemas";
+import {
+  featureUpdateBody,
+  brandConfigSchema,
+  customerConfigSchema,
+  pickCustomerConfigColumns,
+} from "../lib/platformSchemas";
 import { buildCustomerConfigChanges, buildBrandChanges, buildFeatureChanges } from "../lib/settingsAudit";
 
 const router: Router = Router();
@@ -114,39 +119,6 @@ router.get("/admin/platform/customer-config", requireAuth, requireSuperAdmin, as
   res.json({ config: config ?? null });
 });
 
-const customerConfigSchema = z.object({
-  customerName: z.string().max(200).nullable(),
-  planTier: z.enum(["starter", "professional", "enterprise", "custom"]).nullable(),
-  monthlyPriceCents: z.number().int().min(0).nullable(),
-  officerCount: z.number().int().min(1).nullable(),
-  billingNotes: z.string().max(2000).nullable(),
-  planStartDate: z.string().nullable(),
-  processingFeeEnabled: z.boolean().nullable(),
-  processingFeeRate: z
-    .string()
-    .max(20)
-    .regex(/^\d{1,3}(\.\d{1,4})?$/, "processingFeeRate must be a numeric percentage")
-    .refine((v) => {
-      const n = parseFloat(v);
-      return n > 0 && n <= 100;
-    }, "processingFeeRate must be between 0 (exclusive) and 100")
-    .nullable(),
-  // Officer post-shift self-edit window, in hours. Numeric string; positive.
-  // "" / null → clear the override (fall back to env / 2h default). .optional()
-  // so not-yet-redeployed clients that omit the key still validate.
-  timeConfirmEditWindowHours: z
-    .preprocess(
-      (v) => (v === "" ? null : v),
-      z
-        .string()
-        .max(20)
-        .regex(/^\d{1,3}(\.\d{1,4})?$/, "timeConfirmEditWindowHours must be a positive number of hours")
-        .refine((v) => parseFloat(v) > 0, "timeConfirmEditWindowHours must be greater than 0")
-        .nullable(),
-    )
-    .optional(),
-});
-
 /** Upserts the customer plan / commercial config for this deployment. */
 router.put("/admin/platform/customer-config", requireAuth, requireSuperAdmin, async (req, res) => {
   const parsed = customerConfigSchema.safeParse(req.body);
@@ -155,9 +127,6 @@ router.put("/admin/platform/customer-config", requireAuth, requireSuperAdmin, as
     return;
   }
   const editor = req.user?.email ?? "unknown";
-  const { customerName, planTier, monthlyPriceCents, officerCount, billingNotes, planStartDate, processingFeeEnabled, processingFeeRate } = parsed.data;
-  // Absent key (older client) → leave the stored value unchanged.
-  const timeConfirmEditWindowHours = parsed.data.timeConfirmEditWindowHours;
 
   // Snapshot the FULL config BEFORE the upsert so we can record a clear old→new
   // paper trail for every changed field. The generic auditLogMiddleware records
@@ -170,19 +139,22 @@ router.put("/admin/platform/customer-config", requireAuth, requireSuperAdmin, as
     .where(eq(platformCustomerConfigTable.id, "singleton"))
     .limit(1);
 
-  const insertValues = { id: "singleton", customerName, planTier, monthlyPriceCents, officerCount, billingNotes, planStartDate, processingFeeEnabled, processingFeeRate, updatedBy: editor };
-  const updateValues: Record<string, unknown> = { customerName, planTier, monthlyPriceCents, officerCount, billingNotes, planStartDate, processingFeeEnabled, processingFeeRate, updatedBy: editor, updatedAt: sql`now()` };
-  if (timeConfirmEditWindowHours !== undefined) {
-    (insertValues as Record<string, unknown>).timeConfirmEditWindowHours = timeConfirmEditWindowHours;
-    updateValues.timeConfirmEditWindowHours = timeConfirmEditWindowHours;
-  }
+  // Write ONLY the keys the client actually sent — an absent key is left
+  // unchanged (every field in customerConfigSchema is .optional()), so a
+  // version-skewed client never clobbers a field it doesn't know about.
+  const cols = pickCustomerConfigColumns(parsed.data);
+  const insertValues = {
+    id: "singleton",
+    updatedBy: editor,
+    ...cols,
+  } as typeof platformCustomerConfigTable.$inferInsert;
 
   await db
     .insert(platformCustomerConfigTable)
     .values(insertValues)
     .onConflictDoUpdate({
       target: platformCustomerConfigTable.id,
-      set: updateValues,
+      set: { ...cols, updatedBy: editor, updatedAt: sql`now()` },
     });
 
   const [config] = await db
@@ -193,17 +165,13 @@ router.put("/admin/platform/customer-config", requireAuth, requireSuperAdmin, as
   applyProcessingFeeConfig(config ?? null);
   applyConfirmEditWindowConfig(config ?? null);
 
-  // Record the old→new values for every changed field in the audit log. The
-  // values are plain scalars (no sensitive data), so no redaction is required;
-  // the middleware persists this into audit_logs.metadata. Only fields present
-  // in the parsed payload are compared, so an older client that omits a key
-  // never triggers a spurious "changed" entry.
-  const afterConfig: Record<string, unknown> = {
-    customerName, planTier, monthlyPriceCents, officerCount, billingNotes,
-    planStartDate, processingFeeEnabled, processingFeeRate,
-  };
-  if (timeConfirmEditWindowHours !== undefined) {
-    afterConfig["timeConfirmEditWindowHours"] = config?.timeConfirmEditWindowHours ?? null;
+  // Record the old→new values for every changed field in the audit log. Only
+  // the keys the client actually sent are compared (read back from the stored
+  // row), so an older client that omits a key never triggers a spurious
+  // "changed" entry. Values are plain scalars — no redaction required.
+  const afterConfig: Record<string, unknown> = {};
+  for (const key of Object.keys(cols)) {
+    afterConfig[key] = (config as Record<string, unknown> | undefined)?.[key] ?? null;
   }
   const auditMeta = buildCustomerConfigChanges(
     (priorConfig ?? {}) as Record<string, unknown>,

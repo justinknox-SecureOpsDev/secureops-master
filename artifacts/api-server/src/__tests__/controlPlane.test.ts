@@ -16,10 +16,20 @@ import {
   db,
   platformBrandConfigTable,
   platformFeatureOverridesTable,
+  platformCustomerConfigTable,
   platformAgreementSignaturesTable,
 } from "@workspace/db";
 import app from "../app";
 import { signControlPlanePayload, CONTROL_PLANE_SIGNATURE_HEADER } from "../lib/controlPlaneAuth";
+import {
+  isProcessingFeeEnabled,
+  getProcessingFeeRate,
+  applyProcessingFeeConfig,
+} from "../lib/processingFeeConfig";
+import {
+  getConfirmEditWindowOverride,
+  applyConfirmEditWindowConfig,
+} from "../lib/confirmEditWindowConfig";
 
 const SECRET = "control-plane-integration-test-secret";
 let prevSecret: string | undefined;
@@ -36,6 +46,13 @@ afterAll(async () => {
   await db
     .delete(platformFeatureOverridesTable)
     .where(eq(platformFeatureOverridesTable.featureKey, "chat"));
+  await db
+    .delete(platformCustomerConfigTable)
+    .where(eq(platformCustomerConfigTable.id, "singleton"));
+  // Reset the in-memory live-apply singletons this suite mutated back to their
+  // env defaults so later test files that read them aren't polluted.
+  applyProcessingFeeConfig(null);
+  applyConfirmEditWindowConfig(null);
 });
 
 afterEach(() => {
@@ -139,6 +156,92 @@ describe("/api/control-plane (HMAC)", () => {
     const chat = res.body.features.find((f: { key: string }) => f.key === "chat");
     expect(chat).toBeTruthy();
     expect(chat.enabled).toBe(false);
+  });
+
+  describe("customer / commercial config", () => {
+    it("includes the customer config in the settings read", async () => {
+      process.env.CONTROL_PLANE_SHARED_SECRET = SECRET;
+      const sig = signControlPlanePayload("", SECRET);
+      const res = await request(app)
+        .get("/api/control-plane/settings")
+        .set(CONTROL_PLANE_SIGNATURE_HEADER, sig);
+      expect(res.status).toBe(200);
+      expect(res.body).toHaveProperty("customerConfig");
+    });
+
+    it("rejects a customer-config write with no signature (401)", async () => {
+      process.env.CONTROL_PLANE_SHARED_SECRET = SECRET;
+      const res = await request(app)
+        .put("/api/control-plane/customer-config")
+        .set("Content-Type", "application/json")
+        .send(JSON.stringify({ planTier: "professional" }));
+      expect(res.status).toBe(401);
+    });
+
+    it("writes plan / pricing and applies the fee + edit window live", async () => {
+      process.env.CONTROL_PLANE_SHARED_SECRET = SECRET;
+      const body = {
+        customerName: "Remote Plan Co",
+        planTier: "professional",
+        monthlyPriceCents: 89900,
+        officerCount: 42,
+        billingNotes: "net-30",
+        planStartDate: "2026-01-01",
+        processingFeeEnabled: true,
+        processingFeeRate: "9.5",
+        timeConfirmEditWindowHours: "3",
+      };
+      const payload = JSON.stringify(body);
+      const sig = signControlPlanePayload(payload, SECRET);
+      const res = await request(app)
+        .put("/api/control-plane/customer-config")
+        .set(CONTROL_PLANE_SIGNATURE_HEADER, sig)
+        .set("Content-Type", "application/json")
+        .send(payload);
+      expect(res.status).toBe(200);
+      expect(res.body.customerConfig).toMatchObject({
+        customerName: "Remote Plan Co",
+        planTier: "professional",
+        monthlyPriceCents: 89900,
+        officerCount: 42,
+        processingFeeEnabled: true,
+        processingFeeRate: "9.5",
+        timeConfirmEditWindowHours: "3",
+      });
+      // Live-apply hooks ran — the change takes effect with no restart.
+      expect(isProcessingFeeEnabled()).toBe(true);
+      expect(getProcessingFeeRate()).toBeCloseTo(9.5);
+      expect(getConfirmEditWindowOverride()).toBe(3);
+    });
+
+    it("leaves omitted keys unchanged (version-skew tolerance)", async () => {
+      process.env.CONTROL_PLANE_SHARED_SECRET = SECRET;
+      // Send ONLY officerCount — every previously-saved field must survive.
+      const payload = JSON.stringify({ officerCount: 50 });
+      const sig = signControlPlanePayload(payload, SECRET);
+      const res = await request(app)
+        .put("/api/control-plane/customer-config")
+        .set(CONTROL_PLANE_SIGNATURE_HEADER, sig)
+        .set("Content-Type", "application/json")
+        .send(payload);
+      expect(res.status).toBe(200);
+      expect(res.body.customerConfig.officerCount).toBe(50);
+      // planTier from the previous write survived because its key was omitted.
+      expect(res.body.customerConfig.planTier).toBe("professional");
+    });
+
+    it("rejects an invalid customer-config payload (400) with a valid signature", async () => {
+      process.env.CONTROL_PLANE_SHARED_SECRET = SECRET;
+      // officerCount must be >= 1; 0 is rejected by the shared schema.
+      const payload = JSON.stringify({ officerCount: 0 });
+      const sig = signControlPlanePayload(payload, SECRET);
+      const res = await request(app)
+        .put("/api/control-plane/customer-config")
+        .set(CONTROL_PLANE_SIGNATURE_HEADER, sig)
+        .set("Content-Type", "application/json")
+        .send(payload);
+      expect(res.status).toBe(400);
+    });
   });
 
   describe("GET /api/control-plane/agreements", () => {

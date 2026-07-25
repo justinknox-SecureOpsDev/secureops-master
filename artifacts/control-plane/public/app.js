@@ -68,6 +68,20 @@ function fmtDate(s) {
   return d.toLocaleString();
 }
 
+// Friendly label + badge color for a remote-change kind. The DB stores the raw
+// token (brand / features / plan_billing); the UI shows a readable label.
+function kindLabel(kind) {
+  if (kind === "brand") return "Brand";
+  if (kind === "features") return "Features";
+  if (kind === "plan_billing") return "Plan & billing";
+  return String(kind == null ? "" : kind);
+}
+function kindBadgeClass(kind) {
+  if (kind === "brand") return "warn";
+  if (kind === "plan_billing") return "plan";
+  return "ok";
+}
+
 function statusBadge(c) {
   const cls = c.lastStatus === "online" ? "ok" : c.lastStatus === "offline" ? "bad" : "warn";
   const label = c.isActive ? c.lastStatus : "paused";
@@ -249,7 +263,7 @@ async function loadActivity() {
     changes.forEach(function (ch) {
       const li = document.createElement("li");
       li.innerHTML =
-        "<span class='badge " + (ch.kind === "brand" ? "warn" : "ok") + "'>" + esc(ch.kind) + "</span> " +
+        "<span class='badge " + kindBadgeClass(ch.kind) + "'>" + esc(kindLabel(ch.kind)) + "</span> " +
         esc(ch.summary) +
         "<br><span class='muted small'>" +
         (ch.customerName
@@ -377,7 +391,7 @@ async function openSettings(c) {
   $("settings-history").innerHTML = "";
   if (!c.hasMgmtSecret) {
     $("settings-body").innerHTML =
-      "<p class='muted'>No management secret is configured for this customer. Add one via Edit to manage brand &amp; features remotely.</p>";
+      "<p class='muted'>No management secret is configured for this customer. Add one via Edit to manage brand, features &amp; plan/billing remotely.</p>";
     await loadHistory(c);
     return;
   }
@@ -410,7 +424,7 @@ async function loadHistory(c) {
     let html = "<h3>Recent remote changes</h3><ul class='history-list'>";
     changes.forEach(function (ch) {
       html +=
-        "<li><span class='badge " + (ch.kind === "brand" ? "warn" : "ok") + "'>" + esc(ch.kind) + "</span> " +
+        "<li><span class='badge " + kindBadgeClass(ch.kind) + "'>" + esc(kindLabel(ch.kind)) + "</span> " +
         esc(ch.summary) +
         "<br><span class='muted small'>" + esc(ch.operator) + " · " + fmtDate(ch.createdAt) + "</span></li>";
     });
@@ -424,7 +438,9 @@ async function loadHistory(c) {
 function renderSettings(remote) {
   const brand = (remote && remote.brand) || {};
   const features = (remote && remote.features) || [];
-  let html = "<h3>Brand</h3><div class='settings-grid'>";
+  const customerConfig = (remote && remote.customerConfig) || {};
+  let html = renderPlanBilling(customerConfig);
+  html += "<h3>Brand</h3><div class='settings-grid'>";
   html += brandField("companyName", "Company name", brand.companyName);
   html += brandField("shortName", "Short name", brand.shortName);
   html += brandField("tagline", "Tagline", brand.tagline);
@@ -448,6 +464,7 @@ function renderSettings(remote) {
   html += "</div><button id='save-features' class='primary'>Save features</button>";
   $("settings-body").innerHTML = html;
 
+  wirePlanBilling();
   $("save-brand").addEventListener("click", saveBrand);
   $("save-features").addEventListener("click", saveFeatures);
 }
@@ -457,6 +474,129 @@ function brandField(key, label, val) {
     "<label>" + esc(label) +
     "<input data-brand='" + esc(key) + "' type='text' value='" + esc(val || "") + "'></label>"
   );
+}
+
+// ---- Plan & billing (commercial config) ----
+// Standard preset prices in cents, matching the in-app super-admin Platform page.
+var PRESET_CENTS = { starter: 34900, professional: 89900, enterprise: 199500 };
+
+function tierOption(val, label, current) {
+  return (
+    "<option value='" + esc(val) + "'" +
+    ((current || "") === val ? " selected" : "") +
+    ">" + esc(label) + "</option>"
+  );
+}
+
+function renderPlanBilling(config) {
+  var c = config || {};
+  var priceDollars = c.monthlyPriceCents != null ? String(c.monthlyPriceCents / 100) : "";
+  var startDate = c.planStartDate ? String(c.planStartDate).slice(0, 10) : "";
+  var html = "<h3>Plan &amp; billing</h3>";
+  html += "<div class='preset-row'><span class='muted small'>Presets:</span>";
+  html += "<button type='button' class='ghost small' data-preset='starter'>Starter · $349</button>";
+  html += "<button type='button' class='ghost small' data-preset='professional'>Professional · $899</button>";
+  html += "<button type='button' class='ghost small' data-preset='enterprise'>Enterprise · $1,995</button>";
+  html += "<button type='button' class='ghost small' data-preset='custom'>Custom</button>";
+  html += "</div>";
+  html += "<div class='settings-grid'>";
+  html += "<label>Customer name<input id='pb-customerName' type='text' value='" + esc(c.customerName || "") + "'></label>";
+  html +=
+    "<label>Plan tier<select id='pb-planTier'>" +
+    tierOption("", "— not set —", c.planTier) +
+    tierOption("starter", "Starter", c.planTier) +
+    tierOption("professional", "Professional", c.planTier) +
+    tierOption("enterprise", "Enterprise", c.planTier) +
+    tierOption("custom", "Custom", c.planTier) +
+    "</select></label>";
+  html += "<label>Monthly price (USD)<input id='pb-monthlyPrice' type='number' min='0' step='1' placeholder='e.g. 899' value='" + esc(priceDollars) + "'></label>";
+  html += "<label>Active officers<input id='pb-officerCount' type='number' min='1' step='1' placeholder='e.g. 47' value='" + esc(c.officerCount != null ? String(c.officerCount) : "") + "'></label>";
+  html += "<label>Plan start date<input id='pb-planStartDate' type='date' value='" + esc(startDate) + "'></label>";
+  html += "<label>Officer time-edit window (hrs)<input id='pb-timeWindow' type='number' min='0' step='0.25' placeholder='2 (default)' value='" + esc(c.timeConfirmEditWindowHours || "") + "'></label>";
+  html += "</div>";
+  html += "<div class='pb-fee'>";
+  html += "<label class='check'><input id='pb-feeEnabled' type='checkbox' " + (c.processingFeeEnabled ? "checked" : "") + "> Invoice processing fee</label>";
+  html += "<label id='pb-feeRate-wrap'>Fee rate %<input id='pb-feeRate' type='number' min='0' max='100' step='0.01' placeholder='8.25 (default)' value='" + esc(c.processingFeeRate || "") + "'></label>";
+  html += "</div>";
+  html += "<label>Billing notes<textarea id='pb-billingNotes' rows='2'>" + esc(c.billingNotes || "") + "</textarea></label>";
+  html += "<button id='save-plan-billing' class='primary'>Save plan &amp; billing</button>";
+  return html;
+}
+
+function applyPreset(preset) {
+  var tierEl = $("pb-planTier");
+  if (tierEl) tierEl.value = preset;
+  if (preset !== "custom" && PRESET_CENTS[preset] != null) {
+    var priceEl = $("pb-monthlyPrice");
+    if (priceEl) priceEl.value = String(PRESET_CENTS[preset] / 100);
+  }
+}
+
+function wirePlanBilling() {
+  var save = $("save-plan-billing");
+  if (save) save.addEventListener("click", savePlanBilling);
+  document.querySelectorAll("[data-preset]").forEach(function (el) {
+    el.addEventListener("click", function () {
+      applyPreset(el.getAttribute("data-preset"));
+    });
+  });
+  var fee = $("pb-feeEnabled");
+  if (fee) {
+    var sync = function () {
+      var wrap = $("pb-feeRate-wrap");
+      if (wrap) wrap.style.display = fee.checked ? "" : "none";
+    };
+    fee.addEventListener("change", sync);
+    sync();
+  }
+}
+
+function numOrNull(str, isInt) {
+  var s = String(str == null ? "" : str).trim();
+  if (s === "") return null;
+  var n = isInt ? parseInt(s, 10) : parseFloat(s);
+  return isNaN(n) ? null : n;
+}
+
+// Pull the clearest message out of a failed plan/billing save: the customer
+// backend's re-validation issue if present, otherwise the generic error.
+function planBillingErrorMessage(err) {
+  var b = err && err.body;
+  var remote = b && b.remote;
+  if (remote && Array.isArray(remote.issues) && remote.issues.length) {
+    var i = remote.issues[0];
+    var path = Array.isArray(i.path) ? i.path.join(".") : "";
+    return (path ? path + ": " : "") + (i.message || "invalid value");
+  }
+  return (err && err.message) || "Save failed";
+}
+
+async function savePlanBilling() {
+  var dollars = numOrNull($("pb-monthlyPrice").value, false);
+  var rateStr = $("pb-feeRate").value.trim();
+  var body = {
+    customerName: $("pb-customerName").value.trim() || null,
+    planTier: $("pb-planTier").value || null,
+    monthlyPriceCents: dollars == null ? null : Math.round(dollars * 100),
+    officerCount: numOrNull($("pb-officerCount").value, true),
+    planStartDate: $("pb-planStartDate").value || null,
+    billingNotes: $("pb-billingNotes").value.trim() || null,
+    processingFeeEnabled: $("pb-feeEnabled").checked,
+    processingFeeRate: rateStr === "" ? null : rateStr,
+    timeConfirmEditWindowHours: $("pb-timeWindow").value.trim(),
+  };
+  try {
+    const r = await api("/customers/" + settingsCustomer.id + "/remote-settings/plan-billing", {
+      method: "PUT",
+      body: JSON.stringify(body),
+    });
+    if (r.status === 200) {
+      toast("Plan & billing updated");
+      await loadHistory(settingsCustomer);
+    } else toast("Backend returned " + r.status, true);
+  } catch (err) {
+    toast(planBillingErrorMessage(err), true);
+  }
 }
 
 async function saveBrand() {

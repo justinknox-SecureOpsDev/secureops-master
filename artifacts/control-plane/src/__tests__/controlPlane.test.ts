@@ -19,6 +19,7 @@ import {
   csvCell,
   summarizeBrand,
   summarizeFeatures,
+  summarizePlanBilling,
 } from "../routes/remoteSettings";
 import { OPERATOR_EMAIL, OPERATOR_PASSWORD } from "../config";
 
@@ -114,6 +115,32 @@ describe("remote-change summaries", () => {
     expect(summarizeFeatures({ updates: [] })).toBe("Updated feature flags");
     expect(summarizeFeatures(null)).toBe("Updated feature flags");
   });
+
+  it("summarizes a plan/billing body by its submitted values", () => {
+    expect(
+      summarizePlanBilling({
+        planTier: "professional",
+        monthlyPriceCents: 89900,
+        officerCount: 42,
+        processingFeeEnabled: true,
+        processingFeeRate: "9.5",
+        timeConfirmEditWindowHours: "3",
+      }),
+    ).toBe(
+      "Updated plan & billing: plan professional, $899/mo, 42 officers, fee on 9.5%, time-edit 3h",
+    );
+  });
+
+  it("shows fee off and explicit unset values for a plan/billing body", () => {
+    expect(
+      summarizePlanBilling({ planTier: null, monthlyPriceCents: null, processingFeeEnabled: false }),
+    ).toBe("Updated plan & billing: plan unset, price unset, fee off");
+  });
+
+  it("falls back gracefully for an empty or invalid plan/billing body", () => {
+    expect(summarizePlanBilling({})).toBe("Updated plan & billing");
+    expect(summarizePlanBilling(null)).toBe("Updated plan & billing");
+  });
 });
 
 describe("fleet activity filters", () => {
@@ -133,6 +160,12 @@ describe("fleet activity filters", () => {
     expect(buildRemoteChangesFilter({ kind: "brand" }).clauses).toEqual(["rc.kind = $1"]);
     expect(buildRemoteChangesFilter({ kind: "features" }).params).toEqual(["features"]);
     expect(buildRemoteChangesFilter({ kind: "bogus" }).clauses).toEqual([]);
+  });
+
+  it("accepts the plan_billing kind", () => {
+    const f = buildRemoteChangesFilter({ kind: "plan_billing" });
+    expect(f.clauses).toEqual(["rc.kind = $1"]);
+    expect(f.params).toEqual(["plan_billing"]);
   });
 
   it("treats a date-only until as inclusive of the whole day", () => {
