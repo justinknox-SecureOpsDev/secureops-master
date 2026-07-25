@@ -61,6 +61,36 @@ async function waitForAuditRow(): Promise<typeof auditLogsTable.$inferSelect> {
   throw new Error("audit row for customer-config PUT never appeared");
 }
 
+// All customer-config audit rows for our super-admin, newest first. Unlike the
+// time-windowed helper above, this lets a test pick a specific PUT's audit row
+// by id novelty, which is robust to the fire-and-forget persistence ordering and
+// to DB/JS clock skew (see the "unchanged" test below).
+async function customerConfigAudits(): Promise<Array<typeof auditLogsTable.$inferSelect>> {
+  const rows = await db
+    .select()
+    .from(auditLogsTable)
+    .where(
+      and(
+        eq(auditLogsTable.actorUserId, superId),
+        eq(auditLogsTable.path, "/admin/platform/customer-config"),
+      ),
+    );
+  return rows.sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime());
+}
+
+// Poll until a customer-config audit row appears whose id is NOT in excludeIds —
+// i.e. the row produced by the PUT issued after excludeIds was snapshotted.
+async function waitForNewAudit(
+  excludeIds: Set<string>,
+): Promise<typeof auditLogsTable.$inferSelect> {
+  for (let i = 0; i < 40; i++) {
+    const fresh = (await customerConfigAudits()).filter((r) => !excludeIds.has(r.id));
+    if (fresh.length) return fresh[0]!;
+    await new Promise((r) => setTimeout(r, 25));
+  }
+  throw new Error("new audit row for customer-config PUT never appeared");
+}
+
 async function putConfig(body: Record<string, unknown>) {
   return request(app)
     .put("/api/admin/platform/customer-config")
@@ -145,15 +175,26 @@ describe("time-edit limit change audit trail", () => {
   });
 
   it("does not attach the change metadata when the limit is unchanged", async () => {
-    // Set to a known value first.
+    // Change the limit first (prior "4" → "6"), then wait for THAT PUT's own
+    // audit row to land. The middleware persists fire-and-forget on res
+    // "finish", so under load the first PUT's row can appear late; picking the
+    // second PUT's row by a created_at time window (as an earlier version did)
+    // then races and can wrongly select the first PUT's "changed" row. Instead
+    // snapshot the audit-row ids present once the first PUT has landed and pick
+    // out ONLY the id introduced by the re-save below — deterministic regardless
+    // of persistence ordering or DB/JS clock skew.
+    const beforeChange = new Set((await customerConfigAudits()).map((r) => r.id));
     await putConfig({ ...BASE_BODY, timeConfirmEditWindowHours: "6" });
-    startedAt = new Date();
+    const changeAudit = await waitForNewAudit(beforeChange);
+
+    const beforeResave = new Set((await customerConfigAudits()).map((r) => r.id));
+    beforeResave.add(changeAudit.id);
 
     // Re-save the SAME value — no change to the limit.
     const res = await putConfig({ ...BASE_BODY, timeConfirmEditWindowHours: "6" });
     expect(res.status).toBe(200);
 
-    const audit = await waitForAuditRow();
+    const audit = await waitForNewAudit(beforeResave);
     const meta = audit.metadata as Record<string, unknown> | null;
     // Either no metadata, or a generic settings-change payload that contains no
     // timeConfirmEditWindowHours entry (the limit did not change).

@@ -8,8 +8,7 @@ import { seedDemoUsers, ensureAdminAccountHealth, ensureEmployeesRowsForAllUsers
 import { seedChatRooms } from "./lib/seedChatRooms";
 import { seedRadioChannels } from "./lib/seedRadioChannels";
 import { startScheduledJobs } from "./lib/scheduledJobs";
-import { loadFeatureOverridesFromDb } from "./lib/features";
-import { loadBrandOverridesFromDb } from "./lib/brandConfig";
+import { initConfigReadiness } from "./lib/configReadiness";
 import { loadProcessingFeeConfigFromDb } from "./lib/processingFeeConfig";
 import { loadConfirmEditWindowConfigFromDb } from "./lib/confirmEditWindowConfig";
 
@@ -93,21 +92,14 @@ server.listen(port, () => {
   }
 });
 
-// Load super-admin feature-flag overrides into the in-memory cache so the
-// requireFeature() middleware and GET /api/brand reflect DB state from the
-// first request. Falls back silently to the DISABLED_FEATURES env baseline
-// if the table doesn't exist yet (pre-`db push`).
-loadFeatureOverridesFromDb()
-  .then(() => logger.info("Feature-flag overrides loaded"))
-  .catch((err) => logger.error({ err }, "Failed to load feature-flag overrides"));
-
-// Load super-admin brand overrides (company name, palette, logo, contact
-// emails) into the in-memory `brand` object so emails, PDFs, and GET /api/brand
-// reflect DB state from the first request. Falls back silently to the env
-// defaults if the table doesn't exist yet (pre-`db push`).
-loadBrandOverridesFromDb()
-  .then(() => logger.info("Brand overrides loaded"))
-  .catch((err) => logger.error({ err }, "Failed to load brand overrides"));
+// Load super-admin brand + feature-flag overrides into memory so emails, PDFs,
+// the requireFeature() middleware and GET /api/brand reflect DB state from the
+// first request. server.listen (above) already opened the port, so this stays
+// non-blocking; GET /api/brand awaits this same readiness signal before its
+// first response so a redeploy never briefly serves the env-baseline company
+// name or feature set. Falls back to env defaults after a short timeout (or if
+// the tables don't exist yet, pre-`db push`).
+initConfigReadiness();
 
 loadProcessingFeeConfigFromDb()
   .then(() => logger.info("Processing-fee config loaded"))
