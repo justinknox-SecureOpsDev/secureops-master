@@ -8,11 +8,15 @@ import {
   licensesTable,
   revokedTokensTable,
   timeEntriesTable,
+  sitesTable,
+  siteManagersTable,
+  clientsTable,
 } from "@workspace/db";
 import {
   sendLicenseExpiryReminders,
   cleanupExpiredRevokedTokens,
   sendUnconfirmedEntryReminders,
+  escalateUnconfirmedEntries,
 } from "../lib/scheduledJobs";
 
 // Tag everything so cleanup can scope precisely and never trample
@@ -248,6 +252,143 @@ describe("sendUnconfirmedEntryReminders", () => {
     expect(await readReminderStamp(confirmedId)).toBeNull();
     expect(await readReminderStamp(legacyId)).toBeNull();
     expect(await readReminderStamp(openId)).toBeNull();
+  });
+});
+
+describe("escalateUnconfirmedEntries", () => {
+  async function makeActiveManagerAtSite(siteId: string, suffix: string): Promise<string> {
+    const [u] = await db
+      .insert(usersTable)
+      .values({
+        email: `${TAG}-${suffix}-${randomUUID().slice(0, 6)}@example.test`,
+        passwordHash,
+        firstName: "Mgr",
+        lastName: TAG,
+        role: "site_manager",
+        status: "active",
+        tokensValidAfter: new Date(0),
+      })
+      .returning({ id: usersTable.id });
+    await db.insert(siteManagersTable).values({ siteId, userId: u.id });
+    return u.id;
+  }
+
+  async function makeSite(suffix: string): Promise<string> {
+    const [c] = await db
+      .insert(clientsTable)
+      .values({ name: `${TAG}-client-${suffix}` })
+      .returning({ id: clientsTable.id });
+    const [s] = await db
+      .insert(sitesTable)
+      .values({ name: `${TAG}-site-${suffix}`, address: "1 Test Way", clientId: c.id })
+      .returning({ id: sitesTable.id });
+    return s.id;
+  }
+
+  async function insertEntry(opts: {
+    employeeId: string;
+    siteId?: string | null;
+    clockOutAgoMs: number | null;
+    confirmationStatus?: string | null;
+    escalatedAt?: Date | null;
+  }): Promise<string> {
+    const now = Date.now();
+    const clockOut =
+      opts.clockOutAgoMs === null ? null : new Date(now - opts.clockOutAgoMs);
+    const clockIn = new Date(now - (opts.clockOutAgoMs ?? 0) - 8 * 60 * 60 * 1000);
+    const [row] = await db
+      .insert(timeEntriesTable)
+      .values({
+        employeeId: opts.employeeId,
+        siteId: opts.siteId ?? null,
+        clockInTime: clockIn,
+        clockOutTime: clockOut,
+        confirmationStatus:
+          opts.confirmationStatus === undefined
+            ? "awaiting_confirmation"
+            : opts.confirmationStatus,
+        confirmationEscalatedAt: opts.escalatedAt ?? null,
+        notes: TAG,
+      })
+      .returning({ id: timeEntriesTable.id });
+    return row.id;
+  }
+
+  async function readEscalationStamp(id: string): Promise<Date | null> {
+    const [row] = await db
+      .select({ stamp: timeEntriesTable.confirmationEscalatedAt })
+      .from(timeEntriesTable)
+      .where(eq(timeEntriesTable.id, id))
+      .limit(1);
+    return row.stamp;
+  }
+
+  afterAll(async () => {
+    await db.execute(sql`DELETE FROM time_entries WHERE notes = ${TAG}`);
+    await db.execute(sql`DELETE FROM sites WHERE name LIKE ${TAG + "-site-%"}`);
+  });
+
+  const DAY = 24 * 60 * 60 * 1000;
+
+  it("escalates a >24h-awaiting entry with a site manager exactly once", async () => {
+    const empId = await makeActiveEmployee("esc-a");
+    const siteId = await makeSite("a");
+    await makeActiveManagerAtSite(siteId, "esc-mgr-a");
+    const staleId = await insertEntry({ employeeId: empId, siteId, clockOutAgoMs: DAY + 2 * 60 * 60 * 1000 });
+
+    await escalateUnconfirmedEntries();
+    const first = await readEscalationStamp(staleId);
+    expect(first).not.toBeNull();
+
+    // Second tick must not move the stamp (one escalation per entry, ever).
+    await escalateUnconfirmedEntries();
+    const second = await readEscalationStamp(staleId);
+    expect(second?.getTime()).toBe(first?.getTime());
+  });
+
+  it("escalates a site-less entry to active admins", async () => {
+    const empId = await makeActiveEmployee("esc-b");
+    // Guarantee at least one active admin recipient exists.
+    await db.insert(usersTable).values({
+      email: `${TAG}-admin-${randomUUID().slice(0, 6)}@example.test`,
+      passwordHash,
+      firstName: "Adm",
+      lastName: TAG,
+      role: "admin",
+      status: "active",
+      tokensValidAfter: new Date(0),
+    });
+    const staleId = await insertEntry({ employeeId: empId, siteId: null, clockOutAgoMs: DAY + 60 * 60 * 1000 });
+
+    await escalateUnconfirmedEntries();
+    expect(await readEscalationStamp(staleId)).not.toBeNull();
+  });
+
+  it("skips entries under 24h, confirmed, non-applicable, and still-open", async () => {
+    const empId = await makeActiveEmployee("esc-c");
+    const siteId = await makeSite("c");
+    await makeActiveManagerAtSite(siteId, "esc-mgr-c");
+    const recentId = await insertEntry({ employeeId: empId, siteId, clockOutAgoMs: 2 * 60 * 60 * 1000 });
+    const confirmedId = await insertEntry({
+      employeeId: empId,
+      siteId,
+      clockOutAgoMs: DAY + 60 * 60 * 1000,
+      confirmationStatus: "confirmed",
+    });
+    const legacyId = await insertEntry({
+      employeeId: empId,
+      siteId,
+      clockOutAgoMs: DAY + 60 * 60 * 1000,
+      confirmationStatus: null,
+    });
+    const openId = await insertEntry({ employeeId: empId, siteId, clockOutAgoMs: null });
+
+    await escalateUnconfirmedEntries();
+
+    expect(await readEscalationStamp(recentId)).toBeNull();
+    expect(await readEscalationStamp(confirmedId)).toBeNull();
+    expect(await readEscalationStamp(legacyId)).toBeNull();
+    expect(await readEscalationStamp(openId)).toBeNull();
   });
 });
 

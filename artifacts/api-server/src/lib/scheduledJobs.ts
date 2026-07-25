@@ -734,6 +734,139 @@ export async function sendUnconfirmedEntryReminders(): Promise<void> {
 }
 
 /**
+ * Second-tier escalation for time entries still stuck in
+ * `awaiting_confirmation` roughly a day after clock-out. The first-tier
+ * reminder (above) nudges the officer ~1 hour after clock-out; if they still
+ * never confirm, the entry sits outside the admin approval queue and can stall
+ * payroll. This escalation notifies the site's managers (falling back to the
+ * active admin team when the entry has no site) so a human can force-clear it
+ * via approve/correct — both of which flip the entry to 'confirmed'.
+ *
+ * One escalation per entry, ever: the atomic UPDATE…RETURNING stamp on
+ * `confirmationEscalatedAt` debounces overlapping ticks and multiple
+ * instances. Entries confirmed (or force-cleared by an admin) before the tick
+ * are excluded by the `confirmation_status='awaiting_confirmation'` filter;
+ * the same predicate in the claim WHERE clause means a confirm racing the tick
+ * also suppresses the escalation.
+ */
+const CONFIRMATION_ESCALATION_DELAY_MS = 24 * HOUR_MS;
+
+export async function escalateUnconfirmedEntries(): Promise<void> {
+  try {
+    const cutoff = new Date(Date.now() - CONFIRMATION_ESCALATION_DELAY_MS);
+
+    const stale = await db
+      .select({
+        entryId: timeEntriesTable.id,
+        employeeId: timeEntriesTable.employeeId,
+        siteId: timeEntriesTable.siteId,
+        clockOutTime: timeEntriesTable.clockOutTime,
+        siteName: sitesTable.name,
+        officerFirstName: usersTable.firstName,
+        officerLastName: usersTable.lastName,
+      })
+      .from(timeEntriesTable)
+      .leftJoin(sitesTable, eq(sitesTable.id, timeEntriesTable.siteId))
+      .innerJoin(usersTable, eq(usersTable.id, timeEntriesTable.employeeId))
+      .where(
+        and(
+          eq(timeEntriesTable.confirmationStatus, "awaiting_confirmation"),
+          lt(timeEntriesTable.clockOutTime, cutoff),
+          isNull(timeEntriesTable.confirmationEscalatedAt),
+        ),
+      );
+
+    if (stale.length === 0) return;
+
+    // Cache the active-admin fallback (used only for site-less entries) so we
+    // don't re-query it per row.
+    let adminIdsCache: string[] | null = null;
+    const activeAdminIds = async (): Promise<string[]> => {
+      if (adminIdsCache) return adminIdsCache;
+      const admins = await db
+        .select({ id: usersTable.id })
+        .from(usersTable)
+        .where(and(eq(usersTable.role, "admin"), eq(usersTable.status, "active")));
+      adminIdsCache = admins.map((a) => a.id);
+      return adminIdsCache;
+    };
+
+    let totalSent = 0;
+    for (const entry of stale) {
+      // Atomically claim this entry so overlapping ticks / a second instance
+      // can never double-send, and a confirm racing the tick suppresses it.
+      const claimed = await db
+        .update(timeEntriesTable)
+        .set({ confirmationEscalatedAt: new Date() })
+        .where(
+          and(
+            eq(timeEntriesTable.id, entry.entryId),
+            eq(timeEntriesTable.confirmationStatus, "awaiting_confirmation"),
+            isNull(timeEntriesTable.confirmationEscalatedAt),
+          ),
+        )
+        .returning({ id: timeEntriesTable.id });
+      if (claimed.length === 0) continue;
+
+      // Recipients: site managers for the entry's site; fall back to the
+      // active admin team when the entry has no site (ad-hoc geo clock-in with
+      // no site resolved). Exclude the officer themselves in the unlikely
+      // event they also hold a manager/admin role.
+      const managerIds = entry.siteId ? await getSiteManagerUserIds(entry.siteId) : await activeAdminIds();
+      const recipientIds = managerIds.filter((id) => id !== entry.employeeId);
+      if (recipientIds.length === 0) {
+        // Nobody to notify — leave the stamp in place so we don't re-scan and
+        // spam-attempt on every future tick. The entry is still visible in-app
+        // for whoever gets assigned later.
+        continue;
+      }
+
+      const officerName =
+        [entry.officerFirstName, entry.officerLastName].filter(Boolean).join(" ") || "An officer";
+      const where = entry.siteName ? ` at ${entry.siteName}` : "";
+      const pushBody = `${officerName} hasn't confirmed their recorded hours${where} from over a day ago. Review and approve or correct the entry to clear it for payroll.`;
+      const smsBody = `SecureOps: ${officerName}'s time entry${where} has been awaiting confirmation for over 24h. Please log in to approve or correct it so payroll isn't stalled.`;
+
+      let pushOk = false;
+      try {
+        await sendPushToUsers(recipientIds, {
+          title: "⚠️ Unconfirmed hours need review",
+          body: pushBody,
+          data: { type: "unconfirmed_entry_escalation", timeEntryId: entry.entryId },
+        });
+        pushOk = true;
+      } catch (err) {
+        logger.warn({ err, timeEntryId: entry.entryId }, "[confirm-entry-escalation] push send failed");
+      }
+
+      try {
+        await sendSmsToUsers(recipientIds, smsBody);
+      } catch (err) {
+        logger.warn({ err, timeEntryId: entry.entryId }, "[confirm-entry-escalation] sms send failed");
+      }
+
+      if (!pushOk) {
+        // Roll back the stamp so the next tick retries (push is the primary
+        // channel; SMS-only delivery still rolls back to preserve retries).
+        await db
+          .update(timeEntriesTable)
+          .set({ confirmationEscalatedAt: null })
+          .where(eq(timeEntriesTable.id, entry.entryId))
+          .catch(() => {/* swallow */});
+        continue;
+      }
+      totalSent += 1;
+    }
+
+    if (totalSent > 0) {
+      logger.info({ totalSent }, "Escalated unconfirmed time entries to managers/admins");
+    }
+  } catch (err) {
+    logger.error({ err }, "[confirm-entry-escalation] job failed");
+  }
+}
+
+/**
  * Weekly time-entry approval reminder. Runs hourly but self-gates: only
  * fires on Fridays between 17:00 and 19:00 in the business timezone.
  *
@@ -1632,6 +1765,12 @@ export function startScheduledJobs(intervalMs: number = HOUR_MS): NodeJS.Timeout
   // nudged close to the 1-hour mark after clock-out. One reminder per
   // entry, ever (atomic claim on confirmation_reminder_sent_at).
   schedule("confirm-entry-reminders", sendUnconfirmedEntryReminders, 5 * MIN_MS);
+  // Second-tier escalation for entries still awaiting confirmation ~24h after
+  // clock-out — hourly. Notifies the site's managers (falling back to active
+  // admins when the entry has no site) so a human can force-clear it. One
+  // escalation per entry, ever (atomic claim on confirmation_escalated_at).
+  logger.info("Scheduled job: confirm-entry-escalation (hourly)");
+  schedule("confirm-entry-escalation", escalateUnconfirmedEntries, intervalMs);
   // Weekly time-entry approval reminders — hourly tick, self-gates to
   // Fridays 17:00–19:00 business timezone. Nudges site managers who have
   // unapproved time entries for the current pay week.

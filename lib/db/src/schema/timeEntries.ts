@@ -88,6 +88,13 @@ export const timeEntriesTable = pgTable("time_entries", {
   // nudged them by push (+ SMS if opted in). One reminder per entry, ever —
   // the job only selects rows where this is NULL.
   confirmationReminderSentAt: timestamp("confirmation_reminder_sent_at", { withTimezone: true }),
+  // Second-tier admin escalation: stamped once when an entry has sat in
+  // 'awaiting_confirmation' for over ~24h after clock-out and the officer
+  // still hasn't confirmed. At that point we notify the site's managers
+  // (falling back to active admins when siteId is null) so a human can
+  // force-clear it via approve/correct. One escalation per entry, ever —
+  // the job only selects rows where this is NULL.
+  confirmationEscalatedAt: timestamp("confirmation_escalated_at", { withTimezone: true }),
   // External-sync fields for Event Staff Scheduler integration.
   // externalId = the scheduler's clock-event ID; used for idempotent upsert.
   // externalSource = 'scheduler' (only known external source).
