@@ -95,6 +95,10 @@ export const platformAgreementDocsTable = pgTable("platform_agreement_docs", {
   fileKey: text("file_key").notNull(), // canonical /objects/... path
   fileName: text("file_name").notNull(),
   fileSize: integer("file_size"),
+  // SHA-256 (hex) of the stored PDF bytes, computed server-side when the
+  // document is registered. Nullable so rows uploaded before this column
+  // existed keep working; every new/replaced upload populates it.
+  documentSha256: text("document_sha256"),
   uploadedAt: timestamp("uploaded_at", { withTimezone: true }).notNull().defaultNow(),
   uploadedBy: text("uploaded_by"),
 });

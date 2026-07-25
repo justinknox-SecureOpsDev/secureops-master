@@ -74,11 +74,13 @@ function kindLabel(kind) {
   if (kind === "brand") return "Brand";
   if (kind === "features") return "Features";
   if (kind === "plan_billing") return "Plan & billing";
+  if (kind === "agreement") return "Agreement";
   return String(kind == null ? "" : kind);
 }
 function kindBadgeClass(kind) {
   if (kind === "brand") return "warn";
   if (kind === "plan_billing") return "plan";
+  if (kind === "agreement") return "warn";
   return "ok";
 }
 
@@ -531,11 +533,126 @@ function renderSettings(remote) {
       (f.envDisabled ? " <span class='muted small'>(env-locked)</span>" : "") + "</label>";
   });
   html += "</div><button id='save-features' class='primary'>Save features</button>";
+
+  html += renderAgreements((remote && remote.agreementDocs) || []);
   $("settings-body").innerHTML = html;
 
   wirePlanBilling();
+  wireAgreements();
   $("save-brand").addEventListener("click", saveBrand);
   $("save-features").addEventListener("click", saveFeatures);
+}
+
+// ---- Agreement documents (MSA / User Agreement PDFs) ----
+var AGREEMENT_LABELS = { msa: "Master Services Agreement", user_agreement: "User Agreement" };
+
+function agreementStatusText(doc) {
+  if (!doc || !doc.custom) return "Bundled template in effect — no custom document uploaded.";
+  var c = doc.custom;
+  var parts = ["Custom PDF: " + esc(c.fileName)];
+  if (c.uploadedAt) parts.push("uploaded " + fmtDate(c.uploadedAt));
+  if (c.uploadedBy) parts.push("by " + esc(c.uploadedBy));
+  if (c.documentSha256) parts.push("SHA-256 " + esc(String(c.documentSha256).slice(0, 12)) + "…");
+  return parts.join(" · ");
+}
+
+function renderAgreements(docs) {
+  var bySlot = {};
+  (docs || []).forEach(function (d) {
+    bySlot[d.slot] = d;
+  });
+  var html = "<h3>Signed agreement documents</h3>";
+  html += "<p class='muted small'>Upload the executed MSA / User Agreement PDF to replace the bundled template on this customer's backend.</p>";
+  html += "<div class='agreements'>";
+  ["msa", "user_agreement"].forEach(function (slot) {
+    var doc = bySlot[slot];
+    html +=
+      "<div class='agreement-row'>" +
+      "<div><strong>" + esc(AGREEMENT_LABELS[slot]) + "</strong>" +
+      "<br><span class='muted small' id='agr-status-" + slot + "'>" + agreementStatusText(doc) + "</span></div>" +
+      "<div class='agreement-actions'>" +
+      "<input type='file' accept='application/pdf,.pdf' data-agr-file='" + slot + "' style='display:none'>" +
+      "<button type='button' class='ghost small' data-agr-upload='" + slot + "'>" +
+      (doc && doc.custom ? "Replace PDF" : "Upload PDF") + "</button></div></div>";
+  });
+  html += "</div>";
+  return html;
+}
+
+function wireAgreements() {
+  document.querySelectorAll("[data-agr-upload]").forEach(function (btnEl) {
+    var slot = btnEl.getAttribute("data-agr-upload");
+    var fileEl = document.querySelector("[data-agr-file='" + slot + "']");
+    if (!fileEl) return;
+    btnEl.addEventListener("click", function () {
+      fileEl.click();
+    });
+    fileEl.addEventListener("change", function () {
+      var file = fileEl.files && fileEl.files[0];
+      if (file) uploadAgreement(slot, file, btnEl);
+      fileEl.value = "";
+    });
+  });
+}
+
+function agreementContentType(file) {
+  var declared = (file.type || "").trim().toLowerCase();
+  if (declared) return declared;
+  return /\.pdf$/i.test(file.name) ? "application/pdf" : "application/octet-stream";
+}
+
+async function uploadAgreement(slot, file, btnEl) {
+  if (!/\.pdf$/i.test(file.name)) {
+    toast("Please choose a PDF file", true);
+    return;
+  }
+  if (file.size > 15 * 1024 * 1024) {
+    toast("PDF exceeds the 15 MB limit", true);
+    return;
+  }
+  var label = btnEl ? btnEl.textContent : "";
+  if (btnEl) {
+    btnEl.disabled = true;
+    btnEl.textContent = "Uploading…";
+  }
+  try {
+    // 1) Ask the customer backend (via the proxy) for a presigned upload URL.
+    var minted = await api("/customers/" + settingsCustomer.id + "/remote-settings/agreement-upload-url", {
+      method: "POST",
+      body: JSON.stringify({ name: file.name, size: file.size, contentType: agreementContentType(file) }),
+    });
+    if (minted.status !== 200 || !minted.remote || !minted.remote.uploadURL) {
+      throw new Error("Backend returned " + minted.status + " requesting an upload URL");
+    }
+    // 2) PUT the bytes straight to object storage.
+    var put = await fetch(minted.remote.uploadURL, {
+      method: "PUT",
+      headers: { "Content-Type": agreementContentType(file) },
+      body: file,
+    });
+    if (!put.ok) throw new Error("Upload to storage failed (" + put.status + ")");
+    // 3) Register the uploaded object as the slot's document.
+    var reg = await api("/customers/" + settingsCustomer.id + "/remote-settings/agreements/" + slot, {
+      method: "PUT",
+      body: JSON.stringify({ fileKey: minted.remote.objectPath, fileName: file.name }),
+    });
+    if (reg.status !== 200) {
+      var msg = reg.remote && (reg.remote.message || reg.remote.error);
+      throw new Error(msg || "Backend returned " + reg.status);
+    }
+    var statusEl = $("agr-status-" + slot);
+    if (statusEl) statusEl.textContent = agreementStatusText(reg.remote);
+    if (btnEl) label = "Replace PDF";
+    toast("Agreement document updated");
+    await loadHistory(settingsCustomer);
+  } catch (err) {
+    toast((err && err.message) || "Upload failed", true);
+  } finally {
+    if (btnEl) {
+      btnEl.disabled = false;
+      btnEl.textContent = label || "Upload PDF";
+    }
+  }
 }
 
 function brandField(key, label, val) {

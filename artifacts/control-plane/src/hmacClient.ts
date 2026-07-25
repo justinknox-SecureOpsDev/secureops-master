@@ -34,12 +34,12 @@ async function fetchWithTimeout(url: string, init: RequestInit, timeoutMs: numbe
 
 /**
  * Call a customer control-plane endpoint with a signed request.
- * `method` GET has no body (signs ""); PUT signs JSON.stringify(body).
+ * `method` GET has no body (signs ""); PUT/POST sign JSON.stringify(body).
  */
 export async function callCustomerControlPlane(
   origin: string,
   path: string,
-  method: "GET" | "PUT",
+  method: "GET" | "PUT" | "POST",
   secret: string,
   body?: unknown,
 ): Promise<RemoteResult> {

@@ -293,4 +293,89 @@ describe("/api/control-plane (HMAC)", () => {
       expect(JSON.stringify(res.body)).not.toContain("SECRET DOCUMENT BODY");
     });
   });
+
+  describe("agreement document upload (remote)", () => {
+    it("exposes per-slot custom-document status in the settings read", async () => {
+      process.env.CONTROL_PLANE_SHARED_SECRET = SECRET;
+      const sig = signControlPlanePayload("", SECRET);
+      const res = await request(app)
+        .get("/api/control-plane/settings")
+        .set(CONTROL_PLANE_SIGNATURE_HEADER, sig);
+      expect(res.status).toBe(200);
+      expect(Array.isArray(res.body.agreementDocs)).toBe(true);
+      const slots = res.body.agreementDocs.map((d: { slot: string }) => d.slot);
+      expect(slots).toContain("msa");
+      expect(slots).toContain("user_agreement");
+    });
+
+    it("is inert (503) with no shared secret configured", async () => {
+      delete process.env.CONTROL_PLANE_SHARED_SECRET;
+      const res = await request(app)
+        .post("/api/control-plane/agreements/upload-url")
+        .set("Content-Type", "application/json")
+        .send(JSON.stringify({ name: "x.pdf", size: 1, contentType: "application/pdf" }));
+      expect(res.status).toBe(503);
+    });
+
+    it("rejects an upload-url request with no signature (401)", async () => {
+      process.env.CONTROL_PLANE_SHARED_SECRET = SECRET;
+      const res = await request(app)
+        .post("/api/control-plane/agreements/upload-url")
+        .set("Content-Type", "application/json")
+        .send(JSON.stringify({ name: "x.pdf", size: 1, contentType: "application/pdf" }));
+      expect(res.status).toBe(401);
+    });
+
+    it("rejects a non-PDF upload-url request (415)", async () => {
+      process.env.CONTROL_PLANE_SHARED_SECRET = SECRET;
+      const body = { name: "notes.txt", size: 10, contentType: "text/plain" };
+      const payload = JSON.stringify(body);
+      const sig = signControlPlanePayload(payload, SECRET);
+      const res = await request(app)
+        .post("/api/control-plane/agreements/upload-url")
+        .set(CONTROL_PLANE_SIGNATURE_HEADER, sig)
+        .set("Content-Type", "application/json")
+        .send(payload);
+      expect(res.status).toBe(415);
+    });
+
+    it("rejects an oversized upload-url request (413)", async () => {
+      process.env.CONTROL_PLANE_SHARED_SECRET = SECRET;
+      const body = { name: "big.pdf", size: 20 * 1024 * 1024, contentType: "application/pdf" };
+      const payload = JSON.stringify(body);
+      const sig = signControlPlanePayload(payload, SECRET);
+      const res = await request(app)
+        .post("/api/control-plane/agreements/upload-url")
+        .set(CONTROL_PLANE_SIGNATURE_HEADER, sig)
+        .set("Content-Type", "application/json")
+        .send(payload);
+      expect(res.status).toBe(413);
+    });
+
+    it("rejects registering an unknown slot (404)", async () => {
+      process.env.CONTROL_PLANE_SHARED_SECRET = SECRET;
+      const body = { fileKey: "/objects/uploads/x", fileName: "x.pdf" };
+      const payload = JSON.stringify(body);
+      const sig = signControlPlanePayload(payload, SECRET);
+      const res = await request(app)
+        .put("/api/control-plane/agreements/bogus")
+        .set(CONTROL_PLANE_SIGNATURE_HEADER, sig)
+        .set("Content-Type", "application/json")
+        .send(payload);
+      expect(res.status).toBe(404);
+    });
+
+    it("rejects an invalid register payload (400)", async () => {
+      process.env.CONTROL_PLANE_SHARED_SECRET = SECRET;
+      const body = { fileName: "x.pdf" }; // missing fileKey
+      const payload = JSON.stringify(body);
+      const sig = signControlPlanePayload(payload, SECRET);
+      const res = await request(app)
+        .put("/api/control-plane/agreements/msa")
+        .set(CONTROL_PLANE_SIGNATURE_HEADER, sig)
+        .set("Content-Type", "application/json")
+        .send(payload);
+      expect(res.status).toBe(400);
+    });
+  });
 });

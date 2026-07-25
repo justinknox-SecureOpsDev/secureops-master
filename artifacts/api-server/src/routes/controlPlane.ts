@@ -26,6 +26,15 @@ import {
   platformAgreementSignaturesTable,
 } from "@workspace/db";
 import { AGREEMENT_SLOTS, AGREEMENT_TITLES } from "@workspace/legal-docs";
+import { z } from "zod/v4";
+import { ObjectStorageService } from "../lib/objectStorage";
+import {
+  MAX_AGREEMENT_PDF_BYTES,
+  parseAgreementSlot,
+  agreementUploadBody,
+  registerAgreementDoc,
+  readAgreementDocDtos,
+} from "../lib/agreementDocs";
 import { applyBrandOverrides } from "../lib/brandConfig";
 import {
   type FeatureKey,
@@ -46,6 +55,7 @@ import { requireControlPlaneHmac } from "../lib/controlPlaneAuth";
 import { BUILD_VERSION, BUILD_TIME } from "../lib/buildInfo";
 
 const router: Router = Router();
+const storage = new ObjectStorageService();
 
 // Every route under /control-plane requires a valid HMAC signature.
 router.use("/control-plane", requireControlPlaneHmac);
@@ -77,12 +87,14 @@ async function readCustomerConfigRow() {
 router.get("/control-plane/settings", async (_req, res) => {
   const brandRow = await readBrandRow();
   const customerConfig = await readCustomerConfigRow();
+  const agreementDocs = await readAgreementDocDtos();
   res.json({
     version: BUILD_VERSION,
     builtAt: BUILD_TIME,
     brand: brandRow,
     features: getFeatureFlagDetails(),
     customerConfig,
+    agreementDocs,
   });
 });
 
@@ -117,6 +129,74 @@ router.get("/control-plane/agreements", async (_req, res) => {
     };
   }
   res.json({ agreements });
+});
+
+/**
+ * Mint a short-lived presigned upload URL so the operator's browser can push an
+ * agreement PDF straight into THIS customer's object storage — the same
+ * presigned-upload flow the in-app super-admin page uses. Only the URL is
+ * returned here; the object is validated + registered by the PUT below. Size
+ * and content-type are gated up-front (the actual bytes go straight to storage,
+ * so this is the only pre-upload check); the PUT re-validates the stored bytes.
+ */
+router.post("/control-plane/agreements/upload-url", async (req, res) => {
+  const parsed = z
+    .object({
+      name: z.string().min(1),
+      size: z.number().min(1),
+      contentType: z.string().min(1),
+    })
+    .safeParse(req.body);
+  if (!parsed.success) {
+    res.status(400).json({ error: "Bad request", issues: parsed.error.issues });
+    return;
+  }
+  const { name, size, contentType } = parsed.data;
+  if (size > MAX_AGREEMENT_PDF_BYTES) {
+    res.status(413).json({ error: "Payload Too Large", message: "PDF exceeds the 15 MB limit" });
+    return;
+  }
+  const isPdf =
+    contentType.split(";")[0].trim().toLowerCase() === "application/pdf" ||
+    /\.pdf$/i.test(name);
+  if (!isPdf) {
+    res.status(415).json({ error: "Unsupported Media Type", message: "File must be a PDF" });
+    return;
+  }
+  const uploadURL = await storage.getObjectEntityUploadURL();
+  const objectPath = storage.normalizeObjectEntityPath(uploadURL);
+  res.json({ uploadURL, objectPath });
+});
+
+/**
+ * Register an uploaded PDF as the actual document for an agreement slot,
+ * replacing the bundled template. Reuses the SAME validation the in-app
+ * super-admin route uses (re-downloads the object, checks PDF magic bytes +
+ * size, records the SHA-256) so a remote change is indistinguishable from an
+ * in-app one.
+ */
+router.put("/control-plane/agreements/:slot", async (req, res) => {
+  const slot = parseAgreementSlot(req.params["slot"]);
+  if (!slot) {
+    res.status(404).json({ error: "Not Found", message: "Unknown agreement slot" });
+    return;
+  }
+  const parsed = agreementUploadBody.safeParse(req.body);
+  if (!parsed.success) {
+    res.status(400).json({ error: "Bad request", issues: parsed.error.issues });
+    return;
+  }
+  const result = await registerAgreementDoc(storage, {
+    slot,
+    fileKey: parsed.data.fileKey,
+    fileName: parsed.data.fileName,
+    editor: "control-plane",
+  });
+  if (!result.ok) {
+    res.status(result.status).json({ error: "Bad request", message: result.message });
+    return;
+  }
+  res.json(result.dto);
 });
 
 /** Upsert brand overrides remotely and patch the live brand in memory. */

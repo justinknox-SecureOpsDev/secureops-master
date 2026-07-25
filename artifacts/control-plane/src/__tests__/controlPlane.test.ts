@@ -20,6 +20,7 @@ import {
   summarizeBrand,
   summarizeFeatures,
   summarizePlanBilling,
+  summarizeAgreement,
 } from "../routes/remoteSettings";
 import { OPERATOR_EMAIL, OPERATOR_PASSWORD } from "../config";
 
@@ -141,6 +142,20 @@ describe("remote-change summaries", () => {
     expect(summarizePlanBilling({})).toBe("Updated plan & billing");
     expect(summarizePlanBilling(null)).toBe("Updated plan & billing");
   });
+
+  it("summarizes an agreement upload with the slot label and file name", () => {
+    expect(summarizeAgreement("msa", { fileName: "wcsg-msa-signed.pdf" })).toBe(
+      "Replaced MSA document: wcsg-msa-signed.pdf",
+    );
+    expect(summarizeAgreement("user_agreement", { fileName: "ua.pdf" })).toBe(
+      "Replaced User Agreement document: ua.pdf",
+    );
+  });
+
+  it("falls back gracefully when the agreement file name is missing", () => {
+    expect(summarizeAgreement("msa", {})).toBe("Replaced MSA document");
+    expect(summarizeAgreement("user_agreement", null)).toBe("Replaced User Agreement document");
+  });
 });
 
 describe("fleet activity filters", () => {
@@ -166,6 +181,12 @@ describe("fleet activity filters", () => {
     const f = buildRemoteChangesFilter({ kind: "plan_billing" });
     expect(f.clauses).toEqual(["rc.kind = $1"]);
     expect(f.params).toEqual(["plan_billing"]);
+  });
+
+  it("accepts the agreement kind", () => {
+    const f = buildRemoteChangesFilter({ kind: "agreement" });
+    expect(f.clauses).toEqual(["rc.kind = $1"]);
+    expect(f.params).toEqual(["agreement"]);
   });
 
   it("treats a date-only until as inclusive of the whole day", () => {

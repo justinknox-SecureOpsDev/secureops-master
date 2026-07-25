@@ -81,10 +81,25 @@ export function summarizePlanBilling(body: unknown): string {
   return parts.length ? "Updated plan & billing: " + parts.join(", ") : "Updated plan & billing";
 }
 
+/**
+ * Build a concise human-readable summary of an agreement-document upload. The
+ * control plane is a conduit and doesn't hold the prior document, so this
+ * describes WHICH agreement was replaced and the uploaded file name — mirroring
+ * how the brand/feature/plan summaries describe the submitted change.
+ */
+export function summarizeAgreement(slot: string, body: unknown): string {
+  const label = slot === "msa" ? "MSA" : slot === "user_agreement" ? "User Agreement" : slot;
+  const fileName =
+    body && typeof body === "object" && typeof (body as { fileName?: unknown }).fileName === "string"
+      ? (body as { fileName: string }).fileName
+      : "";
+  return fileName ? `Replaced ${label} document: ${fileName}` : `Replaced ${label} document`;
+}
+
 async function recordChange(
   customerId: string,
   operator: string,
-  kind: "brand" | "features" | "plan_billing",
+  kind: "brand" | "features" | "plan_billing" | "agreement",
   summary: string,
   status: number | null,
 ): Promise<void> {
@@ -131,7 +146,7 @@ function resolveSecret(row: CustomerRow): string | null {
 async function proxy(
   res: import("express").Response,
   row: CustomerRow,
-  method: "GET" | "PUT",
+  method: "GET" | "PUT" | "POST",
   path: string,
   body?: unknown,
 ): Promise<number | null> {
@@ -199,6 +214,48 @@ remoteSettingsRouter.put("/customers/:id/remote-settings/plan-billing", async (r
   }
 });
 
+/**
+ * Mint a presigned upload URL on the customer backend so the operator's browser
+ * can push the agreement PDF straight into that customer's object storage. Pure
+ * conduit — the customer backend validates size/type and returns the URL.
+ */
+remoteSettingsRouter.post(
+  "/customers/:id/remote-settings/agreement-upload-url",
+  async (req, res) => {
+    const row = await loadCustomer(req.params.id);
+    if (!row) {
+      res.status(404).json({ error: "Customer not found" });
+      return;
+    }
+    await proxy(res, row, "POST", "/api/control-plane/agreements/upload-url", req.body ?? {});
+  },
+);
+
+/**
+ * Register an already-uploaded PDF as a customer's agreement document (MSA /
+ * User Agreement), replacing the bundled template. The customer backend
+ * re-validates and stores the document + its SHA-256; we record the change.
+ */
+remoteSettingsRouter.put("/customers/:id/remote-settings/agreements/:slot", async (req, res) => {
+  const row = await loadCustomer(req.params.id);
+  if (!row) {
+    res.status(404).json({ error: "Customer not found" });
+    return;
+  }
+  const slot = req.params.slot;
+  const status = await proxy(
+    res,
+    row,
+    "PUT",
+    `/api/control-plane/agreements/${encodeURIComponent(slot)}`,
+    req.body ?? {},
+  );
+  if (status === 200) {
+    const operator = (res.locals.operator as string) || "operator";
+    await recordChange(row.id, operator, "agreement", summarizeAgreement(slot, req.body), status);
+  }
+});
+
 remoteSettingsRouter.get("/customers/:id/remote-settings/history", async (req, res) => {
   const row = await loadCustomer(req.params.id);
   if (!row) {
@@ -243,7 +300,7 @@ export function buildRemoteChangesFilter(query: Record<string, unknown>): {
   }
 
   const kind = typeof query.kind === "string" ? query.kind.trim() : "";
-  if (kind === "brand" || kind === "features" || kind === "plan_billing") {
+  if (kind === "brand" || kind === "features" || kind === "plan_billing" || kind === "agreement") {
     params.push(kind);
     clauses.push(`rc.kind = $${params.length}`);
   }

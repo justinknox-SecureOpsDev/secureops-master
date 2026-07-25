@@ -113,6 +113,9 @@ td.actions { display: flex; gap: 6px; justify-content: flex-end; }
 .preset-row { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin: 4px 0 12px; }
 .pb-fee { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 16px; margin: 12px 0; }
 .pb-fee .check { margin-bottom: 4px; }
+.agreements { display: flex; flex-direction: column; gap: 8px; margin-bottom: 12px; }
+.agreement-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 8px 10px; border: 1px solid var(--border, #2a3348); border-radius: 8px; }
+.agreement-actions { flex-shrink: 0; }
 #save-plan-billing { margin-top: 12px; }
 
 .settings-history h3 { margin: 16px 0 8px; font-size: 14px; color: var(--gold); }

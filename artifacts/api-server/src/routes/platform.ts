@@ -10,11 +10,18 @@
  */
 
 import { Router, type RequestHandler } from "express";
-import { z } from "zod/v4";
 import { eq, sql } from "drizzle-orm";
 import { db, platformFeatureOverridesTable, platformCustomerConfigTable, platformBrandConfigTable, platformAgreementDocsTable } from "@workspace/db";
 import { requireAuth, requireAdmin } from "../middlewares/auth";
 import { ObjectStorageService, ObjectNotFoundError } from "../lib/objectStorage";
+import {
+  AGREEMENT_SLOTS,
+  type AgreementSlot,
+  parseAgreementSlot,
+  agreementUploadBody,
+  agreementRowToDto,
+  registerAgreementDoc,
+} from "../lib/agreementDocs";
 import { brand, applyBrandOverrides } from "../lib/brandConfig";
 import { applyProcessingFeeConfig } from "../lib/processingFeeConfig";
 import { applyConfirmEditWindowConfig } from "../lib/confirmEditWindowConfig";
@@ -249,39 +256,6 @@ router.put("/admin/platform/brand", requireAuth, requireSuperAdmin, async (req, 
 
 const storage = new ObjectStorageService();
 
-const AGREEMENT_SLOTS = ["msa", "user_agreement"] as const;
-type AgreementSlot = (typeof AGREEMENT_SLOTS)[number];
-const MAX_AGREEMENT_PDF_BYTES = 15 * 1024 * 1024; // 15 MB
-
-function parseAgreementSlot(raw: string | string[] | undefined): AgreementSlot | null {
-  if (typeof raw !== "string") return null;
-  return AGREEMENT_SLOTS.includes(raw as AgreementSlot) ? (raw as AgreementSlot) : null;
-}
-
-type AgreementSlotDto = {
-  slot: AgreementSlot;
-  custom: {
-    fileName: string;
-    fileSize: number | null;
-    uploadedAt: string | null;
-    uploadedBy: string | null;
-  } | null;
-};
-
-function agreementRowToDto(slot: AgreementSlot, row: typeof platformAgreementDocsTable.$inferSelect | undefined): AgreementSlotDto {
-  return {
-    slot,
-    custom: row
-      ? {
-          fileName: row.fileName,
-          fileSize: row.fileSize,
-          uploadedAt: row.uploadedAt ? row.uploadedAt.toISOString() : null,
-          uploadedBy: row.uploadedBy,
-        }
-      : null,
-  };
-}
-
 /** Per-slot status: has an actual document been uploaded, or is the template in effect? */
 router.get("/admin/platform/agreements", requireAdmin, async (_req, res) => {
   const rows = await db.select().from(platformAgreementDocsTable);
@@ -307,16 +281,13 @@ router.get("/admin/platform/agreements/:slot/url", requireAdmin, async (req, res
   }
 });
 
-const agreementUploadBody = z.object({
-  fileKey: z.string().min(1),
-  fileName: z.string().min(1).max(300),
-});
-
 /**
  * Register an uploaded PDF (via the standard presigned-upload flow) as the
  * actual document for a slot. The server re-downloads the object to verify it
- * exists, is a real PDF (magic bytes), and is within the size cap — the
- * client-declared metadata on the presigned PUT is not trusted.
+ * exists, is a real PDF (magic bytes), and is within the size cap, and records
+ * its SHA-256 — the client-declared metadata on the presigned PUT is not
+ * trusted. Shared with the remote control-plane route so both paths validate
+ * and store identically.
  */
 router.put("/admin/platform/agreements/:slot", requireAuth, requireSuperAdmin, async (req, res) => {
   const slot = parseAgreementSlot(req.params["slot"]);
@@ -327,40 +298,18 @@ router.put("/admin/platform/agreements/:slot", requireAuth, requireSuperAdmin, a
     return;
   }
 
-  const normalized = storage.normalizeObjectEntityPath(parsed.data.fileKey);
-  let size: number;
-  let head: Buffer;
-  try {
-    const dl = await storage.downloadObjectBuffer(normalized, { maxBytes: MAX_AGREEMENT_PDF_BYTES });
-    size = dl.size;
-    head = dl.buffer.subarray(0, 5);
-  } catch (err) {
-    if (err instanceof ObjectNotFoundError) {
-      res.status(400).json({ error: "Bad request", message: "Uploaded file not found in storage" });
-      return;
-    }
-    if ((err as { __tooLarge?: boolean }).__tooLarge) {
-      res.status(400).json({ error: "Bad request", message: "PDF exceeds the 15 MB limit" });
-      return;
-    }
-    throw err;
-  }
-  if (head.toString("latin1") !== "%PDF-") {
-    res.status(400).json({ error: "Bad request", message: "File is not a PDF" });
+  const editor = req.user?.email ?? "unknown";
+  const result = await registerAgreementDoc(storage, {
+    slot,
+    fileKey: parsed.data.fileKey,
+    fileName: parsed.data.fileName,
+    editor,
+  });
+  if (!result.ok) {
+    res.status(result.status).json({ error: "Bad request", message: result.message });
     return;
   }
-
-  const editor = req.user?.email ?? "unknown";
-  await db
-    .insert(platformAgreementDocsTable)
-    .values({ slot, fileKey: normalized, fileName: parsed.data.fileName, fileSize: size, uploadedBy: editor })
-    .onConflictDoUpdate({
-      target: platformAgreementDocsTable.slot,
-      set: { fileKey: normalized, fileName: parsed.data.fileName, fileSize: size, uploadedBy: editor, uploadedAt: sql`now()` },
-    });
-
-  const [row] = await db.select().from(platformAgreementDocsTable).where(eq(platformAgreementDocsTable.slot, slot)).limit(1);
-  res.json(agreementRowToDto(slot, row));
+  res.json(result.dto);
 });
 
 /** Revert a slot to the bundled template (removes the uploaded-document record). */
