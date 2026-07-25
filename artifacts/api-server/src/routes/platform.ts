@@ -144,6 +144,17 @@ router.put("/admin/platform/customer-config", requireAuth, requireSuperAdmin, as
   // Absent key (older client) → leave the stored value unchanged.
   const timeConfirmEditWindowHours = parsed.data.timeConfirmEditWindowHours;
 
+  // Snapshot the current time-edit limit BEFORE the upsert so we can record a
+  // clear old→new paper trail for this payroll-affecting control. The generic
+  // auditLogMiddleware records this PUT as `admin.action`; stashing the change
+  // on res.locals.auditMetadata gives reviewers the specific before/after
+  // values (who loosened or tightened officer self-edits, and when).
+  const [priorConfig] = await db
+    .select({ timeConfirmEditWindowHours: platformCustomerConfigTable.timeConfirmEditWindowHours })
+    .from(platformCustomerConfigTable)
+    .where(eq(platformCustomerConfigTable.id, "singleton"))
+    .limit(1);
+
   const insertValues = { id: "singleton", customerName, planTier, monthlyPriceCents, officerCount, billingNotes, planStartDate, processingFeeEnabled, processingFeeRate, updatedBy: editor };
   const updateValues: Record<string, unknown> = { customerName, planTier, monthlyPriceCents, officerCount, billingNotes, planStartDate, processingFeeEnabled, processingFeeRate, updatedBy: editor, updatedAt: sql`now()` };
   if (timeConfirmEditWindowHours !== undefined) {
@@ -166,6 +177,22 @@ router.put("/admin/platform/customer-config", requireAuth, requireSuperAdmin, as
     .limit(1);
   applyProcessingFeeConfig(config ?? null);
   applyConfirmEditWindowConfig(config ?? null);
+
+  // Record the old→new time-edit limit for the audit log when it actually
+  // changed. The values are plain numeric strings / null (no sensitive data),
+  // so no redaction is required; the middleware persists this into
+  // audit_logs.metadata.
+  if (timeConfirmEditWindowHours !== undefined) {
+    const oldValue = priorConfig?.timeConfirmEditWindowHours ?? null;
+    const newValue = config?.timeConfirmEditWindowHours ?? null;
+    if (oldValue !== newValue) {
+      res.locals["auditMetadata"] = {
+        change: "time_confirm_edit_window_hours",
+        timeConfirmEditWindowHours: { old: oldValue, new: newValue },
+      };
+    }
+  }
+
   res.json({ config });
 });
 
