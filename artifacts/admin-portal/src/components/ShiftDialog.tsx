@@ -63,7 +63,7 @@ function toLocalInput(iso: string | undefined | null): string {
 }
 
 function levelLabel(level: number, customLabel: string | null, rateTier?: number): string {
-  const base = level <= 1 ? "Support (no licence)" : level === 4 ? "L4 / PPO" : level === 3 ? "L3 Armed" : "L2 Unarmed";
+  const base = level <= 1 ? "Support — no license required" : level === 4 ? "L4 / PPO" : level === 3 ? "L3 Armed" : "L2 Unarmed";
   const withTier = rateTier != null ? `${base} · Rate ${rateTier}` : base;
   return customLabel ? `${withTier} — ${customLabel}` : withTier;
 }
@@ -245,7 +245,7 @@ export function ShiftDialog({ open, onOpenChange, initial, onSaved }: Props) {
               >
                 <SelectTrigger><SelectValue /></SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="1">Support (no licence)</SelectItem>
+                  <SelectItem value="1">Support — no license required</SelectItem>
                   <SelectItem value="2">L2 Unarmed</SelectItem>
                   <SelectItem value="3">L3 Armed</SelectItem>
                   <SelectItem value="4">L4 / PPO</SelectItem>

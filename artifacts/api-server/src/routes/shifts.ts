@@ -1013,8 +1013,8 @@ router.post("/shifts/:id/claim", requireStaff, async (req, res): Promise<void> =
     res.status(403).json({
       error: "Forbidden",
       message: shift.requiredLicenseLevel <= 1
-        ? `This is a support shift. Your account isn't cleared to claim it yet — ask your administrator to set you up as support staff.`
-        : `This shift requires Level ${shift.requiredLicenseLevel}${shift.requiredLicenseLevel === 4 ? "/PPO" : ""}. Your highest valid licence is ${myLevel === 0 ? "none" : `Level ${myLevel}`}.`,
+        ? `This is a support shift — no licence is required. Your account isn't cleared to claim it yet; contact your administrator.`
+        : `This shift requires Level ${shift.requiredLicenseLevel}${shift.requiredLicenseLevel === 4 ? "/PPO" : ""}. Your highest valid licence is ${myLevel <= 1 ? "none" : `Level ${myLevel}`}.`,
     });
     return;
   }
@@ -1273,6 +1273,18 @@ router.post("/shifts/:id/assignments", requireSchedulingStaff, async (req, res):
     res.status(404).json({ error: "Not Found", message: "Employee not found" });
     return;
   }
+  // Worker-role gate: only staff accounts can be put on a roster. Client-portal
+  // accounts (role="client") are external customer contacts — with the
+  // universal Level-1 baseline they would otherwise pass the clearance check
+  // for support shifts, so reject them explicitly before any level math.
+  const WORKER_ROLES = ["admin", "dispatcher", "employee", "site_manager"] as const;
+  if (!WORKER_ROLES.includes(assigneeUser.role as (typeof WORKER_ROLES)[number])) {
+    res.status(403).json({
+      error: "Forbidden",
+      message: "Only staff accounts can be assigned to shifts.",
+    });
+    return;
+  }
   const MGMT_ROLES = ["admin", "dispatcher", "site_manager"] as const;
   const empLevel = MGMT_ROLES.includes(assigneeUser.role as (typeof MGMT_ROLES)[number])
     ? 4
@@ -1290,9 +1302,7 @@ router.post("/shifts/:id/assignments", requireSchedulingStaff, async (req, res):
     } else {
       res.status(403).json({
         error: "Forbidden",
-        message: shift.requiredLicenseLevel <= 1
-          ? `This is a support shift. The selected employee isn't cleared for it — set their position to support staff or assign a licensed officer.`
-          : `Employee's highest valid licence (${empLevel === 0 ? "none" : `Level ${empLevel}`}) does not meet the shift requirement (Level ${shift.requiredLicenseLevel}${shift.requiredLicenseLevel === 4 ? "/PPO" : ""}).`,
+        message: `Employee's clearance (Level ${empLevel}) does not meet the shift requirement (Level ${shift.requiredLicenseLevel}${shift.requiredLicenseLevel === 4 ? "/PPO" : ""}).`,
       });
       return;
     }

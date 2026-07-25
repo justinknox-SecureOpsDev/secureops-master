@@ -34,7 +34,7 @@ function Field({ label, value, onChangeText, placeholder, keyboardType, autoCapi
 }
 
 const LEVELS: Array<{ value: 1 | 2 | 3 | 4; label: string; sub: string }> = [
-  { value: 1, label: "Support", sub: "No licence required — support staff or any officer" },
+  { value: 1, label: "Support", sub: "No licence required — open to any worker" },
   { value: 2, label: "Level 2", sub: "Unarmed — any qualified officer" },
   { value: 3, label: "Level 3", sub: "Armed — L3 or L4 officers only" },
   { value: 4, label: "L4 / PPO", sub: "Personal Protection — L4 only" },

@@ -23,8 +23,13 @@ const passwordHash = bcrypt.hashSync("test-password", 4);
 type Ctx = {
   employeeAId: string;
   employeeBId: string;
+  unlicensedId: string;
+  clientUserId: string;
+  adminId: string;
   tokenA: string;
   tokenB: string;
+  tokenUnlicensed: string;
+  tokenAdmin: string;
   clientId: string;
   siteId: string;
 };
@@ -49,6 +54,38 @@ async function makeEmployee(suffix: string): Promise<string> {
 beforeAll(async () => {
   ctx.employeeAId = await makeEmployee("a");
   ctx.employeeBId = await makeEmployee("b");
+  // Deliberately gets NO license row — exercises the universal Level-1 baseline.
+  ctx.unlicensedId = await makeEmployee("nolic");
+
+  // A client-portal account (external customer contact, NOT a worker) and an
+  // admin — used to prove non-worker roles can never be put on a roster.
+  const [clientUser] = await db
+    .insert(usersTable)
+    .values({
+      email: `${TAG}-clientrole-${randomUUID().slice(0, 6)}@example.test`,
+      passwordHash,
+      firstName: "ClientPortal",
+      lastName: TAG,
+      role: "client",
+      status: "active",
+      tokensValidAfter: new Date(0),
+    })
+    .returning({ id: usersTable.id });
+  ctx.clientUserId = clientUser.id;
+
+  const [adminUser] = await db
+    .insert(usersTable)
+    .values({
+      email: `${TAG}-admin-${randomUUID().slice(0, 6)}@example.test`,
+      passwordHash,
+      firstName: "Admin",
+      lastName: TAG,
+      role: "admin",
+      status: "active",
+      tokensValidAfter: new Date(0),
+    })
+    .returning({ id: usersTable.id });
+  ctx.adminId = adminUser.id;
 
   const futureDate = new Date(Date.now() + 365 * 24 * 60 * 60 * 1000)
     .toISOString()
@@ -85,10 +122,20 @@ beforeAll(async () => {
     email: `${TAG}-b@example.test`,
     role: "employee",
   });
+  ctx.tokenUnlicensed = signToken({
+    userId: ctx.unlicensedId,
+    email: `${TAG}-nolic@example.test`,
+    role: "employee",
+  });
+  ctx.tokenAdmin = signToken({
+    userId: ctx.adminId,
+    email: `${TAG}-admin@example.test`,
+    role: "admin",
+  });
 });
 
 afterAll(async () => {
-  const ids = [ctx.employeeAId, ctx.employeeBId].filter(Boolean);
+  const ids = [ctx.employeeAId, ctx.employeeBId, ctx.unlicensedId].filter(Boolean);
   if (ids.length > 0) {
     await db.execute(
       sql`DELETE FROM shift_assignments WHERE employee_id = ANY(${sql.raw(`ARRAY['${ids.join("','")}']::uuid[]`)})`,
@@ -104,7 +151,11 @@ function authed(token: string) {
   return { Authorization: `Bearer ${token}` };
 }
 
-async function insertOpenShift(title: string, headcount: number): Promise<string> {
+async function insertOpenShift(
+  title: string,
+  headcount: number,
+  requiredLicenseLevel = 2,
+): Promise<string> {
   const start = new Date(Date.now() + 6 * 60 * 60 * 1000);
   const end = new Date(start.getTime() + 4 * 60 * 60 * 1000);
   const [row] = await db
@@ -114,7 +165,7 @@ async function insertOpenShift(title: string, headcount: number): Promise<string
       siteId: ctx.siteId,
       startTime: start,
       endTime: end,
-      requiredLicenseLevel: 2,
+      requiredLicenseLevel,
       headcount,
       status: "upcoming",
     })
@@ -196,6 +247,89 @@ describe("POST /shifts/:id/claim atomic concurrency", () => {
       .send({});
     expect(res.status).toBe(409);
     expect(res.body.message).toMatch(/no longer open/i);
+  });
+});
+
+describe("universal Level-1 baseline (Support — no license required)", () => {
+  it("shows an open Level-1 shift in an unlicensed worker's feed, hides Level-2", async () => {
+    const l1Id = await insertOpenShift(`${TAG}-feed-l1`, 1, 1);
+    const l2Id = await insertOpenShift(`${TAG}-feed-l2`, 1, 2);
+
+    const res = await request(app)
+      .get("/api/shifts?status=upcoming")
+      .set(authed(ctx.tokenUnlicensed));
+    expect(res.status).toBe(200);
+    const ids = (res.body as Array<{ id: string }>).map((s) => s.id);
+    expect(ids).toContain(l1Id);
+    expect(ids).not.toContain(l2Id);
+  });
+
+  it("lets an unlicensed worker claim an open Level-1 shift", async () => {
+    const shiftId = await insertOpenShift(`${TAG}-claim-l1`, 1, 1);
+
+    const res = await request(app)
+      .post(`/api/shifts/${shiftId}/claim`)
+      .set(authed(ctx.tokenUnlicensed))
+      .send({});
+    expect(res.status).toBe(201);
+    expect(res.body.shiftId).toBe(shiftId);
+    expect(res.body.status).toBe("pending_approval");
+  });
+
+  it("still blocks an unlicensed worker from claiming a Level-2 shift (403)", async () => {
+    const shiftId = await insertOpenShift(`${TAG}-claim-l2-blocked`, 1, 2);
+
+    const res = await request(app)
+      .post(`/api/shifts/${shiftId}/claim`)
+      .set(authed(ctx.tokenUnlicensed))
+      .send({});
+    expect(res.status).toBe(403);
+    expect(res.body.message).toMatch(/level 2/i);
+  });
+
+  it("licensed officers keep claiming Level-2 shifts as before", async () => {
+    const shiftId = await insertOpenShift(`${TAG}-claim-l2-ok`, 1, 2);
+
+    const res = await request(app)
+      .post(`/api/shifts/${shiftId}/claim`)
+      .set(authed(ctx.tokenA))
+      .send({});
+    expect(res.status).toBe(201);
+  });
+});
+
+describe("POST /shifts/:id/assignments worker-role gate", () => {
+  it("rejects assigning a client-portal account even to a Level-1 support shift (403)", async () => {
+    // With the universal Level-1 baseline, the clearance check alone would let
+    // a client account (external customer contact) onto a support shift. The
+    // route must reject non-worker roles outright, before any level math.
+    const shiftId = await insertOpenShift(`${TAG}-assign-clientrole`, 1, 1);
+
+    const res = await request(app)
+      .post(`/api/shifts/${shiftId}/assignments`)
+      .set(authed(ctx.tokenAdmin))
+      .send({ employeeId: ctx.clientUserId });
+    expect(res.status).toBe(403);
+    expect(res.body.message).toMatch(/staff accounts/i);
+
+    // And nothing landed on the roster.
+    const [{ filled }] = await db
+      .select({ filled: sql<number>`count(*)::int` })
+      .from(shiftAssignmentsTable)
+      .where(sql`${shiftAssignmentsTable.shiftId} = ${shiftId}`);
+    expect(filled).toBe(0);
+  });
+
+  it("still assigns an unlicensed worker to a Level-1 support shift (201)", async () => {
+    const shiftId = await insertOpenShift(`${TAG}-assign-l1-worker`, 1, 1);
+
+    const res = await request(app)
+      .post(`/api/shifts/${shiftId}/assignments`)
+      .set(authed(ctx.tokenAdmin))
+      .send({ employeeId: ctx.unlicensedId });
+    expect(res.status).toBe(201);
+    expect(res.body.employeeId).toBe(ctx.unlicensedId);
+    expect(res.body.status).toBe("accepted");
   });
 });
 

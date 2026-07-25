@@ -1,5 +1,5 @@
 import { and, eq, gte, sql } from "drizzle-orm";
-import { db, licensesTable, employeesTable } from "@workspace/db";
+import { db, licensesTable } from "@workspace/db";
 
 /**
  * Eligibility / capability-level model.
@@ -11,17 +11,22 @@ import { db, licensesTable, employeesTable } from "@workspace/db";
  *   4 = L4 / PPO
  * Higher levels cover lower ones (an L4 officer can work an L2 or a support
  * shift). An officer's *effective* level is the GREATER of their highest
- * unexpired licence level and a baseline derived from their `position`:
- *   - position 'support_staff' → baseline 1 (can work level-1 support shifts
- *     even though they hold no licence)
- *   - everyone else            → baseline 0 (must hold a licence to work)
+ * unexpired licence level and the universal worker baseline of 1: level 1
+ * (Support) is not a licensed position, so EVERY worker — regardless of
+ * position — can work level-1 shifts without holding any licence. Licences
+ * only matter from level 2 upward.
  *
  * Note: `licenses.employee_id` and `employees.user_id` both reference
  * `users.id`, so every helper here is keyed on the user id.
  */
 
-export function positionBaselineLevel(position: string | null | undefined): number {
-  return position === "support_staff" ? 1 : 0;
+/**
+ * Baseline effective level for any worker. Level 1 (Support) requires no
+ * licence, so the baseline is 1 for everyone. The `position` argument is
+ * kept for call-site compatibility but no longer affects the result.
+ */
+export function positionBaselineLevel(_position?: string | null | undefined): number {
+  return 1;
 }
 
 /** Roles that represent shift workers (internal staff). */
@@ -43,35 +48,29 @@ export const WORKER_ROLES = ["employee", "site_manager", "dispatcher", "admin"] 
 
 /**
  * Highest effective capability level for a single officer:
- * max(highest unexpired licence level, position baseline).
- * Returns 0 for an officer with no licence and no support baseline.
+ * max(highest unexpired licence level, worker baseline of 1).
+ * Never returns less than 1 — level-1 support shifts need no licence.
  */
 export async function getEffectiveLevel(userId: string): Promise<number> {
-  const [licRows, empRows] = await Promise.all([
-    db
-      .select({ level: licensesTable.level })
-      .from(licensesTable)
-      .where(and(
-        eq(licensesTable.employeeId, userId),
-        gte(licensesTable.expiryDate, sql`current_date`),
-      )),
-    db
-      .select({ position: employeesTable.position })
-      .from(employeesTable)
-      .where(eq(employeesTable.userId, userId))
-      .limit(1),
-  ]);
+  const licRows = await db
+    .select({ level: licensesTable.level })
+    .from(licensesTable)
+    .where(and(
+      eq(licensesTable.employeeId, userId),
+      gte(licensesTable.expiryDate, sql`current_date`),
+    ));
   let max = 0;
   for (const r of licRows) if (r.level != null && r.level > max) max = r.level;
-  return Math.max(max, positionBaselineLevel(empRows[0]?.position));
+  return Math.max(max, positionBaselineLevel());
 }
 
 /**
  * SQL fragment computing the effective level inside a query that is grouped
- * by `users.id` and has BOTH `licensesTable` and `employeesTable` left-joined
- * onto the user (licenses.employee_id = users.id, employees.user_id = users.id).
+ * by `users.id` and has `licensesTable` left-joined onto the user
+ * (licenses.employee_id = users.id). Floors at 1 — the universal worker
+ * baseline — so unlicensed workers qualify for level-1 support shifts.
  */
 export const effectiveLevelSql = sql<number>`greatest(
   coalesce(max(${licensesTable.level}) filter (where ${licensesTable.expiryDate} >= current_date), 0),
-  coalesce(max(case when ${employeesTable.position} = 'support_staff' then 1 else 0 end), 0)
+  1
 )`;

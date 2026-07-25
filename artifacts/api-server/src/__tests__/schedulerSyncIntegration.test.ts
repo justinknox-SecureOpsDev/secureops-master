@@ -1674,8 +1674,51 @@ describe("scheduler webhook rejects unsigned and malformed requests", () => {
     expect(assignments).toHaveLength(0);
   });
 
+  it("never rosters a client-portal account, even on a Level-1 support shift (role gate)", async () => {
+    // Client-portal users are external customer contacts, NOT workers. With the
+    // universal Level-1 baseline every worker now carries, a bare eligibility
+    // check would let this account pass on a Level-1 shift — the role filter in
+    // resolveUserByEmail must reject it before any level math.
+    const clientEmail = `${TAG}-clientrole-${randomUUID().slice(0, 6)}@example.test`;
+    await db.insert(usersTable).values({
+      email: clientEmail,
+      passwordHash,
+      firstName: "ClientPortal",
+      lastName: TAG,
+      role: "client",
+      status: "active",
+      tokensValidAfter: new Date(0),
+    });
+
+    const externalId = `${TAG}-assign-clientrole-${randomUUID().slice(0, 8)}`;
+    const res = await postSignedShift({
+      id: externalId,
+      action: "upsert",
+      title: `${TAG} Support Post`,
+      siteName: ctx.siteName,
+      startTime: rel(69, 8),
+      endTime: rel(69, 16),
+      requiredLicenseLevel: 1,
+      headcount: 1,
+      status: "upcoming",
+      assignedOfficerEmails: [clientEmail],
+      updatedAt: rel(-1),
+    });
+
+    expect(res.status).toBe(200);
+    expect(res.body).toMatchObject({ ok: true, action: "created" });
+    const shiftId = res.body.secureopsId as string;
+
+    // The client account must be skipped exactly like an unknown email.
+    const assignments = await db
+      .select({ id: shiftAssignmentsTable.id })
+      .from(shiftAssignmentsTable)
+      .where(eq(shiftAssignmentsTable.shiftId, shiftId));
+    expect(assignments).toHaveLength(0);
+  });
+
   it("skips an under-licensed officer the scheduler tries to roster (eligibility gate)", async () => {
-    // An officer with NO licence (effective level 0) — below a Level-2 shift.
+    // An officer with NO licence (effective level 1, worker baseline) — below a Level-2 shift.
     const underEmail = `${TAG}-underlic-${randomUUID().slice(0, 6)}@example.test`;
     const [under] = await db
       .insert(usersTable)
@@ -1736,7 +1779,8 @@ describe("scheduler webhook rejects unsigned and malformed requests", () => {
     expect(meta.requiredLicenseLevel).toBe(2);
     const skippedEntry = meta.skipped.find((s) => s.userId === under.id);
     expect(skippedEntry).toBeDefined();
-    expect(skippedEntry!.effectiveLevel).toBe(0);
+    // Universal worker baseline is 1 (support) — still below the Level-2 bar.
+    expect(skippedEntry!.effectiveLevel).toBe(1);
     expect(skippedEntry!.requiredLevel).toBe(2);
     expect(skippedEntry!.email).toBe(underEmail);
 

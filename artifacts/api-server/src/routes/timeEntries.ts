@@ -161,7 +161,8 @@ async function resolveOrAssignShiftForAdHocClockIn(
   // honour the same licence hierarchy the manual claim route enforces, so we
   // never create an assignment record asserting an under-licensed officer
   // covered a higher-level (e.g. armed) shift. Effective level = MAX(highest
-  // unexpired licence, support-staff baseline); higher covers lower.
+  // unexpired licence, worker baseline of 1); higher covers lower — every
+  // worker qualifies for level-1 support shifts with no licence.
   const effectiveLevel = await getEffectiveLevel(employeeId);
   const candidates = await db
     .select({
@@ -263,11 +264,11 @@ const CLOCK_IN_PICK_END_GRACE_MS = 2 * 60 * 60 * 1000;
 async function officerRosteredShiftsForPicker(
   employeeId: string,
   whenAt: Date,
-): Promise<Array<{ shiftId: string; siteId: string | null; startTime: Date; endTime: Date }>> {
+): Promise<Array<{ shiftId: string; siteId: string | null; startTime: Date; endTime: Date; requiredLicenseLevel: number | null }>> {
   const endFloor = new Date(whenAt.getTime() - CLOCK_IN_PICK_END_GRACE_MS);
   const farFutureCutoff = new Date("2090-01-01T00:00:00Z");
   return db
-    .select({ shiftId: shiftsTable.id, siteId: shiftsTable.siteId, startTime: shiftsTable.startTime, endTime: shiftsTable.endTime })
+    .select({ shiftId: shiftsTable.id, siteId: shiftsTable.siteId, startTime: shiftsTable.startTime, endTime: shiftsTable.endTime, requiredLicenseLevel: shiftsTable.requiredLicenseLevel })
     .from(shiftAssignmentsTable)
     .innerJoin(shiftsTable, eq(shiftAssignmentsTable.shiftId, shiftsTable.id))
     .where(and(
@@ -471,28 +472,19 @@ router.post("/time-entries/clock-in", requireStaff, async (req, res): Promise<vo
     return;
   }
 
-  // License compliance: officers must hold at least one unexpired security
-  // license to clock in. Admins are exempt (they may be helping cover a
-  // shift or troubleshooting a stuck record on someone else's behalf).
-  // 403 with a precise message so the mobile UI can surface the exact
-  // reason — see the banner on the employee Home tab.
-  if (req.user!.role !== "admin") {
-    const [{ count: validLicenses }] = await db
-      .select({ count: sql<number>`count(*)::int` })
-      .from(licensesTable)
-      .where(and(
-        eq(licensesTable.employeeId, req.user!.userId),
-        gte(licensesTable.expiryDate, sql`current_date`),
-      ));
-    if (!validLicenses) {
-      res.status(403).json({
-        error: "Forbidden",
-        code: "license_expired",
-        message: "Your security license has expired or is missing. Upload a renewed license from Profile → My licenses before clocking in.",
-      });
-      return;
-    }
-  }
+  // License compliance is LEVEL-AWARE: every worker has a baseline effective
+  // level of 1 (Support — no license required), so an unlicensed worker may
+  // clock in to Level-1 work and ad-hoc (no-shift) entries. Shifts requiring
+  // Level 2+ still demand an unexpired license of that level at clock-in time
+  // (catches licenses that lapsed AFTER the officer was rostered). Admins are
+  // exempt (they may be covering a post or fixing a stuck record).
+  const myEffectiveLevel =
+    req.user!.role !== "admin" ? await getEffectiveLevel(req.user!.userId) : Number.MAX_SAFE_INTEGER;
+  const levelRejection = (requiredLevel: number): { error: string; code: string; message: string } => ({
+    error: "Forbidden",
+    code: "license_expired",
+    message: `This shift requires a Level ${requiredLevel} license and your license is expired or missing. Upload a renewed license from Profile → My licenses before clocking in.`,
+  });
 
   // Geo-resolve site if no shiftId provided.
   let resolvedSite: { id: string; name: string; distanceMiles: number } | null = null;
@@ -540,6 +532,14 @@ router.post("/time-entries/clock-in", requireStaff, async (req, res): Promise<vo
         res.status(409).json(windowRej);
         return;
       }
+
+      // Level gate at clock-in time: the roster gate ran when the assignment
+      // was created, but a license can expire between rostering and shift day.
+      const requiredLevel = shift.requiredLicenseLevel ?? 1;
+      if (requiredLevel > myEffectiveLevel) {
+        res.status(403).json(levelRejection(requiredLevel));
+        return;
+      }
     }
     assignedShiftSiteId = shift.siteId ?? null;
   } else if (bodySiteId) {
@@ -577,6 +577,12 @@ router.post("/time-entries/clock-in", requireStaff, async (req, res): Promise<vo
       const windowRej = clockInWindowRejection(ownShift, new Date());
       if (windowRej) {
         res.status(409).json(windowRej);
+        return;
+      }
+      // Same lapsed-license guard as the explicit-shift path.
+      const requiredLevel = ownShift.requiredLicenseLevel ?? 1;
+      if (requiredLevel > myEffectiveLevel) {
+        res.status(403).json(levelRejection(requiredLevel));
         return;
       }
       pickedOwnShiftId = ownShift.shiftId;

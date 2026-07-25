@@ -170,14 +170,96 @@ describe("POST /time-entries/clock-in geo-resolution", () => {
     expect(res.body.message).toMatch(/not within/i);
   });
 
-  it("blocks an employee with no unexpired license (403 license_expired)", async () => {
+  it("lets an unlicensed worker clock in ad-hoc (baseline Level 1 — support work)", async () => {
+    // Universal worker baseline: every worker is Level 1 (Support — no
+    // license required), so a GPS-verified ad-hoc clock-in must succeed
+    // even with zero licenses on file.
     await deleteOpenEntries(ctx.unlicensedEmployeeId);
     const res = await request(app)
       .post("/api/time-entries/clock-in")
       .set(authed(ctx.unlicensedToken))
-      .send({ lat: 32.7767, lng: -96.797 });
+      .send({ lat: -54.123456, lng: -12.654321 });
+    expect(res.status).toBe(201);
+    const [row] = await db
+      .select({ siteId: timeEntriesTable.siteId })
+      .from(timeEntriesTable)
+      .where(eq(timeEntriesTable.id, res.body.id));
+    expect(row.siteId).toBe(ctx.nearSiteId);
+    await deleteOpenEntries(ctx.unlicensedEmployeeId);
+  });
+
+  it("blocks an unlicensed worker from clocking in to a rostered Level-2 shift (403 license_expired)", async () => {
+    // The lapsed-license case: the officer was rostered while licensed, the
+    // license then expired/was removed. Explicit-shift clock-in must re-check
+    // the level at clock-in time.
+    await deleteOpenEntries(ctx.unlicensedEmployeeId);
+    const start = new Date(Date.now() - 5 * 60_000);
+    const end = new Date(Date.now() + 6 * 3600_000);
+    const [shift] = await db
+      .insert(shiftsTable)
+      .values({
+        siteId: ctx.nearSiteId,
+        title: `${TAG}-lapsed-l2`,
+        startTime: start,
+        endTime: end,
+        status: "upcoming",
+        headcount: 1,
+        requiredLicenseLevel: 2,
+      })
+      .returning({ id: shiftsTable.id });
+    await db.insert(shiftAssignmentsTable).values({
+      shiftId: shift.id,
+      employeeId: ctx.unlicensedEmployeeId,
+      status: "accepted",
+    });
+
+    const res = await request(app)
+      .post("/api/time-entries/clock-in")
+      .set(authed(ctx.unlicensedToken))
+      .send({ shiftId: shift.id });
     expect(res.status).toBe(403);
     expect(res.body.code).toBe("license_expired");
+
+    await db.delete(shiftAssignmentsTable).where(eq(shiftAssignmentsTable.shiftId, shift.id));
+    await db.delete(shiftsTable).where(eq(shiftsTable.id, shift.id));
+  });
+
+  it("lets an unlicensed worker clock in to their rostered Level-1 shift via shiftId", async () => {
+    await deleteOpenEntries(ctx.unlicensedEmployeeId);
+    const start = new Date(Date.now() - 5 * 60_000);
+    const end = new Date(Date.now() + 6 * 3600_000);
+    const [shift] = await db
+      .insert(shiftsTable)
+      .values({
+        siteId: ctx.nearSiteId,
+        title: `${TAG}-support-l1`,
+        startTime: start,
+        endTime: end,
+        status: "upcoming",
+        headcount: 1,
+        requiredLicenseLevel: 1,
+      })
+      .returning({ id: shiftsTable.id });
+    await db.insert(shiftAssignmentsTable).values({
+      shiftId: shift.id,
+      employeeId: ctx.unlicensedEmployeeId,
+      status: "accepted",
+    });
+
+    const res = await request(app)
+      .post("/api/time-entries/clock-in")
+      .set(authed(ctx.unlicensedToken))
+      .send({ shiftId: shift.id });
+    expect(res.status).toBe(201);
+    const [entry] = await db
+      .select({ shiftId: timeEntriesTable.shiftId })
+      .from(timeEntriesTable)
+      .where(eq(timeEntriesTable.id, res.body.id));
+    expect(entry.shiftId).toBe(shift.id);
+
+    await deleteOpenEntries(ctx.unlicensedEmployeeId);
+    await db.delete(shiftAssignmentsTable).where(eq(shiftAssignmentsTable.shiftId, shift.id));
+    await db.delete(shiftsTable).where(eq(shiftsTable.id, shift.id));
   });
 });
 

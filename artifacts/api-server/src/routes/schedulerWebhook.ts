@@ -119,14 +119,32 @@ async function resolveSiteByName(name: string | null | undefined): Promise<strin
   return site?.id ?? null;
 }
 
-/** Resolve a SecureOps userId by email. */
+/**
+ * Roles allowed on a shift roster. Client-portal accounts (role="client") are
+ * external customer contacts, NOT workers — they must never be rostered, even
+ * on Level-1 support shifts. This matters because every worker now carries a
+ * universal effective-level baseline of 1: without this role filter, a client
+ * user whose email appears in a scheduler payload would pass the Level-1
+ * eligibility check and be silently added to the roster.
+ */
+const ROSTERABLE_ROLES = ["admin", "dispatcher", "employee", "site_manager"] as const;
+
+/** Resolve a SecureOps userId by email — worker/staff roles only. */
 async function resolveUserByEmail(email: string): Promise<string | null> {
   const [user] = await db
-    .select({ id: usersTable.id })
+    .select({ id: usersTable.id, role: usersTable.role })
     .from(usersTable)
     .where(sql`lower(${usersTable.email}) = lower(${email})`)
     .limit(1);
-  return user?.id ?? null;
+  if (!user) return null;
+  if (!ROSTERABLE_ROLES.includes(user.role as (typeof ROSTERABLE_ROLES)[number])) {
+    logger.warn(
+      { email, role: user.role },
+      "scheduler-roster skipped non-worker account (role not rosterable)",
+    );
+    return null;
+  }
+  return user.id;
 }
 
 /** Find a SecureOps shiftId by externalId (from the scheduler). */
@@ -161,7 +179,7 @@ const DEDUP_TOLERANCE_MS = 5 * 60 * 1000;
  * licence-level check the manual claim / admin-assign routes use. The scheduler
  * is NOT trusted to have vetted officer clearance, so each listed officer's
  * effective level (`getEffectiveLevel`, max of unexpired licence level and the
- * support-staff baseline) is compared against the shift's `requiredLicenseLevel`.
+ * universal worker baseline of 1) is compared against the shift's `requiredLicenseLevel`.
  * Under-licensed officers are SKIPPED (never rostered) with a logged warning —
  * the conservative, fail-closed choice consistent with the claim route, which
  * 403s an unqualified officer. A skipped officer is treated exactly like an

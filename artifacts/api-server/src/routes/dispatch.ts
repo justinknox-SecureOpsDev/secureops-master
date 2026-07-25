@@ -397,8 +397,8 @@ router.post("/dispatch/assign-nearest", requireAdminOrDispatcher, async (req, re
           AND ${licensesTable.expiryDate} >= current_date
       )`,
       // Effective capability level: greater of highest unexpired licence level
-      // and the position baseline (support_staff → 1). Drives eligibility so
-      // support staff surface for level-1 support shifts even without a licence.
+      // and the universal worker baseline of 1 — level-1 support shifts need
+      // no licence, so every worker surfaces for them.
       effLevel: sql<number>`GREATEST(
         COALESCE((
           SELECT MAX(${licensesTable.level})::int
@@ -406,11 +406,7 @@ router.post("/dispatch/assign-nearest", requireAdminOrDispatcher, async (req, re
           WHERE ${licensesTable.employeeId} = "users"."id"
             AND ${licensesTable.expiryDate} >= current_date
         ), 0),
-        COALESCE((
-          SELECT CASE WHEN ${employeesTable.position} = 'support_staff' THEN 1 ELSE 0 END
-          FROM ${employeesTable}
-          WHERE ${employeesTable.userId} = "users"."id"
-        ), 0)
+        1
       )`,
       alreadyAssigned: sql<boolean>`EXISTS (
         SELECT 1 FROM ${shiftAssignmentsTable}
