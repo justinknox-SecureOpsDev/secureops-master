@@ -434,6 +434,109 @@ describe("GET /time-entries/time-card", () => {
     });
   });
 
+  describe("Sunday-night boundary sliver: payroll window aligns to business weeks", () => {
+    // An entry clocked in Sunday evening Central is ALREADY Monday in UTC. A
+    // naive UTC-Monday payroll window would pay it in the FOLLOWING week while
+    // the officer's business-TZ time card shows it in the CURRENT week. This
+    // suite pins that both surfaces now bucket by the business (Central) week so
+    // the boundary sliver can never drift them apart again.
+    const B_WEEK = "2025-06-30"; // Central Mon Jun 30 – Sun Jul 6 2025
+    const NEXT_WEEK = "2025-07-07"; // the following Central Monday
+    let bSiteId: string;
+    let bShiftId: string;
+    let bOfficerId: string;
+
+    beforeAll(async () => {
+      bOfficerId = await makeUser("employee", "boundary");
+      const [site] = await db
+        .insert(sitesTable)
+        .values({ clientId: ctx.clientId, name: `${TAG}-boundary-site`, address: "3 Boundary Way", defaultBillRate: "50.00" })
+        .returning({ id: sitesTable.id });
+      bSiteId = site.id;
+      const [shift] = await db
+        .insert(shiftsTable)
+        .values({
+          siteId: bSiteId,
+          title: `${TAG}-boundary-shift`,
+          startTime: new Date("2025-07-06T14:00:00.000Z"),
+          endTime: new Date("2025-07-06T18:00:00.000Z"),
+          payRate: "20.00",
+          billRate: "40.00",
+          headcount: 1,
+        })
+        .returning({ id: shiftsTable.id });
+      bShiftId = shift.id;
+
+      const seed = (v: { clockIn: Date; clockOut: Date; hours: string }) =>
+        db.insert(timeEntriesTable).values({
+          shiftId: bShiftId,
+          siteId: bSiteId,
+          employeeId: bOfficerId,
+          clockInTime: v.clockIn,
+          clockOutTime: v.clockOut,
+          hoursWorked: v.hours,
+          approvalStatus: "approved",
+        });
+
+      // Approved 4h — Tue Jul 1, 9:00am CT. Solidly inside the Jun 30 week.
+      await seed({
+        clockIn: new Date("2025-07-01T14:00:00.000Z"),
+        clockOut: new Date("2025-07-01T18:00:00.000Z"),
+        hours: "4.00",
+      });
+      // THE SLIVER: Sun Jul 6, 11:00pm CT = Mon Jul 7 04:00Z. UTC date is
+      // Monday (next week) but the business day is Sunday Jul 6 (this week).
+      await seed({
+        clockIn: new Date("2025-07-07T04:00:00.000Z"),
+        clockOut: new Date("2025-07-07T06:30:00.000Z"),
+        hours: "2.50",
+      });
+    });
+
+    afterAll(async () => {
+      await db.execute(sql`DELETE FROM payroll_entries WHERE site_id = ${bSiteId}::uuid`);
+      await db.execute(sql`DELETE FROM time_entries WHERE site_id = ${bSiteId}::uuid`);
+      await db.execute(sql`DELETE FROM shifts WHERE site_id = ${bSiteId}::uuid`);
+      await db.execute(sql`DELETE FROM sites WHERE id = ${bSiteId}::uuid`);
+    });
+
+    it("pays the Sunday-night-Central sliver in the SAME week the time card shows it", async () => {
+      // Time card for the Jun 30 business week: sees both entries (4 + 2.5).
+      const card = await getCard(ctx.adminToken, { employeeId: bOfficerId, weekStart: B_WEEK });
+      expect(card.status).toBe(200);
+      expect(card.body.approvedHours).toBe(6.5);
+      // The sliver lands on Sunday Jul 6, not the next Monday.
+      const sunday = card.body.days.find((d: any) => d.date === "2025-07-06");
+      expect(sunday.entries).toHaveLength(1);
+      expect(sunday.entries[0].hoursWorked).toBe(2.5);
+
+      // Payroll generation for the SAME week must pay all 6.5h — a UTC-Monday
+      // window would have dropped the sliver into the next week (paid 4.0 here).
+      const gen = await request(app)
+        .post("/api/payroll/generate")
+        .set(authed(ctx.adminToken))
+        .send({ siteId: bSiteId, weekStart: B_WEEK });
+      expect(gen.status).toBe(201);
+      const row = gen.body.find((r: any) => r.employeeId === bOfficerId);
+      expect(row).toBeTruthy();
+      expect(Number(row.totalHours)).toBe(6.5);
+      expect(row.periodStart).toBe(B_WEEK);
+      expect(card.body.approvedHours).toBe(Number(row.totalHours));
+    });
+
+    it("does NOT double-pay the sliver in the following week's payroll", async () => {
+      // Generating the next business week must find no hours for this officer —
+      // the sliver already belongs to (and was paid in) the Jun 30 week.
+      const gen = await request(app)
+        .post("/api/payroll/generate")
+        .set(authed(ctx.adminToken))
+        .send({ siteId: bSiteId, weekStart: NEXT_WEEK });
+      expect(gen.status).toBe(200);
+      const row = gen.body.find((r: any) => r.employeeId === bOfficerId);
+      expect(row).toBeUndefined();
+    });
+  });
+
   describe("week navigation across DST", () => {
     it("spring-forward week (Mar 2026): prev/next Mondays are exactly 7 calendar days apart", async () => {
       // US DST starts Sunday 2026-03-08 (Central week Mon Mar 2 – Sun Mar 8).

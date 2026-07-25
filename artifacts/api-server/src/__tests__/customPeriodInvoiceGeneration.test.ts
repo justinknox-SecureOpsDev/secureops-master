@@ -15,7 +15,7 @@ import {
 } from "@workspace/db";
 import app from "../app";
 import { signToken } from "../middlewares/auth";
-import { lockEndedWeekInvoices, upsertWeeklyInvoice, weekStartIsoUtc } from "../lib/invoiceSync";
+import { lockEndedWeekInvoices, upsertWeeklyInvoice, weekStartIsoBusiness } from "../lib/invoiceSync";
 
 const TAG = `customperiodinv-${randomUUID().slice(0, 8)}`;
 const passwordHash = bcrypt.hashSync("test-password", 4);
@@ -366,7 +366,7 @@ describe("billingCycle suppression on the weekly path", () => {
       approvalStatus: "approved",
     });
 
-    const weekStart = weekStartIsoUtc(ENTRY_A_IN);
+    const weekStart = weekStartIsoBusiness(ENTRY_A_IN);
     const result = await upsertWeeklyInvoice(ctx.monthlySiteId, weekStart);
     expect(result.status).toBe("skipped");
     expect(result.status === "skipped" && result.reason).toBe("non_weekly_billing_cycle");
@@ -379,7 +379,7 @@ describe("billingCycle suppression on the weekly path", () => {
   });
 
   it("the /invoices/generate weekly path returns 400 pointing at the custom-period option", async () => {
-    const weekStart = weekStartIsoUtc(ENTRY_A_IN);
+    const weekStart = weekStartIsoBusiness(ENTRY_A_IN);
     const res = await request(app)
       .post("/api/invoices/generate")
       .set(authed())
@@ -464,7 +464,7 @@ describe("edited custom drafts vs re-generation (no silent tax double-charge)", 
     // 5. The approval-driven weekly sync never touches either draft
     //    (monthly billing cycle short-circuits; autoSynced=false rows are
     //    skipped regardless). Values must be byte-identical afterwards.
-    const weekStart = weekStartIsoUtc(ENTRY_A_IN);
+    const weekStart = weekStartIsoBusiness(ENTRY_A_IN);
     const syncResult = await upsertWeeklyInvoice(ctx.siteId, weekStart);
     expect(syncResult.status).toBe("skipped");
     expect(syncResult.status === "skipped" && syncResult.reason).toBe("non_weekly_billing_cycle");

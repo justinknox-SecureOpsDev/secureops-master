@@ -7,7 +7,7 @@ import {
   sitesTable,
   subcontractorTimeEntriesTable,
 } from "@workspace/db";
-import { upsertWeeklyInvoice, weekStartIsoUtc } from "../lib/invoiceSync";
+import { upsertWeeklyInvoice, weekStartIsoBusiness } from "../lib/invoiceSync";
 
 const TAG = `subinv-test-${randomUUID().slice(0, 8)}`;
 
@@ -58,9 +58,13 @@ beforeAll(async () => {
   ctx.unratedSiteId = unratedSite.id;
 
   const monday = previousMonday();
-  ctx.weekStart = weekStartIsoUtc(monday);
   const clockIn = new Date(monday.getTime() + 2 * 86400_000 + 9 * 3600_000);
   const clockOut = new Date(clockIn.getTime() + 6 * 3600_000);
+  // Key the week off the actual clock-in (business-TZ Monday), exactly as the
+  // production subcontractor hook does. Deriving it from a UTC-midnight Monday
+  // would drift: that instant is the prior Sunday evening in Central, so it
+  // resolves to the previous business week than where the clock-in lands.
+  ctx.weekStart = weekStartIsoBusiness(clockIn);
 
   // Closed subcontractor entry on the rated site (6h).
   await db.insert(subcontractorTimeEntriesTable).values({

@@ -52,7 +52,7 @@ import { disconnectUser } from "../lib/wsManager";
 import { writeEmployeeFieldChanges } from "../lib/employeeChangeLog";
 import { preparePreUpdateBody as prepareSitePreUpdate, maybeAutoGeocode as maybeAutoGeocodeSite } from "../lib/siteGeocode";
 import { normalizePhoneToE164 } from "../lib/phone";
-import { adminEditBreaksAutoSync, upsertWeeklyInvoiceForTimeEntry, weekStartIsoUtc } from "../lib/invoiceSync";
+import { adminEditBreaksAutoSync, upsertWeeklyInvoiceForTimeEntry, weekStartIsoBusiness } from "../lib/invoiceSync";
 import type { TimeEntry } from "@workspace/db";
 import { buildTimeEntryAuditMetadata, timeEntrySnapshot } from "../lib/timeEntryAudit";
 import { ObjectStorageService, ObjectNotFoundError } from "../lib/objectStorage";
@@ -1371,7 +1371,7 @@ router.put("/admin/tables/:table/:id", requireAdmin, async (req, res): Promise<v
         const movedBucket =
           before.siteId !== after.siteId ||
           before.shiftId !== after.shiftId ||
-          weekStartIsoUtc(new Date(before.clockInTime)) !== weekStartIsoUtc(new Date(after.clockInTime));
+          weekStartIsoBusiness(new Date(before.clockInTime)) !== weekStartIsoBusiness(new Date(after.clockInTime));
         if (wasApproved && movedBucket) {
           void upsertWeeklyInvoiceForTimeEntry(before);
         }

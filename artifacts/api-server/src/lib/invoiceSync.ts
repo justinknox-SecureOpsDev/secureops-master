@@ -14,7 +14,7 @@ import {
 import { logger } from "./logger";
 import { getFederalHolidayName, HOLIDAY_PAY_MULTIPLIER } from "./holidays";
 import { isProcessingFeeEnabled, getProcessingFeeRate } from "./processingFeeConfig";
-import { businessTimeZone, businessDateToUtc } from "./businessTime";
+import { businessTimeZone, businessDateToUtc, businessDateIso, startOfBusinessWeek } from "./businessTime";
 
 /**
  * Auto-population of weekly client invoices (May 2026).
@@ -64,13 +64,15 @@ export function adminEditBreaksAutoSync(body: Record<string, unknown>): boolean 
   return false;
 }
 
-/** Monday 00:00 UTC of the week containing `d`, as YYYY-MM-DD. */
-export function weekStartIsoUtc(d: Date): string {
-  const day = d.getUTCDay(); // 0=Sun .. 6=Sat
-  const offset = day === 0 ? 6 : day - 1;
-  const m = new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate()));
-  m.setUTCDate(m.getUTCDate() - offset);
-  return m.toISOString().slice(0, 10);
+/**
+ * YYYY-MM-DD of the business-TZ (Central) Monday that starts the week
+ * containing `d`. Invoices bucket by the SAME business week as payroll and the
+ * officer time card, so a Sunday-evening-Central shift (already Monday in UTC)
+ * is billed in the same week it is paid — no boundary-sliver drift.
+ */
+export function weekStartIsoBusiness(d: Date): string {
+  const tz = businessTimeZone();
+  return businessDateIso(startOfBusinessWeek(d, tz), tz);
 }
 
 function addDaysUtc(d: Date, n: number): Date {
@@ -150,11 +152,21 @@ export async function upsertWeeklyInvoice(
   siteId: string,
   weekStartIso: string,
 ): Promise<UpsertResult> {
-  const start = new Date(`${weekStartIso}T00:00:00.000Z`);
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(weekStartIso)) {
+    return { status: "skipped", reason: "invalid weekStart" };
+  }
+  // Window by the business-TZ (Central) week so the hours billed here match
+  // exactly what payroll pays and the officer's time card shows. A UTC-Monday
+  // window would split the Sunday-evening-Central boundary sliver (already
+  // Monday in UTC) into a different week than payroll — the same drift Task
+  // #601 fixed for payroll. start = Central Monday 00:00 (as a UTC instant);
+  // end = the following Central Monday (DST-safe).
+  const tz = businessTimeZone();
+  const start = businessDateToUtc(weekStartIso, tz);
   if (Number.isNaN(start.getTime())) {
     return { status: "skipped", reason: "invalid weekStart" };
   }
-  const end = addDaysUtc(start, 7);
+  const end = startOfBusinessWeek(new Date(start.getTime() + 8.5 * 24 * 3600_000), tz);
 
   const [site] = await db
     .select({
@@ -507,7 +519,7 @@ export async function upsertWeeklyInvoiceForTimeEntry(entry: TimeEntry): Promise
     if (!siteId) return null;
     const clockIn = entry.clockInTime ? new Date(entry.clockInTime) : null;
     if (!clockIn || Number.isNaN(clockIn.getTime())) return null;
-    const weekStart = weekStartIsoUtc(clockIn);
+    const weekStart = weekStartIsoBusiness(clockIn);
     const result = await upsertWeeklyInvoice(siteId, weekStart);
     if (result.status === "created" || result.status === "updated") {
       logger.info(
@@ -536,7 +548,7 @@ export async function upsertWeeklyInvoiceForSubcontractorEntry(
     if (!entry.siteId) return null;
     const clockIn = entry.clockInAt ? new Date(entry.clockInAt) : null;
     if (!clockIn || Number.isNaN(clockIn.getTime())) return null;
-    const weekStart = weekStartIsoUtc(clockIn);
+    const weekStart = weekStartIsoBusiness(clockIn);
     const result = await upsertWeeklyInvoice(entry.siteId, weekStart);
     if (result.status === "created" || result.status === "updated") {
       logger.info(

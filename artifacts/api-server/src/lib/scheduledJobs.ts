@@ -24,10 +24,10 @@ import { brand } from "./brandConfig";
 import { sendPushToUsers } from "./push";
 import { sendSmsToUsers } from "./sms";
 import { CHANGE_FIELD_LABELS } from "./employeeChangeLog";
-import { lockEndedWeekInvoices, weekStartIsoUtc } from "./invoiceSync";
+import { lockEndedWeekInvoices, weekStartIsoBusiness } from "./invoiceSync";
 import { isSchedulerConfigured, fetchSchedulerDelta } from "./schedulerSync";
 import { getSiteManagerUserIds } from "./siteManagerAuthz";
-import { businessTimeZone } from "./businessTime";
+import { businessTimeZone, businessDateToUtc } from "./businessTime";
 
 /**
  * Coalescing window for the high-risk self-edit digest. Edits inside this
@@ -894,10 +894,11 @@ export async function sendWeeklyTimeEntryApprovalReminders(): Promise<void> {
     const hourNum = hourPart !== undefined ? Number(hourPart) : -1;
     if (weekdayPart !== "Fri" || hourNum < 17 || hourNum >= 19) return;
 
-    // Current pay week: Mon 00:00 UTC that starts this week.
-    const weekKey = weekStartIsoUtc(now); // "YYYY-MM-DD" of the Monday
+    // Current pay week: business-TZ (Central) Monday that starts this week —
+    // matches how payroll and the invoice sync bucket the week.
+    const weekKey = weekStartIsoBusiness(now); // "YYYY-MM-DD" of the Central Monday
 
-    const weekStart = new Date(weekKey + "T00:00:00Z");
+    const weekStart = businessDateToUtc(weekKey, tz);
     const weekEnd = new Date(weekStart.getTime() + 7 * 24 * HOUR_MS);
 
     // Find distinct siteIds that have pending time entries this week and

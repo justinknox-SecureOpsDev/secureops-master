@@ -7,6 +7,7 @@ import { randomUUID } from "node:crypto";
 // (employeesTable + sitesTable + auditLogsTable used by board endpoint below)
 import { requireAdmin } from "../middlewares/auth";
 import { getFederalHolidayName, HOLIDAY_PAY_MULTIPLIER } from "../lib/holidays";
+import { businessTimeZone, businessDateToUtc, startOfBusinessWeek } from "../lib/businessTime";
 import { requireFeature } from "../lib/features";
 import { submitMultipayment, getPaymentStatusByCustomerRef, mapRowToInstruction, isPncConfigured } from "../lib/pncPayments";
 
@@ -72,9 +73,18 @@ router.post("/payroll/generate", requireAdmin, async (req, res): Promise<void> =
     res.status(400).json({ error: "Bad Request", message: "siteId and weekStart required" });
     return;
   }
-  const start = new Date(`${weekStart}T00:00:00.000Z`);
-  if (Number.isNaN(start.getTime())) { res.status(400).json({ error: "Bad Request", message: "weekStart must be YYYY-MM-DD" }); return; }
-  const end = addDays(start, 7);
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(String(weekStart))) { res.status(400).json({ error: "Bad Request", message: "weekStart must be YYYY-MM-DD" }); return; }
+  // Window by business-TZ (Central) weeks so the hours paid here match exactly
+  // what the officer's time card shows. A UTC-Monday window would split the
+  // Sunday-evening-Central boundary sliver (already Monday in UTC) into a
+  // different week than the time card, silently paying it in the wrong period.
+  const tz = businessTimeZone();
+  // Anchor noon UTC inside the requested business day, then snap to that week's
+  // Central Monday 00:00 (returned in UTC). end = the following Central Monday.
+  const anchor = new Date(businessDateToUtc(weekStart, tz).getTime() + 12 * 3600_000);
+  if (Number.isNaN(anchor.getTime())) { res.status(400).json({ error: "Bad Request", message: "weekStart must be YYYY-MM-DD" }); return; }
+  const start = startOfBusinessWeek(anchor, tz);
+  const end = startOfBusinessWeek(new Date(start.getTime() + 8.5 * 24 * 3600_000), tz);
 
   // Pull approved time entries at this site for the week.
   const entries = await db
@@ -884,14 +894,12 @@ router.get("/payroll/pay-run/pnc-status", requireAdmin, async (req, res): Promis
 // processed/paid), then the existing Pay Run page takes over.
 // =============================================================================
 
-// Monday 00:00:00 UTC of the week containing d.
+// UTC instant of the business-TZ (Central) Monday 00:00 that starts the week
+// containing d. Buckets by the business week — NOT the naive UTC week — so the
+// Payroll Board and payroll generation agree with the officer's time card on
+// which week a Sunday-evening-Central (already Monday-UTC) entry belongs to.
 function mondayOfWeekUTC(d: Date): Date {
-  const x = new Date(d);
-  const day = x.getUTCDay();            // 0=Sun … 6=Sat
-  const diff = day === 0 ? -6 : 1 - day; // back up to Monday
-  x.setUTCDate(x.getUTCDate() + diff);
-  x.setUTCHours(0, 0, 0, 0);
-  return x;
+  return startOfBusinessWeek(d, businessTimeZone());
 }
 
 type BoardBucket = {
