@@ -302,6 +302,138 @@ describe("GET /time-entries/time-card", () => {
     });
   });
 
+  describe("payroll-generation parity (time card vs Payroll Board math)", () => {
+    // The time card buckets by business-TZ (Central) weeks; POST /payroll/generate
+    // windows by UTC Mondays. For any entry clocked in strictly inside the week
+    // (i.e. not in the Sunday-evening-Central / early-UTC-Monday boundary sliver)
+    // both surfaces must count the exact same hours. This test seeds a mixed week
+    // — approved, pending, rejected, open, a late-evening Central clock-in, and a
+    // real federal-holiday entry — runs BOTH the real payroll generation and the
+    // time-card route, and asserts the hour totals agree. Any future divergence
+    // in either surface's math (rounding, status filtering, TZ bucketing, holiday
+    // handling) fails this test.
+    const P_WEEK = "2025-06-30"; // Mon Jun 30 2025 — week contains Fri Jul 4 (federal holiday)
+    let pSiteId: string;
+    let pShiftId: string;
+    let pOfficerId: string;
+
+    beforeAll(async () => {
+      pOfficerId = await makeUser("employee", "parity");
+      const [site] = await db
+        .insert(sitesTable)
+        .values({ clientId: ctx.clientId, name: `${TAG}-parity-site`, address: "2 Parity Way", defaultBillRate: "50.00" })
+        .returning({ id: sitesTable.id });
+      pSiteId = site.id;
+      const [shift] = await db
+        .insert(shiftsTable)
+        .values({
+          siteId: pSiteId,
+          title: `${TAG}-parity-shift`,
+          startTime: new Date("2025-07-01T14:00:00.000Z"),
+          endTime: new Date("2025-07-01T18:00:00.000Z"),
+          payRate: "20.00",
+          billRate: "40.00",
+          headcount: 1,
+        })
+        .returning({ id: shiftsTable.id });
+      pShiftId = shift.id;
+
+      const seed = (v: {
+        clockIn: Date;
+        clockOut?: Date | null;
+        hours?: string | null;
+        approvalStatus?: "pending" | "approved" | "rejected";
+      }) =>
+        db.insert(timeEntriesTable).values({
+          shiftId: pShiftId,
+          siteId: pSiteId,
+          employeeId: pOfficerId,
+          clockInTime: v.clockIn,
+          clockOutTime: v.clockOut === undefined ? new Date(v.clockIn.getTime() + 4 * 3600_000) : v.clockOut,
+          hoursWorked: v.hours === undefined ? "4.00" : v.hours,
+          approvalStatus: v.approvalStatus ?? "pending",
+        });
+
+      // Approved 4h — Tue Jul 1, 9:00am CT.
+      await seed({ clockIn: new Date("2025-07-01T14:00:00.000Z"), hours: "4.00", approvalStatus: "approved" });
+      // Approved 2.5h — LATE-EVENING Central: Wed Jul 2, 11:30pm CT = Thu Jul 3 04:30Z.
+      // Business-TZ day is Wednesday; both surfaces still count it in this week.
+      await seed({
+        clockIn: new Date("2025-07-03T04:30:00.000Z"),
+        clockOut: new Date("2025-07-03T07:00:00.000Z"),
+        hours: "2.50",
+        approvalStatus: "approved",
+      });
+      // Approved 3.25h on the ACTUAL holiday date — Fri Jul 4, 9:00am CT.
+      // Holiday changes the RATE (1.5×), never the hours; hour parity must hold.
+      await seed({
+        clockIn: new Date("2025-07-04T14:00:00.000Z"),
+        clockOut: new Date("2025-07-04T17:15:00.000Z"),
+        hours: "3.25",
+        approvalStatus: "approved",
+      });
+      // Pending 5h Thu — counted by the time card (pendingHours) but payroll
+      // generation only pays approved entries.
+      await seed({
+        clockIn: new Date("2025-07-03T14:00:00.000Z"),
+        clockOut: new Date("2025-07-03T19:00:00.000Z"),
+        hours: "5.00",
+      });
+      // Rejected 8h Wed — excluded everywhere.
+      await seed({ clockIn: new Date("2025-07-02T14:00:00.000Z"), hours: "8.00", approvalStatus: "rejected" });
+      // Open entry Sat (no clock-out) — listed as open, never counted.
+      await seed({ clockIn: new Date("2025-07-05T14:00:00.000Z"), clockOut: null, hours: null });
+    });
+
+    afterAll(async () => {
+      await db.execute(sql`DELETE FROM payroll_entries WHERE site_id = ${pSiteId}::uuid`);
+      await db.execute(sql`DELETE FROM time_entries WHERE site_id = ${pSiteId}::uuid`);
+      await db.execute(sql`DELETE FROM shifts WHERE site_id = ${pSiteId}::uuid`);
+      await db.execute(sql`DELETE FROM sites WHERE id = ${pSiteId}::uuid`);
+    });
+
+    it("time-card hour totals equal what POST /payroll/generate computes for the same week", async () => {
+      // Run the REAL payroll generation for this site + week.
+      const gen = await request(app)
+        .post("/api/payroll/generate")
+        .set(authed(ctx.adminToken))
+        .send({ siteId: pSiteId, weekStart: P_WEEK });
+      expect(gen.status).toBe(201);
+      const payrollRow = gen.body.find((r: any) => r.employeeId === pOfficerId);
+      expect(payrollRow).toBeTruthy();
+
+      // And the time card for the same employee + business week.
+      const card = await getCard(ctx.adminToken, { employeeId: pOfficerId, weekStart: P_WEEK });
+      expect(card.status).toBe(200);
+      expect(card.body.weekStart).toBe(P_WEEK);
+
+      // Core parity: hours payroll will pay == the card's APPROVED hours
+      // (payroll generation only pays approved entries; the card's totalHours
+      // additionally counts pending). 4.00 + 2.50 (late-evening CT) + 3.25
+      // (July 4 holiday) = 9.75.
+      expect(Number(payrollRow.totalHours)).toBe(9.75);
+      expect(card.body.approvedHours).toBe(Number(payrollRow.totalHours));
+      // Equivalent derived form: card totalHours minus its pending portion is
+      // exactly the payroll number, so the two surfaces can never disagree on
+      // payable hours.
+      expect(Math.round((card.body.totalHours - card.body.pendingHours) * 100) / 100).toBe(
+        Number(payrollRow.totalHours),
+      );
+
+      // The card's full total is approved + pending (rejected/open excluded) —
+      // so the Payroll Board number is always recoverable from the card.
+      expect(card.body.pendingHours).toBe(5);
+      expect(card.body.totalHours).toBe(
+        Math.round((card.body.approvedHours + card.body.pendingHours) * 100) / 100,
+      );
+
+      // Sanity on the money side: the holiday entry pays 1.5× on the whole
+      // entry ((4 + 2.5) × $20) + (3.25 × $30) = $227.50 — proving the parity
+      // above covered a genuinely holiday-rated entry, not a plain week.
+      expect(Number(payrollRow.grossPay)).toBe(227.5);
+    });
+  });
+
   describe("week navigation across DST", () => {
     it("spring-forward week (Mar 2026): prev/next Mondays are exactly 7 calendar days apart", async () => {
       // US DST starts Sunday 2026-03-08 (Central week Mon Mar 2 – Sun Mar 8).
