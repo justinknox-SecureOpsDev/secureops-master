@@ -23,6 +23,12 @@ export const GetBrandResponse = zod.object({
   colorNavy: zod.string(),
   colorGold: zod.string(),
   colorCream: zod.string(),
+  timeConfirmEditWindowHours: zod
+    .number()
+    .optional()
+    .describe(
+      "Max hours an officer may move their own clock-in\/out from the recorded time during post-shift confirmation. Drives the mobile review modal hint text and client-side pre-check.",
+    ),
   features: zod
     .record(zod.string(), zod.boolean())
     .describe(

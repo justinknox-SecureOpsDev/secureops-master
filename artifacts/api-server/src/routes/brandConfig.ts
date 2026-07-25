@@ -1,6 +1,7 @@
 import { Router } from "express";
 import { brand } from "../lib/brandConfig";
 import { getFeatureFlags } from "../lib/features";
+import { getConfirmEditWindowHours } from "./timeEntries";
 
 const router = Router();
 
@@ -27,6 +28,10 @@ router.get("/brand", (_req, res) => {
     colorGold:   brand.colorGold,
     colorCream:  brand.colorCream,
     logoDataUrl: brand.logoDataUrl,
+    // Max hours an officer may move their own clock-in/out during post-shift
+    // confirmation. Surfaced so the mobile review modal can state the real
+    // limit up front and pre-validate before submitting.
+    timeConfirmEditWindowHours: getConfirmEditWindowHours(),
     // Feature flags drive nav visibility on the admin portal and tab
     // visibility on the mobile app. Owner controls via DISABLED_FEATURES env.
     features:    getFeatureFlags(),

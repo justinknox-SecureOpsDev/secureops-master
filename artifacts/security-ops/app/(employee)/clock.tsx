@@ -2,6 +2,7 @@ import React, { useState, useEffect, useRef } from "react";
 import { useTopPad } from "@/hooks/useTopPad";
 import { View, Text, StyleSheet, TouchableOpacity, ActivityIndicator, ScrollView, AccessibilityInfo, Modal, Animated, TextInput } from "react-native";
 import { useColors } from "@/hooks/useColors";
+import { useTimeConfirmEditWindowHours } from "@/hooks/useFeatures";
 import { useHighlightFlash } from "@/hooks/useHighlightFlash";
 import { useLocalSearchParams } from "expo-router";
 import { useClockIn, useClockOut, useConfirmTimeEntry, useGetActiveTimeEntry, getGetActiveTimeEntryQueryKey, useGetTimeEntries, getGetTimeEntriesQueryKey, updateMyLocation, useGetMyClockInShifts, getGetMyClockInShiftsQueryKey, getGetEmployeeDashboardSummaryQueryKey, getGetShiftsQueryKey } from "@workspace/api-client-react";
@@ -25,6 +26,15 @@ function fromLocalEditable(v: string): Date | null {
   if (!m) return null;
   const d = new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3]), Number(m[4]), Number(m[5]));
   return isNaN(d.getTime()) ? null : d;
+}
+
+function formatHoursLabel(hours: number): string {
+  if (hours < 1) {
+    const mins = Math.round(hours * 60);
+    return `${mins} minute${mins === 1 ? "" : "s"}`;
+  }
+  const rounded = Number.isInteger(hours) ? hours : Math.round(hours * 100) / 100;
+  return `${rounded} hour${rounded === 1 ? "" : "s"}`;
 }
 
 function formatDuration(seconds: number) {
@@ -116,6 +126,8 @@ export default function EmployeeClockScreen({ hideTopPad }: { hideTopPad?: boole
     (e) => e.confirmationStatus === "awaiting_confirmation",
   );
   const confirmMutation = useConfirmTimeEntry({ mutation: { networkMode: "always" } });
+  const editWindowHours = useTimeConfirmEditWindowHours();
+  const editWindowLabel = formatHoursLabel(editWindowHours);
   const [reviewOpen, setReviewOpen] = useState(false);
   const [editTimes, setEditTimes] = useState(false);
   const [editIn, setEditIn] = useState("");
@@ -162,6 +174,17 @@ export default function EmployeeClockScreen({ hideTopPad }: { hideTopPad?: boole
       const changed =
         inD.getTime() !== new Date(awaitingEntry.clockInTime).getTime() ||
         outD.getTime() !== new Date(awaitingEntry.clockOutTime).getTime();
+      if (changed) {
+        const maxDeviationMs = editWindowHours * 3_600_000;
+        const inDelta = Math.abs(inD.getTime() - new Date(awaitingEntry.clockInTime).getTime());
+        const outDelta = Math.abs(outD.getTime() - new Date(awaitingEntry.clockOutTime).getTime());
+        if (inDelta > maxDeviationMs || outDelta > maxDeviationMs) {
+          setReviewError(
+            `Adjustments are limited to ${editWindowLabel} from your recorded times. For a larger correction, confirm your recorded times and ask an admin to adjust the entry.`,
+          );
+          return;
+        }
+      }
       if (changed && !editReason.trim()) {
         setReviewError("Please add a short reason for the time change.");
         return;
@@ -625,7 +648,7 @@ export default function EmployeeClockScreen({ hideTopPad }: { hideTopPad?: boole
             ) : (
               <View style={{ gap: 8, marginTop: 8 }}>
                 <Text style={{ color: colors.mutedForeground, fontSize: 12 }}>
-                  Small corrections only — times can be adjusted up to a couple of hours from what was recorded. For bigger changes, confirm as-is and contact an admin.
+                  {`Small corrections only — times can be adjusted up to ${editWindowLabel} from what was recorded. For bigger changes, confirm as-is and contact an admin.`}
                 </Text>
                 <Text style={{ color: colors.mutedForeground, fontSize: 12 }}>Clock-in (YYYY-MM-DD HH:MM)</Text>
                 <TextInput

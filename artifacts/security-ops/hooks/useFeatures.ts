@@ -68,12 +68,17 @@ const ENV_BRAND: BrandText = {
   appName: process.env.EXPO_PUBLIC_APP_NAME ?? "SecureOps",
 };
 
+/** Fallback edit window (hours) when the backend hasn't reported one yet. */
+const DEFAULT_CONFIRM_EDIT_WINDOW_HOURS = 2;
+
 type BrandPayload = {
   features: Flags;
   brand: BrandText;
   colors: BrandColors;
   /** Org's uploaded logo (data:image/* URI) — null falls back to the platform emblem. */
   logoDataUrl: string | null;
+  /** Max hours an officer may move their own clock times during confirmation. */
+  timeConfirmEditWindowHours: number;
 };
 
 function envPayload(): BrandPayload {
@@ -82,6 +87,7 @@ function envPayload(): BrandPayload {
     brand: ENV_BRAND,
     colors: ENV_BRAND_COLORS,
     logoDataUrl: null,
+    timeConfirmEditWindowHours: DEFAULT_CONFIRM_EDIT_WINDOW_HOURS,
   };
 }
 
@@ -120,6 +126,7 @@ function buildPayload(data: unknown): BrandPayload {
     colorGold?: string;
     colorCream?: string;
     logoDataUrl?: string | null;
+    timeConfirmEditWindowHours?: number;
   };
   const logo = typeof d.logoDataUrl === "string" && d.logoDataUrl.startsWith("data:image/")
     ? d.logoDataUrl
@@ -139,6 +146,12 @@ function buildPayload(data: unknown): BrandPayload {
       cream: d.colorCream,
     }),
     logoDataUrl: logo,
+    timeConfirmEditWindowHours:
+      typeof d.timeConfirmEditWindowHours === "number" &&
+      Number.isFinite(d.timeConfirmEditWindowHours) &&
+      d.timeConfirmEditWindowHours > 0
+        ? d.timeConfirmEditWindowHours
+        : DEFAULT_CONFIRM_EDIT_WINDOW_HOURS,
   };
 }
 
@@ -209,6 +222,12 @@ export async function hydrateBrandFromStorage(): Promise<void> {
         parsed.logoDataUrl.startsWith("data:image/")
           ? parsed.logoDataUrl
           : null,
+      timeConfirmEditWindowHours:
+        typeof parsed.timeConfirmEditWindowHours === "number" &&
+        Number.isFinite(parsed.timeConfirmEditWindowHours) &&
+        parsed.timeConfirmEditWindowHours > 0
+          ? parsed.timeConfirmEditWindowHours
+          : DEFAULT_CONFIRM_EDIT_WINDOW_HOURS,
     };
     notify();
   } catch {
@@ -287,6 +306,11 @@ export function useBrandColors(): BrandColors {
 export function useBrandLogo(): { logoDataUrl: string | null; name: string } {
   const p = useBrandPayload();
   return { logoDataUrl: p.logoDataUrl, name: p.brand.companyName };
+}
+
+/** Max hours an officer may move their own clock times during confirmation. */
+export function useTimeConfirmEditWindowHours(): number {
+  return useBrandPayload().timeConfirmEditWindowHours;
 }
 
 export function isEnabled(flags: Flags, key: FeatureKey): boolean {

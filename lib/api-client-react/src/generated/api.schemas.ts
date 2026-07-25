@@ -44,6 +44,8 @@ export interface BrandConfig {
   colorNavy: string;
   colorGold: string;
   colorCream: string;
+  /** Max hours an officer may move their own clock-in/out from the recorded time during post-shift confirmation. Drives the mobile review modal hint text and client-side pre-check. */
+  timeConfirmEditWindowHours?: number;
   /** Map of FeatureKey → enabled flag. Absent keys default to enabled on the client. Property keys are FeatureKey values. */
   features: BrandConfigFeatures;
 }
