@@ -43,11 +43,13 @@ project + channel + runtime version, NOT bundle/ASC ids directly. Policy is
   against `eas build:list`; if they diverge, push a manual OTA from HEAD.
 - Native-compat guard: build 10 has LiveKit natives but NOT expo-audio; builds
   ≤9 have NEITHER. All native deps newer than the oldest served binary must be
-  loaded via guarded lazy require — expo-audio via `getExpoAudio()`, LiveKit
-  via `components/radio/nativeModules.ts` (`getLiveKitNative()` /
-  `getLiveKitWebRTC()`; radio degrades to presence-only with an "update the
-  app" notice). Any NEW native dep must get the same guard (or a real runtime
-  bump) before 1.0.0 OTAs.
+  loaded via guarded lazy require — LiveKit via
+  `components/radio/nativeModules.ts` (`getLiveKitNative()` /
+  `getLiveKitWebRTC()`; radio degrades to presence-only). expo-audio currently
+  has NO loader at all (its keep-alive was reverted July 25, 2026 with the
+  radio rollback) — it stays in BINARY_GATED_NATIVE_PACKAGES with an empty
+  allow-list, so re-adding it requires a new guarded loader. Any NEW native
+  dep must get the same guard (or a real runtime bump) before 1.0.0 OTAs.
 - **`livekit-client` (pure JS!) is ALSO gated**: its module eval touches
   `DOMException` etc., which exist on Hermes only after registerGlobals() —
   a static value import crashes EVERY native binary at route registration

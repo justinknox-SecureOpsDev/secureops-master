@@ -31,8 +31,8 @@
  * `class … extends RNKeyProvider` that needs it at module-eval time) would
  * throw and crash the app the moment the Radio/Chat screen loads. So the
  * native packages are required lazily and the subclass is DEFINED lazily via
- * `createRadioKeyProvider()`, mirroring the `getExpoAudio()` pattern in
- * radioMedia.native.ts. Callers (radioMedia.native.ts) only invoke the
+ * `createRadioKeyProvider()`, mirroring the `getLiveKitNative()` pattern in
+ * nativeModules.ts. Callers (radioMedia.native.ts) only invoke the
  * factory after `getLiveKitNative()` confirmed the natives are present.
  *
  * The option values below MUST mirror what RNKeyProvider's constructor

@@ -14,28 +14,22 @@
  *    resume listening.
  *
  * E2EE keys are derived per-channel server-side and delivered (base64) only to
- * authorised members; the SFU only ever relays ciphertext.
+ * authorised members; the SFU only ever relays ciphertext. The UIBackgroundModes
+ * `audio` entitlement + an active AudioSession keep audio flowing when the app
+ * is backgrounded mid-shift.
  *
- * BACKGROUND / LOCKED-SCREEN SURVIVAL: the UIBackgroundModes `audio`
- * entitlement only keeps iOS from suspending the app while the audio I/O unit
- * is ACTUALLY RENDERING. On a quiet PTT channel there are zero remote tracks
- * (each transmission is a short-lived publisher room), so WebRTC stops
- * playout, iOS suspends the app ~30s after lock, and the officer silently
- * misses every later transmission. The fix is a looping SILENT keep-alive
- * player (expo-audio) that runs exactly while there is REAL radio demand — a
- * listen room live or connecting, or a transmit in flight — keeping the audio
- * unit rendering so the app, its control WS, and the LiveKit listen room stay
- * alive when the phone locks mid-shift. `reconcileKeepAlive()` re-derives the
- * demand at every connect/drop boundary, so muting or leaving every channel
- * stops the silent loop. This scoping is DISCLOSED to App Review
- * (APP_REVIEW_NOTES.md §3) — keep code and disclosure in lockstep.
+ * REVERT NOTE (2026-07-25): this file is the July 22 last-known-working radio
+ * engine (the "garble layered fix" state that store build 10 ran successfully
+ * for days), re-expressed through the lazy native-module loader below. The
+ * expo-audio silent keep-alive that was added later (locked-screen survival)
+ * is deliberately ABSENT — it never shipped in a working phone bundle and is
+ * parked until the radio is stable again (git history: 23b2a6c).
  *
  * This module is Metro-resolved ONLY on native (web gets `radioMedia.ts`), so
  * loading the native-only WebRTC stack here is safe for the web bundle — but
- * the natives are still required LAZILY (see the OTA-COMPAT guards below)
+ * the natives are still required LAZILY (see the OTA-COMPAT guard below)
  * because older App Store binaries don't contain them.
  */
-import type { AudioPlayer } from "expo-audio";
 import type {
   Room,
   DisconnectReason,
@@ -58,11 +52,10 @@ import { type RadioMedia, type RadioToken } from "./radioTypes";
  * binaries; a top-level `import … from "@livekit/react-native"` (and a
  * module-eval `registerGlobals()` call) would throw and crash the app the
  * moment the Radio screen — or the Chat screen that embeds it — loads. So the
- * natives load lazily via `getLiveKitNative()` (see ./nativeModules.ts, same
- * pattern as `getExpoAudio()` below); when unavailable, `createRadioMedia()`
- * returns a presence-only stub with `supportsAudio = false` and
- * `degradedReason = "missing_natives"` so the screen tells the user to update
- * the app instead of crashing.
+ * natives load lazily via `getLiveKitNative()` (see ./nativeModules.ts); when
+ * unavailable, `createRadioMedia()` returns a presence-only stub with
+ * `supportsAudio = false` and `degradedReason = "missing_natives"` so the
+ * screen tells the user to update the app instead of crashing.
  *
  * `livekit-client` must be loaded the SAME lazy way (`getLiveKitClient()`):
  * although it is pure JS, its module evaluation references browser globals
@@ -71,34 +64,6 @@ import { type RadioMedia, type RadioToken } from "./radioTypes";
  * "ReferenceError: Property 'DOMException' doesn't exist" before any guard
  * could execute. Only `import type` from livekit-client is safe at top level.
  */
-
-/**
- * OTA-COMPAT GUARD: expo-audio was added to the binary AFTER the 1.0.0 App
- * Store builds shipped (it arrived with the keep-alive work). runtimeVersion
- * policy is `appVersion`, so an OTA bundle published for runtime "1.0.0" CAN
- * land on binaries whose native image has no ExpoAudio module — a top-level
- * `import { … } from "expo-audio"` would then throw during module evaluation
- * and crash the whole app at launch. Load it lazily and tolerate absence:
- * on older binaries the silent keep-alive is simply disabled (the radio still
- * works in the foreground; locked-phone survival needs the newer binary).
- */
-type ExpoAudioModule = typeof import("expo-audio");
-let expoAudioModule: ExpoAudioModule | null | undefined;
-function getExpoAudio(): ExpoAudioModule | null {
-  if (expoAudioModule === undefined) {
-    try {
-      // eslint-disable-next-line @typescript-eslint/no-require-imports
-      expoAudioModule = require("expo-audio") as ExpoAudioModule;
-    } catch (e) {
-      console.warn(
-        "[radio] expo-audio native module unavailable — silent keep-alive disabled",
-        e,
-      );
-      expoAudioModule = null;
-    }
-  }
-  return expoAudioModule;
-}
 
 // How long a freshly-published (still muted) track waits before unmuting so
 // listeners' receiver cryptors are created and keyed before the first audible
@@ -132,8 +97,6 @@ class NativeRadioMedia implements RadioMedia {
   private publishChannelId: string | null = null;
   private publishTrack: LocalAudioTrack | null = null;
   private sessionStarted = false;
-  private keepAlive: AudioPlayer | null = null;
-  private publishStarting = false;
   private onListenLost: ((channelId: string) => void) | null = null;
 
   listenChannelIds(): string[] {
@@ -151,106 +114,12 @@ class NativeRadioMedia implements RadioMedia {
 
   private async ensureSession(): Promise<void> {
     if (this.sessionStarted) return;
-    // expo-audio's mode FIRST, LiveKit's session config LAST so LiveKit's
-    // playAndRecord/voice settings win the AVAudioSession category. The mode
-    // grants background playback + silent-switch playback for the keep-alive
-    // loop; allowsRecording keeps the category compatible with PTT capture.
-    try {
-      const expoAudio = getExpoAudio();
-      if (expoAudio) {
-        await expoAudio.setAudioModeAsync({
-          playsInSilentMode: true,
-          shouldPlayInBackground: true,
-          interruptionMode: "mixWithOthers",
-          allowsRecording: true,
-        });
-      }
-    } catch (e) {
-      // Keep-alive is best-effort; the radio itself must still work.
-      console.warn("[radio] setAudioModeAsync failed", e);
-    }
     await this.lk.AudioSession.configureAudio({
       android: { audioTypeOptions: this.lk.AndroidAudioTypePresets.communication },
       ios: { defaultOutput: "speaker" },
     });
     await this.lk.AudioSession.startAudioSession();
     this.sessionStarted = true;
-  }
-
-  /**
-   * True while the radio actually needs the audio unit kept awake: a listen
-   * room is live or connecting, or a transmit is registered / being set up.
-   */
-  private hasKeepAliveDemand(): boolean {
-    return (
-      this.listenRooms.size > 0 ||
-      this.connecting.size > 0 ||
-      this.publishRoom !== null ||
-      this.publishStarting
-    );
-  }
-
-  /**
-   * Start/stop the looping silent player so it runs EXACTLY while there is
-   * real radio demand. Without it, an idle (nobody-transmitting) channel has
-   * no audio to render, so iOS suspends the app shortly after the screen
-   * locks and the officer misses every later transmission. Called at every
-   * connect/drop boundary; both halves are idempotent. NOTE: App Review is
-   * told the silent loop only plays while the user is actively on a channel
-   * (APP_REVIEW_NOTES.md §3) — widening this scope needs a disclosure update.
-   */
-  private reconcileKeepAlive(): void {
-    if (this.hasKeepAliveDemand()) this.startKeepAlive();
-    else this.stopKeepAlive();
-  }
-
-  private startKeepAlive(): void {
-    if (this.keepAlive) return;
-    const expoAudio = getExpoAudio();
-    // Older 1.0.0 binaries have no ExpoAudio native module — skip silently.
-    if (!expoAudio) return;
-    try {
-      // eslint-disable-next-line @typescript-eslint/no-require-imports
-      const player = expoAudio.createAudioPlayer(require("../../assets/audio/silence.wav"));
-      player.loop = true;
-      player.play();
-      this.keepAlive = player;
-    } catch (e) {
-      console.warn("[radio] keep-alive player failed to start", e);
-    }
-  }
-
-  private stopKeepAlive(): void {
-    const player = this.keepAlive;
-    this.keepAlive = null;
-    if (!player) return;
-    try {
-      player.pause();
-      player.remove();
-    } catch {
-      /* ignore */
-    }
-  }
-
-  /**
-   * Recovery nudge from the screen's AppState "active" handler: an
-   * AVAudioSession interruption (phone call, Siri) pauses the keep-alive
-   * player and nothing resumes it automatically — replay it (play() on an
-   * already-playing player is a no-op) or restart it if it died entirely.
-   */
-  resumeKeepAlive(): void {
-    if (!this.hasKeepAliveDemand()) return;
-    const player = this.keepAlive;
-    if (!player) {
-      this.startKeepAlive();
-      return;
-    }
-    try {
-      player.play();
-    } catch {
-      this.stopKeepAlive();
-      this.startKeepAlive();
-    }
   }
 
   private async makeRoom(token: RadioToken): Promise<Room> {
@@ -274,7 +143,6 @@ class NativeRadioMedia implements RadioMedia {
     if (this.publishChannelId === channelId) return;
     if (this.listenRooms.has(channelId) || this.connecting.has(channelId)) return;
     this.connecting.add(channelId);
-    this.reconcileKeepAlive();
     try {
       await this.ensureSession();
       const room = await this.makeRoom(token);
@@ -295,14 +163,12 @@ class NativeRadioMedia implements RadioMedia {
       this.listenRooms.set(channelId, room);
     } finally {
       this.connecting.delete(channelId);
-      this.reconcileKeepAlive();
     }
   }
 
   async dropListen(channelId: string): Promise<void> {
     const room = this.listenRooms.get(channelId);
     this.listenRooms.delete(channelId);
-    this.reconcileKeepAlive();
     if (room) {
       try {
         await room.disconnect();
@@ -318,41 +184,25 @@ class NativeRadioMedia implements RadioMedia {
     shouldAbort?: () => boolean,
   ): Promise<void> {
     const aborted = (): boolean => shouldAbort?.() ?? false;
-    // `publishStarting` holds keep-alive demand across the whole setup, so
-    // dropping the listen room below can't briefly stop the silent loop.
-    this.publishStarting = true;
-    try {
-      // The publish token uses a distinct `userId#pub` identity, so it can't
-      // evict the listen connection — but we still drop the listen room first
-      // so the speaker doesn't hear their own transmission echoed back.
-      await this.dropListen(channelId);
-      if (aborted()) return;
-      await this.ensureSession();
-      if (aborted()) return;
-      const room = await this.makeRoom(token);
-      if (aborted()) {
-        // Released before we even connected — nothing to register or tear down
-        // beyond the freshly-made (not-yet-connected) room.
-        try { await room.disconnect(); } catch { /* ignore */ }
-        return;
-      }
-      // Register the room BEFORE connecting so a concurrent stopPublish() (PTT
-      // released mid-connect) can find and disconnect it instead of letting
-      // this connection leak audio after release.
-      this.publishRoom = room;
-      this.publishChannelId = channelId;
-      await this.connectAndPublish(room, token, aborted);
-    } finally {
-      this.publishStarting = false;
-      this.reconcileKeepAlive();
+    // The publish token uses a distinct `userId#pub` identity, so it can't
+    // evict the listen connection — but we still drop the listen room first
+    // so the speaker doesn't hear their own transmission echoed back.
+    await this.dropListen(channelId);
+    if (aborted()) return;
+    await this.ensureSession();
+    if (aborted()) return;
+    const room = await this.makeRoom(token);
+    if (aborted()) {
+      // Released before we even connected — nothing to register or tear down
+      // beyond the freshly-made (not-yet-connected) room.
+      try { await room.disconnect(); } catch { /* ignore */ }
+      return;
     }
-  }
-
-  private async connectAndPublish(
-    room: Room,
-    token: RadioToken,
-    aborted: () => boolean,
-  ): Promise<void> {
+    // Register the room BEFORE connecting so a concurrent stopPublish() (PTT
+    // released mid-connect) can find and disconnect it instead of letting this
+    // connection leak audio after release.
+    this.publishRoom = room;
+    this.publishChannelId = channelId;
     let track: LocalAudioTrack | null = null;
     try {
       await room.connect(token.url, token.token);
@@ -446,11 +296,9 @@ class NativeRadioMedia implements RadioMedia {
         /* ignore */
       }
     }
-    this.reconcileKeepAlive();
   }
 
   async teardown(): Promise<void> {
-    this.stopKeepAlive();
     await this.stopPublish();
     for (const id of this.listenChannelIds()) await this.dropListen(id);
     if (this.sessionStarted) {

@@ -20,9 +20,9 @@
  * always fine — it is erased at compile time.
  *
  * If this test fails: load the package through a guarded lazy loader (see
- * getLiveKitNative() in components/radio/nativeModules.ts or getExpoAudio()
- * in components/radio/radioMedia.native.ts) and degrade gracefully, or bump
- * the runtime version so old binaries never receive the bundle.
+ * getLiveKitNative() in components/radio/nativeModules.ts) and degrade
+ * gracefully, or bump the runtime version so old binaries never receive
+ * the bundle.
  */
 import { readdirSync, readFileSync } from "node:fs";
 import path from "node:path";

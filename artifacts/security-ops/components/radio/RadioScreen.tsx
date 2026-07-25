@@ -1,10 +1,9 @@
-import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import {
   View, Text, TouchableOpacity, ScrollView, StyleSheet,
-  ActivityIndicator, Pressable, AppState,
+  ActivityIndicator, Pressable,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
-import { useFocusEffect } from "expo-router";
 import { Feather } from "@expo/vector-icons";
 import { useColors } from "@/hooks/useColors";
 import { apiRequest, getApiBaseUrl } from "@/utils/api";
@@ -14,7 +13,12 @@ import { createRadioMedia } from "./radioMedia";
 import type { RadioMedia, RadioToken } from "./radioTypes";
 import { createTransmitController, type TransmitController } from "./radioTransmit";
 
-import { selectSiteChannels, reconcileActiveId, type RadioChannel as Channel } from "./radioChannels";
+type Channel = {
+  id: string; name: string;
+  scope: "global" | "all_officers" | "admins" | "site";
+  siteId: string | null; siteName?: string | null;
+  adminOnly: boolean; archivedAt: string | null;
+};
 
 type Speaker = { userId: string; name: string } | null;
 type TalkState = "idle" | "requesting" | "connecting" | "live";
@@ -70,7 +74,11 @@ async function postRadioToken(
   return { status: res.status, data: (await res.json()) as RadioToken };
 }
 
-export default function RadioScreen({ refreshEpoch = 0 }: { refreshEpoch?: number } = {}): React.JSX.Element {
+// `refreshEpoch` is accepted (and deliberately ignored) for compatibility with
+// the Chat screen host, which bumps it when the Radio sub-tab regains focus.
+// This July-22 revert of the screen fetches channels once on mount — the
+// focus-driven roster refresh went with the reverted feature work.
+export default function RadioScreen(_props: { refreshEpoch?: number } = {}): React.JSX.Element {
   const colors = useColors();
   const { user } = useAuth();
   const [channels, setChannels] = useState<Channel[]>([]);
@@ -95,17 +103,9 @@ export default function RadioScreen({ refreshEpoch = 0 }: { refreshEpoch?: numbe
   const [listenEpoch, setListenEpoch] = useState(0);
   const listenLossRef = useRef({ count: 0, lastAt: 0 });
 
-  const mediaProbe = mediaRef.current ?? createRadioMedia();
-  const supportsAudio = mediaProbe.supportsAudio;
-  // A native binary that predates the LiveKit native modules got this bundle
-  // over OTA — presence still works, but live audio needs a store update.
-  const missingNatives = mediaProbe.degradedReason === "missing_natives";
+  const supportsAudio = mediaRef.current?.supportsAudio ?? createRadioMedia().supportsAudio;
 
   const activeChannel = useMemo(() => channels.find((c) => c.id === activeId) || null, [channels, activeId]);
-  // Site radio channels get their own labelled section so a dispatcher can jump
-  // straight to any site's channel without hunting through the chip row (or
-  // opening the live map). Sorted by site name for scanability.
-  const siteChannels = useMemo(() => selectSiteChannels(channels), [channels]);
   const isSpeakingHere = activeId ? speakers[activeId]?.userId === user?.id : false;
   const otherSpeaker = activeId && speakers[activeId] && speakers[activeId]?.userId !== user?.id ? speakers[activeId] : null;
   const isTransmitting = talkState === "live" || talkState === "requesting" || talkState === "connecting";
@@ -131,51 +131,15 @@ export default function RadioScreen({ refreshEpoch = 0 }: { refreshEpoch?: numbe
   }
   useEffect(() => { userIdRef.current = user?.id; }, [user?.id]);
 
-  // Fetch the channel roster on every screen focus (not just mount) so a site
-  // channel an admin just created or archived shows up / disappears the next
-  // time a dispatcher opens the Radio tab — no app restart needed.
-  const firstLoadDoneRef = useRef(false);
-  // Shared roster refetch: used by the focus effect, the refreshEpoch
-  // sub-tab nudge, AND the live `channels_changed` WS nudge, so a channel an
-  // admin creates/archives while the Radio tab stays open appears/disappears
-  // in place. Silent on refetch: the spinner only gates the very first load,
-  // and a transient refetch failure keeps the last-known list rather than
-  // surfacing an error. Archiving the ACTIVE channel is handled by
-  // reconcileActiveId (selection moves to the first live channel); the
-  // listen-reconcile effect then drops the dead room because
-  // activeId/activeChannel changed.
-  const refetchChannels = useCallback((): (() => void) => {
-    let cancelled = false;
+  useEffect(() => {
     apiRequest("/radio/channels")
       .then((rows: Channel[]) => {
-        if (cancelled) return;
         setChannels(rows);
-        setActiveId((cur) => reconcileActiveId(rows, cur));
-        setError(null); // clear a stale first-load error once a refetch succeeds
+        if (rows[0]) setActiveId(rows[0].id);
       })
-      .catch((e: Error) => {
-        if (!cancelled && !firstLoadDoneRef.current) setError(e.message);
-      })
-      .finally(() => {
-        if (cancelled) return;
-        firstLoadDoneRef.current = true;
-        setLoading(false);
-      });
-    return () => { cancelled = true; };
+      .catch((e: Error) => setError(e.message))
+      .finally(() => setLoading(false));
   }, []);
-  const refetchChannelsRef = useRef(refetchChannels);
-  useEffect(() => { refetchChannelsRef.current = refetchChannels; }, [refetchChannels]);
-
-  useFocusEffect(useCallback(() => refetchChannels(), [refetchChannels]));
-  // When RadioScreen is embedded as a hidden sub-tab (employee Chat screen),
-  // expo-router focus fires for the PARENT tab, not the sub-tab flip. The host
-  // bumps refreshEpoch each time the Radio sub-tab becomes visible so the
-  // roster refetches then too. Epoch 0 is the mount value — the focus effect
-  // already covers the first load, so skip it to avoid a duplicate request.
-  useEffect(() => {
-    if (refreshEpoch === 0) return;
-    return refetchChannels();
-  }, [refreshEpoch, refetchChannels]);
 
   // --- WS control plane (presence + speaker lock signalling) ---
   // Auto-reconnects with capped exponential backoff + jitter so a dropped
@@ -260,12 +224,6 @@ export default function RadioScreen({ refreshEpoch = 0 }: { refreshEpoch?: numbe
             if (intent) void beginPublish(intent.channelId, intent.gen);
           } else if (m.type === "silent" && m.channelId) {
             setSpeakers((s) => ({ ...s, [m.channelId]: null }));
-          } else if (m.type === "channels_changed") {
-            // Admin created/archived/retargeted a channel — refetch the roster
-            // in place so the Site Channels section updates without leaving
-            // the tab. Server sends a nudge only; the refetch re-applies the
-            // per-user visibility filter server-side.
-            refetchChannelsRef.current();
           } else if (m.type === "denied") {
             setError(friendlyDeniedReason(m.reason));
             cancelTransmit();
@@ -288,29 +246,6 @@ export default function RadioScreen({ refreshEpoch = 0 }: { refreshEpoch?: numbe
       mediaRef.current = null;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
-
-  // --- resume re-reconcile after unlock/foreground ---
-  // While the app is suspended (locked phone without the audio keep-alive, or
-  // iOS reclaiming resources) all JS timers freeze, so the listen self-heal
-  // backoff and the WS reconnect timer may never have fired. On return to
-  // "active": bump listenEpoch so the reconcile effect re-checks the listen
-  // room (no-op when healthy), nudge the control WS with a protocol ping —
-  // a socket the OS silently killed will fail the send / surface onclose,
-  // which owns reconnection — and replay the native silent keep-alive player
-  // (an AVAudioSession interruption like a phone call pauses it and nothing
-  // resumes it automatically).
-  useEffect(() => {
-    const sub = AppState.addEventListener("change", (status) => {
-      if (status !== "active") return;
-      setListenEpoch((e) => e + 1);
-      mediaRef.current?.resumeKeepAlive?.();
-      const ws = wsRef.current;
-      if (ws && ws.readyState === WebSocket.OPEN) {
-        try { ws.send(JSON.stringify({ type: "ping" })); } catch { /* onclose handles it */ }
-      }
-    });
-    return () => sub.remove();
   }, []);
 
   // --- join all visible non-archived channels (control plane) once WS is up ---
@@ -424,9 +359,7 @@ export default function RadioScreen({ refreshEpoch = 0 }: { refreshEpoch?: numbe
   function startTalking(): void {
     if (!activeId || talkState !== "idle" || isSpeakingHere || otherSpeaker) return;
     if (!supportsAudio) {
-      setError(missingNatives
-        ? "Live audio requires the latest app version from the App Store. Presence and channels still work."
-        : "Live radio audio is in the SecureOps app on your phone. This preview shows presence only.");
+      setError("Live radio audio is in the SecureOps app on your phone. This preview shows presence only.");
       return;
     }
     if (!audioAvailable) { setError("Live radio audio is not configured on this server."); return; }
@@ -478,14 +411,6 @@ export default function RadioScreen({ refreshEpoch = 0 }: { refreshEpoch?: numbe
         </View>
       </View>
 
-      {missingNatives && (
-        <View style={styles.errorBox}>
-          <Text style={styles.errorText}>
-            Live audio requires the latest app version from the App Store. You can still see channels and who's transmitting.
-          </Text>
-        </View>
-      )}
-
       {supportsAudio && !audioAvailable && (
         <View style={styles.errorBox}>
           <Text style={styles.errorText}>
@@ -517,38 +442,6 @@ export default function RadioScreen({ refreshEpoch = 0 }: { refreshEpoch?: numbe
           );
         })}
       </ScrollView>
-
-      {siteChannels.length > 0 && (
-        <View style={styles.siteSection}>
-          <Text style={styles.siteSectionTitle}>Site Channels</Text>
-          <ScrollView style={styles.siteList} showsVerticalScrollIndicator={false}>
-            {siteChannels.map((c) => {
-              const active = c.id === activeId;
-              const sp = speakers[c.id];
-              const label = c.siteName ?? c.name;
-              return (
-                <TouchableOpacity
-                  key={c.id}
-                  onPress={() => setActiveId(c.id)}
-                  style={[styles.siteRow, active && { borderColor: colors.primary, backgroundColor: colors.card }]}
-                  accessibilityRole="button"
-                  accessibilityState={{ selected: active }}
-                  accessibilityLabel={`Site channel ${label}${sp ? `, ${sp.name} transmitting` : ""}`}
-                >
-                  <Feather name="map-pin" size={14} color={active ? colors.primary : colors.mutedForeground} />
-                  <View style={{ flex: 1 }}>
-                    <Text style={[styles.siteRowName, active && { color: colors.primary }]} numberOfLines={1}>{label}</Text>
-                    {c.siteName && c.name !== c.siteName && (
-                      <Text style={styles.siteRowSub} numberOfLines={1}>{c.name}</Text>
-                    )}
-                  </View>
-                  {sp && <Feather name="volume-2" size={14} color="#16a34a" />}
-                </TouchableOpacity>
-              );
-            })}
-          </ScrollView>
-        </View>
-      )}
 
       <View style={styles.body}>
         {!activeChannel ? (
@@ -645,12 +538,6 @@ const makeStyles = (colors: ReturnType<typeof useColors>) => StyleSheet.create({
   chipRow: { maxHeight: 48, flexGrow: 0 },
   chip: { flexDirection: "row", alignItems: "center", paddingHorizontal: 12, paddingVertical: 6, borderRadius: 16, backgroundColor: colors.card, borderWidth: 1, borderColor: colors.border },
   chipText: { color: colors.foreground, fontSize: 13 },
-  siteSection: { paddingHorizontal: 16, paddingTop: 12 },
-  siteSectionTitle: { fontSize: 12, fontWeight: "700", color: colors.mutedForeground, textTransform: "uppercase", letterSpacing: 0.5, marginBottom: 6 },
-  siteList: { maxHeight: 168, flexGrow: 0 },
-  siteRow: { flexDirection: "row", alignItems: "center", gap: 10, paddingHorizontal: 12, paddingVertical: 9, borderRadius: 10, borderWidth: 1, borderColor: colors.border, backgroundColor: colors.background, marginBottom: 6 },
-  siteRowName: { color: colors.foreground, fontSize: 14, fontWeight: "600" },
-  siteRowSub: { color: colors.mutedForeground, fontSize: 11, marginTop: 1 },
   body: { flex: 1, alignItems: "center", paddingTop: 24 },
   channelName: { fontSize: 20, fontWeight: "700", color: colors.foreground },
   muted: { color: colors.mutedForeground, fontSize: 13, marginTop: 4 },

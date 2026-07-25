@@ -6,8 +6,7 @@
  * does. runtimeVersion policy is `appVersion`, so a 1.0.0 OTA bundle lands on
  * ALL of those binaries; a top-level import of either package would throw at
  * module evaluation and crash the app the moment the Radio screen (or the
- * Chat screen that embeds it) loads. Same pattern as `getExpoAudio()` in
- * radioMedia.native.ts.
+ * Chat screen that embeds it) loads.
  *
  * On first successful load of `@livekit/react-native` this also runs
  * `registerGlobals()`, which patches in the WebRTC/media primitives that the
@@ -49,8 +48,12 @@ export const BINARY_GATED_NATIVE_PACKAGES: ReadonlyArray<{
     allowedLoaderFiles: ["components/radio/nativeModules.ts"],
   },
   {
+    // Not currently loaded anywhere (the expo-audio silent keep-alive was
+    // reverted with the July-22 radio rollback), but the package is still
+    // absent from App Store builds ≤ 9 — keep it gated with NO approved
+    // loader so any future use must add a guarded lazy loader first.
     package: "expo-audio",
-    allowedLoaderFiles: ["components/radio/radioMedia.native.ts"],
+    allowedLoaderFiles: [],
   },
   {
     // livekit-client is pure JS, but its MODULE EVALUATION touches browser
