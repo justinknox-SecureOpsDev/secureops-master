@@ -149,10 +149,53 @@ class NativeRadioMedia implements RadioMedia {
       }
     }
     await this.lk.AudioSession.configureAudio({
-      android: { audioTypeOptions: this.lk.AndroidAudioTypePresets.communication },
+      android: {
+        // Bluetooth-first routing so a connected headset carries BOTH
+        // directions (SCO engages the headset mic, not just playback); the
+        // list is the selection order, so with no BT/wired device connected
+        // the speakerphone-out/phone-mic behavior is unchanged. LiveKit's
+        // audio switcher re-evaluates this list on device connect/disconnect,
+        // which is what keeps mid-session plug/unplug from stranding the
+        // route.
+        preferredOutputList: ["bluetooth", "headset", "speaker", "earpiece"],
+        audioTypeOptions: {
+          ...this.lk.AndroidAudioTypePresets.communication,
+          // Some Android devices skip audio routing entirely depending on
+          // audio mode, which leaves capture on the built-in mic even with a
+          // BT headset connected — force routing so SCO capture engages.
+          forceHandleAudioRouting: true,
+        },
+      },
       ios: { defaultOutput: "speaker" },
     });
     await this.lk.AudioSession.startAudioSession();
+    // iOS: the default LiveKit session category has NO Bluetooth options, so
+    // a connected headset gets playback (route override) but transmissions
+    // still capture from the built-in mic. Re-apply the category with
+    // allowBluetooth (HFP — REQUIRED for the headset MIC to be an input
+    // route) + allowBluetoothA2DP (high-quality playback while not
+    // capturing) + defaultToSpeaker (no BT/wired device → speakerphone, not
+    // earpiece; BT outranks this automatically when connected) + voiceChat
+    // mode (PTT-appropriate processing; OS then follows route changes when a
+    // headset connects/disconnects mid-session). mixWithOthers keeps the
+    // silent keep-alive loop co-existing exactly as before. Applied AFTER
+    // startAudioSession so it wins over the activation defaults. Best-effort:
+    // a binary whose native module predates this method keeps today's
+    // behavior (phone mic) instead of failing the session.
+    try {
+      await this.lk.AudioSession.setAppleAudioConfiguration({
+        audioCategory: "playAndRecord",
+        audioCategoryOptions: [
+          "allowBluetooth",
+          "allowBluetoothA2DP",
+          "defaultToSpeaker",
+          "mixWithOthers",
+        ],
+        audioMode: "voiceChat",
+      });
+    } catch (e) {
+      console.warn("[radio] setAppleAudioConfiguration failed", e);
+    }
     this.sessionStarted = true;
   }
 

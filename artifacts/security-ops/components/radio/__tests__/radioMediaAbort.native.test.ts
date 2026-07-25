@@ -59,6 +59,7 @@ vi.mock("@livekit/react-native", () => ({
     configureAudio: vi.fn(async () => {}),
     startAudioSession: vi.fn(async () => {}),
     stopAudioSession: vi.fn(async () => {}),
+    setAppleAudioConfiguration: vi.fn(async () => {}),
   },
   RNKeyProvider: class {
     setSharedKey = vi.fn(async () => {});
