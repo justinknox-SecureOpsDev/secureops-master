@@ -113,3 +113,9 @@ id = "_OCS3f--viUxTfkbNjkXE"
 uri = "file://attached_assets/feature-graphic.png"
 type = "image"
 title = "Feature Graphic — 1024×500 (Google Play)"
+
+[[outputs]]
+id = "saYbh2dl9lEeakvbTQM9D"
+uri = "file://attached_assets/location-permission-demo.mp4"
+type = "video"
+title = "Location Permission Demo — 23s MP4 (Google Play)"

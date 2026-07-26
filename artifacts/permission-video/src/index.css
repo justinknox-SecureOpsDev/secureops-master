@@ -1,0 +1,36 @@
+@import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=Inter:wght@400;500;600&display=swap');
+@import "tailwindcss";
+
+@theme {
+  --font-display: "Plus Jakarta Sans", sans-serif;
+  --font-body: "Inter", sans-serif;
+
+  --color-brand-bg: #0c0a08;
+  --color-brand-gold: #C9A84C;
+  --color-brand-gold-hover: #b3923a;
+  
+  --color-android-bg: #1e1e1e;
+  --color-android-surface: #2d2d2d;
+  --color-android-text: #e0e0e0;
+  --color-android-text-muted: #a0a0a0;
+  --color-android-accent: #8ab4f8; /* default Android blue accent */
+}
+
+@layer base {
+  :root {
+    --background: 0 0% 100%;
+    --foreground: 0 0% 3.9%;
+  }
+
+  * {
+    box-sizing: border-box;
+  }
+}
+
+body {
+  margin: 0;
+  overflow: hidden;
+  font-family: var(--font-body);
+  background-color: #000;
+  color: white;
+}

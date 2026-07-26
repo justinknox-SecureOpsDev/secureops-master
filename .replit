@@ -153,6 +153,18 @@ args = "pnpm --filter @workspace/scripts run check-front-door"
 [workflows.workflow.metadata]
 isValidation = true
 
+[[workflows.workflow]]
+name = "artifacts/permission-video: web"
+author = "agent"
+
+[[workflows.workflow.tasks]]
+task = "shell.exec"
+args = "PORT=8082 BASE_PATH=/permission-video/ pnpm --filter @workspace/permission-video run dev"
+waitForPort = 8082
+
+[workflows.workflow.metadata]
+outputType = "console"
+
 [agent]
 stack = "BEST_EFFORT_FALLBACK"
 expertMode = true
