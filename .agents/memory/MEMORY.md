@@ -77,6 +77,8 @@
 - [Brand palette encodings](brand-palette-encodings.md) — brand colors span hex + HSL tuples + rgba triples across admin/home/mobile token files; a palette change must warm ALL encodings + derived shades, not just the base values.
 - [App Store 5.1.5 EULA](appstore-5.1.5-eula.md) — location/emergency feature needs a public EULA (/admin-portal/eula) whose disclaimer must stay in sync with the /emergency + location behavior, or Apple 5.1.5 re-rejects.
 - [App Store 5.1.1(iv) permission priming](appstore-permission-priming.md) — custom pre-permission screen buttons must be neutral ("Continue"/"Next"), never "Allow/Enable/Grant X", or Apple rejects.
+- [Mobile location is foreground-only](mobile-location-foreground-only.md) — app DECLARES background-location/FGS-location but code only does foreground one-shot reads, no geofencing; drives store permission answers.
+- [Permission demo video export](permission-demo-video-export.md) — artifacts/permission-video ?v=media|mic renders store permission demos; export via puppeteer-core+Chromium frame-capture → ffmpeg.
 - [OTA update from sandbox](ota-update-from-sandbox.md) — policy 2026-07: OTA runtime 1.0.0 ONLY, app.json pinned to 1.0.0 (1.0.1/build14 embeds broken radio); auto-OTA from deploy snapshot; manual = capped expo export + eas update.
 - [Radio keep-alive binary gate](radio-keepalive-binary-gate.md) — locked-screen radio survival needs the expo-audio silent loop; absent from store builds ≤10 so it degrades off there — never OTA-fixable, needs a new binary.
 - [Hermes eval-unsafe JS libs](ota-update-from-sandbox.md) — livekit-client (pure JS) module eval needs registerGlobals() polyfills; static value import crashes ALL native binaries at route registration; gate it, top-level `import type` only.

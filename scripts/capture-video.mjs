@@ -6,20 +6,27 @@ import { join } from 'path';
 
 const execFileAsync = promisify(execFile);
 
+// --- CLI args: --url, --dur (ms), --out ---
+const args = Object.fromEntries(
+  process.argv.slice(2).flatMap((a) => {
+    const m = a.match(/^--([^=]+)=(.*)$/);
+    return m ? [[m[1], m[2]]] : [];
+  }),
+);
+
 const CHROMIUM = '/nix/store/qa9cnw4v5xkxyip6mb9kxqfq1z4x2dx1-chromium-138.0.7204.100/bin/chromium';
-const URL = 'http://localhost:8082/permission-video/';
+const URL = args.url || 'http://localhost:8082/permission-video/';
 const FPS = 30;
-const DURATION_MS = 23500; // 8000 + 7000 + 8000 + 500ms buffer
+const DURATION_MS = Number(args.dur || 23500);
 const TOTAL_FRAMES = Math.ceil((DURATION_MS / 1000) * FPS);
 const FRAMES_DIR = '/tmp/pv-frames';
-const OUTPUT = 'attached_assets/location-permission-demo.mp4';
+const OUTPUT = args.out || 'attached_assets/location-permission-demo.mp4';
 
 async function main() {
-  // Clean frames dir
   try { rmSync(FRAMES_DIR, { recursive: true }); } catch {}
   mkdirSync(FRAMES_DIR, { recursive: true });
 
-  console.log(`Launching Chromium...`);
+  console.log(`Launching Chromium for ${URL} (${DURATION_MS}ms)...`);
   const browser = await puppeteer.launch({
     executablePath: CHROMIUM,
     headless: true,
@@ -34,21 +41,16 @@ async function main() {
 
   const page = await browser.newPage();
   await page.setViewport({ width: 1280, height: 720 });
-
-  console.log(`Navigating to ${URL}...`);
   await page.goto(URL, { waitUntil: 'networkidle0', timeout: 30000 });
-
-  // Give fonts/animations a moment to settle
-  await new Promise(r => setTimeout(r, 800));
+  await new Promise((r) => setTimeout(r, 800));
 
   console.log(`Capturing ${TOTAL_FRAMES} frames at ${FPS}fps...`);
   const interval = 1000 / FPS;
-
   for (let i = 0; i < TOTAL_FRAMES; i++) {
     const framePath = join(FRAMES_DIR, `frame-${String(i).padStart(5, '0')}.png`);
     await page.screenshot({ path: framePath, type: 'png' });
-    if (i % 30 === 0) console.log(`  Frame ${i}/${TOTAL_FRAMES}`);
-    await new Promise(r => setTimeout(r, interval));
+    if (i % 60 === 0) console.log(`  Frame ${i}/${TOTAL_FRAMES}`);
+    await new Promise((r) => setTimeout(r, interval));
   }
 
   await browser.close();
@@ -69,4 +71,4 @@ async function main() {
   console.log(`Done! Output: ${OUTPUT}`);
 }
 
-main().catch(e => { console.error(e); process.exit(1); });
+main().catch((e) => { console.error(e); process.exit(1); });

@@ -119,3 +119,15 @@ id = "saYbh2dl9lEeakvbTQM9D"
 uri = "file://attached_assets/location-permission-demo.mp4"
 type = "video"
 title = "Location Permission Demo — 23s MP4 (Google Play)"
+
+[[outputs]]
+id = "UmE3LqDx3iOGKgWZ5mxpK"
+uri = "file://attached_assets/media-playback-demo.mp4"
+type = "video"
+title = "Media Playback FGS Demo — 21s (Google Play)"
+
+[[outputs]]
+id = "wc8hFfd_3CrUjnyKNXzef"
+uri = "file://attached_assets/microphone-demo.mp4"
+type = "video"
+title = "Microphone FGS Demo — 21s (Google Play)"
