@@ -285,7 +285,7 @@ export function OnboardPage() {
                 <Field label="SSN"><Input value={niNumberConfirmed} onChange={(e) => setNiNumberConfirmed(e.target.value)} placeholder="xxx-xx-xxxx" /></Field>
                 <Field label="W-4 filing status"><Input value={taxCode} onChange={(e) => setTaxCode(e.target.value)} placeholder="e.g. Single, Married" /></Field>
               </Two>
-              <FileUploadField label="Prior W-2 / final pay stub (if available)" accept=".pdf,image/*" value={p45Doc} onChange={setP45Doc} uploadFn={uploadFileAnon} />
+              <FileUploadField label="Prior W-2 / final pay stub (if available)" accept=".pdf,image/*,.heic,.heif" value={p45Doc} onChange={setP45Doc} uploadFn={uploadFileAnon} />
             </>
           )}
           {step === 1 && (
@@ -310,8 +310,8 @@ export function OnboardPage() {
           {step === 2 && (
             <>
               <h2 ref={headingRef} tabIndex={-1} className="brand-wordmark text-xl focus:outline-none">Documents</h2>
-              <FileUploadField label="TX security license (photo of card)" accept="image/*,.pdf" value={siaLicenseDoc} onChange={setSiaDoc} uploadFn={uploadFileAnon} error={error?.field === "siaLicenseDoc" ? error.message : undefined} />
-              <FileUploadField label="Passport / driver's license / right-to-work document" accept="image/*,.pdf" value={passportDoc} onChange={setPassportDoc} uploadFn={uploadFileAnon} error={error?.field === "passportDoc" ? error.message : undefined} />
+              <FileUploadField label="TX security license (photo of card)" accept="image/*,.pdf,.heic,.heif" value={siaLicenseDoc} onChange={setSiaDoc} uploadFn={uploadFileAnon} error={error?.field === "siaLicenseDoc" ? error.message : undefined} />
+              <FileUploadField label="Passport / driver's license / right-to-work document" accept="image/*,.pdf,.heic,.heif" value={passportDoc} onChange={setPassportDoc} uploadFn={uploadFileAnon} error={error?.field === "passportDoc" ? error.message : undefined} />
             </>
           )}
           {step === 3 && (

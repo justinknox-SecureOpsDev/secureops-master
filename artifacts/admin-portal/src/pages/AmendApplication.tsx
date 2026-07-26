@@ -200,7 +200,7 @@ function FieldEditor({
         <FileUploadField
           label={`${field.label} (required)`}
           required
-          accept={field.key === "photo" ? "image/*" : field.key === "cv" ? ".pdf,.doc,.docx" : "image/*,.pdf"}
+          accept={field.key === "photo" ? "image/*,.heic,.heif" : field.key === "cv" ? ".pdf,.doc,.docx" : "image/*,.pdf,.heic,.heif"}
           value={(value as UploadedFile | null) ?? null}
           onChange={(v) => onChange(v)}
           uploadFn={uploadFileAnon}
