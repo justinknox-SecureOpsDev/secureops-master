@@ -31,10 +31,13 @@ export async function pickAndUploadImage(opts?: {
   if (source === "camera") {
     const perm = await ImagePicker.requestCameraPermissionsAsync();
     if (!perm.granted) throw new Error("Camera permission denied");
-  } else {
-    const perm = await ImagePicker.requestMediaLibraryPermissionsAsync();
-    if (!perm.granted) throw new Error("Photo library permission denied");
   }
+  // For the library source we deliberately do NOT request a media-library
+  // permission: launchImageLibraryAsync() uses the OS system photo picker
+  // (Android Photo Picker / iOS PHPicker), which runs out-of-process, lets the
+  // user pick exactly what to share, and needs no READ_MEDIA_* permission.
+  // Google Play rejects apps that request READ_MEDIA_IMAGES/READ_MEDIA_VIDEO
+  // when the system picker is sufficient — which it is here (single-image pick).
 
   const result = source === "camera"
     ? await ImagePicker.launchCameraAsync({ mediaTypes: ["images"], quality, allowsEditing: false })
