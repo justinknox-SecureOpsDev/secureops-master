@@ -11,7 +11,7 @@ import { SecureOpsLogo } from "@/components/SecureOpsLogo";
 import { OrgQrScanner } from "@/components/OrgQrScanner";
 import { useOrg } from "@/contexts/OrgContext";
 import { useAuth } from "@/contexts/AuthContext";
-import { normalizeOrgCode, isValidOrgCode, decideOrgCodeAction } from "@/utils/orgConfig";
+import { normalizeOrgCode, isValidOrgCode, decideOrgCodeAction, resolveOrgCode } from "@/utils/orgConfig";
 import { runConnectOrgFlow, runSwitchToCodeFlow } from "@/utils/orgBootstrap";
 
 /**
@@ -78,6 +78,43 @@ export default function ConnectScreen() {
     }
   }, [user, router]);
 
+  // Web connect. The web build always talks to its OWN same origin (see
+  // utils/api getApiBaseUrl), so we never re-point the API origin in place —
+  // that would leave the hand-written fetch helper same-origin while the
+  // generated client goes cross-origin and trips CORS. Instead we resolve the
+  // code to its backend origin and HARD-NAVIGATE the browser there, where the
+  // app is same-origin again. When the resolved org IS this very deployment
+  // (the common case on the platform/demo host) we skip the reload and go
+  // straight to sign-in. `busy` is intentionally left set on success — we're
+  // leaving this page.
+  const runWebConnect = useCallback(
+    async (rawCode: string) => {
+      if (busy) return;
+      setBusy(true);
+      setError(null);
+      try {
+        const resolved = await resolveOrgCode(rawCode);
+        const target = resolved.apiBaseUrl.replace(/\/+$/, "");
+        if (typeof window !== "undefined" && target === window.location.origin) {
+          router.replace("/login");
+          return;
+        }
+        if (typeof window !== "undefined") {
+          window.location.assign(`${target}/app/`);
+          return;
+        }
+      } catch (e) {
+        setError(
+          e instanceof Error
+            ? e.message
+            : "Couldn't connect to that organization. Try again.",
+        );
+        setBusy(false);
+      }
+    },
+    [busy, router],
+  );
+
   // THE single safe entry point for every code that arrives here — invite-link
   // / QR deep link, the QR scanner, the Connect button, and the keyboard
   // submit. It decides what to do and, crucially, NEVER re-points the backend
@@ -86,6 +123,13 @@ export default function ConnectScreen() {
   const connectOrSwitch = useCallback(
     (rawCode: string, onDismiss: () => void) => {
       if (busy) return;
+      if (Platform.OS === "web") {
+        // Web has no persisted org and no in-place origin switch (see
+        // runWebConnect): resolve the code and navigate to that org's web app.
+        // `onDismiss` is unused here — there's no same-org teardown to undo.
+        void runWebConnect(rawCode);
+        return;
+      }
       const action = decideOrgCodeAction(rawCode, org?.code ?? null);
       switch (action.kind) {
         case "connect":
@@ -122,7 +166,7 @@ export default function ConnectScreen() {
         }
       }
     },
-    [busy, org, user, runFirstConnect, runSwitch],
+    [busy, org, user, runFirstConnect, runSwitch, runWebConnect],
   );
 
   // Auto-act on a valid prefilled code exactly once. Invite-link taps and QR

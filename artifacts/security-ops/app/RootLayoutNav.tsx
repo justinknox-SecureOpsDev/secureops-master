@@ -83,7 +83,17 @@ export default function RootLayoutNav() {
     const inAuthGroup = top === "(admin)" || top === "(employee)";
 
     if (!user) {
-      if (top !== "login" && top !== "forgot-password") router.replace("/login");
+      // On web the marketing front door hands off to /app/connect so a visitor
+      // (or an App Store reviewer entering the demo code) can choose an
+      // organization before signing in. Native reaches /connect via the org
+      // gate above; web skips that gate, so without this exception the guard
+      // would bounce /connect straight back to /login and the code screen could
+      // never render. Only /connect is spared — every other no-user web route
+      // still funnels to sign-in.
+      const stayOnWebConnect = Platform.OS === "web" && top === "connect";
+      if (top !== "login" && top !== "forgot-password" && !stayOnWebConnect) {
+        router.replace("/login");
+      }
       return;
     }
 

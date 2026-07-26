@@ -131,17 +131,30 @@ if (ALLOWED_ORIGINS.size === 0 && process.env.NODE_ENV === "production") {
 }
 
 app.use(
-  cors({
-    origin: (origin, cb) => {
-      // No Origin header → server-to-server, curl, native fetch from
-      // mobile (React Native sets no Origin). Always allow.
-      if (!origin) return cb(null, true);
-      if (ALLOWED_ORIGINS.has(origin.replace(/\/+$/, ""))) {
-        return cb(null, true);
-      }
-      return cb(new Error(`Origin ${origin} not allowed by CORS`));
-    },
-    credentials: true,
+  cors((req, cb) => {
+    // The public org-directory resolve endpoint is a stateless, credential-free
+    // routing lookup: ONE app-store build serves MANY customer backends, so a
+    // browser on ANY customer origin must be able to resolve a code to its
+    // backend. Non-browser clients (the native app, curl, server-to-server)
+    // already read it without CORS at all, so opening it to browsers exposes
+    // nothing new. Open to all origins, NEVER with credentials.
+    const path = (req as unknown as { path: string }).path;
+    if (path === "/api/org-directory/resolve") {
+      return cb(null, { origin: "*", credentials: false });
+    }
+    // Everything else stays locked to the operator allow-list.
+    return cb(null, {
+      origin: (origin, ocb) => {
+        // No Origin header → server-to-server, curl, native fetch from
+        // mobile (React Native sets no Origin). Always allow.
+        if (!origin) return ocb(null, true);
+        if (ALLOWED_ORIGINS.has(origin.replace(/\/+$/, ""))) {
+          return ocb(null, true);
+        }
+        return ocb(new Error(`Origin ${origin} not allowed by CORS`));
+      },
+      credentials: true,
+    });
   }),
 );
 
