@@ -137,3 +137,9 @@ id = "UA7M4em9OnD7AfFyJz7Te"
 uri = "file://attached_assets/secureops-officer-training.mp4"
 type = "video"
 title = "SecureOps — Officer Quick-Start Guide"
+
+[[outputs]]
+id = "0Tx6uKywkPWaIuh1aLTgh"
+uri = "file://attached_assets/secureops-officer-app-walkthrough.mp4"
+type = "video"
+title = "SecureOps Officer App — Training Walkthrough"
