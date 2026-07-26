@@ -166,6 +166,23 @@ app.use(express.urlencoded({ extended: true, limit: "1mb" }));
 
 app.use("/api", router);
 
+// Android App Links verification — must be served before the SPA fallback so
+// the marketing-site history handler never shadows it.
+app.get("/.well-known/assetlinks.json", (_req, res) => {
+  res.json([
+    {
+      relation: ["delegate_permission/common.handle_all_urls"],
+      target: {
+        namespace: "android_app",
+        package_name: "com.secureopscommand.app",
+        sha256_cert_fingerprints: [
+          "E6:7D:62:E5:6C:D4:4D:FA:5A:FC:67:D0:7E:3F:EF:D5:3D:45:AF:00:41:50:D9:26:08:B5:2D:DD:9F:D9:41:BC",
+        ],
+      },
+    },
+  ]);
+});
+
 // Single-port (Reserved VM) production builds also serve the pre-built web SPAs
 // (admin portal, home) from dist/static so the whole product runs on one port.
 // Mounted AFTER /api so it can never shadow an API route; no-ops in dev/test
