@@ -21,8 +21,8 @@ export type UploadedFile = {
 };
 
 /**
- * Extension → MIME map covering exactly the server's upload allow-list
- * (`ALLOWED_CONTENT_TYPES` in api-server storage routes).
+ * Extension → MIME map for the server's accepted upload inputs. iPhone photos
+ * (`.heic`/`.heif`) are included: the API accepts them and transcodes to JPEG.
  */
 const EXT_CONTENT_TYPES: Record<string, string> = {
   pdf: "application/pdf",
@@ -33,6 +33,8 @@ const EXT_CONTENT_TYPES: Record<string, string> = {
   png: "image/png",
   gif: "image/gif",
   webp: "image/webp",
+  heic: "image/heic",
+  heif: "image/heif",
   txt: "text/plain",
 };
 

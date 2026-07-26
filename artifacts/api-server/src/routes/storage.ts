@@ -1,5 +1,7 @@
 import express, { Router, type IRouter, type Request, type Response } from "express";
 import { Readable } from "stream";
+import sharp from "sharp";
+import { heicBufferToJpeg } from "../lib/heicConvert";
 import {
   RequestUploadUrlBody,
   RequestUploadUrlResponse,
@@ -20,8 +22,11 @@ import { isWorkerRole } from "../lib/eligibility";
 const MAX_UPLOAD_BYTES = 25 * 1024 * 1024;
 
 /**
- * Lower cap for anonymous HR application uploads (Apply / Onboard / Amend).
- * 10 MB is enough for scanned documents, license photos, and passports.
+ * Cap for anonymous HR application uploads (Apply / Onboard / Amend). 10 MB is
+ * ample for a phone photo of a driver's license, SSN card, or passport (an
+ * iPhone HEIC is 2–5 MB). Kept deliberately low: this endpoint is
+ * unauthenticated and every accepted image is re-encoded server-side, so a
+ * tight input bound limits the abuse surface of that transcode.
  */
 const APPLICATION_MAX_UPLOAD_BYTES = 10 * 1024 * 1024;
 
@@ -43,14 +48,14 @@ const ALLOWED_CONTENT_TYPES = new Set([
 ]);
 
 /**
- * Extension → MIME map covering exactly `ALLOWED_CONTENT_TYPES`.
+ * Extension → MIME map for the accepted upload inputs (the store-as-is
+ * allow-list plus the convertible HEIC/HEIF image types).
  *
  * Browsers frequently report an empty or generic `application/octet-stream`
- * type for Word documents (`.doc`/`.docx`) and any file whose extension the
- * OS hasn't registered. Without a fallback those legitimate uploads get a 415.
- * The client now infers the type from the extension, but we mirror it here so
- * the server stays robust against older/stale clients and isn't coupled to
- * frontend behavior.
+ * type for Word documents (`.doc`/`.docx`), iPhone `.heic` photos, and any file
+ * whose extension the OS hasn't registered. Without a fallback those legitimate
+ * uploads get a 415. The client also infers the type from the extension, but we
+ * mirror it here so the server stays robust against older/stale clients.
  */
 const EXTENSION_CONTENT_TYPES: Record<string, string> = {
   pdf: "application/pdf",
@@ -61,6 +66,8 @@ const EXTENSION_CONTENT_TYPES: Record<string, string> = {
   png: "image/png",
   gif: "image/gif",
   webp: "image/webp",
+  heic: "image/heic",
+  heif: "image/heif",
   txt: "text/plain",
 };
 
@@ -69,11 +76,83 @@ const EXTENSION_CONTENT_TYPES: Record<string, string> = {
  * generic `application/octet-stream`, fall back to the file extension. Returns
  * the normalized declared type otherwise.
  */
-function resolveContentType(declaredType: string, fileName: string): string {
+export function resolveContentType(declaredType: string, fileName: string): string {
   const normalized = declaredType.split(";")[0].trim().toLowerCase();
   if (normalized && normalized !== "application/octet-stream") return normalized;
   const ext = fileName.split(".").pop()?.toLowerCase() ?? "";
   return EXTENSION_CONTENT_TYPES[ext] ?? normalized;
+}
+
+/**
+ * iPhone/HEIF still-image formats. Most admin browsers (Chrome/Firefox) can't
+ * render these, so we accept them as INPUT but always transcode to JPEG before
+ * storing — see normalizeApplicationUpload.
+ */
+const CONVERTIBLE_IMAGE_TYPES = new Set(["image/heic", "image/heif"]);
+
+/**
+ * Raster photo types normalized via sharp (auto-orient + downscale + JPEG).
+ * HEIC/HEIF are handled separately (ImageMagick) because this build's sharp is
+ * AVIF-only and can't decode HEVC — see CONVERTIBLE_IMAGE_TYPES and
+ * normalizeApplicationUpload. PDFs/Word docs are in neither set and are stored
+ * byte-for-byte.
+ */
+const RASTER_IMAGE_TYPES = new Set([
+  "image/jpeg",
+  "image/jpg",
+  "image/png",
+  "image/gif",
+  "image/webp",
+]);
+
+/** Whether the anonymous application endpoint will accept this resolved type. */
+export function isAcceptedApplicationType(type: string): boolean {
+  return ALLOWED_CONTENT_TYPES.has(type) || CONVERTIBLE_IMAGE_TYPES.has(type);
+}
+
+/**
+ * Prepare an application upload for storage:
+ *  - iPhone HEIC/HEIF → decoded to JPEG via ImageMagick (this build's sharp is
+ *    AVIF-only and cannot read HEVC, so it can't decode real iPhone photos).
+ *  - Other raster photos → auto-rotated from EXIF, downscaled, and re-encoded to
+ *    JPEG via sharp, so the stored ID/SSN document is viewable in every admin
+ *    browser and an oversized phone photo doesn't bloat storage.
+ *  - PDF/DOC/DOCX/TXT → stored byte-for-byte.
+ * Throws if an image can't be decoded (the caller maps that to a 422).
+ */
+export async function normalizeApplicationUpload(
+  buffer: Buffer,
+  resolvedType: string,
+  name: string,
+): Promise<{ buffer: Buffer; contentType: string; name: string }> {
+  const jpgName = name.replace(/\.[^.]+$/, "") + ".jpg";
+
+  // iPhone HEIC/HEIF: sharp here is AVIF-only, so hand the bytes to ImageMagick,
+  // which carries the HEVC decoder and returns a normalized JPEG.
+  if (CONVERTIBLE_IMAGE_TYPES.has(resolvedType)) {
+    const jpeg = await heicBufferToJpeg(buffer);
+    return { buffer: jpeg, contentType: "image/jpeg", name: jpgName };
+  }
+
+  // Non-image files (PDF/DOC/DOCX/TXT) are stored byte-for-byte.
+  if (!RASTER_IMAGE_TYPES.has(resolvedType)) {
+    return { buffer, contentType: resolvedType, name };
+  }
+
+  // Regular raster photos go through sharp's fast native pipeline.
+  const out = await sharp(buffer, {
+    failOn: "none",
+    // Cap decompressed size: this endpoint is unauthenticated, so a highly
+    // compressible "pixel bomb" (huge dimensions, tiny byte size) could
+    // otherwise exhaust memory before the resize runs. 100 MP still admits
+    // every real phone camera (12–48 MP) with generous headroom.
+    limitInputPixels: 100_000_000,
+  })
+    .rotate()
+    .resize(3000, 3000, { fit: "inside", withoutEnlargement: true })
+    .jpeg({ quality: 82 })
+    .toBuffer();
+  return { buffer: out, contentType: "image/jpeg", name: jpgName };
 }
 
 const router: IRouter = Router();
@@ -242,17 +321,19 @@ router.post(
   async (req: Request, res: Response) => {
     // X-File-Name is advisory only (display on client). Sanitised, never used
     // in storage paths. Also used to recover the MIME type when the browser
-    // sends an empty/octet-stream Content-Type (common for .doc/.docx).
+    // sends an empty/octet-stream Content-Type (common for .doc/.docx and for
+    // iPhone .heic photos).
     const rawName = String(req.headers["x-file-name"] ?? "upload");
     const safeName = rawName.replace(/[^\w\s.\-()]/g, "").slice(0, 255) || "upload";
 
     const rawType = String(req.headers["content-type"] ?? "");
-    const normalizedType = resolveContentType(rawType, safeName);
+    const resolvedType = resolveContentType(rawType, safeName);
 
-    if (!ALLOWED_CONTENT_TYPES.has(normalizedType)) {
+    if (!isAcceptedApplicationType(resolvedType)) {
       res.status(415).json({
         error: "Unsupported Media Type",
-        message: "File type not permitted",
+        message:
+          "That file type isn't supported. Please upload a PDF or a photo (JPG, PNG, HEIC, or WEBP).",
       });
       return;
     }
@@ -263,13 +344,31 @@ router.post(
       return;
     }
 
+    // Auto-orient, downscale, and transcode raster photos to JPEG so iPhone
+    // HEIC/HEIF uploads work and every stored ID/SSN image is viewable in any
+    // admin browser. PDFs and Word docs pass through untouched.
+    let normalized: { buffer: Buffer; contentType: string; name: string };
     try {
-      const objectPath = await objectStorageService.saveObjectBuffer(body, normalizedType);
+      normalized = await normalizeApplicationUpload(body, resolvedType, safeName);
+    } catch (err) {
+      req.log.warn({ err }, "Application image normalization failed");
+      res.status(422).json({
+        error: "Unprocessable Entity",
+        message: "We couldn't read that image. Please try another photo or upload a PDF.",
+      });
+      return;
+    }
+
+    try {
+      const objectPath = await objectStorageService.saveObjectBuffer(
+        normalized.buffer,
+        normalized.contentType,
+      );
       res.json({
         objectPath,
-        name: safeName,
-        size: body.length,
-        contentType: normalizedType,
+        name: normalized.name,
+        size: normalized.buffer.length,
+        contentType: normalized.contentType,
       });
     } catch (error) {
       req.log.error({ err: error }, "Error saving application upload");

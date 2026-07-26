@@ -1015,7 +1015,7 @@ export function ApplyPage() {
       case "ssnCardDoc":
         return { width: "full", node: (
           <div className="space-y-1">
-            <FileUploadField label={label} required={req} accept="image/*,.pdf" value={form.ssnCardDoc} onChange={(v) => set("ssnCardDoc", v)} uploadFn={uploadFileAnon} error={errOnStep("ssnCardDoc")} />
+            <FileUploadField label={label} required={req} accept="image/*,.pdf,.heic,.heif" value={form.ssnCardDoc} onChange={(v) => set("ssnCardDoc", v)} uploadFn={uploadFileAnon} error={errOnStep("ssnCardDoc")} />
             {fileHelp("ssnCardDoc")}
           </div>
         ) };
@@ -1045,7 +1045,7 @@ export function ApplyPage() {
         const idLabel = isRelabeled("idDoc") ? label : dyn;
         return { width: "full", node: (
           <div className="space-y-1">
-            <FileUploadField label={idLabel} required={req} accept="image/*,.pdf" value={form.idDoc} onChange={(v) => set("idDoc", v)} uploadFn={uploadFileAnon} error={errOnStep("idDoc")} />
+            <FileUploadField label={idLabel} required={req} accept="image/*,.pdf,.heic,.heif" value={form.idDoc} onChange={(v) => set("idDoc", v)} uploadFn={uploadFileAnon} error={errOnStep("idDoc")} />
             {fileHelp("idDoc")}
           </div>
         ) };
@@ -1105,7 +1105,7 @@ export function ApplyPage() {
       case "photo":
         return { width: "half", node: (
           <div className="space-y-1">
-            <FileUploadField label={label} required={req} accept="image/*" value={form.photo} onChange={(v) => set("photo", v)} uploadFn={uploadFileAnon} error={errOnStep("photo")} />
+            <FileUploadField label={label} required={req} accept="image/*,.heic,.heif" value={form.photo} onChange={(v) => set("photo", v)} uploadFn={uploadFileAnon} error={errOnStep("photo")} />
             {fileHelp("photo")}
           </div>
         ) };
@@ -1122,7 +1122,7 @@ export function ApplyPage() {
             <MultiFileUploadField
               label={label}
               required={req}
-              accept="image/*,.pdf"
+              accept="image/*,.pdf,.heic,.heif"
               value={form.trainingCertificates}
               onChange={(v) => set("trainingCertificates", v)}
               uploadFn={uploadFileAnon}
