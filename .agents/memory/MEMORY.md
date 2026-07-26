@@ -45,6 +45,7 @@
 - [licenses.employee_id = users.id](licenses-table-user-id.md) — misnamed FK references users(id) not employees; joining via employees returns zero rows; fresh DBs seed demo staff with no licenses/site links.
 - [Two phone fields must sync](two-phone-fields-sync.md) — employees.phone (HR file) vs users.phoneNumber (account + ONLY field SMS reads); every phone write must mirror+E.164-normalize across both.
 - [Release gate schema drift](release-gate-schema-drift.md) — forgotten `db push` after a schema-adding commit breaks test/security-headers gates (`column ... does not exist`) while typecheck stays green; fix = push, not code.
+- [Stale gate after split merges](gate-red-stale-after-split-merge.md) — tests-first task merge reddens the gate until impl lands; re-run the suite before "fixing" clean code, then restart the gate.
 - [security-headers gate dist race](security-headers-gate-dist-race.md) — gate's "Cannot find module dist/index.mjs" is a race with the api-server dev workflow rebuilding the same dist; not a code defect, ignore for unrelated changes.
 - [Time-entry correction history](time-entry-correction-history.md) — officer entry change history filters audit_logs by entryId, NOT action (two edit paths emit different generic actions); new edit paths must stamp lastEdited cols + res.locals.auditMetadata.
 - [Admin time-card week-nav](admin-time-card-week-nav.md) — "week arrows don't work" is usually an unselectable officer (site-filter INNER-JOINs the dropdown), not nav; a loaded card gates the arrows.
