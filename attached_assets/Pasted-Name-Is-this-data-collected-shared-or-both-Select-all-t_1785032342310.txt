@@ -1,0 +1,47 @@
+Name
+Is this data collected, shared, or both?
+Select all that apply. Some types of data collection and sharing are exempt. View definitions and exemptions
+
+
+Collected
+This data is transmitted off the user's device, either to you (the developer) or a third party. This includes data that is processed ephemerally, or stored for longer.
+
+Shared
+This data is transferred to a third party, either on or off the user's device
+Is this data processed ephemerally?
+Processing data "ephemerally" means accessing and using data while it is only stored in memory, and is retained for no longer than necessary to service the specific request in real-time.
+
+Data collected in this way must still be disclosed, but will not be shown to users on your store listing. Learn more
+
+
+Yes, this collected data is processed ephemerally
+
+No, this collected data is not processed ephemerally
+Is this data required for your app, or can users choose whether it's collected? Learn more
+
+Data collection is required (users can't turn off this data collection)
+
+Users can choose whether this data is collected
+Data will be shown as optional on your store listing
+Why is this user data collected? Select all that apply. Learn more and view examples
+
+App functionality
+Used for features in your app. For example, to enable functionality, or authenticate users. Learn more
+
+Analytics
+Used to collect data about how users use your app, or how your app performs. For example, to see how many users are using a particular feature, to monitor app health, to diagnose and fix bugs or crashes, or to make future performance improvements. Learn more
+
+Developer communications
+Used to send news or notifications about you or your app. For example, sending a push notification to inform users about an important security update, or informing users about new features in your app. Learn more
+
+Advertising or marketing
+Used to display or target ads or marketing communications, or measure ad performance. For example, displaying ads in your app, sending push notifications to promote other products or services, or sharing data with advertising partners. Learn more
+
+Fraud prevention, security, and compliance
+Used for fraud prevention, security, or compliance with laws. For example, monitoring failed login attempts to identify possible fraudulent activity. Learn more
+
+Personalization
+Used to customize your app, such as showing recommended content or suggestions. For example, suggesting playlists based on users' listening habits, or delivering local news based on a user's location. Learn more
+
+Account management
+Used for the setup or management of user accounts. For example, to enable users to create accounts; to add information to accounts you provide, for use across your services; to log in to your app; or to verify their credentials. Learn more
