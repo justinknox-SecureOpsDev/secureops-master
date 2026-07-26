@@ -11,6 +11,7 @@ import {
 } from "@workspace/db";
 import app from "../app";
 import { signToken } from "../middlewares/auth";
+import { ObjectStorageService } from "../lib/objectStorage";
 
 /**
  * Regression coverage for the admin form-builder *custom questions* path.
@@ -629,5 +630,131 @@ describe("Admin review surfaces — custom answers display", () => {
       .set(authed(ctx.adminToken));
     expect(res.status).toBe(200);
     expectAnswersIntact(res.body.customAnswers as DisplayAnswer[], questionIds);
+  });
+});
+
+/**
+ * End-to-end coverage for the *anonymous upload path* behind a custom
+ * photo/file question. The suites above drive `coerceCustomAnswer` with
+ * synthetic `/objects/uploads/<uuid>` paths, so they never exercise the real
+ * `POST /storage/uploads/application-file` endpoint the public Apply form hits.
+ *
+ * These tests push genuine bytes through that endpoint (the same one
+ * `uploadFileAnon` calls from the client) and confirm:
+ *   - an oversized file, a disallowed type, a corrupt image, and an empty body
+ *     each fail loudly with a distinct status — nothing reaches storage as a
+ *     usable answer;
+ *   - a valid upload returns an anonymous-namespace objectPath, which is then
+ *     accepted as a custom-question answer, surfaces in admin review, and opens
+ *     via a signed URL.
+ */
+describe("Anonymous application-file upload — custom-question end to end", () => {
+  const UPLOAD_URL = "/api/storage/uploads/application-file";
+  // A minimal, valid PDF body. PDFs pass through the upload normalizer
+  // byte-for-byte (no image decode), so this is the least-flaky "valid" input.
+  const validPdf = Buffer.from("%PDF-1.4\n1 0 obj<<>>endobj\ntrailer<<>>\n%%EOF\n");
+  // Best-effort cleanup of any real objects we wrote to the bucket.
+  const uploadedPaths: string[] = [];
+
+  afterAll(async () => {
+    const storage = new ObjectStorageService();
+    for (const path of uploadedPaths) {
+      try {
+        const file = await storage.getObjectEntityFile(path);
+        await file.delete();
+      } catch {
+        /* object already gone or unreachable — cleanup is best-effort */
+      }
+    }
+  });
+
+  it("rejects a disallowed file type with 415 (never stored)", async () => {
+    const res = await request(app)
+      .post(UPLOAD_URL)
+      .set("Content-Type", "application/zip")
+      .set("X-File-Name", "malware.zip")
+      .send(Buffer.from("PK\x03\x04 not really a zip"));
+    expect(res.status).toBe(415);
+    expect(res.body.objectPath).toBeUndefined();
+  });
+
+  it("rejects a corrupt image with 422 (decode fails, never stored)", async () => {
+    const res = await request(app)
+      .post(UPLOAD_URL)
+      .set("Content-Type", "image/png")
+      .set("X-File-Name", "headshot.png")
+      .send(Buffer.from("this is not a real PNG payload"));
+    expect(res.status).toBe(422);
+    expect(res.body.objectPath).toBeUndefined();
+  });
+
+  it("rejects an empty body with 400", async () => {
+    const res = await request(app)
+      .post(UPLOAD_URL)
+      .set("Content-Type", "application/pdf")
+      .set("X-File-Name", "empty.pdf")
+      .send(Buffer.alloc(0));
+    expect(res.status).toBe(400);
+    expect(res.body.objectPath).toBeUndefined();
+  });
+
+  it("rejects an oversized file with 413 (over the 10 MB HTTP limit)", async () => {
+    // 11 MB > the endpoint's 10 MB express.raw() cap: the parser aborts before
+    // the handler ever runs, so nothing is written to storage.
+    const res = await request(app)
+      .post(UPLOAD_URL)
+      .set("Content-Type", "application/pdf")
+      .set("X-File-Name", "huge.pdf")
+      .send(Buffer.alloc(11 * 1024 * 1024, 0x41));
+    expect(res.status).toBe(413);
+  });
+
+  it("accepts a valid file, stores it as a custom answer, and opens via signed URL", async () => {
+    // 1. Real anonymous upload — the exact call the public Apply form makes.
+    const upload = await request(app)
+      .post(UPLOAD_URL)
+      .set("Content-Type", "application/pdf")
+      .set("X-File-Name", "certificate.pdf")
+      .send(validPdf);
+    expect(upload.status).toBe(200);
+    const objectPath = upload.body.objectPath as string;
+    expect(typeof objectPath).toBe("string");
+    // Must land in the anonymous namespace, never the user-scoped one.
+    expect(objectPath.startsWith("/objects/uploads/")).toBe(true);
+    expect(objectPath.startsWith("/objects/uploads/u/")).toBe(false);
+    expect(upload.body.name).toBe("certificate.pdf");
+    uploadedPaths.push(objectPath);
+
+    // 2. Use that real path as the answer to a custom file question.
+    const fileQ = await createQuestion({ label: "Certificate", fieldType: "file", required: true });
+    const body = buildApplicationBody("anon-upload-e2e");
+    body.customAnswers = [
+      { questionId: fileQ.id, value: { objectPath, name: upload.body.name } },
+    ];
+    const submit = await request(app).post("/api/applications").send(body);
+    expect(submit.status).toBe(201);
+
+    // 3. The stored answer references the uploaded object.
+    const row = await fetchApplicationByEmail(body.email as string);
+    const answers = row.customAnswers as Array<{ questionId: string; fieldType: string; value: unknown }>;
+    const stored = answers.find((a) => a.questionId === fileQ.id);
+    expect(stored).toMatchObject({ fieldType: "file", value: { objectPath, name: "certificate.pdf" } });
+
+    // 4. Admin review surfaces the same reference…
+    const detail = await request(app)
+      .get(`/api/admin/applications/${row.id}`)
+      .set(authed(ctx.adminToken));
+    expect(detail.status).toBe(200);
+    const reviewAnswers = detail.body.customAnswers as Array<{ questionId: string; value: { objectPath?: string } }>;
+    const reviewed = reviewAnswers.find((a) => a.questionId === fileQ.id);
+    expect(reviewed?.value.objectPath).toBe(objectPath);
+
+    // 5. …and the reviewer can open it via a short-lived signed URL.
+    const sign = await request(app)
+      .get(`/api/admin/storage/sign?path=${encodeURIComponent(objectPath)}`)
+      .set(authed(ctx.adminToken));
+    expect(sign.status).toBe(200);
+    expect(typeof sign.body.url).toBe("string");
+    expect(sign.body.url).toMatch(/^https?:\/\//);
   });
 });
