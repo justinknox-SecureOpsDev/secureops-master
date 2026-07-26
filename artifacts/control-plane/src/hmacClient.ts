@@ -39,15 +39,16 @@ async function fetchWithTimeout(url: string, init: RequestInit, timeoutMs: numbe
 export async function callCustomerControlPlane(
   origin: string,
   path: string,
-  method: "GET" | "PUT" | "POST",
+  method: "GET" | "PUT" | "POST" | "DELETE",
   secret: string,
   body?: unknown,
 ): Promise<RemoteResult> {
-  const payload = method === "GET" || body === undefined ? "" : JSON.stringify(body);
+  const bodyless = method === "GET" || method === "DELETE" || body === undefined;
+  const payload = bodyless ? "" : JSON.stringify(body);
   const sig = signControlPlanePayload(payload, secret);
   const headers: Record<string, string> = { [CONTROL_PLANE_SIGNATURE_HEADER]: sig };
   const init: RequestInit = { method, headers };
-  if (method !== "GET") {
+  if (!bodyless) {
     headers["Content-Type"] = "application/json";
     init.body = payload;
   }

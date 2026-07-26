@@ -573,7 +573,11 @@ function renderAgreements(docs) {
       "<div class='agreement-actions'>" +
       "<input type='file' accept='application/pdf,.pdf' data-agr-file='" + slot + "' style='display:none'>" +
       "<button type='button' class='ghost small' data-agr-upload='" + slot + "'>" +
-      (doc && doc.custom ? "Replace PDF" : "Upload PDF") + "</button></div></div>";
+      (doc && doc.custom ? "Replace PDF" : "Upload PDF") + "</button>" +
+      (doc && doc.custom
+        ? "<button type='button' class='ghost small danger' data-agr-remove='" + slot + "'>Remove custom PDF</button>"
+        : "") +
+      "</div></div>";
   });
   html += "</div>";
   return html;
@@ -591,6 +595,12 @@ function wireAgreements() {
       var file = fileEl.files && fileEl.files[0];
       if (file) uploadAgreement(slot, file, btnEl);
       fileEl.value = "";
+    });
+  });
+  document.querySelectorAll("[data-agr-remove]").forEach(function (btnEl) {
+    var slot = btnEl.getAttribute("data-agr-remove");
+    btnEl.addEventListener("click", function () {
+      removeAgreement(slot, btnEl);
     });
   });
 }
@@ -651,6 +661,40 @@ async function uploadAgreement(slot, file, btnEl) {
     if (btnEl) {
       btnEl.disabled = false;
       btnEl.textContent = label || "Upload PDF";
+    }
+  }
+}
+
+async function removeAgreement(slot, btnEl) {
+  var label = AGREEMENT_LABELS[slot] || slot;
+  if (!window.confirm("Remove the custom " + label + " PDF and revert to the bundled template?")) {
+    return;
+  }
+  var prev = btnEl ? btnEl.textContent : "";
+  if (btnEl) {
+    btnEl.disabled = true;
+    btnEl.textContent = "Removing…";
+  }
+  try {
+    var del = await api("/customers/" + settingsCustomer.id + "/remote-settings/agreements/" + slot, {
+      method: "DELETE",
+    });
+    if (del.status !== 200) {
+      var msg = del.remote && (del.remote.message || del.remote.error);
+      throw new Error(msg || "Backend returned " + del.status);
+    }
+    var statusEl = $("agr-status-" + slot);
+    if (statusEl) statusEl.textContent = agreementStatusText(del.remote);
+    if (btnEl && btnEl.parentNode) btnEl.parentNode.removeChild(btnEl);
+    var uploadEl = document.querySelector("[data-agr-upload='" + slot + "']");
+    if (uploadEl) uploadEl.textContent = "Upload PDF";
+    toast("Reverted to bundled template");
+    await loadHistory(settingsCustomer);
+  } catch (err) {
+    toast((err && err.message) || "Remove failed", true);
+    if (btnEl) {
+      btnEl.disabled = false;
+      btnEl.textContent = prev || "Remove custom PDF";
     }
   }
 }

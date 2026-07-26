@@ -24,6 +24,7 @@ import {
   platformBrandConfigTable,
   platformCustomerConfigTable,
   platformAgreementSignaturesTable,
+  platformAgreementDocsTable,
 } from "@workspace/db";
 import { AGREEMENT_SLOTS, AGREEMENT_TITLES } from "@workspace/legal-docs";
 import { z } from "zod/v4";
@@ -34,6 +35,7 @@ import {
   agreementUploadBody,
   registerAgreementDoc,
   readAgreementDocDtos,
+  agreementRowToDto,
 } from "../lib/agreementDocs";
 import { applyBrandOverrides } from "../lib/brandConfig";
 import {
@@ -197,6 +199,21 @@ router.put("/control-plane/agreements/:slot", async (req, res) => {
     return;
   }
   res.json(result.dto);
+});
+
+/**
+ * Revert an agreement slot to the bundled template by removing the uploaded
+ * custom-document record. Mirrors the in-app super-admin DELETE route so a
+ * remote revert is indistinguishable from an in-app one.
+ */
+router.delete("/control-plane/agreements/:slot", async (req, res) => {
+  const slot = parseAgreementSlot(req.params["slot"]);
+  if (!slot) {
+    res.status(404).json({ error: "Not Found", message: "Unknown agreement slot" });
+    return;
+  }
+  await db.delete(platformAgreementDocsTable).where(eq(platformAgreementDocsTable.slot, slot));
+  res.json(agreementRowToDto(slot, undefined));
 });
 
 /** Upsert brand overrides remotely and patch the live brand in memory. */

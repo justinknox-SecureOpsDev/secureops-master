@@ -21,6 +21,7 @@ import {
   summarizeFeatures,
   summarizePlanBilling,
   summarizeAgreement,
+  summarizeAgreementRemoval,
 } from "../routes/remoteSettings";
 import { OPERATOR_EMAIL, OPERATOR_PASSWORD } from "../config";
 
@@ -155,6 +156,15 @@ describe("remote-change summaries", () => {
   it("falls back gracefully when the agreement file name is missing", () => {
     expect(summarizeAgreement("msa", {})).toBe("Replaced MSA document");
     expect(summarizeAgreement("user_agreement", null)).toBe("Replaced User Agreement document");
+  });
+
+  it("summarizes an agreement removal as a revert to the bundled template", () => {
+    expect(summarizeAgreementRemoval("msa")).toBe(
+      "Removed custom MSA document — reverted to bundled template",
+    );
+    expect(summarizeAgreementRemoval("user_agreement")).toBe(
+      "Removed custom User Agreement document — reverted to bundled template",
+    );
   });
 });
 

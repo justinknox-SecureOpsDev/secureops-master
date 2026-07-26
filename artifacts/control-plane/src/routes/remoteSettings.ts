@@ -96,6 +96,15 @@ export function summarizeAgreement(slot: string, body: unknown): string {
   return fileName ? `Replaced ${label} document: ${fileName}` : `Replaced ${label} document`;
 }
 
+/**
+ * Build a concise human-readable summary of an agreement-document removal —
+ * reverting the slot back to the bundled template.
+ */
+export function summarizeAgreementRemoval(slot: string): string {
+  const label = slot === "msa" ? "MSA" : slot === "user_agreement" ? "User Agreement" : slot;
+  return `Removed custom ${label} document — reverted to bundled template`;
+}
+
 async function recordChange(
   customerId: string,
   operator: string,
@@ -146,7 +155,7 @@ function resolveSecret(row: CustomerRow): string | null {
 async function proxy(
   res: import("express").Response,
   row: CustomerRow,
-  method: "GET" | "PUT" | "POST",
+  method: "GET" | "PUT" | "POST" | "DELETE",
   path: string,
   body?: unknown,
 ): Promise<number | null> {
@@ -253,6 +262,30 @@ remoteSettingsRouter.put("/customers/:id/remote-settings/agreements/:slot", asyn
   if (status === 200) {
     const operator = (res.locals.operator as string) || "operator";
     await recordChange(row.id, operator, "agreement", summarizeAgreement(slot, req.body), status);
+  }
+});
+
+/**
+ * Remove a customer's custom agreement PDF, reverting the slot to the bundled
+ * template. The customer backend deletes its docs-table row; we record the
+ * change under the "agreement" kind so it shows in per-customer + fleet history.
+ */
+remoteSettingsRouter.delete("/customers/:id/remote-settings/agreements/:slot", async (req, res) => {
+  const row = await loadCustomer(req.params.id);
+  if (!row) {
+    res.status(404).json({ error: "Customer not found" });
+    return;
+  }
+  const slot = req.params.slot;
+  const status = await proxy(
+    res,
+    row,
+    "DELETE",
+    `/api/control-plane/agreements/${encodeURIComponent(slot)}`,
+  );
+  if (status === 200) {
+    const operator = (res.locals.operator as string) || "operator";
+    await recordChange(row.id, operator, "agreement", summarizeAgreementRemoval(slot), status);
   }
 });
 
