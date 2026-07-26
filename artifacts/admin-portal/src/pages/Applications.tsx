@@ -812,12 +812,21 @@ function ApplicationDialog({
         {app.customAnswers && app.customAnswers.length > 0 && (
           <Section title="Additional questions">
             <dl className="text-sm space-y-2">
-              {app.customAnswers.map((a) => (
-                <div key={a.questionId}>
-                  <dt className="text-muted-foreground text-xs">{a.label}</dt>
-                  <dd className="font-medium whitespace-pre-wrap">{formatCustomAnswer(a.value)}</dd>
-                </div>
-              ))}
+              {app.customAnswers.map((a) => {
+                const uploadPath = customAnswerUploadPath(a);
+                return (
+                  <div key={a.questionId}>
+                    <dt className="text-muted-foreground text-xs">{a.label}</dt>
+                    {uploadPath ? (
+                      <dd className="font-medium">
+                        <button type="button" className="underline brand-navy" onClick={() => openSignedObject(uploadPath)}>view</button>
+                      </dd>
+                    ) : (
+                      <dd className="font-medium whitespace-pre-wrap">{formatCustomAnswer(a.value)}</dd>
+                    )}
+                  </div>
+                );
+              })}
             </dl>
           </Section>
         )}
@@ -1153,6 +1162,21 @@ function ApprovalSuccessDialog({ resp, onClose }: { resp: ApproveResp; onClose: 
       </DialogContent>
     </Dialog>
   );
+}
+
+/**
+ * Upload-type custom answers ("file" / "photo") store an uploaded-file
+ * reference {objectPath, name}. Return its object path so the review UI can
+ * render a signed view/download link like the built-in Photo/Resume files.
+ */
+function customAnswerUploadPath(a: { fieldType: string; value: unknown }): string | null {
+  if (a.fieldType !== "file" && a.fieldType !== "photo") return null;
+  const v = a.value;
+  if (v && typeof v === "object" && "objectPath" in v) {
+    const p = (v as { objectPath?: unknown }).objectPath;
+    if (typeof p === "string" && p.length > 0) return p;
+  }
+  return null;
 }
 
 function formatCustomAnswer(value: unknown): string {

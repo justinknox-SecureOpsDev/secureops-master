@@ -16,9 +16,12 @@ type Props = {
    *  with role="alert" and wired to the trigger via aria-describedby so
    *  screen readers announce it. */
   error?: string;
+  /** When set, hints mobile browsers to open the camera directly. Use
+   *  "environment" for the rear camera (e.g. photo-capture questions). */
+  capture?: boolean | "user" | "environment";
 };
 
-export function FileUploadField({ label, accept, value, onChange, required, uploadFn, error }: Props) {
+export function FileUploadField({ label, accept, value, onChange, required, uploadFn, error, capture }: Props) {
   const inputRef = useRef<HTMLInputElement | null>(null);
   const triggerRef = useRef<HTMLButtonElement | null>(null);
   const [busy, setBusy] = useState(false);
@@ -62,6 +65,7 @@ export function FileUploadField({ label, accept, value, onChange, required, uplo
         ref={inputRef}
         type="file"
         accept={accept}
+        capture={capture}
         className="sr-only"
         tabIndex={-1}
         aria-hidden="true"

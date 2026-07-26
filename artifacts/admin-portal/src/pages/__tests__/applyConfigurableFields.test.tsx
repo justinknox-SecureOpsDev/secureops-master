@@ -243,4 +243,48 @@ describe("Apply wizard — custom questions", () => {
 
     expect(screen.getByText(/Do you have a reliable vehicle\?/i)).toBeTruthy();
   });
+
+  it("renders a file picker for upload questions and blocks submit when a required upload is missing", async () => {
+    hoisted.questions = [
+      {
+        id: "q-cert",
+        label: "Upload your certificate",
+        helpText: null,
+        fieldType: "file",
+        required: true,
+        options: null,
+        sortOrder: 0,
+        enabled: true,
+      },
+      {
+        id: "q-headshot",
+        label: "Upload a headshot",
+        helpText: null,
+        fieldType: "photo",
+        required: false,
+        options: null,
+        sortOrder: 1,
+        enabled: true,
+      },
+    ];
+
+    render(<ApplyPage />);
+    await waitFor(() => expect(screen.getByLabelText(/City/i)).toBeTruthy());
+
+    await fillCoreFields();
+    for (let i = 0; i < 5; i++) clickContinue(); // reach "Additional questions"
+
+    // Both upload questions render a file-picker control, not a text box.
+    expect(screen.getByText(/Upload your certificate/i)).toBeTruthy();
+    expect(screen.getByText(/Upload a headshot/i)).toBeTruthy();
+    expect(screen.getAllByText(/Choose file/i).length).toBe(2);
+
+    // The required upload is unanswered — advancing must be blocked with an
+    // inline error and no POST fired.
+    clickContinue();
+    await waitFor(() =>
+      expect(screen.getByText(/"Upload your certificate" is required\./i)).toBeTruthy(),
+    );
+    expect(hoisted.submitBody).toBeNull();
+  });
 });

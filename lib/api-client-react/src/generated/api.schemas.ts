@@ -1936,6 +1936,8 @@ export const ApplicationQuestionFieldType = {
   select: "select",
   multiselect: "multiselect",
   yes_no: "yes_no",
+  file: "file",
+  photo: "photo",
 } as const;
 
 export interface ApplicationQuestion {
@@ -1962,6 +1964,8 @@ export const CreateApplicationQuestionRequestFieldType = {
   select: "select",
   multiselect: "multiselect",
   yes_no: "yes_no",
+  file: "file",
+  photo: "photo",
 } as const;
 
 export interface CreateApplicationQuestionRequest {
@@ -1984,6 +1988,8 @@ export const UpdateApplicationQuestionRequestFieldType = {
   select: "select",
   multiselect: "multiselect",
   yes_no: "yes_no",
+  file: "file",
+  photo: "photo",
 } as const;
 
 export interface UpdateApplicationQuestionRequest {

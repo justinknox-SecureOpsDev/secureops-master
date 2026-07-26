@@ -85,7 +85,7 @@ type Form = {
   customAnswers: Record<string, unknown>;
 };
 
-const CUSTOM_FIELD_TYPES = ["short_text", "long_text", "number", "date", "select", "multiselect", "yes_no"] as const;
+const CUSTOM_FIELD_TYPES = ["short_text", "long_text", "number", "date", "select", "multiselect", "yes_no", "file", "photo"] as const;
 type CustomFieldType = (typeof CUSTOM_FIELD_TYPES)[number];
 type TemplateQuestion = {
   id: string;
@@ -1570,6 +1570,29 @@ function CustomQuestionField({
   const helpNode = help ? <div id={helpId} className="text-xs text-muted-foreground">{help}</div> : null;
   const errorNode = errorMsg ? <div id={errorId} role="alert" className="text-xs text-destructive">{errorMsg}</div> : null;
   const strVal = typeof value === "string" ? value : "";
+
+  if (q.fieldType === "file" || q.fieldType === "photo") {
+    const isPhoto = q.fieldType === "photo";
+    const fileVal =
+      value && typeof value === "object" && "objectPath" in (value as object)
+        ? (value as UploadedFile)
+        : null;
+    return (
+      <div className="space-y-1">
+        {helpNode}
+        <FileUploadField
+          label={q.label}
+          required={q.required}
+          accept={isPhoto ? "image/*,.heic,.heif" : "image/*,.pdf,.doc,.docx,.heic,.heif"}
+          capture={isPhoto ? "environment" : undefined}
+          value={fileVal}
+          onChange={(f) => onChange(f)}
+          uploadFn={uploadFileAnon}
+          error={errorMsg}
+        />
+      </div>
+    );
+  }
 
   if (q.fieldType === "multiselect") {
     const arr = Array.isArray(value) ? (value as unknown[]).filter((x): x is string => typeof x === "string") : [];

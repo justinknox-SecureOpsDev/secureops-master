@@ -5739,7 +5739,7 @@ components:
         helpText: { type: string, nullable: true }
         fieldType:
           type: string
-          enum: [short_text, long_text, number, date, select, multiselect, yes_no]
+          enum: [short_text, long_text, number, date, select, multiselect, yes_no, file, photo]
         required: { type: boolean }
         options: { type: array, nullable: true, items: { type: string } }
         sortOrder: { type: integer }
@@ -5755,7 +5755,7 @@ components:
         helpText: { type: string, nullable: true }
         fieldType:
           type: string
-          enum: [short_text, long_text, number, date, select, multiselect, yes_no]
+          enum: [short_text, long_text, number, date, select, multiselect, yes_no, file, photo]
         required: { type: boolean }
         options: { type: array, nullable: true, items: { type: string } }
         enabled: { type: boolean }
@@ -5767,7 +5767,7 @@ components:
         helpText: { type: string, nullable: true }
         fieldType:
           type: string
-          enum: [short_text, long_text, number, date, select, multiselect, yes_no]
+          enum: [short_text, long_text, number, date, select, multiselect, yes_no, file, photo]
         required: { type: boolean }
         options: { type: array, nullable: true, items: { type: string } }
         enabled: { type: boolean }

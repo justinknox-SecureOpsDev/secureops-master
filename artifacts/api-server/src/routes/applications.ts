@@ -265,6 +265,8 @@ const CUSTOM_FIELD_TYPES = [
   "select",
   "multiselect",
   "yes_no",
+  "file",
+  "photo",
 ] as const;
 type CustomFieldType = (typeof CUSTOM_FIELD_TYPES)[number];
 
@@ -337,6 +339,22 @@ function coerceCustomAnswer(q: ApplicationQuestionRow, raw: unknown): { value: u
       const vals = raw.filter((x): x is string => typeof x === "string" && opts.includes(x));
       if (q.required && vals.length === 0) return { value: null, error: `"${q.label}" is required.` };
       return { value: vals };
+    }
+    case "file":
+    case "photo": {
+      // The answer is an uploaded-file reference {objectPath, name}, minted by
+      // the anonymous application-upload endpoint (same shape the built-in file
+      // fields use). Reject anything that isn't a valid application object path.
+      if (typeof raw !== "object" || raw === null || !("objectPath" in raw)) {
+        return { value: null, error: `"${q.label}" must be an uploaded file.` };
+      }
+      const objectPath = (raw as { objectPath?: unknown }).objectPath;
+      if (typeof objectPath !== "string" || !isApplicationObjectPath(objectPath)) {
+        return { value: null, error: `"${q.label}" must be an uploaded file.` };
+      }
+      const nameRaw = (raw as { name?: unknown }).name;
+      const name = typeof nameRaw === "string" && nameRaw.trim().length > 0 ? nameRaw.trim() : null;
+      return { value: { objectPath, name } };
     }
     default:
       return { value: null };

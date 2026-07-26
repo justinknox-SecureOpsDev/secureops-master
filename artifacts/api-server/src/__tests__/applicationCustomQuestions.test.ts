@@ -188,6 +188,17 @@ describe("Admin custom-question CRUD", () => {
     expect(res.status).toBe(400);
   });
 
+  it("creates upload question types (file / photo) with no options", async () => {
+    const fileQ = await createQuestion({ label: "Certificate", fieldType: "file" });
+    expect(fileQ.fieldType).toBe("file");
+    expect(fileQ.options).toBeNull();
+
+    const photoQ = await createQuestion({ label: "Headshot", fieldType: "photo", required: true });
+    expect(photoQ.fieldType).toBe("photo");
+    expect(photoQ.required).toBe(true);
+    expect(photoQ.options).toBeNull();
+  });
+
   it("rejects an unknown field type (400)", async () => {
     const res = await request(app)
       .post("/api/admin/application-questions")
@@ -432,6 +443,57 @@ describe("POST /applications — custom-answer handling", () => {
     const answers = (row.customAnswers as Array<{ questionId: string }>) ?? [];
     expect(answers.some((a) => a.questionId === disabled.id)).toBe(false);
     expect(answers.some((a) => a.questionId === enabled.id)).toBe(true);
+  });
+
+  it("persists an upload answer as {objectPath, name} and rejects non-upload values", async () => {
+    const fileQ = await createQuestion({ label: "Certificate", fieldType: "file" });
+    const photoQ = await createQuestion({ label: "Headshot", fieldType: "photo" });
+
+    const certPath = `/objects/uploads/${randomUUID()}`;
+    const shotPath = `/objects/uploads/${randomUUID()}`;
+    const body = buildApplicationBody("upload-valid");
+    body.customAnswers = [
+      { questionId: fileQ.id, value: { objectPath: certPath, name: "cert.pdf" } },
+      { questionId: photoQ.id, value: { objectPath: shotPath, name: "me.jpg" } },
+    ];
+
+    const res = await request(app).post("/api/applications").send(body);
+    expect(res.status).toBe(201);
+
+    const row = await fetchApplicationByEmail(body.email as string);
+    const answers = row.customAnswers as Array<{ questionId: string; fieldType: string; value: unknown }>;
+    const byId = new Map(answers.map((a) => [a.questionId, a]));
+    expect(byId.get(fileQ.id)).toMatchObject({ fieldType: "file", value: { objectPath: certPath, name: "cert.pdf" } });
+    expect(byId.get(photoQ.id)).toMatchObject({ fieldType: "photo", value: { objectPath: shotPath, name: "me.jpg" } });
+  });
+
+  it("rejects an upload answer that isn't a valid application object path (400)", async () => {
+    const fileQ = await createQuestion({ label: "Certificate", fieldType: "file" });
+    const body = buildApplicationBody("upload-bad-path");
+    // A user-scoped path must never be accepted from the anonymous flow.
+    body.customAnswers = [{ questionId: fileQ.id, value: { objectPath: `/objects/uploads/u/${randomUUID()}/x.pdf`, name: "x.pdf" } }];
+
+    const res = await request(app).post("/api/applications").send(body);
+    expect(res.status).toBe(400);
+    expect(res.body.fieldErrors.some((e: { field: string }) => e.field === `custom:${fileQ.id}`)).toBe(true);
+  });
+
+  it("rejects a plain-string answer for an upload question (400)", async () => {
+    const photoQ = await createQuestion({ label: "Headshot", fieldType: "photo", required: true });
+    const body = buildApplicationBody("upload-string");
+    body.customAnswers = [{ questionId: photoQ.id, value: "not-a-file" }];
+
+    const res = await request(app).post("/api/applications").send(body);
+    expect(res.status).toBe(400);
+    expect(res.body.fieldErrors.some((e: { field: string }) => e.field === `custom:${photoQ.id}`)).toBe(true);
+  });
+
+  it("rejects a submission missing a required upload answer (400)", async () => {
+    const q = await createQuestion({ label: "ID photo", fieldType: "photo", required: true });
+    const body = buildApplicationBody("upload-required-missing");
+    const res = await request(app).post("/api/applications").send(body);
+    expect(res.status).toBe(400);
+    expect(res.body.fieldErrors.some((e: { field: string }) => e.field === `custom:${q.id}`)).toBe(true);
   });
 
   it("omits optional custom questions left unanswered", async () => {

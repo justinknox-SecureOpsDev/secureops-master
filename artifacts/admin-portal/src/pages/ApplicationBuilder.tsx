@@ -16,6 +16,8 @@ const FIELD_TYPES = [
   { value: "select", label: "Dropdown (single choice)" },
   { value: "multiselect", label: "Checkboxes (multiple choice)" },
   { value: "yes_no", label: "Yes / No" },
+  { value: "file", label: "File upload" },
+  { value: "photo", label: "Photo (camera or upload)" },
 ] as const;
 
 type FieldType = (typeof FIELD_TYPES)[number]["value"];
