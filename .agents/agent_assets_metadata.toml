@@ -131,3 +131,9 @@ id = "wc8hFfd_3CrUjnyKNXzef"
 uri = "file://attached_assets/microphone-demo.mp4"
 type = "video"
 title = "Microphone FGS Demo — 21s (Google Play)"
+
+[[outputs]]
+id = "UA7M4em9OnD7AfFyJz7Te"
+uri = "file://attached_assets/secureops-officer-training.mp4"
+type = "video"
+title = "SecureOps — Officer Quick-Start Guide"

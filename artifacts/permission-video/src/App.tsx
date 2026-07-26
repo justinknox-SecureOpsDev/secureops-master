@@ -1,6 +1,7 @@
 import VideoTemplate from '@/components/video/VideoTemplate';
 import VideoTemplateMedia from '@/components/video/VideoTemplateMedia';
 import VideoTemplateMic from '@/components/video/VideoTemplateMic';
+import VideoTemplateTraining from '@/components/video/VideoTemplateTraining';
 
 export default function App() {
   const v =
@@ -10,5 +11,6 @@ export default function App() {
 
   if (v === 'media') return <VideoTemplateMedia />;
   if (v === 'mic') return <VideoTemplateMic />;
+  if (v === 'training') return <VideoTemplateTraining />;
   return <VideoTemplate />;
 }
