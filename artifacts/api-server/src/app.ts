@@ -51,6 +51,27 @@ app.use(
 //   - connect-src: self + wss://<self> for the chat WebSocket. Tile servers
 //                for the live map are explicitly allow-listed.
 //   - frame-ancestors: 'none' (no embedding the portal anywhere)
+//
+// The web connect screen (/app/connect) fetches the CENTRAL org directory
+// cross-origin to resolve an org code → backend origin, then hard-navigates
+// there. That directory lives at the canonical SecureOps Command deployment —
+// the same origin the mobile client hardcodes as DEFAULT_NATIVE_ORIGIN in
+// artifacts/security-ops/utils/api.ts (keep the two in sync). The resolve
+// endpoint is CORS-open, but the page's own connect-src would still make the
+// browser BLOCK that request, so the directory origin must be allow-listed
+// here too. Operators whose web build points EXPO_PUBLIC_ORG_DIRECTORY_URL at
+// a different host add that origin via ORG_DIRECTORY_ORIGINS (comma-separated).
+const ORG_DIRECTORY_CONNECT_SRC = Array.from(
+  new Set(
+    [
+      "https://secureops-command.replit.app",
+      ...(process.env.ORG_DIRECTORY_ORIGINS || "")
+        .split(",")
+        .map((s) => s.trim().replace(/\/+$/, "")),
+    ].filter(Boolean),
+  ),
+);
+
 const CSP_DIRECTIVES = {
   defaultSrc: ["'self'"],
   // unpkg.com hosts the Leaflet build that the live-map srcdoc iframes load
@@ -65,7 +86,13 @@ const CSP_DIRECTIVES = {
   // as fetched blobs (blob: URLs); we also allow https: for any future
   // signed-URL direct embeds.
   mediaSrc: ["'self'", "blob:", "https:"],
-  connectSrc: ["'self'", "ws:", "wss:", "https://*.tile.openstreetmap.org"],
+  connectSrc: [
+    "'self'",
+    "ws:",
+    "wss:",
+    "https://*.tile.openstreetmap.org",
+    ...ORG_DIRECTORY_CONNECT_SRC,
+  ],
   frameAncestors: ["'none'"],
   baseUri: ["'self'"],
   formAction: ["'self'"],

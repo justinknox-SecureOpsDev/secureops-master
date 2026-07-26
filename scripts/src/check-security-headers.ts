@@ -142,6 +142,10 @@ async function main(): Promise<void> {
       "https://fonts.googleapis.com",
       "https://fonts.gstatic.com",
       "https://*.tile.openstreetmap.org",
+      // The web /connect screen resolves an org code against the central org
+      // directory cross-origin; connect-src must allow that origin or the
+      // browser blocks the resolve fetch even though the endpoint is CORS-open.
+      "https://secureops-command.replit.app",
     ]) {
       checks.push({ name: `CSP contains: ${required}`, ok: csp.includes(required), detail: csp.includes(required) ? undefined : csp });
     }
