@@ -100,6 +100,35 @@ function fmtMonthlyPrice(cents) {
   return "$" + Number(Number(cents) / 100).toLocaleString(undefined, { maximumFractionDigits: 0 }) + "/mo";
 }
 
+// Plan snapshots older than this are flagged as stale. The poller refreshes each
+// backend roughly every 60s, so a snapshot this old means the backend has been
+// unreachable for many cycles and its plan/price can no longer be trusted.
+var PLAN_STALE_MS = 15 * 60 * 1000;
+
+// Compact "x ago" label from an ISO timestamp; null/invalid → null.
+function relativeAge(iso) {
+  if (!iso) return null;
+  var t = new Date(iso).getTime();
+  if (isNaN(t)) return null;
+  var diff = Date.now() - t;
+  if (diff < 0) diff = 0;
+  var mins = Math.floor(diff / 60000);
+  if (mins < 1) return "just now";
+  if (mins < 60) return mins + " min ago";
+  var hrs = Math.floor(mins / 60);
+  if (hrs < 24) return hrs + " hr" + (hrs === 1 ? "" : "s") + " ago";
+  var days = Math.floor(hrs / 24);
+  return days + " day" + (days === 1 ? "" : "s") + " ago";
+}
+
+// True when a plan snapshot's fetchedAt is older than the stale threshold.
+function planIsStale(plan) {
+  if (!plan || !plan.fetchedAt) return false;
+  var t = new Date(plan.fetchedAt).getTime();
+  if (isNaN(t)) return false;
+  return Date.now() - t > PLAN_STALE_MS;
+}
+
 // Fleet plan cell: tier badge + monthly price. Degrades to "unknown" when the
 // plan snapshot was never fetched (no secret / unreachable backend), and to
 // "not set" when the backend was reached but no commercial config is saved.
@@ -117,7 +146,22 @@ function planCell(c) {
   var tier = plan.tier
     ? "<span class='badge plan'>" + esc(tierLabel(plan.tier)) + "</span>"
     : "<span class='muted small'>no tier</span>";
-  return tier + " <span class='small'>" + esc(fmtMonthlyPrice(plan.monthlyPriceCents)) + "</span>";
+  var age = relativeAge(plan.fetchedAt);
+  var freshTip = plan.fetchedAt
+    ? "Plan snapshot fetched " + (age || fmtDate(plan.fetchedAt)) + " (" + fmtDate(plan.fetchedAt) + ")"
+    : "Snapshot freshness unknown";
+  var body =
+    "<span title='" + esc(freshTip) + "'>" +
+    tier +
+    " <span class='small'>" + esc(fmtMonthlyPrice(plan.monthlyPriceCents)) + "</span>" +
+    "</span>";
+  if (planIsStale(plan)) {
+    var staleTip =
+      "Snapshot is " + (age || "old") +
+      " — backend has been unreachable; plan & price may be out of date";
+    body += " <span class='badge bad' title='" + esc(staleTip) + "'>stale</span>";
+  }
+  return body;
 }
 
 function statusBadge(c) {
@@ -186,12 +230,14 @@ function renderSummary() {
   var mrrCents = 0;
   var priced = 0;
   var unknownPrice = 0;
+  var stalePriced = 0;
   var tierCounts = { starter: 0, professional: 0, enterprise: 0, custom: 0, other: 0 };
   customers.forEach(function (c) {
     var plan = c.plan;
     if (plan && plan.monthlyPriceCents != null) {
       mrrCents += Number(plan.monthlyPriceCents);
       priced += 1;
+      if (planIsStale(plan)) stalePriced += 1;
     } else {
       unknownPrice += 1;
     }
@@ -201,7 +247,9 @@ function renderSummary() {
     }
   });
   var mrrLabel = "$" + Number(mrrCents / 100).toLocaleString(undefined, { maximumFractionDigits: 0 }) + "/mo";
-  var mrrSub = priced + " of " + total + " priced" + (unknownPrice ? " · " + unknownPrice + " unknown" : "");
+  var mrrSub = priced + " of " + total + " priced" +
+    (unknownPrice ? " · " + unknownPrice + " unknown" : "") +
+    (stalePriced ? " · " + stalePriced + " stale" : "");
   var tierParts = [];
   [["starter", "Starter"], ["professional", "Professional"], ["enterprise", "Enterprise"], ["custom", "Custom"]].forEach(function (pair) {
     if (tierCounts[pair[0]]) tierParts.push(esc(pair[1]) + " " + tierCounts[pair[0]]);
