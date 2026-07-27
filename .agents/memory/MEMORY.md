@@ -111,3 +111,4 @@
 - [Invoice unpriced-hours under-billing](invoice-unpriced-hours.md) — shift_id NULL + no site default bill rate = hours silently dropped; every generate path must surface unpricedHours; fix = set site rate, regenerate, void short draft.
 - [Inactive-site lifecycle](site-inactive-lifecycle.md) — status=inactive blocks NEW intake only; every direct insert(shiftsTable) path (incl. client coverage approval) needs its own guard; payroll/webhook/clock-in stay open.
 - [Agreement docs — two tables](agreement-docs-two-tables.md) — signed-status (signatures table) vs uploaded PDF (docs table + SHA-256); in-app + remote upload must share registerAgreementDoc validator.
+- [User delete strands application](user-delete-strands-application.md) — applications.created_employee_id has no FK; every user-delete path must un-strand the linked app (shared reset helper); boot repair needs FOR UPDATE claim.

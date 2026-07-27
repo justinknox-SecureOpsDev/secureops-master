@@ -3,6 +3,7 @@ import { eq, sql, desc, asc, ilike, or, and, inArray, isNull, type AnyColumn } f
 import bcrypt from "bcryptjs";
 import { randomBytes } from "node:crypto";
 import { z } from "zod/v4";
+import { resetApplicationsForDeletedUser } from "../lib/onboardingLifecycle";
 import {
   db,
   usersTable,
@@ -1429,7 +1430,28 @@ router.delete("/admin/tables/:table/:id", requireAdmin, async (req, res): Promis
       const rows = await db.select().from(timeEntriesTable).where(eq(timeEntriesTable.id, id));
       deletedTimeEntry = rows[0] ?? null;
     }
-    const result = (await db.delete(cfg.table).where(eq((cfg.table as any).id, id)).returning()) as unknown[];
+    let result: unknown[];
+    if (tableName === "users") {
+      // Deleting a user directly from the Users table must un-strand any
+      // application that points at them (applications.created_employee_id has
+      // no FK). Without this, an approved applicant whose account is deleted
+      // here stays frozen as "approved" pointing at a missing account: they
+      // vanish from Onboarding and can never log in or finish onboarding.
+      // Reuses the exact reset the dedicated "Remove from onboarding" action
+      // runs so the two delete paths can never drift apart.
+      result = await db.transaction(async (tx) => {
+        const resetIds = await resetApplicationsForDeletedUser(tx, id);
+        if (resetIds.length > 0) {
+          res.locals["auditMetadata"] = {
+            ...(res.locals["auditMetadata"] as Record<string, unknown> | undefined),
+            resetApplicationIds: resetIds,
+          };
+        }
+        return (await tx.delete(usersTable).where(eq(usersTable.id, id)).returning()) as unknown[];
+      });
+    } else {
+      result = (await db.delete(cfg.table).where(eq((cfg.table as any).id, id)).returning()) as unknown[];
+    }
     if (result.length === 0) {
       res.status(404).json({ error: "Not Found", message: `${cfg.label} not found` });
       return;

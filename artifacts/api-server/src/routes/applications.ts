@@ -44,6 +44,7 @@ import { sendPushToUsers } from "../lib/push";
 import { sendEmail, sendEmailDetailed, renderOnboardingEmail, renderResendOnboardingEmail, renderRejectionEmail, renderApplicationReceivedEmail, renderRequestInfoEmail, renderApplicationDraftResumeEmail, renderNewApplicationAdminEmail, renderOnboardingCompletedAdminEmail } from "../lib/email";
 import { brand } from "../lib/brandConfig";
 import { sendSmsToPhoneNumber } from "../lib/sms";
+import { resetApplicationsForDeletedUser } from "../lib/onboardingLifecycle";
 import { normalizePhoneToE164 } from "../lib/phone";
 import { requireFeature } from "../lib/features";
 import { businessTimeZone, businessDateIso } from "../lib/businessTime";
@@ -2453,23 +2454,11 @@ router.delete("/admin/onboarding/:employeeId", requireAdmin, async (req, res): P
     // sign-offs, and the onboarding-email delivery state, and send the row
     // back to `under_review` so HR can re-approve or reject it later instead
     // of it being frozen as "approved" for a person who no longer exists.
-    const reset = await tx.update(applicationsTable).set({
-      status: "under_review",
-      createdEmployeeId: null,
-      firstApprovedBy: null,
-      firstApprovedAt: null,
-      secondApprovedBy: null,
-      secondApprovedAt: null,
-      onboardingEmailStatus: null,
-      onboardingEmailMessageId: null,
-      onboardingEmailResponse: null,
-      onboardingEmailError: null,
-      onboardingEmailSentAt: null,
-      onboardingEmailAttemptedAt: null,
-    }).where(eq(applicationsTable.createdEmployeeId, employeeId))
-      .returning({ id: applicationsTable.id });
-    if (reset.length > 0) {
-      (res.locals["auditMetadata"] as Record<string, unknown>)["resetApplicationIds"] = reset.map((r) => r.id);
+    // Shared with the generic admin Users-table delete so the two delete paths
+    // can never drift apart.
+    const resetIds = await resetApplicationsForDeletedUser(tx, employeeId);
+    if (resetIds.length > 0) {
+      (res.locals["auditMetadata"] as Record<string, unknown>)["resetApplicationIds"] = resetIds;
     }
     await tx.delete(usersTable).where(eq(usersTable.id, employeeId));
   });

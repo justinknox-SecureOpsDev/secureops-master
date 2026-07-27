@@ -11,6 +11,7 @@ import { startScheduledJobs } from "./lib/scheduledJobs";
 import { initConfigReadiness } from "./lib/configReadiness";
 import { loadProcessingFeeConfigFromDb } from "./lib/processingFeeConfig";
 import { loadConfirmEditWindowConfigFromDb } from "./lib/confirmEditWindowConfig";
+import { restoreStrandedOnboardingApplicants } from "./lib/restoreStrandedOnboarding";
 
 const rawPort = process.env["PORT"];
 
@@ -165,6 +166,22 @@ Promise.all([employeeProfileBackfillDone, employeesRowsBackfilled, demoUsersSeed
 backfillUserPhoneNumbersFromEmployees()
   .then(() => logger.info("User phone numbers backfilled from employee files"))
   .catch((err) => logger.error({ err }, "Failed to backfill user phone numbers"));
+
+// One-time idempotent repair (production only): re-provision applicants who
+// were APPROVED but whose login account + onboarding token were later deleted
+// out from under the still-"approved" application (e.g. by deleting the user
+// row directly from the admin Users table before that path un-stranded the
+// application). Such people are invisible in Onboarding and cannot log in.
+// This mints a fresh pending account + token and re-sends the onboarding email
+// + SMS so they get a working link and temporary password. Gated to production
+// because (a) dev/test share no data with prod and (b) SMS is NOT
+// environment-suppressed, so it would fire live texts from a dev boot. Set
+// DISABLE_ONBOARDING_RESTORE=true to publish without re-inviting anyone.
+if (process.env.NODE_ENV === "production" && process.env.DISABLE_ONBOARDING_RESTORE !== "true") {
+  restoreStrandedOnboardingApplicants()
+    .then((r) => logger.info(r, "Stranded onboarding applicants restore finished"))
+    .catch((err) => logger.error({ err }, "Failed to restore stranded onboarding applicants"));
+}
 
 // Idempotently seed the canonical chat channel set (announcements,
 // per-license-level rooms, OPS, city rooms, elite, one-per-site).
