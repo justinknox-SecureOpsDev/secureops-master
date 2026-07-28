@@ -768,6 +768,65 @@ export async function upsertCustomPeriodInvoice(
 }
 
 /**
+ * Re-sync every open auto-synced draft invoice for a site.
+ *
+ * Called after a site's fee settings (salesTaxEnabled / salesTaxRate) change
+ * so that existing draft invoices immediately reflect the new fee without
+ * requiring an admin to regenerate them by hand.
+ *
+ * Only touches rows that are still "syncable" (draft + unlocked + autoSynced).
+ * Manually-edited drafts are left alone (they are excluded by autoSynced=true
+ * filter inside upsertWeeklyInvoice). Never throws — best-effort; failures
+ * are logged.
+ */
+export async function resyncSiteAutoSyncedDrafts(siteId: string): Promise<void> {
+  try {
+    // Find every open auto-synced draft for this site.
+    const openDrafts = await db
+      .select({ id: invoicesTable.id, periodStart: invoicesTable.periodStart })
+      .from(invoicesTable)
+      .where(
+        and(
+          eq(invoicesTable.siteId, siteId),
+          eq(invoicesTable.status, SYNCABLE_STATUS),
+          isNull(invoicesTable.lockedAt),
+          eq(invoicesTable.autoSynced, true),
+          isNotNull(invoicesTable.periodStart),
+        ),
+      );
+
+    if (openDrafts.length === 0) return;
+
+    logger.info(
+      { siteId, count: openDrafts.length },
+      "[invoice-sync] re-syncing open auto-synced drafts after fee-setting change",
+    );
+
+    for (const draft of openDrafts) {
+      if (!draft.periodStart) continue;
+      try {
+        const result = await upsertWeeklyInvoice(siteId, draft.periodStart);
+        if (result.status === "updated" || result.status === "created") {
+          logger.info(
+            { siteId, weekStart: draft.periodStart, invoiceId: result.invoiceId, total: result.totalAmount },
+            "[invoice-sync] draft invoice re-synced after fee-setting change",
+          );
+        } else {
+          logger.debug(
+            { siteId, weekStart: draft.periodStart, result },
+            "[invoice-sync] draft invoice re-sync skipped/deleted",
+          );
+        }
+      } catch (err) {
+        logger.warn({ err, siteId, invoiceId: draft.id }, "[invoice-sync] re-sync of single draft failed");
+      }
+    }
+  } catch (err) {
+    logger.warn({ err, siteId }, "[invoice-sync] resyncSiteAutoSyncedDrafts failed");
+  }
+}
+
+/**
  * Hourly scheduled job — stamp locked_at on every draft whose week has
  * fully elapsed. After locking, the next approval for that site rolls
  * into a fresh draft (the upsert keys on periodStart so it won't find

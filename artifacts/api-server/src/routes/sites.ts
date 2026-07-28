@@ -7,6 +7,7 @@ import { preparePreUpdateBody, maybeAutoGeocode } from "../lib/siteGeocode";
 import { getGeofenceRadiusMiles } from "../lib/geofence";
 import { siteBlockersForOne, refuseIfBlocked } from "../lib/siteDeletion";
 import { canManageSite, getManagedSiteIds } from "../lib/siteManagerAuthz";
+import { resyncSiteAutoSyncedDrafts } from "../lib/invoiceSync";
 
 // Resolve the effective geofence radius for a site row: per-site override
 // (when set and positive) wins, otherwise the global env default. Mirrors
@@ -254,6 +255,13 @@ router.put("/sites/:id", requireAdmin, async (req, res): Promise<void> => {
   if (!before) { res.status(404).json({ error: "Not Found" }); return; }
   updates = preparePreUpdateBody(before as any, updates);
 
+  // Snapshot whether fee settings are changing so we can re-sync open
+  // auto-synced draft invoices after save (see resyncSiteAutoSyncedDrafts).
+  const feeSettingChanged =
+    (salesTaxEnabled !== undefined &&
+      (salesTaxEnabled === true || salesTaxEnabled === "true") !== !!before.salesTaxEnabled) ||
+    (salesTaxRate !== undefined && String(salesTaxRate ?? "8.25") !== String(before.salesTaxRate ?? "8.25"));
+
   const [site] = await db.update(sitesTable).set(updates).where(eq(sitesTable.id, id)).returning();
   if (!site) { res.status(404).json({ error: "Not Found" }); return; }
   // Best-effort auto-geocode: if the row ends up with an address but no
@@ -261,6 +269,15 @@ router.put("/sites/:id", requireAdmin, async (req, res): Promise<void> => {
   // on failure — same pattern as the applicant home-address geocoder.
   const final = await maybeAutoGeocode(site as Record<string, unknown>, req.log);
   res.json(final);
+  // Best-effort: when fee settings changed, re-sync open auto-synced draft
+  // invoices for this site so operators see the updated fee immediately
+  // without having to manually regenerate each draft. Runs after the
+  // response is sent so latency is not affected.
+  if (feeSettingChanged) {
+    resyncSiteAutoSyncedDrafts(id).catch((err) => {
+      req.log?.warn({ err, siteId: id }, "[sites] background resync of auto-synced drafts failed");
+    });
+  }
 });
 
 router.delete("/sites/:id", requireAdmin, async (req, res): Promise<void> => {
