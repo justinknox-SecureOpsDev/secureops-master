@@ -8,6 +8,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { api, fetchWithAuth } from "@/lib/api";
+import { hoursByLevel, levelLabel } from "@/lib/invoiceLevels";
 
 type LineItem = {
   description: string;
@@ -83,6 +84,7 @@ const fmtDateRange = (periodStart: string, periodEnd: string) => {
 };
 
 const num = (s: string | null) => parseFloat(String(s ?? "0")) || 0;
+
 
 /** True when this row is a custom (non-ISO-week) period. */
 function isCustomPeriodRow(row: InvoiceRow): boolean {
@@ -223,6 +225,10 @@ export default function InvoiceBoardPage() {
   const [clients, setClients] = useState<ClientOption[]>([]);
   const [sendTarget, setSendTarget] = useState<SendTarget | null>(null);
   const [sendEmailInput, setSendEmailInput] = useState("");
+  // Bulk "Email to clients" confirmation. The per-row send has always gone
+  // through a review dialog; the bulk action used to fire immediately, which
+  // meant one click could email every selected client with no way back.
+  const [bulkSendConfirm, setBulkSendConfirm] = useState(false);
   const sendInputRef = useRef<HTMLInputElement>(null);
 
   // New Invoice dialog state
@@ -584,6 +590,7 @@ export default function InvoiceBoardPage() {
     if (selectedInvoices.length === 0) return;
     const todo = selectedInvoices.filter((r) => r.status !== "paid" && r.status !== "void");
     if (todo.length === 0) { showToast("err", "Nothing to send."); return; }
+    setBulkSendConfirm(false);
     setBusy(true);
     let emailed = 0, noEmail = 0, failed = 0;
     for (const inv of todo) {
@@ -818,7 +825,7 @@ export default function InvoiceBoardPage() {
         <Button
           variant="outline"
           className="bg-white/10 border-white/30 text-white hover:bg-white/20"
-          onClick={() => void bulkSendToClients()}
+          onClick={() => setBulkSendConfirm(true)}
           disabled={selectedInvoices.length === 0 || busy}
           title="Email PDF to each client and mark sent. Invoices without a stored client email are still marked sent."
         >
@@ -1052,9 +1059,14 @@ export default function InvoiceBoardPage() {
                                       ? <Loader2 className="w-3.5 h-3.5 animate-spin" />
                                       : <Download className="w-3.5 h-3.5" />}
                                   </button>
-                                  {/* Recalculate fee button — shown on sent/overdue invoices that
-                                      have no processingFeeAmount (generated before toggle was on). */}
-                                  {r.processingFeeAmount === null && (r.status === "sent" || r.status === "overdue") && (
+                                  {/* Recalculate fee button — shown on any still-mutable invoice
+                                      (draft/sent/overdue) that has no processingFeeAmount, i.e. it
+                                      was generated before the processing fee was switched on.
+                                      Drafts are included because enabling the fee does NOT re-price
+                                      invoices that already exist, and drafts are the most common
+                                      thing an admin is looking at right after flipping the toggle.
+                                      Paid/void are settled records and the server refuses them. */}
+                                  {r.processingFeeAmount === null && (r.status === "draft" || r.status === "sent" || r.status === "overdue") && (
                                     <button
                                       type="button"
                                       onClick={() => void recalculateFee(r)}
@@ -1111,6 +1123,36 @@ export default function InvoiceBoardPage() {
                                         ))}
                                       </tbody>
                                       <tfoot>
+                                        {/* Hours rolled up per licence level — line items are grouped
+                                            per officer, so this answers "how many armed vs unarmed
+                                            hours are on this invoice" without re-adding rows by hand. */}
+                                        {(() => {
+                                          const levels = hoursByLevel(r.lineItems);
+                                          if (levels.length === 0) return null;
+                                          const totalHours = levels.reduce((s, lv) => s + lv.hours, 0);
+                                          return (
+                                            <>
+                                              <tr className="border-t border-gray-300">
+                                                <td className="px-2 pt-2 pb-1 text-[10px] uppercase tracking-wider text-muted-foreground" colSpan={4}>
+                                                  Hours by licence level
+                                                </td>
+                                              </tr>
+                                              {levels.map((lv) => (
+                                                <tr key={`lvl-${lv.level ?? "none"}`} className="text-muted-foreground">
+                                                  <td className="px-2 py-0.5 text-right">{levelLabel(lv.level)}</td>
+                                                  <td className="px-2 py-0.5 text-right tabular-nums">{lv.hours.toFixed(2)}</td>
+                                                  <td className="px-2 py-0.5" />
+                                                  <td className="px-2 py-0.5 text-right tabular-nums">{fmtUsd(lv.amount)}</td>
+                                                </tr>
+                                              ))}
+                                              <tr className="text-gray-700">
+                                                <td className="px-2 py-0.5 text-right font-medium">All levels</td>
+                                                <td className="px-2 py-0.5 text-right font-semibold tabular-nums">{totalHours.toFixed(2)}</td>
+                                                <td className="px-2 py-0.5" colSpan={2} />
+                                              </tr>
+                                            </>
+                                          );
+                                        })()}
                                         <tr className="border-t border-gray-300 bg-gray-100/60">
                                           <td className="px-2 py-1 text-right font-medium" colSpan={3}>Subtotal</td>
                                           <td className="px-2 py-1 text-right font-semibold">{fmtUsd(num(r.subtotal))}</td>
@@ -1204,13 +1246,13 @@ export default function InvoiceBoardPage() {
                     </thead>
                     <tbody className="divide-y divide-gray-100">
                       {sendTarget.lineItems.map((li, i) => {
-                        const levelLabel = li.level != null
-                          ? ({ 1: "Support Staff", 2: "Unarmed", 3: "Armed" } as Record<number, string>)[li.level] ?? `L${li.level}`
-                          : "—";
+                        // Use the shared label so this row reads the same as the
+                        // rollup below it and the PDF the client receives.
+                        const label = li.level != null ? levelLabel(li.level) : "—";
                         return (
                           <tr key={i} className="hover:bg-gray-50/60">
                             <td className="px-3 py-2 text-gray-700">{li.description}</td>
-                            <td className="px-3 py-2 text-center text-muted-foreground">{levelLabel}</td>
+                            <td className="px-3 py-2 text-center text-muted-foreground">{label}</td>
                             <td className="px-3 py-2 text-right text-gray-700">{li.hours != null ? li.hours.toFixed(2) : "—"}</td>
                             <td className="px-3 py-2 text-right text-gray-700">{li.rate != null ? fmtUsd(li.rate) : "—"}</td>
                             <td className="px-3 py-2 text-right font-medium text-gray-800">{fmtUsd(li.amount)}</td>
@@ -1219,6 +1261,35 @@ export default function InvoiceBoardPage() {
                       })}
                     </tbody>
                     <tfoot className="bg-gray-50 border-t border-gray-200">
+                      {/* Licence-level hours rollup, so the sender can sanity-check
+                          the armed/unarmed split before the PDF goes to the client. */}
+                      {(() => {
+                        const levels = hoursByLevel(sendTarget.lineItems);
+                        if (levels.length === 0) return null;
+                        const totalHours = levels.reduce((s, lv) => s + lv.hours, 0);
+                        return (
+                          <>
+                            <tr>
+                              <td className="px-3 pt-2 pb-1 text-[10px] uppercase tracking-wider text-muted-foreground" colSpan={5}>
+                                Hours by licence level
+                              </td>
+                            </tr>
+                            {levels.map((lv) => (
+                              <tr key={`send-lvl-${lv.level ?? "none"}`} className="text-muted-foreground">
+                                <td className="px-3 py-0.5 text-xs text-right" colSpan={2}>{levelLabel(lv.level)}</td>
+                                <td className="px-3 py-0.5 text-xs text-right tabular-nums">{lv.hours.toFixed(2)}</td>
+                                <td className="px-3 py-0.5" />
+                                <td className="px-3 py-0.5 text-xs text-right tabular-nums">{fmtUsd(lv.amount)}</td>
+                              </tr>
+                            ))}
+                            <tr className="text-gray-700 border-b border-gray-200">
+                              <td className="px-3 py-0.5 text-xs text-right font-medium" colSpan={2}>All levels</td>
+                              <td className="px-3 py-0.5 text-xs text-right font-semibold tabular-nums">{totalHours.toFixed(2)}</td>
+                              <td className="px-3 py-0.5" colSpan={2} />
+                            </tr>
+                          </>
+                        );
+                      })()}
                       <tr>
                         <td className="px-3 py-2 text-right text-xs text-muted-foreground" colSpan={4}>Subtotal</td>
                         <td className="px-3 py-2 text-right text-xs font-semibold text-gray-800">{fmtUsd(num(sendTarget.subtotal))}</td>
@@ -1288,6 +1359,121 @@ export default function InvoiceBoardPage() {
           </div>
         </div>
       )}
+
+      {/* Bulk send — confirmation before emailing every selected client */}
+      {bulkSendConfirm && (() => {
+        const todo = selectedInvoices.filter((r) => r.status !== "paid" && r.status !== "void");
+        const skipped = selectedInvoices.length - todo.length;
+        const withEmail = todo.filter((r) => !!r.clientEmail);
+        const withoutEmail = todo.filter((r) => !r.clientEmail);
+        const noFee = todo.filter((r) => r.processingFeeAmount === null);
+        const todoTotal = todo.reduce((s, r) => s + num(r.totalAmount), 0);
+        return (
+          <div
+            className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm p-4"
+            onClick={(e) => { if (e.target === e.currentTarget) setBulkSendConfirm(false); }}
+          >
+            <div className="bg-white rounded-xl shadow-2xl w-full max-w-3xl flex flex-col max-h-[90vh] overflow-hidden">
+              <div className="bg-brand-navy px-5 py-4 flex items-center justify-between shrink-0">
+                <div className="flex items-center gap-2 text-white">
+                  <Mail className="w-4 h-4 text-brand-gold" />
+                  <span className="font-semibold text-sm">Review &amp; Send {todo.length} Invoice{todo.length === 1 ? "" : "s"}</span>
+                </div>
+                <button type="button" onClick={() => setBulkSendConfirm(false)} className="text-white/60 hover:text-white transition-colors">
+                  <X className="w-4 h-4" />
+                </button>
+              </div>
+
+              <div className="overflow-y-auto flex-1 px-5 py-5 space-y-4">
+                <p className="text-sm text-gray-700">
+                  Each invoice below is emailed to its client as a branded PDF and marked <strong>sent</strong>. This cannot be undone.
+                </p>
+
+                {/* Per-invoice preview — what actually goes out, and to whom. */}
+                <div className="border border-gray-200 rounded-lg overflow-hidden">
+                  <table className="w-full text-xs">
+                    <thead className="bg-gray-50 border-b border-gray-200">
+                      <tr>
+                        <th className="px-3 py-2 text-left text-[10px] uppercase tracking-wider text-muted-foreground">Invoice</th>
+                        <th className="px-3 py-2 text-left text-[10px] uppercase tracking-wider text-muted-foreground">Client / Site</th>
+                        <th className="px-3 py-2 text-left text-[10px] uppercase tracking-wider text-muted-foreground">Recipient</th>
+                        <th className="px-3 py-2 text-right text-[10px] uppercase tracking-wider text-muted-foreground w-20">Fee</th>
+                        <th className="px-3 py-2 text-right text-[10px] uppercase tracking-wider text-muted-foreground w-24">Total</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-gray-100">
+                      {todo.map((r) => (
+                        <tr key={r.id} className="hover:bg-gray-50/60">
+                          <td className="px-3 py-2 font-mono text-gray-800 whitespace-nowrap">{r.invoiceNumber}</td>
+                          <td className="px-3 py-2 text-gray-700">
+                            <div>{r.clientName ?? "—"}</div>
+                            {r.siteName && <div className="text-[10px] text-muted-foreground">{r.siteName}</div>}
+                          </td>
+                          <td className="px-3 py-2">
+                            {r.clientEmail
+                              ? <span className="text-gray-700">{r.clientEmail}</span>
+                              : <span className="text-amber-700 font-medium">no email — marked sent only</span>}
+                          </td>
+                          <td className="px-3 py-2 text-right">
+                            {r.processingFeeAmount !== null
+                              ? <span className="text-gray-700">{fmtUsd(num(r.processingFeeAmount))}</span>
+                              : <span className="text-amber-700">none</span>}
+                          </td>
+                          <td className="px-3 py-2 text-right font-medium text-gray-800 whitespace-nowrap">{fmtUsd(num(r.totalAmount))}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                    <tfoot className="bg-gray-50 border-t border-gray-200">
+                      <tr>
+                        <td className="px-3 py-2 text-right text-xs text-muted-foreground" colSpan={2}>
+                          {withEmail.length} emailed{withoutEmail.length > 0 ? ` · ${withoutEmail.length} marked sent only` : ""}
+                        </td>
+                        <td className="px-3 py-2 text-right text-xs font-bold text-brand-navy" colSpan={2}>Combined total</td>
+                        <td className="px-3 py-2 text-right text-sm font-bold text-brand-navy whitespace-nowrap">{fmtUsd(todoTotal)}</td>
+                      </tr>
+                    </tfoot>
+                  </table>
+                </div>
+
+                {withoutEmail.length > 0 && (
+                  <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-900">
+                    <strong>{withoutEmail.length}</strong> invoice{withoutEmail.length === 1 ? " has" : "s have"} no client email on file.
+                    They will be marked sent but no email goes out:
+                    <span className="block mt-1 font-mono">{withoutEmail.slice(0, 5).map((r) => r.invoiceNumber).join(", ")}{withoutEmail.length > 5 ? ` +${withoutEmail.length - 5} more` : ""}</span>
+                  </div>
+                )}
+
+                {noFee.length > 0 && (
+                  <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-900">
+                    <strong>{noFee.length}</strong> invoice{noFee.length === 1 ? " has" : "s have"} no processing fee applied
+                    (created before the fee was switched on). Recalculate the fee first if the client should be charged it:
+                    <span className="block mt-1 font-mono">{noFee.slice(0, 5).map((r) => r.invoiceNumber).join(", ")}{noFee.length > 5 ? ` +${noFee.length - 5} more` : ""}</span>
+                  </div>
+                )}
+
+                {skipped > 0 && (
+                  <p className="text-xs text-muted-foreground">
+                    {skipped} selected invoice{skipped === 1 ? " is" : "s are"} already paid or void and will be skipped.
+                  </p>
+                )}
+              </div>
+
+              <div className="shrink-0 flex justify-end gap-2 px-5 py-4 border-t border-gray-100 bg-gray-50/60">
+                <Button variant="outline" size="sm" onClick={() => setBulkSendConfirm(false)}>Cancel</Button>
+                <Button
+                  size="sm"
+                  className="bg-brand-navy text-white hover:bg-brand-navy/90"
+                  onClick={() => void bulkSendToClients()}
+                  disabled={todo.length === 0 || busy}
+                >
+                  <Mail className="w-3.5 h-3.5 mr-1.5" />
+                  Confirm &amp; Send {todo.length}
+                </Button>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
 
       {/* New Invoice dialog */}
       {showNewInvoice && (

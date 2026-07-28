@@ -2,10 +2,11 @@ import { useEffect, useState } from "react";
 import { useLocation } from "wouter";
 import { Receipt, Download, CreditCard, CheckCircle2, AlertTriangle, ChevronDown, ChevronUp } from "lucide-react";
 import { api, fetchWithAuth } from "@/lib/api";
+import { hoursByLevel, levelLabel, totalHours } from "@/lib/invoiceLevels";
 import { Button } from "@/components/ui/button";
 import { useToast } from "@/hooks/use-toast";
 
-type LineItem = { description: string; hours?: number | null; rate?: number | null; amount: number };
+type LineItem = { description: string; level?: number | null; hours?: number | null; rate?: number | null; amount: number };
 type Invoice = {
   id: string;
   invoiceNumber: string;
@@ -154,6 +155,34 @@ function InvoiceRow({ inv, onPaid }: { inv: Invoice; onPaid: () => void }) {
                   ))}
                 </tbody>
               </table>
+              {/* Hours rolled up per licence level, so a client can see the
+                  armed/unarmed split without adding up the per-officer rows. */}
+              {(() => {
+                const levels = hoursByLevel(inv.lineItems);
+                if (levels.length === 0) return null;
+                return (
+                  <div className="border-t pt-2 mt-2">
+                    <div className="text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-1">
+                      Hours by licence level
+                    </div>
+                    <div className="space-y-0.5">
+                      {levels.map((lv) => (
+                        <div key={`lvl-${lv.level ?? "none"}`} className="flex justify-between text-xs text-muted-foreground">
+                          <span>{levelLabel(lv.level)}</span>
+                          <span className="tabular-nums">
+                            {lv.hours.toFixed(2)} hrs
+                            <span className="ml-3 inline-block w-20 text-right">{fmtUsd(lv.amount)}</span>
+                          </span>
+                        </div>
+                      ))}
+                      <div className="flex justify-between text-xs font-semibold pt-1 border-t">
+                        <span>Total hours</span>
+                        <span className="tabular-nums">{totalHours(levels).toFixed(2)} hrs</span>
+                      </div>
+                    </div>
+                  </div>
+                );
+              })()}
               <div className="border-t pt-2 mt-2 space-y-1 text-sm">
                 <div className="flex justify-between text-muted-foreground text-xs">
                   <span>Subtotal</span><span>{fmtUsd(inv.subtotal)}</span>

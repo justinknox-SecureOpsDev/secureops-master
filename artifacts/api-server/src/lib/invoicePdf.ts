@@ -57,6 +57,44 @@ const fmtUsd = (n: string | number | null): string => {
   return v.toLocaleString("en-US", { style: "currency", currency: "USD" });
 };
 
+/**
+ * Licence-level labels. Kept in sync with the admin invoice board so the PDF a
+ * client receives reads the same as the board an admin approved it from.
+ * Unknown levels fall back to "L<n>" rather than rendering blank.
+ */
+const LEVEL_LABELS: Record<number, string> = {
+  1: "Support Staff",
+  2: "Unarmed",
+  3: "Armed",
+  4: "L4/PPO",
+};
+
+const levelLabel = (level: number | null | undefined): string =>
+  level == null ? "Unspecified" : LEVEL_LABELS[level] ?? `L${level}`;
+
+type LevelTotal = { level: number | null; hours: number; amount: number };
+
+/**
+ * Roll the line items up per licence level. Items are grouped per officer (and
+ * rate/holiday), so an invoice usually carries several rows at the same level;
+ * this collapses them into "how many armed vs unarmed hours were billed".
+ */
+function totalsByLevel(
+  items: NonNullable<InvoicePdfInput["lineItems"]>,
+): LevelTotal[] {
+  const acc = new Map<number | null, LevelTotal>();
+  for (const it of items) {
+    const key = it.level ?? null;
+    const cur = acc.get(key) ?? { level: key, hours: 0, amount: 0 };
+    cur.hours += it.hours ?? 0;
+    cur.amount += it.amount ?? 0;
+    acc.set(key, cur);
+  }
+  return Array.from(acc.values()).sort(
+    (a, b) => (a.level ?? Number.MAX_SAFE_INTEGER) - (b.level ?? Number.MAX_SAFE_INTEGER),
+  );
+}
+
 function sectionHeader(doc: PDFKit.PDFDocument, label: string): void {
   doc.fillColor(brand.colorNavy).font("Helvetica-Bold").fontSize(9)
     .text(label.toUpperCase(), 56, doc.y, { characterSpacing: 0.5 });
@@ -144,8 +182,9 @@ export function buildInvoicePdf(inv: InvoicePdfInput): InvoicePdfPayload {
   const th = doc.y;
   doc.rect(56, th - 2, W - 112, 16).fill("#eef0f3");
   doc.fillColor(MUTED).font("Helvetica-Bold").fontSize(8);
-  doc.text("Officer",  66, th, { width: 185 });
-  doc.text("Level",   255, th, { width: 40, align: "center" });
+  doc.text("Officer",  66, th, { width: 165 });
+  // Wide enough for the longest label ("Support Staff") on one line.
+    doc.text("Level",   235, th, { width: 62, align: "center" });
   doc.text("Hours",   300, th, { width: 60, align: "right" });
   doc.text("Rate",    366, th, { width: 65, align: "right" });
   doc.text("Amount",  436, th, { width: 100, align: "right" });
@@ -156,8 +195,9 @@ export function buildInvoicePdf(inv: InvoicePdfInput): InvoicePdfPayload {
     const th = doc.y;
     doc.rect(56, th - 2, W - 112, 16).fill("#eef0f3");
     doc.fillColor(MUTED).font("Helvetica-Bold").fontSize(8);
-    doc.text("Officer",  66, th, { width: 185 });
-    doc.text("Level",   255, th, { width: 40, align: "center" });
+    doc.text("Officer",  66, th, { width: 165 });
+    // Wide enough for the longest label ("Support Staff") on one line.
+    doc.text("Level",   235, th, { width: 62, align: "center" });
     doc.text("Hours",   300, th, { width: 60, align: "right" });
     doc.text("Rate",    366, th, { width: 65, align: "right" });
     doc.text("Amount",  436, th, { width: 100, align: "right" });
@@ -175,13 +215,11 @@ export function buildInvoicePdf(inv: InvoicePdfInput): InvoicePdfPayload {
     }
     if (i % 2 === 1) doc.rect(56, rowY - 1, W - 112, 16).fill("#fafafa");
     doc.fillColor(TEXT).font("Helvetica").fontSize(9);
-    doc.text(item.description,  66, rowY, { width: 185, lineBreak: false });
+    doc.text(item.description,  66, rowY, { width: 165, lineBreak: false });
     doc.fillColor(MUTED).font("Helvetica").fontSize(8.5);
     doc.text(
-      item.level != null
-        ? ({ 1: "Support Staff", 2: "Unarmed", 3: "Armed" } as Record<number, string>)[item.level] ?? `L${item.level}`
-        : "—",
-      255, rowY, { width: 40, align: "center" },
+      item.level != null ? levelLabel(item.level) : "—",
+      235, rowY, { width: 62, align: "center", lineBreak: false },
     );
     doc.fillColor(TEXT).font("Helvetica").fontSize(9);
     doc.text(
@@ -199,6 +237,47 @@ export function buildInvoicePdf(inv: InvoicePdfInput): InvoicePdfPayload {
   doc.moveDown(0.4);
   doc.moveTo(56, doc.y).lineTo(W - 56, doc.y).strokeColor("#ddd").lineWidth(0.5).stroke();
   doc.moveDown(0.4);
+
+  // ── Hours by licence level ────────────────────────────────────────────────
+  // Rolls the per-officer rows up so the client can see the armed/unarmed split
+  // at a glance. Drawn on the left so it sits beside the right-aligned totals.
+  const levelTotals = totalsByLevel(items);
+  let levelBlockEndY = doc.y;
+  if (levelTotals.length > 0) {
+    // Keep the heading with its rows: if the whole block cannot fit above the
+    // footer margin, start it on a fresh page rather than orphaning the header.
+    const blockHeight = 14 + levelTotals.length * 12 + 14;
+    if (doc.y + blockHeight > doc.page.height - 90) doc.addPage();
+
+    const blockTop = doc.y;
+    doc.fillColor(MUTED).font("Helvetica-Bold").fontSize(8)
+      .text("HOURS BY LICENCE LEVEL", 56, blockTop, { width: 220 });
+    let ly = blockTop + 13;
+
+    let allHours = 0;
+    for (const lt of levelTotals) {
+      allHours += lt.hours;
+      doc.fillColor(TEXT).font("Helvetica").fontSize(8.5)
+        .text(levelLabel(lt.level), 56, ly, { width: 110, lineBreak: false });
+      doc.fillColor(TEXT).font("Helvetica").fontSize(8.5)
+        .text(`${lt.hours.toFixed(2)} hrs`, 168, ly, { width: 55, align: "right" });
+      doc.fillColor(MUTED).font("Helvetica").fontSize(8.5)
+        .text(fmtUsd(lt.amount), 227, ly, { width: 70, align: "right" });
+      ly += 12;
+    }
+
+    doc.moveTo(56, ly + 1).lineTo(297, ly + 1).strokeColor("#ddd").lineWidth(0.5).stroke();
+    ly += 4;
+    doc.fillColor(brand.colorNavy).font("Helvetica-Bold").fontSize(8.5)
+      .text("Total hours", 56, ly, { width: 110, lineBreak: false });
+    doc.fillColor(brand.colorNavy).font("Helvetica-Bold").fontSize(8.5)
+      .text(`${allHours.toFixed(2)} hrs`, 168, ly, { width: 55, align: "right" });
+    levelBlockEndY = ly + 14;
+
+    // Totals are drawn from doc.y on the right-hand side; rewind to the top of
+    // this block so the two sit side by side instead of stacking.
+    doc.y = blockTop;
+  }
 
   // ── Totals block ──────────────────────────────────────────────────────────
   const totX = W - 56 - 200;
@@ -231,6 +310,11 @@ export function buildInvoicePdf(inv: InvoicePdfInput): InvoicePdfPayload {
   doc.fillColor(brand.colorGold).font("Helvetica-Bold").fontSize(11)
     .text(fmtUsd(total), totX + 124, totalBoxY + 4, { width: 76, align: "right" });
   doc.y = totalBoxY + 24;
+
+  // The licence-level block was drawn to the left of the totals from the same
+  // starting Y. Drop below whichever column is taller so Notes never lands on
+  // top of the breakdown.
+  doc.y = Math.max(doc.y, levelBlockEndY);
 
   // ── Notes ────────────────────────────────────────────────────────────────
   if (inv.notes && inv.notes.trim()) {

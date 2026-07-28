@@ -98,6 +98,16 @@ export interface EmailMessage {
   text: string;
   html?: string;
   attachments?: EmailAttachment[];
+  /**
+   * Address replies should go to, when it differs from the envelope sender.
+   *
+   * The From address is fixed by provider config (RESEND_FROM / SMTP_FROM) and
+   * usually has to stay on a verified sending domain, which is not necessarily
+   * the mailbox a human should answer. Setting this lets a message be sent from
+   * the verified sender while replies land on the correct inbox (e.g. invoices
+   * reply to the billing address).
+   */
+  replyTo?: string;
 }
 
 /**
@@ -140,6 +150,7 @@ async function sendViaResend(msg: EmailMessage): Promise<EmailSendResult | null>
     const { data, error } = await resend.emails.send({
       from,
       to: msg.to,
+      ...(msg.replyTo ? { replyTo: msg.replyTo } : {}),
       subject: msg.subject,
       text: msg.text,
       html: msg.html,
@@ -182,6 +193,7 @@ async function sendViaSmtp(msg: EmailMessage): Promise<EmailSendResult | null> {
     const info = await t.sendMail({
       from,
       to: msg.to,
+      ...(msg.replyTo ? { replyTo: msg.replyTo } : {}),
       subject: msg.subject,
       text: msg.text,
       html: msg.html,

@@ -518,6 +518,11 @@ router.post("/invoices/:id/send", requireAdmin, async (req, res): Promise<void> 
 
   const emailResult = await sendEmailDetailed({
     to: recipient,
+    // The From address is pinned to the verified sending domain (RESEND_FROM /
+    // SMTP_FROM) and is often a no-reply/system mailbox. Point replies at the
+    // billing inbox so a client hitting "Reply" reaches accounts receivable
+    // rather than the sending domain's catch-all.
+    replyTo: brand.billingEmail,
     subject: `Invoice ${row.invoiceNumber} — ${brand.companyName}`,
     text: [
       `Dear ${row.clientName ?? "Client"},`,
