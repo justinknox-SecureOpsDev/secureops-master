@@ -8,6 +8,7 @@
 - [One-open-time-entry invariant](single-open-time-entry-invariant.md) — no DB uniqueness on open time entries per officer; clock-in paths must guard concurrency (FOR UPDATE on users row) themselves.
 - [requireAuth admits client role](auth-requireauth-admits-client.md) — bare requireAuth lets external client-portal users in too; staff/officer-only internal-data endpoints must use requireStaff, not requireAuth.
 - [Upload MIME octet-stream fallback](upload-mime-octet-stream.md) — browser sends octet-stream for .doc/.docx → 415; client+server derive MIME from extension; raw parser needs type:()=>true.
+- [Public upload error contract](public-upload-error-contract.md) — bare "Upload failed (N)" = response had no JSON `message`; express.raw errors bypass the route, and there's no global JSON error handler.
 - [HEIC decode via ImageMagick](heic-decode-imagemagick.md) — env sharp is AVIF-only (no HEVC); decode iPhone HEIC with ImageMagick, keep imagemagick a declared dep, mirror upload type lists everywhere.
 - [Drizzle date vs timestamp coercion](drizzle-date-vs-timestamp-coercion.md) — pg `date` cols want ISO strings, `timestamp` cols want Date objects; only coerce timestamps in admin CRUD.
 - [Pay-run export atomic-claim](pay-run-export-atomic-claim.md) — AP/pay-run CSV rows must come from UPDATE…RETURNING claim (status=approved only), not read-then-update, or you double-pay.

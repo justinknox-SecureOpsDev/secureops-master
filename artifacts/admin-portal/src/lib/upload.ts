@@ -100,18 +100,60 @@ export async function uploadFile(file: File): Promise<UploadedFile> {
 export async function uploadFileAnon(file: File): Promise<UploadedFile> {
   const contentType = resolveContentType(file);
 
-  const res = await fetch("/api/storage/uploads/application-file", {
-    method: "POST",
-    headers: {
-      "Content-Type": contentType,
-      "X-File-Name": file.name,
-    },
-    body: file,
-  });
+  /**
+   * Applicants are anonymous members of the public filling in a long form, so a
+   * failed document upload is where we lose them entirely — they have no
+   * account, no support channel, and no way to retry later. Two things matter
+   * here beyond the happy path:
+   *
+   *  - Retry transient failures. A 5xx or a dropped connection is routinely
+   *    momentary (a backend redeploy restarts the server for a few seconds, and
+   *    every request in that window 5xxs). Re-sending a second later almost
+   *    always succeeds, and the applicant never sees it. 4xx is *not* retried:
+   *    the file is wrong and resending cannot change that.
+   *  - Never surface a bare status code. An error the applicant cannot act on
+   *    is indistinguishable from the app being broken.
+   */
+  let res: Response | undefined;
+  let networkError: unknown;
+
+  for (let attempt = 1; attempt <= 3; attempt++) {
+    networkError = undefined;
+    try {
+      res = await fetch("/api/storage/uploads/application-file", {
+        method: "POST",
+        headers: {
+          "Content-Type": contentType,
+          "X-File-Name": file.name,
+        },
+        body: file,
+      });
+    } catch (e) {
+      // Network-level failure (offline, connection reset mid-upload).
+      networkError = e;
+    }
+
+    const retriable = networkError !== undefined || (res !== undefined && res.status >= 500);
+    if (!retriable) break;
+    if (attempt < 3) await new Promise((r) => setTimeout(r, attempt * 800));
+  }
+
+  if (!res) {
+    throw new Error(
+      "Upload failed — we couldn't reach the server. Check your connection and try again.",
+    );
+  }
 
   if (!res.ok) {
+    // A 5xx often isn't JSON at all (a proxy error page during a restart), so
+    // fall back to an explanation rather than the status number.
     const body = await res.json().catch(() => ({})) as { message?: string };
-    throw new Error(body.message ?? `Upload failed (${res.status})`);
+    if (body.message) throw new Error(body.message);
+    throw new Error(
+      res.status >= 500
+        ? "Upload failed — the server is temporarily unavailable. Please wait a moment and try again."
+        : `Upload failed (${res.status})`,
+    );
   }
 
   const data = await res.json() as { objectPath: string; name: string; size: number; contentType: string };

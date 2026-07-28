@@ -698,15 +698,56 @@ describe("Anonymous application-file upload — custom-question end to end", () 
     expect(res.body.objectPath).toBeUndefined();
   });
 
-  it("rejects an oversized file with 413 (over the 10 MB HTTP limit)", async () => {
-    // 11 MB > the endpoint's 10 MB express.raw() cap: the parser aborts before
+  it("rejects an oversized file with 413 and a message the applicant can act on", async () => {
+    // 26 MB > the endpoint's 25 MB express.raw() cap: the parser aborts before
     // the handler ever runs, so nothing is written to storage.
     const res = await request(app)
       .post(UPLOAD_URL)
       .set("Content-Type", "application/pdf")
       .set("X-File-Name", "huge.pdf")
-      .send(Buffer.alloc(11 * 1024 * 1024, 0x41));
+      .send(Buffer.alloc(26 * 1024 * 1024, 0x41));
     expect(res.status).toBe(413);
+    // Must be JSON carrying a `message`. Left to Express's default handler this
+    // is an HTML stack trace, which leaks internals to an unauthenticated
+    // caller AND renders client-side as a bare "Upload failed (413)" — hiding
+    // the one cause the applicant could actually fix.
+    expect(res.body.message).toMatch(/too large/i);
+    expect(res.body.message).toMatch(/25 MB/);
+    expect(res.text).not.toMatch(/PayloadTooLargeError|at readStream/);
+  });
+
+  it("answers an unreadable body in JSON rather than an HTML error page", async () => {
+    // The body parser rejects an unsupported Content-Encoding before the route
+    // handler runs. There is no global JSON error handler, so without explicit
+    // handling this returns Express's default HTML page — the client finds no
+    // `message` and shows a bare status code, which is the exact unactionable
+    // failure this endpoint keeps getting reported for.
+    const res = await request(app)
+      .post(UPLOAD_URL)
+      .set("Content-Type", "application/pdf")
+      .set("Content-Encoding", "br")
+      .set("X-File-Name", "card.pdf")
+      .send(validPdf);
+    expect(res.status).toBeGreaterThanOrEqual(400);
+    expect(res.status).toBeLessThan(500);
+    expect(typeof res.body.message).toBe("string");
+    expect(res.body.message.length).toBeGreaterThan(0);
+    expect(res.text).not.toMatch(/<!DOCTYPE html|<pre>|at readStream/);
+  });
+
+  it("accepts a large photo that the old 10 MB cap would have rejected", async () => {
+    // Applicants were blocked here: a high-megapixel phone photo or a flatbed
+    // scan of an SSN card routinely exceeds 10 MB, and they have no way to
+    // resize it.
+    const big = Buffer.concat([validPdf, Buffer.alloc(12 * 1024 * 1024, 0x20)]);
+    const res = await request(app)
+      .post(UPLOAD_URL)
+      .set("Content-Type", "application/pdf")
+      .set("X-File-Name", "scan.pdf")
+      .send(big);
+    expect(res.status).toBe(200);
+    expect(typeof res.body.objectPath).toBe("string");
+    uploadedPaths.push(res.body.objectPath as string);
   });
 
   it("accepts a valid file, stores it as a custom answer, and opens via signed URL", async () => {

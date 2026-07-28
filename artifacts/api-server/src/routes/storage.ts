@@ -22,13 +22,17 @@ import { isWorkerRole } from "../lib/eligibility";
 const MAX_UPLOAD_BYTES = 25 * 1024 * 1024;
 
 /**
- * Cap for anonymous HR application uploads (Apply / Onboard / Amend). 10 MB is
- * ample for a phone photo of a driver's license, SSN card, or passport (an
- * iPhone HEIC is 2–5 MB). Kept deliberately low: this endpoint is
- * unauthenticated and every accepted image is re-encoded server-side, so a
- * tight input bound limits the abuse surface of that transcode.
+ * Cap for anonymous HR application uploads (Apply / Onboard / Amend).
+ *
+ * Was 10 MB, which real applicants hit: a high-megapixel Android photo or a
+ * flatbed scan of an SSN card routinely exceeds it, and the applicant — who
+ * has no way to resize a file — simply cannot finish the form. Since every
+ * accepted image is downscaled and re-encoded server-side before storage, a
+ * larger *input* bound costs nothing on disk; the abuse surface is held down
+ * by the per-IP rate limiter and the decode ceilings below instead.
  */
-const APPLICATION_MAX_UPLOAD_BYTES = 10 * 1024 * 1024;
+const APPLICATION_MAX_UPLOAD_BYTES = 25 * 1024 * 1024;
+const APPLICATION_MAX_UPLOAD_MB = Math.round(APPLICATION_MAX_UPLOAD_BYTES / (1024 * 1024));
 
 /**
  * MIME types the application legitimately handles: identity/work documents,
@@ -147,6 +151,10 @@ export async function normalizeApplicationUpload(
     // otherwise exhaust memory before the resize runs. 100 MP still admits
     // every real phone camera (12–48 MP) with generous headroom.
     limitInputPixels: 100_000_000,
+    // Stream the decode instead of materialising the full raster where the
+    // format allows it. A 100 MP image is ~400 MB decoded, and an OOM here
+    // takes down the whole process — which the applicant sees as a bare 500.
+    sequentialRead: true,
   })
     .rotate()
     .resize(3000, 3000, { fit: "inside", withoutEnlargement: true })
@@ -221,6 +229,61 @@ const applicationRawParser = express.raw({
   // parsing when no Content-Type header is present, leaving req.body unparsed.
   type: () => true,
 });
+
+/**
+ * Run the raw parser and turn an over-limit body into a JSON answer the
+ * applicant can act on.
+ *
+ * Without this the parser's PayloadTooLargeError falls through to Express's
+ * default handler, which replies with an HTML page containing a stack trace.
+ * The upload client parses JSON, finds no `message`, and renders a bare
+ * "Upload failed (413)" — so the one error a user can actually fix (their
+ * photo is too big) arrives as an opaque number, and a stack trace leaks to an
+ * unauthenticated caller. Every failure on this endpoint must carry a plain
+ * `message`.
+ */
+function applicationBodyParser(req: Request, res: Response, next: express.NextFunction): void {
+  applicationRawParser(req, res, (err?: unknown) => {
+    if (!err) {
+      next();
+      return;
+    }
+    const status = (err as { status?: number; statusCode?: number }).status
+      ?? (err as { statusCode?: number }).statusCode;
+    const type = (err as { type?: string }).type;
+
+    if (status === 413 || type === "entity.too.large") {
+      req.log.info(
+        { size: req.headers["content-length"] },
+        "Application upload rejected: over size limit",
+      );
+      res.status(413).json({
+        error: "Payload Too Large",
+        message:
+          `That file is too large (limit ${APPLICATION_MAX_UPLOAD_MB} MB). ` +
+          "Please upload a smaller photo, or take the picture at a lower resolution.",
+      });
+      return;
+    }
+
+    // Every other parser failure (unsupported content-encoding, a body that
+    // died mid-flight, a bad declared length) must ALSO answer in JSON. There
+    // is no global JSON error handler on this app, so `next(err)` here would
+    // hand the applicant Express's default HTML error page — no `message`,
+    // which is exactly the unactionable "Upload failed (500)" this endpoint
+    // keeps getting reported for, plus a stack trace leaked to an
+    // unauthenticated caller in non-production builds.
+    req.log.warn({ err, type, status }, "Application upload body could not be read");
+    if (res.headersSent) return;
+    const code = typeof status === "number" && status >= 400 && status < 500 ? status : 400;
+    res.status(code).json({
+      error: "Bad Request",
+      message:
+        "We couldn't read that upload. Please try again, and if it keeps " +
+        "failing try a different file or a photo taken with your phone's camera.",
+    });
+  });
+}
 
 /**
  * Shared handler logic: validate size + content-type then mint a signed URL.
@@ -317,7 +380,7 @@ router.post(
 router.post(
   "/storage/uploads/application-file",
   applicationUploadLimiter,
-  applicationRawParser,
+  applicationBodyParser,
   async (req: Request, res: Response) => {
     // X-File-Name is advisory only (display on client). Sanitised, never used
     // in storage paths. Also used to recover the MIME type when the browser
@@ -351,7 +414,13 @@ router.post(
     try {
       normalized = await normalizeApplicationUpload(body, resolvedType, safeName);
     } catch (err) {
-      req.log.warn({ err }, "Application image normalization failed");
+      // Log what the file actually was. An applicant can only tell us "it
+      // didn't work", so the failing type/size has to be in the logs or the
+      // next report is undiagnosable.
+      req.log.warn(
+        { err, resolvedType, rawType, bytes: body.length, name: safeName },
+        "Application image normalization failed",
+      );
       res.status(422).json({
         error: "Unprocessable Entity",
         message: "We couldn't read that image. Please try another photo or upload a PDF.",
@@ -359,21 +428,46 @@ router.post(
       return;
     }
 
-    try {
-      const objectPath = await objectStorageService.saveObjectBuffer(
-        normalized.buffer,
-        normalized.contentType,
-      );
-      res.json({
-        objectPath,
-        name: normalized.name,
-        size: normalized.buffer.length,
-        contentType: normalized.contentType,
-      });
-    } catch (error) {
-      req.log.error({ err: error }, "Error saving application upload");
-      res.status(500).json({ error: "Failed to save file" });
+    // Retry a failed storage write before giving up. The object-storage call
+    // goes out over the network, so a single transient hiccup would otherwise
+    // end an applicant's session with an unexplained 500 and no way forward —
+    // and re-picking the file is the only recovery they have. Writes here are
+    // safe to repeat: each attempt mints its own object name, so a retry can
+    // never overwrite or duplicate a previously stored document.
+    let lastError: unknown;
+    for (let attempt = 1; attempt <= 3; attempt++) {
+      try {
+        const objectPath = await objectStorageService.saveObjectBuffer(
+          normalized.buffer,
+          normalized.contentType,
+        );
+        res.json({
+          objectPath,
+          name: normalized.name,
+          size: normalized.buffer.length,
+          contentType: normalized.contentType,
+        });
+        return;
+      } catch (error) {
+        lastError = error;
+        req.log.warn(
+          { err: error, attempt, bytes: normalized.buffer.length },
+          "Application upload storage write failed",
+        );
+        if (attempt < 3) await new Promise((r) => setTimeout(r, attempt * 250));
+      }
     }
+
+    req.log.error(
+      { err: lastError, bytes: normalized.buffer.length, contentType: normalized.contentType },
+      "Error saving application upload",
+    );
+    res.status(500).json({
+      error: "Failed to save file",
+      message:
+        "We couldn't save that file just now. Please try again in a moment — " +
+        "if it keeps failing, continue with the rest of the form and let us know.",
+    });
   },
 );
 
