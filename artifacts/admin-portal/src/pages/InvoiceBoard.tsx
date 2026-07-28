@@ -9,6 +9,44 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { api, fetchWithAuth } from "@/lib/api";
 import { hoursByLevel, levelLabel } from "@/lib/invoiceLevels";
+import { formatDate, formatTime } from "@/lib/format";
+
+// One work session behind an invoice line item, as returned by
+// GET /invoices/:id/entries. Times are UTC ISO strings; rendered in the
+// business timezone (Central) via the shared format helpers, matching the
+// Time Card and Payroll Board.
+type SessionEntry = {
+  kind: "officer" | "subcontractor";
+  entryId: string;
+  workerName: string;
+  description: string;
+  clockIn: string;
+  clockOut: string | null;
+  hours: number;
+  rate: number | null;
+  level: number | null;
+  unpriced: boolean;
+  billable: boolean;
+};
+
+// Does this session belong to this line item's billed grouping? The server
+// groups line items by (worker+holiday [encoded in description], level,
+// rate), so description alone is NOT unique — two line items can share a
+// description with different rates/levels. Match the full grouping key.
+function sessionMatchesLineItem(e: SessionEntry, li: LineItem): boolean {
+  if (e.description !== li.description) return false;
+  if ((e.level ?? null) !== (li.level ?? null)) return false;
+  if (li.rate != null && (e.rate == null || Math.abs(e.rate - li.rate) >= 0.005)) return false;
+  return true;
+}
+
+type InvoiceEntriesResult = {
+  unresolved: boolean;
+  reason?: string;
+  reconciled: boolean;
+  unpricedHours: number;
+  entries: SessionEntry[];
+};
 
 type LineItem = {
   description: string;
@@ -518,6 +556,37 @@ export default function InvoiceBoardPage() {
     const next = new Set(openInvoices);
     if (next.has(id)) next.delete(id); else next.add(id);
     setOpenInvoices(next);
+  };
+
+  // ---- Line-item drill-down: the clock-in/clock-out sessions behind each
+  // line item. Entries are fetched ONCE per invoice on the first line-item
+  // expand and cached for the rest of the page's life.
+  const [openLineItems, setOpenLineItems] = useState<Set<string>>(new Set());
+  const [invoiceEntries, setInvoiceEntries] = useState<Record<string, InvoiceEntriesResult | "loading" | "error">>({});
+
+  const loadInvoiceEntries = async (invoiceId: string) => {
+    let alreadyRequested = false;
+    setInvoiceEntries((prev) => {
+      if (prev[invoiceId] !== undefined && prev[invoiceId] !== "error") { alreadyRequested = true; return prev; }
+      return { ...prev, [invoiceId]: "loading" };
+    });
+    if (alreadyRequested) return;
+    try {
+      const data = await api<InvoiceEntriesResult>(`/invoices/${invoiceId}/entries`);
+      setInvoiceEntries((prev) => ({ ...prev, [invoiceId]: data }));
+    } catch {
+      setInvoiceEntries((prev) => ({ ...prev, [invoiceId]: "error" }));
+    }
+  };
+
+  const toggleLineItemExpanded = (invoiceId: string, index: number) => {
+    const key = `${invoiceId}::${index}`;
+    setOpenLineItems((prev) => {
+      const next = new Set(prev);
+      if (next.has(key)) next.delete(key); else next.add(key);
+      return next;
+    });
+    if (!openLineItems.has(key)) void loadInvoiceEntries(invoiceId);
   };
 
   // From the double-billing warning banner: expand the conflicting invoice's
@@ -1113,14 +1182,159 @@ export default function InvoiceBoardPage() {
                                         </tr>
                                       </thead>
                                       <tbody>
-                                        {r.lineItems!.map((li, i) => (
-                                          <tr key={i} className="border-t border-gray-200">
-                                            <td className="px-2 py-1">{li.description}</td>
-                                            <td className="px-2 py-1 text-right">{li.hours != null ? li.hours.toFixed(2) : "—"}</td>
-                                            <td className="px-2 py-1 text-right">{li.rate != null ? fmtUsd(li.rate) : "—"}</td>
-                                            <td className="px-2 py-1 text-right font-medium">{fmtUsd(li.amount)}</td>
-                                          </tr>
-                                        ))}
+                                        {r.lineItems!.map((li, i) => {
+                                          const liKey = `${r.id}::${i}`;
+                                          const liOpen = openLineItems.has(liKey);
+                                          const detail = invoiceEntries[r.id];
+                                          const loaded = detail !== undefined && detail !== "loading" && detail !== "error" ? detail : null;
+                                          const sessions = loaded ? loaded.entries.filter((e) => sessionMatchesLineItem(e, li)) : [];
+                                          return (
+                                            <Fragment key={i}>
+                                              <tr className="border-t border-gray-200">
+                                                <td className="px-2 py-1">
+                                                  <button
+                                                    type="button"
+                                                    onClick={() => toggleLineItemExpanded(r.id, i)}
+                                                    className="inline-flex items-center gap-1 text-left hover:text-brand-navy hover:underline"
+                                                    title="Show the individual clock-in/clock-out sessions behind this line item"
+                                                    aria-expanded={liOpen}
+                                                  >
+                                                    {liOpen
+                                                      ? <ChevronDown className="w-3 h-3 shrink-0 text-muted-foreground" />
+                                                      : <ChevronRight className="w-3 h-3 shrink-0 text-muted-foreground" />}
+                                                    <span>{li.description}</span>
+                                                  </button>
+                                                </td>
+                                                <td className="px-2 py-1 text-right">{li.hours != null ? li.hours.toFixed(2) : "—"}</td>
+                                                <td className="px-2 py-1 text-right">{li.rate != null ? fmtUsd(li.rate) : "—"}</td>
+                                                <td className="px-2 py-1 text-right font-medium">{fmtUsd(li.amount)}</td>
+                                              </tr>
+                                              {liOpen && (
+                                                <tr>
+                                                  <td colSpan={4} className="px-2 pb-2 pt-0">
+                                                    {detail === undefined || detail === "loading" ? (
+                                                      <div className="flex items-center gap-2 text-xs text-muted-foreground px-2 py-2">
+                                                        <Loader2 className="w-3.5 h-3.5 animate-spin" /> Loading work sessions…
+                                                      </div>
+                                                    ) : detail === "error" ? (
+                                                      <div className="text-xs text-red-600 px-2 py-2">
+                                                        Couldn't load the work sessions for this invoice.{" "}
+                                                        <button type="button" className="underline" onClick={() => void loadInvoiceEntries(r.id)}>Retry</button>
+                                                      </div>
+                                                    ) : detail.unresolved ? (
+                                                      <div className="text-xs text-amber-800 bg-amber-50 border border-amber-200 rounded px-2 py-1.5">
+                                                        {detail.reason ?? "This invoice's line items cannot be traced back to time entries."}
+                                                      </div>
+                                                    ) : (
+                                                      <div className="space-y-1.5">
+                                                        {!detail.reconciled && (
+                                                          <div className="flex items-start gap-1.5 text-xs text-amber-800 bg-amber-50 border border-amber-200 rounded px-2 py-1.5">
+                                                            <AlertTriangle className="w-3.5 h-3.5 shrink-0 mt-0.5" />
+                                                            <span>
+                                                              These are the current live time entries for this site and period — they no
+                                                              longer match the billed line items (the invoice was hand-edited, or entries
+                                                              were changed or un-approved after it was generated).
+                                                            </span>
+                                                          </div>
+                                                        )}
+                                                        {sessions.length === 0 ? (
+                                                          <div className="text-xs text-muted-foreground italic px-2 py-1">
+                                                            No matching work sessions found for this line item.
+                                                          </div>
+                                                        ) : (
+                                                          <div
+                                                            className="overflow-x-auto rounded border border-gray-200 bg-white"
+                                                            tabIndex={0}
+                                                            role="region"
+                                                            aria-label={`Work sessions for ${li.description}`}
+                                                          >
+                                                            <table className="w-full text-xs min-w-[420px]">
+                                                              <thead className="text-[10px] uppercase tracking-wider text-muted-foreground bg-gray-50">
+                                                                <tr>
+                                                                  <th className="px-2 py-1 text-left">Date</th>
+                                                                  <th className="px-2 py-1 text-left">Clock in</th>
+                                                                  <th className="px-2 py-1 text-left">Clock out</th>
+                                                                  <th className="px-2 py-1 text-right">Hours</th>
+                                                                </tr>
+                                                              </thead>
+                                                              <tbody>
+                                                                {sessions.map((s) => (
+                                                                  <tr key={s.entryId} className="border-t border-gray-100">
+                                                                    <td className="px-2 py-1 whitespace-nowrap">{formatDate(s.clockIn)}</td>
+                                                                    <td className="px-2 py-1 whitespace-nowrap">{formatTime(s.clockIn)}</td>
+                                                                    <td className="px-2 py-1 whitespace-nowrap">
+                                                                      {s.clockOut
+                                                                        ? formatTime(s.clockOut)
+                                                                        : <span className="italic text-muted-foreground">Still clocked in</span>}
+                                                                    </td>
+                                                                    <td className="px-2 py-1 text-right">{s.hours > 0 ? s.hours.toFixed(2) : "—"}</td>
+                                                                  </tr>
+                                                                ))}
+                                                              </tbody>
+                                                            </table>
+                                                          </div>
+                                                        )}
+                                                      </div>
+                                                    )}
+                                                  </td>
+                                                </tr>
+                                              )}
+                                            </Fragment>
+                                          );
+                                        })}
+                                        {(() => {
+                                          // Approved hours with NO bill rate — dropped from billing.
+                                          // Shown once entries are loaded (any line item expanded), in
+                                          // their own labelled group, consistent with the unbilled-hours
+                                          // warning banner.
+                                          const detail = invoiceEntries[r.id];
+                                          const loaded = detail !== undefined && detail !== "loading" && detail !== "error" ? detail : null;
+                                          const unpriced = loaded && !loaded.unresolved ? loaded.entries.filter((e) => e.unpriced) : [];
+                                          if (!unpriced.length) return null;
+                                          return (
+                                            <tr className="border-t border-amber-200 bg-amber-50/60">
+                                              <td colSpan={4} className="px-2 py-2">
+                                                <div className="flex items-center gap-1.5 text-[11px] font-medium text-amber-900 mb-1">
+                                                  <AlertTriangle className="w-3.5 h-3.5 shrink-0" />
+                                                  Approved hours with no bill rate — not billed on this invoice
+                                                </div>
+                                                <div
+                                                  className="overflow-x-auto rounded border border-amber-200 bg-white"
+                                                  tabIndex={0}
+                                                  role="region"
+                                                  aria-label="Unpriced work sessions"
+                                                >
+                                                  <table className="w-full text-xs min-w-[480px]">
+                                                    <thead className="text-[10px] uppercase tracking-wider text-muted-foreground bg-amber-50/60">
+                                                      <tr>
+                                                        <th className="px-2 py-1 text-left">Worker</th>
+                                                        <th className="px-2 py-1 text-left">Date</th>
+                                                        <th className="px-2 py-1 text-left">Clock in</th>
+                                                        <th className="px-2 py-1 text-left">Clock out</th>
+                                                        <th className="px-2 py-1 text-right">Hours</th>
+                                                      </tr>
+                                                    </thead>
+                                                    <tbody>
+                                                      {unpriced.map((s) => (
+                                                        <tr key={s.entryId} className="border-t border-amber-100">
+                                                          <td className="px-2 py-1 whitespace-nowrap">{s.workerName}</td>
+                                                          <td className="px-2 py-1 whitespace-nowrap">{formatDate(s.clockIn)}</td>
+                                                          <td className="px-2 py-1 whitespace-nowrap">{formatTime(s.clockIn)}</td>
+                                                          <td className="px-2 py-1 whitespace-nowrap">
+                                                            {s.clockOut
+                                                              ? formatTime(s.clockOut)
+                                                              : <span className="italic text-muted-foreground">Still clocked in</span>}
+                                                          </td>
+                                                          <td className="px-2 py-1 text-right">{s.hours > 0 ? s.hours.toFixed(2) : "—"}</td>
+                                                        </tr>
+                                                      ))}
+                                                    </tbody>
+                                                  </table>
+                                                </div>
+                                              </td>
+                                            </tr>
+                                          );
+                                        })()}
                                       </tbody>
                                       <tfoot>
                                         {/* Hours rolled up per licence level — line items are grouped

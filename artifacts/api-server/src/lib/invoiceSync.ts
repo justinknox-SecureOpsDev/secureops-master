@@ -42,6 +42,229 @@ import { businessTimeZone, businessDateToUtc, businessDateIso, startOfBusinessWe
 
 const SYNCABLE_STATUS = "draft";
 
+/**
+ * One individual work session (officer or subcontractor clock-in/out) inside
+ * an invoice period, carrying everything the generators need to roll it into
+ * a line item AND everything the Invoice Board drill-down needs to display it.
+ *
+ * This is the single source of truth for "what was billed": both invoice
+ * generators build their line items from these entries via
+ * buildLineItemsFromEntries(), and the read-only
+ * GET /invoices/:id/entries endpoint returns the same entries, so the
+ * displayed sessions can never drift from the billing math.
+ */
+export type InvoicePeriodEntry = {
+  kind: "officer" | "subcontractor";
+  entryId: string;
+  /** Officer full name, or "Name (Company)" for subcontractors. */
+  workerName: string;
+  clockIn: Date;
+  clockOut: Date | null;
+  /** Parsed hoursWorked; 0 when missing/invalid/still open. */
+  hours: number;
+  level: number | null;
+  holidayName: string | null;
+  /** Resolved bill rate incl. holiday premium; null when no rate applies. */
+  rate: number | null;
+  /** hours > 0 but no bill rate could be resolved — dropped from billing. */
+  unpriced: boolean;
+  /** hours > 0 AND a rate resolved — contributes to a line item. */
+  billable: boolean;
+  /** Line-item grouping key (null when not billable). */
+  groupKey: string | null;
+  /** The line-item description this entry rolls into. */
+  description: string;
+};
+
+/**
+ * Collect every approved officer entry + closed subcontractor entry for
+ * (siteId, [start, end)) with its resolved rate, holiday premium, unpriced
+ * flag, and line-item group key. Pure read — shared by both invoice
+ * generators and the invoice drill-down endpoint.
+ */
+export async function collectInvoicePeriodEntries(
+  siteId: string,
+  start: Date,
+  end: Date,
+  siteBillRate: number,
+): Promise<InvoicePeriodEntry[]> {
+  const out: InvoicePeriodEntry[] = [];
+
+  // Approved officer entries for this site+period.
+  const entries = await db
+    .select({
+      id: timeEntriesTable.id,
+      hoursWorked: timeEntriesTable.hoursWorked,
+      clockInTime: timeEntriesTable.clockInTime,
+      clockOutTime: timeEntriesTable.clockOutTime,
+      shiftBillRate: shiftsTable.billRate,
+      shiftLevel: shiftsTable.requiredLicenseLevel,
+      employeeFirst: usersTable.firstName,
+      employeeLast: usersTable.lastName,
+    })
+    .from(timeEntriesTable)
+    .leftJoin(shiftsTable, eq(timeEntriesTable.shiftId, shiftsTable.id))
+    .leftJoin(usersTable, eq(timeEntriesTable.employeeId, usersTable.id))
+    .where(
+      and(
+        or(eq(shiftsTable.siteId, siteId), eq(timeEntriesTable.siteId, siteId)),
+        eq(timeEntriesTable.approvalStatus, "approved"),
+        gte(timeEntriesTable.clockInTime, start),
+        lt(timeEntriesTable.clockInTime, end),
+      ),
+    );
+  for (const e of entries) {
+    const hoursRaw = parseFloat(String(e.hoursWorked ?? "0"));
+    const hours = isFinite(hoursRaw) && hoursRaw > 0 ? hoursRaw : 0;
+    const shiftBill = parseFloat(String(e.shiftBillRate ?? "0"));
+    const baseRate = shiftBill > 0 ? shiftBill : siteBillRate;
+    const officerName =
+      [e.employeeFirst, e.employeeLast].filter(Boolean).join(" ") || "Unassigned officer";
+    const level = e.shiftLevel ?? null;
+    // Federal-holiday premium (1.5×): hours worked on a US federal holiday
+    // (clock-in date in PAYROLL_TIMEZONE) are billed at time-and-a-half and
+    // split into their own line item so the client sees the premium plainly.
+    const holidayName = getFederalHolidayName(e.clockInTime);
+    const rate =
+      baseRate > 0
+        ? holidayName
+          ? Math.round(baseRate * HOLIDAY_PAY_MULTIPLIER * 100) / 100
+          : baseRate
+        : null;
+    const description = holidayName
+      ? `${officerName} — Holiday (${holidayName}, ${HOLIDAY_PAY_MULTIPLIER}×)`
+      : officerName;
+    const billable = hours > 0 && rate !== null;
+    out.push({
+      kind: "officer",
+      entryId: e.id,
+      workerName: officerName,
+      clockIn: e.clockInTime,
+      clockOut: e.clockOutTime ?? null,
+      hours,
+      level,
+      holidayName,
+      rate,
+      unpriced: hours > 0 && rate === null,
+      billable,
+      groupKey: billable ? `${officerName}__${level ?? ""}__${rate}__${holidayName ?? ""}` : null,
+      description,
+    });
+  }
+
+  // Subcontractor hours. Closed entries only (clockOutAt set) for this
+  // site+period. Subcontractors have no shift and no system account, so
+  // there's no shift-level billRate to fall back from — they're billed at
+  // the site's defaultBillRate, at the same 1.5× holiday premium.
+  const subEntries = await db
+    .select({
+      id: subcontractorTimeEntriesTable.id,
+      hoursWorked: subcontractorTimeEntriesTable.hoursWorked,
+      clockInAt: subcontractorTimeEntriesTable.clockInAt,
+      clockOutAt: subcontractorTimeEntriesTable.clockOutAt,
+      name: subcontractorTimeEntriesTable.name,
+      company: subcontractorTimeEntriesTable.company,
+    })
+    .from(subcontractorTimeEntriesTable)
+    .where(
+      and(
+        eq(subcontractorTimeEntriesTable.siteId, siteId),
+        isNotNull(subcontractorTimeEntriesTable.clockOutAt),
+        gte(subcontractorTimeEntriesTable.clockInAt, start),
+        lt(subcontractorTimeEntriesTable.clockInAt, end),
+      ),
+    );
+  for (const e of subEntries) {
+    const hoursRaw = parseFloat(String(e.hoursWorked ?? "0"));
+    const hours = isFinite(hoursRaw) && hoursRaw > 0 ? hoursRaw : 0;
+    const holidayName = getFederalHolidayName(e.clockInAt);
+    const rate =
+      siteBillRate > 0
+        ? holidayName
+          ? Math.round(siteBillRate * HOLIDAY_PAY_MULTIPLIER * 100) / 100
+          : siteBillRate
+        : null;
+    const label = holidayName
+      ? `${e.name} (${e.company}) — subcontractor, Holiday (${holidayName}, ${HOLIDAY_PAY_MULTIPLIER}×)`
+      : `${e.name} (${e.company}) — subcontractor`;
+    const billable = hours > 0 && rate !== null;
+    out.push({
+      kind: "subcontractor",
+      entryId: e.id,
+      workerName: `${e.name} (${e.company})`,
+      clockIn: e.clockInAt,
+      clockOut: e.clockOutAt ?? null,
+      hours,
+      level: null,
+      holidayName,
+      rate,
+      unpriced: hours > 0 && rate === null,
+      billable,
+      groupKey: billable ? `sub__${label}__${rate}` : null,
+      description: label,
+    });
+  }
+
+  return out;
+}
+
+/**
+ * Roll individual period entries into invoice line items, exactly as both
+ * generators have always done: group by (worker, level, rate, holiday),
+ * accumulate hours × rate, round once per line, sort by description.
+ * Approved hours with no resolvable rate accumulate into unpricedHours —
+ * silently dropping them produces an invoice that under-bills with no
+ * visible sign anything is wrong.
+ */
+export function buildLineItemsFromEntries(entries: InvoicePeriodEntry[]): {
+  lineItems: Array<{ description: string; level: number | null; hours: number; rate: number; amount: number }>;
+  unpricedHours: number;
+} {
+  type Group = { description: string; level: number | null; hours: number; rate: number; amount: number };
+  const groups = new Map<string, Group>();
+  let unpricedHours = 0;
+  for (const e of entries) {
+    if (e.hours <= 0) continue;
+    if (!e.billable || e.rate === null || !e.groupKey) {
+      unpricedHours += e.hours;
+      continue;
+    }
+    const cur = groups.get(e.groupKey) ?? { description: e.description, level: e.level, hours: 0, rate: e.rate, amount: 0 };
+    cur.hours += e.hours;
+    cur.amount += e.hours * e.rate;
+    groups.set(e.groupKey, cur);
+  }
+  const lineItems = Array.from(groups.values())
+    .sort((a, b) => a.description.localeCompare(b.description))
+    .map((g) => ({
+      description: g.description,
+      level: g.level,
+      hours: Math.round(g.hours * 100) / 100,
+      rate: g.rate,
+      amount: Math.round(g.amount * 100) / 100,
+    }));
+  return { lineItems, unpricedHours };
+}
+
+/**
+ * The exact [start, end) UTC window of entries covered by an invoice with
+ * business-TZ calendar-day boundaries periodStart..periodEnd (inclusive).
+ * Matches both generators: the custom-period path uses this formula
+ * directly, and for weekly invoices (periodEnd = periodStart + 6 days)
+ * businessDateToUtc(periodEnd + 1 day) IS the next business-week Monday
+ * midnight the weekly path computes via startOfBusinessWeek (DST-safe,
+ * since businessDateToUtc resolves the actual local midnight).
+ */
+export function invoicePeriodWindow(periodStartIso: string, periodEndIso: string): { start: Date; end: Date } | null {
+  const rawEnd = new Date(`${periodEndIso}T00:00:00.000Z`);
+  const tz = businessTimeZone();
+  const start = businessDateToUtc(periodStartIso, tz);
+  if (Number.isNaN(start.getTime()) || Number.isNaN(rawEnd.getTime())) return null;
+  const end = businessDateToUtc(isoDate(addDaysUtc(rawEnd, 1)), tz);
+  if (end <= start) return null;
+  return { start, end };
+}
+
 const SYNCED_LINE_KEYS = new Set([
   "lineItems",
   "line_items",
@@ -243,110 +466,16 @@ export async function upsertWeeklyInvoice(
     )
     .limit(1);
 
-  // Pull every approved entry for this site+week, grouped by officer+rate.
-  const entries = await db
-    .select({
-      hoursWorked: timeEntriesTable.hoursWorked,
-      clockInTime: timeEntriesTable.clockInTime,
-      shiftBillRate: shiftsTable.billRate,
-      shiftLevel: shiftsTable.requiredLicenseLevel,
-      employeeFirst: usersTable.firstName,
-      employeeLast: usersTable.lastName,
-    })
-    .from(timeEntriesTable)
-    .leftJoin(shiftsTable, eq(timeEntriesTable.shiftId, shiftsTable.id))
-    .leftJoin(usersTable, eq(timeEntriesTable.employeeId, usersTable.id))
-    .where(
-      and(
-        or(eq(shiftsTable.siteId, siteId), eq(timeEntriesTable.siteId, siteId)),
-        eq(timeEntriesTable.approvalStatus, "approved"),
-        gte(timeEntriesTable.clockInTime, start),
-        lt(timeEntriesTable.clockInTime, end),
-      ),
-    );
-
-  type Group = { description: string; level: number | null; hours: number; rate: number; amount: number };
-  const groups = new Map<string, Group>();
-  // Approved hours we could NOT price (no shift bill rate AND no site default
-  // bill rate). Mirrors the custom-period path: these must be surfaced to the
-  // admin — silently dropping them produces an invoice that under-bills with
-  // no visible sign anything is wrong.
-  let unpricedHours = 0;
-  for (const e of entries) {
-    const hours = parseFloat(String(e.hoursWorked ?? "0"));
-    if (!isFinite(hours) || hours <= 0) continue;
-    const shiftBill = parseFloat(String(e.shiftBillRate ?? "0"));
-    const baseRate = shiftBill > 0 ? shiftBill : siteBillRate;
-    if (baseRate <= 0) { unpricedHours += hours; continue; }
-    const officerName =
-      [e.employeeFirst, e.employeeLast].filter(Boolean).join(" ") || "Unassigned officer";
-    const level = e.shiftLevel ?? null;
-    // Federal-holiday premium (1.5×): hours worked on a US federal holiday
-    // (clock-in date in PAYROLL_TIMEZONE) are billed at time-and-a-half and
-    // split into their own line item so the client sees the premium plainly.
-    const holidayName = getFederalHolidayName(e.clockInTime);
-    const rate = holidayName ? Math.round(baseRate * HOLIDAY_PAY_MULTIPLIER * 100) / 100 : baseRate;
-    const description = holidayName
-      ? `${officerName} — Holiday (${holidayName}, ${HOLIDAY_PAY_MULTIPLIER}×)`
-      : officerName;
-    const key = `${officerName}__${level ?? ""}__${rate}__${holidayName ?? ""}`;
-    const cur = groups.get(key) ?? { description, level, hours: 0, rate, amount: 0 };
-    cur.hours += hours;
-    cur.amount += hours * rate;
-    groups.set(key, cur);
-  }
-  // Subcontractor hours (Task #277). Closed entries only (clockOutAt set,
-  // hoursWorked > 0) for this site+week. Subcontractors have no shift and
-  // no system account, so there's no shift-level billRate to fall back
-  // from — they're billed at the site's defaultBillRate. When the site
-  // has no default bill rate, these lines are skipped (rate <= 0), exactly
-  // like an officer entry whose shift+site can't resolve a rate; if that
-  // leaves the whole week with zero priced lines the upsert refuses with
-  // "no priced entries" (surfaced as the explicit 400 by the route).
-  const subEntries = await db
-    .select({
-      hoursWorked: subcontractorTimeEntriesTable.hoursWorked,
-      clockInAt: subcontractorTimeEntriesTable.clockInAt,
-      name: subcontractorTimeEntriesTable.name,
-      company: subcontractorTimeEntriesTable.company,
-    })
-    .from(subcontractorTimeEntriesTable)
-    .where(
-      and(
-        eq(subcontractorTimeEntriesTable.siteId, siteId),
-        isNotNull(subcontractorTimeEntriesTable.clockOutAt),
-        gte(subcontractorTimeEntriesTable.clockInAt, start),
-        lt(subcontractorTimeEntriesTable.clockInAt, end),
-      ),
-    );
-  for (const e of subEntries) {
-    const hours = parseFloat(String(e.hoursWorked ?? "0"));
-    if (!isFinite(hours) || hours <= 0) continue;
-    if (siteBillRate <= 0) { unpricedHours += hours; continue; }
-    // Subcontractor hours worked on a federal holiday are billed to the
-    // client at the same 1.5× premium as officer hours, split into a
-    // dedicated line item.
-    const holidayName = getFederalHolidayName(e.clockInAt);
-    const rate = holidayName ? Math.round(siteBillRate * HOLIDAY_PAY_MULTIPLIER * 100) / 100 : siteBillRate;
-    const label = holidayName
-      ? `${e.name} (${e.company}) — subcontractor, Holiday (${holidayName}, ${HOLIDAY_PAY_MULTIPLIER}×)`
-      : `${e.name} (${e.company}) — subcontractor`;
-    const key = `sub__${label}__${rate}`;
-    const cur = groups.get(key) ?? { description: label, level: null, hours: 0, rate, amount: 0 };
-    cur.hours += hours;
-    cur.amount += hours * rate;
-    groups.set(key, cur);
-  }
-
-  const lineItems = Array.from(groups.values())
-    .sort((a, b) => a.description.localeCompare(b.description))
-    .map((g) => ({
-      description: g.description,
-      level: g.level,
-      hours: Math.round(g.hours * 100) / 100,
-      rate: g.rate,
-      amount: Math.round(g.amount * 100) / 100,
-    }));
+  // Pull every approved officer entry + closed subcontractor entry for this
+  // site+week and roll them into line items via the SHARED helpers — the
+  // same entries the Invoice Board drill-down endpoint returns, so the
+  // displayed sessions can never drift from what was billed. Approved hours
+  // with no resolvable rate accumulate into unpricedHours (mirrors the
+  // custom-period path); if that leaves the whole week with zero priced
+  // lines the upsert refuses with "no priced entries" (surfaced as the
+  // explicit 400 by the route).
+  const periodEntries = await collectInvoicePeriodEntries(siteId, start, end, siteBillRate);
+  const { lineItems, unpricedHours } = buildLineItemsFromEntries(periodEntries);
 
   // Round once, reuse in every return path. Computed BEFORE the empty-week
   // early-return so an all-unpriced week still leaves a log trace — the
@@ -630,97 +759,14 @@ export async function upsertCustomPeriodInvoice(
 
   const siteBillRate = parseFloat(String(site.defaultBillRate ?? "0"));
 
-  // Pull every approved entry for this site+period, grouped by officer+rate.
-  const entries = await db
-    .select({
-      hoursWorked: timeEntriesTable.hoursWorked,
-      clockInTime: timeEntriesTable.clockInTime,
-      shiftBillRate: shiftsTable.billRate,
-      shiftLevel: shiftsTable.requiredLicenseLevel,
-      employeeFirst: usersTable.firstName,
-      employeeLast: usersTable.lastName,
-    })
-    .from(timeEntriesTable)
-    .leftJoin(shiftsTable, eq(timeEntriesTable.shiftId, shiftsTable.id))
-    .leftJoin(usersTable, eq(timeEntriesTable.employeeId, usersTable.id))
-    .where(
-      and(
-        or(eq(shiftsTable.siteId, siteId), eq(timeEntriesTable.siteId, siteId)),
-        eq(timeEntriesTable.approvalStatus, "approved"),
-        gte(timeEntriesTable.clockInTime, start),
-        lt(timeEntriesTable.clockInTime, end),
-      ),
-    );
-
-  type Group = { description: string; level: number | null; hours: number; rate: number; amount: number };
-  const groups = new Map<string, Group>();
-  // Approved hours we could NOT price (no shift bill rate AND no site default
-  // bill rate). These must be surfaced to the admin — silently dropping them
-  // produces an invoice that under-bills with no visible sign anything is wrong.
-  let unpricedHours = 0;
-  for (const e of entries) {
-    const hours = parseFloat(String(e.hoursWorked ?? "0"));
-    if (!isFinite(hours) || hours <= 0) continue;
-    const shiftBill = parseFloat(String(e.shiftBillRate ?? "0"));
-    const baseRate = shiftBill > 0 ? shiftBill : siteBillRate;
-    if (baseRate <= 0) { unpricedHours += hours; continue; }
-    const officerName =
-      [e.employeeFirst, e.employeeLast].filter(Boolean).join(" ") || "Unassigned officer";
-    const level = e.shiftLevel ?? null;
-    const holidayName = getFederalHolidayName(e.clockInTime);
-    const rate = holidayName ? Math.round(baseRate * HOLIDAY_PAY_MULTIPLIER * 100) / 100 : baseRate;
-    const description = holidayName
-      ? `${officerName} — Holiday (${holidayName}, ${HOLIDAY_PAY_MULTIPLIER}×)`
-      : officerName;
-    const key = `${officerName}__${level ?? ""}__${rate}__${holidayName ?? ""}`;
-    const cur = groups.get(key) ?? { description, level, hours: 0, rate, amount: 0 };
-    cur.hours += hours;
-    cur.amount += hours * rate;
-    groups.set(key, cur);
-  }
-
-  // Subcontractor hours for this period.
-  const subEntries = await db
-    .select({
-      hoursWorked: subcontractorTimeEntriesTable.hoursWorked,
-      clockInAt: subcontractorTimeEntriesTable.clockInAt,
-      name: subcontractorTimeEntriesTable.name,
-      company: subcontractorTimeEntriesTable.company,
-    })
-    .from(subcontractorTimeEntriesTable)
-    .where(
-      and(
-        eq(subcontractorTimeEntriesTable.siteId, siteId),
-        isNotNull(subcontractorTimeEntriesTable.clockOutAt),
-        gte(subcontractorTimeEntriesTable.clockInAt, start),
-        lt(subcontractorTimeEntriesTable.clockInAt, end),
-      ),
-    );
-  for (const e of subEntries) {
-    const hours = parseFloat(String(e.hoursWorked ?? "0"));
-    if (!isFinite(hours) || hours <= 0) continue;
-    if (siteBillRate <= 0) { unpricedHours += hours; continue; }
-    const holidayName = getFederalHolidayName(e.clockInAt);
-    const rate = holidayName ? Math.round(siteBillRate * HOLIDAY_PAY_MULTIPLIER * 100) / 100 : siteBillRate;
-    const label = holidayName
-      ? `${e.name} (${e.company}) — subcontractor, Holiday (${holidayName}, ${HOLIDAY_PAY_MULTIPLIER}×)`
-      : `${e.name} (${e.company}) — subcontractor`;
-    const key = `sub__${label}__${rate}`;
-    const cur = groups.get(key) ?? { description: label, level: null, hours: 0, rate, amount: 0 };
-    cur.hours += hours;
-    cur.amount += hours * rate;
-    groups.set(key, cur);
-  }
-
-  const lineItems = Array.from(groups.values())
-    .sort((a, b) => a.description.localeCompare(b.description))
-    .map((g) => ({
-      description: g.description,
-      level: g.level,
-      hours: Math.round(g.hours * 100) / 100,
-      rate: g.rate,
-      amount: Math.round(g.amount * 100) / 100,
-    }));
+  // Pull every approved officer entry + closed subcontractor entry for this
+  // site+period and roll them into line items via the SHARED helpers — the
+  // same entries the Invoice Board drill-down endpoint returns. Approved
+  // hours with no resolvable rate accumulate into unpricedHours: these must
+  // be surfaced to the admin — silently dropping them produces an invoice
+  // that under-bills with no visible sign anything is wrong.
+  const periodEntries = await collectInvoicePeriodEntries(siteId, start, end, siteBillRate);
+  const { lineItems, unpricedHours } = buildLineItemsFromEntries(periodEntries);
 
   if (lineItems.length === 0) {
     return { status: "skipped", reason: "no priced entries" };

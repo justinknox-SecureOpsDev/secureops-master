@@ -2,7 +2,13 @@ import { Router, type IRouter } from "express";
 import { eq, and, ilike, ne, lte, gte } from "drizzle-orm";
 import { db, invoicesTable, sitesTable } from "@workspace/db";
 import { requireAdmin } from "../middlewares/auth";
-import { upsertWeeklyInvoice, upsertCustomPeriodInvoice } from "../lib/invoiceSync";
+import {
+  upsertWeeklyInvoice,
+  upsertCustomPeriodInvoice,
+  collectInvoicePeriodEntries,
+  buildLineItemsFromEntries,
+  invoicePeriodWindow,
+} from "../lib/invoiceSync";
 import { buildInvoicePdf } from "../lib/invoicePdf";
 import { sendEmailDetailed } from "../lib/email";
 import { brand } from "../lib/brandConfig";
@@ -357,6 +363,92 @@ router.post("/invoices/generate", requireAdmin, async (req, res): Promise<void> 
     ...((result.status === "created" || result.status === "updated") && result.unpricedHours
       ? { unpricedHours: result.unpricedHours }
       : {}),
+  });
+});
+
+// The individual work sessions (officer + subcontractor clock-ins) behind an
+// invoice's line items — the Invoice Board drill-down. Read-only: recomputes
+// the entries with the SAME shared helper + business-timezone window the
+// generators use, then reports whether they still reconcile with the stored
+// line items (they won't for hand-edited invoices or entries changed /
+// un-approved after generation). An invoice with no linked site or period
+// returns an empty, clearly-flagged result rather than an error.
+router.get("/invoices/:id/entries", requireAdmin, async (req, res): Promise<void> => {
+  const id = Array.isArray(req.params.id) ? req.params.id[0] : req.params.id;
+  const [inv] = await db
+    .select({
+      id: invoicesTable.id,
+      siteId: invoicesTable.siteId,
+      periodStart: invoicesTable.periodStart,
+      periodEnd: invoicesTable.periodEnd,
+      lineItems: invoicesTable.lineItems,
+    })
+    .from(invoicesTable)
+    .where(eq(invoicesTable.id, id));
+  if (!inv) { res.status(404).json({ error: "Not Found" }); return; }
+
+  const toIso = (v: unknown): string | null =>
+    typeof v === "string" ? v : v instanceof Date ? v.toISOString().slice(0, 10) : null;
+  const periodStart = toIso(inv.periodStart);
+  const periodEnd = toIso(inv.periodEnd);
+  const window = inv.siteId && periodStart && periodEnd ? invoicePeriodWindow(periodStart, periodEnd) : null;
+
+  if (!inv.siteId || !window) {
+    res.json({
+      unresolved: true,
+      reason: !inv.siteId
+        ? "This invoice has no linked site, so its line items cannot be traced back to time entries."
+        : "This invoice has no valid billing period, so its line items cannot be traced back to time entries.",
+      reconciled: false,
+      unpricedHours: 0,
+      entries: [],
+    });
+    return;
+  }
+
+  const [site] = await db
+    .select({ defaultBillRate: sitesTable.defaultBillRate })
+    .from(sitesTable)
+    .where(eq(sitesTable.id, inv.siteId));
+  const siteBillRate = parseFloat(String(site?.defaultBillRate ?? "0"));
+
+  const periodEntries = await collectInvoicePeriodEntries(inv.siteId, window.start, window.end, siteBillRate);
+  const { lineItems: computed, unpricedHours } = buildLineItemsFromEntries(periodEntries);
+
+  // Reconciliation: the invoice still matches the live entries iff the
+  // recomputed line items are (as a multiset of description/hours/rate)
+  // identical to the stored ones. Hand-edited invoices, un-approved or
+  // edited entries, and rate changes all break this.
+  const stored = (Array.isArray(inv.lineItems) ? inv.lineItems : []) as InvoiceLineItem[];
+  const close = (a: number, b: number) => Math.abs(a - b) < 0.005;
+  const reconciled =
+    stored.length === computed.length &&
+    computed.every((c) =>
+      stored.some(
+        (s) =>
+          s.description === c.description &&
+          close(parseFloat(String(s.hours ?? 0)) || 0, c.hours) &&
+          close(parseFloat(String(s.rate ?? 0)) || 0, c.rate),
+      ),
+    );
+
+  res.json({
+    unresolved: false,
+    reconciled,
+    unpricedHours: Math.round(unpricedHours * 100) / 100,
+    entries: periodEntries.map((e) => ({
+      kind: e.kind,
+      entryId: e.entryId,
+      workerName: e.workerName,
+      description: e.description,
+      clockIn: e.clockIn.toISOString(),
+      clockOut: e.clockOut ? e.clockOut.toISOString() : null,
+      hours: e.hours,
+      rate: e.rate,
+      level: e.level,
+      unpriced: e.unpriced,
+      billable: e.billable,
+    })),
   });
 });
 
