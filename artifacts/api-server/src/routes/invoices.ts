@@ -9,9 +9,15 @@ import {
   buildLineItemsFromEntries,
   invoicePeriodWindow,
 } from "../lib/invoiceSync";
-import { buildInvoicePdf } from "../lib/invoicePdf";
+import { buildInvoicePdf, invoicePdfFilename } from "../lib/invoicePdf";
 import { sendEmailDetailed } from "../lib/email";
 import { brand } from "../lib/brandConfig";
+import { buildInvoiceEmailContent, invoiceEmailDigest } from "../lib/invoiceEmail";
+import {
+  issueSendTicket,
+  redeemSendTicket,
+  ticketRejectionMessage,
+} from "../lib/invoiceSendTickets";
 import { requireFeature } from "../lib/features";
 import { isProcessingFeeEnabled, getProcessingFeeRate } from "../lib/processingFeeConfig";
 import { getFeeMigrationPendingCount } from "../lib/invoiceProcessingFeeBackfill";
@@ -504,15 +510,15 @@ router.get("/invoices/:id/pdf", requireAdmin, async (req, res): Promise<void> =>
   });
 });
 
-// Email the invoice PDF to the client and mark status='sent'.
-// Body: { email?: string }  — uses stored clientEmail if not supplied;
-// returns { emailSent, emailStatus, emailAddress, invoiceNumber }.
-// If SMTP is not configured, still marks the invoice sent and returns
-// emailSent:false so the admin can send the PDF manually.
-router.post("/invoices/:id/send", requireAdmin, async (req, res): Promise<void> => {
-  const id = Array.isArray(req.params.id) ? req.params.id[0] : req.params.id;
-  const { email: overrideEmail } = req.body as { email?: string };
+function isoDay(v: unknown): string {
+  if (!v) return "";
+  return typeof v === "string" ? v : (v as Date).toISOString().slice(0, 10);
+}
 
+// One row shape shared by the preview and the send. If these ever read
+// different columns an admin could approve a preview built from different data
+// than the email that actually reaches the client.
+async function loadInvoiceForSend(id: string) {
   const [row] = await db
     .select({
       id: invoicesTable.id,
@@ -539,6 +545,233 @@ router.post("/invoices/:id/send", requireAdmin, async (req, res): Promise<void> 
     .from(invoicesTable)
     .leftJoin(sitesTable, eq(invoicesTable.siteId, sitesTable.id))
     .where(eq(invoicesTable.id, id));
+  return row ?? null;
+}
+
+type SendableInvoice = NonNullable<Awaited<ReturnType<typeof loadInvoiceForSend>>>;
+
+// Render the email for an invoice and fingerprint it. Used by both the preview
+// route (to show the admin) and the send route (to prove the admin saw THIS).
+async function renderInvoiceEmail(row: SendableInvoice) {
+  const periodStart = isoDay(row.periodStart);
+  // Refresh line items first so the reviewed email — and the emailed PDF —
+  // carry level data rather than a stale pre-`level` snapshot.
+  const items = await refreshLineItemsIfStale(
+    row.id,
+    row.siteId ?? null,
+    row.autoSynced,
+    row.lineItems as InvoiceLineItem[] | null,
+    periodStart,
+  );
+  const emailRow = {
+    invoiceNumber: row.invoiceNumber,
+    clientName: row.clientName,
+    periodStart,
+    periodEnd: isoDay(row.periodEnd),
+    dueDate: isoDay(row.dueDate) || null,
+    subtotal: row.subtotal,
+    taxAmount: row.taxAmount,
+    totalAmount: row.totalAmount,
+    processingFeeRate: row.processingFeeRate,
+    processingFeeAmount: row.processingFeeAmount,
+    lineItems: items ?? [],
+    // Printed on the attached PDF but not in the email body — carried through
+    // so the digest notices if they change after the admin approved the send.
+    siteName: row.siteName,
+    clientAddress: row.clientAddress,
+    notes: row.notes,
+  };
+  return {
+    items,
+    periodStart,
+    content: buildInvoiceEmailContent(emailRow),
+    digest: invoiceEmailDigest(emailRow),
+  };
+}
+
+// Things an admin should notice before this leaves the building. These are
+// warnings, not blocks — the admin decides.
+function sendWarnings(
+  row: SendableInvoice,
+  recipient: string | null,
+  items: InvoiceLineItem[] | null,
+): string[] {
+  const out: string[] = [];
+  if (!recipient) {
+    out.push("No client email on file — this invoice will be marked sent, but no email will go out.");
+  }
+  if (row.status === "sent" || row.status === "overdue") {
+    out.push("This invoice has already been sent once — confirming will email the client again.");
+  }
+  if (row.status === "paid") {
+    out.push("This invoice is already marked paid.");
+  }
+  if (!items || items.length === 0) {
+    out.push("This invoice has no line items.");
+  }
+  const feeAmt = parseFloat(String(row.processingFeeAmount ?? "0"));
+  if (isProcessingFeeEnabled() && !(feeAmt > 0)) {
+    out.push(
+      `The ${getProcessingFeeRate()}% processing fee is switched on, but this invoice does not include one. ` +
+      "Recalculate the fee before sending if it should be charged.",
+    );
+  }
+  return out;
+}
+
+// One uniform shape per requested invoice — including the ones that cannot be
+// sent — so the portal renders a single list without special-casing holes.
+type SendPreviewItem = {
+  id: string;
+  invoiceNumber: string | null;
+  status: string | null;
+  clientName: string | null;
+  siteName: string | null;
+  periodStart: string | null;
+  periodEnd: string | null;
+  dueDate: string | null;
+  subtotal: string | null;
+  taxAmount: string | null;
+  processingFeeRate: string | null;
+  processingFeeAmount: string | null;
+  totalAmount: string | null;
+  lineItems: InvoiceLineItem[];
+  to: string | null;
+  replyTo: string | null;
+  subject: string | null;
+  text: string | null;
+  html: string | null;
+  attachmentFilename: string | null;
+  warnings: string[];
+  sendable: boolean;
+  blockedReason: string | null;
+  previewToken: string | null;
+};
+
+// Defaults to "not sendable, nothing to show" — callers fill in what applies,
+// so a new field can never silently default to something that looks approvable.
+function emptyPreview(id: string): SendPreviewItem {
+  return {
+    id,
+    invoiceNumber: null,
+    status: null,
+    clientName: null,
+    siteName: null,
+    periodStart: null,
+    periodEnd: null,
+    dueDate: null,
+    subtotal: null,
+    taxAmount: null,
+    processingFeeRate: null,
+    processingFeeAmount: null,
+    totalAmount: null,
+    lineItems: [],
+    to: null,
+    replyTo: null,
+    subject: null,
+    text: null,
+    html: null,
+    attachmentFilename: null,
+    warnings: [],
+    sendable: false,
+    blockedReason: null,
+    previewToken: null,
+  };
+}
+
+// Show the admin exactly what each invoice would email, and hand back a
+// single-use ticket per invoice. POST /invoices/:id/send refuses to email
+// anything without one, so no invoice can reach a client until an admin has
+// had this preview in front of them and pressed confirm.
+router.post("/invoices/send-preview", requireAdmin, async (req, res): Promise<void> => {
+  const { ids } = req.body as { ids?: unknown };
+  if (!Array.isArray(ids) || ids.length === 0) {
+    res.status(400).json({ error: "Bad Request", message: "Provide the invoice ids to preview." });
+    return;
+  }
+  if (ids.length > 200) {
+    res.status(400).json({
+      error: "Bad Request",
+      message: "Too many invoices selected to preview at once (maximum 200).",
+    });
+    return;
+  }
+
+  const userId = req.user!.userId;
+  const previews: SendPreviewItem[] = [];
+
+  for (const raw of ids) {
+    if (typeof raw !== "string") continue;
+    const row = await loadInvoiceForSend(raw);
+
+    if (!row) {
+      previews.push({
+        ...emptyPreview(raw),
+        blockedReason: "This invoice no longer exists.",
+      });
+      continue;
+    }
+
+    const base: SendPreviewItem = {
+      ...emptyPreview(row.id),
+      invoiceNumber: row.invoiceNumber,
+      status: row.status,
+      clientName: row.clientName,
+      siteName: row.siteName,
+      periodStart: isoDay(row.periodStart) || null,
+      periodEnd: isoDay(row.periodEnd) || null,
+      dueDate: isoDay(row.dueDate) || null,
+      subtotal: row.subtotal,
+      taxAmount: row.taxAmount,
+      processingFeeRate: row.processingFeeRate,
+      processingFeeAmount: row.processingFeeAmount,
+      totalAmount: row.totalAmount,
+    };
+
+    if (row.status === "void") {
+      previews.push({ ...base, blockedReason: "Voided invoices cannot be sent." });
+      continue;
+    }
+
+    const { items, content, digest } = await renderInvoiceEmail(row);
+    const recipient = row.clientEmail?.trim() || null;
+
+    previews.push({
+      ...base,
+      lineItems: items ?? [],
+      to: recipient,
+      // The From address is a deployment setting on the verified sending
+      // domain, not something the admin picks here — only the reply address is
+      // meaningful to show.
+      replyTo: brand.billingEmail,
+      subject: content.subject,
+      text: content.text,
+      html: content.html,
+      attachmentFilename: invoicePdfFilename(row.invoiceNumber),
+      warnings: sendWarnings(row, recipient, items),
+      sendable: true,
+      blockedReason: null,
+      previewToken: issueSendTicket(row.id, userId, digest),
+    });
+  }
+
+  res.json({ previews });
+});
+
+// Email the invoice PDF to the client and mark status='sent'.
+// Body: { previewToken: string, email?: string } — the token comes from
+// POST /invoices/send-preview and proves an admin reviewed this exact email.
+// Returns { emailSent, emailStatus, emailAddress, invoiceNumber }.
+// If SMTP is not configured, still marks the invoice sent and returns
+// emailSent:false so the admin can send the PDF manually.
+router.post("/invoices/:id/send", requireAdmin, async (req, res): Promise<void> => {
+  const id = Array.isArray(req.params.id) ? req.params.id[0] : req.params.id;
+  const { email: overrideEmail, previewToken } = req.body as {
+    email?: string;
+    previewToken?: string;
+  };
+
+  const row = await loadInvoiceForSend(id);
 
   if (!row) { res.status(404).json({ error: "Not Found" }); return; }
   if (row.status === "void") {
@@ -546,11 +779,28 @@ router.post("/invoices/:id/send", requireAdmin, async (req, res): Promise<void> 
     return;
   }
 
-  const recipient = overrideEmail?.trim() || row.clientEmail?.trim() || null;
+  const sendPeriodStartStr = isoDay(row.periodStart);
+  const { items: freshSendItems, content, digest } = await renderInvoiceEmail(row);
 
-  const sendPeriodStartStr = row.periodStart ? (typeof row.periodStart === "string" ? row.periodStart : (row.periodStart as Date).toISOString().slice(0, 10)) : "";
-  // Refresh line items before marking sent so the emailed PDF has level data.
-  const freshSendItems = await refreshLineItemsIfStale(row.id, row.siteId ?? null, row.autoSynced, row.lineItems as InvoiceLineItem[] | null, sendPeriodStartStr);
+  // The review gate. Checked before ANY mutation: a send that was never
+  // previewed, or was previewed against different numbers, must leave the
+  // invoice exactly as it was.
+  const ticket = redeemSendTicket(previewToken, row.id, req.user!.userId, digest);
+  if (!ticket.ok) {
+    req.log.warn(
+      { invoiceId: row.id, invoiceNumber: row.invoiceNumber, reason: ticket.reason },
+      "[invoiceSend] blocked — invoice email was not reviewed",
+    );
+    res.status(409).json({
+      error: "Conflict",
+      code: "preview_required",
+      reason: ticket.reason,
+      message: ticketRejectionMessage(ticket.reason),
+    });
+    return;
+  }
+
+  const recipient = overrideEmail?.trim() || row.clientEmail?.trim() || null;
 
   // Mark sent immediately — even when SMTP isn't configured the admin needs
   // to be able to flag it as "sent via other channel".
@@ -597,17 +847,6 @@ router.post("/invoices/:id/send", requireAdmin, async (req, res): Promise<void> 
     return;
   }
 
-  const totalDisplay = parseFloat(String(row.totalAmount ?? "0")).toLocaleString("en-US", {
-    style: "currency", currency: "USD",
-  });
-  const period = `${row.periodStart} to ${row.periodEnd}`;
-  const feeAmt = parseFloat(String(row.processingFeeAmount ?? "0"));
-  const feeRt = parseFloat(String(row.processingFeeRate ?? "0"));
-  const feeDisplay = feeAmt > 0
-    ? feeAmt.toLocaleString("en-US", { style: "currency", currency: "USD" })
-    : null;
-  const feeLabel = `Processing fee${feeRt > 0 ? ` (${feeRt}%)` : ""}`;
-
   const emailResult = await sendEmailDetailed({
     to: recipient,
     // The From address is pinned to the verified sending domain (RESEND_FROM /
@@ -615,40 +854,11 @@ router.post("/invoices/:id/send", requireAdmin, async (req, res): Promise<void> 
     // billing inbox so a client hitting "Reply" reaches accounts receivable
     // rather than the sending domain's catch-all.
     replyTo: brand.billingEmail,
-    subject: `Invoice ${row.invoiceNumber} — ${brand.companyName}`,
-    text: [
-      `Dear ${row.clientName ?? "Client"},`,
-      "",
-      `Please find attached invoice ${row.invoiceNumber} for security services provided during ${period}.`,
-      "",
-      `${feeDisplay ? `${feeLabel}: ${feeDisplay}\n` : ""}Invoice total: ${totalDisplay}${row.dueDate ? `\nDue date:      ${row.dueDate}` : ""}`,
-      "",
-      `Please reference the invoice number on your payment. For questions, contact ${brand.billingEmail}.`,
-      "",
-      `— ${brand.companyName}${brand.companyLicense ? ` · ${brand.companyLicense}` : ""}`,
-    ].join("\n"),
-    html: `
-      <div style="font-family:Georgia,serif;max-width:560px;margin:0 auto;color:${brand.colorNavy}">
-        <div style="background:${brand.colorNavy};padding:20px 24px;border-radius:4px 4px 0 0">
-          <h2 style="color:${brand.colorGold};margin:0;font-size:18px">${escHtml(brand.companyName)}</h2>
-          <p style="color:${brand.colorCream};margin:4px 0 0;font-size:12px">${escHtml(brand.tagline)}</p>
-          ${brand.companyLicense ? `<p style="color:${brand.colorCream};margin:2px 0 0;font-size:11px">${escHtml(brand.companyLicense)}</p>` : ""}
-        </div>
-        <div style="border:1px solid #ddd;border-top:none;padding:24px;border-radius:0 0 4px 4px">
-          <p>Dear ${escHtml(row.clientName ?? "Client")},</p>
-          <p>Please find attached invoice <strong>${escHtml(row.invoiceNumber)}</strong> for security services provided during <strong>${escHtml(period)}</strong>.</p>
-          <div style="background:#f6f1e1;padding:14px 16px;border-left:3px solid ${brand.colorGold};margin:18px 0;border-radius:4px">
-            ${feeDisplay ? `<div><strong>${escHtml(feeLabel)}:</strong> ${escHtml(feeDisplay)}</div>` : ""}
-            <div><strong>Invoice total:</strong> ${escHtml(totalDisplay)}</div>
-            ${row.dueDate ? `<div><strong>Due date:</strong> ${escHtml(row.dueDate)}</div>` : ""}
-            <div><strong>Invoice #:</strong> ${escHtml(row.invoiceNumber)}</div>
-          </div>
-          <p style="color:#555;font-size:13px">Please reference the invoice number on your payment. For questions, contact <a href="mailto:${escHtml(brand.billingEmail)}">${escHtml(brand.billingEmail)}</a>.</p>
-          <hr style="border:none;border-top:2px solid ${brand.colorGold};margin:20px 0"/>
-          <p style="color:${brand.colorNavy};font-weight:bold;margin:0;font-size:13px">${escHtml(brand.companyName)}${brand.companyLicense ? ` · ${escHtml(brand.companyLicense)}` : ""}</p>
-        </div>
-      </div>
-    `,
+    // Byte-for-byte the subject and body the admin approved in the preview —
+    // the redeemed ticket above was issued against exactly this content.
+    subject: content.subject,
+    text: content.text,
+    html: content.html,
     attachments: [{ filename, content: pdfBuf, contentType: "application/pdf" }],
   });
 
@@ -675,9 +885,6 @@ type InvoiceLineItem = {
   amount: number;
 };
 
-function escHtml(s: string): string {
-  return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
-}
 
 // Recalculate the processing fee fields for a sent/overdue invoice using the
 // site's current salesTaxEnabled + salesTaxRate settings. Updates

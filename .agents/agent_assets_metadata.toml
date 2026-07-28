@@ -19,12 +19,6 @@ type = "image"
 title = "Google Play — 10\" tablet screenshot (login)"
 
 [[outputs]]
-id = "D0mAAsN1xAjtMSXPMV-zL"
-uri = "file://exports/wcsg-invite-contact-list.csv"
-type = "table"
-title = "WCSG Officer Invite Contact List (241 officers, 235 with phone + temp password)"
-
-[[outputs]]
 id = "yxUYR9bny38cktXVhs9B7"
 uri = "file://exports/wcsg-payroll-process.pdf"
 type = "pdf"
@@ -131,12 +125,6 @@ id = "wc8hFfd_3CrUjnyKNXzef"
 uri = "file://attached_assets/microphone-demo.mp4"
 type = "video"
 title = "Microphone FGS Demo — 21s (Google Play)"
-
-[[outputs]]
-id = "UA7M4em9OnD7AfFyJz7Te"
-uri = "file://attached_assets/secureops-officer-training.mp4"
-type = "video"
-title = "SecureOps — Officer Quick-Start Guide"
 
 [[outputs]]
 id = "0Tx6uKywkPWaIuh1aLTgh"

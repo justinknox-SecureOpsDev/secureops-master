@@ -173,20 +173,40 @@ const stateLabel = (s: SyncState): { label: string; cls: string; Icon: typeof Re
 const isSelectable = (row: InvoiceRow) =>
   row.status !== "paid" && row.status !== "void";
 
-type SendTarget = {
+/**
+ * Exactly what the server says an invoice would email — recipient, subject,
+ * body, attachment — plus the single-use token that authorises the send.
+ *
+ * The dialog renders this instead of rebuilding the message from row data, so
+ * what the admin approves is what the client receives. The server refuses to
+ * send without the token, which is what makes the review a real gate rather
+ * than a habit.
+ */
+type SendPreview = {
   id: string;
-  invoiceNumber: string;
+  invoiceNumber: string | null;
+  status: string | null;
   clientName: string | null;
   siteName: string | null;
-  periodStart: string;
-  periodEnd: string;
-  email: string;
-  lineItems: LineItem[] | null;
+  periodStart: string | null;
+  periodEnd: string | null;
+  dueDate: string | null;
   subtotal: string | null;
   taxAmount: string | null;
-  processingFeeAmount: string | null;
   processingFeeRate: string | null;
+  processingFeeAmount: string | null;
   totalAmount: string | null;
+  lineItems: LineItem[];
+  to: string | null;
+  replyTo: string | null;
+  subject: string | null;
+  text: string | null;
+  html: string | null;
+  attachmentFilename: string | null;
+  warnings: string[];
+  sendable: boolean;
+  blockedReason: string | null;
+  previewToken: string | null;
 };
 
 /** Compute a sensible default date range for the "+ New Invoice" dialog based on the client's billing cycle. */
@@ -261,12 +281,16 @@ export default function InvoiceBoardPage() {
   const [toast, setToast] = useState<{ kind: "ok" | "err"; msg: string } | null>(null);
   const [sites, setSites] = useState<Array<{ id: string; name: string; clientId?: string | null }>>([]);
   const [clients, setClients] = useState<ClientOption[]>([]);
-  const [sendTarget, setSendTarget] = useState<SendTarget | null>(null);
+  // Single-invoice review. "loading" while the server renders the email — the
+  // Confirm button does not exist until a real preview is on screen.
+  const [sendTarget, setSendTarget] = useState<SendPreview | "loading" | null>(null);
   const [sendEmailInput, setSendEmailInput] = useState("");
-  // Bulk "Email to clients" confirmation. The per-row send has always gone
-  // through a review dialog; the bulk action used to fire immediately, which
-  // meant one click could email every selected client with no way back.
-  const [bulkSendConfirm, setBulkSendConfirm] = useState(false);
+  // Bulk "Email to clients" review — one preview per selected invoice, held to
+  // the same gate. This used to fire immediately, so a single click could email
+  // every selected client with no way back.
+  const [bulkSendConfirm, setBulkSendConfirm] = useState<SendPreview[] | "loading" | null>(null);
+  // Which invoice's full message body is expanded in the bulk review list.
+  const [bulkOpenBody, setBulkOpenBody] = useState<string | null>(null);
   const sendInputRef = useRef<HTMLInputElement>(null);
 
   // New Invoice dialog state
@@ -600,32 +624,56 @@ export default function InvoiceBoardPage() {
     }, 60);
   };
 
-  const openSendDialog = (r: InvoiceRow) => {
-    setSendTarget({
-      id: r.id,
-      invoiceNumber: r.invoiceNumber,
-      clientName: r.clientName,
-      siteName: r.siteName,
-      periodStart: r.periodStart,
-      periodEnd: r.periodEnd,
-      email: r.clientEmail ?? "",
-      lineItems: r.lineItems,
-      subtotal: r.subtotal,
-      taxAmount: r.taxAmount,
-      processingFeeAmount: r.processingFeeAmount,
-      processingFeeRate: r.processingFeeRate,
-      totalAmount: r.totalAmount,
-    });
+  // Nothing is sent from here. This only asks the server to render the email
+  // and issue a review token; the admin still has to confirm.
+  const openSendDialog = async (r: InvoiceRow) => {
+    setSendTarget("loading");
     setSendEmailInput(r.clientEmail ?? "");
-    setTimeout(() => sendInputRef.current?.focus(), 50);
+    try {
+      const res = await api<{ previews: SendPreview[] }>("/invoices/send-preview", {
+        method: "POST",
+        body: { ids: [r.id] },
+      });
+      const preview = res.previews[0];
+      if (!preview) {
+        setSendTarget(null);
+        showToast("err", "Couldn't build the email preview for this invoice.");
+        return;
+      }
+      setSendTarget(preview);
+      setSendEmailInput(preview.to ?? r.clientEmail ?? "");
+      setTimeout(() => sendInputRef.current?.focus(), 50);
+    } catch (e) {
+      setSendTarget(null);
+      showToast("err", `Couldn't build the email preview: ${(e as Error).message}`);
+    }
   };
 
   const closeSendDialog = () => { setSendTarget(null); setSendEmailInput(""); };
 
-  const sendInvoice = async (id: string, emailOverride?: string) => {
+  const openBulkSendDialog = async () => {
+    const todo = selectedInvoices.filter((r) => r.status !== "paid" && r.status !== "void");
+    if (todo.length === 0) { showToast("err", "Nothing to send."); return; }
+    setBulkOpenBody(null);
+    setBulkSendConfirm("loading");
+    try {
+      const res = await api<{ previews: SendPreview[] }>("/invoices/send-preview", {
+        method: "POST",
+        body: { ids: todo.map((r) => r.id) },
+      });
+      setBulkSendConfirm(res.previews);
+    } catch (e) {
+      setBulkSendConfirm(null);
+      showToast("err", `Couldn't build the email previews: ${(e as Error).message}`);
+    }
+  };
+
+  // `previewToken` is required: it is the server's proof that this exact email
+  // was reviewed. There is deliberately no way to call this without one.
+  const sendInvoice = async (id: string, previewToken: string, emailOverride?: string) => {
     setRowBusy((s) => new Set(s).add(id));
     try {
-      const body: Record<string, string> = {};
+      const body: Record<string, string> = { previewToken };
       if (emailOverride?.trim()) body.email = emailOverride.trim();
       const r = await api<{
         emailSent: boolean;
@@ -650,22 +698,27 @@ export default function InvoiceBoardPage() {
   };
 
   const confirmSend = async () => {
-    if (!sendTarget) return;
+    if (!sendTarget || sendTarget === "loading") return;
+    if (!sendTarget.sendable || !sendTarget.previewToken) return;
+    const { id, previewToken } = sendTarget;
     closeSendDialog();
-    await sendInvoice(sendTarget.id, sendEmailInput || undefined);
+    await sendInvoice(id, previewToken, sendEmailInput || undefined);
   };
 
-  const bulkSendToClients = async () => {
-    if (selectedInvoices.length === 0) return;
-    const todo = selectedInvoices.filter((r) => r.status !== "paid" && r.status !== "void");
+  const bulkSendToClients = async (previews: SendPreview[]) => {
+    const todo = previews.filter(
+      (p): p is SendPreview & { previewToken: string } => p.sendable && !!p.previewToken,
+    );
     if (todo.length === 0) { showToast("err", "Nothing to send."); return; }
-    setBulkSendConfirm(false);
+    setBulkSendConfirm(null);
+    setBulkOpenBody(null);
     setBusy(true);
     let emailed = 0, noEmail = 0, failed = 0;
-    for (const inv of todo) {
+    for (const p of todo) {
       try {
         const r = await api<{ emailSent: boolean; emailStatus: string }>(
-          `/invoices/${inv.id}/send`, { method: "POST", body: {} },
+          `/invoices/${p.id}/send`,
+          { method: "POST", body: { previewToken: p.previewToken } },
         );
         if (r.emailSent) emailed++;
         else if (r.emailStatus === "no_recipient") noEmail++;
@@ -894,7 +947,7 @@ export default function InvoiceBoardPage() {
         <Button
           variant="outline"
           className="bg-white/10 border-white/30 text-white hover:bg-white/20"
-          onClick={() => setBulkSendConfirm(true)}
+          onClick={() => void openBulkSendDialog()}
           disabled={selectedInvoices.length === 0 || busy}
           title="Email PDF to each client and mark sent. Invoices without a stored client email are still marked sent."
         >
@@ -1413,179 +1466,265 @@ export default function InvoiceBoardPage() {
                 <Mail className="w-4 h-4 text-brand-gold" />
                 <span className="font-semibold text-sm">Review &amp; Send Invoice</span>
               </div>
-              <button type="button" onClick={closeSendDialog} className="text-white/60 hover:text-white transition-colors">
+              <button
+                type="button"
+                onClick={closeSendDialog}
+                aria-label="Close"
+                className="text-white/60 hover:text-white transition-colors"
+              >
                 <X className="w-4 h-4" />
               </button>
             </div>
 
-            {/* Scrollable body */}
-            <div className="overflow-y-auto flex-1 px-5 py-5 space-y-5">
-
-              {/* Invoice meta */}
-              <div className="flex flex-wrap gap-x-6 gap-y-1 text-sm">
-                <div>
-                  <span className="text-muted-foreground text-xs uppercase tracking-wide mr-1">Invoice</span>
-                  <span className="font-mono font-semibold text-gray-800">{sendTarget.invoiceNumber}</span>
-                </div>
-                {sendTarget.clientName && (
-                  <div>
-                    <span className="text-muted-foreground text-xs uppercase tracking-wide mr-1">Client</span>
-                    <span className="font-medium text-gray-800">{sendTarget.clientName}</span>
-                  </div>
-                )}
-                {sendTarget.siteName && (
-                  <div>
-                    <span className="text-muted-foreground text-xs uppercase tracking-wide mr-1">Site</span>
-                    <span className="text-gray-700">{sendTarget.siteName}</span>
-                  </div>
-                )}
-                <div>
-                  <span className="text-muted-foreground text-xs uppercase tracking-wide mr-1">Period</span>
-                  <span className="text-gray-700">{fmtDateRange(sendTarget.periodStart, sendTarget.periodEnd)}</span>
-                </div>
+            {sendTarget === "loading" ? (
+              <div className="flex items-center justify-center gap-2 px-5 py-16 text-sm text-muted-foreground">
+                <Loader2 className="w-4 h-4 animate-spin" />
+                Building the email your client will receive…
               </div>
+            ) : (
+              <>
+                {/* Scrollable body */}
+                <div className="overflow-y-auto flex-1 px-5 py-5 space-y-5">
 
-              {/* Line items preview */}
-              {sendTarget.lineItems && sendTarget.lineItems.length > 0 ? (
-                <div className="border border-gray-200 rounded-lg overflow-hidden">
-                  <table className="w-full text-xs">
-                    <thead className="bg-gray-50 border-b border-gray-200">
-                      <tr>
-                        <th className="px-3 py-2 text-left text-[10px] uppercase tracking-wider text-muted-foreground">Officer</th>
-                        <th className="px-3 py-2 text-center text-[10px] uppercase tracking-wider text-muted-foreground w-20">Level</th>
-                        <th className="px-3 py-2 text-right text-[10px] uppercase tracking-wider text-muted-foreground w-16">Hours</th>
-                        <th className="px-3 py-2 text-right text-[10px] uppercase tracking-wider text-muted-foreground w-20">Rate</th>
-                        <th className="px-3 py-2 text-right text-[10px] uppercase tracking-wider text-muted-foreground w-24">Amount</th>
-                      </tr>
-                    </thead>
-                    <tbody className="divide-y divide-gray-100">
-                      {sendTarget.lineItems.map((li, i) => {
-                        // Use the shared label so this row reads the same as the
-                        // rollup below it and the PDF the client receives.
-                        const label = li.level != null ? levelLabel(li.level) : "—";
-                        return (
-                          <tr key={i} className="hover:bg-gray-50/60">
-                            <td className="px-3 py-2 text-gray-700">{li.description}</td>
-                            <td className="px-3 py-2 text-center text-muted-foreground">{label}</td>
-                            <td className="px-3 py-2 text-right text-gray-700">{li.hours != null ? li.hours.toFixed(2) : "—"}</td>
-                            <td className="px-3 py-2 text-right text-gray-700">{li.rate != null ? fmtUsd(li.rate) : "—"}</td>
-                            <td className="px-3 py-2 text-right font-medium text-gray-800">{fmtUsd(li.amount)}</td>
+                  {/* Invoice meta */}
+                  <div className="flex flex-wrap gap-x-6 gap-y-1 text-sm">
+                    <div>
+                      <span className="text-muted-foreground text-xs uppercase tracking-wide mr-1">Invoice</span>
+                      <span className="font-mono font-semibold text-gray-800">{sendTarget.invoiceNumber}</span>
+                    </div>
+                    {sendTarget.clientName && (
+                      <div>
+                        <span className="text-muted-foreground text-xs uppercase tracking-wide mr-1">Client</span>
+                        <span className="font-medium text-gray-800">{sendTarget.clientName}</span>
+                      </div>
+                    )}
+                    {sendTarget.siteName && (
+                      <div>
+                        <span className="text-muted-foreground text-xs uppercase tracking-wide mr-1">Site</span>
+                        <span className="text-gray-700">{sendTarget.siteName}</span>
+                      </div>
+                    )}
+                    <div>
+                      <span className="text-muted-foreground text-xs uppercase tracking-wide mr-1">Period</span>
+                      <span className="text-gray-700">
+                        {fmtDateRange(sendTarget.periodStart ?? "", sendTarget.periodEnd ?? "")}
+                      </span>
+                    </div>
+                  </div>
+
+                  {!sendTarget.sendable && (
+                    <div className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-800">
+                      {sendTarget.blockedReason ?? "This invoice cannot be sent."}
+                    </div>
+                  )}
+
+                  {sendTarget.warnings.length > 0 && (
+                    <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 space-y-1">
+                      {sendTarget.warnings.map((w, i) => (
+                        <div key={i} className="flex items-start gap-1.5 text-xs text-amber-900">
+                          <AlertTriangle className="w-3.5 h-3.5 shrink-0 mt-0.5" />
+                          <span>{w}</span>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+
+                  {/* The actual message — rendered from the server's own copy so
+                      there is no gap between what is approved and what is sent. */}
+                  <div className="border border-gray-200 rounded-lg overflow-hidden">
+                    <div className="bg-gray-50 border-b border-gray-200 px-3 py-2 text-[10px] uppercase tracking-wider text-muted-foreground">
+                      The email your client will receive
+                    </div>
+                    <dl className="divide-y divide-gray-100 text-xs">
+                      <div className="flex gap-3 px-3 py-2">
+                        <dt className="w-24 shrink-0 text-muted-foreground">To</dt>
+                        <dd className="min-w-0 break-words">
+                          {sendEmailInput.trim()
+                            ? <span className="text-gray-800">{sendEmailInput.trim()}</span>
+                            : <span className="text-amber-700 font-medium">no email on file — will be marked sent only</span>}
+                        </dd>
+                      </div>
+                      <div className="flex gap-3 px-3 py-2">
+                        <dt className="w-24 shrink-0 text-muted-foreground">Replies to</dt>
+                        <dd className="min-w-0 break-words text-gray-700">{sendTarget.replyTo ?? "—"}</dd>
+                      </div>
+                      <div className="flex gap-3 px-3 py-2">
+                        <dt className="w-24 shrink-0 text-muted-foreground">Subject</dt>
+                        <dd className="min-w-0 break-words font-medium text-gray-800">{sendTarget.subject ?? "—"}</dd>
+                      </div>
+                      <div className="flex gap-3 px-3 py-2">
+                        <dt className="w-24 shrink-0 text-muted-foreground">Attachment</dt>
+                        <dd className="min-w-0 break-all font-mono text-gray-700">{sendTarget.attachmentFilename ?? "—"}</dd>
+                      </div>
+                    </dl>
+                    {sendTarget.html && (
+                      <iframe
+                        title="Invoice email preview"
+                        srcDoc={sendTarget.html}
+                        sandbox=""
+                        className="w-full h-72 border-t border-gray-200 bg-white"
+                      />
+                    )}
+                  </div>
+
+                  {/* Billed detail behind the attached PDF */}
+                  {sendTarget.lineItems.length > 0 ? (
+                    <div className="border border-gray-200 rounded-lg overflow-hidden">
+                      <table className="w-full text-xs">
+                        <thead className="bg-gray-50 border-b border-gray-200">
+                          <tr>
+                            <th className="px-3 py-2 text-left text-[10px] uppercase tracking-wider text-muted-foreground">Officer</th>
+                            <th className="px-3 py-2 text-center text-[10px] uppercase tracking-wider text-muted-foreground w-20">Level</th>
+                            <th className="px-3 py-2 text-right text-[10px] uppercase tracking-wider text-muted-foreground w-16">Hours</th>
+                            <th className="px-3 py-2 text-right text-[10px] uppercase tracking-wider text-muted-foreground w-20">Rate</th>
+                            <th className="px-3 py-2 text-right text-[10px] uppercase tracking-wider text-muted-foreground w-24">Amount</th>
                           </tr>
-                        );
-                      })}
-                    </tbody>
-                    <tfoot className="bg-gray-50 border-t border-gray-200">
-                      {/* Licence-level hours rollup, so the sender can sanity-check
-                          the armed/unarmed split before the PDF goes to the client. */}
-                      {(() => {
-                        const levels = hoursByLevel(sendTarget.lineItems);
-                        if (levels.length === 0) return null;
-                        const totalHours = levels.reduce((s, lv) => s + lv.hours, 0);
-                        return (
-                          <>
-                            <tr>
-                              <td className="px-3 pt-2 pb-1 text-[10px] uppercase tracking-wider text-muted-foreground" colSpan={5}>
-                                Hours by licence level
-                              </td>
-                            </tr>
-                            {levels.map((lv) => (
-                              <tr key={`send-lvl-${lv.level ?? "none"}`} className="text-muted-foreground">
-                                <td className="px-3 py-0.5 text-xs text-right" colSpan={2}>{levelLabel(lv.level)}</td>
-                                <td className="px-3 py-0.5 text-xs text-right tabular-nums">{lv.hours.toFixed(2)}</td>
-                                <td className="px-3 py-0.5" />
-                                <td className="px-3 py-0.5 text-xs text-right tabular-nums">{fmtUsd(lv.amount)}</td>
+                        </thead>
+                        <tbody className="divide-y divide-gray-100">
+                          {sendTarget.lineItems.map((li, i) => {
+                            // Shared label so this row reads the same as the
+                            // rollup below it and the PDF the client receives.
+                            const label = li.level != null ? levelLabel(li.level) : "—";
+                            return (
+                              <tr key={i} className="hover:bg-gray-50/60">
+                                <td className="px-3 py-2 text-gray-700">{li.description}</td>
+                                <td className="px-3 py-2 text-center text-muted-foreground">{label}</td>
+                                <td className="px-3 py-2 text-right text-gray-700">{li.hours != null ? li.hours.toFixed(2) : "—"}</td>
+                                <td className="px-3 py-2 text-right text-gray-700">{li.rate != null ? fmtUsd(li.rate) : "—"}</td>
+                                <td className="px-3 py-2 text-right font-medium text-gray-800">{fmtUsd(li.amount)}</td>
                               </tr>
-                            ))}
-                            <tr className="text-gray-700 border-b border-gray-200">
-                              <td className="px-3 py-0.5 text-xs text-right font-medium" colSpan={2}>All levels</td>
-                              <td className="px-3 py-0.5 text-xs text-right font-semibold tabular-nums">{totalHours.toFixed(2)}</td>
-                              <td className="px-3 py-0.5" colSpan={2} />
+                            );
+                          })}
+                        </tbody>
+                        <tfoot className="bg-gray-50 border-t border-gray-200">
+                          {/* Licence-level hours rollup, so the sender can sanity-check
+                              the armed/unarmed split before the PDF goes to the client. */}
+                          {(() => {
+                            const levels = hoursByLevel(sendTarget.lineItems);
+                            if (levels.length === 0) return null;
+                            const totalHours = levels.reduce((s, lv) => s + lv.hours, 0);
+                            return (
+                              <>
+                                <tr>
+                                  <td className="px-3 pt-2 pb-1 text-[10px] uppercase tracking-wider text-muted-foreground" colSpan={5}>
+                                    Hours by licence level
+                                  </td>
+                                </tr>
+                                {levels.map((lv) => (
+                                  <tr key={`send-lvl-${lv.level ?? "none"}`} className="text-muted-foreground">
+                                    <td className="px-3 py-0.5 text-xs text-right" colSpan={2}>{levelLabel(lv.level)}</td>
+                                    <td className="px-3 py-0.5 text-xs text-right tabular-nums">{lv.hours.toFixed(2)}</td>
+                                    <td className="px-3 py-0.5" />
+                                    <td className="px-3 py-0.5 text-xs text-right tabular-nums">{fmtUsd(lv.amount)}</td>
+                                  </tr>
+                                ))}
+                                <tr className="text-gray-700 border-b border-gray-200">
+                                  <td className="px-3 py-0.5 text-xs text-right font-medium" colSpan={2}>All levels</td>
+                                  <td className="px-3 py-0.5 text-xs text-right font-semibold tabular-nums">{totalHours.toFixed(2)}</td>
+                                  <td className="px-3 py-0.5" colSpan={2} />
+                                </tr>
+                              </>
+                            );
+                          })()}
+                          <tr>
+                            <td className="px-3 py-2 text-right text-xs text-muted-foreground" colSpan={4}>Subtotal</td>
+                            <td className="px-3 py-2 text-right text-xs font-semibold text-gray-800">{fmtUsd(num(sendTarget.subtotal))}</td>
+                          </tr>
+                          {num(sendTarget.taxAmount) > 0 && (
+                            <tr>
+                              <td className="px-3 py-2 text-right text-xs text-muted-foreground" colSpan={4}>Processing fee</td>
+                              <td className="px-3 py-2 text-right text-xs text-gray-700">{fmtUsd(num(sendTarget.taxAmount))}</td>
                             </tr>
-                          </>
-                        );
-                      })()}
-                      <tr>
-                        <td className="px-3 py-2 text-right text-xs text-muted-foreground" colSpan={4}>Subtotal</td>
-                        <td className="px-3 py-2 text-right text-xs font-semibold text-gray-800">{fmtUsd(num(sendTarget.subtotal))}</td>
-                      </tr>
-                      {num(sendTarget.taxAmount) > 0 && (
-                        <tr>
-                          <td className="px-3 py-2 text-right text-xs text-muted-foreground" colSpan={4}>Processing fee</td>
-                          <td className="px-3 py-2 text-right text-xs text-gray-700">{fmtUsd(num(sendTarget.taxAmount))}</td>
-                        </tr>
-                      )}
-                      {num(sendTarget.processingFeeAmount) > 0 && (
-                        <tr>
-                          <td className="px-3 py-2 text-right text-xs text-muted-foreground" colSpan={4}>
-                            Platform fee ({(parseFloat(String(sendTarget.processingFeeRate ?? "0")) || 0).toFixed(2)}%)
-                          </td>
-                          <td className="px-3 py-2 text-right text-xs text-gray-700">{fmtUsd(num(sendTarget.processingFeeAmount))}</td>
-                        </tr>
-                      )}
-                      <tr className="border-t border-gray-300">
-                        <td className="px-3 py-2 text-right text-xs font-bold text-brand-navy" colSpan={4}>Total Due</td>
-                        <td className="px-3 py-2 text-right text-sm font-bold text-brand-navy">{fmtUsd(num(sendTarget.totalAmount))}</td>
-                      </tr>
-                    </tfoot>
-                  </table>
+                          )}
+                          {num(sendTarget.processingFeeAmount) > 0 && (
+                            <tr>
+                              <td className="px-3 py-2 text-right text-xs text-muted-foreground" colSpan={4}>
+                                Platform fee ({(parseFloat(String(sendTarget.processingFeeRate ?? "0")) || 0).toFixed(2)}%)
+                              </td>
+                              <td className="px-3 py-2 text-right text-xs text-gray-700">{fmtUsd(num(sendTarget.processingFeeAmount))}</td>
+                            </tr>
+                          )}
+                          <tr className="border-t border-gray-300">
+                            <td className="px-3 py-2 text-right text-xs font-bold text-brand-navy" colSpan={4}>Total Due</td>
+                            <td className="px-3 py-2 text-right text-sm font-bold text-brand-navy">{fmtUsd(num(sendTarget.totalAmount))}</td>
+                          </tr>
+                        </tfoot>
+                      </table>
+                    </div>
+                  ) : (
+                    <p className="text-xs text-muted-foreground italic">No line items on this invoice yet.</p>
+                  )}
+
+                  {/* Email field */}
+                  <div className="space-y-1">
+                    <Label htmlFor="send-email-input" className="text-xs font-medium">
+                      Recipient email {!sendTarget.to && <span className="text-red-500">*</span>}
+                    </Label>
+                    <Input
+                      id="send-email-input"
+                      ref={sendInputRef}
+                      type="email"
+                      placeholder="client@example.com"
+                      value={sendEmailInput}
+                      onChange={(e) => setSendEmailInput(e.target.value)}
+                      onKeyDown={(e) => { if (e.key === "Enter" && sendEmailInput.trim()) void confirmSend(); }}
+                      className="h-9 text-sm"
+                    />
+                    {!sendTarget.to && sendEmailInput.trim() && (
+                      <p className="text-xs text-blue-600">This email will be saved to the invoice.</p>
+                    )}
+                    <p className="text-xs text-muted-foreground">
+                      The PDF above is attached and the invoice is marked <strong>sent</strong>.
+                    </p>
+                  </div>
                 </div>
-              ) : (
-                <p className="text-xs text-muted-foreground italic">No line items on this invoice yet.</p>
-              )}
 
-              {/* Email field */}
-              <div className="space-y-1">
-                <Label htmlFor="send-email-input" className="text-xs font-medium">
-                  Recipient email {!sendTarget.email && <span className="text-red-500">*</span>}
-                </Label>
-                <Input
-                  id="send-email-input"
-                  ref={sendInputRef}
-                  type="email"
-                  placeholder="client@example.com"
-                  value={sendEmailInput}
-                  onChange={(e) => setSendEmailInput(e.target.value)}
-                  onKeyDown={(e) => { if (e.key === "Enter" && sendEmailInput.trim()) void confirmSend(); }}
-                  className="h-9 text-sm"
-                />
-                {!sendTarget.email && sendEmailInput.trim() && (
-                  <p className="text-xs text-blue-600">This email will be saved to the invoice.</p>
-                )}
-                <p className="text-xs text-muted-foreground">
-                  A branded PDF will be attached and the invoice will be marked <strong>sent</strong>.
-                </p>
-              </div>
-            </div>
-
-            {/* Footer actions — always visible */}
-            <div className="shrink-0 flex justify-end gap-2 px-5 py-4 border-t border-gray-100 bg-gray-50/60">
-              <Button variant="outline" size="sm" onClick={closeSendDialog}>Cancel</Button>
-              <Button
-                size="sm"
-                className="bg-brand-navy text-white hover:bg-brand-navy/90"
-                onClick={() => void confirmSend()}
-                disabled={!sendEmailInput.trim()}
-              >
-                <Mail className="w-3.5 h-3.5 mr-1.5" />
-                Confirm &amp; Send PDF
-              </Button>
-            </div>
+                {/* Footer actions — always visible */}
+                <div className="shrink-0 flex justify-end gap-2 px-5 py-4 border-t border-gray-100 bg-gray-50/60">
+                  <Button variant="outline" size="sm" onClick={closeSendDialog}>Cancel</Button>
+                  <Button
+                    size="sm"
+                    className="bg-brand-navy text-white hover:bg-brand-navy/90"
+                    onClick={() => void confirmSend()}
+                    disabled={!sendTarget.sendable || !sendTarget.previewToken || !sendEmailInput.trim()}
+                  >
+                    <Mail className="w-3.5 h-3.5 mr-1.5" />
+                    Confirm &amp; Send PDF
+                  </Button>
+                </div>
+              </>
+            )}
           </div>
         </div>
       )}
 
-      {/* Bulk send — confirmation before emailing every selected client */}
+      {/* Bulk send — every selected invoice's real email, reviewed before any of it goes out */}
       {bulkSendConfirm && (() => {
-        const todo = selectedInvoices.filter((r) => r.status !== "paid" && r.status !== "void");
-        const skipped = selectedInvoices.length - todo.length;
-        const withEmail = todo.filter((r) => !!r.clientEmail);
-        const withoutEmail = todo.filter((r) => !r.clientEmail);
-        const noFee = todo.filter((r) => r.processingFeeAmount === null);
-        const todoTotal = todo.reduce((s, r) => s + num(r.totalAmount), 0);
+        if (bulkSendConfirm === "loading") {
+          return (
+            <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm p-4">
+              <div className="bg-white rounded-xl shadow-2xl px-6 py-8 flex items-center gap-3 text-sm text-muted-foreground">
+                <Loader2 className="w-4 h-4 animate-spin" />
+                Building the emails your clients will receive…
+              </div>
+            </div>
+          );
+        }
+
+        const previews = bulkSendConfirm;
+        const todo = previews.filter((p) => p.sendable && !!p.previewToken);
+        const blocked = previews.filter((p) => !p.sendable);
+        const withEmail = todo.filter((p) => !!p.to);
+        const withoutEmail = todo.filter((p) => !p.to);
+        // Paid/void invoices are filtered out before the previews are fetched.
+        const skipped = selectedInvoices.length - previews.length + blocked.length;
+        const todoTotal = todo.reduce((s, p) => s + num(p.totalAmount), 0);
+        const closeBulk = () => { setBulkSendConfirm(null); setBulkOpenBody(null); };
+
         return (
           <div
             className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm p-4"
-            onClick={(e) => { if (e.target === e.currentTarget) setBulkSendConfirm(false); }}
+            onClick={(e) => { if (e.target === e.currentTarget) closeBulk(); }}
           >
             <div className="bg-white rounded-xl shadow-2xl w-full max-w-3xl flex flex-col max-h-[90vh] overflow-hidden">
               <div className="bg-brand-navy px-5 py-4 flex items-center justify-between shrink-0">
@@ -1593,91 +1732,156 @@ export default function InvoiceBoardPage() {
                   <Mail className="w-4 h-4 text-brand-gold" />
                   <span className="font-semibold text-sm">Review &amp; Send {todo.length} Invoice{todo.length === 1 ? "" : "s"}</span>
                 </div>
-                <button type="button" onClick={() => setBulkSendConfirm(false)} className="text-white/60 hover:text-white transition-colors">
+                <button
+                  type="button"
+                  onClick={closeBulk}
+                  aria-label="Close"
+                  className="text-white/60 hover:text-white transition-colors"
+                >
                   <X className="w-4 h-4" />
                 </button>
               </div>
 
               <div className="overflow-y-auto flex-1 px-5 py-5 space-y-4">
                 <p className="text-sm text-gray-700">
-                  Each invoice below is emailed to its client as a branded PDF and marked <strong>sent</strong>. This cannot be undone.
+                  Each invoice below is emailed to its client as a branded PDF and marked <strong>sent</strong>.
+                  Open any row to read the exact message before you confirm. This cannot be undone.
                 </p>
 
                 {/* Per-invoice preview — what actually goes out, and to whom. */}
                 <div className="border border-gray-200 rounded-lg overflow-hidden">
-                  <table className="w-full text-xs">
-                    <thead className="bg-gray-50 border-b border-gray-200">
-                      <tr>
-                        <th className="px-3 py-2 text-left text-[10px] uppercase tracking-wider text-muted-foreground">Invoice</th>
-                        <th className="px-3 py-2 text-left text-[10px] uppercase tracking-wider text-muted-foreground">Client / Site</th>
-                        <th className="px-3 py-2 text-left text-[10px] uppercase tracking-wider text-muted-foreground">Recipient</th>
-                        <th className="px-3 py-2 text-right text-[10px] uppercase tracking-wider text-muted-foreground w-20">Fee</th>
-                        <th className="px-3 py-2 text-right text-[10px] uppercase tracking-wider text-muted-foreground w-24">Total</th>
-                      </tr>
-                    </thead>
-                    <tbody className="divide-y divide-gray-100">
-                      {todo.map((r) => (
-                        <tr key={r.id} className="hover:bg-gray-50/60">
-                          <td className="px-3 py-2 font-mono text-gray-800 whitespace-nowrap">{r.invoiceNumber}</td>
-                          <td className="px-3 py-2 text-gray-700">
-                            <div>{r.clientName ?? "—"}</div>
-                            {r.siteName && <div className="text-[10px] text-muted-foreground">{r.siteName}</div>}
-                          </td>
-                          <td className="px-3 py-2">
-                            {r.clientEmail
-                              ? <span className="text-gray-700">{r.clientEmail}</span>
-                              : <span className="text-amber-700 font-medium">no email — marked sent only</span>}
-                          </td>
-                          <td className="px-3 py-2 text-right">
-                            {r.processingFeeAmount !== null
-                              ? <span className="text-gray-700">{fmtUsd(num(r.processingFeeAmount))}</span>
-                              : <span className="text-amber-700">none</span>}
-                          </td>
-                          <td className="px-3 py-2 text-right font-medium text-gray-800 whitespace-nowrap">{fmtUsd(num(r.totalAmount))}</td>
+                  <div className="overflow-x-auto" tabIndex={0} role="region" aria-label="Invoices to be emailed">
+                    <table className="w-full text-xs min-w-[640px]">
+                      <thead className="bg-gray-50 border-b border-gray-200">
+                        <tr>
+                          <th className="px-3 py-2 text-left text-[10px] uppercase tracking-wider text-muted-foreground">Invoice</th>
+                          <th className="px-3 py-2 text-left text-[10px] uppercase tracking-wider text-muted-foreground">Client / Site</th>
+                          <th className="px-3 py-2 text-left text-[10px] uppercase tracking-wider text-muted-foreground">Recipient</th>
+                          <th className="px-3 py-2 text-right text-[10px] uppercase tracking-wider text-muted-foreground w-20">Fee</th>
+                          <th className="px-3 py-2 text-right text-[10px] uppercase tracking-wider text-muted-foreground w-24">Total</th>
                         </tr>
-                      ))}
-                    </tbody>
-                    <tfoot className="bg-gray-50 border-t border-gray-200">
-                      <tr>
-                        <td className="px-3 py-2 text-right text-xs text-muted-foreground" colSpan={2}>
-                          {withEmail.length} emailed{withoutEmail.length > 0 ? ` · ${withoutEmail.length} marked sent only` : ""}
-                        </td>
-                        <td className="px-3 py-2 text-right text-xs font-bold text-brand-navy" colSpan={2}>Combined total</td>
-                        <td className="px-3 py-2 text-right text-sm font-bold text-brand-navy whitespace-nowrap">{fmtUsd(todoTotal)}</td>
-                      </tr>
-                    </tfoot>
-                  </table>
+                      </thead>
+                      <tbody className="divide-y divide-gray-100">
+                        {todo.map((p) => {
+                          const open = bulkOpenBody === p.id;
+                          return (
+                            <Fragment key={p.id}>
+                              <tr className="hover:bg-gray-50/60">
+                                <td className="px-3 py-2 font-mono text-gray-800 whitespace-nowrap">
+                                  <button
+                                    type="button"
+                                    onClick={() => setBulkOpenBody(open ? null : p.id)}
+                                    className="inline-flex items-center gap-1 text-left hover:text-brand-navy hover:underline"
+                                    aria-expanded={open}
+                                    title="Read the email that will be sent"
+                                  >
+                                    {open
+                                      ? <ChevronDown className="w-3 h-3 shrink-0 text-muted-foreground" />
+                                      : <ChevronRight className="w-3 h-3 shrink-0 text-muted-foreground" />}
+                                    <span>{p.invoiceNumber}</span>
+                                  </button>
+                                </td>
+                                <td className="px-3 py-2 text-gray-700">
+                                  <div>{p.clientName ?? "—"}</div>
+                                  {p.siteName && <div className="text-[10px] text-muted-foreground">{p.siteName}</div>}
+                                </td>
+                                <td className="px-3 py-2">
+                                  {p.to
+                                    ? <span className="text-gray-700">{p.to}</span>
+                                    : <span className="text-amber-700 font-medium">no email — marked sent only</span>}
+                                </td>
+                                <td className="px-3 py-2 text-right">
+                                  {num(p.processingFeeAmount) > 0
+                                    ? <span className="text-gray-700">{fmtUsd(num(p.processingFeeAmount))}</span>
+                                    : <span className="text-amber-700">none</span>}
+                                </td>
+                                <td className="px-3 py-2 text-right font-medium text-gray-800 whitespace-nowrap">{fmtUsd(num(p.totalAmount))}</td>
+                              </tr>
+                              {open && (
+                                <tr>
+                                  <td colSpan={5} className="px-3 pb-3 pt-0 bg-gray-50/60">
+                                    <div className="rounded border border-gray-200 bg-white overflow-hidden">
+                                      <dl className="divide-y divide-gray-100 text-xs">
+                                        <div className="flex gap-3 px-3 py-2">
+                                          <dt className="w-24 shrink-0 text-muted-foreground">Subject</dt>
+                                          <dd className="min-w-0 break-words font-medium text-gray-800">{p.subject ?? "—"}</dd>
+                                        </div>
+                                        <div className="flex gap-3 px-3 py-2">
+                                          <dt className="w-24 shrink-0 text-muted-foreground">Replies to</dt>
+                                          <dd className="min-w-0 break-words text-gray-700">{p.replyTo ?? "—"}</dd>
+                                        </div>
+                                        <div className="flex gap-3 px-3 py-2">
+                                          <dt className="w-24 shrink-0 text-muted-foreground">Attachment</dt>
+                                          <dd className="min-w-0 break-all font-mono text-gray-700">{p.attachmentFilename ?? "—"}</dd>
+                                        </div>
+                                      </dl>
+                                      {p.html && (
+                                        <iframe
+                                          title={`Email preview for invoice ${p.invoiceNumber}`}
+                                          srcDoc={p.html}
+                                          sandbox=""
+                                          className="w-full h-64 border-t border-gray-200 bg-white"
+                                        />
+                                      )}
+                                    </div>
+                                    {p.warnings.length > 0 && (
+                                      <div className="mt-2 rounded border border-amber-200 bg-amber-50 px-3 py-2 space-y-1">
+                                        {p.warnings.map((w, wi) => (
+                                          <div key={wi} className="flex items-start gap-1.5 text-xs text-amber-900">
+                                            <AlertTriangle className="w-3.5 h-3.5 shrink-0 mt-0.5" />
+                                            <span>{w}</span>
+                                          </div>
+                                        ))}
+                                      </div>
+                                    )}
+                                  </td>
+                                </tr>
+                              )}
+                            </Fragment>
+                          );
+                        })}
+                      </tbody>
+                      <tfoot className="bg-gray-50 border-t border-gray-200">
+                        <tr>
+                          <td className="px-3 py-2 text-right text-xs text-muted-foreground" colSpan={2}>
+                            {withEmail.length} emailed{withoutEmail.length > 0 ? ` · ${withoutEmail.length} marked sent only` : ""}
+                          </td>
+                          <td className="px-3 py-2 text-right text-xs font-bold text-brand-navy" colSpan={2}>Combined total</td>
+                          <td className="px-3 py-2 text-right text-sm font-bold text-brand-navy whitespace-nowrap">{fmtUsd(todoTotal)}</td>
+                        </tr>
+                      </tfoot>
+                    </table>
+                  </div>
                 </div>
 
                 {withoutEmail.length > 0 && (
                   <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-900">
                     <strong>{withoutEmail.length}</strong> invoice{withoutEmail.length === 1 ? " has" : "s have"} no client email on file.
                     They will be marked sent but no email goes out:
-                    <span className="block mt-1 font-mono">{withoutEmail.slice(0, 5).map((r) => r.invoiceNumber).join(", ")}{withoutEmail.length > 5 ? ` +${withoutEmail.length - 5} more` : ""}</span>
+                    <span className="block mt-1 font-mono">{withoutEmail.slice(0, 5).map((p) => p.invoiceNumber).join(", ")}{withoutEmail.length > 5 ? ` +${withoutEmail.length - 5} more` : ""}</span>
                   </div>
                 )}
 
-                {noFee.length > 0 && (
-                  <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-900">
-                    <strong>{noFee.length}</strong> invoice{noFee.length === 1 ? " has" : "s have"} no processing fee applied
-                    (created before the fee was switched on). Recalculate the fee first if the client should be charged it:
-                    <span className="block mt-1 font-mono">{noFee.slice(0, 5).map((r) => r.invoiceNumber).join(", ")}{noFee.length > 5 ? ` +${noFee.length - 5} more` : ""}</span>
+                {blocked.length > 0 && (
+                  <div className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-800">
+                    <strong>{blocked.length}</strong> selected invoice{blocked.length === 1 ? "" : "s"} cannot be sent and will be left alone:
+                    <span className="block mt-1 font-mono">{blocked.slice(0, 5).map((p) => p.invoiceNumber ?? p.id).join(", ")}{blocked.length > 5 ? ` +${blocked.length - 5} more` : ""}</span>
                   </div>
                 )}
 
                 {skipped > 0 && (
                   <p className="text-xs text-muted-foreground">
-                    {skipped} selected invoice{skipped === 1 ? " is" : "s are"} already paid or void and will be skipped.
+                    {skipped} selected invoice{skipped === 1 ? " is" : "s are"} already paid, void, or unsendable and will be skipped.
                   </p>
                 )}
               </div>
 
               <div className="shrink-0 flex justify-end gap-2 px-5 py-4 border-t border-gray-100 bg-gray-50/60">
-                <Button variant="outline" size="sm" onClick={() => setBulkSendConfirm(false)}>Cancel</Button>
+                <Button variant="outline" size="sm" onClick={closeBulk}>Cancel</Button>
                 <Button
                   size="sm"
                   className="bg-brand-navy text-white hover:bg-brand-navy/90"
-                  onClick={() => void bulkSendToClients()}
+                  onClick={() => void bulkSendToClients(todo)}
                   disabled={todo.length === 0 || busy}
                 >
                   <Mail className="w-3.5 h-3.5 mr-1.5" />

@@ -114,4 +114,5 @@
 - [User delete strands application](user-delete-strands-application.md) — applications.created_employee_id has no FK; every user-delete path must un-strand the linked app (shared reset helper); boot repair needs FOR UPDATE claim.
 - [Fee toggle doesn't re-price invoices](invoice-fee-toggle-no-reprice.md) — enabling the processing fee only affects NEW invoices; existing rows keep NULL fee and need per-invoice recalculate (drafts included).
 - [Licence-level labels duplicated](invoice-licence-level-labels.md) — invoice level names live in admin-portal AND the api-server PDF builder; change both together, a parity test guards drift.
+- [Invoice send preview gate](invoice-send-preview-gate.md) — sending needs a single-use ticket from the preview; digest must cover PDF-only fields; "mark sent" is not a bypass.
 - [Invoice email — three addresses](invoice-email-reply-address.md) — "wrong invoice email" = body contact (brand.billingEmail, boot-cached) vs From (RESEND_FROM secret) vs replyTo; check which before editing.

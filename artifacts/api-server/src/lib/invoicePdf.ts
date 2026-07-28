@@ -104,6 +104,16 @@ function sectionHeader(doc: PDFKit.PDFDocument, label: string): void {
   doc.moveDown(0.6);
 }
 
+/**
+ * Attachment name for an invoice PDF. Exported so the send-preview can show the
+ * admin the real filename without paying to render the document.
+ */
+export function invoicePdfFilename(invoiceNumber: string): string {
+  const safeNum = invoiceNumber.replace(/[^a-z0-9-]/gi, "-").toLowerCase();
+  const safeShort = brand.shortName.replace(/[^a-z0-9]/gi, "-").toLowerCase();
+  return `${safeShort}-invoice-${safeNum}.pdf`;
+}
+
 export function buildInvoicePdf(inv: InvoicePdfInput): InvoicePdfPayload {
   const doc = new PDFDocument({
     size: "LETTER",
@@ -366,9 +376,7 @@ export function buildInvoicePdf(inv: InvoicePdfInput): InvoicePdfPayload {
 
   doc.end();
 
-  const safeNum = inv.invoiceNumber.replace(/[^a-z0-9-]/gi, "-").toLowerCase();
-  const safeShort = brand.shortName.replace(/[^a-z0-9]/gi, "-").toLowerCase();
-  const filename = `${safeShort}-invoice-${safeNum}.pdf`;
+  const filename = invoicePdfFilename(inv.invoiceNumber);
 
   const stream = doc as unknown as Readable;
 
