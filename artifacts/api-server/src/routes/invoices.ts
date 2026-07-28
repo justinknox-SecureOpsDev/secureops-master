@@ -12,6 +12,34 @@ import { isProcessingFeeEnabled, getProcessingFeeRate } from "../lib/processingF
 const router: IRouter = Router();
 router.use("/invoices", requireFeature("invoicing"));
 
+// Re-sync line items for an auto-synced invoice if they were stored before the
+// `level` field was introduced (old JSONB entries have no `level` key at all,
+// as opposed to new entries that may legitimately carry `level: null`).
+async function refreshLineItemsIfStale(
+  invoiceId: string,
+  siteId: string | null,
+  autoSynced: boolean,
+  lineItems: InvoiceLineItem[] | null,
+  periodStart: string,
+): Promise<InvoiceLineItem[] | null> {
+  if (
+    !autoSynced ||
+    !siteId ||
+    !Array.isArray(lineItems) ||
+    lineItems.length === 0 ||
+    lineItems.every((item) => "level" in item)
+  ) {
+    return lineItems;
+  }
+  // At least one line item is missing the level key — re-sync to pick it up.
+  await upsertWeeklyInvoice(siteId, periodStart);
+  const [refreshed] = await db
+    .select({ lineItems: invoicesTable.lineItems })
+    .from(invoicesTable)
+    .where(eq(invoicesTable.id, invoiceId));
+  return (refreshed?.lineItems as InvoiceLineItem[] | null) ?? lineItems;
+}
+
 function generateInvoiceNumber(): string {
   const now = new Date();
   const prefix = `INV-${now.getFullYear()}${String(now.getMonth() + 1).padStart(2, "0")}`;
@@ -309,6 +337,8 @@ router.get("/invoices/:id/pdf", requireAdmin, async (req, res): Promise<void> =>
       clientEmail: invoicesTable.clientEmail,
       clientAddress: invoicesTable.clientAddress,
       siteName: sitesTable.name,
+      siteId: invoicesTable.siteId,
+      autoSynced: invoicesTable.autoSynced,
       periodStart: invoicesTable.periodStart,
       periodEnd: invoicesTable.periodEnd,
       dueDate: invoicesTable.dueDate,
@@ -327,11 +357,14 @@ router.get("/invoices/:id/pdf", requireAdmin, async (req, res): Promise<void> =>
 
   if (!row) { res.status(404).json({ error: "Not Found" }); return; }
 
+  const periodStartStr = row.periodStart ? (typeof row.periodStart === "string" ? row.periodStart : (row.periodStart as Date).toISOString().slice(0, 10)) : "";
+  const freshItems = await refreshLineItemsIfStale(row.id, row.siteId ?? null, row.autoSynced, row.lineItems as InvoiceLineItem[] | null, periodStartStr);
+
   const { filename, stream } = buildInvoicePdf({
     ...row,
-    periodStart: row.periodStart ? (typeof row.periodStart === "string" ? row.periodStart : (row.periodStart as Date).toISOString().slice(0, 10)) : "",
+    periodStart: periodStartStr,
     periodEnd: row.periodEnd ? (typeof row.periodEnd === "string" ? row.periodEnd : (row.periodEnd as Date).toISOString().slice(0, 10)) : "",
-    lineItems: row.lineItems as InvoiceLineItem[] | null,
+    lineItems: freshItems,
   });
 
   res.setHeader("Content-Type", "application/pdf");
@@ -361,6 +394,8 @@ router.post("/invoices/:id/send", requireAdmin, async (req, res): Promise<void> 
       clientEmail: invoicesTable.clientEmail,
       clientAddress: invoicesTable.clientAddress,
       siteName: sitesTable.name,
+      siteId: invoicesTable.siteId,
+      autoSynced: invoicesTable.autoSynced,
       periodStart: invoicesTable.periodStart,
       periodEnd: invoicesTable.periodEnd,
       dueDate: invoicesTable.dueDate,
@@ -384,6 +419,10 @@ router.post("/invoices/:id/send", requireAdmin, async (req, res): Promise<void> 
   }
 
   const recipient = overrideEmail?.trim() || row.clientEmail?.trim() || null;
+
+  const sendPeriodStartStr = row.periodStart ? (typeof row.periodStart === "string" ? row.periodStart : (row.periodStart as Date).toISOString().slice(0, 10)) : "";
+  // Refresh line items before marking sent so the emailed PDF has level data.
+  const freshSendItems = await refreshLineItemsIfStale(row.id, row.siteId ?? null, row.autoSynced, row.lineItems as InvoiceLineItem[] | null, sendPeriodStartStr);
 
   // Mark sent immediately — even when SMTP isn't configured the admin needs
   // to be able to flag it as "sent via other channel".
@@ -416,9 +455,9 @@ router.post("/invoices/:id/send", requireAdmin, async (req, res): Promise<void> 
   const { buffer, filename } = buildInvoicePdf({
     ...row,
     clientEmail: recipient,
-    periodStart: row.periodStart ? (typeof row.periodStart === "string" ? row.periodStart : (row.periodStart as Date).toISOString().slice(0, 10)) : "",
+    periodStart: sendPeriodStartStr,
     periodEnd: row.periodEnd ? (typeof row.periodEnd === "string" ? row.periodEnd : (row.periodEnd as Date).toISOString().slice(0, 10)) : "",
-    lineItems: row.lineItems as InvoiceLineItem[] | null,
+    lineItems: freshSendItems,
   });
 
   let pdfBuf: Buffer;
