@@ -140,6 +140,8 @@ router.get("/sites", requireSchedulingStaff, async (req, res): Promise<void> => 
       locationLng: sitesTable.locationLng,
       notes: sitesTable.notes,
       geofenceRadiusMiles: sitesTable.geofenceRadiusMiles,
+      salesTaxEnabled: sitesTable.salesTaxEnabled,
+      salesTaxRate: sitesTable.salesTaxRate,
       createdAt: sitesTable.createdAt,
     })
     .from(sitesTable)
@@ -177,6 +179,8 @@ router.get("/sites/:id", requireAdminOrDispatcher, async (req, res): Promise<voi
       locationLng: sitesTable.locationLng,
       notes: sitesTable.notes,
       geofenceRadiusMiles: sitesTable.geofenceRadiusMiles,
+      salesTaxEnabled: sitesTable.salesTaxEnabled,
+      salesTaxRate: sitesTable.salesTaxRate,
       createdAt: sitesTable.createdAt,
     })
     .from(sitesTable)
@@ -191,7 +195,7 @@ router.get("/sites/:id", requireAdminOrDispatcher, async (req, res): Promise<voi
 
 router.put("/sites/:id", requireAdmin, async (req, res): Promise<void> => {
   const id = Array.isArray(req.params.id) ? req.params.id[0] : req.params.id;
-  const { name, status, address, locationLat, locationLng, notes, geofenceRadiusMiles, autoClockOutEnabled } = req.body;
+  const { name, status, address, locationLat, locationLng, notes, geofenceRadiusMiles, autoClockOutEnabled, salesTaxEnabled, salesTaxRate } = req.body;
   let updates: Record<string, unknown> = {};
   if (name !== undefined) updates.name = name;
   if (status !== undefined) {
@@ -207,6 +211,21 @@ router.put("/sites/:id", requireAdmin, async (req, res): Promise<void> => {
   if (notes !== undefined) updates.notes = notes;
   if (autoClockOutEnabled !== undefined) {
     updates.autoClockOutEnabled = autoClockOutEnabled === true || autoClockOutEnabled === "true";
+  }
+  if (salesTaxEnabled !== undefined) {
+    updates.salesTaxEnabled = salesTaxEnabled === true || salesTaxEnabled === "true";
+  }
+  if (salesTaxRate !== undefined) {
+    if (salesTaxRate === null || salesTaxRate === "") {
+      updates.salesTaxRate = "8.25";
+    } else {
+      const n = Number(salesTaxRate);
+      if (!Number.isFinite(n) || n < 0 || n > 100) {
+        res.status(400).json({ error: "Bad Request", message: "salesTaxRate must be a percentage between 0 and 100." });
+        return;
+      }
+      updates.salesTaxRate = String(n);
+    }
   }
   if (geofenceRadiusMiles !== undefined) {
     // null / "" → clear override (use global default). Otherwise must be
