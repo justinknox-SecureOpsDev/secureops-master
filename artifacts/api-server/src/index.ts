@@ -164,9 +164,10 @@ Promise.all([employeeProfileBackfillDone, employeesRowsBackfilled, demoUsersSeed
 // and processingFeeAmount was NULL), move tax_amount → processing_fee_amount
 // and zero tax_amount. Only touches draft rows with tax_amount > 0 and
 // processing_fee_amount IS NULL; finalized invoices are never modified.
+// The function always logs a structured summary (checked/repaired/skipped)
+// so operators can confirm the migration ran cleanly after every deploy.
 import("./lib/invoiceProcessingFeeBackfill")
   .then((m) => m.backfillInvoiceProcessingFees())
-  .then((n) => { if (n > 0) logger.info({ repaired: n }, "Draft invoice processing-fee backfill complete"); })
   .catch((err) => logger.error({ err }, "Failed to backfill invoice processing fees"));
 
 // One-time idempotent repair: copy employees.phone -> users.phoneNumber for

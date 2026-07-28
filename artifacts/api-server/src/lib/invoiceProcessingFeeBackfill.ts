@@ -17,7 +17,33 @@ import { and, eq, gt, isNull, sql } from "drizzle-orm";
 import { db, invoicesTable, sitesTable } from "@workspace/db";
 import { logger } from "./logger";
 
-export async function backfillInvoiceProcessingFees(): Promise<number> {
+export interface BackfillSummary {
+  checked: number;
+  repaired: number;
+  skipped: number;
+}
+
+/**
+ * Returns a count of draft invoices that still need the processing-fee
+ * migration (tax_amount > 0 AND processing_fee_amount IS NULL).
+ * Used by GET /api/admin/invoices/fee-migration-status so operators can
+ * verify the backfill ran cleanly after a deploy without triggering writes.
+ */
+export async function getFeeMigrationPendingCount(): Promise<number> {
+  const result = await db
+    .select({ id: invoicesTable.id })
+    .from(invoicesTable)
+    .where(
+      and(
+        eq(invoicesTable.status, "draft"),
+        gt(invoicesTable.taxAmount, "0"),
+        isNull(invoicesTable.processingFeeAmount),
+      ),
+    );
+  return result.length;
+}
+
+export async function backfillInvoiceProcessingFees(): Promise<BackfillSummary> {
   // Find draft invoices that need migration.
   const candidates = await db
     .select({
@@ -35,7 +61,15 @@ export async function backfillInvoiceProcessingFees(): Promise<number> {
       ),
     );
 
-  if (candidates.length === 0) return 0;
+  const summary: BackfillSummary = { checked: candidates.length, repaired: 0, skipped: 0 };
+
+  // Always log a summary so operators can confirm the backfill ran even when
+  // there is nothing to migrate (checked=0, repaired=0 is the healthy state
+  // after the first clean deploy).
+  if (candidates.length === 0) {
+    logger.info(summary, "[invoice-fee-backfill] complete — no rows needed migration");
+    return summary;
+  }
 
   // Fetch site rates for all affected site ids in one query.
   const siteIds = [...new Set(candidates.map((c) => c.siteId).filter(Boolean))] as string[];
@@ -50,7 +84,6 @@ export async function backfillInvoiceProcessingFees(): Promise<number> {
     }
   }
 
-  let repaired = 0;
   for (const row of candidates) {
     try {
       const feeAmount = parseFloat(String(row.taxAmount ?? "0"));
@@ -74,10 +107,13 @@ export async function backfillInvoiceProcessingFees(): Promise<number> {
             isNull(invoicesTable.processingFeeAmount), // double-guard against races
           ),
         );
-      repaired++;
+      summary.repaired++;
     } catch (err) {
       logger.warn({ err, invoiceId: row.id }, "[invoice-fee-backfill] failed to migrate row, skipping");
+      summary.skipped++;
     }
   }
-  return repaired;
+
+  logger.info(summary, "[invoice-fee-backfill] complete");
+  return summary;
 }

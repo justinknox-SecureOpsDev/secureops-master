@@ -8,6 +8,7 @@ import { sendEmailDetailed } from "../lib/email";
 import { brand } from "../lib/brandConfig";
 import { requireFeature } from "../lib/features";
 import { isProcessingFeeEnabled, getProcessingFeeRate } from "../lib/processingFeeConfig";
+import { getFeeMigrationPendingCount } from "../lib/invoiceProcessingFeeBackfill";
 
 const router: IRouter = Router();
 router.use("/invoices", requireFeature("invoicing"));
@@ -95,6 +96,21 @@ function addDays(d: Date, n: number): Date {
 function isoDate(d: Date): string {
   return d.toISOString().slice(0, 10);
 }
+
+/**
+ * GET /api/admin/invoices/fee-migration-status
+ *
+ * Returns the number of draft invoices that still carry tax_amount > 0 with
+ * processing_fee_amount IS NULL — i.e. rows that have not yet been touched by
+ * the boot backfill. Operators can call this after a deploy to confirm the
+ * migration ran cleanly:  { "pendingCount": 0 } means all rows are migrated.
+ *
+ * Read-only — no data is modified.
+ */
+router.get("/invoices/fee-migration-status", requireAdmin, async (_req, res): Promise<void> => {
+  const pendingCount = await getFeeMigrationPendingCount();
+  res.json({ pendingCount });
+});
 
 router.get("/invoices", requireAdmin, async (req, res): Promise<void> => {
   const { status, clientName, siteId, clientId, overlapStart, overlapEnd } = req.query as Record<string, string | undefined>;
