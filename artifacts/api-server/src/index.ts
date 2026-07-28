@@ -4,7 +4,7 @@ import { logger } from "./lib/logger";
 import { attachWebSocketServer, handleChatUpgrade, getWss } from "./lib/wsManager";
 import { attachRadioWebSocketServer, handleRadioUpgrade, getRadioWss } from "./lib/radioGateway";
 import { seedPolicies, backfillEmployeeProfileFields, backfillMustSignPolicies, pool } from "@workspace/db";
-import { seedDemoUsers, ensureAdminAccountHealth, ensureEmployeesRowsForAllUsers, backfillUserPhoneNumbersFromEmployees, migrateLeadRoleToSiteManager } from "./lib/seedDemoUsers";
+import { seedDemoUsers, ensureAdminAccountHealth, ensureEmployeesRowsForAllUsers, backfillUserPhoneNumbersFromEmployees, migrateLeadRoleToSiteManager, backfillBillingEmail } from "./lib/seedDemoUsers";
 import { seedChatRooms } from "./lib/seedChatRooms";
 import { seedRadioChannels } from "./lib/seedRadioChannels";
 import { startScheduledJobs } from "./lib/scheduledJobs";
@@ -166,6 +166,14 @@ Promise.all([employeeProfileBackfillDone, employeesRowsBackfilled, demoUsersSeed
 backfillUserPhoneNumbersFromEmployees()
   .then(() => logger.info("User phone numbers backfilled from employee files"))
   .catch((err) => logger.error({ err }, "Failed to backfill user phone numbers"));
+
+// One-time idempotent repair: the platform_brand_config billing_email was
+// stored as admin@williamscouncilsecurity.com (an old incorrect value). Flip
+// it to pay@williamscouncil.com so invoice PDF footers use the right address.
+// Safe to run on every boot — only fires when the stale value is still present.
+backfillBillingEmail()
+  .then(() => logger.info("Billing email backfill complete"))
+  .catch((err) => logger.error({ err }, "Failed to backfill billing email"));
 
 // One-time idempotent repair (production only): re-provision applicants who
 // were APPROVED but whose login account + onboarding token were later deleted

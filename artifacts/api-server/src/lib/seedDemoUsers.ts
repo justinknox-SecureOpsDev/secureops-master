@@ -1,6 +1,6 @@
 import bcrypt from "bcryptjs";
 import { eq, and, ne, sql } from "drizzle-orm";
-import { db, usersTable, employeesTable } from "@workspace/db";
+import { db, usersTable, employeesTable, platformBrandConfigTable } from "@workspace/db";
 import { logger } from "./logger";
 import { brand } from "./brandConfig";
 import { normalizePhoneToE164 } from "./phone";
@@ -259,6 +259,37 @@ export async function backfillUserPhoneNumbersFromEmployees(): Promise<void> {
     logger.info(
       { updated, skipped },
       "Backfilled users.phoneNumber from employees.phone so SMS can reach officers and the user profile shows their number",
+    );
+  }
+}
+
+/**
+ * One-time idempotent repair: if the platform_brand_config billing_email was
+ * saved as "admin@williamscouncilsecurity.com" (an old incorrect value), flip
+ * it to "pay@williamscouncil.com" so invoice PDF footers and billing
+ * correspondence use the correct address. Only touches the singleton row when
+ * the value exactly matches the stale address — any admin-set value is left
+ * alone.
+ */
+export async function backfillBillingEmail(): Promise<void> {
+  const staleEmail = "admin@williamscouncilsecurity.com";
+  const correctEmail = "pay@williamscouncil.com";
+
+  const result = await db
+    .update(platformBrandConfigTable)
+    .set({ billingEmail: correctEmail })
+    .where(
+      and(
+        eq(platformBrandConfigTable.id, "singleton"),
+        eq(platformBrandConfigTable.billingEmail, staleEmail),
+      ),
+    )
+    .returning({ id: platformBrandConfigTable.id });
+
+  if (result.length > 0) {
+    logger.info(
+      { from: staleEmail, to: correctEmail },
+      "Backfilled billing email from stale admin address to correct payments address",
     );
   }
 }
