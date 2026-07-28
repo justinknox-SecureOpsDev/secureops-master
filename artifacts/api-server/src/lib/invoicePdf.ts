@@ -30,6 +30,13 @@ export type InvoicePdfInput = {
   notes: string | null;
   processingFeeRate?: string | number | null;
   processingFeeAmount?: string | number | null;
+  /**
+   * When set, a notice callout is rendered on the PDF warning the client that
+   * processing fees may have been updated since this invoice was generated.
+   * Use this when serving a sent/paid invoice whose processingFeeAmount is
+   * stale (NULL) relative to the site's current salesTaxEnabled setting.
+   */
+  staleFeeNote?: string | null;
 };
 
 export type InvoicePdfPayload = {
@@ -231,6 +238,25 @@ export function buildInvoicePdf(inv: InvoicePdfInput): InvoicePdfPayload {
     sectionHeader(doc, "Notes");
     doc.fillColor(TEXT).font("Helvetica").fontSize(9)
       .text(inv.notes.trim(), 56, doc.y, { width: W - 112, lineGap: 2 });
+  }
+
+  // ── Stale-fee notice (shown when invoice was sent before fees were enabled) ──
+  if (inv.staleFeeNote && inv.staleFeeNote.trim()) {
+    doc.moveDown(1);
+    if (doc.y > doc.page.height - 80) doc.addPage();
+    const noticeY = doc.y;
+    const noticeH = 44;
+    // Amber/gold tinted background
+    doc.rect(56, noticeY, W - 112, noticeH).fill("#fff8e6");
+    doc.moveTo(56, noticeY).lineTo(56 + 4, noticeY)
+      .lineTo(56 + 4, noticeY + noticeH).lineTo(56, noticeY + noticeH)
+      .fillColor("#c9a04a");
+    doc.rect(56, noticeY, 4, noticeH).fill("#c9a04a");
+    doc.fillColor("#7a5c00").font("Helvetica-Bold").fontSize(8)
+      .text("NOTICE", 68, noticeY + 8, { width: W - 136, characterSpacing: 0.5 });
+    doc.fillColor("#5a4000").font("Helvetica").fontSize(8)
+      .text(inv.staleFeeNote.trim(), 68, noticeY + 20, { width: W - 136, lineBreak: false });
+    doc.y = noticeY + noticeH + 8;
   }
 
   // ── Payment footer ────────────────────────────────────────────────────────

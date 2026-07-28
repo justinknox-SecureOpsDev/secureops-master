@@ -2,7 +2,7 @@ import { Fragment, useEffect, useMemo, useRef, useState } from "react";
 import {
   Receipt, Loader2, ChevronRight, ChevronDown, AlertTriangle,
   Lock, Pencil, RefreshCw, Send, CheckCircle2, FileText,
-  Download, Mail, X, PlusCircle, Calendar,
+  Download, Mail, X, PlusCircle, Calendar, RotateCcw,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -400,6 +400,27 @@ export default function InvoiceBoardPage() {
   const showToast = (kind: "ok" | "err", msg: string) => {
     setToast({ kind, msg });
     setTimeout(() => setToast(null), 5000);
+  };
+
+  const [recalcBusy, setRecalcBusy] = useState<Set<string>>(new Set());
+  const recalculateFee = async (r: InvoiceRow) => {
+    setRecalcBusy((s) => new Set(s).add(r.id));
+    try {
+      const updated = await api<InvoiceRow & { feeRecalculated: boolean; previousTotal: string | null }>(`/invoices/${r.id}/recalculate-fee`, { method: "POST" });
+      const prevTotal = parseFloat(String(updated.previousTotal ?? "0")) || 0;
+      const newTotal = parseFloat(String(updated.totalAmount ?? "0")) || 0;
+      const feeAmt = parseFloat(String(updated.processingFeeAmount ?? "0")) || 0;
+      if (feeAmt > 0) {
+        showToast("ok", `Fee recalculated for ${r.invoiceNumber}: total updated from ${fmtUsd(prevTotal)} → ${fmtUsd(newTotal)}. Open the send dialog to resend the corrected invoice.`);
+      } else {
+        showToast("ok", `Fee recalculated for ${r.invoiceNumber}: no fee applies at current site settings (total unchanged).`);
+      }
+      await reload();
+    } catch (e) {
+      showToast("err", `Recalculate failed: ${(e as Error).message}`);
+    } finally {
+      setRecalcBusy((s) => { const n = new Set(s); n.delete(r.id); return n; });
+    }
   };
 
   const [pdfBusy, setPdfBusy] = useState<Set<string>>(new Set());
@@ -995,7 +1016,18 @@ export default function InvoiceBoardPage() {
                                 </button>
                               </td>
                               <td className="px-3 py-2 text-right">{fmtUsd(num(r.subtotal))}</td>
-                              <td className="px-3 py-2 text-right font-semibold">{fmtUsd(num(r.totalAmount))}</td>
+                              <td className="px-3 py-2 text-right font-semibold">
+                                <span>{fmtUsd(num(r.totalAmount))}</span>
+                                {r.processingFeeAmount === null && (r.status === "sent" || r.status === "overdue") && (
+                                  <span
+                                    className="ml-1.5 inline-flex items-center gap-0.5 text-[10px] px-1 py-0.5 rounded bg-amber-100 text-amber-800 border border-amber-300 font-medium"
+                                    title="This invoice was generated before processing fees were configured. Click 'Recalculate fee' in the actions to update the total."
+                                  >
+                                    <AlertTriangle className="w-2.5 h-2.5" />
+                                    no fee
+                                  </span>
+                                )}
+                              </td>
                               <td className="px-3 py-2 text-xs">
                                 {r.dueDate
                                   ? new Date(`${r.dueDate}T00:00:00`).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })
@@ -1020,6 +1052,21 @@ export default function InvoiceBoardPage() {
                                       ? <Loader2 className="w-3.5 h-3.5 animate-spin" />
                                       : <Download className="w-3.5 h-3.5" />}
                                   </button>
+                                  {/* Recalculate fee button — shown on sent/overdue invoices that
+                                      have no processingFeeAmount (generated before toggle was on). */}
+                                  {r.processingFeeAmount === null && (r.status === "sent" || r.status === "overdue") && (
+                                    <button
+                                      type="button"
+                                      onClick={() => void recalculateFee(r)}
+                                      disabled={recalcBusy.has(r.id)}
+                                      className="inline-flex items-center justify-center w-7 h-7 rounded hover:bg-amber-100 text-amber-700 hover:text-amber-900 transition-colors disabled:opacity-40"
+                                      title="Recalculate processing fee using current site settings, then resend the corrected invoice"
+                                    >
+                                      {recalcBusy.has(r.id)
+                                        ? <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                                        : <RotateCcw className="w-3.5 h-3.5" />}
+                                    </button>
+                                  )}
                                   {r.status !== "paid" && r.status !== "void" && (
                                     <button
                                       type="button"

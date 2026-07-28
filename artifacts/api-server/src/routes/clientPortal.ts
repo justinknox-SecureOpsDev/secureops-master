@@ -32,6 +32,7 @@ import { ObjectStorageService, ObjectNotFoundError } from "../lib/objectStorage"
 import { buildIncidentReportPdf } from "../lib/incidentPdf";
 import { buildInvoicePdf } from "../lib/invoicePdf";
 import { sendEmail } from "../lib/email";
+import { isProcessingFeeEnabled } from "../lib/processingFeeConfig";
 
 const objectStorageService = new ObjectStorageService();
 
@@ -106,6 +107,65 @@ function getTrustedBaseUrl(): string | null {
   const replitDomain = process.env.REPLIT_DOMAINS?.split(",")[0]?.trim();
   if (replitDomain) return `https://${replitDomain}`;
   return null;
+}
+
+/**
+ * For sent/overdue invoices whose processingFeeAmount is NULL (generated before
+ * the fee toggle was enabled), compute the effective fee on-the-fly using the
+ * site's current salesTaxEnabled + salesTaxRate so client-facing reads always
+ * reflect the correct current total.
+ *
+ * Paid invoices are intentionally left untouched — they are settled financial
+ * records and must reflect what was actually charged, not the current fee rate.
+ */
+function computeEffectiveFee(params: {
+  subtotal: string | null;
+  processingFeeAmount: string | null;
+  processingFeeRate: string | null;
+  totalAmount: string | null;
+  siteSalesTaxEnabled: boolean | null;
+  siteSalesTaxRate: string | null;
+  status: string;
+}): {
+  feeAmount: string | null;
+  feeRate: string | null;
+  totalAmount: string;
+  isStale: boolean;
+} {
+  // Paid invoices: return stored values unchanged (settled financial record).
+  if (params.status !== "sent" && params.status !== "overdue") {
+    return {
+      feeAmount: params.processingFeeAmount,
+      feeRate: params.processingFeeRate,
+      totalAmount: params.totalAmount ?? "0",
+      isStale: false,
+    };
+  }
+
+  const storedFee = parseFloat(String(params.processingFeeAmount ?? "0")) || 0;
+  const siteHasFee = isProcessingFeeEnabled() && Boolean(params.siteSalesTaxEnabled);
+
+  if (storedFee === 0 && siteHasFee) {
+    const subtotal = parseFloat(String(params.subtotal ?? "0")) || 0;
+    const feeRate = parseFloat(String(params.siteSalesTaxRate ?? "0")) || 0;
+    if (feeRate > 0) {
+      const feeAmount = Math.round(subtotal * feeRate / 100 * 100) / 100;
+      const total = Math.round((subtotal + feeAmount) * 100) / 100;
+      return {
+        feeAmount: String(feeAmount),
+        feeRate: String(feeRate),
+        totalAmount: String(total),
+        isStale: true,
+      };
+    }
+  }
+
+  return {
+    feeAmount: params.processingFeeAmount,
+    feeRate: params.processingFeeRate,
+    totalAmount: params.totalAmount ?? "0",
+    isStale: false,
+  };
 }
 
 // ===========================================================================
@@ -544,6 +604,10 @@ router.get(
           subtotal: invoicesTable.subtotal,
           taxAmount: invoicesTable.taxAmount,
           totalAmount: invoicesTable.totalAmount,
+          processingFeeAmount: invoicesTable.processingFeeAmount,
+          processingFeeRate: invoicesTable.processingFeeRate,
+          siteSalesTaxEnabled: sitesTable.salesTaxEnabled,
+          siteSalesTaxRate: sitesTable.salesTaxRate,
           status: invoicesTable.status,
           dueDate: invoicesTable.dueDate,
           paidAt: invoicesTable.paidAt,
@@ -560,7 +624,30 @@ router.get(
         )
         .orderBy(desc(invoicesTable.createdAt));
 
-      res.json(rows);
+      // Apply on-the-fly fee correction for sent/overdue invoices that were
+      // generated before the processing fee toggle was enabled. Paid invoices
+      // are returned unchanged — they reflect what was settled.
+      const corrected = rows.map((r) => {
+        const eff = computeEffectiveFee({
+          subtotal: r.subtotal,
+          processingFeeAmount: r.processingFeeAmount,
+          processingFeeRate: r.processingFeeRate,
+          totalAmount: r.totalAmount,
+          siteSalesTaxEnabled: r.siteSalesTaxEnabled ?? null,
+          siteSalesTaxRate: r.siteSalesTaxRate ?? null,
+          status: r.status,
+        });
+        // Strip internal site fee fields from the client-facing response.
+        const { siteSalesTaxEnabled: _ste, siteSalesTaxRate: _str, ...rest } = r;
+        return {
+          ...rest,
+          totalAmount: eff.totalAmount,
+          processingFeeAmount: eff.feeAmount,
+          processingFeeRate: eff.feeRate,
+        };
+      });
+
+      res.json(corrected);
     } catch (err) {
       if (handleScopeError(err, res)) return;
       req.log.error({ err }, "[client/invoices] error");
@@ -584,10 +671,13 @@ router.get(
           invoiceNumber: invoicesTable.invoiceNumber,
           clientId: invoicesTable.clientId,
           status: invoicesTable.status,
+          siteId: invoicesTable.siteId,
           clientName: invoicesTable.clientName,
           clientEmail: invoicesTable.clientEmail,
           clientAddress: invoicesTable.clientAddress,
           siteName: sitesTable.name,
+          siteSalesTaxEnabled: sitesTable.salesTaxEnabled,
+          siteSalesTaxRate: sitesTable.salesTaxRate,
           periodStart: invoicesTable.periodStart,
           periodEnd: invoicesTable.periodEnd,
           dueDate: invoicesTable.dueDate,
@@ -634,6 +724,26 @@ router.get(
         amount: number;
       };
 
+      // Compute effective fee: if this is a sent/overdue invoice whose
+      // processingFeeAmount is NULL (generated before the fee toggle was
+      // enabled) and the site now has fees on, correct the total on-the-fly
+      // so the PDF reflects the actual current balance due.
+      const eff = computeEffectiveFee({
+        subtotal: row.subtotal,
+        processingFeeAmount: row.processingFeeAmount,
+        processingFeeRate: row.processingFeeRate,
+        totalAmount: row.totalAmount,
+        siteSalesTaxEnabled: row.siteSalesTaxEnabled ?? null,
+        siteSalesTaxRate: row.siteSalesTaxRate ?? null,
+        status: row.status,
+      });
+
+      // When the total was corrected, add a brief note on the PDF so the client
+      // knows the fee was applied retroactively and the total has been updated.
+      const staleFeeNote = eff.isStale
+        ? `A processing fee has been applied to this invoice. The total above reflects the current amount due.`
+        : null;
+
       const { filename, stream } = buildInvoicePdf({
         invoiceNumber: row.invoiceNumber,
         clientName: row.clientName,
@@ -647,10 +757,11 @@ router.get(
         lineItems: (row.lineItems as LI[] | null) ?? null,
         subtotal: row.subtotal,
         taxAmount: row.taxAmount,
-        totalAmount: row.totalAmount,
-        processingFeeRate: row.processingFeeRate,
-        processingFeeAmount: row.processingFeeAmount,
+        totalAmount: eff.totalAmount,
+        processingFeeRate: eff.feeRate,
+        processingFeeAmount: eff.feeAmount,
         notes: row.notes,
+        staleFeeNote,
       });
 
       res.setHeader("Content-Type", "application/pdf");
@@ -686,10 +797,16 @@ router.post(
           clientId: invoicesTable.clientId,
           invoiceNumber: invoicesTable.invoiceNumber,
           clientName: invoicesTable.clientName,
+          subtotal: invoicesTable.subtotal,
           totalAmount: invoicesTable.totalAmount,
+          processingFeeAmount: invoicesTable.processingFeeAmount,
+          processingFeeRate: invoicesTable.processingFeeRate,
           status: invoicesTable.status,
+          siteSalesTaxEnabled: sitesTable.salesTaxEnabled,
+          siteSalesTaxRate: sitesTable.salesTaxRate,
         })
         .from(invoicesTable)
+        .leftJoin(sitesTable, eq(invoicesTable.siteId, sitesTable.id))
         .where(eq(invoicesTable.id, id))
         .limit(1);
 
@@ -710,8 +827,20 @@ router.post(
         return;
       }
 
+      // Use the effective (fee-corrected) total so a stale invoice is always
+      // charged at the current balance, not the pre-fee amount.
+      const effCheckout = computeEffectiveFee({
+        subtotal: invoice.subtotal,
+        processingFeeAmount: invoice.processingFeeAmount,
+        processingFeeRate: invoice.processingFeeRate,
+        totalAmount: invoice.totalAmount,
+        siteSalesTaxEnabled: invoice.siteSalesTaxEnabled ?? null,
+        siteSalesTaxRate: invoice.siteSalesTaxRate ?? null,
+        status: invoice.status,
+      });
+
       const amountCents = Math.round(
-        parseFloat(String(invoice.totalAmount ?? "0")) * 100,
+        parseFloat(String(effCheckout.totalAmount ?? "0")) * 100,
       );
       if (amountCents <= 0) {
         res

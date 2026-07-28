@@ -582,6 +582,72 @@ function escHtml(s: string): string {
   return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
 }
 
+// Recalculate the processing fee fields for a sent/overdue invoice using the
+// site's current salesTaxEnabled + salesTaxRate settings. Updates
+// processingFeeRate, processingFeeAmount, and totalAmount in-place.
+// Safe to call on paid invoices too (returns the unchanged row with a flag),
+// but will not mutate them — paid invoices are a settled financial record.
+router.post("/invoices/:id/recalculate-fee", requireAdmin, async (req, res): Promise<void> => {
+  const id = Array.isArray(req.params.id) ? req.params.id[0] : req.params.id;
+
+  const [row] = await db
+    .select({
+      id: invoicesTable.id,
+      status: invoicesTable.status,
+      siteId: invoicesTable.siteId,
+      lineItems: invoicesTable.lineItems,
+      subtotal: invoicesTable.subtotal,
+      processingFeeRate: invoicesTable.processingFeeRate,
+      processingFeeAmount: invoicesTable.processingFeeAmount,
+      totalAmount: invoicesTable.totalAmount,
+    })
+    .from(invoicesTable)
+    .where(eq(invoicesTable.id, id))
+    .limit(1);
+
+  if (!row) {
+    res.status(404).json({ error: "Not Found" });
+    return;
+  }
+
+  // Paid invoices are settled — do not mutate, return as-is with a flag.
+  if (row.status === "paid") {
+    res.status(409).json({
+      error: "Conflict",
+      message: "Cannot recalculate fee on a paid invoice — the total is a settled financial record.",
+    });
+    return;
+  }
+  if (row.status === "void") {
+    res.status(409).json({
+      error: "Conflict",
+      message: "Cannot recalculate fee on a voided invoice.",
+    });
+    return;
+  }
+
+  const lineItems = (row.lineItems as Array<{ description: string; hours?: number; rate?: number; amount: number }> | null) ?? [];
+  const { subtotal, total, processingFeeRate, processingFeeAmount } = await calcTotals(lineItems, row.siteId ?? null);
+
+  const [updated] = await db
+    .update(invoicesTable)
+    .set({
+      subtotal: String(subtotal),
+      totalAmount: String(total),
+      processingFeeRate: processingFeeRate !== null ? String(processingFeeRate) : null,
+      processingFeeAmount: processingFeeAmount !== null ? String(processingFeeAmount) : null,
+    })
+    .where(eq(invoicesTable.id, id))
+    .returning();
+
+  res.json({
+    ...updated,
+    feeRecalculated: true,
+    previousTotal: row.totalAmount,
+    previousFeeAmount: row.processingFeeAmount,
+  });
+});
+
 router.put("/invoices/:id", requireAdmin, async (req, res): Promise<void> => {
   const id = Array.isArray(req.params.id) ? req.params.id[0] : req.params.id;
   const { clientEmail, clientAddress, lineItems, status, dueDate, notes } = req.body;
