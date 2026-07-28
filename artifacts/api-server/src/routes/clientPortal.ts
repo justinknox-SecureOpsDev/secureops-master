@@ -628,6 +628,7 @@ router.get(
 
       type LI = {
         description: string;
+        level?: number | null;
         hours?: number | null;
         rate?: number | null;
         amount: number;

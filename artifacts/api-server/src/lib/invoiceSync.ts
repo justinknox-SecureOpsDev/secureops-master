@@ -247,6 +247,7 @@ export async function upsertWeeklyInvoice(
       hoursWorked: timeEntriesTable.hoursWorked,
       clockInTime: timeEntriesTable.clockInTime,
       shiftBillRate: shiftsTable.billRate,
+      shiftLevel: shiftsTable.requiredLicenseLevel,
       employeeFirst: usersTable.firstName,
       employeeLast: usersTable.lastName,
     })
@@ -262,7 +263,7 @@ export async function upsertWeeklyInvoice(
       ),
     );
 
-  type Group = { description: string; hours: number; rate: number; amount: number };
+  type Group = { description: string; level: number | null; hours: number; rate: number; amount: number };
   const groups = new Map<string, Group>();
   // Approved hours we could NOT price (no shift bill rate AND no site default
   // bill rate). Mirrors the custom-period path: these must be surfaced to the
@@ -277,6 +278,7 @@ export async function upsertWeeklyInvoice(
     if (baseRate <= 0) { unpricedHours += hours; continue; }
     const officerName =
       [e.employeeFirst, e.employeeLast].filter(Boolean).join(" ") || "Unassigned officer";
+    const level = e.shiftLevel ?? null;
     // Federal-holiday premium (1.5×): hours worked on a US federal holiday
     // (clock-in date in PAYROLL_TIMEZONE) are billed at time-and-a-half and
     // split into their own line item so the client sees the premium plainly.
@@ -285,8 +287,8 @@ export async function upsertWeeklyInvoice(
     const description = holidayName
       ? `${officerName} — Holiday (${holidayName}, ${HOLIDAY_PAY_MULTIPLIER}×)`
       : officerName;
-    const key = `${officerName}__${rate}__${holidayName ?? ""}`;
-    const cur = groups.get(key) ?? { description, hours: 0, rate, amount: 0 };
+    const key = `${officerName}__${level ?? ""}__${rate}__${holidayName ?? ""}`;
+    const cur = groups.get(key) ?? { description, level, hours: 0, rate, amount: 0 };
     cur.hours += hours;
     cur.amount += hours * rate;
     groups.set(key, cur);
@@ -328,7 +330,7 @@ export async function upsertWeeklyInvoice(
       ? `${e.name} (${e.company}) — subcontractor, Holiday (${holidayName}, ${HOLIDAY_PAY_MULTIPLIER}×)`
       : `${e.name} (${e.company}) — subcontractor`;
     const key = `sub__${label}__${rate}`;
-    const cur = groups.get(key) ?? { description: label, hours: 0, rate, amount: 0 };
+    const cur = groups.get(key) ?? { description: label, level: null, hours: 0, rate, amount: 0 };
     cur.hours += hours;
     cur.amount += hours * rate;
     groups.set(key, cur);
@@ -338,6 +340,7 @@ export async function upsertWeeklyInvoice(
     .sort((a, b) => a.description.localeCompare(b.description))
     .map((g) => ({
       description: g.description,
+      level: g.level,
       hours: Math.round(g.hours * 100) / 100,
       rate: g.rate,
       amount: Math.round(g.amount * 100) / 100,
@@ -622,6 +625,7 @@ export async function upsertCustomPeriodInvoice(
       hoursWorked: timeEntriesTable.hoursWorked,
       clockInTime: timeEntriesTable.clockInTime,
       shiftBillRate: shiftsTable.billRate,
+      shiftLevel: shiftsTable.requiredLicenseLevel,
       employeeFirst: usersTable.firstName,
       employeeLast: usersTable.lastName,
     })
@@ -637,7 +641,7 @@ export async function upsertCustomPeriodInvoice(
       ),
     );
 
-  type Group = { description: string; hours: number; rate: number; amount: number };
+  type Group = { description: string; level: number | null; hours: number; rate: number; amount: number };
   const groups = new Map<string, Group>();
   // Approved hours we could NOT price (no shift bill rate AND no site default
   // bill rate). These must be surfaced to the admin — silently dropping them
@@ -651,13 +655,14 @@ export async function upsertCustomPeriodInvoice(
     if (baseRate <= 0) { unpricedHours += hours; continue; }
     const officerName =
       [e.employeeFirst, e.employeeLast].filter(Boolean).join(" ") || "Unassigned officer";
+    const level = e.shiftLevel ?? null;
     const holidayName = getFederalHolidayName(e.clockInTime);
     const rate = holidayName ? Math.round(baseRate * HOLIDAY_PAY_MULTIPLIER * 100) / 100 : baseRate;
     const description = holidayName
       ? `${officerName} — Holiday (${holidayName}, ${HOLIDAY_PAY_MULTIPLIER}×)`
       : officerName;
-    const key = `${officerName}__${rate}__${holidayName ?? ""}`;
-    const cur = groups.get(key) ?? { description, hours: 0, rate, amount: 0 };
+    const key = `${officerName}__${level ?? ""}__${rate}__${holidayName ?? ""}`;
+    const cur = groups.get(key) ?? { description, level, hours: 0, rate, amount: 0 };
     cur.hours += hours;
     cur.amount += hours * rate;
     groups.set(key, cur);
@@ -690,7 +695,7 @@ export async function upsertCustomPeriodInvoice(
       ? `${e.name} (${e.company}) — subcontractor, Holiday (${holidayName}, ${HOLIDAY_PAY_MULTIPLIER}×)`
       : `${e.name} (${e.company}) — subcontractor`;
     const key = `sub__${label}__${rate}`;
-    const cur = groups.get(key) ?? { description: label, hours: 0, rate, amount: 0 };
+    const cur = groups.get(key) ?? { description: label, level: null, hours: 0, rate, amount: 0 };
     cur.hours += hours;
     cur.amount += hours * rate;
     groups.set(key, cur);
@@ -700,6 +705,7 @@ export async function upsertCustomPeriodInvoice(
     .sort((a, b) => a.description.localeCompare(b.description))
     .map((g) => ({
       description: g.description,
+      level: g.level,
       hours: Math.round(g.hours * 100) / 100,
       rate: g.rate,
       amount: Math.round(g.amount * 100) / 100,

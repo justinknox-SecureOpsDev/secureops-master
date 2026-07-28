@@ -19,6 +19,7 @@ export type InvoicePdfInput = {
   createdAt: Date | string;
   lineItems: Array<{
     description: string;
+    level?: number | null;
     hours?: number | null;
     rate?: number | null;
     amount: number;
@@ -136,10 +137,11 @@ export function buildInvoicePdf(inv: InvoicePdfInput): InvoicePdfPayload {
   const th = doc.y;
   doc.rect(56, th - 2, W - 112, 16).fill("#eef0f3");
   doc.fillColor(MUTED).font("Helvetica-Bold").fontSize(8);
-  doc.text("Description",  66, th, { width: 260 });
-  doc.text("Hours",        330, th, { width: 55, align: "right" });
-  doc.text("Rate",         390, th, { width: 60, align: "right" });
-  doc.text("Amount",       454, th, { width: 80, align: "right" });
+  doc.text("Officer",  66, th, { width: 185 });
+  doc.text("Level",   255, th, { width: 40, align: "center" });
+  doc.text("Hours",   300, th, { width: 60, align: "right" });
+  doc.text("Rate",    366, th, { width: 65, align: "right" });
+  doc.text("Amount",  436, th, { width: 100, align: "right" });
   doc.y = th + 18;
 
   const items = inv.lineItems ?? [];
@@ -149,16 +151,22 @@ export function buildInvoicePdf(inv: InvoicePdfInput): InvoicePdfPayload {
     if (rowY > doc.page.height - 100) doc.addPage();
     if (i % 2 === 1) doc.rect(56, rowY - 1, W - 112, 16).fill("#fafafa");
     doc.fillColor(TEXT).font("Helvetica").fontSize(9);
-    doc.text(item.description,  66, rowY, { width: 258, lineBreak: false });
+    doc.text(item.description,  66, rowY, { width: 185, lineBreak: false });
+    doc.fillColor(MUTED).font("Helvetica").fontSize(8.5);
+    doc.text(
+      item.level != null ? `L${item.level}` : "—",
+      255, rowY, { width: 40, align: "center" },
+    );
+    doc.fillColor(TEXT).font("Helvetica").fontSize(9);
     doc.text(
       item.hours != null ? item.hours.toFixed(2) : "—",
-      330, rowY, { width: 55, align: "right" },
+      300, rowY, { width: 60, align: "right" },
     );
     doc.text(
       item.rate != null ? fmtUsd(item.rate) : "—",
-      390, rowY, { width: 60, align: "right" },
+      366, rowY, { width: 65, align: "right" },
     );
-    doc.text(fmtUsd(item.amount), 454, rowY, { width: 80, align: "right" });
+    doc.text(fmtUsd(item.amount), 436, rowY, { width: 100, align: "right" });
     doc.y = rowY + 16;
   }
 

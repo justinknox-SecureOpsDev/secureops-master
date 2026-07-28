@@ -497,6 +497,7 @@ router.post("/invoices/:id/send", requireAdmin, async (req, res): Promise<void> 
 
 type InvoiceLineItem = {
   description: string;
+  level?: number | null;
   hours?: number | null;
   rate?: number | null;
   amount: number;
