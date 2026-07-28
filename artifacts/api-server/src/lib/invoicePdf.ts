@@ -154,7 +154,9 @@ export function buildInvoicePdf(inv: InvoicePdfInput): InvoicePdfPayload {
     doc.text(item.description,  66, rowY, { width: 185, lineBreak: false });
     doc.fillColor(MUTED).font("Helvetica").fontSize(8.5);
     doc.text(
-      item.level != null ? `L${item.level}` : "—",
+      item.level != null
+        ? ({ 1: "Support Staff", 2: "Unarmed", 3: "Armed" } as Record<number, string>)[item.level] ?? `L${item.level}`
+        : "—",
       255, rowY, { width: 40, align: "center" },
     );
     doc.fillColor(TEXT).font("Helvetica").fontSize(9);
