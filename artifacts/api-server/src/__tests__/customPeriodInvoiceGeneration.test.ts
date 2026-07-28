@@ -410,11 +410,11 @@ describe("billingCycle suppression on the weekly path", () => {
   });
 });
 
-describe("edited custom drafts vs re-generation (no silent tax double-charge)", () => {
-  it("keeps the hand-edited draft (with its tax) intact and the re-generated draft at tax 0; neither is scheduler-syncable", async () => {
+describe("edited custom drafts vs re-generation (no silent double-charge)", () => {
+  it("keeps the hand-edited draft intact and the re-generated draft independent; neither is scheduler-syncable", async () => {
     await addApprovedEntry(ENTRY_A_IN, ENTRY_A_OUT, "4.00");
 
-    // 1. Generate the custom draft. Always taxAmount 0, total = subtotal.
+    // 1. Generate the custom draft. taxAmount always 0, total = subtotal.
     const first = await request(app)
       .post("/api/invoices/generate")
       .set(authed())
@@ -423,8 +423,9 @@ describe("edited custom drafts vs re-generation (no silent tax double-charge)", 
     expect(parseFloat(String(first.body.taxAmount))).toBe(0);
     expect(parseFloat(String(first.body.totalAmount))).toBe(160);
 
-    // 2. Admin hand-edits tax AND line items on that draft — bump the
-    //    single line's amount 160 → 200 and rename it.
+    // 2. Admin hand-edits line items on that draft — bump the single
+    //    line's amount 160 → 200 and rename it. taxAmount is now always
+    //    zeroed by the server (fees flow through processingFeeAmount).
     const editedLines = (first.body.lineItems as LineItem[]).map((l) => ({
       ...l,
       description: `${l.description} (adjusted)`,
@@ -433,15 +434,16 @@ describe("edited custom drafts vs re-generation (no silent tax double-charge)", 
     const edit = await request(app)
       .put(`/api/invoices/${first.body.id}`)
       .set(authed())
-      .send({ lineItems: editedLines, taxAmount: 25 });
+      .send({ lineItems: editedLines });
     expect(edit.status).toBe(200);
     expect(parseFloat(String(edit.body.subtotal))).toBe(200);
-    expect(parseFloat(String(edit.body.taxAmount))).toBe(25);
-    expect(parseFloat(String(edit.body.totalAmount))).toBe(225);
+    // taxAmount is always 0 — fees use processingFeeAmount.
+    expect(parseFloat(String(edit.body.taxAmount))).toBe(0);
+    expect(parseFloat(String(edit.body.totalAmount))).toBe(200);
     expect(edit.body.autoSynced).toBe(false);
 
     // 3. Re-generate the same site+period. Must create a SECOND draft —
-    //    never update the edited one — and the new draft's tax is 0.
+    //    never update the edited one — and the new draft's total = subtotal.
     const second = await request(app)
       .post("/api/invoices/generate")
       .set(authed())
@@ -449,7 +451,7 @@ describe("edited custom drafts vs re-generation (no silent tax double-charge)", 
     expect(second.status).toBe(201);
     expect(second.body.id).not.toBe(first.body.id);
     expect(parseFloat(String(second.body.taxAmount))).toBe(0);
-    // total = subtotal exactly — the edited draft's tax must NOT leak in.
+    // total = subtotal exactly — the edited draft must NOT affect the new one.
     expect(parseFloat(String(second.body.totalAmount))).toBe(160);
     expect(second.body.autoSynced).toBe(false);
 
@@ -476,9 +478,11 @@ describe("edited custom drafts vs re-generation (no silent tax double-charge)", 
     expect(after).toHaveLength(2);
     const editedAfter = after.find((r) => r.id === first.body.id)!;
     const freshAfter = after.find((r) => r.id === second.body.id)!;
-    expect(parseFloat(String(editedAfter.taxAmount))).toBe(25);
-    expect(parseFloat(String(editedAfter.totalAmount))).toBe(225);
+    // Edited draft: line items changed, totals reflect the new subtotal.
+    expect(parseFloat(String(editedAfter.taxAmount))).toBe(0);
+    expect(parseFloat(String(editedAfter.totalAmount))).toBe(200);
     expect((editedAfter.lineItems as LineItem[])[0].description).toContain("(adjusted)");
+    // Fresh draft: unaffected by the edit.
     expect(parseFloat(String(freshAfter.taxAmount))).toBe(0);
     expect(parseFloat(String(freshAfter.totalAmount))).toBe(160);
   });

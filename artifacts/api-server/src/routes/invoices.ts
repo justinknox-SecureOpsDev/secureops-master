@@ -47,17 +47,37 @@ function generateInvoiceNumber(): string {
   return `${prefix}-${suffix}`;
 }
 
-function calcTotals(lineItems: Array<{ description: string; hours?: number; rate?: number; amount: number }>, taxAmount: number) {
+async function calcTotals(
+  lineItems: Array<{ description: string; hours?: number; rate?: number; amount: number }>,
+  siteId?: string | null,
+) {
   const subtotal = Math.round(
     lineItems.reduce((s, item) => {
       const amount = item.amount ?? (item.hours && item.rate ? item.hours * item.rate : 0);
       return s + amount;
     }, 0) * 100,
   ) / 100;
-  const feeEnabled = isProcessingFeeEnabled();
-  const feeRate = feeEnabled ? getProcessingFeeRate() : 0;
+
+  // Resolve per-site settings when a siteId is provided so manually
+  // created / edited invoices auto-apply the same fee as auto-synced ones.
+  let siteFeeEnabled = false;
+  let siteFeeRate = 0;
+  if (siteId) {
+    const [site] = await db
+      .select({ salesTaxEnabled: sitesTable.salesTaxEnabled, salesTaxRate: sitesTable.salesTaxRate })
+      .from(sitesTable)
+      .where(eq(sitesTable.id, siteId));
+    if (site?.salesTaxEnabled) {
+      siteFeeEnabled = true;
+      siteFeeRate = parseFloat(String(site.salesTaxRate ?? "8.25"));
+    }
+  }
+
+  // Unified fee: platform master switch AND per-site salesTaxEnabled.
+  const feeEnabled = isProcessingFeeEnabled() && siteFeeEnabled;
+  const feeRate = feeEnabled ? siteFeeRate : 0;
   const feeAmount = feeEnabled ? Math.round(subtotal * feeRate / 100 * 100) / 100 : 0;
-  const total = Math.round((subtotal + (taxAmount || 0) + feeAmount) * 100) / 100;
+  const total = Math.round((subtotal + feeAmount) * 100) / 100;
   return {
     subtotal,
     total,
@@ -137,7 +157,7 @@ router.post("/invoices", requireAdmin, async (req, res): Promise<void> => {
     res.status(400).json({ error: "Bad Request", message: "clientName, lineItems, dueDate required" });
     return;
   }
-  const { subtotal, total, processingFeeRate, processingFeeAmount } = calcTotals(lineItems, taxAmount || 0);
+  const { subtotal, total, processingFeeRate, processingFeeAmount } = await calcTotals(lineItems, siteId || null);
   const [invoice] = await db.insert(invoicesTable).values({
     invoiceNumber: generateInvoiceNumber(),
     clientId: clientId || null,
@@ -147,7 +167,7 @@ router.post("/invoices", requireAdmin, async (req, res): Promise<void> => {
     clientAddress: clientAddress || null,
     lineItems,
     subtotal: String(subtotal),
-    taxAmount: String(taxAmount || 0),
+    taxAmount: "0",
     totalAmount: String(total),
     processingFeeRate: processingFeeRate !== null ? String(processingFeeRate) : null,
     processingFeeAmount: processingFeeAmount !== null ? String(processingFeeAmount) : null,
@@ -548,15 +568,20 @@ function escHtml(s: string): string {
 
 router.put("/invoices/:id", requireAdmin, async (req, res): Promise<void> => {
   const id = Array.isArray(req.params.id) ? req.params.id[0] : req.params.id;
-  const { clientEmail, clientAddress, lineItems, taxAmount, status, dueDate, notes } = req.body;
+  const { clientEmail, clientAddress, lineItems, status, dueDate, notes } = req.body;
   const updates: Record<string, unknown> = {};
   if (clientEmail !== undefined) updates.clientEmail = clientEmail;
   if (clientAddress !== undefined) updates.clientAddress = clientAddress;
   if (lineItems) {
-    const { subtotal, total, processingFeeRate, processingFeeAmount } = calcTotals(lineItems, taxAmount ?? 0);
+    // Fetch the invoice's siteId so calcTotals can auto-apply the per-site fee.
+    const [existing] = await db
+      .select({ siteId: invoicesTable.siteId })
+      .from(invoicesTable)
+      .where(eq(invoicesTable.id, id));
+    const { subtotal, total, processingFeeRate, processingFeeAmount } = await calcTotals(lineItems, existing?.siteId ?? null);
     updates.lineItems = lineItems;
     updates.subtotal = String(subtotal);
-    updates.taxAmount = String(taxAmount ?? 0);
+    updates.taxAmount = "0";
     updates.totalAmount = String(total);
     updates.processingFeeRate = processingFeeRate !== null ? String(processingFeeRate) : null;
     updates.processingFeeAmount = processingFeeAmount !== null ? String(processingFeeAmount) : null;

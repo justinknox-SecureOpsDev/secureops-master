@@ -159,6 +159,16 @@ Promise.all([employeeProfileBackfillDone, employeesRowsBackfilled, demoUsersSeed
   .then(() => logger.info("Must-sign-policies flag backfilled for unsigned staff"))
   .catch((err) => logger.error({ err }, "Failed to backfill must-sign-policies flag"));
 
+// One-time idempotent backfill: for draft invoices created before the
+// per-site processing fee unification (where taxAmount held the site fee
+// and processingFeeAmount was NULL), move tax_amount → processing_fee_amount
+// and zero tax_amount. Only touches draft rows with tax_amount > 0 and
+// processing_fee_amount IS NULL; finalized invoices are never modified.
+import("./lib/invoiceProcessingFeeBackfill")
+  .then((m) => m.backfillInvoiceProcessingFees())
+  .then((n) => { if (n > 0) logger.info({ repaired: n }, "Draft invoice processing-fee backfill complete"); })
+  .catch((err) => logger.error({ err }, "Failed to backfill invoice processing fees"));
+
 // One-time idempotent repair: copy employees.phone -> users.phoneNumber for
 // historical rows so officers are SMS-reachable and their number shows on the
 // user profile. Forward-sync keeps both columns aligned after this; once
