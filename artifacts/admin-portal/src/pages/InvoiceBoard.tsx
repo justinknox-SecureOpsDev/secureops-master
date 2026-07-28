@@ -203,7 +203,15 @@ export default function InvoiceBoardPage() {
   const [loading, setLoading] = useState(true);
   const [statusFilter, setStatusFilter] = useState<StatusFilter>("active");
   const [siteId, setSiteId] = useState("");
-  const [from, setFrom] = useState("");
+  // Default to the Monday of the current week so only current invoices load.
+  // Admins can widen the range with the date pickers or quick-range buttons.
+  const [from, setFrom] = useState(() => {
+    const now = new Date();
+    const dow = now.getUTCDay(); // 0=Sun … 6=Sat
+    const monday = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()));
+    monday.setUTCDate(monday.getUTCDate() - ((dow + 6) % 7));
+    return monday.toISOString().slice(0, 10);
+  });
   const [to, setTo] = useState("");
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [openWeeks, setOpenWeeks] = useState<Set<string>>(new Set());
