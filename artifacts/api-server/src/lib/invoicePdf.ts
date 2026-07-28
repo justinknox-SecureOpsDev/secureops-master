@@ -197,7 +197,7 @@ export function buildInvoicePdf(inv: InvoicePdfInput): InvoicePdfPayload {
   const feeRateVal = parseFloat(String(inv.processingFeeRate ?? "0")) || 0;
 
   addTotalRow("Subtotal", fmtUsd(subtotal));
-  if (tax > 0) addTotalRow("Tax", fmtUsd(tax));
+  if (tax > 0) addTotalRow("Processing fee", fmtUsd(tax));
   if (fee > 0) addTotalRow(`Processing fee (${feeRateVal.toFixed(2)}%)`, fmtUsd(fee));
   doc.moveDown(0.3);
   const totalBoxY = doc.y - 4;

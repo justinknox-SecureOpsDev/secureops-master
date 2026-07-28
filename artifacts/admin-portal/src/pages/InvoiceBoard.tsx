@@ -11,6 +11,7 @@ import { api, fetchWithAuth } from "@/lib/api";
 
 type LineItem = {
   description: string;
+  level?: number | null;
   hours?: number;
   rate?: number;
   amount: number;
@@ -29,6 +30,8 @@ type InvoiceRow = {
   lineItems: LineItem[] | null;
   subtotal: string | null;
   taxAmount: string | null;
+  processingFeeAmount: string | null;
+  processingFeeRate: string | null;
   totalAmount: string | null;
   status: "draft" | "sent" | "paid" | "overdue" | "void" | string;
   dueDate: string | null;
@@ -134,7 +137,16 @@ type SendTarget = {
   id: string;
   invoiceNumber: string;
   clientName: string | null;
+  siteName: string | null;
+  periodStart: string;
+  periodEnd: string;
   email: string;
+  lineItems: LineItem[] | null;
+  subtotal: string | null;
+  taxAmount: string | null;
+  processingFeeAmount: string | null;
+  processingFeeRate: string | null;
+  totalAmount: string | null;
 };
 
 /** Compute a sensible default date range for the "+ New Invoice" dialog based on the client's billing cycle. */
@@ -489,7 +501,16 @@ export default function InvoiceBoardPage() {
       id: r.id,
       invoiceNumber: r.invoiceNumber,
       clientName: r.clientName,
+      siteName: r.siteName,
+      periodStart: r.periodStart,
+      periodEnd: r.periodEnd,
       email: r.clientEmail ?? "",
+      lineItems: r.lineItems,
+      subtotal: r.subtotal,
+      taxAmount: r.taxAmount,
+      processingFeeAmount: r.processingFeeAmount,
+      processingFeeRate: r.processingFeeRate,
+      totalAmount: r.totalAmount,
     });
     setSendEmailInput(r.clientEmail ?? "");
     setTimeout(() => sendInputRef.current?.focus(), 50);
@@ -1041,7 +1062,7 @@ export default function InvoiceBoardPage() {
                                         </tr>
                                         {num(r.taxAmount) > 0 && (
                                           <tr className="bg-gray-100/60">
-                                            <td className="px-2 py-1 text-right" colSpan={3}>Tax</td>
+                                            <td className="px-2 py-1 text-right" colSpan={3}>Processing fee</td>
                                             <td className="px-2 py-1 text-right">{fmtUsd(num(r.taxAmount))}</td>
                                           </tr>
                                         )}
@@ -1068,35 +1089,111 @@ export default function InvoiceBoardPage() {
         </div>
       )}
 
-      {/* Send email confirmation dialog */}
+      {/* Send invoice — preview + confirm dialog */}
       {sendTarget && (
         <div
-          className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm"
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm p-4"
           onClick={(e) => { if (e.target === e.currentTarget) closeSendDialog(); }}
         >
-          <div className="bg-white rounded-xl shadow-2xl w-full max-w-md mx-4 overflow-hidden">
-            <div className="bg-brand-navy px-5 py-4 flex items-center justify-between">
+          <div className="bg-white rounded-xl shadow-2xl w-full max-w-2xl flex flex-col max-h-[90vh] overflow-hidden">
+            {/* Header */}
+            <div className="bg-brand-navy px-5 py-4 flex items-center justify-between shrink-0">
               <div className="flex items-center gap-2 text-white">
                 <Mail className="w-4 h-4 text-brand-gold" />
-                <span className="font-semibold text-sm">Send Invoice</span>
+                <span className="font-semibold text-sm">Review &amp; Send Invoice</span>
               </div>
-              <button type="button" onClick={closeSendDialog} className="text-white/60 hover:text-white">
+              <button type="button" onClick={closeSendDialog} className="text-white/60 hover:text-white transition-colors">
                 <X className="w-4 h-4" />
               </button>
             </div>
-            <div className="px-5 py-5 space-y-4">
-              <div>
-                <p className="text-sm text-gray-600">
-                  Invoice <span className="font-mono font-semibold text-gray-800">{sendTarget.invoiceNumber}</span>
-                  {sendTarget.clientName ? <> for <span className="font-medium text-gray-800">{sendTarget.clientName}</span></> : ""}.
-                </p>
-                <p className="text-xs text-muted-foreground mt-1">
-                  A branded PDF will be emailed as an attachment and the invoice will be marked <strong>sent</strong>.
-                  {!sendTarget.email && (
-                    <> No client email is stored on this invoice — enter one below.</>
-                  )}
-                </p>
+
+            {/* Scrollable body */}
+            <div className="overflow-y-auto flex-1 px-5 py-5 space-y-5">
+
+              {/* Invoice meta */}
+              <div className="flex flex-wrap gap-x-6 gap-y-1 text-sm">
+                <div>
+                  <span className="text-muted-foreground text-xs uppercase tracking-wide mr-1">Invoice</span>
+                  <span className="font-mono font-semibold text-gray-800">{sendTarget.invoiceNumber}</span>
+                </div>
+                {sendTarget.clientName && (
+                  <div>
+                    <span className="text-muted-foreground text-xs uppercase tracking-wide mr-1">Client</span>
+                    <span className="font-medium text-gray-800">{sendTarget.clientName}</span>
+                  </div>
+                )}
+                {sendTarget.siteName && (
+                  <div>
+                    <span className="text-muted-foreground text-xs uppercase tracking-wide mr-1">Site</span>
+                    <span className="text-gray-700">{sendTarget.siteName}</span>
+                  </div>
+                )}
+                <div>
+                  <span className="text-muted-foreground text-xs uppercase tracking-wide mr-1">Period</span>
+                  <span className="text-gray-700">{fmtDateRange(sendTarget.periodStart, sendTarget.periodEnd)}</span>
+                </div>
               </div>
+
+              {/* Line items preview */}
+              {sendTarget.lineItems && sendTarget.lineItems.length > 0 ? (
+                <div className="border border-gray-200 rounded-lg overflow-hidden">
+                  <table className="w-full text-xs">
+                    <thead className="bg-gray-50 border-b border-gray-200">
+                      <tr>
+                        <th className="px-3 py-2 text-left text-[10px] uppercase tracking-wider text-muted-foreground">Officer</th>
+                        <th className="px-3 py-2 text-center text-[10px] uppercase tracking-wider text-muted-foreground w-20">Level</th>
+                        <th className="px-3 py-2 text-right text-[10px] uppercase tracking-wider text-muted-foreground w-16">Hours</th>
+                        <th className="px-3 py-2 text-right text-[10px] uppercase tracking-wider text-muted-foreground w-20">Rate</th>
+                        <th className="px-3 py-2 text-right text-[10px] uppercase tracking-wider text-muted-foreground w-24">Amount</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-gray-100">
+                      {sendTarget.lineItems.map((li, i) => {
+                        const levelLabel = li.level != null
+                          ? ({ 1: "Support Staff", 2: "Unarmed", 3: "Armed" } as Record<number, string>)[li.level] ?? `L${li.level}`
+                          : "—";
+                        return (
+                          <tr key={i} className="hover:bg-gray-50/60">
+                            <td className="px-3 py-2 text-gray-700">{li.description}</td>
+                            <td className="px-3 py-2 text-center text-muted-foreground">{levelLabel}</td>
+                            <td className="px-3 py-2 text-right text-gray-700">{li.hours != null ? li.hours.toFixed(2) : "—"}</td>
+                            <td className="px-3 py-2 text-right text-gray-700">{li.rate != null ? fmtUsd(li.rate) : "—"}</td>
+                            <td className="px-3 py-2 text-right font-medium text-gray-800">{fmtUsd(li.amount)}</td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                    <tfoot className="bg-gray-50 border-t border-gray-200">
+                      <tr>
+                        <td className="px-3 py-2 text-right text-xs text-muted-foreground" colSpan={4}>Subtotal</td>
+                        <td className="px-3 py-2 text-right text-xs font-semibold text-gray-800">{fmtUsd(num(sendTarget.subtotal))}</td>
+                      </tr>
+                      {num(sendTarget.taxAmount) > 0 && (
+                        <tr>
+                          <td className="px-3 py-2 text-right text-xs text-muted-foreground" colSpan={4}>Processing fee</td>
+                          <td className="px-3 py-2 text-right text-xs text-gray-700">{fmtUsd(num(sendTarget.taxAmount))}</td>
+                        </tr>
+                      )}
+                      {num(sendTarget.processingFeeAmount) > 0 && (
+                        <tr>
+                          <td className="px-3 py-2 text-right text-xs text-muted-foreground" colSpan={4}>
+                            Platform fee ({(parseFloat(String(sendTarget.processingFeeRate ?? "0")) || 0).toFixed(2)}%)
+                          </td>
+                          <td className="px-3 py-2 text-right text-xs text-gray-700">{fmtUsd(num(sendTarget.processingFeeAmount))}</td>
+                        </tr>
+                      )}
+                      <tr className="border-t border-gray-300">
+                        <td className="px-3 py-2 text-right text-xs font-bold text-brand-navy" colSpan={4}>Total Due</td>
+                        <td className="px-3 py-2 text-right text-sm font-bold text-brand-navy">{fmtUsd(num(sendTarget.totalAmount))}</td>
+                      </tr>
+                    </tfoot>
+                  </table>
+                </div>
+              ) : (
+                <p className="text-xs text-muted-foreground italic">No line items on this invoice yet.</p>
+              )}
+
+              {/* Email field */}
               <div className="space-y-1">
                 <Label htmlFor="send-email-input" className="text-xs font-medium">
                   Recipient email {!sendTarget.email && <span className="text-red-500">*</span>}
@@ -1114,19 +1211,24 @@ export default function InvoiceBoardPage() {
                 {!sendTarget.email && sendEmailInput.trim() && (
                   <p className="text-xs text-blue-600">This email will be saved to the invoice.</p>
                 )}
+                <p className="text-xs text-muted-foreground">
+                  A branded PDF will be attached and the invoice will be marked <strong>sent</strong>.
+                </p>
               </div>
-              <div className="flex justify-end gap-2 pt-1">
-                <Button variant="outline" size="sm" onClick={closeSendDialog}>Cancel</Button>
-                <Button
-                  size="sm"
-                  className="bg-brand-navy text-white hover:bg-brand-navy/90"
-                  onClick={() => void confirmSend()}
-                  disabled={!sendEmailInput.trim()}
-                >
-                  <Mail className="w-3.5 h-3.5 mr-1.5" />
-                  Send PDF
-                </Button>
-              </div>
+            </div>
+
+            {/* Footer actions — always visible */}
+            <div className="shrink-0 flex justify-end gap-2 px-5 py-4 border-t border-gray-100 bg-gray-50/60">
+              <Button variant="outline" size="sm" onClick={closeSendDialog}>Cancel</Button>
+              <Button
+                size="sm"
+                className="bg-brand-navy text-white hover:bg-brand-navy/90"
+                onClick={() => void confirmSend()}
+                disabled={!sendEmailInput.trim()}
+              >
+                <Mail className="w-3.5 h-3.5 mr-1.5" />
+                Confirm &amp; Send PDF
+              </Button>
             </div>
           </div>
         </div>
