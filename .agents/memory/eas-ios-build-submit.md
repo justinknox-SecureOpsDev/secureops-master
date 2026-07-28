@@ -5,7 +5,7 @@ description: How to run eas build/submit for security-ops from this sandbox — 
 
 # Running `eas build` / `eas submit` for artifacts/security-ops from Replit
 
-Project `@justin.knox/secureops-command`, iOS bundle `com.secureopscommand.mobile` (see distribution-lock note below — was `com.secureopscommand.app` on the original record; Android package left as `com.secureopscommand.app`), Apple ID `justin.knox@williamscouncil.com`. `eas.json`: `appVersionSource=remote` (EAS auto-increments buildNumber remotely; local `app.json` buildNumber is ignored), production `autoIncrement=true`.
+Project `@justin.knox/secureops-command`, iOS bundle `com.secureopscommand.mobile` (see distribution-lock note below — was `com.secureopscommand.app` on the original record; Android package left as `com.secureopscommand.app`), Apple ID: see `appleId` in `eas.json` → `submit.production.ios`. `eas.json`: `appVersionSource=remote` (EAS auto-increments buildNumber remotely; local `app.json` buildNumber is ignored), production `autoIncrement=true`.
 
 ## Private (ABM custom app) distribution locks at approval — Private→Unlisted needs a NEW app record
 Apple permanently fixes the Public/Private choice when an app is APPROVED. The only in-place conversion Apple allows is Public→Unlisted (via the request form). Private→Public/Unlisted is impossible in place: the App Distribution Methods radios go permanently grey.
@@ -32,7 +32,9 @@ eas-cli archives the project via `git`, but the Replit main-agent sandbox blocks
 ## Long remote ops: poll across turns, do NOT rely on a detached loop
 `eas build`/`eas submit` outlast the 120s bash cap, BUT detached/setsid background processes are killed when the bash call returns (the tool tears down the process group) — a long-lived watcher/loop is futile here (confirmed: a setsid auto-submit watcher logged one line then vanished). Instead: `eas build --no-wait` uploads+queues within one call (~40s); the build then runs on Expo infra regardless of your session. In LATER turns poll `eas build:view <id> --json` for `status`. Once `FINISHED`, run `eas submit --platform ios --profile production --id <id> --non-interactive --no-wait` in ONE call — for a finished build it resolves the artifact + schedules the hosted submission in well under 120s. `--wait` defaults true (blocks on ASC processing → would exceed the cap); use `--no-wait`. Reconstruct the .p8 each turn you need it (`/tmp` not guaranteed to persist). Note: `eas submit` used EAS's OWN stored ASC key ("EAS Submit …", Key Source: EAS servers), so once credentials are set up submit may not even need the reconstructed key.
 
-**Non-interactive submit ASC key (July 2026):** `EXPO_ASC_*` env vars are NOT read by `eas submit` — with no key stored on EAS servers it dies with "App Store Connect API Keys cannot be set up in --non-interactive mode". Fix: transiently inject `ascApiKeyPath` (reconstructed /tmp .p8), `ascApiKeyId`, `ascApiKeyIssuerId` into `eas.json` submit.production.ios via node (values from env, never printed), run submit, restore eas.json from backup in the same bash call. Poll submission status via GraphQL `submissions.byId(submissionId)` with Bearer EXPO_TOKEN (eas-cli 18.x has no submit:list).
+**Non-interactive submit ASC key (July 2026):** `EXPO_ASC_*` env vars are NOT read by `eas submit` — they only feed `eas metadata` (`getAppStoreAuthAsync`), so exporting them looks correct and still dies with "App Store Connect API Keys cannot be set up in --non-interactive mode". Submit resolves the key ONLY from `eas.json` submit.production.ios, and `IosSubmitCommand` requires **all three** of `ascApiKeyPath`/`ascApiKeyId`/`ascApiKeyIssuerId` (any subset is an explicit error). Now configured permanently: the reconstructed PEM lives at `artifacts/security-ops/credentials/asc-api-key.p8` (gitignored, so a fresh clone must rebuild it from the swapped secrets above) with the three fields committed in eas.json. Poll submission status via GraphQL `submissions.byId(submissionId)` with Bearer EXPO_TOKEN (eas-cli 18.x has no submit:list/submission:list).
+
+**A killed `eas submit` takes the upload with it — always `--no-wait`.** Without it the CLI streams the binary to Apple from THIS sandbox, so when the bash cap kills the call the submission never reaches ASC even though `eas build:list` still reports `finished` and the command printed no error. With `--no-wait` the upload runs on EAS infra. Do not trust "the submit command ran" — confirm the build actually appears in the ASC `/v1/builds` API (`filter[app]=<ascAppId>`), which is also the only way to see Apple-side `processingState`. EAS-side `IN_QUEUE` can persist for many minutes before anything shows up at Apple.
 
 **Why:** first non-interactive build failed on malformed provisioning profile + missing ASC key; once the key was fixed it then failed on git archival; each is a distinct gate. Getting all of ASC-key-reconstruction + Apple-team env + EAS_NO_VCS right is required for a clean non-interactive build from this environment.
 
@@ -55,3 +57,17 @@ Contrary to the detached-reaping note above: run it in the FOREGROUND wrapped in
 With NO build credentials stored on EAS for the bundle, `credentialsSource:"remote"` dies with "Credentials are not set up. Run this command again in interactive mode" even when the ASC key env vars are set — non-interactive eas-cli will reuse remote credentials but never CREATE them.
 **Working path (proven for 1.0.1):** mint everything directly against the ASC API and go local: (1) openssl RSA-2048 CSR; (2) POST `/v1/certificates` `certificateType:"DISTRIBUTION"` (if at cert limit, DELETE the lost-key cert first — revoking never affects shipped apps, only profiles referencing it); (3) `openssl pkcs12 -export` with `-keypbe PBE-SHA1-3DES -certpbe PBE-SHA1-3DES -macalg sha1` (eas-cli's node-forge can't read OpenSSL-3 default AES p12); (4) POST `/v1/profiles` `IOS_APP_STORE` referencing bundleId + new cert (push capability already on the bundle bakes in); (5) verify profile aps-environment + DeveloperCertificates[0] sha1 == cert sha1; (6) write `artifacts/security-ops/credentials.json` + `credentials/` (both gitignored) and set eas.json `credentialsSource:"local"`.
 Current ASC ids after the 1.0.1 release: dist cert `JTM9W5YTV3` (replaces revoked `96Y75YFX64` whose private key was lost with the workspace files), profile `Q94W8J5NG7`. The p12/key live only in the workspace `credentials/` dir — if they vanish again, re-mint (cheap) rather than hunting for backups.
+
+## An ERRORED submission may still have uploaded
+
+EAS submission status is not a reliable signal of whether Apple received the
+build. A submission can report `ERRORED` (with `error: null`, `logFiles: []`,
+`canRetry: false` over GraphQL — i.e. no diagnosis available) and yet the IPA
+has landed and gone `VALID` in App Store Connect minutes later.
+
+**Always confirm against Apple's `/v1/builds` before concluding a submit failed
+or resubmitting.** Trusting the EAS status alone risks either believing a
+successful release failed, or uploading a duplicate build number.
+
+Queue latency between "Scheduled" and the build appearing in ASC has been
+~20-35 minutes, well past the sandbox's ~5 minute shell cap — poll across turns.

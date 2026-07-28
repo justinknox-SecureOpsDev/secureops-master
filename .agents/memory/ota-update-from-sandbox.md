@@ -47,16 +47,15 @@ project + channel + runtime version, NOT bundle/ASC ids directly. Policy is
   Bluetooth AVAudioSession rewrite), so it EMBEDS the broken radio — do NOT
   treat 1.0.1 as the July-22 reverted engine, and roll-back-to-embedded is NOT
   safe on 1.0.1.
-- POLICY (set by owner justin.knox 2026-07-25, "until further notice"): runtime
-  **1.0.0 is the ONLY runtime that receives OTAs**. `app.json` `expo.version` is
-  therefore intentionally PINNED to "1.0.0" (NOT 1.0.1) so BOTH manual pushes and
-  auto-OTA-on-deploy target the officer installed base (store builds ≤10).
-  1.0.1/build 14 deliberately gets no OTAs. Do NOT "restore" app.json to 1.0.1.
-- RELEASE-BUILD GUARD: while app.json is pinned to 1.0.0, do NOT cut a production
-  native build — it would build as version 1.0.0 and collide with the existing
-  1.0.1/build-14 App Store train. A future native build MUST first bump
-  `expo.version` PAST 1.0.1; that new runtime (not 1.0.0) then becomes the OTA
-  target and this pin/policy should be revisited with the owner.
+- POLICY SUPERSEDED 2026-07-28 (owner justin.knox): the old "pin `expo.version`
+  to 1.0.0, runtime 1.0.0 is the ONLY OTA target, never cut a production native
+  build" rule is RETIRED. app.json is now **1.0.2** and the 1.0.2 native build
+  is the release train; OTAs target runtime **1.0.2**. The 1.0.0 fleet (store
+  builds ≤10) is live but UNSERVICED until officers update from the App Store —
+  a JS-only fix no longer reaches them.
+- Any future native build still needs `expo.version` bumped PAST the highest
+  shipped train before building, or EAS produces a version that collides with
+  an existing App Store train.
 - Auto-OTA-on-deploy exports from the DEPLOY SNAPSHOT's app.json, not HEAD —
   a version fix committed after the deployed commit doesn't take effect until
   the next republish, so deploys kept publishing phantom-runtime updates.

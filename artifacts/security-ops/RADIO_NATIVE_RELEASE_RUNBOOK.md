@@ -15,17 +15,38 @@ Live radio adds **new native modules** to the binary:
 - Android `FOREGROUND_SERVICE_MICROPHONE` + the LiveKit/WebRTC config plugins
 
 `expo-updates` (OTA) can only swap the **JavaScript bundle** — it cannot add
-native code or new OS permissions. Older `1.0.0` binaries (builds ≤ 9) have
-none of these native modules; build 10 (the live store build as of July 2026)
-has the LiveKit natives but **not** `expo-audio`. That is why
-`radioMedia.native.ts` loads `expo-audio` through the guarded lazy
-`getExpoAudio()` require — a `1.0.0` OTA bundle must run on build 10.
+native code or new OS permissions.
 
-**Therefore: build a fresh binary and submit to the App Store, bumping the
-version in the same change (see §1).** The runtime-version policy is
-`appVersion`, so bumping `expo.version` to `1.0.1` at build time gives the new
-binary runtime `1.0.1`, isolating it from the `1.0.0` OTA channel. Do NOT bump
-the version ahead of the build — see the warning in §1.
+### Which binaries have which natives
+
+| iOS store build | `expo.version` / runtime | LiveKit natives | `expo-audio` |
+| --- | --- | --- | --- |
+| 1 – 9 | `1.0.0` | ❌ | ❌ |
+| 10 | `1.0.0` | ✅ | ❌ |
+| 14 | `1.0.1` | ✅ | ✅ |
+| 15+ (this release) | `1.0.2` | ✅ | ✅ |
+
+Most officers are on build 10 (runtime `1.0.0`). That is why every native
+package the radio JS touches is loaded through a guarded lazy require — a
+`1.0.0` OTA bundle must not crash on a binary that lacks the module.
+
+### ⚠️ Build 14 history — read before shipping this again
+
+Build 14 (`1.0.1`) was cut on 2026-07-25 **from the same keep-alive + Bluetooth
+code this release ships**. Hours later that work was stripped back out of the
+repo and an OTA of the July-22 engine was pushed to the `1.0.0` fleet, and
+`app.json` was pinned back to `1.0.0`. The recorded reason is that build 14
+"embeds the broken radio".
+
+The most likely mechanism: the Bluetooth change re-configures the shared
+`AVAudioSession` (and Android routing) through LiveKit calls that **build 10
+already has**, so it reached the live `1.0.0` fleet over OTA and affected
+audio there — not only in the new binary.
+
+**Consequence for this release: the build must be exercised on a real device
+via TestFlight BEFORE it is released to the App Store.** Do not treat a green
+test suite as sufficient; nothing in CI can prove locked-screen survival or
+Bluetooth routing.
 
 ### Locked-phone survival (why the silent keep-alive exists)
 
@@ -34,9 +55,10 @@ the version ahead of the build — see the warning in §1.
 (each transmission is a short-lived publisher room), so iOS suspends the app
 ~30 seconds after the screen locks and the officer silently misses every later
 transmission. `radioMedia.native.ts` therefore loops a silent wav
-(`assets/audio/silence.wav`) via `expo-audio` for exactly as long as the radio
-session is up (user has joined a channel), and `RadioScreen.tsx` re-reconciles
-the listen room + control WebSocket on return to foreground.
+(`assets/audio/silence.wav`) via `expo-audio` for exactly as long as there is
+real radio demand (`reconcileKeepAlive()`), and `RadioScreen.tsx` re-reconciles
+the listen room, the control WebSocket, and the keep-alive player on return to
+foreground.
 
 ---
 
@@ -63,31 +85,30 @@ production **before** submitting the build, or reviewers/first users will see
 
 ---
 
-## 1. Bump the version — ONLY when you actually cut the new binary
+## 1. Version + OTA targeting
 
-In `app.json`, change `expo.version` `1.0.0` → `1.0.1` **as part of building the
-new binary, not before**. Leave `runtimeVersion.policy` as `appVersion`. The iOS
+`app.json` `expo.version` is **`1.0.2`** for this release. `runtimeVersion.policy`
+stays `appVersion`, so the new binary's runtime is `1.0.2`. The iOS
 `buildNumber` / Android `versionCode` are managed by EAS (`eas.json` →
-`appVersionSource: "remote"` + `production.autoIncrement: true`), so you do not
-edit those by hand.
+`appVersionSource: "remote"` + `production.autoIncrement: true`) — never edit
+those by hand.
 
-> ⚠️ **July 2026 lesson:** the repo sat at `1.0.1` for days while every live
-> store build was runtime `1.0.0` — so every auto-OTA-on-deploy published to a
-> runtime nobody had, and NO installed device received updates. The version has
-> been returned to `1.0.0` until the new binary actually ships. Additionally,
-> `radioMedia.native.ts` now loads `expo-audio` through a guarded lazy require
-> (`getExpoAudio()`), so a `1.0.0`-runtime OTA bundle is safe on binaries built
-> before expo-audio existed — the silent keep-alive is simply disabled there.
-> Locked-phone survival (steps 6–8 below) still requires the new binary.
+> **OTA policy change (owner justin.knox, 2026-07-28):** the previous standing
+> rule pinned `expo.version` to `1.0.0` so every OTA reached the store-build-≤10
+> installed base, and explicitly forbade cutting a production native build while
+> that pin was in place. The owner has now approved moving to `1.0.2` and cutting
+> this build, accepting that officers must update from the App Store. From this
+> release, OTAs target runtime **`1.0.2`**; the `1.0.0` fleet stops receiving
+> them once officers move over.
 >
-> The **LiveKit natives get the same guard**: builds ≤ 9 of runtime `1.0.0`
-> have no `@livekit/react-native` / `@livekit/react-native-webrtc` at all, and
-> an earlier OTA that imported them at module top level crashed those installs
-> the moment Radio/Chat opened. `radioMedia.native.ts` (`getLiveKitNative()`)
-> and `radioKeyProvider.ts` (`createRadioKeyProvider()`) now require them
-> lazily; when absent, the radio degrades to presence-only with an "update the
-> app from the App Store" notice. Any NEW native dependency the radio JS
-> touches must get the same guard before it ships in a `1.0.0` OTA.
+> ⚠️ Until officers actually update, the `1.0.0` fleet is live and unserviced.
+> Do not push a JS-only fix expecting it to reach them.
+
+> **July 2026 lesson (still applies):** the repo once sat at `1.0.1` while every
+> live store build was runtime `1.0.0`, so every auto-OTA-on-deploy published to
+> a runtime nobody had and NO installed device received updates. Never bump
+> `expo.version` for an OTA-only release — confirm the live runtimes with
+> `eas build:list` before publishing.
 
 ### Binary-gated native packages (enforced by a test)
 
@@ -97,9 +118,9 @@ together with the only files allowed to `require()` each of them:
 
 | Package | Present in | Guarded loader |
 | --- | --- | --- |
-| `@livekit/react-native` | build ≥ 10 only | `components/radio/nativeModules.ts` (`getLiveKitNative()`) |
-| `@livekit/react-native-webrtc` | build ≥ 10 only | `components/radio/nativeModules.ts` (`getLiveKitWebRTC()`) |
-| `expo-audio` | NO current store build | `components/radio/nativeModules.ts` (`getExpoAudio()`) |
+| `@livekit/react-native` | build ≥ 10 | `components/radio/nativeModules.ts` (`getLiveKitNative()`) |
+| `@livekit/react-native-webrtc` | build ≥ 10 | `components/radio/nativeModules.ts` (`getLiveKitWebRTC()`) |
+| `expo-audio` | build ≥ 14 | `components/radio/nativeModules.ts` (`getExpoAudio()`) |
 | `livekit-client` | every binary (JS-only) — but see below | `components/radio/nativeModules.ts` (`getLiveKitClient()`) |
 
 > **Why `livekit-client` is gated even though it ships in every bundle:** it is
@@ -126,71 +147,62 @@ old binaries never receive bundles that reference it. Once ALL served binaries
 contain a package (after a forced-update cycle), it can be removed from the
 list and imported normally.
 
-## 2. Build + test a dev client (recommended before the store build)
-
-Radio's native modules mean **Expo Go will not work** — you need a development
-build. Build one and smoke-test on a real device:
+## 2. Production build
 
 ```bash
 cd artifacts/security-ops
-
-# iOS dev client (internal distribution / simulator-capable)
-eas build --profile development --platform ios
-
-# Android dev client (APK)
-eas build --profile development --platform android
+EAS_NO_VCS=1 npx eas build --profile production --platform ios --non-interactive --no-wait
 ```
 
-Install the resulting build on a device, then run the dev server and connect:
+`EAS_NO_VCS=1` is **mandatory** in this sandbox: the default VCS archiver ships
+`git HEAD`, so uncommitted working-tree fixes would be silently omitted and you
+would rebuild the previous bug. It also avoids the blocked git index writes.
 
-```bash
-pnpm exec expo start --dev-client
-```
+Builds take far longer than one command window — start with `--no-wait`, then
+poll `eas build:list --platform ios --limit 1` on later turns.
 
-Smoke test (two devices on the same channel):
-1. Both join a channel → presence shows both members.
-2. Device A holds **Hold to talk** → A shows "transmitting", B hears audio and
-   sees "A is transmitting…".
-3. While A talks, B's PTT button is disabled ("Channel busy") — the
-   single-speaker lock holds.
-4. A releases → audio stops, lock frees, B can now transmit.
-5. Background device A's app mid-transmission → audio keeps flowing (background
-   audio entitlement).
-6. **Locked-phone keep-alive:** device B joins a channel, locks the phone, and
-   stays idle for **2+ minutes** (longer than the ~30s suspension window). Then
-   device A transmits — B **must hear it** with the screen still locked. Repeat
-   after B has been locked ~10 minutes for extra confidence.
-7. **Interruption recovery:** with B locked and joined, call B's phone; end the
-   call, unlock B briefly (foreground the app), re-lock, wait 2+ minutes, then
-   A transmits — B must still hear it (the foreground pass restarts the
-   keep-alive player that the call interrupted).
-8. **Keep-alive stops with demand:** on B, mute or leave the active channel
-   (or sign out) → the silent keep-alive stops with the last radio connection;
-   lock B for 2+ minutes and confirm the app suspends normally (no
-   audio-session indicator, transmissions from A are NOT heard until B
-   rejoins). This matches the App Review disclosure in `APP_REVIEW_NOTES.md` §3.
-9. Point the app at a server **without** LiveKit env → app stays usable,
-   presence works, PTT shows the "not configured" notice (503 path).
-
-## 3. Production build
-
-```bash
-cd artifacts/security-ops
-eas build --profile production --platform ios
-# (and, when releasing Android) eas build --profile production --platform android
-```
-
-The `production` profile is on the `production` channel, so once this binary is
-released, future **JS-only** radio fixes can ship OTA to it (same
-`OTA_RELEASE_RUNBOOK.md` flow, but against runtime `1.0.1`).
-
-## 4. Submit to the App Store
+## 3. Upload to App Store Connect (TestFlight)
 
 ```bash
 cd artifacts/security-ops
 pnpm run submit:ios
 # equivalent to: eas submit --platform ios --profile production --latest
 ```
+
+**From this sandbox, add `--no-wait`.** The upload outlives a single command
+window, and if the CLI is killed mid-upload the submission dies with it —
+nothing reaches Apple even though `eas build:list` still says `finished`. With
+`--no-wait`, EAS performs the upload server-side; verify against Apple
+afterwards instead of trusting the CLI's exit.
+
+### App Store Connect API key
+
+`eas submit` does **not** read `EXPO_ASC_API_KEY_PATH` / `EXPO_ASC_KEY_ID` /
+`EXPO_ASC_ISSUER_ID` — those only feed `eas metadata`, so exporting them looks
+right and still fails with "App Store Connect API Keys cannot be set up in
+--non-interactive mode". Submission resolves the key from `eas.json` →
+`submit.production.ios`, which needs **all three** of `ascApiKeyPath`,
+`ascApiKeyIssuerId`, `ascApiKeyId`; any subset is rejected outright.
+
+The key file is gitignored, so a fresh clone must rebuild it from the stored
+secrets before submitting. Note the two are stored **swapped**:
+
+- `EXPO_ASC_API_KEY_P8` actually holds the **Key ID**;
+- `EXPO_ASC_KEY_ID` actually holds the **.p8 body**, with its newlines
+  collapsed — re-wrap the base64 at 64 columns between
+  `-----BEGIN PRIVATE KEY-----` / `-----END PRIVATE KEY-----` and write it to
+  `credentials/asc-api-key.p8` (mode 600);
+- `EXPO_ASC_ISSUER_ID` is correct as stored.
+
+Verify with `openssl pkey -in credentials/asc-api-key.p8 -noout` before
+submitting — a mangled PEM fails late, after the upload.
+
+This uploads the binary and makes it available in **TestFlight**. It does
+**not** submit the app for App Store review — that remains a deliberate manual
+step in App Store Connect.
+
+Confirm the build actually reached Apple (TestFlight → **1.0.2 (16)**, or the
+ASC `/v1/builds` API) rather than assuming a scheduled submission arrived.
 
 Submission targets (from `eas.json` → `submit.production.ios`):
 
@@ -201,7 +213,47 @@ Submission targets (from `eas.json` → `submit.production.ios`):
 | App Store Connect app id (`ascAppId`) | `6789409652` |
 | EAS project id | `e8bcd802-b11d-4c4d-bd20-5e61caf4817c` |
 
+## 4. Device smoke test on TestFlight — REQUIRED before release
+
+Install the TestFlight build on two real devices, at least one with a paired
+Bluetooth headset. Given the build-14 history above, this gate is not optional.
+
+1. Both join a channel → presence shows both members.
+2. Device A holds **Hold to talk** → A shows "transmitting", B hears audio and
+   sees "A is transmitting…".
+3. While A talks, B's PTT button is disabled ("Channel busy") — the
+   single-speaker lock holds.
+4. A releases → audio stops, lock frees, B can now transmit.
+5. Background device A's app mid-transmission → audio keeps flowing.
+6. **Locked-phone keep-alive:** device B joins a channel, locks the phone, and
+   stays idle for **2+ minutes** (longer than the ~30s suspension window). Then
+   device A transmits — B **must hear it** with the screen still locked. Repeat
+   after B has been locked ~10 minutes for extra confidence.
+7. **Interruption recovery:** with B locked and joined, call B's phone; end the
+   call, unlock B briefly (foreground the app), re-lock, wait 2+ minutes, then
+   A transmits — B must still hear it (the foreground pass restarts the
+   keep-alive player that the call interrupted).
+8. **Keep-alive stops with demand:** on B, mute or leave the active channel
+   (or sign out) → the silent keep-alive stops with the last radio connection;
+   lock B for 2+ minutes and confirm the app suspends normally. This matches
+   the App Review disclosure in `APP_REVIEW_NOTES.md` §3.
+9. **Bluetooth playback:** with a headset paired to B, A transmits → audio comes
+   out of the **headset**, not the phone speaker.
+10. **Bluetooth microphone:** B holds PTT while wearing the headset and speaks
+    with the phone held away from their mouth → A hears them clearly (capture is
+    on the headset mic, not the built-in one).
+11. **Bluetooth fallback:** disconnect the headset mid-session → audio moves to
+    speakerphone and PTT still captures on the built-in mic.
+12. Point the app at a server **without** LiveKit env → app stays usable,
+    presence works, PTT shows the "not configured" notice (503 path).
+
+Only after 1–12 pass should the version be submitted for App Store review in
+App Store Connect.
+
 ### App Review notes to include
+
+See `APP_REVIEW_NOTES.md` — §3 covers the background-audio justification and
+must stay in sync with the keep-alive's actual scope.
 
 - **Microphone**: used for live push-to-talk radio between officers and dispatch
   while on shift (`NSMicrophoneUsageDescription`).
@@ -215,14 +267,17 @@ Submission targets (from `eas.json` → `submit.production.ios`):
 
 ## 5. After Apple's final release
 
-Verify on a released-build device: install/update to `1.0.1`, grant the mic
-prompt, and run the two-device smoke test from step 2 (including the
-locked-phone keep-alive step) against the production API.
+Verify on a released-build device: update to `1.0.2`, grant the mic prompt, and
+re-run the smoke test above against the production API. Then confirm OTA
+targeting: `eas update:list --branch production` runtime should read `1.0.2`
+and match `eas build:list`.
 
 ---
 
-### Scope reminder
+### Known gap — Android Bluetooth on API 31+
 
-This task **documents** the procedure and verifies the code (typecheck + tests).
-It does **not** run `eas build`/`eas submit` or bump the shipped version — those
-are manual steps run by the release owner with their Expo/Apple credentials.
+The Android manifest declares legacy `android.permission.BLUETOOTH` but not
+`BLUETOOTH_CONNECT`, which Android 12+ requires to enumerate and route to a
+paired headset. iOS is unaffected. If/when an Android release ships the
+Bluetooth radio capability, that permission (and its runtime request) needs to
+be added and tested separately.
