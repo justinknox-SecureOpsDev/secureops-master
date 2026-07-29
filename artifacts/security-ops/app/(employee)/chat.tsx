@@ -1,5 +1,6 @@
 import React, { useState } from "react";
 import { View, Text, TouchableOpacity, StyleSheet } from "react-native";
+import { SafeAreaView } from "react-native-safe-area-context";
 import { useRouter } from "expo-router";
 import ChatRoomsList from "@/components/chat/ChatRoomsList";
 import { FeatureGate } from "@/components/FeatureGate";
@@ -38,6 +39,10 @@ export default function EmployeeChatScreen() {
     <FeatureGate feature="chat">
       <ChatRoomsList
         refreshEpoch={messagesEpoch}
+        // With Radio enabled the switcher above owns the notch inset, so the
+        // list must not reserve it a second time. Without Radio there is no
+        // switcher and the list is the top-most element, so it keeps its own.
+        topInset={!radioEnabled}
         onSelectRoom={(id, name) =>
           router.push({ pathname: "/(employee)/chat/[id]", params: { id, name } })
         }
@@ -49,8 +54,11 @@ export default function EmployeeChatScreen() {
     return messages;
   }
 
+  // The employee tabs render with headerShown:false, so nothing above us
+  // reserves the status-bar / notch space. Without this the switcher below is
+  // drawn underneath the notch and the user cannot reach Radio at all.
   return (
-    <View style={{ flex: 1, backgroundColor: colors.background }}>
+    <SafeAreaView style={{ flex: 1, backgroundColor: colors.background }} edges={["top"]}>
       <View
         style={[styles.tabBar, { backgroundColor: colors.card, borderBottomColor: colors.border }]}
         accessibilityRole="tablist"
@@ -84,9 +92,9 @@ export default function EmployeeChatScreen() {
         {messages}
       </View>
       <View style={{ flex: 1, display: activeTab === "radio" ? "flex" : "none" }}>
-        <RadioScreen refreshEpoch={radioEpoch} />
+        <RadioScreen refreshEpoch={radioEpoch} topInset={false} />
       </View>
-    </View>
+    </SafeAreaView>
   );
 }
 

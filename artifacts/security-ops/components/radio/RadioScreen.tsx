@@ -78,7 +78,18 @@ async function postRadioToken(
 // the Chat screen host, which bumps it when the Radio sub-tab regains focus.
 // This July-22 revert of the screen fetches channels once on mount — the
 // focus-driven roster refresh went with the reverted feature work.
-export default function RadioScreen(_props: { refreshEpoch?: number } = {}): React.JSX.Element {
+type RadioScreenProps = {
+  refreshEpoch?: number;
+  /**
+   * Whether this screen reserves the status-bar / notch inset itself. False
+   * when a parent already owns the top inset (the Messages/Radio switcher in
+   * app/(employee)/chat.tsx sits above us and pads for the notch), otherwise
+   * we would pad a second time and push the radio UI down by a dead gap.
+   */
+  topInset?: boolean;
+};
+
+export default function RadioScreen({ topInset = true }: RadioScreenProps = {}): React.JSX.Element {
   const colors = useColors();
   const { user } = useAuth();
   const [channels, setChannels] = useState<Channel[]>([]);
@@ -414,7 +425,7 @@ export default function RadioScreen(_props: { refreshEpoch?: number } = {}): Rea
 
   if (loading) {
     return (
-      <SafeAreaView style={styles.container}>
+      <SafeAreaView style={styles.container} edges={topInset ? ["top"] : []}>
         <ActivityIndicator color={colors.primary} style={{ marginTop: 80 }} />
       </SafeAreaView>
     );
@@ -423,7 +434,7 @@ export default function RadioScreen(_props: { refreshEpoch?: number } = {}): Rea
   const pttDisabled = !!otherSpeaker || !wsReady || (activeChannel?.archivedAt ?? null) !== null || !supportsAudio || !audioAvailable;
 
   return (
-    <SafeAreaView style={styles.container} edges={["top"]}>
+    <SafeAreaView style={styles.container} edges={topInset ? ["top"] : []}>
       <View style={styles.header}>
         <Feather name="radio" size={22} color={colors.primary} />
         <Text style={styles.title}>Radio</Text>

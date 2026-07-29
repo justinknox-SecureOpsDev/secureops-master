@@ -41,9 +41,16 @@ interface Props {
    * usages keep working unchanged.
    */
   refreshEpoch?: number;
+  /**
+   * Whether this list reserves the status-bar / notch inset itself. False when
+   * a parent already owns the top inset (the Messages/Radio switcher in
+   * app/(employee)/chat.tsx sits above us and pads for the notch), otherwise
+   * we would pad a second time and push the list down by a dead gap.
+   */
+  topInset?: boolean;
 }
 
-export default function ChatRoomsList({ onSelectRoom, refreshEpoch = 0 }: Props) {
+export default function ChatRoomsList({ onSelectRoom, refreshEpoch = 0, topInset = true }: Props) {
   const colors = useColors();
   const brand = useBrand();
   const { user } = useAuth();
@@ -189,7 +196,7 @@ export default function ChatRoomsList({ onSelectRoom, refreshEpoch = 0 }: Props)
 
   if (loading) {
     return (
-      <SafeAreaView style={[s.container, { backgroundColor: colors.background }]} edges={["top", "bottom"]}>
+      <SafeAreaView style={[s.container, { backgroundColor: colors.background }]} edges={topInset ? ["top", "bottom"] : ["bottom"]}>
         <View style={s.center}>
           <ActivityIndicator color={colors.primary} />
         </View>
@@ -198,7 +205,7 @@ export default function ChatRoomsList({ onSelectRoom, refreshEpoch = 0 }: Props)
   }
 
   return (
-    <SafeAreaView style={[s.container, { backgroundColor: colors.background }]} edges={["top", "bottom"]}>
+    <SafeAreaView style={[s.container, { backgroundColor: colors.background }]} edges={topInset ? ["top", "bottom"] : ["bottom"]}>
       <View style={s.header}>
         <Text style={[s.title, { color: colors.foreground }]} accessibilityRole="header">Team Chat</Text>
         <Text style={[s.subtitle, { color: colors.mutedForeground }]}>

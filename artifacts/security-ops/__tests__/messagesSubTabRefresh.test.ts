@@ -65,7 +65,10 @@ describe("Messages sub-tab inside Chat — refresh on switch back", () => {
     const src = read(ROOMS_LIST);
 
     expect(
-      /refreshEpoch\s*=\s*0\s*\}\s*:\s*Props/.test(src) &&
+      // Tolerate further destructured props after refreshEpoch (e.g. topInset)
+      // — this asserts the default and the type, not the parameter order.
+      /refreshEpoch\s*=\s*0\s*[,}]/.test(src) &&
+        /\}\s*:\s*Props/.test(src) &&
         /refreshEpoch\?\s*:\s*number/.test(src),
       "ChatRoomsList must accept an optional numeric refreshEpoch prop " +
         "(defaulting to 0) so standalone usages keep working unchanged.",

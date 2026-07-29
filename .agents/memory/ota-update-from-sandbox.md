@@ -9,9 +9,11 @@ deploy builder has `EXPO_TOKEN` (see `scripts/build-single-vm.mjs`, best-effort
 / non-fatal). So a server republish usually ships the mobile bundle too — check
 `eas update:list --branch production` before assuming a manual push is needed.
 
-**Manual push under the 120s bash cap:** a plain `eas update` (Metro export of
+**Manual push under the shell timeout:** a plain `eas update` (Metro export of
 ios+android) exceeds the cap and gets killed. Split it — and export ONE
-platform at a time:
+platform at a time. (The shell cap is now ~300s, not 120s; a single-platform
+iOS export plus the upload each finish comfortably in one call at `timeout 280`
+— verified July 29 2026. Two platforms in one call still blows it.)
 1. `cd artifacts/security-ops && CI=1 timeout 118 npx expo export --platform ios --output-dir dist`
    then separately `--platform android`. Metro's *transform* cache persists
    across killed attempts (bundling drops from ~76s cold to ~18s warm), BUT the

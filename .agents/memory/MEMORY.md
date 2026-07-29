@@ -117,4 +117,5 @@
 - [Licence-level labels duplicated](invoice-licence-level-labels.md) — invoice level names live in admin-portal AND the api-server PDF builder; change both together, a parity test guards drift.
 - [Invoice send preview gate](invoice-send-preview-gate.md) — sending needs a single-use ticket from the preview; digest must cover PDF-only fields; "mark sent" is not a bypass.
 - [Invoice email — three addresses](invoice-email-reply-address.md) — "wrong invoice email" = body contact (brand.billingEmail, boot-cached) vs From (RESEND_FROM secret) vs replyTo; check which before editing.
+- [Safe-area inset ownership](safe-area-inset-ownership.md) — nested SafeAreaViews pad by device inset regardless of tree position; exactly one element per screen owns `top` (employee tabs=screen, admin=native header).
 - [Keep-alive demand must be releasable](keepalive-demand-release-visibility.md) — any set counting as background-audio demand must appear in the API the UI uses to release demand, or it loops forever.
