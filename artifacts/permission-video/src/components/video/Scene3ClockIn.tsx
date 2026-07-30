@@ -79,7 +79,7 @@ export const Scene3ClockIn = () => {
             />
             <Navigation className="w-5 h-5 text-blue-400 fill-blue-400 relative z-10" />
           </div>
-          <p className="text-sm text-blue-300 font-medium">Background location is active</p>
+          <p className="text-sm text-blue-300 font-medium">Location shared while the app is open</p>
         </div>
       </motion.div>
 

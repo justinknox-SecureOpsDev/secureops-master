@@ -44,18 +44,18 @@ export const Scene2Permission = () => {
           <Navigation className="w-8 h-8 text-black fill-black" />
         </div>
         <h1 className="text-2xl font-bold text-center text-white mb-6">
-          Background Location Needed
+          Location used for your shift
         </h1>
         <div className="space-y-4 text-[15px] leading-relaxed text-zinc-300 flex-1">
-          <p><strong className="text-white">SecureOps Command</strong> accesses your location in the background while you are clocked in to a shift.</p>
+          <p><strong className="text-white">SecureOps Command</strong> collects your precise location (GPS) when you clock in or out, scan a patrol checkpoint, send an emergency alert, and about once a minute while you are clocked in.</p>
           <div className="p-4 rounded-xl bg-zinc-900/50 border border-zinc-800/50 flex gap-4 mt-6">
             <Shield className="w-6 h-6 text-[#C9A84C] shrink-0" />
-            <p className="text-sm">This allows your dispatcher to verify you are on-site and respond to safety emergencies with your last known location.</p>
+            <p className="text-sm">This is shared with your employer&apos;s dispatch and administrator team, so they can confirm you are on-site and respond if you need help.</p>
           </div>
         </div>
         <div className="mt-auto">
           <div className="w-full bg-[#C9A84C] text-black font-bold py-4 rounded-xl text-center text-lg">
-            Continue
+            I agree, continue
           </div>
         </div>
       </div>

@@ -53,7 +53,7 @@ export const Scene1Disclosure = () => {
         transition={{ delay: 0.5, ...springSmooth }}
         className="text-2xl font-bold text-center text-white mb-6"
       >
-        Background Location Needed
+        Location used for your shift
       </motion.h1>
 
       <motion.div
@@ -63,18 +63,22 @@ export const Scene1Disclosure = () => {
         className="space-y-4 text-[15px] leading-relaxed text-zinc-300 flex-1"
       >
         <p>
-          <strong className="text-white">SecureOps Command</strong> accesses your location in the background while you are clocked in to a shift.
+          <strong className="text-white">SecureOps Command</strong> collects your precise location (GPS)
+          when you clock in or out, scan a patrol checkpoint, send an emergency alert, and about once a
+          minute while you are clocked in.
         </p>
         <div className="p-4 rounded-xl bg-zinc-900/50 border border-zinc-800/50 flex gap-4 mt-6">
           <Shield className="w-6 h-6 text-[#C9A84C] shrink-0" />
           <p className="text-sm">
-            This allows your dispatcher to verify you are on-site and respond to safety emergencies with your last known location.
+            This is shared with your employer&apos;s dispatch and administrator team, so they can confirm
+            you are on-site and respond if you need help. It is not sold or shared with advertisers.
           </p>
         </div>
         <div className="p-4 rounded-xl bg-zinc-900/50 border border-zinc-800/50 flex gap-4 mt-4">
           <MapPin className="w-6 h-6 text-[#C9A84C] shrink-0" />
           <p className="text-sm">
-            You can stop location tracking at any time by clocking out of your active shift.
+            Only while the app is open on your screen. SecureOps does not track your location in the
+            background or when the app is closed.
           </p>
         </div>
       </motion.div>
@@ -89,8 +93,12 @@ export const Scene1Disclosure = () => {
           animate={{ scale: clickActive ? 0.95 : 1 }}
           className="w-full bg-[#C9A84C] text-black font-bold py-4 rounded-xl text-center text-lg"
         >
-          Continue
+          I agree, continue
         </motion.div>
+        {/* Play requires a real decline path, not just an acknowledgement. */}
+        <div className="w-full py-3 text-center text-zinc-400 font-semibold text-base">
+          Not now
+        </div>
       </motion.div>
 
       <Pointer x={pointerPos.x} y={pointerPos.y} active={clickActive} show={showPointer} />
