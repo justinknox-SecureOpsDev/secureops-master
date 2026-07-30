@@ -1,9 +1,9 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import {
   View, Text, TouchableOpacity, ScrollView, StyleSheet,
-  ActivityIndicator, Pressable, AppState,
+  ActivityIndicator, Pressable, AppState, Platform,
 } from "react-native";
-import { SafeAreaView } from "react-native-safe-area-context";
+import { SafeAreaView, useSafeAreaInsets } from "react-native-safe-area-context";
 import { Feather } from "@expo/vector-icons";
 import { useColors } from "@/hooks/useColors";
 import { apiRequest, getApiBaseUrl } from "@/utils/api";
@@ -50,6 +50,15 @@ function friendlyDeniedReason(reason: string | undefined): string {
   }
 }
 
+// The employee/admin tab bars render with position:"absolute" (see
+// app/(employee)/_layout.tsx and app/(admin)/_layout.tsx), so screen content
+// does NOT automatically stop above them. React Navigation's bottom tab bar is
+// 49pt tall on native (plus the home-indicator inset, which we add separately
+// via useSafeAreaInsets); the layouts pin it to 60px on web. The radio body
+// reserves this much space at the bottom so the push-to-talk button and the
+// Mute/Leave row can never be covered by the tab bar on short devices.
+const TAB_BAR_BASE_HEIGHT = Platform.OS === "web" ? 60 : 49;
+
 /** A mic-permission rejection from createLocalAudioTrack / native WebRTC. */
 function isMicPermissionError(e: unknown): boolean {
   const name = (e as { name?: string })?.name ?? "";
@@ -91,6 +100,10 @@ type RadioScreenProps = {
 
 export default function RadioScreen({ topInset = true }: RadioScreenProps = {}): React.JSX.Element {
   const colors = useColors();
+  const insets = useSafeAreaInsets();
+  // Space the absolute tab bar occupies at the bottom of the screen: base bar
+  // height + the home-indicator inset it grows by on notched devices.
+  const tabBarOverlay = TAB_BAR_BASE_HEIGHT + insets.bottom;
   const { user } = useAuth();
   const [channels, setChannels] = useState<Channel[]>([]);
   const [activeId, setActiveId] = useState<string | null>(null);
@@ -477,7 +490,14 @@ export default function RadioScreen({ topInset = true }: RadioScreenProps = {}):
         })}
       </ScrollView>
 
-      <View style={styles.body}>
+      {/* Scrollable so the PTT button and Mute/Leave row stay reachable above
+          the absolute tab bar even on short screens (e.g. iPhone SE) where the
+          fixed-size controls would otherwise run underneath it. */}
+      <ScrollView
+        style={{ flex: 1 }}
+        contentContainerStyle={[styles.body, { paddingBottom: tabBarOverlay + 16 }]}
+        showsVerticalScrollIndicator={false}
+      >
         {!activeChannel ? (
           <Text style={styles.muted}>No channels available.</Text>
         ) : (
@@ -557,7 +577,7 @@ export default function RadioScreen({ topInset = true }: RadioScreenProps = {}):
             )}
           </>
         )}
-      </View>
+      </ScrollView>
     </SafeAreaView>
   );
 }
@@ -572,7 +592,9 @@ const makeStyles = (colors: ReturnType<typeof useColors>) => StyleSheet.create({
   chipRow: { maxHeight: 48, flexGrow: 0 },
   chip: { flexDirection: "row", alignItems: "center", paddingHorizontal: 12, paddingVertical: 6, borderRadius: 16, backgroundColor: colors.card, borderWidth: 1, borderColor: colors.border },
   chipText: { color: colors.foreground, fontSize: 13 },
-  body: { flex: 1, alignItems: "center", paddingTop: 24 },
+  // contentContainerStyle of the body ScrollView — flexGrow (not flex) so it
+  // fills tall screens but can exceed and scroll on short ones.
+  body: { flexGrow: 1, alignItems: "center", paddingTop: 24 },
   channelName: { fontSize: 20, fontWeight: "700", color: colors.foreground },
   muted: { color: colors.mutedForeground, fontSize: 13, marginTop: 4 },
   status: { marginTop: 16, minHeight: 36, justifyContent: "center" },
