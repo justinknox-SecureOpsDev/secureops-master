@@ -192,6 +192,10 @@ const CORE_UNGATED_ROUTERS = new Set<string>([
   // vendor paperwork surface, not a per-tier paid feature — every deployment
   // must be able to execute its agreements. See routes/agreementSignatures.ts.
   "agreementSignaturesRouter",
+  // App-version roster + install-the-new-app notice: core operational tooling
+  // for migrating officers off the retired legacy app; admin/dispatcher-only
+  // via route-level authz, not a per-tier paid feature. See routes/appVersions.ts.
+  "appVersionsRouter",
 ]);
 
 /**

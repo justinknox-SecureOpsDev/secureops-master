@@ -1,7 +1,7 @@
 import React, { useCallback, useEffect, useState } from "react";
 import {
   View, Text, StyleSheet, ScrollView, TouchableOpacity, ActivityIndicator,
-  RefreshControl, Alert, Platform,
+  RefreshControl, Alert, Platform, Linking,
 } from "react-native";
 import { useRouter, Stack } from "expo-router";
 import { Feather } from "@expo/vector-icons";
@@ -35,6 +35,7 @@ function iconFor(type: string): { name: any; color: string } {
     case "shift_swap": return { name: "repeat", color: "#a855f7" };
     case "application":
     case "onboarding": return { name: "user-plus", color: "#22c55e" };
+    case "app_update": return { name: "download", color: "#22c55e" };
     default: return { name: "bell", color: "#94a3b8" };
   }
 }
@@ -110,6 +111,16 @@ export default function NotificationsScreen() {
     }
     if (type === "license_expiry" || type === "license") {
       router.push("/license-renewal" as any);
+      return;
+    }
+    // "Install the new app" notice — jump straight to the right store
+    // listing. The bundle ID changed, so this must be an install of the
+    // new listing, not an update of this app.
+    if (type === "app_update") {
+      const url = Platform.OS === "android" ? d.androidUrl : d.iosUrl;
+      if (typeof url === "string" && url.startsWith("https://")) {
+        void Linking.openURL(url).catch(() => {});
+      }
     }
   }, [router]);
 

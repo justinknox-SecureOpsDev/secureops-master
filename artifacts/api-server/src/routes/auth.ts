@@ -327,10 +327,59 @@ router.post("/auth/delete-account", requireAuth, async (req, res): Promise<void>
   res.json({ success: true });
 });
 
+/**
+ * Optional app-identity fields the mobile app reports alongside its push
+ * token (and standalone via /auth/app-identity even when the user declined
+ * push permission — denial must not hide them from the "old app" roster).
+ * Returns null when no usable identity is present in the body.
+ */
+function parseAppIdentity(body: unknown): {
+  appProjectId: string;
+  appVersion: string | null;
+  appBuildNumber: string | null;
+  appPlatform: string | null;
+  appReportedAt: Date;
+} | null {
+  const b = (body ?? {}) as Record<string, unknown>;
+  const str = (v: unknown, max = 100): string | null =>
+    typeof v === "string" && v.length > 0 && v.length <= max ? v : null;
+  const projectId = str(b.projectId);
+  if (!projectId) return null;
+  return {
+    appProjectId: projectId,
+    appVersion: str(b.appVersion),
+    appBuildNumber: str(b.buildNumber),
+    appPlatform: str(b.platform, 20),
+    appReportedAt: new Date(),
+  };
+}
+
 router.post("/auth/push-token", requireAuth, async (req, res): Promise<void> => {
   const { token } = req.body as { token: string };
   if (!token) { res.status(400).json({ error: "Bad Request", message: "token required" }); return; }
-  await db.update(usersTable).set({ expoPushToken: token }).where(eq(usersTable.id, req.user!.userId));
+  const identity = parseAppIdentity(req.body);
+  await db
+    .update(usersTable)
+    .set({ expoPushToken: token, ...(identity ?? {}) })
+    .where(eq(usersTable.id, req.user!.userId));
+  res.json({ success: true });
+});
+
+/**
+ * POST /auth/app-identity
+ *
+ * The mobile app reports which build it is running on every launch,
+ * independently of push registration — so users who declined push
+ * permission still show up with a current app version on the Personnel
+ * roster instead of being lumped in with retired-legacy-app installs.
+ */
+router.post("/auth/app-identity", requireAuth, async (req, res): Promise<void> => {
+  const identity = parseAppIdentity(req.body);
+  if (!identity) {
+    res.status(400).json({ error: "Bad Request", message: "projectId required" });
+    return;
+  }
+  await db.update(usersTable).set(identity).where(eq(usersTable.id, req.user!.userId));
   res.json({ success: true });
 });
 

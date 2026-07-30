@@ -1,6 +1,6 @@
 import { Expo, type ExpoPushMessage } from "expo-server-sdk";
 import { db, usersTable, notificationsTable } from "@workspace/db";
-import { eq, inArray } from "drizzle-orm";
+import { and, eq, inArray, isNull } from "drizzle-orm";
 import { logger } from "./logger";
 
 const expo = new Expo();
@@ -132,7 +132,13 @@ async function dispatchChunk(chunk: ExpoPushMessage[], allowSplit: boolean): Pro
         { projects: Object.keys(e.details) },
         "Push chunk mixed tokens from multiple Expo projects; splitting and resending per project",
       );
-      for (const tokens of Object.values(e.details)) {
+      for (const [project, tokens] of Object.entries(e.details)) {
+        if (!Array.isArray(tokens)) continue;
+        // Label the rows that own these tokens with the project Expo says
+        // minted them — this back-fills "which app is this device running"
+        // for legacy-app installs that can never self-report (the retired
+        // app has no reporting code). Self-reports always win.
+        await labelTokensFromProjectSplit(project, tokens);
         const tokenSet = new Set(tokens);
         const sub = chunk.filter((m) => typeof m.to === "string" && tokenSet.has(m.to));
         if (sub.length) await dispatchChunk(sub, false);
@@ -140,6 +146,30 @@ async function dispatchChunk(chunk: ExpoPushMessage[], allowSplit: boolean): Pro
       return;
     }
     logger.error({ err }, "Failed to send push chunk");
+  }
+}
+
+/**
+ * Persist "this push token was minted by Expo project X" onto the owning
+ * user rows, using the per-project token grouping from a
+ * PUSH_TOO_MANY_EXPERIENCE_IDS batch split. `project` is an Expo
+ * experience id (e.g. "@acct/slug"), not an EAS project UUID, so it never
+ * matches CURRENT_EXPO_PROJECT_ID — which is correct: only a self-report
+ * from the app itself can prove a device runs the current app. Rows that
+ * have self-reported (appReportedAt set) are never overwritten.
+ *
+ * Exported for tests.
+ */
+export async function labelTokensFromProjectSplit(project: string, tokens: string[]): Promise<void> {
+  const valid = tokens.filter((t) => typeof t === "string" && t.length > 0 && t.length <= 200);
+  if (!valid.length) return;
+  try {
+    await db
+      .update(usersTable)
+      .set({ appProjectId: project })
+      .where(and(inArray(usersTable.expoPushToken, valid), isNull(usersTable.appReportedAt)));
+  } catch (err) {
+    logger.error({ err, project }, "Failed to label tokens from project split");
   }
 }
 

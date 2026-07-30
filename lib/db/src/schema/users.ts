@@ -31,6 +31,26 @@ export const usersTable = pgTable("users", {
   // self-logout-all-devices and admin "revoke all sessions" actions.
   tokensValidAfter: timestamp("tokens_valid_after", { withTimezone: true }).notNull().defaultNow(),
   expoPushToken: text("expo_push_token"),
+  // ── Mobile app identity (self-reported) ────────────────────────────────
+  // The mobile app reports which build it is running on every launch and on
+  // push-token registration (POST /auth/app-identity, /auth/push-token).
+  // Because the app's Expo project / bundle ID changed when the legacy app
+  // was retired, "which project minted this install" is the authoritative
+  // out-of-date signal: never-reported or wrong-project users are shown to
+  // admins as "old app / unknown" on the Personnel roster.
+  //
+  // appProjectId is normally the EAS project UUID from the self-report, but
+  // may instead hold an Expo experience id (e.g. "@acct/slug") when it was
+  // back-filled from a PUSH_TOO_MANY_EXPERIENCE_IDS batch split — see
+  // labelTokensFromProjectSplit in api-server lib/push.ts.
+  appProjectId: text("app_project_id"),
+  appVersion: text("app_version"),
+  appBuildNumber: text("app_build_number"),
+  appPlatform: text("app_platform"),
+  appReportedAt: timestamp("app_reported_at", { withTimezone: true }),
+  // When an admin last sent this user the "install the new app" notice, so
+  // repeat sends are a deliberate choice rather than blind spam.
+  appUpdateNotifiedAt: timestamp("app_update_notified_at", { withTimezone: true }),
   // E.164 phone number for SMS notifications (e.g. "+15125550142"). Optional —
   // SMS only fires when this is set AND smsOptIn is true AND Twilio is connected.
   phoneNumber: text("phone_number"),
