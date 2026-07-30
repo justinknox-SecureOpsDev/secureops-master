@@ -1,4 +1,4 @@
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { randomUUID } from "node:crypto";
 import bcrypt from "bcryptjs";
 import { eq, sql } from "drizzle-orm";
@@ -8,6 +8,7 @@ import {
   licensesTable,
   revokedTokensTable,
   timeEntriesTable,
+  shiftsTable,
   sitesTable,
   siteManagersTable,
   clientsTable,
@@ -17,6 +18,8 @@ import {
   cleanupExpiredRevokedTokens,
   sendUnconfirmedEntryReminders,
   escalateUnconfirmedEntries,
+  autoClockOutEndedShifts,
+  computeAutoClockOut,
 } from "../lib/scheduledJobs";
 
 // Tag everything so cleanup can scope precisely and never trample
@@ -389,6 +392,186 @@ describe("escalateUnconfirmedEntries", () => {
     expect(await readEscalationStamp(confirmedId)).toBeNull();
     expect(await readEscalationStamp(legacyId)).toBeNull();
     expect(await readEscalationStamp(openId)).toBeNull();
+  });
+});
+
+describe("computeAutoClockOut", () => {
+  const HOUR = 60 * 60 * 1000;
+
+  it("clocks out at the shift's scheduled end for a normal forgotten entry", () => {
+    const shiftEnd = new Date("2026-07-01T18:00:00Z");
+    const clockIn = new Date(shiftEnd.getTime() - 8 * HOUR);
+
+    const got = computeAutoClockOut({
+      clockInTime: clockIn,
+      shiftEndTime: shiftEnd,
+      now: shiftEnd.getTime() + 30 * 60 * 1000,
+    });
+
+    expect(got.clockOut.toISOString()).toBe(shiftEnd.toISOString());
+    expect(got.hours).toBe(8);
+    expect(got.capped).toBe(false);
+  });
+
+  it("falls back to now() when the officer clocked in after the shift ended", () => {
+    const shiftEnd = new Date("2026-07-01T18:00:00Z");
+    const clockIn = new Date(shiftEnd.getTime() + 1 * HOUR);
+    const now = clockIn.getTime() + 2 * HOUR;
+
+    const got = computeAutoClockOut({ clockInTime: clockIn, shiftEndTime: shiftEnd, now });
+
+    expect(got.clockOut.getTime()).toBe(now);
+    expect(got.hours).toBe(2);
+    expect(got.capped).toBe(false);
+  });
+
+  it("leaves a long but legitimate shift (24h post, early clock-in) uncapped", () => {
+    const shiftEnd = new Date("2026-07-02T18:00:00Z");
+    const clockIn = new Date(shiftEnd.getTime() - 24 * HOUR - 15 * 60 * 1000);
+
+    const got = computeAutoClockOut({
+      clockInTime: clockIn,
+      shiftEndTime: shiftEnd,
+      now: shiftEnd.getTime() + HOUR,
+    });
+
+    expect(got.capped).toBe(false);
+    expect(got.hours).toBe(24.25);
+  });
+
+  it("caps an entry left open for months instead of overflowing hours_worked", () => {
+    // The real production row: clocked in ~420 days ago, and clocked in AFTER
+    // its shift had already ended, so the old code fell back to now() and tried
+    // to write 10065.08 into numeric(6,2) — which threw and killed the run.
+    const clockIn = new Date("2025-06-05T14:00:00Z");
+    const shiftEnd = new Date("2025-06-03T18:00:00Z");
+    const now = new Date("2026-07-30T12:00:00Z").getTime();
+
+    const got = computeAutoClockOut({ clockInTime: clockIn, shiftEndTime: shiftEnd, now });
+
+    expect(got.capped).toBe(true);
+    expect(got.hours).toBe(36);
+    // hours must stay consistent with the timestamps, and must fit numeric(6,2).
+    expect(got.clockOut.getTime()).toBe(clockIn.getTime() + 36 * HOUR);
+    expect(got.hours).toBeLessThan(10000);
+  });
+});
+
+describe("autoClockOutEndedShifts", () => {
+  const ATAG = `${TAG}-aco`;
+  let siteId: string;
+
+  async function makeShift(suffix: string, startTime: Date, endTime: Date): Promise<string> {
+    const [row] = await db
+      .insert(shiftsTable)
+      .values({ title: `${ATAG}-shift-${suffix}`, siteId, startTime, endTime, status: "active" })
+      .returning({ id: shiftsTable.id });
+    return row.id;
+  }
+
+  async function makeOpenEntry(employeeId: string, shiftId: string, clockIn: Date): Promise<string> {
+    const [row] = await db
+      .insert(timeEntriesTable)
+      .values({ employeeId, shiftId, siteId, clockInTime: clockIn, clockOutTime: null, notes: ATAG })
+      .returning({ id: timeEntriesTable.id });
+    return row.id;
+  }
+
+  async function readEntry(id: string) {
+    const [row] = await db
+      .select({
+        clockOutTime: timeEntriesTable.clockOutTime,
+        hoursWorked: timeEntriesTable.hoursWorked,
+        notes: timeEntriesTable.notes,
+      })
+      .from(timeEntriesTable)
+      .where(eq(timeEntriesTable.id, id))
+      .limit(1);
+    return row;
+  }
+
+  beforeAll(async () => {
+    const [c] = await db
+      .insert(clientsTable)
+      .values({ name: `${ATAG}-client` })
+      .returning({ id: clientsTable.id });
+    const [s] = await db
+      .insert(sitesTable)
+      .values({ name: `${ATAG}-location`, address: "1 Test Way", clientId: c.id })
+      .returning({ id: sitesTable.id });
+    siteId = s.id;
+  });
+
+  afterAll(async () => {
+    await db.execute(sql`DELETE FROM time_entries WHERE site_id = ${siteId}`);
+    await db.execute(sql`DELETE FROM shifts WHERE site_id = ${siteId}`);
+    await db.execute(sql`DELETE FROM sites WHERE id = ${siteId}`);
+    await db.execute(sql`DELETE FROM clients WHERE name = ${`${ATAG}-client`}`);
+  });
+
+  it("closes a months-open entry with a capped, reviewable duration and still closes everyone else in the same run", async () => {
+    const now = Date.now();
+    const HOUR = 60 * 60 * 1000;
+
+    // The pathological row that used to abort the entire job: open for ~420
+    // days, and clocked in AFTER its shift had already ended, so there is no
+    // scheduled end to anchor to and the old code fell back to now().
+    const staleEmp = await makeActiveEmployee("aco-stale");
+    const staleShift = await makeShift(
+      "stale",
+      new Date(now - 421 * 24 * HOUR),
+      new Date(now - 420 * 24 * HOUR),
+    );
+    const staleEntry = await makeOpenEntry(staleEmp, staleShift, new Date(now - 418 * 24 * HOUR));
+
+    // An ordinary forgotten clock-out that must not be collateral damage.
+    const normalEmp = await makeActiveEmployee("aco-normal");
+    const normalEnd = new Date(now - 2 * HOUR);
+    const normalShift = await makeShift("normal", new Date(now - 10 * HOUR), normalEnd);
+    const normalEntry = await makeOpenEntry(normalEmp, normalShift, new Date(now - 10 * HOUR));
+
+    await autoClockOutEndedShifts();
+
+    const stale = await readEntry(staleEntry);
+    expect(stale.clockOutTime).not.toBeNull();
+    expect(Number(stale.hoursWorked)).toBe(36);
+    expect(stale.notes).toContain("capped");
+
+    const normal = await readEntry(normalEntry);
+    expect(normal.clockOutTime).not.toBeNull();
+    expect(normal.clockOutTime?.getTime()).toBe(normalEnd.getTime());
+    expect(Number(normal.hoursWorked)).toBe(8);
+    expect(normal.notes).not.toContain("capped");
+  });
+
+  it("keeps going when one entry's write throws, instead of aborting the whole run", async () => {
+    const now = Date.now();
+    const HOUR = 60 * 60 * 1000;
+    const end = new Date(now - 2 * HOUR);
+
+    const empA = await makeActiveEmployee("aco-iso-a");
+    const shiftA = await makeShift("iso-a", new Date(now - 10 * HOUR), end);
+    const entryA = await makeOpenEntry(empA, shiftA, new Date(now - 10 * HOUR));
+
+    const empB = await makeActiveEmployee("aco-iso-b");
+    const shiftB = await makeShift("iso-b", new Date(now - 10 * HOUR), end);
+    const entryB = await makeOpenEntry(empB, shiftB, new Date(now - 10 * HOUR));
+
+    // Blow up the very first write of the run. Whichever row that lands on,
+    // the other one must still be closed by the same tick.
+    const spy = vi.spyOn(db, "update").mockImplementationOnce(() => {
+      throw new Error("simulated write failure");
+    });
+
+    try {
+      await expect(autoClockOutEndedShifts()).resolves.toBeUndefined();
+    } finally {
+      spy.mockRestore();
+    }
+
+    const [a, b] = [await readEntry(entryA), await readEntry(entryB)];
+    const closed = [a, b].filter((e) => e.clockOutTime !== null);
+    expect(closed).toHaveLength(1);
   });
 });
 

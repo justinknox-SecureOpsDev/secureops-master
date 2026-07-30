@@ -5,6 +5,7 @@
 - [Metro watcher ENOENT on pnpm _tmp_ dirs](metro-watcher-pnpm-tmp-enoent.md) — expo crash watching `.pnpm/*_tmp_<pid>`; race with concurrent install. Fix: rm orphan `*_tmp_*` dirs + restart expo.
 - [api-server no hot reload](api-server-no-hot-reload.md) — dev script is build+start (no watcher); new/changed routes 404 until the api-server workflow is restarted.
 - [Shift assignment PUT status authz](shift-assignment-status-authz.md) — PUT assignment route must gate (role, fromStatus, toStatus), not just ownership, or officers self-approve their pending_approval claim.
+- [Scheduled job row isolation](scheduled-job-row-isolation.md) — loop bodies need per-row try/catch + clamped computed values; one overflowing row silently disabled auto-clock-out fleet-wide.
 - [One-open-time-entry invariant](single-open-time-entry-invariant.md) — no DB uniqueness on open time entries per officer; clock-in paths must guard concurrency (FOR UPDATE on users row) themselves.
 - [requireAuth admits client role](auth-requireauth-admits-client.md) — bare requireAuth lets external client-portal users in too; staff/officer-only internal-data endpoints must use requireStaff, not requireAuth.
 - [Upload MIME octet-stream fallback](upload-mime-octet-stream.md) — browser sends octet-stream for .doc/.docx → 415; client+server derive MIME from extension; raw parser needs type:()=>true.
