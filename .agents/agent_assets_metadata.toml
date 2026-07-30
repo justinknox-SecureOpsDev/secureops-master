@@ -112,7 +112,7 @@ title = "Feature Graphic — 1024×500 (Google Play)"
 id = "saYbh2dl9lEeakvbTQM9D"
 uri = "file://attached_assets/location-permission-demo.mp4"
 type = "video"
-title = "Location Permission Demo — 23s MP4 (Google Play)"
+title = "Location permission demo (corrected, foreground-only)"
 
 [[outputs]]
 id = "UmE3LqDx3iOGKgWZ5mxpK"

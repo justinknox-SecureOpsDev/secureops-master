@@ -56,10 +56,10 @@ export const Scene3ClockIn = () => {
         className="text-center relative z-10 w-full"
       >
         <h1 className="text-3xl font-bold text-white mb-2">Clocked In</h1>
-        <p className="text-zinc-400 mb-8">Nexus Industrial Park</p>
+        <p className="text-zinc-400 mb-5">Nexus Industrial Park</p>
 
         {/* Timer Card */}
-        <div className="bg-zinc-900/80 border border-zinc-800 rounded-2xl p-6 w-full mb-6 backdrop-blur-md">
+        <div className="bg-zinc-900/80 border border-zinc-800 rounded-2xl p-4 w-full mb-4 backdrop-blur-md">
           <div className="flex justify-center items-center gap-3 mb-2">
             <Clock className="w-5 h-5 text-[#C9A84C]" />
             <span className="text-sm font-medium uppercase tracking-wider text-[#C9A84C]">Active Shift</span>
@@ -70,7 +70,7 @@ export const Scene3ClockIn = () => {
         </div>
 
         {/* Location Indicator */}
-        <div className="flex flex-col items-center gap-3 bg-blue-900/10 border border-blue-900/30 rounded-2xl p-4 w-full">
+        <div className="flex flex-col items-center gap-2 bg-blue-900/10 border border-blue-900/30 rounded-2xl p-3 w-full mb-20">
           <div className="relative">
             <motion.div
               animate={{ scale: [1, 1.5, 1], opacity: [1, 0, 1] }}
@@ -88,7 +88,7 @@ export const Scene3ClockIn = () => {
         initial={{ opacity: 0, y: 30 }}
         animate={{ opacity: 1, y: 0 }}
         transition={{ delay: 1, ...springSmooth }}
-        className="absolute bottom-12 left-6 right-6"
+        className="absolute bottom-8 left-6 right-6"
       >
         <div className="w-full bg-zinc-900 border border-zinc-800 rounded-full h-14 flex items-center px-2">
           <div className="w-10 h-10 bg-red-500/20 text-red-500 rounded-full flex items-center justify-center">
