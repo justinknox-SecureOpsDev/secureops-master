@@ -1,0 +1,38 @@
+Hi Developers at SOBBU,
+When reviewing your app, SecureOps Command (com.secureopscommand.app), we found that it doesn’t comply with one or more of our Google Play policies, which has affected your app’s status.
+
+Publishing Status	
+App Status: Rejected
+Changes to your app weren’t published because of the policy issue(s) listed below. If you have an older version of your app, it will still be available on Google Play.
+
+You can learn more about this issue and how to fix it on Play Console.
+
+Go to Play Console
+	
+Issue found: Inadequate Prominent Disclosure
+Your app is not compliant with the Prominent Disclosure and Consent Requirement of the User Data policy.
+
+Prominent Disclosure must require affirmative user action and it should be presented clearly and unambiguously.
+Issue details
+
+We found an issue in the following area(s):
+
+In-app experience: Please see attached screenshot IN_APP_EXPERIENCE-743.png
+About the Prominent Disclosure and Consent Requirement
+In cases where your app’s access, collection, use, or sharing of personal and sensitive user data may not be within the reasonable expectation of the user of the product or feature in question, you must meet the Prominent Disclosure and Consent Requirements.
+
+Submit an Appeal
+If you believe that our decision is incorrect, you can submit an appeal. It may take up to 7 days to receive a response, but it occasionally takes longer.
+
+Submit an appeal
+
+If you’ve fixed this issue, send changes to your app for review on the Publishing overview page in Play Console.
+
+Learn More
+To learn more about the enforcement process, visit the Help Center. For the latest updates on Google Play’s policies, watch Android Developers’ #PolicyBytes. Choose your preferred language by changing the audio track in the settings.
+
+Thanks for your continued support in helping to make Google Play a positive experience for both developers and consumers.
+
+Help us improve the Google Play experience by completing our two question survey.
+
+The Google Play Team

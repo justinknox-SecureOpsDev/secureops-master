@@ -83,6 +83,7 @@
 - [App Store 5.1.5 EULA](appstore-5.1.5-eula.md) — location/emergency feature needs a public EULA (/admin-portal/eula) whose disclaimer must stay in sync with the /emergency + location behavior, or Apple 5.1.5 re-rejects.
 - [App Store 5.1.1(iv) permission priming](appstore-permission-priming.md) — custom pre-permission screen buttons must be neutral ("Continue"/"Next"), never "Allow/Enable/Grant X", or Apple rejects.
 - [Play photo/video permission](appstore-play-photo-picker.md) — Play rejects READ_MEDIA_* when the OS photo picker suffices; strip via android.blockedPermissions + skip requestMediaLibraryPermissionsAsync (expo-image-picker already uses the permissionless picker).
+- [Play prominent disclosure](play-prominent-disclosure.md) — location disclosure is Android-only (Apple 5.1.1(iv) conflicts); one gate for EVERY GPS read, and the copy must be literally true.
 - [Mobile location is foreground-only](mobile-location-foreground-only.md) — app DECLARES background-location/FGS-location but code only does foreground one-shot reads, no geofencing; drives store permission answers.
 - [Permission demo video export](permission-demo-video-export.md) — artifacts/permission-video ?v=media|mic renders store permission demos; export via puppeteer-core+Chromium frame-capture → ffmpeg.
 - [In-repo video capture](video-capture-permission-harness.md) — build videos via permission-video ?v= harness + capture-video-vt.mjs: inject a JS clock (CDP virtual time deadlocks); scenes must use framer-motion, not CSS anims.

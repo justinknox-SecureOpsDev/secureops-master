@@ -20,11 +20,13 @@ import { LicenseLevelBadge, levelLabel } from "@/components/LicenseLevelBadge";
 import { SwapRequestModal } from "@/components/SwapRequestModal";
 import { useRouter, useLocalSearchParams } from "expo-router";
 import { useAuth } from "@/contexts/AuthContext";
+import { useLocationConsent } from "@/contexts/LocationConsentContext";
 
 const FILTERS = ["available", "upcoming", "active", "completed"] as const;
 
 export default function EmployeeShiftsScreen({ hideTopPad }: { hideTopPad?: boolean } = {}) {
   const colors = useColors();
+  const { ensureLocationPermission } = useLocationConsent();
   const router = useRouter();
   // Site Managers keep the "no financial info" invariant even in the employee
   // experience: hide per-shift pay/earnings on their own My Shifts list.
@@ -235,8 +237,7 @@ export default function EmployeeShiftsScreen({ hideTopPad }: { hideTopPad?: bool
     let lat = 0;
     let lng = 0;
     try {
-      const { status } = await Location.requestForegroundPermissionsAsync();
-      if (status === "granted") {
+      if (await ensureLocationPermission()) {
         const loc = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced });
         lat = loc.coords.latitude;
         lng = loc.coords.longitude;

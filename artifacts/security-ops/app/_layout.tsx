@@ -19,6 +19,7 @@ import { ErrorBoundary } from "@/components/ErrorBoundary";
 import { AccessibilityProvider } from "@/contexts/AccessibilityContext";
 import { AuthProvider } from "@/contexts/AuthContext";
 import { ChatProvider } from "@/contexts/ChatContext";
+import { LocationConsentProvider } from "@/contexts/LocationConsentContext";
 import { OrgProvider } from "@/contexts/OrgContext";
 import { getApiBaseUrl } from "@/utils/api";
 import RootLayoutNav from "./RootLayoutNav";
@@ -144,7 +145,9 @@ export default function RootLayout() {
                 <OrgProvider>
                   <AuthProvider>
                     <ChatProvider>
-                      <RootLayoutNav />
+                      <LocationConsentProvider>
+                        <RootLayoutNav />
+                      </LocationConsentProvider>
                     </ChatProvider>
                   </AuthProvider>
                 </OrgProvider>

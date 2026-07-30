@@ -11,6 +11,7 @@ import { SafeAreaView } from "react-native-safe-area-context";
 import { Feather } from "@expo/vector-icons";
 import * as Location from "expo-location";
 import { FeatureGate } from "@/components/FeatureGate";
+import { useLocationConsent } from "@/contexts/LocationConsentContext";
 
 type Scan = {
   id: string;
@@ -36,6 +37,7 @@ export default function PatrolScreen() {
 
 function PatrolScreenInner() {
   const colors = useColors();
+  const { ensureLocationPermission } = useLocationConsent();
   const router = useRouter();
 
   const [code, setCode] = useState("");
@@ -66,11 +68,12 @@ function PatrolScreenInner() {
     setSubmitting(true);
     setLastResult(null);
     try {
-      // Best-effort GPS — we don't block the scan on it.
+      // Best-effort GPS — we don't block the scan on it. silent keeps the old
+      // "only if already available" behaviour while still refusing to collect
+      // anything before the Play prominent disclosure has been accepted.
       let lat: number | undefined; let lng: number | undefined;
       try {
-        const perm = await Location.getForegroundPermissionsAsync();
-        if (perm.granted) {
+        if (await ensureLocationPermission({ silent: true })) {
           const pos = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced });
           lat = pos.coords.latitude; lng = pos.coords.longitude;
         }

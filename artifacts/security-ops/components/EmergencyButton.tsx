@@ -4,10 +4,12 @@ import { Feather } from "@expo/vector-icons";
 import * as Location from "expo-location";
 import { triggerEmergency } from "@workspace/api-client-react";
 import { confirmAction, notify } from "@/utils/confirm";
+import { useLocationConsent } from "@/contexts/LocationConsentContext";
 
 const HOLD_MS = 3000;
 
 export default function EmergencyButton() {
+  const { ensureLocationPermission } = useLocationConsent();
   const [busy, setBusy] = useState(false);
   const [holding, setHolding] = useState(false);
   const [remaining, setRemaining] = useState(3);
@@ -40,8 +42,11 @@ export default function EmergencyButton() {
     let lat: number | undefined;
     let lng: number | undefined;
     try {
-      const { status } = await Location.requestForegroundPermissionsAsync();
-      if (status === "granted") {
+      // silent: a panic alert must never wait behind a consent dialog. Once the
+      // officer has accepted the location disclosure and granted GPS (the normal
+      // case, since clocking in asks first), the alert carries their position;
+      // otherwise it still goes out immediately, just without coordinates.
+      if (await ensureLocationPermission({ silent: true })) {
         const loc = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.High });
         lat = loc.coords.latitude;
         lng = loc.coords.longitude;

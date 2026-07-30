@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef } from "react";
 import { useTopPad } from "@/hooks/useTopPad";
-import { View, Text, StyleSheet, TouchableOpacity, ActivityIndicator, ScrollView, AccessibilityInfo, Modal, Animated, TextInput } from "react-native";
+import { View, Text, StyleSheet, TouchableOpacity, ActivityIndicator, ScrollView, AccessibilityInfo, Modal, Animated, TextInput, AppState } from "react-native";
+import { useLocationConsent } from "@/contexts/LocationConsentContext";
 import { useColors } from "@/hooks/useColors";
 import { useTimeConfirmEditWindowHours } from "@/hooks/useFeatures";
 import { useHighlightFlash } from "@/hooks/useHighlightFlash";
@@ -217,11 +218,13 @@ export default function EmployeeClockScreen({ hideTopPad }: { hideTopPad?: boole
     return () => clearInterval(timer);
   }, [isClockedIn, currentEntry?.clockInTime]);
 
+  const { ensureLocationPermission } = useLocationConsent();
+
   const getLocation = async () => {
     setLocationLoading(true);
     try {
-      const { status } = await Location.requestForegroundPermissionsAsync();
-      if (status !== "granted") { setLocationLoading(false); return; }
+      const granted = await ensureLocationPermission();
+      if (!granted) { setLocationLoading(false); return; }
       const loc = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.High });
       setLocation({ lat: loc.coords.latitude, lon: loc.coords.longitude });
     } catch { /* location optional */ }
@@ -236,8 +239,13 @@ export default function EmployeeClockScreen({ hideTopPad }: { hideTopPad?: boole
     let cancelled = false;
     const ping = async () => {
       try {
-        const { status } = await Location.requestForegroundPermissionsAsync();
-        if (status !== "granted") return;
+        // The disclosure promises we only read location while the app is open,
+        // so honour that literally. The radio's background-audio session can
+        // keep this screen mounted after the app is backgrounded, which would
+        // otherwise turn this into background collection.
+        if (AppState.currentState !== "active") return;
+        const granted = await ensureLocationPermission({ silent: true });
+        if (!granted) return;
         const loc = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced });
         if (cancelled) return;
         const lat = loc.coords.latitude;
@@ -249,7 +257,7 @@ export default function EmployeeClockScreen({ hideTopPad }: { hideTopPad?: boole
     ping();
     const t = setInterval(ping, 60_000);
     return () => { cancelled = true; clearInterval(t); };
-  }, [isClockedIn]);
+  }, [isClockedIn, ensureLocationPermission]);
 
   const performClockIn = async (opts: { lat?: number; lng?: number; siteId?: string; shiftId?: string; siteLabel?: string }) => {
     const { lat, lng, siteId, shiftId, siteLabel } = opts;
