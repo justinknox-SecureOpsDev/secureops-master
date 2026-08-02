@@ -1,6 +1,6 @@
 import React, { useState, useRef, useEffect } from "react";
 import { useTopPad } from "@/hooks/useTopPad";
-import { View, Text, StyleSheet, SectionList, TouchableOpacity, ActivityIndicator, Animated } from "react-native";
+import { View, Text, StyleSheet, SectionList, TouchableOpacity, ActivityIndicator, Animated, TextInput } from "react-native";
 import { useColors } from "@/hooks/useColors";
 import { useHighlightFlash } from "@/hooks/useHighlightFlash";
 import { confirmAction, notify } from "@/utils/confirm";
@@ -21,6 +21,7 @@ import { SwapRequestModal } from "@/components/SwapRequestModal";
 import { useRouter, useLocalSearchParams } from "expo-router";
 import { useAuth } from "@/contexts/AuthContext";
 import { useLocationConsent } from "@/contexts/LocationConsentContext";
+import { buildShiftSearchText, matchesSearchTokens, tokenizeQuery } from "@/utils/shiftSearch";
 
 const FILTERS = ["available", "upcoming", "active", "completed"] as const;
 
@@ -34,7 +35,15 @@ export default function EmployeeShiftsScreen({ hideTopPad }: { hideTopPad?: bool
   const isSiteManager = user?.role === "site_manager";
   const queryClient = useQueryClient();
   const [filter, setFilter] = useState<typeof FILTERS[number]>("available");
+  const [search, setSearch] = useState("");
   const [busyId, setBusyId] = useState<string | null>(null);
+  // Shifts this officer has just requested. Requesting normally drops the shift
+  // out of "Available" (it's assigned now), which shortens the list under their
+  // thumb and loses their place. Keeping the card pinned in position — showing
+  // "Requested" instead of the button — means the list never moves, so they
+  // carry on browsing from exactly the spot they were at. Cleared when they
+  // leave the tab, so a fresh visit shows a clean Available list.
+  const [justRequestedIds, setJustRequestedIds] = useState<Set<string>>(() => new Set());
   const [swapTarget, setSwapTarget] = useState<{ assignmentId: string; title: string } | null>(null);
   const topPad = useTopPad();
 
@@ -55,6 +64,28 @@ export default function EmployeeShiftsScreen({ hideTopPad }: { hideTopPad?: bool
       setFilter(filterParam as typeof FILTERS[number]);
     }
   }, [filterParam, _hlTs]);
+
+  // A deep link has to be able to reach its shift. If the officer left a search
+  // running, the target would be filtered out before we could scroll to it, so
+  // a fresh notification tap clears the search box.
+  useEffect(() => {
+    if (highlightShiftId) setSearch("");
+  }, [highlightShiftId, _hlTs]);
+
+  // Where the officer is in the list, so a claim-triggered refetch can put them
+  // back. `userDraggedRef` means "they've moved since we captured it" — we never
+  // yank the list back under a thumb that's actively scrolling.
+  const scrollOffsetRef = useRef(0);
+  const userDraggedRef = useRef(false);
+  const restoreTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // If they switch tabs or leave the screen while a restore is pending, drop it
+  // — otherwise we'd scroll the tab they just chose to the old tab's offset.
+  useEffect(() => () => {
+    if (restoreTimerRef.current) {
+      clearTimeout(restoreTimerRef.current);
+      restoreTimerRef.current = null;
+    }
+  }, [filter]);
 
   const { data: me } = useGetMe({ query: { queryKey: getGetMeQueryKey() } });
   const myUserId = (me as any)?.id as string | undefined;
@@ -81,16 +112,30 @@ export default function EmployeeShiftsScreen({ hideTopPad }: { hideTopPad?: bool
   });
   const isClockedInElsewhere = !!(activeEntry as any)?.id;
 
+  // Pre-flatten each shift into one searchable string, keyed by id, so typing
+  // doesn't re-format every date on every keystroke.
+  const searchIndex = React.useMemo(() => {
+    const index = new Map<string, string>();
+    for (const s of (allShifts ?? []) as any[]) {
+      index.set(s.id, buildShiftSearchText(s, levelLabel));
+    }
+    return index;
+  }, [allShifts]);
+  const searchTokens = React.useMemo(() => tokenizeQuery(search), [search]);
+  const isSearching = searchTokens.length > 0;
+
   const nowMs = Date.now();
   const FAR_MILES = 50;
-  const shiftsUnsorted = (allShifts ?? []).filter((s: any) => {
+  const shiftsBeforeSearch = (allShifts ?? []).filter((s: any) => {
     const isAssigned = (s.assignments ?? []).some((a: any) => a.employeeId === myUserId);
     if (filter === "available") {
       // Available is forward-looking: only show shifts that haven't started yet
       // (you can't reserve a slot that's already underway or finished).
       const startMs = s.startTime ? new Date(s.startTime).getTime() : 0;
       if (startMs && startMs < nowMs) return false;
-      return !isAssigned;
+      // Keep a shift the officer just requested pinned where it was, so the
+      // list doesn't collapse under them the moment they tap Request.
+      return !isAssigned || justRequestedIds.has(s.id);
     }
     if (filter === "upcoming") {
       // Hide my assigned shifts whose end time has already passed (stale slots).
@@ -103,6 +148,10 @@ export default function EmployeeShiftsScreen({ hideTopPad }: { hideTopPad?: bool
   // home address first (nearest-first), then shifts farther than 50 mi
   // (also nearest-first), then shifts with no distance on file (no site
   // coords or no home coords yet) at the bottom in original order.
+  const shiftsUnsorted = isSearching
+    ? shiftsBeforeSearch.filter((s: any) =>
+        matchesSearchTokens(searchIndex.get(s.id) ?? "", searchTokens))
+    : shiftsBeforeSearch;
   const shifts = filter === "available"
     ? [...shiftsUnsorted].sort((a: any, b: any) => {
         const da = typeof a.distanceMilesFromHome === "number" ? a.distanceMilesFromHome : null;
@@ -197,11 +246,30 @@ export default function EmployeeShiftsScreen({ hideTopPad }: { hideTopPad?: bool
     });
     if (!ok) return;
     setBusyId(shift.id);
+    // Remember exactly where they were reading before the list refreshes.
+    const restoreY = scrollOffsetRef.current;
+    userDraggedRef.current = false;
     try {
       await claimShift(shift.id);
+      // Pin the card before refetching so the row keeps its place in the list
+      // rather than vanishing and pulling everything below it upwards.
+      setJustRequestedIds((prev) => new Set(prev).add(shift.id));
       await queryClient.invalidateQueries({ queryKey: getGetShiftsQueryKey() });
-      setFilter("upcoming");
-      notify("Request Submitted", "Your request is awaiting admin approval. See it under 'Upcoming'.");
+      // Belt and braces: pinning keeps the row count stable, but the card's
+      // height changes (button -> banner) and the refetch can reorder rows, so
+      // scroll back to the offset they were at once the list has re-laid out.
+      // Skipped if they started scrolling themselves in the meantime.
+      if (restoreTimerRef.current) clearTimeout(restoreTimerRef.current);
+      restoreTimerRef.current = setTimeout(() => {
+        restoreTimerRef.current = null;
+        if (userDraggedRef.current) return;
+        try {
+          sectionListRef.current?.getScrollResponder()?.scrollTo({ y: restoreY, animated: false });
+        } catch { /* list unmounted or not scrollable — leave it where it is */ }
+      }, 80);
+      // Stay put: they're browsing open shifts and will usually want to keep
+      // going. The card now reads "Requested", and 'Upcoming' has the details.
+      notify("Request Submitted", "Your request is awaiting admin approval. You can keep browsing — it's saved under 'Upcoming'.");
     } catch (e: any) {
       const msg = e?.response?.data?.message || e?.message || "Could not request this shift.";
       notify("Request Failed", msg);
@@ -326,7 +394,12 @@ export default function EmployeeShiftsScreen({ hideTopPad }: { hideTopPad?: bool
             <TouchableOpacity
               key={f}
               style={[styles.filterChip, { borderColor: selected ? colors.primary : colors.border, backgroundColor: selected ? colors.primary + "20" : "transparent" }]}
-              onPress={() => setFilter(f)}
+              onPress={() => {
+                // Leaving the tab ends the "keep my place" window, so coming
+                // back shows a clean Available list.
+                if (f !== filter) setJustRequestedIds(new Set());
+                setFilter(f);
+              }}
               accessibilityRole="tab"
               accessibilityLabel={`${fLabel} shifts`}
               accessibilityState={{ selected }}
@@ -336,6 +409,41 @@ export default function EmployeeShiftsScreen({ hideTopPad }: { hideTopPad?: bool
           );
         })}
       </View>
+
+      <View style={[styles.searchRow, { borderColor: colors.border, backgroundColor: colors.card }]}>
+        <Feather name="search" size={16} color={colors.mutedForeground} />
+        <TextInput
+          style={[styles.searchInput, { color: colors.foreground }]}
+          placeholder="Search site, client, place or date"
+          placeholderTextColor={colors.mutedForeground}
+          value={search}
+          onChangeText={setSearch}
+          returnKeyType="search"
+          autoCapitalize="none"
+          autoCorrect={false}
+          accessibilityLabel="Search shifts"
+          accessibilityHint="Filters the list by job title, client, location, date or clearance level"
+        />
+        {search.length > 0 && (
+          <TouchableOpacity
+            onPress={() => setSearch("")}
+            style={styles.searchClear}
+            accessibilityRole="button"
+            accessibilityLabel="Clear search"
+          >
+            <Feather name="x-circle" size={16} color={colors.mutedForeground} />
+          </TouchableOpacity>
+        )}
+      </View>
+      {isSearching && !isLoading && !error && (
+        <Text
+          style={[styles.searchCount, { color: colors.mutedForeground }]}
+          accessibilityLiveRegion="polite"
+        >
+          Showing {shifts.length} of {shiftsBeforeSearch.length} {filter} shift
+          {shiftsBeforeSearch.length === 1 ? "" : "s"}
+        </Text>
+      )}
 
       {isLoading ? (
         <View style={styles.center}><ActivityIndicator size="large" color={colors.primary} /></View>
@@ -351,6 +459,9 @@ export default function EmployeeShiftsScreen({ hideTopPad }: { hideTopPad?: bool
           keyExtractor={(item: any) => item.id}
           scrollEnabled={shifts.length > 0}
           stickySectionHeadersEnabled={false}
+          scrollEventThrottle={16}
+          onScroll={(e) => { scrollOffsetRef.current = e.nativeEvent.contentOffset.y; }}
+          onScrollBeginDrag={() => { userDraggedRef.current = true; }}
           onScrollToIndexFailed={() => { /* row not measured yet — ignore */ }}
           contentContainerStyle={{ padding: 16, paddingBottom: 100 }}
           renderSectionHeader={({ section }: { section: any }) => (
@@ -367,10 +478,28 @@ export default function EmployeeShiftsScreen({ hideTopPad }: { hideTopPad?: bool
           ItemSeparatorComponent={() => <View style={{ height: 10 }} />}
           ListEmptyComponent={
             <View style={styles.center}>
-              <Feather name={filter === "available" ? "inbox" : "calendar"} size={40} color={colors.mutedForeground} />
+              <Feather
+                name={isSearching ? "search" : filter === "available" ? "inbox" : "calendar"}
+                size={40}
+                color={colors.mutedForeground}
+              />
               <Text style={[styles.emptyText, { color: colors.mutedForeground }]}>
-                {filter === "available" ? "No open shifts you qualify for right now" : `No ${filter} shifts`}
+                {isSearching
+                  ? `No ${filter} shifts match "${search.trim()}"`
+                  : filter === "available"
+                    ? "No open shifts you qualify for right now"
+                    : `No ${filter} shifts`}
               </Text>
+              {isSearching && (
+                <TouchableOpacity
+                  onPress={() => setSearch("")}
+                  style={[styles.retryBtn, { borderColor: colors.primary, marginTop: 14 }]}
+                  accessibilityRole="button"
+                  accessibilityLabel="Clear search"
+                >
+                  <Text style={{ color: colors.primary }}>Clear search</Text>
+                </TouchableOpacity>
+              )}
             </View>
           }
           renderItem={({ item }: { item: any }) => {
@@ -478,7 +607,7 @@ export default function EmployeeShiftsScreen({ hideTopPad }: { hideTopPad?: bool
                   </View>
                 )}
 
-                {isAvailable && (
+                {isAvailable && !myAssign && (
                   <TouchableOpacity
                     style={[styles.claimBtn, { backgroundColor: colors.primary, opacity: busy ? 0.6 : 1 }]}
                     onPress={() => handleClaim(item)}
@@ -651,6 +780,14 @@ const styles = StyleSheet.create({
   filterRow: { flexDirection: "row", gap: 8, paddingHorizontal: 16, paddingTop: 16, paddingBottom: 8, flexWrap: "wrap" },
   filterChip: { paddingHorizontal: 14, paddingVertical: 6, borderRadius: 16, borderWidth: 1 },
   filterText: { fontSize: 13, fontWeight: "600" },
+  searchRow: {
+    flexDirection: "row", alignItems: "center", gap: 8,
+    marginHorizontal: 16, marginTop: 4, borderRadius: 10, borderWidth: 1, paddingHorizontal: 12,
+  },
+  searchInput: { flex: 1, height: 44, fontSize: 15 },
+  // Full 44x44 touch target; negative margin keeps the row visually tight.
+  searchClear: { width: 44, height: 44, alignItems: "center", justifyContent: "center", marginRight: -8 },
+  searchCount: { fontSize: 12, marginHorizontal: 16, marginTop: 8 },
   sectionHeader: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", marginBottom: 10 },
   sectionHeaderText: { fontSize: 15, fontWeight: "800", letterSpacing: 0.3 },
   sectionCount: { paddingHorizontal: 8, paddingVertical: 3, borderRadius: 10, borderWidth: 1 },
