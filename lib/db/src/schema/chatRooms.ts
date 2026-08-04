@@ -11,8 +11,11 @@ import { pgTable, text, uuid, timestamp, integer, boolean, uniqueIndex, index } 
  *                        (auto, based on unexpired licenses). Admins always
  *                        included.
  *   - `ops`            — admins only. Operations channel.
- *   - `site`           — officers with maxLicenseLevel >= the site's
- *                        requiredLicenseLevel (auto). Admins always included.
+ *   - `site`           — only officers who actually work that site: an
+ *                        accepted assignment to a shift there that is
+ *                        upcoming/in progress or ended in the last 30 days
+ *                        (auto), plus the site's managers. Admins always
+ *                        included. Licence level does NOT grant access.
  *   - `city`           — explicit membership via chat_room_memberships
  *                        (request-to-join, admin approves).
  *   - `elite`          — explicit membership via chat_room_memberships

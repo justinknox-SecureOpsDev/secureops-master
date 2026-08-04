@@ -53,6 +53,9 @@ export const shiftsTable = pgTable("shifts", {
   updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow().$onUpdate(() => new Date()),
 }, (t) => ({
   siteStartIdx: index("shifts_site_start_idx").on(t.siteId, t.startTime),
+  // Chat site-channel membership asks "who is rostered at this site with a
+  // shift ending after <cutoff>" for every site room on every sidebar poll.
+  siteEndIdx: index("shifts_site_end_idx").on(t.siteId, t.endTime),
   // Includes id so the admin grid's default sort (startTime + id tiebreaker)
   // and the row-position deep-link stay fully index-ordered at scale.
   startIdx: index("shifts_start_idx").on(t.startTime, t.id),

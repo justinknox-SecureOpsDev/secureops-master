@@ -78,7 +78,7 @@ export async function seedChatRooms(): Promise<void> {
 
     // One channel per site, slug "site:<siteId>". Dropped/inactive sites
     // leave their rooms behind (history preserved); they just become
-    // unreachable via the auto-membership query (no shifts → admins only).
+    // unreachable via the auto-membership query (nobody rostered → admins only).
     // Only ACTIVE sites are (re)seeded so deactivating a site stops its
     // channel from being recreated/renamed on the next boot.
     const sites = await db

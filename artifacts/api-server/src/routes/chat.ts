@@ -1,5 +1,5 @@
 import { Router, type IRouter } from "express";
-import { eq, desc, asc, sql, and, or, ne, inArray } from "drizzle-orm";
+import { eq, desc, asc, sql, and, or, ne, gte, inArray } from "drizzle-orm";
 import {
   db,
   chatRoomsTable,
@@ -8,10 +8,12 @@ import {
   chatRoomReadsTable,
   usersTable,
   licensesTable,
-  sitesTable,
+  shiftsTable,
+  shiftAssignmentsTable,
   employeesTable,
   type ChatRoom,
 } from "@workspace/db";
+import { getSiteManagerUserIds, getSiteManagerUserIdsForSites } from "../lib/siteManagerAuthz";
 import { requireAuth, requireAdmin, requireStaff } from "../middlewares/auth";
 import { broadcastToRoom } from "../lib/wsManager";
 import { sendPushToUsers } from "../lib/push";
@@ -50,6 +52,141 @@ async function supportBaselineUserIds(): Promise<string[]> {
 }
 
 /**
+ * How long after their last shift at a site an officer keeps access to that
+ * site's channel. Long enough that finishing a rotation doesn't instantly cut
+ * them out of a conversation they were part of; short enough that a one-off
+ * cover shift last quarter doesn't leave them in the channel for good.
+ */
+const SITE_CHANNEL_LOOKBACK_DAYS = 30;
+
+/**
+ * User ids who work at a site: anyone holding an accepted assignment to a
+ * shift there that is still upcoming/in progress, or that ended within the
+ * last SITE_CHANNEL_LOOKBACK_DAYS.
+ *
+ * Pending (unapproved) claims deliberately do NOT count — requesting a shift
+ * at a site is not the same as working there, and the channel must fail
+ * closed until an admin or site manager approves.
+ */
+async function siteWorkerUserIds(siteIds: string[]): Promise<Map<string, string[]>> {
+  const bySite = new Map<string, string[]>(siteIds.map((id) => [id, []]));
+  if (siteIds.length === 0) return bySite;
+  const cutoff = new Date(Date.now() - SITE_CHANNEL_LOOKBACK_DAYS * 24 * 60 * 60 * 1000);
+  const rows = await db
+    .selectDistinct({ siteId: shiftsTable.siteId, userId: shiftAssignmentsTable.employeeId })
+    .from(shiftAssignmentsTable)
+    .innerJoin(shiftsTable, eq(shiftsTable.id, shiftAssignmentsTable.shiftId))
+    .where(and(
+      inArray(shiftsTable.siteId, siteIds),
+      eq(shiftAssignmentsTable.status, "accepted"),
+      gte(shiftsTable.endTime, cutoff),
+    ));
+  for (const r of rows) {
+    if (r.siteId) bySite.get(r.siteId)?.push(r.userId);
+  }
+  return bySite;
+}
+
+/**
+ * Per-request memo for the lookups room authorization needs.
+ *
+ * Room membership is recomputed from live data on every request — nothing
+ * here outlives one HTTP request or one broadcast, so revoking a licence, a
+ * roster slot or a site-manager assignment takes effect on the very next
+ * call. What it avoids is re-running the same query once per room: the chat
+ * sidebar authorizes every room in the workspace on each poll, and a fleet
+ * with many sites turns that into hundreds of round trips.
+ *
+ * `warmSites` fetches every site room's crew and managers in two queries;
+ * anything not warmed falls back to fetching that one site on demand.
+ */
+class RoomAclContext {
+  private admins?: Promise<Set<string>>;
+  private supportBaseline?: Promise<string[]>;
+  private maxLicenseLevels?: Promise<Map<string, number>>;
+  private siteWorkers = new Map<string, Promise<string[]>>();
+  private siteManagers = new Map<string, Promise<string[]>>();
+
+  adminIds(): Promise<Set<string>> {
+    this.admins ??= db
+      .select({ id: usersTable.id })
+      .from(usersTable)
+      .where(eq(usersTable.role, "admin"))
+      .then((rows) => new Set(rows.map((a) => a.id)));
+    return this.admins;
+  }
+
+  supportBaselineIds(): Promise<string[]> {
+    this.supportBaseline ??= supportBaselineUserIds();
+    return this.supportBaseline;
+  }
+
+  /** userId → highest unexpired licence level held. */
+  licenseLevels(): Promise<Map<string, number>> {
+    this.maxLicenseLevels ??= (async () => {
+      const today = new Date();
+      const rows = await db
+        .select({
+          userId: licensesTable.employeeId,
+          maxLevel: sql<number>`MAX(${licensesTable.level})::int`,
+        })
+        .from(licensesTable)
+        .where(sql`${licensesTable.expiryDate} >= ${today}`)
+        .groupBy(licensesTable.employeeId);
+      return new Map(rows.map((r) => [r.userId, r.maxLevel ?? 0]));
+    })();
+    return this.maxLicenseLevels;
+  }
+
+  workersAtSite(siteId: string): Promise<string[]> {
+    let p = this.siteWorkers.get(siteId);
+    if (!p) {
+      p = siteWorkerUserIds([siteId]).then((m) => m.get(siteId) ?? []);
+      this.siteWorkers.set(siteId, p);
+    }
+    return p;
+  }
+
+  managersOfSite(siteId: string): Promise<string[]> {
+    let p = this.siteManagers.get(siteId);
+    if (!p) {
+      p = getSiteManagerUserIds(siteId);
+      this.siteManagers.set(siteId, p);
+    }
+    return p;
+  }
+
+  /** Bulk-load crew + managers for many sites so a room list costs 2 queries. */
+  async warmSites(siteIds: string[]): Promise<void> {
+    const pending = [...new Set(siteIds)].filter((id) => !this.siteWorkers.has(id));
+    if (pending.length === 0) return;
+    const [workers, managers] = await Promise.all([
+      siteWorkerUserIds(pending),
+      getSiteManagerUserIdsForSites(pending),
+    ]);
+    for (const id of pending) {
+      this.siteWorkers.set(id, Promise.resolve(workers.get(id) ?? []));
+      this.siteManagers.set(id, Promise.resolve(managers.get(id) ?? []));
+    }
+  }
+}
+
+/**
+ * Build a context pre-warmed for a whole list of candidate rooms, so
+ * authorizing them costs a fixed handful of queries instead of a few per
+ * room. Only worth it on the list endpoints.
+ */
+async function contextForRooms(rooms: ChatRoom[]): Promise<RoomAclContext> {
+  const ctx = new RoomAclContext();
+  await ctx.warmSites(
+    rooms
+      .filter((r): r is ChatRoom & { siteId: string } => r.type === "site" && !!r.siteId)
+      .map((r) => r.siteId),
+  );
+  return ctx;
+}
+
+/**
  * Resolve the set of user IDs allowed to read/post in a room. Single
  * source of truth for REST auth + WebSocket broadcast fan-out.
  *
@@ -57,7 +194,10 @@ async function supportBaselineUserIds(): Promise<string[]> {
  * Returns a Set otherwise. Admins are added to every non-direct set so
  * admin oversight is consistent (DMs stay strictly between participants).
  */
-async function resolveRoomMembers(room: ChatRoom): Promise<Set<string> | null> {
+async function resolveRoomMembers(
+  room: ChatRoom,
+  ctx: RoomAclContext = new RoomAclContext(),
+): Promise<Set<string> | null> {
   if (room.type === "direct") {
     const parts = parseDirectKey(room.directKey);
     return new Set(parts ?? []);
@@ -66,11 +206,7 @@ async function resolveRoomMembers(room: ChatRoom): Promise<Set<string> | null> {
     return null;
   }
 
-  const admins = await db
-    .select({ id: usersTable.id })
-    .from(usersTable)
-    .where(eq(usersTable.role, "admin"));
-  const ids = new Set<string>(admins.map((a) => a.id));
+  const ids = new Set<string>(await ctx.adminIds());
 
   if (room.type === "ops") {
     return ids; // admins only
@@ -78,55 +214,26 @@ async function resolveRoomMembers(room: ChatRoom): Promise<Set<string> | null> {
 
   if (room.type === "license_level" && room.licenseLevel != null) {
     // Officers whose max unexpired license level meets the threshold.
-    const today = new Date();
-    const rows = await db
-      .select({
-        userId: licensesTable.employeeId,
-        maxLevel: sql<number>`MAX(${licensesTable.level})::int`,
-      })
-      .from(licensesTable)
-      .where(sql`${licensesTable.expiryDate} >= ${today}`)
-      .groupBy(licensesTable.employeeId);
-    for (const r of rows) {
-      if ((r.maxLevel ?? 0) >= room.licenseLevel) ids.add(r.userId);
+    for (const [userId, maxLevel] of await ctx.licenseLevels()) {
+      if (maxLevel >= room.licenseLevel) ids.add(userId);
     }
     // Level-1 (Support Staff) channels must also reach support_staff-position
     // workers who hold no licence row — their position baseline is level 1
     // (mirrors positionBaselineLevel in lib/eligibility.ts).
     if (room.licenseLevel <= 1) {
-      for (const id of await supportBaselineUserIds()) ids.add(id);
+      for (const id of await ctx.supportBaselineIds()) ids.add(id);
     }
     return ids;
   }
 
   if (room.type === "site" && room.siteId) {
-    const [site] = await db.select().from(sitesTable).where(eq(sitesTable.id, room.siteId)).limit(1);
-    if (!site) return ids;
-    // Each shift has its own requiredLicenseLevel; for a site channel we
-    // gate on the lowest shift level posted at that site (any officer who
-    // could work any shift here should be in the channel). Fall back to 2
-    // if the site has no shifts yet.
-    const [{ minLevel }] = (await db.execute(sql`
-      SELECT COALESCE(MIN(required_license_level), 2)::int AS "minLevel"
-      FROM shifts WHERE site_id = ${room.siteId}
-    `)).rows as { minLevel: number }[];
-    const today = new Date();
-    const rows = await db
-      .select({
-        userId: licensesTable.employeeId,
-        maxLevel: sql<number>`MAX(${licensesTable.level})::int`,
-      })
-      .from(licensesTable)
-      .where(sql`${licensesTable.expiryDate} >= ${today}`)
-      .groupBy(licensesTable.employeeId);
-    for (const r of rows) {
-      if ((r.maxLevel ?? 0) >= (minLevel ?? 2)) ids.add(r.userId);
-    }
-    // A site whose lowest shift level is 1 (support) is workable by
-    // support_staff-position workers with no licence row too.
-    if ((minLevel ?? 2) <= 1) {
-      for (const id of await supportBaselineUserIds()) ids.add(id);
-    }
+    // A site channel is for the crew that actually works this site — not
+    // every officer whose licence would qualify them for it (that was the
+    // old rule and it put most of the company in every site's channel).
+    for (const id of await ctx.workersAtSite(room.siteId)) ids.add(id);
+    // The site's own managers supervise the crew, so they belong here too
+    // even in the gaps when they hold no shift of their own.
+    for (const id of await ctx.managersOfSite(room.siteId)) ids.add(id);
     return ids;
   }
 
@@ -158,6 +265,7 @@ async function isAuthorizedForRoom(
   userId: string,
   userRole: string | undefined,
   room: ChatRoom,
+  ctx?: RoomAclContext,
 ): Promise<boolean> {
   // External client-portal users are never permitted in any chat room.
   if (userRole === "client") return false;
@@ -167,7 +275,7 @@ async function isAuthorizedForRoom(
     return userId === parts[0] || userId === parts[1];
   }
   if (userRole === "admin" || userRole === "dispatcher") return true;
-  const members = await resolveRoomMembers(room);
+  const members = await resolveRoomMembers(room, ctx);
   // members === null means "all authenticated staff" (announcements channel).
   // We already blocked client role above, so returning true here is safe.
   if (members === null) return true;
@@ -195,8 +303,9 @@ router.get("/chat/rooms", requireStaff, async (req, res): Promise<void> => {
     ))
     .orderBy(asc(chatRoomsTable.createdAt));
 
+  const aclCtx = await contextForRooms(candidates);
   const authChecks = await Promise.all(
-    candidates.map((room) => isAuthorizedForRoom(me, myRole, room)),
+    candidates.map((room) => isAuthorizedForRoom(me, myRole, room, aclCtx)),
   );
   // Hide elite rooms entirely from non-members (invite-only ⇒ not even
   // visible). City rooms stay visible via the "discoverable" endpoint.
@@ -591,8 +700,9 @@ router.get("/chat/unread-counts", requireStaff, async (req, res): Promise<void> 
         ne(chatRoomsTable.type, "direct"),
         sql`${chatRoomsTable.directKey} LIKE ${"%" + me + "%"}`,
       ));
+    const aclCtx = await contextForRooms(candidates);
     const authChecks = await Promise.all(
-      candidates.map((room) => isAuthorizedForRoom(me, myRole, room)),
+      candidates.map((room) => isAuthorizedForRoom(me, myRole, room, aclCtx)),
     );
     const accessibleIds = candidates.filter((_, i) => authChecks[i]).map((r) => r.id);
     if (accessibleIds.length === 0) { res.json([]); return; }

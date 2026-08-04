@@ -13,6 +13,8 @@ import {
   clientsTable,
   sitesTable,
   shiftsTable,
+  shiftAssignmentsTable,
+  siteManagersTable,
 } from "@workspace/db";
 import app from "../app";
 import { signToken } from "../middlewares/auth";
@@ -46,22 +48,32 @@ type Ctx = {
   officerExpiredId: string;
   // Officer with no license at all.
   officerNoneId: string;
+  // Officer whose last shift at siteL3 ended 3 days ago — inside the lookback
+  // window, so still crew. Holds no license, proving access is roster-driven.
+  officerRecentId: string;
+  // Site manager assigned to siteL3 (holds no shifts of their own).
+  siteManagerId: string;
 
   adminToken: string;
   officerL3Token: string;
   officerL2Token: string;
   officerExpiredToken: string;
   officerNoneToken: string;
+  officerRecentToken: string;
+  siteManagerToken: string;
 
   clientId: string;
-  // Site whose lowest shift requires L3.
+  // Site the L3 officer is rostered at (and the expired officer worked at
+  // 45 days ago, outside the site-channel lookback window).
   siteL3Id: string;
-  // Site with no shifts → resolver falls back to required level 2.
+  // Site nobody is rostered at.
   siteNoShiftsId: string;
 };
 const ctx = {} as Ctx;
 
-async function makeUser(role: "admin" | "employee", suffix: string): Promise<string> {
+type TestRole = "admin" | "employee" | "site_manager";
+
+async function makeUser(role: TestRole, suffix: string): Promise<string> {
   const [row] = await db
     .insert(usersTable)
     .values({
@@ -78,7 +90,7 @@ async function makeUser(role: "admin" | "employee", suffix: string): Promise<str
   return row.id;
 }
 
-function tokenFor(userId: string, role: "admin" | "employee", suffix: string): string {
+function tokenFor(userId: string, role: TestRole, suffix: string): string {
   return signToken({ userId, email: `${TAG}-${suffix}@example.test`, role });
 }
 
@@ -130,12 +142,16 @@ beforeAll(async () => {
   ctx.officerL2Id = await makeUser("employee", "l2");
   ctx.officerExpiredId = await makeUser("employee", "exp");
   ctx.officerNoneId = await makeUser("employee", "none");
+  ctx.officerRecentId = await makeUser("employee", "recent");
+  ctx.siteManagerId = await makeUser("site_manager", "sitemgr");
 
   ctx.adminToken = tokenFor(ctx.adminId, "admin", "admin");
   ctx.officerL3Token = tokenFor(ctx.officerL3Id, "employee", "l3");
   ctx.officerL2Token = tokenFor(ctx.officerL2Id, "employee", "l2");
   ctx.officerExpiredToken = tokenFor(ctx.officerExpiredId, "employee", "exp");
   ctx.officerNoneToken = tokenFor(ctx.officerNoneId, "employee", "none");
+  ctx.officerRecentToken = tokenFor(ctx.officerRecentId, "employee", "recent");
+  ctx.siteManagerToken = tokenFor(ctx.siteManagerId, "site_manager", "sitemgr");
 
   const future = isoDateOffset(365);
   const past = isoDateOffset(-30);
@@ -162,13 +178,33 @@ beforeAll(async () => {
     .returning({ id: sitesTable.id });
   ctx.siteNoShiftsId = siteNoShifts.id;
 
-  // Two shifts at siteL3 (one L4, one L3); resolver gates on the MIN = 3.
+  // Site channel access is roster-based, so the fixture needs both an
+  // upcoming shift (its officer is in) and one that finished outside the
+  // 30-day lookback (its officer has aged out).
   const start = new Date(Date.now() + 6 * 60 * 60 * 1000);
   const end = new Date(start.getTime() + 4 * 60 * 60 * 1000);
-  await db.insert(shiftsTable).values([
-    { title: `${TAG}-shift-l4`, siteId: ctx.siteL3Id, startTime: start, endTime: end, requiredLicenseLevel: 4 },
-    { title: `${TAG}-shift-l3`, siteId: ctx.siteL3Id, startTime: start, endTime: end, requiredLicenseLevel: 3 },
+  const oldStart = new Date(Date.now() - 45 * 24 * 60 * 60 * 1000);
+  const oldEnd = new Date(oldStart.getTime() + 4 * 60 * 60 * 1000);
+  const recentStart = new Date(Date.now() - 3 * 24 * 60 * 60 * 1000);
+  const recentEnd = new Date(recentStart.getTime() + 4 * 60 * 60 * 1000);
+  const [upcoming, stale, recent] = await db.insert(shiftsTable).values([
+    { title: `${TAG}-shift-upcoming`, siteId: ctx.siteL3Id, startTime: start, endTime: end, requiredLicenseLevel: 3 },
+    { title: `${TAG}-shift-stale`, siteId: ctx.siteL3Id, startTime: oldStart, endTime: oldEnd, requiredLicenseLevel: 3 },
+    { title: `${TAG}-shift-recent`, siteId: ctx.siteL3Id, startTime: recentStart, endTime: recentEnd, requiredLicenseLevel: 1 },
+  ]).returning({ id: shiftsTable.id });
+
+  await db.insert(shiftAssignmentsTable).values([
+    // Rostered for an upcoming shift here → in the site channel.
+    { shiftId: upcoming.id, employeeId: ctx.officerL3Id, status: "accepted" },
+    // Last worked here 45 days ago → aged out of the site channel.
+    { shiftId: stale.id, employeeId: ctx.officerExpiredId, status: "accepted" },
+    // Claimed the upcoming shift but not yet approved → still out.
+    { shiftId: upcoming.id, employeeId: ctx.officerNoneId, status: "pending_approval" },
+    // Worked here 3 days ago → inside the 30-day lookback, still crew.
+    { shiftId: recent.id, employeeId: ctx.officerRecentId, status: "accepted" },
   ]);
+
+  await db.insert(siteManagersTable).values({ siteId: ctx.siteL3Id, userId: ctx.siteManagerId });
 });
 
 afterAll(async () => {
@@ -179,6 +215,8 @@ afterAll(async () => {
     ctx.officerL2Id,
     ctx.officerExpiredId,
     ctx.officerNoneId,
+    ctx.officerRecentId,
+    ctx.siteManagerId,
   ].filter(Boolean);
   for (const id of ids) {
     await db.execute(sql`DELETE FROM chat_rooms WHERE direct_key LIKE ${"%" + id + "%"}`);
@@ -246,20 +284,51 @@ describe("GET /chat/rooms — visibility by room type", () => {
     expect(await listRoomIds(ctx.officerNoneToken)).not.toContain(id);
   });
 
-  it("site room gates on the site's lowest shift level (L3 here)", async () => {
+  it("site room is visible only to officers rostered at that site (plus its managers and admins)", async () => {
     const id = await makeRoom({ name: `${TAG}-site-l3-room`, type: "site", siteId: ctx.siteL3Id });
     expect(await listRoomIds(ctx.adminToken)).toContain(id);
+    // Accepted assignment to an upcoming shift here.
     expect(await listRoomIds(ctx.officerL3Token)).toContain(id);
+    // Finished a shift here 3 days ago — inside the lookback window, and in
+    // despite holding no licence at all.
+    expect(await listRoomIds(ctx.officerRecentToken)).toContain(id);
+    // Manages this site, so is in even holding no shift of their own.
+    expect(await listRoomIds(ctx.siteManagerToken)).toContain(id);
+    // Licensed but never rostered here — licence level must not grant access,
+    // otherwise the channel goes out to most of the company.
     expect(await listRoomIds(ctx.officerL2Token)).not.toContain(id);
+    // Last worked here 45 days ago → outside the 30-day lookback.
     expect(await listRoomIds(ctx.officerExpiredToken)).not.toContain(id);
+    // Claim at this site is still pending approval → not yet crew.
+    expect(await listRoomIds(ctx.officerNoneToken)).not.toContain(id);
   });
 
-  it("site room with no shifts falls back to required level 2", async () => {
+  it("site room denies reading and posting to officers not rostered there", async () => {
+    const id = await makeRoom({ name: `${TAG}-site-l3-rest`, type: "site", siteId: ctx.siteL3Id });
+    // Hiding the room from the list is not enough — the message endpoints
+    // must refuse a caller who guesses or keeps a stale room id.
+    expect(await getMessagesStatus(ctx.officerL2Token, id)).toBe(403);
+    expect(await postMessageStatus(ctx.officerL2Token, id)).toBe(403);
+    // Aged out and pending-claim callers are refused the same way.
+    expect(await getMessagesStatus(ctx.officerExpiredToken, id)).toBe(403);
+    expect(await getMessagesStatus(ctx.officerNoneToken, id)).toBe(403);
+    // The rostered crew and the site's manager still get through.
+    expect(await getMessagesStatus(ctx.officerL3Token, id)).toBe(200);
+    expect(await postMessageStatus(ctx.officerL3Token, id)).toBe(201);
+    expect(await getMessagesStatus(ctx.siteManagerToken, id)).toBe(200);
+  });
+
+  it("site room with nobody rostered is admins-only", async () => {
     const id = await makeRoom({ name: `${TAG}-site-noshifts-room`, type: "site", siteId: ctx.siteNoShiftsId });
-    // L2 officer now qualifies via the level-2 fallback; no-license still out.
-    expect(await listRoomIds(ctx.officerL2Token)).toContain(id);
-    expect(await listRoomIds(ctx.officerL3Token)).toContain(id);
-    expect(await listRoomIds(ctx.officerNoneToken)).not.toContain(id);
+    expect(await listRoomIds(ctx.adminToken)).toContain(id);
+    for (const token of [
+      ctx.officerL3Token,
+      ctx.officerL2Token,
+      ctx.officerNoneToken,
+      ctx.siteManagerToken,
+    ]) {
+      expect(await listRoomIds(token)).not.toContain(id);
+    }
   });
 
   it("city room is visible to explicit members and admins, not to non-members", async () => {

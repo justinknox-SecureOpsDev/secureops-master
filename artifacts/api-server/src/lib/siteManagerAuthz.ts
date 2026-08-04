@@ -1,5 +1,5 @@
 import type { Response } from "express";
-import { and, eq } from "drizzle-orm";
+import { and, eq, inArray } from "drizzle-orm";
 import { db, siteManagersTable, usersTable } from "@workspace/db";
 
 /**
@@ -36,18 +36,30 @@ export async function getManagedSiteIds(userId: string): Promise<string[]> {
  * out of the `site_manager` role or deactivated must NOT receive site alerts,
  * so we re-check role+status here rather than trusting the join row alone. */
 export async function getSiteManagerUserIds(siteId: string): Promise<string[]> {
+  return (await getSiteManagerUserIdsForSites([siteId])).get(siteId) ?? [];
+}
+
+/** Bulk form of getSiteManagerUserIds: siteId → live manager user ids, in one
+ * query. Every site asked for gets an entry (empty array if it has no live
+ * managers) so callers can look up without a null check. */
+export async function getSiteManagerUserIdsForSites(
+  siteIds: string[],
+): Promise<Map<string, string[]>> {
+  const bySite = new Map<string, string[]>(siteIds.map((id) => [id, []]));
+  if (siteIds.length === 0) return bySite;
   const rows = await db
-    .select({ userId: siteManagersTable.userId })
+    .select({ siteId: siteManagersTable.siteId, userId: siteManagersTable.userId })
     .from(siteManagersTable)
     .innerJoin(usersTable, eq(usersTable.id, siteManagersTable.userId))
     .where(
       and(
-        eq(siteManagersTable.siteId, siteId),
+        inArray(siteManagersTable.siteId, [...new Set(siteIds)]),
         eq(usersTable.role, "site_manager"),
         eq(usersTable.status, "active"),
       ),
     );
-  return rows.map((r) => r.userId);
+  for (const r of rows) bySite.get(r.siteId)?.push(r.userId);
+  return bySite;
 }
 
 /**

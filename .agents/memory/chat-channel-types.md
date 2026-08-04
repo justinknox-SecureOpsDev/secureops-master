@@ -11,7 +11,18 @@ Chat room read/post access is computed from `chat_rooms.type` server-side
 memberships:
 - `announcements` → everyone (returns `null` ⇒ all authenticated users read **and** post)
 - `ops` → admins only
-- `license_level` / `site` → officers whose max unexpired license meets the threshold (+admins)
+- `license_level` → officers whose max unexpired license meets the threshold (+admins)
+- `site` → **roster-based, not licence-based**: officers with an *accepted*
+  shift_assignment at that site whose shift ends within a rolling lookback
+  window (upcoming/in-progress, or finished in the last N days), plus the
+  site's `site_managers` (+admins). Pending claims do not count. Licence level
+  grants nothing here — gating on licence put most of the company in every
+  site's channel, which is what this replaced.
+  Radio `site` channels still use the OLD licence rule and deliberately no
+  longer match chat; don't assume the two stayed in sync.
+  Membership resolution is per-request memoized (admins/licence rollup/site
+  crew are bulk-loaded for the whole room list) — never cache it beyond one
+  request or revoked access lingers.
 - `city` / `elite` → explicit `chat_room_memberships` rows (+admins); `elite` is hidden from non-members
 - **anything else (incl. legacy `general`, `shift`, and `retired`) → admins-only, fail-closed**
 

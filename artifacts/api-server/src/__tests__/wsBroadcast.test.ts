@@ -15,6 +15,7 @@ import {
   licensesTable,
   sitesTable,
   shiftsTable,
+  shiftAssignmentsTable,
   clientsTable,
 } from "@workspace/db";
 import app from "../app";
@@ -323,6 +324,7 @@ const rooms = {} as {
   clientId: string;
   siteId: string;
   shiftId: string;
+  siteAssignmentId: string;
   l3LicenseId: string;
   opsRoomId: string;
   licenseRoomId: string;
@@ -391,9 +393,9 @@ beforeAll(async () => {
     .values({ clientId: client.id, name: `${TAG2}-site` })
     .returning({ id: sitesTable.id });
   rooms.siteId = site.id;
-  // Site channel membership floor is MIN(required_license_level) across the
-  // site's shifts. Posting one L3 shift means only L3+ officers (and admins)
-  // are auto-eligible — gives us a clean L2-vs-L3 split for the assertion.
+  // Site channel membership is "who actually works here": an accepted
+  // assignment to a shift at the site. Only the L3 officer is rostered, so
+  // the other officers stay out no matter what licence they hold.
   const [shift] = await db
     .insert(shiftsTable)
     .values({
@@ -405,6 +407,11 @@ beforeAll(async () => {
     })
     .returning({ id: shiftsTable.id });
   rooms.shiftId = shift.id;
+  const [assignment] = await db
+    .insert(shiftAssignmentsTable)
+    .values({ shiftId: shift.id, employeeId: rooms.l3Officer.id, status: "accepted" })
+    .returning({ id: shiftAssignmentsTable.id });
+  rooms.siteAssignmentId = assignment.id;
 
   const mkRoom = async (
     vals: Parameters<typeof db.insert<typeof chatRoomsTable>>[0] extends never ? never : Record<string, unknown>,
@@ -594,17 +601,43 @@ describe("WebSocket broadcast scoping by room type", () => {
     }
   });
 
-  it("site rooms reach officers who clear MIN(required_license_level) across the site's shifts and exclude the rest", async () => {
+  it("site rooms reach only the officers rostered at that site, and dropping the roster cuts the next broadcast", async () => {
     const subjects = [rooms.admin, rooms.l3Officer, rooms.l2Officer, rooms.noLicOfficer, rooms.explicit];
     const got = await postAndCollect(rooms.admin, rooms.siteRoomId, "site-traffic", subjects, {
       [rooms.admin.id]: 1,
       [rooms.l3Officer.id]: 1,
     });
     expect(got.get(rooms.admin.id)).toHaveLength(1);
-    expect(got.get(rooms.l3Officer.id)).toHaveLength(1); // qualifies for the L3 shift
+    expect(got.get(rooms.l3Officer.id)).toHaveLength(1); // accepted assignment at this site
+    // Everyone else is unrostered here. The L2 officer is licensed and the
+    // site's shift is L3, but licence level is no longer what grants access —
+    // if this ever passes again, the channel is leaking to the whole company.
     expect(got.get(rooms.l2Officer.id)).toHaveLength(0);
     expect(got.get(rooms.noLicOfficer.id)).toHaveLength(0);
     expect(got.get(rooms.explicit.id)).toHaveLength(0);
+
+    // Taking the officer off the roster must revoke the channel on the very
+    // next broadcast, on the same already-open socket.
+    await db
+      .delete(shiftAssignmentsTable)
+      .where(eq(shiftAssignmentsTable.id, rooms.siteAssignmentId));
+    try {
+      const after = await postAndCollect(
+        rooms.admin,
+        rooms.siteRoomId,
+        "site-after-unroster",
+        [rooms.admin, rooms.l3Officer],
+        { [rooms.admin.id]: 1 },
+      );
+      expect(after.get(rooms.admin.id)).toHaveLength(1);
+      expect(after.get(rooms.l3Officer.id)).toHaveLength(0);
+    } finally {
+      const [restored] = await db
+        .insert(shiftAssignmentsTable)
+        .values({ shiftId: rooms.shiftId, employeeId: rooms.l3Officer.id, status: "accepted" })
+        .returning({ id: shiftAssignmentsTable.id });
+      rooms.siteAssignmentId = restored.id;
+    }
   });
 
   it("city rooms reach only admins + users with an active/invited membership row", async () => {
