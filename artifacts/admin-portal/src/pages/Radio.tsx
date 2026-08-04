@@ -18,6 +18,12 @@ type Channel = {
   id: string; name: string; scope: "global" | "all_officers" | "admins" | "site";
   siteId: string | null; siteName?: string | null;
   adminOnly: boolean; archivedAt: string | null; createdAt: string;
+  /**
+   * The single channel officers' phones keep connected in the background
+   * while they are clocked in. Every other channel is foreground-only. The
+   * server enforces that at most one channel carries this flag.
+   */
+  alwaysOn?: boolean;
 };
 type Site = { id: string; name: string };
 type Transmission = {
@@ -257,6 +263,7 @@ export default function RadioPage() {
   const [newName, setNewName] = useState("");
   const [newScope, setNewScope] = useState<Channel["scope"]>("all_officers");
   const [newSiteId, setNewSiteId] = useState<string>("");
+  const [newAlwaysOn, setNewAlwaysOn] = useState(false);
   const [wsReady, setWsReady] = useState(false);
   const [reconnecting, setReconnecting] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -266,6 +273,7 @@ export default function RadioPage() {
   const [editName, setEditName] = useState("");
   const [editScope, setEditScope] = useState<Channel["scope"]>("all_officers");
   const [editSiteId, setEditSiteId] = useState<string>("");
+  const [editAlwaysOn, setEditAlwaysOn] = useState(false);
 
   const wsRef = useRef<WebSocket | null>(null);
   const mediaRef = useRef<RadioMedia | null>(null);
@@ -609,11 +617,19 @@ export default function RadioPage() {
     try {
       const created = await api<Channel>("/admin/radio/channels", {
         method: "POST",
-        body: { name: newName.trim(), scope: newScope, siteId: newScope === "site" ? newSiteId : null },
+        body: {
+          name: newName.trim(),
+          scope: newScope,
+          siteId: newScope === "site" ? newSiteId : null,
+          alwaysOn: newAlwaysOn,
+        },
       });
-      setChannels((cs) => [...cs, created]);
+      // Only one channel can be always-on: the server clears the flag on the
+      // others, so mirror that locally instead of showing two switched on.
+      setChannels((cs) => [...(created.alwaysOn ? cs.map((c) => ({ ...c, alwaysOn: false })) : cs), created]);
       setNewName("");
       setNewSiteId("");
+      setNewAlwaysOn(false);
       setActiveId(created.id);
     } catch (e: unknown) {
       setError(e instanceof Error ? e.message : "Failed to create channel");
@@ -629,6 +645,7 @@ export default function RadioPage() {
     setEditName(c.name);
     setEditScope(c.scope);
     setEditSiteId(c.siteId ?? "");
+    setEditAlwaysOn(c.alwaysOn === true);
     setEditing(true);
   }
   async function saveEdit(id: string): Promise<void> {
@@ -636,9 +653,20 @@ export default function RadioPage() {
     try {
       const updated = await api<Channel>(`/admin/radio/channels/${id}`, {
         method: "PATCH",
-        body: { name: editName.trim(), scope: editScope, siteId: editScope === "site" ? editSiteId : null },
+        body: {
+          name: editName.trim(),
+          scope: editScope,
+          siteId: editScope === "site" ? editSiteId : null,
+          alwaysOn: editAlwaysOn,
+        },
       });
-      setChannels((cs) => cs.map((c) => (c.id === id ? updated : c)));
+      // Turning this one on turns the previous always-on channel off server
+      // side — reflect that here so the list can't show two.
+      setChannels((cs) =>
+        cs.map((c) =>
+          c.id === id ? updated : updated.alwaysOn ? { ...c, alwaysOn: false } : c,
+        ),
+      );
       setEditing(false);
     } catch (e: unknown) {
       setError(e instanceof Error ? e.message : "Failed to update channel");
@@ -705,6 +733,7 @@ export default function RadioPage() {
                       </div>
                       <div className="text-[11px] opacity-60">
                         {c.scope === "site" ? `Site${c.siteName ? `: ${c.siteName}` : ""}` : c.scope}
+                        {c.alwaysOn && " · always on"}
                         {c.archivedAt && " · archived"}
                         {mutedChannels.has(c.id) && " · muted"}
                         {leftChannels.has(c.id) && " · left"}
@@ -736,6 +765,21 @@ export default function RadioPage() {
                 {sites.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
               </select>
             )}
+            <label className="flex items-start gap-2 text-xs">
+              <input
+                type="checkbox"
+                className="mt-0.5"
+                checked={newAlwaysOn}
+                onChange={(e) => setNewAlwaysOn(e.target.checked)}
+              />
+              <span>
+                Always on
+                <span className="block opacity-60">
+                  Stays connected on clocked-in officers' phones even when the app is in the
+                  background. Only one channel can be always on.
+                </span>
+              </span>
+            </label>
             <Button size="sm" onClick={createChannel} disabled={!newName.trim() || (newScope === "site" && !newSiteId)}>
               <Plus className="w-3.5 h-3.5 mr-1" /> Create
             </Button>
@@ -855,6 +899,21 @@ export default function RadioPage() {
                     </select>
                   </>
                 )}
+                <label className="flex items-start gap-2 text-xs pt-1">
+                  <input
+                    type="checkbox"
+                    className="mt-0.5"
+                    checked={editAlwaysOn}
+                    onChange={(e) => setEditAlwaysOn(e.target.checked)}
+                  />
+                  <span>
+                    Always on
+                    <span className="block opacity-60">
+                      Stays connected on clocked-in officers' phones even when the app is in the
+                      background. Turning this on turns it off for any other channel.
+                    </span>
+                  </span>
+                </label>
                 <div className="flex gap-2 pt-1">
                   <Button size="sm" onClick={() => saveEdit(activeChannel.id)} disabled={!editName.trim() || (editScope === "site" && !editSiteId)}>
                     <Check className="w-3.5 h-3.5 mr-1" /> Save

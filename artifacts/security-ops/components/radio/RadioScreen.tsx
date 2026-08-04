@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useRef, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   View, Text, TouchableOpacity, ScrollView, StyleSheet,
   ActivityIndicator, Pressable, AppState, Platform,
@@ -12,12 +12,16 @@ import { AUTH_TOKEN_KEY, useAuth } from "@/contexts/AuthContext";
 import { createRadioMedia } from "./radioMedia";
 import type { RadioMedia, RadioToken } from "./radioTypes";
 import { createTransmitController, type TransmitController } from "./radioTransmit";
+import { computeDesiredListenChannels, findAlwaysOnChannelId } from "./listenPolicy";
+import { useGetActiveTimeEntry, getGetActiveTimeEntryQueryKey } from "@workspace/api-client-react";
 
 type Channel = {
   id: string; name: string;
   scope: "global" | "all_officers" | "admins" | "site";
   siteId: string | null; siteName?: string | null;
   adminOnly: boolean; archivedAt: string | null;
+  /** The one channel (Dispatch) held open in the background while on duty. */
+  alwaysOn?: boolean;
 };
 
 type Speaker = { userId: string; name: string } | null;
@@ -115,6 +119,19 @@ export default function RadioScreen({ topInset = true }: RadioScreenProps = {}):
   const [audioAvailable, setAudioAvailable] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
+  // Whether the app is on screen. Backgrounding drops every channel except the
+  // always-on one, and drops that too when the officer is off duty — see
+  // listenPolicy.ts for the full rule.
+  const [foreground, setForeground] = useState(AppState.currentState === "active");
+
+  // Duty state drives what stays connected in the background. Shares the
+  // global query cache with the Clock screen, which invalidates this key on
+  // clock in/out, so going on or off shift re-runs the listen reconcile
+  // without this screen polling for it.
+  const { data: activeTimeEntry } = useGetActiveTimeEntry({
+    query: { queryKey: getGetActiveTimeEntryQueryKey() },
+  });
+  const isClockedIn = !!activeTimeEntry?.id;
 
   const wsRef = useRef<WebSocket | null>(null);
   const mediaRef = useRef<RadioMedia | null>(null);
@@ -155,15 +172,27 @@ export default function RadioScreen({ topInset = true }: RadioScreenProps = {}):
   }
   useEffect(() => { userIdRef.current = user?.id; }, [user?.id]);
 
-  useEffect(() => {
-    apiRequest("/radio/channels")
-      .then((rows: Channel[]) => {
-        setChannels(rows);
-        if (rows[0]) setActiveId(rows[0].id);
-      })
-      .catch((e: Error) => setError(e.message))
-      .finally(() => setLoading(false));
+  // stopTalking closes over render-scoped state, but the AppState listener is
+  // registered once — go through a ref so backgrounding always releases the
+  // CURRENT transmission rather than a stale closure's.
+  const stopTalkingRef = useRef<(() => Promise<void>) | null>(null);
+
+  // Stable so the WS effect (mounted once) can call it on a roster broadcast.
+  const refreshChannels = useCallback(async (): Promise<void> => {
+    try {
+      const rows: Channel[] = await apiRequest("/radio/channels");
+      setChannels(rows);
+      // Keep the officer on the channel they picked; fall back to the first
+      // one if it was archived, deleted, or is no longer visible to them.
+      setActiveId((cur) => (cur && rows.some((r) => r.id === cur) ? cur : rows[0]?.id ?? null));
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Could not load radio channels.");
+    }
   }, []);
+
+  useEffect(() => {
+    void refreshChannels().finally(() => setLoading(false));
+  }, [refreshChannels]);
 
   // --- WS control plane (presence + speaker lock signalling) ---
   // Auto-reconnects with capped exponential backoff + jitter so a dropped
@@ -251,6 +280,12 @@ export default function RadioScreen({ topInset = true }: RadioScreenProps = {}):
           } else if (m.type === "denied") {
             setError(friendlyDeniedReason(m.reason));
             cancelTransmit();
+          } else if (m.type === "channels_changed") {
+            // An admin created/archived/deleted a channel or moved the
+            // always-on designation. Without this refetch a long-mounted phone
+            // keeps listening to a stale roster — including holding open a
+            // channel that is no longer the always-on one.
+            void refreshChannels();
           }
         } catch { /* ignore */ }
       };
@@ -284,7 +319,16 @@ export default function RadioScreen({ topInset = true }: RadioScreenProps = {}):
   // resumes it automatically).
   useEffect(() => {
     const sub = AppState.addEventListener("change", (status) => {
-      if (status !== "active") return;
+      // Drives the listen policy: only the always-on channel (and only on
+      // duty) survives leaving the foreground.
+      setForeground(status === "active");
+      if (status !== "active") {
+        // Leaving the foreground mid-transmission would strand the publish
+        // room (and with it the keep-alive) outside the listen policy, so
+        // release the floor exactly as if PTT had been let go.
+        void stopTalkingRef.current?.();
+        return;
+      }
       setListenEpoch((e) => e + 1);
       mediaRef.current?.resumeKeepAlive?.();
       const ws = wsRef.current;
@@ -307,25 +351,37 @@ export default function RadioScreen({ topInset = true }: RadioScreenProps = {}):
     }
   }, [wsReady, channels, leftChannels]);
 
-  // --- reconcile the LiveKit listen room to the ACTIVE channel only ---
+  // --- reconcile the LiveKit listen rooms to the listen policy ---
   // Unlike the admin portal (which monitors many channels at once), an officer
-  // on a phone listens to the one channel they have selected — fewer media
-  // connections, clearer audio, less battery.
+  // on a phone listens to the channel they have selected — fewer media
+  // connections, clearer audio, less battery — plus, while they are clocked
+  // in, the always-on Dispatch channel, which is the only one that keeps
+  // running once the app leaves the foreground. Off duty nothing is held open
+  // in the background at all. See listenPolicy.ts.
   useEffect(() => {
     if (!wsReady || !audioAvailable) return;
     const media = mediaRef.current;
     if (!media || !media.supportsAudio) return;
     let cancelled = false;
     (async () => {
-      const wantActive =
-        !!activeId && !!activeChannel && !activeChannel.archivedAt &&
-        !leftChannels.has(activeId) && !mutedChannels.has(activeId) &&
-        activeId !== publishingChannelId;
-      const desired = wantActive && activeId ? [activeId] : [];
+      const desired = computeDesiredListenChannels({
+        foreground,
+        clockedIn: isClockedIn,
+        activeId,
+        channels,
+        leftChannels,
+        mutedChannels,
+        publishingChannelId,
+      });
       const desiredSet = new Set(desired);
+      // Drops run unconditionally, BEFORE the control-plane check: clocking out
+      // or backgrounding must release rooms (and the keep-alive with them) even
+      // when the control WS happens to be down at that moment.
       for (const id of media.listenChannelIds()) {
         if (!desiredSet.has(id)) await media.dropListen(id);
       }
+      // Connecting, on the other hand, needs a live control plane.
+      if (!wsReady || !audioAvailable) return;
       for (const id of desired) {
         if (cancelled) return;
         if (media.isListening(id)) continue;
@@ -334,8 +390,9 @@ export default function RadioScreen({ topInset = true }: RadioScreenProps = {}):
           if (!data) { if (status === 503) setAudioAvailable(false); continue; }
           if (cancelled) return;
           await media.ensureListen(id, data);
-          // If the active channel changed while we were connecting, this room is
-          // no longer desired — drop it so native stays active-channel-only.
+          // If the policy inputs changed while we were connecting (channel
+          // switch, backgrounding, clock-out), this room is no longer desired
+          // — drop it so nothing is held open outside the policy.
           if (cancelled) { await media.dropListen(id); return; }
         } catch (e) {
           // One channel failing to connect audio shouldn't break presence.
@@ -347,7 +404,7 @@ export default function RadioScreen({ topInset = true }: RadioScreenProps = {}):
     // listenEpoch: bumped by setOnListenLost when a listen room dies
     // unexpectedly — forces this effect to re-run and reconnect.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [wsReady, audioAvailable, activeId, activeChannel, leftChannels, mutedChannels, publishingChannelId, listenEpoch]);
+  }, [wsReady, audioAvailable, activeId, channels, foreground, isClockedIn, leftChannels, mutedChannels, publishingChannelId, listenEpoch]);
 
   function leaveChannel(channelId: string): void {
     const ws = wsRef.current;
@@ -433,6 +490,7 @@ export default function RadioScreen({ topInset = true }: RadioScreenProps = {}):
     await mediaRef.current?.stopPublish();
     setPublishingChannelId(null);
   }
+  stopTalkingRef.current = stopTalking;
 
   const styles = makeStyles(colors);
 

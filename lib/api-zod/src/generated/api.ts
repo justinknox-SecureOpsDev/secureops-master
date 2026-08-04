@@ -3829,6 +3829,12 @@ export const GetRadioChannelsResponseItem = zod.object({
   siteId: zod.string().nullish(),
   siteName: zod.string().nullish(),
   adminOnly: zod.boolean(),
+  alwaysOn: zod
+    .boolean()
+    .optional()
+    .describe(
+      "The single channel a clocked-in officer's phone keeps connected in the background. At most one channel carries this flag.",
+    ),
   archivedAt: zod.coerce.date().nullish(),
   createdAt: zod.coerce.date(),
 });
@@ -3921,6 +3927,12 @@ export const GetAdminRadioChannelsResponseItem = zod.object({
   siteId: zod.string().nullish(),
   siteName: zod.string().nullish(),
   adminOnly: zod.boolean(),
+  alwaysOn: zod
+    .boolean()
+    .optional()
+    .describe(
+      "The single channel a clocked-in officer's phone keeps connected in the background. At most one channel carries this flag.",
+    ),
   archivedAt: zod.coerce.date().nullish(),
   createdAt: zod.coerce.date(),
 });
@@ -3936,6 +3948,12 @@ export const CreateRadioChannelBody = zod.object({
   name: zod.string().min(1),
   scope: zod.enum(["global", "all_officers", "admins", "site"]),
   siteId: zod.string().nullish(),
+  alwaysOn: zod
+    .boolean()
+    .optional()
+    .describe(
+      "Designate this as the always-on channel, clearing the flag elsewhere.",
+    ),
 });
 
 /**
@@ -3948,6 +3966,14 @@ export const UpdateRadioChannelParams = zod.object({
 export const UpdateRadioChannelBody = zod.object({
   name: zod.string().min(1).optional(),
   archived: zod.boolean().optional(),
+  scope: zod.enum(["global", "all_officers", "admins", "site"]).optional(),
+  siteId: zod.string().nullish(),
+  alwaysOn: zod
+    .boolean()
+    .optional()
+    .describe(
+      "Move the always-on designation to this channel (true) or clear it (false). Setting it true clears the flag on every other channel.",
+    ),
 });
 
 export const UpdateRadioChannelResponse = zod.object({
@@ -3957,6 +3983,12 @@ export const UpdateRadioChannelResponse = zod.object({
   siteId: zod.string().nullish(),
   siteName: zod.string().nullish(),
   adminOnly: zod.boolean(),
+  alwaysOn: zod
+    .boolean()
+    .optional()
+    .describe(
+      "The single channel a clocked-in officer's phone keeps connected in the background. At most one channel carries this flag.",
+    ),
   archivedAt: zod.coerce.date().nullish(),
   createdAt: zod.coerce.date(),
 });

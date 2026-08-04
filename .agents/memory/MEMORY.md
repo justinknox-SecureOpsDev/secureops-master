@@ -121,4 +121,5 @@
 - [Invoice email — three addresses](invoice-email-reply-address.md) — "wrong invoice email" = body contact (brand.billingEmail, boot-cached) vs From (RESEND_FROM secret) vs replyTo; check which before editing.
 - [Safe-area inset ownership](safe-area-inset-ownership.md) — nested SafeAreaViews pad by device inset regardless of tree position; exactly one element per screen owns `top` (employee tabs=screen, admin=native header).
 - [Old-app detection & install notice](app-identity-old-app-roster.md) — "current app" = self-reported current Expo project UUID, never version compare; never-reported/legacy = out of date; batch-split labels never overwrite self-reports.
+- [Radio background listen policy](radio-background-listen-policy.md) — background LiveKit only on duty + only the one designated always-on channel; drops must run even when the control WS is down.
 - [Keep-alive demand must be releasable](keepalive-demand-release-visibility.md) — any set counting as background-audio demand must appear in the API the UI uses to release demand, or it loops forever.

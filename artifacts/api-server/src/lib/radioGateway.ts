@@ -183,6 +183,7 @@ export async function listChannelsForUser(
       scope: radioChannelsTable.scope,
       siteId: radioChannelsTable.siteId,
       adminOnly: radioChannelsTable.adminOnly,
+      alwaysOn: radioChannelsTable.alwaysOn,
       slug: radioChannelsTable.slug,
       archivedAt: radioChannelsTable.archivedAt,
       createdAt: radioChannelsTable.createdAt,

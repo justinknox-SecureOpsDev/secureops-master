@@ -3627,6 +3627,11 @@ components:
         siteId: { type: string, nullable: true }
         siteName: { type: string, nullable: true }
         adminOnly: { type: boolean }
+        alwaysOn:
+          type: boolean
+          description: >-
+            The single channel a clocked-in officer's phone keeps connected in
+            the background. At most one channel carries this flag.
         archivedAt: { type: string, format: date-time, nullable: true }
         createdAt: { type: string, format: date-time }
 
@@ -3637,12 +3642,22 @@ components:
         name: { type: string, minLength: 1 }
         scope: { type: string, enum: [global, all_officers, admins, site] }
         siteId: { type: string, nullable: true }
+        alwaysOn:
+          type: boolean
+          description: Designate this as the always-on channel, clearing the flag elsewhere.
 
     UpdateRadioChannelRequest:
       type: object
       properties:
         name: { type: string, minLength: 1 }
         archived: { type: boolean }
+        scope: { type: string, enum: [global, all_officers, admins, site] }
+        siteId: { type: string, nullable: true }
+        alwaysOn:
+          type: boolean
+          description: >-
+            Move the always-on designation to this channel (true) or clear it
+            (false). Setting it true clears the flag on every other channel.
 
     RadioTransmission:
       type: object

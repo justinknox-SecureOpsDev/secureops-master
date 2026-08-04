@@ -274,6 +274,69 @@ describe("PATCH /admin/radio/channels/:id — scope/site retargeting", () => {
   });
 });
 
+describe("always-on channel designation", () => {
+  // Only ONE channel may be always-on: it is the single channel a clocked-in
+  // officer's phone holds open in the background, so a second one would double
+  // the standing LiveKit connections the flag exists to bound.
+  async function setAlwaysOn(channelId: string, alwaysOn: boolean): Promise<number> {
+    const res = await request(app)
+      .patch(`/api/admin/radio/channels/${channelId}`)
+      .set(authed(adminToken))
+      .send({ alwaysOn });
+    return res.status;
+  }
+
+  async function alwaysOnIds(): Promise<string[]> {
+    const rows = await db
+      .select({ id: radioChannelsTable.id })
+      .from(radioChannelsTable)
+      .where(eq(radioChannelsTable.alwaysOn, true));
+    return rows.map((r) => r.id);
+  }
+
+  it("defaults to off and can be switched on", async () => {
+    const res = await request(app)
+      .patch(`/api/admin/radio/channels/${globalChannelId}`)
+      .set(authed(adminToken))
+      .send({ alwaysOn: true });
+    expect(res.status).toBe(200);
+    expect(res.body.alwaysOn).toBe(true);
+  });
+
+  it("moves the flag instead of allowing two always-on channels", async () => {
+    expect(await setAlwaysOn(globalChannelId, true)).toBe(200);
+    expect(await setAlwaysOn(editChannelId, true)).toBe(200);
+    const ids = await alwaysOnIds();
+    expect(ids).toEqual([editChannelId]);
+  });
+
+  it("clears the flag on the others when a new channel is created always-on", async () => {
+    expect(await setAlwaysOn(globalChannelId, true)).toBe(200);
+    const created = await request(app)
+      .post("/api/admin/radio/channels")
+      .set(authed(adminToken))
+      .send({ name: `${TAG} NewAlwaysOn`, scope: "global", alwaysOn: true });
+    expect(created.status).toBe(201);
+    expect(created.body.alwaysOn).toBe(true);
+    expect(await alwaysOnIds()).toEqual([created.body.id]);
+  });
+
+  it("can be switched back off, leaving no always-on channel", async () => {
+    expect(await setAlwaysOn(globalChannelId, true)).toBe(200);
+    expect(await setAlwaysOn(globalChannelId, false)).toBe(200);
+    expect(await alwaysOnIds()).toEqual([]);
+  });
+
+  it("is exposed to the officer channel list so the phone can find it", async () => {
+    expect(await setAlwaysOn(globalChannelId, true)).toBe(200);
+    const res = await request(app).get("/api/radio/channels").set(authed(officerToken));
+    expect(res.status).toBe(200);
+    const row = (res.body as Array<{ id: string; alwaysOn?: boolean }>).find((c) => c.id === globalChannelId);
+    expect(row?.alwaysOn).toBe(true);
+    await setAlwaysOn(globalChannelId, false);
+  });
+});
+
 describe("POST /admin/radio/channels/:id/preempt", () => {
   it("is a no-op when nobody is speaking (preempted false)", async () => {
     const res = await request(app)

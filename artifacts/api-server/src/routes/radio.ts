@@ -1,5 +1,5 @@
 import { Router, type IRouter } from "express";
-import { eq, desc, sql } from "drizzle-orm";
+import { and, eq, ne, desc, sql } from "drizzle-orm";
 import {
   db,
   radioChannelsTable,
@@ -26,6 +26,26 @@ const router: IRouter = Router();
 router.use(["/radio", "/admin/radio"], requireFeature("radio"));
 
 const VALID_SCOPES = new Set(["global", "all_officers", "admins", "site"]);
+
+/**
+ * Clear `alwaysOn` on every channel except `keepId`.
+ *
+ * Exactly one channel may be always-on: it is the single channel a clocked-in
+ * officer's phone holds open in the background, so two of them would double
+ * the standing LiveKit connections (and the battery/data cost) that the flag
+ * exists to bound. Enforced here on write rather than by a partial unique
+ * index so an admin flipping the switch on a second channel simply moves it
+ * instead of getting an error.
+ */
+async function clearOtherAlwaysOn(
+  tx: { update: typeof db.update },
+  keepId: string,
+): Promise<void> {
+  await tx
+    .update(radioChannelsTable)
+    .set({ alwaysOn: false })
+    .where(and(eq(radioChannelsTable.alwaysOn, true), ne(radioChannelsTable.id, keepId)));
+}
 
 /** Human-readable name for a LiveKit participant (cosmetic; identity = userId). */
 async function resolveDisplayName(userId: string): Promise<string> {
@@ -98,6 +118,7 @@ router.get("/admin/radio/channels", requireAdmin, async (_req, res): Promise<voi
       scope: radioChannelsTable.scope,
       siteId: radioChannelsTable.siteId,
       adminOnly: radioChannelsTable.adminOnly,
+      alwaysOn: radioChannelsTable.alwaysOn,
       slug: radioChannelsTable.slug,
       archivedAt: radioChannelsTable.archivedAt,
       createdAt: radioChannelsTable.createdAt,
@@ -111,8 +132,8 @@ router.get("/admin/radio/channels", requireAdmin, async (_req, res): Promise<voi
 
 // POST /admin/radio/channels
 router.post("/admin/radio/channels", requireAdmin, async (req, res): Promise<void> => {
-  const { name, scope, siteId } = (req.body ?? {}) as {
-    name?: string; scope?: string; siteId?: string | null;
+  const { name, scope, siteId, alwaysOn } = (req.body ?? {}) as {
+    name?: string; scope?: string; siteId?: string | null; alwaysOn?: boolean;
   };
   if (!name || typeof name !== "string" || !name.trim()) {
     res.status(400).json({ error: "Bad Request", message: "name is required" });
@@ -130,15 +151,25 @@ router.post("/admin/radio/channels", requireAdmin, async (req, res): Promise<voi
     const [site] = await db.select({ id: sitesTable.id }).from(sitesTable).where(eq(sitesTable.id, siteId)).limit(1);
     if (!site) { res.status(404).json({ error: "Not Found", message: "site not found" }); return; }
   }
-  const [row] = await db
-    .insert(radioChannelsTable)
-    .values({
-      name: name.trim(),
-      scope,
-      siteId: scope === "site" ? siteId! : null,
-      adminOnly: scope === "admins",
-    })
-    .returning();
+  // One transaction so two admins designating different channels at once can
+  // never leave the fleet with two always-on channels (or none).
+  const row = await db.transaction(async (tx) => {
+    const [created] = await tx
+      .insert(radioChannelsTable)
+      .values({
+        name: name.trim(),
+        scope,
+        siteId: scope === "site" ? siteId! : null,
+        adminOnly: scope === "admins",
+        alwaysOn: alwaysOn === true,
+        // Stamped on any explicit choice, on or off — it records that a human
+        // has decided, which switches off boot-time adoption for good.
+        alwaysOnSetAt: typeof alwaysOn === "boolean" ? new Date() : null,
+      })
+      .returning();
+    if (created.alwaysOn) await clearOtherAlwaysOn(tx, created.id);
+    return created;
+  });
   broadcastChannelsChanged();
   res.status(201).json(row);
 });
@@ -146,12 +177,17 @@ router.post("/admin/radio/channels", requireAdmin, async (req, res): Promise<voi
 // PATCH /admin/radio/channels/:id
 router.patch("/admin/radio/channels/:id", requireAdmin, async (req, res): Promise<void> => {
   const id = String(req.params.id);
-  const { name, archived, scope, siteId } = (req.body ?? {}) as {
-    name?: string; archived?: boolean; scope?: string; siteId?: string | null;
+  const { name, archived, scope, siteId, alwaysOn } = (req.body ?? {}) as {
+    name?: string; archived?: boolean; scope?: string; siteId?: string | null; alwaysOn?: boolean;
   };
   const patch: Record<string, unknown> = {};
   if (typeof name === "string" && name.trim()) patch.name = name.trim();
   if (typeof archived === "boolean") patch.archivedAt = archived ? new Date() : null;
+  if (typeof alwaysOn === "boolean") {
+    patch.alwaysOn = alwaysOn;
+    // A human decided — boot-time adoption must never override this later.
+    patch.alwaysOnSetAt = new Date();
+  }
   // Scope/site retargeting mirrors POST validation: a valid scope, a real site
   // when scope=site, adminOnly derived from scope, and siteId nulled for any
   // non-site scope so a stale siteId can't linger after a scope change.
@@ -176,11 +212,16 @@ router.patch("/admin/radio/channels/:id", requireAdmin, async (req, res): Promis
     res.status(400).json({ error: "Bad Request", message: "nothing to update" });
     return;
   }
-  const [row] = await db
-    .update(radioChannelsTable)
-    .set(patch)
-    .where(eq(radioChannelsTable.id, id))
-    .returning();
+  // Same transaction as create: the designation moves atomically.
+  const row = await db.transaction(async (tx) => {
+    const [updated] = await tx
+      .update(radioChannelsTable)
+      .set(patch)
+      .where(eq(radioChannelsTable.id, id))
+      .returning();
+    if (updated?.alwaysOn) await clearOtherAlwaysOn(tx, updated.id);
+    return updated;
+  });
   if (!row) { res.status(404).json({ error: "Not Found", message: "channel not found" }); return; }
   broadcastChannelsChanged();
   res.json(row);

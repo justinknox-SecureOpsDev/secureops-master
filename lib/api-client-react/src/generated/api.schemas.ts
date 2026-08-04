@@ -124,6 +124,8 @@ export interface RadioChannel {
   siteId?: string | null;
   siteName?: string | null;
   adminOnly: boolean;
+  /** The single channel a clocked-in officer's phone keeps connected in the background. At most one channel carries this flag. */
+  alwaysOn?: boolean;
   archivedAt?: string | null;
   createdAt: string;
 }
@@ -143,12 +145,28 @@ export interface CreateRadioChannelRequest {
   name: string;
   scope: CreateRadioChannelRequestScope;
   siteId?: string | null;
+  /** Designate this as the always-on channel, clearing the flag elsewhere. */
+  alwaysOn?: boolean;
 }
+
+export type UpdateRadioChannelRequestScope =
+  (typeof UpdateRadioChannelRequestScope)[keyof typeof UpdateRadioChannelRequestScope];
+
+export const UpdateRadioChannelRequestScope = {
+  global: "global",
+  all_officers: "all_officers",
+  admins: "admins",
+  site: "site",
+} as const;
 
 export interface UpdateRadioChannelRequest {
   /** @minLength 1 */
   name?: string;
   archived?: boolean;
+  scope?: UpdateRadioChannelRequestScope;
+  siteId?: string | null;
+  /** Move the always-on designation to this channel (true) or clear it (false). Setting it true clears the flag on every other channel. */
+  alwaysOn?: boolean;
 }
 
 export interface RadioTransmission {
