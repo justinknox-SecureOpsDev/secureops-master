@@ -14,6 +14,25 @@ export class ApiError extends Error {
   }
 }
 
+/**
+ * Fallback text for responses that carry no JSON body of our own.
+ *
+ * 429/502/503/504 are typically produced by the hosting layer in front of the
+ * API (capacity, restart, cold start) rather than by a route, so the body is
+ * empty or HTML and the raw status code is all the UI would otherwise have.
+ * Saying "wait and retry" matters most on write forms, where an admin who
+ * reads a bare error code tends to hammer Save and create duplicate rows.
+ */
+function statusFallbackMessage(status: number): string {
+  if (status === 429) {
+    return "The server is busy right now and turned this request away. Wait a few seconds and try again — nothing was saved.";
+  }
+  if (status === 502 || status === 503 || status === 504) {
+    return "The server is temporarily unreachable (it may be restarting). Wait a few seconds and try again.";
+  }
+  return `Request failed (${status})`;
+}
+
 let _unauthorizedHandler: (() => void) | null = null;
 
 /**
@@ -82,7 +101,7 @@ export async function api<T = unknown>(
     const msg =
       (data as { message?: string; error?: string })?.message ??
       (data as { error?: string })?.error ??
-      `Request failed (${res.status})`;
+      statusFallbackMessage(res.status);
     throw new ApiError(res.status, msg, data);
   }
   return data as T;
