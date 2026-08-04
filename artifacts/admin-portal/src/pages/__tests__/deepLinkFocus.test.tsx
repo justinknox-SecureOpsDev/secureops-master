@@ -142,12 +142,17 @@ describe("deep-link focus on a paginated admin table", () => {
     renderTablePage("row-40");
 
     // Grid jumps to the page containing the target.
-    await waitFor(() => expect(screen.getByText("Widget 40")).toBeTruthy());
+    // Under the full parallel `pnpm -r` workspace run, CPU contention can push
+    // the DOM update past waitFor's 1 s default; align with the outer timeout.
+    await waitFor(() => expect(screen.getByText("Widget 40")).toBeTruthy(), {
+      timeout: DEEP_LINK_TEST_TIMEOUT_MS,
+    });
     expect(screen.getByText("Page 2 of 3")).toBeTruthy();
 
     // The target row is flashed and scrolled into view.
-    await waitFor(() =>
-      expect(rowFor("Widget 40").className).toContain("wcsg-deep-link-flash"),
+    await waitFor(
+      () => expect(rowFor("Widget 40").className).toContain("wcsg-deep-link-flash"),
+      { timeout: DEEP_LINK_TEST_TIMEOUT_MS },
     );
     expect(scrollSpy).toHaveBeenCalled();
 
@@ -160,15 +165,19 @@ describe("deep-link focus on a paginated admin table", () => {
     renderTablePage("row-does-not-exist");
 
     // First page renders normally and the grid never leaves page 1.
-    await waitFor(() => expect(screen.getByText("Widget 0")).toBeTruthy());
+    await waitFor(() => expect(screen.getByText("Widget 0")).toBeTruthy(), {
+      timeout: DEEP_LINK_TEST_TIMEOUT_MS,
+    });
     expect(screen.getByText("Page 1 of 3")).toBeTruthy();
 
     // The position lookup runs and authoritatively reports the row is absent,
     // so the grid stays on page 1 (no batch scan / no page jump).
-    await waitFor(() =>
-      expect(
-        hoisted.calls.some((c) => c.includes("/row-does-not-exist/position")),
-      ).toBe(true),
+    await waitFor(
+      () =>
+        expect(
+          hoisted.calls.some((c) => c.includes("/row-does-not-exist/position")),
+        ).toBe(true),
+      { timeout: DEEP_LINK_TEST_TIMEOUT_MS },
     );
     expect(screen.getByText("Page 1 of 3")).toBeTruthy();
 
@@ -181,8 +190,9 @@ describe("deep-link focus on a paginated admin table", () => {
     hoisted.rows = makeRows(60);
     renderTablePage("row-3");
 
-    await waitFor(() =>
-      expect(rowFor("Widget 3").className).toContain("wcsg-deep-link-flash"),
+    await waitFor(
+      () => expect(rowFor("Widget 3").className).toContain("wcsg-deep-link-flash"),
+      { timeout: DEEP_LINK_TEST_TIMEOUT_MS },
     );
     expect(scrollSpy).toHaveBeenCalled();
     // The grid never advances past page 1 — the row was already there.
@@ -248,18 +258,23 @@ describe("deep-link focus on the mobile card layout", () => {
     hoisted.rows = makeRows(60);
     renderTablePage("row-40");
 
-    await waitFor(() => expect(screen.getByText("Widget 40")).toBeTruthy());
+    await waitFor(() => expect(screen.getByText("Widget 40")).toBeTruthy(), {
+      timeout: MOBILE_CARD_TEST_TIMEOUT_MS,
+    });
 
     // Mobile branch renders cards, not a <table>.
     expect(document.querySelector("table")).toBeNull();
 
     // The focused card (a div, not a tr) is scrolled into view and flashed.
-    await waitFor(() => {
-      const flashed = document.querySelector(".wcsg-deep-link-flash");
-      expect(flashed).not.toBeNull();
-      expect(flashed?.tagName).toBe("DIV");
-      expect(flashed?.textContent).toContain("Widget 40");
-    });
+    await waitFor(
+      () => {
+        const flashed = document.querySelector(".wcsg-deep-link-flash");
+        expect(flashed).not.toBeNull();
+        expect(flashed?.tagName).toBe("DIV");
+        expect(flashed?.textContent).toContain("Widget 40");
+      },
+      { timeout: MOBILE_CARD_TEST_TIMEOUT_MS },
+    );
     expect(scrollSpy).toHaveBeenCalled();
   }, MOBILE_CARD_TEST_TIMEOUT_MS);
 });

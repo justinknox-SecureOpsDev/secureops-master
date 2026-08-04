@@ -20,18 +20,66 @@ export class ApiError extends Error {
  * 429/502/503/504 are typically produced by the hosting layer in front of the
  * API (capacity, restart, cold start) rather than by a route, so the body is
  * empty or HTML and the raw status code is all the UI would otherwise have.
- * Saying "wait and retry" matters most on write forms, where an admin who
- * reads a bare error code tends to hammer Save and create duplicate rows.
  */
 function statusFallbackMessage(status: number): string {
   if (status === 429) {
-    return "The server is busy right now and turned this request away. Wait a few seconds and try again — nothing was saved.";
+    return "The server is busy right now and turned this request away. Wait a few seconds and try again.";
   }
   if (status === 502 || status === 503 || status === 504) {
     return "The server is temporarily unreachable (it may be restarting). Wait a few seconds and try again.";
   }
   return `Request failed (${status})`;
 }
+
+/**
+ * Whether a response status is a transient hosting-layer rejection that may
+ * be worth retrying for safe (read-only) requests.
+ */
+function isRetryableStatus(status: number): boolean {
+  return status === 429 || status === 502 || status === 503 || status === 504;
+}
+
+/**
+ * Whether the HTTP method is safe/idempotent and therefore eligible for
+ * automatic retry. POST/PUT/PATCH/DELETE are never retried automatically
+ * because a 5xx or 429 response does not guarantee the mutation was not
+ * processed — retrying could duplicate server-side actions.
+ */
+function isSafeMethod(method: string | undefined): boolean {
+  const m = (method ?? "GET").toUpperCase();
+  return m === "GET" || m === "HEAD" || m === "OPTIONS";
+}
+
+/**
+ * How long to wait before the next retry attempt (milliseconds).
+ *
+ * Supports both forms of the Retry-After header:
+ *   - delta-seconds: a non-negative integer, e.g. "5"
+ *   - HTTP-date:     a date string, e.g. "Wed, 04 Aug 2026 12:00:05 GMT"
+ *
+ * Falls back to exponential back-off capped at 8 s when the header is absent
+ * or unparseable.
+ */
+function retryDelayMs(attempt: number, res: Response): number {
+  const retryAfter = res.headers.get("Retry-After");
+  if (retryAfter) {
+    // Try delta-seconds first (most common).
+    const seconds = parseFloat(retryAfter);
+    if (!isNaN(seconds) && seconds >= 0) {
+      return Math.min(seconds * 1000, 10_000);
+    }
+    // Try HTTP-date form.
+    const ts = Date.parse(retryAfter);
+    if (!isNaN(ts)) {
+      const waitMs = ts - Date.now();
+      if (waitMs > 0) return Math.min(waitMs, 10_000);
+    }
+  }
+  // 1 s, 2 s, 4 s, 8 s …
+  return Math.min(1_000 * Math.pow(2, attempt), 8_000);
+}
+
+const MAX_RETRIES = 3;
 
 let _unauthorizedHandler: (() => void) | null = null;
 
@@ -53,6 +101,9 @@ export function setUnauthorizedHandler(handler: (() => void) | null): void {
  * like `api()`, fires the unauthorized handler when an *authenticated* request
  * is rejected with 401, so an expired/revoked session routes back to login
  * instead of dead-ending the screen. Pass the full path (e.g. `/api/...`).
+ *
+ * Retries transient hosting-layer errors automatically for safe (read-only)
+ * methods (GET, HEAD, OPTIONS). Write methods are never retried automatically.
  */
 export async function fetchWithAuth(
   path: string,
@@ -61,9 +112,18 @@ export async function fetchWithAuth(
   const token = getToken();
   const headers = new Headers(init.headers);
   if (token) headers.set("Authorization", `Bearer ${token}`);
-  const res = await fetch(path, { ...init, headers });
-  if (res.status === 401 && token) {
-    _unauthorizedHandler?.();
+
+  const canRetry = isSafeMethod(init.method);
+
+  let res!: Response;
+  for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
+    res = await fetch(path, { ...init, headers });
+    if (res.status === 401 && token) {
+      _unauthorizedHandler?.();
+      return res;
+    }
+    if (!canRetry || !isRetryableStatus(res.status) || attempt === MAX_RETRIES) break;
+    await new Promise((r) => setTimeout(r, retryDelayMs(attempt, res)));
   }
   return res;
 }
@@ -79,25 +139,48 @@ export async function api<T = unknown>(
   };
   const token = getToken();
   if (token) headers.Authorization = `Bearer ${token}`;
-  const res = await fetch(`/api${path}`, {
-    ...rest,
-    headers,
-    body:
-      body === undefined || body === null
-        ? undefined
-        : typeof body === "string"
-          ? body
-          : JSON.stringify(body),
-  });
-  const text = await res.text();
+
+  const serializedBody =
+    body === undefined || body === null
+      ? undefined
+      : typeof body === "string"
+        ? body
+        : JSON.stringify(body);
+
+  // Only retry safe (read-only) methods. POST/PUT/PATCH/DELETE responses with
+  // 502/503 do not guarantee the mutation was not processed; retrying could
+  // duplicate server-side actions.
+  const canRetry = isSafeMethod(rest.method);
+
+  let res!: Response;
+  let text = "";
   let data: unknown = null;
-  if (text) {
-    try { data = JSON.parse(text); } catch { data = text; }
-  }
-  if (!res.ok) {
+
+  for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
+    res = await fetch(`/api${path}`, {
+      ...rest,
+      headers,
+      body: serializedBody,
+    });
+
+    text = await res.text();
+    data = null;
+    if (text) {
+      try { data = JSON.parse(text); } catch { data = text; }
+    }
+
+    // A 401 with a token means the session is expired — don't retry, log out.
     if (res.status === 401 && token) {
       _unauthorizedHandler?.();
+      break;
     }
+
+    if (!canRetry || !isRetryableStatus(res.status) || attempt === MAX_RETRIES) break;
+
+    await new Promise((r) => setTimeout(r, retryDelayMs(attempt, res)));
+  }
+
+  if (!res.ok) {
     const msg =
       (data as { message?: string; error?: string })?.message ??
       (data as { error?: string })?.error ??

@@ -382,15 +382,73 @@ export async function customFetch<T = unknown>(
   const requestInfo = { method, url: resolveUrl(input) };
   const sentAuth = headers.has("authorization");
 
-  const response = await fetch(input, { ...init, method, headers });
+  // Only safe/idempotent methods are retried automatically. POST/PUT/PATCH/DELETE
+  // responses with 429/502/503/504 do not guarantee the mutation was not
+  // processed; retrying could duplicate server-side actions.
+  const canRetry =
+    method === "GET" || method === "HEAD" || method === "OPTIONS";
 
-  if (!response.ok) {
+  let response!: Response;
+  for (let attempt = 0; attempt <= CUSTOM_FETCH_MAX_RETRIES; attempt++) {
+    response = await fetch(input, { ...init, method, headers });
+
     if (response.status === 401 && sentAuth) {
       notifyUnauthorized();
+      break;
     }
+
+    if (
+      !canRetry ||
+      !isCustomFetchRetryable(response.status) ||
+      attempt === CUSTOM_FETCH_MAX_RETRIES
+    ) {
+      break;
+    }
+
+    await new Promise<void>((r) =>
+      setTimeout(r, customFetchRetryDelayMs(attempt, response)),
+    );
+  }
+
+  if (!response.ok) {
     const errorData = await parseErrorBody(response, method);
     throw new ApiError(response, errorData, requestInfo);
   }
 
   return (await parseSuccessBody(response, responseType, requestInfo)) as T;
+}
+
+// ---------------------------------------------------------------------------
+// Retry helpers (defined after customFetch to keep the happy-path readable)
+// ---------------------------------------------------------------------------
+
+const CUSTOM_FETCH_MAX_RETRIES = 3;
+
+function isCustomFetchRetryable(status: number): boolean {
+  return status === 429 || status === 502 || status === 503 || status === 504;
+}
+
+/**
+ * Delay before the next retry (milliseconds).
+ *
+ * Supports both Retry-After forms:
+ *   - delta-seconds  e.g. "5"
+ *   - HTTP-date      e.g. "Wed, 04 Aug 2026 12:00:05 GMT"
+ *
+ * Falls back to exponential back-off (1 s, 2 s, 4 s, 8 s …) capped at 8 s.
+ */
+function customFetchRetryDelayMs(attempt: number, response: Response): number {
+  const retryAfter = response.headers.get("Retry-After");
+  if (retryAfter) {
+    const seconds = parseFloat(retryAfter);
+    if (!isNaN(seconds) && seconds >= 0) {
+      return Math.min(seconds * 1000, 10_000);
+    }
+    const ts = Date.parse(retryAfter);
+    if (!isNaN(ts)) {
+      const waitMs = ts - Date.now();
+      if (waitMs > 0) return Math.min(waitMs, 10_000);
+    }
+  }
+  return Math.min(1_000 * Math.pow(2, attempt), 8_000);
 }

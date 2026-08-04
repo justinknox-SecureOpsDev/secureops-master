@@ -382,6 +382,10 @@ describe("RowFormDialog dropdown (select / boolean) and linked-record (FK) field
     expect(hoisted.creates[0]).toMatchObject({ name: "Gizmo", ownerId: "o2" });
   });
 
+  // Radix Select open/close cycles are CPU-heavy in jsdom. Under the full
+  // parallel `pnpm -r` workspace run, contention can push this past the 5 s
+  // default even though it passes comfortably in isolation. A generous timeout
+  // removes the flake without masking a real hang.
   it("Edit: changing a boolean dropdown submits the new boolean on update", async () => {
     hoisted.rows = [{ id: "w1", name: "Widget One", active: false, tier: "bronze", ownerId: "o1" }];
     render(<DataGrid descriptor={choiceDescriptor} />);
@@ -399,7 +403,7 @@ describe("RowFormDialog dropdown (select / boolean) and linked-record (FK) field
     expect(hoisted.updates[0].id).toBe("w1");
     expect(hoisted.updates[0].body).toMatchObject({ active: true });
     expect(hoisted.creates).toHaveLength(0);
-  });
+  }, 20_000);
 });
 
 /**
@@ -495,6 +499,8 @@ describe("RowFormDialog linked FK fields (filterBy narrowing + clearing, autofil
     expect(screen.queryByRole("option", { name: "Tue Night Shift" })).toBeNull();
   }, FILTER_BY_TEST_TIMEOUT_MS);
 
+  // Same Radix Select CPU-contention flake as filterBy: uses multiple open/close
+  // cycles and runs slowly under full parallel `pnpm -r` workspace load.
   it("autofill: picking a shift copies the mapped values into the target fields and submits them", async () => {
     render(<DataGrid descriptor={linkedDescriptor} />);
     await waitFor(() => expect(hoisted.listCalls).toBeGreaterThanOrEqual(1));
@@ -528,5 +534,5 @@ describe("RowFormDialog linked FK fields (filterBy narrowing + clearing, autofil
     });
     // ...while the virtual `shiftId` helper field is never sent to the API.
     expect(hoisted.creates[0]).not.toHaveProperty("shiftId");
-  });
+  }, FILTER_BY_TEST_TIMEOUT_MS);
 });
