@@ -46,6 +46,7 @@ import type {
   DisconnectReason,
   LocalAudioTrack,
 } from "livekit-client";
+import { Platform, PermissionsAndroid } from "react-native";
 
 import {
   getLiveKitNative,
@@ -168,6 +169,35 @@ class NativeRadioMedia implements RadioMedia {
       } catch (e) {
         // Keep-alive is best-effort; the radio itself must still work.
         console.warn("[radio] setAudioModeAsync failed", e);
+      }
+    }
+    // Android 12+ (API 31) introduced BLUETOOTH_CONNECT as a runtime
+    // "dangerous" permission — unlike the legacy BLUETOOTH permission it
+    // replaces, declaring it in the manifest alone does NOT grant it. The
+    // OS must hand it to the app via an explicit request BEFORE the audio
+    // stack tries to enumerate or route to a paired headset, or the routing
+    // call silently falls back to speaker (no SecurityException on all
+    // devices, but no headset route either). We request it here, just
+    // before configureAudio, to maximise the chance it is granted by the
+    // time the routing call executes. Denial is a best-effort degradation:
+    // audio falls back to speakerphone and PTT captures on the built-in mic,
+    // both of which are safe. On API ≤ 30 the legacy BLUETOOTH permission
+    // covers headset routing without a runtime request.
+    if (Platform.OS === "android" && Platform.Version >= 31) {
+      try {
+        await PermissionsAndroid.request(
+          PermissionsAndroid.PERMISSIONS.BLUETOOTH_CONNECT,
+          {
+            title: "Bluetooth Access",
+            message:
+              "SecureOps needs Bluetooth access to route radio audio to your headset.",
+            buttonPositive: "OK",
+          },
+        );
+      } catch (e) {
+        // Best-effort — a failed request still lets the session start; the
+        // routing call will fall back to speaker if the permission is absent.
+        console.warn("[radio] BLUETOOTH_CONNECT permission request failed", e);
       }
     }
     await this.lk.AudioSession.configureAudio({

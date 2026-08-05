@@ -213,10 +213,17 @@ Submission targets (from `eas.json` → `submit.production.ios`):
 | App Store Connect app id (`ascAppId`) | `6789409652` |
 | EAS project id | `e8bcd802-b11d-4c4d-bd20-5e61caf4817c` |
 
-## 4. Device smoke test on TestFlight — REQUIRED before release
+## 4. Device smoke test — REQUIRED before release
 
-Install the TestFlight build on two real devices, at least one with a paired
-Bluetooth headset. Given the build-14 history above, this gate is not optional.
+Run the full checklist on **both** iOS (TestFlight) and Android (internal track
+or sideload) before submitting to either store. Given the build-14 history, this
+gate is not optional — the test suite cannot prove locked-screen survival or
+Bluetooth routing on real hardware.
+
+### 4a. iOS (TestFlight)
+
+Install the TestFlight build on two real iOS devices, at least one with a paired
+Bluetooth headset.
 
 1. Both join a channel → presence shows both members.
 2. Device A holds **Hold to talk** → A shows "transmitting", B hears audio and
@@ -250,6 +257,49 @@ Bluetooth headset. Given the build-14 history above, this gate is not optional.
 Only after 1–12 pass should the version be submitted for App Store review in
 App Store Connect.
 
+### 4b. Android (internal track / sideload)
+
+Android has a different audio-focus model (AudioFocus, foreground service,
+WAKELOCK) from iOS, so it must be tested separately. Two Android devices are
+needed; at least one should be Android 12+ (API 31) to verify the
+`BLUETOOTH_CONNECT` permission path. A Bluetooth headset covers step 9–11.
+
+The configureAudio block sets `preferredOutputList: ["bluetooth","headset",
+"speaker","earpiece"]` + `forceHandleAudioRouting: true` (SCO capture),
+which is the Android equivalent of the iOS AVAudioSession category options.
+
+1. **Basic PTT** — repeat §4a steps 1–5 on Android devices. Audio should route
+   out of the **speakerphone** (not earpiece) when no headset is connected,
+   because `preferredOutputList` ranks speaker above earpiece.
+2. **Clocked in, phone locked** — device B clocks in so the radio screen is
+   active. Lock the screen. Wait **2+ minutes**. Device A transmits — B must
+   hear it (the WAKELOCK + AudioFocus hold open on Android; the expo-audio
+   silent loop is the safety net). Repeat at 5 min and 10 min.
+3. **Clock-out stops audio** — B clocks out (radio screen tears down). Lock the
+   phone, wait 2 minutes, A transmits — B must **not** hear anything, confirming
+   that demand is zero and the keep-alive is stopped.
+4. **Interruption recovery** — with B locked and joined, receive a phone call,
+   end it, briefly foreground the app, re-lock, wait 2 min, A transmits — B
+   hears it (Android AudioFocus re-granted on foreground; keep-alive replayed).
+5. **Bluetooth playback (Android 12+)** — pair a headset to B. A transmits →
+   audio comes from the headset (SCO routing engaged via `forceHandleAudioRouting`).
+   The app itself requests `BLUETOOTH_CONNECT` in `ensureSession()`, before
+   `configureAudio` runs, on the first audio session open of each app launch
+   (regardless of whether a headset is currently paired). Android shows the
+   "Bluetooth Access" OS prompt once; subsequent launches do not prompt again
+   unless the permission is revoked. To verify: revoke the permission in
+   Settings → App → Permissions, join a channel → confirm the "Bluetooth Access"
+   prompt appears; deny → audio falls back to speakerphone (no crash); re-grant
+   → headset routes correctly on the next channel join.
+6. **Bluetooth microphone** — B holds PTT while wearing the headset → A hears
+   clearly from the headset mic.
+7. **Bluetooth fallback** — disconnect mid-session → audio moves to speakerphone
+   and PTT still captures on the built-in mic.
+8. **Pre-Android-12 device (API ≤ 30)** — if available: the legacy `BLUETOOTH`
+   permission (no `BLUETOOTH_CONNECT` prompt) should still route correctly since
+   `forceHandleAudioRouting` does not require the newer permission for routing
+   itself.
+
 ### App Review notes to include
 
 See `APP_REVIEW_NOTES.md` — §3 covers the background-audio justification and
@@ -274,10 +324,11 @@ and match `eas build:list`.
 
 ---
 
-### Known gap — Android Bluetooth on API 31+
+### Android Bluetooth permission (API 31+)
 
-The Android manifest declares legacy `android.permission.BLUETOOTH` but not
-`BLUETOOTH_CONNECT`, which Android 12+ requires to enumerate and route to a
-paired headset. iOS is unaffected. If/when an Android release ships the
-Bluetooth radio capability, that permission (and its runtime request) needs to
-be added and tested separately.
+`BLUETOOTH_CONNECT` (required on Android 12+ to enumerate and connect to
+paired Bluetooth devices) has been added to `app.json` alongside the legacy
+`BLUETOOTH` permission. Android will show a runtime prompt on first Bluetooth
+use; confirm the prompt fires correctly during the §4b smoke test (step 5).
+iOS is unaffected — Bluetooth routing there is controlled by the AVAudioSession
+category options applied in `ensureSession()`.

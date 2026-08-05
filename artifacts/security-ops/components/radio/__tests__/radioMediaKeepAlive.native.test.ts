@@ -62,8 +62,25 @@ const h = vi.hoisted(() => {
     unmute = vi.fn(async () => {});
   }
 
-  return { players, rooms, MockRoom, MockTrack };
+  /**
+   * Mutable platform stub — tests can mutate .OS / .Version before calling
+   * the code under test; the module sees the same object reference.
+   */
+  const platform: { OS: string; Version: number } = { OS: "android", Version: 31 };
+
+  const permissionsAndroid = {
+    PERMISSIONS: { BLUETOOTH_CONNECT: "android.permission.BLUETOOTH_CONNECT" },
+    RESULTS: { GRANTED: "granted", DENIED: "denied" },
+    request: vi.fn(async () => "granted"),
+  };
+
+  return { players, rooms, MockRoom, MockTrack, platform, permissionsAndroid };
 });
+
+vi.mock("react-native", () => ({
+  Platform: h.platform,
+  PermissionsAndroid: h.permissionsAndroid,
+}));
 
 vi.mock("@livekit/react-native", () => ({
   registerGlobals: vi.fn(),
@@ -151,6 +168,11 @@ beforeEach(() => {
   h.players.length = 0;
   h.rooms.length = 0;
   vi.clearAllMocks();
+  // Reset platform to the most interesting default (Android 12+) so all
+  // existing tests exercise the BLUETOOTH_CONNECT code path automatically.
+  h.platform.OS = "android";
+  h.platform.Version = 31;
+  h.permissionsAndroid.request.mockResolvedValue("granted");
 });
 
 describe("NativeRadioMedia — silent keep-alive lifecycle", () => {
@@ -373,5 +395,68 @@ describe("NativeRadioMedia — Bluetooth audio session", () => {
     await expect(media.ensureListen("chan-1", TOKEN)).resolves.toBeUndefined();
     expect(AudioSession.startAudioSession).toHaveBeenCalled();
     expect(media.isListening("chan-1")).toBe(true);
+  });
+});
+
+describe("NativeRadioMedia — Android BLUETOOTH_CONNECT runtime permission", () => {
+  it("requests BLUETOOTH_CONNECT permission before configureAudio on Android 12+ (API 31)", async () => {
+    // h.platform defaults to { OS: 'android', Version: 31 } via beforeEach.
+    const media = createRadioMedia();
+    await media.ensureListen("chan-1", TOKEN);
+
+    expect(h.permissionsAndroid.request).toHaveBeenCalledWith(
+      "android.permission.BLUETOOTH_CONNECT",
+      expect.objectContaining({ title: "Bluetooth Access" }),
+    );
+
+    // The request must land BEFORE configureAudio so the permission is
+    // already granted by the time routing is configured.
+    const permOrder = h.permissionsAndroid.request.mock.invocationCallOrder[0];
+    const configOrder = (AudioSession.configureAudio as ReturnType<typeof vi.fn>).mock.invocationCallOrder[0];
+    expect(permOrder).toBeLessThan(configOrder);
+  });
+
+  it("still configures audio and joins the channel when BLUETOOTH_CONNECT is denied", async () => {
+    h.permissionsAndroid.request.mockResolvedValueOnce("denied");
+    const media = createRadioMedia();
+
+    await expect(media.ensureListen("chan-1", TOKEN)).resolves.toBeUndefined();
+    expect(AudioSession.configureAudio).toHaveBeenCalled();
+    expect(media.isListening("chan-1")).toBe(true);
+  });
+
+  it("still configures audio when the permission request itself throws", async () => {
+    h.permissionsAndroid.request.mockRejectedValueOnce(new Error("unavailable"));
+    const media = createRadioMedia();
+
+    await expect(media.ensureListen("chan-1", TOKEN)).resolves.toBeUndefined();
+    expect(AudioSession.configureAudio).toHaveBeenCalled();
+    expect(media.isListening("chan-1")).toBe(true);
+  });
+
+  it("does NOT request BLUETOOTH_CONNECT on Android below API 31", async () => {
+    h.platform.Version = 30;
+    const media = createRadioMedia();
+    await media.ensureListen("chan-1", TOKEN);
+
+    expect(h.permissionsAndroid.request).not.toHaveBeenCalled();
+  });
+
+  it("does NOT request BLUETOOTH_CONNECT on iOS", async () => {
+    h.platform.OS = "ios";
+    h.platform.Version = 17;
+    const media = createRadioMedia();
+    await media.ensureListen("chan-1", TOKEN);
+
+    expect(h.permissionsAndroid.request).not.toHaveBeenCalled();
+  });
+
+  it("only requests BLUETOOTH_CONNECT once even if multiple listen rooms are opened", async () => {
+    const media = createRadioMedia();
+    await media.ensureListen("chan-1", TOKEN);
+    await media.ensureListen("chan-2", TOKEN);
+
+    // ensureSession() short-circuits after the first call (sessionStarted flag).
+    expect(h.permissionsAndroid.request).toHaveBeenCalledTimes(1);
   });
 });

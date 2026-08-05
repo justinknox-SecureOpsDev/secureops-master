@@ -16,6 +16,18 @@ import { afterAll, describe, it, expect, vi } from "vitest";
  * methods are all safe no-ops.
  */
 
+// Block the real react-native from loading (Flow `import typeof` syntax is
+// unparseable by Rollup/vitest); radioMedia.native.ts imports Platform and
+// PermissionsAndroid from it, so a minimal stub is enough for these tests.
+vi.mock("react-native", () => ({
+  Platform: { OS: "android", Version: 31 },
+  PermissionsAndroid: {
+    PERMISSIONS: { BLUETOOTH_CONNECT: "android.permission.BLUETOOTH_CONNECT" },
+    RESULTS: { GRANTED: "granted" },
+    request: vi.fn(async () => "granted"),
+  },
+}));
+
 // expo-audio is ALSO absent on those binaries.
 vi.mock("expo-audio", () => {
   throw new Error("Cannot find native module 'ExpoAudio' (simulated old binary)");
