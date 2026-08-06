@@ -112,7 +112,8 @@ title = "Feature Graphic — 1024×500 (Google Play)"
 id = "saYbh2dl9lEeakvbTQM9D"
 uri = "file://attached_assets/location-permission-demo.mp4"
 type = "video"
-title = "Location permission demo (corrected, foreground-only)"
+title = "Corrected location permission demo video"
+description = "Re-exported 2026-07-30: shows the corrected foreground-only disclosure ('Location used for your shift', with 'Not now' decline) and the 'While using the app' OS prompt. Upload this to the Play Console location permissions declaration."
 
 [[outputs]]
 id = "UmE3LqDx3iOGKgWZ5mxpK"
