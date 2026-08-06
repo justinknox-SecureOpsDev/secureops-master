@@ -1,17 +1,36 @@
 ---
 name: Mobile location is foreground-only
-description: SecureOps mobile declares background-location + FGS-location but the code only ever does foreground one-shot reads; no geofencing. Load before any store permission declaration or location-perm edit.
+description: SecureOps mobile only ever does foreground one-shot location reads — no background permission, no FGS-location, no geofencing. Load before any store permission declaration, review note, or location-perm edit.
 ---
 
-The `security-ops` app **declares** `ACCESS_BACKGROUND_LOCATION`, `FOREGROUND_SERVICE_LOCATION`, `isAndroidBackgroundLocationEnabled: true`, and iOS `NSLocationAlwaysAndWhenInUse` + `UIBackgroundModes: [audio]`.
+The `security-ops` app is **foreground-location only**, in the manifest *and* in
+the code.
 
-**But the code only ever calls `requestForegroundPermissionsAsync()` + `getCurrentPositionAsync()`** at discrete user-initiated moments (clock in/out, patrol checkpoint, emergency), plus a 60s `setInterval` that pushes position to dispatch **only while the app is foregrounded** (or while the radio's background-audio session happens to keep it alive). There is **NO** `startLocationUpdatesAsync`, **NO** `TaskManager`/`defineTask` background task, **NO** `requestBackgroundPermissionsAsync`, and **NO geofencing** (`startGeofencingAsync`/region monitoring) anywhere.
+- Android declares `ACCESS_FINE_LOCATION` + `ACCESS_COARSE_LOCATION` only.
+  `ACCESS_BACKGROUND_LOCATION` and `FOREGROUND_SERVICE_LOCATION` were removed and
+  the expo-location plugin has `isAndroidBackgroundLocationEnabled: false` /
+  `isAndroidForegroundServiceEnabled: false`.
+- iOS declares `NSLocationWhenInUseUsageDescription` only — no "Always" string.
+  (`UIBackgroundModes: [audio]` is the radio, not location.)
+- The code calls `requestForegroundPermissionsAsync()` + one-shot
+  `getCurrentPositionAsync()` at discrete moments (clock screen open, clock
+  in/out, patrol checkpoint, emergency), plus a 60s ping while clocked in that
+  **checks `AppState` and skips unless the app is foregrounded** — the radio's
+  background-audio session can otherwise keep the screen mounted and turn the
+  timer into background collection.
+- There is **NO** `startLocationUpdatesAsync`, **NO** `TaskManager`/`defineTask`,
+  **NO** `requestBackgroundPermissionsAsync`, and **NO geofencing**.
 
-**Why it matters (Play Console / App Store):**
-- FGS-location task = "User-initiated location sharing" (officer clocks in → live position to dispatch). NOT Geofencing, NOT Navigation.
-- Never check Geofencing — there is none; the store then demands a geofencing demo video that can't be produced honestly.
-- The declared background-location permission is effectively dormant (never requested at runtime), so it is a standing rejection risk. Dropping `ACCESS_BACKGROUND_LOCATION` + `FOREGROUND_SERVICE_LOCATION` + `isAndroidBackgroundLocationEnabled` would simplify approval but needs a NEW binary/AAB.
-- `FOREGROUND_SERVICE_MEDIA_PLAYBACK` is NOT in app.json — `expo-audio` (radio keep-alive) auto-merges it; task = "Media playback" (incoming radio audio in background).
-- `FOREGROUND_SERVICE_MICROPHONE` = push-to-talk two-way radio; Play Console task = "Background audio input".
+**Why it matters (Play Console / App Store):** every store answer must match the
+list above. Never tick Geofencing or background location — the store then demands
+a demo video that cannot be produced honestly, and a disclosure claiming more
+collection than the app performs is itself a policy violation.
 
-**How to apply:** before answering any store permission form or editing location perms, re-grep for `requestBackgroundPermissionsAsync` / `startLocationUpdatesAsync` / `Geofenc`. If still absent, the app is foreground-only regardless of what the manifest declares.
+Other background-service tasks that DO exist: `FOREGROUND_SERVICE_MICROPHONE` =
+push-to-talk ("Background audio input"), and `FOREGROUND_SERVICE_MEDIA_PLAYBACK`
+auto-merged by expo-audio for incoming radio audio ("Media playback").
+
+**How to apply:** before answering any store permission form or editing location
+perms, re-grep for `requestBackgroundPermissionsAsync` / `startLocationUpdatesAsync`
+/ `Geofenc`, and re-read `artifacts/security-ops/APP_REVIEW_NOTES.md` §4 — the
+notes have drifted from the code before.

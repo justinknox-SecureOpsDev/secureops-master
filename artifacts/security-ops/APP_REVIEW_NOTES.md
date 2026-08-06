@@ -80,28 +80,55 @@ locked device keeps receiving the transmission.
 
 ---
 
-## 4. Location usage (background location disclosure)
+## 4. Location usage — FOREGROUND ONLY
 
-Location is used **only while the officer is clocked in on a shift**, for two
-operational purposes disclosed in the permission prompts:
+> Anything in this section that reaches a store form must stay literally true of
+> the code. Google rejected the app once for a disclosure that promised more
+> collection than the app performs. Re-read `.agents/memory/play-prominent-disclosure.md`
+> before editing. There is **no background location and no geofencing** in this
+> app — do not describe either, and never tick "Geofencing" on a store form.
 
-- **Clock-in verification:** confirm the officer is physically on-site.
-- **Live position + geofence:** share live position with dispatch and alert
-  dispatch if the officer leaves their assigned site, or triggers the emergency
-  button.
+**What is requested:** foreground/"when in use" location only.
 
-Location sharing stops when the officer clocks out. The in-app EULA and the
-usage-description strings describe this. The purpose strings in `Info.plist`:
+- Android declares `ACCESS_FINE_LOCATION` + `ACCESS_COARSE_LOCATION`. It does
+  **not** declare `ACCESS_BACKGROUND_LOCATION` or `FOREGROUND_SERVICE_LOCATION`.
+- iOS declares `NSLocationWhenInUseUsageDescription` only — there is no
+  "Always" purpose string.
+- The code only ever calls `requestForegroundPermissionsAsync()` and one-shot
+  `getCurrentPositionAsync()`. There is no `startLocationUpdatesAsync`, no
+  `TaskManager` background task, and no region monitoring / geofencing.
 
-- *When in use:* "SecureOps uses your location to verify you are on-site when
-  you clock in and to share your live position with dispatch while you are on
-  shift."
-- *Always/background:* "SecureOps uses your location in the background while you
-  are clocked in so dispatch can be alerted if you leave your assigned site or
-  trigger an emergency."
+**When location is read** (every one of these is with the app open on screen):
 
-To exercise it: sign in as the officer, clock in on an assigned shift, and grant
-location. The emergency button is on the officer Home screen (press and hold).
+- when the officer opens the Clock screen;
+- when they clock in or out (from the Clock screen or the Shifts list);
+- when they scan a patrol checkpoint;
+- when they send an emergency alert;
+- about once a minute while clocked in — and only while the app is actually
+  foregrounded (the timer checks `AppState` and skips the read otherwise, so
+  the radio's background-audio session cannot turn this into background
+  collection).
+
+**What it is used for:** confirming the officer is physically at the assigned
+site when clocking in, and showing dispatch the officer's position during a
+shift so they can respond to an emergency alert.
+
+**Who it is shared with:** the employer's own dispatch and administrator team.
+It is not sold and not shared with advertisers.
+
+**Prominent disclosure (Android):** on Android the app shows a full in-app
+disclosure — what is collected, when, what for, who it is shared with, and that
+nothing is collected in the background — **before** the OS permission dialog.
+The user must tap "I agree, continue"; "Not now" declines, and declining leaves
+the app fully usable (the officer picks their site by hand when clocking in).
+The demo video of this flow is `attached_assets/location-permission-demo.mp4`.
+
+iOS deliberately does **not** show that screen and prompts directly: Apple has
+rejected this app twice under Guideline 5.1.1(iv) for putting a custom screen in
+front of an OS permission prompt.
+
+To exercise it: sign in as the officer, open the Clock tab, and grant location.
+The emergency button is on the officer Home screen (press and hold).
 
 ---
 

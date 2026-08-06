@@ -38,6 +38,24 @@ re-opens a 5.1.1(iv) rejection.
    radio) that can keep a screen mounted, a timer-driven read needs an explicit
    foreground check or "we never collect in the background" becomes false.
 
+## The disclosure Google judges includes the artefacts you uploaded
+
+Play rejected the app a SECOND time for inadequate prominent disclosure while the
+in-app screen was already correct and already shipped. The evidence screenshot
+(`IN_APP_EXPERIENCE-*.png` in the Console message) was a frame from the **demo
+video attached to the location permission declaration** — a stale export still
+showing the pre-fix "Background Location Needed" copy.
+
+**The in-app screen, the demo video in the declaration form, the Console "App
+access" notes, the Data safety answers, and `APP_REVIEW_NOTES.md` are one
+disclosure as far as review is concerned.** Fixing the code fixes only one of
+them; the rest are uploads and must be replaced by hand in the Console.
+
+**How to apply:** when a rejection cites an in-app experience, open the attached
+screenshot before touching code — a device-bezel frame with a soft grey tap
+circle is our demo-video harness, not the app. Then re-export the video AND
+re-read every store-facing text for the same claim.
+
 ## Dormant permissions are a standing risk
 
 The app declared `ACCESS_BACKGROUND_LOCATION` + `FOREGROUND_SERVICE_LOCATION`
