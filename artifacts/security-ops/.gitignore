@@ -11,9 +11,12 @@ web-dist/
 static-build/
 expo-env.d.ts
 
-# Native
+# Native — generated app dirs only (modules/audio-route native sources are tracked below)
 ios/
 android/
+# Keep local Expo module native sources tracked
+!modules/audio-route/ios/
+!modules/audio-route/android/
 *.orig.*
 *.jks
 *.p8
