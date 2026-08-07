@@ -1,19 +1,16 @@
 /**
  * Per-site processing fee gate tests.
  *
- * The platform-level isProcessingFeeEnabled() is the master switch.
- * When it is ON, a site's salesTaxEnabled toggle controls whether that
- * site's invoices carry the fee at its salesTaxRate.
+ * Each site alone owns whether it charges a processing fee and at what rate.
  *
  * Three invariants tested:
- *   (a) platform ON + site ON  → non-zero processingFeeAmount
- *   (b) platform ON + site OFF → zero fee
- *   (c) platform OFF + site ON → zero fee
+ *   (a) fee-enabled site → non-zero processingFeeAmount
+ *   (b) fee-disabled site → zero fee
  *
  * Tests target upsertWeeklyInvoice (auto-sync path) and the manual
  * POST /invoices route so both paths are covered.
  */
-import { afterAll, beforeAll, describe, expect, it, vi, beforeEach, afterEach } from "vitest";
+import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import request from "supertest";
 import { randomUUID } from "node:crypto";
 import bcrypt from "bcryptjs";
@@ -28,7 +25,6 @@ import {
 } from "@workspace/db";
 import app from "../app";
 import { signToken } from "../middlewares/auth";
-import * as feeConfig from "../lib/processingFeeConfig";
 import { upsertWeeklyInvoice, weekStartIsoBusiness } from "../lib/invoiceSync";
 
 const TAG = `invfee-test-${randomUUID().slice(0, 8)}`;
@@ -39,9 +35,9 @@ type Ctx = {
   officerId: string;
   adminToken: string;
   clientId: string;
-  /** Site with salesTaxEnabled=true, salesTaxRate=5.00 */
+  /** Site with processingFeeEnabled=true, processingFeeRate=5.00 */
   feeOnSiteId: string;
-  /** Site with salesTaxEnabled=false */
+  /** Site with processingFeeEnabled=false */
   feeOffSiteId: string;
 };
 const ctx = {} as Ctx;
@@ -83,8 +79,8 @@ beforeAll(async () => {
       clientId: ctx.clientId,
       name: `${TAG}-fee-on-site`,
       defaultBillRate: "40.00",
-      salesTaxEnabled: true,
-      salesTaxRate: "5.00",
+      processingFeeEnabled: true,
+      processingFeeRate: "5.00",
     })
     .returning({ id: sitesTable.id });
   ctx.feeOnSiteId = feeOnSite.id;
@@ -95,7 +91,7 @@ beforeAll(async () => {
       clientId: ctx.clientId,
       name: `${TAG}-fee-off-site`,
       defaultBillRate: "40.00",
-      salesTaxEnabled: false,
+      processingFeeEnabled: false,
     })
     .returning({ id: sitesTable.id });
   ctx.feeOffSiteId = feeOffSite.id;
@@ -136,58 +132,30 @@ describe("upsertWeeklyInvoice — processing fee gate", () => {
     await deleteTestInvoices();
   });
 
-  it("(a) platform ON + site salesTaxEnabled=true → processingFeeAmount > 0", async () => {
-    vi.spyOn(feeConfig, "isProcessingFeeEnabled").mockReturnValue(true);
-    try {
-      const result = await upsertWeeklyInvoice(ctx.feeOnSiteId, weekStart);
-      expect(result.status).toBe("created");
-      if (result.status !== "created") return;
-      const [inv] = await db
-        .select({ processingFeeAmount: invoicesTable.processingFeeAmount, processingFeeRate: invoicesTable.processingFeeRate, taxAmount: invoicesTable.taxAmount })
-        .from(invoicesTable)
-        .where(eq(invoicesTable.id, result.invoiceId));
-      // subtotal = 8h × $40 = $320; fee = 5% of $320 = $16
-      expect(parseFloat(String(inv.processingFeeAmount ?? "0"))).toBeCloseTo(16, 2);
-      expect(parseFloat(String(inv.processingFeeRate ?? "0"))).toBeCloseTo(5, 2);
-      // taxAmount must be zeroed (canonical column is processingFeeAmount now)
-      expect(parseFloat(String(inv.taxAmount ?? "0"))).toBe(0);
-    } finally {
-      vi.restoreAllMocks();
-    }
+  it("fee-enabled site adds its configured rate to an auto-synced invoice", async () => {
+    const result = await upsertWeeklyInvoice(ctx.feeOnSiteId, weekStart);
+    expect(result.status).toBe("created");
+    if (result.status !== "created") return;
+    const [inv] = await db
+      .select({ processingFeeAmount: invoicesTable.processingFeeAmount, processingFeeRate: invoicesTable.processingFeeRate, taxAmount: invoicesTable.taxAmount })
+      .from(invoicesTable)
+      .where(eq(invoicesTable.id, result.invoiceId));
+    // subtotal = 8h × $40 = $320; fee = 5% of $320 = $16
+    expect(parseFloat(String(inv.processingFeeAmount ?? "0"))).toBeCloseTo(16, 2);
+    expect(parseFloat(String(inv.processingFeeRate ?? "0"))).toBeCloseTo(5, 2);
+    expect(parseFloat(String(inv.taxAmount ?? "0"))).toBe(0);
   });
 
-  it("(b) platform ON + site salesTaxEnabled=false → zero fee", async () => {
-    vi.spyOn(feeConfig, "isProcessingFeeEnabled").mockReturnValue(true);
-    try {
-      const result = await upsertWeeklyInvoice(ctx.feeOffSiteId, weekStart);
-      expect(result.status).toBe("created");
-      if (result.status !== "created") return;
-      const [inv] = await db
-        .select({ processingFeeAmount: invoicesTable.processingFeeAmount, processingFeeRate: invoicesTable.processingFeeRate })
-        .from(invoicesTable)
-        .where(eq(invoicesTable.id, result.invoiceId));
-      expect(inv.processingFeeAmount).toBeNull();
-      expect(inv.processingFeeRate).toBeNull();
-    } finally {
-      vi.restoreAllMocks();
-    }
-  });
-
-  it("(c) platform OFF + site salesTaxEnabled=true → zero fee", async () => {
-    vi.spyOn(feeConfig, "isProcessingFeeEnabled").mockReturnValue(false);
-    try {
-      const result = await upsertWeeklyInvoice(ctx.feeOnSiteId, weekStart);
-      expect(result.status).toBe("created");
-      if (result.status !== "created") return;
-      const [inv] = await db
-        .select({ processingFeeAmount: invoicesTable.processingFeeAmount, processingFeeRate: invoicesTable.processingFeeRate })
-        .from(invoicesTable)
-        .where(eq(invoicesTable.id, result.invoiceId));
-      expect(inv.processingFeeAmount).toBeNull();
-      expect(inv.processingFeeRate).toBeNull();
-    } finally {
-      vi.restoreAllMocks();
-    }
+  it("fee-disabled site adds no fee to an auto-synced invoice", async () => {
+    const result = await upsertWeeklyInvoice(ctx.feeOffSiteId, weekStart);
+    expect(result.status).toBe("created");
+    if (result.status !== "created") return;
+    const [inv] = await db
+      .select({ processingFeeAmount: invoicesTable.processingFeeAmount, processingFeeRate: invoicesTable.processingFeeRate })
+      .from(invoicesTable)
+      .where(eq(invoicesTable.id, result.invoiceId));
+    expect(inv.processingFeeAmount).toBeNull();
+    expect(inv.processingFeeRate).toBeNull();
   });
 });
 
@@ -197,65 +165,34 @@ describe("POST /invoices — processing fee gate", () => {
   const authed = (t: string) => ({ Authorization: `Bearer ${t}` });
   const lineItems = [{ description: "Security services", amount: 320 }];
 
-  it("(a) platform ON + siteId with salesTaxEnabled=true → processingFeeAmount in response", async () => {
-    vi.spyOn(feeConfig, "isProcessingFeeEnabled").mockReturnValue(true);
-    try {
-      const res = await request(app)
-        .post("/api/invoices")
-        .set(authed(ctx.adminToken))
-        .send({
-          clientName: `${TAG}-manual-client`,
-          siteId: ctx.feeOnSiteId,
-          lineItems,
-          dueDate: "2099-01-01",
-        });
-      expect(res.status).toBe(201);
-      // $320 × 5% = $16
-      expect(parseFloat(res.body.processingFeeAmount)).toBeCloseTo(16, 2);
-      expect(parseFloat(res.body.processingFeeRate)).toBeCloseTo(5, 2);
-      expect(parseFloat(res.body.taxAmount)).toBe(0);
-    } finally {
-      vi.restoreAllMocks();
-    }
+  it("fee-enabled site adds its configured rate to a manual invoice", async () => {
+    const res = await request(app)
+      .post("/api/invoices")
+      .set(authed(ctx.adminToken))
+      .send({
+        clientName: `${TAG}-manual-client`,
+        siteId: ctx.feeOnSiteId,
+        lineItems,
+        dueDate: "2099-01-01",
+      });
+    expect(res.status).toBe(201);
+    expect(parseFloat(res.body.processingFeeAmount)).toBeCloseTo(16, 2);
+    expect(parseFloat(res.body.processingFeeRate)).toBeCloseTo(5, 2);
+    expect(parseFloat(res.body.taxAmount)).toBe(0);
   });
 
-  it("(b) platform ON + siteId with salesTaxEnabled=false → zero fee", async () => {
-    vi.spyOn(feeConfig, "isProcessingFeeEnabled").mockReturnValue(true);
-    try {
-      const res = await request(app)
-        .post("/api/invoices")
-        .set(authed(ctx.adminToken))
-        .send({
-          clientName: `${TAG}-manual-client`,
-          siteId: ctx.feeOffSiteId,
-          lineItems,
-          dueDate: "2099-01-01",
-        });
-      expect(res.status).toBe(201);
-      expect(res.body.processingFeeAmount).toBeNull();
-      expect(res.body.processingFeeRate).toBeNull();
-    } finally {
-      vi.restoreAllMocks();
-    }
-  });
-
-  it("(c) platform OFF + siteId with salesTaxEnabled=true → zero fee", async () => {
-    vi.spyOn(feeConfig, "isProcessingFeeEnabled").mockReturnValue(false);
-    try {
-      const res = await request(app)
-        .post("/api/invoices")
-        .set(authed(ctx.adminToken))
-        .send({
-          clientName: `${TAG}-manual-client`,
-          siteId: ctx.feeOnSiteId,
-          lineItems,
-          dueDate: "2099-01-01",
-        });
-      expect(res.status).toBe(201);
-      expect(res.body.processingFeeAmount).toBeNull();
-      expect(res.body.processingFeeRate).toBeNull();
-    } finally {
-      vi.restoreAllMocks();
-    }
+  it("fee-disabled site adds no fee to a manual invoice", async () => {
+    const res = await request(app)
+      .post("/api/invoices")
+      .set(authed(ctx.adminToken))
+      .send({
+        clientName: `${TAG}-manual-client`,
+        siteId: ctx.feeOffSiteId,
+        lineItems,
+        dueDate: "2099-01-01",
+      });
+    expect(res.status).toBe(201);
+    expect(res.body.processingFeeAmount).toBeNull();
+    expect(res.body.processingFeeRate).toBeNull();
   });
 });

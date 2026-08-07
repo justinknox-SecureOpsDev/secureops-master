@@ -7,7 +7,7 @@
  * use the corrected total computed on-the-fly rather than the stale stored
  * value. Paid invoices are left unchanged (settled financial record).
  */
-import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
+import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import request from "supertest";
 import { randomUUID } from "node:crypto";
 import bcrypt from "bcryptjs";
@@ -21,7 +21,6 @@ import {
 } from "@workspace/db";
 import app from "../app";
 import { signToken } from "../middlewares/auth";
-import * as feeConfig from "../lib/processingFeeConfig";
 
 const TAG = `portal-stale-fee-${randomUUID().slice(0, 8)}`;
 const passwordHash = bcrypt.hashSync("test-password", 4);
@@ -34,7 +33,7 @@ type Ctx = {
 };
 const ctx = {} as Ctx;
 
-const FEE_RATE = "8.25"; // site salesTaxRate
+const FEE_RATE = "8.25"; // site processingFeeRate
 const SUBTOTAL = "400.00";
 // Expected corrected fee: $400 × 8.25% = $33.00
 const EXPECTED_FEE = 33.0;
@@ -66,8 +65,8 @@ beforeAll(async () => {
     .values({
       clientId: org.id,
       name: `${TAG}-fee-site`,
-      salesTaxEnabled: true,
-      salesTaxRate: FEE_RATE,
+      processingFeeEnabled: true,
+      processingFeeRate: FEE_RATE,
     })
     .returning({ id: sitesTable.id });
   ctx.siteId = site.id;
@@ -78,7 +77,7 @@ beforeAll(async () => {
     .values({
       clientId: org.id,
       name: `${TAG}-no-fee-site`,
-      salesTaxEnabled: false,
+      processingFeeEnabled: false,
     })
     .returning({ id: sitesTable.id });
   ctx.feeOffSiteId = feeOffSite.id;
@@ -136,7 +135,6 @@ describe("GET /client/invoices — stale-fee correction", () => {
       })
       .returning({ id: invoicesTable.id });
 
-    vi.spyOn(feeConfig, "isProcessingFeeEnabled").mockReturnValue(true);
     try {
       const res = await request(app)
         .get("/api/client/invoices")
@@ -151,7 +149,6 @@ describe("GET /client/invoices — stale-fee correction", () => {
       expect(returnedTotal).toBeCloseTo(EXPECTED_TOTAL, 2);
       expect(returnedFee).toBeCloseTo(EXPECTED_FEE, 2);
     } finally {
-      vi.restoreAllMocks();
       await db.execute(
         sql`DELETE FROM invoices WHERE id = ${inv.id}::uuid`,
       );
@@ -173,7 +170,6 @@ describe("GET /client/invoices — stale-fee correction", () => {
       })
       .returning({ id: invoicesTable.id });
 
-    vi.spyOn(feeConfig, "isProcessingFeeEnabled").mockReturnValue(true);
     try {
       const res = await request(app)
         .get("/api/client/invoices")
@@ -189,7 +185,6 @@ describe("GET /client/invoices — stale-fee correction", () => {
       const returnedFee = parseFloat(String(found.processingFeeAmount ?? "0"));
       expect(returnedFee).toBe(0);
     } finally {
-      vi.restoreAllMocks();
       await db.execute(
         sql`DELETE FROM invoices WHERE id = ${inv.id}::uuid`,
       );
@@ -212,7 +207,6 @@ describe("GET /client/invoices — stale-fee correction", () => {
       })
       .returning({ id: invoicesTable.id });
 
-    vi.spyOn(feeConfig, "isProcessingFeeEnabled").mockReturnValue(true);
     try {
       const res = await request(app)
         .get("/api/client/invoices")
@@ -232,14 +226,13 @@ describe("GET /client/invoices — stale-fee correction", () => {
         2,
       );
     } finally {
-      vi.restoreAllMocks();
       await db.execute(
         sql`DELETE FROM invoices WHERE id = ${inv.id}::uuid`,
       );
     }
   });
 
-  it("does not add a fee when the site has salesTaxEnabled=false", async () => {
+  it("does not add a fee when the site has processingFeeEnabled=false", async () => {
     const [inv] = await db
       .insert(invoicesTable)
       .values({
@@ -253,7 +246,6 @@ describe("GET /client/invoices — stale-fee correction", () => {
       })
       .returning({ id: invoicesTable.id });
 
-    vi.spyOn(feeConfig, "isProcessingFeeEnabled").mockReturnValue(true);
     try {
       const res = await request(app)
         .get("/api/client/invoices")
@@ -269,7 +261,6 @@ describe("GET /client/invoices — stale-fee correction", () => {
         2,
       );
     } finally {
-      vi.restoreAllMocks();
       await db.execute(
         sql`DELETE FROM invoices WHERE id = ${inv.id}::uuid`,
       );
@@ -294,7 +285,6 @@ describe("GET /client/invoices/:id/pdf — stale-fee correction", () => {
       })
       .returning({ id: invoicesTable.id });
 
-    vi.spyOn(feeConfig, "isProcessingFeeEnabled").mockReturnValue(true);
     try {
       const res = await request(app)
         .get(`/api/client/invoices/${inv.id}/pdf`)
@@ -303,7 +293,6 @@ describe("GET /client/invoices/:id/pdf — stale-fee correction", () => {
       expect(res.status).toBe(200);
       expect(res.headers["content-type"]).toMatch(/application\/pdf/);
     } finally {
-      vi.restoreAllMocks();
       await db.execute(
         sql`DELETE FROM invoices WHERE id = ${inv.id}::uuid`,
       );
@@ -330,7 +319,6 @@ describe("POST /client/invoices/:id/checkout — stale-fee correction", () => {
       })
       .returning({ id: invoicesTable.id });
 
-    vi.spyOn(feeConfig, "isProcessingFeeEnabled").mockReturnValue(true);
     const origKey = process.env.STRIPE_SECRET_KEY;
     delete process.env.STRIPE_SECRET_KEY;
     try {
@@ -344,7 +332,6 @@ describe("POST /client/invoices/:id/checkout — stale-fee correction", () => {
       expect(res.body.stripeConfigured).toBe(false);
     } finally {
       if (origKey !== undefined) process.env.STRIPE_SECRET_KEY = origKey;
-      vi.restoreAllMocks();
       await db.execute(
         sql`DELETE FROM invoices WHERE id = ${inv.id}::uuid`,
       );

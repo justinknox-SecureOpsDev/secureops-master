@@ -9,7 +9,6 @@ import { seedChatRooms } from "./lib/seedChatRooms";
 import { seedRadioChannels } from "./lib/seedRadioChannels";
 import { startScheduledJobs } from "./lib/scheduledJobs";
 import { initConfigReadiness } from "./lib/configReadiness";
-import { loadProcessingFeeConfigFromDb } from "./lib/processingFeeConfig";
 import { loadConfirmEditWindowConfigFromDb } from "./lib/confirmEditWindowConfig";
 import { restoreStrandedOnboardingApplicants } from "./lib/restoreStrandedOnboarding";
 
@@ -102,9 +101,6 @@ server.listen(port, () => {
 // the tables don't exist yet, pre-`db push`).
 initConfigReadiness();
 
-loadProcessingFeeConfigFromDb()
-  .then(() => logger.info("Processing-fee config loaded"))
-  .catch((err) => logger.error({ err }, "Failed to load processing-fee config"));
 
 loadConfirmEditWindowConfigFromDb()
   .then(() => logger.info("Confirm edit-window config loaded"))

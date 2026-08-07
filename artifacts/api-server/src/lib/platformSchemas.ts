@@ -88,17 +88,6 @@ export const customerConfigSchema = z.object({
   officerCount: z.number().int().min(1).nullable().optional(),
   billingNotes: z.string().max(2000).nullable().optional(),
   planStartDate: z.string().nullable().optional(),
-  processingFeeEnabled: z.boolean().nullable().optional(),
-  processingFeeRate: z
-    .string()
-    .max(20)
-    .regex(/^\d{1,3}(\.\d{1,4})?$/, "processingFeeRate must be a numeric percentage")
-    .refine((v) => {
-      const n = parseFloat(v);
-      return n > 0 && n <= 100;
-    }, "processingFeeRate must be between 0 (exclusive) and 100")
-    .nullable()
-    .optional(),
   // Officer post-shift self-edit window, in hours. Numeric string; positive.
   // "" / null → clear the override (fall back to env / 2h default).
   timeConfirmEditWindowHours: z
@@ -127,8 +116,6 @@ export const CUSTOMER_CONFIG_WRITE_KEYS = [
   "officerCount",
   "billingNotes",
   "planStartDate",
-  "processingFeeEnabled",
-  "processingFeeRate",
   "timeConfirmEditWindowHours",
 ] as const;
 

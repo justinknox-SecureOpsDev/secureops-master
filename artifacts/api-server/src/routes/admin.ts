@@ -53,7 +53,7 @@ import { disconnectUser } from "../lib/wsManager";
 import { writeEmployeeFieldChanges } from "../lib/employeeChangeLog";
 import { preparePreUpdateBody as prepareSitePreUpdate, maybeAutoGeocode as maybeAutoGeocodeSite } from "../lib/siteGeocode";
 import { normalizePhoneToE164 } from "../lib/phone";
-import { adminEditBreaksAutoSync, upsertWeeklyInvoiceForTimeEntry, weekStartIsoBusiness } from "../lib/invoiceSync";
+import { adminEditBreaksAutoSync, resyncSiteAutoSyncedDrafts, upsertWeeklyInvoiceForTimeEntry, weekStartIsoBusiness } from "../lib/invoiceSync";
 import type { TimeEntry } from "@workspace/db";
 import { buildTimeEntryAuditMetadata, timeEntrySnapshot } from "../lib/timeEntryAudit";
 import { ObjectStorageService, ObjectNotFoundError } from "../lib/objectStorage";
@@ -1304,6 +1304,16 @@ router.put("/admin/tables/:table/:id", requireAdmin, async (req, res): Promise<v
 
     if (tableName === "sites") {
       row = await maybeAutoGeocodeSite(row as Record<string, unknown>, req.log);
+      const beforeSite = beforeRow as Record<string, unknown>;
+      const savedSite = row as Record<string, unknown>;
+      const feeChanged =
+        beforeSite.processingFeeEnabled !== savedSite.processingFeeEnabled ||
+        String(beforeSite.processingFeeRate ?? "8.25") !== String(savedSite.processingFeeRate ?? "8.25");
+      if (feeChanged) {
+        void resyncSiteAutoSyncedDrafts(id).catch((err) => {
+          req.log.warn({ err, siteId: id }, "[admin] background resync of auto-synced drafts failed");
+        });
+      }
     }
 
     // Keep employees.phone <-> users.phoneNumber in sync (SMS source of truth +

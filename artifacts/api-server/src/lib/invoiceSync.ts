@@ -13,7 +13,6 @@ import {
 } from "@workspace/db";
 import { logger } from "./logger";
 import { getFederalHolidayName, HOLIDAY_PAY_MULTIPLIER } from "./holidays";
-import { isProcessingFeeEnabled, getProcessingFeeRate } from "./processingFeeConfig";
 import { businessTimeZone, businessDateToUtc, businessDateIso, startOfBusinessWeek } from "./businessTime";
 
 /**
@@ -397,8 +396,8 @@ export async function upsertWeeklyInvoice(
       name: sitesTable.name,
       clientId: sitesTable.clientId,
       defaultBillRate: sitesTable.defaultBillRate,
-      salesTaxEnabled: sitesTable.salesTaxEnabled,
-      salesTaxRate: sitesTable.salesTaxRate,
+      processingFeeEnabled: sitesTable.processingFeeEnabled,
+      processingFeeRate: sitesTable.processingFeeRate,
     })
     .from(sitesTable)
     .where(eq(sitesTable.id, siteId));
@@ -500,14 +499,10 @@ export async function upsertWeeklyInvoice(
 
   const subtotal =
     Math.round(lineItems.reduce((s, l) => s + l.amount, 0) * 100) / 100;
-  // Unified fee: platform master switch AND per-site salesTaxEnabled must
-  // both be true. The rate comes from the site's salesTaxRate (not the
-  // platform-level getProcessingFeeRate singleton), so each site can carry
-  // a different percentage. taxAmount is zeroed — it was the old per-site
-  // path before this unification; processingFeeAmount is now the single
-  // canonical fee column.
-  const feeEnabled = isProcessingFeeEnabled() && !!site.salesTaxEnabled;
-  const feeRate = feeEnabled ? parseFloat(String(site.salesTaxRate ?? "8.25")) : 0;
+  // Each site owns its fee toggle and rate. taxAmount is zeroed; the
+  // processingFeeAmount column is the canonical fee snapshot on invoices.
+  const feeEnabled = !!site.processingFeeEnabled;
+  const feeRate = feeEnabled ? parseFloat(String(site.processingFeeRate ?? "8.25")) : 0;
   const feeAmount = feeEnabled ? Math.round(subtotal * feeRate / 100 * 100) / 100 : 0;
   const total = Math.round((subtotal + feeAmount) * 100) / 100;
 
@@ -611,9 +606,9 @@ export async function upsertWeeklyInvoice(
       logger.error({ siteId, weekStartIso }, "[invoice-sync] unique violation but no race-winner row found");
       return { status: "skipped", reason: "concurrent insert lost race" };
     }
-    // Use the same unified fee logic as the non-race path.
-    const rwFeeEnabled = isProcessingFeeEnabled() && !!site.salesTaxEnabled;
-    const rwFeeRate = rwFeeEnabled ? parseFloat(String(site.salesTaxRate ?? "8.25")) : 0;
+    // Use the same site-level fee logic as the non-race path.
+    const rwFeeEnabled = !!site.processingFeeEnabled;
+    const rwFeeRate = rwFeeEnabled ? parseFloat(String(site.processingFeeRate ?? "8.25")) : 0;
     const rwFeeAmount = rwFeeEnabled ? Math.round(subtotal * rwFeeRate / 100 * 100) / 100 : 0;
     const rwTotal = Math.round((subtotal + rwFeeAmount) * 100) / 100;
     await db
@@ -743,8 +738,8 @@ export async function upsertCustomPeriodInvoice(
       name: sitesTable.name,
       clientId: sitesTable.clientId,
       defaultBillRate: sitesTable.defaultBillRate,
-      salesTaxEnabled: sitesTable.salesTaxEnabled,
-      salesTaxRate: sitesTable.salesTaxRate,
+      processingFeeEnabled: sitesTable.processingFeeEnabled,
+      processingFeeRate: sitesTable.processingFeeRate,
     })
     .from(sitesTable)
     .where(eq(sitesTable.id, siteId));
@@ -773,9 +768,9 @@ export async function upsertCustomPeriodInvoice(
   }
 
   const subtotal = Math.round(lineItems.reduce((s, l) => s + l.amount, 0) * 100) / 100;
-  // Unified fee: platform master switch AND per-site salesTaxEnabled, rate from site.
-  const cpFeeEnabled = isProcessingFeeEnabled() && !!site.salesTaxEnabled;
-  const cpFeeRate = cpFeeEnabled ? parseFloat(String(site.salesTaxRate ?? "8.25")) : 0;
+  // The site is the sole owner of its processing-fee setting and rate.
+  const cpFeeEnabled = !!site.processingFeeEnabled;
+  const cpFeeRate = cpFeeEnabled ? parseFloat(String(site.processingFeeRate ?? "8.25")) : 0;
   const cpFeeAmount = cpFeeEnabled ? Math.round(subtotal * cpFeeRate / 100 * 100) / 100 : 0;
   const total = Math.round((subtotal + cpFeeAmount) * 100) / 100;
   const dueDate = isoDate(addDaysUtc(new Date(), client.paymentTermsDays ?? 30));
@@ -816,7 +811,8 @@ export async function upsertCustomPeriodInvoice(
 /**
  * Re-sync every open auto-synced draft invoice for a site.
  *
- * Called after a site's fee settings (salesTaxEnabled / salesTaxRate) change
+ * Called after a site's fee settings (processingFeeEnabled /
+ * processingFeeRate) change
  * so that existing draft invoices immediately reflect the new fee without
  * requiring an admin to regenerate them by hand.
  *

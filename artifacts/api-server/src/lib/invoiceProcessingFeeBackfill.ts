@@ -2,7 +2,7 @@
  * One-time idempotent backfill: for draft invoices created before the
  * per-site processing fee unification, tax_amount held the per-site fee
  * while processing_fee_amount was NULL. This moves the amount to the
- * canonical column, computes the rate from the site's current salesTaxRate,
+ * canonical column, computes the rate from the site's current processing fee rate,
  * and zeros tax_amount.
  *
  * Conditions (all must be true to be repaired):
@@ -76,11 +76,11 @@ export async function backfillInvoiceProcessingFees(): Promise<BackfillSummary> 
   const siteRates = new Map<string, number>();
   if (siteIds.length > 0) {
     const sites = await db
-      .select({ id: sitesTable.id, salesTaxRate: sitesTable.salesTaxRate })
+      .select({ id: sitesTable.id, processingFeeRate: sitesTable.processingFeeRate })
       .from(sitesTable)
       .where(sql`${sitesTable.id} = ANY(${sql.raw(`ARRAY['${siteIds.join("','")}']::uuid[]`)})`);
     for (const s of sites) {
-      siteRates.set(s.id, parseFloat(String(s.salesTaxRate ?? "8.25")));
+      siteRates.set(s.id, parseFloat(String(s.processingFeeRate ?? "8.25")));
     }
   }
 

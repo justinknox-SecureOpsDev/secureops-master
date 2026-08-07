@@ -141,8 +141,8 @@ router.get("/sites", requireSchedulingStaff, async (req, res): Promise<void> => 
       locationLng: sitesTable.locationLng,
       notes: sitesTable.notes,
       geofenceRadiusMiles: sitesTable.geofenceRadiusMiles,
-      salesTaxEnabled: sitesTable.salesTaxEnabled,
-      salesTaxRate: sitesTable.salesTaxRate,
+      processingFeeEnabled: sitesTable.processingFeeEnabled,
+      processingFeeRate: sitesTable.processingFeeRate,
       createdAt: sitesTable.createdAt,
     })
     .from(sitesTable)
@@ -180,8 +180,8 @@ router.get("/sites/:id", requireAdminOrDispatcher, async (req, res): Promise<voi
       locationLng: sitesTable.locationLng,
       notes: sitesTable.notes,
       geofenceRadiusMiles: sitesTable.geofenceRadiusMiles,
-      salesTaxEnabled: sitesTable.salesTaxEnabled,
-      salesTaxRate: sitesTable.salesTaxRate,
+      processingFeeEnabled: sitesTable.processingFeeEnabled,
+      processingFeeRate: sitesTable.processingFeeRate,
       createdAt: sitesTable.createdAt,
     })
     .from(sitesTable)
@@ -196,7 +196,7 @@ router.get("/sites/:id", requireAdminOrDispatcher, async (req, res): Promise<voi
 
 router.put("/sites/:id", requireAdmin, async (req, res): Promise<void> => {
   const id = Array.isArray(req.params.id) ? req.params.id[0] : req.params.id;
-  const { name, status, address, locationLat, locationLng, notes, geofenceRadiusMiles, autoClockOutEnabled, salesTaxEnabled, salesTaxRate } = req.body;
+  const { name, status, address, locationLat, locationLng, notes, geofenceRadiusMiles, autoClockOutEnabled, processingFeeEnabled, processingFeeRate } = req.body;
   let updates: Record<string, unknown> = {};
   if (name !== undefined) updates.name = name;
   if (status !== undefined) {
@@ -213,19 +213,19 @@ router.put("/sites/:id", requireAdmin, async (req, res): Promise<void> => {
   if (autoClockOutEnabled !== undefined) {
     updates.autoClockOutEnabled = autoClockOutEnabled === true || autoClockOutEnabled === "true";
   }
-  if (salesTaxEnabled !== undefined) {
-    updates.salesTaxEnabled = salesTaxEnabled === true || salesTaxEnabled === "true";
+  if (processingFeeEnabled !== undefined) {
+    updates.processingFeeEnabled = processingFeeEnabled === true || processingFeeEnabled === "true";
   }
-  if (salesTaxRate !== undefined) {
-    if (salesTaxRate === null || salesTaxRate === "") {
-      updates.salesTaxRate = "8.25";
+  if (processingFeeRate !== undefined) {
+    if (processingFeeRate === null || processingFeeRate === "") {
+      updates.processingFeeRate = "8.25";
     } else {
-      const n = Number(salesTaxRate);
-      if (!Number.isFinite(n) || n < 0 || n > 100) {
-        res.status(400).json({ error: "Bad Request", message: "salesTaxRate must be a percentage between 0 and 100." });
+      const n = Number(processingFeeRate);
+      if (!Number.isFinite(n) || n <= 0 || n > 100) {
+        res.status(400).json({ error: "Bad Request", message: "processingFeeRate must be a percentage greater than 0 and at most 100." });
         return;
       }
-      updates.salesTaxRate = String(n);
+      updates.processingFeeRate = String(n);
     }
   }
   if (geofenceRadiusMiles !== undefined) {
@@ -258,9 +258,9 @@ router.put("/sites/:id", requireAdmin, async (req, res): Promise<void> => {
   // Snapshot whether fee settings are changing so we can re-sync open
   // auto-synced draft invoices after save (see resyncSiteAutoSyncedDrafts).
   const feeSettingChanged =
-    (salesTaxEnabled !== undefined &&
-      (salesTaxEnabled === true || salesTaxEnabled === "true") !== !!before.salesTaxEnabled) ||
-    (salesTaxRate !== undefined && String(salesTaxRate ?? "8.25") !== String(before.salesTaxRate ?? "8.25"));
+    (processingFeeEnabled !== undefined &&
+      (processingFeeEnabled === true || processingFeeEnabled === "true") !== !!before.processingFeeEnabled) ||
+    (processingFeeRate !== undefined && String(processingFeeRate ?? "8.25") !== String(before.processingFeeRate ?? "8.25"));
 
   const [site] = await db.update(sitesTable).set(updates).where(eq(sitesTable.id, id)).returning();
   if (!site) { res.status(404).json({ error: "Not Found" }); return; }

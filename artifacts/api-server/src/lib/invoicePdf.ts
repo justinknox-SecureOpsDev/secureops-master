@@ -34,7 +34,7 @@ export type InvoicePdfInput = {
    * When set, a notice callout is rendered on the PDF warning the client that
    * processing fees may have been updated since this invoice was generated.
    * Use this when serving a sent/paid invoice whose processingFeeAmount is
-   * stale (NULL) relative to the site's current salesTaxEnabled setting.
+   * stale (NULL) relative to the site's current processing-fee setting.
    */
   staleFeeNote?: string | null;
 };

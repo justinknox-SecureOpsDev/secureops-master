@@ -23,7 +23,6 @@ import {
   registerAgreementDoc,
 } from "../lib/agreementDocs";
 import { brand, applyBrandOverrides } from "../lib/brandConfig";
-import { applyProcessingFeeConfig } from "../lib/processingFeeConfig";
 import { applyConfirmEditWindowConfig } from "../lib/confirmEditWindowConfig";
 import {
   type FeatureKey,
@@ -169,7 +168,6 @@ router.put("/admin/platform/customer-config", requireAuth, requireSuperAdmin, as
     .from(platformCustomerConfigTable)
     .where(eq(platformCustomerConfigTable.id, "singleton"))
     .limit(1);
-  applyProcessingFeeConfig(config ?? null);
   applyConfirmEditWindowConfig(config ?? null);
 
   // Record the old→new values for every changed field in the audit log. Only

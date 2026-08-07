@@ -51,7 +51,6 @@ import {
   customerConfigSchema,
   pickCustomerConfigColumns,
 } from "../lib/platformSchemas";
-import { applyProcessingFeeConfig } from "../lib/processingFeeConfig";
 import { applyConfirmEditWindowConfig } from "../lib/confirmEditWindowConfig";
 import { requireControlPlaneHmac } from "../lib/controlPlaneAuth";
 import { BUILD_VERSION, BUILD_TIME } from "../lib/buildInfo";
@@ -274,7 +273,6 @@ router.put("/control-plane/features", async (req, res) => {
  * Upsert the customer / commercial config remotely and apply the live hooks.
  *
  * Reuses the SAME zod schema as the in-app super-admin route so validation is
- * identical on both paths, and the SAME applyProcessingFeeConfig /
  * applyConfirmEditWindowConfig hooks so the invoice processing fee and the
  * officer time-edit window take effect immediately — no customer restart. Only
  * the keys present in the payload are written; an absent key is left unchanged,
@@ -303,7 +301,6 @@ router.put("/control-plane/customer-config", async (req, res) => {
     });
 
   const config = await readCustomerConfigRow();
-  applyProcessingFeeConfig(config);
   applyConfirmEditWindowConfig(config);
   res.json({ customerConfig: config });
 });

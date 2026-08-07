@@ -22,11 +22,6 @@ import {
 import app from "../app";
 import { signControlPlanePayload, CONTROL_PLANE_SIGNATURE_HEADER } from "../lib/controlPlaneAuth";
 import {
-  isProcessingFeeEnabled,
-  getProcessingFeeRate,
-  applyProcessingFeeConfig,
-} from "../lib/processingFeeConfig";
-import {
   getConfirmEditWindowOverride,
   applyConfirmEditWindowConfig,
 } from "../lib/confirmEditWindowConfig";
@@ -49,9 +44,8 @@ afterAll(async () => {
   await db
     .delete(platformCustomerConfigTable)
     .where(eq(platformCustomerConfigTable.id, "singleton"));
-  // Reset the in-memory live-apply singletons this suite mutated back to their
-  // env defaults so later test files that read them aren't polluted.
-  applyProcessingFeeConfig(null);
+  // Reset the in-memory live-apply singleton this suite mutated back to its
+  // env default so later test files aren't polluted.
   applyConfirmEditWindowConfig(null);
 });
 
@@ -178,7 +172,7 @@ describe("/api/control-plane (HMAC)", () => {
       expect(res.status).toBe(401);
     });
 
-    it("writes plan / pricing and applies the fee + edit window live", async () => {
+    it("writes plan / pricing and applies the edit window live", async () => {
       process.env.CONTROL_PLANE_SHARED_SECRET = SECRET;
       const body = {
         customerName: "Remote Plan Co",
@@ -187,8 +181,6 @@ describe("/api/control-plane (HMAC)", () => {
         officerCount: 42,
         billingNotes: "net-30",
         planStartDate: "2026-01-01",
-        processingFeeEnabled: true,
-        processingFeeRate: "9.5",
         timeConfirmEditWindowHours: "3",
       };
       const payload = JSON.stringify(body);
@@ -204,13 +196,9 @@ describe("/api/control-plane (HMAC)", () => {
         planTier: "professional",
         monthlyPriceCents: 89900,
         officerCount: 42,
-        processingFeeEnabled: true,
-        processingFeeRate: "9.5",
         timeConfirmEditWindowHours: "3",
       });
-      // Live-apply hooks ran — the change takes effect with no restart.
-      expect(isProcessingFeeEnabled()).toBe(true);
-      expect(getProcessingFeeRate()).toBeCloseTo(9.5);
+      // The live-apply hook runs without a restart.
       expect(getConfirmEditWindowOverride()).toBe(3);
     });
 

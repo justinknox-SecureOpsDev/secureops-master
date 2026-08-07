@@ -32,16 +32,16 @@ describe("buildCustomerConfigChanges", () => {
   });
 
   it("does not report fields absent from the payload", () => {
-    const before = { customerName: "Acme", processingFeeRate: "3.5" };
-    const after = { customerName: "NewCo" }; // processingFeeRate omitted → unchanged
+    const before = { customerName: "Acme", billingNotes: "Net 30" };
+    const after = { customerName: "NewCo" }; // billingNotes omitted → unchanged
     const meta = buildCustomerConfigChanges(before, after);
     expect(meta?.changes.map((c) => c.field)).toEqual(["customerName"]);
   });
 
   it("treats undefined/null before as unset→set", () => {
-    const meta = buildCustomerConfigChanges({}, { processingFeeEnabled: true });
+    const meta = buildCustomerConfigChanges({}, { billingNotes: "Net 30" });
     expect(meta?.changes).toEqual([
-      { field: "processingFeeEnabled", label: "Processing fee", kind: "bool", old: null, new: true },
+      { field: "billingNotes", label: "Billing notes", kind: "text", old: null, new: "Net 30" },
     ]);
   });
 });

@@ -49,8 +49,6 @@ const CUSTOMER_CONFIG_FIELDS: FieldDescriptor[] = [
   { field: "officerCount", label: "Officer count", kind: "number" },
   { field: "billingNotes", label: "Billing notes", kind: "text" },
   { field: "planStartDate", label: "Plan start date", kind: "text" },
-  { field: "processingFeeEnabled", label: "Processing fee", kind: "bool" },
-  { field: "processingFeeRate", label: "Processing fee rate", kind: "percent" },
   { field: "timeConfirmEditWindowHours", label: "Time-edit limit", kind: "hours" },
 ];
 

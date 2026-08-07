@@ -19,7 +19,6 @@ import {
   ticketRejectionMessage,
 } from "../lib/invoiceSendTickets";
 import { requireFeature } from "../lib/features";
-import { isProcessingFeeEnabled, getProcessingFeeRate } from "../lib/processingFeeConfig";
 import { getFeeMigrationPendingCount } from "../lib/invoiceProcessingFeeBackfill";
 
 const router: IRouter = Router();
@@ -77,17 +76,17 @@ async function calcTotals(
   let siteFeeRate = 0;
   if (siteId) {
     const [site] = await db
-      .select({ salesTaxEnabled: sitesTable.salesTaxEnabled, salesTaxRate: sitesTable.salesTaxRate })
+      .select({ processingFeeEnabled: sitesTable.processingFeeEnabled, processingFeeRate: sitesTable.processingFeeRate })
       .from(sitesTable)
       .where(eq(sitesTable.id, siteId));
-    if (site?.salesTaxEnabled) {
+    if (site?.processingFeeEnabled) {
       siteFeeEnabled = true;
-      siteFeeRate = parseFloat(String(site.salesTaxRate ?? "8.25"));
+      siteFeeRate = parseFloat(String(site.processingFeeRate ?? "8.25"));
     }
   }
 
-  // Unified fee: platform master switch AND per-site salesTaxEnabled.
-  const feeEnabled = isProcessingFeeEnabled() && siteFeeEnabled;
+  // The site is the sole owner of invoice processing-fee configuration.
+  const feeEnabled = siteFeeEnabled;
   const feeRate = feeEnabled ? siteFeeRate : 0;
   const feeAmount = feeEnabled ? Math.round(subtotal * feeRate / 100 * 100) / 100 : 0;
   const total = Math.round((subtotal + feeAmount) * 100) / 100;
@@ -540,6 +539,8 @@ async function loadInvoiceForSend(id: string) {
       totalAmount: invoicesTable.totalAmount,
       processingFeeRate: invoicesTable.processingFeeRate,
       processingFeeAmount: invoicesTable.processingFeeAmount,
+      siteProcessingFeeEnabled: sitesTable.processingFeeEnabled,
+      siteProcessingFeeRate: sitesTable.processingFeeRate,
       notes: invoicesTable.notes,
     })
     .from(invoicesTable)
@@ -610,9 +611,9 @@ function sendWarnings(
     out.push("This invoice has no line items.");
   }
   const feeAmt = parseFloat(String(row.processingFeeAmount ?? "0"));
-  if (isProcessingFeeEnabled() && !(feeAmt > 0)) {
+  if (row.siteProcessingFeeEnabled && !(feeAmt > 0)) {
     out.push(
-      `The ${getProcessingFeeRate()}% processing fee is switched on, but this invoice does not include one. ` +
+      `The ${row.siteProcessingFeeRate}% processing fee is switched on for this site, but this invoice does not include one. ` +
       "Recalculate the fee before sending if it should be charged.",
     );
   }
@@ -887,7 +888,7 @@ type InvoiceLineItem = {
 
 
 // Recalculate the processing fee fields for a sent/overdue invoice using the
-// site's current salesTaxEnabled + salesTaxRate settings. Updates
+// site's current processing-fee settings. Updates
 // processingFeeRate, processingFeeAmount, and totalAmount in-place.
 // Safe to call on paid invoices too (returns the unchanged row with a flag),
 // but will not mutate them — paid invoices are a settled financial record.

@@ -416,14 +416,14 @@ export const TABLES: TableDescriptor[] = [
         helpText: "When enabled, officers at this site are automatically clocked out after their shift ends and they leave the geofence. Disable for sites where officers routinely work past scheduled end times.",
       },
       {
-        key: "salesTaxEnabled",
+        key: "processingFeeEnabled",
         label: "Charge processing fee",
         type: "boolean",
         hiddenInGrid: true,
         helpText: "When enabled, the configured processing fee rate is applied to this site's invoices automatically.",
       },
       {
-        key: "salesTaxRate",
+        key: "processingFeeRate",
         label: "Processing fee rate (%)",
         type: "number",
         hiddenInGrid: true,

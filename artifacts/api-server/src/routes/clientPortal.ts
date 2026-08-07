@@ -32,7 +32,6 @@ import { ObjectStorageService, ObjectNotFoundError } from "../lib/objectStorage"
 import { buildIncidentReportPdf } from "../lib/incidentPdf";
 import { buildInvoicePdf } from "../lib/invoicePdf";
 import { sendEmail } from "../lib/email";
-import { isProcessingFeeEnabled } from "../lib/processingFeeConfig";
 
 const objectStorageService = new ObjectStorageService();
 
@@ -112,7 +111,7 @@ function getTrustedBaseUrl(): string | null {
 /**
  * For sent/overdue invoices whose processingFeeAmount is NULL (generated before
  * the fee toggle was enabled), compute the effective fee on-the-fly using the
- * site's current salesTaxEnabled + salesTaxRate so client-facing reads always
+ * site's current processing-fee setting and rate so client-facing reads always
  * reflect the correct current total.
  *
  * Paid invoices are intentionally left untouched — they are settled financial
@@ -123,8 +122,8 @@ function computeEffectiveFee(params: {
   processingFeeAmount: string | null;
   processingFeeRate: string | null;
   totalAmount: string | null;
-  siteSalesTaxEnabled: boolean | null;
-  siteSalesTaxRate: string | null;
+  siteProcessingFeeEnabled: boolean | null;
+  siteProcessingFeeRate: string | null;
   status: string;
 }): {
   feeAmount: string | null;
@@ -143,11 +142,11 @@ function computeEffectiveFee(params: {
   }
 
   const storedFee = parseFloat(String(params.processingFeeAmount ?? "0")) || 0;
-  const siteHasFee = isProcessingFeeEnabled() && Boolean(params.siteSalesTaxEnabled);
+  const siteHasFee = Boolean(params.siteProcessingFeeEnabled);
 
   if (storedFee === 0 && siteHasFee) {
     const subtotal = parseFloat(String(params.subtotal ?? "0")) || 0;
-    const feeRate = parseFloat(String(params.siteSalesTaxRate ?? "0")) || 0;
+    const feeRate = parseFloat(String(params.siteProcessingFeeRate ?? "0")) || 0;
     if (feeRate > 0) {
       const feeAmount = Math.round(subtotal * feeRate / 100 * 100) / 100;
       const total = Math.round((subtotal + feeAmount) * 100) / 100;
@@ -606,8 +605,8 @@ router.get(
           totalAmount: invoicesTable.totalAmount,
           processingFeeAmount: invoicesTable.processingFeeAmount,
           processingFeeRate: invoicesTable.processingFeeRate,
-          siteSalesTaxEnabled: sitesTable.salesTaxEnabled,
-          siteSalesTaxRate: sitesTable.salesTaxRate,
+          siteProcessingFeeEnabled: sitesTable.processingFeeEnabled,
+          siteProcessingFeeRate: sitesTable.processingFeeRate,
           status: invoicesTable.status,
           dueDate: invoicesTable.dueDate,
           paidAt: invoicesTable.paidAt,
@@ -633,12 +632,12 @@ router.get(
           processingFeeAmount: r.processingFeeAmount,
           processingFeeRate: r.processingFeeRate,
           totalAmount: r.totalAmount,
-          siteSalesTaxEnabled: r.siteSalesTaxEnabled ?? null,
-          siteSalesTaxRate: r.siteSalesTaxRate ?? null,
+          siteProcessingFeeEnabled: r.siteProcessingFeeEnabled ?? null,
+          siteProcessingFeeRate: r.siteProcessingFeeRate ?? null,
           status: r.status,
         });
         // Strip internal site fee fields from the client-facing response.
-        const { siteSalesTaxEnabled: _ste, siteSalesTaxRate: _str, ...rest } = r;
+        const { siteProcessingFeeEnabled: _feeEnabled, siteProcessingFeeRate: _feeRate, ...rest } = r;
         return {
           ...rest,
           totalAmount: eff.totalAmount,
@@ -676,8 +675,8 @@ router.get(
           clientEmail: invoicesTable.clientEmail,
           clientAddress: invoicesTable.clientAddress,
           siteName: sitesTable.name,
-          siteSalesTaxEnabled: sitesTable.salesTaxEnabled,
-          siteSalesTaxRate: sitesTable.salesTaxRate,
+          siteProcessingFeeEnabled: sitesTable.processingFeeEnabled,
+          siteProcessingFeeRate: sitesTable.processingFeeRate,
           periodStart: invoicesTable.periodStart,
           periodEnd: invoicesTable.periodEnd,
           dueDate: invoicesTable.dueDate,
@@ -733,8 +732,8 @@ router.get(
         processingFeeAmount: row.processingFeeAmount,
         processingFeeRate: row.processingFeeRate,
         totalAmount: row.totalAmount,
-        siteSalesTaxEnabled: row.siteSalesTaxEnabled ?? null,
-        siteSalesTaxRate: row.siteSalesTaxRate ?? null,
+        siteProcessingFeeEnabled: row.siteProcessingFeeEnabled ?? null,
+        siteProcessingFeeRate: row.siteProcessingFeeRate ?? null,
         status: row.status,
       });
 
@@ -802,8 +801,8 @@ router.post(
           processingFeeAmount: invoicesTable.processingFeeAmount,
           processingFeeRate: invoicesTable.processingFeeRate,
           status: invoicesTable.status,
-          siteSalesTaxEnabled: sitesTable.salesTaxEnabled,
-          siteSalesTaxRate: sitesTable.salesTaxRate,
+          siteProcessingFeeEnabled: sitesTable.processingFeeEnabled,
+          siteProcessingFeeRate: sitesTable.processingFeeRate,
         })
         .from(invoicesTable)
         .leftJoin(sitesTable, eq(invoicesTable.siteId, sitesTable.id))
@@ -834,8 +833,8 @@ router.post(
         processingFeeAmount: invoice.processingFeeAmount,
         processingFeeRate: invoice.processingFeeRate,
         totalAmount: invoice.totalAmount,
-        siteSalesTaxEnabled: invoice.siteSalesTaxEnabled ?? null,
-        siteSalesTaxRate: invoice.siteSalesTaxRate ?? null,
+        siteProcessingFeeEnabled: invoice.siteProcessingFeeEnabled ?? null,
+        siteProcessingFeeRate: invoice.siteProcessingFeeRate ?? null,
         status: invoice.status,
       });
 
