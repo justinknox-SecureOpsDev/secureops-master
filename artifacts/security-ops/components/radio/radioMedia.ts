@@ -33,6 +33,9 @@ class WebRadioMediaStub implements RadioMedia {
   setOnListenLost(_cb: ((channelId: string) => void) | null): void {
     /* no audio on Expo web — listen rooms never exist, so never lost */
   }
+  setOnPublishLost(_cb: ((channelId: string) => void) | null): void {
+    /* no audio on Expo web — publish rooms never exist, so never lost */
+  }
   async ensureListen(_channelId: string, _token: RadioToken): Promise<void> {
     /* no audio on Expo web */
   }

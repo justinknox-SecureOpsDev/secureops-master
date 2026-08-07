@@ -224,11 +224,37 @@ export default function RadioScreen({ topInset = true }: RadioScreenProps = {}):
       }, delay);
     });
 
-    const cancelTransmit = (): void => {
+    // H3: When the LiveKit PUBLISH room disconnects unexpectedly mid-hold
+    // (SFU restart, network partition), the WS lock is still held server-side
+    // (WS and LiveKit are independent connections). Release the lock so other
+    // officers can speak, reset the PTT UI, and tell the officer their
+    // transmission was lost so they can re-press.
+    mediaRef.current.setOnPublishLost((channelId) => {
+      if (cancelled) return;
+      // stop() bumps gen + clears intent FIRST, then sends WS "end" to release
+      // the lock. This mirrors the normal release path but without a user press.
+      transmitRef.current!.stop(channelId, null);
+      setTalkState("idle");
+      setPublishingChannelId(null);
+      setError("Transmission dropped — connection lost. Press and hold to retry.");
+    });
+
+    // H1: cancelTransmit is called when the WS control plane drops. Pass
+    // droppedByNetwork=true from onclose/onerror so a live transmission shows
+    // an honest "dropped" notice instead of silently reverting to idle.
+    const cancelTransmit = (droppedByNetwork = false): void => {
+      // Check intent BEFORE cancel() clears it — intent() is non-null only if
+      // the user was actually transmitting (requesting, connecting, or live).
+      const wasTransmitting = droppedByNetwork && transmitRef.current!.intent() !== null;
       transmitRef.current!.cancel(); // abort in-flight publish + drop intent (no 'end')
       setTalkState("idle");
       setPublishingChannelId(null);
       void mediaRef.current?.stopPublish();
+      // Surface a visible error so the officer knows their transmission was cut,
+      // not just silently gone. The server already released the lock on disconnect
+      // (radioGateway.ts onSocketClose → releaseLock("disconnect")), so there is
+      // nothing to recover — the user must re-press once the WS reconnects.
+      if (wasTransmitting) setError("Transmission dropped — reconnecting. Press and hold again when ready.");
     };
 
     const scheduleReconnect = (): void => {
@@ -257,11 +283,14 @@ export default function RadioScreen({ topInset = true }: RadioScreenProps = {}):
         if (wsRef.current !== ws) return; // a newer socket already took over
         setWsReady(false);
         joinedRef.current.clear();
-        cancelTransmit();
+        cancelTransmit(true); // show "dropped" notice if a transmission was live
         scheduleReconnect();
       };
       // Don't schedule from onerror — onclose always follows and owns retry.
-      ws.onerror = () => { if (wsRef.current === ws) cancelTransmit(); };
+      // Pass true so a transmission in flight when the socket errors out also
+      // surfaces a "dropped" notice; the second call (from onclose) is a no-op
+      // because cancel() already cleared the intent on the first call.
+      ws.onerror = () => { if (wsRef.current === ws) cancelTransmit(true); };
       ws.onmessage = (ev) => {
         if (wsRef.current !== ws) return; // ignore stale socket events
         if (typeof ev.data !== "string") return; // audio rides LiveKit, not this socket
@@ -301,6 +330,7 @@ export default function RadioScreen({ topInset = true }: RadioScreenProps = {}):
       if (ws) { ws.onclose = null; try { ws.close(); } catch { /* ignore */ } }
       wsRef.current = null;
       mediaRef.current?.setOnListenLost(null);
+      mediaRef.current?.setOnPublishLost(null);
       void mediaRef.current?.teardown();
       mediaRef.current = null;
     };
@@ -318,16 +348,36 @@ export default function RadioScreen({ topInset = true }: RadioScreenProps = {}):
   // (an AVAudioSession interruption like a phone call pauses it and nothing
   // resumes it automatically).
   useEffect(() => {
+    // H4: Debounce the stopTalking trigger so a brief "inactive" window —
+    // iOS notification banner, Control Center pull, incoming-call banner —
+    // does not cut a held PTT. Only release if we stay non-active for 600ms.
+    // The timer is cleared immediately if "active" follows (the normal case for
+    // a dismissable notification). True backgrounding (app switch, lock button)
+    // stays non-active indefinitely and fires the release as intended.
+    let bgTimer: ReturnType<typeof setTimeout> | undefined;
+
     const sub = AppState.addEventListener("change", (status) => {
       // Drives the listen policy: only the always-on channel (and only on
       // duty) survives leaving the foreground.
       setForeground(status === "active");
       if (status !== "active") {
-        // Leaving the foreground mid-transmission would strand the publish
-        // room (and with it the keep-alive) outside the listen policy, so
-        // release the floor exactly as if PTT had been let go.
-        void stopTalkingRef.current?.();
+        // Arm the debounced release. A notification banner that returns to
+        // "active" within 600ms clears the timer and the PTT hold continues.
+        if (bgTimer === undefined) {
+          bgTimer = setTimeout(() => {
+            bgTimer = undefined;
+            // Leaving the foreground mid-transmission would strand the publish
+            // room (and with it the keep-alive) outside the listen policy, so
+            // release the floor exactly as if PTT had been let go.
+            void stopTalkingRef.current?.();
+          }, 600);
+        }
         return;
+      }
+      // Returned to active — cancel any pending debounced release.
+      if (bgTimer !== undefined) {
+        clearTimeout(bgTimer);
+        bgTimer = undefined;
       }
       setListenEpoch((e) => e + 1);
       mediaRef.current?.resumeKeepAlive?.();
@@ -336,7 +386,10 @@ export default function RadioScreen({ topInset = true }: RadioScreenProps = {}):
         try { ws.send(JSON.stringify({ type: "ping" })); } catch { /* onclose handles it */ }
       }
     });
-    return () => sub.remove();
+    return () => {
+      if (bgTimer !== undefined) clearTimeout(bgTimer);
+      sub.remove();
+    };
   }, []);
 
   // --- join all visible non-archived channels (control plane) once WS is up ---
@@ -548,43 +601,70 @@ export default function RadioScreen({ topInset = true }: RadioScreenProps = {}):
         })}
       </ScrollView>
 
-      {/* Scrollable so the PTT button and Mute/Leave row stay reachable above
-          the absolute tab bar even on short screens (e.g. iPhone SE) where the
-          fixed-size controls would otherwise run underneath it. */}
-      <ScrollView
-        style={{ flex: 1 }}
-        contentContainerStyle={[styles.body, { paddingBottom: tabBarOverlay + 16 }]}
-        showsVerticalScrollIndicator={false}
-      >
-        {!activeChannel ? (
-          <Text style={styles.muted}>No channels available.</Text>
-        ) : (
-          <>
-            <Text style={styles.channelName}>{activeChannel.name}</Text>
-            <Text style={styles.muted}>
-              {activeChannel.scope === "site" ? `Site${activeChannel.siteName ? `: ${activeChannel.siteName}` : ""}` : activeChannel.scope}
-            </Text>
+      {/*
+        H2 fix: the PTT Pressable must NEVER be inside a ScrollView.
+        React Native's gesture system gives scroll priority to ScrollView
+        when the user's finger drifts even slightly — the scroll recognizer
+        steals the touch and fires onPressOut, cutting the transmission while
+        the officer is still physically holding the button.
 
-            <View style={styles.status}>
-              {isSpeakingHere || isTransmitting ? (
-                <View style={[styles.banner, { backgroundColor: "#16a34a1a" }]}>
-                  <View style={[styles.bannerDot, { backgroundColor: "#16a34a" }]} />
-                  <Text style={[styles.bannerText, { color: "#15803d" }]}>
-                    {talkState === "requesting" ? "Requesting the floor…"
-                      : talkState === "connecting" ? "Connecting your mic…"
-                      : "You are transmitting…"}
-                  </Text>
-                </View>
-              ) : otherSpeaker ? (
-                <View style={[styles.banner, { backgroundColor: "#0284c71a" }]}>
-                  <Feather name="volume-2" size={16} color="#0284c7" />
-                  <Text style={[styles.bannerText, { color: "#0369a1" }]}>{otherSpeaker.name} is transmitting…</Text>
-                </View>
-              ) : (
-                <Text style={[styles.statusText, { color: colors.mutedForeground }]}>Channel idle</Text>
+        Layout: a flex:1 container holds:
+          1. A ScrollView for the channel info + status banner — keeps short
+             devices (iPhone SE) from having content hidden off-screen.
+          2. A fixed (non-scrollable) footer for the PTT button and Mute/Leave
+             row. paddingBottom: tabBarOverlay + 16 ensures the button clears
+             the absolute tab bar on all devices (preserving the prior fix).
+      */}
+      <View style={{ flex: 1 }}>
+        {/* Scrollable channel info — no PTT button here */}
+        <ScrollView
+          style={{ flex: 1 }}
+          contentContainerStyle={styles.bodyInfo}
+          showsVerticalScrollIndicator={false}
+        >
+          {!activeChannel ? (
+            <Text style={styles.muted}>No channels available.</Text>
+          ) : (
+            <>
+              <Text style={styles.channelName}>{activeChannel.name}</Text>
+              <Text style={styles.muted}>
+                {activeChannel.scope === "site" ? `Site${activeChannel.siteName ? `: ${activeChannel.siteName}` : ""}` : activeChannel.scope}
+              </Text>
+
+              <View style={styles.status}>
+                {isSpeakingHere || isTransmitting ? (
+                  <View style={[styles.banner, { backgroundColor: "#16a34a1a" }]}>
+                    <View style={[styles.bannerDot, { backgroundColor: "#16a34a" }]} />
+                    <Text style={[styles.bannerText, { color: "#15803d" }]}>
+                      {talkState === "requesting" ? "Requesting the floor…"
+                        : talkState === "connecting" ? "Connecting your mic…"
+                        : "You are transmitting…"}
+                    </Text>
+                  </View>
+                ) : otherSpeaker ? (
+                  <View style={[styles.banner, { backgroundColor: "#0284c71a" }]}>
+                    <Feather name="volume-2" size={16} color="#0284c7" />
+                    <Text style={[styles.bannerText, { color: "#0369a1" }]}>{otherSpeaker.name} is transmitting…</Text>
+                  </View>
+                ) : (
+                  <Text style={[styles.statusText, { color: colors.mutedForeground }]}>Channel idle</Text>
+                )}
+              </View>
+
+              {!supportsAudio && (
+                <Text style={[styles.muted, { textAlign: "center", marginTop: 20, paddingHorizontal: 24 }]}>
+                  Presence only in this preview — you can see who's transmitting. Live audio (listen and talk) is end-to-end encrypted in the SecureOps app on your phone.
+                </Text>
               )}
-            </View>
+            </>
+          )}
+        </ScrollView>
 
+        {/* Fixed PTT footer — always outside any scroll container so the
+            gesture recognizer never steals onPressOut from a held press.
+            paddingBottom clears the absolute-positioned tab bar. */}
+        {activeChannel && (
+          <View style={[styles.pttFooter, { paddingBottom: tabBarOverlay + 16 }]}>
             <Pressable
               onPressIn={startTalking}
               onPressOut={() => { void stopTalking(); }}
@@ -627,15 +707,9 @@ export default function RadioScreen({ topInset = true }: RadioScreenProps = {}):
                 </TouchableOpacity>
               )}
             </View>
-
-            {!supportsAudio && (
-              <Text style={[styles.muted, { textAlign: "center", marginTop: 20, paddingHorizontal: 24 }]}>
-                Presence only in this preview — you can see who's transmitting. Live audio (listen and talk) is end-to-end encrypted in the SecureOps app on your phone.
-              </Text>
-            )}
-          </>
+          </View>
         )}
-      </ScrollView>
+      </View>
     </SafeAreaView>
   );
 }
@@ -650,9 +724,15 @@ const makeStyles = (colors: ReturnType<typeof useColors>) => StyleSheet.create({
   chipRow: { maxHeight: 48, flexGrow: 0 },
   chip: { flexDirection: "row", alignItems: "center", paddingHorizontal: 12, paddingVertical: 6, borderRadius: 16, backgroundColor: colors.card, borderWidth: 1, borderColor: colors.border },
   chipText: { color: colors.foreground, fontSize: 13 },
-  // contentContainerStyle of the body ScrollView — flexGrow (not flex) so it
-  // fills tall screens but can exceed and scroll on short ones.
-  body: { flexGrow: 1, alignItems: "center", paddingTop: 24 },
+  // contentContainerStyle of the scrollable channel-info section (above the
+  // PTT footer). flexGrow so it fills tall screens but can exceed and scroll
+  // on short ones. PTT button lives in pttFooter, NOT here (H2 fix).
+  bodyInfo: { flexGrow: 1, alignItems: "center", paddingTop: 24, paddingHorizontal: 16 },
+  // Fixed, non-scrollable footer that holds the PTT button and Mute/Leave row.
+  // Never inside a ScrollView — gesture recognizer can't steal onPressOut here.
+  // paddingBottom is set inline (tabBarOverlay + 16) so it clears the absolute
+  // tab bar on all devices, preserving the prior "button clears tab bar" fix.
+  pttFooter: { alignItems: "center", paddingTop: 12 },
   channelName: { fontSize: 20, fontWeight: "700", color: colors.foreground },
   muted: { color: colors.mutedForeground, fontSize: 13, marginTop: 4 },
   status: { marginTop: 16, minHeight: 36, justifyContent: "center" },
@@ -660,7 +740,7 @@ const makeStyles = (colors: ReturnType<typeof useColors>) => StyleSheet.create({
   banner: { flexDirection: "row", alignItems: "center", gap: 8, paddingHorizontal: 14, paddingVertical: 8, borderRadius: 20 },
   bannerDot: { width: 8, height: 8, borderRadius: 4 },
   bannerText: { fontSize: 14, fontWeight: "700" },
-  ptt: { width: 200, height: 200, borderRadius: 100, justifyContent: "center", alignItems: "center", marginTop: 28, shadowColor: "#000", shadowOpacity: 0.18, shadowOffset: { width: 0, height: 6 }, shadowRadius: 14, elevation: 6 },
+  ptt: { width: 200, height: 200, borderRadius: 100, justifyContent: "center", alignItems: "center", marginTop: 0, shadowColor: "#000", shadowOpacity: 0.18, shadowOffset: { width: 0, height: 6 }, shadowRadius: 14, elevation: 6 },
   pttLabel: { color: "#fff", fontWeight: "600", marginTop: 8 },
   smallBtn: { flexDirection: "row", alignItems: "center", gap: 6, paddingHorizontal: 12, paddingVertical: 8, borderRadius: 8, borderWidth: 1, borderColor: colors.border, backgroundColor: colors.card },
   smallBtnText: { color: colors.foreground, fontSize: 13, fontWeight: "500" },

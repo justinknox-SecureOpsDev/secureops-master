@@ -115,6 +115,7 @@ class NativeRadioMedia implements RadioMedia {
   private publishStarting = false;
   private tearingDown = false;
   private onListenLost: ((channelId: string) => void) | null = null;
+  private onPublishLost: ((channelId: string) => void) | null = null;
   /**
    * Channels whose listen room died UNEXPECTEDLY and whose recovery has been
    * handed to `onListenLost`. These still count as keep-alive demand: dropping
@@ -149,6 +150,9 @@ class NativeRadioMedia implements RadioMedia {
       this.recovering.clear();
       this.reconcileKeepAlive();
     }
+  }
+  setOnPublishLost(cb: ((channelId: string) => void) | null): void {
+    this.onPublishLost = cb;
   }
 
   private async ensureSession(): Promise<void> {
@@ -379,6 +383,23 @@ class NativeRadioMedia implements RadioMedia {
     token: RadioToken,
     aborted: () => boolean,
   ): Promise<void> {
+    // Attach the unexpected-disconnect handler BEFORE connecting. stopPublish()
+    // and abortPublish() null out `this.publishRoom` BEFORE calling
+    // room.disconnect(), so when the Disconnected event fires from a deliberate
+    // teardown `this.publishRoom !== room` and the handler is a silent no-op.
+    // An unexpected disconnect (SFU restart, LiveKit network partition) fires
+    // while `this.publishRoom === room`, so we clear the refs and notify the
+    // screen so it can release the WS lock and reset the PTT UI.
+    room.on(this.lkc.RoomEvent.Disconnected, () => {
+      if (this.publishRoom !== room) return; // deliberate teardown — ignore
+      const channelId = this.publishChannelId;
+      this.publishRoom = null;
+      this.publishTrack = null;
+      this.publishChannelId = null;
+      this.reconcileKeepAlive();
+      if (channelId) this.onPublishLost?.(channelId);
+    });
+
     let track: LocalAudioTrack | null = null;
     try {
       await room.connect(token.url, token.token);
@@ -530,6 +551,9 @@ class MissingNativesRadioMediaStub implements RadioMedia {
   }
   async stopPublish(): Promise<void> {
     /* no audio without the LiveKit natives */
+  }
+  setOnPublishLost(_cb: ((channelId: string) => void) | null): void {
+    /* no audio without the LiveKit natives — publish rooms never exist */
   }
   async teardown(): Promise<void> {
     /* no audio without the LiveKit natives */

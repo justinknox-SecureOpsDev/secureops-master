@@ -227,3 +227,74 @@ describe("NativeRadioMedia.startPublish — release mid-connect", () => {
     expect(media.publishingChannelId()).toBe("chan-1");
   });
 });
+
+describe("NativeRadioMedia.setOnPublishLost — unexpected publish room disconnect", () => {
+  beforeEach(() => {
+    created.rooms = [];
+    created.tracks = [];
+    hooks.connect = undefined;
+    hooks.publish = undefined;
+  });
+
+  /**
+   * H3 fix: when the LiveKit PUBLISH room fires a Disconnected event while we
+   * are the active publisher (SFU restart, network partition), the media layer
+   * must:
+   *   1. Clear publishRoom/publishTrack/publishChannelId refs so the UI knows
+   *      the transmit is over.
+   *   2. Fire the onPublishLost callback with the channelId so the screen can
+   *      release the WS lock and display a "transmission dropped" notice.
+   *   3. NOT fire the callback when the disconnect came from a deliberate
+   *      stopPublish() — those null out publishRoom BEFORE disconnect.
+   */
+  it("clears refs and fires onPublishLost when the publish room disconnects unexpectedly", async () => {
+    const media = createRadioMedia();
+
+    // Start a successful publish (never aborted).
+    await media.startPublish("chan-1", TOKEN, () => false);
+    expect(media.publishingChannelId()).toBe("chan-1");
+
+    // Register the publish-lost callback.
+    const lostChannels: string[] = [];
+    media.setOnPublishLost((channelId) => lostChannels.push(channelId));
+
+    // Simulate an unexpected LiveKit Disconnected event. The MockRoom.on()
+    // records all registered listeners; find the "disconnected" handler and
+    // fire it manually.
+    const room = created.rooms[0];
+    const disconnectedHandler = room.on.mock.calls.find(
+      ([event]: [string]) => event === "disconnected",
+    )?.[1] as (() => void) | undefined;
+    expect(disconnectedHandler).toBeDefined();
+    disconnectedHandler!();
+
+    // Refs must be cleared.
+    expect(media.publishingChannelId()).toBeNull();
+    // The callback must have fired with the correct channelId.
+    expect(lostChannels).toEqual(["chan-1"]);
+  });
+
+  it("does NOT fire onPublishLost when stopPublish() caused the disconnect", async () => {
+    const media = createRadioMedia();
+
+    await media.startPublish("chan-1", TOKEN, () => false);
+
+    const lostChannels: string[] = [];
+    media.setOnPublishLost((channelId) => lostChannels.push(channelId));
+
+    // stopPublish() nulls publishRoom BEFORE calling room.disconnect(), so
+    // by the time the Disconnected event fires publishRoom !== room → no-op.
+    await media.stopPublish();
+
+    // Simulate the Disconnected event arriving after stopPublish already
+    // cleared the refs (as LiveKit fires it asynchronously).
+    const room = created.rooms[0];
+    const disconnectedHandler = room.on.mock.calls.find(
+      ([event]: [string]) => event === "disconnected",
+    )?.[1] as (() => void) | undefined;
+    disconnectedHandler?.();
+
+    // The callback must NOT have fired — this was a deliberate teardown.
+    expect(lostChannels).toEqual([]);
+  });
+});

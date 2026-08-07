@@ -47,6 +47,15 @@ export interface RadioMedia {
    * user would stay deaf on the channel until they switch channels or PTT).
    */
   setOnListenLost(cb: ((channelId: string) => void) | null): void;
+  /**
+   * Register a callback fired when the active PUBLISH room disconnects
+   * UNEXPECTEDLY mid-transmission (LiveKit SFU restart, network partition,
+   * token eviction) — i.e. not via stopPublish/teardown. The screen uses it
+   * to release the WS speaker lock and reset the PTT UI so the officer knows
+   * audio stopped, instead of silently showing "You are transmitting" with no
+   * one hearing them.
+   */
+  setOnPublishLost(cb: ((channelId: string) => void) | null): void;
   ensureListen(channelId: string, token: RadioToken): Promise<void>;
   dropListen(channelId: string): Promise<void>;
   /**
