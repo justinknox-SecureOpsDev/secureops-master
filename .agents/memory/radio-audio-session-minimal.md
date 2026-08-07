@@ -1,37 +1,73 @@
 ---
-name: Radio audio session must stay minimal
-description: Bluetooth headset-mic audio-session options (iOS voiceChat/allowBluetooth, Android forced routing) garble ALL radio transmissions fleet-wide, headset or not.
+name: Radio BT headset — conditional audio-session and detection invariants
+description: Invariants for the SecureOps radio Bluetooth HFP support: what must never be set globally, how detection triggers, what drives routing, and why native listener registration must be lazy.
 ---
 
-The mobile radio's LiveKit audio session must stay minimal: the Android
-`communication` preset plus iOS `defaultOutput: "speaker"`. Nothing else.
+## Audio-session invariants (never violated)
 
-**Why:** an attempt to support Bluetooth headset MICS added, on iOS, an
-`AudioSession.setAppleAudioConfiguration` override (`playAndRecord` +
-`allowBluetooth`/HFP + `allowBluetoothA2DP` + `defaultToSpeaker` +
-`mixWithOthers`, `audioMode: "voiceChat"`) and, on Android, a bluetooth-first
-`preferredOutputList` + `forceHandleAudioRouting: true` + a `BLUETOOTH_CONNECT`
-runtime prompt. It shipped to the fleet by OTA and made EVERY transmission
-sound robotic/underwater to every listener with **no Bluetooth device involved
-at all** — reported as "the radio is jumbled". `voiceChat` is Apple's
-handset-tuned voice-processing path and fights WebRTC's own AEC/AGC/noise
-suppression; forced routing pushes capture onto narrowband voice-call paths.
-Reverted 2026-08-07; audio quality for the whole fleet outranks headset mics.
+- **Never `voiceChat` mode** (iOS) — it activates Apple's handset voice-processing
+  path, which fights WebRTC's AEC/AGC/noise-suppression and makes every
+  transmission sound robotic/underwater for ALL listeners, headset or not.
+  `videoChat` (or the default) is the correct mode.
 
-**How to apply:** if headset capture is revisited, engage those options ONLY
-while a headset is actually the selected route (never as a static session
-config), and verify on real hardware before an OTA. A regression test in
-`radioMediaKeepAlive.native.test.ts` asserts the minimal config, no
-`setAppleAudioConfiguration` call, and no Bluetooth permission prompt.
+- **Never `allowBluetooth`/`allowBluetoothA2DP` as a static session config**
+  (iOS) — those options must be set ONLY while a BT HFP device is actually the
+  selected route (`isBluetoothHFPActive` true); removing them on disconnect is
+  mandatory. A static override degrades ALL transmissions.
 
-**Diagnostic shortcut:** "radio sounds robotic/underwater/muffled" is an
-audio-session/routing problem on the CAPTURE side, not E2EE, not the SFU, not
-the listen policy. Distinguish by symptom: static bursts at the start of a
-press = E2EE cryptor readiness; overlapping/echo = duplicate rooms; robotic
-throughout = session category/mode.
+- **Never `forceHandleAudioRouting: true`** (Android) — forces capture onto the
+  narrowband voice-call path, degrading audio for every user regardless of
+  headset presence.
 
-**Fleet-split gotcha:** the two platforms can sit on different runtime
-versions, so one mobile fix needs TWO OTAs and the auto-OTA-on-deploy only
-serves the newer runtime — the older fleet needs a manual push (mechanics in
-`ota-update-from-sandbox.md`). Check both fleets' runtimes before assuming a
-fix shipped.
+- **Never `configureAudio({ preferredOutputList })` post-session-start**
+  (Android) — `preferredDeviceList` is constructor-only in `AudioSwitchManager`;
+  it has no effect on the running instance. Use `selectAudioOutput("bluetooth")`
+  / `selectAudioOutput("speaker")` on the live instance instead.
+
+## Detection and routing invariants
+
+- **Availability triggers; active-route confirms.**
+  `hasBluetoothHeadsetAvailable` (Android: `getDevices()` type integers;
+  iOS: `availableInputs`) is the trigger for the lazy permission request and
+  `selectAudioOutput("bluetooth")` call. `isBluetoothHFPActive` (Android:
+  `getCommunicationDevice().type` / `isBluetoothScoOn()`; iOS:
+  `currentRoute.inputs`) is the confirmation that routing actually changed.
+  Android branches on availability; iOS branches on active-route (iOS
+  auto-routes, so they arrive together).
+
+- **Permission is lazy.** `requestBluetoothPermission()` (Android 12+ /
+  API 31+) is called only the first time `hasBluetoothHeadsetAvailable`
+  transitions false→true. Officers with no headset never see the prompt.
+  A denied permission must NOT cause a re-prompt loop; the route stays on
+  speaker and disconnect events skip `selectAudioOutput` (route was never
+  changed).
+
+- **Revert guard.** If `BLUETOOTH_CONNECT` was denied, disconnect must not
+  call `selectAudioOutput("speaker")` — the baseline route was never changed.
+
+## Native listener registration must be lazy
+
+`appContext.reactContext` can be null when an Expo module's `OnCreate` fires
+(module instantiated before the React host is fully live). Route-change
+listeners that require `audioManager` (which requires `reactContext`) must be
+guarded by a lazy `ensureRouteListenersRegistered()` call:
+
+- **Idempotency flag** (`@Volatile listenersRegistered`) — registration runs
+  at most once per module lifecycle.
+- **Call sites**: `OnCreate` (eager attempt), `OnStartObserving("onAudioRouteChange")`
+  (fires when JS first adds an event listener — `reactContext` is guaranteed
+  live at this point), and every `Function`/`AsyncFunction` entry point.
+- **OnDestroy resets the flag** so a module-recreate cycle can re-register.
+
+Symptom of missing lazy guard: connecting a headset AFTER a radio session
+starts produces no permission prompt and no BT routing — the three
+route-change signals (AudioDeviceCallback, OnCommunicationDeviceChangedListener,
+SCO broadcast) were never registered.
+
+## Diagnostic shorthand
+
+"Radio sounds robotic/underwater/muffled" → audio-session/routing problem on
+the CAPTURE side (wrong mode, static BT options). NOT E2EE, NOT the SFU, NOT
+the listen policy. Distinguish: static bursts at press start = E2EE cryptor
+readiness; overlapping/echo = duplicate rooms; robotic throughout = session
+category/mode.

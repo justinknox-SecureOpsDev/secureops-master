@@ -46,11 +46,36 @@ import type {
   DisconnectReason,
   LocalAudioTrack,
 } from "livekit-client";
+import type {
+  AppleAudioCategoryOption,
+  AppleAudioConfiguration,
+  AudioEngineConfigurationState,
+} from "@livekit/react-native";
+
+// NOTE: react-native is intentionally NOT imported anywhere in this file.
+// radioMedia.native.ts is imported by tests that don't mock react-native (the
+// missing-natives guard test), and react-native's index.js uses Flow's
+// `import typeof` syntax which rollup/vite cannot parse during SSR transform.
+// `vi.mock("react-native", factory)` intercepts static ES imports but NOT
+// bare CJS require() calls at runtime; so there is no safe way to reference
+// react-native here that works across all test environments.
+//
+// Platform detection and Bluetooth permission are handled through the local
+// audio-route native module instead of react-native:
+//  - `audioRoute.platform()` returns "ios" or "android" — gates which path
+//    runs without any react-native import.
+//  - `audioRoute.requestBluetoothPermission()` handles BLUETOOTH_CONNECT on
+//    Android 12+ (API 31+) inside the Kotlin module via Expo's PermissionsManager
+//    (no react-native PermissionsAndroid needed). Crucially, this call is made
+//    LAZILY — only the first time a BT headset is detected as active — NOT at
+//    session start. Officers without a headset never see the prompt, matching
+//    the "no-headset path byte-for-byte unchanged" contract.
 
 import {
   getLiveKitNative,
   getLiveKitClient,
   getExpoAudio,
+  getAudioRoute,
   type LiveKitNativeModule,
   type LiveKitClientModule,
   type ExpoAudioModule,
@@ -106,16 +131,78 @@ class NativeRadioMedia implements RadioMedia {
   ) {}
 
   private listenRooms = new Map<string, Room>();
+
   private connecting = new Set<string>();
+
   private publishRoom: Room | null = null;
+
   private publishChannelId: string | null = null;
+
   private publishTrack: LocalAudioTrack | null = null;
+
   private sessionStarted = false;
+
   private keepAlive: AudioPlayer | null = null;
+
   private publishStarting = false;
+
   private tearingDown = false;
+
   private onListenLost: ((channelId: string) => void) | null = null;
+
   private onPublishLost: ((channelId: string) => void) | null = null;
+
+  // ── Bluetooth headset monitoring ──────────────────────────────────────────
+  // Engaged ONLY while a BT headset is actually affecting the audio route.
+  // The session config applied in ensureSession() (communication preset +
+  // speaker output) is NEVER changed by these methods for the no-headset path.
+  // All state below is reset by stopBtRouteMonitor() in teardown().
+  /**
+  /**
+   * Android: headset is physically present in the device list (availability).
+   * iOS: same as btActive (iOS auto-routes on connect; availability = active).
+   * Availability is the TRIGGER for the lazy permission request and
+   * selectAudioOutput("bluetooth") on Android.
+   */
+  private btAvailable = false;
+
+  /**
+  /**
+   * True when BT HFP/SCO is the currently selected communication route.
+   * On iOS this is the primary trigger (iOS routes automatically on connect).
+   * On Android this is CONFIRMATION that routing succeeded after selection.
+   */
+  private btActive = false;
+
+  /**
+  /**
+   * Tracks BLUETOOTH_CONNECT permission state on Android.
+   *
+  /**
+   * "unasked"  — no permission request has been made yet (initial state).
+   * "granted"  — user granted the permission (or API < 31 where it's implicit).
+   * "denied"   — user denied; BT config stays off for the rest of this session
+   *              with no re-prompt loop.
+   *
+  /**
+   * Always "granted" on iOS (no runtime BT permission required).
+   */
+  private btPermissionState: "unasked" | "granted" | "denied" = "unasked";
+
+  /** Cached platform string from audioRoute.platform() — set in startBtRouteMonitor. */
+  private btOs: string = "";
+
+  /** AudioRoute module subscription — removed in stopBtRouteMonitor. */
+  private btRouteChangeSubscription: { remove(): void } | null = null;
+
+  /**
+   * Cleanup returned by setupIOSAudioManagement — nulled in stopBtRouteMonitor.
+   * iOS only: replaces LiveKit's static default engine handler with our
+   * BT-aware one so the engine cannot overwrite our route-derived config.
+   */
+  private iosEngineHandlerCleanup: (() => void) | null = null;
+
+  /**
   /**
    * Channels whose listen room died UNEXPECTEDLY and whose recovery has been
    * handed to `onListenLost`. These still count as keep-alive demand: dropping
@@ -136,12 +223,15 @@ class NativeRadioMedia implements RadioMedia {
     // channel during a reconnect. Use isListening() for "audio is flowing".
     return [...new Set([...this.listenRooms.keys(), ...this.recovering])];
   }
+
   isListening(channelId: string): boolean {
     return this.listenRooms.has(channelId);
   }
+
   publishingChannelId(): string | null {
     return this.publishChannelId;
   }
+
   setOnListenLost(cb: ((channelId: string) => void) | null): void {
     this.onListenLost = cb;
     // Deregistering (screen unmount) means nothing will retry a lost channel,
@@ -151,6 +241,7 @@ class NativeRadioMedia implements RadioMedia {
       this.reconcileKeepAlive();
     }
   }
+
   setOnPublishLost(cb: ((channelId: string) => void) | null): void {
     this.onPublishLost = cb;
   }
@@ -174,28 +265,355 @@ class NativeRadioMedia implements RadioMedia {
         console.warn("[radio] setAudioModeAsync failed", e);
       }
     }
-    // The audio session config stays deliberately MINIMAL: LiveKit's
-    // communication preset, output on the speakerphone. Nothing else.
+    // The audio session config stays deliberately MINIMAL for the no-headset
+    // path: LiveKit's communication preset, output on the speakerphone.
     //
-    // DO NOT re-add Bluetooth headset-mic plumbing here without real-hardware
-    // proof. The attempt that shipped 2026-07-30 (iOS: setAppleAudioConfiguration
-    // with allowBluetooth/HFP + `voiceChat` mode; Android: bluetooth-first
-    // preferredOutputList + forceHandleAudioRouting + a BLUETOOTH_CONNECT
-    // runtime prompt) made EVERY transmission sound robotic/underwater to every
-    // listener, with no headset involved at all — `voiceChat` is Apple's
-    // handset-tuned voice-processing path and fights WebRTC's own AEC/AGC/noise
-    // suppression, and forced routing pushes capture onto narrowband voice-call
-    // paths. Clean radio audio for the whole fleet outranks headset-mic support;
-    // any future attempt must engage those options ONLY while a headset is
-    // actually the selected route, and be verified on a real device first.
+    // Bluetooth headset mic support is layered ON TOP via startBtRouteMonitor()
+    // below — it applies additional AVAudioSession / AudioSwitchManager options
+    // ONLY when a headset is actually the selected audio route, and removes them
+    // when the headset disconnects.  This keeps the session byte-for-byte
+    // identical to the pre-headset build when no headset is present.
+    //
+    // HISTORY: the attempt shipped 2026-07-30 engaged voiceChat + forced
+    // routing unconditionally, making every transmission sound robotic fleet-wide
+    // (voiceChat engages Apple's handset voice-processing, fighting WebRTC AEC).
+    // The current design avoids voiceChat and forceHandleAudioRouting entirely
+    // and applies options conditionally per startBtRouteMonitor().
     await this.lk.AudioSession.configureAudio({
       android: { audioTypeOptions: this.lk.AndroidAudioTypePresets.communication },
       ios: { defaultOutput: "speaker" },
     });
     await this.lk.AudioSession.startAudioSession();
     this.sessionStarted = true;
+    // Start monitoring for BT headset connect/disconnect.  Runs async — does
+    // not block ensureSession.  If no headset is present the subscription is a
+    // no-op; the session config above is unchanged for the no-headset path.
+    void this.startBtRouteMonitor();
   }
 
+  /**
+  /**
+   * Begin monitoring for Bluetooth HFP headset availability and route changes.
+   *
+  /**
+   * ── Old binaries ─────────────────────────────────────────────────────────
+   * If the local module is absent (binaries predating audio-route), `audioRoute`
+   * is null and monitoring is disabled — radio works unchanged.
+   */
+  private startBtRouteMonitor(): void {
+    if (this.tearingDown) return;
+    const audioRoute = getAudioRoute();
+    if (!audioRoute) return; // binary predates audio-route module
+
+    // Cache platform once; onBtEvent uses it without a react-native import.
+    this.btOs = audioRoute.platform();
+    // iOS never requires a runtime BT permission — mark granted upfront so
+    // applyBtConfigWithPermission() skips the Android-only lazy request.
+    if (this.btOs !== "android") {
+      this.btPermissionState = "granted";
+
+      // Install a BT-aware engine config handler to prevent LiveKit's static
+      // default from overwriting our route-derived config on engine events.
+      //
+      // registerGlobals() (called in getLiveKitNative()) invokes
+      // setupIOSAudioManagement() with no callback, which installs a default
+      // willEnable/didDisable handler that always applies:
+      //   { playAndRecord, ['allowBluetooth', 'mixWithOthers'], videoChat }
+      // on every engine state change — overwriting whatever config our BT state
+      // machine had applied (applyBtConfig / revertBtConfig).
+      //
+      // Calling setupIOSAudioManagement again replaces the handler
+      // (activeAudioManagementSetup token in AudioManager.ts:41–43 makes the
+      // old cleanup a no-op).  Our callback derives the config from this.btActive
+      // so the engine can never apply an incorrect static config.
+      //
+      // Source: @livekit/react-native@2.11.0
+      //   AudioManager.ts:31–117 — setupIOSAudioManagement API and token logic
+      //   AudioManager.ts:106–107 — sets willEnable + didDisable handlers
+      //   index.tsx:59–68 — registerGlobals calls setupIOSAudioManagement()
+      //   index.tsx:125 — export * from './audio/AudioManager' (re-exports fn)
+      //
+      // Guard: typeof check for binaries where @livekit/react-native predates
+      // the setupIOSAudioManagement export; degrades to LK default handler.
+      if (typeof this.lk.setupIOSAudioManagement === "function") {
+        this.iosEngineHandlerCleanup = this.lk.setupIOSAudioManagement(
+          true, // preferSpeakerOutput — keeps speaker as the default output
+          (state: AudioEngineConfigurationState) =>
+            this.iosEngineAudioConfig(state),
+        );
+      }
+    }
+
+    // Register the route-change listener without requesting any permission.
+    // Detection APIs (getDevices type scan, getCommunicationDevice type field,
+    // isBluetoothScoOn boolean) are all permission-free.
+    try {
+      this.btRouteChangeSubscription = audioRoute.addRouteChangeListener(
+        (event: { hasBluetoothHeadsetAvailable: boolean; isBluetoothHFPActive: boolean }) => {
+          this.onBtEvent(event);
+        },
+      );
+    } catch {
+      // addRouteChangeListener not implemented in this binary build.
+      this.btRouteChangeSubscription = null;
+      return;
+    }
+
+    // Immediate read handles headsets already connected when session starts.
+    this.onBtEvent({
+      hasBluetoothHeadsetAvailable: audioRoute.hasBluetoothHeadsetAvailable(),
+      isBluetoothHFPActive: audioRoute.isBluetoothHFPActive(),
+    });
+  }
+
+  /** Stop all BT monitoring and reset state. */
+  private stopBtRouteMonitor(): void {
+    // Uninstall the iOS engine config handler first so no further engine events
+    // can fire our callback after state has been reset.
+    this.iosEngineHandlerCleanup?.();
+    this.iosEngineHandlerCleanup = null;
+
+    if (this.btRouteChangeSubscription) {
+      try {
+        this.btRouteChangeSubscription.remove();
+      } catch {
+        // Guard against stale subscription objects.
+      }
+      this.btRouteChangeSubscription = null;
+    }
+    this.btAvailable = false;
+    this.btActive = false;
+    this.btPermissionState = "unasked";
+    this.btOs = "";
+  }
+
+  /**
+   * Engine-configuration callback for `setupIOSAudioManagement` (iOS only).
+   *
+   * Installed in `startBtRouteMonitor()` and called by the WebRTC audio engine
+   * (via `audioDeviceModuleEvents` `willEnableEngineHandler` /
+   * `didDisableEngineHandler`) on every recording/playout state change.
+   *
+   * Returns the `AppleAudioConfiguration` appropriate for the current BT route
+   * state, preventing LiveKit's default handler from overwriting our
+   * route-derived config mid-transmission.
+   *
+   * ## No-headset baseline
+   * When `this.btActive` is false, returns **byte-for-byte** the same config
+   * that `getDefaultAppleAudioConfigurationForAudioState(preferSpeakerOutput=true)`
+   * in `@livekit/react-native@2.11.0 AudioManager.ts:122–146` would return,
+   * so existing keep-alive and no-headset behaviour is unchanged.
+   *
+   * ## BT-active case
+   * When `this.btActive` is true (HFP headset is the selected iOS route),
+   * returns our full BT config (`allowBluetooth + allowBluetoothA2DP +
+   * defaultToSpeaker + mixWithOthers + videoChat`) so the engine never reverts
+   * to the default while the headset is connected.
+   */
+  private iosEngineAudioConfig({
+    isPlayoutEnabled,
+    isRecordingEnabled,
+  }: AudioEngineConfigurationState): AppleAudioConfiguration {
+    if (this.btActive) {
+      return {
+        audioCategory: "playAndRecord",
+        audioCategoryOptions: (
+          [
+            "allowBluetooth",
+            "allowBluetoothA2DP",
+            "defaultToSpeaker",
+            "mixWithOthers",
+          ] satisfies AppleAudioCategoryOption[]
+        ),
+        audioMode: "videoChat",
+      };
+    }
+    // No headset — mirror getDefaultAppleAudioConfigurationForAudioState
+    // (preferSpeakerOutput=true), @livekit/react-native@2.11.0 AudioManager.ts:122–146.
+    if (isRecordingEnabled) {
+      return {
+        audioCategory: "playAndRecord",
+        audioCategoryOptions: (
+          ["allowBluetooth", "mixWithOthers"] satisfies AppleAudioCategoryOption[]
+        ),
+        audioMode: "videoChat",
+      };
+    }
+    if (isPlayoutEnabled) {
+      return {
+        audioCategory: "playback",
+        audioCategoryOptions: (
+          ["mixWithOthers"] satisfies AppleAudioCategoryOption[]
+        ),
+        audioMode: "spokenAudio",
+      };
+    }
+    return {
+      audioCategory: "soloAmbient",
+      audioCategoryOptions: [],
+      audioMode: "default",
+    };
+  }
+
+  /**
+   * Only actual transitions fire apply/revertBtConfig so this is idempotent.
+   */
+  private onBtEvent({
+    hasBluetoothHeadsetAvailable,
+    isBluetoothHFPActive,
+  }: {
+    hasBluetoothHeadsetAvailable: boolean;
+    isBluetoothHFPActive: boolean;
+  }): void {
+    if (this.tearingDown) return;
+
+    if (this.btOs === "android") {
+      // Android: trigger on AVAILABILITY transitions.
+      const wasAvailable = this.btAvailable;
+      this.btAvailable = hasBluetoothHeadsetAvailable;
+      this.btActive = isBluetoothHFPActive; // confirmation — updated but not used as trigger
+      if (hasBluetoothHeadsetAvailable && !wasAvailable) {
+        void this.applyBtConfigWithPermission();
+      } else if (!hasBluetoothHeadsetAvailable && wasAvailable) {
+        // Only revert if we actually applied BT config (permission was granted
+        // and selectAudioOutput("bluetooth") was called). If permission was
+        // denied, the baseline speaker route was never changed — nothing to revert.
+        if (this.btPermissionState === "granted") {
+          void this.revertBtConfig();
+        }
+      }
+    } else {
+      // iOS: trigger on ACTIVE ROUTE transitions (iOS auto-routes on connect,
+      // so availability and active-route arrive in the same event).
+      const wasActive = this.btActive;
+      this.btActive = isBluetoothHFPActive;
+      this.btAvailable = isBluetoothHFPActive; // kept in sync for logging/cleanup
+      if (isBluetoothHFPActive && !wasActive) {
+        void this.applyBtConfigWithPermission();
+      } else if (!isBluetoothHFPActive && wasActive) {
+        void this.revertBtConfig();
+      }
+    }
+  }
+
+  /**
+   * On iOS, btPermissionState is always "granted" (set at monitor start).
+   * After the async permission dialog, re-checks btAvailable (Android) or
+   * btActive (iOS) so a headset disconnected during the dialog doesn't
+   * trigger routing that will immediately need to be reverted.
+   */
+  private async applyBtConfigWithPermission(): Promise<void> {
+    if (this.tearingDown) return;
+
+    if (this.btOs === "android" && this.btPermissionState !== "granted") {
+      if (this.btPermissionState === "denied") {
+        // User denied in a previous detection cycle — honour silently, no re-prompt.
+        return;
+      }
+      // btPermissionState === "unasked": request lazily (first-detection only).
+    const audioRoute = getAudioRoute();
+      if (!audioRoute) return;
+      let granted = false;
+      try {
+        granted = await audioRoute.requestBluetoothPermission();
+      } catch {
+        // requestBluetoothPermission absent in old binary — manifest declaration
+        // may be sufficient; treat as granted so the radio is not silently broken.
+        granted = true;
+      }
+      this.btPermissionState = granted ? "granted" : "denied";
+      if (!granted) {
+        console.warn(
+          "[radio] BLUETOOTH_CONNECT permission denied — BT headset audio config disabled",
+        );
+        return;
+      }
+    }
+
+    // Permission is granted (or iOS, which needs none).
+    // Re-check availability/active in case the headset disconnected during the
+    // async permission dialog.
+    const stillRelevant = this.btOs === "android" ? this.btAvailable : this.btActive;
+    if (!this.tearingDown && stillRelevant) {
+      void this.applyBtConfig();
+    }
+  }
+
+  /**
+   * `forceHandleAudioRouting` is never set (narrowband-degradation root cause
+   * from the 2026-07-30 attempt).
+   */
+  private async applyBtConfig(): Promise<void> {
+    if (this.tearingDown) return;
+    if (this.btOs !== "android") {
+      // iOS: setAppleAudioConfiguration with allowBluetooth + videoChat.
+      try {
+        await this.lk.AudioSession.setAppleAudioConfiguration({
+          audioCategory: "playAndRecord",
+          audioCategoryOptions: (
+            [
+              "allowBluetooth",
+              "allowBluetoothA2DP",
+              "defaultToSpeaker",
+              "mixWithOthers",
+            ] satisfies AppleAudioCategoryOption[]
+          ),
+          audioMode: "videoChat",
+        });
+      } catch (e) {
+        console.warn("[radio] applyBtConfig setAppleAudioConfiguration failed", e);
+      }
+    } else {
+      // Android: explicitly select the BT output on the RUNNING AudioSwitch.
+      // AudioSwitchManager.selectAudioOutput calls audioSwitch.selectDevice()
+      // on the live instance — effective post-startAudioSession.
+      try {
+        await this.lk.AudioSession.selectAudioOutput("bluetooth");
+      } catch (e) {
+        console.warn("[radio] applyBtConfig selectAudioOutput bluetooth failed", e);
+      }
+    }
+  }
+
+  /**
+   * ── Android ──────────────────────────────────────────────────────────────
+   * `selectAudioOutput("speaker")` explicitly restores the speakerphone on the
+   * RUNNING AudioSwitch instance.  This is more reliable than relying on
+   * AudioSwitch auto-reroute because we explicitly set speaker as the
+   * chosen device (AudioSwitchManager.java:184 → audioSwitch.selectDevice).
+   */
+  private async revertBtConfig(): Promise<void> {
+    if (this.tearingDown) return;
+    if (this.btOs !== "android") {
+      // iOS: restore baseline AVAudioSession config.
+      try {
+        await this.lk.AudioSession.setAppleAudioConfiguration({
+          audioCategory: "playAndRecord",
+          audioCategoryOptions: (
+            [
+              "allowAirPlay",
+              "allowBluetooth",
+              "allowBluetoothA2DP",
+              "defaultToSpeaker",
+              "mixWithOthers",
+            ] satisfies AppleAudioCategoryOption[]
+          ),
+          audioMode: "videoChat",
+        });
+      } catch (e) {
+        console.warn("[radio] revertBtConfig setAppleAudioConfiguration failed", e);
+      }
+    } else {
+      // Android: explicitly restore speaker on the RUNNING AudioSwitch.
+      try {
+        await this.lk.AudioSession.selectAudioOutput("speaker");
+      } catch (e) {
+        console.warn("[radio] revertBtConfig selectAudioOutput speaker failed", e);
+      }
+    }
+  }
+
+  /**
   /**
    * True while the radio actually needs the audio unit kept awake: a listen
    * room is live or connecting, or a transmit is registered / being set up.
@@ -210,6 +628,7 @@ class NativeRadioMedia implements RadioMedia {
     );
   }
 
+  /**
   /**
    * Start/stop the looping silent player so it runs EXACTLY while there is
    * real radio demand. Without it, an idle (nobody-transmitting) channel has
@@ -229,10 +648,9 @@ class NativeRadioMedia implements RadioMedia {
     if (this.tearingDown) return; // sign-out in progress — never flicker back on
     if (!this.expoAudio) return; // binary predates expo-audio — no keep-alive
     try {
-      const player = this.expoAudio.createAudioPlayer(
-        // eslint-disable-next-line @typescript-eslint/no-require-imports
-        require("../../assets/audio/silence.wav"),
-      );
+      // eslint-disable-next-line @typescript-eslint/no-var-requires
+      const src = require("../../assets/audio/silence.wav") as number;
+      const player = this.expoAudio.createAudioPlayer(src);
       player.loop = true;
       player.play();
       this.keepAlive = player;
@@ -329,7 +747,7 @@ class NativeRadioMedia implements RadioMedia {
   }
 
   async dropListen(channelId: string): Promise<void> {
-    const room = this.listenRooms.get(channelId);
+    const room = this.listenRooms.get(channelId) ?? null;
     this.listenRooms.delete(channelId);
     this.recovering.delete(channelId);
     this.reconcileKeepAlive();
@@ -434,6 +852,7 @@ class NativeRadioMedia implements RadioMedia {
   }
 
   /**
+  /**
    * Tear down a SPECIFIC publish attempt's local handles. Unlike stopPublish(),
    * this disconnects the `room`/`track` passed in even if a concurrent
    * stopPublish() already nulled the instance refs (e.g. PTT released while
@@ -502,6 +921,7 @@ class NativeRadioMedia implements RadioMedia {
     // new one), so the flag never needs resetting.
     this.tearingDown = true;
     this.recovering.clear();
+    this.stopBtRouteMonitor();
     this.stopKeepAlive();
     await this.stopPublish();
     for (const id of this.listenChannelIds()) await this.dropListen(id);

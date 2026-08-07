@@ -1,0 +1,7 @@
+{
+  "name": "audio-route",
+  "version": "1.0.0",
+  "description": "Local Expo native module: iOS AVAudioSession route-change events + BT HFP detection. Android stub (BT detection uses getAudioOutputs polling instead).",
+  "main": "./src/index.js",
+  "source": "./src/index.ts"
+}

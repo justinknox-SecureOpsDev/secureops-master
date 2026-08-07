@@ -19,12 +19,18 @@ native code or new OS permissions.
 
 ### Which binaries have which natives
 
-| iOS store build | `expo.version` / runtime | LiveKit natives | `expo-audio` |
-| --- | --- | --- | --- |
-| 1 – 9 | `1.0.0` | ❌ | ❌ |
-| 10 | `1.0.0` | ✅ | ❌ |
-| 14 | `1.0.1` | ✅ | ✅ |
-| 15+ (this release) | `1.0.2` | ✅ | ✅ |
+| iOS store build | `expo.version` / runtime | LiveKit natives | `expo-audio` | `audio-route` (local) |
+| --- | --- | --- | --- | --- |
+| 1 – 9 | `1.0.0` | ❌ | ❌ | ❌ |
+| 10 | `1.0.0` | ✅ | ❌ | ❌ |
+| 14 | `1.0.1` | ✅ | ✅ | ❌ |
+| 15+ (this release) | `1.0.2` | ✅ | ✅ | ✅ |
+
+`audio-route` is the **local Expo module** (`modules/audio-route/`) added in this
+build for iOS AVAudioSession route-change detection. Its `requireNativeModule`
+call throws `CannotFindNativeModule` on any binary that predates it; the lazy
+loader (`getAudioRoute()`) catches that and returns null — BT monitoring is
+disabled, radio continues unchanged on old binaries.
 
 Most officers are on build 10 (runtime `1.0.0`). That is why every native
 package the radio JS touches is loaded through a guarded lazy require — a
@@ -121,6 +127,7 @@ together with the only files allowed to `require()` each of them:
 | `@livekit/react-native` | build ≥ 10 | `components/radio/nativeModules.ts` (`getLiveKitNative()`) |
 | `@livekit/react-native-webrtc` | build ≥ 10 | `components/radio/nativeModules.ts` (`getLiveKitWebRTC()`) |
 | `expo-audio` | build ≥ 14 | `components/radio/nativeModules.ts` (`getExpoAudio()`) |
+| `audio-route` (local) | build ≥ 15 (this release) | `components/radio/nativeModules.ts` (`getAudioRoute()`) |
 | `livekit-client` | every binary (JS-only) — but see below | `components/radio/nativeModules.ts` (`getLiveKitClient()`) |
 
 > **Why `livekit-client` is gated even though it ships in every bundle:** it is
@@ -215,6 +222,13 @@ Submission targets (from `eas.json` → `submit.production.ios`):
 
 ## 4. Device smoke test — REQUIRED before release
 
+> **Native compile gate:** Kotlin (`AudioRouteModule.kt`) and Swift
+> (`AudioRouteModule.swift`) are compiled only at **EAS build** time — not by
+> the dev sandbox. `tsc --noEmit` and the Vitest suite validate the JS/TS
+> contract but cannot catch Kotlin/Swift type errors or missing symbols.
+> Treat a successful EAS build (step §3 above) as the native-compile gate;
+> do not skip it even if all JS checks pass.
+
 Run the full checklist on **both** iOS (TestFlight) and Android (internal track
 or sideload) before submitting to either store. Given the build-14 history, this
 gate is not optional — the test suite cannot prove locked-screen survival or
@@ -254,13 +268,92 @@ Bluetooth headset.
 Only after 1–10 pass should the version be submitted for App Store review in
 App Store Connect.
 
-> **Bluetooth headset support is NOT shipped.** A headset-mic attempt
-> (iOS `setAppleAudioConfiguration` with `allowBluetooth`/HFP + `voiceChat`
-> mode) reached the fleet on 2026-07-30 and made every transmission sound
-> robotic/underwater to every listener, with no headset involved — reverted
-> 2026-08-07. The audio session is now just the communication preset with
-> speaker output. Do not restore those options without gating them on a
-> headset actually being the selected route and testing on real hardware.
+> **Bluetooth headset support ships in this build, engaged CONDITIONALLY.**
+> The fatal flaw of the 2026-07-30 attempt was applying `voiceChat` mode +
+> forced routing **unconditionally** — every listener heard robotic audio
+> regardless of whether a headset was connected. This build instead monitors
+> for native connect/disconnect events and applies options **only while an HFP
+> device is the active route**, using `videoChat` mode (not `voiceChat`) to
+> keep WebRTC's own AEC/AGC/NS in charge. With no headset present the session
+> is byte-for-byte identical to the pre-feature build.
+>
+> **Architecture (2026-08-xx revision, updated):** both iOS and Android use the
+> same event-driven path via the local `audio-route` native module — iOS from
+> `AVAudioSession.routeChangeNotification` (Swift), Android from three
+> complementary Kotlin signals (all funnel into one `onAudioRouteChange` event):
+>
+> 1. `AudioManager.AudioDeviceCallback` — device physical connect/disconnect.
+> 2. `AudioManager.addOnCommunicationDeviceChangedListener` (API 31+) — fires
+>    when the OS selects a different communication device without a physical
+>    connect/disconnect event (the "selection gap" AudioDeviceCallback misses).
+> 3. `BroadcastReceiver(ACTION_SCO_AUDIO_STATE_UPDATED)` (pre-31) — pre-31
+>    equivalent: fires on every SCO channel state transition so `isBluetoothScoOn`
+>    changes are always observed.
+>
+> **No background poll exists.** The 2-second `getAudioOutputs()` poll was removed
+> after code review found it called `onBtStateChange(false)` on iOS every 2 s —
+> reverting config the route listener had just applied.
+>
+> **BLUETOOTH_CONNECT is requested LAZILY** (Android 12+ / API 31+ only): the
+> route listener is registered without the permission (detection APIs — device
+> type integers, `isBluetoothScoOn` — do not require it). The OS permission
+> dialog appears only the first time a BT headset is detected as the active
+> communication device. A denial leaves the radio on the baseline config; no
+> re-prompt loop is possible.
+>
+> **Hardware verification per §4a Q1–Q2 below is mandatory before release.**
+
+**§4a BT smoke-test steps (run before App Store submission):**
+
+10b. **BT headset — audio quality:** pair an HFP headset (AirPods, any Bluetooth
+     headset with mic). Join a channel. Transmit with the headset mic — B must
+     hear natural, non-robotic speech at the **speaker** output (not robotic,
+     not underwater). This confirms `videoChat` mode + WebRTC AEC are in charge
+     rather than Apple's `voiceChat` voice-processing.
+
+10c. **BT headset — mic capture:** transmit using the headset mic; B must hear
+     the voice clearly. Disconnect the headset mid-session — the app must
+     **automatically fall back to the built-in mic** without crashing or
+     producing audio artifacts.
+
+10d. **No-headset parity:** with no BT device paired, confirm steps 1–10 above
+     still produce identical audio quality to the previous build. The route-change
+     event listener must not fire spuriously — if robotic audio appears with no
+     headset, `AVAudioSession.routeChangeNotification` is firing for a non-HFP
+     reason and `isBluetoothHFPActive()` is returning a false positive.
+
+10e. **Android BT:** on Android, transmit with a paired BT headset → B hears
+     the voice clearly. Disconnect the headset → fallback to speakerphone
+     automatically (AudioSwitchManager reroutes on device removal). Confirm the
+     BLUETOOTH_CONNECT permission prompt appears the first time a BT headset is
+     paired and does NOT appear when no headset is used (Q1 hardware check).
+
+> **Open hardware question remaining for the §4 smoke test:**
+> - **Q1 (Android)** Does the BLUETOOTH_CONNECT runtime prompt appear at the
+>   correct moment — the first time the headset becomes available in the device
+>   list — and NOT at session start and NOT for officers without a headset?
+>   The lazy path is: `onAudioRouteChange` event fires →
+>   `hasBluetoothHeadsetAvailable` true → `requestBluetoothPermission()` called
+>   once. If the prompt appears without a headset, `checkHasBluetoothHeadsetAvailable()`
+>   has a false-positive — tighten the `getDevices()` type filter.
+>
+> **Q2 (iOS engine overwrite) — resolved in code:**
+> `registerGlobals()` installs `setupIOSAudioManagement()` with a static
+> default handler that applies `{ allowBluetooth + mixWithOthers + videoChat }`
+> on every `willEnableEngineHandler` / `didDisableEngineHandler` event,
+> overwriting whatever config our BT state machine had set. Fix: in
+> `startBtRouteMonitor()`, immediately after `registerGlobals()` has run,
+> call `setupIOSAudioManagement(true, iosEngineAudioConfig)` again — the
+> `activeAudioManagementSetup` token (AudioManager.ts:41–43) makes the old
+> cleanup a no-op and replaces both handlers with our BT-aware callback.
+> The callback returns our BT config when `btActive=true` and LiveKit's
+> exact default when `btActive=false` (byte-for-byte match to
+> `getDefaultAppleAudioConfigurationForAudioState(preferSpeakerOutput=true)`,
+> AudioManager.ts:122–146). Covered by the `radioMediaBluetooth.native.test.ts`
+> engine-config handler suite.
+> **Hardware check remaining:** audio quality only — confirm first post-connect
+> transmission sounds natural (non-robotic) with a BT headset connected, as a
+> final integration check of the handler on real hardware.
 
 ### 4b. Android (internal track / sideload)
 
@@ -268,12 +361,38 @@ Android has a different audio-focus model (AudioFocus, foreground service,
 WAKELOCK) from iOS, so it must be tested separately. Two Android devices are
 needed.
 
-The configureAudio block passes only `AndroidAudioTypePresets.communication`.
-Bluetooth-first `preferredOutputList` + `forceHandleAudioRouting` were reverted
-on 2026-08-07 along with the iOS category override (see §4a) — they degraded
-capture quality fleet-wide. `BLUETOOTH_CONNECT` is still declared in the
-manifest from versionCode 8 but is no longer requested at runtime, so no
-Bluetooth prompt appears; drop the declaration in the next binary.
+The baseline `configureAudio` passes only `AndroidAudioTypePresets.communication`
+(no `preferredOutputList`, no `forceHandleAudioRouting`). BT headset routing is
+applied via **`selectAudioOutput("bluetooth")`** on the running AudioSwitch
+instance — NOT via `configureAudio`. See the source citation below.
+
+**Android BT routing mechanism (cited source):**
+`AudioSwitchManager.java:135` (bundled in `@livekit/react-native`) — the
+`preferredDeviceList` is passed **only to the `AudioSwitch` constructor** inside
+`start()`; there is no post-start setter, so calling `configureAudio({
+preferredOutputList })` after `startAudioSession()` cannot affect the running
+AudioSwitch. Contrast with `AudioSwitchManager.java:184–202`:
+`selectAudioOutput()` calls `handler.post(() -> audioSwitch.selectDevice(device))`
+on the live instance — this IS effective post-start.
+
+**Android BT state machine:**
+- BT headset appears in device list (`AudioDeviceCallback.onAudioDevicesAdded`)
+  → `hasBluetoothHeadsetAvailable = true` (permission-free; type integer check).
+- **First** availability event → lazy `BLUETOOTH_CONNECT` request (one prompt,
+  never repeated). On grant: `selectAudioOutput("bluetooth")`.
+- BT headset removed → `hasBluetoothHeadsetAvailable = false`
+  → `selectAudioOutput("speaker")` explicitly restores the baseline.
+- If permission was denied: disconnect events do NOT call `selectAudioOutput`
+  (route was never changed from speaker; nothing to revert).
+
+**Android permission timing:**
+`BLUETOOTH_CONNECT` is declared in `app.json` and requested at runtime via
+`AudioRouteModule.requestBluetoothPermission()` (Expo PermissionsManager, no
+react-native import). The detection APIs that run WITHOUT the permission:
+`AudioManager.getDevices()` (type integers), `getCommunicationDevice().type`
+(integer field), `isBluetoothScoOn()` (boolean). The permission prompt appears
+the first time a BT headset becomes AVAILABLE (physical device present) —
+officers without a headset never see it.
 
 1. **Basic PTT** — repeat §4a steps 1–5 on Android devices. Audio should route
    out of the **speakerphone** (not earpiece) when no headset is connected.
@@ -290,8 +409,53 @@ Bluetooth prompt appears; drop the declaration in the next binary.
 5. **Audio quality** — A transmits a full sentence held at arm's length → B
    hears natural speech from the speakerphone. Robotic/underwater audio means
    a routing or audio-mode override has crept back in (see §4a).
-6. **No Bluetooth prompt** — join a channel on a fresh install → the app must
-   NOT show the "Bluetooth Access" OS prompt.
+6. **BT headset — connect and capture (Android 12+):**
+   a. Fresh install, no BT device paired → join a channel → **no BLUETOOTH_CONNECT
+      prompt** must appear (Q1 check: availability trigger is not firing without
+      a headset).
+   b. Pair a BT headset while joined → the BLUETOOTH_CONNECT prompt appears
+      **exactly once** (Q1 check: prompt fires at the first availability event,
+      not at session start).
+   c. Grant the permission → audio routes to the BT headset mic. Transmit —
+      partner B hears natural speech through their speaker (not robotic/underwater).
+   d. Disconnect the headset mid-session → audio falls back to the speakerphone
+      **immediately and automatically** (Q2 check: `selectAudioOutput("speaker")`
+      was called on disconnect; no crash or silence).
+7. **BT headset — connect and capture (Android < 12):**
+   Repeat step 6b–6d on a pre-API-31 device. No permission prompt appears (not
+   required pre-31). Verify SCO audio routes to headset on connect and reverts
+   on disconnect.
+   **Pre-31 SCO receiver (deferred-context check):** On pre-31 the third listener
+   signal is a `BroadcastReceiver(ACTION_SCO_AUDIO_STATE_UPDATED)` registered in
+   `registerRouteListeners(am, rc)`.  `rc` (reactContext) is resolved from the
+   same snapshot as `audioManager` in `ensureRouteListenersRegistered()` — the
+   TOCTOU race where reactContext becomes null between the audioManager check and
+   the receiver registration is closed.  If context is null the whole registration
+   defers to the next call site.  To exercise the deferred-context path: connect
+   the headset **before** opening the app, then open the app and join a channel.
+   The `OnStartObserving("onAudioRouteChange")` fallback must install the SCO
+   receiver, and headset connect/disconnect must be observed normally.  If audio
+   stays on the earpiece and never routes to the headset, the SCO receiver was not
+   registered — escalate to the deferred-context step (step 9 below).
+8. **No BT prompt without headset (any API level)** — install fresh with no
+   BT device ever paired → join, transmit, receive for 5+ minutes → zero
+   BLUETOOTH_CONNECT prompts ever shown.
+9. **Deferred-context registration** — this scenario tests the Android lazy
+   listener path: the OS can instantiate the `AudioRoute` Expo module before
+   `reactContext` is fully live (so `audioManager` is null at `OnCreate`), which
+   means route-change listeners are deferred to the first JS entry point.
+   To exercise this:
+   a. **Connect headset AFTER the radio session has started** — open the officer
+      app, join a channel, confirm the radio is streaming normally, **then** pair
+      and connect a BT headset.  The BLUETOOTH_CONNECT prompt must appear (first
+      availability event), grant it, and audio must route to the headset within a
+      few seconds. If the prompt never appears and audio stays on speaker, the
+      `ensureRouteListenersRegistered()` lazy path did not fire — check
+      `OnStartObserving("onAudioRouteChange")` registration (cited:
+      `ObjectDefinitionBuilder.kt:496`, expo-modules-core@3.0.30).
+   b. **Repeat at cold start**: force-stop the app, connect the headset, then
+      open the app and join a channel. This tests the eager `OnCreate` path where
+      `reactContext` should already be live. Prompt + routing must both work.
 
 ### App Review notes to include
 
@@ -317,10 +481,35 @@ and match `eas build:list`.
 
 ---
 
-### Android Bluetooth permission (API 31+) — dormant
+### Android Bluetooth permission (API 31+)
 
-`BLUETOOTH` and `BLUETOOTH_CONNECT` are still declared in `app.json` (shipped
-in versionCode 8), but nothing requests or uses them since the 2026-08-07
-audio-routing revert, so no runtime prompt appears. Remove both declarations
-from the next Android binary rather than leaving unused permissions in the
-Play listing.
+`BLUETOOTH` and `BLUETOOTH_CONNECT` are declared in `app.json`:
+
+- `android.permission.BLUETOOTH` — retained for AudioSwitchManager internals
+  on older API levels.
+- `android.permission.BLUETOOTH_CONNECT` — required on API 31+ for SCO mic
+  capture. Requested **lazily** via `AudioRouteModule.kt` / Expo's
+  PermissionsManager at the first moment `hasBluetoothHeadsetAvailable`
+  transitions false→true (BT device physically appears in the device list).
+
+**What does NOT require the permission** (all run before the prompt):
+- `AudioManager.getDevices(GET_DEVICES_ALL)` — type integers; no permission.
+- `AudioManager.getCommunicationDevice().type` — integer field; no permission.
+- `AudioManager.isBluetoothScoOn()` — boolean; no permission.
+- `AudioDeviceCallback` registration and event receipt — no permission.
+
+**Permission lifecycle:**
+1. Session starts (no headset) → listener registered, zero permission calls.
+2. BT headset appears in device list → `hasBluetoothHeadsetAvailable = true`
+   → `requestBluetoothPermission()` called exactly once.
+3. Granted → `selectAudioOutput("bluetooth")` on running AudioSwitch.
+4. Denied → radio stays on baseline speaker; no re-prompt loop.
+5. Headset disconnects (granted path) → `selectAudioOutput("speaker")`.
+6. Headset disconnects (denied path) → no-op (route was never changed).
+
+**If hardware testing (§4b step 6a) shows the prompt without a headset:**
+The trigger `checkHasBluetoothHeadsetAvailable()` in `AudioRouteModule.kt`
+is scanning `getDevices()` and finding a BT device that is not an HFP headset
+(e.g. a car kit, A2DP speaker). Tighten the filter: also check
+`device.type == TYPE_BLUETOOTH_A2DP` is excluded, or restrict to
+`isSource()` devices only (headset mics are source devices).

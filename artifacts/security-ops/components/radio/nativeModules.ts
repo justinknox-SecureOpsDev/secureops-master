@@ -22,6 +22,58 @@ export type LiveKitWebRTCModule = typeof import("@livekit/react-native-webrtc");
 export type LiveKitClientModule = typeof import("livekit-client");
 export type ExpoAudioModule = typeof import("expo-audio");
 
+// hint: Logic and cosmetic changes overlap. Resolve logic first, then reformat.
+/**
+ * Shape of the local `audio-route` Expo module (modules/audio-route/).
+ *
+ * Both platforms emit `onAudioRouteChange` via `addRouteChangeListener` with a
+ * payload carrying two independent state fields:
+ *
+ *  - `hasBluetoothHeadsetAvailable` — BT SCO/HFP device physically present in
+ *    device list (permission-free, type integer). JS uses this as the TRIGGER
+ *    for the lazy BLUETOOTH_CONNECT request and `selectAudioOutput("bluetooth")`.
+ *    On iOS equals `isBluetoothHFPActive` (iOS auto-routes on connect).
+ *
+ *  - `isBluetoothHFPActive` — BT HFP/SCO is the currently SELECTED communication
+ *    device (permission-free). Used by JS as CONFIRMATION.
+ *
+ * iOS : `platform()` → "ios"; both fields from AVAudioSession.routeChangeNotification.
+ * Android: `platform()` → "android"; three complementary signals (AudioDeviceCallback,
+ *   OnCommunicationDeviceChangedListener API 31+, ACTION_SCO_AUDIO_STATE_UPDATED pre-31).
+ */
+export type AudioRouteModuleType = {
+  /** "ios" or "android" — avoids react-native Platform import in radio code. */
+  platform(): string;
+  /**
+   * True when a BT SCO/HFP/BLE headset is AVAILABLE in the device list
+   * (not necessarily the active communication device). Permission-free.
+   * On iOS equals isBluetoothHFPActive (iOS auto-routes when a headset connects).
+   */
+  hasBluetoothHeadsetAvailable(): boolean;
+  /**
+   * True when a BT HFP/SCO device is the ACTIVE selected communication route.
+   * Permission-free (reads type integer / boolean, not device name/address).
+   */
+  isBluetoothHFPActive(): boolean;
+  /**
+   * Requests BLUETOOTH_CONNECT (Android API 31+ only). Always resolves true on
+   * iOS and on Android < 31. Returns false if the user denies the prompt.
+   * Called LAZILY — only when hasBluetoothHeadsetAvailable first becomes true.
+   */
+  requestBluetoothPermission(): Promise<boolean>;
+  /**
+   * Subscribe to route-change events. The callback receives both
+   * `hasBluetoothHeadsetAvailable` and `isBluetoothHFPActive` on every event.
+   * Returns a removable subscription.
+   */
+  addRouteChangeListener(
+    cb: (event: {
+      hasBluetoothHeadsetAvailable: boolean;
+      isBluetoothHFPActive: boolean;
+    }) => void,
+  ): { remove(): void };
+};
+
 /**
  * Native packages that are NOT present in every binary this runtime's OTA
  * bundles are served to (see RADIO_NATIVE_RELEASE_RUNBOOK.md — "Which binaries
@@ -68,6 +120,18 @@ export const BINARY_GATED_NATIVE_PACKAGES: ReadonlyArray<{
     package: "livekit-client",
     allowedLoaderFiles: ["components/radio/nativeModules.ts"],
   },
+  {
+    // Local Expo module (modules/audio-route/) providing iOS AVAudioSession
+    // route-change events and a synchronous isBluetoothHFPActive() query.
+    // First shipped in the binary that accompanies this feature (runtime
+    // 1.0.2 +). Older binaries (1.0.0 / 1.0.1) lack the registered native
+    // module; requireNativeModule("AudioRoute") throws CannotFindNativeModule
+    // and the lazy loader degrades to null — BT monitoring is skipped and
+    // radio continues unchanged. The Android stub always registers so the
+    // require succeeds on Android even though BT detection uses polling.
+    package: "audio-route",
+    allowedLoaderFiles: ["components/radio/nativeModules.ts"],
+  },
 ];
 
 /** Test-only require override; when null, the real (Metro) require is used. */
@@ -77,6 +141,7 @@ let liveKitModule: LiveKitNativeModule | null | undefined;
 let webRTCModule: LiveKitWebRTCModule | null | undefined;
 let liveKitClientModule: LiveKitClientModule | null | undefined;
 let expoAudioModule: ExpoAudioModule | null | undefined;
+let audioRouteModule: AudioRouteModuleType | null | undefined;
 
 /** Test-only: replace the require used for native modules and reset caches. */
 export function __setNativeRequireForTest(
@@ -87,6 +152,7 @@ export function __setNativeRequireForTest(
   webRTCModule = undefined;
   liveKitClientModule = undefined;
   expoAudioModule = undefined;
+  audioRouteModule = undefined;
 }
 
 /**
@@ -173,6 +239,32 @@ export function getExpoAudio(): ExpoAudioModule | null {
     }
   }
   return expoAudioModule;
+}
+
+/**
+ * The local `audio-route` module (modules/audio-route/), or null on binaries
+ * that predate it.  Provides `isBluetoothHFPActive()` (iOS) and, for iOS,
+ * `onAudioRouteChange` events. Android always returns false (polling used
+ * instead). Degrading to null disables BT headset monitoring; radio works on.
+ */
+export function getAudioRoute(): AudioRouteModuleType | null {
+  if (audioRouteModule === undefined) {
+    try {
+      audioRouteModule = (
+        overrideRequire
+          ? overrideRequire("audio-route")
+          : // eslint-disable-next-line @typescript-eslint/no-require-imports
+            require("audio-route")
+      ) as AudioRouteModuleType;
+    } catch (e) {
+      console.warn(
+        "[radio] AudioRoute module unavailable — Bluetooth headset monitoring disabled",
+        e,
+      );
+      audioRouteModule = null;
+    }
+  }
+  return audioRouteModule;
 }
 
 /** `@livekit/react-native-webrtc`, or null on a binary without the natives. */
