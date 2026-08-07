@@ -341,122 +341,67 @@ describe("NativeRadioMedia — silent keep-alive lifecycle", () => {
   });
 });
 
-describe("NativeRadioMedia — Bluetooth audio session", () => {
-  it("re-applies the iOS category with Bluetooth mic + playback AFTER starting the session", async () => {
+/**
+ * REGRESSION GUARD — radio audio quality.
+ *
+ * A Bluetooth headset-mic attempt shipped 2026-07-30 and made every
+ * transmission sound robotic/underwater to every listener, with no headset
+ * involved: iOS `voiceChat` mode is Apple's handset-tuned voice-processing
+ * path (it fights WebRTC's own AEC/AGC/noise suppression) and Android's
+ * bluetooth-first forced routing pushes capture onto narrowband voice-call
+ * paths. The session config must stay minimal until headset support can be
+ * gated on a headset actually being the selected route AND verified on real
+ * hardware.
+ */
+describe("NativeRadioMedia — audio session stays minimal", () => {
+  it("configures only the communication preset and speaker output", async () => {
     const media = createRadioMedia();
 
     await media.ensureListen("chan-1", TOKEN);
 
-    expect(AudioSession.setAppleAudioConfiguration).toHaveBeenCalledWith(
-      expect.objectContaining({
-        audioCategory: "playAndRecord",
-        // allowBluetooth (HFP) is what makes the headset MIC an input route;
-        // A2DP is high-quality playback; defaultToSpeaker keeps the no-headset
-        // case on speakerphone rather than the earpiece.
-        audioCategoryOptions: expect.arrayContaining([
-          "allowBluetooth",
-          "allowBluetoothA2DP",
-          "defaultToSpeaker",
-          "mixWithOthers",
-        ]),
-        audioMode: "voiceChat",
-      }),
-    );
-
-    // Ordering matters: applied before startAudioSession, the activation
-    // defaults would overwrite it and transmissions would silently fall back
-    // to the built-in mic.
-    const started = AudioSession.startAudioSession.mock.invocationCallOrder[0];
-    const applied = AudioSession.setAppleAudioConfiguration.mock.invocationCallOrder[0];
-    expect(applied).toBeGreaterThan(started);
-  });
-
-  it("prefers Bluetooth in the Android output list and forces routing so SCO capture engages", async () => {
-    const media = createRadioMedia();
-
-    await media.ensureListen("chan-1", TOKEN);
-
-    expect(AudioSession.configureAudio).toHaveBeenCalledWith(
-      expect.objectContaining({
-        android: expect.objectContaining({
-          preferredOutputList: ["bluetooth", "headset", "speaker", "earpiece"],
-          audioTypeOptions: expect.objectContaining({ forceHandleAudioRouting: true }),
-        }),
-      }),
-    );
-  });
-
-  it("still starts the audio session when the binary's LiveKit predates setAppleAudioConfiguration", async () => {
-    AudioSession.setAppleAudioConfiguration.mockRejectedValueOnce(
-      new Error("unrecognized selector"),
-    );
-    const media = createRadioMedia();
-
-    await expect(media.ensureListen("chan-1", TOKEN)).resolves.toBeUndefined();
+    expect(AudioSession.configureAudio).toHaveBeenCalledWith({
+      android: { audioTypeOptions: { preset: "communication" } },
+      ios: { defaultOutput: "speaker" },
+    });
     expect(AudioSession.startAudioSession).toHaveBeenCalled();
-    expect(media.isListening("chan-1")).toBe(true);
+  });
+
+  it("never overrides the iOS category/mode (no voiceChat, no HFP Bluetooth)", async () => {
+    const media = createRadioMedia();
+
+    await media.ensureListen("chan-1", TOKEN);
+
+    expect(AudioSession.setAppleAudioConfiguration).not.toHaveBeenCalled();
+  });
+
+  it("never forces Android audio routing or a Bluetooth-first output list", async () => {
+    const media = createRadioMedia();
+
+    await media.ensureListen("chan-1", TOKEN);
+
+    const [config] = AudioSession.configureAudio.mock.calls[0];
+    expect(config.android).not.toHaveProperty("preferredOutputList");
+    expect(config.android.audioTypeOptions).not.toHaveProperty("forceHandleAudioRouting");
   });
 });
 
-describe("NativeRadioMedia — Android BLUETOOTH_CONNECT runtime permission", () => {
-  it("requests BLUETOOTH_CONNECT permission before configureAudio on Android 12+ (API 31)", async () => {
+describe("NativeRadioMedia — no Bluetooth permission prompt", () => {
+  it("never asks for BLUETOOTH_CONNECT on Android 12+", async () => {
     // h.platform defaults to { OS: 'android', Version: 31 } via beforeEach.
     const media = createRadioMedia();
     await media.ensureListen("chan-1", TOKEN);
 
-    expect(h.permissionsAndroid.request).toHaveBeenCalledWith(
-      "android.permission.BLUETOOTH_CONNECT",
-      expect.objectContaining({ title: "Bluetooth Access" }),
-    );
-
-    // The request must land BEFORE configureAudio so the permission is
-    // already granted by the time routing is configured.
-    const permOrder = h.permissionsAndroid.request.mock.invocationCallOrder[0];
-    const configOrder = (AudioSession.configureAudio as ReturnType<typeof vi.fn>).mock.invocationCallOrder[0];
-    expect(permOrder).toBeLessThan(configOrder);
-  });
-
-  it("still configures audio and joins the channel when BLUETOOTH_CONNECT is denied", async () => {
-    h.permissionsAndroid.request.mockResolvedValueOnce("denied");
-    const media = createRadioMedia();
-
-    await expect(media.ensureListen("chan-1", TOKEN)).resolves.toBeUndefined();
-    expect(AudioSession.configureAudio).toHaveBeenCalled();
-    expect(media.isListening("chan-1")).toBe(true);
-  });
-
-  it("still configures audio when the permission request itself throws", async () => {
-    h.permissionsAndroid.request.mockRejectedValueOnce(new Error("unavailable"));
-    const media = createRadioMedia();
-
-    await expect(media.ensureListen("chan-1", TOKEN)).resolves.toBeUndefined();
-    expect(AudioSession.configureAudio).toHaveBeenCalled();
-    expect(media.isListening("chan-1")).toBe(true);
-  });
-
-  it("does NOT request BLUETOOTH_CONNECT on Android below API 31", async () => {
-    h.platform.Version = 30;
-    const media = createRadioMedia();
-    await media.ensureListen("chan-1", TOKEN);
-
+    // The radio no longer routes to headsets, so prompting for Bluetooth
+    // access would be an unexplained dialog on first channel join.
     expect(h.permissionsAndroid.request).not.toHaveBeenCalled();
   });
 
-  it("does NOT request BLUETOOTH_CONNECT on iOS", async () => {
+  it("never asks for BLUETOOTH_CONNECT on iOS", async () => {
     h.platform.OS = "ios";
     h.platform.Version = 17;
     const media = createRadioMedia();
     await media.ensureListen("chan-1", TOKEN);
 
     expect(h.permissionsAndroid.request).not.toHaveBeenCalled();
-  });
-
-  it("only requests BLUETOOTH_CONNECT once even if multiple listen rooms are opened", async () => {
-    const media = createRadioMedia();
-    await media.ensureListen("chan-1", TOKEN);
-    await media.ensureListen("chan-2", TOKEN);
-
-    // ensureSession() short-circuits after the first call (sessionStarted flag).
-    expect(h.permissionsAndroid.request).toHaveBeenCalledTimes(1);
   });
 });

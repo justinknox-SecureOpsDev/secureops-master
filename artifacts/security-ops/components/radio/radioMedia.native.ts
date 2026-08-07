@@ -46,7 +46,6 @@ import type {
   DisconnectReason,
   LocalAudioTrack,
 } from "livekit-client";
-import { Platform, PermissionsAndroid } from "react-native";
 
 import {
   getLiveKitNative,
@@ -171,83 +170,25 @@ class NativeRadioMedia implements RadioMedia {
         console.warn("[radio] setAudioModeAsync failed", e);
       }
     }
-    // Android 12+ (API 31) introduced BLUETOOTH_CONNECT as a runtime
-    // "dangerous" permission — unlike the legacy BLUETOOTH permission it
-    // replaces, declaring it in the manifest alone does NOT grant it. The
-    // OS must hand it to the app via an explicit request BEFORE the audio
-    // stack tries to enumerate or route to a paired headset, or the routing
-    // call silently falls back to speaker (no SecurityException on all
-    // devices, but no headset route either). We request it here, just
-    // before configureAudio, to maximise the chance it is granted by the
-    // time the routing call executes. Denial is a best-effort degradation:
-    // audio falls back to speakerphone and PTT captures on the built-in mic,
-    // both of which are safe. On API ≤ 30 the legacy BLUETOOTH permission
-    // covers headset routing without a runtime request.
-    if (Platform.OS === "android" && Platform.Version >= 31) {
-      try {
-        await PermissionsAndroid.request(
-          PermissionsAndroid.PERMISSIONS.BLUETOOTH_CONNECT,
-          {
-            title: "Bluetooth Access",
-            message:
-              "SecureOps needs Bluetooth access to route radio audio to your headset.",
-            buttonPositive: "OK",
-          },
-        );
-      } catch (e) {
-        // Best-effort — a failed request still lets the session start; the
-        // routing call will fall back to speaker if the permission is absent.
-        console.warn("[radio] BLUETOOTH_CONNECT permission request failed", e);
-      }
-    }
+    // The audio session config stays deliberately MINIMAL: LiveKit's
+    // communication preset, output on the speakerphone. Nothing else.
+    //
+    // DO NOT re-add Bluetooth headset-mic plumbing here without real-hardware
+    // proof. The attempt that shipped 2026-07-30 (iOS: setAppleAudioConfiguration
+    // with allowBluetooth/HFP + `voiceChat` mode; Android: bluetooth-first
+    // preferredOutputList + forceHandleAudioRouting + a BLUETOOTH_CONNECT
+    // runtime prompt) made EVERY transmission sound robotic/underwater to every
+    // listener, with no headset involved at all — `voiceChat` is Apple's
+    // handset-tuned voice-processing path and fights WebRTC's own AEC/AGC/noise
+    // suppression, and forced routing pushes capture onto narrowband voice-call
+    // paths. Clean radio audio for the whole fleet outranks headset-mic support;
+    // any future attempt must engage those options ONLY while a headset is
+    // actually the selected route, and be verified on a real device first.
     await this.lk.AudioSession.configureAudio({
-      android: {
-        // Bluetooth-first routing so a connected headset carries BOTH
-        // directions (SCO engages the headset mic, not just playback); the
-        // list is the selection order, so with no BT/wired device connected
-        // the speakerphone-out/phone-mic behavior is unchanged. LiveKit's
-        // audio switcher re-evaluates this list on device connect/disconnect,
-        // which is what keeps mid-session plug/unplug from stranding the
-        // route.
-        preferredOutputList: ["bluetooth", "headset", "speaker", "earpiece"],
-        audioTypeOptions: {
-          ...this.lk.AndroidAudioTypePresets.communication,
-          // Some Android devices skip audio routing entirely depending on
-          // audio mode, which leaves capture on the built-in mic even with a
-          // BT headset connected — force routing so SCO capture engages.
-          forceHandleAudioRouting: true,
-        },
-      },
+      android: { audioTypeOptions: this.lk.AndroidAudioTypePresets.communication },
       ios: { defaultOutput: "speaker" },
     });
     await this.lk.AudioSession.startAudioSession();
-    // iOS: the default LiveKit session category has NO Bluetooth options, so
-    // a connected headset gets playback (route override) but transmissions
-    // still capture from the built-in mic. Re-apply the category with
-    // allowBluetooth (HFP — REQUIRED for the headset MIC to be an input
-    // route) + allowBluetoothA2DP (high-quality playback while not
-    // capturing) + defaultToSpeaker (no BT/wired device → speakerphone, not
-    // earpiece; BT outranks this automatically when connected) + voiceChat
-    // mode (PTT-appropriate processing; OS then follows route changes when a
-    // headset connects/disconnects mid-session). mixWithOthers keeps the
-    // silent keep-alive loop co-existing exactly as before. Applied AFTER
-    // startAudioSession so it wins over the activation defaults. Best-effort:
-    // a binary whose native module predates this method keeps today's
-    // behavior (phone mic) instead of failing the session.
-    try {
-      await this.lk.AudioSession.setAppleAudioConfiguration({
-        audioCategory: "playAndRecord",
-        audioCategoryOptions: [
-          "allowBluetooth",
-          "allowBluetoothA2DP",
-          "defaultToSpeaker",
-          "mixWithOthers",
-        ],
-        audioMode: "voiceChat",
-      });
-    } catch (e) {
-      console.warn("[radio] setAppleAudioConfiguration failed", e);
-    }
     this.sessionStarted = true;
   }
 

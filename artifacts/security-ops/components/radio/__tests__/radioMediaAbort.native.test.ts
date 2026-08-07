@@ -53,18 +53,6 @@ const h = vi.hoisted(() => {
 
 const { created, hooks } = h;
 
-// Block the real react-native from loading (Flow `import typeof` syntax is
-// unparseable by Rollup/vitest); radioMedia.native.ts imports Platform and
-// PermissionsAndroid from it, so a minimal stub is enough for these tests.
-vi.mock("react-native", () => ({
-  Platform: { OS: "android", Version: 31 },
-  PermissionsAndroid: {
-    PERMISSIONS: { BLUETOOTH_CONNECT: "android.permission.BLUETOOTH_CONNECT" },
-    RESULTS: { GRANTED: "granted" },
-    request: vi.fn(async () => "granted"),
-  },
-}));
-
 vi.mock("@livekit/react-native", () => ({
   registerGlobals: vi.fn(),
   AudioSession: {

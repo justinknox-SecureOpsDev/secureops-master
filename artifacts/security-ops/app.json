@@ -49,9 +49,7 @@
         "android.permission.INTERNET",
         "android.permission.MODIFY_AUDIO_SETTINGS",
         "android.permission.SYSTEM_ALERT_WINDOW",
-        "android.permission.WAKE_LOCK",
-        "android.permission.BLUETOOTH",
-        "android.permission.BLUETOOTH_CONNECT"
+        "android.permission.WAKE_LOCK"
       ],
       "blockedPermissions": [
         "android.permission.READ_MEDIA_IMAGES",

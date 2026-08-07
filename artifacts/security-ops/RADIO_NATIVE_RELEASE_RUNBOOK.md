@@ -244,33 +244,39 @@ Bluetooth headset.
    (or sign out) → the silent keep-alive stops with the last radio connection;
    lock B for 2+ minutes and confirm the app suspends normally. This matches
    the App Review disclosure in `APP_REVIEW_NOTES.md` §3.
-9. **Bluetooth playback:** with a headset paired to B, A transmits → audio comes
-   out of the **headset**, not the phone speaker.
-10. **Bluetooth microphone:** B holds PTT while wearing the headset and speaks
-    with the phone held away from their mouth → A hears them clearly (capture is
-    on the headset mic, not the built-in one).
-11. **Bluetooth fallback:** disconnect the headset mid-session → audio moves to
-    speakerphone and PTT still captures on the built-in mic.
-12. Point the app at a server **without** LiveKit env → app stays usable,
+9. **Audio quality:** A transmits a full sentence held at arm's length → B hears
+   it as natural speech out of the **speakerphone**. Robotic, underwater or
+   "bad speakerphone" audio means something has re-applied an AVAudioSession
+   category/mode override — see the Bluetooth note below.
+10. Point the app at a server **without** LiveKit env → app stays usable,
     presence works, PTT shows the "not configured" notice (503 path).
 
-Only after 1–12 pass should the version be submitted for App Store review in
+Only after 1–10 pass should the version be submitted for App Store review in
 App Store Connect.
+
+> **Bluetooth headset support is NOT shipped.** A headset-mic attempt
+> (iOS `setAppleAudioConfiguration` with `allowBluetooth`/HFP + `voiceChat`
+> mode) reached the fleet on 2026-07-30 and made every transmission sound
+> robotic/underwater to every listener, with no headset involved — reverted
+> 2026-08-07. The audio session is now just the communication preset with
+> speaker output. Do not restore those options without gating them on a
+> headset actually being the selected route and testing on real hardware.
 
 ### 4b. Android (internal track / sideload)
 
 Android has a different audio-focus model (AudioFocus, foreground service,
 WAKELOCK) from iOS, so it must be tested separately. Two Android devices are
-needed; at least one should be Android 12+ (API 31) to verify the
-`BLUETOOTH_CONNECT` permission path. A Bluetooth headset covers step 9–11.
+needed.
 
-The configureAudio block sets `preferredOutputList: ["bluetooth","headset",
-"speaker","earpiece"]` + `forceHandleAudioRouting: true` (SCO capture),
-which is the Android equivalent of the iOS AVAudioSession category options.
+The configureAudio block passes only `AndroidAudioTypePresets.communication`.
+Bluetooth-first `preferredOutputList` + `forceHandleAudioRouting` were reverted
+on 2026-08-07 along with the iOS category override (see §4a) — they degraded
+capture quality fleet-wide. `BLUETOOTH_CONNECT` is still declared in the
+manifest from versionCode 8 but is no longer requested at runtime, so no
+Bluetooth prompt appears; drop the declaration in the next binary.
 
 1. **Basic PTT** — repeat §4a steps 1–5 on Android devices. Audio should route
-   out of the **speakerphone** (not earpiece) when no headset is connected,
-   because `preferredOutputList` ranks speaker above earpiece.
+   out of the **speakerphone** (not earpiece) when no headset is connected.
 2. **Clocked in, phone locked** — device B clocks in so the radio screen is
    active. Lock the screen. Wait **2+ minutes**. Device A transmits — B must
    hear it (the WAKELOCK + AudioFocus hold open on Android; the expo-audio
@@ -281,24 +287,11 @@ which is the Android equivalent of the iOS AVAudioSession category options.
 4. **Interruption recovery** — with B locked and joined, receive a phone call,
    end it, briefly foreground the app, re-lock, wait 2 min, A transmits — B
    hears it (Android AudioFocus re-granted on foreground; keep-alive replayed).
-5. **Bluetooth playback (Android 12+)** — pair a headset to B. A transmits →
-   audio comes from the headset (SCO routing engaged via `forceHandleAudioRouting`).
-   The app itself requests `BLUETOOTH_CONNECT` in `ensureSession()`, before
-   `configureAudio` runs, on the first audio session open of each app launch
-   (regardless of whether a headset is currently paired). Android shows the
-   "Bluetooth Access" OS prompt once; subsequent launches do not prompt again
-   unless the permission is revoked. To verify: revoke the permission in
-   Settings → App → Permissions, join a channel → confirm the "Bluetooth Access"
-   prompt appears; deny → audio falls back to speakerphone (no crash); re-grant
-   → headset routes correctly on the next channel join.
-6. **Bluetooth microphone** — B holds PTT while wearing the headset → A hears
-   clearly from the headset mic.
-7. **Bluetooth fallback** — disconnect mid-session → audio moves to speakerphone
-   and PTT still captures on the built-in mic.
-8. **Pre-Android-12 device (API ≤ 30)** — if available: the legacy `BLUETOOTH`
-   permission (no `BLUETOOTH_CONNECT` prompt) should still route correctly since
-   `forceHandleAudioRouting` does not require the newer permission for routing
-   itself.
+5. **Audio quality** — A transmits a full sentence held at arm's length → B
+   hears natural speech from the speakerphone. Robotic/underwater audio means
+   a routing or audio-mode override has crept back in (see §4a).
+6. **No Bluetooth prompt** — join a channel on a fresh install → the app must
+   NOT show the "Bluetooth Access" OS prompt.
 
 ### App Review notes to include
 
@@ -324,11 +317,10 @@ and match `eas build:list`.
 
 ---
 
-### Android Bluetooth permission (API 31+)
+### Android Bluetooth permission (API 31+) — dormant
 
-`BLUETOOTH_CONNECT` (required on Android 12+ to enumerate and connect to
-paired Bluetooth devices) has been added to `app.json` alongside the legacy
-`BLUETOOTH` permission. Android will show a runtime prompt on first Bluetooth
-use; confirm the prompt fires correctly during the §4b smoke test (step 5).
-iOS is unaffected — Bluetooth routing there is controlled by the AVAudioSession
-category options applied in `ensureSession()`.
+`BLUETOOTH` and `BLUETOOTH_CONNECT` are still declared in `app.json` (shipped
+in versionCode 8), but nothing requests or uses them since the 2026-08-07
+audio-routing revert, so no runtime prompt appears. Remove both declarations
+from the next Android binary rather than leaving unused permissions in the
+Play listing.
