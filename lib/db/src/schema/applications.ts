@@ -66,6 +66,25 @@ export const applicationsTable = pgTable("applications", {
   secondApprovedBy: uuid("second_approved_by"),
   secondApprovedAt: timestamp("second_approved_at", { withTimezone: true }),
   createdEmployeeId: uuid("created_employee_id"),
+  // ---- Background-check gate -------------------------------------------
+  // Final (two-admin) approval no longer issues the onboarding link. It parks
+  // the application here at "pending" and notifies the designated background
+  // -check admin. Recording a "clear" result is what actually provisions the
+  // login account and sends the onboarding link/SMS; "failed" holds the
+  // application with NO applicant email — an admin decides what happens next.
+  //   status: null | "pending" | "clear" | "failed"
+  // NULL means the gate does not apply: either the application has not reached
+  // final approval yet, or it was approved before this gate existed (legacy
+  // rows already have createdEmployeeId and must never re-enter the queue).
+  backgroundCheckStatus: text("background_check_status"),
+  backgroundCheckRequestedAt: timestamp("background_check_requested_at", { withTimezone: true }),
+  backgroundCheckCompletedBy: uuid("background_check_completed_by"),
+  backgroundCheckCompletedAt: timestamp("background_check_completed_at", { withTimezone: true }),
+  backgroundCheckNotes: text("background_check_notes"),
+  // Object-storage key of the report file. Optional — a check may be recorded
+  // with notes alone (e.g. results given verbally). Copied onto the employee
+  // row when onboarding completes so it lands in the permanent employee file.
+  backgroundCheckReportKey: text("background_check_report_key"),
   // Onboarding-approval email delivery state. Captured from the SMTP handoff
   // when the admin approves the application (and again on resend). Lets HR
   // see at a glance whether the candidate actually received their link.

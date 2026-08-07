@@ -41,7 +41,7 @@ import { z } from "zod/v4";
 import type { z as zClassic } from "zod";
 import { requireAdmin } from "../middlewares/auth";
 import { sendPushToUsers } from "../lib/push";
-import { sendEmail, sendEmailDetailed, renderOnboardingEmail, renderResendOnboardingEmail, renderRejectionEmail, renderApplicationReceivedEmail, renderRequestInfoEmail, renderApplicationDraftResumeEmail, renderNewApplicationAdminEmail, renderOnboardingCompletedAdminEmail } from "../lib/email";
+import { sendEmail, sendEmailDetailed, renderOnboardingEmail, renderResendOnboardingEmail, renderRejectionEmail, renderApplicationReceivedEmail, renderRequestInfoEmail, renderApplicationDraftResumeEmail, renderNewApplicationAdminEmail, renderOnboardingCompletedAdminEmail, renderBackgroundCheckPendingEmail, renderBackgroundCheckRequestEmail } from "../lib/email";
 import { brand } from "../lib/brandConfig";
 import { sendSmsToPhoneNumber } from "../lib/sms";
 import { resetApplicationsForDeletedUser } from "../lib/onboardingLifecycle";
@@ -252,6 +252,12 @@ function rowToApplication(r: ApplicationRow, distanceMiles: number | null = null
     onboardingEmailError: r.onboardingEmailError ?? null,
     onboardingEmailSentAt: r.onboardingEmailSentAt ? r.onboardingEmailSentAt.toISOString() : null,
     onboardingEmailAttemptedAt: r.onboardingEmailAttemptedAt ? r.onboardingEmailAttemptedAt.toISOString() : null,
+    backgroundCheckStatus: r.backgroundCheckStatus ?? null,
+    backgroundCheckRequestedAt: r.backgroundCheckRequestedAt ? r.backgroundCheckRequestedAt.toISOString() : null,
+    backgroundCheckCompletedBy: r.backgroundCheckCompletedBy ?? null,
+    backgroundCheckCompletedAt: r.backgroundCheckCompletedAt ? r.backgroundCheckCompletedAt.toISOString() : null,
+    backgroundCheckNotes: r.backgroundCheckNotes ?? null,
+    backgroundCheckReportKey: r.backgroundCheckReportKey ?? null,
     createdAt: r.createdAt.toISOString(),
   };
 }
@@ -1194,7 +1200,15 @@ router.get("/admin/applications", requireAdmin, async (req, res): Promise<void> 
   const maxMiles = maxMilesRaw ? parseFloat(maxMilesRaw) : NaN;
 
   const conds: SQL[] = [];
-  if (status) conds.push(eq(applicationsTable.status, status));
+  // "background_pending" is a virtual status: approved applications parked at
+  // the background-check gate. It backs the admin portal's background-check
+  // queue, which would otherwise be buried inside "Approved".
+  if (status === "background_pending") {
+    conds.push(eq(applicationsTable.status, "approved"));
+    conds.push(eq(applicationsTable.backgroundCheckStatus, "pending"));
+  } else if (status) {
+    conds.push(eq(applicationsTable.status, status));
+  }
   if (city) conds.push(ilike(applicationsTable.city, `%${city}%`));
   if (search) {
     const like = `%${search}%`;
@@ -1341,12 +1355,28 @@ router.post("/admin/applications/:id/review", requireAdmin, async (req, res): Pr
     return;
   }
   const notes = parsed.data.notes;
+  const appId = req.params.id as string;
+
+  // An approved application has left the review stage for good: it is either
+  // parked at the background-check gate or already provisioned. Dropping it
+  // back to "under review" would strand its background state and let the
+  // two-admin approval run a second time on top of an existing account.
+  const [existing] = await db.select().from(applicationsTable).where(eq(applicationsTable.id, appId)).limit(1);
+  if (!existing) { res.status(404).json({ error: "Not Found", message: "Application not found" }); return; }
+  if (existing.status === "approved") {
+    res.status(409).json({
+      error: "Conflict",
+      message: "This application is already approved and cannot be moved back to under review.",
+    });
+    return;
+  }
+
   const [row] = await db.update(applicationsTable).set({
     status: "under_review",
     reviewerNotes: notes ?? null,
     reviewedBy: req.user!.userId,
     reviewedAt: new Date(),
-  }).where(eq(applicationsTable.id, req.params.id as string)).returning();
+  }).where(eq(applicationsTable.id, appId)).returning();
   if (!row) { res.status(404).json({ error: "Not Found", message: "Application not found" }); return; }
   res.json(rowToApplication(row));
 });
@@ -1359,6 +1389,21 @@ router.post("/admin/applications/:id/reject", requireAdmin, async (req, res): Pr
   }
   const notes = parsed.data.notes;
   const appId = req.params.id as string;
+
+  // Rejecting is still allowed for an approved application that never got an
+  // account — that is how a failed background check is closed out. Once the
+  // account exists, though, rejecting would leave a live login and onboarding
+  // token attached to a "rejected" applicant; deactivating the employee is the
+  // correct path there.
+  const [existing] = await db.select().from(applicationsTable).where(eq(applicationsTable.id, appId)).limit(1);
+  if (!existing) { res.status(404).json({ error: "Not Found", message: "Application not found" }); return; }
+  if (existing.createdEmployeeId) {
+    res.status(409).json({
+      error: "Conflict",
+      message: "This applicant already has an account. Deactivate or delete the employee instead of rejecting the application.",
+    });
+    return;
+  }
 
   // Invalidate any outstanding amendment tokens so that an old amendment link
   // cannot reopen a rejected application.
@@ -1420,13 +1465,10 @@ router.post("/admin/applications/:id/approve", requireAdmin, async (req, res): P
   const appId = req.params.id as string;
   const reviewerId = req.user!.userId;
 
-  const token = genToken();
-  const expiresAt = new Date(Date.now() + ONBOARDING_TOKEN_TTL_DAYS * 86400_000);
-
   type ErrorBody = { error: string; message: string };
   type ApproveResult =
     | { kind: "first"; updated: ApplicationRow }
-    | { kind: "second"; updated: ApplicationRow; userId: string; tempPasswordPlain: string }
+    | { kind: "second"; updated: ApplicationRow }
     | { error: { status: number; body: ErrorBody } };
 
   let result: ApproveResult;
@@ -1443,8 +1485,23 @@ router.post("/admin/applications/:id/approve", requireAdmin, async (req, res): P
       if (!app) {
         return { error: { status: 404, body: { error: "Not Found", message: "Application not found" } } };
       }
-      if (app.status === "approved" && app.createdEmployeeId) {
-        return { error: { status: 409, body: { error: "Conflict", message: "Application already approved" } } };
+      // An approved application is either already provisioned (createdEmployeeId) or
+      // waiting on / holding a background-check result. Either way the two-admin
+      // gate is spent: without this guard a third approve click would fall into
+      // the first-approval branch below and reset an approved row back to
+      // awaiting_second_approval.
+      if (app.status === "approved" && (app.createdEmployeeId || app.backgroundCheckStatus)) {
+        return {
+          error: {
+            status: 409,
+            body: {
+              error: "Conflict",
+              message: app.createdEmployeeId
+                ? "Application already approved"
+                : "Application already approved — it is waiting on the background check.",
+            },
+          },
+        };
       }
 
       // ---------------------------- FIRST APPROVAL ----------------------------
@@ -1485,6 +1542,275 @@ router.post("/admin/applications/:id/approve", requireAdmin, async (req, res): P
         };
       }
 
+      // Final approval no longer provisions anything. It parks the application
+      // at the background-check gate: no user account, no onboarding token and
+      // no onboarding email exist until the designated admin records a "clear"
+      // result (POST /admin/applications/:id/background-check). Deferring the
+      // account this far means an applicant who fails a check never had a login
+      // in the first place — there is nothing to disable or clean up.
+
+      // Invalidate any outstanding amendment tokens so that an old amendment
+      // link cannot reopen an already-approved application and create
+      // divergence between the employee record and the application record.
+      await tx.update(applicationAmendmentTokensTable)
+        .set({ consumedAt: new Date() })
+        .where(and(
+          eq(applicationAmendmentTokensTable.applicationId, appId),
+          sql`${applicationAmendmentTokensTable.consumedAt} IS NULL`,
+        ));
+
+      const [updated] = await tx.update(applicationsTable).set({
+        status: "approved",
+        reviewerNotes: notes ?? app.reviewerNotes ?? null,
+        reviewedBy: reviewerId,
+        reviewedAt: new Date(),
+        secondApprovedBy: reviewerId,
+        secondApprovedAt: new Date(),
+        backgroundCheckStatus: "pending",
+        backgroundCheckRequestedAt: new Date(),
+      }).where(eq(applicationsTable.id, appId)).returning();
+
+      return { kind: "second", updated };
+    });
+  } catch (err) {
+    req.log.error({ err }, "Approve transaction failed");
+    res.status(500).json({ error: "Internal Server Error", message: "Approval failed" });
+    return;
+  }
+
+  if ("error" in result) { res.status(result.error.status).json(result.error.body); return; }
+
+  // First approval recorded — no provisioning, no onboarding email yet. Return
+  // the updated application so the admin UI can reflect "awaiting second
+  // approval" and surface who gave the first sign-off.
+  if (result.kind === "first") {
+    res.json({
+      application: rowToApplication(result.updated),
+      awaitingSecondApproval: true,
+      firstApprovedBy: result.updated.firstApprovedBy,
+    });
+    return;
+  }
+
+  // Approved, and now parked at the background-check gate. Two notifications
+  // follow, neither of which may fail the approval: the applicant gets a
+  // holding note so the silence before the onboarding link is explained, and
+  // whoever runs background checks gets the work item.
+  const app = result.updated;
+
+  let applicantEmailSent = false;
+  const pending = renderBackgroundCheckPendingEmail({ firstName: app.firstName });
+  try {
+    applicantEmailSent = await sendEmail({
+      to: app.email,
+      subject: pending.subject,
+      text: pending.text,
+      html: pending.html,
+    });
+  } catch (err) {
+    req.log.warn({ err, applicationId: appId }, "Background-check holding email to applicant failed");
+  }
+
+  const notifiedAdmins = await notifyBackgroundCheckRequested(app, req.log);
+  req.log.info(
+    { applicationId: appId, notifiedAdmins, applicantEmailSent },
+    "Application finally approved — awaiting background check",
+  );
+
+  res.json({
+    application: rowToApplication(app),
+    backgroundCheckPending: true,
+    applicantEmailSent,
+    notifiedAdmins,
+  });
+});
+
+// ---- Admin: background check gate ----------------------------------------
+//
+// A manual pre-employment background check sits between final (two-admin)
+// approval and the onboarding invite. Final approval parks the application at
+// backgroundCheckStatus="pending" and notifies whoever runs checks; recording
+// a "clear" result HERE is what creates the login account and sends the
+// onboarding link. A "failed" result is recorded and held silently — the
+// applicant is never emailed about a failed check, an admin decides what
+// happens next (usually Reject, which sends the standard rejection email).
+
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+const BackgroundCheckBody = z.object({
+  result: z.enum(["clear", "failed"]),
+  notes: z.string().max(4000).optional(),
+  // Object-storage path from POST /storage/uploads/request-url. Optional: a
+  // check may be recorded on notes alone (e.g. results relayed verbally), so
+  // the report file is never required to unblock a hire. The path is further
+  // bound to the acting admin's own upload namespace in the route, so an
+  // arbitrary private-object reference cannot be planted on the record.
+  reportKey: z.union([z.literal(""), z.string().max(512)]).optional(),
+});
+
+/**
+ * Who to tell that a background check is waiting: the admin designated in
+ * Platform → Branding if they still exist and are still an admin, otherwise
+ * every admin. Never returns an empty list while any admin exists, so the
+ * request cannot silently go nowhere when the designated user is deleted or
+ * demoted.
+ */
+async function resolveBackgroundCheckAdmins(): Promise<{ id: string; email: string }[]> {
+  const designated = (brand.backgroundCheckAdminUserId ?? "").trim();
+  // Guard the shape before querying: a non-UUID value would make Postgres
+  // throw on the uuid comparison rather than simply not matching.
+  if (UUID_RE.test(designated)) {
+    const [chosen] = await db
+      .select({ id: usersTable.id, email: usersTable.email })
+      .from(usersTable)
+      .where(and(eq(usersTable.id, designated), eq(usersTable.role, "admin")))
+      .limit(1);
+    if (chosen) return [chosen];
+  }
+  return db
+    .select({ id: usersTable.id, email: usersTable.email })
+    .from(usersTable)
+    .where(eq(usersTable.role, "admin"));
+}
+
+/**
+ * In-app push + email telling the background-check admin there is work
+ * waiting. Never throws: a notification failure must not fail the approval
+ * that triggered it. Returns how many admins were notified.
+ */
+async function notifyBackgroundCheckRequested(
+  app: ApplicationRow,
+  log: Request["log"],
+): Promise<number> {
+  const applicantName = `${app.firstName} ${app.lastName}`.trim() || app.email;
+  let recipients: { id: string; email: string }[] = [];
+  try {
+    recipients = await resolveBackgroundCheckAdmins();
+  } catch (err) {
+    log.error({ err, applicationId: app.id }, "Failed to resolve background-check admins");
+    return 0;
+  }
+  if (!recipients.length) {
+    log.warn({ applicationId: app.id }, "Background check requested but there is no admin to notify");
+    return 0;
+  }
+
+  // Fire-and-forget, per the notification dispatch policy.
+  sendPushToUsers(recipients.map((r) => r.id), {
+    title: "🔎 Background check needed",
+    body: `${applicantName} is approved and waiting on a background check.`,
+    data: { type: "background_check", applicationId: app.id },
+  }).catch(() => {});
+
+  const base = getTrustedBaseUrl();
+  const msg = renderBackgroundCheckRequestEmail({
+    applicantName,
+    applicationUrl: base ? `${base}/admin-portal/hr/applications?focus=${app.id}` : null,
+  });
+  // HR-routed event → a single inbox: the designated admin's own address when
+  // there is one, otherwise the configured admin-notify inbox rather than a
+  // blast to every admin's personal email.
+  const to = recipients.length === 1 ? recipients[0]!.email : brand.adminNotifyEmail;
+  try {
+    await sendEmail({ to, subject: msg.subject, text: msg.text, html: msg.html });
+  } catch (err) {
+    log.warn({ err, applicationId: app.id }, "Background-check request email failed");
+  }
+  return recipients.length;
+}
+
+router.post("/admin/applications/:id/background-check", requireAdmin, async (req, res): Promise<void> => {
+  const parsed = BackgroundCheckBody.safeParse(req.body ?? {});
+  if (!parsed.success) {
+    res.status(400).json({ error: "Bad Request", message: parsed.error.message });
+    return;
+  }
+  const appId = req.params.id as string;
+  const reviewerId = req.user!.userId;
+  const outcome = parsed.data.result;
+  const notes = parsed.data.notes?.trim() ? parsed.data.notes.trim() : null;
+  const reportKey = parsed.data.reportKey ? parsed.data.reportKey : null;
+
+  // A background report must come from THIS admin's own upload session. The
+  // presigned-URL endpoint mints /objects/uploads/u/<userId>/<uuid>, so an
+  // out-of-band object key (someone else's private document) cannot be stapled
+  // to the application — from where it would be copied to the employee file
+  // and handed out as a signed download to every admin.
+  if (reportKey && !reportKey.startsWith(`/objects/uploads/u/${reviewerId}/`)) {
+    res.status(400).json({
+      error: "Bad Request",
+      message: "Background report must be uploaded through this portal by the admin recording the result.",
+    });
+    return;
+  }
+
+  const token = genToken();
+  const expiresAt = new Date(Date.now() + ONBOARDING_TOKEN_TTL_DAYS * 86400_000);
+
+  type ErrorBody = { error: string; message: string };
+  type CheckResult =
+    | { kind: "failed"; updated: ApplicationRow }
+    | { kind: "clear"; updated: ApplicationRow; userId: string; tempPasswordPlain: string }
+    | { error: { status: number; body: ErrorBody } };
+
+  let result: CheckResult;
+  try {
+    result = await db.transaction(async (tx): Promise<CheckResult> => {
+      // FOR UPDATE: two admins recording a result at once must not both
+      // provision an account for the same applicant.
+      const [app] = await tx
+        .select()
+        .from(applicationsTable)
+        .where(eq(applicationsTable.id, appId))
+        .for("update")
+        .limit(1);
+      if (!app) {
+        return { error: { status: 404, body: { error: "Not Found", message: "Application not found" } } };
+      }
+      if (app.status !== "approved" || !app.backgroundCheckStatus) {
+        return {
+          error: {
+            status: 409,
+            body: {
+              error: "Conflict",
+              message:
+                "This application has not been fully approved yet, so there is no background check to record.",
+            },
+          },
+        };
+      }
+      if (app.backgroundCheckStatus === "clear" || app.createdEmployeeId) {
+        return {
+          error: {
+            status: 409,
+            body: {
+              error: "Conflict",
+              message: "This background check is already recorded as clear and onboarding has been issued.",
+            },
+          },
+        };
+      }
+
+      const completedAt = new Date();
+
+      // ------------------------------- FAILED -------------------------------
+      // Record and hold. No account, no onboarding link, and deliberately no
+      // applicant email — an admin decides the next step by hand. A previously
+      // failed check may be re-recorded (e.g. a corrected report came back).
+      if (outcome === "failed") {
+        const [updated] = await tx.update(applicationsTable).set({
+          backgroundCheckStatus: "failed",
+          backgroundCheckCompletedBy: reviewerId,
+          backgroundCheckCompletedAt: completedAt,
+          backgroundCheckNotes: notes ?? app.backgroundCheckNotes ?? null,
+          backgroundCheckReportKey: reportKey ?? app.backgroundCheckReportKey ?? null,
+        }).where(eq(applicationsTable.id, appId)).returning();
+        return { kind: "failed", updated };
+      }
+
+      // -------------------------------- CLEAR -------------------------------
+      // The check passed: provision the login account and mint the onboarding
+      // token now (deferred here from final approval).
       // Generate a cryptographically random temp password — never derive it
       // from applicant data (e.g. SSN last-4) which may be known to others.
       // The plaintext is returned to the admin once and never stored; the
@@ -1565,45 +1891,37 @@ router.post("/admin/applications/:id/approve", requireAdmin, async (req, res): P
         token, employeeId: userId, applicationId: appId, expiresAt,
       });
 
-      // Invalidate any outstanding amendment tokens so that an old amendment
-      // link cannot reopen an already-approved application and create
-      // divergence between the employee record and the application record.
-      await tx.update(applicationAmendmentTokensTable)
-        .set({ consumedAt: new Date() })
-        .where(and(
-          eq(applicationAmendmentTokensTable.applicationId, appId),
-          sql`${applicationAmendmentTokensTable.consumedAt} IS NULL`,
-        ));
-
       const [updated] = await tx.update(applicationsTable).set({
-        status: "approved",
-        reviewerNotes: notes ?? app.reviewerNotes ?? null,
-        reviewedBy: reviewerId,
-        reviewedAt: new Date(),
-        secondApprovedBy: reviewerId,
-        secondApprovedAt: new Date(),
+        backgroundCheckStatus: "clear",
+        backgroundCheckCompletedBy: reviewerId,
+        backgroundCheckCompletedAt: completedAt,
+        backgroundCheckNotes: notes ?? app.backgroundCheckNotes ?? null,
+        backgroundCheckReportKey: reportKey ?? app.backgroundCheckReportKey ?? null,
         createdEmployeeId: userId,
       }).where(eq(applicationsTable.id, appId)).returning();
 
-      return { kind: "second", updated, userId, tempPasswordPlain };
+      return { kind: "clear", updated, userId, tempPasswordPlain };
     });
   } catch (err) {
-    req.log.error({ err }, "Approve transaction failed");
-    res.status(500).json({ error: "Internal Server Error", message: "Approval failed" });
+    req.log.error({ err }, "Background-check transaction failed");
+    res.status(500).json({ error: "Internal Server Error", message: "Could not record the background check" });
     return;
   }
 
   if ("error" in result) { res.status(result.error.status).json(result.error.body); return; }
 
-  // First approval recorded — no provisioning, no onboarding email yet. Return
-  // the updated application so the admin UI can reflect "awaiting second
-  // approval" and surface who gave the first sign-off.
-  if (result.kind === "first") {
-    res.json({
-      application: rowToApplication(result.updated),
-      awaitingSecondApproval: true,
-      firstApprovedBy: result.updated.firstApprovedBy,
-    });
+  res.locals["auditMetadata"] = {
+    applicationId: appId,
+    result: outcome,
+    reportAttached: reportKey !== null,
+  };
+
+  if (result.kind === "failed") {
+    req.log.warn(
+      { applicationId: appId, reviewerId },
+      "Background check recorded as FAILED — application held, applicant not notified",
+    );
+    res.json({ application: rowToApplication(result.updated), onboardingSent: false });
     return;
   }
 
@@ -1663,11 +1981,12 @@ router.post("/admin/applications/:id/approve", requireAdmin, async (req, res): P
       req.log.warn({ employeeId: result.userId }, "Onboarding approval SMS delivery failed");
     }
   } else {
-    req.log.error({ employeeId: result.userId }, "Approve: APP_BASE_URL/REPLIT_DOMAINS unset; cannot build onboarding link");
+    req.log.error({ employeeId: result.userId }, "Background check clear: APP_BASE_URL/REPLIT_DOMAINS unset; cannot build onboarding link");
   }
 
   res.json({
     application: rowToApplication(updatedApp),
+    onboardingSent: true,
     onboardingUrl,
     onboardingToken: token,
     employeeId: result.userId,
@@ -2161,6 +2480,13 @@ router.post("/onboarding/:token", tokenLookupLimiter, async (req, res): Promise<
     uniformBoots: d.uniformBoots ?? null,
     licenseDocKey: d.siaLicenseDoc?.objectPath ?? null,
     passportDocKey: d.passportDoc?.objectPath ?? null,
+    // ---- pre-hire background check (carried over from the application) ----
+    // The check was cleared before this link was ever issued, so the report
+    // and clearance date belong in the permanent employee file. Both stay
+    // null for legacy hires approved before the background-check gate.
+    backgroundCheckDocKey: app?.backgroundCheckReportKey ?? null,
+    backgroundCheckClearedAt:
+      app?.backgroundCheckStatus === "clear" ? app.backgroundCheckCompletedAt ?? null : null,
     directDepositConsent: d.directDepositConsent ?? null,
     directDepositSignature: d.directDepositSignature ?? null,
     acknowledgements: enrichedAcks,

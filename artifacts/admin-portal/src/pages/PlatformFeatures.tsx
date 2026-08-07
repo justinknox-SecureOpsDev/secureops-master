@@ -149,6 +149,7 @@ type BrandCfg = {
   billingEmail: string | null;
   hrEmail: string | null;
   adminNotifyEmail: string | null;
+  backgroundCheckAdminUserId: string | null;
   logoDataUrl: string | null;
   updatedAt?: string | null;
   updatedBy?: string | null;
@@ -166,6 +167,7 @@ const EMPTY_BRAND: BrandCfg = {
   billingEmail: null,
   hrEmail: null,
   adminNotifyEmail: null,
+  backgroundCheckAdminUserId: null,
   logoDataUrl: null,
 };
 
@@ -273,6 +275,15 @@ export default function PlatformFeaturesPage() {
     enabled: meQ.data?.isSuperAdmin === true,
   });
 
+  // Admins available to own the background-check step. Falls back to an empty
+  // list (the picker then only offers "Every admin") if the fetch fails.
+  const adminsQ = useQuery<{ rows: { id: string; email: string; firstName: string | null; lastName: string | null; role: string }[] }>({
+    queryKey: ["platform", "admin-users"],
+    queryFn: () => api("/admin/tables/users?limit=1000"),
+    enabled: meQ.data?.isSuperAdmin === true,
+  });
+  const adminUsers = (adminsQ.data?.rows ?? []).filter((u) => u.role === "admin");
+
   const [brandDraft, setBrandDraft] = useState<BrandCfg>(EMPTY_BRAND);
   const logoInputRef = useRef<HTMLInputElement>(null);
 
@@ -291,6 +302,7 @@ export default function PlatformFeaturesPage() {
         billingEmail: c.billingEmail,
         hrEmail: c.hrEmail,
         adminNotifyEmail: c.adminNotifyEmail,
+        backgroundCheckAdminUserId: c.backgroundCheckAdminUserId,
         logoDataUrl: c.logoDataUrl,
       } : EMPTY_BRAND);
     }
@@ -311,7 +323,7 @@ export default function PlatformFeaturesPage() {
 
   const brandDirty = (() => {
     const c = brandQ.data?.config;
-    const keys: (keyof BrandCfg)[] = ["companyName", "shortName", "tagline", "companyLicense", "appName", "colorNavy", "colorGold", "colorCream", "billingEmail", "hrEmail", "adminNotifyEmail", "logoDataUrl"];
+    const keys: (keyof BrandCfg)[] = ["companyName", "shortName", "tagline", "companyLicense", "appName", "colorNavy", "colorGold", "colorCream", "billingEmail", "hrEmail", "adminNotifyEmail", "backgroundCheckAdminUserId", "logoDataUrl"];
     return keys.some((k) => (brandDraft[k] ?? null) !== ((c?.[k] as string | null | undefined) ?? null));
   })();
 
@@ -555,6 +567,25 @@ export default function PlatformFeaturesPage() {
                 value={brandDraft.adminNotifyEmail ?? ""}
                 onChange={(e) => setBrandDraft((p) => ({ ...p, adminNotifyEmail: e.target.value || null }))}
               />
+            </div>
+            <div className="space-y-1">
+              <p className="text-xs font-semibold uppercase tracking-wide opacity-60">Background-check admin</p>
+              <select
+                aria-label="Background-check admin"
+                className="w-full h-9 rounded-md border border-input bg-background px-3 text-sm"
+                value={brandDraft.backgroundCheckAdminUserId ?? ""}
+                onChange={(e) => setBrandDraft((p) => ({ ...p, backgroundCheckAdminUserId: e.target.value || null }))}
+              >
+                <option value="">Every admin</option>
+                {adminUsers.map((u) => (
+                  <option key={u.id} value={u.id}>
+                    {[u.firstName, u.lastName].filter(Boolean).join(" ") || u.email}
+                  </option>
+                ))}
+              </select>
+              <p className="text-xs opacity-60">
+                Gets the notification when an approved applicant needs a background check.
+              </p>
             </div>
           </div>
 

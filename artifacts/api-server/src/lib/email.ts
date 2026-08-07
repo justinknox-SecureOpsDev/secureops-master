@@ -395,6 +395,82 @@ export function renderResendOnboardingEmail(opts: {
   return { subject, text, html };
 }
 
+/**
+ * Applicant-facing holding note sent on final approval, while the pre-hire
+ * background check runs. Deliberately vague on timing — the check is a manual
+ * process — and makes no promise the hire is confirmed.
+ */
+export function renderBackgroundCheckPendingEmail(opts: {
+  firstName: string;
+}): { subject: string; text: string; html: string } {
+  const subject = `Your ${brand.companyName} application has been approved`;
+  const text = [
+    `Hi ${opts.firstName},`,
+    "",
+    `Good news — your application to ${brand.companyName} has been approved by our review team.`,
+    "",
+    "The final step on our side is a standard pre-employment background check.",
+    "Once that clears, we will email you a link to complete your onboarding.",
+    "",
+    "There is nothing you need to do right now. We will be in touch.",
+    "",
+    `— ${companySignature()}`,
+  ].join("\n");
+  const html = `
+    <div style="font-family:Georgia,serif;max-width:560px;margin:0 auto;color:#0c0a08">
+      <h2 style="color:#0c0a08">Your application has been approved</h2>
+      <p>Hi ${escapeHtml(opts.firstName)},</p>
+      <p>Good news — your application to ${escapeHtml(brand.companyName)} has been approved by our review team.</p>
+      <p>The final step on our side is a standard pre-employment background check. Once that clears, we will email you a link to complete your onboarding.</p>
+      <p style="color:#555">There is nothing you need to do right now. We will be in touch.</p>
+    </div>
+  `;
+  return { subject, text, html };
+}
+
+/**
+ * Internal alert telling the designated admin that an approved applicant is
+ * waiting on a background check. Carries NO applicant PII beyond the name —
+ * date of birth, SSN and address stay behind the portal login, reachable via
+ * the deep link.
+ */
+export function renderBackgroundCheckRequestEmail(opts: {
+  applicantName: string;
+  applicationUrl: string | null;
+}): { subject: string; text: string; html: string } {
+  const subject = `Background check needed — ${opts.applicantName}`;
+  const text = [
+    `${opts.applicantName} has been approved and is waiting on a pre-employment background check.`,
+    "",
+    opts.applicationUrl
+      ? `Open their application (date of birth, SSN and address are on the Background check panel): ${opts.applicationUrl}`
+      : "Open the Applications page in the admin portal to view their details and record the result.",
+    "",
+    "Onboarding will NOT be sent to the applicant until the check is recorded as clear.",
+    "",
+    `— ${companySignature()}`,
+  ].join("\n");
+  const html = `
+    <div style="font-family:Georgia,serif;max-width:560px;margin:0 auto;color:#0c0a08">
+      <h2 style="color:#0c0a08">Background check needed</h2>
+      <p><strong>${escapeHtml(opts.applicantName)}</strong> has been approved and is waiting on a pre-employment background check.</p>
+      ${
+        opts.applicationUrl
+          ? `<p style="margin:24px 0">
+        <a href="${escapeAttr(opts.applicationUrl)}"
+           style="background:#c9a04a;color:#0c0a08;padding:12px 20px;text-decoration:none;font-weight:bold;border-radius:4px">
+          Open application
+        </a>
+      </p>
+      <p style="color:#555">Date of birth, SSN and address are on the Background check panel — they are not included in this email.</p>`
+          : `<p>Open the Applications page in the admin portal to view their details and record the result.</p>`
+      }
+      <p style="color:#555">Onboarding will <strong>not</strong> be sent to the applicant until the check is recorded as clear.</p>
+    </div>
+  `;
+  return { subject, text, html };
+}
+
 export function renderRejectionEmail(opts: {
   firstName: string;
   reviewerNotes?: string | null;

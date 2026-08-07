@@ -66,6 +66,7 @@ const BRAND_FIELDS: FieldDescriptor[] = [
   { field: "billingEmail", label: "Billing email", kind: "text" },
   { field: "hrEmail", label: "HR email", kind: "text" },
   { field: "adminNotifyEmail", label: "Admin-notify email", kind: "text" },
+  { field: "backgroundCheckAdminUserId", label: "Background-check admin", kind: "text" },
   { field: "logoDataUrl", label: "Logo", kind: "image" },
 ];
 

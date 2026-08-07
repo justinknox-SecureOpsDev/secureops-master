@@ -125,6 +125,7 @@ function approve(appId: string, token: string, body: Record<string, unknown> = {
 }
 
 // Drive both approvals (two distinct admins) and return the final response.
+// NOTE: this now stops at the background-check gate — nothing is provisioned.
 async function approveTwice(appId: string) {
   const first = await approve(appId, ctx.adminToken, { notes: "First sign-off." });
   expect(first.status).toBe(200);
@@ -132,6 +133,22 @@ async function approveTwice(appId: string) {
   const second = await approve(appId, ctx.admin2Token, { notes: "Second sign-off." });
   expect(second.status).toBe(200);
   return second;
+}
+
+function backgroundCheck(appId: string, token: string, body: Record<string, unknown>) {
+  return request(app)
+    .post(`/api/admin/applications/${appId}/background-check`)
+    .set(authed(token))
+    .send(body);
+}
+
+// Full happy path: two approvals then a cleared background check, which is the
+// step that actually provisions the account and issues onboarding.
+async function approveAndClear(appId: string, notes = "Check came back clean.") {
+  await approveTwice(appId);
+  const res = await backgroundCheck(appId, ctx.adminToken, { result: "clear", notes });
+  expect(res.status).toBe(200);
+  return res;
 }
 
 beforeAll(async () => {
@@ -203,10 +220,71 @@ describe("admin application two-step approve flow", () => {
     expect(appAfter.createdEmployeeId).toBeNull();
   });
 
-  it("second distinct admin finalizes: creates pending User + onboarding token, but NO Employee/License", async () => {
-    const appId = await insertApplication("final");
+  it("second approval parks the application at the background-check gate without provisioning", async () => {
+    const appId = await insertApplication("bggate");
 
     const res = await approveTwice(appId);
+    expect(res.body.backgroundCheckPending).toBe(true);
+    // Nothing is handed out at this point — no account, no onboarding link.
+    expect(res.body.employeeId).toBeUndefined();
+    expect(res.body.onboardingToken).toBeUndefined();
+    expect(res.body.tempPassword).toBeUndefined();
+
+    const [appAfter] = await db.select().from(applicationsTable).where(eq(applicationsTable.id, appId));
+    expect(appAfter.status).toBe("approved");
+    expect(appAfter.backgroundCheckStatus).toBe("pending");
+    expect(appAfter.backgroundCheckRequestedAt).toBeTruthy();
+    expect(appAfter.createdEmployeeId).toBeNull();
+
+    const users = await db.select().from(usersTable).where(eq(usersTable.email, `${TAG}-bggate@example.test`));
+    expect(users.length).toBe(0);
+    const tokens = await db.select().from(onboardingTokensTable).where(eq(onboardingTokensTable.applicationId, appId));
+    expect(tokens.length).toBe(0);
+
+    // The approve route is closed once the gate is armed.
+    const reapprove = await approve(appId, ctx.adminToken);
+    expect(reapprove.status).toBe(409);
+  });
+
+  it("a failed background check holds the application: no account, no onboarding, no applicant contact", async () => {
+    const appId = await insertApplication("bgfail");
+    await approveTwice(appId);
+
+    const res = await backgroundCheck(appId, ctx.adminToken, { result: "failed", notes: "Disqualifying record." });
+    expect(res.status).toBe(200);
+    expect(res.body.onboardingSent).toBe(false);
+
+    const [appAfter] = await db.select().from(applicationsTable).where(eq(applicationsTable.id, appId));
+    expect(appAfter.backgroundCheckStatus).toBe("failed");
+    expect(appAfter.backgroundCheckCompletedBy).toBe(ctx.adminId);
+    expect(appAfter.backgroundCheckCompletedAt).toBeTruthy();
+    expect(appAfter.backgroundCheckNotes).toBe("Disqualifying record.");
+    expect(appAfter.createdEmployeeId).toBeNull();
+
+    const users = await db.select().from(usersTable).where(eq(usersTable.email, `${TAG}-bgfail@example.test`));
+    expect(users.length).toBe(0);
+    const tokens = await db.select().from(onboardingTokensTable).where(eq(onboardingTokensTable.applicationId, appId));
+    expect(tokens.length).toBe(0);
+  });
+
+  it("rejects a background-check result on an application that never reached the gate (409)", async () => {
+    const appId = await insertApplication("bgungated");
+    const res = await backgroundCheck(appId, ctx.adminToken, { result: "clear" });
+    expect(res.status).toBe(409);
+  });
+
+  it("blocks non-admin employees from recording a background check (403)", async () => {
+    const appId = await insertApplication("bgforbid");
+    await approveTwice(appId);
+    const res = await backgroundCheck(appId, ctx.employeeToken, { result: "clear" });
+    expect(res.status).toBe(403);
+  });
+
+  it("a cleared background check creates the pending User + onboarding token, but NO Employee/License", async () => {
+    const appId = await insertApplication("final");
+
+    const res = await approveAndClear(appId);
+    expect(res.body.onboardingSent).toBe(true);
     expect(res.body.employeeId).toBeTruthy();
     expect(res.body.onboardingToken).toBeTruthy();
     expect(res.body.onboardingUrl).toMatch(/\/admin-portal\/onboard\//);
@@ -250,6 +328,10 @@ describe("admin application two-step approve flow", () => {
     const reapprove = await approve(appId, ctx.adminToken);
     expect(reapprove.status).toBe(409);
     expect(reapprove.body.message).toMatch(/already approved/i);
+
+    // ---- re-running the background check after it cleared is refused ----
+    const recheck = await backgroundCheck(appId, ctx.adminToken, { result: "clear" });
+    expect(recheck.status).toBe(409);
   });
 
   it("request-info resets the two-admin approval gate", async () => {
@@ -315,24 +397,32 @@ describe("admin application two-step approve flow", () => {
     expect(tok.consumedAt).toBeTruthy();
   });
 
-  it("refuses to provision when applicant email collides with an existing admin (second approval)", async () => {
+  it("refuses to provision when applicant email collides with an existing admin (background clear)", async () => {
     // The email-conflict guard refuses to re-provision any user that isn't an
     // employee in pending/inactive state. Admin accounts are off limits. The
-    // collision is only checked at the SECOND approval (where the account is
-    // actually provisioned), so we seed the row already awaiting a second sign-
-    // off with a first approver who differs from the finalizing admin.
+    // collision is checked where the account is actually provisioned, which is
+    // now the cleared background check, so we seed the row already parked at
+    // the gate.
     const appId = await insertApplication("collide", {
       email: `${TAG}-admin@example.test`, // collides with ctx.adminId (an admin)
-      status: "awaiting_second_approval",
+      status: "approved",
       firstApprovedBy: ctx.admin2Id,
       firstApprovedAt: new Date(),
+      secondApprovedBy: ctx.adminId,
+      secondApprovedAt: new Date(),
+      backgroundCheckStatus: "pending",
+      backgroundCheckRequestedAt: new Date(),
     });
 
-    // admin1 (different from the first approver) gives the final approval and
-    // hits the collision against their own admin account.
-    const res = await approve(appId, ctx.adminToken);
+    const res = await backgroundCheck(appId, ctx.adminToken, { result: "clear" });
     expect(res.status).toBe(409);
     expect(res.body.message).toMatch(/already exists/i);
+
+    // The check must not be recorded as cleared when provisioning failed —
+    // otherwise the applicant is stuck: cleared but with no account.
+    const [appAfter] = await db.select().from(applicationsTable).where(eq(applicationsTable.id, appId));
+    expect(appAfter.backgroundCheckStatus).toBe("pending");
+    expect(appAfter.createdEmployeeId).toBeNull();
   });
 
   it("blocks non-admin employees from approving an application (403)", async () => {
@@ -340,12 +430,100 @@ describe("admin application two-step approve flow", () => {
     const res = await approve(appId, ctx.employeeToken);
     expect(res.status).toBe(403);
   });
+
+  it("refuses to move an approved application back to under review (409)", async () => {
+    // Direct-API guard: dropping a gated application back to "under review"
+    // would strand its background-check state and re-open the approval gate.
+    const appId = await insertApplication("bgreview");
+    await approveTwice(appId);
+
+    const res = await request(app)
+      .post(`/api/admin/applications/${appId}/review`)
+      .set(authed(ctx.adminToken))
+      .send({});
+    expect(res.status).toBe(409);
+
+    const [appAfter] = await db.select().from(applicationsTable).where(eq(applicationsTable.id, appId));
+    expect(appAfter.status).toBe("approved");
+    expect(appAfter.backgroundCheckStatus).toBe("pending");
+  });
+
+  it("allows rejecting after a failed check, but refuses once an account exists (409)", async () => {
+    // Failed check → reject is the intended close-out path.
+    const failedId = await insertApplication("bgrejectfail");
+    await approveTwice(failedId);
+    expect((await backgroundCheck(failedId, ctx.adminToken, { result: "failed" })).status).toBe(200);
+    const rejectFailed = await request(app)
+      .post(`/api/admin/applications/${failedId}/reject`)
+      .set(authed(ctx.adminToken))
+      .send({});
+    expect(rejectFailed.status).toBe(200);
+
+    // Provisioned → rejecting would leave a live login attached to a
+    // "rejected" applicant.
+    const clearedId = await insertApplication("bgrejectclear");
+    await approveAndClear(clearedId);
+    const rejectCleared = await request(app)
+      .post(`/api/admin/applications/${clearedId}/reject`)
+      .set(authed(ctx.adminToken))
+      .send({});
+    expect(rejectCleared.status).toBe(409);
+
+    const [appAfter] = await db.select().from(applicationsTable).where(eq(applicationsTable.id, clearedId));
+    expect(appAfter.status).toBe("approved");
+  });
+
+  it("refuses a background report that is not from the recording admin's own upload (400)", async () => {
+    const appId = await insertApplication("bgreport");
+    await approveTwice(appId);
+
+    // Another user's private-object namespace must not be stapled to the record.
+    const foreign = await backgroundCheck(appId, ctx.adminToken, {
+      result: "clear",
+      reportKey: `/objects/uploads/u/${ctx.admin2Id}/${randomUUID()}.pdf`,
+    });
+    expect(foreign.status).toBe(400);
+
+    // Anonymous application-upload namespace is equally out of bounds.
+    const anon = await backgroundCheck(appId, ctx.adminToken, {
+      result: "clear",
+      reportKey: `/objects/uploads/${randomUUID()}`,
+    });
+    expect(anon.status).toBe(400);
+
+    const [appAfter] = await db.select().from(applicationsTable).where(eq(applicationsTable.id, appId));
+    expect(appAfter.backgroundCheckStatus).toBe("pending");
+    expect(appAfter.backgroundCheckReportKey).toBeNull();
+
+    // The admin's own upload path is accepted and carried to the record.
+    const ownKey = `/objects/uploads/u/${ctx.adminId}/${randomUUID()}.pdf`;
+    const ok = await backgroundCheck(appId, ctx.adminToken, { result: "clear", reportKey: ownKey });
+    expect(ok.status).toBe(200);
+    const [cleared] = await db.select().from(applicationsTable).where(eq(applicationsTable.id, appId));
+    expect(cleared.backgroundCheckReportKey).toBe(ownKey);
+  });
+
+  it("a failed check can be corrected to clear, which then provisions", async () => {
+    const appId = await insertApplication("bgcorrect");
+    await approveTwice(appId);
+    expect((await backgroundCheck(appId, ctx.adminToken, { result: "failed", notes: "Wrong record pulled." })).status).toBe(200);
+
+    const res = await backgroundCheck(appId, ctx.admin2Token, { result: "clear", notes: "Re-run came back clean." });
+    expect(res.status).toBe(200);
+    expect(res.body.onboardingSent).toBe(true);
+
+    const [appAfter] = await db.select().from(applicationsTable).where(eq(applicationsTable.id, appId));
+    expect(appAfter.backgroundCheckStatus).toBe("clear");
+    expect(appAfter.backgroundCheckCompletedBy).toBe(ctx.admin2Id);
+    expect(appAfter.backgroundCheckNotes).toBe("Re-run came back clean.");
+    expect(appAfter.createdEmployeeId).toBeTruthy();
+  });
 });
 
 describe("onboarding completion materializes the employee profile + license", () => {
   it("creates the Employee row and License only once onboarding is submitted", async () => {
     const appId = await insertApplication("onboard");
-    const approveRes = await approveTwice(appId);
+    const approveRes = await approveAndClear(appId);
     const newUserId: string = approveRes.body.employeeId;
     const onboardingToken: string = approveRes.body.onboardingToken;
 

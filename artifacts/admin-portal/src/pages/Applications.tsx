@@ -7,8 +7,8 @@ import { Textarea } from "@/components/ui/textarea";
 import {
   Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogFooter,
 } from "@/components/ui/dialog";
-import { ClipboardList, Search, Loader2, Copy, ExternalLink, MailCheck, MailWarning, MailX, MessageSquare, MessageSquareWarning } from "lucide-react";
-import { openSignedObject } from "@/lib/upload";
+import { ClipboardList, Search, Loader2, Copy, ExternalLink, MailCheck, MailWarning, MailX, MessageSquare, MessageSquareWarning, ShieldCheck, ShieldAlert, Upload, FileText } from "lucide-react";
+import { openSignedObject, uploadFile } from "@/lib/upload";
 import { AMENDMENT_FIELDS } from "@/lib/amendmentFields";
 import { useAuth } from "@/lib/auth";
 import { cn } from "@/lib/utils";
@@ -65,6 +65,14 @@ type Application = {
   secondApprovedBy: string | null;
   secondApprovedAt: string | null;
   createdEmployeeId: string | null;
+  // Pre-hire background check. null on applications that have not reached
+  // final approval, and on legacy ones approved before the gate existed.
+  backgroundCheckStatus: "pending" | "clear" | "failed" | null;
+  backgroundCheckRequestedAt: string | null;
+  backgroundCheckCompletedBy: string | null;
+  backgroundCheckCompletedAt: string | null;
+  backgroundCheckNotes: string | null;
+  backgroundCheckReportKey: string | null;
   onboardingEmailStatus: "not_configured" | "sent" | "bounced" | "failed" | null;
   onboardingEmailMessageId: string | null;
   onboardingEmailResponse: string | null;
@@ -128,18 +136,30 @@ function deliveryBadge(a: Application): DeliveryBadge | null {
 
 type ApproveResp = {
   application: Application;
-  // Present (true) only on the FIRST of two approvals; the provisioning fields
-  // below are then absent. On the final (second) approval this is absent/false
-  // and the provisioning fields are populated.
+  // First of two approvals: nothing is provisioned, a second admin must sign off.
   awaitingSecondApproval?: boolean;
   firstApprovedBy?: string | null;
-  onboardingUrl: string;
+  // Final approval: the application is parked at the background-check gate.
+  // No account, no onboarding link and no onboarding email exist yet — those
+  // come from the background-check "clear" call.
+  backgroundCheckPending?: boolean;
+  applicantEmailSent?: boolean;
+  notifiedAdmins?: number;
+};
+
+/** Response shape when a cleared background check issues the onboarding invite. */
+type OnboardingIssued = {
+  application: Application;
+  onboardingSent: true;
+  onboardingUrl: string | null;
   onboardingToken: string;
   employeeId: string;
   tempPassword: string;
   emailSent: boolean;
   smsStatus: "sent" | "skipped" | "failed";
 };
+
+type BackgroundCheckResp = OnboardingIssued | { application: Application; onboardingSent: false };
 
 type RejectResp = Application & { emailSent: boolean };
 
@@ -149,6 +169,7 @@ const STATUSES = [
   { value: "under_review", label: "Under review" },
   { value: "info_requested", label: "Info requested" },
   { value: "awaiting_second_approval", label: "Awaiting 2nd approval" },
+  { value: "background_pending", label: "Background check" },
   { value: "approved", label: "Approved" },
   { value: "rejected", label: "Rejected" },
 ];
@@ -161,6 +182,40 @@ const STATUS_STYLES: Record<string, string> = {
   approved: "bg-emerald-100 text-emerald-900 border-emerald-300",
   rejected: "bg-rose-100 text-rose-900 border-rose-300",
 };
+
+// Background-check state rides alongside the status badge: a finally-approved
+// application is "approved" but has not been offered onboarding until its
+// check clears, and that distinction has to be visible at a glance.
+const BG_STATUS_META: Record<string, { label: string; className: string; title: string }> = {
+  pending: {
+    label: "BG check due",
+    className: "bg-indigo-100 text-indigo-900 border-indigo-300",
+    title: "Approved — waiting on the background check. No account or onboarding link exists yet.",
+  },
+  clear: {
+    label: "BG clear",
+    className: "bg-emerald-100 text-emerald-900 border-emerald-300",
+    title: "Background check cleared — onboarding was issued.",
+  },
+  failed: {
+    label: "BG failed",
+    className: "bg-rose-100 text-rose-900 border-rose-400",
+    title: "Background check failed — the applicant has not been contacted. Decide next steps.",
+  },
+};
+
+function BackgroundBadge({ app }: { app: Application }) {
+  const meta = app.backgroundCheckStatus ? BG_STATUS_META[app.backgroundCheckStatus] : null;
+  if (!meta) return null;
+  return (
+    <span
+      title={meta.title}
+      className={`inline-block px-2 py-0.5 text-[11px] uppercase rounded border shrink-0 ${meta.className}`}
+    >
+      {meta.label}
+    </span>
+  );
+}
 
 type RequestInfoResp = {
   application: Application;
@@ -183,8 +238,10 @@ export function ApplicationsPage() {
   const [maxMiles, setMaxMiles] = useState("25");
   const [sites, setSites] = useState<{ id: string; name: string; locationLat: string | null; locationLng: string | null }[]>([]);
   const [openId, setOpenId] = useState<string | null>(null);
-  const [approval, setApproval] = useState<ApproveResp | null>(null);
+  const [approval, setApproval] = useState<OnboardingIssued | null>(null);
   const [firstApprovalNotice, setFirstApprovalNotice] = useState<Application | null>(null);
+  const [backgroundNotice, setBackgroundNotice] = useState<Application | null>(null);
+  const [backgroundHeld, setBackgroundHeld] = useState<Application | null>(null);
   const [rejection, setRejection] = useState<RejectResp | null>(null);
   const [requestInfo, setRequestInfo] = useState<RequestInfoResp | null>(null);
   const [selected, setSelected] = useState<Set<string>>(new Set());
@@ -534,8 +591,11 @@ export function ApplicationsPage() {
               header: "Status",
               mobile: "meta",
               cell: (a) => (
-                <span className={`inline-block px-2 py-0.5 text-[11px] uppercase rounded border shrink-0 ${STATUS_STYLES[a.status]}`}>
-                  {a.status.replaceAll("_", " ")}
+                <span className="inline-flex flex-wrap items-center gap-1">
+                  <span className={`inline-block px-2 py-0.5 text-[11px] uppercase rounded border shrink-0 ${STATUS_STYLES[a.status]}`}>
+                    {a.status.replaceAll("_", " ")}
+                  </span>
+                  <BackgroundBadge app={a} />
                 </span>
               ),
             },
@@ -580,14 +640,19 @@ export function ApplicationsPage() {
           onUpdated={(updated) => { setItems((arr) => arr.map((x) => x.id === updated.id ? updated : x)); }}
           onApproved={(resp) => {
             setItems((arr) => arr.map((x) => x.id === resp.application.id ? resp.application : x));
-            // First of two approvals: no provisioning happened — show the
-            // "awaiting second approval" notice instead of the onboarding-link
-            // success dialog (which only applies to the final approval).
+            // Neither approval provisions anything any more: the first waits on
+            // a second admin, the second waits on the background check. The
+            // onboarding-link dialog now belongs to the background-check step.
             if (resp.awaitingSecondApproval) {
               setFirstApprovalNotice(resp.application);
             } else {
-              setApproval(resp);
+              setBackgroundNotice(resp.application);
             }
+          }}
+          onBackgroundChecked={(resp) => {
+            setItems((arr) => arr.map((x) => x.id === resp.application.id ? resp.application : x));
+            if (resp.onboardingSent) setApproval(resp);
+            else setBackgroundHeld(resp.application);
           }}
           onRejected={(resp) => {
             const { emailSent: _es, ...app } = resp;
@@ -634,6 +699,63 @@ export function ApplicationsPage() {
           </DialogContent>
         </Dialog>
       )}
+      {backgroundNotice && (
+        <Dialog open onOpenChange={(o) => { if (!o) setBackgroundNotice(null); }}>
+          <DialogContent className="max-w-md">
+            <DialogHeader>
+              <DialogTitle className="brand-wordmark text-xl">Sent for background check</DialogTitle>
+              <DialogDescription className="sr-only">
+                The application is approved and now waiting on a background check.
+              </DialogDescription>
+            </DialogHeader>
+            <div className="space-y-3 text-sm">
+              <div className="flex items-start gap-2 bg-indigo-50 border border-indigo-200 text-indigo-900 p-3 rounded">
+                <ShieldCheck className="w-5 h-5 mt-0.5 shrink-0" />
+                <div>
+                  <div className="font-medium">
+                    {backgroundNotice.firstName} {backgroundNotice.lastName} is approved, pending a background check
+                  </div>
+                  <div className="text-xs mt-0.5">
+                    The background-check admin has been notified, and {backgroundNotice.firstName} has been
+                    emailed to say the application was approved and a check is under way. No account or
+                    onboarding link exists yet — onboarding is sent automatically once the check is
+                    recorded as clear.
+                  </div>
+                </div>
+              </div>
+            </div>
+            <DialogFooter><Button onClick={() => setBackgroundNotice(null)}>Done</Button></DialogFooter>
+          </DialogContent>
+        </Dialog>
+      )}
+      {backgroundHeld && (
+        <Dialog open onOpenChange={(o) => { if (!o) setBackgroundHeld(null); }}>
+          <DialogContent className="max-w-md">
+            <DialogHeader>
+              <DialogTitle className="brand-wordmark text-xl">Background check recorded as failed</DialogTitle>
+              <DialogDescription className="sr-only">
+                The background check did not clear and the application is on hold.
+              </DialogDescription>
+            </DialogHeader>
+            <div className="space-y-3 text-sm">
+              <div className="flex items-start gap-2 bg-rose-50 border border-rose-200 text-rose-900 p-3 rounded">
+                <ShieldAlert className="w-5 h-5 mt-0.5 shrink-0" />
+                <div>
+                  <div className="font-medium">
+                    {backgroundHeld.firstName} {backgroundHeld.lastName} is on hold
+                  </div>
+                  <div className="text-xs mt-0.5">
+                    No account was created and nothing was sent to the applicant — they have not been told
+                    the check failed. Reject the application when you're ready to send the standard
+                    decline email, or record a corrected result if the report was wrong.
+                  </div>
+                </div>
+              </div>
+            </div>
+            <DialogFooter><Button onClick={() => setBackgroundHeld(null)}>Done</Button></DialogFooter>
+          </DialogContent>
+        </Dialog>
+      )}
       {rejection && (
         <RejectionResultDialog resp={rejection} onClose={() => setRejection(null)} />
       )}
@@ -668,13 +790,220 @@ type BatchResult = {
   failures: { app: Application; error: string }[];
 };
 
+/**
+ * The background-check step, shown on any application that has reached final
+ * approval. It carries everything the checker needs (the identity details are
+ * deliberately kept here behind the portal login rather than emailed out) and
+ * is the only place onboarding can be released from: recording "cleared"
+ * creates the account and sends the applicant their onboarding link.
+ */
+function BackgroundCheckPanel({
+  app, onChecked,
+}: {
+  app: Application;
+  onChecked: (resp: BackgroundCheckResp) => void;
+}) {
+  const [notes, setNotes] = useState(app.backgroundCheckNotes ?? "");
+  const [reportKey, setReportKey] = useState<string | null>(app.backgroundCheckReportKey);
+  const [reportName, setReportName] = useState<string | null>(null);
+  const [uploading, setUploading] = useState(false);
+  const [busy, setBusy] = useState<"clear" | "failed" | null>(null);
+  const [confirmClear, setConfirmClear] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const settled = app.backgroundCheckStatus === "clear";
+
+  async function handleUpload(file: File | undefined) {
+    if (!file) return;
+    setUploading(true); setError(null);
+    try {
+      const up = await uploadFile(file);
+      setReportKey(up.objectPath);
+      setReportName(up.name);
+    } catch (e) { setError((e as Error).message); }
+    finally { setUploading(false); }
+  }
+
+  async function submit(result: "clear" | "failed") {
+    setBusy(result); setError(null);
+    try {
+      const resp = await api<BackgroundCheckResp>(`/admin/applications/${app.id}/background-check`, {
+        method: "POST",
+        body: {
+          result,
+          notes: notes.trim() || undefined,
+          reportKey: reportKey ?? undefined,
+        },
+      });
+      onChecked(resp);
+    } catch (e) { setError((e as Error).message); }
+    finally { setBusy(null); setConfirmClear(false); }
+  }
+
+  return (
+    <Section title="Background check">
+      {settled ? (
+        <div className="text-sm bg-emerald-50 border border-emerald-200 text-emerald-900 p-3 rounded space-y-1">
+          <div className="font-medium flex items-center gap-2">
+            <ShieldCheck className="w-4 h-4" /> Cleared
+            {app.backgroundCheckCompletedAt && (
+              <span className="font-normal text-xs">
+                on {new Date(app.backgroundCheckCompletedAt).toLocaleString()}
+              </span>
+            )}
+          </div>
+          {app.backgroundCheckNotes && <p className="text-xs whitespace-pre-wrap">{app.backgroundCheckNotes}</p>}
+          {app.backgroundCheckReportKey && (
+            <button
+              type="button"
+              className="text-xs underline inline-flex items-center gap-1"
+              onClick={() => openSignedObject(app.backgroundCheckReportKey!)}
+            >
+              <FileText className="w-3 h-3" /> View report
+            </button>
+          )}
+          <p className="text-xs opacity-80">
+            The report is copied into the employee's file when they finish onboarding.
+          </p>
+        </div>
+      ) : (
+        <div className="space-y-3">
+          <div
+            className={cn(
+              "text-sm p-3 rounded border",
+              app.backgroundCheckStatus === "failed"
+                ? "bg-rose-50 border-rose-200 text-rose-900"
+                : "bg-indigo-50 border-indigo-200 text-indigo-900",
+            )}
+          >
+            {app.backgroundCheckStatus === "failed" ? (
+              <>
+                <div className="font-medium flex items-center gap-2"><ShieldAlert className="w-4 h-4" /> Recorded as not cleared</div>
+                <div className="text-xs mt-0.5">
+                  On hold. The applicant has not been contacted and has no account. Reject the application to
+                  send the standard decline email, or record a corrected result below.
+                </div>
+              </>
+            ) : (
+              <>
+                <div className="font-medium flex items-center gap-2"><ShieldCheck className="w-4 h-4" /> Waiting on the background check</div>
+                <div className="text-xs mt-0.5">
+                  Requested{app.backgroundCheckRequestedAt ? ` ${new Date(app.backgroundCheckRequestedAt).toLocaleString()}` : ""}.
+                  Recording a clear result creates the applicant's login and emails them their onboarding link.
+                </div>
+              </>
+            )}
+          </div>
+
+          {/* Everything the checker needs to run the search, in one block, so
+              it never has to travel by email. */}
+          <div className="rounded border bg-muted/40 p-3">
+            <div className="text-xs uppercase tracking-wide opacity-70 mb-2">Details for the check</div>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-4 gap-y-2 text-sm">
+              <Info k="Full name" v={`${app.firstName} ${app.lastName}`} />
+              <Info k="Date of birth" v={app.dateOfBirth} />
+              <Info k="SSN (last 4)" v={app.niNumber} />
+              <Info k="City of birth" v={app.cityOfBirth} />
+              <Info k="State of birth" v={app.stateOfBirth} />
+              <Info k="Address" v={[app.address, app.city, app.state, app.zip].filter(Boolean).join(", ")} />
+              <Info k="Phone" v={app.phone} />
+              <Info k="Email" v={app.email} />
+            </div>
+          </div>
+
+          <div>
+            <div className="text-xs uppercase tracking-wide opacity-70 mb-1">Report (optional)</div>
+            {reportKey ? (
+              <div className="flex items-center gap-2 text-sm">
+                <button
+                  type="button"
+                  className="underline inline-flex items-center gap-1"
+                  onClick={() => openSignedObject(reportKey)}
+                >
+                  <FileText className="w-3 h-3" /> {reportName ?? "View attached report"}
+                </button>
+                <Button type="button" variant="ghost" size="sm" onClick={() => { setReportKey(null); setReportName(null); }}>
+                  Remove
+                </Button>
+              </div>
+            ) : (
+              <label className="inline-flex items-center gap-2 text-sm cursor-pointer">
+                <input
+                  type="file"
+                  className="sr-only"
+                  disabled={uploading || !!busy}
+                  onChange={(e) => { void handleUpload(e.target.files?.[0]); e.target.value = ""; }}
+                />
+                <span className="inline-flex items-center gap-1 rounded border px-3 py-1.5 hover:bg-accent/40">
+                  {uploading ? <Loader2 className="w-4 h-4 animate-spin" /> : <Upload className="w-4 h-4" />}
+                  {uploading ? "Uploading…" : "Attach report"}
+                </span>
+              </label>
+            )}
+            <p className="text-xs text-muted-foreground mt-1">
+              PDF or image. Optional — a result can be recorded with notes alone.
+            </p>
+          </div>
+
+          <div>
+            <div className="text-xs uppercase tracking-wide opacity-70 mb-1">Background-check notes</div>
+            <Textarea
+              rows={3}
+              value={notes}
+              onChange={(e) => setNotes(e.target.value)}
+              placeholder="What was run, what came back, who ran it"
+            />
+          </div>
+
+          {error && (
+            <div className="text-sm text-destructive bg-destructive/5 p-2 rounded border border-destructive/20">{error}</div>
+          )}
+
+          <div className="flex flex-wrap items-center gap-2">
+            {confirmClear ? (
+              <>
+                <span className="text-sm">
+                  Clear {app.firstName} and send their onboarding link now?
+                </span>
+                <Button size="sm" className="bg-brand-navy hover:opacity-90 text-white" disabled={!!busy} onClick={() => submit("clear")}>
+                  {busy === "clear" ? "Sending…" : "Yes, send onboarding"}
+                </Button>
+                <Button size="sm" variant="ghost" disabled={!!busy} onClick={() => setConfirmClear(false)}>Cancel</Button>
+              </>
+            ) : (
+              <>
+                <Button
+                  className="bg-brand-navy hover:opacity-90 text-white"
+                  disabled={!!busy || uploading}
+                  onClick={() => setConfirmClear(true)}
+                >
+                  <ShieldCheck className="w-4 h-4 mr-1" /> Background complete — clear
+                </Button>
+                <Button
+                  variant="outline"
+                  className="text-destructive border-destructive/40 hover:bg-destructive/5"
+                  disabled={!!busy || uploading}
+                  onClick={() => submit("failed")}
+                >
+                  {busy === "failed" ? "Saving…" : "Not cleared"}
+                </Button>
+              </>
+            )}
+          </div>
+        </div>
+      )}
+    </Section>
+  );
+}
+
 function ApplicationDialog({
-  app, onClose, onUpdated, onApproved, onRejected, onInfoRequested, onDeleted,
+  app, onClose, onUpdated, onApproved, onBackgroundChecked, onRejected, onInfoRequested, onDeleted,
 }: {
   app: Application;
   onClose: () => void;
   onUpdated: (a: Application) => void;
   onApproved: (resp: ApproveResp) => void;
+  onBackgroundChecked: (resp: BackgroundCheckResp) => void;
   onRejected: (resp: RejectResp) => void;
   onInfoRequested: (resp: RequestInfoResp) => void;
   onDeleted: (id: string) => void;
@@ -728,6 +1057,7 @@ function ApplicationDialog({
             <span className={`ml-2 inline-block px-2 py-0.5 text-[11px] uppercase rounded border ${STATUS_STYLES[app.status]}`}>
               {app.status.replaceAll("_", " ")}
             </span>
+            <span className="ml-2 inline-block align-middle"><BackgroundBadge app={app} /></span>
           </DialogTitle>
           <DialogDescription className="sr-only">
             Full application details for this applicant.
@@ -833,6 +1163,9 @@ function ApplicationDialog({
         <Section title="Reviewer notes">
           <Textarea rows={3} value={notes} onChange={(e) => setNotes(e.target.value)} placeholder="Internal notes (optional)" />
         </Section>
+        {app.backgroundCheckStatus && (
+          <BackgroundCheckPanel app={app} onChecked={(resp) => { onBackgroundChecked(resp); onClose(); }} />
+        )}
         {app.status === "awaiting_second_approval" && (
           <div className="text-sm bg-purple-50 border border-purple-200 text-purple-900 p-2 rounded">
             {user && app.firstApprovedBy === user.id
@@ -883,7 +1216,10 @@ function ApplicationDialog({
               <MessageSquareWarning className="w-4 h-4 mr-1" /> Request more info
             </Button>
           )}
-          {app.status !== "approved" && (
+          {/* A failed background check leaves an approved application with no
+              account and no applicant contact — rejecting is how the admin
+              closes it out and sends the standard decline email. */}
+          {(app.status !== "approved" || app.backgroundCheckStatus === "failed") && (
             <Button variant="destructive" disabled={!!busy} onClick={() => action("reject")}>
               {busy === "reject" ? "…" : "Reject"}
             </Button>
@@ -1065,9 +1401,12 @@ function RequestInfoResultDialog({ resp, onClose }: { resp: RequestInfoResp; onC
   );
 }
 
-function ApprovalSuccessDialog({ resp, onClose }: { resp: ApproveResp; onClose: () => void }) {
+function ApprovalSuccessDialog({ resp, onClose }: { resp: OnboardingIssued; onClose: () => void }) {
   function copy(text: string) { navigator.clipboard.writeText(text).catch(() => {}); }
   const fullName = `${resp.application.firstName} ${resp.application.lastName}`;
+  // Null when APP_BASE_URL/REPLIT_DOMAINS is unset server-side: the account
+  // and token exist, but no absolute link could be built.
+  const onboardingUrl = resp.onboardingUrl ?? "";
   return (
     <Dialog open onOpenChange={(o) => { if (!o) onClose(); }}>
       <DialogContent className="max-w-xl">
@@ -1139,9 +1478,9 @@ function ApprovalSuccessDialog({ resp, onClose }: { resp: ApproveResp; onClose: 
             <div className="mt-2 space-y-2">
               <Field label="Onboarding link">
                 <div className="flex gap-1">
-                  <Input readOnly value={resp.onboardingUrl} />
-                  <Button type="button" variant="outline" onClick={() => copy(resp.onboardingUrl)}><Copy className="w-4 h-4" /></Button>
-                  <a className="inline-flex items-center" href={resp.onboardingUrl} target="_blank" rel="noreferrer">
+                  <Input readOnly value={onboardingUrl} />
+                  <Button type="button" variant="outline" onClick={() => copy(onboardingUrl)}><Copy className="w-4 h-4" /></Button>
+                  <a className="inline-flex items-center" href={onboardingUrl} target="_blank" rel="noreferrer">
                     <Button type="button" variant="outline"><ExternalLink className="w-4 h-4" /></Button>
                   </a>
                 </div>

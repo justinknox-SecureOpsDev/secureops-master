@@ -52,6 +52,10 @@ export const brandConfigSchema = z.object({
   billingEmail: emailField,
   hrEmail: emailField,
   adminNotifyEmail: emailField,
+  // users.id of the designated background-check admin. .optional() so brand
+  // PUTs from clients that predate this field leave it unchanged instead of
+  // 400ing (see companyLicense above).
+  backgroundCheckAdminUserId: blankToNull(z.string().uuid().max(64).nullable().optional()),
   // Inline base64 data URI (capped ~512 KB encoded). Must be an image.
   logoDataUrl: blankToNull(
     z

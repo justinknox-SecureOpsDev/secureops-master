@@ -76,6 +76,11 @@ export const platformBrandConfigTable = pgTable("platform_brand_config", {
   billingEmail: text("billing_email"),
   hrEmail: text("hr_email"),
   adminNotifyEmail: text("admin_notify_email"),
+  // users.id of the admin who runs pre-hire background checks. They get the
+  // in-app notification + email when an approved application needs a check.
+  // Unset (or a user who is no longer an admin) falls back to every admin, so
+  // the request can never silently go nowhere.
+  backgroundCheckAdminUserId: text("background_check_admin_user_id"),
   logoDataUrl: text("logo_data_url"),
   updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow(),
   updatedBy: text("updated_by"),

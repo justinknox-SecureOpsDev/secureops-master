@@ -50,6 +50,11 @@ export const employeesTable = pgTable("employees", {
   cvKey: text("cv_key"),
   licenseDocKey: text("license_doc_key"),
   passportDocKey: text("passport_doc_key"),
+  // Pre-hire background check, copied from the application when onboarding
+  // completes so the report lives in the permanent employee file. The doc key
+  // is null when the check was cleared on notes alone (no report file).
+  backgroundCheckDocKey: text("background_check_doc_key"),
+  backgroundCheckClearedAt: timestamp("background_check_cleared_at", { withTimezone: true }),
   siaLicenseNumber: text("sia_license_number"),
   siaLicenseLevel: integer("sia_license_level"),
   siaLicenseExpiry: date("sia_license_expiry"),

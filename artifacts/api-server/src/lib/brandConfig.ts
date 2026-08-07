@@ -47,6 +47,8 @@ export type BrandConfig = {
   billingEmail: string;
   hrEmail: string;
   adminNotifyEmail: string;
+  /** users.id of the admin who runs pre-hire background checks. "" = notify every admin. */
+  backgroundCheckAdminUserId: string;
   salesEmail: string;
   privacyEmail: string;
   logoDataUrl: string | null;
@@ -73,6 +75,7 @@ const ENV_BRAND: BrandConfig = {
   billingEmail:      process.env.BILLING_EMAIL        ?? "pay@williamscouncil.com",
   hrEmail:           process.env.HR_EMAIL             ?? "hr@williamscouncilsecurity.com",
   adminNotifyEmail:  process.env.ADMIN_NOTIFY_EMAIL   ?? "admin@williamscouncil.com",
+  backgroundCheckAdminUserId: process.env.BACKGROUND_CHECK_ADMIN_USER_ID ?? "",
   // Inbox that receives inbound sales / sign-up leads from the marketing site.
   // Falls back to the central admin-notify inbox when no dedicated sales address
   // is configured. Server-side only — not exposed via the public /api/brand and
@@ -111,6 +114,7 @@ const OVERRIDABLE_KEYS = [
   "billingEmail",
   "hrEmail",
   "adminNotifyEmail",
+  "backgroundCheckAdminUserId",
   "logoDataUrl",
 ] as const;
 
