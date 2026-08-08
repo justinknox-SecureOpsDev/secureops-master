@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useState, useRef } from "react";
 import {
   View, Text, TextInput, TouchableOpacity,
   StyleSheet, ActivityIndicator, Platform,
@@ -23,19 +23,40 @@ import { runSwitchOrgFlow } from "@/utils/orgBootstrap";
 import { BrandLogo } from "@/components/BrandLogo";
 import { useBrand } from "@/hooks/useFeatures";
 
-async function postJson<T>(path: string, body: unknown): Promise<T> {
+async function postJson<T>(
+  path: string,
+  body: unknown,
+  signal?: AbortSignal,
+  timeoutMs = 30_000,
+): Promise<T> {
+  // Combine an internal deadline with any caller-supplied signal.
+  const internal = new AbortController();
+  const deadline = setTimeout(() => internal.abort(), timeoutMs);
+  // Propagate caller abort → internal controller.
+  signal?.addEventListener("abort", () => internal.abort(), { once: true });
+
   let res: Response;
   try {
     res = await fetch(`${getApiBaseUrl()}${path}`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(body),
+      signal: internal.signal,
     });
   } catch (e) {
+    if (internal.signal.aborted) {
+      // Distinguish user-cancel from timeout.
+      const reason = signal?.aborted
+        ? "Login cancelled."
+        : "The server took too long to respond. Check your connection and try again.";
+      throw new Error(reason);
+    }
     const reason = e instanceof Error ? e.message : String(e);
     throw new Error(
       `Can't reach the server (${reason}). Check your internet connection and try again.`,
     );
+  } finally {
+    clearTimeout(deadline);
   }
   const data = await res.json().catch(() => ({}));
   if (!res.ok) throw new Error((data as any)?.message || `HTTP ${res.status}`);
@@ -171,6 +192,8 @@ export default function LoginScreen() {
   const [error, setError] = useState<string | null>(null);
   const [challengeToken, setChallengeToken] = useState<string | null>(null);
   const [code, setCode] = useState("");
+  /** Abort controller for the in-flight login request — lets the user cancel. */
+  const loginAbortRef = useRef<AbortController | null>(null);
   const { login: setAuthContext, logout } = useAuth();
   const { org, switchOrg } = useOrg();
   const colors = useColors();
@@ -190,13 +213,21 @@ export default function LoginScreen() {
       navigateToConnect: () => router.replace("/connect" as any),
     });
 
+  const cancelLogin = () => {
+    loginAbortRef.current?.abort();
+    loginAbortRef.current = null;
+  };
+
   const handleLogin = async () => {
     if (!email || !password) return;
+    const controller = new AbortController();
+    loginAbortRef.current = controller;
     setBusy(true); setError(null);
     try {
       const res = await postJson<{ token?: string; user?: any; needsTotp?: boolean; challengeToken?: string }>(
         "/auth/login",
         { email, password },
+        controller.signal,
       );
       if (res.needsTotp && res.challengeToken) {
         setChallengeToken(res.challengeToken);
@@ -373,14 +404,22 @@ export default function LoginScreen() {
                 </LinearGradient>
               </TouchableOpacity>
 
-              <TouchableOpacity
-                onPress={() => router.push("/forgot-password")}
-                style={styles.forgotRow}
-              >
-                <Text style={[styles.forgotText, { color: colors.mutedForeground }]}>
-                  Forgot password?
-                </Text>
-              </TouchableOpacity>
+              {busy ? (
+                <TouchableOpacity onPress={cancelLogin} style={styles.forgotRow}>
+                  <Text style={[styles.forgotText, { color: colors.mutedForeground }]}>
+                    Cancel
+                  </Text>
+                </TouchableOpacity>
+              ) : (
+                <TouchableOpacity
+                  onPress={() => router.push("/forgot-password")}
+                  style={styles.forgotRow}
+                >
+                  <Text style={[styles.forgotText, { color: colors.mutedForeground }]}>
+                    Forgot password?
+                  </Text>
+                </TouchableOpacity>
+              )}
             </>
           ) : (
             <>
