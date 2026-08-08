@@ -221,6 +221,7 @@ DEMO_ADMIN_EMAIL = "justin.knox@williamscouncil.com"
 SUPER_ADMIN_EMAILS = "justin.knox@williamscouncil.com"
 ORG_DIRECTORY = "[{\"code\":\"wcsgi\",\"name\":\"Williams Council Security Group\",\"apiBaseUrl\":\"https://secureops-command.replit.app\"},{\"code\":\"wcsg\",\"name\":\"Williams Council Security Group\",\"apiBaseUrl\":\"https://secureops-command.replit.app\"},{\"code\":\"rgp\",\"name\":\"RGP\",\"apiBaseUrl\":\"https://rgpsecureopscommand.com\"}]"
 ORG_CODE = "wcsgi"
+IOS_OTA_RUNTIME = "1.0.2"
 
 [objectStorage]
 defaultBucketID = "replit-objstore-932b0f1e-21e4-4a6f-a5f8-ab5a30523226"
