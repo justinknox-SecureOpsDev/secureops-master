@@ -535,9 +535,9 @@ export default function EmployeeProfileScreen() {
       {isEnabled(flags, "trainings") && <MyTrainingSection />}
 
       <View style={[styles.section, { backgroundColor: colors.card, borderColor: colors.border }]}>
-        <Text style={[styles.sectionTitle, { color: colors.accent }]}>MY LICENCES ({licenses?.length ?? 0})</Text>
+          <Text style={[styles.sectionTitle, { color: colors.accent }]}>MY LICENSES ({licenses?.length ?? 0})</Text>
         {(licenses?.length ?? 0) === 0 ? (
-          <Text style={[styles.emptyText, { color: colors.mutedForeground }]}>No licences on record</Text>
+          <Text style={[styles.emptyText, { color: colors.mutedForeground }]}>No licenses on record</Text>
         ) : licenses!.map((lic: any) => {
           const ls = getLicenseStatus(lic.expiryDate);
           return (

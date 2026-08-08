@@ -96,7 +96,7 @@ export default function EmployeeShiftsScreen({ hideTopPad }: { hideTopPad?: bool
   const myPosition = (myEmployee as any)?.position as string | undefined;
   const isSupportStaff = myPosition === "support_staff";
   // Effective clearance: every worker has a baseline of level 1 — Support
-  // shifts require no licence. Licensed officers keep their licence level.
+  // shifts require no license. Licensed officers keep their license level.
   const myEffectiveLevel = Math.max(myMaxLevel ?? 0, 1);
 
   const statusParam = filter === "available" ? "upcoming" : filter;
@@ -365,8 +365,8 @@ export default function EmployeeShiftsScreen({ hideTopPad }: { hideTopPad?: bool
         <TouchableOpacity
           onPress={() => router.push("/edit-profile")}
           accessibilityRole="button"
-          accessibilityLabel="No active TX security licence on file. You can still claim Support shifts, but Level 2 and above require a verified licence. Tap to upload a photo of your card or contact admin."
-          accessibilityHint="Opens your profile to upload a licence"
+          accessibilityLabel="No active TX security license on file. You can still claim Support shifts, but Level 2 and above require a verified license. Tap to upload a photo of your card or contact admin."
+          accessibilityHint="Opens your profile to upload a license"
           style={{
             margin: 12, padding: 12, borderRadius: 10, borderWidth: 1,
             borderColor: colors.accent, backgroundColor: colors.accent + "15",
@@ -376,10 +376,10 @@ export default function EmployeeShiftsScreen({ hideTopPad }: { hideTopPad?: bool
           <Feather name="alert-triangle" size={18} color={colors.accent} />
           <View style={{ flex: 1 }}>
             <Text style={{ color: colors.accent, fontWeight: "700", fontSize: 13 }}>
-              No active TX security licence on file
+              No active TX security license on file
             </Text>
             <Text style={{ color: colors.mutedForeground, fontSize: 11, marginTop: 2 }}>
-              You can still claim Support shifts, but Level 2+ shifts require a verified licence. Tap to upload a photo of your card or contact admin.
+              You can still claim Support shifts, but Level 2+ shifts require a verified license. Tap to upload a photo of your card or contact admin.
             </Text>
           </View>
           <Feather name="chevron-right" size={18} color={colors.mutedForeground} />

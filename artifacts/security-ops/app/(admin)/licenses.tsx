@@ -55,7 +55,7 @@ export default function AdminLicensesScreen() {
 
   const handleCreate = async () => {
     if (!form.employeeId || !form.type || !form.licenseNumber || !form.expiryDate) {
-      Alert.alert("Missing Fields", "Employee, type, licence number and expiry date are required.");
+      Alert.alert("Missing Fields", "Employee, type, license number and expiry date are required.");
       return;
     }
     try {
@@ -64,7 +64,7 @@ export default function AdminLicensesScreen() {
       setShowAdd(false);
       setForm({ employeeId: "", type: "", level: 2, licenseNumber: "", issueDate: "", expiryDate: "", issuingAuthority: "" });
     } catch (e: any) {
-      Alert.alert("Error", e?.message || "Failed to create licence");
+      Alert.alert("Error", e?.message || "Failed to create license");
     }
   };
 
@@ -74,12 +74,12 @@ export default function AdminLicensesScreen() {
         <TouchableOpacity onPress={() => router.back()} style={[styles.backBtn, { borderColor: colors.border }]} accessibilityRole="button" accessibilityLabel="Go back">
           <Feather name="arrow-left" size={18} color={colors.foreground} />
         </TouchableOpacity>
-        <Text style={[styles.pageTitle, { color: colors.foreground }]} accessibilityRole="header">Licences</Text>
+        <Text style={[styles.pageTitle, { color: colors.foreground }]} accessibilityRole="header">Licenses</Text>
         <TouchableOpacity
           style={[styles.approvalsBtn, { borderColor: colors.border }]}
           onPress={() => router.push("/(admin)/license-approvals" as any)}
           accessibilityRole="button"
-          accessibilityLabel={pendingCount > 0 ? `Licence approvals, ${pendingCount} pending` : "Licence approvals"}
+          accessibilityLabel={pendingCount > 0 ? `License approvals, ${pendingCount} pending` : "License approvals"}
         >
           <Feather name="check-square" size={16} color={colors.foreground} />
           <Text style={[styles.approvalsText, { color: colors.foreground }]}>Approvals</Text>
@@ -89,7 +89,7 @@ export default function AdminLicensesScreen() {
             </View>
           )}
         </TouchableOpacity>
-        <TouchableOpacity style={[styles.addBtn, { backgroundColor: colors.primary }]} onPress={() => setShowAdd(true)} accessibilityRole="button" accessibilityLabel="Add licence">
+        <TouchableOpacity style={[styles.addBtn, { backgroundColor: colors.primary }]} onPress={() => setShowAdd(true)} accessibilityRole="button" accessibilityLabel="Add license">
           <Feather name="plus" size={18} color={colors.primaryForeground} />
         </TouchableOpacity>
       </View>
@@ -106,8 +106,8 @@ export default function AdminLicensesScreen() {
         <View style={styles.center}><ActivityIndicator size="large" color={colors.primary} /></View>
       ) : error ? (
         <View style={styles.center}>
-          <Text style={{ color: colors.destructive, marginBottom: 12 }}>Failed to load licences</Text>
-          <TouchableOpacity onPress={() => refetch()} style={[styles.retryBtn, { borderColor: colors.primary }]} accessibilityRole="button" accessibilityLabel="Retry loading licences"><Text style={{ color: colors.primary }}>Retry</Text></TouchableOpacity>
+          <Text style={{ color: colors.destructive, marginBottom: 12 }}>Failed to load licenses</Text>
+          <TouchableOpacity onPress={() => refetch()} style={[styles.retryBtn, { borderColor: colors.primary }]} accessibilityRole="button" accessibilityLabel="Retry loading licenses"><Text style={{ color: colors.primary }}>Retry</Text></TouchableOpacity>
         </View>
       ) : (
         <FlatList
@@ -119,7 +119,7 @@ export default function AdminLicensesScreen() {
           ListEmptyComponent={
             <View style={styles.center}>
               <Feather name="award" size={40} color={colors.mutedForeground} />
-              <Text style={[styles.emptyText, { color: colors.mutedForeground }]}>No licences found</Text>
+              <Text style={[styles.emptyText, { color: colors.mutedForeground }]}>No licenses found</Text>
             </View>
           }
           renderItem={({ item }) => {
@@ -171,7 +171,7 @@ export default function AdminLicensesScreen() {
           <View style={styles.modalOverlay}>
             <View style={[styles.modalCard, { backgroundColor: colors.card, borderColor: colors.border }]}>
               <View style={styles.modalHeader}>
-                <Text style={[styles.modalTitle, { color: colors.foreground }]}>Add Licence</Text>
+                <Text style={[styles.modalTitle, { color: colors.foreground }]}>Add License</Text>
                 <TouchableOpacity onPress={() => setShowAdd(false)} accessibilityRole="button" accessibilityLabel="Close"><Feather name="x" size={20} color={colors.mutedForeground} /></TouchableOpacity>
               </View>
               <KeyboardAwareScrollViewCompat style={{ maxHeight: 420 }}>
@@ -183,7 +183,7 @@ export default function AdminLicensesScreen() {
                     </TouchableOpacity>
                   ))}
                 </View>
-                <Text style={[styles.fieldLabel, { color: colors.mutedForeground }]}>Licence Level *</Text>
+                <Text style={[styles.fieldLabel, { color: colors.mutedForeground }]}>License Level *</Text>
                 <View style={{ flexDirection: "row", gap: 8, marginBottom: 14 }}>
                   {([1, 2, 3, 4] as const).map((lv) => (
                     <TouchableOpacity
@@ -204,8 +204,8 @@ export default function AdminLicensesScreen() {
                   ))}
                 </View>
                 {[
-                  { label: "Licence Type *", key: "type", placeholder: "Security Licence (SIA)" },
-                  { label: "Licence Number *", key: "licenseNumber", placeholder: "SIA-123456789" },
+                  { label: "License Type *", key: "type", placeholder: "Security License (SIA)" },
+                  { label: "License Number *", key: "licenseNumber", placeholder: "SIA-123456789" },
                   { label: "Issued Date (YYYY-MM-DD)", key: "issueDate", placeholder: "2023-01-15" },
                   { label: "Expiry Date *  (YYYY-MM-DD)", key: "expiryDate", placeholder: "2026-01-14" },
                   { label: "Issuing Authority", key: "issuingAuthority", placeholder: "Security Industry Authority" },
@@ -224,8 +224,8 @@ export default function AdminLicensesScreen() {
                   </View>
                 ))}
               </KeyboardAwareScrollViewCompat>
-              <TouchableOpacity style={[styles.submitBtn, { backgroundColor: colors.primary }]} onPress={handleCreate} disabled={createLicense.isPending} accessibilityRole="button" accessibilityLabel="Save licence" accessibilityState={{ disabled: createLicense.isPending, busy: createLicense.isPending }}>
-                {createLicense.isPending ? <ActivityIndicator color={colors.primaryForeground} /> : <Text style={[styles.submitText, { color: colors.primaryForeground }]}>Save Licence</Text>}
+              <TouchableOpacity style={[styles.submitBtn, { backgroundColor: colors.primary }]} onPress={handleCreate} disabled={createLicense.isPending} accessibilityRole="button" accessibilityLabel="Save license" accessibilityState={{ disabled: createLicense.isPending, busy: createLicense.isPending }}>
+                {createLicense.isPending ? <ActivityIndicator color={colors.primaryForeground} /> : <Text style={[styles.submitText, { color: colors.primaryForeground }]}>Save License</Text>}
               </TouchableOpacity>
             </View>
           </View>

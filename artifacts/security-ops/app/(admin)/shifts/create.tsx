@@ -34,7 +34,7 @@ function Field({ label, value, onChangeText, placeholder, keyboardType, autoCapi
 }
 
 const LEVELS: Array<{ value: 1 | 2 | 3 | 4; label: string; sub: string }> = [
-  { value: 1, label: "Support", sub: "No licence required — open to any worker" },
+  { value: 1, label: "Support", sub: "No license required — open to any worker" },
   { value: 2, label: "Level 2", sub: "Unarmed — any qualified officer" },
   { value: 3, label: "Level 3", sub: "Armed — L3 or L4 officers only" },
   { value: 4, label: "L4 / PPO", sub: "Personal Protection — L4 only" },
@@ -188,7 +188,7 @@ export default function CreateShiftScreen() {
 
         <Field label="Notes" value={form.notes} onChangeText={set("notes")} placeholder="Bring high-vis vest" />
 
-        <Text style={[styles.sectionLabel, { color: colors.accent, marginTop: 20 }]}>LICENCE REQUIREMENT *</Text>
+        <Text style={[styles.sectionLabel, { color: colors.accent, marginTop: 20 }]}>LICENSE REQUIREMENT *</Text>
         <View style={{ gap: 8, marginBottom: 14 }}>
           {LEVELS.map((opt) => {
             const selected = form.requiredLicenseLevel === opt.value;

@@ -3,7 +3,7 @@ import { View, Text, StyleSheet } from "react-native";
 import { useColors } from "@/hooks/useColors";
 
 export function levelLabel(lvl: number | null | undefined): string {
-  if (lvl == null) return "No Licence";
+  if (lvl == null) return "No License";
   if (lvl <= 1) return "Support";
   if (lvl === 4) return "L4 / PPO";
   return `Level ${lvl}`;

@@ -197,7 +197,7 @@ describe("mobile UI feature-gate coverage", () => {
     // Locate the quickGrid block — everything between the quickGrid JSX comment
     // markers. We use the known constant items as anchors instead of a fragile
     // block-extraction regex; the critical assertion is the filter logic below.
-    const allLabels = ["Payroll", "Invoices", "Licences", "Lic. Approvals", "Clients", "Time Approval"];
+    const allLabels = ["Payroll", "Invoices", "Licenses", "Lic. Approvals", "Clients", "Time Approval"];
     for (const label of allLabels) {
       expect(src, `Quick Jump item "${label}" not found in dashboard source`).toContain(`"${label}"`);
     }
@@ -234,12 +234,12 @@ describe("mobile UI feature-gate coverage", () => {
     const visibleAllOn = items.filter((i) => !i.feature || allOn[i.feature]);
     expect(visibleAllOn).toHaveLength(6);
 
-    // With payroll + invoicing OFF: 4 tiles visible (Licences, Lic. Approvals, Clients, Time Approval).
+    // With payroll + invoicing OFF: 4 tiles visible (Licenses, Lic. Approvals, Clients, Time Approval).
     const allOff: Record<string, boolean> = { payroll: false, invoicing: false };
     const visibleAllOff = items.filter((i) => !i.feature || allOff[i.feature]);
     expect(visibleAllOff).toHaveLength(4);
     expect(visibleAllOff.map((i) => i.label)).toEqual([
-      "Licences",
+      "Licenses",
       "Lic. Approvals",
       "Clients",
       "Time Approval",
@@ -248,7 +248,7 @@ describe("mobile UI feature-gate coverage", () => {
 
   it("Quick Jump grid: ungated tiles always visible regardless of flag state", () => {
     const src = read("app/(admin)/dashboard.tsx");
-    const ALWAYS_VISIBLE = ["Licences", "Lic. Approvals", "Clients", "Time Approval"];
+    const ALWAYS_VISIBLE = ["Licenses", "Lic. Approvals", "Clients", "Time Approval"];
     const GATED = ["Payroll", "Invoices"];
 
     // Ungated items have no `feature:` key next to their label.

@@ -100,12 +100,12 @@ export default function ShiftDetailScreen() {
   const headcount = (shift as any)?.headcount ?? 1;
   const unassignedAll = (allEmployees ?? []).filter((e) => !assignedIds.has(e.id));
   // Effective clearance mirrors the server's eligibility helper: a licensed
-  // officer's level is their highest unexpired licence; EVERY worker carries a
-  // baseline of 1 ("Support — no licence required"); higher levels cover lower.
+  // officer's level is their highest unexpired license; EVERY worker carries a
+  // baseline of 1 ("Support — no license required"); higher levels cover lower.
   // Filtering on raw maxLicenseLevel alone wrongly hid non-licensed workers
   // from level-1 (Support) shifts.
   // Worker-role staff (admin, dispatcher, site_manager) are always level 4 —
-  // they can work any shift regardless of their own licence records.
+  // they can work any shift regardless of their own license records.
   const effLevel = (e: any) => {
     if (e.role === "admin" || e.role === "dispatcher" || e.role === "site_manager") return 4;
     return Math.max(e.maxLicenseLevel ?? 0, 1);

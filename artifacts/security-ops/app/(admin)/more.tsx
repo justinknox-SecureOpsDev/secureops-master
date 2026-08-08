@@ -31,7 +31,7 @@ const SECTIONS: readonly Section[] = [
     items: [
       { label: "Shift Approvals", icon: "user-check", route: "/(admin)/shift-approvals", desc: "Review pending shift claim requests" },
       { label: "Time Approval", icon: "check-square", route: "/(admin)/time-approval", desc: "Approve submitted time entries" },
-      { label: "Licence Approvals", icon: "award", route: "/(admin)/license-approvals", desc: "Review submitted licence documents" },
+      { label: "License Approvals", icon: "award", route: "/(admin)/license-approvals", desc: "Review submitted license documents" },
     ],
   },
   {
@@ -40,7 +40,7 @@ const SECTIONS: readonly Section[] = [
       { label: "Payroll", icon: "dollar-sign", route: "/(admin)/payroll", desc: "Review pay periods and earnings" },
       { label: "Invoices", icon: "file-text", route: "/(admin)/invoices", desc: "Client invoices and billing" },
       { label: "Clients", icon: "briefcase", route: "/(admin)/clients", desc: "Client accounts and their sites" },
-      { label: "Licences", icon: "shield", route: "/(admin)/licenses", desc: "Officer licence levels and expiry" },
+      { label: "Licenses", icon: "shield", route: "/(admin)/licenses", desc: "Officer license levels and expiry" },
     ],
   },
 ] as const;

@@ -175,8 +175,8 @@ export default function AdminLayout() {
       {/* Hidden screens — accessible via router.push but not shown in tab bar */}
       <Tabs.Screen name="payroll" options={{ href: null, headerTitle: "Payroll" }} />
       <Tabs.Screen name="invoices" options={{ href: null, headerTitle: "Invoices" }} />
-      <Tabs.Screen name="licenses" options={{ href: null, headerTitle: "Licences" }} />
-      <Tabs.Screen name="license-approvals" options={{ href: null, headerTitle: "Licence Approvals" }} />
+      <Tabs.Screen name="licenses" options={{ href: null, headerTitle: "Licenses" }} />
+      <Tabs.Screen name="license-approvals" options={{ href: null, headerTitle: "License Approvals" }} />
       <Tabs.Screen name="clients" options={{ href: null, headerTitle: "Clients" }} />
       <Tabs.Screen name="clients/[id]" options={{ href: null, headerTitle: "Client Sites" }} />
       <Tabs.Screen name="time-approval" options={{ href: null, headerTitle: "Time Approval" }} />

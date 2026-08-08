@@ -116,7 +116,7 @@ describe("filterShiftsBySearch", () => {
     expect(found.map((s) => s.title)).toEqual(["Event Security"]);
   });
 
-  it("matches on the licence level label", () => {
+  it("matches on the license level label", () => {
     const found = filterShiftsBySearch(shifts, "armed", levelLabel);
     // "unarmed" contains "armed", so both licensed levels legitimately match.
     expect(found.map((s) => s.title)).toContain("Event Security");

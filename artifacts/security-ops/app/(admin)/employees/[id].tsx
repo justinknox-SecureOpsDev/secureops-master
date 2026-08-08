@@ -175,19 +175,19 @@ export default function EmployeeDetailScreen() {
 
       <View style={[styles.section, { backgroundColor: colors.card, borderColor: colors.border }]}>
         <View style={styles.licSectionHeader}>
-          <Text style={[styles.sectionTitle, { color: colors.accent, marginBottom: 0 }]}>LICENCES ({licenses?.length ?? 0})</Text>
+            <Text style={[styles.sectionTitle, { color: colors.accent, marginBottom: 0 }]}>LICENSES ({licenses?.length ?? 0})</Text>
           <TouchableOpacity
             onPress={() => setAddLicOpen(true)}
             style={[styles.addLicBtn, { borderColor: colors.primary, backgroundColor: colors.primary + "15" }]}
             accessibilityRole="button"
-            accessibilityLabel="Add licence"
+            accessibilityLabel="Add license"
           >
             <Feather name="plus" size={13} color={colors.primary} />
             <Text style={{ color: colors.primary, fontSize: 12, fontWeight: "700" }}>Add</Text>
           </TouchableOpacity>
         </View>
         {(licenses?.length ?? 0) === 0 ? (
-          <Text style={[styles.emptyText, { color: colors.mutedForeground }]}>No licences on file</Text>
+          <Text style={[styles.emptyText, { color: colors.mutedForeground }]}>No licenses on file</Text>
         ) : (
           licenses!.map((lic: any) => {
             const licStatus = getLicenseStatus(lic.expiryDate);
@@ -300,7 +300,7 @@ function EditEmployeeModal({
             <EditField colors={colors} label="Contact phone" value={form.emergencyContactPhone} onChangeText={update("emergencyContactPhone")} keyboardType="phone-pad" />
 
             <Text style={[styles.modalNote, { color: colors.mutedForeground }]}>
-              Email and banking details are edited from the admin portal. Add licences from the Licences section.
+              Email and banking details are edited from the admin portal. Add licenses from the Licenses section.
             </Text>
           </ScrollView>
         </KeyboardAvoidingView>
@@ -357,7 +357,7 @@ function AddLicenseModal({
 
   const handleSave = async () => {
     if (!form.type.trim() || !form.licenseNumber.trim() || !form.expiryDate.trim()) {
-      const msg = "Licence type, number and expiry date are required.";
+      const msg = "License type, number and expiry date are required.";
       if (Platform.OS === "web") window.alert(msg); else Alert.alert("Missing fields", msg);
       return;
     }
@@ -375,7 +375,7 @@ function AddLicenseModal({
       });
       onSaved();
     } catch (e: any) {
-      const msg = e?.response?.data?.message || e?.message || "Could not add licence.";
+      const msg = e?.response?.data?.message || e?.message || "Could not add license.";
       if (Platform.OS === "web") window.alert(msg); else Alert.alert("Save failed", msg);
     }
   };
@@ -387,8 +387,8 @@ function AddLicenseModal({
           <TouchableOpacity onPress={onClose} disabled={createLicense.isPending} accessibilityRole="button" accessibilityLabel="Cancel">
             <Text style={{ color: colors.mutedForeground, fontSize: 16 }}>Cancel</Text>
           </TouchableOpacity>
-          <Text style={[styles.modalTitle, { color: colors.foreground }]} accessibilityRole="header">Add Licence</Text>
-          <TouchableOpacity onPress={handleSave} disabled={createLicense.isPending} accessibilityRole="button" accessibilityLabel="Save licence" accessibilityState={{ disabled: createLicense.isPending, busy: createLicense.isPending }}>
+          <Text style={[styles.modalTitle, { color: colors.foreground }]} accessibilityRole="header">Add License</Text>
+          <TouchableOpacity onPress={handleSave} disabled={createLicense.isPending} accessibilityRole="button" accessibilityLabel="Save license" accessibilityState={{ disabled: createLicense.isPending, busy: createLicense.isPending }}>
             {createLicense.isPending ? <ActivityIndicator color={colors.primary} /> : <Text style={{ color: colors.primary, fontSize: 16, fontWeight: "700" }}>Save</Text>}
           </TouchableOpacity>
         </View>
@@ -396,7 +396,7 @@ function AddLicenseModal({
           <ScrollView contentContainerStyle={{ padding: 16 }} keyboardShouldPersistTaps="handled">
             <Text style={[styles.modalNote, { color: colors.mutedForeground, marginTop: 0, marginBottom: 16 }]}>For {employeeName}</Text>
 
-            <Text style={[styles.fieldLabel, { color: colors.mutedForeground }]}>Licence level</Text>
+            <Text style={[styles.fieldLabel, { color: colors.mutedForeground }]}>License level</Text>
             <View style={{ flexDirection: "row", gap: 8, marginBottom: 16 }}>
               {([1, 2, 3, 4] as const).map((lv) => (
                 <TouchableOpacity
@@ -417,8 +417,8 @@ function AddLicenseModal({
               ))}
             </View>
 
-            <EditField colors={colors} label="Licence type" value={form.type} onChangeText={set("type")} autoCapitalize="words" />
-            <EditField colors={colors} label="Licence number" value={form.licenseNumber} onChangeText={set("licenseNumber")} />
+            <EditField colors={colors} label="License type" value={form.type} onChangeText={set("type")} autoCapitalize="words" />
+            <EditField colors={colors} label="License number" value={form.licenseNumber} onChangeText={set("licenseNumber")} />
             <EditField colors={colors} label="Issuing authority" value={form.issuingAuthority} onChangeText={set("issuingAuthority")} autoCapitalize="words" />
             <EditField colors={colors} label="Issue date (YYYY-MM-DD)" value={form.issueDate} onChangeText={set("issueDate")} />
             <EditField colors={colors} label="Expiry date (YYYY-MM-DD)" value={form.expiryDate} onChangeText={set("expiryDate")} />

@@ -99,7 +99,7 @@ export default function LicenseApprovalsScreen() {
         <TouchableOpacity onPress={() => router.back()} style={[styles.backBtn, { borderColor: colors.border }]} accessibilityRole="button" accessibilityLabel="Go back">
           <Feather name="arrow-left" size={18} color={colors.foreground} />
         </TouchableOpacity>
-        <Text style={[styles.pageTitle, { color: colors.foreground }]} accessibilityRole="header">Licence Approvals</Text>
+        <Text style={[styles.pageTitle, { color: colors.foreground }]} accessibilityRole="header">License Approvals</Text>
         <TouchableOpacity onPress={() => refetch()} style={[styles.backBtn, { borderColor: colors.border }]} accessibilityRole="button" accessibilityLabel="Refresh">
           <Feather name="refresh-cw" size={16} color={colors.foreground} />
         </TouchableOpacity>
@@ -162,7 +162,7 @@ export default function LicenseApprovalsScreen() {
                 </View>
                 <Text style={[styles.sub, { color: colors.mutedForeground }]}>#{item.licenseNumber}</Text>
                 <Text style={[styles.sub, { color: colors.mutedForeground }]}>
-                  {item.licenseId ? "Renews existing licence" : "New licence"}
+                  {item.licenseId ? "Renews existing license" : "New license"}
                 </Text>
                 <View style={styles.detailRow}>
                   <Feather name="clock" size={13} color={tone} />
@@ -178,7 +178,7 @@ export default function LicenseApprovalsScreen() {
                     style={[styles.actionBtn, { borderColor: colors.border }]}
                     onPress={() => viewPhoto(item)}
                     accessibilityRole="button"
-                    accessibilityLabel="View licence photo"
+                        accessibilityLabel="View license photo"
                   >
                     <Feather name="image" size={14} color={colors.foreground} />
                     <Text style={[styles.actionText, { color: colors.foreground }]}>Photo</Text>

@@ -164,7 +164,7 @@ export default function AdminEmployeesScreen() {
               style={[styles.card, { backgroundColor: colors.card, borderColor: colors.border }]}
               onPress={() => router.push(`/(admin)/employees/${item.id}` as any)}
               accessibilityRole="button"
-              accessibilityLabel={`${item.firstName} ${item.lastName}, ${item.status}${(item.expiringLicenseCount ?? 0) > 0 ? `, ${item.expiringLicenseCount} expiring licence${item.expiringLicenseCount === 1 ? "" : "s"}` : ""}`}
+              accessibilityLabel={`${item.firstName} ${item.lastName}, ${item.status}${(item.expiringLicenseCount ?? 0) > 0 ? `, ${item.expiringLicenseCount} expiring license${item.expiringLicenseCount === 1 ? "" : "s"}` : ""}`}
               accessibilityHint="Opens employee profile"
             >
               <View style={styles.cardRow}>

@@ -213,7 +213,7 @@ export default function AdminDashboardScreen() {
             { label: "Radio", icon: "radio", route: "/(admin)/radio", feature: "radio" },
             { label: "Payroll", icon: "dollar-sign", route: "/(admin)/payroll", feature: "payroll" },
             { label: "Invoices", icon: "file-text", route: "/(admin)/invoices", feature: "invoicing" },
-            { label: "Licences", icon: "award", route: "/(admin)/licenses" },
+            { label: "Licenses", icon: "award", route: "/(admin)/licenses" },
             { label: "Lic. Approvals", icon: "user-check", route: "/(admin)/license-approvals" },
             { label: "Clients", icon: "briefcase", route: "/(admin)/clients" },
             { label: "Time Approval", icon: "check-square", route: "/(admin)/time-approval" },
