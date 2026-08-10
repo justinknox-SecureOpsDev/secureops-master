@@ -13,6 +13,9 @@ import {
 import { useFkOptions } from "@/lib/fk";
 import { api, ApiError } from "@/lib/api";
 import { Repeat } from "lucide-react";
+import {
+  StaffingRowsEditor, newStaffingRow, type SiteRate, type StaffingRow,
+} from "@/components/StaffingRowsEditor";
 
 const DAYS: { v: number; short: string; long: string }[] = [
   { v: 1, short: "Mon", long: "Monday" },
@@ -32,11 +35,13 @@ function plusDaysIso(days: number): string {
 }
 
 export function RepeatingShiftDialog({
-  open, onOpenChange, onCreated,
+  open, onOpenChange, onCreated, isSiteManager = false,
 }: {
   open: boolean;
   onOpenChange: (b: boolean) => void;
   onCreated: () => void;
+  /** When true, hide rate fields (mirrors server-side site_manager rate-blind rule). */
+  isSiteManager?: boolean;
 }) {
   const sites = useFkOptions("sites");
 
@@ -47,43 +52,27 @@ export function RepeatingShiftDialog({
   const [days, setDays] = useState<number[]>([1, 2, 3, 4, 5]);
   const [startTime, setStartTime] = useState("09:00");
   const [endTime, setEndTime] = useState("17:00");
-  const [payRate, setPayRate] = useState("0");
-  const [billRate, setBillRate] = useState("0");
-  const [licenseLevel, setLicenseLevel] = useState<"1" | "2" | "3" | "4">("2");
-  const [headcount, setHeadcount] = useState("1");
   const [notes, setNotes] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  // Rate-card state — when the admin picks a site, fetch its per-license-level
-  // rates and auto-apply the one matching the chosen level. Mirrors ShiftDialog
-  // so a recurring series uses the contracted rate, not whatever was in the
-  // default "0" inputs.
-  type SiteRate = { id: string; licenseLevel: number; rateTier: number; payRate: string; billRate: string; label: string | null };
+
+  // Multi-position staffing rows — each row becomes its own repeat series.
+  const [staffingRows, setStaffingRows] = useState<StaffingRow[]>([newStaffingRow(2)]);
+
+  // Rate-card state, passed through to the rows editor.
   const [siteRates, setSiteRates] = useState<SiteRate[]>([]);
-  const [siteRateId, setSiteRateId] = useState<string | null>(null);
+  const [ratesLoading, setRatesLoading] = useState(false);
 
   useEffect(() => {
     if (!open || !siteId) { setSiteRates([]); return; }
     let cancelled = false;
+    setRatesLoading(true);
     api<SiteRate[]>(`/admin/sites/${siteId}/rates`)
       .then((rows) => { if (!cancelled) setSiteRates(rows ?? []); })
-      .catch(() => { if (!cancelled) setSiteRates([]); });
+      .catch(() => { if (!cancelled) setSiteRates([]); })
+      .finally(() => { if (!cancelled) setRatesLoading(false); });
     return () => { cancelled = true; };
   }, [open, siteId]);
-
-  // Auto-apply the matching rate as soon as the rate card resolves, or when
-  // the admin changes the level. Only fires if no manual rate override is in
-  // play yet (siteRateId tracks the active card pick).
-  useEffect(() => {
-    if (siteRates.length === 0) return;
-    // Default to the level's lowest tier (Rate 1 before Rate 2 before Rate 3).
-    const forLevel = siteRates.filter((r) => r.licenseLevel === Number(licenseLevel));
-    if (forLevel.length === 0) return;
-    const match = forLevel.reduce((best, r) => ((r.rateTier ?? 1) < (best.rateTier ?? 1) ? r : best));
-    setPayRate(String(parseFloat(match.payRate)));
-    setBillRate(String(parseFloat(match.billRate)));
-    setSiteRateId(match.id);
-  }, [siteRates, licenseLevel]);
 
   const toggleDay = (d: number) => {
     setDays((prev) => prev.includes(d) ? prev.filter((x) => x !== d) : [...prev, d].sort());
@@ -92,10 +81,16 @@ export function RepeatingShiftDialog({
   const reset = () => {
     setTitle(""); setSiteId(""); setStartDate(todayIso()); setUntilDate(plusDaysIso(28));
     setDays([1, 2, 3, 4, 5]); setStartTime("09:00"); setEndTime("17:00");
-    setPayRate("0"); setBillRate("0"); setLicenseLevel("2"); setHeadcount("1");
     setNotes(""); setError(null);
-    setSiteRates([]); setSiteRateId(null);
+    setSiteRates([]);
+    setStaffingRows([newStaffingRow(2)]);
   };
+
+  const hasDuplicates = (() => {
+    const counts = new Map<number, number>();
+    for (const r of staffingRows) counts.set(r.requiredLicenseLevel, (counts.get(r.requiredLicenseLevel) ?? 0) + 1);
+    return Array.from(counts.values()).some((n) => n > 1);
+  })();
 
   const handleSubmit = async () => {
     setError(null);
@@ -103,20 +98,24 @@ export function RepeatingShiftDialog({
     if (!siteId) { setError("Site is required"); return; }
     if (days.length === 0) { setError("Pick at least one day of the week"); return; }
     if (untilDate < startDate) { setError("Until date must be on or after the start date"); return; }
+    if (hasDuplicates) { setError("Remove duplicate positions before saving"); return; }
     setSubmitting(true);
     try {
+      const positions = staffingRows.map((r) => ({
+        requiredLicenseLevel: r.requiredLicenseLevel,
+        headcount: Math.max(1, r.headcount),
+        payRate: Number(r.payRate) || 0,
+        billRate: Number(r.billRate) || 0,
+        siteRateId: r.siteRateId || null,
+      }));
       const result = await api<{ created: number; skippedExisting: number; totalOccurrences: number }>("/shifts/repeat", {
         method: "POST",
         body: {
           base: {
             title: title.trim(),
             siteId,
-            payRate: Number(payRate) || 0,
-            billRate: Number(billRate) || 0,
-            requiredLicenseLevel: Number(licenseLevel),
-            headcount: Number(headcount) || 1,
             notes: notes.trim() || null,
-            siteRateId: siteRateId || null,
+            positions,
           },
           recurrence: {
             startDate, untilDate, daysOfWeek: days, startTime, endTime,
@@ -152,9 +151,12 @@ export function RepeatingShiftDialog({
     return count;
   })();
 
+  const totalShifts = occurrenceEstimate * staffingRows.length;
+  const totalStaff = staffingRows.reduce((sum, r) => sum + r.headcount, 0);
+
   return (
     <Dialog open={open} onOpenChange={(b) => { if (!submitting) onOpenChange(b); }}>
-      <DialogContent className="max-w-2xl">
+      <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
             <Repeat className="w-5 h-5 text-brand-gold" />
@@ -162,6 +164,7 @@ export function RepeatingShiftDialog({
           </DialogTitle>
           <DialogDescription>
             Generate a series of shifts on selected days of the week between two dates.
+            Each position row becomes its own repeating series.
           </DialogDescription>
         </DialogHeader>
 
@@ -230,38 +233,15 @@ export function RepeatingShiftDialog({
             </div>
           </div>
 
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-            <div>
-              <Label>Pay rate ($/hr)</Label>
-              <Input
-                type="number" step="0.01" value={payRate}
-                onChange={(e) => { setPayRate(e.target.value); setSiteRateId(null); }}
-              />
-            </div>
-            <div>
-              <Label>Bill rate ($/hr)</Label>
-              <Input
-                type="number" step="0.01" value={billRate}
-                onChange={(e) => { setBillRate(e.target.value); setSiteRateId(null); }}
-              />
-            </div>
-            <div>
-              <Label>Min licence</Label>
-              <Select value={licenseLevel} onValueChange={(v) => setLicenseLevel(v as "1" | "2" | "3" | "4")}>
-                <SelectTrigger><SelectValue /></SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="1">Support (no licence)</SelectItem>
-                  <SelectItem value="2">Level 2 (unarmed)</SelectItem>
-                  <SelectItem value="3">Level 3 (armed)</SelectItem>
-                  <SelectItem value="4">Level 4 (PPO)</SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
-            <div>
-              <Label>Headcount</Label>
-              <Input type="number" min="1" value={headcount} onChange={(e) => setHeadcount(e.target.value)} />
-            </div>
-          </div>
+          {/* Multi-position staffing rows */}
+          <StaffingRowsEditor
+            rows={staffingRows}
+            onChange={setStaffingRows}
+            siteRates={siteRates}
+            ratesLoading={ratesLoading}
+            isSiteManager={isSiteManager}
+            hasSite={!!siteId}
+          />
 
           <div>
             <Label>Notes</Label>
@@ -269,10 +249,13 @@ export function RepeatingShiftDialog({
           </div>
 
           <div className="rounded-md bg-brand-cream/40 border border-brand-gold/30 px-3 py-2 text-sm">
-            <span className="font-medium">Preview:</span> approx <b>{occurrenceEstimate}</b> shift{occurrenceEstimate === 1 ? "" : "s"} will be created
-            ({days.length === 0 ? "no days selected" : days.map((d) => DAYS.find((x) => x.v === d)?.short).join(", ")},{" "}
+            <span className="font-medium">Preview:</span>{" "}
+            <b>{staffingRows.length}</b> position{staffingRows.length === 1 ? "" : "s"} ({totalStaff} officer{totalStaff === 1 ? "" : "s"}/day)
+            × <b>{occurrenceEstimate}</b> occurrence{occurrenceEstimate === 1 ? "" : "s"}
+            {" "}= approx <b>{totalShifts}</b> shift record{totalShifts === 1 ? "" : "s"}
+            {" "}({days.length === 0 ? "no days selected" : days.map((d) => DAYS.find((x) => x.v === d)?.short).join(", ")},{" "}
             {startTime}–{endTime}).
-            {occurrenceEstimate >= 366 && <span className="text-destructive ml-1">Capped at 366.</span>}
+            {occurrenceEstimate >= 366 && <span className="text-destructive ml-1">Capped at 366 per position.</span>}
           </div>
 
           {error && <div className="text-sm text-destructive">{error}</div>}
@@ -282,10 +265,10 @@ export function RepeatingShiftDialog({
           <Button variant="outline" onClick={() => onOpenChange(false)} disabled={submitting}>Cancel</Button>
           <Button
             onClick={handleSubmit}
-            disabled={submitting || occurrenceEstimate === 0}
+            disabled={submitting || occurrenceEstimate === 0 || hasDuplicates}
             className="bg-brand-navy text-white hover:opacity-90"
           >
-            {submitting ? "Creating…" : `Create ${occurrenceEstimate} shift${occurrenceEstimate === 1 ? "" : "s"}`}
+            {submitting ? "Creating…" : `Create ${totalShifts} shift${totalShifts === 1 ? "" : "s"}`}
           </Button>
         </DialogFooter>
       </DialogContent>

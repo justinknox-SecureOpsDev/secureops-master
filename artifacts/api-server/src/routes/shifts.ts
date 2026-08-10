@@ -454,26 +454,234 @@ router.post("/shifts", requireAdminOrSiteManager, async (req, res): Promise<void
 });
 
 /**
+ * Multi-position one-off bulk create: one shift per position row in a single
+ * transaction. Used when a manager picks several license-level positions (each
+ * with their own headcount and rate) for the same date/time window.
+ *
+ * Body shape:
+ *   {
+ *     title:     string,
+ *     siteId?:   uuid,
+ *     startTime: ISO8601,
+ *     endTime:   ISO8601,
+ *     notes?:    string,
+ *     shiftType?: "standard" | "ppo_detail",
+ *     positions: [
+ *       { requiredLicenseLevel: 1|2|3|4, headcount: number, payRate: string, billRate: string, siteRateId?: uuid },
+ *       ...
+ *     ]
+ *   }
+ *
+ * Returns: { created: number, shifts: Shift[] }.
+ * Site-manager rules mirror POST /shifts: must have a site, site must be
+ * managed, rate fields are ignored and the site's defaults are used.
+ */
+router.post("/shifts/bulk-create", requireAdminOrSiteManager, async (req, res): Promise<void> => {
+  const { title, siteId, startTime, endTime, notes, shiftType, positions } = req.body ?? {};
+
+  if (!title || !startTime || !endTime) {
+    res.status(400).json({ error: "Bad Request", message: "title, startTime, endTime required" });
+    return;
+  }
+  if (!Array.isArray(positions) || positions.length === 0) {
+    res.status(400).json({ error: "Bad Request", message: "positions[] required with at least one entry" });
+    return;
+  }
+
+  const isSiteManager = req.user!.role === "site_manager";
+
+  // Resolve site → clientName/location/defaults (same pattern as POST /shifts).
+  let resolvedClientName: string | null = null;
+  let resolvedLocation: string | null = null;
+  let siteDefaultPay: string | null = null;
+  let siteDefaultBill: string | null = null;
+  let siteLat: string | null = null;
+  let siteLng: string | null = null;
+
+  if (siteId) {
+    const [site] = await db
+      .select({ id: sitesTable.id, name: sitesTable.name, status: sitesTable.status, address: sitesTable.address, lat: sitesTable.locationLat, lng: sitesTable.locationLng, clientName: clientsTable.name, defaultPayRate: sitesTable.defaultPayRate, defaultBillRate: sitesTable.defaultBillRate })
+      .from(sitesTable)
+      .leftJoin(clientsTable, eq(sitesTable.clientId, clientsTable.id))
+      .where(eq(sitesTable.id, siteId));
+    if (!site) { res.status(400).json({ error: "Bad Request", message: "Site not found" }); return; }
+    if (site.status !== "active") {
+      res.status(400).json({ error: "Bad Request", message: "This site is inactive — reactivate it before posting new shifts." });
+      return;
+    }
+    resolvedClientName = site.clientName ?? null;
+    resolvedLocation = site.address ?? site.name;
+    siteDefaultPay = site.defaultPayRate ?? null;
+    siteDefaultBill = site.defaultBillRate ?? null;
+    siteLat = site.lat ? String(site.lat) : null;
+    siteLng = site.lng ? String(site.lng) : null;
+  }
+
+  if (isSiteManager) {
+    if (!siteId) {
+      res.status(400).json({ error: "Bad Request", message: "Select a site — site managers post shifts against a site they manage." });
+      return;
+    }
+    if (!(await canManageSite({ userId: req.user!.userId, role: req.user!.role }, siteId))) {
+      res.status(403).json({ error: "Forbidden", message: "You can only post shifts to sites you manage." });
+      return;
+    }
+  }
+
+  const startDt = new Date(startTime);
+  const endDt = new Date(endTime);
+  if (Number.isNaN(startDt.getTime()) || Number.isNaN(endDt.getTime()) || endDt <= startDt) {
+    res.status(400).json({ error: "Bad Request", message: "endTime must be after startTime" });
+    return;
+  }
+
+  // Validate + normalise every position row. Duplicate license levels are
+  // rejected so each row corresponds to a distinct qualifying-officer pool.
+  const seenLevels = new Set<number>();
+  const validPositions: Array<{
+    requiredLicenseLevel: number; headcount: number;
+    payRate: string; billRate: string; siteRateId: string | null;
+  }> = [];
+
+  for (const p of positions as unknown[]) {
+    if (typeof p !== "object" || p === null) continue;
+    const pObj = p as Record<string, unknown>;
+    const lvl = [1, 2, 3, 4].includes(Number(pObj.requiredLicenseLevel)) ? Number(pObj.requiredLicenseLevel) : 2;
+    if (seenLevels.has(lvl)) {
+      const names: Record<number, string> = { 1: "Support", 2: "L2 Unarmed", 3: "L3 Armed", 4: "L4/PPO" };
+      res.status(400).json({ error: "Bad Request", message: `Duplicate position: ${names[lvl] ?? lvl}. Each position must appear once.` });
+      return;
+    }
+    seenLevels.add(lvl);
+    const hc = Math.max(1, Math.floor(Number(pObj.headcount) || 1));
+    const finalPay = isSiteManager
+      ? (Number(siteDefaultPay) || 0)
+      : (Number(pObj.payRate) || 0);
+    const finalBill = isSiteManager
+      ? (Number(siteDefaultBill) || 0)
+      : (Number(pObj.billRate) || 0);
+    validPositions.push({
+      requiredLicenseLevel: lvl,
+      headcount: hc,
+      payRate: String(finalPay),
+      billRate: String(finalBill),
+      siteRateId: isSiteManager ? null : (typeof pObj.siteRateId === "string" ? pObj.siteRateId || null : null),
+    });
+  }
+
+  if (validPositions.length === 0) {
+    res.status(400).json({ error: "Bad Request", message: "No valid positions provided" });
+    return;
+  }
+
+  const finalShiftType = shiftType === "ppo_detail" ? "ppo_detail" : "standard";
+
+  const inserted = await db.transaction(async (tx) => {
+    return tx.insert(shiftsTable).values(validPositions.map((p) => ({
+      title,
+      siteId: siteId || null,
+      clientName: resolvedClientName,
+      location: resolvedLocation,
+      locationLat: siteLat,
+      locationLng: siteLng,
+      startTime: startDt,
+      endTime: endDt,
+      payRate: p.payRate,
+      billRate: p.billRate,
+      hourlyRate: p.payRate,
+      billableRate: p.billRate,
+      isRepeat: false,
+      notes: notes || null,
+      status: "upcoming" as const,
+      requiredLicenseLevel: p.requiredLicenseLevel,
+      headcount: p.headcount,
+      siteRateId: p.siteRateId,
+      shiftType: finalShiftType,
+    }))).returning();
+  });
+
+  // Outbound sync + notifications (mirrors POST /shifts).
+  for (const s of inserted) void pushShiftUpsert(s);
+
+  // Push qualifying employees for each shift's license level.
+  try {
+    const candidates = await db
+      .select({ userId: usersTable.id, effLevel: effectiveLevelSql })
+      .from(usersTable)
+      .leftJoin(licensesTable, eq(licensesTable.employeeId, usersTable.id))
+      .leftJoin(employeesTable, eq(employeesTable.userId, usersTable.id))
+      .where(and(eq(usersTable.role, "employee"), eq(usersTable.status, "active")))
+      .groupBy(usersTable.id);
+    const { sendPushToUsers } = await import("../lib/push");
+    for (const s of inserted) {
+      const eligibleIds = candidates.filter((c) => c.effLevel >= s.requiredLicenseLevel).map((c) => c.userId);
+      if (eligibleIds.length > 0) {
+        const start = fmtShiftWhen(s.startTime);
+        await sendPushToUsers(eligibleIds, {
+          title: `🛡️ New ${shiftLevelLabel(s.requiredLicenseLevel)} Shift Available`,
+          body: `${s.title} @ ${s.clientName ?? resolvedLocation ?? "—"} — ${start}`,
+          data: { type: "shift_available", shiftId: s.id },
+        });
+      }
+    }
+  } catch (err) {
+    req.log.warn({ err }, "Failed to broadcast new-shift push (bulk-create)");
+  }
+
+  // One batched notification to site managers.
+  if (inserted.length > 0 && siteId) {
+    try {
+      const managerIds = (await getSiteManagerUserIds(siteId)).filter((mid) => mid !== req.user!.userId);
+      if (managerIds.length > 0) {
+        const { sendPushToUsers } = await import("../lib/push");
+        const { sendSmsToUsers } = await import("../lib/sms");
+        const start = fmtShiftWhen(inserted[0].startTime);
+        const where = resolvedClientName ?? resolvedLocation ?? "your site";
+        const plural = inserted.length === 1 ? "" : "s";
+        await sendPushToUsers(managerIds, {
+          title: "🗓️ New Shift at Your Site",
+          body: `${inserted.length} ${title} shift${plural} posted at ${where} — ${start}`,
+          data: { type: "site_shift_created", siteId, count: String(inserted.length) },
+        });
+        void sendSmsToUsers(
+          managerIds,
+          `WCSG: ${inserted.length} new shift${plural} posted at your site (${where}). Open the SecureOps app to manage them.`,
+        );
+      }
+    } catch (err) {
+      req.log.warn({ err }, "Failed to notify site managers of bulk-create shifts");
+    }
+  }
+
+  res.status(201).json({
+    created: inserted.length,
+    shifts: inserted.map((s) => stripShiftFinanceForRole(req.user!.role, { ...s, assignments: [] })),
+  });
+});
+
+/**
  * Bulk-create a series of shifts from a recurrence pattern.
  *
  * Body shape:
  *   {
- *     base: { title, siteId, payRate, billRate, requiredLicenseLevel, headcount, notes? },
+ *     base: {
+ *       title, siteId, notes?,
+ *       // Single-position (legacy): payRate, billRate, requiredLicenseLevel, headcount, siteRateId
+ *       // Multi-position (new):     positions: [{ requiredLicenseLevel, headcount, payRate, billRate, siteRateId? }, ...]
+ *     },
  *     recurrence: {
- *       startDate: "YYYY-MM-DD",      // first eligible day (inclusive)
- *       untilDate: "YYYY-MM-DD",      // last eligible day (inclusive)
- *       daysOfWeek: number[],         // 0=Sun ... 6=Sat
- *       startTime: "HH:MM",           // local 24h, applied each occurrence
- *       endTime:   "HH:MM",           // wraps to next day if <= startTime
+ *       startDate: "YYYY-MM-DD",
+ *       untilDate: "YYYY-MM-DD",
+ *       daysOfWeek: number[],   // 0=Sun ... 6=Sat
+ *       startTime: "HH:MM",
+ *       endTime:   "HH:MM",
  *     }
  *   }
  *
- * Returns: { created, skippedExisting, shifts[] }.
+ * Multi-position: each position gets its own repeat series (own seriesId).
+ * Returns: { created, skippedExisting, totalOccurrences, positions, shifts[] }.
  *
- * Times are stored UTC; we apply the HH:MM directly to the calendar date as
- * UTC instants so the admin sees what they typed. (Multi-timezone scheduling
- * is out of scope for this feature.) Existing shifts at the same site +
- * startTime are skipped to make re-runs idempotent.
+ * Times are stored UTC. Existing shifts at same site + startTime are skipped.
  */
 router.post("/shifts/repeat", requireAdminOrSiteManager, async (req, res): Promise<void> => {
   const { base, recurrence } = req.body ?? {};
@@ -483,6 +691,7 @@ router.post("/shifts/repeat", requireAdminOrSiteManager, async (req, res): Promi
   }
   const {
     title, siteId, payRate, billRate, requiredLicenseLevel, headcount, notes, siteRateId,
+    positions: rawPositions,
   } = base;
   const { startDate, untilDate, daysOfWeek, startTime, endTime } = recurrence;
   const tz: string = typeof recurrence.tz === "string" && recurrence.tz ? recurrence.tz : "America/Chicago";
@@ -535,21 +744,47 @@ router.post("/shifts/repeat", requireAdminOrSiteManager, async (req, res): Promi
     return;
   }
 
-  const lvl = [1, 2, 3, 4].includes(Number(requiredLicenseLevel)) ? Number(requiredLicenseLevel) : 2;
-  const hc = Math.max(1, Number(headcount) || 1);
-  // Site managers are rate-blind: inherit the site's configured defaults when
-  // available, otherwise fall through to 0 so creation is never blocked.
-  let pay: number;
-  let bill: number;
-  if (isSiteManager) {
-    pay = Number(site.defaultPayRate) || 0;
-    bill = Number(site.defaultBillRate) || 0;
+  // Build the canonical list of positions. Multi-position path (new): caller
+  // supplies base.positions[]. Single-position path (legacy): fall back to
+  // the top-level base fields for backwards compatibility.
+  type RepeatPosition = { requiredLicenseLevel: number; headcount: number; pay: number; bill: number; siteRateId: string | null };
+  const positions: RepeatPosition[] = [];
+
+  if (Array.isArray(rawPositions) && rawPositions.length > 0) {
+    const seenLevels = new Set<number>();
+    for (const p of rawPositions as unknown[]) {
+      if (typeof p !== "object" || p === null) continue;
+      const pObj = p as Record<string, unknown>;
+      const lvl = [1, 2, 3, 4].includes(Number(pObj.requiredLicenseLevel)) ? Number(pObj.requiredLicenseLevel) : 2;
+      if (seenLevels.has(lvl)) {
+        const names: Record<number, string> = { 1: "Support", 2: "L2 Unarmed", 3: "L3 Armed", 4: "L4/PPO" };
+        res.status(400).json({ error: "Bad Request", message: `Duplicate position: ${names[lvl] ?? lvl}. Each position must appear once.` });
+        return;
+      }
+      seenLevels.add(lvl);
+      const hc = Math.max(1, Math.floor(Number(pObj.headcount) || 1));
+      const pay = isSiteManager ? (Number(site.defaultPayRate) || 0) : (Number(pObj.payRate) || 0);
+      const bill = isSiteManager ? (Number(site.defaultBillRate) || 0) : (Number(pObj.billRate) || 0);
+      positions.push({
+        requiredLicenseLevel: lvl, headcount: hc, pay, bill,
+        siteRateId: isSiteManager ? null : (typeof pObj.siteRateId === "string" ? pObj.siteRateId || null : null),
+      });
+    }
+    if (positions.length === 0) {
+      res.status(400).json({ error: "Bad Request", message: "No valid positions provided" });
+      return;
+    }
   } else {
-    pay = Number(payRate) || 0;
-    bill = Number(billRate) || 0;
+    // Legacy single-position fallback.
+    const lvl = [1, 2, 3, 4].includes(Number(requiredLicenseLevel)) ? Number(requiredLicenseLevel) : 2;
+    const hc = Math.max(1, Number(headcount) || 1);
+    const pay = isSiteManager ? (Number(site.defaultPayRate) || 0) : (Number(payRate) || 0);
+    const bill = isSiteManager ? (Number(site.defaultBillRate) || 0) : (Number(billRate) || 0);
+    positions.push({ requiredLicenseLevel: lvl, headcount: hc, pay, bill, siteRateId: siteRateId || null });
   }
 
   // Cap series length to prevent runaway expansion (~1 year of daily shifts).
+  // The cap is per-position so multi-position series share the same date range.
   const MAX_OCCURRENCES = 366;
   const start = new Date(`${startDate}T00:00:00Z`);
   const until = new Date(`${untilDate}T00:00:00Z`);
@@ -563,10 +798,6 @@ router.post("/shifts/repeat", requireAdminOrSiteManager, async (req, res): Promi
   const wrapsOvernight = (eh * 60 + em) <= (sh * 60 + sm);
 
   const repeatPattern = JSON.stringify({ daysOfWeek: validDays.sort(), startTime, endTime, startDate, untilDate });
-  // Stable series identifier shared by every occurrence in this batch. Lets
-  // the admin UI group, bulk-edit, and bulk-delete a series without relying
-  // on fragile site+title+repeatPattern JSON comparisons.
-  const seriesId = randomUUID();
 
   const occurrences: { startTime: Date; endTime: Date }[] = [];
   for (let d = new Date(start); d <= until && occurrences.length < MAX_OCCURRENCES; d = new Date(d.getTime() + 86400000)) {
@@ -594,10 +825,13 @@ router.post("/shifts/repeat", requireAdminOrSiteManager, async (req, res): Promi
       lte(shiftsTable.startTime, occurrences[occurrences.length - 1].startTime),
     ));
   const existingMs = new Set(existing.map((r) => new Date(r.startTime).getTime()));
+  const freshOccurrences = occurrences.filter((o) => !existingMs.has(o.startTime.getTime()));
 
-  const toInsert = occurrences
-    .filter((o) => !existingMs.has(o.startTime.getTime()))
-    .map((o) => ({
+  // Build all rows: for each position, each fresh occurrence = one shift row.
+  // Each position gets its own stable seriesId so the series-group UI works.
+  const allToInsert = positions.flatMap((pos) => {
+    const seriesId = randomUUID();
+    return freshOccurrences.map((o) => ({
       title,
       siteId,
       clientName: site.clientName ?? null,
@@ -606,26 +840,26 @@ router.post("/shifts/repeat", requireAdminOrSiteManager, async (req, res): Promi
       locationLng: site.lng ? String(site.lng) : null,
       startTime: o.startTime,
       endTime: o.endTime,
-      payRate: String(pay),
-      billRate: String(bill),
-      hourlyRate: String(pay),
-      billableRate: String(bill),
+      payRate: String(pos.pay),
+      billRate: String(pos.bill),
+      hourlyRate: String(pos.pay),
+      billableRate: String(pos.bill),
       isRepeat: true,
       repeatPattern,
       seriesId,
       notes: notes || null,
       status: "upcoming" as const,
-      requiredLicenseLevel: lvl,
-      headcount: hc,
-      siteRateId: siteRateId || null,
+      requiredLicenseLevel: pos.requiredLicenseLevel,
+      headcount: pos.headcount,
+      siteRateId: pos.siteRateId,
     }));
+  });
 
-  const inserted = toInsert.length > 0
-    ? await db.insert(shiftsTable).values(toInsert).returning()
+  const inserted = allToInsert.length > 0
+    ? await db.insert(shiftsTable).values(allToInsert).returning()
     : [];
 
   // Outbound sync: push each created shift to the scheduler (best-effort).
-  // None of these are scheduler-sourced, so loop prevention doesn't apply.
   for (const s of inserted) void pushShiftUpsert(s);
 
   // One BATCHED summary to the site's managers (excluding the actor) so a bulk
@@ -654,10 +888,12 @@ router.post("/shifts/repeat", requireAdminOrSiteManager, async (req, res): Promi
     }
   }
 
+  const skippedExisting = occurrences.length - freshOccurrences.length;
   res.status(201).json({
     created: inserted.length,
-    skippedExisting: occurrences.length - inserted.length,
-    totalOccurrences: occurrences.length,
+    skippedExisting: skippedExisting * positions.length,
+    totalOccurrences: occurrences.length * positions.length,
+    positions: positions.length,
     shifts: inserted.map((s) => stripShiftFinanceForRole(req.user!.role, s)),
   });
 });
