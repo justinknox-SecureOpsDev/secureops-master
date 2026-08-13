@@ -21,6 +21,10 @@ type Entry = {
   notes: string | null;
   lastEditedByEmail: string | null;
   lastEditedAt: string | null;
+  /** Pay rate from the QR token used at clock-in. Null = site default applied. */
+  qrPayRate: number | null;
+  /** Bill rate from the QR token used at clock-in. Null = site default applied to invoices. */
+  qrBillRate: number | null;
 };
 
 function fmtDateTime(iso: string | null | undefined): string {
@@ -103,8 +107,13 @@ function localInputToIso(value: string): string | null {
   return d.toISOString();
 }
 
+function fmtRate(rate: number | null | undefined): string {
+  if (rate == null) return "—";
+  return `$${rate.toFixed(2)}/hr`;
+}
+
 function exportCsv(entries: Entry[]): void {
-  const headers = ["ID", "Name", "Company", "Badge ID", "Site", "Clock In", "Clock Out", "Hours", "Edited By", "Edited At"];
+  const headers = ["ID", "Name", "Company", "Badge ID", "Site", "Clock In", "Clock Out", "Hours", "Pay Rate", "Bill Rate", "Edited By", "Edited At"];
   const rows = entries.map((e) => [
     e.id,
     e.name,
@@ -114,6 +123,8 @@ function exportCsv(entries: Entry[]): void {
     e.clockInAt,
     e.clockOutAt ?? "",
     e.hoursWorked ?? "",
+    e.qrPayRate != null ? String(e.qrPayRate) : "",
+    e.qrBillRate != null ? String(e.qrBillRate) : "",
     e.lastEditedByEmail ?? "",
     e.lastEditedAt ?? "",
   ]);
@@ -322,6 +333,8 @@ export default function SubcontractorEntriesPage() {
                   <th className="text-left p-3 font-medium">Badge ID</th>
                   <th className="text-left p-3 font-medium">Site</th>
                   <th className="text-left p-3 font-medium">Clock In</th>
+                  <th className="text-left p-3 font-medium">Pay Rate</th>
+                  <th className="text-left p-3 font-medium">Bill Rate</th>
                   <th className="text-left p-3 font-medium">Actions</th>
                 </tr>
               </thead>
@@ -338,6 +351,8 @@ export default function SubcontractorEntriesPage() {
                     <td className="p-3 text-muted-foreground">{e.badgeId ?? "—"}</td>
                     <td className="p-3 text-muted-foreground">{e.siteName ?? "—"}</td>
                     <td className="p-3">{fmtDateTime(e.clockInAt)}</td>
+                    <td className="p-3 tabular-nums text-muted-foreground">{fmtRate(e.qrPayRate)}</td>
+                    <td className="p-3 tabular-nums text-muted-foreground">{fmtRate(e.qrBillRate)}</td>
                     <td className="p-3">
                       <div className="flex gap-2">
                         <Button
@@ -389,6 +404,8 @@ export default function SubcontractorEntriesPage() {
                   <th className="text-left p-3 font-medium">Clock In</th>
                   <th className="text-left p-3 font-medium">Clock Out</th>
                   <th className="text-left p-3 font-medium">Hours</th>
+                  <th className="text-left p-3 font-medium">Pay Rate</th>
+                  <th className="text-left p-3 font-medium">Bill Rate</th>
                   <th className="text-left p-3 font-medium">Actions</th>
                 </tr>
               </thead>
@@ -407,6 +424,8 @@ export default function SubcontractorEntriesPage() {
                     <td className="p-3">{fmtDateTime(e.clockInAt)}</td>
                     <td className="p-3">{fmtDateTime(e.clockOutAt)}</td>
                     <td className="p-3 font-medium">{e.hoursWorked ? `${e.hoursWorked} hrs` : "—"}</td>
+                    <td className="p-3 tabular-nums text-muted-foreground">{fmtRate(e.qrPayRate)}</td>
+                    <td className="p-3 tabular-nums text-muted-foreground">{fmtRate(e.qrBillRate)}</td>
                     <td className="p-3">
                       <Button variant="outline" size="sm" onClick={() => openEdit(e)}>
                         <Pencil className="w-3.5 h-3.5 mr-1" />

@@ -6148,6 +6148,8 @@ export const GetSubcontractorQrResponse = zod.object({
   clockUrl: zod.string().optional(),
   siteName: zod.string(),
   createdAt: zod.coerce.date().optional(),
+  payRate: zod.number().nullish(),
+  billRate: zod.number().nullish(),
 });
 
 /**
@@ -6159,6 +6161,18 @@ export const GenerateSubcontractorQrParams = zod.object({
 
 export const GenerateSubcontractorQrBody = zod.object({
   rotate: zod.boolean().optional(),
+  payRate: zod
+    .number()
+    .nullish()
+    .describe(
+      "Admin pay rate ($\/hr) for this QR code. Null or omit to use site default.",
+    ),
+  billRate: zod
+    .number()
+    .nullish()
+    .describe(
+      "Bill rate ($\/hr) applied to invoices for entries from this QR code. Null or omit to fall back to the site's defaultBillRate.",
+    ),
 });
 
 export const GenerateSubcontractorQrResponse = zod.object({
@@ -6167,6 +6181,18 @@ export const GenerateSubcontractorQrResponse = zod.object({
   clockUrl: zod.string(),
   siteName: zod.string(),
   createdAt: zod.coerce.date(),
+  payRate: zod
+    .number()
+    .nullish()
+    .describe(
+      "Admin pay rate ($\/hr) for this QR code. Null = use site default. Never sent to the public clock-in page.",
+    ),
+  billRate: zod
+    .number()
+    .nullish()
+    .describe(
+      "Bill rate ($\/hr) used for invoicing when entries come from this QR code. Null = fall back to the site's defaultBillRate. Never sent to the public clock-in page.",
+    ),
 });
 
 /**
@@ -6190,6 +6216,18 @@ export const GetSubcontractorEntriesResponseItem = zod.object({
   hoursWorked: zod.string().nullish(),
   notes: zod.string().nullish(),
   createdAt: zod.coerce.date().optional(),
+  qrPayRate: zod
+    .number()
+    .nullish()
+    .describe(
+      "Pay rate from the QR token used for this entry. Null if the token had no explicit rate.",
+    ),
+  qrBillRate: zod
+    .number()
+    .nullish()
+    .describe(
+      "Bill rate from the QR token used for this entry. Null if the token had no explicit rate (site default applies).",
+    ),
 });
 export const GetSubcontractorEntriesResponse = zod.array(
   GetSubcontractorEntriesResponseItem,
@@ -6219,6 +6257,18 @@ export const AdminClockOutSubcontractorEntryResponse = zod.object({
   hoursWorked: zod.string().nullish(),
   notes: zod.string().nullish(),
   createdAt: zod.coerce.date().optional(),
+  qrPayRate: zod
+    .number()
+    .nullish()
+    .describe(
+      "Pay rate from the QR token used for this entry. Null if the token had no explicit rate.",
+    ),
+  qrBillRate: zod
+    .number()
+    .nullish()
+    .describe(
+      "Bill rate from the QR token used for this entry. Null if the token had no explicit rate (site default applies).",
+    ),
 });
 
 /**
@@ -6249,6 +6299,18 @@ export const AdminUpdateSubcontractorEntryResponse = zod.object({
   hoursWorked: zod.string().nullish(),
   notes: zod.string().nullish(),
   createdAt: zod.coerce.date().optional(),
+  qrPayRate: zod
+    .number()
+    .nullish()
+    .describe(
+      "Pay rate from the QR token used for this entry. Null if the token had no explicit rate.",
+    ),
+  qrBillRate: zod
+    .number()
+    .nullish()
+    .describe(
+      "Bill rate from the QR token used for this entry. Null if the token had no explicit rate (site default applies).",
+    ),
 });
 
 /**

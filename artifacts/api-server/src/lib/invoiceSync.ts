@@ -8,6 +8,7 @@ import {
   timeEntriesTable,
   usersTable,
   subcontractorTimeEntriesTable,
+  subcontractorQrTokensTable,
   type TimeEntry,
   type SubcontractorTimeEntry,
 } from "@workspace/db";
@@ -152,9 +153,9 @@ export async function collectInvoicePeriodEntries(
   }
 
   // Subcontractor hours. Closed entries only (clockOutAt set) for this
-  // site+period. Subcontractors have no shift and no system account, so
-  // there's no shift-level billRate to fall back from — they're billed at
-  // the site's defaultBillRate, at the same 1.5× holiday premium.
+  // site+period. Bill rate priority: (1) explicit billRate on the QR token
+  // that was used at clock-in, (2) site's defaultBillRate. The same 1.5×
+  // holiday premium applies to whichever rate is chosen.
   const subEntries = await db
     .select({
       id: subcontractorTimeEntriesTable.id,
@@ -163,8 +164,14 @@ export async function collectInvoicePeriodEntries(
       clockOutAt: subcontractorTimeEntriesTable.clockOutAt,
       name: subcontractorTimeEntriesTable.name,
       company: subcontractorTimeEntriesTable.company,
+      // QR token's explicit bill rate — takes precedence over site default.
+      qrBillRate: subcontractorQrTokensTable.billRate,
     })
     .from(subcontractorTimeEntriesTable)
+    .leftJoin(
+      subcontractorQrTokensTable,
+      eq(subcontractorTimeEntriesTable.qrTokenId, subcontractorQrTokensTable.id),
+    )
     .where(
       and(
         eq(subcontractorTimeEntriesTable.siteId, siteId),
@@ -177,11 +184,14 @@ export async function collectInvoicePeriodEntries(
     const hoursRaw = parseFloat(String(e.hoursWorked ?? "0"));
     const hours = isFinite(hoursRaw) && hoursRaw > 0 ? hoursRaw : 0;
     const holidayName = getFederalHolidayName(e.clockInAt);
+    // Resolve effective bill rate: QR-token rate → site default → null (unpriced).
+    const qrRate = e.qrBillRate != null ? parseFloat(String(e.qrBillRate)) : NaN;
+    const effectiveBillRate = isFinite(qrRate) && qrRate > 0 ? qrRate : siteBillRate;
     const rate =
-      siteBillRate > 0
+      effectiveBillRate > 0
         ? holidayName
-          ? Math.round(siteBillRate * HOLIDAY_PAY_MULTIPLIER * 100) / 100
-          : siteBillRate
+          ? Math.round(effectiveBillRate * HOLIDAY_PAY_MULTIPLIER * 100) / 100
+          : effectiveBillRate
         : null;
     const label = holidayName
       ? `${e.name} (${e.company}) — subcontractor, Holiday (${holidayName}, ${HOLIDAY_PAY_MULTIPLIER}×)`

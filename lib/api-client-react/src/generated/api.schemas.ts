@@ -56,6 +56,10 @@ export interface SubcontractorQrResponse {
   clockUrl: string;
   siteName: string;
   createdAt: string;
+  /** Admin pay rate ($/hr) for this QR code. Null = use site default. Never sent to the public clock-in page. */
+  payRate?: number | null;
+  /** Bill rate ($/hr) used for invoicing when entries come from this QR code. Null = fall back to the site's defaultBillRate. Never sent to the public clock-in page. */
+  billRate?: number | null;
 }
 
 export interface SubcontractorQrLookup {
@@ -65,6 +69,8 @@ export interface SubcontractorQrLookup {
   clockUrl?: string;
   siteName: string;
   createdAt?: string;
+  payRate?: number | null;
+  billRate?: number | null;
 }
 
 export interface SubcontractorTimeEntry {
@@ -79,6 +85,10 @@ export interface SubcontractorTimeEntry {
   hoursWorked?: string | null;
   notes?: string | null;
   createdAt?: string;
+  /** Pay rate from the QR token used for this entry. Null if the token had no explicit rate. */
+  qrPayRate?: number | null;
+  /** Bill rate from the QR token used for this entry. Null if the token had no explicit rate (site default applies). */
+  qrBillRate?: number | null;
 }
 
 export interface SubcontractorClockInfo {
@@ -3169,6 +3179,10 @@ export type DeclineShiftRequestBody = {
 
 export type GenerateSubcontractorQrBody = {
   rotate?: boolean;
+  /** Admin pay rate ($/hr) for this QR code. Null or omit to use site default. */
+  payRate?: number | null;
+  /** Bill rate ($/hr) applied to invoices for entries from this QR code. Null or omit to fall back to the site's defaultBillRate. */
+  billRate?: number | null;
 };
 
 export type GetSubcontractorEntriesParams = {

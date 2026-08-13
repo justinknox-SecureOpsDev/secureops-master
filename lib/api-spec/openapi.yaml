@@ -3299,6 +3299,8 @@ paths:
               type: object
               properties:
                 rotate: { type: boolean }
+                payRate: { type: number, nullable: true, description: "Admin pay rate ($/hr) for this QR code. Null or omit to use site default." }
+                billRate: { type: number, nullable: true, description: "Bill rate ($/hr) applied to invoices for entries from this QR code. Null or omit to fall back to the site's defaultBillRate." }
       responses:
         "200":
           description: QR token created or rotated
@@ -3561,6 +3563,8 @@ components:
         clockUrl: { type: string }
         siteName: { type: string }
         createdAt: { type: string, format: date-time }
+        payRate: { type: number, nullable: true, description: "Admin pay rate ($/hr) for this QR code. Null = use site default. Never sent to the public clock-in page." }
+        billRate: { type: number, nullable: true, description: "Bill rate ($/hr) used for invoicing when entries come from this QR code. Null = fall back to the site's defaultBillRate. Never sent to the public clock-in page." }
 
     SubcontractorQrLookup:
       type: object
@@ -3572,6 +3576,8 @@ components:
         clockUrl: { type: string }
         siteName: { type: string }
         createdAt: { type: string, format: date-time }
+        payRate: { type: number, nullable: true }
+        billRate: { type: number, nullable: true }
 
     SubcontractorTimeEntry:
       type: object
@@ -3588,6 +3594,8 @@ components:
         hoursWorked: { type: string, nullable: true }
         notes: { type: string, nullable: true }
         createdAt: { type: string, format: date-time }
+        qrPayRate: { type: number, nullable: true, description: "Pay rate from the QR token used for this entry. Null if the token had no explicit rate." }
+        qrBillRate: { type: number, nullable: true, description: "Bill rate from the QR token used for this entry. Null if the token had no explicit rate (site default applies)." }
 
     SubcontractorClockInfo:
       type: object

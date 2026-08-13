@@ -81,6 +81,8 @@ type SubEntryRow = {
   clockInAt: string | null;
   clockOutAt: string | null;
   hoursWorked: string | null;
+  qrPayRate: number | null;
+  qrBillRate: number | null;
 };
 
 function fmt(iso: string) {
@@ -1521,6 +1523,18 @@ export function SiteDetailPage() {
                       </span>
                     ),
                   },
+                  {
+                    id: "payRate",
+                    header: "Pay rate",
+                    tdClassName: "tabular-nums text-muted-foreground",
+                    cell: (s) => (s.qrPayRate != null ? `$${s.qrPayRate.toFixed(2)}/hr` : "—"),
+                  },
+                  {
+                    id: "billRate",
+                    header: "Bill rate",
+                    tdClassName: "tabular-nums text-muted-foreground",
+                    cell: (s) => (s.qrBillRate != null ? `$${s.qrBillRate.toFixed(2)}/hr` : "—"),
+                  },
                 ]}
               />
             )}
@@ -2027,6 +2041,10 @@ type SubcontractorQr = {
   clockUrl?: string;
   siteName?: string;
   createdAt?: string;
+  /** Admin pay rate ($/hr). Null = use site default. Never shown on public clock-in page. */
+  payRate?: number | null;
+  /** Bill rate ($/hr) for invoicing. Null = fall back to site defaultBillRate. */
+  billRate?: number | null;
 };
 
 function SubcontractorQrCard({ siteId, siteName }: { siteId: string; siteName: string }) {
@@ -2036,12 +2054,19 @@ function SubcontractorQrCard({ siteId, siteName }: { siteId: string; siteName: s
   const [err, setErr] = useState<string | null>(null);
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
 
+  // Rate fields — pre-filled from the existing QR token and sent on save/rotate.
+  const [draftPayRate, setDraftPayRate] = useState("");
+  const [draftBillRate, setDraftBillRate] = useState("");
+
   const load = useCallback(async () => {
     setLoading(true);
     setErr(null);
     try {
       const data = await api<SubcontractorQr>(`/admin/sites/${siteId}/subcontractor-qr`);
       setQr(data ?? null);
+      // Pre-fill rate inputs from the stored token.
+      setDraftPayRate(data?.payRate != null ? String(data.payRate) : "");
+      setDraftBillRate(data?.billRate != null ? String(data.billRate) : "");
     } catch (e) {
       setErr((e as Error).message);
     } finally {
@@ -2051,15 +2076,53 @@ function SubcontractorQrCard({ siteId, siteName }: { siteId: string; siteName: s
 
   useEffect(() => { void load(); }, [load]);
 
+  // Parse a rate input: "" → null (clear), positive number → number string, else undefined (ignore).
+  function parseRate(raw: string): number | null | undefined {
+    if (raw.trim() === "") return null;
+    const n = parseFloat(raw);
+    return isFinite(n) && n >= 0 ? n : undefined;
+  }
+
   async function generate(rotate: boolean) {
     setWorking(true);
     setErr(null);
     try {
+      const body: Record<string, unknown> = { rotate };
+      const pr = parseRate(draftPayRate);
+      const br = parseRate(draftBillRate);
+      if (pr !== undefined) body.payRate = pr;
+      if (br !== undefined) body.billRate = br;
       const data = await api<SubcontractorQr>(`/admin/sites/${siteId}/subcontractor-qr`, {
         method: "POST",
-        body: JSON.stringify({ rotate }),
+        body: JSON.stringify(body),
       });
       setQr({ ...data, exists: true });
+      setDraftPayRate(data?.payRate != null ? String(data.payRate) : "");
+      setDraftBillRate(data?.billRate != null ? String(data.billRate) : "");
+    } catch (e) {
+      setErr((e as Error).message);
+    } finally {
+      setWorking(false);
+    }
+  }
+
+  // Save rates without rotating the token.
+  async function saveRates() {
+    setWorking(true);
+    setErr(null);
+    try {
+      const body: Record<string, unknown> = { rotate: false };
+      const pr = parseRate(draftPayRate);
+      const br = parseRate(draftBillRate);
+      if (pr !== undefined) body.payRate = pr;
+      if (br !== undefined) body.billRate = br;
+      const data = await api<SubcontractorQr>(`/admin/sites/${siteId}/subcontractor-qr`, {
+        method: "POST",
+        body: JSON.stringify(body),
+      });
+      setQr({ ...data, exists: true });
+      setDraftPayRate(data?.payRate != null ? String(data.payRate) : "");
+      setDraftBillRate(data?.billRate != null ? String(data.billRate) : "");
     } catch (e) {
       setErr((e as Error).message);
     } finally {
@@ -2126,6 +2189,45 @@ function SubcontractorQrCard({ siteId, siteName }: { siteId: string; siteName: s
               <div className="break-all bg-muted/50 border rounded p-2 font-mono">{clockUrl}</div>
               {qr?.createdAt && <div>Created: {fmt(qr.createdAt)}</div>}
             </div>
+
+            {/* Rate fields — admin-only, never shown on the public clock-in page */}
+            <div className="border rounded p-3 space-y-2 bg-muted/20">
+              <div className="text-xs font-medium text-foreground">Billing rates for invoicing</div>
+              <div className="grid grid-cols-2 gap-2">
+                <div className="space-y-1">
+                  <label className="text-[11px] text-muted-foreground">Pay rate ($/hr)</label>
+                  <input
+                    type="number"
+                    min="0"
+                    step="0.01"
+                    placeholder="Site default"
+                    value={draftPayRate}
+                    onChange={(e) => setDraftPayRate(e.target.value)}
+                    className="w-full border rounded px-2 py-1.5 text-sm bg-background"
+                  />
+                </div>
+                <div className="space-y-1">
+                  <label className="text-[11px] text-muted-foreground">Bill rate ($/hr)</label>
+                  <input
+                    type="number"
+                    min="0"
+                    step="0.01"
+                    placeholder="Site default"
+                    value={draftBillRate}
+                    onChange={(e) => setDraftBillRate(e.target.value)}
+                    className="w-full border rounded px-2 py-1.5 text-sm bg-background"
+                  />
+                </div>
+              </div>
+              <div className="text-[11px] text-muted-foreground">
+                Leave blank to use the site's default bill rate. These rates are never shown to the person scanning the code.
+              </div>
+              <Button size="sm" variant="outline" onClick={saveRates} disabled={working}>
+                {working ? <Loader2 className="w-3.5 h-3.5 mr-1 animate-spin" /> : null}
+                Save rates
+              </Button>
+            </div>
+
             <div className="flex flex-wrap gap-2">
               <Button variant="outline" size="sm" onClick={handlePrint}>
                 <Printer className="w-3.5 h-3.5 mr-1" /> Print
@@ -2143,7 +2245,37 @@ function SubcontractorQrCard({ siteId, siteName }: { siteId: string; siteName: s
       ) : (
         <div className="border rounded p-4 space-y-3">
           <div className="text-sm text-muted-foreground">
-            No QR code generated for this site yet. Create one for subcontractors to scan.
+            No QR code generated for this site yet. Optionally set billing rates before generating.
+          </div>
+          {/* Rate fields shown before first generation too */}
+          <div className="grid grid-cols-2 gap-2">
+            <div className="space-y-1">
+              <label className="text-[11px] text-muted-foreground">Pay rate ($/hr)</label>
+              <input
+                type="number"
+                min="0"
+                step="0.01"
+                placeholder="Site default"
+                value={draftPayRate}
+                onChange={(e) => setDraftPayRate(e.target.value)}
+                className="w-full border rounded px-2 py-1.5 text-sm bg-background"
+              />
+            </div>
+            <div className="space-y-1">
+              <label className="text-[11px] text-muted-foreground">Bill rate ($/hr)</label>
+              <input
+                type="number"
+                min="0"
+                step="0.01"
+                placeholder="Site default"
+                value={draftBillRate}
+                onChange={(e) => setDraftBillRate(e.target.value)}
+                className="w-full border rounded px-2 py-1.5 text-sm bg-background"
+              />
+            </div>
+          </div>
+          <div className="text-[11px] text-muted-foreground">
+            Leave blank to use the site's default bill rate. These rates are never shown to the person scanning the code.
           </div>
           <Button
             size="sm"

@@ -87,6 +87,9 @@ router.get("/admin/sites/:siteId/subcontractor-qr", requireAdmin, async (req, re
     clockUrl: buildClockUrl(req, row.token),
     siteName: site.name,
     createdAt: row.createdAt.toISOString(),
+    // Rates are admin-only; never sent to the public clock-in endpoints.
+    payRate: row.payRate != null ? parseFloat(String(row.payRate)) : null,
+    billRate: row.billRate != null ? parseFloat(String(row.billRate)) : null,
   });
 });
 
@@ -96,7 +99,21 @@ router.get("/admin/sites/:siteId/subcontractor-qr", requireAdmin, async (req, re
 // ---------------------------------------------------------------------------
 router.post("/admin/sites/:siteId/subcontractor-qr", requireAdmin, async (req, res): Promise<void> => {
   const { siteId } = req.params as { siteId: string };
-  const rotate = Boolean((req.body ?? {}).rotate);
+  const body = req.body ?? {};
+  const rotate = Boolean(body.rotate);
+
+  // Parse optional rate fields. Null means "clear/inherit site default";
+  // omitted (undefined) means "leave unchanged on rotate, or null on insert".
+  function parseOptionalRate(raw: unknown): string | null | undefined {
+    if (raw === null) return null;          // explicit clear
+    if (raw === undefined) return undefined; // not provided → leave unchanged
+    const n = parseFloat(String(raw));
+    if (!isFinite(n) || n < 0) return undefined; // ignore invalid values
+    return n.toFixed(2);
+  }
+
+  const payRate = parseOptionalRate(body.payRate);
+  const billRate = parseOptionalRate(body.billRate);
 
   const [site] = await db.select({ name: sitesTable.name }).from(sitesTable).where(eq(sitesTable.id, siteId));
   if (!site) {
@@ -114,17 +131,41 @@ router.post("/admin/sites/:siteId/subcontractor-qr", requireAdmin, async (req, r
 
   let row = existing;
   if (existing && rotate) {
+    // Rotate: replace the token and always apply the new rate values (if provided).
+    const updateSet: Record<string, unknown> = {
+      token: genToken(),
+      createdByAdminId: req.user!.userId,
+      createdAt: new Date(),
+    };
+    if (payRate !== undefined) updateSet.payRate = payRate;
+    if (billRate !== undefined) updateSet.billRate = billRate;
     const [updated] = await db
       .update(subcontractorQrTokensTable)
-      .set({ token: genToken(), createdByAdminId: req.user!.userId, createdAt: new Date() })
+      .set(updateSet)
       .where(eq(subcontractorQrTokensTable.id, existing.id))
       .returning();
     row = updated!;
-  } else if (!existing) {
+  } else if (existing) {
+    // No rotate — just update rates if supplied.
+    const updateSet: Record<string, unknown> = {};
+    if (payRate !== undefined) updateSet.payRate = payRate;
+    if (billRate !== undefined) updateSet.billRate = billRate;
+    if (Object.keys(updateSet).length > 0) {
+      const [updated] = await db
+        .update(subcontractorQrTokensTable)
+        .set(updateSet)
+        .where(eq(subcontractorQrTokensTable.id, existing.id))
+        .returning();
+      row = updated!;
+    }
+  } else {
+    // First time: insert.
     const [inserted] = await db.insert(subcontractorQrTokensTable).values({
       siteId,
       token: genToken(),
       createdByAdminId: req.user!.userId,
+      payRate: payRate ?? null,
+      billRate: billRate ?? null,
     }).returning();
     row = inserted!;
   }
@@ -135,6 +176,9 @@ router.post("/admin/sites/:siteId/subcontractor-qr", requireAdmin, async (req, r
     clockUrl: buildClockUrl(req, row!.token),
     siteName: site.name,
     createdAt: row!.createdAt.toISOString(),
+    // Rates are admin-only; never sent to public clock-in endpoints.
+    payRate: row!.payRate != null ? parseFloat(String(row!.payRate)) : null,
+    billRate: row!.billRate != null ? parseFloat(String(row!.billRate)) : null,
   });
 });
 
@@ -165,13 +209,25 @@ router.get("/admin/subcontractor-entries", requireAdmin, async (req, res): Promi
       lastEditedAt: subcontractorTimeEntriesTable.lastEditedAt,
       createdAt: subcontractorTimeEntriesTable.createdAt,
       siteName: sitesTable.name,
+      // Rates from the QR token that was used at clock-in time.
+      // Admin-only context — never sent to any public endpoint.
+      qrPayRate: subcontractorQrTokensTable.payRate,
+      qrBillRate: subcontractorQrTokensTable.billRate,
     })
     .from(subcontractorTimeEntriesTable)
     .leftJoin(sitesTable, eq(subcontractorTimeEntriesTable.siteId, sitesTable.id))
+    .leftJoin(subcontractorQrTokensTable, eq(subcontractorTimeEntriesTable.qrTokenId, subcontractorQrTokensTable.id))
     .where(conditions.length > 0 ? and(...conditions) : undefined)
     .orderBy(subcontractorTimeEntriesTable.clockInAt);
 
-  res.json(rows);
+  // Coerce numeric rate columns to number | null for the JSON response.
+  const out = rows.map((r) => ({
+    ...r,
+    qrPayRate: r.qrPayRate != null ? parseFloat(String(r.qrPayRate)) : null,
+    qrBillRate: r.qrBillRate != null ? parseFloat(String(r.qrBillRate)) : null,
+  }));
+
+  res.json(out);
 });
 
 // ---------------------------------------------------------------------------
