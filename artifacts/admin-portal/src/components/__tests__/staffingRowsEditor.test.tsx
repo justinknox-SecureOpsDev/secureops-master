@@ -77,11 +77,46 @@ describe("StaffingRowsEditor", () => {
     expect((screen.getByRole("button", { name: /add position/i }) as HTMLButtonElement).disabled).toBe(true);
   });
 
-  it("shows a duplicate warning when two rows share a license level", () => {
+  it("shows a duplicate warning when two rows share a license level AND rate", () => {
     const a = { ...newStaffingRow(2, []), requiredLicenseLevel: 2 };
     const b = { ...newStaffingRow(2, []), requiredLicenseLevel: 2 };
     render(<Harness initialRows={[a, b]} />);
     expect(screen.getAllByText(/duplicate position/i).length).toBeGreaterThanOrEqual(2);
+  });
+
+  it("does NOT flag two rows with the same level but different rate cards (multi-tier)", () => {
+    const tiers: SiteRate[] = [
+      { id: "l2t1", siteId: "s1", licenseLevel: 2, rateTier: 1, payRate: "20.00", billRate: "40.00", label: null },
+      { id: "l2t2", siteId: "s1", licenseLevel: 2, rateTier: 2, payRate: "24.00", billRate: "46.00", label: "Premium" },
+    ];
+    const a = { ...newStaffingRow(2, tiers) };                                  // snapped to tier 1
+    const b = { ...a, key: "row-b", payRate: "24.00", billRate: "46.00", siteRateId: "l2t2" }; // tier 2
+    render(<Harness initialRows={[a, b]} siteRates={tiers} />);
+    expect(screen.queryByText(/duplicate position/i)).toBeNull();
+  });
+
+  it("does NOT flag two rows with the same level but different custom rates", () => {
+    const a = { ...newStaffingRow(3, []), payRate: "26.00", billRate: "48.00" };
+    const b = { ...newStaffingRow(3, []), payRate: "30.00", billRate: "55.00" };
+    render(<Harness initialRows={[a, b]} siteRates={[]} />);
+    expect(screen.queryByText(/duplicate position/i)).toBeNull();
+  });
+
+  it("Add position falls back to an unused rate tier once all levels are used", () => {
+    const tiers: SiteRate[] = [
+      ...RATES,
+      { id: "r2b", siteId: "s1", licenseLevel: 2, rateTier: 2, payRate: "24.00", billRate: "46.00", label: "Premium" },
+    ];
+    const initial = [1, 2, 3, 4].map((lvl) => ({ ...newStaffingRow(lvl, tiers) }));
+    const onRows = vi.fn();
+    render(<Harness initialRows={initial} siteRates={tiers} onRows={onRows} />);
+    const btn = screen.getByRole("button", { name: /add position/i }) as HTMLButtonElement;
+    expect(btn.disabled).toBe(false); // an unused tier (r2b) remains
+    fireEvent.click(btn);
+    const rows = onRows.mock.calls.at(-1)![0] as StaffingRow[];
+    expect(rows).toHaveLength(5);
+    expect(rows[4].siteRateId).toBe("r2b");
+    expect(rows[4].requiredLicenseLevel).toBe(2);
   });
 
   it("clamps staff count to a positive integer", () => {

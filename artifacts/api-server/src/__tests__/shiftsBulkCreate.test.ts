@@ -124,19 +124,36 @@ describe("POST /shifts/bulk-create — multi-position one-off shifts", () => {
     expect(Number(byLevel[3].payRate)).toBe(28);
   });
 
-  it("rejects duplicate license levels (400) and leaves no partial rows", async () => {
+  it("rejects two rows with the same level AND same rate (400) and leaves no partial rows", async () => {
     const title = `${TAG}-dup`;
     const res = await request(app).post("/api/shifts/bulk-create").set(authed(ctx.adminToken)).send(body({
       title,
       positions: [
-        { requiredLicenseLevel: 2, headcount: 1 },
-        { requiredLicenseLevel: 2, headcount: 2 },
+        { requiredLicenseLevel: 2, headcount: 1, payRate: "20.00", billRate: "40.00" },
+        { requiredLicenseLevel: 2, headcount: 2, payRate: "20.00", billRate: "40.00" },
       ],
     }));
     expect(res.status).toBe(400);
     expect(String(res.body.message)).toMatch(/Duplicate position/i);
     const rows = await db.select().from(shiftsTable).where(eq(shiftsTable.title, title));
     expect(rows).toHaveLength(0);
+  });
+
+  it("allows the same license level at two different rates (201) — multi-tier staffing", async () => {
+    const title = `${TAG}-multitier`;
+    const res = await request(app).post("/api/shifts/bulk-create").set(authed(ctx.adminToken)).send(body({
+      title,
+      positions: [
+        { requiredLicenseLevel: 3, headcount: 2, payRate: "26.00", billRate: "48.00" },
+        { requiredLicenseLevel: 3, headcount: 1, payRate: "30.00", billRate: "55.00" },
+      ],
+    }));
+    expect(res.status).toBe(201);
+    expect(res.body.created).toBe(2);
+    const rows = await db.select().from(shiftsTable).where(eq(shiftsTable.title, title));
+    expect(rows).toHaveLength(2);
+    expect(rows.every((r) => r.requiredLicenseLevel === 3)).toBe(true);
+    expect(new Set(rows.map((r) => Number(r.payRate)))).toEqual(new Set([26, 30]));
   });
 
   it("rejects empty positions[] (400)", async () => {
@@ -222,19 +239,41 @@ describe("POST /shifts/repeat — multi-position series", () => {
     expect(levels).toEqual(new Set([2, 4]));
   });
 
-  it("rejects duplicate positions in a repeat request (400)", async () => {
+  it("rejects same-level same-rate duplicates in a repeat request (400)", async () => {
     const res = await request(app).post("/api/shifts/repeat").set(authed(ctx.adminToken)).send({
       base: {
         title: `${TAG}-repeat-dup`,
         siteId: ctx.siteBId,
         positions: [
-          { requiredLicenseLevel: 3, headcount: 1 },
-          { requiredLicenseLevel: 3, headcount: 2 },
+          { requiredLicenseLevel: 3, headcount: 1, payRate: "28.00", billRate: "52.00" },
+          { requiredLicenseLevel: 3, headcount: 2, payRate: "28.00", billRate: "52.00" },
         ],
       },
       recurrence: { startDate, untilDate, daysOfWeek: [1], startTime: "08:00", endTime: "16:00" },
     });
     expect(res.status).toBe(400);
+  });
+
+  it("allows the same level at two different rate tiers in a repeat request (201)", async () => {
+    const title = `${TAG}-repeat-multitier`;
+    const res = await request(app).post("/api/shifts/repeat").set(authed(ctx.adminToken)).send({
+      base: {
+        title,
+        siteId: ctx.siteBId,
+        positions: [
+          { requiredLicenseLevel: 2, headcount: 1, payRate: "20.00", billRate: "40.00" },
+          { requiredLicenseLevel: 2, headcount: 1, payRate: "24.00", billRate: "46.00" },
+        ],
+      },
+      recurrence: { startDate, untilDate, daysOfWeek: [2], startTime: "09:00", endTime: "17:00" },
+    });
+    expect(res.status).toBe(201);
+    expect(res.body.positions).toBe(2);
+    const rows = await db.select().from(shiftsTable).where(eq(shiftsTable.title, title));
+    expect(rows.length).toBe(res.body.created);
+    expect(new Set(rows.map((r) => r.seriesId)).size).toBe(2); // one series per tier
+    expect(rows.every((r) => r.requiredLicenseLevel === 2)).toBe(true);
+    expect(new Set(rows.map((r) => Number(r.payRate)))).toEqual(new Set([20, 24]));
   });
 
   it("still supports the legacy single-position body shape", async () => {

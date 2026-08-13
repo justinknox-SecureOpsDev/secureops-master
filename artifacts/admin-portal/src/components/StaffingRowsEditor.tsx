@@ -73,6 +73,30 @@ function levelLabel(level: number, customLabel: string | null, rateTier?: number
   return customLabel ? `${withTier} — ${customLabel}` : withTier;
 }
 
+/**
+ * Two rows are duplicates only when they describe the SAME position at the
+ * SAME rate: equal license level AND equal rate selection (rate-card id, or
+ * for custom rows, the typed pay+bill values). Same level with different
+ * tiers is a legitimate staffing pattern (e.g. L3 Rate 1 + L3 Rate 2).
+ */
+export function staffingRowSignature(
+  r: Pick<StaffingRow, "requiredLicenseLevel" | "payRate" | "billRate" | "siteRateId">,
+): string {
+  return r.siteRateId
+    ? `${r.requiredLicenseLevel}|card:${r.siteRateId}`
+    : `${r.requiredLicenseLevel}|custom:${Number(r.payRate) || 0}|${Number(r.billRate) || 0}`;
+}
+
+export function hasDuplicateStaffingRows(rows: StaffingRow[]): boolean {
+  const seen = new Set<string>();
+  for (const r of rows) {
+    const sig = staffingRowSignature(r);
+    if (seen.has(sig)) return true;
+    seen.add(sig);
+  }
+  return false;
+}
+
 let _keyCounter = 0;
 export function newStaffingRow(level = 2, siteRates: SiteRate[] = []): StaffingRow {
   const key = `row-${++_keyCounter}`;
@@ -90,10 +114,14 @@ export function newStaffingRow(level = 2, siteRates: SiteRate[] = []): StaffingR
 export function StaffingRowsEditor({
   rows, onChange, siteRates, ratesLoading, isSiteManager, hasSite,
 }: Props) {
-  // Which license levels are already used by another row (for duplicate warning).
-  const usedLevels = useMemo(() => {
-    const counts = new Map<number, number>();
-    for (const r of rows) counts.set(r.requiredLicenseLevel, (counts.get(r.requiredLicenseLevel) ?? 0) + 1);
+  // Signature counts for duplicate detection: level + rate selection. Two
+  // rows only clash when they'd produce identical shift records.
+  const signatureCounts = useMemo(() => {
+    const counts = new Map<string, number>();
+    for (const r of rows) {
+      const sig = staffingRowSignature(r);
+      counts.set(sig, (counts.get(sig) ?? 0) + 1);
+    }
     return counts;
   }, [rows]);
 
@@ -106,10 +134,28 @@ export function StaffingRowsEditor({
   }, [rows, onChange]);
 
   const addRow = useCallback(() => {
-    // Pick the first level not already in use.
+    // Prefer the first UNUSED license level; once all levels are in play,
+    // fall back to the first unused rate-card row (a different tier of an
+    // already-used level) so multi-tier staffing keeps working.
     const usedSet = new Set(rows.map((r) => r.requiredLicenseLevel));
-    const nextLevel = LEVELS.find((l) => !usedSet.has(l.value))?.value ?? 2;
-    onChange([...rows, newStaffingRow(nextLevel, siteRates)]);
+    const nextLevel = LEVELS.find((l) => !usedSet.has(l.value))?.value;
+    if (nextLevel !== undefined) {
+      onChange([...rows, newStaffingRow(nextLevel, siteRates)]);
+      return;
+    }
+    const usedRateIds = new Set(rows.map((r) => r.siteRateId).filter(Boolean));
+    const unusedRate = siteRates.find((r) => !usedRateIds.has(r.id));
+    if (unusedRate) {
+      const row = newStaffingRow(unusedRate.licenseLevel, []);
+      onChange([...rows, {
+        ...row,
+        payRate: String(unusedRate.payRate),
+        billRate: String(unusedRate.billRate),
+        siteRateId: unusedRate.id,
+      }]);
+      return;
+    }
+    onChange([...rows, newStaffingRow(2, [])]); // custom-rate row
   }, [rows, onChange, siteRates]);
 
   // When siteRates first arrive (or the site changes), auto-fill any rows
@@ -131,7 +177,11 @@ export function StaffingRowsEditor({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [siteRates]);
 
-  const allLevelsUsed = rows.length >= LEVELS.length;
+  // Adding stops making sense once every level AND every rate-card row is in
+  // use (admins with no rate card can still express distinct custom rates,
+  // so cap generously rather than exactly).
+  const maxRows = Math.max(LEVELS.length, LEVELS.length + siteRates.length - new Set(siteRates.map((r) => r.licenseLevel)).size);
+  const addDisabled = rows.length >= (isSiteManager ? LEVELS.length : Math.max(maxRows, LEVELS.length));
 
   return (
     <div className="space-y-3">
@@ -142,7 +192,7 @@ export function StaffingRowsEditor({
           variant="outline"
           size="sm"
           onClick={addRow}
-          disabled={allLevelsUsed}
+          disabled={addDisabled}
           className="h-7 text-xs gap-1"
         >
           <Plus className="w-3 h-3" /> Add position
@@ -150,7 +200,7 @@ export function StaffingRowsEditor({
       </div>
 
       {rows.map((row, idx) => {
-        const isDuplicate = (usedLevels.get(row.requiredLicenseLevel) ?? 0) > 1;
+        const isDuplicate = (signatureCounts.get(staffingRowSignature(row)) ?? 0) > 1;
         const matchingRate = siteRates.find((r) => r.id === row.siteRateId) ?? null;
         const isCustomRate = row.siteRateId == null && hasSite && siteRates.length > 0 && !isSiteManager;
 
@@ -216,7 +266,7 @@ export function StaffingRowsEditor({
             {isDuplicate && (
               <div className="text-xs text-destructive flex items-center gap-1">
                 <AlertTriangle className="w-3 h-3 shrink-0" />
-                Duplicate position — each license level can only appear once.
+                Duplicate position — same license level and rate as another row. Pick a different rate tier or change the level.
               </div>
             )}
 

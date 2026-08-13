@@ -14,7 +14,7 @@ import { useFkOptions } from "@/lib/fk";
 import { api, ApiError } from "@/lib/api";
 import { Repeat } from "lucide-react";
 import {
-  StaffingRowsEditor, newStaffingRow, type SiteRate, type StaffingRow,
+  StaffingRowsEditor, newStaffingRow, hasDuplicateStaffingRows, type SiteRate, type StaffingRow,
 } from "@/components/StaffingRowsEditor";
 
 const DAYS: { v: number; short: string; long: string }[] = [
@@ -86,11 +86,9 @@ export function RepeatingShiftDialog({
     setStaffingRows([newStaffingRow(2)]);
   };
 
-  const hasDuplicates = (() => {
-    const counts = new Map<number, number>();
-    for (const r of staffingRows) counts.set(r.requiredLicenseLevel, (counts.get(r.requiredLicenseLevel) ?? 0) + 1);
-    return Array.from(counts.values()).some((n) => n > 1);
-  })();
+  // Duplicates = same level AND same rate selection; different rate tiers of
+  // one level are distinct positions and allowed.
+  const hasDuplicates = hasDuplicateStaffingRows(staffingRows);
 
   const handleSubmit = async () => {
     setError(null);

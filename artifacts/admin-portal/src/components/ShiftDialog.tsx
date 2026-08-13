@@ -13,7 +13,7 @@ import { api } from "@/lib/api";
 import { useFkOptions } from "@/lib/fk";
 import { AlertTriangle } from "lucide-react";
 import {
-  StaffingRowsEditor, newStaffingRow, type SiteRate, type StaffingRow,
+  StaffingRowsEditor, newStaffingRow, hasDuplicateStaffingRows, type SiteRate, type StaffingRow,
 } from "@/components/StaffingRowsEditor";
 
 type ShiftInitial = {
@@ -153,13 +153,12 @@ export function ShiftDialog({ open, onOpenChange, initial, onSaved, isSiteManage
   );
   const customRate = isEdit && siteRateId == null && siteId != null && siteRates.length > 0;
 
-  // Duplicate level check (create mode only).
-  const hasDuplicates = useMemo(() => {
-    if (isEdit) return false;
-    const counts = new Map<number, number>();
-    for (const r of staffingRows) counts.set(r.requiredLicenseLevel, (counts.get(r.requiredLicenseLevel) ?? 0) + 1);
-    return Array.from(counts.values()).some((n) => n > 1);
-  }, [staffingRows, isEdit]);
+  // Duplicate check (create mode only): same level AND same rate selection.
+  // Same level at different rate tiers is a valid staffing pattern.
+  const hasDuplicates = useMemo(
+    () => (isEdit ? false : hasDuplicateStaffingRows(staffingRows)),
+    [staffingRows, isEdit],
+  );
 
   async function submit() {
     setErr(null);

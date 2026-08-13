@@ -535,9 +535,12 @@ router.post("/shifts/bulk-create", requireAdminOrSiteManager, async (req, res): 
     return;
   }
 
-  // Validate + normalise every position row. Duplicate license levels are
-  // rejected so each row corresponds to a distinct qualifying-officer pool.
-  const seenLevels = new Set<number>();
+  // Validate + normalise every position row. Duplicates are rejected by
+  // SIGNATURE (license level + rate selection), not by level alone: the same
+  // level at two different rate tiers (e.g. L3 Rate 1 + L3 Rate 2) is a
+  // legitimate staffing pattern. Two rows only clash when they'd produce
+  // indistinguishable shift records.
+  const seenSignatures = new Set<string>();
   const validPositions: Array<{
     requiredLicenseLevel: number; headcount: number;
     payRate: string; billRate: string; siteRateId: string | null;
@@ -547,12 +550,6 @@ router.post("/shifts/bulk-create", requireAdminOrSiteManager, async (req, res): 
     if (typeof p !== "object" || p === null) continue;
     const pObj = p as Record<string, unknown>;
     const lvl = [1, 2, 3, 4].includes(Number(pObj.requiredLicenseLevel)) ? Number(pObj.requiredLicenseLevel) : 2;
-    if (seenLevels.has(lvl)) {
-      const names: Record<number, string> = { 1: "Support", 2: "L2 Unarmed", 3: "L3 Armed", 4: "L4/PPO" };
-      res.status(400).json({ error: "Bad Request", message: `Duplicate position: ${names[lvl] ?? lvl}. Each position must appear once.` });
-      return;
-    }
-    seenLevels.add(lvl);
     const hc = Math.max(1, Math.floor(Number(pObj.headcount) || 1));
     const finalPay = isSiteManager
       ? (Number(siteDefaultPay) || 0)
@@ -560,12 +557,20 @@ router.post("/shifts/bulk-create", requireAdminOrSiteManager, async (req, res): 
     const finalBill = isSiteManager
       ? (Number(siteDefaultBill) || 0)
       : (Number(pObj.billRate) || 0);
+    const rateId = isSiteManager ? null : (typeof pObj.siteRateId === "string" ? pObj.siteRateId || null : null);
+    const sig = rateId ? `${lvl}|card:${rateId}` : `${lvl}|custom:${finalPay}|${finalBill}`;
+    if (seenSignatures.has(sig)) {
+      const names: Record<number, string> = { 1: "Support", 2: "L2 Unarmed", 3: "L3 Armed", 4: "L4/PPO" };
+      res.status(400).json({ error: "Bad Request", message: `Duplicate position: ${names[lvl] ?? lvl} with the same rate appears twice. Merge the rows or pick a different rate tier.` });
+      return;
+    }
+    seenSignatures.add(sig);
     validPositions.push({
       requiredLicenseLevel: lvl,
       headcount: hc,
       payRate: String(finalPay),
       billRate: String(finalBill),
-      siteRateId: isSiteManager ? null : (typeof pObj.siteRateId === "string" ? pObj.siteRateId || null : null),
+      siteRateId: rateId,
     });
   }
 
@@ -751,23 +756,27 @@ router.post("/shifts/repeat", requireAdminOrSiteManager, async (req, res): Promi
   const positions: RepeatPosition[] = [];
 
   if (Array.isArray(rawPositions) && rawPositions.length > 0) {
-    const seenLevels = new Set<number>();
+    // Duplicates are keyed by SIGNATURE (level + rate selection), not level
+    // alone — same level at different rate tiers is a valid staffing pattern.
+    const seenSignatures = new Set<string>();
     for (const p of rawPositions as unknown[]) {
       if (typeof p !== "object" || p === null) continue;
       const pObj = p as Record<string, unknown>;
       const lvl = [1, 2, 3, 4].includes(Number(pObj.requiredLicenseLevel)) ? Number(pObj.requiredLicenseLevel) : 2;
-      if (seenLevels.has(lvl)) {
-        const names: Record<number, string> = { 1: "Support", 2: "L2 Unarmed", 3: "L3 Armed", 4: "L4/PPO" };
-        res.status(400).json({ error: "Bad Request", message: `Duplicate position: ${names[lvl] ?? lvl}. Each position must appear once.` });
-        return;
-      }
-      seenLevels.add(lvl);
       const hc = Math.max(1, Math.floor(Number(pObj.headcount) || 1));
       const pay = isSiteManager ? (Number(site.defaultPayRate) || 0) : (Number(pObj.payRate) || 0);
       const bill = isSiteManager ? (Number(site.defaultBillRate) || 0) : (Number(pObj.billRate) || 0);
+      const rateId = isSiteManager ? null : (typeof pObj.siteRateId === "string" ? pObj.siteRateId || null : null);
+      const sig = rateId ? `${lvl}|card:${rateId}` : `${lvl}|custom:${pay}|${bill}`;
+      if (seenSignatures.has(sig)) {
+        const names: Record<number, string> = { 1: "Support", 2: "L2 Unarmed", 3: "L3 Armed", 4: "L4/PPO" };
+        res.status(400).json({ error: "Bad Request", message: `Duplicate position: ${names[lvl] ?? lvl} with the same rate appears twice. Merge the rows or pick a different rate tier.` });
+        return;
+      }
+      seenSignatures.add(sig);
       positions.push({
         requiredLicenseLevel: lvl, headcount: hc, pay, bill,
-        siteRateId: isSiteManager ? null : (typeof pObj.siteRateId === "string" ? pObj.siteRateId || null : null),
+        siteRateId: rateId,
       });
     }
     if (positions.length === 0) {

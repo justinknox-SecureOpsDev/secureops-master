@@ -129,3 +129,5 @@
 - [Radio background listen policy](radio-background-listen-policy.md) — background LiveKit only on duty + only the one designated always-on channel; drops must run even when the control WS is down.
 - [Keep-alive demand must be releasable](keepalive-demand-release-visibility.md) — any set counting as background-audio demand must appear in the API the UI uses to release demand, or it loops forever.
 - [iOS/Android OTA runtime split](ios-android-ota-runtime-split.md) — iOS on 1.0.2, Android on 1.0.3; OTAs must be per-platform until iOS ships 1.0.3 binary; IOS_OTA_RUNTIME env gates auto-OTA split.
+- [Staffing-row duplicate signature](staffing-row-duplicate-signature.md) — multi-position shift rows dedupe by level+rate signature (3 sync points), NOT level alone; same level at two tiers is valid.
+- [Invoice number collision flake](invoice-number-random-collision.md) — INV-YYYYMM-<4 random digits> vs UNIQUE column: rare 23505 under full suite = collision, not regression; latent prod bug too.
