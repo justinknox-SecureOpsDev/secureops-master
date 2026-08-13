@@ -307,11 +307,57 @@ function isoDate(d: Date): string {
   return d.toISOString().slice(0, 10);
 }
 
-function generateInvoiceNumber(): string {
+/**
+ * Generate the next invoice number for the current calendar month, using a
+ * max+1 strategy within the month to avoid random collisions.
+ *
+ * The format is INV-YYYYMM-NNNN (e.g. INV-202608-0042).  Two concurrent
+ * callers can still race and read the same max, so callers must catch a
+ * 23505 on "invoices_invoice_number_unique" and retry — see the insert
+ * wrappers below.
+ */
+export async function generateInvoiceNumber(): Promise<string> {
   const now = new Date();
   const prefix = `INV-${now.getUTCFullYear()}${String(now.getUTCMonth() + 1).padStart(2, "0")}`;
-  const suffix = String(Math.floor(Math.random() * 9999)).padStart(4, "0");
-  return `${prefix}-${suffix}`;
+  // Cast to integer before max() so that 10000 > 9999 (text ordering would
+  // incorrectly put '9999' > '10000').
+  //
+  // Implementation notes:
+  //   • The substring start position is inlined via sql.raw() as a literal
+  //     integer (it is a JS constant, not user input) because PostgreSQL's
+  //     SUBSTRING(str FROM pos) form does not accept a parameterised $N for
+  //     `pos` in all driver/protocol combinations — using a placeholder here
+  //     causes Drizzle to emit $N where PG expects a literal, returning NULL.
+  //   • A CASE expression skips rows whose suffix is non-numeric without
+  //     raising a cast error; MAX() ignores NULLs automatically.
+  const suffixStart = sql.raw(String(prefix.length + 2)); // 1-indexed position after the last '-'
+  const [row] = await db
+    .select({
+      maxSuffix: sql<number | null>`max(
+        case when substring(invoice_number from ${suffixStart}) ~ '^[0-9]+$'
+             then cast(substring(invoice_number from ${suffixStart}) as integer)
+        end
+      )`,
+    })
+    .from(invoicesTable)
+    .where(sql`invoice_number like ${prefix + "-%"}`);
+  const next = (row?.maxSuffix ?? 0) + 1;
+  // Left-pad to at least 4 digits; naturally grows beyond 9999 without wrapping.
+  return `${prefix}-${String(next).padStart(4, "0")}`;
+}
+
+/** True when `err` is a unique-key violation on the invoice_number column.
+ *
+ * Drizzle wraps PG driver errors in DrizzleQueryError; the PG-specific fields
+ * (code, constraint) are on err.cause, not on err itself.  We check both
+ * levels for compatibility with any future change in Drizzle's error shape.
+ */
+function isInvoiceNumberCollision(err: unknown): boolean {
+  type PgFields = { code?: string; constraint?: string };
+  const e = err as (PgFields & { cause?: PgFields }) | null;
+  const code = e?.code ?? e?.cause?.code;
+  const constraint = e?.constraint ?? e?.cause?.constraint;
+  return code === "23505" && constraint === "invoices_invoice_number_unique";
 }
 
 export type UpsertResult =
@@ -550,44 +596,65 @@ export async function upsertWeeklyInvoice(
   }
 
   const dueDate = isoDate(addDaysUtc(new Date(), client.paymentTermsDays ?? 30));
-  try {
-    const [created] = await db
-      .insert(invoicesTable)
-      .values({
-        invoiceNumber: generateInvoiceNumber(),
-        clientId: client.id,
-        siteId: site.id,
-        periodStart: weekStartIso,
-        periodEnd,
-        clientName: client.name,
-        clientEmail: client.contactEmail,
-        clientAddress: client.billingAddress,
-        lineItems,
-        subtotal: String(subtotal),
-        taxAmount: "0",
-        totalAmount: String(total),
-        processingFeeRate: feeEnabled ? String(feeRate) : null,
-        processingFeeAmount: feeEnabled ? String(feeAmount) : null,
-        status: "draft",
-        dueDate,
-        notes: `${site.name} — week of ${weekStartIso}`,
-        autoSynced: true,
-      })
-      .returning();
-    return {
-      status: "created",
-      invoiceId: created.id,
-      totalAmount: total,
-      lineCount: lineItems.length,
-      overlappingInvoiceIds,
-      ...(unpriced > 0 ? { unpricedHours: unpriced } : {}),
-    };
-  } catch (err) {
+  // Retry up to 5 times in the rare event two concurrent inserts race on the
+  // same generated invoice number (23505 on invoices_invoice_number_unique).
+  // Each retry re-queries the max so the new candidate is always max+1 at
+  // that moment.  A 23505 on the DRAFT partial index (two concurrent approvals
+  // racing to create the same site+week draft) is handled separately below.
+  let lastInsertErr: unknown;
+  for (let attempt = 0; attempt < 5; attempt++) {
+    try {
+      const [created] = await db
+        .insert(invoicesTable)
+        .values({
+          invoiceNumber: await generateInvoiceNumber(),
+          clientId: client.id,
+          siteId: site.id,
+          periodStart: weekStartIso,
+          periodEnd,
+          clientName: client.name,
+          clientEmail: client.contactEmail,
+          clientAddress: client.billingAddress,
+          lineItems,
+          subtotal: String(subtotal),
+          taxAmount: "0",
+          totalAmount: String(total),
+          processingFeeRate: feeEnabled ? String(feeRate) : null,
+          processingFeeAmount: feeEnabled ? String(feeAmount) : null,
+          status: "draft",
+          dueDate,
+          notes: `${site.name} — week of ${weekStartIso}`,
+          autoSynced: true,
+        })
+        .returning();
+      return {
+        status: "created",
+        invoiceId: created.id,
+        totalAmount: total,
+        lineCount: lineItems.length,
+        overlappingInvoiceIds,
+        ...(unpriced > 0 ? { unpricedHours: unpriced } : {}),
+      };
+    } catch (err) {
+      if (isInvoiceNumberCollision(err)) {
+        lastInsertErr = err;
+        continue; // regenerate number and retry
+      }
+      // Not an invoice-number collision — fall through to draft-index handler.
+      lastInsertErr = err;
+      break;
+    }
+  }
+  {
+    const err = lastInsertErr;
     // Concurrent approval beat us to the insert. The partial unique
     // index `invoices_active_auto_draft_per_week_idx` guarantees only
     // one active-sync draft exists; re-select it and apply our totals
     // as an UPDATE so the latest-arriving tick wins (idempotent).
-    const code = (err as { code?: string })?.code;
+    // Drizzle wraps PG errors: code lives on err.cause, not err directly.
+    type PgFields = { code?: string };
+    const e = err as (PgFields & { cause?: PgFields }) | null;
+    const code = e?.code ?? e?.cause?.code;
     if (code !== "23505") throw err;
     const [raceWinner] = await db
       .select({ id: invoicesTable.id, taxAmount: invoicesTable.taxAmount })
@@ -775,29 +842,41 @@ export async function upsertCustomPeriodInvoice(
   const total = Math.round((subtotal + cpFeeAmount) * 100) / 100;
   const dueDate = isoDate(addDaysUtc(new Date(), client.paymentTermsDays ?? 30));
 
-  const [created] = await db
-    .insert(invoicesTable)
-    .values({
-      invoiceNumber: generateInvoiceNumber(),
-      clientId: client.id,
-      siteId: site.id,
-      periodStart: periodStartIso,
-      periodEnd: periodEndIso,
-      clientName: client.name,
-      clientEmail: client.contactEmail,
-      clientAddress: client.billingAddress,
-      lineItems,
-      subtotal: String(subtotal),
-      taxAmount: "0",
-      totalAmount: String(total),
-      processingFeeRate: cpFeeEnabled ? String(cpFeeRate) : null,
-      processingFeeAmount: cpFeeEnabled ? String(cpFeeAmount) : null,
-      status: "draft",
-      dueDate,
-      notes: `${site.name} — ${periodStartIso} to ${periodEndIso}`,
-      autoSynced: false,
-    })
-    .returning();
+  // Retry up to 5 times on invoice_number collisions (two concurrent inserts
+  // reading the same max simultaneously).
+  let created: typeof invoicesTable.$inferSelect | undefined;
+  for (let attempt = 0; attempt < 5; attempt++) {
+    try {
+      [created] = await db
+        .insert(invoicesTable)
+        .values({
+          invoiceNumber: await generateInvoiceNumber(),
+          clientId: client.id,
+          siteId: site.id,
+          periodStart: periodStartIso,
+          periodEnd: periodEndIso,
+          clientName: client.name,
+          clientEmail: client.contactEmail,
+          clientAddress: client.billingAddress,
+          lineItems,
+          subtotal: String(subtotal),
+          taxAmount: "0",
+          totalAmount: String(total),
+          processingFeeRate: cpFeeEnabled ? String(cpFeeRate) : null,
+          processingFeeAmount: cpFeeEnabled ? String(cpFeeAmount) : null,
+          status: "draft",
+          dueDate,
+          notes: `${site.name} — ${periodStartIso} to ${periodEndIso}`,
+          autoSynced: false,
+        })
+        .returning();
+      break;
+    } catch (err) {
+      if (isInvoiceNumberCollision(err) && attempt < 4) continue;
+      throw err;
+    }
+  }
+  if (!created) throw new Error("[invoice-sync] custom period insert failed after retries");
 
   return {
     status: "created",

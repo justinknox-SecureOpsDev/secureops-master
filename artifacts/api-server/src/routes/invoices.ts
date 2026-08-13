@@ -9,6 +9,10 @@ import {
   buildLineItemsFromEntries,
   invoicePeriodWindow,
 } from "../lib/invoiceSync";
+// Namespace import so vi.spyOn(invoiceSync, "generateInvoiceNumber") intercepts
+// the call from this file during tests.  Named destructuring captures the value
+// at module-load time (CJS), breaking spies.
+import * as invoiceSync from "../lib/invoiceSync";
 import { buildInvoicePdf, invoicePdfFilename } from "../lib/invoicePdf";
 import { sendEmailDetailed } from "../lib/email";
 import { brand } from "../lib/brandConfig";
@@ -50,13 +54,6 @@ async function refreshLineItemsIfStale(
     .from(invoicesTable)
     .where(eq(invoicesTable.id, invoiceId));
   return (refreshed?.lineItems as InvoiceLineItem[] | null) ?? lineItems;
-}
-
-function generateInvoiceNumber(): string {
-  const now = new Date();
-  const prefix = `INV-${now.getFullYear()}${String(now.getMonth() + 1).padStart(2, "0")}`;
-  const suffix = String(Math.floor(Math.random() * 9999)).padStart(4, "0");
-  return `${prefix}-${suffix}`;
 }
 
 async function calcTotals(
@@ -185,23 +182,39 @@ router.post("/invoices", requireAdmin, async (req, res): Promise<void> => {
     return;
   }
   const { subtotal, total, processingFeeRate, processingFeeAmount } = await calcTotals(lineItems, siteId || null);
-  const [invoice] = await db.insert(invoicesTable).values({
-    invoiceNumber: generateInvoiceNumber(),
-    clientId: clientId || null,
-    siteId: siteId || null,
-    clientName,
-    clientEmail: clientEmail || null,
-    clientAddress: clientAddress || null,
-    lineItems,
-    subtotal: String(subtotal),
-    taxAmount: "0",
-    totalAmount: String(total),
-    processingFeeRate: processingFeeRate !== null ? String(processingFeeRate) : null,
-    processingFeeAmount: processingFeeAmount !== null ? String(processingFeeAmount) : null,
-    status: "draft",
-    dueDate,
-    notes: notes || null,
-  }).returning();
+  // Retry up to 5 times on invoice_number collisions (rare concurrent inserts).
+  let invoice: typeof invoicesTable.$inferSelect | undefined;
+  for (let attempt = 0; attempt < 5; attempt++) {
+    try {
+      [invoice] = await db.insert(invoicesTable).values({
+        invoiceNumber: await invoiceSync.generateInvoiceNumber(),
+        clientId: clientId || null,
+        siteId: siteId || null,
+        clientName,
+        clientEmail: clientEmail || null,
+        clientAddress: clientAddress || null,
+        lineItems,
+        subtotal: String(subtotal),
+        taxAmount: "0",
+        totalAmount: String(total),
+        processingFeeRate: processingFeeRate !== null ? String(processingFeeRate) : null,
+        processingFeeAmount: processingFeeAmount !== null ? String(processingFeeAmount) : null,
+        status: "draft",
+        dueDate,
+        notes: notes || null,
+      }).returning();
+      break;
+    } catch (err) {
+      // Drizzle wraps PG errors: code/constraint live on err.cause, not err.
+      type PgFields = { code?: string; constraint?: string };
+      const e = err as (PgFields & { cause?: PgFields }) | null;
+      const errCode = e?.code ?? e?.cause?.code;
+      const errConstraint = e?.constraint ?? e?.cause?.constraint;
+      if (errCode === "23505" && errConstraint === "invoices_invoice_number_unique" && attempt < 4) continue;
+      throw err;
+    }
+  }
+  if (!invoice) { res.status(500).json({ error: "Internal Server Error", message: "Failed to generate a unique invoice number" }); return; }
   res.status(201).json(invoice);
 });
 
