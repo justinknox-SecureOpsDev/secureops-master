@@ -156,6 +156,38 @@ describe("POST /shifts/bulk-create — multi-position one-off shifts", () => {
     expect(new Set(rows.map((r) => Number(r.payRate)))).toEqual(new Set([26, 30]));
   });
 
+  it("phrases the duplicate rejection in position terms, not rate tiers", async () => {
+    const res = await request(app).post("/api/shifts/bulk-create").set(authed(ctx.adminToken)).send(body({
+      title: `${TAG}-dup-wording`,
+      positions: [
+        { requiredLicenseLevel: 3, headcount: 1, payRate: "28.00", billRate: "52.00" },
+        { requiredLicenseLevel: 3, headcount: 1, payRate: "28.00", billRate: "52.00" },
+      ],
+    }));
+    expect(res.status).toBe(400);
+    const msg = String(res.body.message);
+    expect(msg).toMatch(/Duplicate position/i);
+    expect(msg).toMatch(/L3 Armed/); // named by level + rates, since it's a custom rate
+    expect(msg).not.toMatch(/rate tier/i);
+  });
+
+  it("stores the position name supplied with a custom-rate row", async () => {
+    const title = `${TAG}-custom-name`;
+    const res = await request(app).post("/api/shifts/bulk-create").set(authed(ctx.adminToken)).send(body({
+      title,
+      positions: [
+        { requiredLicenseLevel: 2, headcount: 1, payRate: "22.00", billRate: "44.00", positionName: "Pop-up Gate" },
+      ],
+    }));
+    expect(res.status).toBe(201);
+    const rows = await db.select().from(shiftsTable).where(eq(shiftsTable.title, title));
+    expect(rows).toHaveLength(1);
+    expect(rows[0].positionName).toBe("Pop-up Gate");
+    // Display reads resolve to the same name when no live rate row exists.
+    const read = await request(app).get(`/api/shifts/${rows[0].id}`).set(authed(ctx.adminToken));
+    expect(read.body.positionName).toBe("Pop-up Gate");
+  });
+
   it("rejects empty positions[] (400)", async () => {
     const res = await request(app).post("/api/shifts/bulk-create").set(authed(ctx.adminToken)).send(body({ positions: [] }));
     expect(res.status).toBe(400);

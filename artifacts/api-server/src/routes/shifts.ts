@@ -8,8 +8,20 @@ import { getEffectiveLevel, effectiveLevelSql } from "../lib/eligibility";
 import { pushShiftUpsert, pushShiftDelete, pushAssignmentEvent } from "../lib/schedulerSync";
 import { stripShiftFinanceForRole } from "../lib/financeVisibility";
 import { canManageSite, getManagedSiteIds, getSiteManagerUserIds } from "../lib/siteManagerAuthz";
+import { loadSitePositionNames, levelName, withPositionNames, loadRateNames, resolvePositionName } from "../lib/positionNames";
 
 const router: IRouter = Router();
+
+/**
+ * Message for two staffing rows that would produce indistinguishable shifts.
+ * Speaks in position names when the row has one, and falls back to the license
+ * level + rate for custom (non-rate-card) rows.
+ */
+function duplicatePositionMessage(level: number, positionName: string | null): string {
+  return positionName
+    ? `Duplicate position: "${positionName}" appears twice. Merge the rows or pick a different position.`
+    : `Duplicate position: ${levelName(level)} at the same pay and bill rate appears twice. Merge the rows or pick a different position.`;
+}
 
 // Returns the offset (ms ahead of UTC) that `tz` was actually using at the
 // given UTC instant. e.g. America/Chicago in winter → -6h, in summer → -5h.
@@ -214,6 +226,10 @@ router.get("/shifts", requireStaff, async (req, res): Promise<void> => {
   const shiftIds = shifts.map((s) => s.id);
   if (shiftIds.length === 0) { res.json(shifts.map((s) => ({ ...s, assignments: [] }))); return; }
 
+  // Resolved position name per shift: the LIVE rate-card name when the rate
+  // still exists (so renames flow through), else the name captured at creation.
+  const liveRateNames = await loadRateNames(shifts.map((s) => s.siteRateId));
+
   const assignments = await db
     .select({
       id: shiftAssignmentsTable.id,
@@ -282,6 +298,7 @@ router.get("/shifts", requireStaff, async (req, res): Promise<void> => {
 
   res.json(shifts.map((s) => stripShiftFinanceForRole(role, {
     ...s,
+    positionName: resolvePositionName(s, liveRateNames),
     assignments: assignmentMap.get(s.id) ?? [],
     distanceMilesFromHome: distanceMap?.get(s.id) ?? null,
   })));
@@ -356,6 +373,13 @@ router.post("/shifts", requireAdminOrSiteManager, async (req, res): Promise<void
     ? (Number(siteDefaultBill) || 0)
     : (billRate != null ? Number(billRate) : (billableRate != null ? Number(billableRate) : 0));
 
+  // Rate-card position name captured at creation (site managers can't pick a
+  // rate card, so they never carry one).
+  const effectiveRateId = isSiteManager ? null : (siteRateId || null);
+  const resolvedPositionName = effectiveRateId
+    ? ((await loadRateNames([effectiveRateId])).get(effectiveRateId) ?? null)
+    : null;
+
   const [shift] = await db.insert(shiftsTable).values({
     title,
     siteId: siteId || null,
@@ -379,6 +403,9 @@ router.post("/shifts", requireAdminOrSiteManager, async (req, res): Promise<void
     // rates) — site managers can't pick rate cards, so never persist a
     // client-supplied one for them.
     siteRateId: isSiteManager ? null : (siteRateId || null),
+    // Snapshot of the rate card's position name at creation time; reads prefer
+    // the live name so renames flow through.
+    positionName: resolvedPositionName,
     // PPO Detail shifts carry a protection package (protection_persons rows);
     // anything else is a standard patrol/static shift. Server-side allowlist —
     // never trust an arbitrary client string.
@@ -535,15 +562,22 @@ router.post("/shifts/bulk-create", requireAdminOrSiteManager, async (req, res): 
     return;
   }
 
+  // Named positions on this site's rate card, so each shift can snapshot the
+  // position name it was created with (renames still flow through on read).
+  const sitePositionNames = siteId && !isSiteManager
+    ? await loadSitePositionNames(siteId)
+    : new Map<string, string>();
+
   // Validate + normalise every position row. Duplicates are rejected by
-  // SIGNATURE (license level + rate selection), not by level alone: the same
-  // level at two different rate tiers (e.g. L3 Rate 1 + L3 Rate 2) is a
-  // legitimate staffing pattern. Two rows only clash when they'd produce
+  // SIGNATURE (the named rate-card position, or for a custom rate the license
+  // level + pay + bill), not by level alone: two different named positions at
+  // the same level (e.g. "Floor Manager" + "Overnight Supervisor", both L2)
+  // are a legitimate staffing pattern. Two rows only clash when they'd produce
   // indistinguishable shift records.
   const seenSignatures = new Set<string>();
   const validPositions: Array<{
     requiredLicenseLevel: number; headcount: number;
-    payRate: string; billRate: string; siteRateId: string | null;
+    payRate: string; billRate: string; siteRateId: string | null; positionName: string | null;
   }> = [];
 
   for (const p of positions as unknown[]) {
@@ -558,10 +592,13 @@ router.post("/shifts/bulk-create", requireAdminOrSiteManager, async (req, res): 
       ? (Number(siteDefaultBill) || 0)
       : (Number(pObj.billRate) || 0);
     const rateId = isSiteManager ? null : (typeof pObj.siteRateId === "string" ? pObj.siteRateId || null : null);
+    // Rate-card rows take their name from the card (authoritative); a custom
+    // rate may carry a name typed by the admin.
+    const posName = (rateId ? sitePositionNames.get(rateId) : undefined)
+      ?? (typeof pObj.positionName === "string" && pObj.positionName.trim() ? pObj.positionName.trim().slice(0, 80) : null);
     const sig = rateId ? `${lvl}|card:${rateId}` : `${lvl}|custom:${finalPay}|${finalBill}`;
     if (seenSignatures.has(sig)) {
-      const names: Record<number, string> = { 1: "Support", 2: "L2 Unarmed", 3: "L3 Armed", 4: "L4/PPO" };
-      res.status(400).json({ error: "Bad Request", message: `Duplicate position: ${names[lvl] ?? lvl} with the same rate appears twice. Merge the rows or pick a different rate tier.` });
+      res.status(400).json({ error: "Bad Request", message: duplicatePositionMessage(lvl, posName) });
       return;
     }
     seenSignatures.add(sig);
@@ -571,6 +608,7 @@ router.post("/shifts/bulk-create", requireAdminOrSiteManager, async (req, res): 
       payRate: String(finalPay),
       billRate: String(finalBill),
       siteRateId: rateId,
+      positionName: posName,
     });
   }
 
@@ -601,6 +639,7 @@ router.post("/shifts/bulk-create", requireAdminOrSiteManager, async (req, res): 
       requiredLicenseLevel: p.requiredLicenseLevel,
       headcount: p.headcount,
       siteRateId: p.siteRateId,
+      positionName: p.positionName,
       shiftType: finalShiftType,
     }))).returning();
   });
@@ -752,12 +791,19 @@ router.post("/shifts/repeat", requireAdminOrSiteManager, async (req, res): Promi
   // Build the canonical list of positions. Multi-position path (new): caller
   // supplies base.positions[]. Single-position path (legacy): fall back to
   // the top-level base fields for backwards compatibility.
-  type RepeatPosition = { requiredLicenseLevel: number; headcount: number; pay: number; bill: number; siteRateId: string | null };
+  type RepeatPosition = { requiredLicenseLevel: number; headcount: number; pay: number; bill: number; siteRateId: string | null; positionName: string | null };
   const positions: RepeatPosition[] = [];
 
+  // Named positions on this site's rate card, so each shift snapshots the
+  // position name it was created with.
+  const sitePositionNames = isSiteManager
+    ? new Map<string, string>()
+    : await loadSitePositionNames(siteId);
+
   if (Array.isArray(rawPositions) && rawPositions.length > 0) {
-    // Duplicates are keyed by SIGNATURE (level + rate selection), not level
-    // alone — same level at different rate tiers is a valid staffing pattern.
+    // Duplicates are keyed by SIGNATURE (the named rate-card position, or for a
+    // custom rate the level + pay + bill), not level alone — two different
+    // named positions at the same level are a valid staffing pattern.
     const seenSignatures = new Set<string>();
     for (const p of rawPositions as unknown[]) {
       if (typeof p !== "object" || p === null) continue;
@@ -767,16 +813,18 @@ router.post("/shifts/repeat", requireAdminOrSiteManager, async (req, res): Promi
       const pay = isSiteManager ? (Number(site.defaultPayRate) || 0) : (Number(pObj.payRate) || 0);
       const bill = isSiteManager ? (Number(site.defaultBillRate) || 0) : (Number(pObj.billRate) || 0);
       const rateId = isSiteManager ? null : (typeof pObj.siteRateId === "string" ? pObj.siteRateId || null : null);
+      const posName = (rateId ? sitePositionNames.get(rateId) : undefined)
+        ?? (typeof pObj.positionName === "string" && pObj.positionName.trim() ? pObj.positionName.trim().slice(0, 80) : null);
       const sig = rateId ? `${lvl}|card:${rateId}` : `${lvl}|custom:${pay}|${bill}`;
       if (seenSignatures.has(sig)) {
-        const names: Record<number, string> = { 1: "Support", 2: "L2 Unarmed", 3: "L3 Armed", 4: "L4/PPO" };
-        res.status(400).json({ error: "Bad Request", message: `Duplicate position: ${names[lvl] ?? lvl} with the same rate appears twice. Merge the rows or pick a different rate tier.` });
+        res.status(400).json({ error: "Bad Request", message: duplicatePositionMessage(lvl, posName) });
         return;
       }
       seenSignatures.add(sig);
       positions.push({
         requiredLicenseLevel: lvl, headcount: hc, pay, bill,
         siteRateId: rateId,
+        positionName: posName,
       });
     }
     if (positions.length === 0) {
@@ -789,7 +837,11 @@ router.post("/shifts/repeat", requireAdminOrSiteManager, async (req, res): Promi
     const hc = Math.max(1, Number(headcount) || 1);
     const pay = isSiteManager ? (Number(site.defaultPayRate) || 0) : (Number(payRate) || 0);
     const bill = isSiteManager ? (Number(site.defaultBillRate) || 0) : (Number(billRate) || 0);
-    positions.push({ requiredLicenseLevel: lvl, headcount: hc, pay, bill, siteRateId: siteRateId || null });
+    const rateId = siteRateId || null;
+    positions.push({
+      requiredLicenseLevel: lvl, headcount: hc, pay, bill, siteRateId: rateId,
+      positionName: (rateId ? sitePositionNames.get(rateId) : undefined) ?? null,
+    });
   }
 
   // Cap series length to prevent runaway expansion (~1 year of daily shifts).
@@ -886,6 +938,7 @@ router.post("/shifts/repeat", requireAdminOrSiteManager, async (req, res): Promi
       requiredLicenseLevel: pos.requiredLicenseLevel,
       headcount: pos.headcount,
       siteRateId: pos.siteRateId,
+      positionName: pos.positionName,
     }));
   });
 
@@ -1154,7 +1207,8 @@ router.get("/shifts/:id", requireStaff, async (req, res): Promise<void> => {
     .leftJoin(usersTable, eq(shiftAssignmentsTable.employeeId, usersTable.id))
     .where(eq(shiftAssignmentsTable.shiftId, id));
 
-  res.json(stripShiftFinanceForRole(req.user!.role, { ...shift, assignments }));
+  const [withName] = await withPositionNames([shift]);
+  res.json(stripShiftFinanceForRole(req.user!.role, { ...withName, assignments }));
 });
 
 router.put("/shifts/:id", requireAdminOrSiteManager, async (req, res): Promise<void> => {
@@ -1223,7 +1277,14 @@ router.put("/shifts/:id", requireAdminOrSiteManager, async (req, res): Promise<v
   // Explicit null clears the FK (admin selected "Custom" rate); undefined leaves it alone.
   // siteRateId points at a `site_rates` card that carries pay/bill rates, so it is
   // finance metadata — site managers must never set it (parity with the rate guard above).
-  if (!isSiteManager && siteRateId !== undefined) updates.siteRateId = siteRateId || null;
+  if (!isSiteManager && siteRateId !== undefined) {
+    updates.siteRateId = siteRateId || null;
+    // Re-snapshot the position name so a rate swap doesn't leave the old name
+    // behind (clearing the rate clears the name).
+    updates.positionName = siteRateId
+      ? ((await loadRateNames([siteRateId])).get(siteRateId) ?? null)
+      : null;
+  }
   // Allowlisted shift-type toggle (standard ↔ ppo_detail); anything else ignored.
   if (shiftType === "standard" || shiftType === "ppo_detail") updates.shiftType = shiftType;
 
@@ -1237,6 +1298,7 @@ router.put("/shifts/:id", requireAdminOrSiteManager, async (req, res): Promise<v
     updates.billRate = String(Number(destDefaultBill) || 0);
     updates.billableRate = String(Number(destDefaultBill) || 0);
     updates.siteRateId = null;
+    updates.positionName = null;
   }
 
   // Always reset syncSource to 'local' on admin edits so that changes to

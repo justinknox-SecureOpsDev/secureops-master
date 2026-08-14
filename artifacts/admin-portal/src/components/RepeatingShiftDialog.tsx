@@ -14,7 +14,8 @@ import { useFkOptions } from "@/lib/fk";
 import { api, ApiError } from "@/lib/api";
 import { Repeat } from "lucide-react";
 import {
-  StaffingRowsEditor, newStaffingRow, hasDuplicateStaffingRows, type SiteRate, type StaffingRow,
+  StaffingRowsEditor, newStaffingRow, hasDuplicateStaffingRows, duplicateStaffingMessage,
+  type SiteRate, type StaffingRow,
 } from "@/components/StaffingRowsEditor";
 
 const DAYS: { v: number; short: string; long: string }[] = [
@@ -86,8 +87,9 @@ export function RepeatingShiftDialog({
     setStaffingRows([newStaffingRow(2)]);
   };
 
-  // Duplicates = same level AND same rate selection; different rate tiers of
-  // one level are distinct positions and allowed.
+  // Duplicates = the same named position twice (or, for custom rates, the same
+  // level at identical pay+bill); two different named positions at one level
+  // are distinct and allowed.
   const hasDuplicates = hasDuplicateStaffingRows(staffingRows);
 
   const handleSubmit = async () => {
@@ -96,7 +98,7 @@ export function RepeatingShiftDialog({
     if (!siteId) { setError("Site is required"); return; }
     if (days.length === 0) { setError("Pick at least one day of the week"); return; }
     if (untilDate < startDate) { setError("Until date must be on or after the start date"); return; }
-    if (hasDuplicates) { setError("Remove duplicate positions before saving"); return; }
+    if (hasDuplicates) { setError(duplicateStaffingMessage(staffingRows, siteRates)); return; }
     setSubmitting(true);
     try {
       const positions = staffingRows.map((r) => ({

@@ -1513,6 +1513,12 @@ export const GetShiftsResponseItem = zod.object({
     .describe(
       "Minimum license level required (1=support\/no licence, 2=unarmed, 3=armed, 4=PPO)",
     ),
+  positionName: zod
+    .string()
+    .nullish()
+    .describe(
+      "Name of the site rate-card position this shift was posted for (e.g. 'Floor Manager'). Resolved from the live rate card so renames flow through, falling back to the name captured when the shift was created. Null for shifts with no named position. Display only — eligibility always comes from requiredLicenseLevel.",
+    ),
   headcount: zod
     .number()
     .describe("Total number of officers needed for this shift"),
@@ -1618,6 +1624,12 @@ export const GetShiftResponse = zod.object({
     .describe(
       "Minimum license level required (1=support\/no licence, 2=unarmed, 3=armed, 4=PPO)",
     ),
+  positionName: zod
+    .string()
+    .nullish()
+    .describe(
+      "Name of the site rate-card position this shift was posted for (e.g. 'Floor Manager'). Resolved from the live rate card so renames flow through, falling back to the name captured when the shift was created. Null for shifts with no named position. Display only — eligibility always comes from requiredLicenseLevel.",
+    ),
   headcount: zod
     .number()
     .describe("Total number of officers needed for this shift"),
@@ -1704,6 +1716,12 @@ export const UpdateShiftResponse = zod.object({
     .union([zod.literal(1), zod.literal(2), zod.literal(3), zod.literal(4)])
     .describe(
       "Minimum license level required (1=support\/no licence, 2=unarmed, 3=armed, 4=PPO)",
+    ),
+  positionName: zod
+    .string()
+    .nullish()
+    .describe(
+      "Name of the site rate-card position this shift was posted for (e.g. 'Floor Manager'). Resolved from the live rate card so renames flow through, falling back to the name captured when the shift was created. Null for shifts with no named position. Display only — eligibility always comes from requiredLicenseLevel.",
     ),
   headcount: zod
     .number()
@@ -3220,6 +3238,12 @@ export const GetAdminDashboardSummaryResponse = zod.object({
         .describe(
           "Minimum license level required (1=support\/no licence, 2=unarmed, 3=armed, 4=PPO)",
         ),
+      positionName: zod
+        .string()
+        .nullish()
+        .describe(
+          "Name of the site rate-card position this shift was posted for (e.g. 'Floor Manager'). Resolved from the live rate card so renames flow through, falling back to the name captured when the shift was created. Null for shifts with no named position. Display only — eligibility always comes from requiredLicenseLevel.",
+        ),
       headcount: zod
         .number()
         .describe("Total number of officers needed for this shift"),
@@ -3296,6 +3320,12 @@ export const GetEmployeeDashboardSummaryResponse = zod.object({
         .union([zod.literal(1), zod.literal(2), zod.literal(3), zod.literal(4)])
         .describe(
           "Minimum license level required (1=support\/no licence, 2=unarmed, 3=armed, 4=PPO)",
+        ),
+      positionName: zod
+        .string()
+        .nullish()
+        .describe(
+          "Name of the site rate-card position this shift was posted for (e.g. 'Floor Manager'). Resolved from the live rate card so renames flow through, falling back to the name captured when the shift was created. Null for shifts with no named position. Display only — eligibility always comes from requiredLicenseLevel.",
         ),
       headcount: zod
         .number()
@@ -3423,6 +3453,12 @@ export const GetEmployeeDashboardSummaryResponse = zod.object({
         .union([zod.literal(1), zod.literal(2), zod.literal(3), zod.literal(4)])
         .describe(
           "Minimum license level required (1=support\/no licence, 2=unarmed, 3=armed, 4=PPO)",
+        ),
+      positionName: zod
+        .string()
+        .nullish()
+        .describe(
+          "Name of the site rate-card position this shift was posted for (e.g. 'Floor Manager'). Resolved from the live rate card so renames flow through, falling back to the name captured when the shift was created. Null for shifts with no named position. Display only — eligibility always comes from requiredLicenseLevel.",
         ),
       headcount: zod
         .number()

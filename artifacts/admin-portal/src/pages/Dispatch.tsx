@@ -80,6 +80,8 @@ type OpenShift = {
   filled: number;
   requiredLicenseLevel: number;
   payRate: string | null;
+  /** Resolved rate-card position name (live name, else the captured one). */
+  positionName?: string | null;
 };
 
 type Incident = {
@@ -1653,6 +1655,7 @@ function OpenShiftsPanel({
                           ) : (
                             <span>{shift.filled} / {shift.headcount} filled</span>
                           )}
+                          {shift.positionName && <span className="font-medium">· {shift.positionName}</span>}
                           <span>· L{shift.requiredLicenseLevel}+</span>
                           {shift.payRate && <span>· ${shift.payRate}/hr</span>}
                         </div>

@@ -2,19 +2,30 @@
  * StaffingRowsEditor — multi-position staffing rows used by both the New
  * Shift and Repeating Shift dialogs. Each row maps to one shift record.
  *
- * Pins: add/remove rows, duplicate-position warning, headcount clamping,
- * site-manager rate-blindness (no rate UI), and rate-card auto-fill.
+ * Pins the named-position behaviour: positions are picked BY NAME from the
+ * site's rate card, a site can staff several positions at the SAME license
+ * level (no per-level cap, no "Rate N" tier picker), duplicates are only
+ * genuinely identical positions, and the warning names the position.
  */
-import { describe, expect, it, vi } from "vitest";
+import { beforeAll, describe, expect, it, vi } from "vitest";
 import { render, screen, fireEvent } from "@testing-library/react";
 import { useState } from "react";
 import {
-  StaffingRowsEditor, newStaffingRow, type SiteRate, type StaffingRow,
+  StaffingRowsEditor, newStaffingRow, duplicateStaffingMessage, positionOptionLabel,
+  rateName, type SiteRate, type StaffingRow,
 } from "../StaffingRowsEditor";
 
 const RATES: SiteRate[] = [
-  { id: "r2", siteId: "s1", licenseLevel: 2, rateTier: 1, payRate: "20.00", billRate: "40.00", label: null },
-  { id: "r3", siteId: "s1", licenseLevel: 3, rateTier: 1, payRate: "28.00", billRate: "52.00", label: "Armed" },
+  { id: "r2", siteId: "s1", licenseLevel: 2, rateTier: 1, name: "Floor Guard", payRate: "20.00", billRate: "40.00", label: null },
+  { id: "r3", siteId: "s1", licenseLevel: 3, rateTier: 1, name: "Armed Post", payRate: "28.00", billRate: "52.00", label: "Armed" },
+];
+
+/** Three named positions at ONE license level — the shape that used to be capped. */
+const THREE_L2: SiteRate[] = [
+  { id: "a", siteId: "s1", licenseLevel: 2, rateTier: 1, name: "Tier 1", payRate: "20.00", billRate: "40.00", label: null },
+  { id: "b", siteId: "s1", licenseLevel: 2, rateTier: 2, name: "Floor Manager", payRate: "24.00", billRate: "46.00", label: null },
+  { id: "c", siteId: "s1", licenseLevel: 2, rateTier: 3, name: "Overnight Supervisor", payRate: "27.00", billRate: "50.00", label: null },
+  { id: "d", siteId: "s1", licenseLevel: 2, rateTier: 4, name: "Event Lead", payRate: "30.00", billRate: "56.00", label: null },
 ];
 
 function Harness({
@@ -43,6 +54,28 @@ function Harness({
   );
 }
 
+/** Open a Radix Select via keyboard (jsdom lacks the pointer-capture APIs). */
+async function chooseOption(trigger: HTMLElement, optionName: RegExp | string) {
+  fireEvent.keyDown(trigger, { key: "ArrowDown" });
+  const option = await screen.findByRole("option", { name: optionName });
+  fireEvent.click(option);
+}
+
+beforeAll(() => {
+  const proto = window.HTMLElement.prototype as unknown as Record<string, unknown>;
+  proto.hasPointerCapture = proto.hasPointerCapture ?? (() => false);
+  proto.setPointerCapture = proto.setPointerCapture ?? (() => {});
+  proto.releasePointerCapture = proto.releasePointerCapture ?? (() => {});
+  proto.scrollIntoView = proto.scrollIntoView ?? (() => {});
+  if (!("ResizeObserver" in globalThis)) {
+    (globalThis as unknown as { ResizeObserver: unknown }).ResizeObserver = class {
+      observe() {}
+      unobserve() {}
+      disconnect() {}
+    };
+  }
+});
+
 describe("StaffingRowsEditor", () => {
   it("renders one row by default with no remove button", () => {
     render(<Harness />);
@@ -50,15 +83,15 @@ describe("StaffingRowsEditor", () => {
     expect(screen.queryByLabelText("Remove position")).toBeNull();
   });
 
-  it("adds a row with the next unused license level", () => {
+  it("adds a row carrying the next unused NAMED position", () => {
     const onRows = vi.fn();
     render(<Harness onRows={onRows} />);
     fireEvent.click(screen.getByRole("button", { name: /add position/i }));
     const rows = onRows.mock.calls.at(-1)![0] as StaffingRow[];
     expect(rows).toHaveLength(2);
-    // First row is level 2, so the new row picks level 1 (first unused).
-    expect(rows[1].requiredLicenseLevel).toBe(1);
-    // Remove buttons appear once there are 2+ rows.
+    // First row snapped to "Floor Guard" (r2), so the next unused card is r3.
+    expect(rows[1].siteRateId).toBe("r3");
+    expect(rows[1].requiredLicenseLevel).toBe(3);
     expect(screen.getAllByLabelText("Remove position")).toHaveLength(2);
   });
 
@@ -71,27 +104,54 @@ describe("StaffingRowsEditor", () => {
     expect(rows).toHaveLength(1);
   });
 
-  it("disables Add position when all 4 levels are used", () => {
+  it("staffs FOUR named positions at the same license level — no per-level cap", () => {
+    const onRows = vi.fn();
+    render(<Harness siteRates={THREE_L2} onRows={onRows} />);
+    const add = screen.getByRole("button", { name: /add position/i }) as HTMLButtonElement;
+    for (let i = 0; i < 3; i++) {
+      expect(add.disabled).toBe(false);
+      fireEvent.click(add);
+    }
+    const rows = onRows.mock.calls.at(-1)![0] as StaffingRow[];
+    expect(rows).toHaveLength(4);
+    expect(rows.map((r) => r.siteRateId)).toEqual(["a", "b", "c", "d"]);
+    expect(rows.every((r) => r.requiredLicenseLevel === 2)).toBe(true);
+    // Every row is a distinct position ⟹ no duplicate warning.
+    expect(screen.queryByText(/duplicate position/i)).toBeNull();
+  });
+
+  it("keeps Add position enabled for admins even past the four license levels", () => {
     const initial = [1, 2, 3, 4].map((lvl) => ({ ...newStaffingRow(lvl, []), requiredLicenseLevel: lvl }));
     render(<Harness initialRows={initial} />);
+    expect((screen.getByRole("button", { name: /add position/i }) as HTMLButtonElement).disabled).toBe(false);
+  });
+
+  it("caps site managers at one row per license level (they pick levels, not positions)", () => {
+    const initial = [1, 2, 3, 4].map((lvl) => ({ ...newStaffingRow(lvl, []), requiredLicenseLevel: lvl }));
+    render(<Harness initialRows={initial} isSiteManager />);
     expect((screen.getByRole("button", { name: /add position/i }) as HTMLButtonElement).disabled).toBe(true);
   });
 
-  it("shows a duplicate warning when two rows share a license level AND rate", () => {
+  it("flags two rows on the SAME named position and names it in the warning", () => {
+    const a = { ...newStaffingRow(2, RATES) };            // Floor Guard
+    const b = { ...a, key: "row-dup" };                   // same position again
+    render(<Harness initialRows={[a, b]} />);
+    const warnings = screen.getAllByText(/duplicate position/i);
+    expect(warnings.length).toBeGreaterThanOrEqual(2);
+    expect(warnings[0].textContent).toContain("Floor Guard");
+  });
+
+  it("flags two custom rows at the same level with identical pay and bill", () => {
     const a = { ...newStaffingRow(2, []), requiredLicenseLevel: 2 };
     const b = { ...newStaffingRow(2, []), requiredLicenseLevel: 2 };
-    render(<Harness initialRows={[a, b]} />);
+    render(<Harness initialRows={[a, b]} siteRates={[]} />);
     expect(screen.getAllByText(/duplicate position/i).length).toBeGreaterThanOrEqual(2);
   });
 
-  it("does NOT flag two rows with the same level but different rate cards (multi-tier)", () => {
-    const tiers: SiteRate[] = [
-      { id: "l2t1", siteId: "s1", licenseLevel: 2, rateTier: 1, payRate: "20.00", billRate: "40.00", label: null },
-      { id: "l2t2", siteId: "s1", licenseLevel: 2, rateTier: 2, payRate: "24.00", billRate: "46.00", label: "Premium" },
-    ];
-    const a = { ...newStaffingRow(2, tiers) };                                  // snapped to tier 1
-    const b = { ...a, key: "row-b", payRate: "24.00", billRate: "46.00", siteRateId: "l2t2" }; // tier 2
-    render(<Harness initialRows={[a, b]} siteRates={tiers} />);
+  it("does NOT flag two DIFFERENT named positions at the same license level", () => {
+    const a = { ...newStaffingRow(2, THREE_L2) };                                        // "Tier 1"
+    const b = { ...a, key: "row-b", payRate: "24.00", billRate: "46.00", siteRateId: "b" }; // "Floor Manager"
+    render(<Harness initialRows={[a, b]} siteRates={THREE_L2} />);
     expect(screen.queryByText(/duplicate position/i)).toBeNull();
   });
 
@@ -100,23 +160,6 @@ describe("StaffingRowsEditor", () => {
     const b = { ...newStaffingRow(3, []), payRate: "30.00", billRate: "55.00" };
     render(<Harness initialRows={[a, b]} siteRates={[]} />);
     expect(screen.queryByText(/duplicate position/i)).toBeNull();
-  });
-
-  it("Add position falls back to an unused rate tier once all levels are used", () => {
-    const tiers: SiteRate[] = [
-      ...RATES,
-      { id: "r2b", siteId: "s1", licenseLevel: 2, rateTier: 2, payRate: "24.00", billRate: "46.00", label: "Premium" },
-    ];
-    const initial = [1, 2, 3, 4].map((lvl) => ({ ...newStaffingRow(lvl, tiers) }));
-    const onRows = vi.fn();
-    render(<Harness initialRows={initial} siteRates={tiers} onRows={onRows} />);
-    const btn = screen.getByRole("button", { name: /add position/i }) as HTMLButtonElement;
-    expect(btn.disabled).toBe(false); // an unused tier (r2b) remains
-    fireEvent.click(btn);
-    const rows = onRows.mock.calls.at(-1)![0] as StaffingRow[];
-    expect(rows).toHaveLength(5);
-    expect(rows[4].siteRateId).toBe("r2b");
-    expect(rows[4].requiredLicenseLevel).toBe(2);
   });
 
   it("clamps staff count to a positive integer", () => {
@@ -131,17 +174,17 @@ describe("StaffingRowsEditor", () => {
     expect(rows[0].headcount).toBe(3);
   });
 
-  it("hides all rate UI for site managers", () => {
+  it("hides all rate UI for site managers and falls back to a license-level picker", () => {
     render(<Harness isSiteManager />);
-    expect(screen.queryByText(/rate card/i)).toBeNull();
     expect(screen.queryByText(/pay \(\$\/hr\)/i)).toBeNull();
+    expect(screen.queryByText(/^Position$/)).toBeNull();
+    expect(screen.getByText(/license level/i)).toBeTruthy();
   });
 
-  it("shows rate card cards for admins and snaps rates when one is clicked", () => {
+  it("picking a position by name pulls its license level and rates through", async () => {
     const onRows = vi.fn();
     render(<Harness onRows={onRows} />);
-    // Click the L3 rate card button.
-    fireEvent.click(screen.getByText(/L3 Armed · Rate 1 — Armed/i));
+    await chooseOption(screen.getByRole("combobox"), /Armed Post/i);
     const rows = onRows.mock.calls.at(-1)![0] as StaffingRow[];
     expect(rows[0].siteRateId).toBe("r3");
     expect(rows[0].requiredLicenseLevel).toBe(3);
@@ -149,7 +192,7 @@ describe("StaffingRowsEditor", () => {
     expect(Number(rows[0].billRate)).toBe(52);
   });
 
-  it("clears the rate-card link when a rate is manually edited (custom)", () => {
+  it("clears the position link when a rate is manually edited (custom)", () => {
     const onRows = vi.fn();
     const row = { ...newStaffingRow(2, RATES) }; // snapped to r2
     render(<Harness initialRows={[row]} onRows={onRows} />);
@@ -165,5 +208,32 @@ describe("StaffingRowsEditor", () => {
     expect(row.siteRateId).toBe("r3");
     expect(row.payRate).toBe("28.00");
     expect(row.headcount).toBe(1);
+  });
+});
+
+describe("position naming helpers", () => {
+  it("falls back to the internal slot number for legacy unnamed rates", () => {
+    expect(rateName({ name: null, rateTier: 2 })).toBe("Rate 2");
+    expect(rateName({ name: "  ", rateTier: 1 })).toBe("Rate 1");
+    expect(rateName({ name: "Floor Manager", rateTier: 3 })).toBe("Floor Manager");
+  });
+
+  it("labels an option by name first, then license level", () => {
+    expect(positionOptionLabel(RATES[0])).toBe("Floor Guard — L2 Unarmed");
+    expect(positionOptionLabel(RATES[1])).toBe("Armed Post — L3 Armed · Armed");
+  });
+
+  it("names the offending position in the duplicate message", () => {
+    const a = { ...newStaffingRow(2, RATES) };
+    const dup = duplicateStaffingMessage([a, { ...a, key: "x" }], RATES);
+    expect(dup).toContain("Floor Guard");
+    expect(dup).not.toMatch(/rate tier/i);
+  });
+
+  it("describes custom duplicates by level and rates, not tiers", () => {
+    const a = { ...newStaffingRow(3, []), payRate: "26", billRate: "48" };
+    const dup = duplicateStaffingMessage([a, { ...a, key: "x" }], []);
+    expect(dup).toMatch(/L3 Armed/);
+    expect(dup).not.toMatch(/rate tier/i);
   });
 });

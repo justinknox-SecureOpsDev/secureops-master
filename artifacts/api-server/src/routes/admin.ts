@@ -53,6 +53,7 @@ import { disconnectUser } from "../lib/wsManager";
 import { writeEmployeeFieldChanges } from "../lib/employeeChangeLog";
 import { preparePreUpdateBody as prepareSitePreUpdate, maybeAutoGeocode as maybeAutoGeocodeSite } from "../lib/siteGeocode";
 import { normalizePhoneToE164 } from "../lib/phone";
+import { rateDisplayName, levelName } from "../lib/positionNames";
 import { adminEditBreaksAutoSync, resyncSiteAutoSyncedDrafts, upsertWeeklyInvoiceForTimeEntry, weekStartIsoBusiness } from "../lib/invoiceSync";
 import type { TimeEntry } from "@workspace/db";
 import { buildTimeEntryAuditMetadata, timeEntrySnapshot } from "../lib/timeEntryAudit";
@@ -1971,14 +1972,19 @@ router.post("/admin/users/bulk-invite", requireAdmin, async (req, res): Promise<
 
 // ============================================================ SITE RATE CARDS
 //
-// Per-site pay+bill rate card keyed by license level (L2 unarmed / L3 armed /
-// L4 PPO) + rate tier (Rate 1 / Rate 2 / Rate 3 within each level). Shift
-// create/edit pulls these into the form so each shift's pay and bill amounts
-// reflect the site + position + tier combo, with per-shift override still
+// Per-site pay+bill rate card. Each row is a NAMED POSITION ("Tier 1",
+// "Floor Manager", "Overnight Supervisor") pinned to a license level, with its
+// own pay and bill rate. A level may carry as many named positions as the site
+// needs. Shift create/edit pulls these into the form so each shift's pay and
+// bill amounts reflect the chosen position, with per-shift override still
 // available. Admin-only — these are commercial rates and exposing them to
 // officers would leak each site's margin.
+//
+// `rateTier` is an internal slot number, assigned automatically (max+1 within
+// the level) so the historical (siteId, licenseLevel, rateTier) unique
+// constraint stays satisfied; admins never pick it.
 
-// GET /admin/sites/:id/rates — list rate card rows for a site
+// GET /admin/sites/:id/rates — list rate card rows (named positions) for a site
 router.get("/admin/sites/:id/rates", requireAdmin, async (req, res): Promise<void> => {
   const siteId = req.params.id as string;
   const rows = await db
@@ -1989,27 +1995,34 @@ router.get("/admin/sites/:id/rates", requireAdmin, async (req, res): Promise<voi
   res.json(rows);
 });
 
-// PUT /admin/sites/:id/rates — upsert a row by (siteId, licenseLevel, rateTier).
-// Body: { licenseLevel: 1|2|3|4, rateTier?: 1|2|3 (default 1),
+function parseRateMoney(payRate: unknown, billRate: unknown): { pay: number; bill: number } | null {
+  const pay = Number(payRate);
+  const bill = Number(billRate);
+  if (!Number.isFinite(pay) || pay < 0 || !Number.isFinite(bill) || bill < 0) return null;
+  return { pay, bill };
+}
+
+// POST/PUT /admin/sites/:id/rates — create a new named position on the card.
+// Body: { name: string, licenseLevel: 1|2|3|4,
 //         payRate: number|string, billRate: number|string, label?: string }
-router.put("/admin/sites/:id/rates", requireAdmin, async (req, res): Promise<void> => {
+// PUT is kept as an alias of POST for older clients; it no longer upserts a
+// numbered slot — updating an existing rate goes through PUT /admin/site-rates/:id
+// so an edit can never silently overwrite a different position.
+const createSiteRate = async (req: Request, res: Response): Promise<void> => {
   const siteId = req.params.id as string;
-  const { licenseLevel, rateTier, payRate, billRate, label } = req.body ?? {};
+  const { name, licenseLevel, payRate, billRate, label } = req.body ?? {};
   const lvl = Number(licenseLevel);
   if (![1, 2, 3, 4].includes(lvl)) {
     res.status(400).json({ error: "Bad Request", message: "licenseLevel must be 1, 2, 3, or 4" });
     return;
   }
-  // rateTier is optional for backwards compatibility — older clients that
-  // don't send it keep upserting the level's Rate 1 row.
-  const tier = rateTier === undefined || rateTier === null ? 1 : Number(rateTier);
-  if (![1, 2, 3].includes(tier)) {
-    res.status(400).json({ error: "Bad Request", message: "rateTier must be 1, 2, or 3" });
+  const cleanName = typeof name === "string" ? name.trim().slice(0, 80) : "";
+  if (!cleanName) {
+    res.status(400).json({ error: "Bad Request", message: "Give this position a name (e.g. \"Tier 1\" or \"Floor Manager\")." });
     return;
   }
-  const pay = Number(payRate);
-  const bill = Number(billRate);
-  if (!Number.isFinite(pay) || pay < 0 || !Number.isFinite(bill) || bill < 0) {
+  const money = parseRateMoney(payRate, billRate);
+  if (!money) {
     res.status(400).json({ error: "Bad Request", message: "payRate and billRate must be non-negative numbers" });
     return;
   }
@@ -2017,14 +2030,99 @@ router.put("/admin/sites/:id/rates", requireAdmin, async (req, res): Promise<voi
   if (!site) { res.status(404).json({ error: "Not Found", message: "Site not found" }); return; }
   const cleanLabel = typeof label === "string" && label.trim() ? label.trim().slice(0, 80) : null;
 
-  const [row] = await db
-    .insert(siteRatesTable)
-    .values({ siteId, licenseLevel: lvl, rateTier: tier, payRate: String(pay), billRate: String(bill), label: cleanLabel })
-    .onConflictDoUpdate({
-      target: [siteRatesTable.siteId, siteRatesTable.licenseLevel, siteRatesTable.rateTier],
-      set: { payRate: String(pay), billRate: String(bill), label: cleanLabel, updatedAt: new Date() },
-    })
-    .returning();
+  const siblings = await db
+    .select({ id: siteRatesTable.id, name: siteRatesTable.name, rateTier: siteRatesTable.rateTier })
+    .from(siteRatesTable)
+    .where(and(eq(siteRatesTable.siteId, siteId), eq(siteRatesTable.licenseLevel, lvl)));
+  if (siblings.some((r) => rateDisplayName(r).toLowerCase() === cleanName.toLowerCase())) {
+    res.status(400).json({
+      error: "Bad Request",
+      message: `"${cleanName}" is already a position at ${levelName(lvl)} for this site. Pick a different name.`,
+    });
+    return;
+  }
+
+  // Internal slot number: next free within this level. Retry once on the
+  // unique-constraint race with a concurrent create at the same level.
+  let row;
+  for (let attempt = 0; attempt < 3 && !row; attempt++) {
+    const [{ maxTier }] = await db
+      .select({ maxTier: sql<number>`coalesce(max(${siteRatesTable.rateTier}), 0)::int` })
+      .from(siteRatesTable)
+      .where(and(eq(siteRatesTable.siteId, siteId), eq(siteRatesTable.licenseLevel, lvl)));
+    try {
+      [row] = await db
+        .insert(siteRatesTable)
+        .values({
+          siteId, licenseLevel: lvl, name: cleanName, rateTier: (maxTier ?? 0) + 1,
+          payRate: String(money.pay), billRate: String(money.bill), label: cleanLabel,
+        })
+        .returning();
+    } catch (err) {
+      const code = (err as { code?: string })?.code;
+      if (code !== "23505" || attempt === 2) throw err;
+    }
+  }
+  // Always a creation now (the PUT alias no longer upserts a numbered slot).
+  res.status(201).json(row);
+};
+
+router.post("/admin/sites/:id/rates", requireAdmin, createSiteRate);
+router.put("/admin/sites/:id/rates", requireAdmin, createSiteRate);
+
+// PUT /admin/site-rates/:id — update ONE existing rate in place (name, pay,
+// bill). Targets the row by id so an edit never touches a different position.
+// License level is fixed at create time (shifts already reference this row).
+router.put("/admin/site-rates/:id", requireAdmin, async (req, res): Promise<void> => {
+  const id = req.params.id as string;
+  const { name, payRate, billRate, label } = req.body ?? {};
+
+  const [existing] = await db.select().from(siteRatesTable).where(eq(siteRatesTable.id, id)).limit(1);
+  if (!existing) { res.status(404).json({ error: "Not Found", message: "Rate not found" }); return; }
+
+  const updates: Record<string, unknown> = { updatedAt: new Date() };
+
+  if (name !== undefined) {
+    const cleanName = typeof name === "string" ? name.trim().slice(0, 80) : "";
+    if (!cleanName) {
+      res.status(400).json({ error: "Bad Request", message: "Give this position a name (e.g. \"Tier 1\" or \"Floor Manager\")." });
+      return;
+    }
+    const siblings = await db
+      .select({ id: siteRatesTable.id, name: siteRatesTable.name, rateTier: siteRatesTable.rateTier })
+      .from(siteRatesTable)
+      .where(and(
+        eq(siteRatesTable.siteId, existing.siteId),
+        eq(siteRatesTable.licenseLevel, existing.licenseLevel),
+      ));
+    if (siblings.some((r) => r.id !== id && rateDisplayName(r).toLowerCase() === cleanName.toLowerCase())) {
+      res.status(400).json({
+        error: "Bad Request",
+        message: `"${cleanName}" is already a position at ${levelName(existing.licenseLevel)} for this site. Pick a different name.`,
+      });
+      return;
+    }
+    updates.name = cleanName;
+  }
+
+  if (payRate !== undefined || billRate !== undefined) {
+    const money = parseRateMoney(
+      payRate !== undefined ? payRate : existing.payRate,
+      billRate !== undefined ? billRate : existing.billRate,
+    );
+    if (!money) {
+      res.status(400).json({ error: "Bad Request", message: "payRate and billRate must be non-negative numbers" });
+      return;
+    }
+    updates.payRate = String(money.pay);
+    updates.billRate = String(money.bill);
+  }
+
+  if (label !== undefined) {
+    updates.label = typeof label === "string" && label.trim() ? label.trim().slice(0, 80) : null;
+  }
+
+  const [row] = await db.update(siteRatesTable).set(updates).where(eq(siteRatesTable.id, id)).returning();
   res.json(row);
 });
 
