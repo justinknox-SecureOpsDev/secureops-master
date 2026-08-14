@@ -129,7 +129,6 @@
 - [Radio background listen policy](radio-background-listen-policy.md) — background LiveKit only on duty + only the one designated always-on channel; drops must run even when the control WS is down.
 - [Keep-alive demand must be releasable](keepalive-demand-release-visibility.md) — any set counting as background-audio demand must appear in the API the UI uses to release demand, or it loops forever.
 - [iOS/Android OTA runtime split](ios-android-ota-runtime-split.md) — iOS on 1.0.2, Android on 1.0.3; OTAs must be per-platform until iOS ships 1.0.3 binary; IOS_OTA_RUNTIME env gates auto-OTA split.
-- [Site rates = named positions](site-rate-named-positions.md) — rate_tier is a hidden auto-slot (keeps the legacy unique constraint); shifts prefer the LIVE name, snapshot only after delete; eligibility stays numeric.
 - [Staffing-row duplicate signature](staffing-row-duplicate-signature.md) — multi-position shift rows dedupe by level+rate signature (3 sync points), NOT level alone; same level at two tiers is valid.
 - [Invoice number collision flake](invoice-number-random-collision.md) — INV-YYYYMM-<4 random digits> vs UNIQUE column: rare 23505 under full suite = collision, not regression; latent prod bug too.
 - [Subcontractor QR rates](subcontractor-qr-rates.md) — pay/bill rates live on the QR token (join via qr_token_id), bill priority QR→site default; public clock endpoints must stay rate-free.

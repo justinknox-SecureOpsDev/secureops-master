@@ -455,11 +455,6 @@ export function ShiftsListView({
                       <div className="flex items-center gap-1.5 flex-wrap">
                         {s.isRepeat && <Repeat className="w-3 h-3 text-amber-700 shrink-0" aria-label="Repeating series" />}
                         <span className="font-medium">{s.title}</span>
-                        {s.positionName && (
-                          <span className="text-[10px] px-1.5 py-0.5 rounded border font-semibold bg-brand-cream/60 text-brand-navy border-brand-gold/50">
-                            {s.positionName}
-                          </span>
-                        )}
                         <span className={`text-[10px] px-1.5 py-0.5 rounded border font-semibold ${lvl.cls}`}>{lvl.label}</span>
                       </div>
                     </td>

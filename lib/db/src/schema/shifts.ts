@@ -31,10 +31,6 @@ export const shiftsTable = pgTable("shifts", {
   // When set on shift create/edit, the shift's payRate + billRate are
   // populated from this row; admin can still override per-shift.
   siteRateId: uuid("site_rate_id").references(() => siteRatesTable.id, { onDelete: "set null" }),
-  // Position name captured at creation time from the site rate card (or typed
-  // for a custom rate). Reads prefer the LIVE rate-card name so renames flow
-  // through; this snapshot is the fallback once the rate row is deleted.
-  positionName: text("position_name"),
   headcount: integer("headcount").notNull().default(1),
   isRepeat: boolean("is_repeat").notNull().default(false),
   repeatPattern: text("repeat_pattern"),

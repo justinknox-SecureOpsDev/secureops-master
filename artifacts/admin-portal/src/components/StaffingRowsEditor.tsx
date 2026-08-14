@@ -2,17 +2,12 @@
  * StaffingRowsEditor
  *
  * Reusable multi-position / headcount editor for shift-creation dialogs.
- * Each row maps to one shift record when saved.
- *
- * Positions are picked BY NAME from the site's rate card ("Floor Manager",
- * "Overnight Supervisor", …). The chosen position carries its own license
- * level and pay/bill rates, so a site can staff three different L2 positions
- * on one shift. "Custom rate" keeps the manual escape hatch: pick the license
- * level and type the rates (they are never written back to the rate card).
+ * Each row maps to one shift record when saved. The rate-card picker mirrors
+ * ShiftDialog: clicking a card auto-fills pay+bill; manual edits clear the
+ * card link so the audit trail is honest about overrides.
  *
  * Admins see pay/bill rate inputs; site managers are rate-blind (those fields
- * are hidden and the server derives rates from the site's defaults), so they
- * pick a license level directly.
+ * are hidden and the server derives rates from the site's defaults).
  */
 import { useCallback, useEffect, useMemo } from "react";
 import { Button } from "@/components/ui/button";
@@ -27,10 +22,7 @@ export type SiteRate = {
   id: string;
   siteId: string;
   licenseLevel: number;
-  /** Internal slot number assigned server-side; only a fallback label source. */
   rateTier: number;
-  /** Admin-chosen position name. Null on rows created before naming existed. */
-  name?: string | null;
   payRate: string;
   billRate: string;
   label: string | null;
@@ -43,7 +35,7 @@ export type StaffingRow = {
   headcount: number;
   payRate: string;
   billRate: string;
-  /** Non-null ⟹ rates were snapped from a site rate card (a named position). */
+  /** Non-null ⟹ rates were snapped from a site rate card. */
   siteRateId: string | null;
 };
 
@@ -52,9 +44,9 @@ type Props = {
   onChange: (rows: StaffingRow[]) => void;
   siteRates: SiteRate[];
   ratesLoading: boolean;
-  /** When true, hide pay/bill inputs and the position picker. */
+  /** When true, hide pay/bill inputs and the rate-card picker. */
   isSiteManager: boolean;
-  /** Whether a site is selected at all (gate for the position picker). */
+  /** Whether a site is selected at all (gate for the rate-card section). */
   hasSite: boolean;
 };
 
@@ -65,34 +57,27 @@ const LEVELS = [
   { value: 4, label: "L4 / PPO" },
 ] as const;
 
-const CUSTOM_VALUE = "custom";
-
-/** A rate's position name, falling back to its slot number for legacy rows. */
-export function rateName(r: Pick<SiteRate, "name" | "rateTier">): string {
-  return (r.name ?? "").trim() || `Rate ${r.rateTier ?? 1}`;
-}
-
-function shortLevelLabel(level: number): string {
-  return level <= 1 ? "Support" : level === 4 ? "L4 / PPO" : level === 3 ? "L3 Armed" : "L2 Unarmed";
-}
-
-/** "Floor Manager — L2 Unarmed" (+ optional free-text label from the card). */
-export function positionOptionLabel(r: SiteRate): string {
-  const base = `${rateName(r)} — ${shortLevelLabel(r.licenseLevel)}`;
-  return r.label ? `${base} · ${r.label}` : base;
-}
-
 function defaultRateForLevel(rates: SiteRate[], level: number): SiteRate | null {
   const forLevel = rates.filter((r) => r.licenseLevel === level);
   if (forLevel.length === 0) return null;
   return forLevel.reduce((best, r) => (r.rateTier < best.rateTier ? r : best));
 }
 
+function levelLabel(level: number, customLabel: string | null, rateTier?: number): string {
+  const base =
+    level <= 1 ? "Support — no license required"
+    : level === 4 ? "L4 / PPO"
+    : level === 3 ? "L3 Armed"
+    : "L2 Unarmed";
+  const withTier = rateTier != null ? `${base} · Rate ${rateTier}` : base;
+  return customLabel ? `${withTier} — ${customLabel}` : withTier;
+}
+
 /**
- * Two rows are duplicates only when they describe the SAME position: the same
- * named rate-card position, or — for custom rows — the same license level at
- * identical pay and bill. Two DIFFERENT named positions at the same level are
- * a legitimate staffing pattern.
+ * Two rows are duplicates only when they describe the SAME position at the
+ * SAME rate: equal license level AND equal rate selection (rate-card id, or
+ * for custom rows, the typed pay+bill values). Same level with different
+ * tiers is a legitimate staffing pattern (e.g. L3 Rate 1 + L3 Rate 2).
  */
 export function staffingRowSignature(
   r: Pick<StaffingRow, "requiredLicenseLevel" | "payRate" | "billRate" | "siteRateId">,
@@ -112,22 +97,6 @@ export function hasDuplicateStaffingRows(rows: StaffingRow[]): boolean {
   return false;
 }
 
-/** Client-side duplicate copy, phrased in position names. */
-export function duplicateStaffingMessage(rows: StaffingRow[], siteRates: SiteRate[] = []): string {
-  const seen = new Set<string>();
-  for (const r of rows) {
-    const sig = staffingRowSignature(r);
-    if (seen.has(sig)) {
-      const card = r.siteRateId ? siteRates.find((s) => s.id === r.siteRateId) : null;
-      return card
-        ? `Duplicate position: "${rateName(card)}" appears twice. Merge the rows or pick a different position.`
-        : `Duplicate position: ${shortLevelLabel(r.requiredLicenseLevel)} at the same pay and bill rate appears twice. Merge the rows or pick a different position.`;
-    }
-    seen.add(sig);
-  }
-  return "Duplicate position — merge the rows or pick a different position.";
-}
-
 let _keyCounter = 0;
 export function newStaffingRow(level = 2, siteRates: SiteRate[] = []): StaffingRow {
   const key = `row-${++_keyCounter}`;
@@ -145,8 +114,8 @@ export function newStaffingRow(level = 2, siteRates: SiteRate[] = []): StaffingR
 export function StaffingRowsEditor({
   rows, onChange, siteRates, ratesLoading, isSiteManager, hasSite,
 }: Props) {
-  // Signature counts for duplicate detection: named position, or level + rates
-  // for custom rows. Two rows only clash when they'd produce identical shifts.
+  // Signature counts for duplicate detection: level + rate selection. Two
+  // rows only clash when they'd produce identical shift records.
   const signatureCounts = useMemo(() => {
     const counts = new Map<string, number>();
     for (const r of rows) {
@@ -155,10 +124,6 @@ export function StaffingRowsEditor({
     }
     return counts;
   }, [rows]);
-
-  // Positions can only be picked by name when this site actually has a rate
-  // card and the user is allowed to see rates.
-  const canPickPositions = !isSiteManager && hasSite && siteRates.length > 0;
 
   const updateRow = useCallback((key: string, patch: Partial<StaffingRow>) => {
     onChange(rows.map((r) => r.key === key ? { ...r, ...patch } : r));
@@ -169,11 +134,18 @@ export function StaffingRowsEditor({
   }, [rows, onChange]);
 
   const addRow = useCallback(() => {
-    // Offer the next UNUSED named position, at any license level — a site with
-    // three L2 positions can staff all three on one shift.
+    // Prefer the first UNUSED license level; once all levels are in play,
+    // fall back to the first unused rate-card row (a different tier of an
+    // already-used level) so multi-tier staffing keeps working.
+    const usedSet = new Set(rows.map((r) => r.requiredLicenseLevel));
+    const nextLevel = LEVELS.find((l) => !usedSet.has(l.value))?.value;
+    if (nextLevel !== undefined) {
+      onChange([...rows, newStaffingRow(nextLevel, siteRates)]);
+      return;
+    }
     const usedRateIds = new Set(rows.map((r) => r.siteRateId).filter(Boolean));
     const unusedRate = siteRates.find((r) => !usedRateIds.has(r.id));
-    if (!isSiteManager && unusedRate) {
+    if (unusedRate) {
       const row = newStaffingRow(unusedRate.licenseLevel, []);
       onChange([...rows, {
         ...row,
@@ -183,12 +155,8 @@ export function StaffingRowsEditor({
       }]);
       return;
     }
-    // No named position left (or no rate card): fall back to the first unused
-    // license level, then to a plain custom row.
-    const usedLevels = new Set(rows.map((r) => r.requiredLicenseLevel));
-    const nextLevel = LEVELS.find((l) => !usedLevels.has(l.value))?.value;
-    onChange([...rows, newStaffingRow(nextLevel ?? 2, [])]);
-  }, [rows, onChange, siteRates, isSiteManager]);
+    onChange([...rows, newStaffingRow(2, [])]); // custom-rate row
+  }, [rows, onChange, siteRates]);
 
   // When siteRates first arrive (or the site changes), auto-fill any rows
   // that still have the default "0" rates so the form starts populated.
@@ -197,7 +165,7 @@ export function StaffingRowsEditor({
     let changed = false;
     const next = rows.map((r) => {
       // Only auto-fill rows that haven't been manually edited yet.
-      if (r.siteRateId !== null) return r; // already snapped to a position
+      if (r.siteRateId !== null) return r; // already snapped to a card
       if (Number(r.payRate) !== 0 || Number(r.billRate) !== 0) return r; // manual value
       const match = defaultRateForLevel(siteRates, r.requiredLicenseLevel);
       if (!match) return r;
@@ -209,9 +177,11 @@ export function StaffingRowsEditor({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [siteRates]);
 
-  // Site managers pick by license level only, so more rows than levels would
-  // always be duplicates. Admins are uncapped — positions are free-form.
-  const addDisabled = isSiteManager && rows.length >= LEVELS.length;
+  // Adding stops making sense once every level AND every rate-card row is in
+  // use (admins with no rate card can still express distinct custom rates,
+  // so cap generously rather than exactly).
+  const maxRows = Math.max(LEVELS.length, LEVELS.length + siteRates.length - new Set(siteRates.map((r) => r.licenseLevel)).size);
+  const addDisabled = rows.length >= (isSiteManager ? LEVELS.length : Math.max(maxRows, LEVELS.length));
 
   return (
     <div className="space-y-3">
@@ -232,7 +202,7 @@ export function StaffingRowsEditor({
       {rows.map((row, idx) => {
         const isDuplicate = (signatureCounts.get(staffingRowSignature(row)) ?? 0) > 1;
         const matchingRate = siteRates.find((r) => r.id === row.siteRateId) ?? null;
-        const isCustomRate = row.siteRateId == null && canPickPositions;
+        const isCustomRate = row.siteRateId == null && hasSite && siteRates.length > 0 && !isSiteManager;
 
         return (
           <div
@@ -246,59 +216,25 @@ export function StaffingRowsEditor({
               </span>
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 flex-1">
                 <div>
-                  {canPickPositions ? (
-                    <>
-                      <Label className="text-xs" id={`${row.key}-position-label`}>Position</Label>
-                      <Select
-                        value={row.siteRateId ?? CUSTOM_VALUE}
-                        onValueChange={(v) => {
-                          if (v === CUSTOM_VALUE) {
-                            updateRow(row.key, { siteRateId: null });
-                            return;
-                          }
-                          const rate = siteRates.find((r) => r.id === v);
-                          if (!rate) return;
-                          // License level and rates follow from the position.
-                          updateRow(row.key, {
-                            siteRateId: rate.id,
-                            requiredLicenseLevel: rate.licenseLevel,
-                            payRate: String(rate.payRate),
-                            billRate: String(rate.billRate),
-                          });
-                        }}
-                      >
-                        <SelectTrigger className="h-8 text-sm" aria-labelledby={`${row.key}-position-label`}><SelectValue /></SelectTrigger>
-                        <SelectContent>
-                          {siteRates.map((r) => (
-                            <SelectItem key={r.id} value={r.id}>{positionOptionLabel(r)}</SelectItem>
-                          ))}
-                          <SelectItem value={CUSTOM_VALUE}>Custom rate…</SelectItem>
-                        </SelectContent>
-                      </Select>
-                    </>
-                  ) : (
-                    <>
-                      <Label className="text-xs" id={`${row.key}-level-label`}>License level</Label>
-                      <Select
-                        value={String(row.requiredLicenseLevel)}
-                        onValueChange={(v) => {
-                          const lvl = Number(v);
-                          const match = defaultRateForLevel(siteRates, lvl);
-                          updateRow(row.key, {
-                            requiredLicenseLevel: lvl,
-                            ...(match ? { payRate: String(match.payRate), billRate: String(match.billRate), siteRateId: match.id } : { siteRateId: null }),
-                          });
-                        }}
-                      >
-                        <SelectTrigger className="h-8 text-sm" aria-labelledby={`${row.key}-level-label`}><SelectValue /></SelectTrigger>
-                        <SelectContent>
-                          {LEVELS.map((l) => (
-                            <SelectItem key={l.value} value={String(l.value)}>{l.label}</SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
-                    </>
-                  )}
+                  <Label className="text-xs" id={`${row.key}-level-label`}>License level</Label>
+                  <Select
+                    value={String(row.requiredLicenseLevel)}
+                    onValueChange={(v) => {
+                      const lvl = Number(v);
+                      const match = defaultRateForLevel(siteRates, lvl);
+                      updateRow(row.key, {
+                        requiredLicenseLevel: lvl,
+                        ...(match ? { payRate: String(match.payRate), billRate: String(match.billRate), siteRateId: match.id } : { siteRateId: null }),
+                      });
+                    }}
+                  >
+                    <SelectTrigger className="h-8 text-sm" aria-labelledby={`${row.key}-level-label`}><SelectValue /></SelectTrigger>
+                    <SelectContent>
+                      {LEVELS.map((l) => (
+                        <SelectItem key={l.value} value={String(l.value)}>{l.label}</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
                 </div>
                 <div>
                   <Label className="text-xs" htmlFor={`${row.key}-headcount`}>Staff count</Label>
@@ -330,20 +266,18 @@ export function StaffingRowsEditor({
             {isDuplicate && (
               <div className="text-xs text-destructive flex items-center gap-1">
                 <AlertTriangle className="w-3 h-3 shrink-0" />
-                {matchingRate
-                  ? `Duplicate position — "${rateName(matchingRate)}" is already on another row. Pick a different position.`
-                  : "Duplicate position — another row has the same license level at the same pay and bill rate. Pick a different position."}
+                Duplicate position — same license level and rate as another row. Pick a different rate tier or change the level.
               </div>
             )}
 
-            {/* Rates — only for admins with a site */}
+            {/* Rate card picker — only for admins with a site */}
             {!isSiteManager && hasSite && (
               <div className="rounded border border-brand-gold/30 bg-brand-cream/20 p-2.5">
                 <div className="flex items-center justify-between mb-1.5">
-                  <span className="text-xs font-medium text-muted-foreground">Rate</span>
+                  <span className="text-xs font-medium text-muted-foreground">Rate card</span>
                   {matchingRate && (
                     <span className="text-xs text-emerald-700">
-                      {positionOptionLabel(matchingRate)}
+                      {levelLabel(matchingRate.licenseLevel, matchingRate.label, matchingRate.rateTier)}
                     </span>
                   )}
                 </div>
@@ -351,28 +285,48 @@ export function StaffingRowsEditor({
                   <span className="text-xs text-muted-foreground">Loading…</span>
                 ) : siteRates.length === 0 ? (
                   <span className="text-xs text-muted-foreground">
-                    No positions on this site's rate card — enter values manually.
+                    No rate card for this site — enter values manually.
                   </span>
-                ) : null}
-
-                {/* Custom rows still choose their own license level. */}
-                {isCustomRate && (
-                  <div className="mt-1.5">
-                    <Label className="text-xs" id={`${row.key}-level-label`}>License level</Label>
-                    <Select
-                      value={String(row.requiredLicenseLevel)}
-                      onValueChange={(v) => updateRow(row.key, { requiredLicenseLevel: Number(v) })}
+                ) : (
+                  <div className="flex flex-wrap gap-1.5">
+                    {siteRates.map((r) => {
+                      const sel = r.id === row.siteRateId;
+                      return (
+                        <button
+                          key={r.id}
+                          type="button"
+                          onClick={() => updateRow(row.key, {
+                            payRate: String(r.payRate),
+                            billRate: String(r.billRate),
+                            siteRateId: r.id,
+                            requiredLicenseLevel: r.licenseLevel,
+                          })}
+                          className={`text-left px-2.5 py-1.5 rounded border text-xs transition ${
+                            sel
+                              ? "bg-brand-navy text-white border-brand-navy"
+                              : "bg-white hover:bg-brand-cream/60 border-brand-gold/40"
+                          }`}
+                        >
+                          <div className="font-semibold">{levelLabel(r.licenseLevel, r.label, r.rateTier)}</div>
+                          <div className={sel ? "text-white/80" : "text-muted-foreground"}>
+                            Pay ${parseFloat(r.payRate).toFixed(2)} · Bill ${parseFloat(r.billRate).toFixed(2)}
+                          </div>
+                        </button>
+                      );
+                    })}
+                    <button
+                      type="button"
+                      onClick={() => updateRow(row.key, { siteRateId: null })}
+                      className={`px-2.5 py-1.5 rounded border text-xs ${
+                        row.siteRateId == null
+                          ? "bg-amber-100 border-amber-400 text-amber-900"
+                          : "bg-white hover:bg-amber-50 border-dashed border-amber-300 text-amber-800"
+                      }`}
                     >
-                      <SelectTrigger className="h-8 text-sm" aria-labelledby={`${row.key}-level-label`}><SelectValue /></SelectTrigger>
-                      <SelectContent>
-                        {LEVELS.map((l) => (
-                          <SelectItem key={l.value} value={String(l.value)}>{l.label}</SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
+                      Custom
+                    </button>
                   </div>
                 )}
-
                 {isCustomRate && (
                   <div className="mt-1.5 text-xs text-amber-800 flex items-center gap-1">
                     <AlertTriangle className="w-3 h-3 shrink-0" />

@@ -25,12 +25,6 @@ export type Shift = {
   notes: string | null;
   shiftType?: "standard" | "ppo_detail" | string | null;
   siteRateId?: string | null;
-  /**
-   * Resolved position name: the live rate-card name when the shift is still
-   * linked to a rate, else the name captured when the shift was created.
-   * Display-only — eligibility always comes from requiredLicenseLevel.
-   */
-  positionName?: string | null;
   assignments: ShiftAssignment[];
 };
 

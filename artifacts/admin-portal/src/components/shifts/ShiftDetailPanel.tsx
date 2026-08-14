@@ -111,11 +111,6 @@ export function ShiftDetailPanel({
             <SheetDescription className="sr-only">Shift details and actions</SheetDescription>
             <div className="flex flex-wrap gap-1.5">
               <Badge variant="outline" className={statusBadge(shift.status)}>{shift.status}</Badge>
-              {shift.positionName && (
-                <Badge variant="outline" className="bg-brand-cream/60 text-brand-navy border-brand-gold/50">
-                  {shift.positionName}
-                </Badge>
-              )}
               <Badge variant="outline" className={lvl.cls}>{lvl.label}</Badge>
               {shift.shiftType === "ppo_detail" && (
                 <Badge variant="outline" className="bg-indigo-100 text-indigo-800 border-indigo-300">PPO Detail</Badge>

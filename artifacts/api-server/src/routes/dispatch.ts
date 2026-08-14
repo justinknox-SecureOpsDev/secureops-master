@@ -18,7 +18,6 @@ import { getGeofenceRadiusMiles } from "../lib/geofence";
 import { businessDayWindow, businessTimeZone } from "../lib/businessTime";
 import { requireFeature } from "../lib/features";
 import { broadcastOfficerJoined } from "../lib/wsManager";
-import { withPositionNames } from "../lib/positionNames";
 
 const router: IRouter = Router();
 router.use("/dispatch", requireFeature("liveMap"));
@@ -318,8 +317,6 @@ router.get("/dispatch/open-shifts", requireAdminOrDispatcher, async (req, res): 
       endTime: shiftsTable.endTime,
       headcount: shiftsTable.headcount,
       requiredLicenseLevel: shiftsTable.requiredLicenseLevel,
-      siteRateId: shiftsTable.siteRateId,
-      positionName: shiftsTable.positionName,
       payRate: shiftsTable.payRate,
       filled: sql<number>`(
         SELECT count(*)::int FROM ${shiftAssignmentsTable}
@@ -337,9 +334,7 @@ router.get("/dispatch/open-shifts", requireAdminOrDispatcher, async (req, res): 
     .orderBy(asc(shiftsTable.startTime));
 
   const open = rows.filter((r) => r.filled < r.headcount);
-  // Position name: live rate-card name (so renames flow through) falling back
-  // to the name captured when the shift was created.
-  res.json(await withPositionNames(open));
+  res.json(open);
 });
 
 /**

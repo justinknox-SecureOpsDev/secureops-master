@@ -559,16 +559,6 @@ export default function EmployeeShiftsScreen({ hideTopPad }: { hideTopPad?: bool
                 )}
 
                 <View style={styles.metaRow}>
-                  {/* Position name from the site's rate card — display only;
-                      eligibility still comes from the license level badge. */}
-                  {item.positionName ? (
-                    <View style={[styles.metaChip, { backgroundColor: colors.secondary, borderColor: colors.border }]}>
-                      <Feather name="briefcase" size={11} color={colors.mutedForeground} />
-                      <Text style={[styles.metaChipText, { color: colors.mutedForeground }]} numberOfLines={1}>
-                        {item.positionName}
-                      </Text>
-                    </View>
-                  ) : null}
                   <LicenseLevelBadge level={item.requiredLicenseLevel} size="sm" />
                   <View style={[styles.metaChip, { backgroundColor: colors.secondary, borderColor: colors.border }]}>
                     <Feather name="users" size={11} color={colors.mutedForeground} />

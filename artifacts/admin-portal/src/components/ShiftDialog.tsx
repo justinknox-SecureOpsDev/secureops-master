@@ -13,8 +13,7 @@ import { api } from "@/lib/api";
 import { useFkOptions } from "@/lib/fk";
 import { AlertTriangle } from "lucide-react";
 import {
-  StaffingRowsEditor, newStaffingRow, hasDuplicateStaffingRows, duplicateStaffingMessage,
-  positionOptionLabel, type SiteRate, type StaffingRow,
+  StaffingRowsEditor, newStaffingRow, hasDuplicateStaffingRows, type SiteRate, type StaffingRow,
 } from "@/components/StaffingRowsEditor";
 
 type ShiftInitial = {
@@ -48,6 +47,12 @@ function toLocalInput(iso: string | undefined | null): string {
   if (Number.isNaN(d.getTime())) return "";
   const pad = (n: number) => String(n).padStart(2, "0");
   return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+}
+
+function levelLabel(level: number, customLabel: string | null, rateTier?: number): string {
+  const base = level <= 1 ? "Support — no license required" : level === 4 ? "L4 / PPO" : level === 3 ? "L3 Armed" : "L2 Unarmed";
+  const withTier = rateTier != null ? `${base} · Rate ${rateTier}` : base;
+  return customLabel ? `${withTier} — ${customLabel}` : withTier;
 }
 
 function defaultRateForLevel(rates: SiteRate[], level: number): SiteRate | null {
@@ -148,9 +153,8 @@ export function ShiftDialog({ open, onOpenChange, initial, onSaved, isSiteManage
   );
   const customRate = isEdit && siteRateId == null && siteId != null && siteRates.length > 0;
 
-  // Duplicate check (create mode only): the same named position twice (or, for
-  // custom rates, the same level at identical pay+bill). Two DIFFERENT named
-  // positions at one level are a valid staffing pattern.
+  // Duplicate check (create mode only): same level AND same rate selection.
+  // Same level at different rate tiers is a valid staffing pattern.
   const hasDuplicates = useMemo(
     () => (isEdit ? false : hasDuplicateStaffingRows(staffingRows)),
     [staffingRows, isEdit],
@@ -161,7 +165,7 @@ export function ShiftDialog({ open, onOpenChange, initial, onSaved, isSiteManage
     if (!title.trim()) { setErr("Title is required"); return; }
     if (!startTime || !endTime) { setErr("Start and end time are required"); return; }
     if (new Date(endTime) <= new Date(startTime)) { setErr("End time must be after start time"); return; }
-    if (hasDuplicates) { setErr(duplicateStaffingMessage(staffingRows, siteRates)); return; }
+    if (hasDuplicates) { setErr("Remove duplicate positions before saving"); return; }
 
     setSubmitting(true);
     try {
@@ -331,10 +335,10 @@ export function ShiftDialog({ open, onOpenChange, initial, onSaved, isSiteManage
               {siteId && !isSiteManager && (
                 <div className="rounded-lg border border-brand-gold/40 bg-brand-cream/30 p-3">
                   <div className="flex items-center justify-between mb-2">
-                    <div className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Site positions</div>
+                    <div className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Site rate card</div>
                     {matchingRate && (
                       <div className="text-xs text-emerald-700">
-                        Using: <strong>{positionOptionLabel(matchingRate)}</strong>
+                        Using: <strong>{levelLabel(matchingRate.licenseLevel, matchingRate.label, matchingRate.rateTier)}</strong>
                       </div>
                     )}
                   </div>
@@ -342,7 +346,7 @@ export function ShiftDialog({ open, onOpenChange, initial, onSaved, isSiteManage
                     <div className="text-xs text-muted-foreground">Loading rates…</div>
                   ) : siteRates.length === 0 ? (
                     <div className="text-xs text-muted-foreground">
-                      This site has no positions configured. Enter values manually below.
+                      This site has no rate card configured. Enter values manually below.
                     </div>
                   ) : (
                     <div className="flex flex-wrap gap-2">
@@ -359,7 +363,7 @@ export function ShiftDialog({ open, onOpenChange, initial, onSaved, isSiteManage
                                 : "bg-white hover:bg-brand-cream/60 border-brand-gold/40"
                             }`}
                           >
-                            <div className="font-semibold">{positionOptionLabel(r)}</div>
+                            <div className="font-semibold">{levelLabel(r.licenseLevel, r.label, r.rateTier)}</div>
                             <div className={selected ? "text-white/85" : "text-muted-foreground"}>
                               Pay ${parseFloat(r.payRate).toFixed(2)} · Bill ${parseFloat(r.billRate).toFixed(2)}
                             </div>
