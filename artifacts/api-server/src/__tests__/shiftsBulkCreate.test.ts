@@ -276,6 +276,55 @@ describe("POST /shifts/repeat — multi-position series", () => {
     expect(new Set(rows.map((r) => Number(r.payRate)))).toEqual(new Set([20, 24]));
   });
 
+  it("skips only same-position occurrences: an existing tier-1 series doesn't block a tier-2 series at the same times", async () => {
+    const title = `${TAG}-repeat-tier-idem`;
+    const recurrence = { startDate, untilDate, daysOfWeek: [3], startTime: "10:00", endTime: "18:00" };
+    // First series: L2 at tier-1 rates.
+    const first = await request(app).post("/api/shifts/repeat").set(authed(ctx.adminToken)).send({
+      base: {
+        title,
+        siteId: ctx.siteBId,
+        positions: [{ requiredLicenseLevel: 2, headcount: 1, payRate: "20.00", billRate: "40.00" }],
+      },
+      recurrence,
+    });
+    expect(first.status).toBe(201);
+    expect(first.body.created).toBeGreaterThan(0);
+    expect(first.body.skippedExisting).toBe(0);
+
+    // Second series: SAME level, SAME site, SAME times, DIFFERENT rates (tier 2).
+    // Previously the site+startTime idempotency check reported these as
+    // "already exist" and created nothing.
+    const second = await request(app).post("/api/shifts/repeat").set(authed(ctx.adminToken)).send({
+      base: {
+        title,
+        siteId: ctx.siteBId,
+        positions: [{ requiredLicenseLevel: 2, headcount: 1, payRate: "24.00", billRate: "46.00" }],
+      },
+      recurrence,
+    });
+    expect(second.status).toBe(201);
+    expect(second.body.created).toBe(first.body.created);
+    expect(second.body.skippedExisting).toBe(0);
+
+    // Third: EXACT re-submission of the second series → fully skipped (idempotent).
+    const third = await request(app).post("/api/shifts/repeat").set(authed(ctx.adminToken)).send({
+      base: {
+        title,
+        siteId: ctx.siteBId,
+        positions: [{ requiredLicenseLevel: 2, headcount: 1, payRate: "24.00", billRate: "46.00" }],
+      },
+      recurrence,
+    });
+    expect(third.status).toBe(201);
+    expect(third.body.created).toBe(0);
+    expect(third.body.skippedExisting).toBe(second.body.created);
+
+    const rows = await db.select().from(shiftsTable).where(eq(shiftsTable.title, title));
+    expect(rows.length).toBe(first.body.created + second.body.created);
+    expect(new Set(rows.map((r) => Number(r.payRate)))).toEqual(new Set([20, 24]));
+  });
+
   it("still supports the legacy single-position body shape", async () => {
     const title = `${TAG}-repeat-legacy`;
     const res = await request(app).post("/api/shifts/repeat").set(authed(ctx.adminToken)).send({

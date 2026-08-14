@@ -824,23 +824,48 @@ router.post("/shifts/repeat", requireAdminOrSiteManager, async (req, res): Promi
     return;
   }
 
-  // Idempotency: skip occurrences that already exist (same site + exact startTime).
+  // Idempotency: skip occurrences that already exist for each position.
+  // Match on siteId + startTime + requiredLicenseLevel + siteRateId so that
+  // two rows with the same level but different rate tiers (e.g. L2 Tier 1 and
+  // L2 Tier 2) can both be created even when one already exists.
   const existing = await db
-    .select({ startTime: shiftsTable.startTime })
+    .select({
+      startTime: shiftsTable.startTime,
+      requiredLicenseLevel: shiftsTable.requiredLicenseLevel,
+      siteRateId: shiftsTable.siteRateId,
+      payRate: shiftsTable.payRate,
+      billRate: shiftsTable.billRate,
+    })
     .from(shiftsTable)
     .where(and(
       eq(shiftsTable.siteId, siteId),
       gte(shiftsTable.startTime, occurrences[0].startTime),
       lte(shiftsTable.startTime, occurrences[occurrences.length - 1].startTime),
     ));
-  const existingMs = new Set(existing.map((r) => new Date(r.startTime).getTime()));
-  const freshOccurrences = occurrences.filter((o) => !existingMs.has(o.startTime.getTime()));
+  // Key convention mirrors the duplicate-position signature: rate-card rows
+  // are identified by the card id, custom rows by their pay+bill values.
+  const posKeyOf = (lvl: number, rateId: string | null, pay: unknown, bill: unknown): string =>
+    rateId
+      ? `${lvl}|card:${rateId}`
+      : `${lvl}|custom:${Number(pay) || 0}|${Number(bill) || 0}`;
+  // "positionKey|startTimeMs" strings for fast lookup.
+  const existingKeys = new Set(
+    existing.map((r) =>
+      `${posKeyOf(r.requiredLicenseLevel ?? 2, r.siteRateId, r.payRate, r.billRate)}|${new Date(r.startTime).getTime()}`,
+    ),
+  );
 
   // Build all rows: for each position, each fresh occurrence = one shift row.
+  // Freshness is judged PER POSITION so an existing L2 Tier 1 series doesn't
+  // block a new L2 Tier 2 series at the same times.
   // Each position gets its own stable seriesId so the series-group UI works.
+  let skippedExisting = 0;
   const allToInsert = positions.flatMap((pos) => {
+    const posKey = posKeyOf(pos.requiredLicenseLevel, pos.siteRateId, pos.pay, pos.bill);
+    const freshForPos = occurrences.filter((o) => !existingKeys.has(`${posKey}|${o.startTime.getTime()}`));
+    skippedExisting += occurrences.length - freshForPos.length;
     const seriesId = randomUUID();
-    return freshOccurrences.map((o) => ({
+    return freshForPos.map((o) => ({
       title,
       siteId,
       clientName: site.clientName ?? null,
@@ -897,10 +922,9 @@ router.post("/shifts/repeat", requireAdminOrSiteManager, async (req, res): Promi
     }
   }
 
-  const skippedExisting = occurrences.length - freshOccurrences.length;
   res.status(201).json({
     created: inserted.length,
-    skippedExisting: skippedExisting * positions.length,
+    skippedExisting,
     totalOccurrences: occurrences.length * positions.length,
     positions: positions.length,
     shifts: inserted.map((s) => stripShiftFinanceForRole(req.user!.role, s)),
