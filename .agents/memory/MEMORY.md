@@ -131,4 +131,5 @@
 - [iOS/Android OTA runtime split](ios-android-ota-runtime-split.md) — iOS on 1.0.2, Android on 1.0.3; OTAs must be per-platform until iOS ships 1.0.3 binary; IOS_OTA_RUNTIME env gates auto-OTA split.
 - [Staffing-row duplicate signature](staffing-row-duplicate-signature.md) — multi-position shift rows dedupe by level+rate signature (3 sync points), NOT level alone; same level at two tiers is valid.
 - [Invoice number collision flake](invoice-number-random-collision.md) — INV-YYYYMM-<4 random digits> vs UNIQUE column: rare 23505 under full suite = collision, not regression; latent prod bug too.
+- [Role-scoped list endpoints](role-scoped-list-endpoints.md) — list routes widen by ROLE with no filter (admin gets everyone); personal "my stuff" screens must pass employeeId + re-assert ownership.
 - [Subcontractor QR rates](subcontractor-qr-rates.md) — pay/bill rates live on the QR token (join via qr_token_id), bill priority QR→site default; public clock endpoints must stay rate-free.

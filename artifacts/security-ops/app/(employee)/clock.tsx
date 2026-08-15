@@ -6,6 +6,7 @@ import { useColors } from "@/hooks/useColors";
 import { useTimeConfirmEditWindowHours } from "@/hooks/useFeatures";
 import { useHighlightFlash } from "@/hooks/useHighlightFlash";
 import { useLocalSearchParams } from "expo-router";
+import { useAuth } from "@/contexts/AuthContext";
 import { useClockIn, useClockOut, useConfirmTimeEntry, useGetActiveTimeEntry, getGetActiveTimeEntryQueryKey, useGetTimeEntries, getGetTimeEntriesQueryKey, updateMyLocation, useGetMyClockInShifts, getGetMyClockInShiftsQueryKey, getGetEmployeeDashboardSummaryQueryKey, getGetShiftsQueryKey } from "@workspace/api-client-react";
 import { Feather } from "@expo/vector-icons";
 import { useQueryClient } from "@tanstack/react-query";
@@ -70,9 +71,16 @@ export default function EmployeeClockScreen({ hideTopPad }: { hideTopPad?: boole
     query: { queryKey: getGetActiveTimeEntryQueryKey() }
   });
 
+  // MUST be scoped to the signed-in user. GET /time-entries returns EVERY
+  // employee's entries to an admin (and every managed site's to a site
+  // manager) when no employeeId is given — this is a personal screen, so an
+  // unscoped call showed admins other officers' shifts in the confirmation
+  // card and recent list, and confirming 403'd because they didn't own it.
+  const { user } = useAuth();
+  const myId = user?.id;
   const { data: recentEntries } = useGetTimeEntries(
-    {},
-    { query: { queryKey: getGetTimeEntriesQueryKey({}) } },
+    { employeeId: myId },
+    { query: { queryKey: getGetTimeEntriesQueryKey({ employeeId: myId }), enabled: !!myId } },
   );
 
   // Deep-link highlight: a "forgot to clock out" tap lands here with the open
@@ -120,12 +128,16 @@ export default function EmployeeClockScreen({ hideTopPad }: { hideTopPad?: boole
 
   // --- Post-shift confirmation -------------------------------------------
   // After clock-out the entry sits in `awaiting_confirmation` until the
-  // officer confirms (or edits) it. recentEntries is the officer's OWN list,
-  // so the first awaiting entry is theirs. This survives relaunch/web reload
-  // because it's derived from server state, not local state.
-  const awaitingEntry = ((recentEntries ?? []) as any[]).find(
-    (e) => e.confirmationStatus === "awaiting_confirmation",
-  );
+  // officer confirms (or edits) it. This survives relaunch/web reload because
+  // it's derived from server state, not local state.
+  //
+  // Belt-and-braces on top of the employeeId-scoped fetch: re-assert ownership
+  // (only the owner may confirm — anything else 403s) and pick the MOST RECENT
+  // awaiting entry rather than trusting list order, since the card is titled
+  // "Confirm your last shift".
+  const awaitingEntry = ((recentEntries ?? []) as any[])
+    .filter((e) => e.confirmationStatus === "awaiting_confirmation" && e.employeeId === myId)
+    .sort((a, b) => new Date(b.clockInTime).getTime() - new Date(a.clockInTime).getTime())[0];
   const confirmMutation = useConfirmTimeEntry({ mutation: { networkMode: "always" } });
   const editWindowHours = useTimeConfirmEditWindowHours();
   const editWindowLabel = formatHoursLabel(editWindowHours);

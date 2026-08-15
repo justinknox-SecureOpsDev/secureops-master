@@ -1,5 +1,5 @@
 import { Router, type IRouter } from "express";
-import { eq, and, gte, lte, ne, isNull, inArray, sql } from "drizzle-orm";
+import { eq, and, gte, lte, ne, isNull, inArray, sql, desc } from "drizzle-orm";
 import { db, timeEntriesTable, shiftsTable, usersTable, sitesTable, shiftAssignmentsTable, licensesTable } from "@workspace/db";
 import { requireAuth, requireAdmin, requireAdminOrDispatcher, requireAdminOrSiteManager, requireStaff } from "../middlewares/auth";
 import { upsertWeeklyInvoiceForTimeEntry } from "../lib/invoiceSync";
@@ -482,7 +482,11 @@ router.get("/time-entries", requireStaff, async (req, res): Promise<void> => {
     .leftJoin(shiftsTable, eq(timeEntriesTable.shiftId, shiftsTable.id))
     .leftJoin(sitesTable, sql`${sitesTable.id} = coalesce(${timeEntriesTable.siteId}, ${shiftsTable.siteId})`)
     .leftJoin(usersTable, eq(timeEntriesTable.employeeId, usersTable.id))
-    .where(conditions.length > 0 ? and(...conditions) : undefined);
+    .where(conditions.length > 0 ? and(...conditions) : undefined)
+    // Newest first, deterministically. Callers that pick "the latest entry"
+    // (e.g. the officer's post-shift confirmation card) must not depend on
+    // unordered Postgres row order, which can surface an arbitrary old entry.
+    .orderBy(desc(timeEntriesTable.clockInTime), desc(timeEntriesTable.id));
 
   res.json(rows.map((r) => stripTimeEntryBillRateForRole(req.user!.role, r)));
 });
