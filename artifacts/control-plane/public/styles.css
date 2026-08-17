@@ -84,6 +84,19 @@ main { padding: 22px; max-width: 1200px; margin: 0 auto; }
 .stat .num.small-num { font-size: 15px; font-weight: 700; line-height: 1.5; }
 .stat .lbl { color: var(--muted); font-size: 12px; }
 .stat.alert .num { color: var(--bad); }
+.stat.clickable { cursor: pointer; transition: border-color 0.15s, background 0.15s; }
+.stat.clickable:hover { border-color: var(--gold); background: var(--panel-2); }
+.stat.clickable:focus-visible { outline: 2px solid var(--gold); outline-offset: 2px; }
+.stat.clickable.active { border-color: var(--gold); background: rgba(201,160,74,.10); }
+.stat.clickable.active .lbl::after { content: " ✕"; font-size: 10px; opacity: 0.7; }
+
+.fleet-filter-indicator {
+  margin: 0 0 10px; font-size: 13px; color: var(--muted);
+  padding: 7px 12px; background: rgba(201,160,74,.08);
+  border: 1px solid rgba(201,160,74,.25); border-radius: 9px;
+}
+.fleet-filter-indicator strong { color: var(--text); }
+.fleet-filter-indicator a { color: var(--gold); }
 
 table.fleet { width: 100%; border-collapse: collapse; background: var(--panel); border-radius: 13px; overflow: hidden; border: 1px solid var(--line); }
 table.fleet th, table.fleet td { text-align: left; padding: 11px 13px; border-bottom: 1px solid var(--line); vertical-align: top; }

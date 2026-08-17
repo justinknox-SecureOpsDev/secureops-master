@@ -3,6 +3,7 @@
 const TOKEN_KEY = "cp_operator_token";
 let customers = [];
 
+let fleetFilter = null; // null | "setup-in-progress" | "setup-not-started"
 function token() {
   return localStorage.getItem(TOKEN_KEY) || "";
 }
@@ -282,16 +283,38 @@ function renderSummary() {
   if (tierCounts.other) tierParts.push("Other " + tierCounts.other);
   var tierSub = tierParts.length ? tierParts.join(" · ") : "no plans set";
 
+  var sipActive = fleetFilter === "setup-in-progress";
+  var snsActive = fleetFilter === "setup-not-started";
+
   $("summary").innerHTML =
     '<div class="stat"><span class="num">' + total + '</span><span class="lbl">Customers</span></div>' +
     '<div class="stat"><span class="num">' + online + '</span><span class="lbl">Online</span></div>' +
     '<div class="stat"><span class="num">' + paidCount + ' / ' + trialCount + '</span><span class="lbl">Paid / Trial</span></div>' +
     '<div class="stat ' + (needs ? "alert" : "") + '"><span class="num">' + needs + '</span><span class="lbl">Needs update</span></div>' +
     '<div class="stat ' + (unsigned ? "alert" : "") + '"><span class="num">' + unsigned + '</span><span class="lbl">Agreements incomplete</span></div>' +
-    '<div class="stat ' + (setupInProgress ? "alert" : "") + '"><span class="num">' + setupInProgress + '</span><span class="lbl">Setup in progress</span></div>' +
-    '<div class="stat ' + (setupNotStarted ? "alert" : "") + '"><span class="num">' + setupNotStarted + '</span><span class="lbl">Setup not started</span></div>' +
+    '<div class="stat ' + (setupInProgress ? "alert " : "") + 'clickable' + (sipActive ? " active" : "") + '" id="stat-setup-in-progress" role="button" tabindex="0" aria-pressed="' + sipActive + '" title="Click to filter fleet to setup-in-progress customers' + (sipActive ? ' \xb7 Click again to clear"' : '"') + '><span class="num">' + setupInProgress + '</span><span class="lbl">Setup in progress</span></div>' +
+    '<div class="stat ' + (setupNotStarted ? "alert " : "") + 'clickable' + (snsActive ? " active" : "") + '" id="stat-setup-not-started" role="button" tabindex="0" aria-pressed="' + snsActive + '" title="Click to filter fleet to setup-not-started customers' + (snsActive ? ' \xb7 Click again to clear"' : '"') + '><span class="num">' + setupNotStarted + '</span><span class="lbl">Setup not started</span></div>' +
     '<div class="stat"><span class="num">' + mrrLabel + '</span><span class="lbl">MRR · ' + esc(mrrSub) + '</span></div>' +
     '<div class="stat"><span class="num small-num">' + esc(tierSub) + '</span><span class="lbl">Plan tiers</span></div>';
+
+  // Wire up filter click handlers for the two setup stat cards.
+  (function () {
+    function wireStatFilter(id, filterKey) {
+      var el = $(id);
+      if (!el) return;
+      function activate() {
+        fleetFilter = fleetFilter === filterKey ? null : filterKey;
+        renderSummary();
+        renderFleet();
+      }
+      el.addEventListener("click", activate);
+      el.addEventListener("keydown", function (e) {
+        if (e.key === "Enter" || e.key === " ") { e.preventDefault(); activate(); }
+      });
+    }
+    wireStatFilter("stat-setup-in-progress", "setup-in-progress");
+    wireStatFilter("stat-setup-not-started", "setup-not-started");
+  })();
 }
 
 function setupProgressCell(c) {
@@ -305,8 +328,53 @@ function setupProgressCell(c) {
 function renderFleet() {
   const body = $("fleet-body");
   body.innerHTML = "";
-  $("empty").hidden = customers.length > 0;
-  customers.forEach(function (c) {
+
+  // Apply active stat-card filter.
+  var visible = customers;
+  if (fleetFilter === "setup-in-progress") {
+    visible = customers.filter(function (c) {
+      if ((c.lifecycleStatus || "trial") !== "trial") return false;
+      var p = c.checklistProgress;
+      return p && p.total > 0 && p.done > 0 && p.done < p.total;
+    });
+  } else if (fleetFilter === "setup-not-started") {
+    visible = customers.filter(function (c) {
+      if ((c.lifecycleStatus || "trial") !== "trial") return false;
+      var p = c.checklistProgress;
+      return p && p.total > 0 && p.done === 0;
+    });
+  }
+
+  // Show/update a filter indicator row above the table when a filter is active.
+  var indicator = $("fleet-filter-indicator");
+  if (fleetFilter) {
+    var label = fleetFilter === "setup-in-progress" ? "Setup in progress" : "Setup not started";
+    if (!indicator) {
+      indicator = document.createElement("p");
+      indicator.id = "fleet-filter-indicator";
+      indicator.className = "fleet-filter-indicator";
+      var tableEl = body.closest("table");
+      if (tableEl) tableEl.parentNode.insertBefore(indicator, tableEl);
+    }
+    indicator.innerHTML =
+      "Showing <strong>" + visible.length + "</strong> customer" + (visible.length === 1 ? "" : "s") +
+      " matching <strong>" + esc(label) + "</strong>. " +
+      "<a href='#' id='clear-fleet-filter'>Clear filter</a>";
+    var clearLink = $("clear-fleet-filter");
+    if (clearLink) {
+      clearLink.addEventListener("click", function (e) {
+        e.preventDefault();
+        fleetFilter = null;
+        renderSummary();
+        renderFleet();
+      });
+    }
+  } else if (indicator && indicator.parentNode) {
+    indicator.parentNode.removeChild(indicator);
+  }
+
+  $("empty").hidden = visible.length > 0;
+  visible.forEach(function (c) {
     const tr = document.createElement("tr");
     const versionCell =
       esc(c.reportedVersion || "—") +

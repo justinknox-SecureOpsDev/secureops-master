@@ -28,11 +28,16 @@ interface FakeEl {
   textContent: string;
   className: string;
   value: string;
+  parentNode: FakeEl | null;
   appendChild: () => void;
+  removeChild: () => void;
+  insertBefore: () => void;
   querySelector: () => FakeEl;
   addEventListener: () => void;
   setAttribute: () => void;
   getAttribute: () => string;
+  closest: () => null;
+  remove: () => void;
 }
 
 function makeEl(tag = ""): FakeEl {
@@ -43,15 +48,20 @@ function makeEl(tag = ""): FakeEl {
     textContent: "",
     className: "",
     value: "",
+    parentNode: null,
     appendChild: () => {},
+    removeChild: () => {},
+    insertBefore: () => {},
     querySelector: () => makeEl("stub"),
     addEventListener: () => {},
     setAttribute: () => {},
     getAttribute: () => "",
+    closest: () => null,
+    remove: () => {},
   };
 }
 
-function renderWith(customersData: unknown[]): { created: FakeEl[]; esc: (s: unknown) => string } {
+function renderWith(customersData: unknown[]): { created: FakeEl[]; esc: (s: unknown) => string; renderFiltered: (arr: unknown[], filter: string | null) => void } {
   const created: FakeEl[] = [];
   const elements: Record<string, FakeEl> = {};
   const documentStub = {
@@ -78,11 +88,14 @@ function renderWith(customersData: unknown[]): { created: FakeEl[]; esc: (s: unk
   // `customers`/`renderFleet`/`esc` bindings (top-level `let`/`function`).
   const augmented =
     appJsSource +
-    "\n;globalThis.__renderFleetWith = function (arr) { customers = arr; renderFleet(); };" +
+    "\n;globalThis.__renderFleetWith = function (arr, filter) { customers = arr; fleetFilter = filter || null; renderFleet(); };" +
     "\n;globalThis.__esc = esc;";
   vm.runInContext(augmented, sandbox);
-  (sandbox.__renderFleetWith as (a: unknown[]) => void)(customersData);
-  return { created, esc: sandbox.__esc as (s: unknown) => string };
+  (sandbox.__renderFleetWith as (a: unknown[], f?: string | null) => void)(customersData);
+  return { created, esc: sandbox.__esc as (s: unknown) => string,
+    renderFiltered: (arr: unknown[], filter: string | null) =>
+      (sandbox.__renderFleetWith as (a: unknown[], f: string | null) => void)(arr, filter),
+  };
 }
 
 const baseCustomer = {
@@ -328,6 +341,68 @@ describe("renderSummary — setup stat cards (trial-scoped)", () => {
     const notStarted = html.match(/<span class="num">(\d+)<\/span><span class="lbl">Setup not started<\/span>/);
     expect(inProgress![1]).toBe("1");
     expect(notStarted![1]).toBe("1");
+  });
+});
+
+describe("renderFleet — setup stat-card filter", () => {
+  // Each `renderWith` call produces a fresh `created` array and a fresh sandbox,
+  // so calling renderFiltered *before* any baseline render gives us a clean
+  // count. We use `renderWith([])` to boot the module cheaply (0 trs emitted),
+  // then call `renderFiltered` and inspect only the rows added by that call.
+
+  const trialPartial = { ...baseCustomer, lifecycleStatus: "trial", checklistProgress: { done: 2, total: 11 }, name: "InProgress" };
+  const trialNone    = { ...baseCustomer, lifecycleStatus: "trial", checklistProgress: { done: 0, total: 11 }, name: "NotStarted" };
+  const trialDone    = { ...baseCustomer, lifecycleStatus: "trial", checklistProgress: { done: 11, total: 11 }, name: "Complete" };
+  const paidPartial  = { ...baseCustomer, lifecycleStatus: "paid",  checklistProgress: { done: 5, total: 11 }, name: "PaidPartial" };
+  const allCustomers = [trialPartial, trialNone, trialDone, paidPartial];
+
+  function rowsAfter(created: FakeEl[], positionBefore: number) {
+    return created.filter((e) => e.tag === "tr").slice(positionBefore);
+  }
+
+  it("with no filter, all customers render", () => {
+    const { created } = renderWith(allCustomers);
+    const rows = created.filter((e) => e.tag === "tr");
+    expect(rows).toHaveLength(4);
+    const html = rows.map((r) => r.innerHTML).join("");
+    expect(html).toContain("InProgress");
+    expect(html).toContain("NotStarted");
+    expect(html).toContain("Complete");
+    expect(html).toContain("PaidPartial");
+  });
+
+  it("'setup-in-progress' filter shows only trial customers with partial checklist", () => {
+    const { created, renderFiltered } = renderWith([]); // boot with 0 customers → 0 trs
+    const pos = created.filter((e) => e.tag === "tr").length; // 0
+    renderFiltered(allCustomers, "setup-in-progress");
+    const rows = rowsAfter(created, pos);
+    expect(rows).toHaveLength(1);
+    expect(rows[0].innerHTML).toContain("InProgress");
+  });
+
+  it("'setup-not-started' filter shows only trial customers with zero done", () => {
+    const { created, renderFiltered } = renderWith([]);
+    const pos = created.filter((e) => e.tag === "tr").length;
+    renderFiltered(allCustomers, "setup-not-started");
+    const rows = rowsAfter(created, pos);
+    expect(rows).toHaveLength(1);
+    expect(rows[0].innerHTML).toContain("NotStarted");
+  });
+
+  it("filter returns empty results when no customers match", () => {
+    const onlyPaid = [paidPartial];
+    const { created, renderFiltered } = renderWith([]);
+    const pos = created.filter((e) => e.tag === "tr").length;
+    renderFiltered(onlyPaid, "setup-in-progress");
+    expect(rowsAfter(created, pos)).toHaveLength(0);
+  });
+
+  it("clearing the filter restores all customers", () => {
+    const { created, renderFiltered } = renderWith([]);
+    renderFiltered(allCustomers, "setup-in-progress"); // 1 row
+    const pos = created.filter((e) => e.tag === "tr").length; // 1
+    renderFiltered(allCustomers, null); // clears → all 4 rows
+    expect(rowsAfter(created, pos)).toHaveLength(4);
   });
 });
 
