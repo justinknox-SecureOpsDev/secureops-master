@@ -132,3 +132,10 @@ id = "0Tx6uKywkPWaIuh1aLTgh"
 uri = "file://attached_assets/secureops-officer-app-walkthrough.mp4"
 type = "video"
 title = "SecureOps Officer App — Training Walkthrough"
+
+[[outputs]]
+id = "pUjuGuikxN3Mujc_iIaOM"
+uri = "file://exports/New-Customer-Setup-Runbook.pdf"
+type = "pdf"
+title = "New Customer Setup Runbook"
+description = "Fork-to-live tenant onboarding runbook (Phases 1-11), generated from docs/new-customer-setup-runbook.md — use this to track Quell Protection's setup step by step."
