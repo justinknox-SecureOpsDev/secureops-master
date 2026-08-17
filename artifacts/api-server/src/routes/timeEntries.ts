@@ -1,4 +1,4 @@
-import { Router, type IRouter } from "express";
+import { Router, type IRouter, type Response } from "express";
 import { eq, and, gte, lte, ne, isNull, inArray, sql, desc } from "drizzle-orm";
 import { db, timeEntriesTable, shiftsTable, usersTable, sitesTable, shiftAssignmentsTable, licensesTable } from "@workspace/db";
 import { requireAuth, requireAdmin, requireAdminOrDispatcher, requireAdminOrSiteManager, requireStaff } from "../middlewares/auth";
@@ -1138,12 +1138,55 @@ router.get("/time-entries/time-card/site-officers", requireAdminOrDispatcher, as
 // admin CAN force an open entry to approvalStatus='approved' via the generic
 // CRUD grid; in that case we re-sync the weekly client invoice here so the
 // corrected billed hours track the fill (best-effort, mirrors /times + /approve).
-router.patch("/time-entries/:id/clock-out", requireAdmin, async (req, res): Promise<void> => {
+/**
+ * The site a time entry belongs to: its own siteId (geo/ad-hoc clock-in)
+ * falling back to the linked shift's site. Null when neither is set — and a
+ * null site is never manageable by a site manager, so those entries stay
+ * admin-only by construction.
+ */
+async function resolveTimeEntrySiteId(
+  entry: { siteId: string | null; shiftId: string | null },
+): Promise<string | null> {
+  if (entry.siteId) return entry.siteId;
+  if (!entry.shiftId) return null;
+  const [sh] = await db
+    .select({ siteId: shiftsTable.siteId })
+    .from(shiftsTable)
+    .where(eq(shiftsTable.id, entry.shiftId));
+  return sh?.siteId ?? null;
+}
+
+/**
+ * Per-entry authorization for the routes a site manager shares with admins.
+ * `requireAdminOrSiteManager` only proves the caller holds the role; the
+ * per-site boundary MUST be enforced on the exact entry being touched, or a
+ * manager of site A could correct hours at site B. Admins pass through.
+ *
+ * Writes a 403 and returns false when out of scope — callers MUST return.
+ */
+async function assertCanManageTimeEntry(
+  user: { userId: string; role: string },
+  entry: { siteId: string | null; shiftId: string | null },
+  res: Response,
+  action: string,
+): Promise<boolean> {
+  if (user.role !== "site_manager") return true;
+  const siteId = await resolveTimeEntrySiteId(entry);
+  if (await canManageSite({ userId: user.userId, role: user.role }, siteId)) return true;
+  res.status(403).json({
+    error: "Forbidden",
+    message: `You can only ${action} at sites you manage.`,
+  });
+  return false;
+}
+
+router.patch("/time-entries/:id/clock-out", requireAdminOrSiteManager, async (req, res): Promise<void> => {
   const id = Array.isArray(req.params.id) ? req.params.id[0] : req.params.id;
   const { clockOutTime, useShiftEnd, notes } = req.body ?? {};
 
   const [existing] = await db.select().from(timeEntriesTable).where(eq(timeEntriesTable.id, id));
   if (!existing) { res.status(404).json({ error: "Not Found" }); return; }
+  if (!(await assertCanManageTimeEntry(req.user!, existing, res, "close out time entries"))) return;
   if (existing.clockOutTime) {
     res.status(409).json({
       error: "Conflict",
@@ -1250,15 +1293,17 @@ router.patch("/time-entries/:id/clock-out", requireAdmin, async (req, res): Prom
   });
 });
 
-// Admin corrects the clock-in and/or clock-out timestamps on an existing
-// time entry. Unlike PATCH /time-entries/:id/clock-out (which only FILLS a
-// missing clock-out), this overwrites already-set timestamps for genuine
-// corrections — e.g. resolving an officer's "wrong time" correction request
-// inline from the Site Detail page. Recomputes hoursWorked, stamps last-edited
-// provenance, records before/after audit metadata, and re-syncs the weekly
-// client invoice when the entry is already approved so billed hours track the
-// correction (best-effort, mirrors the approve route).
-router.patch("/time-entries/:id/times", requireAdmin, async (req, res): Promise<void> => {
+// Admin (globally) or site manager (at sites they manage) corrects the
+// clock-in and/or clock-out timestamps on an existing time entry. Unlike
+// PATCH /time-entries/:id/clock-out (which only FILLS a missing clock-out),
+// this overwrites already-set timestamps for genuine corrections — e.g.
+// resolving an officer's "wrong time" correction request inline from the Site
+// Detail page, or a site manager fixing a forgotten clock-out from the portal.
+// Recomputes hoursWorked, stamps last-edited provenance, records before/after
+// audit metadata, and re-syncs the weekly client invoice when the entry is
+// already approved so billed hours track the correction (best-effort, mirrors
+// the approve route).
+router.patch("/time-entries/:id/times", requireAdminOrSiteManager, async (req, res): Promise<void> => {
   const id = Array.isArray(req.params.id) ? req.params.id[0] : req.params.id;
   const { clockInTime, clockOutTime, notes } = req.body ?? {};
 
@@ -1269,6 +1314,7 @@ router.patch("/time-entries/:id/times", requireAdmin, async (req, res): Promise<
 
   const [existing] = await db.select().from(timeEntriesTable).where(eq(timeEntriesTable.id, id));
   if (!existing) { res.status(404).json({ error: "Not Found" }); return; }
+  if (!(await assertCanManageTimeEntry(req.user!, existing, res, "correct time entries"))) return;
 
   let targetClockIn = existing.clockInTime;
   if (clockInTime !== undefined) {
