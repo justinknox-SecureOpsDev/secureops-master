@@ -234,6 +234,16 @@ function renderSummary() {
     return c.needsUpdate;
   }).length;
   const unsigned = customers.filter(agreementsIncomplete).length;
+  const setupInProgress = customers.filter(function (c) {
+    if ((c.lifecycleStatus || "trial") !== "trial") return false;
+    var p = c.checklistProgress;
+    return p && p.total > 0 && p.done > 0 && p.done < p.total;
+  }).length;
+  const setupNotStarted = customers.filter(function (c) {
+    if ((c.lifecycleStatus || "trial") !== "trial") return false;
+    var p = c.checklistProgress;
+    return p && p.total > 0 && p.done === 0;
+  }).length;
   const trialCount = customers.filter(function (c) {
     return (c.lifecycleStatus || "trial") === "trial";
   }).length;
@@ -278,6 +288,8 @@ function renderSummary() {
     '<div class="stat"><span class="num">' + paidCount + ' / ' + trialCount + '</span><span class="lbl">Paid / Trial</span></div>' +
     '<div class="stat ' + (needs ? "alert" : "") + '"><span class="num">' + needs + '</span><span class="lbl">Needs update</span></div>' +
     '<div class="stat ' + (unsigned ? "alert" : "") + '"><span class="num">' + unsigned + '</span><span class="lbl">Agreements incomplete</span></div>' +
+    '<div class="stat ' + (setupInProgress ? "alert" : "") + '"><span class="num">' + setupInProgress + '</span><span class="lbl">Setup in progress</span></div>' +
+    '<div class="stat ' + (setupNotStarted ? "alert" : "") + '"><span class="num">' + setupNotStarted + '</span><span class="lbl">Setup not started</span></div>' +
     '<div class="stat"><span class="num">' + mrrLabel + '</span><span class="lbl">MRR · ' + esc(mrrSub) + '</span></div>' +
     '<div class="stat"><span class="num small-num">' + esc(tierSub) + '</span><span class="lbl">Plan tiers</span></div>';
 }

@@ -213,6 +213,124 @@ describe("setupProgressCell rendering", () => {
   });
 });
 
+// ---- renderSummary setup-stat helpers ----
+
+function renderSummaryWith(customersData: unknown[]): string {
+  const elements: Record<string, FakeEl> = {};
+  const documentStub = {
+    getElementById: (id: string) => (elements[id] = elements[id] || makeEl(id)),
+    createElement: (tag: string) => makeEl(tag),
+    querySelectorAll: () => [],
+    addEventListener: () => {},
+  };
+  const sandbox: Record<string, unknown> = {
+    document: documentStub,
+    localStorage: { getItem: () => "", setItem: () => {}, removeItem: () => {} },
+    setTimeout: () => 0,
+    clearTimeout: () => {},
+    console,
+  };
+  sandbox.window = sandbox;
+  sandbox.globalThis = sandbox;
+  vm.createContext(sandbox);
+  const augmented =
+    appJsSource +
+    "\n;globalThis.__renderSummaryWith = function (arr) { customers = arr; renderSummary(); };";
+  vm.runInContext(augmented, sandbox);
+  (sandbox.__renderSummaryWith as (a: unknown[]) => void)(customersData);
+  // Return the innerHTML that was written to the #summary element.
+  return elements["summary"]?.innerHTML ?? "";
+}
+
+describe("renderSummary — setup stat cards (trial-scoped)", () => {
+  const base = {
+    name: "Acme",
+    orgCode: "acme",
+    apiBaseUrl: "https://a.test",
+    contactEmail: "",
+    needsUpdate: false,
+    lastStatus: "online",
+    isActive: true,
+    lastSeenAt: null,
+    effectiveTargetVersion: null,
+    agreements: null,
+    hasMgmtSecret: false,
+    plan: null,
+  };
+
+  it("counts a trial customer with partial checklist as 'setup in progress'", () => {
+    const html = renderSummaryWith([
+      { ...base, lifecycleStatus: "trial", checklistProgress: { done: 3, total: 11 } },
+    ]);
+    // Find the stat that contains "Setup in progress" and check its number
+    const match = html.match(/<span class="num">(\d+)<\/span><span class="lbl">Setup in progress<\/span>/);
+    expect(match).toBeTruthy();
+    expect(match![1]).toBe("1");
+  });
+
+  it("does NOT count a paid customer with partial checklist as 'setup in progress'", () => {
+    const html = renderSummaryWith([
+      { ...base, lifecycleStatus: "paid", checklistProgress: { done: 3, total: 11 } },
+    ]);
+    const match = html.match(/<span class="num">(\d+)<\/span><span class="lbl">Setup in progress<\/span>/);
+    expect(match).toBeTruthy();
+    expect(match![1]).toBe("0");
+  });
+
+  it("counts a trial customer with 0 steps done as 'setup not started'", () => {
+    const html = renderSummaryWith([
+      { ...base, lifecycleStatus: "trial", checklistProgress: { done: 0, total: 11 } },
+    ]);
+    const notStartedMatch = html.match(/<span class="num">(\d+)<\/span><span class="lbl">Setup not started<\/span>/);
+    expect(notStartedMatch).toBeTruthy();
+    expect(notStartedMatch![1]).toBe("1");
+    // Must NOT also appear in "in progress"
+    const inProgressMatch = html.match(/<span class="num">(\d+)<\/span><span class="lbl">Setup in progress<\/span>/);
+    expect(inProgressMatch![1]).toBe("0");
+  });
+
+  it("does NOT count a fully-complete trial checklist in either setup stat", () => {
+    const html = renderSummaryWith([
+      { ...base, lifecycleStatus: "trial", checklistProgress: { done: 11, total: 11 } },
+    ]);
+    const inProgress = html.match(/<span class="num">(\d+)<\/span><span class="lbl">Setup in progress<\/span>/);
+    const notStarted = html.match(/<span class="num">(\d+)<\/span><span class="lbl">Setup not started<\/span>/);
+    expect(inProgress![1]).toBe("0");
+    expect(notStarted![1]).toBe("0");
+  });
+
+  it("does NOT count a paid customer with 0 steps as 'setup not started'", () => {
+    const html = renderSummaryWith([
+      { ...base, lifecycleStatus: "paid", checklistProgress: { done: 0, total: 11 } },
+    ]);
+    const notStarted = html.match(/<span class="num">(\d+)<\/span><span class="lbl">Setup not started<\/span>/);
+    expect(notStarted).toBeTruthy();
+    expect(notStarted![1]).toBe("0");
+  });
+
+  it("applies alert class to 'setup in progress' stat when count is non-zero", () => {
+    const html = renderSummaryWith([
+      { ...base, lifecycleStatus: "trial", checklistProgress: { done: 2, total: 11 } },
+    ]);
+    // The stat div should have the 'alert' class when count > 0
+    expect(html).toContain('stat alert');
+    expect(html).toContain("Setup in progress");
+  });
+
+  it("mixed fleet: only trial partial customers are counted", () => {
+    const html = renderSummaryWith([
+      { ...base, lifecycleStatus: "trial", checklistProgress: { done: 2, total: 11 } },  // in progress
+      { ...base, lifecycleStatus: "trial", checklistProgress: { done: 0, total: 11 } },  // not started
+      { ...base, lifecycleStatus: "trial", checklistProgress: { done: 11, total: 11 } }, // complete — excluded
+      { ...base, lifecycleStatus: "paid",  checklistProgress: { done: 5, total: 11 } },  // paid — excluded
+    ]);
+    const inProgress = html.match(/<span class="num">(\d+)<\/span><span class="lbl">Setup in progress<\/span>/);
+    const notStarted = html.match(/<span class="num">(\d+)<\/span><span class="lbl">Setup not started<\/span>/);
+    expect(inProgress![1]).toBe("1");
+    expect(notStarted![1]).toBe("1");
+  });
+});
+
 describe("fleet activity feed escaping", () => {
   it("escapes hostile summary / operator / customer name in the activity feed", async () => {
     const created = await renderActivityWith([
