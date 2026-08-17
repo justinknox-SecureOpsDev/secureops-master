@@ -166,6 +166,53 @@ async function renderActivityWith(changes: unknown[]): Promise<FakeEl[]> {
   return created;
 }
 
+describe("setupProgressCell rendering", () => {
+  it("renders a progress badge for a customer with partial checklist", () => {
+    const { created } = renderWith([
+      {
+        ...baseCustomer,
+        checklistProgress: { done: 6, total: 11 },
+      },
+    ]);
+    const tr = created.find((e) => e.tag === "tr");
+    expect(tr!.innerHTML).toContain("6/11");
+    expect(tr!.innerHTML).toContain("partial");
+  });
+
+  it("renders a complete badge when all steps are done", () => {
+    const { created } = renderWith([
+      {
+        ...baseCustomer,
+        checklistProgress: { done: 11, total: 11 },
+      },
+    ]);
+    const tr = created.find((e) => e.tag === "tr");
+    expect(tr!.innerHTML).toContain("11/11");
+    expect(tr!.innerHTML).toContain("complete");
+  });
+
+  it("renders a dash when checklistProgress is null", () => {
+    const { created } = renderWith([{ ...baseCustomer, checklistProgress: null }]);
+    const tr = created.find((e) => e.tag === "tr");
+    // Should fall back to the muted dash span, no "setup-bar".
+    expect(tr!.innerHTML).toContain("muted small");
+    expect(tr!.innerHTML).not.toContain("setup-bar");
+  });
+
+  it("escapes hostile step counts (progress field is server-controlled numbers, but esc() is applied)", () => {
+    // Done/total are numbers so XSS via them is unrealistic, but the cell goes through esc()
+    // — verify the output is at minimum non-null and renders without throwing.
+    const { created } = renderWith([
+      {
+        ...baseCustomer,
+        checklistProgress: { done: 0, total: 11 },
+      },
+    ]);
+    const tr = created.find((e) => e.tag === "tr");
+    expect(tr!.innerHTML).toContain("0/11");
+  });
+});
+
 describe("fleet activity feed escaping", () => {
   it("escapes hostile summary / operator / customer name in the activity feed", async () => {
     const created = await renderActivityWith([

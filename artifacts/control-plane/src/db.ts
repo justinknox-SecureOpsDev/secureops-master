@@ -10,6 +10,7 @@
 
 import { randomUUID } from "node:crypto";
 import pg from "pg";
+import type { PoolClient } from "pg";
 import { DATABASE_URL } from "./config";
 import { logger } from "./logger";
 
@@ -103,7 +104,87 @@ export async function ensureSchema(): Promise<void> {
        ON control_plane_remote_changes (customer_id, created_at DESC);`,
   );
 
+  // Per-customer onboarding checklist. One row per runbook phase/step; seeded
+  // automatically when a new customer is registered. Operators tick steps off
+  // manually as they work through the runbook — no automated verification.
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS control_plane_onboarding_checklist (
+      id          TEXT PRIMARY KEY,
+      customer_id TEXT NOT NULL REFERENCES control_plane_customers(id) ON DELETE CASCADE,
+      step_key    TEXT NOT NULL,
+      step_label  TEXT NOT NULL,
+      step_order  INTEGER NOT NULL,
+      is_done     BOOLEAN NOT NULL DEFAULT FALSE,
+      done_at     TIMESTAMPTZ,
+      UNIQUE (customer_id, step_key)
+    );
+  `);
+
+  await pool.query(
+    `CREATE INDEX IF NOT EXISTS idx_cp_checklist_customer
+       ON control_plane_onboarding_checklist (customer_id, step_order ASC);`,
+  );
+
   logger.info("[control-plane] schema ensured");
+}
+
+/** The ordered runbook phases that make up the onboarding checklist. */
+export const ONBOARDING_STEPS: ReadonlyArray<{ key: string; label: string; order: number }> = [
+  { key: "phase1_fork", label: "Phase 1 — Fork the template", order: 1 },
+  { key: "phase2_clean_env", label: "Phase 2 — Clean the env copy (env vars, org code, dev DB)", order: 2 },
+  { key: "phase3_secrets", label: "Phase 3 — Secrets & integrations configured", order: 3 },
+  { key: "phase4_publish", label: "Phase 4 — First publish verified (Reserved VM)", order: 4 },
+  { key: "phase5_brand", label: "Phase 5 — Branded in-app (name, colors, logo)", order: 5 },
+  { key: "phase6_domain", label: "Phase 6 — Custom domain configured", order: 6 },
+  {
+    key: "phase7_org_directory",
+    label: "Phase 7 — Org code registered in master directory & master republished",
+    order: 7,
+  },
+  {
+    key: "phase8_fleet_console",
+    label: "Phase 8 — Registered in fleet console with management secret",
+    order: 8,
+  },
+  { key: "phase9_acceptance", label: "Phase 9 — Acceptance checklist passed", order: 9 },
+  {
+    key: "phase10_handover",
+    label: "Phase 10 — Handed over & locked down (demo users deactivated)",
+    order: 10,
+  },
+  { key: "phase11_paid", label: "Phase 11 — Trial → Paid (signed & payment started)", order: 11 },
+];
+
+/**
+ * Seed the default onboarding checklist rows for a newly created customer.
+ * Idempotent (ON CONFLICT DO NOTHING on the (customer_id, step_key) unique
+ * constraint) — safe to call multiple times without creating duplicates.
+ *
+ * Pass a `client` to run this inside an existing transaction (e.g. the same
+ * transaction as the customer INSERT so creation and seeding are atomic).
+ * When `client` is omitted the pool default is used (safe for backfills where
+ * atomicity with a customer INSERT is not required).
+ */
+export async function seedChecklistForCustomer(
+  customerId: string,
+  client?: PoolClient,
+): Promise<void> {
+  if (ONBOARDING_STEPS.length === 0) return;
+  const values = ONBOARDING_STEPS.map((s, i) => {
+    const base = i * 5;
+    return `($${base + 1}, $${base + 2}, $${base + 3}, $${base + 4}, $${base + 5})`;
+  }).join(", ");
+  const params: unknown[] = [];
+  for (const s of ONBOARDING_STEPS) {
+    params.push(randomUUID(), customerId, s.key, s.label, s.order);
+  }
+  const executor = client ?? pool;
+  await executor.query(
+    `INSERT INTO control_plane_onboarding_checklist (id, customer_id, step_key, step_label, step_order)
+     VALUES ${values}
+     ON CONFLICT (customer_id, step_key) DO NOTHING`,
+    params,
+  );
 }
 
 /**
@@ -129,6 +210,15 @@ export async function seedInitialCustomers(): Promise<void> {
       "PLACEHOLDER backend URL — fork not yet created. Replace api_base_url with the real fork/deployment address once the Replit fork exists and a custom domain (or .replit.app URL) is known. See docs/new-customer-setup-runbook.md.",
     ],
   );
+
+  // Backfill checklist rows for every existing customer that doesn't have them
+  // yet (idempotent — seedChecklistForCustomer uses ON CONFLICT DO NOTHING).
+  const { rows } = await pool.query<{ id: string }>(
+    `SELECT id FROM control_plane_customers`,
+  );
+  for (const row of rows) {
+    await seedChecklistForCustomer(row.id);
+  }
 }
 
 export interface CustomerRow {
@@ -154,6 +244,16 @@ export interface CustomerRow {
   is_active: boolean;
   created_at: Date;
   updated_at: Date;
+}
+
+export interface ChecklistRow {
+  id: string;
+  customer_id: string;
+  step_key: string;
+  step_label: string;
+  step_order: number;
+  is_done: boolean;
+  done_at: Date | null;
 }
 
 export interface RemoteChangeRow {

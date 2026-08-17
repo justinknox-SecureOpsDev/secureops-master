@@ -9,7 +9,7 @@
 import { randomUUID } from "node:crypto";
 import { Router } from "express";
 import { z } from "zod";
-import { pool, type CustomerRow } from "../db";
+import { pool, type CustomerRow, type ChecklistRow, seedChecklistForCustomer } from "../db";
 import { encryptSecret } from "../crypto";
 import { isValidOrgCode, normalizeOrgCode, toSafeOrigin } from "../orgCode";
 import { IS_PROD } from "../config";
@@ -106,7 +106,31 @@ export function parseCustomerPlan(
   }
 }
 
-function serialize(row: CustomerRow, fleetTarget: string | null) {
+/** Fetch done/total checklist counts for every customer in one query. */
+async function allChecklistProgress(): Promise<Map<string, { done: number; total: number }>> {
+  const { rows } = await pool.query<{
+    customer_id: string;
+    total: string;
+    done: string;
+  }>(
+    `SELECT customer_id,
+            COUNT(*) AS total,
+            COUNT(*) FILTER (WHERE is_done) AS done
+     FROM control_plane_onboarding_checklist
+     GROUP BY customer_id`,
+  );
+  const map = new Map<string, { done: number; total: number }>();
+  for (const r of rows) {
+    map.set(r.customer_id, { done: Number(r.done), total: Number(r.total) });
+  }
+  return map;
+}
+
+function serialize(
+  row: CustomerRow,
+  fleetTarget: string | null,
+  checklistProgress?: { done: number; total: number },
+) {
   const effectiveTarget = row.target_version ?? fleetTarget;
   const needsUpdate = Boolean(
     effectiveTarget && row.reported_version && row.reported_version !== effectiveTarget,
@@ -134,17 +158,21 @@ function serialize(row: CustomerRow, fleetTarget: string | null) {
     lifecycleStatus: row.lifecycle_status,
     convertedAt: row.converted_at,
     needsUpdate,
+    checklistProgress: checklistProgress ?? null,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   };
 }
 
 customersRouter.get("/customers", async (_req, res) => {
-  const fleetTarget = await fleetTargetVersion();
+  const [fleetTarget, progress] = await Promise.all([
+    fleetTargetVersion(),
+    allChecklistProgress(),
+  ]);
   const { rows } = await pool.query<CustomerRow>(
     `SELECT * FROM control_plane_customers ORDER BY name ASC`,
   );
-  res.json({ customers: rows.map((r) => serialize(r, fleetTarget)) });
+  res.json({ customers: rows.map((r) => serialize(r, fleetTarget, progress.get(r.id))) });
 });
 
 customersRouter.post("/customers", async (req, res) => {
@@ -169,8 +197,12 @@ customersRouter.post("/customers", async (req, res) => {
   const mgmtSecretEnc =
     d.mgmtSecret && d.mgmtSecret.trim().length > 0 ? encryptSecret(d.mgmtSecret.trim()) : null;
 
+  // Customer creation and checklist seeding are wrapped in one transaction so
+  // a customer can never exist without its checklist rows (or vice versa).
+  const client = await pool.connect();
   try {
-    const { rows } = await pool.query<CustomerRow>(
+    await client.query("BEGIN");
+    const { rows } = await client.query<CustomerRow>(
       `INSERT INTO control_plane_customers
          (id, org_code, name, api_base_url, contact_name, contact_email, notes, target_version, mgmt_secret_enc, is_active)
        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9, COALESCE($10, TRUE))
@@ -188,13 +220,24 @@ customersRouter.post("/customers", async (req, res) => {
         d.isActive ?? null,
       ],
     );
-    res.status(201).json({ customer: serialize(rows[0], await fleetTargetVersion()) });
+    // Seed within the same transaction — both rows or neither.
+    await seedChecklistForCustomer(rows[0].id, client);
+    await client.query("COMMIT");
+
+    const [fleetTarget, progress] = await Promise.all([
+      fleetTargetVersion(),
+      allChecklistProgress(),
+    ]);
+    res.status(201).json({ customer: serialize(rows[0], fleetTarget, progress.get(rows[0].id)) });
   } catch (err) {
+    await client.query("ROLLBACK");
     if (err && typeof err === "object" && "code" in err && (err as { code: string }).code === "23505") {
       res.status(409).json({ error: "An org code must be unique" });
       return;
     }
     throw err;
+  } finally {
+    client.release();
   }
 });
 
@@ -275,7 +318,11 @@ customersRouter.put("/customers/:id", async (req, res) => {
       res.status(404).json({ error: "Customer not found" });
       return;
     }
-    res.json({ customer: serialize(rows[0], await fleetTargetVersion()) });
+    const [fleetTarget, progress] = await Promise.all([
+      fleetTargetVersion(),
+      allChecklistProgress(),
+    ]);
+    res.json({ customer: serialize(rows[0], fleetTarget, progress.get(rows[0].id)) });
   } catch (err) {
     if (err && typeof err === "object" && "code" in err && (err as { code: string }).code === "23505") {
       res.status(409).json({ error: "An org code must be unique" });
@@ -294,6 +341,62 @@ customersRouter.delete("/customers/:id", async (req, res) => {
     return;
   }
   res.json({ ok: true });
+});
+
+// ---- Onboarding checklist ----
+
+/** GET /customers/:id/checklist — return all steps for this customer. */
+customersRouter.get("/customers/:id/checklist", async (req, res) => {
+  const { rows } = await pool.query<ChecklistRow>(
+    `SELECT * FROM control_plane_onboarding_checklist
+     WHERE customer_id = $1
+     ORDER BY step_order ASC`,
+    [req.params.id],
+  );
+  res.json({
+    checklist: rows.map((r) => ({
+      stepKey: r.step_key,
+      stepLabel: r.step_label,
+      stepOrder: r.step_order,
+      isDone: r.is_done,
+      doneAt: r.done_at,
+    })),
+  });
+});
+
+const toggleChecklistSchema = z.object({
+  isDone: z.boolean(),
+});
+
+/** PUT /customers/:id/checklist/:stepKey — mark a step done or undone. */
+customersRouter.put("/customers/:id/checklist/:stepKey", async (req, res) => {
+  const parsed = toggleChecklistSchema.safeParse(req.body);
+  if (!parsed.success) {
+    res.status(400).json({ error: "Expected { isDone: boolean }" });
+    return;
+  }
+  const { isDone } = parsed.data;
+  const { rows } = await pool.query<ChecklistRow>(
+    `UPDATE control_plane_onboarding_checklist
+     SET is_done = $1, done_at = $2
+     WHERE customer_id = $3 AND step_key = $4
+     RETURNING *`,
+    [isDone, isDone ? new Date() : null, req.params.id, req.params.stepKey],
+  );
+  if (rows.length === 0) {
+    res.status(404).json({ error: "Checklist step not found" });
+    return;
+  }
+  const r = rows[0];
+  res.json({
+    step: {
+      stepKey: r.step_key,
+      stepLabel: r.step_label,
+      stepOrder: r.step_order,
+      isDone: r.is_done,
+      doneAt: r.done_at,
+    },
+  });
 });
 
 customersRouter.post("/customers/poll", async (_req, res) => {

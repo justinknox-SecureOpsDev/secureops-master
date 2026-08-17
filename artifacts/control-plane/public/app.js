@@ -282,6 +282,14 @@ function renderSummary() {
     '<div class="stat"><span class="num small-num">' + esc(tierSub) + '</span><span class="lbl">Plan tiers</span></div>';
 }
 
+function setupProgressCell(c) {
+  var p = c.checklistProgress;
+  if (!p) return "<span class='muted small'>\u2014</span>";
+  var cls = p.total === 0 ? "" : p.done === p.total ? "complete" : p.done > 0 ? "partial" : "";
+  return "<span class='setup-bar " + cls + "' title='" + esc(p.done + " of " + p.total + " onboarding steps done") + "'>" +
+    esc(p.done + "/" + p.total) + "</span>";
+}
+
 function renderFleet() {
   const body = $("fleet-body");
   body.innerHTML = "";
@@ -297,6 +305,7 @@ function renderFleet() {
       "<td class='small'><a href='" + esc(c.apiBaseUrl) + "' target='_blank' rel='noopener'>" + esc(c.apiBaseUrl) + "</a></td>" +
       "<td>" + statusBadge(c) + "</td>" +
       "<td>" + lifecycleBadge(c) + "</td>" +
+      "<td class='setup-cell small'>" + setupProgressCell(c) + "</td>" +
       "<td class='small'>" + agreementsCell(c) + "</td>" +
       "<td class='small'>" + planCell(c) + "</td>" +
       "<td class='small'>" + versionCell + "</td>" +
@@ -545,14 +554,144 @@ async function deleteCustomer(c) {
 
 // ---- Remote settings ----
 let settingsCustomer = null;
+// Monotonically-increasing generation counter. Incremented each time
+// openSettings() is called so that any in-flight checklist fetches or
+// toggle callbacks started for a previous customer can detect they are stale
+// and discard their results instead of overwriting the current modal.
+let settingsGeneration = 0;
+
+// ---- Onboarding checklist ----
+
+/** Render the checklist section into `settings-checklist` element. */
+function renderChecklist(steps) {
+  var el = $("settings-checklist");
+  if (!el) return;
+  var done = steps.filter(function (s) { return s.isDone; }).length;
+  var total = steps.length;
+  var progCls = total === 0 ? "" : done === total ? "prog-done" : "";
+  var html = "<h3>Onboarding checklist</h3>";
+  html += "<p class='checklist-progress'><span class='" + progCls + "'>" + done + "</span> / <span class='prog-all'>" + total + "</span> steps complete</p>";
+  html += "<div class='checklist' id='checklist-items'>";
+  steps.forEach(function (s) {
+    var doneCls = s.isDone ? " done" : "";
+    var doneAt = s.isDone && s.doneAt ? "<span class='checklist-done-at'>" + esc(fmtDate(s.doneAt)) + "</span>" : "";
+    html +=
+      "<label class='checklist-item" + doneCls + "' data-step-key='" + esc(s.stepKey) + "'>" +
+      "<input type='checkbox'" + (s.isDone ? " checked" : "") + " data-step='" + esc(s.stepKey) + "'>" +
+      "<span class='checklist-label'>" + esc(s.stepLabel) + "</span>" +
+      doneAt +
+      "</label>";
+  });
+  html += "</div>";
+  el.innerHTML = html;
+
+  // Wire up toggle handlers.
+  el.querySelectorAll("input[data-step]").forEach(function (chk) {
+    chk.addEventListener("change", function () {
+      var stepKey = chk.getAttribute("data-step");
+      toggleChecklistStep(stepKey, chk.checked, chk);
+    });
+  });
+}
+
+/**
+ * Load and render the onboarding checklist for customer `c`.
+ * `gen` must equal `settingsGeneration` at each await boundary; if the modal
+ * has been switched to a different customer in the meantime the result is
+ * silently discarded to prevent cross-customer data bleeding into the UI.
+ */
+async function loadChecklist(c, gen) {
+  var el = $("settings-checklist");
+  if (!el) return;
+  el.innerHTML = "<p class='muted small'>Loading checklist\u2026</p>";
+  try {
+    var data = await api("/customers/" + c.id + "/checklist");
+    // Discard if the modal moved to a different customer while we were waiting.
+    if (settingsGeneration !== gen) return;
+    renderChecklist(data.checklist || []);
+  } catch (err) {
+    if (settingsGeneration !== gen) return;
+    el.innerHTML = "<p class='muted small'>Could not load checklist: " + esc(err.message) + "</p>";
+  }
+}
+
+async function toggleChecklistStep(stepKey, isDone, chkEl) {
+  if (!settingsCustomer) return;
+  // Capture both the customer ID and modal generation at the moment the toggle
+  // fires. Any await that follows could let the user switch to a different
+  // customer; if that happens we discard the result rather than writing it into
+  // the wrong customer's modal or fleet row.
+  var capturedId = settingsCustomer.id;
+  var capturedGen = settingsGeneration;
+  // Optimistic: disable while saving.
+  chkEl.disabled = true;
+  try {
+    var data = await api("/customers/" + capturedId + "/checklist/" + encodeURIComponent(stepKey), {
+      method: "PUT",
+      body: JSON.stringify({ isDone: isDone }),
+    });
+    // Bail if the modal has moved to a different customer.
+    if (settingsGeneration !== capturedGen) return;
+    // Re-render the toggled item from server truth.
+    var el = $("settings-checklist");
+    if (el) {
+      var itemEl = el.querySelector("[data-step-key='" + stepKey + "']");
+      if (itemEl) {
+        itemEl.className = "checklist-item" + (data.step.isDone ? " done" : "");
+        var existing = itemEl.querySelector(".checklist-done-at");
+        if (existing) existing.remove();
+        if (data.step.isDone && data.step.doneAt) {
+          var span = document.createElement("span");
+          span.className = "checklist-done-at";
+          span.textContent = fmtDate(data.step.doneAt);
+          itemEl.appendChild(span);
+        }
+      }
+    }
+    // Refresh the progress counter.
+    var progress = await api("/customers/" + capturedId + "/checklist");
+    // Check again after the second await.
+    if (settingsGeneration !== capturedGen) return;
+    var steps = progress.checklist || [];
+    var done = steps.filter(function (s) { return s.isDone; }).length;
+    var total = steps.length;
+    var progEl = el && el.querySelector(".checklist-progress");
+    if (progEl) {
+      var progCls = total === 0 ? "" : done === total ? "prog-done" : "";
+      progEl.innerHTML = "<span class='" + progCls + "'>" + done + "</span> / <span class='prog-all'>" + total + "</span> steps complete";
+    }
+    // Update the fleet table row for this specific customer (by captured ID,
+    // not `settingsCustomer` which may now point at another customer).
+    var idx = customers.findIndex(function (x) { return x.id === capturedId; });
+    if (idx !== -1) {
+      customers[idx].checklistProgress = { done: done, total: total };
+      renderFleet();
+    }
+  } catch (err) {
+    toast("Could not save: " + err.message, true);
+    // Only revert the checkbox if we're still showing the same customer.
+    if (settingsGeneration === capturedGen) chkEl.checked = !isDone;
+  } finally {
+    chkEl.disabled = false;
+  }
+}
 
 async function openSettings(c) {
   settingsCustomer = c;
-  $("settings-title").childNodes[0].textContent = "Remote settings — " + c.name + " ";
+  // Increment the modal generation so any in-flight load from the previous
+  // customer can detect it is stale and discard its results.
+  var myGen = ++settingsGeneration;
+  $("settings-title").childNodes[0].textContent = "Remote settings \u2014 " + c.name + " ";
   $("settings-lifecycle").innerHTML = lifecycleBadge(c);
-  $("settings-body").innerHTML = "Loading…";
+  $("settings-body").innerHTML = "Loading\u2026";
+  $("settings-checklist").innerHTML = "";
   $("settings-modal").hidden = false;
   $("settings-history").innerHTML = "";
+
+  // Load checklist independently of the mgmt-secret gate; pass generation so
+  // stale results are discarded if the user switches customers quickly.
+  loadChecklist(c, myGen);
+
   if (!c.hasMgmtSecret) {
     $("settings-body").innerHTML =
       "<p class='muted'>No management secret is configured for this customer. Add one via Edit to manage brand, features &amp; plan/billing remotely.</p>";
