@@ -1331,6 +1331,39 @@ paths:
               schema:
                 $ref: "#/components/schemas/TimeEntry"
 
+  /time-entries/{id}/times:
+    patch:
+      operationId: updateTimeEntryTimes
+      tags: [timeEntries]
+      summary: Correct a time entry's clock-in / clock-out timestamps
+      description: |
+        Admins may correct any entry; site managers may only correct entries at
+        sites they manage (403 otherwise). Unlike PATCH /time-entries/{id}/clock-out
+        (which only FILLS a missing clock-out), this overwrites already-set
+        timestamps. Provide clockInTime and/or clockOutTime — at least one is
+        required. Hours are recomputed server-side, last-edited provenance is
+        stamped, any pending correction request is resolved, and an approved
+        entry's weekly client invoice is re-synced.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpdateTimeEntryTimesRequest"
+      responses:
+        "200":
+          description: Corrected time entry
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TimeEntry"
+
   /payroll:
     get:
       operationId: getPayrollEntries
@@ -5008,6 +5041,20 @@ components:
         hoursWorked: { type: number, description: "Optional override (e.g. correct logged hours)" }
         notes: { type: string }
       required: [decision]
+
+    UpdateTimeEntryTimesRequest:
+      type: object
+      description: "At least one of clockInTime / clockOutTime must be provided."
+      properties:
+        clockInTime:
+          type: string
+          format: date-time
+          description: "Corrected clock-in as an ISO timestamp."
+        clockOutTime:
+          type: string
+          format: date-time
+          description: "Corrected clock-out as an ISO timestamp. Cannot be cleared here."
+        notes: { type: string }
 
     GeneratePayrollRequest:
       type: object

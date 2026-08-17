@@ -2,7 +2,7 @@ import { Router, type IRouter, type Response } from "express";
 import { eq, and, gte, lte, ne, isNull, inArray, sql, desc } from "drizzle-orm";
 import { db, timeEntriesTable, shiftsTable, usersTable, sitesTable, shiftAssignmentsTable, licensesTable } from "@workspace/db";
 import { requireAuth, requireAdmin, requireAdminOrDispatcher, requireAdminOrSiteManager, requireStaff } from "../middlewares/auth";
-import { upsertWeeklyInvoiceForTimeEntry } from "../lib/invoiceSync";
+import { upsertWeeklyInvoiceForTimeEntry, weekStartIsoBusiness } from "../lib/invoiceSync";
 import { pushClockEvent } from "../lib/schedulerSync";
 import { getEffectiveLevel } from "../lib/eligibility";
 import { buildTimeEntryAuditMetadata, timeEntrySnapshot } from "../lib/timeEntryAudit";
@@ -345,6 +345,27 @@ const baseSelect = {
   billRate: shiftsTable.billRate,
   employeeName: sql<string>`${usersTable.firstName} || ' ' || ${usersTable.lastName}`,
 };
+
+// Re-read a just-mutated entry through the SAME projection and finance
+// sanitizer the list route uses, so a mutation response can never expose a
+// field the list withholds.
+//
+// Returning the raw `time_entries` row instead (spread straight from
+// .returning()) leaks columns that are deliberately absent from baseSelect —
+// notably payRateOverride, which is a pay value, and the last-editor
+// provenance columns. Site managers can now reach these routes and must never
+// see any rate, so the response shape has to be derived from one contract
+// rather than hand-assembled per route.
+async function selectTimeEntryForResponse(id: string, role: string | undefined) {
+  const [row] = await db
+    .select(baseSelect)
+    .from(timeEntriesTable)
+    .leftJoin(shiftsTable, eq(timeEntriesTable.shiftId, shiftsTable.id))
+    .leftJoin(sitesTable, sql`${sitesTable.id} = coalesce(${timeEntriesTable.siteId}, ${shiftsTable.siteId})`)
+    .leftJoin(usersTable, eq(timeEntriesTable.employeeId, usersTable.id))
+    .where(eq(timeEntriesTable.id, id));
+  return row ? stripTimeEntryBillRateForRole(role, row) : null;
+}
 
 // Haversine distance in miles between two lat/lng points.
 function haversineMiles(lat1: number, lng1: number, lat2: number, lng2: number): number {
@@ -1281,16 +1302,7 @@ router.patch("/time-entries/:id/clock-out", requireAdminOrSiteManager, async (re
       ));
   }
 
-  const [shift] = updated.shiftId
-    ? await db.select().from(shiftsTable).where(eq(shiftsTable.id, updated.shiftId))
-    : [undefined];
-  const [user] = await db.select().from(usersTable).where(eq(usersTable.id, updated.employeeId));
-
-  res.json({
-    ...updated,
-    shiftTitle: shift?.title,
-    employeeName: user ? `${user.firstName} ${user.lastName}` : null,
-  });
+  res.json(await selectTimeEntryForResponse(updated.id, req.user!.role));
 });
 
 // Admin (globally) or site manager (at sites they manage) corrects the
@@ -1391,6 +1403,15 @@ router.patch("/time-entries/:id/times", requireAdminOrSiteManager, async (req, r
   // corrected hours flow through (best-effort, matches the approve route).
   if (updated.approvalStatus === "approved") {
     void upsertWeeklyInvoiceForTimeEntry(updated);
+    // A correction can move the entry into a DIFFERENT business week (the date
+    // is editable, not just the time of day). Invoices are keyed on
+    // (site, weekStart), so syncing only the new week leaves the old week's
+    // invoice still billing the pre-correction hours. Rebuild it too — the
+    // upsert recomputes that week from the rows that remain, which no longer
+    // include this entry.
+    if (weekStartIsoBusiness(existing.clockInTime) !== weekStartIsoBusiness(updated.clockInTime)) {
+      void upsertWeeklyInvoiceForTimeEntry(existing);
+    }
   }
 
   // Mirror the clock-out endpoints' shift-completion flip: if this correction
@@ -1411,16 +1432,7 @@ router.patch("/time-entries/:id/times", requireAdminOrSiteManager, async (req, r
       ));
   }
 
-  const [shift] = updated.shiftId
-    ? await db.select().from(shiftsTable).where(eq(shiftsTable.id, updated.shiftId))
-    : [undefined];
-  const [user] = await db.select().from(usersTable).where(eq(usersTable.id, updated.employeeId));
-
-  res.json({
-    ...updated,
-    shiftTitle: shift?.title,
-    employeeName: user ? `${user.firstName} ${user.lastName}` : null,
-  });
+  res.json(await selectTimeEntryForResponse(updated.id, req.user!.role));
 });
 
 // Officer confirms (optionally edits) their own clocked-out time entry.

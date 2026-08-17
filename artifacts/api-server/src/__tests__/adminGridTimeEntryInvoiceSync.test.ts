@@ -520,3 +520,56 @@ describe("admin grid DELETE /admin/tables/time_entries/:id — invoice sync on d
     expect(rows).toHaveLength(0);
   });
 });
+
+// The correction route lets an approver edit the DATE, not just the time of
+// day, so an approved entry can hop business weeks. Invoices are keyed on
+// (site, weekStart): syncing only the destination week would leave the origin
+// week still billing hours that moved out of it.
+describe("PATCH /time-entries/:id/times — invoice sync on a cross-week correction", () => {
+  it("re-syncs the OLD week's invoice when a correction moves an approved entry to another week", async () => {
+    const PREV_CLOCK_IN = new Date("2025-04-01T14:00:00.000Z"); // week before BASE_CLOCK_IN
+    const PREV_WEEK_START = weekStartIsoBusiness(PREV_CLOCK_IN);
+    const [entry] = await db
+      .insert(timeEntriesTable)
+      .values({
+        employeeId: ctx.officerId,
+        shiftId: ctx.shiftId,
+        siteId: ctx.siteId,
+        clockInTime: PREV_CLOCK_IN,
+        clockOutTime: new Date(PREV_CLOCK_IN.getTime() + 4 * 3600_000),
+        hoursWorked: "4.00",
+        approvalStatus: "approved",
+      })
+      .returning({ id: timeEntriesTable.id });
+
+    // A draft for the OLD week that still bills the pre-correction hours.
+    await db.insert(invoicesTable).values({
+      invoiceNumber: `${TAG}-times-prev-draft`,
+      clientId: ctx.clientId,
+      siteId: ctx.siteId,
+      periodStart: PREV_WEEK_START,
+      periodEnd: PREV_WEEK_START,
+      clientName: `${TAG}-client`,
+      lineItems: [{ description: "Officer", hours: 4, rate: 50, amount: 200 }],
+      subtotal: "200",
+      taxAmount: "0",
+      totalAmount: "200",
+      status: "draft",
+      dueDate: "2025-04-30",
+      autoSynced: true,
+    });
+
+    const res = await request(app)
+      .patch(`/api/time-entries/${entry.id}/times`)
+      .set(authed())
+      .send({ clockInTime: BASE_CLOCK_IN.toISOString(), clockOutTime: BASE_CLOCK_OUT.toISOString() });
+    expect(res.status).toBe(200);
+
+    // No approved entry remains in the old week, so its auto-synced draft goes.
+    expect(await waitForNoInvoice(ctx.siteId, PREV_WEEK_START, 3000)).toBe(true);
+
+    // ...and the destination week picks the corrected hours up.
+    const moved = await waitForInvoice(ctx.siteId, WEEK_START, (inv) => Number(inv.totalAmount) > 0, 3000);
+    expect(moved).toBeDefined();
+  });
+});

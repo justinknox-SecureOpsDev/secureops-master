@@ -12,6 +12,7 @@ import {
   timeEntriesTable,
   invoicesTable,
   auditLogsTable,
+  siteManagersTable,
 } from "@workspace/db";
 import app from "../app";
 import { signToken } from "../middlewares/auth";
@@ -29,10 +30,14 @@ type Ctx = {
   clientId: string;
   siteId: string;
   shiftId: string;
+  onSiteManagerId: string; // manages ctx.siteId
+  offSiteManagerId: string; // manages nothing
+  onSiteManagerToken: string;
+  offSiteManagerToken: string;
 };
 const ctx = {} as Ctx;
 
-async function makeUser(role: "admin" | "employee", suffix: string): Promise<string> {
+async function makeUser(role: "admin" | "employee" | "site_manager", suffix: string): Promise<string> {
   const [row] = await db
     .insert(usersTable)
     .values({
@@ -59,12 +64,14 @@ async function insertEntry(opts: {
   clockOut?: Date | null;
   hours?: string | null;
   approvalStatus?: "pending" | "approved" | "rejected";
+  /** Detach from both site and shift, so the entry resolves to no site at all. */
+  siteless?: boolean;
 }): Promise<string> {
   const [row] = await db
     .insert(timeEntriesTable)
     .values({
-      shiftId: ctx.shiftId,
-      siteId: ctx.siteId,
+      shiftId: opts.siteless ? null : ctx.shiftId,
+      siteId: opts.siteless ? null : ctx.siteId,
       employeeId: ctx.officerId,
       clockInTime: opts.clockIn ?? BASE_CLOCK_IN,
       clockOutTime: opts.clockOut === undefined ? BASE_CLOCK_OUT : opts.clockOut,
@@ -112,11 +119,21 @@ beforeAll(async () => {
     })
     .returning({ id: shiftsTable.id });
   ctx.shiftId = shift.id;
+
+  // Two site managers: one assigned to the entry's site, one assigned to
+  // nothing. The pair pins the per-site boundary on the correction route —
+  // holding the role is not the same as having reach.
+  ctx.onSiteManagerId = await makeUser("site_manager", "mgr-on");
+  ctx.offSiteManagerId = await makeUser("site_manager", "mgr-off");
+  ctx.onSiteManagerToken = signToken({ userId: ctx.onSiteManagerId, email: `${TAG}-mgr-on@example.test`, role: "site_manager" });
+  ctx.offSiteManagerToken = signToken({ userId: ctx.offSiteManagerId, email: `${TAG}-mgr-off@example.test`, role: "site_manager" });
+  await db.insert(siteManagersTable).values([{ siteId: ctx.siteId, userId: ctx.onSiteManagerId }]);
 });
 
 afterAll(async () => {
   await db.execute(sql`DELETE FROM invoices WHERE client_id = ${ctx.clientId}::uuid`);
   await db.execute(sql`DELETE FROM time_entries WHERE employee_id = ${ctx.officerId}::uuid`);
+  await db.execute(sql`DELETE FROM site_managers WHERE site_id = ${ctx.siteId}::uuid`);
   await db.execute(sql`DELETE FROM shifts WHERE site_id = ${ctx.siteId}::uuid`);
   await db.execute(sql`DELETE FROM sites WHERE id = ${ctx.siteId}::uuid`);
   await db.execute(sql`DELETE FROM clients WHERE id = ${ctx.clientId}::uuid`);
@@ -164,6 +181,95 @@ describe("PATCH /time-entries/:id/times — admin timestamp correction", () => {
         .set(authed(ctx.employeeToken))
         .send({ clockOutTime: BASE_CLOCK_OUT.toISOString() });
       expect(res.status).toBe(403);
+    });
+  });
+
+  // Site managers correct clock times from the mobile app, but only for the
+  // sites they are assigned to. The role middleware alone proves the role, not
+  // the reach — without the per-entry site assertion any manager could rewrite
+  // hours at every site in the company, silently and with no error surfaced.
+  describe("site manager scoping", () => {
+    const CORRECTED_OUT = new Date("2025-03-04T19:30:00.000Z"); // +5.5h from BASE_CLOCK_IN
+
+    it("lets a manager of the entry's site correct the times", async () => {
+      const id = await insertEntry({});
+      const res = await request(app)
+        .patch(`/api/time-entries/${id}/times`)
+        .set(authed(ctx.onSiteManagerToken))
+        .send({ clockOutTime: CORRECTED_OUT.toISOString() });
+
+      expect(res.status).toBe(200);
+      const [row] = await db.select().from(timeEntriesTable).where(eq(timeEntriesTable.id, id));
+      expect(row.clockOutTime?.toISOString()).toBe(CORRECTED_OUT.toISOString());
+      expect(parseFloat(row.hoursWorked ?? "0")).toBeCloseTo(5.5, 2);
+      expect(row.lastEditedByUserId).toBe(ctx.onSiteManagerId);
+    });
+
+    it("refuses a manager who does not manage the entry's site, leaving times untouched", async () => {
+      const id = await insertEntry({});
+      const res = await request(app)
+        .patch(`/api/time-entries/${id}/times`)
+        .set(authed(ctx.offSiteManagerToken))
+        .send({ clockOutTime: CORRECTED_OUT.toISOString() });
+
+      expect(res.status).toBe(403);
+      const [row] = await db.select().from(timeEntriesTable).where(eq(timeEntriesTable.id, id));
+      expect(row.clockOutTime?.toISOString()).toBe(BASE_CLOCK_OUT.toISOString());
+      expect(row.lastEditedByUserId).toBeNull();
+    });
+
+    it("refuses a manager on an entry with no resolvable site", async () => {
+      const id = await insertEntry({ siteless: true });
+      const res = await request(app)
+        .patch(`/api/time-entries/${id}/times`)
+        .set(authed(ctx.onSiteManagerToken))
+        .send({ clockOutTime: CORRECTED_OUT.toISOString() });
+
+      expect(res.status).toBe(403);
+    });
+
+    // Site managers must never see any rate. The mutation response is built
+    // from the same projection + sanitizer as the list route; returning the
+    // raw updated row would hand them payRateOverride and last-editor details.
+    it("does not leak rate or last-editor fields to a site manager", async () => {
+      const id = await insertEntry({});
+      await db.update(timeEntriesTable).set({ payRateOverride: "33.00" }).where(eq(timeEntriesTable.id, id));
+
+      const res = await request(app)
+        .patch(`/api/time-entries/${id}/times`)
+        .set(authed(ctx.onSiteManagerToken))
+        .send({ clockOutTime: CORRECTED_OUT.toISOString() });
+
+      expect(res.status).toBe(200);
+      expect(res.body).not.toHaveProperty("payRateOverride");
+      expect(res.body).not.toHaveProperty("payRate");
+      expect(res.body).not.toHaveProperty("billRate");
+      expect(res.body).not.toHaveProperty("lastEditedByEmail");
+      // The operational fields the mobile approval screen renders still arrive.
+      expect(res.body.hoursWorked).toBe("5.50");
+      expect(res.body.employeeName).toBeTruthy();
+    });
+
+    it("still returns rates to an admin correcting the same entry", async () => {
+      const id = await insertEntry({});
+      const res = await request(app)
+        .patch(`/api/time-entries/${id}/times`)
+        .set(authed(ctx.adminToken))
+        .send({ clockOutTime: CORRECTED_OUT.toISOString() });
+
+      expect(res.status).toBe(200);
+      expect(res.body.payRate).toBe("20.00");
+      expect(res.body.billRate).toBe("40.00");
+    });
+
+    it("still lets an admin correct an entry with no resolvable site", async () => {
+      const id = await insertEntry({ siteless: true });
+      const res = await request(app)
+        .patch(`/api/time-entries/${id}/times`)
+        .set(authed(ctx.adminToken))
+        .send({ clockOutTime: CORRECTED_OUT.toISOString() });
+
+      expect(res.status).toBe(200);
     });
   });
 

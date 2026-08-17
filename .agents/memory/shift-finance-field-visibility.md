@@ -32,3 +32,22 @@ Pinned by `artifacts/api-server/src/__tests__/leadOwnFinance.test.ts`.
 
 **Why:** billRate is commercially sensitive (reveals WCSG's margin over officer pay).
 Officers seeing it is an information-disclosure defect.
+
+## Mutation responses are a second, easily-missed surface
+
+The sanitizer only covers what you pass through it, and it only strips `payRate`/
+`billRate` — which are **joined shift columns, not `time_entries` columns**. So running a
+raw `time_entries` row through `stripTimeEntryBillRateForRole` is a no-op that still
+returns `payRateOverride` (a pay value) plus last-editor provenance.
+
+**The trap:** a route ends with `res.json({ ...updated })` spread straight from
+`.returning()`. That is a different, wider shape than the list route's `baseSelect`
+projection, and it silently bypasses the role sanitizer. It is invisible while the route
+is admin-only, and becomes a leak the moment the route is widened to another role.
+
+**How to apply:** when widening a mutation route to a non-admin role, fixing authorization
+is only half the job — the RESPONSE must be re-derived, not just the guard. Re-read the
+mutated row through the same projection + sanitizer the list route uses (in
+`routes/timeEntries.ts` that is `selectTimeEntryForResponse`) instead of returning
+`.returning()` output. One contract, one sanitizer, so a mutation can never expose a field
+the list withholds.

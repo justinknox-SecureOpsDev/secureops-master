@@ -2640,6 +2640,90 @@ export const ConfirmTimeEntryResponse = zod.object({
 });
 
 /**
+ * Admins may correct any entry; site managers may only correct entries at
+sites they manage (403 otherwise). Unlike PATCH /time-entries/{id}/clock-out
+(which only FILLS a missing clock-out), this overwrites already-set
+timestamps. Provide clockInTime and/or clockOutTime — at least one is
+required. Hours are recomputed server-side, last-edited provenance is
+stamped, any pending correction request is resolved, and an approved
+entry's weekly client invoice is re-synced.
+
+ * @summary Correct a time entry's clock-in / clock-out timestamps
+ */
+export const UpdateTimeEntryTimesParams = zod.object({
+  id: zod.coerce.string(),
+});
+
+export const UpdateTimeEntryTimesBody = zod
+  .object({
+    clockInTime: zod.coerce
+      .date()
+      .optional()
+      .describe("Corrected clock-in as an ISO timestamp."),
+    clockOutTime: zod.coerce
+      .date()
+      .optional()
+      .describe(
+        "Corrected clock-out as an ISO timestamp. Cannot be cleared here.",
+      ),
+    notes: zod.string().optional(),
+  })
+  .describe("At least one of clockInTime \/ clockOutTime must be provided.");
+
+export const UpdateTimeEntryTimesResponse = zod.object({
+  id: zod.string(),
+  shiftId: zod.string(),
+  shiftTitle: zod.string().optional(),
+  employeeId: zod.string(),
+  employeeName: zod.string().optional(),
+  clockInTime: zod.coerce.date(),
+  clockInLat: zod.number().optional(),
+  clockInLng: zod.number().optional(),
+  clockOutTime: zod.coerce.date().optional(),
+  clockOutLat: zod.number().optional(),
+  clockOutLng: zod.number().optional(),
+  hoursWorked: zod.number().optional(),
+  isVerified: zod.boolean(),
+  approvalStatus: zod.enum(["pending", "approved", "rejected"]),
+  approvedAt: zod.coerce.date().optional(),
+  approvedBy: zod.string().optional(),
+  siteId: zod.string().optional(),
+  siteName: zod.string().optional(),
+  payRate: zod.number().optional(),
+  billRate: zod.number().optional(),
+  notes: zod.string().optional(),
+  correctionRequested: zod.boolean().optional(),
+  correctionNote: zod.string().optional(),
+  confirmationStatus: zod
+    .enum(["awaiting_confirmation", "confirmed"])
+    .nullish()
+    .describe(
+      "Officer post-clock-out confirmation state. `awaiting_confirmation`\nmeans the officer must review\/confirm their times before the entry\nenters the normal pending-approval queue. `confirmed` means the\nofficer submitted (or an admin acted on the entry, force-clearing\nit). Null = confirmation not applicable (admin-created, imported,\nor legacy entries).\n",
+    ),
+  originalClockInTime: zod.coerce
+    .date()
+    .nullish()
+    .describe(
+      "GPS\/clock-recorded clock-in captured at clock-out, before any officer edit.",
+    ),
+  originalClockOutTime: zod.coerce
+    .date()
+    .nullish()
+    .describe(
+      "GPS\/clock-recorded clock-out captured at clock-out, before any officer edit.",
+    ),
+  employeeEdited: zod
+    .boolean()
+    .optional()
+    .describe(
+      "True when the officer changed the recorded times during confirmation.",
+    ),
+  employeeEditReason: zod.string().nullish(),
+  confirmedAt: zod.coerce.date().nullish(),
+  createdAt: zod.coerce.date(),
+});
+
+/**
  * @summary Get payroll entries
  */
 export const GetPayrollEntriesQueryParams = zod.object({

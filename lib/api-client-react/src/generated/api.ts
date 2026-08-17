@@ -193,6 +193,7 @@ import type {
   UpdateSiteManagers200,
   UpdateSiteManagersRequest,
   UpdateSiteRequest,
+  UpdateTimeEntryTimesRequest,
   UploadUrlRequest,
   UploadUrlResponse,
   User,
@@ -4986,6 +4987,102 @@ export const useConfirmTimeEntry = <
   TContext
 > => {
   return useMutation(getConfirmTimeEntryMutationOptions(options));
+};
+
+/**
+ * Admins may correct any entry; site managers may only correct entries at
+sites they manage (403 otherwise). Unlike PATCH /time-entries/{id}/clock-out
+(which only FILLS a missing clock-out), this overwrites already-set
+timestamps. Provide clockInTime and/or clockOutTime — at least one is
+required. Hours are recomputed server-side, last-edited provenance is
+stamped, any pending correction request is resolved, and an approved
+entry's weekly client invoice is re-synced.
+
+ * @summary Correct a time entry's clock-in / clock-out timestamps
+ */
+export const getUpdateTimeEntryTimesUrl = (id: string) => {
+  return `/api/time-entries/${id}/times`;
+};
+
+export const updateTimeEntryTimes = async (
+  id: string,
+  updateTimeEntryTimesRequest: UpdateTimeEntryTimesRequest,
+  options?: RequestInit,
+): Promise<TimeEntry> => {
+  return customFetch<TimeEntry>(getUpdateTimeEntryTimesUrl(id), {
+    ...options,
+    method: "PATCH",
+    headers: { "Content-Type": "application/json", ...options?.headers },
+    body: JSON.stringify(updateTimeEntryTimesRequest),
+  });
+};
+
+export const getUpdateTimeEntryTimesMutationOptions = <
+  TError = ErrorType<unknown>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof updateTimeEntryTimes>>,
+    TError,
+    { id: string; data: BodyType<UpdateTimeEntryTimesRequest> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof updateTimeEntryTimes>>,
+  TError,
+  { id: string; data: BodyType<UpdateTimeEntryTimesRequest> },
+  TContext
+> => {
+  const mutationKey = ["updateTimeEntryTimes"];
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof updateTimeEntryTimes>>,
+    { id: string; data: BodyType<UpdateTimeEntryTimesRequest> }
+  > = (props) => {
+    const { id, data } = props ?? {};
+
+    return updateTimeEntryTimes(id, data, requestOptions);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type UpdateTimeEntryTimesMutationResult = NonNullable<
+  Awaited<ReturnType<typeof updateTimeEntryTimes>>
+>;
+export type UpdateTimeEntryTimesMutationBody =
+  BodyType<UpdateTimeEntryTimesRequest>;
+export type UpdateTimeEntryTimesMutationError = ErrorType<unknown>;
+
+/**
+ * @summary Correct a time entry's clock-in / clock-out timestamps
+ */
+export const useUpdateTimeEntryTimes = <
+  TError = ErrorType<unknown>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof updateTimeEntryTimes>>,
+    TError,
+    { id: string; data: BodyType<UpdateTimeEntryTimesRequest> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationResult<
+  Awaited<ReturnType<typeof updateTimeEntryTimes>>,
+  TError,
+  { id: string; data: BodyType<UpdateTimeEntryTimesRequest> },
+  TContext
+> => {
+  return useMutation(getUpdateTimeEntryTimesMutationOptions(options));
 };
 
 /**

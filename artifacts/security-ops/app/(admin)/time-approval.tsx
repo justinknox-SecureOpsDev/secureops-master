@@ -2,7 +2,7 @@ import React, { useState, useMemo } from "react";
 import { useTopPad } from "@/hooks/useTopPad";
 import { View, Text, StyleSheet, FlatList, TouchableOpacity, ActivityIndicator, TextInput, Alert, Platform, Modal, ScrollView } from "react-native";
 import { useColors } from "@/hooks/useColors";
-import { useGetTimeEntries, getGetTimeEntriesQueryKey, useApproveTimeEntry } from "@workspace/api-client-react";
+import { useGetTimeEntries, getGetTimeEntriesQueryKey, useApproveTimeEntry, useUpdateTimeEntryTimes } from "@workspace/api-client-react";
 import { Feather } from "@expo/vector-icons";
 import { useRouter } from "expo-router";
 import { useQueryClient } from "@tanstack/react-query";
@@ -32,6 +32,30 @@ type ReviewEntry = {
   employeeEditReason: string | null;
 };
 
+// Local-time value for the YYYY-MM-DDTHH:MM correction inputs. Matches the
+// convention the shift editor already uses for date/time text fields, so we
+// don't pull in a date-picker dependency for two fields.
+function fmtLocalInput(iso: string | null): string {
+  if (!iso) return "";
+  const d = new Date(iso);
+  if (isNaN(d.getTime())) return "";
+  const pad = (n: number) => String(n).padStart(2, "0");
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+}
+
+// `initial*` snapshots what the inputs were seeded with, so save can send ONLY
+// the field the approver actually touched. The inputs are minute-granular, so
+// round-tripping an untouched field would silently discard the seconds the
+// officer's clock actually recorded.
+type TimeEdit = {
+  id: string;
+  employeeName: string | null;
+  clockIn: string;
+  clockOut: string;
+  initialClockIn: string;
+  initialClockOut: string;
+};
+
 export default function TimeApprovalScreen() {
   const colors = useColors();
   const router = useRouter();
@@ -40,12 +64,14 @@ export default function TimeApprovalScreen() {
   const [filter, setFilter] = useState<typeof FILTERS[number]>("pending");
   const [edits, setEdits] = useState<Record<string, string>>({});
   const [review, setReview] = useState<ReviewEntry | null>(null);
+  const [timeEdit, setTimeEdit] = useState<TimeEdit | null>(null);
 
   const { data: entries, isLoading, refetch } = useGetTimeEntries({}, {
     query: { queryKey: getGetTimeEntriesQueryKey({}) },
   });
 
   const approve = useApproveTimeEntry();
+  const updateTimes = useUpdateTimeEntryTimes();
 
   const visible = useMemo(() => {
     return ((entries ?? []) as any[])
@@ -72,6 +98,43 @@ export default function TimeApprovalScreen() {
       queryClient.invalidateQueries({ queryKey: getGetTimeEntriesQueryKey({}) });
       setEdits((e) => { const n = { ...e }; delete n[id]; return n; });
     }).catch((e: any) => Alert.alert("Failed", e?.response?.data?.message || e?.message || "Approval failed"));
+  };
+
+  // Correct an officer's recorded clock-in / clock-out. Admins may fix any
+  // entry; site managers are restricted server-side to sites they manage and
+  // get a 403 with an explanatory message otherwise, so surface the server's
+  // message rather than a generic failure. Hours are recomputed server-side.
+  const saveTimes = () => {
+    if (!timeEdit) return;
+    const inDate = new Date(timeEdit.clockIn);
+    if (!timeEdit.clockIn || isNaN(inDate.getTime())) {
+      Alert.alert("Check the clock-in", "Use the format YYYY-MM-DDTHH:MM, e.g. 2026-06-01T20:00."); return;
+    }
+    let outIso: string | undefined;
+    if (timeEdit.clockOut) {
+      const outDate = new Date(timeEdit.clockOut);
+      if (isNaN(outDate.getTime())) {
+        Alert.alert("Check the clock-out", "Use the format YYYY-MM-DDTHH:MM, e.g. 2026-06-02T04:00."); return;
+      }
+      if (outDate.getTime() <= inDate.getTime()) {
+        Alert.alert("Check the times", "Clock-out must be after clock-in."); return;
+      }
+      outIso = outDate.toISOString();
+    }
+    // Send only what changed, so an untouched field keeps its recorded seconds.
+    const data: { clockInTime?: string; clockOutTime?: string } = {};
+    if (timeEdit.clockIn !== timeEdit.initialClockIn) data.clockInTime = inDate.toISOString();
+    if (timeEdit.clockOut !== timeEdit.initialClockOut && outIso) data.clockOutTime = outIso;
+    if (!data.clockInTime && !data.clockOutTime) { setTimeEdit(null); return; }
+
+    const editedId = timeEdit.id;
+    updateTimes.mutateAsync({ id: editedId, data } as any).then(() => {
+      queryClient.invalidateQueries({ queryKey: getGetTimeEntriesQueryKey({}) });
+      // Server recomputes hoursWorked — drop any stale local hours override so
+      // the approve field reflects the corrected total.
+      setEdits((e) => { const n = { ...e }; delete n[editedId]; return n; });
+      setTimeEdit(null);
+    }).catch((e: any) => Alert.alert("Couldn't save times", e?.response?.data?.message || e?.message || "Update failed"));
   };
 
   return (
@@ -126,14 +189,44 @@ export default function TimeApprovalScreen() {
                       {item.siteName ?? "Site unknown"}
                     </Text>
                   </View>
-                  <View style={[styles.lvBadge, { backgroundColor: colors.primary + "20", borderColor: colors.primary }]}>
-                    <Text style={{ color: colors.primary, fontSize: 11, fontWeight: "700" }}>${parseFloat(item.payRate ?? "0").toFixed(2)}/h</Text>
-                  </View>
+                  {/* Pay rate is stripped from the response for roles without
+                      finance visibility (e.g. site managers) — render nothing
+                      rather than a misleading $0.00/h. */}
+                  {item.payRate != null && (
+                    <View style={[styles.lvBadge, { backgroundColor: colors.primary + "20", borderColor: colors.primary }]}>
+                      <Text style={{ color: colors.primary, fontSize: 11, fontWeight: "700" }}>${parseFloat(item.payRate).toFixed(2)}/h</Text>
+                    </View>
+                  )}
                 </View>
 
-                <Text style={[styles.line, { color: colors.mutedForeground }]}>
-                  {new Date(item.clockInTime).toLocaleString()} → {item.clockOutTime ? new Date(item.clockOutTime).toLocaleString() : "—"}
-                </Text>
+                <View style={styles.timesRow}>
+                  <Text style={[styles.line, { color: colors.mutedForeground, flex: 1 }]}>
+                    {new Date(item.clockInTime).toLocaleString()} → {item.clockOutTime ? new Date(item.clockOutTime).toLocaleString() : "—"}
+                  </Text>
+                  {filter !== "rejected" && (
+                    <TouchableOpacity
+                      onPress={() => {
+                        const clockIn = fmtLocalInput(item.clockInTime);
+                        const clockOut = fmtLocalInput(item.clockOutTime ?? null);
+                        setTimeEdit({
+                          id: item.id,
+                          employeeName: item.employeeName ?? null,
+                          clockIn,
+                          clockOut,
+                          initialClockIn: clockIn,
+                          initialClockOut: clockOut,
+                        });
+                      }}
+                      style={[styles.editTimesBtn, { borderColor: colors.primary }]}
+                      accessibilityRole="button"
+                      accessibilityLabel={`Edit clock in and out times for ${item.employeeName ?? "this entry"}`}
+                      accessibilityHint="Opens a form to correct the recorded clock-in and clock-out"
+                    >
+                      <Feather name="clock" size={11} color={colors.primary} />
+                      <Text style={{ color: colors.primary, fontSize: 11, fontWeight: "700" }}>Edit times</Text>
+                    </TouchableOpacity>
+                  )}
+                </View>
 
                 {item.confirmationStatus === "awaiting_confirmation" && (
                   <View style={[styles.correctionBox, { backgroundColor: colors.primary + "12", borderColor: colors.primary }]}>
@@ -304,6 +397,69 @@ export default function TimeApprovalScreen() {
           </View>
         </View>
       </Modal>
+
+      <Modal visible={!!timeEdit} transparent animationType="fade" onRequestClose={() => setTimeEdit(null)}>
+        <View style={styles.modalBackdrop}>
+          <View style={[styles.modalCard, { backgroundColor: colors.card, borderColor: colors.border }]}>
+            <View style={[styles.correctionHead, { justifyContent: "space-between" }]}>
+              <View style={styles.correctionHead}>
+                <Feather name="clock" size={14} color={colors.primary} />
+                <Text style={[styles.modalTitle, { color: colors.foreground }]}>Correct clock times</Text>
+              </View>
+              <TouchableOpacity onPress={() => setTimeEdit(null)} accessibilityRole="button" accessibilityLabel="Close time correction" style={{ padding: 4 }}>
+                <Feather name="x" size={18} color={colors.mutedForeground} />
+              </TouchableOpacity>
+            </View>
+            {timeEdit && (
+              <ScrollView style={{ maxHeight: 380 }} contentContainerStyle={{ gap: 14, paddingTop: 10 }} keyboardShouldPersistTaps="handled">
+                <Text style={{ color: colors.mutedForeground, fontSize: 12, lineHeight: 17 }}>
+                  {timeEdit.employeeName
+                    ? `Adjusting ${timeEdit.employeeName}'s recorded times.`
+                    : "Adjusting the recorded times."}{" "}
+                  Hours are recalculated automatically when you save.
+                </Text>
+
+                {([
+                  { key: "clockIn" as const, label: "Clock-in", placeholder: "2026-06-01T20:00" },
+                  { key: "clockOut" as const, label: "Clock-out", placeholder: "2026-06-02T04:00" },
+                ]).map(({ key, label, placeholder }) => (
+                  <View key={key} style={{ gap: 6 }}>
+                    <Text style={[styles.fieldLabel, { color: colors.mutedForeground }]}>{label} (YYYY-MM-DDTHH:MM)</Text>
+                    <TextInput
+                      value={timeEdit[key]}
+                      onChangeText={(v) => setTimeEdit((t) => (t ? { ...t, [key]: v } : t))}
+                      placeholder={placeholder}
+                      placeholderTextColor={colors.mutedForeground}
+                      autoCapitalize="none"
+                      autoCorrect={false}
+                      style={[styles.timeInput, { color: colors.foreground, borderColor: colors.border, backgroundColor: colors.secondary }]}
+                      accessibilityLabel={`${label} time`}
+                    />
+                  </View>
+                ))}
+              </ScrollView>
+            )}
+            <View style={{ flexDirection: "row", gap: 8, marginTop: 14 }}>
+              <TouchableOpacity
+                onPress={() => setTimeEdit(null)}
+                style={[styles.actBtn, { backgroundColor: "transparent", borderWidth: 1, borderColor: colors.border }]}
+                accessibilityRole="button" accessibilityLabel="Cancel time correction">
+                <Text style={[styles.actText, { color: colors.mutedForeground }]}>Cancel</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                onPress={saveTimes}
+                disabled={updateTimes.isPending}
+                style={[styles.actBtn, { backgroundColor: colors.primary, opacity: updateTimes.isPending ? 0.6 : 1 }]}
+                accessibilityRole="button" accessibilityLabel="Save corrected times"
+                accessibilityState={{ disabled: updateTimes.isPending, busy: updateTimes.isPending }}>
+                <Text style={[styles.actText, { color: colors.primaryForeground ?? "#fff" }]}>
+                  {updateTimes.isPending ? "Saving…" : "Save"}
+                </Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
     </View>
   );
 }
@@ -327,6 +483,10 @@ const styles = StyleSheet.create({
   correctionTitle: { fontSize: 12, fontWeight: "700" },
   correctionNote: { fontSize: 13, lineHeight: 18 },
   lvBadge: { paddingHorizontal: 8, paddingVertical: 4, borderRadius: 6, borderWidth: 1 },
+  timesRow: { flexDirection: "row", alignItems: "center", gap: 8 },
+  editTimesBtn: { flexDirection: "row", alignItems: "center", gap: 4, paddingHorizontal: 8, paddingVertical: 5, borderRadius: 6, borderWidth: 1 },
+  fieldLabel: { fontSize: 11, fontWeight: "600" },
+  timeInput: { height: 42, borderWidth: 1, borderRadius: 8, paddingHorizontal: 12, fontSize: 14 },
   editRow: { flexDirection: "row", alignItems: "center", gap: 8, padding: 8, borderRadius: 6, borderWidth: 1 },
   input: { width: 80, height: 36, borderWidth: 1, borderRadius: 6, paddingHorizontal: 10, fontSize: 14, textAlign: "center" },
   actBtn: { flex: 1, flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 6, padding: 10, borderRadius: 8 },

@@ -1462,6 +1462,17 @@ export interface ApproveTimeEntryRequest {
   notes?: string;
 }
 
+/**
+ * At least one of clockInTime / clockOutTime must be provided.
+ */
+export interface UpdateTimeEntryTimesRequest {
+  /** Corrected clock-in as an ISO timestamp. */
+  clockInTime?: string;
+  /** Corrected clock-out as an ISO timestamp. Cannot be cleared here. */
+  clockOutTime?: string;
+  notes?: string;
+}
+
 export interface GeneratePayrollRequest {
   siteId: string;
   /** Monday of the week (YYYY-MM-DD) */
