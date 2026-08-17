@@ -558,10 +558,24 @@ async function markPaid(c) {
 }
 
 async function deleteCustomer(c) {
-  if (!window.confirm("Remove " + c.name + " from the registry? This does not touch their backend.")) return;
-  await api("/customers/" + c.id, { method: "DELETE" });
-  await loadFleet();
-  toast("Removed");
+  var progress = c.checklistProgress;
+  var checklistNote = "";
+  if (progress && progress.done > 0) {
+    checklistNote =
+      "\n\nNote: " + progress.done + " of " + progress.total + " onboarding step" +
+      (progress.total === 1 ? "" : "s") + " " + (progress.done === 1 ? "is" : "are") + " checked off. " +
+      "If you re-add this customer with the same org code, those steps will be restored automatically.";
+  }
+  if (!window.confirm(
+    "Remove " + c.name + " from the registry? This does not touch their backend." + checklistNote
+  )) return;
+  try {
+    await api("/customers/" + c.id, { method: "DELETE" });
+    await loadFleet();
+    toast("Removed");
+  } catch (err) {
+    toast(err.message || "Could not remove customer", true);
+  }
 }
 
 // ---- Remote settings ----

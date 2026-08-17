@@ -125,6 +125,19 @@ export async function ensureSchema(): Promise<void> {
        ON control_plane_onboarding_checklist (customer_id, step_order ASC);`,
   );
 
+  // Checklist archive: preserves done-step state keyed by org_code so that
+  // if a customer record is deleted and re-added with the same org code, the
+  // operator's progress is restored automatically rather than starting fresh.
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS control_plane_checklist_archive (
+      org_code    TEXT NOT NULL,
+      step_key    TEXT NOT NULL,
+      done_at     TIMESTAMPTZ,
+      archived_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+      PRIMARY KEY (org_code, step_key)
+    );
+  `);
+
   logger.info("[control-plane] schema ensured");
 }
 
@@ -154,6 +167,61 @@ export const ONBOARDING_STEPS: ReadonlyArray<{ key: string; label: string; order
   },
   { key: "phase11_paid", label: "Phase 11 — Trial → Paid (signed & payment started)", order: 11 },
 ];
+
+/**
+ * Snapshot the current checklist state for a customer into the archive, keyed
+ * by org_code. Called inside the DELETE transaction so the snapshot is written
+ * before the customer row (and its CASCADE-deleted checklist) disappears.
+ *
+ * This is a FULL SNAPSHOT, not an accumulation: we delete ALL existing archive
+ * rows for this org_code first, then re-insert only the currently-done steps.
+ * This means that if a step was done on a previous record, then explicitly
+ * un-done on the current record before deletion, it will NOT be restored on
+ * re-creation (the archive reflects the last known state, not max-ever state).
+ */
+export async function archiveChecklistForCustomer(
+  customerId: string,
+  orgCode: string,
+  client: PoolClient,
+): Promise<void> {
+  // Clear the old snapshot for this org code first so un-done steps don't linger.
+  await client.query(
+    `DELETE FROM control_plane_checklist_archive WHERE org_code = $1`,
+    [orgCode],
+  );
+  // Insert the current done steps as the new snapshot.
+  await client.query(
+    `INSERT INTO control_plane_checklist_archive (org_code, step_key, done_at, archived_at)
+     SELECT $2, step_key, done_at, now()
+     FROM control_plane_onboarding_checklist
+     WHERE customer_id = $1 AND is_done = true`,
+    [customerId, orgCode],
+  );
+}
+
+/**
+ * After seeding checklist rows for a newly created customer, restore any done
+ * steps that were archived for that org_code (from a previous customer record
+ * with the same org code that was deleted). Only steps that exist in both the
+ * current checklist AND the archive are restored — steps removed from
+ * ONBOARDING_STEPS are ignored.
+ */
+export async function restoreChecklistFromArchive(
+  customerId: string,
+  orgCode: string,
+  client: PoolClient,
+): Promise<number> {
+  const { rowCount } = await client.query(
+    `UPDATE control_plane_onboarding_checklist cl
+     SET is_done = true, done_at = a.done_at
+     FROM control_plane_checklist_archive a
+     WHERE cl.customer_id = $1
+       AND cl.step_key = a.step_key
+       AND a.org_code = $2`,
+    [customerId, orgCode],
+  );
+  return rowCount ?? 0;
+}
 
 /**
  * Seed the default onboarding checklist rows for a newly created customer.

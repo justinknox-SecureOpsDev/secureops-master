@@ -9,7 +9,14 @@
 import { randomUUID } from "node:crypto";
 import { Router } from "express";
 import { z } from "zod";
-import { pool, type CustomerRow, type ChecklistRow, seedChecklistForCustomer } from "../db";
+import {
+  pool,
+  type CustomerRow,
+  type ChecklistRow,
+  seedChecklistForCustomer,
+  archiveChecklistForCustomer,
+  restoreChecklistFromArchive,
+} from "../db";
 import { encryptSecret } from "../crypto";
 import { isValidOrgCode, normalizeOrgCode, toSafeOrigin } from "../orgCode";
 import { IS_PROD } from "../config";
@@ -222,6 +229,9 @@ customersRouter.post("/customers", async (req, res) => {
     );
     // Seed within the same transaction — both rows or neither.
     await seedChecklistForCustomer(rows[0].id, client);
+    // Restore any done steps that were archived when a previous customer with
+    // this org code was deleted. This is a no-op for brand-new org codes.
+    await restoreChecklistFromArchive(rows[0].id, orgCode, client);
     await client.query("COMMIT");
 
     const [fleetTarget, progress] = await Promise.all([
@@ -333,14 +343,50 @@ customersRouter.put("/customers/:id", async (req, res) => {
 });
 
 customersRouter.delete("/customers/:id", async (req, res) => {
-  const { rowCount } = await pool.query(`DELETE FROM control_plane_customers WHERE id = $1`, [
-    req.params.id,
-  ]);
-  if (!rowCount) {
-    res.status(404).json({ error: "Customer not found" });
-    return;
+  // Wrap in a transaction so the archive write and the customer delete are atomic:
+  // if anything fails, neither the archive nor the deletion happens.
+  const client = await pool.connect();
+  try {
+    await client.query("BEGIN");
+
+    // Lock the customer row and fetch org_code + checklist progress before deleting.
+    const { rows: customerRows } = await client.query<{ org_code: string }>(
+      `SELECT org_code FROM control_plane_customers WHERE id = $1 FOR UPDATE`,
+      [req.params.id],
+    );
+    if (customerRows.length === 0) {
+      await client.query("ROLLBACK");
+      res.status(404).json({ error: "Customer not found" });
+      return;
+    }
+    const orgCode = customerRows[0].org_code;
+
+    // Fetch checklist progress for the response (before the CASCADE delete wipes it).
+    const { rows: progressRows } = await client.query<{ done: string; total: string }>(
+      `SELECT COUNT(*) FILTER (WHERE is_done) AS done, COUNT(*) AS total
+       FROM control_plane_onboarding_checklist
+       WHERE customer_id = $1`,
+      [req.params.id],
+    );
+    const progress = progressRows[0]
+      ? { done: Number(progressRows[0].done), total: Number(progressRows[0].total) }
+      : { done: 0, total: 0 };
+
+    // Archive done steps keyed by org_code so they can be restored if the
+    // operator re-adds a customer with the same org code.
+    await archiveChecklistForCustomer(req.params.id, orgCode, client);
+
+    // Delete the customer (CASCADE removes checklist rows).
+    await client.query(`DELETE FROM control_plane_customers WHERE id = $1`, [req.params.id]);
+    await client.query("COMMIT");
+
+    res.json({ ok: true, checklistProgress: progress });
+  } catch (err) {
+    await client.query("ROLLBACK");
+    throw err;
+  } finally {
+    client.release();
   }
-  res.json({ ok: true });
 });
 
 // ---- Onboarding checklist ----
