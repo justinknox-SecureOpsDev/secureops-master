@@ -304,8 +304,9 @@ describe("POST /shifts — per-site create scoping", () => {
       .send(shiftBody(ctx.siteAId));
     expect(res.status).toBe(201);
     expect(res.body.siteId).toBe(ctx.siteAId);
-    // Finance is stripped from a site manager's view even on their own create.
-    expect(res.body).not.toHaveProperty("payRate");
+    // A site manager sees the pay rate on their own create, but never the
+    // client bill rate.
+    expect(res.body).toHaveProperty("payRate");
     expect(res.body).not.toHaveProperty("billRate");
   });
 

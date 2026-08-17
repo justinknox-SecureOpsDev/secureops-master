@@ -231,7 +231,7 @@ describe("PATCH /time-entries/:id/times — admin timestamp correction", () => {
     // Site managers must never see any rate. The mutation response is built
     // from the same projection + sanitizer as the list route; returning the
     // raw updated row would hand them payRateOverride and last-editor details.
-    it("does not leak rate or last-editor fields to a site manager", async () => {
+    it("shows a site manager payRate but never billRate/payRateOverride/last-editor fields", async () => {
       const id = await insertEntry({});
       await db.update(timeEntriesTable).set({ payRateOverride: "33.00" }).where(eq(timeEntriesTable.id, id));
 
@@ -241,8 +241,11 @@ describe("PATCH /time-entries/:id/times — admin timestamp correction", () => {
         .send({ clockOutTime: CORRECTED_OUT.toISOString() });
 
       expect(res.status).toBe(200);
+      // payRate is visible to a site manager — only the client bill rate and
+      // finance-adjacent internals (the override, last-editor identity) are not.
+      expect(res.body).toHaveProperty("payRate");
+      expect(res.body.payRate).toBe("20.00");
       expect(res.body).not.toHaveProperty("payRateOverride");
-      expect(res.body).not.toHaveProperty("payRate");
       expect(res.body).not.toHaveProperty("billRate");
       expect(res.body).not.toHaveProperty("lastEditedByEmail");
       // The operational fields the mobile approval screen renders still arrive.

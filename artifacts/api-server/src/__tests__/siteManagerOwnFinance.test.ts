@@ -311,16 +311,18 @@ describe("GET /employees/:id — site-manager self vs other finance boundary", (
 });
 
 describe("GET /shifts — site-manager finance stripping", () => {
-  it("strips payRate/billRate from shifts for a site manager", async () => {
+  it("shows a site manager the pay rate but strips the client bill rate", async () => {
     const res = await request(app)
       .get("/api/shifts")
       .set(authed(ctx.siteManagerToken));
     expect(res.status).toBe(200);
     const shift = (res.body as Array<Record<string, unknown>>).find((s) => s.id === ctx.shiftId);
     expect(shift).toBeTruthy();
-    expect(shift).not.toHaveProperty("payRate");
+    // payRate and its legacy pay-side alias hourlyRate are both visible; only
+    // the client bill rate and its legacy alias billableRate are stripped.
+    expect(shift).toHaveProperty("payRate");
+    expect(shift!.payRate).toBe("30.00");
     expect(shift).not.toHaveProperty("billRate");
-    expect(shift).not.toHaveProperty("hourlyRate");
     expect(shift).not.toHaveProperty("billableRate");
   });
 });

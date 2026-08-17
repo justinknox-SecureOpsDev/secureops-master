@@ -257,17 +257,19 @@ describe("GET /time-entries — site-manager list scoped to managed sites", () =
     expect(ids).not.toContain(unmanagedEntryId);
   });
 
-  it("never exposes any rate (payRate or billRate) to a site manager", async () => {
+  it("shows a site manager the pay rate but never the client bill rate", async () => {
     // Link the entry to a shift so the joined payRate/billRate are non-null at
-    // the source — proving the strip removes them, not that they were absent.
+    // the source — proving the strip removes billRate specifically, not that
+    // it was absent.
     const shiftId = await makeShiftRow(ctx.siteAId);
     const entryId = await makeClockedOutEntry(ctx.siteAId, shiftId);
 
     const mgrRes = await request(app).get("/api/time-entries").set(authed(ctx.managerToken));
     expect(mgrRes.status).toBe(200);
-    const mgrRow = (mgrRes.body as Array<{ id: string }>).find((r) => r.id === entryId);
+    const mgrRow = (mgrRes.body as Array<{ id: string; payRate?: string }>).find((r) => r.id === entryId);
     expect(mgrRow).toBeDefined();
-    expect(mgrRow).not.toHaveProperty("payRate");
+    expect(mgrRow).toHaveProperty("payRate");
+    expect(mgrRow!.payRate).toBe("30.00");
     expect(mgrRow).not.toHaveProperty("billRate");
 
     // Control: an admin DOES see the rates, confirming they exist at the source.
