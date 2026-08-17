@@ -99,6 +99,12 @@ td.actions { display: flex; gap: 6px; justify-content: flex-end; }
 
 /* ---- Modals ---- */
 .modal { position: fixed; inset: 0; background: rgba(4,7,16,.7); display: flex; align-items: center; justify-content: center; padding: 20px; z-index: 50; }
+/* The `hidden` attribute alone isn't enough here: `.modal` sets `display: flex`
+   as an author rule, which (per CSS cascade origin rules) always outranks the
+   user-agent's own `[hidden] { display: none }`, regardless of specificity.
+   Without this rule both modals render open, on top of everything, all the
+   time. */
+.modal[hidden] { display: none; }
 .modal-card { background: var(--panel); border: 1px solid var(--line); border-radius: 16px; padding: 24px; width: 100%; max-width: 460px; max-height: 90vh; overflow: auto; }
 .modal-card.wide { max-width: 640px; }
 .modal-card h2 { margin: 0 0 8px; font-size: 18px; }

@@ -170,6 +170,17 @@ function statusBadge(c) {
   return '<span class="badge ' + (c.isActive ? cls : "warn") + '">' + label + "</span>";
 }
 
+// Trial/Paid billing lifecycle badge. "Paid" shows the conversion date in its
+// tooltip; "Trial" has no timestamp (never converted, or reverted).
+function lifecycleBadge(c) {
+  var status = c.lifecycleStatus || "trial";
+  if (status === "paid") {
+    var tip = c.convertedAt ? "Converted to paid on " + fmtDate(c.convertedAt) : "Paid";
+    return "<span class='badge ok' title='" + esc(tip) + "'>Paid</span>";
+  }
+  return "<span class='badge warn' title='Trial account — not yet converted to paid'>Trial</span>";
+}
+
 function agreementsCell(c) {
   if (!c.hasMgmtSecret) {
     return "<span class='muted small'>no secret</span>";
@@ -223,6 +234,10 @@ function renderSummary() {
     return c.needsUpdate;
   }).length;
   const unsigned = customers.filter(agreementsIncomplete).length;
+  const trialCount = customers.filter(function (c) {
+    return (c.lifecycleStatus || "trial") === "trial";
+  }).length;
+  const paidCount = total - trialCount;
 
   // Fleet-wide monthly recurring revenue = sum of known monthly prices, plus a
   // count of customers whose price we couldn't read (so the MRR isn't silently
@@ -260,6 +275,7 @@ function renderSummary() {
   $("summary").innerHTML =
     '<div class="stat"><span class="num">' + total + '</span><span class="lbl">Customers</span></div>' +
     '<div class="stat"><span class="num">' + online + '</span><span class="lbl">Online</span></div>' +
+    '<div class="stat"><span class="num">' + paidCount + ' / ' + trialCount + '</span><span class="lbl">Paid / Trial</span></div>' +
     '<div class="stat ' + (needs ? "alert" : "") + '"><span class="num">' + needs + '</span><span class="lbl">Needs update</span></div>' +
     '<div class="stat ' + (unsigned ? "alert" : "") + '"><span class="num">' + unsigned + '</span><span class="lbl">Agreements incomplete</span></div>' +
     '<div class="stat"><span class="num">' + mrrLabel + '</span><span class="lbl">MRR · ' + esc(mrrSub) + '</span></div>' +
@@ -280,6 +296,7 @@ function renderFleet() {
       "<td><code>" + esc(c.orgCode) + "</code></td>" +
       "<td class='small'><a href='" + esc(c.apiBaseUrl) + "' target='_blank' rel='noopener'>" + esc(c.apiBaseUrl) + "</a></td>" +
       "<td>" + statusBadge(c) + "</td>" +
+      "<td>" + lifecycleBadge(c) + "</td>" +
       "<td class='small'>" + agreementsCell(c) + "</td>" +
       "<td class='small'>" + planCell(c) + "</td>" +
       "<td class='small'>" + versionCell + "</td>" +
@@ -293,6 +310,11 @@ function renderFleet() {
     actions.appendChild(btn("Edit", "ghost small", function () {
       openEditor(c);
     }));
+    if ((c.lifecycleStatus || "trial") === "trial") {
+      actions.appendChild(btn("Mark Paid", "ghost small", function () {
+        markPaid(c);
+      }));
+    }
     actions.appendChild(btn("Delete", "ghost small danger", function () {
       deleteCustomer(c);
     }));
@@ -452,8 +474,12 @@ function openEditor(c) {
   $("c-contactEmail").value = c ? c.contactEmail || "" : "";
   $("c-targetVersion").value = c ? c.targetVersion || "" : "";
   $("c-isActive").checked = c ? c.isActive : true;
+  $("c-lifecycleStatus").value = c ? (c.lifecycleStatus || "trial") : "trial";
   $("c-mgmtSecret").value = "";
   $("c-notes").value = c ? c.notes || "" : "";
+  $("lifecycle-hint").textContent = c && c.lifecycleStatus === "paid" && c.convertedAt
+    ? "Converted to paid on " + fmtDate(c.convertedAt) + ". Switching back to Trial clears this date."
+    : "New customers start in Trial. Switching to Paid stamps today as the conversion date.";
   $("secret-hint").textContent = c && c.hasMgmtSecret
     ? "A management secret is set. Leave blank to keep it, or type a new one to replace."
     : "No management secret yet. Set the same value as the customer's CONTROL_PLANE_SHARED_SECRET to manage it remotely.";
@@ -478,6 +504,10 @@ async function submitCustomer(e) {
     isActive: $("c-isActive").checked,
     notes: $("c-notes").value.trim(),
   };
+  // lifecycleStatus is only settable on existing customers (new ones always
+  // start in Trial via the DB default) — omit it from create payloads since
+  // createSchema doesn't accept the field.
+  if (id) payload.lifecycleStatus = $("c-lifecycleStatus").value;
   const secret = $("c-mgmtSecret").value;
   if (secret) payload.mgmtSecret = secret;
   try {
@@ -489,6 +519,20 @@ async function submitCustomer(e) {
   } catch (err) {
     $("modal-error").textContent = err.message;
     $("modal-error").hidden = false;
+  }
+}
+
+async function markPaid(c) {
+  if (!window.confirm("Mark " + c.name + " as Paid? This stamps today's date as their conversion date.")) return;
+  try {
+    await api("/customers/" + c.id, {
+      method: "PUT",
+      body: JSON.stringify({ lifecycleStatus: "paid" }),
+    });
+    await loadFleet();
+    toast(c.name + " is now Paid");
+  } catch (err) {
+    toast(err.message || "Could not update lifecycle status", true);
   }
 }
 
@@ -504,7 +548,8 @@ let settingsCustomer = null;
 
 async function openSettings(c) {
   settingsCustomer = c;
-  $("settings-title").textContent = "Remote settings — " + c.name;
+  $("settings-title").childNodes[0].textContent = "Remote settings — " + c.name + " ";
+  $("settings-lifecycle").innerHTML = lifecycleBadge(c);
   $("settings-body").innerHTML = "Loading…";
   $("settings-modal").hidden = false;
   $("settings-history").innerHTML = "";

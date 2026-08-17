@@ -100,6 +100,8 @@ Log in as the admin → **Platform → Branding**. Set company name, short name,
 
 In the control plane, add the customer: name, org code, backend address, and the `mgmtSecret` = the exact `CONTROL_PLANE_SHARED_SECRET` value you generated in Phase 3. Until both sides hold the same secret, the customer backend simply ignores control-plane requests (safe default).
 
+Every new registration starts with a **Trial** lifecycle badge — that's expected even for a customer who's already committed to buying. Leave it as Trial until they've actually signed and started paying, then flip it in Phase 11.
+
 ## Phase 9 — Acceptance checklist (10 min)
 
 Run through every line before handover:
@@ -114,6 +116,13 @@ Run through every line before handover:
 - [ ] Upload a document (e.g. a license) — it saves and re-opens
 - [ ] Org code resolves from the master directory (Phase 7, step 3)
 - [ ] Customer appears healthy in the control plane
+- [ ] Run the config preflight from a Shell **inside the fork**:
+      `pnpm --filter @workspace/scripts run check-tenant-config`.
+      It checks the fork's own production environment (database, session
+      secret, org identity, object storage, email, Twilio, control-plane
+      secret, brand env defaults) and prints every gap at once — fix any
+      line marked `FAIL` before telling the customer they're live; lines
+      marked `WARN` are worth a look but don't block handover.
 
 ## Phase 10 — Handover & lockdown (10 min)
 
@@ -121,6 +130,20 @@ Run through every line before handover:
 2. The demo staff accounts (`officer@` / `lead@` / `guest@secureops.com`) are seeded for testing. Once the customer is live, set `SEED_DEMO_USERS=false` in production env and republish, then deactivate those demo users in the Users grid.
 3. Confirm who holds super-admin (`SUPER_ADMIN_EMAILS`) — that's who can change branding and platform settings.
 4. Send them the legal docs (`legal/` folder: Master Subscription Agreement + User Agreement).
+
+## Phase 11 — Flip Trial → Paid (once they sign)
+
+The fleet console tracks each customer's billing lifecycle (Trial or Paid) —
+a manual status flag, not in-app billing. New registrations always start in
+**Trial** (Phase 8). Once the customer signs and starts paying:
+
+1. Open the control plane dashboard → find the customer's row.
+2. Click **Mark Paid** (shown only while a customer is in Trial), or open
+   **Edit** and switch the Lifecycle field to Paid.
+3. This stamps a conversion timestamp and switches their badge from amber
+   "Trial" to green "Paid" in both the fleet list and their detail view.
+   Nothing about the customer's own backend changes — this is purely a
+   record in the operator's registry.
 
 ---
 

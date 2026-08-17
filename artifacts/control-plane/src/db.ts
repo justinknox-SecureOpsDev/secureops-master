@@ -8,6 +8,7 @@
  * never sees these operator-only tables.
  */
 
+import { randomUUID } from "node:crypto";
 import pg from "pg";
 import { DATABASE_URL } from "./config";
 import { logger } from "./logger";
@@ -74,6 +75,16 @@ export async function ensureSchema(): Promise<void> {
     `ALTER TABLE control_plane_customers ADD COLUMN IF NOT EXISTS customer_config_json TEXT;`,
   );
 
+  // Trial→Paid lifecycle tracking. New customers default to 'trial'; flipping
+  // to 'paid' (via the update API) stamps converted_at. Historical rows with
+  // no explicit conversion keep converted_at NULL even if manually set to paid.
+  await pool.query(
+    `ALTER TABLE control_plane_customers ADD COLUMN IF NOT EXISTS lifecycle_status TEXT NOT NULL DEFAULT 'trial';`,
+  );
+  await pool.query(
+    `ALTER TABLE control_plane_customers ADD COLUMN IF NOT EXISTS converted_at TIMESTAMPTZ;`,
+  );
+
   // Audit trail of remote brand/feature changes pushed to customer backends.
   await pool.query(`
     CREATE TABLE IF NOT EXISTS control_plane_remote_changes (
@@ -95,6 +106,31 @@ export async function ensureSchema(): Promise<void> {
   logger.info("[control-plane] schema ensured");
 }
 
+/**
+ * Seed the registry with customers that must exist on every deployment of
+ * THIS control plane, so their presence doesn't depend on someone remembering
+ * to click "Add customer" by hand. Idempotent (ON CONFLICT DO NOTHING keyed
+ * on the unique org_code) — safe to call on every boot.
+ *
+ * Quell Protection ("quell") is a prospective customer whose trial-to-paid
+ * onboarding is being tracked here ahead of their backend fork existing. The
+ * placeholder `.invalid` backend URL (RFC 2606 reserved TLD — guaranteed to
+ * never resolve) must be replaced with their real fork/deployment address
+ * once it exists; see docs/new-customer-setup-runbook.md.
+ */
+export async function seedInitialCustomers(): Promise<void> {
+  await pool.query(
+    `INSERT INTO control_plane_customers (id, org_code, name, api_base_url, notes, is_active)
+     VALUES ($1, 'quell', 'Quell Protection', $2, $3, FALSE)
+     ON CONFLICT (org_code) DO NOTHING;`,
+    [
+      randomUUID(),
+      "https://quell-protection.placeholder.invalid",
+      "PLACEHOLDER backend URL — fork not yet created. Replace api_base_url with the real fork/deployment address once the Replit fork exists and a custom domain (or .replit.app URL) is known. See docs/new-customer-setup-runbook.md.",
+    ],
+  );
+}
+
 export interface CustomerRow {
   id: string;
   org_code: string;
@@ -106,6 +142,8 @@ export interface CustomerRow {
   mgmt_secret_enc: string | null;
   agreements_json: string | null;
   customer_config_json: string | null;
+  lifecycle_status: string;
+  converted_at: Date | null;
   target_version: string | null;
   reported_version: string | null;
   reported_built_at: string | null;

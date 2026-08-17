@@ -28,6 +28,10 @@ const baseFields = {
   isActive: z.boolean().optional(),
 };
 
+/** Trial/Paid billing lifecycle. New customers always start in 'trial' — this
+ * is only settable via update (PUT), never at creation. */
+const lifecycleStatusSchema = z.enum(["trial", "paid"]);
+
 const createSchema = z.object({
   orgCode: z.string().trim().min(1).max(64),
   ...baseFields,
@@ -43,6 +47,7 @@ const updateSchema = z.object({
   targetVersion: baseFields.targetVersion,
   mgmtSecret: baseFields.mgmtSecret,
   isActive: baseFields.isActive,
+  lifecycleStatus: lifecycleStatusSchema.optional(),
 });
 
 async function fleetTargetVersion(): Promise<string | null> {
@@ -126,6 +131,8 @@ function serialize(row: CustomerRow, fleetTarget: string | null) {
     hasMgmtSecret: Boolean(row.mgmt_secret_enc),
     agreements: parseAgreements(row.agreements_json),
     plan: parseCustomerPlan(row.customer_config_json),
+    lifecycleStatus: row.lifecycle_status,
+    convertedAt: row.converted_at,
     needsUpdate,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
@@ -231,6 +238,26 @@ customersRouter.put("/customers/:id", async (req, res) => {
   if (d.mgmtSecret !== undefined) {
     const trimmed = (d.mgmtSecret ?? "").trim();
     push("mgmt_secret_enc", trimmed.length > 0 ? encryptSecret(trimmed) : null);
+  }
+  if (d.lifecycleStatus !== undefined) {
+    // `converted_at` must only move on an actual STORED-status transition, not
+    // whenever the client happens to resend the current value (e.g. editing an
+    // already-Paid customer's contact info re-submits lifecycleStatus: "paid").
+    // The CASE branches read `lifecycle_status` — the column's PRE-update value,
+    // since Postgres evaluates every SET expression against the old row — so
+    // this stays correct and atomic even under concurrent edits:
+    //   trial -> paid : stamp now()
+    //   paid  -> paid : leave the original converted_at alone
+    //   *     -> trial: clear it (re-flipping to paid later stamps a fresh time)
+    const placeholder = `$${++i}`;
+    vals.push(d.lifecycleStatus);
+    sets.push(`lifecycle_status = ${placeholder}`);
+    sets.push(
+      `converted_at = CASE ` +
+        `WHEN ${placeholder} = 'paid' AND lifecycle_status <> 'paid' THEN now() ` +
+        `WHEN ${placeholder} = 'trial' THEN NULL ` +
+        `ELSE converted_at END`,
+    );
   }
 
   if (sets.length === 0) {
