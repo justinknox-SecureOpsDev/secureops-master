@@ -135,3 +135,4 @@
 - [Role-scoped list endpoints](role-scoped-list-endpoints.md) — list routes widen by ROLE with no filter (admin gets everyone); personal "my stuff" screens must pass employeeId + re-assert ownership.
 - [Subcontractor QR rates](subcontractor-qr-rates.md) — pay/bill rates live on the QR token (join via qr_token_id), bill priority QR→site default; public clock endpoints must stay rate-free.
 - [hidden attribute overridden by CSS](hidden-attribute-css-override.md) — an author `display` rule on the same selector silently beats `[hidden]{display:none}`; needs an explicit `sel[hidden]{display:none}` override.
+- [Headless admin-portal verification](admin-portal-headless-verification.md) — vite dev has no /api proxy & API CORS rejects the Origin; run an in-script proxy that strips it; boolean fields are Yes/No selects.

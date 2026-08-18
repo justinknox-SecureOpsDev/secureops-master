@@ -1350,6 +1350,14 @@ export interface Site {
   notes?: string;
   /** When false, the auto-clock-out job skips officers at this site */
   autoClockOutEnabled?: boolean;
+  /**
+   * Minutes past a shift's scheduled end the auto-clock-out job waits before closing an abandoned entry. Null = the global 10-minute default.
+   * @minimum 0
+   * @maximum 720
+   */
+  autoClockOutDelayMinutes?: number | null;
+  /** When true, an auto-closed entry is stamped at scheduled end + the delay above (the officer is paid through the grace window). Default false stamps it at the scheduled end. */
+  autoClockOutPayGrace?: boolean;
   /** When true, officers with an accepted shift here are automatically clocked in once their shift starts and the app detects them inside the geofence (app must be open) */
   autoClockInEnabled?: boolean;
   createdAt: string;
@@ -1425,6 +1433,12 @@ export interface CreateSiteRequest {
   locationLng?: number;
   notes?: string;
   autoClockOutEnabled?: boolean;
+  /**
+   * @minimum 0
+   * @maximum 720
+   */
+  autoClockOutDelayMinutes?: number | null;
+  autoClockOutPayGrace?: boolean;
   autoClockInEnabled?: boolean;
 }
 
@@ -1444,6 +1458,13 @@ export interface UpdateSiteRequest {
   locationLng?: number;
   notes?: string;
   autoClockOutEnabled?: boolean;
+  /**
+   * Whole minutes (0–720). Null clears the override back to the global 10-minute default.
+   * @minimum 0
+   * @maximum 720
+   */
+  autoClockOutDelayMinutes?: number | null;
+  autoClockOutPayGrace?: boolean;
   autoClockInEnabled?: boolean;
 }
 

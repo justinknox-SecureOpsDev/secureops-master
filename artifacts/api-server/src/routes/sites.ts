@@ -8,6 +8,11 @@ import { getGeofenceRadiusMiles } from "../lib/geofence";
 import { siteBlockersForOne, refuseIfBlocked } from "../lib/siteDeletion";
 import { canManageSite, getManagedSiteIds } from "../lib/siteManagerAuthz";
 import { resyncSiteAutoSyncedDrafts } from "../lib/invoiceSync";
+import {
+  AUTO_CLOCKOUT_DELAY_MAX_MINUTES,
+  AUTO_CLOCKOUT_DELAY_MIN_MINUTES,
+  DEFAULT_AUTO_CLOCKOUT_DELAY_MINUTES,
+} from "../lib/scheduledJobs";
 
 // Resolve the effective geofence radius for a site row: per-site override
 // (when set and positive) wins, otherwise the global env default. Mirrors
@@ -142,6 +147,8 @@ router.get("/sites", requireSchedulingStaff, async (req, res): Promise<void> => 
       notes: sitesTable.notes,
       geofenceRadiusMiles: sitesTable.geofenceRadiusMiles,
       autoClockOutEnabled: sitesTable.autoClockOutEnabled,
+      autoClockOutDelayMinutes: sitesTable.autoClockOutDelayMinutes,
+      autoClockOutPayGrace: sitesTable.autoClockOutPayGrace,
       autoClockInEnabled: sitesTable.autoClockInEnabled,
       processingFeeEnabled: sitesTable.processingFeeEnabled,
       processingFeeRate: sitesTable.processingFeeRate,
@@ -183,6 +190,8 @@ router.get("/sites/:id", requireAdminOrDispatcher, async (req, res): Promise<voi
       notes: sitesTable.notes,
       geofenceRadiusMiles: sitesTable.geofenceRadiusMiles,
       autoClockOutEnabled: sitesTable.autoClockOutEnabled,
+      autoClockOutDelayMinutes: sitesTable.autoClockOutDelayMinutes,
+      autoClockOutPayGrace: sitesTable.autoClockOutPayGrace,
       autoClockInEnabled: sitesTable.autoClockInEnabled,
       processingFeeEnabled: sitesTable.processingFeeEnabled,
       processingFeeRate: sitesTable.processingFeeRate,
@@ -200,7 +209,7 @@ router.get("/sites/:id", requireAdminOrDispatcher, async (req, res): Promise<voi
 
 router.put("/sites/:id", requireAdmin, async (req, res): Promise<void> => {
   const id = Array.isArray(req.params.id) ? req.params.id[0] : req.params.id;
-  const { name, status, address, locationLat, locationLng, notes, geofenceRadiusMiles, autoClockOutEnabled, autoClockInEnabled, processingFeeEnabled, processingFeeRate } = req.body;
+  const { name, status, address, locationLat, locationLng, notes, geofenceRadiusMiles, autoClockOutEnabled, autoClockOutDelayMinutes, autoClockOutPayGrace, autoClockInEnabled, processingFeeEnabled, processingFeeRate } = req.body;
   let updates: Record<string, unknown> = {};
   if (name !== undefined) updates.name = name;
   if (status !== undefined) {
@@ -216,6 +225,28 @@ router.put("/sites/:id", requireAdmin, async (req, res): Promise<void> => {
   if (notes !== undefined) updates.notes = notes;
   if (autoClockOutEnabled !== undefined) {
     updates.autoClockOutEnabled = autoClockOutEnabled === true || autoClockOutEnabled === "true";
+  }
+  if (autoClockOutDelayMinutes !== undefined) {
+    // null / "" → clear the override so the site falls back to the global
+    // 10-minute default. Otherwise a whole number of minutes inside the same
+    // range the scheduled job clamps to, so what an admin saves is what the
+    // job actually applies (no silently-ignored value).
+    if (autoClockOutDelayMinutes === null || autoClockOutDelayMinutes === "") {
+      updates.autoClockOutDelayMinutes = null;
+    } else {
+      const n = Number(autoClockOutDelayMinutes);
+      if (!Number.isInteger(n) || n < AUTO_CLOCKOUT_DELAY_MIN_MINUTES || n > AUTO_CLOCKOUT_DELAY_MAX_MINUTES) {
+        res.status(400).json({
+          error: "Bad Request",
+          message: `autoClockOutDelayMinutes must be a whole number of minutes between ${AUTO_CLOCKOUT_DELAY_MIN_MINUTES} and ${AUTO_CLOCKOUT_DELAY_MAX_MINUTES} (or null to use the ${DEFAULT_AUTO_CLOCKOUT_DELAY_MINUTES}-minute default).`,
+        });
+        return;
+      }
+      updates.autoClockOutDelayMinutes = n;
+    }
+  }
+  if (autoClockOutPayGrace !== undefined) {
+    updates.autoClockOutPayGrace = autoClockOutPayGrace === true || autoClockOutPayGrace === "true";
   }
   if (autoClockInEnabled !== undefined) {
     updates.autoClockInEnabled = autoClockInEnabled === true || autoClockInEnabled === "true";

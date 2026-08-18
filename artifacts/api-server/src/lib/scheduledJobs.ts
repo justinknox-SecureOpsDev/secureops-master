@@ -43,7 +43,18 @@ const MIN_MS = 60 * 1000;
 
 // Auto clock-out: how long past a shift's scheduled end an officer can
 // stay clocked in before we close their entry (unless still on site).
-const AUTO_CLOCKOUT_GRACE_MS = 10 * MIN_MS;
+// Sites may override this via `sites.auto_clock_out_delay_minutes`; this is
+// the fallback used when the site has no override (or has no site row at all).
+export const DEFAULT_AUTO_CLOCKOUT_DELAY_MINUTES = 10;
+/**
+ * Bounds the per-site auto-clock-out delay is clamped to before it is used.
+ * 0 means "close as soon as the shift's end has passed"; the upper bound keeps
+ * a fat-fingered or corrupt row (say 100000) from silently parking an entry
+ * open forever — and, when paid grace is on, from inventing runaway hours.
+ * Anything above a working day of slack is operator error, not a policy.
+ */
+export const AUTO_CLOCKOUT_DELAY_MIN_MINUTES = 0;
+export const AUTO_CLOCKOUT_DELAY_MAX_MINUTES = 720; // 12h
 /**
  * Hard ceiling on the duration auto-clock-out is willing to invent, in hours.
  * `time_entries.hours_worked` is numeric(6,2) (max 9999.99), so an entry left
@@ -1012,10 +1023,11 @@ export async function sendWeeklyTimeEntryApprovalReminders(): Promise<void> {
 }
 
 /**
- * Auto clock-out after shift end. For each officer still clocked in
- * more than AUTO_CLOCKOUT_GRACE_MS past their assigned shift's
- * scheduled end, close the open time entry — UNLESS we can confirm
- * they are still physically on site (inside the geofence).
+ * Auto clock-out after shift end. For each officer still clocked in past
+ * their assigned shift's scheduled end plus that site's configured delay
+ * (`sites.auto_clock_out_delay_minutes`, default 10 minutes), close the open
+ * time entry — UNLESS we can confirm they are still physically on site
+ * (inside the geofence).
  *
  * "Still within the geofence" = the time entry's `geofence_state` is
  * `inside` AND the officer's last location ping is recent
@@ -1027,7 +1039,9 @@ export async function sendWeeklyTimeEntryApprovalReminders(): Promise<void> {
  *
  * Clock-out time = the shift's scheduled end (not "now"), so payroll
  * reflects the shift the officer was actually scheduled for and the
- * result is deterministic regardless of when the tick fires. Officers
+ * result is deterministic regardless of when the tick fires. Sites that opt
+ * into `auto_clock_out_pay_grace` instead anchor at scheduled end + delay, so
+ * the officer is paid through the window the job waited out. Officers
  * still inside the geofence are left alone and instead receive the
  * forgot-to-clock-out nudges; this job re-checks them every tick and
  * closes them out once they leave.
@@ -1041,28 +1055,66 @@ export async function sendWeeklyTimeEntryApprovalReminders(): Promise<void> {
  * courtesy.
  */
 /**
+ * Resolve a site's stored auto-clock-out delay into the number of minutes the
+ * job will actually wait past a shift's scheduled end.
+ *
+ * NULL / missing / non-finite → the global default (10 minutes), so a site
+ * that has never been configured behaves exactly as it always has. Anything
+ * else is floored to whole minutes and clamped into
+ * [AUTO_CLOCKOUT_DELAY_MIN_MINUTES, AUTO_CLOCKOUT_DELAY_MAX_MINUTES]. The
+ * clamp is deliberately defensive rather than trusting the write-side
+ * validation: a single corrupt row must never park entries open indefinitely
+ * (nor, with paid grace on, invent runaway hours) for the rest of the fleet.
+ */
+export function resolveAutoClockOutDelayMinutes(raw: number | null | undefined): number {
+  if (raw == null) return DEFAULT_AUTO_CLOCKOUT_DELAY_MINUTES;
+  const n = Number(raw);
+  if (!Number.isFinite(n)) return DEFAULT_AUTO_CLOCKOUT_DELAY_MINUTES;
+  return Math.min(
+    AUTO_CLOCKOUT_DELAY_MAX_MINUTES,
+    Math.max(AUTO_CLOCKOUT_DELAY_MIN_MINUTES, Math.floor(n)),
+  );
+}
+
+/**
  * Decide when an abandoned time entry should be closed, and how many hours
  * that is worth.
  *
- * Normally the answer is the shift's scheduled end. Two cases are not normal:
+ * Normally the answer is the shift's scheduled end — the grace window the job
+ * waited out is unpaid. When the site opts into paying the grace period
+ * (`payGrace`), the anchor moves to scheduled end + the site's delay, so the
+ * officer is paid through the window we waited.
+ *
+ * Two cases are not normal:
  *  - the officer clocked in AFTER their shift's scheduled end (bad data, or a
  *    late drop-in) — there is no sane anchor, so we fall back to now();
  *  - the entry has been open so long that the resulting duration is absurd.
  *
- * Both are capped at MAX_AUTO_CLOCKOUT_HOURS. `clockOut` and `hours` are
- * always kept consistent with each other (hours == clockOut - clockIn), since
- * analytics recomputes hours from the timestamps in places and payroll reads
- * the stored column — they must not disagree.
+ * Both are capped at MAX_AUTO_CLOCKOUT_HOURS, and the cap wins over paid
+ * grace too. `clockOut` and `hours` are always kept consistent with each other
+ * (hours == clockOut - clockIn), since analytics recomputes hours from the
+ * timestamps in places and payroll reads the stored column — they must not
+ * disagree.
  */
 export function computeAutoClockOut(args: {
   clockInTime: Date;
   shiftEndTime: Date;
   now: number;
+  /** Minutes waited past scheduled end before closing. Defaults to the global 10. */
+  delayMinutes?: number;
+  /** When true, the recorded clock-out is scheduled end + delay (paid grace). */
+  payGrace?: boolean;
 }): { clockOut: Date; hours: number; capped: boolean } {
   const clockInMs = args.clockInTime.getTime();
   const scheduledEndMs = new Date(args.shiftEndTime).getTime();
+  const delayMinutes = resolveAutoClockOutDelayMinutes(args.delayMinutes);
+  // Paid grace only moves the anchor — it never invents an end for an entry
+  // that has no usable scheduled end (the now() fallback below).
+  const anchorMs = args.payGrace === true
+    ? scheduledEndMs + delayMinutes * 60_000
+    : scheduledEndMs;
 
-  const candidateMs = scheduledEndMs > clockInMs ? scheduledEndMs : args.now;
+  const candidateMs = anchorMs > clockInMs ? anchorMs : args.now;
   const ceilingMs = clockInMs + MAX_AUTO_CLOCKOUT_HOURS * 3_600_000;
 
   const capped = candidateMs > ceilingMs;
@@ -1075,8 +1127,11 @@ export function computeAutoClockOut(args: {
 export async function autoClockOutEndedShifts(): Promise<void> {
   try {
     const now = Date.now();
-    const cutoff = new Date(now - AUTO_CLOCKOUT_GRACE_MS);
 
+    // Pre-filter only on "the shift has already ended" — the wait itself is
+    // per-site now, so the eligibility cutoff has to be evaluated per row
+    // below. A single fixed cutoff here would silently ignore any site whose
+    // configured delay is longer than it.
     const rows = await db
       .select({
         entryId: timeEntriesTable.id,
@@ -1089,6 +1144,8 @@ export async function autoClockOutEndedShifts(): Promise<void> {
         lastLocationAt: usersTable.lastLocationAt,
         siteName: sitesTable.name,
         autoClockOutEnabled: sitesTable.autoClockOutEnabled,
+        autoClockOutDelayMinutes: sitesTable.autoClockOutDelayMinutes,
+        autoClockOutPayGrace: sitesTable.autoClockOutPayGrace,
       })
       .from(timeEntriesTable)
       .innerJoin(shiftsTable, eq(shiftsTable.id, timeEntriesTable.shiftId))
@@ -1096,7 +1153,7 @@ export async function autoClockOutEndedShifts(): Promise<void> {
       .leftJoin(sitesTable, eq(sitesTable.id, shiftsTable.siteId))
       .where(and(
         isNull(timeEntriesTable.clockOutTime),
-        lte(shiftsTable.endTime, cutoff),
+        lte(shiftsTable.endTime, new Date(now)),
       ));
 
     let totalClosed = 0;
@@ -1105,6 +1162,13 @@ export async function autoClockOutEndedShifts(): Promise<void> {
       // Skip if auto-clock-out is disabled for this site (null = no site →
       // treat as enabled so siteless shifts still auto-clock-out).
       if (r.autoClockOutEnabled === false) continue;
+
+      // Per-site wait past scheduled end. No site row → the global default.
+      // Always clamped, so one corrupt value can't stall the whole fleet.
+      const delayMinutes = resolveAutoClockOutDelayMinutes(r.autoClockOutDelayMinutes);
+      const payGrace = r.autoClockOutPayGrace === true;
+      const shiftEndMs = new Date(r.shiftEndTime).getTime();
+      if (!Number.isFinite(shiftEndMs) || now - shiftEndMs < delayMinutes * MIN_MS) continue;
 
       // Skip officers we can confirm are still on site.
       const pingFresh =
@@ -1117,6 +1181,8 @@ export async function autoClockOutEndedShifts(): Promise<void> {
           clockInTime: r.clockInTime,
           shiftEndTime: r.shiftEndTime,
           now,
+          delayMinutes,
+          payGrace,
         });
         if (capped) {
           logger.warn(
@@ -1125,9 +1191,15 @@ export async function autoClockOutEndedShifts(): Promise<void> {
           );
         }
 
+        // Spell out the timing policy that produced these hours, so anyone
+        // reviewing the time card / payroll can see why the clock-out lands
+        // where it does without digging into the site's settings.
+        const graceNote = payGrace
+          ? `Waited ${delayMinutes} min past scheduled end; grace period paid (clock-out set to scheduled end + ${delayMinutes} min).`
+          : `Waited ${delayMinutes} min past scheduled end; grace period unpaid (clock-out set to scheduled end).`;
         const marker = capped
-          ? `Auto clocked out: shift ended, officer not within geofence. Duration capped at ${MAX_AUTO_CLOCKOUT_HOURS}h — this entry was left open long past its shift, please review.`
-          : "Auto clocked out: shift ended, officer not within geofence.";
+          ? `Auto clocked out: shift ended, officer not within geofence. ${graceNote} Duration capped at ${MAX_AUTO_CLOCKOUT_HOURS}h — this entry was left open long past its shift, please review.`
+          : `Auto clocked out: shift ended, officer not within geofence. ${graceNote}`;
         const nextNotes = r.notes ? `${r.notes} | ${marker}` : marker;
 
         const claimed = await db

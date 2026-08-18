@@ -416,6 +416,21 @@ export const TABLES: TableDescriptor[] = [
         helpText: "When enabled, officers at this site are automatically clocked out after their shift ends and they leave the geofence. Disable for sites where officers routinely work past scheduled end times.",
       },
       {
+        key: "autoClockOutDelayMinutes",
+        label: "Auto clock-out delay (minutes) — leave blank for 10",
+        type: "integer",
+        hiddenInGrid: true,
+        placeholder: "e.g. 45 for an event post",
+        helpText: "How long past the scheduled shift end the system waits before closing an abandoned entry, if the officer can't be confirmed inside the geofence. Blank uses the 10-minute default; max 720 (12h).",
+      },
+      {
+        key: "autoClockOutPayGrace",
+        label: "Pay the grace period",
+        type: "boolean",
+        hiddenInGrid: true,
+        helpText: "PAYROLL IMPACT: when enabled, an auto-closed entry is stamped at the scheduled end PLUS the delay above, so the officer is paid (and the client billed) for the whole wait. Off — the default — stamps the clock-out at the scheduled shift end and the wait is unpaid.",
+      },
+      {
         key: "autoClockInEnabled",
         label: "Auto clock-in",
         type: "boolean",

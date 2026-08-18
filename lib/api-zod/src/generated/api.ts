@@ -39,6 +39,9 @@ export const GetBrandResponse = zod.object({
 /**
  * @summary List clients
  */
+export const getClientsResponseSitesItemAutoClockOutDelayMinutesMin = 0;
+export const getClientsResponseSitesItemAutoClockOutDelayMinutesMax = 720;
+
 export const GetClientsResponseItem = zod.object({
   id: zod.string(),
   name: zod.string(),
@@ -80,6 +83,20 @@ export const GetClientsResponseItem = zod.object({
           .optional()
           .describe(
             "When false, the auto-clock-out job skips officers at this site",
+          ),
+        autoClockOutDelayMinutes: zod
+          .number()
+          .min(getClientsResponseSitesItemAutoClockOutDelayMinutesMin)
+          .max(getClientsResponseSitesItemAutoClockOutDelayMinutesMax)
+          .nullish()
+          .describe(
+            "Minutes past a shift's scheduled end the auto-clock-out job waits before closing an abandoned entry. Null = the global 10-minute default.",
+          ),
+        autoClockOutPayGrace: zod
+          .boolean()
+          .optional()
+          .describe(
+            "When true, an auto-closed entry is stamped at scheduled end + the delay above (the officer is paid through the grace window). Default false stamps it at the scheduled end.",
           ),
         autoClockInEnabled: zod
           .boolean()
@@ -123,6 +140,9 @@ export const GetClientParams = zod.object({
   id: zod.coerce.string(),
 });
 
+export const getClientResponseSitesItemAutoClockOutDelayMinutesMin = 0;
+export const getClientResponseSitesItemAutoClockOutDelayMinutesMax = 720;
+
 export const GetClientResponse = zod.object({
   id: zod.string(),
   name: zod.string(),
@@ -164,6 +184,20 @@ export const GetClientResponse = zod.object({
           .optional()
           .describe(
             "When false, the auto-clock-out job skips officers at this site",
+          ),
+        autoClockOutDelayMinutes: zod
+          .number()
+          .min(getClientResponseSitesItemAutoClockOutDelayMinutesMin)
+          .max(getClientResponseSitesItemAutoClockOutDelayMinutesMax)
+          .nullish()
+          .describe(
+            "Minutes past a shift's scheduled end the auto-clock-out job waits before closing an abandoned entry. Null = the global 10-minute default.",
+          ),
+        autoClockOutPayGrace: zod
+          .boolean()
+          .optional()
+          .describe(
+            "When true, an auto-closed entry is stamped at scheduled end + the delay above (the officer is paid through the grace window). Default false stamps it at the scheduled end.",
           ),
         autoClockInEnabled: zod
           .boolean()
@@ -210,6 +244,9 @@ export const UpdateClientBody = zod.object({
     .describe("Object-storage path of the signed contract PDF"),
 });
 
+export const updateClientResponseSitesItemAutoClockOutDelayMinutesMin = 0;
+export const updateClientResponseSitesItemAutoClockOutDelayMinutesMax = 720;
+
 export const UpdateClientResponse = zod.object({
   id: zod.string(),
   name: zod.string(),
@@ -252,6 +289,20 @@ export const UpdateClientResponse = zod.object({
           .describe(
             "When false, the auto-clock-out job skips officers at this site",
           ),
+        autoClockOutDelayMinutes: zod
+          .number()
+          .min(updateClientResponseSitesItemAutoClockOutDelayMinutesMin)
+          .max(updateClientResponseSitesItemAutoClockOutDelayMinutesMax)
+          .nullish()
+          .describe(
+            "Minutes past a shift's scheduled end the auto-clock-out job waits before closing an abandoned entry. Null = the global 10-minute default.",
+          ),
+        autoClockOutPayGrace: zod
+          .boolean()
+          .optional()
+          .describe(
+            "When true, an auto-closed entry is stamped at scheduled end + the delay above (the officer is paid through the grace window). Default false stamps it at the scheduled end.",
+          ),
         autoClockInEnabled: zod
           .boolean()
           .optional()
@@ -279,6 +330,9 @@ export const CreateClientSiteParams = zod.object({
   id: zod.coerce.string(),
 });
 
+export const createClientSiteBodyAutoClockOutDelayMinutesMin = 0;
+export const createClientSiteBodyAutoClockOutDelayMinutesMax = 720;
+
 export const CreateClientSiteBody = zod.object({
   clientId: zod
     .string()
@@ -290,6 +344,12 @@ export const CreateClientSiteBody = zod.object({
   locationLng: zod.number().optional(),
   notes: zod.string().optional(),
   autoClockOutEnabled: zod.boolean().optional(),
+  autoClockOutDelayMinutes: zod
+    .number()
+    .min(createClientSiteBodyAutoClockOutDelayMinutesMin)
+    .max(createClientSiteBodyAutoClockOutDelayMinutesMax)
+    .nullish(),
+  autoClockOutPayGrace: zod.boolean().optional(),
   autoClockInEnabled: zod.boolean().optional(),
 });
 
@@ -303,6 +363,9 @@ export const GetSitesQueryParams = zod.object({
     .optional()
     .describe("Pass 'true' to include inactive sites (admin management views)"),
 });
+
+export const getSitesResponseAutoClockOutDelayMinutesMin = 0;
+export const getSitesResponseAutoClockOutDelayMinutesMax = 720;
 
 export const GetSitesResponseItem = zod.object({
   id: zod.string(),
@@ -323,6 +386,20 @@ export const GetSitesResponseItem = zod.object({
     .boolean()
     .optional()
     .describe("When false, the auto-clock-out job skips officers at this site"),
+  autoClockOutDelayMinutes: zod
+    .number()
+    .min(getSitesResponseAutoClockOutDelayMinutesMin)
+    .max(getSitesResponseAutoClockOutDelayMinutesMax)
+    .nullish()
+    .describe(
+      "Minutes past a shift's scheduled end the auto-clock-out job waits before closing an abandoned entry. Null = the global 10-minute default.",
+    ),
+  autoClockOutPayGrace: zod
+    .boolean()
+    .optional()
+    .describe(
+      "When true, an auto-closed entry is stamped at scheduled end + the delay above (the officer is paid through the grace window). Default false stamps it at the scheduled end.",
+    ),
   autoClockInEnabled: zod
     .boolean()
     .optional()
@@ -370,6 +447,9 @@ export const GetSiteParams = zod.object({
   id: zod.coerce.string(),
 });
 
+export const getSiteResponseAutoClockOutDelayMinutesMin = 0;
+export const getSiteResponseAutoClockOutDelayMinutesMax = 720;
+
 export const GetSiteResponse = zod.object({
   id: zod.string(),
   clientId: zod.string(),
@@ -389,6 +469,20 @@ export const GetSiteResponse = zod.object({
     .boolean()
     .optional()
     .describe("When false, the auto-clock-out job skips officers at this site"),
+  autoClockOutDelayMinutes: zod
+    .number()
+    .min(getSiteResponseAutoClockOutDelayMinutesMin)
+    .max(getSiteResponseAutoClockOutDelayMinutesMax)
+    .nullish()
+    .describe(
+      "Minutes past a shift's scheduled end the auto-clock-out job waits before closing an abandoned entry. Null = the global 10-minute default.",
+    ),
+  autoClockOutPayGrace: zod
+    .boolean()
+    .optional()
+    .describe(
+      "When true, an auto-closed entry is stamped at scheduled end + the delay above (the officer is paid through the grace window). Default false stamps it at the scheduled end.",
+    ),
   autoClockInEnabled: zod
     .boolean()
     .optional()
@@ -405,6 +499,9 @@ export const UpdateSiteParams = zod.object({
   id: zod.coerce.string(),
 });
 
+export const updateSiteBodyAutoClockOutDelayMinutesMin = 0;
+export const updateSiteBodyAutoClockOutDelayMinutesMax = 720;
+
 export const UpdateSiteBody = zod.object({
   name: zod.string().optional(),
   status: zod.enum(["active", "inactive"]).optional(),
@@ -413,8 +510,20 @@ export const UpdateSiteBody = zod.object({
   locationLng: zod.number().optional(),
   notes: zod.string().optional(),
   autoClockOutEnabled: zod.boolean().optional(),
+  autoClockOutDelayMinutes: zod
+    .number()
+    .min(updateSiteBodyAutoClockOutDelayMinutesMin)
+    .max(updateSiteBodyAutoClockOutDelayMinutesMax)
+    .nullish()
+    .describe(
+      "Whole minutes (0–720). Null clears the override back to the global 10-minute default.",
+    ),
+  autoClockOutPayGrace: zod.boolean().optional(),
   autoClockInEnabled: zod.boolean().optional(),
 });
+
+export const updateSiteResponseAutoClockOutDelayMinutesMin = 0;
+export const updateSiteResponseAutoClockOutDelayMinutesMax = 720;
 
 export const UpdateSiteResponse = zod.object({
   id: zod.string(),
@@ -435,6 +544,20 @@ export const UpdateSiteResponse = zod.object({
     .boolean()
     .optional()
     .describe("When false, the auto-clock-out job skips officers at this site"),
+  autoClockOutDelayMinutes: zod
+    .number()
+    .min(updateSiteResponseAutoClockOutDelayMinutesMin)
+    .max(updateSiteResponseAutoClockOutDelayMinutesMax)
+    .nullish()
+    .describe(
+      "Minutes past a shift's scheduled end the auto-clock-out job waits before closing an abandoned entry. Null = the global 10-minute default.",
+    ),
+  autoClockOutPayGrace: zod
+    .boolean()
+    .optional()
+    .describe(
+      "When true, an auto-closed entry is stamped at scheduled end + the delay above (the officer is paid through the grace window). Default false stamps it at the scheduled end.",
+    ),
   autoClockInEnabled: zod
     .boolean()
     .optional()

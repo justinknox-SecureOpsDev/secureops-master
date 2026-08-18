@@ -56,6 +56,11 @@ import { normalizePhoneToE164 } from "../lib/phone";
 import { adminEditBreaksAutoSync, resyncSiteAutoSyncedDrafts, upsertWeeklyInvoiceForTimeEntry, weekStartIsoBusiness } from "../lib/invoiceSync";
 import type { TimeEntry } from "@workspace/db";
 import { buildTimeEntryAuditMetadata, timeEntrySnapshot } from "../lib/timeEntryAudit";
+import {
+  AUTO_CLOCKOUT_DELAY_MAX_MINUTES,
+  AUTO_CLOCKOUT_DELAY_MIN_MINUTES,
+  DEFAULT_AUTO_CLOCKOUT_DELAY_MINUTES,
+} from "../lib/scheduledJobs";
 import { ObjectStorageService, ObjectNotFoundError } from "../lib/objectStorage";
 import {
   extractEmployeeFromPdf,
@@ -307,7 +312,32 @@ const tables: Record<string, TableConfig> = {
     insertSchema: insertSiteSchema as unknown as z.ZodSchema<any>,
     searchColumns: [sitesTable.name, sitesTable.address],
     orderBy: sitesTable.createdAt,
-    coerceWrite: (v) => applyNumericCoercion(v, ["locationLat", "locationLng", "defaultPayRate", "defaultBillRate", "geofenceRadiusMiles"]),
+    coerceWrite: (v) => {
+      const out = applyNumericCoercion(v, ["locationLat", "locationLng", "defaultPayRate", "defaultBillRate", "geofenceRadiusMiles"]);
+      // Auto clock-out delay is validated on the value the admin actually
+      // supplied, BEFORE any int coercion: the shared coercion truncates
+      // decimals (45.5 -> 45) and turns junk into null, either of which would
+      // quietly save a different delay than what was typed — and this delay
+      // moves payroll when the site also pays the grace period. Only an
+      // explicit blank/null clears the override back to the global default.
+      if ("autoClockOutDelayMinutes" in out) {
+        const raw = out.autoClockOutDelayMinutes;
+        const blank = raw === null || raw === undefined || (typeof raw === "string" && raw.trim() === "");
+        if (blank) {
+          out.autoClockOutDelayMinutes = null;
+        } else {
+          const n = typeof raw === "number" ? raw : typeof raw === "string" ? Number(raw.trim()) : NaN;
+          if (!Number.isInteger(n) || n < AUTO_CLOCKOUT_DELAY_MIN_MINUTES || n > AUTO_CLOCKOUT_DELAY_MAX_MINUTES) {
+            throw Object.assign(
+              new Error(`Auto clock-out delay must be a whole number of minutes between ${AUTO_CLOCKOUT_DELAY_MIN_MINUTES} and ${AUTO_CLOCKOUT_DELAY_MAX_MINUTES} (leave blank for the ${DEFAULT_AUTO_CLOCKOUT_DELAY_MINUTES}-minute default).`),
+              { __badRequest: true },
+            );
+          }
+          out.autoClockOutDelayMinutes = n;
+        }
+      }
+      return out;
+    },
     importSupported: true,
     label: "Site",
   },
@@ -1531,7 +1561,19 @@ router.post("/admin/import/:table", requireAdmin, async (req, res): Promise<void
       results.push({ index: i, ok: false, error: fkErrors.get(i)! });
       continue;
     }
-    const r = cfg.coerceWrite(rows[i]);
+    // A coercer may reject the row outright (e.g. a non-whole auto clock-out
+    // delay). That is this row's validation error, not a failed import: the
+    // remaining rows still get their own verdict.
+    let r: Record<string, unknown>;
+    try {
+      r = cfg.coerceWrite(rows[i]);
+    } catch (err: any) {
+      if (err?.__badRequest) {
+        results.push({ index: i, ok: false, error: err.message });
+        continue;
+      }
+      throw err;
+    }
     const parsed = cfg.insertSchema.safeParse(r);
     if (!parsed.success) {
       results.push({

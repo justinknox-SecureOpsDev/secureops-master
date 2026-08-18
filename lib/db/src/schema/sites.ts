@@ -48,6 +48,19 @@ export const sitesTable = pgTable("sites", {
   // time (e.g. events, extended-duration details) and manual clock-out is
   // preferred. Defaults to true (global behavior unchanged).
   autoClockOutEnabled: boolean("auto_clock_out_enabled").notNull().default(true),
+  // How long past a shift's scheduled end the auto-clock-out job waits before
+  // closing an abandoned entry, in whole minutes. NULL = the global default
+  // (10 minutes). Longer for event/extended-duration posts where officers
+  // routinely run over; shorter for tight, high-turnover posts. The job
+  // defensively clamps whatever is stored here, so a corrupt value can never
+  // disable auto-clock-out fleet-wide.
+  autoClockOutDelayMinutes: integer("auto_clock_out_delay_minutes"),
+  // When true, an auto-closed entry is stamped at scheduled end + the delay
+  // above, so the officer is PAID through the grace window. Default false =
+  // today's behavior: the clock-out is stamped at the scheduled shift end and
+  // the wait itself is unpaid. Payroll/invoicing read the recorded times, so
+  // this directly changes billable hours — hence opt-in per site.
+  autoClockOutPayGrace: boolean("auto_clock_out_pay_grace").notNull().default(false),
   // When true, an officer with an ACCEPTED shift assignment at this site is
   // automatically clocked in — no manual tap — once their shift has started
   // and the app detects them inside the geofence while in the foreground

@@ -39,6 +39,15 @@ stale open entries are always possible — see `single-open-time-entry-invariant
 A stale open entry also blocks that officer from clocking in again, so these
 rows are user-visible, not just cosmetic.
 
+**Turning a global constant into per-entity config:** the job's SQL pre-filter
+usually encodes the old constant (`WHERE end_time <= now() - 10min`). Once each
+site can set its own wait, that filter silently excludes every site whose value
+is *longer* than the old constant — those rows never enter the loop, so the
+feature looks like it "just doesn't run" there. Widen the query to the loosest
+bound the config allows (here: "the shift has ended at all") and evaluate the
+per-row threshold in JS, where the clamp also lives. Rows with no linked entity
+must fall back to the documented default, not be skipped.
+
 **Known gap:** auto-clock-out INNER JOINs shifts, so an ad-hoc clock-in with no
 `shift_id` is never swept — it stays open indefinitely and keeps blocking that
 officer. Closing those needs a different rule (they are legitimately open while

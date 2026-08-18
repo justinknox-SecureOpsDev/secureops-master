@@ -20,6 +20,7 @@ import {
   escalateUnconfirmedEntries,
   autoClockOutEndedShifts,
   computeAutoClockOut,
+  resolveAutoClockOutDelayMinutes,
 } from "../lib/scheduledJobs";
 
 // Tag everything so cleanup can scope precisely and never trample
@@ -455,26 +456,158 @@ describe("computeAutoClockOut", () => {
     expect(got.clockOut.getTime()).toBe(clockIn.getTime() + 36 * HOUR);
     expect(got.hours).toBeLessThan(10000);
   });
+
+  it("ignores the site's delay when the grace period is unpaid (today's behavior)", () => {
+    const shiftEnd = new Date("2026-07-01T18:00:00Z");
+    const clockIn = new Date(shiftEnd.getTime() - 8 * HOUR);
+
+    const got = computeAutoClockOut({
+      clockInTime: clockIn,
+      shiftEndTime: shiftEnd,
+      now: shiftEnd.getTime() + 90 * 60 * 1000,
+      delayMinutes: 45,
+      payGrace: false,
+    });
+
+    expect(got.clockOut.toISOString()).toBe(shiftEnd.toISOString());
+    expect(got.hours).toBe(8);
+  });
+
+  it("pays through the grace window when the site opts in", () => {
+    const shiftEnd = new Date("2026-07-01T18:00:00Z");
+    const clockIn = new Date(shiftEnd.getTime() - 8 * HOUR);
+
+    const got = computeAutoClockOut({
+      clockInTime: clockIn,
+      shiftEndTime: shiftEnd,
+      now: shiftEnd.getTime() + 90 * 60 * 1000,
+      delayMinutes: 45,
+      payGrace: true,
+    });
+
+    expect(got.clockOut.getTime()).toBe(shiftEnd.getTime() + 45 * 60 * 1000);
+    expect(got.hours).toBe(8.75);
+    expect(got.capped).toBe(false);
+  });
+
+  it("pays the default 10 minutes of grace when the site has no delay configured", () => {
+    const shiftEnd = new Date("2026-07-01T18:00:00Z");
+    const clockIn = new Date(shiftEnd.getTime() - 8 * HOUR);
+
+    const got = computeAutoClockOut({
+      clockInTime: clockIn,
+      shiftEndTime: shiftEnd,
+      now: shiftEnd.getTime() + 30 * 60 * 1000,
+      delayMinutes: null as unknown as undefined,
+      payGrace: true,
+    });
+
+    expect(got.clockOut.getTime()).toBe(shiftEnd.getTime() + 10 * 60 * 1000);
+    expect(got.hours).toBe(8.17);
+  });
+
+  it("clamps an absurd stored delay before paying it out", () => {
+    const shiftEnd = new Date("2026-07-01T18:00:00Z");
+    const clockIn = new Date(shiftEnd.getTime() - 1 * HOUR);
+
+    const got = computeAutoClockOut({
+      clockInTime: clockIn,
+      shiftEndTime: shiftEnd,
+      now: shiftEnd.getTime() + 30 * 60 * 1000,
+      delayMinutes: 999_999,
+      payGrace: true,
+    });
+
+    // 720-minute (12h) ceiling, not 999999 minutes of invented paid time.
+    expect(got.clockOut.getTime()).toBe(shiftEnd.getTime() + 720 * 60 * 1000);
+    expect(got.hours).toBe(13);
+  });
+
+  it("keeps the 36h maximum-duration cap winning over paid grace", () => {
+    // Clocked in two days before the shift ended: end + 12h of paid grace
+    // would be ~60h, well past the numeric(6,2)-protecting ceiling.
+    const shiftEnd = new Date("2026-07-03T18:00:00Z");
+    const clockIn = new Date(shiftEnd.getTime() - 48 * HOUR);
+
+    const got = computeAutoClockOut({
+      clockInTime: clockIn,
+      shiftEndTime: shiftEnd,
+      now: shiftEnd.getTime() + 13 * HOUR,
+      delayMinutes: 720,
+      payGrace: true,
+    });
+
+    expect(got.capped).toBe(true);
+    expect(got.hours).toBe(36);
+    expect(got.clockOut.getTime()).toBe(clockIn.getTime() + 36 * HOUR);
+  });
+});
+
+describe("resolveAutoClockOutDelayMinutes", () => {
+  it("falls back to the 10-minute default for an unconfigured site", () => {
+    expect(resolveAutoClockOutDelayMinutes(null)).toBe(10);
+    expect(resolveAutoClockOutDelayMinutes(undefined)).toBe(10);
+    expect(resolveAutoClockOutDelayMinutes(Number.NaN)).toBe(10);
+  });
+
+  it("passes a configured delay through untouched", () => {
+    expect(resolveAutoClockOutDelayMinutes(45)).toBe(45);
+    expect(resolveAutoClockOutDelayMinutes(0)).toBe(0);
+    expect(resolveAutoClockOutDelayMinutes(720)).toBe(720);
+  });
+
+  it("clamps corrupt values into the supported range", () => {
+    expect(resolveAutoClockOutDelayMinutes(-30)).toBe(0);
+    expect(resolveAutoClockOutDelayMinutes(100_000)).toBe(720);
+    expect(resolveAutoClockOutDelayMinutes(12.9)).toBe(12);
+  });
 });
 
 describe("autoClockOutEndedShifts", () => {
   const ATAG = `${TAG}-aco`;
   let siteId: string;
+  let clientId: string;
+  // Extra sites created per-test to exercise the per-site timing settings.
+  const extraSiteIds: string[] = [];
 
-  async function makeShift(suffix: string, startTime: Date, endTime: Date): Promise<string> {
+  async function makeShift(suffix: string, startTime: Date, endTime: Date, atSiteId?: string): Promise<string> {
     const [row] = await db
       .insert(shiftsTable)
-      .values({ title: `${ATAG}-shift-${suffix}`, siteId, startTime, endTime, status: "active" })
+      .values({ title: `${ATAG}-shift-${suffix}`, siteId: atSiteId ?? siteId, startTime, endTime, status: "active" })
       .returning({ id: shiftsTable.id });
     return row.id;
   }
 
-  async function makeOpenEntry(employeeId: string, shiftId: string, clockIn: Date): Promise<string> {
+  async function makeOpenEntry(employeeId: string, shiftId: string, clockIn: Date, atSiteId?: string): Promise<string> {
     const [row] = await db
       .insert(timeEntriesTable)
-      .values({ employeeId, shiftId, siteId, clockInTime: clockIn, clockOutTime: null, notes: ATAG })
+      .values({ employeeId, shiftId, siteId: atSiteId ?? siteId, clockInTime: clockIn, clockOutTime: null, notes: ATAG })
       .returning({ id: timeEntriesTable.id });
     return row.id;
+  }
+
+  /**
+   * Site with explicit auto-clock-out timing. `delayMinutes` is written with a
+   * raw SQL cast so tests can also store values the API would reject (corrupt
+   * rows), which is exactly what the job's clamp defends against.
+   */
+  async function makeSiteWithDelay(
+    suffix: string,
+    delayMinutes: number | null,
+    payGrace: boolean,
+  ): Promise<string> {
+    const [s] = await db
+      .insert(sitesTable)
+      .values({
+        name: `${ATAG}-${suffix}`,
+        address: "1 Test Way",
+        clientId,
+        autoClockOutDelayMinutes: delayMinutes,
+        autoClockOutPayGrace: payGrace,
+      })
+      .returning({ id: sitesTable.id });
+    extraSiteIds.push(s.id);
+    return s.id;
   }
 
   async function readEntry(id: string) {
@@ -495,6 +628,7 @@ describe("autoClockOutEndedShifts", () => {
       .insert(clientsTable)
       .values({ name: `${ATAG}-client` })
       .returning({ id: clientsTable.id });
+    clientId = c.id;
     const [s] = await db
       .insert(sitesTable)
       .values({ name: `${ATAG}-location`, address: "1 Test Way", clientId: c.id })
@@ -503,9 +637,12 @@ describe("autoClockOutEndedShifts", () => {
   });
 
   afterAll(async () => {
-    await db.execute(sql`DELETE FROM time_entries WHERE site_id = ${siteId}`);
-    await db.execute(sql`DELETE FROM shifts WHERE site_id = ${siteId}`);
-    await db.execute(sql`DELETE FROM sites WHERE id = ${siteId}`);
+    const ids = [siteId, ...extraSiteIds];
+    for (const id of ids) {
+      await db.execute(sql`DELETE FROM time_entries WHERE site_id = ${id}`);
+      await db.execute(sql`DELETE FROM shifts WHERE site_id = ${id}`);
+      await db.execute(sql`DELETE FROM sites WHERE id = ${id}`);
+    }
     await db.execute(sql`DELETE FROM clients WHERE name = ${`${ATAG}-client`}`);
   });
 
@@ -572,6 +709,106 @@ describe("autoClockOutEndedShifts", () => {
     const [a, b] = [await readEntry(entryA), await readEntry(entryB)];
     const closed = [a, b].filter((e) => e.clockOutTime !== null);
     expect(closed).toHaveLength(1);
+  });
+
+  it("waits out the site's own delay instead of the global 10 minutes", async () => {
+    const now = Date.now();
+    const MIN = 60 * 1000;
+    const eventSite = await makeSiteWithDelay("delay45", 45, false);
+
+    // 20 minutes past end: already past the global default, but this site
+    // asked for 45 — the officer must be left alone for now.
+    const earlyEmp = await makeActiveEmployee("aco-d45-early");
+    const earlyEnd = new Date(now - 20 * MIN);
+    const earlyShift = await makeShift("d45-early", new Date(now - 8 * 60 * MIN), earlyEnd, eventSite);
+    const earlyEntry = await makeOpenEntry(earlyEmp, earlyShift, new Date(now - 8 * 60 * MIN), eventSite);
+
+    // 50 minutes past end: the site's delay has elapsed, so this one closes.
+    const lateEmp = await makeActiveEmployee("aco-d45-late");
+    const lateEnd = new Date(now - 50 * MIN);
+    const lateShift = await makeShift("d45-late", new Date(now - 8 * 60 * MIN), lateEnd, eventSite);
+    const lateEntry = await makeOpenEntry(lateEmp, lateShift, new Date(now - 8 * 60 * MIN), eventSite);
+
+    await autoClockOutEndedShifts();
+
+    const early = await readEntry(earlyEntry);
+    expect(early.clockOutTime).toBeNull();
+
+    const late = await readEntry(lateEntry);
+    expect(late.clockOutTime).not.toBeNull();
+    // Grace unpaid (default): stamped at the scheduled end, exactly as today.
+    expect(late.clockOutTime?.getTime()).toBe(lateEnd.getTime());
+    expect(late.notes).toContain("Waited 45 min past scheduled end");
+    expect(late.notes).toContain("grace period unpaid");
+  });
+
+  it("pays through the grace window when the site opts in, and says so on the entry", async () => {
+    const now = Date.now();
+    const MIN = 60 * 1000;
+    const paidSite = await makeSiteWithDelay("paid30", 30, true);
+
+    const emp = await makeActiveEmployee("aco-paid");
+    const end = new Date(now - 40 * MIN);
+    const clockIn = new Date(end.getTime() - 8 * 60 * MIN);
+    const shift = await makeShift("paid30", clockIn, end, paidSite);
+    const entryId = await makeOpenEntry(emp, shift, clockIn, paidSite);
+
+    await autoClockOutEndedShifts();
+
+    const entry = await readEntry(entryId);
+    expect(entry.clockOutTime?.getTime()).toBe(end.getTime() + 30 * MIN);
+    expect(Number(entry.hoursWorked)).toBe(8.5);
+    expect(entry.notes).toContain("Waited 30 min past scheduled end");
+    expect(entry.notes).toContain("grace period paid");
+  });
+
+  it("clamps a corrupt stored delay rather than stalling the site", async () => {
+    const now = Date.now();
+    const MIN = 60 * 1000;
+    // Negative minutes can only come from a corrupt/hand-edited row — the API
+    // rejects them. Clamped to 0, so the entry closes as soon as the shift
+    // has ended rather than the job silently skipping this site forever.
+    const brokenSite = await makeSiteWithDelay("broken", -600, false);
+
+    const emp = await makeActiveEmployee("aco-broken");
+    const end = new Date(now - 1 * MIN);
+    const clockIn = new Date(end.getTime() - 4 * 60 * MIN);
+    const shift = await makeShift("broken", clockIn, end, brokenSite);
+    const entryId = await makeOpenEntry(emp, shift, clockIn, brokenSite);
+
+    await autoClockOutEndedShifts();
+
+    const entry = await readEntry(entryId);
+    expect(entry.clockOutTime?.getTime()).toBe(end.getTime());
+    expect(Number(entry.hoursWorked)).toBe(4);
+    expect(entry.notes).toContain("Waited 0 min past scheduled end");
+  });
+
+  it("leaves a site with auto clock-out switched off alone, whatever its timing settings say", async () => {
+    const now = Date.now();
+    const MIN = 60 * 1000;
+    const [offSite] = await db
+      .insert(sitesTable)
+      .values({
+        name: `${ATAG}-off`,
+        address: "1 Test Way",
+        clientId,
+        autoClockOutEnabled: false,
+        autoClockOutDelayMinutes: 0,
+        autoClockOutPayGrace: true,
+      })
+      .returning({ id: sitesTable.id });
+    extraSiteIds.push(offSite.id);
+
+    const emp = await makeActiveEmployee("aco-off");
+    const end = new Date(now - 3 * 60 * MIN);
+    const clockIn = new Date(end.getTime() - 8 * 60 * MIN);
+    const shift = await makeShift("off", clockIn, end, offSite.id);
+    const entryId = await makeOpenEntry(emp, shift, clockIn, offSite.id);
+
+    await autoClockOutEndedShifts();
+
+    expect((await readEntry(entryId)).clockOutTime).toBeNull();
   });
 });
 

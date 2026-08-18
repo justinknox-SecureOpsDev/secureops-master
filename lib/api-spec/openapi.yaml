@@ -5007,6 +5007,8 @@ components:
         locationLng: { type: number }
         notes: { type: string }
         autoClockOutEnabled: { type: boolean, description: "When false, the auto-clock-out job skips officers at this site" }
+        autoClockOutDelayMinutes: { type: integer, nullable: true, minimum: 0, maximum: 720, description: "Minutes past a shift's scheduled end the auto-clock-out job waits before closing an abandoned entry. Null = the global 10-minute default." }
+        autoClockOutPayGrace: { type: boolean, description: "When true, an auto-closed entry is stamped at scheduled end + the delay above (the officer is paid through the grace window). Default false stamps it at the scheduled end." }
         autoClockInEnabled: { type: boolean, description: "When true, officers with an accepted shift here are automatically clocked in once their shift starts and the app detects them inside the geofence (app must be open)" }
         createdAt: { type: string, format: date-time }
       required: [id, clientId, name, createdAt]
@@ -5043,6 +5045,8 @@ components:
         locationLng: { type: number }
         notes: { type: string }
         autoClockOutEnabled: { type: boolean }
+        autoClockOutDelayMinutes: { type: integer, nullable: true, minimum: 0, maximum: 720 }
+        autoClockOutPayGrace: { type: boolean }
         autoClockInEnabled: { type: boolean }
       required: [name]
 
@@ -5056,6 +5060,8 @@ components:
         locationLng: { type: number }
         notes: { type: string }
         autoClockOutEnabled: { type: boolean }
+        autoClockOutDelayMinutes: { type: integer, nullable: true, minimum: 0, maximum: 720, description: "Whole minutes (0–720). Null clears the override back to the global 10-minute default." }
+        autoClockOutPayGrace: { type: boolean }
         autoClockInEnabled: { type: boolean }
 
     SiteManagerUser:
