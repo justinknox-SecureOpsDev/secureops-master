@@ -1,4 +1,4 @@
-import { lt, eq, and, or, isNull, gt, gte, lte, ne, sql, inArray } from "drizzle-orm";
+import { lt, eq, and, or, isNull, isNotNull, gt, gte, lte, ne, sql, inArray } from "drizzle-orm";
 import {
   db,
   revokedTokensTable,
@@ -55,6 +55,13 @@ export const DEFAULT_AUTO_CLOCKOUT_DELAY_MINUTES = 10;
  */
 export const AUTO_CLOCKOUT_DELAY_MIN_MINUTES = 0;
 export const AUTO_CLOCKOUT_DELAY_MAX_MINUTES = 720; // 12h
+// The first forgotten-clock-out nudge is deliberately close to the site's
+// automatic close deadline. Five minutes gives an officer a useful chance to
+// clock out themselves while still fitting within the five-minute job cadence.
+export const AUTO_CLOCKOUT_REMINDER_LEAD_MINUTES = 5;
+// If geofence evidence keeps an officer open past the automatic close
+// deadline, wait a little longer before the second manual follow-up.
+const AUTO_CLOCKOUT_REMINDER_FOLLOW_UP_MINUTES = 10;
 /**
  * Hard ceiling on the duration auto-clock-out is willing to invent, in hours.
  * `time_entries.hours_worked` is numeric(6,2) (max 9999.99), so an entry left
@@ -1076,6 +1083,81 @@ export function resolveAutoClockOutDelayMinutes(raw: number | null | undefined):
   );
 }
 
+type ClockOutReminderTier = "first" | "second";
+type ClockOutReminderColumn = "clockOutReminder1SentAt" | "clockOutReminder2SentAt";
+
+interface ClockOutReminderPlan {
+  offsetMinutes: number;
+  column: ClockOutReminderColumn;
+  tier: ClockOutReminderTier;
+}
+
+/**
+ * Resolve the two clock-out reminder deadlines from the same effective site
+ * policy the auto-clock-out job uses.
+ *
+ * Auto-close sites get a warning five minutes before their configured close
+ * deadline, then one manual follow-up after that deadline if a current
+ * geofence reading kept the entry open. Sites that intentionally disable
+ * auto-close retain the long-standing 20/60-minute manual reminder cadence.
+ */
+export function getClockOutReminderPlan(args: {
+  autoClockOutEnabled: boolean | null | undefined;
+  autoClockOutDelayMinutes: number | null | undefined;
+}): ClockOutReminderPlan[] {
+  if (args.autoClockOutEnabled === false) {
+    return [
+      { offsetMinutes: 20, column: "clockOutReminder1SentAt", tier: "first" },
+      { offsetMinutes: 60, column: "clockOutReminder2SentAt", tier: "second" },
+    ];
+  }
+
+  const delayMinutes = resolveAutoClockOutDelayMinutes(args.autoClockOutDelayMinutes);
+  return [
+    {
+      offsetMinutes: Math.max(0, delayMinutes - AUTO_CLOCKOUT_REMINDER_LEAD_MINUTES),
+      column: "clockOutReminder1SentAt",
+      tier: "first",
+    },
+    {
+      offsetMinutes: delayMinutes + AUTO_CLOCKOUT_REMINDER_FOLLOW_UP_MINUTES,
+      column: "clockOutReminder2SentAt",
+      tier: "second",
+    },
+  ];
+}
+
+function formatMinutes(minutes: number): string {
+  return `${minutes} ${minutes === 1 ? "minute" : "minutes"}`;
+}
+
+export function getClockOutReminderMessage(args: {
+  siteName: string | null;
+  shiftEndTime: Date;
+  autoClockOutEnabled: boolean | null | undefined;
+  autoClockOutDelayMinutes: number | null | undefined;
+  tier: ClockOutReminderTier;
+  now: number;
+}): string {
+  const where = args.siteName ?? "your shift";
+  if (args.autoClockOutEnabled === false) {
+    return `Your shift at ${where} has ended. Auto clock-out is disabled at this site, so please clock out manually.`;
+  }
+
+  const deadline = new Date(args.shiftEndTime).getTime()
+    + resolveAutoClockOutDelayMinutes(args.autoClockOutDelayMinutes) * MIN_MS;
+  const minutesUntilClose = Math.max(0, Math.ceil((deadline - args.now) / MIN_MS));
+
+  if (args.tier === "first") {
+    if (minutesUntilClose === 0) {
+      return `Your shift at ${where} has ended. Automatic clock-out is due now if you have left the site; please clock out manually.`;
+    }
+    return `Your shift at ${where} has ended. If you have left the site, the system will clock you out automatically in ${formatMinutes(minutesUntilClose)}.`;
+  }
+
+  return `Your shift at ${where} ended, and you are still clocked in. Please clock out manually when you are done.`;
+}
+
 /**
  * Decide when an abandoned time entry should be closed, and how many hours
  * that is worth.
@@ -1262,6 +1344,120 @@ export async function autoClockOutEndedShifts(): Promise<void> {
     }
   } catch (err) {
     logger.error({ err }, "[auto-clock-out] job failed");
+  }
+}
+
+/**
+ * Forgot-to-clock-out reminders. For an automatic-close site, the first
+ * nudge is scheduled from that site's current close delay rather than a
+ * fixed offset after shift end. This job resolves the delay afresh on every
+ * tick: a mid-shift setting change moves an unsent reminder, while the atomic
+ * sent-at stamps ensure it never re-arms a reminder already delivered.
+ *
+ * Auto-close-off sites cannot promise an automatic close, so they retain the
+ * familiar 20/60-minute manual nudge cadence with copy that says so. Entries
+ * with no linked site use the global automatic-close default, matching
+ * `autoClockOutEndedShifts`.
+ */
+export async function sendForgotClockOutReminders(): Promise<void> {
+  try {
+    const now = Date.now();
+    // The longest enabled schedule is 12 hours + the 10-minute follow-up;
+    // preserve the former one-day catch-up window for disabled sites without
+    // scanning every historical open entry on every five-minute tick.
+    const oldestRelevantEnd = new Date(now - 24 * HOUR_MS);
+    const rows = await db
+      .select({
+        entryId: timeEntriesTable.id,
+        employeeId: timeEntriesTable.employeeId,
+        siteName: sitesTable.name,
+        shiftEndTime: shiftsTable.endTime,
+        autoClockOutEnabled: sitesTable.autoClockOutEnabled,
+        autoClockOutDelayMinutes: sitesTable.autoClockOutDelayMinutes,
+        clockOutReminder1SentAt: timeEntriesTable.clockOutReminder1SentAt,
+        clockOutReminder2SentAt: timeEntriesTable.clockOutReminder2SentAt,
+      })
+      .from(timeEntriesTable)
+      .innerJoin(shiftsTable, eq(shiftsTable.id, timeEntriesTable.shiftId))
+      .leftJoin(sitesTable, eq(sitesTable.id, shiftsTable.siteId))
+      .where(and(
+        isNull(timeEntriesTable.clockOutTime),
+        gte(shiftsTable.endTime, oldestRelevantEnd),
+        lte(shiftsTable.endTime, new Date(now)),
+      ));
+
+    let totalSent = 0;
+    for (const row of rows) {
+      const plan = getClockOutReminderPlan(row);
+      for (const reminder of plan) {
+        const alreadySent = reminder.column === "clockOutReminder1SentAt"
+          ? row.clockOutReminder1SentAt
+          : row.clockOutReminder2SentAt;
+        if (alreadySent) continue;
+
+        // Do not bunch both tiers into one delayed recovery tick. Once the
+        // first reminder is claimed, the next five-minute tick can decide
+        // whether a still-open entry warrants the follow-up.
+        if (reminder.tier === "second" && !row.clockOutReminder1SentAt) continue;
+
+        const dueAt = new Date(row.shiftEndTime).getTime() + reminder.offsetMinutes * MIN_MS;
+        if (now < dueAt) continue;
+
+        const sentColumn = reminder.column === "clockOutReminder1SentAt"
+          ? timeEntriesTable.clockOutReminder1SentAt
+          : timeEntriesTable.clockOutReminder2SentAt;
+        const claimed = await db
+          .update(timeEntriesTable)
+          .set(reminder.column === "clockOutReminder1SentAt"
+            ? { clockOutReminder1SentAt: new Date() }
+            : { clockOutReminder2SentAt: new Date() })
+          .where(and(
+            eq(timeEntriesTable.id, row.entryId),
+            isNull(timeEntriesTable.clockOutTime),
+            isNull(sentColumn),
+            ...(reminder.tier === "second"
+              ? [isNotNull(timeEntriesTable.clockOutReminder1SentAt)]
+              : []),
+          ))
+          .returning({ id: timeEntriesTable.id });
+        if (claimed.length === 0) continue;
+
+        let pushOk = false;
+        try {
+          await sendPushToUsers([row.employeeId], {
+            title: "Don't forget to clock out",
+            body: getClockOutReminderMessage({
+              siteName: row.siteName,
+              shiftEndTime: row.shiftEndTime,
+              autoClockOutEnabled: row.autoClockOutEnabled,
+              autoClockOutDelayMinutes: row.autoClockOutDelayMinutes,
+              tier: reminder.tier,
+              now,
+            }),
+            data: { type: "forgot_clock_out", timeEntryId: row.entryId, tier: reminder.tier },
+          });
+          pushOk = true;
+        } catch (err) {
+          logger.warn({ err, timeEntryId: row.entryId }, "[forgot-clock-out] push send failed");
+        }
+        if (!pushOk) {
+          await db
+            .update(timeEntriesTable)
+            .set(reminder.column === "clockOutReminder1SentAt"
+              ? { clockOutReminder1SentAt: null }
+              : { clockOutReminder2SentAt: null })
+            .where(eq(timeEntriesTable.id, row.entryId))
+            .catch(() => {/* swallow */});
+          continue;
+        }
+        totalSent += 1;
+      }
+    }
+    if (totalSent > 0) {
+      logger.info({ totalSent }, "Sent forgot-clock-out reminders");
+    }
+  } catch (err) {
+    logger.error({ err }, "[forgot-clock-out] job failed");
   }
 }
 
@@ -1691,104 +1887,6 @@ export function startScheduledJobs(intervalMs: number = HOUR_MS): NodeJS.Timeout
       }
     } catch (err) {
       logger.error({ err }, "[high-risk-digest] job failed");
-    }
-  }
-
-  /**
-   * Forgot-to-clock-out reminders. For each officer who is still clocked
-   * in past their assigned shift's scheduled end, push a friendly nudge
-   * at ~20m and ~60m after end. Skips entries with no linked shift
-   * (drop-in clock-ins have no scheduled end). Idempotent via
-   * `time_entries.clock_out_reminder1_sent_at` / `_reminder2_sent_at`,
-   * claimed atomically via UPDATE … RETURNING so two overlapping ticks
-   * never double-send.
-   */
-  async function sendForgotClockOutReminders(): Promise<void> {
-    try {
-      const now = Date.now();
-      const windows: Array<{
-        minOffset: number;
-        maxOffset: number;
-        column: "clockOutReminder1SentAt" | "clockOutReminder2SentAt";
-        label: string;
-      }> = [
-        // ~20 minutes past scheduled end. Window: 15–45m so a 5-minute
-        // tick can't miss it and a long previous tick can still catch up.
-        { minOffset: 15 * MIN_MS, maxOffset: 45 * MIN_MS, column: "clockOutReminder1SentAt", label: "first" },
-        // ~60 minutes past scheduled end, then stop.
-        { minOffset: 55 * MIN_MS, maxOffset: 24 * HOUR_MS, column: "clockOutReminder2SentAt", label: "second" },
-      ];
-
-      let totalSent = 0;
-      for (const w of windows) {
-        const sentColumn = w.column === "clockOutReminder1SentAt"
-          ? timeEntriesTable.clockOutReminder1SentAt
-          : timeEntriesTable.clockOutReminder2SentAt;
-        // Officer scheduled end happened between (now - maxOffset) and (now - minOffset).
-        const endMin = new Date(now - w.maxOffset);
-        const endMax = new Date(now - w.minOffset);
-
-        const rows = await db
-          .select({
-            entryId: timeEntriesTable.id,
-            employeeId: timeEntriesTable.employeeId,
-            siteName: sitesTable.name,
-          })
-          .from(timeEntriesTable)
-          .innerJoin(shiftsTable, eq(shiftsTable.id, timeEntriesTable.shiftId))
-          .leftJoin(sitesTable, eq(sitesTable.id, shiftsTable.siteId))
-          .where(and(
-            isNull(timeEntriesTable.clockOutTime),
-            isNull(sentColumn),
-            gte(shiftsTable.endTime, endMin),
-            lte(shiftsTable.endTime, endMax),
-          ));
-
-        for (const r of rows) {
-          const claimed = await db
-            .update(timeEntriesTable)
-            .set(w.column === "clockOutReminder1SentAt"
-              ? { clockOutReminder1SentAt: new Date() }
-              : { clockOutReminder2SentAt: new Date() })
-            .where(and(
-              eq(timeEntriesTable.id, r.entryId),
-              isNull(timeEntriesTable.clockOutTime),
-              isNull(sentColumn),
-            ))
-            .returning({ id: timeEntriesTable.id });
-          if (claimed.length === 0) continue;
-
-          const where = r.siteName ? r.siteName : "your shift";
-          let pushOk = false;
-          try {
-            await sendPushToUsers([r.employeeId], {
-              title: "Don't forget to clock out",
-              body: `Your shift at ${where} has ended. Tap to clock out.`,
-              data: { type: "forgot_clock_out", timeEntryId: r.entryId, tier: w.label },
-            });
-            pushOk = true;
-          } catch (err) {
-            logger.warn({ err, timeEntryId: r.entryId }, "[forgot-clock-out] push send failed");
-          }
-          if (!pushOk) {
-            // Roll back claim so a later tick can retry.
-            await db
-              .update(timeEntriesTable)
-              .set(w.column === "clockOutReminder1SentAt"
-                ? { clockOutReminder1SentAt: null }
-                : { clockOutReminder2SentAt: null })
-              .where(eq(timeEntriesTable.id, r.entryId))
-              .catch(() => {/* swallow */});
-            continue;
-          }
-          totalSent += 1;
-        }
-      }
-      if (totalSent > 0) {
-        logger.info({ totalSent }, "Sent forgot-clock-out reminders");
-      }
-    } catch (err) {
-      logger.error({ err }, "[forgot-clock-out] job failed");
     }
   }
 

@@ -1,7 +1,7 @@
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { randomUUID } from "node:crypto";
 import bcrypt from "bcryptjs";
-import { eq, sql } from "drizzle-orm";
+import { and, eq, sql } from "drizzle-orm";
 import {
   db,
   usersTable,
@@ -12,6 +12,7 @@ import {
   sitesTable,
   siteManagersTable,
   clientsTable,
+  notificationsTable,
 } from "@workspace/db";
 import {
   sendLicenseExpiryReminders,
@@ -21,6 +22,9 @@ import {
   autoClockOutEndedShifts,
   computeAutoClockOut,
   resolveAutoClockOutDelayMinutes,
+  getClockOutReminderPlan,
+  getClockOutReminderMessage,
+  sendForgotClockOutReminders,
 } from "../lib/scheduledJobs";
 
 // Tag everything so cleanup can scope precisely and never trample
@@ -563,6 +567,58 @@ describe("resolveAutoClockOutDelayMinutes", () => {
   });
 });
 
+describe("clock-out reminder timing", () => {
+  it("warns shortly before the site's configured automatic close deadline", () => {
+    expect(getClockOutReminderPlan({
+      autoClockOutEnabled: true,
+      autoClockOutDelayMinutes: 45,
+    })).toEqual([
+      { offsetMinutes: 40, column: "clockOutReminder1SentAt", tier: "first" },
+      { offsetMinutes: 55, column: "clockOutReminder2SentAt", tier: "second" },
+    ]);
+
+    // Short waits cannot have a five-minute lead-in before the shift ends,
+    // so the warning is due immediately at scheduled end rather than after
+    // the automatic close has already happened.
+    expect(getClockOutReminderPlan({
+      autoClockOutEnabled: true,
+      autoClockOutDelayMinutes: 5,
+    })[0]).toMatchObject({ offsetMinutes: 0, tier: "first" });
+  });
+
+  it("keeps the established manual cadence when automatic close is disabled", () => {
+    expect(getClockOutReminderPlan({
+      autoClockOutEnabled: false,
+      autoClockOutDelayMinutes: 0,
+    })).toEqual([
+      { offsetMinutes: 20, column: "clockOutReminder1SentAt", tier: "first" },
+      { offsetMinutes: 60, column: "clockOutReminder2SentAt", tier: "second" },
+    ]);
+  });
+
+  it("explains the actual automatic close deadline and manual-only sites", () => {
+    const shiftEnd = new Date("2026-08-18T18:00:00Z");
+
+    expect(getClockOutReminderMessage({
+      siteName: "North Gate",
+      shiftEndTime: shiftEnd,
+      autoClockOutEnabled: true,
+      autoClockOutDelayMinutes: 45,
+      tier: "first",
+      now: new Date("2026-08-18T18:40:00Z").getTime(),
+    })).toContain("clock you out automatically in 5 minutes");
+
+    expect(getClockOutReminderMessage({
+      siteName: "North Gate",
+      shiftEndTime: shiftEnd,
+      autoClockOutEnabled: false,
+      autoClockOutDelayMinutes: 45,
+      tier: "first",
+      now: new Date("2026-08-18T18:20:00Z").getTime(),
+    })).toContain("Auto clock-out is disabled");
+  });
+});
+
 describe("autoClockOutEndedShifts", () => {
   const ATAG = `${TAG}-aco`;
   let siteId: string;
@@ -616,6 +672,8 @@ describe("autoClockOutEndedShifts", () => {
         clockOutTime: timeEntriesTable.clockOutTime,
         hoursWorked: timeEntriesTable.hoursWorked,
         notes: timeEntriesTable.notes,
+        clockOutReminder1SentAt: timeEntriesTable.clockOutReminder1SentAt,
+        clockOutReminder2SentAt: timeEntriesTable.clockOutReminder2SentAt,
       })
       .from(timeEntriesTable)
       .where(eq(timeEntriesTable.id, id))
@@ -809,6 +867,80 @@ describe("autoClockOutEndedShifts", () => {
     await autoClockOutEndedShifts();
 
     expect((await readEntry(entryId)).clockOutTime).toBeNull();
+  });
+
+  it("moves an unsent nudge when the site delay changes without re-sending it", async () => {
+    const now = Date.now();
+    const MIN = 60 * 1000;
+    const delayedSite = await makeSiteWithDelay("reminder-delay", 45, false);
+    const emp = await makeActiveEmployee("aco-reminder-delay");
+    const end = new Date(now - 20 * MIN);
+    const shift = await makeShift("reminder-delay", new Date(end.getTime() - 8 * 60 * MIN), end, delayedSite);
+    const entryId = await makeOpenEntry(emp, shift, new Date(end.getTime() - 8 * 60 * MIN), delayedSite);
+
+    // The first nudge for a 45-minute close delay is due 40 minutes after end.
+    await sendForgotClockOutReminders();
+    expect((await readEntry(entryId)).clockOutReminder1SentAt).toBeNull();
+
+    // Lowering the wait during the open shift makes the currently-unsent
+    // reminder due immediately. The existing sent-at claim then prevents a
+    // later delay edit from re-arming a duplicate.
+    await db
+      .update(sitesTable)
+      .set({ autoClockOutDelayMinutes: 10 })
+      .where(eq(sitesTable.id, delayedSite));
+    await sendForgotClockOutReminders();
+    expect((await readEntry(entryId)).clockOutReminder1SentAt).not.toBeNull();
+
+    await db
+      .update(sitesTable)
+      .set({ autoClockOutDelayMinutes: 45 })
+      .where(eq(sitesTable.id, delayedSite));
+    await sendForgotClockOutReminders();
+
+    const notifications = await db
+      .select({ id: notificationsTable.id })
+      .from(notificationsTable)
+      .where(and(
+        eq(notificationsTable.userId, emp),
+        eq(notificationsTable.type, "forgot_clock_out"),
+      ));
+    expect(notifications).toHaveLength(1);
+  });
+
+  it("reminds a manual-only site without claiming it will auto-close", async () => {
+    const now = Date.now();
+    const MIN = 60 * 1000;
+    const [offSite] = await db
+      .insert(sitesTable)
+      .values({
+        name: `${ATAG}-reminder-off`,
+        address: "1 Test Way",
+        clientId,
+        autoClockOutEnabled: false,
+        autoClockOutDelayMinutes: 0,
+      })
+      .returning({ id: sitesTable.id });
+    extraSiteIds.push(offSite.id);
+
+    const emp = await makeActiveEmployee("aco-reminder-off");
+    const end = new Date(now - 21 * MIN);
+    const shift = await makeShift("reminder-off", new Date(end.getTime() - 8 * 60 * MIN), end, offSite.id);
+    const entryId = await makeOpenEntry(emp, shift, new Date(end.getTime() - 8 * 60 * MIN), offSite.id);
+
+    await sendForgotClockOutReminders();
+
+    const entry = await readEntry(entryId);
+    expect(entry.clockOutTime).toBeNull();
+    expect(entry.clockOutReminder1SentAt).not.toBeNull();
+    const [notification] = await db
+      .select({ body: notificationsTable.body })
+      .from(notificationsTable)
+      .where(and(
+        eq(notificationsTable.userId, emp),
+        eq(notificationsTable.type, "forgot_clock_out"),
+      ));
+    expect(notification?.body).toContain("Auto clock-out is disabled");
   });
 });
 
