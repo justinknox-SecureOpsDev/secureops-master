@@ -2,14 +2,15 @@
 
 **Goal:** stand up a brand-new customer on their own copy of the system — same features, zero WCSG data — and wire every integration back up, step by step.
 
-**The model (why this works):** one shared mobile app serves every customer. Each customer gets their **own full backend** — their own copy of the code, their own database, their own domain, their own branding. Customers never share a server or a database. The phone app finds the right backend using a short **org code** (like `wcsg` or `rgp`) that this master project's directory resolves.
+**The model (why this works):** one shared mobile app serves every customer. Each customer gets their **own full backend** — their own copy of the code, their own database, their own domain, their own branding. Customers never share a server or a database. The phone app finds the right backend using a short **org code** that a separate directory resolves.
 
-**This project is the master.** It plays three roles at once:
+**This project (the WCSG deployment) plays two roles:**
 1. The golden template you fork for each new customer
-2. WCSG's own live backend
-3. The **org directory** (the phone app asks it "where does code `acme` live?") and the **only** project that pushes phone-app updates
+2. WCSG's own live backend, and — since the 2026-07-25 role swap — the **only** project that pushes phone-app OTA updates
 
-Keep it healthy and don't fork *from* a customer copy — always fork from here.
+**A separate project, `secureops-command.replit.app` (aka secureopscommand.com), plays the third role:** it hosts the **org directory** (the phone app asks it "where does code `acme` live?") and the **fleet console** used to manage every customer. This repo's own `ORG_DIRECTORY` env and local `artifacts/control-plane` copy are stale/disconnected — always do directory and fleet-console work on that other project (Phases 7 & 8 below), never here.
+
+Keep this project healthy and don't fork *from* a customer copy — always fork from here.
 
 ---
 
@@ -85,9 +86,11 @@ Log in as the admin → **Platform → Branding**. Set company name, short name,
 2. Once it's serving, set in the fork's **production** env: `APP_BASE_URL=https://theirdomain.com` and `ALLOWED_ORIGINS=https://theirdomain.com`, then **republish**.
 3. Email links and browser security now use their domain.
 
-## Phase 7 — Register the org code (5 min, back in THIS master project)
+## Phase 7 — Register the org code (5 min, in the SEPARATE org-directory/fleet-console project — secureops-command.replit.app / secureopscommand.com — NOT this repo)
 
-1. Edit the master's `ORG_DIRECTORY` env — add one line to the JSON list:
+This repo's own `ORG_DIRECTORY` env is a stale local copy that nothing reads from in production; editing and republishing *this* project does not affect org-code resolution. The real directory that customer phones query lives on the separate `secureops-command.replit.app` project (same one that hosts the real fleet console — see Phase 8). Do this step there.
+
+1. Edit that project's `ORG_DIRECTORY` env — add one line to the JSON list:
    ```json
    { "code": "acme", "name": "Acme Security", "apiBaseUrl": "https://theirdomain.com" }
    ```
@@ -149,11 +152,11 @@ a manual status flag, not in-app billing. New registrations always start in
 
 ## Quick-reference: the whole flow
 
-Fork master → clean env (Phase 2) → re-enter secrets & reconnect integrations (Phase 3) → publish Reserved VM, seeding ON (Phase 4) → brand in-app (Phase 5) → domain (Phase 6) → add org code to master directory + republish master (Phase 7) → control plane (Phase 8) → verify (Phase 9) → handover (Phase 10).
+Fork this project → clean env (Phase 2) → re-enter secrets & reconnect integrations (Phase 3) → publish Reserved VM, seeding ON (Phase 4) → brand in-app (Phase 5) → domain (Phase 6) → add org code to the SEPARATE directory project + republish it (Phase 7) → register in the SEPARATE fleet console (Phase 8) → verify (Phase 9) → handover (Phase 10).
 
 **Golden rules**
-- Always fork from the master, never from a customer copy.
+- Always fork from this project, never from a customer copy.
 - Seeding ON for every first boot — off too early means permanent lockout.
-- `EXPO_TOKEN` lives **only** in the master.
+- `EXPO_TOKEN` lives **only** in this project.
 - One customer = one backend = one database = one bucket. Nothing shared.
-- The master's `ORG_DIRECTORY` is the single source of truth for org codes; every change needs a master republish.
+- The `secureops-command.replit.app` project's `ORG_DIRECTORY` is the single source of truth for org codes; every change needs a republish of THAT project, not this one.
