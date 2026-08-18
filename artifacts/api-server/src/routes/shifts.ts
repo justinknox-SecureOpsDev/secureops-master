@@ -7,6 +7,7 @@ import { haversineMiles } from "../lib/geofence";
 import { getEffectiveLevel, effectiveLevelSql } from "../lib/eligibility";
 import { pushShiftUpsert, pushShiftDelete, pushAssignmentEvent } from "../lib/schedulerSync";
 import { stripShiftFinanceForRole } from "../lib/financeVisibility";
+import { resolvePayRate } from "../lib/payRate";
 import { canManageSite, getManagedSiteIds, getSiteManagerUserIds } from "../lib/siteManagerAuthz";
 
 const router: IRouter = Router();
@@ -241,12 +242,22 @@ router.get("/shifts", requireStaff, async (req, res): Promise<void> => {
   // canonical worksite location). Null when caller is admin, the employee
   // has no home coords, the shift has no siteId, or the site has no coords.
   let distanceMap: Map<string, number> | null = null;
+  // Officer-facing rate parity: when the caller is reading their personal
+  // worker feed, the "$X/hr" they see must be the rate they'd actually be
+  // paid — their profile hourlyRate when set (> 0), else the shift rate
+  // (same precedence as payroll's shared resolver; no per-entry override
+  // exists yet for an unclaimed/upcoming shift). Admin/dispatcher/site-manager
+  // management views keep showing the shift's own configured rate.
+  let myProfileRate: string | null = null;
+  let applyWorkerRate = false;
   if (!isAdmin && !isSiteManager) {
+    applyWorkerRate = true;
     const [meEmp] = await db
-      .select({ homeLat: employeesTable.homeLat, homeLng: employeesTable.homeLng })
+      .select({ homeLat: employeesTable.homeLat, homeLng: employeesTable.homeLng, hourlyRate: employeesTable.hourlyRate })
       .from(employeesTable)
       .where(eq(employeesTable.userId, userId))
       .limit(1);
+    myProfileRate = meEmp?.hourlyRate ?? null;
     const homeLat = meEmp?.homeLat != null ? Number(meEmp.homeLat) : null;
     const homeLng = meEmp?.homeLng != null ? Number(meEmp.homeLng) : null;
     if (homeLat != null && homeLng != null && Number.isFinite(homeLat) && Number.isFinite(homeLng)) {
@@ -280,11 +291,22 @@ router.get("/shifts", requireStaff, async (req, res): Promise<void> => {
     }
   }
 
-  res.json(shifts.map((s) => stripShiftFinanceForRole(role, {
-    ...s,
-    assignments: assignmentMap.get(s.id) ?? [],
-    distanceMilesFromHome: distanceMap?.get(s.id) ?? null,
-  })));
+  res.json(shifts.map((s) => {
+    // Shared resolver (profile > shift, zero = not set; no per-entry override
+    // exists for an unworked shift), holiday-adjusted against the shift's
+    // start so the "$X/hr" matches what payroll will actually pay.
+    let rateFields: Record<string, string> = {};
+    if (applyWorkerRate) {
+      const r = resolvePayRate({ profileRate: myProfileRate, shiftRate: s.payRate, clockInTime: s.startTime });
+      if (r.source !== "none") rateFields = { payRate: String(r.effectiveRate), hourlyRate: String(r.effectiveRate) };
+    }
+    return stripShiftFinanceForRole(role, {
+      ...s,
+      ...rateFields,
+      assignments: assignmentMap.get(s.id) ?? [],
+      distanceMilesFromHome: distanceMap?.get(s.id) ?? null,
+    });
+  }));
 });
 
 router.post("/shifts", requireAdminOrSiteManager, async (req, res): Promise<void> => {
@@ -1154,7 +1176,24 @@ router.get("/shifts/:id", requireStaff, async (req, res): Promise<void> => {
     .leftJoin(usersTable, eq(shiftAssignmentsTable.employeeId, usersTable.id))
     .where(eq(shiftAssignmentsTable.shiftId, id));
 
-  res.json(stripShiftFinanceForRole(req.user!.role, { ...shift, assignments }));
+  // Officer-facing rate parity (mirrors the /shifts list): an employee sees
+  // the rate they'd actually be paid — their profile hourlyRate when set
+  // (> 0), else the shift rate. Admin/dispatcher/site-manager views keep the
+  // shift's configured rate.
+  let rateFields: Record<string, string> = {};
+  if (req.user!.role === "employee") {
+    const [meEmp] = await db
+      .select({ hourlyRate: employeesTable.hourlyRate })
+      .from(employeesTable)
+      .where(eq(employeesTable.userId, req.user!.userId))
+      .limit(1);
+    const r = resolvePayRate({ profileRate: meEmp?.hourlyRate ?? null, shiftRate: shift.payRate, clockInTime: shift.startTime });
+    if (r.source !== "none") {
+      rateFields = { payRate: String(r.effectiveRate), hourlyRate: String(r.effectiveRate) };
+    }
+  }
+
+  res.json(stripShiftFinanceForRole(req.user!.role, { ...shift, ...rateFields, assignments }));
 });
 
 router.put("/shifts/:id", requireAdminOrSiteManager, async (req, res): Promise<void> => {

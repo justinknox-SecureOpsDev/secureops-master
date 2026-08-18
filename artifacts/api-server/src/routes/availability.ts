@@ -11,6 +11,7 @@ import {
 } from "@workspace/db";
 import { requireAuth } from "../middlewares/auth";
 import { getEffectiveLevel } from "../lib/eligibility";
+import { resolvePayRate } from "../lib/payRate";
 import { requireFeature } from "../lib/features";
 
 const router: IRouter = Router();
@@ -169,7 +170,7 @@ router.get("/me/suggested-shifts", requireAuth, requireEmployee, async (req, res
     })
       .from(officerAvailabilityWindowsTable)
       .where(eq(officerAvailabilityWindowsTable.userId, userId)),
-    db.select({ maxWeeklyHours: employeesTable.maxWeeklyHours })
+    db.select({ maxWeeklyHours: employeesTable.maxWeeklyHours, hourlyRate: employeesTable.hourlyRate })
       .from(employeesTable)
       .where(eq(employeesTable.userId, userId))
       .limit(1),
@@ -178,6 +179,10 @@ router.get("/me/suggested-shifts", requireAuth, requireEmployee, async (req, res
 
   if (windows.length === 0) { res.json({ shifts: [], reason: "no_windows" }); return; }
   const maxWeekly = empRows[0]?.maxWeeklyHours ?? null;
+  // Officer-facing rate parity: the "$X/hr" on a suggested shift must be the
+  // rate this officer would actually be paid — the shared payroll resolver
+  // (profile hourlyRate > shift rate, zero = not set, holiday-adjusted).
+  const myProfileRate = empRows[0]?.hourlyRate ?? null;
 
   // Index windows by dow for fast lookup.
   const windowsByDow = new Map<number, { startMin: number; endMin: number }[]>();
@@ -261,7 +266,10 @@ router.get("/me/suggested-shifts", requireAuth, requireEmployee, async (req, res
 
   matches.sort((a, b) => a.startTime.getTime() - b.startTime.getTime());
   res.json({
-    shifts: matches.slice(0, 50),
+    shifts: matches.slice(0, 50).map((s) => {
+      const r = resolvePayRate({ profileRate: myProfileRate, shiftRate: s.payRate, clockInTime: s.startTime });
+      return r.source !== "none" ? { ...s, payRate: String(r.effectiveRate) } : s;
+    }),
     maxWeeklyHours: maxWeekly,
   });
 });

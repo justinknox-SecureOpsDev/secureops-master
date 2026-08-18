@@ -7,6 +7,7 @@ import { randomUUID } from "node:crypto";
 // (employeesTable + sitesTable + auditLogsTable used by board endpoint below)
 import { requireAdmin } from "../middlewares/auth";
 import { getFederalHolidayName, HOLIDAY_PAY_MULTIPLIER } from "../lib/holidays";
+import { resolvePayRate, type PayRateSource } from "../lib/payRate";
 import { businessTimeZone, businessDateToUtc, startOfBusinessWeek } from "../lib/businessTime";
 import { requireFeature } from "../lib/features";
 import { submitMultipayment, getPaymentStatusByCustomerRef, mapRowToInstruction, isPncConfigured } from "../lib/pncPayments";
@@ -93,9 +94,12 @@ router.post("/payroll/generate", requireAdmin, async (req, res): Promise<void> =
       clockInTime: timeEntriesTable.clockInTime,
       hoursWorked: timeEntriesTable.hoursWorked,
       payRate: shiftsTable.payRate,
+      payRateOverride: timeEntriesTable.payRateOverride,
+      employeeRate: employeesTable.hourlyRate,
     })
     .from(timeEntriesTable)
     .innerJoin(shiftsTable, eq(timeEntriesTable.shiftId, shiftsTable.id))
+    .leftJoin(employeesTable, eq(employeesTable.userId, timeEntriesTable.employeeId))
     .where(and(
       eq(shiftsTable.siteId, siteId),
       eq(timeEntriesTable.approvalStatus, "approved"),
@@ -108,14 +112,16 @@ router.post("/payroll/generate", requireAdmin, async (req, res): Promise<void> =
   const perEmployee = new Map<string, Agg>();
   for (const e of entries) {
     const hours = parseFloat(String(e.hoursWorked || "0"));
-    const rate = parseFloat(String(e.payRate || "0"));
-    // Federal-holiday premium (1.5×): an entry clocked in on a US federal
-    // holiday (in PAYROLL_TIMEZONE) earns time-and-a-half on the whole entry.
-    // Round the premium rate to cents so it reconciles with the per-entry rate
-    // surfaced elsewhere (Payroll Board, invoices) — rate × hours == gross.
-    const effectiveRate = getFederalHolidayName(e.clockInTime)
-      ? Math.round(rate * HOLIDAY_PAY_MULTIPLIER * 100) / 100
-      : rate;
+    // Shared resolver: per-entry override > employee profile rate > shift
+    // rate (zero/null = "not set" at every level). Includes the federal
+    // holiday 1.5× premium with the premium rate rounded to cents BEFORE
+    // multiplying by hours, so rate × hours == gross reconciles everywhere.
+    const { effectiveRate } = resolvePayRate({
+      overrideRate: e.payRateOverride,
+      profileRate: e.employeeRate,
+      shiftRate: e.payRate,
+      clockInTime: e.clockInTime,
+    });
     const cur = perEmployee.get(e.employeeId) ?? { totalHours: 0, gross: 0 };
     cur.totalHours += hours;
     cur.gross += hours * effectiveRate;
@@ -1000,7 +1006,7 @@ async function computeBoardBuckets(filters: {
     hours: number;
     gross: number;
     timeEntryIds: string[];
-    entries: Array<{ id: string; clockInTime: string; hoursWorked: number; rate: number; holiday: string | null; hasClockOut: boolean; scheduledEnd: string | null; lastEditedByEmail: string | null; lastEditedAt: string | null; clockOutTime: string | null; employeeEdited: boolean; employeeEditReason: string | null; originalClockInTime: string | null; originalClockOutTime: string | null; confirmationStatus: string | null }>;
+    entries: Array<{ id: string; clockInTime: string; hoursWorked: number; rate: number; rateSource: PayRateSource; holiday: string | null; hasClockOut: boolean; scheduledEnd: string | null; lastEditedByEmail: string | null; lastEditedAt: string | null; clockOutTime: string | null; employeeEdited: boolean; employeeEditReason: string | null; originalClockInTime: string | null; originalClockOutTime: string | null; confirmationStatus: string | null }>;
     zeroRateEntries: number;
     missingClockOutEntries: number;
     zeroHoursEntries: number;
@@ -1017,20 +1023,18 @@ async function computeBoardBuckets(filters: {
     const siteKey = r.siteId ?? "__nosite__";
     const key = `${r.employeeId}|${siteKey}|${periodStart}`;
     const hours = parseFloat(String(r.hoursWorked || "0"));
-    // Rate priority: per-entry admin override (set via the Payroll Board
-    // "Apply pay rate" action) -> the assigned shift's payRate -> the
-    // employee's default hourlyRate. The override exists so admins can
-    // backfill historical zero-rate entries (no shift on file, or hired
-    // before a rate was set) without rewriting shift/employee records.
-    const rate = parseFloat(String(r.payRateOverride ?? r.payRate ?? r.employeeRate ?? "0"));
-    // Federal-holiday premium (1.5×): entries clocked in on a US federal
-    // holiday (in PAYROLL_TIMEZONE) earn time-and-a-half on the whole entry.
-    // The effective rate flows into the bucket gross AND the per-entry detail
-    // so the admin UI's "hours × rate = line gross" reconciles with the total.
-    const holidayName = getFederalHolidayName(r.clockInTime);
-    const effectiveRate = holidayName
-      ? Math.round(rate * HOLIDAY_PAY_MULTIPLIER * 100) / 100
-      : rate;
+    // Rate priority (shared resolver): per-entry admin override (set via the
+    // Payroll Board "Apply pay rate" action) -> the employee's profile
+    // hourlyRate -> the assigned shift's payRate. Null AND zero both mean
+    // "not set" at every level. Includes the federal-holiday 1.5× premium
+    // (premium rate rounded to cents BEFORE multiplying) so the per-entry
+    // detail's "hours × rate = line gross" reconciles with the bucket total.
+    const { baseRate: rate, effectiveRate, source: rateSource, holidayName } = resolvePayRate({
+      overrideRate: r.payRateOverride,
+      profileRate: r.employeeRate,
+      shiftRate: r.payRate,
+      clockInTime: r.clockInTime,
+    });
     let b = buckets.get(key);
     if (!b) {
       b = {
@@ -1070,6 +1074,7 @@ async function computeBoardBuckets(filters: {
       clockInTime: r.clockInTime.toISOString(),
       hoursWorked: Math.round(hours * 100) / 100,
       rate: Math.round(effectiveRate * 100) / 100,
+      rateSource,
       holiday: holidayName,
       hasClockOut: !!r.hasClockOut,
       scheduledEnd: r.shiftEndTime ? r.shiftEndTime.toISOString() : null,
@@ -1113,8 +1118,8 @@ async function computeBoardBuckets(filters: {
     if (b.zeroRateEntries > 0) {
       warnings.push(
         b.zeroRateEntries === b.entries.length
-          ? "Pay rate is $0 — no shift rate or employee fallback rate on file"
-          : `Pay rate is $0 on ${b.zeroRateEntries} of ${b.entries.length} entries`,
+          ? "Pay rate is $0 — set a rate on the employee's profile, or use Apply pay rate on these entries"
+          : `Pay rate is $0 on ${b.zeroRateEntries} of ${b.entries.length} entries — set a rate on the employee's profile, or use Apply pay rate`,
       );
     }
     if (b.missingClockOutEntries > 0) {
@@ -2031,7 +2036,13 @@ router.post("/payroll/board/apply-rate", requireAdmin, async (req, res): Promise
       continue;
     }
     if (onlyZeroRate) {
-      const effective = parseFloat(String(r.override ?? r.shiftRate ?? r.employeeRate ?? "0"));
+      // Same precedence as everywhere else: override > profile > shift,
+      // with zero/null meaning "not set" at every level.
+      const { baseRate: effective } = resolvePayRate({
+        overrideRate: r.override,
+        profileRate: r.employeeRate,
+        shiftRate: r.shiftRate,
+      });
       if (effective > 0) {
         skipped.push({ id: r.id, reason: "already has a non-zero rate" });
         continue;

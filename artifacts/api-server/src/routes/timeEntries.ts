@@ -1,12 +1,13 @@
 import { Router, type IRouter, type Response } from "express";
 import { eq, and, gte, lte, ne, isNull, inArray, sql, desc } from "drizzle-orm";
-import { db, timeEntriesTable, shiftsTable, usersTable, sitesTable, shiftAssignmentsTable, licensesTable } from "@workspace/db";
+import { db, timeEntriesTable, shiftsTable, usersTable, sitesTable, shiftAssignmentsTable, licensesTable, employeesTable } from "@workspace/db";
 import { requireAuth, requireAdmin, requireAdminOrDispatcher, requireAdminOrSiteManager, requireStaff } from "../middlewares/auth";
 import { upsertWeeklyInvoiceForTimeEntry, weekStartIsoBusiness } from "../lib/invoiceSync";
 import { pushClockEvent } from "../lib/schedulerSync";
 import { getEffectiveLevel } from "../lib/eligibility";
 import { buildTimeEntryAuditMetadata, timeEntrySnapshot } from "../lib/timeEntryAudit";
 import { stripTimeEntryBillRateForRole } from "../lib/financeVisibility";
+import { resolvePayRate } from "../lib/payRate";
 import { getConfirmEditWindowOverride } from "../lib/confirmEditWindowConfig";
 import { canManageSite, getManagedSiteIds } from "../lib/siteManagerAuthz";
 import { broadcastOfficerLeft, broadcastOfficerJoined } from "../lib/wsManager";
@@ -346,7 +347,37 @@ const baseSelect = {
   payRate: shiftsTable.payRate,
   billRate: shiftsTable.billRate,
   employeeName: sql<string>`${usersTable.firstName} || ' ' || ${usersTable.lastName}`,
+  // Internal-only inputs for officer-facing rate resolution — stripped from
+  // every response by finalizeTimeEntryRow below, never serialized.
+  _payRateOverride: timeEntriesTable.payRateOverride,
+  _employeeRate: employeesTable.hourlyRate,
 };
+
+// Finalize a baseSelect row for a response: resolve the officer-facing pay
+// rate, drop the internal resolution inputs, then run the finance sanitizer.
+//
+// Officer-facing rate parity: when the caller is the officer (role
+// "employee" — the list/detail routes already scope them to their own
+// entries), `payRate` is the rate they will actually be paid, resolved with
+// the same precedence payroll uses (per-entry override > profile hourlyRate >
+// shift rate, zero/null = not set). Admin/dispatcher/site-manager views keep
+// the raw shift rate — their management surfaces show the shift's configured
+// rate, and the Payroll Board is where the resolved rate + source live.
+function finalizeTimeEntryRow<T extends Record<string, unknown>>(role: string | undefined, row: T): Record<string, unknown> {
+  const { _payRateOverride, _employeeRate, ...rest } = row as Record<string, unknown>;
+  if (role === "employee") {
+    const resolved = resolvePayRate({
+      overrideRate: _payRateOverride as string | null,
+      profileRate: _employeeRate as string | null,
+      shiftRate: rest.payRate as string | null,
+      // Holiday-adjusted like payroll: an entry clocked in on a federal
+      // holiday shows the 1.5× rate the officer is actually paid.
+      clockInTime: rest.clockInTime as Date | null,
+    });
+    if (resolved.source !== "none") rest.payRate = String(resolved.effectiveRate);
+  }
+  return stripTimeEntryBillRateForRole(role, rest);
+}
 
 // Re-read a just-mutated entry through the SAME projection and finance
 // sanitizer the list route uses, so a mutation response can never expose a
@@ -365,19 +396,13 @@ async function selectTimeEntryForResponse(id: string, role: string | undefined) 
     .leftJoin(shiftsTable, eq(timeEntriesTable.shiftId, shiftsTable.id))
     .leftJoin(sitesTable, sql`${sitesTable.id} = coalesce(${timeEntriesTable.siteId}, ${shiftsTable.siteId})`)
     .leftJoin(usersTable, eq(timeEntriesTable.employeeId, usersTable.id))
+    .leftJoin(employeesTable, eq(employeesTable.userId, timeEntriesTable.employeeId))
     .where(eq(timeEntriesTable.id, id));
-  return row ? stripTimeEntryBillRateForRole(role, row) : null;
+  return row ? finalizeTimeEntryRow(role, row) : null;
 }
 
-// Haversine distance in miles between two lat/lng points.
-function haversineMiles(lat1: number, lng1: number, lat2: number, lng2: number): number {
-  const R = 3958.7613;
-  const toRad = (d: number) => (d * Math.PI) / 180;
-  const dLat = toRad(lat2 - lat1);
-  const dLng = toRad(lng2 - lng1);
-  const a = Math.sin(dLat / 2) ** 2 + Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.sin(dLng / 2) ** 2;
-  return 2 * R * Math.asin(Math.sqrt(a));
-}
+// (Haversine distance now comes from ../lib/geofence — the local duplicate
+// conflicted with that import.)
 
 const GEO_RESOLVE_RADIUS_MILES = 1;
 
@@ -505,13 +530,14 @@ router.get("/time-entries", requireStaff, async (req, res): Promise<void> => {
     .leftJoin(shiftsTable, eq(timeEntriesTable.shiftId, shiftsTable.id))
     .leftJoin(sitesTable, sql`${sitesTable.id} = coalesce(${timeEntriesTable.siteId}, ${shiftsTable.siteId})`)
     .leftJoin(usersTable, eq(timeEntriesTable.employeeId, usersTable.id))
+    .leftJoin(employeesTable, eq(employeesTable.userId, timeEntriesTable.employeeId))
     .where(conditions.length > 0 ? and(...conditions) : undefined)
     // Newest first, deterministically. Callers that pick "the latest entry"
     // (e.g. the officer's post-shift confirmation card) must not depend on
     // unordered Postgres row order, which can surface an arbitrary old entry.
     .orderBy(desc(timeEntriesTable.clockInTime), desc(timeEntriesTable.id));
 
-  res.json(rows.map((r) => stripTimeEntryBillRateForRole(req.user!.role, r)));
+  res.json(rows.map((r) => finalizeTimeEntryRow(req.user!.role, r)));
 });
 
 router.post("/time-entries/clock-in", requireStaff, async (req, res): Promise<void> => {
@@ -1059,6 +1085,7 @@ router.get("/time-entries/active", requireStaff, async (req, res): Promise<void>
     .leftJoin(shiftsTable, eq(timeEntriesTable.shiftId, shiftsTable.id))
     .leftJoin(sitesTable, sql`${sitesTable.id} = coalesce(${timeEntriesTable.siteId}, ${shiftsTable.siteId})`)
     .leftJoin(usersTable, eq(timeEntriesTable.employeeId, usersTable.id))
+    .leftJoin(employeesTable, eq(employeesTable.userId, timeEntriesTable.employeeId))
     .where(and(eq(timeEntriesTable.employeeId, req.user!.userId), isNull(timeEntriesTable.clockOutTime)));
 
   // Return 200 with null rather than 404 when there's no active entry — this
@@ -1066,7 +1093,7 @@ router.get("/time-entries/active", requireStaff, async (req, res): Promise<void>
   // after a clock-out instead of treating "no entry" as an error and keeping
   // the previous cached value.
   if (!entry) { res.json(null); return; }
-  res.json(stripTimeEntryBillRateForRole(req.user!.role, entry));
+  res.json(finalizeTimeEntryRow(req.user!.role, entry));
 });
 
 // Weekly time card — a human-readable per-week view of one employee's hours.

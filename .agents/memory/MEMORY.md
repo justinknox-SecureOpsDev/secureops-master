@@ -36,6 +36,7 @@
 - [Prod data backfills run in-app](prod-data-backfill-runs-in-app.md) — agent executeSql only writes dev (prod is read-only & a separate DB); repair prod DATA via an idempotent boot backfill + republish, not from the agent loop.
 - [Publish migration truncate wipe](replit-publish-migration-truncate.md) — publish diffs dev-DB vs prod-DB (not schema files); unique-constraint add on populated prod table + startup DDL two-writer wiped 4 tables via TRUNCATE CASCADE; never DDL at boot.
 - [Site/client hard-delete data loss](site-delete-cascade-data-loss.md) — deleting a site/client splits dependents (SET NULL survivors vs CASCADE deletes); all 4 delete paths must hit the shared blocker guard.
+- [Officer pay-rate resolution](pay-rate-resolution.md) — one shared resolver: override > profile > shift, zero/null = NOT set (never `??` — shift rate is NOT NULL DEFAULT '0').
 - [Holiday rate cent-rounding](holiday-rate-cent-rounding.md) — round holiday premium rate to cents BEFORE × hours, identically in payroll + invoicing, or displayed-rate×hours drifts from gross.
 - [Payroll 1099 — no tax](payroll-1099-no-tax.md) — all WCSG workers are 1099; payroll NEVER withholds tax (net=gross), enforced at compute + read + write surfaces.
 - [Server day = business TZ](server-calendar-day-must-use-business-tz.md) — server "which calendar day" logic must use PAYROLL_TIMEZONE/Central (lib/businessTime.ts), not UTC, or evening shifts fall into the wrong day.

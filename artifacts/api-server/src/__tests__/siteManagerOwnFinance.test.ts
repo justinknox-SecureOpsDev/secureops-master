@@ -335,9 +335,11 @@ describe("GET /shifts — officer (employee) bill-rate stripping", () => {
     expect(res.status).toBe(200);
     const shift = (res.body as Array<Record<string, unknown>>).find((s) => s.id === ctx.shiftId);
     expect(shift).toBeTruthy();
-    // Pay rate (what the officer earns) stays visible.
+    // Pay rate (what the officer earns) stays visible — and it's the rate
+    // the officer will actually be paid: their profile hourlyRate ($37.50)
+    // wins over the shift's configured rate ($30.00).
     expect(shift).toHaveProperty("payRate");
-    expect(shift!.payRate).toBe("30.00");
+    expect(Number(shift!.payRate)).toBe(37.5);
     // Bill rate (what the client is charged) is admin-only and must be gone.
     expect(shift).not.toHaveProperty("billRate");
     expect(shift).not.toHaveProperty("billableRate");

@@ -21,7 +21,7 @@ type BoardBucket = {
   hourlyRate: number;
   grossPay: number;
   timeEntryIds: string[];
-  entries: Array<{ id: string; clockInTime: string; hoursWorked: number; rate: number; holiday: string | null; hasClockOut: boolean; scheduledEnd: string | null; lastEditedByEmail: string | null; lastEditedAt: string | null; clockOutTime: string | null; employeeEdited: boolean; employeeEditReason: string | null; originalClockInTime: string | null; originalClockOutTime: string | null; confirmationStatus: string | null }>;
+  entries: Array<{ id: string; clockInTime: string; hoursWorked: number; rate: number; rateSource?: "override" | "profile" | "shift" | "none"; holiday: string | null; hasClockOut: boolean; scheduledEnd: string | null; lastEditedByEmail: string | null; lastEditedAt: string | null; clockOutTime: string | null; employeeEdited: boolean; employeeEditReason: string | null; originalClockInTime: string | null; originalClockOutTime: string | null; confirmationStatus: string | null }>;
   existingPayrollEntryId: string | null;
   existingStatus: string | null;
   warnings: string[];
@@ -787,7 +787,24 @@ export default function PayrollBoardPage() {
                                           <td className="px-2 py-1 text-right">
                                             {e.hasClockOut ? e.hoursWorked.toFixed(2) : <span className="text-amber-800">— no clock-out</span>}
                                           </td>
-                                          <td className="px-2 py-1 text-right">{fmtUsd(e.rate)}</td>
+                                          <td className="px-2 py-1 text-right">
+                                            <div className="flex items-center justify-end gap-1.5">
+                                              {/* Where the winning rate came from: per-entry override > employee profile rate > shift rate. */}
+                                              {e.rateSource === "override" && (
+                                                <span className="inline-flex items-center rounded bg-purple-100 px-1.5 py-0.5 text-[10px] font-medium text-purple-900" title="Per-entry pay-rate override (Apply pay rate)">override</span>
+                                              )}
+                                              {e.rateSource === "profile" && (
+                                                <span className="inline-flex items-center rounded bg-blue-100 px-1.5 py-0.5 text-[10px] font-medium text-blue-900" title="Employee profile hourly rate">profile</span>
+                                              )}
+                                              {e.rateSource === "shift" && (
+                                                <span className="inline-flex items-center rounded bg-gray-100 px-1.5 py-0.5 text-[10px] font-medium text-gray-700" title="Shift pay rate (snapshotted from the site default)">shift</span>
+                                              )}
+                                              {e.rateSource === "none" && (
+                                                <span className="inline-flex items-center rounded bg-red-100 px-1.5 py-0.5 text-[10px] font-medium text-red-900" title="No rate on file — set a profile rate or apply a per-entry rate">no rate</span>
+                                              )}
+                                              <span>{fmtUsd(e.rate)}</span>
+                                            </div>
+                                          </td>
                                           <td className="px-2 py-1 text-right">{fmtUsd(e.hoursWorked * e.rate)}</td>
                                           <td className="px-2 py-1 font-mono text-[10px] text-muted-foreground">
                                             <div className="flex items-center gap-2">

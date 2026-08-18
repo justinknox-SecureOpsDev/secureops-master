@@ -6,8 +6,8 @@
  *   - Revenue per approved hour = shift.billRate, else site.defaultBillRate,
  *     else $0 (unpriceable hours still count as worked hours).
  *   - Labor cost per approved hour = time_entries.payRateOverride, else
- *     shift.payRate, else employees.hourlyRate, else $0 (same precedence as
- *     the Payroll Board).
+ *     employees.hourlyRate, else shift.payRate, else $0 (zero/null = "not
+ *     set" at each level; same shared resolver as the Payroll Board).
  *   - Federal-holiday hours (clock-in date in the business timezone) apply
  *     the 1.5× premium to BOTH sides, with the premium rate rounded to cents
  *     BEFORE multiplying by hours — identical to invoiceSync/payroll.
@@ -28,6 +28,7 @@ import {
   incidentsTable,
 } from "@workspace/db";
 import { getFederalHolidayName, HOLIDAY_PAY_MULTIPLIER } from "./holidays";
+import { resolvePayRate } from "./payRate";
 import { businessTimeZone, startOfBusinessWeek, businessDateIso } from "./businessTime";
 
 /** An officer is "punctual" iff clock-in ≤ shift start + this grace. */
@@ -258,10 +259,17 @@ function priceEntry(e: EntryRow): { hours: number; revenue: number; laborCost: n
   const shiftBill = parseFloat(String(e.shiftBillRate ?? "0"));
   const siteBill = parseFloat(String(e.siteBillRate ?? "0"));
   const billBase = shiftBill > 0 ? shiftBill : siteBill > 0 ? siteBill : 0;
-  // Same null-coalescing precedence as the Payroll Board (payroll.ts).
-  const payBase = parseFloat(String(e.payRateOverride ?? e.shiftPayRate ?? e.employeeRate ?? "0"));
+  // Same shared resolver as the Payroll Board / payroll generation
+  // (override > employee profile rate > shift rate; zero = not set), so the
+  // dashboard's labor cost and a pay run never disagree.
+  const pay = resolvePayRate({
+    overrideRate: e.payRateOverride,
+    profileRate: e.employeeRate,
+    shiftRate: e.shiftPayRate,
+    clockInTime: e.clockInTime,
+  });
   const revenue = hours * effectiveRate(billBase, e.clockInTime);
-  const laborCost = hours * effectiveRate(payBase > 0 ? payBase : 0, e.clockInTime);
+  const laborCost = hours * pay.effectiveRate;
   return { hours, revenue, laborCost };
 }
 
