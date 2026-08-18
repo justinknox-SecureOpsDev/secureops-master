@@ -39,6 +39,8 @@ import type {
   ApproveTimeEntryRequest,
   AssignShiftRequest,
   AuthResponse,
+  AutoClockInRequest,
+  AutoClockInResponse,
   BrandConfig,
   ChangePasswordRequest,
   ChatMessage,
@@ -4605,6 +4607,103 @@ export const useClockOut = <
   TContext
 > => {
   return useMutation(getClockOutMutationOptions(options));
+};
+
+/**
+ * Called by the mobile app while it is open/opened (foreground only —
+there is no background location tracking) to silently clock the
+officer in with no button tap. Clocks the caller in ONLY when all of
+the following hold: they have an ACCEPTED shift assignment whose
+window (startTime..endTime) contains now; the assignment's site has
+autoClockInEnabled=true; the caller's current (lat, lng) is inside
+that site's geofence; the caller has no open time entry already; and
+the caller's effective license level still meets the shift's
+requirement. Otherwise it is a no-op. Always responds 200 — a
+not-triggered result is the normal/common case, not an error.
+
+ * @summary Foreground auto clock-in check
+ */
+export const getAutoClockInUrl = () => {
+  return `/api/time-entries/auto-clock-in`;
+};
+
+export const autoClockIn = async (
+  autoClockInRequest: AutoClockInRequest,
+  options?: RequestInit,
+): Promise<AutoClockInResponse> => {
+  return customFetch<AutoClockInResponse>(getAutoClockInUrl(), {
+    ...options,
+    method: "POST",
+    headers: { "Content-Type": "application/json", ...options?.headers },
+    body: JSON.stringify(autoClockInRequest),
+  });
+};
+
+export const getAutoClockInMutationOptions = <
+  TError = ErrorType<unknown>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof autoClockIn>>,
+    TError,
+    { data: BodyType<AutoClockInRequest> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof autoClockIn>>,
+  TError,
+  { data: BodyType<AutoClockInRequest> },
+  TContext
+> => {
+  const mutationKey = ["autoClockIn"];
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof autoClockIn>>,
+    { data: BodyType<AutoClockInRequest> }
+  > = (props) => {
+    const { data } = props ?? {};
+
+    return autoClockIn(data, requestOptions);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type AutoClockInMutationResult = NonNullable<
+  Awaited<ReturnType<typeof autoClockIn>>
+>;
+export type AutoClockInMutationBody = BodyType<AutoClockInRequest>;
+export type AutoClockInMutationError = ErrorType<unknown>;
+
+/**
+ * @summary Foreground auto clock-in check
+ */
+export const useAutoClockIn = <
+  TError = ErrorType<unknown>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof autoClockIn>>,
+    TError,
+    { data: BodyType<AutoClockInRequest> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationResult<
+  Awaited<ReturnType<typeof autoClockIn>>,
+  TError,
+  { data: BodyType<AutoClockInRequest> },
+  TContext
+> => {
+  return useMutation(getAutoClockInMutationOptions(options));
 };
 
 /**

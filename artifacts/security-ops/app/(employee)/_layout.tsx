@@ -11,11 +11,16 @@ import { useAuth } from "@/contexts/AuthContext";
 import { useFeatures, isEnabled } from "@/hooks/useFeatures";
 import { DemoBanner } from "@/components/DemoBanner";
 import { TAB_HOME, TAB_MY_WORK, TAB_INCIDENTS, TAB_CHAT, TAB_PROFILE, TAB_MORE } from "@/constants/tabNames";
+import { useAutoClockInWatcher } from "@/hooks/useAutoClockInWatcher";
 
 export default function EmployeeLayout() {
   const colors = useColors();
   const isIOS = Platform.OS === "ios";
   const isWeb = Platform.OS === "web";
+  // App-wide, foreground-only auto clock-in check — mounted here (not inside
+  // the Clock screen) so it keeps running no matter which employee/site
+  // manager tab is open. See hooks/useAutoClockInWatcher.ts.
+  useAutoClockInWatcher();
 
   return (
     <TourProvider>

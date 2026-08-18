@@ -1221,6 +1221,36 @@ paths:
               schema:
                 $ref: "#/components/schemas/TimeEntry"
 
+  /time-entries/auto-clock-in:
+    post:
+      operationId: autoClockIn
+      tags: [timeEntries]
+      summary: Foreground auto clock-in check
+      description: |
+        Called by the mobile app while it is open/opened (foreground only —
+        there is no background location tracking) to silently clock the
+        officer in with no button tap. Clocks the caller in ONLY when all of
+        the following hold: they have an ACCEPTED shift assignment whose
+        window (startTime..endTime) contains now; the assignment's site has
+        autoClockInEnabled=true; the caller's current (lat, lng) is inside
+        that site's geofence; the caller has no open time entry already; and
+        the caller's effective license level still meets the shift's
+        requirement. Otherwise it is a no-op. Always responds 200 — a
+        not-triggered result is the normal/common case, not an error.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AutoClockInRequest"
+      responses:
+        "200":
+          description: Result of the check (triggered or not).
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AutoClockInResponse"
+
   /time-entries/active:
     get:
       operationId: getActiveTimeEntry
@@ -4679,6 +4709,28 @@ components:
         notes:
           type: string
 
+    AutoClockInRequest:
+      type: object
+      properties:
+        lat:
+          type: number
+        lng:
+          type: number
+      required: [lat, lng]
+
+    AutoClockInResponse:
+      type: object
+      properties:
+        triggered:
+          type: boolean
+          description: True when this call created a new open time entry.
+        reason:
+          type: string
+          description: Why nothing happened, when triggered is false (e.g. no_eligible_shift, outside_geofence, already_clocked_in, license_expired, auto_clock_in_disabled).
+        entry:
+          $ref: "#/components/schemas/TimeEntry"
+      required: [triggered]
+
     ConfirmTimeEntryRequest:
       type: object
       description: |
@@ -4955,6 +5007,7 @@ components:
         locationLng: { type: number }
         notes: { type: string }
         autoClockOutEnabled: { type: boolean, description: "When false, the auto-clock-out job skips officers at this site" }
+        autoClockInEnabled: { type: boolean, description: "When true, officers with an accepted shift here are automatically clocked in once their shift starts and the app detects them inside the geofence (app must be open)" }
         createdAt: { type: string, format: date-time }
       required: [id, clientId, name, createdAt]
 
@@ -4990,6 +5043,7 @@ components:
         locationLng: { type: number }
         notes: { type: string }
         autoClockOutEnabled: { type: boolean }
+        autoClockInEnabled: { type: boolean }
       required: [name]
 
     UpdateSiteRequest:
@@ -5002,6 +5056,7 @@ components:
         locationLng: { type: number }
         notes: { type: string }
         autoClockOutEnabled: { type: boolean }
+        autoClockInEnabled: { type: boolean }
 
     SiteManagerUser:
       type: object

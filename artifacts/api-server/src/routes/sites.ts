@@ -141,6 +141,8 @@ router.get("/sites", requireSchedulingStaff, async (req, res): Promise<void> => 
       locationLng: sitesTable.locationLng,
       notes: sitesTable.notes,
       geofenceRadiusMiles: sitesTable.geofenceRadiusMiles,
+      autoClockOutEnabled: sitesTable.autoClockOutEnabled,
+      autoClockInEnabled: sitesTable.autoClockInEnabled,
       processingFeeEnabled: sitesTable.processingFeeEnabled,
       processingFeeRate: sitesTable.processingFeeRate,
       createdAt: sitesTable.createdAt,
@@ -180,6 +182,8 @@ router.get("/sites/:id", requireAdminOrDispatcher, async (req, res): Promise<voi
       locationLng: sitesTable.locationLng,
       notes: sitesTable.notes,
       geofenceRadiusMiles: sitesTable.geofenceRadiusMiles,
+      autoClockOutEnabled: sitesTable.autoClockOutEnabled,
+      autoClockInEnabled: sitesTable.autoClockInEnabled,
       processingFeeEnabled: sitesTable.processingFeeEnabled,
       processingFeeRate: sitesTable.processingFeeRate,
       createdAt: sitesTable.createdAt,
@@ -196,7 +200,7 @@ router.get("/sites/:id", requireAdminOrDispatcher, async (req, res): Promise<voi
 
 router.put("/sites/:id", requireAdmin, async (req, res): Promise<void> => {
   const id = Array.isArray(req.params.id) ? req.params.id[0] : req.params.id;
-  const { name, status, address, locationLat, locationLng, notes, geofenceRadiusMiles, autoClockOutEnabled, processingFeeEnabled, processingFeeRate } = req.body;
+  const { name, status, address, locationLat, locationLng, notes, geofenceRadiusMiles, autoClockOutEnabled, autoClockInEnabled, processingFeeEnabled, processingFeeRate } = req.body;
   let updates: Record<string, unknown> = {};
   if (name !== undefined) updates.name = name;
   if (status !== undefined) {
@@ -212,6 +216,9 @@ router.put("/sites/:id", requireAdmin, async (req, res): Promise<void> => {
   if (notes !== undefined) updates.notes = notes;
   if (autoClockOutEnabled !== undefined) {
     updates.autoClockOutEnabled = autoClockOutEnabled === true || autoClockOutEnabled === "true";
+  }
+  if (autoClockInEnabled !== undefined) {
+    updates.autoClockInEnabled = autoClockInEnabled === true || autoClockInEnabled === "true";
   }
   if (processingFeeEnabled !== undefined) {
     updates.processingFeeEnabled = processingFeeEnabled === true || processingFeeEnabled === "true";

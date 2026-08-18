@@ -416,6 +416,13 @@ export const TABLES: TableDescriptor[] = [
         helpText: "When enabled, officers at this site are automatically clocked out after their shift ends and they leave the geofence. Disable for sites where officers routinely work past scheduled end times.",
       },
       {
+        key: "autoClockInEnabled",
+        label: "Auto clock-in",
+        type: "boolean",
+        hiddenInGrid: true,
+        helpText: "When enabled, officers with an accepted shift here are automatically clocked in — no tap needed — once their shift starts and the app (open in the foreground) detects them inside the geofence. Off by default.",
+      },
+      {
         key: "processingFeeEnabled",
         label: "Charge processing fee",
         type: "boolean",

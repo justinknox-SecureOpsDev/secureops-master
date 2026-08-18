@@ -1147,6 +1147,19 @@ export interface ClockInRequest {
   notes?: string;
 }
 
+export interface AutoClockInRequest {
+  lat: number;
+  lng: number;
+}
+
+export interface AutoClockInResponse {
+  /** True when this call created a new open time entry. */
+  triggered: boolean;
+  /** Why nothing happened, when triggered is false (e.g. no_eligible_shift, outside_geofence, already_clocked_in, license_expired, auto_clock_in_disabled). */
+  reason?: string;
+  entry?: TimeEntry;
+}
+
 /**
  * Officer confirmation of a clocked-out time entry. Omit both times to
 confirm the recorded values as-is. Provide clockInTime and/or
@@ -1337,6 +1350,8 @@ export interface Site {
   notes?: string;
   /** When false, the auto-clock-out job skips officers at this site */
   autoClockOutEnabled?: boolean;
+  /** When true, officers with an accepted shift here are automatically clocked in once their shift starts and the app detects them inside the geofence (app must be open) */
+  autoClockInEnabled?: boolean;
   createdAt: string;
 }
 
@@ -1410,6 +1425,7 @@ export interface CreateSiteRequest {
   locationLng?: number;
   notes?: string;
   autoClockOutEnabled?: boolean;
+  autoClockInEnabled?: boolean;
 }
 
 export type UpdateSiteRequestStatus =
@@ -1428,6 +1444,7 @@ export interface UpdateSiteRequest {
   locationLng?: number;
   notes?: string;
   autoClockOutEnabled?: boolean;
+  autoClockInEnabled?: boolean;
 }
 
 export interface SiteManagerUser {

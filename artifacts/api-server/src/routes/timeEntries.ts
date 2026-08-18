@@ -12,6 +12,8 @@ import { canManageSite, getManagedSiteIds } from "../lib/siteManagerAuthz";
 import { broadcastOfficerLeft, broadcastOfficerJoined } from "../lib/wsManager";
 import { businessTimeZone, businessDateIso, businessDateToUtc, businessDayWindow, startOfBusinessWeek } from "../lib/businessTime";
 import { renderTimeCardPdf, buildTimeCardCsv } from "../lib/timeCardPdf";
+import { haversineMiles, getGeofenceRadiusMiles } from "../lib/geofence";
+import { sendPushToUsers } from "../lib/push";
 
 const router: IRouter = Router();
 
@@ -766,6 +768,184 @@ router.post("/time-entries/clock-in", requireStaff, async (req, res): Promise<vo
     siteName: resolvedSite?.name ?? pickedSite?.name ?? null,
     geoResolved: resolvedSite ? { siteName: resolvedSite.name, distanceMiles: Math.round(resolvedSite.distanceMiles * 100) / 100 } : null,
     employeeName: user ? `${user.firstName} ${user.lastName}` : null,
+  });
+});
+
+// Find the officer's ACCEPTED shift assignment(s) whose window (startTime..
+// endTime) contains `now`, joined to the site actually used for the geofence
+// check (per-site radius override, same resolution evaluateGeofence() uses).
+// Only sites with autoClockInEnabled=true and saved coordinates are
+// candidates. When multiple shifts are live at once (rare), prefer the one
+// whose startTime is closest to now.
+async function findAutoClockInCandidates(employeeId: string, now: Date): Promise<Array<{
+  shiftId: string;
+  siteId: string;
+  siteName: string;
+  startTime: Date;
+  requiredLicenseLevel: number | null;
+  lat: number;
+  lng: number;
+  radiusMiles: number;
+}>> {
+  const rows = await db
+    .select({
+      shiftId: shiftsTable.id,
+      siteId: sitesTable.id,
+      siteName: sitesTable.name,
+      startTime: shiftsTable.startTime,
+      requiredLicenseLevel: shiftsTable.requiredLicenseLevel,
+      lat: sitesTable.locationLat,
+      lng: sitesTable.locationLng,
+      radiusOverride: sitesTable.geofenceRadiusMiles,
+      autoClockInEnabled: sitesTable.autoClockInEnabled,
+    })
+    .from(shiftAssignmentsTable)
+    .innerJoin(shiftsTable, eq(shiftAssignmentsTable.shiftId, shiftsTable.id))
+    .innerJoin(sitesTable, eq(shiftsTable.siteId, sitesTable.id))
+    .where(and(
+      eq(shiftAssignmentsTable.employeeId, employeeId),
+      eq(shiftAssignmentsTable.status, "accepted"),
+      lte(shiftsTable.startTime, now),
+      gte(shiftsTable.endTime, now),
+      ne(shiftsTable.status, "cancelled"),
+      ne(shiftsTable.status, "completed"),
+    ));
+
+  const globalRadius = getGeofenceRadiusMiles();
+  return rows
+    .filter((r) => r.autoClockInEnabled && r.lat != null && r.lng != null)
+    .map((r) => {
+      const override = r.radiusOverride != null ? Number(r.radiusOverride) : NaN;
+      const radiusMiles = Number.isFinite(override) && override > 0 ? override : globalRadius;
+      return {
+        shiftId: r.shiftId,
+        siteId: r.siteId,
+        siteName: r.siteName,
+        startTime: r.startTime,
+        requiredLicenseLevel: r.requiredLicenseLevel,
+        lat: Number(r.lat),
+        lng: Number(r.lng),
+        radiusMiles,
+      };
+    })
+    .sort((a, b) => Math.abs(a.startTime.getTime() - now.getTime()) - Math.abs(b.startTime.getTime() - now.getTime()));
+}
+
+// POST /time-entries/auto-clock-in — foreground-only, silent auto clock-in.
+// Called by the mobile app whenever it's open (on launch/foreground and
+// periodically while active); the app never runs a background location
+// watcher, so this can only fire while a human has the app open. See
+// AutoClockInRequest in openapi.yaml for the full trigger contract. Always
+// 200s — "nothing happened" is the overwhelmingly common response, not an
+// error, so the client can poll this quietly without surfacing failures.
+router.post("/time-entries/auto-clock-in", requireStaff, async (req, res): Promise<void> => {
+  const { lat, lng } = req.body;
+  if (lat == null || lng == null || !Number.isFinite(Number(lat)) || !Number.isFinite(Number(lng))) {
+    res.status(400).json({ error: "Bad Request", message: "lat and lng are required" });
+    return;
+  }
+  const latNum = Number(lat);
+  const lngNum = Number(lng);
+  const now = new Date();
+
+  const existing = await db
+    .select({ id: timeEntriesTable.id })
+    .from(timeEntriesTable)
+    .where(and(eq(timeEntriesTable.employeeId, req.user!.userId), isNull(timeEntriesTable.clockOutTime)))
+    .limit(1);
+  if (existing.length > 0) {
+    res.json({ triggered: false, reason: "already_clocked_in" });
+    return;
+  }
+
+  const candidates = await findAutoClockInCandidates(req.user!.userId, now);
+  if (candidates.length === 0) {
+    res.json({ triggered: false, reason: "no_eligible_shift" });
+    return;
+  }
+
+  // License gate — re-checked here because a licence can lapse between
+  // rostering and shift day (same reasoning as the manual clock-in route).
+  const myEffectiveLevel =
+    req.user!.role !== "admin" ? await getEffectiveLevel(req.user!.userId) : Number.MAX_SAFE_INTEGER;
+
+  let match: (typeof candidates)[number] | null = null;
+  let distanceMiles = 0;
+  for (const c of candidates) {
+    const requiredLevel = c.requiredLicenseLevel ?? 1;
+    if (requiredLevel > myEffectiveLevel) continue;
+    const d = haversineMiles(latNum, lngNum, c.lat, c.lng);
+    if (d <= c.radiusMiles) { match = c; distanceMiles = d; break; }
+  }
+  if (!match) {
+    res.json({ triggered: false, reason: "outside_geofence" });
+    return;
+  }
+
+  // Atomic open-entry guard + insert — same per-officer row-lock pattern as
+  // the dispatch on-behalf clock-in: there is no DB uniqueness on "one open
+  // entry per officer", and this endpoint may be polled repeatedly in quick
+  // succession (foreground interval), so a bare check-then-insert could
+  // double-clock the officer on two overlapping calls.
+  const outcome = await db.transaction(async (tx) => {
+    await tx.execute(sql`SELECT 1 FROM ${usersTable} WHERE ${usersTable.id} = ${req.user!.userId} FOR UPDATE`);
+    const open = await tx
+      .select({ id: timeEntriesTable.id })
+      .from(timeEntriesTable)
+      .where(and(eq(timeEntriesTable.employeeId, req.user!.userId), isNull(timeEntriesTable.clockOutTime)))
+      .limit(1);
+    if (open.length > 0) return { conflict: true as const };
+
+    const [entry] = await tx.insert(timeEntriesTable).values({
+      shiftId: match!.shiftId,
+      siteId: match!.siteId,
+      employeeId: req.user!.userId,
+      clockInTime: now,
+      clockInLat: String(latNum),
+      clockInLng: String(lngNum),
+      notes: "Auto clocked in: officer entered the site geofence at shift start.",
+      isVerified: false,
+      approvalStatus: "pending",
+    }).returning();
+
+    await tx
+      .update(shiftsTable)
+      .set({ status: "active" })
+      .where(and(eq(shiftsTable.id, match!.shiftId), eq(shiftsTable.status, "upcoming")));
+
+    return { entry };
+  });
+
+  if ("conflict" in outcome) {
+    res.json({ triggered: false, reason: "already_clocked_in" });
+    return;
+  }
+
+  broadcastOfficerJoined(req.user!.userId);
+
+  try {
+    await db
+      .update(usersTable)
+      .set({ lastLat: String(latNum), lastLng: String(lngNum), lastLocationAt: now })
+      .where(eq(usersTable.id, req.user!.userId));
+  } catch (err) {
+    req.log.warn({ err }, "[auto-clock-in] failed to seed users.lastLat from auto clock-in coords");
+  }
+
+  sendPushToUsers([req.user!.userId], {
+    title: "You're clocked in",
+    body: `You were automatically clocked in at ${match.siteName} — you're now on duty.`,
+    data: { type: "auto_clock_in", timeEntryId: outcome.entry.id },
+  }).catch((err: unknown) => req.log.warn({ err }, "[auto-clock-in] push send failed"));
+
+  req.log.info(
+    { employeeId: req.user!.userId, shiftId: match.shiftId, siteId: match.siteId, distanceMiles: Math.round(distanceMiles * 100) / 100 },
+    "[auto-clock-in] officer auto clocked in",
+  );
+
+  res.json({
+    triggered: true,
+    entry: { ...outcome.entry, siteName: match.siteName },
   });
 });
 

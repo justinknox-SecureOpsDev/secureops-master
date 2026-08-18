@@ -81,6 +81,12 @@ export const GetClientsResponseItem = zod.object({
           .describe(
             "When false, the auto-clock-out job skips officers at this site",
           ),
+        autoClockInEnabled: zod
+          .boolean()
+          .optional()
+          .describe(
+            "When true, officers with an accepted shift here are automatically clocked in once their shift starts and the app detects them inside the geofence (app must be open)",
+          ),
         createdAt: zod.coerce.date(),
       }),
     )
@@ -158,6 +164,12 @@ export const GetClientResponse = zod.object({
           .optional()
           .describe(
             "When false, the auto-clock-out job skips officers at this site",
+          ),
+        autoClockInEnabled: zod
+          .boolean()
+          .optional()
+          .describe(
+            "When true, officers with an accepted shift here are automatically clocked in once their shift starts and the app detects them inside the geofence (app must be open)",
           ),
         createdAt: zod.coerce.date(),
       }),
@@ -240,6 +252,12 @@ export const UpdateClientResponse = zod.object({
           .describe(
             "When false, the auto-clock-out job skips officers at this site",
           ),
+        autoClockInEnabled: zod
+          .boolean()
+          .optional()
+          .describe(
+            "When true, officers with an accepted shift here are automatically clocked in once their shift starts and the app detects them inside the geofence (app must be open)",
+          ),
         createdAt: zod.coerce.date(),
       }),
     )
@@ -272,6 +290,7 @@ export const CreateClientSiteBody = zod.object({
   locationLng: zod.number().optional(),
   notes: zod.string().optional(),
   autoClockOutEnabled: zod.boolean().optional(),
+  autoClockInEnabled: zod.boolean().optional(),
 });
 
 /**
@@ -304,6 +323,12 @@ export const GetSitesResponseItem = zod.object({
     .boolean()
     .optional()
     .describe("When false, the auto-clock-out job skips officers at this site"),
+  autoClockInEnabled: zod
+    .boolean()
+    .optional()
+    .describe(
+      "When true, officers with an accepted shift here are automatically clocked in once their shift starts and the app detects them inside the geofence (app must be open)",
+    ),
   createdAt: zod.coerce.date(),
 });
 export const GetSitesResponse = zod.array(GetSitesResponseItem);
@@ -364,6 +389,12 @@ export const GetSiteResponse = zod.object({
     .boolean()
     .optional()
     .describe("When false, the auto-clock-out job skips officers at this site"),
+  autoClockInEnabled: zod
+    .boolean()
+    .optional()
+    .describe(
+      "When true, officers with an accepted shift here are automatically clocked in once their shift starts and the app detects them inside the geofence (app must be open)",
+    ),
   createdAt: zod.coerce.date(),
 });
 
@@ -382,6 +413,7 @@ export const UpdateSiteBody = zod.object({
   locationLng: zod.number().optional(),
   notes: zod.string().optional(),
   autoClockOutEnabled: zod.boolean().optional(),
+  autoClockInEnabled: zod.boolean().optional(),
 });
 
 export const UpdateSiteResponse = zod.object({
@@ -403,6 +435,12 @@ export const UpdateSiteResponse = zod.object({
     .boolean()
     .optional()
     .describe("When false, the auto-clock-out job skips officers at this site"),
+  autoClockInEnabled: zod
+    .boolean()
+    .optional()
+    .describe(
+      "When true, officers with an accepted shift here are automatically clocked in once their shift starts and the app detects them inside the geofence (app must be open)",
+    ),
   createdAt: zod.coerce.date(),
 });
 
@@ -2397,6 +2435,91 @@ export const ClockOutResponse = zod.object({
   employeeEditReason: zod.string().nullish(),
   confirmedAt: zod.coerce.date().nullish(),
   createdAt: zod.coerce.date(),
+});
+
+/**
+ * Called by the mobile app while it is open/opened (foreground only —
+there is no background location tracking) to silently clock the
+officer in with no button tap. Clocks the caller in ONLY when all of
+the following hold: they have an ACCEPTED shift assignment whose
+window (startTime..endTime) contains now; the assignment's site has
+autoClockInEnabled=true; the caller's current (lat, lng) is inside
+that site's geofence; the caller has no open time entry already; and
+the caller's effective license level still meets the shift's
+requirement. Otherwise it is a no-op. Always responds 200 — a
+not-triggered result is the normal/common case, not an error.
+
+ * @summary Foreground auto clock-in check
+ */
+export const AutoClockInBody = zod.object({
+  lat: zod.number(),
+  lng: zod.number(),
+});
+
+export const AutoClockInResponse = zod.object({
+  triggered: zod
+    .boolean()
+    .describe("True when this call created a new open time entry."),
+  reason: zod
+    .string()
+    .optional()
+    .describe(
+      "Why nothing happened, when triggered is false (e.g. no_eligible_shift, outside_geofence, already_clocked_in, license_expired, auto_clock_in_disabled).",
+    ),
+  entry: zod
+    .object({
+      id: zod.string(),
+      shiftId: zod.string(),
+      shiftTitle: zod.string().optional(),
+      employeeId: zod.string(),
+      employeeName: zod.string().optional(),
+      clockInTime: zod.coerce.date(),
+      clockInLat: zod.number().optional(),
+      clockInLng: zod.number().optional(),
+      clockOutTime: zod.coerce.date().optional(),
+      clockOutLat: zod.number().optional(),
+      clockOutLng: zod.number().optional(),
+      hoursWorked: zod.number().optional(),
+      isVerified: zod.boolean(),
+      approvalStatus: zod.enum(["pending", "approved", "rejected"]),
+      approvedAt: zod.coerce.date().optional(),
+      approvedBy: zod.string().optional(),
+      siteId: zod.string().optional(),
+      siteName: zod.string().optional(),
+      payRate: zod.number().optional(),
+      billRate: zod.number().optional(),
+      notes: zod.string().optional(),
+      correctionRequested: zod.boolean().optional(),
+      correctionNote: zod.string().optional(),
+      confirmationStatus: zod
+        .enum(["awaiting_confirmation", "confirmed"])
+        .nullish()
+        .describe(
+          "Officer post-clock-out confirmation state. `awaiting_confirmation`\nmeans the officer must review\/confirm their times before the entry\nenters the normal pending-approval queue. `confirmed` means the\nofficer submitted (or an admin acted on the entry, force-clearing\nit). Null = confirmation not applicable (admin-created, imported,\nor legacy entries).\n",
+        ),
+      originalClockInTime: zod.coerce
+        .date()
+        .nullish()
+        .describe(
+          "GPS\/clock-recorded clock-in captured at clock-out, before any officer edit.",
+        ),
+      originalClockOutTime: zod.coerce
+        .date()
+        .nullish()
+        .describe(
+          "GPS\/clock-recorded clock-out captured at clock-out, before any officer edit.",
+        ),
+      employeeEdited: zod
+        .boolean()
+        .optional()
+        .describe(
+          "True when the officer changed the recorded times during confirmation.",
+        ),
+      employeeEditReason: zod.string().nullish(),
+      confirmedAt: zod.coerce.date().nullish(),
+      createdAt: zod.coerce.date(),
+    })
+    .optional(),
 });
 
 /**

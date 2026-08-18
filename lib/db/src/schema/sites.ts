@@ -48,6 +48,14 @@ export const sitesTable = pgTable("sites", {
   // time (e.g. events, extended-duration details) and manual clock-out is
   // preferred. Defaults to true (global behavior unchanged).
   autoClockOutEnabled: boolean("auto_clock_out_enabled").notNull().default(true),
+  // When true, an officer with an ACCEPTED shift assignment at this site is
+  // automatically clocked in — no manual tap — once their shift has started
+  // and the app detects them inside the geofence while in the foreground
+  // (app open/opened; there is no background location tracking). Defaults to
+  // false: unlike auto-clock-out (which only ever closes a record the officer
+  // already opened), this creates a new time entry / payroll record without
+  // an explicit action, so sites must opt in.
+  autoClockInEnabled: boolean("auto_clock_in_enabled").notNull().default(false),
   // Per-site invoice processing fee. Every site starts disabled; when it is
   // enabled, this rate (%) is applied to invoices generated for this site.
   // The fee fields written on an invoice are a historical snapshot, so later
