@@ -1,4 +1,4 @@
-import { Image } from "react-native";
+import { Image, type ImageStyle, type StyleProp } from "react-native";
 
 import { useBrandLogo } from "@/hooks/useFeatures";
 
@@ -19,14 +19,21 @@ import { useBrandLogo } from "@/hooks/useFeatures";
  * The pre-connect screens (connect / org-code entry) intentionally keep the
  * fixed platform emblem via `SecureOpsLogo` instead of this component.
  */
-export function BrandLogo({ size = 120 }: { size?: number }) {
+export function BrandLogo({
+  size = 120,
+  style,
+}: {
+  size?: number;
+  /** Extra style merged over the default size box (e.g. a circular crop). */
+  style?: StyleProp<ImageStyle>;
+}) {
   const { logoDataUrl, name } = useBrandLogo();
 
   if (!logoDataUrl) {
     return (
       <Image
         source={require("../assets/images/emblem.png")}
-        style={{ width: size, height: size }}
+        style={[{ width: size, height: size }, style]}
         resizeMode="contain"
         accessibilityLabel={name}
       />
@@ -36,7 +43,7 @@ export function BrandLogo({ size = 120 }: { size?: number }) {
   return (
     <Image
       source={{ uri: logoDataUrl }}
-      style={{ width: size, height: size }}
+      style={[{ width: size, height: size }, style]}
       resizeMode="contain"
       accessibilityLabel={name}
     />

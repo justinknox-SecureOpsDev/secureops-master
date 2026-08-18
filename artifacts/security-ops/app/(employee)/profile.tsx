@@ -12,6 +12,7 @@ import { isBiometricAvailable, isBiometricEnabled, setBiometricEnabled, promptBi
 import { apiRequest, getApiBaseUrl } from "@/utils/api";
 import { useTour } from "@/contexts/TourContext";
 import { useFeatures, isEnabled, useBrand } from "@/hooks/useFeatures";
+import { BrandLogo } from "@/components/BrandLogo";
 
 function InfoRow({ label, value, icon }: { label: string; value?: string | number | null; icon: string }) {
   const colors = useColors();
@@ -337,7 +338,7 @@ export default function EmployeeProfileScreen() {
 
       <View style={[styles.heroCard, { backgroundColor: colors.card, borderColor: colors.border }]}>
         <View style={styles.heroRow}>
-          <Image source={require("@/assets/images/logo.png")} style={styles.brandLogo} resizeMode="contain" />
+          <BrandLogo size={60} style={styles.brandLogo} />
           <View style={{ flex: 1, gap: 2 }}>
             <Text style={[styles.heroName, { color: colors.foreground }]}>{p?.firstName} {p?.lastName}</Text>
             <View style={[styles.roleBadge, { backgroundColor: colors.primary + "20", borderColor: colors.primary + "50" }]}>
