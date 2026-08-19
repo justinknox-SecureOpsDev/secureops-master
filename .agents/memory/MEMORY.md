@@ -15,6 +15,7 @@
 - [Pay-run export atomic-claim](pay-run-export-atomic-claim.md) — AP/pay-run CSV rows must come from UPDATE…RETURNING claim (status=approved only), not read-then-update, or you double-pay.
 - [api-server suite WS broadcast flake](api-server-ws-broadcast-flake.md) — wsBroadcast.test.ts passes alone but flakes under full parallel run (500ms collectFor window starved by load); not a regression.
 - [admin-portal deepLinkFocus flake](admin-portal-deeplink-flake.md) — deepLinkFocus.test.tsx animation-class assertion flakes under full parallel admin-portal run, passes in isolation; not a regression.
+- [Admin portal parallel-test timeouts](admin-portal-parallel-test-timeouts.md) — unrelated UI tests can hit 5s timeouts under workspace-wide parallel load but pass in isolation.
 - [Admin grid sort indexes](admin-grid-sort-indexes.md) — every admin-CRUD table's default sort column needs a (col, id) composite index; list + position deep-link both order by (sortCol, id).
 - [axe parent-opacity contrast](axe-parent-opacity-contrast.md) — Tailwind opacity-* on a container dims descendants; axe flags blended contrast. Fix on the leaf text node, not the child.
 - [Clock-in location-proof invariant](clock-in-location-proof.md) — GPS-less clock-in (manual siteId picker) MUST require an accepted roster at that site and NEVER auto-assign; only GPS-verified path may auto-assign.

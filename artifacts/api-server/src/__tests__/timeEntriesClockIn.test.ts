@@ -137,6 +137,34 @@ async function deleteOpenEntries(employeeId: string) {
 }
 
 describe("POST /time-entries/clock-in geo-resolution", () => {
+  it("serializes two concurrent manual clock-ins so exactly one open entry remains", async () => {
+    await deleteOpenEntries(ctx.licensedEmployeeId);
+
+    const fire = () =>
+      request(app)
+        .post("/api/time-entries/clock-in")
+        .set(authed(ctx.licensedToken))
+        .send({ lat: -54.123456, lng: -12.654321 });
+    const [a, b] = await Promise.all([fire(), fire()]);
+
+    const succeeded = [a, b].filter((response) => response.status === 201);
+    const rejected = [a, b].filter((response) => response.status === 400);
+    expect(succeeded).toHaveLength(1);
+    expect(rejected).toHaveLength(1);
+    expect(rejected[0].body.message).toBe("Already clocked in");
+
+    const open = await db
+      .select({ id: timeEntriesTable.id })
+      .from(timeEntriesTable)
+      .where(and(
+        eq(timeEntriesTable.employeeId, ctx.licensedEmployeeId),
+        isNull(timeEntriesTable.clockOutTime),
+      ));
+    expect(open).toHaveLength(1);
+
+    await deleteOpenEntries(ctx.licensedEmployeeId);
+  });
+
   it("resolves the nearest site when no shiftId is provided and the officer is within 1 mile", async () => {
     await deleteOpenEntries(ctx.licensedEmployeeId);
     const res = await request(app)

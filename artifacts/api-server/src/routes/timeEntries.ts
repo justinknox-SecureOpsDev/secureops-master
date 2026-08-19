@@ -719,17 +719,38 @@ router.post("/time-entries/clock-in", requireStaff, async (req, res): Promise<vo
     }
   }
 
-  const [entry] = await db.insert(timeEntriesTable).values({
-    shiftId: shiftId || autoAttachedShiftId || null,
-    siteId: resolvedSite ? resolvedSite.id : assignedShiftSiteId,
-    employeeId: req.user!.userId,
-    clockInTime: new Date(),
-    clockInLat: hasCoords ? String(lat) : null,
-    clockInLng: hasCoords ? String(lng) : null,
-    notes: notes || null,
-    isVerified: false,
-    approvalStatus: "pending",
-  }).returning();
+  // Atomic open-entry guard + insert. There is no database uniqueness
+  // constraint for one open entry per officer, so the initial request-time
+  // check above alone would let two rapid taps both insert. Lock the stable
+  // user row, then re-check under that lock before creating the entry.
+  const outcome = await db.transaction(async (tx) => {
+    await tx.execute(sql`SELECT 1 FROM ${usersTable} WHERE ${usersTable.id} = ${req.user!.userId} FOR UPDATE`);
+    const open = await tx
+      .select({ id: timeEntriesTable.id })
+      .from(timeEntriesTable)
+      .where(and(eq(timeEntriesTable.employeeId, req.user!.userId), isNull(timeEntriesTable.clockOutTime)))
+      .limit(1);
+    if (open.length > 0) return { conflict: true as const };
+
+    const [entry] = await tx.insert(timeEntriesTable).values({
+      shiftId: shiftId || autoAttachedShiftId || null,
+      siteId: resolvedSite ? resolvedSite.id : assignedShiftSiteId,
+      employeeId: req.user!.userId,
+      clockInTime: new Date(),
+      clockInLat: hasCoords ? String(lat) : null,
+      clockInLng: hasCoords ? String(lng) : null,
+      notes: notes || null,
+      isVerified: false,
+      approvalStatus: "pending",
+    }).returning();
+    return { entry };
+  });
+
+  if ("conflict" in outcome) {
+    res.status(400).json({ error: "Bad Request", message: "Already clocked in" });
+    return;
+  }
+  const { entry } = outcome;
 
   // Real-time push: tell live-map viewers a new time entry just opened so the
   // officer marker appears immediately instead of waiting for the next 30s
