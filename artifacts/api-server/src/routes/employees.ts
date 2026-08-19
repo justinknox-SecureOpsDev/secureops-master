@@ -3,11 +3,14 @@ import bcrypt from "bcryptjs";
 import { eq, ilike, and, sql, desc } from "drizzle-orm";
 import { db, usersTable, employeesTable, licensesTable, employeeChangesTable } from "@workspace/db";
 import { requireAuth, requireStaff, requireAdmin, requireAdminOrDispatcher, requireSchedulingStaff, signPdfDownloadToken, verifyPdfDownloadToken, pdfDownloadTokenTtlSeconds, type PdfDownloadTokenPayload } from "../middlewares/auth";
-import { requirePermission, ASSIGNABLE_ROLES } from "../lib/permissions";
+import { requirePermission, isRoleAllowed, ASSIGNABLE_ROLES } from "../lib/permissions";
 
-// Representative wiring for the "personnel.manage" permission key: creating
-// a new employee stays admin-only by default (matching requireAdmin exactly)
-// but is now toggleable via the Permissions admin UI.
+// "personnel.manage" permission key: creating a new employee, editing
+// someone else's employee record, and deactivating an employee (the
+// `status` field on PUT /employees/:id) all stay admin-only by default
+// (matching requireAdmin exactly) but are now toggleable via the
+// Permissions admin UI. Self-edit of one's own record is never gated by
+// this permission — see the inline check on PUT /employees/:id.
 const requirePersonnelManage = [requireAuth, requirePermission("personnel.manage")] as const;
 import type { Request, Response, NextFunction } from "express";
 import { buildEmployeeProfilePdf } from "../lib/profilePdf";
@@ -538,13 +541,19 @@ router.get("/me/profile/pdf", requireAuthOrQueryToken, async (req, res): Promise
 
 router.put("/employees/:id", requireStaff, async (req, res): Promise<void> => {
   const id = Array.isArray(req.params.id) ? req.params.id[0] : req.params.id;
-  if (req.user!.role !== "admin" && req.user!.userId !== id) {
+  // "personnel.manage" permission key: editing someone ELSE's employee
+  // record (and, below, the admin-only fields/status on any record) is
+  // gated by the toggleable permission, matching requireAdmin's default
+  // exactly (admin-only). Editing one's OWN record is always allowed
+  // regardless of this permission — it is not a "manage personnel" action.
+  const canManageOthers = isRoleAllowed("personnel.manage", req.user!.role);
+  if (!canManageOthers && req.user!.userId !== id) {
     res.status(403).json({ error: "Forbidden" });
     return;
   }
   const body = req.body as Record<string, unknown>;
 
-  const isAdmin = req.user!.role === "admin";
+  const isAdmin = canManageOthers;
 
   // Snapshot the row BEFORE writes so we can diff field-by-field and
   // populate the employee_changes log. We need both the user-level cols

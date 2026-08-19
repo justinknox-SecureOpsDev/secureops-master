@@ -2,15 +2,19 @@ import { Router, type IRouter } from "express";
 import { randomUUID } from "node:crypto";
 import { eq, and, gt, gte, lt, lte, ne, sql, or, isNull, inArray } from "drizzle-orm";
 import { db, shiftsTable, shiftAssignmentsTable, usersTable, licensesTable, sitesTable, clientsTable, trainingCertificationsTable, employeesTable } from "@workspace/db";
-import { requireAuth, requireStaff, requireAdmin, requireAdminOrDispatcher, requireAdminOrSiteManager, requireSchedulingStaff } from "../middlewares/auth";
+import { requireAuth, requireStaff, requireAdmin, requireSchedulingStaff } from "../middlewares/auth";
 import { requirePermission } from "../lib/permissions";
 
-// Representative wiring for the "scheduling.manage" permission key: shift
-// creation stays reachable by admin/site_manager by default (matching
-// requireAdminOrSiteManager exactly) but is now toggleable per-role via the
+// "scheduling.manage" permission key: create/edit/delete/bulk-create/repeat
+// a shift stay reachable by admin/site_manager by default (matching
+// requireAdminOrSiteManager exactly) but are now toggleable per-role via the
 // Permissions admin UI. Per-site scope (canManageSite) is still enforced
-// inside the handler below — this only replaces the outer role gate.
+// inside each handler below — this only replaces the outer role gate.
 const requireSchedulingManage = [requireAuth, requirePermission("scheduling.manage")] as const;
+// "dispatch.manage" permission key: notifying eligible officers about a
+// vacant shift stays admin/dispatcher by default (matching
+// requireAdminOrDispatcher exactly), now toggleable the same way.
+const requireDispatchManage = [requireAuth, requirePermission("dispatch.manage")] as const;
 import { haversineMiles } from "../lib/geofence";
 import { getEffectiveLevel, effectiveLevelSql } from "../lib/eligibility";
 import { pushShiftUpsert, pushShiftDelete, pushAssignmentEvent } from "../lib/schedulerSync";
@@ -513,7 +517,7 @@ router.post("/shifts", ...requireSchedulingManage, async (req, res): Promise<voi
  * Site-manager rules mirror POST /shifts: must have a site, site must be
  * managed, rate fields are ignored and the site's defaults are used.
  */
-router.post("/shifts/bulk-create", requireAdminOrSiteManager, async (req, res): Promise<void> => {
+router.post("/shifts/bulk-create", ...requireSchedulingManage, async (req, res): Promise<void> => {
   const { title, siteId, startTime, endTime, notes, shiftType, positions } = req.body ?? {};
 
   if (!title || !startTime || !endTime) {
@@ -725,7 +729,7 @@ router.post("/shifts/bulk-create", requireAdminOrSiteManager, async (req, res): 
  *
  * Times are stored UTC. Existing shifts at same site + startTime are skipped.
  */
-router.post("/shifts/repeat", requireAdminOrSiteManager, async (req, res): Promise<void> => {
+router.post("/shifts/repeat", ...requireSchedulingManage, async (req, res): Promise<void> => {
   const { base, recurrence } = req.body ?? {};
   if (!base || !recurrence) {
     res.status(400).json({ error: "Bad Request", message: "base and recurrence required" });
@@ -1299,7 +1303,7 @@ router.get("/shifts/:id", requireStaff, async (req, res): Promise<void> => {
   res.json(stripShiftFinanceForRole(req.user!.role, { ...shift, ...rateFields, assignments }));
 });
 
-router.put("/shifts/:id", requireAdminOrSiteManager, async (req, res): Promise<void> => {
+router.put("/shifts/:id", ...requireSchedulingManage, async (req, res): Promise<void> => {
   const id = Array.isArray(req.params.id) ? req.params.id[0] : req.params.id;
   const { title, siteId, startTime, endTime, payRate, billRate, hourlyRate, billableRate, status, notes, requiredLicenseLevel, headcount, siteRateId, shiftType, claimableFrom } = req.body;
   // Site managers must not change rates — ignore any rate fields they submit.
@@ -1411,7 +1415,7 @@ router.put("/shifts/:id", requireAdminOrSiteManager, async (req, res): Promise<v
   res.json(stripShiftFinanceForRole(req.user!.role, { ...shift, assignments: [] }));
 });
 
-router.delete("/shifts/:id", requireAdminOrSiteManager, async (req, res): Promise<void> => {
+router.delete("/shifts/:id", ...requireSchedulingManage, async (req, res): Promise<void> => {
   const id = Array.isArray(req.params.id) ? req.params.id[0] : req.params.id;
   // Fetch the row before deletion so we can include externalId + syncSource in the push.
   const [toDelete] = await db.select({ id: shiftsTable.id, siteId: shiftsTable.siteId, externalId: shiftsTable.externalId, syncSource: shiftsTable.syncSource }).from(shiftsTable).where(eq(shiftsTable.id, id));
@@ -1678,7 +1682,7 @@ router.post("/shifts/:id/claim", requireStaff, async (req, res): Promise<void> =
   res.status(201).json({ ...assignment, employeeName: user ? `${user.firstName} ${user.lastName}` : null });
 });
 
-router.post("/shifts/:id/notify-vacancy", requireAdminOrDispatcher, async (req, res): Promise<void> => {
+router.post("/shifts/:id/notify-vacancy", ...requireDispatchManage, async (req, res): Promise<void> => {
   const shiftId = Array.isArray(req.params.id) ? req.params.id[0] : req.params.id;
 
   const [shift] = await db.select().from(shiftsTable).where(eq(shiftsTable.id, shiftId));

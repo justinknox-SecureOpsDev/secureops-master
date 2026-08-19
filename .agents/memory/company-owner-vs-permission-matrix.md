@@ -131,6 +131,27 @@ delegable to other roles, re-audit its full request body — not just the
 route's own gate — for fields whose value grants privilege beyond the
 specific action the permission was meant to scope.
 
+## Extending a toggle to sibling routes: match role-sets exactly, don't average them
+
+When a later task widens a permission key from "one representative route" to
+"every CRUD/action route in that module," convert a given route to
+`requirePermission(key)` ONLY when that route's current hardcoded role-gate
+middleware allows the *exact same role set* as the key's `defaultAllowedRoles`
+(e.g. `requireAdminOrSiteManager` ⇄ a key defaulting to `[admin, site_manager]`).
+If the current gate is a three-role set (like `requireSchedulingStaff`:
+admin+dispatcher+site_manager) or stricter/broader than every existing key,
+leave it hardcoded rather than picking the "closest" key — silently
+loosening or narrowing a route's default access is exactly the regression
+this kind of task must avoid. Flag the mismatched routes as a follow-up task
+(propose a new key) instead of forcing a fit.
+
+For a route that mixes self-service and "manage someone else" (e.g. an
+employee edit endpoint editable by both the owner of the record and an
+admin), don't swap the outer middleware at all — replace the inline
+role-name check with `isRoleAllowed(key, role)` so self-edit stays always
+allowed regardless of the toggle, while only the "act on someone else"
+branch becomes permission-gated.
+
 ## Running the full api-server test suite in a time-boxed shell
 
 `artifacts/api-server` forces `fileParallelism:false` + `singleFork` (shared

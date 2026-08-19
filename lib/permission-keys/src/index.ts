@@ -67,7 +67,8 @@ export const PERMISSION_KEY_DEFS: readonly PermissionKeyDef[] = [
     area: "personnel",
     areaLabel: "Personnel",
     label: "Manage employee records",
-    description: "Create new employee/staff accounts (previously admin only).",
+    description:
+      "Create new employee/staff accounts, edit another employee's record, and deactivate an employee (previously admin only). Editing one's own record is never gated by this permission.",
     defaultAllowedRoles: ["admin"],
   },
   {
@@ -75,7 +76,8 @@ export const PERMISSION_KEY_DEFS: readonly PermissionKeyDef[] = [
     area: "dispatch",
     areaLabel: "Dispatch",
     label: "Dispatch command center",
-    description: "Assign officers to open shifts from the dispatch board (previously admin + dispatcher only).",
+    description:
+      "Assign officers to open shifts and notify eligible officers about a shift vacancy, from the dispatch board (previously admin + dispatcher only).",
     defaultAllowedRoles: ["admin", "dispatcher"],
   },
   {

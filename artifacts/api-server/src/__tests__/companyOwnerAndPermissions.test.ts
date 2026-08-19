@@ -13,6 +13,7 @@ import {
   shiftsTable,
   payrollEntriesTable,
   invoicesTable,
+  timeEntriesTable,
   permissionOverridesTable,
   companyOwnerRolloutTable,
 } from "@workspace/db";
@@ -717,5 +718,142 @@ describe("Delegating personnel.manage can never be used to self-escalate to a pr
     expect(res.status).toBe(201);
     expect(res.body.role).toBe("dispatcher");
     createdUserIds.push(res.body.id);
+  });
+});
+
+// Task #735 — the permission matrix now also gates the remaining
+// scheduling/time-attendance/personnel CRUD routes, not just the one
+// representative action per area wired up by Task #733.
+describe("Permission-matrix toggles now also govern shift edit, time-entry approval, and non-self employee edit", () => {
+  let editShiftId: string;
+  let pendingEntryId: string;
+
+  beforeAll(async () => {
+    const [shift] = await db
+      .insert(shiftsTable)
+      .values({
+        siteId: ctx.siteId,
+        title: `${TAG}-edit-shift`,
+        startTime: new Date(Date.now() + 3600_000),
+        endTime: new Date(Date.now() + 7200_000),
+        payRate: "25.00",
+        billRate: "40.00",
+        requiredLicenseLevel: 1,
+        headcount: 1,
+      })
+      .returning({ id: shiftsTable.id });
+    editShiftId = shift.id;
+
+    const [entry] = await db
+      .insert(timeEntriesTable)
+      .values({
+        employeeId: ctx.officerId,
+        siteId: ctx.siteId,
+        clockInTime: new Date(Date.now() - 8 * 3600_000),
+        clockOutTime: new Date(Date.now() - 3600_000),
+        approvalStatus: "pending",
+      })
+      .returning({ id: timeEntriesTable.id });
+    pendingEntryId = entry.id;
+  });
+
+  afterAll(async () => {
+    await db.delete(timeEntriesTable).where(eq(timeEntriesTable.id, pendingEntryId));
+    await db.delete(shiftsTable).where(eq(shiftsTable.id, editShiftId));
+  });
+
+  it("PUT /shifts/:id (scheduling.manage): blocks a plain officer by default, then lets one through once granted", async () => {
+    const blocked = await request(app)
+      .put(`/api/shifts/${editShiftId}`)
+      .set(authed(ctx.officerToken))
+      .send({ notes: "should be blocked" });
+    expect(blocked.status).toBe(403);
+
+    const grant = await request(app)
+      .patch("/api/admin/permissions/scheduling.manage")
+      .set(authed(ctx.ownerAdminToken))
+      .send({ allowedRoles: ["admin", "site_manager", "employee"] });
+    expect(grant.status).toBe(200);
+
+    try {
+      const allowed = await request(app)
+        .put(`/api/shifts/${editShiftId}`)
+        .set(authed(ctx.officerToken))
+        .send({ notes: "now allowed" });
+      expect(allowed.status).not.toBe(403);
+    } finally {
+      await db.delete(permissionOverridesTable).where(eq(permissionOverridesTable.key, "scheduling.manage"));
+      clearPermissionOverrideInMemory("scheduling.manage");
+      await loadPermissionOverridesFromDb();
+    }
+
+    // Default is restored: the same officer is blocked again.
+    const blockedAgain = await request(app)
+      .put(`/api/shifts/${editShiftId}`)
+      .set(authed(ctx.officerToken))
+      .send({ notes: "should be blocked again" });
+    expect(blockedAgain.status).toBe(403);
+  });
+
+  it("POST /time-entries/:id/approve (timeAttendance.manage): blocks a plain officer by default, then lets one through once granted", async () => {
+    const blocked = await request(app)
+      .post(`/api/time-entries/${pendingEntryId}/approve`)
+      .set(authed(ctx.officerToken))
+      .send({ decision: "approved" });
+    expect(blocked.status).toBe(403);
+
+    const grant = await request(app)
+      .patch("/api/admin/permissions/timeAttendance.manage")
+      .set(authed(ctx.ownerAdminToken))
+      .send({ allowedRoles: ["admin", "site_manager", "employee"] });
+    expect(grant.status).toBe(200);
+
+    try {
+      const allowed = await request(app)
+        .post(`/api/time-entries/${pendingEntryId}/approve`)
+        .set(authed(ctx.officerToken))
+        .send({ decision: "approved" });
+      expect(allowed.status).not.toBe(403);
+    } finally {
+      await db.delete(permissionOverridesTable).where(eq(permissionOverridesTable.key, "timeAttendance.manage"));
+      clearPermissionOverrideInMemory("timeAttendance.manage");
+      await loadPermissionOverridesFromDb();
+    }
+  });
+
+  it("PUT /employees/:id editing ANOTHER user (personnel.manage): blocks a site manager by default, then lets one through once granted — self-edit stays unaffected either way", async () => {
+    const blocked = await request(app)
+      .put(`/api/employees/${ctx.officerId}`)
+      .set(authed(ctx.siteManagerToken))
+      .send({ firstName: "ShouldNotChange" });
+    expect(blocked.status).toBe(403);
+
+    // Self-edit is never gated by this permission, regardless of the toggle.
+    const selfEdit = await request(app)
+      .put(`/api/employees/${ctx.siteManagerId}`)
+      .set(authed(ctx.siteManagerToken))
+      .send({ firstName: "Test" });
+    expect(selfEdit.status).toBe(200);
+
+    const grant = await request(app)
+      .patch("/api/admin/permissions/personnel.manage")
+      .set(authed(ctx.ownerAdminToken))
+      .send({ allowedRoles: ["admin", "site_manager"] });
+    expect(grant.status).toBe(200);
+
+    try {
+      const allowed = await request(app)
+        .put(`/api/employees/${ctx.officerId}`)
+        .set(authed(ctx.siteManagerToken))
+        .send({ firstName: "Test" });
+      expect(allowed.status).toBe(200);
+      // Non-admin editors still can't set restricted admin-only fields (status)
+      // even once granted personnel.manage for the "edit someone else" gate.
+      expect(allowed.body.status).not.toBe("terminated");
+    } finally {
+      await db.delete(permissionOverridesTable).where(eq(permissionOverridesTable.key, "personnel.manage"));
+      clearPermissionOverrideInMemory("personnel.manage");
+      await loadPermissionOverridesFromDb();
+    }
   });
 });
