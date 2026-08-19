@@ -70,7 +70,7 @@ export default function ClientUsers() {
   const [loading, setLoading] = useState(true);
   const [showForm, setShowForm] = useState(false);
   const [submitting, setSubmitting] = useState(false);
-  const [inviteResult, setInviteResult] = useState<{ email: string; tempPassword?: string; loginUrl?: string } | null>(null);
+  const [inviteResult, setInviteResult] = useState<{ email: string; tempPassword?: string; loginUrl?: string; emailSent: boolean } | null>(null);
   const [deactivating, setDeactivating] = useState<string | null>(null);
 
   const [form, setForm] = useState({ email: "", firstName: "", lastName: "", clientId: "" });
@@ -101,8 +101,8 @@ export default function ClientUsers() {
       toast({ title: res.status === "reinvited" ? "User re-invited." : "Client user created and invited." });
       setShowForm(false);
       setForm({ email: "", firstName: "", lastName: "", clientId: "" });
-      if (!res.emailSent && res.tempPassword) {
-        setInviteResult({ email: res.email, tempPassword: res.tempPassword, loginUrl: res.loginUrl });
+      if (res.tempPassword || res.loginUrl) {
+        setInviteResult({ email: res.email, tempPassword: res.tempPassword, loginUrl: res.loginUrl, emailSent: res.emailSent });
       }
       await refresh();
     } catch (err: any) {
@@ -137,25 +137,31 @@ export default function ClientUsers() {
         </Button>
       </div>
 
-      {/* Manual credentials notice */}
+      {/* Shareable invite link / credentials notice */}
       {inviteResult && (
         <div className="bg-amber-50 border border-amber-200 rounded-lg px-4 py-3 mb-6 space-y-1">
           <div className="flex items-start gap-2">
             <AlertTriangle className="w-4 h-4 text-amber-500 shrink-0 mt-0.5" />
             <div>
-              <p className="text-sm font-medium text-amber-800">Email not configured — share credentials manually</p>
+              <p className="text-sm font-medium text-amber-800">
+                {inviteResult.emailSent
+                  ? "Invitation emailed — you can also share the link and temp password directly"
+                  : "Email not configured — share credentials manually"}
+              </p>
               <div className="text-sm text-amber-700 mt-1 space-y-0.5">
                 <div className="flex items-center gap-2">
                   <span className="font-mono">{inviteResult.email}</span>
                 </div>
-                <div className="flex items-center gap-2">
-                  <span>Temp password:</span>
-                  <code className="bg-white border rounded px-1.5 py-0.5 text-xs">{inviteResult.tempPassword}</code>
-                  <CopyButton text={inviteResult.tempPassword!} />
-                </div>
+                {inviteResult.tempPassword && (
+                  <div className="flex items-center gap-2">
+                    <span>Temp password:</span>
+                    <code className="bg-white border rounded px-1.5 py-0.5 text-xs">{inviteResult.tempPassword}</code>
+                    <CopyButton text={inviteResult.tempPassword} />
+                  </div>
+                )}
                 {inviteResult.loginUrl && (
                   <div className="flex items-center gap-2">
-                    <span>Login:</span>
+                    <span>Login link:</span>
                     <a href={inviteResult.loginUrl} className="underline text-xs">{inviteResult.loginUrl}</a>
                     <CopyButton text={inviteResult.loginUrl} />
                   </div>
@@ -274,8 +280,8 @@ export default function ClientUsers() {
                               { method: "POST", body: { email: u.email, firstName: u.firstName, lastName: u.lastName, clientId: u.clientId } },
                             );
                             toast({ title: "Re-invitation sent." });
-                            if (!res.emailSent && res.tempPassword) {
-                              setInviteResult({ email: res.email, tempPassword: res.tempPassword, loginUrl: res.loginUrl });
+                            if (res.tempPassword || res.loginUrl) {
+                              setInviteResult({ email: res.email, tempPassword: res.tempPassword, loginUrl: res.loginUrl, emailSent: res.emailSent });
                             }
                             await refresh();
                           } catch (err: any) {

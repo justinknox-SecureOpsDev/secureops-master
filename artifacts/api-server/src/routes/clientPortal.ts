@@ -1292,8 +1292,9 @@ router.post(
         status: "reinvited",
         emailSent,
         loginUrl,
-        // Return plaintext only when email failed — admin must share manually.
-        tempPassword: emailSent ? undefined : tempPassword,
+        // Always returned so the admin can copy/share the link and temp
+        // password directly, regardless of whether the invite email sent.
+        tempPassword,
       });
       return;
     }
@@ -1329,8 +1330,9 @@ router.post(
       status: "created",
       emailSent,
       loginUrl,
-      // Only in response body on creation so admin can share manually if SMTP is off
-      tempPassword: emailSent ? undefined : tempPassword,
+      // Always returned so the admin can copy/share the link and temp
+      // password directly, regardless of whether the invite email sent.
+      tempPassword,
     });
   },
 );
