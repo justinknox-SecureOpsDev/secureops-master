@@ -20,6 +20,7 @@ import {
   sendUnconfirmedEntryReminders,
   escalateUnconfirmedEntries,
   autoClockOutEndedShifts,
+  claimAutoClockOutEntry,
   computeAutoClockOut,
   resolveAutoClockOutDelayMinutes,
   getClockOutReminderPlan,
@@ -634,7 +635,7 @@ describe("autoClockOutEndedShifts", () => {
     return row.id;
   }
 
-  async function makeOpenEntry(employeeId: string, shiftId: string, clockIn: Date, atSiteId?: string): Promise<string> {
+  async function makeOpenEntry(employeeId: string, shiftId: string | null, clockIn: Date, atSiteId?: string): Promise<string> {
     const [row] = await db
       .insert(timeEntriesTable)
       .values({ employeeId, shiftId, siteId: atSiteId ?? siteId, clockInTime: clockIn, clockOutTime: null, notes: ATAG })
@@ -868,7 +869,6 @@ describe("autoClockOutEndedShifts", () => {
 
     expect((await readEntry(entryId)).clockOutTime).toBeNull();
   });
-
   it("moves an unsent nudge when the site delay changes without re-sending it", async () => {
     const now = Date.now();
     const MIN = 60 * 1000;
@@ -941,6 +941,82 @@ describe("autoClockOutEndedShifts", () => {
         eq(notificationsTable.type, "forgot_clock_out"),
       ));
     expect(notification?.body).toContain("Auto clock-out is disabled");
+  });
+  it("closes an abandoned shift-less walk-up entry with a reviewable note", async () => {
+    const now = Date.now();
+    const HOUR = 60 * 60 * 1000;
+    const emp = await makeActiveEmployee("aco-walk-up-stale");
+    const entryId = await makeOpenEntry(emp, null, new Date(now - 13 * HOUR));
+
+    await autoClockOutEndedShifts();
+
+    const entry = await readEntry(entryId);
+    expect(entry.clockOutTime).not.toBeNull();
+    expect(Number(entry.hoursWorked)).toBeGreaterThanOrEqual(13);
+    expect(entry.notes).toContain("walk-up entry had no scheduled shift");
+    expect(entry.notes).toContain("no recent on-site location ping after 12h");
+  });
+
+  it("keeps a shift-less walk-up entry open while fresh geofence evidence says the officer is inside", async () => {
+    const now = Date.now();
+    const HOUR = 60 * 60 * 1000;
+    const emp = await makeActiveEmployee("aco-walk-up-inside");
+    const entryId = await makeOpenEntry(emp, null, new Date(now - 13 * HOUR));
+    await db
+      .update(timeEntriesTable)
+      .set({ geofenceState: "inside" })
+      .where(eq(timeEntriesTable.id, entryId));
+    await db
+      .update(usersTable)
+      .set({ lastLocationAt: new Date() })
+      .where(eq(usersTable.id, emp));
+
+    await autoClockOutEndedShifts();
+
+    expect((await readEntry(entryId)).clockOutTime).toBeNull();
+  });
+
+  it("atomically refuses a stale walk-up candidate when fresh inside evidence arrived before its write", async () => {
+    const HOUR = 60 * 60 * 1000;
+    const emp = await makeActiveEmployee("aco-walk-up-race");
+    const entryId = await makeOpenEntry(emp, null, new Date(Date.now() - 13 * HOUR));
+
+    // Model evidence arriving after the scheduler's candidate SELECT: the
+    // caller still tries to claim the stale candidate, but the atomic UPDATE
+    // must re-read these current values and refuse it.
+    await db
+      .update(timeEntriesTable)
+      .set({ geofenceState: "inside" })
+      .where(eq(timeEntriesTable.id, entryId));
+    await db
+      .update(usersTable)
+      .set({ lastLocationAt: new Date() })
+      .where(eq(usersTable.id, emp));
+
+    const claimed = await claimAutoClockOutEntry({
+      entryId,
+      clockOut: new Date(),
+      hours: 13,
+      notes: "must not be written",
+      freshLocationCutoff: new Date(Date.now() - 15 * 60 * 1000),
+    });
+
+    expect(claimed).toHaveLength(0);
+    const entry = await readEntry(entryId);
+    expect(entry.clockOutTime).toBeNull();
+    expect(entry.notes).not.toContain("must not be written");
+  });
+
+  it("caps a days-old shift-less walk-up entry at 36 hours", async () => {
+    const HOUR = 60 * 60 * 1000;
+    const emp = await makeActiveEmployee("aco-walk-up-cap");
+    const entryId = await makeOpenEntry(emp, null, new Date(Date.now() - 10 * 24 * HOUR));
+
+    await autoClockOutEndedShifts();
+
+    const entry = await readEntry(entryId);
+    expect(Number(entry.hoursWorked)).toBe(36);
+    expect(entry.notes).toContain("Duration capped at 36h");
   });
 });
 

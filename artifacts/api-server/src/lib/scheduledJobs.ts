@@ -72,9 +72,8 @@ const AUTO_CLOCKOUT_REMINDER_FOLLOW_UP_MINUTES = 10;
  * still catching corrupt rows.
  */
 const MAX_AUTO_CLOCKOUT_HOURS = 36;
-// How recent a location ping must be for an `inside` geofence reading to
-// count as "currently on site". A stale `inside` (phone stopped pinging)
-// must NOT veto auto clock-out — that's the case this job exists to fix.
+
+export const SHIFTLESS_AUTO_CLOCKOUT_ABANDONMENT_HOURS = 12;
 const GEOFENCE_FRESH_MS = 15 * MIN_MS;
 
 /**
@@ -1036,6 +1035,12 @@ export async function sendWeeklyTimeEntryApprovalReminders(): Promise<void> {
  * time entry — UNLESS we can confirm they are still physically on site
  * (inside the geofence).
  *
+ * Shift-less walk-up entries have no scheduled end, so they use a separate
+ * bounded policy: after `SHIFTLESS_AUTO_CLOCKOUT_ABANDONMENT_HOURS` open with
+ * no fresh `inside` geofence evidence, close them at the sweep time. This
+ * clears forgotten coverage entries without clocking out an officer who is
+ * demonstrably still working on site.
+ *
  * "Still within the geofence" = the time entry's `geofence_state` is
  * `inside` AND the officer's last location ping is recent
  * (`GEOFENCE_FRESH_MS`). We require freshness because a stale `inside`
@@ -1206,14 +1211,59 @@ export function computeAutoClockOut(args: {
   return { clockOut: new Date(clockOutMs), hours, capped };
 }
 
+/**
+ * Atomically claim an open entry for auto clock-out while re-checking the
+ * current on-site evidence in the same statement.
+ *
+ * The scheduler's candidate SELECT is only a snapshot. A location request can
+ * refresh `users.last_location_at` and geofence evaluation can mark the entry
+ * `inside` while the job is processing another row. Repeating both conditions
+ * here prevents that newly-confirmed officer from being closed based on stale
+ * candidate data.
+ */
+export async function claimAutoClockOutEntry(args: {
+  entryId: string;
+  clockOut: Date;
+  hours: number;
+  notes: string;
+  freshLocationCutoff: Date;
+}): Promise<Array<{ id: string; shiftId: string | null }>> {
+  return db
+    .update(timeEntriesTable)
+    .set({
+      clockOutTime: args.clockOut,
+      hoursWorked: String(args.hours),
+      notes: args.notes,
+    })
+    .where(and(
+      eq(timeEntriesTable.id, args.entryId),
+      isNull(timeEntriesTable.clockOutTime),
+      // IS DISTINCT FROM handles a null/never-evaluated geofence state.
+      // In that case there is no proof the officer is inside, so the row may
+      // still be claimed once its timing policy says it is abandoned.
+      sql`(
+        ${timeEntriesTable.geofenceState} IS DISTINCT FROM 'inside'
+        OR NOT EXISTS (
+          SELECT 1
+          FROM ${usersTable}
+          WHERE ${usersTable.id} = ${timeEntriesTable.employeeId}
+            AND ${usersTable.lastLocationAt} >= ${args.freshLocationCutoff}
+        )
+      )`,
+    ))
+    .returning({ id: timeEntriesTable.id, shiftId: timeEntriesTable.shiftId });
+}
 export async function autoClockOutEndedShifts(): Promise<void> {
   try {
     const now = Date.now();
+    const freshLocationCutoff = new Date(now - GEOFENCE_FRESH_MS);
 
-    // Pre-filter only on "the shift has already ended" — the wait itself is
-    // per-site now, so the eligibility cutoff has to be evaluated per row
-    // below. A single fixed cutoff here would silently ignore any site whose
-    // configured delay is longer than it.
+    // Shift-linked rows are pre-filtered only on "the shift has already
+    // ended" because their per-site wait is evaluated below. Shift-less rows
+    // use their own bounded abandonment threshold.
+    const walkUpAbandonmentCutoff = new Date(
+      now - SHIFTLESS_AUTO_CLOCKOUT_ABANDONMENT_HOURS * HOUR_MS,
+    );
     const rows = await db
       .select({
         entryId: timeEntriesTable.id,
@@ -1230,27 +1280,39 @@ export async function autoClockOutEndedShifts(): Promise<void> {
         autoClockOutPayGrace: sitesTable.autoClockOutPayGrace,
       })
       .from(timeEntriesTable)
-      .innerJoin(shiftsTable, eq(shiftsTable.id, timeEntriesTable.shiftId))
+      .leftJoin(shiftsTable, eq(shiftsTable.id, timeEntriesTable.shiftId))
       .innerJoin(usersTable, eq(usersTable.id, timeEntriesTable.employeeId))
-      .leftJoin(sitesTable, eq(sitesTable.id, shiftsTable.siteId))
+      .leftJoin(sitesTable, sql`${sitesTable.id} = coalesce(${timeEntriesTable.siteId}, ${shiftsTable.siteId})`)
       .where(and(
         isNull(timeEntriesTable.clockOutTime),
-        lte(shiftsTable.endTime, new Date(now)),
+        or(
+          lte(shiftsTable.endTime, new Date(now)),
+          and(
+            isNull(timeEntriesTable.shiftId),
+            lte(timeEntriesTable.clockInTime, walkUpAbandonmentCutoff),
+          ),
+        ),
       ));
 
     let totalClosed = 0;
     let failed = 0;
     for (const r of rows) {
+      const isWalkUpEntry = r.shiftId == null;
+
       // Skip if auto-clock-out is disabled for this site (null = no site →
       // treat as enabled so siteless shifts still auto-clock-out).
       if (r.autoClockOutEnabled === false) continue;
 
-      // Per-site wait past scheduled end. No site row → the global default.
-      // Always clamped, so one corrupt value can't stall the whole fleet.
-      const delayMinutes = resolveAutoClockOutDelayMinutes(r.autoClockOutDelayMinutes);
-      const payGrace = r.autoClockOutPayGrace === true;
-      const shiftEndMs = new Date(r.shiftEndTime).getTime();
-      if (!Number.isFinite(shiftEndMs) || now - shiftEndMs < delayMinutes * MIN_MS) continue;
+      let delayMinutes = 0;
+      let payGrace = false;
+      if (!isWalkUpEntry) {
+        // Per-site wait past scheduled end. No site row → the global default.
+        // Always clamped, so one corrupt value can't stall the whole fleet.
+        delayMinutes = resolveAutoClockOutDelayMinutes(r.autoClockOutDelayMinutes);
+        payGrace = r.autoClockOutPayGrace === true;
+        const shiftEndMs = new Date(r.shiftEndTime!).getTime();
+        if (!Number.isFinite(shiftEndMs) || now - shiftEndMs < delayMinutes * MIN_MS) continue;
+      }
 
       // Skip officers we can confirm are still on site.
       const pingFresh =
@@ -1261,7 +1323,9 @@ export async function autoClockOutEndedShifts(): Promise<void> {
       try {
         const { clockOut, hours, capped } = computeAutoClockOut({
           clockInTime: r.clockInTime,
-          shiftEndTime: r.shiftEndTime,
+          // Shift-less entries are closed at the sweep time. Passing `now`
+          // produces that anchor while retaining the shared 36-hour cap.
+          shiftEndTime: isWalkUpEntry ? new Date(now) : r.shiftEndTime!,
           now,
           delayMinutes,
           payGrace,
@@ -1279,23 +1343,22 @@ export async function autoClockOutEndedShifts(): Promise<void> {
         const graceNote = payGrace
           ? `Waited ${delayMinutes} min past scheduled end; grace period paid (clock-out set to scheduled end + ${delayMinutes} min).`
           : `Waited ${delayMinutes} min past scheduled end; grace period unpaid (clock-out set to scheduled end).`;
-        const marker = capped
-          ? `Auto clocked out: shift ended, officer not within geofence. ${graceNote} Duration capped at ${MAX_AUTO_CLOCKOUT_HOURS}h — this entry was left open long past its shift, please review.`
-          : `Auto clocked out: shift ended, officer not within geofence. ${graceNote}`;
+        const marker = isWalkUpEntry
+          ? capped
+            ? `Auto clocked out: walk-up entry had no scheduled shift and no recent on-site location ping after ${SHIFTLESS_AUTO_CLOCKOUT_ABANDONMENT_HOURS}h. Duration capped at ${MAX_AUTO_CLOCKOUT_HOURS}h — please review.`
+            : `Auto clocked out: walk-up entry had no scheduled shift and no recent on-site location ping after ${SHIFTLESS_AUTO_CLOCKOUT_ABANDONMENT_HOURS}h.`
+          : capped
+            ? `Auto clocked out: shift ended, officer not within geofence. ${graceNote} Duration capped at ${MAX_AUTO_CLOCKOUT_HOURS}h — this entry was left open long past its shift, please review.`
+            : `Auto clocked out: shift ended, officer not within geofence. ${graceNote}`;
         const nextNotes = r.notes ? `${r.notes} | ${marker}` : marker;
 
-        const claimed = await db
-          .update(timeEntriesTable)
-          .set({
-            clockOutTime: clockOut,
-            hoursWorked: String(hours),
-            notes: nextNotes,
-          })
-          .where(and(
-            eq(timeEntriesTable.id, r.entryId),
-            isNull(timeEntriesTable.clockOutTime),
-          ))
-          .returning({ id: timeEntriesTable.id, shiftId: timeEntriesTable.shiftId });
+        const claimed = await claimAutoClockOutEntry({
+          entryId: r.entryId,
+          clockOut,
+          hours,
+          notes: nextNotes,
+          freshLocationCutoff,
+        });
         if (claimed.length === 0) continue; // another tick/instance got it
 
         // Complete the shift iff no other officer is still clocked in on
@@ -1318,10 +1381,12 @@ export async function autoClockOutEndedShifts(): Promise<void> {
         }
 
         // Best-effort courtesy push. Never rolls back the clock-out.
-        const where = r.siteName ? r.siteName : "your shift";
+        const where = r.siteName ? r.siteName : isWalkUpEntry ? "your walk-up coverage" : "your shift";
         sendPushToUsers([r.employeeId], {
           title: "You were clocked out",
-          body: `Your shift at ${where} ended and you'd left the area, so we clocked you out automatically.`,
+          body: isWalkUpEntry
+            ? `Your walk-up coverage at ${where} had no recent on-site location ping, so we clocked you out automatically.`
+            : `Your shift at ${where} ended and you'd left the area, so we clocked you out automatically.`,
           data: { type: "auto_clock_out", timeEntryId: r.entryId },
         }).catch((err: unknown) => logger.warn({ err, timeEntryId: r.entryId }, "[auto-clock-out] push send failed"));
 
