@@ -1,8 +1,9 @@
 import { Router, type IRouter } from "express";
 import { eq, and, ilike, ne, lte, gte } from "drizzle-orm";
 import { db, invoicesTable, sitesTable } from "@workspace/db";
-import { requireAdmin, requireAuth, requireCompanyOwner } from "../middlewares/auth";
-import { requirePermission } from "../lib/permissions";
+import { requireAdmin, requireAuth } from "../middlewares/auth";
+import { requirePermission, requireCompanyOwnerOrPermission } from "../lib/permissions";
+import { stripDashboardFinanceForOwner } from "../lib/financeVisibility";
 
 // Single-invoice, day-to-day transactional actions (create/edit/send/recalc
 // one invoice) stay reachable by anyone with the finance.transactions
@@ -127,9 +128,16 @@ router.get("/invoices/fee-migration-status", requireAdmin, async (_req, res): Pr
   res.json({ pendingCount });
 });
 
-// Aggregate invoice board/list — company-owner gated (default owners are
-// exactly the admin-role users from the rollout backfill).
-router.get("/invoices", requireCompanyOwner, async (req, res): Promise<void> => {
+// Invoice list — reachable two ways: a company owner sees the full,
+// unsanitized list (default owners are exactly the admin-role users from
+// the rollout backfill), and anyone with the finance.transactions
+// permission (e.g. a non-owner bookkeeper who creates/edits/sends
+// individual invoices) can browse it too, so they can locate a record to
+// work on without already knowing its id. The latter path gets the
+// aggregate finance fields (subtotal/totalAmount) stripped via the shared
+// dashboard sanitizer — see lib/financeVisibility.ts — since this is still
+// classified as a company-financial view, just no longer owner-exclusive.
+router.get("/invoices", requireCompanyOwnerOrPermission("finance.transactions"), async (req, res): Promise<void> => {
   const { status, clientName, siteId, clientId, overlapStart, overlapEnd } = req.query as Record<string, string | undefined>;
   const conditions = [];
   if (status) conditions.push(eq(invoicesTable.status, status));
@@ -181,7 +189,7 @@ router.get("/invoices", requireCompanyOwner, async (req, res): Promise<void> => 
     .leftJoin(sitesTable, eq(invoicesTable.siteId, sitesTable.id))
     .where(conditions.length > 0 ? and(...conditions) : undefined);
 
-  res.json(rows);
+  res.json(stripDashboardFinanceForOwner(!!req.user?.isCompanyOwner, rows));
 });
 
 router.post("/invoices", ...requireInvoiceTransactionPermission, async (req, res): Promise<void> => {

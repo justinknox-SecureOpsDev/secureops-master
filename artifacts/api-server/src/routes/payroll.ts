@@ -6,7 +6,8 @@ import { z } from "zod/v4";
 import { randomUUID } from "node:crypto";
 // (employeesTable + sitesTable + auditLogsTable used by board endpoint below)
 import { requireAdmin, requireAuth, requireCompanyOwner } from "../middlewares/auth";
-import { requirePermission } from "../lib/permissions";
+import { requirePermission, requireCompanyOwnerOrPermission } from "../lib/permissions";
+import { stripDashboardFinanceForOwner } from "../lib/financeVisibility";
 
 // Single-payroll-entry, day-to-day transactional edits stay reachable by
 // anyone with the finance.transactions permission — independent of the
@@ -32,11 +33,16 @@ function isoDate(d: Date): string {
   return d.toISOString().slice(0, 10);
 }
 
-// Aggregate payroll list — this is the source for the mobile admin payroll
-// screen's totals, so it's company-owner gated like the other aggregate
-// financial views (default owners are exactly the admin-role users from the
-// rollout backfill).
-router.get("/payroll", requireCompanyOwner, async (req, res): Promise<void> => {
+// Payroll list — reachable two ways: a company owner sees the full,
+// unsanitized list (default owners are exactly the admin-role users from
+// the rollout backfill), and anyone with the finance.transactions
+// permission (e.g. a non-owner bookkeeper who creates/edits individual
+// payroll entries) can browse it too, so they can locate a record to work
+// on without already knowing its id. The latter path gets the aggregate
+// finance fields (grossPay/netPay) stripped via the shared dashboard
+// sanitizer — see lib/financeVisibility.ts — since this is still
+// classified as a company-financial view, just no longer owner-exclusive.
+router.get("/payroll", requireCompanyOwnerOrPermission("finance.transactions"), async (req, res): Promise<void> => {
   const { employeeId, siteId, status, periodStart, periodEnd } = req.query as Record<string, string | undefined>;
 
   const conditions = [];
@@ -74,7 +80,8 @@ router.get("/payroll", requireCompanyOwner, async (req, res): Promise<void> => {
 
   // 1099 contractors — no tax is withheld; net always equals gross. Normalise on
   // read so any legacy row stored with withholding still shows full gross.
-  res.json(rows.map((r) => ({ ...r, tax: "0", netPay: r.grossPay })));
+  const normalized = rows.map((r) => ({ ...r, tax: "0", netPay: r.grossPay }));
+  res.json(stripDashboardFinanceForOwner(!!req.user?.isCompanyOwner, normalized));
 });
 
 // Generate weekly payroll for a site from APPROVED time entries.

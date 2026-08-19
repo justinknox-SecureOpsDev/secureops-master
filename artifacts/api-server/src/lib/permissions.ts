@@ -25,6 +25,7 @@
  */
 
 import type { RequestHandler } from "express";
+import { requireAuth } from "../middlewares/auth";
 import { db, permissionOverridesTable } from "@workspace/db";
 import {
   PERMISSION_KEY_DEFS,
@@ -125,5 +126,42 @@ export function requirePermission(key: PermissionKey): RequestHandler {
       return;
     }
     next();
+  };
+}
+
+/**
+ * Express middleware: authenticates the caller, then admits them if EITHER
+ * their live `isCompanyOwner` flag is set OR their role currently has `key`
+ * in its effective allowed-roles list. 403 otherwise.
+ *
+ * Use for a surface that is legitimately reachable two ways: the aggregate
+ * company-owner path (sees everything) and a scoped, day-to-day permission
+ * (e.g. finance.transactions) that reaches the same data for a narrower,
+ * transactional purpose. The route handler is responsible for sanitizing
+ * the response differently for the two paths where they must differ (see
+ * lib/financeVisibility.ts's stripDashboardFinanceForOwner) — this
+ * middleware only decides admission, not what the caller is shown.
+ *
+ * Composes requireAuth internally (unlike `requirePermission`, which
+ * expects it to already have run) so this can be dropped directly onto a
+ * route in place of `requireCompanyOwner`.
+ */
+export function requireCompanyOwnerOrPermission(key: PermissionKey): RequestHandler {
+  return (req, res, next) => {
+    requireAuth(req, res, () => {
+      if (req.user?.isCompanyOwner) {
+        next();
+        return;
+      }
+      if (!isRoleAllowed(key, req.user?.role)) {
+        res.status(403).json({
+          error: "Forbidden",
+          message: `Your role does not have the '${key}' permission, and you are not a company owner.`,
+          permission: key,
+        });
+        return;
+      }
+      next();
+    });
   };
 }

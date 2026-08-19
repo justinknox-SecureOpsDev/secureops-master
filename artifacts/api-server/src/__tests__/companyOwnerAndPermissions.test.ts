@@ -11,6 +11,8 @@ import {
   sitesTable,
   siteManagersTable,
   shiftsTable,
+  payrollEntriesTable,
+  invoicesTable,
   permissionOverridesTable,
   companyOwnerRolloutTable,
 } from "@workspace/db";
@@ -122,8 +124,6 @@ describe("Company-owner gate on aggregate financial dashboard endpoints", () => 
   const cases: Array<{ label: string; call: () => request.Test }> = [
     { label: "GET /analytics/summary", call: () => request(app).get("/api/analytics/summary?start=2020-01-01&end=2020-01-31") },
     { label: "GET /payroll/board", call: () => request(app).get("/api/payroll/board") },
-    { label: "GET /payroll", call: () => request(app).get("/api/payroll") },
-    { label: "GET /invoices", call: () => request(app).get("/api/invoices") },
     { label: "POST /subcontractor-pay-run/preview", call: () => request(app).post("/api/subcontractor-pay-run/preview").send({ ids: [randomUUID()] }) },
   ];
 
@@ -162,6 +162,125 @@ describe("Company-owner gate on aggregate financial dashboard endpoints", () => 
       .set(authed(ctx.nonOwnerAdminToken))
       .send({ dataset: "shifts", filters: {} });
     expect(res.status).toBe(200);
+  });
+});
+
+// Task #734 — GET /payroll and GET /invoices (the plain lists) were fully
+// company-owner gated by task #733 as an aggregate/board view, which also
+// blocked a non-owner bookkeeper with the finance.transactions permission
+// from browsing the list to find a record they're otherwise allowed to open
+// and edit. They're now reachable by EITHER an owner OR finance.transactions,
+// with the dashboard finance sanitizer applied for the non-owner path.
+describe("Non-owner bookkeepers with finance.transactions can browse (sanitized) payroll and invoice lists", () => {
+  let payrollEntryId: string;
+  let invoiceId: string;
+
+  beforeAll(async () => {
+    const [entry] = await db
+      .insert(payrollEntriesTable)
+      .values({
+        employeeId: ctx.officerId,
+        siteId: ctx.siteId,
+        periodStart: "2020-01-06",
+        periodEnd: "2020-01-12",
+        totalHours: "40.00",
+        hourlyRate: "30.00",
+        grossPay: "1200.00",
+        tax: "0",
+        netPay: "1200.00",
+        status: "pending",
+      })
+      .returning({ id: payrollEntriesTable.id });
+    payrollEntryId = entry.id;
+
+    const [invoice] = await db
+      .insert(invoicesTable)
+      .values({
+        invoiceNumber: `${TAG}-INV-1`,
+        clientId: ctx.clientId,
+        siteId: ctx.siteId,
+        clientName: `${TAG}-client`,
+        lineItems: [],
+        subtotal: "5000.00",
+        taxAmount: "0",
+        totalAmount: "5000.00",
+        status: "draft",
+        dueDate: "2020-02-01",
+      })
+      .returning({ id: invoicesTable.id });
+    invoiceId = invoice.id;
+  });
+
+  afterAll(async () => {
+    await db.delete(payrollEntriesTable).where(eq(payrollEntriesTable.id, payrollEntryId));
+    await db.delete(invoicesTable).where(eq(invoicesTable.id, invoiceId));
+    await db.delete(permissionOverridesTable).where(eq(permissionOverridesTable.key, "finance.transactions"));
+    clearPermissionOverrideInMemory("finance.transactions");
+    await loadPermissionOverridesFromDb();
+  });
+
+  it("blocks a plain site_manager (no owner flag, no finance.transactions) from GET /payroll and GET /invoices", async () => {
+    const payrollRes = await request(app).get("/api/payroll").set(authed(ctx.siteManagerToken));
+    expect(payrollRes.status).toBe(403);
+    const invoicesRes = await request(app).get("/api/invoices").set(authed(ctx.siteManagerToken));
+    expect(invoicesRes.status).toBe(403);
+  });
+
+  it("lets a non-owner admin (finance.transactions' default role) browse GET /payroll with dashboard finance fields stripped", async () => {
+    const res = await request(app).get("/api/payroll").set(authed(ctx.nonOwnerAdminToken));
+    expect(res.status).toBe(200);
+    const row = res.body.find((r: { id: string }) => r.id === payrollEntryId);
+    expect(row).toBeDefined();
+    expect(row.grossPay).toBeUndefined();
+    expect(row.netPay).toBeUndefined();
+    // Non-financial-aggregate fields needed to locate/open the record stay visible.
+    expect(row.status).toBe("pending");
+    expect(row.totalHours).toBe("40.00");
+  });
+
+  it("lets a non-owner admin browse GET /invoices with dashboard finance fields stripped", async () => {
+    const res = await request(app).get("/api/invoices").set(authed(ctx.nonOwnerAdminToken));
+    expect(res.status).toBe(200);
+    const row = res.body.find((r: { id: string }) => r.id === invoiceId);
+    expect(row).toBeDefined();
+    expect(row.subtotal).toBeUndefined();
+    expect(row.totalAmount).toBeUndefined();
+    expect(row.invoiceNumber).toBe(`${TAG}-INV-1`);
+    expect(row.status).toBe("draft");
+  });
+
+  it("a company owner still sees the full, unsanitized payroll and invoice lists", async () => {
+    const payrollRes = await request(app).get("/api/payroll").set(authed(ctx.ownerAdminToken));
+    expect(payrollRes.status).toBe(200);
+    const payrollRow = payrollRes.body.find((r: { id: string }) => r.id === payrollEntryId);
+    expect(payrollRow.grossPay).toBe("1200.00");
+    expect(payrollRow.netPay).toBe("1200.00");
+
+    const invoicesRes = await request(app).get("/api/invoices").set(authed(ctx.ownerAdminToken));
+    expect(invoicesRes.status).toBe(200);
+    const invoiceRow = invoicesRes.body.find((r: { id: string }) => r.id === invoiceId);
+    expect(invoiceRow.subtotal).toBe("5000.00");
+    expect(invoiceRow.totalAmount).toBe("5000.00");
+  });
+
+  it("granting finance.transactions to site_manager lets a non-owner site_manager browse both (sanitized) lists", async () => {
+    const grant = await request(app)
+      .patch("/api/admin/permissions/finance.transactions")
+      .set(authed(ctx.ownerAdminToken))
+      .send({ allowedRoles: ["admin", "site_manager"] });
+    expect(grant.status).toBe(200);
+
+    const payrollRes = await request(app).get("/api/payroll").set(authed(ctx.siteManagerToken));
+    expect(payrollRes.status).toBe(200);
+    const payrollRow = payrollRes.body.find((r: { id: string }) => r.id === payrollEntryId);
+    expect(payrollRow).toBeDefined();
+    expect(payrollRow.grossPay).toBeUndefined();
+
+    const invoicesRes = await request(app).get("/api/invoices").set(authed(ctx.siteManagerToken));
+    expect(invoicesRes.status).toBe(200);
+    const invoiceRow = invoicesRes.body.find((r: { id: string }) => r.id === invoiceId);
+    expect(invoiceRow).toBeDefined();
+    expect(invoiceRow.totalAmount).toBeUndefined();
   });
 });
 
