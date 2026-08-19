@@ -28,3 +28,15 @@ Never run agent tasks and never hand-edit code inside a customer repl. `.replit`
 `listConnections("github")` redacts credentials, so it cannot drive `git push`. The connector's real token is reachable the same way app code gets it — `GET https://$REPLIT_CONNECTORS_HOSTNAME/api/v2/connection?include_secrets=true&connector_names=github` with header `X_REPLIT_TOKEN: repl $REPL_IDENTITY` — then push with a throwaway credential helper reading a `chmod 600` file, and delete the file afterwards. Never echo the token into shell output.
 
 Push `main` explicitly (`git push github main:main`): this repo carries hundreds of `subrepl-*` task-agent branches that must not go to the mirror.
+
+## Diagnose a tenant update failure against the mirror, not against master
+
+The mirror only advances when someone pushes it by hand, so it silently falls behind `main`. When a tenant reports that a fetched upstream "does not contain" a column/feature that plainly exists here, the tenant is usually right and the mirror is stale — check `git rev-list --count github/main..main` **before** debugging the tenant.
+
+**Why:** master's `main` and what tenants can actually fetch are two different things; assuming they match sends you looking for a tenant-side bug that does not exist.
+
+**How to apply:** two distinct tenant-merge symptoms, two different owners —
+- Conflicts in shared files, or DB objects that `git log --all -S<name>` proves never existed in master history: **tenant drift**, fix in the fork (reset to upstream, drop the local-only columns).
+- Missing feature/column that does exist in master: **stale mirror**, fix here by pushing.
+
+Time the push to a feature boundary. Pushing mid-feature (e.g. the first commit of a multi-task permission system) unblocks the tenant but commits you to a second full update round.
