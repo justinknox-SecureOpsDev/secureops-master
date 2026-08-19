@@ -139,3 +139,10 @@ uri = "file://exports/New-Customer-Setup-Runbook.pdf"
 type = "pdf"
 title = "New Customer Setup Runbook"
 description = "Fork-to-live tenant onboarding runbook (Phases 1-11), generated from docs/new-customer-setup-runbook.md — use this to track Quell Protection's setup step by step."
+
+[[outputs]]
+id = "S-Vim1W8Yq0fBg2Xw_D89"
+uri = "file://docs/client-system-setup-checklist.pdf"
+type = "pdf"
+title = "Client Setup Checklist — Getting Your System Live"
+description = "Four-page, plain-language document to send a new customer: what's done, what's left, and exactly what you need from them (email/DNS access, domain, sites, officers, rules, brand files)."

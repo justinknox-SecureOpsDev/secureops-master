@@ -12,6 +12,7 @@
     "check-schema-drift": "tsx ./src/check-schema-drift.ts",
     "sync-feature-keys": "tsx ./src/sync-feature-keys.ts",
     "generate-legal-pdfs": "tsx ./src/generate-legal-pdfs.ts",
+    "generate-onboarding-pdf": "tsx ./src/generate-onboarding-pdf.ts",
     "test": "vitest run",
     "test-schema-drift": "tsx --test ./src/test-schema-drift.ts",
     "test-dispatcher-authz": "tsx --test ./src/test-dispatcher-authz.ts",

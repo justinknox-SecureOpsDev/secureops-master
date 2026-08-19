@@ -54,7 +54,13 @@ These committed settings carry over from WCSG and **must be changed** in the for
 
 ## Phase 3 — Secrets & integrations checklist (15–30 min, inside the fork)
 
-Secrets never copy on a fork. Work through this table top to bottom:
+Secrets never copy on a fork. Work through this table top to bottom.
+
+Several values here have to come **from the customer** (mail account or DNS
+access, domain, phone number, brand files). Collect them up front by sending
+them `docs/client-system-setup-checklist.pdf` — a plain-language version of
+this phase written for them. Regenerate it after edits with
+`pnpm --filter @workspace/scripts run generate-onboarding-pdf`.
 
 | Secret / integration | What it powers | Required? | Where the value comes from |
 |---|---|---|---|

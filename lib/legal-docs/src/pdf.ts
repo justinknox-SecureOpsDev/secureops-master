@@ -439,6 +439,12 @@ export type RenderLegalPdfOptions = {
   markdown: string;
   /** When present, appends the electronic-signature certificate. */
   signature?: SignatureCertificate | null;
+  /**
+   * Subtitle printed in the header band. Defaults to the legal-document
+   * label; non-legal platform documents (e.g. the client setup checklist)
+   * pass their own so the band doesn't mislabel them as an agreement.
+   */
+  bandLabel?: string;
 };
 
 /**
@@ -454,7 +460,7 @@ export function renderLegalPdf(opts: RenderLegalPdfOptions): PDFKit.PDFDocument 
     info: { Title: opts.title, Author: "SOBBU LLC" },
   });
 
-  drawSobbuBand(doc, "SecureOps Command \u2014 Platform Legal Document");
+  drawSobbuBand(doc, opts.bandLabel ?? "SecureOps Command \u2014 Platform Legal Document");
 
   const md = new MarkdownIt({ html: false });
   const blocks = tokensToBlocks(md.parse(opts.markdown, {}));

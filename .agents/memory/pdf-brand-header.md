@@ -28,3 +28,11 @@ drifted independently. Centralizing means brand/logo changes happen once.
 the server needs at runtime must be embedded as a base64 string compiled into a `.ts` module
 (Buffer.from(base64)). Wrap `doc.image(...)` in try/catch so a bad/missing asset degrades
 gracefully and never breaks PDF generation.
+
+## Legal/onboarding PDFs use pdfkit standard fonts (WinAnsi)
+
+Markdown rendered through pdfkit's built-in fonts is WinAnsi-encoded: anything outside that set silently prints as garbage (`☐` renders as `&`; emoji and dingbats likewise). Stick to ASCII plus the punctuation WinAnsi covers.
+
+**Why:** generation succeeds either way — only a rasterized page reveals it, so it ships unnoticed.
+
+**How to apply:** rasterize and look at a page before shipping any generated PDF.
