@@ -99,10 +99,10 @@ async function putConfig(body: Record<string, unknown>) {
     .send(body);
 }
 
+// Provider-owned fields (customerName / planTier / monthlyPriceCents) are
+// deliberately absent: the tenant route refuses to CHANGE them, since they are
+// printed into the platform agreements the customer signs.
 const BASE_BODY = {
-  customerName: TAG,
-  planTier: null,
-  monthlyPriceCents: null,
   officerCount: null,
   billingNotes: null,
   planStartDate: null,

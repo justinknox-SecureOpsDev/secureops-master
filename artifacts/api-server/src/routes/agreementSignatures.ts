@@ -3,8 +3,8 @@
  *
  * The customer-org admin reviews the fillable agreement in the admin portal
  * (Legal & Agreements → Review & sign), with fields auto-populated from the
- * platform setup (customer config, brand config, org code, deployment
- * domain). Signing stores an immutable snapshot of the FULL filled markdown,
+ * platform setup (customer config, org code, deployment domain, operator
+ * env). Signing stores an immutable snapshot of the FULL filled markdown,
  * its SHA-256, the fill values, and the verbatim consent text — so what was
  * agreed to is provable even if the bundled template changes later.
  *
@@ -35,7 +35,6 @@ import {
 } from "@workspace/legal-docs";
 import { renderLegalPdf } from "@workspace/legal-docs/pdf";
 import { requireAdmin } from "../middlewares/auth";
-import { brand } from "../lib/brandConfig";
 import { businessTimeZone } from "../lib/businessTime";
 
 const router: Router = Router();
@@ -58,12 +57,27 @@ function deploymentDomain(): string {
   return replit ? `https://${replit}` : "";
 }
 
+/** The fields SOBBU sets — everything except the customer-completed ones. */
+function providerDefs(slot: AgreementSlot) {
+  return AGREEMENT_FIELDS[slot].filter((def) => def.authority === "provider");
+}
+
 /**
- * Auto-populate fill values from the platform setup. Only allow-listed
- * field keys are ever produced — commercial notes like `billingNotes` are
- * deliberately never surfaced here.
+ * Resolve the SOBBU-set values for a slot from platform configuration:
+ * customer config (control-plane-owned columns), org code, deployment domain,
+ * operator env values, then static defaults.
+ *
+ * This is the ONLY source of pricing, commercial terms, agreement terms and
+ * SOBBU's own entity details. The signing customer never supplies them — the
+ * sign route ignores any field values in the request body. Commercial notes
+ * like `billingNotes` are deliberately never surfaced here.
+ *
+ * NOTHING here may read tenant-editable configuration (brand config in
+ * particular): a customer-org super-admin can edit their own branding, so any
+ * agreement value sourced from it would be a value they set on the contract
+ * they then sign.
  */
-async function buildPrefill(slot: AgreementSlot): Promise<Record<string, string>> {
+async function buildProviderValues(slot: AgreementSlot): Promise<Record<string, string>> {
   const [config] = await db
     .select()
     .from(platformCustomerConfigTable)
@@ -77,7 +91,9 @@ async function buildPrefill(slot: AgreementSlot): Promise<Record<string, string>
 
   const values: Record<string, string> = {};
   if (slot === "msa") {
-    values["customerLegalName"] = config?.customerName?.trim() || brand.companyName;
+    // No fallback to brand.companyName: branding is tenant-editable, so a
+    // customer could otherwise set the legal name on their own contract.
+    values["customerLegalName"] = config?.customerName?.trim() ?? "";
     values["effectiveDate"] = today;
     values["orgCode"] = process.env["ORG_CODE"]?.trim() ?? "";
     values["customerDomain"] = deploymentDomain();
@@ -89,7 +105,9 @@ async function buildPrefill(slot: AgreementSlot): Promise<Record<string, string>
             maximumFractionDigits: 2,
           })}`
         : "";
-    values["billingContact"] = brand.billingEmail;
+    // Operator-set, NOT brand.billingEmail — that one is tenant-editable, and
+    // the billing contact is a commercial term of the signed agreement.
+    values["billingContact"] = process.env["AGREEMENT_BILLING_CONTACT"]?.trim() ?? "";
     values["venueCounty"] = process.env["SOBBU_VENUE_COUNTY"]?.trim() ?? "";
     values["noticeEmail"] = process.env["SOBBU_NOTICE_EMAIL"]?.trim() ?? "";
     values["providerAddress"] = process.env["SOBBU_PRINCIPAL_ADDRESS"]?.trim() ?? "";
@@ -102,11 +120,39 @@ async function buildPrefill(slot: AgreementSlot): Promise<Record<string, string>
       (process.env["SOBBU_NOTICE_EMAIL"]?.trim() ?? "");
     values["providerAddress"] = process.env["SOBBU_PRINCIPAL_ADDRESS"]?.trim() ?? "";
   }
-  // Static defaults for anything still blank.
-  for (const def of AGREEMENT_FIELDS[slot]) {
+  // Static defaults for anything still blank — provider fields only, so a
+  // customer-completed field can never be pre-supplied from here.
+  for (const def of providerDefs(slot)) {
     if (!values[def.key] && def.defaultValue) values[def.key] = def.defaultValue;
   }
   return values;
+}
+
+/**
+ * Required SOBBU-set values that are still blank. Signing is blocked until
+ * SOBBU fills them, because the customer has no way to supply them.
+ */
+function missingProviderDefs(slot: AgreementSlot, values: Record<string, string>) {
+  return providerDefs(slot).filter((def) => def.required && !(values[def.key] ?? "").trim());
+}
+
+/**
+ * Digest of the exact SOBBU-set values shown to the signer. The signing form
+ * echoes it back, so terms that changed between page load and signature — or
+ * that were never displayed — are rejected instead of silently signed.
+ */
+function termsDigest(slot: AgreementSlot, values: Record<string, string>): string {
+  const canonical = JSON.stringify({
+    slot,
+    values: providerDefs(slot).map((def) => [def.key, values[def.key] ?? ""]),
+    // The document text is itself a term: covering the template and consent
+    // wording means a stale portal bundle can't sign a version of the
+    // agreement it never displayed — it gets "terms changed, reload" instead.
+    template: LEGAL_TEMPLATES[slot],
+    consent: AGREEMENT_CONSENT_TEXTS[slot],
+    guarantyConsent: slot === "msa" ? GUARANTY_CONSENT_TEXT : null,
+  });
+  return createHash("sha256").update(canonical, "utf8").digest("hex");
 }
 
 function toDto(row: PlatformAgreementSignature) {
@@ -141,7 +187,8 @@ async function latestSignature(slot: AgreementSlot): Promise<PlatformAgreementSi
 router.get("/admin/platform/agreements/signing-context", requireAdmin, async (_req, res) => {
   const slots: Record<string, unknown> = {};
   for (const slot of AGREEMENT_SLOTS) {
-    const prefill = await buildPrefill(slot);
+    const providerValues = await buildProviderValues(slot);
+    const missingProvider = missingProviderDefs(slot, providerValues);
     const signed = await latestSignature(slot);
     slots[slot] = {
       title: AGREEMENT_TITLES[slot],
@@ -153,10 +200,16 @@ router.get("/admin/platform/agreements/signing-context", requireAdmin, async (_r
         label: def.label,
         group: def.group,
         required: def.required,
+        authority: def.authority,
         hint: def.hint ?? null,
         multiline: def.multiline ?? false,
-        value: prefill[def.key] ?? "",
+        // Only SOBBU's values are prefilled; customer-completed fields start blank.
+        value: def.authority === "provider" ? (providerValues[def.key] ?? "") : "",
       })),
+      // Ties a signature to the exact terms rendered on this page.
+      termsDigest: termsDigest(slot, providerValues),
+      readyToSign: missingProvider.length === 0,
+      missingProviderLabels: missingProvider.map((def) => def.label),
       signed: signed ? toDto(signed) : null,
     };
   }
@@ -181,8 +234,14 @@ const guarantorSchema = z.object({
   consent: z.literal(true),
 });
 
+/**
+ * The acceptance payload. It deliberately carries NO agreement field values:
+ * the terms are provider-set and resolved server-side. `termsDigest` is the
+ * digest handed out by the signing context, tying this signature to the exact
+ * terms the signer reviewed.
+ */
 const signBody = z.object({
-  fields: z.record(z.string(), z.string().max(500)),
+  termsDigest: z.string().trim().min(1).max(64),
   signerName: z.string().trim().min(1).max(200),
   signerTitle: z.string().trim().min(1).max(200),
   signature: z.string().trim().min(1).max(200),
@@ -207,13 +266,41 @@ router.post("/admin/platform/agreements/:slot/sign", requireAdmin, async (req, r
     return;
   }
 
-  // Merge only allow-listed field keys (plus defaults) — unknown keys and
-  // anything not in the field definitions are dropped.
-  const values: Record<string, string> = {};
-  for (const def of AGREEMENT_FIELDS[slot]) {
-    const raw = body.fields[def.key]?.trim() || def.defaultValue || "";
-    if (raw) values[def.key] = raw;
+  // Terms come from platform configuration, never from the signer. A stale or
+  // tampering client can still post field values; they are dropped here, and
+  // logged so the attempt is visible.
+  if (req.body && typeof req.body === "object" && "fields" in (req.body as object)) {
+    req.log.warn(
+      { slot },
+      "ignored client-supplied agreement field values — terms are provider-set",
+    );
   }
+
+  const providerValues = await buildProviderValues(slot);
+  const missingProvider = missingProviderDefs(slot, providerValues);
+  if (missingProvider.length > 0) {
+    req.log.error(
+      { slot, missing: missingProvider.map((def) => def.key) },
+      "agreement cannot be signed — SOBBU terms are unset",
+    );
+    res.status(409).json({
+      message: `This agreement is not ready to sign yet — SOBBU still has to set: ${missingProvider
+        .map((def) => def.label)
+        .join(", ")}. Please contact SOBBU.`,
+      missingProviderLabels: missingProvider.map((def) => def.label),
+    });
+    return;
+  }
+  if (body.termsDigest !== termsDigest(slot, providerValues)) {
+    res.status(409).json({
+      message:
+        "The terms of this agreement changed since you opened it. Reload the page and review the updated agreement before signing.",
+      code: "terms_changed",
+    });
+    return;
+  }
+
+  const values: Record<string, string> = { ...providerValues };
   if (body.guarantor) {
     values["guarantorName"] = body.guarantor.name;
     values["guarantorTitle"] = body.guarantor.title;

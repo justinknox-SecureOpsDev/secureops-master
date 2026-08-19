@@ -616,52 +616,35 @@ export default function PlatformFeaturesPage() {
         </CardHeader>
         <CardContent className="space-y-4">
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            {/*
+              Company name, plan tier and monthly price are printed into the
+              platform agreements signed here, so they are SOBBU's to set from
+              the fleet console — shown for reference, never editable locally.
+              The server refuses a change to them as well.
+            */}
             <div className="space-y-1">
               <p className="text-xs font-semibold uppercase tracking-wide opacity-60">Company name</p>
-              <Input
-                placeholder="e.g. Williams Council Security Group"
-                value={configDraft.customerName ?? ""}
-                onChange={(e) => setConfigDraft((p) => ({ ...p, customerName: e.target.value || null }))}
-              />
+              <p className="flex h-10 items-center rounded-md border border-dashed border-border px-3 text-sm">
+                {configDraft.customerName ?? "— not set —"}
+              </p>
+              <p className="text-xs opacity-60">
+                Company name, plan tier and price are set by SOBBU — they appear in your signed
+                agreements. Contact SOBBU to change them.
+              </p>
             </div>
             <div className="space-y-1">
               <p className="text-xs font-semibold uppercase tracking-wide opacity-60">Plan tier</p>
-              <select
-                className="w-full h-10 border rounded-md px-3 text-sm bg-background text-foreground"
-                value={configDraft.planTier ?? ""}
-                onChange={(e) => setConfigDraft((p) => ({ ...p, planTier: (e.target.value as CustomerConfig["planTier"]) || null }))}
-              >
-                <option value="">— not set —</option>
-                <option value="starter">Starter</option>
-                <option value="professional">Professional</option>
-                <option value="enterprise">Enterprise</option>
-                <option value="custom">Custom</option>
-              </select>
+              <p className="flex h-10 items-center rounded-md border border-dashed border-border px-3 text-sm capitalize">
+                {configDraft.planTier ?? "— not set —"}
+              </p>
             </div>
             <div className="space-y-1">
               <p className="text-xs font-semibold uppercase tracking-wide opacity-60">Monthly price</p>
-              <div className="flex items-center gap-2">
-                <span className="text-sm opacity-60">$</span>
-                <Input
-                  type="number"
-                  min={0}
-                  step={1}
-                  placeholder={
-                    configDraft.planTier && STANDARD_PRICES[configDraft.planTier]
-                      ? `${(STANDARD_PRICES[configDraft.planTier]! / 100).toFixed(0)} (standard)`
-                      : "e.g. 899"
-                  }
-                  value={configDraft.monthlyPriceCents != null ? (configDraft.monthlyPriceCents / 100).toFixed(0) : ""}
-                  onChange={(e) => {
-                    const v = parseFloat(e.target.value);
-                    setConfigDraft((p) => ({ ...p, monthlyPriceCents: isNaN(v) ? null : Math.round(v * 100) }));
-                  }}
-                />
-                <span className="text-sm opacity-60 whitespace-nowrap">/mo</span>
-              </div>
-              {configDraft.planTier && STANDARD_PRICES[configDraft.planTier] && configDraft.monthlyPriceCents == null && (
-                <p className="text-xs opacity-50">Standard: ${(STANDARD_PRICES[configDraft.planTier]! / 100).toFixed(0)}/mo</p>
-              )}
+              <p className="flex h-10 items-center rounded-md border border-dashed border-border px-3 text-sm">
+                {configDraft.monthlyPriceCents != null
+                  ? `${fmtDollars(configDraft.monthlyPriceCents)}/mo`
+                  : "— not set —"}
+              </p>
             </div>
             <div className="space-y-1">
               <p className="text-xs font-semibold uppercase tracking-wide opacity-60">Active officers</p>
@@ -866,7 +849,8 @@ export default function PlatformFeaturesPage() {
                       next[f.key] = !disabled.has(f.key);
                     }
                     setDraft(next);
-                    setConfigDraft((p) => ({ ...p, planTier: t.key }));
+                    // The plan tier itself is SOBBU's to set (it's in the
+                    // signed agreement) — this only previews the toggles.
                     toast({
                       title: `Previewing ${t.name}`,
                       description: "Toggles updated below. Click Save changes to apply.",

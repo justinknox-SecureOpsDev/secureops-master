@@ -106,6 +106,33 @@ record(
 record("Object storage", "PRIVATE_OBJECT_DIR is set", "required", has("PRIVATE_OBJECT_DIR"));
 record("Object storage", "PUBLIC_OBJECT_SEARCH_PATHS is set", "required", has("PUBLIC_OBJECT_SEARCH_PATHS"));
 
+// ---- Platform agreements (SOBBU provider terms) ----
+// The customer signs the MSA / User Agreement in their own portal, but the
+// terms are the platform provider's to set: the sign route derives them from
+// these values and refuses the signature while any required one is blank.
+// Leave them unset and the customer sees "Not set by SOBBU yet" and cannot
+// complete their agreements. Pricing (plan tier, monthly price) is not env —
+// it comes from platform customer config, set from the control plane.
+{
+  const providerTerms: Array<[string, string]> = [
+    ["SOBBU_VENUE_COUNTY", "venue county named in both agreements"],
+    ["SOBBU_NOTICE_EMAIL", "address for contractual notices (MSA)"],
+    ["SOBBU_PRINCIPAL_ADDRESS", "SOBBU's principal address in both agreements"],
+    ["SOBBU_ARBITRATION_CITY", "arbitration city (User Agreement)"],
+    ["AGREEMENT_BILLING_CONTACT", "billing contact printed in the MSA fee schedule"],
+  ];
+  for (const [name, why] of providerTerms) {
+    record("Platform agreements", `${name} is set`, "required", has(name), why);
+  }
+  record(
+    "Platform agreements",
+    "SOBBU_CONTACT_EMAIL is set",
+    "recommended",
+    has("SOBBU_CONTACT_EMAIL") || has("SOBBU_NOTICE_EMAIL"),
+    "User Agreement contact address; falls back to SOBBU_NOTICE_EMAIL",
+  );
+}
+
 // ---- Email ----
 {
   const resendReady = has("RESEND_API_KEY") && (has("RESEND_FROM") || has("SMTP_FROM"));

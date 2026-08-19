@@ -125,6 +125,34 @@ export const CUSTOMER_CONFIG_WRITE_KEYS = [
 ] as const;
 
 /**
+ * Commercial terms that are printed verbatim into the signed platform
+ * agreements (MSA / User Agreement). They belong to SOBBU as the platform
+ * provider, so only the control plane may write them — the tenant-facing
+ * super-admin route refuses to change them. Without this, the customer's own
+ * super-admin could set the legal name, plan tier and monthly price on the
+ * agreement they then sign.
+ */
+export const PROVIDER_OWNED_CONFIG_KEYS = [
+  "customerName",
+  "planTier",
+  "monthlyPriceCents",
+] as const;
+
+/**
+ * Provider-owned keys the payload would actually CHANGE, compared with the
+ * stored row. A portal that echoes back the current values (as the platform
+ * screen does on every save) conflicts with nothing and saves normally.
+ */
+export function providerOwnedConflicts(
+  cols: Record<string, unknown>,
+  current: Record<string, unknown> | undefined,
+): string[] {
+  return PROVIDER_OWNED_CONFIG_KEYS.filter(
+    (key) => key in cols && (cols[key] ?? null) !== (current?.[key] ?? null),
+  );
+}
+
+/**
  * Reduce a parsed customer-config payload to the columns to actually write:
  * ONLY keys that are present (not `undefined`). An absent key is intentionally
  * skipped so it is left unchanged on update rather than nulled out.

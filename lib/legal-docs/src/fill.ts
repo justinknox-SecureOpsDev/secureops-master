@@ -51,8 +51,16 @@ export type FillResult = {
 export function fillAgreement(
   slot: AgreementSlot,
   values: Record<string, string | undefined>,
+  options?: {
+    /**
+     * Override the bundled template. Clients pass the template the SERVER
+     * returned, so a stale browser bundle previews (and therefore signs) the
+     * same document text the server will record — never its own older copy.
+     */
+    template?: string;
+  },
 ): FillResult {
-  let markdown: string = LEGAL_TEMPLATES[slot];
+  let markdown: string = options?.template ?? LEGAL_TEMPLATES[slot];
   const defs = AGREEMENT_FIELDS[slot];
   const missing: AgreementFieldDef[] = [];
 

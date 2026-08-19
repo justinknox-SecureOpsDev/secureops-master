@@ -36,6 +36,8 @@ import {
   brandConfigSchema,
   customerConfigSchema,
   pickCustomerConfigColumns,
+  providerOwnedConflicts,
+  PROVIDER_OWNED_CONFIG_KEYS,
 } from "../lib/platformSchemas";
 import { buildCustomerConfigChanges, buildBrandChanges, buildFeatureChanges } from "../lib/settingsAudit";
 
@@ -149,6 +151,22 @@ router.put("/admin/platform/customer-config", requireAuth, requireSuperAdmin, as
   // unchanged (every field in customerConfigSchema is .optional()), so a
   // version-skewed client never clobbers a field it doesn't know about.
   const cols = pickCustomerConfigColumns(parsed.data);
+
+  // Legal name, plan tier and monthly price are printed into the platform
+  // agreements this customer signs, so they are SOBBU's to set from the
+  // control plane — never editable by the tenant, not even a super-admin
+  // (the customer's own first admin is one). Echoing the current values back
+  // is fine; changing one is refused, never silently dropped.
+  const providerConflicts = providerOwnedConflicts(cols, priorConfig as Record<string, unknown>);
+  for (const key of PROVIDER_OWNED_CONFIG_KEYS) delete cols[key];
+  if (providerConflicts.length > 0) {
+    res.status(403).json({
+      message:
+        "Company name, plan tier and monthly price are set by SOBBU — they appear in your signed agreements. Contact SOBBU to change them.",
+      providerOwnedFields: providerConflicts,
+    });
+    return;
+  }
   const insertValues = {
     id: "singleton",
     updatedBy: editor,

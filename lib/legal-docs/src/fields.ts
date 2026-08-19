@@ -40,6 +40,19 @@ export const AGREEMENT_FIELD_GROUP_LABELS: Record<AgreementFieldGroup, string> =
   guaranty: "Personal Guaranty (Exhibit C — optional)",
 };
 
+/**
+ * Who supplies a field's value.
+ *
+ * - `provider` — SOBBU's to set: pricing, commercial terms, agreement terms
+ *   and SOBBU's own entity details. The server derives these from platform
+ *   configuration and NEVER accepts a signer-supplied value for them, so a
+ *   customer cannot rewrite the deal they are signing.
+ * - `customer` — completed by the signing organization (currently only the
+ *   optional Exhibit C guarantor's own details, alongside the acceptance
+ *   inputs, which are not fill fields at all).
+ */
+export type AgreementFieldAuthority = "provider" | "customer";
+
 export type AgreementFieldDef = {
   /** Stable camelCase key used in API payloads and stored fieldsJson. */
   key: string;
@@ -49,14 +62,34 @@ export type AgreementFieldDef = {
   group: AgreementFieldGroup;
   /** Required to sign. Guaranty fields are conditionally required as a set. */
   required: boolean;
+  /** Who sets the value — see AgreementFieldAuthority. */
+  authority: AgreementFieldAuthority;
   /** Static default applied when the value is blank (prefill may override). */
   defaultValue?: string;
   hint?: string;
   multiline?: boolean;
 };
 
+/**
+ * The only fields the signing customer fills in themselves. Everything else
+ * is provider-set by default, so a newly added term is locked unless it is
+ * deliberately listed here.
+ */
+const CUSTOMER_AUTHORITY_KEYS: ReadonlySet<string> = new Set([
+  "guarantorName",
+  "guarantorTitle",
+  "guarantorAddress",
+]);
+
+function withAuthority(defs: Omit<AgreementFieldDef, "authority">[]): AgreementFieldDef[] {
+  return defs.map((def) => ({
+    ...def,
+    authority: CUSTOMER_AUTHORITY_KEYS.has(def.key) ? "customer" : "provider",
+  }));
+}
+
 export const AGREEMENT_FIELDS: Record<AgreementSlot, AgreementFieldDef[]> = {
-  msa: [
+  msa: withAuthority([
     {
       key: "customerLegalName",
       token: "[CUSTOMER LEGAL NAME]",
@@ -236,8 +269,8 @@ export const AGREEMENT_FIELDS: Record<AgreementSlot, AgreementFieldDef[]> = {
       required: false,
       multiline: true,
     },
-  ],
-  user_agreement: [
+  ]),
+  user_agreement: withAuthority([
     {
       key: "effectiveDate",
       token: "[EFFECTIVE DATE]",
@@ -282,7 +315,7 @@ export const AGREEMENT_FIELDS: Record<AgreementSlot, AgreementFieldDef[]> = {
       required: true,
       multiline: true,
     },
-  ],
+  ]),
 };
 
 /**

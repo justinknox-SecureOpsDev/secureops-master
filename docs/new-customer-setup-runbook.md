@@ -76,6 +76,21 @@ this phase written for them. Regenerate it after edits with
 
 Optional per-customer tuning (env, not secrets): `PAYROLL_TIMEZONE` (default America/Chicago), `EMERGENCY_CALL_NUMBER` (default 911), `GEOFENCE_RADIUS_MILES` (default 0.25).
 
+**Platform agreement terms — you set these, never the customer.** The customer signs the MSA and User Agreement inside their own portal, but every term in those documents is SOBBU's: the server fills them in at signing and *refuses* the signature while any is blank (the customer sees "Not set by SOBBU yet" and has no way to type over it). Set these in the fork's **shared** env:
+
+| Env var | What it fills in |
+|---|---|
+| `SOBBU_VENUE_COUNTY` | County for venue/jurisdiction, in both agreements |
+| `SOBBU_NOTICE_EMAIL` | Where the customer sends contractual notices (MSA) |
+| `SOBBU_PRINCIPAL_ADDRESS` | SOBBU's principal business address, in both agreements |
+| `SOBBU_ARBITRATION_CITY` | City for arbitration (User Agreement) |
+| `SOBBU_CONTACT_EMAIL` | Contact address in the User Agreement (falls back to `SOBBU_NOTICE_EMAIL`) |
+| `AGREEMENT_BILLING_CONTACT` | Billing contact in the MSA fee schedule — the address you agreed to invoice |
+
+Plan tier, monthly price and the customer's legal name are **not** env — set them from the fleet console (Phase 8) *before* asking them to sign, or their agreement won't be signable. They are read-only on the customer's Platform → Features screen: they print into the signed agreement, so the tenant cannot edit them (the server refuses the change too).
+
+These env values — like `CONTROL_PLANE_SHARED_SECRET` — are yours, not the customer's. Keep the fork's Replit account and its **Secrets/environment** under SOBBU control: anyone who can edit the deployment env can edit the agreement terms, whatever the app enforces. Give customer staff accounts *inside* the app, never access to the workspace. Confirm the whole set with `pnpm --filter @workspace/scripts run check-tenant-config`.
+
 ## Phase 4 — First publish (10 min, inside the fork)
 
 1. Publish as **Reserved VM (always-on)** — *not* Autoscale (the radio and live features need an always-on server). A **fresh, empty production database** is created here.

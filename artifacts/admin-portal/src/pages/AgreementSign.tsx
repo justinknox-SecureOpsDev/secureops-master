@@ -5,6 +5,7 @@ import {
   ArrowLeft,
   Download,
   Loader2,
+  Lock,
   PenLine,
   ShieldCheck,
   BadgeCheck,
@@ -38,6 +39,8 @@ type ContextField = {
   label: string;
   group: AgreementFieldGroup;
   required: boolean;
+  /** "provider" values are SOBBU's and read-only here; "customer" ones are editable. */
+  authority: "provider" | "customer";
   hint: string | null;
   multiline: boolean;
   value: string;
@@ -61,6 +64,10 @@ type SlotContext = {
   consentText: string;
   guarantyConsentText: string | null;
   fields: ContextField[];
+  /** Digest of SOBBU's terms as shown here; echoed back so we can't sign stale terms. */
+  termsDigest: string;
+  readyToSign: boolean;
+  missingProviderLabels: string[];
   signed: SignedDto | null;
 };
 
@@ -119,21 +126,31 @@ export default function AgreementSignPage() {
         if (!s) throw new Error("Agreement not found");
         setCtx(s);
         const initial: Record<string, string> = {};
-        for (const f of s.fields) initial[f.key] = f.value;
+        for (const f of s.fields) if (f.authority === "customer") initial[f.key] = f.value;
         setValues(initial);
       })
       .catch((e) => setLoadError((e as Error).message));
   }, [slot]);
 
+  // SOBBU's values are display-only. The server re-derives them when the
+  // signature is submitted, so nothing on this page can alter the terms.
+  const providerValues = useMemo(() => {
+    const v: Record<string, string> = {};
+    for (const f of ctx?.fields ?? []) if (f.authority === "provider") v[f.key] = f.value;
+    return v;
+  }, [ctx]);
+
   const previewValues = useMemo(() => {
-    const v: Record<string, string> = { ...values };
+    const v: Record<string, string> = { ...providerValues, ...values };
     if (!guarantyEnabled) for (const k of GUARANTY_KEYS) delete v[k];
     return v;
-  }, [values, guarantyEnabled]);
+  }, [providerValues, values, guarantyEnabled]);
 
+  // Preview the SERVER's template, not this bundle's copy, so a stale browser
+  // build can never show one document and sign another.
   const filled = useMemo(
-    () => (slot ? fillAgreement(slot, previewValues) : null),
-    [slot, previewValues],
+    () => (slot ? fillAgreement(slot, previewValues, { template: ctx?.template }) : null),
+    [slot, previewValues, ctx?.template],
   );
 
   const previewHtml = useMemo(
@@ -163,8 +180,13 @@ export default function AgreementSignPage() {
     }
   }
 
+  // Only what the customer can actually fix. Gaps in SOBBU's terms are
+  // reported separately (and authoritatively) by the server.
   const missingLabels = filled
-    ? filled.missing.filter((d) => d.group !== "guaranty" || guarantyEnabled).map((d) => d.label)
+    ? filled.missing
+        .filter((d) => d.authority === "customer")
+        .filter((d) => d.group !== "guaranty" || guarantyEnabled)
+        .map((d) => d.label)
     : [];
 
   const guarantorName = values["guarantorName"]?.trim() ?? "";
@@ -182,6 +204,7 @@ export default function AgreementSignPage() {
   const canSubmit =
     !submitting &&
     ctx !== null &&
+    ctx.readyToSign &&
     missingLabels.length === 0 &&
     signerName.trim().length > 0 &&
     signerTitle.trim().length > 0 &&
@@ -194,14 +217,10 @@ export default function AgreementSignPage() {
     setSubmitError(null);
     setSubmitting(true);
     try {
-      const fields: Record<string, string> = {};
-      for (const f of ctx.fields) {
-        if (f.group === "guaranty") continue;
-        const v = values[f.key]?.trim();
-        if (v) fields[f.key] = v;
-      }
+      // No field values are sent: the terms are SOBBU's and are resolved
+      // server-side. The digest proves which terms were on screen.
       const body: Record<string, unknown> = {
-        fields,
+        termsDigest: ctx.termsDigest,
         signerName: signerName.trim(),
         signerTitle: signerTitle.trim(),
         signature: signatureText.trim(),
@@ -250,6 +269,24 @@ export default function AgreementSignPage() {
             value={values[f.key] ?? ""}
             onChange={(e) => setValues((v) => ({ ...v, [f.key]: e.target.value }))}
           />
+        )}
+        {f.hint && <p className="text-xs text-muted-foreground">{f.hint}</p>}
+      </div>
+    );
+  }
+
+  /**
+   * A term SOBBU has set. Shown for review only — the customer accepts these,
+   * they don't complete them, and the server ignores anything sent for them.
+   */
+  function renderProviderValue(f: ContextField) {
+    return (
+      <div key={f.key} className="space-y-0.5">
+        <p className="text-xs font-medium text-muted-foreground">{f.label}</p>
+        {f.value.trim() ? (
+          <p className="whitespace-pre-wrap break-words text-sm text-foreground">{f.value}</p>
+        ) : (
+          <p className="text-sm font-medium text-amber-700">Not set by SOBBU yet</p>
         )}
         {f.hint && <p className="text-xs text-muted-foreground">{f.hint}</p>}
       </div>
@@ -322,8 +359,9 @@ export default function AgreementSignPage() {
           Review &amp; sign — {ctx?.title ?? "…"}
         </h1>
         <p className="mt-1 text-sm text-muted-foreground">
-          Fields are pre-filled from your platform setup. Review every value, complete anything
-          blank, then sign at the bottom. The exact document you sign is stored permanently.
+          The commercial and legal terms are set by SOBBU and shown here for review — they
+          can&apos;t be changed on this page. Complete the signature block to accept. The exact
+          document you sign is stored permanently.
         </p>
       </header>
 
@@ -344,16 +382,38 @@ export default function AgreementSignPage() {
         </div>
       )}
 
+      {ctx && !ctx.readyToSign && (
+        <div
+          role="alert"
+          className="mb-4 rounded-md border border-amber-300 bg-amber-50 px-3 py-2 text-sm text-amber-900"
+        >
+          This agreement isn&apos;t ready to sign yet — SOBBU still has to set:{" "}
+          {ctx.missingProviderLabels.join(", ")}. These can only be set by SOBBU, so please
+          contact them to finish the agreement.
+        </div>
+      )}
+
       {ctx && (
         <div className="grid gap-6 lg:grid-cols-[minmax(0,380px)_minmax(0,1fr)]">
           <div className="space-y-4">
-            {groups.map((g) => (
+            {groups.map((g, i) => (
               <Card key={g}>
                 <CardHeader className="pb-3">
-                  <CardTitle className="text-sm">{AGREEMENT_FIELD_GROUP_LABELS[g]}</CardTitle>
+                  <CardTitle className="flex items-center gap-1.5 text-sm">
+                    <Lock className="h-3.5 w-3.5 text-muted-foreground" aria-hidden="true" />
+                    {AGREEMENT_FIELD_GROUP_LABELS[g]}
+                  </CardTitle>
+                  {i === 0 && (
+                    <CardDescription>
+                      Set by SOBBU LLC as the platform provider. Review them before you sign —
+                      contact SOBBU if anything needs to change.
+                    </CardDescription>
+                  )}
                 </CardHeader>
                 <CardContent className="space-y-3">
-                  {ctx.fields.filter((f) => f.group === g).map(renderField)}
+                  {ctx.fields
+                    .filter((f) => f.group === g)
+                    .map((f) => (f.authority === "provider" ? renderProviderValue(f) : renderField(f)))}
                 </CardContent>
               </Card>
             ))}
